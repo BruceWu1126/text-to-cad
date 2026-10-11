@@ -137,7 +137,9 @@ name exactly as every selector resolves them
 (`cadgen.assembly_lookup.assembly_occurrence_rows`), `bounds` is the component's
 exact box placed by the occurrence's transform (rounded to 1e-3), and
 `triangleCount`/`vertexCount` are the stored display mesh's, the one a view
-draws (meshed in the build pool when the store has none). `--focus` and
+draws. The build derived it; a part the store has none for is derived by one
+build-pool job before the list is read ([`STORE.md`](STORE.md) §3), as for a
+view. `--focus` and
 `--hide` narrow the rows the way they narrow a section.
 
 A part whose stored mesh leaves out a face no mesher could cover (its body's
@@ -195,10 +197,10 @@ Still view renders report these measured browser durations in milliseconds:
 | `captureMs` | Entire capture call, including readiness and all output stages below |
 
 Exact-surface packages also report `stageTimings.sourceLoad`. Counts distinguish
-`componentCount`, `cacheBatchCount`, `cacheHitCount` and `cacheMissCount`, and
-`producedCount` when the page asked the host to mesh what its probe found
-missing. Measured durations are `probeMs` (metadata), `produceMs` (the build
-pool meshing the missing components, before the page reads them),
+`componentCount`, `cacheBatchCount`, `cacheHitCount` and `cacheMissCount`. The
+page only reads stored meshes: the build derived them, and a part the store
+lacked was derived before the page opened, while the snapshot resolved its view.
+Measured durations are `probeMs` (metadata),
 `cacheReadMs` (bounded body fetch and integrity validation), `cacheDecodeMs`
 (component views and metadata), `meshBuildMs` (owned render arrays), and
 `composeMs` (occurrence composition). A static package's own mesh files measure

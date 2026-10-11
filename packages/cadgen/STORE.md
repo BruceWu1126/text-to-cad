@@ -343,19 +343,43 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   its axis or direction, a general curve its range. Format 2 stays readable:
   an older build may have pinned one in an eager-only component's identity.
   The surface input digest includes every geometry/appearance/producer field.
-  Unknown versions cannot create a shared persistent namespace. `derive` runs
-  in an artifact job, privately decodes only captured inputs, verifies the SURF
-  container and writes the immutable object before the surface index.
-  Expected output conflicts fail; no source, model record, latest child or live
-  authored shape is consulted.
-  Geometry reads, STEP re-emits and parent materialization do not derive SURF.
-  First display or selector demand pays that work when its disposable result
-  is absent; faster native reads do not imply faster first display. A build's
-  kinematics are selector demand only where a selector is named: a mate's
-  parent and child resolve in the result tree's occurrences, group nodes and
-  their labels, with no component read, and an `axis={"ref": ...}` reads the
-  SURF of the one component its occurrence places
-  (`_internal/kinematics_resolve.py`).
+  Unknown versions cannot create a shared persistent namespace. `derive`
+  privately decodes only captured inputs, verifies the SURF container and
+  writes the immutable object before the surface index. Expected output
+  conflicts fail; no source, model record, latest child or live authored shape
+  is consulted.
+
+  **A build derives its parts' display data; views only read.** Every build
+  job (`_internal/generation.py`: a model build, a no-op build that reuses its
+  tree, a compile of an imported STEP, a re-emit) runs
+  `surfaces.ensure_display` on the tree a view of its output reads -- the saved
+  document's tree, a mesh-only model's own -- in its own process, after its
+  record is written and before it reports done, and before its declared mesh
+  exports. Which parts lack display data is asked of the store alone (probes,
+  no kernel import), so a no-op build of a model whose display data is stored
+  derives nothing; one whose store was cleared derives it again. Each missing
+  part's surface, selector table and display mesh is derived in turn, the
+  build's progress showing `Meshing parts n/total`, and the time counts as
+  cadgen's in the model's time line. Nothing splits the work: sibling models
+  derive in parallel because they build in parallel jobs, and a parent's tree
+  holds its children's components, which their own jobs derived before they
+  reported done, so a parent normally finds nothing missing. A part that fails
+  to derive is a warning on the build, never its failure: the geometry is
+  published, and a view shows that part as failed. A build's kinematics read
+  components only where a selector is named: a mate's parent and child resolve
+  in the result tree's occurrences, group nodes and their labels, with no
+  component read, and an `axis={"ref": ...}` derives (here, in the build) and
+  reads the display data of the one component its occurrence places
+  (`_internal/kinematics_resolve.py`). `read_step` never waits for SURF or a
+  mesh.
+
+  A view -- the CAD Viewer and the CAD app (`POST /__cad/surfaces`), a snapshot
+  and `--mode list` (`store/view.py`), a mesh export -- reads what the build
+  derived. A part whose display data the store lacks (a cleared, evicted or
+  older store) is derived by ONE build-pool job for the request (`kind:
+  display`, `daemon/artifacts.py`): one request, one job, one worker. No server
+  or snapshot process derives in its own process, and correctness never
+  depends on a store hit.
 
   Every surface is derived with the component's **selector table**
   (`_internal/selector_table.py`, stored by `store/selectors.py` under
@@ -372,12 +396,12 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   `inspect` to the entity it names, and nothing in a browser mints one. The
   table is served by the surface request's ready row (`selectors`) through the
   same store route as the surface, and a surface without its table is not
-  ready: the request derives it again, from the stored surface and BREP. The
+  ready: it is derived again, from the stored surface and BREP. The
   scheme is bumped for any change in what the table holds, and an older
   scheme's entry is obsolete (§2).
 
-  Meshes are derived the same way, and by cadgen alone. `derive` with
-  `tessellations` meshes each component after its surface
+  Meshes are derived the same way, and by cadgen alone. `derive` meshes each
+  component at the display tolerance after its surface
   (`_internal/occt_mesh.py`: OCCT's `BRepMesh_IncrementalMesh` on the exact
   BREP, the chord tolerance a fraction of the component's bounding diagonal, the
   angle in radians; a face OCCT refuses is tessellated over its own parameters by
@@ -402,17 +426,15 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   is not watertight. A face smaller than the mesh resolves
   (area under the deflection squared) may have no triangles and is not named. Any
   other failure -- OCCT raising, a body its encoding refuses -- is the component's
-  `MeshProductionError`. A component is ready once its surface and every mesh asked for are
-  stored: the CAD Viewer's cold components ask for the display tolerance in the
-  surface request that derives them, a mesh export asks for its tolerances (a
-  build's own export derives them in the build's process, §9), and
-  the snapshot host has the build pool mesh what its page found missing, from
-  the stored surface record alone (`POST /__tess_cache/produce`: `meshes` jobs
-  running `produce_meshes`, the keys dealt across the daemon's warm workers, and
-  across more only for enough keys to repay starting one), with no tree.
-  Tolerances outside the tessellation policy's bounds
-  (`tessellation_policy.tolerance_refusal`) are refused, never meshed. No client writes a mesh: every reader probes and reads, and the routes
-  refuse a POST to an entry (405).
+  `MeshProductionError`. A component is ready once its surface, its selector
+  table and its display mesh are stored, and `index/mesh` holds display meshes
+  alone: a mesh export at the display tolerance writes the stored display
+  meshes, and one at any other tolerance meshes each component in the
+  exporting process, from its stored surface and BREP, and stores nothing (the
+  file is the output; `_internal/mesh_export.py`). Tolerances outside the
+  tessellation policy's bounds (`tessellation_policy.tolerance_refusal`) are
+  refused, never meshed. No client writes a mesh: every reader probes and
+  reads, and the routes refuse a POST to an entry (405).
 
 - `assembly.root` is the grouping the author's compound expressed; a link
   appears in it as a node of type `link`.
@@ -1665,17 +1687,11 @@ CPU scheduling and reuse remain independent of memory admission:
    — queuing if it must — when that wait ends. A waiting parent holds no CPU slot, which is
    why a 1-slot pool still builds a 3-level tree. It retains its geometry and
    memory reservation. Slots count kernel work only:
-   the build pipeline takes one around a model body and its emit. The artifact
-   work a build asks for under its slot — the surfaces and meshes its declared
-   mesh exports lack — runs in the build's own process, under that slot,
-   whichever executor runs the build (`artifacts.worker_context`): its kernel and
-   store are loaded there, where a pool job cost a cold box's export 2.6 s of
-   kernel import for 0.03 s of work. The build does the first share itself and
-   deals the pool only shares that repay starting a worker (`artifacts.deal`:
-   32 components' surfaces each), so a 250-part export spreads and a 40-part one
-   does not; the daemon's warm spares get none of it, because the build has
-   bound one of them and the next share waited on a kernel import. A door and a
-   server hold no slot, so their artifact work is always pool jobs. **Doors take
+   the build pipeline takes one around a model body, its emit and the display
+   data it derives (§3: a build derives its parts' display data), all in the
+   build's own process. A door and a server hold no slot, and derive nothing in
+   their own process: a part whose display data the store lacks is one pool
+   job. **Doors take
    none and never run a body**: `snapshot` and the mesh doors
    (`stl|3mf|glb build`) ask one question of a document — does the store have a
    tree for this file's bytes (`doors.document_tree`: `sha256(bytes)` →
@@ -1739,11 +1755,11 @@ but has no daemon-wide aggregate process budget. CPU slot counts remain upper
 bounds, and extraction concurrency also fits a per-worker extraction ceiling
 (a third of the budget, capped at 2048 MiB), which is not the admission
 reservation and is likewise unconfigurable.
-Geometry publication no longer starts extraction subprocesses for native
-components. Surface requests use the shared artifact-job admission and one
-private derivation per requested component; they have no model binding,
-declared output or editing-producer order. Their time and memory remain real
-work, charged when a display or selector first requires them. On the daemon,
+Geometry publication starts no extraction subprocesses: the build derives its
+parts' display data in its own process (§3). A view's display job for parts
+the store lacks uses the shared artifact-job admission and one private
+derivation per requested component; it has no model binding, declared output
+or editing-producer order. On the daemon,
 an artifact job is never killed when its caller leaves, as the CAD Viewer's do
 routinely: the worker stays warm rather than being replaced by a fresh kernel
 import. Before each derivation the worker asks its supervisor whether anyone

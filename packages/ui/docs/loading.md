@@ -34,14 +34,17 @@ cache key names both of its tolerances, and one that names fewer is refused,
 never filled in (`tessellationQuality`, `@text-to-cad/core/lib/surf/tessellationCache.js`).
 
 Every mesh the viewer draws is cadgen's (OCCT's mesh of the exact BREP, stored
-by cadgen); the browser never tessellates. The display meshes are probed a chunk
+by cadgen, derived by the build that made the model before it reported done); the
+browser never tessellates. The display meshes are probed a chunk
 of components at a time and the stored bodies read a batch at a time
 (`createInitialDisplayPlans` in `renderers/step/render/initialDisplay.js`,
 `packageBatchReads.js`), the first of each the size of the first publish, so the
-first geometry waits on no more than it draws. A component the store holds no
-display mesh for names the display tolerance in the `/__cad/surfaces` request
-that derives its surface: cadgen meshes it in the same job, and the row carries
-the mesh's probe row, which the component then reads like a stored one. Both are
+first geometry waits on no more than it draws. A component the probe finds no
+display mesh for is asked for in the `/__cad/surfaces` request, whose ready row
+carries the mesh's probe row, which the component then reads like a stored one;
+a part the store lacks altogether (a cleared or evicted store) is derived by one
+cadgen build-pool job for the request, the loading screen saying it is meshing
+parts meanwhile. Both are
 sized by the stored body before their decode is admitted; one above the
 concurrent decode cap runs alone only when the shared Viewer memory envelope
 can reserve its complete estimate.

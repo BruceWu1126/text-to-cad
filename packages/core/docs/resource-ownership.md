@@ -194,14 +194,14 @@ once its last component has taken its body; each component's decode is still
 admitted on its own before it runs, and an entry the batch could not read or
 verify is that component's strict-read miss alone. The cold components'
 surfaces resolve up to 64 to a `/__cad/surfaces` request, each the moment its
-own row is ready; the request names the display tolerance, so cadgen meshes each
-component there in the same job and its row carries the mesh's probe row.
+own row is ready; each row carries the display mesh's probe row, from the store
+the build filled (a part the store lacks is derived by one cadgen build-pool job
+for the request).
 
 A validated warm entry carries the full surface-object provenance, so
 rendering does not need the SURF object or its derivation index to remain
 present. `createHttpTessellationCacheProvider` takes an `origin` for hosts
-whose store is not on the page's own origin, and a `produceUrl` for a host that
-meshes on request (the snapshot host's `POST /__tess_cache/produce`). TESB body
+whose store is not on the page's own origin (the snapshot host). TESB body
 groups remain bounded at 32 MiB.
 
 Every read is strict: a missing or invalid body reports a typed miss

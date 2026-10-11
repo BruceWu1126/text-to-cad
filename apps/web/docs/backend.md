@@ -173,11 +173,12 @@ The mesh routes likewise delegate reads and TESB batch framing to
 mesh cadgen made (OCCT's mesh of a component's exact BREP); a client never
 writes one. The shared JavaScript reader and key scheme live in
 `@text-to-cad/core/lib/surf/tessellationCache.js`. Mesh names are validated
-before access: a request names an entry of the store, never a path. A mesh the
-store lacks is made by naming the display tolerance in the component's
-`POST /__cad/surfaces` request (`tessellation`), which meshes it in the same
-build-pool job that derives the surface; its ready row carries the mesh's probe
-row (`mesh`).
+before access: a request names an entry of the store, never a path. The build
+that made a model derived each part's display data -- its surface, selector
+table and display mesh -- before it reported done, so the server only reads it:
+a component's `POST /__cad/surfaces` ready row carries the display mesh's probe
+row (`mesh`). A part the store lacks it for (a cleared, evicted or older store)
+is derived by one build-pool job for the request; the server never derives.
 
 The browser host constructs a `CadClient` from `@text-to-cad/core/client` and
 injects it into the viewer renderers. Catalog subscriptions share the client's
@@ -213,7 +214,7 @@ asked for through the surface request, never tessellated in the page.
 | `GET /__cad/version` | Whether a newer text-to-cad is out: the update button's `notice`, or null. |
 | `POST /__cad/sketches?name=...` | Save a PNG a copied prompt names by path (a Quick Edit's sketch) as scratch in the system's temporary directory; answers its absolute path. |
 | `POST /__cad/shutdown` | Exit: a newer launch replacing this viewer, or `cadgen viewer stop`. Answers 202, then stops and frees the port. |
-| `POST /__cad/surfaces` | Resolve components' exact surfaces, deriving them in the build pool; with `tessellation`, their meshes at those tolerances too. |
+| `POST /__cad/surfaces` | Read components' display data -- exact surface, selector table, display mesh -- from the store; what it lacks, one build-pool job derives. |
 | `POST /__tess_cache/probe` | The stored meshes' index records, for keys. |
 | `GET /__tess_cache/<key>.glb` | Read a stored mesh, a GLB body (POST answers 405: cadgen writes every mesh). |
 | `POST /__tess_cache/batch` | Read a batch of stored meshes in a TESB container. |

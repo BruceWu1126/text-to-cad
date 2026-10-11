@@ -104,5 +104,8 @@ longer tessellate, and nothing cadgen runs needs Node.
   `mesh_tolerance` below `5e-5` of the bounding diagonal, or
   `mesh_angular_tolerance` below `0.05` or above `1.5708` radians.
 - `CADGEN_MESH_CACHE` is gone: a mesh is an ordinary store entry.
-- Each model's first view or snapshot after upgrading derives its meshes again,
-  once; `cadgen store gc` reclaims what the older cadgen stored.
+- A build now meshes its parts before it reports done, so a view only reads. Each
+  model's first `python <model>.py` after upgrading, current or not, meshes its
+  parts again, once (`Meshing parts n/total`); a STEP no build has touched since
+  is meshed on its first view or snapshot. `cadgen store gc` reclaims what the
+  older cadgen stored.
