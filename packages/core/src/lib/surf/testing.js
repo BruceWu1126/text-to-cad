@@ -4,42 +4,30 @@
 // real meshes (cadgen/store/meshes.py encode_payload); nothing in the product
 // imports this module. Browser-safe, so browser tests can use it too.
 
-import { DISPLAY_TESSELLATION } from "./fixtures/displayTessellation.js";
-import { installDisplayTessellation } from "./displayTessellation.js";
 import {
   MESH_EDGE_CLASSES,
-  MESH_PAYLOAD_VERSION,
-  TESSELLATION_VERSION,
   canonicalMeshGltf,
+  decodeComponentTessellation,
   meshEdgePolylines,
   meshFaceRanges,
-  tessellationCacheKey,
-  tessellationQuality,
+  tessellationDecodedBytes,
 } from "./tessellationCache.js";
 
 const UNSIGNED_SHORT_VERTEX_LIMIT = 65535;
 
-/** The display tolerance a cadgen server publishes, as cadgen wrote it for the tests. */
-export const TEST_DISPLAY_TESSELLATION = DISPLAY_TESSELLATION;
-
-/** Install it, as a host installs the one its server publishes. */
-export function installTestDisplayTessellation() {
-  return installDisplayTessellation(DISPLAY_TESSELLATION);
+/** A part key for a test (`<64 hex>-v1`), from a hex `seed` repeated to 64 digits. */
+export function testPartKey(seed = "a") {
+  const hex = String(seed).replace(/[^0-9a-f]/g, "") || "a";
+  return `${hex.repeat(Math.ceil(64 / hex.length)).slice(0, 64)}-v1`;
 }
 
 /**
  * A synthetic stored-mesh body for `component`, laid out as cadgen writes one: either
  * `{positions, normals, indices, faceRanges: [{ord, color?, indexStart, indexCount}],
- * edges: [{ord, visibilityClass?, polyline}], bounds, scale, unmeshedFaces?}` or a decoded component
- * (`decodeComponentTessellation(...).component`), whose tables it reads back. Its tolerances
- * are `tessellation`'s, else the display tolerance.
+ * edges: [{ord, visibilityClass?, polyline}], bounds, unmeshedFaces?}` or a decoded component
+ * (`decodeComponentTessellation(...).component`), whose tables it reads back. It names `part`.
  */
-export function encodeMeshFixture(component, {
-  surfaceInput,
-  surfaceObject,
-  tessellation = DISPLAY_TESSELLATION,
-  partColor = null,
-} = {}) {
+export function encodeMeshFixture(component, { part }) {
   const faceRanges = component.faceTable ? meshFaceRanges(component) : component.faceRanges || [];
   const edges = component.edgeTable ? meshEdgePolylines(component) : component.edges || [];
   const palette = new Map();
@@ -64,15 +52,8 @@ export function encodeMeshFixture(component, {
   });
   const vertexCount = component.positions.length / 3;
   const cad = {
-    payloadVersion: MESH_PAYLOAD_VERSION,
-    tessellatorVersion: TESSELLATION_VERSION,
-    tessellationInput: tessellationCacheKey(surfaceInput, tessellation),
-    surfaceInput,
-    surfaceObject,
-    quality: tessellationQuality(tessellation),
+    part,
     bounds: { min: [...component.bounds.min], max: [...component.bounds.max] },
-    scale: component.scale,
-    partColor: partColor ?? null,
     faceColors: [...palette.values()].map((entry) => entry.color),
   };
   if (component.unmeshedFaces?.length) cad.unmeshedFaces = [...component.unmeshedFaces];
@@ -118,4 +99,33 @@ export function encodeMeshFixture(component, {
     });
   }
   return bytes;
+}
+
+/**
+ * What a part's record says of its display mesh `bytes`, but the object's address (which a test
+ * hashes): `{byteLength, decodedBytes, <counts>, unmeshedFaceCount?}`, as cadgen's
+ * `meshes.body_facts` reads it.
+ */
+export function partMeshFacts(bytes) {
+  const decoded = decodeComponentTessellation(bytes);
+  if (!decoded) throw new TypeError("not a stored mesh body");
+  const { component } = decoded;
+  const counts = {
+    vertexCount: component.positions.length / 3,
+    indexCount: component.indices.length,
+    faceCount: component.faceTable.length / 4,
+    edgeCount: component.edgeTable.length / 4,
+    edgePointCount: component.edgePoints.length / 3,
+  };
+  return {
+    byteLength: bytes.byteLength, decodedBytes: tessellationDecodedBytes(counts), ...counts,
+    ...(component.unmeshedFaces.length ? { unmeshedFaceCount: component.unmeshedFaces.length } : {}),
+  };
+}
+
+/** What a part's record says of its selector table `bytes`, but the object's address. */
+export function partSelectorFacts(bytes) {
+  const { stats } = JSON.parse(new TextDecoder().decode(bytes));
+  return { byteLength: bytes.byteLength, faceCount: stats.faceCount, edgeCount: stats.edgeCount,
+    vertexCount: stats.vertexCount };
 }

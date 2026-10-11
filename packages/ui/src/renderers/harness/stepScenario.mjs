@@ -11,16 +11,13 @@ import { chromium } from 'playwright';
 // `renderers/step/__fixtures__/step` (its README says how those bytes were made).
 //
 // A STEP is the one format whose load is a conversation rather than a download:
-// the catalog names a store view, the view names components by an immutable
-// `surfaceInput`, and only `POST /__cad/surfaces` turns those inputs into the
-// object digests the `.surf` bytes and the component's selector table
-// (`components/<cid>.selectors.json`, cadgen's) are fetched by, and each
-// component's stored display mesh, which cadgen's build made.
-// The descriptor the real store route serves is NOT materialized, so that round
-// trip is mandatory and this server implements it exactly as
-// `client/surfaceResolution.js` validates it: the returned URLs must be
-// `/__cad/store` carrying the same `tree`, `surfaceInput` and a lowercase 64-hex
-// `object`, and a requested mesh's row must be that mesh's probe row.
+// the catalog names a store view, the view names each component's part (its key),
+// and the part store answers a part's record -- its display mesh and its selector
+// table (`components/<cid>.selectors.json`, cadgen's), each read by the part's key and
+// the object the record names -- for a part the store holds; `POST /__cad/surfaces`
+// answers the same record for one cadgen has to derive first, as this server does
+// for a cold store (`client/surfaceResolution.js` validates it). A component's
+// `.surf` is the view's to serve, by its component path, for feature recognition.
 
 const FIXTURE = new URL('../step/__fixtures__/step/', import.meta.url);
 
@@ -28,8 +25,9 @@ const read = (name) => readFile(new URL(name, FIXTURE));
 
 /**
  * Everything the fixture is, loaded once: the view, the sidecar and cadgen's articulation of its
- * kinematics, the surf bytes by object digest, and each component's stored display mesh
- * (`components/<cid>.glb`), decoded so the harness's store can serve it for any input.
+ * kinematics, and each part by its key: its SURF (what recognition reads), its stored display mesh
+ * (`components/<cid>.glb`), decoded so the harness's store can serve it for any part, and its
+ * selector table.
  */
 export async function loadStepFixture() {
   const { decodeComponentTessellation } = await import('@text-to-cad/core/lib/surf/tessellationCache.js');
@@ -37,16 +35,12 @@ export async function loadStepFixture() {
   const sidecar = JSON.parse(await read('hinge_block.step.json'));
   const articulation = JSON.parse(await read('hinge_block.articulation.json'));
   const view = JSON.parse(assembly);
-  // `surfaceObject` is the digest of the `.surf` payload itself — the pin a real
-  // surface resolution hands back. Deriving it here keeps the fixture to the files
-  // the client actually reads.
   const surfaces = new Map();
   for (const [cid, component] of Object.entries(view.components)) {
     const bytes = await read(`components/${cid}.surf`);
     const mesh = decodeComponentTessellation(new Uint8Array(await read(`components/${cid}.glb`)));
-    // The component's selector table, served by its own digest through the same store route.
     const table = await read(`components/${cid}.selectors.json`);
-    surfaces.set(component.surfaceInput, { cid, bytes, object: createHash('sha256').update(bytes).digest('hex'), mesh,
+    surfaces.set(component.part, { cid, bytes, mesh,
       selectors: { bytes: table, object: createHash('sha256').update(table).digest('hex') } });
   }
   return { assembly, view, sidecar, articulation, surfaces, file: 'hinge_block.step' };
@@ -76,12 +70,12 @@ const ARM_COUNT = 24, BASE_AT = 19;
  * arms (20 × 20 × 10 against 10 × 8 × 8), so the box, the ground sized from it, the
  * depth range and the framing all change on that publish and on no other.
  *
- * Two surface inputs may name one surface object — that is what a content-addressed
- * store does with two inputs that produce identical geometry — so the twenty-four arms
- * are twenty-four components served from one `.surf`. They are HELD by input, one gate
- * per batch, so each publish is a test's to place rather than a race — held the way cadgen
- * holds a part it is still meshing: the store does not list its mesh, and its surface row
- * answers `pending` until the gate opens, so the page asks again. No response is ever held
+ * Two parts may hold identical geometry -- that is what a content-addressed store does
+ * with two inputs that produce it -- so the twenty-four arms are twenty-four parts served
+ * from one arm's mesh. They are HELD by part, one gate per batch, so each publish is a
+ * test's to place rather than a race -- held the way cadgen holds a part it is still
+ * meshing: the store does not list it, and its surface row answers `pending` until the
+ * gate opens, so the page asks again. No response is ever held
  * open. A browser keeps six connections to a host and the loader runs up to eight lanes
  * (`navigator.hardwareConcurrency`), so a held body could fill every connection and starve
  * an unheld component's request queued behind it: the first batch would never land.
@@ -91,31 +85,32 @@ export function stageProgressiveFixture(fixture) {
   const occurrenceNamed = name => original.occurrences.find(occurrence => occurrence.name === name);
   const armOccurrence = occurrenceNamed('arm'), baseOccurrence = occurrenceNamed('base');
   const arm = original.components[armOccurrence.component], base = original.components[baseOccurrence.component];
-  const armSurface = fixture.surfaces.get(arm.surfaceInput);
+  const armSurface = fixture.surfaces.get(arm.part);
   const surfaces = new Map(fixture.surfaces);
   const components = {};
   const occurrences = [];
   const children = [];
-  const inputs = [];
+  const parts = [];
   const addArm = (index) => {
     const suffix = String(index).padStart(2, '0');
     const cid = `${arm.contentHash.slice(0, 14)}${suffix}`;
-    const surfaceInput = `${arm.surfaceInput.slice(0, 62)}${suffix}`;
-    components[cid] = { ...arm, contentHash: `${cid}${arm.contentHash.slice(16)}`, surfaceInput, brep: `components/${cid}.brep` };
-    surfaces.set(surfaceInput, { ...armSurface, cid });
+    const part = `${arm.part.slice(0, 62)}${suffix}${arm.part.slice(64)}`;
+    components[cid] = { ...arm, contentHash: `${cid}${arm.contentHash.slice(16)}`, part, brep: `components/${cid}.brep`,
+      surf: `components/${cid}.surf` };
+    surfaces.set(part, { ...armSurface, cid });
     const id = `o1.${index + 2}`;
     // Every arm at the origin: the box the first batch spans is one arm's, whichever
     // eight of them get there first.
     occurrences.push({ ...armOccurrence, id, name: `arm_${index + 1}`, component: cid, transform: baseOccurrence.transform });
     children.push(leaf(id, `arm_${index + 1}`));
-    inputs.push(surfaceInput);
+    parts.push(part);
   };
   for (let index = 0; index < ARM_COUNT; index += 1) {
     if (index === BASE_AT) {
       components[baseOccurrence.component] = base;
       occurrences.push({ ...baseOccurrence, id: 'o1.1' });
       children.push(leaf('o1.1', 'base'));
-      inputs.push(base.surfaceInput);
+      parts.push(base.part);
     }
     addArm(index);
   }
@@ -126,15 +121,15 @@ export function stageProgressiveFixture(fixture) {
     assembly: { root: { ...original.assembly.root, children, leafPartIds: children.map(child => child.id) } }
   };
   // Gate `a` is the second batch, gate `b` the one component that completes the load.
-  const heldInputs = new Map([
-    ...inputs.slice(8, 24).map(input => [input, 'a']),
-    ...inputs.slice(24).map(input => [input, 'b'])
+  const heldParts = new Map([
+    ...parts.slice(8, 24).map(part => [part, 'a']),
+    ...parts.slice(24).map(part => [part, 'b'])
   ]);
   // The same package with no `bbox`, as a descriptor that declares none is served: the viewer
   // frames its first batch and again once it is whole (`declare(false)` serves this one).
   const undeclared = { ...view };
   delete undeclared.bbox;
-  return { ...fixture, view, surfaces, heldInputs, assembly: Buffer.from(JSON.stringify(view)),
+  return { ...fixture, view, surfaces, heldParts, assembly: Buffer.from(JSON.stringify(view)),
     undeclaredAssembly: Buffer.from(JSON.stringify(undeclared)) };
 }
 
@@ -157,7 +152,7 @@ export function stageSinglePartFixture(fixture) {
     assembly: { root: { id: 'o1', name: 'o1', nodeType: 'assembly', leafPartIds: ['o1.1'],
       children: [{ ...leaf('o1.1', 'base') }] } }
   };
-  const surfaces = new Map([...fixture.surfaces].filter(([input]) => input === original.components[base.component].surfaceInput));
+  const surfaces = new Map([...fixture.surfaces].filter(([part]) => part === original.components[base.component].part));
   return { ...fixture, view, surfaces, sidecar: null, articulation: null, file: 'hinge_base.step', assembly: Buffer.from(JSON.stringify(view)) };
 }
 
@@ -174,34 +169,35 @@ export function reviseFixture(fixture, revision) {
 }
 
 /**
- * cadgen's mesh store as the harness serves it: every component of `fixture` has its mesh, keyed
- * and encoded as the store keeps it, for whatever input names it (a staged component shares its
- * shape's mesh). `warm` holds every component's display mesh already, as a build leaves it; otherwise
- * a mesh is stored once a surface request names its component (`displayMesh`), as cadgen's one job
- * derives what a cleared store lacks. Answers the routes the client reads it by: a probe, a batch
- * read and a single read.
+ * cadgen's part store as the harness serves it: every component of `fixture` has its part -- its
+ * display mesh, encoded as the store keeps it for whatever part names it (a staged component shares
+ * its shape's mesh), and its selector table -- under the record that names both. `warm` holds every
+ * part already, as a build leaves it; otherwise a part is stored once a surface request names its
+ * component (`derive`), as cadgen's one job derives what a cleared store lacks. Answers the routes
+ * the client reads it by: a probe, a batch read and a single read of either object.
  */
 async function meshStore(fixture, { warm = false } = {}) {
-  const [cache, { encodeMeshFixture, TEST_DISPLAY_TESSELLATION }] = await Promise.all([
+  const [cache, { encodeMeshFixture, partMeshFacts, partSelectorFacts }] = await Promise.all([
     import('@text-to-cad/core/lib/surf/tessellationCache.js'),
     import('@text-to-cad/core/lib/surf/testing.js'),
   ]);
   const stored = new Map();
-  const produce = (surfaceInput, tessellation) => {
-    const surface = fixture.surfaces.get(surfaceInput);
+  const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+  const derive = (part) => {
+    const surface = fixture.surfaces.get(part);
     if (!surface) return null;
-    const key = cache.tessellationCacheKey(surfaceInput, tessellation);
-    if (!stored.has(key)) {
-      const { component, partColor } = surface.mesh;
-      const bytes = encodeMeshFixture(component, { surfaceInput, surfaceObject: surface.object, tessellation, partColor });
-      const row = cache.validateTessellationProbeRow({ schemaVersion: cache.MESH_INDEX_SCHEMA,
-        object: createHash('sha256').update(bytes).digest('hex'), ...cache.tessellationPayloadFacts(bytes) });
-      stored.set(key, { bytes: Buffer.from(bytes), row });
+    if (!stored.has(part)) {
+      const bytes = encodeMeshFixture(surface.mesh.component, { part });
+      const record = {
+        glb: { object: digest(bytes), ...partMeshFacts(bytes) },
+        selectors: { object: surface.selectors.object, ...partSelectorFacts(surface.selectors.bytes) },
+      };
+      stored.set(part, { bytes: Buffer.from(bytes), table: surface.selectors.bytes, record });
     }
-    return stored.get(key).row;
+    return stored.get(part).record;
   };
   if (warm) {
-    for (const component of Object.values(fixture.view.components)) produce(component.surfaceInput, TEST_DISPLAY_TESSELLATION);
+    for (const component of Object.values(fixture.view.components)) derive(component.part);
   }
   const binary = (response, bytes) => {
     response.setHeader('Content-Type', 'application/octet-stream');
@@ -209,13 +205,18 @@ async function meshStore(fixture, { warm = false } = {}) {
     response.end(bytes);
   };
   return {
-    displayMesh: surfaceInput => produce(surfaceInput, TEST_DISPLAY_TESSELLATION),
-    probe: keys => ({ entries: Object.fromEntries(keys.filter(key => stored.has(key)).map(key => [key, stored.get(key).row])) }),
-    batch: (response, requested) => binary(response, Buffer.from(cache.encodeTessellationCacheBatch(requested.map(({ tessellationInput, object }) => {
-      const entry = stored.get(tessellationInput);
-      return entry?.row.object === object ? entry.bytes : null;
+    derive,
+    probe: parts => ({ entries: Object.fromEntries(parts.filter(part => stored.has(part)).map(part => [part, stored.get(part).record])) }),
+    batch: (response, requested) => binary(response, Buffer.from(cache.encodeTessellationCacheBatch(requested.map(({ part, object }) => {
+      const entry = stored.get(part);
+      return entry?.record.glb.object === object ? entry.bytes : null;
     })))),
-    read: (response, key) => { const entry = stored.get(key); if (entry) { binary(response, entry.bytes); return true; } return false; },
+    read: (response, part, role, object) => {
+      const entry = stored.get(part);
+      if (!entry || entry.record[role]?.object !== object) return false;
+      binary(response, role === 'glb' ? entry.bytes : entry.table);
+      return true;
+    },
   };
 }
 
@@ -313,7 +314,7 @@ export async function serveStepHarness(t, { onRequest, progressive = false, sing
   // component behind a closed gate is one cadgen is still meshing (`stageProgressiveFixture`).
   const closed = new Set();
   const hold = name => { closed.add(name); };
-  const meshing = surfaceInput => closed.has(fixture.heldInputs?.get(surfaceInput));
+  const meshing = part => closed.has(fixture.heldParts?.get(part));
   for (const name of ['a', 'b']) hold(name);
   let declaring = true;
   // Set by `fail()`: the file was saved again and its build failed.
@@ -365,58 +366,51 @@ export async function serveStepHarness(t, { onRequest, progressive = false, sing
       // A held component is still being meshed: its row is pending under the request's
       // subscriber token, as cadgen answers one, and the page asks again.
       const job = body.job || `job-${createHash('sha256').update(JSON.stringify(body.components || [])).digest('hex').slice(0, 16)}`;
-      const waiting = (body.components || []).some(({ surfaceInput }) => meshing(surfaceInput));
+      const waiting = (body.components || []).some(({ part }) => meshing(part));
       json(response, {
         viewId: shown.view.viewId,
         ...(waiting ? { job } : {}),
-        components: Object.fromEntries((body.components || []).map(({ cid, surfaceInput }) => {
-          const surface = fixture.surfaces.get(surfaceInput);
-          if (!surface) return [cid, { surfaceInput, state: 'failed', error: `unknown surface input for ${cid}` }];
-          if (meshing(surfaceInput)) return [cid, { surfaceInput, state: 'pending', job }];
-          return [cid, { surfaceInput, state: 'ready', surfaceObject: surface.object, byteLength: surface.bytes.length,
-            url: `/__cad/store?tree=${shown.view.tree}&surfaceInput=${surfaceInput}&object=${surface.object}`,
-            selectors: { object: surface.selectors.object, byteLength: surface.selectors.bytes.length,
-              url: `/__cad/store?tree=${shown.view.tree}&surfaceInput=${surfaceInput}&object=${surface.selectors.object}` },
-            mesh: meshes.displayMesh(surfaceInput) }];
+        components: Object.fromEntries((body.components || []).map(({ cid, part }) => {
+          if (!fixture.surfaces.has(part)) return [cid, { part, state: 'failed', error: `unknown part for ${cid}` }];
+          if (meshing(part)) return [cid, { part, state: 'pending', job }];
+          return [cid, { part, state: 'ready', record: meshes.derive(part) }];
         })),
       });
       return;
     }
     if (url.pathname.endsWith('/__cad/store')) {
-      const object = url.searchParams.get('object');
-      if (object) {
-        // The surface's bytes, or its selector table's: each by its own digest.
-        const surface = [...fixture.surfaces.values()].find(entry => entry.object === object || entry.selectors.object === object);
-        if (!surface) { notFound(response); return; }
-        const bytes = surface.object === object ? surface.bytes : surface.selectors.bytes;
-        response.setHeader('Content-Type', 'application/octet-stream');
-        response.setHeader('Content-Length', String(bytes.length));
-        response.end(request.method === 'HEAD' ? undefined : bytes);
-        return;
-      }
-      if (url.searchParams.get('file')?.endsWith('/assembly.json')) {
-        const shown = views.get(url.searchParams.get('file').split('/')[0]) || fixture;
+      const file = url.searchParams.get('file') || '';
+      if (file.endsWith('/assembly.json')) {
+        const shown = views.get(file.split('/')[0]) || fixture;
         response.setHeader('Content-Type', 'application/json');
         response.end(declaring || !shown.undeclaredAssembly ? shown.assembly : shown.undeclaredAssembly);
         return;
       }
-      notFound(response); return;
+      // A component's SURF, by the view's component path, as cadgen extracts it for recognition.
+      const surf = /^\/?([0-9a-f]{64})\/components\/([0-9a-f]{16})\.surf$/.exec(file);
+      const shown = surf && (views.get(surf[1]) || fixture);
+      const part = shown?.view.components[surf[2]]?.part;
+      const surface = part && fixture.surfaces.get(part);
+      if (!surface) { notFound(response); return; }
+      response.setHeader('Content-Type', 'application/octet-stream');
+      response.setHeader('Content-Length', String(surface.bytes.length));
+      response.end(request.method === 'HEAD' ? undefined : surface.bytes);
+      return;
     }
     if (url.pathname.endsWith('/__tess_cache/probe')) {
-      // A mesh cadgen is still making is not in the store yet, though an earlier open made it:
+      // A part cadgen is still making is not in the store yet, though an earlier open made it:
       // a reopen's held component is resolved, and waits, as a cold one does.
-      const keys = (await readBody(request)).tessellationInputs || [];
-      json(response, meshes.probe(keys.filter(key => !meshing(String(key).slice(0, 64)))));
+      const parts = (await readBody(request)).parts || [];
+      json(response, meshes.probe(parts.filter(part => !meshing(part))));
       return;
     }
     if (url.pathname.endsWith('/__tess_cache/batch')) {
       meshes.batch(response, (await readBody(request)).entries || []);
       return;
     }
-    if (request.method === 'GET' && url.pathname.endsWith('.glb')) {
-      const key = decodeURIComponent(url.pathname.split('/__tess_cache/')[1].slice(0, -'.glb'.length));
-      if (meshes.read(response, key)) return;
-    }
+    const object = request.method === 'GET' && /\/__tess_cache\/([^/]+?)\.(glb|selectors\.json)$/.exec(url.pathname);
+    if (object && meshes.read(response, decodeURIComponent(object[1]), object[2] === 'glb' ? 'glb' : 'selectors',
+      url.searchParams.get('object'))) return;
     // A mesh the store does not hold: a clean 404, never the HTML shell, which a
     // reader would fail to parse.
     if (url.pathname.includes('/__tess_cache/')) { notFound(response); return; }

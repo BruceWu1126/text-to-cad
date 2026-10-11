@@ -1,4 +1,4 @@
-import type { CadDisplayTessellation, CadEditingPreview } from '@text-to-cad/core/client';
+import type { CadEditingPreview } from '@text-to-cad/core/client';
 import type { LibraryModel } from '@text-to-cad/ui/library';
 import type { UpdateNotice } from '@text-to-cad/ui/update';
 import type { Bridge, CallOptions, ToolResult } from './bridge';
@@ -21,8 +21,6 @@ export interface Launch {
   /** The server's version and platform: the page starts on the launch alone. */
   version?: string;
   platform?: string;
-  /** The display tolerance the page draws STEP models at (cadgen's policy). */
-  tessellation?: CadDisplayTessellation;
   /** The home's library as it stood, so the home draws its cards without asking first. */
   recents?: Recent[];
   /** Whether this computer has a file chooser for the home's Open. */

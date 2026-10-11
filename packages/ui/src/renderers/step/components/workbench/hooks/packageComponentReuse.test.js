@@ -8,23 +8,28 @@ import {
 
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
-const SURF_A = "1".repeat(64);
-const INPUT_A = "d".repeat(64);
+const PART_A = `${"d".repeat(64)}-v1`;
+const PART_B = `${"e".repeat(64)}-v1`;
 const CID = "0123456789abcdef";
 
-function descriptor(surfaceObject = SURF_A, surfaceInput = INPUT_A) {
-  return { components: { [CID]: { surfaceInput, ...(surfaceObject ? { surfaceObject } : {}) } } };
+function descriptor(part = PART_A) {
+  return { components: { [CID]: { part } } };
+}
+
+// The row a component's mesh was drawn from: its part's record.
+function row(part = PART_A) {
+  return { part, glb: { object: "1".repeat(64) }, selectors: { object: "2".repeat(64) } };
 }
 
 function meshUrl(tree) {
   return `/__cad/store?file=/${tree}&v=${tree}`;
 }
 
-test("an unchanged concrete surface stays retained across a tree revision", () => {
+test("a component whose part is unchanged keeps its mesh across a tree revision", () => {
   const meshData = { vertices: new Float32Array(3) };
   const previous = {
     descriptor: descriptor(),
-    componentIdentityByCid: { [CID]: descriptor().components[CID] },
+    componentIdentityByCid: { [CID]: row() },
     meshUrl: meshUrl(HASH_A),
     componentMeshDataByCid: { [CID]: meshData },
   };
@@ -36,30 +41,24 @@ test("an unchanged concrete surface stays retained across a tree revision", () =
   assert.equal(retained[CID], meshData);
 });
 
-test("reuse rejects changed surface outputs and inputs", () => {
+test("reuse rejects a changed part, and a mesh no part's row was drawn from", () => {
   const meshData = {};
   const previous = {
     descriptor: descriptor(),
+    componentIdentityByCid: { [CID]: row() },
     meshUrl: meshUrl(HASH_A),
     componentMeshDataByCid: { [CID]: meshData },
   };
   assert.deepEqual(retainedComponentMeshesForRevision({
     previous,
-    descriptor: descriptor("2".repeat(64)),
+    descriptor: descriptor(PART_B),
     meshUrl: meshUrl(HASH_B),
-  }), {}, "an explicit conflicting surface output is never reused");
-
-  assert.equal(retainedComponentMeshesForRevision({
-    previous,
-    descriptor: descriptor(null),
-    meshUrl: meshUrl(HASH_B),
-  })[CID], meshData, "a geometry-only descriptor inherits O from the exact prior D");
-
+  }), {}, "another part cannot reuse the mesh");
   assert.deepEqual(retainedComponentMeshesForRevision({
-    previous,
-    descriptor: descriptor(SURF_A, "e".repeat(64)),
+    previous: { ...previous, componentIdentityByCid: {} },
+    descriptor: descriptor(),
     meshUrl: meshUrl(HASH_B),
-  }), {}, "a different producer-bound surface input cannot reuse the mesh");
+  }), {}, "a mesh with no row behind it is never reused");
 });
 
 test("A remains the bounded reuse source after B staging fails or is superseded by C", () => {
@@ -69,7 +68,7 @@ test("A remains the bounded reuse source after B staging fails or is superseded 
     meshHash: "tree-a",
     complete: true,
     descriptor: descriptor(),
-    componentIdentityByCid: { [CID]: descriptor().components[CID] },
+    componentIdentityByCid: { [CID]: row() },
     meshUrl: meshUrl(HASH_A),
     componentMeshDataByCid: { [CID]: meshData },
   };

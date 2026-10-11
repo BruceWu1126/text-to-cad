@@ -5,29 +5,22 @@ import { Vector3 } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 import {
-  MESH_INDEX_SCHEMA,
-  MESH_PAYLOAD_VERSION,
-  TESSELLATION_VERSION,
   createHttpTessellationCacheProvider,
   decodeComponentTessellation,
   decodeTessellationCacheBatch,
   encodeTessellationCacheBatch,
-  float64Hex,
   isTessellationCacheProbeMissError,
   meshEdgePolylines,
   meshFaceRanges,
-  resolvedTessellationIdentity,
   createTessellationCache,
-  surfIndexFromCacheEntry,
+  partMeshMatches,
+  partRow,
+  partSelectorsPath,
   TESS_BATCH_MAX_BYTES,
   tessBatchMaxBytes,
-  tessellationCacheKey,
-  tessellationQuality,
-  tessellationPayloadFacts,
-  validateTessellationProbeRow,
 } from "./tessellationCache.js";
-import { buildMeshDataFromSurf } from "./surfMeshData.js";
-import { encodeMeshFixture, memoryMeshProvider, meshFixture, probeRowFor } from "./__tests__/meshFixtures.js";
+import { buildComponentMeshData } from "./surfMeshData.js";
+import { encodeMeshFixture, meshFixture, partRowFor, selectorTableFixture, testPartKey } from "./__tests__/meshFixtures.js";
 import { buildComposedPackageMeshData } from "../assembly/meshData.js";
 
 let tessellationCache = createTessellationCache();
@@ -36,11 +29,8 @@ function setTessellationCacheProvider(provider) {
   tessellationCache = createTessellationCache({ provider });
 }
 
-const D = "11".repeat(32);
-const D2 = "22".repeat(32);
-const O = "aa".repeat(32);
-const O2 = "bb".repeat(32);
-const Q = Object.freeze({ chordTolerance: 0.0015, angleTolerance: 0.005 });
+const P = testPartKey("11");
+const P2 = testPartKey("22");
 
 function componentFixture() {
   return {
@@ -54,18 +44,11 @@ function componentFixture() {
       polyline: new Float32Array([0, 0, 0, 2, 0, 0]),
     }],
     bounds: { min: [0, 0, 0], max: [2, 3, 0] },
-    scale: 3.605551275463989,
   };
 }
 
 function encodedEntry(overrides = {}) {
-  return encodeMeshFixture(componentFixture(), {
-    surfaceInput: D,
-    surfaceObject: O,
-    tessellation: Q,
-    partColor: [0.6, 0.5, 0.4, 1],
-    ...overrides,
-  });
+  return encodeMeshFixture(componentFixture(), { part: P, ...overrides });
 }
 
 // The fixture triangle, decoded: what a render consumer holds.
@@ -106,83 +89,12 @@ function rewriteTable(bytes, name, word, value) {
   return result;
 }
 
-function fromF64Hex(hex) {
-  const bytes = Uint8Array.from(hex.match(/../g), (pair) => Number.parseInt(pair, 16));
-  return new DataView(bytes.buffer).getFloat64(0, false);
-}
-
-test("lossless binary64 keys match Python and separate old decimal collisions", () => {
-  const vectors = [
-    [Number.MIN_VALUE, "0000000000000001"],
-    [0.00001, "3ee4f8b588e368f1"],
-    [0.0015, "3f589374bc6a7efa"],
-    [0.005, "3f747ae147ae147b"],
-    [1, "3ff0000000000000"],
-    [Number.MAX_VALUE, "7fefffffffffffff"],
-  ];
-  for (const [value, expected] of vectors) assert.equal(float64Hex(value), expected);
-  for (const value of [0, -0, -1, NaN, Infinity, -Infinity, "0.0015", true]) {
-    assert.throws(() => float64Hex(value), /positive finite/);
-  }
-  for (const invalid of ["11", "A".repeat(64), null]) {
-    assert.throws(() => tessellationCacheKey(invalid, Q), /64 lowercase hex/);
-    assert.throws(() => resolvedTessellationIdentity(D, invalid, Q), /64 lowercase hex/);
-  }
-
-  const closeA = fromF64Hex("3f589374bc6a7efa");
-  const closeB = fromF64Hex("3f589374bc6a7efb");
-  assert.equal(closeA.toExponential(6), closeB.toExponential(6), "old key collides");
-  assert.notEqual(
-    tessellationCacheKey(D, { ...Q, chordTolerance: closeA }),
-    tessellationCacheKey(D, { ...Q, chordTolerance: closeB }),
-    "the key preserves the requested double",
-  );
-
-  // The tolerances are the only options a mesh is keyed by: anything else is a request for
-  // something no stored mesh is, and never reaches a hit.
-  for (const [name, value] of [["loopTolerance", 1e-5], ["maxRefineDepth", 9], ["collectBoundaryDebug", true]]) {
-    assert.throws(
-      () => tessellationCacheKey(D, { ...Q, [name]: value }),
-      new RegExp(`not part of the mesh key: ${name}`),
-    );
-    assert.throws(() => tessellationQuality({ [name]: value }), /not part of the mesh key/);
-  }
-  // A quality read back from an entry keys as the request it spells.
-  assert.equal(tessellationCacheKey(D, tessellationQuality(Q)), tessellationCacheKey(D, Q));
-  assert.equal(tessellationCacheKey(D, { chordTolerance: 0.0015, angleTolerance: 0.35 }),
-    `${D}-t${TESSELLATION_VERSION}-p6-l3f589374bc6a7efa-a3fd6666666666666`);
-  // A request names both tolerances: which pair a mesh is drawn at is cadgen's, so one that
-  // leaves either out is refused, never filled in here.
-  for (const partial of [undefined, {}, { chordTolerance: 0.0015 }, { angleTolerance: 0.35 }]) {
-    assert.throws(() => tessellationCacheKey(D, partial), /names both tolerances/, JSON.stringify(partial));
-    assert.throws(() => resolvedTessellationIdentity(D, O, partial), /names both tolerances/);
-  }
-});
-
-test("a GLB body round-trips its arrays and tables as views and exposes exact D/O/L/Q/R", () => {
+test("a GLB body round-trips its arrays and tables as views and names its part", () => {
   const source = componentFixture();
   const bytes = encodedEntry();
-  const L = tessellationCacheKey(D, Q);
-  const R = resolvedTessellationIdentity(D, O, Q);
-  const decoded = decodeComponentTessellation(bytes, {
-    surfaceInput: D,
-    surfaceObject: O,
-    tessellationInput: L,
-    renderIdentity: R,
-    tessellation: Q,
-  });
+  const decoded = decodeComponentTessellation(bytes, { part: P });
   assert.ok(decoded);
-  assert.equal(MESH_PAYLOAD_VERSION, 6);
-  assert.deepEqual(decoded.identity, {
-    surfaceInput: D,
-    surfaceObject: O,
-    tessellationInput: L,
-    renderIdentity: R,
-    quality: tessellationQuality(Q),
-    tessellatorVersion: TESSELLATION_VERSION,
-    payloadVersion: 6,
-  });
-  assert.deepEqual(decoded.partColor, [0.6, 0.5, 0.4, 1]);
+  assert.equal(decoded.part, P);
   const { component } = decoded;
   assert.ok(component.indices instanceof Uint16Array, "a component of at most 65,535 vertices indexes in u16");
   for (const field of ["positions", "normals", "indices"]) {
@@ -195,12 +107,11 @@ test("a GLB body round-trips its arrays and tables as views and exposes exact D/
   assert.deepEqual(meshEdgePolylines(component).map(({ ord, visibilityClass, polyline }) => [ord, visibilityClass, [...polyline]]),
     [[9, "boundary", [0, 0, 0, 2, 0, 0]]]);
   assert.deepEqual(component.bounds, source.bounds);
-  assert.equal(component.scale, source.scale);
 
   const unalignedStorage = new Uint8Array(bytes.length + 1);
   unalignedStorage.set(bytes, 1);
   const unaligned = unalignedStorage.subarray(1);
-  const copied = decodeComponentTessellation(unaligned, { surfaceInput: D, surfaceObject: O, tessellation: Q });
+  const copied = decodeComponentTessellation(unaligned, { part: P });
   assert.ok(copied);
   assert.deepEqual([...copied.component.positions], [...source.positions]);
   assert.notEqual(copied.component.positions.buffer, unalignedStorage.buffer, "unaligned input safely copies");
@@ -214,13 +125,13 @@ test("a component past 65,535 vertices indexes in u32, and the render buffers ar
     positions, normals: new Float32Array(3 * vertices).fill(1 / Math.sqrt(3)),
     indices: new Uint32Array([0, 1, vertices - 1]),
     faceRanges: [{ ord: 1, indexStart: 0, indexCount: 3 }], edges: [],
-    bounds: { min: [0, 0, 0], max: [vertices - 1, 0, 0] }, scale: vertices - 1,
+    bounds: { min: [0, 0, 0], max: [vertices - 1, 0, 0] },
   };
-  const wide = decodeComponentTessellation(encodeMeshFixture(component, { surfaceInput: D, surfaceObject: O }));
+  const wide = decodeComponentTessellation(encodeMeshFixture(component, { part: P }));
   assert.ok(wide.component.indices instanceof Uint32Array);
   assert.deepEqual([...wide.component.indices], [0, 1, vertices - 1]);
-  assert.ok(buildMeshDataFromSurf(surfIndexFromCacheEntry(wide), wide.component).indices instanceof Uint32Array);
-  assert.ok(buildMeshDataFromSurf({ partColor: null }, solidComponent()).indices instanceof Uint32Array);
+  assert.ok(buildComponentMeshData(wide.component).indices instanceof Uint32Array);
+  assert.ok(buildComponentMeshData(solidComponent()).indices instanceof Uint32Array);
 });
 
 test("a stored mesh is a glTF 2.0 file a stock GLTFLoader draws", async () => {
@@ -243,17 +154,18 @@ test("empty imported components round-trip through the cache without changing as
   const component = {
     positions: new Float32Array(0), normals: new Float32Array(0),
     indices: new Uint32Array(0), faceRanges: [], edges: [],
-    bounds: { min: [0, 0, 0], max: [0, 0, 0] }, scale: 1e-6,
+    bounds: { min: [0, 0, 0], max: [0, 0, 0] },
   };
-  const bytes = encodeMeshFixture(component, { surfaceInput: D, surfaceObject: O });
+  const bytes = encodeMeshFixture(component, { part: P });
   const decoded = decodeComponentTessellation(bytes);
   assert.ok(decoded, "an empty product entry is a valid complete payload");
-  assert.equal(tessellationPayloadFacts(bytes).byteLength, bytes.length, "a JSON chunk alone");
+  assert.equal(20 + new DataView(bytes.buffer).getUint32(12, true), bytes.length, "a JSON chunk alone");
+  assert.ok(partMeshMatches(bytes, partRowFor(bytes)), "a part's whole mesh");
   for (const field of ["positions", "normals", "indices", "faceTable", "edgeTable", "edgePoints"]) {
     assert.equal(decoded.component[field].length, 0, field);
   }
-  const emptyMesh = buildMeshDataFromSurf(surfIndexFromCacheEntry(decoded), decoded.component);
-  const solidMesh = buildMeshDataFromSurf({ partColor: null }, solidComponent());
+  const emptyMesh = buildComponentMeshData(decoded.component);
+  const solidMesh = buildComponentMeshData(solidComponent());
   const descriptor = { assembly: { root: {
     id: "root", nodeType: "assembly", children: [
       { id: "empty", nodeType: "part", children: [] },
@@ -287,15 +199,15 @@ test("a wire-only imported component draws its edges and frames nothing", () => 
       { ord: 1, visibilityClass: "feature", polyline: new Float32Array([0, 0, 0, 0, 0, 50]) },
       { ord: 2, visibilityClass: "feature", polyline: new Float32Array([10, 0, 50, 0, 10, 50, -10, 0, 50]) },
     ],
-    bounds: { min: [-10, 0, 0], max: [10, 10, 50] }, scale: Math.hypot(20, 10, 50),
+    bounds: { min: [-10, 0, 0], max: [10, 10, 50] },
   };
-  const decoded = decodeComponentTessellation(encodeMeshFixture(component, { surfaceInput: D, surfaceObject: O }));
+  const decoded = decodeComponentTessellation(encodeMeshFixture(component, { part: P }));
   assert.ok(decoded, "a wire-only product is a valid complete payload");
   assert.deepEqual(meshEdgePolylines(decoded.component).map((edge) => edge.ord), [1, 2]);
 
-  const wireMesh = buildMeshDataFromSurf(surfIndexFromCacheEntry(decoded), decoded.component);
+  const wireMesh = buildComponentMeshData(decoded.component);
   assert.deepEqual([...wireMesh.cadEdgeIndices], [0, 1, 2, 3, 3, 4], "its edges reach the mesh data");
-  const solidMesh = buildMeshDataFromSurf({ partColor: null }, solidComponent());
+  const solidMesh = buildComponentMeshData(solidComponent());
   const assembly = buildComposedPackageMeshData({ assembly: { root: {
     id: "root", nodeType: "assembly", children: [
       { id: "wire", nodeType: "part", children: [] },
@@ -318,8 +230,8 @@ test("each edge class draws as its line class, and none draws nothing", () => {
       ord: index + 1, visibilityClass, polyline: new Float32Array([index, 0, 0, index, 1, 0]),
     })),
   };
-  const decoded = decodeComponentTessellation(encodeMeshFixture(component, { surfaceInput: D, surfaceObject: O }));
-  const { cadEdgePositions, cadEdgeClassRanges } = buildMeshDataFromSurf({ partColor: null }, decoded.component);
+  const decoded = decodeComponentTessellation(encodeMeshFixture(component, { part: P }));
+  const { cadEdgePositions, cadEdgeClassRanges } = buildComponentMeshData(decoded.component);
   assert.deepEqual(cadEdgeClassRanges.map(({ classId, pointCount, segmentCount }) => [classId, pointCount, segmentCount]),
     [["feature", 8, 4], ["tangent", 2, 1], ["seam", 2, 1], ["degenerate", 2, 1]]);
   // Feature first, in edge order, with the classes that draw as features (boundary,
@@ -327,47 +239,34 @@ test("each edge class draws as its line class, and none draws nothing", () => {
   assert.deepEqual([0, 1, 2, 3].map((point) => cadEdgePositions[6 * point]), [0, 4, 5, 6]);
 });
 
-test("cadgen's stored meshes decode as the bodies their probe rows describe", () => {
+test("cadgen's stored meshes decode as the bodies their records describe", () => {
   for (const name of ["sun_gear", "cam_follower_roller", "mixed", "slot"]) {
     const fixture = meshFixture(name);
-    const row = validateTessellationProbeRow(fixture.row, {
-      tessellationInput: tessellationCacheKey(fixture.surfaceInput, fixture.tessellation),
-    });
+    const row = partRow(fixture.part, fixture.row);
     assert.ok(row, `${name} row`);
-    const decoded = decodeComponentTessellation(fixture.bytes, {
-      surfaceInput: fixture.surfaceInput, surfaceObject: fixture.surfaceObject, tessellation: fixture.tessellation,
-    });
+    assert.ok(partMeshMatches(fixture.bytes, row), `${name}: its mesh is the one its record names`);
+    const decoded = decodeComponentTessellation(fixture.bytes, { part: fixture.part });
     assert.ok(decoded, `${name} decodes`);
-    assert.equal(decoded.component.positions.length, 3 * row.vertexCount);
-    assert.equal(decoded.component.normals.length, 3 * row.vertexCount);
-    assert.equal(decoded.component.indices.length, row.indexCount);
-    assert.ok(row.faceCount > 0 && row.edgeCount > 0);
-    assert.ok(surfIndexFromCacheEntry(decoded), "every stored mesh carries its part colour");
+    assert.equal(decoded.component.positions.length, 3 * row.glb.vertexCount);
+    assert.equal(decoded.component.normals.length, 3 * row.glb.vertexCount);
+    assert.equal(decoded.component.indices.length, row.glb.indexCount);
+    // Its mesh holds every face and edge of the part's selector table.
+    const { stats } = selectorTableFixture(name);
+    assert.deepEqual([row.glb.faceCount, row.glb.edgeCount], [stats.faceCount, stats.edgeCount], name);
+    assert.ok(row.glb.faceCount > 0 && row.glb.edgeCount > 0);
   }
 });
 
-test("decode rejects expected and embedded identity mismatches as cache misses", () => {
+test("decode rejects a body of another part, or of none, as a cache miss", () => {
   const bytes = encodedEntry();
-  const L = tessellationCacheKey(D, Q);
-  assert.equal(decodeComponentTessellation(bytes, { surfaceInput: D2 }), null);
-  assert.equal(decodeComponentTessellation(bytes, { surfaceObject: O2 }), null);
-  assert.equal(decodeComponentTessellation(bytes, { tessellationInput: `${L}x` }), null);
-  assert.equal(decodeComponentTessellation(bytes, {
-    renderIdentity: resolvedTessellationIdentity(D, O2, Q),
-  }), null);
-  assert.equal(decodeComponentTessellation(bytes, {
-    tessellation: { ...Q, chordTolerance: fromF64Hex("3f589374bc6a7efb") },
-  }), null);
+  assert.equal(decodeComponentTessellation(bytes, { part: P2 }), null);
+  assert.equal(decodeComponentTessellation(bytes, { part: `${P.slice(0, -1)}2` }), null, "another version is another part");
 
   const cad = (mutate) => rewriteJson(bytes, (gltf) => mutate(gltf.extras.cadgen));
-  assert.equal(decodeComponentTessellation(cad((c) => { c.surfaceInput = D2; })), null);
-  assert.equal(decodeComponentTessellation(cad((c) => { c.surfaceObject = O2; }), { surfaceObject: O }), null);
-  assert.equal(decodeComponentTessellation(cad((c) => { c.quality.chordToleranceF64 = "3f589374bc6a7efb"; })), null);
-  assert.equal(decodeComponentTessellation(cad((c) => {
-    c.tessellationInput = `${c.tessellationInput.slice(0, -1)}0`;
-  })), null);
-  assert.equal(decodeComponentTessellation(cad((c) => { c.payloadVersion = 5; })), null, "another format version is a miss");
-  assert.equal(decodeComponentTessellation(cad((c) => { delete c.surfaceInput; })), null);
+  assert.equal(decodeComponentTessellation(cad((c) => { c.part = P2; }), { part: P }), null);
+  assert.equal(decodeComponentTessellation(cad((c) => { c.part = P.slice(0, 64); })), null, "a digest is no part key");
+  assert.equal(decodeComponentTessellation(cad((c) => { delete c.part; })), null);
+  assert.equal(decodeComponentTessellation(cad((c) => { c.part = P2; }), { part: P2 }).part, P2, "a body is the part it names");
 });
 
 test("decode rejects corrupt, truncated and foreign containers", () => {
@@ -390,11 +289,10 @@ test("decode rejects corrupt, truncated and foreign containers", () => {
 
 test("decode rejects a JSON chunk that is not the canonical one for its values", () => {
   const bytes = encodedEntry();
+  const row = partRowFor(bytes);
   const mutations = [
     (g) => { g.extras.cadgen.bounds.min = [null, 0, 0]; },
     (g) => { g.extras.cadgen.bounds.min[0] = g.extras.cadgen.bounds.max[0] + 1; },
-    (g) => { g.extras.cadgen.scale = 0; },
-    (g) => { g.extras.cadgen.partColor = [1, 0, 0]; },
     (g) => { g.extras.cadgen.faceColors = [[1, 0, 0]]; },
     (g) => { g.extras.cadgen.edgeClasses = ["none"]; },
     (g) => { g.extras.cadgen.faces.count = 2; },
@@ -413,10 +311,9 @@ test("decode rejects a JSON chunk that is not the canonical one for its values",
   for (const [index, mutate] of mutations.entries()) {
     const mutated = rewriteJson(bytes, mutate);
     assert.equal(decodeComponentTessellation(mutated), null, `JSON mutation ${index}`);
-    assert.equal(tessellationPayloadFacts(mutated), null, `JSON mutation ${index} has no facts`);
+    assert.equal(partMeshMatches(mutated, row), false, `JSON mutation ${index} is no record's mesh`);
   }
   assert.ok(decodeComponentTessellation(rewriteJson(bytes, () => {})), "the canonical JSON, re-spelled, reads");
-  assert.equal(surfIndexFromCacheEntry(null), null, "nothing decoded is nothing to draw");
 });
 
 test("decode rejects face and edge tables that do not cover their arrays in order", () => {
@@ -444,31 +341,33 @@ test("decode rejects face and edge tables that do not cover their arrays in orde
     indices: new Uint32Array([0, 1, 2, 0, 1, 3]),
     faceRanges: [{ ord: 1, indexStart: 0, indexCount: 3 }, { ord: 2, indexStart: 3, indexCount: 3 }],
     bounds: { min: [0, 0, 0], max: [2, 3, 1] },
-  }, { surfaceInput: D, surfaceObject: O });
+  }, { part: P });
   assert.ok(decodeComponentTessellation(twoFaces));
   assert.equal(decodeComponentTessellation(rewriteTable(twoFaces, "cadgen.faces", 4, 1)), null,
     "face ordinals rise");
 });
 
-test("a body that leaves a face no mesher covered names it, and its probe row counts it", () => {
+test("a body that leaves a face no mesher covered names it, and its record counts it", () => {
   const leftOut = encodeMeshFixture({
     ...componentFixture(),
     faceRanges: [{ ord: 1, indexStart: 0, indexCount: 3 }, { ord: 2, indexStart: 3, indexCount: 0 }],
     unmeshedFaces: [2],
-  }, { surfaceInput: D, surfaceObject: O, tessellation: Q });
+  }, { part: P });
   const decoded = decodeComponentTessellation(leftOut);
   assert.ok(decoded);
   assert.deepEqual([...decoded.component.unmeshedFaces], [2]);
   assert.deepEqual([...solidComponent().unmeshedFaces], [], "a whole body names none");
   // The render data carries them, for the viewer to name the part drawn without them.
-  assert.deepEqual(buildMeshDataFromSurf(surfIndexFromCacheEntry(decoded), decoded.component).unmeshedFaces, [2]);
-  const row = probeRowFor(leftOut);
-  assert.equal(row.unmeshedFaceCount, 1);
-  assert.equal(tessellationPayloadFacts(leftOut).unmeshedFaceCount, 1);
-  assert.deepEqual(validateTessellationProbeRow(row), row);
-  assert.equal("unmeshedFaceCount" in probeRowFor(encodedEntry()), false, "a whole body's row counts none");
+  assert.deepEqual(buildComponentMeshData(decoded.component).unmeshedFaces, [2]);
+  const row = partRowFor(leftOut);
+  assert.equal(row.glb.unmeshedFaceCount, 1);
+  assert.deepEqual(partRow(P, row), row);
+  assert.ok(partMeshMatches(leftOut, row));
+  const { unmeshedFaceCount: _count, ...uncounted } = row.glb;
+  assert.equal(partMeshMatches(leftOut, { ...row, glb: uncounted }), false, "a record that does not count them is another mesh's");
+  assert.equal("unmeshedFaceCount" in partRowFor(encodedEntry()).glb, false, "a whole body's record counts none");
   for (const count of [0, 3, 1.5]) {
-    assert.equal(validateTessellationProbeRow({ ...row, unmeshedFaceCount: count }), null, `count ${count}`);
+    assert.equal(partRow(P, { ...row, glb: { ...row.glb, unmeshedFaceCount: count } }), null, `count ${count}`);
   }
   // A named face is one of the table's empty faces, named once, in order.
   for (const [label, value] of Object.entries({
@@ -489,11 +388,7 @@ test("batch container preserves aligned zero-copy hits, misses and odd payloads"
   assert.equal(decoded[1], null);
   assert.deepEqual([...decoded[2]], [1, 2, 3]);
   assert.equal(decoded[0].byteOffset % 4, 0);
-  const component = decodeComponentTessellation(decoded[0], {
-    surfaceInput: D,
-    surfaceObject: O,
-    tessellation: Q,
-  });
+  const component = decodeComponentTessellation(decoded[0], { part: P });
   assert.ok(component);
   assert.equal(component.component.positions.buffer, batch.buffer, "batch hit stays zero-copy");
   assert.equal(decodeTessellationCacheBatch(batch.subarray(0, 14)), null);
@@ -502,61 +397,67 @@ test("batch container preserves aligned zero-copy hits, misses and odd payloads"
   assert.equal(decodeTessellationCacheBatch(corrupt), null);
 });
 
-test("probes and reads accept only entries bound to the requested L", async (t) => {
+test("probes and reads accept only records of the requested part", async (t) => {
   t.after(() => setTessellationCacheProvider(null));
   const entry = encodedEntry();
-  const row = probeRowFor(entry);
+  const row = partRowFor(entry);
   setTessellationCacheProvider({
-    // A provider answering every key with D's row: only D's key may adopt it.
-    async probeMany(keys) { return keys.map(() => row); },
+    // A provider answering every part with P's row: only P may adopt it.
+    async probeMany(parts) { return parts.map(() => row); },
     async getProbed() { return entry; },
   });
-  const probes = await tessellationCache.probeCachedTessellationEntries([D, D2], Q);
-  assert.deepEqual([...probes.keys()], [D], "only the bound entry is readable");
-  const hit = await tessellationCache.getCachedComponentEntry(D, Q, { probe: probes.get(D) });
-  assert.equal(hit.identity.surfaceObject, O);
-  assert.equal(await tessellationCache.getCachedEntryBytes(D2, Q), null);
+  const probes = await tessellationCache.probeCachedTessellationEntries([P, P2]);
+  assert.deepEqual([...probes.keys()], [P], "only the part the row names reads it");
+  const hit = await tessellationCache.getCachedComponentEntry(P, { probe: probes.get(P) });
+  assert.equal(hit.part, P);
+  assert.equal(await tessellationCache.getCachedEntryBytes(P2), null);
+  // A record answered by key names no part: one whose mesh is another part's is a miss.
+  const { part: _part, ...record } = row;
+  let reads = 0;
+  setTessellationCacheProvider({
+    async probeMany(parts) { return parts.map(() => record); },
+    async getProbed() { reads += 1; return entry; },
+  });
+  assert.equal(await tessellationCache.getCachedEntryBytes(P2), null);
+  assert.equal(reads, 1, "the record was read, and its mesh refused");
+  await assert.rejects(tessellationCache.getCachedEntryBytes(P2, { probe: record, strictProbe: true }),
+    (error) => isTessellationCacheProbeMissError(error) && error.probe.part === P2);
 });
 
 test("a vanished probed body is an explicit retry boundary only when requested", async (t) => {
   t.after(() => setTessellationCacheProvider(null));
-  const entry = encodedEntry();
-  const key = tessellationCacheKey(D, Q);
-  const facts = tessellationPayloadFacts(entry, { tessellationInput: key });
-  const object = createHash("sha256").update(entry).digest("hex");
-  const row = validateTessellationProbeRow({ schemaVersion: MESH_INDEX_SCHEMA, object, ...facts });
+  const row = partRowFor(encodedEntry());
   setTessellationCacheProvider({
     async probeMany() { return [row]; },
     async getProbed() { return null; },
   });
-  assert.equal(await tessellationCache.getCachedEntryBytes(D, Q, { probe: row }), null);
+  assert.equal(await tessellationCache.getCachedEntryBytes(P, { probe: row }), null);
   await assert.rejects(
-    tessellationCache.getCachedEntryBytes(D, Q, { probe: row, strictProbe: true }),
-    (error) => isTessellationCacheProbeMissError(error) && error.probe.object === row.object,
+    tessellationCache.getCachedEntryBytes(P, { probe: row, strictProbe: true }),
+    (error) => isTessellationCacheProbeMissError(error) && error.probe.glb.object === row.glb.object,
   );
 });
 
 test("strict probe admission also rejects a provider lost before body read", async () => {
   setTessellationCacheProvider(null);
   await assert.rejects(
-    tessellationCache.getCachedEntryBytes(D, Q, { probe: { object: "gone" }, strictProbe: true }),
+    tessellationCache.getCachedEntryBytes(P, { probe: { object: "gone" }, strictProbe: true }),
     isTessellationCacheProbeMissError,
   );
 });
 
-test("HTTP provider probes metadata before an exact bounded object read", async (t) => {
+test("HTTP provider probes records before an exact bounded object read", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = originalFetch; });
   const entry = encodedEntry();
-  const key = tessellationCacheKey(D, Q);
-  const facts = tessellationPayloadFacts(entry, { tessellationInput: key });
-  const object = createHash("sha256").update(entry).digest("hex");
-  const row = validateTessellationProbeRow({ schemaVersion: MESH_INDEX_SCHEMA, object, ...facts });
+  const row = partRowFor(entry);
+  // A host answers each stored part's record by its key.
+  const { part: _part, ...record } = row;
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
     calls.push({ url: String(url), options });
     if (String(url).endsWith("/probe")) {
-      return new Response(JSON.stringify({ entries: { [key]: row } }), {
+      return new Response(JSON.stringify({ entries: { [P]: record } }), {
         status: 200, headers: { "content-type": "application/json" },
       });
     }
@@ -565,33 +466,42 @@ test("HTTP provider probes metadata before an exact bounded object read", async 
     });
   };
   const provider = createHttpTessellationCacheProvider({ origin: "http://cache.test", fetch: (...args) => globalThis.fetch(...args) });
-  const [probed] = await provider.probeMany([key]);
+  const [probed] = await provider.probeMany([P]);
   assert.deepEqual(probed, row);
-  const body = await provider.getProbed(probed, { maxBytes: row.byteLength });
+  assert.deepEqual(JSON.parse(calls[0].options.body), { parts: [P] });
+  const body = await provider.getProbed(probed, { maxBytes: row.glb.byteLength });
   assert.deepEqual(body, entry);
   const readUrl = new URL(calls[1].url);
-  assert.equal(readUrl.searchParams.get("object"), object);
-  assert.equal(readUrl.searchParams.get("maxBytes"), String(row.byteLength));
+  assert.equal(readUrl.pathname, `/__tess_cache/${P}.glb`);
+  assert.equal(readUrl.searchParams.get("object"), row.glb.object);
+  assert.equal(readUrl.searchParams.get("maxBytes"), String(row.glb.byteLength));
+  // Its selector table is read the same way, bound to the record's other object.
+  const tableUrl = new URL(partSelectorsPath(row), "http://cache.test");
+  assert.equal(tableUrl.pathname, `/__tess_cache/${P}.selectors.json`);
+  assert.deepEqual([tableUrl.searchParams.get("object"), tableUrl.searchParams.get("maxBytes")],
+    [row.selectors.object, String(row.selectors.byteLength)]);
 
   globalThis.fetch = async () => new Response(entry.slice(), {
     status: 200, headers: { "content-length": String(entry.byteLength + 1) },
   });
-  assert.equal(await provider.getProbed(probed, { maxBytes: row.byteLength }), null,
+  assert.equal(await provider.getProbed(probed, { maxBytes: row.glb.byteLength }), null,
     "an observed body larger than admission is rejected before adoption");
 });
 
 
 test("an HTTP batch read verifies each entry on its own: a damaged one is a miss for its component alone", async () => {
-  const entries = [encodedEntry(), encodedEntry({ surfaceInput: D2 })];
-  const rows = entries.map((entry) => validateTessellationProbeRow({ schemaVersion: MESH_INDEX_SCHEMA,
-    object: createHash("sha256").update(entry).digest("hex"), ...tessellationPayloadFacts(entry) }));
+  const entries = [encodedEntry(), encodedEntry({ part: P2 })];
+  const rows = entries.map((entry) => partRowFor(entry));
   const damaged = entries[1].slice();
   damaged[damaged.length - 1] ^= 0xff;
   const container = encodeTessellationCacheBatch([entries[0], damaged]);
-  const provider = createHttpTessellationCacheProvider({ origin: "http://cache.test", fetch: async () => new Response(container.slice(), {
-    status: 200, headers: { "content-length": String(container.byteLength) },
-  }) });
+  let request;
+  const provider = createHttpTessellationCacheProvider({ origin: "http://cache.test", fetch: async (_url, options) => {
+    request = JSON.parse(options.body);
+    return new Response(container.slice(), { status: 200, headers: { "content-length": String(container.byteLength) } });
+  } });
   const bodies = await provider.getManyProbed(rows, { maxBytes: container.byteLength });
+  assert.deepEqual(request.entries, rows.map((row) => ({ part: row.part, object: row.glb.object, maxBytes: row.glb.byteLength })));
   assert.deepEqual(bodies[0], entries[0]);
   assert.equal(bodies[1], null);
 });
@@ -609,22 +519,16 @@ test("a transport's batch ceiling lowers the server's bound and never raises it"
   assert.deepEqual([provider.maxBatchBytes, cache.batchMaxBytes, cache.createSession().batchMaxBytes], [8 * MIB, 8 * MIB, 8 * MIB]);
   assert.equal(createTessellationCache({ provider: createHttpTessellationCacheProvider() }).batchMaxBytes, 32 * MIB);
   // And the provider asks for no batch over it, whatever its caller allows.
-  const row = validateTessellationProbeRow({ schemaVersion: MESH_INDEX_SCHEMA,
-    object: createHash("sha256").update(encodedEntry()).digest("hex"), ...tessellationPayloadFacts(encodedEntry()) });
-  const over = Array.from({ length: Math.ceil((8 * MIB) / row.byteLength) + 1 }, () => row);
+  const row = partRowFor(encodedEntry());
+  const over = Array.from({ length: Math.ceil((8 * MIB) / row.glb.byteLength) + 1 }, () => row);
   assert.equal(await provider.getManyProbed(over, { maxBytes: 32 * MIB }), null);
   assert.equal(fetched, 0);
   cache.dispose();
 });
 
 test("bounded probes retain other chunks when one metadata response is unavailable", async (t) => {
-  const inputs = Array.from({ length: 513 }, (_, n) => createHash("sha256").update(`input-${n}`).digest("hex"));
-  const rows = new Map(inputs.map((surfaceInput) => {
-    const entry = encodedEntry({ surfaceInput });
-    const facts = tessellationPayloadFacts(entry);
-    return [facts.tessellationInput, validateTessellationProbeRow({ schemaVersion: MESH_INDEX_SCHEMA,
-      object: createHash("sha256").update(entry).digest("hex"), ...facts })];
-  }));
+  const parts = Array.from({ length: 513 }, (_, n) => `${createHash("sha256").update(`input-${n}`).digest("hex")}-v1`);
+  const rows = new Map(parts.map((part) => [part, partRowFor(encodedEntry({ part }))]));
   const calls = [];
   setTessellationCacheProvider({ async getProbed() { return null; }, async probeMany(keys) {
     calls.push(keys.length);
@@ -632,18 +536,21 @@ test("bounded probes retain other chunks when one metadata response is unavailab
     return keys.map((key) => rows.get(key));
   } });
   t.after(() => setTessellationCacheProvider(null));
-  const hits = await tessellationCache.probeCachedTessellationEntries(inputs, Q);
+  const hits = await tessellationCache.probeCachedTessellationEntries(parts);
   assert.deepEqual(calls, [256, 256, 1]);
   assert.equal(hits.size, 257);
-  assert.ok(hits.has(inputs[0]));
-  assert.ok(hits.has(inputs[512]));
-  assert.equal(hits.has(inputs[256]), false);
+  assert.ok(hits.has(parts[0]));
+  assert.ok(hits.has(parts[512]));
+  assert.equal(hits.has(parts[256]), false);
 });
 
 test("render-session caches isolate exact objects and disposal", async () => {
-  const entries = [encodedEntry(), encodedEntry({ surfaceObject: O2 })];
+  // Two stores holding different meshes of one part: each cache reads its own.
+  const entries = [encodedEntry(), encodeMeshFixture({
+    ...componentFixture(), positions: new Float32Array([0, 0, 0, 4, 0, 0, 0, 6, 0]), bounds: { min: [0, 0, 0], max: [4, 6, 0] },
+  }, { part: P })];
   const caches = entries.map((bytes) => {
-    const row = probeRowFor(bytes);
+    const row = partRowFor(bytes);
     return createTessellationCache({
       provider: {
         probeMany: async () => [row],
@@ -652,12 +559,11 @@ test("render-session caches isolate exact objects and disposal", async () => {
     });
   });
   try {
-    const decoded = await Promise.all(caches.map((cache) => cache.getCachedComponentEntry(D, Q)));
-    assert.equal(decoded[0].identity.surfaceObject, O);
-    assert.equal(decoded[1].identity.surfaceObject, O2);
+    const decoded = await Promise.all(caches.map((cache) => cache.getCachedComponentEntry(P)));
+    assert.deepEqual(decoded.map(({ component }) => component.bounds.max), [[2, 3, 0], [4, 6, 0]]);
     caches[0].dispose();
-    assert.equal(await caches[0].getCachedEntryBytes(D, Q), null);
-    assert.deepEqual(await caches[1].getCachedEntryBytes(D, Q), entries[1]);
+    assert.equal(await caches[0].getCachedEntryBytes(P), null);
+    assert.deepEqual(await caches[1].getCachedEntryBytes(P), entries[1]);
   } finally {
     for (const cache of caches) cache.dispose();
   }
@@ -665,9 +571,7 @@ test("render-session caches isolate exact objects and disposal", async () => {
 
 test("cache disposal rejects a late custom-provider response without affecting another session", async () => {
   const entry = encodedEntry();
-  const facts = tessellationPayloadFacts(entry);
-  const row = validateTessellationProbeRow({ schemaVersion: MESH_INDEX_SCHEMA,
-    object: createHash("sha256").update(entry).digest("hex"), ...facts });
+  const row = partRowFor(entry);
   let finish;
   const a = createTessellationCache({ provider: {
     probeMany: async () => [row],
@@ -677,12 +581,12 @@ test("cache disposal rejects a late custom-provider response without affecting a
     probeMany: async () => [row], getProbed: async () => entry,
   } });
   try {
-    const pending = a.getCachedEntryBytes(D, Q, { probe: row });
+    const pending = a.getCachedEntryBytes(P, { probe: row });
     const cancelled = assert.rejects(pending, { name: "AbortError" });
     a.dispose();
     finish(entry);
     await cancelled;
-    assert.deepEqual(await b.getCachedEntryBytes(D, Q), entry);
+    assert.deepEqual(await b.getCachedEntryBytes(P), entry);
   } finally {
     a.dispose(); b.dispose();
   }
@@ -690,8 +594,7 @@ test("cache disposal rejects a late custom-provider response without affecting a
 
 test("borrowed view cancellation is independent while owner disposal aborts every read", async () => {
   const bytes = encodedEntry();
-  const row = validateTessellationProbeRow({ schemaVersion: MESH_INDEX_SCHEMA,
-    object: createHash("sha256").update(bytes).digest("hex"), ...tessellationPayloadFacts(bytes) });
+  const row = partRowFor(bytes);
   const pending = [];
   const owner = createTessellationCache({ provider: {
     probeMany: async () => [row],
@@ -702,9 +605,9 @@ test("borrowed view cancellation is independent while owner disposal aborts ever
     const lifetime = new AbortController();
     const previous = owner.createSession({ signal: lifetime.signal });
     const current = owner.createSession();
-    const oldRead = previous.getCachedEntryBytes(D, Q, { probe: row });
+    const oldRead = previous.getCachedEntryBytes(P, { probe: row });
     const rejectedOld = assert.rejects(oldRead, { name: "AbortError" });
-    const currentRead = current.getCachedEntryBytes(D, Q, { probe: row });
+    const currentRead = current.getCachedEntryBytes(P, { probe: row });
     lifetime.abort();
     assert.equal(pending[0].signal.aborted, true);
     assert.equal(pending[1].signal.aborted, false, "another view retains its own read lifetime");
@@ -712,10 +615,10 @@ test("borrowed view cancellation is independent while owner disposal aborts ever
     pending[1].resolve(bytes);
     await rejectedOld;
     assert.deepEqual(await currentRead, bytes);
-    await assert.rejects(previous.getCachedEntryBytes(D, Q, { probe: row }), { name: "AbortError" });
+    await assert.rejects(previous.getCachedEntryBytes(P, { probe: row }), { name: "AbortError" });
     assert.equal(pending.length, 2, "an already-cancelled view never asks the provider again");
 
-    const lastRead = current.getCachedEntryBytes(D, Q, { probe: row });
+    const lastRead = current.getCachedEntryBytes(P, { probe: row });
     const rejectedLast = assert.rejects(lastRead, { name: "AbortError" });
     owner.dispose();
     assert.equal(pending[2].signal.aborted, true);

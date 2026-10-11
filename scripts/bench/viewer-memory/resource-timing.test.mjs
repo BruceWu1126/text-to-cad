@@ -26,6 +26,7 @@ test('collects same-origin cache/SURF phases after grading without copying body 
   const f = fixture([
     entry('http://localhost:3267/__tess_cache/cid.L1.glb', { body: ignoredBody }),
     entry('http://localhost:3267/__tess_cache/batch'),
+    entry('http://localhost:3267/__tess_cache/cid.selectors.json?object=x'),
     entry('http://localhost:3267/__cad/store?file=%2Fprivate%2Ftree%2Fcomponents%2Fcid.surf&secret=x'),
     entry('http://localhost:3267/files/cid2.surf'),
     entry('http://other-origin/__tess_cache/private.glb'), entry('http://localhost:3267/assets/main.js'),
@@ -35,7 +36,8 @@ test('collects same-origin cache/SURF phases after grading without copying body 
   const result = f.collect();
   assert.equal(result.installed, true); assert.equal(result.truncated, false);
   assert.deepEqual(result.entries.map(e => [e.route, e.key]), [
-    ['tess-entry', 'cid.L1.glb'], ['tess-batch', ''], ['surf', 'cid.surf'], ['surf', 'cid2.surf']]);
+    ['tess-entry', 'cid.L1.glb'], ['tess-batch', ''], ['tess-selectors', 'cid.selectors.json'],
+    ['surf', 'cid.surf'], ['surf', 'cid2.surf']]);
   assert.equal(result.entries[0].requestStart, 102); assert.equal(result.entries[0].responseStart, 130);
   assert.equal(result.entries[0].encodedBodySize, 1000);
   assert.equal(result.entries[0].body, undefined); assert.ok(!JSON.stringify(result).includes('secret'));

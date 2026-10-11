@@ -1,7 +1,7 @@
 """Write the fixture's selector tables: ``components/<cid>.selectors.json``.
 
-The harness serves these as cadgen's surface request does (the ready row's
-``selectors``, read through the store route): one table per component, as
+The harness serves these as cadgen's part store does (each part record's
+``selectors``, read at ``/__tess_cache/<part>.selectors.json``): one table per component, as
 ``cadgen._internal.selector_table`` builds it from the part's exact BREP and
 its SURF. The two parts are rebuilt here from ``hinge_block.py``'s shapes; a
 part whose edges a newer build orders differently is written in the committed
@@ -58,7 +58,8 @@ def _remap_edges(table: dict, mapping: dict[int, int]) -> dict:
 def main() -> None:
     from cadgen._internal.component_package import decode_display_shape, prepare_geometry_component
     from cadgen._internal.selector_table import build_selector_table, read_selector_table, selector_table_bytes
-    from cadgen._internal.surface_extract import extract_surface_component, read_surf
+    from cadgen._internal.surf_container import read_surf
+    from cadgen._internal.surface_extract import extract_surface_component
 
     from make_meshes import _match, shapes
 

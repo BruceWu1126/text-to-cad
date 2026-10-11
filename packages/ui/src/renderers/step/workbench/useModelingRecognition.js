@@ -1,8 +1,7 @@
 import { cadResourceCacheKey } from "@text-to-cad/core/client";
-import { resolveSurfaceComponents } from "./surfaceResolution.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadPackageDescriptor } from '../components/workbench/hooks/packageDescriptorCache.js';
-import { completedPackages, completedPackageRevision } from '../render/completedPackageCache.js';
+import { completedPackageRevision } from '../render/completedPackageCache.js';
 import { completedModelingRecognition, modelingRecognitionKey } from './modelingRecognitionCache.js';
 const EMPTY_RESULTS = {};
 // A frame, or this long when frames are not running (a hidden page): results never wait on one.
@@ -60,7 +59,7 @@ export function useModelingRecognition(meshUrl, enabled, { client, entry, reques
     // This scope survives expansion changes. Its one worker recognizes one component at a time
     // and is kept for the next; a component no longer wanted takes the worker down with it, since
     // its work cannot be recalled. Changing the requested set updates the remaining queue.
-    let disposed=false,active=null,pending=[],accepted=null,worker=null;
+    let disposed=false,active=null,pending=[],worker=null;
     const retire=()=>{worker?.terminate();worker=null;};
     const stop=job=>{
       clearTimeout(job.timer);
@@ -83,17 +82,10 @@ export function useModelingRecognition(meshUrl, enabled, { client, entry, reques
       const signal=job.controller.signal;
       try {
         const component=descriptor.components[id];
-        let identity=accepted?.[id] || component;
-        let surf=component?.surf ? resources.resolveDependency(meshUrl, component.surf, {kind:"package"}) : "";
-        let key=modelingRecognitionKey(identity,surf,{resources});
+        // The part's SURF, which the view names and cadgen extracts when asked.
+        const surf=component?.surf ? resources.resolveDependency(meshUrl, component.surf, {kind:"package"}) : "";
+        const key=modelingRecognitionKey(component,{resources});
         let result=completedModelingRecognition.get(key);
-        if(!result && !surf && component?.surfaceInput && client) {
-          identity=(await resolveSurfaceComponents(descriptor, [{ cid:id, surfaceInput:component.surfaceInput, surfaceObject:component.surfaceObject }], { client, signal })).get(id);
-          if(signal.aborted || disposed)return;
-          surf=identity?.surfUrl || "";
-          key=modelingRecognitionKey(identity,surf,{resources});
-          result=completedModelingRecognition.get(key);
-        }
         if(!result) {
           result=await new Promise(resolve=>{
             let settled=false;
@@ -135,7 +127,6 @@ export function useModelingRecognition(meshUrl, enabled, { client, entry, reques
       // Repeated occurrences request one component, without sharing selection IDs.
       const requested=new Set(JSON.parse(requestedKey));
       const components=[...new Set(descriptor.occurrences.filter(o=>requested.has(o.id)).map(o=>o.component))];
-      accepted=components.length ? completedPackages.peekComponentIdentities(client,entryRef.current,{descriptor}) : null;
       if(active && !components.includes(active.id))cancelActive();
       pending=components.filter(id=>id!==active?.id && !cache.current.has(id)).reverse();
       void recognize();

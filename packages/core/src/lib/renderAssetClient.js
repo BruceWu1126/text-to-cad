@@ -17,10 +17,7 @@ import {
   releaseSurfWorkerPoolWhenIdle,
   surfWorkerMemoryStats as surfWorkerMemoryStatsFromPool,
 } from "./surf/surfWorkerClient.js";
-import {
-  TessellationCacheProbeMissError,
-  resolvedTessellationIdentity,
-} from "./surf/tessellationCache.js";
+import { TessellationCacheProbeMissError } from "./surf/tessellationCache.js";
 import {
   assertAssetSourceScope,
   assetSourceScopeMatches,
@@ -291,23 +288,26 @@ export async function loadRenderGlbDocument(url, { signal, resources } = {}) {
   return buildGlbDocumentFromBuffer(buffer, { resources, sourceUrl: url, signal });
 }
 
-export async function loadRenderSurf(url, {
+/**
+ * One part's display payload, from its stored mesh. `identity` is `{ part, tessellationProbe }`:
+ * the part's key and its row (`partRow`), and `tessellationEntry` when a batched read already
+ * holds the mesh's verified bytes.
+ */
+export async function loadRenderSurf({
   signal,
   resources,
-  tessellation,
   identity,
   memoryEstimateBytes,
   tessellationCache,
 } = {}) {
   // The worker builds only the display payload. A stored mesh carries
-  // geometry, display edges, bounds and appearance, so this path skips both
+  // geometry, display edges and bounds, so this path skips both
   // the selector join and the selector table request.
-  const cacheKey = surfTessellationCacheKey(url, tessellation, identity);
+  const cacheKey = identityCacheKey(identity);
   const meshData = await loadCached(glbCache, cacheKey, async () => {
-    return (await loadSurfPayload(url, {
+    return (await loadSurfPayload("", {
       signal,
       resources,
-      tessellation,
       identity,
       memoryEstimateBytes,
       tessellationCache,
@@ -625,9 +625,8 @@ const surfPayloadCache = new Map();
 // composed. Retaining a second
 // reference here for the load's lifetime pinned every component's decoded
 // selector bundle (manifest rows + edge polylines) for the whole session; a
-// miss re-decodes from the shared tessellation cache in a worker. Mesh keys
-// include component identity, effective tolerances, tessellator algorithm and
-// payload compatibility.
+// miss re-decodes from the shared part store in a worker. Keys name the part
+// and its display mesh's object (`partCacheKey`).
 //
 // The leash is bounded by COUNT and by BYTES. A count alone pinned whatever the
 // entries weighed: the tendon hand's components decode to ~90 MB each, so 24
@@ -763,56 +762,53 @@ export function renderAssetCacheStats({ excludeBuffers = [] } = {}) {
   return stats;
 }
 
-/** The display payload `loadRenderSurf` already holds for this component, or null. */
-export function peekRenderSurf(url, { tessellation, identity } = {}) {
-  return peekCached(glbCache, surfTessellationCacheKey(url, tessellation, identity));
+/** The display payload `loadRenderSurf` already holds for the part `row` names, or null. */
+export function peekRenderSurf(row) {
+  return peekCached(glbCache, partCacheKey(row));
 }
 
-export function surfTessellationCacheKey(_url, tessellation, identity) {
-  return resolvedTessellationIdentity(
-    String(identity?.surfaceInput || ""),
-    String(identity?.surfaceObject || ""),
-    tessellation,
-  );
+/** What a part's decoded payloads are cached under: its key and its display mesh's object. */
+export function partCacheKey(row) {
+  const part = String(row?.part || "");
+  const object = String(row?.glb?.object || "");
+  return part && object ? `${part}@${object}` : "";
+}
+
+// A load reads `identity.part` and is cached under its row's key, so a row naming a part must name
+// that one: another part's would cache this part's mesh as that one's. A row naming none has no key.
+function identityCacheKey(identity) {
+  const row = identity?.tessellationProbe;
+  if (row?.part && row.part !== identity.part) throw new TypeError("A part's load names another part's row");
+  return partCacheKey(row);
 }
 
 function capabilityCacheKey(capabilities) {
   return `${capabilities.render ? "r" : ""}${capabilities.selectors ? "s" : ""}`;
 }
 
-async function loadSurfPayloadInline(url, { signal, resources, tessellation, identity, capabilities, tessellationCache } = {}) {
+async function loadSurfPayloadInline(url, { signal, resources, identity, capabilities, tessellationCache } = {}) {
   const [
-    {
-      decodeComponentTessellation,
-      surfIndexFromCacheEntry,
-      tessellationCacheKey,
-    },
-    { buildMeshDataFromSurf },
+    { decodeComponentTessellation },
+    { buildComponentMeshData },
     { joinSelectorTable, parseSelectorTable },
   ] = await Promise.all([
     import("./surf/tessellationCache.js"),
     import("./surf/surfMeshData.js"),
     import("./surf/selectorTable.js"),
   ]);
-  const surfaceInput = String(identity?.surfaceInput || "");
-  const surfaceObject = String(identity?.surfaceObject || "");
+  const part = String(identity?.part || "");
   const probe = identity?.tessellationProbe || null;
   // As the worker path takes them (`loadSurfComponentInWorker`): bytes a batched read already
-  // verified for this probe, else this tier's entry read here. cadgen produces every mesh; one
+  // verified for this probe, else the part's mesh read here. cadgen produces every mesh; one
   // the store does not hold is a probe miss, which the caller answers by asking for it.
   const readEntry = identity?.tessellationEntry instanceof Uint8Array ? identity.tessellationEntry : null;
   const cached = readEntry
-    ? decodeComponentTessellation(readEntry, {
-      surfaceInput, ...(surfaceObject ? { surfaceObject } : {}),
-      tessellationInput: tessellationCacheKey(surfaceInput, tessellation), tessellation,
-    })
-    : await tessellationCache?.getCachedComponentEntry(surfaceInput, tessellation, {
-      signal, probe, strictProbe: true,
-    });
+    ? decodeComponentTessellation(readEntry, { part })
+    : await tessellationCache?.getCachedComponentEntry(part, { signal, probe, strictProbe: true });
   if (!cached) throw new TessellationCacheProbeMissError(probe);
-  const meshData = capabilities.render ? buildMeshDataFromSurf(surfIndexFromCacheEntry(cached), cached.component) : null;
-  // Drawing needs only the mesh; selectors also need the component's selector table
-  // (`url`: the one its surface request answered with), joined to this mesh.
+  const meshData = capabilities.render ? buildComponentMeshData(cached.component) : null;
+  // Drawing needs only the mesh; selectors also need the part's selector table (`url`, its
+  // record's other object), joined to this mesh.
   if (!capabilities.selectors) {
     return { meshData };
   }
@@ -828,19 +824,17 @@ async function loadSurfPayloadInline(url, { signal, resources, tessellation, ide
 async function loadSurfPayload(url, {
   signal,
   resources,
-  tessellation,
   identity,
   memoryEstimateBytes,
   tessellationCache,
   capabilities = { render: true, selectors: true },
 } = {}) {
-  const cacheKey = `${surfTessellationCacheKey(url, tessellation, identity)}#cap=${capabilityCacheKey(capabilities)}`;
+  const cacheKey = `${identityCacheKey(identity)}#cap=${capabilityCacheKey(capabilities)}`;
   const payload = await loadCached(surfPayloadCache, cacheKey, async () => {
     const { loadSurfComponentInWorker } = await import("./surf/surfWorkerClient.js");
     const workerPayload = loadSurfComponentInWorker(url, {
       signal,
       resources,
-      tessellation,
       identity,
       capabilities,
       memoryEstimateBytes,
@@ -852,29 +846,27 @@ async function loadSurfPayload(url, {
       // is only the path for environments where Workers never started.
       return workerPayload;
     }
-    return loadSurfPayloadInline(url, { signal, resources, tessellation, identity, capabilities, tessellationCache });
+    return loadSurfPayloadInline(url, { signal, resources, identity, capabilities, tessellationCache });
   }, { cachePending: !signal });
   finalizeCached(surfPayloadCache, cacheKey, payload);
   retainSurfEntry(surfPayloadCache, cacheKey);
   return payload;
 }
 
-/** The selector bundle of one component: cadgen's selector table (`selectorsUrl`, its
- * surface ticket's) joined to the mesh at `tessellation`. */
+/** The selector bundle of one part: cadgen's selector table (`selectorsUrl`, read for the row in
+ * `identity`) joined to its display mesh. */
 export async function loadRenderSurfSelectorBundle(selectorsUrl, {
   signal,
   resources,
-  tessellation,
   identity,
   memoryEstimateBytes,
   tessellationCache,
 } = {}) {
-  const cacheKey = surfTessellationCacheKey(selectorsUrl, tessellation, identity);
+  const cacheKey = identityCacheKey(identity);
   const bundle = await loadCached(selectorCache, cacheKey, async () => {
     return (await loadSurfPayload(selectorsUrl, {
       signal,
       resources,
-      tessellation,
       identity,
       memoryEstimateBytes,
       tessellationCache,

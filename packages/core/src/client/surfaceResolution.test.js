@@ -3,6 +3,7 @@ import test from "node:test";
 import { createCadClient } from "./client.js";
 
 import { resolveSurfaceComponents as resolveWithClient, SurfaceResolutionError } from "./surfaceResolution.js";
+import { tessellationDecodedBytes } from "../lib/surf/tessellationCache.js";
 
 function resolveSurfaceComponents(descriptor, requests, options = {}) {
   const client = options.client || createCadClient();
@@ -11,12 +12,12 @@ function resolveSurfaceComponents(descriptor, requests, options = {}) {
 
 const TREE = "a".repeat(64);
 const VIEW = "b".repeat(64);
-const D = "d".repeat(64);
+const P = `${"d".repeat(64)}-v1`;
 const O = "e".repeat(64);
 const descriptor = {
   tree: TREE,
   viewId: VIEW,
-  surfaceProducer: { scheme: 20, surfFormat: 3, producerKey: "c".repeat(64) },
+  surfaceProducer: { build123d: "0.9.1", ocp: "7.8.1.1", cadqueryOcp: "7.8.1.1", producerKey: "c".repeat(64) },
 };
 
 function json(value, status = 200) {
@@ -25,27 +26,21 @@ function json(value, status = 200) {
   });
 }
 
-// The component's selector table rides every ready row, bound to the same input.
+// A part's record as cadgen's store answers it: its display mesh (one triangle) and its selector
+// table, each by its object.
 const S = "5".repeat(64);
-const selectors = (surfaceInput) => ({ object: S, url: `/__cad/store?tree=${TREE}&surfaceInput=${surfaceInput}&object=${S}`, byteLength: 99 });
+const MESH = { vertexCount: 3, indexCount: 3, faceCount: 1, edgeCount: 0, edgePointCount: 0 };
+const record = (object = O) => ({
+  glb: { object, byteLength: 1240, decodedBytes: tessellationDecodedBytes(MESH), ...MESH },
+  selectors: { object: S, byteLength: 99, faceCount: 1, edgeCount: 3, vertexCount: 3 },
+});
+const readyRow = (part = P, object = O) => ({ part, state: "ready", record: record(object) });
 
-function ready() {
-  return {
-    viewId: VIEW,
-    components: {
-      part: {
-        surfaceInput: D,
-        state: "ready",
-        surfaceObject: O,
-        url: `/__cad/store?tree=${TREE}&surfaceInput=${D}&object=${O}`,
-        byteLength: 1234,
-        selectors: selectors(D),
-      },
-    },
-  };
+function ready(object = O) {
+  return { viewId: VIEW, components: { part: readyRow(P, object) } };
 }
 
-test("surface resolution forwards frozen pins and validates a ready CAS ticket", async (t) => {
+test("surface resolution forwards frozen pins and answers each component with its part's row", async (t) => {
   const original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });
   let request;
@@ -53,28 +48,25 @@ test("surface resolution forwards frozen pins and validates a ready CAS ticket",
     request = { url, options, body: JSON.parse(options.body) };
     return json(ready());
   };
-  const result = await resolveSurfaceComponents(descriptor, [{
-    cid: "part", surfaceInput: D, surfaceObject: O,
-  }]);
-  assert.deepEqual(result.get("part"), {
-    surfaceInput: D, surfaceObject: O,
-    surfUrl: `/__cad/store?tree=${TREE}&surfaceInput=${D}&object=${O}`,
-    byteLength: 1234,
-    selectorsObject: S,
-    selectorsUrl: `/__cad/store?tree=${TREE}&surfaceInput=${D}&object=${S}`,
-    selectorsByteLength: 99,
-  });
-  // A ready row without its table, or with one bound to another input, is no ticket.
-  for (const broken of [{ selectors: undefined }, { selectors: selectors("f".repeat(64)) }, { selectors: { ...selectors(D), byteLength: 0 } }]) {
-    globalThis.fetch = async () => json({ ...ready(), components: { part: { ...ready().components.part, ...broken } } });
-    await assert.rejects(resolveSurfaceComponents(descriptor, [{ cid: "part", surfaceInput: D }]), /selector table/);
+  const result = await resolveSurfaceComponents(descriptor, [{ cid: "part", part: P }]);
+  assert.deepEqual(result.get("part"), { part: P, ...record() });
+  assert.ok(Object.isFrozen(result.get("part")));
+  // A ready row whose record is not a whole part record is no ticket.
+  const broken = [undefined, { glb: record().glb }, { ...record(), schemaVersion: 1 },
+    { ...record(), glb: { ...record().glb, decodedBytes: 1 } },
+    { ...record(), selectors: { ...record().selectors, byteLength: 0 } }];
+  for (const value of broken) {
+    globalThis.fetch = async () => json({ ...ready(), components: { part: { ...readyRow(), record: value } } });
+    await assert.rejects(resolveSurfaceComponents(descriptor, [{ cid: "part", part: P }]), /no valid part record/);
   }
   assert.equal(request.url, "/__cad/surfaces");
   assert.equal(request.options.headers["x-cadgen-viewer"], "1");
   assert.deepEqual(request.body, {
     tree: TREE, viewId: VIEW, producer: descriptor.surfaceProducer,
-    components: [{ cid: "part", surfaceInput: D, expectedSurfaceObject: O }],
+    components: [{ cid: "part", part: P }],
   });
+  // A component is asked for by the part its view pins, and nothing else is one.
+  await assert.rejects(resolveSurfaceComponents(descriptor, [{ cid: "part", part: "d".repeat(64) }]), /must be a part key/);
 });
 
 test("pending resolution polls the same request and subscriber token", async (t) => {
@@ -85,11 +77,11 @@ test("pending resolution polls the same request and subscriber token", async (t)
     bodies.push(JSON.parse(options.body));
     return bodies.length === 1 ? json({
       viewId: VIEW, job: "job-1",
-      components: { part: { surfaceInput: D, state: "pending", job: "job-1" } },
+      components: { part: { part: P, state: "pending", job: "job-1" } },
     }) : json(ready());
   };
-  const result = await resolveSurfaceComponents(descriptor, [{ cid: "part", surfaceInput: D }]);
-  assert.equal(result.get("part").surfaceObject, O);
+  const result = await resolveSurfaceComponents(descriptor, [{ cid: "part", part: P }]);
+  assert.equal(result.get("part").glb.object, O);
   assert.equal(bodies.length, 2);
   assert.equal(bodies[1].job, "job-1");
   assert.deepEqual(bodies[1].components, bodies[0].components);
@@ -98,21 +90,19 @@ test("pending resolution polls the same request and subscriber token", async (t)
 test("a row ready before the rest of its request is announced at once, and once", async (t) => {
   const original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });
-  const D2 = "f".repeat(64), O2 = "9".repeat(64);
-  const row = (surfaceInput, object) => ({ surfaceInput, state: "ready", surfaceObject: object,
-    url: `/__cad/store?tree=${TREE}&surfaceInput=${surfaceInput}&object=${object}`, byteLength: 10, selectors: selectors(surfaceInput) });
+  const P2 = `${"f".repeat(64)}-v1`, O2 = "9".repeat(64);
   let polls = 0;
   globalThis.fetch = async () => {
     polls += 1;
     return json({ viewId: VIEW, job: "job-2", components: {
-      part: row(D, O),
-      other: polls === 1 ? { surfaceInput: D2, state: "pending", job: "job-2" } : row(D2, O2),
+      part: readyRow(P, O),
+      other: polls === 1 ? { part: P2, state: "pending", job: "job-2" } : readyRow(P2, O2),
     } });
   };
   const announced = [];
   const deriving = [];
-  const result = await resolveSurfaceComponents(descriptor, [{ cid: "part", surfaceInput: D }, { cid: "other", surfaceInput: D2 }],
-    { onReady: (cid, ticket) => announced.push([cid, polls, ticket.surfaceObject]), onPending: (cid) => deriving.push([cid, polls]) });
+  const result = await resolveSurfaceComponents(descriptor, [{ cid: "part", part: P }, { cid: "other", part: P2 }],
+    { onReady: (cid, ticket) => announced.push([cid, polls, ticket.glb.object]), onPending: (cid) => deriving.push([cid, polls]) });
   assert.deepEqual(announced, [["part", 1, O], ["other", 2, O2]]);
   assert.deepEqual(deriving, [["other", 1]], "the one cadgen was still deriving, while it was");
   assert.equal(result.size, 2);
@@ -123,19 +113,17 @@ test("a row ready before the rest of its request is announced at once, and once"
 test("a failed component fails alone, with its own error, and the request goes on for the rest", async (t) => {
   const original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });
-  const D2 = "f".repeat(64), D3 = "7".repeat(64), O2 = "9".repeat(64);
-  const row = (surfaceInput, object) => ({ surfaceInput, state: "ready", surfaceObject: object,
-    url: `/__cad/store?tree=${TREE}&surfaceInput=${surfaceInput}&object=${object}`, byteLength: 10, selectors: selectors(surfaceInput) });
+  const P2 = `${"f".repeat(64)}-v1`, P3 = `${"7".repeat(64)}-v1`, O2 = "9".repeat(64);
   let polls = 0;
   globalThis.fetch = async () => {
     polls += 1;
     return json({ viewId: VIEW, job: "job-3", components: {
-      bad: { surfaceInput: D3, state: "failed", error: "component bad: OCCT did not mesh 1 face(s)", code: "mesh" },
-      part: row(D, O),
-      other: polls === 1 ? { surfaceInput: D2, state: "pending", job: "job-3" } : row(D2, O2),
+      bad: { part: P3, state: "failed", error: "component bad: OCCT did not mesh 1 face(s)", code: "mesh" },
+      part: readyRow(P, O),
+      other: polls === 1 ? { part: P2, state: "pending", job: "job-3" } : readyRow(P2, O2),
     } });
   };
-  const requests = [{ cid: "bad", surfaceInput: D3 }, { cid: "part", surfaceInput: D }, { cid: "other", surfaceInput: D2 }];
+  const requests = [{ cid: "bad", part: P3 }, { cid: "part", part: P }, { cid: "other", part: P2 }];
   const announced = [];
   const failures = [];
   const result = await resolveSurfaceComponents(descriptor, requests, {
@@ -182,10 +170,10 @@ test("abort detaches only the known surface subscriber", async (t) => {
     if (calls.length === 2) sawFirstPoll();
     return json({
       viewId: VIEW, job: "job-cancel",
-      components: { part: { surfaceInput: D, state: "pending", job: "job-cancel" } },
+      components: { part: { part: P, state: "pending", job: "job-cancel" } },
     });
   };
-  const pending = resolveSurfaceComponents(descriptor, [{ cid: "part", surfaceInput: D }], {
+  const pending = resolveSurfaceComponents(descriptor, [{ cid: "part", part: P }], {
     signal: controller.signal,
   });
   // The job id only exists once the first poll has answered (an abort before that waits
@@ -210,12 +198,12 @@ test("an abort while the first post is in flight cancels the job its answer open
     // As fetch does: an abort rejects a request in flight.
     requestSurfaces: (_body, { signal } = {}) => new Promise((resolve, reject) => {
       signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
-      answer = () => resolve({ viewId: VIEW, components: { part: { surfaceInput: D, state: "pending", job: "job-early" } } });
+      answer = () => resolve({ viewId: VIEW, components: { part: { part: P, state: "pending", job: "job-early" } } });
       posted();
     }),
     cancelSurfaceRequest: async (body) => { cancels.push(body); },
   };
-  const pending = resolveSurfaceComponents(descriptor, [{ cid: "part", surfaceInput: D }], { client, signal: controller.signal });
+  const pending = resolveSurfaceComponents(descriptor, [{ cid: "part", part: P }], { client, signal: controller.signal });
   await firstPost;
   controller.abort();
   answer();
@@ -228,44 +216,41 @@ test("failed, replacement and mismatched ready responses never produce tickets",
   t.after(() => { globalThis.fetch = original; });
   globalThis.fetch = async () => json({
     viewId: VIEW,
-    components: { part: { surfaceInput: D, state: "failed", error: "bad face", code: "extract" } },
+    components: { part: { part: P, state: "failed", error: "bad face", code: "extract" } },
   });
   await assert.rejects(
-    resolveSurfaceComponents(descriptor, [{ cid: "part", surfaceInput: D }]),
+    resolveSurfaceComponents(descriptor, [{ cid: "part", part: P }]),
     (error) => error instanceof SurfaceResolutionError && error.code === "extract",
   );
   const replacementView = {
     ...descriptor,
     viewId: "f".repeat(64),
     surfaceProducer: { ...descriptor.surfaceProducer, producerKey: "9".repeat(64) },
-    components: { part: { surfaceInput: "8".repeat(64) } },
+    components: { part: { part: `${"8".repeat(64)}-v1` } },
   };
   globalThis.fetch = async () => json({ ...ready(), replacementView });
   await assert.rejects(
-    resolveSurfaceComponents(descriptor, [{ cid: "part", surfaceInput: D }]),
+    resolveSurfaceComponents(descriptor, [{ cid: "part", part: P }]),
     (error) => error instanceof SurfaceResolutionError && error.code === "replacement-view"
       && error.replacementView.viewId === replacementView.viewId,
   );
-  globalThis.fetch = async () => json({
-    ...ready(), components: { part: { ...ready().components.part, surfaceObject: "0".repeat(64) } },
-  });
-  await assert.rejects(
-    resolveSurfaceComponents(descriptor, [{ cid: "part", surfaceInput: D, surfaceObject: O }]),
-    /invalid immutable URL|changed the pinned object/,
-  );
+  // A ready row for another part is not this component's.
+  globalThis.fetch = async () => json({ ...ready(), components: { part: readyRow(`${"0".repeat(64)}-v1`) } });
+  await assert.rejects(resolveSurfaceComponents(descriptor, [{ cid: "part", part: P }]), /omitted part/);
 });
 
-test("independent renderer clients bind surface tickets to their own backend origins", async () => {
+test("independent renderer clients each ask their own backend", async () => {
   const calls = [];
-  const clients = ["http://127.0.0.1:4101", "http://127.0.0.1:4102"].map(origin => ({
+  const objects = ["1".repeat(64), "2".repeat(64)];
+  const clients = ["http://127.0.0.1:4101", "http://127.0.0.1:4102"].map((origin, index) => ({
     origin,
-    requestSurfaces: async (body, options) => { calls.push({ origin, body, signal: options.signal }); return ready(); },
+    requestSurfaces: async (body, options) => { calls.push({ origin, body, signal: options.signal }); return ready(objects[index]); },
   }));
   const controller = new AbortController();
-  const results = await Promise.all(clients.map(client => resolveSurfaceComponents(descriptor, [{ cid: "part", surfaceInput: D }], { client, signal: controller.signal })));
-  assert.equal(calls.length, 2);
+  const results = await Promise.all(clients.map(client => resolveSurfaceComponents(descriptor, [{ cid: "part", part: P }], { client, signal: controller.signal })));
+  assert.deepEqual(calls.map(({ origin }) => origin), clients.map(({ origin }) => origin));
   for (let i=0; i<2; i++) {
-    assert.equal(new URL(results[i].get("part").surfUrl).origin, clients[i].origin);
+    assert.equal(results[i].get("part").glb.object, objects[i], "each answer is its own backend's");
     // A first post is never aborted in flight (its answer carries the token a cancel needs).
     assert.equal(calls[i].signal, undefined);
     assert.equal(calls[i].body.viewId, VIEW);
@@ -282,12 +267,9 @@ test("a request for more components than one POST may name is sent in chunks of 
     if (body.components.length < 1 || body.components.length > 64) {
       return json({ error: "surface request must name between 1 and 64 components" }, 400);
     }
-    return json({ viewId: VIEW, components: Object.fromEntries(body.components.map(({ cid }) => [cid, {
-      surfaceInput: D, state: "ready", surfaceObject: O,
-      url: `/__cad/store?tree=${TREE}&surfaceInput=${D}&object=${O}`, byteLength: 10, selectors: selectors(D),
-    }])) });
+    return json({ viewId: VIEW, components: Object.fromEntries(body.components.map(({ cid }) => [cid, readyRow()])) });
   };
-  const requests = Array.from({ length: 150 }, (_, index) => ({ cid: `part${index}`, surfaceInput: D, surfaceObject: O }));
+  const requests = Array.from({ length: 150 }, (_, index) => ({ cid: `part${index}`, part: P }));
   const result = await resolveSurfaceComponents(descriptor, requests);
   assert.deepEqual(bodies.map((body) => body.components.length), [64, 64, 22]);
   assert.deepEqual([...result.keys()], requests.map(({ cid }) => cid));
@@ -300,10 +282,10 @@ test("a failing chunk fails the whole request with its own error", async (t) => 
   globalThis.fetch = async (url, options) => {
     const body = JSON.parse(options.body);
     return json({ viewId: VIEW, components: Object.fromEntries(body.components.map(({ cid }) => [cid, cid === "part70"
-      ? { surfaceInput: D, state: "failed", error: "bad face", code: "extract" }
-      : { surfaceInput: D, state: "ready", surfaceObject: O, url: `/__cad/store?tree=${TREE}&surfaceInput=${D}&object=${O}`, byteLength: 10, selectors: selectors(D) }])) });
+      ? { part: P, state: "failed", error: "bad face", code: "extract" }
+      : readyRow()])) });
   };
-  const requests = Array.from({ length: 100 }, (_, index) => ({ cid: `part${index}`, surfaceInput: D, surfaceObject: O }));
+  const requests = Array.from({ length: 100 }, (_, index) => ({ cid: `part${index}`, part: P }));
   await assert.rejects(resolveSurfaceComponents(descriptor, requests), (error) => error instanceof SurfaceResolutionError && error.cid === "part70");
 });
 
@@ -317,12 +299,12 @@ test("a derivation pending for two minutes is asked at a tenth of its wait, at m
     origin: "",
     async requestSurfaces() {
       asks.push(Date.now());
-      return { viewId: VIEW, job: "job-1", components: { part: { surfaceInput: D, state: "pending", job: "job-1" } } };
+      return { viewId: VIEW, job: "job-1", components: { part: { part: P, state: "pending", job: "job-1" } } };
     },
     async cancelSurfaceRequest() { return {}; },
   };
   const controller = new AbortController();
-  const settled = resolveWithClient(descriptor, [{ cid: "part", surfaceInput: D }], { client, signal: controller.signal })
+  const settled = resolveWithClient(descriptor, [{ cid: "part", part: P }], { client, signal: controller.signal })
     .catch((error) => error);
   while (Date.now() < 120_000) {
     await new Promise((resolve) => setImmediate(resolve)); // the answer lands and the next wait starts

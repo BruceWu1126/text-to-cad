@@ -2,12 +2,11 @@ import { createHttpCadResourceProvider } from "../client/resources.js";
 import {
   buildComposedPackageMeshData
 } from "../lib/assembly/meshData.js";
-import { buildMeshDataFromSurf } from "../lib/surf/surfMeshData.js";
+import { buildComponentMeshData } from "../lib/surf/surfMeshData.js";
 import { validateSnapshotRenderJob } from "./snapshotJobValidation.js";
 import {
   TESS_PROBE_MAX_KEYS,
   decodeComponentTessellation,
-  surfIndexFromCacheEntry,
   tessBatchMaxBytes,
 } from "../lib/surf/tessellationCache.js";
 import {
@@ -162,21 +161,7 @@ async function fetchComponentMeshBuffer(url, cid, options) {
   throw new Error(`Failed to load component mesh ${cid}: HTTP ${lastStatus}${hint}`);
 }
 
-// The tolerances a resolved STEP job's components are drawn at: cadgen's display
-// tolerance (cadgen.tessellation_policy), both named in the job.
-// A static package (the docs hero) ships one mesh per component beside its tree and
-// names none: each file is drawn at the tessellation cadgen exported it at.
-function resolvedTessellation(resolved) {
-  const tessellation = isObject(resolved?.tessellation) ? resolved.tessellation : null;
-  if (!tessellation) return null;
-  const { chordTolerance, angleTolerance } = tessellation;
-  if (![chordTolerance, angleTolerance].every((value) => typeof value === "number" && value > 0 && Number.isFinite(value))) {
-    throw new Error(`resolved.tessellation must name a positive chordTolerance and angleTolerance; got ${JSON.stringify(tessellation)}`);
-  }
-  return { chordTolerance, angleTolerance };
-}
-
-async function loadPackageMeshData(packageInfo, tessellation = null, diagnostics = null, tessellationCache = null, options = {}) {
+async function loadPackageMeshData(packageInfo, diagnostics = null, tessellationCache = null, options = {}) {
   const measure = (name, started) => {
     if (diagnostics) diagnostics[name] = (diagnostics[name] || 0) + performance.now() - started;
   };
@@ -192,19 +177,12 @@ async function loadPackageMeshData(packageInfo, tessellation = null, diagnostics
   const components = isObject(descriptor.components) ? descriptor.components : {};
   const componentMeshDataByCid = {};
   const cids = Object.keys(components);
-  const inputOf = (cid) => String(components[cid]?.surfaceInput || "");
+  // Each component names its part: the key its display mesh is read by.
+  const partOf = (cid) => String(components[cid]?.part || "");
   if (diagnostics) diagnostics.componentCount = cids.length;
   const probeStarted = performance.now();
-  if (tessellationCache && !tessellation) {
-    throw new Error("a package drawn from cadgen's mesh store names the tessellation to draw (resolved.tessellation)");
-  }
-  const probes = await tessellationCache?.probeCachedTessellationEntries(cids.map(inputOf), tessellation) || new Map();
+  const probes = await tessellationCache?.probeCachedTessellationEntries(cids.map(partOf)) || new Map();
   measure("probeMs", probeStarted);
-  const usable = (cid) => {
-    const probe = probes.get(inputOf(cid));
-    const surfaceObject = String(components[cid]?.surfaceObject || "");
-    return probe && (!surfaceObject || probe.surfaceObject === surfaceObject) ? probe : null;
-  };
   const misses = [];
 
   // Probe metadata is tiny. Full bodies are fetched only in admitted TESB
@@ -223,15 +201,15 @@ async function loadPackageMeshData(packageInfo, tessellation = null, diagnostics
     framedBytes = 12;
   };
   for (const cid of cids) {
-    const probe = usable(cid);
+    const probe = probes.get(partOf(cid));
     if (!probe) {
       misses.push(cid);
       continue;
     }
-    const entryBytes = 4 + ((probe.byteLength + 3) & ~3);
+    const entryBytes = 4 + ((probe.glb.byteLength + 3) & ~3);
     if (group.length >= TESS_PROBE_MAX_KEYS
       || (group.length && framedBytes + entryBytes > batchMaxBytes)) flush();
-    group.push({ cid, surfaceInput: inputOf(cid), probe });
+    group.push({ cid, part: probe.part, probe });
     framedBytes += entryBytes;
     if (framedBytes >= batchMaxBytes || entryBytes + 12 > batchMaxBytes) flush();
   }
@@ -241,21 +219,16 @@ async function loadPackageMeshData(packageInfo, tessellation = null, diagnostics
   let cacheHits = 0;
   // Components the store named a mesh for whose body could not be read, even alone.
   const unreadable = new Set();
-  const decodeEntry = (entry, bytes) => decodeComponentTessellation(bytes, {
-    surfaceInput: entry.surfaceInput,
-    surfaceObject: entry.probe.surfaceObject,
-    tessellationInput: entry.probe.tessellationInput,
-    tessellation,
-  });
+  const decodeEntry = (entry, bytes) => decodeComponentTessellation(bytes, { part: entry.part });
   for (const entries of groups) {
     const readStarted = performance.now();
     let bodies;
-    if (entries.length === 1 && entries[0].probe.byteLength + 16 > batchMaxBytes) {
+    if (entries.length === 1 && entries[0].probe.glb.byteLength + 16 > batchMaxBytes) {
       const entry = entries[0];
-      bodies = [await tessellationCache?.getCachedEntryBytes(entry.surfaceInput, tessellation, { probe: entry.probe })];
+      bodies = [await tessellationCache?.getCachedEntryBytes(entry.part, { probe: entry.probe })];
     } else {
       const maxBytes = 12 + entries.reduce(
-        (sum, entry) => sum + 4 + ((entry.probe.byteLength + 3) & ~3),
+        (sum, entry) => sum + 4 + ((entry.probe.glb.byteLength + 3) & ~3),
         0,
       );
       bodies = await tessellationCache?.getCachedEntryBytesMany(entries.map((entry) => entry.probe), { maxBytes });
@@ -270,7 +243,7 @@ async function loadPackageMeshData(packageInfo, tessellation = null, diagnostics
         // The store named this mesh: a body that did not come back is read again, alone, before
         // the component is a miss (a batch can fail as a whole where its entries would not).
         const rereadStarted = performance.now();
-        const body = await tessellationCache?.getCachedEntryBytes(entry.surfaceInput, tessellation, { probe: entry.probe });
+        const body = await tessellationCache?.getCachedEntryBytes(entry.part, { probe: entry.probe });
         measure("cacheReadMs", rereadStarted);
         decoded = decodeEntry(entry, body);
       }
@@ -281,7 +254,7 @@ async function loadPackageMeshData(packageInfo, tessellation = null, diagnostics
       }
       cacheHits += 1;
       const meshStarted = performance.now();
-      componentMeshDataByCid[entry.cid] = buildMeshDataFromSurf(surfIndexFromCacheEntry(decoded), decoded.component);
+      componentMeshDataByCid[entry.cid] = buildComponentMeshData(decoded.component);
       measure("meshBuildMs", meshStarted);
     }
   }
@@ -296,21 +269,18 @@ async function loadPackageMeshData(packageInfo, tessellation = null, diagnostics
     const url = String(meshUrls[cid] || "").trim();
     if (!url) {
       throw new Error(unreadable.has(cid)
-        ? `Assembly package component ${cid}: the store holds its mesh at this tessellation, but it could not be read`
-        : `Assembly package component ${cid} has no mesh at this tessellation; cadgen meshes every component before a page draws it`);
+        ? `Assembly package component ${cid}: the store holds its mesh, but it could not be read`
+        : `Assembly package component ${cid} has no mesh; cadgen meshes every component before a page draws it`);
     }
     const readStarted = performance.now();
     const bytes = new Uint8Array(await fetchComponentMeshBuffer(url, cid, options));
     measure("meshReadMs", readStarted);
-    const surfaceObject = String(components[cid]?.surfaceObject || "");
-    const decoded = decodeComponentTessellation(bytes, {
-      surfaceInput: inputOf(cid), ...(surfaceObject ? { surfaceObject } : {}), ...(tessellation ? { tessellation } : {}),
-    });
+    const decoded = decodeComponentTessellation(bytes, { part: partOf(cid) });
     if (!decoded) {
-      throw new Error(`Assembly package component ${cid}: ${url} is not its mesh at this tessellation`);
+      throw new Error(`Assembly package component ${cid}: ${url} is not its part's mesh`);
     }
     const meshStarted = performance.now();
-    componentMeshDataByCid[cid] = buildMeshDataFromSurf(surfIndexFromCacheEntry(decoded), decoded.component);
+    componentMeshDataByCid[cid] = buildComponentMeshData(decoded.component);
     measure("meshBuildMs", meshStarted);
   };
   const POOL = 6;
@@ -351,13 +321,12 @@ function stepPose(kind, articulation, controls) {
 }
 
 // A render package served off a plain static host (a docs site, a CDN): no
-// backend resolves component URLs or meshes there, but the descriptor already
-// names every component's surf path relative to the package directory, and
-// each component's mesh ships beside it as `<cid>.glb` (its stored GLB body at
-// the tessellation the page draws, written by cadgen). This maps that layout to a
-// loadSource package input. The caller fetches `${baseUrl}/assembly.json`
-// itself (it may want to cache or inline it) and spreads extra fields
-// (articulation, controls, sourceAnimation, cadPath) into the returned object.
+// backend resolves meshes there, but the descriptor names every component's
+// display mesh (`glb`: its part's stored GLB body, written by cadgen) relative to
+// the package directory. This maps that layout to a loadSource package input.
+// The caller fetches `${baseUrl}/assembly.json` itself (it may want to cache or
+// inline it) and spreads extra fields (articulation, controls, sourceAnimation,
+// cadPath) into the returned object.
 export function packageSourceFromBaseUrl(baseUrl, descriptor) {
   const base = String(baseUrl || "").replace(/\/+$/, "");
   if (!base) {
@@ -367,17 +336,15 @@ export function packageSourceFromBaseUrl(baseUrl, descriptor) {
   if (!components) {
     throw new Error(`Tree at ${base}/assembly.json has no components`);
   }
-  const componentUrls = {};
   const meshUrls = {};
   for (const [cid, entry] of Object.entries(components)) {
-    const surf = String(entry?.surf || "").trim();
-    if (!surf) {
-      throw new Error(`Render package component ${cid} declares no surf path`);
+    const glb = String(entry?.glb || "").trim();
+    if (!glb) {
+      throw new Error(`Render package component ${cid} declares no glb path`);
     }
-    componentUrls[cid] = `${base}/${surf}`;
-    meshUrls[cid] = `${base}/${surf.replace(/\.surf$/, "")}.glb`;
+    meshUrls[cid] = `${base}/${glb}`;
   }
-  return { kind: "step", package: { descriptor, componentUrls, meshUrls } };
+  return { kind: "step", package: { descriptor, meshUrls } };
 }
 
 export async function loadSource(input, options = {}) {
@@ -395,7 +362,6 @@ export async function loadSource(input, options = {}) {
   );
   refuseFamilySceneKind(rawKind);
   const kind = normalizeKind(rawKind);
-  const tessellation = resolvedTessellation(resolved);
   // What the document's sidecar means, resolved by cadgen: the articulation and the
   // control vector to pose it at, and the baked animation (`resolved.animation` in a job,
   // whose own top-level `animation` is the frame REQUEST; `sourceAnimation` for a direct
@@ -417,7 +383,7 @@ export async function loadSource(input, options = {}) {
   );
   if (!meshData && packageInfo) {
     const diagnostics = options.stageTimings ? {} : null;
-    meshData = await loadPackageMeshData(packageInfo, tessellation, diagnostics, options.tessellationCache, options);
+    meshData = await loadPackageMeshData(packageInfo, diagnostics, options.tessellationCache, options);
     if (diagnostics) options.stageTimings.sourceLoad = diagnostics;
     const packageSelectorRuntime = inputObject.selectorRuntime || options.selectorRuntime || null;
     return {

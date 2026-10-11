@@ -24,7 +24,7 @@ function abortError() {
 
 // The TESB container: a 12-byte header, then per entry a u32 length and its 4-byte-padded bytes.
 const BATCH_HEADER_BYTES = 12;
-const framedEntryBytes = row => 4 + ((Number(row.byteLength) + 3) & ~3);
+const framedEntryBytes = row => 4 + ((Number(row.glb.byteLength) + 3) & ~3);
 
 /**
  * The ceilings of the `index`th batch: the first publish's, doubling up to the server's bounds.
@@ -140,7 +140,7 @@ export function createTessellationBodyBatches({
     const held = batchOf.get(cid);
     if (!held) return null;
     const { batch, member } = held;
-    if (member.row.object !== row.object) { retire(batch, member); return null; }
+    if (member.row.glb.object !== row.glb.object) { retire(batch, member); return null; }
     let entries;
     try {
       entries = await batch.read;
@@ -176,11 +176,11 @@ export function createTessellationBodyBatches({
 }
 
 /**
- * Exact SURF tickets for a package's cold components, resolved up to `maxComponents` to a
+ * The part rows of a package's cold components, resolved up to `maxComponents` to a
  * `POST /__cad/surfaces` in load order where each lane asked for its own.
  *
- * `needs(cid)` is the component when it must be resolved, false when it need not be (it is warm,
- * or carries its surface), undefined while that is not known yet. The first `alone` components to
+ * `needs(cid)` is the component when it must be resolved, false when it need not be (its part is
+ * stored), undefined while that is not known yet. The first `alone` components to
  * resolve go one to a request, as their lanes asked before, so the derivations the first geometry
  * waits on still run side by side; the rest go up to `maxComponents` to a request, with up to
  * `inFlight` requests out at once ahead of the lanes. A component's ticket is answered the moment
@@ -232,7 +232,7 @@ export function createSurfaceTicketBatches({
       considered = index;
       if (!component || waiting.has(cid)) continue;
       waiter(cid);
-      requested.push({ cid, surfaceInput: component.surfaceInput, surfaceObject: component.surfaceObject });
+      requested.push({ cid, part: component.part });
     }
     if (!requested.length) return false;
     assigned += requested.length;
@@ -296,7 +296,7 @@ export function createSurfaceTicketBatches({
       const entry = waiting.get(cid);
       if (entry) return entry.promise;
       // Not one this table knows to batch yet: asked alone, as before.
-      return Promise.resolve(resolve([{ cid, surfaceInput: component.surfaceInput, surfaceObject: component.surfaceObject }], { signal }))
+      return Promise.resolve(resolve([{ cid, part: component.part }], { signal }))
         .then((tickets) => {
           const ticket = tickets.get(cid);
           if (!ticket) throw new Error(`Surface response omitted ${cid}`);

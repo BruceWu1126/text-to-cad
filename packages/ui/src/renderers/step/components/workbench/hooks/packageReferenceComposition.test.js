@@ -10,8 +10,8 @@ import path from "node:path";
 import test from "node:test";
 import { createRequire } from "node:module";
 
-import { decodeComponentTessellation, surfIndexFromCacheEntry } from "@text-to-cad/core/lib/surf/tessellationCache.js";
-import { buildMeshDataFromSurf } from "@text-to-cad/core/lib/surf/surfMeshData.js";
+import { decodeComponentTessellation } from "@text-to-cad/core/lib/surf/tessellationCache.js";
+import { buildComponentMeshData } from "@text-to-cad/core/lib/surf/surfMeshData.js";
 import { joinSelectorTable, parseSelectorTable } from "@text-to-cad/core/lib/surf/selectorTable.js";
 import { buildGlbFaceIdsForPart, TOPOLOGY_FACE_ID_NONE } from "@text-to-cad/core/lib/viewer/selectorPickGroups.js";
 import { buildEdgeChainGraph } from "../../../workbench/edgeChainSelection.js";
@@ -33,7 +33,7 @@ function loadMesh() {
   const table = parseSelectorTable(fs.readFileSync(path.join(FIXTURES, "sun_gear.selectors.json"), "utf8"));
   const decoded = decodeComponentTessellation(new Uint8Array(fs.readFileSync(path.join(FIXTURES, "sun_gear.glb"))));
   return {
-    meshData: buildMeshDataFromSurf(surfIndexFromCacheEntry(decoded), decoded.component),
+    meshData: buildComponentMeshData(decoded.component),
     bundle: joinSelectorTable(table, decoded.component),
     component: decoded.component
   };

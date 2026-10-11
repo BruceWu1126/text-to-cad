@@ -335,11 +335,11 @@ test('a STEP opens in Select with the tools its sidecar earns, its Features in t
 test('a pick names its face or edge by the id cadgen minted in the selector table, and Group edges grows it to the table\'s chain', async () => {
   const view = await open();
   const { page, pane, at, errors } = view;
-  // The table the surface request served for the base, as cadgen stored it beside the surface:
-  // the ids a pick must answer with are its rows', joined to the mesh by ordinal, never the page's.
+  // The base part's selector table, as cadgen stored it beside its display mesh: the ids a pick
+  // must answer with are its rows', joined to the mesh by ordinal, never the page's.
   const fixture = await loadStepFixture();
   const base = fixture.view.occurrences.find(occurrence => occurrence.name === 'base');
-  const table = JSON.parse(fixture.surfaces.get(fixture.view.components[base.component].surfaceInput).selectors.bytes.toString());
+  const table = JSON.parse(fixture.surfaces.get(fixture.view.components[base.component].part).selectors.bytes.toString());
   const rows = (name, columns) => table[name].map(row => Object.fromEntries(table.tables[columns].map((column, index) => [column, row[index]])));
   const top = rows('faces', 'faceColumns').find(face => face.normal && face.normal[2] > 0.5);
   const edges = rows('edges', 'edgeColumns');
@@ -1444,7 +1444,7 @@ test('a warm package opens with a probe per chunk and its bodies in batches, and
   assert.equal(sent(/^POST \/one\/__tess_cache\/batch$/), 3, 'a read for each batch: eight, sixteen and the last one');
   assert.equal(sent(/^GET \/one\/__tess_cache\//), 0, 'no body read alone');
   assert.equal(sent(/\/__cad\/surfaces/), 0, 'no surface resolved');
-  assert.equal(sent(/^GET \/one\/__cad\/store\?tree=/), 0, 'no surface read');
+  assert.equal(sent(/^(GET|HEAD) \/one\/__cad\/store\?file=[^&]*\.surf(&|$)/), 0, 'no SURF read');
   assert.deepEqual(errors, []);
 });
 

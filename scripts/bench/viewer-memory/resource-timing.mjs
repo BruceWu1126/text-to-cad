@@ -32,6 +32,8 @@ export function collectViewerResourceTiming({ cutoffEpochMs } = {}) {
       route = 'tess-batch'; key = '';
     } else if (url.pathname.startsWith('/__tess_cache/') && url.pathname.endsWith('.glb')) {
       route = 'tess-entry'; key = url.pathname.slice('/__tess_cache/'.length);
+    } else if (url.pathname.startsWith('/__tess_cache/') && url.pathname.endsWith('.selectors.json')) {
+      route = 'tess-selectors'; key = url.pathname.slice('/__tess_cache/'.length);
     } else {
       const file = url.pathname === '/__cad/store' ? url.searchParams.get('file') : url.pathname;
       if (!file?.endsWith('.surf')) continue;

@@ -1,7 +1,7 @@
-// The worker pool decodes stored meshes: a request carries the component's mesh
-// bytes in (read on this thread, by the backend-prepared surface input and the
-// exact resolved surface object; URL spelling never participates), or fails as a
-// probe miss for its caller to answer by asking the host for that mesh.
+// The worker pool decodes stored meshes: a request carries its part's mesh bytes
+// in (read on this thread, by the part's key and the row its probe answered; URL
+// spelling never participates), or fails as a probe miss for its caller to answer
+// by asking the host for that part.
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -12,8 +12,7 @@ import {
   surfWorkerMemoryStats,
 } from "./surfWorkerClient.js";
 import { createTessellationCache, isTessellationCacheProbeMissError } from "./tessellationCache.js";
-import { encodeMeshFixture, probeRowFor } from "./__tests__/meshFixtures.js";
-import { TEST_DISPLAY_TESSELLATION } from "./testing.js";
+import { encodeMeshFixture, partRowFor, testPartKey } from "./__tests__/meshFixtures.js";
 
 let tessellationCache = createTessellationCache();
 function setTessellationCacheProvider(provider) {
@@ -21,18 +20,15 @@ function setTessellationCacheProvider(provider) {
   tessellationCache = createTessellationCache({ provider });
 }
 
-const CACHE_IDENTITY = {
-  surfaceInput: "d".repeat(64),
-  surfaceObject: "e".repeat(64),
-};
+const CACHE_IDENTITY = { part: testPartKey("d") };
 // One stored triangle: what a pool test's request carries when the test is not about reading it.
 const ENTRY = encodeMeshFixture({
   positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
   indices: new Uint32Array([0, 1, 2]),
   faceRanges: [{ ord: 1, color: null, indexStart: 0, indexCount: 3 }], edges: [],
-  bounds: { min: [0, 0, 0], max: [1, 1, 0] }, scale: Math.SQRT2,
+  bounds: { min: [0, 0, 0], max: [1, 1, 0] },
 }, CACHE_IDENTITY);
-const ROW = probeRowFor(ENTRY);
+const ROW = partRowFor(ENTRY);
 // A provider whose probe answers when the test says so, with the stored row (or none).
 function waitingProvider() {
   let answer;
@@ -42,10 +38,8 @@ function waitingProvider() {
   };
   return { provider, answer: (found = true) => answer(found) };
 }
-// Every request names the tolerances it reads: the display tolerance cadgen publishes.
-const STANDARD = TEST_DISPLAY_TESSELLATION;
 const loadSurfComponentInWorker = (url, options = {}) => loadWorker(url, {
-  tessellationCache, tessellation: STANDARD, ...options,
+  tessellationCache, ...options,
   identity: options.identity ?? { ...CACHE_IDENTITY, tessellationEntry: ENTRY.slice() },
 });
 
@@ -702,6 +696,7 @@ test("bytes a batched read already holds are posted without a read; otherwise th
     const posted = answer("http://x/held.surf");
     await held;
     assert.equal(posted.message.cachedEntry, entry);
+    assert.equal(posted.message.part, CACHE_IDENTITY.part, "the worker reads it as its part's mesh");
     assert.deepEqual(posted.transfer, [entry.buffer], "its own buffer travels to the worker");
     assert.deepEqual(reads, [], "a held body is not read again");
 
@@ -934,11 +929,10 @@ test('custom resource transfers begin only when a worker slot is reserved', asyn
   await Promise.all(pending);
 });
 
-// A part that opened from its stored mesh has no SURF URL until its surface is resolved, and a
-// selectors read with that empty URL fails first. That used to hand the
-// worker a ticket for "", which read the page's own address: in the CAD app, a cad_http GET of its
-// sandbox page, answered 404 (43 per hypercar open).
-test("selectors with no SURF URL fail as not ready, fetching no ticket", async (t) => {
+// A selectors read names its part's selector table; one with an empty URL (nothing names the table
+// yet) fails first. That used to hand the worker a ticket for "", which read the page's own
+// address: in the CAD app, a cad_http GET of its sandbox page, answered 404 (43 per hypercar open).
+test("selectors with no selector table URL fail as not ready, fetching no ticket", async (t) => {
   const created = [];
   class FakeWorker {
     constructor() { this.messages = []; created.push(this); }

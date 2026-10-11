@@ -6,15 +6,11 @@ export const MODELING_RECOGNITION_VERSION = 1;
 const MAX_ENTRIES = 512;
 const MAX_BYTES = 8 * 1024 * 1024;
 
-/** Recognition is component-local; occurrence placement and selection remain file-owned. */
-export function modelingRecognitionKey(identity, surfUrl, { resources, recognizerVersion = MODELING_RECOGNITION_VERSION } = {}) {
+/** Recognition is component-local, keyed by its part; occurrence placement and selection remain file-owned. */
+export function modelingRecognitionKey(component, { resources, recognizerVersion = MODELING_RECOGNITION_VERSION } = {}) {
+  if (!component?.part) return "";
   const scope = resources ? cadResourceCacheKey(resources, "") : "static";
-  if (identity?.surfaceInput && identity?.surfaceObject) {
-    return JSON.stringify([scope, recognizerVersion, "surface", identity.surfaceInput, identity.surfaceObject]);
-  }
-  if (!surfUrl) return "";
-  // Older static packages carry an immutable component URL instead of D/O.
-  return JSON.stringify([scope, recognizerVersion, "url", String(surfUrl)]);
+  return JSON.stringify([scope, recognizerVersion, component.part]);
 }
 
 /** Store JSON metadata only: no SURF arrays, mutable scene, worker or pending promise. */

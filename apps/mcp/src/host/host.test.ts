@@ -6,10 +6,8 @@ import { frameClipboard } from './clipboard';
 import { chatReach, createChatPromptContext } from './prompt';
 import { createServer, type SyncReply, type SyncRequest, type ViewEvent } from './server';
 import { createViewSync, LOST_AFTER, NEWS_MS, SYNC_MS } from './sync';
-import {
-  MESH_INDEX_SCHEMA, createHttpTessellationCacheProvider, tessellationPayloadFacts,
-} from '@text-to-cad/core/lib/surf/tessellationCache.js';
-import { encodeMeshFixture } from '@text-to-cad/core/lib/surf/testing.js';
+import { createHttpTessellationCacheProvider, partRow } from '@text-to-cad/core/lib/surf/tessellationCache.js';
+import { encodeMeshFixture, partMeshFacts, testPartKey } from '@text-to-cad/core/lib/surf/testing.js';
 import { createTunnelClient, createTunnelFetch, decodeBase64, TUNNEL_ORIGIN, TUNNEL_REPLY_MAX_BYTES } from './tunnel';
 
 /** A host frame: records what the page posts and answers with `respond`. */
@@ -302,6 +300,7 @@ describe('the fetch tunnel', () => {
   it('verifies a tessellation read in parts as a whole one: put together it is the body, and a damaged part makes it a miss', async () => {
     const vertices = 200_000;
     const triangles = 50_000;
+    const key = testPartKey('1');
     const bytes = encodeMeshFixture({
       positions: new Float32Array(3 * vertices).map((_, index) => index % 97),
       normals: new Float32Array(3 * vertices).fill(1),
@@ -309,14 +308,14 @@ describe('the fetch tunnel', () => {
       faceRanges: [{ ord: 1, indexStart: 0, indexCount: 3 * triangles }],
       edges: [],
       bounds: { min: [0, 0, 0], max: [96, 96, 96] },
-      scale: 166,
-    }, { surfaceInput: '1'.repeat(64), surfaceObject: 'a'.repeat(64) });
+    }, { part: key });
     expect(bytes.length).toBeGreaterThan(TUNNEL_REPLY_MAX_BYTES);
     const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('');
-    const row = { schemaVersion: MESH_INDEX_SCHEMA, object: digest, ...tessellationPayloadFacts(bytes) };
+    const row = partRow(key, { glb: { object: digest, ...partMeshFacts(bytes) },
+      selectors: { object: 'e'.repeat(64), byteLength: 2, faceCount: 1, edgeCount: 0, vertexCount: 0 } })!;
     const read = (parted: ReturnType<typeof servingInParts>) => createHttpTessellationCacheProvider({
       origin: TUNNEL_ORIGIN, fetch: createTunnelFetch(parted.server), maxBatchBytes: TUNNEL_REPLY_MAX_BYTES,
-    }).getProbed(row, { maxBytes: row.byteLength });
+    }).getProbed(row, { maxBytes: row.glb.byteLength });
     const whole = await read(servingInParts(bytes, { etag: () => `"${digest}"` }));
     expect(whole && same(whole, bytes)).toBe(true);
     const damaged = servingInParts(bytes, { etag: () => `"${digest}"`, alter: (part, first) => (first === TUNNEL_REPLY_MAX_BYTES ? part.map(value => value ^ 1) : part) });

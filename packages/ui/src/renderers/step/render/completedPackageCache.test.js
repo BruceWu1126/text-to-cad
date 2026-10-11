@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildComposedPackageMeshData } from "@text-to-cad/core/lib/assembly/meshData.js";
+import { partRow, tessellationDecodedBytes } from "@text-to-cad/core/lib/surf/tessellationCache.js";
 import { completedPackages, createCompletedPackageCache, renderAssetCacheStatsWithPackages } from "./completedPackageCache.js";
 import { renderMemoryAccounting } from "./renderMemoryAccounting.js";
 
 const root = { resources: {cacheKey: () => "test-service"} };
 const matrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+const COUNTS = { vertexCount: 3, indexCount: 3, faceCount: 1, edgeCount: 0, edgePointCount: 0 };
+// The row a component's mesh was drawn from: its part's record, as a probe or a derivation answers it.
+const rowFor = part => partRow(part, {
+  glb: { object: "a".repeat(64), byteLength: 1024, decodedBytes: tessellationDecodedBytes(COUNTS), ...COUNTS },
+  selectors: { object: "b".repeat(64), byteLength: 512, faceCount: 1, edgeCount: 3, vertexCount: 3 },
+});
+const partOf = index => `${index.toString(16).padStart(64, "0")}-v1`;
 function model(file = "assembly.step", count = 1) {
   const entry = { file, kind: "assembly", sourceFormat: "step", hash: `revision-${file}`,
     documentHash: "document", appearanceHash: "appearance", url: `http://cad.test/${file}/` };
@@ -13,11 +21,11 @@ function model(file = "assembly.step", count = 1) {
     assembly: { root: { id: "root", nodeType: "assembly", children: [] } } };
   const componentMeshDataByCid = {}, componentIdentityByCid = {};
   for (let i = 0; i < count; i++) {
-    const cid = `c${i}`, surfaceInput = i.toString(16).padStart(64, "0"), surfaceObject = "a".repeat(64);
-    descriptor.components[cid] = { surfaceInput };
+    const cid = `c${i}`, part = partOf(i);
+    descriptor.components[cid] = { part };
     descriptor.occurrences.push({ id: `o${i}`, name: cid, component: cid, transform: [...matrix], material: { roughness: 0.5 } });
     descriptor.assembly.root.children.push({ id: `o${i}`, nodeType: "part", children: [] });
-    componentIdentityByCid[cid] = { surfaceInput, surfaceObject, surfUrl: `http://cad.test/${cid}.surf` };
+    componentIdentityByCid[cid] = rowFor(part);
     componentMeshDataByCid[cid] = { vertices: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
       normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), indices: new Uint32Array([0, 1, 2]),
       bounds: { min: [0, 0, 0], max: [1, 1, 0] },
@@ -43,11 +51,11 @@ test("a 317-component working set survives component-LRU-sized churn with privat
   assert.equal(first.componentMeshDataByCid.c0.vertices, a.context.componentMeshDataByCid.c0.vertices);
   first.meshData.parts[0].material.roughness = 1;
   first.descriptor.occurrences[0].transform[3] = 42;
-  first.componentIdentityByCid.c0.surfUrl = "changed";
+  first.componentIdentityByCid.c0.part = "changed";
   const second = cache.get(root, a.entry);
   assert.equal(second.meshData.parts[0].material.roughness, 0.5);
   assert.equal(second.meshData.parts[0].transform[3], 0);
-  assert.equal(second.componentIdentityByCid.c0.surfUrl, "http://cad.test/c0.surf");
+  assert.equal(second.componentIdentityByCid.c0.part, partOf(0));
   assert.equal(cache.stats().entries, 2);
 });
 
@@ -64,8 +72,7 @@ test("service generation, revision, source appearance and replacement runtime vi
     assert.equal(cache.stats().entries, 0, "the obsolete revision is released");
   }
   for (const descriptor of [{ ...a.context.descriptor, viewId: "replacement" },
-    { ...a.context.descriptor, components: { c0: { surfaceInput: "b".repeat(64) } } },
-    { ...a.context.descriptor, components: { c0: { ...a.context.descriptor.components.c0, surfaceObject: "b".repeat(64) } } }]) {
+    { ...a.context.descriptor, components: { c0: { part: partOf(1) } } }]) {
     populate();
     assert.equal(cache.get(root, a.entry, { descriptor }), null);
   }
@@ -73,36 +80,6 @@ test("service generation, revision, source appearance and replacement runtime vi
   assert.equal(cache.set(anonymous, a.entry, a.context), true);
   assert.equal(cache.get({}, a.entry), null);
   assert.ok(cache.get(anonymous, a.entry));
-});
-
-test("recognition reads only private exact identities from the matching root, revision and runtime view", () => {
-  const cache = createCompletedPackageCache(), a = model("identities.step", 317);
-  const populate = () => assert.equal(cache.set(root, a.entry, a.context), true);
-  populate();
-  const before = cache.stats();
-  const identities = cache.peekComponentIdentities({ ...root }, a.entry, { descriptor: a.context.descriptor });
-  assert.equal(Object.keys(identities).length, 317);
-  assert.deepEqual(Object.keys(identities.c0).sort(), ["surfaceInput", "surfaceObject"]);
-  assert.deepEqual(identities.c0, { surfaceInput: "0".repeat(64), surfaceObject: "a".repeat(64) });
-  identities.c0.surfaceObject = "b".repeat(64);
-  delete identities.c1;
-  const again = cache.peekComponentIdentities(root, a.entry, { descriptor: a.context.descriptor });
-  assert.equal(again.c0.surfaceObject, "a".repeat(64));
-  assert.ok(again.c1);
-  assert.equal(cache.stats().bytes, before.bytes, "identity reads retain no geometry or metadata copies");
-  assert.equal(cache.peekComponentIdentities(root, a.entry), null, "a descriptor is required to prove the runtime view");
-  for (const client of [{ ...root, resources: {cacheKey: () => "other-service"} }]) {
-    assert.equal(cache.peekComponentIdentities(client, a.entry, { descriptor: a.context.descriptor }), null);
-  }
-  for (const change of [{ hash: "new" }, { documentHash: "new" }]) {
-    populate();
-    assert.equal(cache.peekComponentIdentities(root, { ...a.entry, ...change }, { descriptor: a.context.descriptor }), null);
-  }
-  for (const descriptor of [{ ...a.context.descriptor, viewId: "new-view" },
-    { ...a.context.descriptor, components: { ...a.context.descriptor.components, c0: { surfaceInput: "b".repeat(64) } } }]) {
-    populate();
-    assert.equal(cache.peekComponentIdentities(root, a.entry, { descriptor }), null);
-  }
 });
 
 test("only complete exact display publications are admitted; runtime objects are excluded", () => {
@@ -115,9 +92,13 @@ test("only complete exact display publications are admitted; runtime objects are
     { ...a.context, componentMeshDataByCid: {} }, { ...a.context, meshHash: "old" }]) {
     assert.equal(cache.set(root, a.entry, context), false);
   }
-  a.context.componentIdentityByCid.c0.surfaceObject = "invalid";
-  assert.equal(cache.set(root, a.entry, a.context), false);
-  a.context.componentIdentityByCid.c0.surfaceObject = "a".repeat(64);
+  // Every component is drawn from its own part's row, which names the mesh drawn.
+  const drawn = a.context.componentIdentityByCid.c0;
+  for (const row of [undefined, rowFor(partOf(1)), { ...drawn, glb: {} }]) {
+    a.context.componentIdentityByCid.c0 = row;
+    assert.equal(cache.set(root, a.entry, a.context), false);
+  }
+  a.context.componentIdentityByCid.c0 = drawn;
   a.context.controller = new AbortController();
   assert.equal(cache.set(root, a.entry, a.context), true);
   const result = cache.get(root, a.entry);

@@ -232,7 +232,7 @@ test('surface and preview requests are origin-bound, guarded and cancelled with 
     calls.push({ url, options });
     return json({ job: 'subscriber', feedCursor: 'next' });
   } });
-  const body = { tree: 'tree', components: [{ cid: 'one', surfaceInput: 'input' }] };
+  const body = { tree: 'tree', components: [{ cid: 'one', part: `${'1'.repeat(64)}-v1` }] };
   assert.equal((await client.requestSurfaces(body)).job, 'subscriber');
   await client.cancelSurfaceRequest({ job: 'subscriber' });
   await client.editingPreview('part.step', { after: 'cursor' });

@@ -1,10 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createCadClient } from './client.js';
-import { tessellationCacheKey } from '../lib/surf/tessellationCache.js';
 
-const surfaceInput = '11'.repeat(32);
-const tessellation = { chordTolerance: 2e-3, angleTolerance: 0.5 };
+const part = `${'11'.repeat(32)}-v1`;
 
 test('render sessions borrow the root client\'s mesh store: a view cancels its own reads, the root every read', async () => {
   const requests = [];
@@ -18,13 +16,13 @@ test('render sessions borrow the root client\'s mesh store: a view cancels its o
   try {
     const previous = client.createRenderSession({ file: 'previous.step' });
     const reopened = client.createRenderSession({ file: 'reopened.step' });
-    const oldRead = previous.tessellationCache.probeCachedTessellationEntries([surfaceInput], tessellation);
-    const currentRead = reopened.tessellationCache.probeCachedTessellationEntries([surfaceInput], tessellation);
+    const oldRead = previous.tessellationCache.probeCachedTessellationEntries([part]);
+    const currentRead = reopened.tessellationCache.probeCachedTessellationEntries([part]);
     assert.equal(requests.length, 2);
     for (const { url, options } of requests) {
       assert.equal(url, 'http://root-cache.test/__tess_cache/probe');
       assert.equal(options.headers['x-cadgen-viewer'], '1');
-      assert.deepEqual(JSON.parse(options.body), { tessellationInputs: [tessellationCacheKey(surfaceInput, tessellation)] });
+      assert.deepEqual(JSON.parse(options.body), { parts: [part] });
     }
     previous.dispose();
     assert.equal(previous.signal.aborted, true);
@@ -33,7 +31,7 @@ test('render sessions borrow the root client\'s mesh store: a view cancels its o
     requests[1].answer();
     assert.equal((await currentRead).size, 0);
 
-    const lastRead = reopened.tessellationCache.probeCachedTessellationEntries([surfaceInput], tessellation);
+    const lastRead = reopened.tessellationCache.probeCachedTessellationEntries([part]);
     const activeRead = requests[2].options.signal;
     client.dispose();
     assert.equal(activeRead.aborted, true, 'the root owns cancellation of every read');

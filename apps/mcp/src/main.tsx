@@ -1,7 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createCrashReporter, type CadPageCrash } from '@text-to-cad/core/client';
-import { installDisplayTessellation } from '@text-to-cad/core/lib/surf/displayTessellation.js';
 import { version } from '../package.json';
 import App from './App';
 import Notice from './Notice';
@@ -68,8 +67,6 @@ async function start() {
       root.render(<Notice title="CAD was updated" message="Close this tab and open CAD again to use the new version." details={`view ${PROTOCOL} · launch ${launch.protocol}${launch.version ? ` (${launch.version})` : ''}`} />);
       return;
     }
-    // The display tolerance is cadgen's: the launch says it, the page draws at it.
-    installDisplayTessellation(launch.tessellation);
     root.render(<StrictMode><App bridge={bridge} server={server} launch={launch} presentation={presentation} /></StrictMode>);
   } catch (error) {
     root.render(<Notice title="CAD could not open" message={error instanceof Error ? error.message : String(error)} details={`CAD ${version}`} />);

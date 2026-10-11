@@ -373,7 +373,6 @@ export function releaseSurfWorkerPoolWhenIdle() {
 export function loadSurfComponentInWorker(url, {
   signal,
   resources,
-  tessellation,
   identity,
   capabilities: rawCapabilities,
   memoryEstimateBytes,
@@ -391,13 +390,12 @@ export function loadSurfComponentInWorker(url, {
   }
   const id = nextRequestId;
   nextRequestId += 1;
-  // The mesh store lives on THIS thread's provider (a fetch against the host's
-  // /__tess_cache/ routes); the worker cannot reach it, so the entry's bytes
+  // The part store lives on THIS thread's provider (a fetch against the host's
+  // /__tess_cache/ routes); the worker cannot reach it, so the mesh's bytes
   // ride the request in, transferred. cadgen produces every mesh: one the
   // store does not hold is a probe miss, which the caller answers by asking
   // the host for it.
-  const surfaceInput = String(identity?.surfaceInput || "");
-  const surfaceObject = String(identity?.surfaceObject || "");
+  const part = String(identity?.part || "");
   // What a caller that reads a whole package's entries in batches hands in: the bytes it already
   // read and verified for this probe (`tessellationEntry`). Otherwise this request reads them.
   const readEntry = identity?.tessellationEntry instanceof Uint8Array ? identity.tessellationEntry : null;
@@ -427,7 +425,7 @@ export function loadSurfComponentInWorker(url, {
       poolGeneration,
       memoryEstimateBytes: normalizedMemoryEstimateBytes(memoryEstimateBytes),
       startedAt: perfStart(),
-      cid: surfaceInput,
+      cid: part,
       ready: false,
       slot: null,
       message: null,
@@ -452,8 +450,7 @@ export function loadSurfComponentInWorker(url, {
         url,
         ...(resource ? { resource } : {}),
         capabilities,
-        ...(tessellation ? { tessellation } : {}),
-        cacheIdentity: { surfaceInput, surfaceObject },
+        part,
         cachedEntry,
       };
       request.transfer = cachedEntry.buffer.byteLength === cachedEntry.byteLength
@@ -465,19 +462,17 @@ export function loadSurfComponentInWorker(url, {
     };
     const ready = cachedEntry => {
       if (!cachedEntry) { fail(new TessellationCacheProbeMissError(identity?.tessellationProbe || null)); return; }
-      // Drawing needs only the mesh; selectors also read the SURF's topology tables.
+      // Drawing needs only the mesh; selectors also read the part's selector table (`url`).
       if (!capabilities.selectors) { post(cachedEntry); return; }
-      // Nothing names this component's SURF yet (a part that opened warm, its topology asked for
-      // before its surface was resolved): fail as the inline path does, and the caller resolves one and asks again. A
-      // ticket for "" read the page's own address, which in the CAD app is a tunnelled 404.
-      if (!url) { fail(new Error("Exact SURF bytes are not ready for this component")); return; }
+      // A ticket for "" read the page's own address, which in the CAD app is a tunnelled 404.
+      if (!url) { fail(new Error("The selector table is not ready for this component")); return; }
       if (!resources) { post(cachedEntry, { kind: "url", url }); return; }
       post(cachedEntry, null, () => resources.workerTicket(url, { signal }));
     };
     if (readEntry) {
       ready(readEntry);
     } else if (tessellationCache) {
-      tessellationCache.getCachedEntryBytes(surfaceInput, tessellation, {
+      tessellationCache.getCachedEntryBytes(part, {
         signal,
         probe: identity?.tessellationProbe || null,
         strictProbe: true,

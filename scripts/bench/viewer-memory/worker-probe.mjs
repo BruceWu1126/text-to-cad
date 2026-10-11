@@ -39,7 +39,7 @@ export function installWorkerProbe() {
         if (requests.length >= 128) requests.shift();
         requests.push({ worker: this.__probeId, id: message.id, url: String(message.url),
           startedAt: performance.now(), capabilities: { ...message.capabilities },
-          tessellation: { ...message.tessellation }, cachedBytes: message.cachedEntry?.byteLength || 0 });
+          part: String(message.part || ''), cachedBytes: message.cachedEntry?.byteLength || 0 });
       }
       return super.postMessage(message, ...rest);
     }

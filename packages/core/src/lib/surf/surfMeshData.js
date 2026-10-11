@@ -8,7 +8,6 @@
 // per corner. CAD edges ride beside the triangles as indexed line segments
 // built from the same mesh's edge table and points.
 
-import { linearRgbToHex } from "../color.js";
 import { MESH_EDGE_CLASSES, MESH_TABLE_COLUMNS } from "./tessellationCache.js";
 
 // The line pass groups CAD edges by class so display.edges.classes styles each
@@ -95,9 +94,9 @@ export function buildCadEdgeLines(table, points) {
   return { positions, indices, classRanges };
 }
 
-// `index` is the component's SURF index, or the stand-in a mesh entry carries
-// (surfIndexFromCacheEntry): only its part colour is read here.
-export function buildMeshDataFromSurf(index, component) {
+// `component` is a decoded stored mesh (`decodeComponentTessellation(...).component`). It carries
+// no colour of its own: a part takes its occurrence's, and a face its own.
+export function buildComponentMeshData(component) {
   if (!component?.positions) throw new TypeError("Display data needs the component's mesh");
   const vertices = ownedArray(component.positions, Float32Array);
   const normals = ownedArray(component.normals, Float32Array);
@@ -113,10 +112,6 @@ export function buildMeshDataFromSurf(index, component) {
     max: [...component.bounds.max],
   };
 
-  // The surf's partColor is LINEAR RGBA (a build123d/OCCT Color), while
-  // `part.color` is the sRGB hex the viewer decodes with new THREE.Color.
-  const partColor = Array.isArray(index.partColor) ? index.partColor : null;
-  const color = partColor ? linearRgbToHex(partColor) : null;
   const part = {
     id: "surf:0",
     occurrenceId: "",
@@ -124,9 +119,9 @@ export function buildMeshDataFromSurf(index, component) {
     name: "",
     label: "",
     nodeType: "part",
-    color,
-    opacity: partColor && Number.isFinite(partColor[3]) ? partColor[3] : 1,
-    hasSourceColors: Boolean(color),
+    color: null,
+    opacity: 1,
+    hasSourceColors: false,
     bounds,
     vertexOffset: 0,
     vertexCount,
@@ -147,8 +142,8 @@ export function buildMeshDataFromSurf(index, component) {
     cadEdgeClassRanges: cadEdges.classRanges,
     bounds,
     parts: [part],
-    has_source_colors: Boolean(color),
-    sourceColor: color || "",
+    has_source_colors: false,
+    sourceColor: "",
     // The faces no mesher could cover, which this mesh does not draw: the viewer names the
     // parts drawn without them.
     unmeshedFaces: [...(component.unmeshedFaces || [])],

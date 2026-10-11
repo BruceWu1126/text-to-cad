@@ -1,37 +1,32 @@
-import { displayTessellation } from "@text-to-cad/core/lib/surf/displayTessellation.js";
 import { TESS_PROBE_MAX_KEYS } from "@text-to-cad/core/lib/surf/tessellationCache.js";
 
 // The first probe of a package covers the loader's first publish (`PROGRESSIVE_PUBLISH_FIRST_COMPONENTS`).
 export const INITIAL_PROBE_FIRST_CHUNK = 8;
 
-// Every component opens at, and stays at, its display mesh: its stored one when the store
-// holds it, else the one cadgen makes in the request that derives its surface.
+// Every component opens at, and stays at, its part's display mesh: the stored one when the store
+// holds it, else the one cadgen derives in the request that answers with its part's record.
 
 /**
- * The plan for a component whose display mesh the store holds (`cacheProbe`, its probe row): sized
- * by the stored body, and null when the row is another surface's or a body this load already found
- * missing. One too large to admit with the rest still loads, alone, as the loader admits an oversized
- * single component.
+ * The plan for a component whose part the store holds (`cacheProbe`, its row): sized by the stored
+ * mesh, and null when it is a mesh this load already found missing. One too large to admit with the
+ * rest still loads, alone, as the loader admits an oversized single component.
  */
-export function initialDisplayFromProbe(cacheProbe, {
-  surfaceObject, maxInFlightBytes, rejectedCacheObjects = new Set(),
-} = {}) {
-  if (!cacheProbe || (surfaceObject && surfaceObject !== cacheProbe.surfaceObject)) return null;
-  if (rejectedCacheObjects.has(cacheProbe.object)) return null;
+export function initialDisplayFromProbe(cacheProbe, { maxInFlightBytes, rejectedCacheObjects = new Set() } = {}) {
+  if (!cacheProbe || rejectedCacheObjects.has(cacheProbe.glb.object)) return null;
   const plan = storedMeshPlan(cacheProbe, "warm", maxInFlightBytes);
   return plan ? { cacheProbe, plan } : null;
 }
 
 /**
- * The plan for a component whose display mesh cadgen just produced (its surface request named the
- * display tolerance, and `mesh` is the probe row the request answered with), sized as a warm one is.
+ * The plan for a component whose part cadgen just derived (`row`, the record its request answered
+ * with), sized as a warm one is.
  */
-export function producedDisplayPlan(mesh, { maxInFlightBytes } = {}) {
-  return storedMeshPlan(mesh, "produced", maxInFlightBytes);
+export function producedDisplayPlan(row, { maxInFlightBytes } = {}) {
+  return storedMeshPlan(row, "produced", maxInFlightBytes);
 }
 
 function storedMeshPlan(row, reason, maxInFlightBytes) {
-  const estimatedBytes = Number(row?.byteLength) + Number(row?.decodedBytes);
+  const estimatedBytes = Number(row?.glb?.byteLength) + Number(row?.glb?.decodedBytes);
   if (!Number.isSafeInteger(estimatedBytes) || estimatedBytes <= 0) return null;
   return {
     estimatedBytes,
@@ -42,17 +37,17 @@ function storedMeshPlan(row, reason, maxInFlightBytes) {
 
 /** One component's warm plan, probed alone (a retry after a probed body went missing). */
 export async function probeInitialDisplay({
-  surfaceInput, surfaceObject, maxInFlightBytes, signal, tessellationCache,
+  part, maxInFlightBytes, signal, tessellationCache,
   rejectedCacheObjects = new Set(),
   probeEntries = (...args) => tessellationCache.probeCachedTessellationEntries(...args),
 }) {
-  const hits = await probeEntries([surfaceInput], displayTessellation(), { signal });
-  return initialDisplayFromProbe(hits.get(surfaceInput), { surfaceObject, maxInFlightBytes, rejectedCacheObjects });
+  const hits = await probeEntries([part], { signal });
+  return initialDisplayFromProbe(hits.get(part), { maxInFlightBytes, rejectedCacheObjects });
 }
 
 /**
  * A package's initial display plans, a chunk of components at a time in load order: one metadata
- * probe of the display meshes for the whole chunk. The rule is `probeInitialDisplay`'s; the
+ * probe of the parts for the whole chunk. The rule is `probeInitialDisplay`'s; the
  * requests are one per chunk where that made one per component. The first chunk is `firstChunk`
  * components (the loader's first publish) and each next one twice the last, up to `maxChunk`: a
  * server answers a probe a key at a time, so the first geometry waits on a probe of what it draws,
@@ -80,16 +75,15 @@ export function createInitialDisplayPlans({
   }
   const plans = new Map();
   const work = new Map();
-  const inputOf = component => String(component?.surfaceInput || "");
+  const partOf = component => String(component?.part || "");
   const planChunk = (index) => {
     if (!work.has(index)) {
       const planned = (async () => {
         const chunk = chunks[index];
-        const inputs = [...new Set(chunk.map(([, component]) => inputOf(component)))];
-        const hits = await probeEntries(inputs, displayTessellation(), { signal });
+        const parts = [...new Set(chunk.map(([, component]) => partOf(component)))];
+        const hits = await probeEntries(parts, { signal });
         for (const [cid, component] of chunk) {
-          plans.set(cid, initialDisplayFromProbe(hits.get(inputOf(component)),
-            { surfaceObject: component?.surfaceObject, maxInFlightBytes }));
+          plans.set(cid, initialDisplayFromProbe(hits.get(partOf(component)), { maxInFlightBytes }));
         }
       })();
       // Awaited by whoever asked; a chunk probed ahead fails quietly until somebody does.

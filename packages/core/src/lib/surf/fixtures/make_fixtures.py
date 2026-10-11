@@ -1,19 +1,16 @@
-"""Regenerate the surf/mesh test fixtures in this directory.
+"""Regenerate the part fixtures in this directory.
 
-Each fixture is one component as cadgen stores it: ``<name>.surf`` (its SURF:
-exact surfaces and the topology index) and ``<name>.glb`` (cadgen's OCCT mesh
-of it at the display tolerance), bound to each
-other by the SURF's digest and to a fixed test surface input
-(``sha256("cadgen-test-fixture:<name>")``, recorded in ``fixtures.json``).
-``<name>.selectors.json`` is the component's selector table as cadgen stores
-it beside the SURF (``cadgen._internal.selector_table``): what the page joins
-to the mesh, and the oracle every id and fact a JS test expects comes from.
-``displayTessellation.js`` is cadgen's display tolerance
-(``cadgen.tessellation_policy.DISPLAY_TESSELLATION``), which a JS test installs
-as a host installs the one its server publishes (``../testing.js``).
+Each fixture is one component's part as cadgen stores it: ``<name>.glb`` (cadgen's
+OCCT mesh of it at the display tolerance), naming a fixed test part key
+(``sha256("cadgen-test-fixture:<name>")`` at this cadgen's part version, recorded in
+``fixtures.json``), and ``<name>.selectors.json``, the component's selector table
+(``cadgen._internal.selector_table``): what the page joins to the mesh, and the
+oracle every id and fact a JS test expects comes from. Both are made as cadgen
+derives a part (``cadgen.store.parts``): the table from the component's SURF,
+extracted in memory, and the mesh from the table and the component's face colours.
 
 The shapes are built here, not read from ``models/``. Run from the repository
-root with the repo's Python whenever cadgen's SURF or mesh output changes:
+root with the repo's Python whenever cadgen's selector table or mesh output changes:
 
     .venv/bin/python packages/core/src/lib/surf/fixtures/make_fixtures.py
 """
@@ -26,7 +23,7 @@ from math import cos, sin, tau
 from pathlib import Path
 
 from build123d import (
-    Align, Axis, Box, BuildLine, BuildPart, BuildSketch, Circle, Color, Cylinder, Line, Location, Locations,
+    Align, Axis, Box, BuildLine, BuildPart, BuildSketch, Circle, Cylinder, Line, Location, Locations,
     Mode, Plane, Polygon, Pos, Rectangle, SlotOverall, Spline, extrude, fillet, loft, make_face, revolve,
 )
 
@@ -48,9 +45,7 @@ def sun_gear():
         extrude(amount=8.0)
         with Locations(Location((0, 0, -0.5))):
             Cylinder(5.0, 9.0, align=(Align.CENTER, Align.CENTER, Align.MIN), mode=Mode.SUBTRACT)
-    part = gear.part
-    part.color = Color(0.98, 0.62, 0.18, 1.0)
-    return part
+    return gear.part
 
 
 def cam_follower_roller():
@@ -59,9 +54,7 @@ def cam_follower_roller():
         Cylinder(16.0, 18.0, align=(Align.CENTER, Align.CENTER, Align.MIN))
         with Locations(Location((0, 0, -1))):
             Cylinder(6.0, 20.0, align=(Align.CENTER, Align.CENTER, Align.MIN), mode=Mode.SUBTRACT)
-    part = fillet(roller.part.edges().filter_by(lambda edge: edge.geom_type.name == "CIRCLE"), 1.8)
-    part.color = Color(0.60, 0.64, 0.67, 1.0)
-    return part
+    return fillet(roller.part.edges().filter_by(lambda edge: edge.geom_type.name == "CIRCLE"), 1.8)
 
 
 def mixed():
@@ -78,9 +71,7 @@ def mixed():
             make_face()
         revolve(axis=Axis.Z)
     lofted = loft([Plane.XY.offset(6) * Pos(10, 0) * Rectangle(10, 10), Plane.XY.offset(14) * Pos(10, 0) * Circle(3)])
-    part = body + Pos(10, 0, 0) * knob.part.moved(Location((-10, 0, 0))) + lofted
-    part.color = Color(0.35, 0.55, 0.85, 1.0)
-    return part
+    return body + Pos(10, 0, 0) * knob.part.moved(Location((-10, 0, 0))) + lofted
 
 
 def slot():
@@ -90,58 +81,35 @@ def slot():
         with BuildSketch(Plane.XY):
             SlotOverall(30, 10)
         extrude(amount=5)
-    solid = part.part
-    solid.color = Color(0.72, 0.30, 0.30, 1.0)
-    return solid
-
-
-DISPLAY_MODULE_HEAD = (
-    "// Written by cadgen (make_fixtures.py, from cadgen.tessellation_policy.DISPLAY_TESSELLATION):\n"
-    "// the display tolerance a cadgen server publishes, for tests to install as a host does.\n"
-    "// Regenerate it; a Python test holds it equal to cadgen's.\n"
-    "export const DISPLAY_TESSELLATION = "
-)
-
-
-def write_display_tessellation() -> None:
-    """``displayTessellation.js``: the display tolerance a server publishes, for the JS tests."""
-    from cadgen.tessellation_policy import DISPLAY_TESSELLATION
-
-    text = DISPLAY_MODULE_HEAD + json.dumps(DISPLAY_TESSELLATION, separators=(", ", ": ")) + ";\n"
-    (HERE / "displayTessellation.js").write_text(text, encoding="utf-8")
+    return part.part
 
 
 def main() -> None:
     from cadgen._internal import occt_mesh
-    from cadgen._internal.component_package import decode_display_shape, prepare_geometry_component
+    from cadgen._internal.component_package import decode_display_shape, effective_face_colors, prepare_geometry_component
     from cadgen._internal.selector_table import build_selector_table, selector_table_bytes
     from cadgen._internal.surf_container import read_surf
     from cadgen._internal.surface_extract import extract_surface_component
-
+    from cadgen.store.index import versioned_key
+    from cadgen.store.parts import PART_VERSION
     from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
-    write_display_tessellation()
     chord, angle = DISPLAY_TESSELLATION["chordTolerance"], DISPLAY_TESSELLATION["angleTolerance"]
     manifest = {}
     for name, build in (("sun_gear", sun_gear), ("cam_follower_roller", cam_follower_roller),
                         ("mixed", mixed), ("slot", slot)):
         prepared = prepare_geometry_component(build())
         entry, payload = prepared["entry"], prepared["payload"]
-        shape = decode_display_shape(entry, payload)
-        surf = extract_surface_component(shape.wrapped, face_colors=getattr(shape, "cad_face_ordinal_colors", None))
-        index, _floats = read_surf(surf)
-        table = selector_table_bytes(build_selector_table(shape.wrapped, index))
-        (HERE / f"{name}.selectors.json").write_bytes(table + b"\n")
-        surface_input = hashlib.sha256(f"cadgen-test-fixture:{name}".encode()).hexdigest()
-        surface_object = hashlib.sha256(surf).hexdigest()
-        (HERE / f"{name}.surf").write_bytes(surf)
-        body = occt_mesh.mesh_component(decode_display_shape(entry, payload).wrapped, index,
-                                        surface_input=surface_input, surface_object=surface_object,
-                                        chord=chord, angle=angle)
+        topods = decode_display_shape(entry, payload).wrapped
+        colors = effective_face_colors(topods, entry["faceColors"])
+        index, _floats = read_surf(extract_surface_component(topods, face_colors=colors))
+        table = build_selector_table(topods, index)
+        (HERE / f"{name}.selectors.json").write_bytes(selector_table_bytes(table) + b"\n")
+        part = versioned_key(hashlib.sha256(f"cadgen-test-fixture:{name}".encode()).hexdigest(), PART_VERSION)
+        body = occt_mesh.mesh_component(topods, table, colors, part=part, chord=chord, angle=angle)
         (HERE / f"{name}.glb").write_bytes(body)
-        manifest[name] = {"surfaceInput": surface_input, "surfaceObject": surface_object,
-                          "faces": len(index["faces"]), "edges": len(index["edges"]),
-                          "selectorsByteLength": len(table), "meshByteLength": len(body)}
+        manifest[name] = {"part": part, "faces": len(index["faces"]), "edges": len(index["edges"]),
+                          "selectorsByteLength": len(selector_table_bytes(table)) + 1, "meshByteLength": len(body)}
     (HERE / "fixtures.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(manifest, indent=2, sort_keys=True))
 

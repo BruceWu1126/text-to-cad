@@ -1,18 +1,18 @@
 import { readCadWorkerTicket } from "../../client/resources.js";
 // Surf component worker.
 //
-// One request = one component's stored mesh (bytes the client thread read and
+// One request = one part's stored mesh (bytes the client thread read and
 // verified) and an explicit capability set. Ordinary display asks only for
 // render data, which the mesh alone carries; picking/measurement asks for
-// selectors, which also read the component's selector table (cadgen's, served
-// with its surface) and join it to the mesh; refinement of active topology
-// asks for both so triangle ranges stay aligned. Decoding, copying into
-// render-owned arrays and the join run here, off the page's main thread.
+// selectors, which also read the part's selector table (cadgen's, its record's
+// other object) and join it to the mesh; refinement of active topology asks for
+// both so triangle ranges stay aligned. Decoding, copying into render-owned
+// arrays and the join run here, off the page's main thread.
 
-import { buildMeshDataFromSurf } from "./surfMeshData.js";
+import { buildComponentMeshData } from "./surfMeshData.js";
 import { joinSelectorTable, parseSelectorTable } from "./selectorTable.js";
 import { meshDataTransferList } from "../render/meshTransfer.js";
-import { decodeComponentTessellation, surfIndexFromCacheEntry } from "./tessellationCache.js";
+import { decodeComponentTessellation } from "./tessellationCache.js";
 
 const activeControllers = new Map();
 
@@ -54,16 +54,11 @@ self.addEventListener("message", async (event) => {
     if (!capabilities.render && !capabilities.selectors) {
       throw new Error("Surf worker request has no capabilities");
     }
-    const cacheIdentity = message.cacheIdentity || {};
-    const cached = decodeComponentTessellation(message.cachedEntry, {
-      surfaceInput: cacheIdentity.surfaceInput,
-      surfaceObject: cacheIdentity.surfaceObject,
-      tessellation: message.tessellation,
-    });
+    const cached = decodeComponentTessellation(message.cachedEntry, { part: String(message.part || "") });
     if (!cached) {
       throw new Error("Surf worker request carries no readable mesh for this component");
     }
-    const meshData = capabilities.render ? buildMeshDataFromSurf(surfIndexFromCacheEntry(cached), cached.component) : null;
+    const meshData = capabilities.render ? buildComponentMeshData(cached.component) : null;
     let bundle = null;
     if (capabilities.selectors) {
       const buffer = await readCadWorkerTicket(message.resource, { signal: controller.signal });

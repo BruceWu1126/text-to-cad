@@ -3,19 +3,14 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import test from "node:test";
 
-import { loadSource as loadSourceInput } from "./source.js";
+import { loadSource as loadSourceInput, packageSourceFromBaseUrl } from "./source.js";
 import { renderAssetSourceScope } from "../lib/renderAssetSourceScope.js";
 import {
   createTessellationCache, createHttpTessellationCacheProvider, encodeTessellationCacheBatch,
-  tessellationCacheKey,
 } from "../lib/surf/tessellationCache.js";
-import { encodeMeshFixture, memoryMeshProvider, meshFixture, probeRowFor, surfFixture } from "../lib/surf/__tests__/meshFixtures.js";
-import { TEST_DISPLAY_TESSELLATION } from "../lib/surf/testing.js";
+import { encodeMeshFixture, memoryMeshProvider, meshFixture, partRowFor } from "../lib/surf/__tests__/meshFixtures.js";
 
-// The tolerances cadgen names in a resolved job: its display tolerance.
-const STANDARD = TEST_DISPLAY_TESSELLATION;
-
-// A host's mesh store that records every key probed.
+// A host's part store that records every part probed.
 function recordingMeshStore(requested = [], { stored = [] } = {}) {
   const store = memoryMeshProvider(stored);
   const probeMany = store.probeMany;
@@ -85,28 +80,15 @@ function meshData() {
   };
 }
 
-test("a resolved job's tessellation is cadgen's, named whole; a page that draws from the store needs one", async () => {
-  await assert.rejects(() => loadSource({ ...rollerPackage(), resolved: { tessellation: { chordTolerance: 0.001 } } }),
-    /resolved\.tessellation must name a positive chordTolerance and angleTolerance/);
-  setTessellationCacheProvider(memoryMeshProvider([]));
-  try {
-    const { resolved: _resolved, ...unnamed } = rollerPackage();
-    await assert.rejects(() => loadSource(unnamed), /names the tessellation to draw \(resolved\.tessellation\)/);
-  } finally {
-    setTessellationCacheProvider(null);
-  }
-});
-
-// The roller as a one-component package, bound to its fixture identity.
-function rollerPackage(extra = {}) {
-  const { surfaceInput, surfaceObject } = surfFixture("cam_follower_roller");
-  return { kind: "step", resolved: { tessellation: STANDARD }, package: {
-    descriptor: { components: { roller: { surfaceInput, surfaceObject } },
+// The roller as a one-component package, naming its fixture part.
+function rollerPackage(extra = {}, component = {}) {
+  const { part } = meshFixture("cam_follower_roller");
+  return { kind: "step", package: {
+    descriptor: { components: { roller: { part, ...component } },
       occurrences: [{ id: "o1.1", name: "roller", component: "roller" }],
       assembly: { root: { id: "o1", name: "macro", nodeType: "assembly", children: [
         { id: "o1.1", name: "roller", nodeType: "part", children: [] }
       ] } } },
-    componentUrls: { roller: "/macro-fixture/roller.surf" },
     ...extra,
   } };
 }
@@ -116,7 +98,8 @@ test("a package's meshes are read from the store; one it lacks is an error, neve
   let fetches = 0;
   globalThis.fetch = async () => { fetches += 1; return new Response(null, { status: 404 }); };
   const requested = [];
-  const store = recordingMeshStore(requested, { stored: [meshFixture("cam_follower_roller").bytes] });
+  const roller = meshFixture("cam_follower_roller");
+  const store = recordingMeshStore(requested, { stored: [roller.bytes] });
   setTessellationCacheProvider(store);
   t.after(() => { globalThis.fetch = oldFetch; setTessellationCacheProvider(null); });
   const stages = {};
@@ -127,12 +110,11 @@ test("a package's meshes are read from the store; one it lacks is an error, neve
   for (const stage of ["probeMs", "cacheReadMs", "meshBuildMs"]) {
     assert.ok(stages.sourceLoad[stage] >= 0, stage);
   }
-  // Every key it asked for names the display tolerance the job carries.
-  const display = tessellationCacheKey("0".repeat(64), STANDARD).slice(64);
-  assert.ok(requested.length && requested.every((key) => key.endsWith(display)), JSON.stringify(requested));
-  assert.equal(fetches, 0, "no SURF is read to draw a package");
+  // It asks the store for the part its component names, and for nothing else.
+  assert.deepEqual(requested, [roller.part]);
+  assert.equal(fetches, 0, "nothing else is read to draw a package");
   setTessellationCacheProvider(recordingMeshStore());
-  await assert.rejects(loadSource(rollerPackage()), /component roller has no mesh at this tessellation/);
+  await assert.rejects(loadSource(rollerPackage()), /component roller has no mesh; cadgen meshes every component/);
 });
 
 // A body the store named but did not hand back is read again, alone, before its component is a
@@ -152,7 +134,7 @@ test("a stored mesh whose batched read fails is read again alone; one that stays
   store.getManyProbed = async (rows) => rows.map(() => null);
   store.getProbed = async () => null;
   await assert.rejects(loadSource(rollerPackage()),
-    /component roller: the store holds its mesh at this tessellation, but it could not be read/);
+    /component roller: the store holds its mesh, but it could not be read/);
 });
 
 test("a static package reads each component's own mesh file; a component nothing meshed is an error", async (t) => {
@@ -166,16 +148,19 @@ test("a static package reads each component's own mesh file; a component nothing
       : new Response(null, { status: 404 });
   };
   t.after(() => { globalThis.fetch = oldFetch; setTessellationCacheProvider(null); });
-  // The docs hero: no mesh store at all, a mesh beside each surf, drawn at the
-  // tessellation cadgen exported it at -- the page names none.
+  // The docs hero: no part store at all, and each component's tree entry names its mesh file
+  // beside the tree.
   setTessellationCacheProvider(null);
-  const { resolved: _named, ...job } = rollerPackage({ meshUrls: { roller: "/hero/components/roller.glb" } });
+  const hero = (component) => packageSourceFromBaseUrl("/hero/", rollerPackage({}, component).package.descriptor);
+  const job = hero({ glb: "components/roller.glb" });
+  assert.deepEqual(job.package.meshUrls, { roller: "/hero/components/roller.glb" });
   const source = await loadSourceInput(job);
   assert.ok(source.meshData.indices.length > 0);
   assert.deepEqual(fetched, ["/hero/components/roller.glb"], "only the mesh file is read");
-  // A mesh at another tessellation is not this component's mesh at the one a job names.
-  await assert.rejects(loadSource({ ...job, resolved: { tessellation: { chordTolerance: 2e-3, angleTolerance: 1.4 } } }),
-    /is not its mesh at this tessellation/);
+  // A file of another part is not this component's mesh.
+  await assert.rejects(loadSource(hero({ glb: "components/roller.glb", part: `${"0".repeat(64)}-v1` })),
+    /is not its part's mesh/);
+  assert.throws(() => hero({}), /component roller declares no glb path/);
   await assert.rejects(loadSource(rollerPackage()), /cadgen meshes every component before a page draws it/);
 });
 
@@ -184,23 +169,22 @@ const WARM_COMPONENT = {
   normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
   indices: new Uint32Array([0, 1, 2]),
   faceRanges: [{ ord: 1, indexStart: 0, indexCount: 3 }], edges: [],
-  bounds: { min: [0, 0, 0], max: [2, 3, 0] }, scale: Math.sqrt(13),
+  bounds: { min: [0, 0, 0], max: [2, 3, 0] },
 };
 
-/** A warm package of `count` cached components, loaded through an HTTP cache provider. */
+/** A warm package of `count` stored parts, loaded through an HTTP cache provider. */
 async function loadWarmPackage(t, count, providerOptions = {}) {
   const component = WARM_COMPONENT;
-  const surfaceObject = "a".repeat(64);
-  const components = {}, componentUrls = {}, rows = {}, bodies = {};
+  const components = {}, records = {}, bodies = {};
   const occurrences = [];
   for (let n = 0; n < count; n += 1) {
-    const cid = `c${n}`, surfaceInput = createHash("sha256").update(cid).digest("hex");
-    const key = tessellationCacheKey(surfaceInput, STANDARD);
-    const body = encodeMeshFixture(component, { surfaceInput, surfaceObject, tessellation: STANDARD });
-    rows[key] = probeRowFor(body);
-    bodies[key] = body;
-    components[cid] = { surfaceInput, surfaceObject };
-    componentUrls[cid] = `/never-fetch/${cid}.surf`;
+    const cid = `c${n}`, part = `${createHash("sha256").update(cid).digest("hex")}-v1`;
+    const body = encodeMeshFixture(component, { part });
+    // A host answers each stored part's record by its key.
+    const { part: _part, ...record } = partRowFor(body);
+    records[part] = record;
+    bodies[part] = body;
+    components[cid] = { part };
     occurrences.push({ id: `o${n}`, component: cid });
   }
   const probes = [], batches = [];
@@ -209,15 +193,15 @@ async function loadWarmPackage(t, count, providerOptions = {}) {
   globalThis.fetch = async (url, options) => {
     const body = JSON.parse(options.body);
     if (String(url).endsWith("/probe")) {
-      probes.push(body.tessellationInputs.length);
-      assert.ok(body.tessellationInputs.length <= 256);
+      probes.push(body.parts.length);
+      assert.ok(body.parts.length <= 256);
       return new Response(JSON.stringify({ entries: Object.fromEntries(
-        body.tessellationInputs.map((key) => [key, rows[key]]),
+        body.parts.map((part) => [part, records[part]]),
       ) }));
     }
-    assert.ok(String(url).endsWith("/batch"), "a warm package never fetches SURF");
+    assert.ok(String(url).endsWith("/batch"), "a warm package reads nothing but the store");
     assert.ok(body.entries.length <= 256);
-    const payload = encodeTessellationCacheBatch(body.entries.map((entry) => bodies[entry.tessellationInput]));
+    const payload = encodeTessellationCacheBatch(body.entries.map((entry) => bodies[entry.part]));
     batches.push({ count: body.entries.length, bytes: payload.byteLength });
     return new Response(payload, { headers: { "content-length": String(payload.byteLength) } });
   };
@@ -226,9 +210,9 @@ async function loadWarmPackage(t, count, providerOptions = {}) {
   const options = typeof providerOptions === "function" ? providerOptions(entryBytes) : providerOptions;
   setTessellationCacheProvider(createHttpTessellationCacheProvider({ origin: "http://cache.test", ...options }));
   const stageTimings = {};
-  const source = await loadSource({ kind: "step", resolved: { tessellation: STANDARD }, package: {
+  const source = await loadSource({ kind: "step", package: {
     descriptor: { components, occurrences, assembly: { root: { id: "root", nodeType: "assembly",
-      children: occurrences.map(({ id }) => ({ id, nodeType: "part", children: [] })) } } }, componentUrls,
+      children: occurrences.map(({ id }) => ({ id, nodeType: "part", children: [] })) } } },
   } }, { stageTimings });
   assert.equal(source.meshData.parts.length, count);
   for (const part of source.meshData.parts) {
@@ -260,14 +244,14 @@ test("a warm package's batches stay within the ceiling its cache's transport dec
 });
 
 test("a package draws the finish, colour and opacity cadgen composed onto its occurrences", async (t) => {
-  const { surfaceInput, surfaceObject } = surfFixture("cam_follower_roller");
-  setTessellationCacheProvider(memoryMeshProvider([meshFixture("cam_follower_roller").bytes]));
+  const { part, bytes } = meshFixture("cam_follower_roller");
+  setTessellationCacheProvider(memoryMeshProvider([bytes]));
   t.after(() => { setTessellationCacheProvider(null); });
   // The descriptor as cadgen serves it for display (`source_sidecar.apply_appearance`): the
   // assigned occurrence already carries what its material resolves to.
   const descriptor = {
     kind: "assembly-package",
-    components: { "appearance-cid": { surfaceInput, surfaceObject } },
+    components: { "appearance-cid": { part } },
     occurrences: [{
       id: "o1.1", name: "roller", component: "appearance-cid",
       materialId: "polished", materialName: "Polished",
@@ -278,17 +262,13 @@ test("a package draws the finish, colour and opacity cadgen composed onto its oc
       { id: "o1.1", name: "roller", nodeType: "part", children: [] }
     ] } }
   };
-  const source = await loadSource({
-    kind: "step",
-    resolved: { tessellation: STANDARD },
-    package: { descriptor, componentUrls: { "appearance-cid": "/appearance/roller.surf" } }
-  });
-  const [part] = source.meshData.parts;
-  assert.deepEqual(part.material, descriptor.occurrences[0].material);
-  assert.equal(part.materialId, "polished");
-  assert.equal(part.materialName, "Polished");
-  assert.equal(part.color, "#336699");
-  assert.equal(part.opacity, 0.5, "the opacity is the one cadgen folded, not multiplied again here");
+  const source = await loadSource({ kind: "step", package: { descriptor } });
+  const [occurrence] = source.meshData.parts;
+  assert.deepEqual(occurrence.material, descriptor.occurrences[0].material);
+  assert.equal(occurrence.materialId, "polished");
+  assert.equal(occurrence.materialName, "Polished");
+  assert.equal(occurrence.color, "#336699");
+  assert.equal(occurrence.opacity, 0.5, "the opacity is the one cadgen folded, not multiplied again here");
 });
 
 // A snapshot job carries what cadgen resolved: the articulation and the control vector it

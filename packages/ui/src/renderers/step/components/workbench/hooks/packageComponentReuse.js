@@ -10,9 +10,8 @@ export function matchingDisplayedPackageContext(displayed, meshState, file) {
 }
 
 // Keep decoded geometry that is still visible alive across an atomic revision
-// swap. D already binds the exact geometry and surface producer. The prior
-// runtime ticket supplies O when the new geometry descriptor intentionally
-// omits display artifacts; an explicit new O must still agree.
+// swap: a component whose part is the one already drawn (its key binds the exact
+// geometry and surface producer) keeps its mesh, and the row it was drawn from.
 export function retainedComponentMeshesForRevision({
   previous,
   descriptor,
@@ -23,12 +22,9 @@ export function retainedComponentMeshesForRevision({
   }
   const retained = {};
   for (const [cid, component] of Object.entries(descriptor.components || {})) {
-    const oldComponent = previous.descriptor.components?.[cid];
-    const oldIdentity = previous.componentIdentityByCid?.[cid] || oldComponent;
+    const row = previous.componentIdentityByCid?.[cid];
     const meshData = previous.componentMeshDataByCid?.[cid];
-    if (!oldComponent?.surfaceInput || oldComponent.surfaceInput !== component?.surfaceInput
-        || !oldIdentity?.surfaceObject || !meshData) continue;
-    if (!component.surfaceObject || component.surfaceObject === oldIdentity.surfaceObject) retained[cid] = meshData;
+    if (row?.part && row.part === component?.part && meshData) retained[cid] = meshData;
   }
   return retained;
 }

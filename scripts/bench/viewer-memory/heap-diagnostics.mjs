@@ -37,7 +37,7 @@ export function summarizeSamplingProfile(profile, limit = 30) {
 async function requestSourceHints(requests, origin) {
   const recent = [...new Map((requests || []).slice(-8).map(row => [row.url, row])).values()];
   return Promise.all(recent.map(async row => {
-    const hint = { worker: row.worker, requestId: row.id, url: row.url, tessellation: row.tessellation };
+    const hint = { worker: row.worker, requestId: row.id, url: row.url, part: row.part };
     try {
       const response = await fetch(new URL(row.url, origin), { method: 'HEAD', signal: AbortSignal.timeout(1500) });
       const bytes = Number(response.headers.get('content-length'));

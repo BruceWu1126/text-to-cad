@@ -1,18 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createCadClient, SurfaceResolutionError } from "@text-to-cad/core/client";
-import { isTessellationCacheProbeMissError } from "@text-to-cad/core/lib/surf/tessellationCache.js";
+import { isTessellationCacheProbeMissError, tessellationDecodedBytes } from "@text-to-cad/core/lib/surf/tessellationCache.js";
 import { createSurfaceTicketBatches, createTessellationBodyBatches } from "./packageBatchReads.js";
 import { createInitialDisplayPlans } from "../../../render/initialDisplay.js";
-import { TEST_DISPLAY_TESSELLATION, installTestDisplayTessellation } from "@text-to-cad/core/lib/surf/testing.js";
-
-// The display tolerance a cadgen server publishes, installed as a host installs it.
-installTestDisplayTessellation();
 
 const KIB = 1024, MIB = 1024 * KIB;
 const cids = count => Array.from({ length: count }, (_, index) => `c${index}`);
-const rowFor = (cid, byteLength = 100 * KIB) => ({ object: `object-${cid}`, byteLength, surfaceInput: `input-${cid}` });
-const bodyFor = row => new Uint8Array(row.byteLength).fill(Number(row.object.slice(8)) % 251);
+// Each component's part, keyed by its index.
+const partOf = cid => `${Number(cid.slice(1)).toString(16).padStart(64, "0")}-v1`;
+const indexOf = part => parseInt(part.slice(0, 64), 16);
+// A part's row, its display mesh `byteLength` bytes.
+const rowFor = (cid, byteLength = 100 * KIB) => ({ part: partOf(cid), glb: { object: `object-${cid}`, byteLength },
+  selectors: { object: `selectors-${cid}`, byteLength: KIB } });
+const bodyFor = row => new Uint8Array(row.glb.byteLength).fill(Number(row.glb.object.slice(8)) % 251);
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
 // A server's batch read: the bodies of the rows asked for, as views into ONE container, as the
@@ -46,7 +47,7 @@ test("bodies are read in batches growing from the first publish to the server's 
   // The first batch is the first publish's eight; the next is read with it.
   assert.deepEqual(server.reads.map(read => read.count), [8, 16]);
   assert.equal(first.byteOffset, 0, "a body of its own, to transfer to a worker");
-  assert.equal(first.buffer.byteLength, rows.get("c0").byteLength);
+  assert.equal(first.buffer.byteLength, rows.get("c0").glb.byteLength);
   assert.deepEqual(first, bodyFor(rows.get("c0")));
   // Lanes, eight at a time, in load order.
   for (let start = 1; start < order.length; start += 8) {
@@ -123,12 +124,12 @@ test("an entry a batch could not read is a probe miss for that component alone; 
   const order = cids(8);
   const rows = new Map(order.map(cid => [cid, rowFor(cid)]));
   let failAll = false;
-  const server = batchServer({ answer: rows => (failAll ? null : rows.map(row => (row.object === "object-c2" ? null : bodyFor(row)))) });
+  const server = batchServer({ answer: rows => (failAll ? null : rows.map(row => (row.glb.object === "object-c2" ? null : bodyFor(row)))) });
   const batches = createTessellationBodyBatches({ order, rowOf: cid => rows.get(cid), readMany: server.readMany });
   await assert.rejects(batches.take("c2", rows.get("c2")), isTessellationCacheProbeMissError);
   assert.deepEqual(await batches.take("c3", rows.get("c3")), bodyFor(rows.get("c3")));
   // A row that is not the one batched (a fresh probe after a miss) reads alone.
-  assert.equal(await batches.take("c4", { ...rows.get("c4"), object: "object-other" }), null);
+  assert.equal(await batches.take("c4", { ...rows.get("c4"), glb: { ...rows.get("c4").glb, object: "object-other" } }), null);
   failAll = true;
   const later = createTessellationBodyBatches({ order, rowOf: cid => rows.get(cid), readMany: server.readMany });
   assert.equal(await later.take("c0", rows.get("c0")), null);
@@ -159,24 +160,24 @@ test("the first eight cold components resolve alone, the rest up to 64 to a requ
     requests.push(request);
   });
   const finish = (request) => {
-    for (const { cid } of request.requested) request.onReady(cid, { surfUrl: `/surf/${cid}` });
-    request.done(new Map(request.requested.map(({ cid }) => [cid, { surfUrl: `/surf/${cid}` }])));
+    for (const { cid } of request.requested) request.onReady(cid, rowFor(cid));
+    request.done(new Map(request.requested.map(({ cid }) => [cid, rowFor(cid)])));
   };
-  const tickets = createSurfaceTicketBatches({ order, resolve,
-    needs: cid => ({ surfaceInput: `input-${cid}`, surfaceObject: undefined }) });
+  const tickets = createSurfaceTicketBatches({ order, resolve, needs: cid => ({ part: partOf(cid) }) });
   const first = tickets.ticket("c0", {});
   await tick();
   // Eight lone requests are out, as eight lanes made them; the rest wait for room.
   assert.deepEqual(requests.map(request => request.requested.length), [1, 1, 1, 1, 1, 1, 1, 1]);
+  assert.deepEqual(requests[0].requested, [{ cid: "c0", part: partOf("c0") }], "a component is asked for by its part");
   finish(requests[0]);
-  assert.deepEqual(await first, { surfUrl: "/surf/c0" });
+  assert.deepEqual(await first, rowFor("c0"));
   await tick();
   assert.equal(requests.length, 9);
   assert.equal(requests[8].requested.length, 64);
   // A row ready before its request has finished answers its component at once.
   const early = tickets.ticket("c8", {});
-  requests[8].onReady("c8", { surfUrl: "/surf/c8" });
-  assert.deepEqual(await early, { surfUrl: "/surf/c8" });
+  requests[8].onReady("c8", rowFor("c8"));
+  assert.deepEqual(await early, rowFor("c8"));
   for (const request of requests.slice(1, 8)) finish(request);
   await tick();
   assert.deepEqual(requests.map(request => request.requested.length), [1, 1, 1, 1, 1, 1, 1, 1, 64, 64, 64]);
@@ -187,9 +188,9 @@ test("a surface request that fails fails each of its components still waiting", 
   const order = cids(20);
   const failure = new Error("surface derivation failed for c12");
   const tickets = createSurfaceTicketBatches({ order, alone: 0,
-    needs: cid => ({ surfaceInput: `input-${cid}` }),
-    resolve: async (requested, { onReady }) => { onReady("c0", { surfUrl: "/surf/c0" }); throw failure; } });
-  assert.deepEqual(await tickets.ticket("c0", {}), { surfUrl: "/surf/c0" });
+    needs: cid => ({ part: partOf(cid) }),
+    resolve: async (requested, { onReady }) => { onReady("c0", rowFor("c0")); throw failure; } });
+  assert.deepEqual(await tickets.ticket("c0", {}), rowFor("c0"));
   await assert.rejects(tickets.ticket("c12", {}), failure);
 });
 
@@ -197,49 +198,49 @@ test("a surface request that fails fails each of its components still waiting", 
 // its request, ready in the same response (before or after it), are answered.
 test("a component that failed in its request fails alone; the ready ones beside it are answered", async () => {
   const hex = c => c.repeat(64);
-  const view = { tree: hex("a"), viewId: hex("b"), surfaceProducer: { scheme: 1 } };
-  const inputs = { c0: hex("1"), bad: hex("2"), c2: hex("3") };
-  const object = hex("e");
-  const ready = cid => ({ surfaceInput: inputs[cid], state: "ready", surfaceObject: object, byteLength: 10,
-    url: `/__cad/store?tree=${view.tree}&surfaceInput=${inputs[cid]}&object=${object}`,
-    selectors: { object: hex("5"), byteLength: 10, url: `/__cad/store?tree=${view.tree}&surfaceInput=${inputs[cid]}&object=${hex("5")}` } });
+  const view = { tree: hex("a"), viewId: hex("b"), surfaceProducer: { build123d: "0.10.0", ocp: "7.9.3", cadqueryOcp: "7.9.3.1" } };
+  const parts = { c0: `${hex("1")}-v1`, bad: `${hex("2")}-v1`, c2: `${hex("3")}-v1` };
+  const counts = { vertexCount: 3, indexCount: 3, faceCount: 1, edgeCount: 0, edgePointCount: 0 };
+  // What cadgen derived for a part: its record, naming its display mesh and selector table.
+  const record = { glb: { object: hex("e"), byteLength: 1024, decodedBytes: tessellationDecodedBytes(counts), ...counts },
+    selectors: { object: hex("5"), byteLength: 64, faceCount: 1, edgeCount: 0, vertexCount: 3 } };
+  const ready = cid => ({ part: parts[cid], state: "ready", record });
   const client = createCadClient({ fetch: async () => new Response(JSON.stringify({ viewId: view.viewId, components: {
     c0: ready("c0"),
-    bad: { surfaceInput: inputs.bad, state: "failed", error: "component bad: OCCT did not mesh 2 face(s)", code: "mesh" },
+    bad: { part: parts.bad, state: "failed", error: "component bad: OCCT did not mesh 2 face(s)", code: "mesh" },
     c2: ready("c2"),
   } }), { headers: { "content-type": "application/json" } }) });
   const order = ["bad", "c0", "c2"];
   const tickets = createSurfaceTicketBatches({ order, alone: 0,
-    needs: cid => ({ surfaceInput: inputs[cid] }),
+    needs: cid => ({ part: parts[cid] }),
     resolve: (requested, options) => client.resolveSurfaceComponents(view, requested, options) });
   const [bad, c0, c2] = await Promise.allSettled(order.map(cid => tickets.ticket(cid, {})));
   assert.equal(tickets.stats().requests, 1);
   assert.equal(bad.status, "rejected");
   assert.ok(bad.reason instanceof SurfaceResolutionError);
   assert.deepEqual([bad.reason.cid, bad.reason.code, bad.reason.message], ["bad", "mesh", "component bad: OCCT did not mesh 2 face(s)"]);
-  assert.deepEqual([c0.status, c0.value?.surfaceObject, c2.status, c2.value?.surfaceObject],
-    ["fulfilled", object, "fulfilled", object]);
+  assert.deepEqual([c0.status, c0.value?.part, c0.value?.glb.object, c2.status, c2.value?.part],
+    ["fulfilled", parts.c0, hex("e"), "fulfilled", parts.c2]);
   client.dispose();
 });
 
-test("initial plans probe the display meshes a chunk at a time, growing from eight to 256", async () => {
-  const components = cids(747).map(cid => [cid, { surfaceInput: `input-${cid}` }]);
+test("initial plans probe the parts a chunk at a time, growing from eight to 256", async () => {
+  const components = cids(747).map(cid => [cid, { part: partOf(cid) }]);
   const calls = [];
-  // Standard entries for the even components; nothing for the odd ones, which are cold.
+  // Stored parts for the even components; nothing for the odd ones, which are cold.
   const plans = createInitialDisplayPlans({ components, maxInFlightBytes: 256 * MIB,
-    probeEntries: async (inputs, tessellation) => {
-      calls.push([tessellation, inputs.length]);
-      return new Map(inputs.filter(input => Number(input.slice(7)) % 2 === 0)
-        .map(input => [input, { object: `o-${input}`, surfaceObject: "s", byteLength: KIB, decodedBytes: KIB }]));
+    probeEntries: async (parts, ...rest) => {
+      calls.push([parts, ...rest]);
+      return new Map(parts.filter(part => indexOf(part) % 2 === 0)
+        .map(part => [part, { part, glb: { object: `o-${part}`, byteLength: KIB, decodedBytes: KIB } }]));
     } });
   assert.equal(plans.peek("c0"), undefined);
   assert.ok((await plans.plan("c0")).plan.estimatedBytes > 0);
-  assert.equal(await plans.plan("c1"), null, "a component the store has no display mesh for is cold");
+  assert.equal(await plans.plan("c1"), null, "a component the store holds no part for is cold");
   for (const [cid] of components) await plans.plan(cid);
-  assert.deepEqual(calls.map(([, count]) => count), [8, 16, 32, 64, 128, 256, 243]);
-  assert.ok(calls.every(([tessellation]) => JSON.stringify(tessellation) === JSON.stringify(TEST_DISPLAY_TESSELLATION)),
-    "nothing but the display mesh is asked");
-  assert.equal(plans.peek("c2").cacheProbe.object, "o-input-c2");
+  assert.deepEqual(calls.map(([parts]) => parts.length), [8, 16, 32, 64, 128, 256, 243]);
+  assert.deepEqual(calls[0], [cids(8).map(partOf), { signal: undefined }], "a chunk is asked for by its parts alone");
+  assert.equal(plans.peek("c2").cacheProbe.glb.object, `o-${partOf("c2")}`);
   assert.equal(plans.peek("c3"), null);
 });
 
@@ -248,7 +249,7 @@ test("a load that is aborted, or over, asks nothing more ahead and leaves no com
   const sent = [];
   const controller = new AbortController();
   const tickets = createSurfaceTicketBatches({ order, alone: 0, inFlight: 1, signal: controller.signal,
-    needs: cid => ({ surfaceInput: `input-${cid}` }),
+    needs: cid => ({ part: partOf(cid) }),
     resolve: (requested, { signal }) => new Promise((_, reject) => {
       sent.push(requested.length);
       signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
@@ -265,13 +266,13 @@ test("a load that is aborted, or over, asks nothing more ahead and leaves no com
 });
 
 test("nothing is probed ahead of the first chunk until the first body read is past", async () => {
-  const components = cids(100).map(cid => [cid, { surfaceInput: `input-${cid}` }]);
+  const components = cids(100).map(cid => [cid, { part: partOf(cid) }]);
   const probed = [];
   let pastFirstRead;
   const plans = createInitialDisplayPlans({ components, maxInFlightBytes: 256 * MIB,
     readAheadAfter: new Promise(resolve => { pastFirstRead = resolve; }),
-    probeEntries: async (inputs) => { probed.push(inputs.length); return new Map(inputs.map(input => [input,
-      { object: `o-${input}`, surfaceObject: "s", byteLength: KIB, decodedBytes: KIB }])); } });
+    probeEntries: async (parts) => { probed.push(parts.length); return new Map(parts.map(part => [part,
+      { part, glb: { object: `o-${part}`, byteLength: KIB, decodedBytes: KIB } }])); } });
   await plans.plan("c0");
   await tick();
   assert.deepEqual(probed, [8], "the first geometry's probe runs alone");

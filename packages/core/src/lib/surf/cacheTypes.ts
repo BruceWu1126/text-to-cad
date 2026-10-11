@@ -1,8 +1,3 @@
-/** The tolerances a stored mesh is keyed by: chord relative to the component's diagonal, angle in radians. */
-export interface TessellationOptions {
-  chordTolerance?: number;
-  angleTolerance?: number;
-}
 /**
  * One stored mesh's sections, viewed in place (`decodeComponentTessellation`): both tables are
  * u32 rows of four, faces (ord, indexStart, indexCount, colour: 0 for none, else a `faceColors`
@@ -17,43 +12,43 @@ export interface TessellatedComponent {
   edgePoints: Float32Array;
   faceColors: number[][];
   bounds: { min: number[]; max: number[] };
-  scale: number;
   /** The faces no mesher could cover: their ranges are empty and the mesh does not draw them. */
   unmeshedFaces: readonly number[];
 }
 export interface TessellationCacheEntry {
   component: TessellatedComponent;
-  partColor: number[] | null;
+  /** The part the mesh is (`<digest>-v<version>`). */
+  part: string;
 }
-export interface TessellationProbe {
-  schemaVersion: number;
-  object: string;
-  byteLength: number;
-  decodedBytes: number;
-  surfaceInput: string;
-  surfaceObject: string;
-  tessellationInput: string;
-  renderIdentity: string;
-  quality: TessellationOptions;
-  tessellatorVersion: number;
-  payloadVersion: number;
-  vertexCount: number;
-  indexCount: number;
-  faceCount: number;
-  edgeCount: number;
-  edgePointCount: number;
-  /** How many faces the mesh leaves undrawn, no mesher having covered them; absent when none. */
-  unmeshedFaceCount?: number;
+/**
+ * A part's record, by its key (cadgen/store/parts.py): its two objects -- the display mesh and the
+ * selector table -- with what a reader sizes each by without opening it.
+ */
+export interface PartRow {
+  part: string;
+  glb: {
+    object: string;
+    byteLength: number;
+    decodedBytes: number;
+    vertexCount: number;
+    indexCount: number;
+    faceCount: number;
+    edgeCount: number;
+    edgePointCount: number;
+    /** How many faces the mesh leaves undrawn, no mesher having covered them; absent when none. */
+    unmeshedFaceCount?: number;
+  };
+  selectors: { object: string; byteLength: number; faceCount: number; edgeCount: number; vertexCount: number };
 }
 export interface TessellationReadOptions {
   signal?: AbortSignal;
-  probe?: TessellationProbe | null;
+  probe?: PartRow | null;
   strictProbe?: boolean;
 }
 export interface TessellationCacheProvider {
-  probeMany(keys: string[], options?: { signal?: AbortSignal }): Promise<(TessellationProbe | null)[] | null>;
-  getProbed(probe: TessellationProbe, options?: { signal?: AbortSignal; maxBytes?: number }): Promise<Uint8Array | null>;
-  getManyProbed?(probes: TessellationProbe[], options?: { signal?: AbortSignal; maxBytes?: number }): Promise<(Uint8Array | null)[] | null>;
+  probeMany(parts: string[], options?: { signal?: AbortSignal }): Promise<(PartRow | null)[] | null>;
+  getProbed(row: PartRow, options?: { signal?: AbortSignal; maxBytes?: number }): Promise<Uint8Array | null>;
+  getManyProbed?(rows: PartRow[], options?: { signal?: AbortSignal; maxBytes?: number }): Promise<(Uint8Array | null)[] | null>;
   /** The most framed bytes its transport carries in one batched read (`tessBatchMaxBytes`). */
   readonly maxBatchBytes?: number;
 }
@@ -66,9 +61,9 @@ export interface TessellationCache {
   /** Borrow a cancellable view of this cache's reads. */
   createSession(options?: { signal?: AbortSignal }): TessellationCache;
   tessellationCacheProviderRegistered(): boolean;
-  probeCachedTessellationEntries(surfaceInputs: string[], options?: TessellationOptions, request?: TessellationReadOptions): Promise<Map<string, TessellationProbe>>;
-  getCachedComponentEntry(surfaceInput: string, options?: TessellationOptions, request?: TessellationReadOptions): Promise<TessellationCacheEntry | null>;
-  getCachedEntryBytes(surfaceInput: string, options?: TessellationOptions, request?: TessellationReadOptions): Promise<Uint8Array | null>;
-  getCachedEntryBytesMany(probes: TessellationProbe[], request?: { signal?: AbortSignal; maxBytes?: number }): Promise<(Uint8Array | null)[] | null>;
+  probeCachedTessellationEntries(parts: string[], request?: TessellationReadOptions): Promise<Map<string, PartRow>>;
+  getCachedComponentEntry(part: string, request?: TessellationReadOptions): Promise<TessellationCacheEntry | null>;
+  getCachedEntryBytes(part: string, request?: TessellationReadOptions): Promise<Uint8Array | null>;
+  getCachedEntryBytesMany(rows: PartRow[], request?: { signal?: AbortSignal; maxBytes?: number }): Promise<(Uint8Array | null)[] | null>;
   dispose(): void;
 }

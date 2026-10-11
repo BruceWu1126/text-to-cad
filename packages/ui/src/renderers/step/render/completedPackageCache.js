@@ -6,7 +6,6 @@ import { renderCapabilities } from "@text-to-cad/core/lib/renderCapabilities.js"
 import { renderAssetCacheStats } from "@text-to-cad/core/lib/renderAssetClient.js";
 
 const MAX_PACKAGES = 8;
-const DIGEST = /^[0-9a-f]{64}$/;
 const MAX_BYTES = 256 * 1024 * 1024;
 
 export function completedPackageRevision(entry) {
@@ -113,17 +112,6 @@ export function createCompletedPackageCache({ maxEntries = MAX_PACKAGES, maxByte
         return null;
       }
     },
-    // Recognition only needs the accepted D/O bindings. Validate the whole view
-    // once, then copy these small records without traversing geometry or exposing
-    // the cache's mutable metadata. A missing descriptor cannot prove this view.
-    peekComponentIdentities(client, entry, { descriptor } = {}) {
-      if (!descriptor) return null;
-      const cached = matchingEntry(client, entry, descriptor);
-      if (!cached) return null;
-      return Object.fromEntries(Object.entries(cached.value.componentIdentityByCid).map(([cid, identity]) => [cid, {
-        surfaceInput: identity.surfaceInput, surfaceObject: identity.surfaceObject,
-      }]));
-    },
     set(client, entry, context) {
       const expected = completedPackageRevision(entry), id = key(client, entry);
       // A declined newer publication must not expose a previous one under the same
@@ -133,11 +121,10 @@ export function createCompletedPackageCache({ maxEntries = MAX_PACKAGES, maxByte
           || context.meshHash !== entryMeshAssetSignature(entry)) return false;
       const components = Object.entries(context.descriptor?.components || {});
       if (!components.length || components.length !== Object.keys(context.componentMeshDataByCid || {}).length) return false;
+      // Every component is drawn, from the row of the part its descriptor names.
       for (const [cid, component] of components) {
-        const mesh = context.componentMeshDataByCid[cid], identity = context.componentIdentityByCid?.[cid];
-        if (!mesh || !DIGEST.test(identity?.surfaceInput) || !DIGEST.test(identity.surfaceObject)
-            || identity.surfaceInput !== component.surfaceInput
-            || (component.surfaceObject && component.surfaceObject !== identity.surfaceObject)) return false;
+        const mesh = context.componentMeshDataByCid[cid], row = context.componentIdentityByCid?.[cid];
+        if (!mesh || !row?.glb?.object || row.part !== component.part) return false;
       }
       // Explicit fields omit live request IDs/controllers, selector bundles and callbacks.
       let snapshot;

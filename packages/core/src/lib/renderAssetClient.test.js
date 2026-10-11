@@ -18,6 +18,7 @@ import {
   loadRenderSurfSelectorBundle as loadSurfSelectors,
   peekRenderJson,
   peekRenderRobot,
+  peekRenderSurf,
   ROBOT_PAYLOAD_SCHEMA_VERSION,
   renderAssetCacheStats,
   reclaimIdleSurfWorkers,
@@ -32,19 +33,14 @@ import { fileURLToPath } from "node:url";
 import {
   setRenderAssetSourceScope
 } from "./renderAssetSourceScope.js";
-import { parseSurf } from "./surf/container.js";
 import {
   isTessellationCacheProbeMissError,
   createTessellationCache,
-  tessellationCacheKey,
+  partSelectorsPath,
 } from "./surf/tessellationCache.js";
-import { everyKeyMeshProvider, probeRowFor } from "./surf/__tests__/meshFixtures.js";
-import { TEST_DISPLAY_TESSELLATION } from "./surf/testing.js";
+import { everyKeyMeshProvider, partRowFor, selectorTableFixture } from "./surf/__tests__/meshFixtures.js";
 
-// Every mesh read names its tolerances: the display tolerance cadgen publishes.
-const STANDARD = TEST_DISPLAY_TESSELLATION;
-
-// The mesh store every surf load reads: it holds the gear's mesh for any component asked.
+// The part store every surf load reads: it holds the gear's mesh for any part asked.
 let meshStore = everyKeyMeshProvider();
 let tessellationCache = createTessellationCache({ provider: meshStore });
 function setTessellationCacheProvider(provider) {
@@ -53,16 +49,24 @@ function setTessellationCacheProvider(provider) {
   tessellationCache = createTessellationCache({ provider: meshStore });
 }
 
-const identityForSurfTest = (url) => ({
-  surfaceInput: createHash("sha256").update(`render-client-test:${url}`).digest("hex"),
-  surfaceObject: "a".repeat(64),
+// What a page loads the part `name` stands for by: its key and the row the store's probe answers
+// for it, and its selector table's URL, bound to that row.
+async function partLoad(name) {
+  const part = `${createHash("sha256").update(`render-client-test:${name}`).digest("hex")}-v1`;
+  const [row] = await meshStore.probeMany([part]);
+  return { identity: { part, tessellationProbe: row }, selectorsUrl: `https://cache.test${partSelectorsPath(row)}` };
+}
+const loadRenderSurf = async (name, options = {}) => loadSurf({
+  identity: (await partLoad(name)).identity, tessellationCache, ...options,
 });
-const loadRenderSurf = (url, options = {}) => loadSurf(url, {
-  identity: identityForSurfTest(url), tessellationCache, tessellation: STANDARD, ...options,
-});
-const loadRenderSurfSelectorBundle = (url, options = {}) => loadSurfSelectors(url, {
-  identity: identityForSurfTest(url), tessellationCache, tessellation: STANDARD, ...options,
-});
+const loadRenderSurfSelectorBundle = async (name, options = {}) => {
+  const { identity, selectorsUrl } = await partLoad(name);
+  return loadSurfSelectors(selectorsUrl, { identity, tessellationCache, ...options });
+};
+const sunGearTable = () => {
+  const bytes = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "surf/fixtures/sun_gear.selectors.json"));
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+};
 
 function pad4(buffer, byte = 0) {
   const padding = (4 - (buffer.length % 4)) % 4;
@@ -526,25 +530,18 @@ test("an unset source scope leaves render asset caching untouched", async (t) =>
 });
 
 test("the surf leash is byte-bounded: large entries evict oldest-first down to the count floor", async (t) => {
-  const surfBytes = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "surf/fixtures/sun_gear.surf"));
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(
-    surfBytes.buffer.slice(surfBytes.byteOffset, surfBytes.byteOffset + surfBytes.byteLength),
-    { status: 200 }
-  );
-  const url = (i) => `https://cache.test/leash-bytes/components/c${i}.surf`;
+  const name = (i) => `leash-bytes/c${i}`;
   // One decoded component's bytes, measured; then a ceiling that fits two of
   // them, so every entry is "large" relative to the budget.
-  const first = await loadRenderSurf(url(0));
+  const first = await loadRenderSurf(name(0));
   const oneEntryBytes = renderAssetCacheStats().surfLeash.bytes;
   assert.ok(oneEntryBytes > 0, "a decoded payload weighs something");
   const previous = configureSurfLeash({ maxBytes: Math.floor(oneEntryBytes * 2.5), minEntries: 1 });
   t.after(() => {
     configureSurfLeash(previous);
-    globalThis.fetch = originalFetch;
   });
   for (let i = 1; i < 12; i += 1) {
-    await loadRenderSurf(url(i));
+    await loadRenderSurf(name(i));
   }
   const stats = renderAssetCacheStats();
   assert.ok(stats.surfLeash.bytes <= stats.surfLeash.maxBytes, `bytes ${stats.surfLeash.bytes} within ${stats.surfLeash.maxBytes}`);
@@ -552,61 +549,57 @@ test("the surf leash is byte-bounded: large entries evict oldest-first down to t
   // meshData), so two components fit the ceiling: four entries, not 24.
   assert.ok(stats.surfLeash.entries <= 4 && stats.surfLeash.entries >= 1, `entries ${stats.surfLeash.entries}: two large components fit, not 24`);
   assert.ok(stats.surfPayload.entries <= 2, `surf payloads retained: ${stats.surfPayload.entries}`);
-  assert.notEqual(await loadRenderSurf(url(0)), first, "the oldest entry was evicted first");
+  assert.notEqual(await loadRenderSurf(name(0)), first, "the oldest entry was evicted first");
   // The count floor holds a few entries whatever they weigh.
   configureSurfLeash({ maxBytes: 1, minEntries: 3 });
   for (let i = 20; i < 26; i += 1) {
-    await loadRenderSurf(url(i));
+    await loadRenderSurf(name(i));
   }
   assert.equal(renderAssetCacheStats().surfLeash.entries, 3, "the floor keeps three entries above a 1-byte ceiling");
 });
 
 test("surf payloads and selector bundles live on one bounded leash and re-decode after eviction", async (t) => {
-  // What a selector read fetches: the component's selector table (cadgen's), never the SURF.
-  const tableBytes = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "surf/fixtures/sun_gear.selectors.json"));
+  // What a selector read fetches: the part's selector table (cadgen's), its record's other object.
   const originalFetch = globalThis.fetch;
   let fetches = 0;
   globalThis.fetch = async () => {
     fetches += 1;
-    return new Response(tableBytes.buffer.slice(tableBytes.byteOffset, tableBytes.byteOffset + tableBytes.byteLength), { status: 200 });
+    return new Response(sunGearTable(), { status: 200 });
   };
   t.after(() => {
     globalThis.fetch = originalFetch;
   });
-  const url = (i) => `https://cache.test/pkg/components/c${i}.surf`;
+  const name = (i) => `pkg/c${i}`;
   const reads = meshStore.counts.reads;
-  const first = await loadRenderSurf(url(0));
+  const first = await loadRenderSurf(name(0));
   assert.ok(first.vertices instanceof Float32Array);
   assert.equal(fetches, 0, "display reads only the stored mesh");
   // The selector join is deferred: the table is fetched when selection is first used.
-  await loadRenderSurfSelectorBundle(url(0));
+  await loadRenderSurfSelectorBundle(name(0));
   assert.equal(fetches, 1);
   for (let i = 1; i < 30; i += 1) {
-    await loadRenderSurf(url(i));
+    await loadRenderSurf(name(i));
   }
   const stats = renderAssetCacheStats();
   assert.ok(stats.surfLeash.entries <= stats.surfLeash.limit, "leash bounded");
   assert.ok(stats.surfPayload.entries <= stats.surfLeash.limit, `surf payload cache bounded (${stats.surfPayload.entries})`);
   assert.ok(stats.surfPayload.typedBytes > 0, "stats attribute retained render bytes");
   assert.equal(stats.selector.manifestRows, 0, "an old selector is evicted independently of displayed meshes");
-  // The first component was evicted: loading it again decodes a FRESH payload
-  // (the array-buffer cache may absorb the fetch itself).
-  const again = await loadRenderSurf(url(0));
+  // The first component was evicted: loading it again decodes a FRESH payload.
+  const again = await loadRenderSurf(name(0));
   assert.notEqual(again, first, "evicted entry is re-decoded, not retained");
   assert.ok(meshStore.counts.reads - reads >= 31, "every display, the evicted one again, read its mesh");
 });
 
 test("display reads only the stored mesh and joins selectors on first use", async (t) => {
-  const surfBytes = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "surf/fixtures/sun_gear.surf"));
-  const surfBuffer = surfBytes.buffer.slice(surfBytes.byteOffset, surfBytes.byteOffset + surfBytes.byteLength);
-  const { index } = parseSurf(surfBuffer);
-  const tableBytes = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "surf/fixtures/sun_gear.selectors.json"));
-  const url = `https://cache.test/cached/components/cached-${Date.now()}.selectors.json`;
+  // The table cadgen derived beside the mesh: the oracle for every fact the bundle carries.
+  const table = selectorTableFixture("sun_gear");
+  const name = `cached/cached-${Date.now()}`;
   let fetches = 0;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => {
     fetches += 1;
-    return new Response(tableBytes.buffer.slice(tableBytes.byteOffset, tableBytes.byteOffset + tableBytes.byteLength), { status: 200 });
+    return new Response(sunGearTable(), { status: 200 });
   };
   setTessellationCacheProvider(everyKeyMeshProvider());
   t.after(() => {
@@ -614,28 +607,28 @@ test("display reads only the stored mesh and joins selectors on first use", asyn
     setTessellationCacheProvider(null);
   });
 
-  const meshData = await loadRenderSurf(url);
+  const meshData = await loadRenderSurf(name);
   assert.ok(meshData.indices.length > 0);
-  assert.equal(fetches, 0, "display needs no surf bytes");
-  assert.equal(meshStore.counts.reads, 1, "display performs one input-addressed mesh read");
+  assert.equal(fetches, 0, "display needs no selector table");
+  assert.equal(meshStore.counts.reads, 1, "display performs one part-addressed mesh read");
   const selectorsBeforeDemand = renderAssetCacheStats().selector.entries;
 
-  const bundle = await loadRenderSurfSelectorBundle(url);
+  const bundle = await loadRenderSurfSelectorBundle(name);
   assert.equal(fetches, 1, "topology is fetched only when selectors are requested");
   assert.equal(
     renderAssetCacheStats().selector.entries,
     selectorsBeforeDemand + 1,
     "display did not populate the selector cache",
   );
-  assert.equal(bundle.manifest.faces.length, index.faces.length);
-  assert.equal(bundle.manifest.edges.length, index.edges.length);
+  assert.equal(bundle.manifest.faces.length, table.stats.faceCount);
+  assert.equal(bundle.manifest.edges.length, table.stats.edgeCount);
   const column = (columns, name) => bundle.manifest.tables[columns].indexOf(name);
-  assert.equal(bundle.manifest.faces[0][column("faceColumns", "area")], index.faces[0].area, "exact stored face area survives");
-  assert.equal(bundle.manifest.edges[0][column("edgeColumns", "length")], index.edges[0].length, "exact stored edge length survives");
+  const stored = (rows, columns, name) => table[rows][0][table.tables[columns].indexOf(name)];
+  assert.equal(bundle.manifest.faces[0][column("faceColumns", "area")], stored("faces", "faceColumns", "area"), "exact stored face area survives");
+  assert.equal(bundle.manifest.edges[0][column("edgeColumns", "length")], stored("edges", "edgeColumns", "length"), "exact stored edge length survives");
 });
 
 test("a corrupt stored body is a probe miss for its caller to ask for again, never a fallback", async (t) => {
-  const url = `https://cache.test/corrupt/components/corrupt-${Date.now()}.surf`;
   const store = everyKeyMeshProvider();
   const read = store.getProbed;
   store.getProbed = async (row, options) => {
@@ -651,26 +644,25 @@ test("a corrupt stored body is a probe miss for its caller to ask for again, nev
     globalThis.fetch = originalFetch;
     setTessellationCacheProvider(null);
   });
-  await assert.rejects(loadRenderSurf(url), isTessellationCacheProbeMissError);
-  assert.equal(fetches, 0, "nothing reads the surf to make a mesh of its own");
+  await assert.rejects(loadRenderSurf(`corrupt/corrupt-${Date.now()}`), isTessellationCacheProbeMissError);
+  assert.equal(fetches, 0, "nothing else is read to make a mesh of its own");
 });
 
 test("an admitted probe whose body vanished is a probe miss, reading nothing else", async (t) => {
-  const surfBytes = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "surf/fixtures/sun_gear.surf"));
-  const surfBuffer = surfBytes.buffer.slice(surfBytes.byteOffset, surfBytes.byteOffset + surfBytes.byteLength);
-  const url = `https://cache.test/strict/components/strict-${Date.now()}.surf`;
-  const identity = identityForSurfTest(url);
-  const [probe] = await everyKeyMeshProvider().probeMany([tessellationCacheKey(identity.surfaceInput, STANDARD)]);
-  assert.deepEqual(probe, probeRowFor((await everyKeyMeshProvider().getManyProbed([probe]))[0]));
+  const store = everyKeyMeshProvider();
+  const part = `${createHash("sha256").update(`render-client-test:strict-${Date.now()}`).digest("hex")}-v1`;
+  const [probe] = await store.probeMany([part]);
+  assert.deepEqual(probe, partRowFor((await store.getManyProbed([probe]))[0]));
   let fetches = 0;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => {
     fetches += 1;
-    return new Response(surfBuffer.slice(0), { status: 200 });
+    return new Response(null, { status: 404 });
   };
+  let reads = 0;
   setTessellationCacheProvider({
     async probeMany() { return [probe]; },
-    async getProbed() { return null; },
+    async getProbed() { reads += 1; return null; },
   });
   t.after(() => {
     globalThis.fetch = originalFetch;
@@ -678,10 +670,21 @@ test("an admitted probe whose body vanished is a probe miss, reading nothing els
   });
 
   await assert.rejects(
-    loadSurf(url, { tessellation: STANDARD, identity: { ...identity, tessellationProbe: probe } }),
+    loadSurf({ tessellationCache, identity: { part, tessellationProbe: probe } }),
     isTessellationCacheProbeMissError,
   );
+  assert.equal(reads, 1, "the admitted body was asked for once");
   assert.equal(fetches, 0, "cold work waits for a fresh admission");
+});
+
+test("a load whose row names another part is refused before anything is read or cached", async () => {
+  const [a, b] = await Promise.all([partLoad(`row-a-${Date.now()}`), partLoad(`row-b-${Date.now()}`)]);
+  const mismatched = { part: a.identity.part, tessellationProbe: b.identity.tessellationProbe };
+  const reads = meshStore.counts.reads;
+  await assert.rejects(loadSurf({ tessellationCache, identity: mismatched }), /another part's row/);
+  await assert.rejects(loadSurfSelectors(a.selectorsUrl, { tessellationCache, identity: mismatched }), /another part's row/);
+  assert.equal(meshStore.counts.reads, reads, "nothing was read");
+  assert.equal(peekRenderSurf(b.identity.tessellationProbe), null, "nothing was cached as the other part's");
 });
 
 test("a failed surf worker job is not retried synchronously on the main thread", async (t) => {
@@ -709,8 +712,7 @@ test("a failed surf worker job is not retried synchronously on the main thread",
     globalThis.fetch = savedFetch;
   });
 
-  const url = `https://failure.test/components/heavy-${Date.now()}.surf`;
-  await assert.rejects(loadRenderSurf(url), /heavy worker failed/);
+  await assert.rejects(loadRenderSurf(`failure/heavy-${Date.now()}`), /heavy worker failed/);
   assert.equal(mainThreadFetches, 0);
 });
 
@@ -734,14 +736,14 @@ test("surf RAM hits do not create worker memory ownership", async (t) => {
     globalThis.Worker = savedWorker;
   });
 
-  const url = `https://ram-hit.test/not-components/resident-${Date.now()}.surf`;
-  const first = await loadRenderSurf(url, { memoryEstimateBytes: 321 });
+  const name = `ram-hit/resident-${Date.now()}`;
+  const first = await loadRenderSurf(name, { memoryEstimateBytes: 321 });
   assert.ok(first);
   assert.equal(surfWorkerMemoryStats().residentEstimateBytes, 321);
   const posts = created.reduce((total, worker) => total + worker.messages.length, 0);
 
   assert.equal(
-    await loadRenderSurf(url, { memoryEstimateBytes: 999 }),
+    await loadRenderSurf(name, { memoryEstimateBytes: 999 }),
     first,
     "the second load is the exact main-thread cache owner",
   );

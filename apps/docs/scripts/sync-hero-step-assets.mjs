@@ -8,10 +8,10 @@
 //
 // The tree lives in cadgen's store, keyed by the STEP file's bytes, and the
 // store holds no directories: this script asks cadgen to export a view of the
-// tree (assembly.json + components/), to mesh every component at the display
-// tolerance (components/<cid>.glb, the mesh every view draws) and to write
-// the articulation and animation beside them, and copies what the browser
-// fetches. Run it after rebuilding the model:
+// tree (assembly.json + components/), to write each component's part's display
+// mesh beside it (components/<cid>.glb, the mesh every view draws, which the
+// descriptor names as the component's `glb`) and the articulation and animation,
+// and copies what the browser fetches. Run it after rebuilding the model:
 //
 //   python models/assemblies/src/planetary_gear_assembly/planetary_gear_assembly.py
 //   node apps/docs/scripts/sync-hero-step-assets.mjs
@@ -52,15 +52,15 @@ const viewDir = execFileSync(
     "-c",
     "import json, sys; from pathlib import Path; " +
       "from cadgen.catalog import result_tree_for; from cadgen.store.view import export_view; " +
-      "from cadgen.store import meshes, surfaces; " +
+      "from cadgen.store import parts; " +
       "from cadgen._internal.source_sidecar import apply_appearance, read_source_sidecar; " +
       "from cadgen.articulation import step_articulation; " +
       "tree = result_tree_for(Path(sys.argv[1])); view = export_view(tree) if tree else None; " +
       "descriptor = json.loads((view / 'assembly.json').read_text()) if view else {}; " +
-      "surfaces.derive(tree, producer=descriptor['surfaceProducer'], tessellations=[dict(" +
-      "chordTolerance=meshes.DISPLAY_CHORD, angleTolerance=meshes.DISPLAY_ANGLE)]) if view else None; " +
-      "[(view / 'components' / (cid + '.glb')).write_bytes(meshes.read(meshes.tessellation_key(entry['surfaceInput']))) " +
-      "for cid, entry in descriptor.get('components', {}).items()]; " +
+      "[entry.update(glb=f'components/{cid}.glb') for cid, entry in descriptor.get('components', {}).items()]; " +
+      "[(view / entry['glb']).write_bytes(parts.read(entry['part'], 'glb')) " +
+      "for entry in descriptor.get('components', {}).values()]; " +
+      "(view / 'assembly.json').write_text(json.dumps(descriptor)) if view else None; " +
       "sidecar = read_source_sidecar(Path(sys.argv[1])) if view else None; " +
       "(view / 'assembly.json').write_text(json.dumps(apply_appearance(descriptor, sidecar.get('appearance')))) " +
       "if sidecar and sidecar.get('appearance') is not None else None; " +
@@ -82,10 +82,10 @@ try {
   const descriptor = JSON.parse(fs.readFileSync(path.join(viewDir, "assembly.json"), "utf8"));
 
   // Ship only what the browser fetches: the descriptor, each component's mesh,
-  // which `packageSourceFromBaseUrl` finds beside the surf path the descriptor
-  // names, and the articulation and animation cadgen wrote beside them. The
-  // .surf (exact surfaces), the selector table and the .brep (exact geometry)
-  // exist for picking, recognition and exports, which the hero never does.
+  // which `packageSourceFromBaseUrl` finds at the glb path the descriptor names,
+  // and the articulation and animation cadgen wrote beside them. The selector
+  // table and the .brep (exact geometry) exist for picking and exports, which
+  // the hero never does.
   fs.rmSync(heroTreeDir, { recursive: true, force: true });
   fs.mkdirSync(path.join(heroTreeDir, "components"), { recursive: true });
   fs.copyFileSync(path.join(viewDir, "assembly.json"), path.join(heroTreeDir, "assembly.json"));
@@ -98,11 +98,10 @@ try {
 
   let copied = 0;
   for (const [cid, entry] of Object.entries(descriptor.components || {})) {
-    const surf = String(entry?.surf || "");
-    if (!surf) {
-      throw new Error(`Component ${cid} declares no surf path in ${viewDir}/assembly.json`);
+    const mesh = String(entry?.glb || "");
+    if (!mesh) {
+      throw new Error(`Component ${cid} declares no glb path in ${viewDir}/assembly.json`);
     }
-    const mesh = `${surf.replace(/\.surf$/, "")}.glb`;
     fs.copyFileSync(path.join(viewDir, mesh), path.join(heroTreeDir, mesh));
     copied += 1;
   }

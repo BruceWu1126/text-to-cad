@@ -16,7 +16,7 @@ function rowsOf(manifest, rows, columns) {
 
 function load(name) {
   const mesh = meshFixture(name);
-  const { component } = decodeComponentTessellation(mesh.bytes, { surfaceInput: mesh.surfaceInput, tessellation: mesh.tessellation });
+  const { component } = decodeComponentTessellation(mesh.bytes, { part: mesh.part });
   const table = selectorTableFixture(name);
   return { table, component, bundle: joinSelectorTable(table, component) };
 }

@@ -1,5 +1,5 @@
-import type { TessellationCache } from '../lib/surf/cacheTypes.js';
-export type { TessellationCache, TessellationCacheEntry, TessellationCacheProvider, TessellatedComponent, TessellationOptions } from '../lib/surf/cacheTypes.js';
+import type { PartRow, TessellationCache } from '../lib/surf/cacheTypes.js';
+export type { PartRow, TessellationCache, TessellationCacheEntry, TessellationCacheProvider, TessellatedComponent } from '../lib/surf/cacheTypes.js';
 export type CadJson = null | boolean | number | string | CadJson[] | { [key: string]: CadJson };
 export interface CadEntry {
   /** The file's absolute path, `/`-separated. */
@@ -13,16 +13,9 @@ export interface CadEntry {
   bytes?: number;
   [key: string]: unknown;
 }
-/** cadgen's display tolerance (`cadgen.tessellation_policy`): what every STEP part is meshed at. */
-export interface CadDisplayTessellation {
-  chordTolerance: number;
-  angleTolerance: number;
-}
 export interface CadServerInfo {
   autoReload?: boolean;
   identityToken?: string;
-  /** The display tolerance the page draws STEP models at. */
-  tessellation?: CadDisplayTessellation;
   /** The folder the server was started in, where a developer's relative `?file=` resolves. */
   start?: string;
   /** Whether this computer has a file chooser for the home's Open. */
@@ -134,28 +127,25 @@ export interface CadResourceProvider {
   resolveDependency(source: string, reference: string, options?: { kind?: 'relative' | 'package' }): string;
   workerTicket(url: string, options?: CadResourceReadOptions): Promise<CadWorkerResourceTicket>;
 }
-export interface CadSurfaceProducer { scheme?: number; surfFormat?: number; producerKey?: string; [key: string]: unknown }
+/** The kernel a view's parts are derived under: opaque to the page, which only forwards it. */
+export interface CadSurfaceProducer { producerKey?: string; [key: string]: unknown }
 export interface CadRuntimeView {
   tree: string;
   viewId: string;
   surfaceProducer: CadSurfaceProducer;
-  components?: Record<string, {surfaceInput: string; surfaceObject?: string; [key: string]: unknown}>;
+  /** Each component names its part (`<digest>-v<version>`): the key its display data is read by. */
+  components?: Record<string, {part: string; [key: string]: unknown}>;
   [key: string]: unknown;
 }
-export interface CadSurfaceComponentRequest { cid: string; surfaceInput: string; surfaceObject?: string }
-/** One component's exact surface and, beside it, cadgen's selector table (the refs and facts the page joins to the mesh). */
-export interface CadSurfaceTicket {
-  readonly surfaceInput: string; readonly surfaceObject: string; readonly surfUrl: string; readonly byteLength: number;
-  readonly selectorsObject: string; readonly selectorsUrl: string; readonly selectorsByteLength: number;
-}
+export interface CadSurfaceComponentRequest { cid: string; part: string }
 export interface CadSurfaceRequest {
   tree: string; viewId: string; producer: CadSurfaceProducer;
-  components: {cid: string; surfaceInput: string; expectedSurfaceObject?: string}[];
+  components: CadSurfaceComponentRequest[];
   job?: string;
 }
 export interface CadSurfaceResponse {
   viewId: string; job?: string; replacementView?: CadRuntimeView;
-  components: Record<string, {state: 'pending' | 'ready' | 'failed'; surfaceInput: string; surfaceObject?: string; url?: string; byteLength?: number; job?: string; error?: string; code?: string}>;
+  components: Record<string, {state: 'pending' | 'ready' | 'failed'; part: string; record?: Omit<PartRow, 'part'>; job?: string; error?: string; code?: string}>;
 }
 /** What a build of a STEP file is doing: status only. The viewer always shows the saved file. */
 export interface CadEditingPreview {
@@ -223,17 +213,16 @@ export interface CadWorkspaceService {
   robot(file: string, options?: CadRequestOptions): Promise<CadRobotPayload>;
   readonly resources: CadResourceProvider;
   /**
-   * `onReady` hears each component as soon as its row is ready, while the rest are still awaited.
-   * `onFailed` hears each component cadgen could not derive or mesh, with its own error, and the
-   * request resolves with the rest; without it, a failed component fails the request.
-   * `tessellation` also has cadgen mesh each component at those tolerances.
+   * Each component's part row: its record, which cadgen derives in one job for a part the store
+   * lacks. `onReady` hears each component as soon as its row is ready, while the rest are still
+   * awaited. `onFailed` hears each component cadgen could not derive or mesh, with its own error,
+   * and the request resolves with the rest; without it, a failed component fails the request.
    */
   resolveSurfaceComponents(view: CadRuntimeView, requested: CadSurfaceComponentRequest[],
     options?: CadRequestOptions & {
-      onReady?: (cid: string, ticket: CadSurfaceTicket) => void;
+      onReady?: (cid: string, row: PartRow) => void;
       onFailed?: (cid: string, error: Error) => void;
-      tessellation?: { chordTolerance?: number; angleTolerance?: number };
-    }): Promise<Map<string, CadSurfaceTicket>>;
+    }): Promise<Map<string, PartRow>>;
   observeEditingPreview(file: string, onUpdate: (preview: CadEditingPreview) => void, onError: (error: unknown) => void, options?: CadPreviewObserverOptions): () => void;
   createRenderSession(options?: { file?: string }): CadRenderSession;
   dispose(): void;

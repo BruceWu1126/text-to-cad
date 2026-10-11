@@ -6,56 +6,56 @@ import {
   probeInitialDisplay,
   producedDisplayPlan,
 } from "./initialDisplay.js";
-import { TEST_DISPLAY_TESSELLATION, installTestDisplayTessellation } from "@text-to-cad/core/lib/surf/testing.js";
-
-// The display tolerance a cadgen server publishes, installed as a host installs it.
-installTestDisplayTessellation();
 
 const MIB = 1024 * 1024;
+const PART = `${"d".repeat(64)}-v1`;
 
-function cachedProbes(standard) {
+// A part's row as the store answers it, sized by its display mesh.
+function row(glb = {}) {
+  return { part: PART, glb: { object: "1".repeat(64), byteLength: MIB, decodedBytes: 3 * MIB, ...glb },
+    selectors: { object: "2".repeat(64), byteLength: 64 } };
+}
+
+function cachedProbes(stored) {
   const requested = [];
   return {
     requested,
-    probeEntries: async ([input], tessellation) => {
-      requested.push(tessellation);
-      return new Map(standard ? [[input, standard]] : []);
+    probeEntries: async (parts, ...rest) => {
+      requested.push([parts, ...rest]);
+      return new Map(stored ? [[parts[0], stored]] : []);
     },
   };
 }
 
-test("a stored display mesh opens the component without a SURF URL, sized by its body", async () => {
-  const standard = { surfaceObject: "exact", byteLength: MIB, decodedBytes: 3 * MIB };
-  const cache = cachedProbes(standard);
-  const hit = await probeInitialDisplay({ surfaceInput: "input", maxInFlightBytes: 256 * MIB, ...cache });
-  assert.equal(hit.cacheProbe, standard);
+test("a stored part opens the component, sized by its display mesh", async () => {
+  const stored = row();
+  const cache = cachedProbes(stored);
+  const hit = await probeInitialDisplay({ part: PART, maxInFlightBytes: 256 * MIB, ...cache });
+  assert.equal(hit.cacheProbe, stored);
   assert.equal(hit.plan.estimatedBytes, 4 * MIB);
   assert.equal(hit.plan.fitsDecodeCap, true);
-  assert.deepEqual(cache.requested, [TEST_DISPLAY_TESSELLATION],
-    "the display mesh, and no other, is asked, by both its tolerances");
+  assert.deepEqual(cache.requested, [[[PART], { signal: undefined }]], "the part, and no other, is asked, by its key alone");
 });
 
-test("a missing, mismatched, refused or unsized display entry leaves the component cold", async () => {
-  const row = { object: "standard", surfaceObject: "exact", byteLength: MIB, decodedBytes: 3 * MIB };
-  for (const [standard, options] of [
+test("a missing, refused or unsized part leaves the component cold", async () => {
+  for (const [stored, options] of [
     [null, {}],
-    [{ ...row, surfaceObject: "different" }, {}],
-    [row, { rejectedCacheObjects: new Set(["standard"]) }],
-    [{ ...row, decodedBytes: NaN }, {}],
+    [row(), { rejectedCacheObjects: new Set(["1".repeat(64)]) }],
+    [row({ decodedBytes: NaN }), {}],
   ]) {
-    assert.equal(await probeInitialDisplay({ surfaceInput: "input", surfaceObject: "exact",
-      maxInFlightBytes: 256 * MIB, ...cachedProbes(standard), ...options }), null);
+    assert.equal(await probeInitialDisplay({ part: PART, maxInFlightBytes: 256 * MIB,
+      ...cachedProbes(stored), ...options }), null);
   }
   const controller = new AbortController();
   controller.abort();
-  await assert.rejects(probeInitialDisplay({ surfaceInput: "input", maxInFlightBytes: 256 * MIB,
-    signal: controller.signal, probeEntries: async (_inputs, _options, { signal }) => signal.throwIfAborted() }),
+  await assert.rejects(probeInitialDisplay({ part: PART, maxInFlightBytes: 256 * MIB,
+    signal: controller.signal, probeEntries: async (_parts, { signal }) => signal.throwIfAborted() }),
   { name: "AbortError" });
 });
 
 test("a mesh too large to admit with the rest still opens, to load alone", () => {
-  const huge = { surfaceObject: "exact", byteLength: MIB, decodedBytes: 300 * MIB };
-  const warm = initialDisplayFromProbe(huge, { surfaceObject: "exact", maxInFlightBytes: 256 * MIB });
+  const huge = row({ decodedBytes: 300 * MIB });
+  const warm = initialDisplayFromProbe(huge, { maxInFlightBytes: 256 * MIB });
   assert.deepEqual(warm.plan, { estimatedBytes: 301 * MIB, fitsDecodeCap: false, reason: "warm" });
   assert.deepEqual(producedDisplayPlan(huge, { maxInFlightBytes: 256 * MIB }),
     { estimatedBytes: 301 * MIB, fitsDecodeCap: false, reason: "produced" });

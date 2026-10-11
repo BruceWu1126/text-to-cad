@@ -1,5 +1,4 @@
-import { viewerOriginUrl } from "./origin.js";
-import { tessellationCacheKey, tessellationQuality, validateTessellationProbeRow } from "../lib/surf/tessellationCache.js";
+import { isPartKey, partRow } from "../lib/surf/tessellationCache.js";
 const DIGEST_RE = /^[0-9a-f]{64}$/;
 const INITIAL_POLL_MS = 80;
 const MAX_POLL_MS = 640;
@@ -24,6 +23,11 @@ function digest(value, label) {
   return text;
 }
 
+function partKey(value, label) {
+  if (!isPartKey(value)) throw new TypeError(`${label} must be a part key`);
+  return value;
+}
+
 function waitForPoll(delay, signal) {
   if (signal?.aborted) return Promise.reject(abortError());
   return new Promise((resolve, reject) => {
@@ -45,60 +49,6 @@ async function guardedPost(path, body, { signal, client }) {
     : client.requestSurfaces(body, { signal });
 }
 
-function verifiedReadyRow(row, { tree, cid, surfaceInput, client, tessellation }) {
-  if (!row || row.state !== "ready" || row.surfaceInput !== surfaceInput) {
-    throw new Error(`Surface response changed the immutable input for ${cid}`);
-  }
-  const surfaceObject = digest(row.surfaceObject, `surface object for ${cid}`);
-  const byteLength = Number(row.byteLength);
-  if (!Number.isSafeInteger(byteLength) || byteLength <= 0) {
-    throw new Error(`Surface response has an invalid byte length for ${cid}`);
-  }
-  const parsed = new URL(String(row.url || ""), "http://cad-viewer.local");
-  if (parsed.origin !== "http://cad-viewer.local" || parsed.pathname !== "/__cad/store"
-      || parsed.searchParams.get("tree") !== tree
-      || parsed.searchParams.get("surfaceInput") !== surfaceInput
-      || parsed.searchParams.get("object") !== surfaceObject) {
-    throw new Error(`Surface response has an invalid immutable URL for ${cid}`);
-  }
-  // The component's selector table (cadgen's, derived with the surface): the same store route,
-  // bound to the same input, naming the table's object.
-  const selectors = row.selectors;
-  const selectorsObject = digest(selectors?.object, `selector table object for ${cid}`);
-  const selectorsByteLength = Number(selectors?.byteLength);
-  if (!Number.isSafeInteger(selectorsByteLength) || selectorsByteLength <= 0) {
-    throw new Error(`Surface response has an invalid selector table byte length for ${cid}`);
-  }
-  const selectorsParsed = new URL(String(selectors?.url || ""), "http://cad-viewer.local");
-  if (selectorsParsed.origin !== "http://cad-viewer.local" || selectorsParsed.pathname !== "/__cad/store"
-      || selectorsParsed.searchParams.get("tree") !== tree
-      || selectorsParsed.searchParams.get("surfaceInput") !== surfaceInput
-      || selectorsParsed.searchParams.get("object") !== selectorsObject) {
-    throw new Error(`Surface response has an invalid selector table URL for ${cid}`);
-  }
-  // Every ready row carries the component's display mesh: the probe row a read of the mesh store
-  // would answer. A caller that draws it names the tessellation it draws at, and the row is checked
-  // against it.
-  let mesh = null;
-  if (tessellation) {
-    mesh = validateTessellationProbeRow(row.mesh, {
-      tessellationInput: tessellationCacheKey(surfaceInput, tessellation), surfaceInput, surfaceObject,
-    });
-    if (!mesh) throw new Error(`Surface response has no valid mesh for ${cid}`);
-  }
-  const url = (location) => (client ? viewerOriginUrl(client.origin, `${location.pathname}${location.search}`) : `${location.pathname}${location.search}`);
-  return Object.freeze({
-    surfaceInput,
-    surfaceObject,
-    surfUrl: url(parsed),
-    byteLength,
-    selectorsObject,
-    selectorsUrl: url(selectorsParsed),
-    selectorsByteLength,
-    ...(mesh ? { mesh } : {}),
-  });
-}
-
 function verifiedReplacementView(value, tree) {
   if (!value || typeof value !== "object" || Array.isArray(value)
       || value.tree !== tree || !value.surfaceProducer
@@ -108,7 +58,7 @@ function verifiedReplacementView(value, tree) {
   }
   digest(value.viewId, "replacement surface viewId");
   for (const [cid, component] of Object.entries(value.components)) {
-    digest(component?.surfaceInput, `replacement surface input for ${cid}`);
+    partKey(component?.part, `replacement part for ${cid}`);
   }
   return value;
 }
@@ -124,15 +74,14 @@ export class SurfaceResolutionError extends Error {
 }
 
 /**
- * Resolve exact SURF objects for one frozen runtime view. A fully warm mesh
- * path does not call this function. The request never computes D or producer
- * identity in JavaScript; it forwards the backend-prepared opaque pins.
+ * Resolve the parts of one frozen runtime view. A fully warm mesh path does not
+ * call this function. The request never computes a part key or producer identity
+ * in JavaScript; it forwards the backend-prepared opaque pins.
  *
- * cadgen answers each component from its store -- its surface, selector table and
- * display mesh, which the build derived -- and derives, in one job, any the store
- * lacks. `tessellation`, when given, is the pair the caller draws at (cadgen's
- * display tolerance): each ticket then carries the display mesh's probe row
- * (`mesh`), checked against it, so its body is read next without another probe.
+ * cadgen answers each component with its part's record -- its display mesh and
+ * selector table, which the build derived -- and derives, in one job, any part the
+ * store lacks. Each ticket is the part's row (`partRow`), so its mesh is read next
+ * without another probe.
  *
  * `onReady(cid, ticket)`, when given, hears each component the moment its row is
  * ready, once, while the request goes on waiting for the rest of its components:
@@ -144,14 +93,14 @@ export class SurfaceResolutionError extends Error {
  * once every ready row of the response that names it has been announced.
  *
  * `onPending(cid)`, when given, hears a component cadgen is still deriving (its
- * surface or mesh was not in the store), on every answer that says so: what a
- * loading screen needs to say it is meshing rather than reading.
+ * part was not in the store), on every answer that says so: what a loading
+ * screen needs to say it is meshing rather than reading.
  */
-export async function resolveSurfaceComponents(descriptor, requested, { signal, client, onReady = null, onFailed = null, onPending = null, tessellation = undefined } = {}) {
+export async function resolveSurfaceComponents(descriptor, requested, { signal, client, onReady = null, onFailed = null, onPending = null } = {}) {
   if (!client) throw new TypeError("Surface resolution requires a CAD workspace service");
   const list = Array.isArray(requested) ? requested : [];
   if (list.length <= SURFACE_REQUEST_MAX_COMPONENTS) {
-    return resolveSurfaceRequest(descriptor, list, { signal, client, onReady, onFailed, onPending, tessellation });
+    return resolveSurfaceRequest(descriptor, list, { signal, client, onReady, onFailed, onPending });
   }
   // Every chunk is its own request (and subscriber job); one failing stops the others.
   const controller = new AbortController();
@@ -164,7 +113,7 @@ export async function resolveSurfaceComponents(descriptor, requested, { signal, 
       chunks.push(list.slice(start, start + SURFACE_REQUEST_MAX_COMPONENTS));
     }
     const results = await Promise.all(chunks.map((chunk) => (
-      resolveSurfaceRequest(descriptor, chunk, { signal: controller.signal, client, onReady, onFailed, onPending, tessellation }).catch((error) => {
+      resolveSurfaceRequest(descriptor, chunk, { signal: controller.signal, client, onReady, onFailed, onPending }).catch((error) => {
         controller.abort();
         throw error;
       })
@@ -187,26 +136,20 @@ function subscriberToken(payload) {
   return String(rows.find((row) => row?.job)?.job || "");
 }
 
-async function resolveSurfaceRequest(descriptor, requested, { signal, client, onReady = null, onFailed = null, onPending = null, tessellation = undefined }) {
+async function resolveSurfaceRequest(descriptor, requested, { signal, client, onReady = null, onFailed = null, onPending = null }) {
   const tree = digest(descriptor?.tree, "surface tree");
   const viewId = digest(descriptor?.viewId, "surface viewId");
   const producer = descriptor?.surfaceProducer;
   if (!producer || typeof producer !== "object" || Array.isArray(producer)) {
     throw new TypeError("surface view is missing its attested producer");
   }
-  const components = requested.map(({ cid, surfaceInput, surfaceObject }) => ({
+  const components = requested.map(({ cid, part }) => ({
     cid: String(cid || ""),
-    surfaceInput: digest(surfaceInput, `surface input for ${cid}`),
-    ...(surfaceObject ? { expectedSurfaceObject: digest(surfaceObject, `surface object for ${cid}`) } : {}),
+    part: partKey(part, `part of ${cid}`),
   }));
   if (!components.length || components.some((entry) => !entry.cid)) {
     throw new TypeError("surface request must name at least one component");
   }
-
-  // The pair the caller draws at, which the ready rows' display mesh is checked against.
-  const quality = tessellation == null ? null : tessellationQuality(tessellation);
-  const meshTessellation = quality
-    ? { chordTolerance: quality.chordTolerance, angleTolerance: quality.angleTolerance } : null;
   const base = { tree, viewId, producer, components };
   let job = "";
   let cancelled = false;
@@ -254,7 +197,7 @@ async function resolveSurfaceRequest(descriptor, requested, { signal, client, on
       for (const request of components) {
         if (failed.has(request.cid)) continue;
         const row = payload.components[request.cid];
-        if (!row || row.surfaceInput !== request.surfaceInput) {
+        if (!row || row.part !== request.part) {
           throw new Error(`Surface response omitted ${request.cid}`);
         }
         if (row.state === "failed") {
@@ -273,10 +216,8 @@ async function resolveSurfaceRequest(descriptor, requested, { signal, client, on
           onPending?.(request.cid);
           continue;
         }
-        const ticket = verifiedReadyRow(row, { tree, ...request, client, tessellation: meshTessellation });
-        if (request.expectedSurfaceObject && ticket.surfaceObject !== request.expectedSurfaceObject) {
-          throw new Error(`Surface response changed the pinned object for ${request.cid}`);
-        }
+        const ticket = row.state === "ready" ? partRow(request.part, row.record) : null;
+        if (!ticket) throw new Error(`Surface response has no valid part record for ${request.cid}`);
         ready.set(request.cid, ticket);
         if (onReady && !announced.has(request.cid)) {
           announced.add(request.cid);

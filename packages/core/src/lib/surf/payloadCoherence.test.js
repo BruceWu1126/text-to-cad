@@ -1,34 +1,27 @@
-// The mesh↔labels coherence invariant, pinned across every load-path shape.
+// The mesh↔labels coherence invariant, pinned on cadgen's stored parts.
 //
 // Picking and highlighting work only when the displayed meshData and the
 // selector bundle (face runs, edge tables) derive from ONE mesh. This suite
-// asserts the invariant on cadgen's stored meshes of REAL surfs — a gear
-// (sun_gear) and a turned part (cam_follower_roller) — for every shape a
-// component payload can take: the real SURF index (selectors) and the stored
-// entry's own display index (render-only and snapshot loads).
+// asserts the invariant on cadgen's stored parts of REAL shapes — a gear
+// (sun_gear) and a turned part (cam_follower_roller) — each its display mesh
+// joined to its selector table, the two objects of one part's record.
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseSurf } from "./container.js";
-import { buildMeshDataFromSurf } from "./surfMeshData.js";
+import { buildComponentMeshData } from "./surfMeshData.js";
 import { joinSelectorTable } from "./selectorTable.js";
-import {
-  decodeComponentTessellation, meshEdgePolylines, meshFaceRanges, surfIndexFromCacheEntry,
-} from "./tessellationCache.js";
-import { meshFixture, selectorTableFixture, surfFixture } from "./__tests__/meshFixtures.js";
+import { decodeComponentTessellation, meshEdgePolylines, meshFaceRanges } from "./tessellationCache.js";
+import { meshFixture, selectorTableFixture } from "./__tests__/meshFixtures.js";
 
 const FIXTURES = ["sun_gear", "cam_follower_roller"];
 const FACE_RUN_COLUMNS = 5; // occurrenceRow, primitiveIndex, triangleStart, triangleCount, faceRow
 
 function loadFixture(name) {
-  const { index } = parseSurf(surfFixture(name).arrayBuffer());
   const table = selectorTableFixture(name);
   const mesh = meshFixture(name);
-  const decoded = decodeComponentTessellation(mesh.bytes, {
-    surfaceInput: mesh.surfaceInput, surfaceObject: mesh.surfaceObject, tessellation: mesh.tessellation,
-  });
+  const decoded = decodeComponentTessellation(mesh.bytes, { part: mesh.part });
   assert.ok(decoded, `${name} decodes`);
-  return { index, table, decoded, component: decoded.component };
+  return { table, component: decoded.component };
 }
 
 function faceRunRows(bundle) {
@@ -94,36 +87,13 @@ function assertCoherent(label, component, meshData, bundle) {
   assert.equal(meshData.parts[0].triangleCount, meshTriangles, `${label}: part triangleCount`);
 }
 
-function assertTypedArraysEqual(label, a, b) {
-  assert.equal(a.constructor, b.constructor, `${label}: same array type`);
-  assert.equal(a.length, b.length, `${label}: same length`);
-  for (let i = 0; i < a.length; i += 1) {
-    if (a[i] !== b[i]) {
-      assert.fail(`${label}: differs at ${i} (${a[i]} !== ${b[i]})`);
-    }
-  }
-}
-
 for (const fixture of FIXTURES) {
   test(`${fixture}: the stored mesh with its selector table is coherent (faces + edges)`, () => {
-    const { index, table, component } = loadFixture(fixture);
-    const meshData = buildMeshDataFromSurf(index, component);
+    const { table, component } = loadFixture(fixture);
+    const meshData = buildComponentMeshData(component);
     const bundle = joinSelectorTable(table, component);
-    assertCoherent("real index", component, meshData, bundle);
+    assertCoherent("stored part", component, meshData, bundle);
     // A decoded entry (one buffer for every section) is copied out so the entry can be released.
     assert.notEqual(meshData.vertices.buffer, component.positions.buffer, "vertices leave the entry buffer");
-  });
-
-  test(`${fixture}: the entry's own display index draws what the real index draws`, () => {
-    const { index, decoded, component } = loadFixture(fixture);
-    const surrogate = surfIndexFromCacheEntry(decoded);
-    assert.ok(surrogate, "every stored mesh yields a display index");
-    const meshSurrogate = buildMeshDataFromSurf(surrogate, component);
-    const meshReal = buildMeshDataFromSurf(index, component);
-    for (const key of ["vertices", "indices", "normals", "cadEdgePositions", "cadEdgeIndices"]) {
-      assertTypedArraysEqual(`surrogate meshData.${key}`, meshSurrogate[key], meshReal[key]);
-    }
-    assert.deepEqual(meshSurrogate.cadEdgeClassRanges, meshReal.cadEdgeClassRanges, "surrogate class ranges");
-    assert.equal(meshSurrogate.sourceColor, meshReal.sourceColor, "the part colour rides the entry");
   });
 }

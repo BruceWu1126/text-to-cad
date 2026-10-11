@@ -2,32 +2,28 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createModelingRecognitionCache, modelingRecognitionKey, MODELING_RECOGNITION_VERSION } from "./modelingRecognitionCache.js";
 
-test("a recognizer revision misses completed metadata for both exact and static components", () => {
+const partOf = digit => `${digit.repeat(64)}-v1`;
+
+test("a recognizer revision misses completed metadata", () => {
   const cache = createModelingRecognitionCache();
   const result = { tree: [{ label: "Feature" }] };
-  for (const identity of [{ surfaceInput: "input", surfaceObject: "object" }, {}]) {
-    const url = "https://one.test/component.surf";
-    const current = modelingRecognitionKey(identity, url);
-    cache.set(current, result);
-    assert.deepEqual(cache.get(modelingRecognitionKey(identity, url, {
-      recognizerVersion: MODELING_RECOGNITION_VERSION,
-    })), result);
-    assert.equal(cache.get(modelingRecognitionKey(identity, url, {
-      recognizerVersion: MODELING_RECOGNITION_VERSION + 1,
-    })), null);
-  }
+  const component = { part: partOf("a"), surf: "components/a.surf" };
+  cache.set(modelingRecognitionKey(component), result);
+  assert.deepEqual(cache.get(modelingRecognitionKey(component, {
+    recognizerVersion: MODELING_RECOGNITION_VERSION,
+  })), result);
+  assert.equal(cache.get(modelingRecognitionKey(component, {
+    recognizerVersion: MODELING_RECOGNITION_VERSION + 1,
+  })), null);
 });
 
-test("recognition keys bind exact components without carrying occurrence identity", () => {
-  const identity = { surfaceInput: "input-a", surfaceObject: "object-a" };
-  assert.equal(modelingRecognitionKey(identity, "https://one.test/a.surf"),
-    modelingRecognitionKey(identity, "https://two.test/b.surf"));
-  assert.notEqual(modelingRecognitionKey(identity, ""),
-    modelingRecognitionKey({ ...identity, surfaceObject: "object-b" }, ""));
-  assert.notEqual(modelingRecognitionKey(identity, ""),
-    modelingRecognitionKey({ ...identity, surfaceInput: "input-b" }, ""));
-  assert.notEqual(modelingRecognitionKey({}, "https://one.test/a.surf"),
-    modelingRecognitionKey({}, "https://two.test/a.surf"));
+test("recognition keys bind the part alone, without carrying occurrence identity", () => {
+  const component = { part: partOf("a"), surf: "components/a.surf" };
+  assert.equal(modelingRecognitionKey(component), modelingRecognitionKey({ part: partOf("a"), surf: "components/b.surf" }),
+    "two components of one part share its recognition");
+  assert.notEqual(modelingRecognitionKey(component), modelingRecognitionKey({ ...component, part: partOf("b") }));
+  assert.equal(modelingRecognitionKey({ surf: "components/a.surf" }), "", "a component naming no part has no key");
+  assert.equal(createModelingRecognitionCache().set(modelingRecognitionKey({}), { tree: [] }), false);
 });
 
 test("completed recognition metadata obeys count and byte bounds", () => {
@@ -52,7 +48,7 @@ test("a 317-component assembly reopens without recognizing its components again"
   const components = Array.from({ length: 317 }, (_, index) => {
     const digest = index.toString(16).padStart(64, "0");
     return {
-      key: modelingRecognitionKey({ surfaceInput: digest, surfaceObject: digest }, ""),
+      key: modelingRecognitionKey({ part: `${digest}-v1` }),
       result: { tree: [{ id: `feature-${index}`, label: "Base extrude", faces: [1, 2, 3],
         measurements: [["Depth", index + 1, "mm"]], children: [] }], hasFaces: true },
     };
@@ -90,7 +86,7 @@ test("cached metadata is private on read and failures never become reusable resu
 });
 
 test('resource service generations isolate completed recognition', () => {
-  const identity = {surfaceInput:'same',surfaceObject:'same'};
+  const component = {part: partOf('a')};
   const a = {cacheKey: () => 'root:a:generation:1'}, b = {cacheKey: () => 'root:a:generation:2'};
-  assert.notEqual(modelingRecognitionKey(identity, '', {resources:a}), modelingRecognitionKey(identity, '', {resources:b}));
+  assert.notEqual(modelingRecognitionKey(component, {resources:a}), modelingRecognitionKey(component, {resources:b}));
 });
