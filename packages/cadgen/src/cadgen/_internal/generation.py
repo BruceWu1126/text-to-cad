@@ -915,9 +915,14 @@ def _ensure_display(tree: str, *, producer: dict | None = None, progress: object
             failures = ensure_display(tree, producer=producer, progress=counted)
     except Exception as error:  # noqa: BLE001 - the build's result stands; its display data waits for a view
         failures = [f"{type(error).__name__}: {error}"]
+    from cadgen._internal.build_timing import note_warning
+
     for failure in failures:
-        # stderr: stdout is the result channel, as for a mesh export's warnings.
-        print(f"[cadgen] warning: could not mesh {failure}; views show it as failed", file=sys.stderr)
+        text = f"{failure}; views show it as failed"
+        # On the done event, which reaches the root from a child whose own output is
+        # dropped; outside a build, stderr (stdout is the result channel).
+        if not note_warning(text):
+            print(f"[cadgen] warning: {text}", file=sys.stderr)
 
 
 def _ensure_reused_display(spec: EntrySpec, tree: str | None, *, progress: object | None = None,
@@ -1296,11 +1301,12 @@ def _run_with_spec_generation_status(
         # A profiled body is slowed by the profiler: no slowdown to compare.
         "lastModelSeconds": None if profile else clock.last_model_seconds,
     }
-    # The programs its code started ride the done event as its timings do: a child's
-    # stderr is dropped when it succeeds, and this is how its root warns about it.
+    # The programs its code started and its warnings ride the done event as its timings
+    # do: a child's stderr is dropped when it succeeds, and this is how its root hears them.
     _tree_event(
         spec, "done", elapsed=time.perf_counter() - started, stale=_stale_after_build(spec),
         timings=timings, profile=profile_report, started=list(clock.programs) or None,
+        warnings=list(clock.warnings) or None,
     )
     return result
 

@@ -59,17 +59,19 @@ class BuildDerivesDisplayData(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
 
-    def build(self) -> tuple[str, int]:
-        """Run the model in this process: its outcome word, and how many meshes OCCT made."""
+    def build(self, mesher=None) -> tuple[str, int]:
+        """Run the model in this process: its outcome word, and how many meshes OCCT made
+        (by ``mesher`` when given). What it printed is ``self.output``."""
         from cadgen._internal import occt_mesh
         from cadgen.cli._run_model import run_model_argv
 
         output = io.StringIO()
-        with mock.patch.object(occt_mesh, "mesh_component", wraps=occt_mesh.mesh_component) as meshed, \
+        with mock.patch.object(occt_mesh, "mesh_component", wraps=mesher or occt_mesh.mesh_component) as meshed, \
                 contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
             code = run_model_argv([str(self.script)])
-        self.assertEqual(code, 0, output.getvalue())
-        return output.getvalue().strip().splitlines()[-1].split(" ", 1)[0], meshed.call_count
+        self.output = output.getvalue()
+        self.assertEqual(code, 0, self.output)
+        return self.output.strip().splitlines()[-1].split(" ", 1)[0], meshed.call_count
 
     def listing(self):
         from cadgen import step
@@ -113,6 +115,21 @@ class BuildDerivesDisplayData(unittest.TestCase):
         self.assertEqual(self.build(), ("current", 0))
         with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=NO_JOB):
             self.assertEqual(set(self.listing()), {"block", "peg"})
+
+    def test_a_part_that_cannot_be_meshed_is_a_warning_on_the_build_naming_it(self) -> None:
+        from cadgen._internal import occt_mesh
+
+        real = occt_mesh.mesh_component
+
+        def mesher(topods, index, **options):
+            if len(index["faces"]) == 3:  # the peg, a cylinder; the block has six faces
+                raise ValueError("boom")
+            return real(topods, index, **options)
+
+        self.assertEqual(self.build(mesher)[0], "built", "the build stands")
+        warnings = [line for line in self.output.splitlines() if "could not be meshed" in line]
+        self.assertEqual(warnings, ["[cadgen] warning: pair: #o1.2 peg could not be meshed "
+                                    "(MeshProductionError: ValueError: boom); views show it as failed"])
 
 
 if __name__ == "__main__":

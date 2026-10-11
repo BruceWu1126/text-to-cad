@@ -63,7 +63,7 @@ class _Model:
     __slots__ = (
         "model", "name", "state", "phase", "done", "total", "started", "finished",
         "elapsed", "exit", "parent", "children", "stale", "seen", "timings", "profile",
-        "programs", "timed", "stale_told",
+        "programs", "warnings", "timed", "stale_told",
     )
 
     def __init__(self, model: str, parent: str | None) -> None:
@@ -87,6 +87,7 @@ class _Model:
         self.timings: dict | None = None  # where a built model's time went
         self.profile: str | None = None  # its --profile report
         self.programs: list[str] | None = None  # the programs its code started
+        self.warnings: list[str] | None = None  # what its build warned of
         self.timed = False  # its time lines were printed (or held for the block)
         self.stale_told = False  # its already-stale notice was printed (plain non-TTY)
 
@@ -160,7 +161,7 @@ class BuildTree:
                     self._write_line(node)
                 elif self._tty:
                     self._draw(force=True)
-            if (node.timings is not None or node.programs) and not node.timed:
+            if (node.timings is not None or node.programs or node.warnings) and not node.timed:
                 self._time_lines(node)
             if node.stale and node.terminal and not node.stale_told and not (self._json or self._tty):
                 node.stale_told = True
@@ -227,6 +228,9 @@ class BuildTree:
             programs = event.get("started")
             if state == STATE_DONE and isinstance(programs, list) and node.programs is None:
                 node.programs = [str(program) for program in programs if isinstance(program, str) and program]
+            warnings = event.get("warnings")
+            if state == STATE_DONE and isinstance(warnings, list) and node.warnings is None:
+                node.warnings = [str(warning) for warning in warnings if isinstance(warning, str) and warning]
             if state == STATE_FAILED:
                 node.state = STATE_FAILED
         stale = event.get("stale")
@@ -238,8 +242,8 @@ class BuildTree:
 
     def _time_lines(self, node: _Model) -> None:
         """The durable lines for a model that was built: where its time went, the
-        slowdown warning, the warning that it started a program, the ``--profile``
-        report. Once per model."""
+        slowdown warning, the warning that it started a program, its build's own
+        warnings, the ``--profile`` report. Once per model."""
         node.timed = True
         from cadgen._internal.build_timing import slowdown_warning, started_warning, time_line
         from cadgen._internal.doors import display_path
@@ -259,6 +263,7 @@ class BuildTree:
         started = started_warning(node.name, node.programs or [])
         if started:
             lines.append(f"[cadgen] {started}")
+        lines += [f"[cadgen] warning: {node.name}: {warning}" for warning in node.warnings or ()]
         if node.profile:
             lines += [f"[cadgen] {line}" for line in node.profile.splitlines()]
         if self._tty:
@@ -290,6 +295,8 @@ class BuildTree:
             payload["timings"] = {k: v for k, v in node.timings.items() if k != "document"}
         if node.state == STATE_DONE and node.programs:
             payload["started"] = list(node.programs)
+        if node.state == STATE_DONE and node.warnings:
+            payload["warnings"] = list(node.warnings)
         with contextlib.suppress(OSError, ValueError):
             self._stream.write(json.dumps(payload, separators=(",", ":")) + "\n")
             self._stream.flush()

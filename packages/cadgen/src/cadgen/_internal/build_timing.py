@@ -24,10 +24,11 @@ How the split is measured, on the thread that runs the build:
 functions the time went to. Stdlib only: the root process imports this to print,
 and the root must stay light.
 
-The clock also carries the one other thing a build's ``done`` event tells its root
-about the model's own code: the programs it started (``note_programs``), whose
-reads no trace sees, so the root warns that editing what they read will not
-rebuild the model (``started_warning``).
+The clock also carries what else a build's ``done`` event tells its root: the
+programs the model's code started (``note_programs``), whose reads no trace sees,
+so the root warns that editing what they read will not rebuild the model
+(``started_warning``), and the build's own warnings (``note_warning``). A child's
+output is dropped when it succeeds, so its done event is how its root hears either.
 """
 
 from __future__ import annotations
@@ -148,6 +149,7 @@ class BuildClock:
         self.queued = 0.0
         self.profile_report: str | None = None
         self.programs: list[str] = []  # what the model's code started (note_programs)
+        self.warnings: list[str] = []  # what the build warns of (note_warning)
         self._in_body = 0
         self._paused = 0
 
@@ -178,6 +180,17 @@ def note_programs(programs: list[str]) -> None:
     for program in programs:
         if program not in clock.programs:
             clock.programs.append(program)
+
+
+def note_warning(text: str) -> bool:
+    """A warning for the ``done`` event of the build measured on this thread, which its
+    root prints once; False outside a build, where the caller prints it itself."""
+    clock = current()
+    if clock is None:
+        return False
+    if text not in clock.warnings:
+        clock.warnings.append(text)
+    return True
 
 
 def record_fields() -> dict[str, float]:

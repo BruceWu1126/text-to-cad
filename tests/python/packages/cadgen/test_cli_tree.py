@@ -274,6 +274,25 @@ class StartedPrograms(unittest.TestCase):
                     self.assertEqual(_lines_json(out)[0]["started"], ["openscad"])
 
 
+class BuildWarnings(unittest.TestCase):
+    """A child's output is dropped when it succeeds, so what its build warns of rides its
+    done event and the root prints it once, after its time line, in every mode."""
+
+    def test_a_done_events_warnings_follow_the_time_line_once_in_every_mode(self):
+        warning = "#o1.2 pin could not be meshed (MeshProductionError: boom); views show it as failed"
+        for mode in ("tty", "plain", "json"):
+            with self.subTest(mode=mode):
+                out = _Tty() if mode == "tty" else io.StringIO()
+                tree = BuildTree(root_id="r", stream=out, json_lines=mode == "json")
+                tree.handle({"model": ARM, "state": "done", "timings": _timings(1.0), "warnings": [warning]})
+                tree.handle({"model": ARM, "state": "done"})  # the job thread's second done
+                tree.close()
+                lines = [line for line in out.getvalue().splitlines() if line.startswith("[cadgen]")]
+                self.assertEqual(lines[1:], [f"[cadgen] warning: arm: {warning}"])
+                if mode == "json":
+                    self.assertEqual(_lines_json(out)[0]["warnings"], [warning])
+
+
 class ProcessWiring(unittest.TestCase):
     def setUp(self):
         self.addCleanup(executors.set_event_sink, None)

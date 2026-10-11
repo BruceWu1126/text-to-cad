@@ -376,13 +376,13 @@ def _derive_component(entry: dict, producer: dict, *, force: bool = False, expec
 
 
 def _captured(tree_hash: str, producer: dict | None) -> tuple[dict, dict]:
-    """The tree's verified component map, and the producer named (this runtime's when None)."""
+    """The tree's verified descriptor, and the producer named (this runtime's when None)."""
     from cadgen.store.trees import capture_tree as capture
 
     # Surface work admits only a complete verified geometry graph, but retains none
     # of its BREPs: each derivation reads the exact CAS payload it decodes.
     descriptor, _ = capture(tree_hash, retain_payloads=False)
-    return descriptor["components"], producer_identity() if producer is None else producer_fields(producer)
+    return descriptor, producer_identity() if producer is None else producer_fields(producer)
 
 
 def derive(tree_hash: str, cids: list[str] | None = None, *, force: bool = False,
@@ -404,7 +404,8 @@ def derive(tree_hash: str, cids: list[str] | None = None, *, force: bool = False
     """
     from cadgen._internal.occt_mesh import MeshProductionError
 
-    components, producer = _captured(tree_hash, producer)
+    descriptor, producer = _captured(tree_hash, producer)
+    components = descriptor["components"]
     if producer != producer_identity():
         raise SurfaceProducerUnavailable()
     requested = list(components) if cids is None else list(dict.fromkeys(cids))
@@ -433,14 +434,15 @@ def ensure_display(tree_hash: str, *, producer: dict | None = None,
                    progress: Callable[[int, int], None] | None = None) -> list[str]:
     """Derive in this process the display data of every component of ``tree_hash`` the
     store lacks, and return a line for each component that could not be derived, naming
-    it and its error. A build does this before it reports done
+    the occurrences that place it and the error. A build does this before it reports done
     (``_internal/generation.py``), so a view of what it built only reads.
 
     Which components lack it is asked of the store alone (``_display_stored``): a tree
     whose display data is all stored imports no kernel. ``producer`` is the one a view of
     the tree selects (its document's), this runtime's when None. ``progress(done, total)``
     hears how many of the missing components are done, before each one and at the end."""
-    components, producer = _captured(tree_hash, producer)
+    descriptor, producer = _captured(tree_hash, producer)
+    components = descriptor["components"]
     missing = [cid for cid, entry in components.items() if not _display_stored(entry, producer)]
     if not missing:
         return []
@@ -453,10 +455,19 @@ def ensure_display(tree_hash: str, *, producer: dict | None = None,
         try:
             _derive_component(components[cid], producer)
         except Exception as error:  # noqa: BLE001 - one part's failure is reported, the rest derive
-            failures.append(f"part {cid}: {type(error).__name__}: {error}")
+            failures.append((cid, f"{type(error).__name__}: {error}"))
     if progress is not None:
         progress(len(missing), len(missing))
-    return failures
+    if not failures:
+        return []
+    from cadgen.store.meshes import placed_parts
+
+    placed: dict[str, list[tuple[str, str]]] = {}
+    for row in descriptor.get("occurrences") or ():
+        if isinstance(row, dict) and row.get("component") and row.get("id"):
+            placed.setdefault(str(row["component"]), []).append((str(row["id"]), str(row.get("name") or "")))
+    return [f"{placed_parts(placed[cid]) if placed.get(cid) else f'part {cid}'} could not be meshed ({error})"
+            for cid, error in failures]
 
 
 def validate_surface_record(value: Any, *, surface_input_key: str | None = None) -> None:

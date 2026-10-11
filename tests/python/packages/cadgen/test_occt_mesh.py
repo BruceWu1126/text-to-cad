@@ -143,10 +143,11 @@ class ARequestOutlivesOneComponent(unittest.TestCase):
 
             self.assertEqual(stored(), others,
                              "the other component was meshed and stored before the failure was reported")
-            # A build's derivation names the part it could not mesh, and fails nothing.
+            # A build's derivation names the occurrence it could not mesh, and fails nothing.
             with mock.patch.object(occt_mesh, "mesh_component", side_effect=mesher):
                 [failure] = surfaces.ensure_display(tree, producer=producer)
-            self.assertRegex(failure, r"^part [0-9a-f]{16}: MeshProductionError: ValueError: invalid tessellation JSON length$")
+            self.assertRegex(failure, r"^#o1\.[12]\b.* could not be meshed "
+                                      r"\(MeshProductionError: ValueError: invalid tessellation JSON length\)$")
             self.assertEqual(stored(), others)
             # An interrupt is not a component's failure.
             with mock.patch.object(occt_mesh, "mesh_component", side_effect=KeyboardInterrupt), \
