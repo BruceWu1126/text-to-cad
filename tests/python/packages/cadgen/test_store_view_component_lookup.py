@@ -39,7 +39,7 @@ class ComponentLookup(unittest.TestCase):
              mock.patch.object(records, "model_for_output", side_effect=AssertionError("output")):
             actual = view.component_object_for_tree(self.tree, self.cid + ".brep")
         self.assertEqual(actual, (self.entry["brep"], "brep"))
-        self.assertIsNone(view.component_object_for_tree(self.tree, self.cid + ".surf"))
+        self.assertIsNone(view.component_object_for_tree(self.tree, self.cid + ".glb"))
 
     def test_repeated_links_use_one_exact_brep(self):
         from cadgen.store import view

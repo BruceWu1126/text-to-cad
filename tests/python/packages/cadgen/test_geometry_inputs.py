@@ -1,7 +1,6 @@
 """Geometry-complete publication, and display data derived from it alone."""
 from __future__ import annotations
 
-import base64
 import copy
 import hashlib
 import json
@@ -36,8 +35,9 @@ def materialize_snapshot(descriptor, captured):
 
 
 def surface_of(digest, cid):
-    """The SURF a part's derivation extracts for ``cid`` (``parts.surface``): in memory, stored nowhere."""
-    return base64.b64decode(parts.surface(digest, cid)["surface"])
+    """The SURF a part's derivation extracts for ``cid`` (``parts._surface``): in memory, stored nowhere."""
+    entry = capture_tree(digest, retain_payloads=False)[0]["components"][cid]
+    return parts._surface(entry, *((None, {}) if entry["kind"] == "eager-only" else parts._decoded(entry)))
 
 
 def part_objects(records):

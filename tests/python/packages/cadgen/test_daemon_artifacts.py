@@ -165,8 +165,8 @@ class ArtifactRequests(unittest.TestCase):
                    display_request(producer={**PRODUCER, "ocp": "unknown"}),
                    # An older cadgen's producer named its extraction scheme; this one's is the kernel.
                    display_request(producer={**PRODUCER, "scheme": 20}),
-                   {"kind": "surface", "tree": "a" * 64}, {"kind": "surface", "tree": "a" * 64, "cid": "B" * 16},
-                   {"kind": "surface", "tree": "a" * 64, "cid": "b" * 16, "producer": dict(PRODUCER)}]
+                   # The retired job that extracted one component's SURF for the page.
+                   {"kind": "surface", "tree": "a" * 64, "cid": "b" * 16}]
         with mock.patch.object(client, "run_artifact") as dispatch:
             for request in invalid:
                 with self.subTest(request=request), self.assertRaises(ValueError):

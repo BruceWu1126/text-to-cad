@@ -246,11 +246,11 @@ the shell: Measure's session (`workbench/useStepMeasure.js`), the pose and routi
 The shell was widened for it rather than forked: it accepts display settings a renderer
 made earlier than it could hand them back (`viewSettings`), a viewer handle the renderer
 owns (`viewerRef`), externally held tool state (`tool`) and preview state
-(`preview`, from `usePreviewState`: STEP's picking and recognition gates run before the shell's hook),
+(`preview`, from `usePreviewState`: STEP's picking gates run before the shell's hook),
 and a load report that knows about finding, editing and previewing.
 
 Its safety net is `step/StepRenderer.browser.test.mjs`, which opens a real `.step`
-in a real browser: a two-part component-SURF package with one revolute mate, one
+in a real browser: a two-part component package with one revolute mate, one
 named pose and one routine, committed under `step/__fixtures__/step/` and served by
 `harness/stepScenario.mjs` exactly as the backend serves one. The same two shapes
 are also served as a package that really ARRIVES IN PIECES
@@ -723,8 +723,8 @@ On mount, immutable mesh and complete robot state are read synchronously from
 the existing bounded decoded caches. Reopening a warm file can therefore show
 those assets on its first render while file-owned controls restore their own
 camera and pose. Completed STEP working sets have a separate LRU of at most
-eight packages and 256 MiB, so an assembly that exceeds the core SURF cache's
-24-entry limit can reopen without fetching or decoding every component again.
+eight packages and 256 MiB, so an assembly that exceeds the core decoded-part cache's
+24-entry limit (`renderAssetClient.js`'s `SURF_CACHE_LIMIT`) can reopen without fetching or decoding every component again.
 The bound includes unique full backing buffers and estimated structural metadata;
 an oversized package is not retained. Memory pressure evicts these disposable
 snapshots before reclaiming workers. The existing memory probe reports their
@@ -1009,8 +1009,8 @@ change sets the tree's expansion (`changeSelectMode`): leaving All saves the per
 expansion and coming back restores it (with the owners of selected topology kept open);
 Parts opens every assembly (`collectStepTreeAssemblyNodeIds`) and shuts every part;
 Faces and Edges open every assembly and leave each part to the tree, which asks for a
-part's topology (`onLoadTopology`) and recognition as its row comes on screen (the rows
-the tree's list reports in view, below). Those requests, and every other
+part's topology (`onLoadTopology`) as its row comes on screen (the rows the tree's list
+reports in view, below). Those requests, and every other
 (`loadInspectionTopology`), cost a lookup for a part already requested; new parts expand
 together at most every 150 ms. The loader behind them (`useCadAssets`'
 `loadReferencesForEntry`) unions requests for the file revision it serves, never aborts its
@@ -1025,16 +1025,11 @@ The one-press load for a part not yet loaded stays in the pick path; the Feature
 row shows `Loading…` while it waits.
 
 **A large tree under Faces and Edges.** Above `LARGE_TREE_ROWS` (300, in `ModelingTree.jsx`) rows
-of assemblies and parts — the fully expanded tree less the features recognition adds under a
-part later, so the tree never changes shape under the person — Faces and Edges keep every
-assembly open and locked but start every part closed: its disclosure is its own (the lock is
-lifted for part rows alone). A part row shows no face or edge count. A part opens by its disclosure, by a pick inside
-it (the reveal opens it and scrolls to the picked row) or by its row menu's Expand; Expand all and
-Collapse all open and close every part. A closed part on screen asks for nothing; opening one asks
-for its topology and recognition at once (Expand all leaves that to the rows as they come on screen),
-and the viewport asks for the part under a pointer that rests on it for `TOPOLOGY_DWELL_MS` (150) or
-presses it, read from the viewport's hover store (`workbench/hoverStore.js`), each part once.
-Below the threshold, and under All and Parts, nothing of this applies.
+of assemblies and parts, Faces and Edges keep every assembly open and locked as they do below it,
+but a part row on screen asks for nothing: the viewport asks for the part under a pointer that
+rests on it for `TOPOLOGY_DWELL_MS` (150) or presses it, read from the viewport's hover store
+(`workbench/hoverStore.js`), each part once, and a press on a part not yet loaded loads it and
+picks (above). Below the threshold, and under All and Parts, nothing of this applies.
 
 Explode and Clip follow Measure on the strip; Explode only with two or more parts
 (hidden, never disabled, once the mesh is known). Their panels
@@ -1066,20 +1061,18 @@ was opened stay mounted wherever they are, so a reveal, Enter, keyboard focus an
 always have their row; a row carries its level
 (`aria-level`) in place of the nesting it no longer has. Under Faces and Edges the rows the list
 reports on screen (never its margin), once layout has settled a frame later, are the parts
-whose topology is asked for, each once (in a large tree, only the open ones). A face or edge
-picked on a part not yet recognized asks for that part's recognition itself, so its feature row
-arrives and is revealed wherever the part sits in the tree.
+whose topology is asked for, each once (in a large tree, none: above). A face or edge picked
+in the viewport is revealed at its part's row, wherever the part sits in the tree.
 Rows are memoized on their own facts (their selection and joins as booleans, stable callbacks,
 the one `partControls` object `useStepPanels` keeps), so a re-render of the viewer that changes
-nothing in a row renders no row. Recognition (`useModelingRecognition`) runs one component at a
-time in one worker kept for the next, and its results reach the tree at most once a frame.
+nothing in a row renders no row.
 
 The Features rows share the tree-row primitive (`TreeRowSurface`, `dense`: 24px rows),
 inset 4px from the panel, with a 16px disclosure column and the explorer's 10px per level,
-hung from faint lines under their owners' chevrons (`TreeRowGuides`), their kind icons light. The disclosure
-button expands children; the rest of the row selects its canonical references.
-Labels keep the row's width; summaries and measurements belong in the Reference
-panel. An assembly row's actions (`ModelPartActions.jsx`), shown on hover and kept
+hung from faint lines under their owners' chevrons (`TreeRowGuides`), their kind icons light. A part is a
+leaf: its faces and edges are the viewport's to pick, never rows. An assembly's disclosure
+button expands its children; the rest of the row selects it. Labels keep the row's width;
+measurements belong in the Reference panel. An assembly row's actions (`ModelPartActions.jsx`), shown on hover and kept
 shown while they are on, are Isolate (lit while that node is isolated; not in a part
 file) and then Hide (the eye). A double-click on a component or subassembly row
 isolates it too; Isolate is also in the row's context menu.
@@ -1101,17 +1094,15 @@ opens this one too — so there it opens with the part menu's reference group fo
 whole part (`<file>#`): Copy Reference (`modelMenuDescriptor`'s `copyText`). The tree starts directly below `Filter…`, the
 filter box (`TreeFilterInput`, `primitives/tree-filter`, shared with the explorer), with a conditional
 Show all on the filter row's right side. While something is isolated, an isolation
-bar heads the tree (`Isolated: …` and **Exit**). There is no feature-count header.
-Clicking empty tree space clears selection, including a pending topology pick.
+bar heads the tree (`Isolated: …` and **Exit**). Clicking empty tree space clears
+selection, including a pending topology pick.
 
 The filter is a second view of the tree, never a filter over its expansion.
 Typing replaces the rows with a flat, ranked list (first 200; a search-only status line counts
 every match) drawn from an index of what the presented tree already holds: every
-assembly and part by name or occurrence reference (`#o1.2`), and the features of
-parts recognized earlier. Typing expands nothing, requests no topology and starts
-no recognition, so the picking frontier is the same before, during and after a
-search; a part's features become searchable once that part has been opened. The
-query matches a name as a subsequence (`navigation/fuzzy.js`: `m3scr` finds `M3 Screw`); several words may
+assembly and part by name or occurrence reference (`#o1.2`). Typing expands nothing
+and requests no topology, so the picking frontier is the same before, during and
+after a search. The query matches a name as a subsequence (`navigation/fuzzy.js`: `m3scr` finds `M3 Screw`); several words may
 also name owners (`bridge screw`), provided one of them is in the name. A hit is
 the tree row without its place: name first, its owners muted and truncating
 behind it, with the same menu, visibility action, hover and availability.
@@ -1122,29 +1113,29 @@ search ends (clear, Escape or an empty box); without a new selection the tree
 returns to its previous scroll position. Up/Down move the cursor; Enter selects.
 
 Parts retain their assembly hierarchy, except redundant document wrappers are
-flattened for presentation. A single structural root (assembly, part, or body)
-is also implicitly expanded until its children offer a real choice. Its canonical
-owner is expanded in the host and its topology/recognition requested once, so
-viewport picking matches the visible features. Feature groups are never implicitly
-expanded. Flattening never rewrites occurrence or reference IDs, and hidden-owner
-restrictions still apply to the exposed children. Assembly and part expansion use the same controlled state as viewport
-picking and topology requests. A collapsed assembly is picked as a unit;
-expanding it exposes its children, and expanding a visible part requests that
-part's exact topology and inferred features. Collapsing an ancestor removes its
-descendants from the requested frontier even if their saved expansion remains.
-Viewport hits select individual faces and edges in All, Faces and Edges modes,
-independently of inferred feature grouping or tree expansion within the part.
-Feature rows select their groups only when clicked in the tree; connected
-selection modes explicitly opt into edge chains or tangent face groups.
-Double-clicking empty space exits isolation. Collapsing a part or leaving
+flattened for presentation. A single assembly root is also implicitly expanded
+until its children offer a real choice, and expanded in the host, so viewport
+picking matches the visible rows; a folded repeat is never implicitly expanded.
+Flattening never rewrites occurrence or reference IDs, and hidden-owner
+restrictions still apply to the exposed children. Assembly expansion uses the same
+controlled state as viewport picking and topology requests. A collapsed assembly is
+picked as a unit; expanding it exposes its children. A part is expanded in the host
+alone, never in the tree: by its menu's Expand (Expand all), which loads its exact
+topology so that a press under All picks its faces and edges, or by the topology
+requests of Faces and Edges. A file of one part (a part file, or an assembly of one)
+loads it once Select is up (`StepSurface`'s `onlyPartId`). Collapsing an ancestor
+removes its descendants from the requested frontier even if their saved expansion
+remains. Viewport hits select individual faces and edges in All, Faces and Edges
+modes; connected selection modes explicitly opt into edge chains or tangent face
+groups. Double-clicking empty space exits isolation. Collapsing a part or leaving
 isolation clears topology selections whose owners leave the expanded tree;
 the copy action only appears for a resolved selection.
 
 Isolation restricts the selectable subtree without propagating an excluded
 ancestor's disabled state into the isolated descendants. Hidden geometry stays
 unselectable. Selection reveals expand the required ancestors and scroll once
-per selection or explicit reveal command. Later expansion, recognition updates
-and manual scrolling must not pull the view back to that row.
+per selection or explicit reveal command. Later expansion and manual scrolling
+must not pull the view back to that row.
 
 The Reference pane is read-only, sized on its own (it opens at every panel's width, capped at 144px, and its corner grip sizes it),
 independently scrollable, and pinned at the panel's foot, under every section. Its
@@ -1450,7 +1441,7 @@ Preview was — clears it; no host prop reaches it.
 While previewing, the frame drops the toolbar, the tool stack and its resize handles,
 Quick Edit, view cube (not mounted), alert card and viewport menu, and every renderer
 gate reads the same state: picks, hover,
-highlights, recognition, Measure, Draw, joint handles, and Select and Position as tools
+highlights, Measure, Draw, joint handles, and Select and Position as tools
 are off, and Explode and Clip suspended, without discarding their values. The navbar
 steps aside, and Display and Preview with it; the view's corner (`PreviewChrome`'s `corner`,
 at the view's top-right on a row of the navbar's geometry) holds Orbit (`OrbitMenu`, its
@@ -1462,35 +1453,6 @@ draws preview one scene-quality tier up (`previewSceneQuality`), keeps the full
 pixel ratio while orbiting (`renderProfileKeepsPixelRatio`) and never changes a
 Display setting; `sceneForRenderProfile` is what RendererShell and `StepSurface`
 draw. Preview never uses the browser Fullscreen API.
-
-### Read-only STEP features
-
-Feature detection is an optional client-side capability of the shared renderer.
-Expanding a visible part requests its geometry analysis in a disposable worker;
-repeated instances and warm file reopening reuse completed metadata. Expansion
-changes preserve a pending component while at least one of its occurrences is
-still requested. The cache is versioned and bounded, and lasts only for the
-running page or app renderer.
-
-The [feature detection guide](feature-detection.md) owns the algorithm's scope,
-cache identity, cancellation, limits, code map and regression policy. Keep this
-work in UI, separate from cadgen compilation, Python inspection and reference
-syntax. Recognized groups select existing canonical faces and edges. They do
-not establish original source history, and failed recognition does not prevent
-structural tree display or ordinary part selection.
-
-### Replay experiment scope
-
-Shared Features inspection runs entirely client-side from STEP geometry. The
-worker returns inferred operations, not executable playback. The existing
-canonical face/edge reference flow supplies highlighting and copying.
-
-Kernel verification, its cache and endpoint, intermediate-solid playback, and
-GIF/video export are isolated on `amy/step-reconstruction-playback`. They are
-not shipped in the shared app. Recognition records the numbers a solid was
-reconstructed from (`workbench/modelingSolidRecipes.js`); assembling a recognized tree
-into a numerical recipe is test-only (`workbench/__tests__/reconstructionRecipe.js`), a
-recognition regression check with no runtime interpreter or export path.
 
 ### Robot links
 
@@ -1628,9 +1590,7 @@ override or undo state.
 The host-supplied render session owns its mesh-store reader and worker leases.
 The file view's display slice is the sole view-settings authority; the camera is the
 mounted viewport's, saved with the view and restored in place of the fit. Part derivation and preview requests
-use the file's injected service and abort when the consumer leaves. The Features
-tree reads exact surfaces on demand through the same service; cadgen extracts
-each when asked.
+use the file's injected service and abort when the consumer leaves.
 
 Opening shows in the viewport's loading overlay. An update — a newer revision
 loading behind the model on screen, or a Display change being prepared, and that

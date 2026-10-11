@@ -1,7 +1,7 @@
 # The STEP browser-test fixture
 
-What a browser test has to serve to open one STEP in the viewer, and nothing
-else. `StepRenderer.browser.test.mjs` serves it through
+What a browser test has to serve to open one STEP in the viewer, and the two
+SURFs its generators read. `StepRenderer.browser.test.mjs` serves it through
 `renderers/harness/stepScenario.mjs`.
 
 The model is `hinge_block`: a 20 × 20 × 10 mm **base** in `#3A6EA5` with a Ø6 mm
@@ -11,7 +11,7 @@ one revolute mate. Every property is there for a test:
 | property | what it buys |
 | --- | --- |
 | two parts, two distinct colours | a part's pixels can be told from the other's, so "hidden", "exploded" and "posed" are measurements rather than guesses about total ink |
-| the bore | a cylindrical face beside planar ones, so a face pick has something to report a diameter for, and the modeling tree a cut feature to recognise |
+| the bore | a cylindrical face beside planar ones, so a face pick has something to report a diameter for |
 | one revolute mate `hinge` (0…90°) | the panel's Position section, the Position tool and its one knob |
 | one named pose `open` | the named-pose jump |
 | one routine `swing` | its playbar in preview |
@@ -20,8 +20,8 @@ one revolute mate. Every property is there for a test:
 
 | file | bytes | the request it answers |
 | --- | ---: | --- |
-| `assembly.json` | 3,057 | `GET /__cad/store?file=<tree>/assembly.json&documentHash=…` — the view descriptor. Carries `kind: "assembly-package"`, the `tree`, the `viewId`, the attested `surfaceProducer`, two components (each naming its `part` and its `surf`), two occurrences and the model box. |
-| `components/552fc5fd1b854ab4.surf` | 13,966 | `GET /__cad/store?file=<tree>/components/552fc5fd1b854ab4.surf` for the base, the `surf` its component names. Exact surfaces: what feature recognition reads, which cadgen extracts when asked. |
+| `assembly.json` | 2,969 | `GET /__cad/store?file=<tree>/assembly.json&documentHash=…` — the view descriptor. Carries `kind: "assembly-package"`, the `tree`, the `viewId`, the attested `surfaceProducer`, two components (each naming its `part`), two occurrences and the model box. |
+| `components/552fc5fd1b854ab4.surf` | 13,966 | **no request at all.** The base's SURF as cadgen 0.6.5 extracted it: the ordinals `make_meshes.py` and `make_selectors.py` write the mesh and the selector table in (below). |
 | `components/df492f79c6123df5.surf` | 10,478 | the same, for the arm. |
 | `components/552fc5fd1b854ab4.selectors.json` | 8,355 | `GET /__tess_cache/<part>.selectors.json?object=…&maxBytes=…` for the base: its part record's `selectors`. cadgen's selector table: the ids, facts, adjacency, chains and tangent groups picking and measuring join to the mesh. |
 | `components/df492f79c6123df5.selectors.json` | 6,499 | the same, for the arm. |
@@ -29,7 +29,7 @@ one revolute mate. Every property is there for a test:
 | `hinge_block.step.json` | 2,217 | **no request at all.** The harness puts its `animation` section inline on the catalog entry, which is what the real scanner does, and the renderer plays the routine's keyframes straight from there. |
 | `hinge_block.articulation.json` | 921 | **no request at all.** cadgen's articulation of the sidecar's kinematics (`cadgen.articulation.step_articulation` over `assembly.json` and the sidecar), which the harness puts inline on the catalog entry as `articulation`, as the real scanner does; the Position tool plays it. `tests/python/packages/cadgen/test_articulation.py` asserts it is what cadgen writes today. |
 
-Total 57,389 bytes with the meshes and tables. No Git attribute applies here (`git check-attr -a` on these
+Total 57,301 bytes with the meshes and tables. No Git attribute applies here (`git check-attr -a` on these
 paths prints nothing), and the repository carries no LFS. Keep it that way — an
 LFS pointer would be rejected by name at `renderAssetClient.js`'s readers.
 
@@ -52,9 +52,9 @@ of the generated `hinge_block.step`, which is also the `documentHash` in
 `source/hinge_block.py` is the model verbatim, its routine a Python clip. The
 view descriptor and the two `.surf` files were generated with cadgen **0.6.5**
 (build123d 0.11.1, OCP 7.9.3.1, scheme 19, SURF format 2) and stay at format 2
-on purpose: every reader still reads format 2 (an older build may have pinned
-one in an eager-only component's identity), and this fixture is where the
-browser tests read one end to end.
+on purpose: cadgen still reads format 2 (an older build may have pinned one in
+an eager-only component's identity), and the generators below read these two
+for their ordinals.
 The sidecar was rewritten at schema 10 by a later build of the same model, whose
 STEP bytes did not change, so `documentHash` and every id stayed as they were.
 Build in a scratch directory, with a cache of its own:
@@ -66,17 +66,18 @@ CADGEN_CACHE_DIR=$PWD/cache <repo>/.venv/bin/python src/hinge_block.py
 ```
 
 That writes `STEP/hinge_block.step` and `STEP/hinge_block.step.json`, and fills
-the store. Then copy out the three served files: the view descriptor is
+the store. Then copy out the view descriptor:
 `descriptor_for_view(tree, document_hash=…)` from `cadgen.store.view` for the
-tree that `document_entry_for_hash(sha256(step_bytes))` names, and each `.surf`
-is the base64 `surface` that `cadgen.store.parts.surface(tree, cid)` answers, decoded.
+tree that `document_entry_for_hash(sha256(step_bytes))` names. Each `.surf` is
+the SURF a part's derivation extracts for that component
+(`cadgen._internal.surface_extract.extract_surface_component`).
 
 The meshes are cadgen's own: `source/make_meshes.py` rebuilds the two parts,
 meshes them with cadgen's producer at the display tolerance, and writes them in the
 committed `.surf`s' ordinals (a newer build orders the base's edges differently;
 the script matches them by centre and length). It also writes each component's
-`part` (cadgen's key for it under the view's producer), its `surf` path and the
-view's `viewId` into `assembly.json`. Run it from the repository root
+`part` (cadgen's key for it under the view's producer) and the view's `viewId`
+into `assembly.json`. Run it from the repository root
 with the repo's Python whenever the mesh format, the mesher or the part key moves:
 
 ```sh
@@ -93,8 +94,8 @@ whenever the table's schema or scheme moves:
 .venv/bin/python packages/ui/src/renderers/step/__fixtures__/step/source/make_selectors.py
 ```
 
-Regenerate when the view schema or the sidecar schema moves, or when readers
-stop reading SURF format 2.
+Regenerate when the view schema or the sidecar schema moves, or when cadgen
+stops reading SURF format 2.
 When the STEP bytes or the view change, the component ids, `tree`, `viewId` and
 `documentHash` change with them, and `stepScenario.mjs` reads every one of them
 out of `assembly.json` rather than hard-coding them; a sidecar schema move that

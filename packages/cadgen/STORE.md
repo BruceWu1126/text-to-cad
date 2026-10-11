@@ -388,15 +388,13 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   (`_internal/surface_extract.py`; an eager-only component's SURF is the
   geometry object its tree pins), builds the selector table from the BREP and
   the SURF, meshes the component, writes both objects and then the entry, so an
-  entry always names complete objects. Nothing stores a SURF. A format-3 SURF
-  holds what its readers -- the selector table, feature recognition -- take and
-  no tessellation input: loops are edge references, a B-spline surface keeps its
-  degrees and pole counts (a bilinear patch its four corners), a swept surface
-  its axis or direction, a general curve its range. The CAD Viewer extracts one
-  part's when feature recognition asks for it (`components/<cid>.surf` of a
-  served view: one build-pool job, `kind: surface`), and keeps it nowhere.
-  Format 2 stays readable: an older build may have pinned one in an eager-only
-  component's identity.
+  entry always names complete objects. Nothing stores a SURF, and nothing
+  outside a derivation reads one. A format-3 SURF holds what the selector table
+  takes and no tessellation input: loops are edge references, a B-spline surface
+  keeps its degrees and pole counts (a bilinear patch its four corners), a swept
+  surface its axis or direction, a general curve its range. Format 2 stays
+  readable: an older build may have pinned one in an eager-only component's
+  identity.
 
   The **selector table** (`_internal/selector_table.py`) is the one place a
   ref's facts are minted. From the exact BREP and the SURF, per face, edge and

@@ -15,7 +15,7 @@ import { buildEdgeChainGraph } from './edgeChainSelection.js';
 import { connectedReferenceIds } from './selectionFilter.js';
 import { buildTangentFaceGraph } from './tangentFaceSelection.js';
 
-const FIXTURES = path.join(path.dirname(createRequire(import.meta.url).resolve('@text-to-cad/core/lib/surf/container.js')), 'fixtures');
+const FIXTURES = path.join(path.dirname(createRequire(import.meta.url).resolve('@text-to-cad/core/lib/surf/tessellationCache.js')), 'fixtures');
 
 function slotRuntime() {
   const table = parseSelectorTable(fs.readFileSync(path.join(FIXTURES, 'slot.selectors.json'), 'utf8'));

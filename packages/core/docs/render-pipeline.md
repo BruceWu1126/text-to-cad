@@ -443,7 +443,7 @@ loading the photographic studio.
 `resolveDisplayMaterialSettings()` applies the shared Original, Single color
 and Color by part policy without app state.
 
-**Scene geometry is the stored mesh's INDEXED arrays.** A surf component's
+**Scene geometry is the stored mesh's INDEXED arrays.** A component's
 `meshData` takes the vertex, normal and index buffers of the mesh cadgen made
 (copied out of the decoded GLB body's one buffer, its u16 indices widened to
 u32) and is never expanded per triangle corner.

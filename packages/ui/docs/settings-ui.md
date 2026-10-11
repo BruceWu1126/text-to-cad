@@ -222,21 +222,16 @@ and Faces, Group edges under All and Edges. Only the options that apply under th
 mode in hand are shown (both under All, none under Parts); a hidden one keeps
 its choice for when it applies again. Nothing under the strip names the mode. The mode sets the Features tree's shape: under **All** it
 is the person's own (put back as it was when they left All, with the owners of
-what is still selected kept open); **Parts** opens every assembly and shuts
-every part; **Faces** and **Edges** open everything down to the features whose
-faces and edges are picked. Outside All the disclosure is locked (chevrons
-shown, not pressable) and Expand/Collapse leave the row menus. Under Faces or Edges
-a part's topology is asked for as its row comes on screen in the tree, never for
-a whole large assembly at once; a viewport press on a part not yet loaded loads
-that part and picks, and the Features filter row says "Loading…" meanwhile. A large
-assembly (more than 300 rows of assemblies and parts, `LARGE_TREE_ROWS`) opens
-under Faces or Edges with its assemblies open and locked but its parts closed, each
-with a disclosure of its own and, at its right in muted text, its face or edge
-count ("412 faces", "96 edges") once that is known. A part opens by its
-disclosure, by a pick inside it (which scrolls to the picked row) or by the
-row menu's Expand and Expand all; Collapse and Collapse all close parts. A
-closed part's topology is not asked for when its row shows: opening it asks, and
-so does the pointer resting on the part in the viewport (150ms) or pressing it.
+what is still selected kept open); **Parts**, **Faces** and **Edges** open every
+assembly. A part is a leaf in every mode: nothing opens under it, and a face or
+edge picked in the viewport is revealed at its part's row. Outside All the
+disclosure is locked (chevrons shown, not pressable) and Expand/Collapse leave the
+row menus. Under Faces or Edges a part's topology is asked for as its row comes on
+screen in the tree, never for a whole large assembly at once; a viewport press on a
+part not yet loaded loads that part and picks, and the Features filter row says
+"Loading…" meanwhile. In a large assembly (more than 300 rows of assemblies and
+parts, `LARGE_TREE_ROWS`) a part's row coming on screen asks for nothing: the
+pointer resting on the part in the viewport (150ms) or pressing it asks.
 
 **Draw.** Its **Drawing** panel leads the stack while Draw is up, with no heading
 and no X: choosing another tool, or pressing Draw again, puts it down. It holds
@@ -621,8 +616,7 @@ shows the shortcut. What goes to an agent goes through [Quick Edit](#quick-edit)
 pick opens and which carries the selected references with the file. Every copied
 reference names its file by absolute path.
 
-Viewport picks reach individual faces and edges even where the tree groups them
-into a feature. In an assembly, faces and edges load per part, when first
+Viewport picks reach individual faces and edges. In an assembly, faces and edges load per part, when first
 needed: under a face or edge filter, a press on a part whose faces are not
 loaded loads that part alone and then picks what is under the pointer — one
 press, with "Loading…" in the Features filter row meanwhile. Until

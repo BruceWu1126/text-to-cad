@@ -318,28 +318,7 @@ print(json.dumps({cid: entry['part'] for cid, entry in view['components'].items(
         self.assertEqual(status, 200, payload)
         descriptor = json.loads(payload)
         self.assertEqual(descriptor["viewId"], self.view["viewId"])
-        component = descriptor["components"][self.cid]
-        self.assertEqual((component["part"], component["surf"]), (self.part, f"components/{self.cid}.surf"))
-
-    def test_a_parts_surf_is_extracted_by_one_job_when_asked_and_stored_nowhere(self):
-        from cadgen._internal.surf_container import validate_surface_bytes
-        from cadgen.store.paths import objects_dir
-        from cadgen.store.view import virtual_path
-
-        def objects():
-            return sorted(path.name for path in objects_dir().rglob("*") if path.is_file())
-
-        stored = objects()
-        with inline_artifacts() as jobs:
-            payload, content_type = virtual_path(f"{self.tree}/components/{self.cid}.surf")
-        self.assertEqual([call.args[0] for call in jobs.call_args_list],
-                         [{"kind": "surface", "tree": self.tree, "cid": self.cid}])
-        self.assertEqual(content_type, "application/octet-stream")
-        self.assertEqual(len(validate_surface_bytes(payload)["faces"]), 6)
-        self.assertEqual(objects(), stored, "a SURF is stored nowhere")
-        with inline_artifacts() as jobs:
-            self.assertEqual(virtual_path(f"{self.tree}/components/{'0' * 16}.surf"), (None, ""))
-        self.assertEqual(jobs.call_count, 0, "a component the tree does not pin asks for nothing")
+        self.assertEqual(descriptor["components"][self.cid]["part"], self.part)
 
     def test_static_views_keep_distinct_saved_document_bindings(self):
         from cadgen.store.records import note_document_tree
@@ -376,14 +355,13 @@ print(json.dumps({cid: entry['part'] for cid, entry in view['components'].items(
             export_view(tree, self.root / "repaired-view", producer=self.producer)
         self.assertEqual([call.args[0]["cids"] for call in jobs.call_args_list], [[cids[1]]],
                          "a part the store lost is derived alone")
-        # Each component's BREP and its part's selector table; no SURF, which nothing stores.
+        # Each component's BREP and its part's selector table.
         for cid, entry in descriptor["components"].items():
             record = parts.probe(entry["part"])
             self.assertEqual(entry["selectors"], f"components/{cid}.selectors.json")
             self.assertEqual((target / entry["selectors"]).read_bytes(),
                              object_path(record["selectors"]["object"]).read_bytes())
             self.assertEqual((target / entry["brep"]).read_bytes(), object_path(entry["brepObject"]).read_bytes())
-        self.assertEqual(list((target / "components").glob("*.surf")), [])
 
     def test_invalid_optional_hint_is_replaced_without_losing_geometry(self):
         from cadgen.store.index import read_entry, write_entry

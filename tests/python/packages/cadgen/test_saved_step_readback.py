@@ -436,19 +436,18 @@ class SavedStepReadbackTest(unittest.TestCase):
             self.assertIsNone(scene_from_render_package(self.root / "part.step", step_hash=expected[3]))
 
     def test_honestly_hashed_invalid_native_recipe_and_eager_inputs_cannot_reuse_identity(self):
-        import base64
-
         from cadgen._internal import component_package as cp, step_scene_package
         from cadgen._internal.step_scene_loader import load_step_scene
         from cadgen.store import parts
         from cadgen.store.build import _publish_document_scene
         from cadgen.store.objects import put_object, read_verified_object
         from cadgen.store.records import note_document_tree
-        from cadgen.store.trees import get_tree
+        from cadgen.store.trees import capture_tree, get_tree
 
         expected = self.seed()
         tree_hash = expected[2]["documentTree"]
-        surface = put_object(base64.b64decode(parts.surface(tree_hash, next(iter(get_tree(tree_hash)["components"])))["surface"]))
+        native = next(iter(capture_tree(tree_hash, retain_payloads=False)[0]["components"].values()))
+        surface = put_object(parts._surface(native, *parts._decoded(native)))
         for mode in ("unreadable-native", "absent-face", "eager-only", "singular-placement"):
             with self.subTest(mode=mode):
                 tree = get_tree(tree_hash)

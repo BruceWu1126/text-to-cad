@@ -4,8 +4,8 @@
 format version and the JSON index's length (two little-endian u32), the JSON
 index (faces, edges, shapes, their metrics and boxes), then the binary payload
 the index points into. Reading it is plain bytes and JSON, so a process that
-only reads -- the build pool checking an eager-only component's pinned surface,
-the CAD Viewer's server -- reads it here and never loads OCCT. The store keeps
+only reads -- the build pool checking an eager-only component's pinned surface --
+reads it here and never loads OCCT. The store keeps
 no SURF but that pinned one: a part's display data is derived from one extracted
 in memory (``cadgen.store.parts``).
 """

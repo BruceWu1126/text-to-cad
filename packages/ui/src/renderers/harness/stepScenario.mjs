@@ -16,8 +16,7 @@ import { chromium } from 'playwright';
 // table (`components/<cid>.selectors.json`, cadgen's), each read by the part's key and
 // the object the record names -- for a part the store holds; `POST /__cad/surfaces`
 // answers the same record for one cadgen has to derive first, as this server does
-// for a cold store (`client/surfaceResolution.js` validates it). A component's
-// `.surf` is the view's to serve, by its component path, for feature recognition.
+// for a cold store (`client/surfaceResolution.js` validates it).
 
 const FIXTURE = new URL('../step/__fixtures__/step/', import.meta.url);
 
@@ -25,9 +24,8 @@ const read = (name) => readFile(new URL(name, FIXTURE));
 
 /**
  * Everything the fixture is, loaded once: the view, the sidecar and cadgen's articulation of its
- * kinematics, and each part by its key: its SURF (what recognition reads), its stored display mesh
- * (`components/<cid>.glb`), decoded so the harness's store can serve it for any part, and its
- * selector table.
+ * kinematics, and each part by its key: its stored display mesh (`components/<cid>.glb`), decoded
+ * so the harness's store can serve it for any part, and its selector table.
  */
 export async function loadStepFixture() {
   const { decodeComponentTessellation } = await import('@text-to-cad/core/lib/surf/tessellationCache.js');
@@ -37,10 +35,9 @@ export async function loadStepFixture() {
   const view = JSON.parse(assembly);
   const surfaces = new Map();
   for (const [cid, component] of Object.entries(view.components)) {
-    const bytes = await read(`components/${cid}.surf`);
     const mesh = decodeComponentTessellation(new Uint8Array(await read(`components/${cid}.glb`)));
     const table = await read(`components/${cid}.selectors.json`);
-    surfaces.set(component.part, { cid, bytes, mesh,
+    surfaces.set(component.part, { cid, mesh,
       selectors: { bytes: table, object: createHash('sha256').update(table).digest('hex') } });
   }
   return { assembly, view, sidecar, articulation, surfaces, file: 'hinge_block.step' };
@@ -95,8 +92,7 @@ export function stageProgressiveFixture(fixture) {
     const suffix = String(index).padStart(2, '0');
     const cid = `${arm.contentHash.slice(0, 14)}${suffix}`;
     const part = `${arm.part.slice(0, 62)}${suffix}${arm.part.slice(64)}`;
-    components[cid] = { ...arm, contentHash: `${cid}${arm.contentHash.slice(16)}`, part, brep: `components/${cid}.brep`,
-      surf: `components/${cid}.surf` };
+    components[cid] = { ...arm, contentHash: `${cid}${arm.contentHash.slice(16)}`, part, brep: `components/${cid}.brep` };
     surfaces.set(part, { ...armSurface, cid });
     const id = `o1.${index + 2}`;
     // Every arm at the origin: the box the first batch spans is one arm's, whichever
@@ -386,15 +382,7 @@ export async function serveStepHarness(t, { onRequest, progressive = false, sing
         response.end(declaring || !shown.undeclaredAssembly ? shown.assembly : shown.undeclaredAssembly);
         return;
       }
-      // A component's SURF, by the view's component path, as cadgen extracts it for recognition.
-      const surf = /^\/?([0-9a-f]{64})\/components\/([0-9a-f]{16})\.surf$/.exec(file);
-      const shown = surf && (views.get(surf[1]) || fixture);
-      const part = shown?.view.components[surf[2]]?.part;
-      const surface = part && fixture.surfaces.get(part);
-      if (!surface) { notFound(response); return; }
-      response.setHeader('Content-Type', 'application/octet-stream');
-      response.setHeader('Content-Length', String(surface.bytes.length));
-      response.end(request.method === 'HEAD' ? undefined : surface.bytes);
+      notFound(response);
       return;
     }
     if (url.pathname.endsWith('/__tess_cache/probe')) {

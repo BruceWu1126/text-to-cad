@@ -283,7 +283,7 @@ it('names the parts drawn without a face cadgen could not mesh', async () => {
 
 // The core fixture parts: cadgen's display mesh of each, its selector table and its row.
 function fixtureParts(names: string[]) {
-  const dir = path.join(path.dirname(createRequire(import.meta.url).resolve('@text-to-cad/core/lib/surf/container.js')), 'fixtures');
+  const dir = path.join(path.dirname(createRequire(import.meta.url).resolve('@text-to-cad/core/lib/surf/tessellationCache.js')), 'fixtures');
   const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'fixtures.json'), 'utf8'));
   return names.map((name) => {
     const bytes = new Uint8Array(fs.readFileSync(path.join(dir, `${name}.glb`)));

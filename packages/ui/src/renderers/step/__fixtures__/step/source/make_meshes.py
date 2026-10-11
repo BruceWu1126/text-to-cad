@@ -5,7 +5,7 @@ The harness serves these as cadgen's part store would: one GLB body per part,
 at the display tolerance (``cadgen.tessellation_policy``), named by the part key
 cadgen derives from the component and the view's surface producer
 (``cadgen.store.parts``), which this script writes into ``assembly.json`` with the
-view's id and the ``surf`` path the CAD Viewer names for each component. The two
+view's id. The two
 parts are rebuilt here from ``hinge_block.py``'s shapes and meshed by cadgen's own
 producer (``cadgen._internal.occt_mesh``); a part whose edges a newer build orders
 differently is written in the committed ``.surf``'s ordinals, matched by each
@@ -45,15 +45,14 @@ def _match(rows, fresh, key):
 
 
 def _view(view: dict) -> dict:
-    """The served view under its own producer: each component names its part and its ``surf``."""
+    """The served view under its own producer: each component names its part."""
     from cadgen.store import parts
 
     producer = parts.producer_fields({name: view["surfaceProducer"][name] for name in ("build123d", "ocp", "cadqueryOcp")})
     view["surfaceProducer"] = {**producer, "producerKey": parts.producer_key(producer)}
     view["viewId"] = parts._view_id(view["tree"], producer)
-    for cid, component in view["components"].items():
+    for component in view["components"].values():
         component["part"] = parts.part_key(component, producer)
-        component["surf"] = f"components/{cid}.surf"
     return view
 
 

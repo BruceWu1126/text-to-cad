@@ -3010,6 +3010,23 @@ function StepSurfaceBody({ view, data }) {
   const selectionToolActive = tabToolMode === TAB_TOOL_MODE.REFERENCES;
   const selectionCount = selectedReferences.length + selectedParts.length
     + (!isAssemblyView && selectedPartIds.includes(STEP_MODEL_ROOT_ID) ? 1 : 0);
+  // A file of one part -- a part file, or an assembly of one -- has nothing to choose before its
+  // faces and edges: they load once Select is up, once per revision, so a pick reaches them in
+  // every mode.
+  const onlyPartId = useMemo(() => {
+    if (!isAssemblyView) return STEP_MODEL_ROOT_ID;
+    const leaves = flattenAssemblyLeafParts(assemblyRoot);
+    return leaves.length === 1 ? String(leaves[0].id || "") : "";
+  }, [isAssemblyView, assemblyRoot]);
+  const loadedOnlyPart = useRef("");
+  useEffect(() => {
+    const key = `${selectedKey}:${artifactRevision}:${onlyPartId}`;
+    if (!onlyPartId || loadedOnlyPart.current === key || !selectionToolActive || previewing
+      || viewerLoading || assemblyTreeLoading || stepInteractionBlocked) return;
+    loadedOnlyPart.current = key;
+    loadInspectionTopology([onlyPartId]);
+  }, [selectedKey, artifactRevision, onlyPartId, selectionToolActive, previewing, viewerLoading, assemblyTreeLoading,
+    stepInteractionBlocked, loadInspectionTopology]);
   // Every CAD format shares the View settings and camera contract.
 
   // The handles are placed over the mesh at rest (the viewer poses display records, never
@@ -3194,7 +3211,6 @@ function StepSurfaceBody({ view, data }) {
     loadingGeometry: Boolean(pendingTopologyPick),
     positionRuntime: motion.positionControls,
     selectedMeshData: selectedDisplayMeshData,
-    client,
     geometryInspection: { revision: artifactRevision,
       references: !viewerLoading && !stepUpdateInProgress ? isAssemblyView ? assemblyStepTreeTopologyReferences : selectedSelectorRuntime?.references || EMPTY_LIST : EMPTY_LIST,
       parts: !viewerLoading && !stepUpdateInProgress ? selectedMeshData?.parts || EMPTY_LIST : EMPTY_LIST,
@@ -3205,15 +3221,12 @@ function StepSurfaceBody({ view, data }) {
     stepTreeRoot: displayStepTreeRoot,
     expandedTreeNodeIds: expandedStepTreeNodeIds,
     selectedPartIds,
-    selectedReferenceIds,
     selectedReferences: selectedReferenceItems,
     selectableNodeIds: isolatedStepTreeSelectableNodeIds,
     activeTreeNodeScrollKey,
     hiddenPartIds,
     focusedNodeIds: focusedAssemblyNodeIds,
     onSelectTreeNode: selectStepTreeNode,
-    onSelectReferenceGroup: selectReferenceGroup,
-    onCopySelection: copySelectedReferences,
     selectionCopy,
     onFocusTreeNode: focusStepTreeNode,
     onUnfocusTreeNode: handleExitSingleIsolate,
@@ -3225,7 +3238,6 @@ function StepSurfaceBody({ view, data }) {
     onTogglePartVisibility: togglePartVisibility,
     treeSelectionDisabled: stepInteractionBlocked,
     menuForNode: assemblyNodeMenu,
-    menuForReferences: topologyReferenceMenu,
     partMenuActions,
     showAllHiddenParts: handleShowAllHiddenParts
   });

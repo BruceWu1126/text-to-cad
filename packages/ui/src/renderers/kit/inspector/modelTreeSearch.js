@@ -31,13 +31,12 @@ const panelScroller = element => element?.closest('[data-tool-panel-body]') ?? e
 const segment = label => String(label || '').replaceAll('/', '∕');
 const NO_ALIASES = Object.freeze([]);
 
-/** Flatten the presented tree once per tree; curves are never rows. */
+/** Flatten the presented tree once per tree. */
 export function buildModelTreeSearchIndex(tree) {
   /** @type {ModelTreeSearchEntry[]} */
   const entries = [];
   const visit = (nodes, parent, prefix) => {
     for (const node of nodes || []) {
-      if (node.kind === 'curve') continue;
       const label = String(node.label || '');
       const at = entries.push({
         node, parent, label, prefix,

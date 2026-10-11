@@ -178,9 +178,7 @@ never a path. The build that made a model derived each part's display data
 before it reported done, so the server only reads it: a component's
 `POST /__cad/surfaces` ready row carries its part's record. A part the store
 lacks (a cleared or evicted store) is derived by one build-pool job for the
-request; the server never derives. A component's exact surface (SURF), which
-only feature recognition reads, is stored nowhere: reading it from
-`/__cad/store` waits on one build-pool job that extracts it.
+request; the server never derives.
 
 The browser host constructs a `CadClient` from `@text-to-cad/core/client` and
 injects it into the viewer renderers. Catalog subscriptions share the client's

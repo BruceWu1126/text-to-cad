@@ -289,7 +289,6 @@ class PackagePortabilityTest(unittest.TestCase):
             recorded = [
                 *([descriptor["sourcePath"]] if "sourcePath" in descriptor else []),
                 *descriptor.get("sourceClosureFiles", []),
-                *(entry.get("surf", "") for entry in descriptor.get("components", {}).values()),
             ]
             for value in recorded:
                 with self.subTest(descriptor=descriptor_path.parent.name, value=value):

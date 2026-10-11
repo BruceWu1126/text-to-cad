@@ -34,16 +34,15 @@ The worker never receives a service function or detaches an admitted cache
 buffer. Selector-table tickets are acquired only after reserving a worker slot, so
 queued components cannot accumulate eagerly transferred buffers. Drawing a part
 reads its display mesh alone, from the part store on the owning thread, and
-requests no ticket. Recognition reads are limited to 16 MiB. Aborting a worker
-request retains the existing scheduler and owner rules in
+requests no ticket. Aborting a worker request retains the existing scheduler and owner rules in
 [resource ownership](resource-ownership.md).
 
 Each service wraps its provider in an opaque cache generation. URL-addressed
-JSON, text, mesh and descriptor caches include this scope; completed package and
-recognition caches do too. A fresh server-metadata read that observes a changed
+JSON, text, mesh and descriptor caches include this scope; the completed package
+cache does too. A fresh server-metadata read that observes a changed
 identity token retires the generation and aborts its pending reads.
 The provider exposes that generation signal on the main thread. Worker clients
-and recognition subscribe before acquiring tickets, so already-issued URL
+subscribe before acquiring tickets, so already-issued URL
 tickets cannot publish a late result after retirement. The signal itself never
 crosses into a serializable worker message.
 Replacement services and authentication providers cannot inherit another

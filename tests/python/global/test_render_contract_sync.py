@@ -1,18 +1,11 @@
-"""The cross-language render contract: constants that exist in BOTH the Python
-producer and the JS consumer must be bumped together.
+"""The render contract: what the Python producer writes and pins must stay what its
+readers expect.
 
 This repo has lost a cross-language mirror to a deleted check before (the
 viewer scanner's package-path constants drifted silently once nothing compared
-them) — these greps are the structural version of that comparison: a one-sided
-bump fails CI before it can ship a viewer that cannot read what cadgen writes.
-
-The CLIENT half of that boundary is JS — ``packages/core`` parses ``.surf``
-in the browser — so the SURF_VERSION pin stays here. The viewer BACKEND is
-``cadgen.viewer`` now and reads the store through cadgen's own helpers, so there
-is no second derivation of a store key left to compare; what remains for it here
-is the two package-boundary behaviours that a constant pin cannot see (the
-progress record a live build publishes, and the provenance record the classifier
-reads), asked of the real reader against a real producer.
+them). The viewer BACKEND is ``cadgen.viewer`` now and reads the store through
+cadgen's own helpers, and the page reads no SURF, so there is no second
+derivation of a store key or a format version left to compare.
 """
 
 from __future__ import annotations
@@ -37,38 +30,6 @@ def _extract(pattern: str, path: Path, flags: int = re.MULTILINE) -> str:
 
 
 class RenderContractSyncTest(unittest.TestCase):
-    def test_surf_version_matches_between_python_and_js(self) -> None:
-        python_version = _extract(
-            r"^SURF_VERSION = (\d+)$",
-            ROOT / "packages/cadgen/src/cadgen/_internal/surface_extract.py",
-        )
-        js_version = _extract(
-            r"^export const SURF_VERSION = (\d+);$",
-            ROOT / "packages/core/src/lib/surf/container.js",
-        )
-        self.assertEqual(
-            python_version,
-            js_version,
-            "SURF_VERSION diverged between the Python extractor and the JS "
-            "surf parser — bump both together; a .surf the client cannot parse "
-            "renders nothing. SURF_VERSION is the surface artifact's own version "
-            "and never touches geometry identity (GEOMETRY_SCHEME).",
-        )
-
-    def test_surf_versions_read_and_written_agree_everywhere(self) -> None:
-        extractor = ROOT / "packages/cadgen/src/cadgen/_internal/surface_extract.py"
-        container = ROOT / "packages/cadgen/src/cadgen/_internal/surf_container.py"
-        parser = ROOT / "packages/core/src/lib/surf/container.js"
-        written = _extract(r"^SURF_VERSION = (\d+)$", extractor)
-        read = {
-            "container": _extract(r"^SURF_VERSIONS_READ = \(([\d, ]+)\)$", container),
-            "parser": _extract(r"^export const SURF_VERSIONS_READ = Object\.freeze\(\[([\d, ]+)\]\);$", parser),
-        }
-        versions = {name: [int(v) for v in text.replace(" ", "").split(",") if v] for name, text in read.items()}
-        self.assertEqual(len({tuple(v) for v in versions.values()}), 1,
-                         f"every reader reads the same SURF versions: {versions}")
-        self.assertIn(int(written), versions["parser"], "what is written is read")
-
     def test_component_blob_format_is_pinned_not_current(self) -> None:
         # Component blobs are content-addressed: their serialized bytes ARE the
         # cid. A floating BinTools_FormatVersion_CURRENT would let an OCP

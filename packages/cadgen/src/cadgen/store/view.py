@@ -20,7 +20,6 @@ a page reads its display mesh and selector table by.
 from __future__ import annotations
 
 import atexit
-import base64
 import json
 import os
 import shutil
@@ -36,8 +35,6 @@ DESCRIPTOR_NAME = "assembly.json"
 COMPONENT_DIRNAME = "components"
 # A component's selector table in a view: `components/<cid>.selectors.json`.
 SELECTOR_TABLE_SUFFIX = ".selectors.json"
-# A component's SURF in a served view, for feature recognition: extracted when asked.
-SURFACE_SUFFIX = ".surf"
 
 
 def _select_producer(tree_hash: str, producer: dict | None, document_hash: str | None) -> dict:
@@ -267,26 +264,14 @@ def _write_view(descriptor: dict, records: dict, root: Path) -> Path:
     return root
 
 
-def _served_surface(tree_hash: str, cid: str) -> bytes | None:
-    """One component's SURF, extracted by one build-pool job (``kind: surface``) and stored
-    nowhere: what a served view's ``components/<cid>.surf`` answers."""
-    from cadgen.daemon.artifacts import ArtifactJobError, resolve_artifact
-
-    try:
-        result = resolve_artifact({"kind": "surface", "tree": tree_hash, "cid": cid})
-        return base64.b64decode(result["surface"], validate=True)
-    except (ArtifactJobError, KeyError, TypeError, ValueError):
-        return None
-
-
 def virtual_path(
     rel: str, *, producer: dict | None = None, document_hash: str | None = None,
 ) -> tuple[bytes | Path | None, str]:
-    """Resolve ``<tree>`` (or ``<tree>/assembly.json``) and ``<tree>/components/<cid>.<suffix>``:
-    a component's BREP (``.brep``) and SURF (``.surf``, extracted when asked).
+    """Resolve ``<tree>`` (or ``<tree>/assembly.json``) and ``<tree>/components/<cid>.brep``,
+    a component's BREP.
 
-    Returns ``(payload, content_type)``: bytes for the assembly.json and a SURF, a Path for a
-    BREP (streamable), or ``(None, "")`` when nothing matches."""
+    Returns ``(payload, content_type)``: bytes for the assembly.json, a Path for a BREP
+    (streamable), or ``(None, "")`` when nothing matches."""
     segments = [p for p in str(rel or "").replace("\\", "/").split("/") if p]
     if not segments or not is_object_hash(segments[0]):
         return None, ""
@@ -297,17 +282,7 @@ def virtual_path(
         descriptor = descriptor_for_view(tree_hash, producer=producer, document_hash=document_hash)
         if descriptor is None:
             return None, ""
-        for cid, entry in descriptor["components"].items():
-            entry["surf"] = f"{COMPONENT_DIRNAME}/{cid}{SURFACE_SUFFIX}"
         return json.dumps(descriptor).encode("utf-8"), "application/json"
-    if len(segments) == 3 and segments[1] == COMPONENT_DIRNAME and segments[2].endswith(SURFACE_SUFFIX):
-        cid = segments[2][:-len(SURFACE_SUFFIX)]
-        try:
-            descriptor, _ = capture_tree(tree_hash, retain_payloads=False)
-        except (OSError, ValueError, TypeError):
-            return None, ""
-        payload = _served_surface(tree_hash, cid) if cid in descriptor["components"] else None
-        return (payload, "application/octet-stream") if payload is not None else (None, "")
     if len(segments) == 3 and segments[1] == COMPONENT_DIRNAME:
         resolved = component_object_for_tree(tree_hash, segments[2])
         if resolved is None:

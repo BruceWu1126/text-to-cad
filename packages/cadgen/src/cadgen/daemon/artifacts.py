@@ -1,10 +1,8 @@
 """Build-pool artifact jobs, independent of source models and document paths: this
-runtime's surface producer (``kind: producer``), the display data of the parts a
+runtime's surface producer (``kind: producer``), and the display data of the parts a
 view found missing from the store (``kind: display``: one request, one job, one
-worker), and one component's SURF for feature recognition, extracted and stored
-nowhere (``kind: surface``). Only workers import the native surface producer. Requests
-contain immutable pins, never a script, a declared output, or an instruction to run
-arbitrary Python.
+worker). Only workers import the native surface producer. Requests contain immutable
+pins, never a script, a declared output, or an instruction to run arbitrary Python.
 """
 
 from __future__ import annotations
@@ -61,11 +59,8 @@ def normalize_request(request):
     kind = request.get("kind")
     if kind == "producer" and set(request) == {"kind"}:
         return {"kind": "producer"}
-    if kind == "surface" and set(request) == {"kind", "tree", "cid"}:
-        return {"kind": kind, "tree": _digest(request["tree"], "tree"), "cid": _digest(request["cid"], "cid", _CID)}
     if kind != "display" or set(request) != {"kind", "tree", "cids", "producer"}:
-        raise ValueError("artifact request must be producer, surface with exactly tree and cid, "
-                         "or display with exactly tree, cids and producer")
+        raise ValueError("artifact request must be producer, or display with exactly tree, cids and producer")
     cids = request["cids"]
     if not isinstance(cids, (list, tuple)) or not cids:
         raise ValueError("artifact cids must be a nonempty list")
@@ -129,8 +124,6 @@ def execute(request, *, keep_going=None):
 
     if request["kind"] == "producer":
         return parts.producer_identity()
-    if request["kind"] == "surface":
-        return parts.surface(request["tree"], request["cid"])
     return parts.derive(request["tree"], request["cids"], producer=request["producer"], keep_going=keep_going)
 
 

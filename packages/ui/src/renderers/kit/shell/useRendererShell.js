@@ -110,7 +110,7 @@ const NO_CHOICE = Object.freeze({});
  *   the normal view on screen (`previewing` stays false, `setPreviewing` does nothing).
  * @param {{ previewing: boolean, set: (previewing: boolean) => void }} [options.preview]  Preview mode
  *   (`usePreviewState`), when the renderer holds that state itself: a renderer whose own gates
- *   (picking, recognition, tool effects) and whose scene's inputs run before this hook cannot wait for it.
+ *   (picking, tool effects) and whose scene's inputs run before this hook cannot wait for it.
  *   Every gate reads this one state; the Preview button, Escape and its X write it, through the returned
  *   `setPreviewing`. Omitted: the shell holds it. While it is on, the renderer draws the model as it opens
  *   (at rest, nothing hidden, isolated, picked or measured) and leaves its own state as it is, so leaving

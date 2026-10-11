@@ -1,11 +1,11 @@
 """`.surf` extraction: one component's exact topology for its readers.
 
-A `.surf` is read by the selector tables, the measure and reference panels and
-feature recognition -- never tessellated (cadgen meshes components with OCCT).
+A `.surf` is read by the selector table a part's derivation builds from it --
+never tessellated (cadgen meshes components with OCCT).
 So the oracle here is OCCT itself for every analytic value a reader uses, and
 the contract for everything else is what those readers take: loops as ordered
-edge references, B-spline surfaces as degrees and pole counts (a bilinear
-patch's corners, which recognition reads as a ruled loft's sections), swept
+edge references, B-spline surfaces as degrees and pole counts (and a bilinear
+patch's corners), swept
 surfaces by axis or direction, general curves by kind and range.
 """
 
@@ -295,8 +295,7 @@ class TightBoundsTest(unittest.TestCase):
 class ClampedUvBoundsTest(unittest.TestCase):
     """UVBounds_s can return a bound a floating-point hair OUTSIDE the
     surface's own domain (vendor STEPs: -0.0 vs 0.0, a few 1e-6 past a
-    trimmed span). A face's recorded ``uv`` window -- what feature recognition
-    reads a cylinder's sweep from -- is pulled into the domain in each
+    trimmed span). A face's recorded ``uv`` window is pulled into the domain in each
     non-periodic direction, so it names parameters the surface has (Waveshare
     ESP32 driver board regression)."""
 

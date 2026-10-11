@@ -227,9 +227,8 @@ def _store_asset_url(tree: str) -> str:
     """``/__cad/store?file=<tree>``.
 
     The tree hash stands where a directory used to: the client's
-    ``resolvePackageAssetUrl`` appends ``/assembly.json`` and
-    ``/components/<cid>.surf`` to this same ``file`` param, and the store route
-    resolves both by hash. The value carries NO leading slash (the route strips
+    ``resolvePackageAssetUrl`` appends ``/assembly.json`` to this same ``file``
+    param, and the store route resolves it by hash. The value carries NO leading slash (the route strips
     them, but the catalog must not emit one). No ``?v=`` token: a tree is
     content-addressed, so its hash IS the version.
     """

@@ -21,8 +21,6 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); Element.prototype.scrollInto
 const leaves = Array.from({ length: 12 }, (_, i) => ({ id: `o${i}`, nodeType: 'part', displayName: `Part ${i}`, leafPartIds: [`o${i}`], children: [] }));
 const group = { id: 'group', nodeType: 'assembly', displayName: 'Subassembly', leafPartIds: ['o0', 'o1'], children: leaves.slice(0, 2) };
 const root = { id: '__step_model__', nodeType: 'assembly', displayName: 'Document', leafPartIds: leaves.map(n => n.id), children: [group, ...leaves.slice(2)] };
-// Different parts, each its own component: one component placed many times would fold into one row.
-const descriptor = { components: Object.fromEntries(leaves.map(n => [`c${n.id}`, {}])), occurrences: leaves.map(n => ({ id: n.id, component: `c${n.id}`, name: n.displayName })) };
 const source = { list: async () => [{ path: '/models/part.step', name: 'part.step', kind: 'file' }],
   search: async () => ({ paths: ['/models/part.step'], truncated: false }) };
 
@@ -30,7 +28,7 @@ function Trees({ expanded = [] as string[] }) {
   const [selected, setSelected] = useState<string[]>([]);
   return <>
     <section data-testid="files"><FolderExplorer source={source} file="/models/part.step" onOpen={() => {}} /></section>
-    <section data-testid="model"><ModelingTree active disabled={false} modeling={{ descriptor, results: {}, error: '', retryFailed() {} }} stepRoot={root}
+    <section data-testid="model"><ModelingTree active disabled={false} stepRoot={root}
       selectedPartIds={selected} partControls={{ isAssemblyView: true, expandedTreeNodeIds: expanded, onToggleTreeNode() {}, hiddenPartIds: [],
         onSelectTreeNode: (id: string) => setSelected([id]), onTogglePartVisibility() {}, onFocusTreeNode() {} }} /></section>
   </>;

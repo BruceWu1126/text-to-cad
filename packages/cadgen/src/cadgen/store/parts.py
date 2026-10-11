@@ -16,13 +16,11 @@ answers whether a part's display data is stored.
 Derivation extracts the component's SURF in memory (an eager-only component's is the
 geometry object its tree pins), builds the selector table from it, meshes the component
 from the table and its face colours, writes the two objects and then the record, so a
-record always names complete objects. Nothing stores the SURF: feature recognition asks
-for one part's on demand (``surface``). A mesh export at another tolerance meshes from the
-stored table the same way and stores nothing (``mesh_at``).
+record always names complete objects. Nothing stores the SURF. A mesh export at another
+tolerance meshes from the stored table the same way and stores nothing (``mesh_at``).
 """
 from __future__ import annotations
 
-import base64
 import contextlib
 import hashlib
 import json
@@ -374,21 +372,6 @@ def mesh_at(entry: dict, key: str, chord: float, angle: float) -> bytes:
     with _meshing():
         topods, colors = _decoded(entry)
         return mesh_component(topods, read_selector_table(payload), colors, part=key, chord=chord, angle=angle)
-
-
-def surface(tree_hash: str, cid: str) -> dict:
-    """One component's SURF, for feature recognition (the CAD Viewer's
-    ``components/<cid>.surf``): extracted here, in memory, and stored nowhere -- an
-    eager-only component's is the object its tree pins. A job's result is JSON, so the
-    bytes are base64 (``{"surface": ...}``)."""
-    from cadgen.store.trees import capture_tree
-
-    descriptor, _ = capture_tree(tree_hash, retain_payloads=False)
-    entry = descriptor["components"].get(cid)
-    if entry is None:
-        raise ValueError("surface request names an unpinned component")
-    topods, colors = (None, {}) if entry["kind"] == "eager-only" else _decoded(entry)
-    return {"surface": base64.b64encode(_surface(entry, topods, colors)).decode("ascii")}
 
 
 def _captured(tree_hash: str, producer: dict | None) -> tuple[dict, dict]:

@@ -791,15 +791,14 @@ class CadApp:
 
     def _handle_store_asset(self, request, response, query):
         """A tree served as if it were a directory: ``<tree>/assembly.json`` is
-        the flattened tree, ``<tree>/components/<cid>.brep`` streams a component's
-        BREP and ``<tree>/components/<cid>.surf`` its SURF, extracted when asked
-        (``store.view.virtual_path``). Nothing here touches a path the client names:
+        the flattened tree and ``<tree>/components/<cid>.brep`` streams a component's
+        BREP (``store.view.virtual_path``). Nothing here touches a path the client names:
         the ``file`` param is parsed into (tree hash, component) and each is looked up
         by HASH in the store, so ``file=/etc/hosts`` is simply not a tree.
 
         Everything that fails is 404, never 403. Leading slashes are STRIPPED
         because the client's resolvePackageAssetUrl emits
-        ``file=/<tree>/components/<cid>.surf``.
+        ``file=/<tree>/assembly.json``.
         """
         rel = str(query.get("file") or "").replace("\\", "/").lstrip("/")
         producer = json.loads(query.get("surfaceProducer")) if query.get("surfaceProducer") else None

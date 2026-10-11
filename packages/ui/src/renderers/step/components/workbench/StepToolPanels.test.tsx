@@ -34,12 +34,10 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); while (restores.length) restores.pop()!(); });
 
-// The committed two-part fixture's shape: an assembly of a base and an arm, one recognised feature each.
-const tree = [{ id: 'body:1', kind: 'body', label: 'Box', faces: [1, 2], edges: [1], complete: true, children: [] }];
-const descriptor = { components: { c: { surf: 'components/c.surf' } }, occurrences: [{ id: 'o1.1', component: 'c', name: 'base' }, { id: 'o1.2', component: 'c', name: 'arm' }] };
+// An assembly: a hinge of a base and an arm, and a pin beside it.
 const partNode = (id: string, name: string) => ({ id, nodeType: 'part', name, leafPartIds: [id], children: [] });
-const stepRoot = { id: 'document', nodeType: 'assembly', name: 'fixture', children: [partNode('o1.1', 'base'), partNode('o1.2', 'arm')] };
-const modeling = { descriptor, results: { c: { tree } }, error: null, retryFailed: vi.fn() };
+const stepRoot = { id: 'document', nodeType: 'assembly', name: 'fixture', children: [
+  { id: 'o1.1', nodeType: 'assembly', name: 'hinge', children: [partNode('o1.1.1', 'base'), partNode('o1.1.2', 'arm')] }, partNode('o1.2', 'pin')] };
 
 const rows = () => [...document.querySelectorAll('[aria-label="Modeling tree"] button')].map(button => button.getAttribute('aria-label'))
   .filter(label => /^(?:Select|Expand|Collapse) /.test(label || ''));
@@ -58,7 +56,7 @@ function Features({ mode = 'all', initialLayout = undefined as any, mobile = fal
   const [expanded, setExpanded] = useState<string[]>([]);
   // The shell hands the stack the viewer's layout, as it hands every panel (`RendererShell.jsx`).
   return <ViewerMobileContext.Provider value={mobile}><ToolStack layout={layout} onLayoutChange={change} mobile={mobile}>
-    <ModelingTreeView modeling={modeling} stepRoot={stepRoot} active mode={mode} references={[]} onLoadTopology={() => {}}
+    <ModelingTreeView stepRoot={stepRoot} active mode={mode} onLoadTopology={() => {}}
       modeMenu={<SelectModeMenu mode={mode} assembly onModeChange={() => {}} connected={{ edgeChain: true, tangentFaces: true }} onConnectedChange={() => {}} />}
       partControls={{ isAssemblyView: true, expandedTreeNodeIds: expanded,
         onToggleTreeNode: (id: string) => setExpanded(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]) }} />
@@ -67,29 +65,25 @@ function Features({ mode = 'all', initialLayout = undefined as any, mobile = fal
 }
 const storedLayout = () => JSON.parse(document.querySelector('[data-layout]')!.getAttribute('data-layout')!);
 
-it("Select's mode button sits in the Features filter row beside its X, and each mode holds the tree: Parts a row per part, Faces everything open, locked; All the person's own tree again", () => {
+it("Select's mode button sits in the Features filter row beside its X, and each mode holds the tree: Parts, Faces and Edges every assembly open, locked; All the person's own tree again", () => {
   const view = render(<Features />);
   expect([...features().querySelectorAll('[data-slot=tree-filter] button')].map(button => button.getAttribute('aria-label')))
     .toEqual(['Select mode: All', 'Close features']);
-  // All: the tree is the person's own — open the base.
-  expect(rows()).toEqual(['Expand base', 'Select base', 'Expand arm', 'Select arm']);
-  fireEvent.click(screen.getByRole('button', { name: 'Expand base' }));
-  expect(rows()).toEqual(['Collapse base', 'Select base', 'Select Box', 'Expand arm', 'Select arm']);
+  // All: the tree is the person's own — open the hinge. A part is a leaf.
+  expect(rows()).toEqual(['Expand hinge', 'Select hinge', 'Select pin']);
+  fireEvent.click(screen.getByRole('button', { name: 'Expand hinge' }));
+  expect(rows()).toEqual(['Collapse hinge', 'Select hinge', 'Select base', 'Select arm', 'Select pin']);
   expect(locks()).toEqual([]);
-  // Parts: every part a row, none open, and no disclosure to press.
-  view.rerender(<Features mode="parts" />);
-  expect(screen.getByRole('button', { name: 'Select mode: Parts' })).toBeTruthy();
-  expect(rows()).toEqual(['Select base', 'Select arm']);
-  expect(locks()).toEqual(['shut', 'shut']);
-  // Faces (and Edges): everything open, down to the features, and locked.
-  view.rerender(<Features mode="faces" />);
-  expect(rows()).toEqual(['Select base', 'Select Box', 'Select arm', 'Select Box']);
-  expect(locks()).toEqual(['open', 'open']);
-  view.rerender(<Features mode="edges" />);
-  expect(locks()).toEqual(['open', 'open']);
-  // All: the tree the person left — the base open, the arm shut — and unlocked.
+  // Parts, Faces and Edges: every assembly open, and no disclosure to press.
+  for (const mode of ['parts', 'faces', 'edges']) {
+    view.rerender(<Features mode={mode} />);
+    expect(rows()).toEqual(['Select hinge', 'Select base', 'Select arm', 'Select pin']);
+    expect(locks()).toEqual(['open']);
+  }
+  expect(screen.getByRole('button', { name: 'Select mode: Edges' })).toBeTruthy();
+  // All: the tree the person left — the hinge open — and unlocked.
   view.rerender(<Features mode="all" />);
-  expect(rows()).toEqual(['Collapse base', 'Select base', 'Select Box', 'Expand arm', 'Select arm']);
+  expect(rows()).toEqual(['Collapse hinge', 'Select hinge', 'Select base', 'Select arm', 'Select pin']);
   expect(locks()).toEqual([]);
 });
 
@@ -101,7 +95,7 @@ it("Features closes by the X at its filter row's end, kept mounted with its filt
   // The trailing controls (the mode menu, the X) yield to a focused box (`tree-filter.jsx`).
   expect(features().querySelector('[data-tree-filter-trailing]')!.className).toContain('group-has-[input:focus]/filter:hidden');
   expect(within(features()).queryByRole('button', { name: /^(?:Collapse|Expand) features$/ })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Expand base' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Expand hinge' }));
   await user.click(search);
   await user.keyboard('ba');
   expect(within(features()).getByRole('status').textContent).toMatch(/match/);
@@ -261,7 +255,7 @@ it('a neutral effect leaves with the next tool, an applied one stays until clear
 
 it('a short viewer: the tree gives way first, then the details panels, a kept effect never; the column is bounded by the stack and scrolls rather than cutting a panel', () => {
   const measure = { shown: true, controls: <p>0 measurements</p>, onRemove() {} };
-  render(<Workbench measure={measure} extraPanels={<ModelingTreeView modeling={modeling} stepRoot={stepRoot} active references={[]} onLoadTopology={() => {}}
+  render(<Workbench measure={measure} extraPanels={<ModelingTreeView stepRoot={stepRoot} active onLoadTopology={() => {}}
     selectionDetails={{ content: <p>Part o1.2</p> }} partControls={{ isAssemblyView: true, expandedTreeNodeIds: [] }} />} />);
   fireEvent.click(tool('Explode'));
   fireEvent.keyDown(slider('Explode amount'), { key: 'PageUp' });

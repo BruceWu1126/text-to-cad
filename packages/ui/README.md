@@ -85,7 +85,7 @@ src/
   library/           a host's home: the models opened before, to open again, and their pictures
   renderers/
     kit/            the frame every viewer file shares: viewport, tools, panels, Display settings, status
-    step/           STEP: Features tree, Position, routines, feature recognition
+    step/           STEP: Features tree, Position, routines
     robot/          URDF, SRDF and SDF: Position and Links
     glb/, mesh/     GLB, and STL/3MF triangle meshes
     dxf/            2D drawings
@@ -193,9 +193,6 @@ bounded cache. They retain exact decoded component buffers and copy structural
 metadata for each mount; scene objects, controls and pending work are not cached.
 Reuse is scoped to workspace, resource-provider generation and file revision. See
 [CAD resource lifetime](docs/cad-renderer.md) for cache bounds and invalidation.
-The Features tree can reuse those accepted component identities for completed
-recognition metadata after the runtime descriptor also matches, avoiding surface
-requests on a warm reopen without retaining another copy of the geometry.
 
 The host owns where state lives; the package owns what it is. Everything the
 viewer keeps is one tab record (`@text-to-cad/ui/tab-store`: the tab's settings and
@@ -243,18 +240,12 @@ The STEP renderer consumes the artifact, its schema-10 `.step.json`
 sidecar and immutable store views. Animation keyframes, authored appearance and
 kinematics travel in the sidecar, the one file read beside the document.
 The scene uses progressive component loading and demand-driven exact surfaces.
-The Model tree shares the explorer's row and filter primitives. Its visible expansion
-controls viewport selection, exact topology and optional feature recognition;
-collapsed parts do not trigger whole-assembly analysis, and neither does its
-filter, which searches names without expanding anything. Contextual measurements
-remain available in Render too. See [model tree and recognition](docs/cad-renderer.md#step-panels)
-for selection, isolation, demand and cache ownership.
-
-Feature detection stays client-side in this renderer, separate from cadgen
-compilation, Python inspection and reference syntax. Both apps reuse its worker
-and versioned, bounded memory cache; it adds no persistent store. Read
-[feature detection](docs/feature-detection.md) before changing inference rules,
-cache identity, cancellation or recognition limits.
+The Model tree shares the explorer's row and filter primitives. Its rows are the
+STEP's assemblies and parts, a part a leaf whose faces and edges the viewport picks;
+its expansion controls viewport selection and exact topology, and its filter searches
+names without expanding anything. Contextual measurements remain available in Render
+too. See [the model tree](docs/cad-renderer.md#step-panels) for selection, isolation
+and demand.
 
 A CAD file's controls are `ToolPanel`s in the tool stack, shown by the tool they
 belong to. Select shows Features (a robot's Links) and, with a selection, the Reference; Position shows Position; Display and Draw show

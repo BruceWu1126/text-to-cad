@@ -233,6 +233,13 @@ async function open(options = {}) {
       await page.locator('[role=menu][aria-label="Select mode"]').getByRole('menuitemradio', { name, exact: true }).click();
       await page.locator('[role=menu]').waitFor({ state: 'detached' });
     },
+    // A part is a leaf of the tree: its row's menu Expands it, which loads its faces and edges for
+    // a pick under All, and Collapses it again.
+    partMenu: async (name, item) => {
+      await pane.getByRole('button', { name: `Select ${name}`, exact: true }).click({ button: 'right' });
+      await page.getByRole('menuitem', { name: item, exact: true }).click();
+      await page.getByRole('menu').waitFor({ state: 'detached' });
+    },
     // Display's settings: a dropdown, portaled out of the viewer.
     displayPanel: () => page.locator('[data-display-popover]'),
     rows: () => pane.locator('[aria-label="Modeling tree"]').getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))
@@ -274,7 +281,8 @@ test('a STEP opens in Select with the tools its sidecar earns, its Features in t
   assert.ok(coverage(opened) > 0.2, `the opening frame is the model: ${coverage(opened)}`);
   const boxes = partBoxes(opened);
   assert.ok(boxes.base?.count > 2000 && boxes.arm?.count > 1000, `both parts are drawn, each in its own colour: ${JSON.stringify(boxes)}`);
-  assert.deepEqual(await view.rows(), ['Expand base', 'Select base', 'Expand arm', 'Select arm']);
+  // A part is a leaf: nothing opens under it.
+  assert.deepEqual(await view.rows(), ['Select base', 'Select arm']);
   // Its cap is half the stack's own height (the area under the strip), and a cap is never a
   // floor: two rows are two rows tall.
   const featuresPanel = pane.getByRole('region', { name: 'Features', exact: true });
@@ -284,19 +292,7 @@ test('a STEP opens in Select with the tools its sidecar earns, its Features in t
   assert.equal(fit.cap, `${Math.round(stackHeight / 2)}px`, 'the tree opens capped at half the stack');
   assert.ok(Math.abs(fit.height - (fit.filter + fit.rows + 2)) <= 1, `and is its filter row and its rows: ${JSON.stringify(fit)}`);
   // Its X, at the filter row's end, closes it; Select, pressed while it is the tool, opens it again
-  // as it was. (Recognition is unavailable in this harness: a part opens onto one supplied feature.)
-  await page.evaluate(() => {
-    window.Worker = class {
-      constructor(url) { if (!String(url).includes('modelingTree.worker')) throw new Error('No worker'); }
-      postMessage() { queueMicrotask(() => this.onmessage?.({ data: { tree: [{
-        id: 'feature:box', kind: 'extrude', label: 'Box', faces: [1, 2, 3], edges: [1], children: [], complete: true
-      }] } })); }
-      terminate() {}
-    };
-  });
-  await pane.getByRole('button', { name: 'Expand base', exact: true }).click();
-  await pane.getByRole('button', { name: 'Select Box', exact: true }).waitFor();
-  await pane.getByRole('button', { name: 'Collapse base', exact: true }).waitFor();
+  // as it was.
   const openedRows = await view.rows();
   assert.equal(await featuresPanel.getByRole('button', { name: /^(?:Collapse|Expand) features$/ }).count(), 0, 'the tree does not fold');
   const selectMark = view.tool('Select').locator('[data-tool-panel-closed]');
@@ -348,8 +344,8 @@ test('a pick names its face or edge by the id cadgen minted in the selector tabl
   assert.ok(top && rim, 'the base has a top face and a top rim edge along +X');
   // A selected reference id ends in the selector the pick resolved to (`topology|<part>|<type>|<selector>`).
   const selected = () => page.evaluate(() => window.cadHarness.a.controller.readState().selectedReferenceIds.map(id => id.split('|').pop()));
-  await pane.getByRole('button', { name: 'Expand base', exact: true }).click();
-  // The part's topology lands after the row opens, and a press before it lands picks the part:
+  await view.partMenu('base', 'Expand');
+  // The part's topology lands after it expands, and a press before it lands picks the part:
   // press until a face answers, then hold it to cadgen's id.
   for (let attempt = 0; attempt < 50 && !(await selected()).some(id => /\.f\d+$/.test(id)); attempt += 1) {
     await page.mouse.click(...at([6, 6, 5]));
@@ -389,28 +385,17 @@ test('Select picks parts and faces, a selection lives only under Select, and the
   await view.waitCursor('auto');
   await frameWhen(view, shot => differing(still, shot) === 0, 'came back exactly as it was once the pointer left');
 
-  // In the viewport a press picks ONE face or ONE edge, even where the tree groups them: under
-  // All an open part's faces are what a press picks, and this part opens onto a feature of seven
-  // faces (recognition is unavailable in this harness, so the feature is supplied).
-  await page.evaluate(() => {
-    window.Worker = class {
-      constructor(url) { if (!String(url).includes('modelingTree.worker')) throw new Error('No worker'); }
-      postMessage() { queueMicrotask(() => this.onmessage?.({ data: { tree: [{
-        id: 'feature:box', kind: 'extrude', label: 'Grouped faces', faces: [1, 2, 3, 4, 5, 6, 7], edges: [1, 2, 3], children: [], complete: true
-      }] } })); }
-      terminate() {}
-    };
-  });
-  await pane.getByRole('button', { name: 'Expand base', exact: true }).click();
-  // The feature row can arrive before the faces it names, and under All a press before they land
-  // picks the part. The row's own press waits for them and selects what it groups, its seven faces
-  // and three edges; the viewport press then narrows that to one face.
-  await pane.getByRole('button', { name: 'Select Grouped faces', exact: true }).click();
-  await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedReferenceIds
-    .filter(id => /\.f\d+$/.test(id)).length === 7);
-  await page.mouse.click(...at([6, 6, 5]));
-  await page.waitForFunction(() => { const ids = window.cadHarness.a.controller.readState().selectedReferenceIds;
+  // In the viewport a press picks ONE face or ONE edge: under All an expanded part's faces are what
+  // a press picks. Its faces land after it expands, and a press before they land picks the part:
+  // press until a face answers.
+  await view.partMenu('base', 'Expand');
+  const oneFace = () => page.evaluate(() => { const ids = window.cadHarness.a.controller.readState().selectedReferenceIds;
     return ids.length === 1 && /\.f\d+$/.test(ids[0]); });
+  for (let attempt = 0; attempt < 50 && !(await oneFace()); attempt += 1) {
+    await page.mouse.click(...at([6, 6, 5]));
+    await page.waitForTimeout(100);
+  }
+  assert.equal(await oneFace(), true, 'a press picks one face of the expanded part');
   // The pick opened Quick Edit with the pick attached, and the keyboard is in its box.
   const quickEdit = pane.getByRole('region', { name: 'Quick Edit', exact: true });
   await quickEdit.locator('[data-quick-edit-chip="references"]').waitFor();
@@ -418,8 +403,8 @@ test('Select picks parts and faces, a selection lives only under Select, and the
   await page.mouse.click(...at([10, 6, 5]));
   await page.waitForFunction(() => { const ids = window.cadHarness.a.controller.readState().selectedReferenceIds;
     return ids.length === 1 && /\.e\d+$/.test(ids[0]); });
-  // Folding the part away unloads its faces, and the pick with them: the tree is as it opened.
-  await pane.getByRole('button', { name: 'Collapse base', exact: true }).click();
+  // Collapsing the part unloads its faces, and the pick with them.
+  await view.partMenu('base', 'Collapse');
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedReferenceIds.length === 0);
 
   // No Reference until something is picked: it comes with the selection.
@@ -1286,8 +1271,8 @@ test('Measure reads a distance between two picks', async () => {
   const view = await open();
   const { page, pane, at, errors } = view;
   // Measure snaps onto exact topology, which arrives with the tree's frontier.
-  await pane.getByRole('button', { name: 'Expand base', exact: true }).click();
-  await pane.getByRole('button', { name: 'Expand arm', exact: true }).click();
+  await view.partMenu('base', 'Expand');
+  await view.partMenu('arm', 'Expand');
   await view.tool('Measure').click();
   // Its panel is up as soon as it is the tool, empty but for a hint.
   const measurePanel = pane.getByRole('region', { name: 'Measure controls', exact: true });
@@ -1673,7 +1658,7 @@ test('a reload of the tab brings back the view — camera, Display, Clip, Explod
   const { page, pane, at, errors } = view;
   const rest = await translations(page);
   // The tree: expanded; the pose: posed, then Select again.
-  await pane.getByRole('button', { name: 'Expand base', exact: true }).click();
+  await view.partMenu('base', 'Expand');
   await view.tool('Position').click();
   const position = pane.locator('[data-tool-panel][aria-label="Position controls"]');
   const input = position.getByLabel('hinge slider value', { exact: true });
@@ -1703,9 +1688,9 @@ test('a reload of the tab brings back the view — camera, Display, Clip, Explod
   const left = await view.state();
   // Where the explosion put every part once it has eased out, to be found in the same place after the reload.
   const explodedLeft = await restingLayout(page, posed);
-  // The tree as isolation shows it: the base's rows, opened.
+  // The tree as isolation shows it.
   const rowsLeft = await view.rows();
-  assert.ok(rowsLeft.length > 1, `the tree has the base's rows before the reload: ${rowsLeft.join(', ')}`);
+  assert.ok(rowsLeft.length > 1, `the tree has its rows before the reload: ${rowsLeft.join(', ')}`);
   assert.deepEqual(await page.evaluate(() => Object.keys(sessionStorage)), ['text-to-cad:tab:harness'], 'one record, and nothing else in the tab');
 
   await view.reload();

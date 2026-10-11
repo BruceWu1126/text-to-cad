@@ -377,7 +377,7 @@ class StoreRouteConfinement(SecurityTestCase):
                 self.assertEqual(body, b'{"error":"Not found"}')
 
     def test_leading_slashes_are_stripped_so_the_client_form_works(self):
-        # resolvePackageAssetUrl emits file=/<key>/components/c0.surf.
+        # resolvePackageAssetUrl emits file=/<key>/assembly.json.
         status, _, body = self.fixture.request(
             "GET", f"/__cad/store?file=/{self.fixture.package_name}/components/{self.fixture.component_name}.brep"
         )

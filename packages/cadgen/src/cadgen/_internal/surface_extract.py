@@ -1,7 +1,7 @@
 """B-rep surface extraction: a component's SURF.
 
-A SURF describes one component's exact topology for the code that selects,
-measures and recognizes it: per-face analytic surfaces (a bilinear B-spline patch
+A SURF describes one component's exact topology for the code that selects and
+measures it: per-face analytic surfaces (a bilinear B-spline patch
 also keeps its four corners), each face's loops as ordered edge references, the
 analytic curve of every edge, and the selector-table metadata -- surface and
 curve types, parameters, exact metrics from GProps/BndLib, edge classes and
@@ -11,8 +11,7 @@ meaning, and the component's mesh (``occt_mesh``) is grouped by the same
 ordinals.
 
 It is extracted in memory and stored nowhere: a part's selector table and
-display mesh are derived from it (``cadgen.store.parts``), and feature
-recognition asks for one part's when it needs it. Only an eager-only
+display mesh are derived from it (``cadgen.store.parts``). Only an eager-only
 component's SURF is an object, pinned by its tree as part of its geometry
 identity.
 
@@ -207,8 +206,8 @@ def _clamped_uv_bounds(face, surface) -> tuple[float, float, float, float]:
 
 def _surface_payload(face, bin_out: _Bin) -> dict[str, Any]:
     """The face's surface: analytic frames exactly, a swept surface by its axis
-    or direction, a B-spline by its degrees and pole counts (the corners of a
-    bilinear patch, which feature recognition reads as a ruled loft's section)."""
+    or direction, a B-spline by its degrees and pole counts (and a bilinear
+    patch's corners)."""
     adaptor = BRepAdaptor_Surface(face)
     kind = adaptor.GetType()
     if kind == GeomAbs_SurfaceType.GeomAbs_Plane:
