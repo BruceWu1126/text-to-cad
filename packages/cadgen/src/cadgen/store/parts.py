@@ -1,0 +1,482 @@
+"""A part's display data: ONE index record per part, naming its two objects -- the display
+mesh (a GLB body, ``cadgen.store.meshes``) and the selector table
+(``cadgen._internal.selector_table``) -- derived from captured immutable geometry inputs,
+and read back.
+
+A part is a component under one surface producer, the kernel that derives it. Its key,
+``index/part/<digest>-v<PART_VERSION>``, carries no tolerance: the digest hashes the
+component's geometry input (its ``contentHash``: kind, codec, BREP bytes, face colours and
+an eager-only component's pinned surface) and the producer, and the version is bumped by
+any change to the extractor, the selector table, the mesher or the GLB payload. The record
+is ``{"glb": {...}, "selectors": {...}}``: each object's address and byte length and what a
+reader sizes it by without opening it -- the mesh's decoded-bytes estimate and counts (and
+``unmeshedFaceCount`` when a face could not be meshed), the table's counts. One probe
+answers whether a part's display data is stored.
+
+Derivation extracts the component's SURF in memory (an eager-only component's is the
+geometry object its tree pins), builds the selector table from it, meshes the component
+from the table and its face colours, writes the two objects and then the record, so a
+record always names complete objects. Nothing stores the SURF: feature recognition asks
+for one part's on demand (``surface``). A mesh export at another tolerance meshes from the
+stored table the same way and stores nothing (``mesh_at``).
+"""
+from __future__ import annotations
+
+import base64
+import contextlib
+import hashlib
+import json
+import os
+import re
+from functools import lru_cache
+from typing import Any, Callable
+
+from cadgen.store.index import entry_path, versioned_key, write_entry
+from cadgen.store.objects import is_object_hash, object_path, put_object, read_verified_object
+
+# 1: one record per part names its display GLB and its selector table (the surface,
+# selector and mesh kinds before it are retired).
+PART_VERSION = 1
+INDEX_KIND = "part"
+MAX_INDEX_BYTES = 16 * 1024
+_KEY = re.compile(rf"[0-9a-f]{{64}}-v{PART_VERSION}")
+# Any version's key, this cadgen's or another's (``obsolete_key``).
+_ANY_KEY = re.compile(r"[0-9a-f]{64}-v(\d+)")
+ROLES = ("glb", "selectors")
+_GLB_FIELDS = {"object", "byteLength", "decodedBytes", "vertexCount", "indexCount", "faceCount", "edgeCount",
+               "edgePointCount"}
+_UNMESHED_COUNT = "unmeshedFaceCount"
+_SELECTOR_FIELDS = {"object", "byteLength", "faceCount", "edgeCount", "vertexCount"}
+_PRODUCER_FIELDS = {"build123d", "ocp", "cadqueryOcp"}
+
+
+class SurfaceProducerUnavailable(ValueError):
+    """This runtime cannot implement the surface producer the request pins.
+
+    A caller that holds a replacement producer recovers from this and only
+    this; every other failure is a failure. Routing it by a substring of the
+    message, retyped at each catch site, made that distinction a typo away
+    from wrong, so the refusal has a type and one declared marker text.
+    """
+
+    MARKER = "worker cannot implement the request's pinned surface producer"
+
+    def __init__(self, message: str = MARKER) -> None:
+        super().__init__(message)
+
+
+def producer_unavailable(error: object) -> bool:
+    """Whether ``error`` is that refusal, however it reached the caller.
+
+    In-process the type answers. Derivation also runs in a POOLED WORKER, and
+    a worker's refusal arrives as an ArtifactJobError carrying its text, so the
+    marker is matched too -- one constant, declared beside the raise.
+    """
+    return isinstance(error, SurfaceProducerUnavailable) or SurfaceProducerUnavailable.MARKER in str(error)
+
+
+def validate_producer(value: Any) -> None:
+    if type(value) is not dict or set(value) not in (_PRODUCER_FIELDS, _PRODUCER_FIELDS | {"producerKey"}):
+        raise ValueError("unsupported surface producer")
+    for field in _PRODUCER_FIELDS:
+        text = value[field]
+        if type(text) is not str or not text.strip() or "unknown" in text.lower():
+            raise ValueError("surface producer requires known runtime identity")
+    if "producerKey" in value and value["producerKey"] != producer_key(value):
+        raise ValueError("surface producer key mismatch")
+
+
+def producer_key(value: dict) -> str:
+    from cadgen._internal.component_package import canonical_json_bytes as canonical_bytes
+    definition = {key: item for key, item in value.items() if key != "producerKey"}
+    validate_producer(definition)
+    return hashlib.sha256(b"cadgen-surface-producer-v2\0" + canonical_bytes(definition)).hexdigest()
+
+
+def producer_fields(value: dict) -> dict:
+    validate_producer(value)
+    return {key: item for key, item in value.items() if key != "producerKey"}
+
+
+@lru_cache(maxsize=1)
+def kernel_versions() -> tuple[str, str, str]:
+    """The installed build123d, the loaded OCP and cadquery-ocp-novtk versions:
+    who produced a derived fact (a part's display data, a measured box).
+
+    OCP.__version__ is exported by the native extension, not inferred from
+    build123d. build123d's is its installed metadata: importing build123d to
+    read it was most of the start of a worker that derives and meshes, which
+    never imports build123d otherwise (``component_package.NativeShape``). An
+    unknown version is a ValueError: a derived fact must never share an
+    identity with an unrelated kernel build.
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    import OCP
+
+    try:
+        build123d, distribution = version("build123d"), version("cadquery-ocp-novtk")
+    except PackageNotFoundError as error:
+        raise ValueError("a derived fact needs the build123d and cadquery-ocp-novtk distributions") from error
+    versions = (build123d, getattr(OCP, "__version__", None), distribution)
+    if any(not isinstance(value, str) or not value.strip() or "unknown" in value.lower() for value in versions):
+        raise ValueError("a derived fact needs known build123d and OCP versions")
+    return versions
+
+
+def producer_identity() -> dict:
+    build123d, ocp, distribution = kernel_versions()
+    identity = {"build123d": build123d, "ocp": ocp, "cadqueryOcp": distribution}
+    validate_producer(identity)
+    return identity
+
+
+def part_key(entry: dict, producer: dict) -> str:
+    """The key of ``entry``'s part (a tree's component entry) under ``producer``."""
+    return _part_key(entry, producer_key(producer))
+
+
+def _part_key(entry: dict, producer: str) -> str:
+    """``part_key`` under the producer whose key is ``producer``."""
+    digest = hashlib.sha256(b"cadgen-part\0" + str(entry["contentHash"]).encode() + b"\0"
+                            + producer.encode()).hexdigest()
+    return versioned_key(digest, PART_VERSION)
+
+
+def valid_key(key: Any) -> bool:
+    return isinstance(key, str) and _KEY.fullmatch(key) is not None
+
+
+def obsolete_key(key: Any) -> bool:
+    """Whether a part entry's key is an older version's than this cadgen's: no reader asks
+    for it again (STORE.md §8). A newer cadgen's is not."""
+    match = _ANY_KEY.fullmatch(key) if isinstance(key, str) else None
+    return match is not None and int(match[1]) < PART_VERSION
+
+
+def _view_id(tree_hash: str, producer: dict) -> str:
+    key = producer_key(producer)
+    return hashlib.sha256(
+        b"cadgen-runtime-view-v1\0" + tree_hash.encode() + b"\0" + key.encode()
+    ).hexdigest()
+
+
+def view_from_geometry(tree_hash: str, descriptor: dict, *, producer: dict | None = None) -> dict:
+    """Consume an owned descriptor from this call's verified geometry capture: each
+    component gains its part key (``part``), and the view its id and producer.
+
+    Internal metadata paths use this after verification to avoid rereading the
+    same closure. Callers retaining canonical metadata pass a private copy.
+    """
+    selected = producer_identity() if producer is None else producer_fields(producer)
+    key = producer_key(selected)
+    descriptor["viewSchemaVersion"] = 1
+    descriptor["tree"] = tree_hash
+    descriptor["viewId"] = _view_id(tree_hash, selected)
+    descriptor["surfaceProducer"] = {**selected, "producerKey": key}
+    for entry in descriptor["components"].values():
+        entry["part"] = _part_key(entry, key)
+        entry["brepObject"] = entry.pop("brep")
+    return descriptor
+
+
+def geometry_entry(view_entry: dict) -> dict:
+    """The canonical tree entry behind a view's component (``view_from_geometry``)."""
+    entry = {"kind": view_entry["kind"], "codec": view_entry["codec"], "brep": view_entry["brepObject"],
+             "faceColors": view_entry["faceColors"], "contentHash": view_entry["contentHash"]}
+    if view_entry["kind"] == "eager-only":
+        entry["eagerSurface"] = view_entry["eagerSurface"]
+    return entry
+
+
+def _counts(value: Any, fields: set[str]) -> bool:
+    return all(type(value[name]) is int and value[name] >= 0 for name in fields - {"object"})
+
+
+def _valid_record(record: Any) -> bool:
+    """A part record's shape: ``{"glb": {...}, "selectors": {...}}`` (module docstring)."""
+    from cadgen.store.meshes import decoded_bytes
+
+    try:
+        if type(record) is not dict or set(record) != set(ROLES):
+            return False
+        glb, table = record["glb"], record["selectors"]
+        if (type(glb) is not dict or set(glb) not in (_GLB_FIELDS, _GLB_FIELDS | {_UNMESHED_COUNT})
+                or not is_object_hash(glb["object"]) or not _counts(glb, set(glb))):
+            return False
+        if _UNMESHED_COUNT in glb and not 0 < glb[_UNMESHED_COUNT] <= glb["faceCount"]:
+            return False
+        if (glb["byteLength"] < 20 or glb["byteLength"] % 4 or glb["decodedBytes"] != decoded_bytes(glb)
+                or glb["edgePointCount"] < 2 * glb["edgeCount"]
+                or (glb["edgeCount"] == 0) != (glb["edgePointCount"] == 0)):
+            return False
+        return (type(table) is dict and set(table) == _SELECTOR_FIELDS and is_object_hash(table["object"])
+                and _counts(table, _SELECTOR_FIELDS) and table["byteLength"] > 0)
+    except (TypeError, KeyError):
+        return False
+
+
+def probe(key: str) -> dict | None:
+    """The part's record, when it is valid and both objects it names are stored at their
+    sizes; None otherwise. Bounded metadata only: no body, no kernel import."""
+    if not valid_key(key):
+        return None
+    try:
+        with entry_path(INDEX_KIND, key).open("rb") as stream:
+            raw = stream.read(MAX_INDEX_BYTES + 1)
+        if len(raw) > MAX_INDEX_BYTES:
+            return None
+        record = json.loads(raw.decode("utf-8"))
+        if not _valid_record(record):
+            return None
+        if any(object_path(record[role]["object"]).stat().st_size != record[role]["byteLength"] for role in ROLES):
+            return None
+        return record
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
+def read(key: str, role: str, *, expected_object: str | None = None, max_bytes: int | None = None) -> bytes | None:
+    """One of the part's objects (``role``: ``glb`` or ``selectors``), at most ``max_bytes``,
+    bound to its record: a body's framing and JSON name this part, a table's bytes hash to
+    its address. None for anything else."""
+    from cadgen.store.meshes import MAX_SAFE_INTEGER, body_facts
+
+    record = probe(key)
+    facts = record[role] if record is not None and role in ROLES else None
+    if facts is None or (expected_object is not None and expected_object != facts["object"]):
+        return None
+    limit = facts["byteLength"] if max_bytes is None else max_bytes
+    if type(limit) is not int or not 0 < limit <= MAX_SAFE_INTEGER or facts["byteLength"] > limit:
+        return None
+    try:
+        with object_path(facts["object"]).open("rb") as stream:
+            if os.fstat(stream.fileno()).st_size != facts["byteLength"]:
+                return None
+            payload = stream.read(facts["byteLength"] + 1)
+        if len(payload) != facts["byteLength"]:
+            return None
+        if role == "glb":
+            # The record's content address names the body ``_write`` validated whole; a read
+            # checks the framing, the canonical JSON and the part again. The tables are for
+            # the decoders that read them (``meshes.decode_payload``, tessellationCache.js).
+            body = body_facts(payload)
+            if body.pop("part") != key or body != {name: value for name, value in facts.items() if name != "object"}:
+                return None
+        elif hashlib.sha256(payload).hexdigest() != facts["object"]:
+            return None
+        return payload
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
+def stored_unmeshed_faces(key: str) -> list[int]:
+    """The faces the part's stored mesh leaves undrawn: none when the store lacks it or its
+    record counts none, so a reader asks every part it drew for the price of a probe."""
+    from cadgen.store.meshes import unmeshed_faces
+
+    record = probe(key)
+    if record is None or not record["glb"].get(_UNMESHED_COUNT):
+        return []
+    payload = read(key, "glb")
+    return unmeshed_faces(payload) if payload is not None else []
+
+
+def _write(key: str, glb: bytes, table: bytes) -> dict:
+    """Store the part's two objects, then its record: a record names complete objects."""
+    from cadgen._internal.selector_table import read_selector_table
+    from cadgen.store.meshes import body_facts
+
+    facts = body_facts(glb)
+    if facts.pop("part") != key:
+        raise ValueError("the part's mesh names another part")
+    stats = read_selector_table(table)["stats"]
+    record = {
+        "glb": {"object": put_object(glb, repair=True), **facts},
+        "selectors": {"object": put_object(table, repair=True), "byteLength": len(table),
+                      **{name: stats[name] for name in ("faceCount", "edgeCount", "vertexCount")}},
+    }
+    if not _valid_record(record):
+        raise ValueError("invalid part record")
+    # A hit is a read and writes nothing (STORE.md §8); the caller probed first.
+    write_entry(INDEX_KIND, key, record)
+    return record
+
+
+@contextlib.contextmanager
+def _meshing():
+    """Whatever fails inside, as the ``MeshProductionError`` that names it (its type
+    and message): one component's failure, which its caller reports once the rest
+    of the request is stored. An interrupt is not one."""
+    from cadgen._internal.occt_mesh import MeshProductionError
+
+    try:
+        yield
+    except Exception as error:  # noqa: BLE001 - the error is the component's, reported by name
+        raise MeshProductionError(f"{type(error).__name__}: {error}") from error
+
+
+def _decoded(entry: dict) -> tuple[Any, dict]:
+    """A private decode of the component (meshing stores its triangulation on the shape)
+    and its face colours by ordinal."""
+    from cadgen._internal.component_package import decode_display_shape, effective_face_colors
+
+    shape = decode_display_shape(entry, read_verified_object(entry["brep"]), native=True)
+    topods = getattr(shape, "wrapped", shape)
+    return topods, effective_face_colors(topods, entry["faceColors"])
+
+
+def _surface(entry: dict, topods: Any, colors: dict) -> bytes:
+    """The component's SURF: an eager-only component's is the object its tree pins, any
+    other's is extracted here, in memory."""
+    if entry["kind"] == "eager-only":
+        return read_verified_object(entry["eagerSurface"])
+    from cadgen._internal.surface_extract import extract_surface_component
+
+    return extract_surface_component(topods, face_colors=colors)
+
+
+def _derive(entry: dict, key: str, keep_going: Callable[[], bool] | None = None) -> dict | None:
+    """Store the part's display data when the store lacks it and return its record; None when
+    ``keep_going`` said stop first. Any failure is the ``MeshProductionError`` naming it."""
+    prior = probe(key)
+    if prior is not None:
+        return prior
+    if keep_going is not None and not keep_going():
+        return None
+    from cadgen._internal.occt_mesh import mesh_component
+    from cadgen._internal.selector_table import build_selector_table, selector_table_bytes
+    from cadgen._internal.surf_container import read_surf
+    from cadgen.tessellation_policy import DISPLAY_TESSELLATION
+
+    with _meshing():
+        topods, colors = _decoded(entry)
+        index, _payload = read_surf(_surface(entry, topods, colors))
+        table = build_selector_table(topods, index)
+        # The extraction and the table read the shape; the mesher, last, triangulates it.
+        glb = mesh_component(topods, table, colors, part=key, chord=DISPLAY_TESSELLATION["chordTolerance"],
+                             angle=DISPLAY_TESSELLATION["angleTolerance"])
+        return _write(key, glb, selector_table_bytes(table))
+
+
+def mesh_at(entry: dict, key: str, chord: float, angle: float) -> bytes:
+    """The GLB body of the part ``key`` names, at ``chord``/``angle``, meshed in this process
+    and stored nowhere: a mesh export at a tolerance other than the display one
+    (``_internal/mesh_export.py``), whose file is the output. ``entry`` is the component's
+    tree entry. The mesher reads what the display mesh's read -- the part's stored
+    selector table and the component's face colours -- so no SURF is extracted."""
+    from cadgen._internal.occt_mesh import MeshProductionError, mesh_component
+    from cadgen._internal.selector_table import read_selector_table
+
+    payload = read(key, "selectors")
+    if payload is None:
+        raise MeshProductionError(f"part {key} has no stored selector table")
+    with _meshing():
+        topods, colors = _decoded(entry)
+        return mesh_component(topods, read_selector_table(payload), colors, part=key, chord=chord, angle=angle)
+
+
+def surface(tree_hash: str, cid: str) -> dict:
+    """One component's SURF, for feature recognition (the CAD Viewer's
+    ``components/<cid>.surf``): extracted here, in memory, and stored nowhere -- an
+    eager-only component's is the object its tree pins. A job's result is JSON, so the
+    bytes are base64 (``{"surface": ...}``)."""
+    from cadgen.store.trees import capture_tree
+
+    descriptor, _ = capture_tree(tree_hash, retain_payloads=False)
+    entry = descriptor["components"].get(cid)
+    if entry is None:
+        raise ValueError("surface request names an unpinned component")
+    topods, colors = (None, {}) if entry["kind"] == "eager-only" else _decoded(entry)
+    return {"surface": base64.b64encode(_surface(entry, topods, colors)).decode("ascii")}
+
+
+def _captured(tree_hash: str, producer: dict | None) -> tuple[dict, dict]:
+    """The tree's verified descriptor, and the producer named (this runtime's when None)."""
+    from cadgen.store.trees import capture_tree as capture
+
+    # Display work admits only a complete verified geometry graph, but retains none
+    # of its BREPs: each derivation reads the exact CAS payload it decodes.
+    descriptor, _ = capture(tree_hash, retain_payloads=False)
+    return descriptor, producer_identity() if producer is None else producer_fields(producer)
+
+
+def derive(tree_hash: str, cids: list[str] | None = None, *, producer: dict | None = None,
+           keep_going: Callable[[], bool] | None = None) -> dict:
+    """Derive in this process the display data of ``cids`` (every component when None) the
+    store lacks -- the job a view submits for the parts it found missing -- and return
+    their records, ``{cid: record}``.
+
+    ``keep_going``, when given, is asked before each part: False stops there, and the
+    result holds the parts done so far (a daemon worker asks whether anyone still wants
+    its job, ``daemon/worker.py``). A part that fails, however it fails, does not stop the
+    others: they are stored, then ``MeshProductionError`` names each failure (the
+    component, and the error's type and message).
+    """
+    from cadgen._internal.occt_mesh import MeshProductionError
+
+    descriptor, producer = _captured(tree_hash, producer)
+    components = descriptor["components"]
+    if producer != producer_identity():
+        raise SurfaceProducerUnavailable()
+    requested = list(components) if cids is None else list(dict.fromkeys(cids))
+    if any(cid not in components for cid in requested):
+        raise ValueError("display request names an unpinned component")
+    key = producer_key(producer)
+    result, unmeshed = {}, []
+    for cid in requested:
+        try:
+            record = _derive(components[cid], _part_key(components[cid], key), keep_going)
+        except MeshProductionError as error:
+            # One part's failure leaves the rest of the request to be done: they are
+            # stored before the failure is reported, so a retry finds them.
+            unmeshed.append(f"component {cid}: {error}")
+            continue
+        if record is None:
+            break
+        result[cid] = record
+    if unmeshed:
+        raise MeshProductionError("; ".join(unmeshed))
+    return result
+
+
+def ensure_display(tree_hash: str, *, producer: dict | None = None,
+                   progress: Callable[[int, int], None] | None = None) -> list[str]:
+    """Derive in this process the display data of every part of ``tree_hash`` the store
+    lacks, and return a line for each part that could not be derived, naming the
+    occurrences that place it and the error. A build does this before it reports done
+    (``_internal/generation.py``), so a view of what it built only reads.
+
+    Which parts are missing is asked of the store alone (``probe``): a tree whose
+    display data is all stored imports no kernel. ``producer`` is the one a view of the
+    tree selects (its document's), this runtime's when None. ``progress(done, total)``
+    hears how many of the missing parts are done, before each one and at the end."""
+    descriptor, producer = _captured(tree_hash, producer)
+    components = descriptor["components"]
+    key = producer_key(producer)
+    keys = {cid: _part_key(entry, key) for cid, entry in components.items()}
+    missing = [cid for cid in components if probe(keys[cid]) is None]
+    if not missing:
+        return []
+    if producer != producer_identity():
+        raise SurfaceProducerUnavailable()
+    failures = []
+    for done, cid in enumerate(missing):
+        if progress is not None:
+            progress(done, len(missing))
+        try:
+            _derive(components[cid], keys[cid])
+        except Exception as error:  # noqa: BLE001 - one part's failure is reported, the rest derive
+            failures.append((cid, f"{type(error).__name__}: {error}"))
+    if progress is not None:
+        progress(len(missing), len(missing))
+    if not failures:
+        return []
+    from cadgen.store.meshes import placed_parts
+
+    placed: dict[str, list[tuple[str, str]]] = {}
+    for row in descriptor.get("occurrences") or ():
+        if isinstance(row, dict) and row.get("component") and row.get("id"):
+            placed.setdefault(str(row["component"]), []).append((str(row["id"]), str(row.get("name") or "")))
+    return [f"{placed_parts(placed[cid]) if placed.get(cid) else f'part {cid}'} could not be meshed ({error})"
+            for cid, error in failures]

@@ -164,12 +164,9 @@ class TabServerTest(_Session):
         opened = self.launch("cad_open", {"path": self.bracket})
         self.assertEqual({key: opened[key] for key in ("protocol", "page", "model", "surface")},
                          {"protocol": 7, "page": "viewer", "model": self.bracket, "surface": "agent"})
+        # No tolerance: the page reads each part's one display mesh by its key.
         self.assertEqual(sorted(opened), ["model", "notice", "page", "pick", "platform", "protocol", "surface",
-                                          "tessellation", "version"])
-        # The display tolerance the page draws STEP models at: cadgen's, carried by the launch.
-        from cadgen.tessellation_policy import DISPLAY_TESSELLATION
-
-        self.assertEqual(opened["tessellation"], DISPLAY_TESSELLATION)
+                                          "version"])
         # The thread's tab reopens on what the thread last opened.
         self.assertEqual(self.launch("cad_tab")["model"], self.bracket)
         refused = self.call("cad_open", {"path": "parts/bracket.stl"})
@@ -626,16 +623,14 @@ class TunnelBoundTest(_Session):
         reply, size = self.sized("GET", url)
         self.assertEqual((reply["status"], size < 1024), (502, True))
 
-    def test_a_tessellation_body_read_in_parts_is_the_body_its_object_names(self) -> None:
-        from tests.python.support.tessellation import tessellation_fixture
+    def test_a_display_mesh_read_in_parts_is_the_body_its_object_names(self) -> None:
+        from tests.python.support.tessellation import part_fixture, store_part
 
-        fixture = tessellation_fixture()
-        body = base64.b64decode(fixture["bytes"])
-        digest = fixture["facts"]["object"]
+        fixture = part_fixture()
+        body = base64.b64decode(fixture["glb"])
+        digest = fixture["record"]["glb"]["object"]
         with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.tmp / "store")}):
-            from cadgen.store import meshes
-
-            meshes.write(fixture["key"], body)
+            store_part(fixture)
             whole, sizes, etags = self.read(f"http://cad.invalid/__tess_cache/{fixture['key']}.glb?object={digest}&maxBytes={len(body)}", part=256)
         self.assertEqual((whole, etags), (body, {f'"{digest}"'}))
         self.assertGreaterEqual(len(sizes), 3)

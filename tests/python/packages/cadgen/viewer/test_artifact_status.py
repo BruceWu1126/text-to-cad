@@ -59,13 +59,13 @@ class _Tree:
         path.write_bytes(body)
         return str(path)
 
-    def package(self, step_path, *, kind="assembly-package", components=("c0.surf",), write_payloads=True):
+    def package(self, step_path, *, kind="assembly-package", components=("c0",), write_payloads=True):
         """Seed the document's result: a tree (one component per name) and a
         record keyed by the document itself. Returns the tree hash."""
         import hashlib
 
         descriptor = {"kind": kind, "components": {f"k{i}": {} for i, _name in enumerate(components)}}
-        tree = seed_result(step_path, descriptor, surf=b"SURF\x00")
+        tree = seed_result(step_path, descriptor)
         if not write_payloads:
             from cadgen.store.objects import object_path
 

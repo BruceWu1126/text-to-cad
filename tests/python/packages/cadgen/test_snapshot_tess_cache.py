@@ -1,16 +1,15 @@
-"""The snapshot host's side of the store's component meshes.
+"""The snapshot host's side of the store's parts.
 
-The page draws the meshes cadgen stores, the ones the viewer and mesh exports
-use: GLB bodies with exact input, surface and quality identity. Probes return small
-metadata before admitted body reads and batch responses have a fixed byte cap; the
-host and the page only read.
+The page draws the display meshes cadgen stores, the ones the viewer and mesh exports
+use: each part's GLB body, read by the part key its view names. Probes return the
+parts' records before admitted object reads and batch responses have a fixed byte cap;
+the host and the page only read.
 """
 
 from __future__ import annotations
 
 import asyncio
 import base64
-import hashlib
 import json
 import os
 import unittest
@@ -20,16 +19,15 @@ from unittest import mock
 from tests.python.support.paths import add_repo_path
 
 add_repo_path("packages/cadgen/src")
-from tests.python.support.tessellation import tessellation_fixture
+from tests.python.support.tessellation import part_fixture, store_part
 from tests.python.support.tmp_root import generated_cad_directory
 
-FIXTURE = tessellation_fixture()
-PAYLOAD = base64.b64decode(FIXTURE["bytes"])
+FIXTURE = part_fixture()
+PAYLOAD = base64.b64decode(FIXTURE["glb"])
 NAME = FIXTURE["key"] + ".glb"
-ADMITTED = {"tessellationInput": FIXTURE["key"], "object": FIXTURE["facts"]["object"], "maxBytes": len(PAYLOAD)}
+ADMITTED = {"part": FIXTURE["key"], "object": FIXTURE["record"]["glb"]["object"], "maxBytes": len(PAYLOAD)}
 ADMISSION_QUERY = f"?object={ADMITTED['object']}&maxBytes={ADMITTED['maxBytes']}"
 
-from cadgen.tessellation_policy import DISPLAY_TESSELLATION  # noqa: E402
 from cadgen.snapshot_core import (  # noqa: E402
     BatchSnapshotRenderer,
     SnapshotError,
@@ -40,7 +38,7 @@ from cadgen.snapshot_core import (  # noqa: E402
     read_tessellation_cache_batch,
     read_tessellation_cache_entry,
 )
-from cadgen.store import meshes  # noqa: E402
+from cadgen.store import parts  # noqa: E402
 from cadgen.assets import browser_runtime_dir  # noqa: E402
 # The TESB framing is the store's; the snapshot host only routes to it.
 from cadgen.store.tess_cache import TESS_CACHE_BATCH_MAGIC, TESS_CACHE_BATCH_VERSION  # noqa: E402
@@ -182,10 +180,14 @@ class SnapshotAssetServerTests(unittest.TestCase):
         self.assertEqual(status, 404)
         status, _, _ = self.request("POST", f"{TESS_CACHE_ROUTE_PREFIX}{name}", PAYLOAD)
         self.assertEqual(status, 405, "the page never writes a mesh")
-        self.assertIsNone(meshes.probe(FIXTURE["key"]))
-        meshes.write(FIXTURE["key"], PAYLOAD)
-        status, body, _ = self.request("GET", f"{TESS_CACHE_ROUTE_PREFIX}{name}{ADMISSION_QUERY}")
-        self.assertEqual((status, body), (200, PAYLOAD))
+        self.assertIsNone(parts.probe(FIXTURE["key"]))
+        store_part()
+        status, body, headers = self.request("GET", f"{TESS_CACHE_ROUTE_PREFIX}{name}{ADMISSION_QUERY}")
+        self.assertEqual((status, body, headers.get("content-type")), (200, PAYLOAD, "model/gltf-binary"))
+        table = FIXTURE["record"]["selectors"]
+        status, body, _ = self.request("GET", f"{TESS_CACHE_ROUTE_PREFIX}{FIXTURE['key']}.selectors.json"
+                                              f"?object={table['object']}&maxBytes={table['byteLength']}")
+        self.assertEqual((status, body), (200, base64.b64decode(FIXTURE["selectors"])))
         status, _, headers = self.request("OPTIONS", f"{TESS_CACHE_ROUTE_PREFIX}{name}")
         self.assertEqual(status, 204)
         self.assertIn("POST", headers.get("access-control-allow-methods", ""))
@@ -227,10 +229,13 @@ class SnapshotAssetServerTests(unittest.TestCase):
             status, _, _ = self.request(method, path)
             self.assertEqual(status, 404, f"{method} {path}")
 
-    def test_batch_route_round_trip(self) -> None:
+    def test_probe_and_batch_routes_round_trip(self) -> None:
         import json
 
-        meshes.write(FIXTURE["key"], PAYLOAD)
+        store_part()
+        status, response, _ = self.request("POST", "/__tess_cache/probe",
+                                           json.dumps({"parts": [FIXTURE["key"], "2" * 64 + "-v1"]}).encode())
+        self.assertEqual((status, json.loads(response)), (200, {"entries": {FIXTURE["key"]: FIXTURE["record"]}}))
         body = json.dumps({"entries": [ADMITTED, {**ADMITTED, "object": "f" * 64}]}).encode()
         status, response, _ = self.request("POST", TESS_CACHE_BATCH_PATH, body)
         self.assertEqual(status, 200)
@@ -245,18 +250,16 @@ class SnapshotBrowserTessCacheIntegrationTest(unittest.TestCase):
     def test_a_render_reads_the_stored_display_mesh_and_derives_nothing(self) -> None:
         async def exercise(root: Path) -> None:
             from build123d import Box, Cylinder
-            from cadgen.store import surfaces
             from cadgen.store.build import build_tree_from_compound
 
             tree, geometry, _ = build_tree_from_compound(Box(20, 20, 10) - Cylinder(4, 10), root_name="bored")
-            producer = surfaces.producer_identity()
             [(cid, entry)] = geometry["components"].items()
-            [record] = surfaces.derive(tree, producer=producer).values()
+            parts.derive(tree)
             asset_root = root / "assets"
             asset_root.mkdir()
             descriptor = {
                 "kind": "assembly-package",
-                "components": {cid: {"surfaceInput": record["surfaceInput"], "surfaceObject": record["object"]}},
+                "components": {cid: {"part": parts.part_key(entry, parts.producer_identity())}},
                 "occurrences": [{
                     "id": "o1.1", "name": "part", "component": cid,
                     "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
@@ -270,29 +273,19 @@ class SnapshotBrowserTessCacheIntegrationTest(unittest.TestCase):
             }
             job = {
                 "kind": "step",
-                "resolved": {
-                    "kind": "step",
-                    "rootPath": str(asset_root),
-                    # The tolerances the page draws at are cadgen's, named in the job.
-                    "tessellation": dict(DISPLAY_TESSELLATION),
-                    "package": {
-                        "descriptor": descriptor,
-                        # Nothing serves a surf here: the page draws only the stored mesh.
-                        "componentUrls": {cid: "/__render_asset/part.surf"},
-                    },
-                },
+                "resolved": {"kind": "step", "rootPath": str(asset_root), "package": {"descriptor": descriptor}},
                 "outputs": [{
                     "path": str(root / "out.png"), "width": 64, "height": 64, "camera": "iso",
                 }],
             }
-            mesh_index = root / "cache/index/mesh"
-            stored = [path.read_bytes() for path in mesh_index.iterdir()]
-            self.assertEqual(len(stored), 1, "deriving the component stored its display mesh")
+            part_index = root / "cache/index/part"
+            stored = [path.read_bytes() for path in part_index.iterdir()]
+            self.assertEqual(len(stored), 1, "deriving the component stored its part")
             renderer = BatchSnapshotRenderer(browser_runtime_dir(None))
             try:
                 with mock.patch("cadgen.daemon.artifacts.submit_artifact",
                                 side_effect=AssertionError("a stored mesh is asked for nothing")), \
-                        mock.patch("cadgen.store.surfaces.derive",
+                        mock.patch("cadgen.store.parts.derive",
                                    side_effect=AssertionError("the host derived in its own process")):
                     rendered = await renderer.render(job)
                 self.assertTrue(rendered["ok"])
@@ -302,7 +295,7 @@ class SnapshotBrowserTessCacheIntegrationTest(unittest.TestCase):
                         "({secure: isSecureContext, subtle: !!globalThis.crypto?.subtle})"
                     ),
                 )
-                self.assertEqual([path.read_bytes() for path in mesh_index.iterdir()], stored)
+                self.assertEqual([path.read_bytes() for path in part_index.iterdir()], stored)
             finally:
                 await renderer.close()
 

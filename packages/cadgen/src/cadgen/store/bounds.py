@@ -31,7 +31,7 @@ import threading
 from collections import OrderedDict
 from typing import Any, Callable
 
-from cadgen.store.surfaces import kernel_versions
+from cadgen.store.parts import kernel_versions
 
 _RAM_ENTRIES = 1 << 16
 _ram: OrderedDict[str, Any] = OrderedDict()

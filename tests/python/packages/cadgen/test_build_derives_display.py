@@ -86,7 +86,7 @@ class BuildDerivesDisplayData(unittest.TestCase):
         self.assertEqual(self.build(), ("built", 2), "one display mesh a part; the STL is written from them")
         self.assertTrue((self.root / "STL/pair.stl").is_file())
         with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=NO_JOB), \
-                mock.patch("cadgen.store.surfaces.derive", side_effect=NO_JOB):
+                mock.patch("cadgen.store.parts.derive", side_effect=NO_JOB):
             counts = self.listing()
             exported = stl.build(self.document, self.root / "again.stl", force=True)
         self.assertTrue(exported.ok)
@@ -94,23 +94,22 @@ class BuildDerivesDisplayData(unittest.TestCase):
         self.assertEqual(counts["block"], 12)
 
     def test_a_part_the_store_lost_is_derived_alone_by_one_job(self) -> None:
-        from cadgen.store import meshes
+        from cadgen.store import parts
 
         self.build()
         expected = self.listing()
-        [lost] = [key for key in (self.store / "index/mesh").iterdir()
-                  if meshes.probe(key.name)["indexCount"] // 3 != 12]
+        [lost] = [key for key in (self.store / "index/part").iterdir()
+                  if parts.probe(key.name)["glb"]["indexCount"] // 3 != 12]
         lost.unlink()
         with inline_artifacts() as jobs:
             self.assertEqual(self.listing(), expected)
         [job] = [call.args[0] for call in jobs.call_args_list]
         self.assertEqual((job["kind"], len(job["cids"])), ("display", 1))
-        self.assertIsNotNone(meshes.probe(lost.name), "the job stored the part's mesh again")
+        self.assertIsNotNone(parts.probe(lost.name), "the job stored the part again")
 
     def test_a_no_op_build_repairs_a_cleared_store(self) -> None:
         self.build()
-        for kind in ("surface", "selector", "mesh"):
-            shutil.rmtree(self.store / "index" / kind)
+        shutil.rmtree(self.store / "index/part")
         self.assertEqual(self.build(), ("current", 2))
         self.assertEqual(self.build(), ("current", 0))
         with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=NO_JOB):
@@ -121,10 +120,10 @@ class BuildDerivesDisplayData(unittest.TestCase):
 
         real = occt_mesh.mesh_component
 
-        def mesher(topods, index, **options):
-            if len(index["faces"]) == 3:  # the peg, a cylinder; the block has six faces
+        def mesher(topods, table, face_colors, **options):
+            if len(table["faces"]) == 3:  # the peg, a cylinder; the block has six faces
                 raise ValueError("boom")
-            return real(topods, index, **options)
+            return real(topods, table, face_colors, **options)
 
         self.assertEqual(self.build(mesher)[0], "built", "the build stands")
         warnings = [line for line in self.output.splitlines() if "could not be meshed" in line]

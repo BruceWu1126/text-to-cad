@@ -32,7 +32,7 @@ class NativeArtifactTransport(unittest.TestCase):
             "CADGEN_DAEMON_SPARES": "1", "CADGEN_COMPONENT_WORKERS": "1",
         }))
         from build123d import Solid
-        from cadgen.store import surfaces
+        from cadgen.store import parts
         from cadgen.store.build import build_tree_from_compound
         from cadgen.store.trees import capture_tree
 
@@ -40,7 +40,7 @@ class NativeArtifactTransport(unittest.TestCase):
         box.cad_face_ordinal_colors = {1: (0.1, 0.3, 0.8, 1.0)}
         self.tree, self.descriptor, _ = build_tree_from_compound(box, root_name="colored box")
         self.geometry = capture_tree(self.tree)[1]
-        self.producer = surfaces.producer_identity()
+        self.producer = parts.producer_identity()
         self.request = {
             "kind": "display", "tree": self.tree,
             "cids": sorted(self.descriptor["components"]), "producer": self.producer,
@@ -88,18 +88,15 @@ sys.addaudithook(audit)
 """
 
     def assert_geometry_and_result(self, result):
-        from cadgen.store import surfaces
-        from cadgen.store.objects import read_verified_object
+        from cadgen.store import meshes, parts
         from cadgen.store.trees import capture_tree
 
         self.assertEqual(set(result), set(self.request["cids"]))
         for cid, record in result.items():
-            self.assertEqual(record["producer"], self.producer)
-            self.assertEqual(record["surfaceInput"], surfaces.surface_input(self.descriptor["components"][cid], self.producer))
-            self.assertEqual(record["component"], self.descriptor["components"][cid]["contentHash"])
-            self.assertEqual(record["brep"], self.descriptor["components"][cid]["brep"])
-            index = surfaces.validate_surface_bytes(read_verified_object(record["object"]))
-            self.assertEqual(index["counts"]["faces"], 6)
+            key = parts.part_key(self.descriptor["components"][cid], self.producer)
+            self.assertEqual(parts.probe(key), record, "the job answers the part it stored")
+            self.assertEqual(meshes.body_facts(parts.read(key, "glb"))["part"], key)
+            self.assertEqual((record["glb"]["faceCount"], record["selectors"]["faceCount"]), (6, 6))
         self.assertEqual(capture_tree(self.tree)[1], self.geometry)
         self.assertFalse(self.audit_violation.exists())
         self.assertFalse((Path(self.store) / "index/model").exists())
@@ -192,8 +189,8 @@ import time
 import build123d
 from cadgen._internal import component_package,surface_extract
 from cadgen.daemon import artifacts,broker
-from cadgen.store import surfaces
-original=surfaces.derive
+from cadgen.store import parts
+original=parts.derive
 def derive(*args,**kwargs):
     assert broker.current_lease() is not None
     Path({str(entered)!r}).write_text('entered')
@@ -204,7 +201,7 @@ def derive(*args,**kwargs):
     result=original(*args,**kwargs)
     Path({str(derived)!r}).write_text('derived')
     return result
-surfaces.derive=derive
+parts.derive=derive
 raise SystemExit(artifacts._main())
 """
         original_popen, processes = subprocess.Popen, []
@@ -268,8 +265,8 @@ raise SystemExit(artifacts._main())
         entered, release = self.root / "daemon-entered", self.root / "daemon-release"
         prelude = self.source_guard() + f"""
 import time
-from cadgen.store import surfaces
-original=surfaces.derive
+from cadgen.store import parts
+original=parts.derive
 def derive(*args,**kwargs):
     Path({str(entered)!r}).write_text('entered')
     deadline=time.monotonic()+15
@@ -277,7 +274,7 @@ def derive(*args,**kwargs):
         if time.monotonic()>deadline: raise RuntimeError('test barrier')
         time.sleep(.005)
     return original(*args,**kwargs)
-surfaces.derive=derive
+parts.derive=derive
 """
         with self.daemon(prelude) as (workers, ledger, processes):
             first = artifacts.submit_artifact(self.request, store_root=self.store)

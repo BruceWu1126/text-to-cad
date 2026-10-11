@@ -2,7 +2,7 @@
 
 Pinned on hand-built cubes, so every number is known: what each format carries
 (placements baked in and mirrored safely, colours resolved face > occurrence >
-part > default as the viewer draws them, the GLB's Y-up metres, node layout, extras and
+default as the viewer draws them, the GLB's Y-up metres, node layout, extras and
 finishes, the 3MF's shared vertices and stored zip) and that the same input is
 the same bytes. Real geometry runs through the engine in the export suites.
 """
@@ -42,7 +42,7 @@ FACES = (
 )
 
 
-def cube(size: float = 10.0, face_colors: dict | None = None, part_color=None) -> Tessellation:
+def cube(size: float = 10.0, face_colors: dict | None = None) -> Tessellation:
     """A cube centred on the origin, one block of four vertices per face, as OCCT stores one."""
     positions, normals, indices, ranges = [], [], [], []
     for ordinal, (n, u, v) in enumerate(FACES, start=1):
@@ -56,7 +56,7 @@ def cube(size: float = 10.0, face_colors: dict | None = None, part_color=None) -
         ranges.append({"ord": ordinal, "color": (face_colors or {}).get(ordinal),
                        "indexStart": start, "indexCount": 6})
     return Tessellation(np.array(positions, np.float32), np.array(normals, np.float32),
-                        np.array(indices, np.uint32), ranges, part_color)
+                        np.array(indices, np.uint32), ranges)
 
 
 def placed(x=0.0, y=0.0, z=0.0, mirror_x=False) -> list[float]:
@@ -142,7 +142,6 @@ class Colour(unittest.TestCase):
             ({"components": components, "occurrences": [occurrence("o1", color=half_grey)]}, cube(), {"#bcbcbc"}),
             # Never the component's: a shared one carries whichever occurrence the build met first.
             ({"components": components, "occurrences": [occurrence("o1")]}, cube(), {"#d4d4d8"}),
-            ({"components": {"c1": {}}, "occurrences": [occurrence("o1")]}, cube(part_color=half_grey), {"#bcbcbc"}),
             ({"components": {"c1": {}}, "occurrences": [occurrence("o1")]}, cube(), {"#d4d4d8"}),
         ]
         for descriptor, tessellation, expected in cases:
@@ -310,10 +309,8 @@ class Determinism(unittest.TestCase):
 
         source = cube(face_colors={3: [0.1, 0.2, 0.3, 1.0]})
         payload = encode_payload(
-            surface_input="a" * 64, surface_object="b" * 64, chord=0.0015, angle=0.35,
-            positions=source.positions, normals=source.normals, indices=source.indices,
+            part="a" * 64 + "-v1", positions=source.positions, normals=source.normals, indices=source.indices,
             face_ranges=source.face_ranges, edges=[], bounds={"min": [-5.0] * 3, "max": [5.0] * 3},
-            scale=17.3, part_color=[1, 0, 0, 1],
         )
         decoded = decode_tessellation(payload)
         np.testing.assert_array_equal(source.positions, decoded.positions)
@@ -321,7 +318,6 @@ class Determinism(unittest.TestCase):
         np.testing.assert_array_equal(source.indices, decoded.indices)
         self.assertEqual(decoded.indices.dtype, np.uint32, "the body's u16 indices are widened for the writers")
         self.assertEqual(source.face_ranges, decoded.face_ranges)
-        self.assertEqual([1, 0, 0, 1], decoded.part_color)
 
 
 if __name__ == "__main__":

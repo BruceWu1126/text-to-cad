@@ -640,7 +640,7 @@ def _capture(
     and remembers what it verified all the same.
     """
     from cadgen._internal.component_package import canonical_json_bytes, validate_geometry_component
-    from cadgen.store.surfaces import validate_surface_bytes
+    from cadgen._internal.surf_container import validate_surface_bytes
 
     cache_key = _metadata_capture_key(tree_hash)
     flight = None

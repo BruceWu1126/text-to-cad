@@ -1,8 +1,8 @@
-"""Owned browser requests bind geometry, producer and exact surface output."""
+"""A view's parts as the browser asks for them: each request binds the geometry, the
+producer and the parts it names, and a part the store lacks is derived by one pool job."""
 from __future__ import annotations
 
 from concurrent.futures import Future
-import copy
 import json
 import os
 from pathlib import Path
@@ -17,10 +17,12 @@ from tests.python.support.paths import add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
 
 SRC = add_repo_path("packages/cadgen/src")
-from cadgen.store import surfaces
+from cadgen.store import parts
 from cadgen.store.build import build_tree_from_compound
+from cadgen.store.index import remove_entry
 from cadgen.store.objects import object_path
-from cadgen.viewer.surfaces import SurfaceSubscribers, _request, pinned_surface_object
+from cadgen.store.view import descriptor_for_view
+from cadgen.viewer.surfaces import SurfaceSubscribers, _request
 
 
 class SubscriberFuture(Future):
@@ -30,6 +32,15 @@ class SubscriberFuture(Future):
 
     def detach(self):
         self.detached += 1
+
+
+def _row_tree() -> tuple[str, dict]:
+    """A tree of three distinct boxes: three parts."""
+    from build123d import Compound, Pos, Solid
+
+    boxes = [Pos(4 * n, 0, 0) * Solid.make_box(1 + n, 1, 1) for n in range(3)]
+    tree, geometry, _ = build_tree_from_compound(Compound(children=boxes), root_name="row")
+    return tree, geometry
 
 
 class SurfaceRequests(unittest.TestCase):
@@ -47,12 +58,13 @@ class SurfaceRequests(unittest.TestCase):
         box = Solid.make_box(1, 2, 3)
         box.cad_face_ordinal_colors = {1: (1., 0., 0., 1.)}
         self.tree, _, _ = build_tree_from_compound(box, root_name="box")
-        self.producer = surfaces.producer_identity()
-        self.view = surfaces.request_view(self.tree, producer=self.producer)
+        self.producer = parts.producer_identity()
+        self.view = descriptor_for_view(self.tree, producer=self.producer)
         self.cid, self.entry = next(iter(self.view["components"].items()))
+        self.part = self.entry["part"]
         self.request = {
             "tree": self.tree, "viewId": self.view["viewId"], "producer": self.producer,
-            "components": [{"cid": self.cid, "surfaceInput": self.entry["surfaceInput"]}],
+            "components": [{"cid": self.cid, "part": self.part}],
         }
         self.manager = SurfaceSubscribers()
         self.addCleanup(lambda: [self.manager.cancel(token) for token in list(self.manager._jobs)])
@@ -60,62 +72,55 @@ class SurfaceRequests(unittest.TestCase):
     def resolve(self, request=None):
         return self.manager.resolve(json.dumps(request or self.request).encode())
 
-    def test_ready_request_never_initializes_native_work_and_serves_only_pinned_bytes(self):
-        from cadgen.store import selectors
-
-        record = surfaces.derive(self.tree)[self.cid]
-        table = selectors.probe(selectors.selector_key(self.entry["surfaceInput"]))
-        self.assertIsNotNone(table, "the surface is derived with its selector table")
+    def test_a_stored_part_is_ready_without_native_work(self):
+        record = parts.derive(self.tree)[self.cid]
+        self.assertEqual(record, parts.probe(self.part))
         with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=AssertionError("unexpected job")), \
-             mock.patch.object(surfaces, "producer_identity", side_effect=AssertionError("kernel forbidden")):
+             mock.patch.object(parts, "producer_identity", side_effect=AssertionError("kernel forbidden")):
             result = self.resolve()
-            row = result["components"][self.cid]
-            self.assertEqual(row["state"], "ready")
-            self.assertEqual(row["surfaceObject"], record["object"])
-            # The table rides the ready row, served by the same store route as the surface.
-            self.assertEqual(row["selectors"], {
-                "object": table["object"], "byteLength": table["byteLength"],
-                "url": row["url"].replace(record["object"], table["object"]),
-            })
-            self.assertEqual(pinned_surface_object(self.tree, self.entry["surfaceInput"], record["object"]),
-                             object_path(record["object"]))
-            self.assertEqual(pinned_surface_object(self.tree, self.entry["surfaceInput"], table["object"]),
-                             object_path(table["object"]))
-            self.assertIsNone(pinned_surface_object(self.tree, "f" * 64, record["object"]))
-            self.assertIsNone(pinned_surface_object(self.tree, "f" * 64, table["object"]))
-            self.assertIsNone(pinned_surface_object(self.tree, self.entry["surfaceInput"], "f" * 64))
+        # The row is the part's record: the client reads its mesh and its table by it.
+        self.assertEqual(result, {"viewId": self.view["viewId"],
+                                  "components": {self.cid: {"part": self.part, "state": "ready", "record": record}}})
 
-    def test_a_surface_without_its_table_is_pending_until_the_job_restores_it(self):
-        from cadgen.store import selectors
-        from cadgen.store.index import remove_entry
+    def test_a_part_missing_from_the_store_is_pending_until_its_one_job_derives_it(self):
+        parts.derive(self.tree)
+        # Evicted (STORE.md §8): its record, or an object the record names -- either way
+        # the part is not stored.
+        losses = {
+            "record": lambda record: remove_entry("part", self.part),
+            "selector table": lambda record: object_path(record["selectors"]["object"]).unlink(),
+            "display mesh": lambda record: object_path(record["glb"]["object"]).unlink(),
+        }
+        for lost, lose in losses.items():
+            with self.subTest(lost=lost):
+                lose(parts.probe(self.part))
+                future = SubscriberFuture()
+                with mock.patch("cadgen.daemon.artifacts.submit_artifact", return_value=future) as submit:
+                    pending = self.resolve()
+                    self.assertEqual(pending["components"][self.cid],
+                                     {"part": self.part, "state": "pending", "job": pending["job"]})
+                    self.assertEqual([call.args[0] for call in submit.call_args_list],
+                                     [{"kind": "display", "tree": self.tree, "cids": [self.cid], "producer": self.producer}])
+                    parts.derive(self.tree)
+                    future.set_result({})
+                    ready = self.resolve({**self.request, "job": pending["job"]})["components"][self.cid]
+                self.assertEqual(ready, {"part": self.part, "state": "ready", "record": parts.probe(self.part)})
+                self.assertEqual(future.detached, 1)
 
-        surfaces.derive(self.tree)
-        key = selectors.selector_key(self.entry["surfaceInput"])
-        remove_entry("selector", key)  # evicted (STORE.md §8): the surface alone is not ready
-        future = SubscriberFuture()
-        with mock.patch("cadgen.daemon.artifacts.submit_artifact", return_value=future) as submit:
-            pending = self.resolve()
-            self.assertEqual(pending["components"][self.cid]["state"], "pending")
-            self.assertEqual(submit.call_count, 1)
-            surfaces.derive(self.tree)
-            future.set_result({})
-            ready = self.resolve({**self.request, "job": pending["job"]})["components"][self.cid]
-        self.assertEqual(ready["state"], "ready")
-        self.assertEqual(ready["selectors"]["object"], selectors.probe(key)["object"])
-
-    def test_request_validates_only_named_surface_inputs_without_rebuilding_whole_view(self):
-        surface_input = surfaces.surface_input
-        with mock.patch.object(
-            surfaces, "_view_from_geometry", side_effect=AssertionError("whole view rebuilt")
-        ), mock.patch.object(surfaces, "surface_input", wraps=surface_input) as inputs:
-            view, selected, operation, expected, token, canonical = _request(json.dumps(self.request).encode())
-        self.assertEqual(view, {"viewId": self.view["viewId"]})
-        self.assertEqual(selected, {self.cid: {"surfaceInput": self.entry["surfaceInput"]}})
-        self.assertEqual(operation, {"kind": "display", "tree": self.tree, "cids": [self.cid], "producer": self.producer})
-        self.assertEqual(expected, {})
+    def test_a_request_keys_only_the_parts_it_names_and_never_rebuilds_the_view(self):
+        tree, _ = _row_tree()
+        view = descriptor_for_view(tree, producer=self.producer)
+        cid = sorted(view["components"])[1]
+        body = json.dumps({"tree": tree, "viewId": view["viewId"], "producer": self.producer,
+                           "components": [{"cid": cid, "part": view["components"][cid]["part"]}]}).encode()
+        with mock.patch.object(parts, "view_from_geometry", side_effect=AssertionError("whole view rebuilt")), \
+             mock.patch.object(parts, "part_key", wraps=parts.part_key) as keyed:
+            selected_view, selected, operation, token = _request(body)
+        self.assertEqual(selected_view, {"viewId": view["viewId"]})
+        self.assertEqual(selected, {cid: view["components"][cid]["part"]})
+        self.assertEqual(operation, {"kind": "display", "tree": tree, "cids": [cid], "producer": self.producer})
         self.assertIsNone(token)
-        self.assertIn(self.cid, canonical["components"])
-        self.assertEqual(inputs.call_count, 1)
+        self.assertEqual(keyed.call_count, 1, "only the part the request names is keyed")
 
     def test_poll_submits_once_and_completion_rechecks_ready_output(self):
         future = SubscriberFuture()
@@ -125,7 +130,7 @@ class SurfaceRequests(unittest.TestCase):
             request = {**self.request, "job": token}
             self.assertEqual(self.resolve(request)["job"], token)
             self.assertEqual(submit.call_count, 1)
-            surfaces.derive(self.tree)
+            parts.derive(self.tree)
             future.set_result({})
             result = self.resolve(request)
         self.assertEqual(result["components"][self.cid]["state"], "ready")
@@ -133,54 +138,30 @@ class SurfaceRequests(unittest.TestCase):
         self.assertEqual(future.detached, 1)
         self.assertFalse(self.manager._jobs)
 
-    def test_a_surface_without_its_display_mesh_is_pending_until_the_job_derives_it(self):
-        from cadgen.store import meshes
-        from cadgen.store.index import remove_entry
-
-        surfaces.derive(self.tree)
-        key = meshes.tessellation_key(self.entry["surfaceInput"])
-        remove_entry("mesh", key)  # evicted: the surface and its table alone are not ready
-        future = SubscriberFuture()
-        with mock.patch("cadgen.daemon.artifacts.submit_artifact", return_value=future) as submit:
-            pending = self.resolve()
-            self.assertEqual(pending["components"][self.cid]["state"], "pending")
-            [operation] = [call.args[0] for call in submit.call_args_list]
-            self.assertEqual(operation, {"kind": "display", "tree": self.tree, "cids": [self.cid], "producer": self.producer})
-            surfaces.derive(self.tree)
-            future.set_result({})
-            ready = self.resolve({**self.request, "job": pending["job"]})["components"][self.cid]
-        self.assertEqual(ready["state"], "ready")
-        self.assertEqual(ready["mesh"], meshes.probe(key), "the row is the display mesh's probe row")
-        with self.assertRaises(ValueError):
-            self.resolve({**self.request, "tessellation": {"chordTolerance": 5e-4, "angleTolerance": 0.35}})
-
     def test_a_failed_completion_racing_first_lookup_reports_ready_what_it_stored(self):
-        from build123d import Compound, Pos, Solid
         from cadgen._internal import occt_mesh
-        from cadgen.store import meshes
 
-        parts = [Pos(4 * n, 0, 0) * Solid.make_box(1 + n, 1, 1) for n in range(3)]
-        tree, _, _ = build_tree_from_compound(Compound(children=parts), root_name="row")
-        view = surfaces.request_view(tree, producer=self.producer)
-        inputs = {cid: entry["surfaceInput"] for cid, entry in sorted(view["components"].items())}
-        cids = list(inputs)
+        tree, _ = _row_tree()
+        view = descriptor_for_view(tree, producer=self.producer)
+        keys = {cid: entry["part"] for cid, entry in sorted(view["components"].items())}
+        cids = list(keys)
         request = {"tree": tree, "viewId": view["viewId"], "producer": self.producer,
-                   "components": [{"cid": cid, "surfaceInput": inputs[cid]} for cid in cids]}
-        real, failing = occt_mesh.mesh_component, inputs[cids[-1]]
+                   "components": [{"cid": cid, "part": keys[cid]} for cid in cids]}
+        real, failing = occt_mesh.mesh_component, keys[cids[-1]]
 
-        def mesher(topods, index, *, surface_input, **options):
-            if surface_input == failing:
+        def mesher(topods, table, face_colors, *, part, **options):
+            if part == failing:
                 raise occt_mesh.MeshProductionError("OCCT did not mesh 1 face(s) of the component: f3")
-            return real(topods, index, surface_input=surface_input, **options)
+            return real(topods, table, face_colors, part=part, **options)
 
         future = SubscriberFuture()
 
         def submit(operation, **kwargs):
             # The job ends after this poll's first lookup: it stores the first two
-            # components, then raises the last one's failure.
+            # parts, then raises the last one's failure.
             try:
                 with mock.patch.object(occt_mesh, "mesh_component", side_effect=mesher):
-                    surfaces.derive(tree, operation["cids"], producer=self.producer)
+                    parts.derive(tree, operation["cids"], producer=self.producer)
             except occt_mesh.MeshProductionError as error:
                 future.set_exception(error)
             return future
@@ -192,12 +173,13 @@ class SurfaceRequests(unittest.TestCase):
                          "what the failed job stored is ready; only what it left missing failed")
         self.assertIn(f"component {cids[-1]}: MeshProductionError: OCCT did not mesh", rows[cids[-1]]["error"])
         for cid in cids[:-1]:
-            self.assertEqual(rows[cid]["mesh"], meshes.probe(meshes.tessellation_key(inputs[cid])))
+            self.assertEqual(rows[cid]["record"], parts.probe(keys[cid]))
+        self.assertIsNone(parts.probe(failing))
 
     def test_completion_racing_first_lookup_still_returns_ready(self):
         future = SubscriberFuture()
         def submit(*args, **kwargs):
-            surfaces.derive(self.tree)
+            parts.derive(self.tree)
             future.set_result({})
             return future
         with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=submit):
@@ -220,22 +202,15 @@ class SurfaceRequests(unittest.TestCase):
         future = SubscriberFuture()
         with mock.patch("cadgen.daemon.artifacts.submit_artifact", return_value=future):
             token = self.resolve()["job"]
-        request = copy.deepcopy(self.request)
-        request["job"] = token
-        request["components"][0]["expectedSurfaceObject"] = "f" * 64
+        # The same component under another producer: another view, another part.
+        other = {**self.producer, "ocp": "other-runtime"}
+        view = descriptor_for_view(self.tree, producer=other)
         with self.assertRaises(ValueError):
-            self.resolve(request)
+            self.resolve({"tree": self.tree, "viewId": view["viewId"], "producer": other, "job": token,
+                          "components": [{"cid": self.cid, "part": view["components"][self.cid]["part"]}]})
         with mock.patch("cadgen.viewer.surfaces.store_root", return_value=self.root / "other-store"):
             with self.assertRaises(ValueError):
                 self.resolve({**self.request, "job": token})
-
-    def test_displayed_mesh_surface_conflict_never_rebinds_selector_output(self):
-        surfaces.derive(self.tree)
-        request = copy.deepcopy(self.request)
-        request["components"][0]["expectedSurfaceObject"] = "f" * 64
-        with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=AssertionError("must fail pinned output")):
-            result = self.resolve(request)["components"][self.cid]
-        self.assertEqual((result["state"], result["code"]), ("failed", "surface-conflict"))
 
     def test_missing_completed_output_is_terminal_and_releases_subscriber(self):
         future = SubscriberFuture()
@@ -249,9 +224,9 @@ class SurfaceRequests(unittest.TestCase):
 
     def test_failed_old_producer_stages_a_separate_runtime_view(self):
         producer = {**self.producer, "ocp": "old-runtime"}
-        old_view = surfaces.request_view(self.tree, producer=producer)
+        old_view = descriptor_for_view(self.tree, producer=producer)
         request = {**self.request, "viewId": old_view["viewId"], "producer": producer,
-                   "components": [{"cid": self.cid, "surfaceInput": old_view["components"][self.cid]["surfaceInput"]}]}
+                   "components": [{"cid": self.cid, "part": old_view["components"][self.cid]["part"]}]}
         future = SubscriberFuture()
         future.set_exception(ValueError("worker cannot implement the request's pinned surface producer"))
         with mock.patch("cadgen.daemon.artifacts.submit_artifact", return_value=future), \
@@ -260,6 +235,7 @@ class SurfaceRequests(unittest.TestCase):
         self.assertEqual(result["viewId"], old_view["viewId"])
         self.assertEqual(result["replacementView"]["viewId"], self.view["viewId"])
         self.assertNotEqual(result["viewId"], result["replacementView"]["viewId"])
+        self.assertEqual(result["replacementView"]["components"][self.cid]["part"], self.part)
         self.assertEqual(result["components"][self.cid]["code"], "producer-unavailable")
 
     def test_expired_subscriber_is_detached_and_not_reused(self):
@@ -281,11 +257,19 @@ class SurfaceRequests(unittest.TestCase):
             self.assertTrue(detached.wait(2), "an abandoned subscriber kept native work alive")
         self.assertFalse(self.manager._jobs)
 
-    def test_wrong_view_or_component_never_submits(self):
-        for field, value in (("viewId", "f" * 64), ("components", []),
-                             ("components", [{"cid": self.cid, "surfaceInput": "f" * 64}])):
-            with self.subTest(field=field), self.assertRaises(ValueError):
-                self.resolve({**self.request, field: value})
+    def test_a_request_not_naming_this_views_parts_exactly_never_submits(self):
+        refused = {
+            "another view": {"viewId": "f" * 64},
+            "no component": {"components": []},
+            "another part": {"components": [{"cid": self.cid, "part": "f" * 64 + "-v1"}]},
+            "a component field it does not take": {"components": [{"cid": self.cid, "part": self.part, "surfaceInput": "f" * 64}]},
+            # No tolerance is the page's to name.
+            "a field it does not take": {"tessellation": {"chordTolerance": 5e-4, "angleTolerance": 0.35}},
+        }
+        with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=AssertionError("submitted")):
+            for name, change in refused.items():
+                with self.subTest(name), self.assertRaises(ValueError):
+                    self.resolve({**self.request, **change})
 
     def test_kernel_free_import_and_hinted_descriptor_in_fresh_process(self):
         script = """
@@ -298,13 +282,14 @@ sys.meta_path.insert(0, NoKernel())
 from cadgen.viewer.http_app import create_cad_app
 from cadgen.store.view import descriptor_for_view
 view = descriptor_for_view(sys.argv[1], producer=json.loads(sys.argv[2]))
-assert view and all('surfaceObject' not in entry for entry in view['components'].values())
+print(json.dumps({cid: entry['part'] for cid, entry in view['components'].items()}))
 """
         result = subprocess.run([sys.executable, "-c", script, self.tree, json.dumps(self.producer)],
                                 capture_output=True, text=True, env={**os.environ, "PYTHONPATH": str(SRC)})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout), {self.cid: self.part})
 
-    def test_http_routes_enforce_guard_and_serve_exact_surface_binding(self):
+    def test_http_routes_enforce_guard_and_serve_each_part_bound_to_its_record(self):
         from urllib.parse import urlencode
         from tests.python.packages.cadgen.viewer.test_http_layer import ServerFixture
 
@@ -312,28 +297,55 @@ assert view and all('surfaceObject' not in entry for entry in view['components']
         self.addCleanup(fixture.close)
         body = json.dumps(self.request).encode()
         self.assertEqual(fixture.request("POST", "/__cad/surfaces", body=body)[0], 403)
-        record = surfaces.derive(self.tree)[self.cid]
+        record = parts.derive(self.tree)[self.cid]
         status, _, payload = fixture.request("POST", "/__cad/surfaces", body=body,
                                              headers={"x-cadgen-viewer": "1"})
         self.assertEqual(status, 200, payload)
-        row = json.loads(payload)["components"][self.cid]
-        self.assertEqual(fixture.request("GET", row["url"])[::2], (200, object_path(record["object"]).read_bytes()))
-        self.assertEqual(fixture.request("GET", row["selectors"]["url"])[::2],
-                         (200, object_path(row["selectors"]["object"]).read_bytes()))
-        wrong = row["url"].replace(record["object"], "f" * 64)
-        self.assertEqual(fixture.request("GET", wrong)[0], 404)
+        self.assertEqual(json.loads(payload)["components"][self.cid],
+                         {"part": self.part, "state": "ready", "record": record})
+        for role, suffix, content_type in (("glb", ".glb", "model/gltf-binary"),
+                                           ("selectors", ".selectors.json", "application/json")):
+            facts = record[role]
+            route = f"/__tess_cache/{self.part}{suffix}?object={facts['object']}&maxBytes={facts['byteLength']}"
+            with self.subTest(role=role):
+                status, headers, got = fixture.request("GET", route)
+                self.assertEqual((status, got), (200, object_path(facts["object"]).read_bytes()))
+                self.assertEqual({name.lower(): value for name, value in headers.items()}["content-type"], content_type)
+                # An object the record does not name is a miss.
+                self.assertEqual(fixture.request("GET", route.replace(facts["object"], "f" * 64))[0], 404)
         url = "/__cad/store?" + urlencode({"file": self.tree + "/assembly.json", "surfaceProducer": json.dumps(self.producer)})
         status, _, payload = fixture.request("GET", url)
         self.assertEqual(status, 200, payload)
         descriptor = json.loads(payload)
         self.assertEqual(descriptor["viewId"], self.view["viewId"])
-        self.assertNotIn("surfaceObject", descriptor["components"][self.cid])
+        component = descriptor["components"][self.cid]
+        self.assertEqual((component["part"], component["surf"]), (self.part, f"components/{self.cid}.surf"))
+
+    def test_a_parts_surf_is_extracted_by_one_job_when_asked_and_stored_nowhere(self):
+        from cadgen._internal.surf_container import validate_surface_bytes
+        from cadgen.store.paths import objects_dir
+        from cadgen.store.view import virtual_path
+
+        def objects():
+            return sorted(path.name for path in objects_dir().rglob("*") if path.is_file())
+
+        stored = objects()
+        with inline_artifacts() as jobs:
+            payload, content_type = virtual_path(f"{self.tree}/components/{self.cid}.surf")
+        self.assertEqual([call.args[0] for call in jobs.call_args_list],
+                         [{"kind": "surface", "tree": self.tree, "cid": self.cid}])
+        self.assertEqual(content_type, "application/octet-stream")
+        self.assertEqual(len(validate_surface_bytes(payload)["faces"]), 6)
+        self.assertEqual(objects(), stored, "a SURF is stored nowhere")
+        with inline_artifacts() as jobs:
+            self.assertEqual(virtual_path(f"{self.tree}/components/{'0' * 16}.surf"), (None, ""))
+        self.assertEqual(jobs.call_count, 0, "a component the tree does not pin asks for nothing")
 
     def test_static_views_keep_distinct_saved_document_bindings(self):
         from cadgen.store.records import note_document_tree
-        from cadgen.store.view import view_dir_for, descriptor_for_view
+        from cadgen.store.view import view_dir_for
 
-        surfaces.derive(self.tree)
+        parts.derive(self.tree)
         first, second = "a" * 64, "b" * 64
         note_document_tree(first, self.tree, surface_producer=self.producer)
         note_document_tree(second, self.tree, surface_producer=self.producer)
@@ -346,13 +358,9 @@ assert view and all('surfaceObject' not in entry for entry in view['components']
         self.assertEqual(json.loads((two / "assembly.json").read_text(encoding="utf-8"))["documentHash"], second)
 
     def test_a_static_view_derives_only_what_the_store_lacks_in_one_job(self):
-        from build123d import Compound, Pos, Solid
-        from cadgen.store import meshes
-        from cadgen.store.index import remove_entry
         from cadgen.store.view import export_view
 
-        parts = [Pos(4 * n, 0, 0) * Solid.make_box(1 + n, 1, 1) for n in range(3)]
-        tree, geometry, _ = build_tree_from_compound(Compound(children=parts), root_name="row")
+        tree, geometry = _row_tree()
         cids = sorted(geometry["components"])
         with inline_artifacts() as jobs:
             export_view(tree, self.root / "cold-view", producer=self.producer)
@@ -362,26 +370,31 @@ assert view and all('surfaceObject' not in entry for entry in view['components']
         with inline_artifacts() as jobs:
             target = export_view(tree, self.root / "warm-view", producer=self.producer)
         self.assertEqual(jobs.call_count, 0, "a view of stored display data only reads")
-        lost = surfaces.surface_input(geometry["components"][cids[1]], self.producer)
-        remove_entry("mesh", meshes.tessellation_key(lost))
+        descriptor = json.loads((target / "assembly.json").read_text(encoding="utf-8"))
+        remove_entry("part", descriptor["components"][cids[1]]["part"])
         with inline_artifacts() as jobs:
             export_view(tree, self.root / "repaired-view", producer=self.producer)
         self.assertEqual([call.args[0]["cids"] for call in jobs.call_args_list], [[cids[1]]],
                          "a part the store lost is derived alone")
-        descriptor = json.loads((target / "assembly.json").read_text(encoding="utf-8"))
-        self.assertTrue(all(entry.get("surf") for entry in descriptor["components"].values()))
+        # Each component's BREP and its part's selector table; no SURF, which nothing stores.
+        for cid, entry in descriptor["components"].items():
+            record = parts.probe(entry["part"])
+            self.assertEqual(entry["selectors"], f"components/{cid}.selectors.json")
+            self.assertEqual((target / entry["selectors"]).read_bytes(),
+                             object_path(record["selectors"]["object"]).read_bytes())
+            self.assertEqual((target / entry["brep"]).read_bytes(), object_path(entry["brepObject"]).read_bytes())
+        self.assertEqual(list((target / "components").glob("*.surf")), [])
 
     def test_invalid_optional_hint_is_replaced_without_losing_geometry(self):
         from cadgen.store.index import read_entry, write_entry
         from cadgen.store.records import document_key, note_document_tree
-        from cadgen.store.view import descriptor_for_view
         digest = "c" * 64
         note_document_tree(digest, self.tree)
         entry = read_entry("document", document_key(digest))
         entry["surfaceProducer"] = {"ocp": "broken"}
         write_entry("document", document_key(digest), entry)
         with mock.patch("cadgen.daemon.artifacts.resolve_artifact", return_value=self.producer) as job, \
-             mock.patch.object(surfaces, "producer_identity", side_effect=AssertionError("kernel forbidden")):
+             mock.patch.object(parts, "producer_identity", side_effect=AssertionError("kernel forbidden")):
             descriptor = descriptor_for_view(self.tree, document_hash=digest)
         self.assertEqual(descriptor["viewId"], self.view["viewId"])
         self.assertEqual(job.call_args.args[0], {"kind": "producer"})
@@ -394,13 +407,13 @@ assert view and all('surfaceObject' not in entry for entry in view['components']
         producer = {**self.producer, "ocp": "old-runtime"}
         digest = "d" * 64
         note_document_tree(digest, self.tree, surface_producer=producer)
-        old_view = surfaces.request_view(self.tree, producer=producer)
+        old_view = descriptor_for_view(self.tree, producer=producer)
         def run(request):
             if request["kind"] == "producer":
                 return self.producer
             if request["producer"] == producer:
                 raise ArtifactJobError("worker cannot implement the request's pinned surface producer")
-            return surfaces.derive(request["tree"], request["cids"], producer=request["producer"])
+            return parts.derive(request["tree"], request["cids"], producer=request["producer"])
         with inline_artifacts(run):
             target = view_dir_for(self.tree, document_hash=digest)
         descriptor = json.loads((target / "assembly.json").read_text(encoding="utf-8"))
@@ -408,8 +421,9 @@ assert view and all('surfaceObject' not in entry for entry in view['components']
         self.assertNotEqual(descriptor["viewId"], old_view["viewId"])
         self.assertEqual(target.parent.name, descriptor["viewId"])
         entry = descriptor["components"][self.cid]
-        self.assertEqual(entry["surfaceInput"], self.entry["surfaceInput"])
-        self.assertEqual((target / entry["surf"]).read_bytes(), object_path(entry["surfaceObject"]).read_bytes())
+        self.assertEqual(entry["part"], self.part)
+        self.assertEqual((target / entry["selectors"]).read_bytes(),
+                         object_path(parts.probe(self.part)["selectors"]["object"]).read_bytes())
         self.assertEqual(document_entry_for_hash(digest)["surfaceProducer"], self.producer)
 
 

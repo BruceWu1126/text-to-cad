@@ -1,9 +1,19 @@
-"""Transport-neutral access to the store's component meshes.
+"""Transport-neutral access to the store's parts: their records, display meshes and
+selector tables (``cadgen.store.parts``).
 
-The meshes are the ``mesh`` index defined by :mod:`cadgen.store.meshes`. This
-module owns the bounded probe/body protocol and TESB framing used by both the
-snapshot host and the Viewer. Clients only read: cadgen writes every mesh. URI decoding and HTTP status codes stay in
-the hosts, so store and snapshot code never import ``cadgen.viewer``.
+This module owns the bounded probe/body protocol and TESB framing used by both the
+snapshot host and the Viewer, under one route family:
+
+- ``POST <prefix>probe`` ``{"parts": [key, ...]}`` -> ``{"entries": {key: record}}``,
+  the stored parts' records (a missing part is absent);
+- ``POST <prefix>batch`` ``{"entries": [{"part", "object", "maxBytes"}, ...]}`` -> the
+  parts' display meshes in one TESB container, a missing or changed one empty: the
+  big-assembly path;
+- ``GET <prefix><key>.glb`` and ``GET <prefix><key>.selectors.json``, each with
+  ``?object=&maxBytes=``: one part's display mesh, one part's selector table.
+
+Clients only read: cadgen writes every part. URI decoding and HTTP status codes stay
+in the hosts, so store and snapshot code never import ``cadgen.viewer``.
 """
 
 from __future__ import annotations
@@ -17,9 +27,8 @@ __all__ = [
     "TESS_CACHE_BATCH_MAGIC", "TESS_CACHE_BATCH_MAX_BYTES",
     "TESS_CACHE_BATCH_MAX_NAMES", "TESS_CACHE_BATCH_VERSION",
     "TESS_CACHE_METADATA_MAX_BYTES", "encode_tessellation_cache_batch",
-    "is_tessellation_cache_key", "parse_tess_cache_admission",
-    "read_tess_cache_batch", "read_tess_cache_probe",
-    "read_tessellation_cache", "tessellation_cache_dir",
+    "parse_tess_cache_admission", "read_part_object", "read_tess_cache_batch",
+    "read_tess_cache_probe", "tess_cache_name",
 ]
 
 TESS_CACHE_BATCH_MAGIC = 0x42534554  # "TESB" little-endian
@@ -27,22 +36,20 @@ TESS_CACHE_BATCH_VERSION = 1
 TESS_CACHE_BATCH_MAX_NAMES = 256
 TESS_CACHE_BATCH_MAX_BYTES = 32 * 1024 * 1024
 TESS_CACHE_METADATA_MAX_BYTES = 256 * 1024
+# A route's file name: a part key and the object it names, by suffix.
+_ROLES = {".glb": "glb", ".selectors.json": "selectors"}
 
 
-def tessellation_cache_dir() -> str:
-    from cadgen.store.paths import index_dir
-    return str(index_dir("mesh"))
+def tess_cache_name(name: object) -> tuple[str, str] | None:
+    """``(part key, role)`` of a route's file name (``<key>.glb``, ``<key>.selectors.json``);
+    None for anything else."""
+    from cadgen.store.parts import valid_key
 
-
-def is_tessellation_cache_key(value: object) -> bool:
-    from cadgen.store.meshes import valid_key
-    return valid_key(value)
-
-
-def _validated_key(key: str) -> str:
-    if not is_tessellation_cache_key(key):
-        raise ValueError(f"invalid tessellation cache key: {key!r}")
-    return key
+    text = str(name or "")
+    for suffix, role in _ROLES.items():
+        if text.endswith(suffix) and valid_key(text[:-len(suffix)]):
+            return text[:-len(suffix)], role
+    return None
 
 
 def parse_tess_cache_admission(digest, raw_limit) -> tuple[str, int]:
@@ -57,14 +64,16 @@ def parse_tess_cache_admission(digest, raw_limit) -> tuple[str, int]:
     return digest, limit
 
 
-def read_tessellation_cache(
-    key: str, *, expected_object: str | None = None, max_bytes: int | None = None,
-) -> bytes | None:
-    """Read one verified body, optionally bound to a probe's exact facts."""
-    key = _validated_key(key)
+def read_part_object(name: object, *, expected_object: str, max_bytes: int) -> bytes | None:
+    """The object a route's file name names, bound to the caller's admitted facts; None for
+    a name that names none, or an object the store does not hold as named."""
+    from cadgen.store.parts import read
+
+    named = tess_cache_name(name)
+    if named is None:
+        return None
     try:
-        from cadgen.store.meshes import read
-        return read(key, expected_object=expected_object, max_bytes=max_bytes)
+        return read(named[0], named[1], expected_object=expected_object, max_bytes=max_bytes)
     except (OSError, ValueError):
         return None
 
@@ -96,21 +105,23 @@ def _request_items(body: bytes | None, field: str) -> list | None:
 
 
 def read_tess_cache_probe(body: bytes | None) -> dict | None:
-    """Return bounded index facts without loading a mesh or SURF body."""
-    from cadgen.store.meshes import probe
-    inputs = _request_items(body, "tessellationInputs")
-    if inputs is None:
+    """Return the stored parts' records without loading a body."""
+    from cadgen.store.parts import probe
+    keys = _request_items(body, "parts")
+    if keys is None:
         return None
     entries = {}
-    for key in inputs:
-        row = probe(key) if type(key) is str else None
-        if row is not None:
-            entries[key] = row
+    for key in keys:
+        record = probe(key) if type(key) is str else None
+        if record is not None:
+            entries[key] = record
     return {"entries": entries}
 
 
 def read_tess_cache_batch(body: bytes | None) -> bytes | None:
-    """Read admitted exact objects into a response capped at 32 MiB."""
+    """Read admitted exact display meshes into a response capped at 32 MiB."""
+    from cadgen.store.parts import read, valid_key
+
     requests = _request_items(body, "entries")
     if requests is None:
         return None
@@ -118,17 +129,14 @@ def read_tess_cache_batch(body: bytes | None) -> bytes | None:
     remaining = TESS_CACHE_BATCH_MAX_BYTES - 12 - 4 * len(requests)
     for request in requests:
         data = None
-        if type(request) is dict and set(request) == {
-            "tessellationInput", "object", "maxBytes",
-        }:
-            key, digest, limit = (
-                request["tessellationInput"], request["object"], request["maxBytes"],
-            )
-            if (is_tessellation_cache_key(key) and type(digest) is str
+        if type(request) is dict and set(request) == {"part", "object", "maxBytes"}:
+            key, digest, limit = request["part"], request["object"], request["maxBytes"]
+            if (valid_key(key) and type(digest) is str
                     and type(limit) is int and limit > 0 and remaining >= 0):
-                data = read_tessellation_cache(
-                    key, expected_object=digest, max_bytes=min(limit, remaining),
-                )
+                try:
+                    data = read(key, "glb", expected_object=digest, max_bytes=min(limit, remaining))
+                except (OSError, ValueError):
+                    data = None
                 if data and len(data) + (-len(data) % 4) > remaining:
                     data = None
         entries.append(data)

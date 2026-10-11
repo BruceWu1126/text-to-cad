@@ -304,7 +304,7 @@ def capture_links(draft: dict[str, Any]) -> Snapshot:
         tree = json.loads(read(digest, "tree"))
         from cadgen.store.trees import _validate_structure
         from cadgen._internal.component_package import validate_geometry_component
-        from cadgen.store.surfaces import validate_surface_bytes
+        from cadgen._internal.surf_container import validate_surface_bytes
         _validate_structure(tree)
         for cid, entry in tree.get("components", {}).items():
             validate_geometry_component(entry, read(entry["brep"], "brep"), cid=cid)

@@ -42,10 +42,6 @@
      "platform": "<platform>",
      "protocol": 7,
      "surface": "file",
-     "tessellation": {
-      "angleTolerance": 0.35,
-      "chordTolerance": 0.0005
-     },
      "version": "<version>"
     }
    }
@@ -67,10 +63,6 @@
      "protocol": 7,
      "recents": [],
      "surface": "sidebar",
-     "tessellation": {
-      "angleTolerance": 0.35,
-      "chordTolerance": 0.0005
-     },
      "version": "<version>"
     }
    }
@@ -91,10 +83,6 @@
      "platform": "<platform>",
      "protocol": 7,
      "surface": "agent",
-     "tessellation": {
-      "angleTolerance": 0.35,
-      "chordTolerance": 0.0005
-     },
      "version": "<version>"
     }
    }
@@ -135,10 +123,6 @@
      "platform": "<platform>",
      "protocol": 7,
      "surface": "tab",
-     "tessellation": {
-      "angleTolerance": 0.35,
-      "chordTolerance": 0.0005
-     },
      "version": "<version>"
     }
    }

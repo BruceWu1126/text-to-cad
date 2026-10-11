@@ -52,23 +52,23 @@ class NativeDocumentDoors(unittest.TestCase):
                 return opener(path, *args, **kwargs)
             return read
 
-        surfaces = sorted(path.name for path in (self.store / "index/surface").glob("*"))
+        derived = sorted(path.name for path in (self.store / "index/part").glob("*"))
         with contextlib.ExitStack() as stack:
             for name in ("cadgen.daemon.artifacts.submit_artifact", "cadgen.daemon.artifacts.resolve_artifact",
-                         "cadgen.store.surfaces._derive_component", "cadgen._internal.surface_extract.extract_surface_component",
+                         "cadgen.store.parts._derive", "cadgen._internal.surface_extract.extract_surface_component",
                          "cadgen.catalog.result_view_dir", "cadgen.store.view.export_view"):
                 stack.enter_context(mock.patch(name, side_effect=AssertionError(f"native-only operation invoked {name}")))
             stack.enter_context(mock.patch("builtins.open", side_effect=guard(original_open)))
             stack.enter_context(mock.patch("io.open", side_effect=guard(original_io_open)))
             yield
         self.assertEqual(attempts, [], "a source scan swallowed the forbidden read")
-        self.assertEqual(sorted(path.name for path in (self.store / "index/surface").glob("*")), surfaces)
+        self.assertEqual(sorted(path.name for path in (self.store / "index/part").glob("*")), derived)
         self.assertEqual(self.document.read_bytes(), self.original)
 
     def test_the_compile_derived_the_display_data_of_every_part(self):
         import hashlib
 
-        from cadgen.store import surfaces
+        from cadgen.store import parts
         from cadgen.store.records import document_entry_for_hash
         from cadgen.store.trees import capture_tree
 
@@ -76,13 +76,12 @@ class NativeDocumentDoors(unittest.TestCase):
         components = capture_tree(self.tree, retain_payloads=False)[0]["components"]
         self.assertTrue(components)
         for entry in components.values():
-            self.assertIsNotNone(surfaces.display_records(entry, producer))
+            self.assertIsNotNone(parts.probe(parts.part_key(entry, producer)))
 
     def test_scene_selectors_skip_display_and_unrelated_source(self):
         from cadgen import read_scene
         # An inspection never derives display data, even where the store has none.
-        for kind in ("surface", "selector", "mesh"):
-            shutil.rmtree(self.store / "index" / kind)
+        shutil.rmtree(self.store / "index/part")
         with self.native_only():
             scene = read_scene(self.document)
             self.assertAlmostEqual(scene.resolve("#s1").shape().volume, 24)

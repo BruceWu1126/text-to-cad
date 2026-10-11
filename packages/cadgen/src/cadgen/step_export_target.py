@@ -39,7 +39,7 @@ from cadgen._internal.mesh_export import (
     run_mesh_exporter,
 )
 from cadgen.metadata import normalize_mesh_numeric
-from cadgen.store.meshes import DISPLAY_ANGLE, DISPLAY_CHORD
+from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 from cadgen.step_artifact_cli import _build_entry_spec
 
 # :data:`MESH_EXPORT_FORMATS` (cadgen._internal.mesh_export) is what
@@ -364,10 +364,10 @@ def export_cad_target(
                 "skipped": skipped,
                 # The EFFECTIVE pair: an omitted tolerance is the display
                 # tolerance, and the result says which number that was.
-                "meshTolerance": job.mesh_tolerance if job.mesh_tolerance is not None else DISPLAY_CHORD,
-                "meshAngularTolerance": (
-                    job.mesh_angular_tolerance if job.mesh_angular_tolerance is not None else DISPLAY_ANGLE
-                ),
+                "meshTolerance": (job.mesh_tolerance if job.mesh_tolerance is not None
+                                  else DISPLAY_TESSELLATION["chordTolerance"]),
+                "meshAngularTolerance": (job.mesh_angular_tolerance if job.mesh_angular_tolerance is not None
+                                         else DISPLAY_TESSELLATION["angleTolerance"]),
                 "animation": summary,
             }
         )

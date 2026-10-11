@@ -686,23 +686,20 @@ class SnapshotCliTests(unittest.TestCase):
         input_url = urlparse(job["resolved"]["inputUrl"])
         self.assertEqual(input_url.path, "/__render_asset/part.step")
         self.assertRegex(parse_qs(input_url.query)["v"][0], r"^[0-9a-f]{16}$")
-        # The render artifact is a SELF-CONTAINED tree, so the resolved job
-        # carries an assembly.json with per-component asset URLs (no monolithic glbUrl).
-        # Each component URL points into the tree's own components/ dir inside __cadgen__.
+        # The render artifact is the tree: the resolved job inlines its assembly.json, whose
+        # components name their parts, and the page reads each part's display mesh from the
+        # store by that key (no monolithic glbUrl, no URL per component, no tolerance).
         self.assertNotIn("glbUrl", job["resolved"])
+        self.assertNotIn("tessellation", job["resolved"])
         package = job["resolved"]["package"]
+        self.assertEqual(list(package), ["descriptor"])
         self.assertEqual(package["descriptor"]["kind"], "assembly-package")
-        component_urls = package["componentUrls"]
-        self.assertTrue(component_urls)
-        for component_url in component_urls.values():
-            parsed_component_url = urlparse(component_url)
-            self.assertTrue(
-                parsed_component_url.path.startswith(
-                    "/__store_asset/"
-                ),
-                component_url,
-            )
-            self.assertRegex(parse_qs(parsed_component_url.query)["v"][0], r"^[0-9a-f]{16}$")
+        from cadgen.store.parts import probe
+
+        components = package["descriptor"]["components"]
+        self.assertTrue(components)
+        for entry in components.values():
+            self.assertIsNotNone(probe(entry["part"]), entry)
 
     def test_multijob_asset_urls_do_not_collide_across_render_roots(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

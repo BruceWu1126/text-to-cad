@@ -456,7 +456,7 @@ def _generate_part_outputs(
             if key in package_provenance
         }
         from cadgen.daemon import executors
-        from cadgen.store.surfaces import producer_identity
+        from cadgen.store.parts import producer_identity
 
         # The worker can attest its actual display producer without deriving
         # SURF. Unknown display capability never prevents native publication.
@@ -891,8 +891,8 @@ def _generate_step_outputs(
 def _ensure_display(tree: str, *, producer: dict | None = None, progress: object | None = None,
                     logger: CliLogger | None = None) -> None:
     """Derive here the display data of every part of ``tree`` the store lacks -- its
-    surface, selector table and display mesh (``store.surfaces.ensure_display``) --
-    before the build reports done, so a view of what it built only reads. A part that
+    display mesh and selector table (``store.parts.ensure_display``) -- before the
+    build reports done, so a view of what it built only reads. A part that
     cannot be derived is a warning on the build, never its failure: a view shows that
     part as failed. The parts of a child the build composed are normally there
     already: the child's own job derived them before it reported done."""
@@ -900,7 +900,7 @@ def _ensure_display(tree: str, *, producer: dict | None = None, progress: object
         return
     from contextlib import nullcontext
 
-    from cadgen.store.surfaces import ensure_display
+    from cadgen.store.parts import ensure_display
 
     progress = resolve_progress(progress)
 

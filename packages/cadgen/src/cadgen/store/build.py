@@ -1379,7 +1379,7 @@ def writer_input_digest(descriptor: dict[str, Any], *, root_name: str, step_name
     holds a value that is not canonical JSON.
     """
     from cadgen._internal.component_package import canonical_json_bytes
-    from cadgen.store.surfaces import kernel_versions
+    from cadgen.store.parts import kernel_versions
 
     try:
         kernel = kernel_versions()

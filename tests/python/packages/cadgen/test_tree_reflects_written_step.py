@@ -195,9 +195,11 @@ class TreeReflectsWrittenStep(unittest.TestCase):
         self.assertEqual(_volumes(warm), _volumes(imported))
         self.assertEqual(len(_volumes(warm)), 6)  # pair(2) + bar + vendor + 2 pins
 
+        import base64
+
         from cadgen.catalog import result_descriptor_for
         from cadgen.store.objects import object_path
-        from cadgen.store.surfaces import derive
+        from cadgen.store.parts import surface
         from cadgen._internal.surf_container import read_surf
 
         with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.store)}):
@@ -216,8 +218,7 @@ class TreeReflectsWrittenStep(unittest.TestCase):
             self.assertEqual({link["name"] for link in result["links"]}, {"pin_left", "pin_right"})
             # The vendor part's face colours came back through the document.
             vendor_cid = by_name["vendor"]["component"]
-            surfaces = derive(descriptor["tree"], [vendor_cid])
-            index, _ = read_surf(object_path(surfaces[vendor_cid]["object"]).read_bytes())
+            index, _ = read_surf(base64.b64decode(surface(descriptor["tree"], vendor_cid)["surface"]))
             coloured = {tuple(round(c, 3) for c in face["color"][:3]) for face in index["faces"] if face.get("color")}
             self.assertEqual(coloured, {(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)})
 

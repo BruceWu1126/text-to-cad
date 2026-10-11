@@ -8,12 +8,11 @@ descriptor's order:
   :func:`cadgen.assembly_lookup.assembly_occurrence_rows` gives them -- the rows
   every selector, ``--focus`` and ``--hide`` resolve against, so a listed ref
   is one those accept;
-- ``bounds`` is that row's box: the component's exact box (from its SURF),
-  placed by the occurrence's transform, rounded to a nanometre;
-- ``triangleCount`` and ``vertexCount`` are the stored display mesh's
-  (``cadgen.store.meshes``), at the display tolerance a view draws
-  (``cadgen.tessellation_policy.DISPLAY_TESSELLATION``): read, as the view the
-  list is made from read it (``store.view.view_dir_for``).
+- ``bounds`` is that row's box: the component's exact box (from its selector
+  table), placed by the occurrence's transform, rounded to a nanometre;
+- ``triangleCount`` and ``vertexCount`` are the part's stored display mesh's, as
+  its record counts them (``cadgen.store.parts``): read, as the view the list is
+  made from read it (``store.view.view_dir_for``).
 
 A part whose mesh leaves out a face no mesher could cover is listed, drawn and
 counted without it, and :func:`unmeshed_warnings` names the faces in the result's
@@ -83,39 +82,29 @@ def _rounded(values: Sequence[float]) -> list:
     return out
 
 
-def _mesh_counts(descriptor: Mapping[str, Any], cids: set[str]) -> dict:
-    """``{cid: (triangles, vertices)}`` from the stored display meshes."""
-    from cadgen.store.meshes import probe, tessellation_key
+def _records(descriptor: Mapping[str, Any], cids) -> dict:
+    """``{cid: record}`` of the stored parts of ``cids`` (``cadgen.store.parts``)."""
+    from cadgen.store.parts import probe
 
     components = descriptor.get("components") if isinstance(descriptor.get("components"), Mapping) else {}
-    counts = {}
-    for cid in sorted(cids):
-        surface_input = str((components.get(cid) or {}).get("surfaceInput") or "")
-        record = probe(tessellation_key(surface_input)) if surface_input else None
+    records = {}
+    for cid in cids:
+        key = str((components.get(cid) or {}).get("part") or "")
+        record = probe(key) if key else None
         if record is not None:
-            counts[cid] = (int(record["indexCount"]) // 3, int(record["vertexCount"]))
-    return counts
+            records[cid] = record
+    return records
 
 
-def has_surfaces(descriptor: Mapping[str, Any], package_dir: Path) -> bool:
-    """Whether any placed occurrence's component has a face to draw, by its SURF's
+def has_surfaces(descriptor: Mapping[str, Any]) -> bool:
+    """Whether any placed occurrence's part has a face to draw, by its selector table's
     face count. A model with none -- empty, or only curves and points -- is drawn as
-    nothing, which nobody would guess from a blank image. A SURF that does not read
-    is taken to have faces: this never claims an absence it did not see."""
-    from cadgen._internal.surf_container import read_surf_index
-
-    components = descriptor.get("components") if isinstance(descriptor.get("components"), Mapping) else {}
+    nothing, which nobody would guess from a blank image. A part the store does not
+    hold is taken to have faces: this never claims an absence it did not see."""
     occurrences = descriptor.get("occurrences") if isinstance(descriptor.get("occurrences"), list) else []
-    placed = dict.fromkeys(str(row.get("component") or "") for row in occurrences if isinstance(row, Mapping))
-    for cid in placed:
-        surf = str((components.get(cid) or {}).get("surf") or "")
-        try:
-            counts = read_surf_index(package_dir / surf).get("counts") if surf else None
-        except (OSError, ValueError):
-            return True
-        if not isinstance(counts, Mapping) or int(counts.get("faces") or 0) > 0:
-            return True
-    return False
+    placed = list(dict.fromkeys(str(row.get("component") or "") for row in occurrences if isinstance(row, Mapping)))
+    records = _records(descriptor, placed)
+    return any(cid not in records or records[cid]["selectors"]["faceCount"] > 0 for cid in placed)
 
 
 def unmeshed_warnings(
@@ -127,7 +116,8 @@ def unmeshed_warnings(
     mesher could cover undrawn (``cadgen.store.meshes``), naming the faces, the
     occurrences of ``rows`` that place it, and ``consequence``. A probe per component
     when none is missing."""
-    from cadgen.store import meshes
+    from cadgen.store.meshes import unmeshed_warning
+    from cadgen.store.parts import stored_unmeshed_faces
 
     components = descriptor.get("components") if isinstance(descriptor.get("components"), Mapping) else {}
     placed: dict[str, list[tuple[str, str]]] = {}
@@ -136,11 +126,10 @@ def unmeshed_warnings(
             placed.setdefault(str(row["component"]), []).append((str(row["id"]), str(row.get("name") or "")))
     warnings = []
     for cid, occurrences in placed.items():
-        surface_input = str((components.get(cid) or {}).get("surfaceInput") or "")
-        if surface_input:
-            faces = meshes.stored_unmeshed_faces(meshes.tessellation_key(surface_input))
-            if faces:
-                warnings.append(meshes.unmeshed_warning(occurrences, faces, consequence))
+        key = str((components.get(cid) or {}).get("part") or "")
+        faces = stored_unmeshed_faces(key) if key else []
+        if faces:
+            warnings.append(unmeshed_warning(occurrences, faces, consequence))
     return warnings
 
 
@@ -154,10 +143,11 @@ def list_rows(
     from cadgen.assembly_lookup import assembly_occurrence_rows
 
     rows = filter_occurrences(assembly_occurrence_rows(descriptor, package_dir), selection)
-    counts = _mesh_counts(descriptor, {str(row["component"]) for row in rows if row.get("component")})
+    records = _records(descriptor, sorted({str(row["component"]) for row in rows if row.get("component")}))
     listed = []
     for row in rows:
-        triangles, vertices = counts.get(str(row.get("component")), (0, 0))
+        mesh = (records.get(str(row.get("component"))) or {}).get("glb") or {}
+        triangles, vertices = int(mesh.get("indexCount") or 0) // 3, int(mesh.get("vertexCount") or 0)
         box = row.get("bbox") if isinstance(row.get("bbox"), Mapping) else None
         listed.append({
             "ref": f"#{row['id']}",

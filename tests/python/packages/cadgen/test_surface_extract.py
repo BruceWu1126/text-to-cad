@@ -231,7 +231,7 @@ class SurfaceExtractTest(unittest.TestCase):
     def test_container_roundtrip_and_the_previous_format_still_reads(self) -> None:
         from cadgen._internal.surf_container import read_surf
         from cadgen._internal.surface_extract import SURF_VERSION
-        from cadgen.store.surfaces import validate_surface_bytes
+        from cadgen._internal.surf_container import validate_surface_bytes
 
         index, _ = read_surf(bytes(self.data))
         self.assertEqual((index["version"], SURF_VERSION), (3, 3))

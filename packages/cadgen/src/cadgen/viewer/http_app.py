@@ -30,8 +30,6 @@ import sys
 import threading
 from pathlib import Path
 
-from cadgen.tessellation_policy import DISPLAY_TESSELLATION
-
 from . import reload as dev_reload
 from .backend import absolute_path, asset_path
 from .cadgen_ops import CadgenOps
@@ -40,8 +38,9 @@ from .encoding import UriError, strict_decode_uri_component
 from .scanner import CAD_CATALOG_SCHEMA_VERSION, SOURCE_EXTENSIONS, catalog_entry, to_posix_path
 from .store_paths import virtual_store_asset
 from .tess_cache import (
-    TESS_CACHE_METADATA_MAX_BYTES, parse_tess_cache_admission,
-    read_tess_cache_batch, read_tess_cache_entry, read_tess_cache_probe,
+    TESS_CACHE_BATCH_PATH, TESS_CACHE_METADATA_MAX_BYTES, TESS_CACHE_PROBE_PATH, TESS_CACHE_ROUTE_PREFIX,
+    parse_tess_cache_admission, read_tess_cache_batch, read_tess_cache_entry, read_tess_cache_probe,
+    tess_cache_name_from_route_path,
 )
 
 __all__ = [
@@ -63,10 +62,6 @@ _LIBRARY_BODY_LIMIT = 768 * 1024
 _THUMBNAIL_NAME = re.compile(r"[0-9a-f]{32}\.png")
 _CAD_EXTENSIONS = ", ".join(sorted(SOURCE_EXTENSIONS))
 _LOOPBACK_NAMES = frozenset({"127.0.0.1", "localhost", "::1"})
-
-TESS_CACHE_ROUTE_PREFIX = "/__tess_cache/"
-TESS_CACHE_BATCH_PATH = "/__tess_cache/batch"
-TESS_CACHE_PROBE_PATH = "/__tess_cache/probe"
 
 # Routes that do NOT hold the development auto-reload back (``reload.py``).
 # `/__cad/server` is what the browser's own reload watcher polls — counting it
@@ -335,9 +330,6 @@ class CadApp:
             "autoReload": self.auto_reload,
             # Which file manager Reveal opens: darwin, win32 or linux.
             "platform": sys.platform if sys.platform in ("darwin", "win32") else "linux",
-            # The display tolerance the page draws STEP models at: cadgen's policy
-            # (cadgen.tessellation_policy), never written down in the page.
-            "tessellation": dict(DISPLAY_TESSELLATION),
             # Whose viewer this is: a launch reuses, replaces or stops only its own user's.
             "user": os_user(),
             # Where a developer's relative ?file= resolves, in the page. Not a boundary.
@@ -488,7 +480,7 @@ class CadApp:
             if self._rejected_by_host_check(request, response):
                 return
             if pathname.startswith(TESS_CACHE_ROUTE_PREFIX):
-                # The store's component meshes. Checked BEFORE the dist
+                # The store's parts: display meshes and selector tables. Checked BEFORE the dist
                 # fallthrough: this is an API family, not a page asset.
                 self._handle_tess_get(request, response)
                 return
@@ -636,7 +628,7 @@ class CadApp:
                     # matches both.
                     self._handle_tess_batch(request, response)
                 elif pathname.startswith(TESS_CACHE_ROUTE_PREFIX):
-                    # cadgen writes every mesh: a client reads them.
+                    # cadgen writes every part: a client reads them.
                     response.send_empty(405, [("allow", "GET")])
                 else:
                     response.send_empty(405, [("allow", "POST")])
@@ -799,26 +791,21 @@ class CadApp:
 
     def _handle_store_asset(self, request, response, query):
         """A tree served as if it were a directory: ``<tree>/assembly.json`` is
-        the flattened tree, ``<tree>/components/<object>.surf`` streams the
-        object. Nothing here touches a path the client names: the ``file``
-        param is parsed into (tree hash, object hash) and each is looked up by
-        HASH in the store, so ``file=/etc/hosts`` is simply not a tree.
+        the flattened tree, ``<tree>/components/<cid>.brep`` streams a component's
+        BREP and ``<tree>/components/<cid>.surf`` its SURF, extracted when asked
+        (``store.view.virtual_path``). Nothing here touches a path the client names:
+        the ``file`` param is parsed into (tree hash, component) and each is looked up
+        by HASH in the store, so ``file=/etc/hosts`` is simply not a tree.
 
         Everything that fails is 404, never 403. Leading slashes are STRIPPED
         because the client's resolvePackageAssetUrl emits
-        ``file=/<tree>/components/<object>.surf``.
+        ``file=/<tree>/components/<cid>.surf``.
         """
         rel = str(query.get("file") or "").replace("\\", "/").lstrip("/")
-        if query.get("surfaceInput") is not None or query.get("object") is not None:
-            from .surfaces import pinned_surface_object
-
-            payload = pinned_surface_object(query.get("tree"), query.get("surfaceInput"), query.get("object"))
-            content_type = "application/octet-stream"
-        else:
-            producer = json.loads(query.get("surfaceProducer")) if query.get("surfaceProducer") else None
-            payload, content_type = virtual_store_asset(
-                rel, producer=producer, document_hash=query.get("documentHash"),
-            )
+        producer = json.loads(query.get("surfaceProducer")) if query.get("surfaceProducer") else None
+        payload, content_type = virtual_store_asset(
+            rel, producer=producer, document_hash=query.get("documentHash"),
+        )
         if payload is None:
             response.send_json(404, {"error": "Not found"})
             return
@@ -904,7 +891,9 @@ class CadApp:
         if status != 200:
             response.send_empty(status)
             return
-        response.send_bytes(200, body, "model/gltf-binary")
+        # The decoded name's suffix, as the read's: an encoded `%2Eglb` names a mesh too.
+        glb = tess_cache_name_from_route_path(request.path).endswith(".glb")
+        response.send_bytes(200, body, "model/gltf-binary" if glb else "application/json")
 
     def _handle_tess_probe(self, request, response):
         if int(request.headers.get("content-length") or 0) > TESS_CACHE_METADATA_MAX_BYTES:

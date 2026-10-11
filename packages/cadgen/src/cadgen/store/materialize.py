@@ -604,8 +604,8 @@ def materialize_descriptor(
         if entry.get("kind") != "native":
             raise ValueError("unsupported geometry component kind")
         if cid in shapes:
-            # Unpublished own shapes have no SURF object yet. Their extraction
-            # input is authoritative, and normalization takes a private copy.
+            # Unpublished own shapes have no published component yet. Their
+            # face colours are authoritative, and normalization takes a private copy.
             face_colors_by_cid[cid] = _normalized_face_colors(
                 getattr(shapes[cid], "cad_face_ordinal_colors", None)
             )

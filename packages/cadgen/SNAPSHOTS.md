@@ -31,8 +31,8 @@ backgrounds. Unknown keys and retired modes are refused.
 
 A STEP model with no surfaces -- empty, or only curves and points -- has nothing a
 view draws. Its snapshot is still written, with a warning that says the model has
-no surfaces, decided from the parts' SURF face counts before any browser starts
-(`snapshot_parts.has_surfaces`).
+no surfaces, decided from the face counts the parts' records give before any
+browser starts (`snapshot_parts.has_surfaces`).
 
 `edges`, `clip`, `exploded`, the `xray`, `hidden-line` and `wireframe` presets and
 the `hidden` and `off` surface styles describe a CAD model: its topology edges,
@@ -136,8 +136,8 @@ occurrence, in the tree's order: `ref` and `name` are the occurrence's id and
 name exactly as every selector resolves them
 (`cadgen.assembly_lookup.assembly_occurrence_rows`), `bounds` is the component's
 exact box placed by the occurrence's transform (rounded to 1e-3), and
-`triangleCount`/`vertexCount` are the stored display mesh's, the one a view
-draws. The build derived it; a part the store has none for is derived by one
+`triangleCount`/`vertexCount` are the stored display mesh's, as its part's record
+counts them: the mesh a view draws. The build derived it; a part the store has none for is derived by one
 build-pool job before the list is read ([`STORE.md`](STORE.md) §3), as for a
 view. `--focus` and
 `--hide` narrow the rows the way they narrow a section.
@@ -196,11 +196,11 @@ Still view renders report these measured browser durations in milliseconds:
 | `waitViewportMs` | Waiting for the prepared viewport's asynchronous readiness |
 | `captureMs` | Entire capture call, including readiness and all output stages below |
 
-Exact-surface packages also report `stageTimings.sourceLoad`. Counts distinguish
+STEP packages also report `stageTimings.sourceLoad`. Counts distinguish
 `componentCount`, `cacheBatchCount`, `cacheHitCount` and `cacheMissCount`. The
-page only reads stored meshes: the build derived them, and a part the store
-lacked was derived before the page opened, while the snapshot resolved its view.
-Measured durations are `probeMs` (metadata),
+page only reads stored meshes, by each component's part: the build derived them,
+and a part the store lacked was derived before the page opened, while the
+snapshot resolved its view. Measured durations are `probeMs` (the parts' records),
 `cacheReadMs` (bounded body fetch and integrity validation), `cacheDecodeMs`
 (component views and metadata), `meshBuildMs` (owned render arrays), and
 `composeMs` (occurrence composition). A static package's own mesh files measure

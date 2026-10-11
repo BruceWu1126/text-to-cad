@@ -1,4 +1,4 @@
-"""Geometry routes resolve pinned BREP; disposable SURF needs a runtime view."""
+"""Geometry routes resolve pinned BREP; a runtime view names each component's part."""
 from __future__ import annotations
 import copy
 import json
@@ -94,14 +94,14 @@ class ComponentLookup(unittest.TestCase):
         os.environ["CADGEN_CACHE_DIR"] = str(self.root / "other")
         self.assertIsNone(view.component_object_for_tree(self.tree, self.cid + ".brep"))
 
-    def test_runtime_descriptor_carries_surface_input_without_resolving_surface(self):
-        from cadgen.store import view, surfaces
-        with mock.patch.object(surfaces, "producer_identity", side_effect=AssertionError("native import")):
+    def test_runtime_descriptor_names_each_part_without_deriving_it(self):
+        from cadgen.store import parts, view
+        with mock.patch.object(parts, "producer_identity", side_effect=AssertionError("native import")), \
+             mock.patch.object(parts, "derive", side_effect=AssertionError("derived")):
             descriptor = view.descriptor_for_view(self.tree, producer=FIXTURE_SURFACE_PRODUCER)
         self.assertEqual(descriptor["kind"], "assembly-package")
         entry = descriptor["components"][self.cid]
         self.assertEqual(entry["brepObject"], self.entry["brep"])
-        self.assertEqual(len(entry["surfaceInput"]), 64)
-        self.assertNotIn("surfaceObject", entry)
+        self.assertEqual(entry["part"], parts.part_key(self.entry, FIXTURE_SURFACE_PRODUCER))
 
 if __name__ == "__main__": unittest.main()

@@ -163,16 +163,13 @@ _TELEMETRY_TOOL = {
 
 def _stamped(launch: dict[str, Any]) -> dict[str, Any]:
     """A launch with what the page needs to start on it alone: this server's version and platform,
-    the display tolerance (``cadgen.tessellation_policy``), whether this computer has a
-    file chooser for the home's Open, and the update notice as the server last read it
-    (``cadgen/updates.py``; a launch never waits on the feed)."""
+    whether this computer has a file chooser for the home's Open, and the update notice as the
+    server last read it (``cadgen/updates.py``; a launch never waits on the feed)."""
     from cadgen import __version__, updates
     from cadgen._internal.picker import available
-    from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
     launch["version"] = __version__
     launch["platform"] = sys.platform if sys.platform in ("darwin", "win32") else "linux"
-    launch["tessellation"] = dict(DISPLAY_TESSELLATION)
     launch["pick"] = available()
     launch["notice"] = updates.notice()
     updates.refresh()  # a server can run for days: a feed that is due is read in the background, for the next launch

@@ -87,7 +87,7 @@ class SnapshotListTests(unittest.TestCase):
         self.assertEqual(["#o1.2"], [row["ref"] for row in self.focused.parts])
 
     def test_listing_a_stored_model_loads_no_kernel(self) -> None:
-        # The rows are read from the tree, its SURFs and the mesh index: a process that lists
+        # The rows are read from the tree and its parts' records: a process that lists
         # (the snapshot CLI) never pays for OCCT. Run where nothing else has loaded it.
         import os
         import subprocess

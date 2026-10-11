@@ -21,7 +21,7 @@ from cadgen.daemon.jobs import JobLedger
 from tests.python.support.tmp_root import generated_cad_directory
 
 
-PRODUCER = {"scheme": 20, "surfFormat": 3, "build123d": "0.10", "ocp": "7.9.3.1", "cadqueryOcp": "7.9.3.1.1"}
+PRODUCER = {"build123d": "0.10", "ocp": "7.9.3.1", "cadqueryOcp": "7.9.3.1.1"}
 
 
 def display_request(**changes):
@@ -163,7 +163,10 @@ class ArtifactRequests(unittest.TestCase):
                    display_request(cids=["B" * 16]), display_request(cids=["b" * 16] * 2), display_request(cids=[]),
                    display_request(force=False), display_request(kind="surfaces"),
                    display_request(producer={**PRODUCER, "ocp": "unknown"}),
-                   display_request(producer={**PRODUCER, "scheme": True})]
+                   # An older cadgen's producer named its extraction scheme; this one's is the kernel.
+                   display_request(producer={**PRODUCER, "scheme": 20}),
+                   {"kind": "surface", "tree": "a" * 64}, {"kind": "surface", "tree": "a" * 64, "cid": "B" * 16},
+                   {"kind": "surface", "tree": "a" * 64, "cid": "b" * 16, "producer": dict(PRODUCER)}]
         with mock.patch.object(client, "run_artifact") as dispatch:
             for request in invalid:
                 with self.subTest(request=request), self.assertRaises(ValueError):
@@ -174,7 +177,7 @@ class ArtifactRequests(unittest.TestCase):
         script = """import sys
 from cadgen.daemon import artifacts, client, server, worker
 assert not any(k == 'OCP' or k.startswith('OCP.') or k == 'build123d' or k.startswith('build123d.') for k in sys.modules)
-assert 'cadgen.store.surfaces' not in sys.modules
+assert 'cadgen.store.parts' not in sys.modules
 print('kernel-free')
 """
         result = subprocess.run([sys.executable, "-c", script], text=True, capture_output=True, timeout=20)
@@ -585,14 +588,14 @@ class ArtifactLeases(unittest.TestCase):
         env = mock.patch.dict(os.environ, {**self.private.env(), "CADGEN_CACHE_DIR": self.root, "CADGEN_DAEMON": "0"})
         env.start()
         self.addCleanup(env.stop)
-        self.fake = types.ModuleType("cadgen.store.surfaces")
+        self.fake = types.ModuleType("cadgen.store.parts")
         self.fake.producer_identity = mock.Mock(return_value=dict(PRODUCER))
         self.fake.derive = mock.Mock(return_value={"components": ["b" * 16]})
         import cadgen.store
 
         stack = self.enterContext(contextlib.ExitStack())
-        stack.enter_context(mock.patch.dict(sys.modules, {"cadgen.store.surfaces": self.fake}))
-        stack.enter_context(mock.patch.object(cadgen.store, "surfaces", self.fake, create=True))
+        stack.enter_context(mock.patch.dict(sys.modules, {"cadgen.store.parts": self.fake}))
+        stack.enter_context(mock.patch.object(cadgen.store, "parts", self.fake, create=True))
 
     def settled(self):
         deadline = time.monotonic() + 3
@@ -714,7 +717,7 @@ class ArtifactLeases(unittest.TestCase):
         script = f"""import json,os,sys,time,types
 from pathlib import Path
 from cadgen.daemon import artifacts,broker
-module=types.ModuleType('cadgen.store.surfaces')
+module=types.ModuleType('cadgen.store.parts')
 def identity():
     assert broker.current_lease() is not None
     Path({str(entered)!r}).write_text('entered')
@@ -759,7 +762,7 @@ raise SystemExit(artifacts._main())
         script = f"""import os,sys,time,types
 from pathlib import Path
 from cadgen.daemon import artifacts,broker
-module=types.ModuleType('cadgen.store.surfaces')
+module=types.ModuleType('cadgen.store.parts')
 def identity():
     assert broker.current_lease() is not None
     Path({str(entered)!r}).write_text('entered')
@@ -822,7 +825,7 @@ raise SystemExit(artifacts._main())
         script = f"""import sys,time,types
 from pathlib import Path
 from cadgen.daemon import artifacts,broker
-module=types.ModuleType('cadgen.store.surfaces')
+module=types.ModuleType('cadgen.store.parts')
 def identity():
     assert broker.current_lease() is not None
     Path({str(entered)!r}).write_text('entered')
@@ -972,23 +975,23 @@ class SupervisedDerivation(unittest.TestCase):
         root = str(Path(temp.name).resolve())
         self.enterContext(mock.patch.dict(os.environ, {**private.env(), "CADGEN_CACHE_DIR": root, "CADGEN_DAEMON": "0"}))
         from build123d import Box, Compound, Pos
-        from cadgen.store import surfaces
+        from cadgen.store import parts
         from cadgen.store.build import build_tree_from_compound
 
-        parts = Compound(children=[Pos(20 * index, 0, 0) * Box(1 + index, 2, 3) for index in range(3)])
-        tree, descriptor, _ = build_tree_from_compound(parts, root_name="parts")
-        producer, cids = surfaces.producer_identity(), sorted(descriptor["components"])
+        boxes = Compound(children=[Pos(20 * index, 0, 0) * Box(1 + index, 2, 3) for index in range(3)])
+        tree, descriptor, _ = build_tree_from_compound(boxes, root_name="parts")
+        producer, cids = parts.producer_identity(), sorted(descriptor["components"])
         request = {"tool": "artifact", "argv": [], "store_root": root,
                    "artifact": {"kind": "display", "tree": tree, "cids": cids, "producer": producer}}
-        # Asked before the first component's extraction and its mesh, then before the second's.
-        answers = io.StringIO('{"kind": "artifactNext", "goOn": true}\n' * 2 + '{"kind": "artifactNext", "goOn": false}\n')
+        # Asked before the first part's derivation, then before the second's.
+        answers = io.StringIO('{"kind": "artifactNext", "goOn": true}\n{"kind": "artifactNext", "goOn": false}\n')
         frames = []
         with mock.patch.object(worker, "_emit", side_effect=frames.append), mock.patch.object(sys, "stdin", answers):
             self.assertEqual(worker._run(request, supervised=True), 0)
-        self.assertEqual(frames[:3], [{"artifactNext": True}] * 3)
-        self.assertEqual(list(frames[3]["artifactResult"]["result"]), cids[:1])
-        self.assertEqual([surfaces.display_records(descriptor["components"][cid], producer) is not None for cid in cids],
-                         [True, False, False])
+        self.assertEqual(frames[:2], [{"artifactNext": True}] * 2)
+        self.assertEqual(list(frames[2]["artifactResult"]["result"]), cids[:1])
+        self.assertEqual([parts.probe(parts.part_key(descriptor["components"][cid], producer)) is not None
+                          for cid in cids], [True, False, False])
 
 
 if __name__ == "__main__":

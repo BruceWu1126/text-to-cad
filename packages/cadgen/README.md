@@ -72,7 +72,7 @@ this one:
 |---|---|---|
 | Build status: the viewer's feed says whether a build of a file is running or failed, never what it previews; the viewer shows the saved file | saved-artifact read-back; no reader reaches source, closure or a model record | [`STORE.md`](STORE.md) §9b |
 | Composition: what a decorated call returns, what a parent may consume before a child's save, and when an exact `Compound(children=[...])` keeps its children's pins | the link/component decision, declared-output completion, `isinstance(root, Compound)` | [`STORE.md`](STORE.md) §6, §9a |
-| Display surfaces and meshes: canonical trees pin encoded BREP and effective intrinsic face colors; a build job derives its parts' display data — SURF, selector table and OCCT's mesh at the display tolerance, under an attested producer — in its own process before it reports done (a parent waits for its children, whose jobs derived theirs); views only read, and a part missing from the store is derived by one build-pool job; cadgen is the only mesher — every client draws the store's meshes | geometry stays separate from display data — the record is written before the build derives, so a part that fails to derive is a warning and never makes the geometry rebuild; `read_step` never waits for SURF or a mesh | [`STORE.md`](STORE.md) §3 |
+| Display data: canonical trees pin encoded BREP and effective intrinsic face colors; a build job derives each part's display data — ONE record naming two objects, OCCT's mesh at the one display tolerance and the selector table, both made from a SURF extracted in memory under an attested producer — in its own process before it reports done (a parent waits for its children, whose jobs derived theirs); views only read, and a part missing from the store is derived by one build-pool job; cadgen is the only mesher — every client draws the store's meshes and holds no tolerance | geometry stays separate from display data — the record is written before the build derives, so a part that fails to derive is a warning and never makes the geometry rebuild; `read_step` never waits for a part | [`STORE.md`](STORE.md) §3 |
 | Tree composition: an all-link parent's saved-document tree composed from its children's document trees instead of parsed from the STEP it just wrote | `index/document` holds the cold compile of the written bytes, the same tree either way; every ineligible case parses | [`STORE.md`](STORE.md) §3 |
 | STEP splicing: the same parent's STEP written from its children's saved STEP files instead of exported through OCCT | the cold compile of the spliced file is the exported file's; every ineligible case exports | [`STORE.md`](STORE.md) §3 |
 
@@ -80,8 +80,8 @@ this one:
 
 `~/.cache/cadgen` is the store: content-addressed objects (a model's result
 tree and the components it is made of) and input-addressed index entries
-(the per-model record, the document → tree map, bounds and tessellation
-entries) — data derivable from sources and documents, and nothing else. Its
+(the per-model record, the document → tree map, bounds and part entries)
+— data derivable from sources and documents, and nothing else. Its
 layout, formats, gate, two-sides law and invariants are the contract in
 [`STORE.md`](STORE.md); read it before touching anything that writes to or
 reads from the store. Where this document and `STORE.md` disagree, `STORE.md`
@@ -95,9 +95,10 @@ that information is in the wrong place.
 **The store is what the sources imply; the sidecar is what the author meant.**
 
 The store holds itself to a size cap (`CADGEN_STORE_MAX`, default 20 GB): the
-daemon, when idle, evicts derived entries (mesh, surface, component, bounds,
-drawing) least recently written first and sweeps what nothing reaches, and
-retires on sight the index kinds an older cadgen left (`index/op`). A record,
+daemon, when idle, evicts derived entries (part, component, bounds, drawing)
+least recently written first and sweeps what nothing reaches, and retires on
+sight the index kinds an older cadgen left (`index/op`, and `index/surface`,
+`index/selector` and `index/mesh`). A record,
 a document entry or an output entry is never evicted. `cadgen store gc` does
 the same by hand (`STORE.md` §8). A cadgen never judges what it cannot read:
 a store a newer cadgen wrote to within 30 days is left to that cadgen, and a

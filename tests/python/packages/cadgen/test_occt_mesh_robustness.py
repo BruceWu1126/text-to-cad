@@ -28,6 +28,7 @@ from tests.python.packages.cadgen import test_mesh_export_manifold as exported  
 from tests.python.support.tmp_root import generated_cad_directory  # noqa: E402
 
 CHORD, ANGLE = 1.5e-3, 0.35
+PART = "1" * 64 + "-v1"
 IDENTITY = [1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0]
 
 
@@ -39,13 +40,15 @@ def _surf_index(topods) -> dict:
 
 
 def _mesh(shape, *, chord=CHORD, angle=ANGLE):
-    """``shape`` meshed as the store meshes a component: its GLB body, decoded."""
+    """``shape`` meshed as the store meshes a component, from its selector table: its GLB
+    body, decoded."""
     from cadgen._internal.mesh_formats import decode_tessellation
     from cadgen._internal.occt_mesh import mesh_component
+    from cadgen._internal.selector_table import build_selector_table
 
     topods = getattr(shape, "wrapped", shape)
-    body = mesh_component(topods, _surf_index(topods), surface_input="1" * 64, surface_object="a" * 64,
-                          chord=chord, angle=angle)
+    table = build_selector_table(topods, _surf_index(topods))
+    body = mesh_component(topods, table, {}, part=PART, chord=chord, angle=angle)
     return body, decode_tessellation(body)
 
 
@@ -108,17 +111,17 @@ class DegenerateComponents(unittest.TestCase):
     def test_a_tree_with_a_lone_vertex_meshes_every_component(self):
         from build123d import Box, Compound, Cylinder, Pos, Vertex
 
-        from cadgen.store import meshes, surfaces
+        from cadgen.store import parts
         from cadgen.store.build import build_tree_from_compound
 
         with generated_cad_directory(prefix="occt-mesh-vertex-") as temporary, \
                 mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(Path(temporary) / "cache")}):
             tree, geometry, _ = build_tree_from_compound(
                 Compound(children=[Box(4, 4, 4), Vertex(10, 0, 0), Pos(20, 0, 0) * Cylinder(2, 4)]), root_name="trio")
-            producer = surfaces.producer_identity()
-            surfaces.derive(tree, producer=producer)
-            stored = [meshes.probe(meshes.tessellation_key(surfaces.lookup(entry, producer)["surfaceInput"]))
-                      is not None for entry in geometry["components"].values()]
+            producer = parts.producer_identity()
+            parts.derive(tree, producer=producer)
+            stored = [parts.probe(parts.part_key(entry, producer)) is not None
+                      for entry in geometry["components"].values()]
         self.assertEqual(stored, [True, True, True])
 
 

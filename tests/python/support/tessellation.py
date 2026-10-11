@@ -1,63 +1,98 @@
-"""Tiny stored-mesh (GLB) fixture, encoded by cadgen's own writer (``cadgen.store.meshes``),
-and the shared JavaScript reader every client decodes it with."""
+"""A tiny part as cadgen stores it (``cadgen.store.parts``) -- its display mesh, one triangle
+encoded by cadgen's own writer (``cadgen.store.meshes``), and its selector table -- and the
+shared JavaScript reader every client decodes a mesh with."""
 import base64
 from functools import lru_cache
+import hashlib
 import json
-import math
 from pathlib import Path
 import shutil
 import struct
 import subprocess
 
-CODEC = Path(__file__).resolve().parents[3] / "packages/core/src/lib/surf/tessellationCache.js"
+CORE = Path(__file__).resolve().parents[3] / "packages/core/src/lib/surf"
 
 
 def _floats(*values: float) -> bytes:
     return struct.pack(f"<{len(values)}f", *values)
 
 
+def _selector_table() -> bytes:
+    """The smallest table ``selector_table.read_selector_table`` reads: one face, one edge and
+    its two vertices, every other column empty."""
+    from cadgen._internal.selector_table import (
+        EDGE_COLUMNS, FACE_COLUMNS, OCCURRENCE_COLUMNS, SELECTOR_TABLE_SCHEMA_VERSION, SHAPE_COLUMNS,
+        VERTEX_COLUMNS, selector_table_bytes,
+    )
+
+    def row(columns, ordinal=None):
+        return [ordinal if name == "ordinal" else None for name in columns]
+
+    return selector_table_bytes({
+        "schemaVersion": SELECTOR_TABLE_SCHEMA_VERSION,
+        "tables": {"occurrenceColumns": OCCURRENCE_COLUMNS, "shapeColumns": SHAPE_COLUMNS,
+                   "faceColumns": FACE_COLUMNS, "edgeColumns": EDGE_COLUMNS, "vertexColumns": VERTEX_COLUMNS},
+        "occurrences": [row(OCCURRENCE_COLUMNS)], "shapes": [row(SHAPE_COLUMNS, 1)],
+        "faces": [row(FACE_COLUMNS, 1)], "edges": [row(EDGE_COLUMNS, 1)],
+        "vertices": [row(VERTEX_COLUMNS, 1), row(VERTEX_COLUMNS, 2)],
+        "stats": {"shapeCount": 1, "faceCount": 1, "edgeCount": 1, "vertexCount": 2},
+        "relations": {"faceEdgeRows": [0], "edgeFaceRows": [0], "edgeVertexRows": [0, 1], "vertexEdgeRows": [0, 0]},
+    })
+
+
 @lru_cache(maxsize=1)
-def tessellation_fixture():
-    from cadgen.store.meshes import encode_payload, payload_record, tessellation_key
+def part_fixture() -> dict:
+    """The part: ``key``, its display mesh (``glb``) and selector table (``selectors``), base64,
+    and the ``record`` that names them, as ``parts.probe`` answers it once stored."""
+    from cadgen.store.meshes import body_facts, encode_payload
+    from cadgen.store.parts import PART_VERSION
 
-    surface_input, chord, angle = "1" * 64, 0.0015, 0.005
-    key = tessellation_key(surface_input, chord, angle)
-
-    def encode(scale: float = math.sqrt(13), surface_object: str = "a" * 64) -> bytes:
-        return encode_payload(
-            surface_input=surface_input, surface_object=surface_object, chord=chord, angle=angle,
-            positions=_floats(0, 0, 0, 2, 0, 0, 0, 3, 0), normals=_floats(0, 0, 1, 0, 0, 1, 0, 0, 1),
-            indices=struct.pack("<3I", 0, 1, 2),
-            face_ranges=[{"ord": 1, "indexStart": 0, "indexCount": 3, "color": [0.2, 0.4, 0.6, 1.0]}],
-            edges=[(1, "boundary", _floats(0, 0, 0, 2, 0, 0, 2, 3, 0))],
-            bounds={"min": [0, 0, 0], "max": [2, 3, 0]}, scale=scale, part_color=[0.2, 0.3, 0.4, 1],
-        )
-
-    payload = encode()
+    key = f"{'1' * 64}-v{PART_VERSION}"
+    glb = encode_payload(
+        part=key, positions=_floats(0, 0, 0, 2, 0, 0, 0, 3, 0), normals=_floats(0, 0, 1, 0, 0, 1, 0, 0, 1),
+        indices=struct.pack("<3I", 0, 1, 2),
+        face_ranges=[{"ord": 1, "indexStart": 0, "indexCount": 3, "color": [0.2, 0.4, 0.6, 1.0]}],
+        edges=[(1, "boundary", _floats(0, 0, 0, 2, 0, 0, 2, 3, 0))],
+        bounds={"min": [0, 0, 0], "max": [2, 3, 0]},
+    )
+    table = _selector_table()
+    facts = body_facts(glb)
+    del facts["part"]
+    record = {"glb": {"object": hashlib.sha256(glb).hexdigest(), **facts},
+              "selectors": {"object": hashlib.sha256(table).hexdigest(), "byteLength": len(table),
+                            "faceCount": 1, "edgeCount": 1, "vertexCount": 2}}
     text = lambda data: base64.b64encode(data).decode("ascii")  # noqa: E731
-    return {
-        "key": key,
-        "bytes": text(payload),
-        "changed": text(encode(scale=math.sqrt(13) + 1)),
-        "changedSurface": text(encode(surface_object="b" * 64)),
-        "facts": payload_record(key, payload),
-    }
+    return {"key": key, "glb": text(glb), "selectors": text(table), "record": record}
+
+
+def store_part(fixture: dict | None = None) -> dict:
+    """Store the part's two objects, then its record, in the current store (``CADGEN_CACHE_DIR``),
+    as a derivation does; return the record."""
+    from cadgen.store.parts import _write
+
+    fixture = part_fixture() if fixture is None else fixture
+    return _write(fixture["key"], base64.b64decode(fixture["glb"]), base64.b64decode(fixture["selectors"]))
 
 
 def js_reader(payloads: list[bytes]) -> list[list]:
-    """What the shared JS reader makes of each body: ``[facts, decodes]`` (facts None for a refusal)."""
+    """What the shared JS reader makes of each body: ``[facts, part]`` -- what a part's record
+    says of it (``testing.js partMeshFacts``) and the part it names -- or ``[None, None]``
+    for a body it refuses."""
     node = shutil.which("node")
     if node is None:
         raise RuntimeError("Node is required to verify the shared mesh contract")
     script = """
 import fs from 'node:fs';
 const api = await import(process.argv[1]);
+const testing = await import(process.argv[2]);
 console.log(JSON.stringify(JSON.parse(fs.readFileSync(0, 'utf8')).map((body) => {
   const bytes = new Uint8Array(Buffer.from(body, 'base64'));
-  return [api.tessellationPayloadFacts(bytes), api.decodeComponentTessellation(bytes) !== null];
+  const decoded = api.decodeComponentTessellation(bytes);
+  return decoded ? [testing.partMeshFacts(bytes), decoded.part] : [null, null];
 })));
 """
-    result = subprocess.run([node, "--input-type=module", "-e", script, CODEC.as_uri()],
+    result = subprocess.run([node, "--input-type=module", "-e", script, (CORE / "tessellationCache.js").as_uri(),
+                             (CORE / "testing.js").as_uri()],
                             input=json.dumps([base64.b64encode(payload).decode() for payload in payloads]),
                             text=True, capture_output=True, check=True, timeout=30)
     return json.loads(result.stdout)

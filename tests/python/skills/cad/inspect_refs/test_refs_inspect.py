@@ -115,7 +115,8 @@ class StepSceneTests(unittest.TestCase):
     def test_read_and_occurrence_lookup_decode_no_geometry_or_surfaces(self):
         from cadgen._internal import component_package
         with mock.patch.object(component_package, "decode_geometry_component", wraps=component_package.decode_geometry_component) as decoded, \
-             mock.patch("cadgen.store.surfaces.derive", side_effect=AssertionError("inspection requested surfaces")), \
+             mock.patch("cadgen.store.parts.derive", side_effect=AssertionError("inspection requested display data")), \
+             mock.patch("cadgen.store.parts.ensure_display", side_effect=AssertionError("inspection requested display data")), \
              mock.patch("cadgen._internal.surface_extract.extract_surface_component", side_effect=AssertionError("inspection extracted surfaces")):
             scene = read_scene(self.path)
             scene.resolve("#housing")

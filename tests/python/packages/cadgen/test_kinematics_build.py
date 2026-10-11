@@ -244,14 +244,15 @@ class KinematicsBuildTests(unittest.TestCase):
 
     def test_mates_resolve_without_reading_any_component(self) -> None:
         # A mate's ends name occurrences, never topology: a group, a leaf, a
-        # label or an id. Resolving them reads no component's SURF and writes no
-        # view of the tree; each of those cost seconds on a large assembly and
-        # derived SURF inside the build when the store had none.
+        # label or an id. Resolving them reads no component's selector table and
+        # writes no view of the tree; each of those cost seconds on a large assembly
+        # and derived display data inside the build when the store had none.
         script = self.root / "grouped.py"
         script.write_text(GROUPED_MODEL, encoding="utf-8")
         refused = AssertionError("mate ends need no component topology")
         with mock.patch("cadgen.store.view.export_view", side_effect=refused), \
-                mock.patch("cadgen.store.view.materialize_view_surfaces", side_effect=refused), \
+                mock.patch("cadgen.store.view.materialize_parts", side_effect=refused), \
+                mock.patch("cadgen.store.parts.derive", side_effect=refused), \
                 mock.patch("cadgen.assembly_lookup._read_component_table", side_effect=refused):
             self.assertEqual(0, self._build(script))
         (mate,) = self._sidecar(script)["kinematics"]["mates"]

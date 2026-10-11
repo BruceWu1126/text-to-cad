@@ -800,28 +800,6 @@ def path_is_inside_or_equal(child: Path, parent: Path) -> bool:
         return False
 def encode_path_param(value: str) -> str:
     return "/".join(quote(part) for part in value.replace(os.sep, "/").split("/"))
-def asset_url_for_store_path(file_path: Path) -> str:
-    """Asset URL for a file in the store (outside any render
-    root): served by the ``/__store_asset/`` route, confined to the store's
-    ``packages/`` tier. Same mtime/size version key as root assets."""
-    from cadgen.store.view import views_root
-
-    resolved_path = Path(file_path).resolve()
-    base = views_root().resolve()
-    if not path_is_inside_or_equal(resolved_path, base):
-        raise SnapshotError(f"Store asset must be inside the store: {file_path}")
-    relative_path = resolved_path.relative_to(base).as_posix()
-    base_url = f"{STORE_ASSET_ROUTE_PREFIX}{encode_path_param(relative_path)}"
-    try:
-        file_stat = resolved_path.stat()
-    except FileNotFoundError:
-        return base_url
-    cache_identity = "\0".join(
-        (str(resolved_path), str(file_stat.st_size), str(file_stat.st_mtime_ns))
-    )
-    return f"{base_url}?v={sha256(cache_identity.encode('utf-8')).hexdigest()[:16]}"
-
-
 def asset_url_for_path(file_path: Path, root_path: Path) -> str:
     if not path_is_inside_or_equal(file_path, root_path):
         raise SnapshotError(f"Render asset must be inside the snapshot render root: {file_path}")
@@ -1332,15 +1310,16 @@ def route_file(pathname: str, prefix: str, root: Path) -> Path:
     if not path_is_inside_or_equal(file_path, root):
         raise RouteFileError(f"forbidden route path: {pathname}", status=403)
     return file_path
-# --- the store's component meshes ---------------------------------------------
+# --- the store's parts -----------------------------------------------------------
 #
 # The snapshot page draws the same stored meshes the viewer and the mesh
-# exports do (immutable objects plus index/mesh; codec and key scheme in
-# cadgen/store/meshes.py and packages/core/src/lib/surf/tessellationCache.js).
-# The page cannot touch the filesystem, so the host serves the store: a probe
-# names what exists, and GET /__tess_cache/<key>.glb and the batch route read
-# exact objects: the display meshes the build derived, or the view's one
-# build-pool job derived before the page opened. The page never tessellates.
+# exports do (immutable objects named by index/part; the record in
+# cadgen/store/parts.py, the codec in cadgen/store/meshes.py and
+# packages/core/src/lib/surf/tessellationCache.js). The page cannot touch the
+# filesystem, so the host serves the store (cadgen/store/tess_cache.py): a probe
+# answers the parts' records, and GET /__tess_cache/<part>.glb and the batch
+# route read exact objects: the display meshes the build derived, or the view's
+# one build-pool job derived before the page opened. The page never tessellates.
 #
 # TRANSPORT: bulk bytes must NOT go through Playwright at all. CDP serializes
 # every fulfilled body as base64 over the devtools pipe at ~20 MB/s, which made
@@ -1354,40 +1333,24 @@ def route_file(pathname: str, prefix: str, root: Path) -> Path:
 # So the renderer runs a loopback HTTP server and the page addresses it by its
 # ABSOLUTE origin for the cache (window.__cadgenSnapshotAssetOrigin, injected
 # in BatchSnapshotRenderer.start): those requests are never intercepted, in
-# either direction, at any size. Page-relative asset URLs (/__render_asset/,
-# the store prefix) are GET-only, so they stay intercepted and answer with a
-# tiny 307 to the same server. The intercepted page uses localhost (a secure
+# either direction, at any size. Page-relative asset URLs (/__render_asset/)
+# are GET-only, so they stay intercepted and answer with a tiny 307 to the
+# same server. The intercepted page uses localhost (a secure
 # context for its required SubtleCrypto checks), while the loopback responses
 # carry CORS headers and answer the preflight their distinct origin triggers.
 # Without that server there is no working transport, so start() raises instead
 # of degrading.
 
 TESS_CACHE_ROUTE_PREFIX = "/__tess_cache/"
-# The route's safe filename envelope. The store additionally requires the
-# current exact surface-input/algorithm/payload/binary64-tolerance key.
-TESS_CACHE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.+_-]*\.glb$")
 
 
-def _tessellation_cache_key(pathname: str) -> str | None:
-    name = str(pathname or "")[len(TESS_CACHE_ROUTE_PREFIX):]
-    if not TESS_CACHE_NAME_PATTERN.fullmatch(name) or ".." in name:
-        return None
-    return name[:-len(".glb")]
+def read_tessellation_cache_entry(pathname: str, *, expected_object: str, max_bytes: int) -> bytes | None:
+    """The part object a route names (``<part>.glb``, ``<part>.selectors.json``), bound to
+    the admitted facts; None for a refused name or a miss."""
+    from cadgen.store.tess_cache import read_part_object
 
-
-def read_tessellation_cache_entry(pathname: str, *, expected_object=None, max_bytes=None) -> bytes | None:
-    """One entry's bytes, from the mesh index (``index/mesh`` -> object); None
-    for a refused name, a miss, or a disabled cache."""
-    from cadgen.store.tess_cache import read_tessellation_cache
-    key = _tessellation_cache_key(pathname)
-    if key is None:
-        return None
-    try:
-        return read_tessellation_cache(
-            key, expected_object=expected_object, max_bytes=max_bytes,
-        )
-    except ValueError:
-        return None
+    return read_part_object(str(pathname or "")[len(TESS_CACHE_ROUTE_PREFIX):],
+                            expected_object=expected_object, max_bytes=max_bytes)
 
 
 # Probe small index facts, then request only admitted exact objects. The shared
@@ -1404,7 +1367,6 @@ def read_tessellation_cache_batch(body: bytes | None) -> bytes | None:
 
 
 RENDER_ASSET_ROUTE_PREFIX = "/__render_asset/"
-STORE_ASSET_ROUTE_PREFIX = "/__store_asset/"
 # A job's tube skins (``cadgen._internal.tube_skin_payload``), by content hash.
 TUBE_SKINS_ROUTE_PREFIX = "/__tube_skins/"
 _TUBE_SKINS_NAME = re.compile(r"^[0-9a-f]{64}\.glb$")
@@ -1444,12 +1406,6 @@ def tube_skins_asset_url(*, tree: str, document_hash: str, animation: object) ->
     if not path.is_file():
         write_bytes_atomic(path, data)
     return f"{TUBE_SKINS_ROUTE_PREFIX}{name}"
-
-
-def _store_packages_root() -> Path:
-    from cadgen.store.view import views_root
-
-    return views_root()
 
 
 def _write_http_body(output, body: bytes) -> None:
@@ -1526,7 +1482,7 @@ class SnapshotAssetServer:
                     if body is None:
                         self._send(404, b"miss", "text/plain; charset=utf-8")
                         return
-                    self._send(200, body, "model/gltf-binary")
+                    self._send(200, body, "model/gltf-binary" if pathname.endswith(".glb") else "application/json")
                     return
                 if pathname.startswith(TUBE_SKINS_ROUTE_PREFIX):
                     name = pathname[len(TUBE_SKINS_ROUTE_PREFIX):]
@@ -1549,17 +1505,6 @@ class SnapshotAssetServer:
                         self._send(404, b"not found", "text/plain; charset=utf-8")
                         return
                     self._send(200, body, "model/gltf-binary")
-                    return
-                if pathname.startswith(STORE_ASSET_ROUTE_PREFIX):
-                    try:
-                        file_path = route_file(pathname, STORE_ASSET_ROUTE_PREFIX, _store_packages_root())
-                    except RouteFileError as exc:
-                        self._send(exc.status, str(exc).encode(), "text/plain; charset=utf-8")
-                        return
-                    if not file_path.is_file():
-                        self._send(404, b"not found", "text/plain; charset=utf-8")
-                        return
-                    self._send(200, file_path.read_bytes(), content_type_for_path(file_path))
                     return
                 if pathname.startswith(RENDER_ASSET_ROUTE_PREFIX):
                     root = server.root_provider()
@@ -1595,7 +1540,7 @@ class SnapshotAssetServer:
                     return
                 if pathname not in (TESS_CACHE_PROBE_PATH, TESS_CACHE_BATCH_PATH):
                     self.close_connection = True
-                    self._send(405, b"the store's meshes are read-only here", "text/plain; charset=utf-8")
+                    self._send(405, b"the store's parts are read-only here", "text/plain; charset=utf-8")
                     return
                 if length > TESS_CACHE_METADATA_MAX_BYTES:
                     self.close_connection = True
@@ -1661,8 +1606,6 @@ def resolve_snapshot_route_file(
         if active_root_path is None:
             raise RouteFileError("snapshot render asset requested without an active render root")
         return route_file(parsed.path, "/__render_asset/", active_root_path)
-    if parsed.path.startswith(STORE_ASSET_ROUTE_PREFIX):
-        return route_file(parsed.path, STORE_ASSET_ROUTE_PREFIX, _store_packages_root())
     if parsed.path == "/snapshot-render.js":
         return Path(runtime_dir) / "snapshot-render.js"
     raise RouteFileError(f"snapshot route not found: {parsed.path}")
@@ -1784,10 +1727,7 @@ class BatchSnapshotRenderer:
     async def handle_route(self, route: Any) -> None:
         request = route.request
         parsed = urlparse(request.url)
-        bulk = (
-            parsed.path.startswith(RENDER_ASSET_ROUTE_PREFIX)
-            or parsed.path.startswith(STORE_ASSET_ROUTE_PREFIX)
-        )
+        bulk = parsed.path.startswith(RENDER_ASSET_ROUTE_PREFIX)
         if bulk and request.url.startswith(SNAPSHOT_ORIGIN):
             # These asset URLs are page-relative (the job names files, not
             # origins), so they are intercepted and redirected: a tiny 307
@@ -2118,7 +2058,7 @@ def _unmeshed_view_warnings(job: Mapping[str, object]) -> list[str]:
     resolved = job.get("resolved") if is_plain_object(job.get("resolved")) else {}
     package = resolved.get("package")
     if (str(resolved.get("kind") or "").lower() not in ("step", "stp") or not is_plain_object(package)
-            or not is_plain_object(package.get("descriptor")) or not is_plain_object(resolved.get("tessellation"))):
+            or not is_plain_object(package.get("descriptor"))):
         return []
     from cadgen.assembly_lookup import assembly_occurrence_rows
     from cadgen.snapshot_parts import filter_occurrences, unmeshed_warnings

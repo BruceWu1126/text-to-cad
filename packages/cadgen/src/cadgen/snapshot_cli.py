@@ -1064,8 +1064,6 @@ def resolve_step_render_job(
     if not package_dir.is_dir():
         raise SnapshotError(f"STEP/STP render input has no tree in the store: {package_dir}")
 
-    from cadgen.tessellation_policy import DISPLAY_TESSELLATION
-
     resolved: dict[str, object] = {
         "rootPath": str(root_path),
         "inputPath": str(input_path),
@@ -1074,13 +1072,10 @@ def resolve_step_render_job(
         # The hash of the tree this job renders: the geometry's identity in the
         # result (cadgen.results.SnapshotFile.tree), never a directory.
         "tree": selected_tree,
-        # The tolerances its components are drawn at: cadgen's display tolerance,
-        # never the page's.
-        "tessellation": dict(DISPLAY_TESSELLATION),
     }
-    # tree (the canonical render artifact for every STEP model): inline
-    # the assembly.json and pre-resolve one asset URL per unique component so the renderer
-    # fetches and composes them in world space.
+    # tree (the canonical render artifact for every STEP model): inline the
+    # assembly.json, whose components name their parts, so the renderer reads each
+    # part's display mesh from the store and composes them in world space.
     descriptor = json.loads((package_dir / "assembly.json").read_text(encoding="utf-8"))
     artifact_manifest = getattr(artifact, "manifest", None)
     if isinstance(artifact_manifest, Mapping) and artifact_manifest != descriptor:
@@ -1110,18 +1105,12 @@ def resolve_step_render_job(
         return resolved_job
     from cadgen.snapshot_parts import has_surfaces
 
-    if not has_surfaces(descriptor, package_dir):
+    if not has_surfaces(descriptor):
         # A true answer, and one nobody would guess from a blank PNG.
         resolved["warnings"] = ["this model has no surfaces to draw: it is empty, or only curves and points"]
     # This is the renderer's private descriptor loaded from the selected view,
     # never the immutable tree object.
     descriptor["documentHash"] = document_hash
-    from cadgen.snapshot_core import asset_url_for_store_path
-
-    component_urls = {
-        cid: asset_url_for_store_path(package_dir / str(entry.get("surf", "")))
-        for cid, entry in (descriptor.get("components") or {}).items()
-    }
     from cadgen._internal.source_sidecar import apply_appearance, read_source_sidecar
 
     resolved["documentHash"] = document_hash
@@ -1133,7 +1122,7 @@ def resolve_step_render_job(
     sidecar = read_source_sidecar(input_path, document_hash=document_hash) or {}
     if sidecar.get("appearance") is not None:
         descriptor = apply_appearance(descriptor, sidecar["appearance"])
-    resolved["package"] = {"descriptor": descriptor, "componentUrls": component_urls}
+    resolved["package"] = {"descriptor": descriptor}
     animation = sidecar.get("animation")
     if animation is not None:
         resolved["animation"] = animation

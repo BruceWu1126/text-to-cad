@@ -250,7 +250,7 @@ def _warm_imports() -> None:
     # with its model's folder on that path.
     with contextlib.suppress(Exception):
         import cadgen
-        from cadgen.store.surfaces import kernel_versions
+        from cadgen.store.parts import kernel_versions
 
         getattr(cadgen, "__version__")
         kernel_versions()

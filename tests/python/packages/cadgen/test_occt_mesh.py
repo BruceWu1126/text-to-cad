@@ -20,19 +20,28 @@ add_repo_path("packages/cadgen/src")
 from tests.python.support.tmp_root import generated_cad_directory  # noqa: E402
 
 CHORD, ANGLE = 1.5e-3, 0.35
+PART = "1" * 64 + "-v1"
 
 
 def _component():
+    """A fresh decode of a bored block each call, and its selector table: what the mesher reads."""
     from build123d import Box, Cylinder
 
     from cadgen._internal.component_package import decode_display_shape, prepare_geometry_component
+    from cadgen._internal.selector_table import build_selector_table
     from cadgen._internal.surf_container import read_surf
     from cadgen._internal.surface_extract import extract_surface_component
 
     prepared = prepare_geometry_component(Box(20, 20, 10) - Cylinder(4, 10))
     entry, payload = prepared["entry"], prepared["payload"]
-    index, _ = read_surf(extract_surface_component(decode_display_shape(entry, payload).wrapped))
-    return (lambda: decode_display_shape(entry, payload).wrapped), index
+    shape = decode_display_shape(entry, payload).wrapped
+    index, _ = read_surf(extract_surface_component(shape))
+    return (lambda: decode_display_shape(entry, payload).wrapped), build_selector_table(shape, index)
+
+
+def _ordinals(table: dict) -> list[int]:
+    column = table["tables"]["faceColumns"].index("ordinal")
+    return [row[column] for row in table["faces"]]
 
 
 def _faces(body: bytes) -> dict[int, int]:
@@ -45,10 +54,10 @@ def _faces(body: bytes) -> dict[int, int]:
 class EmptyFaces(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        fresh, cls.index = _component()
+        fresh, cls.table = _component()
         cls.fresh = staticmethod(fresh)
 
-    def mesh(self, emptied: int | None, *, every_pass: bool = False, index=None) -> bytes:
+    def mesh(self, emptied: int | None, *, every_pass: bool = False, table=None) -> bytes:
         """Mesh the component with face ``emptied`` left without triangles by the
         component's pass (and, with ``every_pass``, by every retry too)."""
         from OCP import BRepMesh
@@ -73,14 +82,13 @@ class EmptyFaces(unittest.TestCase):
             return result
 
         with mock.patch.object(BRepMesh, "BRepMesh_IncrementalMesh", side_effect=mesher):
-            body = mesh_component(topods, index or self.index, surface_input="1" * 64,
-                                  surface_object="a" * 64, chord=CHORD, angle=ANGLE)
+            body = mesh_component(topods, table or self.table, {}, part=PART, chord=CHORD, angle=ANGLE)
         self.calls = len(calls)
         return body
 
     def test_a_face_the_pass_leaves_empty_is_meshed_again_with_the_whole_component(self):
         whole = _faces(self.mesh(None))
-        self.assertEqual(sorted(whole), [row["ord"] for row in self.index["faces"]])
+        self.assertEqual(sorted(whole), _ordinals(self.table))
         face = max(whole, key=whole.get)
         repaired = _faces(self.mesh(face))
         self.assertGreater(self.calls, 1, "the component was meshed again")
@@ -91,12 +99,14 @@ class EmptyFaces(unittest.TestCase):
         from cadgen._internal.occt_mesh import _bounding_diagonal
         from cadgen.store.meshes import decode_payload
 
-        face = self.index["faces"][0]["ord"]
+        face = _ordinals(self.table)[0]
         deflection = CHORD * _bounding_diagonal(self.fresh())
-        sliver = {**self.index, "faces": [{**row, "area": deflection * deflection / 4} if row["ord"] == face else row
-                                          for row in self.index["faces"]]}
+        area = self.table["tables"]["faceColumns"].index("area")
+        sliver = {**self.table, "faces": [[*row[:area], deflection * deflection / 4, *row[area + 1:]]
+                                          if ordinal == face else row
+                                          for ordinal, row in zip(_ordinals(self.table), self.table["faces"])]}
         with mock.patch.object(face_fallback, "tessellate_face", return_value=None):
-            small = self.mesh(face, every_pass=True, index=sliver)
+            small = self.mesh(face, every_pass=True, table=sliver)
             refused = self.mesh(face, every_pass=True)
         # Under what the mesh resolves, a face may have no triangles, and nothing says so.
         self.assertEqual((_faces(small)[face], decode_payload(small).unmeshed_faces), (0, []))
@@ -112,7 +122,7 @@ class ARequestOutlivesOneComponent(unittest.TestCase):
         from build123d import Box, Compound, Cylinder, Pos
 
         from cadgen._internal import occt_mesh
-        from cadgen.store import meshes, surfaces
+        from cadgen.store import parts
         from cadgen.store.build import build_tree_from_compound
 
         with generated_cad_directory(prefix="occt-mesh-request-") as temporary, \
@@ -121,38 +131,37 @@ class ARequestOutlivesOneComponent(unittest.TestCase):
                 Compound(children=[Box(4, 4, 4), Pos(10, 0, 0) * Cylinder(2, 4)]), root_name="pair")
             real, failed = occt_mesh.mesh_component, []
 
-            def mesher(topods, index, *, surface_input, **options):
+            def mesher(topods, table, face_colors, *, part, **options):
                 # Whatever fails, not only OCCT's own refusal: the first component meshed fails
                 # every time, as a body its encoding refuses would.
-                if failed in ([], [surface_input]):
-                    failed[:] = [surface_input]
+                if failed in ([], [part]):
+                    failed[:] = [part]
                     raise ValueError("invalid tessellation JSON length")
-                return real(topods, index, surface_input=surface_input, **options)
+                return real(topods, table, face_colors, part=part, **options)
 
-            producer = surfaces.producer_identity()
+            producer = parts.producer_identity()
             named = r"^component [0-9a-f]{16}: ValueError: invalid tessellation JSON length$"
             with mock.patch.object(occt_mesh, "mesh_component", side_effect=mesher), \
                     self.assertRaisesRegex(occt_mesh.MeshProductionError, named):
-                surfaces.derive(tree, producer=producer)
-            inputs = [surfaces.lookup(entry, producer)["surfaceInput"] for entry in geometry["components"].values()]
-            others = {surface_input: surface_input != failed[0] for surface_input in inputs}
+                parts.derive(tree, producer=producer)
+            keys = [parts.part_key(entry, producer) for entry in geometry["components"].values()]
+            others = {key: key != failed[0] for key in keys}
 
             def stored():
-                return {surface_input: meshes.probe(meshes.tessellation_key(surface_input)) is not None
-                        for surface_input in inputs}
+                return {key: parts.probe(key) is not None for key in keys}
 
             self.assertEqual(stored(), others,
                              "the other component was meshed and stored before the failure was reported")
             # A build's derivation names the occurrence it could not mesh, and fails nothing.
             with mock.patch.object(occt_mesh, "mesh_component", side_effect=mesher):
-                [failure] = surfaces.ensure_display(tree, producer=producer)
+                [failure] = parts.ensure_display(tree, producer=producer)
             self.assertRegex(failure, r"^#o1\.[12]\b.* could not be meshed "
                                       r"\(MeshProductionError: ValueError: invalid tessellation JSON length\)$")
             self.assertEqual(stored(), others)
             # An interrupt is not a component's failure.
             with mock.patch.object(occt_mesh, "mesh_component", side_effect=KeyboardInterrupt), \
                     self.assertRaises(KeyboardInterrupt):
-                surfaces.ensure_display(tree, producer=producer)
+                parts.ensure_display(tree, producer=producer)
 
 
 if __name__ == "__main__":

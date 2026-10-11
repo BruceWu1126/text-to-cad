@@ -7,14 +7,15 @@ for ``QUIET_SECONDS``, one look -- a stat walk that keeps nothing per file:
    ``after`` being where that store's last pass ended under the same cap, a
    full pass with the cap (retire, evict, sweep). ``band`` is the fifth of the
    cap between the cap and its low watermark.
-2. **Otherwise, a retired index kind** (``index/op``), **or a store holding
-   surfaces, meshes, records or document entries that no pass under these
-   versions has looked at for a day**: a pass that retires the retired and the
-   week-old obsolete entries -- the records and document entries at keys this
-   cadgen does not own among them -- and sweeps only the objects the retired
-   and obsolete derived entries named. Obsolete entries -- the surfaces and
-   meshes an older extractor or mesher of cadgen's wrote -- cannot be told
-   from a stat walk, so the daemon notes when its last retiring pass ran, per
+2. **Otherwise, a retired index kind** (``index/op``, or the display data's old
+   ``index/surface``, ``index/selector`` and ``index/mesh``), **or a store holding
+   parts, records or document entries that no pass under these versions has
+   looked at for a day**: a pass that retires the retired and the week-old
+   obsolete entries -- the records and document entries at keys this cadgen does
+   not own among them -- and sweeps only the objects the retired and obsolete
+   derived entries named. Obsolete entries -- the parts an older derivation of
+   cadgen's wrote among them -- are not told apart by a look that keeps nothing
+   per file, so the daemon notes when its last retiring pass ran, per
    store and per the versions it ran under (``gc.producer_versions``), in a
    file of their own: a daemon of another release sharing the store keeps a
    note of its own and never moves this one. A store gets one such pass after
@@ -52,8 +53,8 @@ from typing import Callable
 QUIET_SECONDS = 30.0
 # How long a pass told to stop may take to reach its next step before it is killed.
 STOP_GRACE_SECONDS = 10.0
-# How often a store holding surfaces or meshes gets a retiring pass under the same
-# versions: the obsolete entries the last one kept for being younger than a week
+# How often a store holding parts, records or documents gets a retiring pass under the
+# same versions: the obsolete entries the last one kept for being younger than a week
 # (gc.OBSOLETE_RETIRE_AFTER_SECONDS) go within a day of turning a week old.
 RETIRE_INTERVAL_SECONDS = 24 * 3600.0
 
@@ -162,10 +163,9 @@ class Housekeeper:
             self._note_retired(root, versions)
             return _summary(report)
         # A full pass retires obsolete entries too; without one, a store that holds
-        # surfaces, meshes, records or documents earns a pass when none under these
-        # versions ran today.
-        obsolete = (any((resolved / "index" / kind).is_dir()
-                        for kind in ("surface", "selector", "mesh", "model", "document"))
+        # parts, records or documents earns a pass when none under these versions
+        # ran today.
+        obsolete = (any((resolved / "index" / kind).is_dir() for kind in ("part", "model", "document"))
                     and self._retire_due(root, versions))
         retired = found.retired and self._clock() - self._retired_at.get(root, float("-inf")) >= DEFAULT_GRACE_SECONDS
         if obsolete or retired:

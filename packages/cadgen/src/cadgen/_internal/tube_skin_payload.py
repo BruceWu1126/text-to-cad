@@ -170,11 +170,12 @@ def tube_skins_bytes(*, tree: str, document_hash: str, animation: Any) -> bytes 
     from cadgen._internal.source_sidecar import animation_digest
     from cadgen.store import meshes, skins
     from cadgen.store.view import descriptor_for_view
+    from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
     tracks = tube_tracks(animation)
     if not tracks:
         return None
-    pair = (meshes.DISPLAY_CHORD, meshes.DISPLAY_ANGLE)
+    pair = (DISPLAY_TESSELLATION["chordTolerance"], DISPLAY_TESSELLATION["angleTolerance"])
     descriptor = descriptor_for_view(tree, document_hash=document_hash)
     if descriptor is None:
         raise FileNotFoundError(f"tube skins: geometry tree missing or unreadable: {tree}")
@@ -184,7 +185,7 @@ def tube_skins_bytes(*, tree: str, document_hash: str, animation: Any) -> bytes 
                    if str(member) in placed})
     key = skins.skin_input_key(
         scheme=_SCHEME, document_hash=document_hash, animation_digest=animation_digest(animation),
-        mesh_keys=[meshes.tessellation_key(descriptor["components"][cid]["surfaceInput"], *pair) for cid in cids],
+        mesh_keys=[descriptor["components"][cid]["part"] for cid in cids],
     )
     cached = skins.read(key)
     if cached is not None:

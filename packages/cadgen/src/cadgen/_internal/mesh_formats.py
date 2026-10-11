@@ -73,7 +73,6 @@ class Tessellation:
     normals: np.ndarray  # (n, 3) float32
     indices: np.ndarray  # (m,) uint32, m % 3 == 0
     face_ranges: list
-    part_color: list | None = None
 
 
 def decode_tessellation(payload: bytes) -> Tessellation:
@@ -84,7 +83,7 @@ def decode_tessellation(payload: bytes) -> Tessellation:
     decoded = decode_payload(payload)
     return Tessellation(
         positions=decoded.positions, normals=decoded.normals, indices=decoded.indices.astype(np.uint32),
-        face_ranges=decoded.face_ranges(), part_color=decoded.cad["partColor"],
+        face_ranges=decoded.face_ranges(),
     )
 
 
@@ -249,16 +248,15 @@ def occurrence_colors(
 ) -> list[str]:
     """Every face range of one occurrence resolved to its export colour: its own,
     else the occurrence's (a named material's ``baseColor``, then its STEP colour),
-    the part's, the export default -- the chain the CAD Viewer and snapshots draw. The
-    one chain, for the soup and for a bent tube's skin that replaces an occurrence's
-    primitives alike.
+    the export default -- the chain the CAD Viewer and snapshots draw. The one chain,
+    for the soup and for a bent tube's skin that replaces an occurrence's primitives
+    alike.
 
     Never the component's: occurrences share a component, which carries whichever
     coloured occurrence the build met first, so an uncoloured sibling would take it."""
     base_color = str(occurrence.get("baseColor") or "")
     occurrence_color = base_color.lower() if _HEX.fullmatch(base_color) else linear_rgb_to_hex(occurrence.get("color"))
-    fallback = (occurrence_color or linear_rgb_to_hex(tessellation.part_color)
-                or (default_color or DEFAULT_COLOR).lower())
+    fallback = occurrence_color or (default_color or DEFAULT_COLOR).lower()
     return [linear_rgb_to_hex(face_range.get("color")) or fallback for face_range in tessellation.face_ranges]
 
 

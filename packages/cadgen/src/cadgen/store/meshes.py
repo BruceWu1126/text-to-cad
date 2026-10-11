@@ -1,17 +1,14 @@
-"""Validated component meshes: immutable GLB objects, input-keyed indexes.
+"""A part's display mesh: the GLB body cadgen stores for it, and its codec.
 
 The kernel-free half of the store's mesh format: glTF 2.0 binary (GLB), its
 validation and its encoder. cadgen is the only producer -- OCCT's mesher, run on
 a component's exact BREP (``cadgen/_internal/occt_mesh.py``) -- and every
 consumer only reads: the CAD Viewer, snapshots and mesh exports draw the same
-stored triangles. A probe reads only the small index and the object's observed
-size. Body reads remain bound to that exact object and an admitted byte limit;
-they verify both the content address and the payload's complete input identity
-before returning. SURF hashes are provenance here, not additional required
-objects or GC roots.
+stored triangles. A part's record (``cadgen.store.parts``) names the body and
+what a reader sizes it by; this module only writes and reads the bytes.
 
-One body is one component at one tolerance pair, in CAD units (millimetres, Z
-up), laid out so a reader views every array in place:
+One body is one part, in CAD units (millimetres, Z up), laid out so a reader
+views every array in place:
 
 - the BIN chunk holds, each section 4-byte aligned and present only when it is
   not empty: POSITION and NORMAL (float32 xyz per vertex), the indices of the
@@ -23,10 +20,10 @@ up), laid out so a reader views every array in place:
   to back;
 - the JSON chunk is what any glTF reader needs to draw that primitive -- one
   node carrying the CAD -> glTF frame (Z-up millimetres shown Y-up in metres),
-  one mesh, three accessors -- and, in ``extras.cadgen``, the body's identity,
-  its bounds, scale and part colour, the face colour palette (exact doubles),
-  the names the class codes index, and where each table is. It is the
-  canonical JSON for those values: a reader rebuilds it and requires it, so
+  one mesh, three accessors -- and, in ``extras.cadgen``, the part it is (its
+  key, ``cadgen.store.parts``), its bounds, the face colour palette (exact
+  doubles), the names the class codes index, and where each table is. It is
+  the canonical JSON for those values: a reader rebuilds it and requires it, so
   nothing but the tables grows with the component.
 
 A face the mesh can resolve that no mesher could cover -- OCCT refused it and
@@ -34,44 +31,27 @@ its own tessellation (``cadgen/_internal/face_fallback.py``) did not cover its
 area -- leaves the component meshed without it: its face range is empty, and
 ``extras.cadgen.unmeshedFaces`` names it among the ordinals of every such face
 (present only when there is one), so each reader says what it does not draw or
-write; the index record counts them (``unmeshedFaceCount``, likewise).
+write; the part's record counts them (``unmeshedFaceCount``, likewise).
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
-import os
 import re
 import struct
 from typing import TYPE_CHECKING, Any
 
-from cadgen.tessellation_policy import DISPLAY_TESSELLATION, tolerance_refusal
-from cadgen.store.index import entry_path, write_entry
-from cadgen.store.objects import object_path, put_object
-
 if TYPE_CHECKING:
-    # The code that builds or views a body's arrays imports numpy where it runs: keys,
-    # probes and reads stay stdlib-only for a process that only serves stored meshes
-    # (the CAD Viewer's server).
+    # The code that builds or views a body's arrays imports numpy where it runs: reads
+    # stay stdlib-only for a process that only serves stored meshes (the CAD Viewer's
+    # server).
     import numpy as np
 
-# 6: glTF 2.0 binary replaced TESS v5 (one triangle primitive, face and edge
-# tables in buffer views, no per-vertex face ordinals).
-PAYLOAD_VERSION = 6
-# 10: OCCT BRepMesh on the exact BREP replaced the JavaScript surface tessellator.
-TESSELLATOR_VERSION = 10
-MESH_INDEX_SCHEMA = 2
-MAX_INDEX_BYTES = 16 * 1024
 # The JSON chunk grows only with the face colour palette, which holds each distinct
 # colour once. tessellationCache.js MESH_MAX_JSON_BYTES is the same number.
 MAX_JSON_BYTES = 64 * 1024 * 1024
 MAX_SAFE_INTEGER = 2**53 - 1
-# The display tolerance (cadgen.tessellation_policy): what a key that names no
-# tolerances means.
-DISPLAY_CHORD = DISPLAY_TESSELLATION["chordTolerance"]
-DISPLAY_ANGLE = DISPLAY_TESSELLATION["angleTolerance"]
 # The class codes of the edge table, in this order (tessellationCache.js MESH_EDGE_CLASSES).
 EDGE_CLASSES = ("none", "feature", "tangent", "seam", "degenerate", "boundary", "nonManifold", "unknown")
 _EDGE_CODES = {name: code for code, name in enumerate(EDGE_CLASSES)}
@@ -84,39 +64,18 @@ _GLB_MAGIC, _GLB_VERSION, _JSON_CHUNK, _BIN_CHUNK = 0x46546C67, 2, 0x4E4F534A, 0
 _FLOAT, _UNSIGNED_SHORT, _UNSIGNED_INT = 5126, 5123, 5125
 _ARRAY_BUFFER, _ELEMENT_ARRAY_BUFFER = 34962, 34963
 _TABLE_COLUMNS = 4
-_KEY = re.compile(
-    rf"([0-9a-f]{{64}})-t{TESSELLATOR_VERSION}-p{PAYLOAD_VERSION}"
-    rf"-l([0-9a-f]{{16}})-a([0-9a-f]{{16}})"
-)
-# Any mesher's and payload format's key, this cadgen's or another's (``obsolete_key``).
-_ANY_KEY = re.compile(r"([0-9a-f]{64})-t(\d+)-p(\d+)-l[0-9a-f]{16}-a[0-9a-f]{16}")
-_QUALITY_FIELDS = {"chordTolerance", "chordToleranceF64", "angleTolerance", "angleToleranceF64"}
+# A part key (``cadgen.store.parts.part_key``): what a body says it is.
+_PART = re.compile(r"[0-9a-f]{64}-v[0-9]+")
 # ``extras.cadgen``'s values, in the order the writer spells them -- ``unmeshedFaces``
 # last, and only in a body that has one; the class names and the table references follow
 # them.
-_CAD_VALUES = ("payloadVersion", "tessellatorVersion", "tessellationInput", "surfaceInput", "surfaceObject",
-               "quality", "bounds", "scale", "partColor", "faceColors")
+_CAD_VALUES = ("part", "bounds", "faceColors")
 _UNMESHED = "unmeshedFaces"
-_COUNT_FIELDS = ("vertexCount", "indexCount", "faceCount", "edgeCount", "edgePointCount")
-_RECORD_FIELDS = {
-    "schemaVersion", "object", "byteLength", "decodedBytes", "surfaceInput", "surfaceObject",
-    "tessellationInput", "renderIdentity", "quality", "tessellatorVersion", "payloadVersion",
-    *_COUNT_FIELDS,
-}
-# The record of a body with unmeshed faces counts them.
-_UNMESHED_COUNT = "unmeshedFaceCount"
-
-
-class MeshConflictError(ValueError):
-    """One deterministic tessellation input produced different output bytes."""
+COUNT_FIELDS = ("vertexCount", "indexCount", "faceCount", "edgeCount", "edgePointCount")
 
 
 def _integer(value: Any) -> bool:
     return type(value) is int and 0 <= value <= MAX_SAFE_INTEGER
-
-
-def _digest(value: Any) -> bool:
-    return type(value) is str and len(value) == 64 and re.fullmatch(r"[0-9a-f]{64}", value) is not None
 
 
 def _finite_number(value: Any) -> bool:
@@ -146,84 +105,6 @@ def _read_json(payload: bytes) -> Any:
 _BOOLEAN_TOKENS = (b"true", b"false")
 
 
-def float64_hex(value: Any) -> str:
-    if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
-        raise ValueError("tessellation tolerances must be positive finite binary64 values")
-    return struct.pack(">d", float(value)).hex()
-
-
-def tessellation_quality(chord: float = DISPLAY_CHORD, angle: float = DISPLAY_ANGLE) -> dict:
-    return {
-        "chordTolerance": chord, "chordToleranceF64": float64_hex(chord),
-        "angleTolerance": angle, "angleToleranceF64": float64_hex(angle),
-    }
-
-
-def normalize_tessellations(value: Any) -> list[tuple[float, float]]:
-    """``[{chordTolerance, angleTolerance}, ...]`` as sorted, distinct (chord, angle) pairs.
-
-    What a request may ask to have meshed: both tolerances, positive finite
-    binary64 values within the tessellation policy's bounds
-    (``cadgen.tessellation_policy.tolerance_refusal``); anything else is a
-    ValueError before any work starts.
-    """
-    if value is None:
-        return []
-    if type(value) not in (list, tuple):
-        raise ValueError("tessellations must be a list of {chordTolerance, angleTolerance}")
-    pairs = set()
-    for item in value:
-        if type(item) is not dict or set(item) != {"chordTolerance", "angleTolerance"}:
-            raise ValueError("a tessellation is exactly {chordTolerance, angleTolerance}")
-        chord, angle = item["chordTolerance"], item["angleTolerance"]
-        tessellation_quality(chord, angle)  # positive finite binary64 values, or ValueError
-        refusal = (tolerance_refusal("chordTolerance", float(chord), name="chordTolerance")
-                   or tolerance_refusal("angleTolerance", float(angle), name="angleTolerance"))
-        if refusal is not None:
-            raise ValueError(refusal)
-        pairs.add((float(chord), float(angle)))
-    return sorted(pairs)
-
-
-def tessellation_key(surface_input: str, chord: float = DISPLAY_CHORD, angle: float = DISPLAY_ANGLE) -> str:
-    if not _digest(surface_input):
-        raise ValueError("surface input must be a full lowercase content digest")
-    return f"{surface_input}-t{TESSELLATOR_VERSION}-p{PAYLOAD_VERSION}-l{float64_hex(chord)}-a{float64_hex(angle)}"
-
-
-def obsolete_key(key: Any) -> bool:
-    """Whether a mesh entry's key is an older mesher's or payload format's than this
-    cadgen's: no reader asks for it again (STORE.md §8). A newer cadgen's is not."""
-    match = _ANY_KEY.fullmatch(key) if isinstance(key, str) else None
-    if match is None:
-        return False
-    mesher, payload = int(match[2]), int(match[3])
-    return (mesher <= TESSELLATOR_VERSION and payload <= PAYLOAD_VERSION
-            and (mesher, payload) != (TESSELLATOR_VERSION, PAYLOAD_VERSION))
-
-
-def valid_key(key: Any) -> bool:
-    if not isinstance(key, str) or _KEY.fullmatch(key) is None:
-        return False
-    match = _KEY.fullmatch(key)
-    try:
-        return tessellation_key(
-            match[1], struct.unpack(">d", bytes.fromhex(match[2]))[0],
-            struct.unpack(">d", bytes.fromhex(match[3]))[0],
-        ) == key
-    except (ValueError, OverflowError, struct.error):
-        return False
-
-
-def _quality(value: Any) -> dict:
-    if type(value) is not dict or set(value) != _QUALITY_FIELDS:
-        raise ValueError("invalid tessellation quality")
-    expected = tessellation_quality(value["chordTolerance"], value["angleTolerance"])
-    if value != expected:
-        raise ValueError("tessellation quality bits do not match its values")
-    return expected
-
-
 def decoded_bytes(counts: dict) -> int:
     """What decoding a body costs beyond its bytes: the client's mesh data (positions,
     normals, uint32 indices, the edges' points and segment pairs), never less than
@@ -250,9 +131,9 @@ def _sections(counts: dict) -> list[tuple[str, int, int | None]]:
 
 
 def canonical_gltf(cad: dict, counts: dict) -> dict:
-    """The JSON chunk of a body with these ``extras.cadgen`` values (identity, bounds,
-    scale, colours) and these counts: what ``encode_payload`` writes, and what every
-    reader requires (tessellationCache.js ``canonicalMeshGltf``)."""
+    """The JSON chunk of a body with these ``extras.cadgen`` values (part, bounds,
+    colours) and these counts: what ``encode_payload`` writes, and what every reader
+    requires (tessellationCache.js ``canonicalMeshGltf``)."""
     vertices, indices = counts["vertexCount"], counts["indexCount"]
     views, offset, table = [], 0, {}
     for name, length, target in _sections(counts):
@@ -317,16 +198,14 @@ def _validate_cad(cad: Any) -> None:
     """``extras.cadgen``'s values, before its canonical JSON can be rebuilt from them."""
     if type(cad) is not dict:
         raise ValueError("tessellation lacks its cadgen extras")
+    if type(cad.get("part")) is not str or _PART.fullmatch(cad["part"]) is None:
+        raise ValueError("tessellation names no part")
     bounds = cad.get("bounds")
     if type(bounds) is not dict or set(bounds) != {"min", "max"} or any(
         type(bounds[name]) is not list or len(bounds[name]) != 3
         or not all(map(_finite_number, bounds[name])) for name in ("min", "max")
     ) or any(lo > hi for lo, hi in zip(bounds["min"], bounds["max"])):
         raise ValueError("invalid tessellation bounds")
-    if not _finite_number(cad.get("scale")) or cad["scale"] <= 0:
-        raise ValueError("invalid tessellation scale")
-    if cad.get("partColor") is not None and not _color(cad["partColor"]):
-        raise ValueError("invalid tessellation part color")
     palette = cad.get("faceColors")
     if type(palette) is not list or not all(map(_color, palette)):
         raise ValueError("invalid tessellation face colours")
@@ -406,6 +285,17 @@ def _payload_json(payload: bytes) -> tuple[dict, dict, dict, int, int]:
     return expected, cad, counts, bin_start, bin_length
 
 
+def body_facts(payload: bytes) -> dict:
+    """What a part's record says of a body (``cadgen.store.parts``), read off its framing and
+    JSON chunk: ``{part, byteLength, decodedBytes, <counts>, unmeshedFaceCount?}``.
+    ValueError for anything that is not a body."""
+    _, cad, counts, _, _ = _payload_json(payload)
+    facts = {"part": cad["part"], "byteLength": len(payload), "decodedBytes": decoded_bytes(counts), **counts}
+    if _UNMESHED in cad:
+        facts["unmeshedFaceCount"] = len(cad[_UNMESHED])
+    return facts
+
+
 def decode_payload(payload: bytes) -> MeshPayload:
     """One body's values and views, validated: GLB framing, the canonical JSON for its
     values, and tables whose ordinals rise, whose ranges cover their arrays exactly
@@ -461,39 +351,6 @@ def decode_payload(payload: bytes) -> MeshPayload:
     return MeshPayload(cad, counts, positions, normals, flat, faces, edges, points)
 
 
-def payload_record(key: str, payload: bytes) -> dict:
-    """Validate a complete body, its tables too, and return its canonical index facts."""
-    if not valid_key(key):
-        raise ValueError("invalid tessellation input or payload")
-    decoded = decode_payload(payload)
-    return _record(key, payload, decoded.cad, decoded.counts)
-
-
-def _record(key: str, payload: bytes, cad: dict, counts: dict) -> dict:
-    """The index facts of a body whose JSON gave these values and counts."""
-    quality = _quality(cad.get("quality"))
-    surface_input, surface_object = cad.get("surfaceInput"), cad.get("surfaceObject")
-    if not _digest(surface_object):
-        raise ValueError("invalid tessellation surface object")
-    expected_key = tessellation_key(surface_input, quality["chordTolerance"], quality["angleTolerance"])
-    if (cad.get("tessellatorVersion") != TESSELLATOR_VERSION or cad.get("payloadVersion") != PAYLOAD_VERSION
-            or expected_key != key or cad.get("tessellationInput") != key):
-        raise ValueError("tessellation payload belongs to a different input")
-    record = {
-        "schemaVersion": MESH_INDEX_SCHEMA, "object": hashlib.sha256(payload).hexdigest(),
-        "byteLength": len(payload), "decodedBytes": decoded_bytes(counts),
-        "surfaceInput": surface_input, "surfaceObject": surface_object,
-        "tessellationInput": key, "renderIdentity": f"{key}-s{surface_object}",
-        "quality": quality, "tessellatorVersion": TESSELLATOR_VERSION, "payloadVersion": PAYLOAD_VERSION,
-        **counts,
-    }
-    if _UNMESHED in cad:
-        record[_UNMESHED_COUNT] = len(cad[_UNMESHED])
-    if not _valid_record(key, record):
-        raise ValueError("invalid tessellation index facts")
-    return record
-
-
 def _array(value: Any, dtype: str, columns: int) -> np.ndarray:
     import numpy as np
 
@@ -501,25 +358,21 @@ def _array(value: Any, dtype: str, columns: int) -> np.ndarray:
     return np.ascontiguousarray(array, dtype).reshape(-1, columns)
 
 
-def encode_payload(*, surface_input: str, surface_object: str, chord: float, angle: float,
-                   positions, normals, indices, face_ranges: list[dict],
-                   edges: list[tuple[int, str, Any]], bounds: dict, scale: float,
-                   part_color: list | None = None, unmeshed_faces: Any = ()) -> bytes:
-    """One component's GLB body.
+def encode_payload(*, part: str, positions, normals, indices, face_ranges: list[dict],
+                   edges: list[tuple[int, str, Any]], bounds: dict, unmeshed_faces: Any = ()) -> bytes:
+    """One part's GLB body.
 
-    ``positions`` and ``normals`` are float32 xyz per vertex and ``indices`` the
-    triangles over them (arrays, or little-endian bytes of float32 and uint32);
-    ``bounds`` are the positions' (else the polylines') min and max;
-    ``face_ranges`` are ``{ord, indexStart, indexCount, color}`` in ordinal order,
-    covering the indices; ``edges`` are ``(ord, class, polyline)`` in ordinal
-    order, each polyline float32 xyz of at least two points; ``unmeshed_faces``
-    are the ordinals of the empty faces no mesher could cover. The result is
-    validated before it is returned.
+    ``part`` is the part's key (``cadgen.store.parts.part_key``); ``positions`` and
+    ``normals`` are float32 xyz per vertex and ``indices`` the triangles over them
+    (arrays, or little-endian bytes of float32 and uint32); ``bounds`` are the
+    positions' (else the polylines') min and max; ``face_ranges`` are ``{ord,
+    indexStart, indexCount, color}`` in ordinal order, covering the indices; ``edges``
+    are ``(ord, class, polyline)`` in ordinal order, each polyline float32 xyz of at
+    least two points; ``unmeshed_faces`` are the ordinals of the empty faces no mesher
+    could cover. The result is validated before it is returned.
     """
     import numpy as np
 
-    quality = tessellation_quality(chord, angle)
-    key = tessellation_key(surface_input, chord, angle)
     positions = _array(positions, "<f4", 3)
     normals = _array(normals, "<f4", 3)
     flat = _array(indices, "<u4", 1).reshape(-1)
@@ -547,12 +400,8 @@ def encode_payload(*, surface_input: str, surface_object: str, chord: float, ang
     table = np.array(rows, "<u4").reshape(-1, _TABLE_COLUMNS)
     points = np.concatenate(polylines) if polylines else np.zeros((0, 3), "<f4")
     cad = {
-        "payloadVersion": PAYLOAD_VERSION, "tessellatorVersion": TESSELLATOR_VERSION,
-        "tessellationInput": key, "surfaceInput": surface_input, "surfaceObject": surface_object,
-        "quality": quality,
+        "part": part,
         "bounds": {"min": [float(v) for v in bounds["min"]], "max": [float(v) for v in bounds["max"]]},
-        "scale": float(scale),
-        "partColor": None if part_color is None else [float(c) for c in part_color],
         "faceColors": [list(color) for color in palette],
     }
     if unmeshed_faces:
@@ -572,95 +421,13 @@ def encode_payload(*, surface_input: str, surface_object: str, chord: float, ang
         struct.pack("<II", len(text), _JSON_CHUNK), text,
         struct.pack("<II", len(chunk), _BIN_CHUNK) + chunk if chunk else b"",
     ])
-    payload_record(key, payload)
+    decode_payload(payload)
     return payload
-
-
-def _valid_record(key: str, record: Any) -> bool:
-    try:
-        if (type(record) is not dict or set(record) not in (_RECORD_FIELDS, _RECORD_FIELDS | {_UNMESHED_COUNT})
-                or not valid_key(key)):
-            return False
-        if _UNMESHED_COUNT in record and not (
-                _integer(record[_UNMESHED_COUNT]) and 0 < record[_UNMESHED_COUNT] <= record["faceCount"]):
-            return False
-        quality = _quality(record["quality"])
-        if (record["schemaVersion"] != MESH_INDEX_SCHEMA or record["payloadVersion"] != PAYLOAD_VERSION
-                or record["tessellatorVersion"] != TESSELLATOR_VERSION
-                or not all(_digest(record[name]) for name in ("object", "surfaceInput", "surfaceObject"))):
-            return False
-        if record["tessellationInput"] != key or tessellation_key(
-            record["surfaceInput"], quality["chordTolerance"], quality["angleTolerance"],
-        ) != key or record["renderIdentity"] != f"{key}-s{record['surfaceObject']}":
-            return False
-        if not all(_integer(record[name]) for name in (*_COUNT_FIELDS, "byteLength", "decodedBytes")):
-            return False
-        if record["edgePointCount"] < 2 * record["edgeCount"] or (record["edgeCount"] == 0) != (record["edgePointCount"] == 0):
-            return False
-        return (record["byteLength"] >= 20 and record["byteLength"] % 4 == 0
-                and record["decodedBytes"] == decoded_bytes(record))
-    except (ValueError, TypeError, KeyError, OverflowError, struct.error):
-        return False
-
-
-def probe(key: str) -> dict | None:
-    """Bounded metadata only; no body, SURF, native import, or source lookup."""
-    if not valid_key(key):
-        return None
-    try:
-        with entry_path("mesh", key).open("rb") as stream:
-            raw = stream.read(MAX_INDEX_BYTES + 1)
-        if len(raw) > MAX_INDEX_BYTES:
-            return None
-        record = _read_json(raw)
-        if not _valid_record(key, record):
-            return None
-        if object_path(record["object"]).stat().st_size != record["byteLength"]:
-            return None
-        return record
-    except (OSError, ValueError, TypeError, KeyError):
-        return None
-
-
-def read(key: str, *, expected_object: str | None = None, max_bytes: int | None = None) -> bytes | None:
-    """Read at most an admitted body's size and verify its exact identity."""
-    record = probe(key)
-    if record is None or (expected_object is not None and expected_object != record["object"]):
-        return None
-    limit = record["byteLength"] if max_bytes is None else max_bytes
-    if not _integer(limit) or record["byteLength"] > limit:
-        return None
-    try:
-        with object_path(record["object"]).open("rb") as stream:
-            if os.fstat(stream.fileno()).st_size != record["byteLength"]:
-                return None
-            payload = stream.read(record["byteLength"] + 1)
-        if len(payload) != record["byteLength"]:
-            return None
-        # The record's content address names the body ``write`` validated whole. A read
-        # checks the framing, the canonical JSON and the identity again; the tables are
-        # for the decoders that read them (``decode_payload``, tessellationCache.js).
-        _, cad, counts, _, _ = _payload_json(payload)
-        if _record(key, payload, cad, counts) != record:
-            return None
-        return payload
-    except (OSError, ValueError, TypeError, KeyError, OverflowError, struct.error):
-        return None
 
 
 def unmeshed_faces(payload: bytes) -> list[int]:
     """The faces a valid body leaves undrawn (``unmeshedFaces``), read off its JSON chunk."""
     return list(_payload_json(payload)[1].get(_UNMESHED, []))
-
-
-def stored_unmeshed_faces(key: str) -> list[int]:
-    """The faces the stored mesh at ``key`` leaves undrawn: none when the store lacks it
-    or its record counts none, so a reader asks every key it drew for the price of a probe."""
-    record = probe(key)
-    if record is None or not record.get(_UNMESHED_COUNT):
-        return []
-    payload = read(key, expected_object=record["object"])
-    return unmeshed_faces(payload) if payload is not None else []
 
 
 def placed_parts(placed: list[tuple[str, str]]) -> str:
@@ -678,19 +445,3 @@ def unmeshed_warning(placed: list[tuple[str, str]], faces: list[int], consequenc
     named = ", ".join(f"f{ordinal}" for ordinal in faces[:8]) + (", ..." if len(faces) > 8 else "")
     noun, them = ("face", "it") if len(faces) == 1 else ("faces", "them")
     return f"{where}: {len(faces)} {noun} ({named}) could not be meshed, so {consequence.format(them=them)}"
-
-
-def write(key: str, payload: bytes) -> dict:
-    """Publish a verified object before its input index; observed conflicts fail."""
-    record = payload_record(key, payload)
-    prior = probe(key)
-    if prior is not None and (prior["object"] != record["object"] or prior["surfaceObject"] != record["surfaceObject"]):
-        # A corrupt prior body is a miss and can be repaired. A valid different
-        # body for these same deterministic inputs is not a new cache revision.
-        if read(key, expected_object=prior["object"]) is not None:
-            raise MeshConflictError("tessellation producer returned different bytes for the same immutable input")
-    digest = put_object(payload, repair=True)
-    if digest != record["object"]:
-        raise ValueError("tessellation object address mismatch")
-    write_entry("mesh", key, record)
-    return record

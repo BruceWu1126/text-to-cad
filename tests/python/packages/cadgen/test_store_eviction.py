@@ -2,12 +2,12 @@
 with least-recently-written eviction, the three ways an earlier version of it
 broke -- a hit that wrote, a reused object swept under a fresh record, and a
 full pass rerun while records alone overfilled the cap -- a store a newer
-cadgen shares, and the surfaces and meshes an older extractor or mesher left.
+cadgen shares, and the display data an older cadgen left: the surface, selector
+and mesh entries before parts, and parts an older derivation wrote.
 Tiny stores in fresh temporary directories; no kernel."""
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import os
@@ -39,7 +39,7 @@ class StoreSweepCase(unittest.TestCase):
     # --- fixtures -------------------------------------------------------------
 
     def seed_document(self) -> tuple[str, str]:
-        """A record, its document entry, its tree, a component and its surface;
+        """A record, its document entry, its tree, a component and its part;
         returns (tree, the component's brep object)."""
         from cadgen.store.trees import get_tree
         from tests.python.support.store_fixtures import seed_result
@@ -96,17 +96,14 @@ class HitsNeverWrite(StoreSweepCase):
     store this user cannot write failed the build that hit it."""
 
     def test_every_cache_hit_is_a_pure_read(self) -> None:
-        from cadgen.store import bounds, drawings, meshes, surfaces
+        from cadgen.store import bounds, drawings, parts
         from cadgen.store.gate import stale
         from cadgen.store.records import tree_for_document_hash
         from cadgen.store.trees import capture_tree, get_tree
         from tests.python.support.store_fixtures import FIXTURE_SURFACE_PRODUCER
-        from tests.python.support.tessellation import tessellation_fixture
 
         tree, _brep = self.seed_document()
-        component = next(iter(get_tree(tree)["components"].values()))
-        mesh = tessellation_fixture()
-        meshes.write(mesh["key"], base64.b64decode(mesh["bytes"]))
+        part = parts.part_key(next(iter(get_tree(tree)["components"].values())), FIXTURE_SURFACE_PRODUCER)
         drawings.write("d" * 64, b"drawing payload")
         versions = ("0.11.1", "7.9.3.1", "7.9.3.1.1")
         with mock.patch.object(bounds, "kernel_versions", return_value=versions):
@@ -122,9 +119,10 @@ class HitsNeverWrite(StoreSweepCase):
         self.assertFalse(stale(self.root / "part.step").stale)
         self.assertEqual(tree_for_document_hash(hashlib.sha256(b"fixture document").hexdigest()), tree)
         self.assertIsNotNone(capture_tree(tree, retain_payloads=False))
-        self.assertIsNotNone(surfaces.lookup(component, FIXTURE_SURFACE_PRODUCER))
-        self.assertIsNotNone(meshes.probe(mesh["key"]))
-        self.assertIsNotNone(meshes.read(mesh["key"]))
+        self.assertEqual(parts.ensure_display(tree, producer=FIXTURE_SURFACE_PRODUCER), [], "every part is stored")
+        self.assertIsNotNone(parts.probe(part))
+        self.assertIsNotNone(parts.read(part, "glb"))
+        self.assertIsNotNone(parts.read(part, "selectors"))
         self.assertEqual(drawings.read("d" * 64), b"drawing payload")
         self.assertEqual(self.snapshot(), before, "nothing under the store changed")
 
@@ -184,7 +182,7 @@ class ReusedObjectsSurvive(StoreSweepCase):
         from cadgen.store.trees import IDENTITY_16, get_tree, put_tree
 
         child, brep = self.seed_document()
-        for kind in ("model", "document", "surface"):
+        for kind in ("model", "document"):
             for key, _ in list(iter_entries(kind)):
                 remove_entry(kind, key)  # the child moved on: nothing reaches its old tree
         parent = put_tree({"label": "parent", "units": "mm", "entryKind": "assembly", "components": {},
@@ -546,143 +544,117 @@ class LeastRecentlyWritten(StoreSweepCase):
 
 
 
-class Obsolete(StoreSweepCase):
-    """An upgrade that moves the extractor or the mesher leaves the surfaces and
-    meshes the older one wrote, which no reader of this cadgen asks for again: a
-    pass retires them once a week old, with the objects only they named, and
-    keeps a newer cadgen's. An older cadgen still sharing the store may read
-    them, and a read never writes, so a younger one stays."""
+class RetiredDisplayData(StoreSweepCase):
+    """A part's display data was three entries before ``index/part`` named its two objects in
+    one: the surface, selector and mesh kinds are retired, and a pass removes them with the
+    objects only they named. A part an older cadgen's derivation wrote (an older
+    ``-v<PART_VERSION>``) no reader of this cadgen asks for again: a pass retires it once a
+    week old, with the objects only it named, and keeps a newer cadgen's. An older cadgen
+    still sharing the store may read it, and a read never writes, so a younger one stays."""
 
-    def surface_entry(self, key: str, producer: dict | None, digest: str, age: float = 8 * DAY) -> None:
-        self.raw_entry("surface", key, {
-            "schemaVersion": 1, "surfaceInput": key, "component": "c" * 64, "brep": "b" * 64,
-            "codec": "bintools-v4", "faceColors": {}, "producer": producer, "object": digest}, age)
-
-    def mesh_entry(self, surface_input: str, mesher: int, payload: int, digest: str, age: float = 8 * DAY) -> str:
-        key = f"{surface_input}-t{mesher}-p{payload}-l{'0' * 16}-a{'0' * 16}"
-        self.raw_entry("mesh", key, {"schemaVersion": 1, "object": digest}, age)
+    def part_entry(self, version: int, digest: str, objects: tuple[str, str], age: float = 8 * DAY) -> str:
+        key = f"{digest * 64}-v{version}"
+        self.raw_entry("part", key, {"glb": {"object": objects[0]}, "selectors": {"object": objects[1]}}, age)
         return key
-
-    def selector_entry(self, surface_input: str, scheme: int, digest: str, age: float = 8 * DAY) -> str:
-        key = f"{surface_input}-s{scheme}"
-        self.raw_entry("selector", key, {"schemaVersion": 1, "object": digest}, age)
-        return key
-
-    @staticmethod
-    def older_producer() -> dict:
-        from cadgen.store import surfaces
-
-        return {"scheme": surfaces.EXTRACTION_SCHEME - 1, "surfFormat": surfaces.SURF_FORMAT - 1,
-                "build123d": "0.11.1", "ocp": "7.9.3.1", "cadqueryOcp": "7.9.3.1.1"}
 
     def seed_versions(self) -> dict[str, str]:
-        """Surfaces and meshes of this cadgen's versions, an older one's and a newer
-        one's; returns the objects by what wrote them."""
-        from cadgen.store import meshes, selectors, surfaces
+        """The display kinds before parts, and an older and a newer cadgen's parts; returns
+        the objects by what wrote them."""
+        from cadgen.store.parts import PART_VERSION
 
-        now = {"scheme": surfaces.EXTRACTION_SCHEME, "surfFormat": surfaces.SURF_FORMAT,
-               "build123d": "0.11.1", "ocp": "7.9.3.1", "cadqueryOcp": "7.9.3.1.1"}
-        mesher, payload = meshes.TESSELLATOR_VERSION, meshes.PAYLOAD_VERSION
         objects = {name: self.old_object(name.encode()) for name in (
-            "older surface", "current surface", "newer surface", "pinned surface",
-            "older mesher's mesh", "older surface's mesh", "current mesh", "newer mesher's mesh",
-            "older scheme's table", "older surface's table", "current table", "newer scheme's table")}
-        self.selector_entry("2" * 64, selectors.SELECTOR_SCHEME - 1, objects["older scheme's table"])
-        self.selector_entry("1" * 64, selectors.SELECTOR_SCHEME, objects["older surface's table"])
-        self.selector_entry("2" * 64, selectors.SELECTOR_SCHEME, objects["current table"])
-        self.selector_entry("2" * 64, selectors.SELECTOR_SCHEME + 1, objects["newer scheme's table"])
-        self.surface_entry("1" * 64, {**now, "scheme": now["scheme"] - 1, "surfFormat": now["surfFormat"] - 1},
-                           objects["older surface"])
-        self.surface_entry("2" * 64, now, objects["current surface"])
-        self.surface_entry("3" * 64, {**now, "scheme": now["scheme"] + 1}, objects["newer surface"])
-        # An eager-only component's surface names no producer: its key carries the SURF format.
-        pinned = objects["pinned surface"]
-        self.surface_entry(surfaces._pinned_surface_input(pinned, surfaces.SURF_FORMAT - 1), None, pinned)
-        self.surface_entry(surfaces._pinned_surface_input(pinned, surfaces.SURF_FORMAT), None, pinned)
-        self.mesh_entry("2" * 64, mesher - 1, payload - 1, objects["older mesher's mesh"])
-        self.mesh_entry("1" * 64, mesher, payload, objects["older surface's mesh"])
-        self.mesh_entry("2" * 64, mesher, payload, objects["current mesh"])
-        self.mesh_entry("2" * 64, mesher + 1, payload, objects["newer mesher's mesh"])
+            "surface", "selector table", "mesh", "older part's mesh", "older part's table",
+            "newer part's mesh", "newer part's table")}
+        for kind, name in (("surface", "surface"), ("selector", "selector table"), ("mesh", "mesh")):
+            self.raw_entry(kind, "1" * 64, {"schemaVersion": 1, "object": objects[name]}, age=HOUR * 3)
+        self.part_entry(PART_VERSION - 1, "1", (objects["older part's mesh"], objects["older part's table"]))
+        self.part_entry(PART_VERSION + 1, "2", (objects["newer part's mesh"], objects["newer part's table"]))
         return objects
 
-    def test_a_pass_retires_what_an_older_extractor_or_mesher_wrote_and_keeps_the_rest(self) -> None:
-        from cadgen.store import gc
+    def test_a_pass_retires_the_kinds_before_parts_and_an_older_cadgens_parts_and_keeps_the_rest(self) -> None:
+        from cadgen.store import gc, parts
+        from cadgen.store.index import iter_entries
         from cadgen.store.objects import has_object
 
         tree, brep = self.seed_document()
+        [(current, _)] = iter_entries("part")
         objects = self.seed_versions()
         before = self.snapshot()
         dry = gc.collect(retired_only=True, dry_run=True)
-        self.assertEqual(dry.obsolete, {"surface": 2, "selector": 2, "mesh": 2})
+        self.assertEqual((dry.retired, dry.obsolete), ({"surface": 1, "selector": 1, "mesh": 1}, {"part": 1}))
         self.assertEqual(self.snapshot(), before, "a dry run removes nothing")
 
         report = gc.collect(retired_only=True)
-        self.assertEqual(report.obsolete, {"surface": 2, "selector": 2, "mesh": 2})
-        gone = {"older surface", "older mesher's mesh", "older surface's mesh",
-                "older scheme's table", "older surface's table"}
-        self.assertEqual({name for name, digest in objects.items() if not has_object(digest)}, gone,
-                         "a pinned surface a current entry names stays, and so does a newer cadgen's work")
+        self.assertEqual((report.retired, report.obsolete), ({"surface": 1, "selector": 1, "mesh": 1}, {"part": 1}))
+        self.assertEqual({name for name, digest in objects.items() if not has_object(digest)},
+                         {"surface", "selector table", "mesh", "older part's mesh", "older part's table"},
+                         "a newer cadgen's part stays")
+        self.assertFalse(any((self.store / "index" / kind).exists() for kind in ("surface", "selector", "mesh")))
         self.assertTrue(has_object(tree) and has_object(brep))
-        self.assertEqual(gc.collect(retired_only=True).obsolete, {}, "nothing is obsolete twice")
+        self.assertIsNotNone(parts.probe(current), "this cadgen's part stays whole")
+        again = gc.collect(retired_only=True)
+        self.assertEqual((again.retired, again.obsolete), ({}, {}), "nothing is retired twice")
 
-    def test_an_obsolete_entry_goes_only_once_a_week_old(self) -> None:
-        from cadgen.store import gc, meshes, selectors
+    def test_an_obsolete_part_goes_only_once_a_week_old(self) -> None:
+        from cadgen.store import gc
         from cadgen.store.objects import has_object
+        from cadgen.store.parts import PART_VERSION
 
         tree, brep = self.seed_document()
         week = gc.OBSOLETE_RETIRE_AFTER_SECONDS
-        mesher, payload = meshes.TESSELLATOR_VERSION, meshes.PAYLOAD_VERSION
         objects = {name: self.old_object(name.encode()) for name in (
-            "old surface", "young surface", "young surface's old mesh",
-            "old surface with a young mesh", "that young mesh", "old surface with a young table", "that young table")}
+            "old part's mesh", "old part's table", "young part's mesh", "young part's table")}
         old, young = week + HOUR, week - DAY
-        self.surface_entry("1" * 64, self.older_producer(), objects["old surface"], age=old)
-        self.surface_entry("2" * 64, self.older_producer(), objects["young surface"], age=young)
-        self.mesh_entry("2" * 64, mesher - 1, payload - 1, objects["young surface's old mesh"], age=old)
-        # This cadgen's mesher and format, keyed by an obsolete surface: known obsolete only by that surface.
-        self.surface_entry("3" * 64, self.older_producer(), objects["old surface with a young mesh"], age=old)
-        self.mesh_entry("3" * 64, mesher, payload, objects["that young mesh"], age=young)
-        # And this cadgen's selector table scheme, keyed the same way.
-        self.surface_entry("4" * 64, self.older_producer(), objects["old surface with a young table"], age=old)
-        self.selector_entry("4" * 64, selectors.SELECTOR_SCHEME, objects["that young table"], age=young)
+        self.part_entry(PART_VERSION - 1, "1", (objects["old part's mesh"], objects["old part's table"]), age=old)
+        self.part_entry(PART_VERSION - 1, "2", (objects["young part's mesh"], objects["young part's table"]), age=young)
 
         # A full pass -- what `cadgen store gc` runs -- holds to the same week as the daemon's.
         report = gc.collect()
-        self.assertEqual(report.obsolete, {"surface": 1, "mesh": 1})
+        self.assertEqual(report.obsolete, {"part": 1})
         self.assertEqual({name for name, digest in objects.items() if not has_object(digest)},
-                         {"old surface", "young surface's old mesh"},
-                         "a younger obsolete entry keeps its objects, and an obsolete surface stays with its younger mesh or table")
+                         {"old part's mesh", "old part's table"}, "a younger obsolete part keeps its objects")
         self.assertTrue(has_object(tree) and has_object(brep))
 
-        for kind in ("surface", "selector", "mesh"):
-            for path in (self.store / "index" / kind).iterdir():
-                self.old(path, old)
-        self.assertEqual(gc.collect(retired_only=True).obsolete, {"surface": 3, "selector": 1, "mesh": 1},
-                         "a week later they go")
+        for path in (self.store / "index" / "part").iterdir():
+            self.old(path, old)
+        self.assertEqual(gc.collect(retired_only=True).obsolete, {"part": 1}, "a week later it goes")
         self.assertFalse(any(has_object(digest) for digest in objects.values()))
+        self.assertTrue(has_object(tree) and has_object(brep))
 
-    def test_an_obsolete_entry_written_again_during_the_pass_stays(self) -> None:
+    def test_an_obsolete_part_written_again_during_the_pass_stays(self) -> None:
         from cadgen.store import gc
         from cadgen.store.index import entry_path
         from cadgen.store.objects import has_object, put_object
+        from cadgen.store.parts import PART_VERSION
 
         self.seed_document()
-        payload = b"a surface an older cadgen sharing the store still reads"
+        payload = b"a part an older cadgen sharing the store still reads"
         digest = self.old_object(payload)
-        self.surface_entry("1" * 64, self.older_producer(), digest)
+        key = self.part_entry(PART_VERSION - 1, "1", (digest, digest))
         retire = gc._retire
 
         def derived_again_then_retire(*args, **kwargs):
             # The older cadgen derives it again after the sweep: object first, then its entry.
             put_object(payload)
-            os.utime(entry_path("surface", "1" * 64))
+            os.utime(entry_path("part", key))
             return retire(*args, **kwargs)
 
         with mock.patch.object(gc, "_retire", side_effect=derived_again_then_retire):
             report = gc.collect(retired_only=True)
         self.assertEqual(report.obsolete, {})
-        self.assertTrue(entry_path("surface", "1" * 64).is_file(), "an entry written since the scan stays")
+        self.assertTrue(entry_path("part", key).is_file(), "an entry written since the scan stays")
         self.assertTrue(has_object(digest), "and the object it names is there")
+
+    def test_a_store_holding_an_older_cadgens_parts_alone_earns_the_daemons_pass(self) -> None:
+        from cadgen.daemon.housekeeping import Housekeeper
+        from cadgen.store.objects import has_object
+        from cadgen.store.parts import PART_VERSION
+
+        objects = (self.old_object(b"an older part's mesh"), self.old_object(b"an older part's table"))
+        self.part_entry(PART_VERSION - 1, "1", objects)
+        line = Housekeeper(active=lambda: False, state_dir=lambda: self.root / "daemon").look(str(self.store), 20 * 1024**3)
+        self.assertIn("retired obsolete part entries (1)", line or "")
+        self.assertFalse(any(has_object(digest) for digest in objects))
 
     def test_the_daemon_retires_obsolete_entries_once_per_upgrade_then_daily(self) -> None:
         from cadgen.daemon.housekeeping import RETIRE_INTERVAL_SECONDS, Housekeeper
@@ -697,12 +669,12 @@ class Obsolete(StoreSweepCase):
 
         housekeeper = daemon()
         line = housekeeper.look(str(self.store), cap)
-        self.assertIn("retired obsolete mesh entries (2), selector entries (2), surface entries (2)", line)
-        self.assertFalse(has_object(objects["older surface"]))
+        self.assertIn("retired index/mesh (1 entries), index/selector (1 entries), index/surface (1 entries)", line)
+        self.assertIn("retired obsolete part entries (1)", line)
+        self.assertFalse(has_object(objects["older part's mesh"]))
         self.assertIsNone(housekeeper.look(str(self.store), cap), "not once per idle moment")
         self.assertIsNone(daemon().look(str(self.store), cap), "nor once per daemon start")
-        moved = {"surface": [99, 9], "mesh": [99, 9]}
-        with mock.patch("cadgen.store.gc.producer_versions", return_value=moved):
+        with mock.patch("cadgen.store.gc.producer_versions", return_value={"part": [99]}):
             self.assertIsNotNone(housekeeper.look(str(self.store), cap), "an upgrade earns one more pass")
             self.assertIsNone(housekeeper.look(str(self.store), cap))
         # Two releases sharing the store keep a note each: neither moves the other's.

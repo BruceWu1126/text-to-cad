@@ -244,12 +244,13 @@ class CadGenerationTests(unittest.TestCase):
         components = descriptor["components"]
         self.assertTrue(components, "the tree must reference at least one component")
         for entry in components.values():
-            ref = str(entry["surf"])
-            # Self-contained, flat refs into the tree's own components/ dir.
-            self.assertTrue(ref.startswith("components/"), ref)
-            self.assertNotIn("..", ref)
-            self.assertTrue((package_dir / ref).is_file(), f"missing component GLB {ref}")
-        # components/ holds only flat GLB files — no nested __cadgen__ scaffolding.
+            # Self-contained, flat refs into the tree's own components/ dir: the component's
+            # BREP and its part's selector table.
+            for ref in (str(entry["brep"]), str(entry["selectors"])):
+                self.assertTrue(ref.startswith("components/"), ref)
+                self.assertNotIn("..", ref)
+                self.assertTrue((package_dir / ref).is_file(), f"missing component file {ref}")
+        # components/ holds only flat files — no nested __cadgen__ scaffolding.
         self.assertEqual(
             [],
             [child.name for child in (package_dir / "components").iterdir() if child.is_dir()],

@@ -1,8 +1,10 @@
 """Build-pool artifact jobs, independent of source models and document paths: this
-runtime's surface producer (``kind: producer``), and the display data of the parts a
+runtime's surface producer (``kind: producer``), the display data of the parts a
 view found missing from the store (``kind: display``: one request, one job, one
-worker). Only workers import the native surface producer. Requests contain immutable pins,
-never a script, a declared output, or an instruction to run arbitrary Python.
+worker), and one component's SURF for feature recognition, extracted and stored
+nowhere (``kind: surface``). Only workers import the native surface producer. Requests
+contain immutable pins, never a script, a declared output, or an instruction to run
+arbitrary Python.
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ from cadgen.daemon import broker
 
 _HASH = re.compile(r"[0-9a-f]{64}\Z")
 _CID = re.compile(r"[0-9a-f]{16}\Z")
-_PRODUCER_FIELDS = {"scheme", "surfFormat", "build123d", "ocp", "cadqueryOcp"}
+_PRODUCER_FIELDS = {"build123d", "ocp", "cadqueryOcp"}
 
 
 class ArtifactJobError(RuntimeError):
@@ -42,12 +44,8 @@ def _digest(value, name, pattern=_HASH):
 
 def _producer(value):
     if not isinstance(value, dict) or set(value) != _PRODUCER_FIELDS:
-        raise ValueError("artifact producer requires exactly scheme, surfFormat, build123d, ocp, cadqueryOcp")
+        raise ValueError("artifact producer requires exactly build123d, ocp, cadqueryOcp")
     result = {}
-    for name in ("scheme", "surfFormat"):
-        if type(value[name]) is not int or value[name] <= 0:
-            raise ValueError(f"artifact producer {name} must be a positive integer")
-        result[name] = value[name]
     for name in ("build123d", "ocp", "cadqueryOcp"):
         item = value[name]
         if not isinstance(item, str) or not item.strip() or item.lower() in {"unknown", "none"}:
@@ -63,8 +61,11 @@ def normalize_request(request):
     kind = request.get("kind")
     if kind == "producer" and set(request) == {"kind"}:
         return {"kind": "producer"}
+    if kind == "surface" and set(request) == {"kind", "tree", "cid"}:
+        return {"kind": kind, "tree": _digest(request["tree"], "tree"), "cid": _digest(request["cid"], "cid", _CID)}
     if kind != "display" or set(request) != {"kind", "tree", "cids", "producer"}:
-        raise ValueError("artifact request must be producer, or display with exactly tree, cids and producer")
+        raise ValueError("artifact request must be producer, surface with exactly tree and cid, "
+                         "or display with exactly tree, cids and producer")
     cids = request["cids"]
     if not isinstance(cids, (list, tuple)) or not cids:
         raise ValueError("artifact cids must be a nonempty list")
@@ -121,14 +122,16 @@ def worker_context(root):
 def execute(request, *, keep_going=None):
     """Worker-only native entry. Source and model lookup are absent by design.
 
-    ``keep_going`` is asked before each derivation and each mesh (``surfaces.derive``):
-    a daemon worker's asks its supervisor whether anyone still wants the job."""
+    ``keep_going`` is asked before each part (``parts.derive``): a daemon worker's asks
+    its supervisor whether anyone still wants the job."""
     request = normalize_request(request)
-    from cadgen.store import surfaces
+    from cadgen.store import parts
 
     if request["kind"] == "producer":
-        return surfaces.producer_identity()
-    return surfaces.derive(request["tree"], request["cids"], producer=request["producer"], keep_going=keep_going)
+        return parts.producer_identity()
+    if request["kind"] == "surface":
+        return parts.surface(request["tree"], request["cid"])
+    return parts.derive(request["tree"], request["cids"], producer=request["producer"], keep_going=keep_going)
 
 
 class ArtifactFuture(Future):
@@ -379,7 +382,7 @@ def resolve_artifact(request, *, store_root=None):
 
 
 def _main():
-    # Private one-shot worker, not an author CLI. No import of store.surfaces
+    # Private one-shot worker, not an author CLI. No import of store.parts
     # occurs until worker._run has acquired the required broker lease.
     from cadgen.daemon import worker
 

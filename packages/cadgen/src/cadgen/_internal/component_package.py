@@ -1,7 +1,7 @@
 """Component serialization, intrinsic appearance and extraction helpers.
 
 Canonical geometry inputs contain exact encoded BREP and effective face-color
-recipes. Disposable surfaces are derived by ``cadgen.store.surfaces`` under a
+recipes. Disposable display data is derived by ``cadgen.store.parts`` under a
 separately attested producer. Native imports remain local to operations.
 """
 
@@ -18,7 +18,6 @@ import time
 from pathlib import Path
 from typing import Any, Mapping
 
-from cadgen._internal.atomic_replace import replace_atomic, temp_suffix
 PACKAGE_KIND = "assembly-package"
 COMPONENT_DIRNAME = "components"
 DESCRIPTOR_NAME = "assembly.json"
@@ -409,39 +408,6 @@ def _build123d_shape_from_topods(topo: Any) -> Any:
     return cls(topo)
 
 
-# Some imported (vendor STEP / boolean-derived) solids serialize BREP entities
-# that BinTools cannot READ back (an OCCT write/read asymmetry, e.g. point
-# representations) — their payloads cannot cross a process boundary, so they
-# fall back to an in-process build from the original shape.
-PAYLOAD_UNREADABLE = "__payload-unreadable__"
-
-
-def _build_component_surf_worker(
-    args: tuple[bytes, str, str, dict | None],
-) -> tuple[str, str | None]:
-    """Process-pool entry: extract one component .surf from a BREP payload.
-
-    Returns ``(cid, None)`` on success or ``(cid, error message)`` — exceptions
-    are flattened so one failed component reports cleanly instead of poisoning
-    the pool. A payload the worker cannot deserialize reports the
-    ``PAYLOAD_UNREADABLE`` marker so the parent retries in-process."""
-    payload, cid, out_surf, face_colors = args
-    try:
-        try:
-            shape = _build123d_shape_from_brep_bytes(payload)
-        except Exception as exc:  # noqa: BLE001 - marker for the parent retry
-            return (cid, f"{PAYLOAD_UNREADABLE}: {type(exc).__name__}: {exc}")
-        if face_colors:
-            # Ordinal-keyed, so it survives the process boundary: the BinTools
-            # round-trip preserves MapShapes order even though it rebuilds TShapes.
-            shape.cad_face_ordinal_colors = face_colors
-        _write_component_artifacts_atomic(
-            shape, Path(out_surf), cad_ref=cid, brep_bytes=payload)
-        return (cid, None)
-    except Exception as exc:  # noqa: BLE001 - crossing a process boundary
-        return (cid, f"{type(exc).__name__}: {exc}")
-
-
 def parallel_worker_count(work_count: int, *, env_var: str) -> int:
     """Worker count for a spawn pool over ``work_count`` independent OCP jobs.
 
@@ -538,55 +504,6 @@ class _StageTimer:
         with contextlib.suppress(OSError):
             with open(path, "a", encoding="utf-8") as handle:
                 handle.write(json.dumps(record) + "\n")
-
-
-def _write_atomic(path: Path, data: bytes) -> None:
-    """Write to a sibling temp file and rename into place, so a killed build
-    never leaves a truncated artifact that a later run would trust as a
-    valid content-addressed cache hit."""
-    temp_path = path.with_name(f"{path.name}{temp_suffix()}")
-    try:
-        temp_path.write_bytes(data)
-        replace_atomic(temp_path, path)
-    finally:
-        # The handle that blocks a rename blocks the delete too; letting that
-        # escape would replace the real failure with a cleanup error.
-        with contextlib.suppress(OSError):
-            temp_path.unlink(missing_ok=True)
-
-
-def _write_component_artifacts_atomic(
-    shape: Any,
-    out_surf: Path,
-    *,
-    cad_ref: str,
-    brep_bytes: bytes | None = None,
-) -> Path:
-    """Persist one component's DOCUMENT pair: ``<cid>.brep`` — the exact shape,
-    the same location-stripped BinTools bytes that computed the cid — and
-    ``<cid>.surf`` — the render view. Surface extraction is READING; the
-    component object is a plain write when the hashing payload is already in hand.
-    The surf goes in place LAST so its existence signals a complete set.
-
-    Per-face colors go into SURF and participate in the component input hash.
-    Uniform occurrence color and PBR finish stay on the tree's occurrences and
-    are applied per placement; they do not alter this reusable component."""
-    from cadgen._internal.surface_extract import extract_surface_component
-
-    out_surf.parent.mkdir(parents=True, exist_ok=True)
-    local = _unlocated_shape(shape)
-    _write_atomic(
-        out_surf.with_name(f"{cad_ref}.brep"),
-        brep_bytes if brep_bytes is not None else _shape_brep_bytes(shape),
-    )
-    _write_atomic(
-        out_surf,
-        extract_surface_component(
-            local.wrapped,
-            face_colors=getattr(local, "cad_face_ordinal_colors", None),
-        ),
-    )
-    return out_surf
 
 
 # The ONLY version on geometry identity. A component's cid hashes its BREP
@@ -807,7 +724,7 @@ def prepare_geometry_component(shape: Any, *, face_colors: object = None) -> dic
     never a falsely readable native entry.
     """
     from cadgen._internal.surface_extract import extract_surface_component
-    from cadgen.store.surfaces import validate_surface_bytes
+    from cadgen._internal.surf_container import validate_surface_bytes
 
     try:
         encoded = _encode_brep(shape)

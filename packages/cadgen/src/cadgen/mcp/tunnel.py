@@ -14,7 +14,7 @@ A body travels base64 inside the host's JSON, and a JSON body of more than
 ``GZIP_JSON_MIN_BYTES`` travels gzipped as well, flagged ``encoding: "gzip"``: the
 page inflates it before the client sees it, and the headers describe the inflated
 body. A large model's descriptor is 1.43 MB of base64 as it is and 0.28 MB gzipped,
-for about 5 ms of level-1 compression. Binary bodies (tessellations, SURF objects)
+for about 5 ms of level-1 compression. Binary bodies (display meshes, SURFs)
 barely shrink, so they travel as they are.
 
 A reply is one message on the host's channel, and a host reads that channel with

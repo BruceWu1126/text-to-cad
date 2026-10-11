@@ -62,7 +62,7 @@ def _with_named_entities(index, descriptor: Mapping[str, Any], refs: list[str], 
     from cadgen import cad_ref_syntax as syntax
     from cadgen.assembly_lookup import merge_assembly_entities
     from cadgen.lookup import canonicalize_selector
-    from cadgen.store.surfaces import derive, producer_identity
+    from cadgen.store.parts import derive, producer_identity
     from cadgen.store.view import export_view
 
     named: set[str] = set()

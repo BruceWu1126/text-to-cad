@@ -83,19 +83,42 @@ class DelegatesToCadgen(unittest.TestCase):
                 self.assertNotIn("surf", component)
 
     def test_the_virtual_store_asset_serves_the_tree_and_its_components(self) -> None:
+        import base64
+        import json
+
+        from cadgen.daemon.artifacts import ArtifactJobError
+        from cadgen.store.objects import read_verified_object
+        from tests.python.support.inline_artifacts import inline_artifacts
+
         tree = seed_result(self.probes[0])
         body, content_type = store_paths.virtual_store_asset(f"{tree}/assembly.json", document_hash=catalog.artifact_file_hash(Path(self.probes[0])))
         self.assertEqual(content_type, "application/json")
-        self.assertIn(b'"kind": "assembly-package"', body)
+        served = json.loads(body)
+        self.assertEqual(served["kind"], "assembly-package")
         descriptor = store_paths.result_descriptor(tree)
-        from cadgen.store.objects import read_verified_object
         cid, component = next(iter(descriptor["components"].items()))
+        # Each component names its SURF, which the page recognises its features from.
+        self.assertEqual(served["components"][cid]["surf"], f"components/{cid}.surf")
         payload, content_type = store_paths.virtual_store_asset(f"{tree}/components/{cid}.brep")
         self.assertEqual(Path(payload).read_bytes(), read_verified_object(component["brep"]))
         self.assertEqual(content_type, "application/octet-stream")
-        for bad in ("", "/etc/hosts", f"{tree}/../x", f"{tree}/components/nope.surf", "zz/assembly.json"):
-            with self.subTest(bad=bad):
-                self.assertEqual(store_paths.virtual_store_asset(bad), (None, ""))
+        # A SURF is extracted when asked, by one pool job, and stored nowhere.
+        with inline_artifacts(lambda request: {"surface": base64.b64encode(b"SURF bytes").decode("ascii")}) as jobs:
+            self.assertEqual(store_paths.virtual_store_asset(f"{tree}/components/{cid}.surf"),
+                             (b"SURF bytes", "application/octet-stream"))
+        self.assertEqual([call.args[0] for call in jobs.call_args_list], [{"kind": "surface", "tree": tree, "cid": cid}])
+
+        def fail(request):
+            raise ArtifactJobError("the extraction failed")
+
+        with inline_artifacts(fail):
+            self.assertEqual(store_paths.virtual_store_asset(f"{tree}/components/{cid}.surf"), (None, ""))
+        with inline_artifacts() as jobs:
+            for bad in ("", "/etc/hosts", f"{tree}/../x", f"{tree}/components/nope.surf",
+                        f"{tree}/components/{'0' * 16}.surf", "zz/assembly.json"):
+                with self.subTest(bad=bad):
+                    self.assertEqual(store_paths.virtual_store_asset(bad), (None, ""))
+        self.assertEqual(jobs.call_count, 0, "a path that names no component of the tree starts no job")
 
 
 class ReadPerCall(unittest.TestCase):

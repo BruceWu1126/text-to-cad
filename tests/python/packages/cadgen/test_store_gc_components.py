@@ -1,4 +1,4 @@
-"""Artifact and geometry/surface indexes retain independent GC closures."""
+"""Artifact, geometry and part indexes retain independent GC closures."""
 from __future__ import annotations
 import os
 from pathlib import Path
@@ -22,10 +22,11 @@ class ComponentGcReachability(unittest.TestCase):
         path.write_bytes(b"fixture document")
         return seed_result(path)
 
-    def test_geometry_index_and_surface_index_own_separate_objects(self):
+    def test_geometry_index_and_part_index_own_separate_objects(self):
         from cadgen.store.gc import collect
-        from cadgen.store.index import write_entry, remove_entry
+        from cadgen.store.index import iter_entries, write_entry, remove_entry
         from cadgen.store.objects import has_object, put_object
+        from cadgen.store.parts import probe
         from cadgen.store.records import document_key
         from cadgen.store.trees import get_tree
         import hashlib
@@ -36,9 +37,12 @@ class ComponentGcReachability(unittest.TestCase):
         remove_entry("document", document_key(hashlib.sha256(b"fixture document").hexdigest()))
         remove_entry("model", next((self.store / "index/model").iterdir()).name)
         orphan = put_object(b"unreferenced")
+        [(part, _)] = iter_entries("part")
+        named = [probe(part)[role]["object"] for role in ("glb", "selectors")]
         report = collect(grace_seconds=0)
-        self.assertEqual(report.reachable, 2)
+        self.assertEqual(report.reachable, 3)
         self.assertTrue(has_object(entry["brep"]))
+        self.assertTrue(all(has_object(digest) for digest in named), "a part keeps its display mesh and table")
         self.assertFalse(has_object(tree))
         self.assertFalse(has_object(orphan))
 
@@ -63,7 +67,7 @@ class ComponentGcReachability(unittest.TestCase):
         parent = put_tree({"label":"parent","units":"mm","entryKind":"assembly","components":{},"occurrences":[],
             "links":[{"id":"o1.1","name":"child","tree":child,"transform":IDENTITY_16}],
             "assembly":{"root":{"id":"o1","nodeType":"assembly","children":[{"id":"o1.1","nodeType":"link","children":[]}]}}})
-        for kind in ("document", "model", "surface"):
+        for kind in ("document", "model", "part"):
             for key, _ in list(iter_entries(kind)): remove_entry(kind, key)
         external = put_object(b"external exported mesh")
         note_document_tree("d" * 64, parent)

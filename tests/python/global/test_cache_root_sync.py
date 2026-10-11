@@ -1,22 +1,28 @@
-"""The mesh-store contract is CROSS-LANGUAGE.
+"""The part-store contract is CROSS-LANGUAGE.
 
-cadgen writes the store's mesh entries (cadgen/store/meshes.py) and the CAD
-Viewer's client keys, probes and reads them
-(packages/core/src/lib/surf/tessellationCache.js). A one-sided change to the key
-scheme or its tessellator-version salt would split "one store warms every
-consumer" into silent misses, so each is pinned against the other here, the same
-way test_render_contract_sync pins the render contract. The tolerances are not
-among them: the client keeps none, and every request names the pair cadgen chose.
+cadgen writes each part's record and the two objects it names (cadgen/store/parts.py;
+the display mesh's codec is cadgen/store/meshes.py) and the CAD Viewer's client reads
+them (packages/core/src/lib/surf/tessellationCache.js) by the key a view names. The
+client derives no key and keeps no tolerance, so what is pinned here is what each side
+must take of the other: a body's bound, and a record cadgen stores being a row the
+client reads whole -- its fields, and the decoded size both sides compute -- naming a
+body the client matches to it. A one-sided change would split "one store warms every
+consumer" into silent misses.
 """
 
 from __future__ import annotations
 
+import base64
 import json
+import os
 import re
 import shutil
+import struct
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tests.python.support.paths import add_repo_path
 
@@ -30,25 +36,26 @@ def _node() -> str:
     """The development Node that evaluates the client's half of the contract."""
     node = shutil.which("node")
     if node is None:
-        raise AssertionError("node is required to evaluate the JavaScript half of the mesh-store contract")
+        raise AssertionError("node is required to evaluate the JavaScript half of the part-store contract")
     return node
 
 
-class MeshStoreContractSyncTest(unittest.TestCase):
-    def test_tessellator_version_matches_between_python_and_js(self) -> None:
-        from cadgen.store.meshes import TESSELLATOR_VERSION
+def _unmeshed_part(fixture: dict) -> tuple[str, bytes, bytes]:
+    """Another part, whose mesh leaves its second face undrawn: its record counts it."""
+    from cadgen.store.meshes import encode_payload
 
-        source = TESSELLATION_CACHE_JS.read_text(encoding="utf-8")
-        match = re.search(r"^export const TESSELLATION_VERSION = (\d+);", source, re.MULTILINE)
-        assert match, "TESSELLATION_VERSION not found in tessellationCache.js"
-        self.assertEqual(
-            int(match.group(1)),
-            TESSELLATOR_VERSION,
-            "the mesh key's tessellator-version salt diverged between languages — bump "
-            "TESSELLATION_VERSION (tessellationCache.js) and TESSELLATOR_VERSION "
-            "(cadgen/store/meshes.py) together",
-        )
+    floats = lambda *values: struct.pack(f"<{len(values)}f", *values)  # noqa: E731
+    key = "3" * 64 + fixture["key"][64:]
+    glb = encode_payload(
+        part=key, positions=floats(0, 0, 0, 2, 0, 0, 0, 3, 0), normals=floats(0, 0, 1, 0, 0, 1, 0, 0, 1),
+        indices=struct.pack("<3I", 0, 1, 2),
+        face_ranges=[{"ord": 1, "indexStart": 0, "indexCount": 3}, {"ord": 2, "indexStart": 3, "indexCount": 0}],
+        edges=[], bounds={"min": [0, 0, 0], "max": [2, 3, 0]}, unmeshed_faces=[2],
+    )
+    return key, glb, base64.b64decode(fixture["selectors"])
 
+
+class PartStoreContractSyncTest(unittest.TestCase):
     def test_json_bound_matches_between_python_and_js(self) -> None:
         # A body's JSON chunk grows with its face colour palette, so its bound is
         # a limit on the components either side takes: a body cadgen stores and
@@ -65,25 +72,30 @@ class MeshStoreContractSyncTest(unittest.TestCase):
             "(cadgen/store/meshes.py) — change both together",
         )
 
-    def test_key_scheme_carries_the_version_salt(self) -> None:
-        # Policy: the key must salt the algorithm version. Grep-level pin so a
-        # JS-side refactor cannot drop it without failing a Python-side gate.
-        self.assertIn("-t${TESSELLATION_VERSION}-", TESSELLATION_CACHE_JS.read_text(encoding="utf-8"))
+    def test_a_record_cadgen_stores_is_a_row_the_client_reads_whole(self) -> None:
+        from cadgen.store import parts
+        from tests.python.support.tessellation import part_fixture, store_part
 
-    def test_complete_tessellation_keys_match_between_python_and_js(self) -> None:
-        from cadgen.store.meshes import tessellation_key
-
-        cases = [("a" * 64, 0.0015, 0.005), ("b" * 64, 0.00001, 0.013),
-                 ("a" * 64, 0.0015000000000000002, 0.005)]
+        fixture = part_fixture()
+        key, glb, table = _unmeshed_part(fixture)
+        with tempfile.TemporaryDirectory() as store, mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": store}):
+            stored = {fixture["key"]: (store_part(fixture), fixture["glb"]),
+                      key: (parts._write(key, glb, table), base64.b64encode(glb).decode("ascii"))}
+            self.assertEqual({part: parts.probe(part) for part in stored}, {part: row[0] for part, row in stored.items()})
+        self.assertEqual(stored[key][0]["glb"]["unmeshedFaceCount"], 1)
         script = f'''
 import fs from "node:fs";
-import {{ tessellationCacheKey }} from {json.dumps(TESSELLATION_CACHE_JS.as_uri())};
-console.log(JSON.stringify(JSON.parse(fs.readFileSync(0,"utf8")).map(([surfaceInput, chordTolerance, angleTolerance]) =>
-  tessellationCacheKey(surfaceInput, {{chordTolerance, angleTolerance}}))));
+import {{ partMeshMatches, partRow }} from {json.dumps(TESSELLATION_CACHE_JS.as_uri())};
+console.log(JSON.stringify(JSON.parse(fs.readFileSync(0, "utf8")).map(([part, record, glb]) => {{
+  const row = partRow(part, record);
+  return [row, row !== null && partMeshMatches(new Uint8Array(Buffer.from(glb, "base64")), row)];
+}})));
 '''
         result = subprocess.run([_node(), "--input-type=module", "-e", script],
-                                input=json.dumps(cases), text=True, capture_output=True, check=True)
-        self.assertEqual([tessellation_key(*case) for case in cases], json.loads(result.stdout))
+                                input=json.dumps([[part, record, body] for part, (record, body) in stored.items()]),
+                                text=True, capture_output=True, check=True)
+        self.assertEqual(json.loads(result.stdout),
+                         [[{"part": part, **record}, True] for part, (record, _body) in stored.items()])
 
 
 if __name__ == "__main__":

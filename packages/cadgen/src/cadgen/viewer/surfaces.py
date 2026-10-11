@@ -1,7 +1,7 @@
-"""A runtime view's display data, read from the store: each component's surface,
-selector table and display mesh, which the build that made the tree derived. A
-component the store lacks them for is derived by ONE build-pool job for the request
-(``kind: display``); this server never derives.
+"""A runtime view's display data, read from the store: each component's part record
+(``cadgen.store.parts``: its display mesh and selector table), which the build that
+made the tree derived. A part the store lacks is derived by ONE build-pool job for the
+request (``kind: display``); this server never derives.
 
 Tokens are disposable subscribers to that job, never persistent store
 entries or editing sessions. Every poll repeats and validates its immutable
@@ -19,10 +19,9 @@ import os
 import threading
 import time
 import uuid
-from urllib.parse import urlencode
 
-from cadgen.store import surfaces
-from cadgen.store.objects import object_path, read_verified_object
+from cadgen.store import parts
+from cadgen.store.objects import object_path
 from cadgen.store.paths import store_root
 from cadgen.store.trees import capture_tree
 
@@ -55,14 +54,12 @@ def _is_digest(value) -> bool:
 class _Pin:
     """One verified tree's component map (read-only) and where each object lies."""
 
-    __slots__ = ("components", "by_content", "paths", "tree_path")
+    __slots__ = ("components", "paths", "tree_path")
 
     def __init__(self, tree: str, components: dict):
         self.components = components
-        self.by_content: dict[str, list[str]] = {}
         self.paths: dict[str, tuple[str, ...]] = {}
         for cid, entry in components.items():
-            self.by_content.setdefault(entry["contentHash"], []).append(cid)
             self.paths[cid] = tuple(str(object_path(entry[field])) for field in ("brep", "eagerSurface")
                                     if entry.get(field))
         self.tree_path = str(object_path(tree))
@@ -107,117 +104,41 @@ def _pinned(tree: str, cids=()) -> _Pin:
     return pin
 
 
-def _request(body: bytes) -> tuple[dict, dict, dict, dict, str | None, dict]:
+def _request(body: bytes) -> tuple[dict, dict, dict, str | None]:
     if len(body) > 128 * 1024:
         raise ValueError("surface request is too large")
     value = json.loads(body)
     fields = {"tree", "viewId", "producer", "components"}
     if type(value) is not dict or not fields <= set(value) or set(value) - fields - {"job"}:
         raise ValueError("surface request requires tree, viewId, producer and components")
-    producer = surfaces.producer_fields(value["producer"])
+    producer = parts.producer_fields(value["producer"])
     tree = value["tree"]
     if not _is_digest(tree):
         raise ValueError("surface request names no tree")
     pin = _pinned(tree)
-    view_id = surfaces._view_id(tree, producer)
+    view_id = parts._view_id(tree, producer)
     if value["viewId"] != view_id:
         raise ValueError("surface request mixes runtime views")
     components = value["components"]
     if type(components) is not list or not 0 < len(components) <= MAX_COMPONENTS:
         raise ValueError("surface request must name between 1 and 64 components")
     selected = {}
-    expected = {}
     for item in components:
-        if type(item) is not dict or not {"cid", "surfaceInput"} <= set(item) or set(item) - {"cid", "surfaceInput", "expectedSurfaceObject"}:
+        if type(item) is not dict or set(item) != {"cid", "part"}:
             raise ValueError("invalid surface component request")
         cid = item["cid"]
         entry = pin.components.get(cid) if type(cid) is str else None
-        surface_input = surfaces.surface_input(entry, producer) if entry is not None else None
-        if entry is None or cid in selected or item["surfaceInput"] != surface_input:
-            raise ValueError("surface request names an unpinned component or input")
-        selected[cid] = {"surfaceInput": surface_input}
-        if "expectedSurfaceObject" in item:
-            digest = item["expectedSurfaceObject"]
-            if type(digest) is not str or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
-                raise ValueError("expected surface object must be a full lowercase digest")
-            expected[surface_input] = digest
+        key = parts.part_key(entry, producer) if entry is not None else None
+        if entry is None or cid in selected or item["part"] != key:
+            raise ValueError("surface request names an unpinned component or part")
+        selected[cid] = key
     job = value.get("job")
     if job is not None and (type(job) is not str or len(job) != 32 or any(c not in "0123456789abcdef" for c in job)):
         raise ValueError("invalid surface subscriber token")
     operation = {"kind": "display", "tree": value["tree"], "cids": sorted(selected), "producer": producer}
     # The named components' objects, still on disk; the map itself is read-only.
-    canonical = {"components": _pinned(tree, selected).components}
-    return {"viewId": view_id}, selected, operation, expected, job, canonical
-
-
-def surface_object_url(tree: str, surface_input: str, digest: str) -> str:
-    return "/__cad/store?" + urlencode({"tree": tree, "surfaceInput": surface_input, "object": digest})
-
-
-def pinned_surface_object(tree: str, surface_input: str, digest: str):
-    """Serve exact CAS bytes only when a verified derivation binds D to O: the
-    surface the input names, or the selector table derived from that surface
-    (``store.selectors``), bound to it by its record."""
-    from cadgen.store import selectors
-    from cadgen.store.index import read_entry
-
-    if not all(_is_digest(value) for value in (tree, surface_input, digest)):
-        return None
-    # The geometry pins which component may participate; the derivation index
-    # pins its full producer and exact output. No producer initialization here.
-    pin = _pinned(tree)
-    record = read_entry("surface", surface_input)
-    if record is None:
-        return None
-    if record.get("object") != digest:
-        table = selectors.probe(selectors.selector_key(surface_input))
-        if table is None or table["object"] != digest or table["surfaceObject"] != record.get("object"):
-            return None
-        if pinned_surface_object(tree, surface_input, record["object"]) is None:
-            return None
-        return object_path(digest)
-    producer, component = record.get("producer"), record.get("component")
-    for cid in pin.by_content.get(component, ()) if type(component) is str else ():
-        entry = pin.components[cid]
-        if producer is None:
-            if entry.get("kind") != "eager-only" or entry.get("eagerSurface") != digest:
-                continue
-            if surfaces.surface_input(entry, {}) != surface_input:
-                continue
-            _pinned(tree, (cid,))
-            surfaces.validate_surface_bytes(read_verified_object(digest))
-            return object_path(digest)
-        if surfaces.surface_input(entry, producer) != surface_input:
-            continue
-        _pinned(tree, (cid,))
-        found = surfaces.lookup(entry, producer)
-        if found is not None and found["object"] == digest:
-            return object_path(digest)
-    return None
-
-
-def _ready(operation: dict, entry: dict, records: dict) -> dict:
-    surface, table = records["surface"], records["selectors"]
-    return {
-        "surfaceInput": entry["surfaceInput"], "state": "ready", "surfaceObject": surface["object"],
-        "url": surface_object_url(operation["tree"], entry["surfaceInput"], surface["object"]),
-        "byteLength": object_path(surface["object"]).stat().st_size,
-        # The component's selector table (``store.selectors``): the refs and facts the page
-        # joins to the mesh, served by the same store route as the surface.
-        "selectors": {
-            "object": table["object"],
-            "url": surface_object_url(operation["tree"], entry["surfaceInput"], table["object"]),
-            "byteLength": table["byteLength"],
-        },
-        # The display mesh's index record: what a tessellation-cache probe answers, so the
-        # client reads its body next without asking again.
-        "mesh": records["mesh"],
-    }
-
-
-def _conflict(entry: dict) -> dict:
-    return {"surfaceInput": entry["surfaceInput"], "state": "failed",
-            "error": "surface output differs from the displayed mesh", "code": "surface-conflict"}
+    _pinned(tree, selected)
+    return {"viewId": view_id}, selected, operation, job
 
 
 class SurfaceSubscribers:
@@ -268,9 +189,9 @@ class SurfaceSubscribers:
     def resolve(self, body: bytes) -> dict:
         from cadgen.daemon.artifacts import request_key, submit_artifact
 
-        view, selected, operation, expected, token, canonical = _request(body)
+        view, selected, operation, token = _request(body)
         self._prune()
-        request_identity = (str(store_root().resolve()), request_key(operation), sorted(expected.items()))
+        request_identity = (str(store_root().resolve()), request_key(operation))
         future = None
         if token is not None:
             with self._guard:
@@ -283,16 +204,14 @@ class SurfaceSubscribers:
         response = {"viewId": view["viewId"], "components": {}}
 
         def settle(cids) -> list[str]:
-            """Answer each of ``cids`` the store holds (or conflicts with); the rest are missing."""
+            """Answer each of ``cids`` the store holds the part of; the rest are missing."""
             missing = []
             for cid in cids:
-                entry = selected[cid]
-                records = surfaces.display_records(canonical["components"][cid], operation["producer"])
-                pinned = expected.get(entry["surfaceInput"])
-                if records is not None and pinned is not None and records["surface"]["object"] != pinned:
-                    response["components"][cid] = _conflict(entry)
-                elif records is not None:
-                    response["components"][cid] = _ready(operation, entry, records)
+                record = parts.probe(selected[cid])
+                if record is not None:
+                    # The part's record: what a probe of the mesh store answers, so the client
+                    # reads the part's mesh, and later its selector table, without asking again.
+                    response["components"][cid] = {"part": selected[cid], "state": "ready", "record": record}
                 else:
                     missing.append(cid)
             return missing
@@ -324,22 +243,22 @@ class SurfaceSubscribers:
             # Recheck once after completion, including a completion that raced the
             # first lookup. A deleted result is then a failure. So is a failed job's,
             # for only the components it left missing: one component's failure is
-            # raised once the others are stored (surfaces.derive), and they are ready.
+            # raised once the others are stored (parts.derive), and they are ready.
             missing = settle(missing)
             for cid in missing:
-                response["components"][cid] = {"surfaceInput": selected[cid]["surfaceInput"], "state": "failed", "error": error}
+                response["components"][cid] = {"part": selected[cid], "state": "failed", "error": error}
             self.cancel(token)
-            if surfaces.producer_unavailable(error):
+            if parts.producer_unavailable(error):
                 from cadgen.daemon.artifacts import resolve_artifact
                 from cadgen.store.view import descriptor_for_view
 
                 replacement = resolve_artifact({"kind": "producer"})
-                if surfaces.producer_key(replacement) != surfaces.producer_key(operation["producer"]):
+                if parts.producer_key(replacement) != parts.producer_key(operation["producer"]):
                     response["replacementView"] = descriptor_for_view(operation["tree"], producer=replacement)
                     for cid in missing:
                         response["components"][cid]["code"] = "producer-unavailable"
             return response
         response["job"] = token
         for cid in missing:
-            response["components"][cid] = {"surfaceInput": selected[cid]["surfaceInput"], "state": "pending", "job": token}
+            response["components"][cid] = {"part": selected[cid], "state": "pending", "job": token}
         return response

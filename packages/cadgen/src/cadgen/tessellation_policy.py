@@ -8,16 +8,15 @@ and so is the choice of tolerances it is made at:
   robot primitive's -- and the pair a mesh export that names none is written at,
   so that export is served from the very mesh the viewer draws. Chord tolerance
   is RELATIVE to each component's bounding diagonal, angle tolerance is radians.
-  It is this module's alone, configurable nowhere: the page receives it with the
-  server's description (the CAD Viewer's server info, the CAD app's launch) and
-  writes no tolerance of its own.
+  It is this module's alone, configurable nowhere, and no page knows it: a page
+  reads each part's one display mesh by the part's key (``cadgen.store.parts``),
+  which names no tolerance.
 - **The bounds** (:data:`TESSELLATION_FLOORS`, :data:`TESSELLATION_CEILINGS`):
   the finest and the coarsest a mesh export may ask to have meshed. One rule
   (:func:`tolerance_refusal`) holds them at every door a tolerance enters -- a
   mesh decorator's argument or a mesh door's flag (``cadgen.metadata``), the mesh
-  export they reach (``cadgen.store.meshes.normalize_tessellations``) -- so a
-  request outside them is refused where it enters, in words naming the bound, and
-  never meshed.
+  export they reach (``cadgen._internal.mesh_export``) -- so a request outside
+  them is refused where it enters, in words naming the bound, and never meshed.
 """
 
 from __future__ import annotations

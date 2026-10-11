@@ -398,7 +398,7 @@ class MaterializedIdentityTest(unittest.TestCase):
             self.assertTrue(object_path(component["brep"]).is_file())
 
     def test_pinned_objects_repair_a_missing_component_index_without_extraction(self):
-        from cadgen._internal import component_package
+        from cadgen._internal import surface_extract
         from cadgen.store.build import build_tree_from_compound
         from cadgen.store.index import read_entry, remove_entry
         from cadgen.store.trees import get_tree
@@ -407,9 +407,9 @@ class MaterializedIdentityTest(unittest.TestCase):
         cid = next(iter((get_tree(tree) or {})["components"]))
         remove_entry("component", cid)
         with mock.patch.object(
-            component_package,
-            "_build_component_surf_worker",
-            wraps=component_package._build_component_surf_worker,
+            surface_extract,
+            "extract_surface_component",
+            wraps=surface_extract.extract_surface_component,
         ) as extracted:
             _result, descriptor, stats = build_tree_from_compound(child, root_name="reindexed")
         self.assertEqual(extracted.call_count, 0)

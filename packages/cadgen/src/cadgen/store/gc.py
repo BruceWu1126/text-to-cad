@@ -4,12 +4,11 @@ One pass scans the store once (names, sizes, mtimes), marks once, and removes
 three kinds of thing:
 
 - **Retired kinds and obsolete entries.** The ``index/`` folders in
-  ``RETIRED_KINDS`` (the operation cache's ``index/op``) go, with every object
-  only their entries named; so do the surface, selector-table and mesh entries
-  an older extractor, table scheme or mesher of cadgen's wrote, which no
-  reader of this cadgen asks for again (``surfaces.obsolete_entry``,
-  ``selectors.obsolete_key``, ``meshes.obsolete_key``, and a mesh or table
-  keyed by such a surface's input), and the records and document entries at
+  ``RETIRED_KINDS`` (the operation cache's ``index/op``; the surface, selector
+  and mesh entries a part's display data was before ``index/part``) go, with
+  every object only their entries named; so do the part entries an older
+  version of cadgen's derivation wrote, which no reader of this cadgen asks for
+  again (``parts.obsolete_key``), and the records and document entries at
   keys this cadgen does not own (another schema version's, ``owned_key``),
   once last written ``OBSOLETE_RETIRE_AFTER_SECONDS`` ago (a week): another
   cadgen sharing the store may still read them, and a read never writes. Until
@@ -87,9 +86,6 @@ _UNITS = {"": 1, "k": 1024, "m": 1024**2, "g": 1024**3, "t": 1024**4}
 # for any top-level object pointer: their readers are gone with their schema.
 _NAMED_FIELDS = {
     "component": ("brep", "eagerSurface"),
-    "surface": ("object",),
-    "selector": ("object",),
-    "mesh": ("object",),
     "drawing": ("object",),
     "skin": ("object",),
     # A robot entry names its payload and the primitive meshes the payload draws.
@@ -235,11 +231,11 @@ def named_objects(kind: str, entry: dict | None) -> tuple[str, ...]:
         return ()
     if kind == "component" and entry.get("schemaVersion") != 1:
         return ()
-    if kind == "surface":
-        from cadgen.store.surfaces import SURFACE_SCHEMA
-
-        if entry.get("schemaVersion") != SURFACE_SCHEMA:
-            return ()
+    if kind == "part":
+        # A part names its two objects (``store.parts``): its display mesh and selector table.
+        roles = (entry.get(role) for role in ("glb", "selectors"))
+        return tuple(dict.fromkeys(role.get("object") for role in roles
+                                   if isinstance(role, dict) and is_object_hash(role.get("object"))))
     fields = _NAMED_FIELDS.get(kind)
     values = entry.values() if fields is None else (entry.get(name) for name in fields)
     # A field names one object, or a list of them (a robot entry's primitive meshes).
@@ -418,19 +414,11 @@ class _Entry:
     obsolete: bool = False
 
 
-def _obsolete(kind: str, key: str, entry: dict | None) -> bool:
-    if kind == "mesh":
-        from cadgen.store.meshes import obsolete_key
+def _obsolete(kind: str, key: str) -> bool:
+    if kind == "part":
+        from cadgen.store.parts import obsolete_key
 
         return obsolete_key(key)
-    if kind == "selector":
-        from cadgen.store.selectors import obsolete_key
-
-        return obsolete_key(key)
-    if kind == "surface":
-        from cadgen.store.surfaces import obsolete_entry
-
-        return obsolete_entry(key, entry)
     return False
 
 
@@ -444,39 +432,27 @@ def _read_entries(found: Scan, kinds, should_stop: Callable[[], bool]) -> list[_
             entry = None if kind == "bounds" else _read_json(folder / key)
             named = named_objects(kind, entry)
             rows.append(_Entry(kind, key, size, mtime, tuple(d for d in named if d in found.objects),
-                               _obsolete(kind, key, entry)))
+                               _obsolete(kind, key)))
     return rows
 
 
 def _split_obsolete(rows: list[_Entry], retire_before: float) -> tuple[list[_Entry], list[_Entry]]:
     """``rows`` as (kept, retiring): the obsolete entries last written by
-    ``retire_before``, and the rest. A mesh or selector table keyed by an
-    obsolete surface's input is obsolete with it: no reader of this cadgen
-    computes that input again. A younger obsolete entry stays like a current
-    one, with its objects, and so does an obsolete surface while a mesh or
-    table keyed by it is younger: that entry is known obsolete only by its
-    surface."""
-    gone = {row.key for row in rows if row.kind == "surface" and row.obsolete}
-    for row in rows:
-        row.obsolete = row.obsolete or (row.kind in ("mesh", "selector") and row.key[:64] in gone)
-    held = {row.key[:64] for row in rows if row.kind in ("mesh", "selector") and row.obsolete and row.mtime > retire_before}
+    ``retire_before``, and the rest. A younger obsolete entry stays like a current
+    one, with its objects."""
     current: list[_Entry] = []
     obsolete: list[_Entry] = []
     for row in rows:
-        retiring = row.obsolete and row.mtime <= retire_before and not (row.kind == "surface" and row.key in held)
-        (obsolete if retiring else current).append(row)
+        (obsolete if row.obsolete and row.mtime <= retire_before else current).append(row)
     return current, obsolete
 
 
 def producer_versions() -> dict[str, list[int]]:
     """The versions an entry is obsolete against. The daemon notes, per store and
     per these versions, when its last retiring pass ran (``daemon/housekeeping.py``)."""
-    from cadgen.store.meshes import PAYLOAD_VERSION, TESSELLATOR_VERSION
-    from cadgen.store.selectors import SELECTOR_SCHEME
-    from cadgen.store.surfaces import EXTRACTION_SCHEME, SURF_FORMAT
+    from cadgen.store.parts import PART_VERSION
 
-    return {"surface": [EXTRACTION_SCHEME, SURF_FORMAT], "selector": [SELECTOR_SCHEME],
-            "mesh": [TESSELLATOR_VERSION, PAYLOAD_VERSION]}
+    return {"part": [PART_VERSION]}
 
 
 @dataclass
@@ -490,7 +466,7 @@ class GcReport:
     removed_paths: list[str] = field(default_factory=list)
     # Retired index kinds: entries removed (or that would be), by kind.
     retired: dict[str, int] = field(default_factory=dict)
-    # Obsolete surface and mesh entries removed (or that would be), by kind.
+    # Obsolete part entries removed (or that would be), by kind.
     obsolete: dict[str, int] = field(default_factory=dict)
     # Both of the above, in index bytes.
     retired_bytes: int = 0
@@ -584,8 +560,7 @@ def collect(
     report.records = len(found.entries["model"])
     report.bytes_before = report.bytes_after = found.total
     unowned = _unowned(found, retire_before)
-    if (retired_only and not found.retired and not unowned
-            and not (found.entries["surface"] or found.entries["selector"] or found.entries["mesh"])):
+    if retired_only and not found.retired and not unowned and not found.entries["part"]:
         return report
     try:
         if stop():

@@ -9,11 +9,11 @@ distinct tolerance pair, and every format serialized from those same meshes
 ``cadgen._internal.glb_animation``, a bending tube as a skin by
 ``cadgen._internal.tube_skin``). At the display tolerance the meshes are the
 store's, the ones the CAD Viewer and snapshots draw; at any other they are made
-here and kept nowhere (:func:`stored_meshes`). Nothing here spawns a process of
-its own.
+here, from each part's stored selector table, and kept nowhere
+(:func:`stored_meshes`). Nothing here spawns a process of its own.
 
-Freshness rides content-keyed records in the store's ``index/mesh`` tier: a
-record is keyed by the
+Freshness rides content-keyed records -- the model record's outputs and the
+document entry's mesh ledger: a record is keyed by the
 WRITTEN file's bytes and names the source documents (by content hash) and the
 effective tolerances that produced it — plus, for an animated GLB, the clip
 request and the sidecar keyframes that produced the motion, which the document's
@@ -53,8 +53,8 @@ MESH_FORMAT_SUFFIX = {"stl": ".stl", "3mf": ".3mf", "glb": ".glb"}
 @dataclass(frozen=True)
 class MeshExportJob:
     """One output the exporter must write: format, destination, and the
-    tolerances it meshes at (``None`` = the store's defaults,
-    ``cadgen.store.meshes.DISPLAY_CHORD``/``DISPLAY_ANGLE``). The geometry is the
+    tolerances it meshes at (``None`` = the display tolerance,
+    ``cadgen.tessellation_policy.DISPLAY_TESSELLATION``). The geometry is the
     document's tree as stored; a mesh never moves it.
 
     ``animation`` is the GLB door's clip request (cadgen._internal.mesh_animation)
@@ -111,13 +111,14 @@ def run_mesh_exporter(
     hear them. A file's own ``warnings`` name the faces no mesher could cover
     (``cadgen.store.meshes`` ``unmeshedFaces``), which it leaves open. Anything
     worse raises, and a job that raises leaves no file."""
-    from cadgen.store import meshes
+    from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
     label = "+".join(job.fmt for job in jobs)
     pairs = [
         (
-            float(meshes.DISPLAY_CHORD if job.mesh_tolerance is None else job.mesh_tolerance),
-            float(meshes.DISPLAY_ANGLE if job.mesh_angular_tolerance is None else job.mesh_angular_tolerance),
+            float(DISPLAY_TESSELLATION["chordTolerance"] if job.mesh_tolerance is None else job.mesh_tolerance),
+            float(DISPLAY_TESSELLATION["angleTolerance"] if job.mesh_angular_tolerance is None
+                  else job.mesh_angular_tolerance),
         )
         for job in jobs
     ]
@@ -129,7 +130,9 @@ def run_mesh_exporter(
 
 def _check_jobs(jobs: "list[MeshExportJob]", pairs: list, animation_source: AnimationSnapshot | None) -> None:
     """Refuse a request no file should come out of, before any meshing."""
-    from cadgen.store.meshes import normalize_tessellations
+    import math
+
+    from cadgen.tessellation_policy import tolerance_refusal
 
     if not jobs:
         raise ValueError("mesh export needs at least one output")
@@ -138,10 +141,13 @@ def _check_jobs(jobs: "list[MeshExportJob]", pairs: list, animation_source: Anim
     for job, (chord, angle) in zip(jobs, pairs):
         if job.fmt not in MESH_EXPORT_FORMATS:
             raise ValueError(f"mesh export format must be one of {', '.join(MESH_EXPORT_FORMATS)}, got {job.fmt!r}")
-        try:
-            normalize_tessellations([{"chordTolerance": chord, "angleTolerance": angle}])
-        except ValueError as error:
-            raise ValueError(f"{job.fmt} export at chord {chord:g}, angle {angle:g}: {error}") from None
+        refusal = next((f"{name} must be a positive finite number" for name, value in
+                        (("chordTolerance", chord), ("angleTolerance", angle))
+                        if not math.isfinite(value) or value <= 0), None)
+        refusal = refusal or tolerance_refusal("chordTolerance", chord, name="chordTolerance") \
+            or tolerance_refusal("angleTolerance", angle, name="angleTolerance")
+        if refusal is not None:
+            raise ValueError(f"{job.fmt} export at chord {chord:g}, angle {angle:g}: {refusal}")
         if job.animation is not None:
             if job.fmt != "glb":
                 raise ValueError(f"{job.fmt} carries no animation: only glb does")
@@ -296,7 +302,7 @@ def _loaded_producer() -> dict | None:
     a producer would cost more than the job it saves."""
     if "build123d" not in sys.modules:
         return None
-    from cadgen.store.surfaces import producer_identity
+    from cadgen.store.parts import producer_identity
 
     try:
         return producer_identity()
@@ -319,28 +325,29 @@ def stored_meshes(source: MeshSource, pairs: list, appearance: object,
     ``components``) at every pair, ``{(cid, pair): bytes}``.
 
     At the display tolerance a body is the stored display mesh the viewer draws: the
-    view binds the descriptor to the components' display data, which the build that
-    made the tree derived (and one build-pool job derives for a component the store
-    lacks it for, ``store.view.materialize_view_surfaces``). At any other tolerance
-    the component is meshed here, from its stored surface and BREP, and the body is
-    stored nowhere: the export's file is the output."""
-    from cadgen.store import meshes, surfaces
-    from cadgen.store.view import materialize_view_surfaces
+    part the build that made the tree derived (and one build-pool job derives for a
+    part the store lacks, ``store.view.materialize_parts``). At any other tolerance
+    the part is meshed here, from its BREP and stored selector table
+    (``store.parts.mesh_at``), and the body is stored nowhere: the export's file is
+    the output."""
+    from cadgen.store import parts
+    from cadgen.store.view import materialize_parts
+    from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
     descriptor = _export_view(source, _loaded_producer())
     used = components if components is not None else _used_components(descriptor)
-    descriptor = materialize_view_surfaces(descriptor, used)
-    display = (meshes.DISPLAY_CHORD, meshes.DISPLAY_ANGLE)
+    descriptor, _records = materialize_parts(descriptor, used)
+    display = (DISPLAY_TESSELLATION["chordTolerance"], DISPLAY_TESSELLATION["angleTolerance"])
     bodies = {}
     for cid in used:
-        surface_key = descriptor["components"][cid]["surfaceInput"]
+        entry = descriptor["components"][cid]
         for chord, angle in pairs:
             if (chord, angle) == display:
-                payload = meshes.read(meshes.tessellation_key(surface_key))
+                payload = parts.read(entry["part"], "glb")
                 if payload is None:
                     raise RuntimeError(f"mesh export failed: component {cid} has no stored display mesh")
             else:
-                payload = surfaces.mesh_at(surface_key, chord, angle)
+                payload = parts.mesh_at(parts.geometry_entry(entry), entry["part"], chord, angle)
             bodies[(cid, (chord, angle))] = payload
     if appearance is not None:
         from cadgen._internal.source_sidecar import apply_appearance

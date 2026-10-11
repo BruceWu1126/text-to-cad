@@ -41,12 +41,13 @@ One word per concept; the code uses these words and no others.
 | **link** | a tree entry pointing at a child's tree hash, with placement and name |
 | **pin** | the child tree hash a parent resolved during a build (noun and verb) |
 | **record** | the mutable per-model entry in `index/`: current tree hash, closure, children pins, outputs |
-| **index** | the input-addressed side of the store: records, bounds, mesh entries |
+| **index** | the input-addressed side of the store: records, bounds, part entries |
 | **closure** | what a model's build depended on: the source it reaches, the files it read, the folders it listed, and the files its imports rely on not existing |
 | **stale / current**, **gate** | the freshness state and the check that decides it |
 | **claim** | what a write does to an object it finds already present: its mtime becomes now, less two ticks of its clock, so the sweeper's grace window covers it and the claiming process keeps what it verified of it (§8) |
 | **evict** | drop a derived entry to keep the store under its cap; only the derived kinds are ever evicted (§8) |
-| **obsolete** | a surface, selector-table or mesh entry an older extractor, table scheme or mesher of cadgen's wrote, or a record or document entry at a key this cadgen does not own (another schema version's): no reader of this cadgen asks for it again, and the sweeper retires it once it is a week old (§2, §8) |
+| **part** | a component's display data under one surface producer: ONE index entry naming its display mesh and its selector table (§3) |
+| **obsolete** | a part entry an older version of cadgen's derivation wrote, or a record or document entry at a key this cadgen does not own (another schema version's): no reader of this cadgen asks for it again, and the sweeper retires it once it is a week old (§2, §8) |
 | **worker / spare / extra**, **job** | daemon vocabulary (the daemon's own documentation) |
 
 Retired words: node, package, manifest, ref (as a store concept), scope, blob.
@@ -68,10 +69,8 @@ One word is NOT retired, and it has exactly one meaning:
   index/model/<sha256(script::function)>-v<schema>  records (input-addressed, mutable, atomic)
   index/output/<sha256(output path)>  {model}: which script wrote the file at this path
   index/component/<cid>               geometry-input entries → encoded BREP and intrinsic recipe
-  index/surface/<surfaceInput>        attested extraction inputs → SURF object hash
-  index/selector/<surfaceInput>-s<scheme>  a surface's selector table (refs, facts, chains) → object hash
   index/bounds/<sha256(bounds key)>   bounding boxes of stored geometry, inline
-  index/mesh/<key>                    a component's mesh at one tessellation → GLB object hash
+  index/part/<digest>-v<version>      a part's display data → its display mesh (GLB) and selector table objects
   index/drawing/<sha256(scheme + document hash)>  a 2D drawing's render payload → object hash
   index/skin/<sha256(scheme + document + animation + meshes)>  a document's tube skins → object hash
   index/robot/<sha256(scheme + path + description hash + paired URDF hash)>  a robot description resolved for a player → object hash, plus its primitive meshes
@@ -82,28 +81,26 @@ content: the daemon's job ledger, read over its socket (§7, §9). Editing
 previews use the same immutable objects, with ephemeral request handles in
 that ledger (§9b); there is no preview directory or persistent session index.
 A **retired kind** is one an older cadgen wrote and nothing reads any more:
-`RETIRED_KINDS` in `store/paths.py`, today only `index/op`, the operation
-cache of cadgen 0.7.4 and earlier. The sweeper removes it with every object
-only it named (§8). Retiring a kind means moving it from `INDEX_KINDS` to
-`RETIRED_KINDS`. Any other folder under `index/` belongs to a newer cadgen or
-to none, and nothing here touches it.
+`RETIRED_KINDS` in `store/paths.py` -- `index/op`, the operation cache of
+cadgen 0.7.4 and earlier, and `index/surface`, `index/selector` and
+`index/mesh`, a part's display data as three entries (its SURF, its selector
+table bound to that SURF, and its mesh at one tessellation) before `index/part`
+named its two objects in one. The sweeper removes a retired kind with every
+object only it named (§8). Retiring a kind means moving it from `INDEX_KINDS`
+to `RETIRED_KINDS`. Any other folder under `index/` belongs to a newer cadgen
+or to none, and nothing here touches it.
 
 An **obsolete** entry is the same thing one entry at a time, in a kind still
-in use: a surface entry whose producer's extraction scheme and SURF format are
-no newer than this cadgen's and not both the same
-(`surfaces.obsolete_entry`; an eager-only one, which names no producer, was
-keyed under an older SURF format), a mesh entry keyed by an older mesher or
-mesh format (`meshes.obsolete_key`), a selector table keyed by an older table
-scheme (`selectors.obsolete_key`), or a mesh or table keyed by an obsolete
-surface's input. No reader of this cadgen computes those keys again, but an
+in use: a part entry whose key names an older version of cadgen's derivation
+(`parts.obsolete_key`: the `-v<version>` its key ends in is older than
+`PART_VERSION`). No reader of this cadgen computes that key again, but an
 older cadgen sharing the store still may, and a read never writes. So the
 sweeper retires an obsolete entry, with every object only it named, once it
-was last written a week ago (`gc.OBSOLETE_RETIRE_AFTER_SECONDS`), and an
-obsolete surface with its meshes and table, once the youngest is (§8): an older cadgen
-still in use derives each again at most once a week, and an upgrade's
-leftovers go within about a week. A newer cadgen's derived entry is never obsolete.
-Kernel versions are not ordered here: an entry of another build123d or OCP is
-left to the cap.
+was last written a week ago (`gc.OBSOLETE_RETIRE_AFTER_SECONDS`, §8): an older
+cadgen still in use derives each again at most once a week, and an upgrade's
+leftovers go within about a week. A newer cadgen's derived entry is never
+obsolete. Kernel versions are not ordered here: a part of another build123d or
+OCP is left to the cap.
 
 Records and document entries carry their schema version in their key,
 `<key>-v<schema>` (`index.versioned_key`; `RECORD_SCHEMA_VERSION` and
@@ -147,10 +144,9 @@ operations always execute.
 
 `objects/` is the **artifact side**: what geometry exists. `index/model`,
 `index/output` are the **code side**: what source produced a result and
-what it depended on. `index/bounds`, `index/component`, `index/surface`,
-`index/selector`, `index/mesh`, `index/drawing`, `index/skin` and
-`index/robot` remember reusable derivations; surface, selector, mesh and
-drawing jobs consume only immutable artifact inputs. `index/drawing` is a
+what it depended on. `index/bounds`, `index/component`, `index/part`,
+`index/drawing`, `index/skin` and `index/robot` remember reusable
+derivations; part and drawing jobs consume only immutable artifact inputs. `index/drawing` is a
 2D document's flattened render payload: its key hashes the extraction scheme
 (payload shape × the drawing library's release) together with the document's
 content hash, so the same bytes are never flattened twice and an upgrade lands
@@ -167,14 +163,14 @@ which a sweep keeps with it. `index/skin` is the
 same for a document's bending tubes as a CAD view plays them
 (`_internal/tube_skin_payload.py`): its key hashes the payload's scheme, the
 document's content hash, the digest of the sidecar animation that bends them and
-the mesh entries they bind, so an edited clip, a new mesher or a new binding rule
-lands on a new key. `index/document` is the document lookup: `sha256(file bytes)`, under
+the parts whose meshes they bind, so an edited clip, a new mesher or a new binding
+rule lands on a new key. `index/document` is the document lookup: `sha256(file bytes)`, under
 this cadgen's document schema (above), → the tree describing those bytes (plus a mesh ledger keyed by format × tolerances
 × pose × appearance — the bare mesh doors read and write it, and a script run notes its
 declared meshes there too, so the two front doors never redo each other's work).
 Mesh variants and model output entries also carry their format's final serializer
 revision. A change to one format's encoding invalidates that format's final exports
-without discarding geometry or tessellation results, or affecting the other formats'
+without discarding geometry or display meshes, or affecting the other formats'
 freshness.
 Animated exports capture the sidecar's `animation` keyframes once, before mesh preparation;
 the animation variant and the clip sampler consume that same immutable text.
@@ -215,16 +211,18 @@ nothing in the viewer or on a render path reads it.
 There are exactly two ways a file is named, and that is the only distinction
 the store makes:
 
-- **Content-addressed** (`objects/`): the name is `sha256(bytes)`. Two kinds
-  of object exist — a **component** (the `.brep` bytes, and separately the
-  `.surf` bytes, of one solid) and a **tree** (JSON). Writing an object is
-  idempotent; valid bytes are never changed. Geometry completeness requires
-  the entire verified required closure before publication. Display readiness
-  is separate and disposable. A repair may restore bytes at their exact hash.
+- **Content-addressed** (`objects/`): the name is `sha256(bytes)`. Geometry
+  objects are a **component** (the `.brep` bytes of one solid, and an
+  eager-only component's pinned `.surf`) and a **tree** (JSON); a part's
+  display mesh and selector table are derived objects beside them. Writing an
+  object is idempotent; valid bytes are never changed. Geometry completeness
+  requires the entire verified required closure before publication. Display
+  readiness is separate and disposable. A repair may restore bytes at their
+  exact hash.
 - **Input-addressed** (`index/`): the name is derived from what PRODUCED the
-  entry (a script path, measured bytes and their placement, a surface × tolerance),
-  and the entry is a small JSON file pointing at objects or recording facts.
-  Entries are mutable and written temp + rename.
+  entry (a script path, measured bytes and their placement, a component under a
+  producer), and the entry is a small JSON file pointing at objects or recording
+  facts. Entries are mutable and written temp + rename.
 
 No directories per result, no hardlinks, no staging directories, no version
 salts in object addresses. An input-addressed entry's key includes what its
@@ -239,16 +237,17 @@ A component's id (cid) is a hash of exactly three inputs: its BREP bytes, its
 intrinsic face colours, and the string `GEOMETRY_SCHEME` (currently
 `cadgen-geometry-input-v3`, in `_internal/component_package.py`). That
 string is the **only** version on geometry identity. Everything derived from
-a component — surfaces (`SURF_VERSION`), tessellations (the tessellation
-scheme), index payloads (their `schemaVersion`) — carries its own version and
-validates its own compatibility, so a fix in a producer retires that layer's
-entries alone and never moves a cid.
+a component — its part (`PART_VERSION`, in its key), index payloads (their
+`schemaVersion`) — carries its own version and validates its own
+compatibility, so a fix in a producer retires that layer's entries alone and
+never moves a cid.
 
 - Bump `GEOMETRY_SCHEME` only when the same bytes must map to a different
   tree: a codec or interpretation change. It re-keys every user's store, so
   it is rare and deliberate, and the reason goes in the commit and here.
-- Bump the derived artifact's own version for an extractor, mesher or surface
-  fix. Never reach for geometry identity to invalidate a derived layer.
+- Bump the derived artifact's own version for an extractor, selector-table,
+  mesher or mesh-payload fix (`store/parts.PART_VERSION`). Never reach for
+  geometry identity to invalidate a derived layer.
 - Wiping a store is an operator action (`cadgen store gc`, `store forget`),
   never a hash side effect.
 
@@ -334,107 +333,119 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   parse, measured but never meshed — stands in as the prepared native input.
   A forced build derives and fences every component again.
 
-  `store.surfaces.request_view` captures a runtime producer separately from the
-  tree. The producer contains extraction scheme 20, SURF format 3 and the
-  actual loaded build123d/OCP/distribution versions. A format-3 SURF holds what
-  its readers -- selection, measurement, feature recognition -- take and no
-  tessellation input: loops are edge references, a B-spline surface keeps its
-  degrees and pole counts (a bilinear patch its four corners), a swept surface
-  its axis or direction, a general curve its range. Format 2 stays readable:
-  an older build may have pinned one in an eager-only component's identity.
-  The surface input digest includes every geometry/appearance/producer field.
-  Unknown versions cannot create a shared persistent namespace. `derive`
-  privately decodes only captured inputs, verifies the SURF container and
-  writes the immutable object before the surface index. Expected output
-  conflicts fail; no source, model record, latest child or live authored shape
-  is consulted.
+  A view of a tree (`store/view.py`, `parts.view_from_geometry`) names a
+  runtime surface producer separately from the tree: the loaded build123d, OCP
+  and distribution versions. Each component of a view names its **part**: the
+  key its display data is stored and read by, `<digest>-v<version>`
+  (`parts.part_key`). The digest hashes the component's `contentHash` (its
+  kind, codec, BREP bytes, face colours and an eager-only component's pinned
+  surface) and the producer; the version (`parts.PART_VERSION`) is bumped by any
+  change to the extractor, the selector table, the mesher or the mesh payload.
+  No tolerance is in the key: a part has one display mesh. Unknown versions
+  cannot create a shared persistent namespace. Derivation privately decodes
+  only captured inputs; no source, model record, latest child or live authored
+  shape is consulted.
 
   **A build derives its parts' display data; views only read.** Every build
   job (`_internal/generation.py`: a model build, a no-op build that reuses its
   tree, a compile of an imported STEP, a re-emit) runs
-  `surfaces.ensure_display` on the tree a view of its output reads -- the saved
+  `parts.ensure_display` on the tree a view of its output reads -- the saved
   document's tree, a mesh-only model's own -- in its own process, after its
   record is written and before it reports done, and before its declared mesh
-  exports. Which parts lack display data is asked of the store alone (probes,
-  no kernel import), so a no-op build of a model whose display data is stored
-  derives nothing; one whose store was cleared derives it again. Each missing
-  part's surface, selector table and display mesh is derived in turn, the
-  build's progress showing `Meshing parts n/total`, and the time counts as
-  cadgen's in the model's time line. Nothing splits the work: sibling models
-  derive in parallel because they build in parallel jobs, and a parent's tree
-  holds its children's components, which their own jobs derived before they
-  reported done, so a parent normally finds nothing missing. A part that fails
-  to derive is a warning on the build, never its failure: the geometry is
-  published, and a view shows that part as failed. A build's kinematics read
-  components only where a selector is named: a mate's parent and child resolve
-  in the result tree's occurrences, group nodes and their labels, with no
-  component read, and an `axis={"ref": ...}` derives (here, in the build) and
-  reads the display data of the one component its occurrence places
-  (`_internal/kinematics_resolve.py`). `read_step` never waits for SURF or a
-  mesh.
+  exports. Which parts lack display data is asked of the store alone (one
+  probe per part, no kernel import), so a no-op build of a model whose display
+  data is stored derives nothing; one whose store was cleared derives it again.
+  Each missing part is derived in turn, the build's progress showing `Meshing
+  parts n/total`, and the time counts as cadgen's in the model's time line.
+  Nothing splits the work: sibling models derive in parallel because they build
+  in parallel jobs, and a parent's tree holds its children's components, which
+  their own jobs derived before they reported done, so a parent normally finds
+  nothing missing. A part that fails to derive is a warning on the build, never
+  its failure: the geometry is published, and a view shows that part as failed.
+  A build's kinematics read components only where a selector is named: a mate's
+  parent and child resolve in the result tree's occurrences, group nodes and
+  their labels, with no component read, and an `axis={"ref": ...}` derives
+  (here, in the build) and reads the selector table of the one component its
+  occurrence places (`_internal/kinematics_resolve.py`). `read_step` never waits
+  for a part.
 
   A view -- the CAD Viewer and the CAD app (`POST /__cad/surfaces`), a snapshot
   and `--mode list` (`store/view.py`), a mesh export -- reads what the build
-  derived. A part whose display data the store lacks (a cleared, evicted or
-  older store) is derived by ONE build-pool job for the request (`kind:
-  display`, `daemon/artifacts.py`): one request, one job, one worker. No server
-  or snapshot process derives in its own process, and correctness never
-  depends on a store hit.
+  derived. A part the store lacks (a cleared, evicted or older store) is derived
+  by ONE build-pool job for the request (`kind: display`,
+  `daemon/artifacts.py`): one request, one job, one worker. No server or
+  snapshot process derives in its own process, and correctness never depends on
+  a store hit.
 
-  Every surface is derived with the component's **selector table**
-  (`_internal/selector_table.py`, stored by `store/selectors.py` under
-  `index/selector/<surfaceInput>-s<scheme>`): the one place a ref's facts are
-  minted. From the exact BREP and the SURF it holds, per face, edge and vertex,
-  the local id a ref ends in (`f7`, `e3`, `v2`), the exact metrics and
+  A part's display data is ONE index entry, `index/part/<key>`
+  (`store/parts.py`), naming TWO objects -- its display mesh and its selector
+  table -- with what a reader sizes each by without opening it: each object's
+  byte length, the mesh's decoded-bytes estimate and counts (and
+  `unmeshedFaceCount` when a face could not be meshed), the table's counts. One
+  probe answers whether a part's display data is stored: the entry is valid and
+  both objects are present at their sizes. Derivation (`parts._derive`) decodes
+  the component's BREP once, extracts its **SURF** in memory
+  (`_internal/surface_extract.py`; an eager-only component's SURF is the
+  geometry object its tree pins), builds the selector table from the BREP and
+  the SURF, meshes the component, writes both objects and then the entry, so an
+  entry always names complete objects. Nothing stores a SURF. A format-3 SURF
+  holds what its readers -- the selector table, feature recognition -- take and
+  no tessellation input: loops are edge references, a B-spline surface keeps its
+  degrees and pole counts (a bilinear patch its four corners), a swept surface
+  its axis or direction, a general curve its range. The CAD Viewer extracts one
+  part's when feature recognition asks for it (`components/<cid>.surf` of a
+  served view: one build-pool job, `kind: surface`), and keeps it nowhere.
+  Format 2 stays readable: an older build may have pinned one in an eager-only
+  component's identity.
+
+  The **selector table** (`_internal/selector_table.py`) is the one place a
+  ref's facts are minted. From the exact BREP and the SURF, per face, edge and
+  vertex, the local id a ref ends in (`f7`, `e3`, `v2`), the exact metrics and
   parameters the SURF carries, the plane normals, whether an entity can be
   referenced, its relevance, every adjacency (face–edge, edge–vertex), each
   edge's chain and each face's tangent group — the sets the viewer's connected
-  selection grows a pick to. The CAD Viewer joins the table to the mesh's face
-  and edge tables by ordinal and composes `occurrenceId + "." + localId`; the
+  selection grows a pick to. The CAD Viewer reads it when it needs it -- a pick,
+  a measure, a node opened -- by the part's key, bound to the object its entry
+  names (`GET /__tess_cache/<part>.selectors.json`), and joins it to the mesh's
+  face and edge tables by ordinal, composing `occurrenceId + "." + localId`; the
   CLI (`assembly_lookup`) reads the same table from a view's
   `components/<cid>.selectors.json`. So a ref the page shows resolves in
-  `inspect` to the entity it names, and nothing in a browser mints one. The
-  table is served by the surface request's ready row (`selectors`) through the
-  same store route as the surface, and a surface without its table is not
-  ready: it is derived again, from the stored surface and BREP. The
-  scheme is bumped for any change in what the table holds, and an older
-  scheme's entry is obsolete (§2).
+  `inspect` to the entity it names, and nothing in a browser mints one.
 
-  Meshes are derived the same way, and by cadgen alone. `derive` meshes each
-  component at the display tolerance after its surface
-  (`_internal/occt_mesh.py`: OCCT's `BRepMesh_IncrementalMesh` on the exact
-  BREP, the chord tolerance a fraction of the component's bounding diagonal, the
-  angle in radians; a face OCCT refuses is tessellated over its own parameters by
-  `_internal/face_fallback.py`) and writes each body (`store/meshes.py`) before its
-  `index/mesh` entry. The key is the surface input, the mesher and format
-  versions and the two tolerances' float64 bits, so a mesher fix lands on new
-  keys. A body is glTF 2.0 binary (format 6) in the component's own units: ONE
-  triangle primitive (positions, normals, u16 indices up to 65,535 vertices,
-  else u32), a face table whose rows give each face's ordinal, contiguous index
-  range and colour, an edge table giving each edge's ordinal, class and run of
-  polyline points, and the points; the JSON chunk is the canonical JSON for the
-  body's identity, bounds, scale and colour palette, which every reader rebuilds
-  and requires before it views the arrays in place. Any glTF viewer draws it
-  (its one node turns Z-up millimetres into Y-up metres); the tables are
-  `extras`. A face no mesher covers -- OCCT refused it and the fallback's
-  triangles missed its area by more than a quarter -- never fails the component:
-  it is meshed without that face, whose range is empty, and the body names it
-  (`unmeshedFaces`, only in a body that has one; its record counts them,
-  `unmeshedFaceCount`). Every reader says so: a view or a list warns which faces
-  of which part it does not draw or count, the CAD Viewer names the parts it
-  draws without them, and a mesh export warns that its file has a hole there and
-  is not watertight. A face smaller than the mesh resolves
-  (area under the deflection squared) may have no triangles and is not named. Any
-  other failure -- OCCT raising, a body its encoding refuses -- is the component's
-  `MeshProductionError`. A component is ready once its surface, its selector
-  table and its display mesh are stored, and `index/mesh` holds display meshes
-  alone: a mesh export at the display tolerance writes the stored display
-  meshes, and one at any other tolerance meshes each component in the
-  exporting process, from its stored surface and BREP, and stores nothing (the
-  file is the output; `_internal/mesh_export.py`). Tolerances outside the
-  tessellation policy's bounds (`tessellation_policy.tolerance_refusal`) are
-  refused, never meshed. No client writes a mesh: every reader probes and
-  reads, and the routes refuse a POST to an entry (405).
+  Meshes are derived the same way, and by cadgen alone. The mesher
+  (`_internal/occt_mesh.py`) runs OCCT's `BRepMesh_IncrementalMesh` on the exact
+  BREP at the display tolerance (`tessellation_policy.DISPLAY_TESSELLATION`: the
+  chord tolerance a fraction of the component's bounding diagonal, the angle in
+  radians; a face OCCT refuses is tessellated over its own parameters by
+  `_internal/face_fallback.py`), reading what the triangles do not say from the
+  part's selector table (each face's area, each edge's class) and the
+  component's face colours. A body (`store/meshes.py`) is glTF 2.0 binary in
+  the component's own units: ONE triangle primitive (positions, normals, u16
+  indices up to 65,535 vertices, else u32), a face table whose rows give each
+  face's ordinal, contiguous index range and colour, an edge table giving each
+  edge's ordinal, class and run of polyline points, and the points; the JSON
+  chunk is the canonical JSON for the body's part key, bounds and colour
+  palette, which every reader rebuilds and requires before it views the arrays
+  in place. Any glTF viewer draws it (its one node turns Z-up millimetres into
+  Y-up metres); the tables are `extras`. A face no mesher covers -- OCCT refused
+  it and the fallback's triangles missed its area by more than a quarter --
+  never fails the component: it is meshed without that face, whose range is
+  empty, and the body names it (`unmeshedFaces`, only in a body that has one;
+  the part's entry counts them, `unmeshedFaceCount`). Every reader says so: a
+  view or a list warns which faces of which part it does not draw or count, the
+  CAD Viewer names the parts it draws without them, and a mesh export warns that
+  its file has a hole there and is not watertight. A face smaller than the mesh
+  resolves (area under the deflection squared) may have no triangles and is not
+  named. Any other failure -- OCCT raising, a body its encoding refuses -- is the
+  component's `MeshProductionError`. A mesh export at the display tolerance
+  writes the stored display meshes; one at any other tolerance meshes each part
+  in the exporting process from the very inputs its display mesh was made from
+  -- the BREP, the stored selector table and the face colours (`parts.mesh_at`),
+  so no SURF is extracted -- and stores nothing (the file is the output;
+  `_internal/mesh_export.py`). Tolerances outside the tessellation policy's
+  bounds (`tessellation_policy.tolerance_refusal`) are refused, never meshed. No
+  client writes a part: every reader probes and reads, and the routes refuse a
+  POST to an object (405).
 
 - `assembly.root` is the grouping the author's compound expressed; a link
   appears in it as a node of type `link`.
@@ -592,12 +603,12 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   roots and listing entries). Earlier records are misses: the next source run
   rebuilds outputs whose input hashes may have been captured after a mid-build
   edit, as well as outputs predating distinct occurrence colours.
-  This is one source rebuild; existing geometry and surface objects remain reusable.
+  This is one source rebuild; existing geometry objects and parts remain reusable.
   A record with no `closure.own` leaves nothing out of its listings, which is
   how it hashed them, so it needs no new schema.
-  Document mappings remain payload schema4: saved bytes stay
-  authoritative and are reparsed without guessing colours that the document
-  does not contain. There are no directory or document-byte-key salts. Trees
+  Document mappings use payload schema 7 (the producer hint names the kernel
+  alone): saved bytes stay authoritative and are reparsed without guessing
+  colours that the document does not contain. There are no directory or document-byte-key salts. Trees
   use only geometry schema2; there is no optional old-tree decoder. Schema2
   admits resolved named intrinsic appearance on authored trees. Document indexes may carry an
   optional exact loaded `surfaceProducer` hint outside the tree. A same-tree
@@ -605,7 +616,7 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   drops both unless an attested producer is supplied. A reader selects tree and
   hint from one atomic record snapshot. Geometry ignores absent or invalid
   hints. A prepared warm view can use a valid prior producer without importing
-  the kernel; its concrete mesh provenance remains valid after SURF deletion.
+  the kernel.
 
 - Consumers that speak the older flat shape (the viewer client, the mesh
   exports) read a **flattened** tree: `cadgen.store.trees.flatten` expands
@@ -1128,8 +1139,8 @@ Each with the failure it prevents.
   the project; the record validates them by sha (clause 5). Prevents: a
   store wipe destroying a user's documents, and a document pretending to be
   current after a hand edit.
-- **A hit is a read.** No reader writes the store: a mesh probe, a surface
-  lookup, a bounds hit, a document lookup, the gate, a materialized pin --
+- **A hit is a read.** No reader writes the store: a part probe, a bounds
+  hit, a document lookup, the gate, a materialized pin --
   none refreshes a stamp or an mtime, so "recently used" for eviction means
   recently written (§8). Prevents: a store this user cannot write failing
   every build that only hits it, which the last-use stamps an earlier
@@ -1164,7 +1175,7 @@ Decided mechanically from the returned geometry and occurrence metadata.
   require a matching content digest; a hit still requires the object to exist
   on disk. Complete tree capture verifies every required object on each new
   materialization. Intrinsic recipes live in the immutable geometry tree;
-  no SURF read or surface-recipe cache is needed. Each exposure receives a
+  no surface-recipe cache is needed. Each exposure receives a
   private dictionary. Clearing the byte memo leaves active consumers' shapes
   and appearance maps valid.
 - When the parent's result is written, every tagged child whose native
@@ -1341,18 +1352,19 @@ pass scans the store once (names, sizes, mtimes), marks once, and removes three
 kinds of thing:
 
 1. **Retired kinds and obsolete entries.** The folders in `RETIRED_KINDS`
-   (`index/op`, §2) go, and so do the obsolete surface, selector-table and
-   mesh entries a week old (§2), with every object only those entries named; a younger
-   obsolete entry stays, objects and all, like a current one. An entry naming
+   (`index/op`, `index/surface`, `index/selector`, `index/mesh`, §2) go, and so
+   do the obsolete part entries a week old (§2), with every object only those
+   entries named; a younger obsolete entry stays, objects and all, like a
+   current one. An entry naming
    an object the grace window still keeps waits for the next pass, so that
    object goes with its entry rather than with the next full sweep, and an
    entry written again since the scan stays. The records and document entries
    at keys this cadgen does not own go on the same rule -- a week after their
    last write, and not if written again since the scan; their trees' objects
    are left to the sweep (3), which takes what nothing else reaches.
-2. **Evicted entries**, only under a cap: the derived kinds -- `mesh`,
-   `surface`, `selector`, `component`, `bounds`, `drawing`, `skin`, `section`,
-   `robot` -- least recently written first, until the store fits 80% of the cap. Sizes
+2. **Evicted entries**, only under a cap: the derived kinds -- `part`,
+   `component`, `bounds`, `drawing`, `skin`, `robot` -- least recently written
+   first, until the store fits 80% of the cap. Sizes
    are deduplicated: an
    object goes only when nothing that stays still needs it, so evicting a
    component entry whose BREP a current tree places frees only the entry.
@@ -1373,8 +1385,8 @@ kinds of thing:
 
 **Recently used means recently written.** A hit is a read (§5). An entry's age
 is when a build or a derivation last wrote it -- a publish rewrites every
-component entry its tree has; a derivation writes the surface, selector, mesh,
-bounds, drawing, skin, section or robot entry it computed -- and an object's is when a
+component entry its tree has; a derivation writes the part, bounds, drawing,
+skin or robot entry it computed -- and an object's is when a
 publish last wrote or claimed it. A display cache that is only ever read ages, goes when the cap needs
 the room, and costs one recomputation when it is next shown. Evicting never
 changes an answer: every reader treats a missing entry or object as a miss.
@@ -1429,8 +1441,8 @@ reads, like any older cadgen's, and its records and document entries, at keys
 this cadgen does not own, are retired. The other way round needs only a week: a newer
 cadgen treats an older format as garbage, which is how an upgrade frees the
 space the old one used, and an older cadgen still in use rebuilds what it
-needs -- an obsolete surface, selector-table or mesh entry, a record or a
-document entry, at most once a week (§2). Until then each version keeps its
+needs -- an obsolete part entry, a record or a document entry, at most once a
+week (§2). Until then each version keeps its
 own record and document entry at its own key, so neither recompiles a
 document or rebuilds a model because the other one did. A pass
 never touches anything outside its own folders: object shards
@@ -1442,7 +1454,7 @@ an older sweeper cannot see it, and must know to stand down.
 The mark reads JSON only: records, document entries, derived entries and each
 tree they reach, once each, verified against its address. A leaf object counts
 by being there; whoever reads its bytes verifies them and repairs or recompiles
-a damaged one, so the sweep never reads a BREP or SURF body.
+a damaged one, so the sweep never reads a BREP, a mesh or a selector table.
 
 **The cap** is `CADGEN_STORE_MAX` (`20G`, `500M`, `1.5GiB`, `0` for none;
 default 20 GiB) over the apparent bytes of `objects/` and `index/`. `cadgen
@@ -1455,10 +1467,10 @@ with every request):
 
 - larger than `max(cap, after + cap/5)` -- `after` being where its last pass
   under that cap ended -- gets a full pass with the cap;
-- otherwise, a store holding a retired kind, or holding surfaces, selector tables, meshes,
-  records or document entries that
-  no retiring pass under this cadgen's versions (`gc.producer_versions`: the
-  extractor's and the mesher's) has looked at for a day, gets a retiring pass,
+- otherwise, a store holding a retired kind, or holding parts, records or
+  document entries that no retiring pass under this cadgen's versions
+  (`gc.producer_versions`: the part version) has looked at for a day, gets a
+  retiring pass,
   which retires the retired entries and the week-old obsolete ones -- the
   records and document entries at keys this cadgen does not own among them --
   and sweeps only the objects the retired and obsolete derived entries named. Obsolete entries cannot be told from a stat
@@ -1665,7 +1677,7 @@ The CLI doors (`cadgen step build|compile`, `stl|3mf|glb build`)
 are themselves dispatched through the daemon when one is reachable, so they
 run on warm kernels; the subject-less commands (`store`, `doctor`, `daemon
 status`, all snapshot orchestration) run in-process. STEP snapshots delegate
-missing document compilation and surface derivation to the artifact build pool;
+missing document compilation and part derivation to the artifact build pool;
 their request resolution and browser orchestration never import the CAD kernel.
 
 When the daemon's runtime changes, a request carrying the new version is told
@@ -1969,8 +1981,7 @@ publishing a preview alone is not success. No saved byte hash is mapped to a
 preview tree.
 
 An interactive viewer can retain a complete displayed component across a
-replacement when its full SURF object hash, component identity, origin and
-effective tessellation agree. Tree-specific placements and appearance are
+replacement when its part (its key) and origin agree. Tree-specific placements and appearance are
 recomposed. This is disposable browser ownership, not a new persistent cache
 or source of geometry identity. Superseded or failed staging does not release
 the last complete view's ownership. No automatic-save producer exists in this
@@ -2022,8 +2033,8 @@ supersession does not cancel their exports.
   they served last, and per request stat the tree and the objects of the
   components it names, so a deleted one sends the tree back through the
   complete verification.
-  Components carry `brep`, `codec` and `faceColors`; display SURF resolves
-  separately through `store.surfaces` and `index/surface`.
+  Components carry `brep`, `codec` and `faceColors`; display data resolves
+  separately, by each component's part, through `store.parts` and `index/part`.
 - `CADGEN_VERIFY_READBACK=1` makes every saved build that reuses a document
   tree — composed from its children's (§3) or taken from the document index
   for already-seen bytes — parse the written STEP as well, and fail with the

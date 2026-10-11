@@ -20,10 +20,10 @@ class WorkerPrewarm(unittest.TestCase):
             assert "build123d" not in sys.modules
             assert "OCP.BRep" not in sys.modules
             import cadgen
-            from cadgen.store import surfaces
+            from cadgen.store import parts
             resolved = set()
-            real_kernel, real_version = surfaces.kernel_versions, cadgen._resolve_version
-            surfaces.kernel_versions = lambda: (resolved.add("kernel"), real_kernel())[1]
+            real_kernel, real_version = parts.kernel_versions, cadgen._resolve_version
+            parts.kernel_versions = lambda: (resolved.add("kernel"), real_kernel())[1]
             cadgen._resolve_version = lambda: (resolved.add("cadgen"), real_version())[1]
             original_emit = worker._emit
             def checked_emit(frame):

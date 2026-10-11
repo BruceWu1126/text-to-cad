@@ -3,12 +3,13 @@
 A ref someone copies (``#o1.2.f7``), the facts a tool reports for it and the
 sets the viewer's connected selection grows it to (an edge's chain, a face's
 tangent group) all come from this one table. It is derived from the exact
-BREP and the component's ``.surf`` index -- the SURF already holds the exact
-metrics, surface and curve types, parameters and edge classes; the BREP adds
-what the SURF does not carry: the vertices, which edge ends where, and the
-tangent directions the chains follow -- and stored beside the surface
-(``cadgen.store.selectors``). The page joins its rows to the mesh's face and
-edge tables by ordinal and composes ``occurrenceId + "." + localId``; it
+BREP and the component's SURF index, extracted in memory -- the SURF holds the
+exact metrics, surface and curve types, parameters and edge classes; the BREP
+adds what the SURF does not carry: the vertices, which edge ends where, and the
+tangent directions the chains follow -- and stored as one of a part's two
+objects, beside its display mesh (``cadgen.store.parts``), whose mesher reads
+its faces' areas and edges' classes. The page joins its rows to the mesh's face
+and edge tables by ordinal and composes ``occurrenceId + "." + localId``; it
 mints nothing. The CLI reads the same table (``cadgen.assembly_lookup``).
 
 Ordinals are the ``TopExp.MapShapes_s`` order the SURF and the mesh share, so
@@ -31,9 +32,9 @@ from cadgen._internal.glb_topology import (
 )
 
 # The table's wire schema, read by the page (selectorTable.js) and the CLI: a
-# column added, removed or given a new meaning bumps it. The stored entry's
-# scheme (cadgen.store.selectors.SELECTOR_SCHEME) is bumped with it, and for
-# any change in what the same columns hold.
+# column added, removed or given a new meaning bumps it. The part version
+# (cadgen.store.parts.PART_VERSION) is bumped with it, and for any change in
+# what the same columns hold.
 SELECTOR_TABLE_SCHEMA_VERSION = 1
 OCCURRENCE_ID = "o1"
 _IDENTITY = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]

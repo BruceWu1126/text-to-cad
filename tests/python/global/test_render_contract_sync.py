@@ -57,14 +57,11 @@ class RenderContractSyncTest(unittest.TestCase):
 
     def test_surf_versions_read_and_written_agree_everywhere(self) -> None:
         extractor = ROOT / "packages/cadgen/src/cadgen/_internal/surface_extract.py"
-        store = ROOT / "packages/cadgen/src/cadgen/store/surfaces.py"
+        container = ROOT / "packages/cadgen/src/cadgen/_internal/surf_container.py"
         parser = ROOT / "packages/core/src/lib/surf/container.js"
         written = _extract(r"^SURF_VERSION = (\d+)$", extractor)
-        self.assertEqual(written, _extract(r"^SURF_FORMAT = (\d+)$", store),
-                         "the store validates the format the extractor writes")
         read = {
-            "extractor": _extract(r"^SURF_VERSIONS_READ = \(([\d, ]+)\)$", extractor),
-            "store": _extract(r"^SURF_FORMATS_READ = \(([\d, ]+)\)$", store),
+            "container": _extract(r"^SURF_VERSIONS_READ = \(([\d, ]+)\)$", container),
             "parser": _extract(r"^export const SURF_VERSIONS_READ = Object\.freeze\(\[([\d, ]+)\]\);$", parser),
         }
         versions = {name: [int(v) for v in text.replace(" ", "").split(",") if v] for name, text in read.items()}

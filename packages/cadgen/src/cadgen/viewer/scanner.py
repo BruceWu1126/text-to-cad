@@ -546,7 +546,7 @@ def _build_step_entry(source_path, extension, *, document_hash, tree) -> dict:
         from cadgen._internal.source_sidecar import appearance_digest
 
         # Appearance participates in the composed scene identity only. The
-        # immutable STEP tree/hash and component tessellation keys stay pure.
+        # immutable STEP tree/hash and its parts' keys stay pure.
         entry["appearanceHash"] = appearance_digest(appearance)
         # What it resolves to, per assigned occurrence: the page joins it to the tree by id.
         entry["display"] = metadata.get("display") or {}

@@ -10,9 +10,11 @@ surfaces, and one polyline per model edge lying exactly on the mesh boundary.
 The viewer, snapshots and mesh exports all draw these same bytes.
 
 Face and edge ordinals are ``TopExp.MapShapes`` order on the unlocated
-component -- the order its SURF index and every selector use -- and the SURF
-index supplies what the triangles do not: each face's intrinsic colour and
-each edge's display class. OCCT's mesher drops the odd tiny face at one
+component -- the order its selector table and every selector use -- and the
+mesher reads what the triangles do not say from the component's selector table
+(each face's area, each edge's display class) and its intrinsic face colours:
+the one input a display mesh and a mesh export at another tolerance are both
+made from (``cadgen.store.parts``). OCCT's mesher drops the odd tiny face at one
 deflection and meshes it at the next, so a component whose pass leaves a face
 empty that the mesh can resolve is meshed again, whole and finer, in a fixed
 order. A face no whole pass meshes is one OCCT refuses -- it reads the face's
@@ -313,19 +315,17 @@ def _edge_polyline(edge, adjacent: list[int], face_map, faces, deflection: float
                      for k in range(1, sampler.NbPoints() + 1)], np.float32)
 
 
-def mesh_component(topods, surf_index: dict, *, surface_input: str, surface_object: str,
-                   chord: float, angle: float) -> bytes:
-    """Mesh one unlocated component and return its GLB body.
+def mesh_component(topods, table: dict, face_colors: dict, *, part: str, chord: float, angle: float) -> bytes:
+    """Mesh one unlocated component and return its GLB body, which names ``part``.
 
     ``topods`` is a private decode of the component's BREP: meshing stores its
     triangulation on the shape, so it must not be a shape anything else holds.
-    ``surf_index`` is the component's SURF index (its faces' colours and areas,
-    its edges' classes), in the same ordinals. A failure inside OCCT is the
-    component's ``MeshProductionError``.
+    ``table`` is the component's selector table (its faces' areas, its edges'
+    classes) and ``face_colors`` its intrinsic face colours by ordinal, in the same
+    ordinals. A failure inside OCCT is the component's ``MeshProductionError``.
     """
     try:
-        return _mesh_component(topods, surf_index, surface_input=surface_input,
-                               surface_object=surface_object, chord=chord, angle=angle)
+        return _mesh_component(topods, table, face_colors, part=part, chord=chord, angle=angle)
     except Exception as error:  # noqa: BLE001 - OCCT's own, told apart below
         # OCP raises OCCT's exception classes, whose Python bases differ between
         # platform wheels (Standard_ConstructionError is no Standard_Failure): one is
@@ -335,18 +335,24 @@ def mesh_component(topods, surf_index: dict, *, surface_input: str, surface_obje
         raise MeshProductionError(f"OCCT failed on the component: {type(error).__name__}: {error}") from error
 
 
-def _mesh_component(topods, surf_index: dict, *, surface_input: str, surface_object: str,
-                    chord: float, angle: float) -> bytes:
+def _rows(table: dict, kind: str, *names: str) -> list[tuple]:
+    """``(ordinal, *names)`` of each of the table's ``kind`` rows (``faces`` or ``edges``)."""
+    columns = table["tables"][f"{kind[:-1]}Columns"]
+    at = [columns.index(name) for name in ("ordinal", *names)]
+    return sorted(tuple(row[index] for index in at) for row in table[kind])
+
+
+def _mesh_component(topods, table: dict, face_colors: dict, *, part: str, chord: float, angle: float) -> bytes:
     from cadgen.store.meshes import encode_payload
     from OCP.Precision import Precision
     from OCP.TopoDS import TopoDS
 
     face_map, edge_map = _maps(topods)
-    surf_faces, surf_edges = surf_index.get("faces", []), surf_index.get("edges", [])
-    if len(surf_faces) != face_map.Extent() or len(surf_edges) != edge_map.Extent():
+    table_faces, table_edges = _rows(table, "faces", "area"), _rows(table, "edges", "visibilityClass")
+    if len(table_faces) != face_map.Extent() or len(table_edges) != edge_map.Extent():
         raise MeshProductionError(
             f"the component's BREP has {face_map.Extent()} faces and {edge_map.Extent()} edges, "
-            f"its SURF index {len(surf_faces)} and {len(surf_edges)}"
+            f"its selector table {len(table_faces)} and {len(table_edges)}"
         )
     diagonal = _bounding_diagonal(topods)
     # OCCT refuses a deflection under its confusion tolerance, which a component of
@@ -356,7 +362,7 @@ def _mesh_component(topods, surf_index: dict, *, surface_input: str, surface_obj
     # Only a face that must earns the finer passes: a watch case's 0.002 mm² sliver
     # left a 1,529-face case meshed three times over, fifteen times as long, for a
     # face under what the mesh can resolve.
-    required = [row["ord"] for row in surf_faces if float(row.get("area") or 0.0) >= deflection * deflection]
+    required = [ordinal for ordinal, area in table_faces if float(area or 0.0) >= deflection * deflection]
     if face_map.Extent():
         _mesh(topods, face_map, required, deflection, angle)
     triangulated = _triangulated_faces(topods, face_map)
@@ -368,13 +374,12 @@ def _mesh_component(topods, surf_index: dict, *, surface_input: str, surface_obj
 
     position_parts, normal_parts, index_parts, face_ranges = [], [], [], []
     vertex_base = index_start = 0
-    for row in sorted(surf_faces, key=lambda row: row["ord"]):
-        ordinal = row["ord"]
+    for ordinal, _area in table_faces:
         positions, normals, triangles = faces.get(ordinal, (np.zeros((0, 3), np.float32),) * 2 + (np.zeros((0, 3), np.uint32),))
         position_parts.append(positions)
         normal_parts.append(normals)
         index_parts.append(triangles.reshape(-1) + np.uint32(vertex_base))
-        color = row.get("color")
+        color = face_colors.get(ordinal)
         face_ranges.append({"ord": ordinal, "color": [float(c) for c in color] if color else None,
                             "indexStart": index_start, "indexCount": int(triangles.size)})
         vertex_base += len(positions)
@@ -385,12 +390,11 @@ def _mesh_component(topods, surf_index: dict, *, surface_input: str, surface_obj
 
     adjacent = _edge_faces(topods, face_map, edge_map)
     edges = []
-    for row in sorted(surf_edges, key=lambda row: row["ord"]):
-        ordinal, visibility = row["ord"], str(row.get("class") or "none")
+    for ordinal, visibility in table_edges:
         polyline = _edge_polyline(TopoDS.Edge_s(edge_map.FindKey(ordinal)), adjacent[ordinal],
                                   face_map, faces, deflection, angle)
         if polyline is not None and len(polyline) >= 2:
-            edges.append((ordinal, visibility, np.ascontiguousarray(polyline, "<f4").reshape(-1, 3)))
+            edges.append((ordinal, str(visibility or "none"), np.ascontiguousarray(polyline, "<f4").reshape(-1, 3)))
 
     if len(positions):
         low, high = positions.min(axis=0), positions.max(axis=0)
@@ -400,10 +404,5 @@ def _mesh_component(topods, surf_index: dict, *, surface_input: str, surface_obj
     else:
         low = high = np.zeros(3, np.float32)
     bounds = {"min": [float(v) for v in low], "max": [float(v) for v in high]}
-    part_color = surf_index.get("partColor")
-    return encode_payload(
-        surface_input=surface_input, surface_object=surface_object, chord=chord, angle=angle,
-        positions=positions, normals=normals, indices=indices, face_ranges=face_ranges, edges=edges,
-        bounds=bounds, scale=float(diagonal),
-        part_color=[float(c) for c in part_color] if part_color else None, unmeshed_faces=unmeshed,
-    )
+    return encode_payload(part=part, positions=positions, normals=normals, indices=indices, face_ranges=face_ranges,
+                          edges=edges, bounds=bounds, unmeshed_faces=unmeshed)

@@ -335,30 +335,33 @@ class SavedStepReadbackTest(unittest.TestCase):
                         self.assertEqual(object_path(object_digest).read_bytes(), payload)
                         self.assertEqual(object_hash(payload), object_digest)
 
-    def test_missing_or_unreadable_surface_never_blocks_native_face_colors(self):
+    def test_missing_or_unreadable_display_data_never_blocks_native_face_colors(self):
         from cadgen._internal.step_scene_package import scene_from_render_package
-        from cadgen.store import surfaces
+        from cadgen.store import parts
         from cadgen.store.index import write_entry
         from cadgen.store.objects import object_path, put_object
         from cadgen.store.trees import get_tree
 
         expected = self.seed()
         tree = expected[2]["documentTree"]
-        expected_colors = sorted(tuple(color) for entry in get_tree(tree)["components"].values()
+        components = get_tree(tree)["components"]
+        expected_colors = sorted(tuple(color) for entry in components.values()
                                  for color in entry["faceColors"].values())
-        record = next(iter(surfaces.derive(tree).values()))
-        payload = object_path(record["object"]).read_bytes()
+        cid, record = next(iter(parts.derive(tree).items()))
+        key = parts.part_key(components[cid], parts.producer_identity())
+        payloads = {role: object_path(record[role]["object"]).read_bytes() for role in ("glb", "selectors")}
         for damage in ("missing", "digest-mismatched", "hash-valid-unreadable"):
             with self.subTest(damage=damage):
-                put_object(payload, repair=True)
-                write_entry("surface", record["surfaceInput"], record)
+                for payload in payloads.values():
+                    put_object(payload, repair=True)
+                write_entry("part", key, record)
                 if damage == "missing":
-                    object_path(record["object"]).unlink()
+                    object_path(record["glb"]["object"]).unlink()
                 elif damage == "digest-mismatched":
-                    object_path(record["object"]).write_bytes(b"corrupt surface")
+                    object_path(record["selectors"]["object"]).write_bytes(b"corrupt selector table")
                 else:
-                    write_entry("surface", record["surfaceInput"], {
-                        **record, "object": put_object(b"hash-valid unreadable SURF"),
+                    write_entry("part", key, {
+                        **record, "glb": {**record["glb"], "object": put_object(b"hash-valid unreadable mesh")},
                     })
                 with mock.patch("cadgen._internal.step_scene_loader.load_step_scene", side_effect=AssertionError("native hit parsed STEP")), \
                         mock.patch("cadgen._internal.surface_extract.extract_surface_component", side_effect=AssertionError("native read extracted SURF")):
@@ -433,9 +436,11 @@ class SavedStepReadbackTest(unittest.TestCase):
             self.assertIsNone(scene_from_render_package(self.root / "part.step", step_hash=expected[3]))
 
     def test_honestly_hashed_invalid_native_recipe_and_eager_inputs_cannot_reuse_identity(self):
+        import base64
+
         from cadgen._internal import component_package as cp, step_scene_package
         from cadgen._internal.step_scene_loader import load_step_scene
-        from cadgen.store import surfaces
+        from cadgen.store import parts
         from cadgen.store.build import _publish_document_scene
         from cadgen.store.objects import put_object, read_verified_object
         from cadgen.store.records import note_document_tree
@@ -443,7 +448,7 @@ class SavedStepReadbackTest(unittest.TestCase):
 
         expected = self.seed()
         tree_hash = expected[2]["documentTree"]
-        surface = next(iter(surfaces.derive(tree_hash).values()))["object"]
+        surface = put_object(base64.b64decode(parts.surface(tree_hash, next(iter(get_tree(tree_hash)["components"])))["surface"]))
         for mode in ("unreadable-native", "absent-face", "eager-only", "singular-placement"):
             with self.subTest(mode=mode):
                 tree = get_tree(tree_hash)

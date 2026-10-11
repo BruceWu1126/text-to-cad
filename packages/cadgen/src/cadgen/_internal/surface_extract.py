@@ -1,7 +1,7 @@
-"""B-rep surface extraction: the `.surf` component artifact.
+"""B-rep surface extraction: a component's SURF.
 
-A `.surf` describes one component's exact topology for the clients that select,
-measure and recognize it: per-face analytic surfaces (a bilinear B-spline patch
+A SURF describes one component's exact topology for the code that selects,
+measures and recognizes it: per-face analytic surfaces (a bilinear B-spline patch
 also keeps its four corners), each face's loops as ordered edge references, the
 analytic curve of every edge, and the selector-table metadata -- surface and
 curve types, parameters, exact metrics from GProps/BndLib, edge classes and
@@ -10,8 +10,14 @@ order the selector system has always used, so refs (``#o1.2.f5``) keep their
 meaning, and the component's mesh (``occt_mesh``) is grouped by the same
 ordinals.
 
-Nothing here tessellates, and nothing reads a `.surf` to tessellate: meshes
-are cadgen's, made by OCCT from the exact BREP. So a `.surf` carries no
+It is extracted in memory and stored nowhere: a part's selector table and
+display mesh are derived from it (``cadgen.store.parts``), and feature
+recognition asks for one part's when it needs it. Only an eager-only
+component's SURF is an object, pinned by its tree as part of its geometry
+identity.
+
+Nothing here tessellates, and nothing reads a SURF to tessellate: meshes
+are cadgen's, made by OCCT from the exact BREP. So a SURF carries no
 tessellation inputs -- no trim curves in parameter space, no control nets, no
 basis curves of swept surfaces.
 
@@ -53,10 +59,6 @@ from OCP.TopoDS import TopoDS
 #    carries its degrees and pole counts (a bilinear patch its four corners),
 #    a swept surface its axis or direction, a general curve its range.
 SURF_VERSION = 3
-# A store may still hold version-2 surfaces an older build pinned (an
-# eager-only component's surface is part of its geometry identity); version 3
-# only removed fields, so every reader reads both.
-SURF_VERSIONS_READ = (2, 3)
 
 
 def _enum_name_geomabs(value) -> str:

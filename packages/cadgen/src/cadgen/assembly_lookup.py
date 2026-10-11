@@ -19,9 +19,9 @@ workaround was to re-identify each face by area and position in the owning part'
 which is guesswork whenever a part appears at more than one occurrence.
 
 The fix needs no new data. Each occurrence names a component, and each
-``components/<cid>.selectors.json`` -- the component's selector table, derived beside its
-``.surf`` (``_internal/selector_table``) and the same table the CAD Viewer reads -- already
-carries that part's own complete topology. So this module ADDS the instance-tree occurrences
+``components/<cid>.selectors.json`` -- the component's selector table, one of its part's two
+objects (``_internal/selector_table``, ``store.parts``) and the same table the CAD Viewer
+reads -- already carries that part's own complete topology. So this module ADDS the instance-tree occurrences
 to the flat index rather than replacing it: ``#o1.f19`` keeps resolving exactly as before, and
 ``#o1.12`` starts resolving, to the entity the viewer shows under that ref.
 
@@ -199,9 +199,9 @@ def _place_entity_row(matrix: list[float], row: Mapping[str, Any]) -> dict[str, 
 
 
 def _read_component_table(package_dir: Path, component: str) -> dict[str, Any] | None:
-    """A component's selector table, as the view carries it beside its ``.surf``
-    (``store.view``): the one table the page reads too, so a ref resolves here to
-    the entity it names there. None when the view holds none or it does not read."""
+    """A component's selector table, as the view carries it (``store.view``): the
+    one table the page reads too, so a ref resolves here to the entity it names
+    there. None when the view holds none or it does not read."""
     from cadgen._internal.selector_table import read_selector_table
     from cadgen.store.view import SELECTOR_TABLE_SUFFIX
 

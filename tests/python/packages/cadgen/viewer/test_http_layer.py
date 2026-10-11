@@ -215,11 +215,8 @@ class ServerInfo(HttpLayerTestCase):
         # Where a developer's relative links resolve, spelled with "/". A viewer has no root.
         self.assertEqual(info["start"], self.fixture.root.replace(os.sep, "/"))
         self.assertIsInstance(info["pick"], bool)
-        # The display tolerance the page draws STEP models at is cadgen's, and said here.
-        from cadgen.tessellation_policy import DISPLAY_TESSELLATION
-
-        self.assertEqual(info["tessellation"], DISPLAY_TESSELLATION)
-        self.assertEqual(list(info), ["app", "identityToken", "autoReload", "platform", "tessellation", "user",
+        # No tolerance: the page reads each part's one display mesh by its key.
+        self.assertEqual(list(info), ["app", "identityToken", "autoReload", "platform", "user",
                                       "start", "pick", "port", "pid"])
         self.assertEqual(headers["cache-control"], "no-store")
 
@@ -792,26 +789,30 @@ class EveryRouteAnswersForReal(HttpLayerTestCase):
     def test_tess_get_uses_the_probed_object_and_byte_limit(self):
         import base64
         import json
-        from cadgen.store import meshes
-        from tests.python.support.tessellation import tessellation_fixture
+        from cadgen.store import parts
+        from tests.python.support.tessellation import part_fixture, store_part
 
-        fixture = tessellation_fixture()
-        payload = base64.b64decode(fixture["bytes"])
+        fixture = part_fixture()
+        key = fixture["key"]
         with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(Path(self.fixture.root) / "store")}):
-            row = meshes.write(fixture["key"], payload)
+            record = store_part(fixture)
             status, _, body = self.fixture.request("POST", "/__tess_cache/probe", headers={"x-cadgen-viewer": "1"},
-                                                 body=json.dumps({"tessellationInputs": [fixture["key"]]}).encode())
+                                                 body=json.dumps({"parts": [key, "2" * 64 + key[64:]]}).encode())
             self.assertEqual(status, 200)
-            self.assertEqual(json.loads(body)["entries"][fixture["key"]], row)
-            route = f"/__tess_cache/{fixture['key']}.glb?object={row['object']}&maxBytes={row['byteLength']}"
-            status, headers, body = self.fixture.request("GET", route)
-            self.assertEqual((status, body), (200, payload))
-            self.assertEqual({name.lower(): value for name, value in headers.items()}.get("content-type"), "model/gltf-binary")
-            # cadgen writes every mesh: a client's write is refused, and changes nothing.
-            status, headers, _ = self.fixture.request("POST", f"/__tess_cache/{fixture['key']}.glb",
-                                                      headers={"x-cadgen-viewer": "1"}, body=payload)
+            self.assertEqual(json.loads(body), {"entries": {key: record}}, "a part the store lacks is absent")
+            # The part's display mesh and its selector table, each read by what its record says of it.
+            for role, suffix, content_type in (("glb", ".glb", "model/gltf-binary"),
+                                               ("selectors", ".selectors.json", "application/json")):
+                with self.subTest(role=role):
+                    route = f"/__tess_cache/{key}{suffix}?object={record[role]['object']}&maxBytes={record[role]['byteLength']}"
+                    status, headers, body = self.fixture.request("GET", route)
+                    self.assertEqual((status, body), (200, base64.b64decode(fixture[role])))
+                    self.assertEqual({name.lower(): value for name, value in headers.items()}.get("content-type"), content_type)
+            # cadgen writes every part: a client's write is refused, and changes nothing.
+            status, headers, _ = self.fixture.request("POST", f"/__tess_cache/{key}.glb",
+                                                      headers={"x-cadgen-viewer": "1"}, body=base64.b64decode(fixture["glb"]))
             self.assertEqual(status, 405)
-            self.assertEqual(meshes.probe(fixture["key"]), row)
+            self.assertEqual(parts.probe(key), record)
 
     def test_no_route_reports_itself_as_unported(self):
         # This class used to list the routes still awaiting their step, each
