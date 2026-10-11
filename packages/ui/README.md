@@ -257,7 +257,9 @@ background work. Features has no X: an assembly shows it whenever Select is up, 
 too. Links' X closes it alone (Select stays the tool, marked) until a press on Select brings
 it back; it starts closed on a phone, until a person chooses. The tree, the Reference and
 Position each open as tall as their content needs, up to the whole stack, and are each sized
-by their own bottom-right grip, Quick Edit's. SDF metadata is a Select panel
+by their own bottom-right grip, Quick Edit's. The toggle at the strip's right end hides the
+strip and every panel, sliding them out to the left, and shows them again; they start hidden
+on a phone, until a person chooses. SDF metadata is a Select panel
 too. Links is the description's link tree, with the Model tree's rows, filter
 and Reference panel; see [robot links](docs/cad-renderer.md#robot-links).
 The binding [viewer design system](docs/settings-ui.md) defines tool lifecycle,
