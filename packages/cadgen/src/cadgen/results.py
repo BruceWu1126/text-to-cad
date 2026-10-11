@@ -126,7 +126,7 @@ class MeshExportFile:
     #: tolerance pair, so nothing was written.
     skipped: bool
     #: The EFFECTIVE pair the file was written at: the door's argument, else the
-    #: mesh default (1.5e-3 / 0.35) -- a number either way, never null.
+    #: display tolerance (5e-4 / 0.35) -- a number either way, never null.
     #: A door reads no model declaration.
     mesh_tolerance: float | None = None
     mesh_angular_tolerance: float | None = None

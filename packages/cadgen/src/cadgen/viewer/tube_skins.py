@@ -10,8 +10,8 @@ document whose animation bends a tube.
 
 Statuses, in the order they are decided:
 
-* no ``?file=``, a ref that is not an absolute path, or one that is not a STEP, or
-  a tessellation that is not one -> 400 (through the GET funnel's JSON error).
+* no ``?file=``, a ref that is not an absolute path, or one that is not a STEP
+  -> 400 (through the GET funnel's JSON error).
 * no such file, a document not built, a sidecar this cadgen cannot read or none,
   or an animation that bends no tube -> 404.
 * ``documentHash`` naming other bytes than the file holds now -> 409: the view is
@@ -39,16 +39,7 @@ def tube_skins_url(path: str, document_hash: str) -> str:
             f"&documentHash={encode_uri_component(str(document_hash))}")
 
 
-def _tolerance(value, name: str) -> float | None:
-    if value in (None, ""):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        raise ValueError(f"{TUBE_SKINS_ROUTE_PATH} {name} must be a number, got {value!r}") from None
-
-
-def tube_skins_response(file_ref, document_hash=None, chord=None, angle=None) -> tuple[int, bytes | dict]:
+def tube_skins_response(file_ref, document_hash=None) -> tuple[int, bytes | dict]:
     """``(status, body)``: the payload's bytes at 200, or a JSON error dict."""
     if not file_ref:
         raise ValueError(f"GET {TUBE_SKINS_ROUTE_PATH} needs ?file=<the absolute path of a .step>")
@@ -56,7 +47,6 @@ def tube_skins_response(file_ref, document_hash=None, chord=None, angle=None) ->
     if not candidate.lower().endswith(_STEP_SUFFIXES):
         raise ValueError(f"{TUBE_SKINS_ROUTE_PATH} binds the tubes of STEP documents; "
                          f"{node_basename(candidate)} is not one")
-    chord, angle = _tolerance(chord, "chord"), _tolerance(angle, "angle")
     if not os.path.isfile(candidate):
         return 404, {"error": "Not found"}
     snapshot = result_snapshot(candidate)
@@ -77,8 +67,7 @@ def tube_skins_response(file_ref, document_hash=None, chord=None, angle=None) ->
         sidecar = read_source_sidecar(candidate, document_hash=current)
     except (SidecarBindingError, SidecarSchemaError):
         sidecar = None
-    data = tube_skins_bytes(tree=tree, document_hash=current, animation=(sidecar or {}).get("animation"),
-                            chord=chord, angle=angle)
+    data = tube_skins_bytes(tree=tree, document_hash=current, animation=(sidecar or {}).get("animation"))
     if data is None:
         return 404, {"error": f"{node_basename(candidate)} bends no tube"}
     return 200, data

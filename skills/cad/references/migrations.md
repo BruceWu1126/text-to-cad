@@ -83,10 +83,19 @@ no part carries fails the build, naming the clip and the time.
 
 ## Meshes come from cadgen in 0.8
 
-cadgen 0.8 meshes every component itself, with OCCT, and every client draws
-those meshes: the CAD Viewer, snapshots and the CAD app no longer tessellate,
-and nothing cadgen runs needs Node. Model scripts need no change; the tolerance
-options keep their names, units and defaults.
+cadgen 0.8 meshes every component itself, with OCCT, at one display tolerance,
+and every client draws those meshes: the CAD Viewer, snapshots and the CAD app no
+longer tessellate, and nothing cadgen runs needs Node.
+
+- `@step` takes no mesh tolerance: delete `mesh_tolerance=` and
+  `mesh_angular_tolerance=` from it (`@step got an unexpected keyword argument`).
+  A model run (`python <model>.py`) takes no `--mesh-tolerance` or
+  `--mesh-angular-tolerance`, and a snapshot job no `quality` key: every view
+  and snapshot draws the display tolerance.
+- `@stl`/`@glb`/`@threemf` and the export commands keep both tolerances, in the
+  same units. An export that names none is written at the display tolerance
+  (chord `5e-4` of the bounding diagonal, angle `0.35`), from the meshes the
+  viewer draws; a declared export no longer inherits anything from `@step`.
 
 - The first build or export after upgrading rewrites every STL, 3MF and GLB
   once, with OCCT's triangles: the same surfaces within the same tolerances, in

@@ -39,7 +39,7 @@ from cadgen._internal.mesh_export import (
     run_mesh_exporter,
 )
 from cadgen.metadata import normalize_mesh_numeric
-from cadgen.store.meshes import DEFAULT_ANGLE, DEFAULT_CHORD
+from cadgen.store.meshes import DISPLAY_ANGLE, DISPLAY_CHORD
 from cadgen.step_artifact_cli import _build_entry_spec
 
 # :data:`MESH_EXPORT_FORMATS` (cadgen._internal.mesh_export) is what
@@ -362,13 +362,11 @@ def export_cad_target(
                 "format": job.fmt,
                 "path": str(job.out),
                 "skipped": skipped,
-                # The EFFECTIVE pair: an omitted tolerance is the store's mesh
-                # default, and the result says which number that was. (The ledger
-                # keeps keying an omitted tolerance as "default", so a changed
-                # default re-exports rather than reading as current.)
-                "meshTolerance": job.mesh_tolerance if job.mesh_tolerance is not None else DEFAULT_CHORD,
+                # The EFFECTIVE pair: an omitted tolerance is the display
+                # tolerance, and the result says which number that was.
+                "meshTolerance": job.mesh_tolerance if job.mesh_tolerance is not None else DISPLAY_CHORD,
                 "meshAngularTolerance": (
-                    job.mesh_angular_tolerance if job.mesh_angular_tolerance is not None else DEFAULT_ANGLE
+                    job.mesh_angular_tolerance if job.mesh_angular_tolerance is not None else DISPLAY_ANGLE
                 ),
                 "animation": summary,
             }

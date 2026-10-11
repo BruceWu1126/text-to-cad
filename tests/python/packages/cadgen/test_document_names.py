@@ -74,14 +74,13 @@ class DocumentNamesTests(unittest.TestCase):
         self.root = Path(temp.name)
 
     def _build(self, name: str, source: str, *models: str) -> None:
-        from cadgen.catalog import StepImportOptions
         from cadgen.generation import generate_step_targets
 
         script = self.root / name
         script.write_text(source, encoding="utf-8")
         targets = [f"{script}::{model}" for model in models] or [str(script)]
         self.assertEqual(0, generate_step_targets(
-            targets, step_options=StepImportOptions(), force=True, verbose=False,
+            targets, force=True, verbose=False,
         ))
 
     def test_every_name_is_an_authored_label(self) -> None:

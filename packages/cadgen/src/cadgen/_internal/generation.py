@@ -9,10 +9,7 @@ from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Sequence
 
-from cadgen.catalog import (
-    StepImportOptions,
-    source_from_path,
-)
+from cadgen.catalog import source_from_path
 from cadgen.cli_logging import CliLogger
 from cadgen._internal.glb_topology import build_step_topology_index_manifest
 from cadgen.coordination import (
@@ -43,7 +40,6 @@ from cadgen._internal.generation_runner import (
 from cadgen._internal.generation_spec import (
     EntrySpec,
     GeneratedStepResult,
-    _apply_step_options_to_spec,
     _cli_progress_line,
     _display_path,
     _entry_spec_from_source,
@@ -901,10 +897,8 @@ def _produce_declared_mesh_exports(
     Content-gated deliberately even under --force: a byte-identical rebuild
     leaves exports byte-identical by determinism, so rewriting them is pure waste.
 
-    Tolerance precedence: run-level flag > declaration > @step model-level >
-    tessellator default. The flag is folded into ``spec.mesh_exports`` (and the
-    model-level value) by ``_apply_step_options_to_spec`` before this runs, so
-    "declaration, else model" below already honours it.
+    A declaration's own tolerances are the only ones: one that names none is
+    written at the display tolerance, from the very meshes the viewer draws.
     """
     if not spec.mesh_exports or spec.entry_path is None or spec.step_path is None:
         return ()
@@ -939,18 +933,12 @@ def _produce_declared_mesh_exports(
     appearance_key = appearance_digest(appearance)
     pending: list[MeshExportJob] = []
     for declared in spec.mesh_exports:
-        chord = declared.mesh_tolerance if declared.mesh_tolerance is not None else spec.mesh_tolerance
-        angle = (
-            declared.mesh_angular_tolerance
-            if declared.mesh_angular_tolerance is not None
-            else spec.mesh_angular_tolerance
-        )
         if mesh_export_current(
             declared.path,
             model=model,
             document_hash=document_hash,
-            mesh_tolerance=chord,
-            mesh_angular_tolerance=angle,
+            mesh_tolerance=declared.mesh_tolerance,
+            mesh_angular_tolerance=declared.mesh_angular_tolerance,
             appearance_key=appearance_key,
         ):
             continue
@@ -959,8 +947,8 @@ def _produce_declared_mesh_exports(
             MeshExportJob(
                 fmt=declared.fmt,
                 out=declared.path,
-                mesh_tolerance=chord,
-                mesh_angular_tolerance=angle,
+                mesh_tolerance=declared.mesh_tolerance,
+                mesh_angular_tolerance=declared.mesh_angular_tolerance,
             )
         )
     if not pending:
@@ -1019,15 +1007,10 @@ def _generate_step_outputs_for_cli(
     return _generate_step_outputs(spec, **kwargs)
 
 
-def _selected_specs_for_targets(
-    targets: Sequence[str],
-    *,
-    step_options: StepImportOptions | None = None,
-) -> tuple[list[EntrySpec], list[EntrySpec]]:
+def _selected_specs_for_targets(targets: Sequence[str]) -> tuple[list[EntrySpec], list[EntrySpec]]:
     """``(all specs the targets reach, the targets' own specs)``. A target is a
     model script or a document — its outputs are what it declares (``out=``);
     nothing on the command line renames them."""
-    step_options = step_options or StepImportOptions()
     explicit_specs: list[EntrySpec] = []
     unresolved_targets: list[str] = []
     from cadgen.store.index import MODEL_REF_SEP
@@ -1041,14 +1024,14 @@ def _selected_specs_for_targets(
         target_path = Path(target_text)
         resolved = target_path.resolve() if target_path.is_absolute() else (Path.cwd() / target_path).resolve()
         source = (
-            source_from_path(resolved, function=function or None, step_options=step_options)
+            source_from_path(resolved, function=function or None)
             if resolved.exists()
             else None
         )
         if source is None:
             unresolved_targets.append(target_text)
             continue
-        explicit_specs.append(_apply_step_options_to_spec(_entry_spec_from_source(source), step_options))
+        explicit_specs.append(_entry_spec_from_source(source))
 
     if not unresolved_targets:
         return list(explicit_specs), explicit_specs
@@ -1449,7 +1432,6 @@ def _assembly_glb_package_current(spec: EntrySpec) -> bool:
 def generate_step_targets(
     targets: Sequence[str],
     *,
-    step_options: StepImportOptions | None = None,
     force: bool = False,
     verbose: bool = False,
     json_output: bool = False,
@@ -1505,11 +1487,9 @@ def generate_step_targets(
             else:
                 document = entry["document"]
                 print(f"{entry['outcome']} {_display_path(Path(document)) if document else entry['tree']}")
-    all_specs, selected_specs = _selected_specs_for_targets(targets, step_options=step_options)
+    all_specs, selected_specs = _selected_specs_for_targets(targets)
     for spec in selected_specs:
         _validate_step_target(spec, tool_name=tool_name)
-    if step_options is not None and step_options.has_metadata:
-        selected_specs = [_apply_step_options_to_spec(spec, step_options) for spec in selected_specs]
     # Children are not rebuilt here any more: a parent depends on its children by
     # RESULT (their pinned trees, gate clause 3), and a stale child is built when
     # the parent's body calls it (cadgen.authoring._compose_child).

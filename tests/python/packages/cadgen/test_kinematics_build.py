@@ -116,12 +116,10 @@ class KinematicsBuildTests(unittest.TestCase):
         self._tempdir.cleanup()
 
     def _build(self, script: Path) -> int:
-        from cadgen.catalog import StepImportOptions
         from cadgen.generation import generate_step_targets
 
         return generate_step_targets(
             [str(script)],
-            step_options=StepImportOptions(),
             force=True,
             verbose=False,
         )

@@ -39,8 +39,8 @@ reference host `basic-host` does.
   showing that file, or the home. Agents name models by absolute path only, and
   nothing here branches on a surface's name but one: `surface: file` (below).
 - **A launch is enough to start.** It also carries what the server is — its
-  `protocol`, `version` and `platform`, and the display tessellation ladder the
-  page installs before it draws a STEP model (`tessellation`, cadgen's policy) —
+  `protocol`, `version` and `platform`, and the display tolerance the page
+  installs before it draws a STEP model (`tessellation`, cadgen's policy) —
   and the home's carries its `recents`,
   so the page asks nothing before it draws. A launch from another build (a tab
   the host restored after an update, a past chat's card) says so: the page

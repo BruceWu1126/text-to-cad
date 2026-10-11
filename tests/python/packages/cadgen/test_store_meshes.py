@@ -104,7 +104,7 @@ class MeshStoreContract(unittest.TestCase):
         faces, edges = 30_000, 45_000
         key = meshes.tessellation_key("2" * 64)
         payload = meshes.encode_payload(
-            surface_input="2" * 64, surface_object="b" * 64, chord=meshes.DEFAULT_CHORD, angle=meshes.DEFAULT_ANGLE,
+            surface_input="2" * 64, surface_object="b" * 64, chord=meshes.DISPLAY_CHORD, angle=meshes.DISPLAY_ANGLE,
             positions=np.zeros((3 * faces, 3), np.float32), normals=np.zeros((3 * faces, 3), np.float32),
             indices=np.arange(3 * faces, dtype=np.uint32),
             face_ranges=[{"ord": n, "indexStart": 3 * (n - 1), "indexCount": 3} for n in range(1, faces + 1)],

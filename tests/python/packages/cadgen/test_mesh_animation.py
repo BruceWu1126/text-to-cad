@@ -156,10 +156,12 @@ class TheFreshnessVariant(unittest.TestCase):
         from cadgen._internal.source_sidecar import appearance_digest
 
         static = mesh_variant_key("glb", None, None)
+        # An omitted tolerance is keyed as the display tolerance it is written at.
         self.assertEqual(
-            f"glb|default|default|serializer:{GLB_SERIALIZATION_VERSION}|appearance:{appearance_digest(None)}",
+            f"glb|0.0005|0.35|serializer:{GLB_SERIALIZATION_VERSION}|appearance:{appearance_digest(None)}",
             static,
         )
+        self.assertEqual(static, mesh_variant_key("glb", 5e-4, 0.35))
         animated = mesh_variant_key("glb", None, None, "deadbeef")
         self.assertNotEqual(static, animated)
         self.assertTrue(animated.startswith(static))

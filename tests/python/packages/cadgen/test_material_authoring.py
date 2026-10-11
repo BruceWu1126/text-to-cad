@@ -266,13 +266,12 @@ if __name__ == "__main__":
 """,
             encoding="utf-8",
         )
-        from cadgen.catalog import StepImportOptions
         from cadgen.generation import generate_step_targets
         from cadgen.store.index import model_ref
         from cadgen.store.records import read_record
 
         self.assertEqual(0, generate_step_targets(
-            [str(script)], step_options=StepImportOptions(), force=True, verbose=False
+            [str(script)], force=True, verbose=False
         ))
         sidecar = read_source_sidecar(script.with_suffix(".step"))
         animation_before = sidecar["animation"]
@@ -306,7 +305,7 @@ if __name__ == "__main__":
             side_effect=AssertionError("annotation-only refresh ran model geometry"),
         ):
             self.assertEqual(0, generate_step_targets(
-                [str(script)], step_options=StepImportOptions(), force=False, verbose=False
+                [str(script)], force=False, verbose=False
             ))
         refreshed = read_record(model_ref(script, "colored"))
         self.assertEqual(step_before, script.with_suffix(".step").read_bytes())
@@ -327,7 +326,7 @@ if __name__ == "__main__":
             generation, "run_script_generator", wraps=generation.run_script_generator
         ) as ran:
             self.assertEqual(0, generate_step_targets(
-                [str(script)], step_options=StepImportOptions(), force=False, verbose=False
+                [str(script)], force=False, verbose=False
             ))
         self.assertEqual(1, ran.call_count)
         rebaked = read_source_sidecar(script.with_suffix(".step"))["animation"]

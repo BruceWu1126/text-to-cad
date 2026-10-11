@@ -15,8 +15,7 @@ from lib import spec as S
 from lib.palette import material_compound, materials_for_system
 
 
-@step(out="../STEP/camdrive.step", materials=materials_for_system("camdrive"),
-      mesh_tolerance=0.0006, mesh_angular_tolerance=0.3)
+@step(out="../STEP/camdrive.step", materials=materials_for_system("camdrive"))
 def camdrive():
     parts = camdrive_lib.build(S.SECTIONED)
     if not parts:

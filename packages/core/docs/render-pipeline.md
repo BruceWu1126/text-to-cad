@@ -129,11 +129,10 @@ Lighting quality is `preview` or `final`, mapping to standard/high scene policy.
 The viewer passes `lightingQuality: "preview"`; the CLI baseline is `final`.
 That environment default also feeds Custom comparison and does not pin a saved
 override. An explicit `lighting.quality` wins in either context.
-Final uses the finest mesh rung, a 0.25px viewport target, 4096px spotlight
-shadows, a 512px procedural environment and 2x snapshot capture. Which mesh rung
-a still draws is cadgen's (`cadgen.tessellation_policy.snapshot_tessellation`),
-named in the job as `resolved.tessellation`; `quality.tessellation` and
-`output.renderScale` remain explicit overrides.
+Final uses a 0.25px viewport target, 4096px spotlight shadows, a 512px
+procedural environment and 2x snapshot capture. Every still draws cadgen's display
+tolerance (`cadgen.tessellation_policy`), named in the job as
+`resolved.tessellation`; `output.renderScale` remains an explicit override.
 PNG output retains requested dimensions by resampling the full drawing buffer.
 
 The two studios use one physical Render pipeline. A neutral HDR key card, a rear
@@ -326,11 +325,9 @@ Accepted input fields:
   which the source carries as it is (`loadSourceAnimation` compiles it). A job's own
   top-level `animation` is its frame request, not the section.
 - `resolved.tessellation`: the `{chordTolerance, angleTolerance}` a STEP job's
-  components are drawn at, both named: cadgen's choice for the job (an explicit
-  `quality.tessellation`, else the rung its lighting quality asks for), checked
-  against the floors before a browser starts. A package read from a mesh store
-  needs it; a static package (the docs hero) names none and draws each component
-  mesh at the tessellation cadgen exported it at.
+  components are drawn at, both named: cadgen's display tolerance. A package
+  read from a mesh store needs it; a static package (the docs hero) names none
+  and draws each component mesh at the tessellation cadgen exported it at.
 
 STEP-only options are rejected for non-STEP sources. The old shared `params`
 field is rejected, and so is the retired `stepParameters` spelling; use

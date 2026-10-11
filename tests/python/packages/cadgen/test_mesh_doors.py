@@ -45,9 +45,9 @@ _WROTE_STL = {
             "format": "stl",
             "path": "/abs/sample.stl",
             "skipped": False,
-            # The engine reports the EFFECTIVE pair: the mesh defaults when the
-            # door was given none, never null.
-            "meshTolerance": 1.5e-3,
+            # The engine reports the EFFECTIVE pair: the display tolerance when
+            # the door was given none, never null.
+            "meshTolerance": 5e-4,
             "meshAngularTolerance": 0.35,
         }
     ],

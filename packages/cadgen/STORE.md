@@ -403,7 +403,7 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   (area under the deflection squared) may have no triangles and is not named. Any
   other failure -- OCCT raising, a body its encoding refuses -- is the component's
   `MeshProductionError`. A component is ready once its surface and every mesh asked for are
-  stored: the CAD Viewer's cold components ask for the standard level in the
+  stored: the CAD Viewer's cold components ask for the display tolerance in the
   surface request that derives them, a mesh export asks for its tolerances (a
   build's own export derives them in the build's process, §9), and
   the snapshot host has the build pool mesh what its page found missing, from
@@ -942,12 +942,10 @@ reuse check; it is taken again only after the job waited for a slot, or after
 another model of the same run was built, either of which can change it. The
 already-stale notice after publishing asks anew (§9a).
 
-Mesh tolerances and argv flags are not inputs. A model run's
-`--mesh-tolerance` / `--mesh-angular-tolerance` override every declared mesh's
-tolerance for that run (flag > declaration > `@step` > default): each mesh's
-ledger entry records the pair the file was written at, so the declared meshes
-are re-cut from the current tree — the model is never rebuilt for it — and the
-next run without the flags restores them, once. Imported STEPs are inputs (a
+Mesh tolerances and argv flags are not inputs. A declared mesh's ledger entry
+records the effective pair the file was written at (an omitted tolerance is the
+display tolerance's), so a changed declaration re-cuts that mesh from the current
+tree — the model is never rebuilt for it. Imported STEPs are inputs (a
 file the body reads is in the closure), not models. `--force` rebuilds the named
 model only; its children go through the gate as usual. `cadgen store forget
 <model.py>` drops the record instead, so the next run — not this one — rebuilds

@@ -4,7 +4,7 @@
 // real meshes (cadgen/store/meshes.py encode_payload); nothing in the product
 // imports this module. Browser-safe, so browser tests can use it too.
 
-import { TESSELLATION_LADDER } from "./fixtures/tessellationLadder.js";
+import { DISPLAY_TESSELLATION } from "./fixtures/displayTessellation.js";
 import { installTessellationLadder } from "./lodPolicy.js";
 import {
   MESH_EDGE_CLASSES,
@@ -19,10 +19,23 @@ import {
 
 const UNSIGNED_SHORT_VERTEX_LIMIT = 65535;
 
-/** The display ladder a cadgen server publishes, as cadgen wrote it for the tests. */
+/** The display tolerance a cadgen server publishes, as cadgen wrote it for the tests. */
+export const TEST_DISPLAY_TESSELLATION = DISPLAY_TESSELLATION;
+
+// The rungs the level-of-detail tests draw at: coarse to fine, opening at the second, which
+// the fixture meshes (`fixtures/*.l<level>.glb`) were cut at.
+const TESSELLATION_LADDER = Object.freeze({
+  levels: Object.freeze([
+    { chordTolerance: 2e-3, angleTolerance: 1.4 },
+    { chordTolerance: 1.5e-3, angleTolerance: 0.35 },
+    { chordTolerance: 5e-4, angleTolerance: 0.35 },
+    { chordTolerance: 1.5e-4, angleTolerance: 0.35 },
+  ]),
+  defaultLevel: 1,
+});
 export const TEST_TESSELLATION_LADDER = TESSELLATION_LADDER;
 
-/** Install that ladder, as a host installs the one its server publishes. */
+/** Install that ladder for the level-of-detail tests. */
 export function installTestTessellationLadder() {
   return installTessellationLadder(TESSELLATION_LADDER);
 }

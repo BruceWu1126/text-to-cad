@@ -30,9 +30,7 @@ class StepArtifactsTests(unittest.TestCase):
                 source_path=source_path,
                 step_path=step_path,
             )
-            spec = step_artifacts._entry_spec_for_target(
-                target, mesh_tolerance=None, mesh_angular_tolerance=None
-            )
+            spec = step_artifacts._entry_spec_for_target(target)
             # Imported, even with a same-stem script sitting right beside it.
             self.assertEqual(spec.source, "imported")
             self.assertIsNone(spec.script_path)
@@ -55,9 +53,7 @@ class StepArtifactsTests(unittest.TestCase):
                 step_path=step_path,
             )
             with self.assertRaises(FileNotFoundError):
-                step_artifacts._entry_spec_for_target(
-                    target, mesh_tolerance=None, mesh_angular_tolerance=None
-                )
+                step_artifacts._entry_spec_for_target(target)
 
     def test_existing_step_spec_can_reuse_python_backed_glb_when_step_hash_matches(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -200,8 +196,6 @@ class EnsureStepTopologyArtifactDebugTests(unittest.TestCase):
                     display_name=None,
                     generator_names=("model",),
                     format="step",
-                    mesh_tolerance=None,
-                    mesh_angular_tolerance=None,
                     entry_function="model",
                     out_target=None,
                     is_decorated=True,

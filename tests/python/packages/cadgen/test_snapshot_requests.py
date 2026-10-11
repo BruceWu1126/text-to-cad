@@ -184,16 +184,9 @@ class CrossKindOptionsAreRefusedByName(_Workspace):
         # cannot honour must not cost a flattening first.
         with mock.patch.object(snapshot_cli, "drawing_payload_file", side_effect=AssertionError("flattened")):
             with self.assertRaises(SnapshotError) as caught:
-                self.resolve({"input": "panel.dxf", "outputs": [{"path": "o.png"}],
-                              "quality": {"tessellation": {"chordTolerance": 0.001}}})
-        self.assertIn("a DXF drawing is line work, not a tessellated surface", str(caught.exception))
+                self.resolve({"input": "panel.dxf", "outputs": [{"path": "o.png"}], "kinematics": "open"})
+        self.assertIn("a DXF drawing has no kinematics", str(caught.exception))
         self.assertNotIn("GLB", str(caught.exception))
-
-    def test_a_robots_link_meshes_cannot_be_retessellated_either(self) -> None:
-        self.write("arm.urdf", URDF)
-        with self.assertRaisesRegex(SnapshotError, r"quality\.tessellation requires an exact-surface STEP package"):
-            self.resolve({"input": "arm.urdf", "outputs": [{"path": "o.png"}],
-                          "quality": {"tessellation": {"chordTolerance": 0.001}}})
 
     def test_a_mesh_doors_mode_error_offers_only_the_modes_it_accepts(self) -> None:
         """S12: `--display Wireframe` on an STL used to list all five presets."""

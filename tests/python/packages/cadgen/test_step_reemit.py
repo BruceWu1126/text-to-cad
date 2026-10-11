@@ -70,7 +70,6 @@ class StepReemitTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        from cadgen.catalog import StepImportOptions
         from cadgen.generation import generate_step_targets
 
         # IsolatedCadRoots registers its cwd and CADGEN_CACHE_DIR restores as cleanups on a
@@ -83,7 +82,7 @@ class StepReemitTests(unittest.TestCase):
                 script = Path(tempdir.name) / "hinge.py"
                 script.write_text(MODEL, encoding="utf-8")
                 if generate_step_targets(
-                    [str(script)], step_options=StepImportOptions(), force=True, verbose=False
+                    [str(script)], force=True, verbose=False
                 ):
                     raise RuntimeError("the seed document could not be built")
                 cls._vendor_bytes = (Path(tempdir.name) / "hinge.step").read_bytes()

@@ -53,7 +53,7 @@ MESH_FORMAT_SUFFIX = {"stl": ".stl", "3mf": ".3mf", "glb": ".glb"}
 class MeshExportJob:
     """One output the exporter must write: format, destination, and the
     tolerances it meshes at (``None`` = the store's defaults,
-    ``cadgen.store.meshes.DEFAULT_CHORD``/``DEFAULT_ANGLE``). The geometry is the
+    ``cadgen.store.meshes.DISPLAY_CHORD``/``DISPLAY_ANGLE``). The geometry is the
     document's tree as stored; a mesh never moves it.
 
     ``animation`` is the GLB door's clip request (cadgen._internal.mesh_animation)
@@ -116,8 +116,8 @@ def run_mesh_exporter(
     label = "+".join(job.fmt for job in jobs)
     pairs = [
         (
-            float(meshes.DEFAULT_CHORD if job.mesh_tolerance is None else job.mesh_tolerance),
-            float(meshes.DEFAULT_ANGLE if job.mesh_angular_tolerance is None else job.mesh_angular_tolerance),
+            float(meshes.DISPLAY_CHORD if job.mesh_tolerance is None else job.mesh_tolerance),
+            float(meshes.DISPLAY_ANGLE if job.mesh_angular_tolerance is None else job.mesh_angular_tolerance),
         )
         for job in jobs
     ]
@@ -381,8 +381,12 @@ def stored_meshes(source: MeshSource, pairs: list, appearance: object,
         return descriptor, bodies
 
 
-def _tolerance_token(value: float | None) -> str:
-    return "default" if value is None else repr(float(value))
+def _tolerance_token(value: float | None, key: str) -> str:
+    """A tolerance as the ledgers key it: the EFFECTIVE number, so an omitted one is
+    the display tolerance it was written at, and a changed display tolerance is a miss."""
+    from cadgen.tessellation_policy import DISPLAY_TESSELLATION
+
+    return repr(float(DISPLAY_TESSELLATION[key] if value is None else value))
 
 
 def _sha256_of(path: Path) -> str | None:
@@ -425,8 +429,8 @@ def record_mesh_export(
             "sha256": digest,
             "declared": fmt,
             "document": str(document_hash),
-            "chord": _tolerance_token(mesh_tolerance),
-            "angle": _tolerance_token(mesh_angular_tolerance),
+            "chord": _tolerance_token(mesh_tolerance, "chordTolerance"),
+            "angle": _tolerance_token(mesh_angular_tolerance, "angleTolerance"),
             "anim": animation_key,
             "appearance": _appearance_key(appearance_key),
         }
@@ -478,8 +482,8 @@ def mesh_variant_key(
     return "|".join(
         (
             str(fmt),
-            _tolerance_token(mesh_tolerance),
-            _tolerance_token(mesh_angular_tolerance),
+            _tolerance_token(mesh_tolerance, "chordTolerance"),
+            _tolerance_token(mesh_angular_tolerance, "angleTolerance"),
         )
         + (() if serialization_version is None else (f"serializer:{serialization_version}",))
         + (f"appearance:{_appearance_key(appearance_key)}",)
@@ -559,8 +563,8 @@ def mesh_export_current(
         return False
     return (
         entry.get("document") == str(document_hash)
-        and entry.get("chord") == _tolerance_token(mesh_tolerance)
-        and entry.get("angle") == _tolerance_token(mesh_angular_tolerance)
+        and entry.get("chord") == _tolerance_token(mesh_tolerance, "chordTolerance")
+        and entry.get("angle") == _tolerance_token(mesh_angular_tolerance, "angleTolerance")
         and entry.get("anim") == animation_key
         and entry.get("appearance") == _appearance_key(appearance_key)
         and entry.get("serializer") == _serialization_version(entry.get("declared"))

@@ -136,8 +136,8 @@ occurrence, in the tree's order: `ref` and `name` are the occurrence's id and
 name exactly as every selector resolves them
 (`cadgen.assembly_lookup.assembly_occurrence_rows`), `bounds` is the component's
 exact box placed by the occurrence's transform (rounded to 1e-3), and
-`triangleCount`/`vertexCount` are the stored display mesh's at the tessellation a
-view would draw (meshed in the build pool when the store has none). `--focus` and
+`triangleCount`/`vertexCount` are the stored display mesh's, the one a view
+draws (meshed in the build pool when the store has none). `--focus` and
 `--hide` narrow the rows the way they narrow a section.
 
 A part whose stored mesh leaves out a face no mesher could cover (its body's

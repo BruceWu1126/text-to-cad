@@ -692,12 +692,11 @@ class AModelBuildBakesItsClips(unittest.TestCase):
         self.document = self.script.with_suffix(".step")
 
     def _build(self) -> str:
-        from cadgen.catalog import StepImportOptions
         from cadgen.generation import generate_step_targets
 
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            self.assertEqual(0, generate_step_targets([str(self.script)], step_options=StepImportOptions(), json_output=True))
+            self.assertEqual(0, generate_step_targets([str(self.script)], json_output=True))
         (line,) = out.getvalue().splitlines()
         return json.loads(line)["outcome"]
 

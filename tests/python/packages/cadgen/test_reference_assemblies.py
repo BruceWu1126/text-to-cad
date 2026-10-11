@@ -410,7 +410,7 @@ class ReferenceAssemblies(unittest.TestCase):
         parent = self.root / "parent.py"
         parent.write_text(
             "from cadgen import step, build123d as bd\nfrom box import box\nfrom curve import curve\n"
-            "@step(mesh_tolerance=.001, mesh_angular_tolerance=.07)\ndef parent():\n"
+            "@step\ndef parent():\n"
             "    return bd.Compound(children=[bd.Pos(5, 0, 0) * box(), bd.Pos(-5, 0, 0) * curve()], label='assembly')\n",
             encoding="utf-8",
         )

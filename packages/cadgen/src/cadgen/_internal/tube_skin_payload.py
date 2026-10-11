@@ -161,11 +161,9 @@ def decode_tube_skins(data: bytes) -> dict:
     return {"schemaVersion": content["schemaVersion"], "bindings": bindings, "tracks": tracks}
 
 
-def tube_skins_bytes(*, tree: str, document_hash: str, animation: Any,
-                     chord: float | None = None, angle: float | None = None) -> bytes | None:
+def tube_skins_bytes(*, tree: str, document_hash: str, animation: Any) -> bytes | None:
     """The payload for one document's bytes and sidecar animation, bound to its
-    stored meshes at (``chord``, ``angle``) -- the CAD view's default tessellation
-    unless named -- or None when the animation bends no tube. What the store lacks
+    display meshes, or None when the animation bends no tube. What the store lacks
     is derived as an export derives it (build-pool jobs), and the payload is cached
     in the store's ``skin`` index."""
     from cadgen._internal.mesh_export import MeshSource, stored_meshes
@@ -176,9 +174,7 @@ def tube_skins_bytes(*, tree: str, document_hash: str, animation: Any,
     tracks = tube_tracks(animation)
     if not tracks:
         return None
-    pair = (meshes.DEFAULT_CHORD if chord is None else float(chord),
-            meshes.DEFAULT_ANGLE if angle is None else float(angle))
-    meshes.normalize_tessellations([{"chordTolerance": pair[0], "angleTolerance": pair[1]}])
+    pair = (meshes.DISPLAY_CHORD, meshes.DISPLAY_ANGLE)
     descriptor = descriptor_for_view(tree, document_hash=document_hash)
     if descriptor is None:
         raise FileNotFoundError(f"tube skins: geometry tree missing or unreadable: {tree}")

@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  installDisplayTessellation,
   installTessellationLadder,
   lodChordLevels,
   lodDefaultLevel,
@@ -18,10 +19,21 @@ import {
   projectedChordErrorPx,
   settledLevel,
 } from "./lodPolicy.js";
-import { TEST_TESSELLATION_LADDER, installTestTessellationLadder } from "./testing.js";
+import { TEST_DISPLAY_TESSELLATION, TEST_TESSELLATION_LADDER, installTestTessellationLadder } from "./testing.js";
 
-test("the ladder is cadgen's: nothing is drawn until the host installs the one its server published", () => {
-  assert.throws(() => lodDefaultLevel(), /installTessellationLadder/);
+test("the display tolerance is cadgen's: nothing is drawn until the host installs the one its server published", () => {
+  assert.throws(() => lodDefaultLevel(), /installDisplayTessellation/);
+  for (const bad of [null, {}, { chordTolerance: 1 }, { chordTolerance: 0, angleTolerance: 0.35 }]) {
+    assert.throws(() => installDisplayTessellation(bad), /cadgen's display tolerance is/);
+  }
+  installDisplayTessellation(TEST_DISPLAY_TESSELLATION);
+  // One rung: every model opens, and stays, at the display tolerance.
+  assert.equal(lodDefaultLevel(), 0);
+  assert.deepEqual(lodTessellationLevels(), [TEST_DISPLAY_TESSELLATION]);
+  assert.deepEqual(lodTessellationForLevel(3), TEST_DISPLAY_TESSELLATION);
+});
+
+test("a ladder names its rungs and the one a model opens at", () => {
   for (const bad of [null, { levels: [] }, { levels: [{ chordTolerance: 1 }], defaultLevel: 0 },
     { levels: TEST_TESSELLATION_LADDER.levels, defaultLevel: 9 }]) {
     assert.throws(() => installTessellationLadder(bad), /cadgen's tessellation ladder is/);

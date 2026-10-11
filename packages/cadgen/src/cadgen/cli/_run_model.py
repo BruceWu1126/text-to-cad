@@ -19,28 +19,6 @@ import os
 from collections.abc import Sequence
 from pathlib import Path
 
-from cadgen.metadata import normalize_mesh_numeric
-
-
-def _tolerance(field_name: str):
-    """An argparse ``type=`` over the ONE mesh-numeric normaliser (cadgen.metadata),
-    so a run-level flag is refused by the same rule, in the same words, as a
-    decorator argument or a door's flag -- and refused while the flags are parsed,
-    before any handoff to the daemon."""
-
-    def parse(text: str) -> float:
-        try:
-            value = float(text)
-        except ValueError:
-            raise argparse.ArgumentTypeError(f"{field_name} must be a number (got {text!r})") from None
-        try:
-            return normalize_mesh_numeric(value, field_name=field_name)
-        except ValueError as exc:
-            raise argparse.ArgumentTypeError(str(exc)) from None
-
-    parse.__name__ = field_name
-    return parse
-
 
 def _build_parser(prog: str) -> argparse.ArgumentParser:
     """The per-run FLAGS of ``python <model>.py``.
@@ -61,25 +39,6 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
     )
     parser.add_argument("--model", metavar="FUNCTION", help=argparse.SUPPRESS)
     parser.add_argument("--force", action="store_true", help="Rebuild even when current.")
-    parser.add_argument(
-        "--mesh-tolerance",
-        type=_tolerance("mesh_tolerance"),
-        metavar="CHORD",
-        help=(
-            "For this run only, write every declared mesh at this chord tolerance, "
-            "overriding the declarations' own. RELATIVE to each component's bounding "
-            "diagonal, not millimetres (default 1.5e-3)."
-        ),
-    )
-    parser.add_argument(
-        "--mesh-angular-tolerance",
-        type=_tolerance("mesh_angular_tolerance"),
-        metavar="RADIANS",
-        help=(
-            "For this run only, write every declared mesh at this max normal spread "
-            "across a triangle edge, in radians (default 0.35)."
-        ),
-    )
     parser.add_argument(
         "--verbose",
         action="store_true",
@@ -163,7 +122,7 @@ def run_model_argv(argv: Sequence[str], *, prog: str = "python <model>.py") -> i
 
 def _run(args: argparse.Namespace, script: Path, prog: str) -> int:
 
-    from cadgen.catalog import StepImportOptions, source_from_path
+    from cadgen.catalog import source_from_path
 
     try:
         function = getattr(args, "model", None)
@@ -195,12 +154,6 @@ def _run(args: argparse.Namespace, script: Path, prog: str) -> int:
         # two documents for one model would be two truths).
         return generate_step_targets(
             [target],
-            # Already normalised by the parser (`_tolerance`). A run-level flag
-            # overrides every declaration's tolerance for THIS run only.
-            step_options=StepImportOptions(
-                mesh_tolerance=args.mesh_tolerance,
-                mesh_angular_tolerance=args.mesh_angular_tolerance,
-            ),
             # A profile needs the body to run: --profile rebuilds a current model.
             force=bool(args.force or args.profile),
             verbose=bool(args.verbose),

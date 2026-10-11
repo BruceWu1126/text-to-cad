@@ -15,8 +15,7 @@ from lib import spec as S
 from lib.palette import material_compound, materials_for_system
 
 
-@step(out="../STEP/valvetrain.step", materials=materials_for_system("valvetrain"),
-      mesh_tolerance=0.0006, mesh_angular_tolerance=0.3)
+@step(out="../STEP/valvetrain.step", materials=materials_for_system("valvetrain"))
 def valvetrain():
     parts = valvetrain_lib.build()
     if not parts:

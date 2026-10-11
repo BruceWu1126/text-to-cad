@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from dataclasses import replace
 from pathlib import Path
 from typing import Sequence
 
@@ -13,7 +12,6 @@ from cadgen._internal.step_scene import SelectorBundle
 from cadgen._internal.step_scene import SelectorOptions
 from cadgen._internal.step_scene import adaptive_mesh_resolution_for_scene
 from cadgen.catalog import CadSource
-from cadgen.catalog import StepImportOptions
 from cadgen.catalog import find_source_by_path
 from cadgen.catalog import iter_cad_sources
 from cadgen.catalog import normalize_cad_ref
@@ -35,15 +33,9 @@ class EntrySpec:
     script_path: Path | None = None
     generator_metadata: GeneratorMetadata | None = None
     dxf_path: Path | None = None
-    # ``None`` means "the caller specified nothing" — the adaptive resolver
-    # supplies the value. A number is the caller's explicit choice, and
-    # ``is not None`` IS the explicitness test; there is no separate flag and
-    # no default sentinel to compare against.
-    mesh_tolerance: float | None = None
-    mesh_angular_tolerance: float | None = None
     color: tuple[float, float, float, float] | None = None
-    # Declared mesh serializations, resolved to absolute paths. Tolerances
-    # ``None`` inherit the model's policy at export time.
+    # Declared mesh serializations, resolved to absolute paths. A tolerance
+    # ``None`` is the display tolerance.
     mesh_exports: "tuple[ResolvedMeshExport, ...]" = ()
     # False for a mesh-only model: ``step_path`` stays the LOGICAL document the
     # store keys by, but it is never written and is not among the outputs.
@@ -146,37 +138,6 @@ def _display_name_for_path(path: Path) -> str:
 _display_path = relative_to_cwd
 
 
-def _apply_step_options_to_spec(spec: EntrySpec, step_options: StepImportOptions) -> EntrySpec:
-    """Apply a model run's ``--mesh-tolerance`` / ``--mesh-angular-tolerance``.
-
-    ONE precedence rule: run-level flag > declaration (`@stl`/`@glb`/`@threemf`)
-    > `@step` model-level > the tessellator's default. A flag is a TEMPORARY
-    override of every declared mesh for this run, so it is written over each
-    declaration's own tolerance here -- the single place the rule is decided --
-    and not only over the model-level value a declaration falls back to. The
-    mesh ledger records the pair each file was actually written at, so the next
-    unflagged run sees a file cut at the flag's tolerance as NOT the declared
-    export and restores it, once; a repeated run at the same flags is a no-op.
-    """
-    if not step_options.has_metadata or spec.step_path is None:
-        return spec
-    chord = step_options.mesh_tolerance
-    angle = step_options.mesh_angular_tolerance
-    return replace(
-        spec,
-        mesh_tolerance=chord if chord is not None else spec.mesh_tolerance,
-        mesh_angular_tolerance=angle if angle is not None else spec.mesh_angular_tolerance,
-        mesh_exports=tuple(
-            replace(
-                export,
-                mesh_tolerance=chord if chord is not None else export.mesh_tolerance,
-                mesh_angular_tolerance=angle if angle is not None else export.mesh_angular_tolerance,
-            )
-            for export in spec.mesh_exports
-        ),
-    )
-
-
 def _resolve_discovery_root(root: Path | str) -> Path:
     candidate = Path(root)
     resolved = candidate.resolve() if candidate.is_absolute() else (Path.cwd() / candidate).resolve()
@@ -213,8 +174,6 @@ def _entry_spec_from_source(source: CadSource) -> EntrySpec:
         script_path=script_path,
         generator_metadata=generator_metadata,
         dxf_path=source.dxf_path,
-        mesh_tolerance=source.mesh_tolerance,
-        mesh_angular_tolerance=source.mesh_angular_tolerance,
         color=source.color,
         mesh_exports=_resolve_mesh_exports(
             getattr(generator_metadata, "mesh_exports", ()) or (),
@@ -278,9 +237,9 @@ def _selector_options_for_part(spec: EntrySpec, *, scene: LoadedStepScene | None
     the adaptive resolver classifies the topology and
     ``_edge_visibility_classes_for_resolution`` turns that classification into
     the classes. Without a scene there is nothing to classify, so the default
-    set stands. Mesh tolerances are absent on purpose — ``--mesh-tolerance``
-    reaches the mesh EXPORT jobs (``MeshExportJob``), which have their own
-    content gate; a tree is tessellation-free.
+    set stands. Mesh tolerances are absent on purpose: a declared export's
+    reach its EXPORT job (``MeshExportJob``), which has its own content gate; a
+    tree is tessellation-free.
     """
     edge_visibility_classes = normalize_step_edge_render_visibility_classes(None)
     if isinstance(scene, LoadedStepScene):

@@ -40,8 +40,7 @@ Semantics:
   sharing a file each write ``<function>.<fmt>``.
 
 Per-run flags ride ``sys.argv`` of the top-level call: ``--force``,
-``--verbose``, ``--json``, ``--profile``, ``--mesh-tolerance``,
-``--mesh-angular-tolerance``. Durable configuration lives
+``--verbose``, ``--json``, ``--profile``. Durable configuration lives
 in the decorator call. A model function takes no parameters: it is one
 configuration of one output. Parametric geometry lives in a plain factory the
 model calls; another configuration is another model.
@@ -257,8 +256,6 @@ class ModelDef:
     fmt: str  # "step" | "dxf"
     script_path: Path
     out: str | None
-    mesh_tolerance: float | None
-    mesh_angular_tolerance: float | None
     # Typed mates (kinematics= dict, validated at decoration); axis refs
     # resolve at build and the block lands in the model's sidecar. STEP only.
     kinematics: KinematicsDef | None = None
@@ -486,8 +483,6 @@ def _decorator(
     fmt: str,
     *,
     out: str | None,
-    mesh_tolerance: float | None,
-    mesh_angular_tolerance: float | None,
     kinematics: object = None,
     materials: object = None,
     animation: object = None,
@@ -503,10 +498,6 @@ def _decorator(
         materials_def = normalize_materials(materials, where=f"@{fmt} materials=")
         animation_def = normalize_clips(animation, where=f"@{fmt} animation=")
         out = _checked_out(out, where=f"@{fmt}")
-        mesh_tolerance = _checked_tolerance(mesh_tolerance, "mesh_tolerance", where=f"@{fmt}")
-        mesh_angular_tolerance = _checked_tolerance(
-            mesh_angular_tolerance, "mesh_angular_tolerance", where=f"@{fmt}"
-        )
 
     def apply(func: Callable[..., Any]) -> Callable[..., Any]:
         with _declaring(func):
@@ -537,8 +528,6 @@ def _decorator(
             fmt=fmt,
             script_path=script_path,
             out=out,
-            mesh_tolerance=mesh_tolerance,
-            mesh_angular_tolerance=mesh_angular_tolerance,
             kinematics=kinematics_def,
             materials=materials_def,
             animation=animation_def,
@@ -612,8 +601,6 @@ def step(
     func: Callable[..., Any] | None = None,
     *,
     out: str | None = None,
-    mesh_tolerance: float | None = None,
-    mesh_angular_tolerance: float | None = None,
     kinematics: object = None,
     materials: object = None,
     animation: object = None,
@@ -626,8 +613,8 @@ def step(
     ``animation=`` takes a dict of clip id -> ``cadgen.clip(update, duration=...)``,
     baked to keyframes when the model builds (see ``cadgen.animation``). No
     decorator argument changes the geometry a model writes: the geometry is the
-    function's return value; the arguments decide where the files land, how
-    they are written, and what the sidecar declares. No decorator names
+    function's return value; the arguments decide where the files land and
+    what the sidecar declares. No decorator names
     declaration changes the STEP geometry or its authored colors.
     """
     with _declaring_here():
@@ -635,8 +622,6 @@ def step(
     decorator = _decorator(
         "step",
         out=out,
-        mesh_tolerance=mesh_tolerance,
-        mesh_angular_tolerance=mesh_angular_tolerance,
         kinematics=kinematics,
         materials=materials,
         animation=animation,
@@ -658,9 +643,7 @@ def dxf(
         )
     with _declaring_here():
         _reject_unknown_kwargs("dxf", unsupported)
-    decorator = _decorator(
-        "dxf", out=out, mesh_tolerance=None, mesh_angular_tolerance=None
-    )
+    decorator = _decorator("dxf", out=out)
     return decorator(func) if func is not None else decorator
 
 
@@ -748,10 +731,7 @@ def _mesh_export_decorator(deco_name: str, fmt: str):
             # tree, record and job as any model — whose outputs are its mesh
             # declarations; its .step is never written. A @step stacked above takes
             # the declarations over, so stacking order stays neutral.
-            wrapper = _decorator(
-                "step", out=None, mesh_tolerance=None,
-                mesh_angular_tolerance=None, step_output=False,
-            )(target)
+            wrapper = _decorator("step", out=None, step_output=False)(target)
             registered = _REGISTRY[model_ref(_script_path_of(target), target.__name__)]
             updated = _replace(registered, mesh_exports=(decl,))
             _REGISTRY[updated.ref] = updated

@@ -30,7 +30,7 @@ NAME = FIXTURE["key"] + ".glb"
 ADMITTED = {"tessellationInput": FIXTURE["key"], "object": FIXTURE["facts"]["object"], "maxBytes": len(PAYLOAD)}
 ADMISSION_QUERY = f"?object={ADMITTED['object']}&maxBytes={ADMITTED['maxBytes']}"
 
-from cadgen.tessellation_policy import snapshot_tessellation  # noqa: E402
+from cadgen.tessellation_policy import DISPLAY_TESSELLATION  # noqa: E402
 from cadgen.snapshot_core import (  # noqa: E402
     BatchSnapshotRenderer,
     SnapshotError,
@@ -299,7 +299,7 @@ class SnapshotBrowserTessCacheIntegrationTest(unittest.TestCase):
                     "kind": "step",
                     "rootPath": str(asset_root),
                     # The tolerances the page draws at are cadgen's, named in the job.
-                    "tessellation": snapshot_tessellation({}),
+                    "tessellation": dict(DISPLAY_TESSELLATION),
                     "package": {
                         "descriptor": descriptor,
                         # Nothing serves a surf here: the page draws only the stored mesh.

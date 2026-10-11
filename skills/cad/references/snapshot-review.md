@@ -97,13 +97,6 @@ framing (`preset`, `position`, `target`, `up`, `direction`, `zoom`,
 `hidden`/`off` surface styles are STEP-only; meshes, drawings and robot
 descriptions take `solid` or `render`.
 
-For close views of a STEP, a JSON job can set `quality.tessellation` to
-`{"chordTolerance": 0.0005, "angleTolerance": 0.10}` (chord relative to each
-component's bounding diagonal, angle in radians; bounds `0.00005`–`0.05` and
-`0.05`–`1.5708`, as for mesh exports). cadgen meshes the exact surfaces at those
-tolerances for the image alone; finer costs memory and render time. Mesh
-documents cannot be remeshed this way.
-
 `camera` is a preset (`front`, `back`, `left`, `right`, `top`, `bottom`, `iso`),
 an `azimuth:elevation` pair, or a camera object. `output` takes `sizeProfile`,
 `padding` (0–0.15), `renderScale` (1–3) and the booleans `viewLabels`,

@@ -179,7 +179,7 @@ _RETIRED: dict[tuple[str, ...], str] = {
         "cadgen gen has been removed: generation has no CLI. A model script is a program "
         "-- run it: python <model>.py (it gates, builds, and writes the STEP/DXF, the "
         "sidecar and every declared mesh). Per-run flags ride the script's argv: "
-        "--force, --json, --verbose, --mesh-tolerance, --mesh-angular-tolerance."
+        "--force, --json, --verbose, --profile."
     ),
     ("step", "export"): (
         "cadgen step export has been removed: each mesh format is its own door. Use "

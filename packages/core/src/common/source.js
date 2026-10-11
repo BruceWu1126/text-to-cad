@@ -162,8 +162,8 @@ async function fetchComponentMeshBuffer(url, cid, options) {
   throw new Error(`Failed to load component mesh ${cid}: HTTP ${lastStatus}${hint}`);
 }
 
-// The tolerances a resolved STEP job's components are drawn at: cadgen decides them
-// (cadgen.tessellation_policy.snapshot_tessellation) and names both in the job.
+// The tolerances a resolved STEP job's components are drawn at: cadgen's display
+// tolerance (cadgen.tessellation_policy), both named in the job.
 // A static package (the docs hero) ships one mesh per component beside its tree and
 // names none: each file is drawn at the tessellation cadgen exported it at.
 function resolvedTessellation(resolved) {

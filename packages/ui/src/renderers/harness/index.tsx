@@ -3,8 +3,8 @@ import { useState } from 'react';
 import { FileViewer } from '@text-to-cad/ui/file-viewer';
 import type { FileSource } from '@text-to-cad/ui/file-viewer';
 import { createCadClient } from '@text-to-cad/core/client';
-// The display ladder a cadgen server publishes, as cadgen wrote it for the tests (`make_fixtures.py`):
-// this page is the host, and a host installs the ladder before a STEP model is drawn.
+// The level-of-detail tests' ladder: this page is the host, and a host installs what it draws
+// STEP models at before one is drawn.
 import { installTestTessellationLadder } from '@text-to-cad/core/lib/surf/testing.js';
 import { createTabStore, memoryTabRecord, useTabViewerState } from '@text-to-cad/ui/tab-store';
 import type { TabRecordStorage, TabStore } from '@text-to-cad/ui/tab-store';

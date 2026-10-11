@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
 
-from .metadata import GeneratorMetadata, normalize_mesh_numeric, parse_generator_metadata
+from .metadata import GeneratorMetadata, parse_generator_metadata
 
 from ._internal.doors import STEP_SUFFIXES
 from ._internal.shared_read import open_shared_for_read
@@ -35,24 +35,6 @@ class CadSourceError(ValueError):
 
 
 @dataclass(frozen=True)
-class StepImportOptions:
-    # Tree mesh settings only. Standalone STEP/STL/3MF/GLB files are not
-    # configured here — they are one-off exports owned by cadgen.step_export_target
-    # (the `cadgen stl|3mf|glb build` doors), which builds and meshes the scene itself.
-    mesh_tolerance: float | None = None
-    mesh_angular_tolerance: float | None = None
-
-    @property
-    def has_metadata(self) -> bool:
-        return any(
-            (
-                self.mesh_tolerance is not None,
-                self.mesh_angular_tolerance is not None,
-            )
-        )
-
-
-@dataclass(frozen=True)
 class CadSource:
     source_ref: str
     cad_ref: str
@@ -63,8 +45,6 @@ class CadSource:
     generator_metadata: GeneratorMetadata | None = None
     step_path: Path | None = None
     dxf_path: Path | None = None
-    mesh_tolerance: float | None = None
-    mesh_angular_tolerance: float | None = None
     color: tuple[float, float, float, float] | None = None
 
     @property
@@ -146,7 +126,6 @@ def source_from_path(
     path: Path,
     *,
     function: str | None = None,
-    step_options: StepImportOptions | None = None,
 ) -> CadSource | None:
     """The source behind ``path``: a model script (``function`` names one model of a
     file holding several; a file holding one needs no name) or a STEP document."""
@@ -154,7 +133,7 @@ def source_from_path(
     if resolved.suffix.lower() == ".py":
         return _read_python_source(resolved, function=function, allow_dxf_only=True)
     if resolved.suffix.lower() in STEP_SUFFIXES:
-        return _read_step_source(resolved, options=step_options)
+        return _read_step_source(resolved)
     return None
 
 
@@ -500,8 +479,6 @@ def _dxf_generator_source(resolved_script_path: Path, metadata: GeneratorMetadat
         generator_metadata=metadata,
         step_path=None,
         dxf_path=dxf_path,
-        mesh_tolerance=None,
-        mesh_angular_tolerance=None,
     )
 
 
@@ -529,8 +506,6 @@ def _read_python_source(
         generator_metadata=metadata,
         step_path=step_path,
         dxf_path=None,
-        mesh_tolerance=metadata.mesh_tolerance,
-        mesh_angular_tolerance=metadata.mesh_angular_tolerance,
     )
 
 
@@ -544,13 +519,8 @@ def _iter_step_sources(root: Path, *, excluded_step_paths: set[Path]) -> tuple[C
     return tuple(sorted(sources, key=lambda source: source.source_ref))
 
 
-def _read_step_source(
-    step_path: Path,
-    *,
-    options: StepImportOptions | None = None,
-) -> CadSource:
+def _read_step_source(step_path: Path) -> CadSource:
     resolved_step_path = step_path.resolve()
-    options = options or StepImportOptions()
     if resolved_step_path.suffix.lower() not in STEP_SUFFIXES:
         raise CadSourceError(f"{_display_path(resolved_step_path)} source must end in .step or .stp")
     if not resolved_step_path.is_file():
@@ -566,16 +536,6 @@ def _read_step_source(
         source="imported",
         origin_path=resolved_step_path,
         step_path=resolved_step_path,
-        mesh_tolerance=normalize_step_numeric(
-            options.mesh_tolerance,
-            base_path=resolved_step_path,
-            field_name="mesh_tolerance",
-        ),
-        mesh_angular_tolerance=normalize_step_numeric(
-            options.mesh_angular_tolerance,
-            base_path=resolved_step_path,
-            field_name="mesh_angular_tolerance",
-        ),
     )
 
 
@@ -602,13 +562,6 @@ def _looks_like_generator_script(script_path: Path) -> bool:
     except OSError:
         return False
     return any(marker in source_bytes for marker in GENERATOR_NAME_MARKERS)
-
-
-def normalize_step_numeric(raw_value: object, *, base_path: Path, field_name: str) -> float | None:
-    try:
-        return normalize_mesh_numeric(raw_value, field_name=field_name)
-    except ValueError as exc:
-        raise CadSourceError(f"{_display_path(base_path)} {exc}") from exc
 
 
 def normalize_step_color(

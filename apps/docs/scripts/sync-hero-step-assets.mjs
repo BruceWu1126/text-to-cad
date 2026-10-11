@@ -8,8 +8,8 @@
 //
 // The tree lives in cadgen's store, keyed by the STEP file's bytes, and the
 // store holds no directories: this script asks cadgen to export a view of the
-// tree (assembly.json + components/), to mesh every component at the default
-// tolerances (components/<cid>.glb, the one level the hero draws) and to write
+// tree (assembly.json + components/), to mesh every component at the display
+// tolerance (components/<cid>.glb, the mesh every view draws) and to write
 // the articulation and animation beside them, and copies what the browser
 // fetches. Run it after rebuilding the model:
 //
@@ -58,7 +58,7 @@ const viewDir = execFileSync(
       "tree = result_tree_for(Path(sys.argv[1])); view = export_view(tree) if tree else None; " +
       "descriptor = json.loads((view / 'assembly.json').read_text()) if view else {}; " +
       "surfaces.derive(tree, producer=descriptor['surfaceProducer'], tessellations=[dict(" +
-      "chordTolerance=meshes.DEFAULT_CHORD, angleTolerance=meshes.DEFAULT_ANGLE)]) if view else None; " +
+      "chordTolerance=meshes.DISPLAY_CHORD, angleTolerance=meshes.DISPLAY_ANGLE)]) if view else None; " +
       "[(view / 'components' / (cid + '.glb')).write_bytes(meshes.read(meshes.tessellation_key(entry['surfaceInput']))) " +
       "for cid, entry in descriptor.get('components', {}).items()]; " +
       "sidecar = read_source_sidecar(Path(sys.argv[1])) if view else None; " +

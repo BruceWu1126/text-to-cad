@@ -14,7 +14,6 @@ from cadgen._internal import generation as cad_generation
 from cadgen._internal.generation_spec import list_entry_specs, selected_entry_specs
 from cadgen import catalog as cad_catalog
 from cadgen._internal import source_hash as cad_source_hash
-from cadgen.catalog import StepImportOptions
 from cadgen._internal.glb_topology import read_step_topology_manifest_from_glb
 from cadgen._internal.glb_topology import STEP_TOPOLOGY_SCHEMA_VERSION
 from cadgen._internal.step_scene import LoadedStepScene, OccurrenceNode, SelectorBundle
@@ -139,17 +138,6 @@ class CadGenerationTests(unittest.TestCase):
         step_path = directory / f"{name}{suffix}"
         step_path.write_text("ISO-10303-21; END-ISO-10303-21;\n", encoding="utf-8")
         return step_path
-
-    def _step_options(
-        self,
-        *,
-        mesh_tolerance: float | None = None,
-        mesh_angular_tolerance: float | None = None,
-    ) -> StepImportOptions:
-        return StepImportOptions(
-            mesh_tolerance=mesh_tolerance,
-            mesh_angular_tolerance=mesh_angular_tolerance,
-        )
 
     def _write_step(
         self,
@@ -1096,27 +1084,6 @@ class CadGenerationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "builds model scripts only.*is a document"):
             cad_generation.generate_step_targets([str(step_path)])
 
-    def test_step_cli_flags_apply_to_generated_python_targets(self) -> None:
-        script_path = self._generator_script("generated")
-        calls: list[cad_generation.EntrySpec] = []
-
-        def fake_generate(spec, *, entries_by_step_path, **_extra):
-            calls.append(spec)
-            return self._generated_result(spec)
-
-        with mock.patch.object(cad_generation, "_generate_step_outputs", side_effect=fake_generate):
-            cad_generation.generate_step_targets(
-                [str(script_path)],
-                step_options=self._step_options(
-                    mesh_tolerance=0.02,
-                    mesh_angular_tolerance=0.3,
-                ),
-            )
-
-        self.assertEqual(1, len(calls))
-        self.assertEqual(0.02, calls[0].mesh_tolerance)
-        self.assertEqual(0.3, calls[0].mesh_angular_tolerance)
-
     def test_generator_discovery_rejects_none_gen_step(self) -> None:
         script_path = self.temp_root / "broken.py"
         script_path.write_text(
@@ -1174,35 +1141,9 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual(1, len(specs))
         self.assertIsNotNone(specs[0].step_path)
 
-    def test_imported_step_specifies_no_mesh_tolerances(self) -> None:
-        # Nothing specified is ``None``, which is what lets the adaptive
-        # resolver supply the values. There is no default-value sentinel.
-        self._write_step("imported-mesh")
-
-        specs = [spec for spec in list_entry_specs() if spec.cad_ref == self._cad_ref("imported-mesh")]
-
-        self.assertEqual(1, len(specs))
-        self.assertIsNone(specs[0].mesh_tolerance)
-        self.assertIsNone(specs[0].mesh_angular_tolerance)
-
-    def test_imported_step_reads_mesh_settings_from_cli_options(self) -> None:
-        step_path = self._write_step("imported-heavy")
-
-        _all, selected = cad_generation._selected_specs_for_targets(
-            [str(step_path)],
-            step_options=self._step_options(mesh_tolerance=0.009, mesh_angular_tolerance=0.45),
-        )
-
-        self.assertEqual(1, len(selected))
-        self.assertEqual(0.009, selected[0].mesh_tolerance)
-        self.assertEqual(0.45, selected[0].mesh_angular_tolerance)
-
     def test_generate_part_outputs_emits_package(self) -> None:
         step_path = self._write_step("selector-output")
-        _, selected_specs = cad_generation._selected_specs_for_targets(
-            [str(step_path)],
-            step_options=self._step_options(mesh_tolerance=0.003, mesh_angular_tolerance=0.2),
-        )
+        _, selected_specs = cad_generation._selected_specs_for_targets([str(step_path)])
         spec = selected_specs[0]
         scene = self._fake_scene(step_path)
         package_patch, package_calls = self._patch_package_build()
@@ -1225,10 +1166,7 @@ class CadGenerationTests(unittest.TestCase):
 
     def test_generate_part_outputs_uses_preloaded_scene_without_reloading(self) -> None:
         step_path = self._write_step("preloaded")
-        _, selected_specs = cad_generation._selected_specs_for_targets(
-            [str(step_path)],
-            step_options=self._step_options(mesh_tolerance=0.003, mesh_angular_tolerance=0.2),
-        )
+        _, selected_specs = cad_generation._selected_specs_for_targets([str(step_path)])
         spec = selected_specs[0]
         scene = self._fake_scene(step_path)
 

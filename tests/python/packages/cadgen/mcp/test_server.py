@@ -163,13 +163,13 @@ class TabServerTest(_Session):
     def test_an_agent_names_a_model_by_its_absolute_path_and_a_tab_reopens_on_it(self) -> None:
         opened = self.launch("cad_open", {"path": self.bracket})
         self.assertEqual({key: opened[key] for key in ("protocol", "page", "model", "surface")},
-                         {"protocol": 6, "page": "viewer", "model": self.bracket, "surface": "agent"})
+                         {"protocol": 7, "page": "viewer", "model": self.bracket, "surface": "agent"})
         self.assertEqual(sorted(opened), ["model", "notice", "page", "pick", "platform", "protocol", "surface",
                                           "tessellation", "version"])
-        # The display tessellation ladder the page draws STEP models by: cadgen's, carried by the launch.
-        from cadgen.tessellation_policy import ladder_payload
+        # The display tolerance the page draws STEP models at: cadgen's, carried by the launch.
+        from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
-        self.assertEqual(opened["tessellation"], ladder_payload())
+        self.assertEqual(opened["tessellation"], DISPLAY_TESSELLATION)
         # The thread's tab reopens on what the thread last opened.
         self.assertEqual(self.launch("cad_tab")["model"], self.bracket)
         refused = self.call("cad_open", {"path": "parts/bracket.stl"})

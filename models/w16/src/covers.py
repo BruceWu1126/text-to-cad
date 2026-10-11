@@ -15,8 +15,7 @@ from lib import spec as S
 from lib.palette import material_compound, materials_for_system
 
 
-@step(out="../STEP/covers.step", materials=materials_for_system("covers"),
-      mesh_tolerance=0.0006, mesh_angular_tolerance=0.3)
+@step(out="../STEP/covers.step", materials=materials_for_system("covers"))
 def covers():
     parts = covers_lib.build(S.SECTIONED)
     if not parts:

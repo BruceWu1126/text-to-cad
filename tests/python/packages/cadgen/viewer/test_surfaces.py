@@ -168,7 +168,7 @@ class SurfaceRequests(unittest.TestCase):
         inputs = {cid: entry["surfaceInput"] for cid, entry in sorted(view["components"].items())}
         cids = list(inputs)
         request = {"tree": tree, "viewId": view["viewId"], "producer": self.producer,
-                   "tessellation": {"chordTolerance": 1.5e-3, "angleTolerance": 0.35},
+                   "tessellation": {"chordTolerance": 5e-4, "angleTolerance": 0.35},
                    "components": [{"cid": cid, "surfaceInput": inputs[cid]} for cid in cids]}
         real, failing = occt_mesh.mesh_component, inputs[cids[-1]]
 

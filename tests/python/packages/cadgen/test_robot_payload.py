@@ -36,7 +36,7 @@ from cadgen.robot_payload import (  # noqa: E402
     robot_payload_bytes,
 )
 from cadgen.store.objects import object_path, read_verified_object  # noqa: E402
-from cadgen.tessellation_policy import DEFAULT_TESSELLATION  # noqa: E402
+from cadgen.tessellation_policy import DISPLAY_TESSELLATION  # noqa: E402
 
 
 def box(size: str, xyz: str = "0 0 0", rgba: str = "") -> str:
@@ -239,7 +239,7 @@ class UrdfArticulation(_Workspace):
         self.assertEqual(document["nodes"][0]["extras"]["cadUpAxis"], "y")
         from cadgen._internal.primitive_mesh import primitive_segments
         segments = primitive_segments(0.3, math.sqrt(2 * 0.6 ** 2 + 0.1 ** 2))
-        self.assertGreater(segments, 2 * math.pi / DEFAULT_TESSELLATION["angleTolerance"] - 1)
+        self.assertGreater(segments, 2 * math.pi / DISPLAY_TESSELLATION["angleTolerance"] - 1)
         self.assertEqual(document["accessors"][0]["count"], 2 * segments + 2 * (segments + 1))
 
     def test_links_and_joints_carry_what_the_description_says(self) -> None:

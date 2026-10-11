@@ -694,7 +694,6 @@ def check_robot_render_job(
         mode=mode,
         subject=f"{label} robots",
         pose_hint=f"pose a {label} robot with jointValues",
-        tessellation_hint="a robot's link meshes are existing meshes",
         joints=True,
     )
     try:
@@ -1065,7 +1064,7 @@ def resolve_step_render_job(
     if not package_dir.is_dir():
         raise SnapshotError(f"STEP/STP render input has no tree in the store: {package_dir}")
 
-    from cadgen.tessellation_policy import snapshot_tessellation
+    from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
     resolved: dict[str, object] = {
         "rootPath": str(root_path),
@@ -1075,8 +1074,9 @@ def resolve_step_render_job(
         # The hash of the tree this job renders: the geometry's identity in the
         # result (cadgen.results.SnapshotFile.tree), never a directory.
         "tree": selected_tree,
-        # The tolerances its components are drawn at: cadgen's policy, never the page's.
-        "tessellation": snapshot_tessellation(job),
+        # The tolerances its components are drawn at: cadgen's display tolerance,
+        # never the page's.
+        "tessellation": dict(DISPLAY_TESSELLATION),
     }
     # tree (the canonical render artifact for every STEP model): inline
     # the assembly.json and pre-resolve one asset URL per unique component so the renderer
@@ -1095,13 +1095,11 @@ def resolve_step_render_job(
         from cadgen.snapshot_parts import filter_occurrences, list_rows, unmeshed_warnings
 
         try:
-            parts = list_rows(descriptor, package_dir, selection=normalized_selection,
-                              tessellation=resolved["tessellation"])
+            parts = list_rows(descriptor, package_dir, selection=normalized_selection)
             listed = filter_occurrences(assembly_occurrence_rows(descriptor, None), normalized_selection)
         except ValueError as error:
             raise SnapshotError(str(error)) from None
-        warnings = unmeshed_warnings(descriptor, listed, resolved["tessellation"],
-                                     "its triangle count leaves {them} out")
+        warnings = unmeshed_warnings(descriptor, listed, "its triangle count leaves {them} out")
         if warnings:
             resolved["warnings"] = warnings
         if debug_enabled:
@@ -1279,7 +1277,6 @@ def check_drawing_render_job(
         mode=mode,
         subject="DXF drawings",
         pose_hint="a DXF drawing has no kinematics",
-        tessellation_hint="a DXF drawing is line work, not a tessellated surface",
     )
 
 

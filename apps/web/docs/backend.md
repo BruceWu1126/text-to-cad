@@ -174,7 +174,7 @@ mesh cadgen made (OCCT's mesh of a component's exact BREP); a client never
 writes one. The shared JavaScript reader and key scheme live in
 `@text-to-cad/core/lib/surf/tessellationCache.js`. Mesh names are validated
 before access: a request names an entry of the store, never a path. A mesh the
-store lacks is made by naming its tolerances in the component's
+store lacks is made by naming the display tolerance in the component's
 `POST /__cad/surfaces` request (`tessellation`), which meshes it in the same
 build-pool job that derives the surface; its ready row carries the mesh's probe
 row (`mesh`).
@@ -243,8 +243,7 @@ URL as `tubeSkinsUrl` for a built document whose animation bends a tube, and the
 STEP renderer reads it once, with the clips (`@text-to-cad/core/common/tubeSkin.js`
 plays it; `packages/core/docs/tube-skins.md`).
 
-`?file=` names the STEP by its absolute path; anything else is 400, as is a
-tessellation (`&chord=`, `&angle=`) that is not one. A missing file, a document
+`?file=` names the STEP by its absolute path; anything else is 400. A missing file, a document
 not built, a sidecar the server cannot read or an animation that bends no tube
 is 404. `&documentHash=` that names other bytes than the file holds now is 409:
 the page is behind the file, and its next catalog read names the current skins.

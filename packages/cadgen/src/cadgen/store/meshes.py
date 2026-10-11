@@ -47,7 +47,7 @@ import re
 import struct
 from typing import TYPE_CHECKING, Any
 
-from cadgen.tessellation_policy import DEFAULT_TESSELLATION, tolerance_refusal
+from cadgen.tessellation_policy import DISPLAY_TESSELLATION, tolerance_refusal
 from cadgen.store.index import entry_path, write_entry
 from cadgen.store.objects import object_path, put_object
 
@@ -68,10 +68,10 @@ MAX_INDEX_BYTES = 16 * 1024
 # colour once. tessellationCache.js MESH_MAX_JSON_BYTES is the same number.
 MAX_JSON_BYTES = 64 * 1024 * 1024
 MAX_SAFE_INTEGER = 2**53 - 1
-# The standard rung of the display ladder (cadgen.tessellation_policy): what a key
-# that names no tolerances means.
-DEFAULT_CHORD = DEFAULT_TESSELLATION["chordTolerance"]
-DEFAULT_ANGLE = DEFAULT_TESSELLATION["angleTolerance"]
+# The display tolerance (cadgen.tessellation_policy): what a key that names no
+# tolerances means.
+DISPLAY_CHORD = DISPLAY_TESSELLATION["chordTolerance"]
+DISPLAY_ANGLE = DISPLAY_TESSELLATION["angleTolerance"]
 # The class codes of the edge table, in this order (tessellationCache.js MESH_EDGE_CLASSES).
 EDGE_CLASSES = ("none", "feature", "tangent", "seam", "degenerate", "boundary", "nonManifold", "unknown")
 _EDGE_CODES = {name: code for code, name in enumerate(EDGE_CLASSES)}
@@ -152,7 +152,7 @@ def float64_hex(value: Any) -> str:
     return struct.pack(">d", float(value)).hex()
 
 
-def tessellation_quality(chord: float = DEFAULT_CHORD, angle: float = DEFAULT_ANGLE) -> dict:
+def tessellation_quality(chord: float = DISPLAY_CHORD, angle: float = DISPLAY_ANGLE) -> dict:
     return {
         "chordTolerance": chord, "chordToleranceF64": float64_hex(chord),
         "angleTolerance": angle, "angleToleranceF64": float64_hex(angle),
@@ -185,7 +185,7 @@ def normalize_tessellations(value: Any) -> list[tuple[float, float]]:
     return sorted(pairs)
 
 
-def tessellation_key(surface_input: str, chord: float = DEFAULT_CHORD, angle: float = DEFAULT_ANGLE) -> str:
+def tessellation_key(surface_input: str, chord: float = DISPLAY_CHORD, angle: float = DISPLAY_ANGLE) -> str:
     if not _digest(surface_input):
         raise ValueError("surface input must be a full lowercase content digest")
     return f"{surface_input}-t{TESSELLATOR_VERSION}-p{PAYLOAD_VERSION}-l{float64_hex(chord)}-a{float64_hex(angle)}"

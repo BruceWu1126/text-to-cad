@@ -25,8 +25,6 @@ class GeneratorMetadata:
     generator_names: tuple[str, ...]
     # The decorator kind this model script declares: "step" (@step) or "dxf" (@dxf).
     format: str
-    mesh_tolerance: float | None
-    mesh_angular_tolerance: float | None
     # Library-first fields: the @step/@dxf decorated entry function and its
     # statically-declared output target.
     entry_function: str | None = None
@@ -48,7 +46,8 @@ class MeshExportDecl:
     ``fmt`` is the FORMAT name ("stl" | "3mf" | "glb"); the 3MF decorator is
     spelled ``@threemf`` (identifiers cannot start with a digit). ``out``
     is the raw script-relative target, ``None`` meaning the sibling of the
-    logical STEP artifact. Tolerances ``None`` inherit the model's policy."""
+    logical STEP artifact. A tolerance ``None`` is the display tolerance
+    (``cadgen.tessellation_policy.DISPLAY_TESSELLATION``)."""
 
     fmt: str
     out: str | None = None
@@ -64,8 +63,8 @@ _POLICY_KEYS = {"mesh_tolerance": "chordTolerance", "mesh_angular_tolerance": "a
 
 
 def normalize_mesh_numeric(value: object, *, field_name: str) -> float | None:
-    """The ONE validator of a mesh tolerance, wherever it enters: a decorator
-    argument, a model run's flag, a format door's flag or keyword. Its bounds are
+    """The ONE validator of a mesh tolerance, wherever it enters: a mesh
+    decorator's argument, a mesh door's flag or keyword. Its bounds are
     the tessellation policy's (``cadgen.tessellation_policy.tolerance_refusal``)."""
     if value is None:
         return None
@@ -353,8 +352,6 @@ def parse_generator_metadata(script_path: Path, function: str | None = None) -> 
         display_name=display_name,
         generator_names=(function.name,),
         format=defn.fmt,
-        mesh_tolerance=defn.mesh_tolerance,
-        mesh_angular_tolerance=defn.mesh_angular_tolerance,
         entry_function=function.name,
         out_target=defn.out,
         is_decorated=True,
@@ -431,8 +428,7 @@ def _check_step_return(
             raise ValueError(
                 f"{_display_path(script_path)} {function.name}() returns a dict; a @step "
                 "model returns a build123d shape and nothing else. Declare mesh exports "
-                "with @stl/@threemf/@glb stacked on the model and tolerances with "
-                "@step(mesh_tolerance=..., mesh_angular_tolerance=...)."
+                "with @stl/@threemf/@glb stacked on the model."
             )
 
 

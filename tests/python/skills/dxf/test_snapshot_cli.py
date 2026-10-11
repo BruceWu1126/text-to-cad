@@ -163,8 +163,6 @@ class DxfSnapshotRefusalTests(unittest.TestCase):
             (self.job(jointValues={"j1": 10}), r"jointValues pose a robot description"),
             (self.job(animation={"clip": "open"}), r"an animation frame requires a STEP document"),
             (self.job(selection={"focus": ["#o1"]}), r"selection focus/hide require STEP topology"),
-            (self.job(quality={"tessellation": {"chordTolerance": 0.01}}),
-             r"quality\.tessellation requires an exact-surface STEP package"),
         ):
             with self.subTest(keys=sorted(set(job) - {"input", "outputs"})):
                 self.refuses(job, pattern)

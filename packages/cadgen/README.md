@@ -213,7 +213,7 @@ the script's folder declares it the standard Python way (`PYTHONPATH=src`).
 care, only the project's imports may.
 
 A script may declare several models, and builds the ones its `__main__` calls.
-Its flags (`--force`, `--json`, `--verbose`, `--profile`, the mesh tolerances)
+Its flags (`--force`, `--json`, `--verbose`, `--profile`)
 apply to every model it builds: no flag names, selects or configures one of them. A command
 that addresses one model, such as `cadgen store why`, names it
 `script.py::function`; a bare `script.py` names its sole model, and a file that
@@ -286,7 +286,7 @@ to its source, a repo script, or a repo workflow does not.
 
 A `@step`/`@dxf`/`@stl`/`@glb`/`@threemf` decorator's arguments never change
 the geometry a model produces. They decide where the files land (`out=`),
-how they are written (the mesh tolerances), and what the sidecar declares
+how they are written (a mesh decorator's tolerances), and what the sidecar declares
 (`kinematics=`, `materials=`, `animation=`). The geometry is the function's return value and nothing
 else: a `Compound` placing children is packaged as occurrences, a single
 solid as one component, and `part`/`assembly` is read off the resulting tree.

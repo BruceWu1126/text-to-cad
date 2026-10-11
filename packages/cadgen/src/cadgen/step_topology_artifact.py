@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import time
-from dataclasses import replace
 from pathlib import Path
 from typing import Iterator
 
@@ -41,8 +40,6 @@ def ensure_step_topology_artifact(
     require_selector: bool = False,
     force: bool = False,
     logger: CliLogger | None = None,
-    mesh_tolerance: float | None = None,
-    mesh_angular_tolerance: float | None = None,
     debug: dict[str, object] | None = None,
 ) -> StepTopologyArtifact:
     """Resolve (building/regenerating if needed) the render/topology artifact for `target`.
@@ -65,8 +62,6 @@ def ensure_step_topology_artifact(
                 require_selector=require_selector,
                 force=force,
                 logger=logger,
-                mesh_tolerance=mesh_tolerance,
-                mesh_angular_tolerance=mesh_angular_tolerance,
                 debug=debug,
                 sink=sink,
             )
@@ -103,16 +98,10 @@ def _ensure_step_topology_artifact(
     require_selector: bool,
     force: bool,
     logger: CliLogger | None,
-    mesh_tolerance: float | None,
-    mesh_angular_tolerance: float | None,
     debug: dict[str, object] | None,
     sink: object | None = None,
 ) -> StepTopologyArtifact:
-    spec = _entry_spec_for_target(
-        target,
-        mesh_tolerance=mesh_tolerance,
-        mesh_angular_tolerance=mesh_angular_tolerance,
-    )
+    spec = _entry_spec_for_target(target)
     if debug is not None:
         debug["source"] = spec.source
     resolved_artifact_path = artifact_path or result_view_dir(spec.entry_path)
@@ -205,12 +194,7 @@ def _ensure_step_topology_artifact(
         )
 
 
-def _entry_spec_for_target(
-    target: ResolvedStepTarget,
-    *,
-    mesh_tolerance: float | None,
-    mesh_angular_tolerance: float | None,
-) -> EntrySpec:
+def _entry_spec_for_target(target: ResolvedStepTarget) -> EntrySpec:
     # DOCUMENTS-ONLY (README law 7): a target is the document. The artifact
     # resolver used to walk back to a `.py` generator and re-run it here, which
     # is how a render could contain a build; a stale document is now refused at
@@ -228,8 +212,6 @@ def _entry_spec_for_target(
         display_name=step_path.stem,
         source="imported",
         step_path=step_path,
-        mesh_tolerance=mesh_tolerance,
-        mesh_angular_tolerance=mesh_angular_tolerance,
     )
 
 
@@ -352,25 +334,6 @@ def _scene_for_regeneration(
     with (logger.timed(f"load STEP {spec.cad_ref}") if logger is not None else _null_context()):
         scene = load_step_scene_cached(spec.step_path)
     return spec, scene
-
-
-def _with_mesh_overrides(
-    spec: EntrySpec,
-    *,
-    mesh_tolerance: float | None,
-    mesh_angular_tolerance: float | None,
-) -> EntrySpec:
-    if mesh_tolerance is None and mesh_angular_tolerance is None:
-        return spec
-    return replace(
-        spec,
-        mesh_tolerance=mesh_tolerance if mesh_tolerance is not None else spec.mesh_tolerance,
-        mesh_angular_tolerance=(
-            mesh_angular_tolerance
-            if mesh_angular_tolerance is not None
-            else spec.mesh_angular_tolerance
-        ),
-    )
 
 
 def _relative_to_base(repo_root: Path, path: Path) -> str:

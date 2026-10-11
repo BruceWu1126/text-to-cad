@@ -44,7 +44,6 @@ from lib.animation import ANIMATION
 
 
 @step(out="../STEP/w16.step",
-      mesh_tolerance=0.0006, mesh_angular_tolerance=0.3,
       animation=ANIMATION,
 )
 def w16():

@@ -6,12 +6,11 @@
 // thrashes the tessellator. The scheduler (viewer-side) owns time — debounce,
 // in-flight limits, cancellation — this module owns only the geometry.
 
-// The tessellation ladder is cadgen's (cadgen.tessellation_policy): which rungs exist,
-// coarse to fine, what chord (RELATIVE to a component's bounding diagonal) and angle
-// (radians) tolerances each means, and which one every model opens at. It arrives with
-// the server's description -- the CAD Viewer's server info, the CAD app's launch -- and
-// the host installs it once, before a STEP model is drawn. This module only picks a
-// rung from the camera; it holds no tolerance of its own.
+// The display tolerance is cadgen's (cadgen.tessellation_policy): the chord (RELATIVE to a
+// component's bounding diagonal) and angle (radians) tolerances every STEP part is meshed
+// at. It arrives with the server's description -- the CAD Viewer's server info, the CAD
+// app's launch -- and the host installs it once, before a STEP model is drawn, as the one
+// rung of the ladder this module picks from. It holds no tolerance of its own.
 let installed = null;
 
 function finitePositive(value) {
@@ -19,7 +18,21 @@ function finitePositive(value) {
 }
 
 /**
- * Install the ladder cadgen published: `{ levels: [{chordTolerance, angleTolerance}], defaultLevel }`.
+ * Install the display tolerance cadgen published: `{ chordTolerance, angleTolerance }`.
+ */
+export function installDisplayTessellation(published) {
+  const { chordTolerance, angleTolerance } = published ?? {};
+  if (!finitePositive(chordTolerance) || !finitePositive(angleTolerance)) {
+    throw new Error(
+      "cadgen's display tolerance is { chordTolerance, angleTolerance }; "
+      + `received ${JSON.stringify(published)}. Update cadgen and the app together.`
+    );
+  }
+  return installTessellationLadder({ levels: [{ chordTolerance, angleTolerance }], defaultLevel: 0 });
+}
+
+/**
+ * Install a ladder: `{ levels: [{chordTolerance, angleTolerance}], defaultLevel }`.
  * Installing the same ladder again is a no-op; a different one replaces it.
  */
 export function installTessellationLadder(published) {
@@ -44,7 +57,7 @@ export function installTessellationLadder(published) {
 function ladder() {
   if (!installed) {
     throw new Error(
-      "The tessellation ladder is cadgen's: the host installs it (installTessellationLadder) from the "
+      "The display tolerance is cadgen's: the host installs it (installDisplayTessellation) from the "
       + "server's description before a STEP model is drawn."
     );
   }

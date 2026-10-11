@@ -103,11 +103,10 @@ class SnapshotListTests(unittest.TestCase):
             "from cadgen._internal.doors import document_snapshot\n"
             "from cadgen.store.view import view_dir_for\n"
             "from cadgen.snapshot_parts import list_rows\n"
-            "from cadgen.tessellation_policy import DEFAULT_TESSELLATION\n"
             "document, tree = document_snapshot(Path(sys.argv[1]))\n"
             "package = view_dir_for(tree, document_hash=document)\n"
             "descriptor = json.loads((package / 'assembly.json').read_text())\n"
-            "rows = list_rows(descriptor, package, selection=None, tessellation=DEFAULT_TESSELLATION)\n"
+            "rows = list_rows(descriptor, package, selection=None)\n"
             "print(json.dumps([len(rows), sorted(name for name in sys.modules if name.split('.')[0] in ('OCP', 'build123d'))]))\n"
         )
         done = subprocess.run([sys.executable, "-c", script, str(self.workspace / "asm.step")],

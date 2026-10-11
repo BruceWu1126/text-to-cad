@@ -35,7 +35,7 @@ FOLDER = "out"
 
 
 @stl(out=f"{FOLDER}/{NAME}.stl", mesh_tolerance=TOL)
-@step(out=FOLDER + "/" + NAME + ".step", mesh_tolerance=TOL * 2)
+@step(out=FOLDER + "/" + NAME + ".step")
 def plate():
     return bd.Box(20, 10, 2)
 
@@ -102,7 +102,6 @@ class DecoratorArgumentsAreEvaluated(unittest.TestCase):
 
         metadata = parse_generator_metadata(self.src / "plate.py")
         self.assertEqual(metadata.out_target, "out/plate_rev_b.step")
-        self.assertAlmostEqual(metadata.mesh_tolerance, 0.04)
         (stl_decl,) = metadata.mesh_exports
         self.assertEqual(stl_decl.out, "out/plate_rev_b.stl")
         self.assertAlmostEqual(stl_decl.mesh_tolerance, 0.02)

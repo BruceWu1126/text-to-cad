@@ -11,9 +11,9 @@ descriptor's order:
 - ``bounds`` is that row's box: the component's exact box (from its SURF),
   placed by the occurrence's transform, rounded to a nanometre;
 - ``triangleCount`` and ``vertexCount`` are the stored display mesh's
-  (``cadgen.store.meshes``) at the tessellation a view of the same job would
-  draw (``cadgen.tessellation_policy.snapshot_tessellation``), meshed in the
-  build pool when the store has none.
+  (``cadgen.store.meshes``), at the display tolerance a view draws
+  (``cadgen.tessellation_policy.DISPLAY_TESSELLATION``), meshed in the build
+  pool when the store has none.
 
 A part whose mesh leaves out a face no mesher could cover is listed, drawn and
 counted without it, and :func:`unmeshed_warnings` names the faces in the result's
@@ -83,19 +83,17 @@ def _rounded(values: Sequence[float]) -> list:
     return out
 
 
-def _mesh_counts(descriptor: Mapping[str, Any], cids: set[str], tessellation: Mapping[str, float]) -> dict:
-    """``{cid: (triangles, vertices)}`` from the stored meshes at ``tessellation``."""
+def _mesh_counts(descriptor: Mapping[str, Any], cids: set[str]) -> dict:
+    """``{cid: (triangles, vertices)}`` from the stored display meshes."""
     from cadgen.store.meshes import tessellation_key
     from cadgen.store.tess_cache import produce_meshes
 
-    chord = float(tessellation["chordTolerance"])
-    angle = float(tessellation["angleTolerance"])
     components = descriptor.get("components") if isinstance(descriptor.get("components"), Mapping) else {}
     keys = {}
     for cid in sorted(cids):
         surface_input = str((components.get(cid) or {}).get("surfaceInput") or "")
         if surface_input:
-            keys[cid] = tessellation_key(surface_input, chord, angle)
+            keys[cid] = tessellation_key(surface_input)
     records = produce_meshes(list(keys.values())) if keys else {}
     counts = {}
     for cid, key in keys.items():
@@ -129,16 +127,14 @@ def has_surfaces(descriptor: Mapping[str, Any], package_dir: Path) -> bool:
 def unmeshed_warnings(
     descriptor: Mapping[str, Any],
     rows: Sequence[Mapping[str, Any]],
-    tessellation: Mapping[str, float],
     consequence: str,
 ) -> list[str]:
-    """A warning per component whose stored mesh at ``tessellation`` leaves a face no
+    """A warning per component whose stored display mesh leaves a face no
     mesher could cover undrawn (``cadgen.store.meshes``), naming the faces, the
     occurrences of ``rows`` that place it, and ``consequence``. A probe per component
     when none is missing."""
     from cadgen.store import meshes
 
-    chord, angle = float(tessellation["chordTolerance"]), float(tessellation["angleTolerance"])
     components = descriptor.get("components") if isinstance(descriptor.get("components"), Mapping) else {}
     placed: dict[str, list[tuple[str, str]]] = {}
     for row in rows:
@@ -148,7 +144,7 @@ def unmeshed_warnings(
     for cid, occurrences in placed.items():
         surface_input = str((components.get(cid) or {}).get("surfaceInput") or "")
         if surface_input:
-            faces = meshes.stored_unmeshed_faces(meshes.tessellation_key(surface_input, chord, angle))
+            faces = meshes.stored_unmeshed_faces(meshes.tessellation_key(surface_input))
             if faces:
                 warnings.append(meshes.unmeshed_warning(occurrences, faces, consequence))
     return warnings
@@ -159,13 +155,12 @@ def list_rows(
     package_dir: Path,
     *,
     selection: Mapping[str, Any] | None,
-    tessellation: Mapping[str, float],
 ) -> list[dict[str, Any]]:
     """The ``--mode list`` rows for a STEP tree (see the module docstring)."""
     from cadgen.assembly_lookup import assembly_occurrence_rows
 
     rows = filter_occurrences(assembly_occurrence_rows(descriptor, package_dir), selection)
-    counts = _mesh_counts(descriptor, {str(row["component"]) for row in rows if row.get("component")}, tessellation)
+    counts = _mesh_counts(descriptor, {str(row["component"]) for row in rows if row.get("component")})
     listed = []
     for row in rows:
         triangles, vertices = counts.get(str(row.get("component")), (0, 0))

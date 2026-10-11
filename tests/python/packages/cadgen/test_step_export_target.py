@@ -139,8 +139,8 @@ class StepExportTargetTests(unittest.TestCase):
         for entry in payload["files"]:
             self._assert_export_file(Path(entry["path"]), entry["format"])
             # The result reports the EFFECTIVE pair: no tolerance was asked for, so
-            # these are the mesh defaults -- numbers, never null.
-            self.assertEqual(1.5e-3, entry["meshTolerance"])
+            # these are the display tolerance's -- numbers, never null.
+            self.assertEqual(5e-4, entry["meshTolerance"])
             self.assertEqual(0.35, entry["meshAngularTolerance"])
 
     def test_an_asked_for_tolerance_is_the_one_reported(self) -> None:

@@ -1,4 +1,4 @@
-"""Unified display, technical output, and tessellation are closed schemas."""
+"""Unified display and technical output are closed schemas."""
 
 from __future__ import annotations
 
@@ -17,13 +17,10 @@ from cadgen.snapshot_core import (  # noqa: E402
     DISPLAY_MODES,
     RENDER_QUALITY_IDS,
     SUPPORTED_OUTPUT_SETTINGS_KEYS,
-    SUPPORTED_QUALITY_KEYS,
     SnapshotError,
     load_display_option,
     normalize_common_job,
-    validate_render_tessellation,
 )
-from cadgen.tessellation_policy import TESSELLATION_CEILINGS, TESSELLATION_FLOORS  # noqa: E402
 
 
 def normalize(**settings: object) -> dict[str, object]:
@@ -125,44 +122,18 @@ class RenderDisplaySchemaTest(unittest.TestCase):
         self.assertIn("camera", signature.parameters)
         self.assertNotIn("render", signature.parameters)
 
-    def test_output_and_quality_are_closed(self):
+    def test_output_is_closed(self):
         output = {
             "sizeProfile": "diagnostic", "padding": 0.1,
             "viewLabels": True, "tightFrame": True, "transparent": True, "renderScale": 2,
         }
         self.assertEqual(set(output), set(SUPPORTED_OUTPUT_SETTINGS_KEYS))
-        self.assertEqual({"tessellation"}, set(SUPPORTED_QUALITY_KEYS))
-        normalize(output=output, quality={"tessellation": {"chordTolerance": 0.001}})
+        normalize(output=output)
         with self.assertRaisesRegex(SnapshotError, "output has unknown key"):
             normalize(output={"pixels": 2})
         # One name per setting: the old second spelling of `padding` names its replacement.
         with self.assertRaisesRegex(SnapshotError, r"output\.paddingPercent was removed; use output\.padding"):
             normalize(output={"paddingPercent": 0.1})
-
-
-class RenderTessellationLimitsTest(unittest.TestCase):
-    def test_unknown_field_and_non_numbers_are_refused(self):
-        for value in ({"quality": "high"}, {"chordTolerance": "0.001"}, {"chordTolerance": True}):
-            with self.assertRaises(SnapshotError):
-                validate_render_tessellation(value)
-        with self.assertRaises(SnapshotError):
-            validate_render_tessellation([0.001])
-
-    def test_tolerances_outside_the_bounds_are_refused_here_not_in_the_browser(self):
-        with self.assertRaises(SnapshotError) as caught:
-            normalize(quality={"tessellation": {"chordTolerance": 1e-12}})
-        self.assertIn("quality.tessellation.chordTolerance 1e-12 is finer than cadgen meshes", str(caught.exception))
-        self.assertIn("at least 5e-05", str(caught.exception))
-        with self.assertRaises(SnapshotError):
-            normalize(quality={"tessellation": {"angleTolerance": 1e-6}})
-        with self.assertRaises(SnapshotError) as caught:
-            normalize(quality={"tessellation": {"chordTolerance": 1e300}})
-        self.assertIn("at most 0.05", str(caught.exception))
-        # The bounds themselves, and everything between, are legal requests.
-        validate_render_tessellation(dict(TESSELLATION_FLOORS))
-        validate_render_tessellation(dict(TESSELLATION_CEILINGS))
-        validate_render_tessellation({"chordTolerance": 0.0005, "angleTolerance": 0.10})
-        validate_render_tessellation(None)
 
 
 if __name__ == "__main__":

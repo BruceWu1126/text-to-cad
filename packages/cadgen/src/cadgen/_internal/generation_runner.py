@@ -243,8 +243,7 @@ def _normalize_step_payload(
 
     The dict envelope (``{"shape": ..., "stl": ..., "mesh_tolerance": ...}``) is
     gone: exports are declared with ``@stl``/``@threemf``/``@glb`` stacked on the
-    model and tolerances with ``@step(mesh_tolerance=...)``. A dict here is a hard
-    error that names those decorators; the static parser refuses the same shape
+    model. A dict here is a hard error that names those decorators; the static parser refuses the same shape
     before a build starts.
     """
     from build123d import Shape as Build123dShape
@@ -265,8 +264,7 @@ def _normalize_step_payload(
         raise TypeError(
             f"{_display_path(script_path)} @step returned a dict; a model returns a "
             "build123d shape and nothing else. Declare mesh exports with "
-            "@stl/@threemf/@glb stacked on the model and tolerances with "
-            "@step(mesh_tolerance=..., mesh_angular_tolerance=...)."
+            "@stl/@threemf/@glb stacked on the model."
         )
     raise TypeError(
         f"{_display_path(script_path)} @step must return a build123d Shape, got "

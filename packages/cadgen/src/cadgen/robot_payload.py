@@ -51,8 +51,8 @@ The payload::
   pivots ``ground_length`` apart, the range reachable, the derived range within the joint's
   limits) is checked here, and refused in words; the page solves nothing.
 - A visual's mesh is the file it names (``format`` the page's decoder: stl, 3mf or glb) or,
-  for a box, cylinder, sphere or capsule, a GLB cadgen meshed at the standard rung of the
-  display ladder and stored as an object (``_internal.primitive_mesh``). The payload names
+  for a box, cylinder, sphere or capsule, a GLB cadgen meshed at the display tolerance and
+  stored as an object (``_internal.primitive_mesh``). The payload names
   a file by its absolute path (``path``) and a primitive by its object hash (``object``);
   the host that serves it mints each one's ``url`` (:func:`locate_robot_payload`). A mesh
   lands in the robot's metres as its format defines it: a GLB is metres by the glTF spec,
@@ -82,7 +82,7 @@ import xml.etree.ElementTree as ET
 
 from cadgen.articulation import ARTICULATION_SCHEMA_VERSION
 from cadgen.findings import FindingsReport, format_findings
-from cadgen.tessellation_policy import DEFAULT_TESSELLATION
+from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 from cadgen.xml_common import children, display_path, local_name
 
 __all__ = [
@@ -1476,7 +1476,7 @@ def robot_payload_scheme() -> str:
     """What the payload's shape, its resolution and its primitive meshes depend on, hashed into
     the index key."""
     return f"robot-payload-{ROBOT_PAYLOAD_SCHEMA_VERSION}-resolution-{_RESOLUTION_REVISION}-articulation-{ARTICULATION_SCHEMA_VERSION}-" \
-           + json.dumps(DEFAULT_TESSELLATION, sort_keys=True)
+           + json.dumps(DISPLAY_TESSELLATION, sort_keys=True)
 
 
 def encode_robot_payload(payload: Mapping[str, Any]) -> bytes:

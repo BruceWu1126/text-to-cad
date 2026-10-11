@@ -17,9 +17,9 @@ class SelectorOptions:
 
     Carries no mesh tolerance. A tree is tessellation-free — it
     stores surfaces (``.surf``) and the client meshes them — so the only
-    option here with a consequence is which edge classes get built.
-    ``--mesh-tolerance`` belongs to the mesh EXPORT path (``MeshExportJob``),
-    which never reads this.
+    option here with a consequence is which edge classes get built. A mesh
+    tolerance belongs to the mesh EXPORT path (``MeshExportJob``), which never
+    reads this.
     """
 
     edge_deflection: float | None = None

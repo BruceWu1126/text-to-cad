@@ -427,7 +427,7 @@ test("photographic Render applies a non-rest kinematics transform", () => {
   }
 });
 
-test("render display accepts common camera, selection, clipping, and quality controls", () => {
+test("render display accepts common camera, selection and clipping controls", () => {
   const context = renderJobContext(twoPartMeshData(), {
     kind: "step",
     camera: { preset: "front" },
@@ -438,8 +438,7 @@ test("render display accepts common camera, selection, clipping, and quality con
       exploded: { enabled: true, amount: 0.5 },
       surfaces: { colorMode: "single", color: "#123456" }
     },
-    selection: { hiddenPartIds: ["right"], selectedPartIds: ["left"] },
-    quality: { tessellation: { chordTolerance: 0.001 } }
+    selection: { hiddenPartIds: ["right"], selectedPartIds: ["left"] }
   });
   assert.equal(context.camera.projection, "orthographic");
   assert.equal(context.sharedRenderOptions.clip.enabled, true);

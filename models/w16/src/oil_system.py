@@ -15,8 +15,7 @@ from lib import spec as S
 from lib.palette import material_compound, materials_for_system
 
 
-@step(out="../STEP/oil_system.step", materials=materials_for_system("oil_system"),
-      mesh_tolerance=0.0006, mesh_angular_tolerance=0.3)
+@step(out="../STEP/oil_system.step", materials=materials_for_system("oil_system"))
 def oil_system():
     parts = oil_system_lib.build(S.SECTIONED)
     if not parts:

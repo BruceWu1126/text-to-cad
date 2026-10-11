@@ -68,8 +68,6 @@ class RetainedRevisionPublication(unittest.TestCase):
             display_name="parent",
             generator_names=("parent",),
             format="step",
-            mesh_tolerance=None,
-            mesh_angular_tolerance=None,
             entry_function="parent",
             is_decorated=True,
         )

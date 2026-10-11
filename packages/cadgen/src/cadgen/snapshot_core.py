@@ -1,7 +1,7 @@
 """Snapshot render core shared by the CAD and DXF skills.
 
 Everything here is format-agnostic: the headless browser driver, the job normalisation
-(camera, Render scene, display, output, quality), the mesh render path, and output writing. It
+(camera, Render scene, display, output), the mesh render path, and output writing. It
 knows nothing about STEP topology, drawings, or robot descriptions -- a caller resolves its
 own input to an asset URL and hands the result to :func:`render_resolved_job_packet`.
 
@@ -39,7 +39,6 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 from cadgen.assets import require_browser_runtime
 from cadgen.coordination import PHASE_RENDER, resolve as resolve_progress
 from cadgen.results import SnapshotFile, SnapshotResult, SnapshotTimings
-from cadgen.tessellation_policy import TESSELLATION_FLOORS, tolerance_refusal
 from cadgen._internal.atomic_replace import write_bytes_atomic
 
 
@@ -70,7 +69,6 @@ SUPPORTED_JOB_KEYS = frozenset(
         "outputs",
         "display",
         "output",
-        "quality",
         "camera",
         "selection",
         # A STEP model's pose: a declared preset name, or {dof: value}. Named for the
@@ -105,7 +103,6 @@ RETIRED_OUTPUT_SETTINGS_KEYS = {"paddingPercent": "padding"}
 # clamped in the page without a word, so it is refused here instead.
 OUTPUT_PADDING_RANGE = (0, 0.15)
 OUTPUT_RENDER_SCALE_RANGE = (1, 3)
-SUPPORTED_QUALITY_KEYS = frozenset({"tessellation"})
 SUPPORTED_OUTPUT_KEYS = frozenset(
     {
         "path",
@@ -793,22 +790,6 @@ def validate_timeout_seconds(value: object) -> float:
     return float(value)
 
 
-def validate_quality_settings(value: object) -> dict[str, object]:
-    if value is None:
-        return {}
-    if not is_plain_object(value):
-        raise SnapshotError("quality must be an object")
-    quality = dict(value)
-    unknown = sorted(set(quality) - SUPPORTED_QUALITY_KEYS)
-    if unknown:
-        raise SnapshotError(
-            f"quality has unknown key(s): {', '.join(unknown)}; "
-            f"supported keys: {', '.join(sorted(SUPPORTED_QUALITY_KEYS))}"
-        )
-    validate_render_tessellation(quality.get("tessellation"))
-    return quality
-
-
 def path_is_inside_or_equal(child: Path, parent: Path) -> bool:
     resolved_child = child.resolve()
     resolved_parent = parent.resolve()
@@ -1051,32 +1032,6 @@ def normalize_snapshot_job_packet(raw_payload: object) -> tuple[bool, list[objec
     if is_plain_object(raw_payload) and isinstance(raw_payload.get("jobs"), list):
         return False, list(raw_payload["jobs"])
     return True, [raw_payload]
-def validate_render_tessellation(value: object) -> None:
-    """Refuse an unusable ``quality.tessellation`` here, the one place it is
-    checked, before anything is meshed or a browser launched: the page draws the
-    tolerances the resolved job names (``cadgen.tessellation_policy.snapshot_tessellation``),
-    each within the policy's bounds (``tolerance_refusal``)."""
-    if value is None:
-        return
-    if not is_plain_object(value):
-        raise SnapshotError("quality.tessellation must be an object of chordTolerance/angleTolerance")
-    unknown = sorted(set(value) - set(TESSELLATION_FLOORS))
-    if unknown:
-        raise SnapshotError(
-            f"quality.tessellation has unknown key(s): {', '.join(unknown)}; "
-            f"supported keys: {', '.join(sorted(TESSELLATION_FLOORS))}"
-        )
-    for key in TESSELLATION_FLOORS:
-        if key not in value:
-            continue
-        raw = value[key]
-        if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not isfinite(float(raw)) or float(raw) <= 0:
-            raise SnapshotError(f"quality.tessellation.{key} must be a positive finite number")
-        refusal = tolerance_refusal(key, float(raw), name=f"quality.tessellation.{key}")
-        if refusal is not None:
-            raise SnapshotError(refusal)
-
-
 def normalize_common_job(
     job: dict[str, object],
     *,
@@ -1133,7 +1088,6 @@ def normalize_common_job(
                 )
 
     output_settings = validate_output_settings(job.get("output"))
-    quality = validate_quality_settings(job.get("quality"))
     if not is_plain_object(job.get("display", {})):
         raise SnapshotError("display must be a display settings object")
     # Every mode shares its preset defaults with the Viewer; only appearance is
@@ -1235,7 +1189,6 @@ def normalize_common_job(
         **job,
         "mode": mode,
         "output": output_settings,
-        "quality": quality,
         "display": display,
         "outputs": normalized_outputs,
     }
@@ -1289,7 +1242,6 @@ def refuse_cad_model_requests(
     mode: str,
     subject: str,
     pose_hint: str,
-    tessellation_hint: str,
     joints: bool = False,
 ) -> None:
     """Refuse, by name, everything in ``job`` that only a STEP model can honour.
@@ -1319,11 +1271,6 @@ def refuse_cad_model_requests(
         )
     if job.get("video") is not None:
         raise SnapshotError(f"a video renders an animation clip; {subject} have no clips to render")
-    quality = job.get("quality") if is_plain_object(job.get("quality")) else {}
-    if quality.get("tessellation") is not None:
-        raise SnapshotError(
-            f"quality.tessellation requires an exact-surface STEP package; {tessellation_hint}"
-        )
 
 
 def check_mesh_render_job(job: Mapping[str, object], *, kind: str, mode: str, **_context: object) -> None:
@@ -1334,7 +1281,6 @@ def check_mesh_render_job(job: Mapping[str, object], *, kind: str, mode: str, **
         mode=mode,
         subject=f"{label} mesh inputs",
         pose_hint=f"{label} mesh inputs are not parametric",
-        tessellation_hint=f"{label} is an existing mesh",
     )
 
 
@@ -2197,7 +2143,7 @@ def _unmeshed_view_warnings(job: Mapping[str, object]) -> list[str]:
         rows = filter_occurrences(assembly_occurrence_rows(descriptor, None), {"hide": selection.get("hide")})
     except ValueError:
         return []
-    return unmeshed_warnings(descriptor, rows, resolved["tessellation"], "the view does not draw {them}")
+    return unmeshed_warnings(descriptor, rows, "the view does not draw {them}")
 
 
 async def render_resolved_job_packet(

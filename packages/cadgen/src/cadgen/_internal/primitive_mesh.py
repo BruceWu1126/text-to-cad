@@ -1,11 +1,11 @@
 """The meshes of a robot description's primitive shapes: box, cylinder, sphere, capsule.
 
 A URDF or SDF visual may be a shape rather than a mesh file. cadgen meshes it, as it
-meshes every other display mesh, at the standard rung of the display ladder
-(``cadgen.tessellation_policy.DEFAULT_TESSELLATION``): a round shape takes as many
+meshes every other display mesh, at the display tolerance
+(``cadgen.tessellation_policy.DISPLAY_TESSELLATION``): a round shape takes as many
 segments as the chord criterion (relative to the shape's bounding diagonal, as a STEP
 component's is) and the angle criterion between them allow, which is what OCCT's
-mesher decides for the same solid. A box is twelve triangles whatever the rung.
+mesher decides for the same solid. A box is twelve triangles whatever the tolerance.
 
 Each mesh is one glTF binary: positions and normals in glTF's Y-up metres, one triangle
 primitive, no material (the robot's visual paints it: the description's colour, else the
@@ -24,7 +24,7 @@ import struct
 
 import numpy as np
 
-from cadgen.tessellation_policy import DEFAULT_TESSELLATION
+from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
 __all__ = ["PRIMITIVE_SHAPES", "primitive_glb", "primitive_segments"]
 
@@ -32,7 +32,7 @@ __all__ = ["PRIMITIVE_SHAPES", "primitive_glb", "primitive_segments"]
 PRIMITIVE_SHAPES = ("box", "cylinder", "sphere", "capsule")
 
 # A circle is never coarser than an octagon nor finer than this, whatever the tolerances
-# and the radius say: the ladder is a display policy, not a licence for a million triangles.
+# and the radius say: the tolerance is a display policy, not a licence for a million triangles.
 _MIN_SEGMENTS = 8
 _MAX_SEGMENTS = 512
 
@@ -43,12 +43,12 @@ _FLOAT, _UNSIGNED_INT, _ARRAY_BUFFER, _ELEMENT_ARRAY_BUFFER, _TRIANGLES = 5126, 
 def primitive_segments(radius: float, diagonal: float) -> int:
     """How many segments a circle of ``radius`` takes on a shape of bounding ``diagonal``.
 
-    The chord criterion bounds the sagitta of one segment by the rung's chord tolerance
+    The chord criterion bounds the sagitta of one segment by the display chord tolerance
     times the diagonal; the angle criterion bounds the turn between two segments' normals.
     The tighter of the two decides, within the floor and the cap above.
     """
-    chord = float(DEFAULT_TESSELLATION["chordTolerance"]) * float(diagonal)
-    angle = float(DEFAULT_TESSELLATION["angleTolerance"])
+    chord = float(DISPLAY_TESSELLATION["chordTolerance"]) * float(diagonal)
+    angle = float(DISPLAY_TESSELLATION["angleTolerance"])
     theta = angle
     if 0.0 < chord < radius:
         theta = min(theta, 2.0 * math.acos(1.0 - chord / radius))

@@ -2,15 +2,15 @@
 
 Each fixture is one component as cadgen stores it: ``<name>.surf`` (its SURF:
 exact surfaces and the topology index) and ``<name>.l<level>.glb`` (cadgen's
-OCCT mesh of it at that viewer LOD level, ``lodPolicy.js``), bound to each
+OCCT mesh of it at that rung of the LOD tests' ladder, ``LEVELS``), bound to each
 other by the SURF's digest and to a fixed test surface input
 (``sha256("cadgen-test-fixture:<name>")``, recorded in ``fixtures.json``).
 ``<name>.selectors.json`` is the component's selector table as cadgen stores
 it beside the SURF (``cadgen._internal.selector_table``): what the page joins
 to the mesh, and the oracle every id and fact a JS test expects comes from.
-``tessellationLadder.js`` is cadgen's display ladder
-(``cadgen.tessellation_policy.ladder_payload``), which a JS test installs as a
-host installs the one its server publishes (``../testing.js``).
+``displayTessellation.js`` is cadgen's display tolerance
+(``cadgen.tessellation_policy.DISPLAY_TESSELLATION``), which a JS test installs
+as a host installs the one its server publishes (``../testing.js``).
 
 The shapes are built here, not read from ``models/``. Run from the repository
 root with the repo's Python whenever cadgen's SURF or mesh output changes:
@@ -95,22 +95,22 @@ def slot():
     return solid
 
 
-LADDER_MODULE_HEAD = (
-    "// Written by cadgen (make_fixtures.py, from cadgen.tessellation_policy.ladder_payload): the\n"
-    "// display ladder a cadgen server publishes, for tests to install as a host does. Regenerate it;\n"
-    "// a Python test holds it equal to cadgen's.\n"
-    "export const TESSELLATION_LADDER = "
+DISPLAY_MODULE_HEAD = (
+    "// Written by cadgen (make_fixtures.py, from cadgen.tessellation_policy.DISPLAY_TESSELLATION):\n"
+    "// the display tolerance a cadgen server publishes, for tests to install as a host does.\n"
+    "// Regenerate it; a Python test holds it equal to cadgen's.\n"
+    "export const DISPLAY_TESSELLATION = "
 )
+# The rungs the level-of-detail tests draw at (``../testing.js`` TEST_TESSELLATION_LADDER).
+LEVELS = ({"chordTolerance": 2e-3, "angleTolerance": 1.4}, {"chordTolerance": 1.5e-3, "angleTolerance": 0.35})
 
 
-def write_ladder() -> dict:
-    """``tessellationLadder.js``: the ladder a server publishes, for the JS tests."""
-    from cadgen.tessellation_policy import ladder_payload
+def write_display_tessellation() -> None:
+    """``displayTessellation.js``: the display tolerance a server publishes, for the JS tests."""
+    from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
-    ladder = ladder_payload()
-    text = LADDER_MODULE_HEAD + json.dumps(ladder, separators=(", ", ": ")) + ";\n"
-    (HERE / "tessellationLadder.js").write_text(text, encoding="utf-8")
-    return ladder
+    text = DISPLAY_MODULE_HEAD + json.dumps(DISPLAY_TESSELLATION, separators=(", ", ": ")) + ";\n"
+    (HERE / "displayTessellation.js").write_text(text, encoding="utf-8")
 
 
 def main() -> None:
@@ -120,7 +120,7 @@ def main() -> None:
     from cadgen._internal.surf_container import read_surf
     from cadgen._internal.surface_extract import extract_surface_component
 
-    ladder = write_ladder()["levels"]
+    write_display_tessellation()
     manifest = {}
     for name, build, levels in (("sun_gear", sun_gear, (0, 1)), ("cam_follower_roller", cam_follower_roller, (0, 1)),
                                 ("mixed", mixed, (0, 1)), ("slot", slot, (0, 1))):
@@ -136,7 +136,7 @@ def main() -> None:
         (HERE / f"{name}.surf").write_bytes(surf)
         meshes = {}
         for level in levels:
-            chord, angle = ladder[level]["chordTolerance"], ladder[level]["angleTolerance"]
+            chord, angle = LEVELS[level]["chordTolerance"], LEVELS[level]["angleTolerance"]
             body = occt_mesh.mesh_component(decode_display_shape(entry, payload).wrapped, index,
                                             surface_input=surface_input, surface_object=surface_object,
                                             chord=chord, angle=angle)

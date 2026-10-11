@@ -61,8 +61,8 @@ no per-run output override.
 - **Outputs are what the decorators declare**: `@step` writes the `.step`, and
   `@stl`/`@threemf`/`@glb` write meshes ([mesh exports](supported-exports.md));
   a model may declare meshes and no STEP.
-- Options on `@step`: `out=`, `mesh_tolerance=`, `mesh_angular_tolerance=`,
-  `kinematics=`, `materials=` and `animation=` ([kinematics](kinematics.md)). No
+- Options on `@step`: `out=`, `kinematics=`, `materials=` and `animation=`
+  ([kinematics](kinematics.md)). Mesh tolerances belong to the mesh decorators. No
   decorator argument changes the geometry a model produces. `materials=` is
   `{"definitions": {id: material}, "assignments": [{"targets": ["#label", "#group"], "material": id}]}`;
   every target must resolve exactly ([material channels](build123d-modeling.md#colour-and-finish)).

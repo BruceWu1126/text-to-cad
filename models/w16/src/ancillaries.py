@@ -15,8 +15,7 @@ from lib import spec as S
 from lib.palette import material_compound, materials_for_system
 
 
-@step(out="../STEP/ancillaries.step", materials=materials_for_system("ancillaries"),
-      mesh_tolerance=0.0006, mesh_angular_tolerance=0.3)
+@step(out="../STEP/ancillaries.step", materials=materials_for_system("ancillaries"))
 def ancillaries():
     parts = ancillaries_lib.build(S.SECTIONED)
     if not parts:

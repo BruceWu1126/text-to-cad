@@ -92,21 +92,22 @@ its own glTF scene, with its authored materials, at rest.
 
 ## Mesh tolerance
 
-Mesh exports write the meshes the CAD Viewer draws: OCCT's mesh of each
-component's exact surfaces. Faces that meet share their boundary vertices, and
-identical inputs produce identical bytes.
+Mesh exports are OCCT's mesh of each component's exact surfaces. Faces that
+meet share their boundary vertices, and identical inputs produce identical bytes.
+An export that names no tolerance is written at the display tolerance, from the
+very meshes the CAD Viewer and snapshots draw.
+
+A mesh decorator takes `mesh_tolerance=` and `mesh_angular_tolerance=`; an export
+command takes the same two as flags (the model's declarations are not read):
 
 ```bash
 --mesh-tolerance FLOAT           # chord tolerance RELATIVE to each component's
-                                 # bounding diagonal (default 1.5e-3)
+                                 # bounding diagonal (default 5e-4)
 --mesh-angular-tolerance FLOAT   # max normal spread across a triangle edge,
                                  # radians (default 0.35)
 ```
 
-On an export command these set that export's tolerances (defaults otherwise; the
-model's declarations are not read). On a model-script run they override every
-declared mesh's tolerances for that run only. `--json` results report the
-effective pair.
+`--json` results report the effective pair.
 
 Linear tolerance is relative, not millimetres: for a chord deviation of X mm on a
 part whose bounding diagonal is D mm, pass X/D (0.1 mm on a 200 mm part is

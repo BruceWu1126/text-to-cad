@@ -36,7 +36,7 @@ class CompoundAssemblyGenerationTests(unittest.TestCase):
             {"shape": object(), "params": "tom.params.js"},
         ):
             with self.subTest(payload=sorted(payload)):
-                with self.assertRaisesRegex(TypeError, r"returned a dict.*@stl/@threemf/@glb.*mesh_tolerance"):
+                with self.assertRaisesRegex(TypeError, r"returned a dict.*@stl/@threemf/@glb"):
                     generation_runner._normalize_step_payload(payload, script_path=Path("part.py"))
 
     def test_step_payload_rejects_non_shapes(self) -> None:
