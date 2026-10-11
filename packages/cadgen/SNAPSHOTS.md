@@ -17,7 +17,11 @@ cadgen step snapshot part.step review.png --display display.json --camera front
 
 The public groups are `camera`, `surfaces`, `edges`, `lighting`, `background`,
 `floor`, `grid`, and `axes`. `clip` and `exploded` remain independent inspection
-tools. `--camera` or a job/output `camera` specifies pose and framing;
+tools. A clip keeps the part of a STEP model on the lower side of a plane across
+`axis` (`x`, `y` or `z`), at `offset` (0 to 1 across the model's bounds), or the
+upper side with `invert`, and fills the cut faces: a camera facing the cut
+(`right`, `back` or `top`; `left`, `front` or `bottom` inverted) draws a section
+view. `--camera` or a job/output `camera` specifies pose and framing;
 `display.camera` specifies projection and focal length (20–200 mm). Render
 defaults to perspective; other presets use orthographic projection. Opacity is
 0 for transparent and 1 for opaque, including partially transparent PNG
@@ -115,51 +119,12 @@ packet. Only then is OUT cleared, so a failed build or render leaves no file
 rather than the previous one. Occurrence refs are the one request check that
 needs the built tree, so they are checked after the clear.
 
-OUT's extension decides the encoding, and no job key does: view mode writes
-`.png`, section mode `.png` or `.svg`, a video `.mp4` or `.gif`. Any other
-extension is refused.
+OUT's extension decides the encoding, and no job key does: a view writes
+`.png`, a video `.mp4` or `.gif`. Any other extension is refused.
 
 A job comes from `--job FILE` or from `TARGET OUT` and the flags; there is no
 stdin form. With `--job`, each flag given overrides that setting in every job of
 the packet, and `--width`/`--height` size every output.
-
-## Section planes
-
-`--mode section` draws the outline a plane cuts through a STEP model.
-`--section PLANE[:OFFSET]` (job key `"section": {"plane", "offset"}`) places it:
-`PLANE` is `XY` (the default), `XZ` or `YZ`, and `OFFSET` moves it along its own
-normal in model units, defaulting to 0.
-
-```bash
-cadgen step snapshot part.step cut.svg --mode section --section XZ:12.5
-```
-
-Those are the only two keys, a `section` outside section mode is refused, and a
-plane that cuts no material returns an empty drawing with a warning.
-
-The cut is exact. cadgen sections each part's BREP with the plane, in the part's
-own coordinates (`cadgen.store.sections`, a build-pool job cached by part and
-plane in the store's `section` index), so a cylinder cut across its axis is a
-circle of its true radius, never the chords of a tessellation. Only a part whose
-placed box reaches the plane is cut; the rest of a big assembly costs nothing. A section is the
-material the plane cuts, and only a solid has any: a solid's cut is the region
-of the plane inside it (a face of it lying in the plane included), a plane that
-only touches a solid (tangent to a torus's top) cuts nothing, a sheet body's cut
-is its curves, and a wire or edge is no part of a section even lying in the
-plane. `--focus` and `--hide` pick the parts that are cut. The cut is drawn as a
-2D drawing payload (`cadgen.section_drawing`): each part's solid material filled
-even-odd and hatched at 45 degrees, dash-dot centre lines through the cut's box,
-and every outline, a sheet's curves included, in the appearance's foreground
-(or `display.edges.color`). A `.png` is that payload painted by the snapshot
-page with the same drawing code a DXF is, with a cut locator in the corner and,
-with `--view-labels`, the plane's label; a `.svg` is written by cadgen itself, y
-up as drawn, and a job whose outputs are all `.svg` starts no browser. Both are
-drawn in model units from the model point the SVG's root names in
-`data-origin`: `0 0` unless the cut lies far from the origin (more than fifty
-times its own size), where a round point beside it keeps every coordinate
-within a renderer's 32-bit floats. The plane's label is always the model's.
-Section mode is for STEP/STP inputs; a mesh or a robot description has no
-solids to section.
 
 ## Listing a STEP model's parts
 

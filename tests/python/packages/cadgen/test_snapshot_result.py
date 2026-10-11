@@ -377,7 +377,7 @@ class PublicVerbs(unittest.TestCase):
         drawing = parameters("cadgen.dxf")
         self.assertIn("appearance", drawing)
         for absent in ("camera", "display", "mode", "view_labels",
-                       "kinematics", "focus", "hide", "joint_values", "section"):
+                       "kinematics", "focus", "hide", "joint_values"):
             self.assertNotIn(absent, drawing, f"{absent} describes a scene a drawing does not have")
 
         for door in ("urdf", "sdf"):

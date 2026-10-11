@@ -735,9 +735,9 @@ def _ascii_v3_bytes(shape: Any) -> bytes:
 
 class NativeShape:
     """A decoded component as the build pool's kernel work reads it: the bare
-    ``TopoDS_Shape`` and its face colours. Surfaces, selector tables, meshes and
-    sections read only those, and a build123d wrapper would cost a worker that
-    starts for one job most of its start: importing build123d."""
+    ``TopoDS_Shape`` and its face colours. Surfaces, selector tables and meshes
+    read only those, and a build123d wrapper would cost a worker that starts
+    for one job most of its start: importing build123d."""
 
     __slots__ = ("wrapped", "cad_face_ordinal_colors")
 

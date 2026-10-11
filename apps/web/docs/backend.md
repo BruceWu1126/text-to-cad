@@ -273,7 +273,7 @@ not add one).
 
 ```jsonc
 {
-  "schemaVersion": 3,
+  "schemaVersion": 2,
   "units": { "insunits": 4, "name": "Millimeters", "toMillimetres": 1.0 },
   "bounds": [minX, minY, maxX, maxY],        // null when nothing was drawn
   "layers": [{ "name": "CUT", "color": "#ff0000", "count": 12 }],
@@ -295,10 +295,7 @@ not add one).
   foreground, which is why one payload serves both the light and the dark
   theme. Every other ACI and every true colour is a literal `#rrggbb`. A layer
   row's `color` is null on the same rule. Lineweights are not in the payload:
-  the client draws hairlines, as AutoCAD does with LWDISPLAY off. The payload
-  shape also lets a stroke (`lines`, `path`) name its own screen `width` (CSS
-  pixels) and any primitive its `opacity`, which a STEP section's drawing uses
-  and a DXF's never does.
+  the client draws hairlines, as AutoCAD does with LWDISPLAY off.
 - **`primitives[].type`** is ezdxf's own vocabulary: `point` (`[x, y]`),
   `lines` (`[[x0,y0,x1,y1], …]`), `path` (SVG-like `["M"|"L"|"Q"|"C"|"Z", …]`
   commands), `filled-paths` (a list of those command lists, even-odd filled)

@@ -74,7 +74,6 @@ One word is NOT retired, and it has exactly one meaning:
   index/mesh/<key>                    a component's mesh at one tessellation → GLB object hash
   index/drawing/<sha256(scheme + document hash)>  a 2D drawing's render payload → object hash
   index/skin/<sha256(scheme + document + animation + meshes)>  a document's tube skins → object hash
-  index/section/<sha256(scheme + BREP + plane)>    one component's exact cut by one plane → object hash
   index/robot/<sha256(scheme + path + description hash + paired URDF hash)>  a robot description resolved for a player → object hash, plus its primitive meshes
 ```
 
@@ -149,10 +148,9 @@ operations always execute.
 `objects/` is the **artifact side**: what geometry exists. `index/model`,
 `index/output` are the **code side**: what source produced a result and
 what it depended on. `index/bounds`, `index/component`, `index/surface`,
-`index/selector`, `index/mesh`, `index/drawing`, `index/skin`,
-`index/section` and `index/robot` remember reusable derivations; surface,
-selector, mesh, drawing and section jobs consume only immutable artifact
-inputs. `index/drawing` is a
+`index/selector`, `index/mesh`, `index/drawing`, `index/skin` and
+`index/robot` remember reusable derivations; surface, selector, mesh and
+drawing jobs consume only immutable artifact inputs. `index/drawing` is a
 2D document's flattened render payload: its key hashes the extraction scheme
 (payload shape × the drawing library's release) together with the document's
 content hash, so the same bytes are never flattened twice and an upgrade lands
@@ -170,12 +168,7 @@ same for a document's bending tubes as a CAD view plays them
 (`_internal/tube_skin_payload.py`): its key hashes the payload's scheme, the
 document's content hash, the digest of the sidecar animation that bends them and
 the mesh entries they bind, so an edited clip, a new mesher or a new binding rule
-lands on a new key. `index/section` is one component's exact section (`store/sections.py`): the
-material a plane cuts from its BREP's solids (and the curves it cuts from its
-sheets), in its own coordinates, made by a build-pool `sections` job. Its key hashes the section scheme, the BREP's codec and object
-hash, and the plane (unit normal and offset, rounded before they key or cut
-anything), so every occurrence a plane meets the same way shares one entry,
-and a new scheme lands on new keys. `index/document` is the document lookup: `sha256(file bytes)`, under
+lands on a new key. `index/document` is the document lookup: `sha256(file bytes)`, under
 this cadgen's document schema (above), → the tree describing those bytes (plus a mesh ledger keyed by format × tolerances
 × pose × appearance — the bare mesh doors read and write it, and a script run notes its
 declared meshes there too, so the two front doors never redo each other's work).

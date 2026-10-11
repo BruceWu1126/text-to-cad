@@ -92,7 +92,6 @@ _NAMED_FIELDS = {
     "mesh": ("object",),
     "drawing": ("object",),
     "skin": ("object",),
-    "section": ("object",),
     # A robot entry names its payload and the primitive meshes the payload draws.
     "robot": ("object", "meshes"),
     "bounds": (),

@@ -18,8 +18,8 @@ boolean left, and the warning names the part's ref and the faces (`#o1.2`, `f7`)
 ## Views
 
 No fixed set of views shows every face. Opposed isometric views reveal more
-exterior faces, orthographic views show patterns and silhouettes, and a section
-shows internal geometry. Several views can share one JSON job:
+exterior faces, orthographic views show patterns and silhouettes, and a clipped view
+shows internal geometry ([cross-sections](#cross-sections)). Several views can share one JSON job:
 
 ```json
 {
@@ -39,7 +39,7 @@ Set `input` to the saved STEP/STP artifact using a relative or absolute path
 (documents only: run a `.py` model first). With no explicit display settings,
 snapshots use the `solid` preset, Light appearance and an orthographic isometric
 camera. Every mode defaults to 1600x1200 (the `diagnostic` profile). Job `mode`
-remains `view`, `section`, or `list`; display presets are a separate choice.
+is `view` or `list`; display presets are a separate choice.
 
 `--size-profile` (`output.sizeProfile` in a job) is one of exactly these names;
 anything else is refused with this list:
@@ -143,26 +143,25 @@ to the whole job (give a view its own job in a `jobs` array to select per view):
 
 With `--job FILE`, other flags override every job in it; there is no stdin form.
 
-## Section planes
+## Cross-sections
 
-`--mode section` cuts the model with a plane and draws the cut outline. Say where
-with `--section PLANE[:OFFSET]`:
+To see inside a STEP model, clip it and look straight at the cut. `display.clip`
+keeps the part of the model on one side of a plane across `x`, `y` or `z` and
+fills the cut faces. The default display is orthographic, so a camera facing the
+cut draws the section, with the walls beyond it:
 
 ```bash
-cadgen step snapshot STEP/housing.step tmp/cut.png --mode section --section XZ:12.5
-cadgen step snapshot STEP/housing.step tmp/cut.svg --mode section --section YZ
+cadgen step snapshot STEP/housing.step tmp/cut.png --camera back --display '{"clip": {"axis": "y", "offset": 0.5}}'
 ```
 
-`PLANE` is `XY`, `XZ` or `YZ` (default `XY`); `OFFSET` moves it along its normal
-in model units (default 0), so `XZ:12.5` cuts at Y = 12.5. In a job it is
-`"section": {"plane": "XZ", "offset": 12.5}` beside `"mode": "section"`. A plane
-that cuts no material renders an empty drawing and warns. Section mode is
-STEP-only and takes no kinematics, animation or Render display.
+`offset` places the plane across the model's bounds on that axis, from 0 to 1
+(0.5 is the middle). The clip keeps the lower side, so the cut faces the
+positive axis: look at it with `right` for `x`, `back` for `y` and `top` for
+`z`. `"invert": true` keeps the upper side instead; then use `left`, `front` or
+`bottom`. The cut follows the display mesh, so a hole cut across its axis is a
+many-sided polygon.
 
-The cut is exact (a bore cut across its axis is a true circle), limited by
-`--focus`/`--hide`, filled and hatched per solid; a sheet body's cut is lines
-only. A `.svg` is the same drawing, y up, in model units from the point its
-root's `data-origin` names, and needs no browser.
+## Listing parts
 
 `--mode list` writes no image: it prints one row per placed part — its `ref`
 (what `--focus`, `--hide` and `scene.resolve(ref)` accept), its `name`, its exact
@@ -170,8 +169,8 @@ root's `data-origin` names, and needs no browser.
 mesh a view would draw. `--focus`/`--hide` narrow the rows. A STEP list starts no
 browser, so it is the cheap way to learn what an assembly contains.
 
-OUT's extension picks the format: section mode writes `.png` or `.svg`, view
-mode `.png`, a video `.mp4` or `.gif`; any other extension is refused.
+OUT's extension picks the format: a view writes `.png`, a video `.mp4` or
+`.gif`; any other extension is refused.
 
 ## Output paths
 

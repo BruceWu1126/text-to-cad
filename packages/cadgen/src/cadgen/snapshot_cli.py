@@ -85,7 +85,6 @@ from cadgen.snapshot_core import (
     normalize_render_mode,
     normalize_snapshot_job_packet,
     parse_camera_option,
-    parse_section_option,
     path_is_inside_or_equal,
     refuse_cad_model_requests,
     render_snapshot,
@@ -140,8 +139,6 @@ class SnapshotOptions:
     animation_specified: bool = False
     video: object = None
     video_specified: bool = False
-    section: object = None
-    section_specified: bool = False
     joint_values: object = None
     joint_values_specified: bool = False
     focus: list[str] | None = None
@@ -295,7 +292,6 @@ def apply_option_overrides_to_job(job: object, options: SnapshotOptions, *, cwd:
             options.kinematics_specified,
             options.animation_specified,
             options.video_specified,
-            options.section_specified,
             options.joint_values_specified,
             options.display_specified,
             options.camera_specified,
@@ -321,8 +317,6 @@ def apply_option_overrides_to_job(job: object, options: SnapshotOptions, *, cwd:
         next_job["animation"] = parse_animation_option(options.animation, options.animation_time)
     if options.video_specified:
         next_job["video"] = parse_video_option(options.video, cwd=cwd)
-    if options.section_specified:
-        next_job["section"] = parse_section_option(options.section)
     if options.width is not None or options.height is not None:
         # Size lives on each output, so the override lands on every one of them —
         # the same "every job in the packet" reach the other overrides have.
@@ -420,8 +414,6 @@ def load_job_from_options(options: SnapshotOptions, *, cwd: Path | None = None) 
         job["animation"] = parse_animation_option(options.animation, options.animation_time)
     if options.video_specified:
         job["video"] = parse_video_option(options.video, cwd=resolved_cwd)
-    if options.section_specified:
-        job["section"] = parse_section_option(options.section)
     if options.joint_values_specified:
         job["jointValues"] = parse_joint_values_option(options.joint_values)
     if options.debug:
@@ -1118,18 +1110,6 @@ def resolve_step_render_job(
         if normalized_selection is not None:
             resolved_job["selection"] = normalized_selection
         return resolved_job
-    if job["mode"] == "section":
-        # The cut is cadgen's: exact, from each component's BREP, and drawn by the
-        # page as the 2D payload a DXF is (cadgen.section_drawing).
-        section = resolve_step_section(
-            job, descriptor=descriptor, package_dir=package_dir, selection=normalized_selection
-        )
-        if debug_enabled:
-            section["debug"] = {"stepArtifact": step_artifact_debug}
-        resolved_job = {**job, "resolved": {**resolved, **section}}
-        if normalized_selection is not None:
-            resolved_job["selection"] = normalized_selection
-        return resolved_job
     from cadgen.snapshot_parts import has_surfaces
 
     if not has_surfaces(descriptor, package_dir):
@@ -1198,77 +1178,6 @@ def resolve_step_render_job(
     return resolved_job
 
 
-def _section_frame_size(job: Mapping[str, object]) -> tuple[int, int]:
-    """The output a section is framed for: its first PNG, else its first output."""
-    outputs = [output for output in job.get("outputs") or [] if is_plain_object(output)]
-    for output in outputs:
-        if str(output.get("path") or "").lower().endswith(".png"):
-            return int(output["width"]), int(output["height"])
-    first = outputs[0] if outputs else {}
-    return int(first.get("width") or 1200), int(first.get("height") or 900)
-
-
-def resolve_step_section(
-    job: Mapping[str, object],
-    *,
-    descriptor: Mapping[str, object],
-    package_dir: Path,
-    selection: Mapping[str, object] | None,
-) -> dict[str, object]:
-    """What a STEP section job's ``resolved`` carries: the cut, drawn.
-
-    The drawing payload is a file the page fetches over the asset server (as a
-    DXF's is), its SVG a file the render loop copies to any ``.svg`` output, and
-    what the picture says -- the plane's label, where the cut sits across the
-    parts, a plane that misses -- rides beside it. Missing component cuts are
-    build-pool work (``cadgen.store.sections``), cached by component and plane.
-    """
-    from hashlib import sha256
-
-    from cadgen._internal.atomic_replace import write_bytes_atomic
-    from cadgen.assembly_lookup import assembly_occurrence_rows
-    from cadgen.drawing_payload import encode_drawing_payload
-    from cadgen.section_drawing import locator_fraction, section_drawing
-    from cadgen.snapshot_parts import filter_occurrences
-
-    try:
-        rows = filter_occurrences(assembly_occurrence_rows(descriptor, package_dir), selection)
-    except ValueError as error:
-        raise SnapshotError(str(error)) from None
-    request = job["section"]
-    display = job.get("display") if is_plain_object(job.get("display")) else {}
-    edges = display.get("edges") if is_plain_object(display.get("edges")) else {}
-    drawing = section_drawing(
-        descriptor,
-        rows,
-        plane=str(request["plane"]),
-        offset=float(request["offset"]),
-        size=_section_frame_size(job),
-        outline_color=str(edges["color"]) if edges.get("color") else None,
-    )
-    directory = _drawing_payload_dir()
-    data = encode_drawing_payload(drawing.payload)
-    payload_path = directory / f"{sha256(data).hexdigest()}.drawing.json"
-    if not payload_path.is_file():
-        write_bytes_atomic(payload_path, data)
-    svg = drawing.svg.encode("utf-8")
-    svg_path = directory / f"{sha256(svg).hexdigest()}.section.svg"
-    if not svg_path.is_file():
-        write_bytes_atomic(svg_path, svg)
-    output_settings = job.get("output") if is_plain_object(job.get("output")) else {}
-    return {
-        "rootPath": str(directory),
-        "drawingUrl": asset_url_for_path(payload_path, directory),
-        "sectionSvg": str(svg_path),
-        "section": {
-            "label": drawing.label,
-            "locator": locator_fraction(rows, str(request["plane"]), float(request["offset"])),
-            "title": f"SECTION {drawing.label}" if output_settings.get("viewLabels") is True else None,
-        },
-        "warnings": list(drawing.warnings),
-    }
-
-
 # A DXF is DRAWN, not staged: `cadgen dxf snapshot` paints the same
 # `cadgen.drawing_payload` the CAD Viewer's DXF pane paints, with the same
 # core code (@text-to-cad/core/lib/drawing2d), so the CLI cannot show a picture
@@ -1335,7 +1244,7 @@ def check_drawing_render_job(
         )
     if job.get("camera") is not None or _drawing_output_cameras(job):
         raise SnapshotError(drawing_camera_refusal(label))
-    if mode != "view" or job.get("section") is not None:
+    if mode != "view":
         raise SnapshotError(drawing_mode_refusal(label))
     if job.get("scale") is not None:
         raise SnapshotError(
@@ -1363,8 +1272,8 @@ def check_drawing_render_job(
             f"{', '.join(sorted(DRAWING_OUTPUT_SETTINGS_KEYS))}."
         )
     # The refusals every non-STEP input shares (selection, poses, clips, videos,
-    # tessellation). Mode and section are already decided above, with a sentence
-    # about drawings rather than about mesh inputs.
+    # tessellation). Mode is already decided above, with a sentence about
+    # drawings rather than about mesh inputs.
     refuse_cad_model_requests(
         job,
         mode=mode,

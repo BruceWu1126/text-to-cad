@@ -39,7 +39,6 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 from cadgen.assets import require_browser_runtime
 from cadgen.coordination import PHASE_RENDER, resolve as resolve_progress
 from cadgen.results import SnapshotFile, SnapshotResult, SnapshotTimings
-from cadgen.section_drawing import SECTION_FRAMES
 from cadgen.tessellation_policy import TESSELLATION_FLOORS, tolerance_refusal
 from cadgen._internal.atomic_replace import write_bytes_atomic
 
@@ -63,8 +62,7 @@ VIDEO_TEARDOWN_TIMEOUT_SECONDS = 30
 # How often a video says where it is when nothing is painting a progress bar.
 VIDEO_NARRATE_INTERVAL_SECONDS = 15.0
 RENDER_BROWSER_STARTUP_TIMEOUT_MS = 15_000
-SUPPORTED_RENDER_MODES = {"view", "section", "list"}
-MESH_SUPPORTED_RENDER_MODES = {"view", "list"}
+SUPPORTED_RENDER_MODES = {"view", "list"}
 SUPPORTED_JOB_KEYS = frozenset(
     {
         "input",
@@ -92,9 +90,6 @@ SUPPORTED_JOB_KEYS = frozenset(
         # {fps, seconds, start, quality, loop}, encoded to the .mp4/.gif the
         # output names. Meaningless without `animation` (cadgen.snapshot_video).
         "video",
-        # Where `mode: "section"` cuts: {"plane": "XY"|"XZ"|"YZ", "offset": <model
-        # units along the plane's normal>}. Spelled the same as the --section flag.
-        "section",
         "scale",
         "debug",
         "timeoutSeconds",
@@ -158,12 +153,9 @@ RETIRED_SIZE_PROFILES = {
 # photographic preset's 2x render scale this is the 16384 px renderbuffer limit.
 MAX_OUTPUT_DIMENSION = 8192
 SIMPLE_RENDER_WIDTH, SIMPLE_RENDER_HEIGHT = SIZE_PROFILES["simple"]
-# Where section mode cuts: the planes cadgen.section_drawing cuts and draws.
-SECTION_PLANES = tuple(SECTION_FRAMES)
-SECTION_KEYS = frozenset({"plane", "offset"})
 # What an output's extension may be, per mode. The extension decides the
 # encoding; nothing in a job does.
-STILL_OUTPUT_SUFFIXES = {"view": (".png",), "section": (".png", ".svg")}
+STILL_OUTPUT_SUFFIXES = {"view": (".png",)}
 DISPLAY_OPTION_KEYS = frozenset({
     "mode", "appearance", "camera", "surfaces", "edges", "lighting",
     "background", "floor", "grid", "axes", "clip", "exploded",
@@ -600,7 +592,7 @@ DRAWING_KINDS = frozenset({"dxf"})
 def validate_display_for_kind(display: Mapping[str, object], *, kind: str, input_label: str) -> None:
     """Refuse STEP-only display settings for an input that is not a STEP model.
 
-    Asking for a section of a mesh would otherwise render a picture that silently
+    Asking to clip a mesh would otherwise render a picture that silently
     ignores the request, so the request is refused by name, as the viewer refuses
     to offer the control.
 
@@ -776,57 +768,6 @@ def validate_size_profile(value: object) -> str:
         )
     sizes = ", ".join(f"{name} ({width}x{height})" for name, (width, height) in SIZE_PROFILES.items())
     raise SnapshotError(f"Unknown size profile: {value!r}. Size profiles: {sizes}")
-
-
-def validate_section(value: object) -> dict[str, object]:
-    """``{"plane": "XY"|"XZ"|"YZ", "offset": <number>}`` — where section mode cuts.
-
-    The plane is named by the two axes it contains; the offset moves it along its
-    own normal (Z for XY, Y for XZ, X for YZ) in model units, and defaults to 0.
-    These are exactly the two fields ``cadgen.section_drawing`` cuts with.
-    """
-    if not is_plain_object(value):
-        raise SnapshotError(
-            'section must be a {"plane": "XY"|"XZ"|"YZ", "offset": number} object, '
-            f"got {json.dumps(value)}"
-        )
-    unknown = sorted(set(value) - SECTION_KEYS)
-    if unknown:
-        raise SnapshotError(
-            f"section has unknown key(s): {', '.join(unknown)}; "
-            f"supported keys: {', '.join(sorted(SECTION_KEYS))}"
-        )
-    plane = value.get("plane", SECTION_PLANES[0])
-    if not isinstance(plane, str) or plane not in SECTION_PLANES:
-        raise SnapshotError(f"section.plane must be one of: {', '.join(SECTION_PLANES)}; got {plane!r}")
-    offset = value.get("offset", 0)
-    if isinstance(offset, bool) or not isinstance(offset, (int, float)) or not isfinite(float(offset)):
-        raise SnapshotError(f"section.offset must be a finite number in model units; got {offset!r}")
-    return {"plane": plane, "offset": offset}
-
-
-def parse_section_option(raw_section: object) -> dict[str, object]:
-    """``--section PLANE[:OFFSET]`` in job form.
-
-    Already an object when it came from a ``step.snapshot(section={...})`` call.
-    From argv it is one string shaped like ``--camera``'s angle pair: the plane,
-    then optionally a colon and the offset along its normal (``XZ:12.5``).
-    """
-    if is_plain_object(raw_section):
-        return validate_section(raw_section)
-    text = str(raw_section or "").strip()
-    if not text:
-        raise SnapshotError("--section requires PLANE[:OFFSET], for example XZ or XZ:12.5")
-    plane, separator, raw_offset = text.partition(":")
-    request: dict[str, object] = {"plane": plane.strip()}
-    if separator:
-        try:
-            request["offset"] = float(raw_offset)
-        except ValueError as exc:
-            raise SnapshotError(
-                f"--section offset must be a number in model units, got {raw_offset!r} (PLANE[:OFFSET])"
-            ) from exc
-    return validate_section(request)
 
 
 def normalize_render_mode(value: object) -> str:
@@ -1144,7 +1085,7 @@ def normalize_common_job(
     job_count: int = 1,
 ) -> dict[str, object]:
     """Kind-independent job normalization shared by every input kind: the outputs
-    guard, output/quality/section validation, output-path resolution, and the
+    guard, output/quality validation, output-path resolution, and the
     common return shape.
     Job preparation runs the kind's capability checks first, then calls this, so a
     STEP/mesh/robot job all normalize identically; the kind resolver attaches its
@@ -1197,15 +1138,6 @@ def normalize_common_job(
     # fixed to Light for deterministic CLI output.
     display = {"mode": "solid", "appearance": "light", **job.get("display", {})}
 
-    # Where section mode cuts. The key means nothing to a view or a list, and a
-    # request that carries it there expected a cut it would not get.
-    if mode == "section":
-        job["section"] = validate_section(job.get("section", {}))
-    elif "section" in job:
-        raise SnapshotError(
-            f"section positions the cut of section mode, and this job's mode is {mode}; "
-            'set "mode": "section" (--mode section), or clip a view with display.clip'
-        )
     if "timeoutSeconds" in job:
         job["timeoutSeconds"] = validate_timeout_seconds(job["timeoutSeconds"])
     if "debug" in job:
@@ -1289,7 +1221,6 @@ def normalize_common_job(
                 raise SnapshotError(
                     f"{mode} mode writes {' or '.join(allowed)}: render output {index} names "
                     f"{output_path.strip()!r}"
-                    + ("; a section can also be written as .svg with --mode section" if mode == "view" and suffix == ".svg" else "")
                 )
         explicit_camera = output_object.get("camera")
         if explicit_camera is None:
@@ -1391,9 +1322,6 @@ def refuse_cad_model_requests(
         raise SnapshotError(
             f"quality.tessellation requires an exact-surface STEP package; {tessellation_hint}"
         )
-    if mode not in MESH_SUPPORTED_RENDER_MODES or job.get("section") is not None:
-        supported = ", ".join(sorted(MESH_SUPPORTED_RENDER_MODES))
-        raise SnapshotError(f"section mode requires STEP topology; {subject} support: {supported}")
 
 
 def check_mesh_render_job(job: Mapping[str, object], *, kind: str, mode: str, **_context: object) -> None:
@@ -2228,33 +2156,11 @@ def _browser_stage_timings(value: object) -> dict[str, object]:
     return timings
 
 
-def _python_outputs(job: Mapping[str, object]) -> tuple[list[dict[str, object]], dict[str, object] | None]:
-    """Split a job into the outputs Python writes itself and what is left for the page.
-
-    A section's SVG is written by cadgen (``cadgen.section_drawing``), so its
-    ``.svg`` outputs never reach a browser; the job that is left -- its PNGs, if it
-    has any -- is ``None`` when nothing does. Every other job goes to the page whole.
-    """
-    resolved = job.get("resolved") if is_plain_object(job.get("resolved")) else {}
-    svg_path = resolved.get("sectionSvg")
-    if not svg_path:
-        return [], dict(job)
-    text = Path(str(svg_path)).read_text(encoding="utf-8")
-    written, drawn = [], []
-    for output in job.get("outputs") or []:
-        if str(output.get("path") or "").lower().endswith(".svg"):
-            written.append({"path": str(output["path"]), "mimeType": "image/svg+xml", "text": text})
-        else:
-            drawn.append(output)
-    page_resolved = {key: value for key, value in resolved.items() if key != "sectionSvg"}
-    return written, ({**job, "outputs": drawn, "resolved": page_resolved} if drawn else None)
-
-
 async def _render_job(renderer: "BatchSnapshotRenderer", job: Mapping[str, object]) -> dict[str, object]:
     """One still job's result: what Python answered, merged with what the page drew.
 
-    A STEP list and a section's SVG are cadgen's alone; a job that needs nothing
-    drawn never reaches the renderer, so no browser starts for it.
+    A STEP list is cadgen's alone: it never reaches the renderer, so no browser
+    starts for it.
 
     Warnings cadgen raised while resolving the job (``resolved.warnings``) come
     first; the outputs keep the order the job declared them in.
@@ -2264,15 +2170,7 @@ async def _render_job(renderer: "BatchSnapshotRenderer", job: Mapping[str, objec
         # A STEP list is answered whole by cadgen (cadgen.snapshot_parts).
         return {"ok": True, "mode": "list", "parts": list(resolved["parts"]),
                 "warnings": [str(warning) for warning in resolved.get("warnings") or []]}
-    written, page_job = _python_outputs(job)
-    if page_job is None:
-        result: dict[str, object] = {"ok": True, "mode": job.get("mode"), "outputs": [], "warnings": []}
-    else:
-        result = dict(await renderer.render(page_job))
-    if written:
-        by_path = {str(output.get("path")): output for output in [*written, *(result.get("outputs") or [])]}
-        result["outputs"] = [by_path[str(output.get("path"))] for output in job.get("outputs") or []
-                             if str(output.get("path")) in by_path]
+    result = dict(await renderer.render(job))
     warnings = [str(warning) for warning in resolved.get("warnings") or []]
     if warnings:
         result["warnings"] = [*warnings, *(result.get("warnings") or [])]

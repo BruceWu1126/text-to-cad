@@ -627,11 +627,8 @@ that rest box.
   per mesh, in its scene graph's order (a robot's scene attaches a link's meshes
   before the joints it carries, so its rows run down the tree from the root).
 
-A STEP model's list and section are cadgen's facts and never reach this module:
-cadgen answers `--mode list` from the tree and the store
-(`cadgen.snapshot_parts`), and cuts a section from the exact BREP
-(`cadgen.section_drawing`), whose PNG the page paints as a 2D drawing
-(`common/headlessDrawingRender.js`, the code that paints a DXF).
+A STEP model's list is cadgen's facts and never reaches this module: cadgen
+answers `--mode list` from the tree and the store (`cadgen.snapshot_parts`).
 
 It does not write files. The CAD skill snapshot CLI writes the returned data to
 disk. Consumers use compiled `@text-to-cad/core` exports; generated snapshot browser assets

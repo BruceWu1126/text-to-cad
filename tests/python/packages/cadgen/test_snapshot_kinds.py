@@ -231,7 +231,7 @@ class GeneratedHelpTests(unittest.TestCase):
 
     def test_step_only_options_appear_for_the_step_door(self):
         step_help = door_help("step")
-        for present in ("--kinematics", "--animation", "--time", "--focus", "section", "--view-labels"):
+        for present in ("--kinematics", "--animation", "--time", "--focus", "--view-labels"):
             self.assertIn(present, step_help)
 
     def test_display_is_the_one_view_option_on_every_door_that_has_a_scene(self):

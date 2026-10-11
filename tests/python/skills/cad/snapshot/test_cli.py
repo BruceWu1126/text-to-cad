@@ -492,8 +492,8 @@ class SnapshotCliTests(unittest.TestCase):
         )
 
     def test_declared_output_paths_are_used_exactly(self) -> None:
-        """Every explicit output path is the path that gets written -- per output,
-        across jobs, in every mode. This used to append a shared UTC timestamp
+        """Every explicit output path is the path that gets written -- per output
+        and across jobs. This used to append a shared UTC timestamp
         before each extension (`iso.png` -> `iso_20260527T163012Z.png`), so the
         command's output never matched its declaration and callers had to parse
         the "saved snapshot:" line to learn where their own file went."""
@@ -522,8 +522,7 @@ class SnapshotCliTests(unittest.TestCase):
                             },
                             {
                                 "input": "models/part.step",
-                                "mode": "section",
-                                "outputs": [{"path": "tmp/section.png"}],
+                                "outputs": [{"path": "tmp/top.png", "camera": "top"}],
                             },
                         ]
                     },
@@ -539,7 +538,7 @@ class SnapshotCliTests(unittest.TestCase):
                 for output in job["outputs"]
             ]
 
-        self.assertEqual(output_paths, ["tmp/iso.png", "tmp/front.png", "tmp/section.png"])
+        self.assertEqual(output_paths, ["tmp/iso.png", "tmp/front.png", "tmp/top.png"])
 
     def test_a_directory_output_gets_a_generated_name_inside_it(self) -> None:
         """The don't-care case: `--output tmp/` names no file, so one is generated
@@ -1220,19 +1219,11 @@ class SnapshotCliTests(unittest.TestCase):
     def test_render_display_rejects_non_view_modes_before_kind_checks(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = self._mesh_job_env(temporary_directory, "widget.glb", b"glTF")
-            for mode in ("section", "list"):
-                with self.subTest(mode=mode), self.assertRaisesRegex(
-                    SnapshotError, "Render display supports only view mode"
-                ):
-                    resolve_render_job_packet(
-                        {
-                            "input": "models/widget.glb",
-                            "mode": mode,
-                            "display": {"mode": "render"},
-                            "outputs": [] if mode == "list" else [{"path": "tmp/iso.png"}],
-                        },
-                        cwd=root,
-                    )
+            with self.assertRaisesRegex(SnapshotError, "Render display supports only view mode"):
+                resolve_render_job_packet(
+                    {"input": "models/widget.glb", "mode": "list", "display": {"mode": "render"}, "outputs": []},
+                    cwd=root,
+                )
 
     def test_non_view_restriction_follows_lighting_not_the_preset_name(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -1242,19 +1233,6 @@ class SnapshotCliTests(unittest.TestCase):
                 resolve_render_job_packet({**base, "display": {"mode": "solid", "lighting": {}}}, cwd=root)
             packet = resolve_render_job_packet({**base, "display": {"mode": "render", "lighting": {"enabled": False}}}, cwd=root)
             self.assertEqual("list", packet["jobs"][0]["mode"])
-
-    def test_render_job_rejects_section_mode_for_mesh_input(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = self._mesh_job_env(temporary_directory, "widget.glb", b"glTF")
-            with self.assertRaisesRegex(SnapshotError, "section mode requires STEP topology"):
-                resolve_render_job_packet(
-                    {
-                        "input": "models/widget.glb",
-                        "mode": "section",
-                        "outputs": [{"path": "tmp/iso.png", "camera": "iso"}],
-                    },
-                    cwd=root,
-                )
 
     def test_mesh_and_robot_refuse_the_presets_made_of_cad_edges_and_keep_surface_styles(self) -> None:
         # Hidden line, X-ray and Wireframe are drawn from CAD edges, which only a STEP model
@@ -1676,8 +1654,6 @@ class SnapshotCliTests(unittest.TestCase):
                 resolve_render_job_packet(
                     {**base, "display": {"exploded": {"enabled": True, "amount": 1}}}, cwd=root
                 )
-            with self.assertRaisesRegex(SnapshotError, "section mode requires STEP topology"):
-                resolve_render_job_packet({**base, "mode": "section"}, cwd=root)
 
     def test_render_job_missing_mesh_file_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -2576,7 +2552,7 @@ class StepAnimationFrameTests(unittest.TestCase):
     def test_a_frame_supports_only_view_mode(self) -> None:
         self._step()
         with self.assertRaisesRegex(SnapshotError, "animation frame supports only view mode"):
-            self._resolve(self._job(mode="section", animation={"clip": "demo"}))
+            self._resolve(self._job(mode="list", animation={"clip": "demo"}))
 
     def test_a_frame_requires_a_step_model(self) -> None:
         (self.models / "part.stl").write_bytes(b"solid part\nendsolid part\n")

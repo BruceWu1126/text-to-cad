@@ -12,7 +12,7 @@ Four signature shapes cover the seven doors honestly (the old shared
 signature advertised STEP-only options to every door and refused them at
 runtime):
 
-- STEP: the full surface — section mode and its plane, display, kinematics, animation, focus/hide.
+- STEP: the full surface — display, kinematics, animation, focus/hide.
 - mesh (stl/3mf/glb): view/list renders of untyped geometry.
 - robot (urdf/sdf): the mesh shape plus ``joint_values``.
 - dxf: a DRAWING, not a scene. Where, how big, and light or dark — nothing
@@ -89,7 +89,6 @@ def _run(
     animation: object = None,
     time: float | None = None,
     video: object = None,
-    section: object = None,
     joint_values: object = None,
     focus: tuple[str, ...] = (),
     hide: tuple[str, ...] = (),
@@ -145,8 +144,6 @@ def _run(
         options.animation, options.animation_time, options.animation_specified = animation, time, True
     if video is not None:
         options.video, options.video_specified = video, True
-    if section is not None:
-        options.section, options.section_specified = section, True
     if joint_values is not None:
         options.joint_values, options.joint_values_specified = joint_values, True
     options.focus = _refs(focus, "focus")
@@ -184,7 +181,6 @@ def step_snapshot_verb(door: str):
         *,
         job: Path | None = None,
         mode: str = "view",
-        section: str | dict | None = None,
         camera: str | dict | None = None,
         display: str | dict | None = None,
         kinematics: str | dict | None = None,
@@ -210,17 +206,12 @@ def step_snapshot_verb(door: str):
 
         target: the model to render — a .step/.stp document (a model script
             is refused by naming the run that writes the document).
-        out: destination path, written EXACTLY there — .png (section mode
-            also writes .svg, --video writes .mp4/.gif) — or a directory for
-            a generated timestamped name.
+        out: destination path, written EXACTLY there — .png (--video writes
+            .mp4/.gif) — or a directory for a generated timestamped name.
         job: a render-job JSON file — one job, an array of them, or
             {"jobs": [...]}. When given it wins: target/out are ignored, and
             the other flags override every job in it.
-        mode: view (default), section, or list.
-        section: where --mode section cuts, as PLANE[:OFFSET] — the plane is
-            XY, XZ or YZ (default XY) and the offset moves it along its normal
-            in model units (default 0): XZ:12.5 cuts at Y=12.5. In a job,
-            {"plane": "XZ", "offset": 12.5}.
+        mode: view (default) or list.
         camera: a preset (front, back, left, right, top, bottom, iso), an
             "azimuth:elevation" pair, or camera JSON;
             orthographicHalfHeight preserves an orthographic view's scale.
@@ -259,7 +250,7 @@ def step_snapshot_verb(door: str):
             kinds,
             target=target, out=out, job=job, mode=mode,
             camera=camera, display=display, kinematics=kinematics,
-            animation=animation, time=time, video=video, section=section,
+            animation=animation, time=time, video=video,
             focus=focus, hide=hide, width=width, height=height,
             size_profile=size_profile, view_labels=view_labels, debug=debug,
         )
@@ -303,8 +294,8 @@ def drawing_camera_refusal(subject: str) -> str:
 def drawing_mode_refusal(subject: str) -> str:
     """Why ``view`` is the only render mode a drawing has."""
     return (
-        f"{DRAWING_IS}: it has no parts to list and no solid to section, so view is the "
-        f"only mode {subject} renders in."
+        f"{DRAWING_IS}: it has no parts to list, so view is the only mode {subject} "
+        "renders in."
     )
 
 
@@ -327,7 +318,7 @@ DRAWING_RETIRED_OPTIONS: dict[str, str] = {
     ),
     "--display": drawing_scene_refusal("display", "a drawing", plural=False),
     "--mode": (
-        f"mode chose between view, section and list; {drawing_mode_refusal('a drawing')} "
+        f"mode chose between view and list; {drawing_mode_refusal('a drawing')} "
         "Drop the flag."
     ),
     "--view-labels": (
@@ -346,9 +337,9 @@ def drawing_snapshot_verb(door: str):
     every option that describes a 3D scene is absent from this signature
     rather than accepted and ignored: no ``camera`` (nothing to pose), no
     ``display`` (no surfaces, lighting or render mode), no ``mode`` (a drawing
-    has no parts to list and no solid to section), no ``view_labels`` (no view
-    to label). ``appearance`` is what survives of display, because a default
-    pen has no colour until a background is chosen.
+    has no parts to list), no ``view_labels`` (no view to label).
+    ``appearance`` is what survives of display, because a default pen has no
+    colour until a background is chosen.
 
     Absent is not silent: each of those four is declared in
     :data:`DRAWING_RETIRED_OPTIONS` and refused by name, in the same words the
@@ -430,7 +421,7 @@ def drawing_snapshot_verb(door: str):
 
 def mesh_snapshot_verb(door: str):
     """The mesh-shaped verb: view/list renders of untyped geometry —
-    no kinematics, section mode, or selection (nothing to act on)."""
+    no kinematics or selection (nothing to act on)."""
     kinds = DOOR_KINDS[door]
     suffixes = ", ".join(f".{kind}" for kind in kinds)
 
@@ -576,7 +567,6 @@ def polymorphic_snapshot_verb():
         *,
         job: Path | None = None,
         mode: str = "view",
-        section: str | dict | None = None,
         camera: str | dict | None = None,
         display: str | dict | None = None,
         kinematics: str | dict | None = None,
@@ -597,17 +587,15 @@ def polymorphic_snapshot_verb():
         target: the document to render — STEP/STP, STL/3MF/GLB, DXF, or a
             robot description (URDF/SRDF/SDF). Run model scripts first, then
             snapshot the document they write.
-        out: destination path, written EXACTLY there — .png (a STEP section
-            also writes .svg, a STEP --video writes .mp4/.gif) — or a directory
-            for a generated timestamped name. A refused request leaves an
-            existing OUT untouched; an accepted one clears it first.
+        out: destination path, written EXACTLY there — .png (a STEP --video
+            writes .mp4/.gif) — or a directory for a generated timestamped
+            name. A refused request leaves an existing OUT untouched; an
+            accepted one clears it first.
         job: a render-job JSON file — one job, an array of them, or
             {"jobs": [...]}; jobs may mix formats. When given it wins, and the
             other flags override every job in it.
-        mode: view (default), section (STEP only), or list (not DXF: a
-            drawing has no parts to list).
-        section: where a STEP --mode section cuts, as PLANE[:OFFSET] — XY, XZ
-            or YZ, offset along the plane's normal in model units: XZ:12.5.
+        mode: view (default) or list (not DXF: a drawing has no parts to
+            list).
         camera: a preset (front, back, left, right, top, bottom, iso), an
             "azimuth:elevation" pair, or camera JSON;
             orthographicHalfHeight preserves an orthographic view's scale.
@@ -648,7 +636,7 @@ def polymorphic_snapshot_verb():
             ALL_KINDS,
             target=target, out=out, job=job, mode=mode,
             camera=camera, display=display, kinematics=kinematics,
-            animation=animation, time=time, video=video, section=section,
+            animation=animation, time=time, video=video,
             joint_values=joint_values, focus=focus, hide=hide,
             width=width, height=height, size_profile=size_profile,
             view_labels=view_labels, debug=debug,

@@ -87,7 +87,7 @@ cadgen glb snapshot meshes/bracket.glb tmp/bracket_glb.png
 
 A mesh has no CAD topology: its door takes `--display solid` (default) or
 `render`, and refuses the STEP-only options by name (`edges`, `clip`, `exploded`,
-section mode, `--focus`/`--hide`, `--kinematics`, `--animation`). A GLB renders as
+`--focus`/`--hide`, `--kinematics`, `--animation`). A GLB renders as
 its own glTF scene, with its authored materials, at rest.
 
 ## Mesh tolerance

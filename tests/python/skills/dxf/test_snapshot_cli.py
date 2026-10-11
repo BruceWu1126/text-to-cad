@@ -122,11 +122,9 @@ class DxfSnapshotRefusalTests(unittest.TestCase):
                 self.assertEqual(sentence, str(raised.exception))
 
     def test_view_is_the_only_mode_a_drawing_renders_in(self) -> None:
-        # `list` reports a model's renderable parts and `section` cuts a solid;
-        # a drawing has neither. Both used to be accepted here.
-        self.refuses(self.job(mode="list", outputs=[]), r"no parts to list and no solid to section")
-        self.refuses(self.job(mode="section"), r"no parts to list and no solid to section")
-        self.refuses(self.job(section={"plane": "XY"}), r"no parts to list and no solid to section")
+        # `list` reports a model's renderable parts; a drawing has none. It used
+        # to be accepted here.
+        self.refuses(self.job(mode="list", outputs=[]), r"no parts to list, so view is the only mode")
 
     def test_scene_scale_means_nothing_to_a_drawing(self) -> None:
         self.refuses(self.job(scale="urdf"), r"scale picks the units a 3D scene")
@@ -263,7 +261,7 @@ class DxfSnapshotDoorSurfaceTests(unittest.TestCase):
         expected = {
             "--camera": ("poses a model in space", "no camera and no views to choose between"),
             "--display": ("describes a 3D scene", "--appearance light|dark"),
-            "--mode": ("view, section and list", "no parts to list and no solid to section"),
+            "--mode": ("view and list", "no parts to list, so view is the only mode"),
             "--view-labels": ("view name into the image", "no camera"),
         }
         self.assertEqual(sorted(expected), sorted(DRAWING_RETIRED_OPTIONS))

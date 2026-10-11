@@ -196,69 +196,6 @@ class ArtifactRequests(unittest.TestCase):
             with self.subTest(request=request), self.assertRaises(ValueError):
                 artifacts.normalize_request(request)
 
-    def test_a_sections_request_names_each_component_cut_once_in_one_canonical_order(self):
-        component = {"kind": "native", "codec": "bintools-v4", "brep": "b" * 64, "contentHash": "c" * 64,
-                     "faceColors": {}}
-        items = [{"component": component, "normal": [0, 0, 2], "offset": 4},
-                 {"component": component, "normal": [1, 0, 0], "offset": -1.5}]
-        normalized = artifacts.normalize_request({"kind": "sections", "items": items})
-        # The plane is the unit normal and the offset along it, as every key and cut uses it.
-        self.assertIn({"component": component, "normal": [0.0, 0.0, 1.0], "offset": 2.0}, normalized["items"])
-        self.assertEqual(artifacts.request_key({"kind": "sections", "items": items}),
-                         artifacts.request_key({"kind": "sections", "items": items[::-1]}), "an order splits no request")
-        crowd = [{"component": component, "normal": [0, 0, 1], "offset": n}
-                 for n in range(artifacts.SECTION_ITEMS_MAX + 1)]
-        for request in ({"kind": "sections"}, {"kind": "sections", "items": []},
-                        {"kind": "sections", "items": items * 2}, {"kind": "sections", "items": crowd},
-                        {"kind": "sections", "items": items, "tree": "a" * 64},
-                        {"kind": "sections", "items": [{**items[0], "normal": [0, 0, 0]}]},
-                        {"kind": "sections", "items": [{**items[0], "component": {**component, "script": "x.py"}}]},
-                        {"kind": "sections", "items": [{**items[0], "component": {**component, "brep": "../x"}}]}):
-            with self.subTest(request=request), self.assertRaises(ValueError):
-                artifacts.normalize_request(request)
-
-    def test_a_canonical_plane_is_its_own_canonical_form_so_a_worker_keys_the_request_the_client_did(self):
-        # The client keys its items canonical; the worker canonicalizes them again. Dividing a
-        # rounded normal by its length again moved a 1.5 m offset by 1e-9 a pass, so the keys
-        # split and every section through a rotated part failed. Over many placements -- turned,
-        # moved metres out, some scaled -- canonical(canonical(p)) is canonical(p), bit for bit.
-        import math
-        import random
-
-        from cadgen.section_drawing import SECTION_FRAMES, occurrence_plane
-        from cadgen.store.sections import canonical_plane
-
-        component = {"kind": "native", "codec": "bintools-v4", "brep": "b" * 64, "contentHash": "c" * 64,
-                     "faceColors": {}}
-        rng = random.Random(568)
-
-        def placement():
-            # A random rotation (a unit quaternion), scaled 1, 2 or 0.25, moved up to 5 m.
-            w, x, y, z = (rng.gauss(0, 1) for _ in range(4))
-            norm = math.sqrt(w * w + x * x + y * y + z * z)
-            w, x, y, z = w / norm, x / norm, y / norm, z / norm
-            rotation = [[1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
-                        [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
-                        [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)]]
-            scale = rng.choice((1.0, 1.0, 1.0, 2.0, 0.25))
-            matrix = []
-            for row in range(3):
-                matrix += [scale * value for value in rotation[row]] + [rng.uniform(-5000, 5000)]
-            return matrix + [0.0, 0.0, 0.0, 1.0]
-
-        items = []
-        for _ in range(2000):
-            plane = rng.choice(sorted(SECTION_FRAMES))
-            normal, offset = occurrence_plane(placement(), SECTION_FRAMES[plane][0], rng.uniform(-3000, 3000))
-            unit, distance = canonical_plane(normal, offset)
-            self.assertEqual((unit, distance), canonical_plane(unit, distance), (normal, offset))
-            self.assertAlmostEqual(1.0, math.sqrt(sum(value * value for value in unit)), delta=1e-9)
-            items.append({"component": component, "normal": list(unit), "offset": distance})
-        for start in range(0, len(items), 250):
-            request = {"kind": "sections", "items": items[start:start + 250]}
-            payload = artifacts.result_frame(artifacts.normalize_request(request), {"keys": []})
-            self.assertEqual({"keys": []}, artifacts.validate_result(request, payload))
-
     def test_work_is_dealt_one_job_per_cpu_slot_and_every_job_ends_before_a_failure_is_raised(self):
         def jobs(count, *, warm, per_started_worker=32, cpus=4):
             with mock.patch.object(executors, "use_daemon", return_value=warm is not None), \
@@ -529,9 +466,9 @@ class ArtifactCoalescing(unittest.TestCase):
         pool.release.assert_called_once_with(running, healthy=False, cancelled=True)
 
     def test_a_wrong_result_fails_the_job_its_client_is_still_waiting_on(self):
-        # A section whose plane was canonicalized twice came back keyed to other inputs. That is
-        # the job failing, with its reason, to a client still connected -- never a cancel, which
-        # reads as "ask again" and hid it, killing a warm worker per request.
+        # A result keyed to other inputs than the request's is the job failing, with its reason,
+        # to a client still connected -- never a cancel, which reads as "ask again", hid such a
+        # bug behind retries and killed a warm worker per request.
         class WrongWorker(ResultWorker):
             def frames(inner, **kwargs):
                 yield {"artifactResult": artifacts.result_frame(surface_request(force=True), {})}
