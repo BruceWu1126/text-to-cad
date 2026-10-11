@@ -341,7 +341,7 @@ def _run_artifact(request: dict, *, supervised: bool = False) -> int:
         root = artifacts.store_path(request.get("store_root"))
         if artifacts.store_path() != root:
             raise RuntimeError("artifact worker store does not match its request")
-        with broker.held(f"artifact:{operation['kind']}", required=True), artifacts.worker_context(root), \
+        with broker.held(f"artifact:{operation['kind']}", required=True), \
              contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             result = artifacts.result_frame(
                 operation, artifacts.execute(operation, keep_going=_wanted if supervised else None))

@@ -557,12 +557,13 @@ class AssemblyJobReads(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr[-2000:])
         return done.stdout.strip().splitlines()[-1].split(" ", 1)[0]
 
-    def closure(self, model: Path) -> dict[str, str]:
-        """Every object of the model's result closure, by digest."""
+    def closure(self, model: Path, field: str = "tree") -> dict[str, str]:
+        """Every object of the model's result closure (or its saved document's, with
+        ``field="documentTree"``), by digest."""
         from cadgen.store.records import read_record
         from cadgen.store.trees import tree_objects
 
-        tree = read_record(f"{model}::{model.stem}")["tree"]
+        tree = read_record(f"{model}::{model.stem}")[field]
         return {digest: tree for digest in tree_objects(tree)}
 
     def counted_reads(self):
@@ -587,6 +588,9 @@ class AssemblyJobReads(unittest.TestCase):
         with counted:
             self.assertEqual(self.run_here(self.arm), "current")
         counts = Counter(reads)
+        # The saved document's tree is the one a view reads: the no-op checks that its
+        # parts' display data is stored (``_ensure_reused_display``).
+        closure = {**self.closure(self.arm, "documentTree"), **closure}
         self.assertEqual(set(counts), set(closure))
         # Clause 3 verifies each child's closure; clause 4 takes those verified
         # subtrees as they are and reads only the parent's own objects. The
@@ -632,6 +636,8 @@ class AssemblyJobReads(unittest.TestCase):
     def test_a_childs_rebuild_elsewhere_costs_the_parent_that_childs_closure(self) -> None:
         from collections import Counter
 
+        from cadgen.store.records import read_record
+
         self.assertEqual(self.run_here(self.arm), "built")
         self.assertEqual(self.run_here(self.arm), "current")
         pinned = self.closure(self.pin)
@@ -647,7 +653,12 @@ class AssemblyJobReads(unittest.TestCase):
         counts = Counter(reads)
         self.assertEqual(max(counts.values()), 1, counts)
         root = next(digest for digest, tree in whole.items() if digest == tree)
-        self.assertEqual(set(reads), {*pinned, root}, counts)
+        # The no-op's display check of the parent's saved document (``_ensure_reused_display``)
+        # verifies that document's tree again, and the parts it shares with the child's
+        # saved document, which the child's rebuild claimed.
+        document = read_record(f"{self.arm}::{self.arm.stem}")["documentTree"]
+        shared = set(self.closure(self.arm, "documentTree")) & set(self.closure(self.pin, "documentTree"))
+        self.assertEqual(set(reads), {*pinned, root, document, *shared}, counts)
 
 
 if __name__ == "__main__":

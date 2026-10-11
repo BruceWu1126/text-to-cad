@@ -2,8 +2,8 @@
 
 The page draws the meshes cadgen stores, the ones the viewer and mesh exports
 use: GLB bodies with exact input, surface and quality identity. Probes return small
-metadata before admitted body reads, batch responses have a fixed byte cap, and
-the host meshes on request what a probe found missing; the page never writes.
+metadata before admitted body reads and batch responses have a fixed byte cap; the
+host and the page only read.
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ from unittest import mock
 from tests.python.support.paths import add_repo_path
 
 add_repo_path("packages/cadgen/src")
-from tests.python.support.inline_artifacts import inline_artifacts
 from tests.python.support.tessellation import tessellation_fixture
 from tests.python.support.tmp_root import generated_cad_directory
 
@@ -191,30 +190,6 @@ class SnapshotAssetServerTests(unittest.TestCase):
         self.assertEqual(status, 204)
         self.assertIn("POST", headers.get("access-control-allow-methods", ""))
 
-    def test_produce_route_meshes_a_derived_surface_and_reports_why_it_cannot(self) -> None:
-        import json
-
-        from build123d import Box
-        from cadgen.store import surfaces
-        from cadgen.store.build import build_tree_from_compound
-
-        tree, descriptor, _ = build_tree_from_compound(Box(4, 5, 6), root_name="block")
-        producer = surfaces.producer_identity()
-        surfaces.derive(tree, producer=producer)
-        [entry] = descriptor["components"].values()
-        key = meshes.tessellation_key(surfaces.surface_input(entry, producer))
-        produce = json.dumps({"tessellationInputs": [key]}).encode()
-        with inline_artifacts():
-            with mock.patch("cadgen.store.surfaces.produce_meshes", side_effect=ValueError("OCCT did not mesh 1 face(s)")):
-                status, body, _ = self.request("POST", "/__tess_cache/produce", produce)
-            self.assertEqual(status, 500)
-            self.assertIn(b"OCCT did not mesh 1 face(s)", body)
-            status, body, _ = self.request("POST", "/__tess_cache/produce", produce)
-        self.assertEqual(status, 200)
-        self.assertEqual(json.loads(body)["entries"], {key: meshes.probe(key)})
-        status, _, _ = self.request("POST", "/__tess_cache/produce", b"not json")
-        self.assertEqual(status, 400)
-
     def test_unadmitted_reads_never_reach_the_cache(self) -> None:
         from urllib.parse import urlencode
 
@@ -265,9 +240,9 @@ class SnapshotAssetServerTests(unittest.TestCase):
 
 
 class SnapshotBrowserTessCacheIntegrationTest(unittest.TestCase):
-    """The real snapshot page draws the meshes the build pool makes for its host."""
+    """The real snapshot page draws the display meshes cadgen stored, and asks for nothing."""
 
-    def test_a_cold_render_has_the_build_pool_mesh_and_a_warm_one_reads_that_mesh(self) -> None:
+    def test_a_render_reads_the_stored_display_mesh_and_derives_nothing(self) -> None:
         async def exercise(root: Path) -> None:
             from build123d import Box, Cylinder
             from cadgen.store import surfaces
@@ -311,33 +286,28 @@ class SnapshotBrowserTessCacheIntegrationTest(unittest.TestCase):
                 }],
             }
             mesh_index = root / "cache/index/mesh"
-            self.assertFalse(mesh_index.exists(), "deriving the surface meshed nothing")
+            stored = [path.read_bytes() for path in mesh_index.iterdir()]
+            self.assertEqual(len(stored), 1, "deriving the component stored its display mesh")
             renderer = BatchSnapshotRenderer(browser_runtime_dir(None))
             try:
-                with mock.patch("cadgen.store.surfaces.produce_meshes",
-                                side_effect=AssertionError("the host meshed in its own process")):
-                    cold = await renderer.render(job)
-                self.assertTrue(cold["ok"])
+                with mock.patch("cadgen.daemon.artifacts.submit_artifact",
+                                side_effect=AssertionError("a stored mesh is asked for nothing")), \
+                        mock.patch("cadgen.store.surfaces.derive",
+                                   side_effect=AssertionError("the host derived in its own process")):
+                    rendered = await renderer.render(job)
+                self.assertTrue(rendered["ok"])
                 self.assertEqual(
                     {"secure": True, "subtle": True},
                     await renderer.page.evaluate(
                         "({secure: isSecureContext, subtle: !!globalThis.crypto?.subtle})"
                     ),
                 )
-                mesh_entries = list(mesh_index.iterdir())
-                self.assertEqual(len(mesh_entries), 1, "the build pool meshed the one component the page asked for")
-                stored = mesh_entries[0].read_bytes()
-                with mock.patch("cadgen.daemon.artifacts.submit_artifact",
-                                side_effect=AssertionError("a stored mesh is asked for nothing")):
-                    warm = await renderer.render(job)
-                self.assertTrue(warm["ok"])
-                self.assertEqual([path.read_bytes() for path in mesh_index.iterdir()], [stored])
+                self.assertEqual([path.read_bytes() for path in mesh_index.iterdir()], stored)
             finally:
                 await renderer.close()
 
         with generated_cad_directory(prefix="snapshot-browser-cache-") as temporary:
             root = Path(temporary).resolve()
-            # A one-shot build-pool worker meshes for the page, as it does wherever no daemon runs.
             with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(root / "cache"), "CADGEN_DAEMON": "0"}):
                 asyncio.run(exercise(root))
 

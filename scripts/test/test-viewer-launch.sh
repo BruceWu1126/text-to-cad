@@ -200,13 +200,12 @@ if ! printf '%s' "$reuse_json" | grep -q "\"port\":$PORT"; then
 fi
 
 # End-to-end display FROM THE BUNDLE: a raw STEP, named by its absolute path, goes
-# not-compiled -> POST (cadgen's compile entry point, a job in the pool)
-# -> compiled geometry -> a real browser load that derives and fetches its
-# display surface. Its small STEP fixture belongs to this test rather than the
-# repository's shared model workspace. Geometry completion and display readiness
-# are separate contracts: the artifact endpoint must stay "compiled" after the
-# geometry tree lands, while
-# the bundled client drives missing SURF work through /__cad/surfaces.
+# not-compiled -> POST (cadgen's compile entry point, a job in the pool, which
+# derives the parts' display data before it reports done) -> compiled geometry ->
+# a real browser load that reads its display surface and mesh. Its small STEP
+# fixture belongs to this test rather than the repository's shared model
+# workspace. The bundled client resolves the stored display data through
+# /__cad/surfaces, every row ready at its first answer: the view derives nothing.
 FIXTURE="$REPO_ROOT/tests/fixtures/cad/import-smoke.step"
 if ! head -1 "$FIXTURE" | grep -q "ISO-10303-21"; then
   echo "FAIL: import fixture is not STEP text: $FIXTURE" >&2
@@ -262,10 +261,10 @@ if ! printf '%s' "$catalog_json" | grep -q '"url":"/__cad/store?file='; then
 fi
 
 # Loading the page is load-bearing. Merely accepting the new compiled state
-# would let this smoke pass with a dead display path: a cold isolated store has
-# no SURF or mesh entries, so the bundled client must request exact surface
-# derivation, fetch the pinned SURF bytes, tessellate them, and clear its loading
-# overlay. CI installs Playwright's Chromium with requirements-dev.txt.
+# would let this smoke pass with a dead display path: the bundled client must
+# resolve the exact surfaces the compile derived, fetch the pinned SURF bytes,
+# draw the stored meshes, and clear its loading overlay. CI installs
+# Playwright's Chromium with requirements-dev.txt.
 "$PYTHON" - "http://$HOST:$PORT/?file=$smoke_ref" "$(cat "$REPO_ROOT/VERSION")" <<'PY'
 import sys
 import time
@@ -277,6 +276,7 @@ url = sys.argv[1]
 responses = []
 page_errors = []
 surface_payload = None
+surface_pending = False
 surface_fetches = set()
 
 with sync_playwright() as playwright:
@@ -307,6 +307,8 @@ with sync_playwright() as playwright:
                 if parsed.path == "/__cad/surfaces" and request.method == "POST" and response.ok:
                     payload = response.json()
                     components = payload.get("components") if isinstance(payload, dict) else None
+                    surface_pending = surface_pending or any(
+                        row.get("state") == "pending" for row in (components or {}).values())
                     if components and all(row.get("state") == "ready" for row in components.values()):
                         surface_payload = payload
                 elif parsed.path == "/__cad/store" and response.ok:
@@ -321,7 +323,9 @@ with sync_playwright() as playwright:
         if page_errors:
             raise RuntimeError("browser page error: " + " | ".join(page_errors))
         if not surface_payload:
-            raise RuntimeError("bundled client did not complete a cold /__cad/surfaces request")
+            raise RuntimeError("bundled client did not complete a /__cad/surfaces request")
+        if surface_pending:
+            raise RuntimeError("the view derived display data the compile should have derived")
         rows = surface_payload["components"]
         missing = [
             cid for cid, row in rows.items()
@@ -330,14 +334,14 @@ with sync_playwright() as playwright:
         if missing:
             raise RuntimeError("bundled client did not fetch pinned SURF bytes for: " + ", ".join(missing))
         if page.locator(".cad-loading-overlay").count():
-            raise RuntimeError("bundled client did not finish tessellating the display surface")
+            raise RuntimeError("bundled client did not finish drawing the display surface")
         canvases = page.locator("canvas")
         if not canvases.count() or not any(canvases.nth(index).is_visible() for index in range(canvases.count())):
             raise RuntimeError("bundled client completed surface work without a visible canvas")
         alerts = [text.strip() for text in page.locator('[role="alert"]').all_text_contents() if text.strip()]
         if alerts:
             raise RuntimeError("bundled client reported an alert: " + " | ".join(alerts))
-        print(f"    bundled client displayed {len(rows)} cold-derived surface component(s)")
+        print(f"    bundled client displayed {len(rows)} component(s) the compile derived")
     finally:
         browser.close()
 PY

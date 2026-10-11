@@ -11,7 +11,7 @@ from unittest import mock
 @contextlib.contextmanager
 def inline_artifacts(run=None):
     """Every artifact job this process submits (``artifacts.submit_artifact``, which
-    ``resolve_artifact`` and ``resolve_artifacts`` go through) runs at once, on the
+    ``resolve_artifact`` goes through) runs at once, on the
     submitting thread, through the worker's own entry (``artifacts.execute``) and
     result binding -- or through ``run(request)`` when given. Yields the mock, whose
     calls are the requests."""

@@ -54,8 +54,6 @@ export interface TessellationCacheProvider {
   probeMany(keys: string[], options?: { signal?: AbortSignal }): Promise<(TessellationProbe | null)[] | null>;
   getProbed(probe: TessellationProbe, options?: { signal?: AbortSignal; maxBytes?: number }): Promise<Uint8Array | null>;
   getManyProbed?(probes: TessellationProbe[], options?: { signal?: AbortSignal; maxBytes?: number }): Promise<(Uint8Array | null)[] | null>;
-  /** Mesh what the keys name and answer as a probe would; only a host that meshes on request offers it. */
-  produceMany?(keys: string[], options?: { signal?: AbortSignal }): Promise<(TessellationProbe | null)[] | null>;
   /** The most framed bytes its transport carries in one batched read (`tessBatchMaxBytes`). */
   readonly maxBatchBytes?: number;
 }
@@ -69,8 +67,6 @@ export interface TessellationCache {
   createSession(options?: { signal?: AbortSignal }): TessellationCache;
   tessellationCacheProviderRegistered(): boolean;
   probeCachedTessellationEntries(surfaceInputs: string[], options?: TessellationOptions, request?: TessellationReadOptions): Promise<Map<string, TessellationProbe>>;
-  /** Ask the host to mesh the inputs a probe found missing; empty where the host cannot. */
-  produceTessellationEntries(surfaceInputs: string[], options?: TessellationOptions, request?: TessellationReadOptions): Promise<Map<string, TessellationProbe>>;
   getCachedComponentEntry(surfaceInput: string, options?: TessellationOptions, request?: TessellationReadOptions): Promise<TessellationCacheEntry | null>;
   getCachedEntryBytes(surfaceInput: string, options?: TessellationOptions, request?: TessellationReadOptions): Promise<Uint8Array | null>;
   getCachedEntryBytesMany(probes: TessellationProbe[], request?: { signal?: AbortSignal; maxBytes?: number }): Promise<(Uint8Array | null)[] | null>;

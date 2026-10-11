@@ -1,0 +1,119 @@
+"""A build derives its parts' display data before it reports done; a view only reads.
+
+A two-part model declaring an STL at the display tolerance, built in this process with the
+daemon off (STORE.md §3, a build derives its parts' display data): the build meshes each
+part once and the STL is written from those meshes; a list and a view of the saved STEP
+start no job; a part the store lost is derived alone, by one job; and a no-op build of the
+model repairs a cleared store.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import io
+import os
+import shutil
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from tests.python.support.inline_artifacts import inline_artifacts
+from tests.python.support.paths import add_repo_path
+from tests.python.support.tmp_root import generated_cad_directory
+
+add_repo_path("packages/cadgen/src")
+
+MODEL = """
+from cadgen import step, stl
+from cadgen import build123d as bd
+
+
+@stl(out="../STL/pair.stl")
+@step(out="../STEP/pair.step")
+def pair():
+    block = bd.Box(10, 10, 10)
+    block.label = "block"
+    peg = bd.Pos(20, 0, 0) * bd.Cylinder(3, 10)
+    peg.label = "peg"
+    return bd.Compound(children=[block, peg], label="pair")
+
+
+if __name__ == "__main__":
+    pair()
+"""
+
+NO_JOB = AssertionError("a view started a derivation job")
+
+
+class BuildDerivesDisplayData(unittest.TestCase):
+    def setUp(self) -> None:
+        temporary = generated_cad_directory(prefix="build-display-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        (self.root / "src").mkdir()
+        self.script = self.root / "src/pair.py"
+        self.script.write_text(MODEL, encoding="utf-8")
+        self.document = self.root / "STEP/pair.step"
+        self.store = self.root / "store"
+        patch = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.store), "CADGEN_DAEMON": "0"})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def build(self) -> tuple[str, int]:
+        """Run the model in this process: its outcome word, and how many meshes OCCT made."""
+        from cadgen._internal import occt_mesh
+        from cadgen.cli._run_model import run_model_argv
+
+        output = io.StringIO()
+        with mock.patch.object(occt_mesh, "mesh_component", wraps=occt_mesh.mesh_component) as meshed, \
+                contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            code = run_model_argv([str(self.script)])
+        self.assertEqual(code, 0, output.getvalue())
+        return output.getvalue().strip().splitlines()[-1].split(" ", 1)[0], meshed.call_count
+
+    def listing(self):
+        from cadgen import step
+
+        listed = step.snapshot(self.document, mode="list")
+        self.assertTrue(listed.ok)
+        return {row["name"]: row["triangleCount"] for row in listed.parts}
+
+    def test_the_build_meshes_each_part_once_and_every_view_after_it_only_reads(self) -> None:
+        from cadgen import stl
+
+        self.assertEqual(self.build(), ("built", 2), "one display mesh a part; the STL is written from them")
+        self.assertTrue((self.root / "STL/pair.stl").is_file())
+        with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=NO_JOB), \
+                mock.patch("cadgen.store.surfaces.derive", side_effect=NO_JOB):
+            counts = self.listing()
+            exported = stl.build(self.document, self.root / "again.stl", force=True)
+        self.assertTrue(exported.ok)
+        self.assertEqual(set(counts), {"block", "peg"})
+        self.assertEqual(counts["block"], 12)
+
+    def test_a_part_the_store_lost_is_derived_alone_by_one_job(self) -> None:
+        from cadgen.store import meshes
+
+        self.build()
+        expected = self.listing()
+        [lost] = [key for key in (self.store / "index/mesh").iterdir()
+                  if meshes.probe(key.name)["indexCount"] // 3 != 12]
+        lost.unlink()
+        with inline_artifacts() as jobs:
+            self.assertEqual(self.listing(), expected)
+        [job] = [call.args[0] for call in jobs.call_args_list]
+        self.assertEqual((job["kind"], len(job["cids"])), ("display", 1))
+        self.assertIsNotNone(meshes.probe(lost.name), "the job stored the part's mesh again")
+
+    def test_a_no_op_build_repairs_a_cleared_store(self) -> None:
+        self.build()
+        for kind in ("surface", "selector", "mesh"):
+            shutil.rmtree(self.store / "index" / kind)
+        self.assertEqual(self.build(), ("current", 2))
+        self.assertEqual(self.build(), ("current", 0))
+        with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=NO_JOB):
+            self.assertEqual(set(self.listing()), {"block", "peg"})
+
+
+if __name__ == "__main__":
+    unittest.main()

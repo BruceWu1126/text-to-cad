@@ -69,18 +69,16 @@ export function probeRowFor(bytes) {
 
 /**
  * A mesh store in memory, answering as a host's /__tess_cache/ routes do: probes, exact reads and
- * batches over `bodies`. `produce`, when given, is the bodies a produce request makes (a host that
- * meshes on request); every read and request is counted.
+ * batches over `bodies`; every read and request is counted.
  */
-export function memoryMeshProvider(bodies = [], { produce = null } = {}) {
+export function memoryMeshProvider(bodies = []) {
   const stored = new Map();
   const add = (bytes) => {
     const row = probeRowFor(bytes);
     stored.set(row.tessellationInput, { row, bytes });
   };
   for (const bytes of bodies) add(bytes);
-  const pending = new Map((produce || []).map((bytes) => [probeRowFor(bytes).tessellationInput, bytes]));
-  const counts = { probes: 0, reads: 0, batches: 0, produced: 0 };
+  const counts = { probes: 0, reads: 0, batches: 0 };
   const read = (row) => {
     const entry = stored.get(row?.tessellationInput);
     return entry && entry.row.object === row.object ? entry.bytes.slice() : null;
@@ -100,18 +98,6 @@ export function memoryMeshProvider(bodies = [], { produce = null } = {}) {
       counts.batches += 1;
       return rows.map(read);
     },
-    ...(produce ? {
-      async produceMany(keys) {
-        return keys.map((key) => {
-          const bytes = pending.get(key);
-          if (!bytes) return stored.get(key)?.row || null;
-          counts.produced += 1;
-          pending.delete(key);
-          add(bytes);
-          return stored.get(key).row;
-        });
-      },
-    } : {}),
   };
 }
 

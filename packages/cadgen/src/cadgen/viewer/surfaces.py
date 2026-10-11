@@ -1,6 +1,9 @@
-"""Artifact-only asynchronous SURF resolution for owned runtime views.
+"""A runtime view's display data, read from the store: each component's surface,
+selector table and display mesh, which the build that made the tree derived. A
+component the store lacks them for is derived by ONE build-pool job for the request
+(``kind: display``); this server never derives.
 
-Tokens are disposable subscribers to pooled work, never persistent store
+Tokens are disposable subscribers to that job, never persistent store
 entries or editing sessions. Every poll repeats and validates its immutable
 inputs. Disconnect/cancellation detaches that subscriber, not another reader,
 and never kills a derivation: the daemon finishes the one in hand into the store
@@ -104,12 +107,12 @@ def _pinned(tree: str, cids=()) -> _Pin:
     return pin
 
 
-def _request(body: bytes) -> tuple[dict, dict, dict, str | None, dict]:
+def _request(body: bytes) -> tuple[dict, dict, dict, dict, str | None, dict]:
     if len(body) > 128 * 1024:
         raise ValueError("surface request is too large")
     value = json.loads(body)
     fields = {"tree", "viewId", "producer", "components"}
-    if type(value) is not dict or not fields <= set(value) or set(value) - fields - {"job", "tessellation"}:
+    if type(value) is not dict or not fields <= set(value) or set(value) - fields - {"job"}:
         raise ValueError("surface request requires tree, viewId, producer and components")
     producer = surfaces.producer_fields(value["producer"])
     tree = value["tree"]
@@ -141,16 +144,10 @@ def _request(body: bytes) -> tuple[dict, dict, dict, str | None, dict]:
     job = value.get("job")
     if job is not None and (type(job) is not str or len(job) != 32 or any(c not in "0123456789abcdef" for c in job)):
         raise ValueError("invalid surface subscriber token")
-    # A tessellation asks for the components' meshes at that tolerance as well:
-    # the display mesh is produced here, by OCCT, never by the browser.
-    tessellations = [] if value.get("tessellation") is None else surfaces.normalize_tessellations([value["tessellation"]])
-    operation = {"kind": "surfaces", "tree": value["tree"], "cids": sorted(selected),
-                 "producer": producer, "expected_objects": expected,
-                 **({"tessellations": [{"chordTolerance": chord, "angleTolerance": angle}
-                                       for chord, angle in tessellations]} if tessellations else {})}
+    operation = {"kind": "display", "tree": value["tree"], "cids": sorted(selected), "producer": producer}
     # The named components' objects, still on disk; the map itself is read-only.
     canonical = {"components": _pinned(tree, selected).components}
-    return {"viewId": view_id}, selected, operation, job, canonical
+    return {"viewId": view_id}, selected, operation, expected, job, canonical
 
 
 def surface_object_url(tree: str, surface_input: str, digest: str) -> str:
@@ -199,24 +196,12 @@ def pinned_surface_object(tree: str, surface_input: str, digest: str):
     return None
 
 
-def _meshes(entry: dict, operation: dict) -> list[dict] | None:
-    """The stored mesh records of every tessellation ``operation`` asks for, or None
-    while any is missing."""
-    records = list(surfaces.mesh_records(entry, operation["producer"], operation.get("tessellations")).values())
-    return None if any(record is None for record in records) else records
-
-
-def _selectors(entry: dict, operation: dict, record: dict) -> dict | None:
-    """The stored selector table of the component's surface, or None while missing."""
-    table = surfaces.selector_record(entry, operation["producer"])
-    return table if table is not None and table["surfaceObject"] == record["object"] else None
-
-
-def _ready(operation: dict, entry: dict, record: dict, meshes: list[dict], table: dict) -> dict:
-    ready = {
-        "surfaceInput": entry["surfaceInput"], "state": "ready", "surfaceObject": record["object"],
-        "url": surface_object_url(operation["tree"], entry["surfaceInput"], record["object"]),
-        "byteLength": object_path(record["object"]).stat().st_size,
+def _ready(operation: dict, entry: dict, records: dict) -> dict:
+    surface, table = records["surface"], records["selectors"]
+    return {
+        "surfaceInput": entry["surfaceInput"], "state": "ready", "surfaceObject": surface["object"],
+        "url": surface_object_url(operation["tree"], entry["surfaceInput"], surface["object"]),
+        "byteLength": object_path(surface["object"]).stat().st_size,
         # The component's selector table (``store.selectors``): the refs and facts the page
         # joins to the mesh, served by the same store route as the surface.
         "selectors": {
@@ -224,12 +209,15 @@ def _ready(operation: dict, entry: dict, record: dict, meshes: list[dict], table
             "url": surface_object_url(operation["tree"], entry["surfaceInput"], table["object"]),
             "byteLength": table["byteLength"],
         },
-    }
-    if meshes:
-        # The mesh's index record: what a tessellation-cache probe answers, so the
+        # The display mesh's index record: what a tessellation-cache probe answers, so the
         # client reads its body next without asking again.
-        ready["mesh"] = meshes[0]
-    return ready
+        "mesh": records["mesh"],
+    }
+
+
+def _conflict(entry: dict) -> dict:
+    return {"surfaceInput": entry["surfaceInput"], "state": "failed",
+            "error": "surface output differs from the displayed mesh", "code": "surface-conflict"}
 
 
 class SurfaceSubscribers:
@@ -280,9 +268,9 @@ class SurfaceSubscribers:
     def resolve(self, body: bytes) -> dict:
         from cadgen.daemon.artifacts import request_key, submit_artifact
 
-        view, selected, operation, token, canonical = _request(body)
+        view, selected, operation, expected, token, canonical = _request(body)
         self._prune()
-        request_identity = (str(store_root().resolve()), request_key(operation))
+        request_identity = (str(store_root().resolve()), request_key(operation), sorted(expected.items()))
         future = None
         if token is not None:
             with self._guard:
@@ -293,19 +281,23 @@ class SurfaceSubscribers:
                 self._changed.notify_all()
                 future = job["future"]
         response = {"viewId": view["viewId"], "components": {}}
-        missing = []
-        for cid, entry in selected.items():
-            record = surfaces.lookup(canonical["components"][cid], operation["producer"])
-            expected = operation["expected_objects"].get(entry["surfaceInput"])
-            meshes = _meshes(canonical["components"][cid], operation)
-            table = _selectors(canonical["components"][cid], operation, record) if record is not None else None
-            if record is not None and expected is not None and record["object"] != expected:
-                response["components"][cid] = {"surfaceInput": entry["surfaceInput"], "state": "failed",
-                                               "error": "surface output differs from the displayed mesh", "code": "surface-conflict"}
-            elif record is not None and meshes is not None and table is not None:
-                response["components"][cid] = _ready(operation, entry, record, meshes, table)
-            else:
-                missing.append(cid)
+
+        def settle(cids) -> list[str]:
+            """Answer each of ``cids`` the store holds (or conflicts with); the rest are missing."""
+            missing = []
+            for cid in cids:
+                entry = selected[cid]
+                records = surfaces.display_records(canonical["components"][cid], operation["producer"])
+                pinned = expected.get(entry["surfaceInput"])
+                if records is not None and pinned is not None and records["surface"]["object"] != pinned:
+                    response["components"][cid] = _conflict(entry)
+                elif records is not None:
+                    response["components"][cid] = _ready(operation, entry, records)
+                else:
+                    missing.append(cid)
+            return missing
+
+        missing = settle(selected)
         if not missing:
             if token is not None:
                 self.cancel(token)
@@ -314,9 +306,10 @@ class SurfaceSubscribers:
             with self._guard:
                 if len(self._jobs) >= MAX_SUBSCRIBERS:
                     raise ValueError("surface request capacity reached; retry after an active request finishes")
-                # Each HTTP consumer owns one future. The daemon coalesces the
-                # native work; cancelling this token cannot detach another one.
-                future = submit_artifact(operation, store_root=store_root())
+                # The one job for this request's missing components (its first answer's: a poll
+                # names the same inputs). Each HTTP consumer owns one future; the daemon
+                # coalesces the native work, so cancelling this token cannot detach another.
+                future = submit_artifact({**operation, "cids": sorted(missing)}, store_root=store_root())
                 token = uuid.uuid4().hex
                 self._jobs[token] = {"future": future, "request": request_identity, "touched": time.monotonic()}
                 self._start_reaper_locked()
@@ -324,25 +317,15 @@ class SurfaceSubscribers:
         if future.done():
             try:
                 future.result()
-                error = "surface derivation completed without its requested output"
+                error = "display derivation completed without its requested output"
             except Exception as exc:
-                LOG.warning("surface derivation failed for %s: %r", operation["tree"][:16], exc)
+                LOG.warning("display derivation failed for %s: %r", operation["tree"][:16], exc)
                 error = str(exc) or type(exc).__name__
             # Recheck once after completion, including a completion that raced the
             # first lookup. A deleted result is then a failure. So is a failed job's,
             # for only the components it left missing: one component's failure is
             # raised once the others are stored (surfaces.derive), and they are ready.
-            remaining = []
-            for cid in missing:
-                record = surfaces.lookup(canonical["components"][cid], operation["producer"])
-                expected = operation["expected_objects"].get(selected[cid]["surfaceInput"])
-                meshes = _meshes(canonical["components"][cid], operation)
-                table = _selectors(canonical["components"][cid], operation, record) if record is not None else None
-                if record is None or meshes is None or table is None or (expected is not None and record["object"] != expected):
-                    remaining.append(cid)
-                else:
-                    response["components"][cid] = _ready(operation, selected[cid], record, meshes, table)
-            missing = remaining
+            missing = settle(missing)
             for cid in missing:
                 response["components"][cid] = {"surfaceInput": selected[cid]["surfaceInput"], "state": "failed", "error": error}
             self.cancel(token)

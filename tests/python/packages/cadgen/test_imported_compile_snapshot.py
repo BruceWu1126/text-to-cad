@@ -59,6 +59,9 @@ class ImportedCompileSnapshot(unittest.TestCase):
         first = self.compile(document)
         expected_kind = trees.tree_kind_for(first["tree"])
         expected_stats = trees.capture_tree(first["tree"], retain_payloads=False)[0]["stats"]
+        # The first compile derived its parts' display data; a hit derives nothing more.
+        derived = sorted((self.root / "store/index/surface").iterdir())
+        self.assertTrue(derived)
         forbidden = AssertionError("imported hit did extra work")
         with mock.patch.object(trees, "capture_tree", wraps=trees.capture_tree) as capture, \
              mock.patch.object(artifact, "load_step_scene_exact", side_effect=forbidden), \
@@ -72,7 +75,7 @@ class ImportedCompileSnapshot(unittest.TestCase):
         self.assertEqual(current["tree"], first["tree"])
         self.assertEqual(current["stats"], expected_stats)
         self.assertEqual(current["entryKind"], expected_kind)
-        self.assertFalse((self.root / "store/index/surface").exists())
+        self.assertEqual(sorted((self.root / "store/index/surface").iterdir()), derived)
 
     def test_edge_policy_well_formedness_gate_remains(self):
         from cadgen import step_artifact_cli as artifact

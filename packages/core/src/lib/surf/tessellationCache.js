@@ -696,32 +696,6 @@ export function createTessellationCache({ provider = null } = {}) {
     return hits;
   }
 
-  // Ask the host to mesh what a probe found missing: cadgen produces it, stores
-  // it, and answers with its probe row, exactly as a probe would have. Only a
-  // host that can mesh offers this (`provider.produceMany`); elsewhere a
-  // missing mesh stays missing.
-  async function produceTessellationEntries(surfaceInputs, options, { signal } = {}) {
-    const hits = new Map();
-    const provider = disposed ? null : cacheProvider;
-    if (!provider || typeof provider.produceMany !== "function"
-      || !Array.isArray(surfaceInputs) || !surfaceInputs.length) return hits;
-    for (let start = 0; start < surfaceInputs.length; start += TESS_PROBE_MAX_KEYS) {
-      const inputs = surfaceInputs.slice(start, start + TESS_PROBE_MAX_KEYS);
-      const keys = inputs.map((surfaceInput) => tessellationCacheKey(surfaceInput, options));
-      const rows = await provider.produceMany(keys, { signal });
-      signal?.throwIfAborted();
-      if (!Array.isArray(rows) || rows.length !== keys.length) continue;
-      for (let index = 0; index < keys.length; index += 1) {
-        const row = validateTessellationProbeRow(rows[index], {
-          tessellationInput: keys[index],
-          surfaceInput: inputs[index],
-        });
-        if (row) hits.set(inputs[index], row);
-      }
-    }
-    return hits;
-  }
-
   async function getCachedEntryBytes(surfaceInput, options, {
     signal,
     probe = null,
@@ -802,7 +776,6 @@ export function createTessellationCache({ provider = null } = {}) {
       ...cache,
       tessellationCacheProviderRegistered: () => active() && cache.tessellationCacheProviderRegistered(),
       probeCachedTessellationEntries: (inputs, options, request) => read("probeCachedTessellationEntries", [inputs, options], request),
-      produceTessellationEntries: (inputs, options, request) => read("produceTessellationEntries", [inputs, options], request),
       getCachedEntryBytes: (input, options, request) => read("getCachedEntryBytes", [input, options], request),
       getCachedEntryBytesMany: (probes, request) => read("getCachedEntryBytesMany", [probes], request),
       getCachedComponentEntry: (input, options, request) => read("getCachedComponentEntry", [input, options], request),
@@ -819,7 +792,6 @@ export function createTessellationCache({ provider = null } = {}) {
     batchMaxBytes: tessBatchMaxBytes(cacheProvider?.maxBatchBytes),
     tessellationCacheProviderRegistered,
     probeCachedTessellationEntries: (inputs, options, request) => probeCachedTessellationEntries(inputs, options, requestOptions(request)),
-    produceTessellationEntries: (inputs, options, request) => produceTessellationEntries(inputs, options, requestOptions(request)),
     getCachedEntryBytes: (input, options, request) => getCachedEntryBytes(input, options, requestOptions(request)),
     getCachedEntryBytesMany: (probes, request) => getCachedEntryBytesMany(probes, requestOptions(request)),
     getCachedComponentEntry: (input, options, request) => getCachedComponentEntry(input, options, requestOptions(request)),
@@ -898,8 +870,6 @@ export function createHttpTessellationCacheProvider({
   entryUrl = (key) => `${originPrefix(origin)}/__tess_cache/${encodeURIComponent(key)}.glb`,
   probeUrl = `${originPrefix(origin)}/__tess_cache/probe`,
   batchUrl = `${originPrefix(origin)}/__tess_cache/batch`,
-  // Only a host that meshes on request serves this route (the snapshot host).
-  produceUrl = "",
   headers = {},
   fetch: fetchImpl = globalThis.fetch,
   signal: lifetimeSignal,
@@ -931,24 +901,6 @@ export function createHttpTessellationCacheProvider({
         return null;
       }
     },
-    ...(produceUrl ? {
-      async produceMany(keys, { signal } = {}) {
-        signal = scopedSignal(signal);
-        if (!Array.isArray(keys) || keys.length > TESS_PROBE_MAX_KEYS) return null;
-        const response = await fetchImpl(produceUrl, {
-          method: "POST",
-          headers: { ...headers, "content-type": "application/json" },
-          body: JSON.stringify({ tessellationInputs: keys }),
-          signal,
-          cache: "no-store",
-        });
-        // cadgen could not mesh what was asked: that is the caller's error, with its reason.
-        if (!response.ok) throw new Error(await response.text() || `mesh request failed: HTTP ${response.status}`);
-        const payload = await response.json();
-        const entries = payload?.entries;
-        return keys.map((key) => validateTessellationProbeRow(entries?.[key], { tessellationInput: key }));
-      },
-    } : {}),
     async getProbed(value, { signal, maxBytes } = {}) {
       signal = scopedSignal(signal);
       const row = validateTessellationProbeRow(value);

@@ -18,6 +18,7 @@ from cadgen.coordination.phases import (
     PHASE_COMPONENTS,
     PHASE_FINALIZE,
     PHASE_GENERATE,
+    PHASE_MESH,
     PHASE_PACKAGE,
 )
 
@@ -37,7 +38,7 @@ class ArtifactKind:
     """
 
     name: str
-    phases: tuple[str, ...] = (PHASE_GENERATE, PHASE_PACKAGE, PHASE_COMPONENTS, PHASE_FINALIZE)
+    phases: tuple[str, ...] = (PHASE_GENERATE, PHASE_PACKAGE, PHASE_COMPONENTS, PHASE_FINALIZE, PHASE_MESH)
     labels: Mapping[str, str] = field(default_factory=dict)
 
 
@@ -53,6 +54,7 @@ STEP_IMPORT = ArtifactKind(
         PHASE_GENERATE: "Importing STEP",
         PHASE_PACKAGE: "Importing STEP: collecting parts",
         PHASE_COMPONENTS: "Importing STEP: storing parts",
+        PHASE_MESH: "Importing STEP: meshing parts",
     },
 )
 

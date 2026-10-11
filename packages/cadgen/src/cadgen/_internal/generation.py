@@ -15,6 +15,7 @@ from cadgen._internal.glb_topology import build_step_topology_index_manifest
 from cadgen.coordination import (
     DRAWING_PACKAGE,
     PHASE_GENERATE,
+    PHASE_MESH,
     STEP_PACKAGE,
     ProgressEvent,
     artifact_build,
@@ -790,6 +791,9 @@ def _generate_part_outputs(
     # extracted on demand by ensure_step_topology_artifact (selection renders,
     # read_scene), so generation returns no selector bundle.
     tree_result = artifact_results.get("tree") or {}
+    # The record is written: a part that fails to derive now never makes the geometry rebuild.
+    _ensure_display(str(tree_result.get("documentTree") or tree_result.get("tree") or ""), progress=progress,
+                    logger=logger)
     return GeneratedStepResult(spec=spec, scene=scene, selector_bundle=None,
                                tree=str(tree_result.get("tree") or "") or None,
                                step_kept=bool(tree_result.get("documentKept")))
@@ -815,6 +819,7 @@ def _generate_step_outputs(
         refreshed_tree = refresh_annotations(spec, verdict=verdict)
         if refreshed_tree is not None:
             _current_source_result(spec, refreshed_tree)
+            _ensure_reused_display(spec, refreshed_tree, progress=progress, logger=logger)
             _produce_declared_mesh_exports(spec, logger=logger, source_tree=refreshed_tree)
             return GeneratedStepResult(spec=spec, scene=None, tree=refreshed_tree)
     reuse_tree = _checked_source_tree(spec, verdict) if not force else None
@@ -840,6 +845,7 @@ def _generate_step_outputs(
             from cadgen.catalog import result_tree_for
 
             reuse_tree = result_tree_for(spec.step_path)
+        _ensure_reused_display(spec, reuse_tree, progress=progress, logger=logger)
         _produce_declared_mesh_exports(spec, logger=logger, source_tree=reuse_tree)
         return GeneratedStepResult(spec=spec, scene=None, tree=reuse_tree)
     output_kwargs: dict[str, object] = {
@@ -880,6 +886,56 @@ def _generate_step_outputs(
     result = _generate_part_outputs(spec, **output_kwargs)
     _produce_declared_mesh_exports(spec, logger=logger, source_tree=result.tree)
     return result
+
+
+def _ensure_display(tree: str, *, producer: dict | None = None, progress: object | None = None,
+                    logger: CliLogger | None = None) -> None:
+    """Derive here the display data of every part of ``tree`` the store lacks -- its
+    surface, selector table and display mesh (``store.surfaces.ensure_display``) --
+    before the build reports done, so a view of what it built only reads. A part that
+    cannot be derived is a warning on the build, never its failure: a view shows that
+    part as failed. The parts of a child the build composed are normally there
+    already: the child's own job derived them before it reported done."""
+    if not tree:
+        return
+    from contextlib import nullcontext
+
+    from cadgen.store.surfaces import ensure_display
+
+    progress = resolve_progress(progress)
+
+    def counted(done: int, total: int) -> None:
+        if done == 0:
+            progress.phase(PHASE_MESH, total=total)
+        else:
+            progress.advance()
+
+    try:
+        with logger.timed("display data") if logger is not None else nullcontext():
+            failures = ensure_display(tree, producer=producer, progress=counted)
+    except Exception as error:  # noqa: BLE001 - the build's result stands; its display data waits for a view
+        failures = [f"{type(error).__name__}: {error}"]
+    for failure in failures:
+        # stderr: stdout is the result channel, as for a mesh export's warnings.
+        print(f"[cadgen] warning: could not mesh {failure}; views show it as failed", file=sys.stderr)
+
+
+def _ensure_reused_display(spec: EntrySpec, tree: str | None, *, progress: object | None = None,
+                           logger: CliLogger | None = None) -> None:
+    """:func:`_ensure_display` for a build that reuses its tree: the tree its saved
+    document selects, under the producer that document names -- what a view of it
+    reads -- or a mesh-only model's own tree."""
+    producer = None
+    if spec.step_output and spec.entry_path is not None:
+        from cadgen.catalog import result_snapshot_for
+        from cadgen.store.records import document_entry_for_hash
+
+        snapshot = result_snapshot_for(spec.entry_path)
+        if snapshot is None:
+            return
+        document_hash, tree = snapshot
+        producer = (document_entry_for_hash(document_hash) or {}).get("surfaceProducer")
+    _ensure_display(tree or "", producer=producer, progress=progress, logger=logger)
 
 
 def _produce_declared_mesh_exports(
@@ -1209,7 +1265,7 @@ def _run_with_spec_generation_status(
                 _current_source_result(spec, checked_tree)
             _tree_event(spec, "current")
             return _SkippedGeneration(spec, checked_tree)
-        from cadgen.daemon import artifacts, broker
+        from cadgen.daemon import broker
 
         # One running build per core: the body and its emit hold a job slot; the
         # wait for a forced child gives it back (cadgen.store.lazy). `queued` shows
@@ -1221,12 +1277,8 @@ def _run_with_spec_generation_status(
             if on_queued is not None:
                 on_queued()
 
-        # The build's own artifact work -- its declared meshes' surfaces and meshes --
-        # runs in this process under that slot, where the kernel and the store are
-        # already loaded, whichever process runs the build (daemon/artifacts.py).
         waiting_from = time.perf_counter()
-        with broker.held(spec.source_ref, on_queued=queued), \
-                artifacts.worker_context(artifacts.store_path()), settle_child_builds():
+        with broker.held(spec.source_ref, on_queued=queued), settle_child_builds():
             clock.queued = time.perf_counter() - waiting_from
             _tree_event(spec, "building", phase="generate")
             try:
@@ -1519,9 +1571,10 @@ def generate_step_targets(
                 logger.info(
                     f"{_display_path(Path(document)) if document else spec.cad_ref} is current; not rebuilt"
                 )
-                # A current model can still owe declared mesh exports (deleted
-                # file, changed declaration): heal them from the store package
-                # without leaving the no-op path.
+                # A current model can still owe its parts' display data (a cleared
+                # store) and declared mesh exports (deleted file, changed
+                # declaration): heal both without leaving the no-op path.
+                _ensure_reused_display(spec, tree, logger=logger)
                 if _produce_declared_mesh_exports(spec, logger=logger, source_tree=tree):
                     from cadgen.daemon.telemetry import job_reused
 

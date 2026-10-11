@@ -202,25 +202,6 @@ def obsolete_key(key: Any) -> bool:
             and (mesher, payload) != (TESSELLATOR_VERSION, PAYLOAD_VERSION))
 
 
-def parse_key(key: Any) -> tuple[str, float, float] | None:
-    """A valid key's (surface input, chord, angle); None for anything else."""
-    if not valid_key(key):
-        return None
-    match = _KEY.fullmatch(key)
-    return (match[1], struct.unpack(">d", bytes.fromhex(match[2]))[0],
-            struct.unpack(">d", bytes.fromhex(match[3]))[0])
-
-
-def meshable_key(key: Any) -> tuple[str, float, float] | None:
-    """``parse_key`` for a key anything may ask to have meshed: its tolerances within
-    the tessellation policy's bounds, as ``normalize_tessellations`` holds a
-    request's. None for anything else, a valid key outside them included."""
-    parsed = parse_key(key)
-    if parsed is None or tolerance_refusal("chordTolerance", parsed[1], name="chordTolerance") is not None:
-        return None
-    return parsed if tolerance_refusal("angleTolerance", parsed[2], name="angleTolerance") is None else None
-
-
 def valid_key(key: Any) -> bool:
     if not isinstance(key, str) or _KEY.fullmatch(key) is None:
         return False

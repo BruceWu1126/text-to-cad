@@ -183,9 +183,9 @@ if ! (cd "$project" && "$PYTHON" hinge.py && "$PYTHON" hinge_grown.py \
   exit 1
 fi
 
-# Mesh export necessarily materializes source surfaces and tessellations. The
-# browser gate starts with a new store so its first STEP page remains a true
-# cold import/derive path; only this test's private cache is removed.
+# The builds and the mesh export above stored display data. The browser gate
+# starts with a new store so its first STEP page is a true cold import, whose
+# compile derives it; only this test's private cache is removed.
 rm -rf "$CADGEN_CACHE_DIR"
 mkdir -p "$CADGEN_CACHE_DIR"
 

@@ -8,8 +8,8 @@ without it, the plate whole, and each door does its work and names the face it l
 the list counts the pin without it, the view draws the rest, and the STL is written open
 where the face was.
 
-Meshing is build-pool work; here it runs in this process (``daemon.artifacts`` inline), so
-the refusal reaches it.
+The compile meshes every part before it reports done; here it runs in this process
+(``step.compile``), so the refusal reaches it, and every door after it only reads.
 """
 
 from __future__ import annotations
@@ -67,12 +67,13 @@ class UnmeshedFaceTests(unittest.TestCase):
         import cadgen.step as step_door
         import cadgen.stl as stl_door
         from cadgen._internal import occt_mesh
-        from cadgen.daemon import artifacts
 
-        inline = mock.patch.multiple(artifacts, _can_inline=mock.Mock(return_value=True),
-                                     _dispatch=mock.Mock(side_effect=lambda request, _root: artifacts._run_inline(request)))
-        with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}), inline, \
+        with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}), \
                 mock.patch.object(occt_mesh, "_mesh", refusing_the_pins_side(occt_mesh._mesh)):
+            step_door.compile(document)
+        # Each door only reads what the compile stored: none starts a derivation job.
+        with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}), \
+                mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=AssertionError("a door derived")):
             cls.listing = step_door.snapshot(document, mode="list")
             cls.view = step_door.snapshot(document, cls.workspace / "asm.png", width=SIZE[0], height=SIZE[1])
             cls.export = stl_door.build(document, cls.workspace / "asm.stl")

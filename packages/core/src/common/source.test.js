@@ -15,9 +15,9 @@ import { TEST_DISPLAY_TESSELLATION } from "../lib/surf/testing.js";
 // The tolerances cadgen names in a resolved job: its display tolerance.
 const STANDARD = TEST_DISPLAY_TESSELLATION;
 
-// A host's mesh store that records every key probed, and meshes on request what `produce` holds.
-function recordingMeshStore(requested = [], { stored = [], produce = [] } = {}) {
-  const store = memoryMeshProvider(stored, { produce });
+// A host's mesh store that records every key probed.
+function recordingMeshStore(requested = [], { stored = [] } = {}) {
+  const store = memoryMeshProvider(stored);
   const probeMany = store.probeMany;
   store.probeMany = async (keys) => { requested.push(...keys); return probeMany(keys); };
   return store;
@@ -111,39 +111,34 @@ function rollerPackage(extra = {}) {
   } };
 }
 
-test("a package's missing meshes are asked of the host once, then read as stored ones", async (t) => {
+test("a package's meshes are read from the store; one it lacks is an error, never made by the page", async (t) => {
   const oldFetch = globalThis.fetch;
   let fetches = 0;
   globalThis.fetch = async () => { fetches += 1; return new Response(null, { status: 404 }); };
   const requested = [];
-  const store = recordingMeshStore(requested, {
-    produce: [meshFixture("cam_follower_roller").bytes],
-  });
+  const store = recordingMeshStore(requested, { stored: [meshFixture("cam_follower_roller").bytes] });
   setTessellationCacheProvider(store);
   t.after(() => { globalThis.fetch = oldFetch; setTessellationCacheProvider(null); });
-  const coldStages = {};
-  const canonical = await loadSource(rollerPackage(), { stageTimings: coldStages });
-  assert.equal(coldStages.sourceLoad.producedCount, 1, "the display mesh was meshed on request");
-  assert.equal(coldStages.sourceLoad.cacheHitCount, 1);
-  assert.equal(coldStages.sourceLoad.cacheMissCount, 0);
-  for (const stage of ["probeMs", "produceMs", "cacheReadMs", "meshBuildMs"]) {
-    assert.ok(coldStages.sourceLoad[stage] >= 0, stage);
+  const stages = {};
+  const source = await loadSource(rollerPackage(), { stageTimings: stages });
+  assert.ok(source.meshData.indices.length > 0);
+  assert.equal(stages.sourceLoad.cacheHitCount, 1);
+  assert.equal(stages.sourceLoad.cacheMissCount, 0);
+  for (const stage of ["probeMs", "cacheReadMs", "meshBuildMs"]) {
+    assert.ok(stages.sourceLoad[stage] >= 0, stage);
   }
   // Every key it asked for names the display tolerance the job carries.
   const display = tessellationCacheKey("0".repeat(64), STANDARD).slice(64);
   assert.ok(requested.length && requested.every((key) => key.endsWith(display)), JSON.stringify(requested));
-  const warmStages = {};
-  const warm = await loadSource(rollerPackage(), { stageTimings: warmStages });
-  assert.equal(warmStages.sourceLoad.producedCount, undefined, "a stored mesh is asked for nothing");
-  assert.equal(store.counts.produced, 1);
-  assert.equal(warm.meshData.indices.length, canonical.meshData.indices.length);
   assert.equal(fetches, 0, "no SURF is read to draw a package");
+  setTessellationCacheProvider(recordingMeshStore());
+  await assert.rejects(loadSource(rollerPackage()), /component roller has no mesh at this tessellation/);
 });
 
 // A body the store named but did not hand back is read again, alone, before its component is a
 // miss; and one that stays unreadable says so, not that nothing meshed it.
 test("a stored mesh whose batched read fails is read again alone; one that stays unreadable says so", async (t) => {
-  const store = recordingMeshStore([], { produce: [meshFixture("cam_follower_roller").bytes] });
+  const store = recordingMeshStore([], { stored: [meshFixture("cam_follower_roller").bytes] });
   const batch = store.getManyProbed;
   let batches = 0;
   store.getManyProbed = async (rows) => { batches += 1; return batches === 1 ? null : batch(rows); };

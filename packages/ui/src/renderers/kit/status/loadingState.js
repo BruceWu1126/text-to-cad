@@ -12,7 +12,7 @@ function importing(hint) {
 }
 
 // The phases a cadgen build reports (cadgen.coordination.phases); the page emits none of them.
-const BUILD_PHASES = new Set(["generate", "package", "components", "finalize"]);
+const BUILD_PHASES = new Set(["generate", "package", "components", "finalize", "mesh"]);
 
 // Internal phases stay diagnostic data. The screen describes the user's wait. "Reading model" is
 // only ever an actual read of a model the store holds; a wait with nothing more specific to say is

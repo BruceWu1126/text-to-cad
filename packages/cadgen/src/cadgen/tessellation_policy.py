@@ -14,9 +14,10 @@ and so is the choice of tolerances it is made at:
 - **The bounds** (:data:`TESSELLATION_FLOORS`, :data:`TESSELLATION_CEILINGS`):
   the finest and the coarsest a mesh export may ask to have meshed. One rule
   (:func:`tolerance_refusal`) holds them at every door a tolerance enters -- a
-  mesh decorator's argument or a mesh door's flag (``cadgen.metadata``), a store
-  or daemon request (``cadgen.store.meshes``) -- so a request outside them is
-  refused where it enters, in words naming the bound, and never meshed.
+  mesh decorator's argument or a mesh door's flag (``cadgen.metadata``), the mesh
+  export they reach (``cadgen.store.meshes.normalize_tessellations``) -- so a
+  request outside them is refused where it enters, in words naming the bound, and
+  never meshed.
 """
 
 from __future__ import annotations
@@ -31,7 +32,8 @@ __all__ = [
 ]
 
 # The one pair every display mesh is made at: a part 1,000 px across strays half a
-# pixel from its exact surface, and a round edge turns 20 degrees between facets.
+# pixel from its exact surface, and a round edge turns at most 0.35 rad (20 degrees)
+# between facets -- OCCT draws a full circle with 36 facets at it, 10 degrees each.
 DISPLAY_TESSELLATION: dict[str, float] = {"chordTolerance": 5e-4, "angleTolerance": 0.35}
 
 # The finest tolerances anything may ask to have meshed: past any display or print

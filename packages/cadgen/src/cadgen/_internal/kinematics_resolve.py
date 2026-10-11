@@ -62,6 +62,7 @@ def _with_named_entities(index, descriptor: Mapping[str, Any], refs: list[str], 
     from cadgen import cad_ref_syntax as syntax
     from cadgen.assembly_lookup import merge_assembly_entities
     from cadgen.lookup import canonicalize_selector
+    from cadgen.store.surfaces import derive, producer_identity
     from cadgen.store.view import export_view
 
     named: set[str] = set()
@@ -76,6 +77,10 @@ def _with_named_entities(index, descriptor: Mapping[str, Any], refs: list[str], 
     if not rows:
         return index
     cids = list(dict.fromkeys(str(row["component"]).strip() for row in rows))
+    # The build resolving its own kinematics derives, here in its process, whatever
+    # display data of these components the store lacks; the view then only reads.
+    producer = producer or producer_identity()
+    derive(tree_hash, cids, producer=producer)
     view = export_view(tree_hash, producer=producer, cids=cids)
     try:
         return merge_assembly_entities(index, {**descriptor, "occurrences": rows}, view)

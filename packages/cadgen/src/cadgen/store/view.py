@@ -83,9 +83,10 @@ def descriptor_for_view(
     return descriptor
 
 
-def ready_surface_records(tree_hash: str, producer: dict, cids: list[str] | None = None) -> dict:
-    """Available verified SURF derivations, each with its stored selector table
-    (``{cid: {"surface": record, "selectors": record}}``); a miss does no native work."""
+def ready_display_records(tree_hash: str, producer: dict, cids: list[str] | None = None) -> dict:
+    """The display data the store holds for ``cids`` (every component when None),
+    ``{cid: {"surface", "selectors", "mesh"}}`` (``surfaces.display_records``); a
+    component missing any of it is absent. A read: nothing is derived."""
     from cadgen.store import surfaces
 
     descriptor, _ = capture_tree(tree_hash, retain_payloads=False)
@@ -94,33 +95,30 @@ def ready_surface_records(tree_hash: str, producer: dict, cids: list[str] | None
         raise ValueError("surface request names an unpinned component")
     result = {}
     for cid in selected:
-        entry = descriptor["components"][cid]
-        record = surfaces.lookup(entry, producer)
-        table = surfaces.selector_record(entry, producer) if record is not None else None
-        if record is not None and table is not None and table["surfaceObject"] == record["object"]:
-            result[cid] = {"surface": record, "selectors": table}
+        records = surfaces.display_records(descriptor["components"][cid], producer)
+        if records is not None:
+            result[cid] = records
     return result
 
 
 def materialize_view_surfaces(descriptor: dict, cids: list[str] | None = None) -> dict:
-    """Complete an owned static/export view via artifact-only pooled derivation.
+    """Bind an owned static/export view to its components' stored display data.
 
-    ``cids`` limits the work to those components: only they are derived when
-    absent, and only they gain a ``surf``. The rest of the view is unchanged.
-    The absent ones are dealt across the build pool (``artifacts.deal``)."""
-    from cadgen.daemon.artifacts import (
-        SURFACES_PER_STARTED_WORKER, ArtifactJobError, deal, resolve_artifact, resolve_artifacts)
+    ``cids`` limits it to those components: only they gain a ``surf``, and the rest of
+    the view is unchanged. The build that made the tree derived its display data; a
+    component the store lacks it for (a cleared, evicted or older store) is derived by
+    ONE build-pool job for all of them (``kind: display``), never in this process."""
+    from cadgen.daemon.artifacts import ArtifactJobError, resolve_artifact
     from cadgen.store import surfaces
 
     tree = descriptor["tree"]
     producer = surfaces.producer_fields(descriptor["surfaceProducer"])
     wanted = list(descriptor["components"]) if cids is None else list(dict.fromkeys(cids))
-    records = ready_surface_records(tree, producer, wanted)
+    records = ready_display_records(tree, producer, wanted)
     missing = [cid for cid in wanted if cid not in records]
     if missing:
         try:
-            resolve_artifacts([{"kind": "surfaces", "tree": tree, "cids": dealt, "producer": producer}
-                               for dealt in deal(missing, per_started_worker=SURFACES_PER_STARTED_WORKER)])
+            resolve_artifact({"kind": "display", "tree": tree, "cids": missing, "producer": producer})
         except ArtifactJobError as error:
             if not surfaces.producer_unavailable(error):
                 raise
@@ -138,12 +136,12 @@ def materialize_view_surfaces(descriptor: dict, cids: list[str] | None = None) -
                 if entry is not None and entry.get("tree") == tree:
                     note_document_tree(descriptor["documentHash"], tree, surface_producer=current)
             return materialize_view_surfaces(replacement, cids)
-        records = ready_surface_records(tree, producer, wanted)
+        records = ready_display_records(tree, producer, wanted)
     for cid in wanted:
         entry = descriptor["components"][cid]
         record = records.get(cid)
         if record is None or record["surface"]["surfaceInput"] != entry["surfaceInput"]:
-            raise FileNotFoundError("surface derivation disappeared before view publication")
+            raise FileNotFoundError("display data disappeared before view publication")
         entry["surfaceObject"] = record["surface"]["object"]
         entry["surf"] = f"{COMPONENT_DIRNAME}/{cid}.surf"
         entry["selectorObject"] = record["selectors"]["object"]
@@ -239,8 +237,10 @@ def view_dir_for(tree_hash: str, *, producer: dict | None = None, document_hash:
     view_key = (descriptor["viewId"], document_hash)
     with _VIEW_LOCK:
         existing = _VIEW_DIRS.get(view_key)
-        if existing is not None and (existing / DESCRIPTOR_NAME).is_file():
-            return existing
+    # The directory holds copies of the surfaces and tables; its readers take the display
+    # meshes from the store, so a mesh evicted since it was written binds it again.
+    if existing is not None and (existing / DESCRIPTOR_NAME).is_file() and _meshes_stored(descriptor):
+        return existing
     # Never hold a process-wide view lock while waiting for pooled native work.
     descriptor = materialize_view_surfaces(descriptor)
     view_key = (descriptor["viewId"], document_hash)
@@ -255,6 +255,13 @@ def view_dir_for(tree_hash: str, *, producer: dict | None = None, document_hash:
         _write_view(descriptor, target)
         _VIEW_DIRS[view_key] = target
         return target
+
+
+def _meshes_stored(descriptor: dict) -> bool:
+    from cadgen.store import meshes
+
+    return all(meshes.probe(meshes.tessellation_key(entry["surfaceInput"])) is not None
+               for entry in descriptor["components"].values())
 
 
 def export_view(

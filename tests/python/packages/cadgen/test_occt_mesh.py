@@ -133,28 +133,25 @@ class ARequestOutlivesOneComponent(unittest.TestCase):
             named = r"^component [0-9a-f]{16}: ValueError: invalid tessellation JSON length$"
             with mock.patch.object(occt_mesh, "mesh_component", side_effect=mesher), \
                     self.assertRaisesRegex(occt_mesh.MeshProductionError, named):
-                surfaces.derive(tree, producer=producer,
-                                tessellations=[{"chordTolerance": CHORD, "angleTolerance": ANGLE}])
+                surfaces.derive(tree, producer=producer)
             inputs = [surfaces.lookup(entry, producer)["surfaceInput"] for entry in geometry["components"].values()]
             others = {surface_input: surface_input != failed[0] for surface_input in inputs}
 
-            def stored(chord, angle):
-                return {surface_input: meshes.probe(meshes.tessellation_key(surface_input, chord, angle)) is not None
+            def stored():
+                return {surface_input: meshes.probe(meshes.tessellation_key(surface_input)) is not None
                         for surface_input in inputs}
 
-            self.assertEqual(stored(CHORD, ANGLE), others,
+            self.assertEqual(stored(), others,
                              "the other component was meshed and stored before the failure was reported")
-            # A request that names mesh keys, as the snapshot host's does, outlives it the same way.
-            keys = sorted((meshes.tessellation_key(surface_input, 5e-4, ANGLE) for surface_input in inputs),
-                          key=lambda key: not key.startswith(failed[0]))
-            with mock.patch.object(occt_mesh, "mesh_component", side_effect=mesher), \
-                    self.assertRaisesRegex(occt_mesh.MeshProductionError, named):
-                surfaces.produce_meshes(keys)
-            self.assertEqual(stored(5e-4, ANGLE), others)
+            # A build's derivation names the part it could not mesh, and fails nothing.
+            with mock.patch.object(occt_mesh, "mesh_component", side_effect=mesher):
+                [failure] = surfaces.ensure_display(tree, producer=producer)
+            self.assertRegex(failure, r"^part [0-9a-f]{16}: MeshProductionError: ValueError: invalid tessellation JSON length$")
+            self.assertEqual(stored(), others)
             # An interrupt is not a component's failure.
             with mock.patch.object(occt_mesh, "mesh_component", side_effect=KeyboardInterrupt), \
                     self.assertRaises(KeyboardInterrupt):
-                surfaces.produce_meshes([meshes.tessellation_key(failed[0], 2e-3, 1.4)])
+                surfaces.ensure_display(tree, producer=producer)
 
 
 if __name__ == "__main__":

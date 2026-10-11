@@ -1,4 +1,5 @@
-"""Artifact-only surface derivation from captured immutable geometry inputs."""
+"""A component's display data -- its surface, selector table and display mesh -- derived
+from captured immutable geometry inputs, and read back."""
 from __future__ import annotations
 
 import contextlib
@@ -9,7 +10,6 @@ from functools import lru_cache
 from typing import Any, Callable
 
 from cadgen.store.index import read_entry, write_entry
-from cadgen.store.meshes import normalize_tessellations
 from cadgen.store.objects import put_object, read_verified_object
 
 # 20: a .surf carries no tessellation inputs (SURF format 3).
@@ -212,20 +212,38 @@ def lookup(entry: dict, producer: dict) -> dict | None:
     return actual
 
 
-def mesh_records(entry: dict, producer: dict, tessellations) -> dict[str, dict | None]:
-    """The stored mesh index record of each tessellation of one component, None where absent."""
-    from cadgen.store import meshes
+def display_records(entry: dict, producer: dict) -> dict | None:
+    """One component's display data as the store holds it -- its verified surface record,
+    selector table and display mesh (``{"surface", "selectors", "mesh"}``) -- or None
+    while any is missing. A read: nothing is derived."""
+    from cadgen.store import meshes, selectors
 
-    surface_key = surface_input(entry, producer)
-    return {key: meshes.probe(key) for key in
-            (meshes.tessellation_key(surface_key, chord, angle) for chord, angle in normalize_tessellations(tessellations))}
+    surface = lookup(entry, producer)
+    if surface is None:
+        return None
+    table = selectors.probe(selectors.selector_key(surface["surfaceInput"]))
+    mesh = meshes.probe(meshes.tessellation_key(surface["surfaceInput"]))
+    if table is None or mesh is None or table["surfaceObject"] != surface["object"]:
+        return None
+    return {"surface": surface, "selectors": table, "mesh": mesh}
 
 
-def selector_record(entry: dict, producer: dict) -> dict | None:
-    """The stored selector-table index record of one component, None while absent."""
-    from cadgen.store import selectors
+def _display_stored(entry: dict, producer: dict) -> bool:
+    """Whether the store holds the component's display data: its surface entry and
+    object, the selector table bound to that object, and the display mesh. Probes
+    only, with no body read and no kernel import: a view verifies what it serves
+    (``display_records``) and has derived again what does not verify."""
+    from cadgen.store import meshes, selectors
+    from cadgen.store.objects import is_object_hash, object_path
 
-    return selectors.probe(selectors.selector_key(surface_input(entry, producer)))
+    key = surface_input(entry, producer)
+    surface = read_entry("surface", key)
+    digest = surface.get("object") if type(surface) is dict else None
+    if not is_object_hash(digest) or not object_path(digest).is_file():
+        return False
+    table = selectors.probe(selectors.selector_key(key))
+    return (table is not None and table["surfaceObject"] == digest
+            and meshes.probe(meshes.tessellation_key(key)) is not None)
 
 
 @contextlib.contextmanager
@@ -241,36 +259,35 @@ def _meshing():
         raise MeshProductionError(f"{type(error).__name__}: {error}") from error
 
 
-def _derive_meshes(entry: dict, surface: dict, tessellations: list[tuple[float, float]],
-                   keep_going: Callable[[], bool] | None) -> bool:
-    """Mesh one component at each missing tessellation; False when told to stop.
-
-    Any failure to mesh it -- reading its SURF or BREP, OCCT, the body's encoding,
-    its write -- is a ``MeshProductionError`` (``_meshing``); ``keep_going``'s stop
-    is not a failure, and its own error is the job's."""
+def _mesh_body(entry: dict, surface: dict, chord: float, angle: float) -> bytes:
+    """The component's GLB body at ``chord``/``angle``, from its stored surface and
+    BREP. Meshing stores its triangulation on the shape, so it meshes a fresh private
+    decode. Any failure -- reading the SURF or BREP, OCCT, the body's encoding -- is
+    a ``MeshProductionError`` (``_meshing``)."""
     from cadgen._internal.component_package import decode_display_shape
     from cadgen._internal.occt_mesh import mesh_component
     from cadgen._internal.surf_container import read_surf
-    from cadgen.store import meshes
 
-    surface_key = surface["surfaceInput"]
-    missing = [(chord, angle) for chord, angle in tessellations
-               if meshes.probe(meshes.tessellation_key(surface_key, chord, angle)) is None]
-    if not missing:
-        return True
     with _meshing():
         index, _floats = read_surf(read_verified_object(surface["object"]))
-        payload = read_verified_object(entry["brep"])
-    for chord, angle in missing:
-        if keep_going is not None and not keep_going():
-            return False
-        with _meshing():
-            # Meshing stores its triangulation on the shape: each tessellation meshes
-            # a fresh private decode, so no level depends on another having run.
-            shape = decode_display_shape(entry, payload, native=True)
-            body = mesh_component(getattr(shape, "wrapped", shape), index, surface_input=surface_key,
-                                  surface_object=surface["object"], chord=chord, angle=angle)
-            meshes.write(meshes.tessellation_key(surface_key, chord, angle), body)
+        shape = decode_display_shape(entry, read_verified_object(entry["brep"]), native=True)
+        return mesh_component(getattr(shape, "wrapped", shape), index, surface_input=surface["surfaceInput"],
+                              surface_object=surface["object"], chord=chord, angle=angle)
+
+
+def _derive_mesh(entry: dict, surface: dict, keep_going: Callable[[], bool] | None) -> bool:
+    """Store the component's display mesh when the store lacks it; False when told to
+    stop first. ``keep_going``'s stop is not a failure, and its own error is the job's."""
+    from cadgen.store import meshes
+
+    key = meshes.tessellation_key(surface["surfaceInput"])
+    if meshes.probe(key) is not None:
+        return True
+    if keep_going is not None and not keep_going():
+        return False
+    body = _mesh_body(entry, surface, meshes.DISPLAY_CHORD, meshes.DISPLAY_ANGLE)
+    with _meshing():
+        meshes.write(key, body)
     return True
 
 
@@ -307,129 +324,139 @@ def _geometry_entry(surface: dict) -> dict:
     return entry
 
 
-def produce_meshes(keys: list[str], *, keep_going: Callable[[], bool] | None = None) -> dict[str, dict | None]:
-    """Each tessellation key's mesh index record, meshing the keys the store lacks.
+def mesh_at(surface_key: str, chord: float, angle: float) -> bytes:
+    """The GLB body of the component whose surface ``surface_key`` names, at
+    ``chord``/``angle``, meshed in this process and stored nowhere: a mesh export at a
+    tolerance other than the display one (``_internal/mesh_export.py``), whose file is
+    the output. The surface record names the BREP it was derived from, so no tree is read."""
+    surface = read_entry("surface", surface_key)
+    validate_surface_record(surface, surface_input_key=surface_key)
+    return _mesh_body(_geometry_entry(surface), surface, chord, angle)
 
-    A key names its surface input, and the surface record that input indexes
-    names the BREP it was derived from: all meshing needs, with no tree. A key
-    whose surface the store does not hold (never derived, or reclaimed), or
-    that asks for tolerances finer than any request may, answers None. A key
-    whose component fails to mesh, however it fails, is reported
-    (``MeshProductionError``, naming each) once every other key is done.
-    """
-    from cadgen._internal.occt_mesh import MeshProductionError
-    from cadgen.store import meshes
 
-    result: dict[str, dict | None] = {}
-    unmeshed: list[str] = []
-    for key in keys:
-        record = meshes.probe(key)
-        parsed = meshes.meshable_key(key) if record is None else None
-        if parsed is not None:
-            surface_key, chord, angle = parsed
-            surface = read_entry("surface", surface_key)
-            try:
-                validate_surface_record(surface, surface_input_key=surface_key)
-            except (OSError, ValueError, TypeError, KeyError, struct.error):
-                surface = None
-            if surface is not None:
-                try:
-                    if not _derive_meshes(_geometry_entry(surface), surface, [(chord, angle)], keep_going):
-                        break
-                except MeshProductionError as error:
-                    unmeshed.append(f"component {surface['component'][:16]}: {error}")
-                record = meshes.probe(key)
-        result[key] = record
-    if unmeshed:
-        raise MeshProductionError("; ".join(unmeshed))
-    return result
+def _derive_component(entry: dict, producer: dict, *, force: bool = False, expected_object: str | None = None,
+                      keep_going: Callable[[], bool] | None = None) -> dict | None:
+    """Store whatever of one component's display data the store lacks -- its surface,
+    selector table and display mesh -- and return its surface record; None when
+    ``keep_going`` said stop. A failure of its table or mesh is the
+    ``MeshProductionError`` naming it."""
+    from cadgen._internal.component_package import decode_geometry_component
+    from cadgen._internal.surface_extract import extract_surface_component
+
+    expected = _expected(entry, producer)
+    prior = lookup(entry, producer)
+    if expected_object is None and force and prior is not None:
+        expected_object = prior["object"]
+    shape = None
+    if entry["kind"] == "eager-only":
+        payload = read_verified_object(entry["eagerSurface"])
+        validate_surface_bytes(payload)
+        actual = {**expected, "object": entry["eagerSurface"]}
+    else:
+        actual = None if force else prior
+        if actual is None:
+            if keep_going is not None and not keep_going():
+                return None
+            shape = decode_geometry_component(entry, read_verified_object(entry["brep"]), native=True)
+            payload = extract_surface_component(shape.wrapped, face_colors=shape.cad_face_ordinal_colors)
+            validate_surface_bytes(payload)
+            digest = hashlib.sha256(payload).hexdigest()
+            if expected_object is not None and digest != expected_object:
+                raise ValueError("surface producer conflict for the pinned input")
+            actual = {**expected, "object": put_object(payload, repair=True)}
+    if expected_object is not None and actual["object"] != expected_object:
+        raise ValueError("surface producer conflict for the pinned input")
+    # The complete verified object is durable first; failure earlier cannot
+    # create a readiness marker. Concurrent writers derive identical bytes.
+    # A hit is a read and writes nothing (STORE.md §8).
+    if actual != prior:
+        write_entry("surface", expected["surfaceInput"], actual)
+    _derive_selectors(entry, actual, shape=shape)
+    return actual if _derive_mesh(entry, actual, keep_going) else None
+
+
+def _captured(tree_hash: str, producer: dict | None) -> tuple[dict, dict]:
+    """The tree's verified component map, and the producer named (this runtime's when None)."""
+    from cadgen.store.trees import capture_tree as capture
+
+    # Surface work admits only a complete verified geometry graph, but retains none
+    # of its BREPs: each derivation reads the exact CAS payload it decodes.
+    descriptor, _ = capture(tree_hash, retain_payloads=False)
+    return descriptor["components"], producer_identity() if producer is None else producer_fields(producer)
 
 
 def derive(tree_hash: str, cids: list[str] | None = None, *, force: bool = False,
            expected_objects: dict[str, str] | None = None, producer: dict | None = None,
-           keep_going: Callable[[], bool] | None = None, tessellations: Any = None) -> dict:
-    """Derive the surfaces of ``cids`` (every component when None) and return their records.
-
-    Each surface is stored with the component's selector table
-    (``cadgen.store.selectors``): the refs, facts and connected sets the page and the
-    CLI resolve a pick by, minted here once from the exact BREP.
-    ``tessellations`` (``[{chordTolerance, angleTolerance}, ...]``) also meshes each
-    component at every tolerance it is missing, into the store's mesh entries
-    (``cadgen.store.meshes``): what the CAD Viewer, snapshots and mesh exports draw.
+           keep_going: Callable[[], bool] | None = None) -> dict:
+    """Derive the display data of ``cids`` (every component when None) in this process
+    and return their surface records: each component's surface, its selector table
+    (``cadgen.store.selectors``: the refs, facts and connected sets the page and the CLI
+    resolve a pick by, minted here once from the exact BREP) and its mesh at the display
+    tolerance (``cadgen.store.meshes``: what the CAD Viewer, snapshots and display-tolerance
+    mesh exports draw), each where the store lacks it.
 
     ``keep_going``, when given, is asked before each extraction and each mesh: False stops
     there, and the result holds the components done so far (a daemon worker asks whether
-    anyone still wants its job, ``daemon/worker.py``). A component whose mesh fails, however
-    it fails, does not stop the others: they are stored, then ``MeshProductionError`` names
-    each failure (the component, and the error's type and message).
+    anyone still wants its job, ``daemon/worker.py``). A component whose table or mesh
+    fails, however it fails, does not stop the others: they are stored, then
+    ``MeshProductionError`` names each failure (the component, and the error's type and
+    message).
     """
-    tessellations = normalize_tessellations(tessellations)
-    from cadgen.store.trees import capture_tree as capture
-    from cadgen._internal.component_package import decode_geometry_component
-    from cadgen._internal.surface_extract import extract_surface_component
-
-    # Surface work still admits only a complete verified geometry graph. It
-    # does not need to retain every BREP in that graph when the request names a
-    # bounded CID subset: metadata capture verifies the whole closure, then an
-    # extraction reads the exact selected CAS payload immediately before decode.
-    # This keeps capture_tree()'s native-owner contract unchanged for consumers
-    # that actually materialize the complete graph.
-    descriptor, _ = capture(tree_hash, retain_payloads=False)
-    producer = producer_identity() if producer is None else producer_fields(producer)
-    if producer != producer_identity():
-        raise SurfaceProducerUnavailable()
-    requested = list(descriptor["components"]) if cids is None else list(dict.fromkeys(cids))
-    if any(cid not in descriptor["components"] for cid in requested):
-        raise ValueError("surface request names an unpinned component")
     from cadgen._internal.occt_mesh import MeshProductionError
 
+    components, producer = _captured(tree_hash, producer)
+    if producer != producer_identity():
+        raise SurfaceProducerUnavailable()
+    requested = list(components) if cids is None else list(dict.fromkeys(cids))
+    if any(cid not in components for cid in requested):
+        raise ValueError("surface request names an unpinned component")
     result, unmeshed = {}, []
     for cid in requested:
-        entry = descriptor["components"][cid]
-        expected = _expected(entry, producer)
-        prior = lookup(entry, producer)
-        expected_object = (expected_objects or {}).get(expected["surfaceInput"])
-        if expected_object is None and force and prior is not None:
-            expected_object = prior["object"]
-        shape = None
-        if entry["kind"] == "eager-only":
-            payload = read_verified_object(entry["eagerSurface"])
-            validate_surface_bytes(payload)
-            actual = {**expected, "object": entry["eagerSurface"]}
-        else:
-            actual = None if force else prior
-            if actual is None:
-                if keep_going is not None and not keep_going():
-                    break
-                shape = decode_geometry_component(entry, read_verified_object(entry["brep"]), native=True)
-                payload = extract_surface_component(shape.wrapped, face_colors=shape.cad_face_ordinal_colors)
-                validate_surface_bytes(payload)
-                digest = hashlib.sha256(payload).hexdigest()
-                if expected_object is not None and digest != expected_object:
-                    raise ValueError("surface producer conflict for the pinned input")
-                actual = {**expected, "object": put_object(payload, repair=True)}
-        if expected_object is not None and actual["object"] != expected_object:
-            raise ValueError("surface producer conflict for the pinned input")
-        # The complete verified object is durable first; failure earlier cannot
-        # create a readiness marker. Concurrent writers derive identical bytes.
-        # A hit is a read and writes nothing (STORE.md §8).
-        if actual != prior:
-            write_entry("surface", expected["surfaceInput"], actual)
+        entry = components[cid]
         try:
-            _derive_selectors(entry, actual, shape=shape)
-            meshed = not tessellations or _derive_meshes(entry, actual, tessellations, keep_going)
+            actual = _derive_component(entry, producer, force=force, keep_going=keep_going,
+                                       expected_object=(expected_objects or {}).get(surface_input(entry, producer)))
         except MeshProductionError as error:
-            # One component's mesh failing, whatever failed (``_meshing``), leaves the rest
-            # of the request to be done: they are stored before the failure is reported,
-            # so a retry finds them.
+            # One component's failure leaves the rest of the request to be done: they are
+            # stored before the failure is reported, so a retry finds them.
             unmeshed.append(f"component {cid}: {error}")
             continue
-        if not meshed:
+        if actual is None:
             break
         result[cid] = actual
     if unmeshed:
         raise MeshProductionError("; ".join(unmeshed))
     return result
+
+
+def ensure_display(tree_hash: str, *, producer: dict | None = None,
+                   progress: Callable[[int, int], None] | None = None) -> list[str]:
+    """Derive in this process the display data of every component of ``tree_hash`` the
+    store lacks, and return a line for each component that could not be derived, naming
+    it and its error. A build does this before it reports done
+    (``_internal/generation.py``), so a view of what it built only reads.
+
+    Which components lack it is asked of the store alone (``_display_stored``): a tree
+    whose display data is all stored imports no kernel. ``producer`` is the one a view of
+    the tree selects (its document's), this runtime's when None. ``progress(done, total)``
+    hears how many of the missing components are done, before each one and at the end."""
+    components, producer = _captured(tree_hash, producer)
+    missing = [cid for cid, entry in components.items() if not _display_stored(entry, producer)]
+    if not missing:
+        return []
+    if producer != producer_identity():
+        raise SurfaceProducerUnavailable()
+    failures = []
+    for done, cid in enumerate(missing):
+        if progress is not None:
+            progress(done, len(missing))
+        try:
+            _derive_component(components[cid], producer)
+        except Exception as error:  # noqa: BLE001 - one part's failure is reported, the rest derive
+            failures.append(f"part {cid}: {type(error).__name__}: {error}")
+    if progress is not None:
+        progress(len(missing), len(missing))
+    return failures
 
 
 def validate_surface_record(value: Any, *, surface_input_key: str | None = None) -> None:

@@ -1338,9 +1338,9 @@ def route_file(pathname: str, prefix: str, root: Path) -> Path:
 # exports do (immutable objects plus index/mesh; codec and key scheme in
 # cadgen/store/meshes.py and packages/core/src/lib/surf/tessellationCache.js).
 # The page cannot touch the filesystem, so the host serves the store: a probe
-# names what exists, GET /__tess_cache/<key>.glb and the batch route read
-# exact objects, and POST /__tess_cache/produce has cadgen mesh, here, any
-# component the probe found missing. The page never tessellates.
+# names what exists, and GET /__tess_cache/<key>.glb and the batch route read
+# exact objects: the display meshes the build derived, or the view's one
+# build-pool job derived before the page opened. The page never tessellates.
 #
 # TRANSPORT: bulk bytes must NOT go through Playwright at all. CDP serializes
 # every fulfilled body as base64 over the devtools pipe at ~20 MB/s, which made
@@ -1394,7 +1394,6 @@ def read_tessellation_cache_entry(pathname: str, *, expected_object=None, max_by
 # TESB container frames the bodies; store.tess_cache owns both hosts' framing.
 TESS_CACHE_BATCH_PATH = "/__tess_cache/batch"
 TESS_CACHE_PROBE_PATH = "/__tess_cache/probe"
-TESS_CACHE_PRODUCE_PATH = "/__tess_cache/produce"
 
 
 def read_tessellation_cache_batch(body: bytes | None) -> bytes | None:
@@ -1594,7 +1593,7 @@ class SnapshotAssetServer:
                     self.close_connection = True
                     self._send(400)
                     return
-                if pathname not in (TESS_CACHE_PROBE_PATH, TESS_CACHE_BATCH_PATH, TESS_CACHE_PRODUCE_PATH):
+                if pathname not in (TESS_CACHE_PROBE_PATH, TESS_CACHE_BATCH_PATH):
                     self.close_connection = True
                     self._send(405, b"the store's meshes are read-only here", "text/plain; charset=utf-8")
                     return
@@ -1612,24 +1611,11 @@ class SnapshotAssetServer:
                         return
                     self._send(200, json.dumps(result, separators=(",", ":")).encode(), "application/json")
                     return
-                if pathname == TESS_CACHE_BATCH_PATH:
-                    batch = read_tessellation_cache_batch(body)
-                    if batch is None:
-                        self._send(400, b"bad batch request", "text/plain; charset=utf-8")
-                        return
-                    self._send(200, batch)
+                batch = read_tessellation_cache_batch(body)
+                if batch is None:
+                    self._send(400, b"bad batch request", "text/plain; charset=utf-8")
                     return
-                from cadgen.store.tess_cache import produce_tess_cache
-
-                try:
-                    result = produce_tess_cache(body)
-                except Exception as exc:  # noqa: BLE001 - the page reports why a mesh is missing
-                    self._send(500, f"cadgen could not mesh a component: {exc}".encode(), "text/plain; charset=utf-8")
-                    return
-                if result is None:
-                    self._send(400, b"bad tessellation produce request")
-                    return
-                self._send(200, json.dumps(result, separators=(",", ":")).encode(), "application/json")
+                self._send(200, batch)
 
         class Server(http.server.ThreadingHTTPServer):
             def server_bind(self) -> None:
@@ -2079,10 +2065,10 @@ def _browser_stage_timings(value: object) -> dict[str, object]:
     source_load = value.get("sourceLoad")
     if is_plain_object(source_load):
         measured = durations(source_load, (
-            "probeMs", "produceMs", "cacheReadMs", "cacheDecodeMs", "meshBuildMs",
+            "probeMs", "cacheReadMs", "cacheDecodeMs", "meshBuildMs",
             "meshReadMs", "composeMs",
         ))
-        for name in ("componentCount", "producedCount", "cacheBatchCount", "cacheHitCount", "cacheMissCount"):
+        for name in ("componentCount", "cacheBatchCount", "cacheHitCount", "cacheMissCount"):
             count = source_load.get(name)
             if type(count) is int and 0 <= count <= 2**53 - 1:
                 measured[name] = count

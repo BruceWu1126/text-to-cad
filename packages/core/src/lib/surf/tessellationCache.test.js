@@ -518,46 +518,6 @@ test("probes and reads accept only entries bound to the requested L", async (t) 
   assert.equal(await tessellationCache.getCachedEntryBytes(D2, Q), null);
 });
 
-test("a host that meshes on request answers what a probe found missing, as a probe would", async (t) => {
-  t.after(() => setTessellationCacheProvider(null));
-  const stored = encodedEntry();
-  const made = encodedEntry({ surfaceInput: D2 });
-  const provider = memoryMeshProvider([stored], { produce: [made] });
-  setTessellationCacheProvider(provider);
-  const probed = await tessellationCache.probeCachedTessellationEntries([D, D2], Q);
-  assert.deepEqual([...probed.keys()], [D]);
-  const produced = await tessellationCache.produceTessellationEntries([D2], Q);
-  assert.deepEqual([...produced.keys()], [D2]);
-  assert.equal(provider.counts.produced, 1);
-  const bytes = await tessellationCache.getCachedEntryBytes(D2, Q, { probe: produced.get(D2), strictProbe: true });
-  assert.deepEqual(bytes, made, "the produced mesh reads as a stored one");
-  const unknown = "33".repeat(32);
-  assert.deepEqual([...(await tessellationCache.produceTessellationEntries([unknown], Q)).keys()], [],
-    "a mesh the host cannot make stays missing");
-
-  // A host that only reads (the viewer) offers no produce request: nothing is asked.
-  setTessellationCacheProvider(memoryMeshProvider([stored]));
-  assert.equal((await tessellationCache.produceTessellationEntries([D2], Q)).size, 0);
-});
-
-test("an HTTP produce request names its keys, and a refusal is an error with the host's reason", async () => {
-  const entry = encodedEntry();
-  const row = probeRowFor(entry);
-  const key = tessellationCacheKey(D, Q);
-  const calls = [];
-  let answer = new Response(JSON.stringify({ entries: { [key]: row } }), { status: 200 });
-  const provider = createHttpTessellationCacheProvider({
-    origin: "http://snapshot.test", produceUrl: "http://snapshot.test/__tess_cache/produce",
-    fetch: async (url, options) => { calls.push({ url: String(url), body: JSON.parse(options.body) }); return answer; },
-  });
-  assert.deepEqual(await provider.produceMany([key]), [row]);
-  assert.deepEqual(calls, [{ url: "http://snapshot.test/__tess_cache/produce", body: { tessellationInputs: [key] } }]);
-  answer = new Response("cadgen could not mesh a component: OCCT did not mesh 1 face(s)", { status: 500 });
-  await assert.rejects(provider.produceMany([key]), /OCCT did not mesh 1 face/);
-  assert.equal(createHttpTessellationCacheProvider({ origin: "http://viewer.test" }).produceMany, undefined,
-    "a provider names a produce route only where its host serves one");
-});
-
 test("a vanished probed body is an explicit retry boundary only when requested", async (t) => {
   t.after(() => setTessellationCacheProvider(null));
   const entry = encodedEntry();

@@ -116,8 +116,8 @@ class DegenerateComponents(unittest.TestCase):
             tree, geometry, _ = build_tree_from_compound(
                 Compound(children=[Box(4, 4, 4), Vertex(10, 0, 0), Pos(20, 0, 0) * Cylinder(2, 4)]), root_name="trio")
             producer = surfaces.producer_identity()
-            surfaces.derive(tree, producer=producer, tessellations=[{"chordTolerance": CHORD, "angleTolerance": ANGLE}])
-            stored = [meshes.probe(meshes.tessellation_key(surfaces.lookup(entry, producer)["surfaceInput"], CHORD, ANGLE))
+            surfaces.derive(tree, producer=producer)
+            stored = [meshes.probe(meshes.tessellation_key(surfaces.lookup(entry, producer)["surfaceInput"]))
                       is not None for entry in geometry["components"].values()]
         self.assertEqual(stored, [True, True, True])
 

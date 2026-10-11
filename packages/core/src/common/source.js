@@ -205,16 +205,6 @@ async function loadPackageMeshData(packageInfo, tessellation = null, diagnostics
     const surfaceObject = String(components[cid]?.surfaceObject || "");
     return probe && (!surfaceObject || probe.surfaceObject === surfaceObject) ? probe : null;
   };
-  // cadgen produces every mesh. A host that meshes on request (the snapshot
-  // host) is asked once for every mesh the probe did not find.
-  const unprobed = [...new Set(cids.filter((cid) => !usable(cid)).map(inputOf))];
-  if (unprobed.length && tessellationCache?.produceTessellationEntries) {
-    const produceStarted = performance.now();
-    const produced = await tessellationCache.produceTessellationEntries(unprobed, tessellation);
-    for (const [surfaceInput, row] of produced) probes.set(surfaceInput, row);
-    measure("produceMs", produceStarted);
-    if (diagnostics) diagnostics.producedCount = produced.size;
-  }
   const misses = [];
 
   // Probe metadata is tiny. Full bodies are fetched only in admitted TESB

@@ -3,13 +3,14 @@
 Every mesh serialization (STL/3MF/GLB) — a `@stl`/`@glb`/`@threemf`
 declaration produced by a model-script run, or an ad-hoc `cadgen stl|3mf|glb
 build` — funnels through :func:`run_mesh_exporter`, so the front doors cannot
-drift: the document's tree, the store's mesh of each component at each distinct
-tolerance pair, and every format serialized from those same meshes
+drift: the document's tree, OCCT's mesh of each component's exact BREP at each
+distinct tolerance pair, and every format serialized from those same meshes
 (``cadgen._internal.mesh_formats``; a clip's keys go in as glTF animation by
 ``cadgen._internal.glb_animation``, a bending tube as a skin by
-``cadgen._internal.tube_skin``). The meshes are OCCT's, of each component's
-exact BREP, derived in the build pool when the store lacks them -- the ones the
-CAD Viewer and snapshots draw. Nothing here spawns a process of its own.
+``cadgen._internal.tube_skin``). At the display tolerance the meshes are the
+store's, the ones the CAD Viewer and snapshots draw; at any other they are made
+here and kept nowhere (:func:`stored_meshes`). Nothing here spawns a process of
+its own.
 
 Freshness rides content-keyed records in the store's ``index/mesh`` tier: a
 record is keyed by the
@@ -94,11 +95,10 @@ def run_mesh_exporter(
 ) -> dict:
     """STL/3MF/GLB through the ONE mesh path.
 
-    Every job is served from the store's mesh of each component at its tolerance
-    pair -- chord RELATIVE to each component's bounding diagonal, angle in radians --
-    derived ONCE per distinct pair, in one build-pool job, for whatever the store
-    lacks. Each occurrence's placement is baked in, colours carry per
-    face/occurrence/part, and the bytes are deterministic.
+    Every job is served from each component's mesh at its tolerance pair -- chord
+    RELATIVE to each component's bounding diagonal, angle in radians -- made ONCE per
+    distinct pair (:func:`stored_meshes`). Each occurrence's placement is baked in,
+    colours carry per face/occurrence/part, and the bytes are deterministic.
 
     ``appearance`` is the document sidecar's, applied to a private projection of
     the tree. ``animation_source`` captures the DOCUMENT sidecar's ``animation``
@@ -304,81 +304,51 @@ def _loaded_producer() -> dict | None:
         return None
 
 
-def _export_view(source: MeshSource, producer: dict | None, appearance: object) -> dict:
+def _export_view(source: MeshSource, producer: dict | None) -> dict:
     from cadgen.store.view import descriptor_for_view
 
     descriptor = descriptor_for_view(source.tree, producer=producer, document_hash=source.document_hash)
     if descriptor is None:
         raise FileNotFoundError(f"mesh export: geometry tree missing or unreadable: {source.tree}")
+    return descriptor
+
+
+def stored_meshes(source: MeshSource, pairs: list, appearance: object,
+                  components: "list[str] | None" = None) -> "tuple[dict, dict]":
+    """The export's descriptor, and the GLB body of every placed component (or only
+    ``components``) at every pair, ``{(cid, pair): bytes}``.
+
+    At the display tolerance a body is the stored display mesh the viewer draws: the
+    view binds the descriptor to the components' display data, which the build that
+    made the tree derived (and one build-pool job derives for a component the store
+    lacks it for, ``store.view.materialize_view_surfaces``). At any other tolerance
+    the component is meshed here, from its stored surface and BREP, and the body is
+    stored nowhere: the export's file is the output."""
+    from cadgen.store import meshes, surfaces
+    from cadgen.store.view import materialize_view_surfaces
+
+    descriptor = _export_view(source, _loaded_producer())
+    used = components if components is not None else _used_components(descriptor)
+    descriptor = materialize_view_surfaces(descriptor, used)
+    display = (meshes.DISPLAY_CHORD, meshes.DISPLAY_ANGLE)
+    bodies = {}
+    for cid in used:
+        surface_key = descriptor["components"][cid]["surfaceInput"]
+        for chord, angle in pairs:
+            if (chord, angle) == display:
+                payload = meshes.read(meshes.tessellation_key(surface_key))
+                if payload is None:
+                    raise RuntimeError(f"mesh export failed: component {cid} has no stored display mesh")
+            else:
+                payload = surfaces.mesh_at(surface_key, chord, angle)
+            bodies[(cid, (chord, angle))] = payload
     if appearance is not None:
         from cadgen._internal.source_sidecar import apply_appearance
 
         # A private projection: immutable store objects and the component
         # meshes' identities stay unchanged.
         descriptor = apply_appearance(descriptor, appearance)
-    return descriptor
-
-
-def stored_meshes(source: MeshSource, pairs: list, appearance: object,
-                  components: "list[str] | None" = None) -> "tuple[dict, dict]":
-    """The export's descriptor, and the stored GLB body of every placed component
-    (or only ``components``) at every pair, ``{(cid, pair): bytes}``.
-
-    What the store lacks is derived by build-pool jobs (``surfaces.derive`` with
-    every pair: SURF where missing, then OCCT's mesh at each tolerance), the
-    missing components dealt across the pool (``artifacts.deal``) as a view's
-    are: one job did them one after another, half a cold export's wall time on
-    moonwatch. A model build exporting its own outputs derives them in its own
-    process, where the kernel is loaded, and deals to the pool only the shares
-    past the first that repay starting a worker: a pool job there cost a cold
-    box 2.6 s of kernel import for 0.03 s of work. A pinned producer this runtime
-    cannot implement is replaced by the current one, once, as the views do
-    (``store.view.materialize_view_surfaces``)."""
-    from cadgen.daemon.artifacts import (
-        SURFACES_PER_STARTED_WORKER, ArtifactJobError, deal, resolve_artifact, resolve_artifacts)
-    from cadgen.store import meshes, surfaces
-
-    descriptor = _export_view(source, _loaded_producer(), appearance)
-    tessellations = [{"chordTolerance": chord, "angleTolerance": angle} for chord, angle in pairs]
-    replaced = False
-    while True:
-        placed = descriptor["components"]
-        keys = {
-            (cid, pair): meshes.tessellation_key(placed[cid]["surfaceInput"], *pair)
-            for cid in (components if components is not None else _used_components(descriptor)) for pair in pairs
-        }
-        missing = sorted({cid for (cid, _pair), key in keys.items() if meshes.probe(key) is None})
-        if missing:
-            producer = surfaces.producer_fields(descriptor["surfaceProducer"])
-            try:
-                resolve_artifacts([{"kind": "surfaces", "tree": source.tree, "cids": dealt,
-                                    "producer": producer, "tessellations": tessellations}
-                                   for dealt in deal(missing, per_started_worker=SURFACES_PER_STARTED_WORKER)])
-            except ArtifactJobError as error:
-                if replaced or not surfaces.producer_unavailable(error):
-                    raise
-                current = resolve_artifact({"kind": "producer"})
-                if surfaces.producer_key(current) == surfaces.producer_key(producer):
-                    raise
-                replaced = True
-                descriptor = _export_view(source, current, appearance)
-                if source.document_hash:
-                    from cadgen.store.records import document_entry_for_hash, note_document_tree
-
-                    entry = document_entry_for_hash(source.document_hash)
-                    if entry is not None and entry.get("tree") == source.tree:
-                        note_document_tree(source.document_hash, source.tree, surface_producer=current)
-                continue
-        bodies = {}
-        for (cid, (chord, angle)), key in keys.items():
-            payload = meshes.read(key)
-            if payload is None:
-                raise RuntimeError(
-                    f"mesh export failed: component {cid} has no stored mesh at chord {chord:g}, "
-                    f"angle {angle:g} after its derivation"
-                )
-            bodies[(cid, (chord, angle))] = payload
-        return descriptor, bodies
+    return descriptor, bodies
 
 
 def _tolerance_token(value: float | None, key: str) -> str:

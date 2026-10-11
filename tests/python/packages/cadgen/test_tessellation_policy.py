@@ -44,13 +44,7 @@ class TessellationPolicyTests(unittest.TestCase):
         def request(key, value):
             meshes.normalize_tessellations([{**policy.DISPLAY_TESSELLATION, key: value}])
 
-        def stored(key, value):
-            pair = {**policy.DISPLAY_TESSELLATION, key: value}
-            key_ = meshes.tessellation_key("a" * 64, pair["chordTolerance"], pair["angleTolerance"])
-            if meshes.meshable_key(key_) is None:
-                raise ValueError("not a key anything may ask to have meshed")
-
-        doors = {"flag": flag, "request": request, "stored key": stored}
+        doors = {"flag": flag, "request": request}
         for key in ("chordTolerance", "angleTolerance"):
             floor, ceiling = policy.TESSELLATION_FLOORS[key], policy.TESSELLATION_CEILINGS[key]
             for door, check in doors.items():
@@ -61,8 +55,7 @@ class TessellationPolicyTests(unittest.TestCase):
                                            (1e300, f"at most {ceiling:g}")):
                         with self.assertRaises(ValueError) as caught:
                             check(key, outside)
-                        if door != "stored key":
-                            self.assertIn(bound, str(caught.exception))
+                        self.assertIn(bound, str(caught.exception))
 
     def test_an_export_that_names_no_tolerance_is_cut_from_the_display_mesh(self) -> None:
         from cadgen._internal import mesh_export

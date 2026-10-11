@@ -12,8 +12,8 @@ descriptor's order:
   placed by the occurrence's transform, rounded to a nanometre;
 - ``triangleCount`` and ``vertexCount`` are the stored display mesh's
   (``cadgen.store.meshes``), at the display tolerance a view draws
-  (``cadgen.tessellation_policy.DISPLAY_TESSELLATION``), meshed in the build
-  pool when the store has none.
+  (``cadgen.tessellation_policy.DISPLAY_TESSELLATION``): read, as the view the
+  list is made from read it (``store.view.view_dir_for``).
 
 A part whose mesh leaves out a face no mesher could cover is listed, drawn and
 counted without it, and :func:`unmeshed_warnings` names the faces in the result's
@@ -85,20 +85,14 @@ def _rounded(values: Sequence[float]) -> list:
 
 def _mesh_counts(descriptor: Mapping[str, Any], cids: set[str]) -> dict:
     """``{cid: (triangles, vertices)}`` from the stored display meshes."""
-    from cadgen.store.meshes import tessellation_key
-    from cadgen.store.tess_cache import produce_meshes
+    from cadgen.store.meshes import probe, tessellation_key
 
     components = descriptor.get("components") if isinstance(descriptor.get("components"), Mapping) else {}
-    keys = {}
+    counts = {}
     for cid in sorted(cids):
         surface_input = str((components.get(cid) or {}).get("surfaceInput") or "")
-        if surface_input:
-            keys[cid] = tessellation_key(surface_input)
-    records = produce_meshes(list(keys.values())) if keys else {}
-    counts = {}
-    for cid, key in keys.items():
-        record = records.get(key)
-        if isinstance(record, Mapping):
+        record = probe(tessellation_key(surface_input)) if surface_input else None
+        if record is not None:
             counts[cid] = (int(record["indexCount"]) // 3, int(record["vertexCount"]))
     return counts
 

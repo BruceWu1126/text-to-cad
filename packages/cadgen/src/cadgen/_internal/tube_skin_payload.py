@@ -163,9 +163,9 @@ def decode_tube_skins(data: bytes) -> dict:
 
 def tube_skins_bytes(*, tree: str, document_hash: str, animation: Any) -> bytes | None:
     """The payload for one document's bytes and sidecar animation, bound to its
-    display meshes, or None when the animation bends no tube. What the store lacks
-    is derived as an export derives it (build-pool jobs), and the payload is cached
-    in the store's ``skin`` index."""
+    display meshes, or None when the animation bends no tube. The meshes are read as an
+    export reads them (``mesh_export.stored_meshes``), and the payload is cached in the
+    store's ``skin`` index."""
     from cadgen._internal.mesh_export import MeshSource, stored_meshes
     from cadgen._internal.source_sidecar import animation_digest
     from cadgen.store import meshes, skins

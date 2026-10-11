@@ -76,8 +76,9 @@ function verifiedReadyRow(row, { tree, cid, surfaceInput, client, tessellation }
       || selectorsParsed.searchParams.get("object") !== selectorsObject) {
     throw new Error(`Surface response has an invalid selector table URL for ${cid}`);
   }
-  // A request that named a tessellation is ready only with that mesh stored: its row is the
-  // probe row a read of the mesh store would answer.
+  // Every ready row carries the component's display mesh: the probe row a read of the mesh store
+  // would answer. A caller that draws it names the tessellation it draws at, and the row is checked
+  // against it.
   let mesh = null;
   if (tessellation) {
     mesh = validateTessellationProbeRow(row.mesh, {
@@ -127,10 +128,11 @@ export class SurfaceResolutionError extends Error {
  * path does not call this function. The request never computes D or producer
  * identity in JavaScript; it forwards the backend-prepared opaque pins.
  *
- * `tessellation`, when given, also asks for every component's mesh at those
- * tolerances (`{}` is the default pair): cadgen meshes what its store lacks,
- * and each ticket carries the mesh's probe row (`mesh`), so its body is read
- * next without another probe.
+ * cadgen answers each component from its store -- its surface, selector table and
+ * display mesh, which the build derived -- and derives, in one job, any the store
+ * lacks. `tessellation`, when given, is the pair the caller draws at (cadgen's
+ * display tolerance): each ticket then carries the display mesh's probe row
+ * (`mesh`), checked against it, so its body is read next without another probe.
  *
  * `onReady(cid, ticket)`, when given, hears each component the moment its row is
  * ready, once, while the request goes on waiting for the rest of its components:
@@ -201,11 +203,11 @@ async function resolveSurfaceRequest(descriptor, requested, { signal, client, on
     throw new TypeError("surface request must name at least one component");
   }
 
-  // The pair the server keys the mesh by: both tolerances, as the request names them.
+  // The pair the caller draws at, which the ready rows' display mesh is checked against.
   const quality = tessellation == null ? null : tessellationQuality(tessellation);
   const meshTessellation = quality
     ? { chordTolerance: quality.chordTolerance, angleTolerance: quality.angleTolerance } : null;
-  const base = { tree, viewId, producer, components, ...(meshTessellation ? { tessellation: meshTessellation } : {}) };
+  const base = { tree, viewId, producer, components };
   let job = "";
   let cancelled = false;
   const cancel = () => {

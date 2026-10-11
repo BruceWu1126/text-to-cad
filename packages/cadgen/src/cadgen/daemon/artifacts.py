@@ -1,6 +1,7 @@
-"""Internal artifact operations, independent of source models and document paths.
-
-Only workers import the native surface producer. Requests contain immutable pins,
+"""Build-pool artifact jobs, independent of source models and document paths: this
+runtime's surface producer (``kind: producer``), and the display data of the parts a
+view found missing from the store (``kind: display``: one request, one job, one
+worker). Only workers import the native surface producer. Requests contain immutable pins,
 never a script, a declared output, or an instruction to run arbitrary Python.
 """
 
@@ -23,17 +24,6 @@ from cadgen.daemon import broker
 _HASH = re.compile(r"[0-9a-f]{64}\Z")
 _CID = re.compile(r"[0-9a-f]{16}\Z")
 _PRODUCER_FIELDS = {"scheme", "surfFormat", "build123d", "ocp", "cadqueryOcp"}
-# The most mesh keys one request may name: a mesh probe's bound (store/tess_cache.py).
-MESH_KEYS_MAX = 256
-# How ``deal`` sizes build-pool jobs. A job takes a warm worker when the daemon has
-# one (``pool.spare_count``); a job past them starts a worker, whose kernel import
-# took 4-5 s on a busy 4-core machine. So the warm workers share any work of at
-# least DEAL_PER_JOB items, and a job that starts a worker is dealt only when there
-# is enough work to repay that start: about 32 components' surface extraction, or
-# 96 components' meshing (motorbike: 0.36 s and 0.11 s a component).
-DEAL_PER_JOB = 4
-SURFACES_PER_STARTED_WORKER = 32
-MESHES_PER_STARTED_WORKER = 96
 
 
 class ArtifactJobError(RuntimeError):
@@ -73,52 +63,16 @@ def normalize_request(request):
     kind = request.get("kind")
     if kind == "producer" and set(request) == {"kind"}:
         return {"kind": "producer"}
-    if kind == "meshes" and set(request) == {"kind", "keys"}:
-        return {"kind": "meshes", "keys": _mesh_keys(request["keys"])}
-    fields = {"kind", "tree", "cids", "producer", "expected_objects", "force", "tessellations"}
-    required = {"kind", "tree", "cids", "producer"}
-    if kind != "surfaces" or not required <= set(request) or set(request) - fields:
-        raise ValueError("artifact request must be producer, surfaces or meshes with closed immutable inputs")
+    if kind != "display" or set(request) != {"kind", "tree", "cids", "producer"}:
+        raise ValueError("artifact request must be producer, or display with exactly tree, cids and producer")
     cids = request["cids"]
     if not isinstance(cids, (list, tuple)) or not cids:
         raise ValueError("artifact cids must be a nonempty list")
     cids = [_digest(cid, "cid", _CID) for cid in cids]
     if len(cids) != len(set(cids)):
         raise ValueError("artifact cids must not contain duplicates")
-    expected = request.get("expected_objects", {})
-    if not isinstance(expected, dict):
-        raise ValueError("artifact expected_objects must map surface-input pins to object pins")
-    expected = {_digest(key, "surface input"): _digest(value, "surface object") for key, value in expected.items()}
-    force = request.get("force", False)
-    if type(force) is not bool:
-        raise ValueError("artifact force must be a boolean")
-    from cadgen.store.meshes import normalize_tessellations
-
-    # The meshes to make with the surfaces, in one canonical spelling; a request
-    # naming none keeps the shape (and key) it always had.
-    tessellations = [{"chordTolerance": chord, "angleTolerance": angle}
-                     for chord, angle in normalize_tessellations(request.get("tessellations"))]
     return {"kind": kind, "tree": _digest(request["tree"], "tree"), "cids": sorted(cids),
-            "producer": _producer(request["producer"]), "expected_objects": dict(sorted(expected.items())), "force": force,
-            **({"tessellations": tessellations} if tessellations else {})}
-
-
-def _mesh_keys(keys):
-    """The tessellation keys a meshes request names, in one canonical order: each a
-    key this cadgen writes at tolerances any request may ask to have meshed
-    (``store.meshes.meshable_key``), none twice."""
-    from cadgen.store.meshes import meshable_key
-    from cadgen.tessellation_policy import TESSELLATION_CEILINGS, TESSELLATION_FLOORS
-
-    if not isinstance(keys, (list, tuple)) or not keys or len(keys) > MESH_KEYS_MAX:
-        raise ValueError(f"artifact meshes keys must be a nonempty list of at most {MESH_KEYS_MAX}")
-    if any(meshable_key(key) is None for key in keys):
-        bounds = " and ".join(f"{name} {TESSELLATION_FLOORS[name]:g} to {TESSELLATION_CEILINGS[name]:g}"
-                              for name in TESSELLATION_FLOORS)
-        raise ValueError(f"artifact meshes keys must be this cadgen's tessellation keys, at {bounds}")
-    if len(set(keys)) != len(keys):
-        raise ValueError("artifact meshes keys must not contain duplicates")
-    return sorted(keys)
+            "producer": _producer(request["producer"])}
 
 
 def request_key(request):
@@ -154,10 +108,8 @@ _WORKER = threading.local()
 
 @contextlib.contextmanager
 def worker_context(root):
-    """The store this thread's kernel work is for: a daemon worker's request, or a
-    model build in whatever process runs it (``generation``), never a door or a
-    server. Under a CPU lease for that store, the artifact work the thread asks for
-    runs here, where the kernel is already loaded (:func:`resolve_artifacts`)."""
+    """The store this thread's job is for: a daemon worker's request. An artifact job the
+    thread submits while it runs is that job's dependency (``client.artifact_payload``)."""
     previous = getattr(_WORKER, "root", None)
     _WORKER.root = store_path(root)
     try:
@@ -166,28 +118,17 @@ def worker_context(root):
         _WORKER.root = previous
 
 
-def _can_inline(root):
-    return (getattr(_WORKER, "root", None) == root and broker.current_lease() is not None
-            and store_path() == root)
-
-
 def execute(request, *, keep_going=None):
     """Worker-only native entry. Source and model lookup are absent by design.
 
-    ``keep_going`` is asked before each derivation and each mesh (``surfaces.derive``,
-    ``surfaces.produce_meshes``): a daemon worker's asks its supervisor whether anyone
-    still wants the job."""
+    ``keep_going`` is asked before each derivation and each mesh (``surfaces.derive``):
+    a daemon worker's asks its supervisor whether anyone still wants the job."""
     request = normalize_request(request)
     from cadgen.store import surfaces
 
     if request["kind"] == "producer":
         return surfaces.producer_identity()
-    if request["kind"] == "meshes":
-        return surfaces.produce_meshes(request["keys"], keep_going=keep_going)
-    meshes = {"tessellations": request["tessellations"]} if request.get("tessellations") else {}
-    return surfaces.derive(request["tree"], request["cids"], producer=request["producer"],
-                           expected_objects=request["expected_objects"], force=request["force"],
-                           keep_going=keep_going, **meshes)
+    return surfaces.derive(request["tree"], request["cids"], producer=request["producer"], keep_going=keep_going)
 
 
 class ArtifactFuture(Future):
@@ -244,7 +185,7 @@ class ArtifactFuture(Future):
 
     def result(self, timeout=None):
         # The calling thread owns its lease. A background dispatcher must never
-        # release it, and an already finished inline result need not yield it.
+        # release it, and an already finished result need not yield it.
         if self.done():
             return copy.deepcopy(super().result(timeout))
         with broker.yielded():
@@ -395,26 +336,10 @@ def _run_transient(request, root, env, endpoint, *, subscriber=None):
 
 
 def submit_artifact(request, *, store_root=None):
-    """Start a typed artifact operation: in this process when it runs kernel work for
-    this store under a CPU lease (:func:`worker_context`), else as a build-pool job,
+    """Start a typed artifact operation as ONE build-pool job, on a thread of its own,
     without importing the CAD kernel here."""
     request = normalize_request(request)
     root = store_path(store_root)
-    return _run_inline(request) if _can_inline(root) else _dispatch(request, root)
-
-
-def _run_inline(request):
-    future = ArtifactFuture()
-    future._begin()
-    try:
-        future._complete(validate_result(request, result_frame(request, execute(request))))
-    except Exception as exc:
-        future._complete(error=exc)
-    return future
-
-
-def _dispatch(request, root):
-    """``request`` as a build-pool job, on a thread of its own."""
     future = ArtifactFuture()
     from cadgen.daemon import client
     from cadgen.daemon.executors import use_daemon
@@ -451,61 +376,6 @@ def _dispatch(request, root):
 def resolve_artifact(request, *, store_root=None):
     """Resolve one operation; waits yield the caller's CPU lease."""
     return submit_artifact(request, store_root=store_root).result()
-
-
-def resolve_artifacts(requests, *, store_root=None):
-    """Resolve several operations at once, each on a build-pool worker of its own
-    (only identical requests share one), and return their results in order once
-    every one has finished. The first failure is raised then, never sooner: what
-    the others stored is kept, and a retry finds it. A caller that runs kernel work
-    for this store under a CPU lease (:func:`worker_context`: a build exporting its
-    own meshes) runs the first in its own process while the rest go to the pool --
-    :func:`deal` gives such a caller a second share only for work that repays
-    starting a worker."""
-    requests = list(requests)
-    root = store_path(store_root)
-    if requests and _can_inline(root):
-        # The pool's shares first, so they run while this process does its own.
-        rest = [_dispatch(normalize_request(request), root) for request in requests[1:]]
-        futures = [submit_artifact(requests[0], store_root=root), *rest]
-    else:
-        futures = [submit_artifact(request, store_root=store_root) for request in requests]
-    results, failure = [], None
-    for future in futures:
-        try:
-            results.append(future.result())
-        except Exception as error:  # noqa: BLE001 - raised once the rest are done
-            failure = failure or error
-            results.append(None)
-    if failure is not None:
-        raise failure
-    return results
-
-
-def deal(items, *, per_started_worker, parts=None):
-    """``items`` dealt round-robin into nonempty lists, one per build-pool job: the
-    daemon's warm workers share them (at least ``DEAL_PER_JOB`` items a job), and
-    one more job is dealt for every ``per_started_worker`` items -- each such job
-    starts a worker -- up to ``parts``, by default one per CPU slot
-    (``broker.job_limit``): the most jobs that run at once. For a build's own work
-    the first list is the build's, done in its process (:func:`resolve_artifacts`),
-    and only the started-worker rule deals more."""
-    from cadgen.daemon.executors import use_daemon
-    from cadgen.daemon.pool import spare_count
-
-    items = list(items)
-    if not items:
-        return []
-    warm = spare_count() if use_daemon() else 0
-    limit = max(1, int(parts) if parts else broker.job_limit())
-    started = len(items) // max(1, int(per_started_worker))
-    # A build's own work (``worker_context``) does the first share in its own
-    # process, so it shares nothing until the work repays starting a worker. Handing
-    # it to the warm spares as well was measured slower: the build has bound one of
-    # them, and the next share waited on a kernel import.
-    count = started if _can_inline(store_path()) else max(min(warm, len(items) // DEAL_PER_JOB), started)
-    count = min(limit, max(1, count))
-    return [items[index::count] for index in range(count)]
 
 
 def _main():

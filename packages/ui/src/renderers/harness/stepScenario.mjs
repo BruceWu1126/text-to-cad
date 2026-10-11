@@ -14,8 +14,8 @@ import { chromium } from 'playwright';
 // the catalog names a store view, the view names components by an immutable
 // `surfaceInput`, and only `POST /__cad/surfaces` turns those inputs into the
 // object digests the `.surf` bytes and the component's selector table
-// (`components/<cid>.selectors.json`, cadgen's) are fetched by — and, when it
-// names a tessellation, into each component's stored mesh, which cadgen makes.
+// (`components/<cid>.selectors.json`, cadgen's) are fetched by, and each
+// component's stored display mesh, which cadgen's build made.
 // The descriptor the real store route serves is NOT materialized, so that round
 // trip is mandatory and this server implements it exactly as
 // `client/surfaceResolution.js` validates it: the returned URLs must be
@@ -176,9 +176,10 @@ export function reviseFixture(fixture, revision) {
 /**
  * cadgen's mesh store as the harness serves it: every component of `fixture` has its mesh, keyed
  * and encoded as the store keeps it, for whatever input names it (a staged component shares its
- * shape's mesh). `warm` holds every component's display mesh already, as an earlier open leaves it; otherwise a mesh is stored once a surface request asks for it
- * (`produce`), as cadgen meshes on request. Answers the routes the client reads it by: a probe, a
- * batch read and a single read.
+ * shape's mesh). `warm` holds every component's display mesh already, as a build leaves it; otherwise
+ * a mesh is stored once a surface request names its component (`displayMesh`), as cadgen's one job
+ * derives what a cleared store lacks. Answers the routes the client reads it by: a probe, a batch
+ * read and a single read.
  */
 async function meshStore(fixture, { warm = false } = {}) {
   const [cache, { encodeMeshFixture, TEST_DISPLAY_TESSELLATION }] = await Promise.all([
@@ -208,7 +209,7 @@ async function meshStore(fixture, { warm = false } = {}) {
     response.end(bytes);
   };
   return {
-    produce,
+    displayMesh: surfaceInput => produce(surfaceInput, TEST_DISPLAY_TESSELLATION),
     probe: keys => ({ entries: Object.fromEntries(keys.filter(key => stored.has(key)).map(key => [key, stored.get(key).row])) }),
     batch: (response, requested) => binary(response, Buffer.from(cache.encodeTessellationCacheBatch(requested.map(({ tessellationInput, object }) => {
       const entry = stored.get(tessellationInput);
@@ -376,7 +377,7 @@ export async function serveStepHarness(t, { onRequest, progressive = false, sing
             url: `/__cad/store?tree=${shown.view.tree}&surfaceInput=${surfaceInput}&object=${surface.object}`,
             selectors: { object: surface.selectors.object, byteLength: surface.selectors.bytes.length,
               url: `/__cad/store?tree=${shown.view.tree}&surfaceInput=${surfaceInput}&object=${surface.selectors.object}` },
-            ...(body.tessellation ? { mesh: meshes.produce(surfaceInput, body.tessellation) } : {}) }];
+            mesh: meshes.displayMesh(surfaceInput) }];
         })),
       });
       return;

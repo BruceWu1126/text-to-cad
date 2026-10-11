@@ -122,9 +122,8 @@ async function prepareRenderJob(job) {
   const loadStarted = performance.now();
   const stageTimings = {};
   const assetOrigin = String(globalThis.window?.__cadgenSnapshotAssetOrigin || "").replace(/\/+$/, "");
-  // The snapshot host meshes on request what its store lacks (/__tess_cache/produce).
   const tessellationCache = createTessellationCache({ provider: createHttpTessellationCacheProvider({
-    origin: assetOrigin, produceUrl: `${assetOrigin}/__tess_cache/produce`,
+    origin: assetOrigin,
   }) });
   const resources = createHttpCadResourceProvider({ origin: assetOrigin, cache: "no-store" });
   let source;
@@ -354,8 +353,7 @@ if (typeof window !== "undefined") {
   window.__snapshotRenderSequenceFrame = captureHeadlessRenderSequenceFrame;
   window.__snapshotRenderSequenceDispose = disposeHeadlessRenderSequence;
   // The snapshot host (cadgen's snapshot driver) serves the store's component
-  // meshes on /__tess_cache/ from its loopback asset server, and meshes on
-  // request (POST /__tess_cache/produce) any the store lacks: the page draws
+  // meshes on /__tess_cache/ from its loopback asset server: the page draws
   // what cadgen made and never tessellates.
   //
   // That server is addressed by its ABSOLUTE origin, injected before this

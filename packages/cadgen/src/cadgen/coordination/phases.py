@@ -36,17 +36,20 @@ PHASE_GENERATE = "generate"
 PHASE_PACKAGE = "package"
 PHASE_COMPONENTS = "components"
 PHASE_FINALIZE = "finalize"
+# The display data of every part the store lacks, derived before the build reports done.
+PHASE_MESH = "mesh"
 # Terminal marker. Not a phase -- it means "this record describes a finished run", and a
 # reader must never render it as an in-flight build.
 PHASE_DONE = "done"
 
-PHASE_ORDER = (PHASE_GENERATE, PHASE_PACKAGE, PHASE_COMPONENTS, PHASE_FINALIZE)
+PHASE_ORDER = (PHASE_GENERATE, PHASE_PACKAGE, PHASE_COMPONENTS, PHASE_FINALIZE, PHASE_MESH)
 
 PHASE_LABELS = {
     PHASE_GENERATE: "Building geometry",
     PHASE_PACKAGE: "Collecting parts",
     PHASE_COMPONENTS: "Storing parts",
     PHASE_FINALIZE: "Writing outputs",
+    PHASE_MESH: "Meshing parts",
     PHASE_DONE: "Done",
 }
 

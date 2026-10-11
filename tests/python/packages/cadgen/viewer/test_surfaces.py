@@ -108,10 +108,11 @@ class SurfaceRequests(unittest.TestCase):
         with mock.patch.object(
             surfaces, "_view_from_geometry", side_effect=AssertionError("whole view rebuilt")
         ), mock.patch.object(surfaces, "surface_input", wraps=surface_input) as inputs:
-            view, selected, operation, token, canonical = _request(json.dumps(self.request).encode())
+            view, selected, operation, expected, token, canonical = _request(json.dumps(self.request).encode())
         self.assertEqual(view, {"viewId": self.view["viewId"]})
         self.assertEqual(selected, {self.cid: {"surfaceInput": self.entry["surfaceInput"]}})
-        self.assertEqual(operation["cids"], [self.cid])
+        self.assertEqual(operation, {"kind": "display", "tree": self.tree, "cids": [self.cid], "producer": self.producer})
+        self.assertEqual(expected, {})
         self.assertIsNone(token)
         self.assertIn(self.cid, canonical["components"])
         self.assertEqual(inputs.call_count, 1)
@@ -132,30 +133,26 @@ class SurfaceRequests(unittest.TestCase):
         self.assertEqual(future.detached, 1)
         self.assertFalse(self.manager._jobs)
 
-    def test_a_named_tessellation_is_ready_only_with_its_mesh_and_the_row_carries_it(self):
+    def test_a_surface_without_its_display_mesh_is_pending_until_the_job_derives_it(self):
         from cadgen.store import meshes
+        from cadgen.store.index import remove_entry
 
-        tessellation = {"chordTolerance": 5e-4, "angleTolerance": 0.35}
-        request = {**self.request, "tessellation": tessellation}
         surfaces.derive(self.tree)
+        key = meshes.tessellation_key(self.entry["surfaceInput"])
+        remove_entry("mesh", key)  # evicted: the surface and its table alone are not ready
         future = SubscriberFuture()
         with mock.patch("cadgen.daemon.artifacts.submit_artifact", return_value=future) as submit:
-            pending = self.resolve(request)
-            self.assertEqual(pending["components"][self.cid]["state"], "pending",
-                             "a stored surface without its mesh is not ready")
+            pending = self.resolve()
+            self.assertEqual(pending["components"][self.cid]["state"], "pending")
             [operation] = [call.args[0] for call in submit.call_args_list]
-            self.assertEqual(operation["tessellations"], [tessellation], "the job meshes the named tessellation")
-            surfaces.derive(self.tree, tessellations=operation["tessellations"])
+            self.assertEqual(operation, {"kind": "display", "tree": self.tree, "cids": [self.cid], "producer": self.producer})
+            surfaces.derive(self.tree)
             future.set_result({})
-            ready = self.resolve({**request, "job": pending["job"]})["components"][self.cid]
-        key = meshes.tessellation_key(self.entry["surfaceInput"], 5e-4, 0.35)
+            ready = self.resolve({**self.request, "job": pending["job"]})["components"][self.cid]
         self.assertEqual(ready["state"], "ready")
-        self.assertEqual(ready["mesh"], meshes.probe(key), "the row is the mesh's probe row")
-        with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=AssertionError("unexpected job")):
-            self.assertEqual(self.resolve(request)["components"][self.cid]["mesh"], ready["mesh"])
-        for bad in ({"chordTolerance": 5e-4}, {"chordTolerance": 1e-9, "angleTolerance": 0.35}, "fine"):
-            with self.subTest(tessellation=bad), self.assertRaises(ValueError):
-                self.resolve({**self.request, "tessellation": bad})
+        self.assertEqual(ready["mesh"], meshes.probe(key), "the row is the display mesh's probe row")
+        with self.assertRaises(ValueError):
+            self.resolve({**self.request, "tessellation": {"chordTolerance": 5e-4, "angleTolerance": 0.35}})
 
     def test_a_failed_completion_racing_first_lookup_reports_ready_what_it_stored(self):
         from build123d import Compound, Pos, Solid
@@ -168,7 +165,6 @@ class SurfaceRequests(unittest.TestCase):
         inputs = {cid: entry["surfaceInput"] for cid, entry in sorted(view["components"].items())}
         cids = list(inputs)
         request = {"tree": tree, "viewId": view["viewId"], "producer": self.producer,
-                   "tessellation": {"chordTolerance": 5e-4, "angleTolerance": 0.35},
                    "components": [{"cid": cid, "surfaceInput": inputs[cid]} for cid in cids]}
         real, failing = occt_mesh.mesh_component, inputs[cids[-1]]
 
@@ -184,8 +180,7 @@ class SurfaceRequests(unittest.TestCase):
             # components, then raises the last one's failure.
             try:
                 with mock.patch.object(occt_mesh, "mesh_component", side_effect=mesher):
-                    surfaces.derive(tree, operation["cids"], producer=self.producer,
-                                    tessellations=operation["tessellations"])
+                    surfaces.derive(tree, operation["cids"], producer=self.producer)
             except occt_mesh.MeshProductionError as error:
                 future.set_exception(error)
             return future
@@ -350,18 +345,29 @@ assert view and all('surfaceObject' not in entry for entry in view['components']
         self.assertEqual(json.loads((one / "assembly.json").read_text(encoding="utf-8"))["documentHash"], first)
         self.assertEqual(json.loads((two / "assembly.json").read_text(encoding="utf-8"))["documentHash"], second)
 
-    def test_a_static_view_deals_its_missing_surfaces_across_the_pool(self):
+    def test_a_static_view_derives_only_what_the_store_lacks_in_one_job(self):
         from build123d import Compound, Pos, Solid
+        from cadgen.store import meshes
+        from cadgen.store.index import remove_entry
         from cadgen.store.view import export_view
 
         parts = [Pos(4 * n, 0, 0) * Solid.make_box(1 + n, 1, 1) for n in range(3)]
         tree, geometry, _ = build_tree_from_compound(Compound(children=parts), root_name="row")
-        with inline_artifacts() as jobs, mock.patch("cadgen.daemon.broker.job_limit", return_value=2), \
-                mock.patch("cadgen.daemon.artifacts.SURFACES_PER_STARTED_WORKER", 1):
-            target = export_view(tree, self.root / "row-view", producer=self.producer)
-        dealt = [call.args[0]["cids"] for call in jobs.call_args_list if call.args[0]["kind"] == "surfaces"]
-        self.assertEqual(len(dealt), 2, "one job per CPU slot the pool runs at once")
-        self.assertEqual(sorted(cid for cids in dealt for cid in cids), sorted(geometry["components"]))
+        cids = sorted(geometry["components"])
+        with inline_artifacts() as jobs:
+            export_view(tree, self.root / "cold-view", producer=self.producer)
+        self.assertEqual([call.args[0] for call in jobs.call_args_list],
+                         [{"kind": "display", "tree": tree, "cids": cids, "producer": self.producer}],
+                         "every part the store lacks, in ONE job")
+        with inline_artifacts() as jobs:
+            target = export_view(tree, self.root / "warm-view", producer=self.producer)
+        self.assertEqual(jobs.call_count, 0, "a view of stored display data only reads")
+        lost = surfaces.surface_input(geometry["components"][cids[1]], self.producer)
+        remove_entry("mesh", meshes.tessellation_key(lost))
+        with inline_artifacts() as jobs:
+            export_view(tree, self.root / "repaired-view", producer=self.producer)
+        self.assertEqual([call.args[0]["cids"] for call in jobs.call_args_list], [[cids[1]]],
+                         "a part the store lost is derived alone")
         descriptor = json.loads((target / "assembly.json").read_text(encoding="utf-8"))
         self.assertTrue(all(entry.get("surf") for entry in descriptor["components"].values()))
 

@@ -42,7 +42,7 @@ class NativeArtifactTransport(unittest.TestCase):
         self.geometry = capture_tree(self.tree)[1]
         self.producer = surfaces.producer_identity()
         self.request = {
-            "kind": "surfaces", "tree": self.tree,
+            "kind": "display", "tree": self.tree,
             "cids": sorted(self.descriptor["components"]), "producer": self.producer,
         }
         self.source = self.root / "unrelated.py"
@@ -162,32 +162,14 @@ sys.addaudithook(audit)
                 self.assertFalse(any(handler.is_alive() for handler in handlers))
                 self.assertTrue(all(process.poll() is not None for process in processes))
 
-    def test_real_daemon_native_surface_pins_errors_and_nested_one_slot(self):
-        nested = self.root / "nested-native"
-        prelude = self.source_guard() + f"""
-from cadgen.daemon import artifacts,broker
-from cadgen.store import surfaces
-original_derive=surfaces.derive
-def derive(*args,**kwargs):
-    lease=broker.current_lease()
-    assert lease is not None
-    nested=artifacts.resolve_artifact({{'kind':'producer'}},store_root=artifacts.store_path())
-    assert nested==surfaces.producer_identity() and broker.current_lease() is lease
-    Path({str(nested)!r}).write_text('completed under same lease')
-    return original_derive(*args,**kwargs)
-surfaces.derive=derive
-"""
-        with self.daemon(prelude) as (workers, ledger, processes):
+    def test_real_daemon_native_display_pins_and_errors(self):
+        with self.daemon(self.source_guard()) as (workers, ledger, processes):
             self.assertEqual(artifacts.submit_artifact({"kind": "producer"}, store_root=self.store).result(20), self.producer)
             result = artifacts.submit_artifact(self.request, store_root=self.store).result(20)
             self.assert_geometry_and_result(result)
-            expected = {row["surfaceInput"]: row["object"] for row in result.values()}
-            self.assertEqual(artifacts.submit_artifact({**self.request, "expected_objects": expected, "force": True}, store_root=self.store).result(20), result)
-            self.assertTrue(nested.exists())
             for changes, message in (
                 ({"producer": {**self.producer, "ocp": "different-known-runtime"}}, "pinned surface producer"),
                 ({"cids": ["0" * 16]}, "unpinned component"),
-                ({"expected_objects": {key: "0" * 64 for key in expected}, "force": True}, "producer conflict"),
             ):
                 with self.subTest(changes=changes), self.assertRaisesRegex(artifacts.ArtifactJobError, message):
                     artifacts.submit_artifact({**self.request, **changes}, store_root=self.store).result(20)
@@ -196,10 +178,10 @@ surfaces.derive=derive
             self.assertEqual(len(processes), 1)
             self.assertTrue(all(row["model"] == "" for row in workers.snapshot()["workers"]))
             jobs = ledger.snapshot()
-            self.assertEqual(len(jobs), 6)
+            self.assertEqual(len(jobs), 4)
             self.assertTrue(all(row["subject"] == "" and row["outputs"] == [] and not row["editingProducer"] for row in jobs))
-            self.assertEqual(sum(row["state"] == "failed" for row in jobs), 3)
-            self.assertEqual(self.private.broker.snapshot()["granted"], 6, "inline nested native identity acquired an extra slot")
+            self.assertEqual(sum(row["state"] == "failed" for row in jobs), 2)
+            self.assertEqual(self.private.broker.snapshot()["granted"], 4, "one slot a job")
 
     def test_real_transient_surface_keeps_coalesced_native_work_after_owner_detach(self):
         entered = self.root / "native-entered"
