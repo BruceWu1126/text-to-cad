@@ -90,7 +90,7 @@ none.
   the room below it: past that its list scrolls. It floats over the view and the tool
   stack, so opening it resizes and moves nothing. It starts in the open file's folder and
   lists one folder at a time — its subfolders, then its CAD files — in compact rows: one 24px
-  line of 12px text each, its kind a small light glyph in one column 6px in from the row's
+  line of 12px text each, its kind a small light glyph in one column 5px in from the row's
   left end and 4px before the name (a folder its disclosure chevron, with no folder icon; a
   file its type's icon), as the tool stack's trees draw theirs. A press on a subfolder opens it
   inline, under itself, its rows 10px further in and hung from a faint line under its
@@ -442,8 +442,9 @@ shares that inset. A tree in the stack (Features, Links) is dense (`TreeRowSurfa
 `dense`): 24px rows in the panels' 11px text, and ONE light 12px glyph per row in one
 column, as the explorer has: a subassembly's or folded group's disclosure chevron, turned down
 while open, or a part's box (Links draws its chevrons alone), 4px before the name. The glyph
-column starts 6px in from the row's left end (`TREE_ROW_INSET_PX`), as far as the icons of
-a row's actions sit from its right end, in the STEP tree and the explorer alike; each level adds
+column starts 5px in from the row's left end (`TREE_ROW_INSET_PX`), centred under the filter
+row's search icon and as far in as the icons of a row's actions sit from its right end, in the
+STEP tree and the explorer alike; each level adds
 the explorer's compact indent, 10px (`TREE_INDENT_PX`), its rows hung from a faint line under
 their owner's glyph (`TreeRowGuides`), as the explorer's are; its filter row is a heading's 28px, the box 20px tall and close to the row's walls. An assembly row's
 actions, shown on hover and kept while they are on, are **Isolate** then the **Hide/Reveal** eye; a part file has no

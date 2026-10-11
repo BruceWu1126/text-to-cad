@@ -112,11 +112,11 @@ it("a level of the model tree is the explorer's compact step, its rows hung from
   const model = screen.getByTestId('model');
   const row = (name: string) => within(model).getByRole('button', { name: `Select ${name}` }).parentElement as HTMLElement;
   const guides = (element: HTMLElement) => [...element.querySelectorAll<HTMLElement>('[data-tree-guide]')].map(line => line.style.left);
-  // The subassembly 6px in from the tree's edge, as far as a row's action icons sit from its right
+  // The subassembly 5px in from the tree's edge, as far as a row's action icons sit from its right
   // end; its parts one 10px level further, each under the subassembly's line, drawn in the middle of
   // its 12px glyph column.
-  expect([row('Subassembly').style.paddingLeft, guides(row('Subassembly'))]).toEqual(['6px', []]);
-  expect([row('Part 0').style.paddingLeft, guides(row('Part 0'))]).toEqual(['16px', ['11.5px']]);
+  expect([row('Subassembly').style.paddingLeft, guides(row('Subassembly'))]).toEqual(['5px', []]);
+  expect([row('Part 0').style.paddingLeft, guides(row('Part 0'))]).toEqual(['15px', ['10.5px']]);
   // The parts beside it, at the edge too, hang from nothing.
   expect(guides(row('Part 2'))).toEqual([]);
 });
