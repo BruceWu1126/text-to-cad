@@ -8,8 +8,7 @@ import { cn } from '@text-to-cad/ui/utils';
 import ModelPartMenu from './ModelPartMenu.jsx';
 import ModelPartActions, { rowActionsLayout } from './ModelPartActions.jsx';
 import { modelingSelectionPaths } from '../../workbench/modelingSelection.js';
-import ToolPanel, { ToolPanelClose, ToolPanelFooterButton } from '../../../kit/tools/ToolPanel.jsx';
-import { useViewerMobile } from '../../../../file-viewer/responsive.js';
+import ToolPanel from '../../../kit/tools/ToolPanel.jsx';
 import { implicitModelingRoots, presentModelingAssembly } from '../../workbench/modelingPresentation.js';
 import { modelTreeSearchChain, useTreeSearch } from '../../../kit/inspector/modelTreeSearch.js';
 import VirtualRows from '../../../kit/inspector/VirtualRows.jsx';
@@ -145,18 +144,17 @@ function ModelingSearchRow({ match, index, availability, selected, joinAbove, jo
 const MemoModelingSearchRow = memo(ModelingSearchRow);
 
 /**
- * Two panels of the tool stack: **Features** (the filter and the tree of the STEP's assemblies
- * and parts) and, while something is picked, its **Reference**. Both are on screen while
- * `active` — the Select tool is up — and stay mounted otherwise. A part is a leaf: its faces and
- * edges are the viewport's to pick, never rows.
+ * The **Features** panel of the tool stack: the filter and the tree of an assembly's
+ * subassemblies and parts. It is on screen while `active` — the Select tool is up — and stays
+ * mounted otherwise; it has no X, so an assembly always shows it under Select. A part is a leaf:
+ * its faces and edges are the viewport's to pick, never rows.
  *
  * The tree's shape follows the Select tool's `mode`. Under All it is the person's own. Under
  * Parts, Faces and Edges every assembly is open, and the disclosure is locked. Under Faces and
  * Edges a part's topology is asked for as its row comes on screen, never for a whole large
  * assembly at once.
  */
-function ModelingTree({ active, disabled, mode='all', modeMenu=null, loading=false, selectedPartIds=EMPTY, selectedReferences=EMPTY, onLoadTopology, onClearSelection, stepRoot, selectionDetails, selectionCopy=null, activeTreeNodeScrollKey, partControls=NO_CONTROLS, hoverStore=null }) {
-  const mobile = useViewerMobile();
+function ModelingTree({ active, disabled, mode='all', loading=false, selectedPartIds=EMPTY, selectedReferences=EMPTY, onLoadTopology, onClearSelection, stepRoot, activeTreeNodeScrollKey, partControls=NO_CONTROLS, hoverStore=null }) {
   const [localExpanded,setLocalExpanded]=useState(()=>new Set());
   const tree=useMemo(()=>presentModelingAssembly(stepRoot),[stepRoot]);
   const implicitRoots=useMemo(()=>implicitModelingRoots(tree),[tree]);
@@ -280,7 +278,6 @@ function ModelingTree({ active, disabled, mode='all', modeMenu=null, loading=fal
     if(node.selectionId && partControls.onToggleTreeNode){partControls.onToggleTreeNode(node.selectionId);return;}
     setLocalExpanded(current=>{const next=new Set(current);if(next.has(node.id))next.delete(node.id);else next.add(node.id);return next;});
   },[]);
-  const clearSelection=()=>onClearSelection?.();
   const highlighted=useMemo(()=>{
     const ids=new Set(paths.map(path=>path.at(-1).id));
     // Its members are not rendered while it is collapsed, so the row itself carries
@@ -338,49 +335,32 @@ function ModelingTree({ active, disabled, mode='all', modeMenu=null, loading=fal
       selected={on} joinAbove={on && at > 0 && highlighted.has(matches[at-1].entry.node.id)} joinBelow={on && at < matches.length-1 && highlighted.has(matches[at+1].entry.node.id)}
       choose={choose} disabled={disabled} partControls={rowControls}/>;
   };
-  return <>
-    {/* No heading: the filter is the panel's top row, and stays put while the tree scrolls under it. */}
-    {/* Its X closes it, and Select, pressed while it is the tool, opens it again. A single part,
-        and any file on a phone, starts with it closed (the Select tool's `panel`), so the model
-        gets the screen until the person opens it. */}
-    <ToolPanel id="tree" label="Features" fit="tree" resizable closable collapsible={false} hidden={!active}
-      header={<TreeFilterInput dense label="Filter model" placeholder="Filter…" yieldWhileTyping value={query} onChange={changeQuery} onKeyDown={onSearchKeyDown}
-        trailing={<>
-          {loading && <span role="status" className="shrink-0 text-micro text-muted-foreground">Loading…</span>}
-          {partControls.hiddenPartIds?.length > 0 && <Button disabled={disabled} type="button" variant="ghost" size="sm" className="h-6 shrink-0 px-1.5 text-tiny text-muted-foreground" onClick={partControls.showAllHiddenParts}>Show all</Button>}
-          {/* Select's mode menu (`SelectionModes.jsx`), beside the X. */}
-          {modeMenu}
-          <ToolPanelClose/>
-        </>}/>}>
-      <div ref={treeRef} className="flex flex-col text-tiny" aria-label="Modeling tree">
-        <div ref={listRef} className="px-1 py-1" aria-label="Model tree area"
-          onClick={event=>{if(!disabled && !event.target.closest('li,button,input,[role="menu"]'))clearSelection();}}>
-          {isolatedLabels.length > 0 && <div role="status" aria-label="Isolation" className="mb-1 flex min-h-7 items-center gap-2 rounded-md bg-accent/60 px-2 text-tiny">
-            <Focus className="size-3 shrink-0 text-foreground" aria-hidden="true"/>
-            <TooltipHint content={isolatedLabels.join(', ')} overflowOnly><span className="min-w-0 flex-1 truncate">Isolated: {isolatedLabels.join(', ')}</span></TooltipHint>
-            <Button disabled={disabled} type="button" variant="ghost" size="sm" className="h-6 shrink-0 px-1.5 text-tiny" onClick={partControls.onExitAllIsolate}>Exit</Button>
-          </div>}
-          {searching && <p role="status" className="px-2 py-1 text-micro text-muted-foreground">{found.total > found.matches.length ? `First ${found.matches.length} of ${found.total.toLocaleString()} matches` : `${found.total} ${found.total === 1 ? 'match' : 'matches'}`}</p>}
-          {searching ? found.matches.length
-            ? <VirtualRows key="search" aria-label="Model search results" count={matches.length} rowHeight={TREE_ROW_DENSE_HEIGHT} pinned={searchPinned}
-              rowKey={at=>matches[at].entry.node.id} rowProps={at=>({className:'min-w-0','data-search-row':matches[at].entry.node.id})} renderRow={renderSearchRow}/>
-            : deferredQuery.trim() && <p className="px-3 py-6 text-center text-tiny text-muted-foreground">{`No part matches “${deferredQuery.trim()}”`}</p>
-          : <VirtualRows key="tree" aria-label="Model" count={rows.length} rowHeight={TREE_ROW_DENSE_HEIGHT} pinned={treePinned}
-            rowKey={at=>rows[at].key} rowProps={at=>({className:'min-w-0','aria-level':rows[at].depth+1,'data-tree-part':rows[at].node.kind === 'part' ? rows[at].node.id : undefined})}
-            renderRow={renderTreeRow} registerRow={registerRow} onVisibleRange={onVisibleRows}/>}
-        </div>
+  // No heading: the filter is the panel's top row, and stays put while the tree scrolls under it.
+  return <ToolPanel id="tree" label="Features" fit="tree" resizable collapsible={false} hidden={!active}
+    header={<TreeFilterInput dense label="Filter model" placeholder="Filter…" yieldWhileTyping value={query} onChange={changeQuery} onKeyDown={onSearchKeyDown}
+      trailing={<>
+        {loading && <span role="status" className="shrink-0 text-micro text-muted-foreground">Loading…</span>}
+        {partControls.hiddenPartIds?.length > 0 && <Button disabled={disabled} type="button" variant="ghost" size="sm" className="h-6 shrink-0 px-1.5 text-tiny text-muted-foreground" onClick={partControls.showAllHiddenParts}>Show all</Button>}
+      </>}/>}>
+    <div ref={treeRef} className="flex flex-col text-tiny" aria-label="Modeling tree">
+      <div ref={listRef} className="px-1 py-1" aria-label="Model tree area"
+        onClick={event=>{if(!disabled && !event.target.closest('li,button,input,[role="menu"]'))onClearSelection?.();}}>
+        {isolatedLabels.length > 0 && <div role="status" aria-label="Isolation" className="mb-1 flex min-h-7 items-center gap-2 rounded-md bg-accent/60 px-2 text-tiny">
+          <Focus className="size-3 shrink-0 text-foreground" aria-hidden="true"/>
+          <TooltipHint content={isolatedLabels.join(', ')} overflowOnly><span className="min-w-0 flex-1 truncate">Isolated: {isolatedLabels.join(', ')}</span></TooltipHint>
+          <Button disabled={disabled} type="button" variant="ghost" size="sm" className="h-6 shrink-0 px-1.5 text-tiny" onClick={partControls.onExitAllIsolate}>Exit</Button>
+        </div>}
+        {searching && <p role="status" className="px-2 py-1 text-micro text-muted-foreground">{found.total > found.matches.length ? `First ${found.matches.length} of ${found.total.toLocaleString()} matches` : `${found.total} ${found.total === 1 ? 'match' : 'matches'}`}</p>}
+        {searching ? found.matches.length
+          ? <VirtualRows key="search" aria-label="Model search results" count={matches.length} rowHeight={TREE_ROW_DENSE_HEIGHT} pinned={searchPinned}
+            rowKey={at=>matches[at].entry.node.id} rowProps={at=>({className:'min-w-0','data-search-row':matches[at].entry.node.id})} renderRow={renderSearchRow}/>
+          : deferredQuery.trim() && <p className="px-3 py-6 text-center text-tiny text-muted-foreground">{`No part matches “${deferredQuery.trim()}”`}</p>
+        : <VirtualRows key="tree" aria-label="Model" count={rows.length} rowHeight={TREE_ROW_DENSE_HEIGHT} pinned={treePinned}
+          rowKey={at=>rows[at].key} rowProps={at=>({className:'min-w-0','aria-level':rows[at].depth+1,'data-tree-part':rows[at].node.kind === 'part' ? rows[at].node.id : undefined})}
+          renderRow={renderTreeRow} registerRow={registerRow} onVisibleRange={onVisibleRows}/>}
       </div>
-    </ToolPanel>
-    {/* What is picked, as its own panel under the tree: it comes with a selection and goes with it,
-        and is sized on its own, apart from the tree. Not folded away: its X clears the selection,
-        and the Copy at its foot copies the whole selection (Copy All, with several references). */}
-    {selectionDetails ? <ToolPanel id="reference" title={selectionDetails.title || 'Reference'} label="Reference details" closeLabel="Clear selection" fit="details" resizable
-      collapsible={false} hidden={!active} onClose={clearSelection}
-      footer={selectionCopy ? <ToolPanelFooterButton label={selectionCopy.label} shortcut={mobile ? '' : selectionCopy.shortcut}
-        disabled={disabled} onClick={selectionCopy.onCopy}/> : null}>
-      <div className="px-2 pb-1.5">{selectionDetails.content}</div>
-    </ToolPanel> : null}
-  </>;
+    </div>
+  </ToolPanel>;
 }
 
 export default memo(ModelingTree);

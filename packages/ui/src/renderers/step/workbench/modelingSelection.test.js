@@ -17,8 +17,3 @@ test('part selection prefers the exact part over an assembly containing that par
   assert.deepEqual(ends(modelingSelectionPaths(tree, [], ['o2'])), ['model:o2']);
   assert.deepEqual(ends(modelingSelectionPaths(tree, [], ['root'])), ['model:root']);
 });
-
-test('a part file is one row, and every pick on it is revealed there', () => {
-  const lone = [{ id: 'model:__step_model__', kind: 'part', selectionId: '__step_model__', leafPartIds: ['__model__'], children: [] }];
-  assert.deepEqual(ends(modelingSelectionPaths(lone, [face('o1', 4)])), ['model:__step_model__']);
-});

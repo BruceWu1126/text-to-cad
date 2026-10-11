@@ -190,10 +190,8 @@ function HarnessSurface({ view, data }) {
   // `panel-short.harness` turns the heights round: a tree of two rows and a Reference of many.
   const short = view.file.name.startsWith("panel-short");
   const [treeRows, referenceRows] = short ? [2, 40] : [120, 8];
-  // `panel-part.harness` stands in for a single part, whose tree starts closed.
-  const part = view.file.name.startsWith("panel-part");
   const selectTool = shell.tools.own({ id: SELECT_TOOL, label: "Select", icon: <span aria-hidden="true">S</span>,
-    panel: { id: "tree", label: "Harness tree", startsClosed: part } });
+    panel: { id: "tree", label: "Harness tree" } });
   const keepTool = { id: "keep", label: "Keep", icon: <span aria-hidden="true">K</span>, active: kept, disabled: shell.idle,
     onSelect: () => setKept(value => !value) };
   const poseTool = { id: "pose", label: "Pose", icon: <span aria-hidden="true">P</span>, active: posing, disabled: shell.idle,

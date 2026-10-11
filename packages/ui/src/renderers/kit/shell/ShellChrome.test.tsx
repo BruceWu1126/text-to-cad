@@ -23,7 +23,7 @@ import { viewerLinks } from '../../../../dist/file-viewer/navigation/links.js';
 import { ViewerHostContext } from '../../../../dist/host/context.js';
 import { testHost } from '../../../../dist/host/testing/host.js';
 import { ViewerMobileContext } from '../../../../dist/file-viewer/responsive.js';
-import { TOOL_PANEL_REFERENCE_HEIGHT, TOOL_PANEL_WIDTH } from '../../../../dist/renderers/kit/tools/toolStackLayout.js';
+import { TOOL_PANEL_WIDTH } from '../../../../dist/renderers/kit/tools/toolStackLayout.js';
 import { FLOATING_CHROME_SURFACE_CLASS, FLOATING_SURFACE_CLASS } from '../../../../dist/lib/floatingSurface.js';
 import { PerspectiveProjectionIcon } from '../../../../dist/renderers/kit/camera/ProjectionModeIcons.js';
 
@@ -88,7 +88,7 @@ function drag(handle: Element, [dx, dy]: [number, number], { release = true } = 
   if (release) fireEvent.pointerUp(handle, { pointerId: 1, clientX: 100 + dx, clientY: 100 + dy });
 }
 
-it('the chrome is inset from the viewer, every panel opens one width, the tree at half the stack and the Reference shorter, and nothing is stored until a person sizes one', () => {
+it('the chrome is inset from the viewer, every panel opens one width, a resizable one capped at the whole stack, and nothing is stored until a person sizes one', () => {
   const { preferences } = frame();
   // The strip and the stack under it, 8px in from the viewer's top and left, stopping 8px above the
   // cube in the bottom-left corner (itself 8px off the bottom).
@@ -96,9 +96,8 @@ it('the chrome is inset from the viewer, every panel opens one width, the tree a
   expect(shown()).toEqual(['Harness tree', 'Harness reference']);
   expect(TOOL_PANEL_WIDTH).toBe(164);
   expect([width('Harness tree'), width('Harness reference')]).toEqual([TOOL_PANEL_WIDTH, TOOL_PANEL_WIDTH]);
-  expect(panel('Harness tree')!.style.maxHeight).toBe(`${STACK_HEIGHT / 2}px`);
-  expect(TOOL_PANEL_REFERENCE_HEIGHT).toBe(144);
-  expect(panel('Harness reference')!.style.maxHeight).toBe(`${TOOL_PANEL_REFERENCE_HEIGHT}px`);
+  // Each as tall as its content needs, up to all the room under the strip.
+  expect([panel('Harness tree')!.style.maxHeight, panel('Harness reference')!.style.maxHeight]).toEqual([`${STACK_HEIGHT}px`, `${STACK_HEIGHT}px`]);
   expect(layout(preferences)).toEqual({ panels: {}, collapsed: {}, closed: {} });
   // Two kinds of panel: the tree and the Reference are each the person's to size, by one grip in
   // their bottom-right corner (Quick Edit's, drawn inside the panel); a kept effect is fixed, at the
@@ -124,32 +123,32 @@ it("each resizable panel is sized by its corner alone, apart from every other: w
   const treeCorner = screen.getByRole('separator', { name: 'Resize harness tree' });
   drag(treeCorner, [100, -100], { release: false });
   // Mid-drag: the tree follows the corner, and nothing else moves; nothing is written yet.
-  expect([width('Harness tree'), panel('Harness tree')!.style.maxHeight]).toEqual([TOOL_PANEL_WIDTH + 100, `${STACK_HEIGHT / 2 - 100}px`]);
+  expect([width('Harness tree'), panel('Harness tree')!.style.maxHeight]).toEqual([TOOL_PANEL_WIDTH + 100, `${STACK_HEIGHT - 100}px`]);
   expect(treeCorner.hasAttribute('data-dragging')).toBe(true);
   expect([width('Harness reference'), width('Kept controls')]).toEqual([TOOL_PANEL_WIDTH, TOOL_PANEL_WIDTH]);
   expect(preferences.writes).toBe(0);
   fireEvent.pointerUp(treeCorner, { pointerId: 1, clientX: 200, clientY: 0 });
   expect(preferences.writes).toBe(1);
-  expect(layout(preferences).panels).toEqual({ tree: { width: TOOL_PANEL_WIDTH + 100, height: STACK_HEIGHT / 2 - 100 } });
+  expect(layout(preferences).panels).toEqual({ tree: { width: TOOL_PANEL_WIDTH + 100, height: STACK_HEIGHT - 100 } });
   // The Reference, by its own corner: its size, and the tree's as it was.
   drag(screen.getByRole('separator', { name: 'Resize harness reference' }), [40, -60]);
   expect(preferences.writes).toBe(2);
-  expect(layout(preferences).panels).toEqual({ tree: { width: TOOL_PANEL_WIDTH + 100, height: STACK_HEIGHT / 2 - 100 },
-    reference: { width: TOOL_PANEL_WIDTH + 40, height: TOOL_PANEL_REFERENCE_HEIGHT - 60 } });
+  expect(layout(preferences).panels).toEqual({ tree: { width: TOOL_PANEL_WIDTH + 100, height: STACK_HEIGHT - 100 },
+    reference: { width: TOOL_PANEL_WIDTH + 40, height: STACK_HEIGHT - 60 } });
   expect([width('Harness tree'), width('Harness reference'), panel('Harness reference')!.style.maxHeight])
-    .toEqual([TOOL_PANEL_WIDTH + 100, TOOL_PANEL_WIDTH + 40, `${TOOL_PANEL_REFERENCE_HEIGHT - 60}px`]);
+    .toEqual([TOOL_PANEL_WIDTH + 100, TOOL_PANEL_WIDTH + 40, `${STACK_HEIGHT - 60}px`]);
   // From the keyboard, one axis a key: Left/Right the width, Up/Down the cap; Home and End both, to their bounds.
   fireEvent.keyDown(treeCorner, { key: 'ArrowLeft' });
   fireEvent.keyDown(treeCorner, { key: 'ArrowDown' });
-  expect(layout(preferences).panels.tree).toEqual({ width: TOOL_PANEL_WIDTH + 84, height: STACK_HEIGHT / 2 - 84 });
+  expect(layout(preferences).panels.tree).toEqual({ width: TOOL_PANEL_WIDTH + 84, height: STACK_HEIGHT - 84 });
   fireEvent.keyDown(treeCorner, { key: 'Home' });
   expect(layout(preferences).panels.tree).toEqual({ width: TOOL_PANEL_WIDTH, height: 64 });
   fireEvent.keyDown(treeCorner, { key: 'End' });
   expect(layout(preferences).panels.tree).toEqual({ width: VIEWER.width / 2, height: STACK_HEIGHT });
-  expect(layout(preferences).panels.reference).toEqual({ width: TOOL_PANEL_WIDTH + 40, height: TOOL_PANEL_REFERENCE_HEIGHT - 60 });
+  expect(layout(preferences).panels.reference).toEqual({ width: TOOL_PANEL_WIDTH + 40, height: STACK_HEIGHT - 60 });
   remount();
   expect([width('Harness tree'), panel('Harness tree')!.style.maxHeight]).toEqual([VIEWER.width / 2, `${STACK_HEIGHT}px`]);
-  expect([width('Harness reference'), panel('Harness reference')!.style.maxHeight]).toEqual([TOOL_PANEL_WIDTH + 40, `${TOOL_PANEL_REFERENCE_HEIGHT - 60}px`]);
+  expect([width('Harness reference'), panel('Harness reference')!.style.maxHeight]).toEqual([TOOL_PANEL_WIDTH + 40, `${STACK_HEIGHT - 60}px`]);
 
   // Position, by its corner too: its width and height in one write, the others as they were.
   preferences.update({ toolStack: { panels: {}, collapsed: {}, closed: {} } });
@@ -158,12 +157,12 @@ it("each resizable panel is sized by its corner alone, apart from every other: w
   const writes = preferences.writes;
   drag(screen.getByRole('separator', { name: 'Resize harness position' }), [60, -50]);
   expect(preferences.writes).toBe(writes + 1);
-  expect(layout(preferences).panels).toEqual({ position: { width: TOOL_PANEL_WIDTH + 60, height: STACK_HEIGHT / 2 - 50 } });
-  expect([width('Harness tree'), panel('Harness tree')!.style.maxHeight]).toEqual([TOOL_PANEL_WIDTH, `${STACK_HEIGHT / 2}px`]);
+  expect(layout(preferences).panels).toEqual({ position: { width: TOOL_PANEL_WIDTH + 60, height: STACK_HEIGHT - 50 } });
+  expect([width('Harness tree'), panel('Harness tree')!.style.maxHeight]).toEqual([TOOL_PANEL_WIDTH, `${STACK_HEIGHT}px`]);
   // Reset puts every size back.
   act(() => preferences.update({ toolStack: { panels: {}, collapsed: {}, closed: {} } }));
   expect([width('Harness tree'), width('Harness reference'), width('Harness position'), panel('Harness tree')!.style.maxHeight])
-    .toEqual([TOOL_PANEL_WIDTH, TOOL_PANEL_WIDTH, TOOL_PANEL_WIDTH, `${STACK_HEIGHT / 2}px`]);
+    .toEqual([TOOL_PANEL_WIDTH, TOOL_PANEL_WIDTH, TOOL_PANEL_WIDTH, `${STACK_HEIGHT}px`]);
 });
 
 it("the tree's X closes it, kept mounted, and marks Select; Select pressed while it is the tool opens it again, and from another tool only takes Select up; closed is kept across a remount", () => {
@@ -240,33 +239,6 @@ it("on a phone the tree starts closed, with Select marked and nothing stored; op
   expect(layout(preferences).closed).toEqual({ tree: false });
   fireEvent.click(within(panel('Harness tree')!).getByRole('button', { name: 'Close harness tree' }));
   expect([shown(), layout(preferences).closed]).toEqual([['Harness reference'], { tree: true }]);
-});
-
-it("a single part's tree starts closed, Select marked, and an assembly's open; once a person closes or opens it, their choice holds in every file", () => {
-  const preferences = tabSettings();
-  const mark = () => tool('Select').querySelector('[data-tool-panel-closed]');
-  // `panel-part.harness` is a single part's, `panel.harness` an assembly's.
-  const part = frame({ name: 'panel-part.harness', preferences });
-  expect([shown(), Boolean(mark())]).toEqual([['Harness reference'], true]);
-  part.unmount();
-  const assembly = frame({ name: 'panel.harness', preferences });
-  expect([shown(), Boolean(mark())]).toEqual([['Harness tree', 'Harness reference'], false]);
-  expect(preferences.writes).toBe(0);
-  // Closed in the assembly: closed in a part, and in the next assembly too.
-  fireEvent.click(within(panel('Harness tree')!).getByRole('button', { name: 'Close harness tree' }));
-  expect(layout(preferences).closed).toEqual({ tree: true });
-  assembly.unmount();
-  const closedPart = frame({ name: 'panel-part.harness', preferences });
-  expect([shown(), Boolean(mark())]).toEqual([['Harness reference'], true]);
-  // Opened in a part: open in the next part, and in an assembly.
-  fireEvent.click(tool('Select'));
-  expect(layout(preferences).closed).toEqual({ tree: false });
-  closedPart.unmount();
-  const openedPart = frame({ name: 'panel-part.harness', preferences });
-  expect([shown(), Boolean(mark())]).toEqual([['Harness tree', 'Harness reference'], false]);
-  openedPart.unmount();
-  frame({ name: 'panel.harness', preferences });
-  expect([shown(), Boolean(mark())]).toEqual([['Harness tree', 'Harness reference'], false]);
 });
 
 const displayPopover = () => document.querySelector<HTMLElement>('[data-display-popover]');

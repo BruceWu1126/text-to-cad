@@ -122,12 +122,14 @@ none.
 - **Display and Preview** at the navbar's right end, its last two controls: for a 3D
   file, the view's own — **Display** (the perspective box: see
   [Display settings](#display-settings-and-section-primitives)) and **Preview** (a play
-  icon). They are the navbar's 24px icon buttons with 14px icons, 4px apart, with hints
-  below them, in the box FileViewer hands the renderer for them (`navbarSlot`,
-  `data-view-controls`). Display's dropdown opens down from its button, end-aligned, and
-  never taller than the viewer below it. A view that is not 3D has neither, and neither
-  does a view drawn as a picture, one that is loading or failed to load, or preview, which
-  has the page to itself and draws its own in their place (see
+  icon). Immediately before Display, a STEP adds its **Select modes** while Select is the
+  tool (`RendererShell`'s `navbarControls`: see [Select](#tools-and-lifecycle)). They are
+  the navbar's 24px icon buttons with 14px icons, 4px apart, with hints below them, in the
+  box FileViewer hands the renderer for them (`navbarSlot`, `data-view-controls`). Display's
+  dropdown, and the Select modes', open down from their button, end-aligned, and Display's
+  is never taller than the viewer below it. A view that is not 3D has none of them, and
+  neither does a view drawn as a picture, one that is loading or failed to load, or
+  preview, which has the page to itself and draws its own in their place (see
   [preview](#camera-animation-and-preview)).
 - **Playbar** (preview's, a file with routines only) sits at bottom-centre, on a
   line 1.75rem up (a host whose control floats over the view's bottom moves it
@@ -168,7 +170,7 @@ owner.
 
 | Tool | Pressing it | Leaving it |
 | --- | --- | --- |
-| Select | The default tool of STEP and robots; shows Features (Links) and, with a selection, the Reference panel; a STEP's Select panel above them sets the mode. A press while it is up opens its tree again where a person closed it | The selection is dropped; its panels leave the stack |
+| Select | The default tool of STEP and robots; shows Features (an assembly's; a robot's Links) and, with a selection, the Reference panel; a STEP's modes are a menu at the navbar's right end, before Display, while it is up. A press while it is up opens Links again where a person closed it | The selection is dropped; its panels leave the stack, and the modes the navbar |
 | Draw | Draws on the view; its tools, color and history are the Drawing panel; a second press puts it down | The sketch is gone |
 | Measure | Arms picking and shows the Measure panel: its snapping modes, then its results; a press while it is up clears the results and puts it down | Unfinished picks are cancelled; completed measurements and their panel stay |
 | Explode / Clip | Opens a neutral panel; an edit applies the effect | A neutral panel goes; an applied effect and its panel stay |
@@ -181,9 +183,9 @@ returns to Select before it acts.
 **Every tool's panel but Select's has an X, and no fold chevron.** The X puts
 the tool down and returns to Select, the default tool, which cannot itself be put
 down. Draw's panel is a toolbar with no heading and no X: a second press on Draw
-puts it down. Select's tree has an X too, which closes the tree alone and leaves Select
+puts it down. A robot's Links has an X too, which closes the tree alone and leaves Select
 the tool; a press on Select while it is up opens it again (see
-[Closing the tree](#the-tool-stack)). SDF folds instead.
+[Closing the tree](#the-tool-stack)). A STEP's Features has none. SDF folds instead.
 
 **No tool has a menu on the strip.** A press on a tool is its only action:
 it takes the tool up, and — for a tool that toggles (Draw, Animation, Measure,
@@ -194,8 +196,9 @@ modes are never a panel or a row of their own: they are ONE small button in its
 panel's header row, just before the fold chevron or the X — a sliders icon, the
 size of those buttons (the strip's button shows the mode in hand) — whose
 dropdown lists the modes — each its glyph and its name — then any options that
-go with them (`kit/tools/ToolModeMenu.jsx`). Select's sits in the Features
-filter row, Measure's in the Measure heading. A tool's settings that are not
+go with them (`kit/tools/ToolModeMenu.jsx`). Select's sits at the navbar's
+right end instead, immediately before Display and the size of the navbar's controls,
+there while Select is the tool, a part file's too; Measure's in the Measure heading. A tool's settings that are not
 modes are the same button and dropdown (`ToolSettingsMenu`): Animation's, in its
 heading. A dropdown is ordinary — under
 its own button, free to overlap the stack — and closes with no exit animation,
@@ -207,8 +210,8 @@ preview's menus — Orbit, and the playbar's Routines and Playback settings
 
 **Select** (STEP) has four exclusive modes, each with its own glyph: **All**
 (the pointer), **Parts** (a cube), **Faces** (a cube, its top face filled) and
-**Edges** (a faint cube, one edge heavy). They are the mode menu in the
-Features filter row, beside its X; each menu row shows its mode's glyph
+**Edges** (a faint cube, one edge heavy). They are the mode menu at the
+navbar's right end, immediately before Display; each menu row shows its mode's glyph
 at full size. The strip's Select button shows the mode in hand as ONE composite:
 the pointer, with the mode's glyph shrunk to a badge in its top-right corner
 (cut out of the pointer so the two never touch at the strip's 14px), and the
@@ -335,14 +338,12 @@ stack.
   widens a panel.
 - **Heights.** A panel is exactly its content's height — never padded to a
   minimum: a tree of two rows is its filter row and two rows. A resizable panel
-  has a *cap* the content grows up to and then scrolls inside: the tree and
-  Position open capped at half the stack's own height (the area under the
-  strip, not the viewer) on desktop, and at the whole column on a phone. The
-  Reference opens shorter, capped at 144px on both (`TOOL_PANEL_REFERENCE_HEIGHT`:
-  its heading, its Copy and four compact rows between them — a reference's key
-  measurements, an arc's four the most; a longer one, a robot link's facts,
-  scrolls, or a drag of its corner shows it).
-  A cap is never a floor. Setting one panel's cap changes no other's.
+  has a *cap* the content grows up to and then scrolls inside: every one — the
+  tree, the Reference, Position — opens capped at the stack's own height (the
+  area under the strip, not the viewer), on desktop and phone alike, so it is
+  as tall as its content needs, up to all the room there is
+  (`toolPanelDefaultHeight`). Several open at once share that room as they give
+  way (below). A cap is never a floor. Setting one panel's cap changes no other's.
 - **One grip, on a resizable panel only.** A resizable panel is sized from its
   bottom-right corner alone, by the grip Quick Edit's box has
   (`kit/tools/ResizeGrip.jsx`, mirrored into this corner): two short diagonal
@@ -359,37 +360,36 @@ stack.
   inset above the strip, the strip, and at its foot the cube and an 8px gap above it
   (`VIEWPORT_STACK_BOTTOM`, `calc(6rem + 16px)`: the cube's 6rem, its 8px off the bottom
   and the gap): it never runs under the cube. When the panels need more, the tree gives way first and
-  scrolls inside itself, down to 128px or its content, whichever is less; then a
-  details panel (Reference, Position, Measurements)
-  gives way, down to 96px or its content; a small panel (Explode, Clip, Drawing,
-  Animation) keeps its height. If what cannot give way still does not fit, the column
-  itself scrolls — a panel is never cut. On mobile the tree starts closed and,
-  opened, may take the whole column, giving way as other panels join it.
-- **Closing the tree.** Select's tree (Features, Links) does not fold: the X at
-  its filter row's end ("Close features") closes it, `hidden` and kept mounted
-  with its expansion, filter, selection and scroll, and Select stays the tool —
-  a selection still shows its Reference, a panel of its own. While the tree is
-  closed, Select's button carries the flyout corner: a small filled triangle in
-  its bottom-right corner (the mode badge has the top-right), out of the
-  accessibility tree, with the button described as "Features closed". A press
-  on Select while it is the tool opens the tree again as it was, and the mark
-  goes; from another tool a press only takes Select up, the tree still closed.
-  Until a person closes or opens it, the tree starts as the file does: closed
-  for a single part, open for an assembly (and for a robot's Links), and closed
-  on a phone whatever the file — the mark showing whenever it starts closed.
-  Once the person has closed or opened it, that choice holds in every file of
-  the tab, over how each starts. A renderer opts in with `closable` on the
-  tree's panel (`ToolPanelClose` is its X) and `panel: { id, label, startsClosed }`
-  on the tool it belongs to (STEP: `startsClosed` for a single part); the frame
-  draws the mark, routes the press and starts the panel (`RendererShell.jsx`).
+  scrolls inside itself, down to 128px or its content, whichever is less; then the
+  details panels (Reference, Position, Measurements) give way together, each in
+  proportion to its height, down to 96px or its content; a small panel (Explode, Clip,
+  Drawing, Animation) keeps its height. If what cannot give way still does not fit, the
+  column itself scrolls — a panel is never cut.
+- **The STEP tree is always there.** A STEP's Features has no X and does not fold:
+  under Select an assembly shows it, on a phone too, and a part file has none, its
+  one row being all there would be (the Select modes are in the navbar either way).
+- **Closing Links.** A robot's Links does not fold: the X at its filter row's end
+  ("Close links") closes it, `hidden` and kept mounted with its expansion, filter,
+  selection and scroll, and Select stays the tool — a selection still shows its
+  Reference, a panel of its own. While Links is closed, Select's button carries the
+  flyout corner: a small filled triangle in its bottom-right corner, out of the
+  accessibility tree, with the button described as "Links closed". A press on
+  Select while it is the tool opens Links again as it was, and the mark goes; from
+  another tool a press only takes Select up, Links still closed. Until a person
+  closes or opens it, Links starts open, and closed on a phone — the mark showing
+  whenever it starts closed. Once the person has closed or opened it, that choice
+  holds in every file of the tab. A renderer opts in with `closable` on the tree's
+  panel (`ToolPanelClose` is its X) and `panel: { id, label }` on the tool it
+  belongs to; the frame draws the mark, routes the press and starts the panel
+  (`RendererShell.jsx`).
 - **Folding.** Only Select's SDF panel and a robot's Reference fold: every tool
   panel and a STEP's Reference has an X alone. A folding panel folds to its first row and unfolds again,
   by a chevron at that row's trailing end: up while open (fold), down while
   folded (open), with `aria-expanded` and the panel's name ("Collapse sdf").
   Folded content stays mounted.
 - **First rows.** Features and Links have no heading: the filter is their top
-  row ("Filter…"), stays put while the tree scrolls, and carries the mode menu
-  (Select's) and the X at its end — both step aside while the box has
+  row ("Filter…"), stays put while the tree scrolls, and carries Links' X at its
+  end, and Features' Loading… and Show all — each steps aside while the box has
   focus, so the whole row is the box. Every other panel
   has a heading row, and every heading reads alike: the Display section
   headings' text (11px, regular, `TOOL_PANEL_HEADING_TEXT_CLASS`), 28px tall,
@@ -408,16 +408,15 @@ stack.
   platform's form (a phone shows none); after a copy it says **Copied** for a
   moment, a tick where the shortcut was.
 - **The layout is the person's.** The sizes, the folded panels and the closed
-  tree are one of the tab's settings, across its files (`CadPreferences.toolStack`:
+  Links are one of the tab's settings, across its files (`CadPreferences.toolStack`:
   `{ panels: { [panel id]: { width?, height? } }, collapsed: { [panel id]: boolean }, closed: { [panel id]: boolean } }`,
   kept beside the appearance). `panels` holds only what a person set, by
   resizable panel — the tree, the Reference and Position each under its own
   id; `collapsed` only what differs from a panel's start (the SDF panel starts
   folded); `closed` the person's own choice, once they have closed (`true`) or
-  opened (`false`) the tree, which then holds in every file over how each
-  starts (a part closed, an assembly open, a phone closed). A new tab (a cleared
-  record) puts every panel back at the one width and its default cap, and the
-  tree as each file starts it. Every size is written back once, when the pointer
+  opened (`false`) Links, which then holds in every file over how it starts (a
+  phone closed). A new tab (a cleared record) puts every panel back at the one
+  width and its default cap, and Links as it starts. Every size is written back once, when the pointer
   lets go (or per key), never per pointer move.
 - **Surfaces.** Two, defined once (`lib/floatingSurface.js`), with one border: the
   toolbar and the stack's panels, which stay up beside the model, share
@@ -456,8 +455,9 @@ Model, link and explorer filters share `TreeFilterInput`; the explorer's rows ar
 
 **Mobile** is below 720px of FileViewer width — the one viewer breakpoint
 (`useViewerMobile`); chrome never uses window breakpoints. The tool stack is
-the same stack, but Select's tree (Features, Links) starts closed in every
-file, Select marked, so the model has the screen until the person presses Select. The
+the same stack, but a robot's Links starts closed, Select marked, so the model
+has the screen until the person presses Select; a STEP's Features shows as it does
+on a desktop. The
 explorer is the same popover, never wider than the window less 1rem. The navbar is the
 same row; the shortcut hint is hidden.
 Touch works for every tool: one finger orbits, two pan and
@@ -566,7 +566,7 @@ the person comes back to the page.
 
 The **Position** panel is headed "Position", with a small Reset icon and its
 X in its heading, and is sized like the tree: its content's height, capped at
-half the stack, with its corner grip. Its first row is "Pose" — a label
+the stack's, with its corner grip. Its first row is "Pose" — a label
 beside its dropdown (`KinematicsPoseRow`) — only when there is a named pose to
 choose; the dropdown includes Default, and manual edits show Custom. No divider
 under the pose row and no Reset footer. Each joint's label sits tight above its
@@ -590,8 +590,8 @@ animation are separate capabilities; the absence of one never leaves empty
 controls for another.
 
 The Reference panel is read-only, and a resizable panel of its own under the
-tree: it opens at the one width, capped at 144px, and its corner grip sizes it
-apart from the tree. Its rows are compact (2px above and below) and
+tree: it opens at the one width, capped at the stack's height, and its corner grip
+sizes it apart from the tree. Its rows are compact (2px above and below) and
 in the panel's one face: labels and values alike are the UI font at `text-tiny`,
 numbers in tabular figures — no monospace. A value too long for its cell wraps
 between words, or (a row of numbers, such as a link's inertia) truncates with

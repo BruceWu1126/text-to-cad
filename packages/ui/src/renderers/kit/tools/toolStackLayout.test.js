@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  DEFAULT_TOOL_STACK, TOOL_PANEL_MIN_HEIGHT, TOOL_PANEL_REFERENCE_HEIGHT, TOOL_PANEL_WIDTH,
+  DEFAULT_TOOL_STACK, TOOL_PANEL_MIN_HEIGHT, TOOL_PANEL_WIDTH,
   clampToolPanelHeight, clampToolPanelWidth, normalizeToolStack, toolPanelClosed, toolPanelDefaultHeight
 } from "./toolStackLayout.js";
 
@@ -18,12 +18,11 @@ test("the layout is the sizes a person set, by panel, the folded panels and the 
   assert.deepEqual(normalizeToolStack({ panels: { tree: { width: 99999 } } }).panels.tree, { width: 4000 }, "a stored size is bounded; the viewer bounds what is drawn");
 });
 
-test("a closable panel is closed as the person left it, their choice holding in every file, and otherwise as it starts: closed on a phone, and on a desktop as the file says", () => {
-  assert.equal(toolPanelClosed(DEFAULT_TOOL_STACK, "tree"), false, "an assembly's tree starts open on a desktop");
-  assert.equal(toolPanelClosed(DEFAULT_TOOL_STACK, "tree", { startsClosed: true }), true, "a single part's starts closed");
-  assert.equal(toolPanelClosed(DEFAULT_TOOL_STACK, "tree", { mobile: true }), true, "on a phone every tree starts closed");
-  assert.equal(toolPanelClosed({ closed: { tree: false } }, "tree", { mobile: true, startsClosed: true }), false, "opened, it stays open: a part's, and on a phone");
-  assert.equal(toolPanelClosed({ closed: { tree: true } }, "tree"), true, "closed, it stays closed: an assembly's too");
+test("a closable panel is closed as the person left it, their choice holding in every file, and otherwise as it starts: closed on a phone, open elsewhere", () => {
+  assert.equal(toolPanelClosed(DEFAULT_TOOL_STACK, "tree"), false, "a tree starts open on a desktop");
+  assert.equal(toolPanelClosed(DEFAULT_TOOL_STACK, "tree", { mobile: true }), true, "and closed on a phone");
+  assert.equal(toolPanelClosed({ closed: { tree: false } }, "tree", { mobile: true }), false, "opened, it stays open, on a phone too");
+  assert.equal(toolPanelClosed({ closed: { tree: true } }, "tree"), true, "closed, it stays closed");
   assert.equal(toolPanelClosed(null, "tree"), false);
 });
 
@@ -44,13 +43,8 @@ test("a panel's cap is bounded by the minimum and by the stack", () => {
   assert.equal(clampToolPanelHeight(300, 0), TOOL_PANEL_MIN_HEIGHT, "an unmeasured stack allows the minimum");
 });
 
-test("a tree or Position opens capped at half the stack on desktop and the whole of it on mobile; the Reference, shorter, at its own height", () => {
-  assert.equal(toolPanelDefaultHeight("tree", 600), 300);
-  assert.equal(toolPanelDefaultHeight("position", 601), 301);
-  assert.equal(toolPanelDefaultHeight("tree", 600, true), 600);
-  assert.equal(toolPanelDefaultHeight("position", 600, true), 600);
-  assert.equal(TOOL_PANEL_REFERENCE_HEIGHT, 144, "a heading, its Copy and four compact rows");
-  assert.equal(toolPanelDefaultHeight("reference", 600), TOOL_PANEL_REFERENCE_HEIGHT);
-  assert.equal(toolPanelDefaultHeight("reference", 600, true), TOOL_PANEL_REFERENCE_HEIGHT);
-  assert.equal(toolPanelDefaultHeight("tree", 0), TOOL_PANEL_REFERENCE_HEIGHT, "an unmeasured stack falls back to a height");
+test("every resizable panel opens capped at the whole stack, on desktop and phone alike: as tall as its content, up to the room there is", () => {
+  assert.equal(toolPanelDefaultHeight(600), 600);
+  assert.equal(toolPanelDefaultHeight(600.4), 600);
+  assert.equal(toolPanelDefaultHeight(0), null, "an unmeasured stack sets no cap yet");
 });

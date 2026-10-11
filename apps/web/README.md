@@ -224,10 +224,11 @@ specification.
 
 The web host owns URL/history, the tab's persistence, appearance, version links
 and native service adapters. Shared renderers own all model interaction. STEP and
-robots open in Select, whose Features (Links for a robot) panel hangs under the
-toolbar with the rest of the tool stack; Position's panel replaces it while Position
-is the tool, and the Animation tool's (a STEP with routines) while that is. The file's
-name in the navbar opens the explorer.
+robots open in Select, whose Features (an assembly's; Links for a robot) panel hangs
+under the toolbar with the rest of the tool stack, and whose modes a STEP offers at the
+navbar's right end, before Display; Position's panel replaces it while Position is the
+tool, and the Animation tool's (a STEP with routines) while that is. The file's name in
+the navbar opens the explorer.
 STEP and robot files have a top-left toolbar; GLB, STL and 3MF have none, and a GLB with
 clips has the Animation panel there instead, always up. Every 3D
 file has Display (its settings, a dropdown that opens down) and Preview at the navbar's
@@ -236,8 +237,8 @@ pan, zoom, snapshot and Quick Edit, without a 3D toolbar or tool stack.
 
 The explorer is a popover under the file's name: the file's folder, one folder at a
 time, with "Filter files..." to find a file anywhere under it. Below 720px of
-FileViewer width the tree panel of the tool stack starts closed (Select, pressed,
-opens it). Preview is the shared shell's button beside Display: it takes the whole page,
+FileViewer width a robot's Links starts closed (Select, pressed, opens it); a STEP's
+Features shows as on a desktop. Preview is the shared shell's button beside Display: it takes the whole page,
 hiding the navbar, toolbar, tool stack and
 Quick Edit, orbits by default, plays routines (on entry only with Autoplay on)
 and keeps its own controls where the navbar's sat — Orbit, Display, Exit preview — with

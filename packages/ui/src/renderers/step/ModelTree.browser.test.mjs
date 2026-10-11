@@ -34,21 +34,20 @@ const hoverStore = createHoverStore();
 window.treeTest = {events, hoverStore, order:groups.flatMap(g=>['Group '+g.id.slice(1), ...g.children.map(p=>p.displayName)])};
 const face = (id, n) => ({id:id+'.f'+n,selectorType:'face',occurrenceId:id,normalizedSelector:id+'.f'+n});
 function App(){
-  const [selected,setSelected]=useState([]),[reveal,setReveal]=useState(0),[mode,setMode]=useState('all'),[tick,setTick]=useState(0),[details,setDetails]=useState(0),[picked,setPicked]=useState([]);
+  const [selected,setSelected]=useState([]),[reveal,setReveal]=useState(0),[mode,setMode]=useState('all'),[tick,setTick]=useState(0),[loading,setLoading]=useState(false),[picked,setPicked]=useState([]);
   const expanded=useMemo(()=>groups.map(g=>g.id),[]);
   const partControls=useMemo(()=>({isAssemblyView:true,expandedTreeNodeIds:expanded,onToggleTreeNode(){},hiddenPartIds:[],focusedNodeIds:[],selectableNodeIds:null,
     onSelectTreeNode:id=>{events.selected.push(id);setSelected([id]);},menuForNode:id=>({nodeId:id,copyText:id,zoomSelectionAvailable:false})}),[expanded]);
   const onLoadTopology=useMemo(()=>ids=>{events.topology.push(...ids);},[]);
-  Object.assign(window.treeTest,{refresh:()=>setTick(n=>n+1),details:()=>setDetails(n=>n+1),select:id=>{setPicked([]);setSelected([id]);setReveal(n=>n+1);},setMode,
+  Object.assign(window.treeTest,{refresh:()=>setTick(n=>n+1),loading:()=>setLoading(value=>!value),select:id=>{setPicked([]);setSelected([id]);setReveal(n=>n+1);},setMode,
     // What a face picked in the viewport hands the tree: that face, as the selected reference.
     pickFace:(id,n)=>{setSelected([]);setPicked([face(id,n)]);setReveal(k=>k+1);}});
-  const selectionDetails=useMemo(()=>details?{title:'Ref',content:<p>Details {details}</p>}:null,[details]);
   // As the viewer holds it: the tool stack beside the viewport's canvas, in one surface.
   return <div data-cad-surface="" style={{display:'flex'}}>
     <canvas data-testid="viewport" width="200" height="200" style={{width:200,height:200}}/>
     <section data-testid="model" data-tick={tick} style={{height:420,width:320,display:'flex',flexDirection:'column',gap:8,padding:16}}>
       <ModelingTree active disabled={false} mode={mode} stepRoot={root} selectedPartIds={selected} selectedReferences={picked}
-        activeTreeNodeScrollKey={reveal} onLoadTopology={onLoadTopology} partControls={partControls} selectionDetails={selectionDetails} hoverStore={hoverStore}/>
+        activeTreeNodeScrollKey={reveal} onLoadTopology={onLoadTopology} partControls={partControls} loading={loading} hoverStore={hoverStore}/>
     </section>
   </div>;
 }
@@ -120,7 +119,7 @@ createRoot(document.getElementById('root')).render(<App/>);
     check(await layout(), `scrolled to ${fraction}`);
   }
 
-  // A parent re-rendered with the same props renders nothing; one that changes only the details
+  // A parent re-rendered with the same props renders nothing; one that changes only the filter row's status
   // renders the tree, but not one row.
   await frames();
   const before = await page.evaluate(() => ({ ...window.__renders }));
@@ -128,10 +127,11 @@ createRoot(document.getElementById('root')).render(<App/>);
   await page.evaluate(() => window.treeTest.refresh()); await frames();
   const same = await page.evaluate(() => ({ ...window.__renders }));
   assert.deepEqual([same.ModelingTree - before.ModelingTree, same.ModelingRow - before.ModelingRow], [0, 0], 'unchanged props: no tree or row render');
-  await page.evaluate(() => window.treeTest.details()); await frames();
+  await page.evaluate(() => window.treeTest.loading()); await frames();
   const detailed = await page.evaluate(() => ({ ...window.__renders }));
-  assert.ok(detailed.ModelingTree > same.ModelingTree, 'the tree rendered for its details');
+  assert.ok(detailed.ModelingTree > same.ModelingTree, 'the tree rendered for its status');
   assert.equal(detailed.ModelingRow - same.ModelingRow, 0, 'and no row did');
+  await page.evaluate(() => window.treeTest.loading()); await frames();
 
   // A row holding focus, and a row holding its menu open, stay mounted while the list scrolls
   // far away from them.

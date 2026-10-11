@@ -3,7 +3,8 @@ import { buildPositionSection } from './MotionControlsSection.js';
 import { STEP_MODEL_ROOT_ID } from '@text-to-cad/core/lib/step/stepTree.js';
 import { useStepReference } from './StepReferenceSection.js';
 import ModelingTree from './ModelingTree.jsx';
-import ToolPanel from '../../../kit/tools/ToolPanel.jsx';
+import ToolPanel, { ToolPanelFooterButton } from '../../../kit/tools/ToolPanel.jsx';
+import { useViewerMobile } from '../../../../file-viewer/responsive.js';
 import { stepGeometryMeasurements } from '../../workbench/stepGeometryMeasurements.js';
 const EMPTY = [];
 
@@ -30,10 +31,11 @@ function useLatestActions(actions) {
 
 /**
  * A STEP's panels in the tool stack, top to bottom: while Select is the tool, **Features** (the
- * filter and the model tree) and the **Reference** for what is selected; while Position is the
- * tool, **Position**. Each stays mounted while its tool is not
- * up, so the tree keeps its expansion, filter and scroll. The kept effects' panels follow them
- * (`ModelTools.jsx`); the stack itself is the shell's (`kit/shell/RendererShell.jsx`).
+ * filter and the model tree: an assembly's alone, since a part file's would be its one row) and
+ * the **Reference** for what is selected; while Position is the tool, **Position**. Each stays
+ * mounted while its tool is not up, so the tree keeps its expansion, filter and scroll. The kept
+ * effects' panels follow them (`ModelTools.jsx`); the stack itself is the shell's
+ * (`kit/shell/RendererShell.jsx`).
  *
  * `selectActive`: Features is on screen, which is when a pick is scrolled to. `selectMode` is the
  * Select tool's mode, which the tree's disclosure follows.
@@ -53,11 +55,12 @@ export function useStepPanels({
   // The menu a tree row carries: a node's part menu descriptor, and the actions behind it.
   menuForNode = null, partMenuActions = null,
   treeSelectionDisabled = false, selectMode = 'all', loadingGeometry = false,
-  positionRuntime = null, selectModeMenu = null, onClosePosition = null,
+  positionRuntime = null, onClosePosition = null,
   // The viewport's hover (`workbench/hoverStore.js`): a large tree under Faces or Edges asks for the
   // topology of the part the pointer rests on.
   hoverStore = null,
 }) {
+  const mobile = useViewerMobile();
   const modelReferences = geometryInspection?.references || EMPTY;
   const modelParts = geometryInspection?.parts || EMPTY;
   const measuredSelection = useMemo(() => ({
@@ -102,17 +105,24 @@ export function useStepPanels({
   if (!selectedEntry) return null;
   const selectionDetails = selectedReferences.length || measuredSelection.partIds.length ? reference : null;
   const position = buildPositionSection({ poseRuntime: positionRuntime });
+  const disabled = treeSelectionDisabled || viewerLoading;
   return <>
-    {/* Features, then the Reference for a selection: both the tree's, which knows what is picked in it. */}
-    <ModelingTree key={`${selectedEntry.file}:${geometryInspection?.revision}`}
-      stepRoot={stepTreeRoot} active={selectActive} mode={selectMode} modeMenu={selectModeMenu} loading={loadingGeometry}
-      disabled={treeSelectionDisabled || viewerLoading}
-      selectedReferences={selectedReferences} selectedPartIds={selectedPartIds}
-      selectionDetails={selectionDetails} selectionCopy={selectionCopy} activeTreeNodeScrollKey={activeTreeNodeScrollKey}
+    {isAssemblyView ? <ModelingTree key={`${selectedEntry.file}:${geometryInspection?.revision}`}
+      stepRoot={stepTreeRoot} active={selectActive} mode={selectMode} loading={loadingGeometry} disabled={disabled}
+      selectedReferences={selectedReferences} selectedPartIds={selectedPartIds} activeTreeNodeScrollKey={activeTreeNodeScrollKey}
       onLoadTopology={loadTopology} onClearSelection={clearSelection}
       partControls={partControls} hoverStore={hoverStore}
-    />
-    {/* Headed "Position" with its Reset; sized like the tree: its content's height, up to half the stack. */}
+    /> : null}
+    {/* What is picked, as its own panel under the tree: it comes with a selection and goes with it,
+        and is sized on its own, apart from the tree. Not folded away: its X clears the selection,
+        and the Copy at its foot copies the whole selection (Copy All, with several references). */}
+    {selectionDetails ? <ToolPanel id="reference" title={selectionDetails.title || 'Reference'} label="Reference details" closeLabel="Clear selection" fit="details" resizable
+      collapsible={false} hidden={!selectActive} onClose={clearSelection}
+      footer={selectionCopy ? <ToolPanelFooterButton label={selectionCopy.label} shortcut={mobile ? '' : selectionCopy.shortcut}
+        disabled={disabled} onClick={selectionCopy.onCopy}/> : null}>
+      <div className="px-2 pb-1.5">{selectionDetails.content}</div>
+    </ToolPanel> : null}
+    {/* Headed "Position" with its Reset; sized like every resizable panel: its content's height, up to the stack's. */}
     {/* Its X puts Position down, back to Select; the values stay. */}
     {position ? <ToolPanel id="position" title={position.title} actions={position.actions} label="Position controls" fit="details" resizable
       collapsible={false} onClose={closePosition} closeLabel="Close position" hidden={!positionActive}>{position.content}</ToolPanel> : null}

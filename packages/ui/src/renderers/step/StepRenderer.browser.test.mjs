@@ -3,7 +3,7 @@ import { after, afterEach, before, test } from 'node:test';
 import { PNG } from 'pngjs';
 import { parseCadRefToken } from '@text-to-cad/core/lib/cadRefs.js';
 import { loadStepFixture, serveStepHarness } from '../harness/stepScenario.mjs';
-import { TOOL_PANEL_REFERENCE_HEIGHT, TOOL_PANEL_WIDTH } from '../../../dist/renderers/kit/tools/toolStackLayout.js';
+import { TOOL_PANEL_WIDTH } from '../../../dist/renderers/kit/tools/toolStackLayout.js';
 
 // The STEP renderer end to end in a real browser, over the committed two-part
 // fixture (`__fixtures__/step`): a coloured base with a bore, a coloured arm, one
@@ -225,11 +225,10 @@ async function open(options = {}) {
     // The tool stack's panels on screen, top to bottom, by their accessible names.
     stack: () => pane.locator('[data-cad-tool-stack] [data-tool-panel]').evaluateAll(panels => panels
       .filter(panel => panel.getClientRects().length > 0).map(panel => panel.getAttribute('aria-label'))),
-    // Select's modes are a menu in the Features filter row (`SelectionModes.jsx`); the strip opens no menu.
+    // Select's modes are a menu at the navbar's right end, before Display (`SelectionModes.jsx`); the
+    // strip opens no menu.
     chooseSelectMode: async name => {
-      // The mode menu steps aside while the filter box has focus.
-      await page.evaluate(() => document.activeElement instanceof HTMLInputElement && document.activeElement.blur());
-      await pane.getByRole('button', { name: /^Select mode: / }).click();
+      await pane.locator('[data-view-controls]').getByRole('button', { name: /^Select mode: / }).click();
       await page.locator('[role=menu][aria-label="Select mode"]').getByRole('menuitemradio', { name, exact: true }).click();
       await page.locator('[role=menu]').waitFor({ state: 'detached' });
     },
@@ -256,13 +255,13 @@ async function open(options = {}) {
 }
 
 
-test('a STEP opens in Select with the tools its sidecar earns, its Features in the tool stack and Display and Preview in the navbar, and paints both authored colours', async () => {
+test('a STEP opens in Select with the tools its sidecar earns, its Features in the tool stack and the Select modes, Display and Preview in the navbar, and paints both authored colours', async () => {
   const view = await open();
   const { page, pane, errors } = view;
   assert.deepEqual(await view.tools(), ['Select:true', 'Position:false', 'Animation:false', 'Draw:false', 'Measure:false', 'Explode:false', 'Clip:false'],
     'Position because the sidecar bound, Animation because it has a routine. Display is a dropdown from the navbar, not a tool');
   assert.deepEqual(await pane.locator('[data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-    ['Display', 'Preview'], 'the view\'s controls at the navbar\'s right end: Display, then Preview');
+    ['Select mode: All', 'Display', 'Preview'], 'the view\'s controls at the navbar\'s right end: Select\'s modes, Display, then Preview');
   assert.equal(await view.displayPanel().count(), 0, 'Display is never where a file opens');
   assert.equal(await pane.locator('[data-view-controls]').getByRole('button', { name: 'Preview', exact: true }).count(), 1,
     'a STEP is 3D: Preview sits in its navbar');
@@ -283,34 +282,23 @@ test('a STEP opens in Select with the tools its sidecar earns, its Features in t
   assert.ok(boxes.base?.count > 2000 && boxes.arm?.count > 1000, `both parts are drawn, each in its own colour: ${JSON.stringify(boxes)}`);
   // A part is a leaf: nothing opens under it.
   assert.deepEqual(await view.rows(), ['Select base', 'Select arm']);
-  // Its cap is half the stack's own height (the area under the strip), and a cap is never a
-  // floor: two rows are two rows tall.
+  // Its cap is the stack's own height (the area under the strip): as tall as its rows need, up to
+  // all the room there is. A cap is never a floor: two rows are two rows tall.
   const featuresPanel = pane.getByRole('region', { name: 'Features', exact: true });
   const stackHeight = await pane.locator('[data-cad-tool-stack]').evaluate(node => node.clientHeight);
   const fit = await featuresPanel.evaluate(node => ({ cap: node.style.maxHeight, height: node.getBoundingClientRect().height,
     rows: node.querySelector('[data-tool-panel-body]').scrollHeight, filter: node.querySelector('[data-slot=tree-filter]').getBoundingClientRect().height }));
-  assert.equal(fit.cap, `${Math.round(stackHeight / 2)}px`, 'the tree opens capped at half the stack');
+  assert.equal(fit.cap, `${stackHeight}px`, 'the tree opens capped at the whole stack');
   assert.ok(Math.abs(fit.height - (fit.filter + fit.rows + 2)) <= 1, `and is its filter row and its rows: ${JSON.stringify(fit)}`);
-  // Its X, at the filter row's end, closes it; Select, pressed while it is the tool, opens it again
-  // as it was.
+  // An assembly's tree is always there under Select: no X, no fold, and Select pressed again
+  // changes nothing.
+  assert.equal(await featuresPanel.getByRole('button', { name: /^(?:Close|Collapse|Expand) features$/ }).count(), 0, 'the tree has no X and does not fold');
   const openedRows = await view.rows();
-  assert.equal(await featuresPanel.getByRole('button', { name: /^(?:Collapse|Expand) features$/ }).count(), 0, 'the tree does not fold');
-  const selectMark = view.tool('Select').locator('[data-tool-panel-closed]');
-  assert.equal(await selectMark.count(), 0);
-  await featuresPanel.locator('[data-slot=tree-filter]').getByRole('button', { name: 'Close features', exact: true }).click();
-  await featuresPanel.waitFor({ state: 'hidden' });
-  assert.deepEqual(await view.stack(), [], 'closed: the tree is off the stack');
-  // Select carries the flyout corner while its tree is closed, in its button's bottom-right corner.
-  const [mark, selectBox] = await Promise.all([selectMark.boundingBox(), view.tool('Select').boundingBox()]);
-  assert.ok(mark && Math.abs(mark.x + mark.width - selectBox.x - selectBox.width) <= 1 && Math.abs(mark.y + mark.height - selectBox.y - selectBox.height) <= 1,
-    `the mark sits in Select's bottom-right corner: ${JSON.stringify([mark, selectBox])}`);
-  assert.deepEqual((await page.evaluate(() => window.cadHarness.preferences.getSnapshot().toolStack)).closed, { tree: true });
   await view.tool('Select').click();
-  await featuresPanel.waitFor();
-  assert.equal(await selectMark.count(), 0, 'open again: the mark goes');
-  assert.deepEqual(await view.rows(), openedRows, 'the tree kept its expansion while closed');
-  assert.deepEqual(await page.evaluate(() => window.cadHarness.preferences.getSnapshot().toolStack), { panels: {}, collapsed: {}, closed: { tree: false } },
-    'nothing sized; the tree opened again, the person\'s choice for every file of the tab');
+  assert.deepEqual([await view.stack(), await view.rows()], [['Features'], openedRows]);
+  assert.equal(await view.tool('Select').locator('[data-tool-panel-closed]').count(), 0, 'Select is never marked');
+  assert.deepEqual(await page.evaluate(() => window.cadHarness.preferences.getSnapshot().toolStack), { panels: {}, collapsed: {}, closed: {} },
+    'nothing is stored until a person sizes a panel');
   // One grip, Quick Edit's, in the bottom-right corner and inside the panel's border: it alone sizes the panel.
   assert.deepEqual(await featuresPanel.getByRole('separator').evaluateAll(handles => handles.map(handle => handle.getAttribute('aria-label'))), ['Resize features']);
   const [grip, panelBox] = await Promise.all([featuresPanel.getByRole('separator', { name: 'Resize features', exact: true }).boundingBox(), featuresPanel.boundingBox()]);
@@ -357,8 +345,7 @@ test('a pick names its face or edge by the id cadgen minted in the selector tabl
   assert.deepEqual(await selected(), [`${base.id}.${rim.localId}`], 'the rim edge is the table\'s row');
   // Group edges: the pick grows to the edges of the table's chain, which for a box edge is itself
   // alone (its ends each meet two edges at a right angle), however close the neighbours lie.
-  await page.evaluate(() => document.activeElement instanceof HTMLInputElement && document.activeElement.blur());
-  await pane.getByRole('button', { name: /^Select mode: / }).click();
+  await pane.locator('[data-view-controls]').getByRole('button', { name: /^Select mode: / }).click();
   await page.locator('[role=menu][aria-label="Select mode"]').getByRole('menuitemcheckbox', { name: 'Group edges', exact: true }).click();
   // A checkbox item keeps its menu open for the next one; Escape puts it away.
   await page.keyboard.press('Escape');
@@ -419,12 +406,12 @@ test('Select picks parts and faces, a selection lives only under Select, and the
   assert.doesNotMatch(partText, /\bType\b|\bID\b|o1\.1|Center|Material|Color/);
   assert.equal(await reference.locator('[data-reference-count]').count(), 0, 'one reference has no i/N');
   // Compact rows in the panel's one face: every value is the UI font at the panel's size, never
-  // monospace. The Reference opens at every panel's width and its own default cap, shorter than the
-  // tree's, and is sized on its own by its corner grip — so a long value (a size) wraps to a second
-  // line rather than widening it, and what runs past the cap scrolls inside it.
+  // monospace. The Reference opens at every panel's width, capped at the stack as the tree is, and
+  // is sized on its own by its corner grip — so a long value (a size) wraps to a second line rather
+  // than widening it, and what runs past the cap scrolls inside it.
   assert.equal(Math.round((await reference.boundingBox()).width), TOOL_PANEL_WIDTH);
-  assert.equal(await reference.evaluate(node => node.style.maxHeight), `${TOOL_PANEL_REFERENCE_HEIGHT}px`);
-  assert.ok((await reference.boundingBox()).height <= TOOL_PANEL_REFERENCE_HEIGHT, 'never past its cap');
+  const referenceStack = await pane.locator('[data-cad-tool-stack]').evaluate(node => node.clientHeight);
+  assert.equal(await reference.evaluate(node => node.style.maxHeight), `${referenceStack}px`);
   assert.deepEqual(await reference.getByRole('separator').evaluateAll(handles => handles.map(handle => handle.getAttribute('aria-label'))), ['Resize reference details']);
   const faces = await reference.locator('[data-tool-panel-body] *').evaluateAll(nodes => [...new Set(nodes
     .filter(node => !node.childElementCount && node.textContent.trim())
@@ -441,14 +428,11 @@ test('Select picks parts and faces, a selection lives only under Select, and the
   const [features, pinned] = await Promise.all([pane.getByRole('region', { name: 'Features', exact: true }).boundingBox(), reference.boundingBox()]);
   assert.ok(pinned.y >= features.y + features.height && pinned.y - (features.y + features.height) <= 10, `directly under Features: ${pinned.y} vs ${features.y + features.height}`);
   assert.equal(pinned.width, features.width, 'the one width');
-  // The Features filter row is a heading's height, dense: its buttons sit exactly where a heading's
-  // do, 5px down from their panel's top.
+  // The Features filter row is a heading's height, dense, as the Reference's heading is.
   const featuresPanel = pane.getByRole('region', { name: 'Features', exact: true });
-  const [close, clear] = await Promise.all([featuresPanel.getByRole('button', { name: 'Close features', exact: true }).boundingBox(),
-    reference.getByRole('button', { name: 'Clear selection', exact: true }).boundingBox()]);
-  assert.equal(Math.round(close.y - features.y), 5, 'the filter row\'s X');
-  assert.equal(Math.round(clear.y - pinned.y), 5, 'the Reference heading\'s X');
-  assert.equal(close.height, clear.height);
+  const [filterRow, referenceHeading] = await Promise.all([featuresPanel.locator('[data-slot=tree-filter]').boundingBox(),
+    reference.locator('[data-tool-panel-heading]').boundingBox()]);
+  assert.equal(Math.round(filterRow.height), Math.round(referenceHeading.height), 'the filter row is a heading\'s height');
   assert.equal(await pane.getByRole('textbox', { name: 'Filter model', exact: true }).evaluate(node => getComputedStyle(node).fontSize), '11px');
   assert.equal(await pane.getByRole('button', { name: 'Select base', exact: true }).getAttribute('aria-pressed'), 'true', 'the tree row follows the viewport');
   await page.keyboard.down('Shift');
@@ -802,10 +786,10 @@ test('Position drives the mate and repaints, a named pose jumps, the Position kn
   for (const heading of ['Pose', 'Joints', 'Kinematics']) {
     assert.equal(await panel.getByRole('heading', { name: heading, exact: true }).count(), 0, `no ${heading} heading inside Position`);
   }
-  // Sized like the tree: its content's height, capped at half the stack, with its corner grip.
+  // Sized like the tree: its content's height, capped at the whole stack, with its corner grip.
   const positionFit = await panel.evaluate(node => ({ cap: node.style.maxHeight, stack: node.closest('[data-cad-tool-stack]').clientHeight,
     scrolls: node.querySelector('[data-tool-panel-body]').scrollHeight > node.querySelector('[data-tool-panel-body]').clientHeight }));
-  assert.equal(positionFit.cap, `${Math.round(positionFit.stack / 2)}px`);
+  assert.equal(positionFit.cap, `${positionFit.stack}px`);
   assert.equal(positionFit.scrolls, false);
   assert.equal(await pane.getByRole('separator', { name: 'Resize position controls', exact: true }).count(), 1);
   // A compact value field: 24px tall and about five characters wide.

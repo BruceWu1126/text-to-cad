@@ -35,9 +35,7 @@ export function collectViewerResourceTiming({ cutoffEpochMs } = {}) {
     } else if (url.pathname.startsWith('/__tess_cache/') && url.pathname.endsWith('.selectors.json')) {
       route = 'tess-selectors'; key = url.pathname.slice('/__tess_cache/'.length);
     } else {
-      const file = url.pathname === '/__cad/store' ? url.searchParams.get('file') : url.pathname;
-      if (!file?.endsWith('.surf')) continue;
-      route = 'surf'; key = file.split('/').at(-1);
+      continue;
     }
     if (Number.isFinite(item.responseEnd) && item.responseEnd > cutoffAt) { afterCutoffEntries++; continue; }
     matchingEntries++;
@@ -51,6 +49,6 @@ export function collectViewerResourceTiming({ cutoffEpochMs } = {}) {
   return { ...state, collectedAfterGrade: true, collectedAt: performance.now(), timeOrigin: performance.timeOrigin,
     cutoffAt, totalBufferedEntries: all.length, matchingEntries, afterCutoffEntries,
     truncated: (state.bufferFullEvents || 0) > 0 || matchingEntries > entries.length,
-    coverage: 'Window same-origin tess-cache and SURF requests only. Worker-owned SURF fetches have separate timelines and are absent. No HTTP method, server CPU, JS arrayBuffer materialization, dispatch/adoption or GPU completion timing is inferred. Zero/unsupported timing fields are preserved. Entries ending after the grade are excluded; incomplete requests may be absent.',
+    coverage: 'Window same-origin tess-cache requests only. Worker-owned fetches have separate timelines and are absent. No HTTP method, server CPU, JS arrayBuffer materialization, dispatch/adoption or GPU completion timing is inferred. Zero/unsupported timing fields are preserved. Entries ending after the grade are excluded; incomplete requests may be absent.',
     entries };
 }

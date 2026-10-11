@@ -247,7 +247,7 @@ another model or the home drops it, as in the web Viewer. A view the
 host creates again (its frame re-created) starts afresh: nothing names a view across its
 frames, so there is nothing to keep its record under. `App.tsx` frames it (full page, or
 an inline card whose height the host is told; its Full size is the last of the navbar's
-own controls, before the view's Display and Preview). In a tab, preview's playbar sits on the line of Codex's
+own controls, before the view's own: a STEP's Select modes, Display and Preview). In a tab, preview's playbar sits on the line of Codex's
 composer, which floats over the page (`--cad-viewport-bottom-center`), and the
 home's list scrolls clear of it (`--cad-host-bottom-inset`).
 

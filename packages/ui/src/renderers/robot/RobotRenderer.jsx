@@ -27,7 +27,7 @@ const NO_HANDLES = Object.freeze([]);
 const SELECT_ICON = <MousePointer2 className="size-3" strokeWidth={2} aria-hidden="true" />;
 // Select's own panel, which a person can close (`LinksSection.jsx`'s tree). A robot is never a
 // single part: like an assembly's, its tree starts open, except on a phone.
-const LINKS_PANEL = Object.freeze({ id: "tree", label: "Links", startsClosed: false });
+const LINKS_PANEL = Object.freeze({ id: "tree", label: "Links" });
 
 function RobotSurface({ view, data }) {
   const document = useWorkspaceDocument({ view, data });
@@ -233,7 +233,7 @@ function RobotSurface({ view, data }) {
     {kind === "sdf" ? <ToolPanel id="sdf" title="SDF" label="SDF" fit="details" defaultCollapsed hidden={!linksShown}>
       <SdfSection info={robot?.robot?.sdf || null} />
     </ToolPanel> : null}
-    {/* Headed "Position" with its Reset; sized like the tree: its content's height, up to half the stack. */}
+    {/* Headed "Position" with its Reset; sized like the tree: its content's height, up to the stack's. */}
     {/* Its X puts Position down, back to Select (a robot's default tool); the pose stays. */}
     {posable && pose ? <ToolPanel id="position" title="Position" actions={<MotionResetButton onReset={pose.reset} />} label="Position controls"
       fit="details" resizable collapsible={false} onClose={shell.selectDefaultTool} closeLabel="Close position" hidden={!poseActive}>

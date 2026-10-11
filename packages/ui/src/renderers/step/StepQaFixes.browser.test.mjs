@@ -61,13 +61,15 @@ test('a single-part STEP names a picked face after its part, by the name the vie
   // The staging is what cadgen writes: one part, named `base` in the view, in `hinge_base.step`.
   assert.equal(lone.fixture.view.occurrences[0].name, 'base');
   assert.equal(await view.tool('Explode').count(), 0, 'a single part: no Explode, so this is the lone-part view');
-  // A single part opens with its tree closed and Select marked; Select, pressed, opens it.
-  const features = pane.locator('[data-cad-tool-stack] [data-tool-panel][aria-label="Features"]');
-  assert.equal(await features.isVisible(), false, 'a single part\'s tree starts closed');
-  assert.equal(await view.tool('Select').locator('[data-tool-panel-closed]').count(), 1);
-  await view.tool('Select').click();
-  await features.waitFor();
+  // A single part has no tree under Select (its one row would be all of it), and nothing marks
+  // Select; its modes are in the navbar, All, Faces and Edges, with no Parts.
+  assert.equal(await pane.locator('[data-cad-tool-stack] [data-tool-panel][aria-label="Features"]').count(), 0, 'no tree for a part file');
   assert.equal(await view.tool('Select').locator('[data-tool-panel-closed]').count(), 0);
+  await pane.locator('[data-view-controls]').getByRole('button', { name: 'Select mode: All', exact: true }).click();
+  assert.deepEqual(await page.locator('[role=menu][aria-label="Select mode"]').getByRole('menuitemradio').allInnerTexts(), ['All', 'Faces', 'Edges']);
+  await page.keyboard.press('Escape');
+  await page.locator('[role=menu]').waitFor({ state: 'detached' });
+  // Its faces load once Select is up: under All a press picks one.
   await page.mouse.click(...at([6, 6, 5]));
   await page.waitForFunction(() => /\.f\d+$/.test(window.cadHarness.a.controller.readState().selectedReferenceIds.join()));
   const face = (await view.state()).selectedReferenceIds[0].split('|').at(-1);

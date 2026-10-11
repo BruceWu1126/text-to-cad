@@ -122,7 +122,8 @@ person tells the agent about a CAD file is [Quick Edit](#prompt-handoff)'s.
 
 A renderer's controls for the view are the renderer's own, drawn into the navbar: FileViewer
 hands it the box at the row's right end (`RendererViewProps.navbarSlot`, null where no navbar
-is drawn), and the CAD viewer's Display and Preview, for a 3D view, are portaled there, last.
+is drawn), and the CAD viewer's controls for a 3D view (a STEP's Select modes while Select is
+the tool, then Display and Preview) are portaled there, last.
 A renderer that shows its file fullscreen (the CAD viewer's Preview) says so through
 `onFullscreenChange(true)`, and `false` when it stops: the navbar, the box with it, steps
 aside while it lasts, and the renderer draws its own controls where they sat (preview's
@@ -397,7 +398,7 @@ right-click on the name). Right, only what a host or a file adds: the host's upd
 first (`update`, while its install is behind), the renderer's navigation actions, the
 host's Full size where it shows the view small
 (`fullSize`, the inline card's way to full size, in the home's row too) and, last, the
-renderer's view controls in their box (`navbarSlot`: a 3D view's Display and Preview). The
+renderer's view controls in their box (`navbarSlot`: a 3D view's own, then Display and Preview). The
 navbar holds no settings.
 
 The app menu is FileViewer's, built from the host's `navigation.home`, `links` and
@@ -474,7 +475,7 @@ reason otherwise, each with a Go home button where the host has a home.
 
 The viewport's corners are the shell's, never the host's: the tool strip and its
 stack at the top-left, Quick Edit at the top-right, and the view cube at the
-bottom-left; the view's own controls (Display and Preview, a 3D view's) are the navbar's
+bottom-left; the view's own controls (a STEP's Select modes, Display and Preview, a 3D view's) are the navbar's
 last. A host's one notice goes through the shell too: `notice` is drawn at the top-right once the
 file is on screen, never while it loads or after it failed to, with Quick Edit stacked under
 it while it stands; the home never shows it. Neither app has one now.

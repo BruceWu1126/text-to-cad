@@ -6,7 +6,6 @@ import { NO_CONNECTED_SELECTION, connectedSelectionApplies } from "./workbench/s
 import { PositionToolIcon, positionValuesAreDefault } from "../kit/inspector/kinematicsControls.jsx";
 import { filterSelectionReferences, toggleReferenceGroupSelection, connectedReferenceIds } from "./workbench/selectionFilter.js";
 import { buildTangentFaceGraph } from "./workbench/tangentFaceSelection.js";
-import { explodablePartCount } from "./workbench/explodableParts.js";
 import { createHoverStore } from "./workbench/hoverStore.js";
 
 import * as THREE from "three";
@@ -1653,7 +1652,7 @@ function StepSurfaceBody({ view, data }) {
     if (!normalizedNodeId) {
       return;
     }
-    // The picked row is scrolled to in the Features tree, which is on screen whenever Select is.
+    // The picked row is scrolled to in the Features tree, which an assembly shows whenever Select is up.
     setActiveTreeNodeScrollKey(source === "viewer" || source === "reference" ? `${source}:${Date.now()}:${normalizedNodeId}` : "");
     if (expandAncestors || expandSelf || source === "reference") {
       expandStepTreeAroundNode(normalizedNodeId, { expandSelf });
@@ -3125,10 +3124,6 @@ function StepSurfaceBody({ view, data }) {
   });
 
   // ---- the strip ------------------------------------------------------------------------------
-  // An assembly, as the catalog says or as the model on screen shows (several parts, as Explode
-  // counts them): the model survives an update the catalog has not finished, or one that failed,
-  // so the tree's start does not change under the person while a rebuild is pending.
-  const assemblyOnScreen = isAssemblyView || explodablePartCount(selectedDisplayMeshData) > 1;
   const selectDisabled = viewerLoading || !selectedMeshData || referenceSelectionPending ||
     referenceSelectionUnavailable || topologySelectionDeferred;
   const toolIdle = viewerLoading || !selectedMeshData;
@@ -3158,11 +3153,8 @@ function StepSurfaceBody({ view, data }) {
       // The button shows the mode in hand; nothing under the strip names it.
       icon: <SelectModeIcon mode={selectionFilter} className="size-3.5" aria-hidden="true" />,
       active: !topologySelectionDeferred && selectionToolActive, disabled: selectDisabled,
-      // Its modes and options are a menu in the Features panel's filter row.
+      // Its modes and options are a menu at the navbar's right end, before Display (`selectModeMenu`).
       onSelect: () => handleSelectTabToolMode(TAB_TOOL_MODE.REFERENCES),
-      // Its own panel, which a person can close (`ModelingTree.jsx`'s Features, by its X): a press
-      // on Select while it is the tool opens it again. A single part opens with it closed.
-      panel: { id: "tree", label: "Features", startsClosed: !assemblyOnScreen },
     }),
     // Position comes straight after Select; only files with movable joints offer it.
     poseAvailable ? shell.tools.own({ id: TAB_TOOL_MODE.POSE, label: "Position",
@@ -3196,13 +3188,7 @@ function StepSurfaceBody({ view, data }) {
   // ---- the tool stack ---------------------------------------------------------------------------
   // Under the strip: Select's Features and Reference, Position's joints, then the kept effects.
   const stepPanels = useStepPanels({
-    // Select's mode and options: a menu in the Features filter row, beside its fold chevron.
     onClosePosition: () => handleSelectTabToolMode(TAB_TOOL_MODE.REFERENCES),
-    // One element until the mode or its options change: the Features panel is memoized.
-    selectModeMenu: useMemo(() => <SelectModeMenu mode={selectionFilter} assembly={isAssemblyView} disabled={selectDisabled}
-      onModeChange={value => { changeSelectMode(value); handleSelectTabToolMode(TAB_TOOL_MODE.REFERENCES); }}
-      connected={connectedSelection} onConnectedChange={(id, checked) => setConnectedSelection(current => ({ ...current, [id]: checked }))} />,
-    [selectionFilter, isAssemblyView, selectDisabled, connectedSelection, changeSelectMode, handleSelectTabToolMode]),
     selectActive: selectionToolActive && !previewing,
     positionActive: poseToolActive,
     selectMode: selectionFilter,
@@ -3242,7 +3228,15 @@ function StepSurfaceBody({ view, data }) {
     showAllHiddenParts: handleShowAllHiddenParts
   });
 
+  // Select's mode and options: a menu at the navbar's right end, immediately before Display, while
+  // Select is the tool -- a part file's too, which has no tree.
+  const selectModeMenu = useMemo(() => <SelectModeMenu mode={selectionFilter} assembly={isAssemblyView} disabled={selectDisabled}
+    onModeChange={value => { changeSelectMode(value); handleSelectTabToolMode(TAB_TOOL_MODE.REFERENCES); }}
+    connected={connectedSelection} onConnectedChange={(id, checked) => setConnectedSelection(current => ({ ...current, [id]: checked }))} />,
+  [selectionFilter, isAssemblyView, selectDisabled, connectedSelection, changeSelectMode, handleSelectTabToolMode]);
+
   return <RendererShell shell={shell} tools={tools} toolPanels={<>{stepPanels}{modelEffects.panels}</>}
+    navbarControls={selectionToolActive ? selectModeMenu : null}
     references={selectionActionVisible ? promptSelection : EMPTY_LIST} onClearReferences={clearAssemblySelection} copySelection={copySelection}
     contextMenuItems={selectionToolActive
       ? press => viewportContextMenuItems(press, pickAtRef.current?.(press.clientX, press.clientY) || "") : null}

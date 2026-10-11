@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ModelingTreeView from '../../../../../dist/renderers/step/components/workbench/ModelingTree.js';
-import { SelectModeMenu } from '../../../../../dist/renderers/step/components/workbench/SelectionModes.js';
+import { useStepPanels } from '../../../../../dist/renderers/step/components/workbench/StepPanels.js';
 import { useModelTools } from '../../../../../dist/renderers/step/components/workbench/ModelTools.js';
 import { buildPositionSection } from '../../../../../dist/renderers/step/components/workbench/MotionControlsSection.js';
 import { PositionToolIcon, positionValuesAreDefault } from '../../../../../dist/renderers/kit/inspector/kinematicsControls.js';
@@ -13,7 +13,7 @@ import ToolStack from '../../../../../dist/renderers/kit/tools/ToolStack.js';
 import { TOOL_PANEL_WIDTH } from '../../../../../dist/renderers/kit/tools/toolStackLayout.js';
 import { ViewerMobileContext } from '../../../../../dist/file-viewer/responsive.js';
 
-// The STEP renderer's panels in the tool stack — Select's Features and its mode, the kept effects
+// The STEP renderer's panels in the tool stack — Select's Features and Reference, the kept effects
 // (Explode, Clip), Position — each where it is decided, under the stack that holds them. The
 // viewport that picks and draws is the browser suite's (`StepRenderer.browser.test.mjs`).
 
@@ -57,18 +57,13 @@ function Features({ mode = 'all', initialLayout = undefined as any, mobile = fal
   // The shell hands the stack the viewer's layout, as it hands every panel (`RendererShell.jsx`).
   return <ViewerMobileContext.Provider value={mobile}><ToolStack layout={layout} onLayoutChange={change} mobile={mobile}>
     <ModelingTreeView stepRoot={stepRoot} active mode={mode} onLoadTopology={() => {}}
-      modeMenu={<SelectModeMenu mode={mode} assembly onModeChange={() => {}} connected={{ edgeChain: true, tangentFaces: true }} onConnectedChange={() => {}} />}
       partControls={{ isAssemblyView: true, expandedTreeNodeIds: expanded,
         onToggleTreeNode: (id: string) => setExpanded(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]) }} />
-    <output data-layout={JSON.stringify(layout)} />
   </ToolStack></ViewerMobileContext.Provider>;
 }
-const storedLayout = () => JSON.parse(document.querySelector('[data-layout]')!.getAttribute('data-layout')!);
 
-it("Select's mode button sits in the Features filter row beside its X, and each mode holds the tree: Parts, Faces and Edges every assembly open, locked; All the person's own tree again", () => {
+it("each Select mode holds the tree: Parts, Faces and Edges every assembly open, locked; All the person's own tree again", () => {
   const view = render(<Features />);
-  expect([...features().querySelectorAll('[data-slot=tree-filter] button')].map(button => button.getAttribute('aria-label')))
-    .toEqual(['Select mode: All', 'Close features']);
   // All: the tree is the person's own — open the hinge. A part is a leaf.
   expect(rows()).toEqual(['Expand hinge', 'Select hinge', 'Select pin']);
   fireEvent.click(screen.getByRole('button', { name: 'Expand hinge' }));
@@ -80,47 +75,67 @@ it("Select's mode button sits in the Features filter row beside its X, and each 
     expect(rows()).toEqual(['Select hinge', 'Select base', 'Select arm', 'Select pin']);
     expect(locks()).toEqual(['open']);
   }
-  expect(screen.getByRole('button', { name: 'Select mode: Edges' })).toBeTruthy();
   // All: the tree the person left — the hinge open — and unlocked.
   view.rerender(<Features mode="all" />);
   expect(rows()).toEqual(['Collapse hinge', 'Select hinge', 'Select base', 'Select arm', 'Select pin']);
   expect(locks()).toEqual([]);
 });
 
-it("Features closes by the X at its filter row's end, kept mounted with its filter and expansion; the mode menu and the X step aside while the box has focus", async () => {
+it("Features is its filter and its tree: no X, nothing to fold, and no stored choice closes it, on a desktop or a phone", async () => {
   const user = userEvent.setup();
-  render(<Features />);
+  render(<Features initialLayout={{ panels: {}, collapsed: {}, closed: { tree: true } }} />);
+  expect(shown()).toEqual(['Features']);
   const search = screen.getByRole('textbox', { name: 'Filter model' }) as HTMLInputElement;
   expect(search.getAttribute('placeholder')).toBe('Filter…');
-  // The trailing controls (the mode menu, the X) yield to a focused box (`tree-filter.jsx`).
-  expect(features().querySelector('[data-tree-filter-trailing]')!.className).toContain('group-has-[input:focus]/filter:hidden');
-  expect(within(features()).queryByRole('button', { name: /^(?:Collapse|Expand) features$/ })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Expand hinge' }));
+  // Neither the mode menu (the navbar's) nor an X in its filter row, and no fold.
+  expect([...features().querySelectorAll('[data-slot=tree-filter] button')].map(button => button.getAttribute('aria-label'))).toEqual([]);
+  expect(within(features()).queryByRole('button', { name: /^(?:Close|Collapse|Expand) features$/ })).toBeNull();
   await user.click(search);
   await user.keyboard('ba');
   expect(within(features()).getByRole('status').textContent).toMatch(/match/);
-  fireEvent.click(within(features()).getByRole('button', { name: 'Close features' }));
-  expect(shown()).toEqual([]);
-  expect(features().hasAttribute('data-closed')).toBe(true);
-  expect(storedLayout().closed).toEqual({ tree: true });
-  // Still mounted: the box keeps what was typed.
-  expect((screen.getByRole('textbox', { name: 'Filter model', hidden: true }) as HTMLInputElement).value).toBe('ba');
+  cleanup();
+  render(<Features mobile />);
+  expect(shown()).toEqual(['Features']);
 });
 
-it("on a phone Features starts closed, and opened takes the whole column; on desktop it is open, half the column, and the person's to size by its corner", () => {
+it("Features opens as tall as its rows need, up to the whole column, on desktop and phone alike, and is the person's to size by its corner", () => {
   const phone = render(<Features mobile />);
-  expect(shown()).toEqual([]);
-  expect(features().hasAttribute('data-closed')).toBe(true);
-  phone.unmount();
-  // Opened on a phone (Select's press writes this: `RendererShell.jsx`), it takes the whole column.
-  const opened = render(<Features mobile initialLayout={{ panels: {}, collapsed: {}, closed: { tree: false } }} />);
-  expect(shown()).toEqual(['Features']);
   expect(features().style.maxHeight).toBe(`${STACK_HEIGHT}px`);
-  opened.unmount();
+  phone.unmount();
   render(<Features />);
-  expect(shown()).toEqual(['Features']);
   expect([...features().querySelectorAll('[role=separator]')].map(handle => handle.getAttribute('aria-label'))).toEqual(['Resize features']);
-  expect(features().style.maxHeight).toBe(`${STACK_HEIGHT / 2}px`);
+  expect(features().style.maxHeight).toBe(`${STACK_HEIGHT}px`);
+});
+
+// What Select shows (`StepPanels.js`): an assembly's tree and, with a selection, the Reference
+// under it; a part file has no tree, its one row being all there would be, and the Reference alone.
+const face = { id: 'o1.1.1.f2', normalizedSelector: 'o1.1.1.f2', selectorType: 'face', occurrenceId: 'o1.1.1', pickData: { surfaceType: 'plane', area: 20 } };
+function SelectPanels({ assembly = false, references = [] as any[], onClearSelection = () => {} }) {
+  const partRoot = { id: '__step_model__', nodeType: 'part', name: 'hinge.step', leafPartIds: ['__model__'], children: [] };
+  return useStepPanels({ selectActive: true, selectedEntry: { file: '/models/hinge.step' }, isAssemblyView: assembly,
+    stepTreeRoot: assembly ? stepRoot : partRoot, selectedReferences: references, onClearSelection,
+    selectionCopy: references.length ? { label: 'Copy', shortcut: '⌘C', onCopy: async () => true } : null });
+}
+function Panels(props: any) {
+  const [layout, change] = useLayout();
+  return <ToolStack layout={layout} onLayoutChange={change}><SelectPanels {...props} /></ToolStack>;
+}
+
+it("a part file shows no tree under Select, only the Reference for what is picked; an assembly its tree, then the Reference, capped at the column, its Copy at its foot and its X clearing the selection", () => {
+  const view = render(<Panels />);
+  expect(shown()).toEqual([]);
+  view.rerender(<Panels references={[face]} />);
+  expect(shown()).toEqual(['Reference details']);
+  view.unmount();
+  const onClearSelection = vi.fn();
+  render(<Panels assembly references={[face]} onClearSelection={onClearSelection} />);
+  expect(shown()).toEqual(['Features', 'Reference details']);
+  const reference = within(screen.getByRole('region', { name: 'Reference details' }));
+  expect(reference.getByRole('heading').textContent).toBe('base · face 2');
+  expect(reference.getByRole('button', { name: 'Copy' }).getAttribute('aria-keyshortcuts')).toBe('Meta+C');
+  expect(screen.getByRole('region', { name: 'Reference details' }).style.maxHeight).toBe(`${STACK_HEIGHT}px`);
+  fireEvent.click(reference.getByRole('button', { name: 'Clear selection' }));
+  expect(onClearSelection).toHaveBeenCalledOnce();
 });
 
 // ---- the kept effects: Explode and Clip ---------------------------------------------------------
@@ -255,8 +270,7 @@ it('a neutral effect leaves with the next tool, an applied one stays until clear
 
 it('a short viewer: the tree gives way first, then the details panels, a kept effect never; the column is bounded by the stack and scrolls rather than cutting a panel', () => {
   const measure = { shown: true, controls: <p>0 measurements</p>, onRemove() {} };
-  render(<Workbench measure={measure} extraPanels={<ModelingTreeView stepRoot={stepRoot} active onLoadTopology={() => {}}
-    selectionDetails={{ content: <p>Part o1.2</p> }} partControls={{ isAssemblyView: true, expandedTreeNodeIds: [] }} />} />);
+  render(<Workbench measure={measure} extraPanels={<SelectPanels assembly references={[face]} />} />);
   fireEvent.click(tool('Explode'));
   fireEvent.keyDown(slider('Explode amount'), { key: 'PageUp' });
   fireEvent.click(tool('Clip'));

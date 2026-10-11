@@ -9,22 +9,6 @@ const refs=(o='o1')=>[1,2].map(n=>({id:`${o}.f${n}`,selectorType:'face',occurren
 const partNode=(id:string,name:string,componentId?:string)=>({id,nodeType:'part',name,leafPartIds:[id],children:[],...(componentId?{componentId}:{})});
 const assemblyRoot={id:'document',nodeType:'assembly',name:'tom',children:[{id:'arm',nodeType:'assembly',name:'Arm',leafPartIds:['arm.wrist'],children:[partNode('arm.wrist','Wrist','c')]},partNode('base','Base','c')]};
 
-it('heads the Reference panel with the reference being read, copies the selection at its foot, and clears through the host',()=>{
- const onClearSelection=vi.fn(),onCopy=vi.fn(async()=>true);
- const props={active:true,stepRoot:assemblyRoot,selectedReferences:refs('base'),selectionDetails:{title:'Face · base.f2',content:<p>Face measurements</p>},
-  selectionCopy:{label:'Copy All',shortcut:'⌘C',onCopy},onClearSelection};
- const {rerender}=render(<ModelingTreeView {...props}/>);
- const reference=within(screen.getByRole('region',{name:'Reference details'}));
- expect(reference.getByRole('heading').textContent).toBe('Face · base.f2');
- expect(reference.getByText('Face measurements')).toBeTruthy();
- const copyAll=reference.getByRole('button',{name:'Copy All'});expect(copyAll.getAttribute('aria-keyshortcuts')).toBe('Meta+C');
- fireEvent.click(copyAll);expect(onCopy).toHaveBeenCalledTimes(1);
- expect(screen.queryByRole('heading',{name:'Reference'})).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:'Clear selection'}));expect(onClearSelection).toHaveBeenCalledTimes(1);
- rerender(<ModelingTreeView {...props} selectedReferences={[]} selectionDetails={null}/>);
- expect(screen.queryByRole('button',{name:'Clear selection'})).toBeNull();
-});
-
 it('double-click isolates subassemblies and components',()=>{
  const onFocusTreeNode=vi.fn();
  render(<ModelingTreeView stepRoot={assemblyRoot} active partControls={{isAssemblyView:true,expandedTreeNodeIds:['arm'],onFocusTreeNode}}/>);
@@ -188,22 +172,6 @@ it('clears selection only from empty tree space, not a row or its controls',()=>
  expect(select).toHaveBeenCalledOnce();expect(clear).not.toHaveBeenCalled();
  fireEvent.click(screen.getByLabelText('Model tree area'));
  expect(clear).toHaveBeenCalledOnce();
-});
-
-it('keeps a part file\'s one row selectable and hideable, with nothing to isolate it from',()=>{
- const onSelectTreeNode=vi.fn(),onTogglePartVisibility=vi.fn();
- const stepRoot={id:'__step_model__',nodeType:'part',displayName:'Imported case',leafPartIds:['__model__'],children:[]};
- const props={active:true,stepRoot,partControls:{onSelectTreeNode,onTogglePartVisibility,hiddenPartIds:[]}};
- const {rerender}=render(<ModelingTreeView {...props}/>);
- fireEvent.click(screen.getByRole('button',{name:'Select Imported case'}));
- expect(onSelectTreeNode).toHaveBeenCalledWith('__step_model__',expect.any(Object));
- fireEvent.click(screen.getByRole('button',{name:'Hide Imported case'}));
- expect(onTogglePartVisibility).toHaveBeenCalledWith('__step_model__');
- rerender(<ModelingTreeView {...props} partControls={{...props.partControls,hiddenPartIds:['__model__']}}/>);
- fireEvent.click(screen.getByRole('button',{name:'Reveal Imported case'}));
- expect(onTogglePartVisibility).toHaveBeenCalledTimes(2);
- expect(screen.getByRole('button',{name:'Select Imported case'}).hasAttribute('disabled')).toBe(true);
- expect(screen.queryByRole('button',{name:'Isolate Imported case'})).toBeNull();
 });
 
 const repeatedRoot={id:'document',nodeType:'assembly',name:'deck',children:[
