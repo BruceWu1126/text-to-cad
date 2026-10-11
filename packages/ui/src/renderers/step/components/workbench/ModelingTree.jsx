@@ -78,9 +78,9 @@ function findNodeLabel(nodes, selectionId) {
 // The disclosure a row shows: a button, or — while the Select mode decides the tree's shape —
 // the same chevron as a mark nobody can press.
 function Disclosure({ node, open, locked, toggle }) {
-  if (locked) return <span aria-hidden="true" data-disclosure-locked={open ? "open" : "shut"} className="grid h-6 w-4 shrink-0 place-items-center opacity-50"><TreeRowChevron expanded={open}/></span>;
+  if (locked) return <span aria-hidden="true" data-disclosure-locked={open ? "open" : "shut"} className="grid h-6 w-3 shrink-0 place-items-center opacity-50"><TreeRowChevron expanded={open}/></span>;
   return <button type="button" aria-label={`${open ? 'Collapse' : 'Expand'} ${node.label}`} aria-expanded={open}
-    className="grid h-6 w-4 shrink-0 place-items-center rounded focus-visible:ring-2 focus-visible:ring-ring"
+    className="grid h-6 w-3 shrink-0 place-items-center rounded focus-visible:ring-2 focus-visible:ring-ring"
     onClick={()=>toggle(node)}><TreeRowChevron expanded={open}/></button>;
 }
 
@@ -88,7 +88,6 @@ function Disclosure({ node, open, locked, toggle }) {
 // are the row's own facts — its selection and joins as booleans, callbacks that never change —
 // so a tree re-rendered for anything else leaves it alone.
 function ModelingRow({ node, depth, open, branch, locked, disabled, selected, joinAbove, joinBelow, hiddenByOwner, unavailable, actionsShown, actionsWidth, partControls, toggle, choose }) {
-  const Icon = icons[node.kind] || Box;
   // An assembly outside the isolate/picking frontier cannot select itself, but
   // its descendants can. Only a hidden owner blocks its entire subtree.
   // The name fades out under its actions (`ROW_NAME_UNDER_ACTIONS`): always while one is on
@@ -98,14 +97,16 @@ function ModelingRow({ node, depth, open, branch, locked, disabled, selected, jo
     <TreeRowSurface dense active={selected} className={cn('group/row relative gap-0 pr-0', hiddenByOwner && 'opacity-50')}
       onMouseEnter={() => partControls.onHoverTreeNode?.(node.selectionId || '')}
       onMouseLeave={() => partControls.onHoverTreeNode?.('')} style={{paddingLeft:depth*TREE_INDENT_PX, ...joinedCorners(joinAbove, joinBelow), ...(actionsWidth && {'--row-actions':actionsWidth})}}>
-      {/* Its owners' faint lines, each under its 16px disclosure column. */}
-      <TreeRowGuides depth={depth} column={16}/>
-      {branch ? <Disclosure node={node} open={open} locked={locked} toggle={toggle}/> : <span className="w-4 shrink-0"/>}
+      {/* Its owners' faint lines, each under its glyph column. */}
+      <TreeRowGuides depth={depth}/>
+      {/* One glyph per row, in one 12px column: a branch's chevron, or a part's box. */}
+      {branch && <Disclosure node={node} open={open} locked={locked} toggle={toggle}/>}
       <TooltipHint content={node.label} overflowOnly><button type="button" aria-label={`Select ${node.label}`} aria-pressed={selected}
         disabled={disabled || unavailable || !(node.selectionId || node.memberSelectionIds?.length)}
         onClick={event=>{if(event.detail < 2)choose(node,event);}} onDoubleClick={event=>choose(node,event)}
-        className={cn('flex h-full min-w-0 flex-1 items-center gap-1 rounded pr-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40', underActions)}>
-        <Icon className={TREE_ROW_DENSE_ICON_CLASS} strokeWidth={TREE_GLYPH_STROKE}/><TreeRowLabel className="flex-1">{node.label}</TreeRowLabel>
+        className={cn('flex h-full min-w-0 flex-1 items-center gap-[3px] rounded pr-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40', branch && 'pl-[3px]', underActions)}>
+        {!branch && <Box className={TREE_ROW_DENSE_ICON_CLASS} strokeWidth={TREE_GLYPH_STROKE}/>}
+        <TreeRowLabel className="flex-1">{node.label}</TreeRowLabel>
       </button></TooltipHint>
       {node.selectionId && <ModelPartActions node={node} controls={partControls} disabled={disabled}/>}
     </TreeRowSurface>

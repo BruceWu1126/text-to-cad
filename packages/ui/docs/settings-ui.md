@@ -438,11 +438,11 @@ stack.
 
 Tree rows inset their backgrounds 4px from the panel edges, and the filter row
 shares that inset. A tree in the stack (Features, Links) is dense (`TreeRowSurface`'s
-`dense`): 24px rows in the panels' 11px text, 12px kind icons drawn light (Features'; Links
-has none), a 16px disclosure column with the trees' one light chevron, turned down while
-open, and the explorer's compact indent: 10px a level (`TREE_INDENT_PX`), each level's rows
-hung from a faint line under their owner's chevron (`TreeRowGuides`), as the explorer's
-are; its filter row is a heading's 28px, the box 20px tall and close to the row's walls. An assembly row's
+`dense`): 24px rows in the panels' 11px text, and ONE light 12px glyph per row in one
+column, as the explorer has: a subassembly's or folded group's disclosure chevron, turned down
+while open, or a part's box (Links draws its chevrons alone), 3px before the name; and the
+explorer's compact indent: 10px a level (`TREE_INDENT_PX`), each level's rows hung from a
+faint line under their owner's glyph (`TreeRowGuides`), as the explorer's are; its filter row is a heading's 28px, the box 20px tall and close to the row's walls. An assembly row's
 actions, shown on hover and kept while they are on, are **Isolate** then the **Hide/Reveal** eye; a part file has no
 Isolate. A Links row that draws something — a link with visuals, or one visual —
 has the eye alone, in its search hit too: a link's hides its own visuals, never its
