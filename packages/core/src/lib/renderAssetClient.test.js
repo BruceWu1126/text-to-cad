@@ -23,7 +23,6 @@ import {
   reclaimIdleSurfWorkers,
   releaseSurfWorkers,
   surfWorkerMemoryStats,
-  releaseRenderSurfLevel as releaseSurfLevel,
   configureSurfLeash
 } from "./renderAssetClient.js";
 import { createHash } from "node:crypto";
@@ -40,10 +39,10 @@ import {
   tessellationCacheKey,
 } from "./surf/tessellationCache.js";
 import { everyKeyMeshProvider, probeRowFor } from "./surf/__tests__/meshFixtures.js";
-import { TEST_TESSELLATION_LADDER } from "./surf/testing.js";
+import { TEST_DISPLAY_TESSELLATION } from "./surf/testing.js";
 
-// Every mesh read names its tolerances: the standard rung of the ladder cadgen publishes.
-const STANDARD = TEST_TESSELLATION_LADDER.levels[TEST_TESSELLATION_LADDER.defaultLevel];
+// Every mesh read names its tolerances: the display tolerance cadgen publishes.
+const STANDARD = TEST_DISPLAY_TESSELLATION;
 
 // The mesh store every surf load reads: it holds the gear's mesh for any component asked.
 let meshStore = everyKeyMeshProvider();
@@ -62,9 +61,6 @@ const loadRenderSurf = (url, options = {}) => loadSurf(url, {
   identity: identityForSurfTest(url), tessellationCache, tessellation: STANDARD, ...options,
 });
 const loadRenderSurfSelectorBundle = (url, options = {}) => loadSurfSelectors(url, {
-  identity: identityForSurfTest(url), tessellationCache, tessellation: STANDARD, ...options,
-});
-const releaseRenderSurfLevel = (url, options = {}) => releaseSurfLevel(url, {
   identity: identityForSurfTest(url), tessellationCache, tessellation: STANDARD, ...options,
 });
 
@@ -686,26 +682,6 @@ test("an admitted probe whose body vanished is a probe miss, reading nothing els
     isTessellationCacheProbeMissError,
   );
   assert.equal(fetches, 0, "cold work waits for a fresh admission");
-});
-
-test("obsolete concrete surf levels release browser cache references only", async (t) => {
-  const tableBytes = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "surf/fixtures/sun_gear.selectors.json"));
-  const tableBuffer = tableBytes.buffer.slice(tableBytes.byteOffset, tableBytes.byteOffset + tableBytes.byteLength);
-  const url = `https://cache.test/release/components/release-${Date.now()}.selectors.json`;
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(tableBuffer.slice(0), { status: 200 });
-  t.after(() => { globalThis.fetch = originalFetch; });
-
-  const meshData = await loadRenderSurf(url);
-  const bundle = await loadRenderSurfSelectorBundle(url);
-  const before = renderAssetCacheStats();
-  assert.ok(meshData.indices.length > 0 && bundle.manifest.faces.length > 0);
-  assert.ok(releaseRenderSurfLevel(url) >= 2);
-  const after = renderAssetCacheStats();
-  assert.ok(after.surfPayload.entries < before.surfPayload.entries);
-  assert.equal(after.selector.entries, before.selector.entries - 1);
-  assert.ok(meshData.indices.length > 0, "the displayed owner remains valid");
-  assert.ok(bundle.manifest.faces.length > 0, "the exact selector owner remains valid");
 });
 
 test("a failed surf worker job is not retried synchronously on the main thread", async (t) => {

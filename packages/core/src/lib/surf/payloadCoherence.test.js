@@ -1,17 +1,11 @@
 // The mesh↔labels coherence invariant, pinned across every load-path shape.
 //
 // Picking and highlighting work only when the displayed meshData and the
-// selector bundle (face runs, edge tables) derive from ONE mesh. Two viewer
-// regressions came from breaking that pairing (LOD swaps leaving level-0 runs
-// on a level-2 mesh; nearly, cache-hit meshes vs fresh bundles). This suite
+// selector bundle (face runs, edge tables) derive from ONE mesh. This suite
 // asserts the invariant on cadgen's stored meshes of REAL surfs — a gear
 // (sun_gear) and a turned part (cam_follower_roller) — for every shape a
-// component payload can take:
-//   the real SURF index (selectors) · the stored entry's own display index
-//   (render-only and snapshot loads) · a coarser LOD level.
-// It also asserts the MIXED pairing is DETECTABLE (a level-N mesh against
-// level-0 runs violates the count invariant), so a future desync cannot pass
-// this suite by accident.
+// component payload can take: the real SURF index (selectors) and the stored
+// entry's own display index (render-only and snapshot loads).
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -26,14 +20,14 @@ import { meshFixture, selectorTableFixture, surfFixture } from "./__tests__/mesh
 const FIXTURES = ["sun_gear", "cam_follower_roller"];
 const FACE_RUN_COLUMNS = 5; // occurrenceRow, primitiveIndex, triangleStart, triangleCount, faceRow
 
-function loadFixture(name, level = 1) {
+function loadFixture(name) {
   const { index } = parseSurf(surfFixture(name).arrayBuffer());
   const table = selectorTableFixture(name);
-  const mesh = meshFixture(name, level);
+  const mesh = meshFixture(name);
   const decoded = decodeComponentTessellation(mesh.bytes, {
     surfaceInput: mesh.surfaceInput, surfaceObject: mesh.surfaceObject, tessellation: mesh.tessellation,
   });
-  assert.ok(decoded, `${name} L${level} decodes`);
+  assert.ok(decoded, `${name} decodes`);
   return { index, table, decoded, component: decoded.component };
 }
 
@@ -131,26 +125,5 @@ for (const fixture of FIXTURES) {
     }
     assert.deepEqual(meshSurrogate.cadEdgeClassRanges, meshReal.cadEdgeClassRanges, "surrogate class ranges");
     assert.equal(meshSurrogate.sourceColor, meshReal.sourceColor, "the part colour rides the entry");
-  });
-
-  test(`${fixture}: a mixed level pairing VIOLATES the invariant (detectability)`, () => {
-    const { index, table, component: level1 } = loadFixture(fixture, 1);
-    const { component: level0 } = loadFixture(fixture, 0);
-    assert.notEqual(
-      level1.indices.length,
-      level0.indices.length,
-      "levels mesh to different densities (otherwise this test is vacuous)",
-    );
-    const meshLevel1 = buildMeshDataFromSurf(index, level1);
-    const bundleLevel0 = joinSelectorTable(table, level0);
-    const runTriangles = faceRunRows(bundleLevel0).reduce((sum, row) => sum + row.triangleCount, 0);
-    assert.notEqual(
-      runTriangles,
-      meshLevel1.indices.length / 3,
-      "level-0 runs against a level-1 mesh fail the count invariant — the desync is detectable",
-    );
-    // And the properly paired level-1 payload passes.
-    const bundleLevel1 = joinSelectorTable(table, level1);
-    assertCoherent("level-1 paired", level1, meshLevel1, bundleLevel1);
   });
 }

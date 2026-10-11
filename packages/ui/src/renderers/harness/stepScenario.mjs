@@ -26,13 +26,10 @@ const FIXTURE = new URL('../step/__fixtures__/step/', import.meta.url);
 
 const read = (name) => readFile(new URL(name, FIXTURE));
 
-// The LOD levels the fixture stores a mesh at (`components/<cid>.l<level>.glb`).
-const MESH_LEVELS = [0, 1, 2, 3];
-
 /**
  * Everything the fixture is, loaded once: the view, the sidecar and cadgen's articulation of its
- * kinematics, the surf bytes by object digest, and each component's stored meshes, decoded so
- * the harness's store can serve them for any input.
+ * kinematics, the surf bytes by object digest, and each component's stored display mesh
+ * (`components/<cid>.glb`), decoded so the harness's store can serve it for any input.
  */
 export async function loadStepFixture() {
   const { decodeComponentTessellation } = await import('@text-to-cad/core/lib/surf/tessellationCache.js');
@@ -46,13 +43,10 @@ export async function loadStepFixture() {
   const surfaces = new Map();
   for (const [cid, component] of Object.entries(view.components)) {
     const bytes = await read(`components/${cid}.surf`);
-    const meshes = new Map();
-    for (const level of MESH_LEVELS) {
-      meshes.set(level, decodeComponentTessellation(new Uint8Array(await read(`components/${cid}.l${level}.glb`))));
-    }
+    const mesh = decodeComponentTessellation(new Uint8Array(await read(`components/${cid}.glb`)));
     // The component's selector table, served by its own digest through the same store route.
     const table = await read(`components/${cid}.selectors.json`);
-    surfaces.set(component.surfaceInput, { cid, bytes, object: createHash('sha256').update(bytes).digest('hex'), meshes,
+    surfaces.set(component.surfaceInput, { cid, bytes, object: createHash('sha256').update(bytes).digest('hex'), mesh,
       selectors: { bytes: table, object: createHash('sha256').update(table).digest('hex') } });
   }
   return { assembly, view, sidecar, articulation, surfaces, file: 'hinge_block.step' };
@@ -180,30 +174,24 @@ export function reviseFixture(fixture, revision) {
 }
 
 /**
- * cadgen's mesh store as the harness serves it: every component of `fixture` has a mesh at each
- * fixture LOD level, keyed and encoded as the store keeps it, for whatever input names it (a staged
- * component shares its shape's mesh). `warm` holds every component at the standard tier already, as
- * an earlier open leaves it; otherwise a mesh is stored once a surface request asks for it
+ * cadgen's mesh store as the harness serves it: every component of `fixture` has its mesh, keyed
+ * and encoded as the store keeps it, for whatever input names it (a staged component shares its
+ * shape's mesh). `warm` holds every component's display mesh already, as an earlier open leaves it; otherwise a mesh is stored once a surface request asks for it
  * (`produce`), as cadgen meshes on request. Answers the routes the client reads it by: a probe, a
  * batch read and a single read.
  */
 async function meshStore(fixture, { warm = false } = {}) {
-  const [cache, { encodeMeshFixture }, { lodDefaultLevel, lodTessellationForLevel }, { installTestTessellationLadder }] = await Promise.all([
+  const [cache, { encodeMeshFixture, TEST_DISPLAY_TESSELLATION }] = await Promise.all([
     import('@text-to-cad/core/lib/surf/tessellationCache.js'),
     import('@text-to-cad/core/lib/surf/testing.js'),
-    import('@text-to-cad/core/lib/surf/lodPolicy.js'),
-    import('@text-to-cad/core/lib/surf/testing.js'),
   ]);
-  installTestTessellationLadder();
   const stored = new Map();
   const produce = (surfaceInput, tessellation) => {
     const surface = fixture.surfaces.get(surfaceInput);
     if (!surface) return null;
     const key = cache.tessellationCacheKey(surfaceInput, tessellation);
     if (!stored.has(key)) {
-      // The fixture level these tolerances name, else the standard tier's shape under their key.
-      const level = MESH_LEVELS.find(candidate => cache.tessellationCacheKey(surfaceInput, lodTessellationForLevel(candidate)) === key) ?? 1;
-      const { component, partColor } = surface.meshes.get(level);
+      const { component, partColor } = surface.mesh;
       const bytes = encodeMeshFixture(component, { surfaceInput, surfaceObject: surface.object, tessellation, partColor });
       const row = cache.validateTessellationProbeRow({ schemaVersion: cache.MESH_INDEX_SCHEMA,
         object: createHash('sha256').update(bytes).digest('hex'), ...cache.tessellationPayloadFacts(bytes) });
@@ -212,8 +200,7 @@ async function meshStore(fixture, { warm = false } = {}) {
     return stored.get(key).row;
   };
   if (warm) {
-    const standard = lodTessellationForLevel(lodDefaultLevel());
-    for (const component of Object.values(fixture.view.components)) produce(component.surfaceInput, standard);
+    for (const component of Object.values(fixture.view.components)) produce(component.surfaceInput, TEST_DISPLAY_TESSELLATION);
   }
   const binary = (response, bytes) => {
     response.setHeader('Content-Type', 'application/octet-stream');
@@ -308,7 +295,7 @@ function harnessBundle() {
  *   rather than a race; `declare(false)` then serves its descriptor without the `bbox` it
  *   declares. `singlePart` serves the base alone as a cadgen single-part STEP
  *   (`stageSinglePartFixture`), its part named `base` in `hinge_base.step`. `warmCache` serves a mesh
- *   store that already holds every component at the standard tier (`meshStore`); without it the
+ *   store that already holds every component's display mesh (`meshStore`); without it the
  *   store is cold, and a component's mesh is made when its surface request asks for it.
  */
 export async function serveStepHarness(t, { onRequest, progressive = false, singlePart = false, warmCache = false } = {}) {

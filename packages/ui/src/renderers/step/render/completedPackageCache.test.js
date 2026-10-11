@@ -1,14 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildComposedPackageMeshData } from "@text-to-cad/core/lib/assembly/meshData.js";
-import { surfTessellationCacheKey } from "@text-to-cad/core/lib/renderAssetClient.js";
-import { lodTessellationForLevel } from "@text-to-cad/core/lib/surf/lodPolicy.js";
 import { completedPackages, createCompletedPackageCache, renderAssetCacheStatsWithPackages } from "./completedPackageCache.js";
 import { renderMemoryAccounting } from "./renderMemoryAccounting.js";
-import { installTestTessellationLadder } from "@text-to-cad/core/lib/surf/testing.js";
-
-// The ladder a cadgen server publishes, installed as a host installs it.
-installTestTessellationLadder();
 
 const root = { resources: {cacheKey: () => "test-service"} };
 const matrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
@@ -17,20 +11,19 @@ function model(file = "assembly.step", count = 1) {
     documentHash: "document", appearanceHash: "appearance", url: `http://cad.test/${file}/` };
   const descriptor = { kind: "assembly-package", viewId: `view-${file}`, components: {}, occurrences: [],
     assembly: { root: { id: "root", nodeType: "assembly", children: [] } } };
-  const componentMeshDataByCid = {}, componentIdentityByCid = {}, componentLodLevelByCid = {};
+  const componentMeshDataByCid = {}, componentIdentityByCid = {};
   for (let i = 0; i < count; i++) {
     const cid = `c${i}`, surfaceInput = i.toString(16).padStart(64, "0"), surfaceObject = "a".repeat(64);
     descriptor.components[cid] = { surfaceInput };
     descriptor.occurrences.push({ id: `o${i}`, name: cid, component: cid, transform: [...matrix], material: { roughness: 0.5 } });
     descriptor.assembly.root.children.push({ id: `o${i}`, nodeType: "part", children: [] });
     componentIdentityByCid[cid] = { surfaceInput, surfaceObject, surfUrl: `http://cad.test/${cid}.surf` };
-    componentLodLevelByCid[cid] = 1;
     componentMeshDataByCid[cid] = { vertices: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
       normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), indices: new Uint32Array([0, 1, 2]),
-      bounds: { min: [0, 0, 0], max: [1, 1, 0] }, lodLevel: 1,
+      bounds: { min: [0, 0, 0], max: [1, 1, 0] },
       parts: [{ id: "part", triangleOffset: 0, triangleCount: 1 }] };
   }
-  return { entry, context: { descriptor, componentMeshDataByCid, componentIdentityByCid, componentLodLevelByCid,
+  return { entry, context: { descriptor, componentMeshDataByCid, componentIdentityByCid,
     meshHash: `${entry.hash}:${entry.appearanceHash}`, complete: true,
     meshData: buildComposedPackageMeshData(descriptor, componentMeshDataByCid) } };
 }
@@ -50,13 +43,11 @@ test("a 317-component working set survives component-LRU-sized churn with privat
   assert.equal(first.componentMeshDataByCid.c0.vertices, a.context.componentMeshDataByCid.c0.vertices);
   first.meshData.parts[0].material.roughness = 1;
   first.descriptor.occurrences[0].transform[3] = 42;
-  first.componentLodLevelByCid.c0 = 3;
+  first.componentIdentityByCid.c0.surfUrl = "changed";
   const second = cache.get(root, a.entry);
   assert.equal(second.meshData.parts[0].material.roughness, 0.5);
   assert.equal(second.meshData.parts[0].transform[3], 0);
-  assert.equal(second.componentLodLevelByCid.c0, 1);
-  assert.equal(second.componentKeyByCid.c0,
-    surfTessellationCacheKey("", lodTessellationForLevel(1), second.componentIdentityByCid.c0));
+  assert.equal(second.componentIdentityByCid.c0.surfUrl, "http://cad.test/c0.surf");
   assert.equal(cache.stats().entries, 2);
 });
 
@@ -114,30 +105,25 @@ test("recognition reads only private exact identities from the matching root, re
   }
 });
 
-test("only complete exact display publications are admitted; pending work and runtime objects are excluded", () => {
+test("only complete exact display publications are admitted; runtime objects are excluded", () => {
   const cache = createCompletedPackageCache(), a = model();
   for (const sourceFormat of ["stl", "glb", "urdf", "dxf"]) {
     assert.equal(cache.set(root, { ...a.entry, kind: sourceFormat, sourceFormat }, a.context), false,
       "a format without exact topology cannot enter the package working-set cache");
   }
-  for (const context of [{ ...a.context, complete: false }, { ...a.context, lodPending: {} },
+  for (const context of [{ ...a.context, complete: false },
     { ...a.context, componentMeshDataByCid: {} }, { ...a.context, meshHash: "old" }]) {
     assert.equal(cache.set(root, a.entry, context), false);
   }
-  a.context.componentMeshDataByCid.c0.lodKey = surfTessellationCacheKey("", lodTessellationForLevel(0), a.context.componentIdentityByCid.c0);
-  assert.equal(cache.set(root, a.entry, a.context), false, "a different L/Q/R cannot masquerade as the displayed tier");
-  delete a.context.componentMeshDataByCid.c0.lodKey;
   a.context.componentIdentityByCid.c0.surfaceObject = "invalid";
   assert.equal(cache.set(root, a.entry, a.context), false);
   a.context.componentIdentityByCid.c0.surfaceObject = "a".repeat(64);
   a.context.controller = new AbortController();
-  a.context.componentLodBundleByCid = { c0: { runtime: true } };
   assert.equal(cache.set(root, a.entry, a.context), true);
   const result = cache.get(root, a.entry);
   assert.equal(result.controller, undefined);
-  assert.equal(result.componentLodBundleByCid, undefined);
-  assert.equal(cache.set(root, a.entry, { ...a.context, lodPending: {} }), false);
-  assert.equal(cache.get(root, a.entry), null, "a pending replacement cannot resurrect an older same-revision detail snapshot");
+  assert.equal(cache.set(root, a.entry, { ...a.context, complete: false }), false);
+  assert.equal(cache.get(root, a.entry), null, "a declined publication cannot resurrect an older same-revision snapshot");
   a.context.componentMeshDataByCid.c0.scene = new AbortController();
   assert.equal(cache.set(root, a.entry, a.context), false, "unexpected mutable runtime objects do not enter display data");
 });

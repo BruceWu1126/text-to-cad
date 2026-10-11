@@ -1,7 +1,7 @@
-"""Write the fixture's stored meshes: ``components/<cid>.l<level>.glb``.
+"""Write the fixture's stored meshes: ``components/<cid>.glb``.
 
 The harness serves these as cadgen's mesh store would: one GLB body per
-component and viewer LOD level (``lodPolicy.js``), bound to the component's
+component at the display tolerance (``cadgen.tessellation_policy``), bound to the component's
 ``surfaceInput`` in ``assembly.json`` and to its ``.surf``'s digest. The two
 parts are rebuilt here from ``hinge_block.py``'s shapes and meshed by cadgen's
 own producer (``cadgen._internal.occt_mesh``); a part whose edges a newer
@@ -22,7 +22,6 @@ from pathlib import Path
 import numpy as np
 
 FIXTURE = Path(__file__).resolve().parents[1]
-LEVELS = {0: (2e-3, 1.4), 1: (1.5e-3, 0.35), 2: (5e-4, 0.35), 3: (1.5e-4, 0.35)}
 
 
 def shapes():
@@ -49,6 +48,9 @@ def main() -> None:
     from cadgen._internal.surf_container import read_surf
     from cadgen._internal.surface_extract import extract_surface_component
     from cadgen.store.meshes import decode_payload, encode_payload
+    from cadgen.tessellation_policy import DISPLAY_TESSELLATION
+
+    chord, angle = DISPLAY_TESSELLATION["chordTolerance"], DISPLAY_TESSELLATION["angleTolerance"]
 
     view = json.loads((FIXTURE / "assembly.json").read_text(encoding="utf-8"))
     names = {occurrence["component"]: occurrence["name"] for occurrence in view["occurrences"]}
@@ -66,23 +68,22 @@ def main() -> None:
         edges = _match(committed["edges"], fresh["edges"], "length")
         classes = {row["ord"]: str(row.get("class") or "none") for row in committed["edges"]}
         surface_object = hashlib.sha256(surf).hexdigest()
-        for level, (chord, angle) in LEVELS.items():
-            body = occt_mesh.mesh_component(decode_display_shape(entry, payload).wrapped, fresh,
-                                            surface_input=component["surfaceInput"], surface_object=surface_object,
-                                            chord=chord, angle=angle)
-            meshed = decode_payload(body)
-            polylines = [(int(ordinal), meshed.edge_points[start:start + count])
-                         for ordinal, start, count, _class in meshed.edges.tolist()]
-            remapped = sorted(((edges[ordinal], polyline) for ordinal, polyline in polylines), key=lambda item: item[0])
-            body = encode_payload(
-                surface_input=component["surfaceInput"], surface_object=surface_object, chord=chord, angle=angle,
-                positions=meshed.positions, normals=meshed.normals, indices=meshed.indices.astype(np.uint32),
-                face_ranges=meshed.face_ranges(),
-                edges=[(ordinal, classes[ordinal], polyline) for ordinal, polyline in remapped],
-                bounds=meshed.cad["bounds"], scale=meshed.cad["scale"], part_color=committed.get("partColor"),
-            )
-            (FIXTURE / "components" / f"{cid}.l{level}.glb").write_bytes(body)
-            print(cid, names[cid], f"L{level}", len(body), "bytes")
+        body = occt_mesh.mesh_component(decode_display_shape(entry, payload).wrapped, fresh,
+                                        surface_input=component["surfaceInput"], surface_object=surface_object,
+                                        chord=chord, angle=angle)
+        meshed = decode_payload(body)
+        polylines = [(int(ordinal), meshed.edge_points[start:start + count])
+                     for ordinal, start, count, _class in meshed.edges.tolist()]
+        remapped = sorted(((edges[ordinal], polyline) for ordinal, polyline in polylines), key=lambda item: item[0])
+        body = encode_payload(
+            surface_input=component["surfaceInput"], surface_object=surface_object, chord=chord, angle=angle,
+            positions=meshed.positions, normals=meshed.normals, indices=meshed.indices.astype(np.uint32),
+            face_ranges=meshed.face_ranges(),
+            edges=[(ordinal, classes[ordinal], polyline) for ordinal, polyline in remapped],
+            bounds=meshed.cad["bounds"], scale=meshed.cad["scale"], part_color=committed.get("partColor"),
+        )
+        (FIXTURE / "components" / f"{cid}.glb").write_bytes(body)
+        print(cid, names[cid], len(body), "bytes")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createCrashReporter, type CadPageCrash } from '@text-to-cad/core/client';
-import { installDisplayTessellation } from '@text-to-cad/core/lib/surf/lodPolicy.js';
+import { installDisplayTessellation } from '@text-to-cad/core/lib/surf/displayTessellation.js';
 import { version } from '../package.json';
 import App from './App';
 import Notice from './Notice';

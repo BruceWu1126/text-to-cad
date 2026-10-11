@@ -6,8 +6,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 
-import { lodTessellationForLevel } from "../lodPolicy.js";
-import { installTestTessellationLadder } from "../testing.js";
+import { TEST_DISPLAY_TESSELLATION } from "../testing.js";
 import {
   MESH_INDEX_SCHEMA,
   decodeComponentTessellation,
@@ -36,12 +35,11 @@ export function selectorTableFixture(name) {
   return JSON.parse(fs.readFileSync(new URL(`${name}.selectors.json`, FIXTURES), "utf8"));
 }
 
-/** One fixture component's stored mesh at a viewer LOD level, with its probe row. */
-export function meshFixture(name, level = 1) {
-  installTestTessellationLadder();
-  const bytes = new Uint8Array(fs.readFileSync(new URL(`${name}.l${level}.glb`, FIXTURES)));
+/** One fixture component's stored display mesh, with its probe row. */
+export function meshFixture(name) {
+  const bytes = new Uint8Array(fs.readFileSync(new URL(`${name}.glb`, FIXTURES)));
   const { surfaceInput, surfaceObject } = MANIFEST[name];
-  return { bytes, surfaceInput, surfaceObject, tessellation: lodTessellationForLevel(level), row: probeRowFor(bytes) };
+  return { bytes, surfaceInput, surfaceObject, tessellation: TEST_DISPLAY_TESSELLATION, row: probeRowFor(bytes) };
 }
 
 /** The index record a host's mesh store answers a probe with, for a valid body. */
@@ -118,12 +116,12 @@ export function memoryMeshProvider(bodies = [], { produce = null } = {}) {
 }
 
 /**
- * A mesh store that holds a mesh for every key it is asked: `name`'s stored mesh (its level-1
+ * A mesh store that holds a mesh for every key it is asked: `name`'s stored mesh (its display
  * geometry), re-encoded for the key's surface input and tolerances and bound to `surfaceObject`.
  * For loaders under test that open many distinct components; every read is counted.
  */
 export function everyKeyMeshProvider(name = "sun_gear", { surfaceObject = "a".repeat(64) } = {}) {
-  const fixture = meshFixture(name, 1);
+  const fixture = meshFixture(name);
   const decoded = decodeComponentTessellation(fixture.bytes, { surfaceInput: fixture.surfaceInput });
   const bodies = new Map();
   const counts = { probes: 0, reads: 0, batches: 0 };

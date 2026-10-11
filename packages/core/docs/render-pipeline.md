@@ -129,8 +129,8 @@ Lighting quality is `preview` or `final`, mapping to standard/high scene policy.
 The viewer passes `lightingQuality: "preview"`; the CLI baseline is `final`.
 That environment default also feeds Custom comparison and does not pin a saved
 override. An explicit `lighting.quality` wins in either context.
-Final uses a 0.25px viewport target, 4096px spotlight shadows, a 512px
-procedural environment and 2x snapshot capture. Every still draws cadgen's display
+Final uses 4096px spotlight shadows, a 512px procedural environment and 2x
+snapshot capture. Every still draws cadgen's display
 tolerance (`cadgen.tessellation_policy`), named in the job as
 `resolved.tessellation`; `output.renderScale` remains an explicit override.
 PNG output retains requested dimensions by resampling the full drawing buffer.
@@ -498,8 +498,8 @@ draw call (+1 while any occurrence is highlighted).
 
 **One upload per component.** Geometry built from a shared component is cached
 on the component object (`part.sourceMesh`), never on the composed package
-`meshData`: a package is re-composed on every progressive publish and LOD swap,
-and every occurrence, publish and swap reuses the one upload. A publish of the
+`meshData`: a package is re-composed on every progressive publish, and every
+occurrence and publish reuses the one upload. A publish of the
 same model reaches the live scene through `api.update({ source })`, which
 reconciles records by occurrence id — records already on screen keep their
 mesh, materials, visual and deformation state and BVH; only new occurrences are

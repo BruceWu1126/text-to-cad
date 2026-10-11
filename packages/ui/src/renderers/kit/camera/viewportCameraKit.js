@@ -195,8 +195,8 @@ export function runtimeFramingBounds(runtime, fallbackBounds = null) {
 //   once it can grow no more. A package that declares its box is complete from
 //   its first publish and is never framed twice.
 //
-// An UPDATE is none of these. A rebuild of the open file -- a saved revision, a
-// detail swap, another publish of the same geometry -- keeps the camera exactly,
+// An UPDATE is none of these. A rebuild of the open file -- a saved revision,
+// another publish of the same geometry -- keeps the camera exactly,
 // its pose and its zoom, even when the model grew or shrank: only the person's
 // Zoom to fit frames it again. Neither is a joint, a group state, a mate or an
 // animation frame, which never move the zero pose at all.

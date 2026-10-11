@@ -99,7 +99,7 @@ test("removing a prior module, animation or exploded pose never skips the transi
 function component(level) {
   const geometry = new THREE.BoxGeometry(1 + level / 10, 1, 1);
   const result = { vertices: geometry.attributes.position.array, normals: geometry.attributes.normal.array,
-    indices: geometry.index.array, colors: new Float32Array(0), lodLevel: level,
+    indices: geometry.index.array, colors: new Float32Array(0),
     bounds: { min: [-(1 + level / 10) / 2, -.5, -.5], max: [(1 + level / 10) / 2, .5, .5] },
     parts: [{ id: "solid", vertexCount: geometry.attributes.position.count, triangleCount: geometry.index.count / 3 }] };
   geometry.dispose(); return result;

@@ -729,15 +729,14 @@ The bound includes unique full backing buffers and estimated structural metadata
 an oversized package is not retained. Memory pressure evicts these disposable
 snapshots before reclaiming workers. The existing memory probe reports their
 bytes under `assetCaches.completedPackages`, excluding buffers already charged
-to the displayed scene, LOD staging or another cache.
+to the displayed scene or another cache.
 
 Only complete committed CPU display data enters this cache. Component typed
 arrays remain immutable and share their existing allocations; cache admission
 copies plain bounds, part and descriptor metadata, and every restore gives the
-renderer fresh occurrence/material objects and LOD maps. Scene code must not
-mutate or transfer the shared component arrays. WebGL scenes, selector runtimes,
-workers, pending work, cameras, selections and pose state are never retained.
-Refinement drops the old snapshot when its replacement commits; closing the
+renderer fresh occurrence/material objects. Scene code must not mutate or
+transfer the shared component arrays. WebGL scenes, selector runtimes, workers,
+pending work, cameras, selections and pose state are never retained. Closing the
 renderer captures the latest complete working set.
 
 Reuse requires the same resource-provider generation, stable workspace, file, entry/document and
@@ -808,7 +807,7 @@ The optional `@text-to-cad/ui/file-viewer/empty` entry exports `EmptyCadBackdrop
   so releasing a build drops this scene's count and frees a buffer only when nothing
   else holds it; a rebuild of the SAME model releases with `releaseGpu: false` and
   keeps its components' GPU buffers and BVHs. Runtime-level teardown
-  (`render/lodSceneCleanup.js`) clears only the groups that hold nothing but STEP's
+  (`render/sceneCleanup.js`) clears only the groups that hold nothing but STEP's
   own objects (the edge layer and the three pick groups) — never the model group or
   the stage, which are the viewport's. **So nothing STEP draws may be parked in the
   viewport's model group.** An overlay that belongs WITH the surfaces rather than
@@ -817,10 +816,8 @@ The optional `@text-to-cad/ui/file-viewer/empty` entry exports `EmptyCadBackdrop
   (the edge layer IS cleared) and left a fill lit over a model it was no longer
   measured against. That fill is rebuilt whenever the records are
   (`displayRecordsToken`), because its geometry is read off the display meshes on
-  screen. The LOD publisher's ownership protocol (`onMeshSourceAdoption`) is
-  answered for every source the scene shows, releases or fails to show, and for
-  every way the WebGL runtime under it can go away (`runtimeLifecycle`) — which is
-  also the ONE place the scene is released. The viewport does not release it a
+  screen. The WebGL runtime under the scene going away (`runtimeLifecycle.onRelease`)
+  is the ONE place the scene is released. The viewport does not release it a
   second time from an unmount of its own: two owners firing parent-first worked
   only because `dispose()` happens to be idempotent, which is a property to lean on
   in recovery, not a teardown design.
@@ -844,7 +841,7 @@ The optional `@text-to-cad/ui/file-viewer/empty` entry exports `EmptyCadBackdrop
   and isolated parts, picks, hover, Measure, Position's knobs — is one object of the layers'
   props (`toolsWork`); preview hands them `openingWork` in its place, the model as it opens,
   and changes none of the work, so leaving preview finds it exactly as it was and hands the viewport menu, the selection's references and its copy to the shell, and it
-  keeps the two things only a STEP can answer, beside the kit viewport's handle: `sampleLodCamera` and `zoomToFitSelection` (the boxes of the selected
+  keeps what only a STEP can answer, beside the kit viewport's handle: `zoomToFitSelection` (the boxes of the selected
   references, from the selector runtime as posed, merged with the boxes of the
   selected parts, from the records on screen).
 - **Layers** (`scene/StepSceneLayers.jsx`), mounted through the viewport's overlay
@@ -866,7 +863,7 @@ The optional `@text-to-cad/ui/file-viewer/empty` entry exports `EmptyCadBackdrop
   | module | what it owns |
   | --- | --- |
   | `useStepViewPolicy.js` | Everything DERIVED from the settings and the selection, touching no scene: the normalized display state, which linework is drawn, the edge styling a mode forces, what is pickable once hidden and isolated parts are out. |
-  | `useStepSceneSync.js` | The scene sync: reuse or rebuild, the LOD ownership protocol, the topology line, pick groups, the raycast-BVH schedule and the section clip over the new records; STEP's half of the look. |
+  | `useStepSceneSync.js` | The scene sync: reuse or rebuild, the topology line, pick groups, the raycast-BVH schedule and the section clip over the new records; STEP's half of the look. |
   | `useStepDisplay.js` | `useStepPartVisualState` (hidden, isolated, hovered, selected parts) and `useStepLinework` (pick proxies, B-rep edges, a highlighted part's brighter edges). |
   | `useStepPose.js` | The sidecar module's setup and the ONE pose/animation pass (below). It refreshes core's placed bounds and calls `syncSceneBounds()` before drawing, so the near plane and shadows track moving parts. |
   | `useStepExplode.js` | The exploded view: a radial layout eased over a second, snapped by the slider, re-applied to fresh records. |
@@ -1346,8 +1343,8 @@ routine plays, the animation clock calls that same function once per tick
 (`usePlaybackFrames`; the GLB renderer drives its mixer the same way). Both
 callers draw the routine at ONE time: while it plays, that is the clock's, never
 the time React holds (where playback started, written back only when it stops),
-so a pass React re-runs mid-play — a detail swap, a progressive publish, a display
-change — draws the frame the next tick would (`playbackFrameTime`). The
+so a pass React re-runs mid-play — a progressive publish, a display change —
+draws the frame the next tick would (`playbackFrameTime`). The
 scrubber is the clock's only React subscriber. Because the pass runs inside
 the tick, the clock's adaptive pacing measures a frame's real cost, and only a
 run of frames that all overran slows it (`createAnimationFramePacer` in core's
@@ -1464,7 +1461,7 @@ idle deadline (`PREVIEW_CHROME_IDLE_MS`) that any of their open dropdowns holds.
 draws preview one scene-quality tier up (`previewSceneQuality`), keeps the full
 pixel ratio while orbiting (`renderProfileKeepsPixelRatio`) and never changes a
 Display setting; `sceneForRenderProfile` is what RendererShell and `StepSurface`
-(whose LOD reads the raised quality) draw. Preview never uses the browser Fullscreen API.
+draw. Preview never uses the browser Fullscreen API.
 
 ### Read-only STEP features
 

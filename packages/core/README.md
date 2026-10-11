@@ -51,17 +51,14 @@ in [the drawing contract](../ui/docs/drawing.md); the mechanism is
   rather than released twice. Mechanism:
   [docs/resource-ownership.md](docs/resource-ownership.md) §1.
 - **Demand boundary**: a render-only load builds no selector topology, and no
-  raycast accelerator until a ray reaches a component's bounds. Refinement
-  honours that boundary — a component with active topology replaces its
-  selectors at the same concrete tessellation before publishing new triangles.
+  raycast accelerator until a ray reaches a component's bounds.
   Selectors are cadgen's per-component table joined to the mesh by ordinal:
   the page composes `occurrenceId.localId` and mints no fact of its own.
   Mechanism: [docs/resource-ownership.md](docs/resource-ownership.md) §2.
 - **Reuse never changes what is exact**: recomposition, instanced draws,
-  frustum culling, material pass keys and detail swaps may all reuse previous
-  work, but none may change exact geometry, persistent cache identity or
-  occurrence identity — and changing viewport detail never changes export
-  defaults. Canonical geometry trees carry no surface-producer selection;
+  frustum culling and material pass keys may all reuse previous work, but
+  none may change exact geometry, persistent cache identity or occurrence
+  identity. Canonical geometry trees carry no surface-producer selection;
   reuse requires the exact SURF binding, tolerance pair and payload version.
   Mechanism: [docs/resource-ownership.md](docs/resource-ownership.md) §3.
 - **Worker isolation**: each tessellation worker runs one request at a time;

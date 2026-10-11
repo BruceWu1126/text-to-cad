@@ -25,11 +25,11 @@ one revolute mate. Every property is there for a test:
 | `components/df492f79c6123df5.surf` | 10,478 | the same, for the arm. |
 | `components/552fc5fd1b854ab4.selectors.json` | 8,355 | the same route, by the table's own digest (the `selectors` of a `POST /__cad/surfaces` ready row), for the base. cadgen's selector table: the ids, facts, adjacency, chains and tangent groups picking and measuring join to the mesh. |
 | `components/df492f79c6123df5.selectors.json` | 6,499 | the same, for the arm. |
-| `components/<cid>.l<level>.glb` | 3,044–15,064 | the store's meshes (GLB bodies), one per component and LOD level 0–3: what the harness's mesh store serves (`/__tess_cache/` probe, batch and single reads), and what a `POST /__cad/surfaces` naming a tessellation answers with. |
+| `components/<cid>.glb` | 3,044–9,732 | the store's display meshes (GLB bodies), one per component: what the harness's mesh store serves (`/__tess_cache/` probe, batch and single reads), and what a `POST /__cad/surfaces` naming the display tolerance answers with. |
 | `hinge_block.step.json` | 2,217 | **no request at all.** The harness puts its `animation` section inline on the catalog entry, which is what the real scanner does, and the renderer plays the routine's keyframes straight from there. |
 | `hinge_block.articulation.json` | 921 | **no request at all.** cadgen's articulation of the sidecar's kinematics (`cadgen.articulation.step_articulation` over `assembly.json` and the sidecar), which the harness puts inline on the catalog entry as `articulation`, as the real scanner does; the Position tool plays it. `tests/python/packages/cadgen/test_articulation.py` asserts it is what cadgen writes today. |
 
-Total 96,497 bytes with the meshes and tables. No Git attribute applies here (`git check-attr -a` on these
+Total 58,222 bytes with the meshes and tables. No Git attribute applies here (`git check-attr -a` on these
 paths prints nothing), and the repository carries no LFS. Keep it that way — an
 LFS pointer would be rejected by name at `renderAssetClient.js`'s SURF reader.
 
@@ -75,7 +75,7 @@ The served descriptor is the unmaterialized one — that is deliberate, and is w
 the harness must implement `POST /__cad/surfaces`.
 
 The meshes are cadgen's own: `source/make_meshes.py` rebuilds the two parts,
-meshes them with cadgen's producer at each LOD level, and writes them in the
+meshes them with cadgen's producer at the display tolerance, and writes them in the
 committed `.surf`s' ordinals (a newer build orders the base's edges differently;
 the script matches them by centre and length). Run it from the repository root
 with the repo's Python whenever the mesh format or the mesher moves:

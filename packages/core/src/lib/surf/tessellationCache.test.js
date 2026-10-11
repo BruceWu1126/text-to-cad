@@ -328,16 +328,16 @@ test("each edge class draws as its line class, and none draws nothing", () => {
 });
 
 test("cadgen's stored meshes decode as the bodies their probe rows describe", () => {
-  for (const [name, level] of [["sun_gear", 0], ["sun_gear", 1], ["cam_follower_roller", 1], ["mixed", 0]]) {
-    const fixture = meshFixture(name, level);
+  for (const name of ["sun_gear", "cam_follower_roller", "mixed", "slot"]) {
+    const fixture = meshFixture(name);
     const row = validateTessellationProbeRow(fixture.row, {
       tessellationInput: tessellationCacheKey(fixture.surfaceInput, fixture.tessellation),
     });
-    assert.ok(row, `${name} L${level} row`);
+    assert.ok(row, `${name} row`);
     const decoded = decodeComponentTessellation(fixture.bytes, {
       surfaceInput: fixture.surfaceInput, surfaceObject: fixture.surfaceObject, tessellation: fixture.tessellation,
     });
-    assert.ok(decoded, `${name} L${level} decodes`);
+    assert.ok(decoded, `${name} decodes`);
     assert.equal(decoded.component.positions.length, 3 * row.vertexCount);
     assert.equal(decoded.component.normals.length, 3 * row.vertexCount);
     assert.equal(decoded.component.indices.length, row.indexCount);

@@ -1,14 +1,14 @@
-// Progressive publish of a component package (packages/ui/docs/lod.md,
-// section 4), split out of useCadAssets so it unit-tests in Node (the hook's
+// Progressive publish of a component package (packages/ui/docs/loading.md,
+// section 2), split out of useCadAssets so it unit-tests in Node (the hook's
 // other imports are Vite-resolved; same pattern as packageReferenceComposition.js).
 //
 // The hook used to fetch every component, compose once and publish once, so a
 // 866-component model painted nothing until the last component landed and a
 // cancel mid-way freed nothing it had not yet published. This module loads the
 // components with bounded concurrency and, as they arrive, re-composes the ones
-// loaded so far through the SAME reference-based composition a viewport-LOD
-// level swap uses (buildComposedPackageMeshData shares component buffers, it
-// copies nothing), publishing each batch. The last publish is the full model.
+// loaded so far through one reference-based composition
+// (buildComposedPackageMeshData shares component buffers, it copies nothing),
+// publishing each batch. The last publish is the full model.
 import { buildComposedPackageMeshData } from "@text-to-cad/core/lib/assembly/meshData.js";
 import { estimateMeshRenderCost } from "@text-to-cad/core/lib/render/meshCost.js";
 import { ViewerMemoryLimitError } from "../../../render/viewerMemoryPolicy.js";
@@ -33,8 +33,7 @@ import { ViewerMemoryLimitError } from "../../../render/viewerMemoryPolicy.js";
 export const PROGRESSIVE_PUBLISH_FIRST_COMPONENTS = 8;
 export const PROGRESSIVE_PUBLISH_FIRST_BYTES = 8 * 1024 * 1024;
 // Last ceilings, once doubling reaches them. A batch this size is roughly the
-// cost of a scene rebuild the viewer already absorbs on an LOD swap, so it does
-// not stall interaction noticeably; the byte ceiling also bounds how much
+// cost of one scene rebuild, so it does not stall interaction noticeably; the byte ceiling also bounds how much
 // decoded geometry sits on the main thread unpainted, waiting to be uploaded.
 export const PROGRESSIVE_PUBLISH_MAX_COMPONENTS = 256;
 export const PROGRESSIVE_PUBLISH_MAX_BYTES = 128 * 1024 * 1024;
@@ -178,7 +177,7 @@ export function shouldRetainCompleteSameFileMesh(current, entry, targetMeshHash)
 }
 
 // Readable memory accounting for the headless harness, following the
-// window.__cadModelPlacement / __CAD_VIEWER_LOD__ precedent:
+// window.__cadModelPlacement precedent:
 // written on EVERY progressive publish, nulled on cancel, never React state.
 // Harmless without a window (Node tests).
 function meshCostAccounting({ meshData, componentMeshDataByCid, loaded, total, publishCount, final, meshRevision = "" }) {
@@ -315,7 +314,6 @@ export function orderComponentsForProgressiveLoad(descriptor) {
  *   releaseLoad?(token), onMemoryLimitation?(detail),
  *   recoverMemoryPressure?(detail),    // one bounded reclaim attempt after admitted work drains
  *   onRetainedChange?({ loaded, failed, total, retainedBytes }), // every unique component completion
- *   swappedComponents?(),              // the live LOD working set (cid -> meshData) or null
  *   onPublish({ meshData, componentMeshDataByCid, loaded, total, final, composeMs, publishCount, failures }),
  *   maxComponents?, maxBytes?
  * }).run() -> Promise<{ loaded, total, publishes, failures }>
@@ -327,9 +325,7 @@ export function orderComponentsForProgressiveLoad(descriptor) {
  * `reserveLoad` accepts it. Every publish re-checks isCurrent() first; a superseded or aborted load
  * publishes nothing further, drops its references to every component it
  * loaded (retainedComponentCount() -> 0) and rejects with an AbortError.
- * Composition is `{ ...loadedSoFar, ...swappedComponents() }`, so a viewport
- * LOD swap that lands mid-load is kept by the next batch rather than reverted
- * to its initially requested level. The final publish (`final: true`) carries every component and is
+ * The final publish (`final: true`) carries every component and is
  * the same composition the single post-load publish produced.
  *
  * A component whose own failure `componentFailed` recognizes settles alone: every other component
@@ -355,7 +351,6 @@ export function createProgressivePackageLoader({
   recoverMemoryPressure = null,
   onMemoryLimitation = null,
   onRetainedChange = null,
-  swappedComponents = () => null,
   onPublish,
   publishIntermediate = true,
   firstComponents = PROGRESSIVE_PUBLISH_FIRST_COMPONENTS,
@@ -406,10 +401,7 @@ export function createProgressivePackageLoader({
     if (!active()) {
       stop();
     }
-    const swapped = swappedComponents?.();
-    const componentMeshDataByCid = swapped && typeof swapped === "object"
-      ? { ...loadedByCid, ...swapped }
-      : { ...loadedByCid };
+    const componentMeshDataByCid = { ...loadedByCid };
     const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
     const meshData = buildComposedPackageMeshData(descriptor, componentMeshDataByCid, { previous: previousComposition });
     previousComposition = meshData;

@@ -34,8 +34,8 @@ the last release disposes shared GPU/BVH state.
 
 ## 2. The demand boundary
 
-Render-only loads do not construct selector topology until it is requested,
-and viewport refinement keeps that boundary. Selector topology is cadgen's
+Render-only loads do not construct selector topology until it is requested.
+Selector topology is cadgen's
 selector table (served on the surface request's ready row, `selectorsUrl`)
 joined to the component's stored mesh by ordinal (`lib/surf/selectorTable.js`):
 the ids, metrics, flags, adjacency, chains and tangent groups are the table's,
@@ -74,7 +74,7 @@ range in the mesh on screen.
 
 Recomposition may take its previous result when the descriptor and component
 inputs are immutable. It shares unchanged occurrence rows and unchanged tree
-metadata across detail swaps; changed triangle ranges, bounds, placements and
+metadata across progressive publishes; changed triangle ranges, bounds, placements and
 appearance still produce the corresponding new records. Its private weak
 ownership metadata never enters saved geometry or cache identity. Complete
 same-file revisions can also seed from the prior composition.
@@ -143,9 +143,8 @@ binds each component's opaque surface input to a concrete immutable SURF
 object, and render/selector reuse requires that exact binding plus the lossless
 tolerance pair and payload version. Other snapshot source scopes remain
 isolated. Placement and appearance belong to each tree's occurrence
-composition. Viewport L0 is explicitly coarse; L1 preserves the canonical
-default mesh options and key. **Changing viewport detail never changes export
-defaults.**
+composition. Every part is drawn at cadgen's one display tolerance, the same
+pair a mesh export that names none is written at.
 
 ## 4. Decode workers
 
@@ -162,8 +161,8 @@ workers. Idle pressure reclamation preserves active and queued consumers.
   or when a package load finds its first components cached: it starts the
   isolates its lanes will decode on (`prewarmSurfWorkerPool`, at most the
   lanes' count), so their start overlaps the batch read of those bodies instead
-  of following it. Sequential viewport refinement reuses that isolate until the
-  drain becomes idle; it does not create a maximum-size pool for each component.
+  of following it. Sequential topology reads reuse that isolate until the drain
+  becomes idle; they do not create a maximum-size pool for each component.
 - Pressure reclamation may release idle worker slots while active and queued
   consumers keep their work. Each live slot retains its own highest completed
   request estimate, including handled failures; reclamation or replacement
@@ -195,7 +194,7 @@ once its last component has taken its body; each component's decode is still
 admitted on its own before it runs, and an entry the batch could not read or
 verify is that component's strict-read miss alone. The cold components'
 surfaces resolve up to 64 to a `/__cad/surfaces` request, each the moment its
-own row is ready; the request names the standard tier, so cadgen meshes each
+own row is ready; the request names the display tolerance, so cadgen meshes each
 component there in the same job and its row carries the mesh's probe row.
 
 A validated warm entry carries the full surface-object provenance, so
@@ -207,9 +206,8 @@ groups remain bounded at 32 MiB.
 
 Every read is strict: a missing or invalid body reports a typed miss
 (`TessellationCacheProbeMissError`), never a fallback. The loader releases that
-reservation and probes another stored tier or asks cadgen for the mesh under
-fresh cold-work admission; the viewport's refinement asks for a level it lacks
-the same way. **A lost mesh never silently turns a cheap decode into
+reservation and probes again or asks cadgen for the mesh under fresh cold-work
+admission; a topology read asks for a mesh it lacks the same way. **A lost mesh never silently turns a cheap decode into
 unbudgeted work in the page.**
 
 A client lazily owns one `createTessellationCache({provider})`, whose

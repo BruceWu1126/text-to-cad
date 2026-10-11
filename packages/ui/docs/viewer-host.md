@@ -25,10 +25,10 @@ See [workspace resources](../../core/docs/workspace-resources.md) for resource
 tickets and cache identity.
 
 A host installs cadgen's display tolerance before a STEP model is drawn
-(`installDisplayTessellation` from `@text-to-cad/core/lib/surf/lodPolicy.js`), from what its
-server says: the web viewer from its server info's `tessellation`, the CAD app from its
+(`installDisplayTessellation` from `@text-to-cad/core/lib/surf/displayTessellation.js`), from
+what its server says: the web viewer from its server info's `tessellation`, the CAD app from its
 launch's. The STEP renderer draws every part at it and holds no tolerance of its own
-([LOD](lod.md#1-where-a-model-starts)).
+([the display mesh](loading.md#1-the-display-mesh)).
 
 Apps create services for the workspace lifetime. File tabs borrow them, while
 mounted renderers own scenes, document controllers and temporary resource leases.

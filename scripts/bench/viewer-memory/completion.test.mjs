@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isCompletePublication, isRequestedDetailComplete, recordMeshCostRampSample } from "./completion.mjs";
+import { isCompletePublication, recordMeshCostRampSample } from "./completion.mjs";
 
 const completeCost = {
   final: true,
@@ -37,17 +37,6 @@ test("a final publication cannot certify an old partial scene", () => {
 
 test("a complete publication succeeds only after matching render and scene counts", () => {
   assert.equal(isCompletePublication({ ...completeScene, meshCost: completeCost }), true);
-});
-
-test("canonical completion requires every leaf and a settled requested detail floor", () => {
-  const probe = { ...completeScene, meshCost: completeCost };
-  assert.equal(isRequestedDetailComplete(probe, 0), true);
-  assert.equal(isRequestedDetailComplete(probe, 1), false);
-  const lod = { minimumLevel: 1, componentCount: 866, belowMinimum: 0, busy: false, pendingEvaluation: false };
-  assert.equal(isRequestedDetailComplete({ ...probe, viewportLod: lod }, 1), true);
-  for (const change of [{ componentCount: 865 }, { belowMinimum: 1 }, { busy: true }, { pendingEvaluation: true }]) {
-    assert.equal(isRequestedDetailComplete({ ...probe, viewportLod: { ...lod, ...change } }, 1), false);
-  }
 });
 
 test("scene sync must complete at or after the final publication", () => {

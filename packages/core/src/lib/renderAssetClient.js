@@ -323,7 +323,7 @@ export async function loadRenderSurf(url, {
 }
 
 // Hand the surf worker pool's isolates back once nothing is loading. The
-// generation-scoped wait prevents an overlapping package/LOD request from
+// generation-scoped wait prevents an overlapping package/topology request from
 // leaving its conservative retained-memory estimate charged after it drains.
 export async function releaseSurfWorkers() {
   return releaseSurfWorkerPoolWhenIdle();
@@ -613,27 +613,26 @@ export function peekRenderDisplayEdgeBundle(glbUrl, { resources } = {}) {
 // cadgen's selector table carries the topology the GLB's STEP_TOPOLOGY tables
 // did, and the page joins it to the stored mesh (surf/selectorTable.js).
 // Worker requests declare whether they need render data, selectors, or both.
-// Initial display uses render only; selection and measurement join the table
-// on demand. LOD requests both only for already-used topology; later demand
-// must use the displayed level's concrete tessellation key.
+// Display uses render only; selection and measurement join the table on
+// demand, to the same mesh.
 
 const surfPayloadCache = new Map();
 
-// Every surf entry — a component's payload at any level, its selector bundle,
-// its display-edge bundle — lives on ONE bounded LRU leash. The consumers own
+// Every surf entry — a component's payload, its selector bundle, its
+// display-edge bundle — lives on ONE bounded LRU leash. The consumers own
 // what they keep: the package's componentMeshDataByCid holds every displayed
 // meshData, the reference composition holds the bundles of the occurrences it
-// composed, the LOD working set holds its swapped levels. Retaining a second
+// composed. Retaining a second
 // reference here for the load's lifetime pinned every component's decoded
 // selector bundle (manifest rows + edge polylines) for the whole session; a
 // miss re-decodes from the shared tessellation cache in a worker. Mesh keys
 // include component identity, effective tolerances, tessellator algorithm and
-// payload compatibility; an app-facing LOD label never identifies geometry.
+// payload compatibility.
 //
 // The leash is bounded by COUNT and by BYTES. A count alone pinned whatever the
 // entries weighed: the tendon hand's components decode to ~90 MB each, so 24
-// of them held >2 GB of typed arrays here beside the copies the package and
-// the LOD working set already own, and the tab died at load time. The byte
+// of them held >2 GB of typed arrays here beside the copies the package
+// already owns, and the tab died at load time. The byte
 // ceiling evicts oldest-first until the decoded bytes fit; the count floor
 // keeps a few entries whatever they weigh, so small models behave as before
 // (their whole working set fits under the ceiling anyway).
@@ -764,7 +763,7 @@ export function renderAssetCacheStats({ excludeBuffers = [] } = {}) {
   return stats;
 }
 
-/** The display payload `loadRenderSurf` already holds for this tier of this component, or null. */
+/** The display payload `loadRenderSurf` already holds for this component, or null. */
 export function peekRenderSurf(url, { tessellation, identity } = {}) {
   return peekCached(glbCache, surfTessellationCacheKey(url, tessellation, identity));
 }
@@ -775,39 +774,6 @@ export function surfTessellationCacheKey(_url, tessellation, identity) {
     String(identity?.surfaceObject || ""),
     tessellation,
   );
-}
-
-// Drop browser-cache references for an obsolete concrete surf level after its
-// replacement has committed. Scene records and selector compositions own the
-// values they still use, so deleting these Map entries cannot blank a view or
-// invalidate an exact measurement. Persistent tessellation-store records are
-// intentionally untouched.
-export function releaseRenderSurfLevel(url, { tessellation, identity } = {}) {
-  const baseKey = surfTessellationCacheKey(url, tessellation, identity);
-  const targets = [
-    ...[...surfPayloadCache.keys()]
-      .filter((key) => key.startsWith(`${baseKey}#cap=`))
-      .map((key) => [surfPayloadCache, key]),
-    [selectorCache, baseKey],
-    [displayEdgeCache, baseKey],
-    [glbCache, baseKey],
-  ];
-  let released = 0;
-  for (const [cache, key] of targets) {
-    const value = cache.get(key);
-    if (value && typeof value.then === "function") continue;
-    if (cache.delete(key)) {
-      releaseAssetSourceScope(cache, key);
-      released += 1;
-    }
-  }
-  for (let index = surfEntries.length - 1; index >= 0; index -= 1) {
-    const entry = surfEntries[index];
-    if (targets.some(([cache, key]) => cache === entry.cache && key === entry.key)) {
-      surfEntries.splice(index, 1);
-    }
-  }
-  return released;
 }
 
 function capabilityCacheKey(capabilities) {
@@ -893,35 +859,8 @@ async function loadSurfPayload(url, {
   return payload;
 }
 
-/**
- * Render data and, when requested, selectors for one concrete tessellation.
- * `url` is the component's selector table (its surface ticket's `selectorsUrl`),
- * read only with `selectors`. A render-only refinement passes selectors:false;
- * the caller reconciles any topology demanded during that load before
- * publishing new triangles.
- */
-export async function loadRenderSurfPayloadAtLevel(url, {
-  signal,
-  resources,
-  tessellation,
-  identity,
-  memoryEstimateBytes,
-  tessellationCache,
-  selectors = true,
-} = {}) {
-  return loadSurfPayload(url, {
-    signal,
-    resources,
-    tessellation,
-    identity,
-    memoryEstimateBytes,
-    tessellationCache,
-    capabilities: { render: true, selectors: selectors === true },
-  });
-}
-
-/** The selector bundle of one component at one tessellation: cadgen's selector table
- * (`selectorsUrl`, its surface ticket's) joined to the mesh at that level. */
+/** The selector bundle of one component: cadgen's selector table (`selectorsUrl`, its
+ * surface ticket's) joined to the mesh at `tessellation`. */
 export async function loadRenderSurfSelectorBundle(selectorsUrl, {
   signal,
   resources,

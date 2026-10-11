@@ -5,10 +5,6 @@ import {
   matchingDisplayedPackageContext,
   retainedComponentMeshesForRevision,
 } from "./packageComponentReuse.js";
-import { installTestTessellationLadder } from "@text-to-cad/core/lib/surf/testing.js";
-
-// The ladder a cadgen server publishes, installed as a host installs it.
-installTestTessellationLadder();
 
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
@@ -25,13 +21,12 @@ function meshUrl(tree) {
 }
 
 test("an unchanged concrete surface stays retained across a tree revision", () => {
-  const meshData = { lodLevel: 0, vertices: new Float32Array(3) };
+  const meshData = { vertices: new Float32Array(3) };
   const previous = {
     descriptor: descriptor(),
     componentIdentityByCid: { [CID]: descriptor().components[CID] },
     meshUrl: meshUrl(HASH_A),
     componentMeshDataByCid: { [CID]: meshData },
-    componentLodLevelByCid: { [CID]: 0 },
   };
   const retained = retainedComponentMeshesForRevision({
     previous,
@@ -41,13 +36,12 @@ test("an unchanged concrete surface stays retained across a tree revision", () =
   assert.equal(retained[CID], meshData);
 });
 
-test("reuse rejects changed surface outputs, inputs and exact levels", () => {
-  const meshData = { lodLevel: 0 };
+test("reuse rejects changed surface outputs and inputs", () => {
+  const meshData = {};
   const previous = {
     descriptor: descriptor(),
     meshUrl: meshUrl(HASH_A),
     componentMeshDataByCid: { [CID]: meshData },
-    componentLodLevelByCid: { [CID]: 0 },
   };
   assert.deepEqual(retainedComponentMeshesForRevision({
     previous,
@@ -61,13 +55,6 @@ test("reuse rejects changed surface outputs, inputs and exact levels", () => {
     meshUrl: meshUrl(HASH_B),
   })[CID], meshData, "a geometry-only descriptor inherits O from the exact prior D");
 
-  const changedLevel = { ...previous, componentLodLevelByCid: { [CID]: 1 } };
-  assert.deepEqual(retainedComponentMeshesForRevision({
-    previous: changedLevel,
-    descriptor: descriptor(),
-    meshUrl: meshUrl(HASH_B),
-  }), {}, "the retained mesh's stamped L0 and requested L1 cannot alias");
-
   assert.deepEqual(retainedComponentMeshesForRevision({
     previous,
     descriptor: descriptor(SURF_A, "e".repeat(64)),
@@ -76,7 +63,7 @@ test("reuse rejects changed surface outputs, inputs and exact levels", () => {
 });
 
 test("A remains the bounded reuse source after B staging fails or is superseded by C", () => {
-  const meshData = { lodLevel: 0 };
+  const meshData = {};
   const displayedA = {
     file: "assembly.step",
     meshHash: "tree-a",
@@ -85,7 +72,6 @@ test("A remains the bounded reuse source after B staging fails or is superseded 
     componentIdentityByCid: { [CID]: descriptor().components[CID] },
     meshUrl: meshUrl(HASH_A),
     componentMeshDataByCid: { [CID]: meshData },
-    componentLodLevelByCid: { [CID]: 0 },
   };
   const visibleA = {
     file: "assembly.step",

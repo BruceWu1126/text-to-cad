@@ -1242,7 +1242,7 @@ test('preview\'s Speed and Loop are its own, forgotten on the way out, while Orb
 
 test('a pose pass React re-runs while a routine plays draws the clock, never the time playback started from', async () => {
   // The pose pass has two callers: the clock per playing tick, and React whenever something the
-  // pass reads changes (a detail swap, a progressive publish, a display change). React's copy of
+  // pass reads changes (a progressive publish, a display change). React's copy of
   // the time is where playback STARTED, so a re-run mid-play used to put the model back there for
   // a frame: on a routine that starts at rest, a flash of the rest pose on every re-run.
   const view = await open();
@@ -1417,8 +1417,8 @@ test('a package that arrives in pieces is framed once, on the box it declares; a
     chosen[key].forEach((value, index) => assert.ok(Math.abs(value - kept[key][index]) < 1e-6,
       `${key}[${index}] is the camera the person set, through every publish and the completion`));
   }
-  // The picture settles a frame or two after the camera does (level of detail refines on a slow
-  // renderer), so it is read until it matches, and a picture that never does still fails.
+  // The picture settles a frame or two after the camera does on a slow renderer, so it is read
+  // until it matches, and a picture that never does still fails.
   let left = Infinity;
   for (let attempt = 0; attempt < 16 && left >= 250; attempt += 1) {
     left = differing(chosenFrame, await frame(reopened.pane));

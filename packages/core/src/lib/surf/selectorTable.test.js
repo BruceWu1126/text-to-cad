@@ -14,8 +14,8 @@ function rowsOf(manifest, rows, columns) {
   return manifest[rows].map((row) => Object.fromEntries(manifest.tables[columns].map((name, index) => [name, row[index]])));
 }
 
-function load(name, level = 1) {
-  const mesh = meshFixture(name, level);
+function load(name) {
+  const mesh = meshFixture(name);
   const { component } = decodeComponentTessellation(mesh.bytes, { surfaceInput: mesh.surfaceInput, tessellation: mesh.tessellation });
   const table = selectorTableFixture(name);
   return { table, component, bundle: joinSelectorTable(table, component) };
@@ -75,8 +75,8 @@ for (const name of ["sun_gear", "cam_follower_roller", "slot"]) {
   });
 }
 
-test("the runtime composes refs from the table's local ids and carries its facts, at any level", () => {
-  const { table, bundle } = load("sun_gear", 0);
+test("the runtime composes refs from the table's local ids and carries its facts", () => {
+  const { table, bundle } = load("sun_gear");
   const runtime = buildSelectorRuntime(bundle, { partId: "o1.3", remapOccurrenceId: "o1.3", copyCadPath: "gears.step" });
   const faceRows = rowsOf(table, "faces", "faceColumns");
   const faces = runtime.references.filter((reference) => reference.selectorType === "face");

@@ -511,20 +511,20 @@ function reuseFixture() {
   ] };
   descriptor.assembly = { root: { id: "root", nodeType: "assembly",
     children: descriptor.occurrences.map(({ id }) => ({ id, nodeType: "part", children: [] })) } };
-  return { descriptor, a: { ...unitTriangleComponentMeshData(), lodLevel: 0 }, b: unitTriangleComponentMeshData() };
+  return { descriptor, a: unitTriangleComponentMeshData(), b: unitTriangleComponentMeshData() };
 }
 
-test("LOD composition keeps unchanged occurrences and tree identity while updating repeated triangle ranges", () => {
+test("a component's new mesh keeps unchanged occurrences and tree identity while updating repeated triangle ranges", () => {
   const { descriptor, a, b } = reuseFixture();
   const before = buildComposedPackageMeshData(descriptor, { a, b });
-  const refined = { ...a, lodLevel: 1, indices: new Uint32Array([0, 1, 2, 0, 2, 1]),
+  const refined = { ...a, indices: new Uint32Array([0, 1, 2, 0, 2, 1]),
     parts: a.parts.map(part => ({ ...part, triangleCount: 2 })) };
   const after = buildComposedPackageMeshData(descriptor, { a: refined, b }, { previous: before });
   assert.equal(after.parts[1], before.parts[1], "unaffected occurrence metadata is shared");
   for (const index of [0, 2]) {
     assert.notEqual(after.parts[index], before.parts[index]);
     assert.equal(after.parts[index].sourceMesh, refined);
-    assert.equal(after.parts[index].sourceMeshKey, "a:flat:l1");
+    assert.equal(after.parts[index].sourceMeshKey, "a:flat");
     assert.equal(after.parts[index].sourcePartRanges[0].triangleCount, 2);
   }
   assert.equal(after.assemblyRoot, before.assemblyRoot, "identical bounds/appearance preserve the tree");

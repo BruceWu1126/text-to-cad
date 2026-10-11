@@ -13,7 +13,7 @@ import {
 } from "./surfWorkerClient.js";
 import { createTessellationCache, isTessellationCacheProbeMissError } from "./tessellationCache.js";
 import { encodeMeshFixture, probeRowFor } from "./__tests__/meshFixtures.js";
-import { TEST_TESSELLATION_LADDER } from "./testing.js";
+import { TEST_DISPLAY_TESSELLATION } from "./testing.js";
 
 let tessellationCache = createTessellationCache();
 function setTessellationCacheProvider(provider) {
@@ -42,8 +42,8 @@ function waitingProvider() {
   };
   return { provider, answer: (found = true) => answer(found) };
 }
-// Every request names the rung it reads: the standard one of the ladder cadgen publishes.
-const STANDARD = TEST_TESSELLATION_LADDER.levels[TEST_TESSELLATION_LADDER.defaultLevel];
+// Every request names the tolerances it reads: the display tolerance cadgen publishes.
+const STANDARD = TEST_DISPLAY_TESSELLATION;
 const loadSurfComponentInWorker = (url, options = {}) => loadWorker(url, {
   tessellationCache, tessellation: STANDARD, ...options,
   identity: options.identity ?? { ...CACHE_IDENTITY, tessellationEntry: ENTRY.slice() },
@@ -934,8 +934,8 @@ test('custom resource transfers begin only when a worker slot is reserved', asyn
   await Promise.all(pending);
 });
 
-// A part that opened from its stored mesh has no SURF URL until its surface is resolved, and the
-// viewport's refinement asks for its selectors with that empty URL first. That used to hand the
+// A part that opened from its stored mesh has no SURF URL until its surface is resolved, and a
+// selectors read with that empty URL fails first. That used to hand the
 // worker a ticket for "", which read the page's own address: in the CAD app, a cad_http GET of its
 // sandbox page, answered 404 (43 per hypercar open).
 test("selectors with no SURF URL fail as not ready, fetching no ticket", async (t) => {

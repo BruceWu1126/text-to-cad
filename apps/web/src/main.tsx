@@ -3,7 +3,7 @@ import { EmptyState } from '@text-to-cad/ui/navigation';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createCrashReporter } from '@text-to-cad/core/client';
-import { installDisplayTessellation } from '@text-to-cad/core/lib/surf/lodPolicy.js';
+import { installDisplayTessellation } from '@text-to-cad/core/lib/surf/displayTessellation.js';
 import { ViewerLoadingOverlay } from '@text-to-cad/ui/file-viewer/presentation';
 import { createTabStore } from '@text-to-cad/ui/tab-store';
 import { createWebCadClient } from './host/cadClient.js';

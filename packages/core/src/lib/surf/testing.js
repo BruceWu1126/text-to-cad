@@ -5,7 +5,7 @@
 // imports this module. Browser-safe, so browser tests can use it too.
 
 import { DISPLAY_TESSELLATION } from "./fixtures/displayTessellation.js";
-import { installTessellationLadder } from "./lodPolicy.js";
+import { installDisplayTessellation } from "./displayTessellation.js";
 import {
   MESH_EDGE_CLASSES,
   MESH_PAYLOAD_VERSION,
@@ -22,22 +22,9 @@ const UNSIGNED_SHORT_VERTEX_LIMIT = 65535;
 /** The display tolerance a cadgen server publishes, as cadgen wrote it for the tests. */
 export const TEST_DISPLAY_TESSELLATION = DISPLAY_TESSELLATION;
 
-// The rungs the level-of-detail tests draw at: coarse to fine, opening at the second, which
-// the fixture meshes (`fixtures/*.l<level>.glb`) were cut at.
-const TESSELLATION_LADDER = Object.freeze({
-  levels: Object.freeze([
-    { chordTolerance: 2e-3, angleTolerance: 1.4 },
-    { chordTolerance: 1.5e-3, angleTolerance: 0.35 },
-    { chordTolerance: 5e-4, angleTolerance: 0.35 },
-    { chordTolerance: 1.5e-4, angleTolerance: 0.35 },
-  ]),
-  defaultLevel: 1,
-});
-export const TEST_TESSELLATION_LADDER = TESSELLATION_LADDER;
-
-/** Install that ladder for the level-of-detail tests. */
-export function installTestTessellationLadder() {
-  return installTessellationLadder(TESSELLATION_LADDER);
+/** Install it, as a host installs the one its server publishes. */
+export function installTestDisplayTessellation() {
+  return installDisplayTessellation(DISPLAY_TESSELLATION);
 }
 
 /**
@@ -45,12 +32,12 @@ export function installTestTessellationLadder() {
  * `{positions, normals, indices, faceRanges: [{ord, color?, indexStart, indexCount}],
  * edges: [{ord, visibilityClass?, polyline}], bounds, scale, unmeshedFaces?}` or a decoded component
  * (`decodeComponentTessellation(...).component`), whose tables it reads back. Its tolerances
- * are `tessellation`'s, else the test ladder's standard rung.
+ * are `tessellation`'s, else the display tolerance.
  */
 export function encodeMeshFixture(component, {
   surfaceInput,
   surfaceObject,
-  tessellation = TESSELLATION_LADDER.levels[TESSELLATION_LADDER.defaultLevel],
+  tessellation = DISPLAY_TESSELLATION,
   partColor = null,
 } = {}) {
   const faceRanges = component.faceTable ? meshFaceRanges(component) : component.faceRanges || [];

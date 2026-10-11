@@ -86,8 +86,8 @@ export function float64Hex(value) {
 }
 
 // The tolerances are the only options a request carries, and it names both: the
-// key spells both, and which pair a mesh is drawn at is cadgen's (a rung of the
-// ladder it published, or the tessellation a job names), never a number here. A
+// key spells both, and which pair a mesh is drawn at is cadgen's (the display
+// tolerance it published, or the tessellation a job names), never a number here. A
 // quality object read back from an entry (with its lossless f64 spellings) is
 // accepted as its own request; any other field is a caller asking for something
 // no mesh is keyed by, and is refused.
@@ -105,8 +105,8 @@ export function tessellationQuality(options) {
   const angleTolerance = options?.angleTolerance;
   if (chordTolerance === undefined || angleTolerance === undefined) {
     throw new TypeError(
-      "a mesh request names both tolerances, chordTolerance and angleTolerance: a rung of cadgen's"
-      + ` ladder (lodTessellationForLevel) or the tessellation a job names; got ${JSON.stringify(options ?? null)}`,
+      "a mesh request names both tolerances, chordTolerance and angleTolerance: cadgen's display"
+      + ` tolerance (displayTessellation) or the tessellation a job names; got ${JSON.stringify(options ?? null)}`,
     );
   }
   return Object.freeze({

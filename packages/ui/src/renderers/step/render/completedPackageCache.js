@@ -3,10 +3,10 @@ import { buildComposedPackageMeshData } from "@text-to-cad/core/lib/assembly/mes
 import { entryAssetUrl, entryMeshAssetSignature } from "@text-to-cad/core/lib/entryAssets.js";
 import { entrySourceFormat } from "@text-to-cad/core/lib/fileFormats.js";
 import { renderCapabilities } from "@text-to-cad/core/lib/renderCapabilities.js";
-import { renderAssetCacheStats, surfTessellationCacheKey } from "@text-to-cad/core/lib/renderAssetClient.js";
-import { lodTessellationForLevel, normalizeLodLevel } from "@text-to-cad/core/lib/surf/lodPolicy.js";
+import { renderAssetCacheStats } from "@text-to-cad/core/lib/renderAssetClient.js";
 
 const MAX_PACKAGES = 8;
+const DIGEST = /^[0-9a-f]{64}$/;
 const MAX_BYTES = 256 * 1024 * 1024;
 
 export function completedPackageRevision(entry) {
@@ -104,7 +104,7 @@ export function createCompletedPackageCache({ maxEntries = MAX_PACKAGES, maxByte
       try {
         const data = copyDisplayData(cached.value).value;
         // No cached occurrence/material objects are handed to the scene. This
-        // composition is cheap and retains the exact component arrays and L/Q/R.
+        // composition is cheap and retains the exact component arrays.
         return { ...data, entry, file: entry.file, meshHash: entryMeshAssetSignature(entry),
           meshUrl: entryAssetUrl(entry, "glb"), complete: true, publishCount: 1,
           meshData: buildComposedPackageMeshData(data.descriptor, data.componentMeshDataByCid) };
@@ -126,36 +126,26 @@ export function createCompletedPackageCache({ maxEntries = MAX_PACKAGES, maxByte
     },
     set(client, entry, context) {
       const expected = completedPackageRevision(entry), id = key(client, entry);
-      // A declined newer publication must not expose a previous detail tier
-      // under the same document revision on the next mount.
+      // A declined newer publication must not expose a previous one under the same
+      // document revision on the next mount.
       entries.delete(id);
-      if (!expected || !scope(client) || !context?.complete || context.lodPending
+      if (!expected || !scope(client) || !context?.complete
           || context.meshHash !== entryMeshAssetSignature(entry)) return false;
       const components = Object.entries(context.descriptor?.components || {});
       if (!components.length || components.length !== Object.keys(context.componentMeshDataByCid || {}).length) return false;
-      const componentLodLevelByCid = {}, componentKeyByCid = {};
       for (const [cid, component] of components) {
         const mesh = context.componentMeshDataByCid[cid], identity = context.componentIdentityByCid?.[cid];
-        const level = normalizeLodLevel(context.componentLodLevelByCid?.[cid] ?? mesh?.lodLevel);
-        if (!mesh || !identity?.surfaceInput || !identity.surfaceObject || identity.surfaceInput !== component.surfaceInput
-            || (component.surfaceObject && component.surfaceObject !== identity.surfaceObject)
-            || normalizeLodLevel(mesh.lodLevel) !== level) return false;
-        let concreteKey;
-        try { concreteKey = surfTessellationCacheKey("", lodTessellationForLevel(level), identity); }
-        catch { return false; }
-        if (mesh.lodKey && mesh.lodKey !== concreteKey) return false;
-        componentLodLevelByCid[cid] = level;
-        componentKeyByCid[cid] = concreteKey;
+        if (!mesh || !DIGEST.test(identity?.surfaceInput) || !DIGEST.test(identity.surfaceObject)
+            || identity.surfaceInput !== component.surfaceInput
+            || (component.surfaceObject && component.surfaceObject !== identity.surfaceObject)) return false;
       }
-      // Explicit fields omit live request IDs/controllers, selector bundles,
-      // publication receipts, callbacks and any pending LOD transaction.
+      // Explicit fields omit live request IDs/controllers, selector bundles and callbacks.
       let snapshot;
       try {
         snapshot = copyDisplayData({ descriptor: context.descriptor,
           runtimeDescriptor: context.runtimeDescriptor || context.descriptor,
           componentMeshDataByCid: context.componentMeshDataByCid,
-          componentIdentityByCid: context.componentIdentityByCid,
-          componentLodLevelByCid, componentKeyByCid }, { maxBytes });
+          componentIdentityByCid: context.componentIdentityByCid }, { maxBytes });
       } catch { return false; }
       if (maxEntries < 1) return false;
       const descriptorKey = descriptorIdentity(context.runtimeDescriptor || context.descriptor);

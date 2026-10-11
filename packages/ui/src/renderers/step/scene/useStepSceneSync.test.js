@@ -46,7 +46,7 @@ test("an edge colour edit recolours the live CAD edges without a rebuild, and Re
   const ref = current => ({ current });
   const refs = {
     partVisualStateRef: ref(null), clipSettingsRef: ref(null), staticSceneResetRef: ref({ invalidate() {}, complete() {} }),
-    meshSourceAdoptionRef: ref(null), viewerAlertChangeRef: ref(null), sceneUpdateAlertRef: ref(null), lodCameraChangeRef: ref(null)
+    viewerAlertChangeRef: ref(null), sceneUpdateAlertRef: ref(null)
   };
   // The Display panel's store, and the policy and scene sync that StepSceneLayers wires from what it resolves.
   const store = createViewSettingsStore({}, { appearance: "light", lightingQuality: "preview" });

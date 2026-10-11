@@ -1,8 +1,8 @@
 """Regenerate the surf/mesh test fixtures in this directory.
 
 Each fixture is one component as cadgen stores it: ``<name>.surf`` (its SURF:
-exact surfaces and the topology index) and ``<name>.l<level>.glb`` (cadgen's
-OCCT mesh of it at that rung of the LOD tests' ladder, ``LEVELS``), bound to each
+exact surfaces and the topology index) and ``<name>.glb`` (cadgen's OCCT mesh
+of it at the display tolerance), bound to each
 other by the SURF's digest and to a fixed test surface input
 (``sha256("cadgen-test-fixture:<name>")``, recorded in ``fixtures.json``).
 ``<name>.selectors.json`` is the component's selector table as cadgen stores
@@ -101,8 +101,6 @@ DISPLAY_MODULE_HEAD = (
     "// Regenerate it; a Python test holds it equal to cadgen's.\n"
     "export const DISPLAY_TESSELLATION = "
 )
-# The rungs the level-of-detail tests draw at (``../testing.js`` TEST_TESSELLATION_LADDER).
-LEVELS = ({"chordTolerance": 2e-3, "angleTolerance": 1.4}, {"chordTolerance": 1.5e-3, "angleTolerance": 0.35})
 
 
 def write_display_tessellation() -> None:
@@ -120,10 +118,13 @@ def main() -> None:
     from cadgen._internal.surf_container import read_surf
     from cadgen._internal.surface_extract import extract_surface_component
 
+    from cadgen.tessellation_policy import DISPLAY_TESSELLATION
+
     write_display_tessellation()
+    chord, angle = DISPLAY_TESSELLATION["chordTolerance"], DISPLAY_TESSELLATION["angleTolerance"]
     manifest = {}
-    for name, build, levels in (("sun_gear", sun_gear, (0, 1)), ("cam_follower_roller", cam_follower_roller, (0, 1)),
-                                ("mixed", mixed, (0, 1)), ("slot", slot, (0, 1))):
+    for name, build in (("sun_gear", sun_gear), ("cam_follower_roller", cam_follower_roller),
+                        ("mixed", mixed), ("slot", slot)):
         prepared = prepare_geometry_component(build())
         entry, payload = prepared["entry"], prepared["payload"]
         shape = decode_display_shape(entry, payload)
@@ -134,17 +135,13 @@ def main() -> None:
         surface_input = hashlib.sha256(f"cadgen-test-fixture:{name}".encode()).hexdigest()
         surface_object = hashlib.sha256(surf).hexdigest()
         (HERE / f"{name}.surf").write_bytes(surf)
-        meshes = {}
-        for level in levels:
-            chord, angle = LEVELS[level]["chordTolerance"], LEVELS[level]["angleTolerance"]
-            body = occt_mesh.mesh_component(decode_display_shape(entry, payload).wrapped, index,
-                                            surface_input=surface_input, surface_object=surface_object,
-                                            chord=chord, angle=angle)
-            (HERE / f"{name}.l{level}.glb").write_bytes(body)
-            meshes[str(level)] = {"chordTolerance": chord, "angleTolerance": angle, "byteLength": len(body)}
+        body = occt_mesh.mesh_component(decode_display_shape(entry, payload).wrapped, index,
+                                        surface_input=surface_input, surface_object=surface_object,
+                                        chord=chord, angle=angle)
+        (HERE / f"{name}.glb").write_bytes(body)
         manifest[name] = {"surfaceInput": surface_input, "surfaceObject": surface_object,
                           "faces": len(index["faces"]), "edges": len(index["edges"]),
-                          "selectorsByteLength": len(table), "meshes": meshes}
+                          "selectorsByteLength": len(table), "meshByteLength": len(body)}
     (HERE / "fixtures.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(manifest, indent=2, sort_keys=True))
 

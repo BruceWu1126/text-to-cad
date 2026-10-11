@@ -63,15 +63,14 @@ afterEach(() => { cleanup(); completedPackages.clear(); vi.restoreAllMocks(); vi
 function acceptedPackage(count = 1) {
   const { urls, fetch } = setup();
   const digest = (value: number) => (fixture * 10000 + value).toString(16).padStart(64, '0');
-  const components = {}, identities = {}, meshes = {}, levels = {}, occurrences = [];
+  const components = {}, identities = {}, meshes = {}, occurrences = [];
   for (let i = 0; i < count; i++) {
     const cid = `c${i}`, surfaceInput = digest(i), surfaceObject = digest(1000 + i);
     components[cid] = { surfaceInput };
     identities[cid] = { surfaceInput, surfaceObject };
-    levels[cid] = 1;
     meshes[cid] = { vertices: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
       normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), indices: new Uint32Array([0, 1, 2]),
-      bounds: { min: [0, 0, 0], max: [1, 1, 0] }, lodLevel: 1,
+      bounds: { min: [0, 0, 0], max: [1, 1, 0] },
       parts: [{ id: 'part', triangleOffset: 0, triangleCount: 1 }] };
     occurrences.push({ id: `o${i}`, component: cid });
     expect(completedModelingRecognition.set(modelingRecognitionKey(identities[cid], "", {resources:fixtureClient.resources}), { tree })).toBe(true);
@@ -83,7 +82,7 @@ function acceptedPackage(count = 1) {
   const entry = { file: 'assembly.step', kind: 'assembly', sourceFormat: 'step', hash: `file-${fixture}`,
     documentHash: `document-${fixture}`, url: urls.a };
   const context = { descriptor, runtimeDescriptor: descriptor, componentMeshDataByCid: meshes,
-    componentIdentityByCid: identities, componentLodLevelByCid: levels,
+    componentIdentityByCid: identities,
     meshHash: entryMeshAssetSignature(entry), complete: true };
   const client = Object.assign(fixtureClient, { requestSurfaces: vi.fn(async request => ({
     viewId: request.viewId, components: Object.fromEntries(request.components.map(({ cid, surfaceInput }) => {

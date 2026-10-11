@@ -35,12 +35,3 @@ export function isCompletePublication({ modelKey, meshCost, renderMemoryProbe, s
     && Number.isFinite(publicationAt)
     && Number.isFinite(sceneSyncAt) && sceneSyncAt >= Math.floor(publicationAt);
 }
-
-export function isRequestedDetailComplete(probe, minimumLevel = 0) {
-  if (!isCompletePublication(probe)) return false;
-  if (minimumLevel === 0) return true;
-  const lod = probe?.viewportLod;
-  return lod?.minimumLevel === minimumLevel
-    && lod.componentCount === probe.meshCost.totalComponents
-    && lod.belowMinimum === 0 && !lod.busy && !lod.pendingEvaluation;
-}

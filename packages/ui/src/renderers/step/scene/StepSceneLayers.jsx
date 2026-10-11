@@ -28,7 +28,7 @@ import ViewportError from "../../kit/status/ViewportError.jsx";
  * | layer | module |
  * | --- | --- |
  * | section clip | here (one effect) |
- * | scene sync, reuse or rebuild, LOD ownership | `useStepSceneSync.js` |
+ * | scene sync, reuse or rebuild | `useStepSceneSync.js` |
  * | hidden / isolated / hovered / selected parts | `useStepDisplay.js` (`useStepPartVisualState`) |
  * | sidecar module, pose and animation, the frame | `useStepPose.js` |
  * | exploded view | `useStepExplode.js` |
@@ -50,7 +50,7 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
     meshData, modelKey, isLoading, renderMode, previewMode, pickMode, hiddenPartIds, selectedPartIds,
     hoveredPartId, selectorRuntime, stepParameterRuntime, stepAnimationRuntime, animateMode,
     jointHandles, measureState, activeMeasurementId, measureModeActive,
-    onLodCameraChange, onMeshSourceAdoption, onViewerAlertChange,
+    onViewerAlertChange,
     onHoverReferenceChange, onActivateReference, onDoubleActivateReference, deferActivation, onMeasurePick, onMeasureHoverPoint
   } = props;
   const stepAnimationPlaying = Boolean(stepAnimationRuntime?.playing);
@@ -67,10 +67,6 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
   // The snap indicator needs the live hover point every frame; the workspace only needs to
   // know which entity is under the cursor. A ref tracks it without a render per move.
   const measureHoverRef = useRef(null);
-  const lodCameraChangeRef = useRef(onLodCameraChange);
-  lodCameraChangeRef.current = onLodCameraChange;
-  const meshSourceAdoptionRef = useRef(onMeshSourceAdoption);
-  meshSourceAdoptionRef.current = onMeshSourceAdoption;
   const viewerAlertChangeRef = useRef(onViewerAlertChange);
   const sceneUpdateAlertRef = useRef(null);
   // The last { title, message } the pose pass raised, so it is deduplicated across frames and
@@ -189,7 +185,7 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
 
   const refs = {
     partVisualStateRef, clipSettingsRef, selectorRuntimeRef, staticSceneResetRef,
-    meshSourceAdoptionRef, viewerAlertChangeRef, sceneUpdateAlertRef, sceneEffectsAlertRef, lodCameraChangeRef
+    viewerAlertChangeRef, sceneUpdateAlertRef, sceneEffectsAlertRef
   };
   const layers = {
     viewport, stepScene, props, policy, refs, edges, staticResetRenderToken, explosionRef,

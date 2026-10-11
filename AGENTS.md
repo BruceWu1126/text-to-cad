@@ -119,7 +119,7 @@ path, the rehearsal, and local/manual fallbacks.
   - `packages/core/docs/`: `render-pipeline.md`, `resource-ownership.md`,
     `tube-skins.md`.
   - `packages/ui/docs/`: `settings-ui.md` (BINDING for any settings control),
-    `render-types.md`, `render-mode.md`, `lod.md`, `storage.md`, `backend.md`.
+    `render-types.md`, `render-mode.md`, `loading.md`, `storage.md`, `backend.md`.
 - Ships-alone law: `packages/cadgen` (the built PyPI wheel) works in isolation
   outside this repo, so its markdown must not refer to anything outside the
   package — enforced by `tests/python/global/test_package_boundaries.py`.

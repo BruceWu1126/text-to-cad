@@ -7,14 +7,12 @@ import { renderMemoryAccounting } from "./renderMemoryAccounting.js";
 // objects with it.
 export const STEP_RUNTIME_GROUPS = Object.freeze(["edgesGroup", "facePickGroup", "edgePickGroup"]);
 
-// Full scene teardown is the recovery boundary after an interrupted in-place
-// reconciliation. Never certify disposal from a React unmount/abort alone.
+// Full scene teardown: what the scene built and what the renderer hung on the runtime. A
+// failure keeps the scene reachable, and its buffers counted, for a retry.
 export function disposeViewerCadScene(runtime, {
   clearSceneGroup, preserveModelIdentity = false, releaseGpu = true, groups = STEP_RUNTIME_GROUPS
 } = {}) {
-  if (!runtime) return null;
-  const source = runtime.cadScene?.source || runtime.retiringCadSource || null;
-  runtime.retiringCadSource = source;
+  if (!runtime) return;
   try {
     runtime.cadScene?.dispose?.({ releaseGpu });
     runtime.cadScene = null;
@@ -33,8 +31,6 @@ export function disposeViewerCadScene(runtime, {
     }
     runtime.sceneCleanupFailed = false;
     renderMemoryAccounting(runtime);
-    runtime.retiringCadSource = null;
-    return source;
   } catch (error) {
     runtime.sceneCleanupFailed = true;
     // Partial reconciliation's installed array may omit newly attached

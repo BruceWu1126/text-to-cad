@@ -1,4 +1,4 @@
-// Progressive publish of a component package (packages/ui/docs/lod.md, section 4).
+// Progressive publish of a component package (packages/ui/docs/loading.md, section 2).
 // Fake components (no tessellation): the policy under test is batching,
 // ordering, staleness and release, not geometry.
 import assert from "node:assert/strict";
@@ -642,47 +642,6 @@ test("cancellation fences a queued admission before an active slot releases", as
   assert.deepEqual(released.sort(), started, "every admitted cancellation releases once");
   assert.deepEqual(publishes, []);
   assert.equal(loader.retainedComponentCount(), 0);
-});
-
-test("a viewport-LOD swap that lands mid-load is kept by the next batch", async () => {
-  const descriptor = makeDescriptor({ componentCount: 6, occurrenceCount: 6 });
-  const { loadComponent } = makeLoader(descriptor);
-  let workingSet = null;
-  const publishes = [];
-  await createProgressivePackageLoader({
-    descriptor,
-    loadComponent,
-    concurrency: 1,
-    maxComponents: 2,
-    swappedComponents: () => workingSet,
-    onPublish: ({ meshData, componentMeshDataByCid, loaded }) => {
-      publishes.push({ loaded, keys: meshData.parts.map((part) => part.sourceMeshKey) });
-      workingSet = componentMeshDataByCid;
-      if (loaded === 2) {
-        // The scheduler swaps the first published component to level 2.
-        const [cid] = Object.keys(componentMeshDataByCid);
-        const finer = { ...componentMeshDataByCid[cid], lodLevel: 2 };
-        workingSet = { ...componentMeshDataByCid, [cid]: finer };
-      }
-    }
-  }).run();
-  assert.equal(publishes.length, 3);
-  const swappedKeys = publishes.at(-1).keys.filter((key) => key.endsWith(":l2"));
-  assert.equal(swappedKeys.length, 1, "the level-2 swap survives later batches");
-});
-
-test("an explicit coarse L0 remains part of the composed source identity", async () => {
-  const descriptor = makeDescriptor({ componentCount: 1, occurrenceCount: 2 });
-  const coarse = { ...fakeComponent("c0"), lodLevel: 0 };
-  let final = null;
-  await createProgressivePackageLoader({
-    descriptor,
-    loadComponent: async () => coarse,
-    onPublish: (publish) => { final = publish; },
-  }).run();
-  assert.equal(final.meshData.parts.length, 2);
-  assert.ok(final.meshData.parts.every((part) => part.sourceMesh === coarse));
-  assert.ok(final.meshData.parts.every((part) => part.sourceMeshKey.endsWith(":l0")));
 });
 
 test("load order puts the extreme-placed components first so the first frame spans the model", () => {

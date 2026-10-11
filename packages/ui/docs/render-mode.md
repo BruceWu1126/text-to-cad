@@ -157,8 +157,8 @@ SIZED from the model's rest placement for every renderer, STEP included: a pose,
 playing routine, or entering Render while the model is posed never rescales or
 slides the ground; its height, the lighting and the shadow reach follow the model. Enabling photographic effects updates that live scene;
 it never clears or covers the canvas with a loading screen. Only actual context
-recovery replaces the renderer. Quality refines tessellation within the same
-cache and memory budget. Picking/topology stays demand-driven in every preset.
+recovery replaces the renderer. Quality never changes a mesh: every preset draws
+cadgen's one display mesh. Picking/topology stays demand-driven in every preset.
 
 Enabling Clip prepares its shader/cap variants before presentation. Moving an
 enabled cut stays live. Explicit neutral boundaries

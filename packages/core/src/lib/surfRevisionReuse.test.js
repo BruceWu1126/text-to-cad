@@ -5,15 +5,13 @@ import test from "node:test";
 
 import {
   loadRenderSurf,
-  loadRenderSurfPayloadAtLevel,
   loadRenderSurfSelectorBundle,
-  releaseRenderSurfLevel,
   surfTessellationCacheKey,
 } from "./renderAssetClient.js";
 import { setRenderAssetSourceScope } from "./renderAssetSourceScope.js";
 import { createTessellationCache } from "./surf/tessellationCache.js";
 import { everyKeyMeshProvider } from "./surf/__tests__/meshFixtures.js";
-import { TEST_TESSELLATION_LADDER } from "./surf/testing.js";
+import { TEST_DISPLAY_TESSELLATION } from "./surf/testing.js";
 
 const fixture = readFileSync(new URL("./surf/fixtures/sun_gear.surf", import.meta.url));
 // What a selector read fetches: the component's selector table, bound to that surface.
@@ -22,12 +20,12 @@ const identity = {
   surfaceInput: createHash("sha256").update("test surface input").digest("hex"),
   surfaceObject: createHash("sha256").update(fixture).digest("hex"),
 };
-// The host's mesh store, holding this component's mesh at any level asked.
+// The host's mesh store, holding this component's mesh at any tolerances asked.
 const tessellationCache = createTessellationCache({ provider: everyKeyMeshProvider("sun_gear", { surfaceObject: identity.surfaceObject }) });
 const url = (tree, cid = "123456789abcdef0", extra = "") =>
   `/__cad/store?file=${tree.repeat(64)}/components/${cid}.surf${extra}`;
-// Every read names its tolerances: the standard rung of the ladder cadgen publishes.
-const STANDARD = TEST_TESSELLATION_LADDER.levels[TEST_TESSELLATION_LADDER.defaultLevel];
+// Every read names its tolerances: the display tolerance cadgen publishes.
+const STANDARD = TEST_DISPLAY_TESSELLATION;
 const key = (value, options = STANDARD, object = identity) => surfTessellationCacheKey(value, options, object);
 
 test("immutable SURF identity survives tree revisions but preserves all mesh inputs", () => {
@@ -64,21 +62,6 @@ test("revisions reuse meshes and exact selector payloads without fetching unchan
   const firstFetches = fetches;
   assert.equal(await loadRenderSurfSelectorBundle(second, options), selectors);
   assert.equal(fetches, firstFetches);
-
-  const tessellation = { chordTolerance: 0.002, angleTolerance: 1.4 };
-  const coarseMesh = await loadRenderSurf(first, { ...options, tessellation });
-  const payload = await loadRenderSurfPayloadAtLevel(first, { ...options, tessellation });
-  assert.equal(await loadRenderSurfPayloadAtLevel(second, { ...options, tessellation }), payload);
-  assert.notEqual(payload.bundle, selectors, "selectors must follow the concrete mesh parameters");
-  assert.equal(fetches, firstFetches);
-
-  assert.ok(releaseRenderSurfLevel(second, { identity, tessellation }) > 0);
-  assert.ok(payload.meshData, "release drops cache ownership, not an active scene's payload");
-  const replacement = await loadRenderSurfPayloadAtLevel(first, { ...options, tessellation });
-  assert.notEqual(replacement, payload);
-  assert.notEqual(await loadRenderSurf(first, { ...options, tessellation }), coarseMesh,
-    "release also removes the initial display cache's obsolete arrays");
-  assert.equal(await loadRenderSurf(second, options), mesh, "another concrete level remains owned");
 });
 
 test("snapshot source collision guard remains active even with an object identity", async (t) => {

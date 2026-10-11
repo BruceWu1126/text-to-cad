@@ -19,7 +19,7 @@ const FIXTURES = path.join(path.dirname(createRequire(import.meta.url).resolve('
 
 function slotRuntime() {
   const table = parseSelectorTable(fs.readFileSync(path.join(FIXTURES, 'slot.selectors.json'), 'utf8'));
-  const { component } = decodeComponentTessellation(new Uint8Array(fs.readFileSync(path.join(FIXTURES, 'slot.l1.glb'))));
+  const { component } = decodeComponentTessellation(new Uint8Array(fs.readFileSync(path.join(FIXTURES, 'slot.glb'))));
   return buildSelectorRuntime(joinSelectorTable(table, component), { partId: 'o1.1', remapOccurrenceId: 'o1.1', copyCadPath: 'slot.step' });
 }
 

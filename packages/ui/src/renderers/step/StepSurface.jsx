@@ -14,7 +14,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import { hasAuthoredMaterials } from "@text-to-cad/core/common/inspectEnvironment.js";
 import { displayRecordsBounds, mergeBoundsList } from "@text-to-cad/core/lib/viewer/autoZoom.js";
 import { VIEWER_PICK_MODE } from "@text-to-cad/core/lib/viewer/constants.js";
-import { runtimeModelKeyMatches, toNumber } from "@text-to-cad/core/lib/viewer/modelRuntime.js";
+import { toNumber } from "@text-to-cad/core/lib/viewer/modelRuntime.js";
 import { normalizePartIdList } from "@text-to-cad/core/lib/viewer/partVisualState.js";
 import RendererShell from "../kit/shell/RendererShell.jsx";
 import { usePreviewState, useRendererShell } from "../kit/shell/useRendererShell.js";
@@ -27,8 +27,6 @@ import {
   viewerSelectorRuntimeForRenderPane
 } from "./workbench/viewerPickMode.js";
 import { viewportMenuEntries } from "./components/workbench/AssemblyContextMenuItems.js";
-import { useViewportLod } from "./render/useViewportLod.js";
-import { lodSceneMayMove, sampleLodCamera } from "./render/lodCameraSample.js";
 import { ALL_VIEW_FEATURES } from "@text-to-cad/core/common/viewSettings.js";
 import { useModelTools } from "./components/workbench/ModelTools.jsx";
 import { useStepPanels } from "./components/workbench/StepPanels.js";
@@ -36,7 +34,7 @@ import { stepMotionSources, useStepMotion } from "./workbench/useStepMotion.js";
 import { animationControlsHaveContent } from "../kit/tools/playbar/ViewportAnimationBar.js";
 import { useCadAssets } from "./components/workbench/hooks/useCadAssets.js";
 import { useEditingPreview } from "./components/workbench/hooks/useEditingPreview.js";
-import { useViewportQualityStatus } from "./components/workbench/hooks/useViewportQualityStatus.js";
+import { useViewportLoadStatus } from "./components/workbench/hooks/useViewportLoadStatus.js";
 import { editingBuildActive } from "./workbench/editingPreview.js";
 import MeasurePanel from "./components/workbench/MeasurePanel.jsx";
 import { useCadWorkspaceSelection } from "./components/workbench/hooks/useCadWorkspaceSelection.js";
@@ -277,7 +275,7 @@ function StepSurfaceBody({ view, data }) {
   // Preview, held here because the gates below run before the shell hook; the shell writes it.
   const preview = usePreviewState();
   const previewing = preview.previewing;
-  // The scene as this mode's render profile draws it: preview raises the LOD's detail with the rest.
+  // The scene as this mode's render profile draws it: preview raises the scene quality.
   const resolvedScene = useMemo(() => sceneForRenderProfile(viewUpdate.scene,
     previewing ? VIEWER_RENDER_PROFILE.PREVIEW : VIEWER_RENDER_PROFILE.TOOLS), [viewUpdate.scene, previewing]);
   const [stepUpdateInProgress, setStepUpdateInProgress] = useState(false);
@@ -292,11 +290,6 @@ function StepSurfaceBody({ view, data }) {
 
   const {
     meshState,
-    lodPackage,
-    applyComponentLodBatch,
-    prepareComponentLodPayload,
-    onMeshSourceAdoption,
-    componentLodNeedsSelectors,
     meshLoadInProgress,
     meshLoadTargetFile,
     meshLoadTargetHash,
@@ -425,7 +418,6 @@ function StepSurfaceBody({ view, data }) {
   // already carries its finish, colour and opacity), so what is drawn is what was published.
   const selectedMeshData = (selectedMeshMatches || retainingPreviousStepMesh) ? meshState.meshData : null;
   const selectedDisplayMeshData = selectedMeshData;
-  const handleDisplayMeshAdoption = onMeshSourceAdoption;
   const selectedMeshPartial = selectedMeshMatches && !meshStateIsComplete(meshState);
   // Short of the parts cadgen could not mesh for good, not still updating: the viewport warns instead.
   const selectedMeshSettledShort = selectedMeshMatches && meshStateSettledShort(meshState);
@@ -753,50 +745,20 @@ function StepSurfaceBody({ view, data }) {
     stepHash: ""
   });
   // This is the displayed render revision, so same-file saves cannot inherit
-  // a predecessor's scheduler or benchmark milestones.
-  const viewportQualityModelKey = `${selectedEntry?.file || ""}:${selectedMeshHash || selectedEntry?.hash || ""}`;
-  // Viewport LOD (packages/ui/docs/lod.md): camera-settle
-  // driven re-tessellation of the components that project the worst error.
+  // a predecessor's benchmark milestones.
+  const viewportLoadModelKey = `${selectedEntry?.file || ""}:${selectedMeshHash || selectedEntry?.hash || ""}`;
   // The viewport's own seams, filled in when it mounts: the live WebGL runtime, the layers'
   // published selector runtime, and "what reference is under this point" for the menu.
   const runtimeRefRef = useRef(null);
   const layersApiRef = useRef(null);
   const pickAtRef = useRef(null);
-  const lodSelectedPartIdsRef = useRef(EMPTY_LIST);
-  // Declared here, above the LOD scheduler that is handed it: it reads only refs, so it is
-  // safe this early, and a `const` read before its declaration is a TDZ crash, not undefined.
-  const sampleViewportLodCamera = useCallback((options) => {
-    const runtime = runtimeRefRef.current?.current;
-    if (!runtimeModelKeyMatches(runtime, selectedKey)) return null;
-    return sampleLodCamera(THREE, runtime, { ...options, selectedPartIds: lodSelectedPartIdsRef.current });
-  }, [selectedKey]);
-  const { onCameraMoved: onLodCameraMoved } = useViewportLod({
-    resources: client.resources,
-    sampleCamera: sampleViewportLodCamera,
-    modelKey: viewportQualityModelKey,
-    quality: resolvedScene.quality,
-    lodPackage,
-    tessellationCache: cadRenderSession.tessellationCache,
-    applyComponentLodBatch,
-    prepareComponentLodPayload,
-    componentLodNeedsSelectors,
-    // Capability, not just the current pose: a paused/disabled module can move
-    // an offscreen part without a camera event when re-enabled.
-    dynamicScene: lodSceneMayMove({ kinematics: selectedStepModuleDefinition, kinematicsLoading: selectedStepModuleLoading,
-      animation: selectedSourceAnimation, exploded: resolvedScene.display?.exploded?.enabled })
-  });
-  // Publishes the readiness moments (first geometry, standard detail) that harnesses read.
-  useViewportQualityStatus({
-    modelKey: viewportQualityModelKey,
-    quality: resolvedScene.quality,
-    file: selectedEntry?.file || "",
+  // Publishes the readiness moments (first geometry, the whole model) that harnesses read.
+  useViewportLoadStatus({
+    modelKey: viewportLoadModelKey,
     hasGeometry: Boolean(selectedMeshData),
     // A progressive assembly's first paint is a real preview, but more
-    // components can still arrive. It must not look fully refined yet.
+    // components can still arrive.
     modelComplete: !selectedMeshPartial && !meshLoadInProgress,
-    // The scheduler installs its snapshot after React commits this package.
-    // Its current scope must match this package before it can finish quality.
-    lodExpectedComponentCount: Array.isArray(lodPackage?.components) ? lodPackage.components.length : 0
   });
   const handleViewerAlertChange = useCallback((nextAlert) => {
     setViewerRuntimeAlert(nextAlert || null);
@@ -1441,11 +1403,9 @@ function StepSurfaceBody({ view, data }) {
   const poseToolActive = !previewing && poseAvailable && tabToolMode === TAB_TOOL_MODE.POSE;
 
   const shellRef = useRef(null);
-  // The two things only a STEP can answer about its viewport. Both read the live runtime's own
-  // scene graph, so neither can live on the kit's handle: the LOD sampler reports projection
-  // parameters and nearest eligible occurrence distances (numeric samples retain no scene
-  // objects), and the selection's bounds are the boxes of its references AS POSED merged with
-  // the boxes of its parts as they sit on screen, explosion included.
+  // What only a STEP can answer about its viewport, reading the live runtime's own scene graph:
+  // the selection's bounds are the boxes of its references AS POSED merged with the boxes of its
+  // parts as they sit on screen, explosion included.
   const zoomToFitSelection = useCallback(({ partIds = [], referenceIds = [], animate = true } = {}) => {
     const runtime = runtimeRefRef.current?.current;
     const bounds = mergeBoundsList([
@@ -1462,19 +1422,9 @@ function StepSurfaceBody({ view, data }) {
   const sceneView = useMemo(() => stepSceneView(stepScene, keepsAuthoredFinish), [stepScene, keepsAuthoredFinish]);
   const viewportIsLoading = viewerLoading && !retainingPreviousStepMesh;
   const viewportScene = !viewportIsLoading && hasMeshGeometry(selectedDisplayMeshData) ? sceneView : null;
-  // The WebGL runtime under the scene. A scene owns GPU-backed work the LOD publisher is counting
-  // on, so every way a runtime can go away is named to it exactly once — and this is that place.
-  const meshSourceAdoptionRef = useRef(onMeshSourceAdoption);
-  meshSourceAdoptionRef.current = onMeshSourceAdoption;
+  // The WebGL runtime under the scene: when it goes away, the scene releases what it hung on it.
   const stepRuntimeLifecycle = useMemo(() => ({
-    onRelease(runtime, { handoff }) {
-      const source = releaseStepRuntime(runtime, stepScene);
-      meshSourceAdoptionRef.current?.(source, false, { disposed: true, terminal: !handoff, handoff });
-    },
-    onContextLost() { meshSourceAdoptionRef.current?.(null, false); },
-    // A replacement runtime that cannot initialize has no future scene that can finish an
-    // in-flight LOD handoff.
-    onInitializationError() { meshSourceAdoptionRef.current?.(null, false, { disposed: true, terminal: true }); }
+    onRelease(runtime) { releaseStepRuntime(runtime, stepScene); },
   }), [stepScene]);
   const viewPolicy = { wireframeMode: viewDrawsHairlines(resolvedThemeSettings, resolvedScene.display), edgesVisible: false };
 
@@ -1533,7 +1483,6 @@ function StepSurfaceBody({ view, data }) {
     promptContext: createCadPromptContext,
     escape: { active: escapeActive, handle: () => escapeRef.current() },
     rendererState: session.rendererState,
-    onCameraSettled: () => onLodCameraMoved(),
     preserveInteractionPixelRatio: viewPolicy.wireframeMode || viewPolicy.edgesVisible,
     runtimeLifecycle: stepRuntimeLifecycle,
     onRuntimeAlert: handleViewerAlertChange,
@@ -3141,8 +3090,6 @@ function StepSurfaceBody({ view, data }) {
     stepAnimationRuntime: selectedAnimationRuntime,
     // Nothing is picked and a routine may own the pose: pick-only state stands still (`useStepPose`).
     animateMode: previewing || animateToolActive,
-    onLodCameraChange: onLodCameraMoved,
-    onMeshSourceAdoption: handleDisplayMeshAdoption,
     onViewerAlertChange: handleViewerAlertChange,
     // Under another tool a pick takes up Select (`ensureSelectTool`): it waits the double-click
     // window first, so a double-click there isolates and leaves the tool as it was.
@@ -3159,7 +3106,6 @@ function StepSurfaceBody({ view, data }) {
     hiddenPartIds: layerProps.hiddenPartIds, selectedPartIds: layerProps.selectedPartIds,
     focusedPartId: layerProps.focusedPartIds
   });
-  lodSelectedPartIdsRef.current = layerProps.selectedPartIds;
 
   // ---- the strip ------------------------------------------------------------------------------
   // An assembly, as the catalog says or as the model on screen shows (several parts, as Explode

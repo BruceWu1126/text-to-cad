@@ -51,7 +51,7 @@ export function useStepPose(layers) {
   const { recordEdgesVisible } = layers.edges;
   const {
     partVisualStateRef, clipSettingsRef, staticSceneResetRef, viewerAlertChangeRef,
-    sceneEffectsAlertRef, lodCameraChangeRef
+    sceneEffectsAlertRef
   } = refs;
   // A STEP's linework comes from its B-rep topology.
   const shouldUseCadEdgeSource = true;
@@ -121,7 +121,6 @@ export function useStepPose(layers) {
       });
       const castersChanged = shadowCastersChanged(casters, runtime.displayRecords);
       if (castersChanged) runtime.invalidateShadows?.();
-      lodCameraChangeRef.current?.();
       requestSceneFrame(runtime, castersChanged);
       return;
     }
@@ -229,10 +228,9 @@ export function useStepPose(layers) {
         syncSelectorPickGroups(runtime, explodedPickSelectorRuntime(selectorRuntime, runtime.displayRecords) || effectiveRuntime,
           MODEL_OFFSET, { clearSceneGroup });
         // A kinematic edit (or a stopped scrub) is a one-shot model-bounds
-        // change for LOD and shadows. Playback stays on its existing bounded
-        // frame loop; an idle posed model schedules no recurring work.
+        // change for shadows. Playback stays on its existing bounded frame
+        // loop; an idle posed model schedules no recurring work.
         if (castersChanged) runtime.invalidateShadows?.();
-        lodCameraChangeRef.current?.();
       }
       requestSceneFrame(runtime, castersChanged);
     };

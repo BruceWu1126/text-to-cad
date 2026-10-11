@@ -541,7 +541,6 @@ export function buildComposedPackageMeshData(descriptor, componentMeshDataByCid,
         ? reuse?.partsById.get(occurrenceId)
         : null);
     if (prior?.part.sourceMesh === componentMeshData && prior.sourceParts === sourceParts
-      && prior.lodLevel === componentMeshData.lodLevel
       && equalOccurrenceInput(prior.occurrenceSnapshot, occurrence)) {
       parts.push(prior.part);
       partsByOccurrence.set(occurrence, prior);
@@ -624,16 +623,10 @@ export function buildComposedPackageMeshData(descriptor, componentMeshDataByCid,
       hasSourceColors: useComponentVertexColors,
       // Retain the undecorated color mode for live sidecar assignment removal.
       sourceHasVertexColors: !overrideColor && hasComponentColors,
-      // Shared component geometry: cadScene caches one BufferGeometry per sourceMeshKey and
-      // reuses it across every occurrence of this cid (+ colour mode). A viewport-LOD level
-      // swap re-tessellates the component, so the level is part of the identity — a new key
-      // uploads fresh buffers and flips every occurrence of the cid at once.
+      // Shared component geometry: cadScene caches one BufferGeometry per sourceMeshKey, owned
+      // by the component's mesh, and reuses it across every occurrence of this cid (+ colour mode).
       sourceMesh: componentMeshData,
-      sourceMeshKey: `${cid}:${useComponentVertexColors ? "src" : "flat"}${
-        componentMeshData?.lodLevel != null && Number.isFinite(Number(componentMeshData.lodLevel))
-          ? `:l${Number(componentMeshData.lodLevel)}`
-          : ""
-      }`,
+      sourceMeshKey: `${cid}:${useComponentVertexColors ? "src" : "flat"}`,
       vertexCount: Math.floor(sourceVertices.length / 3),
       triangleCount: Math.floor((componentMeshData?.indices?.length || 0) / 3),
       sourcePartRanges,
@@ -644,8 +637,7 @@ export function buildComposedPackageMeshData(descriptor, componentMeshDataByCid,
     const entry = {
       occurrenceSnapshot: snapshotJsonValue(occurrence),
       part,
-      sourceParts,
-      lodLevel: componentMeshData.lodLevel
+      sourceParts
     };
     partsByOccurrence.set(occurrence, entry);
     if (occurrenceId && occurrenceIdCounts.get(occurrenceId) === 1) partsById.set(occurrenceId, entry);

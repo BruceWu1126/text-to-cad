@@ -290,7 +290,7 @@ was left at, and opening a file — again after leaving it, too — fits it.
 
 Authored material color, finish and opacity are read-only in every style. There
 is no Materials editor or persisted material override. See [View styles](docs/render-mode.md) and
-[progressive detail](docs/lod.md).
+[progressive loading](docs/loading.md).
 
 The navbar leads with the C logo, which opens the app's menu: Back to files where the host
 has a home, the person's settings (Share anonymous usage data, Quick edit), Send feedback

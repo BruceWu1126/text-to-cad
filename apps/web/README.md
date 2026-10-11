@@ -255,10 +255,10 @@ another or for the home drops it, and opening it again frames it anew (see
 Authored material information lives in the selection's reference details; editing
 it requires changing the source model or annotations. The viewer has no Materials
 or Theme editor. These controls live in `@text-to-cad/ui`; see the UI package's
-Render and LOD playbooks.
+Render and loading playbooks.
 
-Large assemblies load progressively and refine visible components within memory
-budgets. Stored meshes render before exact surface derivation. The
+Large assemblies load progressively, every part at cadgen's one display mesh,
+within memory budgets. Stored meshes render before exact surface derivation. The
 viewport carries opening/update status, centred at its top (a progress icon on
 mobile); initial loading may also use the viewport overlay, and an error is a card over the viewport whose Details keep the complete
 compiler output, whose Retry reloads only that file and whose Report Issue opens a

@@ -345,11 +345,11 @@ export function surfWorkerMemoryStats() {
 // whose biggest component decodes to tens of megabytes, is memory the renderer
 // process never returns while the pool lives — measured as the bulk of the gap
 // between what the scene retains and the renderer's RSS on the tendon hand.
-// Only the load and later LOD refinement use the pool, so a caller that has
+// Only the load and later topology reads use the pool, so a caller that has
 // finished loading releases it; the next request builds a fresh pool at the
 // cost of one module load per worker.
 //
-// A package load and a viewport refinement can briefly overlap, so in-flight
+// A package load and a topology read can briefly overlap, so in-flight
 // work is left alone — terminating then would reject work the caller is still
 // waiting on — while its caller still needs to know when the isolates are
 // actually gone so retained-memory accounting can be cleared. Resolve once the
@@ -467,8 +467,8 @@ export function loadSurfComponentInWorker(url, {
       if (!cachedEntry) { fail(new TessellationCacheProbeMissError(identity?.tessellationProbe || null)); return; }
       // Drawing needs only the mesh; selectors also read the SURF's topology tables.
       if (!capabilities.selectors) { post(cachedEntry); return; }
-      // Nothing names this component's SURF yet (a part that opened warm, refined before its surface
-      // was resolved): fail as the inline path does, and the caller resolves one and asks again. A
+      // Nothing names this component's SURF yet (a part that opened warm, its topology asked for
+      // before its surface was resolved): fail as the inline path does, and the caller resolves one and asks again. A
       // ticket for "" read the page's own address, which in the CAD app is a tunnelled 404.
       if (!url) { fail(new Error("Exact SURF bytes are not ready for this component")); return; }
       if (!resources) { post(cachedEntry, { kind: "url", url }); return; }
