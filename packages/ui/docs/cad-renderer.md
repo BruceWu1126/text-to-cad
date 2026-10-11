@@ -741,8 +741,8 @@ renderer captures the latest complete working set.
 
 Reuse requires the same resource-provider generation, stable workspace, file, entry/document and
 appearance revision, package URL and runtime descriptor view. Anonymous clients
-remain object-isolated. Each component retains its exact surface-input/object
-binding and concrete tessellation key and level. Changed revisions and
+remain object-isolated. Each component retains its part and its display mesh's
+object. Changed revisions and
 runtime replacement views invalidate the snapshot. Tabs borrowing the same workspace service can reopen while the bounded entry
 survives. A replacement service or changed backend identity starts a new resource
 generation, preventing URL cache reuse across changed credentials or origins. A native GLB scene and its animation mixer are never cached:
@@ -1627,9 +1627,10 @@ override or undo state.
 
 The host-supplied render session owns its mesh-store reader and worker leases.
 The file view's display slice is the sole view-settings authority; the camera is the
-mounted viewport's, saved with the view and restored in place of the fit. Surface derivation and preview requests
+mounted viewport's, saved with the view and restored in place of the fit. Part derivation and preview requests
 use the file's injected service and abort when the consumer leaves. The Features
-tree resolves exact surfaces on demand through the same client.
+tree reads exact surfaces on demand through the same service; cadgen extracts
+each when asked.
 
 Opening shows in the viewport's loading overlay. An update — a newer revision
 loading behind the model on screen, or a Display change being prepared, and that

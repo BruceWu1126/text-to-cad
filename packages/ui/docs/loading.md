@@ -26,22 +26,20 @@ geometry, measurements or explicit mesh-export tolerances.
 
 Every STEP part is drawn at cadgen's display tolerance (`cadgen.tessellation_policy`),
 and only at it: it opens there and stays there, whatever the camera, the size of
-its assembly or the memory left. The tolerance arrives with the server's
-description -- the CAD Viewer's server info, the CAD app's launch -- and the host
-installs it before a STEP model is drawn (`installDisplayTessellation`,
-`@text-to-cad/core/lib/surf/displayTessellation.js`). Every mesh request and
-cache key names both of its tolerances, and one that names fewer is refused,
-never filled in (`tessellationQuality`, `@text-to-cad/core/lib/surf/tessellationCache.js`).
+its assembly or the memory left. The tolerance is cadgen's alone; the page never
+names one. Each component of a view names its **part** (`part` in `assembly.json`),
+and the part's record names the display mesh the page reads to draw it
+(`partRow`, `@text-to-cad/core/lib/surf/tessellationCache.js`).
 
 Every mesh the viewer draws is cadgen's (OCCT's mesh of the exact BREP, stored
 by cadgen, derived by the build that made the model before it reported done); the
-browser never tessellates. The display meshes are probed a chunk
-of components at a time and the stored bodies read a batch at a time
+browser never tessellates. The parts' records are probed a chunk
+of components at a time and their meshes read a batch at a time
 (`createInitialDisplayPlans` in `renderers/step/render/initialDisplay.js`,
 `packageBatchReads.js`), the first of each the size of the first publish, so the
-first geometry waits on no more than it draws. A component the probe finds no
-display mesh for is asked for in the `/__cad/surfaces` request, whose ready row
-carries the mesh's probe row, which the component then reads like a stored one;
+first geometry waits on no more than it draws. A component whose part the probe
+does not find is asked for in the `/__cad/surfaces` request, whose ready row
+carries the part's record, which the component then reads like a stored one;
 a part the store lacks altogether (a cleared or evicted store) is derived by one
 cadgen build-pool job for the request, the loading screen saying it is meshing
 parts meanwhile. Both are
@@ -92,7 +90,7 @@ do not enter that separate path.
 
 A closed tab keeps the complete package it showed (`render/completedPackageCache.js`,
 bounded by count and bytes), so reopening it reads nothing; a same-file revision
-reuses every component whose surface it shares (`packageComponentReuse.js`).
+reuses every component whose part it shares (`packageComponentReuse.js`).
 
 ## 3. Admission and memory
 
@@ -149,9 +147,8 @@ meshes load (`replacingSameFileMesh`, `awaitingSameFileRevision`), reported as a
 update ("Updating model…"), never as the loading screen — also when edits come
 faster than revisions load, and one revision's load is cancelled for the next
 (`meshStateAfterCancelledLoad`). Complete displayed component arrays remain available while a
-replacement stages or fails. Reuse requires the same runtime surface input,
-concrete surface object and tessellation; placements and appearance come from
-the new tree. Selection, measurements and reference copying wait for matching
+replacement stages or fails. Reuse requires the same part; placements and
+appearance come from the new tree. Selection, measurements and reference copying wait for matching
 new geometry. A failed replacement preserves the view and reports its error;
 only that file/hash stops retrying automatically. A first load that fails part
 way keeps the parts it drew under its error. STEP pose and animation

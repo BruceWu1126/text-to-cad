@@ -130,9 +130,9 @@ The viewer passes `lightingQuality: "preview"`; the CLI baseline is `final`.
 That environment default also feeds Custom comparison and does not pin a saved
 override. An explicit `lighting.quality` wins in either context.
 Final uses 4096px spotlight shadows, a 512px procedural environment and 2x
-snapshot capture. Every still draws cadgen's display
-tolerance (`cadgen.tessellation_policy`), named in the job as
-`resolved.tessellation`; `output.renderScale` remains an explicit override.
+snapshot capture. Every still draws each part at its display mesh, which cadgen
+derived at its display tolerance (`cadgen.tessellation_policy`); the job names no
+tolerance. `output.renderScale` remains an explicit override.
 PNG output retains requested dimensions by resampling the full drawing buffer.
 
 The two studios use one physical Render pipeline. A neutral HDR key card, a rear
@@ -256,8 +256,8 @@ robot description's colour, else its link mesh's own).
 Snapshots use the same grouped display contract. Photographic lighting supports
 only the `view` capture mode. Camera,
 selection, clipping, exploded view, guides, part colour, animation, video,
-kinematics, robot joints, tessellation quality, per-output cameras and output
-sizing remain composable.
+kinematics, robot joints, per-output cameras and output sizing remain
+composable.
 
 Photographic lighting creates its WebGL renderer with
 `logarithmicDepthBuffer: false`. Three's logarithmic depth shader path does not
@@ -324,10 +324,6 @@ Accepted input fields:
 - `sourceAnimation` or `resolved.animation`: the model's baked animation section,
   which the source carries as it is (`loadSourceAnimation` compiles it). A job's own
   top-level `animation` is its frame request, not the section.
-- `resolved.tessellation`: the `{chordTolerance, angleTolerance}` a STEP job's
-  components are drawn at, both named: cadgen's display tolerance. A package
-  read from a mesh store needs it; a static package (the docs hero) names none
-  and draws each component mesh at the tessellation cadgen exported it at.
 
 STEP-only options are rejected for non-STEP sources. The old shared `params`
 field is rejected, and so is the retired `stepParameters` spelling; use
@@ -577,7 +573,7 @@ import {
 `renderJobContext(meshData, job)` resolves the shared scene contract plus
 snapshot-owned output policy: display, camera, quality, scene scale, outputs,
 STEP topology edge visibility, and warnings. Studio scene quality comes from enabled
-`display.lighting.quality`; `job.quality` contains technical tessellation only. A
+`display.lighting.quality`. A
 family scene passes `{ bounds }` for `meshData`; its job's kind resolves the view
 features, and anything but a STEP gets the viewer's `EDGELESS_VIEW_FEATURES` (no edges,
 clip or explode).

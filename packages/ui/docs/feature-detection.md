@@ -17,12 +17,13 @@ must work without it.
 
 1. Load the lightweight assembly descriptor to display the hierarchy.
 2. The Model tree requests recognition for expanded, visible parts. Collapsed
-   parts need no recognition or exact-surface request just to show their rows.
+   parts need no recognition or exact-surface read just to show their rows.
 3. Resolve each requested occurrence to its component. Repeated instances share
    component analysis while retaining distinct selection IDs and placement.
-4. Reuse completed recognition metadata when its exact geometry identity matches.
-   Otherwise obtain the component's SURF data through the resource provider and
-   analyze it in a disposable worker.
+4. Reuse completed recognition metadata when its part matches. Otherwise read the
+   component's exact surface (SURF, at the `surf` path its view names, which
+   cadgen extracts from the part's BREP when asked and stores nowhere) through
+   the resource provider and analyze it in a disposable worker.
 5. Publish the result, cache successful metadata, then process the next requested
    component. Each mounted inspector owns at most one active recognition worker.
 
@@ -53,13 +54,11 @@ The completed cache key combines:
 
 - The resource provider's workspace/generation scope.
 - `MODELING_RECOGNITION_VERSION`.
-- Exact surface input and object identities, or a provider-scoped immutable SURF
-  URL for older static packages.
+- The component's part (cadgen's key for its geometry under the view's producer).
 
 Do not key recognition by filename, display label or assembly occurrence. On a
-warm reopen, accepted component identities can avoid surface requests altogether,
-but only after workspace, provider generation, entry revision and runtime descriptor
-match. Changed geometry or scope must never reuse the previous binding.
+warm reopen, a part recognized before reads no surface. Changed geometry,
+producer or scope must never reuse a previous result.
 
 The least-recently-used cache holds at most **512 components / 8 MiB** of accounted
 serialized metadata. Each read returns a private copy. It retains no SURF buffers,
@@ -67,7 +66,7 @@ workers, scene objects, pending promises or failed results. The active inspector
 also retains its own results, including errors for explicit retry; disposing it
 releases that local state. Large or evicted results may require recomputation.
 
-This cache is **in memory**, separate from cadgen's persistent surface/mesh store
+This cache is **in memory**, separate from cadgen's persistent part store
 and host preference storage. Refreshing the page or restarting the app loses it.
 There is no recognition sidecar, disk database, compile step or backend endpoint.
 
@@ -117,9 +116,9 @@ or matching its tool volume alone does not establish a rebuildable whole part.
 ## Limits and failures
 
 The worker ticket permits at most 16 MiB of SURF data. Analysis rejects inputs
-over 6,000 faces or 20,000 edges; the worker/ticket stage has a 10-second timeout.
-These are safety limits, not promised execution times. Surface derivation before
-worker startup has its own resource-service lifecycle.
+over 6,000 faces or 20,000 edges; the worker/ticket stage, which includes cadgen
+extracting the surface (one build-pool job for the component), has a 10-second
+timeout. These are safety limits, not promised execution times.
 
 Unavailable data, unsupported-size inputs, worker errors and timeouts produce a
 component error and explicit retry. They do not become reusable cached results.

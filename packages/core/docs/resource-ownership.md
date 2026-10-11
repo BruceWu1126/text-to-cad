@@ -36,15 +36,16 @@ the last release disposes shared GPU/BVH state.
 
 Render-only loads do not construct selector topology until it is requested.
 Selector topology is cadgen's
-selector table (served on the surface request's ready row, `selectorsUrl`)
-joined to the component's stored mesh by ordinal (`lib/surf/selectorTable.js`):
+selector table (the part record's other object, read by its part and object:
+`partSelectorsPath`) joined to the component's stored mesh by ordinal
+(`lib/surf/selectorTable.js`):
 the ids, metrics, flags, adjacency, chains and tangent groups are the table's,
 and the join adds only each face's triangle range and each edge's segment
 range in the mesh on screen.
 
 - Unused components replace only display arrays. A component with active
-  topology replaces its selectors at the same concrete tessellation before
-  publishing new triangles.
+  topology replaces its selectors at the same part before publishing new
+  triangles.
 - Raycast accelerators may be deferred until a ray reaches a component's
   local bounds. The first ray uses exact stock intersection; surface builds
   enter a single worker queue in idle time and are shared by occurrences.
@@ -139,12 +140,12 @@ the shared surface material.
 ### Revision reuse
 
 Canonical geometry trees contain no surface-producer selection. A runtime view
-binds each component's opaque surface input to a concrete immutable SURF
-object, and render/selector reuse requires that exact binding plus the lossless
-tolerance pair and payload version. Other snapshot source scopes remain
-isolated. Placement and appearance belong to each tree's occurrence
-composition. Every part is drawn at cadgen's one display tolerance, the same
-pair a mesh export that names none is written at.
+names each component's part, cadgen's key for its display data under the view's
+producer, and render/selector reuse requires that part and its display mesh's
+object. Other snapshot source scopes remain isolated. Placement and appearance
+belong to each tree's occurrence composition. Every part is drawn at cadgen's
+one display tolerance, the same pair a mesh export that names none is written
+at; the page never names it.
 
 ## 4. Decode workers
 
@@ -173,7 +174,7 @@ workers. Idle pressure reclamation preserves active and queued consumers.
 ## 5. Browser mesh-store admission
 
 cadgen writes every stored mesh; the browser only reads them. Reads start with
-a bounded metadata probe. The client admits the encoded object and
+a bounded probe of the parts' records. The client admits the encoded object and
 conservative decoded size before fetching a body, binds that fetch to the
 probed object digest and byte limit, then verifies the GLB body (its canonical
 JSON and tables) and content address before adoption.
@@ -192,17 +193,16 @@ provider the whole, which verifies its digest as it does any body's. A batch's
 framed bytes are charged to the Viewer envelope before it is read and released
 once its last component has taken its body; each component's decode is still
 admitted on its own before it runs, and an entry the batch could not read or
-verify is that component's strict-read miss alone. The cold components'
-surfaces resolve up to 64 to a `/__cad/surfaces` request, each the moment its
-own row is ready; each row carries the display mesh's probe row, from the store
-the build filled (a part the store lacks is derived by one cadgen build-pool job
-for the request).
+verify is that component's strict-read miss alone. The parts the probe did not
+find resolve up to 64 to a `/__cad/surfaces` request, each the moment its own
+row is ready; each row carries the part's record, from the store the build
+filled (a part the store lacks is derived by one cadgen build-pool job for the
+request).
 
-A validated warm entry carries the full surface-object provenance, so
-rendering does not need the SURF object or its derivation index to remain
-present. `createHttpTessellationCacheProvider` takes an `origin` for hosts
-whose store is not on the page's own origin (the snapshot host). TESB body
-groups remain bounded at 32 MiB.
+A validated warm entry names its part, so rendering reads nothing else of it.
+`createHttpTessellationCacheProvider` takes an `origin` for hosts whose store is
+not on the page's own origin (the snapshot host). TESB body groups remain
+bounded at 32 MiB.
 
 Every read is strict: a missing or invalid body reports a typed miss
 (`TessellationCacheProbeMissError`), never a fallback. The loader releases that

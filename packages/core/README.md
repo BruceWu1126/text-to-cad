@@ -39,7 +39,7 @@ in [the drawing contract](../ui/docs/drawing.md); the mechanism is
   occurrences to the display table by id (`applyOccurrenceDisplay`), carries
   material ids, names, finish and the folded opacity into mesh data, decides no
   precedence of its own, and never mutates the stored tree or component
-  tessellation. Materials are read-only in viewers: Inspect and Render honor
+  meshes. Materials are read-only in viewers: Inspect and Render honor
   authored color, finish and opacity, with scene settings supplying fallbacks.
   There are no session material overlays.
   Authored finishes use a small fixed reflection fill in Inspect so metals
@@ -59,17 +59,17 @@ in [the drawing contract](../ui/docs/drawing.md); the mechanism is
   frustum culling and material pass keys may all reuse previous work, but
   none may change exact geometry, persistent cache identity or occurrence
   identity. Canonical geometry trees carry no surface-producer selection;
-  reuse requires the exact SURF binding, tolerance pair and payload version.
+  reuse requires the same part and display-mesh object.
   Mechanism: [docs/resource-ownership.md](docs/resource-ownership.md) §3.
-- **Worker isolation**: each tessellation worker runs one request at a time;
+- **Worker isolation**: each decode worker runs one request at a time;
   excess requests wait on the client. A failed worker request reports an error
-  instead of retrying expensive tessellation on the UI thread, and memory
+  instead of retrying its decode on the UI thread, and memory
   estimates stay on the client — never in worker messages, never in cache keys.
   Mechanism: [docs/resource-ownership.md](docs/resource-ownership.md) §4.
-- **Cache loss is never silent extra work**: a mesh-cache read probes, admits,
+- **Cache loss is never silent extra work**: a part read probes, admits,
   verifies the GLB body and its content address, then adopts; a strict read
-  reports a typed miss before tessellation starts rather than turning a cheap
-  decoded-mesh request into unbudgeted surface tessellation. Mechanism:
+  reports a typed miss rather than turning a cheap decoded-mesh request into
+  unbudgeted work in the page: cadgen derives what the store lacks. Mechanism:
   [docs/resource-ownership.md](docs/resource-ownership.md) §5.
 - **One grouped view state**: `common/viewSettings.js` validates the public
   Solid, Render, X-ray, Hidden line and Wireframe presets. Every preset exposes
@@ -142,7 +142,7 @@ src/
                    #   source (render-source loading), sceneSettings (shared
                    #   CAD/Render contract), camera, themeSettings internals,
                    #   displaySettings, stepTopology
-  lib/             # subsystems: surf/ (tessellation + caches), selectors/
+  lib/             # subsystems: surf/ (part reads, decode + caches), selectors/
                    #   (ref runtime), assembly/ (package composition),
                    #   render/ (format mesh loaders; the GLB and mesh scene
                    #   builders), viewer/ (exploded view, part visual state,
@@ -162,16 +162,16 @@ docs/              # subsystem docs (the map below)
 
 Contract mirrors that must stay in lockstep (each has a sync test):
 `lib/cadRefs.js` ↔ `cadgen/cad_ref_syntax.py`;
-mesh keys, GLB bodies (their canonical JSON and tables) and mesh-index records
+part keys and records, GLB bodies (their canonical JSON and tables)
 (`lib/surf/tessellationCache.js`, a reader only: cadgen is the one writer) ↔
-`cadgen/store/meshes.py`.
+`cadgen/store/meshes.py` and `cadgen/store/parts.py`.
 
 Where the mechanism is written:
 
 | Document | Covers |
 |---|---|
 | [docs/render-pipeline.md](docs/render-pipeline.md) | The staged pipeline (`loadSource` → `buildModel` → `renderModel` → `captureModel`), the unified display state, the two lighting recipes, the photographic rig, display modes, CAD edges and per-component geometry sharing |
-| [docs/resource-ownership.md](docs/resource-ownership.md) | Ownership and disposal, the selector/BVH demand boundary, recomposition and instancing reuse, the tessellation worker pool, mesh-cache admission |
+| [docs/resource-ownership.md](docs/resource-ownership.md) | Ownership and disposal, the selector/BVH demand boundary, recomposition and instancing reuse, the decode worker pool, part-store admission |
 | [docs/tube-skins.md](docs/tube-skins.md) | Playing cadgen's tube skins: the payload, joint blending, GPU and CPU skinning, edges and bounds |
 
 ## Public modules and lifetimes

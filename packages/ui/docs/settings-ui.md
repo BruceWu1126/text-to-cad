@@ -781,9 +781,9 @@ is the tools view's too), Orbit (on or off, and its speed) and Autoplay.
 (`kit/viewport/renderProfile.js`). The tools view is drawn for working on the
 model: the scene quality its settings resolve to, and a lower pixel ratio while
 the camera moves so a gesture stays responsive. Preview is drawn for looking at
-it: one scene-quality tier up (Interactive to Standard, Standard to High —
-finer STEP tessellation, a higher idle pixel ratio, and at High larger shadow
-and environment maps), its full pixel ratio kept while it orbits, and nothing
+it: one scene-quality tier up (Interactive to Standard, Standard to High — a
+higher idle pixel ratio, and at High larger shadow and environment maps, at the
+same meshes), its full pixel ratio kept while it orbits, and nothing
 of the tools view's (no picking, overlays, cube or tool effects). The profile
 never changes a Display setting.
 

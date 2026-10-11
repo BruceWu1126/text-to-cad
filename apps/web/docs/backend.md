@@ -168,24 +168,26 @@ does not maintain a second store layout. See
 `packages/cadgen/STORE.md` for objects,
 document indexes, output records and cache-root resolution.
 
-The mesh routes likewise delegate reads and TESB batch framing to
-`cadgen.store.tess_cache`. `index/mesh/<key>` points to the object holding the
-mesh cadgen made (OCCT's mesh of a component's exact BREP); a client never
-writes one. The shared JavaScript reader and key scheme live in
-`@text-to-cad/core/lib/surf/tessellationCache.js`. Mesh names are validated
-before access: a request names an entry of the store, never a path. The build
-that made a model derived each part's display data -- its surface, selector
-table and display mesh -- before it reported done, so the server only reads it:
-a component's `POST /__cad/surfaces` ready row carries the display mesh's probe
-row (`mesh`). A part the store lacks it for (a cleared, evicted or older store)
-is derived by one build-pool job for the request; the server never derives.
+The part routes likewise delegate reads and TESB batch framing to
+`cadgen.store.tess_cache`. `index/part/<key>` is a part's record: it names the
+two objects cadgen made for it, its display mesh (OCCT's mesh of the
+component's exact BREP) and its selector table; a client never writes one. The
+shared JavaScript reader lives in `@text-to-cad/core/lib/surf/tessellationCache.js`.
+Part names are validated before access: a request names an entry of the store,
+never a path. The build that made a model derived each part's display data
+before it reported done, so the server only reads it: a component's
+`POST /__cad/surfaces` ready row carries its part's record. A part the store
+lacks (a cleared or evicted store) is derived by one build-pool job for the
+request; the server never derives. A component's exact surface (SURF), which
+only feature recognition reads, is stored nowhere: reading it from
+`/__cad/store` waits on one build-pool job that extracts it.
 
 The browser host constructs a `CadClient` from `@text-to-cad/core/client` and
 injects it into the viewer renderers. Catalog subscriptions share the client's
 two-second poll and stop when its last subscriber leaves. Each prepared render
 session owns its mesh-store provider, work queue and cancellation signal;
 there is no page-global provider registration. Session disposal releases its
-resources, and the host disposes the client when finished. A missing mesh is
+resources, and the host disposes the client when finished. A missing part is
 asked for through the surface request, never tessellated in the page.
 
 ## HTTP routes
@@ -214,10 +216,11 @@ asked for through the surface request, never tessellated in the page.
 | `GET /__cad/version` | Whether a newer text-to-cad is out: the update button's `notice`, or null. |
 | `POST /__cad/sketches?name=...` | Save a PNG a copied prompt names by path (a Quick Edit's sketch) as scratch in the system's temporary directory; answers its absolute path. |
 | `POST /__cad/shutdown` | Exit: a newer launch replacing this viewer, or `cadgen viewer stop`. Answers 202, then stops and frees the port. |
-| `POST /__cad/surfaces` | Read components' display data -- exact surface, selector table, display mesh -- from the store; what it lacks, one build-pool job derives. |
-| `POST /__tess_cache/probe` | The stored meshes' index records, for keys. |
-| `GET /__tess_cache/<key>.glb` | Read a stored mesh, a GLB body (POST answers 405: cadgen writes every mesh). |
-| `POST /__tess_cache/batch` | Read a batch of stored meshes in a TESB container. |
+| `POST /__cad/surfaces` | Read components' part records from the store; the parts it lacks, one build-pool job derives. |
+| `POST /__tess_cache/probe` | The parts' records, for part keys. |
+| `GET /__tess_cache/<part>.glb` | Read a part's display mesh, a GLB body, bound to its object (POST answers 405: cadgen writes every part). |
+| `GET /__tess_cache/<part>.selectors.json` | Read a part's selector table, bound to its object. |
+| `POST /__tess_cache/batch` | Read a batch of display meshes in a TESB container. |
 
 Every POST must send `x-cadgen-viewer: 1`. The custom header forces a browser
 preflight for cross-origin POSTs, and the server sends no CORS headers. When
