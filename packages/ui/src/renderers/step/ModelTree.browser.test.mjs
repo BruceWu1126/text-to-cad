@@ -112,7 +112,8 @@ createRoot(document.getElementById('root')).render(<App/>);
   check(await layout(), 'top');
   const indent = await model.getByRole('button', { name: 'Select Part 0-1', exact: true })
     .evaluate(node => [node.parentElement.style.paddingLeft, node.parentElement.querySelectorAll('[data-tree-guide]').length]);
-  assert.deepEqual(indent, ['10px', 1], 'a part under its group is one compact level in, hung from its group\'s line');
+  // The row's 5px inset (TREE_ROW_INSET_PX) and one compact 10px level.
+  assert.deepEqual(indent, ['15px', 1], 'a part under its group is one compact level in, hung from its group\'s line');
   for (const fraction of [0.37, 0.5, 0.999, 0.02]) {
     await page.evaluate(fraction => { const scroller = document.querySelector('[aria-label="Model"]').closest('[data-tool-panel-body]'); scroller.scrollTop = (scroller.scrollHeight - scroller.clientHeight) * fraction; }, fraction);
     await frames();
