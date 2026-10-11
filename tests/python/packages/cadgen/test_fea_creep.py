@@ -289,6 +289,36 @@ class Ladder(unittest.TestCase):
         self.assertIsNone(analysis.apply("adaptive_steps", ctx, inputs))
         self.assertLess(analysis.estimate(ctx, inputs).seconds, before.seconds)
 
+    def test_a_hold_past_its_time_limit_stops_where_it_got_to_and_says_so(self):
+        # Fixed gap: the creep march had no time limit. Past it (twice fit.seconds, the 30 s floor patched to 0 here)
+        # it stops after the step it is on: a result covering the hours reached, a warning saying so, and no check
+        # passing on the hours never solved.
+        from unittest import mock
+
+        from cadgen import fea
+        from cadgen._internal.fea import timestep
+
+        with tempfile.TemporaryDirectory() as name:
+            directory = Path(name)
+            step, fixed, tip = _box(directory, "bar", (40.0, 6.0, 6.0), 0)
+            study = {"analysis": "creep", "material": {**CREEPING, "creep": {**CREEPING["creep"], "temperature_C": 600}},
+                     "mesh": {"size_mm": 3.0}, "duration_h": 10_000, "temperature_C": 600, "steps": 8,
+                     "fixtures": [{"faces": [fixed]}], "loads": [{"faces": [tip], "type": "force", "vector_N": [0, 0, -60]}],
+                     "fit": {"seconds": 1e-6, "allow": []},
+                     "view": {"checks": [{"kind": "creep_strain", "limit_percent": 50}, {"kind": "displacement", "limit_mm": 500}]}}
+            with mock.patch.object(timestep, "LIMIT_FLOOR_S", 0.0), redirect_stderr(io.StringIO()):
+                result = fea.solve(step, directory / "bar.fea.glb", study=study)
+            extras = _glb(result.glb)["meshes"][0]["extras"]
+        summary = result.summary
+        self.assertTrue(result.ok)
+        self.assertEqual((summary["steps"], summary["stopped"], summary["timed_out"]), (1, False, True))
+        self.assertLess(summary["reached_h"], 10_000)
+        self.assertTrue(summary["status"].startswith("Stopped at its time limit after "))
+        self.assertIn("time_limit", [finding["type"] for finding in result.findings])
+        self.assertEqual([c["status"] for c in summary["checks"]], ["close", "close"])
+        self.assertTrue(all("(stopped at " in c["label"] for c in summary["checks"]))
+        self.assertTrue(any(w.startswith("Stopped at its time limit") for w in extras["analysis"]["warnings"]))
+
     def test_a_clamped_bar_over_a_tiny_budget_completes_by_adapting_and_says_so(self):
         from cadgen import fea
 
@@ -324,6 +354,9 @@ class Ladder(unittest.TestCase):
         self.assertEqual(creep["at"], {"frame": len(frames) - 1, "value": 10_000.0, "unit": "h"})
         self.assertEqual(stress["at"]["frame"], 0)  # the largest peak is the instant the load goes on
         self.assertEqual(moved["kind"], "displacement")
+        # Creep is a power of the stress: no check is a multiple of the load (the viewer's caption says no "N× this load").
+        self.assertEqual({check.get("scaling") for check in summary["checks"]}, {"none"})
+        self.assertEqual({check.get("scaling") for check in extras["checks"]}, {"none"})
         self.assertEqual(extras["analysis"]["type"], "creep")
         self.assertTrue(extras["analysis"]["limits"])
         self.assertEqual([(f["attribute"], f["field"], f.get("per_frame")) for f in extras["fields"]],

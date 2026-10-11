@@ -208,8 +208,8 @@ def unsettled_extras(unsettled: list[dict]) -> dict:
 
 
 def path_deadline(ctx) -> float:
-    """Seconds after which a load path stuck cutting its steps stops (``nonlinear_driver.solve_path``'s ``deadline_s``):
-    the study's time target (``fit.Budget.seconds``, 600 s by default)."""
+    """Seconds a load path may go without getting through a step before it stops cutting (``nonlinear_driver.solve_path``'s
+    ``deadline_s``): the study's time target (``fit.Budget.seconds``, 600 s by default)."""
     budget = getattr(ctx, "budget", None)
     return float(getattr(budget, "seconds", 0.0) or 600.0)
 
@@ -683,7 +683,16 @@ class ContactAnalysis(NonlinearAnalysis):
                 + (f" ({others} more step{'s' if others > 1 else ''} did not settle either)" if others else "")
                 + ": try more load steps, a finer mesh where the parts touch, or friction 0 to see whether it is the sliding",
             ))
-        if scalars["collapsed"]:
+        if scalars["collapsed"] and getattr(path, "out_of_time", False):
+            found.append(finding(
+                "error", "contact_stops",
+                f"The contact could not be followed past about {scalars['factor'] * 100:.0f} % of the load in the time allowed",
+                f"no load step got through past {scalars['factor'] * 100:.4g} % for longer than the study's time target, "
+                f"cutting down to steps of {path.smallest_step * 100:.3g} %, so the solve stopped there: it is not known "
+                "whether the parts carry more; the last frame is the last load solved. A longer fit.seconds lets it "
+                "keep cutting",
+            ))
+        elif scalars["collapsed"]:
             found.append(finding(
                 "error", "contact_stops",
                 f"The contact could not be followed past about {scalars['factor'] * 100:.0f} % of the load",
@@ -796,6 +805,8 @@ class ContactAnalysis(NonlinearAnalysis):
             "collapsed": scalars["collapsed"],
             "unsettled_at_percent": [step["percent"] for step in unsettled],
             "load_percent": round(factor * 100.0, 4),
+            # The path stopped because it got through no step for the study's time target, not for want of equilibrium.
+            "out_of_time": bool(getattr(path, "out_of_time", False)),
             "max_von_mises_MPa": round(float(final["von_mises"][peak]), 4),
             "max_von_mises_gauss_MPa": round(scalars["von_mises_gauss_max"], 4),
             "max_von_mises_at_mm": [round(float(c), 3) for c in result.dof_locations[peak]],
@@ -842,6 +853,8 @@ class ContactAnalysis(NonlinearAnalysis):
         head = {"load_percent": summary["load_percent"], "collapsed": summary["collapsed"], "contacts": summary["contacts"]}
         if summary.get("unsettled_at_percent"):
             head["unsettled_at_percent"] = summary["unsettled_at_percent"]
+        if summary.get("out_of_time"):
+            head["out_of_time"] = True
         return head
 
     def study_echo(self, inputs: ContactInputs, bare: Callable[[tuple[str, ...]], list[str]]) -> dict:

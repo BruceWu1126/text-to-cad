@@ -70,12 +70,24 @@ On top of the common keys in [study-file.md](study-file.md#common-keys):
 - `walls` (optional): `"slip"` (default: the fluid slides along the walls, so the waterline moves) or
   `"no_slip"`.
 - `probes` (optional): vertical lines, each `{"label", "at_mm": [x, y, z]}` (any point on the line); the
-  liquid's height along each is followed over time. With none, two are placed at the walls along the shake.
+  liquid's height along each is followed over time. With none, two are placed at the walls along the shake:
+  half an element in from each wall, at mid-width.
 - `map_to_structure` (optional): `{"material", "fixtures"}`, as in [cfd.md](cfd.md).
 - `view.checks`:
-  - `{"kind": "fill_level"}`: the highest the liquid rises above the inside's floor, anywhere (or at
-    `"probes": ["front wall"]`), against `limit_mm` (default: the brim, the inside's height). Titles:
-    "Spills over" / "Close to the brim" / "Stays in". Close at 90 %.
+  - `{"kind": "fill_level"}`: the fill level against `limit_mm` (default: the brim, the inside's height).
+    The fill level is the highest point of the liquid's surface anywhere in the inside, over the whole run
+    (at a wall, in a corner, a splash: where it would spill first), in mm above the inside's floor; with
+    `"probes": ["front wall"]` it is the highest along those probes' lines instead. A probe reads only its
+    own line (the default ones half an element in from the wall, at mid-width), so it reads at most the fill
+    level and usually less: the surface runs up highest in a corner of the wall ahead (a gallery tank braked
+    at 0.3 g: 37.6 mm in the corner, 31.7 mm on the probe 2.5 mm in from that wall). The fluid ends at the
+    brim, so the level never reads past it; liquid that leaves over the brim (an open side no inlet or outlet
+    names) fails the check instead, once more than 1 % of the starting liquid has left (`SPILL_SHARE`: well
+    past round-off, and past what the smeared surface alone carries out of an open top it only comes near,
+    0.02 % for a still tank 8 mm under the brim, 0.26 % for one whose surface stopped 2.4 mm under it). A
+    spill is an error finding (`spills_over_brim`), a CLI line, the check's `spilled_mL` and
+    `spilled_percent`, and the viewer's takeaway, in the same words: "Spills over the brim: 2.3 mL left the
+    tank (6.4 % of the liquid)". Titles: "Spills over" / "Close to the brim" / "Stays in". Close at 90 %.
   - `{"kind": "wall_pressure", "limit_Pa": 2000}`: the hardest the fluids press on the walls at any time.
   - `stress` and `displacement` when mapped.
 
@@ -86,18 +98,28 @@ On top of the common keys in [study-file.md](study-file.md#common-keys):
 - On the part's wetted walls, per frame: `water_fraction` (1 where the liquid touches the wall, 0 where
   the gas does; outer faces read 0) and the wall `pressure` (Pa, gauge: 0 at an open side, or at the top
   of a sealed part).
-- Curves over time (sidecar `curves`): `fill_level_mm` (the highest point of the surface), `height_<probe>_mm`,
+- Curves over time (sidecar `curves`): `fill_level_mm` (the highest point of the surface anywhere), `height_<probe>_mm`,
   `sloshing_force_{x,y,z}_N` (the fluids' push on the part, less its push at rest, which is their weight),
   `moment_{x,y,z}_N_m` (about the inside's floor, below its middle), `max_wall_pressure_Pa`,
   `volume_change_percent`.
-- Summary: `peak_fill_level_mm` and when, `brim_mm`, `probes` (peak, when, final), `max_wall_pressure_Pa`,
+- Summary: `peak_fill_level_mm`, when (`peak_fill_level_at_s`) and where (`peak_fill_level_at_mm`, the
+  point on the surface), `brim_mm`, `probes` (each line's point, peak, when, final), `max_wall_pressure_Pa`,
   `force_N` (`at_rest`, `sloshing_peak`, `sloshing_peak_N` and when), `moment_N_m`, `first_sloshing_Hz`
-  (linear theory, below), `volume` (start, end, change, `net_inflow_L` through the openings, `error_percent`
-  against what came in and went out, the largest per-step drift before it was put
-  back), `max_speed_m_s`, `interface_mm` (how thick the smeared surface is), `fill.words` ("Half full of
+  (linear theory, below), `volume` (start, end, change, `net_inflow_L` through the openings, `spilled_mL`
+  and `spilled_percent` over the brim, `error_percent` against what came in and went out, the largest
+  per-step drift before it was put back), `spill` (the sentence, when it spilled), `max_speed_m_s`, `interface_mm` (how thick the smeared surface is), `fill.words` ("Half full of
   water"), the mesh and the march.
 - The interface's 0.5 iso-surface is not drawn in the GLB (the GLB is the part); the water fraction on
   the walls and the probe heights show where the surface is.
+
+- A long run says how far it has got about every 10 s on the CLI (`two fluids: t = 0.42 s of 1.5 s, 80
+  steps ...`, without `--verbose` too), and stops at its time limit: twice the study's `fit.seconds`
+  (600 s by default, so 20 minutes), at least 30 s. A stopped run still writes its GLB and sidecar,
+  covering the time it reached (its last frame where it stopped): a `time_limit` warning finding and
+  analysis warning, "Stopped at its time limit at t = 420 ms of 1.5 s (after 20 minutes): nothing after
+  420 ms is solved; ...", summary `stopped_at_s` and `planned_end_s`, and every check's label ends
+  "(stopped at 420 ms)" with a pass turned `close` (a failure stays one). Give it a larger `fit.seconds`
+  or a coarser mesh to follow it to the end.
 
 ## How it is solved
 

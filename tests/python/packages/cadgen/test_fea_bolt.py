@@ -355,6 +355,29 @@ class Ladder(unittest.TestCase):
         self.assertTrue(any(line.startswith(f"adapted: {words}") for line in result.human_lines()))
         self.assertIn("fit_adaptive_steps", [finding["type"] for finding in result.findings])
 
+    def test_the_load_path_gets_its_own_deadline_not_what_the_preload_left(self):
+        """The deadline bounds time without progress. The load path used to get the budget less the preload's time: the
+        gallery's pull-off spent 317 of its 600 s tightening the bolt (3 mm mesh, 20 s a Newton iteration), and its load
+        stopped at the first step it had to cut, 20 % (it reaches 46 % given the time)."""
+        from unittest import mock
+
+        from cadgen._internal.fea import nonlinear_driver
+
+        with tempfile.TemporaryDirectory() as name:
+            step, refs, scene = _joint(Path(name), None)
+            study = {
+                "analysis": "bolt", "material": "steel", "mesh": {"size_mm": 2.0}, "steps": 2,
+                "connections": [{"between": ["plate", "bracket"], "type": "bolt", "size": "M6", "preload_N": PRELOAD,
+                                 "holes": _holes(scene, refs)}],
+                "fixtures": [{"faces": [_face(scene, refs["bracket"], 2, 0.0)]}],
+                "loads": [{"faces": [_face(scene, refs["plate"], 2, 2 * THICK)], "type": "force", "vector_N": [0, 0, 2000]}],
+                "fit": {"seconds": 900},
+            }
+            with mock.patch.object(nonlinear_driver, "solve_path", wraps=nonlinear_driver.solve_path) as spy:
+                result, _, _ = _solve(step, study, "deadline")
+        self.assertFalse(result.summary["collapsed"])
+        self.assertEqual([call.kwargs["deadline_s"] for call in spy.call_args_list], [900.0, 900.0])
+
 
 @unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
 class LapJoint(unittest.TestCase):
@@ -382,6 +405,7 @@ class LapJoint(unittest.TestCase):
         cls.holes = [_face(scene, refs["link"], 2, 9.0, wall), _face(scene, refs["base_strap"], 2, 3.0, wall)]
         cls.held = _face(scene, refs["link"], 0, 160.0)
         cls.strap_end = _face(scene, refs["base_strap"], 0, 0.0)
+        cls.link_top = _face(scene, refs["link"], 2, 12.0)
 
     @classmethod
     def tearDownClass(cls):
@@ -412,6 +436,23 @@ class LapJoint(unittest.TestCase):
         self.assertAlmostEqual(joint["friction_holds_N"] / (0.2 * joint["clamp_N"]), 1.0, delta=0.02)
         self.assertAlmostEqual(joint["shear_N"] / 2000, 1.0, delta=0.05)
         self.assertEqual(checks.get("joint_slip", {"status": "passes"})["status"], "passes")
+
+    def test_a_pure_pull_reads_its_sideways_force_from_a_settled_state(self):
+        """The gallery's pull-off: the strap held at its end, the link on a roller at its far end and pulled straight
+        up off it by 3000 N in one step. The roller drags the joint sideways as the link tips, and friction slides there:
+        the faces carry what friction holds, no more. The sideways force used to be read from the step's first solve
+        with every touching point held stuck, which grows with the step taken: 20.5 kN for this 3 kN pull (8.1 kN at
+        20 % of the gallery's 6 kN). And the drift springs' share of the link's lift along the bolt (250 N) was called
+        sliding away sideways."""
+        study = self._study(fixtures=[{"faces": [self.strap_end]}, {"faces": [self.held], "type": "roller"}],
+                            loads=[{"faces": [self.link_top], "type": "force", "vector_N": [0, 0, 3000]}], steps=1)
+        result, _, _ = _solve(self.step, study, "pull-off")
+        self.assertFalse(result.summary["collapsed"])
+        (joint,) = result.summary["joints"]
+        self.assertGreater(joint["friction_holds_N"], 0.0)
+        self.assertLessEqual(joint["shear_N"], 1.01 * joint["friction_holds_N"])
+        self.assertLess(joint["shear_N"], 3000.0)
+        self.assertNotIn("slides_away", [finding["type"] for finding in result.findings])
 
 
 if __name__ == "__main__":

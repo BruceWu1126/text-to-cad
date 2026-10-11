@@ -83,11 +83,11 @@ describe('nonlinear', () => {
     expect(shown.deformation.attribute).toBe('_displacement_f1');
   });
 
-  it('leads its verdict with "Lite · ", fails a collapse and says its limits in Details', () => {
+  it('says "Lite · " in its verdict (after a collapse), fails a collapse and says its limits in Details', () => {
     const verdict = feaVerdict(bentResult());
     expect(verdict.status).toBe('weak');
     expect(verdict.title).toBe('Bends for good');
-    expect(verdict.caption.startsWith('Lite · ')).toBe(true);
+    expect(verdict.caption).toContain(' · Lite · ');
     const details = studyRows(bentResult()).find((row: { id: string }) => row.id === 'details');
     const limits = details.children.find((row: { id: string }) => row.id === 'limits');
     expect(limits.children.map((row: { label: string }) => row.label)).toEqual([LIMIT]);
@@ -97,7 +97,7 @@ describe('nonlinear', () => {
   it('leads a collapse\'s takeaway with the collapse, not the worst check\'s words', () => {
     const result = bentResult();
     expect(result).toMatchObject({ collapsed: true, loadPercent: 69.7 });
-    expect(feaVerdict(result).caption).toBe('Lite · Collapses at about 70 % of the load');
+    expect(feaVerdict(result).caption.replace(/[\u00a0\u202f]/g, ' ')).toMatch(/^Collapses at about 70 % of the load · Lite · /);
     // Without the file's sentence, from the last load it carried.
     const unsaid = bentResult({ analysis: { type: 'nonlinear', tier: 3, word: 'Permanent bend / Stretch', limits: [LIMIT], warnings: [] } });
     expect(collapseCaption(unsaid)).toBe('Collapses at about 70 % of the load');

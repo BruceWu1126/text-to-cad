@@ -69,3 +69,31 @@ it('a pick goes through what the cut took away to what it shows', () => {
   expect(pickFace(result, down(10.9), clip.plane())).toBeNull();
   expect(pickFace(result, down(10.9))?.ref).toBe('#o1.f1');
 });
+
+it('cuts the markers under the mesh by the same plane, and says which of their points the cut keeps', () => {
+  const { mesh, root } = square();
+  // A marker built before the cut, and one added under the mesh after it (a rebuild): both cut on the mesh's next frame.
+  const marker = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial());
+  mesh.add(marker);
+  const clip = createFeaClip(THREE, mesh, root);
+  expect(clip.keeps([0.75, 0, 0], mesh)).toBe(true);
+  clip.set(half(), BOUNDS);
+  expect((marker.material as THREE.Material).clippingPlanes).toHaveLength(1);
+  const later = new THREE.Mesh(new THREE.BufferGeometry(), [new THREE.MeshBasicMaterial(), new THREE.MeshBasicMaterial()]);
+  mesh.add(later);
+  drawn(mesh);
+  expect((later.material as THREE.Material[]).map((material) => material.clippingPlanes?.length)).toEqual([1, 1]);
+  // A label's point, in the mesh's space: kept on the lower half, gone with the upper one.
+  expect(clip.keeps([0.25, 0.5, 0], mesh)).toBe(true);
+  expect(clip.keeps([0.75, 0.5, 0], mesh)).toBe(false);
+  // Flipped, the other half's.
+  clip.set(half({ invert: true }), BOUNDS);
+  expect([clip.keeps([0.25, 0.5, 0], mesh), clip.keeps([0.75, 0.5, 0], mesh)]).toEqual([false, true]);
+  // No cut, nothing on the markers; letting go clears them.
+  clip.set(null, BOUNDS);
+  expect((marker.material as THREE.Material).clippingPlanes).toHaveLength(0);
+  expect(clip.keeps([0.75, 0.5, 0], mesh)).toBe(true);
+  clip.set(half(), BOUNDS);
+  clip.dispose();
+  expect((marker.material as THREE.Material).clippingPlanes).toBeNull();
+});

@@ -1,11 +1,15 @@
+import { FlipHorizontal2 } from "lucide-react";
 import { normalizeViewSettings } from "@text-to-cad/core/common/viewSettings.js";
 import { clipAxisBounds, normalizeStepClipSettings } from "@text-to-cad/core/lib/viewer/clipPlane.js";
 import { Slider } from "@text-to-cad/ui/primitives/slider";
+import { cn } from "@text-to-cad/ui/utils";
 import { FILE_SHEET_PRECISION_SLIDER_CLASSES, FileSheetSelectRow } from "../inspector/FileSheet.js";
+import { TOOL_PANEL_BUTTON_CLASS } from "../tools/ToolPanel.jsx";
 
 // The Clip section's panel, for every view that offers it (`ViewFeatures.sections`): the amount in
-// the panel's heading, one row for a body — the axis it cuts along and then its slider. The view
-// settings own the effect; what a cut does to a scene is its renderer's.
+// the panel's heading, one row for a body — the axis it cuts along, its slider, then Flip, which
+// keeps the other side of the plane. The view settings own the effect (`invert` is the side kept);
+// what a cut does to a scene is its renderer's.
 
 const AXES = Object.freeze(["x", "y", "z"]);
 const AXIS_OPTIONS = Object.freeze(AXES.map(value => ({ value, label: value.toUpperCase() })));
@@ -46,7 +50,29 @@ function ClipAxisSelect({ viewSettings, onViewSettingsPatch }) {
 }
 
 /**
- * The Clip panel's body: its axis, then one slider, which applies the cut as it leaves zero and
+ * The clip settings with the other side of the plane kept: every plane stays where it is (`invert`
+ * flips which half is drawn), and an axis left at its neutral end moves to the other neutral end, so
+ * Flip never turns an uncut axis into a cut-everything one.
+ */
+export function flippedClip(viewSettings) {
+  const { clip, neutral } = clipState(viewSettings, null);
+  const offsets = Object.fromEntries(Object.entries(clip.offsets).map(([axis, offset]) => [axis, Math.abs(offset - neutral) > 1e-6 ? offset : 1 - neutral]));
+  // A cut whose plane sits at the other end (all of it taken away) keeps all of it once flipped: no cut.
+  return { invert: !clip.invert, offsets, enabled: clip.enabled && Math.abs(offsets[clip.axis] - (1 - neutral)) > 1e-6 };
+}
+
+/** Flip: a press keeps the other side of the cut; pressed while the side kept is the higher coordinates. */
+function ClipFlipButton({ viewSettings, onViewSettingsPatch }) {
+  const { clip } = clipState(viewSettings, null);
+  return <button type="button" aria-label="Flip clip side" aria-pressed={clip.invert} title="Keep the other side"
+    className={cn(TOOL_PANEL_BUTTON_CLASS, "size-6", clip.invert && "bg-accent text-foreground")}
+    onClick={() => onViewSettingsPatch({ clip: flippedClip(viewSettings) })}>
+    <FlipHorizontal2 className="size-3" strokeWidth={2} aria-hidden="true" />
+  </button>;
+}
+
+/**
+ * The Clip panel's body: its axis, then one slider, then Flip; which applies the cut as it leaves zero and
  * removes it at zero. `bounds` is the box it cuts through (disabled while it has no extent).
  */
 export function ClipControls({ viewSettings, onViewSettingsPatch, bounds }) {
@@ -60,6 +86,7 @@ export function ClipControls({ viewSettings, onViewSettingsPatch, bounds }) {
       step={0.1} disabled={!range}
       onValueChange={([value]) => changeOffset(clip.invert ? value / 100 : 1 - value / 100)}
       className={FILE_SHEET_PRECISION_SLIDER_CLASSES} />
+    <ClipFlipButton viewSettings={viewSettings} onViewSettingsPatch={onViewSettingsPatch} />
   </div>;
 }
 

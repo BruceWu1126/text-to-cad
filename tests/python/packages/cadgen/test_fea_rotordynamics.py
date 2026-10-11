@@ -337,6 +337,8 @@ class UniformShaft(unittest.TestCase):
         # Rigid bearings take no energy out: undamped, nothing to judge, and a finding asks for the dampers.
         self.assertEqual((checks["stability"]["status"], checks["stability"]["undamped"]), ("passes", True))
         self.assertEqual(checks["stress"]["status"], "passes")
+        # The spinning stress grows with the square of the speed; the speed checks do not scale at all.
+        self.assertEqual(checks["stress"].get("scaling"), "quadratic")
         found = {finding["type"]: finding for finding in self.result.findings}
         self.assertEqual(found["critical_speed_inside"]["severity"], "error")
         self.assertIn("runs at a critical speed: 1st forward whirl meets the spin at 6,600 rpm", found["critical_speed_inside"]["summary"])

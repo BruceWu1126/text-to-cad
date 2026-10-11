@@ -410,8 +410,10 @@ def _check_lines(s: dict) -> list[str]:
             return _frequency_line(check)
         if check.get("kind") == "stability":
             return _stability_line(check)
+        # A share under 1 % reads "0.00×" to two places: say it is under 1 % of the limit instead.
+        share = "under 1% of it" if 0 <= check["ratio"] < 0.01 else f"{check['ratio']:.2f}× it"
         return (f"check '{check['label']}': {check['value']:g}{unit(check)} against a {check['limit']:g}{unit(check)} limit, "
-                f"{check['ratio']:.2f}× it, {check['status']}")
+                f"{share}, {check['status']}")
 
     return [line(check) for check in s.get("checks", [])]
 

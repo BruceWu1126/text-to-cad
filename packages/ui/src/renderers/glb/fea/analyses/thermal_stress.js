@@ -5,10 +5,15 @@
  * together ("this heat"), and it plays the Load ramp. What you see opens on today's field and
  * deformation, the field over stress, displacement and temperature; its setup says where it is held,
  * what pushes it, where it is kept at a temperature, heated and cooled, and what it is made of.
+ * Where the file finds the peak on a clamped edge (`singular_clamped_edge`), the stress check's row
+ * says that peak is a singularity to read away from (`checkHint`).
  */
 import { fieldAndDeformation } from "../controls.js";
 import { cooledRows, heatedRows, heldRows, keptAtRows, madeOfRows, pushedRows } from "../setup.js";
 import { LOAD_RAMP } from "./static.js";
+
+// A part held fast while heat makes it grow is singular at the clamped edge: its peak is the mesh's.
+const SINGULAR_HINT = "Peak at the clamped edge: a singularity that grows as the mesh is refined. Read the stress a little away from the edge";
 
 export default Object.freeze({
   name: "thermal_stress",
@@ -26,4 +31,7 @@ export default Object.freeze({
   markers: Object.freeze(["load", "fixture", "body_load", "temperature", "heat", "convection"]),
   displayTitle: "Loads, fixtures and heat",
   limitWord: "",
+  /** The stress check's hint where the file finds its peak on a clamped edge; "" for anything else. */
+  checkHint: (result, check) => (check.kind === "stress" && result.findings.some((finding) => finding.type === "singular_clamped_edge")
+    ? SINGULAR_HINT : ""),
 });

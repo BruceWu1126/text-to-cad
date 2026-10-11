@@ -83,12 +83,17 @@ External flow (around the part):
 ## What comes out
 
 - Fields on the part's surface (what the viewer shows): `pressure` (wall pressure, Pa gauge,
-  signed) and `wall_shear` (Pa). A face the fluid does not wet (a pipe's outside) reads 0. Mapped:
+  signed), `wall_shear` (Pa) and `speed` ("Speed", m/s): the wall itself is still (no slip), so it
+  is the fastest the fluid moves within one passage width of each wetted point (the inlet's
+  hydraulic diameter; an external flow, two wall elements), reaching at least as far as the
+  fastest point of the flow, so the `velocity` check's value is the top of its colour bar. A face
+  the fluid does not wet (a pipe's outside) reads 0. Mapped:
   `von_mises` and `displacement` too, and the part deforms.
 - Summary: `reynolds` (`value`, `limit`, `kind`, `length_mm`, `laminar`), `max_velocity_m_s` and
   where, `flow_rate_m3_s` and `flow_rate_L_min` (in), `outflow_rate_m3_s`, `flow_balance` (their
   mismatch), `pressure_drop_Pa`, `inlet_pressure_Pa`, `outlet_pressure_Pa` (area means),
-  `min/max_wall_pressure_Pa`, `max_wall_shear_Pa`, `force_N` (the flow's push on the part,
+  `min/max_wall_pressure_Pa`, `max_wall_shear_Pa`, `max_speed_near_wall_m_s` and `speed_reach_mm`
+  (how far the speed field looked), `force_N` (the flow's push on the part,
   pressure and friction), `solve` (Picard and Newton steps, the residual, any continuation stages),
   `fluid_mesh` (elements, wall and free-stream sizes) and the `checks`. Mapped: `max_von_mises_MPa`,
   `max_displacement_mm`, `yield_MPa`, `safety_factor`.
@@ -98,8 +103,9 @@ External flow (around the part):
   (error), `..._close_to_limit` (warning), `flow_balance` (warning: in and out differ by over 1 %),
   `continuation` (info), `flow_unsettled` (warning), and the static findings when mapped.
 - A solve that stops short of its tolerance (1e-8), or at its time limit (the study's time target,
-  or three times the estimate when the run went past it), returns its best state at the full Re and
-  says so: "the flow solve stopped at a residual of ..., its numbers are approximate". Every check
+  or three times the estimate when the run went past it, but never before three times the linear
+  solves it is expected to need, continuation counted above Re 100: a loaded machine makes the
+  solve slower, not shorter), returns its best state at the full Re and says so: "the flow solve stopped at a residual of ..., its numbers are approximate". Every check
   on it then reads `settled: false`, its label ends "(flow not settled)", and a pass becomes
   `close`; the CLI's solve line ends "(not settled)". A long solve logs a progress line (step, Re
   stage, residual, seconds) at most every 10 s.

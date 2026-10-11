@@ -92,7 +92,7 @@ describe('electromagnetic', () => {
       study: { material: { name: 'Stainless steel 304', yield_MPa: 215 }, mode: 'ac_magnetic', frequencyHz: 25000 },
     });
     const [made] = madeOfRows(result);
-    expect(made.children[0]).toMatchObject({ label: '2 materials', hint: 'Copper: 1 part, Stainless steel 304: 1 part',
+    expect(made.children[0]).toMatchObject({ label: 'Copper coil, Stainless steel 304 shaft',
       summary: 'Made of Copper (coil) and Stainless steel 304 (shaft)' });
     expect(faceTitle(result, '#o1.2.f1')).toBe('shaft · face 1');
   });

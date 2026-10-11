@@ -24,6 +24,9 @@ export const FIELDS = Object.freeze({
   _fatigue_factor: field("Fatigue margin", { lowWorst: true }),
   _pressure: field("Pressure", { signed: true }),
   _wall_shear: field("Wall shear"),
+  // A flow's speed by its wetted walls: the wall itself is still (no slip), so the fastest the fluid moves within
+  // a passage width of each point, m/s; it reaches the fastest point of the flow, the speed a velocity check judges.
+  _speed: field("Speed"),
   // A gas flow's speed over the local speed of sound, at its wetted walls.
   _mach: field("Mach number"),
   _plastic_strain: field("Plastic strain"),

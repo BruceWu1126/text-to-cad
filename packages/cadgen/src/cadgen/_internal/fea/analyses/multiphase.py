@@ -45,7 +45,8 @@ from typing import Any, ClassVar
 from cadgen._internal.fea.analyses import kinds
 from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs, Series, SeriesFrame, SolveContext
 
-__all__ = ["GASES", "LIQUIDS", "LIMITS", "MultiphaseAnalysis", "MultiphaseInputs", "fill_words", "sloshing_frequency"]
+__all__ = ["GASES", "LIQUIDS", "LIMITS", "SPILL_SHARE", "MultiphaseAnalysis", "MultiphaseInputs", "fill_words",
+           "sloshing_frequency", "spill_sentence"]
 
 #: Fluids by name at 20 °C: density kg/m³, dynamic viscosity Pa·s.
 LIQUIDS = {"water": (998.2, 1.002e-3), "oil": (870.0, 0.1), "glycerine": (1261.0, 1.41)}
@@ -76,6 +77,11 @@ MIN_STEPS, DEFAULT_PERIODS = 40, 3.0
 ACROSS, NARROWEST = 20.0, 2.0
 #: local_refine: away from the interface's band the mesh is this many times coarser; fluid_coarsen grows it by this.
 BAND_COARSEN, COARSEN = 2.5, 1.6
+#: A fill_level check fails on a spill once more than this share of the starting liquid has left over the brim: well
+#: above round-off (the volume is kept to 1e-12 a step) and above what the smeared surface carries out of an open top
+#: it only comes near (0.26 % on a gallery tank whose surface stopped 2.4 mm under the brim, 0.02 % for a still one
+#: 8 mm under it).
+SPILL_SHARE = 0.01
 #: The cost model (measured on this engine's sloshing tanks; a factor of three is what choosing a rung needs).
 TETS_VOLUME, TETS_SURFACE, DOFS_PER_TET = 4.5, 2.0, 6.0
 ASSEMBLE_S, LEVEL_SET_S, DIRECT_S, ITERATIVE_S, MESH_S = 6e-5, 1.2e-5, 1.4e-7, 3e-5, 2.5e-4
@@ -132,6 +138,12 @@ def sloshing_frequency(length_m: float, depth_m: float, g: float) -> float:
         return 0.0
     k = math.pi / length_m
     return math.sqrt(g * k * math.tanh(k * depth_m)) / (2.0 * math.pi)
+
+
+def spill_sentence(spilled_m3: float, start_m3: float) -> str:
+    """"Spills over the brim: 2.3 mL left the tank (6.4 % of the liquid)"."""
+    share = 100.0 * spilled_m3 / start_m3 if start_m3 > 0 else 0.0
+    return f"Spills over the brim: {spilled_m3 * 1e6:.2g} mL left the tank ({share:.2g} % of the liquid)"
 
 
 def fill_words(fraction: float | None, liquid: str) -> str:
@@ -640,7 +652,7 @@ class MultiphaseAnalysis:
 
         import numpy as np
 
-        from cadgen._internal.fea import cavity, multiphase_ops as ops
+        from cadgen._internal.fea import cavity, multiphase_ops as ops, timestep
         from cadgen._internal.fea.analyses.modal import max_frames
 
         timings: dict[str, float] = {}
@@ -674,8 +686,10 @@ class MultiphaseAnalysis:
                 velocity[axis] = (-1.0 if high else 1.0) * entry.velocity_m_s
                 openings.append(ops.Opening(rows, "inlet", velocity=velocity, phase=1.0 if entry.fluid == "liquid" else 0.0))
             else:
-                # An outlet, or an open side nobody named: open to the air at its pressure (0 Pa).
-                openings.append(ops.Opening(rows, "outlet", pressure=entry.pressure_Pa if entry is not None else 0.0))
+                # An outlet, or an open side nobody named: open to the air at its pressure (0 Pa), and the brim the liquid
+                # spills over.
+                openings.append(ops.Opening(rows, "outlet", pressure=entry.pressure_Pa if entry is not None else 0.0,
+                                            spill=entry is None))
         noslip = facets[kind_of == "wall"] if inputs.walls == "no_slip" else None
 
         distance = self._initial_distance(mesh, inputs, setup)
@@ -713,7 +727,7 @@ class MultiphaseAnalysis:
         frames_wanted = max(max_frames(ctx), 4)
         even = list(np.linspace(0.0, end, max(frames_wanted - 2, 2)))
         stops = even[1:-1]
-        record: dict[str, Any] = {"t": [], "level": [], "force": [], "moment": [], "pmax": [], "volume": [], "speed": [],
+        record: dict[str, Any] = {"t": [], "level": [], "level_at": [], "force": [], "moment": [], "pmax": [], "volume": [], "speed": [],
                                   "probes": {p["label"]: [] for p in probes}, "frames": {}, "peaks": {}}
         wall_corners = np.unique(mesh.facets[:, march.wall_facets])
         part_count = ctx.space.scalar_count
@@ -727,8 +741,12 @@ class MultiphaseAnalysis:
             return {"t": state.t, "share": on_part(state.share), "pressure": on_part(state.p)}
 
         def on_step(state):
-            heights = ops.interface_heights(mesh, state.distance, up)
-            level = (float(heights.max()) - floor_m) * 1e3 if len(heights) else (setup.height_mm if state.share.min() > 0.5 else 0.0)
+            # The fill level: the highest point of the liquid's surface anywhere in the inside (at a wall, in a corner, a
+            # splash), where it is, not along a probe's line.
+            heights, crossings = ops.interface_heights(mesh, state.distance, up, points=True)
+            top = int(np.argmax(heights)) if len(heights) else None
+            level = (float(heights[top]) - floor_m) * 1e3 if top is not None else (setup.height_mm if state.share.min() > 0.5 else 0.0)
+            record["level_at"].append(crossings[:, top] * 1e3 if top is not None else np.full(3, np.nan))
             force, moment = march.wall_force(state.p, about=centre)
             pmax = float(state.p[wall_corners].max()) if len(wall_corners) else 0.0
             record["t"].append(state.t)
@@ -753,10 +771,13 @@ class MultiphaseAnalysis:
         dt_max = self._step(inputs, setup, ctx.plan)
         if ctx.log:
             ctx.log(f"two fluids: {len(mesh.t.T)} tets, {march.n} unknowns, up to {end:g} s in steps of at most {dt_max:.3g} s")
-        march.run(end, dt_max=dt_max, stops=stops, on_step=on_step)
+        last = march.run(end, dt_max=dt_max, stops=stops, on_step=on_step, limit_s=timestep.time_limit(ctx))
+        if march.stopped_at is not None:
+            # Stopped at its time limit: where it got to is the last frame.
+            record["frames"].setdefault(round(last.t, 12), snapshot(last))
         timings["march_s"] = time.perf_counter() - started
         timings.update({f"march_{k}": v for k, v in march.timings.items()})
-        return self._result(ctx, inputs, setup, march, mesh, volume, record, timings, fine, away, size_field, probes)
+        return self._result(ctx, inputs, setup, march, mesh, volume, record, timings, fine, away, size_field, probes, end)
 
     def _band_field(self, setup: _Setup, band: tuple[float, float], fine: float) -> dict:
         """netgen local sizes: points on a grid through the band, each holding the fine size within its reach."""
@@ -868,9 +889,11 @@ class MultiphaseAnalysis:
         i = cross[-1]
         return float(z[i] + d[i] / (d[i] - d[i + 1]) * (z[i + 1] - z[i]))
 
-    def _result(self, ctx, inputs, setup, march, mesh, volume, record, timings, fine, away, size_field, probes) -> AnalysisResult:
+    def _result(self, ctx, inputs, setup, march, mesh, volume, record, timings, fine, away, size_field, probes,
+                planned_end: float) -> AnalysisResult:
         import numpy as np
 
+        from cadgen._internal.fea import timestep
         from cadgen._internal.fea.analyses.thermal_transient import time_label
 
         t = np.array(record["t"])
@@ -915,6 +938,14 @@ class MultiphaseAnalysis:
         if march.max_drift > 0.01:
             analysis_warnings.append(f"the liquid's volume drifted by up to {100 * march.max_drift:.2g}% in a step before it was "
                                      "put back: the surface moved fast for the mesh; a finer mesh would follow it better")
+        spilled = max(float(march.spilled), 0.0)
+        spill = spill_sentence(spilled, float(vol[0])) if vol[0] > 0 and spilled > SPILL_SHARE * float(vol[0]) else None
+        if spill:
+            analysis_warnings.append(spill)
+        stopped = None
+        if march.stopped_at is not None:
+            stopped = timestep.stopped_sentence(time_label(march.stopped_at), time_label(planned_end), timestep.time_limit(ctx))
+            analysis_warnings.append(stopped)
         result = AnalysisResult(
             dof_locations=ctx.space.dof_locations, vertices=ctx.space.vertices, tets=ctx.space.tets,
             boundary_quadratic=ctx.space.boundary_quadratic, element_dofs=ctx.space.element_dofs,
@@ -924,7 +955,9 @@ class MultiphaseAnalysis:
             solver=f"Taylor-Hood P2/P1 two-fluid Navier-Stokes, level set, BDF2, {'GMRES + multigrid' if march.solver == 'iterative' else 'direct'}",
             timings=timings, warnings=warnings,
             scalars={
-                "t": t, "level": level, "force": force, "moment": moment, "pmax": pmax, "volume": vol, "slosh": slosh,
+                "t": t, "level": level, "level_at": np.array(record["level_at"]), "force": force, "moment": moment, "pmax": pmax,
+                "volume": vol, "slosh": slosh, "spilled_m3": spilled, "spill": spill, "time_limit": stopped,
+                "stopped_at": march.stopped_at, "planned_end_s": planned_end,
                 "speed": np.array(record["speed"]), "probes": {p["label"]: (p["at_mm"], np.array(record["probes"][p["label"]])) for p in probes},
                 "peaks": {k: (v[0], v[1]["t"]) for k, v in record["peaks"].items()},
                 "march": {"steps": len(t) - 1, "solves": march.solves, "rebuilds": march.rebuilds,
@@ -985,12 +1018,16 @@ class MultiphaseAnalysis:
     def judge(self, check: dict, index: int, ctx: SolveContext, result: AnalysisResult, inputs: MultiphaseInputs) -> dict:
         import numpy as np
 
+        from cadgen._internal.fea.analyses.thermal_transient import time_label
         from cadgen._internal.fea.checks import check_status
+        from cadgen._internal.fea.timestep import stopped_check
 
+        stopped = result.scalars.get("stopped_at")
+        reached = None if stopped is None else time_label(stopped)
         if check["kind"] in ("stress", "displacement"):
             from cadgen._internal.fea.analyses import get_analysis
 
-            return get_analysis("static").judge(check, index, ctx, result, inputs)
+            return stopped_check(get_analysis("static").judge(check, index, ctx, result, inputs), reached)
         scalars = result.scalars
         t = scalars["t"]
         setup = scalars["setup"]
@@ -1024,23 +1061,42 @@ class MultiphaseAnalysis:
         }
         if check["kind"] == "fill_level" and "limit_mm" not in check:
             out["brim"] = True
-        return out
+        if check["kind"] == "fill_level" and scalars.get("spill"):
+            # Liquid left over the brim: the level reads at most the brim (the fluid ends there), so the spill fails it.
+            vol = scalars["volume"]
+            out["status"] = "fails"
+            out["spilled_mL"] = round(scalars["spilled_m3"] * 1e6, 6)
+            out["spilled_percent"] = round(100.0 * scalars["spilled_m3"] / float(vol[0]), 4)
+        return stopped_check(out, reached)
 
     def findings(self, ctx: SolveContext, result: AnalysisResult, inputs: MultiphaseInputs,
                  check_results: list[dict], *, assembly: bool) -> list[dict]:
         from cadgen._internal.fea import checks
+        from cadgen._internal.fea.timestep import stopped_finding
 
         found: list[dict] = []
         if result.solved:
             found += checks.findings(result.solved[0])
+        scalars = result.scalars
+        if scalars.get("time_limit"):
+            found.append(stopped_finding(scalars["time_limit"]))
+        if scalars.get("spill"):
+            vol = scalars["volume"]
+            found.append({"check": "fea", "severity": "error", "type": "spills_over_brim", "summary": scalars["spill"],
+                          "description": f"{scalars['spilled_m3'] * 1e6:.4g} mL of the {float(vol[0]) * 1e6:.4g} mL of liquid "
+                                         f"left through the open top over the run (more than {SPILL_SHARE * 100:g} %, past "
+                                         "what the smeared surface alone carries out)", "items": []})
         for check in check_results:
             if check["kind"] not in ("fill_level", "wall_pressure") or check["status"] == "passes":
                 continue
+            if check.get("passed_until_stop") or check.get("spilled_mL") is not None:
+                continue                                  # the stop's or the spill's own finding says it
             fails = check["status"] == "fails"
             when = check["at"]["value"]
             if check["kind"] == "fill_level":
                 what = "the brim" if check.get("brim") else f"the {check['limit']:g} mm allowed"
-                summary = (f"The liquid rises to {check['value']:.4g} mm above the floor at {when:.3g} s, "
+                where = "along the probes" if check.get("probes") else "its highest point anywhere"
+                summary = (f"The liquid's surface rises to {check['value']:.4g} mm above the floor at {when:.3g} s ({where}), "
                            f"{'past' if fails else 'close to'} {what}")
             else:
                 summary = (f"The wall pressure reaches {check['value']:.4g} Pa at {when:.3g} s, "
@@ -1052,6 +1108,8 @@ class MultiphaseAnalysis:
                 "items": [],
             })
         for sentence in result.scalars.get("analysis_warnings", ()):
+            if sentence in (scalars.get("spill"), scalars.get("time_limit")):
+                continue
             if sentence == SINGLE_FLUID:
                 found.append({"check": "fea", "severity": "info", "type": "single_fluid", "summary": sentence,
                               "description": "a completely full inside has no free surface: the liquid's flow alone is "
@@ -1085,6 +1143,8 @@ class MultiphaseAnalysis:
         dmoment = np.linalg.norm(moment - moment[0], axis=1)
         march = s["march"]
         total = setup.domain.volume_mm3
+        at = s["level_at"][int(np.argmax(level))] if len(s.get("level_at", ())) else None
+        top_at = [round(float(c), 3) for c in at] if at is not None and np.all(np.isfinite(at)) else None
         summary: dict[str, Any] = {
             "fluids": {"liquid": {"name": inputs.liquid.name, "density_kg_m3": inputs.liquid.density_kg_m3,
                                   "viscosity_Pa_s": inputs.liquid.viscosity_Pa_s},
@@ -1100,8 +1160,11 @@ class MultiphaseAnalysis:
                      "words": fill_words(round(float(vol[0]) * 1e9 / total, 4) if total else None, inputs.liquid.name)},
             "first_sloshing_Hz": round(1.0 / setup.period_s, 6) if math.isfinite(setup.period_s) else None,
             "end_s": round(s["end_s"], 9),
+            # The highest point of the liquid's surface anywhere in the inside, when, and where (mm); a probe reads its own
+            # vertical line only, so it reads at most this.
             "peak_fill_level_mm": round(float(level.max()), 4),
             "peak_fill_level_at_s": round(float(t[int(np.argmax(level))]), 9),
+            "peak_fill_level_at_mm": top_at,
             "brim_mm": round(setup.height_mm, 4),
             "probes": [{"label": label, "at_mm": at, "peak_mm": round(float(h.max()), 4) if len(h) else None,
                         "peak_at_s": round(float(t[int(np.argmax(h))]), 9) if len(h) else None,
@@ -1122,6 +1185,9 @@ class MultiphaseAnalysis:
                        "largest_step_drift_percent": round(100.0 * float(march["max_drift"]), 9),
                        # In through the inlets less out through the outlets and open sides; 0 for a closed part.
                        "net_inflow_L": round((float(march["expected_volume"]) - float(vol[0])) * 1e3, 9),
+                       # What left over the brim (an open side nobody named), mL, and its share of the starting liquid.
+                       "spilled_mL": round(float(s.get("spilled_m3", 0.0)) * 1e6, 6),
+                       "spilled_percent": round(100.0 * float(s.get("spilled_m3", 0.0)) / float(vol[0]), 6) if vol[0] else 0.0,
                        "error_percent": round(100.0 * float(vol[-1] - march["expected_volume"]) / float(vol[0]), 9) if vol[0] else 0.0},
             "max_speed_m_s": round(float(s["speed"].max()), 9),
             "interface_mm": round(4.0 * march["epsilon_mm"], 4),
@@ -1132,6 +1198,11 @@ class MultiphaseAnalysis:
         }
         if march.get("single_fluid"):
             summary["single_fluid"] = SINGLE_FLUID
+        if s.get("spill"):
+            summary["spill"] = s["spill"]
+        if s.get("stopped_at") is not None:
+            summary["stopped_at_s"] = round(float(s["stopped_at"]), 9)
+            summary["planned_end_s"] = round(float(s["planned_end_s"]), 9)
         if result.solved:
             from cadgen._internal.fea import checks
             from cadgen._internal.fea.analyses.static import floored
@@ -1202,16 +1273,21 @@ class MultiphaseAnalysis:
         lines = [
             *([summary["single_fluid"]] if summary.get("single_fluid") else []),
             f"{fill['words']} ({fluids}), followed for {summary['end_s']:g} s in {summary['march']['steps']} steps",
-            f"liquid rises to {summary['peak_fill_level_mm']:.4g} mm above the floor at {summary['peak_fill_level_at_s']:.3g} s "
-            f"(brim {summary['brim_mm']:.4g} mm)"
+            f"liquid's surface rises to {summary['peak_fill_level_mm']:.4g} mm above the floor at {summary['peak_fill_level_at_s']:.3g} s, "
+            f"its highest point anywhere"
+            + (f" (at {', '.join(f'{c:g}' for c in summary['peak_fill_level_at_mm'])} mm)" if summary.get("peak_fill_level_at_mm") else "")
+            + f"; brim {summary['brim_mm']:.4g} mm"
             + (f"; first sloshing mode {summary['first_sloshing_Hz']:.3g} Hz by linear theory" if summary.get("first_sloshing_Hz") else ""),
+            *([summary["spill"]] if summary.get("spill") else []),
             f"wall pressure up to {summary['max_wall_pressure_Pa']:.4g} Pa; sloshing force up to {force['sloshing_peak_N']:.4g} N "
             f"at {force['sloshing_peak_at_s']:.3g} s",
             f"liquid volume {volume['start_L']:.4g} L to {volume['end_L']:.4g} L ({volume['change_percent']:+.2g}%)",
         ]
         for probe in summary["probes"]:
             if probe["peak_mm"] is not None:
-                lines.append(f"probe {probe['label']}: up to {probe['peak_mm']:.4g} mm at {probe['peak_at_s']:.3g} s")
+                at = ", ".join(f"{c:g}" for c in probe["at_mm"])
+                lines.append(f"probe {probe['label']} (its vertical line through {at} mm): surface up to {probe['peak_mm']:.4g} mm "
+                             f"at {probe['peak_at_s']:.3g} s")
         if "max_von_mises_MPa" in summary:
             lines.append(f"under the fluids' pressure at {summary['mapped_at_s']:.3g} s: peak von Mises "
                          f"{summary['max_von_mises_MPa']:.4g} MPa, largest displacement {summary['max_displacement_mm']:.4g} mm"

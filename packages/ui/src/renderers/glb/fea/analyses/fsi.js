@@ -71,6 +71,8 @@ export const fsiLimitWord = (result) => {
 export default planned({
   name: "fsi", tier: 3, word: "Flow and bending", noun: "this flow", limitWord: "Flow and bending", limitWordOf: fsiLimitWord,
   family: null, scalesWithLoad: false,
+  // Flow and bending, each moving the other: no check is a multiple of the load.
+  scaling: "none",
   checks: ["stress", "displacement", "pressure_drop"],
   defaultControls: fieldAndDeformation,
   setupGroups: FSI_SETUP,

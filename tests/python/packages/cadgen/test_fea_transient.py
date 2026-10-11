@@ -175,6 +175,27 @@ class Integrators(unittest.TestCase):
         self.assertGreater(run.largest_step, 0.002)
         self.assertAlmostEqual(max(adaptive) * omega ** 2, 2.0, delta=0.01)
 
+    def test_newmark_past_its_time_limit_stops_and_says_how_far_on_the_way(self):
+        # Fixed gap: the march said nothing but a line every 200 steps (at debug level) and had no time limit.
+        from unittest import mock
+
+        import numpy as np
+        import scipy.sparse as sparse
+
+        from cadgen._internal.fea import timestep
+
+        omega = 2 * math.pi * 10.0
+        K, M = sparse.csr_matrix([[omega ** 2]]), sparse.csr_matrix([[1.0]])
+        said: list[str] = []
+        with mock.patch.object(timestep, "PROGRESS_S", 0.0):
+            run = timestep.newmark(M, None, K, lambda t: np.array([1.0]), 1.0, 0.002, log=said.append, limit_s=0.0)
+        self.assertEqual((run.steps, run.stopped_at), (1, 0.002))
+        self.assertEqual(said, ["time march: t = 0.002 s of 1 s, 1 steps, 0 s so far"])
+        self.assertIsNone(timestep.newmark(M, None, K, lambda t: np.array([1.0]), 0.01, 0.002).stopped_at)
+        # The limit: twice the study's time target, at least LIMIT_FLOOR_S; 600 s by default.
+        budget = lambda seconds: SimpleNamespace(budget=SimpleNamespace(seconds=seconds))  # noqa: E731
+        self.assertEqual([timestep.time_limit(budget(s)) for s in (600.0, 5.0, None)], [1200.0, 30.0, 1200.0])
+
     def test_rayleigh_damping_holds_the_ratio_at_both_modes(self):
         from cadgen._internal.fea import timestep
 
@@ -356,6 +377,28 @@ class SuddenTipForce(unittest.TestCase):
         self.assertIn(f"adapted: {step['words']}", result.human_lines())
         self.assertIn("fit_reduce_modes", [finding["type"] for finding in result.findings])
         self.assertAlmostEqual(result.summary["dynamic_amplification"] / 2.0, 1.0, delta=0.05)
+
+    def test_a_direct_run_past_its_time_limit_stops_with_a_result_that_says_so(self):
+        from unittest import mock
+
+        from cadgen._internal.fea import timestep
+
+        with mock.patch.object(timestep, "LIMIT_FLOOR_S", 0.0):
+            result = self._solve("stopped", method="direct", fit={"seconds": 1e-6, "allow": []})
+        self.assertTrue(result.ok)
+        summary = result.summary
+        self.assertEqual(summary["steps"], 1)
+        self.assertLess(summary["stopped_at_s"], summary["planned_end_s"])
+        self.assertEqual(summary["end_s"], summary["stopped_at_s"])
+        stop = [f for f in result.findings if f["type"] == "time_limit"]
+        self.assertEqual(len(stop), 1)
+        self.assertTrue(stop[0]["summary"].startswith("Stopped at its time limit at t = "))
+        self.assertNotIn("still_moving", [f["type"] for f in result.findings])
+        # Each check judges what was solved, says where it stopped, and does not pass on the rest.
+        self.assertTrue(all("(stopped at " in c["label"] and c["status"] != "passes" for c in summary["checks"]))
+        extras = _glb(result.glb)["meshes"][0]["extras"]
+        self.assertTrue(any(w.startswith("Stopped at its time limit") for w in extras["analysis"]["warnings"]))
+        self.assertAlmostEqual(extras["series"]["frames"][-1]["value"], summary["stopped_at_s"], places=9)
 
     def test_an_oversized_direct_run_completes_by_adaptive_steps(self):
         result = self._solve("adaptive", method="direct", fit={"seconds": 0.001, "allow": ["adaptive_steps"]})

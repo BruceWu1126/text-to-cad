@@ -53,7 +53,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "Coupled", "FLUID_HEAT", "PRANDTL_T", "boundary_flux", "coupled_solve", "energy_matrix", "impermeable", "inflow",
-    "interface_map", "lumped_area", "thermal_wall_film",
+    "interface_map", "local_mixed_temperature", "lumped_area", "thermal_wall_film",
 ]
 
 #: Fluids by name at 20 °C: thermal conductivity W/(m K) and specific heat J/(kg K) (Incropera, Fundamentals of
@@ -331,6 +331,56 @@ def coupled_solve(K_s, f_s, solid_fixed: tuple["np.ndarray", "np.ndarray"], A_f,
     inlet_power = float(residual[held].sum())
     return Coupled(solid=T_s, fluid=T_f, wall_nodes=wall_nodes, wall_power=wall_power, inlet_power=inlet_power,
                    how=how, warnings=warnings)
+
+
+def local_mixed_temperature(space, u: "np.ndarray", T: "np.ndarray", points: "np.ndarray", reach: float,
+                            slab: float) -> "np.ndarray":
+    """At each of ``points`` (mm), the mixed (mixing-cup) temperature of the fluid passing it: ∫ (u · d) T / ∫ u · d
+    over the fluid elements whose centres lie within ``reach`` mm of the point and within ``slab`` mm of the plane
+    through it across the local flow (d, the direction of the flow those elements carry), with the quadratic
+    velocity and the linear temperature, the quadrature the outlets' mixed temperature takes. So in a passage it
+    is the section's bulk temperature, and at an outlet it is the outlet's own. Where the flow there carries
+    little net along any direction (a recirculation, a dead corner) it is the speed-weighted mean instead."""
+    import numpy as np
+    from scipy.spatial import cKDTree
+    from skfem import ElementTetP1, Functional
+
+    basis = space.basis
+    scalar = basis.with_element(ElementTetP1())
+    velocity = basis.interpolate(u)
+    temperature = scalar.interpolate(T)
+
+    def part(component: int, weighted: bool):
+        @Functional
+        def integrand(w):
+            value = w["u"][component] if component >= 0 else np.linalg.norm(w["u"], axis=0)
+            return value * w["T"] if weighted else value
+
+        return integrand.elemental(basis, u=velocity, T=temperature)
+
+    carried = np.stack([part(c, False) for c in range(3)], axis=1)        # (E, 3) ∫ u
+    carried_T = np.stack([part(c, True) for c in range(3)], axis=1)       # (E, 3) ∫ u T
+    speed, speed_T = part(-1, False), part(-1, True)                      # ∫ |u|, ∫ |u| T
+    centres = space.mesh.p[:, space.mesh.t[:4]].mean(axis=1).T
+    tree = cKDTree(centres)
+    out = np.zeros(len(points))
+    for i, near in enumerate(tree.query_ball_point(np.asarray(points, dtype=float), r=reach)):
+        near = np.asarray(near, dtype=np.int64)
+        if not len(near):
+            near = np.asarray([tree.query(points[i])[1]], dtype=np.int64)
+        net = carried[near].sum(axis=0)
+        moving = float(speed[near].sum())
+        size = float(np.linalg.norm(net))
+        if moving > 0 and size > 0.5 * moving:
+            d = net / size
+            across = np.abs((centres[near] - points[i]) @ d) <= slab
+            pick = near[across] if across.any() else near
+            flux = float(carried[pick].sum(axis=0) @ d)
+            if flux > 0.5 * float(speed[pick].sum()):
+                out[i] = float(carried_T[pick].sum(axis=0) @ d) / flux
+                continue
+        out[i] = float(speed_T[near].sum()) / moving if moving > 0 else float(np.mean(T[space.mesh.t[:4, near]]))
+    return out
 
 
 def boundary_flux(space, rows: "np.ndarray", u: "np.ndarray", T: "np.ndarray", rho_cp: float) -> tuple[float, float]:

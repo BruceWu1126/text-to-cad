@@ -640,8 +640,10 @@ def material_from_spec(spec: Any) -> Material:
                 raise ValueError(f"{where}.tangent_MPa: the slope past yield must be 0 (perfectly plastic) or more, got {tangent:g}")
     if tangent is not None and not tangent < E:
         raise ValueError(f"material.tangent_MPa: the plastic tangent ({tangent:g} MPa) must be below E ({E:g} MPa)")
+    # An object that extends a table entry ({"name": "pzt-5a", "piezo": {...}}) is called by the entry's display name
+    # ("PZT-5A"), as the table name alone is; one of its own keeps its name as written.
     return Material(
-        str(spec.get("name", base.name if base else "custom")), E, nu, yield_strength, density,
+        base.name if base is not None else str(spec.get("name", "custom")), E, nu, yield_strength, density,
         uts=_optional(spec, ("uts_MPa",), table("uts"), where="material"),
         endurance=_optional(spec, ("endurance_MPa", "fatigue_strength_MPa"), table("endurance"), where="material"),
         endurance_cycles=_optional(spec, ("endurance_cycles", "fatigue_cycles"), table("endurance_cycles"), where="material"),

@@ -114,6 +114,8 @@ it('Clip cuts a result open: on the strip after Select, a neutral panel that an 
   act(() => { fireEvent.click(screen.getByRole('button', { name: 'Clip' })); });
   expect(screen.getByRole('region', { name: 'Clip controls' }).textContent).toContain('0%');
   expect(drawnPlanes()).toHaveLength(0);
+  // Clip takes no pointer: Select stays the tool, so Study stays up over the Clip panel.
+  expect(screen.getByRole('region', { name: 'Study' })).toBeTruthy();
   // An edit cuts: all the way along X keeps x <= 0, the near half facing the default camera.
   act(() => { fireEvent.keyDown(screen.getByRole('slider', { name: 'Clip amount' }), { key: 'End' }); });
   expect(screen.getByRole('region', { name: 'Clip controls' }).textContent).toContain('100%');
@@ -130,9 +132,18 @@ it('Clip cuts a result open: on the strip after Select, a neutral panel that an 
   expect(drawnPlanes()).toHaveLength(0);
   act(() => { fireEvent.click(screen.getByRole('button', { name: 'Exit preview' })); });
   expect(drawnPlanes()).toHaveLength(1);
-  // Back to Select, the applied cut keeps its panel; its X removes the cut and the panel.
-  act(() => { fireEvent.click(screen.getByRole('button', { name: 'Select' })); });
-  expect(screen.getByRole('region', { name: 'Clip controls' })).toBeTruthy();
+  // Study and the applied cut's panel are both up, Study first, with no trip through Select.
+  const stack = screen.getAllByRole('region').map(region => region.getAttribute('aria-label'));
+  expect(stack.indexOf('Study')).toBeGreaterThanOrEqual(0);
+  expect(stack.indexOf('Study')).toBeLessThan(stack.indexOf('Clip controls'));
+  // Flip keeps the other side of the same plane: just short of all the way, the sliver past it.
+  act(() => { fireEvent.keyDown(screen.getByRole('slider', { name: 'Clip amount' }), { key: 'PageDown' }); });
+  await waitFor(() => expect(drawnPlanes()[0]?.distanceToPoint(new Vector3(1, 0, 0))).toBeLessThan(0));
+  act(() => { fireEvent.click(screen.getByRole('button', { name: 'Flip clip side' })); });
+  expect(screen.getByRole('button', { name: 'Flip clip side' }).getAttribute('aria-pressed')).toBe('true');
+  await waitFor(() => expect(drawnPlanes()[0]?.distanceToPoint(new Vector3(1, 0, 0))).toBeGreaterThan(0));
+  expect(drawnPlanes()[0].distanceToPoint(new Vector3(0, 0, 0))).toBeLessThan(0);
+  // Its X removes the cut and the panel.
   act(() => { fireEvent.click(screen.getByRole('button', { name: 'Close clip controls' })); });
   expect(screen.queryByRole('region', { name: 'Clip controls' })).toBeNull();
   await waitFor(() => expect(drawnPlanes()).toHaveLength(0));

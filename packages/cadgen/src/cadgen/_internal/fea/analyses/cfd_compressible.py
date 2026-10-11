@@ -24,7 +24,8 @@ continuation in the pressure difference for a choked nozzle.
 
 What comes out is on the part's own wetted surface: the wall ``pressure`` (Pa
 above the first outlet's static pressure, the ambient a part's outside sees),
-the ``mach`` number and the gas ``temperature`` (°C). The summary carries the
+the ``mach`` number, the ``speed`` near the wall (m/s, the fastest flow within a
+passage width: :func:`.cfd.speed_to_part`) and the gas ``temperature`` (°C). The summary carries the
 mass flow, the fastest Mach number and speed, the pressure ratio (the inlets'
 total pressure over the outlet's static), the pressure drop, whether the flow
 choked and where a shock stands. Checks ``pressure_drop``, ``velocity`` and
@@ -49,8 +50,8 @@ from typing import Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
 from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs, SolveContext
-from cadgen._internal.fea.analyses.cfd import (OPENINGS, PASCAL, RE_LIMIT, CfdAnalysis, surface_integral, unsettled_check,
-                                              wall_triangles)
+from cadgen._internal.fea.analyses.cfd import (OPENINGS, PASCAL, RE_LIMIT, CfdAnalysis, speed_reach, speed_to_part, surface_integral,
+                                              unsettled_check, wall_triangles)
 
 __all__ = ["CfdCompressibleAnalysis", "CfdCompressibleInputs", "GASES", "GasInletSpec", "LIMITS", "MACH_CHECKED", "mach_sentence"]
 
@@ -291,12 +292,13 @@ class CfdCompressibleAnalysis(CfdAnalysis):
         FieldSpec("pressure", "_PRESSURE", "wall pressure (above the outlet's)", "Pa", signed=True),
         FieldSpec("mach", "_MACH", "Mach number", ""),
         FieldSpec("temperature", "_TEMPERATURE", "gas temperature", "°C", signed=True),
+        FieldSpec("speed", "_SPEED", "flow speed near the wall", "m/s"),
         FieldSpec("von_mises", "_VON_MISES", "von Mises stress", "MPa"),
         FieldSpec("displacement", "_DISPLACEMENT", "displacement", "mm", 3, 1000.0),
     )
     checks: ClassVar[tuple] = (kinds.PRESSURE_DROP, kinds.VELOCITY, kinds.MACH, kinds.STRESS, kinds.DISPLACEMENT)
     default_controls: ClassVar[dict[str, dict]] = {
-        "field": {"drives": "field", "type": "enum", "options": ["pressure", "mach", "temperature"]},
+        "field": {"drives": "field", "type": "enum", "options": ["pressure", "mach", "temperature", "speed"]},
     }
     ladder: ClassVar[tuple[str, ...]] = ("fluid_coarsen", "continuation", "iterative")
     noun: ClassVar[str] = "this flow"
@@ -469,6 +471,8 @@ class CfdCompressibleAnalysis(CfdAnalysis):
         mapped = _to_part(ctx, space, fluid, face_of, row_kind,
                           {"pressure": post["pressure_nodes_Pa"], "mach": flow.mach, "temperature": flow.temperature_K - KELVIN})
         post["wetted"], post["wetted_nodes"] = mapped.pop("wetted"), mapped.pop("wetted_nodes")
+        mapped["speed"], reach = speed_to_part(ctx, space, fluid, face_of, row_kind, np.linalg.norm(space.nodal(flow.u), axis=1) / 1000.0,
+                                               speed_reach(inputs.kind, setup.length_mm, wall))
         timings["post_s"] = time.perf_counter() - started
 
         warnings = list(flow.warnings)
@@ -500,7 +504,7 @@ class CfdCompressibleAnalysis(CfdAnalysis):
         if not flow.converged:
             analysis_warnings += [w for w in flow.warnings if w.startswith("the gas flow stopped")]
 
-        fields = {name: mapped[name] for name in ("pressure", "mach", "temperature")}
+        fields = {name: mapped[name] for name in ("pressure", "mach", "temperature", "speed")}
         result = AnalysisResult(
             dof_locations=ctx.space.dof_locations, vertices=ctx.space.vertices, tets=ctx.space.tets,
             boundary_quadratic=ctx.space.boundary_quadratic, element_dofs=ctx.space.element_dofs, fields=fields,
@@ -509,7 +513,7 @@ class CfdCompressibleAnalysis(CfdAnalysis):
                    f"{'GMRES + multigrid' if solver == 'iterative' else 'direct'}",
             timings={**timings, **{f"flow_{k}": v for k, v in flow.timings.items()}}, warnings=warnings,
             scalars={
-                "post": post, "reynolds": reynolds, "mach": mach, "flow": flow, "wall_mm": wall, "far_mm": far,
+                "post": post, "reynolds": reynolds, "mach": mach, "flow": flow, "wall_mm": wall, "far_mm": far, "speed_reach_mm": reach,
                 "fluid_mesh": {"elements": int(len(fluid.tets)), "nodes": int(len(fluid.nodes)),
                                "wall_size_mm": round(wall, 4), "far_size_mm": round(far, 4)},
                 "analysis_warnings": analysis_warnings,
@@ -769,6 +773,7 @@ class CfdCompressibleAnalysis(CfdAnalysis):
             "shock": post["shock"],
             "min_wall_pressure_Pa": pressure[0], "max_wall_pressure_Pa": pressure[1],
             "min_wall_mach": mach_wall[0], "max_wall_mach": mach_wall[1],
+            "max_speed_near_wall_m_s": span("speed")[1], "speed_reach_mm": round(result.scalars["speed_reach_mm"], 4),
             "min_wall_temperature_C": temperature[0], "max_wall_temperature_C": temperature[1],
             "force_N": [round(float(c), 9) for c in post["force_N"]],
             "solve": {"steps": flow.steps, "linear_solves": flow.linear_solves, "residual": float(f"{flow.residual:.3g}"),
@@ -811,6 +816,7 @@ class CfdCompressibleAnalysis(CfdAnalysis):
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
         ranges = {"pressure": (summary["min_wall_pressure_Pa"], summary["max_wall_pressure_Pa"]),
                   "mach": (0.0, summary["max_wall_mach"]),
+                  "speed": (0.0, summary["max_speed_near_wall_m_s"]),
                   "temperature": (summary["min_wall_temperature_C"], summary["max_wall_temperature_C"])}
         if "max_von_mises_MPa" in summary:
             ranges["von_mises"] = (0.0, summary["max_von_mises_MPa"])

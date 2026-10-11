@@ -19,12 +19,16 @@ the heat on both meshes at once (:mod:`..conjugate`): advection-diffusion with
 SUPG in the fluid, conduction in the part, tied at the wetted walls (continuity
 for laminar flow, the thermal law of the wall for turbulent). What comes out is
 on the part's surface: its ``temperature``; ``fluid_temperature``, the
-speed-weighted mean temperature of the fluid within one passage width of each
-wetted point (internal; a few wall elements for external flow), the inlet's
+fluid's mixed (mixing-cup) temperature across the flow at each wetted point
+(:func:`..conjugate.local_mixed_temperature`: the fluid within one passage
+width, internal, or a few wall elements, external, in a thin slab across the
+local flow, weighted by the flow through it with the outlets' own quadrature,
+so it runs from the inlet's temperature to the outlet's mixed one), the inlet's
 temperature where nothing is wetted; ``wall_heat_flux`` (W/m², into the fluid,
 signed); ``heat_transfer_coefficient`` (W/(m² K), that flux over the wall's
 temperature less the local fluid temperature, or the free stream's for an
-external flow); and the wall ``pressure``. The summary gives each outlet's
+external flow); the wall ``pressure``; and the ``speed`` of the flow near the
+wall (m/s, the fastest within a passage width: :func:`.cfd.speed_to_part`). The summary gives each outlet's
 mixed temperature, the heat the walls put into the fluid against the m c_p ΔT
 it carries out (a balance off by more than 1 % is a warning), the mean heat
 transfer coefficient and the Nusselt number on the hydraulic diameter, the
@@ -146,13 +150,15 @@ class ConjugateHeatAnalysis:
         FieldSpec("wall_heat_flux", "_WALL_HEAT_FLUX", "heat into the flow", "W/m²", signed=True),
         FieldSpec("heat_transfer_coefficient", "_HEAT_TRANSFER_COEFFICIENT", "heat transfer coefficient", "W/m²K"),
         FieldSpec("pressure", "_PRESSURE", "wall pressure", "Pa", signed=True),
+        FieldSpec("speed", "_SPEED", "flow speed near the wall", "m/s"),
     )
     checks: ClassVar[tuple] = (kinds.TEMPERATURE, kinds.PRESSURE_DROP, kinds.VELOCITY)
     default_checks: ClassVar[tuple[dict, ...]] = ()
     drives: ClassVar[tuple[str, ...]] = ("field", "threshold")
     default_controls: ClassVar[dict[str, dict]] = {
         "field": {"drives": "field", "type": "enum",
-                  "options": ["temperature", "fluid_temperature", "wall_heat_flux", "heat_transfer_coefficient", "pressure"]},
+                  "options": ["temperature", "fluid_temperature", "wall_heat_flux", "heat_transfer_coefficient", "pressure",
+                              "speed"]},
     }
     upstream: ClassVar[tuple[str, ...]] = ()
     ladder: ClassVar[tuple[str, ...]] = ("iterative", "fluid_coarsen", "continuation", "local_refine")
@@ -294,7 +300,9 @@ class ConjugateHeatAnalysis:
         import numpy as np
 
         from cadgen._internal.fea import conjugate, fluid_domain, navier_stokes, turbulence
-        from cadgen._internal.fea.analyses.cfd import DENSITY, RE_LIMIT, VISCOSITY, flow_numbers, reynolds_sentence, wall_to_part
+        from cadgen._internal.fea.analyses.cfd import (
+            DENSITY, RE_LIMIT, SPEED, VISCOSITY, flow_numbers, reynolds_sentence, speed_reach, speed_to_part, wall_to_part,
+        )
         from cadgen._internal.fea.analyses.cfd_turbulent import MARCH, MARCH_FAST, laminar_sentence
         from cadgen._internal.fea.analyses.thermal import build_system
         from cadgen._internal.fea.femspace import FemSpace
@@ -335,6 +343,9 @@ class ConjugateHeatAnalysis:
         if turbulent:
             delegate.wall_function_shear(space, row_kind, flow, post, rho)
         pressure, _ = wall_to_part(ctx, space, fluid, face_of, row_kind, post)
+        speed, speed_reach_mm = speed_to_part(ctx, space, fluid, face_of, row_kind,
+                                              np.linalg.norm(post["nodal_velocity"], axis=1) / SPEED,
+                                              speed_reach(flow_inputs.kind, setup.length_mm, wall))
 
         # The heat: the fluid's energy and the part's conduction, tied at the wetted walls.
         started = time.perf_counter()
@@ -440,13 +451,10 @@ class ConjugateHeatAnalysis:
         q[wall_nodes] = coupled.wall_power / np.maximum(area[wall_nodes], 1e-300) * 1e3     # W/m²
         wall_T = np.zeros(vertices)
         wall_T[wall_nodes] = Pi @ T_s
-        speed = np.linalg.norm(post["nodal_velocity"][:vertices], axis=1)
-        lumped = self._lumped_volume(space)
-        if flow_inputs.kind == "internal":
-            reach = setup.length_mm
-        else:
-            reach = EXTERNAL_REACH * wall
-        local = self._local_fluid(space.dof_locations[:vertices], T_f, speed * lumped, wall_nodes, reach)
+        reach = setup.length_mm if flow_inputs.kind == "internal" else EXTERNAL_REACH * wall
+        # The fluid's mixed temperature across the flow at each wetted point, by the outlets' own quadrature
+        # (the quadratic velocity, the linear temperature), in a slab one free-stream element either side.
+        local = conjugate.local_mixed_temperature(space, flow.u, T_f, space.dof_locations[wall_nodes], reach, far)
         fluid_T = np.zeros(vertices)
         fluid_T[wall_nodes] = local
         reference = fluid_T if flow_inputs.kind == "internal" else np.full(vertices, inputs.inlet_C[0])
@@ -497,7 +505,7 @@ class ConjugateHeatAnalysis:
         result = space_result(
             ctx.space,
             {"temperature": T_s, "fluid_temperature": part_values["fluid"], "wall_heat_flux": part_values["flux"],
-             "heat_transfer_coefficient": part_values["h"], "pressure": pressure},
+             "heat_transfer_coefficient": part_values["h"], "pressure": pressure, "speed": speed},
             solver=f"{'RANS (k-omega SST)' if turbulent else 'Taylor-Hood Navier-Stokes'} flow, then the heat: "
                    f"linear SUPG energy in the fluid coupled to the part ({coupled.how})",
             timings={**timings, **{f"flow_{k}": v for k, v in getattr(flow, "timings", {}).items()}},
@@ -514,40 +522,12 @@ class ConjugateHeatAnalysis:
                 "reference_C": inputs.reference_C, "analysis_warnings": analysis_warnings,
                 "analysis_extras": {"reynolds": reynolds, "regime": regime},
                 "wall_nodes": wall_nodes, "wall_flux": q, "wall_temperature": wall_T, "local_fluid": fluid_T,
-                "hydraulic_mm": setup.length_mm, "fluid_space": space,
+                "hydraulic_mm": setup.length_mm, "fluid_space": space, "speed_reach_mm": speed_reach_mm,
             },
         )
         result.dofs = int(len(T_s) + len(T_f) + problem.space.basis.N)
         result.scalars["summary"] = self.summary(result, inputs, [])
         return result
-
-    @staticmethod
-    def _lumped_volume(space) -> "Any":
-        """(vertices,) each corner vertex's share of the fluid volume (linear elements, lumped), mm³."""
-        from skfem import ElementTetP1, LinearForm, asm
-
-        @LinearForm
-        def unit(v, _):
-            return v
-
-        return asm(unit, space.basis.with_element(ElementTetP1()))
-
-    @staticmethod
-    def _local_fluid(points, T_f, weight, wall_nodes, reach: float):
-        """At each wall vertex, the mean fluid temperature within ``reach`` mm, weighted by speed × volume (the
-        fluid that is moving past, so the still layer at the wall counts for little)."""
-        import numpy as np
-        from scipy.spatial import cKDTree
-
-        tree = cKDTree(points)
-        out = np.zeros(len(wall_nodes))
-        groups = tree.query_ball_point(points[wall_nodes], r=reach)
-        for i, near in enumerate(groups):
-            near = np.asarray(near, dtype=np.int64)
-            w = weight[near]
-            total = float(w.sum())
-            out[i] = float((w * T_f[near]).sum() / total) if total > 0 else float(T_f[near].mean())
-        return out
 
     @staticmethod
     def _wall_film(space, flow, wall_rows, wall_nodes, rho: float, cp: float, nu: float, k: float):
@@ -707,6 +687,8 @@ class ConjugateHeatAnalysis:
         pressure = result.fields["pressure"]
         summary["max_wall_pressure_Pa"] = round(float(pressure[wet].max()), 6) if len(wet) else 0.0
         summary["min_wall_pressure_Pa"] = round(float(pressure[wet].min()), 6) if len(wet) else 0.0
+        summary["max_speed_near_wall_m_s"] = round(float(result.fields["speed"][wet].max()), 6) if len(wet) else 0.0
+        summary["speed_reach_mm"] = round(scalars["speed_reach_mm"], 4)
         local = result.fields["fluid_temperature"]
         summary["wall_fluid_temperature_C"] = [round(float(local[wet].min()), 4), round(float(local[wet].max()), 4)] if len(wet) \
             else [summary["min_fluid_temperature_C"], summary["max_fluid_temperature_C"]]
@@ -726,6 +708,7 @@ class ConjugateHeatAnalysis:
             "wall_heat_flux": (min(summary["min_wall_heat_flux_W_m2"], 0.0), max(summary["max_wall_heat_flux_W_m2"], 0.0)),
             "heat_transfer_coefficient": (0.0, round(float(h.max()), 4)),
             "pressure": (summary["min_wall_pressure_Pa"], summary["max_wall_pressure_Pa"]),
+            "speed": (0.0, summary["max_speed_near_wall_m_s"]),
         }
 
     def extras_head(self, summary: dict) -> dict:

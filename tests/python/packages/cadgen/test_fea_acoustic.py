@@ -248,6 +248,15 @@ class Benchmarks(unittest.TestCase):
             self.assertAlmostEqual(position["max"][axis], inner[axis], places=4)
             self.assertAlmostEqual(position["min"][axis], -inner[axis], places=4)
         self.assertEqual(gltf["meshes"][0]["extras"]["analysis"]["acoustic"]["shown"], "air")
+        # The shell's walls, not written as faces, are written as an outline so the box reads: its outer edges reach
+        # past the air on every side (the shell's own thickness), every segment two points in mm.
+        walls = gltf["meshes"][0]["extras"]["analysis"]["acoustic"]["walls_mm"]
+        self.assertGreaterEqual(len(walls), 12)
+        self.assertTrue(all(len(segment) == 6 for segment in walls))
+        ends = [segment[k:k + 3] for segment in walls for k in (0, 3)]
+        for axis in range(3):
+            self.assertGreater(max(end[axis] for end in ends), BOX[axis] / 2)
+            self.assertLess(min(end[axis] for end in ends), -BOX[axis] / 2)
         print(f"\n  inside modes {got} Hz against {[round(e, 2) for e in expected]} Hz", file=sys.stderr)
 
     def test_a_closed_duct_resonates_at_n_c_over_2L_and_a_piston_drives_it_as_theory_says(self):

@@ -304,5 +304,42 @@ class OverBudget(unittest.TestCase):
         self.assertIn("fit_adaptive_steps", [finding["type"] for finding in self.result.findings])
 
 
+@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+class PastTimeLimit(unittest.TestCase):
+    """Fixed gap: the march had no time limit and said nothing but a line every 100 steps at debug level. Past its limit
+    (twice fit.seconds, the 30 s floor patched to 0 here) it stops where it got to, prints as it goes without --verbose,
+    and its result says so: a warning, the last frame where it stopped, and a check that does not pass on the rest."""
+
+    def test_it_stops_at_its_time_limit_and_says_so(self):
+        from unittest import mock
+
+        from cadgen import fea
+        from cadgen._internal.fea import timestep
+
+        with tempfile.TemporaryDirectory() as name:
+            directory = Path(name)
+            step = box_step(directory, "cube", (SIDE, SIDE, SIDE))
+            every = [face.ref for face in fea.faces(step).faces]
+            study = {"analysis": "thermal_transient", "material": "aluminum-6061-t6", "mesh": {"size_mm": 5.0},
+                     "initial_C": T0, "end_s": 2 * TAU, "convection": [{"faces": every, "h_W_m2K": H, "ambient_C": AIR}],
+                     "fit": {"seconds": 1e-6, "allow": []}, "view": {"checks": [{"kind": "temperature", "max_C": 300}]}}
+            printed = io.StringIO()
+            with mock.patch.object(timestep, "LIMIT_FLOOR_S", 0.0), mock.patch.object(timestep, "PROGRESS_S", 0.0), \
+                    redirect_stderr(printed):
+                result = fea.solve(step, directory / "cube.glb", study=study)
+            extras, _ = glb_extras_and_attributes(result.glb, ())
+        self.assertIn("[fea] time march: t = ", printed.getvalue())
+        summary = result.summary
+        self.assertEqual(summary["steps"], 1)
+        self.assertEqual((summary["end_s"], summary["planned_end_s"]), (summary["stopped_at_s"], 2 * TAU))
+        self.assertIn("time_limit", [finding["type"] for finding in result.findings])
+        self.assertNotIn("still_heating", [finding["type"] for finding in result.findings])
+        check = summary["checks"][0]
+        self.assertEqual(check["status"], "close")
+        self.assertIn("(stopped at ", check["label"])
+        self.assertTrue(any(w.startswith("Stopped at its time limit") for w in extras["analysis"]["warnings"]))
+        self.assertAlmostEqual(extras["series"]["frames"][-1]["value"], summary["stopped_at_s"], places=6)
+
+
 if __name__ == "__main__":
     unittest.main()

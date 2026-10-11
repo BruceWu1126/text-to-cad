@@ -388,6 +388,8 @@ class March:
     largest_step: float
     final: "np.ndarray"
     rejected: int = 0
+    #: Where it stopped at its time limit, seconds of simulated time; ``None`` when it ran to the end.
+    stopped_at: float | None = None
 
 
 def march(
@@ -404,6 +406,7 @@ def march(
     curve_points: int = 400,
     tolerance: float = ADAPTIVE_TOLERANCE,
     log: Callable[[str], None] | None = None,
+    limit_s: float | None = None,
 ) -> March:
     """C dT/dt + K T = f(t) from ``initial_C`` to ``end_s`` by backward Euler, steps of ``step_s``.
 
@@ -413,9 +416,13 @@ def march(
     than ``tolerance`` of the temperature range is retried at half the size, and
     one well under it lets the next step double (never past a tenth of the run).
     The state is kept at ``frames - 1`` evenly spaced times from 0 (the first
-    step at or past each), plus the hottest step.
+    step at or past each), plus the hottest step. ``log`` gets a progress line at most every
+    ``timestep.PROGRESS_S``; past ``limit_s`` seconds of wall time the march stops after the step it is on (its
+    state then the last frame) and ``stopped_at`` says where.
     """
     import numpy as np
+
+    from cadgen._internal.fea.timestep import Clock
 
     stepper = (_RadiatingStepper if system.radiation is not None else _Stepper)(system, capacity, warnings, solver)
     T = np.full(system.size, float(initial_C))
@@ -439,6 +446,8 @@ def march(
         span += system.radiation.ambients
     scale = max(1.0, max(span) - min(span))
     finish = end_s * (1 - 1e-12)
+    clock = Clock(log, limit_s)
+    stopped_at = None
     while t < finish:
         dt = min(dt, end_s - t)
         if adaptive:
@@ -474,8 +483,12 @@ def march(
             next_target += 1
         if adaptive and error < tolerance * scale / 8:
             dt = min(2 * dt, largest_step)
-        if log and steps % 100 == 0:
-            log(f"time march: {steps} steps, t = {t:.4g} s of {end_s:.4g} s")
+        clock.tell(lambda: f"time march: t = {t:.4g} s of {end_s:.4g} s, {steps} steps")
+        if clock.over() and t < finish:
+            stopped_at = t
+            if kept[-1][0] != t:
+                kept.append((t, T.copy()))
+            break
     if all(time != hottest_time for time, _ in kept):
         kept.append((hottest_time, hottest_state))
         kept.sort(key=lambda frame: frame[0])
@@ -487,5 +500,5 @@ def march(
     return March(
         frames=kept, hottest_frame=hottest_frame, hottest_time=hottest_time, hottest=hottest, node_peak=node_peak,
         node_peak_time=node_peak_time, curve_t=curve_t, curve_max=curve_max, steps=steps, solves=stepper.solves,
-        smallest_step=smallest if steps else 0.0, largest_step=largest, final=T, rejected=rejected,
+        smallest_step=smallest if steps else 0.0, largest_step=largest, final=T, rejected=rejected, stopped_at=stopped_at,
     )

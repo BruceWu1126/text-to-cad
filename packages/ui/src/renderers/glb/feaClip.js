@@ -1,4 +1,4 @@
-import { axisIndex, clipAxisPosition, normalizeStepClipSettings } from "@text-to-cad/core/lib/viewer/clipPlane.js";
+import { axisIndex, clipAxisPosition, normalizeStepClipSettings, pointVisibleByClipPlane } from "@text-to-cad/core/lib/viewer/clipPlane.js";
 
 /**
  * An FEA result's section cut: the view's Clip (`clip` in its resolved Display settings) as one
@@ -11,12 +11,15 @@ import { axisIndex, clipAxisPosition, normalizeStepClipSettings } from "@text-to
  * so it follows a surface look that swaps the material (Inspect's stand-in, Render's own). It
  * cuts through `bounds` (the box the result is drawn in over its whole series, in the scene's
  * own space) as the slider says; the scene's placement in the viewport (`root.parent`) carries it
- * to where the mesh is drawn. Markers keep standing whole: they are the study's, not the part.
+ * to where the mesh is drawn. What hangs under the mesh (its markers: arrows, cones, dots) is cut
+ * by the same plane, so a load or a fixture on the half taken away goes with it; `keeps(point,
+ * object)` says whether a point (a marker's label) is on the half kept.
  *
  * @param {typeof import("three")} THREE
  * @param {import("three").Mesh} mesh  The result's mesh.
  * @param {import("three").Object3D} root  The scene's root: the plane is in its parent's space.
- * @returns {{ set(clip: object | null, bounds: object | null): boolean, plane(): import("three").Plane | null, dispose(): void }}
+ * @returns {{ set(clip: object | null, bounds: object | null): boolean, plane(): import("three").Plane | null,
+ *   keeps(point: ArrayLike<number>, object: import("three").Object3D): boolean, dispose(): void }}
  */
 export function createFeaClip(THREE, mesh, root) {
   const local = new THREE.Plane();
@@ -30,12 +33,21 @@ export function createFeaClip(THREE, mesh, root) {
   let key = "";
   const own = mesh.onBeforeRender;
   const toWorld = () => world.copy(local).applyMatrix4(root.parent ? root.parent.matrixWorld : identity);
+  const cut = (material, wanted) => {
+    for (const each of Array.isArray(material) ? material : [material]) {
+      if (each && each.clippingPlanes !== wanted) { each.clippingPlanes = wanted; touched.add(each); }
+    }
+  };
+  // The markers under the mesh draw after it (the transparent list), so cutting them here holds the same frame.
+  const cutDescendants = (wanted) => mesh.traverse((object) => { if (object !== mesh && object.material) cut(object.material, wanted); });
   mesh.onBeforeRender = function onBeforeRender(renderer, scene, camera, geometry, material, group) {
     if (active) toWorld();
     const wanted = active ? planes : none;
-    if (material && material.clippingPlanes !== wanted) { material.clippingPlanes = wanted; touched.add(material); }
+    cut(material, wanted);
+    cutDescendants(wanted);
     return own.call(this, renderer, scene, camera, geometry, material, group);
   };
+  const point = new THREE.Vector3();
   return {
     /** Cut as `clip` says (null, off or at its neutral end: no cut). True when that changed what is drawn. */
     set(clip, bounds) {
@@ -52,11 +64,19 @@ export function createFeaClip(THREE, mesh, root) {
         const normal = new THREE.Vector3().setComponent(index, settings.invert ? 1 : -1);
         const point = new THREE.Vector3().setComponent(index, clipAxisPosition(bounds, settings));
         local.setFromNormalAndCoplanarPoint(normal, point);
+        toWorld();
       }
+      cutDescendants(cuts ? planes : none);
       return true;
     },
     /** The cut where the mesh is drawn (world space), or null with none: a pick on its far side is not a pick. */
     plane() { return active ? toWorld() : null; },
+    /** Whether `at` (in `object`'s own space, as a marker's label is in the mesh's) is on the half the cut keeps. */
+    keeps(at, object) {
+      if (!active) return true;
+      object.updateWorldMatrix(true, false);
+      return pointVisibleByClipPlane(toWorld(), point.fromArray(at).applyMatrix4(object.matrixWorld));
+    },
     dispose() {
       mesh.onBeforeRender = own;
       active = false;

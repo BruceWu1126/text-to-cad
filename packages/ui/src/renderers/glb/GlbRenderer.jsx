@@ -120,10 +120,14 @@ function GlbSurface({ view, data }) {
   // the file's view (`kit/shell/fileView.js`), written against the result's own fields, scale and
   // view: a re-solved result opens at its own defaults.
   const fea = useMemo(() => readFeaResult(scene?.document?.scene), [scene]);
-  // The box the model is drawn in over its whole series (`feaBounds.js`), grown on the scene before the shell frames
-  // it and fits the camera's near and far planes to it: a strap stretched at its last load step is never sliced off.
+  // The box the model is drawn in over its whole series and its routine (`feaBounds.js`), at the deformation and load
+  // it opens on, grown on the scene before the shell frames it (Preview frames on it once) and fits the camera's near
+  // and far planes to it: a strap stretched at its last load step is never sliced off, nor a piezo tip at its ramp's top.
   useMemo(() => {
-    const grown = feaDrawnBounds(THREE, scene, fea);
+    const opening = fea ? feaControls(fea) : EMPTY;
+    const scale = opening.find((control) => control.drives === "deformation")?.defaultValue ?? fea?.deformationScale;
+    const load = fea && feaAnalysis(fea).scalesWithLoad ? opening.find((control) => control.drives === "load_scale")?.defaultValue ?? 1 : 1;
+    const grown = feaDrawnBounds(THREE, scene, fea, { scale, load });
     if (grown) Object.assign(scene, { bounds: grown, restBounds: grown });
   }, [scene, fea]);
   const analysis = fea ? feaAnalysis(fea) : null;
@@ -270,9 +274,11 @@ function GlbSurface({ view, data }) {
   const cut = shell.previewing ? null : shell.frame.resolvedScene?.view?.clip || null;
   const clipBounds = scene?.restBounds || scene?.bounds || null;
   useEffect(() => { if (clipRef.current?.set(cut, clipBounds)) requestRenderRef.current?.(); }, [fea, cut, clipBounds, requestRenderRef]);
-  // Its panel is a kept effect's, as a STEP's is: up while Clip is the tool or the view cuts, and through a
-  // drag that passes its neutral end, until the pointer lets go.
+  // Its panel is a kept effect's, as a STEP's is: up from a press on Clip until its X, while the view cuts,
+  // and through a drag that passes its neutral end, until the pointer lets go. Clip takes no pointer: Select
+  // stays the tool, so Study (and a pick) stays reachable over its panel while a cut is applied.
   const shownView = displaySettings.scene.view;
+  const [clipOpen, setClipOpen] = useState(false);
   const [clipHeld, setClipHeld] = useState(false);
   useEffect(() => {
     if (!clipHeld) return undefined;
@@ -281,10 +287,10 @@ function GlbSurface({ view, data }) {
     window.addEventListener("pointercancel", release, true);
     return () => { window.removeEventListener("pointerup", release, true); window.removeEventListener("pointercancel", release, true); };
   }, [clipHeld]);
-  const clipShown = Boolean(fea) && !shell.previewing && (shell.toolMode === GLB_TOOL.CLIP || clipHeld || clipApplied(shownView));
+  const clipShown = Boolean(fea) && !shell.previewing && (clipOpen || clipHeld || clipApplied(shownView));
   const removeClip = () => {
     displaySettings.store.patch({ clip: NEUTRAL_CLIP });
-    if (shell.toolMode === GLB_TOOL.CLIP) shell.selectDefaultTool();
+    setClipOpen(false);
   };
 
   // The colours and the drawn displacement follow the choice, in place on the loaded geometry, with
@@ -342,7 +348,7 @@ function GlbSurface({ view, data }) {
   useEffect(() => {
     if (!fea?.study) return undefined;
     const built = createFeaMarkers(THREE, fea);
-    if (!built.sites.length) { built.dispose(); return undefined; }
+    if (!built.sites.length && !built.walls) { built.dispose(); return undefined; }
     fea.mesh.add(built.object3D);
     built.update(fea.mesh.geometry.getAttribute("position").array);
     markersRef.current = built;
@@ -361,8 +367,10 @@ function GlbSurface({ view, data }) {
       chosen: (site) => markerChosen(faces, site) });
     requestRenderRef.current?.();
   }, [markers, colours, markersOn, markerShow, faces, requestRenderRef]);
+  // A label goes with its marker when Clip cuts away where the load acts (read each frame, as the cut is).
   const loadLabels = useCallback(() => (markers && markersOn
-    ? markers.labels(fieldLoad, { loads: markerShow.loads, fixtures: markerShow.fixtures }) : EMPTY), [markers, markersOn, markerShow, fieldLoad]);
+    ? markers.labels(fieldLoad, { loads: markerShow.loads, fixtures: markerShow.fixtures })
+      .filter((label) => !clipRef.current || clipRef.current.keeps(label.face || label.at, fea.mesh)) : EMPTY), [markers, markersOn, markerShow, fieldLoad, fea]);
 
   // Select is an FEA result's one tool, with Study (and an assembly's Parts) its panels; a GLB that is not a result has none.
   const selectActive = Boolean(fea) && !shell.previewing && shell.toolMode === GLB_TOOL.SELECT;
@@ -371,7 +379,7 @@ function GlbSurface({ view, data }) {
     shell.tools.own({ id: GLB_TOOL.CLIP, label: "Clip", icon: CLIP_ICON, active: clipShown,
       onSelect: () => {
         if (clipShown) { removeClip(); return; }
-        shell.selectTool(GLB_TOOL.CLIP);
+        setClipOpen(true);
         displaySettings.store.patch({ clip: NEUTRAL_CLIP });
       } })] : [];
   // One face chosen is the Reference's: its ref, what the study does to it, and Copy (the copy key too).

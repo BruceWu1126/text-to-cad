@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { FileSheetValueInput } from '../../../../dist/renderers/kit/inspector/FileSheet.js';
+import { FileSheetValueInput, valueInputWidth } from '../../../../dist/renderers/kit/inspector/FileSheet.js';
 
 // The value badge beside a slider — a joint angle, a thickness, a playback speed. It carries a
 // draft while it is being typed into and commits it once, and Enter has to be a commit in its own
@@ -48,3 +48,13 @@ it('still discards the draft on Escape', () => {
   expect(input.value).toBe('0.00 deg');
 });
 
+
+it('sizes the value box to hold its whole value, its padding and its borders: a large exaggeration is never cut off', () => {
+  // "×6000" read "×600C" and "×9500000" crowded the box: its width left out the 1px borders and the × glyph.
+  for (const value of ['0.00°', '×6000', '×42000', '0.00 mm', '×9500000', '×120000000', '×95000000000', '123456789012345']) {
+    const width = valueInputWidth(value);
+    const [, ch, rem, px] = /^w-\[calc\((\d+)ch\+([\d.]+)rem\+(\d+)px\)\]$/.exec(width) || [];
+    expect(Number(ch), `${value}: ${width}`).toBeGreaterThanOrEqual(Math.min(value.length + 1, 14));
+    expect([rem, px], value).toEqual(['0.75', '2']);
+  }
+});

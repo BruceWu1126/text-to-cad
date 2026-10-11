@@ -4,7 +4,8 @@
  * ("60 % load"), opening on the last load the part carried. Its verdict judges the permanent strain,
  * the stress and the displacement there; none moves with a load control (the response is not
  * proportional to the load), and a part that collapses fails every check. Its takeaway leads with
- * "Lite · " and, for a collapse, says it ("Lite · Collapses at about 70 % of the load"); Details
+ * a collapse where there is one ("Collapses at about 70 % of the load · Lite · Peak 300 MPa, limit 250 MPa"),
+ * then "Lite · "; Details
  * lists its limits. What you see opens on the load-step scrubber, the field
  * (stress, displacement, plastic strain) and the deformation; Play runs the steps over three seconds.
  * Its setup is static's: held at, pushed, made of.
@@ -17,17 +18,22 @@ import { routineOf } from "./stub.js";
 export const PLAY = routineOf("Play", "play");
 
 /**
- * The takeaway of a run that collapsed: the file's own sentence ("Collapses at about 70 % of the
- * load", in `analysis.warnings`), else one from the last load it carried; "" for a run that did not.
+ * What leads the takeaway of a load path that stopped short of the full load (`collapsed`): the
+ * file's own sentence (in `analysis.warnings`, starting with `verb`: "Collapses at about 70 % of the
+ * load", "Stops at about 20 % of the load"), else one from the last load it carried; "" for a run that
+ * carried it all.
  */
-export function collapseCaption(result) {
+export function stopSentence(result, verb) {
   if (!result?.collapsed) return "";
-  const said = (result.analysis?.warnings || []).find((line) => /^Collapses\b/.test(line));
+  const said = (result.analysis?.warnings || []).find((line) => new RegExp(`^${verb}\\b`).test(line));
   if (said) return said;
   const percent = result.loadPercent;
-  if (!Number.isFinite(percent)) return "Collapses before the full load";
-  return percent < 1 ? "Collapses before 1 % of the load" : `Collapses at about ${Math.round(percent)} % of the load`;
+  if (!Number.isFinite(percent)) return `${verb} before the full load`;
+  return percent < 1 ? `${verb} before 1 % of the load` : `${verb} at about ${Math.round(percent)} % of the load`;
 }
+
+/** A plastic or stretched part's: "Collapses at about 70 % of the load" (no equilibrium past it). */
+export const collapseCaption = (result) => stopSentence(result, "Collapses");
 
 /** Its setup: where it is held, what pushes it, what it is made of. */
 export const NONLINEAR_SETUP = Object.freeze([heldRows, pushedRows, madeOfRows]);
@@ -52,6 +58,6 @@ export default Object.freeze({
   displayTitle: "Loads and fixtures",
   // A Tier 3 analysis's short limit word, which leads its verdict's takeaway.
   limitWord: "Lite",
-  // A collapse leads the takeaway, not the worst check's words.
-  caption: collapseCaption,
+  // A collapse leads the takeaway, before its limit word and the worst check's words.
+  stopCaption: collapseCaption,
 });

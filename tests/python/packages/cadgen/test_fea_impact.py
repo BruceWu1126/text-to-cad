@@ -263,6 +263,8 @@ class BarDroppedEndOn(unittest.TestCase):
         self.assertEqual((g["kind"], g["label"], g["unit"], g["status"]), ("acceleration", "Peak g", "g", "passes"))
         self.assertAlmostEqual(g["value"], self.result.summary["peak_g"], places=3)
         self.assertAlmostEqual(frames[g["at"]["frame"]]["value"], g["at"]["time_s"], delta=CONTACT_S / 4)
+        # An impact is not linear in the drop: no check is a multiple of the load.
+        self.assertEqual({check.get("scaling") for check in self.result.summary["checks"]}, {"none"})
 
     def test_the_glb_carries_a_time_series_its_envelopes_and_its_limits(self):
         extras = self.extras
@@ -370,6 +372,39 @@ class BarDroppedEndOn(unittest.TestCase):
         self.assertTrue(any("until the first impact was over" in line for line in result.human_lines()))
         frames = json.loads(result.sidecar.read_text(encoding="utf-8"))["series"]["frames"]
         self.assertGreater(frames[-2]["value"], summary["window_ms"] / 1e3)  # frames cover the extension too
+
+@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+class PastTimeLimit(unittest.TestCase):
+    """Fixed gap: the explicit march had no time limit and said nothing but a line every 2000 steps at debug level."""
+
+    def test_it_stops_at_its_time_limit_prints_as_it_goes_and_says_so(self):
+        from unittest import mock
+
+        from cadgen import fea
+        from cadgen._internal.fea import timestep
+
+        with tempfile.TemporaryDirectory() as name:
+            directory = Path(name)
+            step = _bar(directory, "bar")
+            study = _study(material=STEEL_1D, mesh={"size_mm": 5.0}, fit={"seconds": 1e-6, "allow": []},
+                           view={"checks": [{"kind": "stress"}]})
+            printed = io.StringIO()
+            with mock.patch.object(timestep, "LIMIT_FLOOR_S", 0.0), mock.patch.object(timestep, "PROGRESS_S", 0.0), \
+                    redirect_stderr(printed):
+                result = fea.solve(step, directory / "bar.fea.glb", study=study)
+            extras, _ = _glb(result.glb)
+        self.assertIn("[fea] impact: ", printed.getvalue())
+        summary = result.summary
+        self.assertTrue(result.ok)
+        self.assertTrue(summary["stopped_at_time_limit"])
+        self.assertLess(summary["end_ms"], summary["window_ms"])
+        self.assertIn("time_limit", [finding["type"] for finding in result.findings])
+        self.assertNotIn("still_in_contact", [finding["type"] for finding in result.findings])
+        check = summary["checks"][0]
+        self.assertNotEqual(check["status"], "passes")
+        self.assertIn("(stopped at ", check["label"])
+        self.assertTrue(any(w.startswith("Stopped at its time limit") for w in extras["analysis"]["warnings"]))
+
 
 @unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
 class OverBudget(unittest.TestCase):

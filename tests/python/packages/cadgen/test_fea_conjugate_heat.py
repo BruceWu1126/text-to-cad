@@ -13,7 +13,8 @@
   m c_p ΔT.
 - The cold plate: an aluminium block 24 x 10 x 8 mm with a 4 mm bore along x,
   1 W into its top face, everything else insulated, water at 20 °C through the
-  bore at 0.01 m/s: the outlet's mixed temperature is T_in + Q / (m c_p).
+  bore at 0.01 m/s: the outlet's mixed temperature is T_in + Q / (m c_p), and the
+  fluid temperature written on the wetted wall runs from the inlet's to it.
 - The ladder: the cold plate against a 1 s target coarsens the flow's core and the
   part away from its peak, says so everywhere, and still balances.
 - Turbulent: the cold plate at 1 m/s (Re 4000) solved with the k-omega SST flow and
@@ -104,7 +105,7 @@ class StudyFile(unittest.TestCase):
         self.assertEqual(analysis.ladder, ("iterative", "fluid_coarsen", "continuation", "local_refine"))
         self.assertEqual([spec.kind for spec in analysis.checks], ["temperature", "pressure_drop", "velocity"])
         self.assertEqual([spec.name for spec in analysis.fields],
-                         ["temperature", "fluid_temperature", "wall_heat_flux", "heat_transfer_coefficient", "pressure"])
+                         ["temperature", "fluid_temperature", "wall_heat_flux", "heat_transfer_coefficient", "pressure", "speed"])
 
     def test_it_reads_the_flow_the_inlet_temperatures_and_the_parts_heat(self):
         study = self.parse(heat=[{"faces": ["#o1.f3"], "W": 2}], convection=[{"faces": ["#o1.f4"], "h_W_m2K": 10, "ambient_C": 25}])
@@ -242,10 +243,14 @@ class Pipe(unittest.TestCase):
 
     def test_it_writes_the_parts_and_the_fluids_temperature_and_the_wall_heat(self):
         extras, attributes = glb_extras(self.out)
-        for attribute in ("_TEMPERATURE", "_FLUID_TEMPERATURE", "_WALL_HEAT_FLUX", "_HEAT_TRANSFER_COEFFICIENT", "_PRESSURE"):
+        for attribute in ("_TEMPERATURE", "_FLUID_TEMPERATURE", "_WALL_HEAT_FLUX", "_HEAT_TRANSFER_COEFFICIENT", "_PRESSURE", "_SPEED"):
             self.assertIn(attribute, attributes)
         self.assertEqual([field["field"] for field in extras["fields"]],
-                         ["temperature", "fluid_temperature", "wall_heat_flux", "heat_transfer_coefficient", "pressure"])
+                         ["temperature", "fluid_temperature", "wall_heat_flux", "heat_transfer_coefficient", "pressure", "speed"])
+        # The flow's speed near the wall reaches the fastest the flow goes (the parabola's centreline, 2 U).
+        speed = next(field for field in extras["fields"] if field["field"] == "speed")
+        self.assertEqual(speed["units"], "m/s")
+        self.assertAlmostEqual(speed["max"], self.result.summary["max_velocity_m_s"], delta=1e-5 * speed["max"])
         self.assertEqual(extras["analysis"]["type"], "conjugate_heat")
         self.assertEqual(extras["analysis"]["regime"], "laminar")
         self.assertEqual(extras["analysis"]["limits"], [LIMIT_TEXT])
@@ -267,7 +272,7 @@ class ColdPlate(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_the_outlet_is_as_hot_as_the_energy_balance_says(self):
+    def test_the_outlet_and_the_fluid_by_the_wall_are_as_hot_as_the_energy_balance_says(self):
         step, top = cold_plate_step(self.dir)
         result, _ = solve(step, self.dir / "plate.glb", {**COLD_PLATE, "heat": [{"faces": [top], "W": 1.0}]})
         summary = result.summary
@@ -282,6 +287,14 @@ class ColdPlate(unittest.TestCase):
         self.assertAlmostEqual(summary["heat_carried_W"], 1.0, places=6)
         self.assertEqual([check["status"] for check in summary["checks"]], ["passes", "passes"])
         self.assertGreater(summary["max_temperature_C"], summary["outlet_temperature_C"])
+        # The fluid's temperature on the wetted wall is the flow's mixed temperature there: from the inlet's at the
+        # inlet to the outlet's at the outlet, never below the inlet (no heat leaves the fluid) and reaching what the
+        # summary says leaves (it read 19.67 to 21.08 °C against 20 in and 21.89 out, a speed-weighted mean of the
+        # corner nodes that missed the near-wall flow the quadratic velocity carries).
+        rise = summary["outlet_temperature_C"] - 20.0
+        low, high = summary["wall_fluid_temperature_C"]
+        self.assertGreaterEqual(low, 20.0 - 0.01 * rise, (low, high))
+        self.assertLess(abs(high - summary["outlet_temperature_C"]) / rise, 0.02, (low, high, summary["outlet_temperature_C"]))
         lines = result.human_lines()
         self.assertTrue(any(line.startswith("fluid in at 20 °C, out at") for line in lines))
         print(f"\n  cold plate outlet: {summary['outlet_temperature_C']:.6f} °C against {expected:.6f} °C by the balance on the solved "

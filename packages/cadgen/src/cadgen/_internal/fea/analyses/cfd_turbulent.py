@@ -16,7 +16,8 @@ straight duct of the opening's shape, solved on the opening by the same model
 inlet; ``"uniform"`` is one speed with k and omega from the intensity.
 
 What comes out is the laminar flow's: the wall ``pressure`` (Pa, gauge) and
-``wall_shear`` (Pa, the wall function's rho u_tau^2) on the part's wetted faces,
+``wall_shear`` (Pa, the wall function's rho u_tau^2) and the ``speed`` near the
+wall (m/s, the fastest flow within a passage width) on the part's wetted faces,
 the pressure drop, flow rates, fastest speed and force in the summary, checks
 ``pressure_drop`` and ``velocity``, and with ``map_to_structure`` the wall
 pressure applied to a static solve of the part (stress and displacement join).
@@ -42,7 +43,8 @@ from typing import Any, ClassVar
 from cadgen._internal.fea.analyses import kinds
 from cadgen._internal.fea.analyses.base import AnalysisResult, SolveContext
 from cadgen._internal.fea.analyses.cfd import (
-    DENSITY, PASCAL, RE_LIMIT, SPEED, VISCOSITY, CfdAnalysis, CfdInputs, flux_of, flow_numbers, wall_to_part, wall_triangles,
+    DENSITY, PASCAL, RE_LIMIT, SPEED, VISCOSITY, CfdAnalysis, CfdInputs, flux_of, flow_numbers, speed_reach, speed_to_part,
+    wall_to_part, wall_triangles,
 )
 
 __all__ = ["CfdTurbulentAnalysis", "CfdTurbulentInputs", "LIMITS", "laminar_sentence"]
@@ -228,6 +230,8 @@ class CfdTurbulentAnalysis(CfdAnalysis):
         post = flow_numbers(space, fluid, face_of, row_kind, flow, inputs)
         self._wall_function_shear(space, row_kind, flow, post, inputs.fluid.density_kg_m3 * DENSITY)
         pressure, shear = wall_to_part(ctx, space, fluid, face_of, row_kind, post)
+        speed, reach = speed_to_part(ctx, space, fluid, face_of, row_kind, np.linalg.norm(post["nodal_velocity"], axis=1) / SPEED,
+                                     speed_reach(inputs.kind, setup.length_mm, wall))
         timings["post_s"] = time.perf_counter() - started
 
         warnings = list(flow.warnings)
@@ -243,7 +247,7 @@ class CfdTurbulentAnalysis(CfdAnalysis):
         if not flow.converged:
             analysis_warnings += [w for w in flow.warnings if w.startswith("the turbulent flow stopped")]
 
-        fields = {"pressure": pressure, "wall_shear": shear}
+        fields = {"pressure": pressure, "wall_shear": shear, "speed": speed}
         result = AnalysisResult(
             dof_locations=ctx.space.dof_locations, vertices=ctx.space.vertices, tets=ctx.space.tets,
             boundary_quadratic=ctx.space.boundary_quadratic, element_dofs=ctx.space.element_dofs, fields=fields,
@@ -252,6 +256,7 @@ class CfdTurbulentAnalysis(CfdAnalysis):
             timings={**timings, **{f"flow_{k}": v for k, v in flow.timings.items()}}, warnings=warnings,
             scalars={
                 "post": post, "reynolds": reynolds, "flow": flow, "wall_mm": wall, "far_mm": far, "developed": developed,
+                "speed_reach_mm": reach,
                 "fluid_mesh": {"elements": int(len(fluid.tets)), "nodes": int(len(fluid.nodes)),
                                "wall_size_mm": round(wall, 4), "far_size_mm": round(far, 4)},
                 "analysis_warnings": analysis_warnings,
@@ -450,6 +455,8 @@ class CfdTurbulentAnalysis(CfdAnalysis):
             "max_wall_pressure_Pa": round(float(pressure[wet].max()), 6) if len(wet) else 0.0,
             "min_wall_pressure_Pa": round(float(pressure[wet].min()), 6) if len(wet) else 0.0,
             "max_wall_shear_Pa": round(float(shear[wet].max()), 6) if len(wet) else 0.0,
+            "max_speed_near_wall_m_s": round(float(result.fields["speed"][wet].max()), 6) if len(wet) else 0.0,
+            "speed_reach_mm": round(result.scalars["speed_reach_mm"], 4),
             "force_N": [round(float(c), 9) for c in post["force_N"]],
             "turbulence": {
                 "model": "k-omega SST", "wall_treatment": "wall functions (Spalding, y+ >= 30)",

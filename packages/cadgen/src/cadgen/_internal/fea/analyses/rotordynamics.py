@@ -1088,7 +1088,8 @@ class RotordynamicsAnalysis:
             judged = stability_check(check, scalars["lowest_log_dec"], damped=scalars["damped"])
             judged["where"] = {"ref": None, "at": None}
             return judged
-        return self._stress_check(result, check, ctx)
+        # The spinning stress is the centrifugal load ρΩ²r's: it grows with the square of the speed.
+        return {**self._stress_check(result, check, ctx), "scaling": "quadratic"}
 
     def needs_finer(self, result: AnalysisResult, inputs: RotordynamicsInputs, check_results: list[dict]) -> bool:
         """Solve once more finer when the spinning stress is close to its limit."""

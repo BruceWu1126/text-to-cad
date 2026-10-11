@@ -1,6 +1,7 @@
 /**
  * Flow (lite): steady laminar incompressible flow through or around the part, Tier 3. Its fields are
- * on the part's wetted surface: the wall pressure (Pa, signed) and the wall shear; mapped onto the
+ * on the part's wetted surface: the wall pressure (Pa, signed), the wall shear and the speed near the wall
+ * (m/s, the fastest flow within a passage width, so a velocity check's peak shows); mapped onto the
  * structure (one-way), the part's stress and displacement join them and it deforms. Its verdict
  * judges the pressure drop and the fastest flow (and the stress and displacement when mapped), none
  * of which a load control moves, and its takeaway leads with "Laminar · " (past the laminar range,
@@ -26,6 +27,8 @@ export function flowControls(result) {
 
 export default planned({
   name: "cfd", tier: 3, word: "Flow", noun: "this flow", limitWord: "Laminar", family: null, scalesWithLoad: false,
+  // The flow's wall stress grows with its speed squared and more: no check is a multiple of the load.
+  scaling: "none",
   checks: ["pressure_drop", "velocity", "stress", "displacement"],
   defaultControls: flowControls,
   setupGroups: FLOW_SETUP,

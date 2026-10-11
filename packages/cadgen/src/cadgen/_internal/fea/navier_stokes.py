@@ -25,8 +25,10 @@ the residual. When Newton does not converge from there, the Reynolds number is
 reached by continuation: the density is stepped through Re/8, Re/4, Re/2 and
 Re, each stage starting from the one before (a stage that fails is halved, a
 few times, then the target is tried from the last settled stage). A run that
-still does not reach 1e-8, or reaches its deadline, returns its best state at
-the target and says how far it got; it is never refused.
+still does not reach 1e-8, or reaches its deadline (wall-clock seconds, but
+never before the linear solves its caller expects it to need, so a loaded
+machine slows it without cutting it short), returns its best state at the
+target and says how far it got; it is never refused.
 
 Linear systems are solved by SuperLU, or (the ladder's ``iterative`` rung)
 by Krylov methods with a block preconditioner: algebraic multigrid on the
@@ -102,6 +104,7 @@ class FlowSolution:
     timings: dict[str, float] = field(default_factory=dict)
     timed_out: bool = False           # stopped at ``deadline_s`` before settling
     deadline_s: float | None = None
+    min_solves: int | None = None     # the linear solves the deadline could not stop it before
 
 
 def vector_dofs(space: "FemSpace") -> "np.ndarray":
@@ -456,13 +459,15 @@ def unsettled_sentence(flow: "FlowSolution") -> str:
     if flow.converged:
         return ""
     if flow.timed_out:
-        return (f"the flow solve stopped at its time limit ({flow.deadline_s:.0f} s) at a residual of {flow.residual:.1e}, "
+        work = f", {flow.linear_solves} linear solves" if flow.min_solves else ""
+        return (f"the flow solve stopped at its time limit ({flow.deadline_s:.0f} s{work}) at a residual of {flow.residual:.1e}, "
                 "short of 1e-8: its numbers are approximate")
     return f"the flow solve stopped at a residual of {flow.residual:.1e}, short of 1e-8: its numbers are approximate"
 
 
 def solve_flow(problem: FlowProblem, *, schedule: tuple[float, ...] = (), solver: str = "direct",
-               log: Callable[[str], None] | None = None, deadline_s: float | None = None) -> FlowSolution:
+               log: Callable[[str], None] | None = None, deadline_s: float | None = None,
+               min_solves: int | None = None) -> FlowSolution:
     """The steady flow of ``problem``: Stokes, then Picard to 1e-2 (or until it stalls), then damped Newton to 1e-8.
 
     ``schedule`` (the ladder's continuation, fractions of the target Re) steps the Reynolds number up
@@ -471,7 +476,9 @@ def solve_flow(problem: FlowProblem, *, schedule: tuple[float, ...] = (), solver
     ``log`` gets a progress line (the step, the Re stage, the residual, the time so far) at most every
     PROGRESS_S seconds, besides one per continuation stage. ``deadline_s``: seconds after which no new
     linear solve starts; the run returns its best state at the target Re, ``timed_out`` and unconverged,
-    with :func:`unsettled_sentence` saying so. A single linear solve is never interrupted.
+    with :func:`unsettled_sentence` saying so. A single linear solve is never interrupted. ``min_solves``: the
+    deadline stops nothing before this many linear solves are made (the work the solve is expected to need), so a
+    machine that is slower per solve (a loaded one) still does that work, and only takes longer to.
     """
     import numpy as np
 
@@ -483,7 +490,8 @@ def solve_flow(problem: FlowProblem, *, schedule: tuple[float, ...] = (), solver
     clock = {"line": began, "timed_out": False}
 
     def out_of_time() -> bool:
-        if deadline_s is not None and time.perf_counter() - began > deadline_s:
+        if (deadline_s is not None and time.perf_counter() - began > deadline_s
+                and (min_solves is None or system.solves >= min_solves)):
             clock["timed_out"] = True
         return clock["timed_out"]
 
@@ -608,7 +616,7 @@ def solve_flow(problem: FlowProblem, *, schedule: tuple[float, ...] = (), solver
         u=x[:system.nu], p=pressure, pressure_basis=system.pbasis, converged=ok, residual=r,
         picard=counts["picard"], newton=counts["newton"], stages=stages, continued=continued, solver=solver,
         linear_solves=system.solves, warnings=list(system.warnings), timings=timings,
-        timed_out=bool(clock["timed_out"]) and not ok, deadline_s=deadline_s,
+        timed_out=bool(clock["timed_out"]) and not ok, deadline_s=deadline_s, min_solves=min_solves,
     )
     if not ok:
         solution.warnings.append(unsettled_sentence(solution))

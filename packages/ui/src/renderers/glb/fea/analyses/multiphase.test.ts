@@ -121,4 +121,25 @@ describe('multiphase', () => {
       status: 'fails', brim: true, where: { ref: null, at: null }, at: { frame: 2, value: 0.0849, unit: 's' } }]));
     expect(brim.caption.replace(/ /g, ' ')).toContain('Rises to 52 mm, limit: the brim');
   });
+  it('says in words how much spilled over the brim, the fill level at the brim itself', () => {
+    const atBrim = [{ kind: 'fill_level', label: 'Fill level', value: 40, limit: 40, unit: 'mm', ratio: 1, close_at: 0.9, status: 'fails',
+      brim: true, spilled_mL: 2.315, spilled_percent: 6.43, where: { ref: null, at: null }, at: { frame: 2, value: 0.119, unit: 's' } }];
+    const result = twoFluids({}, atBrim);
+    result.analysis.warnings = ['Spills over the brim: 2.3 mL left the tank (6.4 % of the liquid)'];
+    const verdict = feaVerdict(result);
+    expect(verdict.title).toBe('Spills over');
+    expect(verdict.caption).toBe('Laminar · Spills over the brim: 2.3 mL left the tank (6.4 % of the liquid)');
+    // No spill in the file: the takeaway is the fill level's own line, as before.
+    expect(multiphase.caption(twoFluids())).toBe('');
+  });
+
+  it('leads with where a run stopped at its time limit', () => {
+    const result = twoFluids({}, [{ kind: 'fill_level', label: 'Fill level (stopped at 420 ms)', value: 27, limit: 40, unit: 'mm', ratio: 0.675,
+      close_at: 0.9, status: 'close', brim: true, stopped_at: '420 ms', where: { ref: null, at: null }, at: { frame: 2, value: 0.0849, unit: 's' } }]);
+    result.analysis.warnings = ['Stopped at its time limit at t = 420 ms of 1.5 s (after 20 minutes): nothing after 420 ms is solved; '
+      + 'give the study a larger fit.seconds, or a coarser mesh, to follow it to the end'];
+    const verdict = feaVerdict(result);
+    expect(verdict.title).toBe('Close to the brim');
+    expect(verdict.caption.startsWith('Stopped at its time limit at 420 ms · Laminar · ')).toBe(true);
+  });
 });

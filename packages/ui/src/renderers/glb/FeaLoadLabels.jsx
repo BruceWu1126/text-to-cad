@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { GHOST_OPACITY } from "./feaMarkers.js";
+import { GHOST_OPACITY, pastOutline } from "./feaMarkers.js";
 
 // The panels' 11px, in the viewer's own face.
 const FONT_SIZE = "500 11px";
@@ -13,7 +13,9 @@ const HIDDEN_EVERY_MS = 100;
  * Each load's amount ("300 N", "2 MPa") beside its arrows, drawn over the view on a canvas that
  * takes no pointer. `labels()` hands the current ones (`createFeaMarkers().labels`, in the result
  * mesh's space, following the deformation drawn); a frame loop repaints them, so they follow the
- * camera. A label behind the camera is left out. `colours`: the
+ * camera. A label behind the camera is left out. Each stands outside the model's outline on screen
+ * (`pastOutline`, from its box's `corners`), carried on along its marker's line, so none sits on or
+ * inside the part, a back face's or a hole's included. `colours`: the
  * ink and the halo it sits on. A label the model hides (a ray from the eye meets the part before
  * it) is drawn as its arrows are there, a faint ghost.
  */
@@ -49,15 +51,16 @@ export default function FeaLoadLabels({ runtimeRef, hostRef, mesh, labels, colou
         return [((point.x + 1) * width) / 2, ((1 - point.y) * height) / 2];
       };
       const placed = [];
+      let outline = null;
       for (const label of read()) {
         const free = screen(label.at);
         const face = label.face ? screen(label.face) : null;
         if (!free) continue;
-        // On the far side of the free end from the face, the text running away from the arrow.
-        const dx = face ? free[0] - face[0] : 1;
-        const dy = face ? free[1] - face[1] : -1;
-        const span = Math.hypot(dx, dy) || 1;
-        placed.push({ text: label.text, at: label.at, x: free[0] + (dx / span) * OFFSET_PX, y: free[1] + (dy / span) * OFFSET_PX, align: dx < 0 ? "right" : "left" });
+        // The model's outline, once a frame (every label carries the same box).
+        if (outline === null) outline = (label.corners || []).map(screen).filter(Boolean);
+        // On the far side of the free end from the face, past the model's outline, the text running away from the arrow.
+        const { x, y, dx } = pastOutline(free, face, outline, OFFSET_PX);
+        placed.push({ text: label.text, at: label.at, x, y, align: dx < 0 ? "right" : "left" });
       }
       const where = JSON.stringify(placed.map(({ text, x, y }) => [text, Math.round(x), Math.round(y)]));
       const now = window.performance.now();
@@ -67,10 +70,10 @@ export default function FeaLoadLabels({ runtimeRef, hostRef, mesh, labels, colou
         raycaster ??= new runtime.THREE.Raycaster();
         const target = new runtime.THREE.Vector3();
         const ndc = new runtime.THREE.Vector2();
-        hidden = placed.map(({ at }) => {
+        // Through where the label is drawn, to its depth: past the outline, the model hides none in practice.
+        hidden = placed.map(({ at, x, y }) => {
           target.fromArray(at).applyMatrix4(shownMesh.matrixWorld);
-          const projected = target.clone().project(runtime.camera);
-          raycaster.setFromCamera(ndc.set(projected.x, projected.y), runtime.camera);
+          raycaster.setFromCamera(ndc.set((x / width) * 2 - 1, 1 - (y / height) * 2), runtime.camera);
           const reach = raycaster.ray.origin.distanceTo(target);
           raycaster.far = reach * 0.99;
           return raycaster.intersectObject(shownMesh, false).length > 0;

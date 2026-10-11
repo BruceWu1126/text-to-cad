@@ -376,8 +376,8 @@ describe('an assembly result', () => {
     expect(fixed.children[0].label).toBe('base · face 9');
     expect(loads.children[0].children[0].label).toBe('post · face 23');
     expect(loads.children[0].label).toBe('5 N down');
-    // Parts that differ, one material each: how many; each part's own is the hint.
-    expect(rows.find((row) => row.id === 'material').children[0]).toMatchObject({ label: '2 materials', hint: '6061-T6: 1 part, Steel: 1 part' });
+    // Parts that differ, one material each: each material inline with its part.
+    expect(rows.find((row) => row.id === 'material').children[0]).toMatchObject({ label: '6061-T6 post, Steel base' });
     expect((studyRows(studyResult().result) as any[])[0].children[0].label).toBe('Face 1');
   });
 
@@ -578,11 +578,20 @@ describe('the verdict', () => {
     expect(row.choice.summary).toMatch(/^Strength is close to its limit in post: peak 180 MPa/);
   });
 
-  it('says what an assembly is mostly made of, a part with no material of its own taking the study\'s', () => {
+  it('names two or three materials inline with their parts, a part with no material of its own taking the study\'s', () => {
     const parts = [...ASSEMBLY.parts, { ...ASSEMBLY.parts[0], ref: '#o1.3', name: 'lid', material: '' }];
     const made = (list: object[]) => (studyRows(studyResult({ ...ASSEMBLY, parts: list }).result) as any[]).find((row) => row.id === 'material').children[0];
-    expect(made(parts)).toMatchObject({ label: 'Mostly 6061-T6', hint: '6061-T6: 2 parts, Steel: 1 part' });
+    expect(made(parts)).toMatchObject({ label: '6061-T6 post and lid, Steel base' });
+    expect(made(parts).hint).toBeUndefined();
     expect(made([ASSEMBLY.parts[0], { ...ASSEMBLY.parts[1], material: '6061-T6' }]).label).toBe('6061-T6');
+    const part = (name: string, material: string) => ({ ...ASSEMBLY.parts[0], ref: `#o1.${name}`, name, material });
+    // Three parts or more of one material say how many; three materials still inline.
+    expect(made([part('a', 'Steel'), part('b', 'Steel'), part('c', 'Steel'), part('d', 'Copper'), part('e', 'PZT-5A')]).label)
+      .toBe('Steel (3 parts), Copper d, PZT-5A e');
+    // Past three materials: what most of the parts are made of, else how many, each part's own in the hint.
+    const four = [part('a', 'Steel'), part('b', 'Copper'), part('c', 'PZT-5A'), part('d', 'Brass')];
+    expect(made(four)).toMatchObject({ label: '4 materials', hint: 'Steel: 1 part, Copper: 1 part, PZT-5A: 1 part, Brass: 1 part' });
+    expect(made([...four, part('e', 'Steel'), part('f', 'Steel'), part('g', 'Steel')])).toMatchObject({ label: 'Mostly Steel' });
   });
 });
 
@@ -755,6 +764,16 @@ describe('another analysis', () => {
     expect(studyRows(thermalStress).map((row: any) => row.id)).toEqual(['fixed', 'loads', 'material', 'details']);
     expect(feaControls(thermalStress).map((control: any) => control.id)).toEqual(['field', 'deformation']);
   });
+
+  it('heat stress: where the file finds the peak on a clamped edge, the stress row says it is a singularity to read away from', () => {
+    const singular = { check: 'fea', severity: 'warning', type: 'singular_clamped_edge', summary: 'The peak stress sits on the clamped edge', items: [] };
+    const weak = { ...STRESS_CHECK, value: 1882, ratio: 7.53, status: 'fails' };
+    const [stress] = feaVerdict(analysisResult({ analysis: { type: 'thermal_stress' }, checks: [weak], findings: [singular] }))!.rows;
+    expect(stress.hint).toMatch(/^Peak at the clamped edge: a singularity that grows as the mesh is refined\. Read the stress a little away from the edge$/);
+    // Without that finding, or in another analysis, the row is as ever.
+    expect(feaVerdict(analysisResult({ analysis: { type: 'thermal_stress' }, checks: [weak] }))!.rows[0]).not.toHaveProperty('hint');
+    expect(feaVerdict(analysisResult({ checks: [weak], findings: [singular] }))!.rows[0]).not.toHaveProperty('hint');
+  });
 });
 
 // Track V1: what a series, an analysis's tier, the steps taken to fit and another analysis's setup add.
@@ -829,8 +848,8 @@ describe('the takeaway by tier', () => {
     const caption = (extras: Record<string, unknown>) => feaVerdict(analysisResult({ checks: [STRESS_CHECK], ...extras }))!.caption;
     expect(caption({})).toBe('OK up to 5.8× this load');
     expect(caption({ analysis: { type: 'drop', tier: 2, estimate: true } })).toBe('Estimate · OK up to 5.8× this drop');
-    expect(caption({ analysis: { type: 'impact', tier: 3 } })).toBe('Rigid floor · OK up to 5.8× this drop');
-    // Nonlinear is not linear in the load: its worst check's own sentence, no load multiple.
+    // A drop impact and a nonlinear solve are not linear in the load: the worst check's own sentence, no load multiple.
+    expect(caption({ analysis: { type: 'impact', tier: 3 } })).toBe('Rigid floor · Peak 47 MPa, limit 276 MPa');
     expect(caption({ analysis: { type: 'nonlinear', tier: 3 } })).toBe('Lite · Peak 47 MPa, limit 276 MPa');
     expect(caption({ fit: [REFINED] })).toBe('OK up to 5.8× this load · adapted');
     // A step with no cost to the answer (an iterative solver) is not "adapted".
@@ -965,5 +984,32 @@ describe('Ring', () => {
     expect(Array.from(geometry.getAttribute('color').array).slice(0, 3)).toEqual([255, 0, 0]);
     recolorByField(mesh, field, ramp, null, null, null, { valueScale: -1 });
     expect(Array.from(geometry.getAttribute('color').array).slice(0, 3)).toEqual([0, 0, 255]);
+  });
+});
+
+describe('a displacement too small to mean anything', () => {
+  // A magnetostatic force on a plunger, as cadgen wrote it: 0.0 mm (nanometres) drawn ×9,500,000 to be seen.
+  const forced = (max: number) => {
+    const fields = [{ attribute: '_VON_MISES', name: 'von Mises stress', units: 'MPa', min: 0, max: 0.0053, attribute_scale: 1 },
+      { attribute: '_DISPLACEMENT', name: 'displacement', units: 'mm', min: 0, max, attribute_scale: 1000 }];
+    return analysisResult({ analysis: { type: 'electromagnetic', tier: 3 }, deformation_scale: 9500000, fields,
+      view: { controls: [{ drives: 'field', type: 'enum', label: 'Show', options: ['magnetic_field', 'von_mises', 'displacement'] }] } });
+  };
+
+  it('has no Deformation control and is drawn at rest', () => {
+    const still = forced(0);
+    expect(still).toMatchObject({ motionless: true, deformationScale: 0 });
+    expect(feaControls(still).map((control: { drives: string }) => control.drives)).toEqual(['field']);
+    // A tenth of a micrometre on a 1.4 m model: under a ten-millionth of its diagonal.
+    expect(forced(1e-4).motionless).toBe(true);
+    // A micrometre on it is still drawn.
+    expect(forced(1e-3).motionless).toBeUndefined();
+  });
+
+  it('keeps it where the part really moves: a part\'s own deflection is thousands of times more', () => {
+    const moving = forced(0.0288);
+    expect(moving.motionless).toBeUndefined();
+    expect(moving.deformationScale).toBe(9500000);
+    expect(feaControls(moving).map((control: { drives: string }) => control.drives)).toEqual(['field', 'deformation']);
   });
 });

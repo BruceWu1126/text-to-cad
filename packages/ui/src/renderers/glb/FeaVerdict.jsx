@@ -62,6 +62,7 @@ function CheckRow({ row, chosen, onChoose }) {
       </div>
       <WorkBar use={row.use} margin={row.margin} tone={tone} label={`${row.label}: how much of its limit`} />
       <p className="min-w-0 text-micro leading-3.5 text-muted-foreground tabular-nums [overflow-wrap:break-word]" data-fea-check-line="">{row.line}</p>
+      {row.hint ? <p className="min-w-0 text-micro leading-3.5 text-muted-foreground [overflow-wrap:break-word]" data-fea-check-hint="">{row.hint}</p> : null}
     </Choosable>
   </li>;
 }

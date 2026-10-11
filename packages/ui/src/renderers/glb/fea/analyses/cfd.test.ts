@@ -18,6 +18,7 @@ function flowResult(analysis: Record<string, unknown> = {}, extras: Record<strin
   geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
   geometry.setAttribute('_pressure', new BufferAttribute(new Float32Array([0.32, 0, 0.16]), 1));
   geometry.setAttribute('_wall_shear', new BufferAttribute(new Float32Array([0.02, 0.02, 0.02]), 1));
+  geometry.setAttribute('_speed', new BufferAttribute(new Float32Array([0.9, 0.4, 1.3]), 1));
   geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 0]), 1));
   const mesh = new Mesh(geometry);
   Object.assign(mesh.userData, {
@@ -61,6 +62,24 @@ describe('cfd', () => {
       { attribute: '_DISPLACEMENT', name: 'displacement', units: 'mm', min: 0, max: 0.001, attribute_scale: 1000, field: 'displacement' },
     ], deformation_scale: 1000 });
     expect(feaControls(mapped).map((control: { drives: string }) => control.drives)).toEqual(['field', 'deformation']);
+  });
+
+  it('offers the flow\'s speed by the walls as Speed, the velocity check\'s peak at its top', () => {
+    // Fixed gap: a velocity check quoted "Peak 1.3 m/s" with no field on the model showing any speed.
+    const fields = [
+      { attribute: '_PRESSURE', name: 'wall pressure', units: 'Pa', min: 0, max: 0.32, attribute_scale: 1, field: 'pressure', signed: true },
+      { attribute: '_WALL_SHEAR', name: 'wall shear stress', units: 'Pa', min: 0, max: 0.02, attribute_scale: 1, field: 'wall_shear' },
+      { attribute: '_SPEED', name: 'flow speed near the wall', units: 'm/s', min: 0, max: 1.3, attribute_scale: 1, field: 'speed' },
+    ];
+    const checks = [{ kind: 'velocity', label: 'Flow speed', value: 1.3, limit: 3, unit: 'm/s', ratio: 0.4333, close_at: 0.9,
+      status: 'passes', where: { ref: null, at: [0, 0, 0] } }];
+    const result = flowResult({}, { fields, checks });
+    const [field] = feaControls(result);
+    expect(field.options).toEqual([{ value: '_pressure', label: 'Pressure' }, { value: '_wall_shear', label: 'Wall shear' },
+      { value: '_speed', label: 'Speed' }]);
+    expect(field.defaultValue).toBe('_pressure');
+    const speed = result.fields.find((entry: { attribute: string }) => entry.attribute === '_speed');
+    expect(speed).toMatchObject({ units: 'm/s', max: 1.3 });
   });
 
   it('sets up as flow in/out, then held and made of when mapped onto the structure', () => {

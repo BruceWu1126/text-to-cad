@@ -62,8 +62,10 @@ mapped). One key is added:
 
 ## What comes out
 
-- Fields on the part's surface: `pressure` (wall pressure, Pa gauge, signed) and `wall_shear` (Pa,
-  the wall function's ρ u_τ²). A face the fluid does not wet reads 0. Mapped: `von_mises` and
+- Fields on the part's surface: `pressure` (wall pressure, Pa gauge, signed), `wall_shear` (Pa,
+  the wall function's ρ u_τ²) and `speed` (m/s, the fastest flow within a passage width of each
+  wetted point, as `cfd`'s: the velocity check's value is its top). A face the fluid does not wet
+  reads 0. Mapped: `von_mises` and
   `displacement` too.
 - Summary: everything `cfd` gives (`reynolds` with `turbulent` instead of `laminar`,
   `pressure_drop_Pa`, flow rates, `max_velocity_m_s`, wall pressure and shear ranges, `force_N`,

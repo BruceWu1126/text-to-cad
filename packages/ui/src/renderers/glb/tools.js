@@ -6,8 +6,9 @@ import { createToolModes } from "../kit/tools/toolModes.js";
 // which cuts it open to show what is inside.
 export const GLB_TOOL = Object.freeze({ SELECT: "select", CLIP: "clip" });
 
-// An FEA result opens in Select, with Study up; the tool in hand is never saved.
-export const GLB_TOOL_MODES = createToolModes({ defaultMode: GLB_TOOL.SELECT, modes: { [GLB_TOOL.SELECT]: {}, [GLB_TOOL.CLIP]: {} } });
+// An FEA result opens in Select, with Study up; the tool in hand is never saved. Select is its one
+// mode: Clip takes no pointer, so its panel opens under Study and the two are reachable together.
+export const GLB_TOOL_MODES = createToolModes({ defaultMode: GLB_TOOL.SELECT, modes: { [GLB_TOOL.SELECT]: {} } });
 
 /** What a host command that needs picking is told. A GLB shows the scene as authored; it has no references. */
 export const GLB_DECLINED_LIVE_COMMANDS = Object.freeze({

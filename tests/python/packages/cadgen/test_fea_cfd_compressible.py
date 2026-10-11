@@ -287,7 +287,11 @@ class SubsonicNozzle(unittest.TestCase):
 
     def test_the_glb_carries_pressure_mach_and_temperature_on_the_wetted_walls(self):
         fields = {entry["field"]: entry for entry in self.extras["fields"]}
-        self.assertEqual(set(fields), {"pressure", "mach", "temperature"})
+        self.assertEqual(set(fields), {"pressure", "mach", "temperature", "speed"})
+        # The speed the velocity check judges is on the model: the fastest flow near each wetted point.
+        self.assertEqual(fields["speed"]["units"], "m/s")
+        self.assertIn("_SPEED", self.attributes)
+        self.assertAlmostEqual(fields["speed"]["max"], self.summary["max_velocity_m_s"], delta=1e-3 * self.summary["max_velocity_m_s"])
         self.assertEqual((fields["pressure"]["units"], fields["mach"]["units"], fields["temperature"]["units"]), ("Pa", "", "°C"))
         for attribute in ("_PRESSURE", "_MACH", "_TEMPERATURE"):
             self.assertIn(attribute, self.attributes)

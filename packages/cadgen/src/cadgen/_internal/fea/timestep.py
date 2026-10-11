@@ -34,8 +34,81 @@ if TYPE_CHECKING:
     import numpy as np
 
 __all__ = [
-    "NEWMARK_TOLERANCE", "THETA_TOLERANCE", "March", "modal_march", "newmark", "newmark_error", "rayleigh", "theta",
+    "LIMIT_FLOOR_S", "LIMIT_TIMES", "NEWMARK_TOLERANCE", "PROGRESS_S", "THETA_TOLERANCE", "Clock", "March", "modal_march",
+    "newmark", "newmark_error", "rayleigh", "stopped_check", "stopped_finding", "stopped_sentence", "theta", "time_limit",
 ]
+
+#: A time march says how far it has got at most this often, seconds (the CLI prints it without --verbose too).
+PROGRESS_S = 10.0
+#: A time march stops once it has run this many times the study's time target (``fit.seconds``, 600 s by default)...
+LIMIT_TIMES = 2.0
+#: ...and never sooner than this, seconds: a tiny target the ladder fits to is not a reason to stop a short run.
+LIMIT_FLOOR_S = 30.0
+_DEFAULT_TARGET_S = 600.0
+
+
+def time_limit(ctx) -> float:
+    """Seconds a time march may run before it stops where it has got to: ``LIMIT_TIMES`` the study's time target
+    (``ctx.budget.seconds``), at least ``LIMIT_FLOOR_S``. The target is what the fit ladder aims for; this is the
+    hard stop past it, so a model the ladder could not shrink enough still ends with a result, not hours of silence."""
+    budget = getattr(ctx, "budget", None)
+    target = float(getattr(budget, "seconds", 0.0) or _DEFAULT_TARGET_S)
+    return max(LIMIT_TIMES * target, LIMIT_FLOOR_S)
+
+
+class Clock:
+    """A march's wall clock: a progress line through ``log`` at most every ``PROGRESS_S`` seconds, and whether the
+    march has run past ``limit_s`` (``None``: no limit)."""
+
+    def __init__(self, log: Callable[[str], None] | None, limit_s: float | None = None):
+        import time
+
+        self._now = time.perf_counter
+        self.started = self.said = self._now()
+        self.log, self.limit_s = log, limit_s
+        self.every = PROGRESS_S
+
+    def elapsed(self) -> float:
+        return self._now() - self.started
+
+    def tell(self, words: Callable[[], str]) -> None:
+        """Say ``words()`` (with the time so far) when a progress line is due."""
+        now = self._now()
+        if self.log and now - self.said >= self.every:
+            self.said = now
+            self.log(f"{words()}, {now - self.started:.0f} s so far")
+
+    def over(self) -> bool:
+        return self.limit_s is not None and self.elapsed() > self.limit_s
+
+
+def stopped_sentence(reached: str, planned: str, limit_s: float) -> str:
+    """The words of a march that stopped at its time limit: ``reached`` and ``planned`` are time labels ("0.42 s")."""
+    from cadgen._internal.fea.fit import human_seconds
+
+    return (f"Stopped at its time limit at t = {reached} of {planned} (after {human_seconds(limit_s)}): nothing after "
+            f"{reached} is solved; give the study a larger fit.seconds, or a coarser mesh, to follow it to the end")
+
+
+def stopped_finding(sentence: str) -> dict:
+    """The warning finding (``time_limit``) of a march that stopped at its time limit, :func:`stopped_sentence`'s words."""
+    return {"check": "fea", "severity": "warning", "type": "time_limit", "summary": sentence,
+            "description": "the march ran past its time limit (twice the study's fit.seconds, at least 30 s) and stopped "
+                           "there; the frames, curves and checks cover only the time it reached", "items": []}
+
+
+def stopped_check(judged: dict, reached: str | None) -> dict:
+    """A check of a march stopped at its time limit judges only the time it reached (``reached``, a time label; ``None``
+    for a march that ran to its end): it is marked ``stopped_at``, its label says so, and a pass becomes ``close``
+    (what came after was never solved). A failure stays a failure: it happened before the stop."""
+    if reached is None:
+        return judged
+    judged["stopped_at"] = reached
+    judged["label"] = f"{judged['label']} (stopped at {reached})"
+    if judged["status"] == "passes":
+        judged["status"] = "close"
+        judged["passed_until_stop"] = True       # close only for the stop: no finding of its own beyond the stop's
+    return judged
 
 #: Newmark's adaptive steps keep each step's local error under this share of the largest motion so far.
 NEWMARK_TOLERANCE = 1e-3
@@ -60,6 +133,8 @@ class March:
     factorisations: int = 0
     how: str = ""
     warnings: list[str] = field(default_factory=list)
+    #: Where it stopped at its time limit (``limit_s``), seconds of simulated time; ``None`` when it ran to the end.
+    stopped_at: float | None = None
 
 
 def rayleigh(omega_1: float, omega_2: float | None, zeta: float) -> tuple[float, float]:
@@ -137,6 +212,7 @@ def newmark(
     error_modes: "np.ndarray | None" = None,
     on_step: Callable[[float, "np.ndarray", "np.ndarray", "np.ndarray"], None] | None = None,
     log: Callable[[str], None] | None = None,
+    limit_s: float | None = None,
 ) -> March:
     """M ü + C u̇ + K u = load(t) from t = 0 to ``end_s`` by Newmark's method, first step ``step_s``.
 
@@ -146,7 +222,9 @@ def newmark(
     ``adaptive`` controls the step by :func:`newmark_error` (see the module), its size measured on
     ``error_modes`` (mass-normalised columns, the lowest modes: the motion that matters) when given, else
     in the mass norm. ``on_step(t, u, v, a)`` sees
-    t = 0 and every accepted step; the arrays are the integrator's own, so copy what is kept.
+    t = 0 and every accepted step; the arrays are the integrator's own, so copy what is kept. ``log`` gets a progress
+    line at most every ``PROGRESS_S``; past ``limit_s`` seconds of wall time it stops after the step it is on, and the
+    march's ``stopped_at`` says where.
     """
     import numpy as np
     import scipy.sparse.linalg as spla
@@ -197,6 +275,7 @@ def newmark(
     smallest, biggest = math.inf, 0.0
     scale = 0.0
     finish = end_s * (1 - 1e-12)
+    clock = Clock(log, limit_s)
     while t < finish:
         h = _clamp_to(t, dt, stops, end_s)
         a0 = 1.0 / (beta * h * h)
@@ -230,8 +309,10 @@ def newmark(
                 dt = min(2 * h, largest)
             else:
                 dt = h
-        if log and run.steps % 200 == 0:
-            log(f"time march: {run.steps} steps, t = {t:.4g} s of {end_s:.4g} s")
+        clock.tell(lambda: f"time march: t = {t:.4g} s of {end_s:.4g} s, {run.steps} steps")
+        if clock.over() and t < finish:
+            run.stopped_at = t
+            break
     run.smallest_step = smallest if run.steps else 0.0
     run.largest_step = biggest
     if solver != "direct":

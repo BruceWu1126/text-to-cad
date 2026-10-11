@@ -143,6 +143,27 @@ class StudyFile(unittest.TestCase):
         self.assertEqual(subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True, text=True, check=True).stdout.strip(), "")
 
 
+class SolveBudget(unittest.TestCase):
+    """Fixed bug: the flow solve's time limit was wall-clock alone (the 600 s default, or three times the estimate),
+    so whether a study settled depended on the machine's load: the gallery's sharp orifice (Re 299) settled in 90
+    linear solves (454 s), and at the default stopped at a residual of 1.7 after 67 of them on a machine at load 40
+    to 200. The limit now never stops a solve before the linear solves its work is expected to need."""
+
+    def test_the_budget_is_in_linear_solves_and_covers_the_orifices_continuation(self):
+        from cadgen._internal.fea.analyses.cfd import CONTINUE_FROM, DEADLINE_OVER, flow_solve_budget
+        from cadgen._internal.fea.navier_stokes import CONTINUATION
+
+        self.assertGreaterEqual(flow_solve_budget(299.0), 90)       # what the orifice settled in, with room
+        self.assertGreater(flow_solve_budget(299.0), 67)            # past where the loaded run was cut off
+        # Above CONTINUE_FROM it counts the continuation Newton falls back to; at or below, the direct attempt alone.
+        self.assertGreater(flow_solve_budget(CONTINUE_FROM + 1), 2 * flow_solve_budget(CONTINUE_FROM))
+        self.assertGreaterEqual(flow_solve_budget(600.0), flow_solve_budget(299.0))
+        # A planned continuation counts its stages alone, whatever the Re.
+        planned = flow_solve_budget(600.0, (75.0, 150.0, 300.0, 600.0))
+        self.assertEqual(planned, flow_solve_budget(5000.0, (1.0,)))
+        self.assertEqual(planned, math.ceil(DEADLINE_OVER * (1 + 4 * len(CONTINUATION) + 6)))
+
+
 @unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
 class Openings(unittest.TestCase):
     def test_an_opening_the_part_does_not_have_names_the_sides_it_does(self):
@@ -212,7 +233,7 @@ class Poiseuille(unittest.TestCase):
 
     def test_the_glb_carries_wall_pressure_and_shear_on_the_part(self):
         fields = {entry["field"]: entry for entry in self.extras["fields"]}
-        self.assertEqual(set(fields), {"pressure", "wall_shear"})
+        self.assertEqual(set(fields), {"pressure", "wall_shear", "speed"})
         self.assertTrue(fields["pressure"]["signed"])
         self.assertEqual((fields["pressure"]["units"], fields["wall_shear"]["units"]), ("Pa", "Pa"))
         self.assertIn("_PRESSURE", self.attributes)
@@ -221,6 +242,26 @@ class Poiseuille(unittest.TestCase):
         self.assertEqual(self.extras["study"]["flow"]["inlets"], [{"opening": "x_min", "velocity_m_s": self.U, "profile": "developed"}])
         # The inlet end of the bore is at the drop's pressure, the outlet end near 0.
         self.assertAlmostEqual(fields["pressure"]["max"], self.summary["pressure_drop_Pa"], delta=0.1 * self.summary["pressure_drop_Pa"])
+
+    def test_the_speed_the_velocity_check_judges_is_on_the_model(self):
+        """The wall is still (no slip), so the speed field is the fastest flow within a passage width of each wetted
+        point: on the bore it reads the parabola's centreline, 2 U, and its peak is the check's value."""
+        import numpy as np
+
+        fields = {entry["field"]: entry for entry in self.extras["fields"]}
+        self.assertIn("_SPEED", self.attributes)
+        self.assertEqual((fields["speed"]["units"], fields["speed"]["min"]), ("m/s", 0.0))
+        velocity = next(check for check in self.summary["checks"] if check["kind"] == "velocity")
+        self.assertAlmostEqual(fields["speed"]["max"], velocity["value"], delta=1e-5 * velocity["value"])
+        self.assertEqual(self.summary["max_speed_near_wall_m_s"], fields["speed"]["max"])
+        self.assertAlmostEqual(self.summary["speed_reach_mm"], 2 * R, delta=0.05 * R)   # the bore's diameter
+        speed, where = self.own.fields["speed"], self.own.dof_locations
+        r = np.hypot(where[:, 1], where[:, 2])
+        bore = (np.abs(r - R) < 0.05) & (np.abs(where[:, 0] - LENGTH / 2) < 4.0)
+        outside = np.abs(r - (R + WALL)) < 0.05
+        self.assertTrue(bore.any() and outside.any())
+        self.assertLess(float(np.abs(speed[bore] - 2 * self.U).max()), 0.05 * 2 * self.U)
+        self.assertEqual(float(np.abs(speed[outside]).max()), 0.0)    # the outside is not wetted
 
     def test_the_checks_and_the_cli(self):
         checks = {check["kind"]: check for check in self.summary["checks"]}
@@ -404,10 +445,11 @@ class SharpOrifice(unittest.TestCase):
         study = {**PIPE, "mesh": {"size_mm": 1.25},
                  "flow": {**PIPE["flow"], "inlets": [{"opening": "x_min", "velocity_m_s": 0.05}]},
                  "view": {"checks": [{"kind": "pressure_drop", "limit_Pa": 1000}]}}
-        original, cls.problems = navier_stokes.solve_flow, []
+        original, cls.problems, cls.options = navier_stokes.solve_flow, [], []
 
         def keep(problem, **options):
             cls.problems.append(problem)
+            cls.options.append(options)
             return original(problem, **options)
 
         with mock.patch.object(navier_stokes, "solve_flow", keep):
@@ -455,6 +497,21 @@ class SharpOrifice(unittest.TestCase):
         self.assertEqual((judged["label"], judged["status"], judged["settled"]),
                          ("Flow resistance (flow not settled)", "close", False))
         self.assertEqual(unsettled_check({"label": "x", "status": "fails", "ratio": 2}, False)["status"], "fails")
+
+    def test_its_deadline_waits_for_the_work_it_was_given(self):
+        """A deadline long past (a loaded machine) does not stop the solve before ``min_solves`` linear solves; the
+        study's own solve is given its budget."""
+        from cadgen._internal.fea import navier_stokes
+        from cadgen._internal.fea.analyses.cfd import flow_solve_budget
+
+        flow = navier_stokes.solve_flow(self.problems[0], deadline_s=0.0, min_solves=4)
+        self.assertGreaterEqual(flow.linear_solves, 4)
+        self.assertGreater(flow.picard + flow.newton, 0)
+        if not flow.converged:
+            self.assertTrue(flow.timed_out)
+            self.assertIn(f"stopped at its time limit (0 s, {flow.linear_solves} linear solves)", flow.warnings[-1])
+        reynolds = self.result.summary["reynolds"]["value"]
+        self.assertEqual(self.options[0]["min_solves"], flow_solve_budget(reynolds))
 
 
 @unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")

@@ -429,7 +429,7 @@ class Bimorph(unittest.TestCase):
         length, _ = struct.unpack_from("<II", raw, 12)
         extras = json.loads(raw[20:20 + length])["meshes"][0]["extras"]
         self.assertEqual([(part["ref"], part["name"], part["material"]) for part in extras["parts"]],
-                         [("#o1.1", "upper", "pzt-5a"), ("#o1.2", "lower", "pzt-5a")])
+                         [("#o1.1", "upper", "PZT-5A"), ("#o1.2", "lower", "PZT-5A")])
 
     def test_with_weak_coupling_the_tip_meets_the_closed_form(self):
         from cadgen._internal.fea import piezo_ops

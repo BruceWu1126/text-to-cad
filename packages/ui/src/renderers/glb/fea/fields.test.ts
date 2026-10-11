@@ -6,7 +6,7 @@ describe('the fields', () => {
     expect(FIELD_WORDS._von_mises).toBe('Stress');
     expect(FIELD_WORDS._displacement).toBe('Displacement');
     expect(Object.values(FIELDS).map((entry) => entry.word)).toEqual(['Stress', 'Displacement', 'Peak stress', 'Peak displacement', 'Temperature', 'Heat flow', 'Fluid temperature', 'Heat into the flow', 'Heat transfer coefficient', 'Mode shape', 'Life',
-      'Fatigue margin', 'Pressure', 'Wall shear', 'Mach number', 'Plastic strain', 'Contact pressure', 'Creep strain', 'Failure index', 'Voltage', 'Electric field', 'Current density', 'Magnetic field', 'Eddy current', 'Sound pressure', 'Sound level', 'Material kept', 'Stress (1σ)', 'Displacement (1σ)', 'Whirl',
+      'Fatigue margin', 'Pressure', 'Wall shear', 'Speed', 'Mach number', 'Plastic strain', 'Contact pressure', 'Creep strain', 'Failure index', 'Voltage', 'Electric field', 'Current density', 'Magnetic field', 'Eddy current', 'Sound pressure', 'Sound level', 'Material kept', 'Stress (1σ)', 'Displacement (1σ)', 'Whirl',
       'Water fraction']);
     // FIELD_WORDS is FIELDS' words, by attribute.
     expect(Object.keys(FIELD_WORDS)).toEqual(Object.keys(FIELDS));
@@ -15,6 +15,11 @@ describe('the fields', () => {
   it('say which run from their own minimum and which are powers of ten', () => {
     expect(Object.keys(FIELDS).filter((attribute) => FIELDS[attribute].signed)).toEqual(['_temperature', '_fluid_temperature', '_wall_heat_flux', '_pressure', '_potential', '_sound_pressure']);
     expect(Object.keys(FIELDS).filter((attribute) => FIELDS[attribute].log)).toEqual(['_life']);
+  });
+
+  it('call a flow\'s speed by its walls Speed, from 0 like a stress, so the field select offers it in plain words', () => {
+    expect(fieldWord({ attribute: '_SPEED', name: 'flow speed near the wall' })).toBe('Speed');
+    expect(fieldInfo('_speed')).toMatchObject({ word: 'Speed', signed: false, log: false, lowWorst: false });
   });
 
   it('know a frame\'s attribute by its field\'s, and fall back to the file\'s name for one they have no words for', () => {

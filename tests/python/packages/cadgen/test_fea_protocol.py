@@ -449,6 +449,15 @@ class CliLines(unittest.TestCase):
         self.assertIn("check 'Fatigue life': 1.317 against a 1.5 limit, 0.76× it, close", lines)
         self.assertIn("check 'Strength': 77.1 MPa against a 250 MPa limit, 0.31× it, passes", lines)
 
+    def test_a_check_far_under_its_limit_says_under_1_percent_not_0_00_times(self):
+        def stress(value, ratio):
+            return {"label": "Strength", "value": value, "limit": 250.0, "unit": "MPa", "ratio": ratio, "status": "passes"}
+
+        lines = self._result(summary={"safety_factor": 2.5, "checks": [stress(0.0053, 2.12e-05), stress(2.5, 0.01)]}).human_lines()
+        self.assertIn("check 'Strength': 0.0053 MPa against a 250 MPa limit, under 1% of it, passes", lines)
+        self.assertIn("check 'Strength': 2.5 MPa against a 250 MPa limit, 0.01× it, passes", lines)
+        self.assertFalse(any("0.00×" in line for line in lines))
+
     def test_a_frequency_check_says_how_many_hertz_it_clears_its_minimum_or_band_by(self):
         def minimum(value, limit, status):
             return {"kind": "frequency", "label": "Stiff", "value": value, "limit": limit, "unit": "Hz",

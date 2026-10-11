@@ -323,6 +323,8 @@ class Run:
     energy: dict = field(default_factory=dict)
     #: The run went on past its planned end because the first contact pulse had not ended (``extend_to_s``).
     extended: bool = False
+    #: It ran past its time limit (``limit_s``) and stopped at ``end_s``, short of where it would have.
+    timed_out: bool = False
 
 
 class _Elements:
@@ -419,14 +421,19 @@ def simulate(
     curve_points: int = 4000,
     watch: "dict[str, np.ndarray] | None" = None,
     extend_to_s: float | None = None,
+    limit_s: float | None = None,
 ) -> Run:
     """The drop, followed from first contact for ``end_s`` (or, with ``stop_after_pulse``, until the first contact pulse
     ends, plus 20 % of it). ``extend_to_s``: a window that is only a guess (the automatic one) is not ended while the
     part is still on the floor: the run goes on, up to ``extend_to_s``, until the first pulse ends, plus 20 % of it. ``frames`` snapshots, evenly spaced, plus the moment of the peak stress. ``watch``: groups of
-    nodes whose mass-weighted mean acceleration along the fall is followed (filtered like the floor's push)."""
+    nodes whose mass-weighted mean acceleration along the fall is followed (filtered like the floor's push).
+    ``log`` gets a progress line at most every ``timestep.PROGRESS_S``; past ``limit_s`` seconds of wall time the run
+    stops after the step it is on (``timed_out``), what it reached the last frame."""
     import time
 
     import numpy as np
+
+    from cadgen._internal.fea.timestep import Clock
 
     started = time.perf_counter()
     count = model.count
@@ -594,6 +601,8 @@ def simulate(
     record(0.0, 0.0, 0.0)
     curve_t.append(0.0)
     curve_f.append(0.0)
+    clock = Clock(log, limit_s)
+    timed_out = False
     while t < stop_at - eps:
         step_big = min(big, stop_at - t) if n == 1 else big
         if n == 1:
@@ -647,8 +656,10 @@ def simulate(
             spacing = planned / stride_frames
             snap_times.extend(float(x) for x in np.arange(planned + spacing, extend_to + 0.5 * spacing, spacing))
             stop_at = extend_to
-        if log and big_steps % 2000 == 0:
-            log(f"impact: {t * 1e6:.1f} of {stop_at * 1e6:.1f} µs")
+        clock.tell(lambda: f"impact: {t * 1e6:.1f} of {stop_at * 1e6:.1f} µs, {big_steps} steps")
+        if clock.over() and t < stop_at - eps:
+            timed_out = True
+            break
     if curve_t[-1] != t:
         curve_t.append(t)
         curve_f.append(raw["force_f"])
@@ -684,7 +695,7 @@ def simulate(
         filter_s=tau, raw_peak_vm=raw["vm"], raw_peak_force=raw["force"], peak_force=raw["peak_f"],
         peak_force_t=raw["peak_t"], watched={name: (abs(a), t_at) for name, (a, t_at) in group_peak.items()},
         peak_t=None if peak_snap is None else float(peak_snap[0]),
-        subcycle=n, fine_share=float(touching.mean()) if n > 1 else 0.0,
+        subcycle=n, fine_share=float(touching.mean()) if n > 1 else 0.0, timed_out=timed_out,
         energy={"kinetic_start_J": 0.5 * total_mass * drop.speed ** 2 * 1e-3, "kinetic_end_J": kinetic * 1e-3,
                 "centre_velocity_end_mm_s": float((mass @ v) @ d) / total_mass,
                 "mass_t": total_mass, "physical_mass_t": physical_mass},

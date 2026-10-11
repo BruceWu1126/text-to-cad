@@ -75,7 +75,8 @@ A fixed mass flow instead: `"inlets": [{"opening": "x_min", "mass_flow_kg_s": 0.
 
 - Fields on the part's wetted surface: `pressure` (Pa above the outlet's, signed), `mach` (the gas's
   speed over its local speed of sound) and `temperature` (the gas's, °C: it cools as it speeds
-  up, T = T0 / (1 + 0.2 M²) in air). Mapped: `von_mises` and `displacement`, and the part deforms.
+  up, T = T0 / (1 + 0.2 M²) in air) and `speed` (m/s, the fastest flow within a passage width of
+  each wetted point, as `cfd`'s: the velocity check's value is its top). Mapped: `von_mises` and `displacement`, and the part deforms.
 - Summary: `mass_flow_kg_s` (in) and `outflow_kg_s`, `flow_balance`, `max_mach` and where,
   `max_velocity_m_s`, `outlet_mach`, `pressure_ratio` (the inlet's total pressure over the outlet's
   static), `inlet_total_pressure_Pa`, `inlet_pressure_Pa`, `outlet_pressure_Pa`,

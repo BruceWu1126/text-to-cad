@@ -459,8 +459,6 @@ class BoltedProblem(ContactProblem):
         self.springs = springs
         self.offset = np.zeros(self.size)
         self.locked = False
-        self.stuck = np.zeros((self.constraints.count, 3))
-        self.pending_stuck = self.stuck
         #: (rows,) the normal penalty's share of each row's own penalty: rows whose ``penalty`` was softened for
         #: friction keep their normal penalty whole this way.
         self.normal_scale = np.ones(self.constraints.count) if normal_scale is None else np.asarray(normal_scale, dtype=float)
@@ -484,19 +482,6 @@ class BoltedProblem(ContactProblem):
             spring.stretch0 = spring.stretch(u)
         self.locked = True
         self.external = external
-
-    def settle(self, u, factor):
-        """Contact's Uzawa updates, keeping first the tangential forces of the step's solve with every touching point
-        stuck: the sideways force the faces must carry for the joint to hold, which a joint that slips cannot
-        settle into (``stuck``, once the step is committed)."""
-        self.pending_stuck = self.response(u).tangential.copy()
-        return super().settle(u, factor)
-
-    def commit(self, u, factor):
-        if self._change is None:  # driven without settle: settle here
-            u[:] = self.settle(u, factor).u
-        self.stuck = self.pending_stuck
-        super().commit(u, factor)
 
     def full(self, u: "np.ndarray") -> "np.ndarray":
         return u + self.offset

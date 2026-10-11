@@ -12,6 +12,7 @@
 import { seriesControls } from "../controls.js";
 import { plainNumber } from "../numbers.js";
 import { heldRows, madeOfRows, pushedRows, rigidFloorRows, spaced } from "../setup.js";
+import { stopSentence } from "./nonlinear.js";
 import { routineOf } from "./stub.js";
 
 /** Play: the load steps one after another, interpolated (GlbRenderer plays it). */
@@ -74,4 +75,6 @@ export default Object.freeze({
   displayTitle: "Loads and fixtures",
   // A Tier 3 analysis's short limit word, which leads its verdict's takeaway.
   limitWord: "Lite",
+  // A load path that could not be followed to the full load leads the takeaway: "Stops at about 20 % of the load · ".
+  stopCaption: (result) => stopSentence(result, "Stops"),
 });

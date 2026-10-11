@@ -52,6 +52,26 @@ export { faceLabel, faceTitle, forceDirection } from "./fea/setup.js";
 
 const GENERATOR = "cadgen fea";
 
+/**
+ * A displacement under this share of the model's diagonal is no motion to draw: a magnetic force on a
+ * steel plunger moves it nanometres, and drawn ×9,500,000 to be seen it means nothing (a part's own
+ * deflection under a real load is thousands of times more).
+ */
+export const NEGLIGIBLE_MOTION = 1e-7;
+
+/**
+ * Whether a result's displacement is too small to mean anything (`NEGLIGIBLE_MOTION` of its diagonal,
+ * the file's largest over every frame): it is then drawn at rest, with no Deformation control.
+ */
+function motionless(geometry, fields) {
+  const moved = fields.find((entry) => entry.attribute === DISPLACEMENT);
+  if (!moved || !geometry.getAttribute("position")) return false;
+  if (!geometry.boundingBox) geometry.computeBoundingBox();
+  const box = geometry.boundingBox;
+  const diagonalMm = box ? box.min.distanceTo(box.max) * 1000 : 0;
+  return diagonalMm > 0 && Math.abs(moved.max) <= NEGLIGIBLE_MOTION * diagonalMm;
+}
+
 // The ramp the writer uses when a file carries none: blue -> red.
 export const DEFAULT_RAMP = Object.freeze([
   [0.0, [0.05, 0.10, 0.90]],
@@ -229,7 +249,26 @@ function readAnalysis(raw) {
     ...(own.regime === "laminar" || own.regime === "turbulent" ? { regime: own.regime } : {}),
     ...(readMach(own.mach) ? { mach: readMach(own.mach) } : {}),
     ...(readUnsettled(own.unsettled) ? { unsettled: readUnsettled(own.unsettled) } : {}),
+    ...(readWalls(own.acoustic) ? { walls: readWalls(own.acoustic) } : {}),
   };
+}
+
+/**
+ * The walls around the air a sound result shows alone (`analysis.acoustic.walls_mm`: segments in CAD mm,
+ * `[x1, y1, z1, x2, y2, z2]`), as one array of their ends in the mesh's space (glTF metres, x, z, -y),
+ * two points a segment. null for none.
+ */
+function readWalls(acoustic) {
+  const segments = Array.isArray(acoustic?.walls_mm) ? acoustic.walls_mm.filter((s) => Array.isArray(s) && s.length === 6 && s.every(Number.isFinite)) : [];
+  if (!segments.length) return null;
+  const out = new Float32Array(segments.length * 6);
+  segments.forEach((s, i) => {
+    for (let end = 0; end < 2; end += 1) {
+      const [x, y, z] = s.slice(end * 3, end * 3 + 3);
+      out.set([x / 1000, z / 1000, -y / 1000], i * 6 + end * 3);
+    }
+  });
+  return out;
 }
 
 /**
@@ -602,13 +641,16 @@ export function readFeaResult(root) {
       return;
     }
     const analysis = readAnalysis(extras.analysis);
+    const still = motionless(object.geometry, fields);
     found = {
       analysis,
       mesh: object,
       name: String(extras.name || ""),
       document: String(extras.document || ""),
       occurrence: String(extras.occurrence || ""),
-      deformationScale: Number(extras.deformation_scale) || 1,
+      // A displacement too small to mean anything is drawn at rest (`motionless`: no Deformation control either).
+      deformationScale: still ? 0 : Number(extras.deformation_scale) || 1,
+      ...(still ? { motionless: true } : {}),
       safetyFactor: Number.isFinite(extras.safety_factor) ? extras.safety_factor : null,
       fields,
       ramp: rampStops(extras.ramp),
@@ -904,7 +946,9 @@ const finiteNumber = (value) => typeof value === "number" && Number.isFinite(val
 export function feaControls(result) {
   const every = result.fields.map((entry) => entry.attribute);
   const chosen = result.view?.controls ? viewControls(result, every) : [];
-  return chosen.length ? keptDeformation(result, chosen) : feaAnalysis(result).defaultControls(result);
+  const controls = chosen.length ? keptDeformation(result, chosen) : feaAnalysis(result).defaultControls(result);
+  // A displacement too small to mean anything has no Deformation to set: it is drawn at rest.
+  return result.motionless ? controls.filter((control) => control.drives !== "deformation") : controls;
 }
 
 /**
@@ -1305,7 +1349,8 @@ export function unsettledWarning(result) {
 }
 
 /**
- * What leads the verdict's takeaway, by the analysis's tier, after "Not reliable · contact did not
+ * What leads the verdict's takeaway, by the analysis's tier, after where a load path stopped short of
+ * the full load ("Stops at about 20 % of the load · ", the analysis's `stopCaption`) and "Not reliable · contact did not
  * settle at 80% · " where a contact solve's forces did not settle (`unsettledWarning`): "Estimate · " for an estimate (Tier 2),
  * a Tier 3 analysis's short limit word ("Laminar · ", "Rigid floor · "; a flow past the laminar
  * range "Laminar · unreliable above Re 2000 · "; a fast gas flow the file warns of "Ideal gas · past
@@ -1314,6 +1359,9 @@ export function unsettledWarning(result) {
  */
 function captionFrame(result, analysis) {
   const lead = [];
+  // A load path that stopped short of the full load says so first (`stopCaption`: "Stops at about 20 % of the load").
+  const stop = typeof analysis.stopCaption === "function" ? analysis.stopCaption(result) : "";
+  if (stop) lead.push(stop);
   const unsettled = unsettledWarning(result);
   if (unsettled) lead.push("Not reliable", unsettled.short);
   if (result.analysis?.estimate || (result.analysis?.tier ?? analysis.tier) === 2) lead.push("Estimate");
@@ -1394,8 +1442,10 @@ export function feaVerdict(result, loadScale = 1) {
     rows: judged.map((check) => {
       const part = check.kind === "stress" ? (check.part ? spaced(check.part) : weakestName) : "";
       const label = kindLabel(check, analysis.checkLabels);
+      // What the analysis adds under a check's line (heat stress: a clamped edge's singular peak, to read away from).
+      const hint = typeof analysis.checkHint === "function" ? analysis.checkHint(result, check) : "";
       return { id: `check:${check.index}`, kind: check.kind, status: TONE_OF[check.status], label, part, line: kindLine(check, { bare: true, noun }),
-        use: check.use, margin: check.margin, choice: checkChoice(result, check, part, label) };
+        ...(hint ? { hint } : {}), use: check.use, margin: check.margin, choice: checkChoice(result, check, part, label) };
     }),
   };
 }

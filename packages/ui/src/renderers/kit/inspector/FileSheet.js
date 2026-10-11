@@ -364,10 +364,17 @@ export function FileSheetValueInput({
 }
 
 // The value box's width: as narrow as a joint's figure allows — an angle ("-102°", "0.00°") fits
-// five characters, a length with its unit ("0.00 mm") seven — so a unit is never cut off.
-const valueInputWidth = value => {
+// five characters, a length with its unit ("0.00 mm") seven — so a unit is never cut off. Each
+// holds its characters, the padding (0.75rem) and the box's 1px borders, and a character's room
+// more for a glyph wider than a figure ("×6000"; a figure is 1ch); a longer value ("×9500000",
+// "×120000000") takes the box its length needs, so its last figures are never cut off.
+export const valueInputWidth = value => {
   const length = String(value ?? "").length;
-  return length <= 5 ? "w-[calc(5ch+0.75rem)]" : length <= 7 ? "w-[calc(7ch+0.75rem)]" : "w-[calc(9ch+0.75rem)]";
+  if (length <= 5) return "w-[calc(6ch+0.75rem+2px)]";
+  if (length <= 7) return "w-[calc(8ch+0.75rem+2px)]";
+  if (length <= 9) return "w-[calc(10ch+0.75rem+2px)]";
+  if (length <= 11) return "w-[calc(12ch+0.75rem+2px)]";
+  return "w-[calc(14ch+0.75rem+2px)]";
 };
 
 /**

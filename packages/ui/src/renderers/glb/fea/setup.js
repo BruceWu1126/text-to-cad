@@ -301,9 +301,14 @@ export const SETUP_GROUPS = Object.freeze([heldRows, keptAtRows, pushedRows, hea
 
 /**
  * Study's "Made of", under a swatch: the material's name ("Aluminum 6061-T6"). In an assembly whose
- * parts differ, "Mostly Aluminum 6061-T6" where one material has most of the parts, else
- * "2 materials", each part's own in its hint (and in Parts and a picked face's Reference).
+ * parts differ in two or three materials, each with its parts inline ("Copper C110 coil, Steel
+ * plunger"; a material of three parts or more says how many: "Steel (4 parts)"); past three,
+ * "Mostly Aluminum 6061-T6" where one material has most of the parts, else "5 materials", each
+ * part's own in its hint (and in Parts and a picked face's Reference).
  */
+/** The most materials Made of names inline, each with its parts; past it, a count and a hint. */
+const INLINE_MATERIALS = 3;
+
 export function madeOfRows(result) {
   const fallback = result.study.material?.name || "";
   const each = result.parts.map((part) => part.material || fallback).filter(Boolean);
@@ -312,7 +317,14 @@ export function madeOfRows(result) {
   let label = fallback;
   let hint = "";
   if (counts.size === 1) label = each[0];
-  else if (counts.size > 1) {
+  else if (counts.size > 1 && counts.size <= INLINE_MATERIALS) {
+    const partsOf = new Map();
+    for (const part of result.parts) {
+      const name = part.material || fallback;
+      if (name) partsOf.set(name, [...(partsOf.get(name) || []), spaced(part.name || part.ref)]);
+    }
+    label = [...partsOf].map(([name, names]) => (names.length < 3 ? `${name} ${names.join(" and ")}` : `${name} (${names.length} parts)`)).join(", ");
+  } else if (counts.size > 1) {
     const [top, count] = [...counts].sort((a, b) => b[1] - a[1])[0];
     label = count * 2 > each.length ? `Mostly ${top}` : `${counts.size} materials`;
     hint = [...counts].map(([name, n]) => `${name}: ${n} ${n === 1 ? "part" : "parts"}`).join(", ");

@@ -141,4 +141,17 @@ describe('contact', () => {
       expect(verdict.caption.replace(/[\u00a0\u202f]/g, ' ')).toBe('Lite · Peak 14 MPa, limit 250 MPa');
     }
   });
+
+  it('leads with where its load path stopped, before "Not reliable" and its limit word', () => {
+    const sentence = 'Contact did not settle at 20% of the load: the forces here do not balance, so this result is not reliable';
+    const result = pressedResult({
+      collapsed: true, load_percent: 20,
+      analysis: { type: 'contact', tier: 3, word: 'Contact', estimate: false, limits: [LIMIT], noun: 'this load', reference_C: null,
+        warnings: ['Stops at about 20 % of the load', sentence], unsettled: { at_percent: [20], first_percent: 20 } },
+      checks: [{ kind: 'stress', label: 'Strength', value: 13.8, limit: 250, unit: 'MPa', ratio: 0.0552, close_at: 0.5, margin: 2, status: 'fails',
+        scaling: 'none', where: { ref: null, at: [0, 0, 0] } }],
+    });
+    expect(feaVerdict(result).caption.replace(/[\u00a0\u202f]/g, ' '))
+      .toBe('Stops at about 20 % of the load · Not reliable · contact did not settle at 20% · Lite · Peak 14 MPa, limit 250 MPa');
+  });
 });

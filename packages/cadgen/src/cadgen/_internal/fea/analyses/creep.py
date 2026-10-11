@@ -43,6 +43,7 @@ from cadgen._internal.fea.analyses import kinds
 from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Series, SeriesFrame, SolveContext
 from cadgen._internal.fea.analyses.nonlinear import NonlinearAnalysis, external_load, material_specs, PathOutcome
 from cadgen._internal.fea.analyses.static import StaticAnalysis, StaticInputs
+from cadgen._internal.fea.timestep import stopped_check, stopped_finding, stopped_sentence, time_limit
 
 if TYPE_CHECKING:
     import numpy as np
@@ -243,19 +244,24 @@ class _Path:
     largest_step: float
     stopped: bool
     how: str
+    #: It ran past its time limit and stopped where it had got to (``timestep.time_limit``).
+    timed_out: bool = False
 
 
 def _march(problem: _CreepProblem, duration: float, steps: int, *, solver: str, adaptive: bool, keep: int,
-           log: Callable[[str], None] | None, u0: "np.ndarray | None" = None):
+           log: Callable[[str], None] | None, u0: "np.ndarray | None" = None, limit_s: float | None = None):
     """The elastic answer at 0 h, then backward Euler time steps to ``duration``. Returns the path, the frames kept
     (t, u, von Mises at the points, creep strain at the points), and each accepted step's curve point.
 
-    ``u0``: a starting displacement whose held DOF keep their values (a stretch held fixed); zeros by default."""
+    ``u0``: a starting displacement whose held DOF keep their values (a stretch held fixed); zeros by default.
+    ``limit_s``: seconds of wall time after which it stops after the step it is on (``timed_out``), its last state the
+    last frame."""
     import time
 
     import numpy as np
 
     from cadgen._internal.fea import nonlinear_driver
+    from cadgen._internal.fea.timestep import Clock
 
     started = time.perf_counter()
     linear = nonlinear_driver.LinearSolver(problem, "iterative" if solver in ("iterative", "matrix_free") else "direct")
@@ -279,7 +285,8 @@ def _march(problem: _CreepProblem, duration: float, steps: int, *, solver: str, 
     dt, t = base, 0.0
     accepted = rejected = cuts = 0
     smallest, largest = math.inf, 0.0
-    stopped = False
+    stopped = timed_out = False
+    clock = Clock(None, limit_s)
     next_target = 0
     while duration - t > 1e-9 * duration:
         dt = min(dt, duration - t)
@@ -317,12 +324,15 @@ def _march(problem: _CreepProblem, duration: float, steps: int, *, solver: str, 
         grow = 2.0 if error <= 0 else min(2.0, max(1.0, 0.9 * math.sqrt(TOLERANCE / error)))
         dt = dt * grow
         dt = min(dt, MAX_GROWTH * base) if adaptive else min(dt, base)
+        if clock.over() and duration - t > 1e-9 * duration:
+            timed_out = True
+            break
     problem.step(t, t)  # what is evaluated after the march is the committed state, with no more time to creep
     if frames[-1][0] < t:  # a march that stopped early: its last converged state is the last frame
         frames.append((t, u.copy(), problem.state.von_mises.copy(), problem.state.equivalent.copy()))
     path = _Path(times=[c[0] for c in curve], seconds=time.perf_counter() - started, steps=accepted, rejected=rejected,
                  cuts=cuts, iterations=iterations, smallest_step=0.0 if smallest is math.inf else smallest,
-                 largest_step=largest, stopped=stopped, how=linear.how)
+                 largest_step=largest, stopped=stopped, how=linear.how, timed_out=timed_out)
     return path, frames, curve
 
 
@@ -460,7 +470,7 @@ class CreepAnalysis(NonlinearAnalysis):
         frames_max = int(getattr(ctx.budget, "max_frames", MAX_FRAMES) or MAX_FRAMES) if ctx.budget is not None else MAX_FRAMES
         marched = Turned(problem, supports, free) if supports.turned else problem
         path, frames, curve = _march(marched, inputs.duration_h, inputs.steps, solver=solver, adaptive=adaptive,
-                                     keep=max(frames_max, 2), log=ctx.log)
+                                     keep=max(frames_max, 2), log=ctx.log, limit_s=time_limit(ctx))
         if supports.turned:  # a sloped or curved roller: the march's displacements back in global axes
             frames = [(t, supports.global_vector(u), vm, eq) for t, u, vm, eq in frames]
         timings["solve_s"] = path.seconds
@@ -537,6 +547,8 @@ class CreepAnalysis(NonlinearAnalysis):
         analysis_warnings = []
         if path.stopped:
             analysis_warnings.append(f"Creep runs away after about {hours_label(reached)}")
+        if path.timed_out:
+            analysis_warnings.append(stopped_sentence(hours_label(reached), hours_label(inputs.duration_h), time_limit(ctx)))
         how = f"{path.how}, {path.steps} {'adaptive ' if adaptive else ''}backward Euler time steps"
         return AnalysisResult(
             dof_locations=dof_locations, vertices=vertices, tets=tets, boundary_quadratic=boundary, element_dofs=element_dofs,
@@ -544,6 +556,7 @@ class CreepAnalysis(NonlinearAnalysis):
             reactions=reactions, applied=applied, dofs=int(basis.N), solver=how, timings=timings, warnings=warnings,
             scalars={
                 "path": path, "final": final_fields, "reached_h": reached, "stopped": path.stopped, "adaptive": adaptive,
+                "timed_out": path.timed_out,
                 "von_mises_gauss_peaks": gauss_peaks, "creep_gauss_max": creep_gauss, "peak_frame": peak_frame,
                 "frame_times": times, "analysis_warnings": analysis_warnings, "data_temperatures": sorted(data_temperatures),
                 "part_refs": None if ctx.assembly is None else [part.ref for part in ctx.assembly.parts],
@@ -621,6 +634,11 @@ class CreepAnalysis(NonlinearAnalysis):
             # The creep ran away before the whole time: whatever the numbers when it stopped, the check fails.
             judged["status"] = "fails"
             judged["stopped_at_h"] = round(result.scalars["reached_h"], 6)
+        elif result.scalars.get("timed_out"):
+            # The march stopped at its time limit: a pass covers only the hours it reached.
+            stopped_check(judged, hours_label(result.scalars["reached_h"]))
+        # Creep grows with a power of the stress (and with time): no check of it is a multiple of the load.
+        judged["scaling"] = "none"
         return judged
 
     def findings(self, ctx: SolveContext, result: AnalysisResult, inputs: CreepInputs,
@@ -634,6 +652,9 @@ class CreepAnalysis(NonlinearAnalysis):
             return {"check": "fea", "severity": severity, "type": kind, "summary": summary, "description": description,
                     "items": list(items)}
 
+        if scalars.get("timed_out"):
+            found += [stopped_finding(sentence) for sentence in scalars["analysis_warnings"]
+                      if sentence.startswith("Stopped at its time limit")]
         if scalars["stopped"]:
             found.append(finding(
                 "error", "creep_runs_away",
@@ -682,7 +703,9 @@ class CreepAnalysis(NonlinearAnalysis):
         reached = scalars["reached_h"]
         summary: dict[str, Any] = {
             "status": (f"Creep runs away after about {hours_label(reached)}" if scalars["stopped"]
+                       else f"Stopped at its time limit after {hours_label(reached)}" if scalars.get("timed_out")
                        else f"Held for {hours_label(inputs.duration_h)}"),
+            **({"timed_out": True} if scalars.get("timed_out") else {}),
             "stopped": scalars["stopped"],
             "duration_h": round(inputs.duration_h, 6),
             "reached_h": round(reached, 6),

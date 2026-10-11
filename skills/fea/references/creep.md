@@ -93,7 +93,7 @@ grade's data: use the grade's own):
   held fixed) the stress frames fall over the hold. The summary gives `initial_max_von_mises_MPa`
   (at 0 h), `max_von_mises_MPa` (at the end) and `relaxation_percent`; the curve
   `max_von_mises_MPa` gives the peak against time at every step.
-- Summary: `status` ("Held for 10,000 h" or "Creep runs away after about 6,200 h"), `stopped`,
+- Summary: `status` ("Held for 10,000 h", "Creep runs away after about 6,200 h" or "Stopped at its time limit after 4,000 h", then `timed_out: true`), `stopped`,
   `duration_h`, `reached_h`, `temperature_C`, `creep_data_temperature_C`,
   `max_creep_strain_percent` (and the Gauss-point value), `initial_max_displacement_mm`,
   `max_displacement_mm`, each with where, `applied_force_N`, `reaction_force_N`, `steps_requested`,
@@ -150,3 +150,5 @@ It runs at any size. The ladder may take, each an `adapted:` line to report:
 - `defeature`: small fillets and holes far from the loads and fixtures left out of the mesh.
 - `symmetry`: one half (or quarter) solved and mirrored, when the part, the fixtures, the loads
   and the checks are all symmetric.
+
+A run that passes its time limit (twice `fit.seconds`, at least 30 s) stops where it has got to and says so: see [study-file.md](study-file.md#fit).

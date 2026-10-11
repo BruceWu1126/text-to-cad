@@ -16,7 +16,7 @@ from cadgen.results import FeaFace, FeaFacesResult, FeaPair, FeaPart, FeaPartsRe
 if TYPE_CHECKING:
     from cadgen.step_scene import Occurrence, Selection, StepScene
 
-__all__ = ["list_assembly_parts", "list_faces", "solve_study"]
+__all__ = ["list_assembly_parts", "list_faces", "progress_log", "solve_study"]
 
 _AXES = {"X": (1.0, 0.0, 0.0), "Y": (0.0, 1.0, 0.0), "Z": (0.0, 0.0, 1.0)}
 
@@ -547,6 +547,28 @@ def _analysis_extras(analysis, result) -> dict:
     }
 
 
+def progress_log(logger: CliLogger):
+    """What an analysis's ``ctx.log`` (and the meshing lines) print. With --verbose, every line. Without, a line only
+    once nine tenths of ``timestep.PROGRESS_S`` have passed since the last one printed (the run's start the first): a
+    long solve says how far it has got about every ten seconds (a time march's own progress line, due every
+    ``PROGRESS_S``, always gets through) and a short one stays as quiet as before."""
+    if logger.verbose:
+        return logger.debug
+    import time
+
+    from cadgen._internal.fea import timestep
+
+    said = [time.perf_counter()]
+
+    def log(message: str) -> None:
+        now = time.perf_counter()
+        if now - said[0] >= 0.9 * timestep.PROGRESS_S:
+            said[0] = now
+            logger.info(message)
+
+    return log
+
+
 def solve_study(
     target: Path,
     out: Path | None,
@@ -587,6 +609,7 @@ def solve_study(
     inputs = parsed.inputs
     static = parsed.analysis == _STATIC
     logger = CliLogger("fea", verbose=verbose)
+    progress = progress_log(logger)
     document = Path(target)
     glb_path = Path(out) if out is not None else document.with_name(f"{document.stem}.fea.glb")
     if glb_path.suffix.lower() != ".glb":
@@ -662,7 +685,7 @@ def solve_study(
 
     def context(volume, *, space=None, automatic=False, meshed=None):
         return SolveContext(
-            volume=volume, materials=materials, ordinal_of=ordinal_of, space=space, log=logger.debug,
+            volume=volume, materials=materials, ordinal_of=ordinal_of, space=space, log=progress,
             automatic=automatic, upstream={}, budget=budget, plan=fit_plan,
             study=parsed, assembly=plan, part_name=document.stem, geometry=geometry, meshed_plan=meshed,
         )
@@ -680,14 +703,14 @@ def solve_study(
         options: dict = {} if fit_plan.order == 2 else {"order": fit_plan.order}
         if size_field:
             options["size_field"] = size_field
-        logger.debug(f"meshing {occurrence_ref}")
+        progress(f"meshing {occurrence_ref}")
         if plan is None:
             if fit_plan.prepared is not None:
                 options["prepared"] = fit_plan.prepared
             volume = mesh_occurrence(occurrence, max_h=max_h, refine=refine, **options)
         else:
             volume = _mesh_assembly(mesh_assembly, scene, plan, parsed, resolved, ordinal_of, max_h, logger.info, refine, **options)
-        logger.debug(f"meshed: {len(volume.tets)} tets, {len(volume.nodes)} nodes, size {volume.max_h:.3g} mm in {volume.seconds:.1f}s")
+        progress(f"meshed: {len(volume.tets)} tets, {len(volume.nodes)} nodes, size {volume.max_h:.3g} mm in {volume.seconds:.1f}s")
         return volume
 
     def solve_on(volume, automatic: bool = False):

@@ -3,9 +3,12 @@
  * draining, a rising bubble), Tier 3. Its fields are on the part's wetted walls, one per time frame: the
  * water fraction (1 where the liquid touches the wall, 0 where the gas does) and the wall pressure (Pa,
  * signed); mapped onto the structure (one-way), the part's stress and displacement join them and it
- * deforms. Its verdict judges the highest the liquid rises (against the brim or a limit: "Spills over",
- * "Close to the brim", "Stays in") and the hardest it presses on the walls, none of which a load control
- * moves, and choosing a check jumps the scrubber to when it peaked. Its takeaway leads with "Laminar · ".
+ * deforms. Its verdict judges the highest point the liquid's surface reaches anywhere inside (against the
+ * brim or a limit: "Spills over", "Close to the brim", "Stays in") and the hardest it presses on the walls,
+ * none of which a load control moves, and choosing a check jumps the scrubber to when it peaked. Its
+ * takeaway leads with "Laminar · "; liquid that left over the brim is the takeaway itself ("Spills over the
+ * brim: 2.3 mL left the tank (6.4 % of the liquid)"), and a run stopped at its time limit leads it
+ * ("Stopped at its time limit at 0.42 s · ").
  * What you see opens on the Time scrubber (on the moment the liquid rises highest) and the field, water
  * fraction first; Play runs the frames over three seconds. Its setup says how full it starts and how it
  * is shaken ("Half full of water, shaken 0.3 g along X"), where fluid goes in and out, and, mapped, where
@@ -44,6 +47,19 @@ export function shakeWords(acceleration) {
 }
 
 const SINGLE_FLUID = /^Completely full: solved as single-fluid flow/;
+const SPILL = /^Spills over the brim: /;
+const TIME_LIMIT = /^Stopped at its time limit at t = (.+?) of /;
+
+/** The takeaway of a tank that spilled: the file's own sentence ("Spills over the brim: 2.3 mL left the tank ..."); "" otherwise. */
+export function spillCaption(result) {
+  return (result?.analysis?.warnings || []).find((line) => SPILL.test(line)) || "";
+}
+
+/** What leads the takeaway of a run stopped at its time limit: "Stopped at its time limit at 0.42 s"; "" otherwise. */
+export function timeLimitCaption(result) {
+  const line = (result?.analysis?.warnings || []).find((entry) => TIME_LIMIT.test(entry));
+  return line ? `Stopped at its time limit at ${TIME_LIMIT.exec(line)[1]}` : "";
+}
 
 /**
  * Study's "Filled": how full it starts and how it is shaken, its hint how the shake changes over time; a
@@ -103,9 +119,15 @@ export function twoFluidControls(result) {
 
 export default planned({
   name: "multiphase", tier: 3, word: "Two fluids", noun: "this shake", limitWord: "Laminar", family: null, scalesWithLoad: false,
+  // The flow's wall stress grows with its speed squared and more: no check is a multiple of the load.
+  scaling: "none",
   checks: ["fill_level", "wall_pressure", "stress", "displacement"],
   defaultControls: twoFluidControls,
   setupGroups: TWO_FLUIDS_SETUP,
   routine: (result) => (result?.series ? PLAY : null),
   markers: ["inlet", "outlet", "fixture"], displayTitle: "Flow openings",
+  // A spill is the takeaway, not the fill level's "Rises to 40 mm, limit: the brim" (the fluid ends at the brim).
+  caption: spillCaption,
+  // A run stopped at its time limit says so first: nothing after it was solved.
+  stopCaption: timeLimitCaption,
 });

@@ -136,6 +136,40 @@ class StudyFile(unittest.TestCase):
                 self.parse(**change)
             self.assertIn(fragment, str(caught.exception))
 
+    def test_a_spill_fails_the_fill_level_and_says_how_much_left(self):
+        # Fixed gap: a tank that lost 6.4 % of its liquid over the brim read "Fill level: 40 mm against a 40 mm limit,
+        # close" (the fluid ends at the brim, so the level can never pass it) and nothing said it spilled.
+        import types
+
+        import numpy as np
+
+        from cadgen._internal.fea.analyses.multiphase import SPILL_SHARE, MultiphaseAnalysis, spill_sentence
+
+        start = 36e-6
+        sentence = spill_sentence(2.3155e-6, start)
+        self.assertEqual(sentence, "Spills over the brim: 2.3 mL left the tank (6.4 % of the liquid)")
+
+        def judged(spilled):
+            scalars = {"t": np.array([0.0, 0.1, 0.2]), "level": np.array([20.0, 40.0, 30.0]), "pmax": np.array([1.0, 2.0, 1.0]),
+                       "frame_t": [0.0, 0.1, 0.2], "setup": types.SimpleNamespace(height_mm=40.0), "probes": {},
+                       "volume": np.array([start, start - spilled, start - spilled]), "spilled_m3": spilled,
+                       "spill": spill_sentence(spilled, start) if spilled > SPILL_SHARE * start else None,
+                       "analysis_warnings": [], "stopped_at": None, "time_limit": None}
+            result = types.SimpleNamespace(scalars=scalars, solved=None)
+            analysis = MultiphaseAnalysis()
+            check = analysis.judge({"kind": "fill_level"}, 0, None, result, None)
+            if scalars["spill"]:
+                scalars["analysis_warnings"].append(scalars["spill"])
+            return check, analysis.findings(None, result, None, [check], assembly=False)
+
+        check, found = judged(2.3155e-6)
+        self.assertEqual((check["status"], check["spilled_mL"], check["spilled_percent"]), ("fails", 2.3155, 6.4319))
+        self.assertEqual([(f["type"], f["severity"], f["summary"]) for f in found], [("spills_over_brim", "error", sentence)])
+        # Under the threshold (what the smeared surface carries out of a top it only comes near): not a spill.
+        check, found = judged(0.5 * SPILL_SHARE * start)
+        self.assertEqual((check["status"], "spilled_mL" in check), ("close", False))
+        self.assertEqual([f["type"] for f in found], ["fill_level_close_to_limit"])
+
     def test_linear_theory_and_words(self):
         from cadgen._internal.fea.analyses.multiphase import fill_words, sloshing_frequency
 
@@ -287,6 +321,60 @@ class TwoDimensional(unittest.TestCase):
                 if amplitude:
                     self.assertGreater(max(levels), 0.035)                   # it did slosh up near the brim
 
+    def test_liquid_leaving_over_an_open_top_is_counted_as_spilled(self):
+        # Fixed gap: liquid sloshed out over the brim left only a net inflow in the summary (-6.4 % on a gallery tank)
+        # and nothing said so. The solver counts what leaves through an open side nobody named (the brim): all of the
+        # volume lost, to round-off; a tank that is never shaken loses only what its smeared surface leaks.
+        import numpy as np
+        from skfem import MeshTri
+
+        from cadgen._internal.fea.multiphase_ops import Opening, Phases, TwoPhaseProblem, TwoPhaseSolver
+
+        length, height, depth, shake = 0.06, 0.04, 0.032, 0.2
+        mesh = MeshTri.init_tensor(np.linspace(0, length, 13), np.linspace(0, height, 9))
+        top = mesh.facets_satisfying(lambda x: np.isclose(x[1], height), boundaries_only=True)
+        for amplitude in (0.0, 1.0):
+            def acceleration(t, g=amplitude * G0):
+                return np.array([g * math.sin(math.pi * t / shake) if t < shake else 0.0, 0.0])
+
+            solver = TwoPhaseSolver(TwoPhaseProblem(mesh, Phases(WATER, AIR, 1.002e-3, 1.81e-5), depth - mesh.p[1], [0, -G0],
+                                                    acceleration=acceleration, openings=[Opening(top, "outlet", spill=True)]))
+            state = solver.run(0.5, dt_max=0.01)
+            with self.subTest(amplitude_g=amplitude):
+                lost = solver.volume0 - state.volume
+                self.assertAlmostEqual(solver.spilled, lost, delta=1e-9 * solver.volume0)
+                if amplitude:
+                    self.assertGreater(solver.spilled, 0.01 * solver.volume0)     # a real spill, past SPILL_SHARE
+                else:
+                    # Still, 8 mm under the brim: only the smeared surface's own leak (0.02 %), far under SPILL_SHARE.
+                    self.assertLess(solver.spilled, 0.001 * solver.volume0)
+
+    def test_a_march_past_its_time_limit_stops_where_it_got_to_and_says_how_far_on_the_way(self):
+        # Fixed bug: the march had no time limit and said nothing while it ran (a 4 mm tank ran 1 h 46 min with an
+        # empty log). It now prints a line every PROGRESS_S and stops after the step that passes limit_s.
+        from unittest import mock
+
+        import numpy as np
+        from skfem import MeshTri
+
+        from cadgen._internal.fea import timestep
+        from cadgen._internal.fea.multiphase_ops import Phases, TwoPhaseProblem, TwoPhaseSolver
+
+        mesh = MeshTri.init_tensor(np.linspace(0, 0.06, 13), np.linspace(0, 0.04, 9))
+        said: list[str] = []
+        solver = TwoPhaseSolver(TwoPhaseProblem(mesh, Phases(WATER, AIR, 1.002e-3, 1.81e-5), 0.02 - mesh.p[1], [0, -G0]),
+                                log=said.append)
+        with mock.patch.object(timestep, "PROGRESS_S", 0.0):
+            state = solver.run(1.0, dt_max=0.01, limit_s=0.0)
+        self.assertEqual(state.step, 1)
+        self.assertAlmostEqual(solver.stopped_at, state.t)
+        self.assertLess(solver.stopped_at, 1.0)
+        self.assertEqual(len(said), 1)
+        self.assertTrue(said[0].startswith(f"two fluids: t = {state.t:.4g} s of 1 s, 1 steps"), said[0])
+        whole = TwoPhaseSolver(TwoPhaseProblem(mesh, Phases(WATER, AIR, 1.002e-3, 1.81e-5), 0.02 - mesh.p[1], [0, -G0]))
+        self.assertAlmostEqual(whole.run(0.05, dt_max=0.01).t, 0.05)
+        self.assertIsNone(whole.stopped_at)
+
     def test_the_rebuild_sees_a_squeezed_level_function(self):
         # Fixed bug: the band the rebuild watches was picked by each element's farthest corner, so a level function
         # squeezed four times steeper than a distance (the case the hydrostatic split cannot stand) fell out of it
@@ -361,8 +449,54 @@ class Tank(unittest.TestCase):
         self.assertLess(abs(measured - period) / period, 0.05, f"period {measured:.4f} s against {period:.4f} s")
         self.assertLess(abs(sidecar["summary"]["volume"]["max_change_percent"]), 1.0)
         # It sloshed: the liquid rose at the walls and the walls felt a sideways push.
-        self.assertGreater(sidecar["summary"]["peak_fill_level_mm"], 25.5)
-        self.assertGreater(sidecar["summary"]["force_N"]["sloshing_peak_N"], 1e-3)
+        summary = sidecar["summary"]
+        self.assertGreater(summary["peak_fill_level_mm"], 25.5)
+        self.assertGreater(summary["force_N"]["sloshing_peak_N"], 1e-3)
+        # The fill level is the highest point of the surface anywhere, and says where: on the inside, at that height
+        # above the floor (the tank's floor is at z = 2 mm); a probe reads its own line, so never more than it.
+        at = summary["peak_fill_level_at_mm"]
+        self.assertAlmostEqual(at[2] - WALL, summary["peak_fill_level_mm"], places=2)
+        self.assertTrue(WALL - 1e-6 <= at[0] <= WALL + INSIDE[0] + 1e-6)
+        for probe in summary["probes"]:
+            self.assertLessEqual(probe["peak_mm"], summary["peak_fill_level_mm"] + 1e-6)
+        self.assertTrue(any(line.startswith("liquid's surface rises to") and "its highest point anywhere" in line
+                            for line in result.human_lines()))
+        # 25 mm under a 50 mm brim it spills nothing: no more than the smeared surface's own leak, no spill said.
+        self.assertLess(summary["volume"]["spilled_percent"], 0.1)
+        self.assertNotIn("spill", summary)
+
+    def test_a_run_past_its_time_limit_stops_with_a_result_that_says_so(self):
+        # Fixed bug: a 4 mm brake study ran 1 h 46 min and wrote nothing to its log before it was killed. Now, without
+        # --verbose, the march prints a line as it goes and stops at its time limit (twice fit.seconds, at least
+        # LIMIT_FLOOR_S, here patched to 0): a GLB and sidecar written, a warning saying where it stopped, and no
+        # check passing on what was never solved.
+        from unittest import mock
+
+        from cadgen import fea
+        from cadgen._internal.fea import timestep
+
+        study = {"analysis": "multiphase", "fill": {"level_mm": 25}, "end_s": 0.6, "mesh": {"size_mm": 5},
+                 "acceleration": {"direction": [1, 0, 0], "amplitude_g": 0.1, "history": {"shape": "half_sine", "duration_s": 0.05}},
+                 "fit": {"seconds": 1e-6, "allow": []},
+                 "view": {"checks": [{"kind": "fill_level"}, {"kind": "wall_pressure", "limit_Pa": 1e5}]}}
+        printed = io.StringIO()
+        with mock.patch.object(timestep, "LIMIT_FLOOR_S", 0.0), mock.patch.object(timestep, "PROGRESS_S", 0.0), \
+                redirect_stderr(printed):
+            result = fea.solve(self.step, self.step.with_name("tank.fea.glb"), study=study)
+        self.assertIn("[fea] two fluids: t = ", printed.getvalue())           # progress, without --verbose
+        summary = result.summary
+        self.assertLess(summary["stopped_at_s"], 0.6)
+        self.assertEqual((summary["end_s"], summary["planned_end_s"]), (summary["stopped_at_s"], 0.6))
+        stop = next(f for f in result.findings if f["type"] == "time_limit")
+        self.assertEqual(stop["severity"], "warning")
+        self.assertTrue(stop["summary"].startswith("Stopped at its time limit at t = "))
+        # Both checks were well inside their limits when it stopped: close, not passing, and saying where it stopped.
+        self.assertEqual([c["status"] for c in summary["checks"]], ["close", "close"])
+        self.assertTrue(all("(stopped at " in c["label"] for c in summary["checks"]))
+        self.assertFalse(any(f["type"].endswith("_close_to_limit") for f in result.findings))
+        extras, _ = glb_extras(result.glb)
+        self.assertTrue(any(line.startswith("Stopped at its time limit") for line in extras["analysis"]["warnings"]))
+        self.assertAlmostEqual(extras["series"]["frames"][-1]["value"], summary["stopped_at_s"], places=6)
 
     def test_a_run_past_its_budget_takes_the_ladder_and_says_so(self):
         result = solve(self.step, {"analysis": "multiphase", "fill": {"level_mm": 25}, "end_s": 0.6, "mesh": {"size_mm": 5},

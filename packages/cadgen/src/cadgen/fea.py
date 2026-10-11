@@ -86,7 +86,8 @@ def solve(
     mesh_size: target element size in mm, overriding the study's mesh.size_mm.
         Omitted, a fortieth of the part's bounding diagonal.
     vtu: also write a ``.vtu`` of the result for ParaView.
-    verbose: show progress and timings on stderr.
+    verbose: show every progress line and the timings on stderr. Without it, a solve that runs long
+        still says how far it has got on stderr, about every 10 s.
     """
     from cadgen._internal.fea.run import solve_study
 

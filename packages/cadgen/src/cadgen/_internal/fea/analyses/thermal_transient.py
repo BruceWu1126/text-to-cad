@@ -162,7 +162,7 @@ class ThermalTransientAnalysis(ThermalAnalysis):
     def solve(self, ctx: SolveContext, inputs: TransientInputs) -> AnalysisResult:
         import time
 
-        from cadgen._internal.fea import operators, thermal_ops
+        from cadgen._internal.fea import operators, thermal_ops, timestep
 
         timings: dict[str, float] = {}
         warnings: list[str] = []
@@ -175,11 +175,14 @@ class ThermalTransientAnalysis(ThermalAnalysis):
         started = time.perf_counter()
         run = thermal_ops.march(
             system, capacity, inputs.initial_C, inputs.end_s, inputs.first_step, warnings,
-            frames=frames, adaptive=adaptive, solver=plan_solver(ctx), log=ctx.log,
+            frames=frames, adaptive=adaptive, solver=plan_solver(ctx), log=ctx.log, limit_s=timestep.time_limit(ctx),
         )
         timings["solve_s"] = time.perf_counter() - started
+        reached = inputs.end_s if run.stopped_at is None else run.stopped_at
         if ctx.log:
-            ctx.log(f"followed the temperatures for {inputs.end_s:g} s in {run.steps} steps in {timings['solve_s']:.1f}s")
+            ctx.log(f"followed the temperatures for {reached:g} s in {run.steps} steps in {timings['solve_s']:.1f}s")
+        analysis_warnings = [] if run.stopped_at is None else [timestep.stopped_sentence(
+            time_label(run.stopped_at), time_label(inputs.end_s), timestep.time_limit(ctx))]
         temperatures = [state for _, state in run.frames]
         fluxes = [thermal_ops.heat_flux(ctx.space, list(ctx.materials), state) for state in temperatures]
         series = Series(kind="time", unit="s", default=run.hottest_frame, frames=[
@@ -201,7 +204,7 @@ class ThermalTransientAnalysis(ThermalAnalysis):
             curves={"max_temperature_C": {"x": [round(t, 9) for t in run.curve_t], "x_unit": "s",
                                           "y": [round(v, 6) for v in run.curve_max], "y_unit": "°C"}},
             solver=how, timings=timings, warnings=warnings,
-            scalars={"march": run, "reference_C": inputs.reference_C, "analysis_warnings": [], "adaptive": adaptive},
+            scalars={"march": run, "reference_C": inputs.reference_C, "analysis_warnings": analysis_warnings, "adaptive": adaptive},
         )
         radiated = radiation_summary(system, inputs, run.final)
         if radiated is not None:
@@ -228,16 +231,22 @@ class ThermalTransientAnalysis(ThermalAnalysis):
         times = [t for t, _ in run.frames]
         frame = min(range(len(times)), key=lambda i: (abs(times[i] - when), i))
         at = {"frame": frame, "value": round(when, 9), "unit": "s", "time_s": round(when, 9)}
-        return temperature_check(check, peak.value, inputs.reference_C, at=peak.at, ref=peak.ref, faces=peak.faces,
-                                 extra={"at": at})
+        from cadgen._internal.fea.timestep import stopped_check
+
+        judged = temperature_check(check, peak.value, inputs.reference_C, at=peak.at, ref=peak.ref, faces=peak.faces,
+                                   extra={"at": at})
+        return stopped_check(judged, None if run.stopped_at is None else time_label(run.stopped_at))
 
     def findings(self, ctx: SolveContext, result: AnalysisResult, inputs: TransientInputs,
                  check_results: list[dict], *, assembly: bool) -> list[dict]:
         from cadgen._internal.fea.analyses.thermal import temperature_findings
+        from cadgen._internal.fea.timestep import stopped_finding
 
-        found = temperature_findings(check_results, assembly=assembly)
         run = result.scalars["march"]
-        if run.hottest_time >= inputs.end_s * (1 - 1e-9) and run.hottest > inputs.initial_C + 1e-6:
+        # A check close only because the march stopped short says nothing beyond the stop's own warning.
+        found = [stopped_finding(sentence) for sentence in result.scalars.get("analysis_warnings", ())]
+        found += temperature_findings([c for c in check_results if not c.get("passed_until_stop")], assembly=assembly)
+        if run.stopped_at is None and run.hottest_time >= inputs.end_s * (1 - 1e-9) and run.hottest > inputs.initial_C + 1e-6:
             last = run.curve_max[-2] if len(run.curve_max) > 1 else run.hottest
             found.append({
                 "check": "fea", "severity": "info", "type": "still_heating",
@@ -263,7 +272,8 @@ class ThermalTransientAnalysis(ThermalAnalysis):
             "final_max_temperature_C": round(float(run.final.max()), 4),
             "max_heat_flux_W_m2": round(max(float(flux.max()) for flux in result.frame_fields["heat_flux"]), 4),
             "initial_C": inputs.initial_C,
-            "end_s": inputs.end_s,
+            "end_s": inputs.end_s if run.stopped_at is None else round(run.stopped_at, 9),
+            **({} if run.stopped_at is None else {"stopped_at_s": round(run.stopped_at, 9), "planned_end_s": inputs.end_s}),
             "step_s": round(inputs.first_step, 9),
             "steps": run.steps,
             "adaptive": result.scalars["adaptive"],

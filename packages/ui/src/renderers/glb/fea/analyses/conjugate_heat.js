@@ -1,8 +1,8 @@
 /**
  * Cooled by flow (lite): heat carried by a flowing fluid into and out of the part (conjugate heat transfer),
- * Tier 3. Its fields are on the part's surface: the part's temperature (signed), the fluid's temperature next
- * to each wetted wall, the heat into the flow (W/m², signed) and the heat transfer coefficient, and the wall
- * pressure. Its verdict judges the hottest point of the part against a limit (measured from the coolest
+ * Tier 3. Its fields are on the part's surface: the part's temperature (signed), the fluid's mixed temperature
+ * across the passage at each wetted wall (inlet's to outlet's), the heat into the flow (W/m², signed) and the
+ * heat transfer coefficient, the wall pressure and the speed near the wall (m/s). Its verdict judges the hottest point of the part against a limit (measured from the coolest
  * temperature the study sets) and the flow's pressure drop and fastest speed, none of which a load control
  * moves; nothing deforms. Its takeaway leads with the flow model the file solved ("Laminar · ", "Turbulent · ").
  * What you see opens on the field alone, temperature first, with the fluid temperature among its options; its

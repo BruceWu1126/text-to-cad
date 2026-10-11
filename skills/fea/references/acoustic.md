@@ -124,7 +124,9 @@ Vibro-acoustics, a harmonic shake of the part driving the air around it:
     frame per frequency kept (the peaks, each check's peak, and log-spaced ones; at most 24); the
     viewer opens on the loudest.
   - With the air `inside` or `outside`, the values are on the faces the air touches; a dry face
-    reads 0. With the part as the air, every face shows its own.
+    reads 0. With the part as the air, every face shows its own. The air closed `inside` is
+    written alone (the faces it wets, `analysis.acoustic.shown: "air"`), with the walls around it
+    as an outline of their edges in mm (`analysis.acoustic.walls_mm`), which the viewer draws.
 - Summary: `solve`, `domain`, `fluid`, `air_mesh` (`elements`, `size_mm`, `top_Hz`,
   `elements_per_wavelength`, the open-air `box_mm`), and
   - modes: `modes` (each `frequency_Hz`), `first_frequency_Hz`, `uniform_mode_left_out`;

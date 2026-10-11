@@ -200,7 +200,7 @@ class Requires(unittest.TestCase):
             with self.subTest(analysis=name), self.assertRaises(ValueError) as caught:
                 parse_study({**study, "material": ortho})
             message = str(caught.exception)
-            self.assertIn(f"material: {name} studies treat a material as the same in every direction, and steel is orthotropic", message)
+            self.assertIn(f"material: {name} studies treat a material as the same in every direction, and Steel (structural, generic) is orthotropic", message)
             self.assertIn("static, modal, buckling, harmonic, random_vibration, shock, transient, fatigue, drop and thermal_stress "
                           "studies take an orthotropic material", message)
         # An assembly's part made of one is refused the same way.

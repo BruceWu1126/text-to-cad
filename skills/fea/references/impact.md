@@ -141,3 +141,5 @@ small fillet or a sliver can make a run slow. It is never refused; in this order
 
 Report every step with its accuracy note ("Added 5.0% to the part's mass ... peak g moved 0.5%
 against an unscaled rerun"). A result that took a step with an accuracy cost says "adapted".
+
+A run that passes its time limit (twice `fit.seconds`, at least 30 s) stops where it has got to and says so: see [study-file.md](study-file.md#fit).

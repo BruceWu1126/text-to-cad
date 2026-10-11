@@ -264,6 +264,42 @@ class Bars(unittest.TestCase):
         stopped = nonlinear_driver.solve_path(Unsettling(), steps=1, runaway=None, deadline_s=0.0)
         self.assertEqual((stopped.collapsed, stopped.out_of_time, stopped.records), (True, True, []))
 
+    def test_a_path_still_getting_through_its_steps_is_not_stopped_by_its_deadline(self):
+        """The deadline bounds time without progress, not the whole path: a path that keeps getting through steps, now
+        and then cutting one (a bolted lap joint pulled off, 17 small steps over half an hour on a 3 mm mesh), runs to
+        the end however long that takes. Before, any cut past the deadline ended the path: the lap joint stopped at
+        20 % of its load, its first load step, after the preload had used most of the time."""
+        import time
+
+        import numpy as np
+        import scipy.sparse as sparse
+
+        from cadgen._internal.fea import nonlinear_driver
+
+        class Rough:
+            """Linear (u = λ), but a step longer than 0.3 finds no equilibrium; each step it gets through takes 30 ms."""
+
+            size, free, external = 1, np.array([0]), np.array([1.0])
+            locations, component = None, None
+
+            def __init__(self):
+                self.kept = 0.0
+
+            def evaluate(self, u, *, tangent):
+                force = np.array([np.nan]) if abs(float(u[0]) - self.kept) > 0.3 + 1e-9 else u.copy()
+                return force, (sparse.csr_matrix(np.eye(1)) if tangent else None)
+
+            def commit(self, u, factor):
+                time.sleep(0.03)
+                self.kept = float(u[0])
+
+        # Adaptive steps of 0.25 double after each easy one, past 0.3, and are cut back: a cut every other step.
+        path = nonlinear_driver.solve_path(Rough(), steps=4, adaptive=True, runaway=None, deadline_s=0.05)
+        self.assertGreater(path.seconds, 0.05)  # the whole path ran longer than the deadline
+        self.assertGreater(path.cuts, 0)
+        self.assertEqual((path.collapsed, path.out_of_time, path.factor), (False, False, 1.0))
+        self.assertFalse(path.warnings)
+
 
 def _glb(path: Path) -> dict:
     raw = path.read_bytes()

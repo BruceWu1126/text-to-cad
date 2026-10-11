@@ -33,6 +33,8 @@ export default Object.freeze({
   family: null,
   estimate: false,
   scalesWithLoad: false,
+  // Not linear in the load: every check is judged as solved, its takeaway its own sentence, never "OK up to N× this load".
+  scaling: "none",
   checks: Object.freeze(["creep_strain", "stress", "displacement"]),
   checkLabels: Object.freeze({}),
   // The time scrubber (controls.seriesControls words an hours series "Time"), the field, the deformation.

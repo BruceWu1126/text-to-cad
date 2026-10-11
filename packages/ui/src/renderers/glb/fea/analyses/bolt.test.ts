@@ -130,4 +130,17 @@ describe('bolt', () => {
       expect(plain(verdict.caption)).toBe('Lite · Peak 300 MPa, limit 250 MPa');
     }
   });
+
+  it('leads with where the load path stopped, before its limit word and its worst check', () => {
+    const checks = [{ kind: 'stress', label: 'Strength', value: 300, limit: 250, unit: 'MPa', ratio: 1.2, close_at: 0.5, margin: 2,
+      status: 'fails', where: { ref: null, at: [0, 0, 0] }, scaling: 'none' }];
+    const said = boltedResult({ checks, collapsed: true, load_percent: 20,
+      analysis: { type: 'bolt', tier: 3, word: 'Bolted joint', limits: [LIMIT], warnings: ['Stops at about 20 % of the load'] } });
+    expect(plain(feaVerdict(said).caption)).toBe('Stops at about 20 % of the load · Lite · Peak 300 MPa, limit 250 MPa');
+    // An older file without the sentence: from the last load it carried.
+    const unsaid = boltedResult({ checks, collapsed: true, load_percent: 46.25,
+      analysis: { type: 'bolt', tier: 3, word: 'Bolted joint', limits: [LIMIT], warnings: [] } });
+    expect(plain(feaVerdict(unsaid).caption)).toBe('Stops at about 46 % of the load · Lite · Peak 300 MPa, limit 250 MPa');
+    expect(plain(feaVerdict(boltedResult({ checks })).caption)).toBe('Lite · Peak 300 MPa, limit 250 MPa');
+  });
 });

@@ -121,6 +121,9 @@ class Opening:
     velocity: Any = None                       # inlet: the velocity vector, m/s
     phase: float = 1.0                         # inlet: 1 brings liquid, 0 gas
     pressure: float = 0.0                      # outlet: Pa
+    #: outlet: an open side nobody named (the brim, open to the air): the liquid that leaves through it spills,
+    #: counted in the solver's ``spilled``.
+    spill: bool = False
 
 
 @dataclass
@@ -160,19 +163,21 @@ def heaviside(distance, epsilon: float):
     return 0.5 * (1.0 + np.tanh(np.asarray(distance, dtype=float) / (2.0 * epsilon)))
 
 
-def interface_heights(mesh, distance, up) -> "Any":
-    """Where the interface (d = 0) crosses the mesh's edges, as heights along ``up`` (a unit vector): one per crossing."""
+def interface_heights(mesh, distance, up, *, points: bool = False) -> "Any":
+    """Where the interface (d = 0) crosses the mesh's edges, as heights along ``up`` (a unit vector): one per crossing.
+    With ``points``, ``(heights, crossings)``, the crossings (dim, n) in the mesh's units."""
     import numpy as np
 
     edges = mesh.edges if mesh.p.shape[0] == 3 else mesh.facets
     a, b = distance[edges[0]], distance[edges[1]]
     cross = a * b < 0
     if not cross.any():
-        return np.zeros(0)
+        return (np.zeros(0), np.zeros((mesh.p.shape[0], 0))) if points else np.zeros(0)
     s = a[cross] / (a[cross] - b[cross])
-    za = up @ mesh.p[:, edges[0, cross]]
-    zb = up @ mesh.p[:, edges[1, cross]]
-    return za + s * (zb - za)
+    pa, pb = mesh.p[:, edges[0, cross]], mesh.p[:, edges[1, cross]]
+    at = pa + s * (pb - pa)
+    heights = up @ at
+    return (heights, at) if points else heights
 
 
 def _elements(dim: int):
@@ -454,6 +459,10 @@ class TwoPhaseSolver:
         self.dx = np.asarray(self.pbasis.dx)
         self.volume0 = self.volume(self.distance)
         self.expected_volume = self.volume0
+        #: The liquid that has left over the brim (through the ``spill`` openings), m^3 (m^2 in 2D).
+        self.spilled = 0.0
+        #: Where ``run`` stopped at its time limit, s; ``None`` when it ran to its end.
+        self.stopped_at: float | None = None
         self.max_drift = 0.0
         self.corrections = 0
         #: One fluid filling the whole inside: no free surface, so no level set to carry and no volume to keep, and its
@@ -711,7 +720,10 @@ class TwoPhaseSolver:
             return distance
         distance = self.advect(distance, u_adv, dt)
         if self.open:
-            self.expected_volume += dt * self._inflow(distance, u_adv)
+            flows = self._flows(distance, u_adv)
+            self.expected_volume += dt * sum(flows)
+            # What leaves over the brim (an outlet's flow is never inward: air coming back carries no liquid).
+            self.spilled -= dt * sum(flow for flow, opening in zip(flows, self.problem.openings) if opening.spill)
         target = self.expected_volume
         self.max_drift = max(self.max_drift, abs(self.volume(distance) - target) / max(abs(self.volume0), 1e-300))
         if self.profile_error(distance) > PROFILE_TOL:
@@ -923,9 +935,14 @@ class TwoPhaseSolver:
         return math.sqrt((ph.rho_liquid + ph.rho_gas) * self.h_min ** 3 / (4.0 * math.pi * ph.sigma))
 
     def run(self, end_s: float, *, dt_max: float, stops: Sequence[float] = (), dt_first: float | None = None,
-            on_step: Callable[[State], None] | None = None) -> State:
-        """March from rest to ``end_s``: steps CFL-limited and at most ``dt_max``, landing on each of ``stops``."""
+            on_step: Callable[[State], None] | None = None, limit_s: float | None = None) -> State:
+        """March from rest to ``end_s``: steps CFL-limited and at most ``dt_max``, landing on each of ``stops``.
+
+        ``log`` gets a progress line at most every ``timestep.PROGRESS_S`` seconds; past ``limit_s`` seconds of wall
+        time the march stops after the step it is on, ``stopped_at`` saying where, and returns that step's state."""
         import numpy as np
+
+        from cadgen._internal.fea.timestep import Clock
 
         u_n = np.zeros(self.nu)
         u_n[self.D_u] = self.x_u
@@ -940,6 +957,7 @@ class TwoPhaseSolver:
         dt_cap = min(dt_max, self.capillary_step())
         dt = min(dt_first or dt_cap, dt_cap)
         tiny = 1e-12 * max(end_s, 1.0)
+        clock = Clock(self.log, limit_s)
         while t < end_s - tiny:
             speed = float(np.linalg.norm(self.nodal_velocity(u_n), axis=1).max())
             limit = dt_cap if speed <= 0 else min(dt_cap, self.cfl * self.h_min / speed)
@@ -965,17 +983,25 @@ class TwoPhaseSolver:
                           self.volume(distance), speed)
             if on_step:
                 on_step(state)
+            clock.tell(lambda: f"two fluids: t = {t:.4g} s of {end_s:.4g} s, {step} steps (the last {dt:.3g} s)")
+            if clock.over() and t < end_s - tiny:
+                self.stopped_at = t
+                break
         self.distance = distance
         return state
 
     def _inflow(self, distance, u) -> float:
-        """The liquid's volume flow into the container through its openings, m^3/s: minus the integral of H u . n,
-        H the fluid an inlet brings (1 liquid, 0 gas) and, at an outlet, the share of what is there where the flow
-        leaves and 0 (the air outside) where it comes back in."""
+        """The liquid's volume flow into the container through its openings, m^3/s (:meth:`_flows`, summed)."""
+        return float(sum(self._flows(distance, u)))
+
+    def _flows(self, distance, u) -> list[float]:
+        """The liquid's volume flow in through each opening, m^3/s: minus the integral of H u . n, H the fluid an inlet
+        brings (1 liquid, 0 gas) and, at an outlet, the share of what is there where the flow leaves and 0 (the air
+        outside) where it comes back in. One per ``problem.openings``, in order."""
         import numpy as np
         from skfem import FacetBasis, Functional
 
-        total = 0.0
+        flows: list[float] = []
         velocity, scalar = _elements(self.dim)
         for opening in self.problem.openings:
             fu = FacetBasis(self.mesh, velocity, facets=np.asarray(opening.facets, dtype=np.int64), intorder=3)
@@ -987,5 +1013,5 @@ class TwoPhaseSolver:
                 share = np.where(out, heaviside(fp.interpolate(distance).value, self.epsilon), 0.0)
             else:
                 share = np.full(fp.interpolate(distance).value.shape, 1.0 if opening.phase >= 0.5 else 0.0)
-            total -= Functional(lambda w: w["phi"] * (w["u"] * w.n).sum(axis=0)).assemble(fu, u=value, phi=share)
-        return float(total)
+            flows.append(-float(Functional(lambda w: w["phi"] * (w["u"] * w.n).sum(axis=0)).assemble(fu, u=value, phi=share)))
+        return flows

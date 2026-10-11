@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { BoxGeometry, BufferAttribute, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
 import { readFeaResult } from './feaResult.js';
-import { ARROW_LENGTH, GHOST_OPACITY, MARKER_KINDS, createFeaMarkers, dropWords, loadLabel, markerGateText, markerPoses, markerSites, shakeWords } from './feaMarkers.js';
+import { ARROW_LENGTH, GHOST_OPACITY, MARKER_KINDS, createFeaMarkers, dropWords, labelOutside, loadLabel, markerGateText, markerPoses, markerSites, pastOutline, shakeWords } from './feaMarkers.js';
 
 // A unit cube in the result's glTF space, its six faces in BoxGeometry's order (+X, -X, +Y, -Y, +Z,
 // -Z) as `_FACE` 0..5, wound outward as the writer winds it.
@@ -219,6 +219,11 @@ describe('every other kind of marker', () => {
     near(pose.direction, [0, -1, 0]);
     near(pose.tip, [0, -ARROW_LENGTH * Math.sqrt(3) / 2, 0]);
     expect(markers.labels(2).map((label: any) => label.text)).toEqual(['2 g down']);
+    // Its label leaves the model along the arrow, beside it (above or below the cube), never over its middle.
+    const [label] = markers.labels(2);
+    expect(Math.abs(label.at[1])).toBeGreaterThan(0.5);
+    expect([label.at[0], label.at[2]]).toEqual([0, 0]);
+    expect(label.corners).toHaveLength(8);
     markers.dispose();
   });
 
@@ -359,5 +364,69 @@ describe('every other kind of marker', () => {
     expect([dropWords(1000), dropWords(500), dropWords(1500)]).toEqual(['1 m drop', '500 mm drop', '1.5 m drop']);
     expect([shakeWords({ kind: 'psd', direction: [0, 0, 1] }), shakeWords({ kind: 'srs', direction: [1, 0, 0] }),
       shakeWords({ kind: 'base', direction: [0, 0, 1], amplitudeG: 2 }, 1.5)]).toEqual(['shaken at random along Z', 'a shock along X', 'shaken 3 g along Z']);
+  });
+});
+
+describe('a label is never on or inside the part', () => {
+  const BOX = { low: [-0.5, -0.5, -0.5], high: [0.5, 0.5, 0.5] };
+  const inside = (p: number[]) => p.every((v) => Math.abs(v) <= 0.5 + 1e-9);
+
+  it('leaves the model\'s box along its marker\'s line, by the nearer way: a pin hole\'s load, a body load', () => {
+    // "36000 N" in a pin hole near the +X end: the arrow's ends both inside the hole; it leaves by the near +X side.
+    const hole = labelOutside({ free: [0.3, 0, 0], anchor: [0.4, 0, 0] }, BOX, Math.sqrt(3));
+    expect(inside(hole.at)).toBe(false);
+    expect(hole.at[0]).toBeGreaterThan(0.5);
+    expect([hole.at[1], hole.at[2]]).toEqual([0, 0]);
+    // The other way round (free end towards the far side): still out by the nearer +X side, back past its anchor.
+    const back = labelOutside({ free: [0.2, 0, 0], anchor: [0.4, 0, 0] }, BOX, Math.sqrt(3));
+    expect(back.at[0]).toBeGreaterThan(0.5);
+    // Already outside: where it was.
+    expect(labelOutside({ free: [0, 0.7, 0], anchor: [0, 0.5, 0] }, BOX, 1).at).toEqual([0, 0.7, 0]);
+  });
+
+  it('on screen, moves a label past the model\'s outline along its line, by the nearer way, a back face\'s too', () => {
+    const square = [[0, 0], [100, 0], [100, 100], [0, 100]];
+    // A sideways load on a hidden back face: its free end projects inside the outline; it runs on out of it.
+    const sideways = pastOutline([60, 50], [50, 50], square, 10);
+    expect(sideways).toMatchObject({ x: 110, y: 50, dx: 1, dy: 0 });
+    // A shaker standing under the part, its free end pointing up into it: labelled below, not across the part.
+    const shake = pastOutline([50, 95], [50, 105], square, 10);
+    expect(shake.y).toBeGreaterThan(100);
+    expect(shake.dy).toBeGreaterThan(0);
+    // Outside already: only the gap.
+    expect(pastOutline([50, -20], [50, -5], square, 10)).toMatchObject({ x: 50, y: -30 });
+    // An arrow seen end on: straight out from the outline's middle.
+    const endOn = pastOutline([70, 50], [70.5, 50], square, 10);
+    expect(endOn.x).toBeGreaterThan(100);
+  });
+});
+
+describe('a sound result\'s source and walls', () => {
+  it('marks a part shaken by a harmonic result as the source: its broad faces, not the held one, labelled "vibrating"', () => {
+    // A slab: its two broad faces (+Y, -Y in glTF) are the plate's; held on -X.
+    const plate = cube({ fixtures: [{ type: 'fixed', faces: ['#o1.f2'] }], loads: [], excitation: { type: 'base', direction: [0, 0, 1], amplitude_g: 1 },
+      acoustic: { solve: 'response', domain: 'outside', sources: [], from: 'harmonic' } }, [0, 0, 0], { analysis: { type: 'acoustic' } });
+    plate.mesh.geometry.scale(1, 0.05, 1);
+    const markers = createFeaMarkers(THREE, plate);
+    expect(markers.kinds).toContain('speaker');
+    const faces = new Set(markers.sites.filter((site: any) => site.kind === 'speaker').map((site: any) => site.ref));
+    // +Y and -Y (#o1.f3, #o1.f4) and the +Z/-Z sides as broad as them here are not: only faces of a quarter of the largest.
+    expect([...faces].sort()).toEqual(['#o1.f3', '#o1.f4']);
+    markers.update(positionsOf(plate));
+    expect(markers.labels(1).find((label: any) => label.kind === 'speaker')?.text).toBe('vibrating');
+    markers.dispose();
+  });
+
+  it('draws the walls around the air shown alone as a faint outline', () => {
+    const walls_mm = [[-510, -510, -510, 510, -510, -510], [-510, -510, -510, -510, 510, -510]];
+    const air = cube({ fixtures: [], loads: [], acoustic: { solve: 'modes', domain: 'inside', sources: [] } }, [0, 0, 0],
+      { analysis: { type: 'acoustic', acoustic: { solve: 'modes', domain: 'inside', shown: 'air', walls_mm } } });
+    expect(air.analysis.walls).toEqual(new Float32Array([-0.51, -0.51, 0.51, 0.51, -0.51, 0.51, -0.51, -0.51, 0.51, -0.51, -0.51, -0.51]));
+    const markers = createFeaMarkers(THREE, air);
+    expect(markers.walls).toBe(true);
+    const lines = markers.object3D.getObjectByName('fea-enclosure-walls') as THREE.LineSegments;
+    expect(lines.geometry.getAttribute('position').count).toBe(4);
+    expect((lines.material as THREE.LineBasicMaterial).opacity).toBeLessThan(1);
+    markers.dispose();
   });
 });

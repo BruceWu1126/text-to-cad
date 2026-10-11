@@ -489,7 +489,7 @@ class TransientAnalysis:
 
         import numpy as np
 
-        from cadgen._internal.fea import operators
+        from cadgen._internal.fea import operators, timestep
         from cadgen._internal.fea import superposition as sp
 
         space = ctx.space
@@ -537,7 +537,10 @@ class TransientAnalysis:
         else:
             march = self._direct(ctx, inputs, K, M, held, free, F, histories, corners, frames_wanted, timings, warnings)
         if ctx.log:
-            ctx.log(f"transient: {march['steps']} steps to {inputs.end_s:g} s, {march['solver']}")
+            ctx.log(f"transient: {march['steps']} steps to {march['end_s']:g} s, {march['solver']}")
+        stopped = march.get("stopped_at")
+        analysis_warnings = [] if stopped is None else [timestep.stopped_sentence(
+            time_label(stopped), time_label(march["planned_end_s"]), timestep.time_limit(ctx))]
 
         frame_t = march["frame_t"]
         stress_max = [float(v.max()) for v in march["frame_vm"]]
@@ -587,7 +590,9 @@ class TransientAnalysis:
                 "static_max_mm": static_max,
                 "static_von_mises_MPa": static_vm,
                 "applied": [[float(F[space.component == c, j].sum()) for c in range(3)] for j in range(F.shape[1])],
-                "analysis_warnings": [],
+                "analysis_warnings": analysis_warnings,
+                "stopped_at": stopped,
+                "planned_end_s": march.get("planned_end_s", march["end_s"]),
                 "study_checks": tuple(getattr(ctx.study, "checks", ()) or ()),
                 "margin": float(getattr(ctx.study, "margin", 2.0) or 2.0),
                 "parts": None if ctx.assembly is None else [
@@ -781,7 +786,7 @@ class TransientAnalysis:
 
         nodes = space.scalar_count
         full = np.zeros(space.dofs)
-        state = {"best": -1.0, "best_t": 0.0, "best_u": None}
+        state = {"best": -1.0, "best_t": 0.0, "best_u": None, "last_t": 0.0, "last_u": None}
         curve_t: list[float] = []
         curve_d: list[float] = []
         u_peak = np.zeros(nodes)
@@ -800,6 +805,7 @@ class TransientAnalysis:
             u_peak_t[higher] = t
             if largest > state["best"]:
                 state.update(best=largest, best_t=t, best_u=u.copy())
+            state.update(last_t=t, last_u=u)          # the integrator's own array, replaced (not changed) each step
             while targets and t >= targets[0] * (1 - 1e-9) - 1e-15:
                 if not kept or kept[-1][0] != t:
                     kept.append((t, u.copy()))
@@ -810,11 +816,14 @@ class TransientAnalysis:
         run = timestep.newmark(Mff, C, Kff, load, end, dt, adaptive=adaptive, largest_step=end / 20, stops=corners,
                                solver="iterative" if iterative else "direct", near_null=near_null,
                                error_modes=error_modes, on_step=on_step,
-                               log=ctx.log)
+                               log=ctx.log, limit_s=timestep.time_limit(ctx))
         warnings.extend(run.warnings)
-        if all(t != state["best_t"] for t, _ in kept):
-            kept.append((state["best_t"], state["best_u"]))
-            kept.sort(key=lambda frame: frame[0])
+        # A march stopped at its time limit: where it got to is the last frame.
+        extra = [(state["best_t"], state["best_u"])] + ([(state["last_t"], state["last_u"].copy())] if run.stopped_at is not None else [])
+        for when, u in extra:
+            if all(t != when for t, _ in kept):
+                kept.append((when, u))
+        kept.sort(key=lambda frame: frame[0])
         columns = np.zeros((space.dofs, len(kept)))
         for i, (_, u) in enumerate(kept):
             columns[free, i] = u
@@ -833,7 +842,8 @@ class TransientAnalysis:
                                                 f"{' and '.join(hz_text(w / _TWO_PI) for w in omega)}")
         return {
             "steps": run.steps, "first_step_s": dt, "smallest": run.smallest_step, "largest": run.largest_step,
-            "adaptive": adaptive, "end_s": end, "curve_t": curve_t, "curve_d": curve_d,
+            "adaptive": adaptive, "end_s": end if run.stopped_at is None else run.stopped_at, "planned_end_s": end,
+            "stopped_at": run.stopped_at, "curve_t": curve_t, "curve_d": curve_d,
             "frame_t": frame_t, "frame_u": frame_u, "frame_vm": frame_vm,
             "vm_peak": vm_peak, "vm_peak_t": vm_peak_t, "u_peak": u_peak, "u_peak_t": u_peak_t,
             "solver": f"{run.how}, {run.steps} {'adaptive ' if adaptive else ''}steps, {damping}",
@@ -902,6 +912,12 @@ class TransientAnalysis:
         return finer
 
     def judge(self, check: dict, index: int, ctx: SolveContext, result: AnalysisResult, inputs: TransientInputs) -> dict:
+        from cadgen._internal.fea.timestep import stopped_check
+
+        stopped = result.scalars.get("stopped_at")
+        return stopped_check(self._judge_kind(check, index, ctx, result, inputs), None if stopped is None else time_label(stopped))
+
+    def _judge_kind(self, check: dict, index: int, ctx: SolveContext, result: AnalysisResult, inputs: TransientInputs) -> dict:
         from cadgen._internal.fea import checks
         from cadgen._internal.fea.analyses.static import peak_face
 
@@ -927,13 +943,14 @@ class TransientAnalysis:
     def findings(self, ctx: SolveContext, result: AnalysisResult, inputs: TransientInputs,
                  check_results: list[dict], *, assembly: bool) -> list[dict]:
         from cadgen._internal.fea.analyses.modal import finding
+        from cadgen._internal.fea.timestep import stopped_finding
 
         scalars = result.scalars
         whole = "the assembly" if assembly else "the part"
-        found: list[dict] = []
+        found: list[dict] = [stopped_finding(sentence) for sentence in scalars.get("analysis_warnings", ())]
         for check in check_results:
             status = check["status"]
-            if status not in ("fails", "close"):
+            if status not in ("fails", "close") or check.get("passed_until_stop"):
                 continue
             when = time_label(check["at"]["value"])
             severity = "error" if status == "fails" else "warning"
@@ -967,7 +984,8 @@ class TransientAnalysis:
         ))
         end = scalars["end_s"]
         curve = result.curves["max_displacement_mm"]
-        if when >= end * (1 - 1e-9) and len(curve["y"]) > 1 and curve["y"][-1] > curve["y"][-2] and peak_mm > 0:
+        if (scalars.get("stopped_at") is None and when >= end * (1 - 1e-9) and len(curve["y"]) > 1
+                and curve["y"][-1] > curve["y"][-2] and peak_mm > 0):
             found.append(finding(
                 "info", "still_moving",
                 f"Still moving further at the end ({time_label(end)}): run longer (end_s) to see the peak",
@@ -1021,6 +1039,8 @@ class TransientAnalysis:
             "loads": loads,
             "excitation": excitation,
             "end_s": round(scalars["end_s"], 9),
+            **({} if scalars.get("stopped_at") is None else {"stopped_at_s": round(scalars["stopped_at"], 9),
+                                                             "planned_end_s": round(scalars["planned_end_s"], 9)}),
             "step_s": round(scalars["first_step_s"], 9),
             "steps": scalars["steps"],
             "adaptive": scalars["adaptive"],

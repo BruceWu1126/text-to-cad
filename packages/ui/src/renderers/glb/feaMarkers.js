@@ -164,6 +164,23 @@ function spreadTriangles({ areas, centroids }, count) {
   return [...new Set(centres.map(nearest))];
 }
 
+// A face of a shaken part radiates (is marked a sound source) where it is at least this share of its largest face.
+const RADIATING_SHARE = 0.25;
+
+/**
+ * The faces a part shaken by a harmonic result sounds from (`from: "harmonic"`): its broad faces,
+ * each at least `RADIATING_SHARE` of its largest, not held (a fixture's face moves with the base, a
+ * plate's edges barely push the air), where a vibrating panel's sound comes from.
+ */
+function radiatingFaces(result) {
+  const held = new Set(result.study.fixtures.flatMap((fixture) => fixture.faces));
+  const free = result.faces.map((ref, face) => ({ ref, face })).filter(({ ref }) => !held.has(ref));
+  const byFace = trianglesByFace(result, restPositions(result), new Set(free.map(({ face }) => face)));
+  const areas = free.map(({ ref, face }) => ({ ref, area: (byFace.get(face)?.areas || []).reduce((sum, a) => sum + a, 0) }));
+  const largest = Math.max(0, ...areas.map(({ area }) => area));
+  return largest > 0 ? areas.filter(({ area }) => area >= RADIATING_SHARE * largest).map(({ ref }) => ref) : [];
+}
+
 /**
  * The study's entries each kind of marker stands for, in the order Study's rows number them
  * (`group`), each with the faces it stands on (`refs`; none for one that stands elsewhere): the
@@ -194,7 +211,8 @@ function markerGroups(result) {
     outlet: entries(study.flow?.outlets).map(() => []),
     rigid_plane: [...entries(study.rigidPlanes), ...(study.drop?.floor === "rigid" ? [{ floor: true }] : [])].map(() => []),
     crack_front: crackFront(result).map(() => []),
-    speaker: entries(study.acoustic?.sources).filter((source) => source.faces.length).map((source) => source.faces),
+    speaker: [...entries(study.acoustic?.sources).filter((source) => source.faces.length).map((source) => source.faces),
+      ...(study.acoustic?.from === "harmonic" ? [radiatingFaces(result)].filter((refs) => refs.length) : [])],
     electrode: entries(study.piezo?.electrodes).filter((entry) => entry.faces.length).map((entry) => entry.faces),
     // Every bearing on faces is one group: Study names them in one row.
     bearing: [entries(study.rotor?.bearings).flatMap((entry) => (Array.isArray(entry.faces) ? entry.faces.filter((ref) => typeof ref === "string") : []))]
@@ -249,6 +267,9 @@ function loadDirection(load, normal) {
   if (load.vector) return unit(gltfAxes(load.vector));
   return (load.pressure ?? 0) < 0 ? normal : scaled(normal, -1);
 }
+
+/** A box's eight corners. */
+const boxCorners = ({ low, high }) => [0, 1, 2, 3, 4, 5, 6, 7].map((i) => [i & 1 ? high[0] : low[0], i & 2 ? high[1] : low[1], i & 4 ? high[2] : low[2]]);
 
 /** The box of the positions on screen: its `low` and `high` corners and its `centre`. */
 function boxOf(positions) {
@@ -422,6 +443,8 @@ function labelText(result, kind, group, loadScale) {
   if (kind === "outlet") return study.flow.outlets[group].pressure !== null ? `${plainNumber(study.flow.outlets[group].pressure)} Pa` : "";
   if (kind === "speaker") {
     const source = study.acoustic.sources.filter((entry) => entry.faces.length)[group];
+    // Past the study's own sources, the faces a harmonic result shakes: what makes the sound is their vibration.
+    if (!source) return "vibrating";
     return source.velocityMmS !== null ? `${plainNumber(source.velocityMmS)} mm/s` : "";
   }
   if (kind === "electrode") {
@@ -442,6 +465,107 @@ function labelEnds(pose, arrow) {
   if (pose.kind === "convection") return { free: plus(pose.tip, scaled(pose.normal, arrow * 0.9)), anchor: pose.tip };
   if (pose.kind === "base_excitation") return { free: pose.tip, anchor: pose.tail };
   return { free: pose.pushes ? pose.tail : pose.tip, anchor: pose.pushes ? pose.tip : pose.tail };
+}
+
+// The enclosure's outline around a sound result's air: faint, so the air's colours stay what is read.
+const WALL_OPACITY = 0.45;
+
+// A label stands this share of the model's diagonal clear of its box once it is moved out of it.
+const LABEL_CLEARANCE = 0.03;
+
+/** How far from `from` along the unit `way` the box (`low`, `high`) is left behind: 0 from outside it. */
+function boxExit(from, way, { low, high }) {
+  let leave = Infinity;
+  for (let k = 0; k < 3; k += 1) {
+    if (from[k] < low[k] - 1e-12 || from[k] > high[k] + 1e-12) return 0;
+    if (Math.abs(way[k]) > 1e-12) leave = Math.min(leave, ((way[k] > 0 ? high[k] : low[k]) - from[k]) / way[k]);
+  }
+  return Number.isFinite(leave) ? Math.max(leave, 0) : 0;
+}
+
+/**
+ * A label's place outside the model's box, along its marker's line: from the marker's free end on
+ * along the arrow, or from its other end back the other way, whichever leaves the box sooner (a
+ * shake held under the part stands below it, not up through it; a load in a pin hole leaves by the
+ * nearer side of the part, never inside the hole; a body load through the middle leaves past the
+ * model's top or bottom, beside it, not over it), then a little clear of it. `free` and `anchor` as
+ * `labelEnds` gives them; `face` is where the label's text runs away from.
+ */
+export function labelOutside({ free, anchor }, box, diagonal) {
+  const along = sub(free, anchor);
+  if (!box || !(length(along) > 0)) return { at: free, face: anchor };
+  const way = unit(along);
+  const back = scaled(way, -1);
+  const onward = boxExit(free, way, box);
+  const behind = boxExit(anchor, back, box);
+  if (onward === 0) return { at: free, face: anchor };
+  const clear = LABEL_CLEARANCE * diagonal;
+  return behind < onward
+    ? { at: plus(anchor, scaled(back, behind + clear)), face: free }
+    : { at: plus(free, scaled(way, onward + clear)), face: anchor };
+}
+
+/** The convex hull of 2D points, counter-clockwise (Andrew's monotone chain). */
+function hull(points) {
+  const sorted = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (sorted.length < 3) return sorted;
+  const turn = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const half = (list) => {
+    const out = [];
+    for (const p of list) {
+      while (out.length >= 2 && turn(out[out.length - 2], out[out.length - 1], p) <= 0) out.pop();
+      out.push(p);
+    }
+    out.pop();
+    return out;
+  };
+  return [...half(sorted), ...half([...sorted].reverse())];
+}
+
+/** How far from `from` along the unit (`dx`, `dy`) the convex `shape` (counter-clockwise) is left behind: 0 from outside it. */
+function hullExit(from, dx, dy, shape) {
+  let leave = Infinity;
+  for (let i = 0; i < shape.length; i += 1) {
+    const a = shape[i];
+    const b = shape[(i + 1) % shape.length];
+    const ex = b[0] - a[0];
+    const ey = b[1] - a[1];
+    // Inside, every edge has the point on its inner (left) side; it leaves by the nearest edge ahead.
+    const side = ex * (from[1] - a[1]) - ey * (from[0] - a[0]);
+    if (side < 0) return 0;
+    const towards = ex * dy - ey * dx;
+    if (towards < 0) leave = Math.min(leave, side / -towards);
+  }
+  return Number.isFinite(leave) ? leave : 0;
+}
+
+/**
+ * On screen, a label at `at` (its text running away from `face`, where its marker acts), moved along
+ * that line until it is outside the model's outline (`corners`: its box's eight corners on screen,
+ * whose hull bounds every face, a back face's too), then `gap` pixels clear: on from `at`, or back
+ * from `face` the other way, whichever leaves the outline sooner (a shaker under the part labelled
+ * below it, not across it). A line seen end on (an arrow pointing at the eye) moves straight out
+ * from the outline's middle instead. Returns `{ x, y }` and the unit direction its text runs (`dx`, `dy`).
+ */
+export function pastOutline(at, face, corners, gap) {
+  const shape = hull(corners || []);
+  let dx = face ? at[0] - face[0] : 0;
+  let dy = face ? at[1] - face[1] : 0;
+  let ends = Boolean(face);
+  if (Math.hypot(dx, dy) < 2 && shape.length) {
+    const middle = shape.reduce((sum, p) => [sum[0] + p[0] / shape.length, sum[1] + p[1] / shape.length], [0, 0]);
+    [dx, dy] = [at[0] - middle[0], at[1] - middle[1]];
+    ends = false;
+  }
+  const span = Math.hypot(dx, dy);
+  if (!(span > 0)) return { x: at[0] + gap, y: at[1], dx: 1, dy: 0 };
+  dx /= span;
+  dy /= span;
+  if (shape.length < 3) return { x: at[0] + dx * gap, y: at[1] + dy * gap, dx, dy };
+  const onward = hullExit(at, dx, dy, shape);
+  const back = ends && onward > 0 ? hullExit(face, -dx, -dy, shape) : Infinity;
+  if (back < onward) return { x: face[0] - dx * (back + gap), y: face[1] - dy * (back + gap), dx: -dx, dy: -dy };
+  return { x: at[0] + dx * (onward + gap), y: at[1] + dy * (onward + gap), dx, dy };
 }
 
 /** A wave of `periods` swings from `from` to `to` along Y at `x`, as points for a tube. */
@@ -630,6 +754,19 @@ export function createFeaMarkers(THREE, result) {
     group.add(mesh);
     return mesh;
   });
+  // The walls around the air a sound result shows alone (`analysis.walls`): a faint grey outline, drawn whatever
+  // the gate (they are the part, not a marker), so the enclosure reads around its air.
+  const wallEnds = result.analysis?.walls || null;
+  const wallMaterial = wallEnds ? new THREE.LineBasicMaterial({ color: 0x71717a, transparent: true, opacity: WALL_OPACITY, depthWrite: false,
+    toneMapped: false }) : null;
+  const walls = wallEnds ? new THREE.LineSegments(new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(wallEnds, 3)), wallMaterial) : null;
+  if (walls) {
+    walls.name = "fea-enclosure-walls";
+    walls.renderOrder = 9;
+    walls.raycast = () => {};
+    geometries.push(walls.geometry);
+    group.add(walls);
+  }
 
   const up = new THREE.Vector3(0, 1, 0);
   const facing = new THREE.Vector3(0, 0, 1);
@@ -640,6 +777,7 @@ export function createFeaMarkers(THREE, result) {
   const one = new THREE.Vector3(1, 1, 1);
   const colour = new THREE.Color();
   let poses = [];
+  let box = null;
 
   const place = (mesh, index, pose) => {
     rotation.setFromUnitVectors(up, along.fromArray(pose.direction));
@@ -651,9 +789,12 @@ export function createFeaMarkers(THREE, result) {
   return {
     object3D: group,
     sites: placed.sites,
+    // Whether it draws an enclosure's walls (a sound result's air shown alone), markers or none.
+    walls: Boolean(walls),
     kinds: [...new Set(placed.sites.map((site) => site.kind))],
     update(positions) {
       poses = markerPoses(result, placed, positions);
+      box = boxOf(positions);
       let load = 0;
       let fixture = 0;
       const counts = new Map();
@@ -698,6 +839,7 @@ export function createFeaMarkers(THREE, result) {
         plane.visible = visible.fixtures === true;
         planeMaterial.color.set(chosen(planeSites[index]) ? HIGHLIGHT : colours.fixture);
       });
+      wallMaterial?.color.set(colours.fixture);
       for (const mesh of meshes) if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     },
     labels(loadScale = 1, visible = { loads: true, fixtures: true }) {
@@ -717,14 +859,17 @@ export function createFeaMarkers(THREE, result) {
         const middle = scaled(ends.map((end) => end.free).reduce(plus, [0, 0, 0]), 1 / ends.length);
         const away = (end) => length(sub(end.free, middle));
         const chosen = ends.reduce((best, end) => (away(end) < away(best) ? end : best));
-        return { kind, group: index, text, at: chosen.free, face: chosen.anchor };
+        // Never on or inside the part: on along its line out of the model's box (`labelOutside`); FeaLoadLabels
+        // then takes it past the outline on screen (`pastOutline`, from the box's `corners`).
+        const { at, face } = labelOutside(chosen, box, placed.diagonal);
+        return { kind, group: index, text, at, face, ...(box ? { corners: boxCorners(box) } : {}) };
       }).filter(Boolean);
     },
     dispose() {
       group.removeFromParent();
       for (const mesh of meshes) mesh.dispose();
       for (const geometry of geometries) geometry.dispose();
-      for (const material of [...Object.values(materials), ...extra.flatMap((entry) => entry.materials), ...(planeMaterial ? [planeMaterial] : [])]) material.dispose();
+      for (const material of [...Object.values(materials), ...extra.flatMap((entry) => entry.materials), ...(planeMaterial ? [planeMaterial] : []), ...(wallMaterial ? [wallMaterial] : [])]) material.dispose();
     },
   };
 }

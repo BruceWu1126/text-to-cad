@@ -493,8 +493,7 @@ class BoltAnalysis(ContactAnalysis):
 
         def record(u, response):
             full = problem_box[0].full(u)
-            history.append((operators.von_mises(operators.stress(space, materials, full)), response, full.copy(),
-                            problem_box[0].stuck))
+            history.append((operators.von_mises(operators.stress(space, materials, full)), response, full.copy()))
 
         solver = getattr(fit_plan, "solver", "direct") if fit_plan is not None else "direct"
         method = "iterative" if solver in ("iterative", "matrix_free") else "direct"
@@ -524,11 +523,11 @@ class BoltAnalysis(ContactAnalysis):
         if clamped:
             problem.lock(tightened.u, external, friction)
             if np.any(external):
-                # Step 2: the study's loads, the shanks now springs of the bolts' stiffness.
+                # Step 2: the study's loads, the shanks now springs of the bolts' stiffness. Its deadline is its own,
+                # not what the preload left of one: it bounds time without progress, and a slow preload is progress.
                 loaded = path_to_global(nonlinear_driver.solve_path(driven(problem, supports, free), steps=inputs.steps,
                                                                     solver=solver, adaptive=adaptive, runaway=None,
-                                                                    log=ctx.log,
-                                                                    deadline_s=max(path_deadline(ctx) - tightened.seconds, 0.0)),
+                                                                    log=ctx.log, deadline_s=path_deadline(ctx)),
                                  supports)
                 warnings += loaded.warnings
                 path = loaded
@@ -544,7 +543,7 @@ class BoltAnalysis(ContactAnalysis):
         started = time.perf_counter()
         if not history:  # not even the first preload step: the unloaded parts are the one frame
             zeros = np.zeros(problem.size)
-            history = [(np.zeros(basis.dx.shape), problem.response(zeros - problem.offset), zeros, problem.stuck)]
+            history = [(np.zeros(basis.dx.shape), problem.response(zeros - problem.offset), zeros)]
             preload_frame = 0
         # Frames: the preload (the last step-1 state), then step 2's load steps.
         load_states = list(range(preload_frame + 1, len(history)))
@@ -560,7 +559,7 @@ class BoltAnalysis(ContactAnalysis):
             return [spring.force(history[state][2]) for spring in springs]
 
         def pressures(state: int):
-            vm, response, full, _ = history[state]
+            vm, response, full = history[state]
             field = contact_ops.pressure_field(space, constraints, response.normal_force)
             bearing = np.zeros(space.scalar_count)
             for entry, force in zip(bolts, bolt_forces(state)):
@@ -573,12 +572,35 @@ class BoltAnalysis(ContactAnalysis):
 
         stress_frames, displacement_frames, pressure_frames = [], [], []
         for state in picked:
-            vm, _, full, _ = history[state]
+            vm, _, full = history[state]
             stress_frames.append(nodal(vm))
             displacement_frames.append(space.nodal(full + shift))
             pressure_frames.append(pressures(state)[1])
         final_state = picked[-1]
-        final_vm, final_response, final_full, final_stuck = history[final_state]
+
+        def unheld_forces(full) -> dict[int, np.ndarray]:
+            """Each part's share of what the drift springs held of step 2's load at the displacement ``full`` (N, xyz)."""
+            held = (drift + after) @ (full - problem.offset)
+            out: dict[int, np.ndarray] = {}
+            for b, dofs in zip(loose, floating):
+                spring = np.array([float(held[dofs][space.component[dofs] == k].sum()) for k in range(3)])
+                for p in np.unique(node_part[node_body == b]):
+                    out[int(p)] = out.get(int(p), np.zeros(3)) + spring
+            return out
+
+        def sideways(state: int, rows, parts: tuple[int, int], axis) -> float:
+            """The sideways force a joint (its contact ``rows``, between ``parts``) carries in a settled frame: what
+            friction carries across its faces, plus what the drift springs had to hold across the bolt ``axis`` (the
+            rest of a sideways load friction could not hold). Never the forces of a step's first solve with every point
+            held stuck: those grow with the step taken (a pure pull read 8.5 kN sideways after one 20 % step, 3.4 kN
+            after a 2.5 % one, against the 2.3 kN friction held)."""
+            _, response, full = history[state]
+            forces = unheld_forces(full)
+            unheld = sum((forces.get(p, np.zeros(3)) for p in parts), np.zeros(3))
+            lateral = unheld - (unheld @ axis) * axis
+            return float(np.linalg.norm(response.tangential[rows].sum(axis=0))) + float(np.linalg.norm(lateral))
+
+        final_vm, final_response, final_full = history[final_state]
         contact_pressure = pressures(final_state)[0]
 
         # Each bolted joint: its clamp along the load (from the preload on), the sideways force it carries, its friction.
@@ -587,15 +609,17 @@ class BoltAnalysis(ContactAnalysis):
         stats = self._contact_stats(contacts, constraints, owner, final_response, contact_pressure, points, 1.0, moved)
         loose_parts: list[dict] = []
         total = float(np.linalg.norm([factor * external[space.component == k].sum() for k in range(3)]))
-        unheld_by_part: dict[int, np.ndarray] = {}
         pressing_bodies = set(np.unique(node_body[constraints.node[final_response.pressing]]).tolist())
         pressing_bodies |= set(np.unique(node_body[constraints.master_nodes(final_response.pressing & (constraints.owner >= 0))]).tolist())
         held = (drift + after) @ (final_full - problem.offset)  # what the drift springs took of step 2's load
         for b, dofs in zip(loose, floating):
             spring = np.array([float(held[dofs][space.component[dofs] == k].sum()) for k in range(3)])
             load = [float(factor * external[dofs][space.component[dofs] == k].sum()) for k in range(3)]
-            for p in np.unique(node_part[node_body == b]):
-                unheld_by_part[int(p)] = unheld_by_part.get(int(p), np.zeros(3)) + spring
+            if b in pressing_bodies and b in axis_of:
+                # Clamped by a bolt: along its axis the bolt holds it, and what the drift springs take there is their
+                # share of how far the clamped parts bend (a strap pulled off lifts the link a millimetre or two), not
+                # a load nothing holds (the reactions' mismatch says it). It slides away only across the axis.
+                spring = spring - (spring @ axis_of[b]) * axis_of[b]
             size = float(np.linalg.norm(spring))
             if size > 0.01 * max(math.sqrt(sum(c * c for c in load)), total, max(bolt.preload_N for bolt in inputs.bolts)):
                 loose_parts.append({"parts": sorted({names[int(p)] for p in np.unique(node_part[node_body == b])}),
@@ -611,9 +635,11 @@ class BoltAnalysis(ContactAnalysis):
                 (record.factor, float(history[preload_frame + 1 + n][1].normal_force[mine].sum()))
                 for n, record in enumerate(loaded.records if loaded is not None else [])
             ]
-            # Along the load: the sideways force the faces must carry (stuck) against what friction holds there.
+            axis = np.mean([entry["geometry"].axis for entry in members], axis=0)
+            axis /= np.linalg.norm(axis)
+            # Along the load: the sideways force the faces carry against what friction holds there.
             grip = [(0.0, 0.0, friction * preload_clamp)] + [
-                (record.factor, float(np.linalg.norm(history[preload_frame + 1 + n][3][mine].sum(axis=0))),
+                (record.factor, sideways(preload_frame + 1 + n, mine, (i, j), axis),
                  friction * max(float(history[preload_frame + 1 + n][1].normal_force[mine].sum()), 0.0))
                 for n, record in enumerate(loaded.records if loaded is not None else [])
             ]
@@ -621,14 +647,7 @@ class BoltAnalysis(ContactAnalysis):
             pressing = final_response.normal_force[mine] > 0
             touching_area = float(constraints.area[mine][pressing].sum())
             preload_area = float(constraints.area[mine][history[preload_frame][1].normal_force[mine] > 0].sum())
-            axis = np.mean([entry["geometry"].axis for entry in members], axis=0)
-            axis /= np.linalg.norm(axis)
-            tangential = final_response.tangential[mine].sum(axis=0)
-            unheld = sum((unheld_by_part.get(p, np.zeros(3)) for p in (i, j)), np.zeros(3))
-            lateral = unheld - (unheld @ axis) * axis
-            shear = float(np.linalg.norm(tangential)) + float(np.linalg.norm(lateral))
-            # A joint that slips does not settle: the force its faces must carry is what they carry stuck.
-            shear = max(shear, float(np.linalg.norm(final_stuck[mine].sum(axis=0))))
+            shear = sideways(final_state, mine, (i, j), axis)
             if shear <= SHEAR_NOISE * max(preload_clamp, 1e-300):
                 shear = 0.0
             opens = _opens_at(curve, preload_clamp)

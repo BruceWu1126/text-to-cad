@@ -463,6 +463,43 @@ class UnsettledContact(unittest.TestCase):
         self.assertEqual(extras["series"]["frames"][-1]["label"], "100 % load · did not settle")
         self.assertEqual([check["status"] for check in extras["checks"]], ["fails", "fails"])
 
+    def test_a_path_that_runs_out_of_time_says_so_not_that_there_is_no_equilibrium(self):
+        """The same plate with a time target it cannot meet (fit.seconds 0.001, nothing simplified): its step to 100 %
+        does not settle, long past the deadline, so the path stops at 50 % instead of cutting it. The result says it
+        ran out of time (summary and GLB ``out_of_time``), not that Newton's method found no equilibrium."""
+        from unittest import mock
+
+        from build123d import Align, Box, export_step
+
+        from cadgen import fea
+        from cadgen._internal.fea import contact_ops, nonlinear_driver
+
+        real = nonlinear_driver.newton
+
+        def newton(problem, linear, u0, factor, *args, **kwargs):
+            if getattr(problem, "stick", True) is False and factor > 0.9999:
+                return None, 1, float("inf")
+            return real(problem, linear, u0, factor, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as name:
+            step = Path(name) / "plate.step"
+            export_step(Box(20, 20, 4, align=Align.MIN), str(step))
+            top = next(face.ref for face in fea.faces(step).faces if face.normal and face.normal[2] > 0.999)
+            study = {"analysis": "contact", "material": "steel", "mesh": {"size_mm": 5.0}, "steps": 2,
+                     "rigid_planes": [{"point_mm": [0, 0, 0], "normal": [0, 0, 1]}],
+                     "loads": [{"faces": [top], "type": "force", "vector_N": [0, 0, -FORCE]}],
+                     "fit": {"seconds": 0.001, "allow": []}}
+            with mock.patch.object(nonlinear_driver, "newton", newton), mock.patch.object(contact_ops, "AUGMENT_TOLERANCE", -1.0):
+                result, extras, sidecar = _solve(step, study, "out-of-time")
+        summary = result.summary
+        self.assertEqual((summary["collapsed"], summary["out_of_time"], summary["load_percent"]), (True, True, 50.0))
+        self.assertTrue(extras["out_of_time"])
+        self.assertTrue(sidecar["summary"]["out_of_time"])
+        found = {finding["type"]: finding for finding in result.findings}
+        self.assertIn("in the time allowed", found["contact_stops"]["summary"])
+        self.assertNotIn("no equilibrium", found["contact_stops"]["description"])
+        self.assertTrue(any(warning.startswith("stopped cutting the load steps after") for warning in result.warnings))
+
 
 @unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
 class PartMaterials(unittest.TestCase):

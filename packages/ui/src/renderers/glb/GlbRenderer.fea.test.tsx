@@ -373,8 +373,8 @@ it('an assembly has a Parts panel above Study, each part with its joints, the we
   // Opened, base lists the same joint, naming post.
   act(() => { fireEvent.click(screen.getByRole('button', { name: 'Expand base' })); });
   expect(plain(parts).slice(2)).toEqual(['baseSteel · holds 2.5×', '↔ postbonded · 100 mm²']);
-  // Study no longer lists parts or joints; what the parts are made of, which differ, is how many.
-  expect(study.querySelector('[data-study-row="material:name"]')!.textContent!.replace(/\u00a0/g, ' ')).toBe('2 materials');
+  // Study no longer lists parts or joints; what the parts are made of, which differ, each with its part.
+  expect(study.querySelector('[data-study-row="material:name"]')!.textContent!.replace(/\u00a0/g, ' ')).toBe('6061-T6 post, Steel base');
   expect(study.querySelector('[data-study-row^="part:"], [data-study-row^="joint:"], [data-study-row="parts"], [data-study-row="connections"]')).toBeNull();
 });
 

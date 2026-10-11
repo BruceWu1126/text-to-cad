@@ -165,6 +165,43 @@ class HeatedBar(unittest.TestCase):
         smooth = np.linspace(0.0, 100.0, 1001)
         self.assertEqual(colour_range(smooth, 100.0), (0.0, 100.0))
 
+    def test_the_findings_and_the_cli_say_the_clamped_edge_peak_is_a_singularity_read_away_from_it(self):
+        """The capped peak sits on a clamped face: a singularity that grows with the mesh. One finding says so (in
+        place of the generic "peak at the fixed face"), names the face and where the colours stop, and the CLI prints it."""
+        singular = [finding for finding in self.clamped.findings if finding["type"] == "singular_clamped_edge"]
+        self.assertEqual(len(singular), 1)
+        stress = {entry["field"]: entry for entry in self.clamped_extras["fields"]}["von_mises"]
+        summary = singular[0]["summary"]
+        self.assertIn("singularity", summary)
+        self.assertIn("grows every time the mesh is refined", summary)
+        self.assertIn("a little away from the edge", summary)
+        self.assertIn(f"stops at {stress['max']:.0f} MPa", summary)
+        self.assertIn(singular[0]["items"][0]["ref"], [ref for fixture in self.clamped_extras["study"]["fixtures"] for ref in fixture["faces"]])
+        self.assertNotIn("peak_at_fixture", [finding["type"] for finding in self.clamped.findings])
+        self.assertIn(f"warning: {summary}", self.clamped.human_lines())
+
+    def test_only_a_capped_peak_on_a_clamped_face_is_called_singular(self):
+        import dataclasses
+        from types import SimpleNamespace
+
+        import numpy as np
+
+        from cadgen._internal.fea.analyses.thermal_stress import ThermalStressAnalysis
+        from cadgen._internal.fea.checks import Solved
+
+        spike = np.concatenate([np.full(999, 100.0), [900.0]])
+        held = Solved(material_name="Steel", yield_MPa=250.0, peak_MPa=900.0, peak_gauss_MPa=800.0, peak_at=(0.0, 0.0, 0.0),
+                      peak_face="#o1.f1", fixed_faces=("#o1.f1",), max_displacement_mm=0.01, displacement_at=(0.0, 0.0, 0.0),
+                      bbox_diagonal_mm=100.0, margin=2.0, coarser_peak_MPa=600.0, part="bar")
+        singular = ThermalStressAnalysis().singular_edge
+        found = singular(SimpleNamespace(solved=[held], fields={"von_mises": spike}))
+        self.assertEqual((found["type"], found["items"][0]["ref"]), ("singular_clamped_edge", "#o1.f1"))
+        self.assertIn("(it already rose from 600 to 900 MPa on a finer mesh)", found["summary"])
+        self.assertIn("the colour bar stops at 100 MPa", found["summary"])
+        # The peak away from the fixtures (a corner), or a field with no spike: nothing singular to say.
+        self.assertIsNone(singular(SimpleNamespace(solved=[dataclasses.replace(held, peak_face="#o1.f3")], fields={"von_mises": spike})))
+        self.assertIsNone(singular(SimpleNamespace(solved=[held], fields={"von_mises": np.linspace(0.0, 900.0, 1000)})))
+
     def test_the_findings_and_the_cli_say_it_was_heated(self):
         heated = [finding for finding in self.clamped.findings if finding["type"] == "heated"]
         self.assertEqual(len(heated), 1)

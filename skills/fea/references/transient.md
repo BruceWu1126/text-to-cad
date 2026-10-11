@@ -169,3 +169,5 @@ A model too big for the machine still runs; each step is reported
   estimate, on the lowest modes' motion, stays under 0.1 % of the largest
   motion, and shrinks where it does not.
 - `symmetry` is declared but not taken yet.
+
+A run that passes its time limit (twice `fit.seconds`, at least 30 s) stops where it has got to and says so: see [study-file.md](study-file.md#fit).

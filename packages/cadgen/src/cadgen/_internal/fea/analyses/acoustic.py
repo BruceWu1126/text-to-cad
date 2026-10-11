@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AcousticAnalysis", "AcousticInputs", "Absorber", "ELEMENTS_PER_WAVELENGTH", "LIMITS", "Probe", "Source",
-    "level_words",
+    "level_words", "wall_outline",
 ]
 
 LIMITS = (
@@ -77,6 +77,36 @@ G0_MM_S2 = 9806.65
 
 def level_words(dB: float) -> str:
     return f"{dB:.0f} dB" if abs(dB) >= 10 else f"{dB:.1f} dB"
+
+
+def wall_outline(points, triangles, ordinals, wetted) -> list[list[float]]:
+    """The enclosure's walls as an outline, for a viewer that shows the air closed inside alone: each edge of the
+    part's surface between two of its CAD faces where at least one is not wetted by that air (its outer edges, and the
+    rim of an opening), ``[x1, y1, z1, x2, y2, z2]`` in mm, rounded to a micrometre. ``triangles`` are the surface's
+    corner triangles (n, 3) into ``points``, ``ordinals`` each triangle's face, ``wetted`` the faces the air touches."""
+    import numpy as np
+
+    tri = np.asarray(triangles, dtype=np.int64)[:, :3]
+    face = np.asarray(ordinals, dtype=np.int64)
+    if not len(tri):
+        return []
+    edges = np.concatenate([tri[:, [0, 1]], tri[:, [1, 2]], tri[:, [2, 0]]])
+    owner = np.concatenate([face, face, face])
+    edges.sort(axis=1)
+    order = np.lexsort((owner, edges[:, 1], edges[:, 0]))
+    edges, owner = edges[order], owner[order]
+    wet = np.isin(owner, np.asarray(sorted(wetted), dtype=np.int64))
+    out: list[list[float]] = []
+    start = 0
+    for end in range(1, len(edges) + 1):
+        if end < len(edges) and (edges[end] == edges[start]).all():
+            continue
+        faces = set(owner[start:end].tolist())
+        if len(faces) > 1 and not wet[start:end].all():
+            a, b = (np.asarray(points[i], dtype=float) for i in edges[start])
+            out.append([round(float(v), 3) for v in (*a, *b)])
+        start = end
+    return out
 
 
 def _hz(f: float) -> str:
@@ -865,6 +895,9 @@ class AcousticAnalysis:
             # outside reads no pressure and would hide the air's.
             result.scalars["shown_faces"] = sorted(int(o) for o in region.wetted)
             result.scalars["analysis_extras"]["acoustic"]["shown"] = "air"
+            # The walls around it, as an outline (the faces the air does not wet are not written): the box reads.
+            result.scalars["analysis_extras"]["acoustic"]["walls_mm"] = wall_outline(
+                result.dof_locations, result.boundary_quadratic, ctx.volume.boundary_ordinal, region.wetted)
         # The mesh's resolution is a finding (and the ladder's step); the rest are the run's warnings too.
         result.warnings.extend(w for w in warnings if "elements per wavelength" not in w and w not in result.warnings)
         return result

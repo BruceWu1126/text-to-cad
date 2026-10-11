@@ -445,7 +445,7 @@ class ImpactAnalysis:
 
         import numpy as np
 
-        from cadgen._internal.fea import explicit
+        from cadgen._internal.fea import explicit, timestep
         from cadgen._internal.fea.analyses.modal import max_frames
 
         plan = ctx.plan
@@ -469,7 +469,7 @@ class ImpactAnalysis:
         extend_to = AUTO_EXTEND * window if inputs.window_s is None and not stop_after_pulse else None
         run = explicit.simulate(model, drop, end_s=window, stop_after_pulse=stop_after_pulse, subcycle=subcycle,
                                 added_rho=added, plastic=plastic, frames=frames_wanted, log=ctx.log, watch=watch,
-                                extend_to_s=extend_to)
+                                extend_to_s=extend_to, limit_s=timestep.time_limit(ctx))
         timings["march_s"] = time.perf_counter() - started
         if ctx.log:
             ctx.log(f"impact: {run.steps} steps of {run.dt * 1e6:.3g} µs to {run.end_s * 1e6:.4g} µs in {run.seconds:.1f}s")
@@ -529,7 +529,9 @@ class ImpactAnalysis:
                 "mass_check": mass_check, "frame_t": list(run.frame_t), "watch": watch,
                 "element_peak_t": run.vm_peak_t, "element_peak": run.vm_peak,
                 "yields": [m.yield_strength for m in ctx.materials], "node_domain": _node_domain(model, space),
-                "margin": float(getattr(ctx.study, "margin", 2.0) or 2.0), "analysis_warnings": [],
+                "margin": float(getattr(ctx.study, "margin", 2.0) or 2.0),
+                "analysis_warnings": [] if not run.timed_out else [timestep.stopped_sentence(
+                    time_words(run.end_s), time_words(extend_to or window), timestep.time_limit(ctx))],
                 "elements": model.elements, "length_mm": _length_along(model, inputs.direction), "subcycle": run.subcycle,
                 "settled_steps": settled_steps,
             },
@@ -726,6 +728,15 @@ class ImpactAnalysis:
         return run.peak_force / result.scalars["model_mass_t"] / G0_MM_S2, run.peak_force_t
 
     def judge(self, check: dict, index: int, ctx: SolveContext, result: AnalysisResult, inputs: ImpactInputs) -> dict:
+        # A drop's impact (contact with the floor, plasticity, the time it lasts) is not linear in how far it falls:
+        # no check of it is a multiple of the load.
+        from cadgen._internal.fea.timestep import stopped_check
+
+        run = result.scalars["run"]
+        judged = stopped_check(self._judge_kind(check, index, ctx, result), time_words(run.end_s) if run.timed_out else None)
+        return {**judged, "scaling": "none"}
+
+    def _judge_kind(self, check: dict, index: int, ctx: SolveContext, result: AnalysisResult) -> dict:
         from cadgen._internal.fea import checks
         from cadgen._internal.fea.analyses.static import peak_face
 
@@ -785,13 +796,15 @@ class ImpactAnalysis:
                  check_results: list[dict], *, assembly: bool) -> list[dict]:
         from cadgen._internal.fea.analyses.modal import finding
 
+        from cadgen._internal.fea.timestep import stopped_finding
+
         scalars = result.scalars
         run = scalars["run"]
         whole = "the assembly" if assembly else "the part"
-        found: list[dict] = []
+        found: list[dict] = [stopped_finding(sentence) for sentence in scalars.get("analysis_warnings", ())]
         for check in check_results:
             status = check["status"]
-            if status not in ("fails", "close"):
+            if status not in ("fails", "close") or check.get("passed_until_stop"):
                 continue
             when = time_words(check["at"]["value"])
             severity = "error" if status == "fails" else "warning"
@@ -828,7 +841,7 @@ class ImpactAnalysis:
             f"{LIMITS_LINE} The floor's push peaks at {run.peak_force:.4g} N; g is that push over the part's mass",
             [],
         ))
-        if contact is None:
+        if contact is None and not run.timed_out:
             found.append(finding(
                 "info", "still_in_contact",
                 f"Still pressing on the floor at the end ({time_words(run.end_s)}): run longer (window_ms) to follow the "
@@ -869,6 +882,7 @@ class ImpactAnalysis:
             "contact_ms": None if run.pulse_end_s is None else round(run.pulse_end_s * 1e3, 9),
             "end_ms": round(run.end_s * 1e3, 9),
             "stopped_after_pulse": run.stopped_early,
+            **({"stopped_at_time_limit": True} if run.timed_out else {}),
             # The automatic window was followed on past its end until the first impact was over.
             "extended_to_pulse_end": run.extended,
             "step_us": round(run.dt * 1e6, 9),

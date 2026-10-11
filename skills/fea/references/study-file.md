@@ -305,6 +305,17 @@ possible: with every step forbidden, or every step taken and the target still
 missed, the run goes ahead and says how long and how much memory to expect.
 Never ask the user to shrink a model before running it.
 
+A time march (transient's direct march, thermal_transient, creep, impact,
+multiphase) says how far it has got about every 10 s on the CLI, without
+`--verbose` too, and stops at its time limit: twice `seconds` (so 20 minutes
+by default), at least 30 s. A stopped run still writes its GLB and sidecar,
+covering the time it reached: a `time_limit` warning finding, "Stopped at its
+time limit at t = 420 ms of 1.5 s (after 20 minutes): nothing after 420 ms is
+solved; ...", the same sentence in `extras.analysis.warnings`, and each check
+judged on what was solved, its label ending "(stopped at 420 ms)" and a pass
+turned `close` (a failure stays one). Rerun with a larger `seconds`, or a
+coarser mesh, to follow it to the end.
+
 ## `view`
 
 What the Viewer's Study panel shows for the result, all picked from closed

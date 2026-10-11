@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
-import { applyDeformation, readFeaResult } from './feaResult.js';
+import { applyDeformation, readFeaResult, routineScale } from './feaResult.js';
 import { feaDrawnBounds } from './feaBounds.js';
 
 // A rubber strap 74 mm long (glTF metres) whose file carries its first load step (stretched 2.7 mm) and whose last
@@ -54,5 +54,59 @@ describe('feaDrawnBounds', () => {
     const { fea, scene } = strap(false);
     expect(feaDrawnBounds(THREE, scene, fea)).toBeNull();
     expect(feaDrawnBounds(THREE, { object3D: new Group() }, fea)).toBeNull();
+  });
+});
+
+// A piezo bimorph 40 mm long whose static stroke is 2 µm at its tip, drawn ×10: Preview's Load ramp plays it raised to a
+// tenth of its size (`routineScale`), far past the file's own box.
+function bimorph({ series = null as unknown, type = 'piezo' } = {}) {
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.04, 0, 0, 0.04, 0.001, 0, 0, 0.001, 0]), 3));
+  geometry.setIndex([0, 1, 2, 0, 2, 3]);
+  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(16), 4, true));
+  geometry.setAttribute('_von_mises', new BufferAttribute(new Float32Array([0, 1, 1, 0]), 1));
+  // Rest + 10 × 2 µm at the tip: the file's positions carry its own scale.
+  const tip = [0, 0, 0, 0, 0.000002, 0, 0, 0.000002, 0, 0, 0, 0];
+  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(tip), 3));
+  const position = geometry.getAttribute('position');
+  for (let i = 0; i < tip.length; i += 1) (position.array as Float32Array)[i] += 10 * tip[i];
+  const mesh = new Mesh(geometry);
+  Object.assign(mesh.userData, {
+    generator: 'cadgen fea', name: 'bimorph', deformation_scale: 10,
+    analysis: { type, tier: 3, word: type, estimate: false, limits: [], warnings: [] },
+    fields: [{ attribute: '_VON_MISES', name: 'von Mises stress', units: 'MPa', min: 0, max: 1, attribute_scale: 1 },
+      { attribute: '_DISPLACEMENT', name: 'displacement', units: 'mm', min: 0, max: 0.002, attribute_scale: 1000 }],
+    ...(series ? { series } : {}),
+  });
+  const root = new Group();
+  root.add(mesh);
+  const fea = readFeaResult(root)!;
+  const box = new THREE.Box3().setFromObject(root, true);
+  return { fea, mesh, scene: { object3D: root, bounds: { min: box.min.toArray(), max: box.max.toArray() } } };
+}
+
+describe('feaDrawnBounds holds the routine Preview plays, as it is drawn', () => {
+  it('a piezo Load ramp at the scale it plays at: the tip stays in the box Preview frames, so it never crops late', () => {
+    const { fea, mesh, scene } = bimorph();
+    const grown = feaDrawnBounds(THREE, scene, fea)!;
+    expect(grown).not.toBeNull();
+    // Drawn at the top of the ramp, at the routine's scale (a tenth of its 40 mm diagonal: 4 mm of tip travel).
+    const playing = routineScale(mesh, ['_displacement'], 10);
+    expect(playing * 0.000002).toBeCloseTo(0.1 * Math.hypot(0.04, 0.001), 6);
+    applyDeformation(mesh, playing, 10, '_displacement');
+    mesh.geometry.computeBoundingBox();
+    const drawn = mesh.geometry.boundingBox!;
+    expect(drawn.max.y).toBeGreaterThan(scene.bounds.max[1] + 0.003);
+    expect(drawn.max.y).toBeLessThanOrEqual(grown.max[1] + 1e-9);
+  });
+
+  it('a Vibrate swung out both ways', () => {
+    const series = { kind: 'mode', unit: 'Hz', default: 0, frames: [{ value: 850, label: 'Mode 1 · 850 Hz', attributes: { mode_shape: '_DISPLACEMENT' } },
+      { value: 4100, label: 'Mode 2 · 4100 Hz', attributes: { mode_shape: '_DISPLACEMENT' } }] };
+    const { fea, scene } = bimorph({ series, type: 'modal' });
+    const grown = feaDrawnBounds(THREE, scene, fea)!;
+    // Out up and back down, a tenth of its size each way.
+    expect(grown.max[1]).toBeGreaterThan(0.004);
+    expect(grown.min[1]).toBeLessThan(-0.003);
   });
 });

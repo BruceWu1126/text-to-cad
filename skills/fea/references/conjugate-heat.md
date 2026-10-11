@@ -75,19 +75,26 @@ External (a part in a stream):
 
 - Fields on the part's surface:
   - `temperature`: the part's (°C, signed; the colour bar runs from its own coolest);
-  - `fluid_temperature` ("Fluid temperature"): the speed-weighted mean temperature of the fluid
-    within one passage width of each wetted point (the local bulk temperature; for an external flow,
-    within two wall elements of it); a face the fluid does not wet reads the inlet's temperature;
+  - `fluid_temperature` ("Fluid temperature"): the fluid's mixed (bulk, mixing-cup) temperature
+    across the flow at each wetted point: the fluid within one passage width of it (for an external
+    flow, two wall elements), in a thin slab across the local flow, weighted by the flow through it
+    as the outlet's mixed temperature is. So it runs from the inlet's temperature to the outlet's
+    reported one, and is not the wall's own temperature (that is `temperature`); a face the fluid
+    does not wet reads the inlet's temperature;
   - `wall_heat_flux` ("Heat into the flow", W/m², signed: negative where the fluid heats the part);
   - `heat_transfer_coefficient` (W/(m² K)): that flux over the wall's temperature less the local
     fluid temperature (internal) or the free stream's (external); 0 where the two are the same;
-  - `pressure` (the wall pressure, Pa), as `cfd`'s.
+  - `pressure` (the wall pressure, Pa), as `cfd`'s;
+  - `speed` ("Speed", m/s): the fastest the flow moves within a passage width of each wetted point,
+    as `cfd`'s, so the `velocity` check's value is the top of its colour bar.
 - Nothing deforms; there is no load control. The viewer opens on Temperature with the other fields in
   Field, and its takeaway leads with "Laminar · " or "Turbulent · ".
 - Summary: `regime`, `reynolds`, `prandtl`, `peclet`; the part's `max_temperature_C`,
   `min_temperature_C`, `max_at_mm`; the fluid's `inlet_temperature_C`, `outlet_temperature_C` (all
   outlets mixed), `outlet_temperature_by_balance_C` (the inlet's plus m c_p ΔT's rise), each of the
-  `outlets`, `max_fluid_temperature_C`; `heat_to_fluid_W` (what the walls put in), `heat_carried_W`
+  `outlets`, `max_fluid_temperature_C` and `min_fluid_temperature_C` (the fluid mesh's own node
+  extremes: the stabilised advection can over- and undershoot by a few degrees inside a thin, fast
+  thermal layer, so read the mixed temperatures, which the energy balance holds exactly); `heat_to_fluid_W` (what the walls put in), `heat_carried_W`
   (m c_p ΔT out), `fluid_balance` (their mismatch, a share), `mass_flow_kg_s`, `part_heat_in_W`,
   `part_balance`; `wetted_area_mm2`, `mean_wall_temperature_C`, the wall heat flux's range, the
   `mean_heat_transfer_coefficient_W_m2K` (on the log-mean temperature difference, wall to fluid,

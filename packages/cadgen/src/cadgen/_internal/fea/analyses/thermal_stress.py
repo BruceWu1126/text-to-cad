@@ -35,6 +35,11 @@ __all__ = ["ThermalStressAnalysis", "ThermalStressInputs"]
 REFERENCE_C = 20.0
 
 
+def mpa(value: float) -> str:
+    """A stress in MPa as the findings say it: whole megapascals from 100 up, three figures below."""
+    return f"{value:.0f}" if abs(value) >= 100 else f"{value:.3g}"
+
+
 @dataclass(frozen=True)
 class ThermalStressInputs(StaticInputs):
     #: What the upstream thermal solve parsed of the same study.
@@ -134,14 +139,45 @@ class ThermalStressAnalysis(StaticAnalysis):
 
     # -- judging and findings ------------------------------------------------------------------------
 
+    def singular_edge(self, result: AnalysisResult) -> dict | None:
+        """The finding for a peak on a clamped face whose colours stop below it (:func:`colour_range` capped), else None.
+
+        A face held fast while heat makes the part grow is a singular edge in heat stress: its peak grows every time
+        the mesh is refined, so the number at the edge is the mesh's, and the stress is read a little away from it."""
+        import numpy as np
+
+        solved = self.weakest(result)
+        if solved.peak_face is None or solved.peak_face not in solved.fixed_faces or not solved.peak_MPa > 0:
+            return None
+        ranged = colour_range(np.asarray(result.fields["von_mises"], dtype=float), solved.peak_MPa)
+        if len(ranged) < 3:
+            return None
+        cap, peak = ranged[1], solved.peak_MPa
+        coarser = solved.coarser_peak_MPa
+        rose = f" (it already rose from {mpa(coarser)} to {mpa(peak)} MPa on a finer mesh)" if coarser and peak > coarser else ""
+        return {
+            "check": "fea", "severity": "warning", "type": "singular_clamped_edge",
+            "summary": f"The peak stress ({mpa(peak)} MPa) sits on the clamped edge, where a part held fast while heat "
+                       f"makes it grow has a singularity: it grows every time the mesh is refined{rose}, so read the "
+                       f"stress a little away from the edge, where the colour bar stops at {mpa(cap)} MPa",
+            "description": f"colours stop at the {round(ranged[2]['quantile'] * 100)}th percentile of the stress, {mpa(cap)} MPa; "
+                           f"nodal peak {mpa(peak)} MPa at the fixed face",
+            "items": [{"text": "the peak stress", "ref": solved.peak_face, "at": list(solved.peak_at)}],
+        }
+
     def findings(self, ctx: SolveContext, result: AnalysisResult, inputs: ThermalStressInputs,
                  check_results: list[dict], *, assembly: bool) -> list[dict]:
         found = []
+        singular = self.singular_edge(result)
         for finding in super().findings(ctx, result, inputs, check_results, assembly=assembly):
+            if finding["type"] == "peak_at_fixture" and singular is not None:
+                continue  # the singular edge's finding says it, and why
             if finding["type"] == "no_load":
                 finding = {**finding, "summary": "Nothing stresses the part: its temperature stays at the stress-free "
                                                  f"{inputs.reference_C:g} °C and no load reaches it, or it is free to grow"}
             found.append(finding)
+        if singular is not None:
+            found.append(singular)
         thermal = result.scalars.get("thermal") or {}
         if thermal:
             hottest, coolest = thermal["max_temperature_C"], thermal["min_temperature_C"]

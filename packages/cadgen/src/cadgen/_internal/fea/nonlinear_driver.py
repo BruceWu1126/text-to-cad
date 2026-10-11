@@ -123,7 +123,8 @@ class PathResult:
     how: str
     seconds: float
     warnings: list[str] = field(default_factory=list)
-    #: The path stopped cutting its steps because ``deadline_s`` had passed (it is ``collapsed`` there).
+    #: The path stopped cutting its steps because it had got through no step for ``deadline_s`` (it is ``collapsed``
+    #: there).
     out_of_time: bool = False
 
     @property
@@ -296,9 +297,12 @@ def solve_path(
     ``runaway`` (None to turn it off): a step whose stiffness, load over the largest displacement it adds, falls
     under this share of the unloaded part's is cut as if it had not converged.
 
-    ``deadline_s``: seconds after which a step that needs cutting is not cut again: the path ends there, ``collapsed``
-    and ``out_of_time``, with a warning that says so. A path still getting through its steps is never stopped; one
-    cutting a stuck step over and over (each cut a dozen re-solves) ends in minutes, not hours."""
+    ``deadline_s``: seconds the path may go without getting through a step (from its start, then from its last settled
+    step); past them a step that needs cutting is not cut again: the path ends there, ``collapsed`` and
+    ``out_of_time``, with a warning that says so. A path still getting through its steps is never stopped, however
+    long it has run (a bolted lap joint pulled off took over half an hour of small steps on a 3 mm mesh); one
+    cutting a stuck step over and over (each cut a dozen re-solves) ends in minutes, not hours. A step kept
+    unsettled at the smallest size is not getting through: it does not restart the clock."""
     import numpy as np
 
     started = time.perf_counter()
@@ -317,10 +321,11 @@ def solve_path(
     warnings: list[str] = []
     elastic = _elastic_reach(problem, linear) if runaway else None
     out_of_time = False
+    progressed = started  # when the path last got through a step (settled)
 
     def late() -> bool:
         nonlocal out_of_time
-        if deadline_s is not None and time.perf_counter() - started > deadline_s:
+        if deadline_s is not None and time.perf_counter() - progressed > deadline_s:
             out_of_time = True
         return out_of_time
 
@@ -372,11 +377,14 @@ def solve_path(
         if log:
             log(f"load {target * 100:.4g}% in {taken} Newton iterations")
         factor = target
+        if settled:
+            progressed = time.perf_counter()
         if adaptive and taken <= EASY_ITERATIONS and settled:
             step = min(2.0 * step, MAX_GROWTH * base)
     if out_of_time:
-        warnings.append(f"stopped cutting the load steps after {time.perf_counter() - started:.0f} s, past the "
-                        f"{deadline_s:.0f} s allowed: the load could not be followed past {factor * 100:.4g}%")
+        warnings.append(f"stopped cutting the load steps after {time.perf_counter() - progressed:.0f} s without getting "
+                        f"through one (past the {deadline_s:.0f} s allowed): the load could not be followed past "
+                        f"{factor * 100:.4g}%")
         if log:
             log(warnings[-1])
     elif collapsed and log:

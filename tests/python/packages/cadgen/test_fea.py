@@ -184,6 +184,17 @@ class StudyFile(unittest.TestCase):
         self.assertEqual(study.material.E, STEEL.E)
         self.assertEqual(study.material.yield_strength, 900.0)
         self.assertEqual(study.loads[0].pressure, 2.5)
+        # It is still the table's steel, by its display name, not the key it was given by.
+        self.assertEqual(study.material.name, STEEL.name)
+
+    def test_an_inline_material_is_named_by_its_table_entry_or_as_written(self):
+        from cadgen._internal.fea.materials import material_from_spec
+
+        poled = material_from_spec({"name": "pzt-5a", "piezo": {"poling": [0, 0, -1]}})
+        self.assertEqual(poled.name, "PZT-5A")
+        self.assertEqual(material_from_spec({"name": "steel", "relative_permeability": 1000}).name, STEEL.name)
+        own = material_from_spec({"name": "Copper C110", "E_MPa": 117000, "nu": 0.34, "yield_MPa": 69})
+        self.assertEqual(own.name, "Copper C110")
 
     def test_the_errors_name_the_field(self):
         base = {"material": "steel", "fixtures": [{"faces": ["#o1.f1"]}], "loads": [{"faces": ["#o1.f2"], "type": "force", "vector_N": [1, 0, 0]}]}

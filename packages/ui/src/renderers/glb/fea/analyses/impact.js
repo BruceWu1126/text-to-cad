@@ -49,6 +49,8 @@ export default Object.freeze({
   family: null,
   estimate: false,
   scalesWithLoad: false,
+  // Not linear in the load: every check is judged as solved, its takeaway its own sentence, never "OK up to N× this load".
+  scaling: "none",
   checks: Object.freeze(["stress", "acceleration", "plastic_strain"]),
   checkLabels: Object.freeze({ acceleration: "Peak g" }),
   defaultControls: timeFieldAndDeformation,

@@ -57,9 +57,11 @@ On top of the common keys in [study-file.md](study-file.md#common-keys):
   `extras.analysis.warnings` and `extras.analysis.unsettled`, in that frame's label ("80 % load ·
   did not settle") and on every check, which fails. Report it as not reliable, never its numbers
   as the answer: try more `steps`, a finer mesh where the parts touch, or friction 0. Once the
-  study's time target (`fit.seconds`, 600 s by default) has passed, a step that needs cutting is not
-  cut again: the path ends there as a stop ("could not be followed past 40%"), with a warning that
-  it ran out of time, never an hour of cutting. Friction's stick spring is a hundredth of the
+  path has gone the study's time target (`fit.seconds`, 600 s by default) without getting through a
+  step, a step that needs cutting is not cut again: the path ends there as a stop ("could not be
+  followed past 40%"), with a warning that it ran out of time and `out_of_time` in the summary,
+  never an hour of cutting; a path still getting through its steps is never stopped, and a bolted
+  joint's load path gets the whole target after its preload. Friction's stick spring is a hundredth of the
   normal penalty, so stick and slip settle in a few Newton iterations; faces modelled flush (apart
   by round-off) count as touching from the first iteration, so a part held only by contact or a
   bolt has something under it at once. A part pushed past what friction holds slides away, said

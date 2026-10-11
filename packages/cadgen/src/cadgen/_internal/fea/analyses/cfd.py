@@ -11,8 +11,13 @@ Newton, and Reynolds continuation when Newton needs it.
 
 What comes out is on the part's own surface (the GLB is the part, as for every
 analysis): the wall ``pressure`` (Pa, gauge) and ``wall_shear`` (Pa), carried
-from the fluid's walls to the part's faces they came from, face by face; a
-face the fluid does not wet reads 0. The volume numbers go to the summary:
+from the fluid's walls to the part's faces they came from, face by face; and
+the ``speed`` of the flow near the wall (m/s): the wall itself is still (no
+slip), so at each wetted point it is the fastest the fluid moves within one
+passage width (internal: the inlet's hydraulic diameter; external: two wall
+elements), reaching at least as far as the fastest point of the flow, so the
+speed a velocity check judges is on the model. A face the fluid does not wet
+reads 0. The volume numbers go to the summary:
 the fastest velocity, the flow rate, the pressure drop from the inlets to the
 outlets and the force of the flow on the part. Checks ``pressure_drop`` and
 ``velocity``. With ``map_to_structure`` the wall pressure is applied face by
@@ -39,8 +44,8 @@ from typing import Any, ClassVar
 from cadgen._internal.fea.analyses import kinds
 from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs, SolveContext
 
-__all__ = ["CfdAnalysis", "CfdInputs", "FLUIDS", "Fluid", "Inlet", "LIMITS", "Outlet", "RE_LIMIT", "reynolds_sentence",
-           "unsettled_check"]
+__all__ = ["CfdAnalysis", "CfdInputs", "FLUIDS", "Fluid", "Inlet", "LIMITS", "Outlet", "RE_LIMIT", "SPEED_WALLS", "fastest_near",
+           "flow_solve_budget", "reynolds_sentence", "speed_reach", "speed_to_part", "unsettled_check"]
 
 #: Fluids by name at 20 °C: density kg/m³, dynamic viscosity Pa·s.
 FLUIDS = {"air": (1.204, 1.81e-5), "water": (998.2, 1.002e-3)}
@@ -52,7 +57,10 @@ PROFILES = ("developed", "uniform")
 #: A check is close once its value passes this share of its limit.
 CLOSE_AT = 0.9
 #: The nonlinear flow solve stops at its best state after the time target, or this many times its estimate when the
-#: run went ahead past the target (a flap in water sat over 100 minutes on its first flow solve, silent).
+#: run went ahead past the target (a flap in water sat over 100 minutes on its first flow solve, silent); and never
+#: before this many times the linear solves it is expected to need (:func:`flow_solve_budget`), so the work, not the
+#: machine's load, decides whether a study settles (the gallery's orifice, Re 299, settled in 90 linear solves in
+#: 454 s, and stopped unsettled at the 600 s default after 67 of them on a machine at load 40 to 200).
 DEADLINE_OVER = 3.0
 #: The ladder: fluid_coarsen grows the free-stream size by this; continuation is offered above this Re.
 COARSEN, CONTINUE_FROM, FAIL_FROM = 2.5, 100.0, 500.0
@@ -66,6 +74,8 @@ DENSITY, VISCOSITY, SPEED, PASCAL = 1e-12, 1e-6, 1000.0, 1e6
 TETS_VOLUME, TETS_SURFACE, NODES_PER_TET = 4.5, 2.0, 1.6
 DIRECT_S, ITERATIVE_S, ASSEMBLE_S, MESH_S = 6e-7, 1.2e-4, 1e-4, 2.5e-4
 BYTES_PER_TET, NNZ_PER_ROW, FILL = 80_000.0, 90.0, 1.0
+#: The speed field (:func:`speed_to_part`) looks this many wall elements into an external flow from the wall.
+SPEED_WALLS = 2.0
 
 
 @dataclass(frozen=True)
@@ -248,6 +258,7 @@ class CfdAnalysis:
     fields: ClassVar[tuple[FieldSpec, ...]] = (
         FieldSpec("pressure", "_PRESSURE", "wall pressure", "Pa", signed=True),
         FieldSpec("wall_shear", "_WALL_SHEAR", "wall shear stress", "Pa"),
+        FieldSpec("speed", "_SPEED", "flow speed near the wall", "m/s"),
         FieldSpec("von_mises", "_VON_MISES", "von Mises stress", "MPa"),
         FieldSpec("displacement", "_DISPLACEMENT", "displacement", "mm", 3, 1000.0),
     )
@@ -255,7 +266,7 @@ class CfdAnalysis:
     default_checks: ClassVar[tuple[dict, ...]] = ()
     drives: ClassVar[tuple[str, ...]] = ("field", "deformation", "threshold")
     default_controls: ClassVar[dict[str, dict]] = {
-        "field": {"drives": "field", "type": "enum", "options": ["pressure", "wall_shear"]},
+        "field": {"drives": "field", "type": "enum", "options": ["pressure", "wall_shear", "speed"]},
     }
     upstream: ClassVar[tuple[str, ...]] = ()
     ladder: ClassVar[tuple[str, ...]] = ("iterative", "fluid_coarsen", "continuation")
@@ -460,6 +471,12 @@ class CfdAnalysis:
 
     # -- solve ---------------------------------------------------------------------------------------
 
+    def solve_budget(self, ctx: SolveContext, inputs: CfdInputs) -> int:
+        """The linear solves the flow solve may make before its deadline can stop it (:func:`flow_solve_budget`)."""
+        setup = self._setup(ctx, inputs)
+        plan = getattr(ctx, "plan", None)
+        return flow_solve_budget(setup.reynolds, tuple(getattr(plan, "re_schedule", ()) or ()))
+
     def deadline(self, ctx: SolveContext, inputs: CfdInputs) -> float:
         """Seconds the nonlinear flow solve may take before it stops at its best state, saying so: the study's
         time target, or DEADLINE_OVER times the estimate when the run went ahead past the target."""
@@ -501,7 +518,7 @@ class CfdAnalysis:
         schedule = tuple(re / setup.reynolds for re in ctx.plan.re_schedule) if ctx.plan.re_schedule and setup.reynolds > 0 else ()
         solver = "iterative" if ctx.plan.solver == "iterative" else "direct"
         flow = navier_stokes.solve_flow(problem, schedule=schedule, solver=solver, log=ctx.log,
-                                        deadline_s=self.deadline(ctx, inputs))
+                                        deadline_s=self.deadline(ctx, inputs), min_solves=self.solve_budget(ctx, inputs))
         timings["flow_s"] = time.perf_counter() - started
         if ctx.log:
             ctx.log(f"flow: {flow.picard} Picard and {flow.newton} Newton steps, residual {flow.residual:.1e}")
@@ -509,6 +526,8 @@ class CfdAnalysis:
         started = time.perf_counter()
         post = flow_numbers(space, fluid, face_of, row_kind, flow, inputs)
         pressure, shear = wall_to_part(ctx, space, fluid, face_of, row_kind, post)
+        speed, reach = speed_to_part(ctx, space, fluid, face_of, row_kind, np.linalg.norm(post["nodal_velocity"], axis=1) / SPEED,
+                                     speed_reach(inputs.kind, setup.length_mm, wall))
         timings["post_s"] = time.perf_counter() - started
 
         warnings = list(flow.warnings)
@@ -526,7 +545,7 @@ class CfdAnalysis:
         # The Reynolds and balance sentences are findings (and extras.analysis.warnings); an unsettled solve is a warning too.
         warnings += [w for w in analysis_warnings if w.startswith("the flow solve stopped") and w not in warnings]
 
-        fields = {"pressure": pressure, "wall_shear": shear}
+        fields = {"pressure": pressure, "wall_shear": shear, "speed": speed}
         result = AnalysisResult(
             dof_locations=ctx.space.dof_locations, vertices=ctx.space.vertices, tets=ctx.space.tets,
             boundary_quadratic=ctx.space.boundary_quadratic, element_dofs=ctx.space.element_dofs, fields=fields,
@@ -534,7 +553,7 @@ class CfdAnalysis:
             solver=f"Taylor-Hood P2/P1 Navier-Stokes, {'GMRES + multigrid' if solver == 'iterative' else 'direct'}",
             timings={**timings, **{f"flow_{k}": v for k, v in flow.timings.items()}}, warnings=warnings,
             scalars={
-                "post": post, "reynolds": reynolds, "flow": flow, "wall_mm": wall, "far_mm": far,
+                "post": post, "reynolds": reynolds, "flow": flow, "wall_mm": wall, "far_mm": far, "speed_reach_mm": reach,
                 "fluid_mesh": {"elements": int(len(fluid.tets)), "nodes": int(len(fluid.nodes)),
                                "wall_size_mm": round(wall, 4), "far_size_mm": round(far, 4)},
                 "analysis_warnings": analysis_warnings,
@@ -758,6 +777,8 @@ class CfdAnalysis:
             "max_wall_pressure_Pa": round(float(pressure[wet].max()), 6) if len(wet) else 0.0,
             "min_wall_pressure_Pa": round(float(pressure[wet].min()), 6) if len(wet) else 0.0,
             "max_wall_shear_Pa": round(float(shear[wet].max()), 6) if len(wet) else 0.0,
+            "max_speed_near_wall_m_s": round(float(result.fields["speed"][wet].max()), 6) if len(wet) else 0.0,
+            "speed_reach_mm": round(result.scalars["speed_reach_mm"], 4),
             "force_N": [round(float(c), 9) for c in post["force_N"]],
             "solve": {"picard": flow.picard, "newton": flow.newton, "linear_solves": flow.linear_solves,
                       "residual": float(f"{flow.residual:.3g}"), "converged": flow.converged, "continuation": flow.continued,
@@ -787,7 +808,7 @@ class CfdAnalysis:
 
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
         ranges = {"pressure": (summary["min_wall_pressure_Pa"], summary["max_wall_pressure_Pa"]),
-                  "wall_shear": (0.0, summary["max_wall_shear_Pa"])}
+                  "wall_shear": (0.0, summary["max_wall_shear_Pa"]), "speed": (0.0, summary["max_speed_near_wall_m_s"])}
         if "max_von_mises_MPa" in summary:
             ranges["von_mises"] = (0.0, summary["max_von_mises_MPa"])
             ranges["displacement"] = (0.0, summary["max_displacement_mm"])
@@ -835,6 +856,27 @@ class CfdAnalysis:
                          f"largest displacement {summary['max_displacement_mm']:.4g} mm"
                          + (f", safety factor {summary['safety_factor']:g}" if summary.get("safety_factor") is not None else ""))
         return lines
+
+
+# -- the flow solve's budget ---------------------------------------------------------------------------
+
+
+def flow_solve_budget(reynolds: float, schedule: tuple[float, ...] = ()) -> int:
+    """The linear solves a flow solve at ``reynolds`` may make before its time limit can stop it: DEADLINE_OVER times
+    what it is expected to need. Above CONTINUE_FROM that counts the continuation Newton falls back to when it fails
+    from the Stokes flow (a sharp orifice fails there at Re 299, well under FAIL_FROM, and settles in 90 solves), as
+    well as the direct attempt; a planned continuation (``schedule``) counts its stages alone. Wall-clock free: the
+    seconds those solves take are the machine's, and its load only makes them take longer."""
+    from cadgen._internal.fea.navier_stokes import CONTINUATION, MAX_PICARD
+
+    stages = 1 + 4 * len(CONTINUATION) + 6
+    if schedule:
+        expected = stages
+    else:
+        expected = 1 + int(min(MAX_PICARD, 3 + reynolds / 50.0)) + 6
+        if reynolds > CONTINUE_FROM:
+            expected += stages
+    return int(math.ceil(DEADLINE_OVER * expected))
 
 
 # -- numbers from the flow ----------------------------------------------------------------------------
@@ -971,6 +1013,73 @@ def flow_numbers(space, fluid, face_of, row_kind, flow, inputs: CfdInputs) -> di
         "nodal_velocity": nodal,                 # (fluid nodes, 3) mm/s
         "velocity_locations": space.dof_locations,  # where, mm
     }
+
+
+def fastest_near(points, sources, speed, reach: float):
+    """(len(points),) the fastest of ``speed`` at ``sources`` within ``reach`` mm of each of ``points`` (0 where none
+    is): the sources from the fastest down, each settling the points in its reach not settled yet, so the work is
+    one ball per source until every point is settled."""
+    import numpy as np
+    from scipy.spatial import cKDTree
+
+    out = np.full(len(points), -1.0)
+    if not len(points) or not len(sources):
+        return np.zeros(len(points))
+    tree = cKDTree(points)
+    left = len(points)
+    order = np.argsort(-np.asarray(speed), kind="stable")
+    for start in range(0, len(order), 256):
+        chunk = order[start:start + 256]
+        for source, near in zip(chunk, tree.query_ball_point(sources[chunk], r=reach)):
+            if not near:
+                continue
+            near = np.asarray(near, dtype=np.int64)
+            new = near[out[near] < 0.0]
+            if len(new):
+                out[new] = float(speed[source])
+                left -= len(new)
+        if left == 0:
+            break
+    return np.maximum(out, 0.0)
+
+
+def speed_to_part(ctx: SolveContext, space, fluid, face_of, row_kind, speed, reach: float):
+    """The flow's speed on the part's wetted surface (m/s): at each wetted point, the fastest the fluid moves
+    within ``reach`` mm of it (the wall itself is still: no slip). ``speed`` is at every fluid node, m/s. The reach
+    grows, if it must, to take in the fastest point of the whole flow, so the field shows the speed a velocity
+    check judges. Carried face by face as the wall pressure is; a face the fluid does not wet reads 0. Returns the
+    field and the reach used, mm."""
+    import numpy as np
+    from scipy.spatial import cKDTree
+
+    part_space, volume = ctx.space, ctx.volume
+    out = np.zeros(part_space.scalar_count)
+    speed = np.asarray(speed, dtype=float)
+    ordinal_of_row = np.array([face_of[int(o)].ordinal if int(o) in face_of else 0 for o in fluid.boundary_ordinal])
+    wall_rows = (row_kind == "wall") & (ordinal_of_row > 0)
+    if not wall_rows.any():
+        return out, float(reach)
+    locations = space.dof_locations
+    wall_nodes = np.unique(space.boundary_quadratic[wall_rows])
+    fastest = int(speed.argmax())
+    gap, _ = cKDTree(locations[wall_nodes]).query(locations[fastest])
+    reach = max(float(reach), 1.05 * float(gap))
+    at_wall = np.zeros(space.scalar_count)
+    at_wall[wall_nodes] = fastest_near(locations[wall_nodes], locations, speed, reach)
+    for ordinal in sorted(set(int(o) for o in ordinal_of_row[wall_rows])):
+        source = np.unique(space.boundary_quadratic[wall_rows & (ordinal_of_row == ordinal)])
+        target = np.unique(part_space.boundary_quadratic[volume.boundary_ordinal == ordinal])
+        if len(source) == 0 or len(target) == 0:
+            continue
+        _, nearest = cKDTree(locations[source]).query(part_space.dof_locations[target])
+        out[target] = at_wall[source[nearest]]
+    return out, reach
+
+
+def speed_reach(kind: str, length_mm: float, wall_mm: float) -> float:
+    """How far into the fluid the speed field looks from each wetted point, mm: an internal flow's passage width
+    (the inlet's hydraulic diameter), an external flow's SPEED_WALLS wall elements."""
+    return float(length_mm) if kind == "internal" else SPEED_WALLS * float(wall_mm)
 
 
 def wall_to_part(ctx: SolveContext, space, fluid, face_of, row_kind, post: dict):

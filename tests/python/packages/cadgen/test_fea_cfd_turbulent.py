@@ -198,9 +198,14 @@ class MoodyChart(unittest.TestCase):
 
     def test_the_glb_carries_wall_pressure_and_shear_and_the_study(self):
         fields = {entry["field"]: entry for entry in self.extras["fields"]}
-        self.assertEqual(set(fields), {"pressure", "wall_shear"})
+        self.assertEqual(set(fields), {"pressure", "wall_shear", "speed"})
         self.assertIn("_PRESSURE", self.attributes)
         self.assertIn("_WALL_SHEAR", self.attributes)
+        # The speed the velocity check judges is on the model: the fastest flow near the wall (it is still there).
+        self.assertIn("_SPEED", self.attributes)
+        self.assertEqual(fields["speed"]["units"], "m/s")
+        velocity = next(check for check in self.low.summary["checks"] if check["kind"] == "velocity")
+        self.assertAlmostEqual(fields["speed"]["max"], velocity["value"], delta=1e-5 * velocity["value"])
         inlet = self.extras["study"]["flow"]["inlets"][0]
         self.assertEqual((inlet["profile"], inlet["turbulence_intensity"]), ("developed", 0.05))
 

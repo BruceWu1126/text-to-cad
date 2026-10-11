@@ -88,3 +88,5 @@ fine where it is hottest, small far fillets left out, simpler elements, half a s
 `adaptive_steps`: the time step grows while the temperatures change slowly and shrinks where they
 change fast, each step checked against two half steps (step doubling, kept within 0.2 % of the
 temperature range a step). Each is an `adapted:` line with its accuracy note; report every one.
+
+A run that passes its time limit (twice `fit.seconds`, at least 30 s) stops where it has got to and says so: see [study-file.md](study-file.md#fit).
