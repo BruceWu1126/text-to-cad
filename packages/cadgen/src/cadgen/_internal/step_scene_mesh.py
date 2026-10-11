@@ -127,7 +127,7 @@ def scene_to_build123d_compound(scene: LoadedStepScene, *, label: str | None = N
             if face_colors:
                 # Ordinal-keyed (TopExp.MapShapes order) so the value survives the
                 # BinTools round-trip to component-build workers and lands in the
-                # component's .surf, which keys face colors by ordinal.
+                # part's display data, which keys face colors by ordinal.
                 shape.cad_face_ordinal_colors = _face_colors_by_ordinal(
                     scene.prototype_shapes[node.prototype_key], face_colors)
         return shape

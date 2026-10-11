@@ -459,7 +459,7 @@ def _generate_part_outputs(
         from cadgen.store.parts import producer_identity
 
         # The worker can attest its actual display producer without deriving
-        # SURF. Unknown display capability never prevents native publication.
+        # display data. Unknown display capability never prevents native publication.
         try:
             surface_producer = producer_identity()
         except ValueError:

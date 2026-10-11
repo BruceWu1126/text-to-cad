@@ -6,7 +6,7 @@ matched to the document by declared output path) and this module reads it.
 
 The server answers status without loading the CAD kernel. Missing or damaged
 required geometry means not compiled. Complete native geometry means compiled;
-SURF derivation and browser pixels have separate lifecycles. A ref that is not an
+Parts' display data and browser pixels have separate lifecycles. A ref that is not an
 absolute path raises before any store read.
 
 The document's byte digest resolves through index/document to one immutable
@@ -174,8 +174,8 @@ def _validate_step(step_path: str) -> dict:
             "tree": tree,
             "descriptor": descriptor,
         }
-    # result_descriptor captured the full required geometry closure. Optional
-    # SURF/mesh availability is a separate runtime capability and cannot make
+    # result_descriptor captured the full required geometry closure. Whether its
+    # parts' display data is stored is a separate runtime capability and cannot make
     # this document need another compile.
     return {"ok": True, "tree": tree, "descriptor": descriptor}
 

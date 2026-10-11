@@ -1,13 +1,13 @@
 // A component's selector table, joined to its stored mesh.
 //
 // cadgen mints every selector fact once, from the exact BREP, into a table it
-// stores beside the component's surface (cadgen/_internal/selector_table.py,
-// cadgen/store/selectors.py) and serves on the surface request's ready row
-// (`selectors`): the local ids refs end in, exact metrics and parameters, plane
+// stores in the part's record beside its display mesh (cadgen/_internal/selector_table.py,
+// cadgen/store/parts.py) and serves by part (`/__tess_cache/<part>.selectors.json`):
+// the local ids refs end in, exact metrics and parameters, plane
 // normals, referenceable flags and relevance, face-edge and edge-vertex
 // adjacency, each edge's chain and each face's tangent group. The page joins
-// those rows to the mesh it draws -- by ORDINAL, which the SURF, the table and
-// the mesh's face and edge tables share -- so a face's triangle range and an
+// those rows to the mesh it draws -- by ORDINAL, which the table and the mesh's
+// face and edge tables share -- so a face's triangle range and an
 // edge's segment range are its range on screen, and composes a ref as
 // `occurrenceId + "." + localId` (selectors/runtime.js). Nothing here decides
 // a fact: a row the table lacks is a row the page does not have.

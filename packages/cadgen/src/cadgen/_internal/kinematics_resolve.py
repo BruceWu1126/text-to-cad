@@ -10,8 +10,8 @@ A mate's ends name occurrences, so they resolve in the tree's occurrence
 namespace alone: its leaves, its group nodes and their labels, read from the
 flattened tree. No component's topology is read for them. An axis ref names a
 face or edge of one occurrence, and only that occurrence's component is read:
-its selector rows come from its SURF, derived through the build pool when the
-store has none.
+its selector rows come from its part's selector table, derived through the
+build pool when the store has none.
 
 Nothing here moves geometry. A kinematics declaration describes how the
 written tree articulates; the tree itself is the model's return value and is
@@ -53,7 +53,7 @@ def _with_named_entities(index, descriptor: Mapping[str, Any], refs: list[str], 
     """``index`` plus the shapes, faces, edges and vertices of every leaf an
     axis ref in ``refs`` names, placed exactly as the composed index places
     them (``assembly_lookup.merge_assembly_entities``). Each row is a function
-    of its occurrence's placement and its component's SURF alone, so an axis
+    of its occurrence's placement and its part's selector table alone, so an axis
     resolves to the same numbers as it would against every occurrence's rows.
     A ref that names no leaf's entity reads nothing, and fails as it would
     have: the composed index holds entities for leaves only."""
@@ -234,7 +234,7 @@ def resolve_kinematics_block(
     """Validated declaration -> sidecar-ready block (axes as numbers), plus the
     mate-ref -> occurrence-id map, against the stored tree ``tree_hash``.
 
-    ``producer`` is the display producer an axis ref's SURF is derived under;
+    ``producer`` is the display producer an axis ref's part is derived under;
     None resolves it through the build pool, and only when an axis ref needs it."""
     from cadgen.store.trees import flatten
 
