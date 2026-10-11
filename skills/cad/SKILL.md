@@ -98,6 +98,12 @@ python src/bracket.py
   bearings and servos.
 - A STEP's sidecar (`<name>.step.json`: kinematics, materials, animation
   keyframes) is a build output, rewritten by every run.
+- An image without a scale sets no fit dimension, and a drawing's units, projection
+  and revision decide how its numbers read. A missing or conflicting dimension that
+  changes the result is the person's to settle; a value chosen in its place is an
+  assumption.
+- A renamed model leaves its old outputs at their old paths. Removing those exact
+  files keeps what shares their folders: imported sources and other models' outputs.
 
 ## Mesh exports
 
@@ -153,7 +159,8 @@ scene = read_scene("STEP/assembly.step")
 for occurrence in scene.leaves():  # every placed part
     print(occurrence.ref, occurrence.label)
 bracket = scene.resolve("#bracket").shape()  # exact geometry, world coordinates
-print(bracket.bounding_box().size, bracket.volume, len(bracket.faces()))
+print(bracket.bounding_box().size)  # the envelope: not a hole's diameter or a wall's thickness
+print(bracket.volume, len(bracket.faces()))
 ```
 
 - A mesh-only model has no STEP; called from plain Python, it returns its
@@ -168,6 +175,11 @@ print(bracket.bounding_box().size, bracket.volume, len(bracket.faces()))
   the saved placement, not a pose or a clip
   ([interference and contact](references/inspection-and-validation.md#measurements)).
 - A check that fails or cannot decide has shown nothing about the design.
+- A retry that leaves out or shrinks a specified feature (a fillet skipped, a
+  radius reduced) builds a different design from the one asked for.
+- The reply is the person's record of the work: the files written, the checks run
+  and what they showed, the requirements no check covered, and every assumption or
+  departure from the request.
 - Every build prints where its time went, split into model code and cadgen. A
   rise in model code comes from the model's newest code, and
   `python <model>.py --profile` shows where.
