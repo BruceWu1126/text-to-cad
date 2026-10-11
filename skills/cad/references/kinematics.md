@@ -191,6 +191,10 @@ cadgen step snapshot STEP/turntable.step tmp/demo_t1.png --animation demo --time
 In a JSON job the request is `"animation": {"clip": "demo", "time": 2.0}` beside
 `"kinematics"` ([flags and job keys](snapshot-review.md#flags-and-job-keys)).
 
+A pose, frame or video shows motion; it does not measure it. `read_scene` and the
+checks built on it see the saved placement, which is the rest pose with no clip
+playing, so a part that clears there can still pass through another mid-motion.
+
 ### Rendering the whole clip
 
 `--video` renders a span of the clip into the `.mp4` or `.gif` OUT names, with

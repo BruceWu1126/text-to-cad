@@ -91,6 +91,15 @@ oriented solids, 0 for mere contact; pair bodies with
 `[s for e in scene.resolve("#group").entities("shape") for s in e.shape().solids()]`.
 Kernel failures raise.
 
+Two solids at `overlap_volume` 0 at most touch. A pair meant to overlap (a
+press-fit pin, a bearing in its bore) is named as such, not inferred from where it
+sits in the tree. A part meant to sit on, bolt to or bear against another measures
+`closest_points` distance 0 against it; above 0 is a gap, and the part floats.
+Over many parts, two `bounding_box(optimal=False)` envelopes that do not meet rule
+a pair out, leaving the exact queries for the pairs that remain. Both queries
+measure the saved placement: a part clear at rest can still pass through another
+in a pose or a clip ([reviewing motion](kinematics.md#reviewing-motion)).
+
 ## Geometry diagnostics
 
 ```python

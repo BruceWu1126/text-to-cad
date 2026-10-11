@@ -161,6 +161,13 @@ print(bracket.bounding_box().size, bracket.volume, len(bracket.faces()))
 - A snapshot renders a saved document as the viewer draws it
   (`cadgen step snapshot STEP/bracket.step tmp/review.png`; each mesh format has
   the same verb). It shows arrangement and appearance, not dimensions.
+- Measuring the saved document is what shows a request's dimensions and
+  clearances. In an assembly, nothing interferes when `overlap_volume` is 0 for
+  every pair of solids apart from fits named on purpose, and a part meant to rest
+  on another touches it when their `closest_points` distance is 0. Both describe
+  the saved placement, not a pose or a clip
+  ([interference and contact](references/inspection-and-validation.md#measurements)).
+- A check that fails or cannot decide has shown nothing about the design.
 - Every build prints where its time went, split into model code and cadgen. A
   rise in model code comes from the model's newest code, and
   `python <model>.py --profile` shows where.
