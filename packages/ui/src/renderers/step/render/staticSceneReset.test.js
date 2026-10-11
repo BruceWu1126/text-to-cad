@@ -163,7 +163,7 @@ test("actual repeated component publications preserve transforms, materials, cli
   const desc = descriptor(), base = component(0), b = component(0);
   let source = buildComposedPackageMeshData(desc, { a: base, b });
   const control = sceneFixture(source), optimized = sceneFixture(source), visual = visualState();
-  const clip = { enabled: true, axis: "x", offsets: { x: .4 }, invert: false };
+  const clip = { enabled: true, axis: "x", at: 0.4, invert: false };
   try {
     assert.equal(publish(optimized, source, visual, clip, true), false, "first load resets normally");
     publish(control, source, visual, clip, false);

@@ -434,7 +434,7 @@ test("render display accepts common camera, selection, clipping, and quality con
     display: {
       mode: "render",
       camera: { projection: "orthographic" },
-      clip: { enabled: true, axis: "x", offsets: { x: 0.5 } },
+      clip: { axis: "x", at: 0.5 },
       exploded: { enabled: true, amount: 0.5 },
       surfaces: { colorMode: "single", color: "#123456" }
     },
@@ -667,9 +667,11 @@ test("an exploded snapshot radiates from the rest box the viewer explodes from, 
 test("a snapshot's Clip cuts and caps the model where the viewer's does, measured against the rest box", async () => {
   // The snapshot's renderer ignored every material's plane (three honours them only with local
   // clipping on), so `display.clip` drew the whole model, uncapped. The viewer measures the
-  // plane against the model at rest (`syncRuntimeStepClipPlane`), a declared box included.
-  const declaredBounds = { min: [0.5, 0, 0], max: [3, 0.5, 0] };
-  const clip = { enabled: true, axis: "x", offset: 0.1 };
+  // plane against the model at rest (`syncRuntimeStepClipPlane`), a declared box included: with
+  // no coordinate it goes through that box's middle (x = 0.75, across the left part; the mesh's
+  // own box would put it at 1.5, between the parts).
+  const declaredBounds = { min: [0.25, 0, 0], max: [1.25, 0.5, 0] };
+  const clip = { axis: "x" };
   const job = { mode: "view", kind: "step", display: { mode: "solid", clip },
     outputs: [{ path: "clipped.png", width: 64, height: 64, camera: "iso" }] };
   const meshData = { ...twoPartMeshData(), declaredBounds };

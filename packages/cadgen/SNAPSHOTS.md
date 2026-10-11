@@ -18,10 +18,12 @@ cadgen step snapshot part.step review.png --display display.json --camera front
 The public groups are `camera`, `surfaces`, `edges`, `lighting`, `background`,
 `floor`, `grid`, and `axes`. `clip` and `exploded` remain independent inspection
 tools. A clip keeps the part of a STEP model on the lower side of a plane across
-`axis` (`x`, `y` or `z`), at `offset` (0 to 1 across the model's bounds), or the
-upper side with `invert`, and fills the cut faces: a camera facing the cut
-(`right`, `back` or `top`; `left`, `front` or `bottom` inverted) draws a section
-view. `--camera` or a job/output `camera` specifies pose and framing;
+`axis` (`x`, `y` or `z`), or the upper side with `invert`, and fills the cut
+faces. The plane stands at `at`, its coordinate on the axis in millimetres in the
+model's own frame (the numbers `--mode list` prints as bounds), or, without
+`at`, through the middle of the model at rest. A camera facing
+the cut (`right`, `back` or `top`; `left`, `front` or `bottom` inverted) draws a
+section view. `--camera` or a job/output `camera` specifies pose and framing;
 `display.camera` specifies projection and focal length (20–200 mm). Render
 defaults to perspective; other presets use orthographic projection. Opacity is
 0 for transparent and 1 for opaque, including partially transparent PNG

@@ -307,8 +307,10 @@ if the tool held the pointer, Select returns. An axis alone is not an effect. Th
 own both effects, so a Display Reset removes their panels and a restored effect
 reappears with its panel without another press. Clip's slider, left to right,
 cuts deeper through the original bounding box; pose, animation and Explode never
-redefine the range. There is no Flip. With fewer than two parts Explode is not
-on the strip.
+redefine the range. It shows the share cut away, while the view stores where the
+plane stands (`clip.at`, in millimetres), so a model edit leaves the plane where it
+was and the slider reads 0% or 100% if the plane ends up outside the new box. There
+is no Flip. With fewer than two parts Explode is not on the strip.
 
 ## The tool stack
 

@@ -65,7 +65,7 @@ class RenderDisplaySchemaTest(unittest.TestCase):
             "background": {"color": "#abc", "opacity": 0.4},
             "floor": {"enabled": False, "placement": "origin", "opacity": 0.6, "finish": "glossy"},
             "grid": {"density": 2}, "axes": {"enabled": False},
-            "clip": {"enabled": True, "axis": "z", "offsets": {"z": 0.5}},
+            "clip": {"enabled": True, "axis": "z", "at": 0.5},
             "exploded": {"enabled": True, "amount": 0.5},
         }
         self.assertEqual(display, load_display_option(display, cwd=Path(".")))

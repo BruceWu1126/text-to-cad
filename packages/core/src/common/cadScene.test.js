@@ -684,7 +684,7 @@ test("surface instances follow transforms and keep the unaffected majority insta
   assert.equal(matrix.elements[12], 20);
   assert.equal(matrix.elements[13], 6);
 
-  scene.update({ clip: { enabled: true, axis: "x", offsets: { x: 0.5 } } });
+  scene.update({ clip: { axis: "x" } });
   assert.equal(set.object.material.clippingPlanes.length, 1, "shared surface pass receives clipping");
   const originalRecords = [...scene.displayRecords];
   const originalMaterials = scene.displayRecords.map((item) => item.material);
@@ -1196,9 +1196,8 @@ test("buildModel applies selection, clipping, and the pose", () => {
       hiddenPartIds: ["right"]
     },
     clip: {
-      enabled: true,
       axis: "x",
-      offsets: { x: 0.5 }
+      at: 1.5
     },
     stepParameters: slideRuntime("left", 5)
   });
@@ -1225,7 +1224,7 @@ test("buildModel keeps restBounds at the zero pose while bounds follow the pose"
   const scene = buildModel(THREE, sampleMeshData(), {
     theme: cloneThemePresetSettings("workbench-light"),
     renderPartsIndividually: true,
-    clip: { enabled: true, axis: "x", offset: 0.5 },
+    clip: { axis: "x" },
     stepParameters: slideRuntime("right", 12)
   });
 

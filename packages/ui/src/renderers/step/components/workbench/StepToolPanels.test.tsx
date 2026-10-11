@@ -131,7 +131,7 @@ it("on a phone Features starts closed, and opened takes the whole column; on des
 
 // ---- the kept effects: Explode and Clip ---------------------------------------------------------
 
-const neutral = () => ({ exploded: { enabled: false, amount: 0 }, clip: { enabled: false, axis: 'x', offsets: { x: 1, y: 1, z: 1 }, invert: false } });
+const neutral = () => ({ exploded: { enabled: false, amount: 0 }, clip: { enabled: false, axis: 'x', invert: false } });
 const part = (id: string) => ({ id, bounds: { min: [0, 0, 0], max: [10, 10, 10] } });
 let viewSettings = neutral();
 /** Select, Measure, Explode and Clip on a strip over a stack, and the Display settings they write — as the STEP surface composes them. */
@@ -142,7 +142,7 @@ function Workbench({ measure = null as any, extraPanels = null as React.ReactNod
   viewSettings = view;
   const store = { patch: (patch: any) => setView(current => ({
     exploded: { ...current.exploded, ...patch.exploded },
-    clip: { ...current.clip, ...patch.clip, offsets: { ...current.clip.offsets, ...patch.clip?.offsets } } })) };
+    clip: { ...current.clip, ...patch.clip } })) };
   const modelTools = useModelTools({ modelKey: 'fixture', view, features: { sections: ['exploded', 'clip'] }, store,
     mesh: { parts: [part('a'), part('b')], bounds: { min: [0, 0, 0], max: [10, 10, 10] } }, disabled: false, selectedTool, onSelect: setTool, measure });
   const own = (id: string, label: string) => ({ id, label, active: selectedTool === id, icon: <span>{label[0]}</span>, onSelect: () => setTool(id) });

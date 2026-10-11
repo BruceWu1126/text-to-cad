@@ -156,12 +156,12 @@ class RefusedRequestsLeaveOutUntouched(_Workspace):
         with mock.patch.object(snapshot_cli, "document_snapshot", side_effect=AssertionError("compiled")), \
              mock.patch.object(snapshot_cli, "ensure_step_topology_artifact", side_effect=AssertionError("built")):
             single, prepared = snapshot_cli.prepare_render_job_packet(
-                {"input": str(step), "display": {"clip": {"axis": "y", "offset": 0.5}},
+                {"input": str(step), "display": {"clip": {"axis": "y"}},
                  "selection": {"hide": ["#o1.2"]}, "outputs": [{"path": str(self.root / "cut.png")}]},
                 cwd=self.root,
             )
         self.assertTrue(single)
-        self.assertEqual({"axis": "y", "offset": 0.5}, prepared[0].job["display"]["clip"])
+        self.assertEqual({"axis": "y"}, prepared[0].job["display"]["clip"])
 
 
 class CrossKindOptionsAreRefusedByName(_Workspace):
@@ -290,6 +290,33 @@ class OutputFormatTests(_Workspace):
         # `format` was never reachable from Python and is not a key anywhere now.
         with self.assertRaisesRegex(SnapshotError, r"render output 0 has unknown key\(s\): format"):
             self.prepared(outputs=[{"path": "iso.png", "format": "svg"}])
+
+
+class ClipAtTests(_Workspace):
+    """display.clip places its plane by one key: `at`, a coordinate in millimetres on its axis."""
+
+    def prepared(self, clip: dict) -> dict:
+        self.write("part.step", "ISO-10303-21;\nEND-ISO-10303-21;\n")
+        _single, prepared = snapshot_cli.prepare_render_job_packet(
+            {"input": "part.step", "display": {"clip": clip}, "outputs": [{"path": "cut.png"}]}, cwd=self.root
+        )
+        return prepared[0].job["display"]["clip"]
+
+    def test_a_coordinate_reaches_the_page_unchanged(self) -> None:
+        for clip in ({"axis": "y", "at": 12.5}, {"axis": "z", "at": -3, "invert": True}, {}, {"enabled": False, "at": 0}):
+            with self.subTest(clip=clip):
+                self.assertEqual(clip, self.prepared(clip))
+
+    def test_anything_else_is_refused(self) -> None:
+        for clip, pattern in (
+            *(({"at": value}, r"display\.clip\.at must be a finite number: the plane's coordinate on its axis, in millimetres")
+              for value in ("12.5", True, None, float("inf"), float("nan"))),
+            ({"axis": "y", "offset": 0.5},
+             r"display\.clip has unknown key\(s\): offset; supported keys: at, axis, enabled, invert$"),
+            ({"offsets": {"y": 0.5}}, r"display\.clip has unknown key\(s\): offsets; supported keys: at, axis, enabled, invert$"),
+        ):
+            with self.subTest(clip=clip), self.assertRaisesRegex(SnapshotError, pattern):
+                self.prepared(clip)
 
 
 class SizingTests(_Workspace):

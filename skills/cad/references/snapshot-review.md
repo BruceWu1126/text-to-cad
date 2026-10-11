@@ -151,12 +151,14 @@ fills the cut faces. The default display is orthographic, so a camera facing the
 cut draws the section, with the walls beyond it:
 
 ```bash
-cadgen step snapshot STEP/housing.step tmp/cut.png --camera back --display '{"clip": {"axis": "y", "offset": 0.5}}'
+cadgen step snapshot STEP/housing.step tmp/cut.png --camera back --display '{"clip": {"axis": "y", "at": 12.5}}'
 ```
 
-`offset` places the plane across the model's bounds on that axis, from 0 to 1
-(0.5 is the middle). The clip keeps the lower side, so the cut faces the
-positive axis: look at it with `right` for `x`, `back` for `y` and `top` for
+`at` is the plane's coordinate on its axis in millimetres, in the model's own
+frame (the same numbers as the `bounds` `--mode list` prints), so this cuts at
+Y = 12.5. Without `at` the plane goes through the middle of the model:
+`{"clip": {"axis": "y"}}` halves it. The clip keeps the lower side, so the cut faces
+the positive axis: look at it with `right` for `x`, `back` for `y` and `top` for
 `z`. `"invert": true` keeps the upper side instead; then use `left`, `front` or
 `bottom`. The cut follows the display mesh, so a hole cut across its axis is a
 many-sided polygon.

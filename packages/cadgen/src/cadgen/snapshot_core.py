@@ -173,7 +173,7 @@ DISPLAY_FLOOR_KEYS = frozenset({"enabled", "placement", "color", "opacity", "fin
 DISPLAY_FLOOR_FINISHES = frozenset({"matte", "glossy"})
 DISPLAY_GRID_KEYS = frozenset({"enabled", "color", "opacity", "density"})
 DISPLAY_AXES_KEYS = frozenset({"enabled", "color", "opacity"})
-DISPLAY_CLIP_KEYS = frozenset({"enabled", "axis", "offset", "offsets", "invert"})
+DISPLAY_CLIP_KEYS = frozenset({"enabled", "axis", "at", "invert"})
 DISPLAY_EXPLODED_KEYS = frozenset({"enabled", "amount"})
 DISPLAY_GROUP_KEYS = {
     "camera": DISPLAY_CAMERA_KEYS, "surfaces": DISPLAY_SURFACE_KEYS,
@@ -552,7 +552,7 @@ def validate_display_settings_values(
             "camera": {"focalLength": (20, 200)},
             "lighting": {"exposure": (-5, 5), "rotation": (-180, 180), "size": (0.25, 3), "fill": (0, 1)},
             "grid": {"density": (0.25, 4)},
-            "exploded": {"amount": (0, 1)}, "clip": {"offset": (0, 1)},
+            "exploded": {"amount": (0, 1)},
         }.get(name, {}).items():
             if key in value:
                 _render_number(value[key], f"display.{name}.{key}", *bounds)
@@ -565,12 +565,14 @@ def validate_display_settings_values(
         if name == "clip":
             if "invert" in value:
                 _render_boolean(value["invert"], "display.clip.invert")
-            if "offsets" in value:
-                offsets = value["offsets"]
-                if not is_plain_object(offsets) or set(offsets) - {"x", "y", "z"}:
-                    raise SnapshotError("display.clip.offsets must be an object containing only x, y, z")
-                for axis, offset in offsets.items():
-                    _render_number(offset, f"display.clip.offsets.{axis}", 0, 1)
+            if "at" in value:
+                # The plane's coordinate on its axis, in millimetres in the model's frame.
+                at = value["at"]
+                if isinstance(at, bool) or not isinstance(at, (int, float)) or not isfinite(float(at)):
+                    raise SnapshotError(
+                        "display.clip.at must be a finite number: the plane's coordinate on its axis, "
+                        "in millimetres"
+                    )
 
 
 # What belongs to a CAD model (STEP) alone. Edges are drawn from B-rep topology,

@@ -85,7 +85,7 @@ Floor. Preset changes never reorder controls. Clip and Explode are not Display
 sections: they are STEP toolbar tools with their own panels, and their settings
 live in this same store (`clip`, `exploded`). A tool opens neutral — Explode at
 0%, Clip at no cut — and an edit enables its group; removing the tool discards
-its amount, offsets and Flip. Preset selection preserves Clip/Explode; Display
+its amount, axis and Flip. Preset selection preserves Clip/Explode; Display
 Reset disables both. See
 [settings-ui.md](./settings-ui.md#tools-and-lifecycle) for their lifecycle.
 The remaining optional effects use the same feature gate primitive. A surface

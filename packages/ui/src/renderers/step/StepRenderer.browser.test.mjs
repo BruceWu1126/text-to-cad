@@ -1041,7 +1041,7 @@ test('preview and the tools view are two states: preview draws the model as auth
   await view.tool('Select').click();
   await pane.getByRole('button', { name: 'Hide base', exact: true }).click();
   await pane.getByRole('button', { name: 'Select arm', exact: true }).click();
-  await view.display({ clip: { enabled: true, axis: 'z', offsets: { x: 1, y: 1, z: 0.5 }, invert: false } });
+  await view.display({ clip: { enabled: true, axis: 'z', invert: false } });
   await page.evaluate(() => window.cadHarness.a.controller.setCamera({ ...window.cadHarness.a.controller.readState().camera, zoom: 1.4, target: [3, 4, 2] }));
   await page.waitForFunction(() => {
     const state = window.cadHarness.a.controller.readState();
@@ -1696,7 +1696,7 @@ test('a reload of the tab brings back the view — camera, Display, Clip, Explod
   await pane.getByRole('button', { name: 'Select base', exact: true }).dblclick();
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().isolatedPartIds.length === 1);
   // The Display settings, with Clip and Explode; then the camera.
-  await view.display({ mode: 'wireframe', clip: { enabled: true, axis: 'x', offsets: { x: 0.6 } }, exploded: { enabled: true, amount: 0.3 } });
+  await view.display({ mode: 'wireframe', clip: { enabled: true, axis: 'x', at: 9 }, exploded: { enabled: true, amount: 0.3 } });
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.exploded.enabled === true);
   await page.evaluate(() => window.cadHarness.a.controller.setCamera({ ...window.cadHarness.a.controller.readState().camera, position: [60, -20, 25], target: [4, 1, 0], zoom: 1.3 }));
   await page.waitForFunction(() => Object.values(window.cadHarness.state.renderers || {})[0]?.camera?.zoom === 1.3);
@@ -1714,8 +1714,8 @@ test('a reload of the tab brings back the view — camera, Display, Clip, Explod
     const a = [back.camera[property]].flat(), b = [left.camera[property]].flat();
     assert.ok(a.every((value, index) => Math.abs(value - b[index]) < 1e-6), `the saved camera comes back in place of the fit: ${property} ${JSON.stringify([a, b])}`);
   }
-  assert.deepEqual([back.display.mode, back.display.clip.enabled, back.display.clip.axis, back.display.exploded.enabled, back.display.exploded.amount],
-    ['wireframe', true, 'x', true, 0.3], 'the Display settings, Clip and Explode come back');
+  assert.deepEqual([back.display.mode, back.display.clip.enabled, back.display.clip.axis, back.display.clip.at, back.display.exploded.enabled, back.display.exploded.amount],
+    ['wireframe', true, 'x', 9, true, 0.3], 'the Display settings, Clip and Explode come back');
   // An explosion restored on load lays the parts out exactly as the live one did: it is centred on
   // the rest placement, so the restored camera still frames the same picture. It is laid out once
   // the model is drawn again, so it is awaited, on the page's frames.
