@@ -6,6 +6,8 @@ import { buildModelingTree } from './modelingTree.js';
 self.onmessage = async ({ data: { resource } }) => {
   try {
     const bytes = await readCadWorkerTicket(resource);
+    // The SURF is here (cadgen extracts it when asked, behind its build pool): the analysis starts.
+    self.postMessage({ analyzing: true });
     const { index, floats } = parseSurf(bytes);
     const tree = buildModelingTree(index, floats);
     self.postMessage({ tree, hasFaces: index.faces.length > 0, edgeFaces: Object.fromEntries(index.edges.map(edge => [edge.ord, edge.faceOrds || []])) });

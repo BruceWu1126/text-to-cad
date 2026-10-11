@@ -116,9 +116,10 @@ or matching its tool volume alone does not establish a rebuildable whole part.
 ## Limits and failures
 
 The worker ticket permits at most 16 MiB of SURF data. Analysis rejects inputs
-over 6,000 faces or 20,000 edges; the worker/ticket stage, which includes cadgen
-extracting the surface (one build-pool job for the component), has a 10-second
-timeout. These are safety limits, not promised execution times.
+over 6,000 faces or 20,000 edges, and has a 10-second timeout from the moment the
+worker holds the SURF. The wait for the SURF has none: cadgen extracts it when
+asked (one build-pool job for the component), and that job may queue behind a
+build. These are safety limits, not promised execution times.
 
 Unavailable data, unsupported-size inputs, worker errors and timeouts produce a
 component error and explicit retry. They do not become reusable cached results.

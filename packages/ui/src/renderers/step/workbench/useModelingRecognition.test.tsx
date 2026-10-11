@@ -165,6 +165,21 @@ it('reuses completed exact-component recognition through A → B → A and keeps
   expect(RecognitionWorker.instances).toHaveLength(2);
 });
 
+it('gives the analysis a deadline, not the wait for the SURF cadgen extracts when asked', async () => {
+  const { urls } = setup();
+  const timers = vi.spyOn(globalThis, 'setTimeout');
+  const deadlines = () => timers.mock.calls.filter(([, ms]) => ms === 10000).length;
+  const view = renderHook(() => useModelingRecognition(urls.a, true));
+  await waitFor(() => expect(RecognitionWorker.jobs).toHaveLength(1));
+  // The worker is still reading the SURF, whose job may wait behind a build: nothing times out.
+  expect(deadlines()).toBe(0);
+  const { worker } = RecognitionWorker.jobs[0];
+  await act(async () => { worker.onmessage?.({ data: { analyzing: true } }); });
+  expect(deadlines()).toBe(1);
+  await answer(worker, { tree });
+  expect(view.result.current.results.c.tree).toEqual(tree);
+});
+
 it('does not reuse a failed recognition when the file reopens', async () => {
   const { urls, fetch } = setup();
   const first = renderHook(() => useModelingRecognition(urls.a, true));

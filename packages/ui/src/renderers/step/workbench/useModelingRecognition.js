@@ -97,8 +97,12 @@ export function useModelingRecognition(meshUrl, enabled, { client, entry, reques
               worker ||= new Worker(new URL('./modelingTree.worker.js',import.meta.url),{type:'module'});
               const current=worker;
               job.worker=current;
-              job.timer=setTimeout(()=>finish({error:'Recognition timed out for this part.'},true),10000);
-              current.onmessage=event=>finish(event.data);
+              // The analysis has a deadline, not the SURF's arrival: cadgen extracts it when asked, and
+              // its job may wait behind a build.
+              current.onmessage=event=>{
+                if(!event.data?.analyzing){finish(event.data);return;}
+                job.timer=setTimeout(()=>finish({error:'Recognition timed out for this part.'},true),10000);
+              };
               current.onerror=()=>finish({error:'Could not recognize this part.'},true);
               resources.workerTicket(surf,{signal,maxBytes:16*1024*1024}).then(resource=>{
                 if(signal.aborted || job.worker!==current)return;
