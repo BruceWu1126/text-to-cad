@@ -161,6 +161,9 @@ class DeclaringClips(unittest.TestCase):
             (lambda: cadgen.clip(spin, duration=True), "cadgen.clip duration must be a positive number of seconds, got True"),
             (lambda: cadgen.clip(spin, duration=1, fps=0), "cadgen.clip fps must be a positive number of samples a second, got 0"),
             (lambda: cadgen.clip(spin, duration=1, fps=False), "cadgen.clip fps must be a positive number of samples a second, got False"),
+            # A duration written in milliseconds: 3000 s at 60 fps would bake 180,000 poses.
+            (lambda: cadgen.clip(spin, duration=3000), "cadgen.clip samples 3000 s at 60 fps, 180000 poses; a clip bakes "
+                                                       "at most 7200 (two minutes at 60 fps): shorten it or lower its fps"),
             (lambda: cadgen.clip(spin, duration=1, label=""), "cadgen.clip label must be a nonempty string, got ''"),
             (lambda: cadgen.clip(spin, duration=1, label="  "), "cadgen.clip label must be a nonempty string, got '  '"),
         )
@@ -168,6 +171,8 @@ class DeclaringClips(unittest.TestCase):
             with self.subTest(message=message), self.assertRaises(ValueError) as caught:
                 declare()
             self.assertEqual(message, str(caught.exception))
+        # Two minutes at 60 fps is the most a clip bakes, and is taken.
+        self.assertEqual(cadgen.clip(spin, duration=120).duration, 120.0)
 
     def test_animation_takes_a_nonempty_dict_of_clips_and_keeps_its_order(self) -> None:
         def spin(t, m):

@@ -148,7 +148,9 @@ and nothing runs a clip after the build.
   lists (the clip id when omitted). `fps` is the sampling rate, not a playback
   rate: raise it when the build reports a part turning more than 90 degrees
   between samples, or when an abrupt motion (an impact, a snap) looks rounded
-  off. The viewer opens on the first clip in the dict.
+  off. A clip samples at most 7200 poses (`duration * fps`: two minutes at 60
+  fps), and a longer one is refused when it is declared. The viewer opens on the
+  first clip in the dict.
 - `update(t, m)` must be a pure function of `t`: every sample starts from rest,
   so no state between calls, no clock, no randomness.
 - `m.get(*targets)` returns one handle on every occurrence its targets name. A

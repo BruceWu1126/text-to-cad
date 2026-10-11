@@ -51,6 +51,10 @@ __all__ = ["Clip", "clip", "normalize_clips"]
 
 # Samples a second the build evaluates a clip at, unless the clip says otherwise.
 DEFAULT_FPS = 60.0
+# The most poses one clip bakes: two minutes at 60 fps, as many as a snapshot video
+# renders. The build holds every pose until it reduces them to keys, so a duration
+# written in milliseconds would otherwise grow it without end.
+MAX_CLIP_SAMPLES = 7200
 
 
 @dataclass(frozen=True)
@@ -90,6 +94,10 @@ def clip(
     for name, value, minimum in (("duration", duration, 0.0), ("fps", fps, 0.0)):
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= minimum:
             raise _fail(f"cadgen.clip {name} must be a positive number of {'seconds' if name == 'duration' else 'samples a second'}, got {value!r}")
+    samples = math.ceil(duration * fps - 1e-9)
+    if samples > MAX_CLIP_SAMPLES:
+        raise _fail(f"cadgen.clip samples {duration:g} s at {fps:g} fps, {samples} poses; a clip bakes at most "
+                    f"{MAX_CLIP_SAMPLES} (two minutes at 60 fps): shorten it or lower its fps")
     if not isinstance(loop, bool):
         raise _fail(f"cadgen.clip loop must be True or False, got {loop!r}")
     if label is not None and (not isinstance(label, str) or not label.strip()):
