@@ -2,7 +2,7 @@ import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Boxes, Focus } from 'lucide-react';
 import { Button } from '@text-to-cad/ui/primitives/button';
-import { ROW_NAME_UNDER_ACTIONS, TREE_GLYPH_STROKE, TREE_INDENT_PX, TREE_ROW_DENSE_HEIGHT, TREE_ROW_DENSE_ICON_CLASS, TreeRowSurface, TreeRowChevron, TreeRowGuides, TreeRowLabel } from '@text-to-cad/ui/primitives/tree-row';
+import { ROW_NAME_UNDER_ACTIONS, TREE_GLYPH_STROKE, TREE_INDENT_PX, TREE_ROW_INSET_PX, TREE_ROW_DENSE_HEIGHT, TREE_ROW_DENSE_ICON_CLASS, TreeRowSurface, TreeRowChevron, TreeRowGuides, TreeRowLabel } from '@text-to-cad/ui/primitives/tree-row';
 import { TreeFilterHighlight, TreeFilterInput } from '@text-to-cad/ui/primitives/tree-filter';
 import { cn } from '@text-to-cad/ui/utils';
 import ModelPartMenu from './ModelPartMenu.jsx';
@@ -96,15 +96,15 @@ function ModelingRow({ node, depth, open, branch, locked, disabled, selected, jo
   return <ModelPartMenu node={node} controls={partControls} disabled={disabled}>
     <TreeRowSurface dense active={selected} className={cn('group/row relative gap-0 pr-0', hiddenByOwner && 'opacity-50')}
       onMouseEnter={() => partControls.onHoverTreeNode?.(node.selectionId || '')}
-      onMouseLeave={() => partControls.onHoverTreeNode?.('')} style={{paddingLeft:depth*TREE_INDENT_PX, ...joinedCorners(joinAbove, joinBelow), ...(actionsWidth && {'--row-actions':actionsWidth})}}>
+      onMouseLeave={() => partControls.onHoverTreeNode?.('')} style={{paddingLeft:TREE_ROW_INSET_PX+depth*TREE_INDENT_PX, ...joinedCorners(joinAbove, joinBelow), ...(actionsWidth && {'--row-actions':actionsWidth})}}>
       {/* Its owners' faint lines, each under its glyph column. */}
-      <TreeRowGuides depth={depth}/>
+      <TreeRowGuides depth={depth} inset={TREE_ROW_INSET_PX}/>
       {/* One glyph per row, in one 12px column: a branch's chevron, or a part's box. */}
       {branch && <Disclosure node={node} open={open} locked={locked} toggle={toggle}/>}
       <TooltipHint content={node.label} overflowOnly><button type="button" aria-label={`Select ${node.label}`} aria-pressed={selected}
         disabled={disabled || unavailable || !(node.selectionId || node.memberSelectionIds?.length)}
         onClick={event=>{if(event.detail < 2)choose(node,event);}} onDoubleClick={event=>choose(node,event)}
-        className={cn('flex h-full min-w-0 flex-1 items-center gap-[3px] rounded pr-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40', branch && 'pl-[3px]', underActions)}>
+        className={cn('flex h-full min-w-0 flex-1 items-center gap-1 rounded pr-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40', branch && 'pl-1', underActions)}>
         {!branch && <Box className={TREE_ROW_DENSE_ICON_CLASS} strokeWidth={TREE_GLYPH_STROKE}/>}
         <TreeRowLabel className="flex-1">{node.label}</TreeRowLabel>
       </button></TooltipHint>
@@ -131,7 +131,7 @@ function ModelingSearchRow({ match, index, availability, selected, joinAbove, jo
       <TooltipHint content={`${entry.prefix}${node.label}`} overflowOnly><button type="button" aria-label={`Select ${node.label}`} aria-pressed={selected}
         disabled={disabled || unavailable || !node.selectionId}
         onClick={event=>{if(event.detail < 2)choose(node,event);}} onDoubleClick={event=>choose(node,event)}
-        className={cn('flex h-full min-w-0 flex-1 items-center gap-1.5 rounded pl-2 pr-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40', underActions)}>
+        className={cn('flex h-full min-w-0 flex-1 items-center gap-1 rounded pr-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40', underActions)} style={{paddingLeft:TREE_ROW_INSET_PX}}>
         <Icon className={TREE_ROW_DENSE_ICON_CLASS} strokeWidth={TREE_GLYPH_STROKE}/>
         {/* Name first: in a narrow panel a deep owner path takes the truncation, never the name. */}
         <TreeRowLabel className="max-w-full shrink-0"><TreeFilterHighlight indices={indices} text={entry.label}/></TreeRowLabel>
