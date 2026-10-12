@@ -323,7 +323,7 @@ test('a pick names its face or edge by the id cadgen minted in the selector tabl
   // must answer with are its rows', joined to the mesh by ordinal, never the page's.
   const fixture = await loadStepFixture();
   const base = fixture.view.occurrences.find(occurrence => occurrence.name === 'base');
-  const table = JSON.parse(fixture.surfaces.get(fixture.view.components[base.component].part).selectors.bytes.toString());
+  const table = JSON.parse(fixture.partData.get(fixture.view.components[base.component].part).selectors.bytes.toString());
   const rows = (name, columns) => table[name].map(row => Object.fromEntries(table.tables[columns].map((column, index) => [column, row[index]])));
   const top = rows('faces', 'faceColumns').find(face => face.normal && face.normal[2] > 0.5);
   const edges = rows('edges', 'edgeColumns');

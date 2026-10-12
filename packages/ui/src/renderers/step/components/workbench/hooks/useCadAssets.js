@@ -32,7 +32,7 @@ import {
 import {
   createInitialDisplayPlans, probeInitialDisplay, producedDisplayPlan,
 } from "../../../render/initialDisplay.js";
-import { createSurfaceTicketBatches, createTessellationBodyBatches } from "./packageBatchReads.js";
+import { createPartTicketBatches, createTessellationBodyBatches } from "./packageBatchReads.js";
 import {
   matchingDisplayedPackageContext,
   retainedComponentMeshesForRevision
@@ -52,7 +52,7 @@ import {
 import { selectRequestedAssemblyComponents } from "../../../workbench/referenceSelection.js";
 import { createTopologyRequestSession } from "./topologyRequests.js";
 import { viewerMemoryPolicy } from "../../../render/viewerMemoryPolicy.js";
-import { syncSurfWorkerMemory } from "../../../render/surfWorkerMemoryPolicy.js";
+import { syncPartWorkerMemory } from "../../../render/partWorkerMemoryPolicy.js";
 import { componentMemoryAccounting, syncSelectorCacheAccounting } from "../../../render/renderMemoryAccounting.js";
 import { completedPackages, renderAssetCacheStatsWithPackages } from "../../../render/completedPackageCache.js";
 import {
@@ -63,9 +63,9 @@ import {
 // excludes every other format by extension). So where this used to ask whether an entry
 // was a STEP, it asks whether there is one: the same answer for every input it receives.
 
-// A package's first-level surfaces are fetched and decoded off the main thread, so the
+// A package's parts are fetched and decoded off the main thread, so the
 // cap only bounds sockets and the worker's queue.
-const COMPONENT_SURFACE_LOAD_CONCURRENCY = 8;
+const COMPONENT_PART_LOAD_CONCURRENCY = 8;
 
 // Topology requests (loadReferencesForEntry) union into one session per file revision: a request
 // never aborts the work in flight for the same revision, batches start at most every
@@ -112,15 +112,15 @@ function abortError() {
   return error;
 }
 
-function componentSurfaceLoadConcurrency() {
+function componentPartLoadConcurrency() {
   const hardwareConcurrency = typeof navigator !== "undefined"
     ? Number(navigator.hardwareConcurrency)
     : 0;
   if (!Number.isFinite(hardwareConcurrency) || hardwareConcurrency <= 0) {
-    return COMPONENT_SURFACE_LOAD_CONCURRENCY;
+    return COMPONENT_PART_LOAD_CONCURRENCY;
   }
   // Bounded by cores because the worker still parses serially; going wider only queues.
-  return Math.max(2, Math.min(COMPONENT_SURFACE_LOAD_CONCURRENCY, hardwareConcurrency));
+  return Math.max(2, Math.min(COMPONENT_PART_LOAD_CONCURRENCY, hardwareConcurrency));
 }
 
 // Component-GLB packages fan out to many small content-addressed GLBs (141 for
@@ -190,7 +190,7 @@ export function useCadAssets({
     return entryMeshAssetSignature(entry);
   }, [resources]);
 
-  // Complete STEP packages may exceed the per-component SURF LRU. Reuse their
+  // Complete STEP packages may exceed the per-component part LRU. Reuse their
   // bounded CPU working set, with fresh occurrence metadata for this mount.
   const restoreCompletedPackage = useCallback(entry => entryHasMesh(entry)
     ? completedPackages.get(client, entry, { descriptor: peekPackageDescriptor(entryAssetUrl(entry, "glb"), { resources }) })
@@ -233,7 +233,7 @@ export function useCadAssets({
   const referenceComposerRef = useRef(null);
   if (!referenceComposerRef.current) referenceComposerRef.current = { key: "", composer: createPackageReferenceComposer() };
 
-  // The package being loaded or shown: its descriptor, each component's mesh and runtime surface
+  // The package being loaded or shown: its descriptor, each component's mesh and part
   // identity, and the composition of them on screen. Topology composes from it, a same-file
   // revision reuses its unchanged components, and a closed tab keeps it (`completedPackages`).
   const packageRef = useRef(initialPackage);
@@ -245,8 +245,8 @@ export function useCadAssets({
   // same revision carries over what is on screen.
   const referenceCompositionRef = useRef(null);
   const displayedReferenceCompositionRef = useRef(null);
-  const surfaceViewReplacementRef = useRef(null);
-  const surfaceViewReplacementTaskRef = useRef(null);
+  const viewReplacementRef = useRef(null);
+  const viewReplacementTaskRef = useRef(null);
 
   useLayoutEffect(() => {
     if (!initialPackage) return;
@@ -318,9 +318,9 @@ export function useCadAssets({
       return;
     }
 
-    const surfaceViewReplacement = entry?.runtimeSurfaceViewReplacement === true;
+    const viewReplacement = entry?.runtimeViewReplacement === true;
     const targetMeshHash = getAssemblyMeshHash(entry);
-    const completed = surfaceViewReplacement ? null : restoreCompletedPackage(entry);
+    const completed = viewReplacement ? null : restoreCompletedPackage(entry);
     syncAssetCacheMemory(componentMemoryAccounting(previousDisplayed?.componentMeshDataByCid).buffers);
     if (completed) {
       completed.requestId = requestId;
@@ -362,9 +362,9 @@ export function useCadAssets({
     // until the atomic commit.
     packageRef.current = null;
     referenceCompositionRef.current = null;
-    const stageWholeReplacement = atomicSameFileReplacement || surfaceViewReplacement;
+    const stageWholeReplacement = atomicSameFileReplacement || viewReplacement;
     const keepRenderedAssemblyVisible = entry?.kind === "assembly" && (
-      atomicSameFileReplacement || (surfaceViewReplacement && meshStateRef.current?.file === entry.file)
+      atomicSameFileReplacement || (viewReplacement && meshStateRef.current?.file === entry.file)
     );
     let assemblyPreviewVisible = keepRenderedAssemblyVisible;
     if (!keepRenderedAssemblyVisible) {
@@ -425,14 +425,14 @@ export function useCadAssets({
         }
         // One request for many components where a lane made one each (`packageBatchReads.js`):
         // their initial tiers, probed a chunk at a time; the warm ones' bodies, read a batch at a
-        // time; the cold ones' surfaces and meshes, resolved up to a request's bound at a time. Each
+        // time; the cold ones' parts, resolved up to a request's bound at a time. Each
         // follows the order the lanes load in. A same-file revision's retained components read nothing.
         const readOrder = orderComponentsForProgressiveLoad(packageDescriptor)
           .filter(([cid]) => !retainedComponentMeshByCid[cid]);
         const readCids = readOrder.map(([cid]) => cid);
         // A warm load's isolates start once its first probe shows warm bodies, while the first batch
         // is on the wire: a batch hands its bodies over at once, and they would all start only then.
-        // A cold load's start as its surfaces come (measured: started earlier, they finish later).
+        // A cold load's start as its parts come (measured: started earlier, they finish later).
         let prewarmed = false;
         const prewarmForBatches = () => {
           if (prewarmed) return;
@@ -469,7 +469,7 @@ export function useCadAssets({
           skip: (cid, row) => Boolean(peekRenderPart(row)),
           signal: controller.signal,
         });
-        const surfaceTickets = createSurfaceTicketBatches({
+        const partTickets = createPartTicketBatches({
           order: readCids,
           needs: (cid) => {
             const planned = initialPlans.peek(cid);
@@ -550,7 +550,7 @@ export function useCadAssets({
             const row = afresh || skipCacheProbes
               ? (await resolveParts(packageDescriptor, [{ cid, part: component.part }],
                 { client, signal: controller.signal })).get(cid)
-              : await surfaceTickets.ticket(cid, component);
+              : await partTickets.ticket(cid, component);
             if (!producedDisplayPlan(row)) throw new Error(`Component ${cid} has no display mesh`);
             componentIdentityByCid.set(cid, row);
             return row;
@@ -567,7 +567,7 @@ export function useCadAssets({
           }),
           releaseLoad: (token) => {
             viewerMemoryPolicy.release(token);
-            syncSurfWorkerMemory();
+            syncPartWorkerMemory();
           },
           recoverMemoryPressure: async () => {
             if (completedPackages.clear()) {
@@ -575,7 +575,7 @@ export function useCadAssets({
               return true;
             }
             const reclaimed = reclaimIdlePartWorkers();
-            syncSurfWorkerMemory();
+            syncPartWorkerMemory();
             if (reclaimed.reclaimedSlots > 0 || reclaimed.fullyReleased) return true;
             // Every package decode has drained at this point. If another
             // selector consumer still owns all slots, wait for that
@@ -583,7 +583,7 @@ export function useCadAssets({
             // once. Generation fencing prevents this waiter from clearing a
             // replacement pool's accounting.
             const released = await releasePartWorkers();
-            syncSurfWorkerMemory();
+            syncPartWorkerMemory();
             return released;
           },
           onMemoryLimitation: (detail) => viewerMemoryPolicy.noteLimitation(detail),
@@ -641,7 +641,7 @@ export function useCadAssets({
               ctx.complete = final;
             } else {
               packageRef.current = {
-                entry: surfaceViewReplacement ? { ...entry, runtimeSurfaceViewReplacement: false } : entry,
+                entry: viewReplacement ? { ...entry, runtimeViewReplacement: false } : entry,
                 file: entry.file,
                 meshUrl,
                 descriptor: packageDescriptor,
@@ -699,16 +699,16 @@ export function useCadAssets({
           await loader.run();
         } finally {
           bodyBatches.dispose();
-          surfaceTickets.dispose();
+          partTickets.dispose();
           // Nothing decodes once the load ends — a later topology load
           // builds a fresh pool — so the workers' isolates go back to the
           // process instead of holding the heap each grew for the largest
           // component it decoded. Also on the failure path: an aborted load
           // is exactly when the memory is most worth returning.
           releasePartWorkers().then(() => {
-            syncSurfWorkerMemory();
+            syncPartWorkerMemory();
           }).catch(() => {
-            syncSurfWorkerMemory();
+            syncPartWorkerMemory();
           });
         }
         return;
@@ -722,8 +722,8 @@ export function useCadAssets({
       if (requestId !== requestIdRef.current || isAbortError(err) || controller.signal.aborted) {
         return;
       }
-      if (err instanceof PartResolutionError && err.replacementView && !surfaceViewReplacement) {
-        return surfaceViewReplacementRef.current?.(
+      if (err instanceof PartResolutionError && err.replacementView && !viewReplacement) {
+        return viewReplacementRef.current?.(
           entry, entryAssetUrl(entry, "glb"), err.replacementView,
         );
       }
@@ -769,14 +769,14 @@ export function useCadAssets({
     }
   }, [cancelMeshLoad, entryHasMesh, getAssemblyMeshHash, client, restoreCompletedPackage]);
 
-  surfaceViewReplacementRef.current = (entry, meshUrl, replacementView) => {
+  viewReplacementRef.current = (entry, meshUrl, replacementView) => {
     if (!replacementView?.viewId) return Promise.resolve();
     completedPackages.delete(client, entry);
     installRuntimePackageDescriptor(meshUrl, replacementView, { resources });
     if (packageRef.current?.descriptor?.viewId === replacementView.viewId) {
       return Promise.resolve();
     }
-    const active = surfaceViewReplacementTaskRef.current;
+    const active = viewReplacementTaskRef.current;
     if (active?.viewId === replacementView.viewId) return active.promise;
     // An old-view selector request must not publish after the replacement
     // begins. Saved geometry is untouched; this selection lives only in the
@@ -787,13 +787,13 @@ export function useCadAssets({
       displayedReferenceCompositionRef.current = null;
       setReferenceState(null);
       setReferenceStatus(REFERENCE_STATUS.PENDING);
-      await loadMeshForEntry({ ...entry, runtimeSurfaceViewReplacement: true });
+      await loadMeshForEntry({ ...entry, runtimeViewReplacement: true });
     })().finally(() => {
-      if (surfaceViewReplacementTaskRef.current?.promise === task) {
-        surfaceViewReplacementTaskRef.current = null;
+      if (viewReplacementTaskRef.current?.promise === task) {
+        viewReplacementTaskRef.current = null;
       }
     });
-    surfaceViewReplacementTaskRef.current = { viewId: replacementView.viewId, promise: task };
+    viewReplacementTaskRef.current = { viewId: replacementView.viewId, promise: task };
     return task;
   };
 
@@ -865,7 +865,7 @@ export function useCadAssets({
         };
         await mapWithConcurrency(
           neededCids,
-          componentSurfaceLoadConcurrency(),
+          componentPartLoadConcurrency(),
           async (cid) => {
             const component = (packageDescriptor.components || {})[cid];
             if (!component) {
@@ -951,7 +951,7 @@ export function useCadAssets({
       // A first pick can be the last consumer of the tessellation pool.
       // Reclaim its isolates after all sibling loads drain, just like initial
       // display; a topology-only interaction must not pin eight heaps.
-      releasePartWorkers().then(syncSurfWorkerMemory, syncSurfWorkerMemory);
+      releasePartWorkers().then(syncPartWorkerMemory, syncPartWorkerMemory);
     }
   }, [buildNormalizedReferenceState, getAssemblyMeshHash, resources]);
 
@@ -960,7 +960,7 @@ export function useCadAssets({
       return;
     }
     if (err instanceof PartResolutionError && err.replacementView) {
-      await surfaceViewReplacementRef.current?.(
+      await viewReplacementRef.current?.(
         session.entry, entryAssetUrl(session.entry, "glb"), err.replacementView,
       );
       return;

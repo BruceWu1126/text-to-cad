@@ -189,7 +189,7 @@ export function createTessellationBodyBatches({
  * components still waiting, with its error. Once the load is over, aborted or failed (`dispose`),
  * nothing more is asked ahead: a derivation nobody will draw is not started.
  */
-export function createSurfaceTicketBatches({
+export function createPartTicketBatches({
   order, needs, resolve, signal,
   alone = PROGRESSIVE_PUBLISH_FIRST_COMPONENTS, maxComponents = PART_REQUEST_MAX_COMPONENTS, inFlight = 8,
 }) {

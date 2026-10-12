@@ -24,7 +24,7 @@ import {
 } from "./packageReferenceComposition.js";
 
 const require = createRequire(import.meta.url);
-// The gear's selector table and cadgen's stored display mesh of it (core's surf fixtures).
+// The gear's selector table and cadgen's stored display mesh of it (core's part fixtures).
 const FIXTURES = path.join(path.dirname(require.resolve("@text-to-cad/core/lib/parts/tessellationCache.js")), "fixtures");
 
 // Each call joins the table anew: a new bundle object over the same geometry, as a new file

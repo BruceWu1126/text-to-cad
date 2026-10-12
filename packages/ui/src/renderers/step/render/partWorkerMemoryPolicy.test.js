@@ -3,9 +3,9 @@ import test from "node:test";
 
 import { createViewerMemoryPolicy } from "./viewerMemoryPolicy.js";
 import {
-  installSurfWorkerMemoryProvider,
+  installPartWorkerMemoryProvider,
   workerResidentBytesFromStats,
-} from "./surfWorkerMemoryPolicy.js";
+} from "./partWorkerMemoryPolicy.js";
 
 test("worker resident accounting uses the exact live slot sum", () => {
   assert.equal(workerResidentBytesFromStats({
@@ -22,7 +22,7 @@ test("full and partial pool changes are reflected without a completion heuristic
     gpuHeadroomBytes: 0,
   });
   let stats = { residentSlots: 2, usedSlots: 2, residentEstimateBytes: 500 * 1024 * 1024 };
-  installSurfWorkerMemoryProvider(policy, () => stats);
+  installPartWorkerMemoryProvider(policy, () => stats);
   assert.equal(policy.snapshot().retainedByCategory.workerResidentEstimated, 500 * 1024 * 1024);
 
   stats = { residentSlots: 1, usedSlots: 1, residentEstimateBytes: 250 * 1024 * 1024 };

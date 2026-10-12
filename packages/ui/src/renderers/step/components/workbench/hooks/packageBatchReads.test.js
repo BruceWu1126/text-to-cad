@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createCadClient, PartResolutionError } from "@text-to-cad/core/client";
 import { isTessellationCacheProbeMissError, tessellationDecodedBytes } from "@text-to-cad/core/lib/parts/tessellationCache.js";
-import { createSurfaceTicketBatches, createTessellationBodyBatches } from "./packageBatchReads.js";
+import { createPartTicketBatches, createTessellationBodyBatches } from "./packageBatchReads.js";
 import { createInitialDisplayPlans } from "../../../render/initialDisplay.js";
 
 const KIB = 1024, MIB = 1024 * KIB;
@@ -163,7 +163,7 @@ test("the first eight cold components resolve alone, the rest up to 64 to a requ
     for (const { cid } of request.requested) request.onReady(cid, rowFor(cid));
     request.done(new Map(request.requested.map(({ cid }) => [cid, rowFor(cid)])));
   };
-  const tickets = createSurfaceTicketBatches({ order, resolve, needs: cid => ({ part: partOf(cid) }) });
+  const tickets = createPartTicketBatches({ order, resolve, needs: cid => ({ part: partOf(cid) }) });
   const first = tickets.ticket("c0", {});
   await tick();
   // Eight lone requests are out, as eight lanes made them; the rest wait for room.
@@ -187,7 +187,7 @@ test("the first eight cold components resolve alone, the rest up to 64 to a requ
 test("a part request that fails fails each of its components still waiting", async () => {
   const order = cids(20);
   const failure = new Error("part derivation failed for c12");
-  const tickets = createSurfaceTicketBatches({ order, alone: 0,
+  const tickets = createPartTicketBatches({ order, alone: 0,
     needs: cid => ({ part: partOf(cid) }),
     resolve: async (requested, { onReady }) => { onReady("c0", rowFor("c0")); throw failure; } });
   assert.deepEqual(await tickets.ticket("c0", {}), rowFor("c0"));
@@ -211,7 +211,7 @@ test("a component that failed in its request fails alone; the ready ones beside 
     c2: ready("c2"),
   } }), { headers: { "content-type": "application/json" } }) });
   const order = ["bad", "c0", "c2"];
-  const tickets = createSurfaceTicketBatches({ order, alone: 0,
+  const tickets = createPartTicketBatches({ order, alone: 0,
     needs: cid => ({ part: parts[cid] }),
     resolve: (requested, options) => client.resolveParts(view, requested, options) });
   const [bad, c0, c2] = await Promise.allSettled(order.map(cid => tickets.ticket(cid, {})));
@@ -248,7 +248,7 @@ test("a load that is aborted, or over, asks nothing more ahead and leaves no com
   const order = cids(100);
   const sent = [];
   const controller = new AbortController();
-  const tickets = createSurfaceTicketBatches({ order, alone: 0, inFlight: 1, signal: controller.signal,
+  const tickets = createPartTicketBatches({ order, alone: 0, inFlight: 1, signal: controller.signal,
     needs: cid => ({ part: partOf(cid) }),
     resolve: (requested, { signal }) => new Promise((_, reject) => {
       sent.push(requested.length);

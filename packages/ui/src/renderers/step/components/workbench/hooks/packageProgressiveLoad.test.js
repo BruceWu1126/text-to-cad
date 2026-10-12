@@ -74,7 +74,7 @@ function fakeComponent(cid, { floats = 9 } = {}) {
 function makeDescriptor({ componentCount, occurrenceCount, transformFor = () => IDENTITY_4X4 }) {
   const components = {};
   for (let i = 0; i < componentCount; i += 1) {
-    components[`c${i}`] = { surf: `components/c${i}.surf` };
+    components[`c${i}`] = { brep: `components/c${i}.brep` };
   }
   const occurrences = [];
   for (let i = 0; i < occurrenceCount; i += 1) {
@@ -622,7 +622,7 @@ test("a component's own failure leaves it out: the rest load, and the final publ
   assert.deepEqual(finals[0].failures.map(({ cid }) => cid), ["c2"]);
   assert.equal(settled.at(-1), 4, "a failed component counts as settled");
 
-  const fatal = new Error("surface request capacity reached");
+  const fatal = new Error("part request capacity reached");
   const fenced = createProgressivePackageLoader({
     descriptor, concurrency: 2, loadComponent, componentFailed, onPublish: () => {},
     partRow: async (cid) => { if (cid === "c1") throw fatal; return storedRow(cid, 64); },

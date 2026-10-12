@@ -1,4 +1,4 @@
-// Group edges and Group faces over cadgen's own data: the slot's selector table (core's surf
+// Group edges and Group faces over cadgen's own data: the slot's selector table (core's part
 // fixtures, written by cadgen) joined to its stored mesh, composed into a runtime as the
 // viewer composes an occurrence, and grown by the graphs StepSurface grows a pick with. The
 // sets are the table's chains and tangent groups, decided from the exact BREP.
