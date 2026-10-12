@@ -170,23 +170,6 @@ def ensure_ref_file_matches(file_prefix: str, document_path: str, *, source_labe
     )
 
 
-def normalize_cad_path(raw_cad_path: str) -> str | None:
-    normalized = str(raw_cad_path or "").replace("\\", "/").strip().strip("/")
-    if not normalized:
-        return None
-    # Strip generator/model suffixes first so a model script target (plain
-    # `<name>.py` in library-first, `<name>.step.py` historically) normalizes to
-    # the same logical cad path as its `<name>.step` artifact.
-    for suffix in (".step.py", ".stp.py", ".step", ".stp", ".py"):
-        if normalized.lower().endswith(suffix):
-            normalized = normalized[: -len(suffix)]
-            break
-    parts = normalized.split("/")
-    if any(not part or part in {".", ".."} for part in parts):
-        return None
-    return "/".join(parts)
-
-
 def parse_selector(
     raw_selector: str,
     *,
