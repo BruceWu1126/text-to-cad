@@ -303,7 +303,7 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
             "index/selector, index/mesh) once a week old, and every object nothing reaches: "
             "not a record's or a document's tree, not named by a part, component, bounds, drawing, skin or robot "
             "entry, and not written or claimed within the grace window. --max-size first evicts those derived "
-            "entries, least recently written first, until the store fits 80%% of the cap (the newest keep a "
+            "entries, least recently written first, until the store fits 80% of the cap (the newest keep a "
             "fifth of the cap when records and documents leave less room); records, document entries and "
             "output entries are never evicted. The daemon does the same when idle. A store a newer cadgen "
             "wrote to in the last 30 days is left to that cadgen, and nothing is removed."

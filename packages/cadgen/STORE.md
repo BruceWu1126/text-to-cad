@@ -175,8 +175,8 @@ Mesh variants and model output entries also carry their format's final serialize
 revision. A change to one format's encoding invalidates that format's final exports
 without discarding geometry or display meshes, or affecting the other formats'
 freshness.
-Animated exports capture the sidecar's `animation` keyframes once, before mesh preparation;
-the animation variant and the clip sampler consume that same immutable text.
+Animated exports capture the sidecar's `animation` keyframes once, before mesh preparation,
+and the animation variant consumes that same immutable text.
 Three properties, each enforced by a
 test:
 
