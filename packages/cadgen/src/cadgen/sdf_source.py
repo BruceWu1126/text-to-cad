@@ -50,18 +50,6 @@ def file_ref_from_sdf_path(sdf_path: Path) -> str:
     return display_path(resolved)
 
 
-def read_sdf_source(sdf_path: Path) -> SdfSource:
-    resolved_path = sdf_path.resolve()
-    if resolved_path.suffix.lower() != SDF_SUFFIX:
-        raise SdfSourceError(f"{resolved_path} is not an SDF source file")
-
-    try:
-        root = ET.fromstring(resolved_path.read_text(encoding="utf-8"))
-    except (OSError, ET.ParseError) as exc:
-        raise SdfSourceError(f"{display_path(resolved_path)} could not be parsed as SDF XML") from exc
-    return parse_sdf_root(root, source_path=resolved_path, base_dir=resolved_path.parent)
-
-
 def parse_sdf_xml(xml_text: str, *, source_path: Path, base_dir: Path | None = None) -> SdfSource:
     try:
         root = ET.fromstring(xml_text)
