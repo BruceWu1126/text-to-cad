@@ -107,13 +107,6 @@ function syncDisplayedMemory(componentMeshDataByCid) {
   }
 }
 
-function publishMemoryLimitation(detail) {
-  viewerMemoryPolicy.noteLimitation(detail);
-  if (typeof window === "undefined") return;
-  window.__cadViewerMemoryLimitation = detail;
-  window.dispatchEvent(new CustomEvent("cad:memory-limitation", { detail }));
-}
-
 function abortLoad(controllerRef) {
   controllerRef.current?.abort();
   controllerRef.current = null;
@@ -662,7 +655,7 @@ export function useCadAssets({
             syncSurfWorkerMemory();
             return released;
           },
-          onMemoryLimitation: publishMemoryLimitation,
+          onMemoryLimitation: (detail) => viewerMemoryPolicy.noteLimitation(detail),
           // Revision replacement is a transaction: loaded component arrays
           // are accounted beside the current complete scene, but only the
           // final composition is published.

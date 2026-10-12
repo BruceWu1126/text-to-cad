@@ -108,10 +108,9 @@ backing allocation, including unused sections of packed buffers. GPU charges
 use uploaded view sizes; CPU-only edge inputs and picking allocations are
 accounted for separately.
 
-A component that cannot fit is not loaded: the loader reports a limitation
-(`cad:memory-limitation`, `window.__cadViewerMemoryLimitation`) and the load's
-error, and the view stays up with what it drew. **Estimates and sampled resource
-totals are a soft budget, not a hard browser RSS limit.**
+A component that cannot fit is not loaded: the ledger notes the limitation, the
+load fails with its error, and the view stays up with what it drew. **Estimates
+and sampled resource totals are a soft budget, not a hard browser RSS limit.**
 
 ## 4. Failure and cleanup
 

@@ -354,12 +354,6 @@ export function useStepSceneSync(layers) {
         viewerMemoryPolicy.release(token);
         const current = viewerMemoryPolicy.snapshot().retainedByCategory.bvh || 0;
         viewerMemoryPolicy.setRetained("bvh", current + builtBytes);
-      },
-      onBuildDenied: (detail) => {
-        if (typeof window !== "undefined") {
-          window.__cadViewerMemoryLimitation = detail;
-          window.dispatchEvent(new CustomEvent("cad:memory-limitation", { detail }));
-        }
       }
     };
     runtime.raycastBvhOptions = raycastBvhOptions;

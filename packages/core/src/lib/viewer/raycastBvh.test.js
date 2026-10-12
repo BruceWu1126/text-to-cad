@@ -127,14 +127,16 @@ test("a denied BVH reservation leaves correct stock raycasting available", async
   const geometry = indexedGeometry();
   const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
   mesh.updateMatrixWorld();
-  const denied = [];
+  const asked = [];
   scheduleRuntimeRaycastBvh({ displayRecords: [{ mesh }] }, {
-    reserveBuild: ({ estimatedBytes }) => ({ ok: false, detail: { requestedBytes: estimatedBytes } }),
-    onBuildDenied: (detail) => denied.push(detail),
+    reserveBuild: ({ estimatedBytes }) => {
+      asked.push(estimatedBytes);
+      return { ok: false, detail: { requestedBytes: estimatedBytes } };
+    },
   });
   await tick();
   assert.equal(geometry.boundsTree, undefined);
-  assert.equal(denied[0].requestedBytes, estimateGeometryBvhBytes(geometry));
+  assert.deepEqual(asked, [estimateGeometryBvhBytes(geometry)], "the build asked for its estimate and was refused");
   const hits = new THREE.Raycaster(
     new THREE.Vector3(0.6, 0.3, 5),
     new THREE.Vector3(0, 0, -1)

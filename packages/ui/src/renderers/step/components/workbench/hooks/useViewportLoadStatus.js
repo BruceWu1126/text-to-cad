@@ -6,8 +6,8 @@ function nowMs() {
 
 /**
  * Records the two readiness moments of the displayed model: its first geometry and the whole
- * model. The small browser snapshot (`window.__cadViewerLoad`, and the `cad:load-status` event)
- * is intentional public observability for benchmark harnesses; UI copy remains human-facing.
+ * model. The small browser snapshot (`window.__cadViewerLoad`) is intentional public
+ * observability for benchmark harnesses; UI copy remains human-facing.
  */
 export function useViewportLoadStatus({ modelKey = "", hasGeometry = false, modelComplete = false } = {}) {
   const [timeline, setTimeline] = useState(() => ({ modelKey, firstGeometryAt: null, completeAt: null }));
@@ -41,7 +41,6 @@ export function useViewportLoadStatus({ modelKey = "", hasGeometry = false, mode
   useEffect(() => {
     if (typeof window === "undefined") return;
     window.__cadViewerLoad = observation;
-    window.dispatchEvent(new CustomEvent("cad:load-status", { detail: observation }));
   }, [observation]);
 
   return observation;
