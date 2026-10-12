@@ -166,9 +166,14 @@ def _export(source: MeshSource, jobs: "list[MeshExportJob]", pairs: list, *, nam
         threemf_bytes,
         total_triangles,
     )
+    from cadgen._internal.occt_mesh import MeshProductionError
     from cadgen.store import meshes
 
-    descriptor, bodies = stored_meshes(source, sorted(set(pairs)), appearance)
+    try:
+        descriptor, bodies = stored_meshes(source, sorted(set(pairs)), appearance)
+    except MeshProductionError as error:
+        # The file that will not be there, then the part that kept it from being written.
+        raise MeshProductionError(f"{', '.join(job.out.name for job in jobs)} not written: {error}") from error
     used = _used_components(descriptor)
     # Parsed only when a job asks for a clip; the captured text, never the sidecar.
     animation = json.loads(animation_source.data) if any(job.animation for job in jobs) and animation_source else None

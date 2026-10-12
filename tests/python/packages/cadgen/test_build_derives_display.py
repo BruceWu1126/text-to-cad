@@ -135,6 +135,29 @@ class BuildDerivesDisplayData(unittest.TestCase):
         with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=NO_JOB):
             self.assertEqual(set(self.listing()), {"block", "peg"})
 
+    def test_a_declared_mesh_export_of_a_part_that_cannot_be_meshed_fails_naming_both(self) -> None:
+        """Every process meshes alike (the export's job runs here, under the same mesher): the
+        STL cannot be written, so the build fails -- naming the file and the occurrence, never
+        a component id and a worker's traceback -- and leaves no file."""
+        from cadgen._internal import occt_mesh
+        from cadgen.cli._run_model import run_model_argv
+
+        real = occt_mesh.mesh_component
+
+        def mesher(topods, table, face_colors, **options):
+            if len(table["faces"]) == 3:
+                raise ValueError("boom")
+            return real(topods, table, face_colors, **options)
+
+        output = io.StringIO()
+        with inline_artifacts(), mock.patch.object(occt_mesh, "mesh_component", wraps=mesher), \
+                contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            code = run_model_argv([str(self.script)])
+        self.assertEqual(code, 1, output.getvalue())
+        self.assertIn("pair.stl not written: #o1.2 peg could not be meshed", output.getvalue())
+        self.assertNotIn("Traceback", output.getvalue())
+        self.assertFalse((self.root / "STL/pair.stl").exists())
+
     def test_a_part_that_cannot_be_meshed_is_a_warning_on_the_build_naming_it(self) -> None:
         from cadgen._internal import occt_mesh
 

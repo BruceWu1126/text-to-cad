@@ -167,9 +167,14 @@ def materialize_parts(descriptor: dict, cids: list[str] | None = None) -> tuple[
     if missing:
         try:
             resolve_artifact({"kind": "display", "tree": tree, "cids": missing, "producer": producer})
-        except ArtifactJobError as error:
+        # A pooled job's refusal arrives as its text; one run where it was submitted, as itself
+        # (``MeshProductionError`` and ``SurfaceProducerUnavailable`` are ValueErrors).
+        except (ArtifactJobError, ValueError) as error:
             if not parts.producer_unavailable(error):
-                raise
+                failure = _display_failure(descriptor, missing, error)
+                if failure is error:
+                    raise
+                raise failure from error
             current = resolve_artifact({"kind": "producer"})
             if parts.producer_key(current) == parts.producer_key(producer):
                 raise
@@ -186,6 +191,35 @@ def materialize_parts(descriptor: dict, cids: list[str] | None = None) -> tuple[
     if any(cid not in records for cid in wanted):
         raise FileNotFoundError("display data disappeared before view publication")
     return descriptor, records
+
+
+def _display_failure(descriptor: dict, cids: list[str], error: Exception) -> Exception:
+    """A display job's failure as its reader says it: the parts it left missing, named by
+    the occurrences that place them (``#o1.3 ball``), and the job's own reason -- never a
+    component id and a worker's traceback. ``error`` itself for any other failure, or when
+    every part is stored."""
+    from cadgen.daemon.artifacts import ArtifactJobError
+
+    if not isinstance(error, ArtifactJobError) and type(error).__name__ != "MeshProductionError":
+        return error
+    from cadgen._internal.occt_mesh import MeshProductionError
+    from cadgen.store.meshes import placed_parts
+
+    stored = stored_parts(descriptor, cids)
+    failed = [cid for cid in cids if cid not in stored]
+    if not failed:
+        return error
+    placed: dict[str, list[tuple[str, str]]] = {}
+    for row in descriptor.get("occurrences") or ():
+        if isinstance(row, dict) and row.get("component") in failed and row.get("id"):
+            placed.setdefault(str(row["component"]), []).append((str(row["id"]), str(row.get("name") or "")))
+    lines = [line.strip() for line in str(error).splitlines() if line.strip()]
+    reason = lines[-1] if lines else type(error).__name__
+    for prefix in ("artifact request failed: ", "artifact worker failed or returned no result: ",
+                   "cadgen._internal.occt_mesh.MeshProductionError: ", "MeshProductionError: "):
+        reason = reason[len(prefix):] if reason.startswith(prefix) else reason
+    names = "; ".join(placed_parts(placed[cid]) if placed.get(cid) else f"part {cid}" for cid in failed)
+    return MeshProductionError(f"{names} could not be meshed ({reason})")
 
 
 def component_object_for_tree(tree_hash: str, ref: str) -> tuple[str, str] | None:
