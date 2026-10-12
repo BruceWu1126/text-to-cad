@@ -112,7 +112,7 @@ class StepSceneTests(unittest.TestCase):
         untouched_vertex = TopoDS.Vertex_s(TopExp_Explorer(a.shape().wrapped, TopAbs_VERTEX).Current())
         self.assertLess(BRep_Tool.Tolerance_s(untouched_vertex), 1e-3)
 
-    def test_read_and_occurrence_lookup_decode_no_geometry_or_surfaces(self):
+    def test_read_and_occurrence_lookup_decode_no_geometry_or_display_data(self):
         from cadgen._internal import component_package
         with mock.patch.object(component_package, "decode_geometry_component", wraps=component_package.decode_geometry_component) as decoded, \
              mock.patch("cadgen.store.parts.derive", side_effect=AssertionError("inspection requested display data")), \

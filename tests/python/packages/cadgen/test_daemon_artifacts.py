@@ -293,7 +293,7 @@ class ArtifactCoalescing(unittest.TestCase):
         self.exercise_relay(fail=True)
 
     def test_a_cancelled_artifact_request_finishes_on_its_warm_worker(self):
-        # The CAD Viewer cancels surface requests as a matter of course. The derivation writes
+        # The CAD Viewer cancels part requests as a matter of course. The derivation writes
         # its result into the store, so the worker finishes it rather than being killed (a
         # replacement imports the kernel again), and an identical request meanwhile attaches.
         registry, ledger, pool = broker.Broker(1), JobLedger(), mock.Mock()

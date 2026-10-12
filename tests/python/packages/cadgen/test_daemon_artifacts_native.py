@@ -180,7 +180,7 @@ sys.addaudithook(audit)
             self.assertEqual(sum(row["state"] == "failed" for row in jobs), 2)
             self.assertEqual(self.private.broker.snapshot()["granted"], 4, "one slot a job")
 
-    def test_real_transient_surface_keeps_coalesced_native_work_after_owner_detach(self):
+    def test_real_transient_display_derivation_keeps_coalesced_native_work_after_owner_detach(self):
         entered = self.root / "native-entered"
         release = self.root / "native-release"
         derived = self.root / "native-derived"
@@ -237,11 +237,11 @@ raise SystemExit(artifacts._main())
 
             # The entered marker is deliberately emitted after the child's lazy native
             # imports. This test owns the detach/result handoff, not a cold OCP
-            # startup benchmark. Separate real surface derivation from broker
+            # startup benchmark. Separate real display derivation from broker
             # delivery so a failure names the stalled phase and its live state.
             self.wait_for(
                 lambda: derived.exists() or second.done(),
-                lambda: "native surface derivation did not finish after owner detach: "
+                lambda: "native display derivation did not finish after owner detach: "
                 f"child={processes[0].poll()}, broker={self.private.broker.snapshot()}, "
                 f"future_done={second.done()}",
                 timeout=60,

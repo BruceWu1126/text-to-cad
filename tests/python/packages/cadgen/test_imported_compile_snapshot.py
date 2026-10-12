@@ -50,7 +50,7 @@ class ImportedCompileSnapshot(unittest.TestCase):
                          source_path=document, display_name=document.stem,
                          source="imported", step_path=document)
 
-    def test_hit_captures_once_without_source_surface_or_native_work(self):
+    def test_hit_captures_once_without_source_topology_or_native_work(self):
         from cadgen import catalog, step_artifact_cli as artifact
         from cadgen._internal import component_package, topology_extract
         from cadgen.store import trees

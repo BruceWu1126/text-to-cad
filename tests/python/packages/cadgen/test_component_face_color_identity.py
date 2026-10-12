@@ -1,4 +1,4 @@
-"""SURF identity includes face colors; immutable BREP identity remains shared."""
+"""A part's identity includes face colors; immutable BREP identity remains shared."""
 
 from __future__ import annotations
 
@@ -118,7 +118,7 @@ class ComponentFaceColorIdentityTest(unittest.TestCase):
         self.assertEqual(len({cid for document in documents for cid in document["components"]}), 3)
         self.assertEqual(len({component["brep"] for document in documents
                               for component in document["components"].values()}), 1)
-        # Subsequent writes leave the earlier immutable colored SURFs intact.
+        # Subsequent writes leave the earlier immutable colored parts intact.
         self.assertEqual(self.faces(next(iter(documents[0]["components"].values()))), {1: RED})
         self.assertEqual(self.faces(next(iter(documents[1]["components"].values()))), {1: BLUE})
 

@@ -360,7 +360,7 @@ class SavedDocumentIdentityTest(unittest.TestCase):
                 "label": "document",
                 "entryKind": "assembly",
                 "units": "mm",
-                "components": {"c": {"contentHash": "content", "brep": "object", "surf": "object"}},
+                "components": {"c": {"contentHash": "content", "brep": "object"}},
                 "occurrences": [
                     {"id": "o1.1.1", "name": "left", "component": "c", "transform": IDENTITY},
                     {"id": "o1.1.2", "name": "right", "component": "c", "transform": IDENTITY},

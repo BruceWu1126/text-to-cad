@@ -32,7 +32,7 @@ class ComponentLookup(unittest.TestCase):
             "assembly":{"root":{"id":"o1","nodeType":"assembly","children":[
                 {"id":link["id"],"nodeType":"link","children":[]} for link in links]}}})
 
-    def test_root_lookup_does_not_resolve_surfaces_or_read_source_indexes(self):
+    def test_root_lookup_does_not_resolve_a_view_or_read_source_indexes(self):
         from cadgen.store import records, view
         with mock.patch.object(view, "descriptor_for_view", side_effect=AssertionError("flattened")), \
              mock.patch.object(records, "read_record", side_effect=AssertionError("record")), \

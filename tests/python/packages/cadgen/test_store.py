@@ -66,7 +66,7 @@ class StoreCase(unittest.TestCase):
         path.write_text(MODEL_TEXT.format(name=name, size=size), encoding="utf-8")
         return path
 
-    def tree_for(self, label: str, payload: bytes = b"SURF\x00") -> str:
+    def tree_for(self, label: str, payload: bytes = b"BREP\x00") -> str:
         from cadgen.store.objects import put_object
         from cadgen.store.trees import put_tree
 
@@ -148,7 +148,7 @@ class GateTruthTable(StoreCase):
         self.assertIsNone(self.stale_clause(parent))
 
         # The child's result changed under the parent's pin.
-        self.record(child, tree=self.tree_for("pin", payload=b"SURF\x01"))
+        self.record(child, tree=self.tree_for("pin", payload=b"BREP\x01"))
         self.assertEqual(self.stale_clause(parent), 3)
 
         # The pin matches again but the child itself is stale (its source moved on).
@@ -171,7 +171,7 @@ class GateTruthTable(StoreCase):
         from cadgen.store.objects import object_path
 
         script = self.model("plate")
-        tree = self.tree_for("plate", payload=b"SURF\x02")
+        tree = self.tree_for("plate", payload=b"BREP\x02")
         self.record(script, tree=tree)
         self.assertIsNone(self.stale_clause(script))
         from cadgen.store.trees import get_tree

@@ -124,7 +124,7 @@ class PartStoreTest(unittest.TestCase):
         self.assertIsNone(parts.read(self.key, "glb"), "a body naming another part is not this part's")
         self.assertIsNone(parts.read(self.key, "selectors"), "a table that is not its address is no table")
 
-    def test_a_view_carries_each_parts_selector_table_and_no_surface(self) -> None:
+    def test_a_view_carries_each_parts_selector_table_and_nothing_else(self) -> None:
         from cadgen.store.view import SELECTOR_TABLE_SUFFIX, export_view
 
         parts.derive(self.tree)

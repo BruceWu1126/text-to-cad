@@ -4,8 +4,8 @@ readers expect.
 This repo has lost a cross-language mirror to a deleted check before (the
 viewer scanner's package-path constants drifted silently once nothing compared
 them). The viewer BACKEND is ``cadgen.viewer`` now and reads the store through
-cadgen's own helpers, and the page reads no SURF, so there is no second
-derivation of a store key or a format version left to compare.
+cadgen's own helpers, and the page takes every part key from cadgen, so there is no
+second derivation of a store key or a format version left to compare.
 """
 
 from __future__ import annotations

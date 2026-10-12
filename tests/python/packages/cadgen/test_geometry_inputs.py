@@ -450,7 +450,7 @@ class GeometryInputs(unittest.TestCase):
             expected = extract_topology_facts(private.wrapped)
             self.assertEqual(facts_of(digest, cid), expected)
 
-    def test_geometry_gc_retains_partial_closure_and_surface_is_independent(self):
+    def test_geometry_gc_retains_partial_closure_and_display_data_is_independent(self):
         from build123d import Box, Cylinder, Compound, Location
         from cadgen.store.gc import reachable_objects
         from cadgen.store.index import iter_entries, remove_entry
