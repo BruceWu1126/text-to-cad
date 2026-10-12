@@ -39,7 +39,7 @@ SELECTOR_TABLE_SUFFIX = ".selectors.json"
 
 
 # The producers this process found no worker implements, each with the one that replaced it
-# (``materialize_parts``, the CAD Viewer's surface jobs). A view of a document whose hint names
+# (``materialize_parts``, the CAD Viewer's part requests). A view of a document whose hint names
 # one starts under its replacement, and re-attests the document, instead of paying one refused
 # job per part again on every open (a kernel upgrade).
 _REPLACED: dict[str, dict] = {}
@@ -77,7 +77,7 @@ def _attest(document_hash: str, tree_hash: str, producer: dict) -> None:
     with contextlib.suppress(OSError, StoreUnwritableError):
         current = document_entry_for_hash(document_hash)
         if current is not None and current.get("tree") == tree_hash:
-            note_document_tree(document_hash, tree_hash, surface_producer=producer)
+            note_document_tree(document_hash, tree_hash, producer=producer)
 
 
 def _select_producer(tree_hash: str, producer: dict | None, document_hash: str | None) -> dict:
@@ -91,7 +91,7 @@ def _select_producer(tree_hash: str, producer: dict | None, document_hash: str |
             raise FileNotFoundError("the selected document no longer has this geometry tree")
         if selected is None:
             try:
-                selected = parts.producer_fields(entry.get("surfaceProducer"))
+                selected = parts.producer_fields(entry.get("producer"))
             except (ValueError, TypeError):
                 selected = None
             replacement = _replacement_for(selected) if selected is not None else None
@@ -160,7 +160,7 @@ def materialize_parts(descriptor: dict, cids: list[str] | None = None) -> tuple[
     from cadgen.store import parts
 
     tree = descriptor["tree"]
-    producer = parts.producer_fields(descriptor["surfaceProducer"])
+    producer = parts.producer_fields(descriptor["producer"])
     wanted = list(descriptor["components"]) if cids is None else list(dict.fromkeys(cids))
     records = stored_parts(descriptor, wanted)
     missing = [cid for cid in wanted if cid not in records]
@@ -168,7 +168,7 @@ def materialize_parts(descriptor: dict, cids: list[str] | None = None) -> tuple[
         try:
             resolve_artifact({"kind": "display", "tree": tree, "cids": missing, "producer": producer})
         # A pooled job's refusal arrives as its text; one run where it was submitted, as itself
-        # (``MeshProductionError`` and ``SurfaceProducerUnavailable`` are ValueErrors).
+        # (``MeshProductionError`` and ``ProducerUnavailable`` are ValueErrors).
         except (ArtifactJobError, ValueError) as error:
             if not parts.producer_unavailable(error):
                 failure = _display_failure(descriptor, missing, error)
@@ -183,7 +183,7 @@ def materialize_parts(descriptor: dict, cids: list[str] | None = None) -> tuple[
             # whole new owned view; never mix an old mesh with new selectors.
             replacement = descriptor_for_view(tree, producer=current, document_hash=descriptor.get("documentHash"))
             if replacement is None:
-                raise FileNotFoundError("geometry disappeared during surface producer replacement") from error
+                raise FileNotFoundError("geometry disappeared during producer replacement") from error
             if descriptor.get("documentHash"):
                 _attest(descriptor["documentHash"], tree, current)
             return materialize_parts(replacement, cids)

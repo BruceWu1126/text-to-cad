@@ -228,7 +228,7 @@ class SurfaceRequests(unittest.TestCase):
         request = {**self.request, "viewId": old_view["viewId"], "producer": producer,
                    "components": [{"cid": self.cid, "part": old_view["components"][self.cid]["part"]}]}
         future = SubscriberFuture()
-        future.set_exception(ValueError("worker cannot implement the request's pinned surface producer"))
+        future.set_exception(ValueError("worker cannot implement the request's pinned producer"))
         with mock.patch("cadgen.daemon.artifacts.submit_artifact", return_value=future), \
              mock.patch("cadgen.daemon.artifacts.resolve_artifact", return_value=self.producer):
             result = self.resolve(request)
@@ -249,13 +249,13 @@ class SurfaceRequests(unittest.TestCase):
         parts.derive(self.tree)
         old = {**self.producer, "build123d": "0.0.1"}
         digest = "e" * 64
-        note_document_tree(digest, self.tree, surface_producer=old)
+        note_document_tree(digest, self.tree, producer=old)
         old_view = descriptor_for_view(self.tree, document_hash=digest)
         self.assertNotEqual(old_view["viewId"], self.view["viewId"])
         request = {**self.request, "viewId": old_view["viewId"], "producer": old,
                    "components": [{"cid": self.cid, "part": old_view["components"][self.cid]["part"]}]}
         future = SubscriberFuture()
-        future.set_exception(ValueError("worker cannot implement the request's pinned surface producer"))
+        future.set_exception(ValueError("worker cannot implement the request's pinned producer"))
         with mock.patch("cadgen.daemon.artifacts.submit_artifact", return_value=future), \
              mock.patch("cadgen.daemon.artifacts.resolve_artifact", return_value=self.producer):
             self.assertIn("replacementView", self.resolve(request))
@@ -263,7 +263,7 @@ class SurfaceRequests(unittest.TestCase):
              mock.patch("cadgen.daemon.artifacts.resolve_artifact", side_effect=AssertionError("unexpected job")):
             again = descriptor_for_view(self.tree, document_hash=digest)
         self.assertEqual(again["viewId"], self.view["viewId"])
-        self.assertEqual(document_entry_for_hash(digest)["surfaceProducer"], self.producer)
+        self.assertEqual(document_entry_for_hash(digest)["producer"], self.producer)
 
     @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0), "POSIX permissions")
     def test_a_view_of_a_hintless_document_never_writes_a_read_only_store(self):
@@ -284,7 +284,7 @@ class SurfaceRequests(unittest.TestCase):
             _view, records = materialize_parts(descriptor)
         self.assertEqual(descriptor["viewId"], self.view["viewId"])
         self.assertEqual(set(records), {self.cid})
-        self.assertNotIn("surfaceProducer", document_entry_for_hash(digest))
+        self.assertNotIn("producer", document_entry_for_hash(digest))
         self.assertEqual({path: path.read_bytes() for path in store.rglob("*") if path.is_file()}, before)
 
     def test_expired_subscriber_is_detached_and_not_reused(self):
@@ -362,7 +362,7 @@ print(json.dumps({cid: entry['part'] for cid, entry in view['components'].items(
                 self.assertEqual({name.lower(): value for name, value in headers.items()}["content-type"], content_type)
                 # An object the record does not name is a miss.
                 self.assertEqual(fixture.request("GET", route.replace(facts["object"], "f" * 64))[0], 404)
-        url = "/__cad/store?" + urlencode({"file": self.tree + "/assembly.json", "surfaceProducer": json.dumps(self.producer)})
+        url = "/__cad/store?" + urlencode({"file": self.tree + "/assembly.json", "producer": json.dumps(self.producer)})
         status, _, payload = fixture.request("GET", url)
         self.assertEqual(status, 200, payload)
         descriptor = json.loads(payload)
@@ -375,8 +375,8 @@ print(json.dumps({cid: entry['part'] for cid, entry in view['components'].items(
 
         parts.derive(self.tree)
         first, second = "a" * 64, "b" * 64
-        note_document_tree(first, self.tree, surface_producer=self.producer)
-        note_document_tree(second, self.tree, surface_producer=self.producer)
+        note_document_tree(first, self.tree, producer=self.producer)
+        note_document_tree(second, self.tree, producer=self.producer)
         with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=AssertionError("warm view did native work")):
             one = view_dir_for(self.tree, document_hash=first)
             two = view_dir_for(self.tree, document_hash=second)
@@ -418,14 +418,14 @@ print(json.dumps({cid: entry['part'] for cid, entry in view['components'].items(
         digest = "c" * 64
         note_document_tree(digest, self.tree)
         entry = read_entry("document", document_key(digest))
-        entry["surfaceProducer"] = {"ocp": "broken"}
+        entry["producer"] = {"ocp": "broken"}
         write_entry("document", document_key(digest), entry)
         with mock.patch("cadgen.daemon.artifacts.resolve_artifact", return_value=self.producer) as job, \
              mock.patch.object(parts, "producer_identity", side_effect=AssertionError("kernel forbidden")):
             descriptor = descriptor_for_view(self.tree, document_hash=digest)
         self.assertEqual(descriptor["viewId"], self.view["viewId"])
         self.assertEqual(job.call_args.args[0], {"kind": "producer"})
-        self.assertEqual(read_entry("document", document_key(digest))["surfaceProducer"], self.producer)
+        self.assertEqual(read_entry("document", document_key(digest))["producer"], self.producer)
 
     def test_static_export_replaces_an_unavailable_producer_as_a_complete_view(self):
         from cadgen.daemon.artifacts import ArtifactJobError
@@ -433,13 +433,13 @@ print(json.dumps({cid: entry['part'] for cid, entry in view['components'].items(
         from cadgen.store.view import view_dir_for
         producer = {**self.producer, "ocp": "old-runtime"}
         digest = "d" * 64
-        note_document_tree(digest, self.tree, surface_producer=producer)
+        note_document_tree(digest, self.tree, producer=producer)
         old_view = descriptor_for_view(self.tree, producer=producer)
         def run(request):
             if request["kind"] == "producer":
                 return self.producer
             if request["producer"] == producer:
-                raise ArtifactJobError("worker cannot implement the request's pinned surface producer")
+                raise ArtifactJobError("worker cannot implement the request's pinned producer")
             return parts.derive(request["tree"], request["cids"], producer=request["producer"])
         with inline_artifacts(run):
             target = view_dir_for(self.tree, document_hash=digest)
@@ -451,7 +451,7 @@ print(json.dumps({cid: entry['part'] for cid, entry in view['components'].items(
         self.assertEqual(entry["part"], self.part)
         self.assertEqual((target / entry["selectors"]).read_bytes(),
                          object_path(parts.probe(self.part)["selectors"]["object"]).read_bytes())
-        self.assertEqual(document_entry_for_hash(digest)["surfaceProducer"], self.producer)
+        self.assertEqual(document_entry_for_hash(digest)["producer"], self.producer)
 
 
 if __name__ == "__main__":

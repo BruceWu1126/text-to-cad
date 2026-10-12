@@ -198,7 +198,7 @@ test("a surface request that fails fails each of its components still waiting", 
 // its request, ready in the same response (before or after it), are answered.
 test("a component that failed in its request fails alone; the ready ones beside it are answered", async () => {
   const hex = c => c.repeat(64);
-  const view = { tree: hex("a"), viewId: hex("b"), surfaceProducer: { build123d: "0.10.0", ocp: "7.9.3", cadqueryOcp: "7.9.3.1" } };
+  const view = { tree: hex("a"), viewId: hex("b"), producer: { build123d: "0.10.0", ocp: "7.9.3", cadqueryOcp: "7.9.3.1" } };
   const parts = { c0: `${hex("1")}-v1`, bad: `${hex("2")}-v1`, c2: `${hex("3")}-v1` };
   const counts = { vertexCount: 3, indexCount: 3, faceCount: 1, edgeCount: 0, edgePointCount: 0 };
   // What cadgen derived for a part: its record, naming its display mesh and selector table.

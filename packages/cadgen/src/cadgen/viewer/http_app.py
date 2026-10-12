@@ -801,7 +801,7 @@ class CadApp:
         ``file=/<tree>/assembly.json``.
         """
         rel = str(query.get("file") or "").replace("\\", "/").lstrip("/")
-        producer = json.loads(query.get("surfaceProducer")) if query.get("surfaceProducer") else None
+        producer = json.loads(query.get("producer")) if query.get("producer") else None
         payload, content_type = virtual_store_asset(
             rel, producer=producer, document_hash=query.get("documentHash"),
         )

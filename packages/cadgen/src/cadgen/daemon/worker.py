@@ -326,7 +326,7 @@ def _wanted() -> bool:
 
 # The refusals an artifact job answers with (``store.parts``): reported by their message alone.
 _REFUSALS = frozenset({("cadgen._internal.occt_mesh", "MeshProductionError"),
-                       ("cadgen.store.parts", "SurfaceProducerUnavailable")})
+                       ("cadgen.store.parts", "ProducerUnavailable")})
 
 
 def _run_artifact(request: dict, *, supervised: bool = False) -> int:

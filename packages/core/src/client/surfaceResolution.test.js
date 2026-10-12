@@ -17,7 +17,7 @@ const O = "e".repeat(64);
 const descriptor = {
   tree: TREE,
   viewId: VIEW,
-  surfaceProducer: { build123d: "0.9.1", ocp: "7.8.1.1", cadqueryOcp: "7.8.1.1", producerKey: "c".repeat(64) },
+  producer: { build123d: "0.9.1", ocp: "7.8.1.1", cadqueryOcp: "7.8.1.1", producerKey: "c".repeat(64) },
 };
 
 function json(value, status = 200) {
@@ -62,7 +62,7 @@ test("surface resolution forwards frozen pins and answers each component with it
   assert.equal(request.url, "/__cad/surfaces");
   assert.equal(request.options.headers["x-cadgen-viewer"], "1");
   assert.deepEqual(request.body, {
-    tree: TREE, viewId: VIEW, producer: descriptor.surfaceProducer,
+    tree: TREE, viewId: VIEW, producer: descriptor.producer,
     components: [{ cid: "part", part: P }],
   });
   // A component is asked for by the part its view pins, and nothing else is one.
@@ -225,7 +225,7 @@ test("failed, replacement and mismatched ready responses never produce tickets",
   const replacementView = {
     ...descriptor,
     viewId: "f".repeat(64),
-    surfaceProducer: { ...descriptor.surfaceProducer, producerKey: "9".repeat(64) },
+    producer: { ...descriptor.producer, producerKey: "9".repeat(64) },
     components: { part: { part: `${"8".repeat(64)}-v1` } },
   };
   globalThis.fetch = async () => json({ ...ready(), replacementView });

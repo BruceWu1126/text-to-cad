@@ -11,7 +11,7 @@ export function matchingDisplayedPackageContext(displayed, meshState, file) {
 
 // Keep decoded geometry that is still visible alive across an atomic revision
 // swap: a component whose part is the one already drawn (its key binds the exact
-// geometry and surface producer) keeps its mesh, and the row it was drawn from.
+// geometry and producer) keeps its mesh, and the row it was drawn from.
 export function retainedComponentMeshesForRevision({
   previous,
   descriptor,

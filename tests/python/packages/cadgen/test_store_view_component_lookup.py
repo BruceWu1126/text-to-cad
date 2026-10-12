@@ -8,7 +8,7 @@ import unittest
 from unittest import mock
 from tests.python.support.paths import add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
-from tests.python.support.store_fixtures import seed_result, FIXTURE_SURFACE_PRODUCER
+from tests.python.support.store_fixtures import seed_result, FIXTURE_PRODUCER
 add_repo_path("packages/cadgen/src")
 
 class ComponentLookup(unittest.TestCase):
@@ -98,10 +98,10 @@ class ComponentLookup(unittest.TestCase):
         from cadgen.store import parts, view
         with mock.patch.object(parts, "producer_identity", side_effect=AssertionError("native import")), \
              mock.patch.object(parts, "derive", side_effect=AssertionError("derived")):
-            descriptor = view.descriptor_for_view(self.tree, producer=FIXTURE_SURFACE_PRODUCER)
+            descriptor = view.descriptor_for_view(self.tree, producer=FIXTURE_PRODUCER)
         self.assertEqual(descriptor["kind"], "assembly-package")
         entry = descriptor["components"][self.cid]
         self.assertEqual(entry["brepObject"], self.entry["brep"])
-        self.assertEqual(entry["part"], parts.part_key(self.entry, FIXTURE_SURFACE_PRODUCER))
+        self.assertEqual(entry["part"], parts.part_key(self.entry, FIXTURE_PRODUCER))
 
 if __name__ == "__main__": unittest.main()

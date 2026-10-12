@@ -72,7 +72,7 @@ class NativeDocumentDoors(unittest.TestCase):
         from cadgen.store.records import document_entry_for_hash
         from cadgen.store.trees import capture_tree
 
-        producer = document_entry_for_hash(hashlib.sha256(self.original).hexdigest())["surfaceProducer"]
+        producer = document_entry_for_hash(hashlib.sha256(self.original).hexdigest())["producer"]
         components = capture_tree(self.tree, retain_payloads=False)[0]["components"]
         self.assertTrue(components)
         for entry in components.values():

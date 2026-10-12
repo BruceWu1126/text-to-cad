@@ -198,15 +198,15 @@ class GeometryInputs(unittest.TestCase):
             with self.assertRaises(ValueError):parts.derive(digest)
         self.assertFalse((self.root/'store/index/part').exists())
 
-    def test_a_surface_producer_is_the_kernel_alone(self):
+    def test_a_producer_is_the_kernel_alone(self):
         producer = parts.producer_identity()
         self.assertEqual(set(producer), {"build123d", "ocp", "cadqueryOcp"})
         # An older cadgen's hint also named its extraction scheme and format.
         for malformed in ({**producer, "scheme": 20, "surfFormat": 3}, {"build123d": producer["build123d"]}):
-            with self.assertRaisesRegex(ValueError, "unsupported surface producer"):
+            with self.assertRaisesRegex(ValueError, "unsupported producer"):
                 parts.producer_key(malformed)
 
-    def test_geometry_identity_does_not_depend_on_surface_producer(self):
+    def test_geometry_identity_does_not_depend_on_the_producer(self):
         scene=self.scene()
         first_hash,first=publish_document(scene)
 
@@ -218,10 +218,10 @@ class GeometryInputs(unittest.TestCase):
             changed=view()
         normal=view()
         self.assertEqual((first_hash,first),(second_hash,second))
-        self.assertNotEqual(normal['surfaceProducer'],changed['surfaceProducer'])
+        self.assertNotEqual(normal['producer'],changed['producer'])
         cid=next(iter(first['components']))
         self.assertNotEqual(normal['components'][cid]['part'],changed['components'][cid]['part'])
-        self.assertNotIn('surfaceProducer',first)
+        self.assertNotIn('producer',first)
         self.assertNotIn('part',first['components'][cid])
 
     def test_same_brep_distinct_face_colors_do_not_share_topology(self):
@@ -481,19 +481,19 @@ class GeometryInputs(unittest.TestCase):
         first = self.component_tree(Box(1, 2, 3))[0]
         second = self.component_tree(Box(2, 3, 4))[0]
         producer = parts.producer_identity()
-        note_document_tree("a" * 64, first, surface_producer=producer)
+        note_document_tree("a" * 64, first, producer=producer)
         note_document_mesh("a" * 64, "external", "f" * 64)
         with mock.patch.object(parts, "producer_identity", side_effect=AssertionError("kernel forbidden")):
-            note_document_tree("a" * 64, first, surface_producer=producer)
+            note_document_tree("a" * 64, first, producer=producer)
             note_document_tree("a" * 64, first)
             selected = document_entry_for_hash("a" * 64)
-            self.assertEqual(selected["surfaceProducer"], producer)
+            self.assertEqual(selected["producer"], producer)
             self.assertIn("meshes", selected)
             self.assertEqual(parts.view_from_geometry(first, capture_tree(first, retain_payloads=False)[0],
                                                       producer=producer)["tree"], first)
             note_document_tree("a" * 64, second)
         changed = document_entry_for_hash("a" * 64)
-        self.assertNotIn("surfaceProducer", changed)
+        self.assertNotIn("producer", changed)
         self.assertNotIn("meshes", changed)
 
     def test_every_same_brep_variant_validates_native_kind_and_effective_recipe(self):

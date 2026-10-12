@@ -619,7 +619,7 @@ class ArtifactLeases(unittest.TestCase):
              mock.patch.object(worker, "_evict_first_party_modules", side_effect=AssertionError("source hygiene scan")), \
              mock.patch("cadgen.metadata.parse_generator_metadata", side_effect=AssertionError("source metadata")):
             self.assertEqual(worker._run(request), 0)
-            self.fake.derive.side_effect = RuntimeError("surface producer failed")
+            self.fake.derive.side_effect = RuntimeError("producer failed")
             self.assertEqual(worker._run(request), 1)
         self.assertEqual(sum("artifactResult" in frame for frame in frames), 1)
         self.assertEqual(self.settled()["granted"], 2)

@@ -165,7 +165,7 @@ sys.addaudithook(audit)
             result = artifacts.submit_artifact(self.request, store_root=self.store).result(20)
             self.assert_geometry_and_result(result)
             for changes, message in (
-                ({"producer": {**self.producer, "ocp": "different-known-runtime"}}, "pinned surface producer"),
+                ({"producer": {**self.producer, "ocp": "different-known-runtime"}}, "pinned producer"),
                 ({"cids": ["0" * 16]}, "unpinned component"),
             ):
                 with self.subTest(changes=changes), self.assertRaisesRegex(artifacts.ArtifactJobError, message):

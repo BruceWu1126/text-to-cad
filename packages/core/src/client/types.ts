@@ -127,18 +127,18 @@ export interface CadResourceProvider {
   workerTicket(url: string, options?: CadResourceReadOptions): Promise<CadWorkerResourceTicket>;
 }
 /** The kernel a view's parts are derived under: opaque to the page, which only forwards it. */
-export interface CadSurfaceProducer { producerKey?: string; [key: string]: unknown }
+export interface CadProducer { producerKey?: string; [key: string]: unknown }
 export interface CadRuntimeView {
   tree: string;
   viewId: string;
-  surfaceProducer: CadSurfaceProducer;
+  producer: CadProducer;
   /** Each component names its part (`<digest>-v<version>`): the key its display data is read by. */
   components?: Record<string, {part: string; [key: string]: unknown}>;
   [key: string]: unknown;
 }
 export interface CadSurfaceComponentRequest { cid: string; part: string }
 export interface CadSurfaceRequest {
-  tree: string; viewId: string; producer: CadSurfaceProducer;
+  tree: string; viewId: string; producer: CadProducer;
   components: CadSurfaceComponentRequest[];
   job?: string;
 }

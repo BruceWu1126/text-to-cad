@@ -126,12 +126,12 @@ class BuildDerivesDisplayData(unittest.TestCase):
         self.build()
         [entry] = list((self.store / "index/document").iterdir())
         document = json.loads(entry.read_text(encoding="utf-8"))
-        document["surfaceProducer"] = {"build123d": "0.0.1", "ocp": "7.0.0", "cadqueryOcp": "7.0.0.0"}
+        document["producer"] = {"build123d": "0.0.1", "ocp": "7.0.0", "cadqueryOcp": "7.0.0.0"}
         entry.write_text(json.dumps(document), encoding="utf-8")
         shutil.rmtree(self.store / "index/part")
         self.assertEqual(self.build(), ("current", 2))
         self.assertNotIn("warning", self.output)
-        self.assertEqual(json.loads(entry.read_text(encoding="utf-8"))["surfaceProducer"], parts.producer_identity())
+        self.assertEqual(json.loads(entry.read_text(encoding="utf-8"))["producer"], parts.producer_identity())
         with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=NO_JOB):
             self.assertEqual(set(self.listing()), {"block", "peg"})
 

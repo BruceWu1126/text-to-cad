@@ -51,8 +51,8 @@ async function guardedPost(path, body, { signal, client }) {
 
 function verifiedReplacementView(value, tree) {
   if (!value || typeof value !== "object" || Array.isArray(value)
-      || value.tree !== tree || !value.surfaceProducer
-      || typeof value.surfaceProducer !== "object" || Array.isArray(value.surfaceProducer)
+      || value.tree !== tree || !value.producer
+      || typeof value.producer !== "object" || Array.isArray(value.producer)
       || !value.components || typeof value.components !== "object" || Array.isArray(value.components)) {
     throw new Error("Surface response has an invalid replacement view");
   }
@@ -139,7 +139,7 @@ function subscriberToken(payload) {
 async function resolveSurfaceRequest(descriptor, requested, { signal, client, onReady = null, onFailed = null, onPending = null }) {
   const tree = digest(descriptor?.tree, "surface tree");
   const viewId = digest(descriptor?.viewId, "surface viewId");
-  const producer = descriptor?.surfaceProducer;
+  const producer = descriptor?.producer;
   if (!producer || typeof producer !== "object" || Array.isArray(producer)) {
     throw new TypeError("surface view is missing its attested producer");
   }
@@ -182,7 +182,7 @@ async function resolveSurfaceRequest(descriptor, requested, { signal, client, on
         throw new Error("Surface response does not belong to the requested view");
       }
       if (payload.replacementView) {
-        throw new SurfaceResolutionError("The pinned surface producer is unavailable", {
+        throw new SurfaceResolutionError("The pinned producer is unavailable", {
           code: "replacement-view",
           replacementView: verifiedReplacementView(payload.replacementView, tree),
         });

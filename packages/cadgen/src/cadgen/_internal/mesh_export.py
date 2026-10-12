@@ -74,7 +74,7 @@ class MeshExportJob:
 class MeshSource:
     """What an export cuts its meshes from: a geometry tree, and the saved document
     whose bytes selected it (``None`` for a mesh-only model, whose tree is its own
-    geometry). The document's index entry may name the surface producer its meshes
+    geometry). The document's index entry may name the producer its meshes
     were derived under, which spares a producer job."""
 
     tree: str
@@ -297,7 +297,7 @@ def _used_components(descriptor: dict) -> list[str]:
 
 
 def _loaded_producer() -> dict | None:
-    """This process's surface producer when its modeling kernel is already loaded
+    """This process's producer when its modeling kernel is already loaded
     (a model build's), so the export asks the build pool for no producer job;
     otherwise None, and the view takes the document's hint or asks the pool. A
     door process may hold OCP without build123d, and importing build123d to name
