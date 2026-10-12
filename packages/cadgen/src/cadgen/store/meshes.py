@@ -60,7 +60,10 @@ UNSIGNED_SHORT_VERTEX_LIMIT = 65535
 # Z-up millimetres as glTF's Y-up metres: -90 degrees about X, then 0.001.
 NODE_ROTATION = [-math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5)]
 NODE_SCALE = [0.001, 0.001, 0.001]
-_GLB_MAGIC, _GLB_VERSION, _JSON_CHUNK, _BIN_CHUNK = 0x46546C67, 2, 0x4E4F534A, 0x004E4942
+# The glTF 2.0 binary container: its magic ("glTF"), version and chunk types. They are the
+# spec's, not cadgen's to bump, and declared here alone: every GLB cadgen writes or reads
+# frames it with these.
+GLB_MAGIC, GLB_VERSION, GLB_JSON_CHUNK, GLB_BIN_CHUNK = 0x46546C67, 2, 0x4E4F534A, 0x004E4942
 _FLOAT, _UNSIGNED_SHORT, _UNSIGNED_INT = 5126, 5123, 5125
 _ARRAY_BUFFER, _ELEMENT_ARRAY_BUFFER = 34962, 34963
 _TABLE_COLUMNS = 4
@@ -241,7 +244,7 @@ def _payload_json(payload: bytes) -> tuple[dict, dict, dict, int, int]:
     if len(data) < 20:
         raise ValueError("truncated tessellation payload")
     magic, version, length, json_length, json_type = struct.unpack_from("<IIIII", data)
-    if magic != _GLB_MAGIC or version != _GLB_VERSION or length != len(data) or json_type != _JSON_CHUNK:
+    if magic != GLB_MAGIC or version != GLB_VERSION or length != len(data) or json_type != GLB_JSON_CHUNK:
         raise ValueError("unsupported tessellation payload")
     if not 0 < json_length <= MAX_JSON_BYTES or json_length % 4 or 20 + json_length > len(data):
         raise ValueError("invalid tessellation JSON length")
@@ -251,7 +254,7 @@ def _payload_json(payload: bytes) -> tuple[dict, dict, dict, int, int]:
             raise ValueError("truncated tessellation BIN chunk")
         bin_length, bin_type = struct.unpack_from("<II", data, bin_start)
         bin_start += 8
-        if bin_type != _BIN_CHUNK or bin_length == 0 or bin_length % 4 or bin_start + bin_length != len(data):
+        if bin_type != GLB_BIN_CHUNK or bin_length == 0 or bin_length % 4 or bin_start + bin_length != len(data):
             raise ValueError("invalid tessellation BIN chunk")
     text = bytes(data[20:20 + json_length])
     if any(token in text for token in _BOOLEAN_TOKENS):
@@ -417,9 +420,9 @@ def encode_payload(*, part: str, positions, normals, indices, face_ranges: list[
     text += b" " * (-len(text) % 4)
     total = 12 + 8 + len(text) + (8 + len(chunk) if chunk else 0)
     payload = b"".join([
-        struct.pack("<III", _GLB_MAGIC, _GLB_VERSION, total),
-        struct.pack("<II", len(text), _JSON_CHUNK), text,
-        struct.pack("<II", len(chunk), _BIN_CHUNK) + chunk if chunk else b"",
+        struct.pack("<III", GLB_MAGIC, GLB_VERSION, total),
+        struct.pack("<II", len(text), GLB_JSON_CHUNK), text,
+        struct.pack("<II", len(chunk), GLB_BIN_CHUNK) + chunk if chunk else b"",
     ])
     decode_payload(payload)
     return payload

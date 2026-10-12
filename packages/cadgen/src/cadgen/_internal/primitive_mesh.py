@@ -24,6 +24,7 @@ import struct
 
 import numpy as np
 
+from cadgen.store.meshes import GLB_BIN_CHUNK, GLB_JSON_CHUNK, GLB_MAGIC, GLB_VERSION
 from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
 __all__ = ["PRIMITIVE_SHAPES", "primitive_glb", "primitive_segments"]
@@ -36,7 +37,6 @@ PRIMITIVE_SHAPES = ("box", "cylinder", "sphere", "capsule")
 _MIN_SEGMENTS = 8
 _MAX_SEGMENTS = 512
 
-_GLB_MAGIC, _GLB_VERSION, _JSON_CHUNK, _BIN_CHUNK = 0x46546C67, 2, 0x4E4F534A, 0x004E4942
 _FLOAT, _UNSIGNED_INT, _ARRAY_BUFFER, _ELEMENT_ARRAY_BUFFER, _TRIANGLES = 5126, 5125, 34962, 34963, 4
 
 
@@ -239,5 +239,5 @@ def primitive_glb(shape: str, dimensions: dict) -> bytes:
     encoded = json.dumps(document, separators=(",", ":"), sort_keys=True).encode("utf-8")
     encoded += b" " * (-len(encoded) % 4)
     total = 12 + 8 + len(encoded) + 8 + len(body)
-    return (struct.pack("<III", _GLB_MAGIC, _GLB_VERSION, total) + struct.pack("<II", len(encoded), _JSON_CHUNK) + encoded
-            + struct.pack("<II", len(body), _BIN_CHUNK) + body)
+    return (struct.pack("<III", GLB_MAGIC, GLB_VERSION, total) + struct.pack("<II", len(encoded), GLB_JSON_CHUNK) + encoded
+            + struct.pack("<II", len(body), GLB_BIN_CHUNK) + body)

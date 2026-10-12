@@ -44,6 +44,8 @@ from typing import Any, Mapping
 
 import numpy as np
 
+from cadgen.store.meshes import GLB_BIN_CHUNK, GLB_JSON_CHUNK, GLB_MAGIC, GLB_VERSION
+
 __all__ = [
     "TUBE_SKINS_SCHEMA_VERSION",
     "build_tube_skins",
@@ -55,7 +57,6 @@ __all__ = [
 # Bumped with the payload's shape or the binding rule; it is in the store key.
 TUBE_SKINS_SCHEMA_VERSION = 1
 _SCHEME = f"cadgen-tube-skins-v{TUBE_SKINS_SCHEMA_VERSION}"
-_GLB_MAGIC, _JSON_CHUNK, _BIN_CHUNK = 0x46546C67, 0x4E4F534A, 0x004E4942
 
 
 def tube_tracks(animation: Any) -> list[tuple[str, int, Mapping[str, Any]]]:
@@ -129,20 +130,20 @@ def _glb(content: dict, arrays: list[np.ndarray]) -> bytes:
     text = json.dumps(gltf, separators=(",", ":")).encode("utf-8")
     text += b" " * (-len(text) % 4)
     total = 12 + 8 + len(text) + 8 + len(binary)
-    return (struct.pack("<III", _GLB_MAGIC, 2, total) + struct.pack("<II", len(text), _JSON_CHUNK) + text
-            + struct.pack("<II", len(binary), _BIN_CHUNK) + binary)
+    return (struct.pack("<III", GLB_MAGIC, GLB_VERSION, total) + struct.pack("<II", len(text), GLB_JSON_CHUNK) + text
+            + struct.pack("<II", len(binary), GLB_BIN_CHUNK) + binary)
 
 
 def decode_tube_skins(data: bytes) -> dict:
     """The payload's content with every array field replaced by its numpy array
     (flat, in its stored dtype): what a view reads, for tests and checks."""
     magic, version, total = struct.unpack_from("<III", data)
-    if (magic, version) != (_GLB_MAGIC, 2) or total != len(data):
+    if (magic, version) != (GLB_MAGIC, GLB_VERSION) or total != len(data):
         raise ValueError("not a tube skins payload")
     length, kind = struct.unpack_from("<II", data, 12)
     gltf = json.loads(data[20:20 + length])
     binary_length, binary_kind = struct.unpack_from("<II", data, 20 + length)
-    if kind != _JSON_CHUNK or binary_kind != _BIN_CHUNK:
+    if kind != GLB_JSON_CHUNK or binary_kind != GLB_BIN_CHUNK:
         raise ValueError("not a tube skins payload")
     start = 28 + length
     content = gltf["extras"]["cadgenTubeSkins"]

@@ -608,6 +608,8 @@ def glb_bytes(primitives: list[Primitive], *, name: str = "model", animation: An
     glTF ignores a skinned node's transform. Every node's own transform is its pose
     at the clip's first moment: what the file shows when nothing plays it.
     """
+    from cadgen.store.meshes import GLB_BIN_CHUNK, GLB_JSON_CHUNK, GLB_MAGIC, GLB_VERSION
+
     binary: list[bytes] = []
     size = 0
     buffer_views: list[dict] = []
@@ -819,7 +821,7 @@ def glb_bytes(primitives: list[Primitive], *, name: str = "model", animation: An
     text += b" " * (-len(text) % 4)
     total = 12 + 8 + len(text) + 8 + len(chunk)
     return b"".join([
-        struct.pack("<III", 0x46546C67, 2, total),
-        struct.pack("<II", len(text), 0x4E4F534A), text,
-        struct.pack("<II", len(chunk), 0x004E4942), chunk,
+        struct.pack("<III", GLB_MAGIC, GLB_VERSION, total),
+        struct.pack("<II", len(text), GLB_JSON_CHUNK), text,
+        struct.pack("<II", len(chunk), GLB_BIN_CHUNK), chunk,
     ])

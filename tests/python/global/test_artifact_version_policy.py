@@ -124,18 +124,19 @@ class DeadVersionsStayDeadTest(unittest.TestCase):
             (ROOT / "packages/cadgen/src/cadgen/viewer/http_app.py").read_text(encoding="utf-8"),
         )
 
-    def test_the_gltf_container_version_is_declared_once(self) -> None:
-        # GLB_VERSION is the glTF 2.0 spec's container version, not ours to bump, and
-        # two copies of an external constant is two places to get it wrong.
-        declarations = [
-            path
-            for path in (ROOT / "packages/cadgen/src/cadgen/_internal").glob("*.py")
-            if re.search(r"^GLB_VERSION\s*=", path.read_text(encoding="utf-8"), re.MULTILINE)
-        ]
-        self.assertEqual(
-            ["glb_topology.py"],
-            sorted(path.name for path in declarations),
+    def test_the_glb_container_is_declared_once(self) -> None:
+        # The container's magic, version and chunk types are the glTF 2.0 spec's, not ours
+        # to bump, and two copies of an external constant is two places to get it wrong:
+        # every GLB cadgen writes or reads is framed with cadgen.store.meshes' constants,
+        # so the magic appears in that one source.
+        package = ROOT / "packages/cadgen/src/cadgen"
+        magic = re.compile(r"0x46546c67|b[\"']glTF[\"']", re.IGNORECASE)
+        declarations = sorted(
+            path.relative_to(package).as_posix()
+            for path in package.rglob("*.py")
+            if magic.search(path.read_text(encoding="utf-8"))
         )
+        self.assertEqual(["store/meshes.py"], declarations)
 
 
 if __name__ == "__main__":
