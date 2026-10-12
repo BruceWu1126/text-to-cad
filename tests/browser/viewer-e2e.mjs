@@ -36,7 +36,7 @@ const fixtures = [
   // `tools` is the file's own tool strip (a mesh and a drawing have none: a tool that does not
   // apply is hidden, not disabled); `threeD` has Display and Preview at the navbar's right end.
   { format: "stl", file: "smoke.stl", parts: false, tools: [], threeD: true },
-  { format: "step", file: "assembly.step", parts: true, tools: ["Select", "Draw", "Measure"], threeD: true, selectModes: true },
+  { format: "step", file: "assembly.step", parts: true, tools: ["Select", "Draw", "Measure"], threeD: true },
   // A drawing is line work, not shaded surfaces: its outline covers a fraction of what a solid does.
   { format: "dxf", file: "smoke.dxf", parts: false, tools: [], threeD: false, minCoverage: 0.003 },
   { format: "urdf", file: "smoke.urdf", parts: false, tools: ["Select", "Position"], threeD: true },
@@ -276,13 +276,12 @@ async function formatGate() {
       if (!fixture.tools.includes("Measure") && strip.includes("Measure")) {
         failures.push(`${fixture.format}: Measure is offered on a view that cannot measure (must be hidden, not disabled)`);
       }
-      // The view's own controls, last in the navbar: a STEP's Select modes while Select is the tool,
-      // then Display and Preview on a 3D view; none on a drawing. The navbar's left is the logo (the
-      // app menu, the person's settings in it), the file's name and its ⋯, on every file, drawing
-      // included.
+      // The view's own controls, last in the navbar: Display then Preview on a 3D view, none on a
+      // drawing. The navbar's left is the logo (the app menu, the person's settings in it), the
+      // file's name and its ⋯, on every file, drawing included.
       const controls = await page.locator("[data-viewer-navbar] [data-view-controls] button").evaluateAll((buttons) =>
         buttons.map((button) => button.getAttribute("aria-label")));
-      const expected = fixture.threeD ? [...(fixture.selectModes ? ["Select mode: All"] : []), "Display", "Preview"] : [];
+      const expected = fixture.threeD ? ["Display", "Preview"] : [];
       if (JSON.stringify(controls) !== JSON.stringify(expected)) failures.push(`${fixture.format}: the view's controls are ${JSON.stringify(controls)}`);
       const menus = await page.getByRole("button", { name: "Menu", exact: true }).count();
       if (menus !== 1) failures.push(`${fixture.format}: ${menus} app menus (one on every file)`);

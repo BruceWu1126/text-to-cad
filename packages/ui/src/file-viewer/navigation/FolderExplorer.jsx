@@ -230,6 +230,19 @@ export function FolderExplorer({ source, file, onOpen }) {
   else if (!current.entries.length) body = <Note>No CAD files here</Note>;
   else body = rowsOf(current.entries, 0);
 
+  // Opened on a long folder, the list starts scrolled to the open file's row, centred, once: the
+  // first time its folder's rows are on screen. Scrolling after that is the person's.
+  const revealed = useRef(false);
+  const listed = Boolean(current.entries?.length) && !term;
+  useLayoutEffect(() => {
+    if (revealed.current || !listed) return;
+    revealed.current = true;
+    const row = rows.current?.querySelector('[data-explorer-row][aria-current="true"]');
+    if (!row || !rows.current) return;
+    const viewport = rows.current, box = viewport.getBoundingClientRect(), at = row.getBoundingClientRect();
+    viewport.scrollTop += at.top - box.top - (box.height - at.height) / 2;
+  }, [listed]);
+
   return <div className="flex min-h-0 flex-1 flex-col" data-folder-explorer="">
     <nav aria-label="Folders" ref={crumbRow} className="flex min-w-0 shrink-0 items-center gap-0.5 px-2 pt-2 pb-1 text-xs">
       {above.length ? <>

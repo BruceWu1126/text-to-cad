@@ -101,7 +101,8 @@ none.
   farthest giving way first to the "…" (an ellipsis icon), which lists every folder above the crumbs to jump to,
   and only the folder it is in, left alone beside the "…", is cut (its name a hint while it
   is). The folder it is in reads in the foreground color, the others muted; there is no up
-  arrow, and the open file is highlighted. Opened, its filter has the keyboard, so typing
+  arrow, and the open file is highlighted, the list opening scrolled to centre its row, once (a
+  long folder's too). Opened, its filter has the keyboard, so typing
   finds a file at once; on a phone the explorer itself holds focus, keeping the keyboard
   down. "Filter files..." under the breadcrumb searches
   every file nested under the folder (the server's bounded search, debounced 150ms, each
@@ -123,12 +124,10 @@ none.
 - **Display and Preview** at the navbar's right end, its last two controls: for a 3D
   file, the view's own — **Display** (the perspective box: see
   [Display settings](#display-settings-and-section-primitives)) and **Preview** (a play
-  icon). Immediately before Display, a STEP adds its **Select modes** while Select is the
-  tool (`RendererShell`'s `navbarControls`: see [Select](#tools-and-lifecycle)). They are
-  the navbar's 24px icon buttons with 14px icons, 4px apart, with hints below them, in the
-  box FileViewer hands the renderer for them (`navbarSlot`, `data-view-controls`). Display's
-  dropdown, and the Select modes', open down from their button, end-aligned, and Display's
-  is never taller than the viewer below it. A view that is not 3D has none of them, and
+  icon). They are the navbar's 24px icon buttons with 14px icons, 4px apart, with hints
+  below them, in the box FileViewer hands the renderer for them (`navbarSlot`,
+  `data-view-controls`). Display's dropdown opens down from its button, end-aligned, never
+  taller than the viewer below it. A view that is not 3D has none of them, and
   neither does a view drawn as a picture, one that is loading or failed to load, or
   preview, which has the page to itself and draws its own in their place (see
   [preview](#camera-animation-and-preview)).
@@ -165,41 +164,44 @@ that depends on it (Explode, a robot's Position) is shown idle meanwhile, and
 the whole strip is disabled while loading. Unavailable and idle are different
 states.
 
-One tool owns pointer input. A kept effect (an Explode, Clip or Measure panel)
-stays highlighted beside it; a highlighted kept effect is not a second pointer
-owner.
+One tool owns pointer input, and it alone is lit on the strip. A kept effect (an
+Explode, Clip or Measure panel, a Position pose) shows as its panel in the stack, not
+on the strip. **A press on the tool in hand does nothing**: a tool is put down by
+taking up another (Select, most often). A press on a kept effect's tool takes it up
+again, as it was.
 
 | Tool | Pressing it | Leaving it |
 | --- | --- | --- |
-| Select | The default tool of STEP and robots; shows Features (an assembly's; a robot's Links) and, with a selection, the Reference panel; a STEP's modes are a menu at the navbar's right end, before Display, while it is up. A press while it is up opens Links again where a person closed it | The selection is dropped; its panels leave the stack, and the modes the navbar |
-| Draw | Draws on the view; its tools, color and history are the Drawing panel; a second press puts it down | The sketch is gone |
-| Measure | Arms picking and shows the Measure panel: its snapping modes, then its results; a press while it is up clears the results and puts it down | Unfinished picks are cancelled; completed measurements and their panel stay |
-| Explode / Clip | Opens a neutral panel; an edit applies the effect | A neutral panel goes; an applied effect and its panel stay |
-| Position | Shows joint handles and the Position panel; its icon carries a small dot while the pose is not the default | Handles and panel hide; joint values stay |
-| Animation | Shows the Animation panel: its settings in the heading, the routine and the transport; starts the routine when Autoplay is on; a second press, or the X, puts it down | The routine stops and rewinds, and the model is back at rest; the Routine, Speed and Loop stay |
+| Select | The default tool of STEP and robots; shows Features (an assembly's; a robot's Links) and, with a selection, the Reference panel; its modes are a menu at the end of Features' filter row (a part file's Select card's heading). A press while it is up opens Links again where a person closed it | The selection is dropped; its panels leave the stack |
+| Draw | Draws on the view, with the pencil; its tools, color, weight, line style and history are the Drawing panel | The sketch is gone, and the pencil is the drawing tool again |
+| Measure | Arms picking and shows the Measure panel: its snapping modes, then its results; kept, a press takes it up again, results and all | Unfinished picks are cancelled; completed measurements and their panel stay, kept |
+| Explode / Clip | Opens a neutral panel; an edit applies the effect; kept, a press takes it up again as it is | A neutral panel goes; an applied effect and its panel stay, kept |
+| Position | Shows joint handles and the Position panel | Handles and panel hide; joint values stay, and a pose that is not the default is kept: one line in the stack |
+| Animation | Shows the Animation panel: its settings in the heading, the routine and the transport; starts the routine when Autoplay is on; its X puts it down | The routine stops and rewinds, and the model is back at rest; the Routine, Speed and Loop stay |
 
 A tree is Select's panel, so it is used under Select; a tree row's menu action
 returns to Select before it acts.
 
-**Every tool's panel but Select's has an X, and no fold chevron.** The X puts
-the tool down and returns to Select, the default tool, which cannot itself be put
-down. Draw's panel is a toolbar with no heading and no X: a second press on Draw
-puts it down. A robot's Links has an X too, which closes the tree alone and leaves Select
+**No tool panel folds, and only a kept effect's has an X.** Measure's, Explode's,
+Clip's and Position's panels have an X only once kept, their tool not in hand: it
+removes the effect (clears the results, resets the pose). In hand, they have none:
+another tool puts them down. Animation's X puts it down and returns to Select, the
+default tool, which cannot itself be put down. Draw's panel is a toolbar with no
+heading and no X. A robot's Links has an X too, which closes the tree alone and leaves Select
 the tool; a press on Select while it is up opens it again (see
 [Closing the tree](#the-tool-stack)). A STEP's Features has none. SDF folds instead.
 
 **No tool has a menu on the strip.** A press on a tool is its only action:
-it takes the tool up, and — for a tool that toggles (Draw, Animation, Measure,
-Explode, Clip) — a press while it is up puts it down. Whatever a tool can be
+it takes the tool up, and does nothing while it is up. Whatever a tool can be
 set to is its panel in the stack, up while the tool is: Select's modes, Measure's
 snapping, Draw's tools, Position's joints, Animation's routine and playback. A tool's exclusive
 modes are never a panel or a row of their own: they are ONE small button in its
 panel's header row, just before the fold chevron or the X — a sliders icon, the
 size of those buttons (the strip's button shows the mode in hand) — whose
 dropdown lists the modes — each its glyph and its name — then any options that
-go with them (`kit/tools/ToolModeMenu.jsx`). Select's sits at the navbar's
-right end instead, immediately before Display and the size of the navbar's controls,
-there while Select is the tool, a part file's too; Measure's in the Measure heading. A tool's settings that are not
+go with them (`kit/tools/ToolModeMenu.jsx`). Select's ends the Features filter row (a
+part file's Select card's heading, and the Reference's that takes its place); Measure's is
+in the Measure heading. A tool's settings that are not
 modes are the same button and dropdown (`ToolSettingsMenu`): Animation's, in its
 heading. A dropdown is ordinary — under
 its own button, free to overlap the stack — and closes with no exit animation,
@@ -211,9 +213,8 @@ preview's menus — Orbit, and the playbar's Routines and Playback settings
 
 **Select** (STEP) has four exclusive modes, each with its own glyph: **All**
 (the pointer), **Parts** (a cube), **Faces** (a cube, its top face filled) and
-**Edges** (a faint cube, one edge heavy). They are the mode menu at the
-navbar's right end, immediately before Display; each menu row shows its mode's glyph
-at full size. The strip's Select button shows the mode in hand as ONE composite:
+**Edges** (a faint cube, one edge heavy). They are the mode menu at the end of the Features filter row (in a part file, the
+Select card's heading); each menu row shows its mode's glyph at full size. The strip's Select button shows the mode in hand as ONE composite:
 the pointer, with the mode's glyph shrunk to a badge in its top-right corner
 (cut out of the pointer so the two never touch at the strip's 14px), and the
 bare pointer for All (`data-select-mode`). One drawing of each glyph serves
@@ -238,20 +239,24 @@ parts, `LARGE_TREE_ROWS`) a part's row coming on screen asks for nothing: the
 pointer resting on the part in the viewport (150ms) or pressing it asks.
 
 **Draw.** Its **Drawing** panel leads the stack while Draw is up, with no heading
-and no X: choosing another tool, or pressing Draw again, puts it down. It holds
-the tools, then a rule across the panel, then a row of Color, Stroke width (Thin,
-Medium, Bold — a shape's 1, 2 or 4px, the pen drawn to look the same weight),
-Undo, Redo and Clear; both are grids of 24px columns spread across the panel's
-width, their columns lined up, with no menu and no inset beyond the panel's own.
-Leaving Draw forgets the sketch, but not the tool, colour and weight in hand,
-which the next time opens with. An update of the model forgets it too, its history
+and no X: choosing another tool puts it down. It holds the tools, then a rule
+across the panel, then a row of Color, Stroke width (Thin, Medium, Bold — a shape's
+1, 2 or 4px, the pen drawn to look the same weight, its glyph a level line), Line
+style (Solid, Dashed, Dotted — a shape's line; the pen's freehand ink is always
+solid; its glyph a diagonal line, drawn in the style), Undo, Redo and Clear; both
+are grids of 24px columns spread across the panel's width, their columns lined up,
+with no menu and no inset beyond the panel's own. The strip's Draw button is always
+the pencil, whatever drawing tool is in hand. Leaving Draw forgets the sketch and
+puts the pencil back in hand, but not the colour, weight and line style, which the
+next time opens with. An update of the model forgets the sketch too, its history
 with it (Undo has nothing to bring back), and leaves Draw the tool, on the tool,
-colour and weight in hand. Choosing a drawing tool changes the toolbar
-icon. Undo and Redo are disabled when their history is empty. The select tool uses lucide's
-SquareMousePointer. The pencil and the shapes share one default stroke width.
-Once there is ink, the Drawing panel ends in a full-row **Copy Drawing**, which
-writes the view with its ink to the clipboard as a PNG and then says **Copied**, a
-tick where the shortcut was; the copy shortcut does the same. A sketch begun opens
+colour, weight and line style in hand. Undo and Redo are disabled when their
+history is empty. The select tool uses lucide's SquareMousePointer. The pencil and
+the shapes share one default stroke width. The Drawing panel always ends in a
+full-row **Copy Drawing** (**Copy** where the panel is too narrow for its name),
+disabled until there is ink, which writes the view with its ink to the clipboard as
+a PNG and then says **Copied**, a tick where the shortcut was; the copy shortcut
+does the same. A sketch begun opens
 [Quick Edit](#quick-edit), whose header says **drawing** while the ink is there. Draw disables the cube without hiding it.
 
 **Animation** plays a file's routines without leaving the tools view; only a
@@ -260,7 +265,7 @@ Its **Animation** panel leads the stack while it is up, headed as Measure's is:
 "Animation", then its settings — the sliders button, whose dropdown holds Speed,
 Loop and Autoplay, the file's, kept in its view (preview's Speed and Loop are preview's
 own, and never these: see [preview](#camera-animation-and-preview)) — and its X, which puts
-it down as a second press on Animation does. Its body sits flush under the
+it down. Its body sits flush under the
 heading, whose 28px row is the room above it, 8px in at each side and 4px at the
 foot, and its 24px controls sit 4px apart: with more than one routine, the routine's dropdown across the
 panel (the routine's name is the row, so it has no label beside it; its name and
@@ -287,15 +292,23 @@ measurement, one hint row the height of a measurement row ("Pick two points to
 measure"). The strip's Measure button shows the mode in hand
 as Select's does: the ruler badged with the mode's glyph (`data-measure-mode`).
 Completed measurements are the panel's body, and keep the panel in the
-stack when another tool is taken up; choosing a mode there takes Measure up
-again, results and all. A press on Measure while it is up — results or none —
-or the panel's X clears them all and puts it down. Removing the last result
-leaves Measure picking, its panel empty. There is no Clear All footer.
+stack when another tool is taken up: kept, its heading is its title and an X alone,
+no mode menu, and a press on Measure takes it up again, results and all. A press on
+Measure while it is up does nothing. The kept panel's X clears the results. Removing
+the last result leaves Measure picking, its panel empty. There is no Clear All footer.
 
-**Measure, Explode and Clip** do not fold: their X is how a person is done
-with one (it clears the results or removes the effect, and puts the tool down).
+**Measure, Explode and Clip** do not fold: their X — there only while kept, their
+tool not in hand — is how a person is done with one (it clears the results or
+removes the effect).
 
-**Explode and Clip** are toggles with no enabled checkbox, drawn alike: the
+**Position kept.** A pose that is not the default stays when Position is put down,
+and shows as one line in the stack, as a kept effect does (`KeptPositionPanel`):
+"Position", what the pose is — the named pose it is at, or Custom — and an X
+("Reset position") that puts the default pose back. A press on Position takes the tool
+up again, its full panel and joint handles with it. The Position panel itself has no
+X: its heading's Reset puts the pose back, another tool puts it down.
+
+**Explode and Clip** have no enabled checkbox, and are drawn alike: the
 amount in the heading beside the title, one row for a body — Explode's a
 slider, Clip's its axis (a compact X / Y / Z dropdown) and then its slider. Explode opens at 0%,
 Clip at no cut; an edit applies the effect and the panel is then kept. A panel
@@ -367,8 +380,11 @@ stack.
   Drawing, Animation) keeps its height. If what cannot give way still does not fit, the
   column itself scrolls — a panel is never cut.
 - **The STEP tree is always there.** A STEP's Features has no X and does not fold:
-  under Select an assembly shows it, on a phone too, and a part file has none, its
-  one row being all there would be (the Select modes are in the navbar either way).
+  under Select an assembly shows it, on a phone too. A part file has no tree, its one row
+  being all there would be, but a fixed **Select** card in its place: headed "Select" with
+  the mode menu, and one hint row, what to pick — "Select a face or edge", or under Faces
+  "Select a face" and under Edges "Select an edge" — no filter. While something is
+  picked the Reference takes its place, the mode menu in its heading before its X.
 - **Closing Links.** A robot's Links does not fold: the X at its filter row's end
   ("Close links") closes it, `hidden` and kept mounted with its expansion, filter,
   selection and scroll, and Select stays the tool — a selection still shows its
@@ -397,15 +413,16 @@ stack.
   8px in — a title; a summary where there is one (Explode's and Clip's amount);
   then, at its right
   end, its own actions (a mode or settings menu — Measure's — or Position's
-  Reset), the chevron where it folds, and an X when there is something to remove.
+  Reset), the chevron where it folds, and an X where a kept effect can be removed.
   Every small button in a heading or a filter row is 20px, 2px apart and 4px from
   the edge, so the icons line up down the stack. The Reference's heading is the
   reference itself, then an X that clears the selection; a kept panel's X removes
   the effect.
 - **Footers.** A panel can end in one full-row button under its body, which
-  never scrolls (`footer`, `ToolPanelFooterButton`): the Reference's **Copy** —
-  **Copy All** with several references, every one selected — and, once there is
-  ink, Drawing's **Copy Drawing**. The button shows the copy shortcut in the
+  never scrolls (`footer`, `ToolPanelFooterButton`): the Reference's **Copy
+  References**, every one selected, and Drawing's **Copy Drawing**, disabled until there
+  is ink. Where the button is too narrow for its name and shortcut (under 9rem), it says
+  **Copy**. The button shows the copy shortcut in the
   platform's form (a phone shows none); after a copy it says **Copied** for a
   moment, a tick where the shortcut was.
 - **The layout is the person's.** The sizes, the folded panels and the closed
@@ -615,8 +632,7 @@ theme (no fill; only its chevron comes up), and nothing about it moves; that pic
 multi-selection adds, and the rows are always the browsed reference's alone (no
 totals, no count line). An X at the heading's end clears the selection; the
 heading has no Copy of its own. Copy stays in row menus and the copy shortcut, and
-the panel ends in a full-row **Copy** (**Copy All** with several references) that
-shows the shortcut. What goes to an agent goes through [Quick Edit](#quick-edit), which a
+the panel ends in a full-row **Copy References** that shows the shortcut. What goes to an agent goes through [Quick Edit](#quick-edit), which a
 pick opens and which carries the selected references with the file. Every copied
 reference names its file by absolute path.
 

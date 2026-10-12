@@ -122,8 +122,7 @@ person tells the agent about a CAD file is [Quick Edit](#prompt-handoff)'s.
 
 A renderer's controls for the view are the renderer's own, drawn into the navbar: FileViewer
 hands it the box at the row's right end (`RendererViewProps.navbarSlot`, null where no navbar
-is drawn), and the CAD viewer's controls for a 3D view (a STEP's Select modes while Select is
-the tool, then Display and Preview) are portaled there, last.
+is drawn), and the CAD viewer's controls for a 3D view (Display and Preview) are portaled there, last.
 A renderer that shows its file fullscreen (the CAD viewer's Preview) says so through
 `onFullscreenChange(true)`, and `false` when it stops: the navbar, the box with it, steps
 aside while it lasts, and the renderer draws its own controls where they sat (preview's
@@ -475,7 +474,7 @@ reason otherwise, each with a Go home button where the host has a home.
 
 The viewport's corners are the shell's, never the host's: the tool strip and its
 stack at the top-left, Quick Edit at the top-right, and the view cube at the
-bottom-left; the view's own controls (a STEP's Select modes, Display and Preview, a 3D view's) are the navbar's
+bottom-left; the view's own controls (Display and Preview, a 3D view's) are the navbar's
 last. A host's one notice goes through the shell too: `notice` is drawn at the top-right once the
 file is on screen, never while it loads or after it failed to, with Quick Edit stacked under
 it while it stands; the home never shows it. Neither app has one now.
@@ -484,8 +483,8 @@ the ports, never an app name: Copy Prompt always, Queue for a composer
 destination, Send where the prompt port has `send`. Native clipboard effects
 remain in the host implementation.
 
-STEP's Reference panel (Copy, or Copy All with several references) and Draw's
-panel (Copy, once there is ink) use `ClipboardPort` directly, including on
+STEP's Reference panel (Copy References) and Draw's
+panel (Copy Drawing, once there is ink) use `ClipboardPort` directly, including on
 desktop: the references as text, the view with its ink as a PNG through
 `writeImage`. Their copy shortcut and double-click topology copy follow the same
 path. Double-clicking a component or subassembly isolates it instead; only

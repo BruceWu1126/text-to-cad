@@ -19,8 +19,8 @@ it('Select\'s mode is one button showing the mode in hand; its menu lists the mo
   const view = render(<SelectModeMenu mode="faces" assembly={false} onModeChange={modeChange}
     connected={{ edgeChain: true, tangentFaces: true }} onConnectedChange={connectedChange} />);
   const button = screen.getByRole('button', { name: 'Select mode: Faces' });
-  // The button is one of the navbar's view controls, their size, the sliders icon; the strip shows the mode.
-  expect([glyphs(button), !!button.querySelector('svg.lucide-sliders-horizontal'), button.classList.contains('size-6')]).toEqual([[], true, true]);
+  // The button is a panel heading's small sliders button; the strip shows the mode.
+  expect([glyphs(button), !!button.querySelector('svg.lucide-sliders-horizontal'), button.classList.contains('size-5')]).toEqual([[], true, true]);
   await user.click(button);
   expect(menu().getAttribute('aria-label')).toBe('Select mode');
   expect(screen.getAllByRole('menuitemradio').map(item => [item.textContent, item.getAttribute('aria-checked')]))

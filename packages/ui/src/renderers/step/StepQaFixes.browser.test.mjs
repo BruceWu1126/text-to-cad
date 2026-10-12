@@ -61,11 +61,13 @@ test('a single-part STEP names a picked face after its part, by the name the vie
   // The staging is what cadgen writes: one part, named `base` in the view, in `hinge_base.step`.
   assert.equal(lone.fixture.view.occurrences[0].name, 'base');
   assert.equal(await view.tool('Explode').count(), 0, 'a single part: no Explode, so this is the lone-part view');
-  // A single part has no tree under Select (its one row would be all of it), and nothing marks
-  // Select; its modes are in the navbar, All, Faces and Edges, with no Parts.
+  // A single part has no tree under Select (its one row would be all of it): its Select card says
+  // what to pick, under its modes, All, Faces and Edges, with no Parts.
   assert.equal(await pane.locator('[data-cad-tool-stack] [data-tool-panel][aria-label="Features"]').count(), 0, 'no tree for a part file');
+  const card = pane.getByRole('region', { name: 'Select', exact: true });
+  assert.equal(await card.locator('[data-select-hint]').innerText(), 'Select a face or edge');
   assert.equal(await view.tool('Select').locator('[data-tool-panel-closed]').count(), 0);
-  await pane.locator('[data-view-controls]').getByRole('button', { name: 'Select mode: All', exact: true }).click();
+  await card.getByRole('button', { name: 'Select mode: All', exact: true }).click();
   assert.deepEqual(await page.locator('[role=menu][aria-label="Select mode"]').getByRole('menuitemradio').allInnerTexts(), ['All', 'Faces', 'Edges']);
   await page.keyboard.press('Escape');
   await page.locator('[role=menu]').waitFor({ state: 'detached' });

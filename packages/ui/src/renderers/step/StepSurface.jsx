@@ -3,7 +3,7 @@ import { buildEdgeChainGraph } from "./workbench/edgeChainSelection.js";
 
 import { MeasureModeIcon, MeasureModeMenu, SelectModeIcon, SelectModeMenu } from "./components/workbench/SelectionModes.jsx";
 import { NO_CONNECTED_SELECTION, connectedSelectionApplies } from "./workbench/selectionFilter.js";
-import { PositionToolIcon, positionValuesAreDefault } from "../kit/inspector/kinematicsControls.jsx";
+import { PositionToolIcon } from "../kit/inspector/kinematicsControls.jsx";
 import { filterSelectionReferences, toggleReferenceGroupSelection, connectedReferenceIds } from "./workbench/selectionFilter.js";
 import { buildTangentFaceGraph } from "./workbench/tangentFaceSelection.js";
 import { createHoverStore } from "./workbench/hoverStore.js";
@@ -1612,8 +1612,8 @@ function StepSurfaceBody({ view, data }) {
     () => copyTextLines(copySelectionPayload.lines, fileRefPrefix),
     [copySelectionPayload.lines, fileRefPrefix]
   );
-  // The Reference panel's foot: Copy, or Copy All with more than one reference selected.
-  const copyButtonLabel = (copySelectionPayload.copiedCount || canonicalCopySelectionLines.length) > 1 ? "Copy All" : "Copy";
+  // The Reference panel's foot: Copy References, Copy where the button is narrow.
+  const copyButtonLabel = "Copy References";
   const copySelectedReferences = useCallback(async () => {
     const text = canonicalCopySelectionLines.join("\n");
     if (!text || stepInteractionBlocked) return false;
@@ -3138,8 +3138,9 @@ function StepSurfaceBody({ view, data }) {
       // Up while Measure is the tool, empty or not, and kept while it has results.
       shown: tabToolMode === TAB_TOOL_MODE.MEASURE || measureMeasurements.length > 0,
       onRemove: removeMeasurements,
-      // Its snapping, a mode menu in the panel's heading beside the fold chevron.
-      actions: <MeasureModeMenu mode={measure.filter} disabled={measureToolDisabled} onModeChange={value => {
+      // Its snapping, a mode menu in the panel's heading while Measure is the tool; kept, the
+      // heading has its X alone.
+      actions: tabToolMode !== TAB_TOOL_MODE.MEASURE ? null : <MeasureModeMenu mode={measure.filter} disabled={measureToolDisabled} onModeChange={value => {
         measure.setFilter(value); measure.cancelDraft();
         handleSelectTabToolMode(TAB_TOOL_MODE.MEASURE);
       }} />,
@@ -3153,13 +3154,15 @@ function StepSurfaceBody({ view, data }) {
       // The button shows the mode in hand; nothing under the strip names it.
       icon: <SelectModeIcon mode={selectionFilter} className="size-3.5" aria-hidden="true" />,
       active: !topologySelectionDeferred && selectionToolActive, disabled: selectDisabled,
-      // Its modes and options are a menu at the navbar's right end, before Display (`selectModeMenu`).
+      // Its modes and options are a menu in the Features filter row, or a part file's Select card (`selectModeMenu`).
       onSelect: () => handleSelectTabToolMode(TAB_TOOL_MODE.REFERENCES),
     }),
     // Position comes straight after Select; only files with movable joints offer it.
     poseAvailable ? shell.tools.own({ id: TAB_TOOL_MODE.POSE, label: "Position",
-      icon: <PositionToolIcon custom={!positionValuesAreDefault(motion.positionControls?.parameterValues, openingControlValues(motion.positionControls?.definition?.articulation))} />,
-      active: poseToolActive, disabled: toolIdle,
+      icon: <PositionToolIcon />,
+      // Lit while it is the tool alone: a pose it set is kept in the stack (the kept Position panel).
+      active: poseToolActive,
+      disabled: toolIdle,
       // Its panel is in the tool stack for as long as it is the tool.
       onSelect: () => { if (!poseToolActive) handleSelectTabToolMode(TAB_TOOL_MODE.POSE); } }) : null,
     // Animation follows Position; only files with routines offer it. Its panel is the shell's.
@@ -3168,16 +3171,15 @@ function StepSurfaceBody({ view, data }) {
     shell.tools.own({ id: TAB_TOOL_MODE.MEASURE, label: "Measure",
       // Like Select's, the button shows the snapping mode in hand.
       icon: <MeasureModeIcon mode={measure.filter} className="size-3.5" aria-hidden="true" />,
-      active: tabToolMode === TAB_TOOL_MODE.MEASURE || measureMeasurements.length > 0, disabled: measureToolDisabled,
-      // Like Explode and Clip, a press on it while it is up puts it down, with its results; its
-      // snapping is a menu in its panel's heading.
-      onSelect: () => tabToolMode === TAB_TOOL_MODE.MEASURE || measureMeasurements.length
-        ? removeMeasurements() : handleSelectTabToolMode(TAB_TOOL_MODE.MEASURE) }),
+      active: tabToolMode === TAB_TOOL_MODE.MEASURE, disabled: measureToolDisabled,
+      // A press takes it up — again, results and all, where they are kept — and does nothing while
+      // it is the tool; its snapping is a menu in its panel's heading while it is.
+      onSelect: () => { if (tabToolMode !== TAB_TOOL_MODE.MEASURE) handleSelectTabToolMode(TAB_TOOL_MODE.MEASURE); } }),
     ...modelEffects.tools,
   ].filter(Boolean);
 
   // ---- copying the selection ----------------------------------------------------------------
-  // The Reference panel's Copy (Copy All) and the copy key, under Select, while the selection's
+  // The Reference panel's Copy References and the copy key, under Select, while the selection's
   // references can be read; Quick Edit attaches them only then, too.
   const selectionActionVisible = selectionToolActive && selectionCount > 0 && !stepUpdateInProgress && !referenceSelectionPending
     && !referenceSelectionUnavailable && !topologySelectionDeferred;
@@ -3185,10 +3187,17 @@ function StepSurfaceBody({ view, data }) {
   const selectionCopy = useMemo(() => copySelection ? { label: copyButtonLabel, shortcut: shell.frame.copyShortcut, onCopy: copySelection } : null,
     [copySelection, copyButtonLabel, shell.frame.copyShortcut]);
 
+  // Select's mode and options: a menu in the Features filter row, or in a part file's Select card
+  // (and the Reference that takes its place). One element until the mode or its options change.
+  const selectModeMenu = useMemo(() => <SelectModeMenu mode={selectionFilter} assembly={isAssemblyView} disabled={selectDisabled}
+    onModeChange={value => { changeSelectMode(value); handleSelectTabToolMode(TAB_TOOL_MODE.REFERENCES); }}
+    connected={connectedSelection} onConnectedChange={(id, checked) => setConnectedSelection(current => ({ ...current, [id]: checked }))} />,
+  [selectionFilter, isAssemblyView, selectDisabled, connectedSelection, changeSelectMode, handleSelectTabToolMode]);
+
   // ---- the tool stack ---------------------------------------------------------------------------
   // Under the strip: Select's Features and Reference, Position's joints, then the kept effects.
   const stepPanels = useStepPanels({
-    onClosePosition: () => handleSelectTabToolMode(TAB_TOOL_MODE.REFERENCES),
+    selectModeMenu,
     selectActive: selectionToolActive && !previewing,
     positionActive: poseToolActive,
     selectMode: selectionFilter,
@@ -3228,15 +3237,7 @@ function StepSurfaceBody({ view, data }) {
     showAllHiddenParts: handleShowAllHiddenParts
   });
 
-  // Select's mode and options: a menu at the navbar's right end, immediately before Display, while
-  // Select is the tool -- a part file's too, which has no tree.
-  const selectModeMenu = useMemo(() => <SelectModeMenu mode={selectionFilter} assembly={isAssemblyView} disabled={selectDisabled}
-    onModeChange={value => { changeSelectMode(value); handleSelectTabToolMode(TAB_TOOL_MODE.REFERENCES); }}
-    connected={connectedSelection} onConnectedChange={(id, checked) => setConnectedSelection(current => ({ ...current, [id]: checked }))} />,
-  [selectionFilter, isAssemblyView, selectDisabled, connectedSelection, changeSelectMode, handleSelectTabToolMode]);
-
   return <RendererShell shell={shell} tools={tools} toolPanels={<>{stepPanels}{modelEffects.panels}</>}
-    navbarControls={selectionToolActive ? selectModeMenu : null}
     references={selectionActionVisible ? promptSelection : EMPTY_LIST} onClearReferences={clearAssemblySelection} copySelection={copySelection}
     contextMenuItems={selectionToolActive
       ? press => viewportContextMenuItems(press, pickAtRef.current?.(press.clientX, press.clientY) || "") : null}

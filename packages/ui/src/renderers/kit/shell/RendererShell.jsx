@@ -45,9 +45,8 @@ function NavbarControl({ label, disabled = false, onClick, children }) {
 /**
  * The frame every file-family renderer draws itself in: the viewport box with the tool strip at
  * its top-left corner and the tool stack under it, Quick Edit at the top-right, the cube in the
- * bottom-left corner, a 3D view's controls at the navbar's right end (the renderer's own, then
- * Display's settings and Preview, in the renderer's `navbarSlot`), the loading, update and alert
- * overlays, and preview
+ * bottom-left corner, a 3D view's controls at the navbar's right end (Display's settings and
+ * Preview, in the renderer's `navbarSlot`), the loading, update and alert overlays, and preview
  * mode's controls. The same
  * structure, classes and data attributes for every renderer: hosts, stylesheets and tests key on
  * them. A file's controls are never a sidebar: they are panels in the tool stack, shown by the
@@ -56,7 +55,6 @@ function NavbarControl({ label, disabled = false, onClick, children }) {
  * @param {{ shell: ReturnType<typeof import("./useRendererShell.js").useRendererShell>,
  *   tools: import("../tools/FloatingToolBar.js").ViewportTool[],
  *   toolPanels?: import("react").ReactNode,
- *   navbarControls?: import("react").ReactNode,
  *   references?: readonly import("@text-to-cad/core/prompt").PromptReference[],
  *   copySelection?: (() => unknown) | null,
  *   contextMenuItems?: ((press: { clientX: number, clientY: number, shiftKey: boolean }) => object[] | null) | null,
@@ -75,9 +73,6 @@ function NavbarControl({ label, disabled = false, onClick, children }) {
  *   the tool in hand shows (Select's tree and Reference, Position's joints), then the
  *   effects a person keeps. The stack is one column the viewer's height, gone in preview. The
  *   shell's own tools' panels lead it: Draw's, and the Animation tool's.
- *   `navbarControls`: what the renderer puts at the navbar's right end, immediately before Display
- *   (the Select tool's modes, while it is the tool in hand), drawn as Display is: with the view's
- *   controls, in neither preview nor a compact view, nor while the model loads.
  *   `references`: what is selected, in the prompt grammar — the references a Quick Edit attaches
  *   (`kit/tools/quick-edit/QuickEdit.jsx`), counted in its header; the file itself always goes. A
  *   renderer that hands none has no Quick Edit: only a view whose picks and sketches a note can
@@ -104,7 +99,7 @@ function NavbarControl({ label, disabled = false, onClick, children }) {
  *   it. The frame focuses itself on such a press whatever the renderer does; this is for a renderer
  *   that also has something to put down when the person reaches for the model.
  */
-export default function RendererShell({ shell, tools, toolPanels = null, navbarControls = null, references = null, onClearReferences = null, copySelection = null, contextMenuItems = null,
+export default function RendererShell({ shell, tools, toolPanels = null, references = null, onClearReferences = null, copySelection = null, contextMenuItems = null,
   onContextMenuOpenChange = null, viewportOverlay = null,
   frameProvider = null, onCanvasPointerDown = null }) {
   const frame = shell.frame;
@@ -185,11 +180,12 @@ export default function RendererShell({ shell, tools, toolPanels = null, navbarC
   // history, or the Animation tool's routine, transport and settings, whose X puts it down, back to
   // the default tool -- no X where Animation is the file's one tool, never put down. The
   // renderer's follow.
-  // Draw's controls, and once there is ink, Copy Drawing (the view with its ink) at their foot.
+  // Draw's controls, and Copy Drawing (the view with its ink) always at their foot, disabled until
+  // there is ink.
   const shellPanels = <>
     {frame.drawToolActive ? <ToolPanel id="drawing" label="Drawing controls" collapsible={false}
-      footer={frame.drawing.hasContent ? <ToolPanelFooterButton label="Copy Drawing" shortcut={mobile ? "" : frame.copyShortcut}
-        disabled={viewerLoading || !scene} onClick={frame.copyDrawing} /> : null}>
+      footer={<ToolPanelFooterButton label="Copy Drawing" shortLabel="Copy" shortcut={mobile ? "" : frame.copyShortcut}
+        disabled={viewerLoading || !scene || !frame.drawing.hasContent} onClick={frame.copyDrawing} />}>
       <DrawingToolbar drawing={frame.drawing} layout="panel" className="p-1" />
     </ToolPanel> : null}
     {frame.animateToolActive ? <AnimationPanel runtime={playbackRuntime} autoplay={shell.autoplay}
@@ -297,12 +293,11 @@ export default function RendererShell({ shell, tools, toolPanels = null, navbarC
                 </div>
               </div>
 
-              {/* The view's controls, at the navbar's right end: the renderer's own, then Display's
-                  settings, then Preview, for a 3D view (`useRendererShell`'s `previewable`); another has
-                  none. Not while the model loads or after it failed to, not in a host that shows the
-                  view small, and not in Preview, which has the page to itself. */}
+              {/* The view's controls, at the navbar's right end: Display's settings, then Preview, for a
+                  3D view (`useRendererShell`'s `previewable`); another has neither. Not while the model
+                  loads or after it failed to, not in a host that shows the view small, and not in
+                  Preview, which has the page to itself. */}
               {view.navbarSlot && shell.previewable && !toolsHidden && !previewing ? createPortal(<>
-                {navbarControls}
                 <DisplayPopover open={displayOpen} onOpenChange={setDisplayOpen} disabled={shell.idle} boundary={frame.hostElement}>{frame.display}</DisplayPopover>
                 <NavbarControl label="Preview" disabled={shell.idle} onClick={enterPreview}><Maximize2 className="size-3.5" aria-hidden="true" /></NavbarControl>
               </>, view.navbarSlot) : null}

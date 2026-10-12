@@ -40,8 +40,8 @@ export const CAD_TOOL_MODES = createToolModes({
     [TAB_TOOL_MODE.MEASURE]: {},
     [TAB_TOOL_MODE.EXPLODE]: {},
     [TAB_TOOL_MODE.CLIP]: {},
-    [TAB_TOOL_MODE.DRAW]: { toggles: true },
+    [TAB_TOOL_MODE.DRAW]: {},
     [TAB_TOOL_MODE.POSE]: {},
-    [TAB_TOOL_MODE.ANIMATE]: { toggles: true }
+    [TAB_TOOL_MODE.ANIMATE]: {}
   }
 });

@@ -22,7 +22,9 @@ function ClipIcon(props) {
  * Explode, Clip and Measure: tools whose effects a person keeps, each with a panel in the tool
  * stack that outlives the tool being in hand. Measure's is up while it is the tool — its snapping
  * a menu in its heading (`measure.actions`), its results, if any, the body — and stays while it
- * has results (`measure.shown`).
+ * has results (`measure.shown`). A press on one in hand does nothing; on a kept one it takes it
+ * up again, as it is. A panel's X — removing the effect — is there only while it is kept, its
+ * tool not in hand.
  *
  * A tool the file cannot offer is not on the strip: Explode needs two parts to separate. While
  * the mesh is still loading that is not known yet, so Explode is shown, idle, until it is.
@@ -81,10 +83,13 @@ export function useModelTools({ modelKey, view, features, store, mesh, disabled,
   };
   return {
     tools: definitions.filter(tool => tool.id !== "measure" && !tool.unavailable).map(({ id, label, Icon }) => ({
-      id, label, active: panelIds.includes(id), disabled,
+      // Lit while it is the tool alone: a kept effect shows in the stack, not on the strip.
+      id, label, active: selectedTool === id, disabled,
       icon: <Icon className="size-3" strokeWidth={2} aria-hidden="true" />,
       onSelect: () => {
-        if (panelIds.includes(id)) { remove(id); return; }
+        // The tool in hand: nothing. Kept, not in hand: taken up again, as it is.
+        if (selectedTool === id) return;
+        if (panelIds.includes(id)) { onSelect(id); return; }
         onSelect(id);
         // A panel starts neutral. Actual edits enable its effect.
         if (id === "clip") store.patch({ clip: { enabled: false, axis: "x", invert: false } });
@@ -98,10 +103,11 @@ export function useModelTools({ modelKey, view, features, store, mesh, disabled,
       {[...(measure?.shown ? ["measure"] : []), ...panelIds].map(id => {
         const tool = definitions.find(value => value.id === id);
         // Measure's results can run long, so they give way like a details panel; Explode and
-        // Clip are one slider and keep their height. None of them folds: the X is how a person
-        // is done with one.
+        // Clip are one slider and keep their height. None of them folds. The X is how a person
+        // is done with a kept one, there only while its tool is not in hand: in hand, another
+        // tool puts it down.
         return tool ? <ToolPanel key={id} id={id} title={tool.label} label={`${tool.label} controls`} summary={tool.summary} actions={tool.actions}
-          fit={id === "measure" ? "details" : "fixed"} collapsible={false} onClose={() => remove(id)}>
+          fit={id === "measure" ? "details" : "fixed"} collapsible={false} onClose={selectedTool === id ? null : () => remove(id)}>
           <div className="space-y-1 pb-1">{tool.controls}</div>
         </ToolPanel> : null;
       })}

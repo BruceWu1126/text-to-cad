@@ -248,9 +248,10 @@ too. See [the model tree](docs/cad-renderer.md#step-panels) for selection, isola
 and demand.
 
 A CAD file's controls are `ToolPanel`s in the tool stack, shown by the tool they
-belong to. Select shows Features (an assembly's tree; a part file has none) or a robot's
-Links and, with a selection, the Reference; its modes are a menu at the navbar's right end,
-before Display. Position shows Position; Display and Draw show their own panels; kept
+belong to. Select shows Features (an assembly's tree, its modes a menu at its filter row's
+end) — in a part file, a Select card with its modes and "Select a face or edge", which the
+Reference takes the place of while something is picked — or a robot's Links, and, with a
+selection, the Reference. Position shows Position; Display and Draw show their own panels; kept
 effects (Explode, Clip, Measure's results) follow. A panel whose tool is not up stays
 mounted, hidden, so a tree keeps its scroll and expansion; only what is on screen does
 background work. Features has no X: an assembly shows it whenever Select is up, on a phone
@@ -263,9 +264,8 @@ and Reference panel; see [robot links](docs/cad-renderer.md#robot-links).
 The binding [viewer design system](docs/settings-ui.md) defines tool lifecycle,
 the tool stack, mobile layout, section density, keyboard scope, tooltips
 and preview. RendererShell owns the top-left toolbar, Quick Edit at the top-right, the
-bottom-left cube, and a 3D view's controls, which it draws at the navbar's right end: the
-renderer's own (`navbarControls`: a STEP's Select modes), then Display (its settings, a
-dropdown that opens down), then Preview. Preview is the shell's own
+bottom-left cube, and a 3D view's controls, which it draws at the navbar's right end: Display
+(its settings, a dropdown that opens down), then Preview. Preview is the shell's own
 mode, where routines play and the model orbits, and takes the whole page, the navbar with
 it; its own controls sit at the view's top-right, on the navbar's geometry — Orbit, then
 Display where it sat in the navbar, then Exit preview where Preview sat — and its playbar
@@ -294,8 +294,7 @@ app's views), Back and Forward follow, disabled where they have nowhere to go. I
 file — the name opens the explorer — and offers its ⋯ menu (Copy path, Reveal). They share one look: transparent until the
 pointer is on them or their menu is open, with no tooltip. At the right is only what a host
 or a file adds: the host's update button, a dismissed alert's icon, the host's Full size
-and, last, a 3D view's controls: a STEP's Select modes while Select is the tool, then
-Display and Preview.
+and, last, a 3D view's controls: Display and Preview.
 With no file a view shows the host's home, the model library: the models opened before,
 pinned first, with their pictures, and Open where the host has a file chooser, under its
 wordmark and GitHub, Discord and X. A file that

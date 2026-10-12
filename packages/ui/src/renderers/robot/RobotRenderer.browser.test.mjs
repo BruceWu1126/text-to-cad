@@ -95,7 +95,6 @@ async function open(t, file, { panel = true } = {}) {
     camera: () => page.evaluate(() => { const { position, target, zoom } = window.__cadCamera(); return [...position, ...target, zoom]; }),
     stats: () => page.evaluate(() => window.__robotPoseStats()),
     // Whether the Position tool's icon carries its dot: the pose is off its default.
-    posedMark: () => tools.getByRole('button', { name: 'Position', exact: true }).locator('[data-position-custom]').count(),
     jointField: (name, unit = 'deg') => page.getByLabel(`${name} value in ${unit}`, { exact: true }),
     async openPosition() {
       await robot.tool('Position').click();
@@ -193,7 +192,7 @@ test('a robot can enter Position with sidebar controls: knobs drag joints, the c
   assert.equal((await positionHeading.getByRole('heading').innerText()).trim(), 'Position');
   assert.equal(await positionHeading.getByRole('button', { name: 'Reset', exact: true }).count(), 1);
   // It does not fold: its heading is Reset, then the X that puts Position down.
-  assert.deepEqual(await positionHeading.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))), ['Reset', 'Close position']);
+  assert.deepEqual(await positionHeading.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))), ['Reset'], 'no X: Select puts Position down');
   await robot.openPosition();
   // One knob per moving joint row of the articulation: no fixed joint; a mimic follower's knob
   // writes its leader. A slider exists per CONTROL, so the follower has none, nor the fixed joint.
@@ -264,17 +263,13 @@ test('a robot can enter Position with sidebar controls: knobs drag joints, the c
   await robot.waitCursor('grabbing');
   const radius = Math.hypot(shoulder.x - shoulder.pivotX, shoulder.y - shoulder.pivotY);
   const bearing = Math.atan2(shoulder.y - shoulder.pivotY, shoulder.x - shoulder.pivotX);
-  // The Position icon's dot (the pose is off its default) is the one thing a step may render, and
-  // only as the pose leaves or reaches its default: counted, never per step.
-  let flips = 0, marked = await robot.posedMark();
+  // Whether the pose is off its default is read only while Position is not the tool (the kept
+  // line's case), so a step under the tool renders nothing, even leaving the default.
   for (let step = 1; step <= 9; step += 1) {
     const angle = bearing + (step * Math.PI) / 18;
     await page.mouse.move(...at(shoulder.pivotX + radius * Math.cos(angle), shoulder.pivotY + radius * Math.sin(angle)));
     await robot.settle();
-    const now = await robot.posedMark();
-    if (now !== marked) { flips += 1; marked = now; }
   }
-  assert.ok(flips <= 1, 'a drag one way leaves the default once at most');
   await page.waitForFunction(start => Math.abs(window.__cadJointHandles().find(handle => handle.id === 'shoulder').value - start) > 20, home);
   const held = (await robot.handles()).shoulder.value;
   assert.match(await pane.locator('[data-cad-joint-handle-label]').textContent(), /^shoulder\s+-?\d+\.\d°$/);
@@ -299,7 +294,7 @@ test('a robot can enter Position with sidebar controls: knobs drag joints, the c
   assert.equal(dragged.lastPoseWrites, 1, 'a pose step writes the one joint that changed');
   assert.ok(dragged.poseWrites - before.poseWrites >= 5 && dragged.poseWrites - before.poseWrites <= 12, JSON.stringify({ before, dragged }));
   // (The one render a drag may cost is the host storing the debounced record, not a step.)
-  assert.ok(dragged.surfaceRenders - before.surfaceRenders <= 1 + flips, `no React state sits in the per-pose path: ${JSON.stringify({ before, dragged, flips })}`);
+  assert.ok(dragged.surfaceRenders - before.surfaceRenders <= 1, `no React state sits in the per-pose path: ${JSON.stringify({ before, dragged })}`);
   assert.equal((await poseSelect.innerText()).trim(), 'Custom', 'a joint moved by hand releases the named pose');
 
   // A sliding joint's knob sits ON its pivot, its track runs through it, and it drags to its limit and no further.
@@ -768,23 +763,19 @@ test('a pose step costs the same on a long chain: one matrix, no component', asy
   await page.waitForFunction(() => document.querySelector('[data-testid="one"] [data-cad-joint-handle-label]')?.textContent.startsWith('j0'));
   await page.mouse.down();
   const before = await robot.stats();
-  // The Position icon's dot turning on or off as the swing leaves or passes the default is the
-  // one render allowed beyond the host's record; read it between steps.
-  let flips = 0, marked = await robot.posedMark();
   const STEPS = 30;
   for (let step = 1; step <= STEPS; step += 1) {
     const angle = bearing + Math.sin((step / STEPS) * Math.PI * 2) * 0.6;
     await page.mouse.move(surface.x + knob.pivotX + radius * Math.cos(angle), surface.y + knob.pivotY + radius * Math.sin(angle));
     await robot.settle();
-    const now = await robot.posedMark();
-    if (now !== marked) { flips += 1; marked = now; }
   }
   await page.mouse.up();
   const moved = await robot.stats();
   // The root joint carries all 29 links below it, and still one matrix is written per step.
   assert.equal(moved.lastPoseWrites, 1, 'a step writes the one joint that moved');
   assert.ok(moved.poseWrites - before.poseWrites >= STEPS * 0.8 && moved.poseWrites - before.poseWrites <= STEPS, JSON.stringify({ before, moved }));
-  assert.ok(moved.surfaceRenders - before.surfaceRenders <= 2 + flips, `no component of the renderer renders for a pose step: ${JSON.stringify({ before, moved, flips })}`);
-  assert.ok(flips <= 4, `the dot turns only as the swing leaves and reaches the default: ${flips}`);
+  // Whether the pose is kept (not the default) is read only while Position is not the tool, so a
+  // swing past the default renders nothing either.
+  assert.ok(moved.surfaceRenders - before.surfaceRenders <= 2, `no component of the renderer renders for a pose step: ${JSON.stringify({ before, moved })}`);
   assert.deepEqual(robot.errors, []);
 });

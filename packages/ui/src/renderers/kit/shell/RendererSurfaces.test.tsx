@@ -170,7 +170,8 @@ it('a clipboard destination has no snapshot in the navbar, and Draw copies its i
   expect(navigation.mock.calls.flatMap(([actions]) => actions)).toEqual([]);
   fireEvent.click(screen.getByRole('button', { name: 'Draw' }));
   const controls = () => screen.getByRole('region', { name: 'Drawing controls' });
-  expect(within(controls()).queryByRole('button', { name: /^Copy/ })).toBeNull();
+  // Always there, disabled until there is ink.
+  expect((within(controls()).getByRole('button', { name: 'Copy Drawing' }) as HTMLButtonElement).disabled).toBe(true);
   act(() => viewport.props.drawing.onContentChange(true, 1));
   fireEvent.click(within(controls()).getByRole('button', { name: 'Copy Drawing' }));
   await waitFor(() => expect(writeImage).toHaveBeenCalledTimes(1));

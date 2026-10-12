@@ -5,7 +5,7 @@ import { emptyDrawingDocument, MAX_DRAWING_BYTES, parseDrawingScene } from '@tex
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useDrawingSession } from './session.js';
 import { DEFAULT_OVERLAY_DRAWING_COLOR, DRAWING_TOOLS, DrawingToolbar } from './toolbar.jsx';
-import type { DrawingTool } from './toolbar.jsx';
+import type { DrawingStrokeStyle, DrawingTool } from './toolbar.jsx';
 import { fillElementAt } from './fill';
 import '@excalidraw/excalidraw/index.css';
 import './styles.css';
@@ -26,6 +26,8 @@ export interface DrawingController {
   setColor(color: string): void;
   /** How heavy what is drawn next is: a shape's stroke in px (1, 2, 4); the pen takes its weight. */
   setStrokeWidth(width: number): void;
+  /** How what is drawn next is stroked: solid, dashed or dotted (the pen's freehand ink is always solid). */
+  setStrokeStyle(style: DrawingStrokeStyle): void;
   undo(): void;
   redo(): void;
   /** Undoable, unlike unmounting the editor. */
@@ -46,6 +48,7 @@ export interface DrawingEditorProps {
   /** The ink colour and stroke weight a new editor opens with (a remounted overlay keeps the last ones). */
   initialColor?: string;
   initialStrokeWidth?: number;
+  initialStrokeStyle?: DrawingStrokeStyle;
   /** The host's keyboard platform (`ViewerHost.environment.platform`): ⌘ on `darwin`, Ctrl elsewhere. */
   platform?: string;
   onReady(controller: DrawingController | null): void;
@@ -93,13 +96,13 @@ function activateTool(api: ExcalidrawImperativeAPI, tool: DrawingTool, width: nu
 }
 
 /** An editor only: no app detection, persistence, network, file dialogs or prompt routing. */
-export function DrawingEditor({ initialScene, name = 'Drawing', mode = 'canvas', toolbar = true, initialTool: initialToolProp = 'selection', initialColor: initialColorProp, initialStrokeWidth: initialStrokeWidthProp = DEFAULT_DRAWING_STROKE_WIDTH, platform, onReady, onContentChange, onHistoryChange, onToolChange, onColorChange, onViewportChange }: DrawingEditorProps) {
+export function DrawingEditor({ initialScene, name = 'Drawing', mode = 'canvas', toolbar = true, initialTool: initialToolProp = 'selection', initialColor: initialColorProp, initialStrokeWidth: initialStrokeWidthProp = DEFAULT_DRAWING_STROKE_WIDTH, initialStrokeStyle: initialStrokeStyleProp = 'solid', platform, onReady, onContentChange, onHistoryChange, onToolChange, onColorChange, onViewportChange }: DrawingEditorProps) {
   // Read once, when the editor mounts. A host that passes its live session's tool, colour and
   // weight (the CAD overlay does, so a new sketch opens on the last ones) changes them with every
   // choice; followed, they would rebuild the session below and hand the host a fresh, empty-history
   // controller mid-sketch (Undo stayed disabled after a fill, which follows choosing Fill).
-  const [{ initialTool, initialColor, initialStrokeWidth }] = useState(() => ({
-    initialTool: initialToolProp, initialColor: initialColorProp, initialStrokeWidth: initialStrokeWidthProp }));
+  const [{ initialTool, initialColor, initialStrokeWidth, initialStrokeStyle }] = useState(() => ({
+    initialTool: initialToolProp, initialColor: initialColorProp, initialStrokeWidth: initialStrokeWidthProp, initialStrokeStyle: initialStrokeStyleProp }));
   const [initialData] = useState(() => {
     const document = initialScene ? parseDrawingScene(initialScene) : emptyDrawingDocument();
     // Ink over someone else's picture cannot assume a light background.
@@ -110,6 +113,7 @@ export function DrawingEditor({ initialScene, name = 'Drawing', mode = 'canvas',
     const tool = { activeTool: initialTool === 'fill' ? { type: 'custom', customType: 'fill', locked: true, lastActiveTool: null }
       : { type: DRAWING_TOOLS.includes(initialTool) ? initialTool : 'selection', customType: null, locked: true, lastActiveTool: null } };
     return { ...document, appState: { currentItemFontFamily: 5, ...overlayInk, ...document.appState, ...tool,
+      currentItemStrokeStyle: initialStrokeStyle,
       ...(drawingStrokeWidth(initialTool, initialStrokeWidth) != null ? { currentItemStrokeWidth: drawingStrokeWidth(initialTool, initialStrokeWidth) } : {}),
       viewBackgroundColor: mode === 'overlay' ? 'transparent' : '#ffffff',
       exportBackground: mode !== 'overlay', exportWithDarkMode: false,
@@ -137,7 +141,8 @@ export function DrawingEditor({ initialScene, name = 'Drawing', mode = 'canvas',
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const liveApi = useRef<ExcalidrawImperativeAPI | null>(null);
   const root = useRef<HTMLDivElement | null>(null);
-  const session = useDrawingSession(true, { tool: initialTool, color: initialColor ?? (mode === 'overlay' ? DEFAULT_OVERLAY_DRAWING_COLOR : '#1e1e1e'), strokeWidth: initialStrokeWidth });
+  const session = useDrawingSession(true, { tool: initialTool, color: initialColor ?? (mode === 'overlay' ? DEFAULT_OVERLAY_DRAWING_COLOR : '#1e1e1e'),
+    strokeWidth: initialStrokeWidth, strokeStyle: initialStrokeStyle });
   // The weight a shape is drawn at; the pen's is derived from it (`drawingStrokeWidth`).
   const strokeWidth = useRef(initialStrokeWidth);
   const toolChange = useRef(onToolChange), colorChange = useRef(onColorChange), viewportChange = useRef(onViewportChange);
@@ -209,6 +214,7 @@ export function DrawingEditor({ initialScene, name = 'Drawing', mode = 'canvas',
         if (DRAWING_TOOLS.includes(tool)) activateTool(api, tool, strokeWidth.current);
       },
       setColor(color) { api.updateScene({ appState: { currentItemStrokeColor: color }, captureUpdate: CaptureUpdateAction.NEVER }); },
+      setStrokeStyle(style) { api.updateScene({ appState: { currentItemStrokeStyle: style }, captureUpdate: CaptureUpdateAction.NEVER }); },
       setStrokeWidth(width) {
         strokeWidth.current = width;
         const active = api.getAppState().activeTool;

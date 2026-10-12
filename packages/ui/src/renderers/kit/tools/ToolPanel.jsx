@@ -39,13 +39,14 @@ export const TOOL_PANEL_BUTTON_CLASS = "flex size-5 shrink-0 items-center justif
 const ToolPanelContext = createContext(null);
 
 /**
- * A panel's full-row action at its foot, under everything it holds: Copy under the Reference
- * (Copy All with several references) and Copy Drawing under the drawing controls. `shortcut` is the
- * key that does the same from the viewer (⌘C). A press whose `onClick` answers true says "Copied",
- * with a tick where the shortcut was, for a moment.
- * @param {{ label: string, shortcut?: string, disabled?: boolean, onClick(): unknown }} props
+ * A panel's full-row action at its foot, under everything it holds: Copy References under the
+ * Reference and Copy Drawing under the drawing controls. Where the button is too narrow for its
+ * name and the shortcut (under 9rem), it says `shortLabel` ("Copy") instead; its accessible name
+ * stays the whole label. `shortcut` is the key that does the same from the viewer (⌘C). A press
+ * whose `onClick` answers true says "Copied", with a tick where the shortcut was, for a moment.
+ * @param {{ label: string, shortLabel?: string, shortcut?: string, disabled?: boolean, onClick(): unknown }} props
  */
-export function ToolPanelFooterButton({ label, shortcut = "", disabled = false, onClick }) {
+export function ToolPanelFooterButton({ label, shortLabel = label, shortcut = "", disabled = false, onClick }) {
   const keys = shortcut ? shortcut.replace("⌘", "Meta+").replace("Ctrl+", "Control+") : undefined;
   const [done, setDone] = useState(false);
   useEffect(() => {
@@ -54,9 +55,12 @@ export function ToolPanelFooterButton({ label, shortcut = "", disabled = false, 
     return () => clearTimeout(timer);
   }, [done]);
   return <button type="button" aria-label={label} aria-keyshortcuts={keys} disabled={disabled} data-tool-panel-footer-button=""
-    className="flex h-7 w-full shrink-0 items-center justify-center gap-2 rounded-b-md border-t border-border text-tiny text-foreground hover:bg-accent/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45 disabled:opacity-50"
+    className="@container flex h-7 w-full shrink-0 items-center justify-center gap-2 rounded-b-md border-t border-border text-tiny text-foreground hover:bg-accent/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45 disabled:opacity-50"
     onClick={async () => { if (await onClick()) setDone(true); }}>
-    <span>{done ? "Copied" : label}</span>
+    {done ? <span>Copied</span> : <>
+      <span className="@max-[9rem]:hidden">{label}</span>
+      <span className="hidden @max-[9rem]:inline">{shortLabel}</span>
+    </>}
     {done ? <Check className="size-3" aria-hidden="true" /> : shortcut ? <kbd aria-hidden="true" className="font-sans text-micro text-muted-foreground">{shortcut}</kbd> : null}
   </button>;
 }

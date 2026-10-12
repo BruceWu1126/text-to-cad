@@ -225,10 +225,12 @@ async function open(options = {}) {
     // The tool stack's panels on screen, top to bottom, by their accessible names.
     stack: () => pane.locator('[data-cad-tool-stack] [data-tool-panel]').evaluateAll(panels => panels
       .filter(panel => panel.getClientRects().length > 0).map(panel => panel.getAttribute('aria-label'))),
-    // Select's modes are a menu at the navbar's right end, before Display (`SelectionModes.jsx`); the
+    // Select's modes are a menu at the end of the Features filter row (`SelectionModes.jsx`); the
     // strip opens no menu.
     chooseSelectMode: async name => {
-      await pane.locator('[data-view-controls]').getByRole('button', { name: /^Select mode: / }).click();
+      // The mode menu steps aside while the filter box has focus.
+      await page.evaluate(() => document.activeElement instanceof HTMLInputElement && document.activeElement.blur());
+      await pane.locator('[data-cad-tool-stack]').getByRole('button', { name: /^Select mode: / }).click();
       await page.locator('[role=menu][aria-label="Select mode"]').getByRole('menuitemradio', { name, exact: true }).click();
       await page.locator('[role=menu]').waitFor({ state: 'detached' });
     },
@@ -255,13 +257,15 @@ async function open(options = {}) {
 }
 
 
-test('a STEP opens in Select with the tools its sidecar earns, its Features in the tool stack and the Select modes, Display and Preview in the navbar, and paints both authored colours', async () => {
+test('a STEP opens in Select with the tools its sidecar earns, its Features in the tool stack with the Select modes, Display and Preview in the navbar, and paints both authored colours', async () => {
   const view = await open();
   const { page, pane, errors } = view;
   assert.deepEqual(await view.tools(), ['Select:true', 'Position:false', 'Animation:false', 'Draw:false', 'Measure:false', 'Explode:false', 'Clip:false'],
     'Position because the sidecar bound, Animation because it has a routine. Display is a dropdown from the navbar, not a tool');
   assert.deepEqual(await pane.locator('[data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-    ['Select mode: All', 'Display', 'Preview'], 'the view\'s controls at the navbar\'s right end: Select\'s modes, Display, then Preview');
+    ['Display', 'Preview'], 'the view\'s controls at the navbar\'s right end: Display, then Preview');
+  assert.equal(await pane.getByRole('region', { name: 'Features', exact: true }).getByRole('button', { name: 'Select mode: All', exact: true }).count(), 1,
+    'Select\'s modes end the Features filter row');
   assert.equal(await view.displayPanel().count(), 0, 'Display is never where a file opens');
   assert.equal(await pane.locator('[data-view-controls]').getByRole('button', { name: 'Preview', exact: true }).count(), 1,
     'a STEP is 3D: Preview sits in its navbar');
@@ -345,7 +349,7 @@ test('a pick names its face or edge by the id cadgen minted in the selector tabl
   assert.deepEqual(await selected(), [`${base.id}.${rim.localId}`], 'the rim edge is the table\'s row');
   // Group edges: the pick grows to the edges of the table's chain, which for a box edge is itself
   // alone (its ends each meet two edges at a right angle), however close the neighbours lie.
-  await pane.locator('[data-view-controls]').getByRole('button', { name: /^Select mode: / }).click();
+  await pane.locator('[data-cad-tool-stack]').getByRole('button', { name: /^Select mode: / }).click();
   await page.locator('[role=menu][aria-label="Select mode"]').getByRole('menuitemcheckbox', { name: 'Group edges', exact: true }).click();
   // A checkbox item keeps its menu open for the next one; Escape puts it away.
   await page.keyboard.press('Escape');
@@ -1120,8 +1124,10 @@ test('the Animation tool plays the routine in the tools view, preview leaves its
   const playing = (await arm())[1];
   await page.waitForFunction(previous => window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix[1] !== previous, playing);
 
-  // A second press puts it down: the routine stops and the model is at rest, back in Select.
+  // A second press does nothing; Select puts it down: the routine stops and the model is at rest.
   await view.tool('Animation').click();
+  assert.deepEqual(await view.stack(), ['Animation controls'], 'a press on the tool in hand does nothing');
+  await view.tool('Select').click();
   assert.deepEqual(await view.stack(), ['Features']);
   await page.waitForFunction(rest => JSON.stringify(Array.from(window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix.slice(12, 15))) === JSON.stringify(rest), restArm)
     .catch(() => {});
@@ -1488,7 +1494,7 @@ test('a click selects at once, and a double-click ends where it did when a click
   assert.equal(await page.evaluate(() => window.__selectedByProbe), true, 'the arm is selected before any double-click window could close');
   assert.deepEqual(await selection(), { parts: ['o1.2'], refs: [], isolated: [] });
   // The Reference panel's Copy, at its foot: the selection's reference.
-  await view.pane.getByRole('region', { name: 'Reference details', exact: true }).getByRole('button', { name: 'Copy', exact: true }).click();
+  await view.pane.getByRole('region', { name: 'Reference details', exact: true }).getByRole('button', { name: 'Copy References', exact: true }).click();
   await page.waitForFunction(() => window.__clipboardWrites.length === 1);
   assert.equal(await page.evaluate(() => window.__clipboardWrites[0]), '/models/hinge_block.step#o1.2');
   await page.evaluate(() => { window.__clipboardWrites = []; });
@@ -1570,7 +1576,7 @@ test('a click selects at once, and a double-click ends where it did when a click
   await settle(page);
   assert.deepEqual((await selection()).refs, both, 'an empty-space double-click keeps the selection its first click found');
   assert.equal(await copies(), 4, 'and copies nothing');
-  await view.pane.getByRole('region', { name: 'Reference details', exact: true }).getByRole('button', { name: 'Copy All', exact: true }).click();
+  await view.pane.getByRole('region', { name: 'Reference details', exact: true }).getByRole('button', { name: 'Copy References', exact: true }).click();
   await page.waitForFunction(() => window.__clipboardWrites.length === 5);
   const copiedSelection = parseCadRefToken(await page.evaluate(() => window.__clipboardWrites[4]));
   assert.equal(copiedSelection.cadPath, '/models/hinge_block.step');
@@ -1697,9 +1703,9 @@ test('a reload of the tab brings back the view — camera, Display, Clip, Explod
   assert.deepEqual(await view.rows(), rowsLeft, 'the tree comes back as it was, expanded');
   assert.deepEqual([back.selectedPartIds, back.selectedReferenceIds], [[], []], 'the selection does not');
   assert.equal(await measurements.count(), 0, 'nor the measurement');
-  // The tool in hand is Select, the default; Explode and Clip are pressed only because their
-  // restored effects are applied (an applied effect marks its tool), not because either is in hand.
-  assert.deepEqual((await view.tools()).filter(tool => tool.endsWith(':true')), ['Select:true', 'Explode:true', 'Clip:true'], 'and the tool is the default');
+  // The tool in hand is Select, the default, and it alone is lit: Explode's and Clip's restored
+  // effects are kept panels in the stack, not lit tools.
+  assert.deepEqual((await view.tools()).filter(tool => tool.endsWith(':true')), ['Select:true'], 'and the tool is the default');
   await view.tool('Measure').click();
   assert.equal((await pane.getByRole('region', { name: 'Measure controls', exact: true }).locator('[data-measure-hint]').innerText()).trim(), 'Pick two points to measure');
   await view.tool('Position').click();

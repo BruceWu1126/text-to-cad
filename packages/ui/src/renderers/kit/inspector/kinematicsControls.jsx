@@ -3,6 +3,7 @@ import { RotateCcw, Spline } from "lucide-react";
 import { Button } from "@text-to-cad/ui/primitives/button";
 import { cn } from "@text-to-cad/ui/utils";
 import { FILE_SHEET_FIELD_LABEL_CLASSES, FileSheetSelectRow } from "./FileSheet.js";
+import ToolPanel from "../tools/ToolPanel.jsx";
 
 export const NO_PRESET_VALUE = "__none__";
 export const DEFAULT_POSE_VALUE = "__default__";
@@ -34,16 +35,20 @@ export function KinematicsPoseRow({ poses = [], activeValue, onSelect, onReset }
   </div>;
 }
 
+/** The Position tool's icon: the spline. A pose that is not the default is the kept Position panel's to show. */
+export function PositionToolIcon() {
+  return <Spline className="size-3" strokeWidth={2} aria-hidden="true" />;
+}
+
 /**
- * The Position tool's icon: the spline, with a small dot at its top-left while the pose is not the
- * default one (a joint moved, or a named pose applied), so a person can see that from the strip.
+ * Position kept: while the pose is not the default and Position is not the tool, one line in the
+ * tool stack, as a kept Explode or Clip is — "Position", what the pose is (`summary`: the named
+ * pose, or "Custom"), and an X that puts the pose back to the default. A press on Position takes
+ * the tool up again, with its full panel.
  */
-export function PositionToolIcon({ custom = false }) {
-  return <span className="relative inline-flex" data-position-custom={custom ? "" : undefined}>
-    <Spline className="size-3" strokeWidth={2} aria-hidden="true" />
-    {/* The size of the spline's own end dots and in its colour: a note, not a badge. */}
-    {custom ? <span aria-hidden="true" className="absolute -left-px -top-px size-1 rounded-full bg-current" /> : null}
-  </span>;
+export function KeptPositionPanel({ summary = "Custom", onReset }) {
+  return <ToolPanel id="position-kept" title="Position" summary={summary} label="Position kept" collapsible={false}
+    closeLabel="Reset position" onClose={onReset} />;
 }
 
 /** A Position panel's Reset: in its heading, before the fold chevron. */

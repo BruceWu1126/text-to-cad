@@ -58,7 +58,7 @@ its settings are a dropdown from its button at the navbar's right end, before Pr
 (`kit/shell/DisplayPopover.jsx`), a 3D view's alone. A renderer
 builds its own list from `shell.tools.own(...)`, adding `shell.tools.draw` where it offers
 Draw and `shell.tools.animate` (null for a file with no routines) where it offers Animation,
-each declared in its `toolModes` as a mode that toggles; STEP's is in `step/StepSurface.jsx`.
+each declared in its `toolModes` as a mode (a press on the tool in hand does nothing); STEP's is in `step/StepSurface.jsx`.
 Routines play under Animation, whose panel the shell draws, and in preview, whose playbar and
 its menus the shell draws for any file with routines. Preview is not a tool: it is a button beside Display, last in the navbar. Nor is Quick Edit: it is a STEP file's box at the top-right, there while something is picked or drawn. `createToolModes({ defaultMode, modes })`
 answers what a press does (`next`), what a saved tab may record (`persisted`) and
@@ -150,7 +150,7 @@ calls one hook; the shell owns the rest.
 | module | what it is |
 | --- | --- |
 | `useRendererShell.js` | The hook. Per-file state through the host, the Display settings store and the content of Display's dropdown (`shell.display`), tool modes (Draw and Animation are the strip tools the shell itself owns; Display, Preview and preview's menus are the frame's; `toolModes` is omitted altogether by a renderer with no tools of its own), the tool stack's layout (a viewer preference: `services.preferences.toolStack` — the resizable panels' sizes, the folded panels, the closed tree — changed by one patch per gesture, `frame.changeToolStack`), prompt snapshots (the host's `captureRequest`), the clipboard screenshot (Draw's Copy), what Quick Edit takes from the view (its file, how a copied prompt spells a path, the view as a picture, the viewer's Escape), the one preview state (`shell.previewing` / `setPreviewing`, from `usePreviewState`; every way in and out goes through `setPreviewing`, which saves the tools view's routine on the way in, starts preview's at rest — playing under Autoplay — and hands the saved one back on the way out) and preview's Autoplay (`shell.autoplay`, a viewer preference), alerts, shortcuts, and the live command surface. It owns no zoom control: the shell has none. |
-| `RendererShell.jsx` | The frame: viewport box, tool strip (the renderer's tools) at the top-left, the tool stack under the strip (`ToolStack`: the Drawing panel while Draw is up, with Copy at its foot once there is ink, or the Animation panel while Animation is (`AnimationPanel`), then the renderer's `toolPanels`; the column stops above the cube, `VIEWPORT_STACK_BOTTOM`), Quick Edit at the top-right, the view cube in the bottom-left corner, a 3D view's controls portaled into the navbar's box for them (`view.navbarSlot`, `data-view-controls`: the renderer's `navbarControls` — a STEP's Select modes while Select is the tool — then Display, the perspective box, whose dropdown is `DisplayPopover` over `frame.display` and opens down, then Preview, the full-screen icon of two diagonal arrows), preview's controls (`PreviewChrome`: at the view's top-right, on a row of the navbar's geometry, Orbit — `OrbitMenu` — then Display, the same `DisplayPopover`, then the way out, so Display and the way out land where Display and Preview sat; under the model, the playbar for a file with routines, its Routines at its left end and its Playback settings at its right, and nothing for a static one), preview as fullscreen (`onFullscreenChange`: the navbar steps aside), the render profile (`kit/viewport/renderProfile.js`: preview draws the scene one quality tier up, keeps its pixel ratio while orbiting and suspends the tool effects), stopping the routine (`animation.onRelease`) once neither preview nor the Animation tool holds it, the loading overlay, the update status centred at the top of the viewport, and the alert card. While the model loads, and once a load has failed in a way the model did not survive (an alert that cannot be put away), it draws none of its controls and no update status: only the load, or the card saying why; in a compact host (`appearance.compact`), none at all: the model alone. Nothing sits at the bottom centre but preview's playbar, on the `--cad-viewport-bottom-center` line. It takes `references` (what is selected, in the prompt grammar: what Quick Edit attaches and counts) and `copySelection` (what ⌘C / Ctrl+C copies while the renderer's own tool is up and something is selected; null when nothing is). One DOM structure (`data-slot="cad-file-view"`, `data-cad-surface`, `data-cad-scene-backdrop`, `data-cad-toolbar`, `data-cad-tool-stack`, `data-tool-panel`) for every renderer. `frameProvider` wraps the WHOLE frame in the renderer's own context — the tool stack as well as the viewport, because both read it — and `onCanvasPointerDown` is a press that landed on the model, for a renderer with something to put down when the person reaches for it. The frame focuses itself on such a press either way. |
+| `RendererShell.jsx` | The frame: viewport box, tool strip (the renderer's tools) at the top-left, the tool stack under the strip (`ToolStack`: the Drawing panel while Draw is up, with Copy at its foot once there is ink, or the Animation panel while Animation is (`AnimationPanel`), then the renderer's `toolPanels`; the column stops above the cube, `VIEWPORT_STACK_BOTTOM`), Quick Edit at the top-right, the view cube in the bottom-left corner, a 3D view's controls portaled into the navbar's box for them (`view.navbarSlot`, `data-view-controls`: Display, the perspective box, whose dropdown is `DisplayPopover` over `frame.display` and opens down, then Preview, the full-screen icon of two diagonal arrows), preview's controls (`PreviewChrome`: at the view's top-right, on a row of the navbar's geometry, Orbit — `OrbitMenu` — then Display, the same `DisplayPopover`, then the way out, so Display and the way out land where Display and Preview sat; under the model, the playbar for a file with routines, its Routines at its left end and its Playback settings at its right, and nothing for a static one), preview as fullscreen (`onFullscreenChange`: the navbar steps aside), the render profile (`kit/viewport/renderProfile.js`: preview draws the scene one quality tier up, keeps its pixel ratio while orbiting and suspends the tool effects), stopping the routine (`animation.onRelease`) once neither preview nor the Animation tool holds it, the loading overlay, the update status centred at the top of the viewport, and the alert card. While the model loads, and once a load has failed in a way the model did not survive (an alert that cannot be put away), it draws none of its controls and no update status: only the load, or the card saying why; in a compact host (`appearance.compact`), none at all: the model alone. Nothing sits at the bottom centre but preview's playbar, on the `--cad-viewport-bottom-center` line. It takes `references` (what is selected, in the prompt grammar: what Quick Edit attaches and counts) and `copySelection` (what ⌘C / Ctrl+C copies while the renderer's own tool is up and something is selected; null when nothing is). One DOM structure (`data-slot="cad-file-view"`, `data-cad-surface`, `data-cad-scene-backdrop`, `data-cad-toolbar`, `data-cad-tool-stack`, `data-tool-panel`) for every renderer. `frameProvider` wraps the WHOLE frame in the renderer's own context — the tool stack as well as the viewport, because both read it — and `onCanvasPointerDown` is a press that landed on the model, for a renderer with something to put down when the person reaches for it. The frame focuses itself on such a press either way. |
 | `ShellViewport.jsx` | The three.js viewport around ONE kit scene: `useViewerRuntime`, `useViewportCamera`, the look (rig or studio, environment, background, floor, grid, axes), the Draw overlay and view lock, the view cube (bottom-left; not mounted in preview, `previewMode`, while the model loads, or when the shell says so, `viewCube`), frame presentation and the queued view-settings handshake. Its children may be a function of the viewport (`{ runtimeRef, hostRef, mountRef, viewerReadyTick, commitScene, syncSceneBounds }`), which is how a renderer mounts its own overlay or pointer pick. A scene that changes IN PLACE (it arrives in pieces, swaps its detail, is rebuilt under one identity) calls `commitScene()` from its own effect: the viewport re-reads what it placed, fits the stage and the depth range and applies the framing rules THEN, because a child's effects run before the viewport's own adoption effect. The one thing a commit never does ahead of the viewport is FRAME under a camera that is about to change: when the same render also changed the lens, the projection or the viewing mode, the stage is adopted at once and the framing follows once the camera has been given those props (a stored camera applied under the old projection and then converted comes out about a sixth smaller). A scene is framed once, on its `restBounds`; a STEP package's is the box its `assembly.json` declares (`bbox`), final from the first publish. A scene that says `complete: false` (a package that declares no box) is framed on what has arrived and once more when it is whole, unless the camera on screen is by then the person's: one they dragged, wheeled, turned by keys or the cube, zoomed to a selection or set through `setCamera` during the current mount, or one a reload restored from the file's view. A rebuild of the open file never re-frames; only Zoom to fit does. A file opened again after the tab left it starts with fresh framing, since leaving it dropped its view. `preserveInteractionPixelRatio` keeps the idle pixel ratio while the camera moves (a scene drawn with hairlines, and preview's orbit: `renderProfileKeepsPixelRatio`), and `runtimeLifecycle` (`onRelease(runtime, { handoff })` while the WebGL renderer is still alive, `onContextLost()`, `onInitializationError(error)`) is for a renderer that hangs its own objects or in-flight work on the runtime. `syncSceneBounds()` re-fits lighting, shadows and the floor's height to a scene that moved its own bounds, with no React render and no reframe; a sync that finds the bounds (and every setting the fit reads) as they were refits nothing and keeps the shadow maps (`look/stageFollow.js`). What is SIZED stays sized from the rest placement, in Inspect and in Render alike: the grid and stage (`sceneRadiusForBounds` on `restBounds`) and the Render studio's floor plane (`applyPhotographicStudio`'s `groundBounds`), so a pose or a playing routine never rescales or slides the ground under the model; `zoomToBounds(bounds)` frames part of the scene. Read-only test seams: `window.__cadCamera()` (the live camera, its depth range included) and `window.__cadStage()` (the ground's radius, the bounds the stage is fitted to, the floor's height, the studio floor's size and centre). |
 | `fileView.js` | The file's view `{ version, camera, display, playback, renderer }`, read forgivingly and written exactly: the camera (restored in place of the open-time fit; null fits), the Display settings, preview's settings, Orbit's and the playbar's (`tools/playbar/playbackPreferences.js`), and the renderer's own slices, each `{ signature, value }` and restored only under the signature the renderer declares now (`readFileView(raw, signatures)`); the camera, the display and the playback are always kept. The host keys it `[file path, renderer id]` in the tab store, which keeps it for the file on screen alone. Not in it: the tool in hand, a selection, measurements, ink, preview, a routine's time — every open starts those afresh. |
 | `liveBinding.ts` | `attachLiveBinding`: the live command surface. Base commands (`readState`, `setCamera`, `resetCamera`, `setDisplaySettings`, `setRenderMode`, `capture`) mean the same for every renderer; a renderer ADDS commands by name and DECLINES the known host commands (`HOST_LIVE_COMMANDS`) that make no sense for it with the sentence the caller reads. Binding fails when a renderer does neither. |
@@ -184,8 +184,7 @@ shell.syncSceneBounds();         // the scene moved its bounds (a pose): the sta
 shell.scheduleStateSave();       // a slice changed: write the view soon, and on unmount
 shell.playback; shell.setPlayback(patch); // the file's: orbit and its speed, Autoplay, the tools view's chosen Speed and Loop
 shell.routinePlayback; shell.chooseRoutinePlayback(patch); // Speed and Loop in the mode on screen: preview's are its own, forgotten on exit
-// The shell adds Display and Preview (a `previewable` view's, in the navbar, after the renderer's
-// `navbarControls`), preview's corner (Orbit, Display, Exit preview) and playbar (Routines, the
+// The shell adds Display and Preview (a `previewable` view's, in the navbar), preview's corner (Orbit, Display, Exit preview) and playbar (Routines, the
 // transport, Playback settings), and the panels of its own tools (Draw's, Animation's).
 const tools = [shell.tools.own({ id, label, icon }), shell.tools.draw].filter(Boolean); // [] for camera-only formats: no strip
 // toolPanels: the renderer's ToolPanels, shown or `hidden` by the tool they belong to
@@ -208,7 +207,7 @@ Links is `closable`: its X closes it, and the tool that names it as its `panel` 
 carries a corner mark until a press on it, while it is up, opens the tree again; the person's
 closing or opening is kept by `id` as well, for every file, and until then Links starts open,
 and closed on a phone (`kit/tools/toolStackLayout.js`). A STEP's Features has no X: an
-assembly always shows it under Select, and a part file has none. A pick scrolls its row into
+assembly always shows it under Select, and a part file has its Select card instead. A pick scrolls its row into
 view in the tree, which is on screen whenever Select is.
 
 A renderer whose model moves outside React (a robot's pose) keeps that state in
@@ -982,16 +981,19 @@ Shift toggles the resulting group, and Copy Reference copies its canonical edge 
 
 A STEP's panels in the tool stack (`components/workbench/StepPanels.js`), in order:
 
-- **Features** (Select, an assembly's): the `Filter…` box as its top row, then the model tree
-  (`ModelingTree.jsx`). It gives way first on a short viewer and scrolls inside itself. It has
-  no X and does not fold: an assembly shows it whenever Select is the tool, on a phone too. A
-  part file has none, its one row being all there would be.
+- **Features** (Select, an assembly's): the `Filter…` box as its top row, Select's mode menu
+  at its end, then the model tree (`ModelingTree.jsx`). It gives way first on a short viewer
+  and scrolls inside itself. It has no X and does not fold: an assembly shows it whenever
+  Select is the tool, on a phone too.
+- **Select** (Select, a part file's, while nothing is picked): its tree would be its one row,
+  so a fixed card in its place, headed "Select" with the mode menu, and the hint "Select a
+  face or edge" (`data-select-hint`); no filter.
 - **Reference** (Select, with a selection): headed by the reference being read
   (`StepReferenceSection.js`'s `useStepReference`: its label, else its part as the tree
   names it and its kind — `base · face 3`; with several, a picker with `i/N`) and an X
   that clears the selection; its rows are the browsed reference's key measurements alone,
   compact and in the UI font. A resizable panel of its own, apart from the tree (`StepPanels`
-  draws it, a part file's too): it opens at the one width, capped at the stack's height, and
+  draws it; in a part file it takes the Select card's place, the mode menu in its heading): it opens at the one width, capped at the stack's height, and
   its corner grip sizes it.
 - **Position** (Position): named poses, joint values and Reset, when the file has
   kinematics.
@@ -999,9 +1001,9 @@ A STEP's panels in the tool stack (`components/workbench/StepPanels.js`), in ord
 Each is `hidden`, not unmounted, while its tool is not up.
 
 **Select modes.** Select's mode menu (`SelectModeMenu` in `SelectionModes.jsx`, over
-`ToolModeMenu` with `navbar`), at the navbar's right end immediately before Display while
-Select is the tool (`StepSurface` hands it to `RendererShell` as `navbarControls`), a part
-file's too, holds four exclusive modes — All, Parts (assemblies only), Faces, Edges
+`ToolModeMenu`), at the end of the Features filter row, or in a part file's Select card's
+heading and the Reference's that takes its place (`StepSurface` hands it to `useStepPanels`
+as `selectModeMenu`), holds four exclusive modes — All, Parts (assemblies only), Faces, Edges
 (`workbench/selectionFilter.js`'s `SELECT_MODES`), each row its mode's glyph at full
 size — whose composite the strip's button shows (`SelectModeIcon`: the pointer badged with
 the mode's glyph; Measure's `MeasureModeIcon` is the ruler badged with its snapping mode,
@@ -1150,11 +1152,10 @@ Under the browsed reference's name, its rows are its key measurements alone
 (`StepReferenceSection.js`): a face's area and a round face's radii, an edge's
 length, radii and an arc's sweep, a part's size and volume, a subassembly's part
 count, size and volume — no type, canonical ID, centre, normal, component or
-source material row. Rows share a 64px label column, an 8px gutter and 11px
-text. The pane's rows have no copy or dimension-preview
-buttons: copying is the heading's Copy, the full-row **Copy** at the panel's foot
-(**Copy All** with several references, with the ⌘C / Ctrl+C hint; shown only for a
-resolved selection) and the tree and viewport menus, and measurement previews are
+source material row. Each row is one line in 11px text: its label at the left, as
+wide as its words, and its value at the right, 12px apart at least. The pane's rows have no copy or dimension-preview
+buttons: copying is the heading's Copy, the full-row **Copy References** at the panel's foot
+(with the ⌘C / Ctrl+C hint; shown only for a resolved selection) and the tree and viewport menus, and measurement previews are
 the Measure tool's. There is no source feature view.
 
 Tool order, tool panels, persistent panels and cleanup policies are defined in
@@ -1272,8 +1273,8 @@ routine's. Each format has one write path (`write` in `robot/poseStore.js`;
 
 Routines play under the Animation tool and in preview. **Animation** is a shell tool, as
 Draw is (`shell.tools.animate`, `SHELL_TOOL.ANIMATE`; null for a file with no routines),
-which a renderer puts on its strip and declares in its `toolModes` as a mode that
-toggles; STEP's follows Position. A renderer whose one tool it is (a GLB's) declares it as
+which a renderer puts on its strip and declares in its `toolModes` as a mode; STEP's
+follows Position. A renderer whose one tool it is (a GLB's) declares it as
 its DEFAULT mode instead and puts nothing on the strip: the tool is up from the open, its
 panel has no X, and the open is when it is taken up. Its panel leads the stack (`kit/tools/playbar/AnimationPanel.jsx`,
 drawn by `RendererShell.jsx`), headed as Measure's is: "Animation", its settings

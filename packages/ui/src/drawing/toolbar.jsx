@@ -59,6 +59,18 @@ export const DRAWING_STROKE_WIDTHS = [
   { value: 2, label: 'Medium' },
   { value: 4, label: 'Bold' },
 ];
+/** @typedef {'solid' | 'dashed' | 'dotted'} DrawingStrokeStyle */
+// How a shape's line is stroked; the pen's freehand ink is always solid.
+/** @type {readonly { value: DrawingStrokeStyle, label: string }[]} */
+export const DRAWING_STROKE_STYLES = [
+  { value: 'solid', label: 'Solid' },
+  { value: 'dashed', label: 'Dashed' },
+  { value: 'dotted', label: 'Dotted' },
+];
+// The style as a 2px line across a button, on the diagonal (the weight is the level line beside it), dashed or dotted as it draws.
+const STYLE_DASHES = Object.freeze({ solid: undefined, dashed: '4 2.5', dotted: '0.01 3.5' });
+const styleGlyph = style => <svg aria-hidden="true" viewBox="0 0 12 12" className="size-3" fill="none" stroke="currentColor"
+  strokeWidth="2" strokeLinecap="round"><path d="M2 10L10 2" strokeDasharray={STYLE_DASHES[style]} /></svg>;
 // The weight as a line across a button: 1px, 2px or 3px drawn, whatever it draws on the model.
 const strokeGlyph = width => <span aria-hidden="true" className="block w-3 rounded-full bg-current" style={{ height: `${width === 1 ? 1 : width === 2 ? 2 : 3}px` }} />;
 
@@ -70,12 +82,12 @@ const swatch = color => ({ backgroundColor: color, boxShadow: 'inset 0 0 0 1px c
 /**
  * `layout="panel"`: the controls of a panel as wide as its column — the tools, wrapping to the
  * width they are given, then a rule, then the settings on a row of their own: colour, stroke width,
- * undo, redo and clear. Both rows share one column grid, so their buttons line up.
+ * line style, undo, redo and clear. Both rows share one column grid, so their buttons line up.
  * @param {{ drawing: import('./session.js').DrawingSession, className?: string, layout?: 'toolbar' | 'panel' }} props
  */
 export function DrawingToolbar({ drawing, className = '', layout = 'toolbar' }) {
-  // Which of the two pickers is open under the buttons, if either: the colours or the weights.
-  const [choosing, setChoosing] = useState(/** @type {'' | 'color' | 'width'} */ (''));
+  // Which of the pickers is open under the buttons, if any: the colours, the weights or the line styles.
+  const [choosing, setChoosing] = useState(/** @type {'' | 'color' | 'width' | 'style'} */ (''));
   const choosingColor = choosing === 'color';
   const disabled = !drawing.ready;
   // No tooltips: over a canvas they cover the ink being pointed at. Every button keeps its accessible name.
@@ -90,6 +102,9 @@ export function DrawingToolbar({ drawing, className = '', layout = 'toolbar' }) 
     </ToolbarButton>
     <ToolbarButton tooltip={false} label="Stroke width" disabled={disabled} active={choosing === 'width'} aria-expanded={choosing === 'width'} onClick={() => setChoosing(open => open === 'width' ? '' : 'width')}>
       {strokeGlyph(drawing.strokeWidth ?? 2)}
+    </ToolbarButton>
+    <ToolbarButton tooltip={false} label="Line style" disabled={disabled} active={choosing === 'style'} aria-expanded={choosing === 'style'} onClick={() => setChoosing(open => open === 'style' ? '' : 'style')}>
+      {styleGlyph(drawing.strokeStyle ?? 'solid')}
     </ToolbarButton>
     <ToolbarButton tooltip={false} label="Undo" disabled={disabled || !drawing.canUndo} onClick={() => drawing.undo()}><Undo2 className="size-3" strokeWidth={2} aria-hidden="true" /></ToolbarButton>
     <ToolbarButton tooltip={false} label="Redo" disabled={disabled || !drawing.canRedo} onClick={() => drawing.redo()}><Redo2 className="size-3" strokeWidth={2} aria-hidden="true" /></ToolbarButton>
@@ -108,6 +123,13 @@ export function DrawingToolbar({ drawing, className = '', layout = 'toolbar' }) 
       aria-checked={(drawing.strokeWidth ?? 2) === value} active={(drawing.strokeWidth ?? 2) === value}
       onClick={() => { drawing.selectStrokeWidth?.(value); setChoosing(''); }}>
       {strokeGlyph(value)}
+    </ToolbarButton>)}
+  </div> : choosing === 'style' && !disabled ? <div role="radiogroup" aria-label="Line style"
+    className={panel ? "mt-1 flex flex-wrap gap-0.5" : SURFACE}>
+    {DRAWING_STROKE_STYLES.map(({ value, label }) => <ToolbarButton key={value} tooltip={false} label={label} role="radio"
+      aria-checked={(drawing.strokeStyle ?? 'solid') === value} active={(drawing.strokeStyle ?? 'solid') === value}
+      onClick={() => { drawing.selectStrokeStyle?.(value); setChoosing(''); }}>
+      {styleGlyph(value)}
     </ToolbarButton>)}
   </div> : null;
   if (panel) {

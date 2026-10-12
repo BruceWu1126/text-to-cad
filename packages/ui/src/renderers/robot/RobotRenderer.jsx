@@ -10,7 +10,14 @@ import { usePreviewState, useRendererShell } from "../kit/shell/useRendererShell
 import { failureAlert } from "../kit/status/loadAlerts.js";
 import JointHandleOverlay from "../kit/tools/pose/JointHandleOverlay.jsx";
 import ToolPanel from "../kit/tools/ToolPanel.jsx";
-import { MotionResetButton, PositionToolIcon, positionValuesAreDefault } from "../kit/inspector/kinematicsControls.jsx";
+import { KeptPositionPanel, MotionResetButton, PositionToolIcon, positionValuesAreDefault } from "../kit/inspector/kinematicsControls.jsx";
+
+/** What a kept robot pose is: its group state's name where it is at one, otherwise Custom. */
+function keptPoseLabel(pose) {
+  const { groupStateId } = pose.getSnapshot();
+  const state = pose.groupStates.find(candidate => candidate.id === groupStateId);
+  return String(state?.label || state?.name || "").trim() || "Custom";
+}
 import { PointerPick } from "../kit/tools/select/usePointerPick.js";
 import { useDeclinedSelectReference, useWorkspaceDocument, workspaceLoadAlert } from "../workspace/useWorkspaceDocument.js";
 import PositionControls from "./PositionControls.jsx";
@@ -211,17 +218,20 @@ function RobotSurface({ view, data }) {
 
   const modelKey = document.modelKey;
 
-  // Whether the pose is not the opening one, for the dot on the Position icon: a boolean read off
-  // the pose store, so moving a control re-renders this only when it flips.
+  // Whether the pose is not the opening one, for the kept Position panel: a boolean read off the
+  // pose store, so moving a control re-renders this only when it flips.
   const noPose = useCallback(() => () => {}, []);
+  // Read only while Position is not the tool (the kept line's case), so a pose step under the tool
+  // renders nothing here even as it swings past the default.
   const poseCustom = useSyncExternalStore(pose ? pose.subscribe : noPose,
-    () => Boolean(pose) && !positionValuesAreDefault(pose.getSnapshot().values, pose.defaults));
+    () => !poseActive && Boolean(pose) && !positionValuesAreDefault(pose.getSnapshot().values, pose.defaults));
   // Position is offered where a control can be driven; until the robot has loaded that is not
   // known, and it is shown, idle, meanwhile.
   const tools = [
     // Links closes by its X; a press on Select while it is the tool opens it again.
     shell.tools.own({ id: ROBOT_TOOL.SELECT, label: "Select", icon: SELECT_ICON, panel: LINKS_PANEL }),
-    !robot || posable ? shell.tools.own({ id: ROBOT_TOOL.POSE, label: "Position", icon: <PositionToolIcon custom={poseCustom} />,
+    !robot || posable ? shell.tools.own({ id: ROBOT_TOOL.POSE, label: "Position", icon: <PositionToolIcon />,
+      // Lit while it is the tool alone: a pose it set is kept in the stack.
       // Its panel is in the tool stack for as long as it is the tool.
       onSelect: () => { if (!poseActive) selectTool(ROBOT_TOOL.POSE); } }) : null
   ].filter(Boolean);
@@ -233,12 +243,14 @@ function RobotSurface({ view, data }) {
     {kind === "sdf" ? <ToolPanel id="sdf" title="SDF" label="SDF" fit="details" defaultCollapsed hidden={!linksShown}>
       <SdfSection info={robot?.robot?.sdf || null} />
     </ToolPanel> : null}
-    {/* Headed "Position" with its Reset; sized like the tree: its content's height, up to the stack's. */}
-    {/* Its X puts Position down, back to Select (a robot's default tool); the pose stays. */}
+    {/* Headed "Position" with its Reset; sized like the tree: its content's height, up to the
+        stack's. No X: Select puts Position down, and the pose stays. */}
     {posable && pose ? <ToolPanel id="position" title="Position" actions={<MotionResetButton onReset={pose.reset} />} label="Position controls"
-      fit="details" resizable collapsible={false} onClose={shell.selectDefaultTool} closeLabel="Close position" hidden={!poseActive}>
+      fit="details" resizable collapsible={false} hidden={!poseActive}>
       <PositionControls key={robot.revision} pose={pose} />
     </ToolPanel> : null}
+    {/* A pose that is not the default, kept while Position is not the tool: one line, its X the Reset. */}
+    {posable && pose && poseCustom && !poseActive && !shell.previewing ? <KeptPositionPanel summary={keptPoseLabel(pose)} onReset={pose.reset} /> : null}
   </>;
 
   return <RendererShell shell={shell} tools={tools} toolPanels={toolPanels}

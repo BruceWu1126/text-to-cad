@@ -225,8 +225,9 @@ specification.
 The web host owns URL/history, the tab's persistence, appearance, version links
 and native service adapters. Shared renderers own all model interaction. STEP and
 robots open in Select, whose Features (an assembly's; Links for a robot) panel hangs
-under the toolbar with the rest of the tool stack, and whose modes a STEP offers at the
-navbar's right end, before Display; Position's panel replaces it while Position is the
+under the toolbar with the rest of the tool stack, its modes a menu at the end of its filter row (a STEP part
+file has a Select card in the tree's place, the Reference taking its place once something is
+picked); Position's panel replaces it while Position is the
 tool, and the Animation tool's (a STEP with routines) while that is. The file's name in
 the navbar opens the explorer.
 STEP and robot files have a top-left toolbar; GLB, STL and 3MF have none, and a GLB with

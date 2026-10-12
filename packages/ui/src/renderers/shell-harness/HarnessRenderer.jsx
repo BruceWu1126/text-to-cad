@@ -31,11 +31,11 @@ import ToolPanel, { ToolPanelClose } from "../kit/tools/ToolPanel.jsx";
 
 // Draw and nothing else: with no tool taken up, "" is the mode, exactly as the
 // shell records for a renderer that hands over no tools at all.
-const HARNESS_TOOL_MODES = createToolModes({ defaultMode: "", modes: { [SHELL_TOOL.DRAW]: { toggles: true } } });
+const HARNESS_TOOL_MODES = createToolModes({ defaultMode: "", modes: { [SHELL_TOOL.DRAW]: {} } });
 // A file with a tool stack (`panel*.harness`) opens in Select, as STEP and robots do: the tool
 // whose tree a person can close, and whose press while it is up opens it again.
 const SELECT_TOOL = "select";
-const PANEL_TOOL_MODES = createToolModes({ defaultMode: SELECT_TOOL, modes: { [SELECT_TOOL]: {}, [SHELL_TOOL.DRAW]: { toggles: true } } });
+const PANEL_TOOL_MODES = createToolModes({ defaultMode: SELECT_TOOL, modes: { [SELECT_TOOL]: {}, [SHELL_TOOL.DRAW]: {} } });
 const LIVE = Object.freeze({ declined: {
   select: "The shell harness has nothing to select: it draws one triangle and reads no file.",
   clearSelection: "The shell harness has no selection to clear."

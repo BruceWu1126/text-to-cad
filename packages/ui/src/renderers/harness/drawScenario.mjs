@@ -67,13 +67,15 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   await menu.waitFor();
   assert.equal(await tool('Pen').getAttribute('aria-pressed'), 'true', 'Draw opens on the pen');
   // The panel's tools read left to right: the two ways of moving around what was drawn,
-  // then the marks; then, with no rule between, the colour and weight they are made in, undo/redo and Clear.
+  // then the marks; then, with no rule between, the colour, weight and line style they are made in, undo/redo and Clear.
   assert.deepEqual(await menu.getByRole('group', { name: 'Drawing tools' }).getByRole('button')
     .evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
   ['Select and move drawings', 'Pan view', 'Pen', 'Line', 'Arrow', 'Rectangle', 'Ellipse', 'Text', 'Fill area', 'Eraser']);
   assert.deepEqual(await menu.getByRole('group', { name: 'Drawing settings' }).getByRole('button')
     .evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-  ['Color', 'Stroke width', 'Undo', 'Redo', 'Clear drawing']);
+  ['Color', 'Stroke width', 'Line style', 'Undo', 'Redo', 'Clear drawing']);
+  // Copy Drawing is always there, disabled until there is ink.
+  assert.equal(await menu.getByRole('button', { name: 'Copy Drawing', exact: true }).isDisabled(), true, 'no ink: nothing to copy');
   assert.equal(await pane.locator('.layer-ui__wrapper').isVisible(), false, 'the SDK has no controls of its own here');
   // Clear of the tool stack at the overlay's left, where the Drawing panel sits.
   const box = await pane.locator('[data-cad-drawing-overlay]').boundingBox();
@@ -134,7 +136,9 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   // Sticky tools: a rectangle is followed by a rectangle.
   await choose('Rectangle');
   await drag(at(120, 220), at(300, 360));
-  assert.equal(await draw.locator('[data-drawing-tool]').getAttribute('data-drawing-tool'), 'rectangle');
+  // The strip's Draw button stays the pencil, whatever drawing tool is in hand.
+  assert.equal(await draw.locator('svg.lucide-pencil').count(), 1, 'Draw is the pencil on the strip');
+  assert.equal(await menu.getByRole('button', { name: 'Copy Drawing', exact: true }).isDisabled(), false, 'ink: Copy Drawing is live');
   // Color and weight are for what comes next; the red ink stays red. Choosing them never
   // costs the sketch its history (each choice used to hand the panel a fresh, empty one).
   await choose('Color');
@@ -178,7 +182,7 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   };
   await choose('Fill area');
   await fillsInside();
-  assert.equal(await draw.locator('[data-drawing-tool]').getAttribute('data-drawing-tool'), 'fill');
+  assert.equal(await draw.locator('svg.lucide-pencil').count(), 1, 'still the pencil on the strip');
 
   assert.equal(await quickEdit.getByRole('textbox').inputValue(), 'Add a boss where the ink is.', 'the note kept Quick Edit open while the sketch went on');
 
@@ -203,7 +207,8 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   await quickEdit.waitFor({ state: 'detached' });
   assert.equal((await ink()).ink, 0, 'the sketch went with the note');
 
-  // Leaving Draw ends the session and the sketch with it; the tool and colour in hand wait for the next.
+  // Leaving Draw ends the session and the sketch with it, and puts the pencil back in hand; the colour
+  // and weight wait for the next.
   await pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button', { name: 'Select', exact: true }).click();
   await pane.locator('[data-cad-drawing-overlay]').waitFor({ state: 'detached' });
   assert.equal(await page.getByRole('group', { name: 'Drawing tools' }).count(), 0, 'its panel went with it');
@@ -215,15 +220,16 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   await menu.waitFor();
   // Its history too: nothing to undo, redo or clear.
   for (const name of ['Undo', 'Redo', 'Clear drawing']) assert.equal(await tool(name).isDisabled(), true, `${name} starts disabled`);
-  assert.equal(await tool('Fill area').getAttribute('aria-pressed'), 'true', 'with the tool it was left on');
-  assert.equal(await draw.locator('[data-drawing-tool]').getAttribute('data-drawing-tool'), 'fill');
+  assert.equal(await tool('Pen').getAttribute('aria-pressed'), 'true', 'back on the pen');
+  assert.equal(await draw.locator('svg.lucide-pencil').count(), 1);
   await choose('Color');
   assert.equal(await menu.getByRole('radio', { name: 'Neon green', exact: true }).getAttribute('aria-checked'), 'true', 'and its colour');
   await choose('Color');
   await choose('Stroke width');
   assert.equal(await menu.getByRole('radio', { name: 'Bold', exact: true }).getAttribute('aria-checked'), 'true', 'and its stroke width');
   await choose('Stroke width');
-  // The tool it reopened on works, and the new sketch keeps a history of its own.
+  // Fill still works, and the new sketch keeps a history of its own.
+  await choose('Fill area');
   await page.mouse.click(...at(210, 290));
   assert.equal((await ink()).ink, 0, 'a fill with no ink around it adds nothing');
   await choose('Rectangle');

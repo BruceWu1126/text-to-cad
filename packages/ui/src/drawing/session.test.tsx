@@ -26,23 +26,26 @@ it('is the toolbar\'s view of the mounted editor and its only way to drive it', 
   expect(session.result.current).toMatchObject({ tool: 'rectangle', color: '#39ff14' });
 });
 
-it('keeps nothing of a sketch once Draw is left, but keeps its tool, colour and stroke width for the next', () => {
+it('keeps nothing of a sketch once Draw is left and goes back to its first tool, but keeps its colour, stroke width and line style for the next', () => {
   const session = renderHook(({ active }) => useDrawingSession(active, CAD), { initialProps: { active: true } });
-  const controller = { ...editor(), setStrokeWidth: vi.fn() };
+  const controller = { ...editor(), setStrokeWidth: vi.fn(), setStrokeStyle: vi.fn() };
   expect(session.result.current.strokeWidth).toBe(2);
   act(() => { session.result.current.onReady(controller); session.result.current.onToolChange('text'); session.result.current.onColorChange('#ffffff');
-    session.result.current.selectStrokeWidth(4); session.result.current.onContentChange(true); });
+    session.result.current.selectStrokeWidth(4); session.result.current.selectStrokeStyle('dashed'); session.result.current.onContentChange(true); });
   expect(controller.setStrokeWidth).toHaveBeenCalledWith(4);
+  expect(controller.setStrokeStyle).toHaveBeenCalledWith('dashed');
   expect(session.result.current.strokeWidth).toBe(4);
   session.rerender({ active: false });
-  expect(session.result.current).toMatchObject({ ready: false, tool: 'text', color: '#ffffff', strokeWidth: 4, hasContent: false, canUndo: false, canRedo: false });
+  expect(session.result.current).toMatchObject({ ready: false, tool: 'freedraw', color: '#ffffff', strokeWidth: 4, strokeStyle: 'dashed',
+    hasContent: false, canUndo: false, canRedo: false });
   act(() => session.result.current.clear());
   expect(controller.clear).not.toHaveBeenCalled();
-  // The editor releasing its controller on unmount is the same ending.
+  // The editor releasing its controller on unmount while the session stays up (a model update)
+  // keeps the tool in hand too.
   session.rerender({ active: true });
-  act(() => session.result.current.onReady(controller));
+  act(() => { session.result.current.onReady(controller); session.result.current.onToolChange('text'); });
   act(() => session.result.current.onReady(null));
-  expect(session.result.current).toMatchObject({ ready: false, tool: 'text', color: '#ffffff', strokeWidth: 4 });
+  expect(session.result.current).toMatchObject({ ready: false, tool: 'text', color: '#ffffff', strokeWidth: 4, strokeStyle: 'dashed' });
 });
 
 it('does not re-render the viewer for reports that change nothing', () => {

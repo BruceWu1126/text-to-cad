@@ -116,7 +116,6 @@ async function openRobot() {
     stack: () => [...pane.querySelectorAll('[data-cad-tool-stack] [data-tool-panel]')]
       .filter(panel => !panel.closest('[hidden]')).map(panel => panel.getAttribute('aria-label')),
     knobs: () => pane.querySelectorAll('[data-cad-joint-handles]').length,
-    posedMark: () => robot.tool('Position').querySelectorAll('[data-position-custom]').length,
     jointField: (name: string) => within(pane).getByLabelText(`${name} value in deg`) as HTMLInputElement,
     position: () => within(pane.querySelector('[data-tool-panel][aria-label="Position controls"]') as HTMLElement),
     open: (name: string) => fireEvent.click(robot.tool(name)),
@@ -166,18 +165,17 @@ it('robot Select defaults match Links and Position remains an explicit tool', as
   await waitFor(() => expect(document.querySelector('[data-display-popover]')).toBeNull());
   expect(robot.toolNames()).toEqual(['Select:false', 'Position:true']);
 
-  // The Position tool's icon carries a dot while the robot is posed off its default, until Reset.
-  expect(robot.posedMark()).toBe(0);
+  // The Position panel has Reset and no X: Select puts Position down. A pose off its default is
+  // kept as one line in the stack, its X the Reset; Position itself is not lit.
+  expect(within(robot.position().getByRole('heading').parentElement!).queryByRole('button', { name: /^Close/ })).toBeNull();
   robot.type('shoulder', '25');
-  await waitFor(() => expect(robot.posedMark()).toBe(1));
-  fireEvent.click(robot.position().getByRole('button', { name: 'Reset' }));
-  await waitFor(() => expect(robot.posedMark()).toBe(0));
-
-  // Its X puts Position down, back to Select.
-  fireEvent.click(robot.position().getByRole('button', { name: 'Close position' }));
+  robot.open('Select');
+  await waitFor(() => expect(robot.stack()).toEqual(['Links', 'Position kept']));
   expect(robot.toolNames()).toEqual(['Select:true', 'Position:false']);
-  expect(robot.stack()).toEqual(['Links']);
   expect(robot.knobs()).toBe(0);
+  fireEvent.click(within(robot.pane).getByRole('button', { name: 'Reset position' }));
+  await waitFor(() => expect(robot.stack()).toEqual(['Links']));
+  // A press on the tool in hand does nothing; Select pressed again leaves it the tool.
   // Select is the default tool: pressing it again leaves it the tool.
   robot.open('Select');
   expect(robot.tool('Select').getAttribute('aria-pressed')).toBe('true');
@@ -210,7 +208,8 @@ it('robot Links and Position are each their tool\'s panel, and no pick or tool o
   robot.open('Select');
   robot.tapUpperArm();
   await waitFor(() => expect(robot.pressedRows()).toHaveLength(1));
-  expect(robot.stack()).toEqual(['Links', 'Reference details']);
+  // The pose left off its default is kept, one line under the Reference.
+  expect(robot.stack()).toEqual(['Links', 'Reference details', 'Position kept']);
   robot.open('Position');
   expect(robot.stack()).toEqual(['Position controls']);
   robot.client.dispose();

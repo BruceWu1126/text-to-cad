@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
  * @property {(tool: import('./toolbar.jsx').DrawingTool) => void} setTool
  * @property {(color: string) => void} setColor
  * @property {(width: number) => void} setStrokeWidth
+ * @property {(style: import('./toolbar.jsx').DrawingStrokeStyle) => void} setStrokeStyle
  * @property {() => void} undo
  * @property {() => void} redo
  * @property {() => void} clear
@@ -16,12 +17,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
  * @property {string} tool
  * @property {string} color
  * @property {number} strokeWidth
+ * @property {import('./toolbar.jsx').DrawingStrokeStyle} strokeStyle
  * @property {boolean} canUndo
  * @property {boolean} canRedo
  * @property {boolean} hasContent
  * @property {(tool: import('./toolbar.jsx').DrawingTool) => void} selectTool
  * @property {(color: string) => void} selectColor
  * @property {(width: number) => void} selectStrokeWidth
+ * @property {(style: import('./toolbar.jsx').DrawingStrokeStyle) => void} selectStrokeStyle
  * @property {() => void} undo
  * @property {() => void} redo
  * @property {() => void} clear
@@ -40,30 +43,34 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
  * One drawing session: a toolbar's view of the mounted editor and its only way
  * to drive it. The sketch itself lives in the editor; an inactive session (the
  * CAD Draw tool deselected) forgets the sketch, its history and the editor, as the
- * unmounted editor did — but not the tool, colour and weight in hand, which the
- * next session opens with. `discard` forgets them the same way while the session
+ * unmounted editor did, and goes back to its first tool — but not the colour and
+ * weight in hand, which the next session opens with. `discard` forgets them the same way while the session
  * stays up (the CAD model updated under the ink): the host's next editor is empty.
  *
  * @param {boolean} [active]
- * @param {{ tool?: string, color?: string, strokeWidth?: number }} [initial]
+ * @param {{ tool?: string, color?: string, strokeWidth?: number, strokeStyle?: import('./toolbar.jsx').DrawingStrokeStyle }} [initial]
  * @returns {DrawingSession}
  */
 export function useDrawingSession(active = true, initial = {}) {
   const idle = useMemo(() => ({ ready: false, tool: initial.tool ?? 'selection', color: initial.color ?? '#1e1e1e', strokeWidth: initial.strokeWidth ?? 2,
-    hasContent: false, canUndo: false, canRedo: false }), [initial.tool, initial.color, initial.strokeWidth]);
+    strokeStyle: initial.strokeStyle ?? 'solid', hasContent: false, canUndo: false, canRedo: false }),
+  [initial.tool, initial.color, initial.strokeWidth, initial.strokeStyle]);
   const target = useRef(/** @type {DrawingToolbarTarget | null} */ (null));
   const [state, setState] = useState(idle);
   // A sketch is one mounted editor, and its history is that editor's: a new sketch is a new editor.
   const [sketch, setSketch] = useState(0);
   const discard = useCallback(() => setSketch(current => current + 1), []);
+  // Put down, the session forgets its sketch and goes back to its first tool (the pencil, for the
+  // CAD Draw tool); the colour and weight in hand stay for the next session.
   useEffect(() => {
     if (active) return;
     target.current = null;
-    setState(current => ({ ...idle, tool: current.tool, color: current.color, strokeWidth: current.strokeWidth }));
+    setState(current => ({ ...idle, color: current.color, strokeWidth: current.strokeWidth, strokeStyle: current.strokeStyle }));
   }, [active, idle]);
   const onReady = useCallback((/** @type {DrawingToolbarTarget | null} */ next) => {
     target.current = next;
-    setState(current => next ? { ...current, ready: true } : { ...idle, tool: current.tool, color: current.color, strokeWidth: current.strokeWidth });
+    setState(current => next ? { ...current, ready: true }
+      : { ...idle, tool: current.tool, color: current.color, strokeWidth: current.strokeWidth, strokeStyle: current.strokeStyle });
   }, [idle]);
   const report = useCallback((/** @type {'tool' | 'color' | 'hasContent'} */ key, /** @type {string | boolean} */ value) =>
     setState(current => current[key] === value ? current : { ...current, [key]: value }), []);
@@ -76,8 +83,12 @@ export function useDrawingSession(active = true, initial = {}) {
   const actions = useMemo(() => ({
     selectTool: (/** @type {import('./toolbar.jsx').DrawingTool} */ tool) => target.current?.setTool(tool),
     selectColor: (/** @type {string} */ color) => target.current?.setColor(color),
-    // The editor reports tool and colour changes; the weight is only ever set from here.
+    // The editor reports tool and colour changes; the weight and the line style are only ever set from here.
     selectStrokeWidth: (/** @type {number} */ width) => { target.current?.setStrokeWidth(width); setState(current => current.strokeWidth === width ? current : { ...current, strokeWidth: width }); },
+    selectStrokeStyle: (/** @type {import('./toolbar.jsx').DrawingStrokeStyle} */ style) => {
+      target.current?.setStrokeStyle(style);
+      setState(current => current.strokeStyle === style ? current : { ...current, strokeStyle: style });
+    },
     undo: () => target.current?.undo(),
     redo: () => target.current?.redo(),
     clear: () => target.current?.clear(),

@@ -5,7 +5,6 @@ import { VIEWER_SCENE_SCALE } from "@text-to-cad/core/lib/viewer/sceneScale.js";
 import { ViewerElementContext, useViewerHost, usePromptDestination } from "../../../host/context.js";
 import { hasOpenPopup } from "../../../lib/popups.js";
 import { useDrawingSession } from "../../../drawing/session.js";
-import { DRAWING_TOOLBAR_TOOLS } from "../../../drawing/toolbar.jsx";
 import { sceneBackdropEdgeColor } from "../look/chromeBackdrop.js";
 import { useChromeBackdropColor } from "../look/useChromeBackdropColor.js";
 import { prefetchRenderStudio } from "../look/renderStudioChunk.js";
@@ -580,19 +579,17 @@ export function useRendererShell({
   const stripTool = ({ id, label, icon, ...rest }) => ({
     id, label, icon, active: !previewing && toolMode === id, disabled: idle, onSelect: () => selectTool(id), ...rest
   });
-  const DrawIcon = DRAWING_TOOLBAR_TOOLS.find(item => item.id === drawing.tool)?.Icon || Pencil;
   const tools = {
     /** A tool of the renderer's own: `{ id, label, icon }` plus anything the strip reads. */
     own: stripTool,
     // Its tools, color and history are a panel in the tool stack while it is up (`RendererShell.jsx`);
-    // the button shows the drawing tool in hand.
-    draw: stripTool({ id: SHELL_TOOL.DRAW, label: "Draw", icon: <DrawIcon data-drawing-tool={drawing.tool} className="size-3" strokeWidth={2} aria-hidden="true" />,
-      // A second press puts it down, as a kept tool's does (its mode toggles).
+    // the button is the pencil, whatever drawing tool is in hand. A second press does nothing.
+    draw: stripTool({ id: SHELL_TOOL.DRAW, label: "Draw", icon: <Pencil className="size-3" strokeWidth={2} aria-hidden="true" />,
       onSelect: () => selectTool(SHELL_TOOL.DRAW) }),
     // The file's routines, played without leaving the tools view: the playbar and its settings are
     // a panel in the tool stack while it is up (`RendererShell.jsx`). Null for a file with none.
-    // Taking it up starts the routine when Autoplay is on, as entering preview does; a second press,
-    // or the panel's X, puts it down.
+    // Taking it up starts the routine when Autoplay is on, as entering preview does; a second press
+    // does nothing, and the panel's X puts it down.
     animate: routines ? stripTool({ id: SHELL_TOOL.ANIMATE, label: "Animation",
       icon: <Clapperboard className="size-3" strokeWidth={2} aria-hidden="true" />,
       onSelect: () => {
