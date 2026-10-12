@@ -102,8 +102,6 @@ python src/bracket.py
   and revision decide how its numbers read. A missing or conflicting dimension that
   changes the result is the person's to settle; a value chosen in its place is an
   assumption.
-- A renamed model leaves its old outputs at their old paths. Removing those exact
-  files keeps what shares their folders: imported sources and other models' outputs.
 
 ## Mesh exports
 

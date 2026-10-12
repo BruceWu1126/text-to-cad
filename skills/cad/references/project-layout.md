@@ -108,7 +108,8 @@ of an assembly before the root incorporates them.
 - Imported sources (here, under the format's `imported/` folder) are inputs, not
   generated outputs, and need no script.
 - Changing `out=`, renaming a script or deleting a model leaves its previous
-  artifacts (STEP, sidecar, meshes) where they were.
+  artifacts (STEP, sidecar, meshes) where they were. Removing those exact files
+  keeps what shares their folders: imported sources and other models' outputs.
 
 ## Version control
 
