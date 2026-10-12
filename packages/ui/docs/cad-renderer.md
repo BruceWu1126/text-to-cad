@@ -173,7 +173,7 @@ const shell = useRendererShell({
   animation,            // playbar runtime with its own `clock` (and `onRelease`, `savePlayback`, `restorePlayback`), or null: plays in preview and under `tools.animate`
   live,                 // { commands?, declined?, state? }
   // optional: promptReferences, promptContext, escape, sceneScaleMode, preview, tool,
-  //   viewSettings, viewerRef, onCameraSettled, onRuntimeAlert, presentationReport,
+  //   viewSettings, viewerRef, onRuntimeAlert, presentationReport,
   //   preserveInteractionPixelRatio, runtimeLifecycle,
   //   rendererState   { signatures, read }: the renderer's slices of the file's view, read when it is written,
   //                   each restored (by the renderer, `readFileView(view.state, signatures)`) under the same signature
@@ -266,7 +266,7 @@ second publish is its last is re-adopted by the viewport for reasons of its own.
 `kit/tools/draw/Draw.browser.test.mjs` covers the Draw scenario under the shell,
 and each renderer's own browser test asserts that the STEP-only Display sections
 are absent from it. The shell surfaces only STEP uses so far (the viewport menu and
-its open report, the camera-settled report, a scene
+its open report, a scene
 that arrives in place, the pixel ratio kept for hairlines, the runtime lifecycle,
 and what a renderer says about a load that is more than a download) are driven
 through `renderers/shell-harness` in `RendererShell.browser.test.mjs`.

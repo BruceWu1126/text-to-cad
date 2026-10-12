@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import * as THREE from "three";
 import { EDGELESS_VIEW_FEATURES } from "@text-to-cad/core/common/viewSettings.js";
 import { createSurfaceLook } from "@text-to-cad/core/lib/viewer/surfaceLook.js";
@@ -18,8 +18,8 @@ import ToolPanel, { ToolPanelClose } from "../kit/tools/ToolPanel.jsx";
 //
 // It also stands in for a renderer that USES the shell surfaces STEP will need
 // when it moves: a viewport context menu of its own (and word of when it is up), the
-// host's capture request (its own snapshot builder), the camera-settled report,
-// a scene that ARRIVES in place (`complete`, `viewport.commitScene()`), and what
+// host's capture request (its own snapshot builder), a scene that ARRIVES in place
+// (`complete`, `viewport.commitScene()`), and what
 // happens to the WebGL runtime under it (`runtimeLifecycle`). Each is exercised here
 // against the real shell in a real browser.
 //
@@ -121,14 +121,6 @@ function HarnessSurface({ view, data }) {
     captureRequest: commands.captureRequest, acknowledgeCommand: services.commands?.acknowledge
   }), [preferences, services, commands.captureRequest]);
 
-  // The camera-settled report is a signal, not state: counted outside React and
-  // shown in the overlay, so a test reads the same number the renderer got.
-  const settles = useRef(0);
-  const [settleLabel, setSettleLabel] = useState("0");
-  const onCameraSettled = useCallback(() => {
-    settles.current += 1;
-    setSettleLabel(String(settles.current));
-  }, []);
   const [picked, setPicked] = useState("");
   // The noted press is the harness's selection: the reference a Quick Edit carries.
   const references = useMemo(() => (picked ? [{ resource, target: { kind: "cad-selector", selectors: [`press-${picked.replace(",", "-")}`] } }] : []),
@@ -160,7 +152,7 @@ function HarnessSurface({ view, data }) {
     view, services: shellServices, resource, modelKey: data.modelKey ?? view.file.path, revisionKey: "harness",
     features: EDGELESS_VIEW_FEATURES, toolModes: withPanel ? PANEL_TOOL_MODES : HARNESS_TOOL_MODES, previewable, scene: stageScene ? scene : null,
     load: { busy: false, ...stageLoad },
-    live, onCameraSettled, runtimeLifecycle,
+    live, runtimeLifecycle,
     // A test's stand-in animation runtime, when it brings one.
     animation: data.animation ?? null,
     // A renderer whose references are its own vocabulary assembles its own snapshot.
@@ -214,7 +206,6 @@ function HarnessSurface({ view, data }) {
     frameProvider={frame => <HarnessFrameContext.Provider value={`frame:${stage}`}>{frame}</HarnessFrameContext.Provider>}
     onCanvasPointerDown={() => setPutDown(`put down @${stage}`)}
     viewportOverlay={viewport => <div className="pointer-events-none absolute left-2 top-2 z-30 text-xs" data-harness-overlay>
-      <span data-harness-camera-settles>{settleLabel}</span>
       <span data-harness-menu-note>{picked}</span>
       <span data-harness-menu-open>{menuUp ? "up" : ""}</span>
       <span data-harness-runtime>{runtimeEvents.join(" ")}</span>

@@ -188,23 +188,6 @@ it('a host with no prompt workflow gets no snapshot, and Quick Edit copies a pro
     .toEqual(['Close Quick Edit', 'Copy Prompt']);
 });
 
-it('the renderer is told the camera settled, through what the viewport reports: a recorded move and its own settle', () => {
-  const { overlay } = mount();
-  expect(overlay('camera-settles')).toBe('0');
-  // A camera that moved and was recorded (`onPerspectiveChange`) is a settle.
-  act(() => { viewport.props.onPerspectiveChange({ position: [1, 2, 3], target: [0, 0, 0], up: [0, 0, 1], zoom: 1, projection: 'orthographic' }); });
-  expect(overlay('camera-settles')).toBe('1');
-  // So is the viewport's own settle (a preview camera, a resize), which records nothing.
-  act(() => { viewport.props.onCameraSettled(); });
-  expect(overlay('camera-settles')).toBe('2');
-  // Preview: the camera that moves records no perspective, and the renderer still hears of it.
-  act(() => { fireEvent.click(screen.getByRole('button', { name: 'Preview' })); });
-  expect(viewport.props.previewMode).toBe(true);
-  act(() => { viewport.props.onPerspectiveChange({ position: [4, 5, 6], target: [0, 0, 0], up: [0, 0, 1], zoom: 2, projection: 'orthographic' }); });
-  act(() => { viewport.props.onCameraSettled(); });
-  expect(overlay('camera-settles')).toBe('4');
-});
-
 it('a view that has gone writes nothing more: its last write is the one it makes as it unmounts, and a camera report after it writes no view again', () => {
   vi.useFakeTimers();
   try {

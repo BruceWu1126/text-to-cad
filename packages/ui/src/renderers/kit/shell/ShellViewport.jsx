@@ -102,13 +102,6 @@ const ShellViewport = forwardRef(function ShellViewport({
   onPerspectiveChange = null,
   onPresentationChange = null,
   onViewerAlertChange = null,
-  // The camera came to rest on a new view: a preview camera that moved (preview's
-  // orbit, which persists nothing and so emits no perspective), or a viewport whose size
-  // changed. A renderer that samples the camera — to decide what detail the scene needs,
-  // say — cannot see either from the stored perspective alone: an aspect change can expose
-  // a part without changing position, target or zoom. The viewport says the camera settled;
-  // what that is worth is the renderer's.
-  onCameraSettled = null,
   // A scene drawn with hairlines keeps the idle pixel ratio while the camera moves: dropping
   // it mid-orbit turns one-pixel linework into a shimmer the surfaces never show.
   preserveInteractionPixelRatio = false,
@@ -190,8 +183,6 @@ const ShellViewport = forwardRef(function ShellViewport({
   const perspectivePropRef = useRef(perspective);
   const modelKeyRef = useRef(modelKey);
   const sceneScaleModeRef = useRef(normalizedSceneScaleMode);
-  const cameraMovedRef = useRef(null);
-  cameraMovedRef.current = onCameraSettled;
   const runtimeLifecycleRef = useRef(runtimeLifecycle);
   runtimeLifecycleRef.current = runtimeLifecycle;
   // Which model was framed once its rest box was FINAL. A scene whose box still grows while it
@@ -295,7 +286,7 @@ const ShellViewport = forwardRef(function ShellViewport({
     resetZoomAndPan, syncPreviewCamera, syncViewPlaneOrientation
   } = useViewportCamera({
     coordinateSystemFor, activeViewPlaneFaceRef, previewCameraRef,
-    lastEmittedPerspectiveRef, cameraMovedRef, modelBounds: scene?.restBounds || scene?.bounds || null, modelKey, modelKeyRef,
+    lastEmittedPerspectiveRef, modelBounds: scene?.restBounds || scene?.bounds || null, modelKey, modelKeyRef,
     modelTransformRef, perspectiveChangeRef, perspectivePropRef, perspectiveRef, previewMode,
     previewModeRef, previewOrbit: orbitPreview, previewOrbitSpeed, runWithoutPerspectiveEvents, runtimeRef, sceneScaleModeRef, setActiveViewPlaneFace,
     setViewPlaneOrientation, suppressPerspectiveEventsRef, viewerReadyTick
@@ -343,9 +334,6 @@ const ShellViewport = forwardRef(function ShellViewport({
     if (!runtime) return;
     if (!refitOpenFraming(runtime)) syncRuntimeViewportFraming(runtime);
     emitPerspectiveChange(runtime);
-    // A resize can change what is on screen without changing the stored perspective,
-    // so the settle is reported here rather than left to perspective deduplication.
-    cameraMovedRef.current?.();
   }, []);
 
   const hasViewportContent = Boolean(scene);

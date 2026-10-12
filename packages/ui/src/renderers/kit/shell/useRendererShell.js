@@ -152,11 +152,6 @@ const NO_CHOICE = Object.freeze({});
  *   against; a slice comes back (`readFileView`, which the renderer calls itself on mount) only under the same
  *   signature. The renderer calls `shell.scheduleStateSave()` when a slice changed. Null, or omitted, keeps
  *   what is stored as it is: a renderer that has not loaded yet, or one with no slices of its own.
- * @param {() => void} [options.onCameraSettled]  The camera came to rest on a new view: it moved and was
- *   recorded, a preview camera moved (preview mode, which records nothing), or the viewport's size
- *   changed — which can expose part of a scene without changing position, target or zoom at all. For a
- *   renderer that samples the camera to decide what detail its scene needs. It is called often; debounce
- *   it if that matters.
  * @param {boolean} [options.preserveInteractionPixelRatio]  The scene is drawn with hairlines just now: keep the
  *   idle pixel ratio while the camera moves, instead of dropping it for the duration of the gesture.
  * @param {{ onRelease?(runtime: object, detail: { handoff: boolean }): void, onContextLost?(): void,
@@ -177,7 +172,7 @@ export function useRendererShell({
   viewSettings = null, viewerRef: providedViewerRef = null,
   animation = null, live = EMPTY, promptReferences = null, promptContext = createViewPromptContext,
   escape = EMPTY, rendererState = null,
-  onCameraSettled = null, preserveInteractionPixelRatio = false, runtimeLifecycle = null,
+  preserveInteractionPixelRatio = false, runtimeLifecycle = null,
   onRuntimeAlert = null, presentationReport = null,
   sceneScaleMode = VIEWER_SCENE_SCALE.CAD
 }) {
@@ -324,10 +319,6 @@ export function useRendererShell({
   // a renderer's slices when it says so. The tool in hand is not saved at all.
   useEffect(() => { scheduleSessionSave(); }, [displaySettings, playback, scheduleSessionSave]);
 
-  // Stable across renders: the viewport keeps it in a ref for the life of the runtime.
-  const cameraSettledRef = useRef(onCameraSettled);
-  cameraSettledRef.current = onCameraSettled;
-  const reportCameraSettled = useCallback(() => cameraSettledRef.current?.(), []);
   const runtimeLifecycleRef = useRef(runtimeLifecycle);
   runtimeLifecycleRef.current = runtimeLifecycle;
   const stableRuntimeLifecycle = useMemo(() => ({
@@ -336,8 +327,6 @@ export function useRendererShell({
     onInitializationError: (error) => runtimeLifecycleRef.current?.onInitializationError?.(error)
   }), []);
   const handlePerspectiveChange = useCallback((nextPerspective) => {
-    // A camera that moved is a camera that settled, whether or not the file records it.
-    cameraSettledRef.current?.();
     if (previewing) return;
     const snapshot = clonePerspectiveSnapshot(nextPerspective);
     if (!snapshot) return;
@@ -621,7 +610,6 @@ export function useRendererShell({
     frame: {
       view, hostRef, hostElement, sceneBackdrop, modelKey, presentationKey, sceneScaleMode, scene,
       viewerRef, viewUpdate, resolvedScene, viewerPerspective, activePerspectiveRef, handlePerspectiveChange,
-      onCameraSettled: reportCameraSettled,
       preserveInteractionPixelRatio: preserveInteractionPixelRatio === true,
       runtimeLifecycle: stableRuntimeLifecycle,
       previewOrbitSpeed, setPreviewOrbitSpeed, toolStack, changeToolStack, viewerLoading, loading, presentationState,
