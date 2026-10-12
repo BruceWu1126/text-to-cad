@@ -35,20 +35,16 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
-import time
 import uuid
 from typing import Any, Callable, Iterator
 
 from cadgen.coordination.kinds import (
     DRAWING_PACKAGE,
     PHASE_BROWSER,
-    PHASE_CHECK,
-    PHASE_COLLECT,
     PHASE_RENDER,
     SNAPSHOT,
     STEP_IMPORT,
     STEP_PACKAGE,
-    VALIDATION,
     ArtifactKind,
 )
 from cadgen.coordination.phases import (
@@ -72,11 +68,8 @@ __all__ = [
     "BuildRun",
     "DRAWING_PACKAGE",
     "PHASE_BROWSER",
-    "PHASE_CHECK",
-    "PHASE_COLLECT",
     "PHASE_RENDER",
     "SNAPSHOT",
-    "VALIDATION",
     "NULL_PROGRESS",
     "PHASE_COMPONENTS",
     "PHASE_DONE",
@@ -255,19 +248,3 @@ def generator_busy(
         return
     with _reported_run(kind, is_current=None, force=True, sink=sink) as run:
         yield run
-
-
-def _terminal_event(reporter: ProgressReporter) -> ProgressEvent:
-    """A synthetic terminal event carrying the run's measured stage times."""
-    return ProgressEvent(
-        phase=PHASE_DONE,
-        label=PHASE_LABELS[PHASE_DONE],
-        index=0,
-        count=0,
-        done=0,
-        total=None,
-        determinate=False,
-        phase_started_at_ms=time.time() * 1000.0,
-        elapsed_ms=0.0,
-        stage_ms=reporter.stage_ms_snapshot(),
-    )

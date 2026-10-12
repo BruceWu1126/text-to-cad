@@ -40,8 +40,7 @@ def _export(*, chord=None, angle=None, stored_meshes=None):
 
     job = MeshExportJob(fmt="stl", out=Path("part.stl"), mesh_tolerance=chord, mesh_angular_tolerance=angle)
     with mock.patch.object(mesh_export, "stored_meshes", stop), contextlib.suppress(_Accepted):
-        run_mesh_exporter(MeshSource("0" * 64), [job], name="part", default_color=None,
-                          logger=CliLogger("test", verbose=False))
+        run_mesh_exporter(MeshSource("0" * 64), [job], name="part", logger=CliLogger("test", verbose=False))
 
 
 class TessellationPolicyTests(unittest.TestCase):

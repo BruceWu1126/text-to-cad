@@ -13,8 +13,7 @@ they disagreed about what an occurrence is:
   in a single namespace ``o1.s1``/``o1.f19``.
 
 ``lookup.build_selector_index`` reads the second. So every ref the first hands out -- every ref a
-user can actually pick -- resolved to an error, and ``inspect refs --facts`` reported
-``occurrenceCount: 1`` for a 160-part assembly. The user's
+user can actually pick -- resolved to an error. The user's
 workaround was to re-identify each face by area and position in the owning part's own namespace,
 which is guesswork whenever a part appears at more than one occurrence.
 
@@ -112,8 +111,7 @@ def transform_bbox(matrix: list[float], bbox: object) -> dict[str, list[float]] 
 # counts, flags and areas -- and is why `params` is transformed key-by-key rather than wholesale.
 #
 # The param key sets are the COMPLETE vocabulary of `step_scene_geometry._curve_params` and
-# `_surface_params`, which is what writes the `params` this places (and the same set
-# `step_scene_geometry._transform_param_dict` classifies). A point is spelled `origin`
+# `_surface_params`, which is what writes the `params` this places. A point is spelled `origin`
 # (plane/cylinder/cone/line) or `center` (circle/ellipse/hyperbola/parabola/sphere/torus),
 # never both, so a list that knows only one spelling silently leaves half the analytic types
 # in component-local coordinates -- which is what sent `inspect measure` between a circular
@@ -234,8 +232,8 @@ def assembly_occurrence_rows(
 ) -> list[dict[str, Any]]:
     """Instance-tree occurrences as selector-index rows, in world coordinates at rest.
 
-    Column names mirror the topology sidecar's ``occurrenceColumns`` so that consumers written
-    against that table (``entry_summary``, ``reporting``) need no special case for assemblies.
+    Column names mirror the selector table's ``occurrenceColumns``, so a reader of either
+    needs no special case for assemblies.
     With ``package_dir`` None no component's table is read and no row has a ``bbox``: the
     rows are the occurrence namespace alone, what a kinematics mate's ends resolve in.
     """
@@ -270,13 +268,6 @@ def assembly_occurrence_rows(
                 "transform": matrix,
                 "bbox": transform_bbox(matrix, local_bbox),
                 "component": component or None,
-                # Entity ranges belong to phase 2; a reader must not mistake 0 for "has none".
-                "shapeStart": 0,
-                "shapeCount": 0,
-                "faceStart": 0,
-                "faceCount": 0,
-                "edgeStart": 0,
-                "edgeCount": 0,
             }
         )
     return materialized
@@ -313,15 +304,6 @@ def _entity_id(occurrence_id: str, row: Mapping[str, Any]) -> str | None:
     return f"{occurrence_id}.{local_id}" if local_id else None
 
 
-def _rebase(row: dict, field: str, offset: int) -> None:
-    """Shift a range field that indexes a list we are concatenating into."""
-    if field in row:
-        try:
-            row[field] = offset + int(row[field] or 0)
-        except (TypeError, ValueError):
-            row[field] = offset
-
-
 def merge_assembly_entities(
     index: SelectorIndex,
     descriptor: Mapping[str, Any],
@@ -334,12 +316,12 @@ def merge_assembly_entities(
     numbering does not agree with the component's (the assembly's f18 can be a wall's face where
     the part's f18 is a 17.085 mm2 cylinder).
 
-    Every id and every RANGE is re-based as the tables concatenate. A component's rows index its
-    own tables: a face's `edgeStart` points into that component's faceEdgeRows, a shape's
-    `faceStart` slices that component's face list, an edge's `shapeId` names that component's
-    solid. Copied across unchanged they all still resolve -- against the wrong thing, which is
-    worse than not resolving. `#o1.12.f19` reported `shapeId s1`, and `s1` in the merged index is
-    a solid 40 mm away.
+    Every id is re-based as the tables concatenate. A component's rows name its own entities: an
+    edge's `shapeId` names that component's solid. Copied across unchanged it still resolves --
+    against the wrong thing, which is worse than not resolving. `#o1.12.f19` reported `shapeId
+    s1`, and `s1` in the merged index is a solid 40 mm away. A row's range columns (`faceStart`,
+    `edgeCount`, ...) are copied as the component's table wrote them: they index that table, and
+    nothing here reads them.
     """
     occurrences = descriptor.get("occurrences")
     if not isinstance(occurrences, list) or not occurrences:
@@ -353,11 +335,6 @@ def merge_assembly_entities(
     face_by_id = dict(index.face_by_id)
     edge_by_id = dict(index.edge_by_id)
     vertex_by_id = dict(index.vertex_by_id)
-    occurrence_by_id = dict(index.occurrence_by_id)
-    occurrence_rows = list(index.occurrences)
-    relations = {name: list(rows) for name, rows in index.relations.items()}
-    for name in ("faceEdgeRows", "edgeFaceRows", "edgeVertexRows", "vertexEdgeRows"):
-        relations.setdefault(name, [])
     cache: dict[str, Any] = {}
     added = 0
 
@@ -372,15 +349,6 @@ def merge_assembly_entities(
         if component_index is None:
             continue
         matrix = _matrix(entry.get("transform"))
-
-        shape_offset = len(shapes)
-        face_offset = len(faces)
-        edge_offset = len(edges)
-        vertex_offset = len(vertices)
-        face_edge_offset = len(relations["faceEdgeRows"])
-        edge_face_offset = len(relations["edgeFaceRows"])
-        edge_vertex_offset = len(relations["edgeVertexRows"])
-        vertex_edge_offset = len(relations["vertexEdgeRows"])
 
         # A face names its owning solid by id, so the rename has to be known before the faces
         # are written or `shapeId` keeps pointing at the flat namespace.
@@ -397,8 +365,6 @@ def merge_assembly_entities(
             placed = _place_entity_row(matrix, row)
             placed["id"] = new_id
             placed["occurrenceId"] = occurrence_id
-            _rebase(placed, "faceStart", face_offset)
-            _rebase(placed, "edgeStart", edge_offset)
             shapes.append(placed)
             shape_by_id.setdefault(str(placed["id"]), placed)
             added += 1
@@ -411,7 +377,6 @@ def merge_assembly_entities(
             placed["occurrenceId"] = occurrence_id
             if placed.get("shapeId") is not None:
                 placed["shapeId"] = shape_id_map.get(str(placed["shapeId"]), placed["shapeId"])
-            _rebase(placed, "edgeStart", face_edge_offset)
             faces.append(placed)
             face_by_id.setdefault(str(placed["id"]), placed)
             added += 1
@@ -424,8 +389,6 @@ def merge_assembly_entities(
             placed["occurrenceId"] = occurrence_id
             if placed.get("shapeId") is not None:
                 placed["shapeId"] = shape_id_map.get(str(placed["shapeId"]), placed["shapeId"])
-            _rebase(placed, "faceStart", edge_face_offset)
-            _rebase(placed, "vertexStart", edge_vertex_offset)
             edges.append(placed)
             edge_by_id.setdefault(str(placed["id"]), placed)
             added += 1
@@ -438,55 +401,14 @@ def merge_assembly_entities(
             placed["occurrenceId"] = occurrence_id
             if placed.get("shapeId") is not None:
                 placed["shapeId"] = shape_id_map.get(str(placed["shapeId"]), placed["shapeId"])
-            _rebase(placed, "edgeStart", vertex_edge_offset)
             vertices.append(placed)
             vertex_by_id.setdefault(str(placed["id"]), placed)
             added += 1
-
-        component_relations = component_index.relations
-        relations["faceEdgeRows"].extend(
-            edge_offset + int(value) for value in component_relations.get("faceEdgeRows", [])
-        )
-        relations["edgeFaceRows"].extend(
-            face_offset + int(value) for value in component_relations.get("edgeFaceRows", [])
-        )
-        relations["edgeVertexRows"].extend(
-            vertex_offset + int(value) for value in component_relations.get("edgeVertexRows", [])
-        )
-        relations["vertexEdgeRows"].extend(
-            edge_offset + int(value) for value in component_relations.get("vertexEdgeRows", [])
-        )
-
-        # The occurrence's own ranges, now that its rows exist. Phase 1 wrote zeros because it
-        # had no entities to point at, and a zero range reads as "this occurrence has no faces".
-        # A COPY. These row dicts are shared with the index we were handed, and
-        # SelectorIndex is a frozen value: writing ranges into them in place would leave the
-        # caller's index claiming slices of lists it does not have.
-        occurrence_row = occurrence_by_id.get(occurrence_id)
-        if isinstance(occurrence_row, dict):
-            occurrence_row = dict(occurrence_row)
-            occurrence_by_id[occurrence_id] = occurrence_row
-            for position, existing in enumerate(occurrence_rows):
-                if existing is not None and str(existing.get("id")) == occurrence_id:
-                    occurrence_rows[position] = occurrence_row
-                    break
-            occurrence_row.update(
-                {
-                    "shapeStart": shape_offset,
-                    "shapeCount": len(component_index.shapes),
-                    "faceStart": face_offset,
-                    "faceCount": len(component_index.faces),
-                    "edgeStart": edge_offset,
-                    "edgeCount": len(component_index.edges),
-                }
-            )
 
     if not added:
         return index
     return replace(
         index,
-        occurrences=occurrence_rows,
-        occurrence_by_id=occurrence_by_id,
         shapes=shapes,
         faces=faces,
         edges=edges,
@@ -495,7 +417,6 @@ def merge_assembly_entities(
         face_by_id=face_by_id,
         edge_by_id=edge_by_id,
         vertex_by_id=vertex_by_id,
-        relations=relations,
     )
 
 
@@ -566,27 +487,16 @@ def merge_assembly_occurrences(
         added += 1
     if not added:
         return replace(index, group_nodes=group_nodes) if group_nodes else index
-    # occurrenceCount came from the sidecar's stats and said 1 for a 160-part assembly, which is
-    # what `inspect refs --facts` reported. It is a count of what this index can resolve.
-    # It stays a LEAF count: a group ref resolves by expanding to the leaves already
-    # counted here, so counting the interior nodes too would double-count the tree.
-    manifest = dict(index.manifest)
-    stats = dict(manifest.get("stats")) if isinstance(manifest.get("stats"), Mapping) else {}
-    stats["occurrenceCount"] = len(occurrences)
     # The rows are the tree's leaves (groups travel separately as group_nodes). A
     # document with exactly one leaf -- a part -- keeps the bare grammar: `#f19`
     # canonicalizes to that leaf's `f19`, which is what single_occurrence_id is for.
     leaf_ids = [str(row.get("id")) for row in rows if row.get("id")]
-    stats["leafOccurrenceCount"] = len(leaf_ids)
-    manifest["stats"] = stats
     single = index.single_occurrence_id or (leaf_ids[0] if len(leaf_ids) == 1 else "")
     return replace(
         index,
-        manifest=manifest,
         occurrences=occurrences,
         occurrence_by_id=occurrence_by_id,
         group_nodes=group_nodes,
-        leaf_occurrence_ids=leaf_ids,
         single_occurrence_id=single,
     )
 

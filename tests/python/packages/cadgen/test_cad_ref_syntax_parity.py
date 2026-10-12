@@ -1,9 +1,11 @@
 """The Python and JS selector grammars are two implementations of one language.
 
-`cadgen.cad_ref_syntax` and `@text-to-cad/core/lib/cadRefs.js` parse the same refs, and before this fixture
-existed nothing checked that they agreed -- the grammar was copy-pasted into four places. Both
-suites read `packages/core/src/lib/cadRefs.parity.json`, so a form added to one language and
-forgotten in the other fails here rather than in a user's pasted ref.
+`cadgen.cad_ref_syntax` and `@text-to-cad/core/lib/cadRefs.js` parse the same selectors, and before
+this fixture existed nothing checked that they agreed -- the grammar was copy-pasted into four
+places. Both suites read the `selectorCases` of `packages/core/src/lib/cadRefs.parity.json`, so a
+form added to one language and forgotten in the other fails here rather than in a user's pasted
+ref. Its `inheritanceCases` and `tokenCases` are the JS parser's alone: Python takes one ref at a
+time, its file prefix split off (`split_cad_ref`) and its selector parsed (`parse_selector`).
 """
 
 from __future__ import annotations
@@ -20,10 +22,7 @@ from unittest import mock
 from tests.python.support.paths import repo_path
 
 from cadgen.cad_ref_syntax import (
-    build_cad_token,
     ensure_ref_file_matches,
-    normalize_selector_list,
-    parse_cad_tokens,
     parse_selector,
     path_has_suffix,
     split_cad_ref,
@@ -38,10 +37,8 @@ def _fixture() -> dict:
 
 
 class ParityFixtureIsUsableTest(unittest.TestCase):
-    def test_the_fixture_exists_and_has_every_case_kind(self) -> None:
-        data = _fixture()
-        for key in ("selectorCases", "inheritanceCases"):
-            self.assertTrue(data.get(key), f"{key} must be present and non-empty")
+    def test_the_fixture_exists_and_has_selector_cases(self) -> None:
+        self.assertTrue(_fixture().get("selectorCases"), "selectorCases must be present and non-empty")
 
 
 class SelectorParityTest(unittest.TestCase):
@@ -55,13 +52,6 @@ class SelectorParityTest(unittest.TestCase):
                 self.assertEqual(case["ordinal"], parsed.ordinal)
                 self.assertEqual(case["canonical"], parsed.canonical)
                 self.assertEqual(case.get("label", ""), parsed.label)
-
-
-class InheritanceParityTest(unittest.TestCase):
-    def test_comma_lists_inherit_as_the_fixture_says(self) -> None:
-        for case in _fixture()["inheritanceCases"]:
-            with self.subTest(input=case["input"], why=case.get("why", "")):
-                self.assertEqual(case["expected"], normalize_selector_list(case["input"]))
 
 
 class BackwardsCompatibilityTest(unittest.TestCase):
@@ -112,46 +102,11 @@ class BackwardsCompatibilityTest(unittest.TestCase):
         self.assertEqual("shape", parse_selector("s7").selector_type)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
-class TokenParityTest(unittest.TestCase):
-    """The token layer: `<file>#<selectors>`.
-
-    The prefix half of the token was always in the grammar's shape -- ParsedToken has carried a
-    `cad_path` field filled with "" since it was written -- and this is where it gets populated.
-    It sits LEFT of the '#', which is why it cannot collide with the selector grammar: labels,
-    their ':' qualifiers, and entity dots all live on the right.
-    """
-
-    def test_every_token_case_parses_as_the_fixture_says(self) -> None:
-        for case in _fixture()["tokenCases"]:
-            with self.subTest(text=case["text"], why=case.get("why", "")):
-                tokens = parse_cad_tokens(case["text"])
-                if case["selectors"] is None:
-                    self.assertEqual([], tokens, "text without '#' is not a token")
-                    continue
-                self.assertEqual(1, len(tokens), f"expected one token from {case['text']!r}")
-                self.assertEqual(case["cadPath"], tokens[0].cad_path)
-                self.assertEqual(case["selectors"], list(tokens[0].selectors))
-
-    def test_a_token_round_trips_through_build_cad_token(self) -> None:
-        # build_cad_token took a cad_path and discarded it (`_ = cad_path`). It no longer does,
-        # so what the viewer copies is what the grammar parses.
-        self.assertEqual("plate.stl#o1.2", build_cad_token("plate.stl", "o1.2"))
-        self.assertEqual("#o1.2", build_cad_token("", "o1.2"))
-        self.assertEqual("plate.stl#", build_cad_token("plate.stl", ""))
-        self.assertEqual("#", build_cad_token("", ""))
-
-
 class TokenBackwardsCompatibilityTest(unittest.TestCase):
-    def test_bare_tokens_are_untouched(self) -> None:
+    def test_bare_tokens_carry_no_file_prefix(self) -> None:
         for text in ("#o1", "#o1.2.f3", "#f45", "#m1", "#", "#o1.2,f3"):
             with self.subTest(text=text):
-                tokens = parse_cad_tokens(text)
-                self.assertEqual(1, len(tokens))
-                self.assertEqual("", tokens[0].cad_path, f"{text} must carry no file prefix")
+                self.assertEqual(("", text[1:]), split_cad_ref(text), f"{text} must carry no file prefix")
 
 
 class RefFileGuardTest(unittest.TestCase):
@@ -223,9 +178,17 @@ class RefFileGuardTest(unittest.TestCase):
             ensure_ref_file_matches("STEP/part.step", str(document))
 
     def test_a_quoted_prefix_is_decoded_rather_than_cut_at_a_hash(self) -> None:
-        for path in ("/work/CAD models/part #2.step", "C:\\work\\part.step", "STEP/part.step"):
+        # The viewer JSON-quotes a prefix holding a space, a quote, a '#' or a backslash.
+        for path in (
+            "/work/CAD models/part #2.step",
+            "C:\\work\\part.step",
+            "models/Hex Drive Screw (2).STEP",
+            'models/café #1 "screw".STEP',
+        ):
             with self.subTest(path=path):
-                self.assertEqual((path, "o1.f2"), split_cad_ref(build_cad_token(path, "o1.f2")))
+                token = json.dumps(path, ensure_ascii=False) + "#o1.f2,o1.f3"
+                self.assertEqual((path, "o1.f2,o1.f3"), split_cad_ref(token))
+        self.assertEqual(("STEP/part.step", "o1.f2"), split_cad_ref("STEP/part.step#o1.f2"))
         self.assertEqual(("", "o1.f2"), split_cad_ref("#o1.f2"))
         self.assertEqual(("", "o1.f2"), split_cad_ref("o1.f2"))
 
@@ -236,11 +199,6 @@ class RefFileGuardTest(unittest.TestCase):
         self.assertFalse(path_has_suffix("plate.stl", "a/plate.stl"))
         self.assertFalse(path_has_suffix("a/b/plate.stl", ""))
 
-class ImportedFilenameTokenTests(unittest.TestCase):
-    def test_quoted_paths_round_trip(self) -> None:
-        for path in ['models/Hex Drive Screw (2).STEP', 'models/café #1 "screw".STEP']:
-            token = build_cad_token(path, 'o1.f2,o1.f3')
-            parsed = parse_cad_tokens(token)
-            self.assertEqual(1, len(parsed))
-            self.assertEqual(path, parsed[0].cad_path)
-            self.assertEqual(('o1.f2', 'o1.f3'), parsed[0].selectors)
+
+if __name__ == "__main__":
+    unittest.main()

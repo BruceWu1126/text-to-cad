@@ -74,9 +74,7 @@ __all__ = [
     "threemf",
     "ModelDef",
     "registered_model",
-    "registered_models",
     "building",
-    "build_in_progress",
 ]
 
 
@@ -221,10 +219,6 @@ def _same_file(left: Path, right: Path) -> bool:
         return Path(left) == Path(right)
 
 
-def build_in_progress() -> bool:
-    return bool(getattr(_BUILD_STATE, "frames", None))
-
-
 def current_frame() -> BuildFrame | None:
     frames = getattr(_BUILD_STATE, "frames", None)
     return frames[-1] if frames else None
@@ -333,10 +327,6 @@ def registered_models_in(script_path: Path) -> list[ModelDef]:
     """Every model registered from ``script_path``, in registration order."""
     resolved = Path(script_path).resolve()
     return [defn for defn in _REGISTRY.values() if defn.script_path == resolved]
-
-
-def registered_models() -> dict[str, ModelDef]:
-    return dict(_REGISTRY)
 
 
 def _script_path_of(func: Callable[..., Any]) -> Path:

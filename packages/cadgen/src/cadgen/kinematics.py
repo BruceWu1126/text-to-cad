@@ -63,9 +63,6 @@ __all__ = [
 # HERE and a sidecar schema bump, never a new sidecar file.
 KINEMATICS_KEYS = ("mates", "couplings", "poses")
 
-#: The keys that make up the sidecar's kinematics block.
-KINEMATICS_BLOCK_KEYS = KINEMATICS_KEYS
-
 _MATE_KINDS = {"revolute", "slider", "cylindrical", "fastened"}
 # Sub-DOF names of a cylindrical mate: "<name>.turn" rotates, "<name>.travel"
 # slides, both about/along the one declared axis.

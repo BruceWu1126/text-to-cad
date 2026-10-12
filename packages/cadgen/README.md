@@ -453,7 +453,7 @@ src/cadgen/
                          #   cli_from_function, doors (documents by bytes),
                          #   build_timing (where a build's time went;
                          #   --profile),
-                         #   source_sidecar, step_assemble/step_reemit
+                         #   source_sidecar, step_reemit
   viewer/                # the CAD Viewer's server: launcher (main),
                          #   routes (http_app), files by absolute path
                          #   (backend), a file's catalog row (scanner; started

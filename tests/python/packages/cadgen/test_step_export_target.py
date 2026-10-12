@@ -222,18 +222,6 @@ class StepExportTargetTests(unittest.TestCase):
         self._assert_export_file(cwd / "cwd_relative.stl", "stl")
         self.assertFalse((document.parent / "cwd_relative.stl").exists())
 
-    def test_color_hex_encodes_linear_to_srgb(self) -> None:
-        # A model's Color is LINEAR; --default-color is an sRGB hex. 0 and 1 are
-        # fixed points of the transfer function, so only midtones can tell a
-        # correct encoding from no encoding at all.
-        self.assertEqual(step_export_target._color_hex((1.0, 0.0, 0.0, 1.0)), "#ff0000")
-        self.assertEqual(step_export_target._color_hex((0.5, 0.5, 0.5, 1.0)), "#bcbcbc")
-        self.assertEqual(step_export_target._color_hex((0.2, 0.5, 0.8, 1.0)), "#7cbce7")
-        # Out-of-range channels clamp; non-numeric input has no usable colour.
-        self.assertEqual(step_export_target._color_hex((2.0, -1.0, 0.0)), "#ff0000")
-        self.assertIsNone(step_export_target._color_hex(None))
-        self.assertIsNone(step_export_target._color_hex(("red", "green", "blue")))
-
 
 if __name__ == "__main__":
     unittest.main()

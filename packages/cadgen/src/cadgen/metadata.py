@@ -10,14 +10,6 @@ from cadgen.render import relative_to_cwd as _display_path
 from cadgen.tessellation_policy import tolerance_refusal
 
 
-class InvalidModelScriptError(ValueError):
-    """A script whose model DECLARATION is malformed in a way directory
-    discovery should skip-with-a-note rather than abort on (e.g. a file holding
-    several models named without its ``::function``). Contract violations inside a single model (a dict return,
-    bad decorator arguments) stay plain ValueErrors and DO abort, because an
-    explicitly-targeted build must fail loudly."""
-
-
 @dataclass(frozen=True)
 class GeneratorMetadata:
     script_path: Path
@@ -104,7 +96,6 @@ def resolve_model_output_path(
 
 
 _MESH_DECORATOR_NAMES = ("stl", "glb", "threemf")
-_MESH_DECORATOR_FMT = {"stl": "stl", "glb": "glb", "threemf": "3mf"}
 _MESH_SUFFIX = {"stl": ".stl", "3mf": ".3mf", "glb": ".glb"}
 
 
@@ -308,13 +299,13 @@ def parse_generator_metadata(script_path: Path, function: str | None = None) -> 
         chosen = [entry for entry in decorated if entry[0].name == function]
         if not chosen:
             declared = ", ".join(f"{fn.name}()" for fn, _, _, _ in decorated)
-            raise InvalidModelScriptError(
+            raise ValueError(
                 f"{_display_path(script_path)} declares no model {function}() (it declares {declared})"
             )
         decorated = chosen
     elif len(decorated) > 1:
         joined = ", ".join(f"{fn.name}()" for fn, _, _, _ in decorated)
-        raise InvalidModelScriptError(
+        raise ValueError(
             f"{_display_path(script_path)} declares several models ({joined}); name one as "
             f"{_display_path(script_path)}::{decorated[0][0].name}"
         )
@@ -398,7 +389,7 @@ def imported_model(script_path: Path, function: str):
                 _load_generator_module(resolved)
             defn = registered_model(resolved, function)
     if defn is None:
-        raise InvalidModelScriptError(
+        raise ValueError(
             f"{_display_path(resolved)} declares {function}() but importing it registered no such model"
         )
     return defn
@@ -430,45 +421,3 @@ def _check_step_return(
                 "model returns a build123d shape and nothing else. Declare mesh exports "
                 "with @stl/@threemf/@glb stacked on the model."
             )
-
-
-def _call_tail_name(function: ast.expr) -> str | None:
-    if isinstance(function, ast.Name):
-        return function.id
-    if isinstance(function, ast.Attribute):
-        return function.attr
-    return None
-
-
-def _is_nonempty_expression(expression: ast.expr) -> bool:
-    if isinstance(expression, ast.Constant) and expression.value is None:
-        return False
-    if isinstance(expression, (ast.List, ast.Tuple, ast.Set)):
-        return bool(expression.elts)
-    return True
-
-
-def _is_multi_item_sequence_expression(
-    expression: ast.expr,
-    *,
-    local_assignments: dict[str, ast.expr],
-    seen_names: set[str] | None = None,
-) -> bool:
-    if isinstance(expression, ast.Name):
-        seen_names = set(seen_names or set())
-        if expression.id in seen_names:
-            return False
-        target = local_assignments.get(expression.id)
-        if target is None:
-            return False
-        seen_names.add(expression.id)
-        return _is_multi_item_sequence_expression(
-            target,
-            local_assignments=local_assignments,
-            seen_names=seen_names,
-        )
-    if isinstance(expression, (ast.List, ast.Tuple, ast.Set)):
-        return len(expression.elts) > 1
-    return False
-
-

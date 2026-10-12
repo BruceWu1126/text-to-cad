@@ -4,8 +4,7 @@
 occurrences -- `#o1.12 shoulder_yaw_yoke` -- while `inspect refs` and `snapshot --focus/--hide`
 resolved against the whole-assembly topology sidecar, which is extracted from the COMPOSED
 compound and therefore describes any assembly as ONE occurrence. Every ref a user could pick was
-rejected by every tool that could measure it, and `--facts` reported `occurrenceCount: 1` for a
-160-part assembly.
+rejected by every tool that could measure it.
 
 These cover the merge itself (real package, real descriptor) and the transform arithmetic, which
 is the part with a wrong answer that looks plausible.
@@ -126,17 +125,6 @@ class AssemblyOccurrenceRefsTest(_AssemblyDisplayFixture, unittest.TestCase):
         self.assertIsNotNone(lookup.lookup_selector("#o1", merged))
         self.assertEqual(flat.single_occurrence_id, merged.single_occurrence_id)
 
-    def test_the_reported_occurrence_count_stops_saying_one(self) -> None:
-        merged = assembly_lookup.merge_assembly_occurrences(
-            self._flat_index(), self.descriptor, self.package_dir
-        )
-        summary = lookup.entry_summary(merged)
-        self.assertGreater(
-            int(summary["occurrenceCount"]),
-            1,
-            "`inspect refs --facts` reported occurrenceCount 1 for a whole assembly",
-        )
-
     def test_a_part_artifact_is_composed_like_any_tree(self) -> None:
         """A tree's selector tables live in its components, a part's single component
         included: skipping parts left them with the empty base index, so no face or
@@ -216,20 +204,6 @@ class AssemblyEntityRefsTest(_AssemblyDisplayFixture, unittest.TestCase):
             length = sum(component * component for component in row["normal"]) ** 0.5
             self.assertAlmostEqual(1.0, length, places=6, msg=f"{row['id']} normal is not unit")
 
-    def test_adjacency_stays_inside_the_occurrence(self) -> None:
-        """Relation rows index their own component's tables and are re-based as they merge.
-        Without that, adjacency returns confident wrong neighbours -- worse than none."""
-        merged = self._merged()
-        occurrence_id = str(self.descriptor["occurrences"][0]["id"])
-        _, face = lookup.lookup_selector(f"#{occurrence_id}.f1", merged)
-        neighbours = lookup.face_adjacent_edge_selectors(face, merged)
-        self.assertTrue(neighbours, "a solid's face has adjacent edges")
-        for selector in neighbours:
-            self.assertTrue(
-                selector.startswith(f"{occurrence_id}."),
-                f"{selector} escaped {occurrence_id} -- relation offsets are wrong",
-            )
-
     def test_the_flat_entity_namespace_still_resolves(self) -> None:
         """Additive, again: a bare `#f1` still canonicalizes through single_occurrence_id into
         the composed-compound namespace, which is what every part-shaped caller relies on."""
@@ -239,7 +213,7 @@ class AssemblyEntityRefsTest(_AssemblyDisplayFixture, unittest.TestCase):
 
 
 class MergedRowsAreInternallyConsistentTest(_AssemblyDisplayFixture, unittest.TestCase):
-    """Every id and every RANGE a merged row carries must point somewhere true.
+    """Every id a merged row carries must point somewhere true.
 
     A component's rows index that component's own tables. Copied across unchanged they all still
     RESOLVE -- against the wrong thing, which is worse than not resolving at all, because the
@@ -282,81 +256,23 @@ class MergedRowsAreInternallyConsistentTest(_AssemblyDisplayFixture, unittest.Te
             checked += 1
         self.assertGreater(checked, 0, "no placed faces were checked")
 
-    def test_shape_refs_resolve_and_slice_their_own_faces(self) -> None:
+    def test_every_placed_shape_ref_resolves(self) -> None:
         merged = self._merged()
         checked = 0
         for shape in merged.shapes:
             occurrence_id = str(shape.get("occurrenceId") or "")
             if not occurrence_id or occurrence_id == "o1":
                 continue
-            self.assertIsNotNone(lookup.lookup_selector(f"#{shape['id']}", merged))
-            start = int(shape.get("faceStart") or 0)
-            count = int(shape.get("faceCount") or 0)
-            self.assertGreater(count, 0)
-            for face in merged.faces[start : start + count]:
-                self.assertEqual(
-                    shape["id"], str(face.get("shapeId")),
-                    "a shape's face range must contain exactly its own faces",
-                )
+            self.assertEqual("shape", lookup.lookup_selector(f"#{shape['id']}", merged)[0])
             checked += 1
         self.assertGreater(checked, 0, "no placed shapes were checked")
 
-    def test_an_occurrence_range_slices_its_own_entities(self) -> None:
-        merged = self._merged()
-        checked = 0
-        for occurrence_id, row in merged.occurrence_by_id.items():
-            if occurrence_id == "o1" or not int(row.get("faceCount") or 0):
-                continue
-            start = int(row["faceStart"])
-            faces = merged.faces[start : start + int(row["faceCount"])]
-            self.assertTrue(faces, f"{occurrence_id} has an empty face range")
-            for face in faces:
-                self.assertEqual(occurrence_id, str(face.get("occurrenceId")))
-            checked += 1
-        self.assertGreater(checked, 0, "no occurrence ranges were checked")
-
-    def test_the_index_it_was_handed_is_left_alone(self) -> None:
-        """SelectorIndex is a frozen dataclass -- a value. `replace()` makes a new one, but the
-        ROW DICTS are shared, so writing occurrence ranges in place left the caller's index
-        claiming slices of lists it does not have."""
-        occurrences = assembly_lookup.merge_assembly_occurrences(
-            self._flat_index(), self.descriptor, self.package_dir
-        )
-        occurrence_id = str(self.descriptor["occurrences"][0]["id"])
-        before = dict(occurrences.occurrence_by_id[occurrence_id])
-        merged = assembly_lookup.merge_assembly_entities(
-            occurrences, self.descriptor, self.package_dir
-        )
-        self.assertEqual(
-            before, occurrences.occurrence_by_id[occurrence_id],
-            "the input index's occurrence row was rewritten in place",
-        )
-        self.assertGreater(
-            int(merged.occurrence_by_id[occurrence_id]["faceCount"]), 0,
-            "the merged index should carry the ranges instead",
-        )
-
-    def test_adjacency_rows_stay_in_range(self) -> None:
-        """Every relation row is an index into a list we concatenated into. An un-rebased one
-        still lands somewhere -- on another occurrence's edge."""
-        merged = self._merged()
-        for face in merged.faces:
-            occurrence_id = str(face.get("occurrenceId") or "")
-            if not occurrence_id or occurrence_id == "o1":
-                continue
-            for selector in lookup.face_adjacent_edge_selectors(face, merged):
-                self.assertTrue(
-                    selector.startswith(f"{occurrence_id}."),
-                    f"{face['id']} is adjacent to {selector}, which is not its own",
-                )
-
 
 class DormantPathsTest(unittest.TestCase):
-    """Vertex rebasing in isolation, and geometry that cannot be placed.
+    """Vertex placement in isolation, and geometry that cannot be placed.
 
-    A synthetic one-edge component, so the arithmetic of the vertex ranges and the
-    placement of a vertex can be checked against numbers chosen here rather than
-    read off a kernel's ordinals.
+    A synthetic one-edge component, so the placement of a vertex can be checked
+    against numbers chosen here rather than read off a kernel's ordinals.
     """
 
     def _fake_component(self):
@@ -376,16 +292,10 @@ class DormantPathsTest(unittest.TestCase):
                 ["o1.v1", "v1", "o1", 1, [0.0, 0.0, 0.0], 0, 1],
                 ["o1.v2", "v2", "o1", 2, [1.0, 0.0, 0.0], 1, 1],
             ],
-            "relations": {
-                "faceEdgeRows": [0],
-                "edgeFaceRows": [0],
-                "edgeVertexRows": [0, 1],
-                "vertexEdgeRows": [0, 0],
-            },
         }
         return lookup.build_selector_index(manifest)
 
-    def test_vertex_ranges_are_rebased_for_every_occurrence(self) -> None:
+    def test_every_occurrence_gets_its_own_placed_vertices(self) -> None:
         component = self._fake_component()
         descriptor = {
             "occurrences": [
@@ -401,16 +311,10 @@ class DormantPathsTest(unittest.TestCase):
             merged = assembly_lookup.merge_assembly_entities(flat, descriptor, Path("."))
 
         for occurrence_id in ("o1.1", "o1.2"):
-            edge = merged.edge_by_id[f"{occurrence_id}.e1"]
-            neighbours = lookup.edge_adjacent_vertex_selectors(edge, merged)
-            self.assertEqual(
-                [f"{occurrence_id}.v1", f"{occurrence_id}.v2"], neighbours,
-                f"{occurrence_id}.e1 reached another occurrence's vertices",
-            )
-            vertex = merged.vertex_by_id[f"{occurrence_id}.v2"]
-            self.assertEqual(
-                [f"{occurrence_id}.e1"], lookup.vertex_adjacent_edge_selectors(vertex, merged),
-            )
+            for local_id in ("v1", "v2"):
+                found = lookup.lookup_selector(f"#{occurrence_id}.{local_id}", merged)
+                self.assertEqual("vertex", found[0])
+                self.assertEqual(occurrence_id, found[1]["occurrenceId"])
         # ...and the second occurrence is genuinely 100 mm away, not a shared row.
         self.assertEqual(100.0, merged.vertex_by_id["o1.2.v1"]["center"][0])
         self.assertEqual(0.0, merged.vertex_by_id["o1.1.v1"]["center"][0])
@@ -650,11 +554,6 @@ class AssemblyGroupNodesTest(unittest.TestCase):
             lookup.build_selector_index(manifest), self.descriptor, self.package_dir
         )
         self.assertEqual("bar_pair", merged.group_nodes["o1.1"]["name"])
-        # And the count stays a LEAF count: a group resolves by expanding to leaves that
-        # are already in it.
-        self.assertEqual(
-            len(merged.occurrence_by_id), int(lookup.entry_summary(merged)["occurrenceCount"])
-        )
 
 
 if __name__ == "__main__":

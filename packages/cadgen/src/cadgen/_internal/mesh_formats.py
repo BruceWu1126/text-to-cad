@@ -243,9 +243,7 @@ def _place(positions: np.ndarray, normals: np.ndarray, placement: _Placement) ->
     return p.astype(np.float32), (n / length[:, None]).astype(np.float32)
 
 
-def occurrence_colors(
-    occurrence: Mapping[str, Any], tessellation: Tessellation, default_color: str | None = None,
-) -> list[str]:
+def occurrence_colors(occurrence: Mapping[str, Any], tessellation: Tessellation) -> list[str]:
     """Every face range of one occurrence resolved to its export colour: its own,
     else the occurrence's (a named material's ``baseColor``, then its STEP colour),
     the export default -- the chain the CAD Viewer and snapshots draw. The one chain,
@@ -256,7 +254,7 @@ def occurrence_colors(
     coloured occurrence the build met first, so an uncoloured sibling would take it."""
     base_color = str(occurrence.get("baseColor") or "")
     occurrence_color = base_color.lower() if _HEX.fullmatch(base_color) else linear_rgb_to_hex(occurrence.get("color"))
-    fallback = occurrence_color or (default_color or DEFAULT_COLOR).lower()
+    fallback = occurrence_color or DEFAULT_COLOR
     return [linear_rgb_to_hex(face_range.get("color")) or fallback for face_range in tessellation.face_ranges]
 
 
@@ -296,7 +294,6 @@ def build_primitives(
     descriptor: Mapping[str, Any],
     tessellations: Mapping[str, Tessellation],
     *,
-    default_color: str | None = None,
     per_occurrence: bool = False,
     hidden: frozenset[str] | set[str] = frozenset(),
     opacity: Mapping[str, float] | None = None,
@@ -314,8 +311,6 @@ def build_primitives(
     bending tube's refined mesh bound to its skin -- spliced in where its own
     would sort.
     """
-    if default_color is not None and not _HEX.fullmatch(default_color):
-        raise ValueError(f"the default export colour must be #rrggbb, got {default_color!r}")
     if overrides and not per_occurrence:
         raise ValueError("primitive overrides are keyed by occurrence, and the flat layout has none")
     groups: dict[str, _Group] = {}
@@ -344,7 +339,7 @@ def build_primitives(
                     material_id=material_id, material_name=material_name,
                 )
             continue
-        colors = occurrence_colors(occurrence, tessellation, default_color)
+        colors = occurrence_colors(occurrence, tessellation)
         for range_index, face_range in enumerate(tessellation.face_ranges):
             if int(face_range.get("indexCount") or 0) < 3:
                 continue

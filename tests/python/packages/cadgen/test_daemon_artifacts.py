@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import concurrent.futures
 import contextlib
-import copy
 import io
 import json
 import os

@@ -172,12 +172,6 @@ def import_step(step_path: Path, *, label: str | None = None) -> Any:
     return scene_to_build123d_compound(scene, label=label)
 
 
-def scene_occurrence_prototype_shape(scene: LoadedStepScene, node: OccurrenceNode) -> Any:
-    if node.prototype_key is None or node.prototype_key not in scene.prototype_shapes:
-        raise RuntimeError(f"Occurrence {occurrence_selector_id(node)} has no prototype shape")
-    return scene.prototype_shapes[node.prototype_key]
-
-
 def prototype_topology(shape: Any) -> dict[str, Any]:
     """What the adaptive edge policy reads of one prototype: its face and edge
     counts, how many of each are curved (not a plane, not a line), and its loose

@@ -549,8 +549,7 @@ def artifact_selector_index(artifact: StepTopologyArtifact | None) -> lookup.Sel
     manifest = selector_bundle.manifest if isinstance(selector_bundle.manifest, dict) else None
     if manifest is None:
         return None
-    buffers = selector_bundle.buffers if isinstance(selector_bundle.buffers, Mapping) else None
-    index = lookup.build_selector_index(manifest, buffers=buffers)
+    index = lookup.build_selector_index(manifest)
     # The bundle is extracted from the COMPOSED compound, which has no instance tree, so it
     # describes even a 160-part assembly as one occurrence -- and `--focus`/`--hide` rejected
     # every ref `--mode list` had just handed out. See `cadgen.assembly_lookup`.
@@ -879,23 +878,6 @@ def resolve_prepared_render_job(prepared: PreparedRenderJob) -> dict[str, object
         reference_root=prepared.reference_root,
         resolved_cwd=prepared.resolved_cwd,
         **prepared.context,
-    )
-
-
-def resolve_render_job(
-    raw_job: object,
-    *,
-    cwd: Path | None = None,
-    timestamp: str | None = None,
-    kinds: frozenset[str] | None = None,
-    job_index: int = 0,
-    job_count: int = 1,
-) -> dict[str, object]:
-    return resolve_prepared_render_job(
-        prepare_render_job(
-            raw_job, cwd=cwd, timestamp=timestamp, kinds=kinds,
-            job_index=job_index, job_count=job_count,
-        )
     )
 
 

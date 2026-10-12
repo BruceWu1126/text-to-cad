@@ -159,7 +159,6 @@ class PartStoreTest(unittest.TestCase):
             self.assertEqual(found[1]["tangentGroup"], face["tangentGroup"])
         vertex = lookup.lookup_selector(f"{occurrence}.v1", merged)
         self.assertEqual(vertex[0], "vertex")
-        self.assertEqual(len(lookup.vertex_adjacent_edge_selectors(vertex[1], merged)), 3)
 
 
 class PartRecordTest(unittest.TestCase):

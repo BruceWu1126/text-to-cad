@@ -1042,15 +1042,12 @@ def _produce_declared_mesh_exports(
         )
     if not pending:
         return ()
-    from cadgen.step_export_target import _color_hex
-
     jobs = list(pending)
     exported = run_mesh_exporter(
         # A mesh-only model's tree is its own geometry, selected by no document.
         MeshSource(tree_hash, document_hash if spec.step_output else None),
         jobs,
         name=spec.step_path.stem,
-        default_color=_color_hex(spec.color),
         logger=logger if logger is not None else CliLogger("cadgen", verbose=False),
         appearance=appearance,
     )

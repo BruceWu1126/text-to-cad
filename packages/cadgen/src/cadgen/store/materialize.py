@@ -551,12 +551,6 @@ def _material_from_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
     return resolved or None
 
 
-def tree_tag(shape: Any) -> str | None:
-    """The tree hash a materialized compound carries, or None."""
-    tag = getattr(shape, TREE_TAG, None)
-    return str(tag) if tag else None
-
-
 def materialize(tree_hash: str, *, label: str | None = None) -> Any:
     """A ``Compound`` for the tree. Raises FileNotFoundError when the tree or a
     component object is missing (the gate should have said stale)."""

@@ -7,14 +7,11 @@ verdict reads them (STORE.md).
 
 from __future__ import annotations
 
-import json
 import os
 import tempfile
-import time
 import unittest
 from pathlib import Path
 
-from cadgen.viewer import store_paths
 from cadgen.viewer.artifact_status import (
     artifact_status,
     owns_artifact_path,
@@ -62,8 +59,6 @@ class _Tree:
     def package(self, step_path, *, kind="assembly-package", components=("c0",), write_payloads=True):
         """Seed the document's result: a tree (one component per name) and a
         record keyed by the document itself. Returns the tree hash."""
-        import hashlib
-
         descriptor = {"kind": kind, "components": {f"k{i}": {} for i, _name in enumerate(components)}}
         tree = seed_result(step_path, descriptor)
         if not write_payloads:

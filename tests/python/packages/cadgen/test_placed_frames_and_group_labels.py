@@ -154,13 +154,14 @@ class AnalyticParamsAreWorldPlacedTest(PlacedPackageTestCase):
             "params.center is still component-local",
         )
 
-    def test_measure_reads_the_same_frame_it_reports(self) -> None:
-        """What `measure --axis` actually consumes. `positioning_facts_for_row` hands a circular
-        edge its analytic centre, and `positioning_point` prefers that over the bbox -- so a
-        local `params.center` reached the subtraction while the other target's did not."""
+    def test_an_axis_ref_reads_the_same_frame_it_reports(self) -> None:
+        """What a mate's axis ref consumes. `positioning_facts_for_row` hands a circular edge
+        its analytic centre, and the axis takes that as its origin
+        (`kinematics_resolve._axis_from_ref`) -- so a local `params.center` would put the axis
+        in the component's frame while the row's bounds are in the world's."""
         row = self._circle_edge()
         facts = analysis.positioning_facts_for_row("edge", row, self.index)
-        point = analysis.positioning_point(facts)
+        point = facts.get("origin") or facts.get("center") or facts.get("point")
         self.assertIsNotNone(point)
         bbox = row["bbox"]
         for axis in range(3):

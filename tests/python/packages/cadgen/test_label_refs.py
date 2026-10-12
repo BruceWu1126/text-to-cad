@@ -13,9 +13,7 @@ import unittest
 from cadgen.label_refs import (
     LabelResolutionError,
     build_label_aliases,
-    label_ref_for_occurrence,
     resolve_label_selectors,
-    selectors_contain_label,
 )
 
 
@@ -217,20 +215,6 @@ class NumericPassThroughTest(unittest.TestCase):
     def test_numeric_selectors_resolve_without_an_alias_map(self) -> None:
         # A model with no labels at all must keep working exactly as before.
         self.assertEqual(self.UNTOUCHED, resolve_label_selectors(self.UNTOUCHED, None))
-
-    def test_selectors_contain_label_only_flags_labels(self) -> None:
-        self.assertFalse(selectors_contain_label(self.UNTOUCHED))
-        self.assertTrue(selectors_contain_label(["o1.2", "eye_shank"]))
-
-
-class LabelRefLookupTest(unittest.TestCase):
-    def test_the_paste_spelling_is_reported_for_an_occurrence(self) -> None:
-        alias_map = build_label_aliases(
-            [{"id": "o1.1", "name": "eye_shank"}, {"id": "o1.2", "name": "tube"}]
-        )
-        self.assertEqual("#eye_shank", label_ref_for_occurrence(alias_map, "o1.1"))
-        self.assertEqual("", label_ref_for_occurrence(alias_map, "o9.9"))
-
 
 
 class OneNameRuleTest(unittest.TestCase):
