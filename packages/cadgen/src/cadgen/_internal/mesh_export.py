@@ -87,7 +87,6 @@ def run_mesh_exporter(
     jobs: "list[MeshExportJob]",
     *,
     name: str,
-    default_color: str | None,
     logger: Any,
     animation_source: AnimationSnapshot | None = None,
     appearance: object = None,
@@ -123,8 +122,8 @@ def run_mesh_exporter(
     ]
     _check_jobs(jobs, pairs, animation_source)
     with logger.timed(f"tessellate + write {label}"):
-        return _export(source, jobs, pairs, name=name, default_color=default_color,
-                       animation_source=animation_source, appearance=appearance)
+        return _export(source, jobs, pairs, name=name, animation_source=animation_source,
+                       appearance=appearance)
 
 
 def _check_jobs(jobs: "list[MeshExportJob]", pairs: list, animation_source: AnimationSnapshot | None) -> None:
@@ -155,7 +154,7 @@ def _check_jobs(jobs: "list[MeshExportJob]", pairs: list, animation_source: Anim
 
 
 def _export(source: MeshSource, jobs: "list[MeshExportJob]", pairs: list, *, name: str,
-            default_color: str | None, animation_source: AnimationSnapshot | None, appearance: object) -> dict:
+            animation_source: AnimationSnapshot | None, appearance: object) -> dict:
     from cadgen._internal import glb_animation
     from cadgen._internal.atomic_replace import write_bytes_atomic
     from cadgen._internal.mesh_formats import (
@@ -198,9 +197,9 @@ def _export(source: MeshSource, jobs: "list[MeshExportJob]", pairs: list, *, nam
                 # A bending tube's own primitives: its mesh refined and bound to its
                 # skin, in place of the rest tessellation the build would place.
                 primitives = build_primitives(
-                    descriptor, tessellations, default_color=default_color, per_occurrence=True,
+                    descriptor, tessellations, per_occurrence=True,
                     hidden=gltf_clip.hidden, opacity=gltf_clip.opacity,
-                    overrides=_skinned_tubes(descriptor, tessellations, gltf_clip, default_color),
+                    overrides=_skinned_tubes(descriptor, tessellations, gltf_clip),
                 )
                 # The clip names the DOCUMENT's occurrences, the file holds what
                 # meshed: an occurrence with no geometry is a named warning, never
@@ -215,7 +214,7 @@ def _export(source: MeshSource, jobs: "list[MeshExportJob]", pairs: list, *, nam
                 }
             else:
                 if static is None:
-                    static = build_primitives(descriptor, tessellations, default_color=default_color)
+                    static = build_primitives(descriptor, tessellations)
                 primitives = static
             triangles = total_triangles(primitives)
             if not triangles:
@@ -245,7 +244,7 @@ def _unmeshed_warnings(descriptor: dict, unmeshed: dict, written: str) -> list[s
             for cid, faces in unmeshed.items()]
 
 
-def _skinned_tubes(descriptor: dict, tessellations: dict, clip: Any, default_color: str | None) -> dict:
+def _skinned_tubes(descriptor: dict, tessellations: dict, clip: Any) -> dict:
     """Each bending tube's primitives, keyed by occurrence: its placed mesh refined and
     bound to its skin (``tube_skin.bind``), one primitive per face colour."""
     import numpy as np
@@ -271,7 +270,7 @@ def _skinned_tubes(descriptor: dict, tessellations: dict, clip: Any, default_col
             refined = bound.indices.reshape(-1, 3)
             source = (bound.source_triangles if bound.source_triangles is not None
                       else np.arange(len(refined), dtype=np.int64))
-            colors = occurrence_colors(occurrence, tessellation, default_color)
+            colors = occurrence_colors(occurrence, tessellation)
             triangle_colors = np.asarray([colors[int(face)] for face in ranges[source]])
             primitives = []
             for color in sorted(set(triangle_colors.tolist())):

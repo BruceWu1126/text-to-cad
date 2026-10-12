@@ -147,8 +147,6 @@ class Colour(unittest.TestCase):
         for descriptor, tessellation, expected in cases:
             with self.subTest(expected=expected):
                 self.assertEqual(expected, self.colours(descriptor, tessellation))
-        self.assertEqual({"#123456"}, self.colours({"components": {"c1": {}}, "occurrences": [occurrence("o1")]},
-                                                   cube(), default_color="#123456"))
 
     def test_an_uncoloured_occurrence_never_takes_a_siblings_colour_in_any_format(self):
         # Two occurrences of one component, one red: the store's build gives the shared

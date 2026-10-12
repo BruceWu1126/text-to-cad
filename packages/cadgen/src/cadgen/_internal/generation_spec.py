@@ -28,7 +28,6 @@ class EntrySpec:
     script_path: Path | None = None
     generator_metadata: GeneratorMetadata | None = None
     dxf_path: Path | None = None
-    color: tuple[float, float, float, float] | None = None
     # Declared mesh serializations, resolved to absolute paths. A tolerance
     # ``None`` is the display tolerance.
     mesh_exports: "tuple[ResolvedMeshExport, ...]" = ()
@@ -153,7 +152,6 @@ def _entry_spec_from_source(source: CadSource) -> EntrySpec:
         script_path=script_path,
         generator_metadata=generator_metadata,
         dxf_path=source.dxf_path,
-        color=source.color,
         mesh_exports=_resolve_mesh_exports(
             getattr(generator_metadata, "mesh_exports", ()) or (),
             script_path=script_path,

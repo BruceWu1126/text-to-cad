@@ -22,7 +22,6 @@ class CadSource:
     generator_metadata: GeneratorMetadata | None = None
     step_path: Path | None = None
     dxf_path: Path | None = None
-    color: tuple[float, float, float, float] | None = None
 
     @property
     def entry_path(self) -> Path | None:

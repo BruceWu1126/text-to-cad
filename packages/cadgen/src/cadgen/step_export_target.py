@@ -49,32 +49,6 @@ from cadgen.step_artifact_cli import _build_entry_spec
 # `cadgen step build`, and an imported model's STEP is already the file on disk.
 
 
-def _linear_channel_to_srgb_byte(channel: float) -> int:
-    """One LINEAR channel (0..1) to the 0..255 byte an sRGB hex carries.
-
-    The mirror of ``linearChannelToSrgbByte`` in ``packages/core/src/lib/color.js``
-    -- see that module for why the boundary exists.
-    """
-    clamped = max(0.0, min(1.0, channel))
-    srgb = clamped * 12.92 if clamped <= 0.0031308 else 1.055 * clamped ** (1 / 2.4) - 0.055
-    return max(0, min(255, round(srgb * 255)))
-
-
-def _color_hex(color) -> str | None:
-    """LINEAR RGBA floats (0..1) -> sRGB ``#rrggbb``, or None when there is no
-    usable color.
-
-    A build123d ``Color`` / OCCT ``Quantity_Color`` is linear; the hex this
-    feeds the exporter as its default colour is sRGB (the GLB writer decodes it
-    back to a linear ``baseColorFactor``, and 3MF's ``displaycolor`` is spec'd sRGB).
-    """
-    try:
-        red, green, blue = (_linear_channel_to_srgb_byte(float(c)) for c in tuple(color)[:3])
-    except (TypeError, ValueError):
-        return None
-    return f"#{red:02x}{green:02x}{blue:02x}"
-
-
 def _mesh_package(repo_root: Path, step_path: Path) -> "tuple[EntrySpec, MeshSource]":
     """What a mesh export cuts its meshes from: ``(spec, source)``.
 
@@ -152,7 +126,7 @@ def _export_mesh_jobs(
     for job in pending:
         job.out.parent.mkdir(parents=True, exist_ok=True)
     payload = run_mesh_exporter(
-        source, pending, name=spec.step_path.stem, default_color=_color_hex(spec.color),
+        source, pending, name=spec.step_path.stem,
         logger=logger, animation_source=animation_source, appearance=appearance,
     )
     for job in pending:
