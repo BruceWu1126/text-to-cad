@@ -423,6 +423,14 @@ def derive(tree_hash: str, cids: list[str] | None = None, *, producer: dict | No
     return result
 
 
+def all_stored(tree_hash: str, producer: dict) -> bool:
+    """Whether the store holds the display data of every part of ``tree_hash`` under
+    ``producer``: one probe a part, no kernel import."""
+    descriptor, selected = _captured(tree_hash, producer)
+    key = producer_key(selected)
+    return all(probe(_part_key(entry, key)) is not None for entry in descriptor["components"].values())
+
+
 def ensure_display(tree_hash: str, *, producer: dict | None = None,
                    progress: Callable[[int, int], None] | None = None) -> list[str]:
     """Derive in this process the display data of every part of ``tree_hash`` the store

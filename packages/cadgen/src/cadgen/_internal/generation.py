@@ -939,8 +939,36 @@ def _ensure_reused_display(spec: EntrySpec, tree: str | None, *, progress: objec
         if snapshot is None:
             return
         document_hash, tree = snapshot
-        producer = (document_entry_for_hash(document_hash) or {}).get("surfaceProducer")
+        producer = _reused_display_producer(
+            document_hash, tree, (document_entry_for_hash(document_hash) or {}).get("surfaceProducer"))
     _ensure_display(tree or "", producer=producer, progress=progress, logger=logger)
+
+
+def _reused_display_producer(document_hash: str, tree: str, hint: object) -> object:
+    """The producer a reused build derives its document's display data under.
+
+    The document's hint while this runtime implements it, or while the store holds every
+    part under it (a view reads those). Otherwise -- the kernel was upgraded, or another
+    cadgen wrote the hint -- this runtime's, and the document is re-attested with it, so
+    neither this build nor a view asks again for parts no worker can make. Re-attesting is
+    best effort: a store this process cannot write keeps the hint it has."""
+    import contextlib
+
+    from cadgen.store import parts
+
+    try:
+        current = parts.producer_identity()
+        hinted = parts.producer_fields(hint) if hint is not None else None
+    except (ValueError, TypeError):
+        return hint
+    if hinted is None or hinted == current or parts.all_stored(tree, hinted):
+        return hint
+    from cadgen.store.paths import StoreUnwritableError
+    from cadgen.store.records import note_document_tree
+
+    with contextlib.suppress(OSError, StoreUnwritableError):
+        note_document_tree(document_hash, tree, surface_producer=current)
+    return current
 
 
 def _produce_declared_mesh_exports(

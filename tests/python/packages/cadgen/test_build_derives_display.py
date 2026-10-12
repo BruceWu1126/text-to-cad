@@ -115,6 +115,26 @@ class BuildDerivesDisplayData(unittest.TestCase):
         with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=NO_JOB):
             self.assertEqual(set(self.listing()), {"block", "peg"})
 
+    def test_a_no_op_build_after_a_kernel_upgrade_derives_under_this_runtime(self) -> None:
+        """The document names the producer of the kernel it was built under, whose parts the
+        store no longer holds. A no-op build derives them under this runtime's producer, says
+        nothing about it, and re-attests the document, so views ask no worker for the old one."""
+        import json
+
+        from cadgen.store import parts
+
+        self.build()
+        [entry] = list((self.store / "index/document").iterdir())
+        document = json.loads(entry.read_text())
+        document["surfaceProducer"] = {"build123d": "0.0.1", "ocp": "7.0.0", "cadqueryOcp": "7.0.0.0"}
+        entry.write_text(json.dumps(document))
+        shutil.rmtree(self.store / "index/part")
+        self.assertEqual(self.build(), ("current", 2))
+        self.assertNotIn("warning", self.output)
+        self.assertEqual(json.loads(entry.read_text())["surfaceProducer"], parts.producer_identity())
+        with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=NO_JOB):
+            self.assertEqual(set(self.listing()), {"block", "peg"})
+
     def test_a_part_that_cannot_be_meshed_is_a_warning_on_the_build_naming_it(self) -> None:
         from cadgen._internal import occt_mesh
 
