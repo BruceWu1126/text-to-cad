@@ -292,7 +292,6 @@ import { loadSource } from "@text-to-cad/core/common/source.js";
   kind,
   meshData,
   selectorRuntime,
-  displayEdgeRuntime,
   pose,        // {articulation, values} or null: what buildModel's stepParameters takes
   animation,   // the baked animation section, or null
   resolved,
@@ -312,8 +311,8 @@ Accepted input fields:
   carries one.
 - `meshData`: already-loaded mesh data, in place of a package.
 - `cadPath` or `resolved.inputPath`: CAD path used by STEP selectors.
-- `selectorRuntime` and `displayEdgeRuntime`: runtimes a caller already holds;
-  `loadSource` composes neither.
+- `selectorRuntime`: a selector runtime the caller already holds; `loadSource`
+  composes none.
 - `articulation` or `resolved.articulation`: cadgen's articulation of the model's
   kinematics (`cadgen.articulation`), and `controls` or `resolved.controls`: the
   control vector to pose it at, which cadgen resolved from the job's `kinematics`

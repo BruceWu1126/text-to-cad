@@ -321,19 +321,18 @@ export async function loadSource(input, options = {}) {
     isObject(resolved.package) ? resolved.package : null
   );
   const selectorRuntime = inputObject.selectorRuntime || options.selectorRuntime || null;
-  const displayEdgeRuntime = inputObject.displayEdgeRuntime || options.displayEdgeRuntime || null;
   if (!explicitMeshData && packageInfo) {
     const diagnostics = options.stageTimings ? {} : null;
     const meshData = await loadPackageMeshData(packageInfo, diagnostics, options.tessellationCache, options);
     if (diagnostics) options.stageTimings.sourceLoad = diagnostics;
     // The articulation carries the composed occurrence ids each joint moves, so a package
     // poses with no selector runtime at all.
-    return { kind: SOURCE_KIND.STEP, meshData, selectorRuntime, displayEdgeRuntime, pose, animation, resolved, cadPath };
+    return { kind: SOURCE_KIND.STEP, meshData, selectorRuntime, pose, animation, resolved, cadPath };
   }
   if (!explicitMeshData) {
     throw new Error("loadSource requires a STEP document's package (package or resolved.package) or its meshData");
   }
-  return { kind, meshData: explicitMeshData, selectorRuntime, displayEdgeRuntime, pose, animation, resolved, cadPath };
+  return { kind, meshData: explicitMeshData, selectorRuntime, pose, animation, resolved, cadPath };
 }
 
 // Exported for tests only: the component-fetch retry is the recovery path for a

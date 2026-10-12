@@ -17,8 +17,7 @@ import {
 } from "./displayRecordTransform.js";
 import {
   resolveTopologyDisplayEdgeRuntimes,
-  shouldRenderTopologyDisplayEdges,
-  shouldUseRecordTopologyEdgeTransforms
+  shouldRenderTopologyDisplayEdges
 } from "./topologyDisplayEdgeRuntime.js";
 import {
   screenSpaceLineDeviceResolution,
@@ -455,12 +454,10 @@ export function renderJobContext(meshData, job = {}) {
   const wireframeMode = displayModeIsWireframe(displayMode);
   const edgesVisible = sceneSettings.view.edges.enabled;
   const selectorRuntime = job.selectorRuntime || null;
-  const displayEdgeRuntime = job.displayEdgeRuntime || null;
   const topologyDisplayEdgesVisible = shouldRenderTopologyDisplayEdges({
     edgesVisible,
     wireframeMode,
     cadEdgeSource: stepDisplayEnabled,
-    displayEdgeRuntime,
     selectorRuntime,
     edgeSettings
   });
@@ -484,7 +481,6 @@ export function renderJobContext(meshData, job = {}) {
     sharedRenderOptions,
     edgeSettings,
     selectorRuntime,
-    displayEdgeRuntime,
     topologyDisplayEdgesVisible
   };
 }
@@ -765,28 +761,13 @@ function applyViewportExplodedView(viewport, bounds, layoutBounds = bounds) {
 function syncViewportTopologyDisplayEdges(viewport) {
   const { context, model } = viewport;
   const renderedPartIds = displayRecordPartIds(model.displayRecords);
-  const baseEdgeRuntimes = resolveTopologyDisplayEdgeRuntimes({
+  const edgeRuntimes = resolveTopologyDisplayEdgeRuntimes({
     selectorRuntime: context.selectorRuntime,
-    displayEdgeRuntime: context.displayEdgeRuntime,
-    displayRecords: model.displayRecords,
-    transformDisplayEdges: false
-  });
-  const transformByRecord = shouldUseRecordTopologyEdgeTransforms({
-    transformDetected: baseEdgeRuntimes.transformCount > 0,
-    topologyDisplayEdgesVisible: context.topologyDisplayEdgesVisible,
-    displayEdgeRuntime: context.displayEdgeRuntime,
     displayRecords: model.displayRecords
   });
-  const edgeRuntimes = transformByRecord
-    ? baseEdgeRuntimes
-    : resolveTopologyDisplayEdgeRuntimes({
-        selectorRuntime: context.selectorRuntime,
-        displayEdgeRuntime: context.displayEdgeRuntime,
-        displayRecords: model.displayRecords
-      });
   syncTopologyDisplayEdgeLine(
     model.runtime,
-    transformByRecord ? context.displayEdgeRuntime : edgeRuntimes.topologyRuntime,
+    edgeRuntimes.selectorRuntime,
     {
       visible: context.topologyDisplayEdgesVisible,
       edgeSettings: renderedPartIds.length
@@ -796,7 +777,6 @@ function syncViewportTopologyDisplayEdges(viewport) {
           }
         : context.edgeSettings,
       viewerTheme: model.runtime?.baseTheme,
-      transformByRecord,
       displayRecords: model.displayRecords
     }
   );

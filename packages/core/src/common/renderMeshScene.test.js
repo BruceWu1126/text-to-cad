@@ -228,12 +228,10 @@ test("render display retains CAD runtimes and animation", () => {
     kind: "step",
     display: { mode: "render" },
     selectorRuntime: {},
-    displayEdgeRuntime: {},
     stepAnimation
   };
   const context = renderJobContext(twoPartMeshData(), job);
   assert.equal(context.selectorRuntime, job.selectorRuntime);
-  assert.equal(context.displayEdgeRuntime, job.displayEdgeRuntime);
   assert.equal(context.edgesVisible, false);
   const options = modelOptionsForRenderJob(context, job);
   assert.equal(options.callbacks.animation, stepAnimation);

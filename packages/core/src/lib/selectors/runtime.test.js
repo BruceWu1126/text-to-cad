@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  buildDisplayEdgeRuntime,
   buildSelectorRuntime,
-  buildTransformedDisplayEdgeRuntime,
   buildTransformedSelectorRuntime,
   composeSelectorRuntimes
 } from "./runtime.js";
@@ -376,73 +374,6 @@ test("buildTransformedSelectorRuntime applies part transforms to rows and proxy 
   assert.deepEqual(Array.from(transformed.proxy.edgeIndices), [0, 1]);
   assert.deepEqual(Array.from(transformed.proxy.edgeIds), [0]);
 });
-
-test("buildDisplayEdgeRuntime keeps compact edge rows without selector references", () => {
-  const runtime = buildDisplayEdgeRuntime({
-    manifest: {
-      schemaVersion: 2,
-      stepHash: "abc",
-      bbox: { min: [0, 0, 0], max: [1, 0, 0] },
-      tables: {
-        edgeColumns: ["occurrenceId", "segmentStart", "segmentCount", "visibilityClass"]
-      },
-      edges: [["o1", 0, 1, "feature"]],
-      edgeProxy: {
-        positionsView: "edgePositions",
-        indicesView: "edgeIndices",
-        edgeIdsView: "edgeIds"
-      }
-    },
-    buffers: {
-      edgePositions: new Float32Array([0, 0, 0, 1, 0, 0]),
-      edgeIndices: new Uint32Array([0, 1]),
-      edgeIds: new Uint32Array([0])
-    }
-  });
-
-  assert.equal(runtime.stepHash, "abc");
-  assert.deepEqual(runtime.edges, [{ occurrenceId: "o1", segmentStart: 0, segmentCount: 1, visibilityClass: "feature" }]);
-  assert.deepEqual(Array.from(runtime.proxy.edgeIndices), [0, 1]);
-  assert.equal(runtime.referenceMap, undefined);
-});
-
-test("buildTransformedDisplayEdgeRuntime applies occurrence transforms to edge proxy geometry", () => {
-  const runtime = buildDisplayEdgeRuntime({
-    manifest: {
-      schemaVersion: 2,
-      tables: {
-        edgeColumns: ["occurrenceId", "segmentStart", "segmentCount"]
-      },
-      edges: [["o1", 0, 1]],
-      edgeProxy: {
-        positionsView: "edgePositions",
-        indicesView: "edgeIndices",
-        edgeIdsView: "edgeIds"
-      }
-    },
-    buffers: {
-      edgePositions: new Float32Array([0, 0, 0, 1, 0, 0]),
-      edgeIndices: new Uint32Array([0, 1]),
-      edgeIds: new Uint32Array([0])
-    }
-  });
-  const transformed = buildTransformedDisplayEdgeRuntime(runtime, new Map([
-    ["o1", [
-      1, 0, 0, 10,
-      0, 1, 0, 20,
-      0, 0, 1, 30,
-      0, 0, 0, 1
-    ]]
-  ]));
-
-  assert.deepEqual(Array.from(transformed.proxy.edgePositions), [
-    10, 20, 30,
-    11, 20, 30
-  ]);
-  assert.deepEqual(Array.from(transformed.proxy.edgeIndices), [0, 1]);
-  assert.deepEqual(Array.from(transformed.proxy.edgeIds), [0]);
-});
-
 
 test("edge tangency, adjacency and connected ids survive remapping into separate assembly occurrences", () => {
   const bundle={manifest:{tables:{

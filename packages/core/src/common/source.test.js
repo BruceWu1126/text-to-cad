@@ -283,7 +283,7 @@ test("loadSource takes an articulation and animation inline for STEP sources", a
   assert.equal(source.animation, animation);
 });
 
-test("render display source loading keeps kinematics and supplied CAD runtimes", async () => {
+test("render display source loading keeps kinematics and a supplied selector runtime", async () => {
   const source = await loadSource({
     kind: "step",
     meshData: meshData(),
@@ -291,12 +291,10 @@ test("render display source loading keeps kinematics and supplied CAD runtimes",
     cadPath: "hinge.step",
     articulation: HINGE_ARTICULATION,
     controls: { swing: 45 },
-    selectorRuntime: { stale: true },
-    displayEdgeRuntime: { stale: true }
+    selectorRuntime: { stale: true }
   });
   assert.equal(source.kind, "step");
   assert.deepEqual(source.selectorRuntime, { stale: true });
-  assert.deepEqual(source.displayEdgeRuntime, { stale: true });
   assert.deepEqual(source.pose.values, { swing: 45 });
 });
 

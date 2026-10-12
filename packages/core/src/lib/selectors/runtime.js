@@ -662,64 +662,6 @@ export function buildSelectorRuntime(bundle, options = {}) {
   };
 }
 
-export function buildDisplayEdgeRuntime(bundle, {
-  transform = null,
-} = {}) {
-  const manifest = bundle?.manifest || {};
-  if (String(manifest.profile || "") === "surface-edges") {
-    const edgeRendering = manifest.edgeRendering && typeof manifest.edgeRendering === "object"
-      ? manifest.edgeRendering
-      : {};
-    return {
-      schemaVersion: Number(manifest.schemaVersion || 1),
-      surfaceEdgeRendering: true,
-      edgeRendering: {
-        visibilityClasses: Array.isArray(edgeRendering.visibilityClasses)
-          ? edgeRendering.visibilityClasses.map((item) => String(item || "").trim()).filter(Boolean)
-          : [],
-        generatedVisibilityClasses: Array.isArray(edgeRendering.generatedVisibilityClasses)
-          ? edgeRendering.generatedVisibilityClasses.map((item) => String(item || "").trim()).filter(Boolean)
-          : [],
-        visibilityClassCounts: edgeRendering.visibilityClassCounts || {},
-        generatedVisibilityClassCounts: edgeRendering.generatedVisibilityClassCounts || {},
-      },
-      stepHash: String(manifest.stepHash || ""),
-      bbox: transform ? transformBBox(transform, manifest.bbox || {}) : manifest.bbox,
-      edges: [],
-      proxy: {
-        edgePositions: new Float32Array(0),
-        edgeIndices: new Uint32Array(0),
-        edgeIds: new Uint32Array(0),
-      },
-    };
-  }
-  const buffers = bundle?.buffers || {};
-  const edgeProxy = manifest?.edgeProxy || {};
-  const edgePositionView = String(edgeProxy.positionsView || "edgePositions");
-  const edgeIndexView = String(edgeProxy.indicesView || "edgeIndices");
-  const edgeIdView = String(edgeProxy.edgeIdsView || "edgeIds");
-  const edgePositions = buffers[edgePositionView] instanceof Float32Array
-    ? buffers[edgePositionView]
-    : new Float32Array(0);
-  const edgeIndices = buffers[edgeIndexView] instanceof Uint32Array
-    ? buffers[edgeIndexView]
-    : new Uint32Array(0);
-  const edgeIds = buffers[edgeIdView] instanceof Uint32Array
-    ? buffers[edgeIdView]
-    : new Uint32Array(0);
-  return {
-    schemaVersion: Number(manifest.schemaVersion || 1),
-    stepHash: String(manifest.stepHash || ""),
-    bbox: transform ? transformBBox(transform, manifest.bbox || {}) : manifest.bbox,
-    edges: transformRows(toRows(manifest, "edges", "edgeColumns"), transform),
-    proxy: {
-      edgePositions: transformPositions(edgePositions, transform),
-      edgeIndices,
-      edgeIds,
-    },
-  };
-}
-
 function normalizedTransformEntries(value) {
   const entries = value instanceof Map
     ? [...value.entries()]
@@ -1443,36 +1385,6 @@ export function createSelectorRuntimeComposer() {
     compose,
     reset() {
       last = null;
-    },
-  };
-}
-
-export function buildTransformedDisplayEdgeRuntime(displayEdgeRuntime, transformByPartId = null) {
-  const transformEntries = normalizedTransformEntries(transformByPartId);
-  if (!displayEdgeRuntime || !transformEntries.length) {
-    return displayEdgeRuntime || null;
-  }
-
-  const edgesResult = transformRowsByOccurrence(displayEdgeRuntime.edges, "edge", transformEntries);
-  const proxy = displayEdgeRuntime.proxy || {};
-  const edgeProxy = transformIndexedProxy({
-    positions: proxy.edgePositions,
-    indices: proxy.edgeIndices,
-    ids: proxy.edgeIds,
-    rowTransforms: edgesResult.transforms,
-    elementSize: 2,
-  });
-  const modelTransform = transformEntries.find(([key]) => key === "__model__" || key === "*" || key === "__all__")?.[1] || null;
-
-  return {
-    ...displayEdgeRuntime,
-    bbox: modelTransform && displayEdgeRuntime.bbox ? transformBBox(modelTransform, displayEdgeRuntime.bbox) : displayEdgeRuntime.bbox,
-    edges: edgesResult.rows,
-    proxy: {
-      ...proxy,
-      edgePositions: edgeProxy.positions,
-      edgeIndices: edgeProxy.indices,
-      edgeIds: edgeProxy.ids,
     },
   };
 }

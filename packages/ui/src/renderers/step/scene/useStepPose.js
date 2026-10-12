@@ -201,7 +201,7 @@ export function useStepPose(layers) {
       runtime.topologyDisplayEdgeTransformByRecord = useRecordTopologyEdgeTransforms;
       syncTopologyDisplayEdgeLine(
         runtime,
-        useRecordTopologyEdgeTransforms ? null : nextEdgeRuntimes.topologyRuntime,
+        useRecordTopologyEdgeTransforms ? null : nextEdgeRuntimes.selectorRuntime,
         {
           visible: nextTopologyDisplayEdgesVisible,
           edgeSettings: hiddenAwareVisualEdgeSettings,
