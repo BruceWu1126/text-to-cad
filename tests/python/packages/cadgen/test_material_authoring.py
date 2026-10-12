@@ -220,17 +220,6 @@ def model():
                 material["roughness"] for material in inherited["materials"].values()
             })
 
-    def test_dynamic_cad_material_fails_with_migration_hint(self) -> None:
-        from cadgen._internal.component_package import _occurrence_material
-
-        class Shape:
-            pass
-
-        shape = Shape()
-        shape.cad_material = {"roughness": 0.2}
-        with self.assertRaisesRegex(ValueError, "@step\\(materials="):
-            _occurrence_material(shape)
-
     def test_model_build_writes_resolved_unified_sidecar_and_refresh_baseline(self) -> None:
         roots = IsolatedCadRoots(self, prefix="material-build-")
         temp = roots.temporary_cad_directory(prefix="material-build-")

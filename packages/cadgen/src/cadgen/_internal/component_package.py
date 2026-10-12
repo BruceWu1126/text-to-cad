@@ -262,16 +262,7 @@ _MATERIAL_KEYS = ("roughness", "metalness", "clearcoat", "clearcoatRoughness", "
 
 
 def _occurrence_material(child: Any) -> dict[str, Any] | None:
-    """Private material metadata restored from a pinned model tree.
-
-    Public ``cad_material`` mutation was replaced by ``@step(materials=...)``;
-    finding that dynamic attribute is therefore a hard authoring error.
-    """
-    if "cad_material" in getattr(child, "__dict__", {}):
-        raise ValueError(
-            "cad_material authoring was removed; declare named materials with "
-            "@step(materials={'definitions': ..., 'assignments': ...})"
-        )
+    """Private material metadata restored from a pinned model tree."""
     material = getattr(child, "_cadgen_material", None)
     if not isinstance(material, dict):
         return None
