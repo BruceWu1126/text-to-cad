@@ -78,7 +78,10 @@ RECORD_SCHEMA_VERSION = 8
 # Schema 7: the producer hint names the kernel alone (build123d, OCP and
 # its distribution); the part version (store.parts.PART_VERSION) versions the
 # extraction, the selector table and the mesh derived under it.
-DOCUMENT_SCHEMA_VERSION = 7
+# Schema 8: the tree an entry names is geometry schema 3 (store.trees.TREE_SCHEMA),
+# and the hint is ``producer``. A schema-7 entry names a schema-2 tree this cadgen
+# cannot read: on its own key it would be taken for a hit that no view can open.
+DOCUMENT_SCHEMA_VERSION = 8
 
 
 def record_key(model: Path | str) -> str:

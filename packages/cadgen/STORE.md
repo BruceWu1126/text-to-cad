@@ -622,8 +622,9 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   This is one source rebuild; existing geometry objects and parts remain reusable.
   A record with no `closure.own` leaves nothing out of its listings, which is
   how it hashed them, so it needs no new schema.
-  Document mappings use payload schema 7 (the producer hint names the kernel
-  alone): saved bytes stay authoritative and are reparsed without guessing
+  Document mappings use payload schema 8 (the tree an entry names is geometry
+  schema 3, and the hint is `producer`; schema 7 named schema-2 trees): saved
+  bytes stay authoritative and are reparsed without guessing
   colours that the document does not contain. There are no directory or document-byte-key salts. Trees
   use only geometry schema 3; there is no optional old-tree decoder. Schema 3
   admits resolved named intrinsic appearance on authored trees and pins an
