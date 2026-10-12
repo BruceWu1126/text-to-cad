@@ -12,7 +12,7 @@ import { isAnimationClip } from "./animationRuntime.js";
 
 // Whether the transport drives the model is a GATE, not a selection: the
 // Animation section's enable switch. With it off the evaluator never runs and
-// the model shows exactly the pose the Pose tab set. The clip picker therefore
+// the model shows exactly the pose Position set. The clip picker therefore
 // carries the model's authored clips and nothing else -- a built-in "no clip"
 // entry used to stand in for this gate, which read as an authored clip named
 // after a state and collided with pose presets literally named `rest`.
@@ -184,7 +184,7 @@ export function restoreAnimationState(stored, clips) {
 
 /** What the render pass draws for the animation system, or null when the
  * transport is not driving the model. Null IS the rest scene: with no frame the
- * evaluator never runs and the model shows exactly what the Pose tab set, which
+ * evaluator never runs and the model shows exactly what Position set, which
  * is the one behaviour the section's gate switch has to reproduce. */
 export function animationRenderFrame({
   enabled = true,

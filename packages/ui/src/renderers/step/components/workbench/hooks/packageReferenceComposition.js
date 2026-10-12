@@ -60,7 +60,7 @@ function transformKey(transform) {
 }
 
 // Incremental composition for one viewer: each placed occurrence is built into a composition part
-// once — keyed by its component bundle (the exact tessellation, so an LOD level or a new file
+// once — keyed by its component bundle (the exact bundle object, so a new file
 // revision is a different part), its occurrence, placement and copy prefix — and composed by one
 // `createSelectorRuntimeComposer`, which re-places only what moved and extends the previous result
 // when the new composition begins with it. Adding N occurrences builds N parts, whatever is already

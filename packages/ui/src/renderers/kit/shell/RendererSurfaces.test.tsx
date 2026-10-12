@@ -2,13 +2,12 @@ import React, { forwardRef, useImperativeHandle, useRef } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-// The shell's surfaces a RENDERER fills — the viewport menu, Quick Edit, the camera-settled
-// report — driven end to end through the real RendererShell and useRendererShell under the shell
-// harness (a renderer that uses all three), with only the WebGL viewport replaced. The stand-in
+// The shell's surfaces a RENDERER fills — the viewport menu and Quick Edit — driven end to end
+// through the real RendererShell and useRendererShell under the shell
+// harness (a renderer that uses both), with only the WebGL viewport replaced. The stand-in
 // hands the overlay the same viewport context the real one does (a host the pointer events arrive
 // on, a runtime whose renderer's canvas is the scene's), and records the props the shell wired, so
-// the camera reports reach the renderer through exactly the callbacks the real viewport calls.
-// The viewport's own half of those reports (a resize, a preview camera) is ShellViewport.test.tsx.
+// the camera reports reach the shell through exactly the callbacks the real viewport calls.
 const viewport = vi.hoisted(() => ({ props: null as any }));
 vi.mock('../../../../dist/renderers/kit/shell/ShellViewport.js', () => ({
   default: forwardRef(function StandInViewport(props: any, ref) {

@@ -65,7 +65,7 @@ test("ensureFacePickBvh rebuilds when the proxy index array identity changes", a
   ensureFacePickBvh(runtime, { proxy });
   assert.equal(runtime.facePickMesh.geometry.boundsTree, first);
 
-  // New index array (a LOD swap): the cache misses and a new BVH is built.
+  // New index array (a new selector composition): the cache misses and a new BVH is built.
   proxy.faceIndices = new Uint32Array([0, 2, 1, 0, 3, 2]);
   runtime.facePickMesh = makeMesh();
   ensureFacePickBvh(runtime, { proxy });

@@ -1629,7 +1629,7 @@ test("update({ source }) keeps a bent tube's skin geometry and state", () => {
   scene.dispose();
 });
 
-test("LOD publication preserves unaffected surface sets and retires only replaced geometry", () => {
+test("a republication preserves unaffected surface sets and retires only replaced geometry", () => {
   const componentA = surfComponentMeshData();
   const componentB = surfComponentMeshData();
   const order = [0, 1, 2, 3, 4, 5];
@@ -1660,7 +1660,7 @@ test("LOD publication preserves unaffected surface sets and retires only replace
     assert.equal(scene.runtime.cadSurfaceInstanceSets.size, 2);
     assert.equal(scene.displayRecords.find((item) => item.partId === "o1").geometry.attributes.position.array, replacement.vertices);
   }
-  assert.equal(bDisposes, 1, "the departed LOD set is released once");
+  assert.equal(bDisposes, 1, "the replaced component's set is released once");
   assert.equal(bSet.disposed, true);
   scene.dispose();
   assert.equal(aDisposes, 1, "the retained set releases its buffers at final scene disposal");

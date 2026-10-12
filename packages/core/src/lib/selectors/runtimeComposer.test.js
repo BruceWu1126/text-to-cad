@@ -28,7 +28,7 @@ const EDGE_COLUMNS = ["id", "localId", "occurrenceId", "shapeId", "ordinal", "cu
 // `faces` faces over `shapes` solids; each face bounded by a loop of edges that share their
 // end vertices with the next edge BY VALUE (sometimes through a duplicated vertex index), plus a
 // closed circle, a branched edge and a degenerate segment. `detail` scales the edge polylines
-// and the face proxy, as a finer LOD level of the same topology would.
+// and the face proxy, as a denser mesh of the same topology would.
 function makeBundle(seed, { faces: faceCount = 4, shapes: shapeCount = 2, detail = 1, faceProxy = true, stepHash = "h1" } = {}) {
   const rand = random(seed);
   const coord = () => Math.round((rand() * 200 - 100) * 1e4) / 1e4 + 0.1;

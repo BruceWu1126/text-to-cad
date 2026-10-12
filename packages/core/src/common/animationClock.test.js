@@ -62,7 +62,7 @@ test("a model opens on its first declared clip, gated on and paused", () => {
 
 test("the gate, not the selection, decides whether a clip drives the model", () => {
   // The render pass gets a frame or it gets null, and null IS the rest scene:
-  // the evaluator never runs and the model shows exactly what the Pose tab set.
+  // the evaluator never runs and the model shows exactly what Position set.
   // That is the behaviour the removed "No clip" entry used to produce, now on a
   // switch, so turning animation off costs the render path no new code.
   assert.deepEqual(

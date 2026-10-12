@@ -182,7 +182,7 @@ function cacheForOwner(cacheOwner) {
 
 // Geometry built from a shared component (`part.sourceMesh`) is cached on the
 // COMPONENT, not on the composed meshData: a package is re-composed on every
-// progressive publish and every LOD swap, and a cache keyed on those wrappers
+// progressive publish, and a cache keyed on those wrappers
 // re-created and re-uploaded every component's buffers each time while the
 // previous copies lingered undisposed (the hand: ~27 publishes, ~170k GPU
 // buffers, ~7 GB). The component object is stable for as long as it is loaded.
@@ -873,7 +873,7 @@ export function applyMaterialSettingsToRecord(THREE, record, materialSettings, {
   }
   // Colours and PBR strengths are uniforms. Only these explicit mode changes
   // need a program refresh; MeshPhysicalMaterial's clearcoat setter handles its
-  // own feature transition. Stable LOD publications keep the material version.
+  // own feature transition. A publication that changes neither keeps the material version.
   if (previousVertexColors !== record.material.vertexColors || previousTransparent !== record.material.transparent) {
     record.material.needsUpdate = true;
   }
@@ -2332,10 +2332,10 @@ export function buildModel(THREE, source, settings = {}) {
     currentPartsKey = renderPartsKey(meshData, runtime.theme, nextSettings);
   };
 
-  // Same build settings, different parts (a progressive publish, a LOD swap,
-  // a filter): keep every record that still applies, add and remove the rest.
+  // Same build settings, different parts (a progressive publish, a filter):
+  // keep every record that still applies, add and remove the rest.
   const reconcile = (nextSettings = currentSettings) => {
-    // Keep compatible instance sets across progressive and LOD publications.
+    // Keep compatible instance sets across progressive publications.
     // The mutable-state reconciler below retires only sets whose records or
     // render pass changed, preserving unaffected upload buffers and materials.
     setRuntimeTheme(runtime, nextSettings);

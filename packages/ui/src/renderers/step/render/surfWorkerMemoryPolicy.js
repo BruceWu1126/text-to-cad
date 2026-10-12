@@ -19,7 +19,7 @@ export function installSurfWorkerMemoryProvider(
 }
 
 // One shared provider keeps diagnostics and admission current even when the
-// pool was changed by a selector, LOD, or package consumer other than the
+// pool was changed by a selector or package consumer other than the
 // caller taking the snapshot.
 installSurfWorkerMemoryProvider();
 
