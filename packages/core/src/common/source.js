@@ -2,13 +2,13 @@ import { createHttpCadResourceProvider } from "../client/resources.js";
 import {
   buildComposedPackageMeshData
 } from "../lib/assembly/meshData.js";
-import { buildComponentMeshData } from "../lib/surf/surfMeshData.js";
+import { buildComponentMeshData } from "../lib/parts/partMeshData.js";
 import { validateSnapshotRenderJob } from "./snapshotJobValidation.js";
 import {
   TESS_PROBE_MAX_KEYS,
   decodeComponentTessellation,
   tessBatchMaxBytes,
-} from "../lib/surf/tessellationCache.js";
+} from "../lib/parts/tessellationCache.js";
 import { normalizeControlValues } from "./articulation.js";
 
 // A render source is a STEP document: its model is composed here and built by `buildModel`

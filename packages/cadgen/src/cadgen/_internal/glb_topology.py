@@ -3,10 +3,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-STEP_TOPOLOGY_EDGE_CLASSIFICATION_ALGORITHM = "oc-brep-continuity-v1"
-STEP_TOPOLOGY_SURFACE_EDGE_ALGORITHM = "oc-polygon-on-triangulation-v1"
-STEP_TOPOLOGY_EDGE_ANGULAR_TOLERANCE_DEG = 2
-STEP_TOPOLOGY_EDGE_SAMPLE_COUNT = 3
+STEP_EDGE_CLASSIFICATION_ALGORITHM = "oc-brep-continuity-v1"
+STEP_EDGE_SURFACE_ALGORITHM = "oc-polygon-on-triangulation-v1"
+STEP_EDGE_ANGULAR_TOLERANCE_DEG = 2
+STEP_EDGE_SAMPLE_COUNT = 3
 STEP_EDGE_BARYCENTRIC_ATTRIBUTE = "_CAD_EDGE_BARYCENTRIC"
 STEP_EDGE_CLASS_ATTRIBUTE = "_CAD_EDGE_CLASS"
 STEP_EDGE_FLAGS = {
@@ -72,18 +72,18 @@ def normalize_step_edge_render_visibility_classes(value: object) -> tuple[str, .
     return tuple(ordered + extras)
 
 
-def step_topology_capabilities(
+def step_edge_capabilities(
     edge_visibility_classes: object = None,
 ) -> dict[str, Any]:
     visibility_classes = normalize_step_edge_render_visibility_classes(edge_visibility_classes)
     return {
         "edgeClassification": {
-            "algorithm": STEP_TOPOLOGY_EDGE_CLASSIFICATION_ALGORITHM,
-            "angularToleranceDeg": STEP_TOPOLOGY_EDGE_ANGULAR_TOLERANCE_DEG,
-            "samples": STEP_TOPOLOGY_EDGE_SAMPLE_COUNT,
+            "algorithm": STEP_EDGE_CLASSIFICATION_ALGORITHM,
+            "angularToleranceDeg": STEP_EDGE_ANGULAR_TOLERANCE_DEG,
+            "samples": STEP_EDGE_SAMPLE_COUNT,
         },
         "surfaceEdgeRendering": {
-            "algorithm": STEP_TOPOLOGY_SURFACE_EDGE_ALGORITHM,
+            "algorithm": STEP_EDGE_SURFACE_ALGORITHM,
             "primitiveAttributes": {
                 "barycentric": STEP_EDGE_BARYCENTRIC_ATTRIBUTE,
                 "class": STEP_EDGE_CLASS_ATTRIBUTE,
@@ -94,7 +94,7 @@ def step_topology_capabilities(
     }
 
 
-def build_step_topology_index_manifest(
+def build_step_index_manifest(
     manifest: Mapping[str, Any],
     *,
     entry_kind: str | None = None,

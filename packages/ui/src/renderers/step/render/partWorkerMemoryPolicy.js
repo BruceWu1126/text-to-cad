@@ -1,4 +1,4 @@
-import { surfWorkerMemoryStats } from "@text-to-cad/core/lib/renderAssetClient.js";
+import { partWorkerMemoryStats } from "@text-to-cad/core/lib/renderAssetClient.js";
 
 import { viewerMemoryPolicy } from "./viewerMemoryPolicy.js";
 
@@ -7,9 +7,9 @@ export function workerResidentBytesFromStats(stats) {
   return Number.isFinite(value) && value > 0 ? Math.ceil(value) : 0;
 }
 
-export function installSurfWorkerMemoryProvider(
+export function installPartWorkerMemoryProvider(
   policy = viewerMemoryPolicy,
-  readStats = surfWorkerMemoryStats,
+  readStats = partWorkerMemoryStats,
 ) {
   policy.setRetainedProvider(
     "workerResidentEstimated",
@@ -21,9 +21,9 @@ export function installSurfWorkerMemoryProvider(
 // One shared provider keeps diagnostics and admission current even when the
 // pool was changed by a selector or package consumer other than the
 // caller taking the snapshot.
-installSurfWorkerMemoryProvider();
+installPartWorkerMemoryProvider();
 
-export function syncSurfWorkerMemory() {
+export function syncPartWorkerMemory() {
   const snapshot = viewerMemoryPolicy.snapshot();
   if (typeof window !== "undefined") window.__cadViewerMemory = snapshot;
   return snapshot;

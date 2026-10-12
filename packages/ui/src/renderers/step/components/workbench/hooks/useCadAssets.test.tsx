@@ -4,11 +4,11 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { createHttpCadResourceProvider, SurfaceResolutionError } from '@text-to-cad/core/client';
+import { createHttpCadResourceProvider, PartResolutionError } from '@text-to-cad/core/client';
 import { entryHasMesh, entryHasReferences } from '@text-to-cad/core/lib/entryAssets.js';
 import { renderAssetCacheStats } from '@text-to-cad/core/lib/renderAssetClient.js';
-import { createTessellationCache, partRow } from '@text-to-cad/core/lib/surf/tessellationCache.js';
-import { encodeMeshFixture, partMeshFacts, partSelectorFacts } from '@text-to-cad/core/lib/surf/testing.js';
+import { createTessellationCache, partRow } from '@text-to-cad/core/lib/parts/tessellationCache.js';
+import { encodeMeshFixture, partMeshFacts, partSelectorFacts } from '@text-to-cad/core/lib/parts/testing.js';
 import { completedPackages } from '../../../render/completedPackageCache.js';
 import { viewerMemoryPolicy } from '../../../render/viewerMemoryPolicy.js';
 import { useCadAssets } from './useCadAssets.js';
@@ -109,8 +109,8 @@ it('restores all 317 STEP components after remount without a descriptor, probe o
     expect(first.result.current.meshState.meshData.parts).toHaveLength(317);
     const firstVertices = first.result.current.meshState.meshData.parts[0].sourceMesh.vertices;
     expect(bodies).toHaveBeenCalledTimes(317);
-    expect(renderAssetCacheStats().surfLeash.limit).toBe(24);
-    expect(renderAssetCacheStats().surfLeash.entries).toBeLessThanOrEqual(24);
+    expect(renderAssetCacheStats().partLeash.limit).toBe(24);
+    expect(renderAssetCacheStats().partLeash.entries).toBeLessThanOrEqual(24);
     first.unmount();
     session.dispose();
     expect(completedPackages.stats().entries).toBe(1);
@@ -164,8 +164,8 @@ it('keeps a failed load\'s error, and its model partial', async () => {
   const probe = vi.fn(async parts => parts.map(part => (part === cold ? null : encoded.get(part)?.row || null)));
   const many = vi.fn(async rows => rows.map(row => encoded.get(row.part)?.bytes.slice() || null));
   const owner = createTessellationCache({ provider: { probeMany: probe, getProbed: vi.fn(), getManyProbed: many } });
-  const failing = { ...client, resolveSurfaceComponents: vi.fn(async () => {
-    throw new SurfaceResolutionError('artifact request failed: cadgen-daemon: could not start a worker');
+  const failing = { ...client, resolveParts: vi.fn(async () => {
+    throw new PartResolutionError('artifact request failed: cadgen-daemon: could not start a worker');
   }) };
   try {
     const opened = renderHook(() => assets(model, failing, owner.createSession()));
@@ -190,7 +190,7 @@ it('has cadgen derive a part the store lacks in its request, then reads its mesh
   const many = vi.fn(async rows => rows.map(row => encoded.get(row.part)?.bytes.slice() || null));
   const owner = createTessellationCache({ provider: { probeMany: probe, getProbed: single, getManyProbed: many } });
   const requested = [];
-  const deriving = { ...client, resolveSurfaceComponents: vi.fn(async (_descriptor, components) => {
+  const deriving = { ...client, resolveParts: vi.fn(async (_descriptor, components) => {
     requested.push(...components);
     // What cadgen does with the request: derives each part and stores it.
     return new Map(components.map(({ cid, part }) => {
@@ -224,11 +224,11 @@ it('draws the rest of a model when cadgen cannot mesh one component, and reports
     probeMany: async parts => parts.map(part => (cold.includes(part) ? null : encoded.get(part)?.row || null)),
     getProbed: async row => read(row), getManyProbed: async rows => rows.map(read) } });
   const failure = 'component c250: OCCT did not mesh 1 face(s) of the component: f2';
-  const meshing = { ...client, resolveSurfaceComponents: vi.fn(async (_descriptor, requested, options) => {
+  const meshing = { ...client, resolveParts: vi.fn(async (_descriptor, requested, options) => {
     const ready = new Map();
     for (const { cid, part } of requested) {
       if (cid === 'c250') {
-        const error = new SurfaceResolutionError(failure, { cid });
+        const error = new PartResolutionError(failure, { cid });
         if (!options.onFailed) throw error;
         options.onFailed(cid, error);
         continue;
@@ -262,7 +262,7 @@ it('names the parts drawn without a face cadgen could not mesh', async () => {
   const owner = createTessellationCache({ provider: {
     probeMany: async parts => parts.map(part => (part === cold ? null : encoded.get(part)?.row || null)),
     getProbed: async row => read(row), getManyProbed: async rows => rows.map(read) } });
-  const meshing = { ...client, resolveSurfaceComponents: vi.fn(async (_descriptor, requested) => new Map(
+  const meshing = { ...client, resolveParts: vi.fn(async (_descriptor, requested) => new Map(
     requested.map(({ cid, part }) => {
       // What cadgen stores for it: its first face drawn, its second, which no mesher covered, named.
       encoded.set(part, storedPart(part, { ...TRIANGLE, unmeshedFaces: [2],
@@ -283,7 +283,7 @@ it('names the parts drawn without a face cadgen could not mesh', async () => {
 
 // The core fixture parts: cadgen's display mesh of each, its selector table and its row.
 function fixtureParts(names: string[]) {
-  const dir = path.join(path.dirname(createRequire(import.meta.url).resolve('@text-to-cad/core/lib/surf/tessellationCache.js')), 'fixtures');
+  const dir = path.join(path.dirname(createRequire(import.meta.url).resolve('@text-to-cad/core/lib/parts/tessellationCache.js')), 'fixtures');
   const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'fixtures.json'), 'utf8'));
   return names.map((name) => {
     const bytes = new Uint8Array(fs.readFileSync(path.join(dir, `${name}.glb`)));
@@ -324,13 +324,13 @@ it('reads a cold part\'s topology by the record cadgen derives, and asks again f
   const underivable = new Set();
   const asked = [];
   const client = { origin: 'https://cad-assets.test', resources: createHttpCadResourceProvider(),
-    resolveSurfaceComponents: async (_view, requested, options = {}) => {
+    resolveParts: async (_view, requested, options = {}) => {
       asked.push(requested.map(({ cid }) => cid).join());
       // cadgen derives what a request names, once the test lets it.
       await deriving;
       const failed = requested.filter(({ cid }) => underivable.has(cid));
       for (const { cid } of failed) {
-        const error = new SurfaceResolutionError(`component ${cid}: OCCT did not mesh 1 face(s)`, { cid });
+        const error = new PartResolutionError(`component ${cid}: OCCT did not mesh 1 face(s)`, { cid });
         if (!options.onFailed) throw error;
         options.onFailed(cid, error);
       }

@@ -101,10 +101,10 @@ class HitsNeverWrite(StoreSweepCase):
         from cadgen.store.gate import stale
         from cadgen.store.records import tree_for_document_hash
         from cadgen.store.trees import capture_tree, get_tree
-        from tests.python.support.store_fixtures import FIXTURE_SURFACE_PRODUCER
+        from tests.python.support.store_fixtures import FIXTURE_PRODUCER
 
         tree, _brep = self.seed_document()
-        part = parts.part_key(next(iter(get_tree(tree)["components"].values())), FIXTURE_SURFACE_PRODUCER)
+        part = parts.part_key(next(iter(get_tree(tree)["components"].values())), FIXTURE_PRODUCER)
         drawings.write("d" * 64, b"drawing payload")
         versions = ("0.11.1", "7.9.3.1", "7.9.3.1.1")
         with mock.patch.object(bounds, "kernel_versions", return_value=versions):
@@ -120,7 +120,7 @@ class HitsNeverWrite(StoreSweepCase):
         self.assertFalse(stale(self.root / "part.step").stale)
         self.assertEqual(tree_for_document_hash(hashlib.sha256(b"fixture document").hexdigest()), tree)
         self.assertIsNotNone(capture_tree(tree, retain_payloads=False))
-        self.assertEqual(parts.ensure_display(tree, producer=FIXTURE_SURFACE_PRODUCER), [], "every part is stored")
+        self.assertEqual(parts.ensure_display(tree, producer=FIXTURE_PRODUCER), [], "every part is stored")
         self.assertIsNotNone(parts.probe(part))
         self.assertIsNotNone(parts.read(part, "glb"))
         self.assertIsNotNone(parts.read(part, "selectors"))

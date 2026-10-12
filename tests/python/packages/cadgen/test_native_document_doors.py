@@ -55,7 +55,7 @@ class NativeDocumentDoors(unittest.TestCase):
         derived = sorted(path.name for path in (self.store / "index/part").glob("*"))
         with contextlib.ExitStack() as stack:
             for name in ("cadgen.daemon.artifacts.submit_artifact", "cadgen.daemon.artifacts.resolve_artifact",
-                         "cadgen.store.parts._derive", "cadgen._internal.surface_extract.extract_topology_facts",
+                         "cadgen.store.parts._derive", "cadgen._internal.topology_extract.extract_topology_facts",
                          "cadgen.catalog.result_view_dir", "cadgen.store.view.export_view"):
                 stack.enter_context(mock.patch(name, side_effect=AssertionError(f"native-only operation invoked {name}")))
             stack.enter_context(mock.patch("builtins.open", side_effect=guard(original_open)))
@@ -72,7 +72,7 @@ class NativeDocumentDoors(unittest.TestCase):
         from cadgen.store.records import document_entry_for_hash
         from cadgen.store.trees import capture_tree
 
-        producer = document_entry_for_hash(hashlib.sha256(self.original).hexdigest())["surfaceProducer"]
+        producer = document_entry_for_hash(hashlib.sha256(self.original).hexdigest())["producer"]
         components = capture_tree(self.tree, retain_payloads=False)[0]["components"]
         self.assertTrue(components)
         for entry in components.values():

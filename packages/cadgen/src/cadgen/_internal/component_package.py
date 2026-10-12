@@ -722,7 +722,7 @@ def prepare_geometry_component(shape: Any, *, face_colors: object = None) -> dic
     if kind == "eager-only":
         from OCP.TopLoc import TopLoc_Location
 
-        from cadgen._internal.surface_extract import extract_topology_facts
+        from cadgen._internal.topology_extract import extract_topology_facts
         from cadgen._internal.topology_facts import topology_facts_bytes
 
         topology = topology_facts_bytes(
@@ -775,7 +775,7 @@ def prepare_published_component(shape: Any, *, face_colors: object = None) -> di
 
 
 def decode_geometry_component(entry: dict[str, Any], payload: bytes, *, native: bool = False) -> Any:
-    """Privately reconstruct one verified geometry input, without surface reads.
+    """Privately reconstruct one verified geometry input, without display-data reads.
     ``native`` returns a :class:`NativeShape` rather than a build123d shape."""
     validate_geometry_component(entry, payload)
     if entry["kind"] == "eager-only":

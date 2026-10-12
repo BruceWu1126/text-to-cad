@@ -6,11 +6,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  loadSurfComponentInWorker as loadWorker,
-  reclaimIdleSurfWorkers,
-  releaseSurfWorkerPoolWhenIdle,
-  surfWorkerMemoryStats,
-} from "./surfWorkerClient.js";
+  loadPartInWorker as loadWorker,
+  reclaimIdlePartWorkers,
+  releasePartWorkerPoolWhenIdle,
+  partWorkerMemoryStats,
+} from "./partWorkerClient.js";
 import { createTessellationCache, isTessellationCacheProbeMissError } from "./tessellationCache.js";
 import { encodeMeshFixture, partRowFor, testPartKey } from "./__tests__/meshFixtures.js";
 
@@ -38,13 +38,13 @@ function waitingProvider() {
   };
   return { provider, answer: (found = true) => answer(found) };
 }
-const loadSurfComponentInWorker = (url, options = {}) => loadWorker(url, {
+const loadPartInWorker = (url, options = {}) => loadWorker(url, {
   tessellationCache, ...options,
   identity: options.identity ?? { ...CACHE_IDENTITY, tessellationEntry: ENTRY.slice() },
 });
 
 test('worker leases preserve another renderer through abort and release after the last owner', async (t) => {
-  const { retainSurfWorkerPool } = await import('./surfWorkerClient.js');
+  const { retainPartWorkerPool } = await import('./partWorkerClient.js');
   const previous = globalThis.Worker;
   const workers = [];
   globalThis.Worker = class {
@@ -54,12 +54,12 @@ test('worker leases preserve another renderer through abort and release after th
     postMessage(message) { this.messages.push(message); }
     terminate() { this.terminated = true; }
   };
-  const releaseOne = retainSurfWorkerPool();
-  const releaseTwo = retainSurfWorkerPool();
+  const releaseOne = retainPartWorkerPool();
+  const releaseTwo = retainPartWorkerPool();
   t.after(() => { releaseOne(); releaseTwo(); globalThis.Worker = previous; });
   const controller = new AbortController();
-  const first = loadSurfComponentInWorker('http://one.test/component.surf', { signal: controller.signal });
-  const second = loadSurfComponentInWorker('http://two.test/component.surf');
+  const first = loadPartInWorker('http://one.test/component.selectors.json', { signal: controller.signal });
+  const second = loadPartInWorker('http://two.test/component.selectors.json');
   controller.abort();
   await assert.rejects(first, { name: 'AbortError' });
   releaseOne();
@@ -72,8 +72,8 @@ test('worker leases preserve another renderer through abort and release after th
   assert.ok(workers.every((worker) => worker.terminated));
 });
 
-test("loadSurfComponentInWorker returns null where Workers do not exist (node)", () => {
-  assert.equal(loadSurfComponentInWorker("/pkg/components/abc.surf"), null);
+test("loadPartInWorker returns null where Workers do not exist (node)", () => {
+  assert.equal(loadPartInWorker("/pkg/components/abc.selectors.json"), null);
 });
 
 test("worker requests declare a bounded render/selectors capability set", async () => {
@@ -97,10 +97,10 @@ test("worker requests declare a bounded render/selectors capability set", async 
   const savedWorker = globalThis.Worker;
   globalThis.Worker = FakeWorker;
   try {
-    const render = await loadSurfComponentInWorker("http://x/components/render.surf", {
+    const render = await loadPartInWorker("http://x/components/render.selectors.json", {
       capabilities: { render: true, selectors: false },
     });
-    const selectors = await loadSurfComponentInWorker("http://x/components/selectors.surf", {
+    const selectors = await loadPartInWorker("http://x/components/selectors.selectors.json", {
       capabilities: { render: false, selectors: true },
     });
     assert.deepEqual(messages.map((message) => message.capabilities), [
@@ -112,11 +112,11 @@ test("worker requests declare a bounded render/selectors capability set", async 
     assert.ok(selectors.bundle);
     assert.equal(selectors.meshData, undefined);
     assert.throws(
-      () => loadSurfComponentInWorker("http://x/components/none.surf", { capabilities: {} }),
+      () => loadPartInWorker("http://x/components/none.selectors.json", { capabilities: {} }),
       /must require render or selectors capability/,
     );
   } finally {
-    reclaimIdleSurfWorkers();
+    reclaimIdlePartWorkers();
     globalThis.Worker = savedWorker;
   }
 });
@@ -137,19 +137,19 @@ test("worker memory stats follow used slots and keep each slot's own high-water"
   const savedWorker = globalThis.Worker;
   globalThis.Worker = FakeWorker;
   try {
-    const first = loadSurfComponentInWorker("http://x/not-cached-big.surf", {
+    const first = loadPartInWorker("http://x/not-cached-big.selectors.json", {
       memoryEstimateBytes: 500,
     });
     const slotCount = created.length;
     const initial = [first];
     for (let index = 1; index < slotCount; index += 1) {
-      initial.push(loadSurfComponentInWorker(`http://x/not-cached-small-${index}.surf`, {
+      initial.push(loadPartInWorker(`http://x/not-cached-small-${index}.selectors.json`, {
         memoryEstimateBytes: 10,
       }));
     }
     await Promise.all(initial);
-    assert.deepEqual(surfWorkerMemoryStats(), {
-      generation: surfWorkerMemoryStats().generation,
+    assert.deepEqual(partWorkerMemoryStats(), {
+      generation: partWorkerMemoryStats().generation,
       residentSlots: slotCount,
       usedSlots: slotCount,
       residentEstimateBytes: 500 + (slotCount - 1) * 10,
@@ -158,11 +158,11 @@ test("worker memory stats follow used slots and keep each slot's own high-water"
     // More completions rotate over the same slots. They do not invent slots or
     // apply the one large request's estimate to every worker.
     for (let index = 0; index < slotCount * 2; index += 1) {
-      await loadSurfComponentInWorker(`http://x/not-cached-repeat-${index}.surf`, {
+      await loadPartInWorker(`http://x/not-cached-repeat-${index}.selectors.json`, {
         memoryEstimateBytes: 10,
       });
     }
-    const afterRepeats = surfWorkerMemoryStats();
+    const afterRepeats = partWorkerMemoryStats();
     assert.equal(afterRepeats.usedSlots, slotCount);
     assert.equal(afterRepeats.residentEstimateBytes, 500 + (slotCount - 1) * 10);
     assert.equal(
@@ -171,7 +171,7 @@ test("worker memory stats follow used slots and keep each slot's own high-water"
       "process memory estimates never enter the persistent worker protocol",
     );
   } finally {
-    reclaimIdleSurfWorkers();
+    reclaimIdlePartWorkers();
     globalThis.Worker = savedWorker;
   }
 });
@@ -191,19 +191,19 @@ test("handled worker errors retain their estimate and unknown estimates use the 
   globalThis.Worker = FakeWorker;
   try {
     await assert.rejects(
-      loadSurfComponentInWorker("http://x/not-cached-failure.surf", { memoryEstimateBytes: 777 }),
+      loadPartInWorker("http://x/not-cached-failure.selectors.json", { memoryEstimateBytes: 777 }),
       /handled failure/,
     );
-    assert.equal(surfWorkerMemoryStats().residentEstimateBytes, 777);
-    reclaimIdleSurfWorkers();
+    assert.equal(partWorkerMemoryStats().residentEstimateBytes, 777);
+    reclaimIdlePartWorkers();
 
     await assert.rejects(
-      loadSurfComponentInWorker("http://x/not-cached-unknown.surf"),
+      loadPartInWorker("http://x/not-cached-unknown.selectors.json"),
       /handled failure/,
     );
-    assert.equal(surfWorkerMemoryStats().residentEstimateBytes, 128 * 1024 * 1024);
+    assert.equal(partWorkerMemoryStats().residentEstimateBytes, 128 * 1024 * 1024);
   } finally {
-    reclaimIdleSurfWorkers();
+    reclaimIdlePartWorkers();
     globalThis.Worker = savedWorker;
   }
 });
@@ -219,7 +219,7 @@ test("abort replacement drops the old slot charge and a stale reply cannot resto
   const savedWorker = globalThis.Worker;
   globalThis.Worker = FakeWorker;
   try {
-    const warm = loadSurfComponentInWorker("http://x/not-cached-warm-memory.surf", {
+    const warm = loadPartInWorker("http://x/not-cached-warm-memory.selectors.json", {
       memoryEstimateBytes: 400,
     });
     const slotCount = created.length;
@@ -228,7 +228,7 @@ test("abort replacement drops the old slot charge and a stale reply cannot resto
     });
     await warm;
     for (let index = 1; index < slotCount; index += 1) {
-      const fill = loadSurfComponentInWorker(`http://x/not-cached-warm-fill-${index}.surf`, {
+      const fill = loadPartInWorker(`http://x/not-cached-warm-fill-${index}.selectors.json`, {
         memoryEstimateBytes: 10,
       });
       const message = created[index].messages[0];
@@ -237,13 +237,13 @@ test("abort replacement drops the old slot charge and a stale reply cannot resto
       });
       await fill;
     }
-    assert.equal(surfWorkerMemoryStats().residentEstimateBytes, 400 + (slotCount - 1) * 10);
+    assert.equal(partWorkerMemoryStats().residentEstimateBytes, 400 + (slotCount - 1) * 10);
 
     // Round-robin is back at slot zero, which already owns the 400-byte
     // high-water. Aborting its next request replaces that worker and must drop
     // the previous charge along with it.
     const controller = new AbortController();
-    const pending = loadSurfComponentInWorker("http://x/not-cached-abort-memory.surf", {
+    const pending = loadPartInWorker("http://x/not-cached-abort-memory.selectors.json", {
       signal: controller.signal,
       memoryEstimateBytes: 900,
     });
@@ -251,16 +251,16 @@ test("abort replacement drops the old slot charge and a stale reply cannot resto
     const oldMessage = oldWorker.messages.at(-1);
     controller.abort();
     await assert.rejects(pending, { name: "AbortError" });
-    assert.equal(surfWorkerMemoryStats().residentEstimateBytes, (slotCount - 1) * 10);
-    assert.equal(surfWorkerMemoryStats().usedSlots, slotCount - 1);
+    assert.equal(partWorkerMemoryStats().residentEstimateBytes, (slotCount - 1) * 10);
+    assert.equal(partWorkerMemoryStats().usedSlots, slotCount - 1);
 
     oldWorker.listeners.message({
       data: { id: oldMessage.id, ok: true, meshData: { parts: ["stale"] } },
     });
-    assert.equal(surfWorkerMemoryStats().residentEstimateBytes, (slotCount - 1) * 10);
-    assert.ok(created.length > surfWorkerMemoryStats().residentSlots, "the assigned slot was replaced");
+    assert.equal(partWorkerMemoryStats().residentEstimateBytes, (slotCount - 1) * 10);
+    assert.ok(created.length > partWorkerMemoryStats().residentSlots, "the assigned slot was replaced");
   } finally {
-    reclaimIdleSurfWorkers();
+    reclaimIdlePartWorkers();
     globalThis.Worker = savedWorker;
   }
 });
@@ -276,7 +276,7 @@ test("partial and full reclamation release only the terminated slots' estimates"
   const savedWorker = globalThis.Worker;
   globalThis.Worker = FakeWorker;
   try {
-    const first = loadSurfComponentInWorker("http://x/not-cached-first-memory.surf", {
+    const first = loadPartInWorker("http://x/not-cached-first-memory.selectors.json", {
       memoryEstimateBytes: 1000,
     });
     const slotCount = created.length;
@@ -285,7 +285,7 @@ test("partial and full reclamation release only the terminated slots' estimates"
     });
     await first;
     for (let index = 1; index < slotCount; index += 1) {
-      const request = loadSurfComponentInWorker(`http://x/not-cached-fill-${index}.surf`, {
+      const request = loadPartInWorker(`http://x/not-cached-fill-${index}.selectors.json`, {
         memoryEstimateBytes: 10,
       });
       const message = created[index].messages[0];
@@ -294,16 +294,16 @@ test("partial and full reclamation release only the terminated slots' estimates"
       });
       await request;
     }
-    assert.equal(surfWorkerMemoryStats().residentEstimateBytes, 1000 + (slotCount - 1) * 10);
+    assert.equal(partWorkerMemoryStats().residentEstimateBytes, 1000 + (slotCount - 1) * 10);
 
-    const active = loadSurfComponentInWorker("http://x/not-cached-active-memory.surf", {
+    const active = loadPartInWorker("http://x/not-cached-active-memory.selectors.json", {
       memoryEstimateBytes: 2000,
     });
     const activeMessage = created[0].messages.at(-1);
-    const reclaimed = reclaimIdleSurfWorkers();
+    const reclaimed = reclaimIdlePartWorkers();
     assert.equal(reclaimed.residentSlots, 1);
-    assert.deepEqual(surfWorkerMemoryStats(), {
-      generation: surfWorkerMemoryStats().generation,
+    assert.deepEqual(partWorkerMemoryStats(), {
+      generation: partWorkerMemoryStats().generation,
       residentSlots: 1,
       usedSlots: 1,
       residentEstimateBytes: 1000,
@@ -313,16 +313,16 @@ test("partial and full reclamation release only the terminated slots' estimates"
       data: { id: activeMessage.id, ok: true, meshData: { parts: [] } },
     });
     await active;
-    assert.equal(surfWorkerMemoryStats().residentEstimateBytes, 2000);
-    assert.equal(reclaimIdleSurfWorkers().fullyReleased, true);
-    assert.deepEqual(surfWorkerMemoryStats(), {
-      generation: surfWorkerMemoryStats().generation,
+    assert.equal(partWorkerMemoryStats().residentEstimateBytes, 2000);
+    assert.equal(reclaimIdlePartWorkers().fullyReleased, true);
+    assert.deepEqual(partWorkerMemoryStats(), {
+      generation: partWorkerMemoryStats().generation,
       residentSlots: 0,
       usedSlots: 0,
       residentEstimateBytes: 0,
     });
   } finally {
-    reclaimIdleSurfWorkers();
+    reclaimIdlePartWorkers();
     globalThis.Worker = savedWorker;
   }
 });
@@ -344,18 +344,18 @@ test("reclamation terminates idle workers and the next request builds a fresh po
   const savedWorker = globalThis.Worker;
   globalThis.Worker = FakeWorker;
   try {
-    assert.equal(reclaimIdleSurfWorkers().reclaimedSlots, 0, "nothing to release before the first request");
-    const inFlight = loadSurfComponentInWorker("http://x/components/aa.surf");
+    assert.equal(reclaimIdlePartWorkers().reclaimedSlots, 0, "nothing to release before the first request");
+    const inFlight = loadPartInWorker("http://x/components/aa.selectors.json");
     assert.ok(created.length > 0, "the first request builds the pool");
-    assert.equal(reclaimIdleSurfWorkers().fullyReleased, false, "a request in flight keeps its isolate");
+    assert.equal(reclaimIdlePartWorkers().fullyReleased, false, "a request in flight keeps its isolate");
     assert.equal(terminated.length, 0, "in-flight work is never terminated");
     await inFlight;
-    assert.equal(reclaimIdleSurfWorkers().fullyReleased, true);
+    assert.equal(reclaimIdlePartWorkers().fullyReleased, true);
     assert.equal(terminated.length, created.length, "every worker was terminated");
     const before = created.length;
-    await loadSurfComponentInWorker("http://x/components/bb.surf");
+    await loadPartInWorker("http://x/components/bb.selectors.json");
     assert.ok(created.length > before, "the next request builds a fresh pool");
-    reclaimIdleSurfWorkers();
+    reclaimIdlePartWorkers();
   } finally {
     globalThis.Worker = savedWorker;
   }
@@ -377,21 +377,21 @@ test("sequential refinement creates one isolate and concurrent ready work grows 
   };
   try {
     for (let index = 0; index < 8; index += 1) {
-      const request = loadSurfComponentInWorker(`http://x/sequential-${index}.surf`);
+      const request = loadPartInWorker(`http://x/sequential-${index}.selectors.json`);
       assert.equal(created.length, 1);
       finish(created[0]); await request;
     }
-    const first = loadSurfComponentInWorker("http://x/concurrent-first.surf");
-    const second = loadSurfComponentInWorker("http://x/concurrent-second.surf");
+    const first = loadPartInWorker("http://x/concurrent-first.selectors.json");
+    const second = loadPartInWorker("http://x/concurrent-second.selectors.json");
     assert.equal(created.length, 2);
     finish(created[0]); finish(created[1]);
     await Promise.all([first, second]);
   } finally {
-    reclaimIdleSurfWorkers(); globalThis.Worker = savedWorker;
+    reclaimIdlePartWorkers(); globalThis.Worker = savedWorker;
   }
 });
 
-test("reclaimIdleSurfWorkers returns idle capacity without disturbing active or queued requests", async (t) => {
+test("reclaimIdlePartWorkers returns idle capacity without disturbing active or queued requests", async (t) => {
   const created = [];
   const terminated = [];
   class FakeWorker {
@@ -406,16 +406,16 @@ test("reclaimIdleSurfWorkers returns idle capacity without disturbing active or 
   const savedWorker = globalThis.Worker;
   globalThis.Worker = FakeWorker;
   try {
-    const first = loadSurfComponentInWorker("http://x/not-cached-first.surf");
-    const second = loadSurfComponentInWorker("http://x/not-cached-second.surf");
-    const queued = loadSurfComponentInWorker("http://x/components/cache-wait.surf", {
+    const first = loadPartInWorker("http://x/not-cached-first.selectors.json");
+    const second = loadPartInWorker("http://x/not-cached-second.selectors.json");
+    const queued = loadPartInWorker("http://x/components/cache-wait.selectors.json", {
       identity: CACHE_IDENTITY,
     });
     const initialWorkers = [...created];
     const activeWorkers = initialWorkers.filter((worker) => worker.messages.length > 0);
     assert.equal(activeWorkers.length, 2);
 
-    const reclaimed = reclaimIdleSurfWorkers();
+    const reclaimed = reclaimIdlePartWorkers();
     assert.deepEqual(reclaimed, {
       reclaimedSlots: initialWorkers.length - activeWorkers.length,
       residentSlots: activeWorkers.length,
@@ -426,18 +426,18 @@ test("reclaimIdleSurfWorkers returns idle capacity without disturbing active or 
     resolveCache();
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(
-      activeWorkers.some((worker) => worker.messages.some((message) => message.url.endsWith("cache-wait.surf"))),
+      activeWorkers.some((worker) => worker.messages.some((message) => message.url.endsWith("cache-wait.selectors.json"))),
       false,
       "cache-ready work remains queued while every surviving slot is active",
     );
 
     const firstWorker = activeWorkers.find((worker) =>
-      worker.messages.some((message) => message.url.endsWith("not-cached-first.surf")));
+      worker.messages.some((message) => message.url.endsWith("not-cached-first.selectors.json")));
     const firstMessage = firstWorker.messages[0];
     firstWorker.listeners.message({
       data: { id: firstMessage.id, ok: true, meshData: { parts: ["first"] } },
     });
-    const queuedMessage = firstWorker.messages.find((message) => message.url.endsWith("cache-wait.surf"));
+    const queuedMessage = firstWorker.messages.find((message) => message.url.endsWith("cache-wait.selectors.json"));
     assert.ok(queuedMessage, "a surviving slot drains queued work after its active request completes");
 
     const secondWorker = activeWorkers.find((worker) => worker !== firstWorker);
@@ -452,14 +452,14 @@ test("reclaimIdleSurfWorkers returns idle capacity without disturbing active or 
     assert.deepEqual((await second).meshData.parts, ["second"]);
     assert.deepEqual((await queued).meshData.parts, ["queued"]);
 
-    const final = reclaimIdleSurfWorkers();
+    const final = reclaimIdlePartWorkers();
     assert.deepEqual(final, {
       reclaimedSlots: activeWorkers.length,
       residentSlots: 0,
       fullyReleased: true,
     });
   } finally {
-    reclaimIdleSurfWorkers();
+    reclaimIdlePartWorkers();
     globalThis.Worker = savedWorker;
   }
 });
@@ -479,36 +479,36 @@ test("idle reclamation keeps one progress slot for requests waiting on cache rea
   const savedWorker = globalThis.Worker;
   globalThis.Worker = FakeWorker;
   try {
-    const waiting = loadSurfComponentInWorker("http://x/components/cache-only.surf", {
+    const waiting = loadPartInWorker("http://x/components/cache-only.selectors.json", {
       identity: CACHE_IDENTITY,
       memoryEstimateBytes: 73,
     });
-    const reclaimed = reclaimIdleSurfWorkers();
+    const reclaimed = reclaimIdlePartWorkers();
     assert.deepEqual(reclaimed, {
       reclaimedSlots: created.length - 1,
       residentSlots: 1,
       fullyReleased: false,
     });
-    assert.equal(surfWorkerMemoryStats().residentEstimateBytes, 0, "a cache waiter has not used an isolate");
+    assert.equal(partWorkerMemoryStats().residentEstimateBytes, 0, "a cache waiter has not used an isolate");
 
     resolveCache();
     await new Promise((resolve) => setTimeout(resolve, 0));
     const survivor = created.find((worker) =>
-      !terminated.includes(worker) && worker.messages.some((message) => message.url.endsWith("cache-only.surf")));
+      !terminated.includes(worker) && worker.messages.some((message) => message.url.endsWith("cache-only.selectors.json")));
     assert.ok(survivor, "the retained isolate starts work once its cache lookup settles");
     const message = survivor.messages[0];
     survivor.listeners.message({
       data: { id: message.id, ok: true, meshData: { parts: ["complete"] } },
     });
     assert.deepEqual((await waiting).meshData.parts, ["complete"]);
-    assert.equal(surfWorkerMemoryStats().residentEstimateBytes, 73);
+    assert.equal(partWorkerMemoryStats().residentEstimateBytes, 73);
   } finally {
-    reclaimIdleSurfWorkers();
+    reclaimIdlePartWorkers();
     globalThis.Worker = savedWorker;
   }
 });
 
-test("releaseSurfWorkerPoolWhenIdle releases an overlapping request after it completes", async () => {
+test("releasePartWorkerPoolWhenIdle releases an overlapping request after it completes", async () => {
   const created = [];
   const terminated = [];
   class FakeWorker {
@@ -520,10 +520,10 @@ test("releaseSurfWorkerPoolWhenIdle releases an overlapping request after it com
   const savedWorker = globalThis.Worker;
   globalThis.Worker = FakeWorker;
   try {
-    const inFlight = loadSurfComponentInWorker("http://x/components/overlap.surf");
-    const released = releaseSurfWorkerPoolWhenIdle();
+    const inFlight = loadPartInWorker("http://x/components/overlap.selectors.json");
+    const released = releasePartWorkerPoolWhenIdle();
     assert.equal(terminated.length, 0, "in-flight work is not terminated");
-    const worker = created.find((candidate) => candidate.message?.type === "loadSurf");
+    const worker = created.find((candidate) => candidate.message?.type === "loadPart");
     worker.listeners.message({
       data: { id: worker.message.id, ok: true, meshData: { parts: [] } },
     });
@@ -531,12 +531,12 @@ test("releaseSurfWorkerPoolWhenIdle releases an overlapping request after it com
     assert.equal(await released, true);
     assert.equal(terminated.length, created.length, "all isolates release at idle");
   } finally {
-    reclaimIdleSurfWorkers();
+    reclaimIdlePartWorkers();
     globalThis.Worker = savedWorker;
   }
 });
 
-test("releaseSurfWorkerPoolWhenIdle releases after the last request aborts", async () => {
+test("releasePartWorkerPoolWhenIdle releases after the last request aborts", async () => {
   const created = [];
   const terminated = [];
   class FakeWorker {
@@ -549,16 +549,16 @@ test("releaseSurfWorkerPoolWhenIdle releases after the last request aborts", asy
   globalThis.Worker = FakeWorker;
   const controller = new AbortController();
   try {
-    const inFlight = loadSurfComponentInWorker("http://x/components/abort.surf", {
+    const inFlight = loadPartInWorker("http://x/components/abort.selectors.json", {
       signal: controller.signal,
     });
-    const released = releaseSurfWorkerPoolWhenIdle();
+    const released = releasePartWorkerPoolWhenIdle();
     controller.abort();
     await assert.rejects(inFlight, { name: "AbortError" });
     assert.equal(await released, true);
     assert.equal(terminated.length, created.length, "abort drains and releases the pool");
   } finally {
-    reclaimIdleSurfWorkers();
+    reclaimIdlePartWorkers();
     globalThis.Worker = savedWorker;
   }
 });
@@ -575,11 +575,11 @@ test("an old idle-release waiter cannot terminate a replacement pool", async () 
   const savedWorker = globalThis.Worker;
   globalThis.Worker = FakeWorker;
   try {
-    const oldRequest = loadSurfComponentInWorker("http://x/components/old.surf");
-    const oldRelease = releaseSurfWorkerPoolWhenIdle();
+    const oldRequest = loadPartInWorker("http://x/components/old.selectors.json");
+    const oldRelease = releasePartWorkerPoolWhenIdle();
     const oldWorkers = [...created];
     oldWorkers[0].listeners.error({ message: "old pool failed" });
-    const replacementRequest = loadSurfComponentInWorker("http://x/components/new.surf");
+    const replacementRequest = loadPartInWorker("http://x/components/new.selectors.json");
     const replacementWorkers = created.filter((worker) => !oldWorkers.includes(worker));
 
     await assert.rejects(oldRequest, /old pool failed/);
@@ -590,13 +590,13 @@ test("an old idle-release waiter cannot terminate a replacement pool", async () 
       "the old waiter is scoped to its own generation",
     );
 
-    const assigned = replacementWorkers.find((worker) => worker.message?.type === "loadSurf");
+    const assigned = replacementWorkers.find((worker) => worker.message?.type === "loadPart");
     assigned.listeners.message({
       data: { id: assigned.message.id, ok: true, meshData: { parts: [] } },
     });
     await replacementRequest;
   } finally {
-    reclaimIdleSurfWorkers();
+    reclaimIdlePartWorkers();
     globalThis.Worker = savedWorker;
   }
 });
@@ -614,16 +614,16 @@ test("aborting synchronous work replaces only its worker and preserves unrelated
   globalThis.Worker = FakeWorker;
   const controller = new AbortController();
   try {
-    const cancelled = loadSurfComponentInWorker("http://x/components/cancelled.surf", {
+    const cancelled = loadPartInWorker("http://x/components/cancelled.selectors.json", {
       signal: controller.signal,
     });
     const initialWorkers = [...created];
     const poolCount = initialWorkers.length;
     const unrelated = [];
     for (let index = 1; index < poolCount; index += 1) {
-      unrelated.push(loadSurfComponentInWorker(`http://x/components/keep-${index}.surf`));
+      unrelated.push(loadPartInWorker(`http://x/components/keep-${index}.selectors.json`));
     }
-    const queued = loadSurfComponentInWorker("http://x/components/queued.surf");
+    const queued = loadPartInWorker("http://x/components/queued.selectors.json");
     assert.equal(
       initialWorkers.reduce((sum, worker) => sum + worker.messages.length, 0),
       poolCount,
@@ -631,7 +631,7 @@ test("aborting synchronous work replaces only its worker and preserves unrelated
     );
 
     const cancelledWorker = initialWorkers.find((worker) =>
-      worker.messages.some((message) => message.url.endsWith("cancelled.surf")));
+      worker.messages.some((message) => message.url.endsWith("cancelled.selectors.json")));
     controller.abort();
     await assert.rejects(cancelled, { name: "AbortError" });
     assert.ok(terminated.includes(cancelledWorker), "the blocked worker was terminated");
@@ -642,7 +642,7 @@ test("aborting synchronous work replaces only its worker and preserves unrelated
     );
 
     const replacement = created.find((worker) => !initialWorkers.includes(worker));
-    const queuedMessage = replacement.messages.find((message) => message.url.endsWith("queued.surf"));
+    const queuedMessage = replacement.messages.find((message) => message.url.endsWith("queued.selectors.json"));
     assert.ok(queuedMessage, "the replacement immediately accepts queued work");
     // A late event already queued by the terminated worker cannot settle the
     // replacement's request because request ownership includes the slot.
@@ -661,7 +661,7 @@ test("aborting synchronous work replaces only its worker and preserves unrelated
     assert.deepEqual((await queued).meshData.parts, ["queued"]);
     await Promise.all(unrelated);
   } finally {
-    reclaimIdleSurfWorkers();
+    reclaimIdlePartWorkers();
     globalThis.Worker = savedWorker;
   }
 });
@@ -691,29 +691,29 @@ test("bytes a batched read already holds are posted without a read; otherwise th
   };
   try {
     const entry = ENTRY.slice();
-    const held = loadSurfComponentInWorker("http://x/held.surf", { identity: { ...CACHE_IDENTITY, tessellationEntry: entry } });
+    const held = loadPartInWorker("http://x/held.selectors.json", { identity: { ...CACHE_IDENTITY, tessellationEntry: entry } });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const posted = answer("http://x/held.surf");
+    const posted = answer("http://x/held.selectors.json");
     await held;
     assert.equal(posted.message.cachedEntry, entry);
     assert.equal(posted.message.part, CACHE_IDENTITY.part, "the worker reads it as its part's mesh");
     assert.deepEqual(posted.transfer, [entry.buffer], "its own buffer travels to the worker");
     assert.deepEqual(reads, [], "a held body is not read again");
 
-    const unread = loadSurfComponentInWorker("http://x/unread.surf", { identity: CACHE_IDENTITY });
+    const unread = loadPartInWorker("http://x/unread.selectors.json", { identity: CACHE_IDENTITY });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const read = answer("http://x/unread.surf");
+    const read = answer("http://x/unread.selectors.json");
     await unread;
     assert.deepEqual(reads, ["probe", "body"], "one with no body probes and reads it");
     assert.deepEqual(read.message.cachedEntry, ENTRY);
 
     stored = false;
-    await assert.rejects(loadSurfComponentInWorker("http://x/missing.surf", { identity: CACHE_IDENTITY }),
+    await assert.rejects(loadPartInWorker("http://x/missing.selectors.json", { identity: CACHE_IDENTITY }),
       isTessellationCacheProbeMissError, "a mesh the store does not hold is the caller's to ask for");
-    assert.equal(created.flatMap((worker) => worker.messages).some(({ message }) => message.url === "http://x/missing.surf"), false,
+    assert.equal(created.flatMap((worker) => worker.messages).some(({ message }) => message.url === "http://x/missing.selectors.json"), false,
       "nothing was posted for it");
   } finally {
-    reclaimIdleSurfWorkers();
+    reclaimIdlePartWorkers();
     globalThis.Worker = savedWorker;
   }
 });
@@ -732,11 +732,11 @@ test("a pending warm-cache lookup does not occupy a worker slot", async (t) => {
   const savedWorker = globalThis.Worker;
   globalThis.Worker = FakeWorker;
   try {
-    const awaitingCache = loadSurfComponentInWorker("http://x/components/cached.surf", {
+    const awaitingCache = loadPartInWorker("http://x/components/cached.selectors.json", {
       identity: CACHE_IDENTITY,
     });
     assert.equal(created.some((worker) => worker.messages.length > 0), false);
-    const ready = loadSurfComponentInWorker("http://x/held.surf");
+    const ready = loadPartInWorker("http://x/held.selectors.json");
     const readyWorker = created.find((worker) => worker.messages.length > 0);
     assert.ok(readyWorker, "ready work dispatches while the cache lookup waits");
     const readyMessage = readyWorker.messages[0];
@@ -748,14 +748,14 @@ test("a pending warm-cache lookup does not occupy a worker slot", async (t) => {
     resolveCache();
     await new Promise((resolve) => setTimeout(resolve, 0));
     const cachedWorker = created.find((worker) =>
-      worker.messages.some((message) => message.url.endsWith("cached.surf")));
-    const cachedMessage = cachedWorker.messages.find((message) => message.url.endsWith("cached.surf"));
+      worker.messages.some((message) => message.url.endsWith("cached.selectors.json")));
+    const cachedMessage = cachedWorker.messages.find((message) => message.url.endsWith("cached.selectors.json"));
     cachedWorker.listeners.message({
       data: { id: cachedMessage.id, ok: true, meshData: { parts: ["cached"] } },
     });
     assert.deepEqual((await awaitingCache).meshData.parts, ["cached"]);
   } finally {
-    reclaimIdleSurfWorkers();
+    reclaimIdlePartWorkers();
     globalThis.Worker = savedWorker;
   }
 });
@@ -772,10 +772,10 @@ test("a worker runtime error replaces one slot without rejecting unrelated work"
   const savedWorker = globalThis.Worker;
   globalThis.Worker = FakeWorker;
   try {
-    const failed = loadSurfComponentInWorker("http://x/components/fail.surf");
-    const kept = loadSurfComponentInWorker("http://x/components/keep.surf");
-    const failedWorker = created.find((worker) => worker.messages[0]?.url.endsWith("fail.surf"));
-    const keptWorker = created.find((worker) => worker.messages[0]?.url.endsWith("keep.surf"));
+    const failed = loadPartInWorker("http://x/components/fail.selectors.json");
+    const kept = loadPartInWorker("http://x/components/keep.selectors.json");
+    const failedWorker = created.find((worker) => worker.messages[0]?.url.endsWith("fail.selectors.json"));
+    const keptWorker = created.find((worker) => worker.messages[0]?.url.endsWith("keep.selectors.json"));
     const initialWorkerCount = created.length;
     failedWorker.listeners.error({ message: "worker crashed" });
     await assert.rejects(failed, /worker crashed/);
@@ -788,7 +788,7 @@ test("a worker runtime error replaces one slot without rejecting unrelated work"
     assert.deepEqual((await kept).meshData.parts, ["kept"]);
     assert.equal(created.length, initialWorkerCount + 1, "only the failed slot was replaced");
   } finally {
-    reclaimIdleSurfWorkers();
+    reclaimIdlePartWorkers();
     globalThis.Worker = savedWorker;
   }
 });
@@ -815,14 +815,14 @@ test("a failed replacement constructor preserves surviving workers and their que
   globalThis.Worker = FakeWorker;
   const controller = new AbortController();
   try {
-    const cancelled = loadSurfComponentInWorker("http://x/components/cancel-constructor.surf", {
+    const cancelled = loadPartInWorker("http://x/components/cancel-constructor.selectors.json", {
       signal: controller.signal,
     });
-    const survivors = [loadSurfComponentInWorker("http://x/components/survivor-1.surf")];
+    const survivors = [loadPartInWorker("http://x/components/survivor-1.selectors.json")];
     const initialWorkers = [...created];
     const poolCount = initialWorkers.length;
-    reclaimIdleSurfWorkers(); // constrain this generation to the two live slots
-    const queued = loadSurfComponentInWorker("http://x/components/after-constructor-failure.surf");
+    reclaimIdlePartWorkers(); // constrain this generation to the two live slots
+    const queued = loadPartInWorker("http://x/components/after-constructor-failure.selectors.json");
     failNextConstructor = true;
     controller.abort();
     await assert.rejects(cancelled, { name: "AbortError" });
@@ -835,7 +835,7 @@ test("a failed replacement constructor preserves surviving workers and their que
       data: { id: firstMessage.id, ok: true, meshData: { parts: ["survivor"] } },
     });
     const queuedMessage = firstLive.messages.find((message) =>
-      message.url.endsWith("after-constructor-failure.surf"));
+      message.url.endsWith("after-constructor-failure.selectors.json"));
     assert.ok(queuedMessage, "a surviving slot continues draining queued jobs");
     firstLive.listeners.message({
       data: { id: queuedMessage.id, ok: true, meshData: { parts: ["queued"] } },
@@ -849,7 +849,7 @@ test("a failed replacement constructor preserves surviving workers and their que
     assert.deepEqual((await queued).meshData.parts, ["queued"]);
     await Promise.all(survivors);
   } finally {
-    reclaimIdleSurfWorkers();
+    reclaimIdlePartWorkers();
     globalThis.Worker = savedWorker;
   }
 });
@@ -868,15 +868,15 @@ test("synchronous post failures drain a queued batch without recursive dispatch"
   const savedWorker = globalThis.Worker;
   globalThis.Worker = FakeWorker;
   try {
-    const first = loadSurfComponentInWorker("http://x/components/blocker.surf");
+    const first = loadPartInWorker("http://x/components/blocker.selectors.json");
     const initialWorkers = [...created];
     const blockers = [first];
     for (let index = 1; index < initialWorkers.length; index += 1) {
-      blockers.push(loadSurfComponentInWorker(`http://x/components/blocker-${index}.surf`));
+      blockers.push(loadPartInWorker(`http://x/components/blocker-${index}.selectors.json`));
     }
     const failed = Array.from({ length: 40 }, (_, index) =>
-      loadSurfComponentInWorker(`http://x/components/post-failure-${index}.surf`));
-    const final = loadSurfComponentInWorker("http://x/components/final-good.surf");
+      loadPartInWorker(`http://x/components/post-failure-${index}.selectors.json`));
+    const final = loadPartInWorker("http://x/components/final-good.selectors.json");
 
     const firstMessage = initialWorkers[0].messages[0];
     initialWorkers[0].listeners.message({
@@ -885,8 +885,8 @@ test("synchronous post failures drain a queued batch without recursive dispatch"
     const failures = await Promise.allSettled(failed);
     assert.ok(failures.every((result) => result.status === "rejected"));
     const finalWorker = created.find((worker) =>
-      worker.messages.some((message) => message.url.endsWith("final-good.surf")));
-    const finalMessage = finalWorker.messages.find((message) => message.url.endsWith("final-good.surf"));
+      worker.messages.some((message) => message.url.endsWith("final-good.selectors.json")));
+    const finalMessage = finalWorker.messages.find((message) => message.url.endsWith("final-good.selectors.json"));
     assert.ok(finalMessage, "the iterative drain reaches later good work");
     finalWorker.listeners.message({
       data: { id: finalMessage.id, ok: true, meshData: { parts: ["final"] } },
@@ -900,7 +900,7 @@ test("synchronous post failures drain a queued batch without recursive dispatch"
     assert.deepEqual((await final).meshData.parts, ["final"]);
     await Promise.all(blockers);
   } finally {
-    reclaimIdleSurfWorkers();
+    reclaimIdlePartWorkers();
     globalThis.Worker = savedWorker;
   }
 });
@@ -915,9 +915,9 @@ test('custom resource transfers begin only when a worker slot is reserved', asyn
     postMessage(message) { queueMicrotask(() => this.listeners.message({data:{id:message.id,ok:true,meshData:{}}})); }
     terminate() {}
   };
-  t.after(() => { reclaimIdleSurfWorkers(); globalThis.Worker=previous; });
+  t.after(() => { reclaimIdlePartWorkers(); globalThis.Worker=previous; });
   const resources = {workerTicket: () => new Promise(resolve => tickets.push(resolve))};
-  const pending = Array.from({length:20}, (_,index) => loadSurfComponentInWorker(`private:${index}`, {resources}));
+  const pending = Array.from({length:20}, (_,index) => loadPartInWorker(`private:${index}`, {resources}));
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(tickets.length, workers.length);
   assert.ok(tickets.length < pending.length, 'queued components do not eagerly retain transferred bytes');
@@ -943,10 +943,10 @@ test("selectors with no selector table URL fail as not ready, fetching no ticket
   setTessellationCacheProvider({ async probeMany(keys) { return keys.map(() => ROW); }, async getProbed() { return ENTRY.slice(); } });
   const savedWorker = globalThis.Worker;
   globalThis.Worker = FakeWorker;
-  t.after(() => { reclaimIdleSurfWorkers(); globalThis.Worker = savedWorker; setTessellationCacheProvider(null); });
+  t.after(() => { reclaimIdlePartWorkers(); globalThis.Worker = savedWorker; setTessellationCacheProvider(null); });
   const tickets = [];
   const resources = { workerTicket: (url) => { tickets.push(url); return Promise.resolve({ kind: "url", url }); } };
-  await assert.rejects(loadSurfComponentInWorker("", { resources, identity: CACHE_IDENTITY }), /not ready/);
+  await assert.rejects(loadPartInWorker("", { resources, identity: CACHE_IDENTITY }), /not ready/);
   assert.deepEqual(tickets, [], "no ticket for an empty URL");
   assert.deepEqual(created.flatMap((worker) => worker.messages), [], "no worker was asked");
 });

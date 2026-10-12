@@ -505,10 +505,10 @@ class SnapshotCliTests(unittest.TestCase):
             write_package(models / "part.step")
 
             original_timestamp = snapshot_main.snapshot_timestamp
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
                 snapshot_main.snapshot_timestamp = lambda: "20260527T163012Z"
-                snapshot_main.ensure_step_topology_artifact = lambda *args, **kwargs: None
+                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: None
 
                 packet = resolve_render_job_packet(
                     {
@@ -530,7 +530,7 @@ class SnapshotCliTests(unittest.TestCase):
                 )
             finally:
                 snapshot_main.snapshot_timestamp = original_timestamp
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
 
             output_paths = [
                 Path(output["path"]).relative_to(root).as_posix()
@@ -554,10 +554,10 @@ class SnapshotCliTests(unittest.TestCase):
             (root / "shots").mkdir()
 
             original_timestamp = snapshot_main.snapshot_timestamp
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
                 snapshot_main.snapshot_timestamp = lambda: "20260527T163012Z"
-                snapshot_main.ensure_step_topology_artifact = lambda *args, **kwargs: None
+                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: None
                 packet = resolve_render_job_packet(
                     {
                         "jobs": [
@@ -576,7 +576,7 @@ class SnapshotCliTests(unittest.TestCase):
                 )
             finally:
                 snapshot_main.snapshot_timestamp = original_timestamp
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
 
             output_paths = [
                 Path(output["path"]).relative_to(root).as_posix()
@@ -607,16 +607,16 @@ class SnapshotCliTests(unittest.TestCase):
             )
             write_package(root / "models" / "part.step")
             original_timestamp = snapshot_main.snapshot_timestamp
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
                 snapshot_main.snapshot_timestamp = lambda: "20260527T163012Z"
-                snapshot_main.ensure_step_topology_artifact = lambda *args, **kwargs: None
+                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: None
                 packet = resolve_render_job_packet(
                     {"input": "models/part.step", "outputs": [{"path": "tmp/"}]}, cwd=root
                 )
             finally:
                 snapshot_main.snapshot_timestamp = original_timestamp
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
             self.assertEqual(
                 Path(packet["jobs"][0]["outputs"][0]["path"]).name,
                 "part_20260527T163012Z.png",
@@ -637,9 +637,9 @@ class SnapshotCliTests(unittest.TestCase):
                 "ISO-10303-21;\nEND-ISO-10303-21;\n", encoding="utf-8"
             )
             write_package(root / "models" / "part.step")
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_topology_artifact = lambda *args, **kwargs: None
+                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: None
                 packet = resolve_render_job_packet(
                     {
                         "jobs": [
@@ -654,7 +654,7 @@ class SnapshotCliTests(unittest.TestCase):
                     cwd=root,
                 )
             finally:
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
             names = [Path(job["outputs"][0]["path"]).name for job in packet["jobs"]]
             self.assertEqual(len(set(names)), 3, names)
 
@@ -666,9 +666,9 @@ class SnapshotCliTests(unittest.TestCase):
             (models / "part.step").write_text("ISO-10303-21;\nEND-ISO-10303-21;\n", encoding="utf-8")
             write_package(models / "part.step")
 
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_topology_artifact = lambda *args, **kwargs: None
+                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: None
                 packet = resolve_render_job_packet(
                     {
                         "input": "models/part.step",
@@ -677,7 +677,7 @@ class SnapshotCliTests(unittest.TestCase):
                     cwd=root,
                 )
             finally:
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
 
         job = packet["jobs"][0]
         self.assertNotIn("workspaceRoot", job)
@@ -712,9 +712,9 @@ class SnapshotCliTests(unittest.TestCase):
                 )
                 write_package(folder / "model.step")
 
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_topology_artifact = lambda *args, **kwargs: None
+                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: None
                 packet = resolve_render_job_packet(
                     {
                         "jobs": [
@@ -731,7 +731,7 @@ class SnapshotCliTests(unittest.TestCase):
                     cwd=root,
                 )
             finally:
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
 
         first_resolved = packet["jobs"][0]["resolved"]
         second_resolved = packet["jobs"][1]["resolved"]
@@ -789,9 +789,9 @@ class SnapshotCliTests(unittest.TestCase):
                 calls.append((target, kwargs))
                 return None
 
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_topology_artifact = fake_ensure
+                snapshot_main.ensure_step_artifact = fake_ensure
                 resolve_render_job_packet(
                     {
                         "input": "models/part.step",
@@ -800,7 +800,7 @@ class SnapshotCliTests(unittest.TestCase):
                     cwd=root,
                 )
             finally:
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
 
         self.assertEqual(len(calls), 1)
         target, kwargs = calls[0]
@@ -836,9 +836,9 @@ class SnapshotCliTests(unittest.TestCase):
                     )
                 return None
 
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_topology_artifact = fake_ensure
+                snapshot_main.ensure_step_artifact = fake_ensure
                 packet = resolve_render_job_packet(
                     {
                         "input": "models/part.step",
@@ -848,7 +848,7 @@ class SnapshotCliTests(unittest.TestCase):
                     cwd=root,
                 )
             finally:
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
 
         job = packet["jobs"][0]
         self.assertEqual(
@@ -978,9 +978,9 @@ class SnapshotCliTests(unittest.TestCase):
                 calls.append(kwargs)
                 return None
 
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_topology_artifact = fake_ensure
+                snapshot_main.ensure_step_artifact = fake_ensure
                 packet = resolve_render_job_packet(
                     {
                         "input": "models/part.step",
@@ -989,7 +989,7 @@ class SnapshotCliTests(unittest.TestCase):
                     cwd=root,
                 )
             finally:
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
 
         self.assertIsNone(calls[0]["debug"])
         job = packet["jobs"][0]
@@ -1010,9 +1010,9 @@ class SnapshotCliTests(unittest.TestCase):
                 calls.append((target, kwargs))
                 return None
 
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_topology_artifact = fake_ensure
+                snapshot_main.ensure_step_artifact = fake_ensure
                 with self.assertRaisesRegex(
                     SnapshotError,
                     r"does not render \.dxf.*inputs",
@@ -1026,7 +1026,7 @@ class SnapshotCliTests(unittest.TestCase):
                         kinds=CAD_KINDS,
                     )
             finally:
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
 
         self.assertEqual(calls, [])
 
@@ -1046,9 +1046,9 @@ class SnapshotCliTests(unittest.TestCase):
                 calls.append((target, kwargs))
                 return None
 
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_topology_artifact = fake_ensure
+                snapshot_main.ensure_step_artifact = fake_ensure
                 packet = resolve_render_job_packet(
                     {
                         "input": "models/widget.glb",
@@ -1057,7 +1057,7 @@ class SnapshotCliTests(unittest.TestCase):
                     cwd=root,
                 )
             finally:
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
 
         # The STEP artifact pipeline must never be entered for a direct mesh.
         self.assertEqual(calls, [])
@@ -1323,9 +1323,9 @@ class SnapshotCliTests(unittest.TestCase):
                 calls.append(kwargs)
                 return None
 
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_topology_artifact = fake_ensure
+                snapshot_main.ensure_step_artifact = fake_ensure
                 packet = resolve_render_job_packet(
                     {
                         "input": "models/widget.glb",
@@ -1334,7 +1334,7 @@ class SnapshotCliTests(unittest.TestCase):
                     cwd=root,
                 )
             finally:
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
 
         # Mesh inputs skip the STEP artifact pipeline entirely.
         self.assertEqual(calls, [])
@@ -1379,9 +1379,9 @@ class SnapshotCliTests(unittest.TestCase):
                            "limits": {"value": [0, 5]}}],
             })
 
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_topology_artifact = lambda *args, **kwargs: None
+                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: None
                 with self.assertRaisesRegex(SnapshotError, "[Uu]nknown"):
                     resolve_render_job_packet(
                         {
@@ -1392,7 +1392,7 @@ class SnapshotCliTests(unittest.TestCase):
                         cwd=root,
                     )
             finally:
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
 
     def test_input_kind_detects_robot_descriptions(self) -> None:
         self.assertEqual(snapshot_main.input_kind(Path("robots/arm.urdf")), "urdf")
@@ -1408,15 +1408,15 @@ class SnapshotCliTests(unittest.TestCase):
                 calls.append(kwargs)
                 return None
 
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_topology_artifact = fake_ensure
+                snapshot_main.ensure_step_artifact = fake_ensure
                 packet = resolve_render_job_packet(
                     {"input": "models/arm.urdf", "outputs": [{"path": "tmp/iso.png"}]},
                     cwd=root,
                 )
             finally:
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
 
         # A robot is resolved by cadgen from its own description; no STEP pipeline.
         self.assertEqual(calls, [])
@@ -1680,9 +1680,9 @@ class SnapshotCliTests(unittest.TestCase):
                 calls.append((target, kwargs))
                 return _selector_artifact("o1", "o1.2")
 
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_topology_artifact = fake_ensure
+                snapshot_main.ensure_step_artifact = fake_ensure
                 resolve_render_job_packet(
                     {
                         "input": "models/assembly.step",
@@ -1692,7 +1692,7 @@ class SnapshotCliTests(unittest.TestCase):
                     cwd=root,
                 )
             finally:
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
 
         self.assertEqual(len(calls), 1)
         target, kwargs = calls[0]
@@ -1707,9 +1707,9 @@ class SnapshotCliTests(unittest.TestCase):
             (models / "assembly.step").write_text("ISO-10303-21;\nEND-ISO-10303-21;\n", encoding="utf-8")
             write_package(models / "assembly.step", entry_kind="assembly")
 
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_topology_artifact = lambda *args, **kwargs: _selector_artifact(
+                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: _selector_artifact(
                     "o1",
                     "o1.2",
                     "o1.2.1",
@@ -1726,7 +1726,7 @@ class SnapshotCliTests(unittest.TestCase):
                     cwd=root,
                 )
             finally:
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
 
         selection = packet["jobs"][0]["selection"]
         self.assertEqual(selection["focus"], ["o1.2", "o1.3"])
@@ -1739,9 +1739,9 @@ class SnapshotCliTests(unittest.TestCase):
             (models / "assembly.step").write_text("ISO-10303-21;\nEND-ISO-10303-21;\n", encoding="utf-8")
             write_package(models / "assembly.step", entry_kind="assembly")
 
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_topology_artifact = lambda *args, **kwargs: _selector_artifact(
+                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: _selector_artifact(
                     "o1",
                     "o1.2",
                     "o1.2.1",
@@ -1756,7 +1756,7 @@ class SnapshotCliTests(unittest.TestCase):
                     cwd=root,
                 )
             finally:
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
 
         selection = packet["jobs"][0]["selection"]
         self.assertEqual(selection["hide"], ["o1.2.1"])
@@ -1775,9 +1775,9 @@ class SnapshotCliTests(unittest.TestCase):
             (models / "assembly.step").write_text("ISO-10303-21;\nEND-ISO-10303-21;\n", encoding="utf-8")
             write_package(models / "assembly.step", entry_kind="assembly")
 
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_topology_artifact = lambda *args, **kwargs: _selector_artifact(
+                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: _selector_artifact(
                     "o1.1.1",
                     "o1.1.2",
                     "o1.4.1",
@@ -1793,7 +1793,7 @@ class SnapshotCliTests(unittest.TestCase):
                     cwd=root,
                 )
             finally:
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
         return packet["jobs"][0]["selection"]
 
     def test_focus_expands_a_group_ref_to_its_subtree(self) -> None:
@@ -1836,9 +1836,9 @@ class SnapshotCliTests(unittest.TestCase):
             models.mkdir()
             (models / "assembly.step").write_text("ISO-10303-21;\nEND-ISO-10303-21;\n", encoding="utf-8")
 
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_topology_artifact = lambda *args, **kwargs: _selector_artifact("o1", "o1.2")
+                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: _selector_artifact("o1", "o1.2")
                 with self.assertRaisesRegex(SnapshotError, "part/subassembly occurrence refs"):
                     resolve_render_job_packet(
                         {
@@ -1849,7 +1849,7 @@ class SnapshotCliTests(unittest.TestCase):
                         cwd=root,
                     )
             finally:
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
 
     def test_render_job_rejects_mixed_focus_and_hide_selection(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -1858,9 +1858,9 @@ class SnapshotCliTests(unittest.TestCase):
             models.mkdir()
             (models / "assembly.step").write_text("ISO-10303-21;\nEND-ISO-10303-21;\n", encoding="utf-8")
 
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_topology_artifact = lambda *args, **kwargs: _selector_artifact(
+                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: _selector_artifact(
                     "o1",
                     "o1.2",
                     "o1.3",
@@ -1878,7 +1878,7 @@ class SnapshotCliTests(unittest.TestCase):
                         cwd=root,
                     )
             finally:
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
 
     def test_snapshot_root_flags_and_job_fields_are_removed(self) -> None:
         for flag, value in (("--workspace-root", "/tmp"), ("--root-dir", "models")):
@@ -2129,10 +2129,10 @@ class JobOutputResolutionTests(unittest.TestCase):
             models.mkdir(parents=True)
             (models / "part.step").write_text("ISO-10303-21;\nEND-ISO-10303-21;\n", encoding="utf-8")
             write_package(models / "part.step")
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             original_timestamp = snapshot_main.snapshot_timestamp
             try:
-                snapshot_main.ensure_step_topology_artifact = lambda *a, **k: None
+                snapshot_main.ensure_step_artifact = lambda *a, **k: None
                 snapshot_main.snapshot_timestamp = lambda: "20260527T163012Z"
                 packet = resolve_render_job_packet(
                     {"input": "models/part.step", "outputs": outputs},
@@ -2140,7 +2140,7 @@ class JobOutputResolutionTests(unittest.TestCase):
                 )
                 return packet, root
             finally:
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
                 snapshot_main.snapshot_timestamp = original_timestamp
 
     def test_render_job_output_path_string_is_accepted(self):
@@ -2170,9 +2170,9 @@ class JobDisplayResolutionTests(unittest.TestCase):
                 (models / "stage.display.json").write_text(
                     json.dumps(display_body), encoding="utf-8"
                 )
-            original_ensure = snapshot_main.ensure_step_topology_artifact
+            original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_topology_artifact = lambda *a, **k: None
+                snapshot_main.ensure_step_artifact = lambda *a, **k: None
                 return resolve_render_job_packet(
                     {
                         "input": "models/part.step",
@@ -2182,7 +2182,7 @@ class JobDisplayResolutionTests(unittest.TestCase):
                     cwd=root,
                 )
             finally:
-                snapshot_main.ensure_step_topology_artifact = original_ensure
+                snapshot_main.ensure_step_artifact = original_ensure
 
     def test_job_display_mode_string_is_resolved(self):
         packet = self._packet_for("wireframe")
@@ -2241,12 +2241,12 @@ class StepPoseParameterTests(unittest.TestCase):
 
     def _resolve(self, job):
         # The artifact build is out of scope here: these are input-shape rules.
-        original = snapshot_main.ensure_step_topology_artifact
+        original = snapshot_main.ensure_step_artifact
         try:
-            snapshot_main.ensure_step_topology_artifact = lambda *args, **kwargs: None
+            snapshot_main.ensure_step_artifact = lambda *args, **kwargs: None
             return resolve_render_job_packet(job, cwd=self.root)
         finally:
-            snapshot_main.ensure_step_topology_artifact = original
+            snapshot_main.ensure_step_artifact = original
 
     def test_pose_values_and_pose_names_both_reach_the_job(self) -> None:
         """`--kinematics` takes either spelling, told apart by SHAPE.
@@ -2335,7 +2335,7 @@ class StepPoseParameterTests(unittest.TestCase):
             selector_bundle=None,
         )
         with mock.patch.object(
-            snapshot_main, "ensure_step_topology_artifact", lambda *args, **kwargs: artifact
+            snapshot_main, "ensure_step_artifact", lambda *args, **kwargs: artifact
         ):
             with self.assertRaisesRegex(SnapshotError, "changed while its topology"):
                 resolve_render_job_packet(self._job(), cwd=self.root)
@@ -2415,12 +2415,12 @@ class StepAnimationFrameTests(unittest.TestCase):
         return job
 
     def _resolve(self, job):
-        original = snapshot_main.ensure_step_topology_artifact
+        original = snapshot_main.ensure_step_artifact
         try:
-            snapshot_main.ensure_step_topology_artifact = lambda *args, **kwargs: None
+            snapshot_main.ensure_step_artifact = lambda *args, **kwargs: None
             return resolve_render_job_packet(job, cwd=self.root)
         finally:
-            snapshot_main.ensure_step_topology_artifact = original
+            snapshot_main.ensure_step_artifact = original
 
     def test_the_flag_pair_becomes_one_job_field(self) -> None:
         """`--animation CLIP --time SECONDS` is ONE request on the job, and the

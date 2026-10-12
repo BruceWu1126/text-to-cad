@@ -4,7 +4,7 @@ The supervisor owns a socket and a pool of warm workers (``cadgen.daemon.pool``)
 each a subprocess that imported cadgen / OCP / build123d once. It services
 directly-run @step/@dxf model scripts ("run") plus ``cadgen step build|compile``
 and ``cadgen stl|3mf|glb build`` invocations (snapshot orchestration stays in its
-caller; only its document compiles and surface derivations are pool jobs)
+caller; only its document compiles and display derivations are pool jobs)
 over a per-install unix socket (named pipe on Windows), so every
 call skips the multi-second interpreter+OCP startup. The supervisor itself never
 imports OCP: no amount of model badness can take it down.
@@ -452,7 +452,7 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
 
     # An artifact job is never killed for its client. It is a pure function of immutable
     # pins that writes each result into the store as it goes, and the CAD Viewer cancels
-    # surface requests as a matter of course, so killing the worker threw away a warm
+    # part requests as a matter of course, so killing the worker threw away a warm
     # kernel (a replacement imports it again, ~2.6 s) to save a derivation that takes a
     # fraction of that. Nor does it run on for nobody: a request names up to 64
     # components, and one the browser left kept its worker deriving them for seconds while

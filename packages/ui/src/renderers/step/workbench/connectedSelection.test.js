@@ -1,4 +1,4 @@
-// Group edges and Group faces over cadgen's own data: the slot's selector table (core's surf
+// Group edges and Group faces over cadgen's own data: the slot's selector table (core's part
 // fixtures, written by cadgen) joined to its stored mesh, composed into a runtime as the
 // viewer composes an occurrence, and grown by the graphs StepSurface grows a pick with. The
 // sets are the table's chains and tangent groups, decided from the exact BREP.
@@ -9,13 +9,13 @@ import test from 'node:test';
 import { createRequire } from 'node:module';
 
 import { buildSelectorRuntime } from '@text-to-cad/core/lib/selectors/runtime.js';
-import { joinSelectorTable, parseSelectorTable } from '@text-to-cad/core/lib/surf/selectorTable.js';
-import { decodeComponentTessellation } from '@text-to-cad/core/lib/surf/tessellationCache.js';
+import { joinSelectorTable, parseSelectorTable } from '@text-to-cad/core/lib/parts/selectorTable.js';
+import { decodeComponentTessellation } from '@text-to-cad/core/lib/parts/tessellationCache.js';
 import { buildEdgeChainGraph } from './edgeChainSelection.js';
 import { connectedReferenceIds } from './selectionFilter.js';
 import { buildTangentFaceGraph } from './tangentFaceSelection.js';
 
-const FIXTURES = path.join(path.dirname(createRequire(import.meta.url).resolve('@text-to-cad/core/lib/surf/tessellationCache.js')), 'fixtures');
+const FIXTURES = path.join(path.dirname(createRequire(import.meta.url).resolve('@text-to-cad/core/lib/parts/tessellationCache.js')), 'fixtures');
 
 function slotRuntime() {
   const table = parseSelectorTable(fs.readFileSync(path.join(FIXTURES, 'slot.selectors.json'), 'utf8'));

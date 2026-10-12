@@ -135,7 +135,7 @@ class Verdicts(ArtifactStatusTestCase):
         # no result for them.
         self.assertEqual(
             artifact_status(step),
-            {"state": "not-compiled", "reason": "missing_glb"},
+            {"state": "not-compiled", "reason": "missing_tree"},
         )
 
     def test_restoring_the_bytes_makes_it_ready_again_with_nothing_rebuilt(self):
@@ -159,18 +159,18 @@ class Verdicts(ArtifactStatusTestCase):
 
     def test_the_gate_order_missing_then_components_then_ready(self):
         step = self.tree.step()
-        self.assertEqual(artifact_status(step)["reason"], "missing_glb")
+        self.assertEqual(artifact_status(step)["reason"], "missing_tree")
 
         self.tree.package(step, components=())
-        self.assertEqual(artifact_status(step)["reason"], "missing_step_topology")
+        self.assertEqual(artifact_status(step)["reason"], "missing_geometry")
 
         self.tree.package(step)
         self.assertEqual(artifact_status(step), {"state": "compiled"})
 
-    def test_a_component_whose_native_payload_is_absent_is_missing_glb(self):
+    def test_a_component_whose_native_payload_is_absent_is_missing_geometry(self):
         step = self.tree.step()
         self.tree.package(step, write_payloads=False)
-        self.assertEqual(artifact_status(step)["reason"], "missing_step_topology")
+        self.assertEqual(artifact_status(step)["reason"], "missing_geometry")
 
 
 class SnapshotShapes(ArtifactStatusTestCase):
@@ -209,7 +209,7 @@ class SnapshotShapes(ArtifactStatusTestCase):
             snapshot={"writing": False, "busy": True, "runId": None, "progress": None},
         )
         self.assertEqual(
-            status, {"state": "not-compiled", "reason": "missing_glb", "blocked": True}
+            status, {"state": "not-compiled", "reason": "missing_tree", "blocked": True}
         )
 
 

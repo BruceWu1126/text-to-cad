@@ -224,8 +224,8 @@ class ReadyChildren(unittest.TestCase):
 
     def test_deleted_object_after_preparation_fails_on_exact_pin(self):
         late = self.child('late', tree=self.tree)
-        surf = next(iter(get_tree(self.tree)['components'].values()))['brep']
-        first = self.child('first', job=Job(self.other, lambda: object_path(surf).unlink()))
+        brep = next(iter(get_tree(self.tree)['components'].values()))['brep']
+        first = self.child('first', job=Job(self.other, lambda: object_path(brep).unlink()))
         with nullcontext(), mock.patch('cadgen.store.records.read_record', side_effect=AssertionError('latest record')):
             with self.assertRaisesRegex(ChildBuildError, 'disappeared'):
                 bd.Compound(obj=[first, late], children=[first, late])
@@ -234,8 +234,8 @@ class ReadyChildren(unittest.TestCase):
 
     def test_corruption_after_preparation_is_not_hidden_by_private_value(self):
         late = self.child('late', tree=self.tree)
-        surf = next(iter(get_tree(self.tree)['components'].values()))['brep']
-        first = self.child('first', job=Job(self.other, lambda: object_path(surf).write_bytes(b'corrupt')))
+        brep = next(iter(get_tree(self.tree)['components'].values()))['brep']
+        first = self.child('first', job=Job(self.other, lambda: object_path(brep).write_bytes(b'corrupt')))
         with nullcontext():
             with self.assertRaisesRegex(ChildBuildError, 'disappeared'):
                 bd.Compound(obj=[first, late], children=[first, late])
@@ -244,9 +244,9 @@ class ReadyChildren(unittest.TestCase):
 
     def test_failed_preparation_can_retry_same_repaired_object_in_order(self):
         late = self.child('late', tree=self.tree)
-        surf = next(iter(get_tree(self.tree)['components'].values()))['brep']
-        payload = object_path(surf).read_bytes()
-        object_path(surf).write_bytes(b'corrupt')
+        brep = next(iter(get_tree(self.tree)['components'].values()))['brep']
+        payload = object_path(brep).read_bytes()
+        object_path(brep).write_bytes(b'corrupt')
         first = self.child('first', job=Job(self.other, lambda: put_object(payload, repair=True)))
         with nullcontext():
             bd.Compound(obj=[first, late], children=[first, late])
@@ -378,8 +378,8 @@ class ReadyChildren(unittest.TestCase):
 
     def test_brep_repaired_after_short_stat_still_obeys_actual_size_limit(self):
         entry = next(iter(get_tree(self.tree)['components'].values()))
-        surf = entry['brep']
-        path = object_path(surf)
+        brep = entry['brep']
+        path = object_path(brep)
         payload = path.read_bytes()
         path.write_bytes(b'x')
         late = self.child('late', tree=self.tree)

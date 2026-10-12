@@ -293,7 +293,7 @@ class ArtifactCoalescing(unittest.TestCase):
         self.exercise_relay(fail=True)
 
     def test_a_cancelled_artifact_request_finishes_on_its_warm_worker(self):
-        # The CAD Viewer cancels surface requests as a matter of course. The derivation writes
+        # The CAD Viewer cancels part requests as a matter of course. The derivation writes
         # its result into the store, so the worker finishes it rather than being killed (a
         # replacement imports the kernel again), and an identical request meanwhile attaches.
         registry, ledger, pool = broker.Broker(1), JobLedger(), mock.Mock()
@@ -619,7 +619,7 @@ class ArtifactLeases(unittest.TestCase):
              mock.patch.object(worker, "_evict_first_party_modules", side_effect=AssertionError("source hygiene scan")), \
              mock.patch("cadgen.metadata.parse_generator_metadata", side_effect=AssertionError("source metadata")):
             self.assertEqual(worker._run(request), 0)
-            self.fake.derive.side_effect = RuntimeError("surface producer failed")
+            self.fake.derive.side_effect = RuntimeError("producer failed")
             self.assertEqual(worker._run(request), 1)
         self.assertEqual(sum("artifactResult" in frame for frame in frames), 1)
         self.assertEqual(self.settled()["granted"], 2)

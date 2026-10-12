@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildComponentMeshData } from "./surfMeshData.js";
+import { buildComponentMeshData } from "./partMeshData.js";
 import { joinSelectorTable } from "./selectorTable.js";
 import { decodeComponentTessellation, meshEdgePolylines, meshFaceRanges } from "./tessellationCache.js";
 import { meshFixture, selectorTableFixture } from "./__tests__/meshFixtures.js";

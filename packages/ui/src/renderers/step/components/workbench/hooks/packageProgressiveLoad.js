@@ -40,7 +40,7 @@ export const PROGRESSIVE_PUBLISH_MAX_COMPONENTS = 256;
 export const PROGRESSIVE_PUBLISH_MAX_BYTES = 128 * 1024 * 1024;
 
 // Load-time admission (the peak that killed the tab): a component decodes in a
-// surf worker whose intermediates count against the renderer process, and a
+// part worker whose intermediates count against the renderer process, and a
 // hand component reaches ~90 MB of meshData. A count cap alone (8 wide) admits
 // 8 of those at once. Admission is therefore ALSO byte-aware: the bytes the
 // parts' rows charge for the decodes in flight (`displayMeshBytes`) stay under
@@ -507,7 +507,7 @@ export function createProgressivePackageLoader({
     while (true) {
       let row;
       // The ask handles an ordinary miss itself (a part the store lacks is derived). A thrown
-      // error is cancellation, an invalid immutable binding, or failed surface derivation and
+      // error is cancellation, an invalid immutable binding, or failed part derivation and
       // must fence sibling lanes like a decode failure.
       try {
         row = await partRow(cid, component, {

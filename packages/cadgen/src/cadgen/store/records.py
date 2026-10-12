@@ -75,7 +75,7 @@ RECORD_SCHEMA_VERSION = 8
 # another occurrence's label, so the same bytes compile to a tree that names
 # those occurrences differently. An older version's entry is never read and the
 # document compiles again; its components are unchanged.
-# Schema 7: the surface producer hint names the kernel alone (build123d, OCP and
+# Schema 7: the producer hint names the kernel alone (build123d, OCP and
 # its distribution); the part version (store.parts.PART_VERSION) versions the
 # extraction, the selector table and the mesh derived under it.
 DOCUMENT_SCHEMA_VERSION = 7
@@ -152,7 +152,7 @@ def _resolved(path: Path | str) -> str:
 
 def note_document_tree(
     document_hash: str, tree: str, *, kind: str = "step",
-    surface_producer: dict[str, Any] | None = None,
+    producer: dict[str, Any] | None = None,
 ) -> None:
     """``index/document/<sha256(bytes)>-v<schema>`` → the tree describing those
     bytes. Artifact → artifact; idempotent; atomic. Keeps the entry's mesh ledger
@@ -167,14 +167,14 @@ def note_document_tree(
     if existing.get("schemaVersion") == DOCUMENT_SCHEMA_VERSION and isinstance(meshes, dict) and str(existing.get("tree") or "") == tree_hash:
         payload["meshes"] = meshes
     from cadgen.store.parts import producer_fields
-    if surface_producer is not None:
+    if producer is not None:
         # Attestation belongs to the worker or validated artifact response;
         # lightweight readers must not import the kernel to persist its hint.
-        selected = producer_fields(surface_producer)
-        payload["surfaceProducer"] = selected
+        selected = producer_fields(producer)
+        payload["producer"] = selected
     elif existing.get("schemaVersion") == DOCUMENT_SCHEMA_VERSION and existing.get("tree") == tree_hash:
         try:
-            payload["surfaceProducer"] = producer_fields(existing.get("surfaceProducer"))
+            payload["producer"] = producer_fields(existing.get("producer"))
         except (ValueError, TypeError):
             pass
     write_entry("document", document_key(digest), payload)

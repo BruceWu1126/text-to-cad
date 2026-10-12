@@ -118,7 +118,7 @@ def compose_document_tree(
     pinned child tree hash to that child's document tree hash.
     """
     from cadgen._internal.glb_topology import (
-        STEP_EDGE_DEFAULT_RENDER_VISIBILITY_CLASSES, step_topology_capabilities,
+        STEP_EDGE_DEFAULT_RENDER_VISIBILITY_CLASSES, step_edge_capabilities,
     )
     from cadgen._internal.step_scene_loader import _normalize_label_name
     from cadgen.store.trees import TREE_KIND, TREE_SCHEMA, _validate_structure, flatten, get_tree, tree_kind
@@ -246,7 +246,7 @@ def compose_document_tree(
     if not occurrences:
         raise Ineligible("the composed document places nothing")
     tree: dict[str, Any] = {
-        "capabilities": step_topology_capabilities(),
+        "capabilities": step_edge_capabilities(),
         "edgeRendering": {"visibilityClasses": list(STEP_EDGE_DEFAULT_RENDER_VISIBILITY_CLASSES)},
         "label": root_label,
         "units": "mm",

@@ -31,12 +31,12 @@ from cadgen.render import relative_to_cwd
 from cadgen._internal.step_scene import step_file_hash
 from cadgen._internal.step_scene_package import load_step_scene_exact
 from cadgen.step_targets import (
-    StepTopologyArtifact,
+    StepArtifact,
 )
 
 
 @dataclass(frozen=True, kw_only=True)
-class _ImportedArtifactSnapshot(StepTopologyArtifact):
+class _ImportedArtifactSnapshot(StepArtifact):
     """One verified document selection, owned only by this currency check."""
 
     document_hash: str

@@ -1265,7 +1265,7 @@ def route_file(pathname: str, prefix: str, root: Path) -> Path:
 # The snapshot page draws the same stored meshes the viewer and the mesh
 # exports do (immutable objects named by index/part; the record in
 # cadgen/store/parts.py, the codec in cadgen/store/meshes.py and
-# packages/core/src/lib/surf/tessellationCache.js). The page cannot touch the
+# packages/core/src/lib/parts/tessellationCache.js). The page cannot touch the
 # filesystem, so the host serves the store (cadgen/store/tess_cache.py): a probe
 # answers the parts' records, and GET /__tess_cache/<part>.glb and the batch
 # route read exact objects: the display meshes the build derived, or the view's
@@ -1273,7 +1273,7 @@ def route_file(pathname: str, prefix: str, root: Path) -> Path:
 #
 # TRANSPORT: bulk bytes must NOT go through Playwright at all. CDP serializes
 # every fulfilled body as base64 over the devtools pipe at ~20 MB/s, which made
-# a warm moonwatch snapshot spend ~8s moving ~180 MB of surfs + cache entries.
+# a warm moonwatch snapshot spend ~8s moving ~180 MB of display data + cache entries.
 # Worse, INTERCEPTION alone costs the pipe in the other direction: a routed
 # request's body reaches the driver as escaped text in one protocol message, so
 # a large body can exceed Node's string limit and kill the renderer (reported

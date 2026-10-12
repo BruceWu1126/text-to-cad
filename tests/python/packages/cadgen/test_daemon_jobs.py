@@ -200,7 +200,7 @@ class Lifecycle(unittest.TestCase):
         output = str(Path(self.model).with_suffix(".step"))
         self.ledger.observe(self._event(self.model, "building", job=job["id"], sequence=1, preview={
             "output": output, "tree": "source", "kinematics": {"mates": [1] * 1000}, "appearance": {},
-            "animation": "export const clips = {};", "surfaceProducer": {"scheme": 19}}))
+            "animation": "export const clips = {};", "producer": {"scheme": 19}}))
         self.ledger.observe(self._event(self.model, "building", job=job["id"], sequence=2, saved={
             "output": output, "tree": "document", "documentHash": "abc", "appearance": {"materials": {}}}))
         snapshot = self.ledger.snapshot()[0]

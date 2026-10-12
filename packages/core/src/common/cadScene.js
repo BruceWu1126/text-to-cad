@@ -536,7 +536,7 @@ function buildPartGeometryEntry(THREE, meshData, part, recomputeNormals = false)
 
 function buildWholeGeometryEntry(THREE, meshData, recomputeNormals = false) {
   return geometryCacheEntry(THREE, cacheOwnerForMeshData(meshData), MODEL_PART_ID, () => {
-    // Component buffers are immutable and already typed on the surf path: wrap
+    // Component buffers are immutable and already typed on the part path: wrap
     // them rather than duplicating every vertex of a single-part model.
     const geometry = new THREE.BufferGeometry();
     const vertices = meshData.vertices instanceof Float32Array ? meshData.vertices : new Float32Array(meshData.vertices || []);
@@ -1489,7 +1489,7 @@ function addEdgeObject(THREE, runtime, record, edgeGeometry, settings) {
   runtime.edgesGroup.add(object);
 }
 
-// CAD edge lines ride the meshData of the surf component that owns them: a
+// CAD edge lines ride the meshData of the part that owns them: a
 // composed package part reaches its component through sourceMesh, a
 // single-component meshData carries them at the top level. Baked multi-part
 // meshDatas (GLB-era) have none and keep the edge_indices / EdgesGeometry path.
@@ -1649,7 +1649,7 @@ function cadEdgeInstanceSet(THREE, runtime, cadEdges) {
   return set;
 }
 
-// A surf component's edges for one record: a slot in the component's instance
+// A part's edges for one record: a slot in the component's instance
 // set. The record keeps a hook to leave the set for a private line object drawn
 // from a bending tube's own edge segments (`lines`, its skin's), which move with
 // every pose (tubeSkin.js calls it once a clip bends the record).
@@ -1849,7 +1849,7 @@ function createDisplayRecord(THREE, runtime, meshData, settings, {
     partId,
     sourcePart: part || null,
     mesh,
-    // CAD edges of a surf component: a slot in the component's instanced edge
+    // CAD edges of a part: a slot in the component's instanced edge
     // draw (cadEdgeInstances.js) until a bending tube binds its own into `edges`.
     edgeInstance: null,
     bindTubeEdges: null,

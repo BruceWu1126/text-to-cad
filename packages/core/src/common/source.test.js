@@ -5,8 +5,8 @@ import test from "node:test";
 import { loadSource as loadSourceInput, packageSourceFromBaseUrl } from "./source.js";
 import {
   createTessellationCache, createHttpTessellationCacheProvider, encodeTessellationCacheBatch,
-} from "../lib/surf/tessellationCache.js";
-import { encodeMeshFixture, memoryMeshProvider, meshFixture, partRowFor } from "../lib/surf/__tests__/meshFixtures.js";
+} from "../lib/parts/tessellationCache.js";
+import { encodeMeshFixture, memoryMeshProvider, meshFixture, partRowFor } from "../lib/parts/__tests__/meshFixtures.js";
 
 // A host's part store that records every part probed.
 function recordingMeshStore(requested = [], { stored = [] } = {}) {

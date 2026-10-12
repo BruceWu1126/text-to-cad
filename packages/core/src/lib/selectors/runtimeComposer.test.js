@@ -154,7 +154,7 @@ function makeBundle(seed, { faces: faceCount = 4, shapes: shapeCount = 2, detail
       shapes,
       faces,
       edges,
-      faceProxy: { source: "surf", runsView: "faceRuns", runColumns: ["occurrenceRow", "primitiveIndex", "triangleStart", "triangleCount", "faceRow"] },
+      faceProxy: { source: "part", runsView: "faceRuns", runColumns: ["occurrenceRow", "primitiveIndex", "triangleStart", "triangleCount", "faceRow"] },
       edgeProxy: { positionsView: "edgePositions", indicesView: "edgeIndices", edgeIdsView: "edgeIds" },
       relations: { faceEdgeRowsView: "faceEdgeRows", edgeFaceRowsView: "edgeFaceRows" },
     },

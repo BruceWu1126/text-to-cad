@@ -151,7 +151,7 @@ def tree_objects(tree_hash: str, *, _seen: set[str] | None = None) -> set[str]:
 
 
 def tree_complete(tree_hash: str) -> bool:
-    """Full verified geometry closure; disposable surfaces are not required.
+    """Full verified geometry closure; parts' display data is not required.
 
     Verified once per process. The gate asks for the same closures many times
     in one build, so this is the metadata capture: a closure already verified
@@ -453,8 +453,8 @@ def _finite_number(value: Any) -> bool:
 def _validate_structure(tree: Any, *, native: bool = False) -> None:
     if type(tree) is not dict or tree.get("kind") != TREE_KIND or tree.get("schemaVersion") != TREE_SCHEMA:
         raise ValueError("unsupported geometry tree schema")
-    if "surfaceProducer" in tree:
-        raise ValueError("geometry tree contains a surface producer")
+    if "producer" in tree:
+        raise ValueError("geometry tree contains a producer")
     if "appearance" in tree:
         from cadgen._internal.source_sidecar import normalize_appearance
 

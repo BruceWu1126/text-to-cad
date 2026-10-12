@@ -44,7 +44,7 @@ def admitted(key=GOOD_KEY, size=None):
 # The authoritative codec: @text-to-cad/core in this repository. The suite is root-owned
 # and runs from a checkout, so the source path is always present -- no skip.
 REPO_ROOT = Path(__file__).resolve().parents[5]
-CADGEN_JS_CODEC = REPO_ROOT / "packages" / "core" / "src" / "lib" / "surf" / "tessellationCache.js"
+CADGEN_JS_CODEC = REPO_ROOT / "packages" / "core" / "src" / "lib" / "parts" / "tessellationCache.js"
 
 
 class TessCacheTestCase(unittest.TestCase):

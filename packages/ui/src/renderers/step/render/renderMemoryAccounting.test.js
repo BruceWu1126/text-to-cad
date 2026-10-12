@@ -32,7 +32,7 @@ test("render memory accounting counts shared component buffers once and splits e
   assert.equal(totals.displayCpuBytes, totals.surfaceBytes + totals.edgeBytes);
   assert.equal(totals.gpuEstimatedBytes, totals.surfaceBytes + totals.edgeBytes);
   assert.equal(totals.memoryPolicy.hardRssCap, false);
-  assert.equal(typeof totals.assetCaches.surfPayload.entries, "number");
+  assert.equal(typeof totals.assetCaches.partPayload.entries, "number");
   assert.deepEqual(renderMemoryAccounting(null).occurrences, 0);
 });
 

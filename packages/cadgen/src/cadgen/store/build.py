@@ -13,7 +13,7 @@ subtree that is a child model's materialized geometry, found intact, becomes a
   → the model's own components. No error path.
 
 Each native component is privately decoded and validated before publication.
-Surface extraction is a separate artifact derivation and never delays native
+A part's display data is a separate artifact derivation and never delays native
 geometry readiness. A component without an admitted native codec explicitly
 pins its topology facts; no later producer receives the original live shape.
 
@@ -276,13 +276,13 @@ def _publish_document_scene(
     scene: Any, *, force: bool, progress: Any, repair_objects: bool = False,
 ) -> tuple[str, dict[str, Any], dict[str, Any], dict[str, list[str]], dict[str, str]]:
     from cadgen._internal.glb_topology import (
-        STEP_EDGE_DEFAULT_RENDER_VISIBILITY_CLASSES, step_topology_capabilities,
+        STEP_EDGE_DEFAULT_RENDER_VISIBILITY_CLASSES, step_edge_capabilities,
     )
 
     walk, artifact, occurrence_map, node_map = _document_walk(scene, progress=progress, force=force)
     digest, tree, stats = _publish_tree(
         walk, bbox_shape=artifact, root_name=walk.root["name"], force=force, progress=progress,
-        extra={"capabilities": step_topology_capabilities(),
+        extra={"capabilities": step_edge_capabilities(),
                "edgeRendering": {"visibilityClasses": list(STEP_EDGE_DEFAULT_RENDER_VISIBILITY_CLASSES)}},
         repair_objects=repair_objects,
         prepared_occurrence_bounds=True,
@@ -555,7 +555,7 @@ def _publish_tree(
     prepare_bbox_shape: Callable[[], Any] | None = None,
     link_bounds: Callable[[], dict[str, list[float]] | None] | None = None,
 ) -> tuple[str, dict[str, Any], dict[str, Any]]:
-    """Publish verified geometry inputs before any disposable surface work.
+    """Publish verified geometry inputs before any disposable display work.
 
     ``link_bounds`` answers an all-link result's bounds from its links
     (:func:`_bbox_from_links`); ``prepare_bbox_shape`` stands in for

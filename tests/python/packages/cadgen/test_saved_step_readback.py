@@ -364,7 +364,7 @@ class SavedStepReadbackTest(unittest.TestCase):
                         **record, "glb": {**record["glb"], "object": put_object(b"hash-valid unreadable mesh")},
                     })
                 with mock.patch("cadgen._internal.step_scene_loader.load_step_scene", side_effect=AssertionError("native hit parsed STEP")), \
-                        mock.patch("cadgen._internal.surface_extract.extract_topology_facts", side_effect=AssertionError("native read extracted topology facts")):
+                        mock.patch("cadgen._internal.topology_extract.extract_topology_facts", side_effect=AssertionError("native read extracted topology facts")):
                     scene = scene_from_render_package(self.root / "part.step", step_hash=expected[3])
                     self.assertIsNotNone(scene)
                     actual_colors = sorted(color for recipe in scene.prototype_face_colors.values()

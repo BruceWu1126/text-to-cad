@@ -58,7 +58,7 @@ def _remap_edges(table: dict, mapping: dict[int, int]) -> dict:
 def main() -> None:
     from cadgen._internal.component_package import decode_display_shape, prepare_geometry_component
     from cadgen._internal.selector_table import build_selector_table, read_selector_table, selector_table_bytes
-    from cadgen._internal.surface_extract import extract_topology_facts
+    from cadgen._internal.topology_extract import extract_topology_facts
 
     from make_meshes import _match, committed_rows, shapes
 

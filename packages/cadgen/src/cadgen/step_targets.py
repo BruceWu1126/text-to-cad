@@ -22,7 +22,7 @@ class ResolvedStepTarget:
 
 
 @dataclass(frozen=True)
-class StepTopologyArtifact:
+class StepArtifact:
     cad_path: str
     source_path: Path
     step_path: Path
@@ -38,7 +38,7 @@ class StepTopologyArtifact:
         return value if value in {"part", "assembly"} else "part"
 
 
-class StepTopologyArtifactError(CadRefError):
+class StepArtifactError(CadRefError):
     """A door could not produce or read the tree behind a document.
 
     A door never refuses a document and never tells the user to run anything:

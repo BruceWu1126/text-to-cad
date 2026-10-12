@@ -11,7 +11,7 @@ from typing import Sequence
 
 from cadgen.catalog import source_from_path
 from cadgen.cli_logging import CliLogger
-from cadgen._internal.glb_topology import build_step_topology_index_manifest
+from cadgen._internal.glb_topology import build_step_index_manifest
 from cadgen.coordination import (
     DRAWING_PACKAGE,
     PHASE_GENERATE,
@@ -277,13 +277,13 @@ def _assembly_provenance_manifest(selector_options: SelectorOptions) -> dict[str
     read the whole saved document once per build.
     """
 
-    from cadgen._internal.glb_topology import step_topology_capabilities
+    from cadgen._internal.glb_topology import step_edge_capabilities
 
     # STEP-pure by contract: nothing here may derive from the Python source.
     # Source-derived state (provenance, pose, mates) rides the source sidecar
     # (_source_sidecar_payload below) — the tree keys on geometry alone.
-    return build_step_topology_index_manifest({
-        "capabilities": step_topology_capabilities(selector_options.edge_visibility_classes),
+    return build_step_index_manifest({
+        "capabilities": step_edge_capabilities(selector_options.edge_visibility_classes),
         "edgeRendering": {"visibilityClasses": list(selector_options.edge_visibility_classes)},
     })
 
@@ -461,9 +461,9 @@ def _generate_part_outputs(
         # The worker can attest its actual display producer without deriving
         # display data. Unknown display capability never prevents native publication.
         try:
-            surface_producer = producer_identity()
+            producer = producer_identity()
         except ValueError:
-            surface_producer = None
+            producer = None
 
         def tree_kinematics(result_hash: str):
             declaration = getattr(scene, "kinematics", None)
@@ -476,7 +476,7 @@ def _generate_part_outputs(
             with logger.timed("tree: kinematics"):
                 resolved, _ = resolve_kinematics_block(
                     declaration, tree_hash=result_hash, source_ref=str(spec.source_ref),
-                    producer=surface_producer,
+                    producer=producer,
                 )
             return resolved
 
@@ -738,7 +738,7 @@ def _generate_part_outputs(
         # (a reader's one lookup; STORE.md §2). Code side: which model wrote each
         # output path (the badge's question, never a reader's).
         if document_tree_hash and record.get("stepHash"):
-            note_document_tree(str(record["stepHash"]), document_tree_hash, surface_producer=surface_producer)
+            note_document_tree(str(record["stepHash"]), document_tree_hash, producer=producer)
         if generated:
             if staged_step is not None:
                 from cadgen.catalog import seed_artifact_hash
@@ -940,7 +940,7 @@ def _ensure_reused_display(spec: EntrySpec, tree: str | None, *, progress: objec
             return
         document_hash, tree = snapshot
         producer = _reused_display_producer(
-            document_hash, tree, (document_entry_for_hash(document_hash) or {}).get("surfaceProducer"))
+            document_hash, tree, (document_entry_for_hash(document_hash) or {}).get("producer"))
     _ensure_display(tree or "", producer=producer, progress=progress, logger=logger)
 
 
@@ -967,7 +967,7 @@ def _reused_display_producer(document_hash: str, tree: str, hint: object) -> obj
     from cadgen.store.records import note_document_tree
 
     with contextlib.suppress(OSError, StoreUnwritableError):
-        note_document_tree(document_hash, tree, surface_producer=current)
+        note_document_tree(document_hash, tree, producer=current)
     return current
 
 

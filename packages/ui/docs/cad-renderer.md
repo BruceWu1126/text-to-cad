@@ -728,7 +728,7 @@ the existing bounded decoded caches. Reopening a warm file can therefore show
 those assets on its first render while file-owned controls restore their own
 camera and pose. Completed STEP working sets have a separate LRU of at most
 eight packages and 256 MiB, so an assembly that exceeds the core decoded-part cache's
-24-entry limit (`renderAssetClient.js`'s `SURF_CACHE_LIMIT`) can reopen without fetching or decoding every component again.
+24-entry limit (`renderAssetClient.js`'s `PART_CACHE_LIMIT`) can reopen without fetching or decoding every component again.
 The bound includes unique full backing buffers and estimated structural metadata;
 an oversized package is not retained. Memory pressure evicts these disposable
 snapshots before reclaiming workers. The existing memory probe reports their

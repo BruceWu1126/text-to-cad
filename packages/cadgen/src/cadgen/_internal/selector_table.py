@@ -4,7 +4,7 @@ A ref someone copies (``#o1.2.f7``), the facts a tool reports for it and the
 sets the viewer's connected selection grows it to (an edge's chain, a face's
 tangent group) all come from this one table. It is derived from the exact
 BREP and the component's topology facts, extracted in memory
-(``surface_extract``) -- the facts hold the exact metrics, surface and curve
+(``topology_extract``) -- the facts hold the exact metrics, surface and curve
 types, parameters, loops and edge classes; the BREP adds what they do not
 carry: the vertices, which edge ends where, and the tangent directions the
 chains follow -- and stored as one of a part's two objects, beside its display
@@ -24,12 +24,12 @@ import math
 from typing import Any, Mapping
 
 from cadgen._internal.glb_topology import (
+    STEP_EDGE_ANGULAR_TOLERANCE_DEG,
+    STEP_EDGE_CLASSIFICATION_ALGORITHM,
     STEP_EDGE_FLAGS,
     STEP_EDGE_RENDER_VISIBILITY_CLASSES,
+    STEP_EDGE_SAMPLE_COUNT,
     STEP_EDGE_VISIBILITY_CLASSES,
-    STEP_TOPOLOGY_EDGE_ANGULAR_TOLERANCE_DEG,
-    STEP_TOPOLOGY_EDGE_CLASSIFICATION_ALGORITHM,
-    STEP_TOPOLOGY_EDGE_SAMPLE_COUNT,
 )
 
 # The table's wire schema, read by the page (selectorTable.js) and the CLI: a
@@ -264,11 +264,13 @@ def _tangent_groups(faces: list[dict[str, Any]], edges: list[dict[str, Any]]) ->
 def capabilities() -> dict[str, Any]:
     return {
         "edgeClassification": {
-            "algorithm": STEP_TOPOLOGY_EDGE_CLASSIFICATION_ALGORITHM,
-            "angularToleranceDeg": STEP_TOPOLOGY_EDGE_ANGULAR_TOLERANCE_DEG,
-            "samples": STEP_TOPOLOGY_EDGE_SAMPLE_COUNT,
+            "algorithm": STEP_EDGE_CLASSIFICATION_ALGORITHM,
+            "angularToleranceDeg": STEP_EDGE_ANGULAR_TOLERANCE_DEG,
+            "samples": STEP_EDGE_SAMPLE_COUNT,
         },
         # The mesh carries the CAD edge lines, so the page's own topology line pass stays off.
+        # The algorithm's name is in every stored table's bytes: a new spelling would be a
+        # new table for every part.
         "surfaceEdgeRendering": {
             "algorithm": "surf-edge-lines-v1",
             "visibilityClasses": list(STEP_EDGE_RENDER_VISIBILITY_CLASSES),
@@ -279,7 +281,7 @@ def capabilities() -> dict[str, Any]:
 
 def build_selector_table(shape, facts: Mapping[str, Any]) -> dict[str, Any]:
     """The table of one unlocated component: ``shape`` (a ``TopoDS_Shape``) and its
-    topology facts (``surface_extract.extract_topology_facts``, or the object an
+    topology facts (``topology_extract.extract_topology_facts``, or the object an
     eager-only component's tree pins)."""
     faces = list(facts["faces"])
     edges = list(facts["edges"])

@@ -323,7 +323,7 @@ test('a pick names its face or edge by the id cadgen minted in the selector tabl
   // must answer with are its rows', joined to the mesh by ordinal, never the page's.
   const fixture = await loadStepFixture();
   const base = fixture.view.occurrences.find(occurrence => occurrence.name === 'base');
-  const table = JSON.parse(fixture.surfaces.get(fixture.view.components[base.component].part).selectors.bytes.toString());
+  const table = JSON.parse(fixture.partData.get(fixture.view.components[base.component].part).selectors.bytes.toString());
   const rows = (name, columns) => table[name].map(row => Object.fromEntries(table.tables[columns].map((column, index) => [column, row[index]])));
   const top = rows('faces', 'faceColumns').find(face => face.normal && face.normal[2] > 0.5);
   const edges = rows('edges', 'edgeColumns');
@@ -1412,7 +1412,7 @@ test('a warm package opens with a probe per chunk and its bodies in batches, and
   assert.equal(sent(/^POST \/one\/__tess_cache\/probe$/), 3, 'a probe for each chunk: eight, sixteen and the last one');
   assert.equal(sent(/^POST \/one\/__tess_cache\/batch$/), 3, 'a read for each batch: eight, sixteen and the last one');
   assert.equal(sent(/^GET \/one\/__tess_cache\//), 0, 'no body read alone');
-  assert.equal(sent(/\/__cad\/surfaces/), 0, 'no surface resolved');
+  assert.equal(sent(/\/__cad\/parts/), 0, 'no surface resolved');
   assert.equal(sent(/^(GET|HEAD) \/one\/__cad\/store\?file=[^&]*\.surf(&|$)/), 0, 'no SURF read');
   assert.deepEqual(errors, []);
 });

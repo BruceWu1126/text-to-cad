@@ -1,11 +1,11 @@
-// Pooled client for surfWorker.js.
+// Pooled client for partWorker.js.
 //
 // Unlike the single-worker GLB client this is a POOL: a large assembly has
 // hundreds of independent components, and decoding each one's mesh into
 // render-owned arrays and building its selectors is pure CPU, so the
 // wall-clock win scales with cores. Requests round-robin across workers and
 // name the render/selectors capabilities they require. Returns null from
-// loadSurfComponentInWorker when Workers are unavailable (node, old browsers)
+// loadPartInWorker when Workers are unavailable (node, old browsers)
 // so callers can fall back to the inline path.
 
 import { TessellationCacheProbeMissError } from "./tessellationCache.js";
@@ -48,14 +48,14 @@ function normalizeCapabilities(value) {
     return { render: true, selectors: true };
   }
   if (!value || typeof value !== "object") {
-    throw new TypeError("Surf worker capabilities must be an object");
+    throw new TypeError("Part worker capabilities must be an object");
   }
   const capabilities = {
     render: value.render === true,
     selectors: value.selectors === true,
   };
   if (!capabilities.render && !capabilities.selectors) {
-    throw new TypeError("Surf worker request must require render or selectors capability");
+    throw new TypeError("Part worker request must require render or selectors capability");
   }
   return capabilities;
 }
@@ -228,7 +228,7 @@ function handleWorkerMessage(slot, event) {
     });
     return;
   }
-  const error = new Error(message.error?.message || "Failed to load surf component in worker.");
+  const error = new Error(message.error?.message || "Failed to load part in worker.");
   error.name = message.error?.name || "Error";
   request.reject(error);
 }
@@ -237,14 +237,14 @@ function handleWorkerError(slot, event) {
   if (!pool || slot.poolGeneration !== poolGeneration || pool[slot.index] !== slot) return;
   const request = slot.requestId == null ? null : finishRequest(slot, slot.requestId);
   if (request) {
-    request.reject(new Error(event?.message || "surf worker failed."));
+    request.reject(new Error(event?.message || "part worker failed."));
   }
   replaceWorkerSlot(slot);
   dispatchQueuedRequests();
 }
 
 function createWorkerSlot(index, generation) {
-  const worker = new Worker(new URL("./surfWorker.js", import.meta.url), { type: "module" });
+  const worker = new Worker(new URL("./partWorker.js", import.meta.url), { type: "module" });
   const slot = {
     worker,
     index,
@@ -287,7 +287,7 @@ function ensurePool() {
 // least one idle slot remains when queued work has no active slot to inherit.
 // The counts describe live isolates after the call, so the viewer can reduce
 // its conservative worker-resident estimate by exactly the capacity returned.
-export function reclaimIdleSurfWorkers() {
+export function reclaimIdlePartWorkers() {
   const currentPool = pool;
   const generation = poolGeneration;
   if (!currentPool) {
@@ -327,7 +327,7 @@ export function reclaimIdleSurfWorkers() {
 // Process-local ownership only. Estimates describe the live worker slots that
 // actually completed a request in this generation; they are not geometry or
 // cache identity and never cross the worker protocol boundary.
-export function surfWorkerMemoryStats() {
+export function partWorkerMemoryStats() {
   const slots = pool ? pool.filter(Boolean) : [];
   return Object.freeze({
     generation: poolGeneration,
@@ -355,7 +355,7 @@ export function surfWorkerMemoryStats() {
 // actually gone so retained-memory accounting can be cleared. Resolve once the
 // last pending request completes or aborts; no pool is also a successfully
 // released state.
-export function releaseSurfWorkerPoolWhenIdle() {
+export function releasePartWorkerPoolWhenIdle() {
   const generation = poolGeneration;
   if (!pool) {
     return Promise.resolve(true);
@@ -370,7 +370,7 @@ export function releaseSurfWorkerPoolWhenIdle() {
   });
 }
 
-export function loadSurfComponentInWorker(url, {
+export function loadPartInWorker(url, {
   signal,
   resources,
   identity,
@@ -445,7 +445,7 @@ export function loadSurfComponentInWorker(url, {
       }
       request.prepareResource = prepareResource;
       request.message = {
-        type: "loadSurf",
+        type: "loadPart",
         id,
         url,
         ...(resource ? { resource } : {}),
@@ -487,7 +487,7 @@ export function loadSurfComponentInWorker(url, {
 // the pool's growth limit) while their bodies are still on the wire. Otherwise a batched read, which
 // hands every body over at once, starts them all only then, and the first geometry waits on their
 // start. Idle slots carry no charge and are reclaimed and released exactly as grown ones are.
-export function prewarmSurfWorkerPool(count) {
+export function prewarmPartWorkerPool(count) {
   const workers = ensurePool();
   if (!workers) return 0;
   const target = Math.min(poolGrowthLimit, Math.max(0, Math.floor(Number(count) || 0)));
@@ -505,7 +505,7 @@ export function prewarmSurfWorkerPool(count) {
 // A render session leases the shared scheduler. Dropping one session never
 // interrupts another owner's work; the last release retires remaining requests.
 let ownerCount = 0;
-export function retainSurfWorkerPool() {
+export function retainPartWorkerPool() {
   ownerCount += 1;
   let released = false;
   return () => {

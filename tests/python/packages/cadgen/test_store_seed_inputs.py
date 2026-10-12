@@ -26,7 +26,7 @@ class NoNative(importlib.abc.MetaPathFinder):
         if fullname.split('.')[0] in {'OCP', 'build123d'}:
             raise AssertionError('native import: ' + fullname)
 sys.meta_path.insert(0, NoNative())
-from tests.python.support.store_fixtures import seed_result, FIXTURE_SURFACE_PRODUCER
+from tests.python.support.store_fixtures import seed_result, FIXTURE_PRODUCER
 from cadgen.store.trees import capture_tree
 from cadgen.store.view import descriptor_for_view, stored_parts
 from cadgen.store.records import document_entry_for_hash
@@ -35,7 +35,7 @@ from pathlib import Path
 path=Path(sys.argv[1]); tree=seed_result(path)
 flat, objects=capture_tree(tree)
 document=hashlib.sha256(path.read_bytes()).hexdigest()
-assert document_entry_for_hash(document)['surfaceProducer']==FIXTURE_SURFACE_PRODUCER
+assert document_entry_for_hash(document)['producer']==FIXTURE_PRODUCER
 view=descriptor_for_view(tree, document_hash=document)
 assert set(stored_parts(view))==set(flat['components'])
 assert not any(name.split('.')[0] in {'OCP','build123d'} for name in sys.modules)
@@ -47,7 +47,7 @@ print('ok')
         self.assertEqual(result.stdout.strip(), "ok")
 
     def test_seeded_parts_are_what_derivation_makes_of_the_seeded_geometry(self):
-        from tests.python.support.store_fixtures import seed_result, FIXTURE_SURFACE_PRODUCER
+        from tests.python.support.store_fixtures import seed_result, FIXTURE_PRODUCER
         from cadgen.store import parts
         from cadgen.store.index import remove_entry
         from cadgen.store.trees import capture_tree
@@ -58,7 +58,7 @@ print('ok')
         volumes = []
         for entry in flat["components"].values():
             volumes.append(round(decode_geometry_component(entry, objects[entry["brep"]]).volume, 8))
-            key = parts.part_key(entry, FIXTURE_SURFACE_PRODUCER)
+            key = parts.part_key(entry, FIXTURE_PRODUCER)
             seeded = parts.probe(key)
             remove_entry("part", key)
             # The record names both objects by content address: the same record is the same bytes.

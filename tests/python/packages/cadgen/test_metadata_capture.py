@@ -19,7 +19,7 @@ add_repo_path("packages/cadgen/src")
 from cadgen.store import parts, trees
 from cadgen.store.build import build_tree_from_compound
 from cadgen.store.objects import iter_objects, object_path
-from cadgen.viewer.surfaces import SurfaceSubscribers
+from cadgen.viewer.parts import PartSubscribers
 
 WINDOWS_TICK_NS = 15_625_000
 # Twice the coarsest tick trees.py knows (FAT's 2 s write time), and a whole
@@ -27,7 +27,7 @@ WINDOWS_TICK_NS = 15_625_000
 SETTLE_OFFSET_NS = 4_000_000_000
 
 
-class PendingSurface(Future):
+class PendingPart(Future):
     def detach(self):
         pass
 
@@ -67,7 +67,7 @@ class MetadataCapture(unittest.TestCase):
             "tree": self.tree, "viewId": self.view["viewId"], "producer": self.producer,
             "components": [{"cid": self.cid, "part": self.view["components"][self.cid]["part"]}],
         }
-        self.manager = SurfaceSubscribers()
+        self.manager = PartSubscribers()
         self.addCleanup(lambda: [self.manager.cancel(token) for token in list(self.manager._jobs)])
         trees._reset_metadata_capture_cache()
         self.addCleanup(trees._reset_metadata_capture_cache)
@@ -135,7 +135,7 @@ class MetadataCapture(unittest.TestCase):
         self.assertEqual(captured, self.payloads)
 
     def test_resolve_and_polls_recheck_one_verified_complete_closure(self):
-        pending = PendingSurface()
+        pending = PendingPart()
         read = trees.read_verified_object
         with mock.patch.object(trees, "read_verified_object", wraps=read) as reads, \
              mock.patch("cadgen.daemon.artifacts.submit_artifact", return_value=pending) as submit:
@@ -298,12 +298,12 @@ class MetadataCapture(unittest.TestCase):
         self.assertEqual(trees.capture_tree(self.tree), (self.geometry, self.payloads))
 
     def test_the_viewer_verifies_a_tree_once_and_stats_what_each_request_names(self):
-        from cadgen.viewer import surfaces as viewer_surfaces
+        from cadgen.viewer import parts as viewer_parts
 
         parts.derive(self.tree, [self.cid], producer=self.producer)
         resolve = lambda: self.manager.resolve(json.dumps(self.request).encode())["components"][self.cid]["state"]
         self.assertEqual(resolve(), "ready")
-        with mock.patch.object(viewer_surfaces, "capture_tree", side_effect=AssertionError("verified again")):
+        with mock.patch.object(viewer_parts, "capture_tree", side_effect=AssertionError("verified again")):
             for _ in range(3):
                 self.assertEqual(resolve(), "ready")
 

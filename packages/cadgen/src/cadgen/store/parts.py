@@ -3,7 +3,7 @@ mesh (a GLB body, ``cadgen.store.meshes``) and the selector table
 (``cadgen._internal.selector_table``) -- derived from captured immutable geometry inputs,
 and read back.
 
-A part is a component under one surface producer, the kernel that derives it. Its key,
+A part is a component under one producer, the kernel that derives it. Its key,
 ``index/part/<digest>-v<PART_VERSION>``, carries no tolerance: the digest hashes the
 component's geometry input (its ``contentHash``: kind, codec, BREP bytes, face colours and
 an eager-only component's pinned topology facts) and the producer, and the version is
@@ -48,8 +48,8 @@ _SELECTOR_FIELDS = {"object", "byteLength", "faceCount", "edgeCount", "vertexCou
 _PRODUCER_FIELDS = {"build123d", "ocp", "cadqueryOcp"}
 
 
-class SurfaceProducerUnavailable(ValueError):
-    """This runtime cannot implement the surface producer the request pins.
+class ProducerUnavailable(ValueError):
+    """This runtime cannot implement the producer the request pins.
 
     A caller that holds a replacement producer recovers from this and only
     this; every other failure is a failure. Routing it by a substring of the
@@ -57,7 +57,7 @@ class SurfaceProducerUnavailable(ValueError):
     from wrong, so the refusal has a type and one declared marker text.
     """
 
-    MARKER = "worker cannot implement the request's pinned surface producer"
+    MARKER = "worker cannot implement the request's pinned producer"
 
     def __init__(self, message: str = MARKER) -> None:
         super().__init__(message)
@@ -70,24 +70,26 @@ def producer_unavailable(error: object) -> bool:
     a worker's refusal arrives as an ArtifactJobError carrying its text, so the
     marker is matched too -- one constant, declared beside the raise.
     """
-    return isinstance(error, SurfaceProducerUnavailable) or SurfaceProducerUnavailable.MARKER in str(error)
+    return isinstance(error, ProducerUnavailable) or ProducerUnavailable.MARKER in str(error)
 
 
 def validate_producer(value: Any) -> None:
     if type(value) is not dict or set(value) not in (_PRODUCER_FIELDS, _PRODUCER_FIELDS | {"producerKey"}):
-        raise ValueError("unsupported surface producer")
+        raise ValueError("unsupported producer")
     for field in _PRODUCER_FIELDS:
         text = value[field]
         if type(text) is not str or not text.strip() or "unknown" in text.lower():
-            raise ValueError("surface producer requires known runtime identity")
+            raise ValueError("producer requires known runtime identity")
     if "producerKey" in value and value["producerKey"] != producer_key(value):
-        raise ValueError("surface producer key mismatch")
+        raise ValueError("producer key mismatch")
 
 
 def producer_key(value: dict) -> str:
     from cadgen._internal.component_package import canonical_json_bytes as canonical_bytes
     definition = {key: item for key, item in value.items() if key != "producerKey"}
     validate_producer(definition)
+    # The tag's bytes are in every producer key, part key and view id: a new spelling
+    # would re-key every stored part.
     return hashlib.sha256(b"cadgen-surface-producer-v2\0" + canonical_bytes(definition)).hexdigest()
 
 
@@ -171,7 +173,7 @@ def view_from_geometry(tree_hash: str, descriptor: dict, *, producer: dict | Non
     descriptor["viewSchemaVersion"] = 1
     descriptor["tree"] = tree_hash
     descriptor["viewId"] = _view_id(tree_hash, selected)
-    descriptor["surfaceProducer"] = {**selected, "producerKey": key}
+    descriptor["producer"] = {**selected, "producerKey": key}
     for entry in descriptor["components"].values():
         entry["part"] = _part_key(entry, key)
         entry["brepObject"] = entry.pop("brep")
@@ -331,7 +333,7 @@ def _topology(entry: dict, topods: Any) -> dict:
         from cadgen._internal.topology_facts import read_topology_facts
 
         return read_topology_facts(read_verified_object(entry["topology"]))
-    from cadgen._internal.surface_extract import extract_topology_facts
+    from cadgen._internal.topology_extract import extract_topology_facts
 
     return extract_topology_facts(topods)
 
@@ -401,7 +403,7 @@ def derive(tree_hash: str, cids: list[str] | None = None, *, producer: dict | No
     descriptor, producer = _captured(tree_hash, producer)
     components = descriptor["components"]
     if producer != producer_identity():
-        raise SurfaceProducerUnavailable()
+        raise ProducerUnavailable()
     requested = list(components) if cids is None else list(dict.fromkeys(cids))
     if any(cid not in components for cid in requested):
         raise ValueError("display request names an unpinned component")
@@ -450,7 +452,7 @@ def ensure_display(tree_hash: str, *, producer: dict | None = None,
     if not missing:
         return []
     if producer != producer_identity():
-        raise SurfaceProducerUnavailable()
+        raise ProducerUnavailable()
     failures = []
     for done, cid in enumerate(missing):
         if progress is not None:

@@ -13,7 +13,7 @@ colours.
 The shapes are built here, not read from ``models/``. Run from the repository
 root with the repo's Python whenever cadgen's selector table or mesh output changes:
 
-    .venv/bin/python packages/core/src/lib/surf/fixtures/make_fixtures.py
+    .venv/bin/python packages/core/src/lib/parts/fixtures/make_fixtures.py
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ def main() -> None:
     from cadgen._internal import occt_mesh
     from cadgen._internal.component_package import decode_display_shape, effective_face_colors, prepare_geometry_component
     from cadgen._internal.selector_table import build_selector_table, selector_table_bytes
-    from cadgen._internal.surface_extract import extract_topology_facts
+    from cadgen._internal.topology_extract import extract_topology_facts
     from cadgen.store.index import versioned_key
     from cadgen.store.parts import PART_VERSION
     from cadgen.tessellation_policy import DISPLAY_TESSELLATION

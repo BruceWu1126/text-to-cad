@@ -52,9 +52,9 @@ from OCP.TopoDS import TopoDS
 
 from cadgen._internal.entity_ordinals import shape_entities
 from cadgen._internal.glb_topology import (
+    STEP_EDGE_ANGULAR_TOLERANCE_DEG,
     STEP_EDGE_FLAGS,
     STEP_EDGE_VISIBILITY_CLASSES,
-    STEP_TOPOLOGY_EDGE_ANGULAR_TOLERANCE_DEG,
 )
 from cadgen._internal.step_scene_geometry import (
     _curve_params,
@@ -195,7 +195,7 @@ def _edge_classification(edge, faces: list) -> dict[str, Any]:
         return result
     dihedral = _sampled_edge_dihedral_deg(edge, typed_faces, [None, None])
     if dihedral is not None:
-        if dihedral > STEP_TOPOLOGY_EDGE_ANGULAR_TOLERANCE_DEG:
+        if dihedral > STEP_EDGE_ANGULAR_TOLERANCE_DEG:
             result.update(cls=C["FEATURE"], continuity="sampled_hard",
                           flags=F["HARD"], dihedralDeg=dihedral)
         else:

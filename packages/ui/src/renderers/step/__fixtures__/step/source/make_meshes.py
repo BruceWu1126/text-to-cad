@@ -3,7 +3,7 @@ its display mesh, ``components/<cid>.glb``.
 
 The harness serves these as cadgen's part store would: one GLB body per part,
 at the display tolerance (``cadgen.tessellation_policy``), named by the part key
-cadgen derives from the component and the view's surface producer
+cadgen derives from the component and the view's producer
 (``cadgen.store.parts``), which this script writes into ``assembly.json`` with the
 view's id. The two
 parts are rebuilt here from ``hinge_block.py``'s shapes and meshed by cadgen's own
@@ -65,8 +65,8 @@ def _view(view: dict) -> dict:
     """The served view under its own producer: each component names its part."""
     from cadgen.store import parts
 
-    producer = parts.producer_fields({name: view["surfaceProducer"][name] for name in ("build123d", "ocp", "cadqueryOcp")})
-    view["surfaceProducer"] = {**producer, "producerKey": parts.producer_key(producer)}
+    producer = parts.producer_fields({name: view["producer"][name] for name in ("build123d", "ocp", "cadqueryOcp")})
+    view["producer"] = {**producer, "producerKey": parts.producer_key(producer)}
     view["viewId"] = parts._view_id(view["tree"], producer)
     for component in view["components"].values():
         component["part"] = parts.part_key(component, producer)
@@ -77,7 +77,7 @@ def main() -> None:
     from cadgen._internal import occt_mesh
     from cadgen._internal.component_package import decode_display_shape, prepare_geometry_component
     from cadgen._internal.selector_table import build_selector_table
-    from cadgen._internal.surface_extract import extract_topology_facts
+    from cadgen._internal.topology_extract import extract_topology_facts
     from cadgen.store.meshes import decode_payload, encode_payload
     from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 

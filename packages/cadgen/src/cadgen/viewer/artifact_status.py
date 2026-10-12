@@ -60,9 +60,9 @@ class ARTIFACT_STATE:  # noqa: N801 - a namespace of wire constants, not a class
 # right branch rather than falling through to the error arm.
 BUILDABLE_CODES = frozenset(
     {
-        "missing_glb",
-        "missing_step_topology",
-        "unsupported_step_topology",
+        "missing_tree",
+        "missing_geometry",
+        "unsupported_tree",
         "missing_dxf_output",
     }
 )
@@ -147,18 +147,18 @@ def _validate_step(step_path: str) -> dict:
     if tree is None:
         # No result for THESE bytes: never built, or its objects collected (the
         # lookup is by the bytes themselves, so an edited document simply misses).
-        return {"ok": False, "code": "missing_glb", "tree": None}
+        return {"ok": False, "code": "missing_tree", "tree": None}
     descriptor = result_descriptor(tree)
     if descriptor is None:
         return {
             "ok": False,
-            "code": "missing_step_topology",
+            "code": "missing_geometry",
             "tree": tree,
         }
     if descriptor.get("kind") != STEP_PACKAGE_KIND:
         return {
             "ok": False,
-            "code": "unsupported_step_topology",
+            "code": "unsupported_tree",
             "tree": tree,
             "descriptor": descriptor,
         }
@@ -166,7 +166,7 @@ def _validate_step(step_path: str) -> dict:
     if not components:
         return {
             "ok": False,
-            "code": "missing_glb",
+            "code": "missing_tree",
             "tree": tree,
             "descriptor": descriptor,
         }

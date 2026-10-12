@@ -110,7 +110,7 @@ class SavedAppearanceTest(unittest.TestCase):
 
     def test_apply_appearance_returns_a_fresh_descriptor_and_rejects_missing_targets(self) -> None:
         descriptor = {
-            "components": {"c1": {"surf": "a"}, "c2": {"surf": "b"}},
+            "components": {"c1": {"part": "a"}, "c2": {"part": "b"}},
             "occurrences": [
                 {"id": "o1", "component": "c1", "material": {"roughness": 0.4}},
                 {"id": "o2", "component": "c2"},
@@ -151,9 +151,9 @@ class SavedAppearanceTest(unittest.TestCase):
         applied["occurrences"][0]["material"]["roughness"] = 0.2
         self.assertEqual(0.8, second_consumer["occurrences"][0]["material"]["roughness"])
         self.assertEqual(0.8, block["materials"]["rough"]["roughness"])
-        applied["components"]["c1"]["surf"] = "changed"
+        applied["components"]["c1"]["part"] = "changed"
         applied["assembly"]["root"]["children"][0]["id"] = "changed"
-        self.assertEqual("a", descriptor["components"]["c1"]["surf"])
+        self.assertEqual("a", descriptor["components"]["c1"]["part"])
         self.assertEqual("o1", descriptor["assembly"]["root"]["children"][0]["id"])
 
         absent = apply_appearance(descriptor, None)

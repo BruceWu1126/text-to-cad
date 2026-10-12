@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createCadClient, SurfaceResolutionError } from "@text-to-cad/core/client";
-import { isTessellationCacheProbeMissError, tessellationDecodedBytes } from "@text-to-cad/core/lib/surf/tessellationCache.js";
-import { createSurfaceTicketBatches, createTessellationBodyBatches } from "./packageBatchReads.js";
+import { createCadClient, PartResolutionError } from "@text-to-cad/core/client";
+import { isTessellationCacheProbeMissError, tessellationDecodedBytes } from "@text-to-cad/core/lib/parts/tessellationCache.js";
+import { createPartTicketBatches, createTessellationBodyBatches } from "./packageBatchReads.js";
 import { createInitialDisplayPlans } from "../../../render/initialDisplay.js";
 
 const KIB = 1024, MIB = 1024 * KIB;
@@ -163,7 +163,7 @@ test("the first eight cold components resolve alone, the rest up to 64 to a requ
     for (const { cid } of request.requested) request.onReady(cid, rowFor(cid));
     request.done(new Map(request.requested.map(({ cid }) => [cid, rowFor(cid)])));
   };
-  const tickets = createSurfaceTicketBatches({ order, resolve, needs: cid => ({ part: partOf(cid) }) });
+  const tickets = createPartTicketBatches({ order, resolve, needs: cid => ({ part: partOf(cid) }) });
   const first = tickets.ticket("c0", {});
   await tick();
   // Eight lone requests are out, as eight lanes made them; the rest wait for room.
@@ -184,10 +184,10 @@ test("the first eight cold components resolve alone, the rest up to 64 to a requ
   assert.equal(tickets.stats().components, 200);
 });
 
-test("a surface request that fails fails each of its components still waiting", async () => {
+test("a part request that fails fails each of its components still waiting", async () => {
   const order = cids(20);
-  const failure = new Error("surface derivation failed for c12");
-  const tickets = createSurfaceTicketBatches({ order, alone: 0,
+  const failure = new Error("part derivation failed for c12");
+  const tickets = createPartTicketBatches({ order, alone: 0,
     needs: cid => ({ part: partOf(cid) }),
     resolve: async (requested, { onReady }) => { onReady("c0", rowFor("c0")); throw failure; } });
   assert.deepEqual(await tickets.ticket("c0", {}), rowFor("c0"));
@@ -198,7 +198,7 @@ test("a surface request that fails fails each of its components still waiting", 
 // its request, ready in the same response (before or after it), are answered.
 test("a component that failed in its request fails alone; the ready ones beside it are answered", async () => {
   const hex = c => c.repeat(64);
-  const view = { tree: hex("a"), viewId: hex("b"), surfaceProducer: { build123d: "0.10.0", ocp: "7.9.3", cadqueryOcp: "7.9.3.1" } };
+  const view = { tree: hex("a"), viewId: hex("b"), producer: { build123d: "0.10.0", ocp: "7.9.3", cadqueryOcp: "7.9.3.1" } };
   const parts = { c0: `${hex("1")}-v1`, bad: `${hex("2")}-v1`, c2: `${hex("3")}-v1` };
   const counts = { vertexCount: 3, indexCount: 3, faceCount: 1, edgeCount: 0, edgePointCount: 0 };
   // What cadgen derived for a part: its record, naming its display mesh and selector table.
@@ -211,13 +211,13 @@ test("a component that failed in its request fails alone; the ready ones beside 
     c2: ready("c2"),
   } }), { headers: { "content-type": "application/json" } }) });
   const order = ["bad", "c0", "c2"];
-  const tickets = createSurfaceTicketBatches({ order, alone: 0,
+  const tickets = createPartTicketBatches({ order, alone: 0,
     needs: cid => ({ part: parts[cid] }),
-    resolve: (requested, options) => client.resolveSurfaceComponents(view, requested, options) });
+    resolve: (requested, options) => client.resolveParts(view, requested, options) });
   const [bad, c0, c2] = await Promise.allSettled(order.map(cid => tickets.ticket(cid, {})));
   assert.equal(tickets.stats().requests, 1);
   assert.equal(bad.status, "rejected");
-  assert.ok(bad.reason instanceof SurfaceResolutionError);
+  assert.ok(bad.reason instanceof PartResolutionError);
   assert.deepEqual([bad.reason.cid, bad.reason.code, bad.reason.message], ["bad", "mesh", "component bad: OCCT did not mesh 2 face(s)"]);
   assert.deepEqual([c0.status, c0.value?.part, c0.value?.glb.object, c2.status, c2.value?.part],
     ["fulfilled", parts.c0, hex("e"), "fulfilled", parts.c2]);
@@ -248,7 +248,7 @@ test("a load that is aborted, or over, asks nothing more ahead and leaves no com
   const order = cids(100);
   const sent = [];
   const controller = new AbortController();
-  const tickets = createSurfaceTicketBatches({ order, alone: 0, inFlight: 1, signal: controller.signal,
+  const tickets = createPartTicketBatches({ order, alone: 0, inFlight: 1, signal: controller.signal,
     needs: cid => ({ part: partOf(cid) }),
     resolve: (requested, { signal }) => new Promise((_, reject) => {
       sent.push(requested.length);

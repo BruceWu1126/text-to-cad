@@ -70,7 +70,7 @@ _LOOPBACK_NAMES = frozenset({"127.0.0.1", "localhost", "::1"})
 # than doing work. Interrupting a parked poll costs the client one re-poll
 # after it reloads; interrupting a compile would cost a build, which is why
 # every other route, `POST /__cad/artifact` above all, is counted.
-_UNCOUNTED_ROUTES = frozenset({"/__cad/server", "/__cad/preview", "/__cad/surfaces", "/__cad/surfaces/cancel",
+_UNCOUNTED_ROUTES = frozenset({"/__cad/server", "/__cad/preview", "/__cad/parts", "/__cad/parts/cancel",
                                "/__cad/analytics", "/__cad/analytics/activity", "/__cad/version"})
 
 
@@ -261,10 +261,10 @@ class CadApp:
         from cadgen._internal.picker import available
 
         from .drawings import DrawingRenders
-        from .surfaces import SurfaceSubscribers
+        from .parts import PartSubscribers
         from .warm import CatalogWarmer
 
-        self.surface_subscribers = SurfaceSubscribers()
+        self.part_subscribers = PartSubscribers()
         # The drawing route's renders, off the request and one per drawing (``drawings.py``).
         self.drawings = DrawingRenders(on_crash=lambda error: self._crashed(error, bugs_only=True))
         # What a watched build saves, its catalog row computed before a read asks (``warm.py``).
@@ -606,19 +606,19 @@ class CadApp:
                         response.send_empty(413, [("connection", "close")])
                         return
                     response.send_json(200, {"ok": True, "path": save_sketch(request.body(), str(query.get("name") or ""))})
-                elif pathname == "/__cad/surfaces":
+                elif pathname == "/__cad/parts":
                     if int(request.headers.get("content-length") or 0) > 128 * 1024:
                         response.send_empty(413, [("connection", "close")])
                         return
-                    response.send_json(200, self.surface_subscribers.resolve(request.body()))
-                elif pathname == "/__cad/surfaces/cancel":
+                    response.send_json(200, self.part_subscribers.resolve(request.body()))
+                elif pathname == "/__cad/parts/cancel":
                     if int(request.headers.get("content-length") or 0) > 128 * 1024:
                         response.send_empty(413, [("connection", "close")])
                         return
                     payload = json.loads(request.body())
                     if type(payload) is not dict or set(payload) != {"job"} or type(payload["job"]) is not str:
-                        raise ValueError("surface cancellation requires a subscriber token")
-                    self.surface_subscribers.cancel(payload["job"])
+                        raise ValueError("part cancellation requires a subscriber token")
+                    self.part_subscribers.cancel(payload["job"])
                     response.send_empty(204)
                 elif pathname == TESS_CACHE_PROBE_PATH:
                     self._handle_tess_probe(request, response)
@@ -800,7 +800,7 @@ class CadApp:
         ``file=/<tree>/assembly.json``.
         """
         rel = str(query.get("file") or "").replace("\\", "/").lstrip("/")
-        producer = json.loads(query.get("surfaceProducer")) if query.get("surfaceProducer") else None
+        producer = json.loads(query.get("producer")) if query.get("producer") else None
         payload, content_type = virtual_store_asset(
             rel, producer=producer, document_hash=query.get("documentHash"),
         )

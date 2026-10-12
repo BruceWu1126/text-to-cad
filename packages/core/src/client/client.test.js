@@ -226,20 +226,20 @@ test('polling keeps its two-second cadence, obeys host visibility and stops with
   client.dispose();
 });
 
-test('surface and preview requests are origin-bound, guarded and cancelled with their owner', async () => {
+test('part and preview requests are origin-bound, guarded and cancelled with their owner', async () => {
   const calls = [];
   const client = createCadClient({ origin: 'http://workspace.test', fetch: async (url, options) => {
     calls.push({ url, options });
     return json({ job: 'subscriber', feedCursor: 'next' });
   } });
   const body = { tree: 'tree', components: [{ cid: 'one', part: `${'1'.repeat(64)}-v1` }] };
-  assert.equal((await client.requestSurfaces(body)).job, 'subscriber');
-  await client.cancelSurfaceRequest({ job: 'subscriber' });
+  assert.equal((await client.requestParts(body)).job, 'subscriber');
+  await client.cancelPartRequest({ job: 'subscriber' });
   await client.editingPreview('part.step', { after: 'cursor' });
   assert.equal(new URL(calls[0].url).origin, 'http://workspace.test');
   assert.deepEqual(JSON.parse(calls[0].options.body), body);
   assert.equal(calls[0].options.headers['x-cadgen-viewer'], '1');
-  assert.equal(new URL(calls[1].url).pathname, '/__cad/surfaces/cancel');
+  assert.equal(new URL(calls[1].url).pathname, '/__cad/parts/cancel');
   assert.equal(new URL(calls[2].url).pathname, '/__cad/preview');
   assert.equal(new URL(calls[2].url).searchParams.get('file'), 'part.step');
   assert.equal(new URL(calls[2].url).searchParams.get('after'), 'cursor');

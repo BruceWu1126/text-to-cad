@@ -30,7 +30,7 @@ export function distanceFromCurl(points, angle = Math.PI / 2) {
 const QUARTER_TURN_Z = [0, 0, Math.SQRT1_2, Math.SQRT1_2];
 
 /**
- * A tube track over the scene tests' unit quad (`surfComponentMeshData`), already
+ * A tube track over the scene tests' unit quad (`partMeshData`), already
  * given its skin, in the form a load leaves it: two joints along +X, 1 mm apart at
  * rest, and one key that stands the quad at z = 2 turned a quarter about +Z.
  */

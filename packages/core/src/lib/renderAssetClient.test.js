@@ -8,17 +8,17 @@ import {
   loadRenderGlb,
   loadRenderJson,
   loadRenderRobot,
-  loadRenderSurf as loadSurf,
-  loadRenderSurfSelectorBundle as loadSurfSelectors,
+  loadRenderPart as loadPart,
+  loadRenderPartSelectorBundle as loadPartSelectors,
   peekRenderJson,
   peekRenderRobot,
-  peekRenderSurf,
+  peekRenderPart,
   ROBOT_PAYLOAD_SCHEMA_VERSION,
   renderAssetCacheStats,
-  reclaimIdleSurfWorkers,
-  releaseSurfWorkers,
-  surfWorkerMemoryStats,
-  configureSurfLeash
+  reclaimIdlePartWorkers,
+  releasePartWorkers,
+  partWorkerMemoryStats,
+  configurePartLeash
 } from "./renderAssetClient.js";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -32,10 +32,10 @@ import {
   isTessellationCacheProbeMissError,
   createTessellationCache,
   partSelectorsPath,
-} from "./surf/tessellationCache.js";
-import { everyKeyMeshProvider, partRowFor, selectorTableFixture } from "./surf/__tests__/meshFixtures.js";
+} from "./parts/tessellationCache.js";
+import { everyKeyMeshProvider, partRowFor, selectorTableFixture } from "./parts/__tests__/meshFixtures.js";
 
-// The part store every surf load reads: it holds the gear's mesh for any part asked.
+// The part store every part load reads: it holds the gear's mesh for any part asked.
 let meshStore = everyKeyMeshProvider();
 let tessellationCache = createTessellationCache({ provider: meshStore });
 function setTessellationCacheProvider(provider) {
@@ -51,15 +51,15 @@ async function partLoad(name) {
   const [row] = await meshStore.probeMany([part]);
   return { identity: { part, tessellationProbe: row }, selectorsUrl: `https://cache.test${partSelectorsPath(row)}` };
 }
-const loadRenderSurf = async (name, options = {}) => loadSurf({
+const loadRenderPart = async (name, options = {}) => loadPart({
   identity: (await partLoad(name)).identity, tessellationCache, ...options,
 });
-const loadRenderSurfSelectorBundle = async (name, options = {}) => {
+const loadRenderPartSelectorBundle = async (name, options = {}) => {
   const { identity, selectorsUrl } = await partLoad(name);
-  return loadSurfSelectors(selectorsUrl, { identity, tessellationCache, ...options });
+  return loadPartSelectors(selectorsUrl, { identity, tessellationCache, ...options });
 };
 const sunGearTable = () => {
-  const bytes = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "surf/fixtures/sun_gear.selectors.json"));
+  const bytes = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "parts/fixtures/sun_gear.selectors.json"));
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 };
 
@@ -370,36 +370,36 @@ test("an unset source scope leaves render asset caching untouched", async (t) =>
   assert.equal(fetchCount, 1);
 });
 
-test("the surf leash is byte-bounded: large entries evict oldest-first down to the count floor", async (t) => {
+test("the part leash is byte-bounded: large entries evict oldest-first down to the count floor", async (t) => {
   const name = (i) => `leash-bytes/c${i}`;
   // One decoded component's bytes, measured; then a ceiling that fits two of
   // them, so every entry is "large" relative to the budget.
-  const first = await loadRenderSurf(name(0));
-  const oneEntryBytes = renderAssetCacheStats().surfLeash.bytes;
+  const first = await loadRenderPart(name(0));
+  const oneEntryBytes = renderAssetCacheStats().partLeash.bytes;
   assert.ok(oneEntryBytes > 0, "a decoded payload weighs something");
-  const previous = configureSurfLeash({ maxBytes: Math.floor(oneEntryBytes * 2.5), minEntries: 1 });
+  const previous = configurePartLeash({ maxBytes: Math.floor(oneEntryBytes * 2.5), minEntries: 1 });
   t.after(() => {
-    configureSurfLeash(previous);
+    configurePartLeash(previous);
   });
   for (let i = 1; i < 12; i += 1) {
-    await loadRenderSurf(name(i));
+    await loadRenderPart(name(i));
   }
   const stats = renderAssetCacheStats();
-  assert.ok(stats.surfLeash.bytes <= stats.surfLeash.maxBytes, `bytes ${stats.surfLeash.bytes} within ${stats.surfLeash.maxBytes}`);
+  assert.ok(stats.partLeash.bytes <= stats.partLeash.maxBytes, `bytes ${stats.partLeash.bytes} within ${stats.partLeash.maxBytes}`);
   // A component retains two leash entries sharing one set of arrays (payload +
   // meshData), so two components fit the ceiling: four entries, not 24.
-  assert.ok(stats.surfLeash.entries <= 4 && stats.surfLeash.entries >= 1, `entries ${stats.surfLeash.entries}: two large components fit, not 24`);
-  assert.ok(stats.surfPayload.entries <= 2, `surf payloads retained: ${stats.surfPayload.entries}`);
-  assert.notEqual(await loadRenderSurf(name(0)), first, "the oldest entry was evicted first");
+  assert.ok(stats.partLeash.entries <= 4 && stats.partLeash.entries >= 1, `entries ${stats.partLeash.entries}: two large components fit, not 24`);
+  assert.ok(stats.partPayload.entries <= 2, `part payloads retained: ${stats.partPayload.entries}`);
+  assert.notEqual(await loadRenderPart(name(0)), first, "the oldest entry was evicted first");
   // The count floor holds a few entries whatever they weigh.
-  configureSurfLeash({ maxBytes: 1, minEntries: 3 });
+  configurePartLeash({ maxBytes: 1, minEntries: 3 });
   for (let i = 20; i < 26; i += 1) {
-    await loadRenderSurf(name(i));
+    await loadRenderPart(name(i));
   }
-  assert.equal(renderAssetCacheStats().surfLeash.entries, 3, "the floor keeps three entries above a 1-byte ceiling");
+  assert.equal(renderAssetCacheStats().partLeash.entries, 3, "the floor keeps three entries above a 1-byte ceiling");
 });
 
-test("surf payloads and selector bundles live on one bounded leash and re-decode after eviction", async (t) => {
+test("part payloads and selector bundles live on one bounded leash and re-decode after eviction", async (t) => {
   // What a selector read fetches: the part's selector table (cadgen's), its record's other object.
   const originalFetch = globalThis.fetch;
   let fetches = 0;
@@ -412,22 +412,22 @@ test("surf payloads and selector bundles live on one bounded leash and re-decode
   });
   const name = (i) => `pkg/c${i}`;
   const reads = meshStore.counts.reads;
-  const first = await loadRenderSurf(name(0));
+  const first = await loadRenderPart(name(0));
   assert.ok(first.vertices instanceof Float32Array);
   assert.equal(fetches, 0, "display reads only the stored mesh");
   // The selector join is deferred: the table is fetched when selection is first used.
-  await loadRenderSurfSelectorBundle(name(0));
+  await loadRenderPartSelectorBundle(name(0));
   assert.equal(fetches, 1);
   for (let i = 1; i < 30; i += 1) {
-    await loadRenderSurf(name(i));
+    await loadRenderPart(name(i));
   }
   const stats = renderAssetCacheStats();
-  assert.ok(stats.surfLeash.entries <= stats.surfLeash.limit, "leash bounded");
-  assert.ok(stats.surfPayload.entries <= stats.surfLeash.limit, `surf payload cache bounded (${stats.surfPayload.entries})`);
-  assert.ok(stats.surfPayload.typedBytes > 0, "stats attribute retained render bytes");
+  assert.ok(stats.partLeash.entries <= stats.partLeash.limit, "leash bounded");
+  assert.ok(stats.partPayload.entries <= stats.partLeash.limit, `part payload cache bounded (${stats.partPayload.entries})`);
+  assert.ok(stats.partPayload.typedBytes > 0, "stats attribute retained render bytes");
   assert.equal(stats.selector.manifestRows, 0, "an old selector is evicted independently of displayed meshes");
   // The first component was evicted: loading it again decodes a FRESH payload.
-  const again = await loadRenderSurf(name(0));
+  const again = await loadRenderPart(name(0));
   assert.notEqual(again, first, "evicted entry is re-decoded, not retained");
   assert.ok(meshStore.counts.reads - reads >= 31, "every display, the evicted one again, read its mesh");
 });
@@ -448,13 +448,13 @@ test("display reads only the stored mesh and joins selectors on first use", asyn
     setTessellationCacheProvider(null);
   });
 
-  const meshData = await loadRenderSurf(name);
+  const meshData = await loadRenderPart(name);
   assert.ok(meshData.indices.length > 0);
   assert.equal(fetches, 0, "display needs no selector table");
   assert.equal(meshStore.counts.reads, 1, "display performs one part-addressed mesh read");
   const selectorsBeforeDemand = renderAssetCacheStats().selector.entries;
 
-  const bundle = await loadRenderSurfSelectorBundle(name);
+  const bundle = await loadRenderPartSelectorBundle(name);
   assert.equal(fetches, 1, "topology is fetched only when selectors are requested");
   assert.equal(
     renderAssetCacheStats().selector.entries,
@@ -485,7 +485,7 @@ test("a corrupt stored body is a probe miss for its caller to ask for again, nev
     globalThis.fetch = originalFetch;
     setTessellationCacheProvider(null);
   });
-  await assert.rejects(loadRenderSurf(`corrupt/corrupt-${Date.now()}`), isTessellationCacheProbeMissError);
+  await assert.rejects(loadRenderPart(`corrupt/corrupt-${Date.now()}`), isTessellationCacheProbeMissError);
   assert.equal(fetches, 0, "nothing else is read to make a mesh of its own");
 });
 
@@ -511,7 +511,7 @@ test("an admitted probe whose body vanished is a probe miss, reading nothing els
   });
 
   await assert.rejects(
-    loadSurf({ tessellationCache, identity: { part, tessellationProbe: probe } }),
+    loadPart({ tessellationCache, identity: { part, tessellationProbe: probe } }),
     isTessellationCacheProbeMissError,
   );
   assert.equal(reads, 1, "the admitted body was asked for once");
@@ -522,13 +522,13 @@ test("a load whose row names another part is refused before anything is read or 
   const [a, b] = await Promise.all([partLoad(`row-a-${Date.now()}`), partLoad(`row-b-${Date.now()}`)]);
   const mismatched = { part: a.identity.part, tessellationProbe: b.identity.tessellationProbe };
   const reads = meshStore.counts.reads;
-  await assert.rejects(loadSurf({ tessellationCache, identity: mismatched }), /another part's row/);
-  await assert.rejects(loadSurfSelectors(a.selectorsUrl, { tessellationCache, identity: mismatched }), /another part's row/);
+  await assert.rejects(loadPart({ tessellationCache, identity: mismatched }), /another part's row/);
+  await assert.rejects(loadPartSelectors(a.selectorsUrl, { tessellationCache, identity: mismatched }), /another part's row/);
   assert.equal(meshStore.counts.reads, reads, "nothing was read");
-  assert.equal(peekRenderSurf(b.identity.tessellationProbe), null, "nothing was cached as the other part's");
+  assert.equal(peekRenderPart(b.identity.tessellationProbe), null, "nothing was cached as the other part's");
 });
 
-test("a failed surf worker job is not retried synchronously on the main thread", async (t) => {
+test("a failed part worker job is not retried synchronously on the main thread", async (t) => {
   class FailingWorker {
     constructor() { this.listeners = {}; }
     addEventListener(type, handler) { this.listeners[type] = handler; }
@@ -548,16 +548,16 @@ test("a failed surf worker job is not retried synchronously on the main thread",
     throw new Error("main-thread fallback must not fetch");
   };
   t.after(async () => {
-    await releaseSurfWorkers();
+    await releasePartWorkers();
     globalThis.Worker = savedWorker;
     globalThis.fetch = savedFetch;
   });
 
-  await assert.rejects(loadRenderSurf(`failure/heavy-${Date.now()}`), /heavy worker failed/);
+  await assert.rejects(loadRenderPart(`failure/heavy-${Date.now()}`), /heavy worker failed/);
   assert.equal(mainThreadFetches, 0);
 });
 
-test("surf RAM hits do not create worker memory ownership", async (t) => {
+test("part RAM hits do not create worker memory ownership", async (t) => {
   const created = [];
   class FakeWorker {
     constructor() { this.listeners = {}; this.messages = []; created.push(this); }
@@ -573,22 +573,22 @@ test("surf RAM hits do not create worker memory ownership", async (t) => {
   const savedWorker = globalThis.Worker;
   globalThis.Worker = FakeWorker;
   t.after(async () => {
-    await releaseSurfWorkers();
+    await releasePartWorkers();
     globalThis.Worker = savedWorker;
   });
 
   const name = `ram-hit/resident-${Date.now()}`;
-  const first = await loadRenderSurf(name, { memoryEstimateBytes: 321 });
+  const first = await loadRenderPart(name, { memoryEstimateBytes: 321 });
   assert.ok(first);
-  assert.equal(surfWorkerMemoryStats().residentEstimateBytes, 321);
+  assert.equal(partWorkerMemoryStats().residentEstimateBytes, 321);
   const posts = created.reduce((total, worker) => total + worker.messages.length, 0);
 
   assert.equal(
-    await loadRenderSurf(name, { memoryEstimateBytes: 999 }),
+    await loadRenderPart(name, { memoryEstimateBytes: 999 }),
     first,
     "the second load is the exact main-thread cache owner",
   );
-  assert.equal(surfWorkerMemoryStats().residentEstimateBytes, 321);
+  assert.equal(partWorkerMemoryStats().residentEstimateBytes, 321);
   assert.equal(
     created.reduce((total, worker) => total + worker.messages.length, 0),
     posts,
@@ -596,12 +596,12 @@ test("surf RAM hits do not create worker memory ownership", async (t) => {
   );
 });
 
-test("render asset clients can reclaim an idle surf pool without reaching into worker internals", async () => {
-  await releaseSurfWorkers();
-  assert.deepEqual(reclaimIdleSurfWorkers(), {
+test("render asset clients can reclaim an idle part worker pool without reaching into worker internals", async () => {
+  await releasePartWorkers();
+  assert.deepEqual(reclaimIdlePartWorkers(), {
     reclaimedSlots: 0,
     residentSlots: 0,
     fullyReleased: true,
   });
-  assert.equal(surfWorkerMemoryStats().residentEstimateBytes, 0);
+  assert.equal(partWorkerMemoryStats().residentEstimateBytes, 0);
 });

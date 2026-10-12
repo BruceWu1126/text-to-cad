@@ -6,12 +6,12 @@ service per workspace and lends it to every mounted CAD view. The HTTP adapter,
 cache and worker-session lifetimes. Disposing a view releases its render session;
 disposing the service aborts its resources and sessions.
 
-Surface resolution and editing-preview observation belong to the service.
+Part resolution and editing-preview observation belong to the service.
 The HTTP implementation owns request encoding, bounded polling, subscriber
 cancellation, replacement views and immutable store URL validation. A pending
 derivation is asked after again at 80 ms, doubling to 640 ms, then at a tenth of
 the wait so far, at most every 5 s: a derivation stuck behind a daemon that cannot
-start a worker is not asked many times a second until it fails. A surface
+start a worker is not asked many times a second until it fails. A part
 request keeps its tree, view and each component's part; an answer for another
 view or part, or a ready row without a valid part record, fails before
 publication. UI consumes the resulting tickets and never supplies a same-origin

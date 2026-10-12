@@ -10,9 +10,9 @@ import path from "node:path";
 import test from "node:test";
 import { createRequire } from "node:module";
 
-import { decodeComponentTessellation } from "@text-to-cad/core/lib/surf/tessellationCache.js";
-import { buildComponentMeshData } from "@text-to-cad/core/lib/surf/surfMeshData.js";
-import { joinSelectorTable, parseSelectorTable } from "@text-to-cad/core/lib/surf/selectorTable.js";
+import { decodeComponentTessellation } from "@text-to-cad/core/lib/parts/tessellationCache.js";
+import { buildComponentMeshData } from "@text-to-cad/core/lib/parts/partMeshData.js";
+import { joinSelectorTable, parseSelectorTable } from "@text-to-cad/core/lib/parts/selectorTable.js";
 import { buildGlbFaceIdsForPart, TOPOLOGY_FACE_ID_NONE } from "@text-to-cad/core/lib/viewer/selectorPickGroups.js";
 import { buildEdgeChainGraph } from "../../../workbench/edgeChainSelection.js";
 import { buildTangentFaceGraph } from "../../../workbench/tangentFaceSelection.js";
@@ -24,8 +24,8 @@ import {
 } from "./packageReferenceComposition.js";
 
 const require = createRequire(import.meta.url);
-// The gear's selector table and cadgen's stored display mesh of it (core's surf fixtures).
-const FIXTURES = path.join(path.dirname(require.resolve("@text-to-cad/core/lib/surf/tessellationCache.js")), "fixtures");
+// The gear's selector table and cadgen's stored display mesh of it (core's part fixtures).
+const FIXTURES = path.join(path.dirname(require.resolve("@text-to-cad/core/lib/parts/tessellationCache.js")), "fixtures");
 
 // Each call joins the table anew: a new bundle object over the same geometry, as a new file
 // revision's is.

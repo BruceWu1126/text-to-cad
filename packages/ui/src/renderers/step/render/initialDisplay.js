@@ -1,4 +1,4 @@
-import { TESS_PROBE_MAX_KEYS } from "@text-to-cad/core/lib/surf/tessellationCache.js";
+import { TESS_PROBE_MAX_KEYS } from "@text-to-cad/core/lib/parts/tessellationCache.js";
 
 // The first probe of a package covers the loader's first publish (`PROGRESSIVE_PUBLISH_FIRST_COMPONENTS`).
 export const INITIAL_PROBE_FIRST_CHUNK = 8;

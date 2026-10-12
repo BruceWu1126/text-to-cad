@@ -19,7 +19,7 @@ import {
   TESS_BATCH_MAX_BYTES,
   tessBatchMaxBytes,
 } from "./tessellationCache.js";
-import { buildComponentMeshData } from "./surfMeshData.js";
+import { buildComponentMeshData } from "./partMeshData.js";
 import { encodeMeshFixture, meshFixture, partRowFor, selectorTableFixture, testPartKey } from "./__tests__/meshFixtures.js";
 import { buildComposedPackageMeshData } from "../assembly/meshData.js";
 

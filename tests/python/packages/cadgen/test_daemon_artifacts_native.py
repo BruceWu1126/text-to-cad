@@ -165,7 +165,7 @@ sys.addaudithook(audit)
             result = artifacts.submit_artifact(self.request, store_root=self.store).result(20)
             self.assert_geometry_and_result(result)
             for changes, message in (
-                ({"producer": {**self.producer, "ocp": "different-known-runtime"}}, "pinned surface producer"),
+                ({"producer": {**self.producer, "ocp": "different-known-runtime"}}, "pinned producer"),
                 ({"cids": ["0" * 16]}, "unpinned component"),
             ):
                 with self.subTest(changes=changes), self.assertRaisesRegex(artifacts.ArtifactJobError, message):
@@ -180,14 +180,14 @@ sys.addaudithook(audit)
             self.assertEqual(sum(row["state"] == "failed" for row in jobs), 2)
             self.assertEqual(self.private.broker.snapshot()["granted"], 4, "one slot a job")
 
-    def test_real_transient_surface_keeps_coalesced_native_work_after_owner_detach(self):
+    def test_real_transient_display_derivation_keeps_coalesced_native_work_after_owner_detach(self):
         entered = self.root / "native-entered"
         release = self.root / "native-release"
         derived = self.root / "native-derived"
         script = self.source_guard() + f"""
 import time
 import build123d
-from cadgen._internal import component_package,surface_extract
+from cadgen._internal import component_package,topology_extract
 from cadgen.daemon import artifacts,broker
 from cadgen.store import parts
 original=parts.derive
@@ -237,11 +237,11 @@ raise SystemExit(artifacts._main())
 
             # The entered marker is deliberately emitted after the child's lazy native
             # imports. This test owns the detach/result handoff, not a cold OCP
-            # startup benchmark. Separate real surface derivation from broker
+            # startup benchmark. Separate real display derivation from broker
             # delivery so a failure names the stalled phase and its live state.
             self.wait_for(
                 lambda: derived.exists() or second.done(),
-                lambda: "native surface derivation did not finish after owner detach: "
+                lambda: "native display derivation did not finish after owner detach: "
                 f"child={processes[0].poll()}, broker={self.private.broker.snapshot()}, "
                 f"future_done={second.done()}",
                 timeout=60,

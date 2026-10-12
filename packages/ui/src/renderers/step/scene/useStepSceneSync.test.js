@@ -8,7 +8,7 @@ import { createStepScene } from "./stepScene.js";
 import { useStepSceneSync } from "./useStepSceneSync.js";
 import { useStepViewPolicy } from "./useStepViewPolicy.js";
 
-// A STEP as the viewer receives it: a composed package, here one occurrence of a surf component
+// A STEP as the viewer receives it: a composed package, here one occurrence of a part
 // whose CAD edges (a feature outline and one tangent edge) the scene draws as one instanced set.
 function stepPackage() {
   const bounds = { min: [0, 0, 0], max: [1, 1, 0] };

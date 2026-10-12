@@ -36,7 +36,7 @@ One word per concept; the code uses these words and no others.
 | **build** | running a model's function and publishing its result |
 | **store** | the whole cache, `~/.cache/cadgen/`: `objects/` + `index/` |
 | **object** | an immutable, content-addressed file in `objects/` — a component or a tree |
-| **component** | exact encoded BREP plus an immutable effective face-color recipe; display surfaces are derived separately |
+| **component** | exact encoded BREP plus an immutable effective face-color recipe; its part's display data is derived separately |
 | **tree** | a model's result object: its own components + links, with placements, names, colors; its hash is the model's result identity |
 | **link** | a tree entry pointing at a child's tree hash, with placement and name |
 | **pin** | the child tree hash a parent resolved during a build (noun and verb) |
@@ -46,7 +46,7 @@ One word per concept; the code uses these words and no others.
 | **stale / current**, **gate** | the freshness state and the check that decides it |
 | **claim** | what a write does to an object it finds already present: its mtime becomes now, less two ticks of its clock, so the sweeper's grace window covers it and the claiming process keeps what it verified of it (§8) |
 | **evict** | drop a derived entry to keep the store under its cap; only the derived kinds are ever evicted (§8) |
-| **part** | a component's display data under one surface producer: ONE index entry naming its display mesh and its selector table (§3) |
+| **part** | a component's display data under one producer: ONE index entry naming its display mesh and its selector table (§3) |
 | **obsolete** | a part entry an older version of cadgen's derivation wrote, or a record or document entry at a key this cadgen does not own (another schema version's): no reader of this cadgen asks for it again, and the sweeper retires it once it is a week old (§2, §8) |
 | **worker / spare / extra**, **job** | daemon vocabulary (the daemon's own documentation) |
 
@@ -65,7 +65,7 @@ One word is NOT retired, and it has exactly one meaning:
 ```
 ~/.cache/cadgen/                      (CADGEN_CACHE_DIR overrides; else the platform cache dir)
   objects/ab/cdef…                    immutable, content-addressed, sharded like git
-  index/document/<sha256(file bytes)>-v<schema>  ARTIFACT side: {schemaVersion, tree, kind, surfaceProducer?, meshes?} for a file's bytes
+  index/document/<sha256(file bytes)>-v<schema>  ARTIFACT side: {schemaVersion, tree, kind, producer?, meshes?} for a file's bytes
   index/model/<sha256(script::function)>-v<schema>  records (input-addressed, mutable, atomic)
   index/output/<sha256(output path)>  {model}: which script wrote the file at this path
   index/component/<cid>               geometry-input entries → encoded BREP and intrinsic recipe
@@ -315,7 +315,7 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   preserve the same identity. Uniform color remains occurrence metadata.
   Named PBR definitions and leaf assignments live in the authored tree's
   top-level `appearance`.
-  Extractor, native runtime and surface readiness never enter a native component
+  Extractor, native runtime and display-data readiness never enter a native component
   or geometry tree identity.
 
   Native components are privately decoded before publication. BinTools v4
@@ -342,7 +342,7 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   A forced build derives and fences every component again.
 
   A view of a tree (`store/view.py`, `parts.view_from_geometry`) names a
-  runtime surface producer separately from the tree: the loaded build123d, OCP
+  runtime producer separately from the tree: the loaded build123d, OCP
   and distribution versions. Each component of a view names its **part**: the
   key its display data is stored and read by, `<digest>-v<version>`
   (`parts.part_key`). The digest hashes the component's `contentHash` (its
@@ -378,7 +378,7 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   occurrence places (`_internal/kinematics_resolve.py`). `read_step` never waits
   for a part.
 
-  A view -- the CAD Viewer and the CAD app (`POST /__cad/surfaces`), a snapshot
+  A view -- the CAD Viewer and the CAD app (`POST /__cad/parts`), a snapshot
   and `--mode list` (`store/view.py`), a mesh export -- reads what the build
   derived. A part the store lacks (a cleared, evicted or older store) is derived
   by ONE build-pool job for the request (`kind: display`,
@@ -394,7 +394,7 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   probe answers whether a part's display data is stored: the entry is valid and
   both objects are present at their sizes. Derivation (`parts._derive`) decodes
   the component's BREP once, extracts its **topology facts** in memory
-  (`_internal/surface_extract.py`: three ordinal tables -- each solid's kind
+  (`_internal/topology_extract.py`: three ordinal tables -- each solid's kind
   and volume; each face's surface type, exact area, centroid and tight box, a
   plane's oriented normal, its analytic parameters and its loops as edge
   ordinals; each edge's class, continuity, dihedral angle, flags, adjacent
@@ -620,7 +620,7 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   use only geometry schema 3; there is no optional old-tree decoder. Schema 3
   admits resolved named intrinsic appearance on authored trees and pins an
   eager-only component's topology facts as `topology`. Document indexes may carry an
-  optional exact loaded `surfaceProducer` hint outside the tree. A same-tree
+  optional exact loaded `producer` hint outside the tree. A same-tree
   rewrite preserves a valid hint and external mesh ledger; a tree replacement
   drops both unless an attested producer is supplied. A reader selects tree and
   hint from one atomic record snapshot. Geometry ignores absent or invalid
@@ -2036,7 +2036,7 @@ supersession does not cancel their exports.
   Windows ticks. The metadata cache is byte-bounded, store-root
   isolated and returns a newly parsed flattened view to every caller. The gate's
   completeness check (`tree_complete`) is such a consumer, and its output
-  digests follow the same rule (§4). The CAD Viewer's surface routes are not:
+  digests follow the same rule (§4). The CAD Viewer's part routes are not:
   they verify a tree's component map once and keep it, for the eight trees
   they served last, and per request stat the tree and the objects of the
   components it names, so a deleted one sends the tree back through the

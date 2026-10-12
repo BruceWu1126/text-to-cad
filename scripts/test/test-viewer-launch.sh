@@ -277,7 +277,7 @@ responses = []
 page_errors = []
 probed = False
 mesh_reads = 0
-surface_pending = False
+part_pending = False
 
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch(
@@ -309,11 +309,11 @@ with sync_playwright() as playwright:
                     probed = True
                 elif parsed.path.startswith("/__tess_cache/"):
                     mesh_reads += 1
-                elif parsed.path == "/__cad/surfaces" and response.request.method == "POST":
+                elif parsed.path == "/__cad/parts" and response.request.method == "POST":
                     # A part the store lacked: its row is pending while cadgen derives it.
                     payload = response.json()
                     components = payload.get("components") if isinstance(payload, dict) else None
-                    surface_pending = surface_pending or any(
+                    part_pending = part_pending or any(
                         row.get("state") == "pending" for row in (components or {}).values())
 
             overlay_gone = page.locator(".cad-loading-overlay").count() == 0
@@ -324,7 +324,7 @@ with sync_playwright() as playwright:
             raise RuntimeError("browser page error: " + " | ".join(page_errors))
         if not probed:
             raise RuntimeError("bundled client did not look for the parts in the store")
-        if surface_pending:
+        if part_pending:
             raise RuntimeError("the view derived display data the compile should have derived")
         if not mesh_reads:
             raise RuntimeError("bundled client read no stored display mesh")

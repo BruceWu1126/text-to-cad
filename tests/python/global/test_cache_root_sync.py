@@ -2,7 +2,7 @@
 
 cadgen writes each part's record and the two objects it names (cadgen/store/parts.py;
 the display mesh's codec is cadgen/store/meshes.py) and the CAD Viewer's client reads
-them (packages/core/src/lib/surf/tessellationCache.js) by the key a view names. The
+them (packages/core/src/lib/parts/tessellationCache.js) by the key a view names. The
 client derives no key and keeps no tolerance, so what is pinned here is what each side
 must take of the other: a body's bound, and a record cadgen stores being a row the
 client reads whole -- its fields, and the decoded size both sides compute -- naming a
@@ -28,7 +28,7 @@ from tests.python.support.paths import add_repo_path
 add_repo_path("packages/cadgen/src")
 
 ROOT = Path(__file__).resolve().parents[3]
-TESSELLATION_CACHE_JS = ROOT / "packages" / "core" / "src" / "lib" / "surf" / "tessellationCache.js"
+TESSELLATION_CACHE_JS = ROOT / "packages" / "core" / "src" / "lib" / "parts" / "tessellationCache.js"
 
 
 def _unmeshed_part(fixture: dict) -> tuple[str, bytes, bytes]:

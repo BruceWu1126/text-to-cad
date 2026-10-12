@@ -76,7 +76,7 @@ def setUpModule() -> None:
 
 
 class _FakeArtifact:
-    """Stands in for StepTopologyArtifact: the merge only reads `kind` and `artifact_path`."""
+    """Stands in for StepArtifact: the merge only reads `kind` and `artifact_path`."""
 
     def __init__(self, kind: str, artifact_path: Path) -> None:
         self.kind = kind

@@ -1,7 +1,7 @@
 """Build-pool artifact jobs, independent of source models and document paths: this
-runtime's surface producer (``kind: producer``), and the display data of the parts a
+runtime's producer (``kind: producer``), and the display data of the parts a
 view found missing from the store (``kind: display``: one request, one job, one
-worker). Only workers import the native surface producer. Requests contain immutable
+worker). Only workers import the native producer. Requests contain immutable
 pins, never a script, a declared output, or an instruction to run arbitrary Python.
 """
 

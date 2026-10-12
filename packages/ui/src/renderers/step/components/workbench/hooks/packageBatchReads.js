@@ -8,12 +8,12 @@
 // the publish ceilings do, so the first geometry waits for no more than it did, and each batch is
 // read one ahead of the components the lanes are on.
 
-import { SURFACE_REQUEST_MAX_COMPONENTS } from "@text-to-cad/core/client";
+import { PART_REQUEST_MAX_COMPONENTS } from "@text-to-cad/core/client";
 import {
   TESS_PROBE_MAX_KEYS,
   TessellationCacheProbeMissError,
   tessBatchMaxBytes,
-} from "@text-to-cad/core/lib/surf/tessellationCache.js";
+} from "@text-to-cad/core/lib/parts/tessellationCache.js";
 import { PROGRESSIVE_PUBLISH_FIRST_BYTES, PROGRESSIVE_PUBLISH_FIRST_COMPONENTS } from "./packageProgressiveLoad.js";
 
 function abortError() {
@@ -177,7 +177,7 @@ export function createTessellationBodyBatches({
 
 /**
  * The part rows of a package's cold components, resolved up to `maxComponents` to a
- * `POST /__cad/surfaces` in load order where each lane asked for its own.
+ * `POST /__cad/parts` in load order where each lane asked for its own.
  *
  * `needs(cid)` is the component when it must be resolved, false when it need not be (its part is
  * stored), undefined while that is not known yet. The first `alone` components to
@@ -189,9 +189,9 @@ export function createTessellationBodyBatches({
  * components still waiting, with its error. Once the load is over, aborted or failed (`dispose`),
  * nothing more is asked ahead: a derivation nobody will draw is not started.
  */
-export function createSurfaceTicketBatches({
+export function createPartTicketBatches({
   order, needs, resolve, signal,
-  alone = PROGRESSIVE_PUBLISH_FIRST_COMPONENTS, maxComponents = SURFACE_REQUEST_MAX_COMPONENTS, inFlight = 8,
+  alone = PROGRESSIVE_PUBLISH_FIRST_COMPONENTS, maxComponents = PART_REQUEST_MAX_COMPONENTS, inFlight = 8,
 }) {
   const position = new Map(order.map((cid, index) => [cid, index]));
   const waiting = new Map();
@@ -273,7 +273,7 @@ export function createSurfaceTicketBatches({
             if (ticket) answer(cid, ticket);
             else {
               const entry = waiting.get(cid);
-              if (entry && !entry.done) { entry.done = true; entry.reject(new Error(`Surface response omitted ${cid}`)); }
+              if (entry && !entry.done) { entry.done = true; entry.reject(new Error(`Part response omitted ${cid}`)); }
             }
           }
         }, (error) => {
@@ -299,7 +299,7 @@ export function createSurfaceTicketBatches({
       return Promise.resolve(resolve([{ cid, part: component.part }], { signal }))
         .then((tickets) => {
           const ticket = tickets.get(cid);
-          if (!ticket) throw new Error(`Surface response omitted ${cid}`);
+          if (!ticket) throw new Error(`Part response omitted ${cid}`);
           return ticket;
         });
     },

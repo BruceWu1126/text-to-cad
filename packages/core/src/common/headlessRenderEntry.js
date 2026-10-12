@@ -26,7 +26,7 @@ import { loadSourceAnimation } from "./animationRuntime.js";
 import {
   createHttpTessellationCacheProvider,
   createTessellationCache
-} from "../lib/surf/tessellationCache.js";
+} from "../lib/parts/tessellationCache.js";
 
 // Each call owns its measurements. Capture reports camera fitting, draw
 // submission and image encoding separately; viewport construction is not a draw.

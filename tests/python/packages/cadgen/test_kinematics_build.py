@@ -263,7 +263,7 @@ class KinematicsBuildTests(unittest.TestCase):
         from cadgen.assembly_lookup import index_with_assembly_occurrences
         from cadgen.lookup import build_selector_index
         from cadgen.selector_types import SelectorBundle
-        from cadgen.step_targets import StepTopologyArtifact
+        from cadgen.step_targets import StepArtifact
         from cadgen.store import view
         from cadgen.store.index import model_ref
         from cadgen.store.records import read_record
@@ -292,7 +292,7 @@ class KinematicsBuildTests(unittest.TestCase):
         package = original(tree)
         try:
             manifest = json.loads((package / "assembly.json").read_text(encoding="utf-8"))
-            artifact = StepTopologyArtifact(
+            artifact = StepArtifact(
                 cad_path="pivot", source_path=script, step_path=script.with_suffix(".step"),
                 artifact_path=package, manifest=manifest, selector_bundle=SelectorBundle(manifest=manifest),
             )

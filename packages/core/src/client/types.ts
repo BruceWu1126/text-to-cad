@@ -1,5 +1,5 @@
-import type { PartRow, TessellationCache } from '../lib/surf/cacheTypes.js';
-export type { PartRow, TessellationCache, TessellationCacheEntry, TessellationCacheProvider, TessellatedComponent } from '../lib/surf/cacheTypes.js';
+import type { PartRow, TessellationCache } from '../lib/parts/cacheTypes.js';
+export type { PartRow, TessellationCache, TessellationCacheEntry, TessellationCacheProvider, TessellatedComponent } from '../lib/parts/cacheTypes.js';
 export type CadJson = null | boolean | number | string | CadJson[] | { [key: string]: CadJson };
 export interface CadEntry {
   /** The file's absolute path, `/`-separated. */
@@ -127,22 +127,22 @@ export interface CadResourceProvider {
   workerTicket(url: string, options?: CadResourceReadOptions): Promise<CadWorkerResourceTicket>;
 }
 /** The kernel a view's parts are derived under: opaque to the page, which only forwards it. */
-export interface CadSurfaceProducer { producerKey?: string; [key: string]: unknown }
+export interface CadProducer { producerKey?: string; [key: string]: unknown }
 export interface CadRuntimeView {
   tree: string;
   viewId: string;
-  surfaceProducer: CadSurfaceProducer;
+  producer: CadProducer;
   /** Each component names its part (`<digest>-v<version>`): the key its display data is read by. */
   components?: Record<string, {part: string; [key: string]: unknown}>;
   [key: string]: unknown;
 }
-export interface CadSurfaceComponentRequest { cid: string; part: string }
-export interface CadSurfaceRequest {
-  tree: string; viewId: string; producer: CadSurfaceProducer;
-  components: CadSurfaceComponentRequest[];
+export interface CadPartComponentRequest { cid: string; part: string }
+export interface CadPartRequest {
+  tree: string; viewId: string; producer: CadProducer;
+  components: CadPartComponentRequest[];
   job?: string;
 }
-export interface CadSurfaceResponse {
+export interface CadPartResponse {
   viewId: string; job?: string; replacementView?: CadRuntimeView;
   components: Record<string, {state: 'pending' | 'ready' | 'failed'; part: string; record?: Omit<PartRow, 'part'>; job?: string; error?: string; code?: string}>;
 }
@@ -217,7 +217,7 @@ export interface CadWorkspaceService {
    * awaited. `onFailed` hears each component cadgen could not derive or mesh, with its own error,
    * and the request resolves with the rest; without it, a failed component fails the request.
    */
-  resolveSurfaceComponents(view: CadRuntimeView, requested: CadSurfaceComponentRequest[],
+  resolveParts(view: CadRuntimeView, requested: CadPartComponentRequest[],
     options?: CadRequestOptions & {
       onReady?: (cid: string, row: PartRow) => void;
       onFailed?: (cid: string, error: Error) => void;
@@ -229,8 +229,8 @@ export interface CadWorkspaceService {
 /** Reusable HTTP implementation, also used by existing catalog adapters. */
 export interface CadClient extends CadWorkspaceService {
   readonly origin: string;
-  requestSurfaces(body: CadSurfaceRequest, options?: CadRequestOptions): Promise<CadSurfaceResponse>;
-  cancelSurfaceRequest(body: { job: string }, options?: CadRequestOptions): Promise<{ok?: boolean}>;
+  requestParts(body: CadPartRequest, options?: CadRequestOptions): Promise<CadPartResponse>;
+  cancelPartRequest(body: { job: string }, options?: CadRequestOptions): Promise<{ok?: boolean}>;
   editingPreview(file: string, options?: CadRequestOptions & { after?: string }): Promise<CadEditingPreview>;
 }
 export interface CadClientOptions {

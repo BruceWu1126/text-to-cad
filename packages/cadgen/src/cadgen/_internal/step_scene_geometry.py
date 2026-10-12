@@ -12,7 +12,7 @@ from OCP.BRepLProp import BRepLProp_SLProps
 from OCP.Bnd import Bnd_Box
 from OCP.TopAbs import TopAbs_REVERSED
 
-from cadgen._internal.glb_topology import STEP_TOPOLOGY_EDGE_SAMPLE_COUNT
+from cadgen._internal.glb_topology import STEP_EDGE_SAMPLE_COUNT
 
 from cadgen._internal.step_scene_types import _enum_name
 
@@ -241,8 +241,8 @@ def _sampled_edge_dihedral_deg(edge: Any, face_shapes: list[Any], fallback_norma
     if len(face_shapes) != 2:
         return None
     max_angle: float | None = None
-    denominator = STEP_TOPOLOGY_EDGE_SAMPLE_COUNT + 1
-    for index in range(1, STEP_TOPOLOGY_EDGE_SAMPLE_COUNT + 1):
+    denominator = STEP_EDGE_SAMPLE_COUNT + 1
+    for index in range(1, STEP_EDGE_SAMPLE_COUNT + 1):
         fraction = index / denominator
         try:
             left_normal = _face_normal_at_edge_fraction(edge, face_shapes[0], fraction)

@@ -20,14 +20,14 @@ one revolute mate. Every property is there for a test:
 
 | file | bytes | the request it answers |
 | --- | ---: | --- |
-| `assembly.json` | 2,969 | `GET /__cad/store?file=<tree>/assembly.json&documentHash=…` — the view descriptor. Carries `kind: "assembly-package"`, the `tree`, the `viewId`, the attested `surfaceProducer`, two components (each naming its `part`), two occurrences and the model box. |
+| `assembly.json` | 2,962 | `GET /__cad/store?file=<tree>/assembly.json&documentHash=…` — the view descriptor. Carries `kind: "assembly-package"`, the `tree`, the `viewId`, the attested `producer`, two components (each naming its `part`), two occurrences and the model box. |
 | `components/552fc5fd1b854ab4.selectors.json` | 8,355 | `GET /__tess_cache/<part>.selectors.json?object=…&maxBytes=…` for the base: its part record's `selectors`. cadgen's selector table: the ids, facts, adjacency, chains and tangent groups picking and measuring join to the mesh. Its ordinals are the ones cadgen 0.6.5 extracted, which `make_meshes.py` and `make_selectors.py` write the mesh and the table in (below). |
 | `components/df492f79c6123df5.selectors.json` | 6,499 | the same, for the arm. |
 | `components/<cid>.glb` | 2,604–9,292 | the parts' display meshes (GLB bodies), one per component, each its part record's `glb`: what the harness's part store serves (`/__tess_cache/` probe, batch and single reads, by each component's `part`). |
 | `hinge_block.step.json` | 2,217 | **no request at all.** The harness puts its `animation` section inline on the catalog entry, which is what the real scanner does, and the renderer plays the routine's keyframes straight from there. |
 | `hinge_block.articulation.json` | 921 | **no request at all.** cadgen's articulation of the sidecar's kinematics (`cadgen.articulation.step_articulation` over `assembly.json` and the sidecar), which the harness puts inline on the catalog entry as `articulation`, as the real scanner does; the Position tool plays it. `tests/python/packages/cadgen/test_articulation.py` asserts it is what cadgen writes today. |
 
-Total 32,857 bytes with the meshes and tables. No Git attribute applies here (`git check-attr -a` on these
+Total 32,850 bytes with the meshes and tables. No Git attribute applies here (`git check-attr -a` on these
 paths prints nothing), and the repository carries no LFS. Keep it that way — an
 LFS pointer would be rejected by name at `renderAssetClient.js`'s readers.
 

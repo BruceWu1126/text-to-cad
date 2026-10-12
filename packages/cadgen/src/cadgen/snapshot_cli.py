@@ -51,7 +51,7 @@ from cadgen._internal.snapshot_door import (
     drawing_scene_refusal,
 )
 from cadgen.store.view import view_dir_for
-from cadgen.step_targets import ResolvedStepTarget, StepTopologyArtifact, StepTopologyArtifactError
+from cadgen.step_targets import ResolvedStepTarget, StepArtifact, StepArtifactError
 
 from cadgen.cli_logging import CliLogger
 from cadgen.coordination import PHASE_BROWSER, SNAPSHOT, ProgressReporter
@@ -103,7 +103,7 @@ from cadgen.snapshot_video import (
 
 # Snapshot artifact resolution stays kernel-free. Kept module-level so callers
 # testing request resolution can substitute the artifact boundary.
-ensure_step_topology_artifact = None
+ensure_step_artifact = None
 
 
 @dataclass(slots=True)
@@ -457,17 +457,17 @@ def cad_ref_for_step_path(repo_root: Path, step_path: Path) -> str:
     return relative[: -len(suffix)] if suffix else relative
 
 
-def load_ensure_step_topology_artifact():
-    global ensure_step_topology_artifact
-    if ensure_step_topology_artifact is None:
-        ensure_step_topology_artifact = _ensure_snapshot_step_artifact
-    return ensure_step_topology_artifact
+def load_ensure_step_artifact():
+    global ensure_step_artifact
+    if ensure_step_artifact is None:
+        ensure_step_artifact = _ensure_snapshot_step_artifact
+    return ensure_step_artifact
 
 
 def _ensure_snapshot_step_artifact(target, *, require_selector=False, debug=None):
     """Resolve saved bytes through the artifact pool, without importing a kernel.
 
-    A snapshot needs the surface view and, for a selection, the selector tables
+    A snapshot needs the view and, for a selection, the selector tables
     composed from its descriptor. Compiling a document the store has no tree for
     belongs to the pool (:func:`cadgen._internal.doors.document_snapshot`).
     """
@@ -486,7 +486,7 @@ def _ensure_snapshot_step_artifact(target, *, require_selector=False, debug=None
             occurrenceCount=len(descriptor.get("occurrences") or []),
             selectorIndex=bool(require_selector),
         )
-    return StepTopologyArtifact(
+    return StepArtifact(
         cad_path=target.cad_path, source_path=target.source_path,
         step_path=target.step_path, artifact_path=package_dir, manifest=descriptor,
         selector_bundle=SelectorBundle(manifest=descriptor) if require_selector else None,
@@ -513,24 +513,24 @@ def ensure_render_job_step_artifact(
     step_path: Path,
     require_selector: bool = False,
     debug_info: dict[str, object] | None = None,
-) -> StepTopologyArtifact:
+) -> StepArtifact:
     target = ResolvedStepTarget(
         cad_path=cad_ref_for_step_path(reference_root, step_path),
         source_path=input_path,
         step_path=step_path,
     )
     try:
-        ensure_artifact = load_ensure_step_topology_artifact()
+        ensure_artifact = load_ensure_step_artifact()
         return ensure_artifact(
             target,
             require_selector=require_selector,
             debug=debug_info,
         )
-    except StepTopologyArtifactError as exc:
+    except StepArtifactError as exc:
         raise SnapshotError(str(exc)) from exc
 
 
-def artifact_selector_index(artifact: StepTopologyArtifact | None) -> lookup.SelectorIndex | None:
+def artifact_selector_index(artifact: StepArtifact | None) -> lookup.SelectorIndex | None:
     selector_bundle = artifact.selector_bundle if artifact is not None else None
     if selector_bundle is None:
         return None

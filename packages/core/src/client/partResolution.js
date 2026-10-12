@@ -1,12 +1,12 @@
-import { isPartKey, partRow } from "../lib/surf/tessellationCache.js";
+import { isPartKey, partRow } from "../lib/parts/tessellationCache.js";
 const DIGEST_RE = /^[0-9a-f]{64}$/;
 const INITIAL_POLL_MS = 80;
 const MAX_POLL_MS = 640;
 // The longest a request whose derivation is still pending waits before asking again.
 const MAX_PENDING_POLL_MS = 5000;
-// The most components one POST /__cad/surfaces may name (cadgen/viewer/surfaces.py's
+// The most components one POST /__cad/parts may name (cadgen/viewer/parts.py's
 // MAX_COMPONENTS); a larger request is sent as several.
-export const SURFACE_REQUEST_MAX_COMPONENTS = 64;
+export const PART_REQUEST_MAX_COMPONENTS = 64;
 
 function abortError() {
   if (typeof DOMException === "function") {
@@ -45,28 +45,28 @@ function waitForPoll(delay, signal) {
 
 async function guardedPost(path, body, { signal, client }) {
   return path.endsWith("/cancel")
-    ? client.cancelSurfaceRequest(body, { signal })
-    : client.requestSurfaces(body, { signal });
+    ? client.cancelPartRequest(body, { signal })
+    : client.requestParts(body, { signal });
 }
 
 function verifiedReplacementView(value, tree) {
   if (!value || typeof value !== "object" || Array.isArray(value)
-      || value.tree !== tree || !value.surfaceProducer
-      || typeof value.surfaceProducer !== "object" || Array.isArray(value.surfaceProducer)
+      || value.tree !== tree || !value.producer
+      || typeof value.producer !== "object" || Array.isArray(value.producer)
       || !value.components || typeof value.components !== "object" || Array.isArray(value.components)) {
-    throw new Error("Surface response has an invalid replacement view");
+    throw new Error("Part response has an invalid replacement view");
   }
-  digest(value.viewId, "replacement surface viewId");
+  digest(value.viewId, "replacement viewId");
   for (const [cid, component] of Object.entries(value.components)) {
     partKey(component?.part, `replacement part for ${cid}`);
   }
   return value;
 }
 
-export class SurfaceResolutionError extends Error {
+export class PartResolutionError extends Error {
   constructor(message, { code = "", cid = "", replacementView = null } = {}) {
     super(message);
-    this.name = "SurfaceResolutionError";
+    this.name = "PartResolutionError";
     this.code = code;
     this.cid = cid;
     this.replacementView = replacementView;
@@ -96,11 +96,11 @@ export class SurfaceResolutionError extends Error {
  * part was not in the store), on every answer that says so: what a loading
  * screen needs to say it is meshing rather than reading.
  */
-export async function resolveSurfaceComponents(descriptor, requested, { signal, client, onReady = null, onFailed = null, onPending = null } = {}) {
-  if (!client) throw new TypeError("Surface resolution requires a CAD workspace service");
+export async function resolveParts(descriptor, requested, { signal, client, onReady = null, onFailed = null, onPending = null } = {}) {
+  if (!client) throw new TypeError("Part resolution requires a CAD workspace service");
   const list = Array.isArray(requested) ? requested : [];
-  if (list.length <= SURFACE_REQUEST_MAX_COMPONENTS) {
-    return resolveSurfaceRequest(descriptor, list, { signal, client, onReady, onFailed, onPending });
+  if (list.length <= PART_REQUEST_MAX_COMPONENTS) {
+    return resolvePartRequest(descriptor, list, { signal, client, onReady, onFailed, onPending });
   }
   // Every chunk is its own request (and subscriber job); one failing stops the others.
   const controller = new AbortController();
@@ -109,11 +109,11 @@ export async function resolveSurfaceComponents(descriptor, requested, { signal, 
   signal?.addEventListener("abort", forward);
   try {
     const chunks = [];
-    for (let start = 0; start < list.length; start += SURFACE_REQUEST_MAX_COMPONENTS) {
-      chunks.push(list.slice(start, start + SURFACE_REQUEST_MAX_COMPONENTS));
+    for (let start = 0; start < list.length; start += PART_REQUEST_MAX_COMPONENTS) {
+      chunks.push(list.slice(start, start + PART_REQUEST_MAX_COMPONENTS));
     }
     const results = await Promise.all(chunks.map((chunk) => (
-      resolveSurfaceRequest(descriptor, chunk, { signal: controller.signal, client, onReady, onFailed, onPending }).catch((error) => {
+      resolvePartRequest(descriptor, chunk, { signal: controller.signal, client, onReady, onFailed, onPending }).catch((error) => {
         controller.abort();
         throw error;
       })
@@ -129,26 +129,26 @@ export async function resolveSurfaceComponents(descriptor, requested, { signal, 
   }
 }
 
-/** The subscriber token a surface response names, on the response or on a pending row. */
+/** The subscriber token a part response names, on the response or on a pending row. */
 function subscriberToken(payload) {
   if (payload?.job) return String(payload.job);
   const rows = payload?.components && typeof payload.components === "object" ? Object.values(payload.components) : [];
   return String(rows.find((row) => row?.job)?.job || "");
 }
 
-async function resolveSurfaceRequest(descriptor, requested, { signal, client, onReady = null, onFailed = null, onPending = null }) {
-  const tree = digest(descriptor?.tree, "surface tree");
-  const viewId = digest(descriptor?.viewId, "surface viewId");
-  const producer = descriptor?.surfaceProducer;
+async function resolvePartRequest(descriptor, requested, { signal, client, onReady = null, onFailed = null, onPending = null }) {
+  const tree = digest(descriptor?.tree, "view tree");
+  const viewId = digest(descriptor?.viewId, "viewId");
+  const producer = descriptor?.producer;
   if (!producer || typeof producer !== "object" || Array.isArray(producer)) {
-    throw new TypeError("surface view is missing its attested producer");
+    throw new TypeError("view is missing its attested producer");
   }
   const components = requested.map(({ cid, part }) => ({
     cid: String(cid || ""),
     part: partKey(part, `part of ${cid}`),
   }));
   if (!components.length || components.some((entry) => !entry.cid)) {
-    throw new TypeError("surface request must name at least one component");
+    throw new TypeError("part request must name at least one component");
   }
   const base = { tree, viewId, producer, components };
   let job = "";
@@ -156,7 +156,7 @@ async function resolveSurfaceRequest(descriptor, requested, { signal, client, on
   const cancel = () => {
     if (cancelled || !job) return;
     cancelled = true;
-    void guardedPost("/__cad/surfaces/cancel", { job }, { client }).catch(() => {});
+    void guardedPost("/__cad/parts/cancel", { job }, { client }).catch(() => {});
   };
   signal?.addEventListener("abort", cancel);
   let delay = INITIAL_POLL_MS;
@@ -171,7 +171,7 @@ async function resolveSurfaceRequest(descriptor, requested, { signal, client, on
       // A first post (no token yet) is not aborted in flight: its answer, which comes at once,
       // carries the token a cancel needs. Aborted there, the server would go on deriving for a
       // view nobody watches until its subscriber expired, its daemon job with it.
-      const payload = await guardedPost("/__cad/surfaces", { ...base, ...(job ? { job } : {}) },
+      const payload = await guardedPost("/__cad/parts", { ...base, ...(job ? { job } : {}) },
         { signal: job ? signal : undefined, client });
       if (signal?.aborted) {
         job ||= subscriberToken(payload);
@@ -179,17 +179,17 @@ async function resolveSurfaceRequest(descriptor, requested, { signal, client, on
       }
       if (!payload || payload.viewId !== viewId || !payload.components
           || typeof payload.components !== "object" || Array.isArray(payload.components)) {
-        throw new Error("Surface response does not belong to the requested view");
+        throw new Error("Part response does not belong to the requested view");
       }
       if (payload.replacementView) {
-        throw new SurfaceResolutionError("The pinned surface producer is unavailable", {
+        throw new PartResolutionError("The pinned producer is unavailable", {
           code: "replacement-view",
           replacementView: verifiedReplacementView(payload.replacementView, tree),
         });
       }
       const responseJob = String(payload.job || "");
       if (responseJob) {
-        if (job && job !== responseJob) throw new Error("Surface request changed subscriber token");
+        if (job && job !== responseJob) throw new Error("Part request changed subscriber token");
         job = responseJob;
       }
       const ready = new Map();
@@ -198,10 +198,10 @@ async function resolveSurfaceRequest(descriptor, requested, { signal, client, on
         if (failed.has(request.cid)) continue;
         const row = payload.components[request.cid];
         if (!row || row.part !== request.part) {
-          throw new Error(`Surface response omitted ${request.cid}`);
+          throw new Error(`Part response omitted ${request.cid}`);
         }
         if (row.state === "failed") {
-          const error = new SurfaceResolutionError(String(row.error || `Surface derivation failed for ${request.cid}`), {
+          const error = new PartResolutionError(String(row.error || `Part derivation failed for ${request.cid}`), {
             code: String(row.code || ""), cid: request.cid,
           });
           failed.set(request.cid, error);
@@ -210,14 +210,14 @@ async function resolveSurfaceRequest(descriptor, requested, { signal, client, on
         }
         if (row.state === "pending") {
           const rowJob = String(row.job || job || "");
-          if (!rowJob || (job && rowJob !== job)) throw new Error("Surface response has an invalid subscriber token");
+          if (!rowJob || (job && rowJob !== job)) throw new Error("Part response has an invalid subscriber token");
           job = rowJob;
           pending = true;
           onPending?.(request.cid);
           continue;
         }
         const ticket = row.state === "ready" ? partRow(request.part, row.record) : null;
-        if (!ticket) throw new Error(`Surface response has no valid part record for ${request.cid}`);
+        if (!ticket) throw new Error(`Part response has no valid part record for ${request.cid}`);
         ready.set(request.cid, ticket);
         if (onReady && !announced.has(request.cid)) {
           announced.add(request.cid);
