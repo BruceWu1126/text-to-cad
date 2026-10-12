@@ -66,9 +66,8 @@ NAME = "cad"
 TITLE = "CAD"
 # The launch/view protocol between this server and its page: a launch names a model by its absolute
 # path (`page: viewer`) or the home (`page: home`, its recents with it), and carries what the page
-# needs to start on it alone (the server's version and platform, and the display tolerance);
-# a view makes one call a second (`cad_sync`) and reaches the viewer's routes through
-# `cad_http`, by absolute path.
+# needs to start on it alone (the server's version and platform); a view makes one call a second
+# (`cad_sync`) and reaches the viewer's routes through `cad_http`, by absolute path.
 PROTOCOL = 7
 _PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 _RESOURCE_NOT_FOUND = -32002

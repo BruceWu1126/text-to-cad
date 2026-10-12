@@ -32,7 +32,7 @@ from cadgen._internal.mesh_animation import (  # noqa: E402
     resolve_animation,
 )
 from cadgen._internal.mesh_door import mesh_build  # noqa: E402
-from cadgen._internal.mesh_export import GLB_SERIALIZATION_VERSION, MeshSource, mesh_variant_key  # noqa: E402
+from cadgen._internal.mesh_export import SERIALIZATION_VERSIONS, MeshSource, mesh_variant_key  # noqa: E402
 from cadgen.cli import glb_build  # noqa: E402
 
 # The document sidecar's animation section, as a build bakes it: two clips of one part.
@@ -158,7 +158,7 @@ class TheFreshnessVariant(unittest.TestCase):
         static = mesh_variant_key("glb", None, None)
         # An omitted tolerance is keyed as the display tolerance it is written at.
         self.assertEqual(
-            f"glb|0.0005|0.35|serializer:{GLB_SERIALIZATION_VERSION}|appearance:{appearance_digest(None)}",
+            f"glb|0.0005|0.35|serializer:{SERIALIZATION_VERSIONS['glb']}|appearance:{appearance_digest(None)}",
             static,
         )
         self.assertEqual(static, mesh_variant_key("glb", 5e-4, 0.35))

@@ -82,8 +82,6 @@ __all__ = [
 
 ARTICULATION_SCHEMA_VERSION = 2
 
-_CYLINDRICAL_ROWS = (("turn", "deg"), ("travel", "mm"))
-
 
 def _fail(message: str) -> ValueError:
     return ValueError(f"kinematics: {message}")

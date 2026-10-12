@@ -56,7 +56,6 @@ __all__ = [
 TUBE_SKINS_SCHEMA_VERSION = 1
 _SCHEME = f"cadgen-tube-skins-v{TUBE_SKINS_SCHEMA_VERSION}"
 _GLB_MAGIC, _JSON_CHUNK, _BIN_CHUNK = 0x46546C67, 0x4E4F534A, 0x004E4942
-_DTYPES = {"<f4": np.float32, "<u4": np.uint32, "|u1": np.uint8}
 
 
 def tube_tracks(animation: Any) -> list[tuple[str, int, Mapping[str, Any]]]:

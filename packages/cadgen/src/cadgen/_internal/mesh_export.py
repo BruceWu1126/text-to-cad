@@ -41,7 +41,6 @@ from cadgen._internal.mesh_animation import AnimationSnapshot
 # uncoloured occurrence no longer takes a sibling's colour, and a GLB no longer
 # carries triangles that cover nothing.
 SERIALIZATION_VERSIONS = {"glb": 5, "stl": 1, "3mf": 2}
-GLB_SERIALIZATION_VERSION = SERIALIZATION_VERSIONS["glb"]
 
 # Declarable formats, and the decorator that declares each (the digit rule
 # forbids ``@3mf``, so 3MF's decorator is ``@threemf``).
@@ -103,10 +102,10 @@ def run_mesh_exporter(
     ``appearance`` is the document sidecar's, applied to a private projection of
     the tree. ``animation_source`` captures the DOCUMENT sidecar's ``animation``
     keyframes, and is required exactly when a job carries an ``animation``: that
-    job's clip is resampled at its frame rate into glTF node animation. Returns
+    job's clip goes into the file as glTF animation, on the clip's own keys. Returns
     ``{"ok": True, "files": [{path, format, triangleCount, animation?, warnings?}, ...]}``
     in job order; an animated file's ``animation`` block reports what was baked and,
-    under ``warnings``, what the sampling could not carry -- the choices the
+    under ``warnings``, what the file could not carry -- the choices the
     caller made, for its RESULT rather than the log, where ``--json`` would never
     hear them. A file's own ``warnings`` name the faces no mesher could cover
     (``cadgen.store.meshes`` ``unmeshedFaces``), which it leaves open. Anything

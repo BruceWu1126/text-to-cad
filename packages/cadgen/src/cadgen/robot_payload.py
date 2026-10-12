@@ -81,7 +81,7 @@ from urllib.parse import unquote, urlparse
 import xml.etree.ElementTree as ET
 
 from cadgen.articulation import ARTICULATION_SCHEMA_VERSION
-from cadgen.findings import FindingsReport, format_findings
+from cadgen.findings import format_findings
 from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 from cadgen.xml_common import children, display_path, local_name
 
@@ -96,7 +96,6 @@ __all__ = [
     "paired_urdf_for_srdf",
     "read_robot_description",
     "robot_control_values",
-    "robot_payload",
     "robot_payload_bytes",
     "robot_payload_scheme",
 ]
@@ -1520,11 +1519,6 @@ def robot_payload_bytes(path: Path | str, *, rebuild: bool = False) -> bytes:
     data = encode_robot_payload(payload)
     robots.write(key, data, meshes=_mesh_objects(payload))
     return data
-
-
-def robot_payload(path: Path | str) -> dict[str, Any]:
-    """:func:`robot_payload_bytes`, decoded."""
-    return json.loads(robot_payload_bytes(path).decode("utf-8"))
 
 
 def locate_robot_payload(
