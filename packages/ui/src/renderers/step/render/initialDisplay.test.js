@@ -30,10 +30,9 @@ function cachedProbes(stored) {
 test("a stored part opens the component, sized by its display mesh", async () => {
   const stored = row();
   const cache = cachedProbes(stored);
-  const hit = await probeInitialDisplay({ part: PART, maxInFlightBytes: 256 * MIB, ...cache });
+  const hit = await probeInitialDisplay({ part: PART, ...cache });
   assert.equal(hit.cacheProbe, stored);
-  assert.equal(hit.plan.estimatedBytes, 4 * MIB);
-  assert.equal(hit.plan.fitsDecodeCap, true);
+  assert.deepEqual(hit.plan, { estimatedBytes: 4 * MIB }, "the body's bytes and what decoding it costs");
   assert.deepEqual(cache.requested, [[[PART], { signal: undefined }]], "the part, and no other, is asked, by its key alone");
 });
 
@@ -43,21 +42,19 @@ test("a missing, refused or unsized part leaves the component cold", async () =>
     [row(), { rejectedCacheObjects: new Set(["1".repeat(64)]) }],
     [row({ decodedBytes: NaN }), {}],
   ]) {
-    assert.equal(await probeInitialDisplay({ part: PART, maxInFlightBytes: 256 * MIB,
-      ...cachedProbes(stored), ...options }), null);
+    assert.equal(await probeInitialDisplay({ part: PART, ...cachedProbes(stored), ...options }), null);
   }
   const controller = new AbortController();
   controller.abort();
-  await assert.rejects(probeInitialDisplay({ part: PART, maxInFlightBytes: 256 * MIB,
-    signal: controller.signal, probeEntries: async (_parts, { signal }) => signal.throwIfAborted() }),
+  await assert.rejects(probeInitialDisplay({ part: PART, signal: controller.signal,
+    probeEntries: async (_parts, { signal }) => signal.throwIfAborted() }),
   { name: "AbortError" });
 });
 
 test("a mesh too large to admit with the rest still opens, to load alone", () => {
+  // Past the loader's 256 MiB in-flight cap: the plan sizes it, and the loader runs it alone.
   const huge = row({ decodedBytes: 300 * MIB });
-  const warm = initialDisplayFromProbe(huge, { maxInFlightBytes: 256 * MIB });
-  assert.deepEqual(warm.plan, { estimatedBytes: 301 * MIB, fitsDecodeCap: false, reason: "warm" });
-  assert.deepEqual(producedDisplayPlan(huge, { maxInFlightBytes: 256 * MIB }),
-    { estimatedBytes: 301 * MIB, fitsDecodeCap: false, reason: "produced" });
-  assert.equal(producedDisplayPlan(null, { maxInFlightBytes: 256 * MIB }), null, "no row, no plan");
+  assert.deepEqual(initialDisplayFromProbe(huge).plan, { estimatedBytes: 301 * MIB });
+  assert.deepEqual(producedDisplayPlan(huge), { estimatedBytes: 301 * MIB });
+  assert.equal(producedDisplayPlan(null), null, "no row, no plan");
 });

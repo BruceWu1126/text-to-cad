@@ -11,6 +11,7 @@
 // publishing each batch. The last publish is the full model.
 import { buildComposedPackageMeshData } from "@text-to-cad/core/lib/assembly/meshData.js";
 import { estimateMeshRenderCost } from "@text-to-cad/core/lib/render/meshCost.js";
+import { displayMeshBytes } from "../../../render/initialDisplay.js";
 import { ViewerMemoryLimitError } from "../../../render/viewerMemoryPolicy.js";
 
 // A batch publishes as soon as EITHER ceiling is crossed by the components
@@ -41,57 +42,11 @@ export const PROGRESSIVE_PUBLISH_MAX_BYTES = 128 * 1024 * 1024;
 // Load-time admission (the peak that killed the tab): a component decodes in a
 // surf worker whose intermediates count against the renderer process, and a
 // hand component reaches ~90 MB of meshData. A count cap alone (8 wide) admits
-// 8 of those at once. Admission is therefore ALSO byte-aware: the estimated
-// decoded bytes of ordinary concurrent work stay under this budget. The
-// Viewer may opt one larger component into serial admission only after its
-// global owned-memory ledger reserves the complete estimate.
+// 8 of those at once. Admission is therefore ALSO byte-aware: the bytes the
+// parts' rows charge for the decodes in flight (`displayMeshBytes`) stay under
+// this budget. The Viewer may opt one larger component into serial admission
+// only after its global owned-memory ledger reserves the complete charge.
 export const PROGRESSIVE_LOAD_MAX_INFLIGHT_BYTES = 256 * 1024 * 1024;
-// Estimated decoded size of a component before anything is known about the
-// model — a quarter of the budget, so at most four unmeasured components are
-// in flight until the first decode calibrates the estimate (below).
-export const PROGRESSIVE_LOAD_UNMEASURED_SHARE = 4;
-
-// Decoded-bytes estimator, for a component admitted without its stored mesh's
-// probe row (with one, admission charges exactly what the row says): a source
-// byte count hint is scaled by the decoded/source ratio measured on the
-// components already decoded; without a hint, the running mean decoded size;
-// before any decode, the unmeasured share of the budget.
-export function createDecodeSizeEstimator({
-  maxInFlightBytes = PROGRESSIVE_LOAD_MAX_INFLIGHT_BYTES,
-  sourceExpansionRatio = 0,
-} = {}) {
-  let ratioSum = 0;
-  let ratioCount = 0;
-  let decodedSum = 0;
-  let decodedCount = 0;
-  return {
-    estimate(hintBytes, expansionRatio = sourceExpansionRatio) {
-      const hint = Number(hintBytes);
-      const unmeasuredFloor = maxInFlightBytes / PROGRESSIVE_LOAD_UNMEASURED_SHARE;
-      const ratio = Number(expansionRatio) || 0;
-      const sourceFloor = Number.isFinite(hint) && hint > 0 && ratio > 0
-        ? hint * ratio
-        : 0;
-      if (Number.isFinite(hint) && hint > 0 && ratioCount > 0) {
-        return Math.max(unmeasuredFloor, sourceFloor, hint * (ratioSum / ratioCount));
-      }
-      if (decodedCount > 0) {
-        return Math.max(unmeasuredFloor, sourceFloor, decodedSum / decodedCount);
-      }
-      return Math.max(unmeasuredFloor, sourceFloor);
-    },
-    observe(hintBytes, decodedBytes) {
-      const decoded = Number(decodedBytes) || 0;
-      decodedSum += decoded;
-      decodedCount += 1;
-      const hint = Number(hintBytes);
-      if (Number.isFinite(hint) && hint > 0) {
-        ratioSum += decoded / hint;
-        ratioCount += 1;
-      }
-    }
-  };
-}
 
 // `meshing`: cadgen is deriving parts the store did not hold (a cold open), which the
 // screen names as meshing; otherwise the parts are only being read.
@@ -298,19 +253,19 @@ export function orderComponentsForProgressiveLoad(descriptor) {
 /**
  * createProgressivePackageLoader({
  *   descriptor,                        // the assembly.json package descriptor
- *   loadComponent(cid, component, { estimatedBytes, cacheProbe }), // -> Promise<meshData>
+ *   loadComponent(cid, component, { estimatedBytes, row }), // -> Promise<meshData>
  *   concurrency,
  *   isCurrent(),                       // false once the request is superseded or aborted
- *   sizeHint?(cid, component),         // -> Promise<number|{sourceBytes,cacheProbe}> before admission
- *   retryCacheProbeMiss?(error, probe),// true re-enters metadata + admission after a stale body
- *   componentFailed?(error, cid),      // true: sizeHint's error is that component's alone (cadgen could
+ *   partRow(cid, component, { rejectedCacheObjects, skipCacheProbes }), // -> Promise<row>: the
+ *                                      // component's part row (core's `partRow`), before admission
+ *   retryCacheProbeMiss?(error, row),  // true asks for the row again, and admits again, after a stale body
+ *   componentFailed?(error, cid),      // true: partRow's error is that component's alone (cadgen could
  *                                      // not derive or mesh it); the rest load on without it
- *   maxInFlightBytes?,                 // estimated decoded bytes in flight (PROGRESSIVE_LOAD_MAX_INFLIGHT_BYTES)
+ *   maxInFlightBytes?,                 // bytes the decodes in flight charge (PROGRESSIVE_LOAD_MAX_INFLIGHT_BYTES)
  *   allowOversizedSingle?,             // one > maxInFlightBytes decode after reserveLoad accepts it
- *   sourceExpansionRatio?,             // conservative decoded/source estimate floor for this concrete tier
  *   retainedComponent?(cid, component),// already-owned exact meshData, bypassing decode admission
  *   initialComposition?,               // immediately preceding same-file composition
- *   reserveLoad?({ cid, estimatedBytes }) -> { ok, token?, detail? },
+ *   reserveLoad?({ cid, estimatedBytes, row }) -> { ok, token?, detail? },
  *   releaseLoad?(token), onMemoryLimitation?(detail),
  *   recoverMemoryPressure?(detail),    // one bounded reclaim attempt after admitted work drains
  *   onRetainedChange?({ loaded, failed, total, retainedBytes }), // every unique component completion
@@ -319,10 +274,12 @@ export function orderComponentsForProgressiveLoad(descriptor) {
  * }).run() -> Promise<{ loaded, total, publishes, failures }>
  *
  * Admission is count- AND byte-capped: a component starts decoding only when
- * fewer than `concurrency` are in flight and the estimated decoded bytes in
- * flight (createDecodeSizeEstimator over the sizeHint) fit `maxInFlightBytes`.
- * With `allowOversizedSingle`, one larger estimate may run alone after
- * `reserveLoad` accepts it. Every publish re-checks isCurrent() first; a superseded or aborted load
+ * fewer than `concurrency` are in flight and what its part's row charges, its
+ * stored mesh and the cost of decoding it (`displayMeshBytes`), fits
+ * `maxInFlightBytes` beside the decodes in flight. A row that states no size is
+ * the load's error. With `allowOversizedSingle`, one larger part may run alone
+ * after `reserveLoad` accepts it, and its decode is held to its own charge.
+ * Every publish re-checks isCurrent() first; a superseded or aborted load
  * publishes nothing further, drops its references to every component it
  * loaded (retainedComponentCount() -> 0) and rejects with an AbortError.
  * The final publish (`final: true`) carries every component and is
@@ -338,12 +295,11 @@ export function createProgressivePackageLoader({
   loadComponent,
   concurrency = 8,
   isCurrent = () => true,
-  sizeHint = null,
+  partRow,
   retryCacheProbeMiss = null,
   componentFailed = null,
   maxInFlightBytes = PROGRESSIVE_LOAD_MAX_INFLIGHT_BYTES,
   allowOversizedSingle = false,
-  sourceExpansionRatio = 0,
   retainedComponent = null,
   initialComposition = null,
   reserveLoad = null,
@@ -414,20 +370,6 @@ export function createProgressivePackageLoader({
       failures: [...failures] });
   }
 
-  // Coarse and canonical tessellations have different expansion curves. Keep
-  // their observations separate so a dense L1 leaf cannot make a valid L0
-  // estimate appear unfit (or vice versa) in a mixed small assembly.
-  const estimatorsByExpansionRatio = new Map();
-  function estimatorFor(expansionRatio) {
-    const numeric = Number(expansionRatio) || 0;
-    if (!estimatorsByExpansionRatio.has(numeric)) {
-      estimatorsByExpansionRatio.set(numeric, createDecodeSizeEstimator({
-        maxInFlightBytes,
-        sourceExpansionRatio: numeric,
-      }));
-    }
-    return estimatorsByExpansionRatio.get(numeric);
-  }
   let inFlight = 0;
   let inFlightBytes = 0;
   let cancelled = false;
@@ -461,23 +403,12 @@ export function createProgressivePackageLoader({
       && inFlight === 0 && estimate > maxInFlightBytes;
   }
 
-  // Re-estimates on every wake: a decode finishing while this one waited has
-  // calibrated the estimator, and the size it should be admitted at is the
-  // current one, not the one it computed before waiting.
-  async function admit(hint, cid, component) {
+  // Admits one decode at what its part's row charges (`estimate`), waiting while the decodes in
+  // flight leave it no room.
+  async function admit(cid, row, estimate) {
     let lastRecoveryEpoch = -1;
     while (true) {
       if (!active()) throw abortError();
-      const sourceBytes = hint && typeof hint === "object" ? hint.sourceBytes : hint;
-      const cacheProbe = hint && typeof hint === "object" ? hint.cacheProbe : null;
-      const configuredRatio = typeof sourceExpansionRatio === "function"
-        ? sourceExpansionRatio(cid, component, sourceBytes)
-        : sourceExpansionRatio;
-      const estimator = estimatorFor(configuredRatio);
-      const cachedBytes = Number(cacheProbe?.byteLength) + Number(cacheProbe?.decodedBytes);
-      const estimate = cacheProbe && Number.isSafeInteger(cachedBytes) && cachedBytes > 0
-        ? cachedBytes
-        : estimator.estimate(sourceBytes);
       if (!canAdmit(estimate)) {
         if (cancelled) throw abortError();
         if (inFlight === 0) {
@@ -500,14 +431,13 @@ export function createProgressivePackageLoader({
       }
       let reservation = { ok: true, token: null };
       if (typeof reserveLoad === "function") {
-        reservation = reserveLoad({ cid, estimatedBytes: estimate, cacheProbe }) || { ok: false };
+        reservation = reserveLoad({ cid, estimatedBytes: estimate, row }) || { ok: false };
       }
       if (reservation.ok !== false) {
         inFlight += 1;
         inFlightBytes += estimate;
         peakInFlight = Math.max(peakInFlight, inFlight);
-        return { estimate, estimator, reservation: reservation.token, sourceBytes, cacheProbe,
-          oversized: estimate > maxInFlightBytes };
+        return { estimate, reservation: reservation.token, oversized: estimate > maxInFlightBytes };
       }
       if (inFlight > 0) {
         await new Promise((resolve) => waiters.push(resolve));
@@ -575,40 +505,36 @@ export function createProgressivePackageLoader({
     let meshData;
     let admission;
     while (true) {
-      let hint = null;
-      if (typeof sizeHint === "function") {
-        // Optional metadata probes handle ordinary misses themselves. A thrown
-        // error is cancellation, an invalid immutable binding, or failed surface
-        // derivation and must fence sibling lanes like a decode failure.
-        try {
-          hint = await sizeHint(cid, component, {
-            rejectedCacheObjects,
-            // L1 and L0 are the only initial tiers. If both probed objects
-            // disappear, force the next pass through cold resolution instead
-            // of following a rapidly changing cache index forever.
-            skipCacheProbes: cacheProbeMisses >= 2,
-          });
-        } catch (error) {
-          // One component cadgen could not derive or mesh is that component's failure: it settles
-          // alone, and every other component goes on loading (`run` publishes the final
-          // composition when a failure settles last).
-          if (componentFailed?.(error, cid) === true && active()) {
-            failures.push({ cid, error });
-            notifyRetained();
-            return;
-          }
-          markFailed(error);
-          throw error;
+      let row;
+      // The ask handles an ordinary miss itself (a part the store lacks is derived). A thrown
+      // error is cancellation, an invalid immutable binding, or failed surface derivation and
+      // must fence sibling lanes like a decode failure.
+      try {
+        row = await partRow(cid, component, {
+          rejectedCacheObjects,
+          // Two stored bodies gone missing force the next ask through cold resolution instead
+          // of following a rapidly changing cache index forever.
+          skipCacheProbes: cacheProbeMisses >= 2,
+        });
+      } catch (error) {
+        // One component cadgen could not derive or mesh is that component's failure: it settles
+        // alone, and every other component goes on loading (`run` publishes the final
+        // composition when a failure settles last).
+        if (componentFailed?.(error, cid) === true && active()) {
+          failures.push({ cid, error });
+          notifyRetained();
+          return;
         }
+        markFailed(error);
+        throw error;
       }
       if (!active()) stop();
-      admission = await admit(hint, cid, component);
+      const estimate = displayMeshBytes(row);
+      if (estimate === null) throw new Error(`Component ${cid} has no part row to size its decode by`);
+      admission = await admit(cid, row, estimate);
       try {
         if (!active()) stop();
-        meshData = await loadComponent(cid, component, {
-          estimatedBytes: admission.estimate,
-          cacheProbe: admission.cacheProbe,
-        });
+        meshData = await loadComponent(cid, component, { estimatedBytes: admission.estimate, row });
         if (!active()) stop();
         const decodedBytes = estimateMeshRenderCost(meshData).typedArrayBytes;
         const decodedLimit = admission.oversized ? admission.estimate : maxInFlightBytes;
@@ -632,22 +558,21 @@ export function createProgressivePackageLoader({
         releaseSlot(admission);
         break;
       } catch (error) {
-        const retry = cacheProbeMisses < 2 && admission.cacheProbe
-          && retryCacheProbeMiss?.(error, admission.cacheProbe) === true;
+        const retry = cacheProbeMisses < 2 && retryCacheProbeMiss?.(error, row) === true;
         if (!retry) markFailed(error);
         releaseSlot(admission);
         if (retry) {
-          rejectedCacheObjects.add(admission.cacheProbe.object);
+          // The next ask passes over this body: the store no longer holds it.
+          rejectedCacheObjects.add(row.glb.object);
           cacheProbeMisses += 1;
           continue;
         }
-        // The retryable probed-body case above is the only failure that may
+        // The retryable stale-body case above is the only failure that may
         // admit again; every other failure fences waiters before release.
         throw error;
       }
     }
     const decodedBytes = admission.decodedBytes;
-    if (!admission.cacheProbe) admission.estimator.observe(admission.sourceBytes, decodedBytes);
     loadedByCid[cid] = meshData;
     loaded += 1;
     retainedBytes += decodedBytes;

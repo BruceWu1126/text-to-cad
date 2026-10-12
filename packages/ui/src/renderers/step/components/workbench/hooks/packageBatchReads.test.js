@@ -228,7 +228,7 @@ test("initial plans probe the parts a chunk at a time, growing from eight to 256
   const components = cids(747).map(cid => [cid, { part: partOf(cid) }]);
   const calls = [];
   // Stored parts for the even components; nothing for the odd ones, which are cold.
-  const plans = createInitialDisplayPlans({ components, maxInFlightBytes: 256 * MIB,
+  const plans = createInitialDisplayPlans({ components,
     probeEntries: async (parts, ...rest) => {
       calls.push([parts, ...rest]);
       return new Map(parts.filter(part => indexOf(part) % 2 === 0)
@@ -269,7 +269,7 @@ test("nothing is probed ahead of the first chunk until the first body read is pa
   const components = cids(100).map(cid => [cid, { part: partOf(cid) }]);
   const probed = [];
   let pastFirstRead;
-  const plans = createInitialDisplayPlans({ components, maxInFlightBytes: 256 * MIB,
+  const plans = createInitialDisplayPlans({ components,
     readAheadAfter: new Promise(resolve => { pastFirstRead = resolve; }),
     probeEntries: async (parts) => { probed.push(parts.length); return new Map(parts.map(part => [part,
       { part, glb: { object: `o-${part}`, byteLength: KIB, decodedBytes: KIB } }])); } });

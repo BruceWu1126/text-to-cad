@@ -7,13 +7,23 @@ export const INITIAL_PROBE_FIRST_CHUNK = 8;
 // holds it, else the one cadgen derives in the request that answers with its part's record.
 
 /**
+ * What reading and decoding a part's display mesh costs, as its row (core's `partRow`) states it:
+ * the stored body's bytes and what decoding them takes, `glb.byteLength + glb.decodedBytes`. The
+ * loader admits a component's decode by exactly this. Null for a row that does not say.
+ */
+export function displayMeshBytes(row) {
+  const bytes = Number(row?.glb?.byteLength) + Number(row?.glb?.decodedBytes);
+  return Number.isSafeInteger(bytes) && bytes > 0 ? bytes : null;
+}
+
+/**
  * The plan for a component whose part the store holds (`cacheProbe`, its row): sized by the stored
  * mesh, and null when it is a mesh this load already found missing. One too large to admit with the
  * rest still loads, alone, as the loader admits an oversized single component.
  */
-export function initialDisplayFromProbe(cacheProbe, { maxInFlightBytes, rejectedCacheObjects = new Set() } = {}) {
+export function initialDisplayFromProbe(cacheProbe, { rejectedCacheObjects = new Set() } = {}) {
   if (!cacheProbe || rejectedCacheObjects.has(cacheProbe.glb.object)) return null;
-  const plan = storedMeshPlan(cacheProbe, "warm", maxInFlightBytes);
+  const plan = producedDisplayPlan(cacheProbe);
   return plan ? { cacheProbe, plan } : null;
 }
 
@@ -21,28 +31,19 @@ export function initialDisplayFromProbe(cacheProbe, { maxInFlightBytes, rejected
  * The plan for a component whose part cadgen just derived (`row`, the record its request answered
  * with), sized as a warm one is.
  */
-export function producedDisplayPlan(row, { maxInFlightBytes } = {}) {
-  return storedMeshPlan(row, "produced", maxInFlightBytes);
-}
-
-function storedMeshPlan(row, reason, maxInFlightBytes) {
-  const estimatedBytes = Number(row?.glb?.byteLength) + Number(row?.glb?.decodedBytes);
-  if (!Number.isSafeInteger(estimatedBytes) || estimatedBytes <= 0) return null;
-  return {
-    estimatedBytes,
-    fitsDecodeCap: estimatedBytes <= Math.max(1, Number(maxInFlightBytes) || 1),
-    reason,
-  };
+export function producedDisplayPlan(row) {
+  const estimatedBytes = displayMeshBytes(row);
+  return estimatedBytes === null ? null : { estimatedBytes };
 }
 
 /** One component's warm plan, probed alone (a retry after a probed body went missing). */
 export async function probeInitialDisplay({
-  part, maxInFlightBytes, signal, tessellationCache,
+  part, signal, tessellationCache,
   rejectedCacheObjects = new Set(),
   probeEntries = (...args) => tessellationCache.probeCachedTessellationEntries(...args),
 }) {
   const hits = await probeEntries([part], { signal });
-  return initialDisplayFromProbe(hits.get(part), { maxInFlightBytes, rejectedCacheObjects });
+  return initialDisplayFromProbe(hits.get(part), { rejectedCacheObjects });
 }
 
 /**
@@ -62,7 +63,7 @@ export async function probeInitialDisplay({
  * undefined while its chunk is unprobed.
  */
 export function createInitialDisplayPlans({
-  components, probeEntries, maxInFlightBytes, signal, readAheadAfter = null,
+  components, probeEntries, signal, readAheadAfter = null,
   firstChunk = INITIAL_PROBE_FIRST_CHUNK, maxChunk = TESS_PROBE_MAX_KEYS,
 }) {
   const chunks = [];
@@ -83,7 +84,7 @@ export function createInitialDisplayPlans({
         const parts = [...new Set(chunk.map(([, component]) => partOf(component)))];
         const hits = await probeEntries(parts, { signal });
         for (const [cid, component] of chunk) {
-          plans.set(cid, initialDisplayFromProbe(hits.get(partOf(component)), { maxInFlightBytes }));
+          plans.set(cid, initialDisplayFromProbe(hits.get(partOf(component))));
         }
       })();
       // Awaited by whoever asked; a chunk probed ahead fails quietly until somebody does.

@@ -1,10 +1,12 @@
 // Progressive publish of a component package (packages/ui/docs/loading.md, section 2).
 // Fake components (no tessellation): the policy under test is batching,
-// ordering, staleness and release, not geometry.
+// ordering, admission, staleness and release, not geometry.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { buildComposedPackageMeshData } from "@text-to-cad/core/lib/assembly/meshData.js";
+import { partRow, tessellationDecodedBytes } from "@text-to-cad/core/lib/surf/tessellationCache.js";
 
 import {
   PROGRESSIVE_PUBLISH_FIRST_BYTES,
@@ -24,13 +26,30 @@ import {
   replacingSameFileMesh,
   retainsPreviousStepMesh,
   shouldRetainCompleteSameFileMesh,
-  createDecodeSizeEstimator,
-  PROGRESSIVE_LOAD_MAX_INFLIGHT_BYTES,
-  PROGRESSIVE_LOAD_UNMEASURED_SHARE
+  PROGRESSIVE_LOAD_MAX_INFLIGHT_BYTES
 } from "./packageProgressiveLoad.js";
 import { createViewerMemoryPolicy } from "../../../render/viewerMemoryPolicy.js";
 
 const IDENTITY_4X4 = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+const sha256 = (text) => createHash("sha256").update(text).digest("hex");
+
+// A part's row as the store answers it, made by core's `partRow` so it has the product's shape:
+// a 20-byte display mesh whose record says decoding it costs `bytes - 20` more, so admission
+// charges exactly `bytes` (a multiple of 4, at least 20). `version` names another body of the
+// same part, as the store holds one after the first went missing.
+function storedRow(cid, bytes, version = "") {
+  const counts = { vertexCount: 0, indexCount: (bytes - 20) / 4, faceCount: 0, edgeCount: 0, edgePointCount: 0 };
+  const row = partRow(`${sha256(cid)}-v1`, {
+    glb: { object: sha256(`${cid}:${version}`), byteLength: 20, decodedBytes: tessellationDecodedBytes(counts), ...counts },
+    selectors: { object: sha256(`${cid}:selectors`), byteLength: 1, faceCount: 0, edgeCount: 0, vertexCount: 0 },
+  });
+  assert.ok(row, `a part row charging ${bytes} bytes`);
+  return row;
+}
+
+// The row of every component in a test that is not about admission: it charges next to nothing.
+const smallRow = async (cid) => storedRow(cid, 64);
 
 function translation(x, y, z) {
   return [1, 0, 0, x, 0, 1, 0, y, 0, 0, 1, z, 0, 0, 0, 1];
@@ -139,6 +158,7 @@ test("batches publish in order with monotonically increasing component counts; t
   const loader = createProgressivePackageLoader({
     descriptor,
     loadComponent,
+    partRow: smallRow,
     concurrency: 4,
     maxComponents: 4,
     onPublish: ({ meshData, componentMeshDataByCid, loaded, total, final }) => publishes.push({
@@ -178,6 +198,7 @@ test("the byte ceiling publishes a batch before the component ceiling", async ()
   await createProgressivePackageLoader({
     descriptor,
     loadComponent,
+    partRow: smallRow,
     concurrency: 1,
     maxComponents: 100,
     maxBytes: 400,
@@ -197,6 +218,7 @@ test("the final publish equals the single post-load composition", async () => {
   await createProgressivePackageLoader({
     descriptor,
     loadComponent,
+    partRow: smallRow,
     concurrency: 3,
     maxComponents: 4,
     onPublish: (publish) => {
@@ -232,6 +254,7 @@ test("same-file complete revision replacement publishes atomically and accounts 
   await createProgressivePackageLoader({
     descriptor,
     loadComponent,
+    partRow: smallRow,
     concurrency: 2,
     maxComponents: 2,
     publishIntermediate: false,
@@ -320,6 +343,7 @@ test("failed atomic revision drops staged ownership without mutating or publishi
     descriptor: afterDescriptor,
     initialComposition: before,
     retainedComponent: (cid) => cid === "c0" ? components.c0 : null,
+    partRow: smallRow,
     loadComponent: async () => { throw new Error("replacement decode failed"); },
     publishIntermediate: false,
     onPublish: () => { publications += 1; }
@@ -339,6 +363,7 @@ test("producer replacement fences old replies and swaps only a complete new view
   const staleReply = new Promise((resolve) => { releaseStale = resolve; });
   const oldLoader = createProgressivePackageLoader({
     descriptor,
+    partRow: smallRow,
     concurrency: 2,
     maxComponents: 1,
     loadComponent: async (cid) => {
@@ -358,6 +383,7 @@ test("producer replacement fences old replies and swaps only a complete new view
   const replacementPublishes = [];
   await createProgressivePackageLoader({
     descriptor,
+    partRow: smallRow,
     concurrency: 2,
     publishIntermediate: false,
     loadComponent: async (cid) => {
@@ -380,7 +406,7 @@ test("progressive growth keeps already displayed occurrence and leaf metadata", 
   let previous = null;
   let comparisons = 0;
   await createProgressivePackageLoader({
-    descriptor, concurrency: 1, firstComponents: 1, maxComponents: 1,
+    descriptor, partRow: smallRow, concurrency: 1, firstComponents: 1, maxComponents: 1,
     loadComponent: async cid => fakeComponent(cid),
     onPublish: ({ meshData }) => {
       if (previous) {
@@ -410,6 +436,7 @@ test("an atomic revision cancel publishes nothing and releases pending replaceme
   const loader = createProgressivePackageLoader({
     descriptor,
     loadComponent,
+    partRow: smallRow,
     concurrency: 1,
     publishIntermediate: false,
     isCurrent: () => current,
@@ -434,7 +461,7 @@ test("retained exact components bypass decode admission and pending-byte ownersh
     descriptor,
     concurrency: 1,
     retainedComponent: (cid) => cid === "c0" ? retained : null,
-    sizeHint: async () => 1,
+    partRow: smallRow,
     loadComponent: async (cid) => {
       decoded.push(cid);
       return fakeComponent(cid);
@@ -455,6 +482,7 @@ test("a superseded request publishes nothing further and releases what it loaded
   let loads = 0;
   const loader = createProgressivePackageLoader({
     descriptor,
+    partRow: smallRow,
     loadComponent: async (cid, component) => {
       loads += 1;
       return loadComponent(cid, component);
@@ -482,6 +510,7 @@ test("an aborted load (loader rejects) publishes nothing further and releases", 
   const publishes = [];
   const loader = createProgressivePackageLoader({
     descriptor,
+    partRow: smallRow,
     loadComponent: async (cid, component) => {
       if (controller.signal.aborted) {
         throw new DOMException("aborted", "AbortError");
@@ -520,7 +549,9 @@ test("a failed lane fences sibling publishes, wakes queued admission, and preser
   const loader = createProgressivePackageLoader({
     descriptor,
     concurrency: 5,
+    // Four 24-byte parts fit the 100-byte cap; the fifth waits at admission.
     maxInFlightBytes: 100,
+    partRow: async (cid) => storedRow(cid, 24),
     reserveLoad: ({ cid }) => {
       reserved.push(cid);
       return { ok: true, token: cid };
@@ -576,7 +607,7 @@ test("a component's own failure leaves it out: the rest load, and the final publ
   const settled = [];
   const loader = createProgressivePackageLoader({
     descriptor, concurrency: 2, loadComponent, componentFailed,
-    sizeHint: async (cid) => { if (cid === "c2") throw own(cid); return 1; },
+    partRow: async (cid) => { if (cid === "c2") throw own(cid); return storedRow(cid, 64); },
     onRetainedChange: ({ loaded, failed }) => settled.push(loaded + failed),
     onPublish: (publish) => publishes.push(publish),
   });
@@ -594,14 +625,14 @@ test("a component's own failure leaves it out: the rest load, and the final publ
   const fatal = new Error("surface request capacity reached");
   const fenced = createProgressivePackageLoader({
     descriptor, concurrency: 2, loadComponent, componentFailed, onPublish: () => {},
-    sizeHint: async (cid) => { if (cid === "c1") throw fatal; return 1; },
+    partRow: async (cid) => { if (cid === "c1") throw fatal; return storedRow(cid, 64); },
   });
   await assert.rejects(fenced.run(), (error) => error === fatal);
 
   const part = makeDescriptor({ componentCount: 1, occurrenceCount: 1 });
   const lone = createProgressivePackageLoader({
     descriptor: part, loadComponent: makeLoader(part).loadComponent, componentFailed,
-    sizeHint: async (cid) => { throw own(cid); },
+    partRow: async (cid) => { throw own(cid); },
     onPublish: () => assert.fail("nothing is published"),
   });
   await assert.rejects(lone.run(), /component c0: OCCT did not mesh 2 face\(s\)/);
@@ -618,7 +649,9 @@ test("cancellation fences a queued admission before an active slot releases", as
   const loader = createProgressivePackageLoader({
     descriptor,
     concurrency: 5,
+    // Four 24-byte parts fit the 100-byte cap; the fifth waits at admission.
     maxInFlightBytes: 100,
+    partRow: async (cid) => storedRow(cid, 24),
     isCurrent: () => current,
     reserveLoad: ({ cid }) => ({ ok: true, token: cid }),
     releaseLoad: (token) => released.push(token),
@@ -687,6 +720,7 @@ test("recomposition batches double: 800 components publish 8 times, not 25", asy
   const result = await createProgressivePackageLoader({
     descriptor,
     loadComponent,
+    partRow: smallRow,
     concurrency: 8,
     onPublish: (publish) => publishes.push(publish)
   }).run();
@@ -710,6 +744,7 @@ test("window.__cadMeshCost updates on every publish and clears on cancel", async
     await createProgressivePackageLoader({
       descriptor,
       loadComponent,
+      partRow: smallRow,
       concurrency: 1,
       maxComponents: 2,
       onPublish: (publish) => {
@@ -741,6 +776,7 @@ test("a published mesh state is the complete model only on the final publish", a
   await createProgressivePackageLoader({
     descriptor,
     loadComponent,
+    partRow: smallRow,
     concurrency: 3,
     maxComponents: 4,
     onPublish: ({ meshData, final }) => {
@@ -766,86 +802,93 @@ test("a load that ended without the parts cadgen could not mesh is short of them
   assert.equal(meshStateSettledShort(null), false);
 });
 
-test("byte-aware admission: decodes in flight stay under the byte budget, and under the count cap", async () => {
-  // Each fake component decodes to exactly its hint (ratio 1): 40 floats*4 + 36 + 12 = 208 B.
-  const descriptor = makeDescriptor({ componentCount: 24, occurrenceCount: 24 });
-  const { loadComponent } = makeLoader(descriptor, { componentFloats: () => 40 });
-  let inFlight = 0;
-  const inFlightAtStart = [];
-  const wrapped = async (cid, component) => {
-    inFlight += 1;
-    inFlightAtStart.push(inFlight);
-    try {
-      return await loadComponent(cid, component);
-    } finally {
-      inFlight -= 1;
-    }
-  };
-  const budget = 500; // fits two 208 B components, not three
-  const loader = createProgressivePackageLoader({
-    descriptor,
-    loadComponent: wrapped,
-    sizeHint: async () => 208,
-    concurrency: 8,
-    maxInFlightBytes: budget,
-    onPublish: () => {}
-  });
-  await loader.run();
-  assert.equal(inFlightAtStart.length, 24);
-  // Before any decode is measured the estimate is budget/4 = 125 B: at most 4 unmeasured admissions.
-  assert.ok(loader.peakInFlight() <= PROGRESSIVE_LOAD_UNMEASURED_SHARE, `peak ${loader.peakInFlight()}`);
-  // Once measured (ratio 1 → 208 B each) only two fit the 500 B budget; the
-  // first eight admissions span the unmeasured→measured transition.
-  assert.ok(inFlightAtStart.slice(8).every((n) => n <= 2), `later admissions ${inFlightAtStart}`);
-  // Count cap still binds when bytes do not.
-  const { loadComponent: load2 } = makeLoader(descriptor, { componentFloats: () => 40 });
-  const wide = createProgressivePackageLoader({
-    descriptor, loadComponent: load2, sizeHint: async () => 1, concurrency: 3,
-    maxInFlightBytes: PROGRESSIVE_LOAD_MAX_INFLIGHT_BYTES, onPublish: () => {}
-  });
-  await wide.run();
-  assert.ok(wide.peakInFlight() <= 3 && wide.peakInFlight() >= 2, `count cap ${wide.peakInFlight()}`);
-  // Once calibrated, a component larger than the whole decode budget is an
-  // explicit limitation. It is never auto-admitted as a run-alone spike.
-  const { loadComponent: load3 } = makeLoader(descriptor, { componentFloats: () => 400 });
-  const huge = createProgressivePackageLoader({
-    descriptor, loadComponent: load3, sizeHint: async () => 1648, concurrency: 8, maxInFlightBytes: 100, onPublish: () => {}
-  });
-  await assert.rejects(huge.run(), (error) => error.code === "VIEWER_MEMORY_LIMIT");
-  // The estimator itself.
-  const estimator = createDecodeSizeEstimator({ maxInFlightBytes: 400 });
-  assert.equal(estimator.estimate(10), 100, "unmeasured share");
-  estimator.observe(10, 300);
-  assert.equal(estimator.estimate(20), 600, "hint scaled by the measured ratio");
-  assert.equal(estimator.estimate(null), 300, "no hint: running mean");
-  const conservative = createDecodeSizeEstimator({
-    maxInFlightBytes: 400,
-    sourceExpansionRatio: 32,
-  });
-  assert.equal(conservative.estimate(10), 320, "source expansion applies before observations");
-  conservative.observe(10, 50);
-  assert.equal(conservative.estimate(10), 320, "a low observation cannot weaken the configured floor");
-  assert.equal(conservative.estimate(10, 64), 640, "a concrete component can override the floor");
-});
-
-test("mixed component tiers use their own admission estimate floors", async () => {
+// Admission charges what a part's row says reading and decoding its display mesh costs, from the
+// first component on: the reservation, the decodes in flight and the component's own load all see
+// exactly `glb.byteLength + glb.decodedBytes`, and the reservation spans the decode.
+test("admission charges exactly what a part's row states: glb.byteLength + glb.decodedBytes", async () => {
   const descriptor = makeDescriptor({ componentCount: 2, occurrenceCount: 2 });
-  const reserved = [];
+  const rows = { c0: storedRow("c0", 152), c1: storedRow("c1", 36) };
+  const charge = (row) => row.glb.byteLength + row.glb.decodedBytes;
+  assert.deepEqual([charge(rows.c0), charge(rows.c1)], [152, 36]);
+  const policy = createViewerMemoryPolicy({ budgetBytes: 1000, gpuHeadroomBytes: 0 });
+  const seen = [];
   await createProgressivePackageLoader({
     descriptor,
     concurrency: 1,
-    maxInFlightBytes: 1000,
-    sizeHint: async (cid) => cid === "c0" ? 5 : 20,
-    sourceExpansionRatio: (cid) => cid === "c0" ? 64 : 32,
-    reserveLoad: ({ cid, estimatedBytes }) => {
-      reserved.push([cid, estimatedBytes]);
-      return { ok: true, token: cid };
+    maxInFlightBytes: 400,
+    partRow: async (cid) => rows[cid],
+    reserveLoad: ({ cid, estimatedBytes, row }) => {
+      seen.push(["reserve", cid, estimatedBytes, row]);
+      return policy.reserve({ category: "workerInFlight", bytes: estimatedBytes, label: cid });
     },
-    releaseLoad: () => {},
-    loadComponent: async (cid) => fakeComponent(cid, { floats: cid === "c0" ? 200 : 9 }),
+    releaseLoad: (token) => policy.release(token),
+    loadComponent: async (cid, _component, { estimatedBytes, row }) => {
+      seen.push(["load", cid, estimatedBytes, row, policy.snapshot().inFlightBytes]);
+      return fakeComponent(cid);
+    },
     onPublish: () => {},
   }).run();
-  assert.deepEqual(reserved, [["c0", 320], ["c1", 640]]);
+  assert.deepEqual(seen, [
+    ["reserve", "c0", 152, rows.c0], ["load", "c0", 152, rows.c0, 152],
+    ["reserve", "c1", 36, rows.c1], ["load", "c1", 36, rows.c1, 36],
+  ]);
+  assert.equal(policy.snapshot().inFlightBytes, 0, "each reservation is released once its decode is in");
+});
+
+test("small parts decode up to the count cap at once; the byte cap binds when their rows fill it", async () => {
+  const descriptor = makeDescriptor({ componentCount: 24, occurrenceCount: 24 });
+  // Parts far under the viewer's own cap: eight at once, the count cap.
+  const wide = createProgressivePackageLoader({
+    descriptor, loadComponent: makeLoader(descriptor).loadComponent, partRow: smallRow, concurrency: 8,
+    maxInFlightBytes: PROGRESSIVE_LOAD_MAX_INFLIGHT_BYTES, onPublish: () => {}
+  });
+  await wide.run();
+  assert.equal(wide.peakInFlight(), 8, "the count cap, not a guess at each part's size");
+  // Rows of 208 bytes under a 500-byte cap: two at a time, from the first admission on.
+  const { loadComponent } = makeLoader(descriptor, { componentFloats: () => 40 });
+  let inFlight = 0;
+  const inFlightAtStart = [];
+  const narrow = createProgressivePackageLoader({
+    descriptor,
+    loadComponent: async (cid, component) => {
+      inFlight += 1;
+      inFlightAtStart.push(inFlight);
+      try {
+        return await loadComponent(cid, component);
+      } finally {
+        inFlight -= 1;
+      }
+    },
+    partRow: async (cid) => storedRow(cid, 208),
+    concurrency: 8,
+    maxInFlightBytes: 500,
+    onPublish: () => {}
+  });
+  await narrow.run();
+  assert.equal(inFlightAtStart.length, 24);
+  assert.ok(inFlightAtStart.every((count) => count <= 2), `admissions ${inFlightAtStart}`);
+  assert.equal(narrow.peakInFlight(), 2);
+  // A part above the whole cap, with no oversized admission: an explicit limitation, never decoded.
+  let started = false;
+  const huge = createProgressivePackageLoader({
+    descriptor: makeDescriptor({ componentCount: 1, occurrenceCount: 1 }),
+    loadComponent: async () => { started = true; return fakeComponent("c0"); },
+    partRow: async (cid) => storedRow(cid, 1648), concurrency: 8, maxInFlightBytes: 100, onPublish: () => {}
+  });
+  await assert.rejects(huge.run(), (error) => error.code === "VIEWER_MEMORY_LIMIT" && error.detail.requestedBytes === 1648);
+  assert.equal(started, false);
+});
+
+test("a row that states no size is the load's error, not a guess", async () => {
+  const descriptor = makeDescriptor({ componentCount: 1, occurrenceCount: 1 });
+  let started = false;
+  await assert.rejects(createProgressivePackageLoader({
+    descriptor,
+    partRow: async () => ({ part: `${sha256("c0")}-v1`, glb: { object: sha256("c0:") }, selectors: {} }),
+    loadComponent: async () => { started = true; return fakeComponent("c0"); },
+    onPublish: () => {},
+  }).run(), /Component c0 has no part row to size its decode by/);
+  assert.equal(started, false);
 });
 
 test("a drained medium package reclaims idle worker memory once and retries unchanged admission", async () => {
@@ -859,7 +902,7 @@ test("a drained medium package reclaims idle worker memory once and retries unch
     descriptor,
     concurrency: 1,
     maxInFlightBytes: 400,
-    sizeHint: async () => 1,
+    partRow: async (cid) => storedRow(cid, 100),
     reserveLoad: ({ estimatedBytes }) => {
       if (completed === 2 && pressureRetained) {
         return {
@@ -909,7 +952,7 @@ test("a denied waiter may reclaim again after an admitted sibling repopulates wo
     descriptor,
     concurrency: 2,
     maxInFlightBytes: 400,
-    sizeHint: async () => 1,
+    partRow: smallRow,
     reserveLoad: ({ cid }) => {
       if (cid === "c0" && (residentPressure || smallInFlight)) {
         return {
@@ -970,7 +1013,7 @@ test("a no-progress recovery is attempted once and reports worker-temporary byte
   const loader = createProgressivePackageLoader({
     descriptor,
     maxInFlightBytes: 400,
-    sizeHint: async () => 1,
+    partRow: async (cid) => storedRow(cid, 100),
     reserveLoad: ({ estimatedBytes }) => ({
       ok: false,
       detail: { category: "workerInFlight", requestedBytes: estimatedBytes * 2 },
@@ -1002,8 +1045,7 @@ test("an oversized component is rejected when the global envelope cannot reserve
     descriptor,
     maxInFlightBytes: 100,
     allowOversizedSingle: true,
-    sizeHint: async () => 2,
-    sourceExpansionRatio: 100,
+    partRow: async (cid) => storedRow(cid, 200),
     loadComponent: async () => {
       started = true;
       return fakeComponent("c0");
@@ -1021,31 +1063,27 @@ test("an oversized component is rejected when the global envelope cannot reserve
   assert.equal(limitations.length, 1);
 });
 
-test("one globally reserved warm oversized decode runs alone and then restores ordinary concurrency", async () => {
+test("a part above the in-flight cap decodes alone, through a reservation of its whole charge, then ordinary concurrency returns", async () => {
   const descriptor = makeDescriptor({ componentCount: 3, occurrenceCount: 3 });
   const policy = createViewerMemoryPolicy({ budgetBytes: 1000, gpuHeadroomBytes: 0 });
-  const warmProbe = { object: "warm-large", byteLength: 50, decodedBytes: 150 };
+  const rows = { c0: storedRow("c0", 200), c1: storedRow("c1", 24), c2: storedRow("c2", 24) };
   const oversizedMayFinish = deferred();
   const oversizedStarted = deferred();
   const started = [];
   const reservations = [];
-  const run = createProgressivePackageLoader({
+  const loader = createProgressivePackageLoader({
     descriptor,
     concurrency: 3,
     maxInFlightBytes: 100,
     allowOversizedSingle: true,
-    sizeHint: async cid => cid === "c0"
-      ? { sourceBytes: null, cacheProbe: warmProbe }
-      : { sourceBytes: 0.1, cacheProbe: null },
-    sourceExpansionRatio: 100,
-    reserveLoad: ({ cid, estimatedBytes, cacheProbe }) => {
-      reservations.push([cid, estimatedBytes, cacheProbe]);
-      return policy.reserve({ category: "workerInFlight",
-        bytes: cacheProbe ? estimatedBytes : estimatedBytes * 2, label: cid });
+    partRow: async (cid) => rows[cid],
+    reserveLoad: ({ cid, estimatedBytes, row }) => {
+      reservations.push([cid, estimatedBytes, row]);
+      return policy.reserve({ category: "workerInFlight", bytes: estimatedBytes, label: cid });
     },
     releaseLoad: token => policy.release(token),
-    loadComponent: async (cid, _component, { estimatedBytes, cacheProbe }) => {
-      started.push([cid, estimatedBytes, cacheProbe]);
+    loadComponent: async (cid, _component, { estimatedBytes, row }) => {
+      started.push([cid, estimatedBytes, row]);
       if (cid === "c0") {
         oversizedStarted.resolve();
         await oversizedMayFinish.promise;
@@ -1053,21 +1091,23 @@ test("one globally reserved warm oversized decode runs alone and then restores o
       return fakeComponent(cid);
     },
     onPublish: () => {},
-  }).run();
+  });
+  const loading = loader.run();
 
   await oversizedStarted.promise;
   await Promise.resolve();
-  assert.deepEqual(started, [["c0", 200, warmProbe]], "no sibling enters while the oversized reservation is live");
-  assert.equal(policy.snapshot().inFlightBytes, 200, "the global ledger owns the exact warm decode estimate");
+  assert.deepEqual(started, [["c0", 200, rows.c0]], "no sibling enters while the oversized reservation is live");
+  assert.equal(policy.snapshot().inFlightBytes, 200, "the global ledger owns the part's whole charge");
   oversizedMayFinish.resolve();
-  await run;
+  await loading;
 
   assert.equal(started.length, 3);
-  assert.deepEqual(reservations[0], ["c0", 200, warmProbe]);
+  assert.deepEqual(reservations[0], ["c0", 200, rows.c0]);
+  assert.equal(loader.peakInFlight(), 2, "the two small parts then decode together");
   assert.equal(policy.snapshot().reservationCount, 0);
 });
 
-test("an oversized decode that outgrows its admitted estimate is not published", async () => {
+test("an oversized decode is held to its own charge: one that outgrows it is not published", async () => {
   const descriptor = makeDescriptor({ componentCount: 1, occurrenceCount: 1 });
   const policy = createViewerMemoryPolicy({ budgetBytes: 1000, gpuHeadroomBytes: 0 });
   const publications = [];
@@ -1076,8 +1116,8 @@ test("an oversized decode that outgrows its admitted estimate is not published",
     descriptor,
     maxInFlightBytes: 100,
     allowOversizedSingle: true,
-    sizeHint: async () => 2,
-    sourceExpansionRatio: 75,
+    // 152 bytes charged; the decode makes 208.
+    partRow: async (cid) => storedRow(cid, 152),
     reserveLoad: ({ cid, estimatedBytes }) => policy.reserve({
       category: "workerInFlight", bytes: estimatedBytes * 2, label: cid,
     }),
@@ -1088,8 +1128,9 @@ test("an oversized decode that outgrows its admitted estimate is not published",
   });
 
   await assert.rejects(loader.run(), error => {
-    assert.equal(error.detail.decodedEstimateBytes, 150);
-    assert.ok(error.detail.actualDecodedBytes > 150);
+    assert.equal(error.detail.decodedEstimateBytes, 152);
+    assert.equal(error.detail.availableBytes, 152, "its own charge, not the in-flight cap");
+    assert.equal(error.detail.actualDecodedBytes, 208);
     return error.code === "VIEWER_MEMORY_LIMIT";
   });
   assert.deepEqual(publications, []);
@@ -1104,7 +1145,7 @@ test("an underestimated component that actually exceeds the cap is never publish
   const loader = createProgressivePackageLoader({
     descriptor,
     maxInFlightBytes: 100,
-    sizeHint: async () => 1,
+    partRow: async (cid) => storedRow(cid, 24),
     loadComponent: async () => fakeComponent("c0", { floats: 40 }),
     onMemoryLimitation: (detail) => limitations.push(detail),
     onPublish: (publish) => publishes.push(publish),
@@ -1116,108 +1157,68 @@ test("an underestimated component that actually exceeds the cap is never publish
   assert.equal(loader.retainedComponentCount(), 0);
 });
 
-test("worker reservation spans decode and is released after success", async () => {
+// A body the store no longer holds is a miss the strict read reports: the loader releases that
+// admission, passes over the body's object on the next ask, and admits what that ask answers.
+test("a body the store no longer holds puts its row's glb.object in the rejected set, and the next ask passes over it", async () => {
   const descriptor = makeDescriptor({ componentCount: 1, occurrenceCount: 1 });
-  const policy = createViewerMemoryPolicy({ budgetBytes: 1000, gpuHeadroomBytes: 100 });
-  const seen = [];
-  await createProgressivePackageLoader({
-    descriptor,
-    maxInFlightBytes: 400,
-    reserveLoad: ({ cid, estimatedBytes }) => policy.reserve({
-      category: "workerInFlight", bytes: estimatedBytes, label: cid,
-    }),
-    releaseLoad: (token) => policy.release(token),
-    loadComponent: async () => {
-      seen.push(policy.snapshot().inFlightBytes);
-      return fakeComponent("c0");
-    },
-    onPublish: () => {},
-  }).run();
-  assert.deepEqual(seen, [100], "unmeasured decode reserves one quarter of the local cap");
-  assert.equal(policy.snapshot().inFlightBytes, 0);
-});
-
-test("the admitted decoded estimate is passed to the component load", async () => {
-  const descriptor = makeDescriptor({ componentCount: 1, occurrenceCount: 1 });
-  const estimates = [];
-  await createProgressivePackageLoader({
-    descriptor,
-    maxInFlightBytes: 400,
-    sizeHint: async () => 5,
-    sourceExpansionRatio: 30,
-    loadComponent: async (_cid, _component, { estimatedBytes }) => {
-      estimates.push(estimatedBytes);
-      return fakeComponent("c0");
-    },
-    onPublish: () => {},
-  }).run();
-  assert.deepEqual(estimates, [150], "worker ownership receives the exact admitted estimate");
-});
-
-test("a stale probed body releases hit admission and retries through cold admission", async () => {
-  const descriptor = makeDescriptor({ componentCount: 1, occurrenceCount: 1 });
-  const probe = { object: "stale", byteLength: 8, decodedBytes: 12 };
-  const hints = [];
+  // The row the store answered, whose body has gone, and the one cadgen derives afresh.
+  const stale = storedRow("c0", 36, "stale");
+  const fresh = storedRow("c0", 152, "fresh");
+  const asks = [];
   const reservations = [];
   const releases = [];
   const loads = [];
   await createProgressivePackageLoader({
     descriptor,
     maxInFlightBytes: 400,
-    sourceExpansionRatio: 10,
-    sizeHint: async (_cid, _component, { rejectedCacheObjects, skipCacheProbes }) => {
-      hints.push({ rejected: [...rejectedCacheObjects], skipCacheProbes });
-      return rejectedCacheObjects.has(probe.object)
-        ? { sourceBytes: 5, cacheProbe: null }
-        : { sourceBytes: null, cacheProbe: probe };
+    // As the viewer asks: the stored row, unless this load has found its body gone.
+    partRow: async (_cid, _component, { rejectedCacheObjects, skipCacheProbes }) => {
+      asks.push({ rejected: [...rejectedCacheObjects], skipCacheProbes });
+      return rejectedCacheObjects.has(stale.glb.object) ? fresh : stale;
     },
-    reserveLoad: ({ estimatedBytes, cacheProbe }) => {
-      reservations.push({ estimatedBytes, cacheProbe });
+    reserveLoad: ({ estimatedBytes, row }) => {
+      reservations.push([estimatedBytes, row]);
       return { ok: true, token: reservations.length };
     },
     releaseLoad: (token) => releases.push(token),
     retryCacheProbeMiss: (error) => error?.code === "TESS_CACHE_PROBE_MISS",
-    loadComponent: async (_cid, _component, { cacheProbe }) => {
-      loads.push(cacheProbe);
-      if (cacheProbe) throw Object.assign(new Error("gone"), { code: "TESS_CACHE_PROBE_MISS" });
+    loadComponent: async (_cid, _component, { row }) => {
+      loads.push(row);
+      if (row === stale) throw Object.assign(new Error("gone"), { code: "TESS_CACHE_PROBE_MISS" });
       return fakeComponent("c0");
     },
     onPublish: () => {},
   }).run();
-  assert.deepEqual(hints, [
+  assert.deepEqual(asks, [
     { rejected: [], skipCacheProbes: false },
-    { rejected: ["stale"], skipCacheProbes: false },
+    { rejected: [stale.glb.object], skipCacheProbes: false },
   ]);
-  assert.deepEqual(reservations.map(({ estimatedBytes }) => estimatedBytes), [20, 100]);
-  assert.deepEqual(loads, [probe, null]);
+  assert.deepEqual(reservations, [[36, stale], [152, fresh]], "each admission charges its own row");
+  assert.deepEqual(loads, [stale, fresh]);
   assert.deepEqual(releases, [1, 2]);
 });
 
 test("changing stale cache rows are bounded before cold admission", async () => {
   const descriptor = makeDescriptor({ componentCount: 1, occurrenceCount: 1 });
-  const hints = [];
-  let probeNumber = 0;
+  const asks = [];
+  let version = 0;
+  const derived = storedRow("c0", 36, "derived");
   const result = await createProgressivePackageLoader({
     descriptor,
     maxInFlightBytes: 400,
-    sizeHint: async (_cid, _component, { skipCacheProbes }) => {
-      hints.push(skipCacheProbes);
-      return skipCacheProbes
-        ? { sourceBytes: 1, cacheProbe: null }
-        : { sourceBytes: null, cacheProbe: {
-            object: `stale-${probeNumber += 1}`,
-            byteLength: 8,
-            decodedBytes: 12,
-          } };
+    // Every ask of the store answers a body that is gone by the time it is read.
+    partRow: async (cid, _component, { skipCacheProbes }) => {
+      asks.push(skipCacheProbes);
+      return skipCacheProbes ? derived : storedRow(cid, 36, `stale-${version += 1}`);
     },
     retryCacheProbeMiss: (error) => error?.code === "TESS_CACHE_PROBE_MISS",
-    loadComponent: async (_cid, _component, { cacheProbe }) => {
-      if (cacheProbe) throw Object.assign(new Error("gone"), { code: "TESS_CACHE_PROBE_MISS" });
+    loadComponent: async (_cid, _component, { row }) => {
+      if (row !== derived) throw Object.assign(new Error("gone"), { code: "TESS_CACHE_PROBE_MISS" });
       return fakeComponent("c0");
     },
     onPublish: () => {},
   }).run();
-  assert.deepEqual(hints, [false, false, true]);
+  assert.deepEqual(asks, [false, false, true]);
   assert.equal(result.loaded, 1);
 });
 
@@ -1229,6 +1230,7 @@ test("a transient global miss waits for admitted work and leaves no stale limita
     descriptor,
     concurrency: 5,
     maxInFlightBytes: 400,
+    partRow: async (cid) => storedRow(cid, 100),
     reserveLoad: ({ cid, estimatedBytes }) => policy.reserve({
       category: "workerInFlight",
       bytes: estimatedBytes,
@@ -1243,5 +1245,5 @@ test("a transient global miss waits for admitted work and leaves no stale limita
   assert.equal(result.loaded, 5);
   assert.equal(policy.snapshot().lastLimitation, null);
   assert.equal(policy.snapshot().reservationCount, 0);
-  assert.ok(loader.peakInFlight() <= 2, "the global 200-byte owned limit admits two 100-byte estimates");
+  assert.ok(loader.peakInFlight() <= 2, "the global 200-byte owned limit admits two 100-byte parts");
 });

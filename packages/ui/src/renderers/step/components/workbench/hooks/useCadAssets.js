@@ -30,7 +30,6 @@ import {
 import {
   createProgressivePackageLoader,
   orderComponentsForProgressiveLoad,
-  PROGRESSIVE_LOAD_MAX_INFLIGHT_BYTES,
   progressiveLoadProgress,
   publishMeshCostAccounting,
   awaitingSameFileRevision,
@@ -524,7 +523,6 @@ export function useCadAssets({
         const pastFirstBodyRead = new Promise((resolve) => { firstBodyRead = resolve; });
         const initialPlans = createInitialDisplayPlans({
           components: readOrder,
-          maxInFlightBytes: PROGRESSIVE_LOAD_MAX_INFLIGHT_BYTES,
           signal: controller.signal,
           readAheadAfter: pastFirstBodyRead,
           probeEntries: (parts, options) => tessellationCache.probeCachedTessellationEntries(parts, options),
@@ -585,19 +583,17 @@ export function useCadAssets({
             && !error.replacementView && error.cid === cid,
           // The part's stored mesh, as cadgen made it. Same meshData contract as the
           // component GLB this replaced.
-          loadComponent: async (cid, _component, { estimatedBytes, cacheProbe }) => {
-            const row = componentIdentityByCid.get(cid);
-            if (!row) throw new Error(`Component ${cid} has no part record`);
+          loadComponent: async (cid, _component, { estimatedBytes, row }) => {
             // A warm body comes from its batch; null leaves the read to the worker, as before.
             let tessellationEntry = null;
             try {
-              if (cacheProbe) tessellationEntry = await bodyBatches.take(cid, cacheProbe);
+              tessellationEntry = await bodyBatches.take(cid, row);
             } finally {
               firstBodyRead();
             }
             return loadRenderSurf({
               resources, tessellationCache, signal: controller.signal,
-              identity: { part: row.part, tessellationProbe: cacheProbe || row,
+              identity: { part: row.part, tessellationProbe: row,
                 ...(tessellationEntry ? { tessellationEntry } : {}) },
               memoryEstimateBytes: estimatedBytes,
             });
@@ -605,7 +601,7 @@ export function useCadAssets({
           // Byte-aware admission: every component is sized by its part's record before its decode
           // is admitted -- a warm one's from the package's probe, a cold one's from the request that
           // had cadgen derive it.
-          sizeHint: async (cid, component, {
+          partRow: async (cid, component, {
             rejectedCacheObjects = new Set(),
             skipCacheProbes = false,
           } = {}) => {
@@ -616,7 +612,6 @@ export function useCadAssets({
             const cached = skipCacheProbes ? null : afresh
               ? await probeInitialDisplay({ tessellationCache,
                 part: component.part,
-                maxInFlightBytes: PROGRESSIVE_LOAD_MAX_INFLIGHT_BYTES,
                 signal: controller.signal,
                 rejectedCacheObjects,
               })
@@ -624,7 +619,7 @@ export function useCadAssets({
             if (cached) {
               prewarmForBatches();
               componentIdentityByCid.set(cid, cached.cacheProbe);
-              return { sourceBytes: null, cacheProbe: cached.cacheProbe };
+              return cached.cacheProbe;
             }
             // Cold: the request has cadgen derive the part, and answers with its record. A retry
             // after a missing body asks again, alone, so a part the store lost is derived anew.
@@ -632,10 +627,9 @@ export function useCadAssets({
               ? (await resolveSurfaceComponents(packageDescriptor, [{ cid, part: component.part }],
                 { client, signal: controller.signal })).get(cid)
               : await surfaceTickets.ticket(cid, component);
-            const plan = producedDisplayPlan(row, { maxInFlightBytes: PROGRESSIVE_LOAD_MAX_INFLIGHT_BYTES });
-            if (!plan) throw new Error(`Component ${cid} has no display mesh`);
+            if (!producedDisplayPlan(row)) throw new Error(`Component ${cid} has no display mesh`);
             componentIdentityByCid.set(cid, row);
-            return { sourceBytes: null, cacheProbe: row };
+            return row;
           },
           reserveLoad: ({ cid, estimatedBytes }) => viewerMemoryPolicy.reserve({
             category: "workerInFlight",
