@@ -105,7 +105,7 @@ export function createCompletedPackageCache({ maxEntries = MAX_PACKAGES, maxByte
         // No cached occurrence/material objects are handed to the scene. This
         // composition is cheap and retains the exact component arrays.
         return { ...data, entry, file: entry.file, meshHash: entryMeshAssetSignature(entry),
-          meshUrl: entryAssetUrl(entry, "glb"), complete: true, publishCount: 1,
+          meshUrl: entryAssetUrl(entry, "glb"), complete: true,
           meshData: buildComposedPackageMeshData(data.descriptor, data.componentMeshDataByCid) };
       } catch {
         entries.delete(key(client, entry));

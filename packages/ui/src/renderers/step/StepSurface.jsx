@@ -29,7 +29,7 @@ import { viewportMenuEntries } from "./components/workbench/AssemblyContextMenuI
 import { ALL_VIEW_FEATURES } from "@text-to-cad/core/common/viewSettings.js";
 import { useModelTools } from "./components/workbench/ModelTools.jsx";
 import { useStepPanels } from "./components/workbench/StepPanels.js";
-import { stepMotionSources, useStepMotion } from "./workbench/useStepMotion.js";
+import { useStepMotion } from "./workbench/useStepMotion.js";
 import { animationControlsHaveContent } from "../kit/tools/playbar/ViewportAnimationBar.js";
 import { useCadAssets } from "./components/workbench/hooks/useCadAssets.js";
 import { useEditingPreview } from "./components/workbench/hooks/useEditingPreview.js";
@@ -367,10 +367,6 @@ function StepSurfaceBody({ view, data }) {
   // What this file's view opts into: a B-rep model takes every Display section, preset and
   // surface style. The shell configures the store with it (`features`).
   const viewFeatures = ALL_VIEW_FEATURES;
-  // Where this entry's motion comes from; the motion itself is `useStepMotion`'s, below.
-  const {
-    moduleUrl: selectedStepModuleUrl, sourceAnimation: selectedSourceAnimation, animationKey: selectedAnimationSourceKey
-  } = stepMotionSources(selectedEntry);
   const selectedEntryHasMesh = entryHasMesh(selectedEntry);
   const selectedEntryHasReferences = entryHasReferences(selectedEntry);
   // The selected entry's render artifact is (re)building -> show the loading state. Replaces the

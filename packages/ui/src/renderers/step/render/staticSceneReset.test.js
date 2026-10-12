@@ -115,7 +115,7 @@ const visualState = () => ({ hiddenPartIds: [], selectedPartIds: [], hoveredPart
 const topology = { edges: [{ occurrenceId: "a1", segmentStart: 0, segmentCount: 1 }],
   proxy: { edgePositions: new Float32Array([0, 0, 0, 1, 0, 0]), edgeIndices: new Uint32Array([0, 1]), edgeIds: new Uint32Array([0]) } };
 function sceneFixture(source) {
-  const scene = buildModel(THREE, source, { renderPartsIndividually: true, parameterSetup: false });
+  const scene = buildModel(THREE, source, { renderPartsIndividually: true });
   const runtime = { THREE, cadScene: scene, displayRecords: scene.displayRecords, activeModelKey: "test.step",
     modelGroup: scene.modelGroup, edgesGroup: scene.edgesGroup, modelBounds: scene.bounds, requestRender() {} };
   return { scene, runtime, tracker: createStaticSceneReset(), dispose() {
@@ -191,7 +191,7 @@ test("actual prop-only visual and section-clip changes still apply after a compl
     publish(optimized, source, visual, clip, true); publish(optimized, source, visual, clip, true);
     publish(control, source, visual, clip, false);
     for (const [nextVisual, nextClip] of [[{ ...visual, hiddenPartIds: ["a1"], selectedPartIds: ["a2"] }, clip],
-      [visual, { enabled: true, axis: "y", offsets: { y: .2 }, invert: true }]]) {
+      [visual, { enabled: true, axis: "y", at: .2, invert: true }]]) {
       const token = {}; optimized.tracker.beginRender(token, true);
       assert.equal(optimized.tracker.consume(token, { source, runtime: optimized.runtime,
         visualState: nextVisual, clipState: nextClip }), false);

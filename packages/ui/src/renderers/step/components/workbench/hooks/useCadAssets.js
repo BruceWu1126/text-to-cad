@@ -731,7 +731,6 @@ export function useCadAssets({
             }
             packageRef.current.componentIdentityByCid = Object.fromEntries(componentIdentityByCid);
             const publishedCtx = packageRef.current;
-            publishedCtx.publishCount = publishCount;
             publishedCtx.meshHash = nextState.meshHash;
             syncDisplayedMemory(publishedCtx.componentMeshDataByCid);
             displayedPackageRef.current = final ? publishedCtx : null;
@@ -1005,12 +1004,8 @@ export function useCadAssets({
         const nextComposition = {
           file: entry.file,
           meshHash: getAssemblyMeshHash(entry),
-          entry,
-          occurrencesToLoad: composedOccurrences,
-          bundleByCid: componentBundleByCid,
           loadedTopologyKey: publishedTopologyKey,
-          loadedTopologyIds: publishedTopologyIds,
-          isSingleComponentPart
+          loadedTopologyIds: publishedTopologyIds
         };
         referenceCompositionRef.current = nextComposition;
         const displayed = matchingDisplayedPackageContext(displayedPackageRef.current, meshStateRef.current, entry.file);

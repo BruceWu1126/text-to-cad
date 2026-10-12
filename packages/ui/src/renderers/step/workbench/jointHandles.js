@@ -33,7 +33,6 @@ import {
   length,
   normalize,
   rotateAboutAxis,
-  scale,
   subtract
 } from "../../kit/tools/pose/jointHandleMath.js";
 

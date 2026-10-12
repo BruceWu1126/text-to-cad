@@ -112,8 +112,6 @@ export function useStepMotion({ entry, fileKey, resources, readStored, clipboard
   const [appliedPoseName, setAppliedStepPoseName] = useState("");
 
   useEffect(() => {
-    let cancelled = false;
-    const controller = new AbortController();
     if (!moduleUrl) {
       setStepModuleLoadState({
         url: "",
@@ -124,11 +122,9 @@ export function useStepMotion({ entry, fileKey, resources, readStored, clipboard
       });
       stepModuleParameterValuesRef.current = {};
       setStepModuleParameterValues({});
-      return () => {
-        cancelled = true;
-        controller.abort();
-      };
+      return undefined;
     }
+    let cancelled = false;
 
     // The same file's sidecar read again keeps the last one's definition and values in hand
     // (above) while it loads; only a first load starts from nothing.
@@ -193,7 +189,6 @@ export function useStepMotion({ entry, fileKey, resources, readStored, clipboard
 
     return () => {
       cancelled = true;
-      controller.abort();
     };
   }, [fileKey, entry, moduleUrl]);
 

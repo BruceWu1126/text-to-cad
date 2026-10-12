@@ -286,9 +286,9 @@ function harnessBundle() {
  *
  * @param {{ after: (cleanup: () => unknown) => void }} lifetime — a test context, or
  *   any object with its `after`, so one server and one browser can span a whole file.
- * @param {{ onRequest?: (url: URL, request: import('node:http').IncomingMessage) => void,
- *   progressive?: boolean }} [options]  `progressive` serves the twenty-five-component
- *   staging (`stageProgressiveFixture`) and HOLDS each batch after the first until
+ * @param {{ progressive?: boolean, singlePart?: boolean, warmCache?: boolean }} [options]
+ *   `progressive` serves the twenty-five-component staging (`stageProgressiveFixture`) and
+ *   HOLDS each batch after the first until
  *   `release(gate)` is called, so the package's three publishes are a test's to place
  *   rather than a race; `declare(false)` then serves its descriptor without the `bbox` it
  *   declares. `singlePart` serves the base alone as a cadgen single-part STEP
@@ -296,7 +296,7 @@ function harnessBundle() {
  *   store that already holds every component's display mesh (`meshStore`); without it the
  *   store is cold, and a component's mesh is made when its surface request asks for it.
  */
-export async function serveStepHarness(t, { onRequest, progressive = false, singlePart = false, warmCache = false } = {}) {
+export async function serveStepHarness(t, { progressive = false, singlePart = false, warmCache = false } = {}) {
   const loaded = await loadStepFixture();
   const fixture = progressive ? stageProgressiveFixture(loaded) : singlePart ? stageSinglePartFixture(loaded) : loaded;
   const meshes = await meshStore(fixture, { warm: warmCache });
@@ -344,7 +344,6 @@ export async function serveStepHarness(t, { onRequest, progressive = false, sing
       answering.delete(response);
       if (!answering.size) for (const done of idlers.splice(0)) done();
     });
-    onRequest?.(url, request);
     if (url.pathname === '/harness.js') { response.setHeader('Content-Type', 'text/javascript'); response.end(bundle); return; }
     if (url.pathname === '/styles.css') { response.setHeader('Content-Type', 'text/css'); response.end(css); return; }
     if (url.pathname === '/harness.css') { response.setHeader('Content-Type', 'text/css'); response.end(bundledCss); return; }
@@ -487,6 +486,6 @@ export async function serveStepHarness(t, { onRequest, progressive = false, sing
     }, timeout);
     idlers.push(done);
   });
-  return { open, closePages, requests, idle, fixture, entry, revise, port: () => server.address().port, release: gate => { closed.delete(gate); }, hold,
+  return { open, closePages, requests, idle, fixture, release: gate => { closed.delete(gate); }, hold,
     declare: on => { declaring = on !== false; } };
 }

@@ -274,7 +274,6 @@ export function useStepSceneSync(layers) {
         edgeSettings: visualEdgeSettings,
         recomputeNormals: false,
         silhouette: topologyDisplayEdgesVisible && displayEdgeSettings.silhouette === true,
-        parameterSetup: false,
         edgeRendering: {
           mode: "screen-space",
           Line2: runtime.Line2,

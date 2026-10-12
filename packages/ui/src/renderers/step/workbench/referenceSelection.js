@@ -66,8 +66,8 @@ export function buildNormalizedReferenceState(entry, referencePayload = null, {
   // per-component runtimes and passes the result here instead of a single bundle to parse.
   const selectorRuntime = prebuiltSelectorRuntime || buildSelectorRuntime(referencePayload, {
     // fileRefPrefix is the file's absolute path (the view's), extension
-    // included -- which is why cadPathForEntry (which strips it) is NOT used here. An entry
-    // without the field emits bare "#...", so the prefix is opt-in per call site.
+    // included. An entry without the field emits bare "#...", so the prefix is
+    // opt-in per call site.
     copyCadPath: copyCadPath || fileRefPrefixForEntry(entry),
     partId,
     transform,

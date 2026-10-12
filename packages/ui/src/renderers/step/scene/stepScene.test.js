@@ -46,7 +46,7 @@ test("progressive publishes land in ONE scene identity: the roots and the record
   assert.equal(scene.displayRecords[0], firstRecord, "an occurrence on screen keeps its record");
   assert.deepEqual([scene.object3D, scene.edgesObject3D], roots);
   assert.equal(scene.placedObjects(), scene.displayRecords, "the depth fit is told about the records themselves");
-  assert.equal(scene.source, whole);
+  assert.equal(scene.cadScene.source, whole, "the live build holds the publish");
   assert.deepEqual(sceneFramingBounds(scene), bounds);
   scene.dispose();
 });

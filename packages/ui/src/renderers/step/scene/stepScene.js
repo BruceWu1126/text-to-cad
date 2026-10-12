@@ -98,7 +98,6 @@ export function createStepScene(THREE) {
     edgesObject3D,
     overlayObject3D,
     get cadScene() { return cadScene; },
-    get source() { return cadScene?.source || null; },
     get displayRecords() { return cadScene?.displayRecords || EMPTY_RECORDS; },
     /** As posed now: what lighting, shadows and the floor's height follow. */
     get bounds() { return cadScene?.bounds || cadScene?.source?.bounds || EMPTY_BOUNDS; },
