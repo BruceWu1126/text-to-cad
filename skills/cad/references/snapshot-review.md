@@ -14,6 +14,12 @@ view can draw: the snapshot still writes its image and warns that the model has
 no surfaces. A view or list that warns faces `could not be meshed` draws that part
 without them (and a list counts it without them); they are usually slivers a
 boolean left, and the warning names the part's ref and the faces (`#o1.2`, `f7`).
+A part that `could not be meshed` at all, as the build warned, is left out: the
+view draws the rest of the model and the list lists the rest, each warning with the
+part's ref and the reason (`#o1.2 peg could not be meshed (...)`). The image or list
+is then not the whole model. A view or list of nothing else (every part it focuses
+on, or every one it does not hide) fails, naming them. Without `--json`, warnings
+print on stderr.
 
 ## Views
 

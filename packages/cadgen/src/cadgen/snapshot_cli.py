@@ -1046,19 +1046,28 @@ def resolve_step_render_job(
         raise SnapshotError(
             "STEP/STP render input changed while its topology was being resolved; retry the snapshot"
         )
+    from cadgen.assembly_lookup import assembly_occurrence_rows
+    from cadgen.snapshot_parts import fail_if_nothing_left, failed_parts, filter_occurrences
+
     if job["mode"] == "list":
         # The parts are cadgen's facts: the rows every ref resolves against, the
         # store's exact boxes and its stored meshes' counts (cadgen.snapshot_parts).
         # Nothing is drawn, so no browser starts.
-        from cadgen.assembly_lookup import assembly_occurrence_rows
-        from cadgen.snapshot_parts import filter_occurrences, list_rows, unmeshed_warnings
+        from cadgen.snapshot_parts import failed_part_warnings, list_rows, unmeshed_warnings
 
         try:
-            parts = list_rows(descriptor, package_dir, selection=normalized_selection)
             listed = filter_occurrences(assembly_occurrence_rows(descriptor, None), normalized_selection)
         except ValueError as error:
             raise SnapshotError(str(error)) from None
-        warnings = unmeshed_warnings(descriptor, listed, "its triangle count leaves {them} out")
+        # A part no mesh could be made of is not listed, and the list says so; a list of
+        # nothing else fails, naming it.
+        fail_if_nothing_left(descriptor, listed)
+        try:
+            parts = list_rows(descriptor, package_dir, selection=normalized_selection)
+        except ValueError as error:
+            raise SnapshotError(str(error)) from None
+        warnings = [*failed_part_warnings(descriptor, listed, "the list leaves {them} out"),
+                    *unmeshed_warnings(descriptor, listed, "its triangle count leaves {them} out")]
         if warnings:
             resolved["warnings"] = warnings
         if debug_enabled:
@@ -1069,6 +1078,15 @@ def resolve_step_render_job(
         return resolved_job
     from cadgen.snapshot_parts import has_surfaces
 
+    if failed_parts(descriptor):
+        # The page leaves out a part no mesh could be made of, and the view says so once it
+        # has drawn (snapshot_core). A view of nothing else -- of the parts it focuses on, or
+        # of every part it does not hide -- fails, naming them, as a list of them does.
+        try:
+            shown = filter_occurrences(assembly_occurrence_rows(descriptor, None), normalized_selection)
+        except ValueError:
+            shown = []  # a selection that keeps nothing is the page's to refuse, as it always was
+        fail_if_nothing_left(descriptor, shown)
     if not has_surfaces(descriptor):
         # A true answer, and one nobody would guess from a blank PNG.
         resolved["warnings"] = ["this model has no surfaces to draw: it is empty, or only curves and points"]

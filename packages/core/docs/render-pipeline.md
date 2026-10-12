@@ -307,8 +307,11 @@ Accepted input fields:
 - `package` or `resolved.package`: the document's tree (`descriptor`, as cadgen serves
   it for display) and, off a static host, each component's mesh file (`meshUrls`,
   which `packageSourceFromBaseUrl` maps from a package directory). Each component is
-  drawn from its part's stored mesh, composed in world space. A snapshot job always
-  carries one.
+  drawn from its part's stored mesh, composed in world space. A component cadgen
+  could not mesh carries why (`failure`) and is left out on its own, as the viewer's
+  progressive loader leaves out a component whose part failed (`componentFailed`):
+  the rest are drawn, and only when every component failed is the first failure the
+  load's. A snapshot job always carries one.
 - `meshData`: already-loaded mesh data, in place of a package.
 - `cadPath` or `resolved.inputPath`: CAD path used by STEP selectors.
 - `selectorRuntime`: a selector runtime the caller already holds; `loadSource`

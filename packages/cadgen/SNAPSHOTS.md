@@ -148,6 +148,18 @@ that face, never refused: the list and the view each add a warning naming the
 part's occurrences and the faces (`cadgen.snapshot_parts.unmeshed_warnings`,
 asked once the page has drawn).
 
+A part no mesh could be made of at all -- the store has no display data for it and
+the build-pool job that derives it fails -- is left out, as the CAD Viewer leaves it
+out: the view's component says why (`failure`, `cadgen.store.view`), the page draws
+every other part, and the list lists them. Each adds a warning naming the part's
+occurrences and why, in the words the build warned with
+(`#o1.2 peg could not be meshed (MeshProductionError: ...), so the view does not draw it`;
+`cadgen.snapshot_parts.failed_part_warnings`), and the snapshot exits 0, as for any
+warning. Where every part a view or a list shows -- each one `--focus` names, else each
+one `--hide` leaves -- is such a part, there is nothing to show: it fails, naming them,
+as a snapshot of a model none of whose parts could be meshed does. A mesh export never
+leaves a part out: its file is not written.
+
 Without `--json`, a warning prints on stderr, one `warning:` line each, so stdout
 carries the saved paths, or a list's inventory, alone.
 

@@ -121,7 +121,19 @@ async function loadPackageMeshData(packageInfo, diagnostics = null, tessellation
   const meshUrls = isObject(packageInfo.meshUrls) ? packageInfo.meshUrls : {};
   const components = isObject(descriptor.components) ? descriptor.components : {};
   const componentMeshDataByCid = {};
-  const cids = Object.keys(components);
+  // A component cadgen could not mesh carries why (`failure`, cadgen.store.view): it settles
+  // on its own and is left out, as the viewer's loader leaves out a component whose part
+  // failed (`componentFailed`), and every other component is drawn. When every component
+  // failed there is nothing to draw, and the first failure is the load's.
+  const failures = Object.keys(components)
+    .filter((cid) => String(components[cid]?.failure || "").trim())
+    .map((cid) => ({ cid, error: new Error(
+      `Assembly package component ${cid} could not be meshed (${String(components[cid].failure).trim()})`) }));
+  const failed = new Set(failures.map(({ cid }) => cid));
+  const cids = Object.keys(components).filter((cid) => !failed.has(cid));
+  if (failures.length && !cids.length) {
+    throw failures[0].error;
+  }
   // Each component names its part: the key its display mesh is read by.
   const partOf = (cid) => String(components[cid]?.part || "");
   if (diagnostics) diagnostics.componentCount = cids.length;

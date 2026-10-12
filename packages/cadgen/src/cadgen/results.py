@@ -224,7 +224,7 @@ class SnapshotResult:
     parts: tuple[dict, ...] = ()
     #: Non-fatal notes from the renderer (an unresolved selector, a clamped
     #: frame budget, a part drawn or counted without the faces no mesher could
-    #: cover). ``ok`` stays true.
+    #: cover, a part no mesh could be made of, left out). ``ok`` stays true.
     warnings: tuple[str, ...] = ()
     timings: SnapshotTimings = field(default_factory=SnapshotTimings)
     #: ``--debug`` only: artifact resolution and measured browser stages,
