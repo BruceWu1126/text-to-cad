@@ -254,6 +254,11 @@ class SurfaceSubscribers:
 
                 replacement = resolve_artifact({"kind": "producer"})
                 if parts.producer_key(replacement) != parts.producer_key(operation["producer"]):
+                    from cadgen.store.view import note_replaced_producer
+
+                    # The next view of any document hinting the refused producer starts under
+                    # this one (and re-attests it), instead of a refused job per part per open.
+                    note_replaced_producer(operation["producer"], replacement)
                     response["replacementView"] = descriptor_for_view(operation["tree"], producer=replacement)
                     for cid in missing:
                         response["components"][cid]["code"] = "producer-unavailable"

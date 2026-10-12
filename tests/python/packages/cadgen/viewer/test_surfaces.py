@@ -238,6 +238,55 @@ class SurfaceRequests(unittest.TestCase):
         self.assertEqual(result["replacementView"]["components"][self.cid]["part"], self.part)
         self.assertEqual(result["components"][self.cid]["code"], "producer-unavailable")
 
+    def test_a_refused_hint_is_replaced_on_the_documents_next_view(self):
+        """A kernel upgrade: the document's hint names a producer no worker implements. The
+        first view pays one refused job; the next view of the document starts under the
+        replacement, starts no job, and the document is re-attested with it."""
+        from cadgen.store import view
+        from cadgen.store.records import document_entry_for_hash, note_document_tree
+
+        self.addCleanup(view._REPLACED.clear)
+        parts.derive(self.tree)
+        old = {**self.producer, "build123d": "0.0.1"}
+        digest = "e" * 64
+        note_document_tree(digest, self.tree, surface_producer=old)
+        old_view = descriptor_for_view(self.tree, document_hash=digest)
+        self.assertNotEqual(old_view["viewId"], self.view["viewId"])
+        request = {**self.request, "viewId": old_view["viewId"], "producer": old,
+                   "components": [{"cid": self.cid, "part": old_view["components"][self.cid]["part"]}]}
+        future = SubscriberFuture()
+        future.set_exception(ValueError("worker cannot implement the request's pinned surface producer"))
+        with mock.patch("cadgen.daemon.artifacts.submit_artifact", return_value=future), \
+             mock.patch("cadgen.daemon.artifacts.resolve_artifact", return_value=self.producer):
+            self.assertIn("replacementView", self.resolve(request))
+        with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=AssertionError("unexpected job")), \
+             mock.patch("cadgen.daemon.artifacts.resolve_artifact", side_effect=AssertionError("unexpected job")):
+            again = descriptor_for_view(self.tree, document_hash=digest)
+        self.assertEqual(again["viewId"], self.view["viewId"])
+        self.assertEqual(document_entry_for_hash(digest)["surfaceProducer"], self.producer)
+
+    @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0), "POSIX permissions")
+    def test_a_view_of_a_hintless_document_never_writes_a_read_only_store(self):
+        """README law 2: a read never writes the store. A document entry with no hint is
+        viewed from a read-only store as from a writable one."""
+        from cadgen.store.records import document_entry_for_hash, note_document_tree
+
+        parts.derive(self.tree)
+        digest = "f" * 64
+        note_document_tree(digest, self.tree)
+        store = self.root / "store"
+        before = {path: path.read_bytes() for path in store.rglob("*") if path.is_file()}
+        subprocess.run(["chmod", "-R", "a-w", str(store)], check=True)
+        self.addCleanup(subprocess.run, ["chmod", "-R", "u+w", str(store)], check=True)
+        with mock.patch("cadgen.daemon.artifacts.resolve_artifact", return_value=self.producer):
+            descriptor = descriptor_for_view(self.tree, document_hash=digest)
+            from cadgen.store.view import materialize_parts
+            _view, records = materialize_parts(descriptor)
+        self.assertEqual(descriptor["viewId"], self.view["viewId"])
+        self.assertEqual(set(records), {self.cid})
+        self.assertNotIn("surfaceProducer", document_entry_for_hash(digest))
+        self.assertEqual({path: path.read_bytes() for path in store.rglob("*") if path.is_file()}, before)
+
     def test_expired_subscriber_is_detached_and_not_reused(self):
         future = SubscriberFuture()
         with mock.patch("cadgen.daemon.artifacts.submit_artifact", return_value=future):

@@ -20,6 +20,7 @@ a page reads its display mesh and selector table by.
 from __future__ import annotations
 
 import atexit
+import contextlib
 import json
 import os
 import shutil
@@ -37,9 +38,51 @@ COMPONENT_DIRNAME = "components"
 SELECTOR_TABLE_SUFFIX = ".selectors.json"
 
 
+# The producers this process found no worker implements, each with the one that replaced it
+# (``materialize_parts``, the CAD Viewer's surface jobs). A view of a document whose hint names
+# one starts under its replacement, and re-attests the document, instead of paying one refused
+# job per part again on every open (a kernel upgrade).
+_REPLACED: dict[str, dict] = {}
+_REPLACED_LOCK = threading.Lock()
+
+
+def note_replaced_producer(previous: dict, current: dict) -> None:
+    """``previous`` cannot be implemented here; ``current`` replaced it."""
+    from cadgen.store import parts
+
+    with _REPLACED_LOCK:
+        _REPLACED[parts.producer_key(parts.producer_fields(previous))] = parts.producer_fields(current)
+
+
+def _replacement_for(producer: dict) -> dict | None:
+    from cadgen.store import parts
+
+    found, seen = None, set()
+    with _REPLACED_LOCK:
+        key = parts.producer_key(producer)
+        while key in _REPLACED and key not in seen:
+            seen.add(key)
+            found = _REPLACED[key]
+            key = parts.producer_key(found)
+    return found
+
+
+def _attest(document_hash: str, tree_hash: str, producer: dict) -> None:
+    """Record ``producer`` as the document's hint while the document still selects
+    ``tree_hash``. Best effort: no read needs it, and a store this process cannot write
+    keeps the hint it has (README law 2: a read never writes the store)."""
+    from cadgen.store.paths import StoreUnwritableError
+    from cadgen.store.records import document_entry_for_hash, note_document_tree
+
+    with contextlib.suppress(OSError, StoreUnwritableError):
+        current = document_entry_for_hash(document_hash)
+        if current is not None and current.get("tree") == tree_hash:
+            note_document_tree(document_hash, tree_hash, surface_producer=producer)
+
+
 def _select_producer(tree_hash: str, producer: dict | None, document_hash: str | None) -> dict:
     from cadgen.store import parts
-    from cadgen.store.records import document_entry_for_hash, note_document_tree
+    from cadgen.store.records import document_entry_for_hash
 
     selected = producer
     if document_hash:
@@ -51,14 +94,16 @@ def _select_producer(tree_hash: str, producer: dict | None, document_hash: str |
                 selected = parts.producer_fields(entry.get("surfaceProducer"))
             except (ValueError, TypeError):
                 selected = None
+            replacement = _replacement_for(selected) if selected is not None else None
+            if replacement is not None:
+                selected = replacement
+                _attest(document_hash, tree_hash, selected)
     if selected is None:
         from cadgen.daemon.artifacts import resolve_artifact
 
         selected = resolve_artifact({"kind": "producer"})
         if document_hash:
-            current = document_entry_for_hash(document_hash)
-            if current is not None and current.get("tree") == tree_hash:
-                note_document_tree(document_hash, tree_hash, surface_producer=selected)
+            _attest(document_hash, tree_hash, selected)
     return parts.producer_fields(selected)
 
 
@@ -128,16 +173,14 @@ def materialize_parts(descriptor: dict, cids: list[str] | None = None) -> tuple[
             current = resolve_artifact({"kind": "producer"})
             if parts.producer_key(current) == parts.producer_key(producer):
                 raise
+            note_replaced_producer(producer, current)
             # Static exports have no displayed revision to retain. Prepare a
             # whole new owned view; never mix an old mesh with new selectors.
             replacement = descriptor_for_view(tree, producer=current, document_hash=descriptor.get("documentHash"))
             if replacement is None:
                 raise FileNotFoundError("geometry disappeared during surface producer replacement") from error
             if descriptor.get("documentHash"):
-                from cadgen.store.records import document_entry_for_hash, note_document_tree
-                entry = document_entry_for_hash(descriptor["documentHash"])
-                if entry is not None and entry.get("tree") == tree:
-                    note_document_tree(descriptor["documentHash"], tree, surface_producer=current)
+                _attest(descriptor["documentHash"], tree, current)
             return materialize_parts(replacement, cids)
         records = stored_parts(descriptor, wanted)
     if any(cid not in records for cid in wanted):
