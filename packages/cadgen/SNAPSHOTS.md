@@ -148,6 +148,9 @@ that face, never refused: the list and the view each add a warning naming the
 part's occurrences and the faces (`cadgen.snapshot_parts.unmeshed_warnings`,
 asked once the page has drawn).
 
+Without `--json`, a warning prints on stderr, one `warning:` line each, so stdout
+carries the saved paths, or a list's inventory, alone.
+
 ## Sizes
 
 An output is sized by `--size-profile` (`output.sizeProfile`) — `simple`
