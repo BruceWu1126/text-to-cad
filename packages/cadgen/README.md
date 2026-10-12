@@ -221,8 +221,15 @@ call both from `__main__`; every flag must mean the same thing for each.
 
 ### 8. No backwards compatibility
 
-Hard cutovers only. Every retired surface fails loudly with a teaching
-error naming its replacement — never an alias, never a shim.
+Hard cutovers only. A retired surface does not exist: no alias, no shim, and
+no error that recognizes its old spelling to explain what replaced it. A
+removed command, flag, argument, key, module or name gets what the current
+contract's ordinary validation says — an unknown command, an unrecognized
+argument, an unknown key, an `ImportError`. A version-gated refusal (a sidecar
+written to another schema) states what is required and the remedy, never what
+changed.
+*Pressure-test*: use a removed spelling; the error must read exactly as it
+would for a name that never existed.
 
 The explicit exception is `cadgen.assembly.AssemblyHelper`: it is softly
 deprecated and still works. Construction emits a visible `FutureWarning`
@@ -232,8 +239,8 @@ This does not change geometry, model freshness or child sharing.
 
 ### 9. Closed vocabularies
 
-Every declaration surface has a closed key/kind set. Unknown keys are
-teaching errors, never silently ignored.
+Every declaration surface has a closed key/kind set. An unknown key is an
+error naming the supported set, never silently ignored.
 
 ### 10. Loud failure or correct output, nothing between
 
