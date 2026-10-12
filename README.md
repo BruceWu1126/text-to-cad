@@ -59,6 +59,7 @@ Or install it yourself:
 The plugin for your agent app brings the skills and CAD's viewer, a local server
 (`cadgen mcp`). For an agent without a plugin, install the skills alone. Install
 one or the other in an app, not both: two copies means every skill twice.
+[One copy per app](#one-copy-per-app) says how to find and remove an extra copy.
 
 The install commands below take the `latest` branch: it holds the plugin alone
 and gets each release once it is on PyPI. `main`, where development happens,
@@ -262,6 +263,68 @@ installs with `npx skills remove cad-viewer cad-mcp-setup`.
 
 No plugin for your agent yet?
 [Request one](https://github.com/earthtojake/text-to-cad/issues/new?title=Plugin%20request%3A%20).
+
+### One copy per app
+
+An app should load one copy of text-to-cad. With two, every skill shows up twice
+and the app may run the older copy's CAD server. An extra copy comes from
+installing from more than one place: an app's plugin directory and the commands
+above, the plugin and the skills alone, or another app's install that this app
+also loads.
+
+Keep the copy with the newest version, remove the others, then restart the app.
+If two copies have the same version, keep the plugin rather than the skills
+alone, since the plugin also brings CAD's app. The commands above install
+`latest`, the newest release. So when a plugin directory's copy is behind, or
+the only plugin is older than loose skills, swap it for the plugin installed
+from those commands. That keeps the newest version and the app.
+
+Where each app loads a copy from, and how to remove one:
+
+- **Claude Code**: plugins in `claude plugin list`, and skills in `~/.claude/skills`
+  and the project's `.claude/skills`. Remove a plugin with
+  `claude plugin uninstall <id>`. Remove the copy from claude.ai's directory,
+  `text-to-cad@synced`, on claude.ai. While another copy is enabled, Claude Code
+  skips this one, even when it is the newer copy.
+- **Codex**: plugins in `codex plugin list`, the plugin directory's copy included,
+  and skills in `~/.agents/skills`, `~/.codex/skills` and the project's
+  `.agents/skills`. Remove a plugin with `codex plugin remove <id>`. If the copy
+  came from a marketplace you added (`earthtojake`, or `text-to-cad` from before
+  the rename), remove that marketplace next (`codex plugin marketplace remove <name>`).
+- **Cursor**: plugins in Settings › Plugins, which lists Claude Code's plugins as
+  Imported, and skills in `~/.cursor/skills`, `~/.agents/skills`,
+  `~/.claude/skills`, `~/.codex/skills` and the same folders in the project.
+  Uninstall a Cursor Marketplace copy in Settings and an Imported copy in Claude
+  Code, and delete a local copy's folder in `~/.cursor/plugins/local`. A local
+  copy shows its version in `.cursor-plugin/plugin.json`. One cloned before
+  0.7.15 stays at 0.7.14 because it follows the retired `plugin` branch: delete
+  its folder and clone it again.
+- **Grok Build**: plugins in `grok plugin list` and Claude Code's plugins, and
+  skills in `~/.grok/skills`, `~/.claude/skills` and the project's `.grok/skills`.
+  Remove its own copy with `grok plugin uninstall text-to-cad` and Claude Code's
+  in Claude Code.
+- **Gemini**: the extension in `gemini extensions list`, and skills in
+  `~/.gemini/skills`, `~/.agents/skills` and the project's `.gemini/skills` and
+  `.agents/skills`. Gemini runs a loose skill in place of the extension's
+  skill with the same name, even when the loose one is older. Remove the
+  extension with `gemini extensions uninstall text-to-cad`.
+
+The plugin lists show each copy's version. Loose skills show theirs in the
+cadgen release they run. Run this from the project folder. For each folder, it
+prints a line for every skill that runs cadgen, with its version. If it prints
+nothing, there are no loose skills:
+
+```bash
+grep -ERso -m1 --include=SKILL.md 'cadgen={2}[0-9.]+' ~/.{agents,claude,codex,cursor,grok,gemini}/skills .{agents,claude,codex,cursor,grok,gemini}/skills
+```
+
+Remove skills the Skills CLI installed for your user with the command below.
+Leave out `-g` to remove the ones in the project. Delete any you copied in by
+hand.
+
+```bash
+npx skills remove -g bambu-labs cad dfam-check dfm dxf engineering-drawing gcode sdf sendcutsend srdf step-parts urdf
+```
 
 ### Updates
 

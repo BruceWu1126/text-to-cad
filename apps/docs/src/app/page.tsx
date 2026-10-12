@@ -14,6 +14,7 @@ import {
   agentInstallMessage,
   agents,
   installs,
+  oneCopy,
   pluginDescription,
   pluginRequestUrl,
   skillGroups,
@@ -320,6 +321,17 @@ export default function Home() {
                 <Button asChild variant="outline" size="sm">
                   <a href={pluginRequestUrl} target="_blank" rel="noreferrer">Request Plugin</a>
                 </Button>
+              </div>
+              <div id="one-copy-per-app" className="scroll-mt-20">
+                <h3 className="text-base font-semibold text-foreground">
+                  <TitleLink anchor="one-copy-per-app">One copy per app</TitleLink>
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  {oneCopy.text}{" "}
+                  <a href={oneCopy.link.href} target="_blank" rel="noreferrer" className="text-foreground underline underline-offset-4">
+                    {oneCopy.link.text}
+                  </a>
+                </p>
               </div>
             </div>
           </section>

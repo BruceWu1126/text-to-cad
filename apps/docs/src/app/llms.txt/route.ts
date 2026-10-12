@@ -4,6 +4,7 @@ import {
   agentInstallByline,
   agentInstallMessage,
   installs,
+  oneCopy,
   pluginDescription,
   skillGroups,
   support,
@@ -49,6 +50,10 @@ export function GET() {
         ? ["Reinstall: remove it, then install it again:", "", "```bash", item.remove, "```", ""]
         : []),
     ]),
+    "### One copy per app",
+    "",
+    `${oneCopy.text} ${oneCopy.link.text}: ${oneCopy.link.href}`,
+    "",
     `The README has each install's full notes: ${siteConfig.repository}#readme`,
     "",
     "## Skills",

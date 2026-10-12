@@ -127,6 +127,13 @@ export const agents = [
 // A plugin for an agent that has none: a new issue, titled for the person to name it.
 export const pluginRequestUrl = `${siteConfig.repository}/issues/new?title=${encodeURIComponent("Plugin request: ")}`;
 
+// After the installs: one copy per app. The README's section of that name says where each app loads
+// a copy from and how to remove one; the page says the rule and links there.
+export const oneCopy = {
+  text: "Install one copy per app: two copies means every skill twice. If you installed from more than one place, keep the copy with the newest version and remove the others.",
+  link: { text: "Find and remove copies", href: `${siteConfig.repository}#one-copy-per-app` },
+};
+
 export const skillGroups = [
   {
     name: "CAD",

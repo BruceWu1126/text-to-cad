@@ -105,6 +105,16 @@ class PluginManifestPolicyTest(unittest.TestCase):
             with self.subTest(command=command.splitlines()[0]):
                 self.assertIn(command, readme)
 
+    def test_one_copy_per_app_removes_every_skill_and_is_linked_from_the_site(self) -> None:
+        # The README's One copy per app removes loose skills by name, so a skill added or retired
+        # here must reach that command; the docs site links to the section by its heading's anchor.
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("\n### One copy per app\n", readme)
+        removed = re.search(r"^npx skills remove -g ([a-z0-9 -]+)$", readme, re.MULTILINE).group(1).split()
+        self.assertEqual(removed, sorted(path.parent.name for path in SKILLS_ROOT.glob("*/SKILL.md")))
+        page = (REPO_ROOT / "apps" / "docs" / "src" / "lib" / "content.ts").read_text(encoding="utf-8")
+        self.assertIn("#one-copy-per-app`", page)
+
     def test_the_update_cards_instructions_link_reaches_the_docs_install_section(self) -> None:
         # cadgen's update card links to texttocad.dev/install; the docs site redirects that to its
         # Install section, so renaming the section or dropping the redirect breaks every card.
