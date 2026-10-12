@@ -18,29 +18,16 @@ fea extra.
 
 from __future__ import annotations
 
-import io
-import json
-import struct
 import tempfile
 import unittest
-from contextlib import redirect_stderr
 from pathlib import Path
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
+from tests.python.support.fea_fixtures import box_step, class_directory, ends, glb_extras, needs_fea, sidecar, solve
 
 from cadgen._internal.fea.analyses import get_analysis  # noqa: E402
 from cadgen._internal.fea.analyses.nonlinear import collapse_words, load_label  # noqa: E402
 from cadgen._internal.fea.materials import material_from_spec  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
 from cadgen._internal.fea.study import parse_study  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 STEEL_PLASTIC = {"name": "steel", "plasticity": {"tangent_MPa": 2000}}
 RUBBER = {"name": "rubber", "hyperelastic": {"model": "neo_hookean", "mu_MPa": 0.6, "bulk_MPa": 300}}
@@ -100,7 +87,7 @@ class StudyFile(unittest.TestCase):
         self.assertEqual(collapse_words(0.6969), "Collapses at about 70 % of the load")
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class MaterialModels(unittest.TestCase):
     def test_the_tangents_are_the_derivatives_of_the_stresses(self):
         import numpy as np
@@ -182,7 +169,7 @@ def _bar(length=20.0, side=4.0):
     return space, free, pull, stretch
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Bars(unittest.TestCase):
     def test_a_bilinear_bar_pulled_past_yield_strains_exactly_as_its_two_slopes_say(self):
         from cadgen._internal.fea import nonlinear_driver
@@ -221,7 +208,6 @@ class Bars(unittest.TestCase):
         stretched = 1.0 + stretch(path.u)
         self.assertAlmostEqual(stretched, 2.0, delta=0.05)
         self.assertAlmostEqual(0.6 * (stretched - stretched ** -2) / nominal, 1.0, delta=0.02)
-
 
     def test_a_path_stuck_cutting_its_steps_stops_at_its_deadline_and_says_so(self):
         """A step that never converges is cut six times, each cut a dozen re-solves on a real mesh; past the deadline
@@ -266,9 +252,8 @@ class Bars(unittest.TestCase):
 
     def test_a_path_still_getting_through_its_steps_is_not_stopped_by_its_deadline(self):
         """The deadline bounds time without progress, not the whole path: a path that keeps getting through steps, now
-        and then cutting one (a bolted lap joint pulled off, 17 small steps over half an hour on a 3 mm mesh), runs to
-        the end however long that takes. Before, any cut past the deadline ended the path: the lap joint stopped at
-        20 % of its load, its first load step, after the preload had used most of the time."""
+        and then cutting one, runs to the end. Regression: any cut past the deadline ended the path, so a bolted lap
+        joint (17 small steps over half an hour) stopped at 20 % of its load after the preload used most of the time."""
         import time
 
         import numpy as np
@@ -301,26 +286,7 @@ class Bars(unittest.TestCase):
         self.assertFalse(path.warnings)
 
 
-def _glb(path: Path) -> dict:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    return json.loads(raw[20:20 + length])
-
-
-def _box(directory: Path, name: str, size: tuple[float, float, float], axis: int) -> tuple[Path, str, str]:
-    """A box written to a STEP, and its two end faces along ``axis`` (low, high)."""
-    from build123d import Align, Box, export_step
-
-    from cadgen import fea
-
-    step = directory / f"{name}.step"
-    export_step(Box(*size, align=(Align.MIN, Align.MIN, Align.MIN)), str(step))
-    ends = {face.center_mm[axis]: face.ref for face in fea.faces(step).faces
-            if face.normal is not None and abs(abs(face.normal[axis]) - 1) < 1e-6}
-    return step, ends[min(ends)], ends[max(ends)]
-
-
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class CantileverCollapse(unittest.TestCase):
     """80 x 3 x 6 mm, perfectly plastic steel, pushed with 1.5 times its plastic collapse load."""
 
@@ -328,24 +294,17 @@ class CantileverCollapse(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        step, fixed, tip = _box(directory, "cantilever", (cls.LENGTH, cls.WIDTH, cls.DEPTH), 0)
+        directory = class_directory(cls)
+        step = box_step(directory, "cantilever", (cls.LENGTH, cls.WIDTH, cls.DEPTH), "corner")
+        fixed, tip = ends(step)
         cls.collapse_N = YIELD * cls.WIDTH * cls.DEPTH ** 2 / (4 * cls.LENGTH)
         study = {"analysis": "nonlinear", "material": {"name": "steel", "plasticity": {"tangent_MPa": 0}},
                  "mesh": {"size_mm": 2.0}, "fixtures": [{"faces": [fixed]}], "steps": 10,
                  "loads": [{"faces": [tip], "type": "force", "vector_N": [0, 0, -1.5 * cls.collapse_N]}],
                  "view": {"checks": [{"kind": "plastic_strain", "limit_percent": 0.2}, {"kind": "displacement", "limit_mm": 50}]}}
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(step, directory / "cantilever.fea.glb", study=study)
-        cls.extras = _glb(cls.result.glb)["meshes"][0]["extras"]
-        cls.sidecar = json.loads(cls.result.sidecar.read_text(encoding="utf-8"))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.result = solve(step, directory / "cantilever.fea.glb", study)
+        cls.extras = glb_extras(cls.result.glb)
+        cls.sidecar = sidecar(cls.result)
 
     def test_it_collapses_at_the_plastic_hinge_load(self):
         summary = self.result.summary
@@ -392,15 +351,14 @@ class CantileverCollapse(unittest.TestCase):
         self.assertTrue(self.sidecar["limits"])
 
     def test_no_check_quotes_a_load_multiple(self):
-        """Not linear in the load: every check says it holds at this load only (scaling none), in the summary and the
-        GLB the viewer reads, so the verdict's takeaway is the worst check's own sentence, never "OK up to 18× this load"."""
+        """Not linear in the load: every check holds at this load only (scaling none), never "OK up to 18× this load"."""
         checks = self.result.summary["checks"]
         self.assertTrue(checks)
         self.assertEqual({check.get("scaling") for check in checks}, {"none"})
         self.assertEqual({check.get("scaling") for check in self.extras["checks"]}, {"none"})
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Ladder(unittest.TestCase):
     def test_newton_krylov_is_taken_when_it_saves_and_adaptive_steps_cut_the_estimate(self):
         from cadgen._internal.fea import fit
@@ -423,18 +381,16 @@ class Ladder(unittest.TestCase):
         self.assertLess(analysis.estimate(ctx, inputs).seconds, before.seconds)
 
     def test_a_rubber_block_over_a_tiny_budget_completes_by_adapting_and_says_so(self):
-        from cadgen import fea
-
         with tempfile.TemporaryDirectory() as name:
             directory = Path(name)
-            step, bottom, top = _box(directory, "pad", (10.0, 10.0, 20.0), 2)
-            study = {"analysis": "nonlinear", "material": RUBBER, "mesh": {"size_mm": 5.0}, "steps": 4,
-                     "fixtures": [{"faces": [bottom]}], "loads": [{"faces": [top], "type": "force", "vector_N": [0, 0, 30]}],
-                     "fit": {"seconds": 0.001, "allow": ["iterative", "adaptive_steps"]}}
-            with redirect_stderr(io.StringIO()):
-                result = fea.solve(step, directory / "pad.fea.glb", study=study)
-            extras = _glb(result.glb)["meshes"][0]["extras"]
-            sidecar = json.loads(result.sidecar.read_text(encoding="utf-8"))
+            step = box_step(directory, "pad", (10.0, 10.0, 20.0), "corner")
+            bottom, top = ends(step, 2)
+            result = solve(step, directory / "pad.fea.glb", {
+                "analysis": "nonlinear", "material": RUBBER, "mesh": {"size_mm": 5.0}, "steps": 4,
+                "fixtures": [{"faces": [bottom]}], "loads": [{"faces": [top], "type": "force", "vector_N": [0, 0, 30]}],
+                "fit": {"seconds": 0.001, "allow": ["iterative", "adaptive_steps"]}})
+            extras = glb_extras(result.glb)
+            written = sidecar(result)
         self.assertTrue(result.ok)
         rungs = [step["rung"] for step in result.fit]
         self.assertIn("adaptive_steps", rungs)
@@ -449,7 +405,7 @@ class Ladder(unittest.TestCase):
         self.assertEqual([f["field"] for f in extras["fields"]], ["von_mises", "displacement"])
         words = next(step["words"] for step in result.fit if step["rung"] == "adaptive_steps")
         self.assertIn(words, [step["words"] for step in extras["fit"]])
-        self.assertIn(words, [step["words"] for step in sidecar["fit"]])
+        self.assertIn(words, [step["words"] for step in written["fit"]])
         self.assertTrue(any(line.startswith(f"adapted: {words}") for line in result.human_lines()))
         self.assertIn("fit_adaptive_steps", [finding["type"] for finding in result.findings])
 

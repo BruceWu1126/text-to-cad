@@ -47,7 +47,7 @@ _EXAMPLE = ('{"E1_MPa": 181000, "E2_MPa": 10300, "nu12": 0.28, "G12_MPa": 7170, 
             '"Yt_MPa": 40, "Yc_MPa": 246, "S_MPa": 68}')
 
 
-def _json(value: Any) -> str:
+def json_text(value: Any) -> str:
     import json
 
     try:
@@ -58,7 +58,7 @@ def _json(value: Any) -> str:
 
 def _number(value: Any, where: str, *, positive: bool = False) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{where}: expected a number, got {_json(value)}")
+        raise ValueError(f"{where}: expected a number, got {json_text(value)}")
     number = float(value)
     if not math.isfinite(number):
         raise ValueError(f"{where}: expected a finite number, got {number}")

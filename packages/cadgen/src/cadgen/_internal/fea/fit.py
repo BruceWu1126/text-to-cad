@@ -1,31 +1,23 @@
 """The fit-the-budget ladder: every analysis adapts to the machine instead of refusing a model.
 
-A :class:`Budget` is a target, never a threshold. :func:`fit_budget` asks the
-analysis what its current :class:`FitPlan` will cost (``analysis.estimate``)
-and, while that misses the memory or the time target, takes the analysis's
-next rung (``analysis.apply``), each a plain-worded :class:`Step` with its
-accuracy cost where it can be estimated. A rung that does not apply (no thin
-wall, no symmetry) is skipped without a word. When every rung is taken and the
-estimate still misses, the run goes ahead anyway and the last step says how
-long and how much memory to expect. Nothing is refused for size or time.
+A :class:`Budget` is a target, never a threshold. :func:`fit_budget` asks the analysis what its current :class:`FitPlan`
+will cost (``analysis.estimate``) and, while that misses the memory or the time target, takes the analysis's next rung
+(``analysis.apply``), each a plain-worded :class:`Step` with its accuracy cost where it can be estimated. A rung that
+does not apply (no thin wall, no symmetry) is skipped without a word. When every rung is taken and the estimate still
+misses, the run goes ahead anyway and the last step says how long and how much memory to expect. Nothing is refused for
+size or time.
 
-The rungs every solid analysis shares live here (:func:`apply_generic`):
-``iterative`` (an AMG-preconditioned or a matrix-free solver), ``local_refine``
-(a coarse pass, then a pass fine only where the coarse one peaked),
-``defeature`` (:mod:`.defeature`), ``linear_elements`` (4-node tets),
-``idealise`` (:data:`IDEALISERS`, filled by the shell and beam modules) and
-``symmetry`` (:mod:`.symmetry`). An analysis plugs in by declaring ``ladder``
-and implementing ``estimate`` (often :func:`solid_estimate`) and ``apply``
-(often :func:`apply_generic`).
+The rungs every solid analysis shares live here (:func:`apply_generic`): ``iterative`` (an AMG-preconditioned or a
+matrix-free solver), ``local_refine`` (a coarse pass, then a pass fine only where the coarse one peaked), ``defeature``
+(:mod:`.defeature`), ``linear_elements`` (4-node tets), ``idealise`` (:data:`IDEALISERS`, filled by the shell and beam
+modules) and ``symmetry`` (:mod:`.symmetry`). An analysis plugs in by declaring ``ladder`` and implementing ``estimate``
+(often :func:`solid_estimate`) and ``apply`` (often :func:`apply_generic`).
 
-The cost models are per method, from mesh counts: a netgen mesh holds about
-4.5 V/h^3 + 2 A/h^2 tetrahedra, plus a band at each curved or narrow face the
-mesher refines below h; a quadratic vector space costs about 80 kB per element
-to build and assemble; the stiffness has about 77 entries per row (quadratic)
-or 40 (linear); AMG keeps about three times the matrix; SuperLU's factor
-grows as n^1.5. The constants were measured on this engine's own meshes and
-solves; they aim to be right within a factor of three, which is what choosing
-a rung needs.
+The cost models are per method, from mesh counts: a netgen mesh holds about 4.5 V/h^3 + 2 A/h^2 tetrahedra, plus a band
+at each curved or narrow face the mesher refines below h; a quadratic vector space costs about 80 kB per element to
+build and assemble; the stiffness has about 77 entries per row (quadratic) or 40 (linear); AMG keeps about three times
+the matrix; SuperLU's factor grows as n^1.5. The constants were measured on this engine's own meshes and solves; they
+aim to be right within a factor of three, which is what choosing a rung needs.
 
 Stdlib at import; numeric work inside the functions.
 """
@@ -36,6 +28,7 @@ import math
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
@@ -125,12 +118,10 @@ class Step:
 
     def finding(self) -> dict:
         """The step as an info finding of kind ``fit_<rung>``, for the agent."""
-        return {
-            "check": "fea", "severity": "info", "type": f"fit_{self.rung}",
-            "summary": self.words + (f" ({self.accuracy})" if self.accuracy else ""),
-            "description": "cadgen adapted the model to fit the memory and time it had; the run still completed",
-            "items": [],
-        }
+        from cadgen._internal.fea.analyses.base import finding
+
+        return finding("info", f"fit_{self.rung}", self.words + (f" ({self.accuracy})" if self.accuracy else ""),
+                       "cadgen adapted the model to fit the memory and time it had; the run still completed")
 
 
 @dataclass
@@ -174,10 +165,6 @@ class FitPlan:
     @property
     def two_pass(self) -> bool:
         return self.refine_to_mm is not None
-
-    @property
-    def changes_mesh(self) -> bool:
-        return bool(self.two_pass or self.defeatured or self.order != 2 or self.symmetry or self.idealisation != "solid")
 
 
 @dataclass(frozen=True)
@@ -303,32 +290,15 @@ def fit_budget(analysis: "Analysis", ctx: "SolveContext", inputs: "Inputs", *, t
 def apply_generic(rung: str, analysis: "Analysis", ctx: "SolveContext", inputs: "Inputs") -> Step | None:
     """The shared solid rungs, for any analysis whose ``estimate`` reads the plan's solver, size, order,
     defeaturing and symmetry (:func:`solid_estimate` does). ``None`` when the rung does not apply."""
-    def estimate() -> Estimate:
-        return analysis.estimate(ctx, inputs)
-
-    if rung == "iterative":
-        return _apply_iterative(ctx, estimate)
-    if rung == "local_refine":
-        return _apply_local_refine(ctx, estimate)
-    if rung == "defeature":
-        return _apply_defeature(ctx, inputs)
-    if rung == "linear_elements":
-        return _apply_linear(analysis, ctx)
-    if rung == "idealise":
-        for idealiser in _idealisers().values():
-            step = idealiser(analysis, ctx, inputs)
-            if step is not None:
-                return step
-        return None
-    if rung == "symmetry":
-        return _apply_symmetry(analysis, ctx, inputs)
-    return None
+    apply = _GENERIC_RUNGS.get(rung)
+    return None if apply is None else apply(analysis, ctx, inputs)
 
 
-def _apply_iterative(ctx, estimate: Callable[[], Estimate]) -> Step | None:
+def _apply_iterative(analysis, ctx, inputs) -> Step | None:
     """An iterative solver: AMG + CG on the assembled matrix, or, where memory is what misses and storing
     no matrix saves the most, matrix-free CG. Taken only when it saves materially (5 %) what misses."""
     plan, budget = ctx.plan, ctx.budget
+    estimate = partial(analysis.estimate, ctx, inputs)
     if plan.solver != "direct":
         return None
     before = estimate()
@@ -354,9 +324,10 @@ def _apply_iterative(ctx, estimate: Callable[[], Estimate]) -> Step | None:
     return Step("iterative", f"Used an iterative solver to {why}", None, None, detail=detail)
 
 
-def _apply_local_refine(ctx, estimate: Callable[[], Estimate]) -> Step | None:
+def _apply_local_refine(analysis, ctx, inputs) -> Step | None:
     """Coarse everywhere at the size that fits, then (in run.py) fine where the coarse pass peaked."""
     plan, budget, geometry = ctx.plan, ctx.budget, ctx.geometry
+    estimate = partial(analysis.estimate, ctx, inputs)
     if plan.two_pass or plan.requested_mm is None:
         return None
     fine = plan.requested_mm
@@ -384,7 +355,7 @@ def _apply_local_refine(ctx, estimate: Callable[[], Estimate]) -> Step | None:
     )
 
 
-def _apply_defeature(ctx, inputs) -> Step | None:
+def _apply_defeature(analysis, ctx, inputs) -> Step | None:
     from cadgen._internal.fea import defeature
 
     plan, geometry = ctx.plan, ctx.geometry
@@ -406,7 +377,7 @@ def _apply_defeature(ctx, inputs) -> Step | None:
                 detail={"features": len(found), "faces": len(removed), "largest_mm": round(max(f.size_mm for f in found), 4)})
 
 
-def _apply_linear(analysis, ctx) -> Step | None:
+def _apply_linear(analysis, ctx, inputs) -> Step | None:
     plan = ctx.plan
     if plan.order != 2:
         return None
@@ -438,6 +409,15 @@ def _apply_symmetry(analysis, ctx, inputs) -> Step | None:
     across = " and ".join(f"the {plane.axis.upper()} = {plane.offset:.4g} mm plane" for plane in usable)
     return Step("symmetry", f"Solved one {part} of the part, which is symmetric about {across}, and mirrored the result",
                 None, None, detail={"planes": [plane.as_dict() for plane in usable]})
+
+
+def _apply_idealise(analysis, ctx, inputs) -> Step | None:
+    steps = (idealiser(analysis, ctx, inputs) for idealiser in _idealisers().values())
+    return next((step for step in steps if step is not None), None)
+
+
+_GENERIC_RUNGS = {"iterative": _apply_iterative, "local_refine": _apply_local_refine, "defeature": _apply_defeature,
+                  "linear_elements": _apply_linear, "idealise": _apply_idealise, "symmetry": _apply_symmetry}
 
 
 def _named_ordinals(ctx, inputs) -> set[int]:
@@ -620,10 +600,6 @@ def plan_counts(ctx) -> tuple[float, float, bool]:
     return elements, elements * NODES_PER_TET[plan.order], plan.two_pass
 
 
-#: The name it had before analyses outside this module read it; kept for callers that still use it.
-_plan_counts = plan_counts
-
-
 def mesh_key(plan: FitPlan) -> tuple:
     return (plan.size_mm, plan.order, plan.defeatured, plan.symmetry, plan.idealisation)
 
@@ -655,27 +631,24 @@ def solid_estimate(ctx, *, components: int = 3, extra_bytes: float = 0.0, extra_
 def geometry_of(shape, occurrence_ref: str = "", *, parts: int = 1, keep_shape: bool = True) -> Geometry:
     """Volume, area, diagonal and every face's kind and size of an OCP shape, in cadgen's face order."""
     from OCP.BRepAdaptor import BRepAdaptor_Surface
-    from OCP.BRepGProp import BRepGProp
     from OCP.GeomAbs import GeomAbs_Cone, GeomAbs_Cylinder, GeomAbs_Plane, GeomAbs_Sphere, GeomAbs_Torus
-    from OCP.GProp import GProp_GProps
 
     from cadgen._internal.entity_ordinals import entity_map
+    from cadgen._internal.fea.assembly import gprops
+    from cadgen._internal.fea.defeature import as_face
     from cadgen._internal.fea.mesh import shape_diagonal
 
-    props = GProp_GProps()
-    BRepGProp.VolumeProperties_s(shape, props)
-    volume = float(props.Mass())
+    volume = float(gprops(shape, "Volume").Mass())
     faces = entity_map(shape, "face")
     infos = []
     total = 0.0
     for ordinal in range(1, faces.Extent() + 1):
         face = faces.FindKey(ordinal)
-        surface = GProp_GProps()
-        BRepGProp.SurfaceProperties_s(face, surface)
+        surface = gprops(face)
         area = float(surface.Mass())
         centre = surface.CentreOfMass()
         total += area
-        adaptor = BRepAdaptor_Surface(_as_face(face))
+        adaptor = BRepAdaptor_Surface(as_face(face))
         kind_id = adaptor.GetType()
         if kind_id == GeomAbs_Cylinder:
             kind, size = "cylinder", adaptor.Cylinder().Radius()
@@ -695,20 +668,11 @@ def geometry_of(shape, occurrence_ref: str = "", *, parts: int = 1, keep_shape: 
     return Geometry(volume, total, shape_diagonal(shape), tuple(infos), shape if keep_shape else None, occurrence_ref, parts)
 
 
-def _as_face(shape):
-    from OCP.TopoDS import TopoDS
-
-    return TopoDS.Face_s(shape)
-
-
 def _perimeter_width(face, area: float) -> float:
     """A face's width as 2 area / perimeter: a long strip's width, half a square's side."""
-    from OCP.BRepGProp import BRepGProp
-    from OCP.GProp import GProp_GProps
+    from cadgen._internal.fea.assembly import gprops
 
-    props = GProp_GProps()
-    BRepGProp.LinearProperties_s(face, props)
-    perimeter = float(props.Mass())
+    perimeter = float(gprops(face, "Linear").Mass())
     return 2.0 * area / perimeter if perimeter > 0 else 0.0
 
 

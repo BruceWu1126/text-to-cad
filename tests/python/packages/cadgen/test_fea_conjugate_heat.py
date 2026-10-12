@@ -26,27 +26,14 @@ Every STEP is a build123d solid in a temporary directory.
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import struct
-import tempfile
 import unittest
-from contextlib import redirect_stderr
 from pathlib import Path
-from unittest import mock
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
-
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
+from tests.python.support.fea_fixtures import (
+    assert_tracers_cross, box_duct_step, class_directory, ends, glb_attribute_names, glb_extras, needs_fea, sidecar,
+    solve, solve_keeping, tube_step, value_error,
+)
 
 R, WALL, LENGTH = 2.0, 1.0, 32.0
 OIL = {"name": "oil", "density_kg_m3": 900.0, "viscosity_Pa_s": 0.05, "conductivity_W_mK": 0.15, "specific_heat_J_kgK": 2000.0}
@@ -62,30 +49,6 @@ COLD_PLATE = {
 }
 
 
-def glb_extras(path: Path) -> tuple[dict, list[str]]:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    gltf = json.loads(raw[20:20 + length])
-    return gltf["meshes"][0]["extras"], list(gltf["meshes"][0]["primitives"][0]["attributes"])
-
-
-def solve(step: Path, out: Path, study: dict):
-    """Run the study; hand back the result and the analysis's own (the fluid's temperatures and space)."""
-    from cadgen import fea
-    from cadgen._internal.fea.analyses.conjugate_heat import ConjugateHeatAnalysis
-
-    captured = {}
-    original = ConjugateHeatAnalysis.solve
-
-    def keep(self, ctx, inputs):
-        captured["result"] = original(self, ctx, inputs)
-        return captured["result"]
-
-    with redirect_stderr(io.StringIO()), mock.patch.object(ConjugateHeatAnalysis, "solve", keep):
-        result = fea.solve(step, out, study=study)
-    return result, captured.get("result")
-
-
 class StudyFile(unittest.TestCase):
     def parse(self, **changes):
         from cadgen._internal.fea.study import parse_study
@@ -96,10 +59,8 @@ class StudyFile(unittest.TestCase):
         return {**COLD_PLATE["flow"], **changes}
 
     def test_it_is_registered_built_tier_three(self):
-        from cadgen._internal.fea.analyses import REGISTRY, get_analysis
+        from cadgen._internal.fea.analyses import get_analysis
 
-        entry = REGISTRY["conjugate_heat"]
-        self.assertEqual((entry.tier, entry.word, entry.planned), (3, "Cooled by flow", False))
         analysis = get_analysis("conjugate_heat")
         self.assertEqual(analysis.limits, (LIMIT_TEXT,))
         self.assertEqual(analysis.ladder, ("iterative", "fluid_coarsen", "continuation", "local_refine"))
@@ -140,41 +101,24 @@ class StudyFile(unittest.TestCase):
             ({"radiation": []}, "unknown keys ['radiation']"),
         ]
         for changes, words in cases:
-            with self.subTest(words=words), self.assertRaises(ValueError) as caught:
-                self.parse(**changes)
-            self.assertIn(words, str(caught.exception))
+            with self.subTest(words=words):
+                self.assertIn(words, value_error(self, self.parse, **changes))
 
     def test_a_material_is_needed_for_the_parts_conduction(self):
         from cadgen._internal.fea.study import parse_study
 
-        with self.assertRaises(ValueError) as caught:
-            parse_study({key: value for key, value in COLD_PLATE.items() if key != "material"})
-        self.assertIn("'material' is required", str(caught.exception))
-
-
-def tube_step(directory: Path) -> tuple[Path, str]:
-    from build123d import Align, Cylinder, Rotation, export_step
-
-    from cadgen import fea
-
-    step = directory / "tube.step"
-    along = (Align.CENTER, Align.CENTER, Align.MIN)
-    export_step(Rotation(0, 90, 0) * (Cylinder(R + WALL, LENGTH, align=along) - Cylinder(R, LENGTH, align=along)), str(step))
-    outer = max((face for face in fea.faces(step).faces if face.surface == "cylinder"), key=lambda face: face.area_mm2).ref
-    return step, outer
+        no_material = {key: value for key, value in COLD_PLATE.items() if key != "material"}
+        self.assertIn("'material' is required", value_error(self, parse_study, no_material))
 
 
 def cold_plate_step(directory: Path) -> tuple[Path, str]:
     from build123d import Align, Box, Cylinder, Rotation, export_step
 
-    from cadgen import fea
-
     step = directory / "cold_plate.step"
     block = Box(24, 10, 8, align=(Align.MIN, Align.CENTER, Align.CENTER))
     bore = Rotation(0, 90, 0) * Cylinder(R, 24, align=(Align.CENTER, Align.CENTER, Align.MIN))
     export_step(block - bore, str(step))
-    top = max((face for face in fea.faces(step).faces if face.normal and face.normal[2] > 0.9), key=lambda face: face.center_mm[2]).ref
-    return step, top
+    return step, ends(step, 2)[1]
 
 
 def section_bulk(analysis_result, x: float) -> float:
@@ -197,18 +141,20 @@ def section_bulk(analysis_result, x: float) -> float:
     return float((w * u * t).sum() / (w * u).sum())
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Pipe(unittest.TestCase):
     """Graetz: laminar flow through a pipe whose wall is held at one temperature."""
 
     @classmethod
     def setUpClass(cls):
-        cls.tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls.tmp.name)
-        step, outer = tube_step(directory)
+        from cadgen import fea
+
+        directory = class_directory(cls)
+        step = tube_step(directory, R, WALL, LENGTH)
+        outer = max((face for face in fea.faces(step).faces if face.surface == "cylinder"), key=lambda face: face.area_mm2).ref
         cls.U = PECLET * OIL["conductivity_W_mK"] / (OIL["density_kg_m3"] * OIL["specific_heat_J_kgK"] * 2 * R / 1000)
         cls.out = directory / "tube.glb"
-        cls.result, cls.own = solve(step, cls.out, {
+        cls.result, cls.own = solve_keeping("conjugate_heat", step, cls.out, {
             "analysis": "conjugate_heat", "material": {"name": "aluminum-6061-t6", "conductivity_W_mK": 20000.0},
             "mesh": {"size_mm": 0.5},
             "flow": {"kind": "internal", "regime": "laminar", "fluid": OIL,
@@ -217,18 +163,8 @@ class Pipe(unittest.TestCase):
             "temperatures": [{"faces": [outer], "C": 80}],
         })
 
-    @classmethod
-    def tearDownClass(cls):
-        cls.tmp.cleanup()
-
     def test_its_tracers_cross_from_inlet_to_outlet(self):
-        """The viewer's Flow routine: particles let go at the inlet (x = 0), carried along the duct to its outlet."""
-        motion = glb_extras(self.out)[0]["analysis"]["motion"]
-        self.assertEqual((motion["kind"], motion["label"]), ("tracers", "Coolant flow"))
-        starts = [path[0] for path in motion["paths"]]
-        self.assertLess(max(starts), 0.05 * LENGTH)
-        across = [path[-3] for path in motion["paths"] if path[-3] > 0.8 * LENGTH]
-        self.assertGreater(len(across), len(motion["paths"]) / 2)
+        assert_tracers_cross(self, self.out, LENGTH, "Coolant flow")
 
     def test_the_developed_nusselt_number_is_graetzs(self):
         x1, x2 = 8.0, 28.0   # 2 and 7 diameters in: past the thermal entry (x / (D Pe) > 0.05)
@@ -251,7 +187,7 @@ class Pipe(unittest.TestCase):
         print(f"\n  pipe energy balance: m c_p ΔT {carried:.5f} W against {held:.5f} W in ({100 * (carried - held) / held:+.3f}%)")
 
     def test_it_writes_the_parts_and_the_fluids_temperature_and_the_wall_heat(self):
-        extras, attributes = glb_extras(self.out)
+        extras, attributes = glb_extras(self.out), glb_attribute_names(self.out)
         for attribute in ("_TEMPERATURE", "_FLUID_TEMPERATURE", "_WALL_HEAT_FLUX", "_HEAT_TRANSFER_COEFFICIENT", "_PRESSURE", "_SPEED"):
             self.assertIn(attribute, attributes)
         self.assertEqual([field["field"] for field in extras["fields"]],
@@ -272,18 +208,16 @@ class Pipe(unittest.TestCase):
         self.assertGreater(self.result.summary["mean_heat_transfer_coefficient_W_m2K"], 0)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class ColdPlate(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.dir = Path(self.tmp.name)
-
-    def tearDown(self):
-        self.tmp.cleanup()
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = class_directory(cls)
+        cls.step, top = cold_plate_step(cls.dir)
+        cls.heated = {**COLD_PLATE, "heat": [{"faces": [top], "W": 1.0}]}
 
     def test_the_outlet_and_the_fluid_by_the_wall_are_as_hot_as_the_energy_balance_says(self):
-        step, top = cold_plate_step(self.dir)
-        result, _ = solve(step, self.dir / "plate.glb", {**COLD_PLATE, "heat": [{"faces": [top], "W": 1.0}]})
+        result = solve(self.step, self.dir / "plate.glb", self.heated)
         summary = result.summary
         self.assertEqual(summary["regime"], "laminar")    # auto, at Re 40
         expected = 20.0 + 1.0 / (summary["mass_flow_kg_s"] * WATER_CP)
@@ -310,18 +244,14 @@ class ColdPlate(unittest.TestCase):
               f"flow, {by_asked:.6f} °C on the asked flow ({100 * (summary['outlet_temperature_C'] - by_asked) / (by_asked - 20):+.2f}% of the rise)")
 
     def test_the_ladder_coarsens_the_flows_core_and_the_part_and_still_balances(self):
-        step, top = cold_plate_step(self.dir)
-        out = self.dir / "ladder.glb"
-        result, _ = solve(step, out, {**COLD_PLATE, "heat": [{"faces": [top], "W": 1.0}], "fit": {"seconds": 1}})
+        result = solve(self.step, self.dir / "ladder.glb", {**self.heated, "fit": {"seconds": 1}})
         self.assertTrue(result.ok)
         rungs = [step["rung"] for step in result.fit]
         self.assertIn("fluid_coarsen", rungs)
         self.assertIn("local_refine", rungs)
-        extras, _ = glb_extras(out)
-        sidecar = json.loads(out.with_suffix(".json").read_text(encoding="utf-8"))
-        coarsen = next(step for step in extras["fit"] if step["rung"] == "fluid_coarsen")
+        coarsen = next(step for step in glb_extras(result.glb)["fit"] if step["rung"] == "fluid_coarsen")
         self.assertIn("the heat it takes from the walls", coarsen["accuracy"])
-        self.assertEqual([s["rung"] for s in sidecar["fit"]], rungs)
+        self.assertEqual([s["rung"] for s in sidecar(result)["fit"]], rungs)
         self.assertTrue(any(line.startswith("adapted: Coarsened the flow mesh away from the walls") for line in result.human_lines()))
         self.assertTrue(any(f["type"] == "fit_fluid_coarsen" for f in result.findings))
         summary = result.summary
@@ -332,10 +262,9 @@ class ColdPlate(unittest.TestCase):
         print(f"\n  cold plate, adapted ({', '.join(rungs)}): outlet {summary['outlet_temperature_C']:.6f} °C against {expected:.6f} °C")
 
     def test_a_turbulent_flow_closes_its_books_too(self):
-        step, top = cold_plate_step(self.dir)
         flow = {**COLD_PLATE["flow"], "regime": "turbulent",
                 "inlets": [{"opening": "x_min", "velocity_m_s": 1.0, "temperature_C": 20}]}
-        result, _ = solve(step, self.dir / "turbulent.glb", {**COLD_PLATE, "flow": flow, "heat": [{"faces": [top], "W": 1.0}]})
+        result = solve(self.step, self.dir / "turbulent.glb", {**self.heated, "flow": flow})
         summary = result.summary
         self.assertEqual(summary["regime"], "turbulent")
         self.assertAlmostEqual(summary["heat_to_fluid_W"], 1.0, places=6)
@@ -347,30 +276,15 @@ class ColdPlate(unittest.TestCase):
               f"Dittus-Boelter {dittus_boelter:.2f} for developed flow")
 
 
-def box_duct_step(directory: Path, side: float, length: float, wall: float = 1.0) -> Path:
-    """A square passage through a block along x: sharp corners where the inlet meets the walls."""
-    from build123d import Align, Box, export_step
-
-    step = directory / "duct.step"
-    along = (Align.MIN, Align.CENTER, Align.CENTER)
-    export_step(Box(length, side + 2 * wall, side + 2 * wall, align=along) - Box(length, side, side, align=along), str(step))
-    return step
-
-
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class BoxDuct(unittest.TestCase):
     """A square duct (sharp corners at its inlet) is cooled by its flow: the laminar flow under it solves."""
 
     def test_a_square_duct_solves(self):
-        from cadgen import fea
-
-        with tempfile.TemporaryDirectory() as tmp:
-            directory = Path(tmp)
-            step = box_duct_step(directory, 3.0, 12.0)
-            floor = next(face.ref for face in fea.faces(step).faces
-                         if face.surface == "plane" and abs(face.center_mm[2] + 2.5) < 1e-6)
-            result, _ = solve(step, directory / "duct.glb", {**COLD_PLATE, "mesh": {"size_mm": 1.0},
-                                                             "temperatures": [{"faces": [floor], "C": 80}]})
+        directory = class_directory(type(self))
+        step = box_duct_step(directory, 3.0, 12.0)
+        floor = ends(step, 2)[0]              # the block's underside, z = -2.5
+        result = solve(step, directory / "duct.glb", {**COLD_PLATE, "mesh": {"size_mm": 1.0}, "temperatures": [{"faces": [floor], "C": 80}]})
         self.assertTrue(result.ok)
         self.assertGreater(result.summary["pressure_drop_Pa"], 0)
         self.assertGreater(result.summary["max_temperature_C"], 20)

@@ -1,29 +1,21 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
 import { checkLine, checkTitle } from '../checkKinds.js';
-import { feaControls, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, feaVerdict, studyRows } from '../../feaResult.js';
 import { activeFrame, activeFrameIndex } from '../series.js';
 import { heldRows, madeOfRows, pushedRows, rigidFloorRows } from '../setup.js';
 import { feaAnalysis } from './index.js';
 import contact, { CONTACT_SETUP, PLAY, contactRows } from './contact.js';
+import { feaFile, vec } from '../../__tests__/feaFile.js';
 
 const LIMIT = 'Small sliding: each surface node is paired once, before loading, with the surface it faces';
 
 // A pin pressed on a plate that rests on a rigid floor, as cadgen writes it: two load steps, the last the default.
 function pressedResult(extras: Record<string, unknown> = {}) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.01, 0, 0, 0, 0.01, 0]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_von_mises', new BufferAttribute(new Float32Array([40, 10, 20]), 1));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_contact_pressure', new BufferAttribute(new Float32Array([5, 0, 2]), 1));
-  geometry.setAttribute('_von_mises_f1', new BufferAttribute(new Float32Array([80, 20, 40]), 1));
-  geometry.setAttribute('_displacement_f1', new BufferAttribute(new Float32Array([0, 0, -0.001, 0, 0, 0, 0, 0, 0]), 3));
-  geometry.setAttribute('_contact_pressure_f1', new BufferAttribute(new Float32Array([10, 0, 4]), 1));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 1]), 1));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  return feaFile({
+    position: [0, 0, 0, 0.01, 0, 0, 0, 0.01, 0], _von_mises: [40, 10, 20], _displacement: vec(9), _contact_pressure: [5, 0, 2],
+    _von_mises_f1: [80, 20, 40], _displacement_f1: vec([0, 0, -0.001, 0, 0, 0, 0, 0, 0]), _contact_pressure_f1: [10, 0, 4],
+    _face: [0, 0, 1],
+  }, {
     generator: 'cadgen fea', name: 'press contact', deformation_scale: 1, faces: ['#o1.1.f1', '#o1.2.f6'], load_percent: 100, collapsed: false,
     analysis: { type: 'contact', tier: 3, word: 'Contact', estimate: false, limits: [LIMIT], noun: 'this load', reference_C: null, warnings: [] },
     fields: [
@@ -52,9 +44,6 @@ function pressedResult(extras: Record<string, unknown> = {}) {
     findings: [],
     ...extras,
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 describe('contact', () => {

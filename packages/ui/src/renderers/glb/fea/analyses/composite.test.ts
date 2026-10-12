@@ -1,24 +1,19 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
+import { Group } from 'three';
 import { describe, expect, it } from 'vitest';
 import { feaControls, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
 import { checkLine, plyAngle } from '../checkKinds.js';
 import { FIELD_WORDS } from '../fields.js';
 import composite, { layupNotation, layupRows, layupWords, readLayup } from './composite.js';
 import { ANALYSES } from './index.js';
+import { feaFile, plain, vec } from '../../__tests__/feaFile.js';
 
-const plain = (text: string) => text.replace(/[\u00a0\u202f]/g, ' ');
 const ply = (angle: number, thickness = 0.5) => ({ material: 'cfrp', angle_deg: angle, thickness_mm: thickness });
 
 /** A composite result as cadgen writes one (`analysis composite`): failure index, ply-envelope stress, displacement, its layup echoed. */
 function compositeResult({ check = {}, layup = undefined as unknown } = {}) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), 3));
-  geometry.setAttribute('_von_mises', new BufferAttribute(new Float32Array([0, 20, 40]), 1));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_failure_index', new BufferAttribute(new Float32Array([0, 0.4, 0.82]), 1));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 0]), 1));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  return feaFile({
+    position: [0, 0, 0, 1, 0, 0, 0, 1, 0], _von_mises: [0, 20, 40], _displacement: vec(9), _failure_index: [0, 0.4, 0.82], _face: [0, 0, 0],
+  }, {
     generator: 'cadgen fea', name: 'panel composite', deformation_scale: 100,
     fields: [{ attribute: '_VON_MISES', name: 'von Mises stress (ply envelope)', units: 'MPa', min: 0, max: 40, attribute_scale: 1, field: 'von_mises' },
       { attribute: '_DISPLACEMENT', name: 'displacement', units: 'mm', min: 0, max: 0.02, attribute_scale: 1000, field: 'displacement' },
@@ -30,10 +25,7 @@ function compositeResult({ check = {}, layup = undefined as unknown } = {}) {
     study: { fixtures: [{ type: 'fixed', faces: ['#o1.f6'] }], loads: [{ type: 'pressure', faces: ['#o1.f5'], pressure_MPa: 0.01 }],
       mesh: { size_mm: 8, refined_from_mm: null },
       layup: layup === undefined ? { plies: [ply(0), ply(90), ply(90), ply(0)], notation: '[0/90]s', thickness_mm: 2 } : layup },
-  });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
+  }, { index: false, color: false });
 }
 
 describe('composite', () => {

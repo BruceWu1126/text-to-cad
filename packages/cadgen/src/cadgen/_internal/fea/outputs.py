@@ -1,22 +1,13 @@
 """The files a study writes: a vertex-coloured GLB, an optional VTU.
 
-The GLB is what the viewer shows. Its ``COLOR_0`` is the von Mises ramp and
-its positions are the deformed shape (displacement times a scale), so any
-glTF viewer shows the result. The raw fields ride along for a viewer that
-knows them: ``_VON_MISES`` (float, MPa) and ``_DISPLACEMENT`` (vec3, in glTF
-units and axes -- metres, Y up -- unscaled), so the FEA overlay can recolour
-by either field and change the deformation scale from the same file. The
-mesh carries ``extras`` with the fields, the deformation scale and the ramp
-stops -- a legend's inputs -- the study's ``findings`` (checks.py), the
-``study`` itself and ``faces``, the occurrence's face refs. ``_FACE`` (float, an
-index into ``faces``, -1 when the mesher matched no face) says which source face
-each surface triangle came from; a vertex shared by two faces is written once
-per face so every triangle's three vertices agree. Written by hand (glTF 2.0 is a JSON header and
-one binary buffer) so the result path adds no dependency the solver did not
-already need.
+The GLB is what the viewer shows: its ``COLOR_0`` is the value ramp and its positions the deformed shape
+(displacement times a scale), so any glTF viewer shows the result. The raw fields ride along for a viewer that knows
+them (``_VON_MISES``, ``_DISPLACEMENT`` in glTF metres and axes, unscaled; ``_FACE``; :func:`write_glb`), so the FEA
+overlay can recolour by any field and change the deformation scale from the same file, and the mesh's ``extras`` carry
+the legend's inputs, the findings, the study and the face refs. Written by hand (glTF 2.0 is a JSON header and one
+binary buffer) so the result path adds no dependency the solver did not already need.
 
-The VTU is the archival form for ParaView: linear tetrahedra with the
-displacement vector and von Mises as point data.
+The VTU is the archival form for ParaView: linear tetrahedra with the displacement vector and von Mises as point data.
 """
 
 from __future__ import annotations
@@ -32,14 +23,12 @@ if TYPE_CHECKING:
 
 __all__ = ["RAMP", "auto_deformation_scale", "ramp", "write_glb", "write_vtu"]
 
-#: Blue -> cyan -> green -> yellow -> red: the ramp every FEA post-processor
-#: uses, so a reader's eye already knows which end is hot. Written into the
-#: GLB's extras so a viewer recolouring by another field draws the same ramp.
+#: Blue -> cyan -> green -> yellow -> red: the ramp every FEA post-processor uses, so a reader's eye already knows which
+#: end is hot. Written into the GLB's extras so a viewer recolouring by another field draws the same ramp.
 RAMP = ((0.0, (0.05, 0.10, 0.90)), (0.25, (0.05, 0.85, 0.95)), (0.5, (0.10, 0.85, 0.15)),
         (0.75, (0.98, 0.90, 0.10)), (1.0, (0.90, 0.08, 0.05)))
 
-# netgen's 6-node triangle lists the three corners, then the mid-edge nodes of
-# edges (1,2) (0,2) (0,1), in that order.
+# netgen's 6-node triangle lists the three corners, then the mid-edge nodes of edges (1,2) (0,2) (0,1), in that order.
 _TRIG6_MID_OF_EDGE = {(1, 2): 3, (0, 2): 4, (0, 1): 5}
 
 # Face indices share one int64 key with the node id: room for 2**20 faces, offset by one so -1 fits.
@@ -118,48 +107,31 @@ def _signed_volume(positions: "np.ndarray", triangles: "np.ndarray") -> float:
     return float((np.cross(a, b) * c).sum() / 6.0)
 
 
-def write_glb(
-    path: Path,
-    *,
-    positions: "np.ndarray",
-    displacement: "np.ndarray",
-    values: "np.ndarray",
-    triangles6: "np.ndarray",
-    face_of_triangle: "np.ndarray",
-    scale: float,
-    values_attribute: str | None = "_VON_MISES",
-    value_range: tuple[float, float],
-    extras: dict,
-    values_by_part: "np.ndarray | None" = None,
-    part_of_triangle: "np.ndarray | None" = None,
-    extra_attributes: "dict[str, np.ndarray] | None" = None,
-    series: "list[dict[str, np.ndarray]] | None" = None,
-) -> None:
+def write_glb(path: Path, *, positions: "np.ndarray", displacement: "np.ndarray", values: "np.ndarray",
+              triangles6: "np.ndarray", face_of_triangle: "np.ndarray", scale: float,
+              values_attribute: str | None = "_VON_MISES", value_range: tuple[float, float], extras: dict,
+              values_by_part: "np.ndarray | None" = None, part_of_triangle: "np.ndarray | None" = None,
+              extra_attributes: "dict[str, np.ndarray] | None" = None,
+              series: "list[dict[str, np.ndarray]] | None" = None) -> None:
     """A binary glTF of the deformed boundary surface with the value ramp as vertex colour.
 
-    ``positions``, ``displacement`` and ``values`` are per node (corner and
-    mid-edge alike); ``triangles6`` are the mesher's boundary triangles in
-    those node ids, wound consistently, which is kept -- flipped as a whole
-    only when the surface encloses negative volume. ``face_of_triangle`` is the
-    index into ``extras["faces"]`` of the face each of those triangles lies on
-    (-1 for none): it becomes ``_FACE``, one value per vertex. For an assembly,
-    ``values_by_part`` (parts, nodes) holds each part's own field and
-    ``part_of_triangle`` the part each triangle belongs to: a vertex takes the
-    value of its face's part, so a joint's two sides keep their own stress.
-    ``part_of_triangle`` also becomes ``_PART`` (float, an index into
-    ``extras["parts"]``), one value per vertex; a single part has no ``_PART``.
+    ``positions``, ``displacement`` and ``values`` are per node (corner and mid-edge alike); ``triangles6`` are the
+    mesher's boundary triangles in those node ids, wound consistently, which is kept -- flipped as a whole only when the
+    surface encloses negative volume. ``face_of_triangle`` is the index into ``extras["faces"]`` of the face each of
+    those triangles lies on (-1 for none): it becomes ``_FACE``, one value per vertex. For an assembly,
+    ``values_by_part`` (parts, nodes) holds each part's own field and ``part_of_triangle`` the part each triangle
+    belongs to: a vertex takes the value of its face's part, so a joint's two sides keep their own stress.
+    ``part_of_triangle`` also becomes ``_PART`` (float, an index into ``extras["parts"]``), one value per vertex; a
+    single part has no ``_PART``.
 
-    ``values`` colour the surface and are written as ``values_attribute``
-    (``_VON_MISES``); ``None`` colours by them without writing them, for a
-    result whose coloured field is already among ``extra_attributes`` or is
-    a vector's magnitude.
+    ``values`` colour the surface and are written as ``values_attribute`` (``_VON_MISES``); ``None`` colours by them
+    without writing them, for a result whose coloured field is already among ``extra_attributes`` or is a vector's
+    magnitude.
 
-    ``triangles6`` may be (B, 3), the boundary of linear elements: each is
-    written as it is. ``extra_attributes`` are more per-node fields, written
-    after the static ones under their names (``_TEMPERATURE``): an (M,) array
-    is a float scalar as stored, an (M, 3) array a vector in mm, written in glTF
-    metres and axes like ``_DISPLACEMENT``. ``series`` is one such dict per
-    frame of a series (``_MODE_SHAPE_F1``), written the same way after them.
+    ``triangles6`` may be (B, 3), the boundary of linear elements: each is written as it is. ``extra_attributes`` are
+    more per-node fields, written after the static ones under their names (``_TEMPERATURE``): an (M,) array is a float
+    scalar as stored, an (M, 3) array a vector in mm, written in glTF metres and axes like ``_DISPLACEMENT``. ``series``
+    is one such dict per frame of a series (``_MODE_SHAPE_F1``), written the same way after them.
     """
     import numpy as np
 
@@ -271,14 +243,8 @@ def write_glb(
         handle.write(binary)
 
 
-def write_vtu(
-    path: Path,
-    *,
-    positions: "np.ndarray",
-    tets: "np.ndarray",
-    displacement: "np.ndarray",
-    values: "np.ndarray",
-) -> None:
+def write_vtu(path: Path, *, positions: "np.ndarray", tets: "np.ndarray", displacement: "np.ndarray",
+              values: "np.ndarray") -> None:
     """An ASCII VTK unstructured grid of linear tetrahedra with point data."""
     import numpy as np
 

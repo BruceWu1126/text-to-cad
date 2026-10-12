@@ -1,18 +1,15 @@
 """Linear static elasticity on a :class:`VolumeMesh`: scikit-fem assembly, pyamg solve.
 
-Quadratic (10-node) tetrahedra, isotropic linear elasticity, small strain.
-Fixed faces clamp every displacement component; a force is spread as a
-uniform traction over its faces; a pressure acts along the inward normal.
-The solve is algebraic multigrid (smoothed aggregation with the six rigid-body
-modes as the near-nullspace) accelerated by conjugate gradients, which is what
-makes a 150k-DOF part a seconds-long solve where SciPy's direct solver takes
-minutes; small systems go straight to the direct solver.
+Quadratic (10-node) tetrahedra, isotropic linear elasticity, small strain. Fixed faces clamp every displacement
+component; a force is spread as a uniform traction over its faces; a pressure acts along the inward normal. The solve is
+algebraic multigrid (smoothed aggregation with the six rigid-body modes as the near-nullspace) accelerated by conjugate
+gradients, which is what makes a 150k-DOF part a seconds-long solve where SciPy's direct solver takes minutes; small
+systems go straight to the direct solver.
 
-Stress is recovered at the quadrature points from the displacement gradient,
-von Mises is formed there, and its nodal field is the L2 projection onto the
-quadratic scalar basis. Both maxima are reported: the Gauss-point value is
-the higher and the more mesh-dependent of the two, and the difference between
-them is itself a signal of a singularity or an under-resolved region.
+Stress is recovered at the quadrature points from the displacement gradient, von Mises is formed there, and its nodal
+field is the L2 projection onto the quadratic scalar basis. Both maxima are reported: the Gauss-point value is the
+higher and the more mesh-dependent of the two, and the difference between them is itself a signal of a singularity or an
+under-resolved region.
 """
 
 from __future__ import annotations
@@ -36,13 +33,6 @@ __all__ = ["SolveOutcome", "solve_linear_static"]
 DOF_LIMIT = 1_500_000
 #: Above this many it warns that the solve will be slow.
 DOF_WARN = 400_000
-#: Multigrid attempts (one random seed each) before the direct solver takes over.
-_AMG_ATTEMPTS = 3
-#: Below this many free DOF the direct solver wins on setup cost.
-DIRECT_SOLVE_BELOW = 20_000
-
-# The mesher's 10-node tet order mapped to skfem's; it lives with the element space now.
-NETGEN_TET10_TO_SKFEM = (0, 1, 2, 3, 4, 7, 5, 6, 8, 9)
 
 
 @dataclass
@@ -73,26 +63,11 @@ class SolveOutcome:
     timings: dict[str, float] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     solver: str = ""
-    #: For an assembly, (parts, M): each part's own von Mises field, projected from its elements alone
-    #: (zero off the part), so stress jumps across a change of material as it does in the part.
-    #: ``von_mises`` is then their envelope.
+    #: For an assembly, (parts, M): each part's own von Mises field, projected from its elements alone (zero off the
+    #: part), so stress jumps across a change of material as it does in the part. ``von_mises`` is then their envelope.
     von_mises_parts: "np.ndarray | None" = None
     #: (N,) the displacement on the vector DOF, as solved.
     u: "np.ndarray | None" = field(default=None, repr=False)
-
-
-def _element_mesh(volume: "VolumeMesh"):
-    """scikit-fem's quadratic tet mesh from netgen's arrays, and node -> scalar DOF (:func:`femspace.element_mesh`)."""
-    from cadgen._internal.fea.femspace import element_mesh
-
-    return element_mesh(volume, 2)
-
-
-def _rigid_body_modes(locations: "np.ndarray", component: "np.ndarray") -> "np.ndarray":
-    """The near-nullspace pyamg needs for elasticity (:func:`operators.rigid_body_modes`)."""
-    from cadgen._internal.fea.operators import rigid_body_modes
-
-    return rigid_body_modes(locations, component)
 
 
 def dof_warning(dofs: int, automatic: bool, small_feature_mm: float | None = None) -> str:
@@ -108,13 +83,6 @@ def dof_warning(dofs: int, automatic: bool, small_feature_mm: float | None = Non
             f"(elements down to {small_feature_mm:.2g} mm), so a larger mesh.size_mm won't help much"
         )
     return f"{dofs} degrees of freedom: expect a slow solve; a larger mesh.size_mm is usually enough"
-
-
-def _solve_system(K, f, free: "np.ndarray", locations: "np.ndarray", component: "np.ndarray", warnings: list[str], method: str | None = None):
-    """Displacement on the free DOF: direct for small systems, AMG+CG otherwise (:func:`operators.solve_spd`)."""
-    from cadgen._internal.fea.operators import solve_spd
-
-    return solve_spd(K, f, free, locations, component, warnings, method=method)
 
 
 def _project_on_elements(scalar, field: "np.ndarray", rows: "np.ndarray") -> "np.ndarray":
@@ -150,22 +118,12 @@ def _project_on_elements(scalar, field: "np.ndarray", rows: "np.ndarray") -> "np
     return result
 
 
-def solve_linear_static(
-    volume: "VolumeMesh",
-    material: "Material | Sequence[Material]",
-    fixtures: "tuple[Fixture, ...]",
-    loads: "tuple[Load, ...]",
-    ordinal_of: dict[str, int],
-    *,
-    log=None,
-    automatic: bool = False,
-    body_loads: "Sequence[Sequence[float]]" = (),
-    initial_strain=None,
-    facet_pressures: "np.ndarray | None" = None,
-    solver: str | None = None,
-    space: "FemSpace | None" = None,
-    rollers: "Sequence[tuple[Sequence[int], int]]" = (),
-) -> SolveOutcome:
+def solve_linear_static(volume: "VolumeMesh", material: "Material | Sequence[Material]",
+                        fixtures: "tuple[Fixture, ...]", loads: "tuple[Load, ...]", ordinal_of: dict[str, int], *,
+                        log=None, automatic: bool = False, body_loads: "Sequence[Sequence[float]]" = (),
+                        initial_strain=None, facet_pressures: "np.ndarray | None" = None, solver: str | None = None,
+                        space: "FemSpace | None" = None, rollers: "Sequence[tuple[Sequence[int], int]]" = ()
+                        ) -> SolveOutcome:
     """Solve one study on a meshed occurrence. ``ordinal_of`` maps face refs to ordinals.
 
     ``automatic`` marks the re-solve cadgen chose the size of, which words its warnings accordingly.
@@ -189,6 +147,7 @@ def solve_linear_static(
     from cadgen._internal.fea import operators
     from cadgen._internal.fea.femspace import FemSpace
     from cadgen._internal.fea.mesh import small_feature_mm
+    from cadgen._internal.fea.superposition import load_vector
     from skfem import LinearForm, asm
 
     timings: dict[str, float] = {}
@@ -205,9 +164,6 @@ def solve_linear_static(
     locations, component = space.locations, space.component
     materials = list(material) if volume.domain is not None else material
 
-    def facets_of(refs) -> "np.ndarray":
-        return space.facets_of(refs, ordinal_of)
-
     # Stiffness
     started = time.perf_counter()
     if solver == "matrix_free":
@@ -217,24 +173,7 @@ def solve_linear_static(
     timings["assemble_s"] = time.perf_counter() - started
 
     # Loads
-    f = np.zeros(basis.N)
-    for load in loads:
-        facet_basis = basis.boundary(facets_of(load.faces))
-        if load.type == "force":
-            traction = np.asarray(load.vector, dtype=float) / float(facet_basis.dx.sum())
-
-            @LinearForm
-            def form(v, w, traction=traction):
-                return traction[0] * v[0] + traction[1] * v[1] + traction[2] * v[2]
-
-        else:
-            pressure = float(load.pressure)
-
-            @LinearForm
-            def form(v, w, pressure=pressure):
-                return -pressure * (w.n[0] * v[0] + w.n[1] * v[1] + w.n[2] * v[2])
-
-        f += asm(form, facet_basis)
+    f = load_vector(space, loads, ordinal_of)
     for acceleration in body_loads:
         f += operators.body_force(space, materials, acceleration)
     if facet_pressures is not None:
@@ -255,7 +194,7 @@ def solve_linear_static(
     applied = tuple(float(f[component == c].sum()) for c in range(3))
 
     # Fixtures: fixed faces, roller faces (supports.py), and a symmetry plane's held component.
-    from cadgen._internal.fea.supports import not_held_sentence, supports_of, unheld_motions
+    from cadgen._internal.fea.supports import check_held, supports_of
 
     planes = []
     for ordinals, axis in rollers:
@@ -265,8 +204,7 @@ def solve_linear_static(
     fixture_dofs = supports.per_fixture
     fixed = supports.fixed
     free = np.setdiff1d(np.arange(basis.N), fixed)
-    if supports.rollers and (loose := unheld_motions(space, supports)):
-        raise ValueError(not_held_sentence(loose))
+    check_held(space, supports)
 
     started = time.perf_counter()
     u = np.zeros(basis.N)
@@ -275,11 +213,11 @@ def solve_linear_static(
         # A sloped or curved roller: solved in its nodes' own axes, then turned back (matrix-free assembles here).
         K = operators.stiffness(space, materials) if solver == "matrix_free" else K
         local = np.zeros(basis.N)
-        local[free], how = _solve_system(supports.local(K), supports.local_vector(f), free, locations, component, warnings,
-                                         method)
+        local[free], how = operators.solve_spd(supports.local(K), supports.local_vector(f), free, locations, component,
+                                               warnings, method=method)
         u = supports.global_vector(local)
     else:
-        u[free], how = _solve_system(K, f, free, locations, component, warnings, method)
+        u[free], how = operators.solve_spd(K, f, free, locations, component, warnings, method=method)
     timings["solve_s"] = time.perf_counter() - started
     if log:
         log(f"solved with {how} in {timings['solve_s']:.1f}s")
@@ -307,21 +245,9 @@ def solve_linear_static(
     timings["stress_s"] = time.perf_counter() - started
 
     return SolveOutcome(
-        dof_locations=space.dof_locations,
-        displacement=displacement,
-        von_mises=von_mises,
-        von_mises_gauss_max=float(von_mises_q.max()),
-        vertices=space.vertices,
-        tets=space.tets,
-        boundary_quadratic=space.boundary_quadratic,
-        reactions=reactions,
-        applied=applied,
-        dofs=int(basis.N),
-        element_dofs=space.element_dofs,
-        element_von_mises_gauss=von_mises_q.max(axis=1),
-        timings=timings,
-        warnings=warnings,
-        solver=how,
-        von_mises_parts=von_mises_parts,
-        u=u,
+        dof_locations=space.dof_locations, displacement=displacement, von_mises=von_mises,
+        von_mises_gauss_max=float(von_mises_q.max()), vertices=space.vertices, tets=space.tets,
+        boundary_quadratic=space.boundary_quadratic, reactions=reactions, applied=applied, dofs=int(basis.N),
+        element_dofs=space.element_dofs, element_von_mises_gauss=von_mises_q.max(axis=1), timings=timings,
+        warnings=warnings, solver=how, von_mises_parts=von_mises_parts, u=u,
     )

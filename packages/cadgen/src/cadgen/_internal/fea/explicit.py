@@ -499,12 +499,6 @@ def simulate(
     group_a = dict.fromkeys(groups, 0.0)
     group_peak = {name: (0.0, 0.0) for name in groups}
 
-    def element_vm() -> np.ndarray:
-        out = np.empty(model.elements)
-        for each in sets.values():
-            out[each.index] = each.vm
-        return out
-
     def contact(nodes_mask_rows: np.ndarray, v_trial: np.ndarray, step: float) -> float:
         """Implicit normal penalty and explicit friction on boundary nodes ``rows`` over ``step``: updates ``v_trial``
         in place and returns the floor's push (N)."""
@@ -572,7 +566,7 @@ def simulate(
         higher = size > u_peak
         u_peak[higher] = size[higher]
         u_peak_t[higher] = time_now
-        current = element_vm()
+        current = element_values(sets, model.elements, "vm")
         raw["vm"] = max(raw["vm"], float(current.max()))
         raw["force"] = max(raw["force"], force)
         share = min(1.0, step / tau) if step > 0 else 0.0
@@ -692,7 +686,7 @@ def simulate(
         frame_u=[s[1].astype(float) for s in picked],
         frame_vm=[s[2].astype(float) for s in picked],
         vm_peak=vm_peak, vm_peak_t=vm_peak_t, u_peak=u_peak, u_peak_t=u_peak_t,
-        plastic=None if plastic is None else element_alpha(sets, model.elements),
+        plastic=None if plastic is None else element_values(sets, model.elements, "alpha"),
         curve_t=curve_t, curve_force=curve_f, steps=small_steps, big_steps=big_steps, dt=small, end_s=end,
         planned_end_s=planned, pulse_end_s=pulse_end, stopped_early=stopped_early, touched=touched, extended=extended,
         seconds=time.perf_counter() - started,
@@ -716,12 +710,13 @@ def weighted_median(values: "np.ndarray", weights: "np.ndarray") -> float:
     return float(values[order][np.searchsorted(cumulative, 0.5 * cumulative[-1])])
 
 
-def element_alpha(sets: dict, elements: int) -> "np.ndarray":
+def element_values(sets: dict, elements: int, name: str) -> "np.ndarray":
+    """Each element's ``name`` (its von Mises, its equivalent plastic strain) from the element sets that cover them."""
     import numpy as np
 
     out = np.zeros(elements)
     for each in sets.values():
-        out[each.index] = each.alpha
+        out[each.index] = getattr(each, name)
     return out
 
 
@@ -730,5 +725,4 @@ def _choose_frames(times: list[float], even: int, end: float) -> list[int]:
     import numpy as np
 
     values = np.asarray(times)
-    chosen = sorted({int(np.argmin(np.abs(values - target))) for target in np.linspace(0.0, end, max(even, 1) + 1)})
-    return chosen
+    return sorted({int(np.argmin(np.abs(values - target))) for target in np.linspace(0.0, end, max(even, 1) + 1)})

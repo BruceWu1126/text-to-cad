@@ -1,12 +1,8 @@
 """Static: will it hold, and how far does it move. Linear elasticity under fixtures, face loads and body loads.
 
-This is the solve ``cadgen fea`` always ran, moved here from ``run.py``
-unchanged: the call into :func:`cadgen._internal.fea.solve.solve_linear_static`
-(through the module, so a test may patch it), the per-part numbers the checks
-read (:class:`~cadgen._internal.fea.checks.Solved`), the stress and
-displacement checks, the findings, the summary and the GLB extras. New here:
-``gravity`` and ``acceleration`` body loads (in g, no faces). Stdlib only at
-import; numeric imports live inside the methods.
+The solve calls :func:`cadgen._internal.fea.solve.solve_linear_static` through
+its module, so a test may patch it. ``gravity`` and ``acceleration`` are body
+loads in g, on no faces. Stdlib only at import.
 """
 
 from __future__ import annotations
@@ -17,7 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs, SolveContext
+from cadgen._internal.fea.analyses.base import AnalysisBase, AnalysisResult, FieldSpec, Inputs, SolveContext, xyz
 from cadgen._internal.fea.study import DEFAULT_CONTROLS, DEFAULT_CHECKS, VIEW_DRIVES, Fixture, Load, parse_fixtures, parse_loads
 
 if TYPE_CHECKING:
@@ -133,6 +129,14 @@ def solved_part_record(volume, outcome, study, plan, index: int, ordinal_of: dic
     )
 
 
+def solved_records(volume, outcome, ctx: SolveContext, fixtures) -> list["Solved"]:
+    """What the checks read of a solve: the one part's record, or each part's of an assembly."""
+    study, plan = ctx.study, ctx.assembly
+    if plan is None:
+        return [solved_record(volume, outcome, study, ctx.ordinal_of, ctx.part_name, fixtures)]
+    return [solved_part_record(volume, outcome, study, plan, index, ctx.ordinal_of, fixtures) for index in range(len(plan.parts))]
+
+
 def peak_face(
     volume, outcome, peak_node: int, fixed_ordinals: set[int], own: set[int] | None = None
 ) -> str | None:
@@ -168,18 +172,46 @@ def peak_face(
     return volume.faces[ordinals[0]].ref if ordinals else None
 
 
-def _unfold(volume, outcome, planes):
-    """The solved half (or quarter) mirrored back into the whole part: its mesh and every field the checks read."""
+def static_setup(ctx: SolveContext, inputs: StaticInputs, loads) -> tuple:
+    """``(loads, extra, planes)`` for :func:`~cadgen._internal.fea.solve.solve_linear_static` on the plan: the face
+    loads (``loads``, or the surface ones beside a body load), its keyword arguments and the symmetry planes."""
+    import dataclasses
+
+    extra: dict[str, Any] = {}
+    if any(load.body for load in inputs.loads):
+        extra["body_loads"] = inputs.body_accelerations
+    if ctx.space is not None:
+        extra["space"] = ctx.space
+    if extra.get("body_loads"):
+        loads = inputs.surface_loads
+    plan = ctx.plan
+    planes = list(plan.prepared.planes) if plan is not None and plan.prepared is not None else []
+    if plan is not None and plan.solver != "direct":
+        extra["solver"] = plan.solver
+    if planes:
+        # The half carries its share of each force (its faces are that share of the faces); a pressure,
+        # a body load and a fixture act on what is there. The cut faces may slide in their plane only.
+        share = 0.5 ** len(planes)
+        loads = tuple(dataclasses.replace(load, vector=tuple(share * c for c in load.vector)) if load.type == "force" else load
+                      for load in loads)
+        extra["rollers"] = [((p.ordinal,), p.component) for p in planes]
+    return loads, extra, planes
+
+
+def unfold(volume, outcome, planes, nodal: dict | None = None):
+    """The solved half (or quarter) mirrored back into the whole part: its mesh, every field the checks read and
+    the ``nodal`` scalar fields beside them. Returns ``(volume, outcome, nodal)``."""
     import dataclasses
 
     import numpy as np
 
     from cadgen._internal.fea import symmetry
 
+    nodal = dict(nodal or {})
     for plane in reversed(planes):
         whole, keep = symmetry.unfold_volume(volume, plane)
         locations, scalars, vectors, boundary, tets, elements, vertices = symmetry.unfold_fields(
-            plane, outcome.vertices, outcome.dof_locations, keep, scalars={"von_mises": outcome.von_mises},
+            plane, outcome.vertices, outcome.dof_locations, keep, scalars={"von_mises": outcome.von_mises, **nodal},
             vectors={"displacement": outcome.displacement}, boundary=outcome.boundary_quadratic, tets=outcome.tets,
             element_dofs=outcome.element_dofs,
         )
@@ -190,8 +222,9 @@ def _unfold(volume, outcome, planes):
             reactions=[symmetry.unfold_force(plane, r) for r in outcome.reactions],
             applied=symmetry.unfold_force(plane, outcome.applied), u=None,
         )
+        nodal = {name: scalars[name] for name in nodal}
         volume = whole
-    return volume, outcome
+    return volume, outcome, nodal
 
 
 #: A stress's colours stop at this quantile of its values when its peak is a spike above them (a clamped edge's, a
@@ -214,21 +247,31 @@ def colour_range(values, peak: float, spike: float = SPIKE) -> tuple:
     return (0.0, cap, {"quantile": COLOUR_QUANTILE, "peak": peak})
 
 
+def motion_summary(outcome) -> dict:
+    """A summary's motion and forces: the largest displacement and where, the load applied and the reactions."""
+    import numpy as np
+
+    magnitude = np.linalg.norm(outcome.displacement, axis=1)
+    reaction_total = tuple(sum(r[c] for r in outcome.reactions) for c in range(3))
+    return {
+        "max_displacement_mm": round(float(magnitude.max()), 6),
+        "max_displacement_at_mm": xyz(outcome.dof_locations[int(magnitude.argmax())]),
+        "applied_force_N": [round(x, 4) for x in outcome.applied],
+        "reaction_force_N": [round(x, 4) for x in reaction_total],
+    }
+
+
 def floored(factor: float | None) -> float | None:
     # Floored, so a factor just under a threshold is never shown as reaching it.
     return None if factor is None else math.floor(factor * 1000) / 1000
 
 
-class StaticAnalysis:
+class StaticAnalysis(AnalysisBase):
     name: ClassVar[str] = "static"
     tier: ClassVar[int] = 1
     word: ClassVar[str] = "Strength"
-    estimate_only: ClassVar[bool] = False
-    limits: ClassVar[tuple[str, ...]] = ()
+    extras_word: ClassVar[str] = "von Mises"
     study_keys: ClassVar[frozenset[str]] = frozenset({"fixtures", "loads"})
-    material_needs: ClassVar[frozenset[str]] = frozenset()
-    mesh_orders: ClassVar[tuple[int, ...]] = (2,)
-    connection_types: ClassVar[tuple[str, ...]] = ("bonded", "free")
     fields: ClassVar[tuple[FieldSpec, ...]] = (
         FieldSpec("von_mises", "_VON_MISES", "von Mises stress", "MPa"),
         FieldSpec("displacement", "_DISPLACEMENT", "displacement", "mm", 3, 1000.0),
@@ -237,7 +280,6 @@ class StaticAnalysis:
     default_checks: ClassVar[tuple[dict, ...]] = DEFAULT_CHECKS
     drives: ClassVar[tuple[str, ...]] = VIEW_DRIVES
     default_controls: ClassVar[dict[str, dict]] = DEFAULT_CONTROLS
-    upstream: ClassVar[tuple[str, ...]] = ()
     ladder: ClassVar[tuple[str, ...]] = ("iterative", "local_refine", "defeature", "linear_elements", "idealise", "symmetry")
     #: The noun of the viewer's load control and the verdict's takeaway ("OK up to 1.6× this load").
     noun: ClassVar[str] = "this load"
@@ -301,8 +343,6 @@ class StaticAnalysis:
     # -- solve ---------------------------------------------------------------------------------------
 
     def solve(self, ctx: SolveContext, inputs: StaticInputs) -> AnalysisResult:
-        import dataclasses
-
         from cadgen._internal.fea import fit, solve
 
         # The ladder's idealise rung: a thin plate as a shell, a slender bar as a beam (fit.IDEALISERS).
@@ -310,53 +350,25 @@ class StaticAnalysis:
             return idealised
         volume, study, plan = ctx.volume, ctx.study, ctx.assembly
         materials = study.material if plan is None else plan.materials
-        extra: dict[str, Any] = {}
-        if any(load.body for load in inputs.loads):
-            extra["body_loads"] = inputs.body_accelerations
-        if ctx.space is not None:
-            extra["space"] = ctx.space
-        loads = study.loads if not extra.get("body_loads") else inputs.surface_loads
-        fit_plan = ctx.plan
-        planes = list(fit_plan.prepared.planes) if fit_plan is not None and fit_plan.prepared is not None else []
-        if fit_plan is not None and fit_plan.solver != "direct":
-            extra["solver"] = fit_plan.solver
-        if planes:
-            # The half carries its share of each force (its faces are that share of the faces); a pressure,
-            # a body load and a fixture act on what is there. The cut faces may slide in their plane only.
-            share = 0.5 ** len(planes)
-            loads = tuple(dataclasses.replace(load, vector=tuple(share * c for c in load.vector)) if load.type == "force" else load
-                          for load in loads)
-            extra["rollers"] = [((p.ordinal,), p.component) for p in planes]
+        loads, extra, planes = static_setup(ctx, inputs, study.loads)
         outcome = solve.solve_linear_static(
             volume, materials, inputs.fixtures, loads, ctx.ordinal_of, log=ctx.log, automatic=ctx.automatic, **extra
         )
         if planes:
-            volume, outcome = _unfold(volume, outcome, planes)
+            volume, outcome, _ = unfold(volume, outcome, planes)
             ctx.volume = volume
-        if plan is None:
-            solved = [solved_record(volume, outcome, study, ctx.ordinal_of, ctx.part_name, inputs.fixtures)]
-        else:
-            solved = [solved_part_record(volume, outcome, study, plan, index, ctx.ordinal_of, inputs.fixtures) for index in range(len(plan.parts))]
-        return self.static_result(outcome, solved, plan)
+        return self.static_result(outcome, solved_records(volume, outcome, ctx, inputs.fixtures), plan)
 
     def static_result(self, outcome, solved, plan) -> AnalysisResult:
         return AnalysisResult(
-            dof_locations=outcome.dof_locations,
-            vertices=outcome.vertices,
-            tets=outcome.tets,
-            boundary_quadratic=outcome.boundary_quadratic,
-            element_dofs=outcome.element_dofs,
+            dof_locations=outcome.dof_locations, vertices=outcome.vertices, tets=outcome.tets,
+            boundary_quadratic=outcome.boundary_quadratic, element_dofs=outcome.element_dofs,
             fields={"von_mises": outcome.von_mises, "displacement": outcome.displacement},
             fields_by_part={} if outcome.von_mises_parts is None else {"von_mises": outcome.von_mises_parts},
             deformation=outcome.displacement,
             scalars={"outcome": outcome, "part_refs": None if plan is None else [part.ref for part in plan.parts]},
-            reactions=list(outcome.reactions),
-            applied=tuple(outcome.applied),
-            dofs=outcome.dofs,
-            solver=outcome.solver,
-            timings=dict(outcome.timings),
-            warnings=outcome.warnings,
-            solved=solved,
+            reactions=list(outcome.reactions), applied=tuple(outcome.applied), dofs=outcome.dofs, solver=outcome.solver,
+            timings=dict(outcome.timings), warnings=outcome.warnings, solved=solved,
         )
 
     @staticmethod
@@ -438,25 +450,17 @@ class StaticAnalysis:
 
     def summary(self, result: AnalysisResult, inputs: StaticInputs, check_results: list[dict]) -> dict:
         """The one place the numbers are rounded; the GLB's extras and the sidecar are derived from it."""
-        import numpy as np
-
         from cadgen._internal.fea import checks
 
         outcome = result.scalars["outcome"]
-        magnitude = np.linalg.norm(outcome.displacement, axis=1)
-        max_disp_index = int(magnitude.argmax())
         max_vm_index = int(outcome.von_mises.argmax())
-        reaction_total = tuple(sum(r[c] for r in outcome.reactions) for c in range(3))
         solved = self.weakest(result)
         summary = {
             "max_von_mises_MPa": round(float(outcome.von_mises[max_vm_index]), 4),
             "max_von_mises_gauss_MPa": round(outcome.von_mises_gauss_max, 4),
-            "max_von_mises_at_mm": [round(float(c), 3) for c in outcome.dof_locations[max_vm_index]],
+            "max_von_mises_at_mm": xyz(outcome.dof_locations[max_vm_index]),
             "yield_MPa": result.scalars["yield_MPa"],
-            "max_displacement_mm": round(float(magnitude.max()), 6),
-            "max_displacement_at_mm": [round(float(c), 3) for c in outcome.dof_locations[max_disp_index]],
-            "applied_force_N": [round(x, 4) for x in outcome.applied],
-            "reaction_force_N": [round(x, 4) for x in reaction_total],
+            **motion_summary(outcome),
             "deformation_scale": result.scalars["deformation_scale"],
         }
         summary["safety_factor"] = floored(checks.safety_factor(solved))
@@ -468,25 +472,15 @@ class StaticAnalysis:
             summary["weakest_part_peak_MPa"] = round(solved.peak_MPa, 4)
             summary["weakest_part_peak_at_mm"] = [round(c, 3) for c in solved.peak_at]
             summary["parts"] = [
-                {
-                    "ref": refs[i],
-                    "name": part.part,
-                    "material": part.material_name,
-                    "yield_MPa": part.yield_MPa,
-                    "peak_MPa": round(part.peak_MPa, 4),
-                    "peak_gauss_MPa": round(part.peak_gauss_MPa, 4),
-                    "peak_at_mm": [round(c, 3) for c in part.peak_at],
-                    "safety_factor": floored(checks.safety_factor(part)),
-                    "max_displacement_mm": round(part.max_displacement_mm, 6),
-                }
+                {"ref": refs[i], "name": part.part, "material": part.material_name, "yield_MPa": part.yield_MPa,
+                 "peak_MPa": round(part.peak_MPa, 4), "peak_gauss_MPa": round(part.peak_gauss_MPa, 4),
+                 "peak_at_mm": [round(c, 3) for c in part.peak_at], "safety_factor": floored(checks.safety_factor(part)),
+                 "max_displacement_mm": round(part.max_displacement_mm, 6)}
                 for i, part in enumerate(result.solved)
             ]
         # Each check the study asked for (the stress check alone by default), judged at the load as solved.
         summary["checks"] = check_results
         return summary
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} von Mises"
 
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
         return {"von_mises": (0.0, summary["max_von_mises_MPa"]), "displacement": (0.0, summary["max_displacement_mm"])}

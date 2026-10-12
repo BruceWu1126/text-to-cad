@@ -43,7 +43,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs, Series, SeriesFrame, SolveContext
+from cadgen._internal.fea.analyses.base import (
+    AnalysisBase, AnalysisResult, FieldSpec, Inputs, Series, SeriesFrame, SolveContext, by_severity, finding,
+    frame_attributes, max_frames, xyz, yield_at,
+)
 
 if TYPE_CHECKING:
     import numpy as np
@@ -256,18 +259,15 @@ def _slowest(ctx: SolveContext):
     return min(ctx.materials, key=lambda m: m.E / m.density)
 
 
-class ImpactAnalysis:
+class ImpactAnalysis(AnalysisBase):
     name: ClassVar[str] = "impact"
-    tier: ClassVar[int] = 3
     word: ClassVar[str] = "Drop impact"
-    estimate_only: ClassVar[bool] = False
     #: Its explicit elements are the same in every direction: study.parse_study refuses an orthotropic material.
     isotropic_only: ClassVar[bool] = True
     limits: ClassVar[tuple[str, ...]] = (LIMITS_LINE,)
     study_keys: ClassVar[frozenset[str]] = frozenset({"drop", "window_ms", "plasticity"})
     material_needs: ClassVar[frozenset[str]] = frozenset({"density"})
     mesh_orders: ClassVar[tuple[int, ...]] = (1,)
-    connection_types: ClassVar[tuple[str, ...]] = ("bonded", "free")
     fields: ClassVar[tuple[FieldSpec, ...]] = (
         FieldSpec("von_mises", "_VON_MISES", "von Mises stress", "MPa", per_frame=True),
         FieldSpec("displacement", "_DISPLACEMENT", "displacement", "mm", 3, 1000.0, per_frame=True),
@@ -283,10 +283,12 @@ class ImpactAnalysis:
         "field": {"drives": "field", "type": "enum", "options": ["von_mises", "displacement", "von_mises_peak", "displacement_peak"]},
         "deformation": {"drives": "deformation", "type": "number", "min": 0.0, "max": None},
     }
-    upstream: ClassVar[tuple[str, ...]] = ()
     ladder: ClassVar[tuple[str, ...]] = ("iterative", "window", "subcycling", "mass_scaling", "local_refine", "defeature")
     noun: ClassVar[str] = "this drop"
     governing_word: ClassVar[str] = "peak stress"
+    extras_word: ClassVar[str] = "drop impact"
+    # needs_finer stays AnalysisBase's False: an explicit run is not repeated finer on its own, its cost growing with
+    # the fourth power of the element size.
 
     # -- parse ---------------------------------------------------------------------------------------
 
@@ -369,7 +371,7 @@ class ImpactAnalysis:
                 step *= plan.size_mm / ctx.volume.max_h
         steps = window / step
         seconds = steps * (fit.SECONDS_PER_STEP + fit.SECONDS_PER_ELEMENT_STEP * elements * share)
-        frames = int(getattr(ctx.budget, "max_frames", 24) or 24)
+        frames = max_frames(ctx)
         nodes = elements / 4.0
         memory = fit.BASE_BYTES + BYTES_PER_ELEMENT * elements + BYTES_PER_NODE * nodes + 2 * frames * (12 * nodes + 4 * elements)
         return seconds, memory, int(elements)
@@ -404,14 +406,13 @@ class ImpactAnalysis:
             if expected >= 0.95 * window:
                 return None
             plan.window_s = expected
-            step = fit.Step(
+            return fit.Step(
                 "window",
                 f"Stopped once the first impact was over (the floor stopped pushing, plus 20%) instead of following the "
                 f"whole {time_words(window)}, to fit",
                 "the first impact and its peak are kept; a second bounce or later ringing is not followed", None,
                 detail={"window_ms": round(window * 1e3, 6), "expected_ms": round(expected * 1e3, 6)},
             )
-            return step
         if rung == "subcycling":
             if plan.subcycle > 1:
                 return None
@@ -422,7 +423,7 @@ class ImpactAnalysis:
             plan.subcycle = n
             _, touching, _, _, _ = explicit.subcycle_partition(element_dt, model.tets, model.count, n)
             percent = 100.0 * float(touching.mean())
-            step = fit.Step(
+            return fit.Step(
                 "subcycling",
                 f"Stepped the {percent:.0f}% of elements with the smallest stable step (and their neighbours) {n}× as often "
                 "as the rest, to fit",
@@ -430,7 +431,6 @@ class ImpactAnalysis:
                 "interpolated through the small steps", None,
                 detail={"substeps": n, "fine_share": round(percent / 100.0, 4), "work_share": round(share, 4)},
             )
-            return step
         if rung == "mass_scaling":
             if plan.mass_scale_dt is not None:
                 return None
@@ -449,7 +449,7 @@ class ImpactAnalysis:
             plan.mass_scale_dt = reached
             added, _ = explicit.mass_scaling(model, reached)
             heavier = int((added > 0).sum())
-            step = fit.Step(
+            return fit.Step(
                 "mass_scaling",
                 f"Added {share * 100:.1f}% to the part's mass, on its {heavier} smallest elements, so the time step could "
                 f"grow {reached / smallest:.2f}× to fit",
@@ -457,7 +457,6 @@ class ImpactAnalysis:
                 detail={"added_share": round(share, 6), "elements": heavier, "step_gain": round(reached / smallest, 4),
                         "measured": False},
             )
-            return step
         return None
 
     def governing(self, result: AnalysisResult) -> tuple["np.ndarray", float]:
@@ -470,10 +469,7 @@ class ImpactAnalysis:
     def solve(self, ctx: SolveContext, inputs: ImpactInputs) -> AnalysisResult:
         import time
 
-        import numpy as np
-
         from cadgen._internal.fea import explicit, timestep
-        from cadgen._internal.fea.analyses.modal import max_frames
 
         plan = ctx.plan
         timings: dict[str, float] = {}
@@ -484,31 +480,25 @@ class ImpactAnalysis:
         window, estimate = self._window_s(ctx, inputs, model)
         stop_after_pulse = plan.window_s is not None
         added, share = self._added_mass(plan, model)
-        plastic = None
-        if inputs.plastic:
-            plastic = self._plastic(ctx, inputs, model)
-        subcycle = self._substeps(plan, model, self._element_dt(ctx, model))
+        plastic = self._plastic(ctx, inputs, model) if inputs.plastic else None
+        element_dt = self._element_dt(ctx, model)
+        subcycle = self._substeps(plan, model, element_dt)
         drop = explicit.Drop(inputs.direction, inputs.speed_mm_s, inputs.friction)
         watch = self._watch(ctx, model)
-        frames_wanted = max_frames(ctx)
         started = time.perf_counter()
         # The automatic window is the estimate's: past it, a part still on the floor is followed until it lifts off.
         extend_to = AUTO_EXTEND * window if inputs.window_s is None and not stop_after_pulse else None
         run = explicit.simulate(model, drop, end_s=window, stop_after_pulse=stop_after_pulse, subcycle=subcycle,
-                                added_rho=added, plastic=plastic, frames=frames_wanted, log=ctx.log, watch=watch,
+                                added_rho=added, plastic=plastic, frames=max_frames(ctx), log=ctx.log, watch=watch,
                                 extend_to_s=extend_to, limit_s=timestep.time_limit(ctx))
         timings["march_s"] = time.perf_counter() - started
         if ctx.log:
             ctx.log(f"impact: {run.steps} steps of {run.dt * 1e6:.3g} µs to {run.end_s * 1e6:.4g} µs in {run.seconds:.1f}s")
         mass = float((model.rho * model.volume).sum())
-        mass_check = None
-        if added is not None and share > 0:
-            mass_check = self._mass_effect(ctx, model, drop, run.end_s, run, plastic, watch,
-                                           seconds_used=timings["march_s"])
-        scaled = None
-        if added is not None:
-            scaled = {"elements": int((added > 0).sum()),
-                      "gain": float((model.element_dt * ((model.rho + added) / model.rho) ** 0.5).min() / model.element_dt.min())}
+        mass_check = self._mass_effect(ctx, model, drop, run.end_s, run, plastic, watch, seconds_used=timings["march_s"]) \
+            if added is not None and share > 0 else None
+        scaled = None if added is None else {"elements": int((added > 0).sum()),
+                                             "gain": float(element_dt.min() / model.element_dt.min())}
         settled_steps = self._settled_steps(run, window, share, mass_check, mass, scaled)
 
         nodal = model.nodal
@@ -517,10 +507,8 @@ class ImpactAnalysis:
         # The viewer opens on the frame of the peak stress.
         default = 0 if run.peak_t is None else min(range(len(run.frame_t)), key=lambda i: abs(run.frame_t[i] - run.peak_t))
         series = Series(kind="time", unit="s", default=default, frames=[
-            SeriesFrame(value=round(t, 12), label=time_words(t), attributes={
-                "von_mises": "_VON_MISES" if i == 0 else f"_VON_MISES_F{i}",
-                "displacement": "_DISPLACEMENT" if i == 0 else f"_DISPLACEMENT_F{i}",
-            })
+            SeriesFrame(value=round(t, 12), label=time_words(t),
+                        attributes=frame_attributes({"von_mises": "_VON_MISES", "displacement": "_DISPLACEMENT"}, i))
             for i, t in enumerate(run.frame_t)
         ])
         vm_peak = nodal(run.vm_peak)
@@ -529,26 +517,19 @@ class ImpactAnalysis:
         if run.plastic is not None:
             fields["plastic_strain"] = nodal(run.plastic) * 100.0
         curve_t, curve_f = _thin(run.curve_t, run.curve_force)
-        g = [f / mass / G0_MM_S2 for f in curve_f]
-        onto = self._onto(volume, model, run)
-        inputs.resolved["onto"] = onto
+        curve_x = [round(t, 12) for t in curve_t]
+        inputs.resolved["onto"] = self._onto(volume, model, run)
         inputs.resolved["window_s"] = window
         space = ctx.space
+        locations, vertices, tets, boundary, element_dofs = (
+            (space.dof_locations, space.vertices, space.tets, space.boundary_quadratic, space.element_dofs)
+            if space is not None else (model.nodes, model.count, model.tets, model.boundary, model.tets))
         return AnalysisResult(
-            dof_locations=space.dof_locations if space is not None else model.nodes,
-            vertices=space.vertices if space is not None else model.count,
-            tets=space.tets if space is not None else model.tets,
-            boundary_quadratic=space.boundary_quadratic if space is not None else model.boundary,
-            element_dofs=space.element_dofs if space is not None else model.tets,
-            fields=fields,
-            deformation=frame_u[0],
-            series=series,
-            frame_fields={"von_mises": frame_vm, "displacement": frame_u},
+            dof_locations=locations, vertices=vertices, tets=tets, boundary_quadratic=boundary, element_dofs=element_dofs,
+            fields=fields, deformation=frame_u[0], series=series, frame_fields={"von_mises": frame_vm, "displacement": frame_u},
             curves={
-                "contact_force_N": {"x": [round(t, 12) for t in curve_t], "x_unit": "s",
-                                    "y": [round(f, 6) for f in curve_f], "y_unit": "N"},
-                "rigid_body_g": {"x": [round(t, 12) for t in curve_t], "x_unit": "s",
-                                 "y": [round(v, 6) for v in g], "y_unit": "g"},
+                "contact_force_N": {"x": curve_x, "x_unit": "s", "y": [round(f, 6) for f in curve_f], "y_unit": "N"},
+                "rigid_body_g": {"x": curve_x, "x_unit": "s", "y": [round(f / mass / G0_MM_S2, 6) for f in curve_f], "y_unit": "g"},
             },
             scalars={
                 "run": run, "model_mass_t": mass, "window_s": window, "contact_estimate_s": estimate,
@@ -575,8 +556,7 @@ class ImpactAnalysis:
             solver=(f"explicit central difference, lumped mass, {run.steps} steps of {run.dt * 1e6:.3g} µs"
                     + (f", subcycled {run.subcycle}×" if run.subcycle > 1 else "")
                     + (f", mass scaled +{share * 100:.1f}%" if added is not None else "")),
-            timings=timings,
-            warnings=[],
+            timings=timings, warnings=[],
         )
 
     def _plastic(self, ctx: SolveContext, inputs: ImpactInputs, model):
@@ -684,17 +664,11 @@ class ImpactAnalysis:
 
     def _onto(self, volume, model, run) -> list[str]:
         """The faces that met the floor: every boundary triangle whose corners all touched it."""
-        import numpy as np
-
         rows = run.touched[model.boundary].all(axis=1)
         ordinals = sorted({int(o) for o in volume.boundary_ordinal[rows]} - {0})
         return [volume.faces[o].ref for o in ordinals if o in volume.faces]
 
     # -- checks, findings ----------------------------------------------------------------------------
-
-    def needs_finer(self, result: AnalysisResult, inputs: ImpactInputs, check_results: list[dict]) -> bool:
-        """An explicit run is not repeated finer on its own: its cost grows with the fourth power of the element size."""
-        return False
 
     def refined_record(self, result: AnalysisResult, size_mm: float, finer_mm: float, *, assembly: bool) -> dict:
         return {"from_size_mm": round(size_mm, 4), "from_max_von_mises_MPa": round(self._stress_peak(result)[1], 4),
@@ -751,13 +725,6 @@ class ImpactAnalysis:
                 f"peak {peak:.4g} MPa {float(height.max() - height[node]):.3g} mm from the floor; ρ c v with c = √(E/ρ) "
                 "and v the impact speed")
 
-    def _yield_at(self, result: AnalysisResult, node: int) -> float:
-        domains = result.scalars["node_domain"]
-        yields = result.scalars["yields"]
-        if domains is None or len(yields) == 1:
-            return yields[0]
-        return yields[int(domains[node])]
-
     def peak_g(self, result: AnalysisResult) -> tuple[float, float]:
         """(peak rigid-body g, when): the floor's filtered push over the part's mass."""
         run = result.scalars["run"]
@@ -781,7 +748,7 @@ class ImpactAnalysis:
             node, peak, when = self._stress_peak(result)
             at = tuple(float(c) for c in result.dof_locations[node])
             solved = checks.Solved(
-                material_name="", yield_MPa=self._yield_at(result, node), peak_MPa=peak, peak_gauss_MPa=peak, peak_at=at,
+                material_name="", yield_MPa=yield_at(result.scalars, node), peak_MPa=peak, peak_gauss_MPa=peak, peak_at=at,
                 peak_face=peak_face(ctx.volume, result, node, set()), fixed_faces=(), max_displacement_mm=0.0,
                 displacement_at=at, bbox_diagonal_mm=0.0, margin=result.scalars["margin"], coarser_peak_MPa=None, part="",
             )
@@ -804,7 +771,7 @@ class ImpactAnalysis:
                 "kind": "acceleration", "label": check.get("label") or ACCELERATION_LABEL,
                 "value": round(value, 4), "limit": check["limit_g"], "unit": "g", "ratio": round(ratio, 6),
                 "close_at": _CLOSE_AT, "status": checks.check_status(ratio, _CLOSE_AT),
-                "where": {"ref": ref, "at": [round(c, 3) for c in at]},
+                "where": {"ref": ref, "at": xyz(at)},
             }
             if faces:
                 judged["faces"] = list(faces)
@@ -824,14 +791,12 @@ class ImpactAnalysis:
             "value": round(value, 6), "limit": check["limit_percent"], "unit": "%", "ratio": round(ratio, 6),
             "close_at": _CLOSE_AT, "status": checks.check_status(ratio, _CLOSE_AT),
             "where": {"ref": peak_face(ctx.volume, result, node, set()),
-                      "at": [round(float(c), 3) for c in result.dof_locations[node]]},
+                      "at": xyz(result.dof_locations[node])},
             "at": self._at(result, end),
         }
 
     def findings(self, ctx: SolveContext, result: AnalysisResult, inputs: ImpactInputs,
                  check_results: list[dict], *, assembly: bool) -> list[dict]:
-        from cadgen._internal.fea.analyses.modal import finding
-
         from cadgen._internal.fea.timestep import stopped_finding
 
         scalars = result.scalars
@@ -867,7 +832,7 @@ class ImpactAnalysis:
                                      "the plastic strain left at the end of the run", item))
         wave = self._wave_finding(ctx, result, inputs)
         if wave is not None:
-            found.append(finding("info", "impact_stress_wave", *wave, []))
+            found.append(finding("info", "impact_stress_wave", *wave))
         g, g_at = self.peak_g(result)
         contact = run.pulse_end_s
         found.append(finding(
@@ -875,16 +840,15 @@ class ImpactAnalysis:
             f"The floor stops it with a peak of {_figure(g)} g at {time_words(g_at)}"
             + (f"; it is on the floor for {time_words(contact)}" if contact is not None else ""),
             f"{LIMITS_LINE} The floor's push peaks at {run.peak_force:.4g} N; g is that push over the part's mass",
-            [],
         ))
         if contact is None and not run.timed_out:
             found.append(finding(
                 "info", "still_in_contact",
                 f"Still pressing on the floor at the end ({time_words(run.end_s)}): run longer (window_ms) to follow the "
                 "whole impact",
-                f"the contact-time estimate was {time_words(scalars['contact_estimate_s'])}", [],
+                f"the contact-time estimate was {time_words(scalars['contact_estimate_s'])}",
             ))
-        return sorted(found, key=lambda item: {"error": 0, "warning": 1, "info": 2}[item["severity"]])
+        return by_severity(found)
 
     # -- what is written -----------------------------------------------------------------------------
 
@@ -894,26 +858,21 @@ class ImpactAnalysis:
         return requested or auto_deformation_scale(float(result.fields["displacement_peak"].max()), bbox_diagonal)
 
     def summary(self, result: AnalysisResult, inputs: ImpactInputs, check_results: list[dict]) -> dict:
-        import numpy as np
-
         scalars = result.scalars
         run = scalars["run"]
         node, peak, when = self._stress_peak(result)
         envelope = result.fields["displacement_peak"]
         d_node = int(envelope.argmax())
-        yield_MPa = self._yield_at(result, node)
+        yield_MPa = yield_at(result.scalars, node)
         factor = yield_MPa / peak if peak > 0 else None
         g, g_at = self.peak_g(result)
-        mass = scalars["model_mass_t"]
-        speed = inputs.speed_mm_s
         summary: dict[str, Any] = {
             "limits": LIMITS_LINE,
             "drop": {
-                "height_mm": inputs.height_mm, "impact_speed_m_s": round(speed / 1000.0, 4),
+                "height_mm": inputs.height_mm, "impact_speed_m_s": round(inputs.speed_mm_s / 1000.0, 4),
                 "direction": [round(c, 6) for c in inputs.direction], "floor": "rigid", "friction": inputs.friction,
             },
-            "window_ms": round(scalars["window_s"] * 1e3, 9),
-            "window_auto": scalars["window_auto"],
+            "window_ms": round(scalars["window_s"] * 1e3, 9), "window_auto": scalars["window_auto"],
             "contact_time_estimate_ms": round(scalars["contact_estimate_s"] * 1e3, 9),
             "contact_ms": None if run.pulse_end_s is None else round(run.pulse_end_s * 1e3, 9),
             "end_ms": round(run.end_s * 1e3, 9),
@@ -921,40 +880,29 @@ class ImpactAnalysis:
             **({"stopped_at_time_limit": True} if run.timed_out else {}),
             # The automatic window was followed on past its end until the first impact was over.
             "extended_to_pulse_end": run.extended,
-            "step_us": round(run.dt * 1e6, 9),
-            "steps": run.steps,
-            "subcycle": scalars["subcycle"],
+            "step_us": round(run.dt * 1e6, 9), "steps": run.steps, "subcycle": scalars["subcycle"],
             "mass_added_percent": round(scalars["added_share"] * 100.0, 4),
-            "mass_kg": round(mass * 1000.0, 9),
-            "max_von_mises_MPa": round(peak, 4),
-            "max_von_mises_at_ms": round(when * 1e3, 9),
-            "max_von_mises_at_mm": [round(float(c), 3) for c in result.dof_locations[node]],
+            "mass_kg": round(scalars["model_mass_t"] * 1000.0, 9),
+            "max_von_mises_MPa": round(peak, 4), "max_von_mises_at_ms": round(when * 1e3, 9),
+            "max_von_mises_at_mm": xyz(result.dof_locations[node]),
             "yield_MPa": yield_MPa,
             "safety_factor": None if factor is None else math.floor(factor * 1000) / 1000,
-            "peak_force_N": round(run.peak_force, 4),
-            "peak_g": round(g, 4),
-            "peak_g_at_ms": round(g_at * 1e3, 9),
+            "peak_force_N": round(run.peak_force, 4), "peak_g": round(g, 4), "peak_g_at_ms": round(g_at * 1e3, 9),
             "max_displacement_mm": round(float(envelope[d_node]), 6),
             "max_displacement_at_ms": round(float(run.u_peak_t[d_node]) * 1e3, 9),
-            "max_displacement_at_mm": [round(float(c), 3) for c in result.dof_locations[d_node]],
+            "max_displacement_at_mm": xyz(result.dof_locations[d_node]),
             "filter_us": round(run.filter_s * 1e6, 6),
             "unfiltered": {"max_von_mises_MPa": round(run.raw_peak_vm, 4), "peak_force_N": round(run.raw_peak_force, 4)},
             # The centre of mass's speed away from the floor at the end (negative: still moving toward it).
             "rebound_speed_m_s": round(-run.energy["centre_velocity_end_mm_s"] / 1000.0, 4),
-            "frames": len(scalars["frame_t"]),
-            "plastic": inputs.plastic,
-            "deformation_scale": scalars["deformation_scale"],
+            "frames": len(scalars["frame_t"]), "plastic": inputs.plastic, "deformation_scale": scalars["deformation_scale"],
         }
         if inputs.plastic:
             strain = result.fields["plastic_strain"]
-            summary["tangent_MPa"] = inputs.tangent_MPa
-            summary["max_plastic_strain_percent"] = round(float(strain.max()), 6)
-            summary["max_plastic_strain_at_mm"] = [round(float(c), 3) for c in result.dof_locations[int(strain.argmax())]]
+            summary.update({"tangent_MPa": inputs.tangent_MPa, "max_plastic_strain_percent": round(float(strain.max()), 6),
+                            "max_plastic_strain_at_mm": xyz(result.dof_locations[int(strain.argmax())])})
         summary["checks"] = check_results
         return summary
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} drop impact"
 
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
         import numpy as np

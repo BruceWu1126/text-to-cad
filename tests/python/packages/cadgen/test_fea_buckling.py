@@ -11,30 +11,15 @@ Parse tests are stdlib only; the solves need the fea extra.
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import struct
-import tempfile
 import unittest
-from contextlib import redirect_stderr
-from pathlib import Path
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
+from tests.python.support.fea_fixtures import box_step, class_directory, ends, glb_extras, needs_fea, solve
 
 from cadgen._internal.fea.analyses import get_analysis  # noqa: E402
 from cadgen._internal.fea.analyses.buckling import NO_BUCKLING_FACTOR, _buckling_check  # noqa: E402
 from cadgen._internal.fea.materials import lookup_material  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
 from cadgen._internal.fea.study import parse_study  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 LENGTH, SIDE, PUSH = 200.0, 6.0, 100.0
 STEEL = lookup_material("steel")
@@ -55,22 +40,21 @@ class StudyFile(unittest.TestCase):
         self.assertEqual(parse_study(_study(modes=5)).inputs.modes, 5)
 
     def test_fixtures_and_loads_are_required(self):
-        with self.assertRaisesRegex(ValueError, "fixtures"):
-            parse_study({"analysis": "buckling", "material": "steel", "loads": _study()["loads"]})
-        with self.assertRaisesRegex(ValueError, "loads"):
-            parse_study({"analysis": "buckling", "material": "steel", "fixtures": _study()["fixtures"]})
+        for missing in ("fixtures", "loads"):
+            with self.subTest(missing=missing), self.assertRaisesRegex(ValueError, missing):
+                parse_study({key: value for key, value in _study().items() if key != missing})
 
     def test_its_check_and_keys(self):
         parsed = parse_study(_study(view={"checks": [{"kind": "buckling", "margin": 5, "label": "Column"}]}))
         self.assertEqual(parsed.inputs.checks, ({"kind": "buckling", "margin": 5.0, "label": "Column"},))
-        with self.assertRaisesRegex(ValueError, "below 1 means it buckles"):
-            parse_study(_study(view={"checks": [{"kind": "buckling", "margin": 0.5}]}))
-        with self.assertRaisesRegex(ValueError, "only one buckling check"):
-            parse_study(_study(view={"checks": [{"kind": "buckling"}, {"kind": "buckling"}]}))
-        with self.assertRaisesRegex(ValueError, r"unknown keys \['range_Hz'\]; buckling studies take"):
-            parse_study(_study(range_Hz=[0, 10]))
-        with self.assertRaisesRegex(ValueError, "from 1 to 30"):
-            parse_study(_study(modes=0))
+        for more, words in (
+            ({"view": {"checks": [{"kind": "buckling", "margin": 0.5}]}}, "below 1 means it buckles"),
+            ({"view": {"checks": [{"kind": "buckling"}, {"kind": "buckling"}]}}, "only one buckling check"),
+            ({"range_Hz": [0, 10]}, r"unknown keys \['range_Hz'\]; buckling studies take"),
+            ({"modes": 0}, "from 1 to 30"),
+        ):
+            with self.subTest(words=words), self.assertRaisesRegex(ValueError, words):
+                parse_study(_study(**more))
 
     def test_a_body_load_needs_a_density_as_in_static(self):
         parsed = parse_study(_study(loads=[{"type": "gravity", "vector_g": [-1, 0, 0]}]))
@@ -97,39 +81,16 @@ class Check(unittest.TestCase):
             "iterative", "local_refine", "defeature", "linear_elements", "idealise", "symmetry", "reduce_modes"))
 
 
-def _glb(path: Path) -> dict:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    return json.loads(raw[20:20 + length])
-
-
-def _ends(listing) -> tuple[str, str]:
-    by_x = {face.center_mm[0]: face.ref for face in listing.faces
-            if face.surface == "plane" and face.normal is not None and abs(abs(face.normal[0]) - 1) < 1e-6}
-    return by_x[min(by_x)], by_x[max(by_x)]
-
-
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class EulerColumn(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from build123d import Align, Box, export_step
-
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.directory = Path(cls._tmp.name)
-        cls.step = cls.directory / "column.step"
-        export_step(Box(LENGTH, SIDE, SIDE, align=(Align.MIN, Align.CENTER, Align.CENTER)), str(cls.step))
-        cls.fixed, cls.top = _ends(fea.faces(cls.step))
+        directory = class_directory(cls)
+        cls.step = box_step(directory, "column", (LENGTH, SIDE, SIDE), "x")
+        cls.fixed, cls.top = ends(cls.step)
         cls.study = {"analysis": "buckling", "material": "steel", "mesh": {"size_mm": 2.0}, "fixtures": [{"faces": [cls.fixed]}],
                      "loads": [{"faces": [cls.top], "type": "force", "vector_N": [-PUSH, 0, 0]}], "modes": 3}
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(cls.step, cls.directory / "column.fea.glb", study=cls.study)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.result = solve(cls.step, directory / "column.fea.glb", cls.study)
 
     def test_it_buckles_at_eulers_load(self):
         factors = self.result.summary["load_factors"]
@@ -156,7 +117,7 @@ class EulerColumn(unittest.TestCase):
         self.assertEqual(self.result.human_lines()[1][:31], "buckles first at 13.3× this loa")
 
     def test_the_glb_carries_the_shapes_and_the_prestress(self):
-        extras = _glb(self.result.glb)["meshes"][0]["extras"]
+        extras = glb_extras(self.result.glb)
         self.assertEqual(extras["analysis"]["type"], "buckling")
         self.assertEqual([(f["attribute"], f["field"]) for f in extras["fields"]], [("_DISPLACEMENT", "mode_shape"), ("_VON_MISES", "von_mises")])
         self.assertTrue(extras["fields"][0]["per_frame"])
@@ -179,25 +140,25 @@ class EulerColumn(unittest.TestCase):
         ordinal_of = {ref: int(ref.rsplit("f", 1)[1]) for ref in (self.fixed, self.top)}
         analysis = get_analysis("buckling")
 
-        def solve(study, solver="direct"):
+        def run(study, solver="direct"):
             parsed = parse_study(study)
             ctx = SolveContext(volume=volume, materials=(parsed.material,), ordinal_of=ordinal_of, space=space, log=None,
                                automatic=False, upstream={}, budget=None, plan=FitPlan(solver=solver), study=parsed, part_name="column")
             return ctx, parsed, analysis.solve(ctx, parsed.inputs)
 
-        _, _, iterative = solve({**self.study, "modes": 1}, "iterative")
+        _, _, iterative = run({**self.study, "modes": 1}, "iterative")
         self.assertIn("lobpcg + amg", iterative.solver)
         self.assertAlmostEqual(iterative.scalars["load_factors"][0] / (EULER_N / PUSH), 1.0, delta=0.05)
 
         pulled = {**self.study, "loads": [{"faces": [self.top], "type": "force", "vector_N": [PUSH, 0, 0]}]}
-        ctx, parsed, result = solve(pulled)
+        ctx, parsed, result = run(pulled)
         self.assertEqual(result.scalars["load_factors"], [])
         self.assertIn("does not compress the part enough to buckle it", result.warnings[-1])
         found = analysis.findings(ctx, result, parsed.inputs, [], assembly=False)
         self.assertIn("no_buckling", [finding["type"] for finding in found])
 
         close = {**self.study, "view": {"checks": [{"kind": "buckling", "margin": 20, "label": "Column"}]}}
-        ctx, parsed, result = solve(close)
+        ctx, parsed, result = run(close)
         judged = analysis.judge(parsed.checks[0], 0, ctx, result, parsed.inputs)
         self.assertEqual((judged["status"], judged["label"]), ("close", "Column"))
         self.assertTrue(analysis.needs_finer(result, parsed.inputs, []))

@@ -51,7 +51,9 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs, SolveContext
+from cadgen._internal.fea.analyses.base import (
+    AnalysisBase, AnalysisResult, FieldSpec, Inputs, SolveContext, finding, mirrored, unfold_result, xyz,
+)
 
 __all__ = ["AC_LIMITS", "AppliedField", "Coil", "Electrode", "ElectromagneticAnalysis", "ElectromagneticInputs", "LIMITS", "MODES",
            "Probe", "hertz"]
@@ -98,6 +100,15 @@ MODE_FIELDS = {
     "magnetostatic": ("magnetic_field",),
     "ac_magnetic": ("eddy_current", "magnetic_field"),
 }
+#: The study keys each mode takes (beyond ``mode``), and the checks it judges.
+MODE_KEYS = {
+    "electrostatic": {"voltages", "air", "probes", "capacitance"},
+    "current": {"voltages", "currents", "probes", "resistance", "electro_thermal"},
+    "magnetostatic": {"coils", "air", "probes", "map_to_structure"},
+    "ac_magnetic": {"frequency_Hz", "coils", "currents", "voltages", "applied_field", "air", "probes", "electro_thermal"},
+}
+MODE_CHECKS = {"electrostatic": {"electric_field"}, "current": {"temperature"}, "magnetostatic": {"stress", "displacement"},
+               "ac_magnetic": {"temperature"}}
 NOUNS = {"electrostatic": "this voltage", "current": "this current", "magnetostatic": "this current", "ac_magnetic": "this current"}
 
 
@@ -172,24 +183,6 @@ class ElectromagneticInputs(Inputs):
 # -- parse --------------------------------------------------------------------------------------------
 
 
-def _known(entry: dict, keys: set[str], where: str, words: str) -> None:
-    unknown = set(entry) - keys
-    if unknown:
-        raise ValueError(f"{where}: unknown keys {sorted(unknown)}; {words}")
-
-
-def _list(document: dict, key: str, example: str) -> list[dict]:
-    raw = document.get(key)
-    if raw is None:
-        return []
-    if not isinstance(raw, list):
-        raise ValueError(f"study.{key}: expected a list like [{example}]")
-    for index, entry in enumerate(raw):
-        if not isinstance(entry, dict):
-            raise ValueError(f"{key}[{index}]: expected an object like {example}")
-    return raw
-
-
 def _vector(raw: Any, where: str, *, unit: bool = False) -> tuple[float, float, float]:
     if not isinstance(raw, list) or len(raw) != 3:
         raise ValueError(f"{where}: expected [x, y, z]")
@@ -201,9 +194,9 @@ def _vector(raw: Any, where: str, *, unit: bool = False) -> tuple[float, float, 
 
 def _electrodes(document: dict, key: str, unit: str, example: str, words: str) -> tuple[Electrode, ...]:
     out = []
-    for index, entry in enumerate(_list(document, key, example)):
+    for index, entry in enumerate(kinds.entries(document, key, example)):
         where = f"{key}[{index}]"
-        _known(entry, {"faces", unit, "name"}, where, words)
+        kinds.known(entry, {"faces", unit, "name"}, where, words)
         if unit not in entry:
             raise ValueError(f"{where}.{unit}: {words}")
         value = kinds.number(entry[unit], where=f"{where}.{unit}")
@@ -224,15 +217,15 @@ def _air(document: dict, mode: str) -> float | None:
         return 0.0
     if not isinstance(raw, dict):
         raise ValueError('air: true, or an object like {"around_mm": 20} (how far the air reaches past the parts)')
-    _known(raw, {"around_mm"}, "air", "it takes around_mm, how far the air reaches past the parts on every side")
+    kinds.known(raw, {"around_mm"}, "air", "it takes around_mm, how far the air reaches past the parts on every side")
     return kinds.number(raw["around_mm"], where="air.around_mm", positive=True) if "around_mm" in raw else 0.0
 
 
 def _probes(document: dict) -> tuple[Probe, ...]:
     out = []
-    for index, entry in enumerate(_list(document, "probes", '{"at_mm": [0, 0, 0], "label": "centre"}')):
+    for index, entry in enumerate(kinds.entries(document, "probes", '{"at_mm": [0, 0, 0], "label": "centre"}')):
         where = f"probes[{index}]"
-        _known(entry, {"at_mm", "label"}, where, "a probe takes at_mm ([x, y, z]) and a label")
+        kinds.known(entry, {"at_mm", "label"}, where, "a probe takes at_mm ([x, y, z]) and a label")
         if "at_mm" not in entry:
             raise ValueError(f"{where}.at_mm: the point to read the field at, [x, y, z] in mm")
         at = _vector(entry["at_mm"], f"{where}.at_mm")
@@ -243,10 +236,10 @@ def _probes(document: dict) -> tuple[Probe, ...]:
 def _coils(document: dict) -> tuple[Coil, ...]:
     out = []
     example = '{"part": "coil", "turns": 100, "A": 2, "axis": {"direction": [0, 0, 1]}}'
-    for index, entry in enumerate(_list(document, "coils", example)):
+    for index, entry in enumerate(kinds.entries(document, "coils", example)):
         where = f"coils[{index}]"
-        _known(entry, {"part", "turns", "A", "axis", "name"}, where,
-               "a coil takes part (the winding's solid), turns, A (the current in each turn), axis and name")
+        kinds.known(entry, {"part", "turns", "A", "axis", "name"}, where,
+                    "a coil takes part (the winding's solid), turns, A (the current in each turn), axis and name")
         for key, words in (("turns", "the number of turns of wire"), ("A", "the current in each turn, in amperes"),
                            ("axis", 'the axis it winds around: {"direction": [0, 0, 1], "point_mm": [0, 0, 0]}')):
             if key not in entry:
@@ -257,7 +250,7 @@ def _coils(document: dict) -> tuple[Coil, ...]:
         if not isinstance(axis, dict) or "direction" not in axis:
             raise ValueError(f'{where}.axis: an object like {{"direction": [0, 0, 1], "point_mm": [0, 0, 0]}} '
                              "(point_mm defaults to the coil's centre)")
-        _known(axis, {"direction", "point_mm"}, f"{where}.axis", "the axis takes direction and point_mm")
+        kinds.known(axis, {"direction", "point_mm"}, f"{where}.axis", "the axis takes direction and point_mm")
         direction = _vector(axis["direction"], f"{where}.axis.direction", unit=True)
         point = _vector(axis["point_mm"], f"{where}.axis.point_mm") if "point_mm" in axis else None
         part = entry.get("part")
@@ -288,16 +281,20 @@ def _between(document: dict, electrodes: tuple[Electrode, ...], key: str, what: 
     return pair[0], pair[1]
 
 
-def _electro_thermal(document: dict, needs: set[str]) -> tuple[tuple | None, float | None]:
+def _electro_thermal(document: dict, needs: set[str], check_kinds: list, heat: str) -> tuple[tuple | None, float | None]:
     """``electro_thermal``: where the Joule heat (DC) or the eddy-current loss (AC) goes, as a thermal study writes it."""
     from cadgen._internal.fea.analyses import thermal as thermal_analysis
 
     block = document.get("electro_thermal")
+    if block is None:
+        if "temperature" in check_kinds:
+            raise ValueError(f"view.checks: a temperature check needs {heat} to go somewhere: add electro_thermal")
+        return None, None
     if not isinstance(block, dict):
         raise ValueError('electro_thermal: an object like {"convection": [{"faces": ["#o1.f3"], "h_W_m2K": 10, '
                          '"ambient_C": 25}]}, where the Joule heat goes')
-    _known(block, set(thermal_analysis.HEAT_KEYS), "electro_thermal",
-           "it takes temperatures, heat and convection, as a thermal study writes them")
+    kinds.known(block, set(thermal_analysis.HEAT_KEYS), "electro_thermal",
+                "it takes temperatures, heat and convection, as a thermal study writes them")
     try:
         temperatures, heat, convection = thermal_analysis.parse_heat_keys(block)
     except ValueError as exc:
@@ -318,7 +315,7 @@ def _applied(document: dict) -> AppliedField | None:
     example = '{"mT": 10, "direction": [1, 0, 0]}'
     if not isinstance(raw, dict):
         raise ValueError(f"applied_field: an object like {example}, a uniform AC field around the parts")
-    _known(raw, {"mT", "direction"}, "applied_field", "it takes mT (the field's amplitude) and direction")
+    kinds.known(raw, {"mT", "direction"}, "applied_field", "it takes mT (the field's amplitude) and direction")
     for key, words in (("mT", "the field's amplitude, in millitesla"), ("direction", "the field's direction, like [1, 0, 0]")):
         if key not in raw:
             raise ValueError(f"applied_field.{key}: {words}")
@@ -333,15 +330,8 @@ def parse_document(document: dict) -> ElectromagneticInputs:
                          "capacitance, field strength), current (DC current, resistance, Joule heat), "
                          "magnetostatic (coils, magnetic field, inductance, force) or ac_magnetic (coils or a current "
                          "at a frequency: eddy currents, skin effect, loss, induction heating)")
-    allowed = {
-        "electrostatic": {"voltages", "air", "probes", "capacitance"},
-        "current": {"voltages", "currents", "probes", "resistance", "electro_thermal"},
-        "magnetostatic": {"coils", "air", "probes", "map_to_structure"},
-        "ac_magnetic": {"frequency_Hz", "coils", "currents", "voltages", "applied_field", "air", "probes", "electro_thermal"},
-    }[mode]
-    own = {"voltages", "currents", "coils", "air", "probes", "capacitance", "resistance", "electro_thermal", "map_to_structure",
-           "frequency_Hz", "applied_field"}
-    if stray := sorted((set(document) & own) - allowed):
+    allowed = MODE_KEYS[mode]
+    if stray := sorted((set(document) & set().union(*MODE_KEYS.values())) - allowed):
         raise ValueError(f"study: {', '.join(stray)} {'is' if len(stray) == 1 else 'are'} not for {_a(mode)} study; "
                          f"it takes {', '.join(sorted(allowed))}")
     voltages = _electrodes(document, "voltages", "V", '{"faces": ["#o1.f1"], "V": 1000, "name": "top"}',
@@ -354,21 +344,15 @@ def parse_document(document: dict) -> ElectromagneticInputs:
         raise ValueError("voltages and currents: two electrodes are named the same; give each a 'name' of its own")
     probes = _probes(document)
     air = _air(document, mode)
-    between = None
-    thermal = None
-    reference = None
+    between = thermal = reference = structure_part = None
     needs: set[str] = set()
     fixtures: tuple = ()
-    structure_part = None
-    view = document.get("view")
-    checks = view.get("checks") if isinstance(view, dict) else None
-    check_kinds = [c.get("kind") for c in checks if isinstance(c, dict)] if isinstance(checks, list) else []
-    allowed_checks = {"electrostatic": {"electric_field"}, "current": {"temperature"},
-                      "magnetostatic": {"stress", "displacement"}, "ac_magnetic": {"temperature"}}[mode]
+    check_kinds = [c.get("kind") for _, c in kinds.view_checks(document)]
+    allowed_checks = MODE_CHECKS[mode]
     for index, kind in enumerate(check_kinds):
         if kind in {"electric_field", "temperature", "stress", "displacement"} and kind not in allowed_checks:
-            raise ValueError(f"view.checks[{index}]: a {kind} check is not for {_a(mode)} study"
-                             + ("" if allowed_checks else "") + f"; it takes {', '.join(sorted(allowed_checks))}")
+            raise ValueError(f"view.checks[{index}]: a {kind} check is not for {_a(mode)} study; "
+                             f"it takes {', '.join(sorted(allowed_checks))}")
     if mode == "electrostatic":
         if not voltages:
             raise ValueError('voltages: an electrostatic study needs faces held at a voltage, like '
@@ -380,10 +364,7 @@ def parse_document(document: dict) -> ElectromagneticInputs:
                              '{"faces": ["#o1.f2"], "V": 0} (ground)')
         between = _between(document, (*voltages, *currents), "resistance", "electrodes")
         needs.add("resistivity")
-        if document.get("electro_thermal") is not None:
-            thermal, reference = _electro_thermal(document, needs)
-        elif "temperature" in check_kinds:
-            raise ValueError("view.checks: a temperature check needs the Joule heat to go somewhere: add electro_thermal")
+        thermal, reference = _electro_thermal(document, needs, check_kinds, "the Joule heat")
     elif mode == "ac_magnetic":
         if "frequency_Hz" not in document:
             raise ValueError("frequency_Hz: an AC study needs its frequency, in hertz, like 50 or 20000")
@@ -403,10 +384,7 @@ def parse_document(document: dict) -> ElectromagneticInputs:
         if voltages and not currents:
             raise ValueError("voltages: an AC study holds a face at 0 V only as the return of a current; add 'currents'")
         needs.update({"permeability", "resistivity"})
-        if document.get("electro_thermal") is not None:
-            thermal, reference = _electro_thermal(document, needs)
-        elif "temperature" in check_kinds:
-            raise ValueError("view.checks: a temperature check needs the loss to go somewhere: add electro_thermal")
+        thermal, reference = _electro_thermal(document, needs, check_kinds, "the loss")
     else:
         if not coils:
             raise ValueError('coils: a magnetostatic study needs a source: a coil, like [{"part": "coil", "turns": 100, '
@@ -417,8 +395,8 @@ def parse_document(document: dict) -> ElectromagneticInputs:
 
             if not isinstance(mapping, dict):
                 raise ValueError('map_to_structure: an object like {"part": "armature", "fixtures": [{"faces": ["#o2.f1"]}]}')
-            _known(mapping, {"part", "fixtures"}, "map_to_structure",
-                   "it takes the part the magnetic force acts on and the fixtures that hold the parts")
+            kinds.known(mapping, {"part", "fixtures"}, "map_to_structure",
+                        "it takes the part the magnetic force acts on and the fixtures that hold the parts")
             try:
                 fixtures = parse_fixtures(mapping)
             except ValueError as exc:
@@ -515,6 +493,12 @@ def _skin(material, frequency_Hz: float) -> float:
     return em_ops.skin_depth_mm(material.resistivity, float(material.permeability or 1.0), frequency_Hz)
 
 
+def _coil_summary(c: dict) -> dict:
+    return {"name": c["name"], "part": c["part"], "turns": c["turns"], "A": c["A"], "ampere_turns": c["turns"] * c["A"],
+            "section_mm2": round(c["section_mm2"], 6), "current_density_A_mm2": round(c["current_density_A_mm2"], 6),
+            "axis_point_mm": c["axis_point_mm"], "axis_direction": c["axis_direction"]}
+
+
 def hertz(frequency: float) -> str:
     """A frequency as a person says it: "50 Hz", "15.8 kHz", "2 MHz"."""
     for scale, unit in ((1e6, "MHz"), (1e3, "kHz")):
@@ -544,22 +528,11 @@ def _unheld_and_unheated(system) -> "np.ndarray":
     return np.flatnonzero(loose[piece]).astype(np.int64)
 
 
-def _place(at) -> list[float]:
-    return [round(float(c), 3) for c in at]
-
-
-class ElectromagneticAnalysis:
+class ElectromagneticAnalysis(AnalysisBase):
     name: ClassVar[str] = "electromagnetic"
-    tier: ClassVar[int] = 3
     word: ClassVar[str] = "Magnetic / electric"
-    estimate_only: ClassVar[bool] = False
-    study_keys: ClassVar[frozenset[str]] = frozenset({
-        "mode", "voltages", "currents", "coils", "air", "probes", "capacitance", "resistance", "electro_thermal",
-        "map_to_structure", "frequency_Hz", "applied_field",
-    })
-    material_needs: ClassVar[frozenset[str]] = frozenset()
-    mesh_orders: ClassVar[tuple[int, ...]] = (2,)
-    connection_types: ClassVar[tuple[str, ...]] = ("bonded", "free")
+    extras_word: ClassVar[str] = "electromagnetic"
+    study_keys: ClassVar[frozenset[str]] = frozenset({"mode"}.union(*MODE_KEYS.values()))
     checks: ClassVar[tuple] = (kinds.ELECTRIC_FIELD, kinds.TEMPERATURE, kinds.STRESS, kinds.DISPLACEMENT)
     default_checks: ClassVar[tuple[dict, ...]] = ()
     drives: ClassVar[tuple[str, ...]] = ("field", "deformation", "threshold")
@@ -567,7 +540,6 @@ class ElectromagneticAnalysis:
         "field": {"drives": "field", "type": "enum",
                   "options": ["potential", "electric_field", "current_density", "magnetic_field", "eddy_current"]},
     }
-    upstream: ClassVar[tuple[str, ...]] = ()
     #: The static and DC modes' rungs; an AC study takes :data:`AC_LADDER` (``ladder`` follows the parsed mode).
     dc_ladder: ClassVar[tuple[str, ...]] = ("iterative", "local_refine", "defeature", "far_field", "symmetry")
     noun: ClassVar[str] = "this voltage"
@@ -606,13 +578,17 @@ class ElectromagneticAnalysis:
 
     # -- the ladder ----------------------------------------------------------------------------------
 
+    @staticmethod
+    def _extent(ctx: SolveContext) -> float:
+        """The parts' size, mm: the side of the cube their bounding box's diagonal spans."""
+        return ctx.geometry.bbox_diagonal_mm / math.sqrt(3.0) if ctx.geometry is not None else 10.0
+
     def _sizes(self, ctx: SolveContext, inputs: ElectromagneticInputs) -> tuple[float, float, float]:
         """(at the parts, out in the air, how far the air reaches) mm."""
-        plan, geometry = ctx.plan, ctx.geometry
+        plan = ctx.plan
         size = float(plan.size_mm or plan.requested_mm or 1.0)
         far = float(plan.fluid_far_size_mm) if plan.fluid_far_size_mm else FAR * size
-        extent = (geometry.bbox_diagonal_mm / math.sqrt(3.0)) if geometry is not None else 10.0
-        around = inputs.air_mm or AROUND.get(inputs.mode, 1.0) * extent
+        around = inputs.air_mm or AROUND.get(inputs.mode, 1.0) * self._extent(ctx)
         return size, max(far, size), around
 
     def _air_tets(self, ctx: SolveContext, inputs: ElectromagneticInputs) -> float:
@@ -621,7 +597,7 @@ class ElectromagneticAnalysis:
         size, far, around = self._sizes(ctx, inputs)
         geometry = ctx.geometry
         parts = fit.tets_estimate(geometry, size) if geometry is not None else 0.0
-        span = (geometry.bbox_diagonal_mm / math.sqrt(3.0) if geometry is not None else 10.0) + 2.0 * around
+        span = self._extent(ctx) + 2.0 * around
         air_volume = span ** 3 - (geometry.volume_mm3 if geometry is not None else 0.0)
         area = geometry.area_mm2 if geometry is not None else 0.0
         # A band a few elements thick at the parts' size, the size grading out to ``far`` beyond it.
@@ -706,7 +682,7 @@ class ElectromagneticAnalysis:
                 return None
             plan = ctx.plan
             size, far, around = self._sizes(ctx, inputs)
-            span = (ctx.geometry.bbox_diagonal_mm / math.sqrt(3.0) if ctx.geometry is not None else 10.0) + 2.0 * around
+            span = self._extent(ctx) + 2.0 * around
             coarser = min(COARSEN * far, span / 4.0)
             if coarser <= 1.05 * far:
                 return None
@@ -735,17 +711,10 @@ class ElectromagneticAnalysis:
             return False
         if inputs.thermal is not None and inputs.thermal[1]:
             return False  # a heat input given as a total power would land twice on half its faces
-
-        def onto_itself(refs) -> bool:
-            ordinals = {ctx.ordinal_of[ref] for ref in refs}
-            return {plane.mirror.get(o) for o in ordinals} == ordinals
-
         groups = [e.faces for e in inputs.electrodes]
         if inputs.thermal is not None:
             groups += [g.faces for g in (*inputs.thermal[0], *inputs.thermal[1], *inputs.thermal[2])]
-        checks = ctx.study.checks if ctx.study is not None else ()
-        groups += [tuple(check["faces"]) for check in checks if check.get("faces")]
-        return all(onto_itself(group) for group in groups)
+        return mirrored(plane, ctx, groups)
 
     def governing(self, result: AnalysisResult):
         name = {"electrostatic": "electric_field", "current": "current_density",
@@ -861,13 +830,14 @@ class ElectromagneticAnalysis:
         import numpy as np
 
         from cadgen._internal.fea import em_ops
+        from cadgen._internal.fea.analyses.nonlinear import symmetry_planes
         from cadgen._internal.fea.analyses.thermal import plan_solver, space_result
 
         electro = inputs.mode == "electrostatic"
         region = self._region(ctx, inputs, parts)
         n = region.space.scalar_count
         mats = parts.materials
-        planes = list(ctx.plan.prepared.planes) if ctx.plan is not None and ctx.plan.prepared is not None else []
+        planes = symmetry_planes(ctx)
         share = 0.5 ** len(planes)
         warnings: list[str] = []
         held, groups = [], []
@@ -991,9 +961,7 @@ class ElectromagneticAnalysis:
         if region.air:
             potential = em_ops.to_part_mesh(region, x, ctx.space, ctx.volume.domain)
             field_values = em_ops.to_part_mesh(region, field_nodes, ctx.space, ctx.volume.domain)
-            scalars["region"] = {"elements": int(len(region.volume.tets)), "nodes": int(region.space.scalar_count),
-                                 "size_mm": round(region.size_mm, 4), "air_mm": round(region.far_mm, 4),
-                                 "box_mm": [list(map(float, c)) for c in region.box]}
+            scalars["region"] = self._region_record(region, "nodes", region.space.scalar_count)
         else:
             potential, field_values = x, field_nodes
         fields = {"potential": potential, field_name: field_values}
@@ -1003,7 +971,7 @@ class ElectromagneticAnalysis:
                               warnings=warnings, scalars=scalars)
         result.dofs = int(n)
         if planes:
-            self._unfold(ctx, result, planes)
+            unfold_result(ctx, result, planes)
         return result
 
     def _heat(self, ctx, inputs, region, joule, scalars, warnings):
@@ -1062,39 +1030,18 @@ class ElectromagneticAnalysis:
                     nearest, best = part, gap
         return {"in": "air", **({"near": parts.names[nearest], "gap_mm": round(best, 3)} if nearest is not None else {})}
 
-    def _unfold(self, ctx: SolveContext, result: AnalysisResult, planes) -> None:
-        """The solved half (or quarter) mirrored back into the whole part."""
-        from cadgen._internal.fea import symmetry
-
-        volume = ctx.volume
-        for plane in reversed(planes):
-            whole, keep = symmetry.unfold_volume(volume, plane)
-            locations, scalars, _, boundary, tets, elements, vertices = symmetry.unfold_fields(
-                plane, result.vertices, result.dof_locations, keep, scalars=dict(result.fields), vectors={},
-                boundary=result.boundary_quadratic, tets=result.tets, element_dofs=result.element_dofs,
-            )
-            result.dof_locations, result.fields, result.boundary_quadratic = locations, scalars, boundary
-            result.tets, result.element_dofs, result.vertices = tets, elements, vertices
-            volume = whole
-        ctx.volume = volume
-
-    def _magnetic(self, ctx: SolveContext, inputs: ElectromagneticInputs, parts: _Parts) -> AnalysisResult:
-        import numpy as np
-
+    @staticmethod
+    def _coils(region, parts: _Parts, inputs: ElectromagneticInputs):
+        """The coils' summed source current density and a record of each (its axis point defaults to its centroid)."""
         from cadgen._internal.fea import em_ops
-        from cadgen._internal.fea.analyses.thermal import plan_solver, space_result
 
-        region = self._region(ctx, inputs, parts, order=1)
-        mats = parts.materials
-        mu_r = [float(m.permeability) for m in mats] + [em_ops.AIR_MU_R]
         J = None
         coils = []
         for index, coil in enumerate(inputs.coils):
             part = _find(parts, coil.part, f"coils[{index}].part")
-            basis = region.space_hcurl
             if coil.point is None:
                 inside = region.domain == part
-                weights = basis.dx[inside].sum(axis=1)
+                weights = region.space_hcurl.dx[inside].sum(axis=1)
                 centres = region.space.mesh.p[:, region.space.mesh.t[:, inside]].mean(axis=1)
                 point = tuple((centres * weights).sum(axis=1) / weights.sum())
             else:
@@ -1105,8 +1052,38 @@ class ElectromagneticAnalysis:
                                  "it; a coil is a ring of wire around the axis (check axis.direction and point_mm)")
             J = density if J is None else J + density
             coils.append({"name": coil.name, "part": parts.names[part], "index": part, "turns": coil.turns, "A": coil.amps,
-                          "section_mm2": section, "axis_point_mm": _place(point), "axis_direction": list(coil.direction),
+                          "section_mm2": section, "axis_point_mm": xyz(point), "axis_direction": list(coil.direction),
                           "current_density_A_mm2": coil.turns * abs(coil.amps) / section})
+        return J, coils
+
+    @staticmethod
+    def _field_probes(region, probes, B, tesla, part) -> list[dict]:
+        """The flux density at each probe (``part`` of each component: real, or a phasor's amplitude), mT."""
+        import numpy as np
+
+        from cadgen._internal.fea import em_ops
+
+        found = em_ops.element_at(region, np.array([p.at for p in probes]))
+        return [{"label": p.label, "at_mm": list(p.at),
+                 **({"B_mT": [part(c) * 1e9 for c in B[e]], "magnetic_field_mT": float(tesla[e]) * 1e3} if e >= 0 else
+                    {"outside": True})}
+                for p, e in zip(probes, found)]
+
+    @staticmethod
+    def _region_record(region, unknowns: str, count) -> dict:
+        return {"elements": int(len(region.volume.tets)), unknowns: int(count), "size_mm": round(region.size_mm, 4),
+                "air_mm": round(region.far_mm, 4), "box_mm": [list(map(float, c)) for c in region.box]}
+
+    def _magnetic(self, ctx: SolveContext, inputs: ElectromagneticInputs, parts: _Parts) -> AnalysisResult:
+        import numpy as np
+
+        from cadgen._internal.fea import em_ops
+        from cadgen._internal.fea.analyses.thermal import plan_solver, space_result
+
+        region = self._region(ctx, inputs, parts, order=1)
+        mats = parts.materials
+        mu_r = [float(m.permeability) for m in mats] + [em_ops.AIR_MU_R]
+        J, coils = self._coils(region, parts, inputs)
         solved = em_ops.curl_curl(region, mu_r, J, solver=plan_solver(ctx))
         B = solved.B
         tesla = np.linalg.norm(B, axis=1) * 1e6
@@ -1131,13 +1108,7 @@ class ElectromagneticAnalysis:
             forces.append({"part": parts.names[i], "index": i, "N": [float(c) for c in force], "by": how})
         scalars["forces"] = forces
         if inputs.probes:
-            found = em_ops.element_at(region, np.array([p.at for p in inputs.probes]))
-            scalars["probes"] = [
-                {"label": p.label, "at_mm": list(p.at),
-                 **({"B_mT": [float(c) * 1e9 for c in B[e]], "magnetic_field_mT": float(tesla[e]) * 1e3} if e >= 0 else
-                    {"outside": True})}
-                for p, e in zip(inputs.probes, found)
-            ]
+            scalars["probes"] = self._field_probes(region, inputs.probes, B, tesla, float)
         # |B| at the region's nodes, each part's own elements averaged (the air's on the air's), then onto the run's mesh.
         nodal = np.zeros(region.space.scalar_count)
         for part in range(region.parts):
@@ -1150,9 +1121,7 @@ class ElectromagneticAnalysis:
             touched = count > 0
             nodal[touched] = total[touched] / count[touched]
         field = em_ops.to_part_mesh(region, nodal * 1e3, ctx.space, ctx.volume.domain)
-        scalars["region"] = {"elements": int(len(region.volume.tets)), "edges": int(solved.dofs),
-                             "size_mm": round(region.size_mm, 4), "air_mm": round(region.far_mm, 4),
-                             "box_mm": [list(map(float, c)) for c in region.box]}
+        scalars["region"] = self._region_record(region, "edges", solved.dofs)
         result = space_result(ctx.space, {"magnetic_field": field}, solver=f"Nédélec curl-curl, {solved.how}",
                               scalars=scalars)
         result.dofs = int(solved.dofs)
@@ -1181,25 +1150,7 @@ class ElectromagneticAnalysis:
         region = self._region(ctx, inputs, parts, order=1, part_sizes={i: h for i, h in part_sizes.items() if h < size})
         mu_r = [float(m.permeability) for m in mats] + [em_ops.AIR_MU_R]
         sigma = [1.0 / (m.resistivity * 1000.0) if i in eddy else 0.0 for i, m in enumerate(mats)] + [0.0]
-        J = None
-        coils = []
-        for index, coil in enumerate(inputs.coils):
-            part = _find(parts, coil.part, f"coils[{index}].part")
-            if coil.point is None:
-                inside = region.domain == part
-                weights = region.space_hcurl.dx[inside].sum(axis=1)
-                centres = region.space.mesh.p[:, region.space.mesh.t[:, inside]].mean(axis=1)
-                point = tuple((centres * weights).sum(axis=1) / weights.sum())
-            else:
-                point = coil.point
-            density, section, smallest = em_ops.coil_source(region, part, coil.turns, coil.amps, point, coil.direction)
-            if smallest < 0.05 * region.size_mm:
-                raise ValueError(f"coils[{index}]: {parts.names[part]} reaches its own axis, so it does not wind around "
-                                 "it; a coil is a ring of wire around the axis (check axis.direction and point_mm)")
-            J = density if J is None else J + density
-            coils.append({"name": coil.name, "part": parts.names[part], "index": part, "turns": coil.turns, "A": coil.amps,
-                          "section_mm2": section, "axis_point_mm": _place(point), "axis_direction": list(coil.direction),
-                          "current_density_A_mm2": coil.turns * abs(coil.amps) / section})
+        J, coils = self._coils(region, parts, inputs)
         fed, grounds, feeds = [], [], []
         for e in inputs.currents:
             rows = self._rows(region, parts, e.faces, f"currents[{e.name}]")
@@ -1263,13 +1214,7 @@ class ElectromagneticAnalysis:
             scalars["max_eddy_current_A_mm2"] = 0.0
             scalars["max_at"] = scalars["max_field_at"]
         if inputs.probes:
-            found = em_ops.element_at(region, np.array([p.at for p in inputs.probes]))
-            scalars["probes"] = [
-                {"label": p.label, "at_mm": list(p.at),
-                 **({"B_mT": [float(abs(c)) * 1e9 for c in solved.B[e]], "magnetic_field_mT": float(tesla[e]) * 1e3}
-                    if e >= 0 else {"outside": True})}
-                for p, e in zip(inputs.probes, found)
-            ]
+            scalars["probes"] = self._field_probes(region, inputs.probes, solved.B, tesla, lambda c: float(abs(c)))
         # Onto the run's mesh: |B| averaged at each part's nodes, |J| at each conductor's corners averaged at its nodes.
         n = region.space.scalar_count
         b_nodal = np.zeros(n)
@@ -1292,9 +1237,7 @@ class ElectromagneticAnalysis:
         fields = {"eddy_current": em_ops.to_part_mesh(region, j_nodal, ctx.space, ctx.volume.domain),
                   "magnetic_field": em_ops.to_part_mesh(region, b_nodal * 1e3, ctx.space, ctx.volume.domain)}
         self._ac_motion(ctx, region, solved, eddy, volumes, frequency, scalars)
-        scalars["region"] = {"elements": int(len(region.volume.tets)), "dofs": int(solved.dofs),
-                             "size_mm": round(region.size_mm, 4), "air_mm": round(region.far_mm, 4),
-                             "box_mm": [list(map(float, c)) for c in region.box]}
+        scalars["region"] = self._region_record(region, "dofs", solved.dofs)
         if inputs.thermal is not None:
             heat = self._loss_onto_parts(ctx, region, solved, eddy)
             fields["temperature"] = self._heat(ctx, inputs, region, heat, scalars, warnings)
@@ -1402,11 +1345,10 @@ class ElectromagneticAnalysis:
         outcome = solve.solve_linear_static(volume, material_arg, inputs.fixtures, (), ctx.ordinal_of, log=ctx.log,
                                             automatic=ctx.automatic, **extra)
         margin = getattr(ctx.study, "margin", 2.0) if ctx.study is not None else 2.0
+        study = types.SimpleNamespace(material=parts.materials[0], margin=margin)
         if ctx.assembly is None:
-            study = types.SimpleNamespace(material=parts.materials[0], margin=margin)
             result.solved = [solved_record(volume, outcome, study, ctx.ordinal_of, ctx.part_name, inputs.fixtures)]
         else:
-            study = types.SimpleNamespace(material=parts.materials[0], margin=margin)
             result.solved = [solved_part_record(volume, outcome, study, ctx.assembly, i, ctx.ordinal_of, inputs.fixtures)
                              for i in range(len(parts.names))]
         result.fields["von_mises"] = outcome.von_mises
@@ -1417,9 +1359,6 @@ class ElectromagneticAnalysis:
         result.warnings += [w for w in outcome.warnings if w not in result.warnings]
         result.scalars["outcome"] = outcome
         result.scalars["structure"] = {"part": parts.names[target], "force_N": force.tolist()}
-
-    def needs_finer(self, result: AnalysisResult, inputs: ElectromagneticInputs, check_results: list[dict]) -> bool:
-        return False
 
     # -- judging -------------------------------------------------------------------------------------
 
@@ -1437,20 +1376,12 @@ class ElectromagneticAnalysis:
         if check["kind"] == "temperature":
             from cadgen._internal.fea.analyses.thermal import temperature_check
 
-            peak = kinds.field_max_over(
-                result.fields["temperature"], tuple(check.get("faces", ())), boundary=result.boundary_quadratic,
-                boundary_ordinal=ctx.volume.boundary_ordinal, locations=result.dof_locations, face_ref=ctx.volume.faces,
-                ordinal_of=ctx.ordinal_of, where=f"view.checks[{index}]",
-            )
+            peak = kinds.check_max(result.fields["temperature"], check.get("faces", ()), ctx, result, index)
             return temperature_check(check, peak.value, inputs.reference_C, at=peak.at, ref=peak.ref, faces=peak.faces)
         faces = tuple(check.get("faces", ()))
         peak_in = None
         if faces:
-            peak = kinds.field_max_over(
-                result.fields["electric_field"], faces, boundary=result.boundary_quadratic,
-                boundary_ordinal=ctx.volume.boundary_ordinal, locations=result.dof_locations, face_ref=ctx.volume.faces,
-                ordinal_of=ctx.ordinal_of, where=f"view.checks[{index}]",
-            )
+            peak = kinds.check_max(result.fields["electric_field"], faces, ctx, result, index)
             value, at, ref, named = peak.value, peak.at, peak.ref, peak.faces
         else:
             # The strongest field anywhere: in a dielectric part or in the air between the parts.
@@ -1461,7 +1392,7 @@ class ElectromagneticAnalysis:
         return {
             "kind": "electric_field", "label": check.get("label") or "Arcing", "value": round(value, 6), "limit": limit,
             "unit": "kV/mm", "ratio": round(ratio, 6), "close_at": CLOSE_AT, "status": check_status(ratio, CLOSE_AT),
-            "where": {"ref": ref, "at": _place(at), **(peak_in if not faces and peak_in else {})},
+            "where": {"ref": ref, "at": xyz(at), **(peak_in if not faces and peak_in else {})},
             **({"faces": list(named)} if named else {}),
         }
 
@@ -1482,26 +1413,24 @@ class ElectromagneticAnalysis:
                 continue
             fails = check["status"] == "fails"
             value = f"{check['value']:.4g} kV/mm"
-            found.append({
-                "check": "fea", "severity": "error" if fails else "warning",
-                "type": "electric_field_over_limit" if fails else "electric_field_close_to_limit",
-                "summary": (f"The field reaches {value}, {'over' if fails else 'close to'} the {check['limit']:g} kV/mm "
-                            f"allowed: {'it would arc over' if fails else 'it is close to arcing'}"),
-                "description": f"peak field {value} against {check['limit']:g} kV/mm ({check['ratio']:.2f} of it); sharp "
-                               "edges concentrate the field, so round them to bring it down",
-                "items": [{"text": "the strongest field", **check["where"]}],
-            })
+            found.append(finding(
+                "error" if fails else "warning",
+                "electric_field_over_limit" if fails else "electric_field_close_to_limit",
+                f"The field reaches {value}, {'over' if fails else 'close to'} the {check['limit']:g} kV/mm "
+                f"allowed: {'it would arc over' if fails else 'it is close to arcing'}",
+                f"peak field {value} against {check['limit']:g} kV/mm ({check['ratio']:.2f} of it); sharp "
+                "edges concentrate the field, so round them to bring it down",
+                [{"text": "the strongest field", **check["where"]}],
+            ))
         if inputs.mode == "electrostatic" and len({e.value for e in inputs.voltages}) == 1:
-            found.append({"check": "fea", "severity": "info", "type": "one_voltage",
-                          "summary": f"Every electrode is at {inputs.voltages[0].value:g} V, so there is no field",
-                          "description": "hold two faces at different voltages to see a field", "items": []})
+            found.append(finding("info", "one_voltage", f"Every electrode is at {inputs.voltages[0].value:g} V, so there "
+                                 "is no field", "hold two faces at different voltages to see a field"))
         thermal = result.scalars.get("thermal")
         if thermal and thermal["balance"]["imbalance"] > 0.01:
             b = thermal["balance"]
-            found.append({"check": "fea", "severity": "warning", "type": "heat_balance",
-                          "summary": f"The heat in ({b['in_W']:.4g} W) and out ({b['out_W']:.4g} W) differ by "
-                                     f"{b['imbalance']:.1%}: the temperatures may not have settled",
-                          "description": "a finer mesh should close it", "items": []})
+            found.append(finding("warning", "heat_balance", f"The heat in ({b['in_W']:.4g} W) and out ({b['out_W']:.4g} W) "
+                                 f"differ by {b['imbalance']:.1%}: the temperatures may not have settled",
+                                 "a finer mesh should close it"))
         return found
 
     # -- what is written -----------------------------------------------------------------------------
@@ -1528,7 +1457,7 @@ class ElectromagneticAnalysis:
             potential = result.fields["potential"]
             out.update({
                 "max_field_kV_mm": round(s["max_field_kV_mm"], 6),
-                "max_at_mm": _place(s["max_at"]),
+                "max_at_mm": xyz(s["max_at"]),
                 "energy_J": float(f"{s['energy_J']:.6g}"),
                 "min_potential_V": round(float(potential.min()), 6),
                 "max_potential_V": round(float(potential.max()), 6),
@@ -1544,7 +1473,7 @@ class ElectromagneticAnalysis:
             potential = result.fields["potential"]
             out.update({
                 "max_current_density_A_mm2": round(s["max_current_density_A_mm2"], 6),
-                "max_at_mm": _place(s["max_at"]),
+                "max_at_mm": xyz(s["max_at"]),
                 "power_W": float(f"{s['power_W']:.6g}"),
                 "joule_heat_W": float(f"{s['joule_W']:.6g}"),
                 "min_potential_V": round(float(potential.min()), 6),
@@ -1563,18 +1492,15 @@ class ElectromagneticAnalysis:
                 "loss_W": float(f"{s['loss_W']:.6g}"),
                 "losses": [{"part": entry["part"], "W": float(f"{entry['W']:.6g}")} for entry in s["losses"]],
                 "max_eddy_current_A_mm2": round(s["max_eddy_current_A_mm2"], 6),
-                "max_at_mm": _place(s["max_at"]),
+                "max_at_mm": xyz(s["max_at"]),
                 "max_field_mT": round(s["max_field_T"] * 1e3, 6),
-                "max_field_at_mm": _place(s["max_field_at"]),
+                "max_field_at_mm": xyz(s["max_field_at"]),
                 "max_surface_field_mT": round(float(result.fields["magnetic_field"].max()), 6),
                 "energy_J": float(f"{s['energy_J']:.6g}"),
                 "skin": [{"part": k["part"], "depth_mm": round(k["depth_mm"], 6), "surface_mm": round(k["surface_mm"], 6),
                           "elements_per_depth": round(k["elements_per_depth"], 3), "resolved": k["resolved"]}
                          for k in s["skin"]],
-                "coils": [{"name": c["name"], "part": c["part"], "turns": c["turns"], "A": c["A"],
-                           "ampere_turns": c["turns"] * c["A"], "section_mm2": round(c["section_mm2"], 6),
-                           "current_density_A_mm2": round(c["current_density_A_mm2"], 6),
-                           "axis_point_mm": c["axis_point_mm"], "axis_direction": c["axis_direction"]} for c in s["coils"]],
+                "coils": [_coil_summary(c) for c in s["coils"]],
                 "currents": [{"name": f["name"], "part": f["part"], "A": f["A"]} for f in s["fed"]],
             })
             if "applied_field" in s:
@@ -1588,13 +1514,10 @@ class ElectromagneticAnalysis:
             field = result.fields["magnetic_field"]
             out.update({
                 "max_field_mT": round(s["max_field_T"] * 1e3, 6),
-                "max_at_mm": _place(s["max_at"]),
+                "max_at_mm": xyz(s["max_at"]),
                 "max_surface_field_mT": round(float(field.max()), 6),
                 "energy_J": float(f"{s['energy_J']:.6g}"),
-                "coils": [{"name": c["name"], "part": c["part"], "turns": c["turns"], "A": c["A"],
-                           "ampere_turns": c["turns"] * c["A"], "section_mm2": round(c["section_mm2"], 6),
-                           "current_density_A_mm2": round(c["current_density_A_mm2"], 6),
-                           "axis_point_mm": c["axis_point_mm"], "axis_direction": c["axis_direction"]} for c in s["coils"]],
+                "coils": [_coil_summary(c) for c in s["coils"]],
                 "forces": [{"part": f["part"], "force_N": [float(f"{c:.6g}") for c in f["N"]], "by": f["by"]}
                            for f in s["forces"]],
             })
@@ -1620,12 +1543,9 @@ class ElectromagneticAnalysis:
         T = result.fields["temperature"]
         balance = result.scalars["thermal"]["balance"]
         return {"max_temperature_C": round(float(T.max()), 4), "min_temperature_C": round(float(T.min()), 4),
-                "temperature_max_at_mm": _place(result.dof_locations[int(T.argmax())]),
+                "temperature_max_at_mm": xyz(result.dof_locations[int(T.argmax())]),
                 "heat_in_W": round(balance["in_W"], 6), "heat_out_W": round(balance["out_W"], 6),
                 "heat_balance": round(balance["imbalance"], 6), "reference_C": inputs.reference_C}
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} electromagnetic"
 
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
         import numpy as np
@@ -1694,9 +1614,6 @@ class ElectromagneticAnalysis:
                              f"{summary['current_A']:.4g} A")
             lines.append(f"Joule heat {summary['joule_heat_W']:.6g} W; densest current "
                          f"{summary['max_current_density_A_mm2']:.4g} A/mm² at {summary['max_at_mm']} mm")
-            if "max_temperature_C" in summary:
-                lines.append(f"hottest {summary['max_temperature_C']:g} °C, coolest {summary['min_temperature_C']:g} °C "
-                             "from the Joule heat")
         elif mode == "ac_magnetic":
             losses = ", ".join(f"{entry['part']} {entry['W']:.4g} W" for entry in summary["losses"]) or "no conductor"
             lines.append(f"at {hertz(summary['frequency_Hz'])}: loss {summary['loss_W']:.4g} W ({losses}); densest eddy current "
@@ -1708,9 +1625,6 @@ class ElectromagneticAnalysis:
             for skin in summary["skin"]:
                 lines.append(f"skin depth in {skin['part']} {skin['depth_mm']:.3g} mm, its surface meshed at "
                              f"{skin['surface_mm']:.3g} mm" + ("" if skin["resolved"] else " (not resolved: the loss reads high)"))
-            if "max_temperature_C" in summary:
-                lines.append(f"hottest {summary['max_temperature_C']:g} °C, coolest {summary['min_temperature_C']:g} °C "
-                             "from the induction heat")
         else:
             lines.append(f"strongest field {summary['max_field_mT']:.4g} mT at {summary['max_at_mm']} mm; "
                          f"stored energy {summary['energy_J']:.4g} J")
@@ -1722,6 +1636,9 @@ class ElectromagneticAnalysis:
                 st = summary["structure"]
                 lines.append(f"under the magnetic force on {st['part']}: peak von Mises {st['max_von_mises_MPa']:.4g} MPa, "
                              f"largest displacement {st['max_displacement_mm']:.4g} mm")
+        if "max_temperature_C" in summary:  # current (Joule) or ac_magnetic (induction) with electro_thermal
+            lines.append(f"hottest {summary['max_temperature_C']:g} °C, coolest {summary['min_temperature_C']:g} °C "
+                         f"from the {'induction' if mode == 'ac_magnetic' else 'Joule'} heat")
         for probe in summary.get("probes", ()):
             value = (f"{probe['magnetic_field_mT']:.4g} mT" if "magnetic_field_mT" in probe else
                      f"{probe['electric_field_kV_mm']:.4g} kV/mm, {probe['V']:.4g} V" if "electric_field_kV_mm" in probe else

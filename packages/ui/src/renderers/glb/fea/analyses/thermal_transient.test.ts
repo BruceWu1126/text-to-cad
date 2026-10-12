@@ -1,24 +1,18 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
+import { BufferAttribute } from 'three';
 import { describe, expect, it } from 'vitest';
-import { feaControls, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, studyRows } from '../../feaResult.js';
 import { activeFrameIndex } from '../series.js';
 import { feaAnalysis } from './index.js';
 import { HEAT_MARKERS, HEAT_SETUP } from './thermal.js';
 import thermalTransient, { PLAY, fieldAndTime } from './thermal_transient.js';
+import { feaFile, vec } from '../../__tests__/feaFile.js';
 
 // A steady heat result as cadgen writes one: temperature first, heat flow beside it, nothing deformed.
 function heatResult(extras: Record<string, unknown> = {}) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.01, 0, 0, 0, 0.01, 0]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_von_mises', new BufferAttribute(new Float32Array([25, 60, 84]), 1));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_temperature', new BufferAttribute(new Float32Array([25, 60, 84]), 1));
-  geometry.setAttribute('_heat_flux', new BufferAttribute(new Float32Array([0, 900, 2000]), 1));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 1]), 1));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  return feaFile({
+    position: [0, 0, 0, 0.01, 0, 0, 0, 0.01, 0], _von_mises: [25, 60, 84], _displacement: vec(9), _temperature: [25, 60, 84],
+    _heat_flux: [0, 900, 2000], _face: [0, 0, 1],
+  }, {
     generator: 'cadgen fea', name: 'plate temperature', deformation_scale: null, faces: ['#o1.f1', '#o1.f7'],
     analysis: { type: 'thermal', tier: 1, word: 'Heat', estimate: false, limits: [], noun: 'this heat', reference_C: 25, warnings: [] },
     fields: [
@@ -37,9 +31,6 @@ function heatResult(extras: Record<string, unknown> = {}) {
     findings: [],
     ...extras,
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 // Heat over time as cadgen writes it: frame 0 (t = 0) in the fields' own attributes, the hottest frame the default.

@@ -9,26 +9,12 @@ away from the floor. The block is a build123d box written to a temporary STEP.
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import struct
-import tempfile
 import unittest
-from contextlib import redirect_stderr
-from pathlib import Path
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
-
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
+from tests.python.support.fea_fixtures import (
+    box_step, class_directory, ends, glb_extras, needs_fea, read_glb, sidecar, solve, value_error,
+)
 
 G0 = 9806.65
 LINE = ("Estimate: 1 m drop stopping in 2 mm, 500 g equivalent static load; "
@@ -39,26 +25,22 @@ def _study(**drop) -> dict:
     return {"analysis": "drop", "material": "abs", "drop": {"height_mm": 1000, "onto": ["#o1.f5"], **drop}}
 
 
+def _parse(document):
+    from cadgen._internal.fea.study import parse_study
+
+    return parse_study(document)
+
+
 class Parse(unittest.TestCase):
-    def parse(self, document):
-        from cadgen._internal.fea.study import parse_study
-
-        return parse_study(document)
-
-    def error(self, document) -> str:
-        with self.assertRaises(ValueError) as caught:
-            self.parse(document)
-        return str(caught.exception)
-
     def test_g_is_height_over_stopping_distance_exactly(self):
-        study = self.parse(_study(stop_mm=2))
+        study = _parse(_study(stop_mm=2))
         self.assertEqual(study.inputs.G, 500.0)
         self.assertEqual(study.fixtures[0].faces, ("#o1.f5",))
         self.assertEqual(study.inputs.anchor_refs, ("#o1.f5",))
         self.assertEqual(study.checks, ({"kind": "stress", "label": "Drop"},))
 
     def test_a_half_sine_stop_peaks_at_pi_v_over_two_tau(self):
-        study = self.parse(_study(impact_ms=1.5))
+        study = _parse(_study(impact_ms=1.5))
         speed = math.sqrt(2 * G0 * 1000.0)
         self.assertAlmostEqual(study.inputs.G, math.pi * speed / (2 * 1.5e-3) / G0, places=9)
         from cadgen._internal.fea.analyses.drop import estimate_line
@@ -74,7 +56,7 @@ class Parse(unittest.TestCase):
         self.assertTrue(estimate_line(500.0, 250.0, stop_mm=2.0).startswith("Estimate: 500 mm drop stopping in 2 mm, 250 g"))
 
     def test_a_given_direction_is_the_way_it_falls(self):
-        study = self.parse(_study(stop_mm=4, direction=[0, 0, -2]))
+        study = _parse(_study(stop_mm=4, direction=[0, 0, -2]))
         self.assertEqual(study.inputs.direction, (0.0, 0.0, -1.0))
         self.assertEqual(study.loads[0].vector_g, (0.0, 0.0, 250.0))
 
@@ -94,69 +76,51 @@ class Parse(unittest.TestCase):
               "onto": ["#o1.f5"], "stop_mm": 2}}, "need the density"),
         ):
             with self.subTest(fragment=fragment):
-                self.assertIn(fragment, self.error(document))
+                self.assertIn(fragment, value_error(self, _parse, document))
         # dynamic false is the estimate itself; true adds the transient check.
-        self.assertEqual(self.parse(_study(stop_mm=2, dynamic=False)).inputs.G, 500.0)
-        self.assertTrue(self.parse(_study(stop_mm=2, dynamic=True)).inputs.dynamic)
+        self.assertEqual(_parse(_study(stop_mm=2, dynamic=False)).inputs.G, 500.0)
+        self.assertTrue(_parse(_study(stop_mm=2, dynamic=True)).inputs.dynamic)
 
     def test_the_dynamic_pulse_has_the_estimate_s_peak_and_the_impact_s_speed_change(self):
         from cadgen._internal.fea.analyses.drop import pulse_s
 
         # A half-sine of peak G g changes the speed by (2/π) G g τ: the impact speed √(2 g h) sets τ.
         for study in (_study(impact_ms=1.5), _study(stop_mm=2)):
-            G = self.parse(study).inputs.G
+            G = _parse(study).inputs.G
             tau = pulse_s(1000.0, G)
             self.assertAlmostEqual(2 / math.pi * G * G0 * tau, math.sqrt(2 * G0 * 1000.0), places=6)
-        self.assertAlmostEqual(pulse_s(1000.0, self.parse(_study(impact_ms=1.5)).inputs.G), 1.5e-3, places=12)
+        self.assertAlmostEqual(pulse_s(1000.0, _parse(_study(impact_ms=1.5)).inputs.G), 1.5e-3, places=12)
 
 
-def _extras(glb: Path) -> tuple[dict, bytes]:
-    raw = glb.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    return json.loads(raw[20:20 + length])["meshes"][0]["extras"], raw[20 + length:]
-
-
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Solve(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from build123d import Box, export_step
-
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        step = directory / "block.step"
-        export_step(Box(30, 20, 10), str(step))
-        planes = {face.center_mm[2]: face.ref for face in fea.faces(step).faces if face.surface == "plane"}
-        cls.bottom = planes[min(planes)]
+        directory = class_directory(cls)
+        step = box_step(directory, "block", (30, 20, 10))
+        cls.bottom = ends(step, 2)[0]
         cls.volume = 30 * 20 * 10
-        with redirect_stderr(io.StringIO()):
-            cls.drop = fea.solve(step, directory / "drop.glb", study={
-                "analysis": "drop", "material": "abs", "mesh": {"size_mm": 5},
-                "drop": {"height_mm": 1000, "onto": [cls.bottom], "stop_mm": 2},
-            })
-            cls.static = fea.solve(step, directory / "static.glb", study={
-                "material": "abs", "mesh": {"size_mm": 5}, "fixtures": [{"faces": [cls.bottom]}],
-                "loads": [{"type": "acceleration", "vector_g": [0, 0, 500]}],
-            })
-            # A budget far under the model: it completes by static's ladder, here its local refinement.
-            cls.fitted = fea.solve(step, directory / "fitted.glb", study={
-                "analysis": "drop", "material": "abs", "mesh": {"size_mm": 1.5},
-                "fit": {"memory_GB": 0.05, "seconds": 0.5, "allow": ["local_refine"]},
-                "drop": {"height_mm": 1000, "onto": [cls.bottom], "stop_mm": 2},
-            })
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.drop = solve(step, directory / "drop.glb", {
+            "analysis": "drop", "material": "abs", "mesh": {"size_mm": 5},
+            "drop": {"height_mm": 1000, "onto": [cls.bottom], "stop_mm": 2},
+        })
+        cls.static = solve(step, directory / "static.glb", {
+            "material": "abs", "mesh": {"size_mm": 5}, "fixtures": [{"faces": [cls.bottom]}],
+            "loads": [{"type": "acceleration", "vector_g": [0, 0, 500]}],
+        })
+        # A budget far under the model: it completes by static's ladder, here its local refinement.
+        cls.fitted = solve(step, directory / "fitted.glb", {
+            "analysis": "drop", "material": "abs", "mesh": {"size_mm": 1.5},
+            "fit": {"memory_GB": 0.05, "seconds": 0.5, "allow": ["local_refine"]},
+            "drop": {"height_mm": 1000, "onto": [cls.bottom], "stop_mm": 2},
+        })
 
     def test_it_is_exactly_the_static_study_with_that_acceleration(self):
         for key, value in self.static.summary.items():
             if key != "checks":
                 self.assertEqual(self.drop.summary[key], value, key)
-        drop_extras, drop_bin = _extras(self.drop.glb)
-        static_extras, static_bin = _extras(self.static.glb)
+        (drop, drop_bin), (static, static_bin) = read_glb(self.drop.glb), read_glb(self.static.glb)
+        drop_extras, static_extras = drop["meshes"][0]["extras"], static["meshes"][0]["extras"]
         # Every attribute, to the bit: positions, stress, displacement, faces.
         self.assertEqual(drop_bin, static_bin)
         # The same fields and ranges; a non-static result also names each field's view.
@@ -173,13 +137,13 @@ class Solve(unittest.TestCase):
         self.assertTrue(self.drop.summary["estimate"])
         self.assertEqual(self.drop.summary["estimate_line"], LINE)
         self.assertIn(LINE, self.drop.human_lines())
-        extras, _ = _extras(self.drop.glb)
+        extras = glb_extras(self.drop.glb)
         self.assertEqual({k: extras["analysis"][k] for k in ("type", "tier", "estimate", "noun")},
                          {"type": "drop", "tier": 2, "estimate": True, "noun": "this drop"})
         self.assertTrue(any("not an impact simulation" in line for line in extras["analysis"]["limits"]))
-        sidecar = json.loads(self.drop.sidecar.read_text(encoding="utf-8"))
-        self.assertTrue(sidecar["estimate"])
-        self.assertEqual(sidecar["analysis"], "drop")
+        written = sidecar(self.drop)
+        self.assertTrue(written["estimate"])
+        self.assertEqual(written["analysis"], "drop")
         estimate = [finding for finding in self.drop.findings if finding["type"] == "drop_estimate"]
         self.assertEqual(len(estimate), 1)
         self.assertIn("not an impact simulation", estimate[0]["summary"])
@@ -194,10 +158,10 @@ class Solve(unittest.TestCase):
         lines = self.fitted.human_lines()
         self.assertIn(LINE, lines)
         self.assertIn(f"adapted: {refined['words']} ({refined['accuracy']})", lines)
-        self.assertEqual([step["rung"] for step in json.loads(self.fitted.sidecar.read_text(encoding="utf-8"))["fit"]], rungs)
+        self.assertEqual([step["rung"] for step in sidecar(self.fitted)["fit"]], rungs)
 
     def test_the_glb_carries_the_fall_the_viewer_s_drop_routine_plays(self):
-        fall = _extras(self.drop.glb)[0]["analysis"]["fall"]
+        fall = glb_extras(self.drop.glb)["analysis"]["fall"]
         speed = math.sqrt(2 * G0 * 1000.0)
         self.assertEqual((fall["height_mm"], fall["direction"], fall["speed_m_s"]), (1000.0, [0.0, 0.0, -1.0], round(speed / 1000, 4)))
         # The floor is where the landing face is, facing up against the fall; the stop lasts 2 d / v.
@@ -207,7 +171,7 @@ class Solve(unittest.TestCase):
         self.assertAlmostEqual(fall["impact_ms"], 2 * 2.0 / speed * 1e3, places=6)
 
     def test_the_check_is_labelled_drop_and_the_study_echoes_the_drop(self):
-        extras, _ = _extras(self.drop.glb)
+        extras = glb_extras(self.drop.glb)
         self.assertEqual([(check["kind"], check["label"]) for check in extras["checks"]], [("stress", "Drop")])
         self.assertEqual(extras["study"]["drop"], {"height_mm": 1000.0, "onto": [self.bottom], "stop_mm": 2.0,
                                                    "direction": [0.0, 0.0, -1.0], "G": 500.0})
@@ -215,7 +179,7 @@ class Solve(unittest.TestCase):
         self.assertEqual(extras["study"]["loads"], [{"type": "acceleration", "vector_g": [0.0, 0.0, 500.0]}])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Dynamic(unittest.TestCase):
     """``"dynamic": true``: the transient check with a half-sine pulse, and the larger response reported.
 
@@ -227,34 +191,19 @@ class Dynamic(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from build123d import Align, Box, export_step
-
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        block = directory / "block.step"
-        export_step(Box(30, 20, 10), str(block))
-        planes = {face.center_mm[2]: face.ref for face in fea.faces(block).faces if face.surface == "plane"}
-        arm = directory / "arm.step"
-        export_step(Box(100, 6, 6, align=(Align.MIN, Align.CENTER, Align.CENTER)), str(arm))
-        ends = {face.center_mm[0]: face.ref for face in fea.faces(arm).faces
-                if face.surface == "plane" and face.normal is not None and abs(abs(face.normal[0]) - 1) < 1e-6}
-        cls.root = ends[min(ends)]
+        directory = class_directory(cls)
+        block = box_step(directory, "block", (30, 20, 10))
+        arm = box_step(directory, "arm", (100, 6, 6), "x")
+        cls.root = ends(arm)[0]
         drop = {"height_mm": 20, "onto": [cls.root], "impact_ms": 1.6, "direction": [0, 0, -1]}
-        with redirect_stderr(io.StringIO()):
-            cls.block = fea.solve(block, directory / "block.glb", study={
-                "analysis": "drop", "material": "abs", "mesh": {"size_mm": 5},
-                "drop": {"height_mm": 1000, "onto": [planes[min(planes)]], "impact_ms": 1.5, "dynamic": True},
-            })
-            cls.estimate = fea.solve(arm, directory / "estimate.glb", study={
-                "analysis": "drop", "material": "steel", "mesh": {"size_mm": 3}, "drop": drop})
-            cls.arm = fea.solve(arm, directory / "arm.glb", study={
-                "analysis": "drop", "material": "steel", "mesh": {"size_mm": 3}, "drop": {**drop, "dynamic": True}})
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.block = solve(block, directory / "block.glb", {
+            "analysis": "drop", "material": "abs", "mesh": {"size_mm": 5},
+            "drop": {"height_mm": 1000, "onto": [ends(block, 2)[0]], "impact_ms": 1.5, "dynamic": True},
+        })
+        cls.estimate = solve(arm, directory / "estimate.glb", {
+            "analysis": "drop", "material": "steel", "mesh": {"size_mm": 3}, "drop": drop})
+        cls.arm = solve(arm, directory / "arm.glb", {
+            "analysis": "drop", "material": "steel", "mesh": {"size_mm": 3}, "drop": {**drop, "dynamic": True}})
 
     def test_a_part_stiffer_than_the_pulse_answers_it_as_the_steady_load(self):
         dynamic = self.block.summary["dynamic"]
@@ -277,7 +226,7 @@ class Dynamic(unittest.TestCase):
         ratio = self.arm.summary["max_von_mises_MPa"] / self.estimate.summary["max_von_mises_MPa"]
         self.assertAlmostEqual(ratio, dynamic["factor"], delta=1e-3)
         self.assertAlmostEqual(self.arm.summary["max_von_mises_MPa"] / dynamic["max_von_mises_MPa"], 1.0, delta=0.05)
-        extras, _ = _extras(self.arm.glb)
+        extras = glb_extras(self.arm.glb)
         self.assertTrue(extras["study"]["drop"]["dynamic"])
         # The viewer's Drop routine plays the stop as long as the dynamic check's pulse.
         self.assertEqual(extras["analysis"]["fall"]["impact_ms"], dynamic["pulse_ms"])

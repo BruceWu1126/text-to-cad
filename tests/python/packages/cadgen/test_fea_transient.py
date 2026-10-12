@@ -16,30 +16,15 @@ Parse and integrator tests need no mesh; the beam needs the fea extra.
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import struct
-import tempfile
 import unittest
-from contextlib import redirect_stderr
-from pathlib import Path
 from types import SimpleNamespace
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
+from tests.python.support.fea_fixtures import box_step, class_directory, ends, glb_extras, needs_fea, read_glb, sidecar, solve
 
 from cadgen._internal.fea.analyses import get_analysis  # noqa: E402
 from cadgen._internal.fea.materials import lookup_material  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
 from cadgen._internal.fea.study import parse_study  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 LENGTH, SIDE, FORCE = 100.0, 6.0, 10.0
 STEEL = lookup_material("steel")
@@ -94,6 +79,7 @@ class StudyFile(unittest.TestCase):
             ({"damping_ratio": -0.1}, "from 0"),
             ({"method": "explicit"}, "is not one of \"modal\""),
             ({"sweep_Hz": [1, 2]}, "transient studies take"),
+            ({"view": {"checks": [{"kind": "frequency", "min_Hz": 60}]}}, "not a check this cadgen makes"),
         ):
             study = {key: value for key, value in {**_study(), **bad}.items() if value is not None}
             with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, words):
@@ -103,8 +89,6 @@ class StudyFile(unittest.TestCase):
         parsed = parse_study(_study(view={"checks": [{"kind": "stress"}, {"kind": "displacement", "limit_mm": 1}],
                                           "presets": [{"label": "At the peak", "frame": 0.001}]}))
         self.assertEqual([check["kind"] for check in parsed.checks], ["stress", "displacement"])
-        with self.assertRaisesRegex(ValueError, "not a check this cadgen makes"):
-            parse_study(_study(view={"checks": [{"kind": "frequency", "min_Hz": 60}]}))
 
 
 class Histories(unittest.TestCase):
@@ -242,50 +226,23 @@ class Ladder(unittest.TestCase):
             self.assertIsNone(analysis.apply(rung, ctx, inputs))
 
 
-def _glb(path: Path) -> dict:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    return json.loads(raw[20:20 + length])
-
-
-def _ends(listing) -> tuple[str, str]:
-    by_x = {face.center_mm[0]: face.ref for face in listing.faces
-            if face.surface == "plane" and face.normal is not None and abs(abs(face.normal[0]) - 1) < 1e-6}
-    return by_x[min(by_x)], by_x[max(by_x)]
-
-
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class SuddenTipForce(unittest.TestCase):
     """The undamped cantilever with a 10 N tip force stepped on, followed for three periods of mode 1 (490 Hz)."""
 
     @classmethod
     def setUpClass(cls):
-        from build123d import Align, Box, export_step
-
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.directory = Path(cls._tmp.name)
-        cls.step = cls.directory / "beam.step"
-        export_step(Box(LENGTH, SIDE, SIDE, align=(Align.MIN, Align.CENTER, Align.CENTER)), str(cls.step))
-        cls.fixed, cls.tip = _ends(fea.faces(cls.step))
+        cls.directory = class_directory(cls)
+        cls.step = box_step(cls.directory, "beam", (LENGTH, SIDE, SIDE), "x")
+        cls.fixed, cls.tip = ends(cls.step)
         cls.study = _study(fixtures=[{"faces": [cls.fixed]}], loads=[
             {"faces": [cls.tip], "type": "force", "vector_N": [0, 0, -FORCE], "history": {"shape": "step"}}],
             mesh={"size_mm": 3.0}, damping_ratio=0, view={"checks": [{"kind": "stress"}, {"kind": "displacement", "limit_mm": 1.0}]})
-        cls.results = {}
-        with redirect_stderr(io.StringIO()):
-            for method in ("modal", "direct"):
-                cls.results[method] = fea.solve(cls.step, cls.directory / f"{method}.fea.glb", study={**cls.study, "method": method})
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.results = {method: solve(cls.step, cls.directory / f"{method}.fea.glb", {**cls.study, "method": method})
+                       for method in ("modal", "direct")}
 
     def _solve(self, name: str, **more):
-        from cadgen import fea
-
-        with redirect_stderr(io.StringIO()):
-            return fea.solve(self.step, self.directory / f"{name}.fea.glb", study={**self.study, **more})
+        return solve(self.step, self.directory / f"{name}.fea.glb", {**self.study, **more})
 
     def test_the_peak_is_twice_the_static_answer_by_both_methods(self):
         static_theory = FORCE * LENGTH ** 3 / (3 * STEEL.E * SIDE ** 4 / 12)
@@ -314,10 +271,10 @@ class SuddenTipForce(unittest.TestCase):
     def test_the_checks_judge_the_peaks_and_say_when(self):
         result = self.results["modal"]
         stress, moved = result.summary["checks"]
-        sidecar = json.loads(result.sidecar.read_text(encoding="utf-8"))
-        frames = sidecar["series"]["frames"]
+        series = sidecar(result)["series"]
+        frames = series["frames"]
         self.assertEqual((stress["status"], stress["at"]["unit"]), ("passes", "s"))
-        self.assertEqual(stress["at"]["frame"], sidecar["series"]["default"])
+        self.assertEqual(stress["at"]["frame"], series["default"])
         self.assertAlmostEqual(frames[stress["at"]["frame"]]["value"], stress["at"]["time_s"], places=9)
         self.assertAlmostEqual(stress["value"], result.summary["max_von_mises_MPa"])
         self.assertEqual((moved["kind"], moved["status"]), ("displacement", "passes"))
@@ -327,7 +284,7 @@ class SuddenTipForce(unittest.TestCase):
         self.assertIn("× its steady response to the same loads", found["transient_peak"]["summary"])
 
     def test_the_glb_carries_a_time_series_and_the_peak_envelopes(self):
-        gltf = _glb(self.results["modal"].glb)
+        gltf, _ = read_glb(self.results["modal"].glb)
         extras = gltf["meshes"][0]["extras"]
         attributes = gltf["meshes"][0]["primitives"][0]["attributes"]
         self.assertEqual(extras["analysis"]["type"], "transient")
@@ -346,8 +303,7 @@ class SuddenTipForce(unittest.TestCase):
 
     def test_the_sidecar_and_the_cli_lines(self):
         result = self.results["modal"]
-        sidecar = json.loads(result.sidecar.read_text(encoding="utf-8"))
-        curve = sidecar["curves"]["max_displacement_mm"]
+        curve = sidecar(result)["curves"]["max_displacement_mm"]
         self.assertEqual((curve["x"][0], curve["x_unit"]), (0.0, "s"))
         # At rest at the start, but for the modes left out, whose steady share the static correction adds at once.
         self.assertLess(curve["y"][0], 0.002 * max(curve["y"]))
@@ -396,7 +352,7 @@ class SuddenTipForce(unittest.TestCase):
         self.assertNotIn("still_moving", [f["type"] for f in result.findings])
         # Each check judges what was solved, says where it stopped, and does not pass on the rest.
         self.assertTrue(all("(stopped at " in c["label"] and c["status"] != "passes" for c in summary["checks"]))
-        extras = _glb(result.glb)["meshes"][0]["extras"]
+        extras = glb_extras(result.glb)
         self.assertTrue(any(w.startswith("Stopped at its time limit") for w in extras["analysis"]["warnings"]))
         self.assertAlmostEqual(extras["series"]["frames"][-1]["value"], summary["stopped_at_s"], places=9)
 
@@ -408,8 +364,7 @@ class SuddenTipForce(unittest.TestCase):
         step = result.fit[0]
         self.assertTrue(step["accuracy"])
         self.assertIn(f"adapted: {step['words']} ({step['accuracy']})", result.human_lines())
-        gltf = _glb(result.glb)
-        self.assertIn(step["words"], [entry["words"] for entry in gltf["meshes"][0]["extras"]["fit"]])
+        self.assertIn(step["words"], [entry["words"] for entry in glb_extras(result.glb)["fit"]])
         summary = result.summary
         # The step grew past the fixed run's, and the benchmark still holds within a widened 7 %.
         self.assertTrue(summary["adaptive"])

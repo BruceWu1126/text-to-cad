@@ -10,70 +10,18 @@ Each STEP is a build123d box in a temporary directory.
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import struct
-import tempfile
 import unittest
-from contextlib import redirect_stderr
-from pathlib import Path
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
+from tests.python.support.fea_fixtures import (
+    box_step, class_directory, ends, glb_attribute_names, glb_extras, glb_rows, needs_fea, quiet, side_faces, sidecar,
+    solve, value_error,
+)
 
 from cadgen._internal.fea.materials import lookup_material  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 ALUMINIUM = lookup_material("aluminum-6061-t6")
 BASE = {"analysis": "thermal", "material": "aluminum-6061-t6", "temperatures": [{"faces": ["#o1.f1"], "C": 25}]}
-
-
-def glb_extras_and_attributes(path: Path, names: tuple[str, ...]) -> tuple[dict, dict]:
-    """A result GLB's extras and the named vertex attributes (float32 SCALAR or VEC3) as lists of rows."""
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    gltf = json.loads(raw[20:20 + length])
-    binary = raw[20 + length + 8:]
-    primitive = gltf["meshes"][0]["primitives"][0]
-    out = {}
-    for name in names:
-        accessor = gltf["accessors"][primitive["attributes"][name]]
-        view = gltf["bufferViews"][accessor["bufferView"]]
-        width = {"SCALAR": 1, "VEC3": 3}[accessor["type"]]
-        values = struct.unpack_from(f"<{accessor['count'] * width}f", binary, view["byteOffset"])
-        out[name] = [values[i:i + width] for i in range(0, len(values), width)]
-    return gltf["meshes"][0]["extras"], out
-
-
-def x_faces(step: Path) -> tuple[str, str]:
-    """The faces at the low and the high end of x."""
-    from cadgen import fea
-
-    by_x = {face.center_mm[0]: face.ref for face in fea.faces(step).faces
-            if face.surface == "plane" and face.normal and abs(abs(face.normal[0]) - 1) < 1e-6}
-    return by_x[min(by_x)], by_x[max(by_x)]
-
-
-def side_faces(step: Path) -> list[str]:
-    from cadgen import fea
-
-    return [face.ref for face in fea.faces(step).faces if face.normal and abs(face.normal[0]) < 1e-6]
-
-
-def box_step(directory: Path, name: str, size: tuple[float, float, float]) -> Path:
-    from build123d import Align, Box, export_step
-
-    step = directory / f"{name}.step"
-    export_step(Box(*size, align=(Align.MIN, Align.CENTER, Align.CENTER)), str(step))
-    return step
 
 
 class StudyFile(unittest.TestCase):
@@ -99,10 +47,9 @@ class StudyFile(unittest.TestCase):
         self.assertEqual(study.fixtures, ())
 
     def test_a_part_only_heated_has_no_steady_temperature(self):
-        with self.assertRaises(ValueError) as caught:
-            self.parse(temperatures=[], heat=[{"faces": ["#o1.f7"], "W": 15}])
-        self.assertIn("nowhere for the heat to go, has no steady temperature", str(caught.exception))
-        self.assertIn("'convection'", str(caught.exception))
+        message = value_error(self, self.parse, temperatures=[], heat=[{"faces": ["#o1.f7"], "W": 15}])
+        self.assertIn("nowhere for the heat to go, has no steady temperature", message)
+        self.assertIn("'convection'", message)
 
     def test_the_errors_name_the_field_in_plain_words(self):
         cases = [
@@ -118,9 +65,8 @@ class StudyFile(unittest.TestCase):
             ({"material": {"name": "mystery", "E_MPa": 1000, "nu": 0.3, "yield_MPa": 10}}, "conductivity_W_mK"),
         ]
         for changes, fragment in cases:
-            with self.subTest(changes=changes), self.assertRaises(ValueError) as caught:
-                self.parse(**changes)
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(changes=changes):
+                self.assertIn(fragment, value_error(self, self.parse, **changes))
 
     def test_its_view_offers_temperature_and_heat_flow_and_no_deformation(self):
         study = self.parse(view={"controls": [{"drives": "field"}], "presets": [{"label": "Flow", "field": "heat_flux"}]})
@@ -128,21 +74,8 @@ class StudyFile(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.parse(view={"controls": [{"drives": "deformation"}]})
 
-    def test_it_is_stdlib_only_at_import(self):
-        import subprocess
-        import sys
 
-        code = (
-            "import sys; sys.path.insert(0, 'packages/cadgen/src');"
-            "import cadgen._internal.fea.analyses.thermal, cadgen._internal.fea.analyses.thermal_transient,"
-            " cadgen._internal.fea.analyses.thermal_stress, cadgen._internal.fea.thermal_ops;"
-            "print(','.join(sorted(m for m in ('numpy', 'scipy', 'skfem') if m in sys.modules)))"
-        )
-        root = Path(__file__).resolve().parents[4]
-        self.assertEqual(subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True, text=True, check=True).stdout.strip(), "")
-
-
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Slab(unittest.TestCase):
     """Held at 100 °C and 20 °C at its ends: linear in x, Q = k A ΔT / L."""
 
@@ -150,24 +83,17 @@ class Slab(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        step = box_step(directory, "slab", (cls.LENGTH, cls.SIDE, cls.SIDE))
-        cls.hot, cls.cold = x_faces(step)
+        directory = class_directory(cls)
+        step = box_step(directory, "slab", (cls.LENGTH, cls.SIDE, cls.SIDE), "x")
+        cls.hot, cls.cold = ends(step)
         study = {"analysis": "thermal", "material": "aluminum-6061-t6", "mesh": {"size_mm": 4.0},
                  "temperatures": [{"faces": [cls.hot], "C": cls.HOT}, {"faces": [cls.cold], "C": cls.COLD}],
                  "view": {"checks": [{"kind": "temperature", "max_C": 105, "label": "Hot end"},
                                      {"kind": "temperature", "max_C": 150, "faces": [cls.cold]}]}}
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(step, directory / "slab.glb", study=study)
-        cls.extras, cls.attributes = glb_extras_and_attributes(cls.result.glb, ("POSITION", "_TEMPERATURE", "_HEAT_FLUX"))
-        cls.sidecar = json.loads(cls.result.sidecar.read_text(encoding="utf-8"))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.result = solve(step, directory / "slab.glb", study)
+        cls.extras = glb_extras(cls.result.glb)
+        cls.attributes = glb_rows(cls.result.glb, "POSITION", "_TEMPERATURE", "_HEAT_FLUX")
+        cls.sidecar = sidecar(cls.result)
 
     def test_the_temperature_falls_linearly_along_it(self):
         worst = 0.0
@@ -225,34 +151,25 @@ class Slab(unittest.TestCase):
         self.assertTrue(lines[2].startswith("heat in 66."))
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class TooHot(unittest.TestCase):
     """A check the slab fails: its finding reaches the result, the sidecar and the CLI, and the GLB carries no stress."""
 
     @classmethod
     def setUpClass(cls):
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        step = box_step(directory, "slab", (20.0, 10.0, 10.0))
-        hot, cold = x_faces(step)
+        directory = class_directory(cls)
+        step = box_step(directory, "slab", (20.0, 10.0, 10.0), "x")
+        hot, cold = ends(step)
         study = {"analysis": "thermal", "material": "aluminum-6061-t6", "mesh": {"size_mm": 5.0},
                  "temperatures": [{"faces": [hot], "C": 100}, {"faces": [cold], "C": 20}],
                  "view": {"checks": [{"kind": "temperature", "max_C": 80, "label": "Hot end"}]}}
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(step, directory / "slab.glb", study=study)
-        cls.sidecar = json.loads(cls.result.sidecar.read_text(encoding="utf-8"))
-        raw = cls.result.glb.read_bytes()
-        length, _ = struct.unpack_from("<II", raw, 12)
-        cls.gltf = json.loads(raw[20:20 + length])
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.result = solve(step, directory / "slab.glb", study)
+        cls.sidecar = sidecar(cls.result)
+        cls.extras = glb_extras(cls.result.glb)
+        cls.attributes = glb_attribute_names(cls.result.glb)
 
     def test_the_failing_check_is_an_error_finding_everywhere(self):
-        for findings in (self.result.findings, self.sidecar["findings"], self.gltf["meshes"][0]["extras"]["findings"]):
+        for findings in (self.result.findings, self.sidecar["findings"], self.extras["findings"]):
             over = [finding for finding in findings if finding["type"] == "temperature_over_limit"]
             self.assertEqual(len(over), 1)
             self.assertEqual(over[0]["severity"], "error")
@@ -261,15 +178,14 @@ class TooHot(unittest.TestCase):
         self.assertIn("check 'Hot end': 100 °C against a 80 °C limit, 1.33× it, fails", self.result.human_lines())
 
     def test_the_glb_carries_its_own_fields_and_no_stress(self):
-        attributes = self.gltf["meshes"][0]["primitives"][0]["attributes"]
-        self.assertNotIn("_VON_MISES", attributes)
-        self.assertIn("_TEMPERATURE", attributes)
-        self.assertIn("_HEAT_FLUX", attributes)
-        listed = {entry["attribute"] for entry in self.gltf["meshes"][0]["extras"]["fields"]}
+        self.assertNotIn("_VON_MISES", self.attributes)
+        self.assertIn("_TEMPERATURE", self.attributes)
+        self.assertIn("_HEAT_FLUX", self.attributes)
+        listed = {entry["attribute"] for entry in self.extras["fields"]}
         self.assertEqual(listed, {"_TEMPERATURE", "_HEAT_FLUX"})
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class PinFin(unittest.TestCase):
     """A fin with an insulated tip: T_tip - T_inf = (T_b - T_inf) / cosh(mL)."""
 
@@ -277,21 +193,13 @@ class PinFin(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        step = box_step(directory, "fin", (cls.LENGTH, cls.SIDE, cls.SIDE))
-        base, _ = x_faces(step)
+        directory = class_directory(cls)
+        step = box_step(directory, "fin", (cls.LENGTH, cls.SIDE, cls.SIDE), "x")
+        base, _ = ends(step)
         study = {"analysis": "thermal", "material": "aluminum-6061-t6", "mesh": {"size_mm": 2.0},
                  "temperatures": [{"faces": [base], "C": cls.BASE_C}],
                  "convection": [{"faces": side_faces(step), "h_W_m2K": cls.H, "ambient_C": cls.AIR_C}]}
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(step, directory / "fin.glb", study=study)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.result = solve(step, directory / "fin.glb", study)
 
     def test_the_tip_sits_where_fin_theory_says(self):
         # mm units: h in mW/(mm² K), k in mW/(mm K).
@@ -309,7 +217,7 @@ class PinFin(unittest.TestCase):
         self.assertLess(summary["heat_balance"], 1e-6)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class CompositeWall(unittest.TestCase):
     """Aluminium bonded to steel, end to end: the heat crosses both resistances, Q = ΔT / (L/(k_al A) + L/(k_st A))."""
 
@@ -321,15 +229,14 @@ class CompositeWall(unittest.TestCase):
 
         from cadgen import fea
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
+        directory = class_directory(cls)
         hot_part = Box(cls.SIDE, cls.SIDE, cls.SIDE, align=Align.MIN)
         hot_part.label = "spreader"
         cold_part = Pos(cls.SIDE, 0, 0) * Box(cls.SIDE, cls.SIDE, cls.SIDE, align=Align.MIN)
         cold_part.label = "mount"
         step = directory / "wall.step"
         export_step(Compound(children=[hot_part, cold_part]), str(step))
-        with redirect_stderr(io.StringIO()):
+        with quiet():
             refs = {part.name: part.ref for part in fea.parts(step).parts}
 
         def end(name, x):
@@ -339,13 +246,8 @@ class CompositeWall(unittest.TestCase):
         study = {"analysis": "thermal", "material": "aluminum-6061-t6", "parts": {"mount": {"material": "steel"}},
                  "mesh": {"size_mm": 3.0},
                  "temperatures": [{"faces": [end("spreader", 0.0)], "C": cls.HOT}, {"faces": [end("mount", 2 * cls.SIDE)], "C": cls.COLD}]}
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(step, directory / "wall.glb", study=study)
-        cls.extras, _ = glb_extras_and_attributes(cls.result.glb, ())
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.result = solve(step, directory / "wall.glb", study)
+        cls.extras = glb_extras(cls.result.glb)
 
     def test_the_heat_crosses_both_parts_in_series(self):
         area, length = (self.SIDE / 1000) ** 2, self.SIDE / 1000

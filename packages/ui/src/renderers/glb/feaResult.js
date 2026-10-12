@@ -146,8 +146,11 @@ function readFindings(raw) {
 }
 
 const text = (value) => (typeof value === "string" ? value : "");
+/** These fields less each that is null: the keys a record carries only where the file says them. */
+const present = (fields) => Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== null));
 const faceRefs = (raw) => (Array.isArray(raw) ? raw.filter((ref) => typeof ref === "string" && ref) : []);
 const finiteOrNull = (value) => (Number.isFinite(value) ? Number(value) : null);
+const positiveOrNull = (value) => (Number.isFinite(value) && value > 0 ? Number(value) : null);
 // A material as the table's names read: cadgen writes it tidied ("Soft silicone"); a file older than that, its first
 // letter capitalised ("soft silicone" reads "Soft silicone").
 const materialName = (value) => { const name = text(value).trim(); return name ? `${name[0].toUpperCase()}${name.slice(1)}` : ""; };
@@ -216,26 +219,23 @@ function readChecks(raw, kinds) {
       margin: Number.isFinite(check.margin) && check.margin >= 1 ? Number(check.margin) : null,
       status: ["fails", "close", "passes"].includes(check.status) ? check.status : null, part: text(check.part),
       faces: faceRefs(check.faces), where: text(check.where?.ref),
-      ...(readAt(check.at) ? { at: readAt(check.at) } : {}),
-      ...(Number.isInteger(check.mode) && check.mode >= 1 ? { mode: check.mode } : {}),
-      ...(band(check.avoid_Hz) ? { band: band(check.avoid_Hz) } : {}),
-      ...(Number.isFinite(check.need) && check.need > 0 ? { need: Number(check.need) } : {}),
-      ...(Number.isFinite(check.life) && check.life > 0 ? { life: Number(check.life) } : {}),
-      ...(Number.isFinite(check.reference) ? { reference: Number(check.reference) } : {}),
-      // A laminate's worst ply (ply_failure): its number from the bottom face and its angle.
-      ...(Number.isInteger(check.ply) && check.ply >= 1 ? { ply: check.ply, angle: finiteOrNull(check.angle_deg) ?? 0 } : {}),
-      // Where along a crack's front its K is largest (fracture): "the deepest point", "the surface".
-      ...(typeof check.point === "string" && check.point ? { point: check.point } : {}),
-      // A fill level judged against the tank's own brim (multiphase, no limit_mm given): its line says so.
-      ...(check.brim === true ? { brim: true } : {}),
-      // A check that grows with the square of what drives it (a magnetic force's stress, with the current).
-      ...(check.scaling === "quadratic" ? { scaling: "quadratic" } : {}),
-      // A check of an analysis not linear in the load (nonlinear, contact, bolt, composite): judged as solved only.
-      ...(check.scaling === "none" ? { scaling: "none" } : {}),
-      // A field's peak out in the air (electrostatic, no faces named), above what the colours on the parts show.
-      ...(check.where?.in === "air" ? { inAir: { near: text(check.where.near) } } : {}),
-      // A heat stress judged a little away from a singular clamped edge: the edge's own peak, which grows with the mesh.
-      ...(Number.isFinite(check.edge_peak) && check.edge_peak > 0 ? { edgePeak: Number(check.edge_peak) } : {}),
+      ...present({
+        at: readAt(check.at), mode: Number.isInteger(check.mode) && check.mode >= 1 ? check.mode : null, band: band(check.avoid_Hz),
+        need: positiveOrNull(check.need), life: positiveOrNull(check.life), reference: finiteOrNull(check.reference),
+        // A laminate's worst ply (ply_failure): its number from the bottom face and its angle.
+        ...(Number.isInteger(check.ply) && check.ply >= 1 ? { ply: check.ply, angle: finiteOrNull(check.angle_deg) ?? 0 } : {}),
+        // Where along a crack's front its K is largest (fracture): "the deepest point", "the surface".
+        point: text(check.point) || null,
+        // A fill level judged against the tank's own brim (multiphase, no limit_mm given): its line says so.
+        brim: check.brim === true ? true : null,
+        // "quadratic": grows with the square of what drives it (a magnetic force's stress, with the current); "none": an
+        // analysis not linear in the load (nonlinear, contact, bolt, composite), judged as solved only.
+        scaling: check.scaling === "quadratic" || check.scaling === "none" ? check.scaling : null,
+        // A field's peak out in the air (electrostatic, no faces named), above what the colours on the parts show.
+        inAir: check.where?.in === "air" ? { near: text(check.where.near) } : null,
+        // A heat stress judged a little away from a singular clamped edge: the edge's own peak, which grows with the mesh.
+        edgePeak: positiveOrNull(check.edge_peak),
+      }),
     }));
 }
 
@@ -253,16 +253,15 @@ function readAnalysis(raw) {
     type: known.name, tier: [1, 2, 3].includes(own.tier) ? own.tier : known.tier, word: text(own.word) || known.word,
     estimate: typeof own.estimate === "boolean" ? own.estimate : known.estimate, noun: text(own.noun) || known.noun,
     limits: sentences(own.limits), warnings: sentences(own.warnings), referenceC: finiteOrNull(own.reference_C),
-    ...(readReynolds(own.reynolds) ? { reynolds: readReynolds(own.reynolds) } : {}),
-    // A flow that carries heat says which model it solved: "laminar" or "turbulent".
-    ...(own.regime === "laminar" || own.regime === "turbulent" ? { regime: own.regime } : {}),
-    ...(readMach(own.mach) ? { mach: readMach(own.mach) } : {}),
-    ...(readUnsettled(own.unsettled) ? { unsettled: readUnsettled(own.unsettled) } : {}),
-    ...(readWalls(own.acoustic) ? { walls: readWalls(own.acoustic) } : {}),
-    ...(readResonances(own.modes) ? { resonances: readResonances(own.modes) } : {}),
-    ...(readForces(own.forces) ? { forces: readForces(own.forces) } : {}),
-    // A drop's fall, for its Drop routine: the height, the way it falls, the floor, the impact's time.
-    ...(readFall(own.fall) ? { fall: readFall(own.fall) } : {}),
+    ...present({
+      reynolds: readReynolds(own.reynolds),
+      // A flow that carries heat says which model it solved: "laminar" or "turbulent".
+      regime: own.regime === "laminar" || own.regime === "turbulent" ? own.regime : null,
+      mach: readMach(own.mach), unsettled: readUnsettled(own.unsettled), walls: readWalls(own.acoustic),
+      resonances: readResonances(own.modes), forces: readForces(own.forces),
+      // A drop's fall, for its Drop routine: the height, the way it falls, the floor, the impact's time.
+      fall: readFall(own.fall),
+    }),
   };
 }
 
@@ -468,14 +467,14 @@ function readAppliedField(raw) {
   return field ? { mT: finiteOrNull(field.mT), direction: vector(field.direction) } : null;
 }
 
+/** A thermal study's fixed temperatures and its convection, on faces. */
+const readTemperatures = (raw) => entries(raw).map((entry) => ({ faces: faceRefs(entry.faces), celsius: finiteOrNull(entry.C) }));
+const readConvection = (raw) => entries(raw).map((entry) => ({ faces: faceRefs(entry.faces), h: finiteOrNull(entry.h_W_m2K), ambientC: finiteOrNull(entry.ambient_C) }));
+
 /** Where an electromagnetic study's Joule heat goes (`electro_thermal`): its fixed `temperatures` and its `convection`, as a thermal study's. null for none. */
 function readHeatOut(raw) {
   const block = record(raw);
-  if (!block) return null;
-  return {
-    temperatures: entries(block.temperatures).map((entry) => ({ faces: faceRefs(entry.faces), celsius: finiteOrNull(entry.C) })),
-    convection: entries(block.convection).map((entry) => ({ faces: faceRefs(entry.faces), h: finiteOrNull(entry.h_W_m2K), ambientC: finiteOrNull(entry.ambient_C) })),
-  };
+  return block ? { temperatures: readTemperatures(block.temperatures), convection: readConvection(block.convection) } : null;
 }
 
 /**
@@ -573,9 +572,9 @@ function readStudy(raw) {
     })),
     mesh,
     margin: Number.isFinite(raw.margin) && raw.margin >= 1 ? Number(raw.margin) : null,
-    temperatures: entries(raw.temperatures).map((entry) => ({ faces: faceRefs(entry.faces), celsius: finiteOrNull(entry.C) })),
+    temperatures: readTemperatures(raw.temperatures),
     heat: entries(raw.heat).map((entry) => ({ faces: faceRefs(entry.faces), watts: finiteOrNull(entry.W), fluxWm2: finiteOrNull(entry.W_per_m2) })),
-    convection: entries(raw.convection).map((entry) => ({ faces: faceRefs(entry.faces), h: finiteOrNull(entry.h_W_m2K), ambientC: finiteOrNull(entry.ambient_C) })),
+    convection: readConvection(raw.convection),
     // Faces radiating to their surroundings (and, `surfaceToSurface`, to each other): a thermal study's.
     radiation: entries(raw.radiation).map((entry) => ({ faces: faceRefs(entry.faces), emissivity: finiteOrNull(entry.emissivity),
       ambientC: finiteOrNull(entry.ambient_C), surfaceToSurface: entry.surface_to_surface === true })),
@@ -666,12 +665,12 @@ export function readFeaResult(root) {
         min: Number(field.min) || 0,
         max: Number(field.max) || 0,
         attributeScale: Number(field.attribute_scale) || 1,
-        ...(typeof field.field === "string" && field.field ? { view: field.field } : {}),
-        ...(field.signed === true ? { signed: true } : {}),
-        ...(field.per_frame === true ? { perFrame: true } : {}),
-        // Colours stopped below the field's peak (a singular edge's spike): where, and the peak itself.
-        ...(Number.isFinite(field.capped?.peak) && Number.isFinite(field.capped?.quantile)
-          ? { capped: { quantile: Number(field.capped.quantile), peak: Number(field.capped.peak) } } : {}),
+        ...present({
+          view: text(field.field) || null, signed: field.signed === true ? true : null, perFrame: field.per_frame === true ? true : null,
+          // Colours stopped below the field's peak (a singular edge's spike): where, and the peak itself.
+          capped: Number.isFinite(field.capped?.peak) && Number.isFinite(field.capped?.quantile)
+            ? { quantile: Number(field.capped.quantile), peak: Number(field.capped.peak) } : null,
+        }),
       }));
     if (fields.length === 0) {
       return;
@@ -763,15 +762,9 @@ const SOFT_BLEND = 0.3;
 // What a vertex under a threshold is drawn: a neutral grey, no colour of the ramp.
 const BELOW_THRESHOLD = Object.freeze([150, 150, 150]);
 
-/** The face each vertex lies on (`_FACE`), or null for a result that does not say. */
-function vertexFaces(mesh) {
-  const attribute = mesh.geometry.getAttribute("_face");
-  return attribute?.itemSize === 1 ? attribute.array : null;
-}
-
-/** The part each vertex belongs to (`_PART`), or null for a single part's result. */
-function vertexParts(mesh) {
-  const attribute = mesh.geometry.getAttribute("_part");
+/** A per-vertex index the file writes: the face each vertex lies on (`_face`), the part it belongs to (`_part`); null where it does not say. */
+function vertexIndex(mesh, name) {
+  const attribute = mesh.geometry.getAttribute(name);
   return attribute?.itemSize === 1 ? attribute.array : null;
 }
 
@@ -804,9 +797,9 @@ export function recolorByField(mesh, field, ramp = DEFAULT_RAMP, highlight = nul
   }
   const kept = shown(mesh);
   const under = threshold?.field ? keptValues(mesh, threshold.field) : null;
-  const faces = vertexFaces(mesh);
+  const faces = vertexIndex(mesh, "_face");
   const tinted = faces && highlight?.length ? new Set(highlight) : null;
-  const partOf = vertexParts(mesh);
+  const partOf = vertexIndex(mesh, "_part");
   const tintedParts = partOf && parts?.length ? new Set(parts) : null;
   const lightParts = partOf && softParts?.length ? new Set(softParts) : null;
   const sorted = (set) => (set ? [...set].sort((a, b) => a - b).join(",") : "");
@@ -1352,14 +1345,13 @@ const REYNOLDS = /\bRe\s*(\d[\d,.]*)/;
  */
 export function reynoldsWarning(result) {
   if (result.analysis?.type !== "cfd") return null;
+  const sentence = result.analysis.warnings.find((line) => REYNOLDS.test(line) && /laminar|turbulen/i.test(line));
   // The structured number first (`analysis.reynolds`), with the file's sentence where it gives one.
   const stated = result.analysis.reynolds;
   if (stated) {
     if (stated.value <= stated.limit) return null;
-    const line = result.analysis.warnings.find((text) => REYNOLDS.test(text) && /laminar|turbulen/i.test(text));
-    return { sentence: line || `Re ${Math.round(stated.value)} is past the laminar range: real flow is likely turbulent, so this pressure drop is a lower bound and the flow pattern may be wrong`, limit: stated.limit };
+    return { sentence: sentence || `Re ${Math.round(stated.value)} is past the laminar range: real flow is likely turbulent, so this pressure drop is a lower bound and the flow pattern may be wrong`, limit: stated.limit };
   }
-  const sentence = result.analysis.warnings.find((line) => REYNOLDS.test(line) && /laminar|turbulen/i.test(line));
   if (!sentence) return null;
   const said = /above Re\s*(\d[\d,]*)/i.exec(sentence);
   return { sentence, limit: said ? Number(said[1].replace(/,/g, "")) : result.study?.flow?.kind === "external" ? 1000 : 2000 };
@@ -1635,7 +1627,7 @@ const raycaster = new Raycaster();
  * with (`feaClip.js`): what lies past it is not there to pick, so the ray goes on to what the cut shows.
  */
 export function pickFace(result, ray, clip = null) {
-  const faces = vertexFaces(result.mesh);
+  const faces = vertexIndex(result.mesh, "_face");
   if (!faces) return null;
   raycaster.ray.copy(ray);
   const hit = raycaster.intersectObject(result.mesh, false).find((entry) => !clip || clip.distanceToPoint(entry.point) >= -1e-6);

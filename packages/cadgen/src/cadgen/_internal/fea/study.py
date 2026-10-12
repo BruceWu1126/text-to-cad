@@ -21,29 +21,23 @@ caller) of this shape::
       "view": {"checks": [...], "sections": [...], "controls": [...], "presets": [...], "show": {...}}  # optional
     }
 
-That is the static study. ``analysis`` names another (modal, thermal, ...):
-the keys above except ``fixtures`` and ``loads`` are common to every analysis
-(:data:`COMMON_KEYS`), and each analysis reads its own (``study_keys``)
-through its ``parse``. The view's checks, fields and drives, the mesh orders
-and the connection types are the analysis's. A static load may also be a body
-load, with no faces: ``{"type": "gravity", "vector_g": [0, 0, -1]}`` or
-``{"type": "acceleration", "vector_g": [5, 0, 0]}`` (in g).
+That is the static study. ``analysis`` names another (modal, thermal, ...): the keys above except ``fixtures`` and
+``loads`` are common to every analysis (:data:`COMMON_KEYS`), and each analysis reads its own (``study_keys``) through
+its ``parse``. The view's checks, fields and drives, the mesh orders and the connection types are the analysis's. A
+static load may also be a body load, with no faces: ``{"type": "gravity", "vector_g": [0, 0, -1]}`` or ``{"type":
+"acceleration", "vector_g": [5, 0, 0]}`` (in g).
 
-Face references are the viewer's own selectors (``#o1.f17``, or with the
-document prefix ``part.step#o1.f17``); ``cadgen fea faces`` lists them. A
-``force`` is the TOTAL force on its faces, spread as a uniform traction. A
-``pressure`` acts along the inward normal (positive pushes on the surface).
-The optional ``view`` is the agent's choice of what the viewer offers for the
-result (see :func:`_view`): copied, checked, into the GLB and the sidecar.
-Every check here is stdlib-only and runs before the kernel or the solver is
-imported, so a malformed study fails in milliseconds with a message that
-names the field.
+Face references are the viewer's own selectors (``#o1.f17``, or with the document prefix ``part.step#o1.f17``); ``cadgen
+fea faces`` lists them. A ``force`` is the TOTAL force on its faces, spread as a uniform traction. A ``pressure`` acts
+along the inward normal (positive pushes on the surface). The optional ``view`` is the agent's choice of what the viewer
+offers for the result (see :func:`_view`): copied, checked, into the GLB and the sidecar. Every check here is
+stdlib-only and runs before the kernel or the solver is imported, so a malformed study fails in milliseconds with a
+message that names the field.
 """
 
 from __future__ import annotations
 
 import json
-import math
 import typing
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -79,15 +73,11 @@ CONNECTION_TYPES = ("bonded", "free")
 UNSUPPORTED_CONNECTION_TYPES = ("bolt", "contact")
 #: What a view's control can move; the viewer knows how to apply each. `field` is an enum, the rest numbers.
 VIEW_DRIVES = ("field", "deformation", "load_scale", "threshold")
-#: Every drive any analysis offers: static's, then a series frame by mode (enum), a frame by its value (number),
-#: and random vibration's sigma level (enum).
-ALL_DRIVES = (*VIEW_DRIVES, "mode", "frame", "sigma")
 #: The fields a result writes, as a view names them: outputs.py's `_VON_MISES` and `_DISPLACEMENT`.
 VIEW_FIELDS = ("von_mises", "displacement")
 #: What a view's check can judge; cadgen evaluates each (checks.py). With none, the stress check alone.
 CHECK_KINDS = ("stress", "displacement")
 DEFAULT_CHECKS = ({"kind": "stress"},)
-_CHECK_KEYS = {"stress": {"kind", "margin", "label"}, "displacement": {"kind", "limit_mm", "faces", "label"}}
 #: The parts of Study, in the order a view may list them; with no list, all four in this order.
 VIEW_SECTIONS = ("verdict", "setup", "controls", "details")
 #: When a control is shown: always, only while a check fails or is close, or only while every check passes.
@@ -108,6 +98,9 @@ _CONTROL_KEYS = {
     "sigma": {"drives", "type", "label", "options", "default", "when"},
 }
 _ENUM_DRIVES = ("field", "mode", "sigma")
+#: The controls that may leave their range out, and what they then span.
+_OPEN_RANGE = {"deformation": "run from 0 to four times the result's own exaggeration",
+               "frame": "span every frame of the result"}
 
 
 @dataclass(frozen=True)
@@ -241,10 +234,6 @@ _number = kinds.number
 _text = kinds.text
 
 
-def _material(spec: Any) -> Material:
-    return material_from_spec(spec)
-
-
 def _parts(entries: Any) -> dict[str, Material]:
     if entries is None:
         return {}
@@ -254,7 +243,7 @@ def _parts(entries: Any) -> dict[str, Material]:
     for name, entry in entries.items():
         if not isinstance(entry, dict) or "material" not in entry:
             raise ValueError(f"parts[{name!r}]: expected an object with a 'material'")
-        parts[str(name)] = _material(entry["material"])
+        parts[str(name)] = material_from_spec(entry["material"])
     return parts
 
 
@@ -361,12 +350,9 @@ def _control(entry: Any, *, where: str, spec: "_ViewSpec | None" = None) -> dict
     if drives in ("deformation", "frame") and not {"min", "max", "default"} & set(entry):
         return {**control, **_text(entry, "unit", where=where)}
     if "max" not in entry:
-        if drives == "deformation":
+        if drives in _OPEN_RANGE:
             raise ValueError(f"{where}.max: give the top of its range too, or leave min, max and default all out "
-                             "to run from 0 to four times the result's own exaggeration")
-        if drives == "frame":
-            raise ValueError(f"{where}.max: give the top of its range too, or leave min, max and default all out "
-                             "to span every frame of the result")
+                             f"to {_OPEN_RANGE[drives]}")
         raise ValueError(f"{where}.max: a {drives} control needs the top of its range")
     # A load_scale's bottom is a tenth of the load: at no load there is no stress and nothing to show.
     low = _number(entry.get("min", 0.1 if drives == "load_scale" else 0), where=f"{where}.min")
@@ -460,20 +446,15 @@ def _sections(entries: Any) -> list[str]:
 def _view(raw: Any, analysis=None) -> dict | None:
     """The study's ``view``, checked against ``analysis`` (static when ``None``): what the viewer offers for the result.
 
-    ``controls`` are parameters in the viewer's generic schema (``type``,
-    ``label``, ``min``, ``max``, ``default``, ``unit``, ``options``) plus
-    ``drives``, which names what each moves, at most one each and only the
-    drives the analysis offers: ``field`` (an enum of the fields the result
-    writes), ``deformation`` (the exaggeration), ``load_scale`` (the load as a
-    multiple of the solved one), ``threshold`` (values of its ``field`` under it
-    are drawn grey), ``mode`` and ``frame`` (a series frame, by mode or by its
-    value) and ``sigma`` (a random vibration's level), each shown ``when`` the
-    checks say (``always``, ``failing``, ``passing``). ``checks`` are what the
-    result is judged by (the analysis's kinds; cadgen evaluates them),
-    ``sections`` the parts of Study in order. ``presets`` are named states over
-    those controls, ``show`` whether the loads and fixtures are drawn and
-    whether an assembly's Parts panel is shown (``parts``; by default only from
-    six parts up). ``None`` when the study has none.
+    ``controls`` are parameters in the viewer's generic schema (``type``, ``label``, ``min``, ``max``, ``default``,
+    ``unit``, ``options``) plus ``drives``, which names what each moves, at most one each and only the drives the
+    analysis offers: ``field`` (an enum of the fields the result writes), ``deformation`` (the exaggeration),
+    ``load_scale`` (the load as a multiple of the solved one), ``threshold`` (values of its ``field`` under it are drawn
+    grey), ``mode`` and ``frame`` (a series frame, by mode or by its value) and ``sigma`` (a random vibration's level),
+    each shown ``when`` the checks say (``always``, ``failing``, ``passing``). ``checks`` are what the result is judged
+    by (the analysis's kinds; cadgen evaluates them), ``sections`` the parts of Study in order. ``presets`` are named
+    states over those controls, ``show`` whether the loads and fixtures are drawn and whether an assembly's Parts panel
+    is shown (``parts``; by default only from six parts up). ``None`` when the study has none.
     """
     if raw is None:
         return None
@@ -544,8 +525,7 @@ def _vector(entry: dict, key: str, *, where: str, words: str) -> tuple[float, fl
     vector = entry.get(key)
     if not isinstance(vector, list) or len(vector) != 3:
         raise ValueError(f"{where}.{key}: {words}")
-    components = tuple(_number(v, where=f"{where}.{key}") for v in vector)
-    return components  # type: ignore[return-value]
+    return tuple(_number(v, where=f"{where}.{key}") for v in vector)  # type: ignore[return-value]
 
 
 def parse_loads(document: dict, *, required: bool = True, body: bool = True) -> tuple[Load, ...]:
@@ -675,7 +655,7 @@ def parse_study(study: str | dict | Path | None) -> Study:
     material_required = getattr(analysis, "material_required", True)
     if "material" not in document and material_required:
         raise ValueError("study: 'material' is required (a table name or {E_MPa, nu, yield_MPa})")
-    material = _material(document["material"]) if "material" in document else None
+    material = material_from_spec(document["material"]) if "material" in document else None
 
     inputs = analysis.parse(document)
     fixtures = tuple(getattr(inputs, "fixtures", ()))

@@ -22,27 +22,18 @@ Parse tests need no mesh; the solves need the fea extra.
 from __future__ import annotations
 
 import io
-import json
 import math
-import struct
 import tempfile
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
+from tests.python.support.fea_fixtures import (
+    class_directory, glb_attribute_names, glb_extras, glb_rows, needs_fea, sidecar, solve,
+)
 
 from cadgen._internal.fea.analyses import get_analysis  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
 from cadgen._internal.fea.study import parse_study  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 G0 = 9806.65
 LENGTH, SIDE, HEIGHT = 100.0, 10.0, 1000.0
@@ -61,27 +52,9 @@ def _study(**more) -> dict:
             **more}
 
 
-def _glb(path: Path, names: tuple[str, ...] = ()) -> tuple[dict, dict]:
-    """A result GLB's mesh extras and the named float attributes, as lists of rows."""
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    gltf = json.loads(raw[20:20 + length])
-    binary = raw[20 + length + 8:]
-    primitive = gltf["meshes"][0]["primitives"][0]
-    out = {}
-    for name in names:
-        accessor = gltf["accessors"][primitive["attributes"][name]]
-        view = gltf["bufferViews"][accessor["bufferView"]]
-        width = {"SCALAR": 1, "VEC3": 3}[accessor["type"]]
-        values = struct.unpack_from(f"<{accessor['count'] * width}f", binary, view["byteOffset"])
-        out[name] = [values[i:i + width] for i in range(0, len(values), width)]
-    out["_names"] = sorted(primitive["attributes"])
-    return gltf["meshes"][0]["extras"], out
-
-
 def _mid_peak(path: Path) -> float:
     """The peak von Mises over the run in the middle 60 % of the bar (glTF is y-up, in metres): away from the ends."""
-    _, attributes = _glb(path, ("POSITION", "_VON_MISES_PEAK"))
+    attributes = glb_rows(path, "POSITION", "_VON_MISES_PEAK")
     return max(value[0] for position, value in zip(attributes["POSITION"], attributes["_VON_MISES_PEAK"])
                if 0.02 < position[1] < 0.08)
 
@@ -151,7 +124,7 @@ class StudyFile(unittest.TestCase):
         self.assertEqual(analysis.ladder, ("iterative", "window", "subcycling", "mass_scaling", "local_refine", "defeature"))
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class SettledSteps(unittest.TestCase):
     """The ladder's steps are said again after the run through settle_steps, as new steps; the cost model is fit's."""
 
@@ -220,27 +193,19 @@ class Engine(unittest.TestCase):
         self.assertEqual(explicit.best_subcycle(model.element_dt, model.tets, model.count), (1, 1.0))
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class BarDroppedEndOn(unittest.TestCase):
     """A 100 mm steel bar dropped 1 m end-on: contact 2 L / c, stress ρ c v, deceleration c v / L."""
 
     @classmethod
     def setUpClass(cls):
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.directory = Path(cls._tmp.name)
+        cls.directory = class_directory(cls)
         cls.step = _bar(cls.directory, "bar")
         study = _study(material=STEEL_1D, mesh={"size_mm": 3.0},
                        view={"checks": [{"kind": "stress"}, {"kind": "acceleration", "limit_g": 30000}]})
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(cls.step, cls.directory / "bar.fea.glb", study=study)
-        cls.extras, cls.attributes = _glb(cls.result.glb)
-        cls.sidecar = json.loads(cls.result.sidecar.read_text(encoding="utf-8"))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.result = solve(cls.step, cls.directory / "bar.fea.glb", study)
+        cls.extras = glb_extras(cls.result.glb)
+        cls.sidecar = sidecar(cls.result)
 
     def test_contact_time_peak_stress_and_g_match_the_wave_theory(self):
         summary = self.result.summary
@@ -272,7 +237,7 @@ class BarDroppedEndOn(unittest.TestCase):
         self.assertEqual((extras["analysis"]["tier"], extras["analysis"]["limits"]), (3, [LIMITS]))
         self.assertEqual([field["field"] for field in extras["fields"]],
                          ["von_mises", "displacement", "von_mises_peak", "displacement_peak"])
-        self.assertIn("_VON_MISES_PEAK", self.attributes["_names"])
+        self.assertIn("_VON_MISES_PEAK", glb_attribute_names(self.result.glb))
         series = extras["series"]
         self.assertEqual((series["kind"], series["unit"]), ("time", "s"))
         values = [frame["value"] for frame in series["frames"]]
@@ -322,14 +287,11 @@ class BarDroppedEndOn(unittest.TestCase):
         self.assertIn(LIMITS, found["impact_peak"]["description"])
 
     def test_plasticity_caps_the_stress_at_yield_and_leaves_it_bent(self):
-        from cadgen import fea
-
         yield_MPa = 100.0
         study = _study(material={**STEEL_1D, "yield_MPa": yield_MPa}, mesh={"size_mm": 3.0}, window_ms=0.05,
                        plasticity={"tangent_MPa": 0},
                        view={"checks": [{"kind": "stress"}, {"kind": "plastic_strain", "limit_percent": 0.2}]})
-        with redirect_stderr(io.StringIO()):
-            result = fea.solve(self.step, self.directory / "plastic.fea.glb", study=study)
+        result = solve(self.step, self.directory / "plastic.fea.glb", study)
         summary = result.summary
         # Perfectly plastic: the stress stops at yield and the floor pushes with yield × area, not ρ c v A.
         self.assertLessEqual(summary["max_von_mises_MPa"], yield_MPa * 1.001)
@@ -339,11 +301,9 @@ class BarDroppedEndOn(unittest.TestCase):
         self.assertEqual((plastic["kind"], plastic["label"], plastic["unit"], plastic["status"]),
                          ("plastic_strain", "Permanent bend", "%", "fails"))
         self.assertIn("impact_bends_for_good", [finding["type"] for finding in result.findings])
-        extras, attributes = _glb(result.glb)
-        self.assertIn("_PLASTIC_STRAIN", attributes["_names"])
-        self.assertEqual(extras["study"]["plasticity"], {"tangent_MPa": 0.0})
+        self.assertIn("_PLASTIC_STRAIN", glb_attribute_names(result.glb))
+        self.assertEqual(glb_extras(result.glb)["study"]["plasticity"], {"tangent_MPa": 0.0})
         self.assertLess(summary["rebound_speed_m_s"], 0.5 * SPEED / 1000)
-
 
     def test_a_plain_bar_needs_no_word_on_its_peak_and_a_stepped_one_says_why_its_is_over_rho_c_v(self):
         """End-on, a plain bar feels ρ c v (175 MPa here). A bar that widens from 10 to 20 mm square half-way up sends a
@@ -351,16 +311,13 @@ class BarDroppedEndOn(unittest.TestCase):
         its landing end feels (1 + 2 R) ρ c v = 2.2× it. The peak is real, and said, not a filter or floor-penalty error."""
         from build123d import Align, Box, Pos, export_step
 
-        from cadgen import fea
-
         self.assertNotIn("impact_stress_wave", [finding["type"] for finding in self.result.findings])
         step = self.directory / "stepped.step"
         low = (Align.CENTER, Align.CENTER, Align.MIN)
         export_step(Box(SIDE, SIDE, LENGTH / 2, align=low) + Pos(0, 0, LENGTH / 2) * Box(2 * SIDE, 2 * SIDE, LENGTH / 2, align=low),
                     str(step))
         study = _study(material=STEEL_1D, mesh={"size_mm": 3.0}, window_ms=0.03, view={"checks": [{"kind": "stress"}]})
-        with redirect_stderr(io.StringIO()):
-            result = fea.solve(step, self.directory / "stepped.fea.glb", study=study)
+        result = solve(step, self.directory / "stepped.fea.glb", study)
         peak = result.summary["max_von_mises_MPa"]
         self.assertAlmostEqual(peak / (2.2 * STRESS_MPA), 1.0, delta=0.15)
         found = {finding["type"]: finding for finding in result.findings}
@@ -371,13 +328,10 @@ class BarDroppedEndOn(unittest.TestCase):
         """A soft (20 MPa yield, perfectly plastic) bar stays down about ρ L v / σy = 174 µs, four times the elastic
         estimate: the automatic three-estimate window ended with it still on the floor; now the run goes on until the
         first impact is over, plus 20 %."""
-        from cadgen import fea
-
         yield_MPa = 20.0
         study = _study(material={**STEEL_1D, "yield_MPa": yield_MPa}, mesh={"size_mm": 3.0}, plasticity={"tangent_MPa": 0},
                        view={"checks": [{"kind": "stress"}]})
-        with redirect_stderr(io.StringIO()):
-            result = fea.solve(self.step, self.directory / "soft.fea.glb", study=study)
+        result = solve(self.step, self.directory / "soft.fea.glb", study)
         summary = result.summary
         self.assertAlmostEqual(summary["window_ms"], 3 * CONTACT_S * 1e3, places=9)
         self.assertIsNotNone(summary["contact_ms"])
@@ -389,10 +343,11 @@ class BarDroppedEndOn(unittest.TestCase):
         self.assertAlmostEqual(summary["contact_ms"] / (crush * 1e3), 1.0, delta=0.25)
         self.assertNotIn("still_in_contact", [finding["type"] for finding in result.findings])
         self.assertTrue(any("until the first impact was over" in line for line in result.human_lines()))
-        frames = json.loads(result.sidecar.read_text(encoding="utf-8"))["series"]["frames"]
+        frames = sidecar(result)["series"]["frames"]
         self.assertGreater(frames[-2]["value"], summary["window_ms"] / 1e3)  # frames cover the extension too
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+
+@needs_fea
 class PastTimeLimit(unittest.TestCase):
     """Fixed gap: the explicit march had no time limit and said nothing but a line every 2000 steps at debug level."""
 
@@ -411,7 +366,7 @@ class PastTimeLimit(unittest.TestCase):
             with mock.patch.object(timestep, "LIMIT_FLOOR_S", 0.0), mock.patch.object(timestep, "PROGRESS_S", 0.0), \
                     redirect_stderr(printed):
                 result = fea.solve(step, directory / "bar.fea.glb", study=study)
-            extras, _ = _glb(result.glb)
+            extras = glb_extras(result.glb)
         self.assertIn("[fea] impact: ", printed.getvalue())
         summary = result.summary
         self.assertTrue(result.ok)
@@ -425,29 +380,21 @@ class PastTimeLimit(unittest.TestCase):
         self.assertTrue(any(w.startswith("Stopped at its time limit") for w in extras["analysis"]["warnings"]))
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class OverBudget(unittest.TestCase):
     """A bar with a small fillet at its top (small elements, a short step) and a tiny time target."""
 
     @classmethod
     def setUpClass(cls):
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.directory = Path(cls._tmp.name)
-        cls.step = _bar(cls.directory, "filleted", fillet_mm=1.0)
+        directory = class_directory(cls)
+        step = _bar(directory, "filleted", fillet_mm=1.0)
         base = _study(material=STEEL_1D, mesh={"size_mm": 5.0})
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(cls.step, cls.directory / "all.fea.glb", study={
-                **base, "fit": {"seconds": 0.05, "allow": ["window", "subcycling", "mass_scaling"]}})
-            cls.subcycled = fea.solve(cls.step, cls.directory / "sub.fea.glb", study={
-                **base, "window_ms": 0.05, "fit": {"seconds": 0.05, "allow": ["subcycling"]}})
-        cls.extras, _ = _glb(cls.result.glb)
-        cls.sidecar = json.loads(cls.result.sidecar.read_text(encoding="utf-8"))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.result = solve(step, directory / "all.fea.glb", {
+            **base, "fit": {"seconds": 0.05, "allow": ["window", "subcycling", "mass_scaling"]}})
+        cls.subcycled = solve(step, directory / "sub.fea.glb", {
+            **base, "window_ms": 0.05, "fit": {"seconds": 0.05, "allow": ["subcycling"]}})
+        cls.extras = glb_extras(cls.result.glb)
+        cls.sidecar = sidecar(cls.result)
 
     def _benchmark(self, result, tolerance: float) -> None:
         summary = result.summary

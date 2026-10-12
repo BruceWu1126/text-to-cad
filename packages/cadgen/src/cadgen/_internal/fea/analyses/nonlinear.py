@@ -25,6 +25,9 @@ stress for rubber), the displacement and (J2) the equivalent plastic strain
 in percent. Checks: ``plastic_strain`` (``limit_percent``; by default 0.2 %,
 the offset that defines yield), ``stress`` and ``displacement``, each judged
 at the last load carried; a collapse fails every check. Stdlib only at import.
+
+The solve's plumbing (symmetry planes, supports, unfolding a half, the frame series) lives here as module helpers
+that contact, bolt, creep and topology share.
 """
 
 from __future__ import annotations
@@ -35,7 +38,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Series, SeriesFrame, SolveContext
+from cadgen._internal.fea.analyses.base import (
+    AnalysisBase, AnalysisResult, FieldSpec, Series, SeriesFrame, SolveContext, by_severity, finding, frame_attributes,
+    max_frames, plan_value, xyz,
+)
 from cadgen._internal.fea.analyses.static import StaticAnalysis, StaticInputs
 
 if TYPE_CHECKING:
@@ -54,8 +60,6 @@ NEWTON_PER_STEP = 4.0
 GMRES_PER_AMG = 1.5
 #: Quadrature points per quadratic tet (the vector basis's), for the state's memory.
 POINTS_PER_TET = 11
-#: Frames a series keeps when the budget does not say.
-MAX_FRAMES = 24
 #: The permanent strain a plastic_strain check allows when the study names no check: the 0.2 % offset that defines yield.
 DEFAULT_PLASTIC_LIMIT = 0.2
 
@@ -70,14 +74,15 @@ LIMITS = (
 )
 
 
-def _figure(value: float) -> str:
+def figure(value: float) -> str:
+    """A number in three figures, never in exponent form: "2.5", "250", "1000"."""
     text = f"{value:.3g}"
     return text if "e" not in text else f"{value:.0f}"
 
 
 def load_label(factor: float) -> str:
     """A load factor as the scrubber says it: "60 % load"."""
-    return f"{_figure(factor * 100.0)} % load"
+    return f"{figure(factor * 100.0)} % load"
 
 
 def collapse_words(factor: float) -> str:
@@ -118,6 +123,18 @@ def material_specs(document: dict) -> list[tuple[str, Any]]:
     return specs
 
 
+def view_checks(document: dict) -> Any:
+    view = document.get("view")
+    return view.get("checks") if isinstance(view, dict) else None
+
+
+def refuse_stress(checks: list, words: str) -> None:
+    """A material with no yield strength: the first stress check in ``checks`` is a study error ending in ``words``."""
+    for index, check in enumerate(checks):
+        if isinstance(check, dict) and check.get("kind") == "stress":
+            raise ValueError(f"view.checks[{index}]: a stress check compares the peak with a yield strength{words}")
+
+
 def _model(document: dict) -> str:
     from cadgen._internal.fea.materials import material_from_spec
 
@@ -135,10 +152,10 @@ def _model(document: dict) -> str:
     )
 
 
-def _steps(document: dict) -> int:
-    raw = document.get("steps", DEFAULT_STEPS)
-    if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= MAX_STEPS:
-        raise ValueError(f"steps: the number of load steps to start with, a whole number from 1 to {MAX_STEPS}, "
+def parse_steps(document: dict, default: int, most: int = MAX_STEPS, what: str = "load") -> int:
+    raw = document.get("steps", default)
+    if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= most:
+        raise ValueError(f"steps: the number of {what} steps to start with, a whole number from 1 to {most}, "
                          f"got {kinds.json_text(raw)}")
     return raw
 
@@ -146,7 +163,7 @@ def _steps(document: dict) -> int:
 # -- the problems the driver solves --------------------------------------------------------------------
 
 
-class _Problem:
+class SolidProblem:
     """A solid on the space: the free DOF, the full load, and each converged step's quadrature-point fields."""
 
     def __init__(self, space, free, external):
@@ -162,8 +179,23 @@ class _Problem:
         #: Per converged step: (von Mises at the quadrature points, equivalent plastic strain there or None).
         self.history: list[tuple["np.ndarray", "np.ndarray | None"]] = []
 
+    def mean_dilatation(self, update, tangent):
+        """(internal force, tangent or None) of a small-strain update: the deviatoric tangent at the points, the bulk
+        modulus on each element's mean volume change."""
+        import numpy as np
 
-class _J2Problem(_Problem):
+        if not tangent:
+            return self.ops.force(update.stress), None
+        C = update.tangent
+        bulk = np.broadcast_to(np.asarray(self.params.bulk, dtype=float), self.ops.dx.shape)
+        for i in range(3):
+            for k in range(3):
+                C[i, i, k, k] -= bulk
+        K = self.ops.matrix(C) + self.ops.volumetric_matrix(bulk[:, 0])
+        return self.ops.force(update.stress), K
+
+
+class _J2Problem(SolidProblem):
     def __init__(self, space, free, external, params):
         from cadgen._internal.fea.plasticity import J2State
 
@@ -177,19 +209,7 @@ class _J2Problem(_Problem):
         return radial_return(mean_dilatation_strain(self.ops.gradient(u), self.ops), self.state, self.params, tangent=tangent)
 
     def evaluate(self, u, *, tangent):
-        import numpy as np
-
-        update = self._update(u, tangent)
-        if not tangent:
-            return self.ops.force(update.stress), None
-        # Mean dilatation: the deviatoric tangent at the points, the bulk modulus on each element's mean volume change.
-        C = update.tangent
-        bulk = np.broadcast_to(np.asarray(self.params.bulk, dtype=float), self.ops.dx.shape)
-        for i in range(3):
-            for k in range(3):
-                C[i, i, k, k] -= bulk
-        K = self.ops.matrix(C) + self.ops.volumetric_matrix(bulk[:, 0])
-        return self.ops.force(update.stress), K
+        return self.mean_dilatation(self._update(u, tangent), tangent)
 
     def commit(self, u, factor):
         from cadgen._internal.fea.operators import von_mises
@@ -199,7 +219,7 @@ class _J2Problem(_Problem):
         self.history.append((von_mises(update.stress), update.state.equivalent.copy()))
 
 
-class _RubberProblem(_Problem):
+class _RubberProblem(SolidProblem):
     def __init__(self, space, free, external, params):
         super().__init__(space, free, external)
         self.params = params
@@ -271,11 +291,95 @@ def pick_frames(count: int, keep: int) -> list[int]:
     return sorted(picked)
 
 
-class NonlinearAnalysis:
+# -- the solve's plumbing, shared with contact, bolt, creep and topology ----------------------------------
+
+
+def symmetry_planes(ctx: SolveContext) -> list:
+    """The planes fit's ``symmetry`` rung cut the part along (the solve is of one half per plane)."""
+    plan = ctx.plan
+    return list(plan.prepared.planes) if plan is not None and plan.prepared is not None else []
+
+
+def supported(ctx: SolveContext, fixtures, planes: list):
+    """(supports, free DOF): fixed faces, rollers (a sloped or curved one's nodes turned into their own axes:
+    supports.py) and each symmetry plane's normal component."""
+    import numpy as np
+
+    from cadgen._internal.fea.supports import check_held, supports_of
+
+    space = ctx.space
+    plane_dofs = []
+    for plane in planes:
+        dofs = space.basis.get_dofs(space.facets_of_ordinals([plane.ordinal], "a symmetry plane")).all()
+        plane_dofs.append(dofs[space.component[dofs] == plane.component])
+    supports = supports_of(space, fixtures, ctx.ordinal_of, held=plane_dofs)
+    check_held(space, supports)
+    return supports, np.setdiff1d(np.arange(space.basis.N), supports.fixed)
+
+
+def totals(space, values: "np.ndarray", dofs: "np.ndarray | None" = None) -> tuple[float, float, float]:
+    """A DOF vector's x, y and z sums (over ``dofs`` alone, when given): the force it is."""
+    if dofs is None:
+        return tuple(float(values[space.component == c].sum()) for c in range(3))
+    return tuple(float(values[dofs][space.component[dofs] == c].sum()) for c in range(3))
+
+
+def nodal(space, values: "np.ndarray") -> "np.ndarray":
+    """Quadrature-point values at the nodes: the L2 projection, never past the points' own range (it overshoots where
+    a field turns sharply)."""
+    import numpy as np
+
+    return np.clip(space.scalar.project(values), 0.0, float(values.max()))
+
+
+def unfold(ctx: SolveContext, planes: list, scalars: dict[str, list], vectors: dict[str, list], reactions: list, *forces):
+    """A symmetric half's frames mirrored back into the whole part, plane by plane (``ctx.volume`` becomes the whole):
+    (mesh, scalars, vectors, reactions, forces), mesh = (dof_locations, boundary, tets, element_dofs, vertices), each
+    of ``scalars`` and ``vectors`` a list of frames by name, ``forces`` each one force."""
+    space = ctx.space
+    locations, boundary, tets, element_dofs, vertices = (space.dof_locations, space.boundary_quadratic, space.tets,
+                                                         space.element_dofs, space.vertices)
+    if planes:
+        from cadgen._internal.fea import symmetry
+
+        volume = ctx.volume
+        for plane in reversed(planes):
+            whole, keep = symmetry.unfold_volume(volume, plane)
+            locations, flat_scalars, flat_vectors, boundary, tets, element_dofs, vertices = symmetry.unfold_fields(
+                plane, vertices, locations, keep, boundary=boundary, tets=tets, element_dofs=element_dofs,
+                scalars={(name, i): values for name, frames in scalars.items() for i, values in enumerate(frames)},
+                vectors={(name, i): values for name, frames in vectors.items() for i, values in enumerate(frames)},
+            )
+            scalars = {name: [flat_scalars[name, i] for i in range(len(frames))] for name, frames in scalars.items()}
+            vectors = {name: [flat_vectors[name, i] for i in range(len(frames))] for name, frames in vectors.items()}
+            reactions = [symmetry.unfold_force(plane, r) for r in reactions]
+            forces = tuple(symmetry.unfold_force(plane, force) for force in forces)
+            volume = whole
+        ctx.volume = volume
+    return (locations, boundary, tets, element_dofs, vertices), scalars, vectors, reactions, forces
+
+
+def field_peak(ctx: SolveContext, result: AnalysisResult, values: "np.ndarray", faces: tuple, index: int):
+    """``kinds.field_max_over`` of a check: the peak of ``values`` over ``faces`` (the whole part when none)."""
+    return kinds.field_max_over(values, faces, boundary=result.boundary_quadratic, boundary_ordinal=ctx.volume.boundary_ordinal,
+                                locations=result.dof_locations, face_ref=ctx.volume.faces, ordinal_of=ctx.ordinal_of,
+                                where=f"view.checks[{index}]")
+
+
+def peak_check(kind: str, label: str, peak, limit: float, unit: str) -> dict:
+    """A check of a field's peak against a limit (plastic strain, creep strain, contact pressure), close at 90 %."""
+    from cadgen._internal.fea import checks
+
+    ratio = peak.value / limit
+    return {
+        "kind": kind, "label": label, "value": round(peak.value, 6), "limit": limit, "unit": unit, "ratio": round(ratio, 6),
+        "close_at": 0.9, "status": checks.check_status(ratio, 0.9), "where": {"ref": peak.ref, "at": xyz(peak.at)},
+    }
+
+
+class NonlinearAnalysis(AnalysisBase):
     name: ClassVar[str] = "nonlinear"
-    tier: ClassVar[int] = 3
     word: ClassVar[str] = "Permanent bend / Stretch"
-    estimate_only: ClassVar[bool] = False
     #: Its solids are the same in every direction: study.parse_study refuses an orthotropic material (contact, bolt
     #: and creep inherit this).
     isotropic_only: ClassVar[bool] = True
@@ -284,9 +388,6 @@ class NonlinearAnalysis:
     collapse_fails: ClassVar[bool] = True
     limits: ClassVar[tuple[str, ...]] = LIMITS
     study_keys: ClassVar[frozenset[str]] = frozenset({"fixtures", "loads", "steps"})
-    material_needs: ClassVar[frozenset[str]] = frozenset()
-    mesh_orders: ClassVar[tuple[int, ...]] = (2,)
-    connection_types: ClassVar[tuple[str, ...]] = ("bonded", "free")
     fields: ClassVar[tuple[FieldSpec, ...]] = (
         FieldSpec("von_mises", "_VON_MISES", "von Mises stress", "MPa", per_frame=True),
         FieldSpec("displacement", "_DISPLACEMENT", "displacement", "mm", 3, 1000.0, per_frame=True),
@@ -301,27 +402,24 @@ class NonlinearAnalysis:
         "field": {"drives": "field", "type": "enum", "options": ["von_mises", "displacement", "plastic_strain"]},
         "deformation": {"drives": "deformation", "type": "number", "min": 0.0, "max": None},
     }
-    upstream: ClassVar[tuple[str, ...]] = ()
     ladder: ClassVar[tuple[str, ...]] = ("iterative", "adaptive_steps", "local_refine", "defeature", "symmetry")
     noun: ClassVar[str] = "this load"
     governing_word: ClassVar[str] = "peak stress"
+    extras_word: ClassVar[str] = "nonlinear"
+    # needs_finer stays AnalysisBase's False: a whole load path is too dear to run twice unasked.
 
     # -- parse ---------------------------------------------------------------------------------------
 
     def parse(self, document: dict) -> NonlinearInputs:
         static = StaticAnalysis().parse(document)
         model = _model(document)
-        steps = _steps(document)
-        view = document.get("view")
-        checks = view.get("checks") if isinstance(view, dict) else None
+        steps = parse_steps(document, DEFAULT_STEPS)
+        checks = view_checks(document)
         if isinstance(checks, list):
             from cadgen._internal.fea.materials import material_from_spec
 
-            yieldless = any(material_from_spec(spec).yield_strength is None for _, spec in material_specs(document))
-            for index, check in enumerate(checks):
-                if isinstance(check, dict) and check.get("kind") == "stress" and yieldless:
-                    raise ValueError(f"view.checks[{index}]: a stress check compares the peak with a yield strength, and "
-                                     "the rubber has none; give the material's yield_MPa, or check its displacement")
+            if any(material_from_spec(spec).yield_strength is None for _, spec in material_specs(document)):
+                refuse_stress(checks, ", and the rubber has none; give the material's yield_MPa, or check its displacement")
         return NonlinearInputs(
             static.face_refs, static.anchor_refs, True, fixtures=static.fixtures, loads=static.loads,
             material_needs=static.material_needs, steps=steps, model=model,
@@ -361,6 +459,15 @@ class NonlinearAnalysis:
         return fit.Estimate(dofs=n, memory_bytes=int(fit.BASE_BYTES + memory + state),
                             seconds=float(passes * seconds * steps * NEWTON_PER_STEP))
 
+    #: What the adaptive_steps rung says (``{growth}``, ``{steps}``), and its accuracy note (None when nothing is lost).
+    _adaptive_words = ("Let the load steps grow (up to {growth}× the {steps} starting ones) while Newton converges in a "
+                       "few iterations, cutting them where it does not, to fit the time target")
+
+    def _adaptive_accuracy(self, inputs) -> str | None:
+        return None if inputs.model == "hyperelastic" else (
+            "plastic strain is followed along the load in larger steps where the part answers smoothly; the load it "
+            "collapses at is still found to within the smallest step")
+
     def apply(self, rung, ctx: SolveContext, inputs: NonlinearInputs):
         from cadgen._internal.fea import fit
 
@@ -372,14 +479,9 @@ class NonlinearAnalysis:
             ctx.plan.adaptive_steps = True
             from cadgen._internal.fea.nonlinear_driver import MAX_GROWTH
 
-            accuracy = None if inputs.model == "hyperelastic" else (
-                "plastic strain is followed along the load in larger steps where the part answers smoothly; the load it "
-                "collapses at is still found to within the smallest step")
             return fit.Step(
-                "adaptive_steps",
-                f"Let the load steps grow (up to {MAX_GROWTH}× the {inputs.steps} starting ones) while Newton converges in a "
-                "few iterations, cutting them where it does not, to fit the time target",
-                accuracy, None, detail={"starting_steps": inputs.steps, "max_growth": MAX_GROWTH},
+                "adaptive_steps", self._adaptive_words.format(growth=MAX_GROWTH, steps=inputs.steps),
+                self._adaptive_accuracy(inputs), None, detail={"starting_steps": inputs.steps, "max_growth": MAX_GROWTH},
             )
         return fit.apply_generic(rung, self, ctx, inputs)
 
@@ -414,13 +516,21 @@ class NonlinearAnalysis:
 
     # -- solve ---------------------------------------------------------------------------------------
 
+    def _series(self, unit: str, frame_fields: dict[str, list], frames: list[tuple[float, str]]) -> Series:
+        """The time series of ``frames`` ((value, label) each), every field in ``frame_fields`` per frame; the last opens."""
+        attributes = {spec.name: spec.attribute for spec in self.fields if spec.name in frame_fields}
+        return Series(kind="time", unit=unit, default=len(frames) - 1, frames=[
+            SeriesFrame(value=value, label=label, attributes=frame_attributes(attributes, i))
+            for i, (value, label) in enumerate(frames)
+        ])
+
     def solve(self, ctx: SolveContext, inputs: NonlinearInputs) -> AnalysisResult:
         import time
 
         import numpy as np
 
         from cadgen._internal.fea import nonlinear_driver
-        from cadgen._internal.fea.supports import check_held, driven, path_to_global, supports_of
+        from cadgen._internal.fea.supports import driven, path_to_global
 
         space = ctx.space
         basis = space.basis
@@ -428,34 +538,24 @@ class NonlinearAnalysis:
         timings: dict[str, float] = {}
         warnings: list[str] = []
         started = time.perf_counter()
-        fit_plan = ctx.plan
-        planes = list(fit_plan.prepared.planes) if fit_plan is not None and fit_plan.prepared is not None else []
+        planes = symmetry_planes(ctx)
         share = 0.5 ** len(planes)
         external = external_load(space, materials, inputs.surface_loads, inputs.body_accelerations, ctx.ordinal_of, share)
-        plane_dofs = []
-        for plane in planes:
-            dofs = basis.get_dofs(space.facets_of_ordinals([plane.ordinal], "a symmetry plane")).all()
-            plane_dofs.append(dofs[space.component[dofs] == plane.component])
-        # Fixed faces, rollers (a sloped or curved one's nodes turned into their own axes: supports.py) and planes.
-        supports = supports_of(space, inputs.fixtures, ctx.ordinal_of, held=plane_dofs)
-        check_held(space, supports)
-        fixture_dofs = supports.per_fixture
-        fixed = supports.fixed
-        free = np.setdiff1d(np.arange(basis.N), fixed)
+        supports, free = supported(ctx, inputs.fixtures, planes)
         if inputs.model == "hyperelastic":
             from cadgen._internal.fea.hyperelastic import neo_hookean_params
 
             if any(m.tangent is not None and not m.hyperelastic for m in materials):
                 warnings.append("a rubber study treats its metal parts as elastic: their plasticity is left out")
-            problem: _Problem = _RubberProblem(space, free, external, neo_hookean_params(space, materials))
+            problem: SolidProblem = _RubberProblem(space, free, external, neo_hookean_params(space, materials))
         else:
             from cadgen._internal.fea.plasticity import j2_params
 
             problem = _J2Problem(space, free, external, j2_params(space, materials))
         timings["assemble_s"] = time.perf_counter() - started
 
-        solver = getattr(fit_plan, "solver", "direct") if fit_plan is not None else "direct"
-        adaptive = bool(getattr(fit_plan, "adaptive_steps", False)) if fit_plan is not None else False
+        solver = plan_value(ctx, "solver", "direct")
+        adaptive = bool(plan_value(ctx, "adaptive_steps", False))
         path = path_to_global(nonlinear_driver.solve_path(driven(problem, supports, free), steps=inputs.steps, solver=solver,
                                                           adaptive=adaptive, log=ctx.log), supports)
         timings["solve_s"] = path.seconds
@@ -465,72 +565,34 @@ class NonlinearAnalysis:
                     f"Newton iterations, in {path.seconds:.1f}s")
 
         started = time.perf_counter()
-        frames_max = int(getattr(ctx.budget, "max_frames", MAX_FRAMES) or MAX_FRAMES) if ctx.budget is not None else MAX_FRAMES
         records = path.records
         if not records:  # not even the smallest first step: the unloaded part is the one frame
             zeros = np.zeros(problem.size)
             records = [nonlinear_driver.StepRecord(0.0, 0, zeros, 0.0)]
             problem.history = [(np.zeros(basis.dx.shape), None if inputs.model == "hyperelastic" else np.zeros(basis.dx.shape))]
-        picked = pick_frames(len(records), max(frames_max, 1))
+        picked = pick_frames(len(records), max(max_frames(ctx), 1))
         plastic = inputs.model == "plasticity"
-        stress_frames, displacement_frames, plastic_frames = [], [], []
-        def nodal(values):
-            # The L2 projection, never past the quadrature points' own range (it overshoots where a field turns sharply).
-            return np.clip(space.scalar.project(values), 0.0, float(values.max()))
-
-        for index in picked:
-            vm_q, alpha_q = problem.history[index]
-            stress_frames.append(nodal(vm_q))
-            displacement_frames.append(space.nodal(records[index].u))
-            if plastic:
-                plastic_frames.append(nodal(100.0 * alpha_q))
+        stress_frames = [nodal(space, problem.history[index][0]) for index in picked]
+        displacement_frames = [space.nodal(records[index].u) for index in picked]
+        plastic_frames = [nodal(space, 100.0 * problem.history[index][1]) for index in picked] if plastic else []
         final = records[-1]
         internal, _ = problem.evaluate(final.u, tangent=False) if path.records else (np.zeros(problem.size), None)
         residual = internal - final.factor * external
-        reactions = [tuple(float(residual[dofs][space.component[dofs] == c].sum()) for c in range(3)) for dofs in fixture_dofs]
-        applied = tuple(float(final.factor * external[space.component == c].sum()) for c in range(3))
-        requested = tuple(float(external[space.component == c].sum()) for c in range(3))
+        reactions = [totals(space, residual, dofs) for dofs in supports.per_fixture]
+        requested = totals(space, external)
+        applied = tuple(float(final.factor * c) for c in requested)
         vm_gauss = float(problem.history[-1][0].max())
         alpha_gauss = float(problem.history[-1][1].max()) * 100.0 if plastic else 0.0
-        dof_locations, boundary, tets, element_dofs, vertices = (space.dof_locations, space.boundary_quadratic, space.tets,
-                                                                  space.element_dofs, space.vertices)
-        if planes:
-            from cadgen._internal.fea import symmetry
-
-            volume = ctx.volume
-            for plane in reversed(planes):
-                whole, keep = symmetry.unfold_volume(volume, plane)
-                scalars = {f"vm{i}": values for i, values in enumerate(stress_frames)}
-                scalars.update({f"ep{i}": values for i, values in enumerate(plastic_frames)})
-                vectors = {f"u{i}": values for i, values in enumerate(displacement_frames)}
-                dof_locations, scalars, vectors, boundary, tets, element_dofs, vertices = symmetry.unfold_fields(
-                    plane, vertices, dof_locations, keep, scalars=scalars, vectors=vectors, boundary=boundary, tets=tets,
-                    element_dofs=element_dofs,
-                )
-                stress_frames = [scalars[f"vm{i}"] for i in range(len(stress_frames))]
-                plastic_frames = [scalars[f"ep{i}"] for i in range(len(plastic_frames))]
-                displacement_frames = [vectors[f"u{i}"] for i in range(len(displacement_frames))]
-                reactions = [symmetry.unfold_force(plane, r) for r in reactions]
-                applied = symmetry.unfold_force(plane, applied)
-                requested = symmetry.unfold_force(plane, requested)
-                volume = whole
-            ctx.volume = volume
+        mesh, scalars, vectors, reactions, (applied, requested) = unfold(
+            ctx, planes, {"von_mises": stress_frames, "plastic_strain": plastic_frames},
+            {"displacement": displacement_frames}, reactions, applied, requested)
         timings["stress_s"] = time.perf_counter() - started
 
         factors = [records[i].factor for i in picked]
-        attributes = {"von_mises": "_VON_MISES", "displacement": "_DISPLACEMENT", "plastic_strain": "_PLASTIC_STRAIN"}
-        if not plastic:
-            attributes.pop("plastic_strain")
-        series = Series(kind="time", unit="%", default=len(picked) - 1, frames=[
-            SeriesFrame(value=round(f * 100.0, 6), label=load_label(f),
-                        attributes={name: attribute if i == 0 else f"{attribute}_F{i}" for name, attribute in attributes.items()})
-            for i, f in enumerate(factors)
-        ])
-        frame_fields = {"von_mises": stress_frames, "displacement": displacement_frames}
+        frame_fields = {"von_mises": scalars["von_mises"], "displacement": vectors["displacement"]}
         if plastic:
-            frame_fields["plastic_strain"] = plastic_frames
-        fields = {name: values[0] for name, values in frame_fields.items()}
-        final_fields = {name: values[-1] for name, values in frame_fields.items()}
+            frame_fields["plastic_strain"] = scalars["plastic_strain"]
+        series = self._series("%", frame_fields, [(round(f * 100.0, 6), load_label(f)) for f in factors])
         curve_x = [round(record.factor * 100.0, 6) for record in path.records]
         moved = [float(np.linalg.norm(space.nodal(record.u), axis=1).max()) for record in path.records]
         curves = {"max_displacement_mm": {"x": curve_x, "x_unit": "%", "y": [round(v, 6) for v in moved], "y_unit": "mm"}}
@@ -540,43 +602,42 @@ class NonlinearAnalysis:
                 "y": [round(100.0 * float(history[1].max()), 6) for history in problem.history[:len(path.records)]],
             }
         how = f"{path.how}, {len(path.records)} {'adaptive ' if adaptive else ''}load steps"
-        result = AnalysisResult(
-            dof_locations=dof_locations, vertices=vertices, tets=tets, boundary_quadratic=boundary, element_dofs=element_dofs,
-            fields=fields, deformation=displacement_frames[0], series=series, frame_fields=frame_fields, curves=curves,
-            reactions=reactions, applied=applied, dofs=int(basis.N), solver=how, timings=timings, warnings=warnings,
-            scalars={
-                "path": path, "final": final_fields, "factor": path.factor if path.records else 0.0, "collapsed": path.collapsed,
-                "requested": requested, "model": inputs.model, "adaptive": adaptive, "von_mises_gauss_max": vm_gauss,
-                "plastic_gauss_max": alpha_gauss, "frame_factors": factors,
-                "analysis_warnings": [collapse_words(path.factor)] if path.collapsed else [],
-                "part_refs": None if ctx.assembly is None else [part.ref for part in ctx.assembly.parts],
-                "part_materials": part_materials(ctx),
-            },
-        )
-        return result
+        return self._result(mesh, frame_fields, series, curves, reactions, applied, basis, how, timings, warnings, {
+            "path": path, "final": {name: values[-1] for name, values in frame_fields.items()},
+            "factor": path.factor if path.records else 0.0, "collapsed": path.collapsed,
+            "requested": requested, "model": inputs.model, "adaptive": adaptive, "von_mises_gauss_max": vm_gauss,
+            "plastic_gauss_max": alpha_gauss, "frame_factors": factors,
+            "analysis_warnings": [collapse_words(path.factor)] if path.collapsed else [],
+            "part_refs": None if ctx.assembly is None else [part.ref for part in ctx.assembly.parts],
+            "part_materials": part_materials(ctx),
+        })
 
-    def needs_finer(self, result: AnalysisResult, inputs: NonlinearInputs, check_results: list[dict]) -> bool:
-        """No automatic finer re-solve: a whole load path is too dear to run twice unasked."""
-        return False
+    @staticmethod
+    def _result(mesh, frame_fields, series, curves, reactions, applied, basis, how, timings, warnings, scalars):
+        """A load or time path's result: frame 0 the fields (and the deformation), the series and curves as given."""
+        dof_locations, boundary, tets, element_dofs, vertices = mesh
+        return AnalysisResult(
+            dof_locations=dof_locations, vertices=vertices, tets=tets, boundary_quadratic=boundary, element_dofs=element_dofs,
+            fields={name: values[0] for name, values in frame_fields.items()}, deformation=frame_fields["displacement"][0],
+            series=series, frame_fields=frame_fields, curves=curves, reactions=reactions, applied=applied,
+            dofs=int(basis.N), solver=how, timings=timings, warnings=warnings, scalars=scalars,
+        )
 
     # -- judging -------------------------------------------------------------------------------------
 
-    def _final_frame(self, result: AnalysisResult) -> int:
-        return len(result.series.frames) - 1
-
     def _at(self, result: AnalysisResult) -> dict:
-        frame = self._final_frame(result)
+        frame = len(result.series.frames) - 1
         return {"frame": frame, "value": result.series.frames[frame].value, "unit": "%"}
 
-    def _solved(self, ctx: SolveContext, result: AnalysisResult, inputs: NonlinearInputs):
-        """The stress check's numbers at the last load carried: the peak, and the yield of the part it is in."""
+    def _solved(self, ctx: SolveContext, result: AnalysisResult, inputs, stress, displacement, peak_gauss: float):
+        """The stress check's numbers for one frame's ``stress`` and ``displacement``: the peak, and the yield of the
+        part it is in."""
         import numpy as np
 
         from cadgen._internal.fea import checks
         from cadgen._internal.fea.analyses.static import peak_face
 
-        stress = result.scalars["final"]["von_mises"]
-        moved = np.linalg.norm(result.scalars["final"]["displacement"], axis=1)
+        moved = np.linalg.norm(displacement, axis=1)
         peak = int(stress.argmax())
         node_moved = int(moved.argmax())
         materials = list(ctx.materials)
@@ -586,13 +647,12 @@ class NonlinearAnalysis:
             material = materials[int(ctx.volume.domain[element])]
         volume = ctx.volume
         fixed = {ctx.ordinal_of[ref] for fixture in inputs.fixtures for ref in fixture.faces}
-        outcome = PathOutcome(result.boundary_quadratic, result.dof_locations)
         extent = result.dof_locations.max(axis=0) - result.dof_locations.min(axis=0)
         return checks.Solved(
             material_name=material.name, yield_MPa=material.yield_strength, peak_MPa=float(stress[peak]),
-            peak_gauss_MPa=float(result.scalars["von_mises_gauss_max"]),
+            peak_gauss_MPa=float(peak_gauss),
             peak_at=tuple(float(c) for c in result.dof_locations[peak]),
-            peak_face=peak_face(volume, outcome, peak, fixed),
+            peak_face=peak_face(volume, result, peak, fixed),  # it reads the boundary and node locations
             fixed_faces=tuple(volume.faces[o].ref for o in sorted(fixed) if o in volume.faces),
             max_displacement_mm=float(moved[node_moved]),
             displacement_at=tuple(float(c) for c in result.dof_locations[node_moved]),
@@ -600,33 +660,34 @@ class NonlinearAnalysis:
             coarser_peak_MPa=None, part=ctx.part_name, dofs=result.dofs,
         )
 
+    def _displacement_check(self, check: dict, index: int, ctx: SolveContext, result: AnalysisResult) -> dict:
+        """A displacement check at the last frame."""
+        import numpy as np
+
+        from cadgen._internal.fea import checks
+
+        peak = field_peak(ctx, result, np.linalg.norm(result.scalars["final"]["displacement"], axis=1),
+                          tuple(check.get("faces", ())), index)
+        return checks.displacement_check(peak.value, check["limit_mm"], at=peak.at, ref=peak.ref, faces=peak.faces,
+                                         label=check.get("label"))
+
     def judge(self, check: dict, index: int, ctx: SolveContext, result: AnalysisResult, inputs: NonlinearInputs) -> dict:
         import numpy as np
 
         from cadgen._internal.fea import checks
 
         final = result.scalars["final"]
-        where = f"view.checks[{index}]"
-        common = dict(boundary=result.boundary_quadratic, boundary_ordinal=ctx.volume.boundary_ordinal,
-                      locations=result.dof_locations, face_ref=ctx.volume.faces, ordinal_of=ctx.ordinal_of, where=where)
         if check["kind"] == "stress":
-            judged = checks.stress_check(self._solved(ctx, result, inputs), label=check.get("label"))
+            judged = checks.stress_check(self._solved(ctx, result, inputs, final["von_mises"], final["displacement"],
+                                                      result.scalars["von_mises_gauss_max"]), label=check.get("label"))
         elif check["kind"] == "displacement":
-            peak = kinds.field_max_over(np.linalg.norm(final["displacement"], axis=1), tuple(check.get("faces", ())), **common)
-            judged = checks.displacement_check(peak.value, check["limit_mm"], at=peak.at, ref=peak.ref, faces=peak.faces,
-                                               label=check.get("label"))
+            judged = self._displacement_check(check, index, ctx, result)
         else:
             values = final.get("plastic_strain")
             if values is None:
                 values = np.zeros(len(result.dof_locations))
-            peak = kinds.field_max_over(values, (), **common)
-            limit = float(check["limit_percent"])
-            ratio = peak.value / limit
-            judged = {
-                "kind": "plastic_strain", "label": check.get("label") or kinds.PLASTIC_STRAIN.default_label,
-                "value": round(peak.value, 6), "limit": limit, "unit": "%", "ratio": round(ratio, 6), "close_at": 0.9,
-                "status": checks.check_status(ratio, 0.9), "where": {"ref": peak.ref, "at": [round(c, 3) for c in peak.at]},
-            }
+            judged = peak_check("plastic_strain", check.get("label") or kinds.PLASTIC_STRAIN.default_label,
+                                field_peak(ctx, result, values, (), index), float(check["limit_percent"]), "%")
         judged["at"] = self._at(result)
         # Not linear in the load: the check holds at this load only, so the verdict says its own sentence, no load multiple.
         judged["scaling"] = "none"
@@ -645,12 +706,7 @@ class NonlinearAnalysis:
         path = scalars["path"]
         whole = "The assembly" if assembly else "The part"
         found: list[dict] = []
-
-        def finding(severity, kind, summary, description, items=()):
-            return {"check": "fea", "severity": severity, "type": kind, "summary": summary, "description": description,
-                    "items": list(items)}
-
-        final_at = [round(float(c), 3) for c in result.dof_locations[int(scalars["final"]["von_mises"].argmax())]]
+        final_at = xyz(result.dof_locations[int(scalars["final"]["von_mises"].argmax())])
         if scalars["collapsed"]:
             carried = math.sqrt(sum(c * c for c in result.applied))
             found.append(finding(
@@ -674,14 +730,14 @@ class NonlinearAnalysis:
             peak = float(scalars["final"]["plastic_strain"].max())
             if peak <= 0:
                 found.append(finding("info", "stays_elastic", f"{whole} stays elastic: nothing yields under the full load",
-                                     "no quadrature point passed the yield surface; a linear static study answers the same", []))
+                                     "no quadrature point passed the yield surface; a linear static study answers the same"))
         if path.cuts and not scalars["collapsed"]:
             found.append(finding(
                 "info", "load_steps_cut",
                 f"Cut the load steps down to {path.smallest_step * 100:.3g} % to get through where the part "
                 f"{'yields' if scalars['model'] == 'plasticity' else 'stiffens or softens'}",
-                f"{path.cuts} steps did not converge at first and were halved", []))
-        return sorted(found, key=lambda item: {"error": 0, "warning": 1, "info": 2}[item["severity"]])
+                f"{path.cuts} steps did not converge at first and were halved"))
+        return by_severity(found)
 
     # -- what is written -----------------------------------------------------------------------------
 
@@ -693,15 +749,43 @@ class NonlinearAnalysis:
         largest = max(float(np.linalg.norm(frame, axis=1).max()) for frame in result.frame_fields["displacement"])
         return requested or auto_deformation_scale(largest, bbox_diagonal)
 
-    def summary(self, result: AnalysisResult, inputs: NonlinearInputs, check_results: list[dict]) -> dict:
+    def _peaks(self, result: AnalysisResult) -> dict:
+        """The summary's peak stress and displacement at the last frame, and where."""
         import numpy as np
 
-        scalars = result.scalars
-        path = scalars["path"]
-        final = scalars["final"]
+        final = result.scalars["final"]
         moved = np.linalg.norm(final["displacement"], axis=1)
         peak = int(final["von_mises"].argmax())
         node_moved = int(moved.argmax())
+        return {
+            "max_von_mises_MPa": round(float(final["von_mises"][peak]), 4),
+            "max_von_mises_gauss_MPa": round(result.scalars["von_mises_gauss_max"], 4),
+            "max_von_mises_at_mm": xyz(result.dof_locations[peak]),
+            "max_displacement_mm": round(float(moved[node_moved]), 6),
+            "max_displacement_at_mm": xyz(result.dof_locations[node_moved]),
+        }
+
+    def _path_record(self, result: AnalysisResult, inputs) -> dict:
+        """The summary's forces and how the load path was followed."""
+        scalars = result.scalars
+        path = scalars["path"]
+        return {
+            "yield_MPa": scalars.get("yield_MPa"),
+            "applied_force_N": [round(x, 4) for x in result.applied],
+            "requested_force_N": [round(x, 4) for x in scalars["requested"]],
+            "reaction_force_N": [round(sum(r[c] for r in result.reactions), 4) for c in range(3)],
+            "steps_requested": inputs.steps, "steps": len(path.records), "step_cuts": path.cuts,
+            "smallest_step_percent": round(path.smallest_step * 100.0, 6), "newton_iterations": path.iterations,
+        }
+
+    @staticmethod
+    def _frames_record(result: AnalysisResult) -> dict:
+        scalars = result.scalars
+        return {"adaptive": scalars["adaptive"], "frames": len(result.series.frames),
+                "deformation_scale": scalars.get("deformation_scale")}
+
+    def summary(self, result: AnalysisResult, inputs: NonlinearInputs, check_results: list[dict]) -> dict:
+        scalars = result.scalars
         factor = scalars["factor"]
         summary: dict[str, Any] = {
             "status": collapse_words(factor) if scalars["collapsed"] else "Carries the full load",
@@ -709,52 +793,32 @@ class NonlinearAnalysis:
             "load_percent": round(factor * 100.0, 4),
             "collapse_percent": round(factor * 100.0, 4) if scalars["collapsed"] else None,
             "material_model": scalars["model"],
-            "max_von_mises_MPa": round(float(final["von_mises"][peak]), 4),
-            "max_von_mises_gauss_MPa": round(scalars["von_mises_gauss_max"], 4),
-            "max_von_mises_at_mm": [round(float(c), 3) for c in result.dof_locations[peak]],
-            "max_displacement_mm": round(float(moved[node_moved]), 6),
-            "max_displacement_at_mm": [round(float(c), 3) for c in result.dof_locations[node_moved]],
+            **self._peaks(result),
         }
         if scalars["model"] == "plasticity":
-            plastic = final["plastic_strain"]
+            plastic = scalars["final"]["plastic_strain"]
             node = int(plastic.argmax())
             summary.update({
                 "max_plastic_strain_percent": round(float(plastic[node]), 6),
                 "max_plastic_strain_gauss_percent": round(scalars["plastic_gauss_max"], 6),
-                "max_plastic_strain_at_mm": [round(float(c), 3) for c in result.dof_locations[node]],
+                "max_plastic_strain_at_mm": xyz(result.dof_locations[node]),
             })
-        summary.update({
-            "yield_MPa": scalars.get("yield_MPa"),
-            "applied_force_N": [round(x, 4) for x in result.applied],
-            "requested_force_N": [round(x, 4) for x in scalars["requested"]],
-            "reaction_force_N": [round(sum(r[c] for r in result.reactions), 4) for c in range(3)],
-            "steps_requested": inputs.steps,
-            "steps": len(path.records),
-            "step_cuts": path.cuts,
-            "smallest_step_percent": round(path.smallest_step * 100.0, 6),
-            "newton_iterations": path.iterations,
-            "adaptive": scalars["adaptive"],
-            "frames": len(result.series.frames),
-            "deformation_scale": scalars.get("deformation_scale"),
-        })
+        summary.update({**self._path_record(result, inputs), **self._frames_record(result)})
         if scalars.get("part_refs"):
             summary["parts"] = with_materials([{"ref": ref} for ref in scalars["part_refs"]], scalars)
         summary["checks"] = check_results
         return summary
 
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} nonlinear"
+    #: Digits a frame field's range keeps (6 when not named).
+    _range_digits: ClassVar[dict[str, int]] = {"von_mises": 4, "contact_pressure": 4}
 
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
         import numpy as np
 
-        frames = result.frame_fields
-        ranges = {
-            "von_mises": (0.0, round(max(float(f.max()) for f in frames["von_mises"]), 4)),
-            "displacement": (0.0, round(max(float(np.linalg.norm(f, axis=1).max()) for f in frames["displacement"]), 6)),
-        }
-        if "plastic_strain" in frames:
-            ranges["plastic_strain"] = (0.0, round(max(float(f.max()) for f in frames["plastic_strain"]), 6))
+        ranges = {}
+        for name, frames in result.frame_fields.items():
+            peak = max(float((np.linalg.norm(f, axis=1) if name == "displacement" else f).max()) for f in frames)
+            ranges[name] = (0.0, round(peak, self._range_digits.get(name, 6)))
         return ranges
 
     def extras_head(self, summary: dict) -> dict:
@@ -766,6 +830,10 @@ class NonlinearAnalysis:
     def study_echo(self, inputs: NonlinearInputs, bare: Callable[[tuple[str, ...]], list[str]]) -> dict:
         return {**StaticAnalysis().study_echo(inputs, bare), "steps": inputs.steps, "material_model": inputs.model}
 
+    @staticmethod
+    def _cut_words(summary: dict) -> str:
+        return f", {summary['step_cuts']} cut, smallest {summary['smallest_step_percent']:g} %" if summary["step_cuts"] else ""
+
     def human_lines(self, summary: dict) -> list[str]:
         head = summary["status"].lower() if summary["collapsed"] else "carries the full load"
         lines = [f"{head}: max von Mises {summary['max_von_mises_MPa']:g} MPa, max displacement "
@@ -774,15 +842,6 @@ class NonlinearAnalysis:
         if summary["collapsed"]:
             lines.append(f"carried {summary['applied_force_N']} N of {summary['requested_force_N']} N")
         lines.append(f"followed in {summary['steps']} {'adaptive ' if summary['adaptive'] else ''}load steps "
-                     f"({summary['newton_iterations']} Newton iterations"
-                     + (f", {summary['step_cuts']} cut, smallest {summary['smallest_step_percent']:g} %" if summary["step_cuts"] else "")
+                     f"({summary['newton_iterations']} Newton iterations" + self._cut_words(summary)
                      + f"; {summary['material_model']})")
         return lines
-
-
-@dataclass
-class PathOutcome:
-    """What static's ``peak_face`` reads of a solve."""
-
-    boundary_quadratic: Any
-    dof_locations: Any

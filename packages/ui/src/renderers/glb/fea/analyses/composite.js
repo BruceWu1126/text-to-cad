@@ -1,15 +1,13 @@
 /**
- * Composite (lite): a laminated plate judged ply by ply, Tier 3. Its verdict judges the worst ply
- * against a failure index of 1 (Tsai-Wu or max stress, the larger: "Worst ply 3 (+45°), failure
- * index 0.82") and the displacement; neither follows a load control (a Tsai-Wu index is not
- * proportional to the load). Its takeaway leads with "Lite · "; Details lists its limits. What
- * you see is the field (failure index, the ply envelope's stress, displacement) and the
- * deformation. Its setup: held at, pushed, and the layup ("4 plies, [0/90]s, 2 mm"), the ply
- * materials its hint, read from the study the viewer read (`result.study.layup`).
+ * Composite (lite), Tier 3: a laminated plate judged ply by ply, its worst ply against a failure index of 1
+ * (Tsai-Wu or max stress, the larger), which is not proportional to the load. Its fields are the failure
+ * index, the ply envelope's stress and the displacement; Study's Layup row reads the study the viewer read
+ * (`result.study.layup`).
  */
 import { fieldAndDeformation } from "../controls.js";
 import { plainNumber } from "../numbers.js";
 import { heldRows, pushedRows, wholeRefs } from "../setup.js";
+import { planned } from "./stub.js";
 
 /** A layup's angles in the short form, bottom ply first: "[0/90]s" for a symmetric one, else "[0/45/-45/90]". */
 export function layupNotation(plies) {
@@ -48,23 +46,13 @@ export function layupRows(result) {
 
 export const COMPOSITE_SETUP = Object.freeze([heldRows, pushedRows, layupRows]);
 
-export default Object.freeze({
-  name: "composite",
-  tier: 3,
-  word: "Composite",
-  noun: "this load",
-  family: null,
-  estimate: false,
-  scalesWithLoad: false,
+export default planned({
+  name: "composite", tier: 3, word: "Composite",
   // Not linear in the load: every check is judged as solved, its takeaway its own sentence, never "OK up to 18× this load".
   scaling: "none",
-  checks: Object.freeze(["ply_failure", "displacement"]),
-  checkLabels: Object.freeze({}),
+  checks: ["ply_failure", "displacement"],
   defaultControls: fieldAndDeformation,
   setupGroups: COMPOSITE_SETUP,
-  routine: () => null,
-  markers: Object.freeze(["load", "fixture", "body_load"]),
-  displayTitle: "Loads and fixtures",
-  // A Tier 3 analysis's short limit word, which leads its verdict's takeaway.
   limitWord: "Lite",
 });
+

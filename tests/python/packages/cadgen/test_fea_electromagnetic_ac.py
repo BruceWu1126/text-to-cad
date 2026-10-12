@@ -15,28 +15,17 @@ Each STEP is a build123d solid in a temporary directory; meshes are coarse.
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import struct
 import tempfile
 import unittest
-from unittest import mock
-from contextlib import redirect_stderr
 from pathlib import Path
+from unittest import mock
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
+from tests.python.support.fea_fixtures import (
+    class_directory, ends, glb_attribute_names, glb_extras, needs_fea, read_glb, sidecar, solve, value_error,
+)
 
 from cadgen._internal.fea.materials import lookup_material  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 MU0_H_M = 1.25663706127e-6
 ALUMINIUM = "aluminum-6061-t6"
@@ -46,29 +35,6 @@ def parse(document: dict):
     from cadgen._internal.fea.study import parse_study
 
     return parse_study({"analysis": "electromagnetic", "material": ALUMINIUM, "mode": "ac_magnetic", **document})
-
-
-def glb_extras(path: Path) -> tuple[dict, set[str]]:
-    """A result GLB's extras and the names of its vertex attributes."""
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    gltf = json.loads(raw[20:20 + length])
-    mesh = gltf["meshes"][0]
-    return mesh["extras"], set(mesh["primitives"][0]["attributes"])
-
-
-def solve(step: Path, out: Path, study: dict):
-    from cadgen import fea
-
-    with redirect_stderr(io.StringIO()):
-        return fea.solve(step, out, study=study)
-
-
-def ends(step: Path) -> dict[float, str]:
-    """A z-axis cylinder's flat ends, by their z."""
-    from cadgen import fea
-
-    return {round(face.center_mm[2], 6): face.ref for face in fea.faces(step).faces if face.surface == "plane"}
 
 
 def bessel_ratio(radius_m: float, depth_m: float) -> float:
@@ -121,12 +87,11 @@ class StudyFile(unittest.TestCase):
             ({"mode": "magnetostatic", "frequency_Hz": 50, "coils": coil}, "not for a magnetostatic study"),
         ]
         for changes, fragment in cases:
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                parse(changes)
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, value_error(self, parse, changes))
 
 
-@unittest.skipUnless(HAVE_FEA, "needs the [fea] extra")
+@needs_fea
 class SkinEffect(unittest.TestCase):
     """A round wire, radius 2 mm, fed 10 A through its ends: its AC resistance against Bessel's closed form."""
 
@@ -136,34 +101,26 @@ class SkinEffect(unittest.TestCase):
     def setUpClass(cls):
         from build123d import Cylinder, export_step
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.directory = Path(cls._tmp.name)
+        cls.directory = class_directory(cls)
         cls.step = cls.directory / "wire.step"
         export_step(Cylinder(cls.RADIUS, cls.LENGTH), str(cls.step))
-        z = ends(cls.step)
+        bottom, top = ends(cls.step, 2)
         cls.rho = lookup_material(ALUMINIUM).resistivity
         cls.depth = cls.RADIUS / 2.5
         cls.frequency = cls.rho / (math.pi * MU0_H_M * (cls.depth * 1e-3) ** 2)
         cls.study = {"analysis": "electromagnetic", "mode": "ac_magnetic", "material": ALUMINIUM, "mesh": {"size_mm": 1.0},
                      "frequency_Hz": cls.frequency, "air": {"around_mm": 6},
-                     "currents": [{"faces": [z[1.0]], "A": 10, "name": "in"}],
-                     "voltages": [{"faces": [z[-1.0]], "V": 0, "name": "out"}]}
+                     "currents": [{"faces": [top], "A": 10, "name": "in"}],
+                     "voltages": [{"faces": [bottom], "V": 0, "name": "out"}]}
         cls.result = solve(cls.step, cls.directory / "wire.glb", cls.study)
         cls.r_dc = cls.rho * (cls.LENGTH / 1000) / (math.pi * (cls.RADIUS / 1000) ** 2)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def test_it_writes_the_fields_phase_for_the_ac_routine(self):
         """The viewer's AC routine: each field's real and imaginary parts at every vertex, so a phase of the cycle is
         re·cos ωt − im·sin ωt; their size is the amplitude the field says, never more."""
         import numpy as np
 
-        raw = self.result.glb.read_bytes()
-        length, _ = struct.unpack_from("<II", raw, 12)
-        gltf = json.loads(raw[20:20 + length])
-        binary = raw[20 + length + 8:]
+        gltf, binary = read_glb(self.result.glb)
         extras = gltf["meshes"][0]["extras"]
         motion = extras["analysis"]["motion"]
         self.assertEqual((motion["kind"], sorted(motion["fields"])), ("ac", ["eddy_current", "magnetic_field"]))
@@ -212,8 +169,8 @@ class SkinEffect(unittest.TestCase):
         self.assertAlmostEqual(result.summary["impedance"]["R_ohm"] / self.r_dc, 1.0, delta=0.01)
 
     def test_the_glb_says_what_it_is(self):
-        extras, attributes = glb_extras(self.result.glb)
-        self.assertIn("_EDDY_CURRENT", attributes)
+        extras = glb_extras(self.result.glb)
+        self.assertIn("_EDDY_CURRENT", glb_attribute_names(self.result.glb))
         self.assertEqual([entry["field"] for entry in extras["fields"]], ["eddy_current", "magnetic_field"])
         self.assertEqual(extras["fields"][0]["units"], "A/mm²")
         analysis = extras["analysis"]
@@ -228,10 +185,9 @@ class SkinEffect(unittest.TestCase):
 
         side = next(face.ref for face in fea.faces(self.step).faces if face.surface != "plane")
         study = {**self.study, "currents": [{"faces": [side], "A": 10, "name": "in"}]}
-        with self.assertRaises(ValueError) as caught:
-            solve(self.step, self.directory / "side.glb", study)
-        self.assertIn("flat faces square to x, y or z at the ends of the parts", str(caught.exception))
-        self.assertIn(side, str(caught.exception))
+        message = value_error(self, solve, self.step, self.directory / "side.glb", study)
+        self.assertIn("flat faces square to x, y or z at the ends of the parts", message)
+        self.assertIn(side, message)
 
     def test_on_a_tiny_budget_it_coarsens_the_air_and_the_skin_and_says_so(self):
         result = solve(self.step, self.directory / "fit.glb", {**self.study, "fit": {"memory_GB": 0.01, "seconds": 0.001}})
@@ -242,18 +198,17 @@ class SkinEffect(unittest.TestCase):
         self.assertIn("about 6% at one element per skin depth", step["accuracy"])
         skin = result.summary["skin"][0]
         self.assertFalse(skin["resolved"])
-        extras, _ = glb_extras(result.glb)
+        extras = glb_extras(result.glb)
         self.assertIn(step["words"], [s["words"] for s in extras["fit"]])
         self.assertTrue(any("the skin is not resolved there" in line for line in extras["analysis"]["warnings"]))
-        sidecar = json.loads(result.sidecar.read_text(encoding="utf-8"))
-        self.assertIn(step["words"], [s["words"] for s in sidecar["fit"]])
+        self.assertIn(step["words"], [s["words"] for s in sidecar(result)["fit"]])
         self.assertIn("fit_local_refine", [finding["type"] for finding in result.findings])
         # Under-resolved, it still reads the AC resistance (measured 5.7 % high at 0.8 elements per skin depth).
         expected = bessel_ratio(self.RADIUS / 1000, self.depth / 1000)
         self.assertAlmostEqual(result.summary["impedance"]["R_ohm"] / self.r_dc / expected, 1.0, delta=0.1)
 
 
-@unittest.skipUnless(HAVE_FEA, "needs the [fea] extra")
+@needs_fea
 class PlateInUniformField(unittest.TestCase):
     """A 10 x 10 x 0.5 mm aluminium plate in 100 mT along it at 500 Hz (skin depth 4.5 mm), cooled by still air."""
 
@@ -265,8 +220,7 @@ class PlateInUniformField(unittest.TestCase):
 
         from cadgen import fea
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
+        directory = class_directory(cls)
         step = directory / "plate.step"
         export_step(Box(cls.SIDE, cls.SIDE, cls.THICK), str(step))
         refs = [face.ref for face in fea.faces(step).faces]
@@ -276,10 +230,6 @@ class PlateInUniformField(unittest.TestCase):
             "electro_thermal": {"convection": [{"faces": refs, "h_W_m2K": 10, "ambient_C": 20}]},
             "view": {"checks": [{"kind": "temperature", "max_C": 21}]}})
         cls.area_m2 = (2 * cls.SIDE ** 2 + 4 * cls.SIDE * cls.THICK) * 1e-6
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def test_the_eddy_loss_is_the_lamination_formula(self):
         sigma = 1 / lookup_material(ALUMINIUM).resistivity
@@ -302,12 +252,12 @@ class PlateInUniformField(unittest.TestCase):
         self.assertAlmostEqual((summary["max_temperature_C"] - 20.0) / rise, 1.0, delta=0.02)
         check = summary["checks"][0]
         self.assertEqual((check["kind"], check["status"], check["reference"]), ("temperature", "passes", 20.0))
-        extras, attributes = glb_extras(self.result.glb)
+        extras = glb_extras(self.result.glb)
         self.assertEqual([entry["field"] for entry in extras["fields"]], ["eddy_current", "magnetic_field", "temperature"])
-        self.assertIn("_TEMPERATURE", attributes)
+        self.assertIn("_TEMPERATURE", glb_attribute_names(self.result.glb))
 
 
-@unittest.skipUnless(HAVE_FEA, "needs the [fea] extra")
+@needs_fea
 class InductionHeatedPart(unittest.TestCase):
     """A coil (its own part, stranded) around an aluminium disc at 2 kHz, the disc cooled by still air.
 
@@ -324,8 +274,7 @@ class InductionHeatedPart(unittest.TestCase):
 
         from cadgen import fea
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
+        directory = class_directory(cls)
         coil = Cylinder(14, 6) - Cylinder(11, 6)
         coil.label = "coil"
         disc = Cylinder(cls.RADIUS, cls.THICK)
@@ -341,10 +290,6 @@ class InductionHeatedPart(unittest.TestCase):
             "electro_thermal": {"convection": [{"faces": disc_faces, "h_W_m2K": cls.H, "ambient_C": cls.AIR_C}]},
             "view": {"checks": [{"kind": "temperature", "max_C": 1000}]}})
 
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
-
     def test_the_loss_heats_the_workpiece_by_p_over_h_a(self):
         self.assertTrue(self.result.ok)
         summary = self.result.summary
@@ -358,17 +303,17 @@ class InductionHeatedPart(unittest.TestCase):
     def test_the_glb_names_each_part_and_its_own_material(self):
         # The viewer's "Made of" and a face's part ("coil · face 3") read these; electromagnetic writes no per-part
         # results of its own, so they come from the assembly's plan.
-        extras, _ = glb_extras(self.result.glb)
+        extras = glb_extras(self.result.glb)
         self.assertEqual([(part["ref"], part["name"], part["material"]) for part in extras["parts"]],
                          [("#o1.1", "coil", "Brass (C36000)"), ("#o1.2", "disc", "Aluminum 6061-T6")])
 
     def test_the_coil_no_heat_reaches_reads_the_ambient_not_zero(self):
-        extras, _ = glb_extras(self.result.glb)
+        extras = glb_extras(self.result.glb)
         temperature = next(entry for entry in extras["fields"] if entry["field"] == "temperature")
         self.assertAlmostEqual(temperature["min"], self.AIR_C, places=3)
 
 
-@unittest.skipUnless(HAVE_FEA, "needs the [fea] extra")
+@needs_fea
 class LowFrequencyLimit(unittest.TestCase):
     def test_a_coil_at_one_hertz_has_the_magnetostatic_field_and_inductance(self):
         """Also: its complex factorisation runs with BLAS on one thread. On twelve OpenBLAS threads (scipy's BLAS

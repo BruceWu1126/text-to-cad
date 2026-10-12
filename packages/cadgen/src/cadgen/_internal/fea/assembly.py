@@ -1,22 +1,17 @@
 """An assembly's parts, the faces where they touch, and the parts glued into one shape.
 
-A part is one leaf occurrence of the STEP scene, placed in world coordinates.
-Two parts are in contact when a face of one lies on a face of the other, or
-within the contact tolerance of it, over an area. Each stage cheaply drops
-pairs the next would spend long on: a sweep over the parts' boxes (enlarged by
-the tolerance), the boxes of each pair's faces, a lower bound on the distance
-from sampled tessellations, then ``BRepExtrema_DistShapeShape`` for the gap,
-then the common area of the two faces (the second moved across the gap first)
-so that parts meeting only along an edge or at a point are not in contact.
-Two solids that share volume overlap; an overlap no thicker than the contact
-tolerance is an interference (a press fit, or a modelling slip) and is
-contact too: the glue closes it as it closes a gap.
+A part is one leaf occurrence of the STEP scene, placed in world coordinates. Two parts are in contact when a face of
+one lies on a face of the other, or within the contact tolerance of it, over an area. Each stage cheaply drops pairs the
+next would spend long on: a sweep over the parts' boxes (enlarged by the tolerance), the boxes of each pair's faces, a
+lower bound on the distance from sampled tessellations, then ``BRepExtrema_DistShapeShape`` for the gap, then the common
+area of the two faces (the second moved across the gap first) so that parts meeting only along an edge or at a point are
+not in contact. Two solids that share volume overlap; an overlap no thicker than the contact tolerance is an
+interference (a press fit, or a modelling slip) and is contact too: the glue closes it as it closes a gap.
 
-Gluing is OpenCascade's general fuse (``BOPAlgo_Builder``): parts that share a
-face come out sharing ONE face, so netgen meshes them with shared nodes there
-and the mesh is conforming without any tie constraints. Only bonded parts are
-glued together; a group with a gap or an interference is glued with a fuzzy
-value of the tolerance, which closes it by moving geometry up to that far.
+Gluing is OpenCascade's general fuse (``BOPAlgo_Builder``): parts that share a face come out sharing ONE face, so netgen
+meshes them with shared nodes there and the mesh is conforming without any tie constraints. Only bonded parts are glued
+together; a group with a gap or an interference is glued with a fuzzy value of the tolerance, which closes it by moving
+geometry up to that far.
 """
 
 from __future__ import annotations
@@ -113,17 +108,22 @@ class Glued:
     fuzzy_mm: float
 
 
-def list_parts(scene: "StepScene") -> list[Part]:
-    """Every leaf occurrence of the scene, in scene order."""
+def gprops(shape, kind: str = "Surface"):
+    """OCP's ``Volume``, ``Surface`` or ``Linear`` properties of a shape: its ``Mass()`` is the volume, area or length."""
     from OCP.BRepGProp import BRepGProp
     from OCP.GProp import GProp_GProps
 
+    props = GProp_GProps()
+    getattr(BRepGProp, f"{kind}Properties_s")(shape, props)
+    return props
+
+
+def list_parts(scene: "StepScene") -> list[Part]:
+    """Every leaf occurrence of the scene, in scene order."""
     parts = []
     for leaf in scene.leaves():
         shape = leaf.shape().wrapped
-        props = GProp_GProps()
-        BRepGProp.VolumeProperties_s(shape, props)
-        parts.append(Part(ref=leaf.ref, name=leaf.label or leaf.ref, volume_mm3=float(props.Mass()), shape=shape))
+        parts.append(Part(ref=leaf.ref, name=leaf.label or leaf.ref, volume_mm3=float(gprops(shape, "Volume").Mass()), shape=shape))
     return parts
 
 
@@ -176,12 +176,10 @@ def _close_pairs(boxes: list) -> list[tuple[int, int]]:
 class _Faces:
     """One part's faces with a bounding box and a lower bound on distance from a sampled surface.
 
-    The bound: every point of a face is within ``radius`` of one of its
-    ``samples`` (the vertices of a tessellation whose triangles are cut down to
-    ``_SAMPLE_MM``, or coarser on a large face, plus the tessellation's own deviation), so two faces whose
-    nearest samples are farther apart than the contact reach plus both radii
-    cannot be in contact, and need no exact distance. A face with no
-    tessellation has no bound.
+    The bound: every point of a face is within ``radius`` of one of its ``samples`` (the vertices of a tessellation
+    whose triangles are cut down to ``_SAMPLE_MM``, or coarser on a large face, plus the tessellation's own deviation),
+    so two faces whose nearest samples are farther apart than the contact reach plus both radii cannot be in contact,
+    and need no exact distance. A face with no tessellation has no bound.
     """
 
     def __init__(self, shape, reach: float):
@@ -275,8 +273,6 @@ def part_centre(part: Part) -> tuple[float, float, float]:
 def _overlap_area(face_a, face_b, extrema) -> float:
     """The area the two faces share once ``face_b`` is moved across the gap onto ``face_a``."""
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Common
-    from OCP.BRepGProp import BRepGProp
-    from OCP.GProp import GProp_GProps
     from OCP.gp import gp_Trsf, gp_Vec
     from OCP.TopLoc import TopLoc_Location
 
@@ -285,11 +281,7 @@ def _overlap_area(face_a, face_b, extrema) -> float:
         move.SetTranslation(gp_Vec(extrema.PointOnShape2(1), extrema.PointOnShape1(1)))
         face_b = face_b.Moved(TopLoc_Location(move))
     common = BRepAlgoAPI_Common(face_a, face_b)
-    if not common.IsDone():
-        return 0.0
-    props = GProp_GProps()
-    BRepGProp.SurfaceProperties_s(common.Shape(), props)
-    return float(props.Mass())
+    return float(gprops(common.Shape()).Mass()) if common.IsDone() else 0.0
 
 
 def detect_overlaps(parts: list[Part], *, log=None) -> list[Overlap]:
@@ -298,8 +290,6 @@ def detect_overlaps(parts: list[Part], *, log=None) -> list[Overlap]:
     Only parts whose boxes meet are intersected (:func:`_close_pairs`).
     """
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Common
-    from OCP.BRepGProp import BRepGProp
-    from OCP.GProp import GProp_GProps
 
     candidates = _close_pairs([bounding_box(part.shape, 0.0) for part in parts])
     if log:
@@ -309,13 +299,9 @@ def detect_overlaps(parts: list[Part], *, log=None) -> list[Overlap]:
         common = BRepAlgoAPI_Common(parts[i].shape, parts[j].shape)
         if not common.IsDone():
             continue
-        props = GProp_GProps()
-        BRepGProp.VolumeProperties_s(common.Shape(), props)
-        volume = float(props.Mass())
+        volume = float(gprops(common.Shape(), "Volume").Mass())
         if volume > _MIN_VOLUME_MM3:
-            surface = GProp_GProps()
-            BRepGProp.SurfaceProperties_s(common.Shape(), surface)
-            area = float(surface.Mass())
+            area = float(gprops(common.Shape()).Mass())
             a, b = sorted((parts[i], parts[j]), key=lambda part: part.volume_mm3)
             overlaps.append(Overlap(a=a.ref, b=b.ref, volume_mm3=volume, thickness_mm=solid_thickness(common.Shape(), volume, area), area_mm2=area / 2))
     return overlaps
@@ -324,26 +310,20 @@ def detect_overlaps(parts: list[Part], *, log=None) -> list[Overlap]:
 def solid_thickness(solid, volume: float, area: float) -> float:
     """How thick a shared solid is, mm: the larger of two average thicknesses.
 
-    Twice the volume over the surface area is a thin slab's thickness, but the
-    side faces count too, so it reads a cube of side s as s/3: a corner sunk
-    0.25 mm into another part would pass for a 0.08 mm press. The volume over
-    the largest face is the thickness under that face, which reads the slab
-    and the cube (and a thin curved shell, whose largest face is one of its two
-    sides) at their true depth. Taking the larger means an overlap is called
-    thin only when both say so. A slab whose footprint is split into several
-    faces reads thicker than it is, which errs towards leaving it an overlap.
+    Twice the volume over the surface area is a thin slab's thickness, but the side faces count too, so it reads a cube
+    of side s as s/3: a corner sunk 0.25 mm into another part would pass for a 0.08 mm press. The volume over the
+    largest face is the thickness under that face, which reads the slab and the cube (and a thin curved shell, whose
+    largest face is one of its two sides) at their true depth. Taking the larger means an overlap is called thin only
+    when both say so. A slab whose footprint is split into several faces reads thicker than it is, which errs towards
+    leaving it an overlap.
     """
-    from OCP.BRepGProp import BRepGProp
-    from OCP.GProp import GProp_GProps
     from OCP.TopAbs import TopAbs_FACE
     from OCP.TopExp import TopExp_Explorer
 
     largest = 0.0
     explorer = TopExp_Explorer(solid, TopAbs_FACE)
     while explorer.More():
-        props = GProp_GProps()
-        BRepGProp.SurfaceProperties_s(explorer.Current(), props)
-        largest = max(largest, float(props.Mass()))
+        largest = max(largest, float(gprops(explorer.Current()).Mass()))
         explorer.Next()
     return max(2 * volume / area, volume / largest if largest > 0 else 0.0)
 
@@ -351,9 +331,8 @@ def solid_thickness(solid, volume: float, area: float) -> float:
 def interferences(overlaps: list[Overlap], tolerance_mm: float) -> tuple[list[Contact], list[Overlap]]:
     """The overlaps no thicker than ``tolerance_mm``, as contacts to bond, and the overlaps left.
 
-    A shared solid that thin (:func:`solid_thickness`) is two faces pressed a little into each other, a
-    contact the glue closes like a gap; a thicker one is parts in each other's
-    space, which the model may have wrong.
+    A shared solid that thin (:func:`solid_thickness`) is two faces pressed a little into each other, a contact the glue
+    closes like a gap; a thicker one is parts in each other's space, which the model may have wrong.
     """
     reach = tolerance_mm * (1 + 1e-6)
     contacts = [
@@ -366,11 +345,10 @@ def interferences(overlaps: list[Overlap], tolerance_mm: float) -> tuple[list[Co
 def detect_contacts(parts: list[Part], tolerance_mm: float, *, skip: "set[frozenset[str]]" = frozenset(), log=None) -> list[Contact]:
     """Every pair of parts in face contact within ``tolerance_mm``, in part order.
 
-    The gap is the smallest gap between faces in contact; the area is the sum
-    of their common areas. Boxes first (a sweep, :func:`_close_pairs`), then each
-    face pair's box and sampled bound, and only the faces left get the exact
-    distance and area. Pairs of refs in ``skip`` (the overlapping ones) are not
-    looked at. ``log`` is told how many close pairs there are to check.
+    The gap is the smallest gap between faces in contact; the area is the sum of their common areas. Boxes first (a
+    sweep, :func:`_close_pairs`), then each face pair's box and sampled bound, and only the faces left get the exact
+    distance and area. Pairs of refs in ``skip`` (the overlapping ones) are not looked at. ``log`` is told how many
+    close pairs there are to check.
     """
     reach = tolerance_mm * (1 + 1e-6) + _TOUCHING_MM
     candidates = [
@@ -430,10 +408,9 @@ def joined_groups(count: int, pairs: list[tuple[int, int]]) -> list[list[int]]:
 def glue(shapes: list, bonded: list[tuple[int, int, float]], tolerance_mm: float) -> Glued:
     """Glue the shapes joined by ``bonded`` (``(part, part, gap_mm)``) into one compound.
 
-    Each group of parts bonded to each other is fused on its own (fuzzy at the
-    tolerance when a pair in it has a gap; an interference's depth counts as
-    one); parts in different groups only sit
-    side by side in the compound and share nothing.
+    Each group of parts bonded to each other is fused on its own (fuzzy at the tolerance when a pair in it has a gap; an
+    interference's depth counts as one); parts in different groups only sit side by side in the compound and share
+    nothing.
     """
     from OCP.BOPAlgo import BOPAlgo_Builder
     from OCP.BRep import BRep_Builder

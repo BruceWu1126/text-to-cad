@@ -1,24 +1,18 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
-import { feaControls, feaVerdict, readFeaResult, reynoldsWarning, studyRows } from '../../feaResult.js';
+import { feaControls, feaVerdict, reynoldsWarning, studyRows } from '../../feaResult.js';
 import { FLOW_SETUP } from './cfd.js';
 import cfdTurbulent from './cfd_turbulent.js';
 import { feaAnalysis } from './index.js';
+import { feaFile, vec } from '../../__tests__/feaFile.js';
 
 const LIMIT = 'Steady RANS (k-omega SST), wall functions, incompressible';
 
 // A turbulent flow result as cadgen writes one: wall pressure first, wall shear beside it, nothing deformed.
 function turbulentResult(analysis: Record<string, unknown> = {}, extras: Record<string, unknown> = {}) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.015, 0, 0, 0, 0.005, 0]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_pressure', new BufferAttribute(new Float32Array([23.6, 0, 11.8]), 1));
-  geometry.setAttribute('_wall_shear', new BufferAttribute(new Float32Array([3.7, 3.7, 3.7]), 1));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 0]), 1));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  return feaFile({
+    position: [0, 0, 0, 0.015, 0, 0, 0, 0.005, 0], _displacement: vec(9), _pressure: [23.6, 0, 11.8], _wall_shear: [3.7, 3.7, 3.7],
+    _face: [0, 0, 0],
+  }, {
     generator: 'cadgen fea', name: 'tube turbulent flow', deformation_scale: null, faces: ['#o1.f4'], occurrence: '#o1',
     analysis: { type: 'cfd_turbulent', tier: 3, word: 'Turbulent flow', estimate: false, limits: [LIMIT], noun: 'this flow',
       reference_C: null, warnings: [], turbulence: { model: 'k-omega SST', reynolds: 10000, kind: 'internal', viscosity_ratio_max: 89.6 },
@@ -38,9 +32,6 @@ function turbulentResult(analysis: Record<string, unknown> = {}, extras: Record<
     findings: [],
     ...extras,
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 describe('cfd_turbulent', () => {

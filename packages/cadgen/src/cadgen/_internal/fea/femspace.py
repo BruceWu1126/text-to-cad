@@ -24,9 +24,8 @@ if TYPE_CHECKING:
 
 __all__ = ["FacetLookup", "FemSpace", "NETGEN_TET10_TO_SKFEM", "element_mesh", "facet_reference_points", "facet_safe_mapping"]
 
-# netgen's 10-node tetrahedron lists the four corners, then the mid-edge nodes of
-# edges (0,1) (0,2) (0,3) (1,2) (1,3) (2,3); skfem's quadratic tet wants them on
-# edges (0,1) (1,2) (0,2) (0,3) (1,3) (2,3). One fixed permutation maps the
+# netgen's 10-node tetrahedron lists the four corners, then the mid-edge nodes of edges (0,1) (0,2) (0,3) (1,2) (1,3)
+# (2,3); skfem's quadratic tet wants them on edges (0,1) (1,2) (0,2) (0,3) (1,3) (2,3). One fixed permutation maps the
 # former to the latter -- the mesher does not vary its order.
 NETGEN_TET10_TO_SKFEM = (0, 1, 2, 3, 4, 7, 5, 6, 8, 9)
 
@@ -34,28 +33,19 @@ NETGEN_TET10_TO_SKFEM = (0, 1, 2, 3, 4, 7, 5, 6, 8, 9)
 def element_mesh(volume: "VolumeMesh", order: int = 2):
     """scikit-fem's tet mesh from netgen's arrays, and node -> scalar DOF.
 
-    skfem renumbers a quadratic mesh on construction (corner vertices first,
-    then edge nodes); the map back to the mesher's node ids falls out of its
-    element DOF table. A linear mesh keeps the mesher's numbering.
+    skfem renumbers a quadratic mesh on construction (corner vertices first, then edge nodes); the map back to the
+    mesher's node ids falls out of its element DOF table. A linear mesh keeps the mesher's numbering.
     """
     import numpy as np
 
-    if order == 1:
-        from skfem import MeshTet
-
-        connectivity = np.ascontiguousarray(volume.tets[:, :4].T)
-        mesh = MeshTet(np.ascontiguousarray(volume.nodes.T), connectivity)
-        node_to_dof = np.full(len(volume.nodes), -1, dtype=np.int64)
-        node_to_dof[connectivity] = connectivity
-    elif order == 2:
-        from skfem import MeshTet2
-
-        connectivity = np.ascontiguousarray(volume.tets[:, NETGEN_TET10_TO_SKFEM].T)
-        mesh = MeshTet2(np.ascontiguousarray(volume.nodes.T), connectivity)
-        node_to_dof = np.full(len(volume.nodes), -1, dtype=np.int64)
-        node_to_dof[connectivity] = mesh.dofs.element_dofs
-    else:
+    if order not in (1, 2):
         raise ValueError(f"element order {order!r} is not 1 or 2")
+    from skfem import MeshTet, MeshTet2
+
+    connectivity = np.ascontiguousarray((volume.tets[:, :4] if order == 1 else volume.tets[:, NETGEN_TET10_TO_SKFEM]).T)
+    mesh = (MeshTet if order == 1 else MeshTet2)(np.ascontiguousarray(volume.nodes.T), connectivity)
+    node_to_dof = np.full(len(volume.nodes), -1, dtype=np.int64)
+    node_to_dof[connectivity] = connectivity if order == 1 else mesh.dofs.element_dofs
     if (node_to_dof < 0).any():
         raise RuntimeError("the mesher produced nodes that no element uses")
     return mesh, node_to_dof

@@ -1,21 +1,14 @@
 /**
- * Piezo (lite), Tier 3: coupled electro-mechanical parts, actuators, sensors and buzzers, by the
- * study's `solve`. Static: the voltage on its electrodes moves it (or a force makes a voltage on an
- * open electrode); its fields are the stress, the voltage (signed), the electric field and the
- * displacement. Resonance: a series of modes, each frame its shape, stress and voltage; the mode
- * picker chooses one and Vibrate plays it; a static result plays the Load ramp, the voltage going on. Harmonic: a series of frequencies across the sweep, each
- * its displacement, stress and voltage amplitude; the Frequency scrubber chooses one. Its verdict
- * judges stress, displacement, an open electrode's signal (`voltage`: "0.82 V, needs at least 0.5 V")
- * or a frequency; no load control moves them. A resonance also says each mode's resonance, anti-resonance
- * and coupling (`facts`: "Mode 1", "6.5 kHz, anti-resonance 7.1 kHz, k_eff 0.40"), with no limit; with no
- * checks they are its verdict, headed by the first ("First resonance 6.5 kHz"), in no tone. Its takeaway leads with "Linear · " (small signal, no
- * depolarisation). Its setup says each electrode ("1 V on the top electrode", "The out electrode, open"),
- * how each part is poled ("Poled along Z"), where it is held and pushed, and what it is made of.
+ * Piezo (lite), Tier 3: coupled electro-mechanical parts (actuators, sensors, buzzers), by the study's
+ * `solve`. Static: the voltage on its electrodes moves it (or a force makes a voltage on an open electrode).
+ * Resonance: a series of modes, each its shape, stress and voltage. Harmonic: a series of frequencies across
+ * the sweep. Small signal, no depolarisation. A resonance also states each mode's resonance, anti-resonance
+ * and coupling (`facts`), with no limit.
  */
 import { fieldAndDeformation } from "../controls.js";
 import { plainNumber, threeFigures, unbrokenHalves } from "../numbers.js";
 import { frameControl } from "../series.js";
-import { axisWords, faceTitle, heldRows, madeOfRows, pushedRows, spaced, wholeRefs } from "../setup.js";
+import { axisWords, faceEntryRows, facesWords, group, heldRows, madeOfRows, pushedRows, spaced, wholeRefs } from "../setup.js";
 import { VIBRATE as HARMONIC_VIBRATE } from "./harmonic.js";
 import { VIBRATE } from "./modal.js";
 import { LOAD_RAMP } from "./static.js";
@@ -23,12 +16,6 @@ import { planned } from "./stub.js";
 
 /** The piezo study as the viewer read it (`readStudy`'s `piezo`): its solve, electrodes and poling; null for none. */
 const piezoOf = (result) => result?.study?.piezo || null;
-
-/** Faces in a prompt's words: "face 3", "faces 3, 4". */
-function facesWords(faces) {
-  const names = faces.map((ref) => /\.f(\d+)$/.exec(ref)?.[1] ?? ref);
-  return `${names.length === 1 ? "face" : "faces"} ${names.join(", ")}`;
-}
 
 /** The poling in words: "along Z", "along −Z", "along (0.6, 0, 0.8)". */
 export function polingWords(direction) {
@@ -61,17 +48,12 @@ export function piezoElectrodeRows(result) {
   const piezo = piezoOf(result);
   if (!piezo) return [];
   const poled = poledPhrase(result);
-  const rows = piezo.electrodes.filter((entry) => entry.faces.length).map((entry, index) => {
+  const entries = piezo.electrodes.filter((entry) => entry.faces.length).map((entry) => {
     const label = electrodeLabel(entry);
-    const summary = (faces) => `${label} (${facesWords(faces)})${poled ? `, ${poled}` : ""}`;
-    return {
-      id: `electrode:${index}`, label, detail: "", faces: entry.faces, summary: summary(entry.faces), collapsed: true,
-      ...(entry.open ? { hint: "Floats: one voltage, no net charge (a sensor's output)" } : {}),
-      children: entry.faces.map((ref) => ({ id: `electrode:${index}:${ref}`, label: faceTitle(result, ref), detail: "", faces: [ref],
-        wrap: true, summary: summary([ref]) })),
-    };
+    return { faces: entry.faces, label, hint: entry.open ? "Floats: one voltage, no net charge (a sensor's output)" : "",
+      summary: (faces) => `${label} (${facesWords(faces)})${poled ? `, ${poled}` : ""}` };
   });
-  return rows.length ? [{ id: "electrodes", label: "Electrodes", detail: "", glyph: "fixture", children: rows }] : [];
+  return group("electrodes", "Electrodes", "fixture", faceEntryRows(result, "electrode", entries));
 }
 
 /** Study's "Poled": one row per piezo part, "Along Z", the part and its ceramic its hint. */
@@ -84,7 +66,7 @@ export function poledRows(result) {
     return { id: `poled:${index}`, label, detail: "", ...(hint ? { hint } : {}),
       summary: `${entry.part ? `${spaced(entry.part)} ` : ""}poled ${words}`.replace(/^./, (c) => c.toUpperCase()) };
   });
-  return rows.length ? [{ id: "poled", label: "Poled", detail: "", glyph: "wave", children: rows }] : [];
+  return group("poled", "Poled", "wave", rows);
 }
 
 export const PIEZO_SETUP = Object.freeze([piezoElectrodeRows, poledRows, heldRows, pushedRows, madeOfRows]);
@@ -137,8 +119,7 @@ export function piezoFacts(result) {
 }
 
 export default planned({
-  name: "piezo", tier: 3, word: "Piezo", noun: "this voltage", limitWord: "Linear", family: null,
-  scalesWithLoad: false,
+  name: "piezo", tier: 3, word: "Piezo", noun: "this voltage", limitWord: "Linear",
   checks: ["stress", "displacement", "voltage", "frequency"],
   defaultControls: piezoControls,
   setupGroups: PIEZO_SETUP,

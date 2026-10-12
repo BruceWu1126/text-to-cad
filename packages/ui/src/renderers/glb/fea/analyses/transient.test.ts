@@ -1,31 +1,20 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
-import { feaControls, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, studyRows } from '../../feaResult.js';
 import { activeFrameIndex } from '../series.js';
 import { feaAnalysis } from './index.js';
 import transient, { PLAY, historyWords, timeFieldAndDeformation, timeWords } from './transient.js';
+import { feaFile, vec } from '../../__tests__/feaFile.js';
 
 // A cantilever with a tip force stepped on, as cadgen writes one: frame 0 (t = 0) in the fields' own
 // attributes, the peak at 1.02 ms the default, each frame's stress and displacement, the envelopes beside them.
 const FRAMES = [0, 0.00102, 0.003, 0.006];
 const LABELS = ['0 s', '1.02 ms', '3 ms', '6 ms'];
 function overTime(study: Record<string, unknown> = {}, series = true) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.1, 0, 0, 0.1, 0, 0.006]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_von_mises', new BufferAttribute(new Float32Array(3), 1));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_von_mises_peak', new BufferAttribute(new Float32Array([63.6, 20, 0]), 1));
-  geometry.setAttribute('_displacement_peak', new BufferAttribute(new Float32Array([0, 0.1, 0.31]), 1));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 1, 1]), 1));
-  FRAMES.forEach((_, index) => {
-    if (!index) return;
-    geometry.setAttribute(`_von_mises_f${index}`, new BufferAttribute(new Float32Array([60, 20, 0]), 1));
-    geometry.setAttribute(`_displacement_f${index}`, new BufferAttribute(new Float32Array(9), 3));
-  });
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  const frames = Object.fromEntries(FRAMES.flatMap((_, index) => (index ? [[`_von_mises_f${index}`, [60, 20, 0]], [`_displacement_f${index}`, vec(9)]] : [])));
+  return feaFile({
+    position: [0, 0, 0, 0.1, 0, 0, 0.1, 0, 0.006], _von_mises: [0, 0, 0], _displacement: vec(9), _von_mises_peak: [63.6, 20, 0],
+    _displacement_peak: [0, 0.1, 0.31], _face: [0, 1, 1], ...frames,
+  }, {
     generator: 'cadgen fea', name: 'beam over time', deformation_scale: 80, faces: ['#o1.f1', '#o1.f2'],
     analysis: { type: 'transient', tier: 1, word: 'Over time', estimate: false, limits: [], noun: 'this load', reference_C: null, warnings: [] },
     fields: [
@@ -48,9 +37,6 @@ function overTime(study: Record<string, unknown> = {}, series = true) {
       where: { ref: '#o1.f1', at: [0, -3, 3] }, at: { frame: 1, value: 0.00102, unit: 's', time_s: 0.00102 } }],
     findings: [],
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 describe('transient', () => {

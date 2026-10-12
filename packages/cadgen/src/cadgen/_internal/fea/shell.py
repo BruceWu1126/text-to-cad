@@ -23,12 +23,7 @@ Static is the first adopter (:func:`solve`). A laminate (the composite
 analysis) takes the same mid-surface, loads and fixtures
 (:func:`solve_mid_surface`) with classical laminate theory's A, B and D and a
 transverse shear stiffness in place of the isotropic plane-stress matrices
-(:meth:`ShellModel.element_matrices`'s ``abd``). Modal and buckling would add, on
-the same mesh and DOF numbering: a consistent mass (rho t on the translations,
-rho t^3/12 on the two bending rotations, none on the drilling one) and, for
-buckling, the membrane geometric stiffness from this solve's membrane forces
-(N_ab dw/dx_a dw/dx_b, plus the same on the in-plane displacements for a
-curved shell); :meth:`ShellModel.element_matrices` is where they would join.
+(:meth:`ShellModel.element_matrices`'s ``abd``).
 
 The helpers at the end (carrier triangles, nearest triangles, the outcome)
 are shared with :mod:`.beam`. Stdlib at import; numeric work inside functions.
@@ -112,21 +107,19 @@ class Plate:
 def face_records(shape) -> list[FaceRecord]:
     """Every face of ``shape`` in cadgen's ordinal order: area, centroid, kind and sampled outward normals."""
     from OCP.BRepAdaptor import BRepAdaptor_Surface
-    from OCP.BRepGProp import BRepGProp, BRepGProp_Face
+    from OCP.BRepGProp import BRepGProp_Face
     from OCP.GeomAbs import GeomAbs_Cylinder, GeomAbs_Plane
     from OCP.gp import gp_Pnt, gp_Vec
-    from OCP.GProp import GProp_GProps
     from OCP.TopoDS import TopoDS
 
     from cadgen._internal.entity_ordinals import entity_map
+    from cadgen._internal.fea.mesh import area_center
 
     records = []
     faces = entity_map(shape, "face")
     for ordinal in range(1, faces.Extent() + 1):
         face = TopoDS.Face_s(faces.FindKey(ordinal))
-        props = GProp_GProps()
-        BRepGProp.SurfaceProperties_s(face, props)
-        centre = props.CentreOfMass()
+        area, centre = area_center(face)
         adaptor = BRepAdaptor_Surface(face)
         kind_id = adaptor.GetType()
         axis = point = None
@@ -149,8 +142,7 @@ def face_records(shape) -> list[FaceRecord]:
                 length = v.Magnitude()
                 if length > 0:
                     normals.append((v.X() / length, v.Y() / length, v.Z() / length))
-        records.append(FaceRecord(ordinal, face, float(props.Mass()), (centre.X(), centre.Y(), centre.Z()), kind,
-                                  normals, axis, point))
+        records.append(FaceRecord(ordinal, face, area, centre, kind, normals, axis, point))
     return records
 
 
@@ -364,18 +356,11 @@ class ShellModel:
         local = np.einsum("tij,tkj->tki", frame, corners - corners[:, :1])
         return frame, area, local
 
-    def element_matrices(self, E: float, nu: float, abd: dict | None = None):
-        """Per triangle: the global 18 x 18 stiffness, and the membrane and bending strain operators (local).
-
-        ``abd`` (a laminate) replaces the isotropic constitutive matrices: ``A``, ``B``, ``D`` (3 x 3) and the
-        transverse shear ``H`` (2 x 2, shear correction included), all in the laminate's frame whose 0° direction
-        is ``axis`` (a unit vector in the plate's plane; its 90° direction is the normal x axis)."""
+    def operators(self):
+        """The frames (:meth:`frames`), each triangle's corners, shape-function gradients ``dx``, ``dy`` (T, 3) and
+        its membrane and bending strain operators (T, 3, 18), local."""
         import numpy as np
 
-        if abd is not None:
-            return laminate_matrices(self, abd)
-
-        t = self.thickness
         frame, area, local = self.frames()
         corners = self.nodes[self.triangles]
         x, y = local[..., 0], local[..., 1]
@@ -391,39 +376,68 @@ class ShellModel:
             membrane[:, 2, o], membrane[:, 2, o + 1] = dy[:, i], dx[:, i]
             bending[:, 0, o + 4], bending[:, 1, o + 3] = dx[:, i], -dy[:, i]
             bending[:, 2, o + 4], bending[:, 2, o + 3] = dy[:, i], -dx[:, i]
+        h = np.max(np.linalg.norm(corners - np.roll(corners, 1, axis=1), axis=2), axis=1)
+        return frame, area, local, h, dx, dy, membrane, bending
+
+    def element_matrices(self, E: float, nu: float, abd: dict | None = None):
+        """Per triangle: the global 18 x 18 stiffness, and the membrane and bending strain operators (local).
+
+        ``abd`` (a laminate) replaces the isotropic constitutive matrices: ``A``, ``B``, ``D`` (3 x 3) and the
+        transverse shear ``H`` (2 x 2, shear correction included), all in the laminate's frame whose 0° direction
+        is ``axis`` (a unit vector in the plate's plane; its 90° direction is the normal x axis)."""
+        import numpy as np
+
+        if abd is not None:
+            return laminate_matrices(self, abd)
+
+        t = self.thickness
+        frame, area, local, h, dx, dy, membrane, bending = self.operators()
         Q = plane_stress(E, nu)
         G = E / (2.0 * (1.0 + nu))
-        h = np.max(np.linalg.norm(corners - np.roll(corners, 1, axis=1), axis=2), axis=1)
         shear = SHEAR_CORRECTION * G * t * t * t / (t * t + ALPHA * h * h)
         K = area[:, None, None] * (
             t * np.einsum("tki,kl,tlj->tij", membrane, Q, membrane)
             + t ** 3 / 12.0 * np.einsum("tki,kl,tlj->tij", bending, Q, bending)
         )
-        # MITC3: the shear strain is the lowest-order edge (Nedelec) field with the tangential shear of
-        # each edge, (w_j - w_i) + (beta_i + beta_j) . e_ij / 2, integrated at the edge midpoints.
-        gradient = np.stack([dx, dy], axis=2)
-        for q in range(3):
-            weights = np.full(3, 0.5)
-            weights[(q + 2) % 3] = 0.0
-            strain = np.zeros((count, 2, 18))
-            for i, j in ((0, 1), (1, 2), (2, 0)):
-                whitney = weights[i] * gradient[:, j, :] - weights[j] * gradient[:, i, :]
-                edge = local[:, j, :2] - local[:, i, :2]
-                tied = np.zeros((count, 18))
-                tied[:, 6 * j + 2] += 1.0
-                tied[:, 6 * i + 2] -= 1.0
-                for k in (i, j):
-                    tied[:, 6 * k + 4] += 0.5 * edge[:, 0]
-                    tied[:, 6 * k + 3] -= 0.5 * edge[:, 1]
-                strain += whitney[:, :, None] * tied[:, None, :]
+        for strain in mitc3_strains(local, dx, dy):
             K += (area / 3.0 * shear)[:, None, None] * np.einsum("tki,tkj->tij", strain, strain)
-        drilling = DRILLING * E * t * area
-        relative = np.eye(3) - 1.0 / 3.0
-        for i in range(3):
-            for j in range(3):
-                K[:, 6 * i + 5, 6 * j + 5] += drilling * relative[i, j]
+        add_drilling(K, DRILLING * E * t * area)
         T = rotation_blocks(frame, 6)
         return np.einsum("tki,tkl,tlj->tij", T, K, T), membrane, bending, frame, area
+
+
+def mitc3_strains(local, dx, dy):
+    """MITC3: the shear strain is the lowest-order edge (Nedelec) field with the tangential shear of each edge,
+    (w_j - w_i) + (beta_i + beta_j) . e_ij / 2, integrated at the edge midpoints: the (T, 2, 18) operator at each."""
+    import numpy as np
+
+    count = len(local)
+    gradient = np.stack([dx, dy], axis=2)
+    for q in range(3):
+        weights = np.full(3, 0.5)
+        weights[(q + 2) % 3] = 0.0
+        strain = np.zeros((count, 2, 18))
+        for i, j in ((0, 1), (1, 2), (2, 0)):
+            whitney = weights[i] * gradient[:, j, :] - weights[j] * gradient[:, i, :]
+            edge = local[:, j, :2] - local[:, i, :2]
+            tied = np.zeros((count, 18))
+            tied[:, 6 * j + 2] += 1.0
+            tied[:, 6 * i + 2] -= 1.0
+            for k in (i, j):
+                tied[:, 6 * k + 4] += 0.5 * edge[:, 0]
+                tied[:, 6 * k + 3] -= 0.5 * edge[:, 1]
+            strain += whitney[:, :, None] * tied[:, None, :]
+        yield strain
+
+
+def add_drilling(K, drilling) -> None:
+    """The drilling rotations' stiffness ``drilling`` (T,) on K's sixth DOF of each node: it only keeps K regular."""
+    import numpy as np
+
+    relative = np.eye(3) - 1.0 / 3.0
+    for i in range(3):
+        for j in range(3):
+            K[:, 6 * i + 5, 6 * j + 5] += drilling * relative[i, j]
 
 
 def laminate_rotation(frame, normal, axis):
@@ -452,20 +466,8 @@ def laminate_matrices(self, abd):
     import numpy as np
 
     t = self.thickness
-    frame, area, local = self.frames()
-    corners = self.nodes[self.triangles]
-    x, y = local[..., 0], local[..., 1]
-    twice = 2.0 * area
-    dx = np.stack([y[:, 1] - y[:, 2], y[:, 2] - y[:, 0], y[:, 0] - y[:, 1]], 1) / twice[:, None]
-    dy = np.stack([x[:, 2] - x[:, 1], x[:, 0] - x[:, 2], x[:, 1] - x[:, 0]], 1) / twice[:, None]
+    frame, area, local, h, dx, dy, membrane, bending = self.operators()
     count = len(self.triangles)
-    membrane, bending = np.zeros((count, 3, 18)), np.zeros((count, 3, 18))
-    for i in range(3):
-        o = 6 * i
-        membrane[:, 0, o], membrane[:, 1, o + 1] = dx[:, i], dy[:, i]
-        membrane[:, 2, o], membrane[:, 2, o + 1] = dy[:, i], dx[:, i]
-        bending[:, 0, o + 4], bending[:, 1, o + 3] = dx[:, i], -dy[:, i]
-        bending[:, 2, o + 4], bending[:, 2, o + 3] = dy[:, i], -dx[:, i]
     # The element's x axis is at angle phi from the laminate's 0°: laminate strain = T(-phi) element strain.
     c, s = laminate_rotation(frame, self.normal, abd["axis"])
     T = strain_rotation(c, -s)
@@ -473,38 +475,18 @@ def laminate_matrices(self, abd):
     P = np.zeros((count, 2, 2))
     P[:, 0, 0], P[:, 0, 1], P[:, 1, 0], P[:, 1, 1] = c, -s, s, c
     H = np.einsum("tki,kl,tlj->tij", P, np.asarray(abd["H"], dtype=float), P)
-    h = np.max(np.linalg.norm(corners - np.roll(corners, 1, axis=1), axis=2), axis=1)
     stabilised = (t * t / (t * t + ALPHA * h * h))[:, None, None] * H
     coupling = np.einsum("tki,tkl,tlj->tij", membrane, B, bending)
     K = area[:, None, None] * (
         np.einsum("tki,tkl,tlj->tij", membrane, A, membrane) + coupling + np.transpose(coupling, (0, 2, 1))
         + np.einsum("tki,tkl,tlj->tij", bending, D, bending)
     )
-    gradient = np.stack([dx, dy], axis=2)
-    for q in range(3):
-        weights = np.full(3, 0.5)
-        weights[(q + 2) % 3] = 0.0
-        strain = np.zeros((count, 2, 18))
-        for i, j in ((0, 1), (1, 2), (2, 0)):
-            whitney = weights[i] * gradient[:, j, :] - weights[j] * gradient[:, i, :]
-            edge = local[:, j, :2] - local[:, i, :2]
-            tied = np.zeros((count, 18))
-            tied[:, 6 * j + 2] += 1.0
-            tied[:, 6 * i + 2] -= 1.0
-            for k in (i, j):
-                tied[:, 6 * k + 4] += 0.5 * edge[:, 0]
-                tied[:, 6 * k + 3] -= 0.5 * edge[:, 1]
-            strain += whitney[:, :, None] * tied[:, None, :]
+    for strain in mitc3_strains(local, dx, dy):
         K += (area / 3.0)[:, None, None] * np.einsum("tki,tkl,tlj->tij", strain, stabilised, strain)
-    # The drilling rotation only keeps the system regular: its stiffness from the laminate's mean membrane modulus.
-    drilling = DRILLING * 0.5 * (abd["A"][0][0] + abd["A"][1][1]) * area
-    relative = np.eye(3) - 1.0 / 3.0
-    for i in range(3):
-        for j in range(3):
-            K[:, 6 * i + 5, 6 * j + 5] += drilling * relative[i, j]
+    # The drilling stiffness from the laminate's mean membrane modulus.
+    add_drilling(K, DRILLING * 0.5 * (abd["A"][0][0] + abd["A"][1][1]) * area)
     R = rotation_blocks(frame, 6)
     return np.einsum("tki,tkl,tlj->tij", R, K, R), membrane, bending, frame, area
-
 
 
 def plane_stress(E: float, nu: float):
@@ -808,9 +790,8 @@ def solve_mid_surface(ctx, inputs, plate: Plate, h: float, *, E: float, nu: floa
                     add(triangles[tris], (area[tris] / weight)[:, None] * vector[None, :], np.full(len(tris), z))
                 if len(rows):
                     add(edges[rows], (lengths[rows] * t / weight)[:, None] * vector[None, :], np.zeros(len(rows)))
-    rho = density
     for b in inputs.body_accelerations:
-        add(triangles, rho * t * area[:, None] * np.asarray(b, dtype=float)[None, :], np.zeros(len(triangles)))
+        add(triangles, density * t * area[:, None] * np.asarray(b, dtype=float)[None, :], np.zeros(len(triangles)))
     applied = tuple(float(f[c::6].sum()) for c in range(3))
 
     fixture_nodes = []

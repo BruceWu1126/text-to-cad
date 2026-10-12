@@ -14,30 +14,15 @@ Parse tests are stdlib only; the solves need the fea extra.
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import struct
-import tempfile
 import unittest
-from contextlib import redirect_stderr
-from pathlib import Path
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
+from tests.python.support.fea_fixtures import box_step, class_directory, ends, glb_extras, needs_fea, read_glb, sidecar, solve
 
 from cadgen._internal.fea.analyses import get_analysis  # noqa: E402
 from cadgen._internal.fea.analyses.modal import _frequency_check  # noqa: E402
 from cadgen._internal.fea.materials import lookup_material  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
 from cadgen._internal.fea.study import parse_study  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 LENGTH, SIDE = 100.0, 6.0
 STEEL = lookup_material("steel")
@@ -75,14 +60,14 @@ class StudyFile(unittest.TestCase):
                 parse_study(_study(**bad))
 
     def test_it_takes_its_own_keys_and_checks_only(self):
-        with self.assertRaisesRegex(ValueError, r"unknown keys \['loads'\]; modal studies take"):
-            parse_study(_study(loads=[{"faces": ["#o1.f2"], "type": "force", "vector_N": [0, 0, -1]}]))
-        with self.assertRaisesRegex(ValueError, "not a check this cadgen makes"):
-            parse_study(_study(view={"checks": [{"kind": "stress"}]}))
-        with self.assertRaisesRegex(ValueError, "exactly one"):
-            parse_study(_study(view={"checks": [{"kind": "frequency", "min_Hz": 60, "avoid_Hz": [1, 2]}]}))
-        with self.assertRaisesRegex(ValueError, "at most mode 30"):
-            parse_study(_study(view={"checks": [{"kind": "frequency", "min_Hz": 60, "mode": 31}]}))
+        for more, words in (
+            ({"loads": [{"faces": ["#o1.f2"], "type": "force", "vector_N": [0, 0, -1]}]}, r"unknown keys \['loads'\]; modal studies take"),
+            ({"view": {"checks": [{"kind": "stress"}]}}, "not a check this cadgen makes"),
+            ({"view": {"checks": [{"kind": "frequency", "min_Hz": 60, "avoid_Hz": [1, 2]}]}}, "exactly one"),
+            ({"view": {"checks": [{"kind": "frequency", "min_Hz": 60, "mode": 31}]}}, "at most mode 30"),
+        ):
+            with self.subTest(words=words), self.assertRaisesRegex(ValueError, words):
+                parse_study(_study(**more))
 
     def test_a_check_on_a_higher_mode_is_found_whatever_modes_says(self):
         parsed = parse_study(_study(modes=2, view={"checks": [{"kind": "frequency", "min_Hz": 60, "mode": 4},
@@ -150,44 +135,20 @@ class Ladder(unittest.TestCase):
             self.assertIsNone(analysis.apply(rung, ctx, inputs))
 
 
-def _glb(path: Path) -> tuple[dict, bytes]:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    return json.loads(raw[20:20 + length]), raw[20 + length + 8:]
-
-
-def _ends(listing) -> tuple[str, str]:
-    by_x = {face.center_mm[0]: face.ref for face in listing.faces
-            if face.surface == "plane" and face.normal is not None and abs(abs(face.normal[0]) - 1) < 1e-6}
-    return by_x[min(by_x)], by_x[max(by_x)]
-
-
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Cantilever(unittest.TestCase):
     """The clamped beam solved end to end: frequencies, effective mass, checks, the GLB and the sidecar."""
 
     @classmethod
     def setUpClass(cls):
-        from build123d import Align, Box, export_step
-
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.directory = Path(cls._tmp.name)
-        cls.step = cls.directory / "beam.step"
-        export_step(Box(LENGTH, SIDE, SIDE, align=(Align.MIN, Align.CENTER, Align.CENTER)), str(cls.step))
-        cls.fixed, cls.tip = _ends(fea.faces(cls.step))
-        study = _study(fixtures=[{"faces": [cls.fixed]}], mesh={"size_mm": 2.0}, view={"checks": [
+        cls.directory = class_directory(cls)
+        cls.step = box_step(cls.directory, "beam", (LENGTH, SIDE, SIDE), "x")
+        cls.fixed = ends(cls.step)[0]
+        cls.study = _study(fixtures=[{"faces": [cls.fixed]}], mesh={"size_mm": 2.0}, view={"checks": [
             {"kind": "frequency", "min_Hz": 600, "label": "First mode"},
             {"kind": "frequency", "avoid_Hz": [2900, 3100], "label": "Motor speed"}]})
-        cls.study = study
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(cls.step, cls.directory / "beam.fea.glb", study=study)
+        cls.result = solve(cls.step, cls.directory / "beam.fea.glb", cls.study)
         cls.frequencies = [mode["frequency_Hz"] for mode in cls.result.summary["modes"]]
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def test_the_first_mode_is_beam_theorys(self):
         self.assertAlmostEqual(self.frequencies[0] / CANTILEVER_F1, 1.0, delta=0.03)
@@ -202,11 +163,8 @@ class Cantilever(unittest.TestCase):
 
     def test_a_second_run_writes_the_same_file(self):
         # The square section's two equal modes could turn between runs if the eigen solve started at random.
-        from cadgen import fea
-
         again = self.directory / "again.fea.glb"
-        with redirect_stderr(io.StringIO()):
-            fea.solve(self.step, again, study=self.study)
+        solve(self.step, again, self.study)
         self.assertEqual(again.read_bytes(), (self.directory / "beam.fea.glb").read_bytes())
 
     def test_the_second_bending_mode_is_six_point_two_seven_times_the_first(self):
@@ -230,7 +188,7 @@ class Cantilever(unittest.TestCase):
         self.assertEqual(found["first_mode"]["severity"], "info")
 
     def test_the_glb_carries_every_mode_shape_as_a_series(self):
-        gltf, _ = _glb(self.result.glb)
+        gltf, _ = read_glb(self.result.glb)
         extras = gltf["meshes"][0]["extras"]
         attributes = gltf["meshes"][0]["primitives"][0]["attributes"]
         self.assertEqual(extras["analysis"]["type"], "modal")
@@ -246,33 +204,29 @@ class Cantilever(unittest.TestCase):
         self.assertEqual(extras["study"]["fixtures"][0]["type"], "fixed")
 
     def test_the_sidecar_and_the_cli_lines(self):
-        sidecar = json.loads(self.result.sidecar.read_text(encoding="utf-8"))
-        self.assertEqual((sidecar["analysis"], sidecar["series"]["kind"]), ("modal", "mode"))
+        written = sidecar(self.result)
+        self.assertEqual((written["analysis"], written["series"]["kind"]), ("modal", "mode"))
         lines = self.result.human_lines()
         self.assertIn("(modal)", lines[0])
         self.assertTrue(lines[1].startswith("first mode 490 Hz; modes 490 Hz, 490 Hz, 3018 Hz"))
 
     def test_an_oversized_model_completes_by_finding_fewer_modes(self):
-        from cadgen import fea
-
         study = _study(fixtures=[{"faces": [self.fixed]}], mesh={"size_mm": 2.0},
                        fit={"memory_GB": 0.01, "allow": ["iterative", "reduce_modes"]})
-        with redirect_stderr(io.StringIO()):
-            result = fea.solve(self.step, self.directory / "tight.fea.glb", study=study)
+        result = solve(self.step, self.directory / "tight.fea.glb", study)
         self.assertTrue(result.ok)
         rungs = [step["rung"] for step in result.fit]
         self.assertIn("reduce_modes", rungs)
         self.assertEqual((len(result.summary["modes"]), result.summary["modes_requested"]), (3, 6))
         self.assertAlmostEqual(result.summary["modes"][0]["frequency_Hz"] / CANTILEVER_F1, 1.0, delta=0.03)
         words = "Found the first 3 of the 6 modes asked for, to fit"
-        gltf, _ = _glb(result.glb)
-        self.assertIn(words, [step["words"] for step in gltf["meshes"][0]["extras"]["fit"]])
-        self.assertIn(words, [step["words"] for step in json.loads(result.sidecar.read_text(encoding="utf-8"))["fit"]])
+        self.assertIn(words, [step["words"] for step in glb_extras(result.glb)["fit"]])
+        self.assertIn(words, [step["words"] for step in sidecar(result)["fit"]])
         self.assertIn(f"adapted: {words}", result.human_lines())
         self.assertIn("fit_reduce_modes", [finding["type"] for finding in result.findings])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class OnTheEngine(unittest.TestCase):
     """The beam meshed once and solved through the analysis itself: free in space, LOBPCG, a window.
 
@@ -282,23 +236,14 @@ class OnTheEngine(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from build123d import Align, Box, export_step
-
-        from cadgen import fea
         from cadgen._internal.fea.femspace import FemSpace
         from cadgen._internal.fea.mesh import mesh_occurrence
         from cadgen.step_scene import read_scene
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        step = Path(cls._tmp.name) / "beam.step"
-        export_step(Box(LENGTH, SIDE, SIDE, align=(Align.MIN, Align.CENTER, Align.CENTER)), str(step))
-        cls.fixed, _ = _ends(fea.faces(step))
+        step = box_step(class_directory(cls), "beam", (LENGTH, SIDE, SIDE), "x")
+        cls.fixed = ends(step)[0]
         cls.volume = mesh_occurrence(next(iter(read_scene(step).leaves())), max_h=2.0)
         cls.space = FemSpace.build(cls.volume)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def _solve(self, study: dict, solver: str = "direct", modes: int | None = None):
         from cadgen._internal.fea.analyses.base import SolveContext

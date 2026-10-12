@@ -1,17 +1,14 @@
 /**
- * Shock: the peak response of a held part to a shock given as a shock response spectrum (SRS).
- * Each mode's peak comes from the spectrum at its own frequency, and the modes are combined (SRSS,
- * or CQC for modes close together), so its result is two envelopes, no series: the peak von Mises
- * stress and the peak displacement relative to where it is held. Its verdict judges stress
- * (labelled "Shock") and displacement, both k times larger at k times this shock. What you see is
- * the field and the deformation; it plays no routine (a spectrum gives peaks, not a time history).
- * Its setup says where it is held, the shock ("Shocked": the spectrum in a line, "50 g above
- * 100 Hz along Z, 5% damping", how the modes were combined its hint) and what it is made of.
+ * Shock: the peak response of a held part to a shock response spectrum (SRS). Each mode's peak comes from the
+ * spectrum at its own frequency and the modes are combined (SRSS, or CQC for modes close together), so its
+ * result is two envelopes and no series: the peak stress and the peak displacement relative to where it is
+ * held. Its Time row is a base pulse matched to the spectrum, the part's modes ringing.
  */
 import { fieldAndDeformation } from "../controls.js";
 import { plainNumber, threeFigures } from "../numbers.js";
 import { poseRoutine, shakeMotion } from "../poses.js";
-import { axisWords, heldRows, madeOfRows, wholeRefs } from "../setup.js";
+import { planned } from "./stub.js";
+import { axisWords, heldRefs, heldRows, madeOfRows } from "../setup.js";
 
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 
@@ -62,29 +59,20 @@ export function shockedRows(result) {
   const label = spectrumWords(study.srs);
   if (!label) return [];
   const combination = study.combination === "cqc" ? "CQC" : study.combination === "srss" ? "SRSS" : "";
-  const faces = (result.study?.fixtures || []).flatMap((fixture) => fixture.faces);
-  const refs = faces.length ? { faces } : wholeRefs(result).length ? { refs: wholeRefs(result) } : null;
+  const refs = heldRefs(result);
   return [{ id: "shocked", label: "Shocked", detail: "", glyph: "wave", children: [{ id: "shocked:0", label, detail: "", wrap: true,
     ...(combination ? { hint: `Modes combined by ${combination}` } : {}),
     ...(refs ? { ...refs, summary: `Shocked where it is held: ${label}` } : {}) }] }];
 }
 
-export default Object.freeze({
-  name: "shock",
-  tier: 1,
-  word: "Shock",
-  noun: "this shock",
-  family: null,
-  estimate: false,
-  scalesWithLoad: true,
-  checks: Object.freeze(["stress", "displacement"]),
-  checkLabels: Object.freeze({ stress: "Shock" }),
+export default planned({
+  name: "shock", word: "Shock", noun: "this shock", scalesWithLoad: true,
+  checks: ["stress", "displacement"], checkLabels: { stress: "Shock" },
   defaultControls: fieldAndDeformation,
-  setupGroups: Object.freeze([heldRows, shockedRows, madeOfRows]),
+  setupGroups: [heldRows, shockedRows, madeOfRows],
   // Shock: a base pulse matched to the spectrum and the part's modes ringing, scrubbed on its Time row (`../poses.js`).
   motion: shakeMotion,
   routine: (result) => poseRoutine(shakeMotion(result)),
-  markers: Object.freeze(["fixture", "base_excitation"]),
-  displayTitle: "Shaker and fixtures",
-  limitWord: "",
+  markers: ["fixture", "base_excitation"], displayTitle: "Shaker and fixtures",
 });
+

@@ -13,29 +13,14 @@ Parse, spectrum and combination tests need no mesh; the beam needs the fea extra
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import struct
-import tempfile
 import unittest
-from contextlib import redirect_stderr
-from pathlib import Path
 from types import SimpleNamespace
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
+from tests.python.support.fea_fixtures import box_step, class_directory, ends, glb_array, glb_extras, needs_fea, sidecar, solve
 
 from cadgen._internal.fea.analyses import get_analysis  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
 from cadgen._internal.fea.study import parse_study  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 LENGTH, SIDE = 100.0, 6.0
 G0 = 9806.65
@@ -73,6 +58,7 @@ class StudyFile(unittest.TestCase):
             ({"srs": {"direction": [0, 0, 1], "table": TABLE, "q": 10}}, "unknown keys"),
             ({"combination": "abs"}, "is not one of"),
             ({"fixtures": []}, "at least one"),
+            ({"view": {"checks": [{"kind": "acceleration", "limit_g": 10}]}}, "not a check this cadgen makes"),
         ):
             with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, words):
                 parse_study({**_study(), **bad})
@@ -80,8 +66,6 @@ class StudyFile(unittest.TestCase):
     def test_it_takes_stress_and_displacement_checks_only(self):
         parsed = parse_study(_study(view={"checks": [{"kind": "stress"}, {"kind": "displacement", "limit_mm": 0.5}]}))
         self.assertEqual([check["kind"] for check in parsed.checks], ["stress", "displacement"])
-        with self.assertRaisesRegex(ValueError, "not a check this cadgen makes"):
-            parse_study(_study(view={"checks": [{"kind": "acceleration", "limit_g": 10}]}))
 
 
 class Ladder(unittest.TestCase):
@@ -158,55 +142,22 @@ class Combination(unittest.TestCase):
         np.testing.assert_allclose(combine_modal(same), math.sqrt(2) * np.abs(per_mode[0]), rtol=1e-12)
 
 
-def _glb(path: Path) -> tuple[dict, bytes]:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    return json.loads(raw[20:20 + length]), raw[20 + length + 8:]
-
-
-def _ends(listing) -> tuple[str, str]:
-    by_x = {face.center_mm[0]: face.ref for face in listing.faces
-            if face.surface == "plane" and face.normal is not None and abs(abs(face.normal[0]) - 1) < 1e-6}
-    return by_x[min(by_x)], by_x[max(by_x)]
-
-
-def _attribute(path: Path, name: str):
-    import numpy as np
-
-    gltf, binary = _glb(path)
-    accessor = gltf["accessors"][gltf["meshes"][0]["primitives"][0]["attributes"][name]]
-    view = gltf["bufferViews"][accessor["bufferView"]]
-    return np.frombuffer(binary, dtype="<f4", count=accessor["count"] * 3, offset=view["byteOffset"]).reshape(-1, 3)
-
-
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class ShockedCantilever(unittest.TestCase):
     """The clamped beam shocked along Z, 50 g above 100 Hz, its modes up to 4 kHz combined by SRSS."""
 
     @classmethod
     def setUpClass(cls):
-        from build123d import Align, Box, export_step
-
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.directory = Path(cls._tmp.name)
-        cls.step = cls.directory / "beam.step"
-        export_step(Box(LENGTH, SIDE, SIDE, align=(Align.MIN, Align.CENTER, Align.CENTER)), str(cls.step))
-        cls.fixed, cls.tip = _ends(fea.faces(cls.step))
+        cls.directory = class_directory(cls)
+        cls.step = box_step(cls.directory, "beam", (LENGTH, SIDE, SIDE), "x")
+        cls.fixed, cls.tip = ends(cls.step)
         cls.study = _study(fixtures=[{"faces": [cls.fixed]}], mesh={"size_mm": 2.0}, view={"checks": [
             {"kind": "stress"}, {"kind": "displacement", "limit_mm": 0.2, "faces": [cls.tip], "label": "Tip"}]})
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(cls.step, cls.directory / "beam.fea.glb", study=cls.study)
+        cls.result = solve(cls.step, cls.directory / "beam.fea.glb", cls.study)
         cls.summary = cls.result.summary
         # The first bending mode along Z: the one moving the most mass along Z.
         cls.mode = max(cls.summary["modes"], key=lambda mode: mode["effective_mass_fraction"][2])
         cls.f1 = cls.mode["frequency_Hz"]
-        cls.sidecar = json.loads(cls.result.sidecar.read_text(encoding="utf-8"))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def _theory(self) -> float:
         return 1.566 * 50 * G0 / (2 * math.pi * self.f1) ** 2
@@ -224,8 +175,7 @@ class ShockedCantilever(unittest.TestCase):
         answering it, its largest motion the spectrum's peak for it within how closely the pulse meets the spectrum."""
         import numpy as np
 
-        gltf, _ = _glb(self.result.glb)
-        motion = gltf["meshes"][0]["extras"]["analysis"]["motion"]
+        motion = glb_extras(self.result.glb)["analysis"]["motion"]
         self.assertEqual((motion["kind"], motion["label"]), ("base_shake", "Shock"))
         self.assertEqual(len(motion["base_g"]), motion["count"])
         self.assertEqual((motion["base_g"][0], abs(motion["base_g"][-1]) < 1e-6), (0.0, True))
@@ -234,17 +184,14 @@ class ShockedCantilever(unittest.TestCase):
         self.assertAlmostEqual(first["frequency_Hz"], self.f1, delta=0.01)
         peak = float(np.abs(first["q_mm"]).max())
         self.assertAlmostEqual(peak / self.mode["peak_mm"], motion["match"][0], delta=0.03)
-        shape = _attribute(self.result.glb, first["attribute"])
+        shape = glb_array(self.result.glb, first["attribute"], 3)
         self.assertAlmostEqual(float(np.linalg.norm(shape, axis=1).max()), 0.001, delta=1e-6)
         # It rings down: the last tenth of the window moves under a tenth of the peak.
         tail = np.abs(first["q_mm"][-len(first["q_mm"]) // 10:]).max()
         self.assertLess(float(tail), 0.1 * peak)
 
     def test_cqc_equals_srss_for_these_well_separated_modes(self):
-        from cadgen import fea
-
-        with redirect_stderr(io.StringIO()):
-            cqc = fea.solve(self.step, self.directory / "cqc.fea.glb", study={**self.study, "combination": "cqc"})
+        cqc = solve(self.step, self.directory / "cqc.fea.glb", {**self.study, "combination": "cqc"})
         self.assertGreaterEqual(sum(mode["used"] and mode["effective_mass_fraction"][2] > 0.05 for mode in cqc.summary["modes"]), 2)
         for key in ("max_von_mises_MPa", "max_displacement_mm"):
             with self.subTest(key=key):
@@ -267,15 +214,14 @@ class ShockedCantilever(unittest.TestCase):
         self.assertIn("The modes used move only 8", found["modes_missing_mass"]["summary"])
 
     def test_the_glb_carries_the_envelopes_and_the_spectrum(self):
-        gltf, _ = _glb(self.result.glb)
-        extras = gltf["meshes"][0]["extras"]
+        extras = glb_extras(self.result.glb)
         self.assertEqual((extras["analysis"]["type"], extras["analysis"]["noun"]), ("shock", "this shock"))
         self.assertEqual([field["field"] for field in extras["fields"]], ["von_mises", "displacement"])
         self.assertNotIn("series", extras)
         self.assertEqual(extras["study"]["srs"], {"direction": [0.0, 0.0, 1.0], "table": [[10.0, 5.0], [100.0, 50.0], [4000.0, 50.0]],
                                                   "damping_ratio": 0.05})
         self.assertEqual(extras["study"]["combination"], "srss")
-        self.assertEqual(self.sidecar["analysis"], "shock")
+        self.assertEqual(sidecar(self.result)["analysis"], "shock")
 
     def test_the_cli_lines(self):
         lines = self.result.human_lines()
@@ -284,11 +230,8 @@ class ShockedCantilever(unittest.TestCase):
         self.assertTrue(any(line.startswith("4 modes up to 4000 Hz, holding 8") for line in lines), lines)
 
     def test_an_oversized_model_completes_by_keeping_the_modes_that_move_with_the_shock(self):
-        from cadgen import fea
-
         study = {**self.study, "fit": {"memory_GB": 0.01, "allow": ["reduce_modes"]}}
-        with redirect_stderr(io.StringIO()):
-            result = fea.solve(self.step, self.directory / "tight.fea.glb", study=study)
+        result = solve(self.step, self.directory / "tight.fea.glb", study)
         self.assertTrue(result.ok)
         step = result.fit[0]
         self.assertEqual(step["rung"], "reduce_modes")

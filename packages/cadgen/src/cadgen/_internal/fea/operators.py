@@ -8,15 +8,13 @@ its free DOF (direct when small, AMG + CG otherwise), and
 :class:`ElementChunkOperator`, the matrix-free stiffness product, element chunk
 by element chunk, for when the assembled matrix does not fit.
 
-Materials come as one :class:`~cadgen._internal.fea.materials.Material` or one
-per domain (``space.domain`` indexes them). A material with an ``orthotropic``
-block, or a laminate's plies (:class:`~cadgen._internal.fea.laminate.LayeredMaterial`,
-a stiffness per ply chosen at each quadrature point by its height), takes the
-anisotropic path: a 6 x 6 elasticity matrix in global axes (Voigt order 11, 22,
-33, 23, 13, 12, engineering shear) per part or ply. Isotropic materials keep
-the Lamé path they always took, so their numbers are unchanged to the bit. Units are the engine's: mm, N, MPa,
-tonne/mm^3, s; heat in mW (``W x 1000``), conductivity in mW/(mm K) (numerically
-W/(m K)). Numeric imports live inside the functions.
+Materials come as one :class:`~cadgen._internal.fea.materials.Material` or one per domain (``space.domain`` indexes
+them). A material with an ``orthotropic`` block, or a laminate's plies
+(:class:`~cadgen._internal.fea.laminate.LayeredMaterial`, a stiffness per ply chosen at each quadrature point by its
+height), takes the anisotropic path: a 6 x 6 elasticity matrix in global axes (Voigt order 11, 22, 33, 23, 13, 12,
+engineering shear) per part or ply. Isotropic materials keep the Lamé path they always took, so their numbers are
+unchanged to the bit. Units are the engine's: mm, N, MPa, tonne/mm^3, s; heat in mW (``W x 1000``), conductivity in
+mW/(mm K) (numerically W/(m K)). Numeric imports live inside the functions.
 """
 
 from __future__ import annotations
@@ -33,7 +31,7 @@ if TYPE_CHECKING:
 __all__ = [
     "AMG_ATTEMPTS", "CHUNK_ELEMENTS", "DIRECT_SOLVE_BELOW", "G0_MM_S2", "ElementChunkOperator", "anisotropic", "body_force",
     "capacity", "conduction", "convection", "domain_values", "elasticity_matrix", "geometric_stiffness",
-    "initial_strain_load", "isotropic_matrix", "lame", "mass", "orthotropic_matrix", "project", "rigid_body_modes",
+    "initial_strain_load", "isotropic_matrix", "lame", "mass", "material_list", "orthotropic_matrix", "project", "rigid_body_modes",
     "rotate_voigt", "solve_spd", "stiffness", "stress", "von_mises",
 ]
 
@@ -47,7 +45,7 @@ DIRECT_SOLVE_BELOW = 20_000
 CHUNK_ELEMENTS = 20_000
 
 
-def _materials(materials: "Material | Sequence[Material]") -> list:
+def material_list(materials: "Material | Sequence[Material]") -> list:
     return list(materials) if isinstance(materials, (list, tuple)) else [materials]
 
 
@@ -66,7 +64,7 @@ def lame(space: "FemSpace", materials: "Material | Sequence[Material]"):
     """Lamé's lambda and mu: numbers for one part, (elements, quadrature) arrays for an assembly."""
     from skfem.models.elasticity import lame_parameters
 
-    per_part = [lame_parameters(m.E, m.nu) for m in _materials(materials)]
+    per_part = [lame_parameters(m.E, m.nu) for m in material_list(materials)]
     if space.domain is None:
         return per_part[0]
     return domain_values(space, [p[0] for p in per_part]), domain_values(space, [p[1] for p in per_part])
@@ -80,7 +78,7 @@ VOIGT = ((0, 0), (1, 1), (2, 2), (1, 2), (0, 2), (0, 1))
 
 def anisotropic(materials: "Material | Sequence[Material]") -> bool:
     """Whether any material needs the anisotropic path (an ``orthotropic`` block, or a laminate's plies)."""
-    return any(getattr(m, "orthotropic", None) or getattr(m, "layers", None) is not None for m in _materials(materials))
+    return any(getattr(m, "orthotropic", None) or getattr(m, "layers", None) is not None for m in material_list(materials))
 
 
 def isotropic_matrix(E: float, nu: float) -> "np.ndarray":
@@ -177,7 +175,7 @@ def voigt_parts(space: "FemSpace", materials: "Material | Sequence[Material]", b
     import numpy as np
 
     basis = basis or space.basis
-    parts = _materials(materials)
+    parts = material_list(materials)
     shape = basis.dx.shape
     out = []
     points = None
@@ -217,16 +215,26 @@ def _anisotropic_stiffness(space: "FemSpace", materials):
     return asm(form, space.basis, **weights)
 
 
-def _anisotropic_stress(space: "FemSpace", materials, strain: "np.ndarray") -> "np.ndarray":
-    """σ = C ε at the quadrature points, (3, 3, elements, quadrature), from a (3, 3, ...) strain."""
+def _anisotropic_stress(space: "FemSpace", materials, strain: "np.ndarray", basis=None, rows=None) -> "np.ndarray":
+    """σ = C ε at the quadrature points, (3, 3, elements, quadrature), from a (3, 3, ...) strain (``basis`` and
+    ``rows``: :func:`voigt_parts`'s)."""
     import numpy as np
 
     e = voigt(strain)
     s = np.zeros_like(e)
-    for C, weight in voigt_parts(space, materials):
+    for C, weight in voigt_parts(space, materials, basis, rows):
         part = np.einsum("ij,j...->i...", C, e)
         s += part if weight is None else part * weight
     return _unvoigt(s)
+
+
+def _lame_stress(strain: "np.ndarray", lam, mu) -> "np.ndarray":
+    """σ = 2 mu ε + lam tr(ε) I."""
+    trace = strain[0, 0] + strain[1, 1] + strain[2, 2]
+    s = 2.0 * mu * strain
+    for i in range(3):
+        s[i, i] = s[i, i] + lam * trace
+    return s
 
 
 def stiffness(space: "FemSpace", materials: "Material | Sequence[Material]"):
@@ -238,7 +246,7 @@ def stiffness(space: "FemSpace", materials: "Material | Sequence[Material]"):
     if anisotropic(materials):
         return _anisotropic_stiffness(space, materials)
     if space.domain is None:
-        lam, mu = lame_parameters(_materials(materials)[0].E, _materials(materials)[0].nu)
+        lam, mu = lame_parameters(material_list(materials)[0].E, material_list(materials)[0].nu)
         return asm(linear_elasticity(lam, mu), space.basis)
     lam, mu = lame(space, materials)
 
@@ -249,8 +257,12 @@ def stiffness(space: "FemSpace", materials: "Material | Sequence[Material]"):
     return asm(form, space.basis, lam=lam, mu=mu)
 
 
-def _density(space: "FemSpace", materials, basis=None):
-    return domain_values(space, [m.density for m in _materials(materials)], basis)
+def _per_point(space: "FemSpace", values: Sequence[float], basis):
+    """:func:`domain_values` as an (elements, quadrature) array, a single part's number filled out."""
+    import numpy as np
+
+    value = domain_values(space, values, basis)
+    return value if not isinstance(value, float) else np.full(basis.dx.shape, value)
 
 
 def mass(space: "FemSpace", materials: "Material | Sequence[Material]", *, lumped: bool = False):
@@ -263,8 +275,7 @@ def mass(space: "FemSpace", materials: "Material | Sequence[Material]", *, lumpe
     def form(u, v, w):
         return w["rho"] * (u[0] * v[0] + u[1] * v[1] + u[2] * v[2])
 
-    rho = _density(space, materials)
-    M = asm(form, space.basis, rho=rho if not isinstance(rho, float) else np.full(space.basis.dx.shape, rho))
+    M = asm(form, space.basis, rho=_per_point(space, [m.density for m in material_list(materials)], space.basis))
     if lumped:
         return sparse.diags(np.asarray(M.sum(axis=1)).ravel()).tocsr()
     return M
@@ -281,8 +292,7 @@ def body_force(space: "FemSpace", materials: "Material | Sequence[Material]", ac
     def form(v, w):
         return w["rho"] * (b[0] * v[0] + b[1] * v[1] + b[2] * v[2])
 
-    rho = _density(space, materials)
-    return asm(form, space.basis, rho=rho if not isinstance(rho, float) else np.full(space.basis.dx.shape, rho))
+    return asm(form, space.basis, rho=_per_point(space, [m.density for m in material_list(materials)], space.basis))
 
 
 def _initial_strain_tensor(strain) -> "np.ndarray":
@@ -309,18 +319,9 @@ def initial_strain_load(space: "FemSpace", materials: "Material | Sequence[Mater
 
     if anisotropic(materials):
         sigma0 = _anisotropic_stress(space, materials, _initial_strain_tensor(strain))
-
-        @LinearForm
-        def aniso(v, w):
-            return ddot(w["sigma0"], sym_grad(v))
-
-        return asm(aniso, space.basis, sigma0=np.asarray(sigma0))
-    lam, mu = lame(space, materials)
-    eps0 = _initial_strain_tensor(strain)
-    trace = eps0[0, 0] + eps0[1, 1] + eps0[2, 2]
-    sigma0 = 2.0 * mu * eps0
-    for i in range(3):
-        sigma0[i, i] = sigma0[i, i] + lam * trace
+    else:
+        lam, mu = lame(space, materials)
+        sigma0 = _lame_stress(_initial_strain_tensor(strain), lam, mu)
 
     @LinearForm
     def form(v, w):
@@ -333,22 +334,13 @@ def stress(space: "FemSpace", materials: "Material | Sequence[Material]", u: "np
     """σ = C:(ε(u) - ε0) at the quadrature points, (3, 3, elements, quadrature) MPa."""
     import numpy as np
 
-    if anisotropic(materials):
-        grad = space.basis.interpolate(u).grad
-        strain = 0.5 * (grad + np.transpose(grad, (1, 0, 2, 3)))
-        if initial_strain is not None:
-            strain = strain - _initial_strain_tensor(initial_strain)
-        return _anisotropic_stress(space, materials, strain)
-    lam, mu = lame(space, materials)
     grad = space.basis.interpolate(u).grad                          # (3, 3, elements, quadrature)
     strain = 0.5 * (grad + np.transpose(grad, (1, 0, 2, 3)))
     if initial_strain is not None:
         strain = strain - _initial_strain_tensor(initial_strain)
-    trace = strain[0, 0] + strain[1, 1] + strain[2, 2]
-    s = 2.0 * mu * strain
-    for i in range(3):
-        s[i, i] += lam * trace
-    return s
+    if anisotropic(materials):
+        return _anisotropic_stress(space, materials, strain)
+    return _lame_stress(strain, *lame(space, materials))
 
 
 def von_mises(s: "np.ndarray") -> "np.ndarray":
@@ -380,16 +372,13 @@ def geometric_stiffness(space: "FemSpace", sigma: "np.ndarray"):
 
 def conduction(space: "FemSpace", materials: "Material | Sequence[Material]"):
     """K_T = ∫ k ∇T·∇v on the scalar basis, k per domain (W/(m K) is mW/(mm K))."""
-    import numpy as np
     from skfem import BilinearForm, asm
-
-    k = domain_values(space, [m.conductivity for m in _materials(materials)], space.scalar)
 
     @BilinearForm
     def form(u, v, w):
         return w["k"] * (u.grad[0] * v.grad[0] + u.grad[1] * v.grad[1] + u.grad[2] * v.grad[2])
 
-    return asm(form, space.scalar, k=k if not isinstance(k, float) else np.full(space.scalar.dx.shape, k))
+    return asm(form, space.scalar, k=_per_point(space, [m.conductivity for m in material_list(materials)], space.scalar))
 
 
 def convection(space: "FemSpace", facets: "np.ndarray", h: float, ambient: float):
@@ -411,17 +400,14 @@ def convection(space: "FemSpace", facets: "np.ndarray", h: float, ambient: float
 
 def capacity(space: "FemSpace", materials: "Material | Sequence[Material]"):
     """C = ∫ ρ c T v on the scalar basis (c in J/(kg K) is ×1e6 mm²/(s² K) in the engine's units)."""
-    import numpy as np
     from skfem import BilinearForm, asm
-
-    parts = _materials(materials)
-    rho_c = domain_values(space, [m.density * m.specific_heat * 1e6 for m in parts], space.scalar)
 
     @BilinearForm
     def form(u, v, w):
         return w["rc"] * u * v
 
-    return asm(form, space.scalar, rc=rho_c if not isinstance(rho_c, float) else np.full(space.scalar.dx.shape, rho_c))
+    rho_c = [m.density * m.specific_heat * 1e6 for m in material_list(materials)]
+    return asm(form, space.scalar, rc=_per_point(space, rho_c, space.scalar))
 
 
 def rigid_body_modes(locations: "np.ndarray", component: "np.ndarray") -> "np.ndarray":
@@ -447,11 +433,10 @@ def solve_spd(K, f, free: "np.ndarray", locations: "np.ndarray | None", componen
               warnings: list[str], *, method: str | None = None):
     """The solution on the free DOF of a symmetric positive definite system: direct for small systems, AMG+CG otherwise.
 
-    ``K`` is assembled, or a matrix-free ``LinearOperator`` (:class:`ElementChunkOperator`),
-    which only CG with a diagonal preconditioner can take. ``locations`` and
-    ``component`` give elasticity's rigid-body near-nullspace; ``None`` for a
-    scalar (thermal) system. ``method`` forces ``"direct"`` or ``"iterative"``;
-    ``None`` chooses by size. Returns ``(u_free, how)``.
+    ``K`` is assembled, or a matrix-free ``LinearOperator`` (:class:`ElementChunkOperator`), which only CG with a
+    diagonal preconditioner can take. ``locations`` and ``component`` give elasticity's rigid-body near-nullspace;
+    ``None`` for a scalar (thermal) system. ``method`` forces ``"direct"`` or ``"iterative"``; ``None`` chooses by size.
+    Returns ``(u_free, how)``.
     """
     import numpy as np
     import scipy.sparse.linalg as spla
@@ -465,13 +450,11 @@ def solve_spd(K, f, free: "np.ndarray", locations: "np.ndarray | None", componen
     import pyamg
 
     B = None if locations is None else rigid_body_modes(locations[free], component[free])
-    # pyamg's default (Jacobi) prolongator smoothing scales by a spectral radius it
-    # estimates from numpy's global random generator: on a graded mesh a bad estimate
-    # made the solve 30% slower or, now and then, diverge. Energy smoothing draws no
-    # random numbers (and converges in fewer iterations), so the hierarchy repeats run
-    # to run and numpy's global generator is left alone. Still, an attempt that
-    # diverges is stopped early and tried again from another start: a small random
-    # guess from a generator of the solver's own, seeded by the attempt.
+    # pyamg's default (Jacobi) prolongator smoothing scales by a spectral radius it estimates from numpy's global random
+    # generator: on a graded mesh a bad estimate made the solve 30% slower or, now and then, diverge. Energy smoothing
+    # draws no random numbers (and converges in fewer iterations), so the hierarchy repeats run to run and numpy's
+    # global generator is left alone. Still, an attempt that diverges is stopped early and tried again from another
+    # start: a small random guess from a generator of the solver's own, seeded by the attempt.
 
     class Diverged(Exception):
         pass
@@ -513,12 +496,10 @@ def solve_spd(K, f, free: "np.ndarray", locations: "np.ndarray | None", componen
 class ElementChunkOperator:
     """The elastic stiffness product K @ x without K: element chunk by element chunk, in numpy.
 
-    Each product rebuilds every chunk's basis (``chunk`` elements at a time),
-    forms the strain of ``x`` at its quadrature points, the stress, and the
-    virtual work against every local shape function, then scatters it to the
-    global DOF. Memory is one chunk's basis, never the matrix; time is a few
-    assemblies per product. :meth:`solve` runs Jacobi-preconditioned CG on the
-    free DOF with it.
+    Each product rebuilds every chunk's basis (``chunk`` elements at a time), forms the strain of ``x`` at its
+    quadrature points, the stress, and the virtual work against every local shape function, then scatters it to the
+    global DOF. Memory is one chunk's basis, never the matrix; time is a few assemblies per product. :meth:`solve` runs
+    Jacobi-preconditioned CG on the free DOF with it.
     """
 
     def __init__(self, space: "FemSpace", materials: "Material | Sequence[Material]", *, chunk: int = CHUNK_ELEMENTS):
@@ -527,7 +508,7 @@ class ElementChunkOperator:
 
         self.space = space
         self.chunk = int(chunk)
-        parts = _materials(materials)
+        parts = material_list(materials)
         #: The anisotropic path: each chunk's parts and weights (voigt_parts) instead of Lamé's numbers.
         self._materials = parts if anisotropic(parts) else None
         per_part = [lame_parameters(m.E, m.nu) for m in parts]
@@ -559,27 +540,13 @@ class ElementChunkOperator:
             grad = sum(local[i][None, None, :, None] * basis.basis[i][0].grad for i in range(dofs.shape[0]))
             strain = 0.5 * (grad + np.transpose(grad, (1, 0, 2, 3)))
             if self._materials is not None:
-                sigma = self._chunk_stress(rows, basis, strain)
+                sigma = _anisotropic_stress(self.space, self._materials, strain, basis, rows)
             else:
-                trace = strain[0, 0] + strain[1, 1] + strain[2, 2]
-                lam, mu = self._lam[rows][:, None], self._mu[rows][:, None]
-                sigma = 2.0 * mu * strain
-                for i in range(3):
-                    sigma[i, i] = sigma[i, i] + lam * trace
+                sigma = _lame_stress(strain, self._lam[rows][:, None], self._mu[rows][:, None])
             weighted = sigma * basis.dx
             work = np.stack([np.einsum("ijeq,ijeq->e", weighted, basis.basis[i][0].grad) for i in range(dofs.shape[0])])
             y += np.bincount(dofs.ravel(), weights=work.ravel(), minlength=self.shape[0])
         return y
-
-    def _chunk_stress(self, rows, basis, strain):
-        import numpy as np
-
-        e = voigt(strain)
-        s = np.zeros_like(e)
-        for C, weight in voigt_parts(self.space, self._materials, basis, rows):
-            part = np.einsum("ij,j...->i...", C, e)
-            s += part if weight is None else part * weight
-        return _unvoigt(s)
 
     def __matmul__(self, x):
         return self.matvec(x)
@@ -597,7 +564,7 @@ class ElementChunkOperator:
                     g = basis.basis[i][0].grad
                     strain = 0.5 * (g + np.transpose(g, (1, 0, 2, 3)))
                     if self._materials is not None:
-                        energy = np.einsum("ijeq,ijeq->eq", self._chunk_stress(rows, basis, strain), strain)
+                        energy = np.einsum("ijeq,ijeq->eq", _anisotropic_stress(self.space, self._materials, strain, basis, rows), strain)
                     else:
                         trace = strain[0, 0] + strain[1, 1] + strain[2, 2]
                         energy = 2.0 * mu * np.einsum("ijeq,ijeq->eq", strain, strain) + lam * trace * trace

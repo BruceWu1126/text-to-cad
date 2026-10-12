@@ -567,6 +567,12 @@ AC source, a composite's layup and ply materials), and every analysis reads it f
 file's raw echo. Its choices are Study's, and what the colours mean is on
 the view; Display is the view's alone, as a STEP's is. It has no mode of its own.
 
+The FEA viewer is a chunk of its own (`glb/feaView.jsx`: Study, the colour bar, the markers,
+`feaResult.js` and `fea/`), which `GlbRenderer` loads with one `import()` only once the loaded
+scene carries a mesh `cadgen fea solve` wrote (`generator` and `fields` in its extras). A plain
+GLB never fetches it and renders as it always has; a result waits as the file loading until the
+chunk is in (loaded once, for every result after it), so it is framed once, as it is drawn.
+
 A result is of one analysis (`extras.analysis.type`; none is static): Strength (static),
 Vibration, Buckling, Heat, Heat over time, Heat stress, Shaking, Random vibration, Shock, Over
 time, Fatigue life, Drop (estimate) and the Tier 3 "lite" Flow, Drop impact, Permanent bend and

@@ -12,6 +12,14 @@ import staticAnalysis from "./static.js";
 /** The routine an analysis plays in preview, as a descriptor GlbRenderer turns into a clip. */
 export const routineOf = (label, kind) => Object.freeze({ id: `fea:${kind.replace(/_/g, "-")}`, label, kind });
 
+/** Play: the frames (times, load steps) one after another, interpolated (GlbRenderer plays it). */
+export const PLAY = routineOf("Play", "play");
+
+/** Play where the result has frames to play; none without. */
+export const playSeries = (result) => (result?.series ? PLAY : null);
+
+const frozen = (list) => (Object.isFrozen(list) ? list : Object.freeze([...list]));
+
 /** A planned analysis: static's defaults under what `spec` says. */
 export function planned(spec) {
   return Object.freeze({
@@ -24,8 +32,9 @@ export function planned(spec) {
     // A Tier 3 analysis's short limit word, which leads its verdict's takeaway ("Laminar · ").
     limitWord: "",
     ...spec,
-    checks: Object.freeze([...(spec.checks || staticAnalysis.checks)]),
+    checks: frozen(spec.checks || staticAnalysis.checks),
     checkLabels: Object.freeze({ ...(spec.checkLabels || {}) }),
-    markers: Object.freeze([...(spec.markers || staticAnalysis.markers)]),
+    // A list shared with another analysis (the heat analyses' markers) stays that one list.
+    markers: frozen(spec.markers || staticAnalysis.markers),
   });
 }

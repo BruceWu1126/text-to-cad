@@ -112,12 +112,10 @@ class Radiation:
     enclosure: Enclosure | None = None
     entries: int = 0
 
-    def residual(self, T: "np.ndarray") -> "np.ndarray":
-        """The net radiative power out of every node, mW (added to K T - f)."""
-        import numpy as np
+    def _losses(self, T: "np.ndarray"):
+        """Each surroundings entry and its nodal loss ∫ ε σ ((T + 273.15)⁴ - T_a⁴) v, mW."""
         from skfem import LinearForm, asm
 
-        out = np.zeros(len(T))
         for entry in self.ambient:
             e, ta = entry.emissivity, (entry.ambient + KELVIN) ** 4
 
@@ -125,7 +123,15 @@ class Radiation:
             def loss(v, w, e=e, ta=ta):
                 return e * SIGMA * ((w["T"] + KELVIN) ** 4 - ta) * v
 
-            out += asm(loss, entry.boundary, T=entry.boundary.interpolate(T))
+            yield entry, asm(loss, entry.boundary, T=entry.boundary.interpolate(T))
+
+    def residual(self, T: "np.ndarray") -> "np.ndarray":
+        """The net radiative power out of every node, mW (added to K T - f)."""
+        import numpy as np
+
+        out = np.zeros(len(T))
+        for _, loss in self._losses(T):
+            out += loss
         if self.enclosure is not None:
             out += self.enclosure.W @ self.enclosure.flux(T)
         return out
@@ -157,18 +163,9 @@ class Radiation:
 
     def powers(self, T: "np.ndarray") -> list[float]:
         """The net power (W) each radiation entry sends out, in the study's order."""
-        import numpy as np
-        from skfem import LinearForm, asm
-
         out = [0.0] * self.entries
-        for entry in self.ambient:
-            e, ta = entry.emissivity, (entry.ambient + KELVIN) ** 4
-
-            @LinearForm
-            def loss(v, w, e=e, ta=ta):
-                return e * SIGMA * ((w["T"] + KELVIN) ** 4 - ta) * v
-
-            out[entry.index] += float(asm(loss, entry.boundary, T=entry.boundary.interpolate(T)).sum()) / 1e3
+        for entry, loss in self._losses(T):
+            out[entry.index] += float(loss.sum()) / 1e3
         if self.enclosure is not None:
             enc = self.enclosure
             per = enc.flux(T) * enc.area / 1e3
@@ -506,8 +503,7 @@ def assemble(space: "FemSpace", rows_of: list["np.ndarray"], emissivity: list[fl
     face = space.volume.boundary_ordinal[rows] if space.volume is not None else entry_of
     patch = patches_of(centroid, area, face * 10_000 + entry_of)
     count = int(patch.max()) + 1
-    every = np.arange(len(space.boundary_quadratic))
-    blockers = space.dof_locations[space.boundary_quadratic[every][:, :3]]
+    blockers = space.dof_locations[space.boundary_quadratic[:, :3]]
     F, notes = view_factors(corners, area, normal, centroid, patch, blockers)
     if log:
         log(f"radiation: {count} patches, view factors by {notes['method']}, {notes['rays']} rays for obstruction")

@@ -1,12 +1,13 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
+import { BufferAttribute } from 'three';
 import { describe, expect, it } from 'vitest';
-import { feaControls, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, feaVerdict, studyRows } from '../../feaResult.js';
 import { checkLine, checkTitle } from '../checkKinds.js';
 import { heldRows, madeOfRows } from '../setup.js';
 import { feaAnalysis } from './index.js';
 import { VIBRATE } from './modal.js';
 import { LOAD_RAMP } from './static.js';
 import piezo, { PIEZO_SETUP, electrodeLabel, piezoElectrodeRows, poledRows, polingWords } from './piezo.js';
+import { feaFile, plain, vec } from '../../__tests__/feaFile.js';
 
 const LIMITS = ['Linear, small signal: room-temperature constants at low field; no depolarisation, hysteresis, ageing or self-heating.'];
 const STUDY = {
@@ -20,18 +21,11 @@ const STUDY = {
 
 // A piezo result as cadgen writes one: the stress first, the voltage (signed), the field and the displacement.
 function piezoResult(extras: Record<string, unknown> = {}, attributes: Record<string, [number[], number]> = {}) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.01, 0, 0, 0, 0.01, 0]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_von_mises', new BufferAttribute(new Float32Array([0, 2, 4]), 1));
-  geometry.setAttribute('_potential', new BufferAttribute(new Float32Array([0, 0.5, 1]), 1));
-  geometry.setAttribute('_electric_field', new BufferAttribute(new Float32Array([0.001, 0.001, 0.001]), 1));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 1]), 1));
-  for (const [name, [values, size]] of Object.entries(attributes)) geometry.setAttribute(name, new BufferAttribute(new Float32Array(values), size));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  const extra = Object.fromEntries(Object.entries(attributes).map(([name, [values, size]]) => [name, new BufferAttribute(new Float32Array(values), size)]));
+  return feaFile({
+    position: [0, 0, 0, 0.01, 0, 0, 0, 0.01, 0], _displacement: vec(9), _von_mises: [0, 2, 4], _potential: [0, 0.5, 1],
+    _electric_field: [0.001, 0.001, 0.001], _face: [0, 0, 1], ...extra,
+  }, {
     generator: 'cadgen fea', name: 'disc piezo', deformation_scale: 50, faces: ['#o1.f2', '#o1.f5', '#o1.f6'],
     analysis: { type: 'piezo', tier: 3, word: 'Piezo', estimate: false, limits: LIMITS, noun: 'this voltage', reference_C: null,
       warnings: [], solve: 'static' },
@@ -47,9 +41,6 @@ function piezoResult(extras: Record<string, unknown> = {}, attributes: Record<st
     findings: [],
     ...extras,
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 const RESONANCE = {
@@ -133,7 +124,6 @@ describe('piezo', () => {
     const modes = [{ mode: 1, resonance_Hz: 6503.29, antiresonance_Hz: 7100.05, k_eff: 0.401294 },
       { mode: 2, resonance_Hz: 13834.94, antiresonance_Hz: 13834.95, k_eff: 0.000657 }];
     const analysis = { ...RESONANCE.analysis, modes };
-    const plain = (text: string) => text.replace(/[\u00a0\u202f]/g, ' ');
     const verdict = feaVerdict(piezoResult({ ...RESONANCE, analysis, checks: [] }, FRAME_ONE));
     expect(verdict).toMatchObject({ status: 'none', title: 'First resonance 6.5 kHz' });
     expect(verdict.caption).toBe('Linear · Anti-resonance 7.1 kHz, coupling k_eff 0.40');

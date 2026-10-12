@@ -1,12 +1,9 @@
 /**
- * Fatigue life: how many cycles of its load the part lasts, from a static load case repeated. Its
- * fields are the life (log10 cycles, the colour bar in powers of ten) and the fatigue safety factor;
- * the displacement rides along at the load's peak. Its one check kind, `fatigue`, is judged at the
- * cycles needed and does not follow the load control (a Goodman factor is not linear in the load),
- * so it has no load control. Its routine is the Load cycle (`../poses.js`): the stress (the cycle's
- * peak, `_cycle_stress`) and the deformation swinging between the cycle's ends, on a Cycle row. Its setup is static's: where it is held, what pushes it
- * each cycle, what it is made of. Where the part outlasts the material's data everywhere, the life is
- * one capped number with nothing to show, so What you see opens on the fatigue margin instead.
+ * Fatigue life: how many cycles of its load the part lasts, from a static load case repeated. Its fields are
+ * the life (log10 cycles, the colour bar in powers of ten) and the fatigue safety factor, the displacement at
+ * the load's peak. A Goodman factor is not linear in the load, so it has no load control. Its Load cycle
+ * (`../poses.js`) swings the stress (the cycle's peak, `_cycle_stress`) and the deformation between the
+ * cycle's ends.
  */
 import { fieldAndDeformation } from "../controls.js";
 import { cycleMotion, poseRoutine } from "../poses.js";
@@ -29,7 +26,7 @@ export function fatigueControls(result) {
 }
 
 export default planned({
-  name: "fatigue", tier: 1, word: "Fatigue life", noun: "this load", family: null, scalesWithLoad: false,
+  name: "fatigue", word: "Fatigue life",
   checks: ["fatigue"],
   // The field (life first, then the fatigue factor and the displacement) and the deformation.
   defaultControls: fatigueControls,

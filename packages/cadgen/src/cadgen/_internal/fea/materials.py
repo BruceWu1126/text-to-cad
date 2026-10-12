@@ -1,13 +1,10 @@
 """The built-in isotropic material table for ``cadgen fea``.
 
-Textbook room-temperature values for the alloys and polymers a desktop part is
-usually made of. They are starting points, not certified data: a study that
-matters names its own numbers through the study file's ``material`` object,
-which overrides any field here. Units: MPa for E, yield, strength and the
-plastic tangent; tonne/mm^3 for density (so mass = density x volume in mm^3 is
-in tonnes; x1000 for kg); W/(m K) for conductivity, 1/K for expansion and
-J/(kg K) for specific heat, the units people write them in (an analysis
-converts them into the mm-N-s-tonne system it solves in).
+Textbook room-temperature values for the alloys and polymers a desktop part is usually made of. They are starting
+points, not certified data: a study that matters names its own numbers through the study file's ``material`` object,
+which overrides any field here. Units: MPa for E, yield, strength and the plastic tangent; tonne/mm^3 for density (so
+mass = density x volume in mm^3 is in tonnes; x1000 for kg); W/(m K) for conductivity, 1/K for expansion and J/(kg K)
+for specific heat, the units people write them in (an analysis converts them into the mm-N-s-tonne system it solves in).
 
 A value the table does not know is ``None``, and :data:`NONE_REASONS` says why;
 an analysis that needs it asks for it by name (:func:`requires`). Stdlib only.
@@ -15,12 +12,13 @@ an analysis that needs it asks for it by name (:func:`requires`). Stdlib only.
 
 from __future__ import annotations
 
-import json
 import math
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from typing import Any
+
+from cadgen._internal.fea.analyses.kinds import json_text as _json_text, number as _number
 
 __all__ = [
     "CREEP_UNITS", "MATERIALS", "MATERIAL_PROPERTIES", "NONE_REASONS", "ORTHOTROPIC_KEYS", "TABLE_PROPERTIES", "Material",
@@ -81,13 +79,8 @@ class Material:
     piezo: dict | None = field(default=None, hash=False)
 
     def as_dict(self) -> dict:
-        out = {
-            "name": self.name,
-            "E_MPa": self.E,
-            "nu": self.nu,
-            "yield_MPa": self.yield_strength,
-            "density_t_per_mm3": self.density,
-        }
+        out = {"name": self.name, "E_MPa": self.E, "nu": self.nu, "yield_MPa": self.yield_strength,
+               "density_t_per_mm3": self.density}
         for attribute, (key, _) in MATERIAL_PROPERTIES.items():
             value = getattr(self, attribute)
             if attribute not in _BASE and value is not None:
@@ -130,6 +123,8 @@ _EXAMPLE = {
     "conductivity_W_mK": "50", "expansion_per_K": "11.7e-6", "specific_heat_J_kgK": "486", "tangent_MPa": "2000",
     "resistivity_ohm_m": "1.7e-8", "relative_permittivity": "3.0", "relative_permeability": "1.0",
     "fracture_toughness_MPa_sqrt_m": "29", "paris_C": "6.9e-12", "paris_m": "3.0",
+    "hyperelastic": '{"model": "neo_hookean", "mu_MPa": 0.6, "bulk_MPa": 300}',
+    "creep": '{"A": 1e-20, "n": 5, "m": 0, "units": "MPa, hours"}',
 }
 _POLYMER_FATIGUE = (
     "polymers have no endurance limit, and their fatigue strength depends on frequency, temperature, "
@@ -329,11 +324,15 @@ def piezo_block(raw: Any, base: dict | None = None) -> dict:
     out["poling"] = [c + 0.0 for c in poling]
     if "density_kg_m3" in raw:
         out["density_kg_m3"] = _number(raw["density_kg_m3"], where=f"{where}.density_kg_m3", positive=True)
+    _source(raw, out, where)
+    return out
+
+
+def _source(raw: dict, out: dict, where: str) -> None:
     if "source" in raw:
         if not isinstance(raw["source"], str) or not raw["source"].strip():
             raise ValueError(f"{where}.source: where the numbers come from, as a short piece of text")
         out["source"] = raw["source"].strip()
-    return out
 
 
 def piezo_engineering(block: dict) -> tuple[float, float]:
@@ -374,23 +373,12 @@ _PIEZO_ALIASES = {"pzt4": "pzt-4", "pzt5a": "pzt-5a", "pzt5h": "pzt-5h", "navy-i
 
 
 _ALIASES = {
-    "6061": "aluminum-6061-t6",
-    "6061-t6": "aluminum-6061-t6",
-    "al6061": "aluminum-6061-t6",
-    "aluminium-6061-t6": "aluminum-6061-t6",
-    "aluminum": "aluminum-6061-t6",
-    "aluminium": "aluminum-6061-t6",
-    "7075": "aluminum-7075-t6",
-    "7075-t6": "aluminum-7075-t6",
-    "304": "stainless-304",
-    "stainless": "stainless-304",
-    "ss304": "stainless-304",
+    **dict.fromkeys(("6061", "6061-t6", "al6061", "aluminium-6061-t6", "aluminum", "aluminium"), "aluminum-6061-t6"),
+    **dict.fromkeys(("7075", "7075-t6"), "aluminum-7075-t6"),
+    **dict.fromkeys(("304", "stainless", "ss304"), "stainless-304"),
     "mild-steel": "steel",
-    "titanium": "titanium-6al-4v",
-    "ti-6al-4v": "titanium-6al-4v",
-    "ti6al4v": "titanium-6al-4v",
-    "nylon": "nylon-pa12",
-    "pa12": "nylon-pa12",
+    **dict.fromkeys(("titanium", "ti-6al-4v", "ti6al4v"), "titanium-6al-4v"),
+    **dict.fromkeys(("nylon", "pa12"), "nylon-pa12"),
 }
 
 
@@ -399,8 +387,7 @@ def _key(name: str) -> str:
 
 
 def lookup_material(name: str) -> Material:
-    """The table entry for ``name`` (case-insensitive, common aliases), or a
-    ValueError that lists what is available."""
+    """The table entry for ``name`` (case-insensitive, common aliases), or a ValueError that lists what is available."""
     key = _key(name)
     key = _ALIASES.get(key, key)
     material = MATERIALS.get(key) or PIEZO_MATERIALS.get(_PIEZO_ALIASES.get(key, key))
@@ -423,24 +410,6 @@ def display_name(name: str) -> str:
     if " " not in text and re.search(r"[A-Za-z][-_]+[A-Za-z0-9]", text):
         text = " ".join(word.upper() if any(c.isdigit() for c in word) else word for word in re.split(r"[-_]+", text) if word)
     return text[0].upper() + text[1:]
-
-
-def _json_text(value: Any) -> str:
-    try:
-        return json.dumps(value, ensure_ascii=False)
-    except (TypeError, ValueError):
-        return repr(value)
-
-
-def _number(value: Any, *, where: str, positive: bool = False) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{where}: expected a number, got {_json_text(value)}")
-    number = float(value)
-    if not math.isfinite(number):
-        raise ValueError(f"{where}: expected a finite number, got {number}")
-    if positive and not number > 0:
-        raise ValueError(f"{where}: must be > 0, got {number}")
-    return number
 
 
 def _optional(spec: dict, keys: tuple[str, ...], fallback: float | None, *, where: str) -> float | None:
@@ -502,10 +471,7 @@ def _creep(raw: Any) -> dict:
     out: dict = {"A": A, "n": n, "m": m, "units": CREEP_UNITS[key]}
     if "temperature_C" in raw:
         out["temperature_C"] = _number(raw["temperature_C"], where=f"{where}.temperature_C")
-    if "source" in raw:
-        if not isinstance(raw["source"], str) or not raw["source"].strip():
-            raise ValueError(f"{where}.source: where the numbers come from, as a short piece of text")
-        out["source"] = raw["source"].strip()
+    _source(raw, out, where)
     return out
 
 
@@ -580,19 +546,20 @@ def mirror_symmetric(material: Material, axis: int) -> bool:
     return any(abs(abs(direction[axis]) - 1.0) < 1e-9 for direction in (a1, a2, a3))
 
 
+#: The material object's other names for a property's key.
+_ALSO_KEYS = {"endurance": ("fatigue_strength_MPa",), "endurance_cycles": ("fatigue_cycles",)}
+
+
 def material_from_spec(spec: Any) -> Material:
     """The study's ``material``: a table name, or an object that gives the numbers or extends a table entry.
 
-    An object may extend a table entry (``{"name": "steel", "yield_MPa": 355}``);
-    one with no table name needs E_MPa, nu and yield_MPa. Every other property
-    of :data:`MATERIAL_PROPERTIES` is optional and overrides the table's.
-    ``fatigue_strength_MPa`` and ``fatigue_cycles`` are accepted for
-    ``endurance_MPa`` and ``endurance_cycles``, and ``plasticity.tangent_MPa``
-    for ``tangent_MPa`` (0 is perfectly plastic).
+    An object may extend a table entry (``{"name": "steel", "yield_MPa": 355}``); one with no table name needs E_MPa, nu
+    and yield_MPa. Every other property of :data:`MATERIAL_PROPERTIES` is optional and overrides the table's.
+    ``fatigue_strength_MPa`` and ``fatigue_cycles`` are accepted for ``endurance_MPa`` and ``endurance_cycles``, and
+    ``plasticity.tangent_MPa`` for ``tangent_MPa`` (0 is perfectly plastic).
 
-    A rubber needs no E, nu or yield: an object with a ``hyperelastic`` block
-    and no table name takes its small-strain E and nu from the block's mu and
-    bulk modulus, and has no yield strength (``None``) unless it gives one.
+    A rubber needs no E, nu or yield: an object with a ``hyperelastic`` block and no table name takes its small-strain E
+    and nu from the block's mu and bulk modulus, and has no yield strength (``None``) unless it gives one.
     """
     if isinstance(spec, str):
         return lookup_material(spec)
@@ -653,36 +620,27 @@ def material_from_spec(spec: Any) -> Material:
                 raise ValueError(f"{where}.tangent_MPa: the slope past yield must be 0 (perfectly plastic) or more, got {tangent:g}")
     if tangent is not None and not tangent < E:
         raise ValueError(f"material.tangent_MPa: the plastic tangent ({tangent:g} MPa) must be below E ({E:g} MPa)")
+    given = {"tangent": tangent, "piezo": piezo,
+             "hyperelastic": hyperelastic if hyperelastic is not None else table("hyperelastic"),
+             "orthotropic": orthotropic if orthotropic is not None else table("orthotropic")}
+    # Every other property, in MATERIAL_PROPERTIES's order (so the first bad one is the one named): a positive number
+    # under its key (or an alias), else the table's; the creep block checked as its own.
+    for attribute, (key, _) in MATERIAL_PROPERTIES.items():
+        if attribute == "creep":
+            given["creep"] = _creep(spec["creep"]) if "creep" in spec else table("creep")
+        elif attribute not in _BASE and attribute not in given:
+            given[attribute] = _optional(spec, (key, *_ALSO_KEYS.get(attribute, ())), table(attribute), where="material")
     # An object that extends a table entry ({"name": "pzt-5a", "piezo": {...}}) is called by the entry's display name
     # ("PZT-5A"), as the table name alone is; one of its own keeps its name, tidied (display_name: "Copper C110").
-    return Material(
-        base.name if base is not None else display_name(str(spec.get("name", "custom"))), E, nu, yield_strength, density,
-        uts=_optional(spec, ("uts_MPa",), table("uts"), where="material"),
-        endurance=_optional(spec, ("endurance_MPa", "fatigue_strength_MPa"), table("endurance"), where="material"),
-        endurance_cycles=_optional(spec, ("endurance_cycles", "fatigue_cycles"), table("endurance_cycles"), where="material"),
-        conductivity=_optional(spec, ("conductivity_W_mK",), table("conductivity"), where="material"),
-        expansion=_optional(spec, ("expansion_per_K",), table("expansion"), where="material"),
-        specific_heat=_optional(spec, ("specific_heat_J_kgK",), table("specific_heat"), where="material"),
-        tangent=tangent,
-        hyperelastic=hyperelastic if hyperelastic is not None else table("hyperelastic"),
-        creep=_creep(spec["creep"]) if "creep" in spec else table("creep"),
-        orthotropic=orthotropic if orthotropic is not None else table("orthotropic"),
-        resistivity=_optional(spec, ("resistivity_ohm_m",), table("resistivity"), where="material"),
-        permittivity=_optional(spec, ("relative_permittivity",), table("permittivity"), where="material"),
-        permeability=_optional(spec, ("relative_permeability",), table("permeability"), where="material"),
-        fracture_toughness=_optional(spec, ("fracture_toughness_MPa_sqrt_m",), table("fracture_toughness"), where="material"),
-        paris_C=_optional(spec, ("paris_C",), table("paris_C"), where="material"),
-        paris_m=_optional(spec, ("paris_m",), table("paris_m"), where="material"),
-        piezo=piezo,
-    )
+    return Material(base.name if base is not None else display_name(str(spec.get("name", "custom"))), E, nu,
+                    yield_strength, density, **given)
 
 
 def requires(material: Material, needs: Iterable[str], analysis: str) -> None:
     """Raise a plain ValueError for the first property of ``needs`` the material lacks.
 
-    ``needs`` are :data:`MATERIAL_PROPERTIES` attributes (an analysis's
-    ``material_needs``). Density counts as missing at zero. The error names
-    the property and the material-object key that supplies it.
+    ``needs`` are :data:`MATERIAL_PROPERTIES` attributes (an analysis's ``material_needs``). Density counts as missing
+    at zero. The error names the property and the material-object key that supplies it.
     """
     for attribute in needs:
         if attribute not in MATERIAL_PROPERTIES:
@@ -692,18 +650,13 @@ def requires(material: Material, needs: Iterable[str], analysis: str) -> None:
         if not missing:
             continue
         key, words = MATERIAL_PROPERTIES[attribute]
-        example = _EXAMPLE.get(key, _EXAMPLE.get(attribute, "..."))
-        if attribute == "hyperelastic":
-            example = '{"model": "neo_hookean", "mu_MPa": 0.6, "bulk_MPa": 300}'
         if attribute == "piezo":
-            example = '{"poling": [0, 0, 1]}, or name a piezo ceramic from the table: "pzt-4", "pzt-5a" or "pzt-5h"'
             raise ValueError(
                 f"material: {analysis} studies need the {words}, and {material.name} has none; name a piezo ceramic "
                 f'("pzt-4", "pzt-5a" or "pzt-5h"), or add a piezo block to the material object with cE_GPa (6 x 6), '
                 "e_C_m2 (3 x 6), epsS_rel (3 x 3) and poling"
             )
-        if attribute == "creep":
-            example = '{"A": 1e-20, "n": 5, "m": 0, "units": "MPa, hours"}'
+        example = _EXAMPLE.get(key, _EXAMPLE.get(attribute, "..."))
         raise ValueError(
             f"material: {analysis} studies need the {words}, and {material.name} has none; "
             f'add {key} to the material object, like {{"name": "{material.name}", "{key}": {example}}}'

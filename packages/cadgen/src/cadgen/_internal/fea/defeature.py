@@ -1,15 +1,12 @@
 """Leaving small features out of the mesh: the ladder's ``defeature`` rung.
 
-A fillet, a chamfer or a hole much smaller than the elements around it makes
-the mesher refine to its own size, however coarse the study asked for. Far
-from every load, fixture and check such a feature barely moves the answer, so
-the ladder may remove it for meshing with OpenCascade's
-``BRepAlgoAPI_Defeaturing`` (the faces grow back over it). Named faces are
-never removed, and nothing within three element sizes of one is. The faces
-that remain keep their cadgen ordinals: each face of the defeatured shape is
-traced back through the operation's history to the face it came from
-(:class:`Prepared`), so a study's ``#o1.f17`` means the same face on the
-simplified part. OCP imports live inside the functions.
+A fillet, a chamfer or a hole much smaller than the elements around it makes the mesher refine to its own size, however
+coarse the study asked for. Far from every load, fixture and check such a feature barely moves the answer, so the ladder
+may remove it for meshing with OpenCascade's ``BRepAlgoAPI_Defeaturing`` (the faces grow back over it). Named faces are
+never removed, and nothing within three element sizes of one is. The faces that remain keep their cadgen ordinals: each
+face of the defeatured shape is traced back through the operation's history to the face it came from
+(:class:`Prepared`), so a study's ``#o1.f17`` means the same face on the simplified part. OCP imports live inside the
+functions.
 """
 
 from __future__ import annotations
@@ -134,7 +131,7 @@ def small_features(geometry: "Geometry", size_mm: float, named: set[int]) -> lis
     for ordinal, face_info in info.items():
         if ordinal in named:
             continue
-        face = _as_face(faces.FindKey(ordinal))
+        face = as_face(faces.FindKey(ordinal))
         kind = None
         if face_info.kind == "cylinder":
             if _is_hole(face):
@@ -147,7 +144,7 @@ def small_features(geometry: "Geometry", size_mm: float, named: set[int]) -> lis
             normal = _plane_normal(face)
             slanted = 0
             for other in near.get(ordinal, ()):
-                other_normal = _plane_normal(_as_face(faces.FindKey(other)))
+                other_normal = _plane_normal(as_face(faces.FindKey(other)))
                 if normal is None or other_normal is None:
                     continue
                 angle = math.degrees(math.acos(min(1.0, abs(sum(a * b for a, b in zip(normal, other_normal))))))
@@ -160,20 +157,19 @@ def small_features(geometry: "Geometry", size_mm: float, named: set[int]) -> lis
         return []
     named_shapes = [faces.FindKey(ordinal) for ordinal in named if 1 <= ordinal <= faces.Extent()]
     far = FAR * size_mm
-    kept = [
+    return [
         feature for feature in candidates
         if all(_distance(faces.FindKey(face.ordinal), other) > far for face in feature.faces for other in named_shapes)
     ]
-    return kept
 
 
-def _as_face(shape):
+def as_face(shape):
     from OCP.TopoDS import TopoDS
 
     return TopoDS.Face_s(shape)
 
 
-def defeature(geometry: "Geometry", features: list[Feature], prepared: Prepared | None = None) -> Prepared | None:
+def defeature(geometry: "Geometry", features: list[Feature]) -> Prepared | None:
     """The part with ``features`` removed, each remaining face traced to its ordinal; ``None`` when
     OpenCascade cannot remove them (the rung then does not apply)."""
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Defeaturing

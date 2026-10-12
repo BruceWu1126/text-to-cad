@@ -24,32 +24,19 @@ only; the solves need the fea extra.
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import struct
 import tempfile
 import unittest
-from contextlib import redirect_stderr
 from pathlib import Path
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
+from tests.python.support.fea_fixtures import class_directory, glb_extras, needs_fea, sidecar, solve
 
 from cadgen._internal.fea.analyses import get_analysis  # noqa: E402
 from cadgen._internal.fea.analyses.bolt import bolt_words, force_words  # noqa: E402
 from cadgen._internal.fea.bolt_ops import (  # noqa: E402
     SIZES, bolt_compliance, joint_compliance, load_factor, preload_from_torque, proof_load,
 )
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
 from cadgen._internal.fea.study import parse_study  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 PRELOAD = 5000.0
 E_STEEL = 200_000.0          # the material table's steel, for the parts and the bolt
@@ -112,7 +99,7 @@ class StudyFile(unittest.TestCase):
 
     def test_the_errors_say_what_to_add(self):
         no_bolt = {key: value for key, value in _study().items() if key != "connections"}
-        both = {k: v for k, v in _bolt().items()}
+        both = _bolt()
         cases = [
             (no_bolt, "a bolt study needs a bolt"),
             ({**_study(), "fixtures": []}, "nothing holds the parts still"),
@@ -206,12 +193,6 @@ class HandCalcs(unittest.TestCase):
         self.assertAlmostEqual(proof_load(SIZES["M20"], "8.8"), 600 * 245)
 
 
-def _glb(path: Path) -> dict:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    return json.loads(raw[20:20 + length])
-
-
 def _joint(directory: Path, width: float | None):
     """Two plates with a 6.6 mm hole, 6 mm thick, stacked: round as wide as the head (``width`` None) or square."""
     from build123d import Align, Box, Compound, Cylinder, Pos, export_step
@@ -247,16 +228,20 @@ def _holes(scene, refs) -> list[str]:
     return [_face(scene, refs["plate"], 2, 1.5 * THICK, wall), _face(scene, refs["bracket"], 2, 0.5 * THICK, wall)]
 
 
+def _round_plates(directory: Path, load: float, **more) -> tuple[Path, dict]:
+    """The round plates (module docstring), the bracket held at its bottom and the plate pulled off by ``load``."""
+    step, refs, scene = _joint(directory, None)
+    return step, {"analysis": "bolt", "material": "steel", **more, "connections": [_bolt(holes=_holes(scene, refs))],
+                  "fixtures": [{"faces": [_face(scene, refs["bracket"], 2, 0.0)]}],
+                  "loads": [{"faces": [_face(scene, refs["plate"], 2, 2 * THICK)], "type": "force", "vector_N": [0, 0, load]}]}
+
+
 def _solve(step: Path, study: dict, name: str):
-    from cadgen import fea
-
-    with redirect_stderr(io.StringIO()):
-        result = fea.solve(step, step.with_name(f"{name}.fea.glb"), study=study)
-    sidecar = json.loads(result.sidecar.read_text(encoding="utf-8"))
-    return result, _glb(result.glb)["meshes"][0]["extras"], sidecar
+    result = solve(step, step.with_name(f"{name}.fea.glb"), study)
+    return result, glb_extras(result.glb), sidecar(result)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class PulledApart(unittest.TestCase):
     """The round plates pulled apart by 10 kN in five steps: they open at about 7.8 kN, between the third and fourth."""
 
@@ -264,23 +249,11 @@ class PulledApart(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
-        step, refs, scene = _joint(Path(cls._tmp.name), None)
-        study = {
-            "analysis": "bolt", "material": "steel", "mesh": {"size_mm": 1.5}, "steps": 5,
-            "parts": {name: {"material": "steel"} for name in ("plate", "bracket")},
-            "connections": [{"between": ["plate", "bracket"], "type": "bolt", "size": "M6", "preload_N": PRELOAD,
-                             "holes": _holes(scene, refs)}],
-            "fixtures": [{"faces": [_face(scene, refs["bracket"], 2, 0.0)]}],
-            "loads": [{"faces": [_face(scene, refs["plate"], 2, 2 * THICK)], "type": "force", "vector_N": [0, 0, cls.LOAD]}],
-        }
+        step, study = _round_plates(class_directory(cls), cls.LOAD, mesh={"size_mm": 1.5}, steps=5,
+                                    parts={name: {"material": "steel"} for name in ("plate", "bracket")})
         cls.result, cls.extras, cls.sidecar = _solve(step, study, "pulled")
         (cls.bolt,) = cls.result.summary["bolts"]
         (cls.joint,) = cls.result.summary["joints"]
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def test_at_the_preload_the_clamped_faces_carry_the_preload_within_2_percent(self):
         self.assertAlmostEqual(self.joint["preload_clamp_N"] / PRELOAD, 1.0, delta=0.02)
@@ -325,15 +298,14 @@ class PulledApart(unittest.TestCase):
         self.assertTrue(any(line.startswith("bolt 1 (M6, 8.8): preload 5000 N") for line in self.result.human_lines()))
 
     def test_no_check_quotes_a_load_multiple(self):
-        """Not linear in the load: every check says it holds at this load only (scaling none), in the summary and the
-        GLB the viewer reads, so the verdict's takeaway is the worst check's own sentence, never "OK up to 18× this load"."""
+        """Not linear in the load: every check holds at this load only (scaling none), never "OK up to 18× this load"."""
         checks = self.result.summary["checks"]
         self.assertTrue(checks)
         self.assertEqual({check.get("scaling") for check in checks}, {"none"})
         self.assertEqual({check.get("scaling") for check in self.extras["checks"]}, {"none"})
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Slip(unittest.TestCase):
     def test_the_joint_slips_at_friction_times_the_preload(self):
         push = 1050.0
@@ -341,8 +313,7 @@ class Slip(unittest.TestCase):
             step, refs, scene = _joint(Path(name), 24.0)
             study = {
                 "analysis": "bolt", "material": "steel", "mesh": {"size_mm": 4.0}, "steps": 5,
-                "connections": [{"between": ["plate", "bracket"], "type": "bolt", "size": "M6", "preload_N": PRELOAD,
-                                 "friction": 0.2, "holes": _holes(scene, refs)}],
+                "connections": [_bolt(friction=0.2, holes=_holes(scene, refs))],
                 "fixtures": [{"faces": [_face(scene, refs["bracket"], 2, 0.0)]}],
                 "loads": [{"faces": [_face(scene, refs["plate"], 0, 12.0)], "type": "force", "vector_N": [push, 0, 0]}],
             }
@@ -358,21 +329,14 @@ class Slip(unittest.TestCase):
         self.assertIn("joint_slips", [finding["type"] for finding in result.findings])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Ladder(unittest.TestCase):
     def test_the_round_plates_over_a_tiny_budget_complete_by_adapting_and_say_so(self):
         load = 3000.0
         with tempfile.TemporaryDirectory() as name:
-            step, refs, scene = _joint(Path(name), None)
-            study = {
-                "analysis": "bolt", "material": "steel", "mesh": {"size_mm": 1.5}, "steps": 4,
-                "connections": [{"between": ["plate", "bracket"], "type": "bolt", "size": "M6", "preload_N": PRELOAD,
-                                 "holes": _holes(scene, refs)}],
-                "fixtures": [{"faces": [_face(scene, refs["bracket"], 2, 0.0)]}],
-                "loads": [{"faces": [_face(scene, refs["plate"], 2, 2 * THICK)], "type": "force", "vector_N": [0, 0, load]}],
-                "fit": {"seconds": 0.001, "allow": ["iterative", "adaptive_steps"]},
-            }
-            result, extras, sidecar = _solve(step, study, "budget")
+            step, study = _round_plates(Path(name), load, mesh={"size_mm": 1.5}, steps=4,
+                                        fit={"seconds": 0.001, "allow": ["iterative", "adaptive_steps"]})
+            result, extras, written = _solve(step, study, "budget")
         self.assertTrue(result.ok)
         rungs = [step["rung"] for step in result.fit]
         self.assertIn("adaptive_steps", rungs)
@@ -384,7 +348,7 @@ class Ladder(unittest.TestCase):
         self.assertAlmostEqual((summary["bolts"][0]["force_N"] - PRELOAD) / load / phi, 1.0, delta=0.15)
         words = next(step["words"] for step in result.fit if step["rung"] == "adaptive_steps")
         self.assertIn(words, [step["words"] for step in extras["fit"]])
-        self.assertIn(words, [step["words"] for step in sidecar["fit"]])
+        self.assertIn(words, [step["words"] for step in written["fit"]])
         self.assertTrue(any(line.startswith(f"adapted: {words}") for line in result.human_lines()))
         self.assertIn("fit_adaptive_steps", [finding["type"] for finding in result.findings])
 
@@ -397,22 +361,14 @@ class Ladder(unittest.TestCase):
         from cadgen._internal.fea import nonlinear_driver
 
         with tempfile.TemporaryDirectory() as name:
-            step, refs, scene = _joint(Path(name), None)
-            study = {
-                "analysis": "bolt", "material": "steel", "mesh": {"size_mm": 2.0}, "steps": 2,
-                "connections": [{"between": ["plate", "bracket"], "type": "bolt", "size": "M6", "preload_N": PRELOAD,
-                                 "holes": _holes(scene, refs)}],
-                "fixtures": [{"faces": [_face(scene, refs["bracket"], 2, 0.0)]}],
-                "loads": [{"faces": [_face(scene, refs["plate"], 2, 2 * THICK)], "type": "force", "vector_N": [0, 0, 2000]}],
-                "fit": {"seconds": 900},
-            }
+            step, study = _round_plates(Path(name), 2000, mesh={"size_mm": 2.0}, steps=2, fit={"seconds": 900})
             with mock.patch.object(nonlinear_driver, "solve_path", wraps=nonlinear_driver.solve_path) as spy:
                 result, _, _ = _solve(step, study, "deadline")
         self.assertFalse(result.summary["collapsed"])
         self.assertEqual([call.kwargs["deadline_s"] for call in spy.call_args_list], [900.0, 900.0])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class LapJoint(unittest.TestCase):
     """A strap bolted (M8, 12.5 kN) under a held link, the strap held by nothing but the bolt and the contact, as the
     bolt reference allows. Its faces are flush to round-off (1e-15 mm apart, not 0): at the first Newton step no
@@ -425,12 +381,12 @@ class LapJoint(unittest.TestCase):
 
         from cadgen.step_scene import read_scene
 
-        cls._tmp = tempfile.TemporaryDirectory()
+        directory = class_directory(cls)
         low = (Align.MIN, Align.CENTER, Align.MIN)
         strap = Box(100, 40, 6, align=low) - Pos(80, 0, 0) * Cylinder(4.5, 40)
         link = Pos(60, 0, 6) * Box(100, 40, 6, align=low) - Pos(80, 0, 0) * Cylinder(4.5, 40)
         strap.label, link.label = "base_strap", "link"
-        cls.step = Path(cls._tmp.name) / "lap_joint.step"
+        cls.step = directory / "lap_joint.step"
         export_step(Compound(children=[strap, link]), str(cls.step))
         scene = read_scene(cls.step)
         refs = {leaf.label: leaf.ref for leaf in scene.leaves()}
@@ -439,10 +395,6 @@ class LapJoint(unittest.TestCase):
         cls.held = _face(scene, refs["link"], 0, 160.0)
         cls.strap_end = _face(scene, refs["base_strap"], 0, 0.0)
         cls.link_top = _face(scene, refs["link"], 2, 12.0)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def _study(self, **more) -> dict:
         return {"analysis": "bolt", "material": "steel", "mesh": {"size_mm": 3.5},
@@ -469,11 +421,9 @@ class LapJoint(unittest.TestCase):
 
     def test_a_pure_pull_reads_its_sideways_force_from_a_settled_state(self):
         """The gallery's pull-off: the strap held at its end, the link on a roller at its far end and pulled straight
-        up off it by 3000 N in one step. The roller drags the joint sideways as the link tips, and friction slides there:
-        the faces carry what friction holds, no more. The sideways force used to be read from the step's first solve
-        with every touching point held stuck, which grows with the step taken: 20.5 kN for this 3 kN pull (8.1 kN at
-        20 % of the gallery's 6 kN). And the drift springs' share of the link's lift along the bolt (250 N) was called
-        sliding away sideways."""
+        up by 3000 N in one step; as the link tips the joint is dragged sideways and the faces carry what friction holds,
+        no more. Regressions: the sideways force was read from the step's first, all-stuck solve (20.5 kN for this
+        3 kN pull), and the drift springs' share of the lift along the bolt (250 N) was called sliding away."""
         study = self._study(fixtures=[{"faces": [self.strap_end]}, {"faces": [self.held], "type": "roller"}],
                             loads=[{"faces": [self.link_top], "type": "force", "vector_N": [0, 0, 3000]}], steps=1)
         result, _, _ = _solve(self.step, study, "pull-off")

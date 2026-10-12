@@ -12,9 +12,7 @@ import unittest
 from pathlib import Path
 
 from tests.python.support import markdown
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
+from tests.python.support.fea_fixtures import value_error
 
 from cadgen._internal.fea.materials import (  # noqa: E402
     MATERIAL_PROPERTIES,
@@ -70,6 +68,8 @@ class Table(unittest.TestCase):
         text = " ".join(REFERENCE.read_text(encoding="utf-8").split())
         self.assertEqual(set(rows), set(MATERIALS))
         for key, material in MATERIALS.items():
+            with self.subTest(material=key):
+                self.assertTrue(rows[key][len(COLUMNS)].strip(), "the sources column is empty")
             for column, attribute in enumerate(COLUMNS):
                 with self.subTest(material=key, property=attribute):
                     written = _number(rows[key][column])
@@ -81,12 +81,6 @@ class Table(unittest.TestCase):
                         self.assertAlmostEqual(written * DOC_FACTOR.get(attribute, 1.0) / value, 1.0, places=9)
         for reason in set(NONE_REASONS.values()):
             self.assertIn(reason, text)
-
-    def test_every_material_names_its_sources(self):
-        rows = _reference_rows()
-        for key in MATERIALS:
-            with self.subTest(material=key):
-                self.assertTrue(rows[key][len(COLUMNS)].strip(), "the sources column is empty")
 
     def test_the_first_five_fields_keep_their_order(self):
         names = [f.name for f in dataclasses.fields(Material)][:5]
@@ -141,9 +135,8 @@ class MaterialObject(unittest.TestCase):
             (3, "give a name from the table"),
         ]
         for spec, fragment in cases:
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                material_from_spec(spec)
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, value_error(self, material_from_spec, spec))
 
     def test_as_dict_adds_only_the_keys_that_are_set(self):
         custom = material_from_spec({"E_MPa": 1000, "nu": 0.3, "yield_MPa": 10})
@@ -156,18 +149,14 @@ class MaterialObject(unittest.TestCase):
 
 class Requires(unittest.TestCase):
     def test_a_missing_property_is_asked_for_by_its_key(self):
-        with self.assertRaises(ValueError) as caught:
-            requires(lookup_material("abs"), ("uts", "endurance"), "fatigue")
-        message = str(caught.exception)
+        message = value_error(self, requires, lookup_material("abs"), ("uts", "endurance"), "fatigue")
         self.assertIn("fatigue studies need the fatigue strength", message)
         self.assertIn("endurance_MPa", message)
         self.assertIn('"name": "ABS"', message)
 
     def test_zero_density_is_missing(self):
         custom = material_from_spec({"E_MPa": 1000, "nu": 0.3, "yield_MPa": 10})
-        with self.assertRaises(ValueError) as caught:
-            requires(custom, ("density",), "modal")
-        self.assertIn("density_t_per_mm3", str(caught.exception))
+        self.assertIn("density_t_per_mm3", value_error(self, requires, custom, ("density",), "modal"))
         requires(lookup_material("steel"), ("density", "conductivity", "expansion", "specific_heat"), "thermal_stress")
 
     def test_a_stress_check_on_a_rubber_asks_for_its_yield_strength(self):
@@ -178,9 +167,7 @@ class Requires(unittest.TestCase):
                  "loads": [{"faces": ["#o1.f2"], "type": "force", "vector_N": [0, 0, -10]}]}
         # A static study judges stress by default: a plain error naming what to add, not a TypeError later.
         for document in (study, {**study, "view": {"checks": [{"kind": "stress"}]}}):
-            with self.assertRaises(ValueError) as caught:
-                parse_study(document)
-            message = str(caught.exception)
+            message = value_error(self, parse_study, document)
             self.assertIn("static studies need the yield strength, and Rubber has none", message)
             self.assertIn('add yield_MPa to the material object, like {"name": "Rubber", "yield_MPa": 10}', message)
         # Judged by displacement alone it needs no yield strength; given one, the stress check is judged.
@@ -210,12 +197,11 @@ class Requires(unittest.TestCase):
             self.assertTrue(get_analysis(name).isotropic_only)
             isotropic = {key: value for key, value in ortho.items() if key != "orthotropic"}
             parse_study({**study, "material": isotropic})  # the same steel, the same in every direction: fine
-            with self.subTest(analysis=name), self.assertRaises(ValueError) as caught:
-                parse_study({**study, "material": ortho})
-            message = str(caught.exception)
-            self.assertIn(f"material: {name} studies treat a material as the same in every direction, and Steel (structural, generic) is orthotropic", message)
-            self.assertIn("static, modal, buckling, harmonic, random_vibration, shock, transient, fatigue, drop and thermal_stress "
-                          "studies take an orthotropic material", message)
+            with self.subTest(analysis=name):
+                message = value_error(self, parse_study, {**study, "material": ortho})
+                self.assertIn(f"material: {name} studies treat a material as the same in every direction, and Steel (structural, generic) is orthotropic", message)
+                self.assertIn("static, modal, buckling, harmonic, random_vibration, shock, transient, fatigue, drop and thermal_stress "
+                              "studies take an orthotropic material", message)
         # An assembly's part made of one is refused the same way.
         with self.assertRaisesRegex(ValueError, "nonlinear studies treat a material as the same in every direction"):
             parse_study({**studies["nonlinear"], "material": "steel", "parts": {"rib": {"material": ortho}}})

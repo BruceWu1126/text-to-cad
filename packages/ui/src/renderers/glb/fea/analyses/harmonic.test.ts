@@ -1,31 +1,20 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
 import { checkLine, checkTitle } from '../checkKinds.js';
-import { feaControls, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, studyRows } from '../../feaResult.js';
 import { activeFrameIndex, deformationAt } from '../series.js';
 import harmonic, { VIBRATE, frequencyAndDeformation, sweepWords, swingingRows } from './harmonic.js';
 import { feaAnalysis } from './index.js';
+import { feaFile, vec } from '../../__tests__/feaFile.js';
 
 // A shaken cantilever as cadgen writes one: frame 0 (the sweep's bottom) in the fields' own attributes, the
 // resonance at 490 Hz the default, each frame's real and imaginary displacement and its peak stress.
 const FRAMES = [10, 490, 600];
 function shaken(study: Record<string, unknown> = {}) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.1, 0, 0, 0.1, 0, 0.006]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_von_mises', new BufferAttribute(new Float32Array([0.3, 0.1, 0]), 1));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 1, 1]), 1));
-  FRAMES.forEach((_, index) => {
-    geometry.setAttribute(`_displacement_im_f${index}`, new BufferAttribute(new Float32Array(9), 3));
-    if (index) {
-      geometry.setAttribute(`_von_mises_f${index}`, new BufferAttribute(new Float32Array([8.7, 3, 0]), 1));
-      geometry.setAttribute(`_displacement_f${index}`, new BufferAttribute(new Float32Array(9), 3));
-    }
-  });
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  const frames = Object.fromEntries(FRAMES.flatMap((_, index) => [[`_displacement_im_f${index}`, vec(9)],
+    ...(index ? [[`_von_mises_f${index}`, [8.7, 3, 0]], [`_displacement_f${index}`, vec(9)]] : [])]));
+  return feaFile({
+    position: [0, 0, 0, 0.1, 0, 0, 0.1, 0, 0.006], _von_mises: [0.3, 0.1, 0], _displacement: vec(9), _face: [0, 1, 1], ...frames,
+  }, {
     generator: 'cadgen fea', name: 'beam shaking', deformation_scale: 120, faces: ['#o1.f1', '#o1.f2'],
     analysis: { type: 'harmonic', tier: 1, word: 'Shaking', estimate: false, limits: [], noun: 'this shake', reference_C: null, warnings: [] },
     fields: [
@@ -46,9 +35,6 @@ function shaken(study: Record<string, unknown> = {}) {
       where: { ref: '#o1.f2', at: [100, -3, 3] }, faces: ['#o1.f2'], at: { frame: 1, value: 489.6, unit: 'Hz' } }],
     findings: [],
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 describe('harmonic', () => {

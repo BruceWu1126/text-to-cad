@@ -31,15 +31,14 @@ needs none. Stdlib at import.
 
 from __future__ import annotations
 
-import dataclasses
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, SolveContext
-from cadgen._internal.fea.analyses.static import StaticAnalysis, StaticInputs
+from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, SolveContext, finding
+from cadgen._internal.fea.analyses.static import StaticAnalysis, StaticInputs, motion_summary, static_setup, unfold
 
 __all__ = ["CompositeAnalysis", "CompositeInputs"]
 
@@ -147,12 +146,11 @@ class CompositeAnalysis(StaticAnalysis):
     name: ClassVar[str] = "composite"
     tier: ClassVar[int] = 3
     word: ClassVar[str] = "Composite"
-    estimate_only: ClassVar[bool] = False
+    extras_word: ClassVar[str] = "composite"
     limits: ClassVar[tuple[str, ...]] = LIMITS
     study_keys: ClassVar[frozenset[str]] = frozenset({"fixtures", "loads", "layup", "laminae", "layup_axis"})
     #: The plies carry the materials (``laminae``): the study's ``material`` is not needed.
     material_required: ClassVar[bool] = False
-    material_needs: ClassVar[frozenset[str]] = frozenset()
     fields: ClassVar[tuple[FieldSpec, ...]] = (
         FieldSpec("von_mises", "_VON_MISES", "von Mises stress (ply envelope)", "MPa"),
         FieldSpec("displacement", "_DISPLACEMENT", "displacement", "mm", 3, 1000.0),
@@ -325,21 +323,7 @@ class CompositeAnalysis(StaticAnalysis):
         from cadgen._internal.fea import operators, solve
 
         material = _layered(setup, inputs)
-        extra: dict[str, Any] = {}
-        if any(load.body for load in inputs.loads):
-            extra["body_loads"] = inputs.body_accelerations
-        if ctx.space is not None:
-            extra["space"] = ctx.space
-        loads = inputs.surface_loads if extra.get("body_loads") else inputs.loads
-        plan = ctx.plan
-        planes = list(plan.prepared.planes) if plan is not None and plan.prepared is not None else []
-        if plan is not None and plan.solver != "direct":
-            extra["solver"] = plan.solver
-        if planes:
-            share = 0.5 ** len(planes)
-            loads = tuple(dataclasses.replace(load, vector=tuple(share * c for c in load.vector)) if load.type == "force" else load
-                          for load in loads)
-            extra["rollers"] = [((p.ordinal,), p.component) for p in planes]
+        loads, extra, planes = static_setup(ctx, inputs, inputs.loads)
         outcome = solve.solve_linear_static(ctx.volume, material, inputs.fixtures, loads, ctx.ordinal_of, log=ctx.log,
                                             automatic=ctx.automatic, **extra)
         space = ctx.space
@@ -383,37 +367,11 @@ class CompositeAnalysis(StaticAnalysis):
         records = [self._ply_record(inputs, k, tw_max[k], ms_max[k]) for k in range(plies)]
         volume = ctx.volume
         if planes:
-            volume, outcome, nodal = self._unfold(volume, outcome, planes, nodal)
+            # Mirrored back with the failure index beside the stress.
+            volume, outcome, unfolded = unfold(volume, outcome, planes, {"failure_index": nodal})
+            nodal = np.asarray(unfolded["failure_index"])
             ctx.volume = volume
         return self._result(outcome, nodal, worst, "solid", {"elements": int(len(volume.tets))}, records)
-
-    @staticmethod
-    def _unfold(volume, outcome, planes, nodal):
-        """Static's mirror back into the whole part (analyses.static._unfold), carrying the failure index too."""
-        import dataclasses as dc
-
-        import numpy as np
-
-        from cadgen._internal.fea import symmetry
-
-        for plane in reversed(planes):
-            whole, keep = symmetry.unfold_volume(volume, plane)
-            locations, scalars, vectors, boundary, tets, elements, vertices = symmetry.unfold_fields(
-                plane, outcome.vertices, outcome.dof_locations, keep,
-                scalars={"von_mises": outcome.von_mises, "failure_index": nodal},
-                vectors={"displacement": outcome.displacement}, boundary=outcome.boundary_quadratic, tets=outcome.tets,
-                element_dofs=outcome.element_dofs,
-            )
-            outcome = dc.replace(
-                outcome, dof_locations=locations, von_mises=scalars["von_mises"], displacement=vectors["displacement"],
-                boundary_quadratic=boundary, tets=tets, element_dofs=elements, vertices=vertices,
-                element_von_mises_gauss=np.concatenate([outcome.element_von_mises_gauss] * 2),
-                reactions=[symmetry.unfold_force(plane, r) for r in outcome.reactions],
-                applied=symmetry.unfold_force(plane, outcome.applied), u=None,
-            )
-            nodal = scalars["failure_index"]
-            volume = whole
-        return volume, outcome, np.asarray(nodal)
 
     # -- the worst ply -------------------------------------------------------------------------------
 
@@ -513,11 +471,6 @@ class CompositeAnalysis(StaticAnalysis):
                  check_results: list[dict], *, assembly: bool) -> list[dict]:
         worst = result.scalars["worst"]
         found = []
-
-        def finding(severity, kind, summary, description, items=()):
-            return {"check": "fea", "severity": severity, "type": kind, "summary": summary, "description": description,
-                    "items": list(items)}
-
         place = [{"text": f"ply {worst['ply']} ({_angle_words(worst['angle_deg'])}) at its worst", "ref": None,
                   "at": [round(c, 3) for c in worst["at"]]}]
         line = ply_line(worst["ply"], worst["angle_deg"], worst["index"])
@@ -542,15 +495,10 @@ class CompositeAnalysis(StaticAnalysis):
     # -- what is written -----------------------------------------------------------------------------
 
     def summary(self, result: AnalysisResult, inputs: CompositeInputs, check_results: list[dict]) -> dict:
-        import numpy as np
-
         from cadgen._internal.fea.laminate import notation
 
         outcome = result.scalars["outcome"]
-        magnitude = np.linalg.norm(outcome.displacement, axis=1)
-        moved = int(magnitude.argmax())
         worst = result.scalars["worst"]
-        reaction_total = tuple(sum(r[c] for r in outcome.reactions) for c in range(3))
 
         def rounded(value):
             return None if value is None else round(float(value), 6)
@@ -569,18 +517,12 @@ class CompositeAnalysis(StaticAnalysis):
             "plies": [{key: (rounded(value) if key.startswith("max_") else value) for key, value in record.items()}
                       for record in result.scalars["plies"]],
             "max_von_mises_MPa": round(float(outcome.von_mises.max()), 4),
-            "max_displacement_mm": round(float(magnitude.max()), 6),
-            "max_displacement_at_mm": [round(float(c), 3) for c in outcome.dof_locations[moved]],
-            "applied_force_N": [round(x, 4) for x in outcome.applied],
-            "reaction_force_N": [round(x, 4) for x in reaction_total],
+            **motion_summary(outcome),
             "deformation_scale": result.scalars["deformation_scale"],
             "detail": {key: ([[round(float(v), 6) for v in row] for row in value] if isinstance(value, list) else value)
                        for key, value in result.scalars["detail"].items()},
             "checks": check_results,
         }
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} composite"
 
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
         return {"von_mises": (0.0, summary["max_von_mises_MPa"]), "displacement": (0.0, summary["max_displacement_mm"]),

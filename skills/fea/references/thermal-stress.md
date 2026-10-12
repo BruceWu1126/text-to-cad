@@ -1,20 +1,17 @@
 # Heat stress (`thermal_stress`)
 
-It answers "it gets hot: does that stress it or warp it": the stress and movement that come from
-the part's temperature, with any mechanical loads on top. The steady [`thermal`](thermal.md) solve
-runs first, on the same mesh, and its temperatures drive the static solve. The plain word is Heat
-stress.
+Stress and movement from the part's temperature, plus any mechanical loads. The steady
+[`thermal`](thermal.md) solve runs first, on the same mesh; its temperatures drive the static solve.
 
 ## When to use it
 
-- "It's bolted down at both ends and gets to 120 °C: does it buckle the brackets or crack",
-  "how much does it grow", "will the hot side bow".
-- A part held where it would like to grow (clamped, bolted to a cooler or a different metal), or
-  heated unevenly (one hot side). A part free to grow and evenly heated grows without stress.
+- "It's bolted down at both ends and gets to 120 °C: does it buckle the brackets or crack", "how
+  much does it grow", "will the hot side bow": a part held where it would grow (clamped, bolted to a
+  cooler or a different metal), or heated unevenly. Free to grow and evenly heated, it has no stress.
 
 ## The study
 
-On top of the common keys in [study-file.md](study-file.md#common-keys):
+Keys beyond the [shared ones](study-file.md#shared-by-every-analysis):
 
 ```json
 {"analysis": "thermal_stress", "material": "steel",
@@ -25,66 +22,55 @@ On top of the common keys in [study-file.md](study-file.md#common-keys):
  "view": {"checks": [{"kind": "stress"}, {"kind": "displacement", "limit_mm": 0.1}]}}
 ```
 
-- The heat: `temperatures`, `heat`, `convection` and `radiation`, exactly as a steady
-  [`thermal`](thermal.md#the-study) study (at least one held temperature, convection or radiation;
-  radiation as in [thermal.md](thermal.md#radiation): a part that only radiates settles where it
-  radiates what it takes in, and that temperature drives the stress).
-- `fixtures` (required) and `loads` (optional): as [static](linear-static.md), gravity and
-  acceleration included.
-- `reference_C`: the temperature at which the part is stress-free, as made or assembled (default
-  20 °C). The stress comes from the change from it, α (T - reference).
-- The material needs a conductivity and a thermal expansion (`conductivity_W_mK`,
-  `expansion_per_K`; every table material has both). An assembly takes each part's own, so two
-  metals bonded together bow as they would.
-- Checks `stress` and `displacement`, as static ([linear-static.md](linear-static.md)).
+- The heat: `temperatures`, `heat`, `convection` and `radiation`, exactly as
+  [`thermal`](thermal.md#the-study) (at least one held temperature, convection or radiation). A
+  part that only [radiates](thermal.md#radiation) settles where it radiates what it takes in.
+- `fixtures` (required), `loads` (optional, gravity and acceleration included) and checks `stress`
+  and `displacement`, as [static](linear-static.md).
+- `reference_C`: the stress-free temperature, as made or assembled (default 20 °C); the stress
+  comes from the change from it, α (T - reference). Reads `conductivity_W_mK` and
+  `expansion_per_K`, each part its own, so two metals bonded together bow as they would.
 
 ## What comes out
 
-- Everything static writes (peak von Mises, safety factor, displacement, reactions, the static
-  findings), plus the `temperature` field, `max_temperature_C`, `min_temperature_C` and
-  `reference_C` in the summary, and the thermal solve's own summary under the sidecar's `upstream`.
-- An `info` finding `heated` says the temperature range against the stress-free one.
-- Where the peak stress stands more than 1.1× above the field's 99th percentile (a clamped edge
-  that cannot grow is singular in heat stress), the von Mises colours stop at that percentile so the
-  rest of the part still reads; the field's entry carries `capped` (`quantile`, `peak`) and the
-  colour bar says "≥". Where that peak sits on a clamped face (the `singular_clamped_edge` finding),
-  it is the mesh's, not the part's: the stress check and the summary's `safety_factor` judge the
-  stress a little away from the edge, where the colours stop (`judged_away_from_edge_MPa`), and the
-  check keeps the edge's own peak as `edge_peak`; the viewer says so under Strength. The viewer's Heat
-  row scrubs the heat coming on (every temperature the same share of the way from the reference to the
-  solved one, the stress and the deformation with it: a ramp of a linear result, said "ramped"),
-  presets Ambient and Heated, and Preview's playbar plays it. Any other capped
-  peak is judged as it is, with static's notes on peaks at a fixture and peaks that rise on a finer mesh.
-- The load control scales the temperature change and the mechanical loads together ("OK up to 1.6×
-  this heat"): exact, because both act linearly. 2× means twice the rise above `reference_C`.
+- All that static writes, plus the `temperature` field, summary `max_temperature_C`, `min_temperature_C`
+  and `reference_C`, the thermal solve's summary under the sidecar's `upstream`, and an `info`
+  finding `heated` (the temperature range against the stress-free one).
+- A peak over 1.1× the field's 99th percentile (a clamped edge that cannot grow is singular in heat
+  stress) caps the von Mises colours there so the rest still reads: the field carries `capped`
+  (`quantile`, `peak`), the colour bar says "≥". On a clamped face (`singular_clamped_edge`) that
+  peak is the mesh's, not the part's: the stress check and summary `safety_factor` judge the stress a
+  little away from the edge, where the colours stop (`judged_away_from_edge_MPa`), the check keeps
+  the edge's peak as `edge_peak`, and the viewer says so under Strength. Any other capped peak is
+  judged as it is, with static's notes on peaks at a fixture and peaks that rise on a finer mesh.
+- The viewer's Heat row scrubs the heat coming on (every temperature the same share of the way from
+  the reference to the solved one, stress and deformation with it: a ramp of a linear result, said
+  "ramped"), with presets Ambient and Heated; Preview's playbar plays it. The load control scales
+  the temperature change and the mechanical loads together ("OK up to 1.6× this heat"), exactly,
+  as both act linearly; 2× means twice the rise above `reference_C`.
 - CLI: the stress and displacement lines, then "temperatures 25 to 120 °C, stress-free at 20 °C".
 
 ## Judging the answer (a hand check)
 
-- Free to grow (held at one end only): it grows ΔL = α L ΔT and carries no stress away from the
-  fixed face. A 100 mm steel bar heated 100 °C grows 11e-6 × 100 × 100 = 0.11 mm; the solver
-  matches within 1 %.
-- Clamped at both ends: it cannot grow, so it is pressed by σ = -E α ΔT. Steel heated 100 °C:
-  200 000 × 11e-6 × 100 = 220 MPa, near steel's yield, from heat alone. The solver matches within
-  2 % in the middle, and the walls each push back with σ × area.
-- Radiating: a part taking in Q and radiating it from area A settles at
-  T = (Q / (ε σ A) + T∞⁴)^¼ (kelvin), and clamped it carries E α (T − reference). A 100 × 5 × 5 mm
-  steel bar taking 1 W, radiating from every face at ε 0.9 into 20 °C, settles near 88 °C, so
-  clamped at both ends it is pressed by about 150 MPa.
+- Free to grow (held at one end only): ΔL = α L ΔT, no stress away from the fixed face; a 100 mm
+  steel bar heated 100 °C grows 11e-6 × 100 × 100 = 0.11 mm (solver within 1 %).
+- Clamped at both ends it cannot grow, so it is pressed by σ = -E α ΔT. Steel heated 100 °C:
+  200 000 × 11e-6 × 100 = 220 MPa, near yield, from heat alone; the solver matches within 2 % in the
+  middle, and the walls each push back with σ × area.
+- Radiating: a part taking in Q and radiating it from area A settles at T = (Q / (ε σ A) + T∞⁴)^¼
+  (kelvin); clamped it carries E α (T − reference). A 100 × 5 × 5 mm steel bar taking 1 W, radiating
+  from every face at ε 0.9 into 20 °C, settles near 88 °C: clamped at both ends, about 150 MPa.
 - A plate hot on one side and cool on the other bows toward the hot side; held flat, it carries
   about E α ΔT / (2 (1 - ν)) at its faces.
-- A full `fixed` face also stops the part growing sideways, which stresses it near that face more
-  than a bolted joint would: read the stress a little away from a fixture before redesigning.
+- A full `fixed` face also stops it growing sideways: read the stress a little away from it first.
 
 ## Limits
 
-- One-way: the heat drives the stress; the movement does not change the heat.
-- Linear and elastic, constant properties: E and α at room temperature, no softening when hot, no
-  creep. A safety factor under 1 means it yields; how far is not modelled.
-- Steady temperatures only; a stress at the hottest moment of a warm-up is not computed yet.
+- One-way (the movement does not change the heat), linear and elastic, constant properties: E and
+  α at room temperature, no softening when hot, no creep. A safety factor under 1 means it yields;
+  how far is not modelled. Steady temperatures only: a warm-up's hottest moment is not computed yet.
 
 ## When the model is big
 
-Its ladder is static's ([linear-static.md](linear-static.md#when-the-model-is-big-the-static-ladder)),
-with the thermal solve's own (an iterative solver for the temperatures) before it. Report every
-`adapted:` step with its accuracy note.
+Static's [ladder](linear-static.md#when-the-model-is-big-the-static-ladder), after the thermal
+solve's own (an iterative solver for the temperatures).

@@ -1,12 +1,12 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
-import { feaControls, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, feaVerdict, studyRows } from '../../feaResult.js';
 import { colourBarText } from '../../FeaColourBar.jsx';
 import { activeFrameIndex } from '../series.js';
 import { heldRows, madeOfRows } from '../setup.js';
 import { feaAnalysis } from './index.js';
 import multiphase, { TWO_FLUIDS_SETUP, filledRows, fillWords, openingRows, shakeWords } from './multiphase.js';
 import { PLAY } from './transient.js';
+import { feaFile, vec } from '../../__tests__/feaFile.js';
 
 const LIMIT = 'Laminar (no turbulence model), incompressible; the interface is smeared over a few elements and the walls slide freely; no evaporation, boiling, mixing or foam.';
 const FRAMES = [0, 0.0298, 0.0849, 0.3];
@@ -14,19 +14,9 @@ const LABELS = ['0 s', '29.8 ms', '84.9 ms', '300 ms'];
 
 // A half-full tank shaken along X, as cadgen writes one: the water fraction and wall pressure on the wetted walls, frame by frame.
 function twoFluids(multiphaseStudy: Record<string, unknown> = {}, checks?: unknown[]) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.064, 0, 0, 0, 0, 0.052]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 1]), 1));
-  FRAMES.forEach((_, index) => {
-    const suffix = index ? `_f${index}` : '';
-    geometry.setAttribute(`_water_fraction${suffix}`, new BufferAttribute(new Float32Array([1, 1, 0]), 1));
-    geometry.setAttribute(`_pressure${suffix}`, new BufferAttribute(new Float32Array([245, 240, 0]), 1));
-  });
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  const frames = Object.fromEntries(FRAMES.flatMap((_, index) => [[`_water_fraction${index ? `_f${index}` : ''}`, [1, 1, 0]],
+    [`_pressure${index ? `_f${index}` : ''}`, [245, 240, 0]]]));
+  return feaFile({ position: [0, 0, 0, 0.064, 0, 0, 0, 0, 0.052], _displacement: vec(9), _face: [0, 0, 1], ...frames }, {
     generator: 'cadgen fea', name: 'tank two fluids', deformation_scale: null, faces: ['#o1.f7', '#o1.f8'], occurrence: '#o1',
     analysis: { type: 'multiphase', tier: 3, word: 'Two fluids', estimate: false, limits: [LIMIT], noun: 'this shake', reference_C: null,
       warnings: [], fill: { fraction: 0.5, level_mm: 25, liquid: 'water', gas: 'air' } },
@@ -53,9 +43,6 @@ function twoFluids(multiphaseStudy: Record<string, unknown> = {}, checks?: unkno
     ],
     findings: [],
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 describe('multiphase', () => {

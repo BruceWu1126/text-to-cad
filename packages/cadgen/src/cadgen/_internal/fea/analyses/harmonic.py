@@ -37,9 +37,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs, Series, SeriesFrame, SolveContext
+from cadgen._internal.fea.analyses.base import (
+    AnalysisResult, FieldSpec, Inputs, Series, SeriesFrame, SolveContext, by_severity, finding, frame_attributes, max_frames,
+    xyz, yield_at,
+)
 from cadgen._internal.fea.analyses.modal import (
-    align_degenerate, apply_eigen_rung, eigen_estimate, held_supports, hz_text, materials_of, max_frames, solver_method,
+    G0_MM_S2, KEEP_SHARE, ModalResponse, axis_words, converged_finding, field_peak, finish_summary, fixtures_echo,
+    hz_text, kept_step, load_echo, mass_enough, missing_mass_finding, mode_rows, modes_estimate, modes_line, modes_text,
+    no_resonance_finding, parse_damping, response_findings, response_modes, response_operators, scaled_deformation,
+    stress_scalars, unit_vector,
 )
 from cadgen._internal.fea.study import Fixture, Load, parse_fixtures, parse_loads
 
@@ -48,24 +54,17 @@ if TYPE_CHECKING:
 
 __all__ = ["HarmonicAnalysis", "HarmonicInputs", "choose_frames", "sweep_grid"]
 
-G0_MM_S2 = 9806.65
 #: Modes are found up to this multiple of the sweep's top (spec 5.8).
 TOP_FACTOR = 1.5
-#: reduce_modes keeps the fewest modes holding this share of the mass moving along the shake.
-KEEP_SHARE = 0.9
 #: Under this share of the mass along the shake, the modes found may miss part of the response: a finding.
 MASS_WARNING = 0.8
 #: The response peaks a series keeps as frames (spec 5.8).
 PEAK_FRAMES = 6
 #: Log-spaced points the curves run over, before the points added around each mode.
 GRID_POINTS = 160
-#: The number of modes the ladder assumes before the solve has found them, and after reduce_modes.
-GUESS_MODES = 20
-REDUCED_GUESS = 6
 #: Acceleration and stress checks are close at 90 % of their limit.
 _CLOSE_AT = 0.9
 _TWO_PI = 2.0 * math.pi
-_AXES = "XYZ"
 
 
 @dataclass(frozen=True)
@@ -85,28 +84,6 @@ class HarmonicInputs(Inputs):
     def top_Hz(self) -> float:
         """The highest mode the response is built from: 1.5 × the sweep's top."""
         return TOP_FACTOR * self.sweep_Hz[1]
-
-
-def _unit(vector, where: str) -> tuple[float, float, float]:
-    if not isinstance(vector, list) or len(vector) != 3:
-        raise ValueError(f"{where}: the direction it is shaken along as [x, y, z], like [0, 0, 1] for Z")
-    values = [kinds.number(v, where=where) for v in vector]
-    size = math.sqrt(sum(v * v for v in values))
-    if size == 0:
-        raise ValueError(f"{where}: the direction is zero; give the axis it is shaken along, like [0, 0, 1]")
-    return tuple(v / size for v in values)  # type: ignore[return-value]
-
-
-def axis_words(direction) -> str:
-    """"Z", "-X" or "(0.71, 0, 0.71)": the line a shake moves along."""
-    for c, name in enumerate(_AXES):
-        if abs(abs(direction[c]) - 1) < 1e-9:
-            return name
-    return "(" + ", ".join(f"{v:.2g}" for v in direction) + ")"
-
-
-def _percent(share: float) -> str:
-    return f"{share * 100:.0f}%"
 
 
 def sweep_grid(low: float, high: float, modes_Hz, zeta: float, points: int = GRID_POINTS) -> "np.ndarray":
@@ -147,16 +124,11 @@ def choose_frames(grid: "np.ndarray", curve: "np.ndarray", frames: int, zeta: fl
     return sorted(set(chosen)), sorted(local[:min(peaks, frames)])
 
 
-class HarmonicAnalysis:
+class HarmonicAnalysis(ModalResponse):
     name: ClassVar[str] = "harmonic"
-    tier: ClassVar[int] = 1
     word: ClassVar[str] = "Shaking"
-    estimate_only: ClassVar[bool] = False
-    limits: ClassVar[tuple[str, ...]] = ()
+    extras_word: ClassVar[str] = "shaking"
     study_keys: ClassVar[frozenset[str]] = frozenset({"fixtures", "loads", "excitation", "sweep_Hz", "damping_ratio"})
-    material_needs: ClassVar[frozenset[str]] = frozenset({"density"})
-    mesh_orders: ClassVar[tuple[int, ...]] = (2,)
-    connection_types: ClassVar[tuple[str, ...]] = ("bonded", "free")
     # Both per frame. The imaginary part of the displacement rides along as each frame's own attribute
     # (`_DISPLACEMENT_IM_F<i>`, frame field "displacement_im") for the viewer's Vibrate; it is no colour of its own.
     fields: ClassVar[tuple[FieldSpec, ...]] = (
@@ -170,7 +142,6 @@ class HarmonicAnalysis:
         "frame": {"drives": "frame", "type": "number", "min": 0.0, "max": None},
         "deformation": {"drives": "deformation", "type": "number", "min": 0.0, "max": None},
     }
-    upstream: ClassVar[tuple[str, ...]] = ()
     ladder: ClassVar[tuple[str, ...]] = ("reduce_modes", "iterative", "local_refine", "defeature", "linear_elements", "symmetry")
     noun: ClassVar[str] = "this shake"
     governing_word: ClassVar[str] = "peak stress"
@@ -196,7 +167,7 @@ class HarmonicAnalysis:
                 raise ValueError(f"excitation: unknown keys {sorted(unknown)}; a base shake takes type, direction and amplitude_g")
             if "direction" not in raw:
                 raise ValueError("excitation.direction: the direction it is shaken along as [x, y, z], like [0, 0, 1] for Z")
-            direction = _unit(raw["direction"], "excitation.direction")
+            direction = unit_vector(raw["direction"], "excitation.direction")
             amplitude = kinds.number(raw.get("amplitude_g", 1.0), where="excitation.amplitude_g", positive=True)
             if "loads" in document:
                 raise ValueError('loads: a base shake moves the fixtures, so it takes no loads; to shake it by its '
@@ -216,9 +187,7 @@ class HarmonicAnalysis:
         low, high = (kinds.number(v, where="sweep_Hz", positive=True) for v in sweep)
         if not low < high:
             raise ValueError(f"sweep_Hz: low ({low:g}) must be below high ({high:g})")
-        zeta = kinds.number(document.get("damping_ratio", 0.02), where="damping_ratio", positive=True)
-        if zeta >= 1:
-            raise ValueError(f"damping_ratio: a share of critical damping, like 0.02 for 2 %; must be under 1, got {zeta:g}")
+        zeta = parse_damping(document)
         refs = tuple(dict.fromkeys(ref for group in (*fixtures, *loads) for ref in group.faces))
         anchors = tuple(dict.fromkeys(ref for fixture in fixtures for ref in fixture.faces))
         return HarmonicInputs(refs, anchors, True, fixtures=fixtures, loads=loads, excitation=kind, direction=direction,
@@ -231,35 +200,12 @@ class HarmonicAnalysis:
         node) and shape, the frequency grid's combinations and the frames written."""
         from cadgen._internal.fea import fit
 
-        plan = getattr(ctx, "plan", None)
-        modes = int(getattr(plan, "modes", None) or GUESS_MODES)
-        base = eigen_estimate(ctx, modes)
-        nodes = base.dofs / 3.0
+        modes, base, nodes, seconds = modes_estimate(ctx)
         frames = max_frames(ctx)
         grid = GRID_POINTS + 13 * modes
         memory = base.memory_bytes + 8.0 * 9 * nodes * modes + 4.0 * 7 * nodes * frames + 16.0 * 16 * 3 * nodes
-        seconds = base.seconds + modes * fit.SECONDS_PER_ELEMENT.get(getattr(plan, "order", 2), 2.5e-4) * nodes / 1.7 \
-            + 2e-9 * grid * modes * 3 * nodes + 2e-8 * frames * 6 * 12 * nodes
+        seconds = seconds + 2e-9 * grid * modes * 3 * nodes + 2e-8 * frames * 6 * 12 * nodes
         return fit.Estimate(dofs=base.dofs, memory_bytes=int(memory), seconds=float(seconds))
-
-    def apply(self, rung, ctx: SolveContext, inputs: HarmonicInputs):
-        """``reduce_modes``: keep only the fewest modes holding 90 % of the mass moving along the shake (its words
-        give the share once the modes are found). ``iterative``: LOBPCG instead of factorising. The mesh rungs the
-        shared way; ``symmetry`` and ``idealise`` are not taken for a modal response yet."""
-        from cadgen._internal.fea import fit
-
-        if rung == "reduce_modes":
-            plan = ctx.plan
-            if plan.modes is not None and plan.modes <= REDUCED_GUESS:
-                return None
-            plan.modes = REDUCED_GUESS
-            along = f" along {axis_words(inputs.direction)}" if inputs.direction is not None else ""
-            step = fit.Step("reduce_modes", f"Kept only the fewest modes holding {_percent(KEEP_SHARE)} of the mass moving"
-                            f"{along}, to fit", None, None, detail={"keep_share": KEEP_SHARE})
-            # The solve finds the modes, then says how many it kept and the share they hold (settle_steps).
-            return step
-        return apply_eigen_rung(self, rung, ctx, inputs, words="Found the modes with an iterative solver (LOBPCG with "
-                                "multigrid) instead of factorising the stiffness")
 
     def governing(self, result: AnalysisResult) -> tuple["np.ndarray", float]:
         """local_refine keeps the mesh fine where the sweep stresses the part most; two passes compare that peak."""
@@ -273,7 +219,6 @@ class HarmonicAnalysis:
 
         import numpy as np
 
-        from cadgen._internal.fea import operators
         from cadgen._internal.fea import superposition as sp
 
         space = ctx.space
@@ -281,11 +226,7 @@ class HarmonicAnalysis:
         timings: dict[str, float] = {}
         warnings: list[str] = []
         started = time.perf_counter()
-        materials = materials_of(ctx)
-        K = operators.stiffness(space, materials)
-        M = operators.mass(space, materials)
-        held = held_supports(space, inputs.fixtures, ctx.ordinal_of, require=True)
-        fixed = held.fixed
+        materials, K, M, held = response_operators(ctx, inputs.fixtures)
         low, high = inputs.sweep_Hz
         zeta = inputs.damping_ratio
         base = inputs.excitation == "base"
@@ -306,46 +247,27 @@ class HarmonicAnalysis:
         timings["assemble_s"] = time.perf_counter() - started
 
         reduce = "reduce_modes" in (getattr(plan, "taken", None) or ())
-        enough = None
-        if reduce and Mr is not None:
-            def enough(omega2, vectors, free):
-                share = float(((vectors.T @ Mr[free]) ** 2).sum()) / total_along
-                return share >= KEEP_SHARE
-
-        started = time.perf_counter()
-        free_count = space.dofs - len(fixed)
-        method = solver_method(ctx, free_count)
-        found = sp.find_modes(K, M, held, inputs.top_Hz, method=method, locations=space.locations,
-                              component=space.component, enough=enough)
-        warnings.extend(found.warnings)
-        frequencies = found.frequencies_Hz
-        found.vectors = align_degenerate(found.vectors, M, frequencies, space.component)
-        timings["eigen_s"] = time.perf_counter() - started
-        if ctx.log:
-            ctx.log(f"harmonic: {len(found)} modes up to {frequencies[-1]:.4g} Hz ({found.how})")
+        enough = mass_enough(Mr, total_along) if reduce and Mr is not None else None
+        found = response_modes(ctx, K, M, held, inputs.top_Hz, enough, timings, warnings, "harmonic")
 
         fractions = sp.mass_fractions(found, M, space.component)
-        if base:
-            gamma = sp.participation(found, M, r)
-            weights, total = gamma ** 2, total_along
-        else:
-            p = sp.modal_loads(found, force)
-            # Each mode's share of the static response's work (p²/ω²): what keeps a force shake's answer.
-            weights = p ** 2 / np.maximum(found.omega ** 2, 1e-300)
-            total = float(weights.sum())
-        along_share = None
-        if r is not None:
-            masses = (sp.participation(found, M, r) ** 2)
-            along_share = float(masses.sum() / total_along) if total_along > 0 else None
+        gamma = None if r is None else sp.participation(found, M, r)
+        p = None if base else sp.modal_loads(found, force)
+        along_share = float((gamma ** 2).sum() / total_along) if r is not None and total_along > 0 else None
         kept = np.arange(len(found))
         kept_share = None
         reduce_step = None
         if reduce:
-            if base or r is None:
-                kept, kept_share = sp.fewest_modes(weights, total, KEEP_SHARE)
+            if r is not None:
+                kept, kept_share = sp.fewest_modes(gamma ** 2, total_along, KEEP_SHARE)
+                along = f" moving along {axis_words(inputs.direction)}" if inputs.direction is not None else " moving with the shake"
+                what = f"of the mass{along}"
             else:
-                kept, kept_share = sp.fewest_modes(sp.participation(found, M, r) ** 2, total_along, KEEP_SHARE)
-            reduce_step = self._reduce_step(inputs, found, kept, kept_share, base or r is not None)
+                # Each mode's share of the static response's work (p²/ω²): what keeps a force shake's answer.
+                weights = p ** 2 / np.maximum(found.omega ** 2, 1e-300)
+                kept, kept_share = sp.fewest_modes(weights, float(weights.sum()), KEEP_SHARE)
+                what = "of the response to the forces"
+            reduce_step = kept_step(found, kept, kept_share, what)
         used = found.take(kept)
 
         started = time.perf_counter()
@@ -384,8 +306,7 @@ class HarmonicAnalysis:
 
         series = Series(kind="frequency", unit="Hz", default=default, frames=[
             SeriesFrame(value=round(f, 6), label=hz_text(f), attributes={
-                "von_mises": "_VON_MISES" if n == 0 else f"_VON_MISES_F{n}",
-                "displacement": "_DISPLACEMENT" if n == 0 else f"_DISPLACEMENT_F{n}",
+                **frame_attributes({"von_mises": "_VON_MISES", "displacement": "_DISPLACEMENT"}, n),
                 "displacement_im": f"_DISPLACEMENT_IM_F{n}",
             })
             for n, f in enumerate(frame_Hz)
@@ -428,38 +349,13 @@ class HarmonicAnalysis:
                 "stress_envelope": np.max(np.stack(vm), axis=0),
                 "applied_N": None if force is None else [float(force[space.component == c].sum()) for c in range(3)],
                 "analysis_warnings": [],
-                "study_checks": tuple(getattr(ctx.study, "checks", ()) or ()),
-                "margin": float(getattr(ctx.study, "margin", 2.0) or 2.0),
-                "parts": None if ctx.assembly is None else [
-                    {"ref": part.ref, "name": name, "material": material.name}
-                    for part, name, material in zip(ctx.assembly.parts, ctx.assembly.names, ctx.assembly.materials)
-                ],
-                "yields": [m.yield_strength for m in ctx.materials],
-                "node_domain": _node_domain(space),
+                **stress_scalars(ctx),
             },
             dofs=int(space.dofs),
-            solver=f"{found.how}; modal superposition of {len(used)} mode{'s' if len(used) != 1 else ''}",
+            solver=f"{found.how}; modal superposition of {modes_text(len(used))}",
             timings=timings,
             warnings=warnings,
         )
-
-    @staticmethod
-    def _reduce_step(inputs: HarmonicInputs, found, kept, share: float | None, by_mass: bool) -> dict:
-        """reduce_modes' words once the modes are found, for :meth:`settle_steps`."""
-        along = f" moving along {axis_words(inputs.direction)}" if inputs.direction is not None else " moving with the shake"
-        what = f"of the mass{along}" if by_mass else "of the response to the forces"
-        count = len(kept)
-        words = (f"Kept {count} of the {len(found)} modes up to {hz_text(found.searched_Hz)}, the ones holding "
-                 f"{_percent(share or 0.0)} {what}, to fit")
-        return {"words": words,
-                "detail": {"kept_modes": count, "found_modes": len(found), "kept_share": round(share or 0.0, 4)}}
-
-    def settle_steps(self, result: AnalysisResult, steps: list) -> list:
-        """reduce_modes' step said again once the modes are found: how many it kept and the share they hold
-        (run.py calls this after the solve, before writing; the solve leaves the words in ``reduce_step``)."""
-        from cadgen._internal.fea import fit
-
-        return fit.settle_step(steps, "reduce_modes", result.scalars.get("reduce_step"), marker="keep_share")
 
     # -- checks, findings ----------------------------------------------------------------------------
 
@@ -470,31 +366,8 @@ class HarmonicAnalysis:
         node = int(frames[frame].argmax())
         return frame, node, float(frames[frame][node])
 
-    def _yield_at(self, result: AnalysisResult, node: int) -> float:
-        domains = result.scalars["node_domain"]
-        yields = result.scalars["yields"]
-        if domains is None or len(yields) == 1:
-            return yields[0]
-        return yields[int(domains[node])]
-
-    def needs_finer(self, result: AnalysisResult, inputs: HarmonicInputs, check_results: list[dict]) -> bool:
-        """Solve once more finer when the stress check is close: the peak between yield over the margin and yield."""
-        if check_results:
-            return any(check["status"] == "close" for check in check_results)
-        if not any(check.get("kind") == "stress" for check in result.scalars["study_checks"]):
-            return False
-        _, node, peak = self._stress_peak(result)
-        ratio = peak / self._yield_at(result, node)
-        return 1.0 / result.scalars["margin"] < ratio <= 1.0
-
-    def refined_record(self, result: AnalysisResult, size_mm: float, finer_mm: float, *, assembly: bool) -> dict:
-        return {"from_size_mm": round(size_mm, 4), "from_max_von_mises_MPa": round(self._stress_peak(result)[2], 4),
-                "size_mm": round(finer_mm, 4), "max_von_mises_MPa": None}
-
-    def merge_finer(self, coarse: AnalysisResult, finer: AnalysisResult, refined: dict) -> AnalysisResult:
-        refined["max_von_mises_MPa"] = round(self._stress_peak(finer)[2], 4)
-        finer.scalars["coarser_peak_MPa"] = self._stress_peak(coarse)[2]
-        return finer
+    def _peak(self, result: AnalysisResult, inputs=None) -> tuple[int, float]:
+        return self._stress_peak(result)[1:]
 
     def _at(self, result: AnalysisResult, frame: int) -> dict:
         f = result.scalars["frame_Hz"][frame]
@@ -504,30 +377,18 @@ class HarmonicAnalysis:
         """(frame, kinds.FieldMax) of the largest of a per-frame nodal field over the check's faces."""
         best = None
         for frame, values in enumerate(frames):
-            peak = kinds.field_max_over(
-                values, tuple(check.get("faces", ())), boundary=result.boundary_quadratic,
-                boundary_ordinal=ctx.volume.boundary_ordinal, locations=result.dof_locations, face_ref=ctx.volume.faces,
-                ordinal_of=ctx.ordinal_of, where=f"view.checks[{index}]",
-            )
+            peak = field_peak(ctx, result, values, check.get("faces", ()), index)
             if best is None or peak.value > best[1].value:
                 best = (frame, peak)
         return best
 
     def judge(self, check: dict, index: int, ctx: SolveContext, result: AnalysisResult, inputs: HarmonicInputs) -> dict:
         from cadgen._internal.fea import checks
-        from cadgen._internal.fea.analyses.static import peak_face
 
         kind = check["kind"]
         if kind == "stress":
-            frame, node, peak = self._stress_peak(result)
-            fixed = {ctx.ordinal_of[ref] for fixture in inputs.fixtures for ref in fixture.faces}
-            at = tuple(float(c) for c in result.dof_locations[node])
-            solved = checks.Solved(
-                material_name="", yield_MPa=self._yield_at(result, node), peak_MPa=peak, peak_gauss_MPa=peak, peak_at=at,
-                peak_face=peak_face(ctx.volume, result, node, fixed), fixed_faces=(), max_displacement_mm=0.0,
-                displacement_at=at, bbox_diagonal_mm=0.0, margin=result.scalars["margin"], coarser_peak_MPa=None, part="",
-            )
-            return {**checks.stress_check(solved, label=check.get("label")), "at": self._at(result, frame)}
+            frame = self._stress_peak(result)[0]
+            return {**self._yield_check(ctx, result, inputs, check.get("label")), "at": self._at(result, frame)}
         if kind == "displacement":
             frame, peak = self._over_frames(ctx, result, result.scalars["displacement_frames"], check, index)
             judged = checks.displacement_check(peak.value, check["limit_mm"], at=peak.at, ref=peak.ref, faces=peak.faces,
@@ -548,41 +409,23 @@ class HarmonicAnalysis:
 
     def findings(self, ctx: SolveContext, result: AnalysisResult, inputs: HarmonicInputs,
                  check_results: list[dict], *, assembly: bool) -> list[dict]:
-        from cadgen._internal.fea.analyses.modal import finding
-
         scalars = result.scalars
         whole = "The assembly" if assembly else "The part"
-        found: list[dict] = []
-        for check in check_results:
-            status = check["status"]
-            if status not in ("fails", "close"):
-                continue
-            hz = hz_text(check["at"]["value"])
-            severity = "error" if status == "fails" else "warning"
-            item = [{"text": check["label"], **check["where"]}]
-            if check["kind"] == "stress":
-                if status == "fails":
-                    sentence = (f"Shaken at {hz}, {whole.lower()} reaches {check['value']:.3g} MPa, over its "
-                                f"{check['limit']:g} MPa yield ({check['label']})")
-                else:
-                    sentence = (f"Shaken at {hz}, {whole.lower()} reaches {check['value']:.3g} MPa, inside the "
-                                f"{check['margin']:g}× margin under its {check['limit']:g} MPa yield ({check['label']})")
-                found.append(finding(severity, "shaking_yields" if status == "fails" else "shaking_close_to_yield", sentence,
-                                     f"peak von Mises over the cycle {check['value']:.4g} MPa at {check['at']['value']:.4g} Hz",
-                                     item))
-            elif check["kind"] == "acceleration":
-                where = "The checked faces shake" if check.get("faces") else f"{whole} shakes"
-                if status == "fails":
-                    sentence = f"{where} at {check['value']:.3g} g at {hz}, more than the {check['limit']:g} g allowed ({check['label']})"
-                else:
-                    sentence = f"{where} at {check['value']:.3g} g at {hz}, close to the {check['limit']:g} g allowed ({check['label']})"
-                found.append(finding(severity, "acceleration_over_limit" if status == "fails" else "acceleration_close",
-                                     sentence, f"peak acceleration {check['value']:.4g} g against a {check['limit']:g} g limit",
-                                     item))
-            elif check["kind"] == "displacement" and status == "close":
-                found.append(finding("warning", "displacement_close",
-                                     f"Shaken at {hz}, it moves {check['value']:.3g} mm, close to the {check['limit']:g} mm allowed "
-                                     f"({check['label']})", "the displacement is relative to where it is held", item))
+
+        def accelerating(check, severity, item):
+            if check["kind"] != "acceleration":
+                return None
+            where = "The checked faces shake" if check.get("faces") else f"{whole} shakes"
+            fails = severity == "error"
+            return finding(severity, "acceleration_over_limit" if fails else "acceleration_close",
+                           f"{where} at {check['value']:.3g} g at {hz_text(check['at']['value'])}, "
+                           f"{'more than' if fails else 'close to'} the {check['limit']:g} g allowed ({check['label']})",
+                           f"peak acceleration {check['value']:.4g} g against a {check['limit']:g} g limit", item)
+
+        found = response_findings(
+            check_results, "shaking", lambda check: f"Shaken at {hz_text(check['at']['value'])},", whole.lower(),
+            lambda check: f"peak von Mises over the cycle {check['value']:.4g} MPa at {check['at']['value']:.4g} Hz",
+            other=accelerating)
         frequencies = scalars["frequencies_Hz"]
         low, high = inputs.sweep_Hz
         in_sweep = scalars["modes_in_sweep"]
@@ -598,43 +441,22 @@ class HarmonicAnalysis:
                 f"Resonates at {hz_text(f)} (mode {mode}): it moves up to {float(displacement.max()):.3g} mm there and "
                 f"shakes at up to {g:.3g} g",
                 "the frequency in the sweep where the response peaks; a shake there is the worst case",
-                [{"text": "moves most here", "ref": None, "at": [round(float(c), 3) for c in result.dof_locations[node]]}],
+                [{"text": "moves most here", "ref": None, "at": xyz(result.dof_locations[node])}],
             ))
         else:
-            found.append(finding(
-                "info", "no_resonance_in_sweep",
-                f"No natural frequency lies between {low:g} and {high:g} Hz: {whole.lower()} follows the shake without resonating"
-                + (f"; its first mode is {hz_text(frequencies[0])}" if frequencies else ""),
-                "the response stays near its static value across the sweep", [],
-            ))
+            found.append(no_resonance_finding("no_resonance_in_sweep", low, high, whole.lower(), frequencies,
+                                              "the response stays near its static value across the sweep"))
         share = scalars["along_share"]
         if share is not None and share < MASS_WARNING:
-            along = axis_words(scalars["direction"])
-            found.append(finding(
-                "warning", "modes_missing_mass",
-                f"The modes up to {hz_text(scalars['searched_Hz'])} move only {_percent(share)} of the mass along {along}: "
-                f"the rest answers above them, so the response may read a little low",
-                f"effective mass of the modes found {share:.3f} of the total along {along}; "
-                "a fixed face's own mass never moves, and modes above 1.5× the sweep's top are left out", [],
-            ))
-        coarser = scalars.get("coarser_peak_MPa")
-        if coarser:
-            _, _, peak = self._stress_peak(result)
-            moved = abs(peak - coarser) / coarser if coarser > 0 else 0.0
-            found.append(finding(
-                "warning" if moved > 0.1 else "info", "mesh_not_converged" if moved > 0.1 else "mesh_converged",
-                f"The peak stress moved {moved * 100:.1f} % on a finer mesh ({coarser:.3g} to {peak:.3g} MPa)",
-                "a check was close, so the part was solved again finer; the finer answer is the one reported", [],
-            ))
-        return sorted(found, key=lambda item: {"error": 0, "warning": 1, "info": 2}[item["severity"]])
+            found.append(missing_mass_finding(scalars, share, "sweep's"))
+        if coarser := scalars.get("coarser_peak_MPa"):
+            found.append(converged_finding("The peak stress", self._stress_peak(result)[2], coarser))
+        return by_severity(found)
 
     # -- what is written -----------------------------------------------------------------------------
 
     def deformation_scale(self, result: AnalysisResult, bbox_diagonal: float, requested: float | None) -> float | None:
-        from cadgen._internal.fea.outputs import auto_deformation_scale
-
-        largest = max(float(d.max()) for d in result.scalars["displacement_frames"])
-        return requested or auto_deformation_scale(largest, bbox_diagonal)
+        return scaled_deformation(max(float(d.max()) for d in result.scalars["displacement_frames"]), bbox_diagonal, requested)
 
     def summary(self, result: AnalysisResult, inputs: HarmonicInputs, check_results: list[dict]) -> dict:
         scalars = result.scalars
@@ -645,15 +467,13 @@ class HarmonicAnalysis:
         d_node = int(disp[d_frame].argmax())
         acc = scalars["acceleration_frames"]
         a_frame = max(range(len(acc)), key=lambda i: float(acc[i].max()))
-        yield_MPa = self._yield_at(result, s_node)
+        yield_MPa = yield_at(scalars, s_node)
         factor = yield_MPa / s_peak if s_peak > 0 else None
         used = set(scalars["used_modes"])
         direction = scalars["direction"]
         axis = None if direction is None else max(range(3), key=lambda c: abs(direction[c]))
-        excitation: dict[str, Any] = {"type": inputs.excitation}
-        if inputs.excitation == "base":
-            excitation.update({"direction": list(inputs.direction), "amplitude_g": inputs.amplitude_g})
-        else:
+        excitation = self._excitation(inputs)
+        if inputs.excitation != "base":
             excitation["applied_N"] = [round(x, 4) for x in scalars["applied_N"]]
         summary: dict[str, Any] = {
             "excitation": excitation,
@@ -662,36 +482,24 @@ class HarmonicAnalysis:
             "peak_Hz": round(frame_Hz[result.series.default], 4),
             "max_von_mises_MPa": round(s_peak, 4),
             "max_von_mises_Hz": round(frame_Hz[s_frame], 4),
-            "max_von_mises_at_mm": [round(float(c), 3) for c in result.dof_locations[s_node]],
+            "max_von_mises_at_mm": xyz(result.dof_locations[s_node]),
             "yield_MPa": yield_MPa,
             "safety_factor": None if factor is None else math.floor(factor * 1000) / 1000,
             "max_displacement_mm": round(float(disp[d_frame].max()), 6),
             "max_displacement_Hz": round(frame_Hz[d_frame], 4),
-            "max_displacement_at_mm": [round(float(c), 3) for c in result.dof_locations[d_node]],
+            "max_displacement_at_mm": xyz(result.dof_locations[d_node]),
             "max_acceleration_g": round(float(acc[a_frame].max()), 4),
             "max_acceleration_Hz": round(frame_Hz[a_frame], 4),
-            "modes": [
-                {"mode": i + 1, "frequency_Hz": round(f, 4), "effective_mass_fraction": [round(x, 4) for x in share],
-                 "used": i in used}
-                for i, (f, share) in enumerate(zip(scalars["frequencies_Hz"], scalars["effective_mass_fractions"]))
-            ],
+            "modes": [{**row, "used": i in used} for i, row in mode_rows(scalars)],
             "modes_used": len(used),
             "modes_up_to_Hz": round(inputs.top_Hz, 4),
             "effective_mass_fraction": None if scalars["along_share"] is None else round(scalars["along_share"], 4),
-            "effective_mass_axis": None if axis is None else _AXES[axis],
+            "effective_mass_axis": None if axis is None else "XYZ"[axis],
             "total_mass_kg": round(scalars["total_mass_kg"], 6),
             "frames": len(frame_Hz),
             "deformation_scale": scalars["deformation_scale"],
         }
-        if scalars["kept_share"] is not None:
-            summary["kept_share"] = round(scalars["kept_share"], 4)
-        if scalars.get("parts"):
-            summary["parts"] = scalars["parts"]
-        summary["checks"] = check_results
-        return summary
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} shaking"
+        return finish_summary(summary, scalars, check_results, kept_share=True)
 
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
         # Per-frame fields: one range across every frame, so the colours compare along the sweep.
@@ -700,19 +508,18 @@ class HarmonicAnalysis:
     def extras_head(self, summary: dict) -> dict:
         return {"peak_Hz": summary["peak_Hz"], "safety_factor": summary["safety_factor"]}
 
-    def extras_assembly(self, summary: dict) -> dict:
-        return {"parts": summary.get("parts", [])}
-
-    def study_echo(self, inputs: HarmonicInputs, bare: Callable[[tuple[str, ...]], list[str]]) -> dict:
+    @staticmethod
+    def _excitation(inputs: HarmonicInputs) -> dict:
         excitation: dict[str, Any] = {"type": inputs.excitation}
         if inputs.excitation == "base":
             excitation.update({"direction": list(inputs.direction), "amplitude_g": inputs.amplitude_g})
+        return excitation
+
+    def study_echo(self, inputs: HarmonicInputs, bare: Callable[[tuple[str, ...]], list[str]]) -> dict:
         return {
-            "fixtures": [{"type": fixture.type, "faces": bare(fixture.faces)} for fixture in inputs.fixtures],
-            "loads": [{"type": load.type, "faces": bare(load.faces),
-                       **({"vector_N": [float(c) for c in load.vector]} if load.type == "force" else {"pressure_MPa": load.pressure})}
-                      for load in inputs.loads],
-            "excitation": excitation,
+            "fixtures": fixtures_echo(inputs.fixtures, bare),
+            "loads": [load_echo(load, bare) for load in inputs.loads],
+            "excitation": self._excitation(inputs),
             "sweep_Hz": list(inputs.sweep_Hz),
             "damping_ratio": inputs.damping_ratio,
         }
@@ -724,25 +531,10 @@ class HarmonicAnalysis:
             shaken = f"shaken {excitation['amplitude_g']:g} g along {axis_words(excitation['direction'])}"
         else:
             shaken = "pushed by its loads"
-        lines = [
+        return [
             f"{shaken} from {low:g} to {high:g} Hz, {summary['damping_ratio'] * 100:g}% damping; "
             f"strongest at {hz_text(summary['peak_Hz'])}",
             f"peak stress {summary['max_von_mises_MPa']:.4g} MPa at {hz_text(summary['max_von_mises_Hz'])}; moves up to "
             f"{summary['max_displacement_mm']:.4g} mm and shakes up to {summary['max_acceleration_g']:.4g} g",
+            modes_line(summary),
         ]
-        modes = f"{summary['modes_used']} mode{'s' if summary['modes_used'] != 1 else ''} up to {hz_text(summary['modes_up_to_Hz'])}"
-        if summary.get("effective_mass_fraction") is not None:
-            modes += f", holding {summary['effective_mass_fraction'] * 100:.0f}% of the mass along {summary['effective_mass_axis']}"
-        lines.append(modes)
-        return lines
-
-
-def _node_domain(space) -> "np.ndarray | None":
-    """Each node's part (the domain of an element it belongs to), for an assembly; None for one part."""
-    import numpy as np
-
-    if space.domain is None:
-        return None
-    out = np.zeros(space.scalar_count, dtype=np.int64)
-    out[space.scalar.element_dofs] = np.asarray(space.domain)[None, :]
-    return out

@@ -1,7 +1,7 @@
 import React, { forwardRef, useImperativeHandle, useRef } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 
 // The GLB renderer's FEA surfaces under the real shell, with only what loads the file and the WebGL
 // viewport replaced: a result's study, field and deformation are Select's Study panel, its colour
@@ -18,7 +18,7 @@ vi.mock('../../../dist/renderers/glb/useGlbScene.js', () => ({
 }));
 // The renderer's own clips (its analysis's routine) are kept to be played by hand.
 vi.mock('../../../dist/renderers/glb/useGlbAnimation.js', () => ({ useGlbAnimation: (_document: any, _render: any, own: any) => { loaded.own = own; return loaded.animation; } }));
-import GlbRenderer from '../../../dist/renderers/glb/GlbRenderer.js';
+import GlbRenderer, { loadFeaView } from '../../../dist/renderers/glb/GlbRenderer.js';
 import FeaVerdict from '../../../dist/renderers/glb/FeaVerdict.js';
 import { routineScale } from '../../../dist/renderers/glb/feaResult.js';
 import { writeFileView } from '../../../dist/renderers/kit/shell/fileView.js';
@@ -27,6 +27,8 @@ import { ViewerElementContext, ViewerHostContext } from '../../../dist/host/cont
 import { testHost } from '../../../dist/host/testing/host.js';
 import * as THREE from 'three';
 
+// The FEA viewer is its own chunk (`GlbRenderer.lazy.test.tsx`): loaded once here, a result draws as soon as it mounts.
+beforeAll(() => loadFeaView());
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));

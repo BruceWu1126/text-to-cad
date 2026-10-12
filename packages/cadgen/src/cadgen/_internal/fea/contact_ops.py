@@ -61,6 +61,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from cadgen._internal.fea.navier_stokes import vector_dofs
+
 if TYPE_CHECKING:
     import numpy as np
 
@@ -200,18 +202,6 @@ class ContactResponse:
     sliding: "np.ndarray"         # (m, 3) tangential relative displacement
     pressing: "np.ndarray"        # a normal force on it
     slipping: "np.ndarray"
-
-
-def vector_dofs(space: "FemSpace") -> "np.ndarray":
-    """(scalar_count, 3) the vector DOF of each scalar DOF and component."""
-    import numpy as np
-
-    out = np.zeros((space.scalar_count, 3), dtype=np.int64)
-    for c in range(3):
-        out[space.scalar.nodal_dofs[0], c] = space.basis.nodal_dofs[c]
-        if space.order == 2:
-            out[space.scalar.edge_dofs[0], c] = space.basis.edge_dofs[c]
-    return out
 
 
 def body_of_nodes(space: "FemSpace") -> "tuple[np.ndarray, np.ndarray]":

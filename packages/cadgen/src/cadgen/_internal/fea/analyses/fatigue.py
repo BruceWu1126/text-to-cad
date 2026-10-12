@@ -47,10 +47,10 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, SolveContext
+from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, SolveContext, finding, xyz
 from cadgen._internal.fea.analyses.harmonic import HarmonicAnalysis
 from cadgen._internal.fea.analyses.random_vibration import RandomVibrationAnalysis
-from cadgen._internal.fea.analyses.static import StaticAnalysis, StaticInputs
+from cadgen._internal.fea.analyses.static import StaticAnalysis, StaticInputs, floored
 from cadgen._internal.fea.materials import NONE_REASONS, Material, material_from_spec
 
 __all__ = [
@@ -138,14 +138,9 @@ class SNCurve:
 
     def as_dict(self) -> dict:
         return {
-            "uts_MPa": self.uts,
-            "endurance_MPa": self.raw_endurance,
-            "endurance_cycles": self.endurance_cycles,
-            "surface_factor": round(self.surface_factor, 4),
-            "factor": self.factor,
-            "corrected_endurance_MPa": round(self.endurance, 4),
-            "basquin_A_MPa": round(self.A, 4),
-            "basquin_b": round(self.b, 6),
+            "uts_MPa": self.uts, "endurance_MPa": self.raw_endurance, "endurance_cycles": self.endurance_cycles,
+            "surface_factor": round(self.surface_factor, 4), "factor": self.factor,
+            "corrected_endurance_MPa": round(self.endurance, 4), "basquin_A_MPa": round(self.A, 4), "basquin_b": round(self.b, 6),
         }
 
 
@@ -277,6 +272,11 @@ def _fatigue_block(document: dict) -> dict:
     cycles = kinds.number(raw["cycles"], where=f"{where}.cycles", positive=True) if "cycles" in raw else DEFAULT_CYCLES
     if cycles < 1:
         raise ValueError(f"{where}.cycles: at least one cycle, got {cycles:g}")
+    return {"source": source, "loading": loading_name, "ratio": ratio, "cycles": cycles, **_marin(raw, where)}
+
+
+def _marin(raw: dict, where: str) -> dict:
+    """The block's ``surface`` and ``factor`` (the other Marin factors), checked."""
     surface = raw.get("surface", "machined")
     if surface not in SURFACES:
         raise ValueError(f"{where}.surface: {kinds.json_text(surface)} is not one of {list(SURFACES)}")
@@ -284,7 +284,7 @@ def _fatigue_block(document: dict) -> dict:
     if factor > 1:
         raise ValueError(f"{where}.factor: the other Marin factors (size, load, temperature, reliability) multiplied, "
                          f"from 0 to 1, got {factor:g}")
-    return {"source": source, "loading": loading_name, "ratio": ratio, "cycles": cycles, "surface": surface, "factor": factor}
+    return {"surface": surface, "factor": factor}
 
 
 def _vibration_block(raw: dict, source: str, where: str) -> dict:
@@ -300,15 +300,7 @@ def _vibration_block(raw: dict, source: str, where: str) -> dict:
                          f"give {key} instead (a check's cycles may still ask for more)")
     if "loading" in raw and raw["loading"] != "fully_reversed":
         raise ValueError(f"{where}.loading: a vibration's stress swings about zero, so it is fully reversed; leave loading out")
-    surface = raw.get("surface", "machined")
-    if surface not in SURFACES:
-        raise ValueError(f"{where}.surface: {kinds.json_text(surface)} is not one of {list(SURFACES)}")
-    factor = kinds.number(raw["factor"], where=f"{where}.factor", positive=True) if "factor" in raw else 1.0
-    if factor > 1:
-        raise ValueError(f"{where}.factor: the other Marin factors (size, load, temperature, reliability) multiplied, "
-                         f"from 0 to 1, got {factor:g}")
-    return {"source": source, "loading": "fully_reversed", "ratio": -1.0, "cycles": None, "surface": surface,
-            "factor": factor, key: seconds}
+    return {"source": source, "loading": "fully_reversed", "ratio": -1.0, "cycles": None, **_marin(raw, where), key: seconds}
 
 
 def _require_fatigue_data(spec: Any, where: str) -> None:
@@ -347,16 +339,10 @@ def _cycles_words(cycles: float) -> str:
     return f"{round(cycles):,}"
 
 
-def _floored(value: float) -> float:
-    return math.floor(value * 1000) / 1000
-
-
 class FatigueAnalysis(StaticAnalysis):
     name: ClassVar[str] = "fatigue"
-    tier: ClassVar[int] = 1
     word: ClassVar[str] = "Fatigue life"
-    estimate_only: ClassVar[bool] = False
-    limits: ClassVar[tuple[str, ...]] = ()
+    extras_word: ClassVar[str] = "fatigue life"
     # Its own block, and every source's keys (each study is checked against its own source's in parse).
     study_keys: ClassVar[frozenset[str]] = frozenset({"fatigue"}).union(*SOURCE_KEYS.values())
     material_needs: ClassVar[frozenset[str]] = frozenset({"uts", "endurance", "endurance_cycles"})
@@ -381,7 +367,6 @@ class FatigueAnalysis(StaticAnalysis):
     ladder: ClassVar[tuple[str, ...]] = (
         "reduce_modes", "frequency_grid", "iterative", "local_refine", "defeature", "linear_elements", "idealise", "symmetry",
     )
-    noun: ClassVar[str] = "this load"
 
     # -- parse ---------------------------------------------------------------------------------------
 
@@ -445,102 +430,67 @@ class FatigueAnalysis(StaticAnalysis):
     # -- solve ---------------------------------------------------------------------------------------
 
     def solve(self, ctx: SolveContext, inputs: FatigueInputs) -> AnalysisResult:
-        """Life and fatigue factor at every node from the source's von Mises stress, per part's material."""
+        """Life and fatigue factor at every node from the source's stress, each part's against its own material.
+        static: Goodman at the study's cycles. harmonic: Goodman on the peak frame's stress (fully reversed) at
+        f × dwell_s cycles. random_vibration: Steinberg's three bands and Miner's rule over duration_s at each node's
+        zero-crossing rate."""
         import numpy as np
 
-        if inputs.source != "static":
-            return self._solve_vibration(ctx, inputs)
-        source = ctx.upstream.get("static")
-        if source is None:  # called on its own: solve the source here, on the same space
+        source = ctx.upstream.get(inputs.source)
+        if source is None and inputs.source == "static":  # called on its own: solve the source here, on the same space
             source = StaticAnalysis.solve(self, ctx, StaticInputs(
                 inputs.face_refs, inputs.anchor_refs, True, fixtures=inputs.fixtures, loads=inputs.loads,
                 material_needs=inputs.material_needs,
             ))
-        stress = source.fields["von_mises"]
-        nodes = len(stress)
-        per_part = source.fields_by_part.get("von_mises")
-        curves = [sn_curve(material, surface=inputs.surface, factor=inputs.factor) for material in ctx.materials]
-        if per_part is None or ctx.volume.domain is None:
-            groups = [(np.arange(nodes), stress, 0)]
-        else:
-            groups = []
-            for index in range(len(ctx.materials)):
-                own = np.unique(source.element_dofs[ctx.volume.domain == index])
-                groups.append((own, per_part[index], index))
-        factor, life, governing = _nodal(groups, curves, inputs, inputs.cycles, nodes)
-        result = AnalysisResult(
-            dof_locations=source.dof_locations,
-            vertices=source.vertices,
-            tets=source.tets,
-            boundary_quadratic=source.boundary_quadratic,
-            element_dofs=source.element_dofs,
-            fields={"life": np.log10(life), "fatigue_factor": factor, "displacement": source.fields["displacement"],
-                    "von_mises": stress},
-            deformation=source.deformation,
-            scalars={**source.scalars, "curves": curves, "groups": groups, "life_cycles": life, "governing": governing},
-            reactions=list(source.reactions),
-            applied=tuple(source.applied),
-            dofs=source.dofs,
-            solver=source.solver,
-            timings=dict(source.timings),
-            warnings=list(source.warnings),
-            solved=source.solved,
-        )
-        _cycle_motion(result, inputs, stress, inputs.cycles, None)
-        return result
-
-    def _solve_vibration(self, ctx: SolveContext, inputs: FatigueInputs) -> AnalysisResult:
-        """harmonic: Goodman on the peak frame's stress (fully reversed) at f × dwell_s cycles. random_vibration:
-        Steinberg's three bands and Miner's rule over duration_s at each node's zero-crossing rate."""
-        import numpy as np
-
-        analysis = _source_analysis(inputs.source)
-        source = ctx.upstream.get(inputs.source)
-        if source is None:  # called on its own: solve the source here, on the same space
-            source = analysis.solve(ctx, inputs.source_inputs)
+        elif source is None:
+            source = _source_analysis(inputs.source).solve(ctx, inputs.source_inputs)
             ctx.upstream[inputs.source] = source
         curves = [sn_curve(material, surface=inputs.surface, factor=inputs.factor) for material in ctx.materials]
-        extra: dict[str, Any] = {"fatigue_source": inputs.source}
+        extra: dict[str, Any] = {} if inputs.source == "static" else {"fatigue_source": inputs.source}
         fields: dict[str, Any] = {}
-        deformation = None
-        if inputs.source == "harmonic":
+        deformation, rate_Hz = None, None
+        if inputs.source == "static":
+            stress = source.fields["von_mises"]
+            nodes = len(stress)
+            per_part = source.fields_by_part.get("von_mises")
+            if per_part is None or ctx.volume.domain is None:
+                groups = [(np.arange(nodes), stress, 0)]
+            else:
+                groups = [(np.unique(source.element_dofs[ctx.volume.domain == index]), per_part[index], index)
+                          for index in range(len(ctx.materials))]
+            need = inputs.cycles
+            factor, life, governing = _nodal(groups, curves, inputs, need, nodes)
+            fields["displacement"], deformation = source.fields["displacement"], source.deformation
+        elif inputs.source == "harmonic":
             frames = source.scalars["stress_frames"]
             frame = max(range(len(frames)), key=lambda i: float(frames[i].max()))
             stress = np.asarray(frames[frame], dtype=float)
-            peak_Hz = float(source.scalars["frame_Hz"][frame])
-            need = peak_Hz * inputs.dwell_s
+            rate_Hz = float(source.scalars["frame_Hz"][frame])
+            need = rate_Hz * inputs.dwell_s
             groups = _groups(ctx, source, stress)
             factor, life, governing = _nodal(groups, curves, inputs, need, len(stress))
             deformation = _widest_phase(source.frame_fields["displacement"][frame], source.frame_fields["displacement_im"][frame])
             fields["displacement"] = deformation
-            extra.update({"peak_frame": frame, "peak_Hz": peak_Hz, "need_cycles": need})
+            extra.update({"peak_frame": frame, "peak_Hz": rate_Hz, "need_cycles": need})
         else:
             stress = np.asarray(source.fields["von_mises_rms"], dtype=float)
             rate = np.asarray(source.scalars["stress_zero_crossing_Hz"], dtype=float)
-            rate_at_peak = float(source.scalars["zero_crossing_Hz"])
+            rate_Hz = float(source.scalars["zero_crossing_Hz"])
+            need = rate_Hz * inputs.duration_s
             groups = _groups(ctx, source, stress)
             factor, life, governing = _random_nodal(groups, curves, rate * inputs.duration_s, len(stress))
-            extra.update({"zero_crossing_rate": rate, "zero_crossing_Hz": rate_at_peak,
-                          "need_cycles": rate_at_peak * inputs.duration_s})
+            extra.update({"zero_crossing_rate": rate, "zero_crossing_Hz": rate_Hz, "need_cycles": need})
         result = AnalysisResult(
-            dof_locations=source.dof_locations,
-            vertices=source.vertices,
-            tets=source.tets,
-            boundary_quadratic=source.boundary_quadratic,
-            element_dofs=source.element_dofs,
-            fields={"life": np.log10(life), "fatigue_factor": factor, **fields, "von_mises": stress},
-            deformation=deformation,
-            scalars={**source.scalars, **extra, "curves": curves, "groups": groups, "life_cycles": life,
-                     "governing": governing, "source_summary": source.scalars.get("summary")},
-            reactions=list(source.reactions),
-            applied=tuple(source.applied),
-            dofs=source.dofs,
-            solver=source.solver,
-            timings=dict(source.timings),
-            warnings=list(source.warnings),
+            dof_locations=source.dof_locations, vertices=source.vertices, tets=source.tets,
+            boundary_quadratic=source.boundary_quadratic, element_dofs=source.element_dofs,
+            fields={"life": np.log10(life), "fatigue_factor": factor, **fields, "von_mises": stress}, deformation=deformation,
+            scalars={**source.scalars, **extra, "curves": curves, "groups": groups, "life_cycles": life, "governing": governing,
+                     **({} if inputs.source == "static" else {"source_summary": source.scalars.get("summary")})},
+            reactions=list(source.reactions), applied=tuple(source.applied), dofs=source.dofs, solver=source.solver,
+            timings=dict(source.timings), warnings=list(source.warnings),
+            solved=source.solved if inputs.source == "static" else None,
         )
-        _cycle_motion(result, inputs, stress, extra["need_cycles"],
-                      extra["peak_Hz"] if inputs.source == "harmonic" else extra["zero_crossing_Hz"])
+        _cycle_motion(result, inputs, stress, need, rate_Hz)
         return result
 
     def _need(self, result: AnalysisResult, inputs: FatigueInputs) -> float:
@@ -603,17 +553,9 @@ class FatigueAnalysis(StaticAnalysis):
         runout = life[worst] >= max(curve.endurance_cycles for curve in result.scalars["curves"])
         status = "fails" if n < 1 else "close" if n < margin else "passes"
         return {
-            "kind": "fatigue",
-            "label": check.get("label") or "Fatigue life",
-            "value": _floored(n),
-            "limit": margin,
-            "unit": "",
-            "ratio": round(1.0 / n, 6),
-            "close_at": round(1.0 / margin, 6),
-            "margin": margin,
-            "status": status,
-            "where": {"ref": peak.ref, "at": [round(c, 3) for c in peak.at]},
-            "need": cycles,
+            "kind": "fatigue", "label": check.get("label") or "Fatigue life", "value": floored(n), "limit": margin, "unit": "",
+            "ratio": round(1.0 / n, 6), "close_at": round(1.0 / margin, 6), "margin": margin, "status": status,
+            "where": {"ref": peak.ref, "at": [round(c, 3) for c in peak.at]}, "need": cycles,
             **({} if runout else {"life": float(f"{life[worst]:.4g}")}),
         }
 
@@ -629,7 +571,7 @@ class FatigueAnalysis(StaticAnalysis):
             needs = _cycles_words(judged["need"])
             lasts = f"about {_cycles_words(judged['life'])} cycles" if "life" in judged else None
             if judged["status"] == "fails":
-                found.append(_finding(
+                found.append(finding(
                     "error", "wears_out",
                     f"It wears out {'in ' + lasts if lasts else 'too soon'}, short of the {needs} cycles it needs "
                     f"(fatigue safety factor {judged['value']:.2f})",
@@ -637,7 +579,7 @@ class FatigueAnalysis(StaticAnalysis):
                     f"{inputs.loading.replace('_', ' ')} loading",
                     item))
             elif judged["status"] == "close":
-                found.append(_finding(
+                found.append(finding(
                     "warning", "low_fatigue_margin",
                     f"It lasts the {needs} cycles it needs, but only with a fatigue safety factor of {judged['value']:.2f}, "
                     f"under the {judged['margin']:g} margin",
@@ -646,7 +588,7 @@ class FatigueAnalysis(StaticAnalysis):
             if beyond:
                 curve = beyond[0]
                 no_limit = curve.endurance_cycles >= NO_ENDURANCE_LIMIT_FROM
-                found.append(_finding(
+                found.append(finding(
                     "warning" if no_limit else "info", "past_fatigue_data",
                     f"The {needs} cycles asked for are past the material's fatigue data ({_cycles_words(curve.endurance_cycles)} "
                     "cycles); it is judged at the strength there"
@@ -654,7 +596,7 @@ class FatigueAnalysis(StaticAnalysis):
                        if no_limit else ", its endurance limit"),
                     f"fatigue strength {curve.endurance:.4g} MPa at {curve.endurance_cycles:.3g} cycles", []))
         if float(result.scalars["life_cycles"].min()) < LOW_CYCLES:
-            found.append(_finding(
+            found.append(finding(
                 "warning", "low_cycle_fatigue",
                 "It fails in under 1,000 cycles: that is low-cycle fatigue, which this stress-life estimate extrapolates "
                 "and does not model; treat the life as a rough figure and reduce the stress",
@@ -664,90 +606,53 @@ class FatigueAnalysis(StaticAnalysis):
     # -- what is written -----------------------------------------------------------------------------
 
     def summary(self, result: AnalysisResult, inputs: FatigueInputs, check_results: list[dict]) -> dict:
-        import numpy as np
-
-        if inputs.source != "static":
-            return self._vibration_summary(result, inputs, check_results)
-        base = super().summary(result, inputs, check_results)
-        checks = base.pop("checks")
-        stress = result.fields["von_mises"]
-        peak = int(stress.argmax())
-        factor = result.fields["fatigue_factor"]
-        life = result.scalars["life_cycles"]
-        curves = result.scalars["curves"]
-        worst = int(np.argmin(factor))
-        curve = curves[int(result.scalars["governing"][worst])]
-        runout = float(life.min()) >= max(c.endurance_cycles for c in curves)
-        summary = {
-            "source": inputs.source,
-            "loading": inputs.loading,
-            "stress_ratio": inputs.ratio,
-            "cycles": inputs.cycles,
-            "surface": inputs.surface,
-            "max_von_mises_MPa": base["max_von_mises_MPa"],
-            "max_von_mises_at_mm": base["max_von_mises_at_mm"],
-            "stress_amplitude_MPa": round(inputs.amplitude_share * float(stress[peak]), 4),
-            "mean_stress_MPa": round(inputs.mean_share * float(stress[peak]), 4),
-            "min_fatigue_factor": _floored(float(factor[worst])),
-            "min_fatigue_factor_at_mm": [round(float(c), 3) for c in result.dof_locations[worst]],
-            "min_life_cycles": None if runout else float(f"{float(life.min()):.4g}"),
-            "life_beyond_cycles": curve.endurance_cycles if runout else None,
-            "sn": curve.as_dict(),
-            **{key: base[key] for key in ("yield_MPa", "safety_factor", "max_displacement_mm", "max_displacement_at_mm",
-                                          "applied_force_N", "reaction_force_N", "deformation_scale")},
-        }
-        for key in ("weakest_part", "parts"):
-            if key in base:
-                summary[key] = base[key]
-        summary["checks"] = checks
-        return summary
-
-    def _vibration_summary(self, result: AnalysisResult, inputs: FatigueInputs, check_results: list[dict]) -> dict:
-        """A vibration source's: the stress it swings by, how long and how fast, the factor and the life."""
+        """The stress it swings by (and, from a vibration, how long and how fast), the factor and the life."""
         import numpy as np
 
         stress = result.fields["von_mises"]
         peak = int(stress.argmax())
-        factor = result.fields["fatigue_factor"]
-        life = result.scalars["life_cycles"]
-        curves = result.scalars["curves"]
-        worst = int(np.argmin(factor))
-        curve = curves[int(result.scalars["governing"][worst])]
-        runout = float(life.min()) >= max(c.endurance_cycles for c in curves)
-        summary: dict[str, Any] = {
-            "source": inputs.source,
-            "loading": "fully_reversed",
-            "stress_ratio": -1.0,
-            "cycles": float(f"{self._need(result, inputs):.6g}"),
-            "surface": inputs.surface,
-        }
-        if inputs.source == "harmonic":
-            summary.update({
-                "method": "goodman",
-                "dwell_s": inputs.dwell_s,
-                "peak_Hz": round(result.scalars["peak_Hz"], 4),
-                "max_von_mises_MPa": round(float(stress[peak]), 4),
-                "max_von_mises_at_mm": [round(float(c), 3) for c in result.dof_locations[peak]],
-                "stress_amplitude_MPa": round(float(stress[peak]), 4),
-                "mean_stress_MPa": 0.0,
-            })
+        if inputs.source == "static":
+            base = super().summary(result, inputs, check_results)
+            check_results = base.pop("checks")
+            summary: dict[str, Any] = {
+                "source": inputs.source, "loading": inputs.loading, "stress_ratio": inputs.ratio, "cycles": inputs.cycles,
+                "surface": inputs.surface, "max_von_mises_MPa": base["max_von_mises_MPa"],
+                "max_von_mises_at_mm": base["max_von_mises_at_mm"],
+                "stress_amplitude_MPa": round(inputs.amplitude_share * float(stress[peak]), 4),
+                "mean_stress_MPa": round(inputs.mean_share * float(stress[peak]), 4),
+            }
         else:
-            summary.update({
-                "method": "steinberg_miner",
-                "duration_s": inputs.duration_s,
-                "zero_crossing_Hz": round(result.scalars["zero_crossing_Hz"], 4),
-                "max_von_mises_rms_MPa": round(float(stress[peak]), 4),
-                "max_von_mises_at_mm": [round(float(c), 3) for c in result.dof_locations[peak]],
-                "bands": [{"sigma": k, "share": share} for k, share in STEINBERG],
-            })
+            summary = {"source": inputs.source, "loading": "fully_reversed", "stress_ratio": -1.0,
+                       "cycles": float(f"{self._need(result, inputs):.6g}"), "surface": inputs.surface}
+            if inputs.source == "harmonic":
+                summary.update({
+                    "method": "goodman", "dwell_s": inputs.dwell_s, "peak_Hz": round(result.scalars["peak_Hz"], 4),
+                    "max_von_mises_MPa": round(float(stress[peak]), 4), "max_von_mises_at_mm": xyz(result.dof_locations[peak]),
+                    "stress_amplitude_MPa": round(float(stress[peak]), 4), "mean_stress_MPa": 0.0,
+                })
+            else:
+                summary.update({
+                    "method": "steinberg_miner", "duration_s": inputs.duration_s,
+                    "zero_crossing_Hz": round(result.scalars["zero_crossing_Hz"], 4),
+                    "max_von_mises_rms_MPa": round(float(stress[peak]), 4), "max_von_mises_at_mm": xyz(result.dof_locations[peak]),
+                    "bands": [{"sigma": k, "share": share} for k, share in STEINBERG],
+                })
+        factor, life, curves = result.fields["fatigue_factor"], result.scalars["life_cycles"], result.scalars["curves"]
+        worst = int(np.argmin(factor))
+        curve = curves[int(result.scalars["governing"][worst])]
+        runout = float(life.min()) >= max(c.endurance_cycles for c in curves)
         summary.update({
-            "min_fatigue_factor": _floored(float(factor[worst])),
-            "min_fatigue_factor_at_mm": [round(float(c), 3) for c in result.dof_locations[worst]],
+            "min_fatigue_factor": floored(float(factor[worst])),
+            "min_fatigue_factor_at_mm": xyz(result.dof_locations[worst]),
             "min_life_cycles": None if runout else float(f"{float(life.min()):.4g}"),
             "life_beyond_cycles": curve.endurance_cycles if runout else None,
             "sn": curve.as_dict(),
         })
-        if "displacement" in result.fields:
+        if inputs.source == "static":
+            summary.update({key: base[key] for key in ("yield_MPa", "safety_factor", "max_displacement_mm",
+                                                       "max_displacement_at_mm", "applied_force_N", "reaction_force_N",
+                                                       "deformation_scale", "weakest_part", "parts") if key in base})
+        elif "displacement" in result.fields:
             summary["max_displacement_mm"] = round(float(np.linalg.norm(result.fields["displacement"], axis=1).max()), 6)
             summary["deformation_scale"] = result.scalars.get("deformation_scale")
         summary["checks"] = check_results
@@ -771,9 +676,6 @@ class FatigueAnalysis(StaticAnalysis):
             ranges["cycle_stress"] = (0.0, round(float(result.fields["cycle_stress"].max()), 6))
         return ranges
 
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} fatigue life"
-
     def extras_head(self, summary: dict) -> dict:
         return {}
 
@@ -781,35 +683,46 @@ class FatigueAnalysis(StaticAnalysis):
         return {key: summary[key] for key in ("weakest_part",) if key in summary}
 
     def study_echo(self, inputs: FatigueInputs, bare: Callable[[tuple[str, ...]], list[str]]) -> dict:
-        if inputs.source != "static":
+        if inputs.source == "static":
+            echo, key = super().study_echo(inputs, bare), "cycles"
+        else:
             echo = _source_analysis(inputs.source).study_echo(inputs.source_inputs, bare)
             key = DURATION_KEY[inputs.source]
-            echo["fatigue"] = {"from": inputs.source, "loading": inputs.loading, "stress_ratio": inputs.ratio,
-                               key: getattr(inputs, key), "surface": inputs.surface, "factor": inputs.factor}
-            return echo
-        echo = super().study_echo(inputs, bare)
-        echo["fatigue"] = {
-            "from": inputs.source, "loading": inputs.loading, "stress_ratio": inputs.ratio, "cycles": inputs.cycles,
-            "surface": inputs.surface, "factor": inputs.factor,
-        }
+        echo["fatigue"] = {"from": inputs.source, "loading": inputs.loading, "stress_ratio": inputs.ratio,
+                           key: getattr(inputs, key), "surface": inputs.surface, "factor": inputs.factor}
         return echo
 
     def human_lines(self, summary: dict) -> list[str]:
-        if summary["source"] != "static":
-            return _vibration_lines(summary)
-        sn = summary["sn"]
-        loading = summary["loading"].replace("_", " ") if summary["loading"] != "ratio" else f"stress ratio R = {summary['stress_ratio']:g}"
-        life = (f"shortest life {_cycles_words(summary['min_life_cycles'])} cycles" if summary["min_life_cycles"] is not None
-                else f"life past {_cycles_words(summary['life_beyond_cycles'])} cycles everywhere (beyond the material's data)")
-        return [
-            f"fatigue from {summary['source']}, {loading}: peak von Mises {summary['max_von_mises_MPa']} MPa, "
-            f"amplitude {summary['stress_amplitude_MPa']} MPa, mean {summary['mean_stress_MPa']} MPa",
-            f"S-N line: UTS {sn['uts_MPa']:g} MPa; fatigue strength {sn['endurance_MPa']:g} MPa at {sn['endurance_cycles']:.3g} cycles "
-            f"x surface {sn['surface_factor']:g} ({summary['surface'].replace('_', ' ')}) x factor {sn['factor']:g} "
+        source, sn = summary["source"], summary["sn"]
+        if source == "static":
+            loading = (summary["loading"].replace("_", " ") if summary["loading"] != "ratio"
+                       else f"stress ratio R = {summary['stress_ratio']:g}")
+            head = (f"fatigue from static, {loading}: peak von Mises {summary['max_von_mises_MPa']} MPa, "
+                    f"amplitude {summary['stress_amplitude_MPa']} MPa, mean {summary['mean_stress_MPa']} MPa")
+        elif source == "harmonic":
+            head = (f"fatigue from harmonic, a {summary['dwell_s']:g} s dwell at {summary['peak_Hz']:g} Hz "
+                    f"({_cycles_words(summary['cycles'])} cycles): stress swinging {summary['stress_amplitude_MPa']} MPa "
+                    "about zero (fully reversed)")
+        else:
+            head = (f"fatigue from random_vibration, {summary['duration_s']:g} s at {summary['zero_crossing_Hz']:g} Hz zero "
+                    f"crossings ({_cycles_words(summary['cycles'])} cycles): {summary['max_von_mises_rms_MPa']} MPa rms; "
+                    "Steinberg bands 68.3% at 1σ, 27.1% at 2σ, 4.33% at 3σ")
+        if summary["min_life_cycles"] is not None:
+            life = f"shortest life {_cycles_words(summary['min_life_cycles'])} cycles"
+        else:
+            life = f"life past {_cycles_words(summary['life_beyond_cycles'])} cycles everywhere (beyond the material's data)"
+        lines = [
+            head,
+            f"S-N line: UTS {sn['uts_MPa']:g} MPa; fatigue strength {sn['endurance_MPa']:g} MPa at {sn['endurance_cycles']:.3g} "
+            f"cycles x surface {sn['surface_factor']:g} ({summary['surface'].replace('_', ' ')}) x factor {sn['factor']:g} "
             f"= {sn['corrected_endurance_MPa']:g} MPa; from 0.9 UTS at 1000 cycles",
+            f"fatigue safety factor {summary['min_fatigue_factor']} over the shake (Miner's rule); {life}"
+            if source == "random_vibration" else
             f"fatigue safety factor {summary['min_fatigue_factor']} at {summary['cycles']:.3g} cycles (modified Goodman); {life}",
-            f"max displacement {summary['max_displacement_mm']} mm at the load's peak",
         ]
+        if source == "static":
+            lines.append(f"max displacement {summary['max_displacement_mm']} mm at the load's peak")
+        return lines
 
 
 def _source_analysis(name: str):
@@ -841,80 +754,53 @@ def _method_words(inputs: FatigueInputs) -> str:
     return "Steinberg-Miner" if inputs.source == "random_vibration" else "modified Goodman"
 
 
-def _vibration_lines(summary: dict) -> list[str]:
-    sn = summary["sn"]
-    life = (f"shortest life {_cycles_words(summary['min_life_cycles'])} cycles" if summary["min_life_cycles"] is not None
-            else f"life past {_cycles_words(summary['life_beyond_cycles'])} cycles everywhere (beyond the material's data)")
-    if summary["source"] == "harmonic":
-        head = (f"fatigue from harmonic, a {summary['dwell_s']:g} s dwell at {summary['peak_Hz']:g} Hz "
-                f"({_cycles_words(summary['cycles'])} cycles): stress swinging {summary['stress_amplitude_MPa']} MPa "
-                "about zero (fully reversed)")
-        method = f"fatigue safety factor {summary['min_fatigue_factor']} at {summary['cycles']:.3g} cycles (modified Goodman); {life}"
-    else:
-        head = (f"fatigue from random_vibration, {summary['duration_s']:g} s at {summary['zero_crossing_Hz']:g} Hz zero "
-                f"crossings ({_cycles_words(summary['cycles'])} cycles): {summary['max_von_mises_rms_MPa']} MPa rms; "
-                "Steinberg bands 68.3% at 1σ, 27.1% at 2σ, 4.33% at 3σ")
-        method = f"fatigue safety factor {summary['min_fatigue_factor']} over the shake (Miner's rule); {life}"
-    return [
-        head,
-        f"S-N line: UTS {sn['uts_MPa']:g} MPa; fatigue strength {sn['endurance_MPa']:g} MPa at {sn['endurance_cycles']:.3g} cycles "
-        f"x surface {sn['surface_factor']:g} ({summary['surface'].replace('_', ' ')}) x factor {sn['factor']:g} "
-        f"= {sn['corrected_endurance_MPa']:g} MPa; from 0.9 UTS at 1000 cycles",
-        method,
-    ]
-
-
 def _random_nodal(groups, curves, cycles, nodes: int):
     """Per node, for a random response's RMS stress: the Steinberg-Miner fatigue factor over ``cycles`` (per node),
-    the life in cycles (1 / the damage per cycle, at most N_e) and the material that governs it."""
+    the life in cycles (1 / the damage per cycle) and the material that governs it."""
+    import numpy as np
+
+    counts = np.broadcast_to(np.asarray(cycles, dtype=float), (nodes,))
+
+    def rule(curve, own, sigma):
+        n, damage = steinberg_factor(curve, sigma, counts[own]), steinberg_damage(curve, sigma)
+        with np.errstate(divide="ignore"):
+            return n, np.where(damage > 0, 1.0 / np.maximum(damage, 1e-300), np.inf)
+
+    return _worst_of(groups, curves, nodes, rule)
+
+
+def _nodal(groups, curves, inputs: FatigueInputs, cycles: float, nodes: int):
+    """Per node: the modified Goodman fatigue factor at ``cycles``, the life in cycles and the material that governs it."""
+    import numpy as np
+
+    def rule(curve, own, sigma):
+        amplitude, mean = inputs.amplitude_share * sigma, inputs.mean_share * sigma
+        n = goodman_factor(amplitude, mean, curve.strength(cycles), curve.uts)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            equivalent = np.where(mean < curve.uts, amplitude / np.maximum(1.0 - mean / curve.uts, 1e-300), np.inf)
+        return n, curve.life(equivalent)
+
+    return _worst_of(groups, curves, nodes, rule)
+
+
+def _worst_of(groups, curves, nodes: int, rule):
+    """Per node: the fatigue factor (at most FACTOR_CAP), the life in cycles (1 to N_e) and the index of the material
+    that governs it. ``groups`` are (nodes, their stress, material index) per part, ``rule(curve, nodes, stress)``
+    one part's factor and life at its nodes; a node on a joint takes the worse of its parts."""
     import numpy as np
 
     life = np.full(nodes, np.inf)
     factor = np.full(nodes, np.inf)
     governing = np.zeros(nodes, dtype=np.int64)
-    counts = np.broadcast_to(np.asarray(cycles, dtype=float), (nodes,))
     for own, sigma, index in groups:
-        curve = curves[index]
-        n = steinberg_factor(curve, sigma[own], counts[own])
-        damage = steinberg_damage(curve, sigma[own])
-        with np.errstate(divide="ignore"):
-            lasts = np.where(damage > 0, 1.0 / np.maximum(damage, 1e-300), np.inf)
+        n, lasts = rule(curves[index], own, sigma[own])
         worse = n < factor[own]
         governing[own[worse]] = index
         factor[own] = np.minimum(factor[own], n)
         life[own] = np.minimum(life[own], lasts)
     beyond = max(curve.endurance_cycles for curve in curves)
     factor = np.where(np.isfinite(factor), factor, FACTOR_CAP)
-    life = np.clip(np.where(np.isfinite(life), life, beyond), 1.0, beyond)
-    return factor, life, governing
-
-
-def _nodal(groups, curves, inputs: FatigueInputs, cycles: float, nodes: int):
-    """Per node: the fatigue factor at ``cycles`` (at most FACTOR_CAP), the life in cycles (at most N_e) and the
-    index of the material that governs it. ``groups`` are (nodes, their stress, material index) per part; a node
-    on a joint takes the worse of its parts."""
-    import numpy as np
-
-    life = np.full(nodes, np.inf)
-    factor = np.full(nodes, np.inf)
-    governing = np.zeros(nodes, dtype=np.int64)
-    for own, sigma, index in groups:
-        curve = curves[index]
-        amplitude, mean = inputs.amplitude_share * sigma[own], inputs.mean_share * sigma[own]
-        n = goodman_factor(amplitude, mean, curve.strength(cycles), curve.uts)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            equivalent = np.where(mean < curve.uts, amplitude / np.maximum(1.0 - mean / curve.uts, 1e-300), np.inf)
-        worse = n < factor[own]
-        governing[own[worse]] = index
-        factor[own] = np.minimum(factor[own], n)
-        life[own] = np.minimum(life[own], curve.life(equivalent))
-    factor = np.where(np.isfinite(factor), factor, FACTOR_CAP)
-    life = np.where(np.isfinite(life), life, max(curve.endurance_cycles for curve in curves))
-    return factor, life, governing
-
-
-def _finding(severity: str, kind: str, summary: str, description: str, items: list[dict]) -> dict:
-    return {"check": "fea", "severity": severity, "type": kind, "summary": summary, "description": description, "items": items}
+    return factor, np.clip(np.where(np.isfinite(life), life, beyond), 1.0, beyond), governing
 
 
 #: The cycle's stress for the viewer's routine: its peak von Mises at every node, MPa (the ``cycle_stress`` field).

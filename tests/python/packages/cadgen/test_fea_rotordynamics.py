@@ -26,30 +26,17 @@ solves the fea extra. Every STEP is written into a temporary directory.
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import struct
 import tempfile
 import unittest
-from contextlib import redirect_stderr
 from pathlib import Path
 
-from tests.python.support.paths import add_repo_path
+from tests.python.support.fea_fixtures import class_directory, ends, glb_extras, needs_fea, read_glb, sidecar, solve
 
-add_repo_path("packages/cadgen/src")
-
-from cadgen._internal.fea.analyses import REGISTRY, get_analysis  # noqa: E402
+from cadgen._internal.fea.analyses import get_analysis  # noqa: E402
 from cadgen._internal.fea.analyses.rotordynamics import critical_check, orbit_text, rpm_text, stability_check  # noqa: E402
 from cadgen._internal.fea.materials import lookup_material  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
 from cadgen._internal.fea.study import parse_study  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 STEEL = lookup_material("steel")
 E, D_SHAFT, L_SHAFT = 210000.0, 20.0, 600.0
@@ -61,16 +48,8 @@ def _study(**more) -> dict:
             "bearings": [{"faces": ["#o1.f2"], "rigid": True}, {"faces": ["#o1.f3"], "k": 20000, "c": 5}], **more}
 
 
-def _glb(path: Path) -> tuple[dict, bytes]:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    return json.loads(raw[20:20 + length]), raw[20 + length + 8:]
-
-
 class StudyFile(unittest.TestCase):
-    def test_it_is_registered_as_spinning_tier_3_and_built(self):
-        self.assertEqual((REGISTRY["rotordynamics"].tier, REGISTRY["rotordynamics"].word, REGISTRY["rotordynamics"].planned),
-                         (3, "Spinning", False))
+    def test_it_declares_its_ladder_and_checks(self):
         analysis = get_analysis("rotordynamics")
         self.assertEqual(analysis.ladder, ("reduce_modes", "iterative", "local_refine"))
         self.assertEqual([spec.kind for spec in analysis.checks], ["critical_speed", "stability", "stress"])
@@ -189,7 +168,7 @@ class Checks(unittest.TestCase):
         self.assertNotIn("mode", undamped)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (numpy, scipy, scikit-fem) is not installed")
+@needs_fea
 class RotorLine(unittest.TestCase):
     """The rotor line itself (cadgen._internal.fea.rotor) against closed forms."""
 
@@ -285,12 +264,7 @@ class RotorLine(unittest.TestCase):
         self.assertEqual([self.rd.coefficient_at(table, rpm) for rpm in (-5, 0, 3000, 6000, 9000)], [1e4, 1e4, 1.5e4, 2e4, 2e4])
 
 
-def _shaft_ends(listing):
-    planes = sorted((face for face in listing.faces if face.surface == "plane"), key=lambda face: face.center_mm[2])
-    return planes[0].ref, planes[-1].ref
-
-
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class UniformShaft(unittest.TestCase):
     """A 600 mm steel shaft, 20 mm across, on rigid bearings at its ends, spinning up to 8,000 rpm about Z."""
 
@@ -298,24 +272,16 @@ class UniformShaft(unittest.TestCase):
     def setUpClass(cls):
         from build123d import Align, Cylinder, export_step
 
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.directory = Path(cls._tmp.name)
+        cls.directory = class_directory(cls)
         cls.step = cls.directory / "shaft.step"
         export_step(Cylinder(D_SHAFT / 2, L_SHAFT, align=(Align.CENTER, Align.CENTER, Align.MIN)), str(cls.step))
-        cls.low_end, cls.high_end = _shaft_ends(fea.faces(cls.step))
+        cls.low_end, cls.high_end = ends(cls.step, 2)
         cls.study = {"analysis": "rotordynamics", "material": "steel", "spin": {"axis": "Z", "rpm": [0, 8000]},
                      "bearings": [{"faces": [cls.low_end], "rigid": True}, {"faces": [cls.high_end], "rigid": True}],
                      "unbalance": [{"at_mm": 300, "g_mm": 20}], "mesh": {"size_mm": 6.0}}
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(cls.step, cls.directory / "shaft.fea.glb", study=cls.study)
+        cls.result = solve(cls.step, cls.directory / "shaft.fea.glb", cls.study)
         area = math.pi * D_SHAFT ** 2 / 4
         cls.euler_rpm = math.pi ** 2 * math.sqrt(STEEL.E * I_SHAFT / (STEEL.density * area * L_SHAFT ** 4)) * 60 / (2 * math.pi)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def test_its_first_forward_critical_is_euler_bernoullis_first_frequency(self):
         first = self.result.summary["first_critical_rpm"]
@@ -345,7 +311,7 @@ class UniformShaft(unittest.TestCase):
         self.assertIn("undamped_whirl", found)
 
     def test_the_glb_carries_each_criticals_whirl_and_the_spinning_stress(self):
-        gltf, _ = _glb(self.result.glb)
+        gltf, _ = read_glb(self.result.glb)
         extras = gltf["meshes"][0]["extras"]
         attributes = gltf["meshes"][0]["primitives"][0]["attributes"]
         self.assertEqual((extras["analysis"]["type"], extras["analysis"]["tier"], extras["analysis"]["word"]), ("rotordynamics", 3, "Spinning"))
@@ -362,26 +328,23 @@ class UniformShaft(unittest.TestCase):
         self.assertEqual(extras["study"]["unbalance"], [{"at_mm": 300.0, "g_mm": 20.0, "phase_deg": 0.0}])
 
     def test_the_sidecar_carries_the_campbell_diagram_and_the_unbalance_response(self):
-        sidecar = json.loads(self.result.sidecar.read_text(encoding="utf-8"))
-        curves = sidecar["curves"]
+        written = sidecar(self.result)
+        curves = written["curves"]
         for name in ("forward_1_Hz", "backward_1_Hz", "forward_1_log_dec", "order_1x_Hz", "unbalance_amplitude_mm", "unbalance_phase_deg"):
             self.assertIn(name, curves)
         self.assertEqual((curves["forward_1_Hz"]["x_unit"], curves["forward_1_Hz"]["x"][-1]), ("rpm", 12000.0))
         amplitude = curves["unbalance_amplitude_mm"]
         peak = amplitude["x"][max(range(len(amplitude["y"])), key=lambda i: amplitude["y"][i])]
         self.assertAlmostEqual(peak / self.result.summary["first_critical_rpm"], 1.0, delta=0.01)  # the orbit peaks at the critical
-        self.assertEqual(sidecar["limits"][0], "Linear bearings: each a spring and a damper (it may change with speed); no fluid-film nonlinearity")
+        self.assertEqual(written["limits"][0], "Linear bearings: each a spring and a damper (it may change with speed); no fluid-film nonlinearity")
         lines = self.result.human_lines()
         self.assertIn("(rotordynamics)", lines[0])
         self.assertIn("spins 0 to 8,000 rpm about Z", lines)
         self.assertIn("critical speeds 6,600 rpm", lines)
 
     def test_a_tight_time_target_projects_the_rotor_on_its_slowest_shapes(self):
-        from cadgen import fea
-
         study = {**self.study, "fit": {"seconds": 4, "allow": ["reduce_modes"]}}
-        with redirect_stderr(io.StringIO()):
-            result = fea.solve(self.step, self.directory / "tight.fea.glb", study=study)
+        result = solve(self.step, self.directory / "tight.fea.glb", study)
         self.assertTrue(result.ok)
         steps = {step["rung"]: step for step in result.fit}
         self.assertIn("reduce_modes", steps)
@@ -389,21 +352,17 @@ class UniformShaft(unittest.TestCase):
         self.assertTrue(words.startswith("Found the rotor's whirl from its 28 slowest bending shapes"))
         self.assertIn("against the full rotor at 8,000 rpm", steps["reduce_modes"]["accuracy"])
         self.assertAlmostEqual(result.summary["first_critical_rpm"] / self.euler_rpm, 1.0, delta=0.03)
-        gltf, _ = _glb(result.glb)
-        self.assertIn(words, [step["words"] for step in gltf["meshes"][0]["extras"]["fit"]])
-        self.assertIn(words, [step["words"] for step in json.loads(result.sidecar.read_text(encoding="utf-8"))["fit"]])
+        self.assertIn(words, [step["words"] for step in glb_extras(result.glb)["fit"]])
+        self.assertIn(words, [step["words"] for step in sidecar(result)["fit"]])
         self.assertTrue(any(line.startswith(f"adapted: {words}") for line in result.human_lines()))
         self.assertIn("fit_reduce_modes", [finding["type"] for finding in result.findings])
 
     def test_the_solid_spinning_about_its_own_axis_softens_its_bending_by_omega_squared(self):
         # Held at both end faces the solid is a clamped-clamped beam: f0 = (4.730²/2π)·sqrt(EI/ρAL⁴). In the rotating
         # frame a round shaft's bending modes soften to ω² = ω0² − Ω² (its centrifugal stiffening is tiny).
-        from cadgen import fea
-
         study = {**self.study, "spin": {"axis": "Z", "rpm": [0, 8000], "solid_modes": 2},
                  "bearings": [{"faces": [self.low_end], "rigid": True}, {"faces": [self.high_end], "rigid": True}]}
-        with redirect_stderr(io.StringIO()):
-            result = fea.solve(self.step, self.directory / "solid.fea.glb", study=study)
+        result = solve(self.step, self.directory / "solid.fea.glb", study)
         clamped = (4.730041 / math.pi) ** 2 * self.euler_rpm / 60
         spin = 8000 * 2 * math.pi / 60
         for mode in result.summary["solid_modes"]:
@@ -414,7 +373,7 @@ class UniformShaft(unittest.TestCase):
         self.assertIn("solid_mode_spinning", [finding["type"] for finding in result.findings])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class ShaftAndDisc(unittest.TestCase):
     """A shaft with a disc at mid-span, one part: the disc is found in the CAD and lumped with its exact inertia."""
 
@@ -422,22 +381,14 @@ class ShaftAndDisc(unittest.TestCase):
     def setUpClass(cls):
         from build123d import Align, Cylinder, Pos, export_step
 
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
+        directory = class_directory(cls)
         step = directory / "rotor.step"
         disc = Pos(0, 0, 290) * Cylinder(60, 20, align=(Align.CENTER, Align.CENTER, Align.MIN))
         export_step(Cylinder(D_SHAFT / 2, L_SHAFT, align=(Align.CENTER, Align.CENTER, Align.MIN)) + disc, str(step))
-        low, high = _shaft_ends(fea.faces(step))
+        low, high = ends(step, 2)
         study = {"analysis": "rotordynamics", "material": "steel", "spin": {"axis": "Z", "rpm": [1000, 3000]},
                  "bearings": [{"faces": [low], "k": 5e4, "c": 20}, {"faces": [high], "k": 5e4, "c": 20}], "mesh": {"size_mm": 8.0}}
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(step, directory / "rotor.fea.glb", study=study)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.result = solve(step, directory / "rotor.fea.glb", study)
 
     def test_the_disc_is_found_and_lumped_with_its_mass_and_inertia(self):
         (disc,) = self.result.summary["discs"]
@@ -458,7 +409,7 @@ class ShaftAndDisc(unittest.TestCase):
         self.assertTrue(summary["critical_speeds"])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class SpinningDisc(unittest.TestCase):
     """A thin steel disc, 200 mm across with a 40 mm bore, 4 mm thick, spinning at 10,000 rpm about Z."""
 
@@ -475,8 +426,7 @@ class SpinningDisc(unittest.TestCase):
             bore = min((face for face in fea.faces(step).faces if face.surface == "cylinder"), key=lambda face: face.area_mm2)
             study = {"analysis": "rotordynamics", "material": "steel", "spin": {"axis": "Z", "rpm": [0, rpm]},
                      "bearings": [{"faces": [bore.ref], "clamped": True}], "mesh": {"size_mm": 4.0}}
-            with redirect_stderr(io.StringIO()):
-                result = fea.solve(step, Path(tmp) / "disc.fea.glb", study=study)
+            result = solve(step, Path(tmp) / "disc.fea.glb", study)
         omega, nu = rpm * 2 * math.pi / 60, STEEL.nu
         hoop = STEEL.density * omega ** 2 * (3 + nu) / 4 * (outer ** 2 + (1 - nu) / (3 + nu) * inner ** 2)
         summary = result.summary
@@ -500,26 +450,24 @@ class Wording(unittest.TestCase):
                                 "22nd forward whirl"])
 
     def test_the_stability_line_says_the_log_decrement_against_the_least_it_needs(self):
-        from pathlib import Path
-
         from cadgen.results import FeaResult
+
+        def lines(check):
+            return FeaResult(ok=True, document=Path("r.step"), occurrence="#o1", glb=Path("r.glb"), sidecar=Path("r.json"),
+                             analysis="rotordynamics", summary={"checks": [check]}, mesh={}).human_lines()
 
         lowest = {"value": 0.000552, "rpm": 8000.0, "forward": False, "mode": 1}
         check = stability_check({"kind": "stability"}, lowest)
         self.assertEqual(check["status"], "close")
-        result = FeaResult(ok=True, document=Path("r.step"), occurrence="#o1", glb=Path("r.glb"), sidecar=Path("r.json"),
-                           analysis="rotordynamics", summary={"checks": [check]}, mesh={})
-        line = next(line for line in result.human_lines() if line.startswith("check 'Stability'"))
+        line = next(line for line in lines(check) if line.startswith("check 'Stability'"))
         self.assertEqual(line, "check 'Stability': log decrement 0.000552 (1st backward whirl at 8,000 rpm), "
                                "under the 0.1 it needs, close")
         self.assertNotIn("×", line)
         grows = stability_check({"kind": "stability"}, {**lowest, "value": -0.02, "forward": True})
-        result = FeaResult(ok=True, document=Path("r.step"), occurrence="#o1", glb=Path("r.glb"), sidecar=Path("r.json"),
-                           analysis="rotordynamics", summary={"checks": [grows]}, mesh={})
-        self.assertIn("log decrement -0.02 (1st forward whirl at 8,000 rpm), under the 0.1 it needs, fails", "\n".join(result.human_lines()))
+        self.assertIn("log decrement -0.02 (1st forward whirl at 8,000 rpm), under the 0.1 it needs, fails", "\n".join(lines(grows)))
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (numpy, scipy) is not installed")
+@needs_fea
 class Stations(unittest.TestCase):
     def test_kept_stations_a_rounding_apart_are_one(self):
         """A found disc's centre (199.99999999999997) and an unbalance (200) were both kept: the zero-length element
@@ -531,7 +479,7 @@ class Stations(unittest.TestCase):
         self.assertTrue(all(b - a > 0.2 for a, b in zip(merged, merged[1:])))
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class FanShaft(unittest.TestCase):
     """A fan: a 400 mm shaft 20 mm across with a 140 mm disc, 15 mm thick, at mid-span, on stiff damped bearings
     10 mm in from each end, its unbalance on the disc's rim; the default (rigid) disc model."""
@@ -542,8 +490,7 @@ class FanShaft(unittest.TestCase):
 
         from cadgen import fea
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
+        directory = class_directory(cls)
         step = directory / "fan_shaft.step"
         low = (Align.CENTER, Align.CENTER, Align.MIN)
         export_step(Cylinder(10, 400, align=low) + Pos(0, 0, 192.5) * Cylinder(70, 15, align=low), str(step))
@@ -553,12 +500,7 @@ class FanShaft(unittest.TestCase):
                  "bearings": [{"at_mm": 10, "k": 200000, "c": 10}, {"at_mm": 390, "k": 200000, "c": 10}],
                  "unbalance": [{"faces": [rim], "g_mm": 20}],
                  "view": {"checks": [{"kind": "critical_speed", "margin_percent": 15}, {"kind": "stability"}, {"kind": "stress"}]}}
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(step, directory / "fan.fea.glb", study=study)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.result = solve(step, directory / "fan.fea.glb", study)
 
     def test_it_solves_with_the_disc_lumped(self):
         self.assertTrue(self.result.ok)
@@ -584,7 +526,7 @@ class FanShaft(unittest.TestCase):
     def test_no_overdamped_root_is_counted_as_a_whirl(self):
         """The bearing nodes on their 10 N s/mm dampers are overdamped: once spinning they picked up a frequency in
         proportion to the spin (0.29 Hz at 200 rpm) and were counted as whirls 1 and 2."""
-        curves = json.loads(self.result.sidecar.read_text(encoding="utf-8"))["curves"]
+        curves = sidecar(self.result)["curves"]
         first = curves["forward_1_Hz"]["y"]
         self.assertTrue(all(value is None or value > 100 for value in first), first[:4])
 

@@ -42,16 +42,19 @@ Stdlib only at import.
 
 from __future__ import annotations
 
-import dataclasses
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs, SolveContext
-from cadgen._internal.fea.analyses.cfd import (OPENINGS, PASCAL, RE_LIMIT, CfdAnalysis, flow_tracers, speed_reach, speed_to_part,
-                                              surface_integral, unsettled_check, wall_triangles)
+from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs, SolveContext, finding, xyz
+from cadgen._internal.fea.analyses.cfd import (
+    ASSEMBLE_S, FLOW_WORDS, MESH_S, ONE_PART, RE_LIMIT, CfdAnalysis, FlowSetup, balance_sentence, cached_setup, distinct_openings,
+    flow_entries, flow_tracers, fluid_mesh_record, limit_findings, mesh_flow, openings_of, parse_opening, part_result,
+    speed_reach, speed_to_part, structure_echo, structure_line, structure_ranges, structure_summary, surface_integral,
+    to_part, vector3, wall_triangles,
+)
 
 __all__ = ["CfdCompressibleAnalysis", "CfdCompressibleInputs", "GASES", "GasInletSpec", "LIMITS", "MACH_CHECKED", "mach_sentence"]
 
@@ -76,8 +79,6 @@ SHOCK_COMPRESSION = 0.15
 STANDARD_PRESSURE, KELVIN = 101325.0, 273.15
 WALLS = ("auto", "slip", "no_slip")
 PROFILES = ("uniform", "developed")
-#: A check is close once its value passes this share of its limit.
-CLOSE_AT = 0.9
 #: The cost model: pseudo-time steps a subsonic march takes, and one through choking (with and without continuation).
 STEPS_SUBSONIC, STEPS_CHOKED, STEPS_CHOKED_CONTINUED = 45.0, 300.0, 190.0
 #: A step factors afresh and assembles about this many laminar assemblies' worth.
@@ -147,12 +148,6 @@ class CfdCompressibleInputs(Inputs):
 # -- parse --------------------------------------------------------------------------------------------
 
 
-def _known(entry: dict, keys: set[str], where: str, words: str) -> None:
-    unknown = set(entry) - keys
-    if unknown:
-        raise ValueError(f"{where}: unknown keys {sorted(unknown)}; {words}")
-
-
 def _gas(raw: Any) -> Gas:
     if raw is None:
         return Gas("air", *GASES["air"])
@@ -163,7 +158,7 @@ def _gas(raw: Any) -> Gas:
         return Gas(raw, *GASES[raw])
     if not isinstance(raw, dict):
         raise ValueError('flow.gas: "air", or {"name": "argon", "gamma": 1.67, "gas_constant_J_kgK": 208, "viscosity_Pa_s": 2.2e-5}')
-    _known(raw, {"name", "gamma", "gas_constant_J_kgK", "viscosity_Pa_s"}, "flow.gas",
+    kinds.known(raw, {"name", "gamma", "gas_constant_J_kgK", "viscosity_Pa_s"}, "flow.gas",
            "a gas takes name, gamma, gas_constant_J_kgK and viscosity_Pa_s (at 20 °C)")
     for key in ("gamma", "gas_constant_J_kgK", "viscosity_Pa_s"):
         if key not in raw:
@@ -179,14 +174,6 @@ def _gas(raw: Any) -> Gas:
     S, T_ref = GASES["air"][4], 293.15
     return Gas(name.strip(), gamma, kinds.number(raw["gas_constant_J_kgK"], where="flow.gas.gas_constant_J_kgK", positive=True),
                mu20, T_ref, S)
-
-
-def _opening(entry: dict, where: str) -> str:
-    opening = entry.get("opening")
-    if opening not in OPENINGS:
-        raise ValueError(f"{where}.opening: {kinds.json_text(opening)} is not a side of the part's bounding box; "
-                         f"use one of {list(OPENINGS)}")
-    return opening
 
 
 def _temperature(value: Any, where: str) -> float:
@@ -212,35 +199,27 @@ def parse_gas_flow(document: dict) -> dict:
                          "inviscid core; no_slip: laminar walls; auto: laminar in the laminar range, else slip)")
     out: dict[str, Any] = {"kind": kind, "gas": gas, "walls": walls}
     if kind == "external":
-        _known(flow, {"kind", "gas", "walls", "velocity_m_s", "pressure_Pa", "temperature_C"}, "flow",
+        kinds.known(flow, {"kind", "gas", "walls", "velocity_m_s", "pressure_Pa", "temperature_C"}, "flow",
                "an external gas flow takes kind, gas, walls, velocity_m_s, pressure_Pa and temperature_C")
-        raw = flow.get("velocity_m_s")
-        if not isinstance(raw, list) or len(raw) != 3:
-            raise ValueError("flow.velocity_m_s: the free stream as [x, y, z] in m/s, like [150, 0, 0]")
-        velocity = tuple(kinds.number(c, where="flow.velocity_m_s") for c in raw)
-        if not any(velocity):
-            raise ValueError("flow.velocity_m_s: the free stream is zero; give its speed and direction, like [150, 0, 0]")
-        out.update(velocity_m_s=velocity,
+        out.update(velocity_m_s=vector3(flow.get("velocity_m_s"), "flow.velocity_m_s", "[150, 0, 0]"),
                    pressure_Pa=kinds.number(flow.get("pressure_Pa", STANDARD_PRESSURE), where="flow.pressure_Pa", positive=True),
                    temperature_C=_temperature(flow.get("temperature_C", 20.0), "flow.temperature_C"))
         return out
-    _known(flow, {"kind", "gas", "walls", "inlets", "outlets"}, "flow",
+    kinds.known(flow, {"kind", "gas", "walls", "inlets", "outlets"}, "flow",
            "an internal gas flow takes kind, gas, walls, inlets and outlets")
     for key, example in (("inlets", '{"opening": "x_min", "total_pressure_Pa": 150000}'), ("outlets", '{"opening": "x_max", "pressure_Pa": 101325}')):
-        raw = flow.get(key)
-        if not isinstance(raw, list) or not raw or not all(isinstance(entry, dict) for entry in raw):
-            raise ValueError(f"flow.{key}: expected a list like [{example}]")
+        flow_entries(flow, key, example)
     outlets = []
     for index, entry in enumerate(flow["outlets"]):
         where = f"flow.outlets[{index}]"
-        _known(entry, {"opening", "pressure_Pa"}, where, "an outlet takes opening and pressure_Pa (absolute static pressure)")
-        outlets.append(GasOutletSpec(_opening(entry, where),
+        kinds.known(entry, {"opening", "pressure_Pa"}, where, "an outlet takes opening and pressure_Pa (absolute static pressure)")
+        outlets.append(GasOutletSpec(parse_opening(entry, where),
                                      kinds.number(entry.get("pressure_Pa", STANDARD_PRESSURE), where=f"{where}.pressure_Pa", positive=True)))
     lowest = min(outlet.pressure_Pa for outlet in outlets)
     inlets = []
     for index, entry in enumerate(flow["inlets"]):
         where = f"flow.inlets[{index}]"
-        _known(entry, {"opening", "total_pressure_Pa", "mass_flow_kg_s", "total_temperature_C", "profile"}, where,
+        kinds.known(entry, {"opening", "total_pressure_Pa", "mass_flow_kg_s", "total_temperature_C", "profile"}, where,
                "an inlet takes opening, total_pressure_Pa or mass_flow_kg_s, total_temperature_C and profile")
         given = [key for key in ("total_pressure_Pa", "mass_flow_kg_s") if key in entry]
         if len(given) != 1:
@@ -257,15 +236,12 @@ def parse_gas_flow(document: dict) -> dict:
             if total <= lowest:
                 raise ValueError(f"{where}.total_pressure_Pa: {total:g} Pa is not above the outlet's {lowest:g} Pa, so no gas "
                                  "flows in; both are absolute pressures (1 atm is 101325 Pa)")
-            inlets.append(GasInletSpec(_opening(entry, where), "total", total_pressure_Pa=total, total_temperature_C=temperature))
+            inlets.append(GasInletSpec(parse_opening(entry, where), "total", total_pressure_Pa=total, total_temperature_C=temperature))
         else:
             mass = kinds.number(entry["mass_flow_kg_s"], where=f"{where}.mass_flow_kg_s", positive=True)
-            inlets.append(GasInletSpec(_opening(entry, where), "mass", mass_flow_kg_s=mass, total_temperature_C=temperature,
+            inlets.append(GasInletSpec(parse_opening(entry, where), "mass", mass_flow_kg_s=mass, total_temperature_C=temperature,
                                        profile=profile))
-    named = [entry.opening for entry in (*inlets, *outlets)]
-    for opening in named:
-        if named.count(opening) > 1:
-            raise ValueError(f"flow: {opening} is named twice; each side of the bounding box is one opening, an inlet or an outlet")
+    distinct_openings([entry.opening for entry in (*inlets, *outlets)])
     out.update(inlets=tuple(inlets), outlets=tuple(outlets))
     return out
 
@@ -274,18 +250,13 @@ def parse_gas_flow(document: dict) -> dict:
 
 
 @dataclass
-class _Setup:
-    domain: Any
-    reynolds: float
-    length_mm: float
-    wall_mm: float
+class _Setup(FlowSetup):
     walls: str                 # "slip" or "no_slip", as chosen
     total_temperature_K: float
 
 
 class CfdCompressibleAnalysis(CfdAnalysis):
     name: ClassVar[str] = "cfd_compressible"
-    tier: ClassVar[int] = 3
     word: ClassVar[str] = "Fast gas flow"
     limits: ClassVar[tuple[str, ...]] = LIMITS
     fields: ClassVar[tuple[FieldSpec, ...]] = (
@@ -301,9 +272,7 @@ class CfdCompressibleAnalysis(CfdAnalysis):
         "field": {"drives": "field", "type": "enum", "options": ["pressure", "mach", "temperature", "speed"]},
     }
     ladder: ClassVar[tuple[str, ...]] = ("fluid_coarsen", "continuation", "iterative")
-    noun: ClassVar[str] = "this flow"
-
-    # -- parse ---------------------------------------------------------------------------------------
+    extras_word: ClassVar[str] = "gas flow"
 
     def parse(self, document: dict) -> CfdCompressibleInputs:
         flow = parse_gas_flow(document)
@@ -319,21 +288,16 @@ class CfdCompressibleAnalysis(CfdAnalysis):
 
     # -- the fluid region and its numbers ------------------------------------------------------------
 
-    def _setup(self, ctx: SolveContext, inputs: CfdCompressibleInputs) -> _Setup:
-        geometry = ctx.geometry
-        shape = getattr(geometry, "shape", None)
-        if ctx.assembly is not None or shape is None:
-            raise ValueError("a flow study solves one part: name it with --occurrence (#o1.2), or flow through the "
-                             "assembly's parts fused into one")
-        key = (id(shape), id(inputs))
-        if key in self._setups:
-            return self._setups[key]
+    def setup_of(self, ctx: SolveContext, inputs: CfdCompressibleInputs) -> _Setup:
+        return cached_setup(self._setups, ctx, inputs, ONE_PART, lambda shape, refs: self._build_setup(shape, refs, inputs))
+
+    @staticmethod
+    def _build_setup(shape, refs: dict, inputs: CfdCompressibleInputs) -> _Setup:
         from cadgen._internal.fea import fluid_domain
-        from cadgen._internal.fea.compressible import Gas as SolverGas, sutherland
+        from cadgen._internal.fea.compressible import sutherland
 
         gas = inputs.gas
-        solver_gas = SolverGas(gas.name, gas.gamma, gas.R, gas.mu_ref, gas.T_ref, gas.S)
-        refs = {face.ordinal: face.ref for face in geometry.faces}
+        solver_gas = flow_gas(inputs)
         g = gas.gamma
         if inputs.kind == "internal":
             roles = {**{inlet.opening: "inlet" for inlet in inputs.inlets}, **{outlet.opening: "outlet" for outlet in inputs.outlets}}
@@ -371,11 +335,7 @@ class CfdCompressibleAnalysis(CfdAnalysis):
             wall = length / 8.0
         limit = RE_LIMIT[inputs.kind]
         walls = inputs.walls if inputs.walls != "auto" else ("no_slip" if reynolds <= limit else "slip")
-        setup = _Setup(domain, reynolds, length, wall, walls, T0)
-        if len(self._setups) > 4:
-            self._setups.clear()
-        self._setups[key] = setup
-        return setup
+        return _Setup(domain, reynolds, length, wall, walls, T0)
 
     # -- the ladder ----------------------------------------------------------------------------------
 
@@ -393,30 +353,12 @@ class CfdCompressibleAnalysis(CfdAnalysis):
         return best
 
     def estimate(self, ctx: SolveContext, inputs: CfdCompressibleInputs):
-        from cadgen._internal.fea import fit
-        from cadgen._internal.fea.analyses import cfd
-
-        setup = self._setup(ctx, inputs)
-        plan = ctx.plan
-        wall, far = self.sizes(ctx, setup)
-        tets = self._tets(setup, wall, far)
-        n = 3.0 * cfd.NODES_PER_TET * tets + 0.25 * tets
+        tets, n, per, memory = self._cost(ctx, self.setup_of(ctx, inputs), 4.0)
         if self._expected_mach(inputs) < MAY_CHOKE:
             steps = STEPS_SUBSONIC
         else:
-            steps = STEPS_CHOKED_CONTINUED if "continuation" in plan.taken else STEPS_CHOKED
-        build = cfd.BYTES_PER_TET * tets
-        matrix = 12.0 * cfd.NNZ_PER_ROW * n
-        if plan.solver == "iterative":
-            per, memory = 4.0 * cfd.ITERATIVE_S * n, build + matrix * (1.0 + fit.AMG_COPIES)
-        else:
-            per, memory = cfd.DIRECT_S * n ** 1.5, build + matrix * 2.0 + 16.0 * cfd.FILL * n ** 1.5
-        seconds = cfd.MESH_S * tets + steps * (per + ASSEMBLIES * cfd.ASSEMBLE_S * tets)
-        if inputs.mapped:
-            structure = fit.solid_estimate(ctx)
-            memory = max(memory, structure.memory_bytes - fit.BASE_BYTES)
-            seconds += structure.seconds
-        return fit.Estimate(dofs=int(n), memory_bytes=int(fit.BASE_BYTES + memory), seconds=float(seconds))
+            steps = STEPS_CHOKED_CONTINUED if "continuation" in ctx.plan.taken else STEPS_CHOKED
+        return self._estimate(ctx, inputs, n, memory, MESH_S * tets + steps * (per + ASSEMBLIES * ASSEMBLE_S * tets))
 
     def apply(self, rung, ctx: SolveContext, inputs: CfdCompressibleInputs):
         from cadgen._internal.fea import fit
@@ -439,24 +381,14 @@ class CfdCompressibleAnalysis(CfdAnalysis):
 
         import numpy as np
 
-        from cadgen._internal.fea import compressible, fluid_domain
+        from cadgen._internal.fea import compressible
         from cadgen._internal.fea.compressible import CONTINUATION
-        from cadgen._internal.fea.femspace import FemSpace
 
         timings: dict[str, float] = {}
-        setup = self._setup(ctx, inputs)
+        setup = self.setup_of(ctx, inputs)
         domain = setup.domain
-        timings["fluid_domain_s"] = domain.seconds
         wall, far = self.sizes(ctx, setup)
-        if ctx.log:
-            ctx.log(f"meshing the {domain.kind} gas flow region at {wall:.3g} mm" + (f" (free stream {far:.3g} mm)" if far > wall else ""))
-        started = time.perf_counter()
-        fluid = fluid_domain.mesh_fluid(domain, wall, far)
-        space = FemSpace.build(fluid, 2)
-        timings["fluid_mesh_s"] = time.perf_counter() - started
-
-        face_of = {face.index: face for face in domain.faces}
-        row_kind = np.array([face_of[int(o)].kind if int(o) in face_of else "wall" for o in fluid.boundary_ordinal])
+        fluid, space, face_of, row_kind = mesh_flow(ctx, domain, wall, far, timings, "gas flow")
         problem = self._problem(space, fluid, face_of, row_kind, inputs, setup)
         solver = "iterative" if ctx.plan.solver == "iterative" else "direct"
         schedule = tuple(CONTINUATION) if "continuation" in ctx.plan.taken else ()
@@ -468,8 +400,8 @@ class CfdCompressibleAnalysis(CfdAnalysis):
 
         started = time.perf_counter()
         post = self._post(space, fluid, face_of, row_kind, flow, inputs, setup)
-        mapped = _to_part(ctx, space, fluid, face_of, row_kind,
-                          {"pressure": post["pressure_nodes_Pa"], "mach": flow.mach, "temperature": flow.temperature_K - KELVIN})
+        mapped = to_part(ctx, space, fluid, face_of, row_kind,
+                         {"pressure": post["pressure_nodes_Pa"], "mach": flow.mach, "temperature": flow.temperature_K - KELVIN})
         post["wetted"], post["wetted_nodes"] = mapped.pop("wetted"), mapped.pop("wetted_nodes")
         mapped["speed"], reach = speed_to_part(ctx, space, fluid, face_of, row_kind, np.linalg.norm(space.nodal(flow.u), axis=1) / 1000.0,
                                                speed_reach(inputs.kind, setup.length_mm, wall))
@@ -499,8 +431,7 @@ class CfdCompressibleAnalysis(CfdAnalysis):
                 f"the fastest flow is Mach {peak:.2f}, under Mach {COMPRESSIBLE:g}: the gas is nearly incompressible here, so "
                 "the cfd analysis gives the same answer")
         if post["imbalance"] > 0.01:
-            analysis_warnings.append(f"the mass in and out differ by {post['imbalance']:.1%}: the solve did not settle; "
-                                     "check the result with a finer mesh")
+            analysis_warnings.append(balance_sentence(post["imbalance"], "mass"))
         if not flow.converged:
             analysis_warnings += [w for w in flow.warnings if w.startswith("the gas flow stopped")]
 
@@ -508,26 +439,18 @@ class CfdCompressibleAnalysis(CfdAnalysis):
         started = time.perf_counter()
         tracers = flow_tracers(space, row_kind, {"nodal_velocity": space.nodal(flow.u)}, domain, label="Gas flow")
         timings["tracers_s"] = time.perf_counter() - started
-        result = AnalysisResult(
-            dof_locations=ctx.space.dof_locations, vertices=ctx.space.vertices, tets=ctx.space.tets,
-            boundary_quadratic=ctx.space.boundary_quadratic, element_dofs=ctx.space.element_dofs, fields=fields,
-            dofs=int(space.basis.N + flow.pressure_basis.N),
+        result = part_result(
+            ctx, fields, dofs=int(space.basis.N + flow.pressure_basis.N),
             solver=f"pressure-based compressible Taylor-Hood P2/P1, SUPG and shock capturing, "
                    f"{'GMRES + multigrid' if solver == 'iterative' else 'direct'}",
             timings={**timings, **{f"flow_{k}": v for k, v in flow.timings.items()}}, warnings=warnings,
             scalars={
                 "post": post, "reynolds": reynolds, "mach": mach, "flow": flow, "wall_mm": wall, "far_mm": far, "speed_reach_mm": reach,
-                "fluid_mesh": {"elements": int(len(fluid.tets)), "nodes": int(len(fluid.nodes)),
-                               "wall_size_mm": round(wall, 4), "far_size_mm": round(far, 4)},
-                "analysis_warnings": analysis_warnings,
+                "fluid_mesh": fluid_mesh_record(fluid, wall, far), "analysis_warnings": analysis_warnings,
                 "analysis_extras": {"mach": mach, "walls": setup.walls, **({"motion": tracers} if tracers else {})},
             },
         )
-        if inputs.mapped:
-            started = time.perf_counter()
-            self._structure(ctx, inputs, result, fields["pressure"])
-            result.timings["structure_s"] = time.perf_counter() - started
-        return result
+        return self._mapped(ctx, inputs, result, fields["pressure"])
 
     def _problem(self, space, fluid, face_of, row_kind, inputs: CfdCompressibleInputs, setup: _Setup):
         import numpy as np
@@ -536,10 +459,9 @@ class CfdCompressibleAnalysis(CfdAnalysis):
 
         from cadgen._internal.fea import compressible, navier_stokes
 
-        gas = inputs.gas
         boundary = space.boundary_quadratic
         locations = space.dof_locations
-        opening_of = np.array([face_of[int(o)].opening if int(o) in face_of else None for o in fluid.boundary_ordinal], dtype=object)
+        opening_of = openings_of(fluid, face_of)
         walls = np.unique(boundary[row_kind == "wall"])
         inlets = []
         outlets = []
@@ -585,8 +507,7 @@ class CfdCompressibleAnalysis(CfdAnalysis):
                     total_pressure_Pa=inlet.total_pressure_Pa, mass_flow_kg_s=inlet.mass_flow_kg_s))
             for outlet in inputs.outlets:
                 outlets.append((np.flatnonzero((row_kind == "outlet") & (opening_of == outlet.opening)), outlet.pressure_Pa))
-        solver_gas = compressible.Gas(gas.name, gas.gamma, gas.R, gas.mu_ref, gas.T_ref, gas.S)
-        return compressible.GasProblem(space=space, gas=solver_gas, total_temperature_K=setup.total_temperature_K, inlets=inlets,
+        return compressible.GasProblem(space=space, gas=flow_gas(inputs), total_temperature_K=setup.total_temperature_K, inlets=inlets,
                                        outlets=outlets, wall_rows=np.flatnonzero(row_kind == "wall"), walls=setup.walls,
                                        slip_rows=slip_rows)
 
@@ -633,7 +554,7 @@ class CfdCompressibleAnalysis(CfdAnalysis):
             sharp = (corners.min(axis=0) < 1.0) & (corners.max(axis=0) > 1.0) & (compression > SHOCK_COMPRESSION / 3.0)
             if sharp.any():
                 centres = space.mesh.p[:, space.mesh.t[:4]].mean(axis=1).T
-                shock = {"at_mm": [round(float(c), 3) for c in centres[sharp].mean(axis=0)],
+                shock = {"at_mm": xyz(centres[sharp].mean(axis=0)),
                          "compression": round(float(compression.max()), 4), "elements": int(sharp.sum())}
         return {
             "mass_flow_kg_s": inflow, "outflow_kg_s": outflow,
@@ -651,90 +572,44 @@ class CfdCompressibleAnalysis(CfdAnalysis):
             "min_temperature_C": float(flow.temperature_K.min() - KELVIN),
         }
 
-    def needs_finer(self, result: AnalysisResult, inputs: CfdCompressibleInputs, check_results: list[dict]) -> bool:
-        return False
-
     # -- judging -------------------------------------------------------------------------------------
 
-    def judge(self, check: dict, index: int, ctx: SolveContext, result: AnalysisResult, inputs: CfdCompressibleInputs) -> dict:
-        from cadgen._internal.fea.checks import check_status
-
-        post = result.scalars["post"]
-        if check["kind"] in ("stress", "displacement"):
-            from cadgen._internal.fea.analyses import get_analysis
-
-            return unsettled_check(get_analysis("static").judge(check, index, ctx, result, inputs), result.scalars["flow"].converged)
-        if check["kind"] == "pressure_drop":
-            value, limit, unit, label, at = post["pressure_drop_Pa"], check["limit_Pa"], "Pa", "Flow resistance", post["inlet_at"]
-        elif check["kind"] == "velocity":
-            value, limit, unit, label, at = post["max_velocity_m_s"], check["limit_m_s"], "m/s", "Flow speed", post["max_velocity_at"]
-        else:
-            value, limit, unit, label, at = post["max_mach"], check["limit"], "", "Mach number", post["max_mach_at"]
-        ratio = value / limit
-        # A not-settled march is not a pass: the check says so in its label and is held at close (cfd's rule).
-        return unsettled_check({
-            "kind": check["kind"], "label": check.get("label") or label, "value": round(value, 6), "limit": limit,
-            "unit": unit, "ratio": round(ratio, 6), "close_at": CLOSE_AT, "status": check_status(ratio, CLOSE_AT),
-            "where": {"ref": None, "at": [round(float(c), 3) for c in at]},
-        }, result.scalars["flow"].converged)
+    def _measured(self, check: dict, post: dict) -> tuple:
+        if check["kind"] == "mach":
+            return post["max_mach"], check["limit"], "", "Mach number", post["max_mach_at"]
+        return super()._measured(check, post)
 
     def findings(self, ctx: SolveContext, result: AnalysisResult, inputs: CfdCompressibleInputs,
                  check_results: list[dict], *, assembly: bool) -> list[dict]:
         from cadgen._internal.fea import checks
 
-        found: list[dict] = []
-        if result.solved:
-            found += checks.findings(result.solved[0])
+        found: list[dict] = list(checks.findings(result.solved[0])) if result.solved else []
         mach = result.scalars["mach"]
         post = result.scalars["post"]
         if not mach["checked"]:
-            found.append({
-                "check": "fea", "severity": "warning", "type": "mach_past_checked",
-                "summary": mach_sentence(mach["value"], mach["limit"], post["outlet_mach"] > 1.0),
-                "description": f"fastest Mach {mach['value']:.3g} ({mach['regime']}); the solver's benchmark is a normal shock in "
-                               f"a nozzle with Mach {MACH_CHECKED:g} ahead of it as captured", "items": [],
-            })
+            found.append(finding(
+                "warning", "mach_past_checked", mach_sentence(mach["value"], mach["limit"], post["outlet_mach"] > 1.0),
+                f"fastest Mach {mach['value']:.3g} ({mach['regime']}); the solver's benchmark is a normal shock in "
+                f"a nozzle with Mach {MACH_CHECKED:g} ahead of it as captured"))
         if post["shock"]:
             shock = post["shock"]
-            found.append({
-                "check": "fea", "severity": "info", "type": "shock",
-                "summary": f"A shock stands in the flow near {shock['at_mm']} mm: the gas slows from supersonic to subsonic there "
-                           "and loses total pressure",
-                "description": f"captured over about {shock['elements']} elements; its place is good to about two elements",
-                "items": [{"text": "the shock", "ref": None, "at": shock["at_mm"]}],
-            })
+            found.append(finding(
+                "info", "shock", f"A shock stands in the flow near {shock['at_mm']} mm: the gas slows from supersonic to "
+                "subsonic there and loses total pressure",
+                f"captured over about {shock['elements']} elements; its place is good to about two elements",
+                [{"text": "the shock", "ref": None, "at": shock["at_mm"]}]))
         flow = result.scalars["flow"]
         if not flow.converged:
-            found.append({
-                "check": "fea", "severity": "warning", "type": "gas_flow_unsettled",
-                "summary": f"The gas flow's residual was {flow.residual:.1e} of its largest when it stopped, short of 1e-7",
-                "description": "its numbers are approximate and every check on it is marked not settled (none passes "
-                               "outright); a finer or a coarser mesh, or a gentler pressure ratio, may settle",
-                "items": [],
-            })
-        words = {"pressure_drop": "pressure drop", "velocity": "fastest flow", "mach": "fastest Mach number"}
-        for check in check_results:
-            if check["kind"] not in words or check["status"] == "passes":
-                continue
-            if check.get("settled") is False and check["ratio"] <= check["close_at"]:
-                continue   # held back from passing only because the march did not settle: gas_flow_unsettled says so
-            what = words[check["kind"]]
-            unit = f" {check['unit']}" if check["unit"] else ""
-            value = f"{check['value']:.4g}{unit}"
-            fails = check["status"] == "fails"
-            found.append({
-                "check": "fea", "severity": "error" if fails else "warning",
-                "type": f"{check['kind']}_{'over_limit' if fails else 'close_to_limit'}",
-                "summary": f"The {what} is {value}, {'over' if fails else 'close to'} the {check['limit']:g}{unit} allowed",
-                "description": f"{what} {value} against a {check['limit']:g}{unit} limit ({check['ratio']:.2f} of it)",
-                "items": [{"text": f"the {what}", **check["where"]}],
-            })
+            found.append(finding(
+                "warning", "gas_flow_unsettled",
+                f"The gas flow's residual was {flow.residual:.1e} of its largest when it stopped, short of 1e-7",
+                "its numbers are approximate and every check on it is marked not settled (none passes "
+                "outright); a finer or a coarser mesh, or a gentler pressure ratio, may settle"))
+        found += limit_findings(check_results, {**FLOW_WORDS, "mach": "fastest Mach number"})
         if post["imbalance"] > 0.01:
-            found.append({
-                "check": "fea", "severity": "warning", "type": "flow_balance",
-                "summary": f"The mass in and out differ by {post['imbalance']:.1%}: the flow may not have settled",
-                "description": "the solve leaves gas unaccounted for; a finer mesh should close it", "items": [],
-            })
+            found.append(finding(
+                "warning", "flow_balance", f"The mass in and out differ by {post['imbalance']:.1%}: the flow may not have settled",
+                "the solve leaves gas unaccounted for; a finer mesh should close it"))
         return found
 
     # -- what is written -----------------------------------------------------------------------------
@@ -752,7 +627,7 @@ class CfdCompressibleAnalysis(CfdAnalysis):
 
         pressure, mach_wall, temperature = span("pressure"), span("mach"), span("temperature")
         gas = inputs.gas
-        summary: dict[str, Any] = {
+        return {
             "flow_kind": inputs.kind,
             "gas": {"name": gas.name, "gamma": gas.gamma, "gas_constant_J_kgK": gas.R},
             "walls": result.scalars["analysis_extras"]["walls"],
@@ -762,9 +637,9 @@ class CfdCompressibleAnalysis(CfdAnalysis):
             "outflow_kg_s": float(f"{post['outflow_kg_s']:.6g}"),
             "flow_balance": round(post["imbalance"], 6),
             "max_mach": round(post["max_mach"], 4),
-            "max_mach_at_mm": [round(float(c), 3) for c in post["max_mach_at"]],
+            "max_mach_at_mm": xyz(post["max_mach_at"]),
             "max_velocity_m_s": round(post["max_velocity_m_s"], 4),
-            "max_velocity_at_mm": [round(float(c), 3) for c in post["max_velocity_at"]],
+            "max_velocity_at_mm": xyz(post["max_velocity_at"]),
             "outlet_mach": round(post["outlet_mach"], 4),
             "pressure_ratio": round(post["pressure_ratio"], 6),
             "inlet_total_pressure_Pa": round(post["inlet_total_pressure_Pa"], 3),
@@ -784,23 +659,9 @@ class CfdCompressibleAnalysis(CfdAnalysis):
                       "solver": flow.solver},
             "fluid_mesh": dict(result.scalars["fluid_mesh"]),
             "deformation_scale": result.scalars.get("deformation_scale"),
+            **structure_summary(result),
+            "checks": check_results,
         }
-        if result.solved:
-            from cadgen._internal.fea import checks
-            from cadgen._internal.fea.analyses.static import floored
-
-            outcome = result.scalars["outcome"]
-            magnitude = np.linalg.norm(outcome.displacement, axis=1)
-            solved = result.solved[0]
-            summary.update({
-                "max_von_mises_MPa": round(float(outcome.von_mises.max()), 4),
-                "max_von_mises_at_mm": [round(c, 3) for c in solved.peak_at],
-                "yield_MPa": solved.yield_MPa,
-                "max_displacement_mm": round(float(magnitude.max()), 6),
-                "safety_factor": floored(checks.safety_factor(solved)),
-            })
-        summary["checks"] = check_results
-        return summary
 
     @staticmethod
     def _t0(inputs: CfdCompressibleInputs) -> float:
@@ -813,18 +674,10 @@ class CfdCompressibleAnalysis(CfdAnalysis):
             return T + speed2 / (2.0 * SolverGas(gas.name, gas.gamma, gas.R).cp)
         return sum(inlet.total_temperature_C for inlet in inputs.inlets) / len(inputs.inlets) + KELVIN
 
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} gas flow"
-
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
-        ranges = {"pressure": (summary["min_wall_pressure_Pa"], summary["max_wall_pressure_Pa"]),
-                  "mach": (0.0, summary["max_wall_mach"]),
-                  "speed": (0.0, summary["max_speed_near_wall_m_s"]),
-                  "temperature": (summary["min_wall_temperature_C"], summary["max_wall_temperature_C"])}
-        if "max_von_mises_MPa" in summary:
-            ranges["von_mises"] = (0.0, summary["max_von_mises_MPa"])
-            ranges["displacement"] = (0.0, summary["max_displacement_mm"])
-        return ranges
+        return {"pressure": (summary["min_wall_pressure_Pa"], summary["max_wall_pressure_Pa"]),
+                "mach": (0.0, summary["max_wall_mach"]), "speed": (0.0, summary["max_speed_near_wall_m_s"]),
+                "temperature": (summary["min_wall_temperature_C"], summary["max_wall_temperature_C"]), **structure_ranges(summary)}
 
     def study_echo(self, inputs: CfdCompressibleInputs, bare: Callable[[tuple[str, ...]], list[str]]) -> dict:
         gas = inputs.gas
@@ -847,14 +700,7 @@ class CfdCompressibleAnalysis(CfdAnalysis):
                 entries.append(entry)
             flow["inlets"] = entries
             flow["outlets"] = [{"opening": o.opening, "pressure_Pa": o.pressure_Pa} for o in inputs.outlets]
-        echo: dict[str, Any] = {"flow": flow}
-        if inputs.mapped:
-            material = inputs.structure_material
-            echo["material"] = {"name": material.name, "yield_MPa": material.yield_strength,
-                                "youngs_GPa": round(material.E / 1000.0, 6), "poisson": material.nu}
-            echo["fixtures"] = [{"type": fixture.type, "faces": bare(fixture.faces)} for fixture in inputs.fixtures]
-            echo["loads"] = []
-        return echo
+        return {"flow": flow, **structure_echo(inputs, bare)}
 
     def human_lines(self, summary: dict) -> list[str]:
         mach, solve, reynolds = summary["mach"], summary["solve"], summary["reynolds"]
@@ -874,9 +720,7 @@ class CfdCompressibleAnalysis(CfdAnalysis):
                      + (f" through {', '.join(f'{share:.0%}' for share in solve['stages'])} of the drive" if solve["continuation"] else "")
                      + f", residual {solve['residual']:.1e}" + ("" if solve["converged"] else " (not settled)"))
         if "max_von_mises_MPa" in summary:
-            lines.append(f"under the gas's pressure: peak von Mises {summary['max_von_mises_MPa']:.4g} MPa, "
-                         f"largest displacement {summary['max_displacement_mm']:.4g} mm"
-                         + (f", safety factor {summary['safety_factor']:g}" if summary.get("safety_factor") is not None else ""))
+            lines.append(structure_line(summary, "under the gas's pressure"))
         return lines
 
 
@@ -885,31 +729,3 @@ def flow_gas(inputs: CfdCompressibleInputs):
 
     gas = inputs.gas
     return SolverGas(gas.name, gas.gamma, gas.R, gas.mu_ref, gas.T_ref, gas.S)
-
-
-def _to_part(ctx: SolveContext, space, fluid, face_of, row_kind, nodal: dict) -> dict:
-    """Fluid wall node values carried onto the part's surface nodes, face by face (nearest fluid wall node on the
-    same face). A part face the fluid does not wet reads 0."""
-    import numpy as np
-    from scipy.spatial import cKDTree
-
-    part_space, volume = ctx.space, ctx.volume
-    locations = part_space.dof_locations
-    out = {name: np.zeros(part_space.scalar_count) for name in nodal}
-    fluid_boundary = space.boundary_quadratic
-    ordinal_of_row = np.array([face_of[int(o)].ordinal if int(o) in face_of else 0 for o in fluid.boundary_ordinal])
-    wetted: set[int] = set()
-    wet_nodes: list = []
-    for ordinal in sorted(set(int(o) for o in ordinal_of_row[row_kind == "wall"]) - {0}):
-        source = np.unique(fluid_boundary[(row_kind == "wall") & (ordinal_of_row == ordinal)])
-        target = np.unique(part_space.boundary_quadratic[volume.boundary_ordinal == ordinal])
-        if len(source) == 0 or len(target) == 0:
-            continue
-        wetted.add(ordinal)
-        _, nearest = cKDTree(space.dof_locations[source]).query(locations[target])
-        for name, values in nodal.items():
-            out[name][target] = np.asarray(values)[source[nearest]]
-        wet_nodes.append(target)
-    out["wetted"] = wetted
-    out["wetted_nodes"] = np.unique(np.concatenate(wet_nodes)) if wet_nodes else np.zeros(0, dtype=np.int64)
-    return out

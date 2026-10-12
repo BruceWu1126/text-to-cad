@@ -17,6 +17,8 @@ import math
 import re
 from dataclasses import dataclass
 
+from cadgen._internal.fea.analyses.base import finding as _finding
+
 __all__ = ["CLOSE_WITHIN", "CONVERGED_WITHIN", "GAUSS_RATIO", "MATERIALLY_FINER", "LARGE_DISPLACEMENT", "RESOLVE_BELOW", "Solved", "assembly_findings", "check_findings", "check_status", "default_material", "displacement_check", "findings", "floored_factor", "gap_closed", "needs_finer", "safety_factor", "safety_factor_text", "stress_check"]
 
 #: Re-solve finer only when the safety factor is this close to failing.
@@ -112,26 +114,10 @@ def _item(text: str, ref: str | None, at: tuple[float, float, float]) -> dict:
     return {"text": text, "ref": ref, "at": [round(c, 3) for c in at]}
 
 
-def _finding(severity: str, kind: str, summary: str, description: str, items: list[dict]) -> dict:
-    return {
-        "check": "fea",
-        "severity": severity,
-        "type": kind,
-        "summary": summary,
-        "description": description,
-        "items": items,
-    }
-
-
 def default_material(part: str, material_name: str) -> dict:
     """A part the study gave no material of its own: it got the default, which may not be what it is made of."""
-    return _finding(
-        "warning",
-        "default_material",
-        f"{quoted(part)} uses the default material ({material_name}): is that right?",
-        f"the study's parts name no material for {quoted(part)}",
-        [],
-    )
+    return _finding("warning", "default_material", f"{quoted(part)} uses the default material ({material_name}): is that right?",
+                    f"the study's parts name no material for {quoted(part)}")
 
 
 def gap_closed(first: str, second: str, gap_mm: float, *, interference: bool = False) -> dict:
@@ -139,32 +125,20 @@ def gap_closed(first: str, second: str, gap_mm: float, *, interference: bool = F
     anyway by moving geometry up to that far."""
     if interference:
         # Two figures: the depth is estimated from the shared solid's volume and area, not measured.
-        return _finding(
-            "warning",
-            "gap_closed",
-            f"Closed a {gap_mm:.2g} mm interference between {quoted(first)} and {quoted(second)} to bond them",
-            f"the parts overlapped by {gap_mm:.4g} mm, within the contact tolerance",
-            [],
-        )
-    return _finding(
-        "warning",
-        "gap_closed",
-        f"Closed a {_number(gap_mm)} mm gap between {quoted(first)} and {quoted(second)} to bond them",
-        f"the parts were {gap_mm:.4g} mm apart, within the contact tolerance",
-        [],
-    )
+        return _finding("warning", "gap_closed",
+                        f"Closed a {gap_mm:.2g} mm interference between {quoted(first)} and {quoted(second)} to bond them",
+                        f"the parts overlapped by {gap_mm:.4g} mm, within the contact tolerance")
+    return _finding("warning", "gap_closed",
+                    f"Closed a {_number(gap_mm)} mm gap between {quoted(first)} and {quoted(second)} to bond them",
+                    f"the parts were {gap_mm:.4g} mm apart, within the contact tolerance")
 
 
 def overlapping_parts(first: str, second: str, volume_mm3: float) -> dict:
     """Two parts whose solids overlap: not bonded, and real parts can't overlap."""
-    return _finding(
-        "warning",
-        "overlapping_parts",
-        f"{quoted(first)} and {quoted(second)} overlap by {_number(volume_mm3)} mm³: real parts can't, "
-        "so the model may be wrong; fix the geometry or mark them free",
-        "overlapping parts are not bonded to each other, so no load passes between them",
-        [],
-    )
+    return _finding("warning", "overlapping_parts",
+                    f"{quoted(first)} and {quoted(second)} overlap by {_number(volume_mm3)} mm³: real parts can't, "
+                    "so the model may be wrong; fix the geometry or mark them free",
+                    "overlapping parts are not bonded to each other, so no load passes between them")
 
 
 def findings(solved: Solved) -> list[dict]:
@@ -184,13 +158,8 @@ def findings(solved: Solved) -> list[dict]:
         found.append(_finding(severity, kind, summary, description, items))
 
     if factor is None and not solved.assembly:
-        add(
-            "warning",
-            "no_load",
-            "No load reaches the part: check the loads are on faces connected to the fixed ones",
-            "the peak stress is zero",
-            [],
-        )
+        add("warning", "no_load", "No load reaches the part: check the loads are on faces connected to the fixed ones",
+            "the peak stress is zero", [])
 
     # A materially finer solve that agreed with the first resolved the peak: it is not a singularity.
     moved = None
@@ -205,51 +174,30 @@ def findings(solved: Solved) -> list[dict]:
     spike = solved.peak_gauss_MPa > GAUSS_RATIO * solved.peak_MPa
     qualifier = ""
     peak_finding = None
+    peaks = f"nodal peak {_number(solved.peak_MPa)} MPa, Gauss-point peak {_number(solved.peak_gauss_MPa)} MPa"
     if factor is not None and factor < solved.margin and not resolved and (on_fixture or spike):
         if on_fixture:
             qualifier = " (the peak sits at the fixed face)"
-            peak_finding = (
-                "peak_at_fixture",
-                about(
-                    "Check the stress a little away from the fixed face before redesigning: "
-                    "the model exaggerates peaks where a part is held"
-                ),
-                f"nodal peak {_number(solved.peak_MPa)} MPa, Gauss-point peak {_number(solved.peak_gauss_MPa)} MPa",
-                [peak],
-            )
+            peak_finding = ("peak_at_fixture", about("Check the stress a little away from the fixed face before redesigning: "
+                                                     "the model exaggerates peaks where a part is held"), peaks, [peak])
         else:
             qualifier = " (the peak is a local spike)"
-            peak_finding = (
-                "peak_concentration",
-                about(
-                    "The peak is a sharp local spike the mesh can't resolve (a sharp corner or a concentrated load): "
-                    "a fillet or a finer mesh there would show the real value"
-                ),
-                f"nodal peak {_number(solved.peak_MPa)} MPa, Gauss-point peak {_number(solved.peak_gauss_MPa)} MPa",
-                [peak],
-            )
+            peak_finding = ("peak_concentration", about(
+                "The peak is a sharp local spike the mesh can't resolve (a sharp corner or a concentrated load): "
+                "a fillet or a finer mesh there would show the real value"), peaks, [peak])
     if rising and (on_fixture or spike):
         # One clause is enough. A rising peak at a smooth spot is a real concentration: no "lower" claim.
         qualifier = ", but this peak kept rising on a finer mesh, so the real stress is likely lower"
 
     if factor is not None and factor < 1:
         shown_peak, shown_yield = _distinct(peak_MPa, solved.yield_MPa)
-        add(
-            "error",
-            "yields",
-            f"{subject} yields: peak stress {shown_peak} MPa is above "
+        add("error", "yields", f"{subject} yields: peak stress {shown_peak} MPa is above "
             f"the {shown_yield} MPa yield strength of {solved.material_name}{qualifier}",
-            f"safety factor {safety_factor_text(factor)}",
-            [peak],
-        )
+            f"safety factor {safety_factor_text(factor)}", [peak])
     elif factor is not None and factor < solved.margin:
-        add(
-            "warning",
-            "low_margin",
+        add("warning", "low_margin",
             f"{it} holds, but only {safety_factor_text(factor)}× the load: under the {solved.margin:g}× margin{qualifier}",
-            f"safety factor {safety_factor_text(factor)}, margin {solved.margin:g}",
-            [peak],
-        )
+            f"safety factor {safety_factor_text(factor)}, margin {solved.margin:g}", [peak])
 
     if peak_finding is not None:
         add("warning", *peak_finding)
@@ -257,14 +205,10 @@ def findings(solved: Solved) -> list[dict]:
     # A bonded joint is perfectly rigid where it meets the free surface, which a real joint is not.
     # That edge is singular, so a finer mesh agreeing (resolved) does not clear it.
     if solved.joint_with is not None and factor is not None and factor < solved.margin and peak_finding is None:
-        add(
-            "warning",
-            "bonded_edge_peak",
+        add("warning", "bonded_edge_peak",
             f"In {quoted(solved.part)}: the peak sits on the edge of the bonded joint with {quoted(solved.joint_with)}, "
             "where a bonded model exaggerates stress: check the stress a little away from the joint before redesigning",
-            f"nodal peak {_number(solved.peak_MPa)} MPa, Gauss-point peak {_number(solved.peak_gauss_MPa)} MPa",
-            [peak],
-        )
+            peaks, [peak])
 
     # In an assembly only the weakest part decided the re-solve; another part far from
     # failing that moved is no reason to distrust the answer.
@@ -287,15 +231,11 @@ def findings(solved: Solved) -> list[dict]:
 
     if solved.bbox_diagonal_mm > 0 and solved.max_displacement_mm > LARGE_DISPLACEMENT * solved.bbox_diagonal_mm:
         share = solved.max_displacement_mm / solved.bbox_diagonal_mm
-        add(
-            "warning",
-            "large_displacement",
+        add("warning", "large_displacement",
             f"{it} moves {_number(solved.max_displacement_mm)} mm, about {share:.0%} of its size: "
             "check the fit if it mates with another part",
-            f"maximum displacement {solved.max_displacement_mm:.4g} mm, "
-            f"bounding-box diagonal {solved.bbox_diagonal_mm:.4g} mm",
-            [_item("the largest displacement", None, solved.displacement_at)],
-        )
+            f"maximum displacement {solved.max_displacement_mm:.4g} mm, bounding-box diagonal {solved.bbox_diagonal_mm:.4g} mm",
+            [_item("the largest displacement", None, solved.displacement_at)])
 
     return sorted(found, key=lambda finding: finding["severity"] != "error")
 
@@ -303,20 +243,12 @@ def findings(solved: Solved) -> list[dict]:
 def assembly_findings(parts: list[Solved]) -> list[dict]:
     """The findings of every part of one solved assembly, errors first.
 
-    A part no load reaches is nothing to report on its own; only when none of
-    them is loaded does the study say so.
+    A part no load reaches is nothing to report on its own; only when none of them is loaded does the study say so.
     """
     found = [finding for solved in parts for finding in findings(solved)]
     if all(safety_factor(solved) is None for solved in parts):
-        found.append(
-            _finding(
-                "warning",
-                "no_load",
-                "No load reaches the parts: check the loads are on faces connected to the fixed ones",
-                "the peak stress is zero in every part",
-                [],
-            )
-        )
+        found.append(_finding("warning", "no_load", "No load reaches the parts: check the loads are on faces connected to "
+                              "the fixed ones", "the peak stress is zero in every part"))
     return sorted(found, key=lambda finding: finding["severity"] != "error")
 
 
@@ -389,10 +321,8 @@ def check_findings(results: list[dict], *, assembly: bool = False) -> list[dict]
             "The assembly" if assembly else "The part")
         verb = "move" if subject == "The checked faces" else "moves"
         found.append(_finding(
-            "error",
-            "displacement_over_limit",
+            "error", "displacement_over_limit",
             f"{subject} {verb} {_number(result['value'])} mm, more than the {result['limit']:g} mm allowed",
             f"largest displacement {result['value']:.4g} mm, {result['ratio']:.2f}× the {result['limit']:g} mm limit",
-            [{"text": "the largest displacement", **result["where"]}],
-        ))
+            [{"text": "the largest displacement", **result["where"]}]))
     return found

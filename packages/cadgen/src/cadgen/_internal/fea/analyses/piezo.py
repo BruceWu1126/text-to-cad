@@ -28,10 +28,8 @@ material's c^E, e and eps^S turned to its poling direction. The study names a
 A conducting part (a brass shim) is one voltage throughout, held when an
 electrode is on it; a dielectric part (a plastic, with its permittivity) carries
 field but no coupling; any other part only stiffness and mass. Limits: linear,
-small signal; no depolarisation, hysteresis or heating. Ladder: iterative
-(static: MINRES with block multigrid), local_refine, symmetry (static and
-harmonic, about a plane along every poling direction) and reduce_modes (fewer
-modes, or the sweep by modes). Stdlib at import.
+small signal; no depolarisation, hysteresis or heating. Symmetry (static and
+harmonic) is about a plane along every poling direction. Stdlib at import.
 """
 
 from __future__ import annotations
@@ -42,7 +40,10 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs, Series, SeriesFrame, SolveContext
+from cadgen._internal.fea.analyses.base import (
+    AnalysisBase, AnalysisResult, FieldSpec, Inputs, Series, SeriesFrame, SolveContext, finding, frame_attributes, mirrored,
+    unfold_result, xyz,
+)
 
 __all__ = ["LIMITS", "PiezoAnalysis", "PiezoInputs", "SOLVES", "farads_text", "hertz_text"]
 
@@ -137,12 +138,6 @@ class PiezoInputs(Inputs):
 # -- parse --------------------------------------------------------------------------------------------
 
 
-def _known(entry: dict, keys: set[str], where: str, words: str) -> None:
-    unknown = set(entry) - keys
-    if unknown:
-        raise ValueError(f"{where}: unknown keys {sorted(unknown)}; {words}")
-
-
 def _electrodes(document: dict) -> tuple[ElectrodeSpec, ...]:
     raw = document.get("electrodes")
     example = '[{"faces": ["#o1.f6"], "V": 100, "name": "top"}, {"faces": ["#o1.f5"], "V": 0, "name": "ground"}]'
@@ -154,8 +149,8 @@ def _electrodes(document: dict) -> tuple[ElectrodeSpec, ...]:
         where = f"electrodes[{index}]"
         if not isinstance(entry, dict):
             raise ValueError(f"{where}: expected an object like {{\"faces\": [\"#o1.f6\"], \"V\": 100}}")
-        _known(entry, {"faces", "V", "open", "name"}, where,
-               "an electrode takes faces, V (held at a voltage) or open (true: it floats) and an optional name")
+        kinds.known(entry, {"faces", "V", "open", "name"}, where,
+                    "an electrode takes faces, V (held at a voltage) or open (true: it floats) and an optional name")
         is_open = entry.get("open", False)
         if not isinstance(is_open, bool):
             raise ValueError(f"{where}.open: true (the electrode floats: nothing is connected) or false")
@@ -169,12 +164,6 @@ def _electrodes(document: dict) -> tuple[ElectrodeSpec, ...]:
     if len(set(names)) != len(names):
         raise ValueError("electrodes: two are named the same; give each a 'name' of its own")
     return tuple(out)
-
-
-def _checks_of(document: dict) -> list[tuple[int, dict]]:
-    view = document.get("view")
-    checks = view.get("checks") if isinstance(view, dict) else None
-    return [(i, c) for i, c in enumerate(checks) if isinstance(c, dict)] if isinstance(checks, list) else []
 
 
 def _materials_of(document: dict) -> list:
@@ -226,29 +215,22 @@ def parse_document(document: dict) -> PiezoInputs:
             raise ValueError("electrodes: every electrode is at 0 V, so nothing opens at anti-resonance; give the driven "
                              "electrode its voltage (any V) or mark it open")
     if "modes" in document:
-        modes = document["modes"]
-        if isinstance(modes, bool) or not isinstance(modes, int) or not 1 <= modes <= MAX_MODES:
-            raise ValueError(f"modes: how many modes to find, a whole number from 1 to {MAX_MODES}, got {kinds.json_text(modes)}")
+        modes = kinds.whole(document["modes"], where="modes", high=MAX_MODES,
+                            words=f"how many modes to find, a whole number from 1 to {MAX_MODES}")
     if solve == "harmonic":
-        raw = document.get("sweep_Hz")
-        if not isinstance(raw, list) or len(raw) != 2:
-            raise ValueError("sweep_Hz: the band to drive it over as [low, high] in Hz, like [1000, 50000]")
-        low, high = (kinds.number(v, where="sweep_Hz", positive=True) for v in raw)
-        if not low < high:
-            raise ValueError(f"sweep_Hz: low ({low:g}) must be below high ({high:g})")
-        sweep = (low, high)
+        sweep = kinds.band(document.get("sweep_Hz"), where="sweep_Hz",
+                           words="the band to drive it over as [low, high] in Hz, like [1000, 50000]")
         if "damping_ratio" in document:
             zeta = kinds.number(document["damping_ratio"], where="damping_ratio", positive=True)
             if zeta >= 0.5:
                 raise ValueError(f"damping_ratio: the share of critical damping, under 0.5 (a PZT-4 disc is about 0.001, "
                                  f"PZT-5A 0.007, a mounted part 0.01 to 0.05), got {zeta:g}")
         if "points" in document:
-            points = document["points"]
-            if isinstance(points, bool) or not isinstance(points, int) or not 10 <= points <= 400:
-                raise ValueError(f"points: the sweep's frequencies, a whole number from 10 to 400, got {kinds.json_text(points)}")
+            points = kinds.whole(document["points"], where="points", low=10, high=400,
+                                 words="the sweep's frequencies, a whole number from 10 to 400")
     checks = []
     allowed_checks = SOLVE_CHECKS[solve]
-    for index, entry in _checks_of(document):
+    for index, entry in kinds.view_checks(document):
         kind = entry.get("kind")
         if kind in ("stress", "displacement", "voltage", "frequency") and kind not in allowed_checks:
             raise ValueError(f"view.checks[{index}]: a {kind} check is not for a {solve} piezo study; it takes "
@@ -344,18 +326,14 @@ def _rigid_count(frequencies, expected: int) -> int:
     return int((frequencies < threshold).sum())
 
 
-class PiezoAnalysis:
+class PiezoAnalysis(AnalysisBase):
     name: ClassVar[str] = "piezo"
-    tier: ClassVar[int] = 3
     word: ClassVar[str] = "Piezo"
-    estimate_only: ClassVar[bool] = False
+    extras_word: ClassVar[str] = "piezo"
     limits: ClassVar[tuple[str, ...]] = LIMITS
     study_keys: ClassVar[frozenset[str]] = frozenset({
         "solve", "electrodes", "fixtures", "loads", "modes", "sweep_Hz", "damping_ratio", "points",
     })
-    material_needs: ClassVar[frozenset[str]] = frozenset()
-    mesh_orders: ClassVar[tuple[int, ...]] = (2,)
-    connection_types: ClassVar[tuple[str, ...]] = ("bonded", "free")
     checks: ClassVar[tuple] = (kinds.STRESS, kinds.DISPLACEMENT, kinds.VOLTAGE, kinds.FREQUENCY)
     default_checks: ClassVar[tuple[dict, ...]] = ()
     drives: ClassVar[tuple[str, ...]] = ("field", "deformation", "threshold", "mode", "frame")
@@ -363,7 +341,6 @@ class PiezoAnalysis:
         "field": {"drives": "field", "type": "enum", "options": ["von_mises", "potential", "electric_field", "displacement"]},
         "deformation": {"drives": "deformation", "type": "number", "min": 0.0, "max": None},
     }
-    upstream: ClassVar[tuple[str, ...]] = ()
     ladder: ClassVar[tuple[str, ...]] = ("iterative", "local_refine", "symmetry", "reduce_modes")
     noun: ClassVar[str] = "this voltage"
     governing_word: ClassVar[str] = "peak stress"
@@ -412,7 +389,6 @@ class PiezoAnalysis:
             memory = build + 2.0 * matrix + factor_bytes + 8.0 * vectors * n
             seconds = assemble + 2.0 * (factor_seconds + 3 * vectors * 4.0 * fit.FILL * n ** 1.5 * 1e-9)
         else:
-            low, high = inputs.sweep_Hz or (1.0, 10.0)
             solves = inputs.points + 13 * self._modes_wanted(ctx, inputs) + 24
             memory = build + 2.0 * matrix + 2.0 * factor_bytes
             if plan.modes is not None:
@@ -421,7 +397,6 @@ class PiezoAnalysis:
                 seconds = assemble + 2.0 * factor_seconds + 3 * vectors * 4.0 * fit.FILL * n ** 1.5 * 1e-9 + solves * n * 1e-7
             else:
                 seconds = assemble + factor_seconds + 4.0 * solves * factor_seconds
-            del low, high
         if two:
             seconds *= 2.0
         return fit.Estimate(n, int(fit.BASE_BYTES + memory), float(seconds))
@@ -486,15 +461,8 @@ class PiezoAnalysis:
 
                 if not mirror_symmetric(material, axis):
                     return False
-
-        def onto_itself(refs) -> bool:
-            ordinals = {ctx.ordinal_of[ref] for ref in refs}
-            return {plane.mirror.get(o) for o in ordinals} == ordinals
-
         groups = [e.faces for e in inputs.electrodes] + [f.faces for f in inputs.fixtures] + [load.faces for load in inputs.loads]
-        checks = ctx.study.checks if ctx.study is not None else ()
-        groups += [tuple(check["faces"]) for check in checks if check.get("faces")]
-        if not all(onto_itself(group) for group in groups):
+        if not mirrored(plane, ctx, groups):
             return False
         for load in inputs.loads:
             if load.type == "force" and abs(load.vector[axis]) > 1e-9 * max(math.sqrt(sum(c * c for c in load.vector)), 1e-300):
@@ -508,10 +476,6 @@ class PiezoAnalysis:
         return values, float(values.max())
 
     # -- solve ---------------------------------------------------------------------------------------
-
-    def _planes(self, ctx: SolveContext) -> list:
-        plan = ctx.plan
-        return list(plan.prepared.planes) if plan is not None and plan.prepared is not None else []
 
     def _supports(self, ctx: SolveContext, inputs: PiezoInputs, planes):
         from cadgen._internal.fea.supports import supports_of
@@ -539,6 +503,7 @@ class PiezoAnalysis:
         import time
 
         from cadgen._internal.fea import piezo_ops
+        from cadgen._internal.fea.analyses.nonlinear import symmetry_planes
 
         started = time.perf_counter()
         space = ctx.space
@@ -548,7 +513,7 @@ class PiezoAnalysis:
                              "\"pzt-5h\", or a material with a piezo block)")
         matrices = piezo_ops.assemble(space, parts)
         timings = {"assemble_s": time.perf_counter() - started}
-        planes = self._planes(ctx)
+        planes = symmetry_planes(ctx)
         supports = self._supports(ctx, inputs, planes)
         if inputs.solve != "resonance":
             from cadgen._internal.fea.supports import not_held_sentence, unheld_motions
@@ -575,7 +540,7 @@ class PiezoAnalysis:
         result.scalars["poling"] = self._poling(ctx)
         inputs.resolved["poling"] = result.scalars["poling"]
         if planes:
-            self._unfold(ctx, result, planes)
+            unfold_result(ctx, result, planes, vectors={"displacement", "displacement_im", "mode_shape"})
         return result
 
     def _poling(self, ctx) -> list[dict]:
@@ -611,7 +576,8 @@ class PiezoAnalysis:
 
         space = ctx.space
         share = 0.5 ** len(planes)
-        system = piezo_ops.System(space, matrices, supports, self._electrodes(ctx, inputs, "as_given"), conductors)
+        electrodes = self._electrodes(ctx, inputs, "as_given")
+        system = piezo_ops.System(space, matrices, supports, electrodes, conductors)
         f = piezo_ops.surface_loads(space, inputs.loads, ctx.ordinal_of, share)
         started = time.perf_counter()
         warnings: list[str] = []
@@ -620,12 +586,11 @@ class PiezoAnalysis:
         displacement, vm, strength = self._fields(space, parts, response.u, response.phi)
         records = self._electrode_records(inputs, response, share)
         # Each electrode's mean displacement (an actuator's stroke): over its nodes; across a symmetry plane it is zero.
-        for record, electrode in zip(records, system_electrodes := self._electrodes(ctx, inputs, "as_given")):
+        for record, electrode in zip(records, electrodes):
             mean = displacement[electrode.dofs].mean(axis=0)
             for plane in planes:
                 mean[plane.component] = 0.0
             record["mean_displacement_mm"] = [float(c) for c in mean]
-        del system_electrodes
         capacitance = None
         held = [r for r, spec in zip(records, inputs.electrodes) if spec.volts is not None]
         if not inputs.loads and len({r["V"] for r in held}) >= 2:
@@ -705,8 +670,7 @@ class PiezoAnalysis:
                             "in the summary")
         series = mode_series([m["resonance_Hz"] for m in modes], hertz_text, "Hz", frames)
         for n, frame in enumerate(series.frames):
-            frame.attributes.update({"von_mises": "_VON_MISES" if n == 0 else f"_VON_MISES_F{n}",
-                                     "potential": "_POTENTIAL" if n == 0 else f"_POTENTIAL_F{n}"})
+            frame.attributes.update(frame_attributes({"von_mises": "_VON_MISES", "potential": "_POTENTIAL"}, n))
         return self._base(
             space, fields={"mode_shape": shapes[0], "von_mises": stresses[0], "potential": potentials[0]},
             deformation=shapes[0], series=series,
@@ -786,9 +750,7 @@ class PiezoAnalysis:
         default = int(np.argmax([float(np.linalg.norm(r + 1j * i, axis=1).max()) for r, i in zip(re, im)]))
         series = Series(kind="frequency", unit="Hz", default=default, frames=[
             SeriesFrame(value=round(fz, 6), label=hertz_text(fz), attributes={
-                "von_mises": "_VON_MISES" if n == 0 else f"_VON_MISES_F{n}",
-                "potential": "_POTENTIAL" if n == 0 else f"_POTENTIAL_F{n}",
-                "displacement": "_DISPLACEMENT" if n == 0 else f"_DISPLACEMENT_F{n}",
+                **frame_attributes({"von_mises": "_VON_MISES", "potential": "_POTENTIAL", "displacement": "_DISPLACEMENT"}, n),
                 "displacement_im": f"_DISPLACEMENT_IM_F{n}",
             }) for n, fz in enumerate(frame_Hz)])
         x = [round(float(v), 6) for v in grid]
@@ -814,43 +776,6 @@ class PiezoAnalysis:
             dofs=int(space.dofs + space.scalar.N), solver=("modes + static correction; " if modal else "direct sweep; ") + how,
             timings={"eigen_s": eigen_s, "sweep_s": sweep_s}, warnings=warnings,
         )
-
-    def _unfold(self, ctx: SolveContext, result: AnalysisResult, planes) -> None:
-        """The solved half (or quarter) mirrored into the whole part, every field and frame with it."""
-        import numpy as np
-
-        from cadgen._internal.fea import symmetry
-
-        volume = ctx.volume
-        vectors_named = {"displacement", "displacement_im", "mode_shape"}
-        for plane in reversed(planes):
-            whole, keep = symmetry.unfold_volume(volume, plane)
-            scalars, vectors = {}, {}
-            for name, values in result.fields.items():
-                (vectors if name in vectors_named else scalars)[f"f:{name}"] = np.asarray(values)
-            for name, frames in result.frame_fields.items():
-                for i, values in enumerate(frames):
-                    (vectors if name in vectors_named else scalars)[f"{name}:{i}"] = np.asarray(values)
-            if result.deformation is not None:
-                vectors["deformation"] = np.asarray(result.deformation)
-            locations, s_out, v_out, boundary, tets, elements, vertices = symmetry.unfold_fields(
-                plane, result.vertices, result.dof_locations, keep, scalars=scalars, vectors=vectors,
-                boundary=result.boundary_quadratic, tets=result.tets, element_dofs=result.element_dofs,
-            )
-            merged = {**s_out, **v_out}
-            result.fields = {name: merged[f"f:{name}"] for name in result.fields}
-            result.frame_fields = {name: [merged[f"{name}:{i}"] for i in range(len(frames))]
-                                   for name, frames in result.frame_fields.items()}
-            if result.deformation is not None:
-                result.deformation = merged["deformation"]
-            result.reactions = [symmetry.unfold_force(plane, r) for r in result.reactions]
-            result.dof_locations, result.boundary_quadratic = locations, boundary
-            result.tets, result.element_dofs, result.vertices = tets, elements, vertices
-            volume = whole
-        ctx.volume = volume
-
-    def needs_finer(self, result: AnalysisResult, inputs: PiezoInputs, check_results: list[dict]) -> bool:
-        return False
 
     # -- judging -------------------------------------------------------------------------------------
 
@@ -881,7 +806,7 @@ class PiezoAnalysis:
                    "electrode": name}
             electrode = next(e for e in inputs.electrodes if e.name == name)
             face = ctx.volume.faces[ctx.ordinal_of[electrode.faces[0]]]
-            out["where"] = {"ref": face.ref, "at": [round(float(c), 3) for c in face.center]}
+            out["where"] = {"ref": face.ref, "at": xyz(face.center)}
             if at is not None:
                 out["at"] = at
             return out
@@ -891,9 +816,7 @@ class PiezoAnalysis:
             frame = int(np.argmax(stress_max)) if kind == "stress" else result.series.default
         if kind == "stress":
             values = result.frame_fields["von_mises"][frame] if result.frame_fields else result.fields["von_mises"]
-            peak = kinds.field_max_over(values, (), boundary=result.boundary_quadratic,
-                                        boundary_ordinal=ctx.volume.boundary_ordinal, locations=result.dof_locations,
-                                        face_ref=ctx.volume.faces, ordinal_of=ctx.ordinal_of, where=f"view.checks[{index}]")
+            peak = kinds.check_max(values, (), ctx, result, index)
             material = ctx.study.material if ctx.study is not None and ctx.study.material is not None else ctx.materials[0]
             limit = material.yield_strength
             margin = ctx.study.margin if ctx.study is not None else 2.0
@@ -901,16 +824,13 @@ class PiezoAnalysis:
             out = {"kind": "stress", "label": label, "value": round(peak.value, 4), "limit": limit, "unit": "MPa",
                    "ratio": round(ratio, 6), "close_at": round(1 / margin, 6), "margin": margin,
                    "status": "fails" if ratio > 1 else "close" if ratio > 1 / margin else "passes",
-                   "where": {"ref": peak.ref, "at": [round(c, 3) for c in peak.at]}}
+                   "where": {"ref": peak.ref, "at": xyz(peak.at)}}
         else:
             vectors = result.frame_fields["displacement"][frame] if result.frame_fields else result.fields["displacement"]
             if result.frame_fields:
                 vectors = vectors + 1j * result.frame_fields["displacement_im"][frame]
             magnitude = np.sqrt((np.abs(vectors) ** 2).sum(axis=1))
-            refs = tuple(check.get("faces", ()))
-            peak = kinds.field_max_over(magnitude, refs, boundary=result.boundary_quadratic,
-                                        boundary_ordinal=ctx.volume.boundary_ordinal, locations=result.dof_locations,
-                                        face_ref=ctx.volume.faces, ordinal_of=ctx.ordinal_of, where=f"view.checks[{index}]")
+            peak = kinds.check_max(magnitude, check.get("faces", ()), ctx, result, index)
             out = checks.displacement_check(peak.value, check["limit_mm"], at=peak.at, ref=peak.ref, faces=peak.faces, label=label)
         if result.series is not None and result.scalars.get("solve") == "harmonic":
             frame_value = result.series.frames[frame].value
@@ -948,11 +868,6 @@ class PiezoAnalysis:
                  check_results: list[dict], *, assembly: bool) -> list[dict]:
         scalars = result.scalars
         found = []
-
-        def finding(severity, kind, summary, description, items=()):
-            return {"check": "fea", "severity": severity, "type": kind, "summary": summary, "description": description,
-                    "items": list(items)}
-
         if inputs.solve == "static":
             capacitance = scalars["capacitance"]
             if capacitance:
@@ -1017,7 +932,7 @@ class PiezoAnalysis:
                 "capacitance_F": None if capacitance is None else float(f"{capacitance['F']:.6g}"),
                 "capacitance_between": None if capacitance is None else capacitance["between"],
                 "max_displacement_mm": round(float(magnitude.max()), 9),
-                "max_displacement_at_mm": [round(float(c), 3) for c in result.dof_locations[moved]],
+                "max_displacement_at_mm": xyz(result.dof_locations[moved]),
                 "max_von_mises_MPa": round(float(result.fields["von_mises"].max()), 4),
                 "max_electric_field_kV_mm": round(float(result.fields["electric_field"].max()), 6),
                 "potential_range_V": [round(float(result.fields["potential"].min()), 6),
@@ -1055,9 +970,6 @@ class PiezoAnalysis:
         out["deformation_scale"] = scalars["deformation_scale"]
         out["checks"] = check_results
         return out
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} piezo"
 
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
         import numpy as np

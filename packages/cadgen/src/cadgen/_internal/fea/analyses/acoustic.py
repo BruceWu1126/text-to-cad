@@ -35,7 +35,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs, Series, SeriesFrame, SolveContext
+from cadgen._internal.fea.analyses.base import (
+    AnalysisBase, AnalysisResult, FieldSpec, Inputs, Series, SeriesFrame, SolveContext, by_severity, finding, frame_attributes,
+    max_frames, mirrored, unfold_result, xyz,
+)
 
 if TYPE_CHECKING:
     import numpy as np
@@ -184,24 +187,6 @@ class AcousticInputs(Inputs):
 # -- parsing ----------------------------------------------------------------------------------------
 
 
-def _known(entry: dict, keys: set[str], where: str, words: str) -> None:
-    unknown = set(entry) - keys
-    if unknown:
-        raise ValueError(f"{where}: unknown keys {sorted(unknown)}; {words}")
-
-
-def _entries(document: dict, key: str, example: str) -> list[dict]:
-    raw = document.get(key)
-    if raw is None:
-        return []
-    if not isinstance(raw, list):
-        raise ValueError(f"study.{key}: expected a list like [{example}]")
-    for index, entry in enumerate(raw):
-        if not isinstance(entry, dict):
-            raise ValueError(f"{key}[{index}]: expected an object like {example}")
-    return raw
-
-
 def _point(raw: Any, where: str) -> tuple[float, float, float]:
     if not isinstance(raw, list) or len(raw) != 3:
         raise ValueError(f"{where}: a point as [x, y, z] in mm")
@@ -221,7 +206,7 @@ def parse_fluid(raw: Any):
         return Fluid(raw, density, speed, reference)
     if not isinstance(raw, dict):
         raise ValueError('fluid: "air", "water", or {"density_kg_m3": 1.2, "speed_m_s": 343}')
-    _known(raw, {"name", "density_kg_m3", "speed_m_s", "reference_Pa"}, "fluid",
+    kinds.known(raw, {"name", "density_kg_m3", "speed_m_s", "reference_Pa"}, "fluid",
            "a fluid takes density_kg_m3, speed_m_s, and optionally name and reference_Pa")
     for key in ("density_kg_m3", "speed_m_s"):
         if key not in raw:
@@ -236,9 +221,9 @@ def parse_fluid(raw: Any):
 
 def _sources(document: dict) -> tuple[Source, ...]:
     out = []
-    for index, entry in enumerate(_entries(document, "sources", '{"faces": ["#o1.f3"], "velocity_mm_s": 1}')):
+    for index, entry in enumerate(kinds.entries(document, "sources", '{"faces": ["#o1.f3"], "velocity_mm_s": 1}')):
         where = f"sources[{index}]"
-        _known(entry, {"faces", "velocity_mm_s", "point_mm", "volume_velocity_m3_s"}, where,
+        kinds.known(entry, {"faces", "velocity_mm_s", "point_mm", "volume_velocity_m3_s"}, where,
                "a source is a vibrating face (faces, velocity_mm_s) or a point (point_mm, volume_velocity_m3_s)")
         if "faces" in entry:
             if "point_mm" in entry or "volume_velocity_m3_s" in entry:
@@ -264,9 +249,9 @@ def _sources(document: dict) -> tuple[Source, ...]:
 
 def _absorbers(document: dict) -> tuple[Absorber, ...]:
     out = []
-    for index, entry in enumerate(_entries(document, "absorbers", '{"faces": ["#o1.f5"], "absorption": 0.3}')):
+    for index, entry in enumerate(kinds.entries(document, "absorbers", '{"faces": ["#o1.f5"], "absorption": 0.3}')):
         where = f"absorbers[{index}]"
-        _known(entry, {"faces", "absorption", "impedance_rayl"}, where,
+        kinds.known(entry, {"faces", "absorption", "impedance_rayl"}, where,
                "an absorber takes faces and absorption (0 to 1) or impedance_rayl (Pa·s/m)")
         given = [key for key in ("absorption", "impedance_rayl") if key in entry]
         if len(given) != 1:
@@ -285,9 +270,9 @@ def _absorbers(document: dict) -> tuple[Absorber, ...]:
 
 def _probes(document: dict) -> tuple[Probe, ...]:
     out = []
-    for index, entry in enumerate(_entries(document, "probes", '{"at_mm": [0, 0, 100], "label": "ear"}')):
+    for index, entry in enumerate(kinds.entries(document, "probes", '{"at_mm": [0, 0, 100], "label": "ear"}')):
         where = f"probes[{index}]"
-        _known(entry, {"at_mm", "label"}, where, "a probe takes at_mm ([x, y, z]) and a label")
+        kinds.known(entry, {"at_mm", "label"}, where, "a probe takes at_mm ([x, y, z]) and a label")
         label = entry.get("label", f"probe {index + 1}")
         if not isinstance(label, str) or not label.strip():
             raise ValueError(f"{where}.label: a short name, like \"ear\"")
@@ -301,11 +286,9 @@ def _probes(document: dict) -> tuple[Probe, ...]:
 
 
 def _study_checks(document: dict) -> tuple[dict, ...]:
-    view = document.get("view")
-    entries = view.get("checks") if isinstance(view, dict) else None
     found = []
-    for index, entry in enumerate(entries if isinstance(entries, list) else ()):
-        if isinstance(entry, dict) and entry.get("kind") in ("sound_level", "frequency"):
+    for index, entry in kinds.view_checks(document):
+        if entry.get("kind") in ("sound_level", "frequency"):
             spec = kinds.SOUND_LEVEL if entry["kind"] == "sound_level" else kinds.FREQUENCY
             try:
                 found.append({**spec.parse(entry, f"view.checks[{index}]"), "index": index})
@@ -335,25 +318,20 @@ class _Air:
     probe_extrapolated: list = field(default_factory=list)
 
 
-class AcousticAnalysis:
+class AcousticAnalysis(AnalysisBase):
     name: ClassVar[str] = "acoustic"
-    tier: ClassVar[int] = 3
     word: ClassVar[str] = "Sound"
-    estimate_only: ClassVar[bool] = False
+    extras_word: ClassVar[str] = "sound"
     study_keys: ClassVar[frozenset[str]] = frozenset({
         "fluid", "domain", "modes", "sweep_Hz", "frequencies_Hz", "points", "sources", "absorbers", "open", "probes",
         "loss_factor", "air_mm", "from",
     }) | _HARMONIC_KEYS
-    material_needs: ClassVar[frozenset[str]] = frozenset()
     #: The material is the structure's, and only a vibro-acoustic study has one (study.parse_study reads this).
     material_required: ClassVar[bool] = False
     isotropic_only: ClassVar[bool] = False
-    mesh_orders: ClassVar[tuple[int, ...]] = (2,)
-    connection_types: ClassVar[tuple[str, ...]] = ("bonded", "free")
     checks: ClassVar[tuple] = (kinds.SOUND_LEVEL, kinds.FREQUENCY)
     default_checks: ClassVar[tuple[dict, ...]] = ()
     drives: ClassVar[tuple[str, ...]] = ("field", "threshold", "mode", "frame")
-    upstream: ClassVar[tuple[str, ...]] = ()
     ladder: ClassVar[tuple[str, ...]] = ("iterative", "far_field", "local_refine", "reduce_modes", "symmetry")
     noun: ClassVar[str] = "this sound"
 
@@ -401,8 +379,8 @@ class AcousticAnalysis:
         sources = _sources(document)
         absorbers = _absorbers(document)
         open_faces: tuple[str, ...] = ()
-        for index, entry in enumerate(_entries(document, "open", '{"faces": ["#o1.f2"]}')):
-            _known(entry, {"faces"}, f"open[{index}]", "an open face takes faces (held at zero sound pressure, an open pipe end)")
+        for index, entry in enumerate(kinds.entries(document, "open", '{"faces": ["#o1.f2"]}')):
+            kinds.known(entry, {"faces"}, f"open[{index}]", "an open face takes faces (held at zero sound pressure, an open pipe end)")
             open_faces += kinds.faces(entry, where=f"open[{index}]")
         probes = _probes(document)
         harmonic_keys = sorted(set(document) & _HARMONIC_KEYS)
@@ -425,13 +403,8 @@ class AcousticAnalysis:
         sweep = None
         frequencies: tuple[float, ...] = ()
         if document.get("sweep_Hz") is not None:
-            raw = document["sweep_Hz"]
-            if not isinstance(raw, list) or len(raw) != 2:
-                raise ValueError("sweep_Hz: the frequencies to sweep as [low, high] in Hz, like [100, 2000]")
-            low, high = (kinds.number(v, where="sweep_Hz", positive=True) for v in raw)
-            if not low < high:
-                raise ValueError(f"sweep_Hz: low ({low:g}) must be below high ({high:g})")
-            sweep = (low, high)
+            sweep = kinds.band(document["sweep_Hz"], where="sweep_Hz",
+                               words="the frequencies to sweep as [low, high] in Hz, like [100, 2000]")
         if document.get("frequencies_Hz") is not None:
             raw = document["frequencies_Hz"]
             if not isinstance(raw, list) or not raw:
@@ -441,9 +414,8 @@ class AcousticAnalysis:
                 raise ValueError("frequencies_Hz: give a sweep_Hz or a list of frequencies_Hz, not both")
         points = SWEEP_POINTS
         if "points" in document:
-            points = document["points"]
-            if isinstance(points, bool) or not isinstance(points, int) or not 2 <= points <= 400:
-                raise ValueError(f"points: how many log-spaced frequencies to solve over sweep_Hz, 2 to 400, got {kinds.json_text(points)}")
+            points = kinds.whole(document["points"], where="points", low=2, high=400,
+                                 words="how many log-spaced frequencies to solve over sweep_Hz, 2 to 400")
         if response and sweep is None and not frequencies:
             raise ValueError("sweep_Hz: the frequencies to solve the sound at, as [low, high] in Hz (or frequencies_Hz, a list)")
         if not response:
@@ -459,8 +431,7 @@ class AcousticAnalysis:
         modes = document.get("modes", 6)
         if "modes" in document and response:
             raise ValueError("modes: a driven response solves every frequency of its sweep; modes is for a study with no sources")
-        if isinstance(modes, bool) or not isinstance(modes, int) or not 1 <= modes <= MAX_MODES:
-            raise ValueError(f"modes: how many acoustic modes to find, 1 to {MAX_MODES}, got {kinds.json_text(modes)}")
+        kinds.whole(modes, where="modes", high=MAX_MODES, words=f"how many acoustic modes to find, 1 to {MAX_MODES}")
         loss = DEFAULT_LOSS if response else 0.0
         if "loss_factor" in document:
             loss = kinds.number(document["loss_factor"], where="loss_factor")
@@ -589,7 +560,7 @@ class AcousticAnalysis:
         if inputs.solve == "modes":
             return 0
         if inputs.from_harmonic:
-            return int(getattr(ctx.budget, "max_frames", 24) or 24)
+            return max_frames(ctx)
         if inputs.frequencies_Hz:
             return len(inputs.frequencies_Hz)
         count = inputs.points
@@ -784,16 +755,8 @@ class AcousticAnalysis:
             return False
         if any(source.point_mm is not None for source in inputs.sources):
             return False
-
-        def onto_itself(refs) -> bool:
-            ordinals = {ctx.ordinal_of[ref] for ref in refs}
-            return {plane.mirror.get(o) for o in ordinals} == ordinals
-
         groups = [s.faces for s in inputs.sources] + [a.faces for a in inputs.absorbers]
-        groups += [inputs.open_faces] if inputs.open_faces else []
-        checks = ctx.study.checks if ctx.study is not None else ()
-        groups += [tuple(check["faces"]) for check in checks if check.get("faces")]
-        return all(onto_itself(group) for group in groups)
+        return mirrored(plane, ctx, groups + ([inputs.open_faces] if inputs.open_faces else []))
 
     def governing(self, result: AnalysisResult):
         if self._solve == "modes":
@@ -938,7 +901,7 @@ class AcousticAnalysis:
         frequencies, vectors = frequencies[:wanted], vectors[:, :wanted]
         if len(frequencies) < inputs.check_modes:
             raise ValueError(f"view.checks: a check names mode {inputs.check_modes}, but only {len(frequencies)} modes were found")
-        frames = min(len(frequencies), int(getattr(ctx.budget, "max_frames", 24) or 24))
+        frames = min(len(frequencies), max_frames(ctx))
         shapes = []
         for column in vectors.T[:frames]:
             peak = int(np.abs(column).argmax())
@@ -952,7 +915,7 @@ class AcousticAnalysis:
                             f"under {ELEMENTS_PER_WAVELENGTH:g}: it may read about {100 * self._error(per_top):.1f}% high")
         series = Series(kind="mode", unit="Hz", default=0, frames=[
             SeriesFrame(value=float(i + 1), label=f"Mode {i + 1} · {_hz(float(f))}",
-                        attributes={"sound_pressure": "_SOUND_PRESSURE" if i == 0 else f"_SOUND_PRESSURE_F{i}"})
+                        attributes=frame_attributes({"sound_pressure": "_SOUND_PRESSURE"}, i))
             for i, f in enumerate(frequencies[:frames])
         ])
         result = self._base_result(
@@ -1081,7 +1044,7 @@ class AcousticAnalysis:
             peaks[index] = {"grid": int(i), "amplitude": float(values[i, j]),
                             "at": tuple(float(v) for v in region.space.dof_locations[node]), "ref": ref, "probe": None}
 
-        frames_cap = int(getattr(ctx.budget, "max_frames", 24) or 24)
+        frames_cap = max_frames(ctx)
         if inputs.from_harmonic:
             indices = list(range(len(grid)))
         else:
@@ -1107,10 +1070,8 @@ class AcousticAnalysis:
                 level[dry] = 0.0
         default = int(np.argmax([float(curve[i]) for i in indices]))
         series = Series(kind="frequency", unit="Hz", default=default, frames=[
-            SeriesFrame(value=round(float(grid[i]), 6), label=_hz(float(grid[i])), attributes={
-                "sound_level": "_SOUND_LEVEL" if frame == 0 else f"_SOUND_LEVEL_F{frame}",
-                "sound_pressure": "_SOUND_PRESSURE" if frame == 0 else f"_SOUND_PRESSURE_F{frame}",
-            })
+            SeriesFrame(value=round(float(grid[i]), 6), label=_hz(float(grid[i])),
+                        attributes=frame_attributes({"sound_level": "_SOUND_LEVEL", "sound_pressure": "_SOUND_PRESSURE"}, frame))
             for frame, i in enumerate(indices)
         ])
         curves = {"max_level_dB": {"x": [round(float(f), 6) for f in grid], "x_unit": "Hz",
@@ -1140,7 +1101,7 @@ class AcousticAnalysis:
             },
         )
         if ctx.plan.symmetry and ctx.plan.prepared is not None:
-            self._unfold(ctx, result, list(ctx.plan.prepared.planes))
+            unfold_result(ctx, result, list(ctx.plan.prepared.planes), scalars=("level_envelope",))
         return result
 
     def _vibration(self, ctx: SolveContext, inputs: AcousticInputs, air: _Air):
@@ -1179,33 +1140,6 @@ class AcousticAnalysis:
 
         return frame_Hz, None, rhs
 
-    def _unfold(self, ctx: SolveContext, result: AnalysisResult, planes) -> None:
-        """The solved half (or quarter) mirrored back into the whole part, every frame with it."""
-        import numpy as np
-
-        from cadgen._internal.fea import symmetry
-
-        volume = ctx.volume
-        frames = len(result.frame_fields["sound_level"])
-        for plane in reversed(planes):
-            whole, keep = symmetry.unfold_volume(volume, plane)
-            scalars = {f"{name}:{i}": result.frame_fields[name][i] for name in ("sound_level", "sound_pressure") for i in range(frames)}
-            scalars["envelope"] = result.scalars["level_envelope"]
-            locations, out, _, boundary, tets, elements, vertices = symmetry.unfold_fields(
-                plane, result.vertices, result.dof_locations, keep, scalars=scalars, vectors={},
-                boundary=result.boundary_quadratic, tets=result.tets, element_dofs=result.element_dofs,
-            )
-            result.frame_fields = {name: [out[f"{name}:{i}"] for i in range(frames)] for name in ("sound_level", "sound_pressure")}
-            result.fields = {name: result.frame_fields[name][0] for name in ("sound_level", "sound_pressure")}
-            result.scalars["level_envelope"] = np.asarray(out["envelope"])
-            result.dof_locations, result.boundary_quadratic = locations, boundary
-            result.tets, result.element_dofs, result.vertices = tets, elements, vertices
-            volume = whole
-        ctx.volume = volume
-
-    def needs_finer(self, result: AnalysisResult, inputs: AcousticInputs, check_results: list[dict]) -> bool:
-        return False
-
     # -- judging -------------------------------------------------------------------------------------
 
     def judge(self, check: dict, index: int, ctx: SolveContext, result: AnalysisResult, inputs: AcousticInputs) -> dict:
@@ -1224,7 +1158,7 @@ class AcousticAnalysis:
             "kind": "sound_level", "label": check.get("label") or kinds.SOUND_LEVEL.default_label,
             "value": round(level, 4), "limit": limit, "unit": "dB", "ratio": round(ratio, 6), "close_at": round(close_at, 6),
             "status": check_status(ratio, close_at),
-            "where": {"ref": peak["ref"], "at": [round(c, 3) for c in peak["at"]]},
+            "where": {"ref": peak["ref"], "at": xyz(peak["at"])},
             **({"faces": list(check["faces"])} if check.get("faces") else {}),
             **({"probes": list(check["probes"])} if check.get("probes") else {}),
             **({"probe": peak["probe"]} if peak["probe"] else {}),
@@ -1271,29 +1205,27 @@ class AcousticAnalysis:
         peak = kinds.field_max_over(values, (), boundary=result.boundary_quadratic, boundary_ordinal=ctx.volume.boundary_ordinal,
                                     locations=result.dof_locations, face_ref=ctx.volume.faces, ordinal_of=ctx.ordinal_of,
                                     where=f"view.checks[{index}]")
-        judged["where"] = {"ref": peak.ref, "at": [round(c, 3) for c in peak.at]}
+        judged["where"] = {"ref": peak.ref, "at": xyz(peak.at)}
         return judged
 
     def findings(self, ctx: SolveContext, result: AnalysisResult, inputs: AcousticInputs,
                  check_results: list[dict], *, assembly: bool) -> list[dict]:
         found: list[dict] = []
+        reference = f"(re {inputs.fluid.reference_Pa * 1e6:g} µPa)"
         for check in check_results:
             if check["status"] == "passes":
                 continue
             fails = check["status"] == "fails"
+            severity = "error" if fails else "warning"
             item = [{"text": check["label"], **check["where"]}]
             if check["kind"] == "sound_level":
                 at = f" at {_hz(check['at']['value'])}"
                 where = f" at '{check['probe']}'" if check.get("probe") else " on the checked faces" if check.get("faces") else ""
-                found.append({
-                    "check": "fea", "severity": "error" if fails else "warning",
-                    "type": "too_loud" if fails else "sound_close_to_limit",
-                    "summary": f"The sound reaches {level_words(check['value'])}{where}{at}, "
-                               f"{'over' if fails else 'within 3 dB of'} the {level_words(check['limit'])} allowed ({check['label']})",
-                    "description": f"peak level {check['value']:.4g} dB against a {check['limit']:g} dB limit "
-                                   f"(re {inputs.fluid.reference_Pa * 1e6:g} µPa)",
-                    "items": item,
-                })
+                found.append(finding(
+                    severity, "too_loud" if fails else "sound_close_to_limit",
+                    f"The sound reaches {level_words(check['value'])}{where}{at}, "
+                    f"{'over' if fails else 'within 3 dB of'} the {level_words(check['limit'])} allowed ({check['label']})",
+                    f"peak level {check['value']:.4g} dB against a {check['limit']:g} dB limit {reference}", item))
             else:
                 mode, f = check["mode"], check["value"]
                 if "avoid_Hz" in check:
@@ -1304,50 +1236,42 @@ class AcousticAnalysis:
                     which = "first acoustic mode" if mode == 1 else f"acoustic mode {mode}"
                     summary = (f"The air's {which} is {_hz(f)}, {'under' if fails else 'within 10 % of'} the "
                                f"{check['limit']:g} Hz it must stay above ({check['label']})")
-                found.append({"check": "fea", "severity": "error" if fails else "warning",
-                              "type": "acoustic_resonance" if fails else "acoustic_resonance_close",
-                              "summary": summary, "description": f"mode {mode} at {f:.4g} Hz", "items": item})
+                found.append(finding(severity, "acoustic_resonance" if fails else "acoustic_resonance_close", summary,
+                                     f"mode {mode} at {f:.4g} Hz", item))
         scalars = result.scalars
         if inputs.solve == "modes":
             frequencies = scalars["frequencies_Hz"]
             if frequencies:
-                found.append({"check": "fea", "severity": "info", "type": "first_acoustic_mode",
-                              "summary": f"The air's first acoustic mode is {_hz(frequencies[0])}",
-                              "description": "the lowest natural frequency of the air; a sound or vibration near it makes the "
-                                             "air ring (a boom, a whistle)", "items": []})
+                found.append(finding("info", "first_acoustic_mode", f"The air's first acoustic mode is {_hz(frequencies[0])}",
+                                     "the lowest natural frequency of the air; a sound or vibration near it makes the "
+                                     "air ring (a boom, a whistle)"))
             if scalars["uniform_mode"]:
-                found.append({"check": "fea", "severity": "info", "type": "uniform_mode",
-                              "summary": "The closed air's uniform mode (0 Hz, the whole volume squeezed at once) was left out",
-                              "description": "a closed cavity with rigid walls has it; it is not a resonance", "items": []})
+                found.append(finding("info", "uniform_mode",
+                                     "The closed air's uniform mode (0 Hz, the whole volume squeezed at once) was left out",
+                                     "a closed cavity with rigid walls has it; it is not a resonance"))
         else:
             loudest = scalars["loudest"]
-            found.append({"check": "fea", "severity": "info", "type": "loudest",
-                          "summary": f"Loudest {level_words(float(level_dB_of(loudest['amplitude_Pa'], inputs.fluid)))} at "
-                                     f"{_hz(loudest['Hz'])} (re {inputs.fluid.reference_Pa * 1e6:g} µPa)",
-                          "description": "the highest sound pressure level anywhere in the air over the sweep",
-                          "items": [{"text": "loudest here", "ref": None, "at": [round(c, 3) for c in loudest["at"]]}]})
+            found.append(finding("info", "loudest", f"Loudest {level_words(level_dB_of(loudest['amplitude_Pa'], inputs.fluid))} "
+                                 f"at {_hz(loudest['Hz'])} {reference}",
+                                 "the highest sound pressure level anywhere in the air over the sweep",
+                                 [{"text": "loudest here", "ref": None, "at": xyz(loudest["at"])}]))
             outside = [p["label"] for p in scalars["probes"] if p["extrapolated"]]
             if outside:
-                found.append({"check": "fea", "severity": "info", "type": "probe_extrapolated",
-                              "summary": f"{', '.join(repr(o) for o in outside)} {'is' if len(outside) == 1 else 'are'} past the "
-                                         "meshed air; read just inside its box and carried out by spherical spreading (1/r)",
-                              "description": "exact for sound spreading from the part's centre, an estimate for any other",
-                              "items": []})
+                found.append(finding("info", "probe_extrapolated",
+                                     f"{', '.join(repr(o) for o in outside)} {'is' if len(outside) == 1 else 'are'} past the "
+                                     "meshed air; read just inside its box and carried out by spherical spreading (1/r)",
+                                     "exact for sound spreading from the part's centre, an estimate for any other"))
         for warning in scalars.get("analysis_warnings", ()):
             if "elements per wavelength" in warning:
-                found.append({"check": "fea", "severity": "warning", "type": "wave_resolution", "summary": warning[0].upper() + warning[1:],
-                              "description": f"the mesh should have at least {ELEMENTS_PER_WAVELENGTH:g} quadratic elements per "
-                                             "wavelength at the top frequency", "items": []})
+                found.append(finding("warning", "wave_resolution", warning[0].upper() + warning[1:],
+                                     f"the mesh should have at least {ELEMENTS_PER_WAVELENGTH:g} quadratic elements per "
+                                     "wavelength at the top frequency"))
         if inputs.domain == "outside":
-            found.append({"check": "fea", "severity": "info", "type": "open_air_boundary",
-                          "summary": "Open air ends at a first-order absorbing box: an approximation for sound that does not "
-                                     "spread from the part's centre", "description": LIMITS[2], "items": []})
-        return sorted(found, key=lambda item: {"error": 0, "warning": 1, "info": 2}[item["severity"]])
+            found.append(finding("info", "open_air_boundary", "Open air ends at a first-order absorbing box: an "
+                                 "approximation for sound that does not spread from the part's centre", LIMITS[2]))
+        return by_severity(found)
 
     # -- what is written -----------------------------------------------------------------------------
-
-    def deformation_scale(self, result: AnalysisResult, bbox_diagonal: float, requested: float | None) -> float | None:
-        return None
 
     def summary(self, result: AnalysisResult, inputs: AcousticInputs, check_results: list[dict]) -> dict:
         scalars = result.scalars
@@ -1375,7 +1299,7 @@ class AcousticAnalysis:
                 "peak_level_dB": round(loudest["level_dB"], 4),
                 "peak_Hz": round(loudest["Hz"], 4),
                 "peak_pressure_Pa": float(f"{loudest['amplitude_Pa']:.6g}"),
-                "peak_at_mm": [round(c, 3) for c in loudest["at"]],
+                "peak_at_mm": xyz(loudest["at"]),
                 "max_level_dB": round(float(max(level.max() for level in result.frame_fields["sound_level"])), 4),
                 "min_level_dB": round(float(min(level.min() for level in result.frame_fields["sound_level"])), 4),
                 "max_pressure_Pa": float(f"{max(float(p.max()) for p in result.frame_fields['sound_pressure']):.6g}"),
@@ -1390,15 +1314,12 @@ class AcousticAnalysis:
                 levels = level_dB(probe["amplitude_Pa"], fluid.reference_Pa)
                 best = int(levels.argmax())
                 summary["probes"].append({
-                    "label": probe["label"], "at_mm": [round(c, 3) for c in probe["at_mm"]],
+                    "label": probe["label"], "at_mm": xyz(probe["at_mm"]),
                     "peak_level_dB": round(float(levels[best]), 4), "peak_Hz": round(scalars["grid_Hz"][best], 4),
                     "peak_pressure_Pa": float(f"{probe['amplitude_Pa'][best]:.6g}"), "extrapolated": probe["extrapolated"],
                 })
         summary["checks"] = check_results
         return summary
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} sound"
 
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
         if summary["solve"] == "modes":

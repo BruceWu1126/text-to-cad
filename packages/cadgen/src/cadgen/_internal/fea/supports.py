@@ -1,30 +1,23 @@
 """Supports: the faces a study holds, as the displacement DOF they hold.
 
-A study's ``fixtures`` are ``fixed`` (every component of every node on the
-faces held at zero) or ``roller`` (a frictionless support: the face slides in
-its own plane but never moves along its normal). A roller holds each of its
-nodes along the face's normal there, per facet: each roller face's facet
-normals around the node, weighted by area, give the node a direction (on a
-curved face, the local normal), and where two roller faces meet at an edge
-or a corner the node is held along each of theirs (the principal directions
-of ``Σ n nᵀ`` over the faces, one per face that is not tangent to another).
+A study's ``fixtures`` are ``fixed`` (every component of every node on the faces held at zero) or ``roller`` (a
+frictionless support: the face slides in its own plane but never moves along its normal). A roller holds each of its
+nodes along the face's normal there, per facet: each roller face's facet normals around the node, weighted by area, give
+the node a direction (on a curved face, the local normal), and where two roller faces meet at an edge or a corner the
+node is held along each of theirs (the principal directions of ``Σ n nᵀ`` over the faces, one per face that is not
+tangent to another).
 
-Where every held direction is a global axis (a roller on a face square to X,
-Y or Z) the hold is that component's DOF, exactly as a symmetry plane's: the
-system is solved in the global axes, unchanged. Anywhere else (a sloped or
-curved roller face) the node's three DOF are turned into its own frame
-(``frame``, an orthogonal block-diagonal matrix with ``u_global = frame @
-u_local``) and the held directions are DOF of that frame: an analysis solves
-``frameᵀ K frame`` on the free DOF and turns the answer back. :class:`Turned`
-does that for a nonlinear problem the driver follows.
+Where every held direction is a global axis (a roller on a face square to X, Y or Z) the hold is that component's DOF,
+exactly as a symmetry plane's: the system is solved in the global axes, unchanged. Anywhere else (a sloped or curved
+roller face) the node's three DOF are turned into its own frame (``frame``, an orthogonal block-diagonal matrix with
+``u_global = frame @ u_local``) and the held directions are DOF of that frame: an analysis solves ``frameᵀ K frame`` on
+the free DOF and turns the answer back. :class:`Turned` does that for a nonlinear problem the driver follows.
 
-A study with only fixed faces gives exactly the DOF it always did, in the same
-order. A DOF on the edge two fixtures share is held once, so its reaction is
-counted once (``per_fixture`` is disjoint): it goes to the fixture that holds
-its component most, a fixed face fully and a roller by its normal's share of
-that component there (two rollers meeting at an edge each take the reaction
-along their own normal), the first such fixture on a tie. Numeric imports
-live inside the functions.
+A study with only fixed faces gives exactly the DOF it always did, in the same order. A DOF on the edge two fixtures
+share is held once, so its reaction is counted once (``per_fixture`` is disjoint): it goes to the fixture that holds its
+component most, a fixed face fully and a roller by its normal's share of that component there (two rollers meeting at an
+edge each take the reaction along their own normal), the first such fixture on a tie. Numeric imports live inside the
+functions.
 """
 
 from __future__ import annotations
@@ -95,6 +88,14 @@ def has_rollers(fixtures) -> bool:
     return any(getattr(fixture, "type", "fixed") == "roller" for fixture in fixtures or ())
 
 
+def _facet_normals(points: "np.ndarray", triangles: "np.ndarray") -> "np.ndarray":
+    """Each boundary triangle's normal, 2 × its area long."""
+    import numpy as np
+
+    corners = points[triangles[:, :3]]
+    return np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
+
+
 def _roller_directions(space: "FemSpace", roller_ordinals: "list[set[int]]") -> "dict[int, np.ndarray]":
     """Each roller node (scalar DOF) -> its held directions, (r, 3) orthonormal rows, r in 1..3."""
     import numpy as np
@@ -107,8 +108,7 @@ def _roller_directions(space: "FemSpace", roller_ordinals: "list[set[int]]") -> 
         rows = np.flatnonzero(np.isin(ordinal, list(ordinals)))
         if not len(rows):
             continue
-        corners = points[boundary[rows, :3]]
-        normal = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])  # 2 × area along the normal
+        normal = _facet_normals(points, boundary[rows])
         area = np.linalg.norm(normal, axis=1)
         unit = normal / np.where(area > 0, area, 1.0)[:, None]
         outer = area[:, None, None] * unit[:, :, None] * unit[:, None, :]
@@ -146,9 +146,7 @@ def _fixture_normals(space: "FemSpace", ordinals: "set[int]") -> "tuple[np.ndarr
     rows = np.flatnonzero(np.isin(np.asarray(space.volume.boundary_ordinal), list(ordinals)))
     if not len(rows):
         return np.zeros(0, dtype=np.int64), np.zeros((0, 3))
-    points = space.dof_locations
-    corners = points[boundary[rows, :3]]
-    normal = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])  # 2 × area along the normal
+    normal = _facet_normals(space.dof_locations, boundary[rows])
     nodes = boundary[rows]
     unique, inverse = np.unique(nodes.ravel(), return_inverse=True)
     summed = np.zeros((len(unique), 3))
@@ -170,10 +168,8 @@ def _disjoint(space: "FemSpace", fixtures, per_fixture: "list[np.ndarray]", ordi
     if not (counts > 1).any():
         return per_fixture
     node_of = np.zeros(size, dtype=np.int64)
-    for c in range(3):
-        node_of[space.basis.nodal_dofs[c]] = space.scalar.nodal_dofs[0]
-        if space.order == 2:
-            node_of[space.basis.edge_dofs[c]] = space.scalar.edge_dofs[0]
+    for dofs in _vector_dofs(space).T:
+        node_of[dofs] = np.arange(space.scalar_count)
     component = np.asarray(space.component)
     owner = np.full(size, -1, dtype=np.int64)
     best = np.full(size, -1.0)
@@ -190,6 +186,18 @@ def _disjoint(space: "FemSpace", fixtures, per_fixture: "list[np.ndarray]", ordi
         owner[dofs[better]] = index
         best[dofs[better]] = hold[better]
     return [dofs[owner[dofs] == index] for index, dofs in enumerate(per_fixture)]
+
+
+def _vector_dofs(space: "FemSpace") -> "np.ndarray":
+    """(scalar_count, 3): each scalar node's three vector DOF."""
+    import numpy as np
+
+    vdofs = np.zeros((space.scalar_count, 3), dtype=np.int64)
+    for c in range(3):
+        vdofs[space.scalar.nodal_dofs[0], c] = space.basis.nodal_dofs[c]
+        if space.order == 2:
+            vdofs[space.scalar.edge_dofs[0], c] = space.basis.edge_dofs[c]
+    return vdofs
 
 
 def _axes_of(directions: "np.ndarray") -> "list[int] | None":
@@ -223,11 +231,7 @@ def supports_of(space: "FemSpace", fixtures: "tuple[Fixture, ...]", ordinal_of: 
     clamped = [dofs for dofs, fixture in zip(on_faces, fixtures) if getattr(fixture, "type", "fixed") != "roller"]
     pieces = [*clamped, *held]
     fixed = np.unique(np.concatenate(pieces)) if pieces else np.zeros(0, dtype=np.int64)
-    vdofs = np.zeros((space.scalar_count, 3), dtype=np.int64)
-    for c in range(3):
-        vdofs[space.scalar.nodal_dofs[0], c] = basis.nodal_dofs[c]
-        if space.order == 2:
-            vdofs[space.scalar.edge_dofs[0], c] = basis.edge_dofs[c]
+    vdofs = _vector_dofs(space)
     clamped_nodes = np.zeros(space.scalar_count, dtype=bool)
     if len(fixed):
         is_fixed = np.zeros(basis.N, dtype=bool)
@@ -271,19 +275,27 @@ def supports_of(space: "FemSpace", fixtures: "tuple[Fixture, ...]", ordinal_of: 
 
 def unheld_motions(space: "FemSpace", supports: Supports) -> int:
     """How many rigid motions (of 6) the supports leave the whole mesh free to make: 0 when it is held."""
+    return 6 - _held_motions(supports.local_vector(_unit_modes(space.locations, space.component))[supports.fixed])
+
+
+def _unit_modes(locations: "np.ndarray", component: "np.ndarray") -> "np.ndarray":
+    """The six rigid motions of the points, about their centre and scaled by their size."""
     import numpy as np
 
     from cadgen._internal.fea.operators import rigid_body_modes
 
-    locations = space.locations
-    centre = locations.mean(axis=0)
-    size = float(np.ptp(locations, axis=0).max()) or 1.0
-    modes = rigid_body_modes((locations - centre) / size, space.component)
-    held = supports.local_vector(modes)[supports.fixed]
-    if not len(held):
-        return 6
-    values = np.linalg.svd(held, compute_uv=False)
-    return 6 - int((values > 1e-8 * max(float(values.max()), 1e-300)).sum())
+    centre, size = locations.mean(axis=0), float(np.ptp(locations, axis=0).max()) or 1.0
+    return rigid_body_modes((locations - centre) / size, component)
+
+
+def _held_motions(rows: "np.ndarray") -> int:
+    """How many of the six rigid motions the held rows (held DOF x 6) stop."""
+    import numpy as np
+
+    if not len(rows):
+        return 0
+    values = np.linalg.svd(rows, compute_uv=False)
+    return int((values > 1e-8 * max(float(values.max()), 1e-300)).sum())
 
 
 def held_bodies(space: "FemSpace", supports: Supports, body_of_dof: "np.ndarray") -> set[int]:
@@ -291,8 +303,6 @@ def held_bodies(space: "FemSpace", supports: Supports, body_of_dof: "np.ndarray"
     and, with rollers, only those whose six rigid motions are all held (a body on rollers on one face may still
     slide along it, and rests on what else it touches)."""
     import numpy as np
-
-    from cadgen._internal.fea.operators import rigid_body_modes
 
     touched = set(np.unique(body_of_dof[supports.fixed]).tolist()) if len(supports.fixed) else set()
     if not supports.rollers:
@@ -302,13 +312,9 @@ def held_bodies(space: "FemSpace", supports: Supports, body_of_dof: "np.ndarray"
     is_fixed[supports.fixed] = True
     for body in touched:
         mine = body_of_dof == body
-        locations = space.locations[mine]
-        centre, size = locations.mean(axis=0), float(np.ptp(locations, axis=0).max()) or 1.0
         modes = np.zeros((len(body_of_dof), 6))
-        modes[mine] = rigid_body_modes((locations - centre) / size, space.component[mine])
-        rows = supports.local_vector(modes)[is_fixed & mine]
-        values = np.linalg.svd(rows, compute_uv=False) if len(rows) else np.zeros(0)
-        if int((values > 1e-8 * max(float(values.max()) if len(values) else 0.0, 1e-300)).sum()) == 6:
+        modes[mine] = _unit_modes(space.locations[mine], space.component[mine])
+        if _held_motions(supports.local_vector(modes)[is_fixed & mine]) == 6:
             held.add(body)
     return held
 

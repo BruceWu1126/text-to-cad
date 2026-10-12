@@ -12,27 +12,15 @@ temporary directory.
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import struct
-import tempfile
 import unittest
-from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
-
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
+from tests.python.support.fea_fixtures import (
+    box_step, class_directory, ends, glb_attribute_names, glb_extras, needs_fea, sidecar, solve, solve_keeping, tube_step,
+    value_error,
+)
 
 R, WALL, LENGTH = 2.0, 1.0, 16.0
 WATER_MU = 1.002e-3
@@ -42,41 +30,8 @@ PIPE = {"analysis": "cfd", "mesh": {"size_mm": 1.0},
                  "outlets": [{"opening": "x_max", "pressure_Pa": 0}]}}
 
 
-def glb_extras(path: Path) -> tuple[dict, list[str]]:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    gltf = json.loads(raw[20:20 + length])
-    return gltf["meshes"][0]["extras"], list(gltf["meshes"][0]["primitives"][0]["attributes"])
-
-
-def tube_step(directory: Path) -> Path:
-    from build123d import Align, Cylinder, Rotation, export_step
-
-    step = directory / "tube.step"
-    along = (Align.CENTER, Align.CENTER, Align.MIN)
-    export_step(Rotation(0, 90, 0) * (Cylinder(R + WALL, LENGTH, align=along) - Cylinder(R, LENGTH, align=along)), str(step))
-    return step
-
-
 def poiseuille_Pa(flow_m3_s: float, mu: float = WATER_MU) -> float:
     return 8.0 * mu * (LENGTH / 1000) * flow_m3_s / (math.pi * (R / 1000) ** 4)
-
-
-def solve(step: Path, out: Path, study: dict, capture: bool = False):
-    """Run the study; with ``capture`` also hand back the analysis's own result (the volume's velocity)."""
-    from cadgen import fea
-    from cadgen._internal.fea.analyses.cfd import CfdAnalysis
-
-    captured = {}
-    original = CfdAnalysis.solve
-
-    def keep(self, ctx, inputs):
-        captured["result"] = original(self, ctx, inputs)
-        return captured["result"]
-
-    with redirect_stderr(io.StringIO()), mock.patch.object(CfdAnalysis, "solve", keep):
-        result = fea.solve(step, out, study=study)
-    return result, captured.get("result")
 
 
 class StudyFile(unittest.TestCase):
@@ -121,26 +76,15 @@ class StudyFile(unittest.TestCase):
             ({"map_to_structure": {"fixtures": [{"faces": ["#o1.f1"]}]}}, "map_to_structure.material"),
             ({"flow": None}, "study.flow"),
         ):
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                self.parse(**changes)
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, value_error(self, self.parse, **changes))
 
-    def test_it_is_registered_built_and_stdlib_only_at_import(self):
-        import subprocess
-        import sys
-
+    def test_it_is_registered_and_built(self):
         from cadgen._internal.fea.analyses import get_analysis
 
         cfd = get_analysis("cfd")
         self.assertEqual((cfd.tier, cfd.word, cfd.limits), (3, "Flow", (LIMIT_TEXT,)))
         self.assertEqual(cfd.ladder, ("iterative", "fluid_coarsen", "continuation"))
-        code = (
-            "import sys; sys.path.insert(0, 'packages/cadgen/src');"
-            "import cadgen._internal.fea.analyses.cfd;"
-            "print(','.join(m for m in ('numpy', 'scipy', 'skfem', 'netgen', 'OCP') if m in sys.modules))"
-        )
-        root = Path(__file__).resolve().parents[4]
-        self.assertEqual(subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True, text=True, check=True).stdout.strip(), "")
 
 
 class SolveBudget(unittest.TestCase):
@@ -164,21 +108,17 @@ class SolveBudget(unittest.TestCase):
         self.assertEqual(planned, math.ceil(DEADLINE_OVER * (1 + 4 * len(CONTINUATION) + 6)))
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Openings(unittest.TestCase):
     def test_an_opening_the_part_does_not_have_names_the_sides_it_does(self):
-        from cadgen import fea
-
-        with tempfile.TemporaryDirectory() as tmp:
-            step = tube_step(Path(tmp))
-            study = {**PIPE, "flow": {**PIPE["flow"], "inlets": [{"opening": "y_min", "velocity_m_s": 0.01}]}}
-            with redirect_stderr(io.StringIO()), self.assertRaises(ValueError) as caught:
-                fea.solve(step, Path(tmp) / "tube.glb", study=study)
-        self.assertIn("no opening on the low Y side (y_min)", str(caught.exception))
-        self.assertIn("its openings are on x_min, x_max", str(caught.exception))
+        directory = class_directory(type(self))
+        study = {**PIPE, "flow": {**PIPE["flow"], "inlets": [{"opening": "y_min", "velocity_m_s": 0.01}]}}
+        message = value_error(self, solve, tube_step(directory, R, WALL, LENGTH), directory / "tube.glb", study)
+        self.assertIn("no opening on the low Y side (y_min)", message)
+        self.assertIn("its openings are on x_min, x_max", message)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Poiseuille(unittest.TestCase):
     """Re 40 water through the tube: Hagen-Poiseuille's pressure drop, parabola and wall shear."""
 
@@ -186,18 +126,11 @@ class Poiseuille(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        cls.step = tube_step(directory)
+        directory = class_directory(cls)
         study = {**PIPE, "view": {"checks": [{"kind": "pressure_drop", "limit_Pa": 0.34}, {"kind": "velocity", "limit_m_s": 0.1}]}}
-        cls.result, cls.own = solve(cls.step, directory / "tube.glb", study, capture=True)
-        cls.extras, cls.attributes = glb_extras(cls.result.glb)
-        cls.sidecar = json.loads(cls.result.sidecar.read_text(encoding="utf-8"))
+        cls.result, cls.own = solve_keeping("cfd", tube_step(directory, R, WALL, LENGTH), directory / "tube.glb", study)
+        cls.extras, cls.attributes = glb_extras(cls.result.glb), glb_attribute_names(cls.result.glb)
         cls.summary = cls.result.summary
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def test_the_pressure_drop_is_hagen_poiseuilles(self):
         flow = self.summary["flow_rate_m3_s"]
@@ -226,7 +159,7 @@ class Poiseuille(unittest.TestCase):
         self.assertEqual((reynolds["kind"], reynolds["limit"], reynolds["laminar"]), ("internal", 2000, True))
         self.assertAlmostEqual(reynolds["value"], 998.2 * self.U * 2 * R / 1000 / WATER_MU, delta=0.5)
         self.assertEqual(self.extras["analysis"]["limits"], [LIMIT_TEXT])
-        self.assertEqual(self.sidecar["limits"], [LIMIT_TEXT])
+        self.assertEqual(sidecar(self.result)["limits"], [LIMIT_TEXT])
         self.assertEqual(self.extras["analysis"]["warnings"], [])
         self.assertTrue(self.summary["solve"]["converged"])
         self.assertLess(self.summary["solve"]["residual"], 1e-8)
@@ -316,27 +249,21 @@ def rectangular_duct_Pa(flow_m3_s: float, width_mm: float, height_mm: float, len
     return 12 * mu * (length_mm / 1000) * flow_m3_s / (w * h ** 3 * shape)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class SharpCorneredDucts(unittest.TestCase):
     """Rectangular passages solve: the inlet's corners, where every velocity around a pressure node is held,
     used to make the flow's matrix exactly singular. A square and a 2:1 duct against Shah & London."""
 
-    def check(self, width: float, height: float):
-        with tempfile.TemporaryDirectory() as tmp:
-            directory = Path(tmp)
-            result, _ = solve(duct_step(directory, width, height), directory / "duct.glb", PIPE)
-        summary = result.summary
-        self.assertTrue(summary["solve"]["converged"])
-        flow = summary["flow_rate_m3_s"]
-        self.assertAlmostEqual(flow, 0.01 * width * height * 1e-6, delta=1e-3 * flow)
-        expected = rectangular_duct_Pa(flow, width, height)
-        self.assertLess(abs(summary["pressure_drop_Pa"] - expected) / expected, 0.05, (summary["pressure_drop_Pa"], expected))
-
-    def test_a_square_duct_loses_shah_and_londons_pressure(self):
-        self.check(3.0, 3.0)
-
-    def test_a_two_to_one_duct_loses_shah_and_londons_pressure(self):
-        self.check(4.0, 2.0)
+    def test_a_square_and_a_two_to_one_duct_lose_shah_and_londons_pressure(self):
+        directory = class_directory(type(self))
+        for width, height in ((3.0, 3.0), (4.0, 2.0)):
+            summary = solve(duct_step(directory, width, height), directory / "duct.glb", PIPE).summary
+            with self.subTest(width=width, height=height):
+                self.assertTrue(summary["solve"]["converged"])
+                flow = summary["flow_rate_m3_s"]
+                self.assertAlmostEqual(flow, 0.01 * width * height * 1e-6, delta=1e-3 * flow)
+                expected = rectangular_duct_Pa(flow, width, height)
+                self.assertLess(abs(summary["pressure_drop_Pa"] - expected) / expected, 0.05, (summary["pressure_drop_Pa"], expected))
 
     def test_an_unreached_pressure_takes_its_neighbours_value(self):
         import numpy as np
@@ -352,21 +279,16 @@ class SharpCorneredDucts(unittest.TestCase):
         self.assertEqual(filled.tolist(), [5.0, 4.0, 6.0])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class PastLaminar(unittest.TestCase):
     """Re 2400 in the same tube: it solves (never refuses) and warns, in words and as data."""
 
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
+        directory = class_directory(cls)
         study = {**PIPE, "flow": {**PIPE["flow"], "inlets": [{"opening": "x_min", "velocity_m_s": 0.6}]}}
-        cls.result, _ = solve(tube_step(directory), directory / "fast.glb", study)
-        cls.extras, _ = glb_extras(cls.result.glb)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.result = solve(tube_step(directory, R, WALL, LENGTH), directory / "fast.glb", study)
+        cls.extras = glb_extras(cls.result.glb)
 
     def test_it_solves_and_warns(self):
         self.assertTrue(self.result.ok)
@@ -384,31 +306,22 @@ class PastLaminar(unittest.TestCase):
         self.assertEqual({k: carried[k] for k in ("value", "limit", "kind")}, {k: reynolds[k] for k in ("value", "limit", "kind")})
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Ladder(unittest.TestCase):
     """A tiny time target: the pipe at Re 600 reaches its Re by continuation, and Poiseuille holds within 5 %;
     a cube in a free stream coarsens its far field, its part kept at the size asked for."""
 
     @classmethod
     def setUpClass(cls):
-        from build123d import Box, export_step
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
+        directory = class_directory(cls)
         study = {**PIPE, "flow": {**PIPE["flow"], "inlets": [{"opening": "x_min", "velocity_m_s": 0.15}]},
                  "fit": {"seconds": 0.5, "allow": ["fluid_coarsen", "continuation"]}}
-        cls.pipe, _ = solve(tube_step(directory), directory / "pipe.glb", study)
-        cls.pipe_extras, _ = glb_extras(cls.pipe.glb)
-        cube = directory / "cube.step"
-        export_step(Box(4, 4, 4), str(cube))
+        cls.pipe = solve(tube_step(directory, R, WALL, LENGTH), directory / "pipe.glb", study)
+        cls.pipe_extras = glb_extras(cls.pipe.glb)
         study = {"analysis": "cfd", "mesh": {"size_mm": 2.0}, "flow": {"kind": "external", "fluid": "air", "velocity_m_s": [0.1, 0, 0]},
                  "fit": {"seconds": 0.5, "allow": ["fluid_coarsen"]}}
-        cls.cube, _ = solve(cube, directory / "cube.glb", study)
-        cls.cube_extras, _ = glb_extras(cls.cube.glb)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.cube = solve(box_step(directory, "cube", (4, 4, 4)), directory / "cube.glb", study)
+        cls.cube_extras = glb_extras(cls.cube.glb)
 
     def test_continuation_reaches_re_600_and_poiseuille_holds(self):
         rungs = [step["rung"] for step in self.pipe.fit]
@@ -451,7 +364,7 @@ def orifice_step(directory: Path, length: float = 10.0) -> Path:
     return step
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class SharpOrifice(unittest.TestCase):
     """Re 300 through a sharp orifice (a jet at Re 600 through it): it settles to 1e-8. Newton's Jacobian used to
     leave out the streamline diffusion's derivative, so Newton converged only linearly and diverged past Re ~100
@@ -462,8 +375,7 @@ class SharpOrifice(unittest.TestCase):
     def setUpClass(cls):
         from cadgen._internal.fea import navier_stokes
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
+        directory = class_directory(cls)
         study = {**PIPE, "mesh": {"size_mm": 1.25},
                  "flow": {**PIPE["flow"], "inlets": [{"opening": "x_min", "velocity_m_s": 0.05}]},
                  "view": {"checks": [{"kind": "pressure_drop", "limit_Pa": 1000}]}}
@@ -475,11 +387,7 @@ class SharpOrifice(unittest.TestCase):
             return original(problem, **options)
 
         with mock.patch.object(navier_stokes, "solve_flow", keep):
-            cls.result, _ = solve(orifice_step(directory), directory / "orifice.glb", study)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+            cls.result = solve(orifice_step(directory), directory / "orifice.glb", study)
 
     def test_re_300_settles_to_the_tolerance(self):
         solve_info = self.result.summary["solve"]
@@ -549,28 +457,20 @@ class SharpOrifice(unittest.TestCase):
         self.assertEqual(self.options[0]["min_solves"], flow_solve_budget(reynolds))
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class MappedToStructure(unittest.TestCase):
     """A thick fluid (10 Pa s) pushes on the bore at a few kPa; held at its outlet end, the tube is stressed by it."""
 
     @classmethod
     def setUpClass(cls):
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        step = tube_step(directory)
-        outlet_end = next(face.ref for face in fea.faces(step).faces
-                          if face.surface == "plane" and abs(face.center_mm[0] - LENGTH) < 1e-6)
+        directory = class_directory(cls)
+        step = tube_step(directory, R, WALL, LENGTH)
+        outlet_end = ends(step)[1]
         study = {**PIPE, "flow": {**PIPE["flow"], "fluid": {"name": "syrup", "density_kg_m3": 1000, "viscosity_Pa_s": 10}},
                  "map_to_structure": {"material": "aluminum-6061-t6", "fixtures": [{"faces": [outlet_end]}]},
                  "view": {"checks": [{"kind": "pressure_drop", "limit_Pa": 1e5}, {"kind": "stress"}]}}
-        cls.result, _ = solve(step, directory / "mapped.glb", study)
-        cls.extras, cls.attributes = glb_extras(cls.result.glb)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.result = solve(step, directory / "mapped.glb", study)
+        cls.extras, cls.attributes = glb_extras(cls.result.glb), glb_attribute_names(cls.result.glb)
 
     def test_the_wall_pressure_stresses_the_part(self):
         summary = self.result.summary

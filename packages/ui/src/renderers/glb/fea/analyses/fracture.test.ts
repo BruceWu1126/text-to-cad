@@ -1,27 +1,20 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
 import { checkLine, checkTitle } from '../checkKinds.js';
-import { feaControls, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, feaVerdict, studyRows } from '../../feaResult.js';
 import { markerGateText, markerPoses, markerSites } from '../../feaMarkers.js';
 import { heldRows, madeOfRows, pushedRows } from '../setup.js';
 import { feaAnalysis } from './index.js';
 import { LOAD_RAMP } from './static.js';
 import fracture, { FRACTURE_SETUP, crackOf, crackRows, crackWords } from './fracture.js';
+import { feaFile, plain, vec } from '../../__tests__/feaFile.js';
 
 const LIMIT = 'Linear-elastic fracture mechanics: the material stays elastic around the crack (small-scale yielding); no ductile tearing or plastic collapse';
-const plain = (text: string) => text.replace(/[\u00a0\u202f]/g, ' ');
 
 // A plate with a 2 mm edge crack on face 4, as cadgen writes it: its K 18 MPa√m at the deepest point against 29.
 function crackedResult(extras: Record<string, unknown> = {}) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.04, 0, 0, 0, 0.006, 0]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_von_mises', new BufferAttribute(new Float32Array([67, 10, 30]), 1));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 1]), 1));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  return feaFile({
+    position: [0, 0, 0, 0.04, 0, 0, 0, 0.006, 0], _von_mises: [67, 10, 30], _displacement: vec(9), _face: [0, 0, 1],
+  }, {
     generator: 'cadgen fea', name: 'plate crack', deformation_scale: 40, faces: ['#o1.f3', '#o1.f4'], occurrence: '#o1',
     crack: { kind: 'edge', words: '2 mm edge crack on #o1.f4', face: '#o1.f4', size_mm: 2, K_max_MPa_sqrt_m: 18.04, K_point: 'the deepest point',
       toughness_MPa_sqrt_m: 29, front_mm: [[0, 2, 0], [0, 2, 1], [0, 2, 2]], K_front: [17.1, 18.04, 17.2] },
@@ -41,9 +34,6 @@ function crackedResult(extras: Record<string, unknown> = {}) {
     findings: [],
     ...extras,
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 describe('fracture', () => {

@@ -26,29 +26,16 @@ tests are stdlib only; the solves need the fea extra.
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import struct
 import tempfile
 import unittest
-from contextlib import redirect_stderr
 from pathlib import Path
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
+from tests.python.support.fea_fixtures import box_step, class_directory, ends, glb_extras, needs_fea, sidecar, solve
 
 from cadgen._internal.fea.analyses import get_analysis  # noqa: E402
 from cadgen._internal.fea.analyses.contact import contact_words  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
 from cadgen._internal.fea.study import parse_study  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 FORCE = 1000.0
 AREA = 100.0
@@ -123,12 +110,6 @@ class StudyFile(unittest.TestCase):
         self.assertEqual(contact_words(("pin", "plate"), 0.0), "pin presses on plate, no friction")
 
 
-def _glb(path: Path) -> dict:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    return json.loads(raw[20:20 + length])
-
-
 def _stack(directory: Path, *, cap: bool = False) -> tuple[Path, dict[str, str], object]:
     """base 10 x 10 x 20 at the origin, top 10 x 10 x 10 on it, and (``cap``) a 10 x 10 x 5 cap on top."""
     from build123d import Align, Box, Compound, Pos, export_step
@@ -160,24 +141,32 @@ def _face(scene, part_ref: str, axis: int, value: float) -> str:
     raise AssertionError(f"no face of {part_ref} at {'xyz'[axis]} = {value}")
 
 
+def _stacked(directory: Path, push: float, **more) -> tuple[Path, dict]:
+    """The stacked blocks in contact, the base held at its bottom and the top pushed along z by ``push`` on its top."""
+    step, refs, scene = _stack(directory)
+    return step, {"analysis": "contact", "material": "steel", "connections": [{"between": ["top", "base"], "type": "contact"}],
+                  **more, "fixtures": [{"faces": [_face(scene, refs["base"], 2, 0.0)]}],
+                  "loads": [{"faces": [_face(scene, refs["top"], 2, 30.0)], "type": "force", "vector_N": [0, 0, push]}]}
+
+
+def _plate(directory: Path) -> tuple[Path, str]:
+    """A 20 x 20 x 4 mm plate standing on z = 0, and its top face."""
+    step = box_step(directory, "plate", (20, 20, 4), "corner")
+    return step, ends(step, 2)[1]
+
+
 def _solve(step: Path, study: dict, name: str):
-    from cadgen import fea
-
-    with redirect_stderr(io.StringIO()):
-        result = fea.solve(step, step.with_name(f"{name}.fea.glb"), study=study)
-    sidecar = json.loads(result.sidecar.read_text(encoding="utf-8"))
-    return result, _glb(result.glb)["meshes"][0]["extras"], sidecar
+    result = solve(step, step.with_name(f"{name}.fea.glb"), study)
+    return result, glb_extras(result.glb), sidecar(result)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class StackedBlocks(unittest.TestCase):
     """A capped top block pressed on a base by 1000 N, frictionless; the cap is glued to the top (bonded, the default)."""
 
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        cls.step, refs, scene = _stack(directory, cap=True)
+        cls.step, refs, scene = _stack(class_directory(cls), cap=True)
         cls.refs = refs
         cls.contact_face = _face(scene, refs["base"], 2, 20.0)
         study = {
@@ -189,10 +178,6 @@ class StackedBlocks(unittest.TestCase):
             "view": {"checks": [{"kind": "stress"}, {"kind": "contact_pressure", "limit_MPa": 12.0, "faces": [cls.contact_face]}]},
         }
         cls.result, cls.extras, cls.sidecar = _solve(cls.step, study, "capped")
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def test_the_contact_pressure_is_force_over_area_within_2_percent(self):
         summary = self.result.summary
@@ -234,29 +219,25 @@ class StackedBlocks(unittest.TestCase):
         self.assertTrue(any(line.startswith("top on base: presses with") for line in self.result.human_lines()))
 
     def test_no_check_quotes_a_load_multiple(self):
-        """Not linear in the load: every check says it holds at this load only (scaling none), in the summary and the
-        GLB the viewer reads, so the verdict's takeaway is the worst check's own sentence, never "OK up to 18× this load"."""
+        """Not linear in the load: every check holds at this load only (scaling none), never "OK up to 18× this load"."""
         checks = self.result.summary["checks"]
         self.assertTrue(checks)
         self.assertEqual({check.get("scaling") for check in checks}, {"none"})
         self.assertEqual({check.get("scaling") for check in self.extras["checks"]}, {"none"})
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class PulledApart(unittest.TestCase):
     def test_a_contact_never_pulls_the_fixed_block_takes_no_load_and_the_top_comes_loose(self):
         with tempfile.TemporaryDirectory() as name:
-            step, refs, scene = _stack(Path(name))
-            study = {"analysis": "contact", "material": "steel", "mesh": {"size_mm": 4.0}, "steps": 1,
-                     "connections": [{"between": ["top", "base"], "type": "contact", "friction": 0.3}],
-                     "fixtures": [{"faces": [_face(scene, refs["base"], 2, 0.0)]}],
-                     "loads": [{"faces": [_face(scene, refs["top"], 2, 30.0)], "type": "force", "vector_N": [0, 0, FORCE]}]}
-            result, extras, sidecar = _solve(step, study, "pulled")
+            step, study = _stacked(Path(name), FORCE, mesh={"size_mm": 4.0}, steps=1,
+                                   connections=[{"between": ["top", "base"], "type": "contact", "friction": 0.3}])
+            result, extras, written = _solve(step, study, "pulled")
         self.assertTrue(result.ok)
         self.assertEqual(result.summary["max_contact_pressure_MPa"], 0.0)
         self.assertFalse(result.summary["contacts"][0]["touching"])
         self.assertEqual(result.summary["contacts"][0]["force_N"], 0.0)
-        self.assertEqual(sidecar["fixtures"][0]["reaction_N"], [0.0, 0.0, 0.0])  # no tension reaches the base
+        self.assertEqual(written["fixtures"][0]["reaction_N"], [0.0, 0.0, 0.0])  # no tension reaches the base
         self.assertEqual(extras["fields"][2]["max"], 0.0)
         found = {finding["type"]: finding for finding in result.findings}
         self.assertEqual(found["comes_loose"]["severity"], "error")
@@ -264,19 +245,13 @@ class PulledApart(unittest.TestCase):
         self.assertIn("they separate under this load", found["contact_separates"]["summary"])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class RigidPlaneFriction(unittest.TestCase):
     """A 20 x 20 x 4 mm steel plate on a rigid floor with friction 0.4, pressed down by N = 1000 N and pushed sideways."""
 
     def _push(self, sideways: float):
-        from build123d import Align, Box, export_step
-
-        from cadgen import fea
-
         with tempfile.TemporaryDirectory() as name:
-            step = Path(name) / "plate.step"
-            export_step(Box(20, 20, 4, align=Align.MIN), str(step))
-            top = next(face.ref for face in fea.faces(step).faces if face.normal and face.normal[2] > 0.999)
+            step, top = _plate(Path(name))
             study = {"analysis": "contact", "material": "steel", "mesh": {"size_mm": 5.0}, "steps": 2,
                      "rigid_planes": [{"point_mm": [0, 0, 0], "normal": [0, 0, 1], "friction": 0.4}],
                      "loads": [{"faces": [top], "type": "force", "vector_N": [sideways, 0, -FORCE]}]}
@@ -304,7 +279,7 @@ class RigidPlaneFriction(unittest.TestCase):
         self.assertIn("cannot hold 400 N of its load sideways", found["slides_away"]["summary"])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Hertz(unittest.TestCase):
     """A quarter of a steel hemisphere (R = 10 mm) pressed on a steel block by 20 kN, as a whole study: the quarter
     on rollers on its two symmetry planes (x = 0 and y = 0), meshed finer where they touch (mesh.refine)."""
@@ -350,17 +325,13 @@ class Hertz(unittest.TestCase):
         self.assertEqual([fixture["type"] for fixture in extras["study"]["fixtures"]], ["fixed", "roller"])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Ladder(unittest.TestCase):
     def test_stacked_blocks_over_a_tiny_budget_complete_by_adapting_and_say_so(self):
         with tempfile.TemporaryDirectory() as name:
-            step, refs, scene = _stack(Path(name))
-            study = {"analysis": "contact", "material": "steel", "mesh": {"size_mm": 3.0}, "steps": 4,
-                     "connections": [{"between": ["top", "base"], "type": "contact"}],
-                     "fixtures": [{"faces": [_face(scene, refs["base"], 2, 0.0)]}],
-                     "loads": [{"faces": [_face(scene, refs["top"], 2, 30.0)], "type": "force", "vector_N": [0, 0, -FORCE]}],
-                     "fit": {"seconds": 0.001, "allow": ["iterative", "adaptive_steps"]}}
-            result, extras, sidecar = _solve(step, study, "budget")
+            step, study = _stacked(Path(name), -FORCE, mesh={"size_mm": 3.0}, steps=4,
+                                   fit={"seconds": 0.001, "allow": ["iterative", "adaptive_steps"]})
+            result, extras, written = _solve(step, study, "budget")
         self.assertTrue(result.ok)
         rungs = [step["rung"] for step in result.fit]
         self.assertIn("adaptive_steps", rungs)
@@ -372,7 +343,7 @@ class Ladder(unittest.TestCase):
         words = next(step["words"] for step in result.fit if step["rung"] == "adaptive_steps")
         self.assertIn("contacts settle", words)
         self.assertIn(words, [step["words"] for step in extras["fit"]])
-        self.assertIn(words, [step["words"] for step in sidecar["fit"]])
+        self.assertIn(words, [step["words"] for step in written["fit"]])
         self.assertTrue(any(line.startswith(f"adapted: {words}") for line in result.human_lines()))
         self.assertIn("fit_adaptive_steps", [finding["type"] for finding in result.findings])
 
@@ -417,16 +388,13 @@ class Unsettled(unittest.TestCase):
         self.assertIn("did not settle even at the smallest step", path.warnings[0])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class UnsettledContact(unittest.TestCase):
     """A plate pressed on a rigid floor whose contact re-solve at the full load never converges (forced)."""
 
-    def test_the_result_says_it_is_not_reliable_and_every_check_fails(self):
+    def _unsettled(self, name: str, **more):
         from unittest import mock
 
-        from build123d import Align, Box, export_step
-
-        from cadgen import fea
         from cadgen._internal.fea import contact_ops, nonlinear_driver
 
         real = nonlinear_driver.newton
@@ -437,17 +405,17 @@ class UnsettledContact(unittest.TestCase):
                 return None, 1, float("inf")
             return real(problem, linear, u0, factor, *args, **kwargs)
 
-        with tempfile.TemporaryDirectory() as name:
-            step = Path(name) / "plate.step"
-            export_step(Box(20, 20, 4, align=Align.MIN), str(step))
-            top = next(face.ref for face in fea.faces(step).faces if face.normal and face.normal[2] > 0.999)
+        with tempfile.TemporaryDirectory() as directory:
+            step, top = _plate(Path(directory))
             study = {"analysis": "contact", "material": "steel", "mesh": {"size_mm": 5.0}, "steps": 2,
                      "rigid_planes": [{"point_mm": [0, 0, 0], "normal": [0, 0, 1]}],
-                     "loads": [{"faces": [top], "type": "force", "vector_N": [0, 0, -FORCE]}],
-                     "view": {"checks": [{"kind": "stress"}, {"kind": "contact_pressure", "limit_MPa": 1000}]}}
+                     "loads": [{"faces": [top], "type": "force", "vector_N": [0, 0, -FORCE]}], **more}
             # Forces that never count as settled, so each step re-solves at the full penalty, which fails at 100%.
             with mock.patch.object(nonlinear_driver, "newton", newton), mock.patch.object(contact_ops, "AUGMENT_TOLERANCE", -1.0):
-                result, extras, sidecar = _solve(step, study, "unsettled")
+                return _solve(step, study, name)
+
+    def test_the_result_says_it_is_not_reliable_and_every_check_fails(self):
+        result, extras, _ = self._unsettled("unsettled", view={"checks": [{"kind": "stress"}, {"kind": "contact_pressure", "limit_MPa": 1000}]})
         sentence = "Contact did not settle at 100% of the load: the forces here do not balance, so this result is not reliable"
         summary = result.summary
         self.assertFalse(summary["collapsed"])
@@ -464,44 +432,21 @@ class UnsettledContact(unittest.TestCase):
         self.assertEqual([check["status"] for check in extras["checks"]], ["fails", "fails"])
 
     def test_a_path_that_runs_out_of_time_says_so_not_that_there_is_no_equilibrium(self):
-        """The same plate with a time target it cannot meet (fit.seconds 0.001, nothing simplified): its step to 100 %
-        does not settle, long past the deadline, so the path stops at 50 % instead of cutting it. The result says it
-        ran out of time (summary and GLB ``out_of_time``), not that Newton's method found no equilibrium."""
-        from unittest import mock
-
-        from build123d import Align, Box, export_step
-
-        from cadgen import fea
-        from cadgen._internal.fea import contact_ops, nonlinear_driver
-
-        real = nonlinear_driver.newton
-
-        def newton(problem, linear, u0, factor, *args, **kwargs):
-            if getattr(problem, "stick", True) is False and factor > 0.9999:
-                return None, 1, float("inf")
-            return real(problem, linear, u0, factor, *args, **kwargs)
-
-        with tempfile.TemporaryDirectory() as name:
-            step = Path(name) / "plate.step"
-            export_step(Box(20, 20, 4, align=Align.MIN), str(step))
-            top = next(face.ref for face in fea.faces(step).faces if face.normal and face.normal[2] > 0.999)
-            study = {"analysis": "contact", "material": "steel", "mesh": {"size_mm": 5.0}, "steps": 2,
-                     "rigid_planes": [{"point_mm": [0, 0, 0], "normal": [0, 0, 1]}],
-                     "loads": [{"faces": [top], "type": "force", "vector_N": [0, 0, -FORCE]}],
-                     "fit": {"seconds": 0.001, "allow": []}}
-            with mock.patch.object(nonlinear_driver, "newton", newton), mock.patch.object(contact_ops, "AUGMENT_TOLERANCE", -1.0):
-                result, extras, sidecar = _solve(step, study, "out-of-time")
+        """With a time target it cannot meet (fit.seconds 0.001, nothing simplified) its step to 100 % does not settle,
+        long past the deadline, so the path stops at 50 % instead of cutting it. The result says it ran out of time
+        (summary and GLB ``out_of_time``), not that Newton's method found no equilibrium."""
+        result, extras, written = self._unsettled("out-of-time", fit={"seconds": 0.001, "allow": []})
         summary = result.summary
         self.assertEqual((summary["collapsed"], summary["out_of_time"], summary["load_percent"]), (True, True, 50.0))
         self.assertTrue(extras["out_of_time"])
-        self.assertTrue(sidecar["summary"]["out_of_time"])
+        self.assertTrue(written["summary"]["out_of_time"])
         found = {finding["type"]: finding for finding in result.findings}
         self.assertIn("in the time allowed", found["contact_stops"]["summary"])
         self.assertNotIn("no equilibrium", found["contact_stops"]["description"])
         self.assertTrue(any(warning.startswith("stopped cutting the load steps after") for warning in result.warnings))
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class PartMaterials(unittest.TestCase):
     """The stacked blocks pressed by 1000 N, the base 6061 aluminium, the top steel: each part's own material is solved
     with (the column shortens by F/A (L_base/E_al + L_top/E_steel)) and listed in the summary and the GLB."""
@@ -511,13 +456,9 @@ class PartMaterials(unittest.TestCase):
 
         aluminium, steel = lookup_material("aluminum-6061-t6"), lookup_material("steel")
         with tempfile.TemporaryDirectory() as name:
-            step, refs, scene = _stack(Path(name))
-            study = {"analysis": "contact", "material": "steel", "mesh": {"size_mm": 3.0}, "steps": 2,
-                     "parts": {"base": {"material": "aluminum-6061-t6"}, "top": {"material": "steel"}},
-                     "connections": [{"between": ["top", "base"], "type": "contact"}],
-                     "fixtures": [{"faces": [_face(scene, refs["base"], 2, 0.0)]}],
-                     "loads": [{"faces": [_face(scene, refs["top"], 2, 30.0)], "type": "force", "vector_N": [0, 0, -FORCE]}]}
-            result, extras, sidecar = _solve(step, study, "two-materials")
+            step, study = _stacked(Path(name), -FORCE, mesh={"size_mm": 3.0}, steps=2,
+                                   parts={"base": {"material": "aluminum-6061-t6"}, "top": {"material": "steel"}})
+            result, extras, written = _solve(step, study, "two-materials")
         hand = FORCE / AREA * (20.0 / aluminium.E + 10.0 / steel.E)
         # The held base face stops its Poisson spread, a little stiffer than the bar formula.
         self.assertAlmostEqual(result.summary["max_displacement_mm"] / hand, 1.0, delta=0.04)
@@ -526,11 +467,11 @@ class PartMaterials(unittest.TestCase):
         listed = {part["name"]: (part["material"], part["yield_MPa"]) for part in result.summary["parts"]}
         self.assertEqual(listed, {"base": (aluminium.name, aluminium.yield_strength), "top": (steel.name, steel.yield_strength)})
         self.assertEqual({part["name"]: part["material"] for part in extras["parts"]}, {"base": aluminium.name, "top": steel.name})
-        self.assertEqual({part["name"]: part["material"] for part in sidecar["summary"]["parts"]},
+        self.assertEqual({part["name"]: part["material"] for part in written["summary"]["parts"]},
                          {"base": aluminium.name, "top": steel.name})
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class PushedSideways(unittest.TestCase):
     """A 24 mm steel block resting on a held plate, nothing else holding it, pressed down by 3000 N and pushed sideways,
     friction 0.2 (it holds 600 N). Friction's stick spring as stiff as the normal penalty chattered between stick and
@@ -540,16 +481,11 @@ class PushedSideways(unittest.TestCase):
     def setUpClass(cls):
         from build123d import Align, Box, Compound, Pos, export_step
 
-        cls._tmp = tempfile.TemporaryDirectory()
         base = Box(80, 50, 6, align=(Align.CENTER, Align.CENTER, Align.MAX))
         block = Box(24, 24, 20, align=(Align.CENTER, Align.CENTER, Align.MIN))
         base.label, block.label = "base", "block"
-        cls.step = Path(cls._tmp.name) / "block_on_plate.step"
+        cls.step = class_directory(cls) / "block_on_plate.step"
         export_step(Compound(children=[base, block]), str(cls.step))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def _push(self, sideways: float, name: str):
         study = {"analysis": "contact", "material": "steel", "mesh": {"size_mm": 5}, "steps": 3,

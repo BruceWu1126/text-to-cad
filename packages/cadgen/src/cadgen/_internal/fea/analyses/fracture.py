@@ -35,8 +35,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, SolveContext
-from cadgen._internal.fea.analyses.static import StaticAnalysis, StaticInputs, colour_range
+from cadgen._internal.fea.analyses.base import AnalysisResult, SolveContext, finding
+from cadgen._internal.fea.analyses.static import StaticAnalysis, StaticInputs, colour_range, floored
 from cadgen._internal.fea.crack import CrackSpec, parse_crack
 
 if TYPE_CHECKING:
@@ -144,23 +144,17 @@ def _cycles(value: float) -> str:
     return f"{round(value):,}"
 
 
-def _floored(value: float) -> float:
-    return math.floor(value * 1000) / 1000
-
-
 class FractureAnalysis(StaticAnalysis):
     name: ClassVar[str] = "fracture"
     tier: ClassVar[int] = 3
     word: ClassVar[str] = "Cracks"
-    estimate_only: ClassVar[bool] = False
+    extras_word: ClassVar[str] = "crack"
     limits: ClassVar[tuple[str, ...]] = LIMITS
     isotropic_only: ClassVar[bool] = True
     study_keys: ClassVar[frozenset[str]] = frozenset({"fixtures", "loads", "crack", "growth"})
-    material_needs: ClassVar[frozenset[str]] = frozenset()
     checks: ClassVar[tuple] = (kinds.FRACTURE, kinds.CRACK_LIFE, kinds.STRESS, kinds.DISPLACEMENT)
     default_checks: ClassVar[tuple[dict, ...]] = ({"kind": "fracture", "margin": 1.5},)
     ladder: ClassVar[tuple[str, ...]] = ("iterative", "local_refine", "defeature", "symmetry")
-    noun: ClassVar[str] = "this load"
     governing_word: ClassVar[str] = "K"
 
     # -- parse ---------------------------------------------------------------------------------------
@@ -320,8 +314,6 @@ class FractureAnalysis(StaticAnalysis):
     def solve(self, ctx: SolveContext, inputs: FractureInputs) -> AnalysisResult:
         import time
 
-        import numpy as np
-
         from cadgen._internal.fea import crack
         from cadgen._internal.fea.femspace import FemSpace
 
@@ -367,7 +359,6 @@ class FractureAnalysis(StaticAnalysis):
             for name, values in (("K_I", front_k.K_I), ("K_II", front_k.K_II), ("K_III", front_k.K_III))
         }
         result.scalars["analysis_extras"] = {"crack": {"kind": inputs.crack.kind, "K_max_MPa_sqrt_m": round(K_max, 4)}}
-        del np
         return result
 
     @staticmethod
@@ -406,12 +397,10 @@ class FractureAnalysis(StaticAnalysis):
         margin = float(check.get("margin", 1.5))
         ratio = K / toughness
         status = "fails" if ratio >= 1.0 else "close" if ratio * margin > 1.0 else "passes"
-        front_k = result.scalars["front_k"]
-        at = front_k.at_mm[result.scalars["K_index"]]
         return {
             "kind": "fracture", "label": check.get("label") or "Crack", "value": round(K, 4), "limit": toughness,
             "unit": "MPa√m", "ratio": round(ratio, 6), "close_at": round(1.0 / margin, 6), "margin": margin, "status": status,
-            "where": {"ref": None, "at": [round(c, 3) for c in at]}, "point": result.scalars["K_point"],
+            "where": {"ref": None, "at": _K_at(result)}, "point": result.scalars["K_point"],
         }
 
     def _life_check(self, check: dict, result: AnalysisResult) -> dict:
@@ -421,13 +410,11 @@ class FractureAnalysis(StaticAnalysis):
         margin = float(check.get("margin", 2.0))
         ratio = need / life if life > 0 else math.inf
         status = "fails" if life < need else "close" if life < margin * need else "passes"
-        front_k = result.scalars["front_k"]
-        at = front_k.at_mm[result.scalars["K_index"]]
         return {
             "kind": "crack_life", "label": check.get("label") or "Crack life",
             "value": float(f"{life:.4g}") if math.isfinite(life) else None, "limit": need, "unit": "cycles",
             "ratio": round(ratio, 6) if math.isfinite(ratio) else None, "close_at": round(1.0 / margin, 6), "margin": margin,
-            "status": status, "where": {"ref": None, "at": [round(c, 3) for c in at]}, "need": need,
+            "status": status, "where": {"ref": None, "at": _K_at(result)}, "need": need,
             "life": float(f"{life:.4g}") if math.isfinite(life) else None,
             "critical_mm": round(float(growth["final_mm"]), 4) if math.isfinite(growth["final_mm"]) else None,
         }
@@ -443,20 +430,20 @@ class FractureAnalysis(StaticAnalysis):
         K = float(result.scalars["K_max"])
         toughness = result.scalars["toughness"]
         point = result.scalars["K_point"]
-        at = {"text": f"the crack front at {point}", "ref": None, "at": [round(c, 3) for c in front_k.at_mm[index]]}
+        at = {"text": f"the crack front at {point}", "ref": None, "at": _K_at(result)}
         for judged in check_results:
             if judged["kind"] == "fracture" and judged["status"] == "fails":
-                found.append(_finding("error", "crack_grows",
+                found.append(finding("error", "crack_grows",
                                       f"The crack grows at this load: K {K:.3g} MPa√m at {point} reaches the toughness "
                                       f"{toughness:.3g} MPa√m", f"K/K_IC {K / toughness:.3f}", [at]))
             elif judged["kind"] == "fracture" and judged["status"] == "close":
-                found.append(_finding("warning", "low_fracture_margin",
+                found.append(finding("warning", "low_fracture_margin",
                                       f"The crack holds, but K {K:.3g} MPa√m at {point} is within the {judged['margin']:g} "
                                       f"margin of the toughness {toughness:.3g} MPa√m", f"K_IC/K {toughness / K:.3f}", [at]))
             elif judged["kind"] == "crack_life" and judged["status"] in ("fails", "close"):
                 life = judged["life"]
                 words = "no time" if life is not None and life < 1 else f"about {_cycles(life)} cycles" if life else "no end"
-                found.append(_finding("error" if judged["status"] == "fails" else "warning",
+                found.append(finding("error" if judged["status"] == "fails" else "warning",
                                       "crack_life_short" if judged["status"] == "fails" else "low_crack_life_margin",
                                       f"The crack grows to its critical size in {words}, "
                                       + ("short of" if judged["status"] == "fails" else "within the margin of")
@@ -467,25 +454,25 @@ class FractureAnalysis(StaticAnalysis):
         if material.yield_strength and K > 0:
             plastic = 2.5 * (K / material.yield_strength) ** 2 * 1000.0  # mm: ASTM E399's size for plane strain
             if plastic > size:
-                found.append(_finding(
+                found.append(finding(
                     "warning", "lefm_limit",
                     f"The plastic zone at the crack front is not small next to the crack ({size:.3g} mm): LEFM stretches here, "
                     "and the real crack is less stable than K says; treat the answer as approximate",
                     f"2.5 (K/yield)² = {plastic:.3g} mm, more than the crack's {size:.3g} mm", [at]))
         spread = front_k.spread
         if spread > SPREAD_WARNING:
-            found.append(_finding(
+            found.append(finding(
                 "warning", "front_accuracy",
                 f"K moved {100 * spread:.1f}% between the two J domains around the front, so it is known to about that much",
                 f"front meshed at {result.scalars['front_mm']:.3g} mm, J domain {result.scalars['radius_mm']:.3g} mm", [at]))
         K_I, K_II, K_III = front_k.K_I[index], front_k.K_II[index], front_k.K_III[index]
         if K_I < 0:
-            found.append(_finding(
+            found.append(finding(
                 "warning", "crack_closed",
                 "The load presses the crack shut (K_I is negative): its faces would touch, which this analysis does not model",
                 f"K_I {K_I:.3g} MPa√m", [at]))
         elif max(abs(K_II), abs(K_III)) > 0.1 * max(K_I, 1e-12):
-            found.append(_finding(
+            found.append(finding(
                 "info", "mixed_mode",
                 f"The crack is also sheared (K_II {K_II:.2g}, K_III {K_III:.2g} MPa√m beside K_I {K_I:.2g}); the K judged is "
                 "the equivalent one, and a sheared crack may turn as it grows", "", [at]))
@@ -507,10 +494,10 @@ class FractureAnalysis(StaticAnalysis):
             "K_I_MPa_sqrt_m": round(front_k.K_I[index], 4),
             "K_II_MPa_sqrt_m": round(front_k.K_II[index], 4),
             "K_III_MPa_sqrt_m": round(front_k.K_III[index], 4),
-            "K_at_mm": [round(c, 3) for c in front_k.at_mm[index]],
+            "K_at_mm": _K_at(result),
             "K_point": result.scalars["K_point"],
             "toughness_MPa_sqrt_m": toughness,
-            "fracture_factor": None if toughness is None or not K > 0 else _floored(toughness / K),
+            "fracture_factor": None if toughness is None or not K > 0 else floored(toughness / K),
             "front": [
                 {"front": front_k.front[i], "s_mm": round(front_k.s_mm[i], 4), "at_mm": [round(c, 3) for c in front_k.at_mm[i]],
                  "K_I": round(front_k.K_I[i], 4), "K_II": round(front_k.K_II[i], 4), "K_III": round(front_k.K_III[i], 4),
@@ -542,9 +529,6 @@ class FractureAnalysis(StaticAnalysis):
         field's entry says so and keeps the peak."""
         return {"von_mises": colour_range(result.fields["von_mises"], summary["max_von_mises_MPa"], spike=1.0),
                 "displacement": (0.0, summary["max_displacement_mm"])}
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} crack"
 
     def extras_head(self, summary: dict) -> dict:
         """What the viewer reads of the crack: its words, the largest K and where, and the front's stations (for its markers)."""
@@ -592,21 +576,22 @@ class FractureAnalysis(StaticAnalysis):
         return lines
 
 
+def _K_at(result: AnalysisResult) -> list[float]:
+    """Where along the front K is largest, mm."""
+    return [round(c, 3) for c in result.scalars["front_k"].at_mm[result.scalars["K_index"]]]
+
+
 def _front_length(prepared) -> float:
     """The front's length before meshing: the analytic front(s) clipped to the part's box."""
+    import numpy as np
+
     from cadgen._internal.fea import crack
 
     total = 0.0
     for points in crack.front_polylines(prepared.crack, prepared.shape):
-        total += _polyline_length(points)
+        points = np.asarray(points)
+        total += float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum()) if len(points) > 1 else 0.0
     return total
-
-
-def _polyline_length(points) -> float:
-    import numpy as np
-
-    points = np.asarray(points)
-    return float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum()) if len(points) > 1 else 0.0
 
 
 def _inside_crack(geometry, points):
@@ -619,7 +604,3 @@ def _inside_crack(geometry, points):
     if geometry.kind in ("edge", "through"):
         return np.abs(u) <= geometry.a * (1 + 1e-9)
     return (u / geometry.a) ** 2 + (v / geometry.c) ** 2 <= 1.0 + 1e-9
-
-
-def _finding(severity: str, kind: str, summary: str, description: str, items: list[dict]) -> dict:
-    return {"check": "fea", "severity": severity, "type": kind, "summary": summary, "description": description, "items": items}

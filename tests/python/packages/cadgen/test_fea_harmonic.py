@@ -13,30 +13,15 @@ Parse and superposition tests need no mesh; the beam needs the fea extra.
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import struct
-import tempfile
 import unittest
-from contextlib import redirect_stderr
-from pathlib import Path
 from types import SimpleNamespace
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
+from tests.python.support.fea_fixtures import box_step, class_directory, ends, glb_extras, needs_fea, read_glb, sidecar, solve
 
 from cadgen._internal.fea.analyses import get_analysis  # noqa: E402
 from cadgen._internal.fea.materials import lookup_material  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
 from cadgen._internal.fea.study import parse_study  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 LENGTH, SIDE = 100.0, 6.0
 STEEL = lookup_material("steel")
@@ -81,11 +66,12 @@ class StudyFile(unittest.TestCase):
             ({"sweep_Hz": 100}, r"\[low, high\]"),
             ({"damping_ratio": 1.5}, "must be under 1"),
             ({"fixtures": []}, "at least one"),
+            ({"excitation": {"type": "force"}, "loads": [{"type": "gravity", "vector_g": [0, 0, -1]}]}, "not one of"),
+            ({"view": {"checks": [{"kind": "frequency", "min_Hz": 60}]}}, "not a check this cadgen makes"),
+            ({"view": {"checks": [{"kind": "acceleration"}]}}, "limit_g"),
         ):
             with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, words):
                 parse_study({**_study(), **bad})
-        with self.assertRaisesRegex(ValueError, "not one of"):
-            parse_study(_study(excitation={"type": "force"}, loads=[{"type": "gravity", "vector_g": [0, 0, -1]}]))
 
     def test_it_takes_the_three_shaking_checks_and_a_frequency_scrubber(self):
         parsed = parse_study(_study(view={"checks": [
@@ -93,10 +79,6 @@ class StudyFile(unittest.TestCase):
             "presets": [{"label": "At resonance", "frame": 490, "deformation": 50}]}))
         self.assertEqual([check["kind"] for check in parsed.checks], ["stress", "displacement", "acceleration"])
         self.assertEqual(parsed.check_faces, ("#o1.f2",))
-        with self.assertRaisesRegex(ValueError, "not a check this cadgen makes"):
-            parse_study(_study(view={"checks": [{"kind": "frequency", "min_Hz": 60}]}))
-        with self.assertRaisesRegex(ValueError, "limit_g"):
-            parse_study(_study(view={"checks": [{"kind": "acceleration"}]}))
 
 
 class Ladder(unittest.TestCase):
@@ -210,7 +192,7 @@ class Superposition(unittest.TestCase):
         chosen, share = sp.fewest_modes(np.array([0.61, 0.0]), 1.0)
         self.assertEqual((chosen.tolist(), round(share, 6)), ([0], 0.61))
 
-    @unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+    @needs_fea
     def test_lobpcg_finds_the_modes_a_factorisation_does(self):
         import numpy as np
         import scipy.sparse as sparse
@@ -245,45 +227,22 @@ class Frames(unittest.TestCase):
         self.assertEqual(choose_frames(grid, curve, 1, ZETA)[0], peaks)
 
 
-def _glb(path: Path) -> tuple[dict, bytes]:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    return json.loads(raw[20:20 + length]), raw[20 + length + 8:]
-
-
-def _ends(listing) -> tuple[str, str]:
-    by_x = {face.center_mm[0]: face.ref for face in listing.faces
-            if face.surface == "plane" and face.normal is not None and abs(abs(face.normal[0]) - 1) < 1e-6}
-    return by_x[min(by_x)], by_x[max(by_x)]
-
-
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class ShakenCantilever(unittest.TestCase):
     """The clamped beam shaken at 1 g along Z from 10 to 600 Hz, through its first mode (490 Hz)."""
 
     @classmethod
     def setUpClass(cls):
-        from build123d import Align, Box, export_step
-
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.directory = Path(cls._tmp.name)
-        cls.step = cls.directory / "beam.step"
-        export_step(Box(LENGTH, SIDE, SIDE, align=(Align.MIN, Align.CENTER, Align.CENTER)), str(cls.step))
-        cls.fixed, cls.tip = _ends(fea.faces(cls.step))
+        cls.directory = class_directory(cls)
+        cls.step = box_step(cls.directory, "beam", (LENGTH, SIDE, SIDE), "x")
+        cls.fixed, cls.tip = ends(cls.step)
         cls.study = _study(fixtures=[{"faces": [cls.fixed]}], mesh={"size_mm": 2.0}, damping_ratio=ZETA, view={"checks": [
             {"kind": "stress"}, {"kind": "acceleration", "limit_g": 10, "faces": [cls.tip], "label": "Tip"},
             {"kind": "displacement", "limit_mm": 1.0}]})
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(cls.step, cls.directory / "beam.fea.glb", study=cls.study)
+        cls.result = solve(cls.step, cls.directory / "beam.fea.glb", cls.study)
         cls.summary = cls.result.summary
         cls.f1 = cls.summary["modes"][0]["frequency_Hz"]
-        cls.sidecar = json.loads(cls.result.sidecar.read_text(encoding="utf-8"))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.sidecar = sidecar(cls.result)
 
     def _theory_at_f1(self) -> float:
         omega1 = 2 * math.pi * self.f1
@@ -329,7 +288,7 @@ class ShakenCantilever(unittest.TestCase):
         self.assertIn("The modes up to 900 Hz move only 61% of the mass along Z", found["modes_missing_mass"]["summary"])
 
     def test_the_glb_carries_a_frequency_series_with_both_parts_of_the_motion(self):
-        gltf, _ = _glb(self.result.glb)
+        gltf, _ = read_glb(self.result.glb)
         extras = gltf["meshes"][0]["extras"]
         attributes = gltf["meshes"][0]["primitives"][0]["attributes"]
         self.assertEqual(extras["analysis"]["type"], "harmonic")
@@ -358,32 +317,25 @@ class ShakenCantilever(unittest.TestCase):
         self.assertTrue(lines[3].startswith("2 modes up to 900 Hz, holding 61% of the mass along Z"))
 
     def test_an_oversized_model_completes_by_keeping_the_modes_that_move_with_the_shake(self):
-        from cadgen import fea
-
         study = {**self.study, "fit": {"memory_GB": 0.01, "allow": ["reduce_modes"]}}
-        with redirect_stderr(io.StringIO()):
-            result = fea.solve(self.step, self.directory / "tight.fea.glb", study=study)
+        result = solve(self.step, self.directory / "tight.fea.glb", study)
         self.assertTrue(result.ok)
         self.assertEqual([step["rung"] for step in result.fit][0], "reduce_modes")
         words = "Kept 1 of the 2 modes up to 900 Hz, the ones holding 61% of the mass moving along Z, to fit"
         self.assertEqual(result.fit[0]["words"], words)
         self.assertEqual(result.fit[0]["detail"]["kept_modes"], 1)
         self.assertEqual((result.summary["modes_used"], result.summary["kept_share"]), (1, round(result.fit[0]["detail"]["kept_share"], 4)))
-        gltf, _ = _glb(result.glb)
-        self.assertIn(words, [step["words"] for step in gltf["meshes"][0]["extras"]["fit"]])
-        self.assertIn(words, [step["words"] for step in json.loads(result.sidecar.read_text(encoding="utf-8"))["fit"]])
+        self.assertIn(words, [step["words"] for step in glb_extras(result.glb)["fit"]])
+        self.assertIn(words, [step["words"] for step in sidecar(result)["fit"]])
         self.assertIn(f"adapted: {words}", result.human_lines())
         self.assertIn("fit_reduce_modes", [finding["type"] for finding in result.findings])
         # The mode that carries the shake is kept: the benchmark still holds.
         self.assertAlmostEqual(result.summary["max_displacement_mm"] / self._theory_at_f1(), 1.0, delta=0.10)
 
     def test_a_force_shake_resonates_at_the_same_mode(self):
-        from cadgen import fea
-
         study = _study(fixtures=[{"faces": [self.fixed]}], mesh={"size_mm": 2.0}, excitation={"type": "force"},
                        loads=[{"faces": [self.tip], "type": "force", "vector_N": [0, 0, 1]}], sweep_Hz=[10, 600])
-        with redirect_stderr(io.StringIO()):
-            result = fea.solve(self.step, self.directory / "force.fea.glb", study=study)
+        result = solve(self.step, self.directory / "force.fea.glb", study)
         # A 1 N tip force: static PL³/(3EI), amplified by about 1/(2ζ) at f1 (mode 1 holds ~97 % of the tip's static compliance).
         static = LENGTH ** 3 / (3 * STEEL.E * SIDE ** 4 / 12)
         self.assertAlmostEqual(result.summary["peak_Hz"] / self.f1, 1.0, delta=0.005)

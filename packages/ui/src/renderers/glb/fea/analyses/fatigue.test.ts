@@ -1,9 +1,9 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
-import { feaControls, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, feaVerdict, studyRows } from '../../feaResult.js';
 import { heldRows, madeOfRows, pushedRows } from '../setup.js';
 import fatigue from './fatigue.js';
 import { ANALYSES } from './index.js';
+import { feaFile, vec } from '../../__tests__/feaFile.js';
 
 // The check as cadgen writes it: the Goodman factor as the value, held to its margin, its ratio one over
 // the factor and its close_at one over the margin; the cycles needed (`need`) and, within the data, the life.
@@ -15,14 +15,10 @@ const RUNOUT = { kind: 'fatigue', label: '', value: 2.4, limit: 1.5, unit: '', r
 
 /** A fatigue result as cadgen writes one: life (log10 cycles) first, the fatigue factor, the displacement. */
 function fatigueResult(checks: unknown[], { capped = false, view = null }: { capped?: boolean; view?: unknown } = {}) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), 3));
-  geometry.setAttribute('_von_mises', new BufferAttribute(new Float32Array([7.6, 8, 8.7]), 1));
-  geometry.setAttribute('_life', new BufferAttribute(new Float32Array([7.6, 8, 8.7]), 1));
-  geometry.setAttribute('_fatigue_factor', new BufferAttribute(new Float32Array([1.3, 5, 100]), 1));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  return feaFile({
+    position: [0, 0, 0, 1, 0, 0, 0, 1, 0], _von_mises: [7.6, 8, 8.7], _life: [7.6, 8, 8.7], _fatigue_factor: [1.3, 5, 100],
+    _displacement: vec(9),
+  }, {
     generator: 'cadgen fea', name: 'beam fatigue life', deformation_scale: 2,
     fields: [
       { attribute: '_LIFE', name: 'fatigue life', units: 'log10 cycles', min: capped ? 6 : 7.59, max: capped ? 6 : 8.699, attribute_scale: 1, field: 'life' },
@@ -33,10 +29,7 @@ function fatigueResult(checks: unknown[], { capped = false, view = null }: { cap
     study: { material: { name: 'Aluminum 7075-T6', yield_MPa: 503 }, fixtures: [{ type: 'fixed', faces: ['#o1.f1'] }],
       loads: [{ type: 'force', faces: ['#o1.f2'], vector_N: [0, 0, -150] }], mesh: { size_mm: 1.5, refined_from_mm: 3 },
       fatigue: { from: 'static', loading: 'zero_based', stress_ratio: 0, cycles: 1e6, surface: 'machined', factor: 1 } },
-  });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
+  }, { index: false, color: false });
 }
 
 describe('fatigue', () => {

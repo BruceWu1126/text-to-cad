@@ -1,7 +1,7 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
-import { feaVerdict, readFeaResult } from '../../feaResult.js';
+import { feaVerdict } from '../../feaResult.js';
 import { ANALYSES } from './index.js';
+import { feaFile, vec } from '../../__tests__/feaFile.js';
 
 // Every analysis whose response is not a multiple of its load: material laws, contact, flow, time, levels in dB.
 const NOT_LINEAR = ['creep', 'nonlinear', 'contact', 'bolt', 'composite', 'impact', 'multiphase', 'fsi', 'cfd', 'cfd_turbulent',
@@ -9,15 +9,9 @@ const NOT_LINEAR = ['creep', 'nonlinear', 'contact', 'bolt', 'composite', 'impac
 
 // One passing check of `kind` as an older cadgen wrote it: no `scaling` of its own, so the analysis's decides.
 function resultOf(type: string, check: Record<string, unknown>) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.04, 0, 0, 0, 0.006, 0]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_von_mises', new BufferAttribute(new Float32Array([67, 10, 30]), 1));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 1]), 1));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  return feaFile({
+    position: [0, 0, 0, 0.04, 0, 0, 0, 0.006, 0], _von_mises: [67, 10, 30], _displacement: vec(9), _face: [0, 0, 1],
+  }, {
     generator: 'cadgen fea', name: 'part', deformation_scale: 10, faces: ['#o1.f1', '#o1.f2'], occurrence: '#o1', safety_factor: 2.5,
     analysis: { type, tier: 3, word: type, estimate: false, limits: ['x'], warnings: [] },
     fields: [
@@ -28,9 +22,6 @@ function resultOf(type: string, check: Record<string, unknown>) {
     checks: [{ label: 'Check', status: 'passes', close_at: 0.5, where: { ref: '#o1.f1', at: [0, 0, 0] }, ...check }],
     findings: [],
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 const STRESS = { kind: 'stress', value: 100, limit: 250, unit: 'MPa', ratio: 0.4, margin: 2 };

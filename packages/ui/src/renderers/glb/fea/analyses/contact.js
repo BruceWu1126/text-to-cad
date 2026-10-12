@@ -1,24 +1,20 @@
 /**
- * Contact (lite): parts that press on each other or slide instead of being glued, and parts resting on
- * a rigid plane, Tier 3. Its series is the load steps as pseudo-time ("60 % load"), opening on the
- * last load solved. Its verdict judges the stress, the displacement and the contact pressure there;
- * none moves with a load control (contact opens, closes and slides, so the response is not
- * proportional to the load). Its takeaway leads with "Lite · ", and Details lists its limits. What
- * you see opens on the load-step scrubber, the field (stress, displacement, contact pressure) and the
- * deformation; Play runs the steps over three seconds. Its setup is static's held at and pushed, then
- * one row per contact pair in plain words ("pin presses on plate, friction 0.2", what it did under the
- * load its hint), the rigid floor and the material.
+ * Contact (lite), Tier 3: parts that press on each other or slide instead of being glued, and parts resting
+ * on a rigid plane. Its series is the load steps as pseudo-time ("60 % load"); contact opens, closes and
+ * slides, so nothing is proportional to the load. Study names each contact pair in plain words ("pin presses
+ * on plate, friction 0.2"), what it did under the load its hint.
  */
-import { seriesControls } from "../controls.js";
 import { plainNumber } from "../numbers.js";
-import { heldRows, madeOfRows, pushedRows, rigidFloorRows, spaced } from "../setup.js";
-import { stopSentence } from "./nonlinear.js";
-import { routineOf } from "./stub.js";
+import { group, heldRows, madeOfRows, pushedRows, rigidFloorRows, spaced } from "../setup.js";
+import { stopsCaption } from "./nonlinear.js";
+import { planned, playSeries } from "./stub.js";
 
-/** Play: the load steps one after another, interpolated (GlbRenderer plays it). */
-export const PLAY = routineOf("Play", "play");
+export { PLAY } from "./stub.js";
 
-const list = (value) => (Array.isArray(value) ? value.filter((entry) => entry && typeof entry === "object") : []);
+export const list = (value) => (Array.isArray(value) ? value.filter((entry) => entry && typeof entry === "object") : []);
+
+/** The refs a solved outcome names, for its row's choice. */
+export const outcomeRefs = (outcome) => (Array.isArray(outcome?.refs) ? outcome.refs.filter((ref) => typeof ref === "string" && ref) : []);
 
 /** How a contact came out under the load, for its row's hint: "1000 N, peak 10 MPa", "no longer touching". */
 function outcomeWords(outcome) {
@@ -44,37 +40,28 @@ export function contactRows(result) {
     if (!Array.isArray(between) || between.length !== 2) return null;
     const friction = Number(pair.friction) || 0;
     const label = `${spaced(between[0])} presses on ${spaced(between[1])}, ${friction ? `friction ${plainNumber(friction)}` : "no friction"}`;
-    const refs = Array.isArray(outcome?.refs) ? outcome.refs.filter((ref) => typeof ref === "string" && ref) : [];
+    const refs = outcomeRefs(outcome);
     const hint = outcomeWords(outcome);
     return { id: `contact:${index}`, label, detail: "", wrap: true, ...(hint ? { hint } : {}),
       ...(refs.length ? { refs, summary: `Contact: ${label}` } : {}) };
   }).filter(Boolean);
-  return rows.length ? [{ id: "contacts", label: "Pressed together", detail: "", glyph: "load", children: rows }] : [];
+  return group("contacts", "Pressed together", "load", rows);
 }
 
 /** Its setup: where it is held, what pushes it, which parts press on which, the rigid floor, what it is made of. */
 export const CONTACT_SETUP = Object.freeze([heldRows, pushedRows, contactRows, rigidFloorRows, madeOfRows]);
 
-export default Object.freeze({
-  name: "contact",
-  tier: 3,
-  word: "Contact",
-  noun: "this load",
-  family: null,
-  estimate: false,
-  scalesWithLoad: false,
+export default planned({
+  name: "contact", tier: 3, word: "Contact",
   // Not linear in the load: every check is judged as solved, its takeaway its own sentence, never "OK up to 18× this load".
   scaling: "none",
-  checks: Object.freeze(["stress", "displacement", "contact_pressure"]),
-  checkLabels: Object.freeze({}),
+  checks: ["stress", "displacement", "contact_pressure"],
   // The load-step scrubber, the field, the deformation (controls.seriesControls words a % series "Load step").
-  defaultControls: seriesControls,
   setupGroups: CONTACT_SETUP,
-  routine: (result) => (result?.series ? PLAY : null),
-  markers: Object.freeze(["load", "fixture", "rigid_plane"]),
-  displayTitle: "Loads and fixtures",
-  // A Tier 3 analysis's short limit word, which leads its verdict's takeaway.
+  routine: playSeries,
+  markers: ["load", "fixture", "rigid_plane"],
   limitWord: "Lite",
   // A load path that could not be followed to the full load leads the takeaway: "Stops at about 20 % of the load · ".
-  stopCaption: (result) => stopSentence(result, "Stops"),
+  stopCaption: stopsCaption,
 });
+

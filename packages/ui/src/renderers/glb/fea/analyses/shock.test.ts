@@ -1,21 +1,15 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
 import { checkTitle } from '../checkKinds.js';
-import { feaControls, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, feaVerdict, studyRows } from '../../feaResult.js';
 import { feaAnalysis } from './index.js';
 import shock, { shockedRows, spectrumLevel, spectrumWords } from './shock.js';
+import { feaFile, vec } from '../../__tests__/feaFile.js';
 
 // A shocked cantilever as cadgen writes one: two envelopes (peak stress, peak displacement), no series.
 function shocked(study: Record<string, unknown> = {}, checks: unknown[] = []) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.1, 0, 0, 0.1, 0, 0.006]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_von_mises', new BufferAttribute(new Float32Array([16.7, 2, 0]), 1));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 1, 1]), 1));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  return feaFile({
+    position: [0, 0, 0, 0.1, 0, 0, 0.1, 0, 0.006], _von_mises: [16.7, 2, 0], _displacement: vec(9), _face: [0, 1, 1],
+  }, {
     generator: 'cadgen fea', name: 'beam shock', deformation_scale: 80, faces: ['#o1.f1', '#o1.f2'], safety_factor: 14.98,
     analysis: { type: 'shock', tier: 1, word: 'Shock', estimate: false, limits: [], noun: 'this shock', reference_C: null, warnings: [] },
     fields: [
@@ -33,9 +27,6 @@ function shocked(study: Record<string, unknown> = {}, checks: unknown[] = []) {
       status: 'passes', where: { ref: '#o1.f1', at: [0, 3, 3] } }],
     findings: [],
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 describe('shock', () => {

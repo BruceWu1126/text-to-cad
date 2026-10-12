@@ -1,9 +1,9 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
-import { feaControls, feaVerdict, readFeaResult, reynoldsWarning, studyRows } from '../../feaResult.js';
+import { feaControls, feaVerdict, reynoldsWarning, studyRows } from '../../feaResult.js';
 import { flowRows, heldRows, madeOfRows } from '../setup.js';
 import cfd, { FLOW_SETUP } from './cfd.js';
 import { feaAnalysis } from './index.js';
+import { feaFile, vec } from '../../__tests__/feaFile.js';
 
 const LIMIT = 'Laminar, steady, incompressible; no turbulence model.';
 const PAST = 'Re 2391 is past the laminar range (laminar above Re 2000 is unreliable): real flow is likely turbulent, '
@@ -11,17 +11,10 @@ const PAST = 'Re 2391 is past the laminar range (laminar above Re 2000 is unreli
 
 // A flow result as cadgen writes one: wall pressure first, wall shear beside it, nothing deformed.
 function flowResult(analysis: Record<string, unknown> = {}, extras: Record<string, unknown> = {}) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.016, 0, 0, 0, 0.002, 0]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_pressure', new BufferAttribute(new Float32Array([0.32, 0, 0.16]), 1));
-  geometry.setAttribute('_wall_shear', new BufferAttribute(new Float32Array([0.02, 0.02, 0.02]), 1));
-  geometry.setAttribute('_speed', new BufferAttribute(new Float32Array([0.9, 0.4, 1.3]), 1));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 0]), 1));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  return feaFile({
+    position: [0, 0, 0, 0.016, 0, 0, 0, 0.002, 0], _displacement: vec(9), _pressure: [0.32, 0, 0.16], _wall_shear: [0.02, 0.02, 0.02],
+    _speed: [0.9, 0.4, 1.3], _face: [0, 0, 0],
+  }, {
     generator: 'cadgen fea', name: 'tube flow', deformation_scale: null, faces: ['#o1.f4'], occurrence: '#o1',
     analysis: { type: 'cfd', tier: 3, word: 'Flow', estimate: false, limits: [LIMIT], noun: 'this flow', reference_C: null, warnings: [],
       ...analysis },
@@ -39,9 +32,6 @@ function flowResult(analysis: Record<string, unknown> = {}, extras: Record<strin
     findings: [],
     ...extras,
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 describe('cfd', () => {

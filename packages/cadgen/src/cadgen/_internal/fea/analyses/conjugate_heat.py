@@ -51,7 +51,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs, SolveContext
+from cadgen._internal.fea.analyses.base import AnalysisBase, AnalysisResult, FieldSpec, Inputs, SolveContext, finding, xyz
 from cadgen._internal.fea.analyses.thermal import (
     HEAT_KEYS, ThermalInputs, check_limits, heat_echo, parse_heat_keys, space_result, temperature_check, temperature_findings,
 )
@@ -134,16 +134,12 @@ def _strip(document: dict) -> tuple[dict, str, tuple[float, float] | None, tuple
 # -- the analysis -------------------------------------------------------------------------------------
 
 
-class ConjugateHeatAnalysis:
+class ConjugateHeatAnalysis(AnalysisBase):
     name: ClassVar[str] = "conjugate_heat"
-    tier: ClassVar[int] = 3
     word: ClassVar[str] = "Cooled by flow"
-    estimate_only: ClassVar[bool] = False
     limits: ClassVar[tuple[str, ...]] = LIMITS
     study_keys: ClassVar[frozenset[str]] = frozenset({"flow", *HEAT_KEYS})
     material_needs: ClassVar[frozenset[str]] = frozenset({"conductivity"})
-    mesh_orders: ClassVar[tuple[int, ...]] = (2,)
-    connection_types: ClassVar[tuple[str, ...]] = ("bonded", "free")
     fields: ClassVar[tuple[FieldSpec, ...]] = (
         FieldSpec("temperature", "_TEMPERATURE", "temperature", "°C", signed=True),
         FieldSpec("fluid_temperature", "_FLUID_TEMPERATURE", "fluid temperature", "°C", signed=True),
@@ -160,10 +156,10 @@ class ConjugateHeatAnalysis:
                   "options": ["temperature", "fluid_temperature", "wall_heat_flux", "heat_transfer_coefficient", "pressure",
                               "speed"]},
     }
-    upstream: ClassVar[tuple[str, ...]] = ()
     ladder: ClassVar[tuple[str, ...]] = ("iterative", "fluid_coarsen", "continuation", "local_refine")
     noun: ClassVar[str] = "this heat"
     governing_word: ClassVar[str] = "the hottest temperature"
+    extras_word: ClassVar[str] = "cooled by flow"
 
     def __init__(self):
         from cadgen._internal.fea.analyses.cfd import CfdAnalysis
@@ -255,23 +251,10 @@ class ConjugateHeatAnalysis:
 
     def apply(self, rung, ctx: SolveContext, inputs: ConjugateInputs):
         from cadgen._internal.fea import fit
+        from cadgen._internal.fea.analyses.cfd import iterative_rung
 
-        plan, budget = ctx.plan, ctx.budget
         if rung == "iterative":
-            if plan.solver != "direct":
-                return None
-            before = self.estimate(ctx, inputs)
-            plan.solver = "iterative"
-            after = self.estimate(ctx, inputs)
-            memory = before.memory_bytes > budget.memory_bytes
-            saves = after.memory_bytes < 0.95 * before.memory_bytes if memory else after.seconds < 0.95 * before.seconds
-            if not saves:
-                plan.solver = "direct"
-                return None
-            why = "fit in memory" if memory else "finish sooner"
-            return fit.Step("iterative", f"Used iterative solvers for the flow and the heat (Krylov, preconditioned) to {why}",
-                            None, None, detail={"solver": "iterative", "from_bytes": int(before.memory_bytes),
-                                                "to_bytes": int(after.memory_bytes)})
+            return iterative_rung(self, ctx, inputs, "Used iterative solvers for the flow and the heat (Krylov, preconditioned)")
         if rung in ("fluid_coarsen", "continuation"):
             delegate = self.delegate(ctx, inputs)
             with self.fluid_plan(ctx):
@@ -299,15 +282,13 @@ class ConjugateHeatAnalysis:
 
         import numpy as np
 
-        from cadgen._internal.fea import conjugate, fluid_domain, navier_stokes, turbulence
+        from cadgen._internal.fea import conjugate, navier_stokes, thermal_ops, turbulence
         from cadgen._internal.fea.analyses.cfd import (
-            DENSITY, RE_LIMIT, SPEED, VISCOSITY, flow_numbers, flow_tracers, reynolds_sentence, speed_reach, speed_to_part,
-            wall_to_part,
+            DENSITY, RE_LIMIT, VISCOSITY, flow_numbers, flow_tracers, fluid_mesh_record, mesh_flow, openings_of, ordinals_of,
+            reynolds_record, reynolds_sentence, to_part, wall_fields,
         )
         from cadgen._internal.fea.analyses.cfd_turbulent import MARCH, MARCH_FAST, laminar_sentence
         from cadgen._internal.fea.analyses.thermal import build_system
-        from cadgen._internal.fea.femspace import FemSpace
-        from cadgen._internal.fea import thermal_ops
 
         timings: dict[str, float] = {}
         regime = self.regime_of(ctx, inputs)
@@ -318,18 +299,10 @@ class ConjugateHeatAnalysis:
             setup = delegate.setup_of(ctx, flow_inputs)
             wall, far = delegate.sizes(ctx, setup)
         domain = setup.domain
-        timings["fluid_domain_s"] = domain.seconds
-        if ctx.log:
-            ctx.log(f"meshing the {domain.kind} flow region at {wall:.3g} mm" + (f" (free stream {far:.3g} mm)" if far > wall else ""))
-        started = time.perf_counter()
-        fluid = fluid_domain.mesh_fluid(domain, wall, far)
-        space = FemSpace.build(fluid, 2)
-        timings["fluid_mesh_s"] = time.perf_counter() - started
+        fluid, space, face_of, row_kind = mesh_flow(ctx, domain, wall, far, timings)
 
         # The flow, first: it carries the heat and is not changed by it.
         started = time.perf_counter()
-        face_of = {face.index: face for face in domain.faces}
-        row_kind = np.array([face_of[int(o)].kind if int(o) in face_of else "wall" for o in fluid.boundary_ordinal])
         solver = "iterative" if ctx.plan.solver == "iterative" else "direct"
         problem = delegate.problem_of(space, fluid, face_of, row_kind, flow_inputs, setup)
         if turbulent:
@@ -343,11 +316,8 @@ class ConjugateHeatAnalysis:
         rho = flow_inputs.fluid.density_kg_m3 * DENSITY
         if turbulent:
             delegate.wall_function_shear(space, row_kind, flow, post, rho)
-        pressure, _ = wall_to_part(ctx, space, fluid, face_of, row_kind, post)
-        speed, speed_reach_mm = speed_to_part(ctx, space, fluid, face_of, row_kind,
-                                              np.linalg.norm(post["nodal_velocity"], axis=1) / SPEED,
-                                              speed_reach(flow_inputs.kind, setup.length_mm, wall))
-
+        pressure, _, speed, speed_reach_mm = wall_fields(ctx, space, fluid, face_of, row_kind, post, flow_inputs.kind,
+                                                         setup.length_mm, wall)
         tracers = flow_tracers(space, row_kind, post, domain, label="Coolant flow")
 
         # The heat: the fluid's energy and the part's conduction, tied at the wetted walls.
@@ -359,7 +329,7 @@ class ConjugateHeatAnalysis:
         nu_t = np.asarray(flow.k) / np.maximum(np.asarray(flow.omega), 1e-300) if turbulent else None
         A_f, _ = conjugate.energy_matrix(space, flow.u, rho_cp, k_f, nu_t)
         vertices = space.vertices
-        ordinal_of_row = np.array([face_of[int(o)].ordinal if int(o) in face_of else 0 for o in fluid.boundary_ordinal])
+        ordinal_of_row = ordinals_of(fluid, face_of)
         wall_rows = (row_kind == "wall") & (ordinal_of_row > 0)
         if not wall_rows.any():
             raise ValueError("the flow wets none of the part's faces, so no heat passes between them; check the openings")
@@ -382,7 +352,7 @@ class ConjugateHeatAnalysis:
         wall_nodes = np.concatenate(wall_nodes)
         Pi = sparse.vstack(blocks).tocsr()
         # Inlets bring the fluid in at their temperature (Danckwerts: the enthalpy coming in, nothing held).
-        opening_of = np.array([face_of[int(o)].opening if int(o) in face_of else None for o in fluid.boundary_ordinal], dtype=object)
+        opening_of = openings_of(fluid, face_of)
         f_f = np.zeros(vertices)
         entering = [(np.flatnonzero(row_kind == "inlet"), inputs.inlet_C[0])] if flow_inputs.kind == "external" else [
             (np.flatnonzero((row_kind == "inlet") & (opening_of == inlet.opening)), celsius)
@@ -467,8 +437,8 @@ class ConjugateHeatAnalysis:
         loud = np.zeros(vertices, dtype=bool)
         loud[wall_nodes] = np.abs(difference[wall_nodes]) > QUIET * span
         coefficient[loud] = q[loud] / difference[loud]
-        part_values = self._to_part(ctx, space, fluid, face_of, row_kind, {"flux": q, "fluid": fluid_T, "h": coefficient},
-                                    default={"fluid": min(inputs.inlet_C)})
+        part_values = to_part(ctx, space, fluid, face_of, row_kind, {"flux": q, "fluid": fluid_T, "h": coefficient},
+                              corners=True, default={"fluid": min(inputs.inlet_C)})
         wetted_area = float(area[wall_nodes].sum())
         mean_wall = float((wall_T[wall_nodes] * area[wall_nodes]).sum() / max(wetted_area, 1e-300))
         difference_mean = mean_wall - float(inputs.inlet_C[0])
@@ -485,8 +455,7 @@ class ConjugateHeatAnalysis:
         warnings = list(getattr(flow, "warnings", [])) + coupled.warnings
         analysis_warnings = []
         limit = RE_LIMIT[flow_inputs.kind]
-        reynolds = {"value": round(setup.reynolds, 2), "limit": limit, "kind": flow_inputs.kind,
-                    "length_mm": round(setup.length_mm, 4)}
+        reynolds = reynolds_record(setup, flow_inputs.kind)
         if not turbulent and setup.reynolds > limit:
             analysis_warnings.append(reynolds_sentence(setup.reynolds, limit).replace("run the same study as cfd_turbulent",
                                                                                        "set flow.regime to \"turbulent\""))
@@ -520,8 +489,7 @@ class ConjugateHeatAnalysis:
                 "outlet_mean_C": outlet_mean, "outlet_balance_C": outlet_balance, "mass_flow_kg_s": rho * inflow * 1e3, "inflow_mm3_s": inflow,
                 "wetted_area_mm2": wetted_area, "mean_wall_C": mean_wall,
                 "mean_h": mean_h, "reference_mean_C": reference_mean,
-                "fluid_mesh": {"elements": int(len(fluid.tets)), "nodes": int(len(fluid.nodes)),
-                               "wall_size_mm": round(wall, 4), "far_size_mm": round(far, 4)},
+                "fluid_mesh": fluid_mesh_record(fluid, wall, far),
                 "reference_C": inputs.reference_C, "analysis_warnings": analysis_warnings,
                 "analysis_extras": {"reynolds": reynolds, "regime": regime,
                                     **({"motion": tracers} if tracers else {})},
@@ -558,29 +526,6 @@ class ConjugateHeatAnalysis:
 
         return asm(film, boundary, h=boundary.interpolate(h)).tocsr()
 
-    @staticmethod
-    def _to_part(ctx: SolveContext, space, fluid, face_of, row_kind, values: dict, *, default: dict) -> dict:
-        """Fluid wall-vertex values carried onto the part's surface nodes, face by face (the nearest fluid wall
-        vertex on the same face); a part node the fluid does not wet takes ``default`` (else 0)."""
-        import numpy as np
-        from scipy.spatial import cKDTree
-
-        part_space, volume = ctx.space, ctx.volume
-        out = {name: np.full(part_space.scalar_count, float(default.get(name, 0.0))) for name in values}
-        ordinal_of_row = np.array([face_of[int(o)].ordinal if int(o) in face_of else 0 for o in fluid.boundary_ordinal])
-        for ordinal in sorted(set(int(o) for o in ordinal_of_row[row_kind == "wall"]) - {0}):
-            source = np.unique(space.boundary_quadratic[(row_kind == "wall") & (ordinal_of_row == ordinal)][:, :3])
-            target = np.unique(part_space.boundary_quadratic[volume.boundary_ordinal == ordinal])
-            if not len(source) or not len(target):
-                continue
-            _, nearest = cKDTree(space.dof_locations[source]).query(part_space.dof_locations[target])
-            for name, field in values.items():
-                out[name][target] = field[source[nearest]]
-        return out
-
-    def needs_finer(self, result: AnalysisResult, inputs: ConjugateInputs, check_results: list[dict]) -> bool:
-        return False
-
     # -- judging -------------------------------------------------------------------------------------
 
     def judge(self, check: dict, index: int, ctx: SolveContext, result: AnalysisResult, inputs: ConjugateInputs) -> dict:
@@ -595,44 +540,25 @@ class ConjugateHeatAnalysis:
 
     def findings(self, ctx: SolveContext, result: AnalysisResult, inputs: ConjugateInputs,
                  check_results: list[dict], *, assembly: bool) -> list[dict]:
-        found = temperature_findings(check_results, assembly=assembly)
-        for check in check_results:
-            if check["kind"] not in ("pressure_drop", "velocity") or check["status"] == "passes":
-                continue
-            what = "pressure drop" if check["kind"] == "pressure_drop" else "fastest flow"
-            value = f"{check['value']:.4g} {check['unit']}"
-            fails = check["status"] == "fails"
-            found.append({
-                "check": "fea", "severity": "error" if fails else "warning",
-                "type": f"{check['kind']}_{'over_limit' if fails else 'close_to_limit'}",
-                "summary": f"The {what} is {value}, {'over' if fails else 'close to'} the {check['limit']:g} {check['unit']} allowed",
-                "description": f"{what} {value} against a {check['limit']:g} {check['unit']} limit ({check['ratio']:.2f} of it)",
-                "items": [{"text": f"the {what}", **check["where"]}],
-            })
+        from cadgen._internal.fea.analyses.cfd import FLOW_WORDS, limit_findings
+
+        found = temperature_findings(check_results, assembly=assembly) + limit_findings(check_results, FLOW_WORDS, held=False)
         for sentence in result.scalars["analysis_warnings"]:
             kind = ("reynolds_past_laminar" if "past the laminar range" in sentence else
                     "reynolds_laminar_range" if "in the laminar range" in sentence else
                     "fluid_heat_balance" if sentence.startswith("the heat the walls") else
                     "outlet_temperature_spread" if sentence.startswith("the fluid leaves") else "flow_unsettled")
-            found.append({"check": "fea", "severity": "warning", "type": kind, "summary": sentence[0].upper() + sentence[1:],
-                          "description": "the heat is carried by the flow this solve found", "items": []})
+            found.append(finding("warning", kind, sentence[0].upper() + sentence[1:], "the heat is carried by the flow this solve found"))
         scalars = result.scalars
         outlet = scalars["outlet_mean_C"]
         if math.isfinite(outlet):
-            found.append({
-                "check": "fea", "severity": "info", "type": "fluid_warms",
-                "summary": f"The fluid leaves at {outlet:.4g} °C (in at {', '.join(f'{c:g}' for c in inputs.inlet_C)} °C), "
-                           f"carrying {scalars['carried_W']:.4g} W",
-                "description": f"{scalars['mass_flow_kg_s'] * 1000:.4g} g/s of {inputs.flow.fluid.name}; the walls put "
-                               f"{scalars['wall_W']:.4g} W into it",
-                "items": [],
-            })
+            found.append(finding(
+                "info", "fluid_warms", f"The fluid leaves at {outlet:.4g} °C (in at {', '.join(f'{c:g}' for c in inputs.inlet_C)} °C), "
+                f"carrying {scalars['carried_W']:.4g} W",
+                f"{scalars['mass_flow_kg_s'] * 1000:.4g} g/s of {inputs.flow.fluid.name}; the walls put {scalars['wall_W']:.4g} W into it"))
         return found
 
     # -- what is written -----------------------------------------------------------------------------
-
-    def deformation_scale(self, result: AnalysisResult, bbox_diagonal: float, requested: float | None) -> float | None:
-        return None
 
     def summary(self, result: AnalysisResult, inputs: ConjugateInputs, check_results: list[dict]) -> dict:
         import numpy as np
@@ -656,7 +582,7 @@ class ConjugateHeatAnalysis:
             "peclet": round(scalars["prandtl"] * reynolds["value"], 4),
             "max_temperature_C": round(float(T.max()), 4),
             "min_temperature_C": round(float(T.min()), 4),
-            "max_at_mm": [round(float(c), 3) for c in result.dof_locations[hottest]],
+            "max_at_mm": xyz(result.dof_locations[hottest]),
             "inlet_temperature_C": [round(c, 4) for c in inputs.inlet_C],
             "outlet_temperature_C": round(scalars["outlet_mean_C"], 6) if math.isfinite(scalars["outlet_mean_C"]) else None,
             "outlet_temperature_by_balance_C": (round(scalars["outlet_balance_C"], 6) if math.isfinite(scalars["outlet_balance_C"])
@@ -698,9 +624,6 @@ class ConjugateHeatAnalysis:
             else [summary["min_fluid_temperature_C"], summary["max_fluid_temperature_C"]]
         summary["checks"] = check_results
         return summary
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} cooled by flow"
 
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
         fluid = summary["wall_fluid_temperature_C"]

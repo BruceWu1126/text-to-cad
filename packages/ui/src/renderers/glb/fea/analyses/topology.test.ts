@@ -1,29 +1,21 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
 import { checkLine, checkTitle } from '../checkKinds.js';
 import { FIELD_WORDS } from '../fields.js';
-import { feaControls, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, feaVerdict, studyRows } from '../../feaResult.js';
 import { activeFrame, activeFrameIndex } from '../series.js';
 import { heldRows, madeOfRows, pushedRows } from '../setup.js';
 import { feaAnalysis } from './index.js';
 import topology, { FORMING, TOPOLOGY_SETUP, keepWords, keptSolidWords, lightenRows } from './topology.js';
+import { feaFile, vec } from '../../__tests__/feaFile.js';
 
 const LIMIT = 'Linear elastic, small displacement, one material';
 
 // A lightened bracket as cadgen writes it: three design frames over the iterations, the final design the default.
 function lightened(extras: Record<string, unknown> = {}) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.06, 0, 0, 0, 0.02, 0]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_material_kept', new BufferAttribute(new Float32Array([0.3, 0.3, 0.3]), 1));
-  geometry.setAttribute('_material_kept_f1', new BufferAttribute(new Float32Array([0.8, 0.2, 0.5]), 1));
-  geometry.setAttribute('_material_kept_f2', new BufferAttribute(new Float32Array([1, 0, 1]), 1));
-  geometry.setAttribute('_von_mises', new BufferAttribute(new Float32Array([40, 0, 22]), 1));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 1]), 1));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  return feaFile({
+    position: [0, 0, 0, 0.06, 0, 0, 0, 0.02, 0], _material_kept: [0.3, 0.3, 0.3], _material_kept_f1: [0.8, 0.2, 0.5],
+    _material_kept_f2: [1, 0, 1], _von_mises: [40, 0, 22], _displacement: vec(9), _face: [0, 0, 1],
+  }, {
     generator: 'cadgen fea', name: 'bracket topology', deformation_scale: 1, faces: ['#o1.f1', '#o1.f2', '#o1.f7'], occurrence: '#o1',
     mass_saved_percent: 69.4, volume_fraction: 0.3,
     analysis: { type: 'topology', tier: 3, word: 'Lighten it', estimate: false, limits: [LIMIT], noun: 'this load', reference_C: null, warnings: [] },
@@ -51,9 +43,6 @@ function lightened(extras: Record<string, unknown> = {}) {
     findings: [],
     ...extras,
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 describe('topology', () => {

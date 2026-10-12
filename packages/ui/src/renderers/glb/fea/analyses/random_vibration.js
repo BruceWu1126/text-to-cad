@@ -1,18 +1,15 @@
 /**
- * Random vibration: the part's response to a random shake given as a PSD (a transport or MIL-STD
- * profile in g²/Hz), shaken where it is held. Its fields are RMS, one standard deviation (Stress
- * (1σ), Displacement (1σ)); the Sigma control shows them at 1σ or 3σ, opening on the level the
- * study judges at. Its verdict judges stress (labelled "Random vibration") and displacement at that
- * level, both k times larger at k times this shake. An RMS has no sign, so the fields do not deform; its
- * motion (Shake, `../poses.js`) does: a stretch of a shake synthesised from the PSD, the part's modes answering
- * it, relative to the shaker, on a Time row and Preview's playbar. Its setup says where it is held, how hard it is shaken ("6.1 g rms along Z, 20
- * to 2000 Hz") and what it is made of.
+ * Random vibration: the part's response to a random shake given as a PSD (a transport or MIL-STD profile in
+ * g²/Hz), shaken where it is held. Its fields are RMS, one standard deviation, shown at 1σ or 3σ. An RMS has no
+ * sign, so the fields do not deform; its motion (Shake, `../poses.js`) does: a stretch of a shake synthesised
+ * from the PSD, the part's modes answering it, relative to the shaker.
  */
 import { fieldAndDeformation } from "../controls.js";
 import { plainNumber } from "../numbers.js";
 import { sigmaControl } from "../series.js";
+import { planned } from "./stub.js";
 import { poseRoutine, shakeMotion } from "../poses.js";
-import { axisWords, heldRows, madeOfRows, wholeRefs } from "../setup.js";
+import { axisWords, heldRefs, heldRows, madeOfRows } from "../setup.js";
 
 /** The field select over every field (stress first), then the Sigma level; the field alone for a result with no RMS field. */
 export function fieldAndSigma(result) {
@@ -54,29 +51,20 @@ export function shakenAtRandomRows(result) {
   if (!psd) return [];
   const label = psdWords(psd);
   const sigma = result.study?.sigma;
-  const faces = result.study.fixtures.flatMap((fixture) => fixture.faces);
-  const refs = faces.length ? { faces } : wholeRefs(result).length ? { refs: wholeRefs(result) } : null;
+  const refs = heldRefs(result);
   return [{ id: "shaken", label: "Shaken", detail: "", glyph: "wave", children: [{ id: "shaken:0", label, detail: "", wrap: true,
     hint: `At random, a ${psd.table.length}-point PSD${sigma ? `, judged at ${sigma}σ` : ""}`,
     ...(refs ? { ...refs, summary: `Shaken at random where it is held: ${label}` } : {}) }] }];
 }
 
-export default Object.freeze({
-  name: "random_vibration",
-  tier: 1,
-  word: "Random vibration",
-  noun: "this shake",
-  family: null,
-  estimate: false,
-  scalesWithLoad: true,
-  checks: Object.freeze(["stress", "displacement"]),
-  checkLabels: Object.freeze({ stress: "Random vibration" }),
+export default planned({
+  name: "random_vibration", word: "Random vibration", noun: "this shake", scalesWithLoad: true,
+  checks: ["stress", "displacement"], checkLabels: { stress: "Random vibration" },
   defaultControls: fieldAndSigma,
-  setupGroups: Object.freeze([heldRows, shakenAtRandomRows, madeOfRows]),
+  setupGroups: [heldRows, shakenAtRandomRows, madeOfRows],
   // Shake: a shake synthesised from the PSD and the part's modes answering it, scrubbed on its Time row (`../poses.js`).
   motion: shakeMotion,
   routine: (result) => poseRoutine(shakeMotion(result)),
-  markers: Object.freeze(["fixture", "base_excitation"]),
-  displayTitle: "Shaker and fixtures",
-  limitWord: "",
+  markers: ["fixture", "base_excitation"], displayTitle: "Shaker and fixtures",
 });
+

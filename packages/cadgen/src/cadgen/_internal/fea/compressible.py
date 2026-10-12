@@ -75,8 +75,7 @@ if TYPE_CHECKING:
 
     from cadgen._internal.fea.femspace import FemSpace
 
-__all__ = ["AIR", "Gas", "GasInlet", "GasProblem", "GasSolution", "area_mach", "isentropic", "mach_from_area",
-           "solve_gas", "sutherland"]
+__all__ = ["AIR", "Gas", "GasInlet", "GasProblem", "GasSolution", "area_mach", "isentropic", "solve_gas", "sutherland"]
 
 
 @dataclass(frozen=True)
@@ -114,19 +113,6 @@ def area_mach(mach: float, gamma: float = 1.4) -> float:
     """A / A* of isentropic flow at ``mach``."""
     g = gamma
     return (1.0 / mach) * ((2.0 / (g + 1.0)) * (1.0 + 0.5 * (g - 1.0) * mach * mach)) ** ((g + 1.0) / (2.0 * (g - 1.0)))
-
-
-def mach_from_area(ratio: float, supersonic: bool, gamma: float = 1.4) -> float:
-    """The Mach number at A / A* = ``ratio`` (>= 1) on the subsonic or the supersonic branch, by bisection."""
-    low, high = (1.0, 50.0) if supersonic else (1e-9, 1.0)
-    for _ in range(200):
-        middle = 0.5 * (low + high)
-        above = area_mach(middle, gamma) > ratio
-        if supersonic:
-            low, high = (low, middle) if above else (middle, high)
-        else:
-            low, high = (middle, high) if above else (low, middle)
-    return 0.5 * (low + high)
 
 
 @dataclass
@@ -600,7 +586,6 @@ def solve_gas(problem: GasProblem, *, schedule: tuple[float, ...] = (), solver: 
         # Unsettled: the best state the march passed through, with its own residual.
         return False, best[1], best[0], steps, best[2], history
 
-
     def stepped(x, shares):
         ok, residual, total, history, shocks = True, math.inf, 0, [], 0
         for share in shares:
@@ -618,21 +603,17 @@ def solve_gas(problem: GasProblem, *, schedule: tuple[float, ...] = (), solver: 
     started = time.perf_counter()
     x0 = np.zeros(n)
     continued = bool(schedule)
-    if schedule:
-        stages = list(schedule)
-        ok, x, residual, total_steps, history, shocks = stepped(x0, stages)
-    else:
-        stages = [1.0]
-        ok, x, residual, total_steps, history, shocks = stepped(x0, stages)
-        if not ok:
-            if log:
-                log(f"gas flow: the march did not settle at the full drive (residual {residual:.2e}); stepping it up")
-            continued = True
-            ok2, x2, residual2, steps2, history2, shocks2 = stepped(np.zeros(n), list(CONTINUATION))
-            total_steps += steps2
-            history += history2
-            if ok2 or residual2 < residual:
-                ok, x, residual, stages, shocks = ok2, x2, residual2, list(CONTINUATION), shocks2
+    stages = list(schedule) if schedule else [1.0]
+    ok, x, residual, total_steps, history, shocks = stepped(x0, stages)
+    if not schedule and not ok:
+        if log:
+            log(f"gas flow: the march did not settle at the full drive (residual {residual:.2e}); stepping it up")
+        continued = True
+        ok2, x2, residual2, steps2, history2, shocks2 = stepped(np.zeros(n), list(CONTINUATION))
+        total_steps += steps2
+        history += history2
+        if ok2 or residual2 < residual:
+            ok, x, residual, stages, shocks = ok2, x2, residual2, list(CONTINUATION), shocks2
     timings["march_s"] = time.perf_counter() - started
     if not ok:
         warnings.append(f"the gas flow stopped at a residual of {residual:.1e} of its largest, short of {RESIDUAL_TOL:.0e}: "
@@ -755,13 +736,9 @@ class _Operators:
 
     def expand(self, scalar):
         """A scalar block repeated on each velocity component (vector DOF numbering)."""
-        import numpy as np
-        from scipy import sparse
+        from cadgen._internal.fea.turbulence import expand_vector
 
-        coo = scalar.tocoo()
-        rows = np.concatenate([self.table[coo.row, c] for c in range(3)])
-        cols = np.concatenate([self.table[coo.col, c] for c in range(3)])
-        return sparse.csr_matrix((np.tile(coo.data, 3), (rows, cols)), shape=(self.nv, self.nv))
+        return expand_vector(scalar, self.table, self.nv)
 
     def velocity(self, u):
         """(3, M) velocity and (3, 3, M) its gradient [i, j] = d u_i / d x_j at the points."""

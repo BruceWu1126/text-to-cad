@@ -10,11 +10,9 @@ reaches the stress through the upstream thermal solve), ``fixtures`` and optiona
 of a linear static solve (:func:`cadgen._internal.fea.solve.solve_linear_static`'s
 ``initial_strain``), whose stress is σ = C:(ε - α ΔT I).
 
-Everything after the solve is static's: the stress and displacement checks,
-the findings, the summary and the extras (this class is static's, with the
-heat added), plus the ``temperature`` field and the temperatures in the
-summary. The load control scales ΔT and the mechanical loads together, which
-is exact because both act linearly. Stdlib only at import.
+Everything after the solve is static's, plus the ``temperature`` field and
+the temperatures in the summary. The load control scales ΔT and the mechanical
+loads together, which is exact because both act linearly. Stdlib only at import.
 """
 
 from __future__ import annotations
@@ -24,12 +22,10 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, SolveContext
-from cadgen._internal.fea.analyses.static import (
-    StaticAnalysis, StaticInputs, colour_range, floored, solved_record, solved_part_record,
-)
-from cadgen._internal.fea.analyses.thermal import HEAT_KEYS, RADIATION_KEY, ThermalAnalysis, heat_echo
-from cadgen._internal.fea.study import VIEW_DRIVES, parse_fixtures, parse_loads
+from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, SolveContext, finding
+from cadgen._internal.fea.analyses.static import StaticAnalysis, StaticInputs, colour_range, floored, solved_records
+from cadgen._internal.fea.analyses.thermal import HEAT_KEYS, RADIATION_KEY, ThermalAnalysis, heat_echo, plan_solver
+from cadgen._internal.fea.study import parse_fixtures, parse_loads
 
 __all__ = ["ThermalStressAnalysis", "ThermalStressInputs"]
 
@@ -53,6 +49,7 @@ class ThermalStressInputs(StaticInputs):
 class ThermalStressAnalysis(StaticAnalysis):
     name: ClassVar[str] = "thermal_stress"
     word: ClassVar[str] = "Heat stress"
+    extras_word: ClassVar[str] = "heat stress"
     study_keys: ClassVar[frozenset[str]] = frozenset({"fixtures", "loads", "reference_C", *HEAT_KEYS, RADIATION_KEY})
     material_needs: ClassVar[frozenset[str]] = frozenset({"conductivity", "expansion"})
     fields: ClassVar[tuple[FieldSpec, ...]] = (
@@ -60,7 +57,6 @@ class ThermalStressAnalysis(StaticAnalysis):
         FieldSpec("displacement", "_DISPLACEMENT", "displacement", "mm", 3, 1000.0),
         FieldSpec("temperature", "_TEMPERATURE", "temperature", "°C", signed=True),
     )
-    drives: ClassVar[tuple[str, ...]] = VIEW_DRIVES
     default_controls: ClassVar[dict[str, dict]] = {
         "field": {"drives": "field", "type": "enum", "options": ["von_mises", "displacement", "temperature"]},
         "deformation": {"drives": "deformation", "type": "number", "min": 0.0, "max": None},
@@ -115,22 +111,17 @@ class ThermalStressAnalysis(StaticAnalysis):
             upstream = ThermalAnalysis().solve(ctx, inputs.thermal)
             ctx.upstream["thermal"] = upstream
         temperature = upstream.fields["temperature"]
-        volume, study, plan = ctx.volume, ctx.study, ctx.assembly
-        materials = study.material if plan is None else plan.materials
+        volume, plan = ctx.volume, ctx.assembly
+        materials = ctx.study.material if plan is None else plan.materials
         extra: dict[str, Any] = {"initial_strain": self.thermal_strain(ctx, temperature, inputs.reference_C), "space": ctx.space}
         if any(load.body for load in inputs.loads):
             extra["body_loads"] = inputs.body_accelerations
-        solver = getattr(ctx.plan, "solver", None)
-        if solver in ("iterative", "matrix_free"):
+        if (solver := plan_solver(ctx)) is not None:
             extra["solver"] = solver
         outcome = solve.solve_linear_static(
             volume, materials, inputs.fixtures, inputs.surface_loads, ctx.ordinal_of, log=ctx.log, automatic=ctx.automatic, **extra
         )
-        if plan is None:
-            solved = [solved_record(volume, outcome, study, ctx.ordinal_of, ctx.part_name, inputs.fixtures)]
-        else:
-            solved = [solved_part_record(volume, outcome, study, plan, index, ctx.ordinal_of, inputs.fixtures) for index in range(len(plan.parts))]
-        result = self.static_result(outcome, solved, plan)
+        result = self.static_result(outcome, solved_records(volume, outcome, ctx, inputs.fixtures), plan)
         result.fields["temperature"] = temperature
         result.scalars["reference_C"] = inputs.reference_C
         result.scalars["thermal"] = upstream.scalars.get("summary")
@@ -190,40 +181,37 @@ class ThermalStressAnalysis(StaticAnalysis):
         peak = solved.peak_MPa
         coarser = solved.coarser_peak_MPa
         rose = f" (it already rose from {mpa(coarser)} to {mpa(peak)} MPa on a finer mesh)" if coarser and peak > coarser else ""
-        return {
-            "check": "fea", "severity": "warning", "type": "singular_clamped_edge",
-            "summary": f"The peak stress ({mpa(peak)} MPa) sits on the clamped edge, where a part held fast while heat "
-                       f"makes it grow has a singularity: it grows every time the mesh is refined{rose}, so strength is "
-                       f"judged a little away from the edge, where the colour bar stops at {mpa(cap)} MPa",
-            "description": f"colours stop at the {round(quantile * 100)}th percentile of the stress, {mpa(cap)} MPa, which "
-                           f"the strength check and the safety factor judge; nodal peak {mpa(peak)} MPa at the fixed face",
-            "items": [{"text": "the peak stress", "ref": solved.peak_face, "at": list(solved.peak_at)}],
-        }
+        return finding(
+            "warning", "singular_clamped_edge",
+            f"The peak stress ({mpa(peak)} MPa) sits on the clamped edge, where a part held fast while heat makes it grow "
+            f"has a singularity: it grows every time the mesh is refined{rose}, so strength is judged a little away from "
+            f"the edge, where the colour bar stops at {mpa(cap)} MPa",
+            f"colours stop at the {round(quantile * 100)}th percentile of the stress, {mpa(cap)} MPa, which the strength "
+            f"check and the safety factor judge; nodal peak {mpa(peak)} MPa at the fixed face",
+            [{"text": "the peak stress", "ref": solved.peak_face, "at": list(solved.peak_at)}])
 
     def findings(self, ctx: SolveContext, result: AnalysisResult, inputs: ThermalStressInputs,
                  check_results: list[dict], *, assembly: bool) -> list[dict]:
         found = []
         singular = self.singular_edge(result)
-        for finding in super().findings(ctx, result, inputs, check_results, assembly=assembly):
-            if finding["type"] == "peak_at_fixture" and singular is not None:
+        for found_one in super().findings(ctx, result, inputs, check_results, assembly=assembly):
+            if found_one["type"] == "peak_at_fixture" and singular is not None:
                 continue  # the singular edge's finding says it, and why
-            if finding["type"] == "no_load":
-                finding = {**finding, "summary": "Nothing stresses the part: its temperature stays at the stress-free "
-                                                 f"{inputs.reference_C:g} °C and no load reaches it, or it is free to grow"}
-            found.append(finding)
+            if found_one["type"] == "no_load":
+                found_one = {**found_one, "summary": "Nothing stresses the part: its temperature stays at the stress-free "
+                                                     f"{inputs.reference_C:g} °C and no load reaches it, or it is free to grow"}
+            found.append(found_one)
         if singular is not None:
             found.append(singular)
         thermal = result.scalars.get("thermal") or {}
         if thermal:
             hottest, coolest = thermal["max_temperature_C"], thermal["min_temperature_C"]
             rise = max(abs(hottest - inputs.reference_C), abs(coolest - inputs.reference_C))
-            found.append({
-                "check": "fea", "severity": "info", "type": "heated",
-                "summary": f"Heated to {hottest:g} °C at most (coolest {coolest:g} °C), against a stress-free "
-                           f"{inputs.reference_C:g} °C: up to {rise:.3g} °C of change drives the stress",
-                "description": "the temperature comes from the thermal solve of the same study, on the same mesh",
-                "items": [{"text": "the hottest point", "ref": None, "at": thermal["max_at_mm"]}],
-            })
+            found.append(finding(
+                "info", "heated", f"Heated to {hottest:g} °C at most (coolest {coolest:g} °C), against a stress-free "
+                                  f"{inputs.reference_C:g} °C: up to {rise:.3g} °C of change drives the stress",
+                "the temperature comes from the thermal solve of the same study, on the same mesh",
+                [{"text": "the hottest point", "ref": None, "at": thermal["max_at_mm"]}]))
         return found
 
     # -- what is written -----------------------------------------------------------------------------
@@ -247,9 +235,6 @@ class ThermalStressAnalysis(StaticAnalysis):
             "checks": checks,
         })
         return summary
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} heat stress"
 
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple]:
         """Static's, the stress colours stopped at the 99th percentile where the peak is a spike above it (a clamped

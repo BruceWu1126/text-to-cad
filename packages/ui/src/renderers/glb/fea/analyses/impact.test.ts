@@ -1,30 +1,22 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
-import { feaControls, feaPresets, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, feaPresets, feaVerdict, studyRows } from '../../feaResult.js';
 import { motionSpan } from '../motion.js';
 import { activeFrameIndex, frameText } from '../series.js';
 import impact, { PLAY, fallWords, impactDroppedRows } from './impact.js';
 import { ANALYSES, feaAnalysis } from './index.js';
 import { DROP } from '../fall.js';
+import { feaFile, vec } from '../../__tests__/feaFile.js';
 
 const LIMITS = 'Rigid floor; linear tets; elastic unless plasticity is given.';
 
 /** A drop impact as cadgen writes one (`analysis impact`): frame 0 at first contact in the fields' own attributes, the peak the default. */
 function impactResult(drop: Record<string, unknown> = {}, extras: Record<string, unknown> = {}) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.01, 0, 0, 0, 0.1, 0]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('_von_mises', new BufferAttribute(new Float32Array([0, 0, 0]), 1));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_von_mises_peak', new BufferAttribute(new Float32Array([90, 120, 180]), 1));
-  geometry.setAttribute('_displacement_peak', new BufferAttribute(new Float32Array([0, 0.02, 0.04]), 1));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 1]), 1));
-  for (const [index, top] of [[1, 120], [2, 180], [3, 60]]) {
-    geometry.setAttribute(`_von_mises_f${index}`, new BufferAttribute(new Float32Array([0, top / 2, top]), 1));
-    geometry.setAttribute(`_displacement_f${index}`, new BufferAttribute(new Float32Array(9).fill(index * 1e-5), 3));
-  }
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  const frames = Object.fromEntries([[1, 120], [2, 180], [3, 60]].flatMap(([index, top]) => [[`_von_mises_f${index}`, [0, top / 2, top]],
+    [`_displacement_f${index}`, vec(new Float32Array(9).fill(index * 1e-5))]]));
+  return feaFile({
+    position: [0, 0, 0, 0.01, 0, 0, 0, 0.1, 0], _von_mises: [0, 0, 0], _displacement: vec(9), _von_mises_peak: [90, 120, 180],
+    _displacement_peak: [0, 0.02, 0.04], _face: [0, 0, 1], ...frames,
+  }, {
     generator: 'cadgen fea', name: 'bar drop impact', deformation_scale: 100, safety_factor: 1.385, peak_g: 22848,
     faces: ['#o1.f5', '#o1.f6'], occurrence: '#o1',
     analysis: { type: 'impact', tier: 3, word: 'Drop impact', estimate: false, limits: [LIMITS], noun: 'this drop', reference_C: null, warnings: [] },
@@ -49,10 +41,7 @@ function impactResult(drop: Record<string, unknown> = {}, extras: Record<string,
       window_ms: 'auto', mesh: { size_mm: 3, order: 1, elements: 2209, refined_from_mm: null } },
     findings: [],
     ...extras,
-  });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
+  }, { color: false });
 }
 
 describe('impact', () => {

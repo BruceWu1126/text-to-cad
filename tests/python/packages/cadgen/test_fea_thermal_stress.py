@@ -10,28 +10,17 @@ it cannot grow, and its middle carries σ = -E α ΔT, pushing on both walls.
 from __future__ import annotations
 
 import dataclasses
-import io
-import json
 import math
 import tempfile
 import unittest
-from contextlib import redirect_stderr
 from pathlib import Path
+from types import SimpleNamespace
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
-add_repo_path(".")
+from tests.python.support.fea_fixtures import (
+    box_step, class_directory, ends, glb_extras, glb_rows, needs_fea, side_faces, sidecar, solve, value_error,
+)
 
 from cadgen._internal.fea.materials import lookup_material  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
-from tests.python.packages.cadgen.test_fea_thermal import box_step, glb_extras_and_attributes, side_faces, x_faces  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 STEEL = lookup_material("steel")
 LENGTH, SIDE, HOT, REFERENCE = 100.0, 5.0, 120.0, 20.0
@@ -71,13 +60,15 @@ class StudyFile(unittest.TestCase):
               "yield_MPa": 10, "density_t_per_mm3": 0, "conductivity_W_mK": 1, "expansion_per_K": 1e-5}}, "density"),
         ]
         for changes, fragment in cases:
-            with self.subTest(changes=changes), self.assertRaises(ValueError) as caught:
-                self.parse(**changes)
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(changes=changes):
+                self.assertIn(fragment, value_error(self, self.parse, **changes))
 
     def test_its_view_offers_stress_displacement_temperature_and_the_load_control(self):
         study = self.parse(view={"controls": [{"drives": "field"}, {"drives": "load_scale", "max": 2}]})
         self.assertEqual(study.view["controls"][0]["options"], ["von_mises", "displacement", "temperature"])
+
+
+NAMES = ("POSITION", "_DISPLACEMENT", "_VON_MISES", "_TEMPERATURE")
 
 
 def _middle_peak(extras: dict, attributes: dict) -> float:
@@ -90,29 +81,20 @@ def _middle_peak(extras: dict, attributes: dict) -> float:
     return peak
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class HeatedBar(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        step = box_step(directory, "bar", (LENGTH, SIDE, SIDE))
-        near, far = x_faces(step)
+        directory = class_directory(cls)
+        step = box_step(directory, "bar", (LENGTH, SIDE, SIDE), "x")
+        near, far = ends(step)
         heat = {"analysis": "thermal_stress", "material": "steel", "mesh": {"size_mm": 2.5},
                 "temperatures": [{"faces": [far], "C": HOT}]}
-        names = ("POSITION", "_DISPLACEMENT", "_VON_MISES", "_TEMPERATURE")
-        with redirect_stderr(io.StringIO()):
-            cls.free = fea.solve(step, directory / "free.glb", study={**heat, "fixtures": [{"faces": [near]}]})
-            cls.clamped = fea.solve(step, directory / "clamped.glb", study={**heat, "fixtures": [{"faces": [near]}, {"faces": [far]}]})
-        cls.free_extras, cls.free_attributes = glb_extras_and_attributes(cls.free.glb, names)
-        cls.clamped_extras, cls.clamped_attributes = glb_extras_and_attributes(cls.clamped.glb, names)
-        cls.clamped_sidecar = json.loads(cls.clamped.sidecar.read_text(encoding="utf-8"))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.free = solve(step, directory / "free.glb", {**heat, "fixtures": [{"faces": [near]}]})
+        cls.clamped = solve(step, directory / "clamped.glb", {**heat, "fixtures": [{"faces": [near]}, {"faces": [far]}]})
+        cls.free_extras, cls.free_attributes = glb_extras(cls.free.glb), glb_rows(cls.free.glb, *NAMES)
+        cls.clamped_extras, cls.clamped_attributes = glb_extras(cls.clamped.glb), glb_rows(cls.clamped.glb, *NAMES)
+        cls.clamped_sidecar = sidecar(cls.clamped)
 
     def test_held_at_one_end_it_grows_alpha_l_dt(self):
         growth = STEEL.expansion * LENGTH * RISE
@@ -183,19 +165,25 @@ class HeatedBar(unittest.TestCase):
         self.assertNotIn("peak_at_fixture", [finding["type"] for finding in self.clamped.findings])
         self.assertIn(f"warning: {summary}", self.clamped.human_lines())
 
-    def test_only_a_capped_peak_on_a_clamped_face_is_called_singular(self):
-        import dataclasses
-        from types import SimpleNamespace
-
+    @staticmethod
+    def _spiked():
+        """A field with one 900 MPa spike on 100 MPa, and its peak on the clamped face #o1.f1."""
         import numpy as np
 
-        from cadgen._internal.fea.analyses.thermal_stress import ThermalStressAnalysis
         from cadgen._internal.fea.checks import Solved
 
         spike = np.concatenate([np.full(999, 100.0), [900.0]])
         held = Solved(material_name="Steel", yield_MPa=250.0, peak_MPa=900.0, peak_gauss_MPa=800.0, peak_at=(0.0, 0.0, 0.0),
                       peak_face="#o1.f1", fixed_faces=("#o1.f1",), max_displacement_mm=0.01, displacement_at=(0.0, 0.0, 0.0),
                       bbox_diagonal_mm=100.0, margin=2.0, coarser_peak_MPa=600.0, part="bar")
+        return spike, held
+
+    def test_only_a_capped_peak_on_a_clamped_face_is_called_singular(self):
+        import numpy as np
+
+        from cadgen._internal.fea.analyses.thermal_stress import ThermalStressAnalysis
+
+        spike, held = self._spiked()
         singular = ThermalStressAnalysis().singular_edge
         found = singular(SimpleNamespace(solved=[held], fields={"von_mises": spike}))
         self.assertEqual((found["type"], found["items"][0]["ref"]), ("singular_clamped_edge", "#o1.f1"))
@@ -208,17 +196,9 @@ class HeatedBar(unittest.TestCase):
     def test_strength_is_judged_away_from_a_singular_clamped_edge(self):
         """The strength check and the safety factor judge the stress where the colours stop (a little away from the
         singular edge), not the edge's peak, which grows with the mesh; the check keeps the peak beside it."""
-        from types import SimpleNamespace
-
-        import numpy as np
-
         from cadgen._internal.fea.analyses.thermal_stress import ThermalStressAnalysis
-        from cadgen._internal.fea.checks import Solved
 
-        spike = np.concatenate([np.full(999, 100.0), [900.0]])
-        held = Solved(material_name="Steel", yield_MPa=250.0, peak_MPa=900.0, peak_gauss_MPa=800.0, peak_at=(0.0, 0.0, 0.0),
-                      peak_face="#o1.f1", fixed_faces=("#o1.f1",), max_displacement_mm=0.01, displacement_at=(0.0, 0.0, 0.0),
-                      bbox_diagonal_mm=100.0, margin=2.0, coarser_peak_MPa=600.0, part="bar")
+        spike, held = self._spiked()
         analysis = ThermalStressAnalysis()
         check = analysis.judge({"kind": "stress"}, 0, None, SimpleNamespace(solved=[held], fields={"von_mises": spike}), None)
         self.assertEqual((check["value"], check["edge_peak"], check["ratio"], check["status"]), (100.0, 900.0, 0.4, "passes"))
@@ -236,7 +216,7 @@ class HeatedBar(unittest.TestCase):
         self.assertIn("temperatures 120 to 120 °C, stress-free at 20 °C", lines)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class RadiatingBar(unittest.TestCase):
     """The bar takes 1 W on one long side and radiates it from every face (emissivity 0.9, into 20 °C), clamped at
     both ends: it settles at its radiative equilibrium T = (Q / (ε σ A) + T∞⁴)^¼, nearly uniform along it, and is
@@ -245,20 +225,17 @@ class RadiatingBar(unittest.TestCase):
     POWER, EMISSIVITY = 1.0, 0.9
 
     def test_its_stress_follows_its_radiative_equilibrium_temperature(self):
-        from cadgen import fea
-
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
-            step = box_step(directory, "bar", (LENGTH, SIDE, SIDE))
-            near, far = x_faces(step)
+            step = box_step(directory, "bar", (LENGTH, SIDE, SIDE), "x")
+            near, far = ends(step)
             every = [near, far, *side_faces(step)]
             study = {"analysis": "thermal_stress", "material": "steel", "mesh": {"size_mm": 2.5},
                      "fixtures": [{"faces": [near]}, {"faces": [far]}],
                      "heat": [{"faces": [side_faces(step)[0]], "W": self.POWER}],
                      "radiation": [{"faces": every, "emissivity": self.EMISSIVITY, "ambient_C": REFERENCE}]}
-            with redirect_stderr(io.StringIO()):
-                result = fea.solve(step, directory / "radiating.glb", study=study)
-            extras, attributes = glb_extras_and_attributes(result.glb, ("POSITION", "_DISPLACEMENT", "_VON_MISES", "_TEMPERATURE"))
+            result = solve(step, directory / "radiating.glb", study)
+            extras, attributes = glb_extras(result.glb), glb_rows(result.glb, *NAMES)
         area = (4 * LENGTH * SIDE + 2 * SIDE * SIDE) * 1e-6
         ambient = REFERENCE + 273.15
         settled = (self.POWER / (self.EMISSIVITY * 5.670374419e-8 * area) + ambient ** 4) ** 0.25 - 273.15

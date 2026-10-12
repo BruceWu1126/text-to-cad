@@ -9,26 +9,11 @@ down does, and the reactions carry the weight.
 
 from __future__ import annotations
 
-import io
-import json
-import struct
-import tempfile
 import unittest
-from contextlib import redirect_stderr
-from pathlib import Path
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
+from tests.python.support.fea_fixtures import box_step, class_directory, ends, glb_extras, needs_fea, solve
 
 from cadgen._internal.fea.materials import lookup_material  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 LENGTH, SIDE = 100.0, 6.0
 STEEL = lookup_material("steel")
@@ -41,31 +26,15 @@ def _tip_deflection() -> float:
     return q * LENGTH ** 4 / (8.0 * STEEL.E * inertia)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class SelfWeight(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from build123d import Align, Box, export_step
-
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        step = directory / "beam.step"
-        export_step(Box(LENGTH, SIDE, SIDE, align=(Align.MIN, Align.CENTER, Align.CENTER)), str(step))
-        planes = {face.center_mm[0]: face.ref for face in fea.faces(step).faces
-                  if face.surface == "plane" and face.normal and abs(abs(face.normal[0]) - 1) < 1e-6}
-        cls.fixed = planes[min(planes)]
-        base = {"material": "steel", "fixtures": [{"faces": [cls.fixed]}], "mesh": {"size_mm": 2.0}}
-        with redirect_stderr(io.StringIO()):
-            cls.gravity = fea.solve(step, directory / "gravity.glb",
-                                    study={**base, "loads": [{"type": "gravity", "vector_g": [0, 0, -1]}]})
-            cls.lifted = fea.solve(step, directory / "lifted.glb",
-                                   study={**base, "loads": [{"type": "acceleration", "vector_g": [0, 0, 1]}]})
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        directory = class_directory(cls)
+        step = box_step(directory, "beam", (LENGTH, SIDE, SIDE), "x")
+        base = {"material": "steel", "fixtures": [{"faces": [ends(step)[0]]}], "mesh": {"size_mm": 2.0}}
+        cls.gravity = solve(step, directory / "gravity.glb", {**base, "loads": [{"type": "gravity", "vector_g": [0, 0, -1]}]})
+        cls.lifted = solve(step, directory / "lifted.glb", {**base, "loads": [{"type": "acceleration", "vector_g": [0, 0, 1]}]})
 
     def test_the_tip_sags_as_beam_theory_says(self):
         summary = self.gravity.summary
@@ -84,9 +53,7 @@ class SelfWeight(unittest.TestCase):
         self.assertEqual(self.lifted.summary["applied_force_N"], self.gravity.summary["applied_force_N"])
 
     def test_the_glb_echoes_the_body_load_without_faces(self):
-        raw = self.gravity.glb.read_bytes()
-        length, _ = struct.unpack_from("<II", raw, 12)
-        extras = json.loads(raw[20:20 + length])["meshes"][0]["extras"]
+        extras = glb_extras(self.gravity.glb)
         self.assertEqual(extras["study"]["loads"], [{"type": "gravity", "vector_g": [0.0, 0.0, -1.0]}])
         self.assertNotIn("analysis", extras)
 

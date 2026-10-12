@@ -24,29 +24,14 @@ Each STEP is a build123d solid in a temporary directory; meshes are coarse.
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import re
-import struct
-import tempfile
 import unittest
-from contextlib import redirect_stderr
 from pathlib import Path
 
 from tests.python.support import markdown
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
+from tests.python.support.fea_fixtures import box_step, class_directory, glb_extras, needs_fea, sidecar, solve, value_error
 
 from cadgen._internal.fea.materials import PIEZO_MATERIALS, material_from_spec  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 REFERENCE = Path(__file__).resolve().parents[4] / "skills" / "fea" / "references" / "materials.md"
 EPS0_F_M = 8.8541878128e-12
@@ -65,13 +50,6 @@ def parse(document: dict):
 ELECTRODES = [{"faces": ["#o1.f6"], "V": 100, "name": "top"}, {"faces": ["#o1.f5"], "V": 0, "name": "bottom"}]
 
 
-def solve(step: Path, out: Path, study: dict):
-    from cadgen import fea
-
-    with redirect_stderr(io.StringIO()):
-        return fea.solve(step, out, study=study)
-
-
 def plane(step: Path, axis: int, at: float, occurrence: str | None = None) -> str:
     """The plane face square to ``axis`` at ``at``."""
     from cadgen import fea
@@ -88,16 +66,11 @@ def constants(name: str) -> dict:
 
 
 class StudyFile(unittest.TestCase):
-    def test_it_is_built_and_registered(self):
-        from cadgen._internal.fea.analyses import REGISTRY, get_analysis
-
-        self.assertEqual((REGISTRY["piezo"].tier, REGISTRY["piezo"].word, REGISTRY["piezo"].planned), (3, "Piezo", False))
-        self.assertEqual(get_analysis("piezo").word, "Piezo")
-
     def test_each_solve_reads_its_own_keys_and_writes_its_own_fields(self):
         from cadgen._internal.fea.analyses import get_analysis
 
-        analysis = get_analysis("piezo")
+        analysis = get_analysis("piezo")  # registered tier 3, "Piezo", built: test_fea_protocol's Registry
+        self.assertEqual(analysis.word, "Piezo")
         static = parse({"electrodes": ELECTRODES, "fixtures": [{"faces": ["#o1.f5"]}],
                         "view": {"checks": [{"kind": "displacement", "limit_mm": 0.01}]}})
         self.assertEqual((static.inputs.solve, [e.volts for e in static.inputs.electrodes]), ("static", [100.0, 0.0]))
@@ -131,9 +104,8 @@ class StudyFile(unittest.TestCase):
             ({**held, "electrodes": ELECTRODES, "view": {"checks": [{"kind": "stress"}]}}, "add yield_MPa"),
         ]
         for changes, fragment in cases:
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                parse(changes)
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, value_error(self, parse, changes))
 
 
 class Ceramics(unittest.TestCase):
@@ -178,12 +150,11 @@ class Ceramics(unittest.TestCase):
                  ({"name": "pzt-5a", "piezo": {"epsS_rel": [[1, 0, 0], [0, -1, 0], [0, 0, 1]]}}, "positive definite"),
                  ({"name": "pzt-5a", "piezo": {"d33": 1}}, "unknown keys ['d33']")]
         for spec, fragment in cases:
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                material_from_spec(spec)
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, value_error(self, material_from_spec, spec))
 
 
-@unittest.skipUnless(HAVE_FEA, "needs the [fea] extra")
+@needs_fea
 class CoupledSolver(unittest.TestCase):
     def test_minres_with_block_multigrid_agrees_with_the_direct_solve(self):
         import numpy as np
@@ -212,7 +183,7 @@ class CoupledSolver(unittest.TestCase):
         self.assertAlmostEqual(iterative.charges[0] / direct.charges[0], 1.0, delta=1e-6)
 
 
-@unittest.skipUnless(HAVE_FEA, "needs the [fea] extra")
+@needs_fea
 class Plate(unittest.TestCase):
     """A free PZT-5A plate: capacitance, free stroke, blocked force and the open-circuit voltage of a sensor."""
 
@@ -220,13 +191,8 @@ class Plate(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from build123d import Align, Box, export_step
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.dir = Path(cls._tmp.name)
-        step = cls.dir / "plate.step"
-        export_step(Box(cls.A, cls.A, cls.T, align=(Align.MIN, Align.MIN, Align.MIN)), str(step))
-        cls.step = step
+        cls.dir = class_directory(cls)
+        cls.step = step = box_step(cls.dir, "plate", (cls.A, cls.A, cls.T), "corner")
         cls.x0, cls.y0, cls.z0, cls.z1 = plane(step, 0, 0), plane(step, 1, 0), plane(step, 2, 0), plane(step, 2, cls.T)
         cls.c = constants("pzt-5a")
         # +V on the bottom: the field along the poling (+Z), so the plate grows by d33 V.
@@ -239,10 +205,6 @@ class Plate(unittest.TestCase):
             **base, "electrodes": [{"faces": [cls.z1], "open": True, "name": "out"}, {"faces": [cls.z0], "V": 0, "name": "ground"}],
             "fixtures": free, "loads": [{"faces": [cls.z1], "type": "force", "vector_N": [0, 0, -cls.F]}],
             "view": {"checks": [{"kind": "voltage", "min_V": 10, "label": "Sensor output"}]}})
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def test_the_capacitance_is_eps33T_A_over_t(self):
         expected = self.c["epsT"][2, 2] * (self.A * 1e-3) ** 2 / (self.T * 1e-3)
@@ -276,17 +238,17 @@ class Plate(unittest.TestCase):
         self.assertAlmostEqual(check["ratio"], 10 / check["value"], places=5)
 
     def test_the_glb_and_sidecar_say_piezo_with_voltage_and_stress(self):
-        sidecar = json.loads(self.free.sidecar.read_text(encoding="utf-8"))
-        self.assertEqual(sidecar["analysis"], "piezo")
-        self.assertEqual([f["field"] for f in sidecar["fields"]], ["von_mises", "potential", "electric_field", "displacement"])
-        potential = next(f for f in sidecar["fields"] if f["field"] == "potential")
+        written = sidecar(self.free)
+        self.assertEqual(written["analysis"], "piezo")
+        self.assertEqual([f["field"] for f in written["fields"]], ["von_mises", "potential", "electric_field", "displacement"])
+        potential = next(f for f in written["fields"] if f["field"] == "potential")
         self.assertEqual((potential["signed"], potential["min"], potential["max"]), (True, 0.0, 100.0))
-        self.assertEqual(sidecar["study"]["analysis"], "piezo")
+        self.assertEqual(written["study"]["analysis"], "piezo")
         self.assertEqual(self.free.summary["poling"][0]["direction"], [0.0, 0.0, 1.0])
         self.assertTrue(any(line.startswith("capacitance") for line in self.free.human_lines()))
 
 
-@unittest.skipUnless(HAVE_FEA, "needs the [fea] extra")
+@needs_fea
 class ThicknessMode(unittest.TestCase):
     """A laterally clamped PZT-5A column: the 1D thickness mode's fr, fa and k_t, and its blocked capacitance."""
 
@@ -294,12 +256,8 @@ class ThicknessMode(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from build123d import Align, Box, export_step
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        step = directory / "column.step"
-        export_step(Box(cls.A, cls.A, cls.T, align=(Align.MIN, Align.MIN, Align.MIN)), str(step))
+        directory = class_directory(cls)
+        step = box_step(directory, "column", (cls.A, cls.A, cls.T), "corner")
         sides = [plane(step, 0, 0), plane(step, 0, cls.A), plane(step, 1, 0), plane(step, 1, cls.A)]
         cls.top, cls.bottom = plane(step, 2, cls.T), plane(step, 2, 0)
         electrodes = [{"faces": [cls.top], "V": 1, "name": "top"}, {"faces": [cls.bottom], "V": 0, "name": "bottom"}]
@@ -318,10 +276,6 @@ class ThicknessMode(unittest.TestCase):
         cls.sweep = solve(step, directory / "sweep.glb", sweep)
         cls.by_modes = solve(step, directory / "modes.glb", {**sweep, "fit": {"memory_GB": 0.0001, "seconds": 0.001,
                                                                               "allow": ["reduce_modes"]}})
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def theory(self):
         from scipy.optimize import brentq
@@ -360,22 +314,20 @@ class ThicknessMode(unittest.TestCase):
         self.assertAlmostEqual(self.result.summary["blocked_capacitance_F"] / expected, 1.0, delta=0.02)
 
     def test_the_glb_carries_each_modes_shape_voltage_and_stress(self):
-        sidecar = json.loads(self.result.sidecar.read_text(encoding="utf-8"))
-        frames = sidecar["series"]["frames"]
-        self.assertEqual(sidecar["series"]["kind"], "mode")
+        series = sidecar(self.result)["series"]
+        frames = series["frames"]
+        self.assertEqual(series["kind"], "mode")
         self.assertEqual(frames[1]["attributes"], {"mode_shape": "_MODE_SHAPE_F1", "von_mises": "_VON_MISES_F1",
                                                    "potential": "_POTENTIAL_F1"})
         self.assertTrue(frames[0]["label"].startswith("Mode 1 · 1.9"))
         # Each mode's resonance, anti-resonance and coupling, for Study's verdict, as the summary has them.
-        raw = self.result.glb.read_bytes()
-        (length,) = struct.unpack("<I", raw[12:16])
-        modes = json.loads(raw[20:20 + length])["meshes"][0]["extras"]["analysis"]["modes"]
+        modes = glb_extras(self.result.glb)["analysis"]["modes"]
         self.assertEqual(modes, [{key: mode[key] for key in ("mode", "resonance_Hz", "antiresonance_Hz", "k_eff")}
                                  for mode in self.result.summary["modes"]])
 
     def test_a_sweep_draws_omega_C_at_low_frequency_and_by_modes_agrees(self):
         capacitance = self.static.summary["capacitance_F"]
-        curves = json.loads(self.sweep.sidecar.read_text(encoding="utf-8"))["curves"]
+        curves = sidecar(self.sweep)["curves"]
         first = curves["admittance_S"]["x"][0], curves["admittance_S"]["y"][0]
         print(f"piezo admittance at {first[0]:.4g} Hz {first[1]:.6g} S, omega C {2 * math.pi * first[0] * capacitance:.6g} S")
         self.assertAlmostEqual(first[1] / (2 * math.pi * first[0] * capacitance), 1.0, delta=0.02)
@@ -386,7 +338,7 @@ class ThicknessMode(unittest.TestCase):
         self.assertEqual(self.by_modes.summary["peak_admittance_Hz"], self.sweep.summary["peak_admittance_Hz"])
 
 
-@unittest.skipUnless(HAVE_FEA, "needs the [fea] extra")
+@needs_fea
 class Bimorph(unittest.TestCase):
     """A series bimorph cantilever: two PZT-5A layers poled opposite ways, glued, held at one end."""
 
@@ -396,8 +348,7 @@ class Bimorph(unittest.TestCase):
     def setUpClass(cls):
         from build123d import Align, Box, Compound, Pos, export_step
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
+        directory = class_directory(cls)
         upper = Pos(0, 0, cls.H) * Box(cls.L, cls.W, cls.H, align=(Align.MIN, Align.MIN, Align.MIN))
         upper.label = "upper"
         lower = Box(cls.L, cls.W, cls.H, align=(Align.MIN, Align.MIN, Align.MIN))
@@ -418,11 +369,6 @@ class Bimorph(unittest.TestCase):
         cls.real = solve(step, directory / "real.glb", {**cls.study, "parts": parts()})
         cls.weak_eps = [[916e2, 0, 0], [0, 916e2, 0], [0, 0, 830e2]]
         cls.weak = solve(step, directory / "weak.glb", {**cls.study, "parts": parts(epsS_rel=cls.weak_eps)})
-        cls._tmp_dir = directory
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def closed_form(self, d31: float) -> float:
         """δ = 3 d31 V L² / (2 t²), mm."""
@@ -431,10 +377,7 @@ class Bimorph(unittest.TestCase):
 
     def test_the_glb_names_each_layer_so_a_held_face_reads_by_its_part(self):
         # Piezo writes no per-part results; the viewer still needs each part's name and material ("upper · face 1").
-        raw = self.real.glb.read_bytes()
-        length, _ = struct.unpack_from("<II", raw, 12)
-        extras = json.loads(raw[20:20 + length])["meshes"][0]["extras"]
-        self.assertEqual([(part["ref"], part["name"], part["material"]) for part in extras["parts"]],
+        self.assertEqual([(part["ref"], part["name"], part["material"]) for part in glb_extras(self.real.glb)["parts"]],
                          [("#o1.1", "upper", "PZT-5A"), ("#o1.2", "lower", "PZT-5A")])
 
     def test_with_weak_coupling_the_tip_meets_the_closed_form(self):
@@ -460,18 +403,14 @@ class Bimorph(unittest.TestCase):
         self.assertEqual(len(self.real.summary["poling"]), 2)
 
 
-@unittest.skipUnless(HAVE_FEA, "needs the [fea] extra")
+@needs_fea
 class Ladder(unittest.TestCase):
     """Never refused for size: a tiny budget takes the symmetric quarter and local refinement, and the answer holds."""
 
     @classmethod
     def setUpClass(cls):
-        from build123d import Align, Box, export_step
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        step = directory / "disc.step"
-        export_step(Box(4.0, 4.0, 1.0, align=(Align.CENTER, Align.CENTER, Align.MIN)), str(step))
+        directory = class_directory(cls)
+        step = box_step(directory, "disc", (4.0, 4.0, 1.0), "base")
         top, bottom = plane(step, 2, 1.0), plane(step, 2, 0.0)
         cls.study = {"analysis": "piezo", "material": "pzt-4", "mesh": {"size_mm": 0.5},
                      "electrodes": [{"faces": [bottom], "V": 50, "name": "drive"}, {"faces": [top], "V": 0, "name": "ground"}],
@@ -486,10 +425,6 @@ class Ladder(unittest.TestCase):
                                                           "electrodes": cls.study["electrodes"],
                                                           "fit": {**tiny, "allow": ["reduce_modes"]}})
 
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
-
     def test_the_symmetric_quarter_is_the_whole(self):
         rungs = [step["rung"] for step in self.half.fit]
         self.assertIn("symmetry", rungs)
@@ -500,8 +435,7 @@ class Ladder(unittest.TestCase):
         # (The peak stress sits on the held face's edge, a singularity each mesh reads differently: not compared.)
         self.assertAlmostEqual(half["max_displacement_mm"] / full["max_displacement_mm"], 1.0, delta=0.01)
         self.assertAlmostEqual(half["reaction_force_N"][0][2], full["reaction_force_N"][0][2], delta=1e-3)
-        extras = json.loads(self.half.sidecar.read_text(encoding="utf-8"))
-        self.assertEqual(extras["fit"][0]["rung"], "symmetry")
+        self.assertEqual(sidecar(self.half)["fit"][0]["rung"], "symmetry")
         self.assertTrue(any(f["type"] == "fit_symmetry" for f in self.half.findings))
 
     def test_local_refinement_keeps_the_capacitance(self):

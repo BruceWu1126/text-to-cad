@@ -1,13 +1,7 @@
 /**
- * Flow and bending (lite): steady two-way fluid-structure interaction, Tier 3. The flow pushes the
- * part, the part bends, the bend changes the flow, until the two agree. Its fields are on the part:
- * the von Mises stress (first), the wall pressure (Pa, signed), the wall shear and the displacement,
- * and it deforms by that displacement. Its verdict judges the stress, the displacement and the
- * pressure drop, none of which a load control moves (the flow's push is not proportional to the
- * flow's speed); its takeaway leads with the flow's regime ("Laminar · ", "Turbulent · ") and, where
- * the coupling did not settle, "not converged". What you see opens on the field and the deformation;
- * its setup says what bends it ("Water at 0.5 m/s bends the flap"), where the flow goes in and out,
- * where it is held and what it is made of; Details add the coupling's iterations. Its routine moves tracers along the solved flow.
+ * Flow and bending (lite), Tier 3: steady two-way fluid-structure interaction. The flow pushes the part, the
+ * part bends, the bend changes the flow, until the two agree; the push is not proportional to the flow's
+ * speed, so no load control moves it. Where the coupling did not settle its takeaway says "not converged".
  */
 import { fieldAndDeformation } from "../controls.js";
 import { plainNumber } from "../numbers.js";
@@ -77,7 +71,6 @@ export const fsiLimitWord = (result) => {
 
 export default planned({
   name: "fsi", tier: 3, word: "Flow and bending", noun: "this flow", limitWord: "Flow and bending", limitWordOf: fsiLimitWord,
-  family: null, scalesWithLoad: false,
   // Flow and bending, each moving the other: no check is a multiple of the load.
   scaling: "none",
   checks: ["stress", "displacement", "pressure_drop"],

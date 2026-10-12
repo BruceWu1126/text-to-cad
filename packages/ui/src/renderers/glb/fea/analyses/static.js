@@ -1,7 +1,6 @@
 /**
- * Strength: a linear static study, today's result. Its verdict judges stress and displacement, both
- * k times larger at k times the load; its setup says where it is held, what pushes it and what it is
- * made of; its one routine is the Load ramp.
+ * Strength: a linear static study, today's result: stress and displacement, both k times larger at k times
+ * the load.
  */
 import { fieldAndDeformation } from "../controls.js";
 import { heldRows, madeOfRows, pushedRows } from "../setup.js";

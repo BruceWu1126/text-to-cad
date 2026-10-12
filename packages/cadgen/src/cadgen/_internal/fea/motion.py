@@ -1,9 +1,8 @@
 """What a result writes for the viewer to play it over time: ``extras.analysis.motion``.
 
-A result whose physics moves (a shaker, a shock, a load cycle, an AC field, a
-flow) carries the little the viewer needs to play it truthfully, sampled
-sparsely so the GLB stays small; a static result carries none. Every motion is
-an object with a ``kind`` and the numbers its routine reads:
+A result whose physics moves (a shaker, a shock, a load cycle, an AC field, a flow) carries the little the viewer needs
+to play it truthfully, sampled sparsely so the GLB stays small; a static result carries none. Every motion is an object
+with a ``kind`` and the numbers its routine reads:
 
 - ``base_shake`` (random vibration, shock): the part's motion relative to its
   shaker, as a sum of a few mode shapes, each a hidden vertex attribute

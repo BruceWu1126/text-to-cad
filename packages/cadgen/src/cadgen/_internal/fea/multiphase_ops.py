@@ -990,10 +990,6 @@ class TwoPhaseSolver:
         self.distance = distance
         return state
 
-    def _inflow(self, distance, u) -> float:
-        """The liquid's volume flow into the container through its openings, m^3/s (:meth:`_flows`, summed)."""
-        return float(sum(self._flows(distance, u)))
-
     def _flows(self, distance, u) -> list[float]:
         """The liquid's volume flow in through each opening, m^3/s: minus the integral of H u . n, H the fluid an inlet
         brings (1 liquid, 0 gas) and, at an outlet, the share of what is there where the flow leaves and 0 (the air

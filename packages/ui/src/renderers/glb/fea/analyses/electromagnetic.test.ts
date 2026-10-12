@@ -1,23 +1,16 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
-import { feaControls, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, feaVerdict, studyRows } from '../../feaResult.js';
 import { faceTitle, heldRows, madeOfRows } from '../setup.js';
 import electromagnetic, { ELECTROMAGNETIC_SETUP, coilRows, electrodeRows, hertz } from './electromagnetic.js';
 import { feaAnalysis } from './index.js';
+import { feaFile, vec } from '../../__tests__/feaFile.js';
 
 // An electric-field result as cadgen writes one: the voltage first (signed), the field's strength beside it.
 function electricResult(extras: Record<string, unknown> = {}, attributes: Record<string, number[]> = {}) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.01, 0, 0, 0, 0.01, 0]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_potential', new BufferAttribute(new Float32Array([0, 500, 1000]), 1));
-  geometry.setAttribute('_electric_field', new BufferAttribute(new Float32Array([0.5, 0.5, 2.8]), 1));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 1]), 1));
-  for (const [name, values] of Object.entries(attributes)) geometry.setAttribute(name, new BufferAttribute(new Float32Array(values), 1));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  return feaFile({
+    position: [0, 0, 0, 0.01, 0, 0, 0, 0.01, 0], _displacement: vec(9), _potential: [0, 500, 1000], _electric_field: [0.5, 0.5, 2.8],
+    _face: [0, 0, 1], ...attributes,
+  }, {
     generator: 'cadgen fea', name: 'gap electromagnetic', deformation_scale: null, faces: ['#o1.f1', '#o1.f2'],
     analysis: { type: 'electromagnetic', tier: 3, word: 'Magnetic / electric', estimate: false,
       limits: ['Static and DC only: no eddy currents, AC or high frequency; linear materials (no saturation, no hysteresis).'],
@@ -37,9 +30,6 @@ function electricResult(extras: Record<string, unknown> = {}, attributes: Record
     findings: [],
     ...extras,
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 describe('electromagnetic', () => {

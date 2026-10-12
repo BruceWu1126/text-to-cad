@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from cadgen._internal.fea.femspace import FemSpace
     from cadgen._internal.fea.materials import Material
 
-__all__ = ["NeoHookean", "cauchy", "moduli", "neo_hookean", "neo_hookean_params", "shore_a_estimate"]
+__all__ = ["NeoHookean", "cauchy", "moduli", "neo_hookean", "neo_hookean_params"]
 
 
 @dataclass(frozen=True)
@@ -53,17 +53,6 @@ def neo_hookean_params(space: "FemSpace", materials: "list[Material]") -> NeoHoo
 
     pairs = [moduli(m) for m in materials]
     return NeoHookean(domain_values(space, [p[0] for p in pairs]), domain_values(space, [p[1] for p in pairs]))
-
-
-def shore_a_estimate(shore_a: float) -> dict:
-    """A first guess of a rubber's Neo-Hookean block from its Shore A hardness: an estimate, never data.
-
-    Gent's relation E ≈ 0.0981 (56 + 7.62336 S) / (0.137505 (254 - 2.54 S)) MPa, μ = E/3, κ = 500 μ."""
-    if not 0 < shore_a < 100:
-        raise ValueError(f"Shore A hardness: between 0 and 100, got {shore_a:g}")
-    E = 0.0981 * (56.0 + 7.62336 * shore_a) / (0.137505 * (254.0 - 2.54 * shore_a))
-    mu = E / 3.0
-    return {"model": "neo_hookean", "mu_MPa": round(mu, 4), "bulk_MPa": round(500.0 * mu, 2)}
 
 
 def _inverse_and_det(F: "np.ndarray"):

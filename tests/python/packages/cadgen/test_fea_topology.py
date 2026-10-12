@@ -15,26 +15,12 @@ answers. A ladder test forces symmetry and a coarser design mesh with a tiny tim
 
 from __future__ import annotations
 
-import io
-import json
-import struct
-import tempfile
 import unittest
-from contextlib import redirect_stderr
 from pathlib import Path
 
-from tests.python.support.paths import add_repo_path
+from tests.python.support.fea_fixtures import class_directory, glb_array, needs_fea, sidecar, solve, value_error
 
-add_repo_path("packages/cadgen/src")
-
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
 from cadgen._internal.fea.study import parse_study  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 STUDY = {
     "analysis": "topology", "material": "steel", "fixtures": [{"faces": ["#o1.f1"]}],
@@ -90,9 +76,8 @@ class Parse(unittest.TestCase):
             (_study(view={"checks": [{"kind": "mass_saved", "min_percent": 120}]}), "min_percent: the share of the mass to save"),
         ]
         for document, fragment in cases:
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                parse_study(document)
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, value_error(self, parse_study, document))
 
     def test_the_mass_saved_check(self):
         from cadgen._internal.fea.analyses.kinds import MASS_SAVED
@@ -136,7 +121,7 @@ def _half_mbb(nx: int):
     return problem, L / nx
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Core(unittest.TestCase):
     """topology_ops on structured meshes: exact answers, gradients and discretisation independence."""
 
@@ -255,25 +240,6 @@ class Core(unittest.TestCase):
             np.testing.assert_allclose(values[members], values[members[0]], atol=1e-12)
 
 
-def _glb(path: Path) -> tuple[dict, bytes]:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    return json.loads(raw[20:20 + length]), raw[20 + length + 8:]
-
-
-def _attribute(path: Path, name: str):
-    import numpy as np
-
-    gltf, blob = _glb(path)
-    primitive = gltf["meshes"][0]["primitives"][0]
-    accessor = gltf["accessors"][primitive["attributes"][name]]
-    view = gltf["bufferViews"][accessor["bufferView"]]
-    width = {"SCALAR": 1, "VEC3": 3}[accessor["type"]]
-    data = np.frombuffer(blob, dtype=np.float32, count=accessor["count"] * width,
-                         offset=view.get("byteOffset", 0) + accessor.get("byteOffset", 0))
-    return data.reshape(accessor["count"], width)
-
-
 def _slab_step(directory: Path, name: str, outline) -> Path:
     from build123d import Face, Solid, Vector, Wire, export_step
 
@@ -289,14 +255,13 @@ def _faces_at(path: Path) -> dict:
     return {tuple(round(c, 3) for c in face.center_mm): face.ref for face in fea.faces(path).faces}
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Benchmarks(unittest.TestCase):
     """The MBB beam and the cantilever, end to end through ``cadgen fea``."""
 
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.directory = Path(cls._tmp.name)
+        cls.directory = class_directory(cls)
         # MBB: 60 x 20, 3 mm pads at the bottom corners, a 3 mm load pad at the top middle.
         cls.mbb = _slab_step(cls.directory, "mbb", [(0, 0), (3, 0), (57, 0), (60, 0), (60, 20), (31.5, 20), (28.5, 20), (0, 20)])
         at = _faces_at(cls.mbb)
@@ -306,10 +271,6 @@ class Benchmarks(unittest.TestCase):
         at = _faces_at(cls.cantilever)
         cls.cantilever_faces = (at[(0.0, 10.0, 1.0)], at[(40.0, 10.0, 1.0)])
 
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
-
     def _mbb_study(self, **changes) -> dict:
         left, right, top = self.mbb_faces
         return {"analysis": "topology", "material": "steel", "fixtures": [{"faces": [left, right]}],
@@ -317,22 +278,17 @@ class Benchmarks(unittest.TestCase):
                 "mesh": {"size_mm": 2.0}, "iterations": 100, **changes}
 
     def _solve(self, step: Path, name: str, study: dict):
-        from cadgen import fea
-
         glb = self.directory / f"{name}.fea.glb"
-        with redirect_stderr(io.StringIO()):
-            result = fea.solve(step, glb, study=study)
+        result = solve(step, glb, study)
         self.assertTrue(result.ok)
-        sidecar = json.loads(glb.with_suffix(".json").read_text(encoding="utf-8"))
-        return result, glb, sidecar
+        return result, glb, sidecar(result)
 
-    def _promises(self, result, sidecar, target: float):
+    def _promises(self, result, written, target: float):
         """Volume on target within 1 %; compliance non-increasing (0.5 % slack) once the continuation is done;
         stiffer than the uniform grey part of the same mass, never stiffer than the solid part."""
         summary = result.summary
         self.assertAlmostEqual(summary["volume_fraction"], target, delta=0.01 * target)
-        history = result_history(sidecar)
-        final = history[sidecar_final_stage(sidecar):]
+        final = written["curves"]["compliance_Nmm"]["y"][written["summary"]["final_stage_start"]:]
         self.assertGreaterEqual(len(final), 3)
         rises = [(b - a) / a for a, b in zip(final, final[1:])]
         self.assertLess(max(rises), 5e-3, rises)
@@ -342,16 +298,16 @@ class Benchmarks(unittest.TestCase):
         return summary
 
     def test_mbb_beam(self):
-        result, glb, sidecar = self._solve(self.mbb, "mbb", self._mbb_study(symmetry=["x"]))
-        summary = self._promises(result, sidecar, 0.5)
+        result, glb, written = self._solve(self.mbb, "mbb", self._mbb_study(symmetry=["x"]))
+        summary = self._promises(result, written, 0.5)
         self.assertLess(summary["compliance_ratio"], 2.0)
         self.assertLess(summary["grey_percent"], 10.0)
         # The design is symmetric about the middle: the surface's density averaged over cells, against its mirror cell.
         import numpy as np
 
-        positions = _attribute(glb, "POSITION").astype(float) * 1000.0      # glTF metres -> mm; x is the part's x
-        final = sidecar["series"]["frames"][-1]["attributes"]["material_kept"]
-        density = _attribute(glb, final)[:, 0]
+        positions = glb_array(glb, "POSITION", 3) * 1000.0                 # glTF metres -> mm; x is the part's x
+        final = written["series"]["frames"][-1]["attributes"]["material_kept"]
+        density = glb_array(glb, final)[:, 0]
         across = int(np.argmax(np.ptp(positions[:, 1:], axis=0))) + 1       # the slab's height in glTF axes
         cells = np.stack([np.clip((positions[:, 0] / 4.0).astype(int), 0, 14),
                           np.clip(((positions[:, across] - positions[:, across].min()) / 4.0).astype(int), 0, 4)], axis=1)
@@ -361,14 +317,14 @@ class Benchmarks(unittest.TestCase):
         mean = sums / np.maximum(counts, 1)
         self.assertLess(float(np.abs(mean - mean[::-1]).mean()), 0.05, np.round(mean, 2))
         # What it writes: the series, the curves, the checks, the kept faces and the design surface.
-        self.assertEqual(sidecar["analysis"], "topology")
-        self.assertLessEqual(len(sidecar["series"]["frames"]), 24)
-        self.assertEqual(sidecar["series"]["frames"][-1]["label"], "Final design")
-        self.assertEqual(set(sidecar["curves"]), {"compliance_Nmm", "volume_fraction", "grey_fraction"})
+        self.assertEqual(written["analysis"], "topology")
+        self.assertLessEqual(len(written["series"]["frames"]), 24)
+        self.assertEqual(written["series"]["frames"][-1]["label"], "Final design")
+        self.assertEqual(set(written["curves"]), {"compliance_Nmm", "volume_fraction", "grey_fraction"})
         self.assertEqual([c["kind"] for c in summary["checks"]], ["mass_saved", "stress"])
         self.assertEqual(summary["checks"][0]["status"], "passes")
         self.assertTrue(set(self.mbb_faces) <= {entry["face"] for entry in summary["kept_solid"]})
-        stl = glb.with_name(sidecar["files"]["design_stl"])
+        stl = glb.with_name(written["files"]["design_stl"])
         self.assertTrue(stl.is_file())
         self.assertAlmostEqual(summary["surface_volume_mm3"] / summary["design_volume_mm3"], 1.0, delta=0.15)
         self.assertEqual(stl.stat().st_size, 84 + 50 * summary["design_triangles"])
@@ -384,8 +340,8 @@ class Benchmarks(unittest.TestCase):
                  "loads": [{"faces": [pushed], "type": "force", "vector_N": [0, -100, 0]}], "volume_fraction": 0.4,
                  "mesh": {"size_mm": 1.5}, "iterations": 120,
                  "view": {"checks": [{"kind": "mass_saved", "min_percent": 50}, {"kind": "displacement", "limit_mm": 0.05}]}}
-        result, glb, sidecar = self._solve(self.cantilever, "cantilever", study)
-        summary = self._promises(result, sidecar, 0.4)
+        result, glb, written = self._solve(self.cantilever, "cantilever", study)
+        summary = self._promises(result, written, 0.4)
         self.assertEqual([(c["kind"], c["status"]) for c in summary["checks"]], [("mass_saved", "passes"), ("displacement", "passes")])
         print(f"\ncantilever: {summary['iterations']} iterations, volume {summary['volume_fraction']:.4f}, compliance "
               f"{summary['compliance_Nmm']:.5g} N mm (verified {summary['verified_compliance_Nmm']:.5g}), solid "
@@ -393,14 +349,14 @@ class Benchmarks(unittest.TestCase):
               f"{result.timings}")
 
     def test_the_ladder_halves_and_coarsens_it_and_says_what_member_size_is_left(self):
-        result, glb, sidecar = self._solve(self.mbb, "mbb-ladder", self._mbb_study(iterations=60, fit={"seconds": 0.3}))
-        rungs = [step["rung"] for step in sidecar["fit"]]
+        result, glb, written = self._solve(self.mbb, "mbb-ladder", self._mbb_study(iterations=60, fit={"seconds": 0.3}))
+        rungs = [step["rung"] for step in written["fit"]]
         self.assertIn("symmetry", rungs)
         self.assertIn("coarse_design", rungs)
-        coarse = next(step for step in sidecar["fit"] if step["rung"] == "coarse_design")
+        coarse = next(step for step in written["fit"] if step["rung"] == "coarse_design")
         self.assertRegex(coarse["words"], r"resolves members down to about [0-9.]+ mm")
         self.assertTrue(any(line.startswith("adapted: Used a coarser design mesh") for line in result.human_lines()))
-        self.assertTrue(any(f["type"] == "fit_coarse_design" for f in sidecar["findings"]))
+        self.assertTrue(any(f["type"] == "fit_coarse_design" for f in written["findings"]))
         self.assertAlmostEqual(result.summary["volume_fraction"], 0.5, delta=0.005)
         self.assertFalse(any("do not balance" in warning for warning in result.warnings))
         print(f"\nladder: {rungs}, {coarse['words']}; {result.summary['iterations']} iterations, {result.mesh}")
@@ -408,23 +364,15 @@ class Benchmarks(unittest.TestCase):
     def test_lightest_finds_the_least_material_that_stays_within_its_limit(self):
         study = self._mbb_study(objective="lightest", volume_fraction=0.5, iterations=40,
                                 view={"checks": [{"kind": "displacement", "limit_mm": 0.0028}]})
-        result, glb, sidecar = self._solve(self.mbb, "mbb-lightest", study)
+        result, glb, written = self._solve(self.mbb, "mbb-lightest", study)
         rounds = result.summary["lightest_rounds"]
         self.assertGreaterEqual(len(rounds), 2)
         passing = [r["volume_fraction"] for r in rounds if r["passes"]]
         self.assertTrue(passing)
         self.assertAlmostEqual(result.summary["volume_fraction_target"], min(passing), places=4)
         self.assertTrue(any(not r["passes"] and r["volume_fraction"] < min(passing) for r in rounds), rounds)
-        self.assertEqual(result.summary["checks"][0]["status"] != "fails", True)
+        self.assertNotEqual(result.summary["checks"][0]["status"], "fails")
         print(f"\nlightest: {rounds}")
-
-
-def result_history(sidecar: dict) -> list[float]:
-    return sidecar["curves"]["compliance_Nmm"]["y"]
-
-
-def sidecar_final_stage(sidecar: dict) -> int:
-    return sidecar["summary"]["final_stage_start"]
 
 
 if __name__ == "__main__":

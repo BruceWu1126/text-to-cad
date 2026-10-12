@@ -1,26 +1,19 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
-import { feaControls, feaVerdict, machWarning, readFeaResult, reynoldsWarning, studyRows } from '../../feaResult.js';
+import { feaControls, feaVerdict, machWarning, reynoldsWarning, studyRows } from '../../feaResult.js';
 import { FLOW_SETUP } from './cfd.js';
 import cfdCompressible from './cfd_compressible.js';
 import { feaAnalysis } from './index.js';
+import { feaFile, vec } from '../../__tests__/feaFile.js';
 
 const LIMIT = 'Steady, ideal gas, adiabatic (one total temperature); an inviscid core with frictionless walls past the laminar range, '
   + 'laminar walls in it; no turbulence model; shocks are captured over a few elements.';
 
 // A gas flow result as cadgen writes one: wall pressure first, then the Mach number and the gas temperature; nothing deformed.
 function gasResult(checks: Record<string, unknown>[] = []) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.04, 0, 0, 0, 0.004, 0]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_pressure', new BufferAttribute(new Float32Array([2400, -13000, 0]), 1));
-  geometry.setAttribute('_mach', new BufferAttribute(new Float32Array([0.19, 0.53, 0.27]), 1));
-  geometry.setAttribute('_temperature', new BufferAttribute(new Float32Array([17.9, 4.5, 15.7]), 1));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 0]), 1));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  return feaFile({
+    position: [0, 0, 0, 0.04, 0, 0, 0, 0.004, 0], _displacement: vec(9), _pressure: [2400, -13000, 0], _mach: [0.19, 0.53, 0.27],
+    _temperature: [17.9, 4.5, 15.7], _face: [0, 0, 0],
+  }, {
     generator: 'cadgen fea', name: 'nozzle gas flow', deformation_scale: null, faces: ['#o1.f2'], occurrence: '#o1',
     analysis: { type: 'cfd_compressible', tier: 3, word: 'Fast gas flow', estimate: false, limits: [LIMIT], noun: 'this flow',
       reference_C: null, warnings: [], mach: { value: 0.53, limit: 1.8, regime: 'subsonic', checked: true }, walls: 'slip' },
@@ -37,9 +30,6 @@ function gasResult(checks: Record<string, unknown>[] = []) {
     checks,
     findings: [],
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 const mach = (value: number, status: string) => ({ kind: 'mach', label: 'Mach number', value, limit: 0.8, unit: '', ratio: value / 0.8,

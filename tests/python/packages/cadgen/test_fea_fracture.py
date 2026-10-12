@@ -19,32 +19,19 @@ material tests are stdlib only; the solves need the fea extra.
 
 from __future__ import annotations
 
-import io
-import json
 import math
 import re
-import struct
 import tempfile
 import unittest
-from contextlib import redirect_stderr
 from pathlib import Path
 
 from tests.python.support import markdown
-from tests.python.support.paths import add_repo_path
+from tests.python.support.fea_fixtures import box_step, class_directory, glb_extras, needs_fea, sidecar, solve, value_error
 
-add_repo_path("packages/cadgen/src")
-
-from cadgen._internal.fea.analyses import REGISTRY, get_analysis  # noqa: E402
+from cadgen._internal.fea.analyses import get_analysis  # noqa: E402
 from cadgen._internal.fea.crack import paris_life, paris_life_closed_form, parse_crack  # noqa: E402
 from cadgen._internal.fea.materials import MATERIALS, NONE_REASONS, material_from_spec  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
 from cadgen._internal.fea.study import parse_study  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 REFERENCE = Path(__file__).resolve().parents[4] / "skills" / "fea" / "references"
 EDGE = {"kind": "edge", "face": "#o1.f1", "at_mm": [0, 0, 1], "normal": [0, 1, 0], "size_mm": 5}
@@ -56,9 +43,7 @@ def _study(**more) -> dict:
 
 
 class StudyFile(unittest.TestCase):
-    def test_it_is_registered_built_tier_3_cracks(self):
-        entry = REGISTRY["fracture"]
-        self.assertEqual((entry.tier, entry.word, entry.planned), (3, "Cracks", False))
+    def test_it_declares_its_ladder_checks_and_isotropy(self):
         analysis = get_analysis("fracture")
         self.assertEqual(analysis.ladder, ("iterative", "local_refine", "defeature", "symmetry"))
         self.assertTrue(analysis.isotropic_only)
@@ -102,9 +87,8 @@ class StudyFile(unittest.TestCase):
             (_study(material={"name": "aluminum-7075-t6"}, growth={}), "add paris_C to the material object"),
         ]
         for study, fragment in cases:
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                parse_study(study)
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, value_error(self, parse_study, study))
 
     def test_a_study_judged_by_displacement_alone_needs_no_toughness(self):
         parsed = parse_study(_study(material="steel", view={"checks": [{"kind": "displacement", "limit_mm": 1}]}))
@@ -183,33 +167,16 @@ class ParisLaw(unittest.TestCase):
         self.assertEqual(stopped["final_mm"], 2.0)
 
 
-def _glb(path: Path) -> dict:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    return json.loads(raw[20:20 + length])
-
-
 def _plate(directory: Path, name: str, width: float, height: float, thickness: float, *, centred: bool):
     """A plate written to a STEP, and its faces by outward normal ("+x", "-y", ...)."""
-    from build123d import Align, Box, export_step
-
     from cadgen import fea
 
-    step = directory / f"{name}.step"
-    align = (Align.CENTER if centred else Align.MIN, Align.CENTER, Align.MIN)
-    export_step(Box(width, height, thickness, align=align), str(step))
+    step = box_step(directory, name, (width, height, thickness), "base" if centred else "base_x")
     faces = {}
     for face in fea.faces(step).faces:
         axis = max(range(3), key=lambda k: abs(face.normal[k]))
         faces[("+" if face.normal[axis] > 0 else "-") + "xyz"[axis]] = face.ref
     return step, faces
-
-
-def _solve(step: Path, out: Path, study: dict):
-    from cadgen import fea
-
-    with redirect_stderr(io.StringIO()):
-        return fea.solve(step, out, study=study)
 
 
 SIGMA, W, HEIGHT, T, A = 100.0, 100.0, 200.0, 2.0, 5.0
@@ -222,27 +189,20 @@ def _tension(faces: dict, rollers: tuple[str, ...], crack: dict, **more) -> dict
             "loads": [{"type": "pressure", "faces": [faces["+y"]], "pressure_MPa": -SIGMA}], "crack": crack, **more}
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class CentreCrack(unittest.TestCase):
     """2a = 10 mm through a 100 mm wide plate, plane strain (rollers on both faces): K = σ√(πa)·√(sec(πa/W))."""
 
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
+        directory = class_directory(cls)
         cls.step, cls.faces = _plate(directory, "centre", W, HEIGHT, T, centred=True)
         crack = {"kind": "through", "face": cls.faces["+z"], "at_mm": [0, 0, T / 2], "normal": [0, 1, 0], "size_mm": A}
         cls.study = _tension(cls.faces, ("-y", "-z", "+z", "-x", "+x"), crack,
                              growth={"load_ratio": 0.1, "paris_C": 6.9e-12, "paris_m": 3.0},
                              view={"checks": [{"kind": "fracture"}, {"kind": "crack_life", "cycles": 1e5}]})
-        cls.result = _solve(cls.step, directory / "centre.fea.glb", cls.study)
-        cls.extras = _glb(cls.result.glb)["meshes"][0]["extras"]
-        cls.sidecar = json.loads(cls.result.sidecar.read_text(encoding="utf-8"))
-        cls.directory = directory
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.result = solve(cls.step, directory / "centre.fea.glb", cls.study)
+        cls.extras = glb_extras(cls.result.glb)
 
     def test_K_meets_the_finite_width_closed_form(self):
         expected = SIGMA * math.sqrt(math.pi * A / 1000.0) * math.sqrt(1.0 / math.cos(math.pi * A / W))
@@ -281,7 +241,7 @@ class CentreCrack(unittest.TestCase):
         self.assertEqual(self.extras["study"]["crack"]["face"], self.faces["+z"])
         self.assertEqual(self.extras["study"]["growth"], {"load_ratio": 0.1, "paris_C": 6.9e-12, "paris_m": 3.0})
         self.assertEqual([field["field"] for field in self.extras["fields"]], ["von_mises", "displacement"])
-        curves = self.sidecar["curves"]
+        curves = sidecar(self.result)["curves"]
         self.assertEqual(set(curves), {"K_I", "K_II", "K_III"})
         self.assertEqual((curves["K_I"]["x_unit"], curves["K_I"]["y_unit"]), ("mm", "MPa√m"))
         self.assertEqual(len(curves["K_I"]["y"]), len(self.result.summary["front"]))
@@ -295,7 +255,7 @@ class CentreCrack(unittest.TestCase):
         self.assertFalse([finding for finding in self.result.findings if finding["severity"] == "error"])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class EdgeCrack(unittest.TestCase):
     """a/W = 0.05 from the edge of a plate in tension: Tada's F(a/W), which is 1.12 for a small crack."""
 
@@ -304,7 +264,7 @@ class EdgeCrack(unittest.TestCase):
             directory = Path(name)
             step, faces = _plate(directory, "edge", W, HEIGHT, T, centred=False)
             crack = {"kind": "edge", "face": faces["-x"], "at_mm": [0, 0, T / 2], "normal": [0, 1, 0], "size_mm": A}
-            result = _solve(step, directory / "edge.fea.glb", _tension(faces, ("-y", "-z", "+z", "+x"), crack))
+            result = solve(step, directory / "edge.fea.glb", _tension(faces, ("-y", "-z", "+z", "+x"), crack))
         x = A / W
         tada = 1.12 - 0.231 * x + 10.55 * x ** 2 - 21.72 * x ** 3 + 30.39 * x ** 4
         nominal = SIGMA * math.sqrt(math.pi * A / 1000.0)
@@ -314,7 +274,7 @@ class EdgeCrack(unittest.TestCase):
         self.assertEqual(result.summary["crack"]["words"], f"5 mm edge crack on {faces['-x']}")
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class PinLoadedLink(unittest.TestCase):
     """A link bar pulled by its pin holes with an edge crack at mid-length: the load on a curved hole face, whose
     stalling facet search once crashed the solve ("Newton iteration didn't converge")."""
@@ -333,7 +293,7 @@ class PinLoadedLink(unittest.TestCase):
                      "loads": [{"faces": ["#o1.f8"], "type": "force", "vector_N": [force, 0, 0]}],
                      "crack": {"kind": "edge", "face": "#o1.f2", "at_mm": [0, -15, 4], "normal": [1, 0, 0], "size_mm": a},
                      "view": {"checks": [{"kind": "fracture", "margin": 1.5}]}}
-            result = _solve(step, directory / "link.fea.glb", study)
+            result = solve(step, directory / "link.fea.glb", study)
         self.assertTrue(result.ok)
         # Tada's edge crack (free to rotate, as a pin lets it) at a/W = 0.067, on the bar's 150 MPa section stress.
         x = a / width
@@ -342,32 +302,27 @@ class PinLoadedLink(unittest.TestCase):
         self.assertLess(abs(result.summary["K_max_MPa_sqrt_m"] / expected - 1.0), 0.10)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Ladder(unittest.TestCase):
     """A tiny budget: the symmetric quarter and the coarse pass, each said everywhere, K still within 7 %."""
 
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.directory = Path(cls._tmp.name)
+        cls.directory = class_directory(cls)
         cls.step, cls.faces = _plate(cls.directory, "ladder", W, HEIGHT, T, centred=True)
         cls.crack = {"kind": "through", "face": cls.faces["+z"], "at_mm": [0, 0, T / 2], "normal": [0, 1, 0], "size_mm": A}
         cls.expected = SIGMA * math.sqrt(math.pi * A / 1000.0) * math.sqrt(1.0 / math.cos(math.pi * A / W))
 
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
-
     def _run(self, name: str, allow: list[str], size: float):
         study = _tension(self.faces, ("-y", "-z", "+z", "-x", "+x"), self.crack,
                          mesh={"size_mm": size}, fit={"memory_GB": 0.05, "seconds": 0.5, "allow": allow})
-        return _solve(self.step, self.directory / f"{name}.fea.glb", study)
+        return solve(self.step, self.directory / f"{name}.fea.glb", study)
 
     def _said(self, result, rung: str) -> dict:
         self.assertTrue(result.ok)
         step = next(step for step in result.fit if step["rung"] == rung)
-        self.assertEqual(_glb(result.glb)["meshes"][0]["extras"]["fit"], list(result.fit))
-        self.assertEqual(json.loads(result.sidecar.read_text(encoding="utf-8"))["fit"], list(result.fit))
+        self.assertEqual(glb_extras(result.glb)["fit"], list(result.fit))
+        self.assertEqual(sidecar(result)["fit"], list(result.fit))
         self.assertIn(f"adapted: {step['words']}" + (f" ({step['accuracy']})" if step["accuracy"] else ""), result.human_lines())
         self.assertIn(f"fit_{rung}", [finding["type"] for finding in result.findings if finding["severity"] == "info"])
         return step

@@ -43,7 +43,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs, Series, SeriesFrame, SolveContext
+from cadgen._internal.fea.analyses.base import (
+    AnalysisBase, AnalysisResult, FieldSpec, Inputs, Series, SeriesFrame, SolveContext, assembly_parts, by_severity, finding,
+    max_frames, node_domain, xyz, yield_at,
+)
 
 if TYPE_CHECKING:
     import numpy as np
@@ -338,17 +341,10 @@ def _spin(raw: Any) -> dict:
 
 def _parsed_checks(document: dict) -> tuple[dict, ...]:
     """The study's checks of this analysis's kinds, parsed (a malformed one is left for the study's own parse)."""
-    view = document.get("view")
-    entries = view.get("checks") if isinstance(view, dict) else None
-    specs = {spec.kind: spec for spec in RotordynamicsAnalysis.checks}
-    found = []
-    for index, entry in enumerate(entries if isinstance(entries, list) else ()):
-        if isinstance(entry, dict) and entry.get("kind") in specs:
-            try:
-                found.append(specs[entry["kind"]].parse(entry, f"view.checks[{index}]"))
-            except ValueError:
-                continue
-    return tuple(found) if found else tuple(dict(check) for check in RotordynamicsAnalysis.default_checks)
+    from cadgen._internal.fea.analyses.modal import raw_checks
+
+    found = raw_checks(document, *RotordynamicsAnalysis.checks)
+    return found if found else tuple(dict(check) for check in RotordynamicsAnalysis.default_checks)
 
 
 # -- the checks --------------------------------------------------------------------------------------------
@@ -434,16 +430,13 @@ def stability_check(check: dict, lowest: dict | None, *, damped: bool = True) ->
 # -- the analysis ------------------------------------------------------------------------------------------
 
 
-class RotordynamicsAnalysis:
+class RotordynamicsAnalysis(AnalysisBase):
     name: ClassVar[str] = "rotordynamics"
-    tier: ClassVar[int] = 3
     word: ClassVar[str] = "Spinning"
-    estimate_only: ClassVar[bool] = False
+    extras_word: ClassVar[str] = "spinning"
     limits: ClassVar[tuple[str, ...]] = LIMITS
     study_keys: ClassVar[frozenset[str]] = frozenset({"spin", "bearings", "discs", "disc_model", "unbalance", "modes"})
     material_needs: ClassVar[frozenset[str]] = frozenset({"density"})
-    mesh_orders: ClassVar[tuple[int, ...]] = (2,)
-    connection_types: ClassVar[tuple[str, ...]] = ("bonded", "free")
     # The spinning stress colours the part; each critical's whirl shape (its real part, the imaginary part beside it as
     # displacement_im for the Whirl routine) deforms it.
     fields: ClassVar[tuple[FieldSpec, ...]] = (
@@ -460,7 +453,6 @@ class RotordynamicsAnalysis:
         "field": {"drives": "field", "type": "enum", "options": ["von_mises", "whirl"]},
         "deformation": {"drives": "deformation", "type": "number", "min": 0.0, "max": None},
     }
-    upstream: ClassVar[tuple[str, ...]] = ()
     ladder: ClassVar[tuple[str, ...]] = ("reduce_modes", "iterative", "local_refine")
     noun: ClassVar[str] = "this spin"
     governing_word: ClassVar[str] = "the spinning stress"
@@ -693,7 +685,7 @@ class RotordynamicsAnalysis:
                                   "detail": {"kept_shapes": int(basis.shape[1])}}
 
         # The criticals in words, and the frames: each critical's whirl shape, else the whirls at the top speed.
-        frames_cap = int(getattr(getattr(ctx, "budget", None), "max_frames", 24) or 24)
+        frames_cap = max_frames(ctx)
         criticals = []
         for c in found:
             criticals.append({"rpm": c.rpm, "order": c.order, "forward": c.forward, "mode": c.mode,
@@ -852,12 +844,9 @@ class RotordynamicsAnalysis:
                 "reduce_settled": reduce_settled,
                 "margin": float(getattr(ctx.study, "margin", 2.0) or 2.0),
                 "yields": [m.yield_strength for m in materials],
-                "node_domain": self._node_domain(space),
+                "node_domain": node_domain(space),
                 "analysis_warnings": list(warnings),
-                "parts": None if ctx.assembly is None else [
-                    {"ref": part.ref, "name": name, "material": material.name}
-                    for part, name, material in zip(ctx.assembly.parts, ctx.assembly.names, ctx.assembly.materials)
-                ],
+                "parts": assembly_parts(ctx),
             },
             dofs=int(space.dofs),
             solver="dense state-space eigen (rotor line)" + ("" if basis is None else f", {basis.shape[1]} shapes")
@@ -865,17 +854,6 @@ class RotordynamicsAnalysis:
             timings=timings,
             warnings=warnings,
         )
-
-    @staticmethod
-    def _node_domain(space):
-        """Each scalar DOF's part (an assembly), from the elements around it; None for one part."""
-        import numpy as np
-
-        if space.domain is None:
-            return None
-        domain = np.zeros(space.scalar_count, dtype=int)
-        domain[space.scalar.element_dofs] = np.asarray(space.domain)[None, :]
-        return domain
 
     def _unbalances(self, inputs: RotordynamicsInputs, line, unbalance_s: list[float], rotor):
         """((node, U t·mm, phase rad, default), ...), and the default's words when the study gave none."""
@@ -926,15 +904,10 @@ class RotordynamicsAnalysis:
         from skfem import LinearForm, asm
 
         from cadgen._internal.fea import operators
-        from cadgen._internal.fea.analyses.modal import materials_of
 
         space = ctx.space
         warnings: list[str] = []
-        materials = materials_of(ctx)
-        K = operators.stiffness(space, materials)
-        M = operators.mass(space, materials)
-        rho = operators.domain_values(space, [m.density for m in ctx.materials])
-        rho = rho if not isinstance(rho, float) else np.full(space.basis.dx.shape, rho)
+        materials, K, M, rho = self._operators(ctx)
         o, a = np.array(frame.origin, dtype=float), np.array(frame.a, dtype=float)
 
         @LinearForm
@@ -962,6 +935,21 @@ class RotordynamicsAnalysis:
             for index in np.unique(space.domain):
                 vm = np.maximum(vm, self._project_part(space, vm_q, np.asarray(space.domain) == index))
         return vm, warnings, sigma, how
+
+    @staticmethod
+    def _operators(ctx: SolveContext):
+        """(materials, K, M, density at the quadrature points) of the part's own mesh."""
+        import numpy as np
+
+        from cadgen._internal.fea import operators
+        from cadgen._internal.fea.analyses.modal import materials_of
+
+        space = ctx.space
+        materials = materials_of(ctx)
+        K = operators.stiffness(space, materials)
+        M = operators.mass(space, materials)
+        rho = operators.domain_values(space, [m.density for m in ctx.materials])
+        return materials, K, M, rho if not isinstance(rho, float) else np.full(space.basis.dx.shape, rho)
 
     @staticmethod
     def _pins(space, R) -> "np.ndarray":
@@ -1017,15 +1005,11 @@ class RotordynamicsAnalysis:
         from skfem import BilinearForm, asm
 
         from cadgen._internal.fea import eigen, operators
-        from cadgen._internal.fea.analyses.modal import held_supports, materials_of
+        from cadgen._internal.fea.analyses.modal import held_supports
         from cadgen._internal.fea.study import Fixture
 
         space = ctx.space
-        materials = materials_of(ctx)
-        K = operators.stiffness(space, materials)
-        M = operators.mass(space, materials)
-        rho = operators.domain_values(space, [m.density for m in ctx.materials])
-        rho = rho if not isinstance(rho, float) else np.full(space.basis.dx.shape, rho)
+        _, K, M, rho = self._operators(ctx)
         a = np.array(frame.a, dtype=float)
 
         @BilinearForm
@@ -1053,26 +1037,6 @@ class RotordynamicsAnalysis:
 
     # -- checks, findings ------------------------------------------------------------------------------------
 
-    def _stress_check(self, result: AnalysisResult, check: dict, ctx: SolveContext) -> dict:
-        import numpy as np
-
-        from cadgen._internal.fea import checks
-        from cadgen._internal.fea.analyses.static import peak_face
-
-        vm = result.fields["von_mises"]
-        node = int(np.argmax(vm))
-        peak = float(vm[node])
-        yields = result.scalars["yields"]
-        domains = result.scalars["node_domain"]
-        yield_MPa = yields[0] if domains is None or len(yields) == 1 else yields[int(domains[node])]
-        at = tuple(float(c) for c in result.dof_locations[node])
-        solved = checks.Solved(
-            material_name="", yield_MPa=yield_MPa, peak_MPa=peak, peak_gauss_MPa=peak, peak_at=at,
-            peak_face=peak_face(ctx.volume, result, node, set()), fixed_faces=(), max_displacement_mm=0.0,
-            displacement_at=at, bbox_diagonal_mm=0.0, margin=result.scalars["margin"], coarser_peak_MPa=None, part="",
-        )
-        return checks.stress_check(solved, label=check.get("label") or "Spin stress")
-
     def judge(self, check: dict, index: int, ctx: SolveContext, result: AnalysisResult, inputs: RotordynamicsInputs) -> dict:
         scalars = result.scalars
         kind = check["kind"]
@@ -1088,8 +1052,14 @@ class RotordynamicsAnalysis:
             judged = stability_check(check, scalars["lowest_log_dec"], damped=scalars["damped"])
             judged["where"] = {"ref": None, "at": None}
             return judged
+        import numpy as np
+
+        from cadgen._internal.fea.analyses.modal import yield_check
+
+        vm = result.fields["von_mises"]
+        node = int(np.argmax(vm))
         # The spinning stress is the centrifugal load ρΩ²r's: it grows with the square of the speed.
-        return {**self._stress_check(result, check, ctx), "scaling": "quadratic"}
+        return {**yield_check(ctx, result, node, float(vm[node]), check.get("label") or "Spin stress"), "scaling": "quadratic"}
 
     def needs_finer(self, result: AnalysisResult, inputs: RotordynamicsInputs, check_results: list[dict]) -> bool:
         """Solve once more finer when the spinning stress is close to its limit."""
@@ -1099,8 +1069,7 @@ class RotordynamicsAnalysis:
             return False
         vm = result.fields["von_mises"]
         node = int(vm.argmax())
-        yields, domains = result.scalars["yields"], result.scalars["node_domain"]
-        yield_MPa = yields[0] if domains is None or len(yields) == 1 else yields[int(domains[node])]
+        yield_MPa = yield_at(result.scalars, node)
         if not yield_MPa:
             return False
         ratio = float(vm[node]) / yield_MPa
@@ -1117,8 +1086,6 @@ class RotordynamicsAnalysis:
 
     def findings(self, ctx: SolveContext, result: AnalysisResult, inputs: RotordynamicsInputs,
                  check_results: list[dict], *, assembly: bool) -> list[dict]:
-        from cadgen._internal.fea.analyses.modal import finding
-
         scalars = result.scalars
         whole = "The assembly" if assembly else "The rotor"
         low, high = scalars["operating_rpm"]
@@ -1203,7 +1170,7 @@ class RotordynamicsAnalysis:
             found.append(finding("warning" if moved > 0.05 else "info", "mesh_not_converged" if moved > 0.05 else "mesh_converged",
                                  f"The spinning stress moved {moved * 100:.1f} % on a finer mesh",
                                  "the stress was close to its limit, so the part was solved again finer; the finer answer is the one reported", []))
-        return sorted(found, key=lambda item: {"error": 0, "warning": 1, "info": 2}[item["severity"]])
+        return by_severity(found)
 
     # -- what is written ---------------------------------------------------------------------------------------
 
@@ -1215,16 +1182,20 @@ class RotordynamicsAnalysis:
     def summary(self, result: AnalysisResult, inputs: RotordynamicsInputs, check_results: list[dict]) -> dict:
         import numpy as np
 
+        from cadgen._internal.fea.analyses.modal import finish_summary
+
         scalars = result.scalars
         vm = result.fields["von_mises"]
         node = int(np.argmax(vm))
         peak = float(vm[node])
-        yields, domains = scalars["yields"], scalars["node_domain"]
-        yield_MPa = yields[0] if domains is None or len(yields) == 1 else yields[int(domains[node])]
+        yield_MPa = yield_at(scalars, node)
         factor = None if not peak or not yield_MPa else math.floor(yield_MPa / peak * 1000) / 1000
 
         def r(value, digits=4):
             return None if value is None else round(float(value), digits)
+
+        def rounded(entry: dict) -> dict:
+            return {key: (r(value, 6) if isinstance(value, float) else value) for key, value in entry.items()}
 
         lowest = scalars["lowest_log_dec"]
         summary: dict[str, Any] = {
@@ -1233,8 +1204,8 @@ class RotordynamicsAnalysis:
                      "through_mm": [round(c, 4) for c in scalars["frame_axis"]["origin"]]},
             "rotor": {"length_mm": r(scalars["rotor_length_mm"]), "mass_kg": r(scalars["rotor_mass_kg"], 6),
                       "elements": scalars["rotor_elements"], "disc_model": inputs.disc_model},
-            "bearings": [{key: (r(value, 6) if isinstance(value, float) else value) for key, value in b.items()} for b in scalars["bearings"]],
-            "discs": [{key: (r(value, 6) if isinstance(value, float) else value) for key, value in d.items()} for d in scalars["discs"]],
+            "bearings": [rounded(b) for b in scalars["bearings"]],
+            "discs": [rounded(d) for d in scalars["discs"]],
             "critical_speeds": [
                 {"rpm": r(c["rpm"], 3), "order": c["order"], "whirl": "forward" if c["forward"] else "backward", "mode": c["mode"],
                  "frequency_Hz": r(c["frequency_Hz"]), "log_decrement": r(c["log_decrement"], 6), "frame": c["frame"]}
@@ -1244,29 +1215,22 @@ class RotordynamicsAnalysis:
             "lowest_log_decrement": None if lowest is None else {
                 "value": r(0.0 if abs(lowest["value"]) < UNDAMPED else lowest["value"], 6), "rpm": r(lowest["rpm"], 3),
                 "whirl": "forward" if lowest["forward"] else "backward", "mode": lowest["mode"]},
-            "unbalance": [{key: (r(value, 6) if isinstance(value, float) else value) for key, value in u.items()} for u in scalars["unbalance"]],
+            "unbalance": [rounded(u) for u in scalars["unbalance"]],
             "unbalance_peak_um": r(scalars["unbalance_peak_mm"] * 1000.0, 4),
             "unbalance_peak_rpm": r(scalars["unbalance_peak_rpm"], 3),
             "unbalance_at_top_um": r(scalars["unbalance_at_top_mm"] * 1000.0, 4),
             "max_von_mises_MPa": r(peak),
-            "max_von_mises_at_mm": [round(float(c), 3) for c in result.dof_locations[node]],
+            "max_von_mises_at_mm": xyz(result.dof_locations[node]),
             "yield_MPa": yield_MPa,
             "safety_factor": factor,
             "deformation_scale": scalars["deformation_scale"],
         }
         if scalars.get("default_unbalance"):
-            summary["default_unbalance"] = {key: (r(value, 6) if isinstance(value, float) else value)
-                                            for key, value in scalars["default_unbalance"].items()}
+            summary["default_unbalance"] = rounded(scalars["default_unbalance"])
         if scalars.get("solid_modes"):
             summary["solid_modes"] = [{"mode": m["mode"], "at_rest_Hz": r(m["at_rest_Hz"]), "spinning_Hz": r(m["spinning_Hz"])}
                                       for m in scalars["solid_modes"]]
-        if scalars.get("parts"):
-            summary["parts"] = scalars["parts"]
-        summary["checks"] = check_results
-        return summary
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} spinning"
+        return finish_summary(summary, scalars, check_results)
 
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
         # Every whirl shape is scaled to a largest motion of 1 mm, so one range holds across the frames.

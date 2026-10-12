@@ -2,11 +2,11 @@
 
 One :class:`~cadgen._internal.fea.analyses.base.CheckSpec` per kind (spec
 section 6). Parsing only: the analysis that offers a kind judges it. The study
-primitives (a number, a list of faces, a short label) live here too, so the
-study, the analyses and the kinds all say an error the same way. Plus
-:func:`field_max_over`, the largest value of a nodal field over some faces (or
-the whole model), which a displacement, temperature, acceleration or contact
-check reads. Stdlib only at import.
+primitives (a number, a list of faces or of objects, a short label, a band)
+live here too, so the study, the analyses and the kinds all say an error the
+same way. Plus :func:`field_max_over`, the largest value of a nodal field over
+some faces (or the whole model), which a displacement, temperature,
+acceleration or contact check reads. Stdlib only at import.
 """
 
 from __future__ import annotations
@@ -23,16 +23,11 @@ if TYPE_CHECKING:
     import numpy as np
 
 __all__ = [
-    "ACCELERATION", "BOLT_LOAD", "BUCKLING", "CHECK_SPECS", "CONTACT_PRESSURE", "CREEP_STRAIN", "DISPLACEMENT", "ELECTRIC_FIELD", "FATIGUE", "FREQUENCY", "FieldMax",
-    "JOINT_SEPARATION", "JOINT_SLIP", "MACH",
-    "PLASTIC_STRAIN", "PLY_FAILURE", "PRESSURE_DROP", "STRESS", "TEMPERATURE", "VELOCITY", "faces", "field_max_over", "json_text",
-    "number", "parse_check", "text",
-    "SOUND_LEVEL",
-    "MASS_SAVED",
-    "FRACTURE", "CRACK_LIFE",
-    "VOLTAGE",
-    "CRITICAL_SPEED", "STABILITY",
-    "FILL_LEVEL", "WALL_PRESSURE",
+    "ACCELERATION", "BOLT_LOAD", "BUCKLING", "CHECK_SPECS", "CONTACT_PRESSURE", "CRACK_LIFE", "CREEP_STRAIN", "CRITICAL_SPEED",
+    "DISPLACEMENT", "ELECTRIC_FIELD", "FATIGUE", "FILL_LEVEL", "FRACTURE", "FREQUENCY", "FieldMax", "JOINT_SEPARATION",
+    "JOINT_SLIP", "MACH", "MASS_SAVED", "PLASTIC_STRAIN", "PLY_FAILURE", "PRESSURE_DROP", "SOUND_LEVEL", "STABILITY", "STRESS",
+    "TEMPERATURE", "VELOCITY", "VOLTAGE", "WALL_PRESSURE", "band", "check_max", "entries", "faces", "field_max_over",
+    "json_text", "known", "number", "parse_check", "text", "view_checks", "whole",
 ]
 
 
@@ -72,10 +67,48 @@ def text(entry: dict, key: str, *, where: str) -> dict:
     return {key: entry[key].strip()}
 
 
-def _known(entry: dict, keys: frozenset[str], kind: str, where: str) -> None:
-    unknown = set(entry) - keys
+def known(entry: dict, keys, where: str, words: str) -> None:
+    """``entry`` names only ``keys``; else a ValueError at ``where`` ending in ``words`` (what it does take)."""
+    unknown = set(entry) - set(keys)
     if unknown:
-        raise ValueError(f"{where}: unknown keys {sorted(unknown)}; a {kind} check takes {sorted(keys)}")
+        raise ValueError(f"{where}: unknown keys {sorted(unknown)}; {words}")
+
+
+def entries(document: dict, key: str, example: str) -> list[dict]:
+    """``document[key]``, a list of objects (empty when left out)."""
+    raw = document.get(key)
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(f"study.{key}: expected a list like [{example}]")
+    for index, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise ValueError(f"{key}[{index}]: expected an object like {example}")
+    return raw
+
+
+def whole(value: Any, *, where: str, words: str, low: int = 1, high: int | None = None) -> int:
+    """A whole number from ``low`` to ``high`` (no top when ``None``)."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < low or (high is not None and value > high):
+        raise ValueError(f"{where}: {words}, got {json_text(value)}")
+    return value
+
+
+def band(raw: Any, *, where: str, words: str) -> tuple[float, float]:
+    """``[low, high]`` in Hz, both positive, low below high."""
+    if not isinstance(raw, list) or len(raw) != 2:
+        raise ValueError(f"{where}: {words}")
+    low, high = (number(value, where=where, positive=True) for value in raw)
+    if not low < high:
+        raise ValueError(f"{where}: low ({low:g}) must be below high ({high:g})")
+    return low, high
+
+
+def view_checks(document: dict) -> list[tuple[int, dict]]:
+    """``view.checks``' objects with their index, before any is parsed."""
+    view = document.get("view")
+    checks = view.get("checks") if isinstance(view, dict) else None
+    return [(i, c) for i, c in enumerate(checks) if isinstance(c, dict)] if isinstance(checks, list) else []
 
 
 def _margin(entry: dict, where: str, *, low: float = 1.0, words: str) -> float:
@@ -97,26 +130,47 @@ def _with_faces(entry: dict, check: dict, where: str) -> dict:
     return check
 
 
+def _probes(entry: dict, check: dict, where: str, example: str) -> dict:
+    if "probes" in entry:
+        labels = entry["probes"]
+        if isinstance(labels, str):
+            labels = [labels]
+        if not isinstance(labels, list) or not labels or not all(isinstance(label, str) and label.strip() for label in labels):
+            raise ValueError(f"{where}.probes: the labels of the study's probes to judge, like [\"{example}\"]")
+        check["probes"] = [label.strip() for label in labels]
+    return check
+
+
 def _spec(kind: str, keys: tuple[str, ...], label: str, scaling: str, body: Callable[[dict, str], dict],
           *, unique: bool = False) -> CheckSpec:
     accepted = frozenset({"kind", "label", *keys})
 
     def parse(entry: dict, where: str) -> dict:
-        _known(entry, accepted, kind, where)
+        unknown = set(entry) - accepted
+        if unknown:
+            raise ValueError(f"{where}: unknown keys {sorted(unknown)}; a {kind} check takes {sorted(accepted)}")
         return {"kind": kind, **body(entry, where), **text(entry, "label", where=where)}
 
     return CheckSpec(kind, accepted, parse, label, scaling, unique)  # type: ignore[arg-type]
 
 
-def _stress(entry: dict, where: str) -> dict:
-    if "margin" in entry:
-        return {"margin": _margin(entry, where, words="a safety factor below 1 means the part yields")}
-    return {}
+def _limited(kind: str, key: str, label: str, scaling: str, words: str, *, on_faces: bool = False) -> CheckSpec:
+    """A check of one positive limit ``key`` (``words`` when it is missing), over some ``faces`` when ``on_faces``."""
+    def body(entry: dict, where: str) -> dict:
+        check = {key: _limit(entry, key, where, words)}
+        return _with_faces(entry, check, where) if on_faces else check
+
+    return _spec(kind, (key, "faces") if on_faces else (key,), label, scaling, body)
 
 
-def _displacement(entry: dict, where: str) -> dict:
-    check = {"limit_mm": _limit(entry, "limit_mm", where, "a displacement check needs the most it may move, in mm")}
-    return _with_faces(entry, check, where)
+def _margined(kind: str, label: str, scaling: str, words: str, default: float | None) -> CheckSpec:
+    """A check held to an optional ``margin`` of 1 or more (``default`` when left out; none when ``None``)."""
+    def body(entry: dict, where: str) -> dict:
+        if "margin" in entry:
+            return {"margin": _margin(entry, where, words=words)}
+        return {} if default is None else {"margin": default}
+
+    return _spec(kind, ("margin",), label, scaling, body, unique=True)
 
 
 def _frequency(entry: dict, where: str) -> dict:
@@ -127,37 +181,18 @@ def _frequency(entry: dict, where: str) -> dict:
     if given == ["min_Hz"]:
         check: dict = {"min_Hz": number(entry["min_Hz"], where=f"{where}.min_Hz", positive=True)}
         if "mode" in entry:
-            mode = entry["mode"]
-            if isinstance(mode, bool) or not isinstance(mode, int) or mode < 1:
-                raise ValueError(f"{where}.mode: the mode number, 1 for the first, got {json_text(mode)}")
-            check["mode"] = mode
+            check["mode"] = whole(entry["mode"], where=f"{where}.mode", words="the mode number, 1 for the first")
         return check
     if "mode" in entry:
         raise ValueError(f"{where}.mode: a band check looks at every mode; mode goes with min_Hz only")
-    band = entry["avoid_Hz"]
-    if not isinstance(band, list) or len(band) != 2:
-        raise ValueError(f"{where}.avoid_Hz: the band as [low, high] in Hz, like [110, 130]")
-    low, high = (number(value, where=f"{where}.avoid_Hz", positive=True) for value in band)
-    if not low < high:
-        raise ValueError(f"{where}.avoid_Hz: low ({low:g}) must be below high ({high:g})")
-    return {"avoid_Hz": [low, high]}
-
-
-def _buckling(entry: dict, where: str) -> dict:
-    if "margin" in entry:
-        return {"margin": _margin(entry, where, words="a buckling margin below 1 means it buckles at this load")}
-    return {"margin": 3.0}
+    return {"avoid_Hz": list(band(entry["avoid_Hz"], where=f"{where}.avoid_Hz",
+                                  words="the band as [low, high] in Hz, like [110, 130]"))}
 
 
 def _temperature(entry: dict, where: str) -> dict:
     if "max_C" not in entry:
         raise ValueError(f"{where}.max_C: a temperature check needs the hottest it may get, in °C")
     return _with_faces(entry, {"max_C": number(entry["max_C"], where=f"{where}.max_C")}, where)
-
-
-def _acceleration(entry: dict, where: str) -> dict:
-    check = {"limit_g": _limit(entry, "limit_g", where, "an acceleration check needs the most it may take, in g")}
-    return _with_faces(entry, check, where)
 
 
 def _fatigue(entry: dict, where: str) -> dict:
@@ -171,47 +206,8 @@ def _fatigue(entry: dict, where: str) -> dict:
     return check
 
 
-def _pressure_drop(entry: dict, where: str) -> dict:
-    return {"limit_Pa": _limit(entry, "limit_Pa", where, "a pressure_drop check needs the most it may lose, in Pa")}
-
-
-def _velocity(entry: dict, where: str) -> dict:
-    return {"limit_m_s": _limit(entry, "limit_m_s", where, "a velocity check needs the fastest it may flow, in m/s")}
-
-
-def _plastic_strain(entry: dict, where: str) -> dict:
-    return {"limit_percent": _limit(entry, "limit_percent", where,
-                                    "a plastic_strain check needs the most permanent strain allowed, in percent")}
-
-
-def _creep_strain(entry: dict, where: str) -> dict:
-    return {"limit_percent": _limit(entry, "limit_percent", where,
-                                    "a creep_strain check needs the most creep strain allowed, in percent")}
-
-
-def _contact_pressure(entry: dict, where: str) -> dict:
-    check = {"limit_MPa": _limit(entry, "limit_MPa", where, "a contact_pressure check needs the most it may press, in MPa")}
-    return _with_faces(entry, check, where)
-
-
-STRESS = _spec("stress", ("margin",), "Strength", "linear", _stress, unique=True)
-DISPLACEMENT = _spec("displacement", ("limit_mm", "faces"), "Displacement", "linear", _displacement)
-FREQUENCY = _spec("frequency", ("min_Hz", "avoid_Hz", "mode"), "Vibration", "none", _frequency)
-BUCKLING = _spec("buckling", ("margin",), "Buckling", "inverse", _buckling, unique=True)
-TEMPERATURE = _spec("temperature", ("max_C", "faces"), "Heat", "none", _temperature)
-ACCELERATION = _spec("acceleration", ("limit_g", "faces"), "Shaking", "linear", _acceleration)
-FATIGUE = _spec("fatigue", ("cycles", "margin"), "Fatigue life", "none", _fatigue)
-PRESSURE_DROP = _spec("pressure_drop", ("limit_Pa",), "Flow resistance", "none", _pressure_drop)
-VELOCITY = _spec("velocity", ("limit_m_s",), "Flow speed", "none", _velocity)
-PLASTIC_STRAIN = _spec("plastic_strain", ("limit_percent",), "Permanent bend", "none", _plastic_strain)
-def _electric_field(entry: dict, where: str) -> dict:
-    check = {"limit_kV_mm": _limit(entry, "limit_kV_mm", where, "an electric_field check needs the strongest field "
-                                   "allowed, in kV/mm (dry air breaks down at about 3)")}
-    return _with_faces(entry, check, where)
-
-
-CONTACT_PRESSURE = _spec("contact_pressure", ("limit_MPa", "faces"), "Contact", "none", _contact_pressure)
-CREEP_STRAIN = _spec("creep_strain", ("limit_percent",), "Creep", "none", _creep_strain)
+#: The ply failure criteria a ply_failure check may name.
+PLY_CRITERIA = ("tsai_wu", "max_stress")
 
 
 def _ply_failure(entry: dict, where: str) -> dict:
@@ -222,14 +218,6 @@ def _ply_failure(entry: dict, where: str) -> dict:
         raise ValueError(f"{where}.criterion: {json_text(entry['criterion'])} is not one of {list(PLY_CRITERIA)} "
                          "(leave it out to judge by the larger of the two)")
     return {"criterion": entry["criterion"]}
-
-
-#: The ply failure criteria a ply_failure check may name.
-PLY_CRITERIA = ("tsai_wu", "max_stress")
-PLY_FAILURE = _spec("ply_failure", ("criterion",), "Ply failure", "none", _ply_failure, unique=True)
-
-#: Every kind, by name, in the order of spec section 6.
-ELECTRIC_FIELD = _spec("electric_field", ("limit_kV_mm", "faces"), "Arcing", "linear", _electric_field)
 
 
 def _bolt_load(entry: dict, where: str) -> dict:
@@ -249,36 +237,14 @@ def _joint_separation(entry: dict, where: str) -> dict:
     return {}
 
 
-BOLT_LOAD = _spec("bolt_load", ("limit_N",), "Bolt load", "none", _bolt_load)
-JOINT_SEPARATION = _spec("joint_separation", ("min_clamp_N",), "Joint separation", "none", _joint_separation)
-JOINT_SLIP = _spec("joint_slip", (), "Joint slip", "none", lambda entry, where: {})
-
-
-def _mach(entry: dict, where: str) -> dict:
-    """The fastest Mach number a gas flow may reach (the flow speed over the local speed of sound)."""
-    return {"limit": _limit(entry, "limit", where, "a mach check needs the fastest Mach number allowed, like 0.8")}
-
-
-MACH = _spec("mach", ("limit",), "Mach number", "none", _mach)
-
-
 def _sound_level(entry: dict, where: str) -> dict:
     """The loudest sound pressure level allowed, dB (re 20 µPa in air), over some faces, at named probes, or anywhere."""
     check = {"limit_dB": _limit(entry, "limit_dB", where, "a sound_level check needs the loudest level allowed, in dB "
                                 "(a quiet office is about 40, a busy street 70, hearing damage starts near 85)")}
     if "faces" in entry and "probes" in entry:
         raise ValueError(f"{where}: a sound_level check judges faces or probes, not both")
-    if "probes" in entry:
-        labels = entry["probes"]
-        if isinstance(labels, str):
-            labels = [labels]
-        if not isinstance(labels, list) or not labels or not all(isinstance(label, str) and label.strip() for label in labels):
-            raise ValueError(f"{where}.probes: the labels of the study's probes to judge, like [\"ear\"]")
-        check["probes"] = [label.strip() for label in labels]
-    return _with_faces(entry, check, where)
+    return _with_faces(entry, _probes(entry, check, where, "ear"), where)
 
-
-SOUND_LEVEL = _spec("sound_level", ("limit_dB", "faces", "probes"), "Sound", "none", _sound_level)
 
 def _mass_saved(entry: dict, where: str) -> dict:
     """The least share of the part's mass a lightened design must save, percent (topology's; 25 when left out)."""
@@ -288,16 +254,6 @@ def _mass_saved(entry: dict, where: str) -> dict:
     if value >= 100:
         raise ValueError(f"{where}.min_percent: the share of the mass to save, under 100 %, got {value:g}")
     return {"min_percent": value}
-
-
-MASS_SAVED = _spec("mass_saved", ("min_percent",), "Mass saved", "none", _mass_saved, unique=True)
-
-
-def _fracture(entry: dict, where: str) -> dict:
-    """The crack's stress intensity K against the material's fracture toughness K_IC, held to a margin (1.5 when left out)."""
-    if "margin" in entry:
-        return {"margin": _margin(entry, where, words="a fracture margin below 1 means the crack grows at this load")}
-    return {"margin": 1.5}
 
 
 def _crack_life(entry: dict, where: str) -> dict:
@@ -310,9 +266,6 @@ def _crack_life(entry: dict, where: str) -> dict:
     return check
 
 
-FRACTURE = _spec("fracture", ("margin",), "Crack", "linear", _fracture, unique=True)
-CRACK_LIFE = _spec("crack_life", ("cycles", "margin"), "Crack life", "none", _crack_life, unique=True)
-
 def _voltage(entry: dict, where: str) -> dict:
     """A piezo sensor's signal: the voltage an open electrode makes must reach ``min_V`` (piezo's sensing check)."""
     check: dict = {"min_V": _limit(entry, "min_V", where, "a voltage check needs the least signal the sensor must make, "
@@ -322,9 +275,6 @@ def _voltage(entry: dict, where: str) -> dict:
             raise ValueError(f"{where}.electrode: the name of the open electrode whose voltage is judged")
         check["electrode"] = entry["electrode"].strip()
     return check
-
-
-VOLTAGE = _spec("voltage", ("min_V", "electrode"), "Signal", "none", _voltage)
 
 
 def _critical_speed(entry: dict, where: str) -> dict:
@@ -359,33 +309,54 @@ def _stability(entry: dict, where: str) -> dict:
     return {"min_log_dec": number(entry["min_log_dec"], where=f"{where}.min_log_dec", positive=True)}
 
 
-CRITICAL_SPEED = _spec("critical_speed", ("margin_percent", "orders", "backward"), "Critical speed", "none", _critical_speed,
-                       unique=True)
-STABILITY = _spec("stability", ("min_log_dec",), "Stability", "none", _stability, unique=True)
-
 def _fill_level(entry: dict, where: str) -> dict:
     """The highest a liquid may reach, mm above the inside's floor (the brim when left out), at named probes or anywhere."""
     check: dict = {}
     if "limit_mm" in entry:
         check["limit_mm"] = number(entry["limit_mm"], where=f"{where}.limit_mm", positive=True)
-    if "probes" in entry:
-        labels = entry["probes"]
-        if isinstance(labels, str):
-            labels = [labels]
-        if not isinstance(labels, list) or not labels or not all(isinstance(label, str) and label.strip() for label in labels):
-            raise ValueError(f"{where}.probes: the labels of the study's probes to judge, like [\"left wall\"]")
-        check["probes"] = [label.strip() for label in labels]
-    return check
+    return _probes(entry, check, where, "left wall")
 
 
-def _wall_pressure(entry: dict, where: str) -> dict:
-    return {"limit_Pa": _limit(entry, "limit_Pa", where, "a wall_pressure check needs the most the fluid may press on "
-                               "the walls, in Pa")}
-
-
+STRESS = _margined("stress", "Strength", "linear", "a safety factor below 1 means the part yields", None)
+DISPLACEMENT = _limited("displacement", "limit_mm", "Displacement", "linear",
+                        "a displacement check needs the most it may move, in mm", on_faces=True)
+FREQUENCY = _spec("frequency", ("min_Hz", "avoid_Hz", "mode"), "Vibration", "none", _frequency)
+BUCKLING = _margined("buckling", "Buckling", "inverse", "a buckling margin below 1 means it buckles at this load", 3.0)
+TEMPERATURE = _spec("temperature", ("max_C", "faces"), "Heat", "none", _temperature)
+ACCELERATION = _limited("acceleration", "limit_g", "Shaking", "linear",
+                        "an acceleration check needs the most it may take, in g", on_faces=True)
+FATIGUE = _spec("fatigue", ("cycles", "margin"), "Fatigue life", "none", _fatigue)
+PRESSURE_DROP = _limited("pressure_drop", "limit_Pa", "Flow resistance", "none",
+                         "a pressure_drop check needs the most it may lose, in Pa")
+VELOCITY = _limited("velocity", "limit_m_s", "Flow speed", "none", "a velocity check needs the fastest it may flow, in m/s")
+PLASTIC_STRAIN = _limited("plastic_strain", "limit_percent", "Permanent bend", "none",
+                          "a plastic_strain check needs the most permanent strain allowed, in percent")
+CONTACT_PRESSURE = _limited("contact_pressure", "limit_MPa", "Contact", "none",
+                            "a contact_pressure check needs the most it may press, in MPa", on_faces=True)
+CREEP_STRAIN = _limited("creep_strain", "limit_percent", "Creep", "none",
+                        "a creep_strain check needs the most creep strain allowed, in percent")
+PLY_FAILURE = _spec("ply_failure", ("criterion",), "Ply failure", "none", _ply_failure, unique=True)
+ELECTRIC_FIELD = _limited("electric_field", "limit_kV_mm", "Arcing", "linear", "an electric_field check needs the "
+                          "strongest field allowed, in kV/mm (dry air breaks down at about 3)", on_faces=True)
+BOLT_LOAD = _spec("bolt_load", ("limit_N",), "Bolt load", "none", _bolt_load)
+JOINT_SEPARATION = _spec("joint_separation", ("min_clamp_N",), "Joint separation", "none", _joint_separation)
+JOINT_SLIP = _spec("joint_slip", (), "Joint slip", "none", lambda entry, where: {})
+#: The fastest Mach number a gas flow may reach (the flow speed over the local speed of sound).
+MACH = _limited("mach", "limit", "Mach number", "none", "a mach check needs the fastest Mach number allowed, like 0.8")
+SOUND_LEVEL = _spec("sound_level", ("limit_dB", "faces", "probes"), "Sound", "none", _sound_level)
+MASS_SAVED = _spec("mass_saved", ("min_percent",), "Mass saved", "none", _mass_saved, unique=True)
+#: The crack's stress intensity K against the material's fracture toughness K_IC, held to a margin (1.5 when left out).
+FRACTURE = _margined("fracture", "Crack", "linear", "a fracture margin below 1 means the crack grows at this load", 1.5)
+CRACK_LIFE = _spec("crack_life", ("cycles", "margin"), "Crack life", "none", _crack_life, unique=True)
+VOLTAGE = _spec("voltage", ("min_V", "electrode"), "Signal", "none", _voltage)
+CRITICAL_SPEED = _spec("critical_speed", ("margin_percent", "orders", "backward"), "Critical speed", "none", _critical_speed,
+                       unique=True)
+STABILITY = _spec("stability", ("min_log_dec",), "Stability", "none", _stability, unique=True)
 FILL_LEVEL = _spec("fill_level", ("limit_mm", "probes"), "Fill level", "none", _fill_level)
-WALL_PRESSURE = _spec("wall_pressure", ("limit_Pa",), "Wall pressure", "none", _wall_pressure)
+WALL_PRESSURE = _limited("wall_pressure", "limit_Pa", "Wall pressure", "none",
+                         "a wall_pressure check needs the most the fluid may press on the walls, in Pa")
 
+#: Every kind, by name, in the order of spec section 6.
 CHECK_SPECS: dict[str, CheckSpec] = {spec.kind: spec for spec in (
     STRESS, DISPLACEMENT, FREQUENCY, BUCKLING, TEMPERATURE, ACCELERATION, FATIGUE, PRESSURE_DROP, VELOCITY,
     PLASTIC_STRAIN, CONTACT_PRESSURE, CREEP_STRAIN, PLY_FAILURE, ELECTRIC_FIELD,
@@ -461,3 +432,11 @@ def field_max_over(
         ref=face_ref[ordinal].ref if ordinal in face_ref else None,
         faces=tuple(face_ref[o].ref for o in ordinals),
     )
+
+
+def check_max(values: "np.ndarray", refs, ctx, result, index: int) -> FieldMax:
+    """:func:`field_max_over` on a solved result's nodes over faces ``refs`` (every node when empty), for
+    ``view.checks[index]``."""
+    return field_max_over(values, tuple(refs), boundary=result.boundary_quadratic,
+                          boundary_ordinal=ctx.volume.boundary_ordinal, locations=result.dof_locations,
+                          face_ref=ctx.volume.faces, ordinal_of=ctx.ordinal_of, where=f"view.checks[{index}]")

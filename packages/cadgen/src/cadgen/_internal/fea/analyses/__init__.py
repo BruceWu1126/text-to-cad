@@ -36,8 +36,8 @@ class Entry:
     planned: bool = False
 
 
-def _entry(name: str, tier: Tier, cls: str, word: str, *, planned: bool = False) -> Entry:
-    return Entry(name, tier, f"{_PACKAGE}.{name}", cls, word, planned)
+def _entry(name: str, tier: Tier, cls: str, word: str) -> Entry:
+    return Entry(name, tier, f"{_PACKAGE}.{name}", cls, word)
 
 
 REGISTRY: dict[str, Entry] = {entry.name: entry for entry in (

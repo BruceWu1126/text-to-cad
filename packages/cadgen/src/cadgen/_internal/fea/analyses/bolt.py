@@ -41,15 +41,18 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, Series, SeriesFrame, SolveContext
+from cadgen._internal.fea.analyses.base import AnalysisResult, SolveContext, by_severity, finding, max_frames, plan_value, xyz
 from cadgen._internal.fea.analyses.contact import (
-    LIMITS as CONTACT_LIMITS, MAX_FRICTION, ContactAnalysis, ContactInputs, ContactPair, parse_rigid_planes, parse_steps, contact_words,
-    mark_stopped, mark_unsettled, path_deadline, stop_words, unsettled_extras, unsettled_sentence, unsettled_steps,
+    DEFAULT_STEPS, LIMITS as CONTACT_LIMITS, ContactAnalysis, ContactInputs, face_refs, mark_stopped, mark_unsettled,
+    parse_between, parse_connections, parse_friction, parse_rigid_planes, path_deadline, require_held, stop_words,
+    unsettled_scalars, unsettled_status, unsettled_steps,
 )
-from cadgen._internal.fea.analyses.nonlinear import load_label, part_materials, pick_frames
+from cadgen._internal.fea.analyses.nonlinear import (
+    load_label, material_specs, nodal, parse_steps, part_materials, pick_frames, refuse_stress, totals, view_checks,
+)
 from cadgen._internal.fea.bolt_ops import DEFAULT_GRADE, DEFAULT_NUT_FACTOR, PROOF_MPa, SIZES, BoltSize, bolt_size
 from cadgen._internal.fea.study import parse_fixtures, parse_loads
 
@@ -121,23 +124,6 @@ def bolt_words(bolt: Bolt) -> str:
     return f"{bolt.size.name} bolt, {force_words(bolt.preload_N)} preload, clamps {bolt.between[0]} and {bolt.between[1]}"
 
 
-def _friction(entry: dict, where: str, default: float) -> float:
-    if "friction" not in entry:
-        return default
-    value = kinds.number(entry["friction"], where=f"{where}.friction")
-    if not 0.0 <= value <= MAX_FRICTION:
-        raise ValueError(f"{where}.friction: Coulomb's coefficient, from 0 (frictionless) to {MAX_FRICTION:g}, like 0.2 "
-                         f"for dry steel on steel; got {value:g}")
-    return value
-
-
-def _between(entry: dict, where: str, example: str) -> tuple[str, str]:
-    between = entry.get("between")
-    if not isinstance(between, list) or len(between) != 2 or not all(isinstance(n, str) and n.strip() for n in between):
-        raise ValueError(f"{where}.between: name the two parts, like {example}")
-    return between[0].strip(), between[1].strip()
-
-
 def _size(entry: dict, where: str) -> BoltSize:
     raw = entry.get("size")
     words = f'{where}.size: a metric size like "M6" (M3 to M30), or {{"diameter_mm": 6}}'
@@ -157,7 +143,7 @@ def _bolt(entry: dict, where: str) -> Bolt:
     unknown = set(entry) - BOLT_KEYS
     if unknown:
         raise ValueError(f"{where}: unknown keys {sorted(unknown)}; a bolt takes {sorted(BOLT_KEYS - {'type'})}")
-    between = _between(entry, where, '["plate", "bracket"] (the part under the head, then the part under the nut)')
+    between = parse_between(entry, where, '["plate", "bracket"] (the part under the head, then the part under the nut)')
     size = _size(entry, where)
     given = [key for key in ("preload_N", "torque_Nm") if key in entry]
     if len(given) != 1:
@@ -186,41 +172,7 @@ def _bolt(entry: dict, where: str) -> Bolt:
         raise ValueError(f'{where}.holes: the hole walls the bolt passes through, like ["#o1.1.f7", "#o1.2.f7"] (or the flat '
                          "faces its head and nut sit on)")
     return Bolt(between, size, preload, tuple(dict.fromkeys(ref.strip() for ref in holes)), torque, factor,
-                grade.strip().upper(), _friction(entry, where, DEFAULT_FRICTION))
-
-
-def _connections(document: dict) -> tuple[tuple[ContactPair, ...], tuple[Bolt, ...]]:
-    entries = document.get("connections")
-    if not isinstance(entries, list):
-        return (), ()
-    pairs, bolts = [], []
-    for index, entry in enumerate(entries):
-        where = f"connections[{index}]"
-        if not isinstance(entry, dict):
-            continue  # study._connections says what is wrong with it
-        kind = entry.get("type")
-        if kind == "bolt":
-            bolts.append(_bolt(entry, where))
-            continue
-        unknown = set(entry) - {"between", "type", "friction"}
-        if unknown:
-            raise ValueError(f"{where}: unknown keys {sorted(unknown)}; a {kinds.json_text(kind)} connection takes between, "
-                             "type and (contact) friction")
-        if kind != "contact":
-            if "friction" in entry:
-                raise ValueError(f"{where}.friction: only a contact or bolt connection slides; {kinds.json_text(kind)} "
-                                 "parts are glued or apart")
-            continue
-        pairs.append(ContactPair(_between(entry, where, '["pin", "plate"]'), _friction(entry, where, 0.0)))
-    return tuple(pairs), tuple(bolts)
-
-
-def _material_specs(document: dict) -> list[Any]:
-    specs = [document["material"]] if "material" in document else []
-    parts = document.get("parts")
-    if isinstance(parts, dict):
-        specs += [entry["material"] for entry in parts.values() if isinstance(entry, dict) and "material" in entry]
-    return specs
+                grade.strip().upper(), parse_friction(entry, where, DEFAULT_FRICTION))
 
 
 def _opens_at(points: list[tuple[float, float]], preload: float) -> float | None:
@@ -264,18 +216,14 @@ def _slips_at(points: list[tuple[float, float, float]]) -> float | None:
 
 class BoltAnalysis(ContactAnalysis):
     name: ClassVar[str] = "bolt"
-    tier: ClassVar[int] = 3
     word: ClassVar[str] = "Bolted joint"
-    estimate_only: ClassVar[bool] = False
     limits: ClassVar[tuple[str, ...]] = LIMITS
-    study_keys: ClassVar[frozenset[str]] = frozenset({"fixtures", "loads", "steps", "rigid_planes"})
     # The one analysis that accepts bolts (study._connections reads this); contact pairs come along.
     connection_types: ClassVar[tuple[str, ...]] = ("bonded", "free", "contact", "bolt")
     checks: ClassVar[tuple] = (kinds.BOLT_LOAD, kinds.JOINT_SEPARATION, kinds.JOINT_SLIP, kinds.STRESS, kinds.DISPLACEMENT,
                                kinds.CONTACT_PRESSURE)
     default_checks: ClassVar[tuple[dict, ...]] = ({"kind": "bolt_load"}, {"kind": "joint_separation"}, {"kind": "joint_slip"})
-    noun: ClassVar[str] = "this load"
-    governing_word: ClassVar[str] = "peak contact pressure"
+    extras_word: ClassVar[str] = "bolt"
 
     # -- parse ---------------------------------------------------------------------------------------
 
@@ -284,19 +232,15 @@ class BoltAnalysis(ContactAnalysis):
 
         fixtures = parse_fixtures(document, required=False)
         loads = parse_loads(document, required=False)
-        steps = parse_steps(document)
-        pairs, bolts = _connections(document)
+        steps = parse_steps(document, DEFAULT_STEPS)
+        pairs, bolts = parse_connections(document, _bolt)
         planes = parse_rigid_planes(document)
         if not bolts:
             raise ValueError(
                 'study: a bolt study needs a bolt: connections like [{"between": ["plate", "bracket"], "type": "bolt", '
                 '"size": "M6", "preload_N": 5000, "holes": ["#o1.1.f7", "#o1.2.f7"]}]'
             )
-        if not fixtures and not planes:
-            raise ValueError(
-                "study: nothing holds the parts still: add 'fixtures' (faces held fixed), or 'rigid_planes' "
-                "(a rigid floor they rest on)"
-            )
+        require_held(fixtures, planes)
         bolted = {frozenset(bolt.between) for bolt in bolts}
         for index, pair in enumerate(pairs):
             if frozenset(pair.between) in bolted:
@@ -308,18 +252,11 @@ class BoltAnalysis(ContactAnalysis):
             if friction.setdefault(key, bolt.friction) != bolt.friction:
                 raise ValueError(f"connections: the bolts clamping {bolt.between[0]} and {bolt.between[1]} give different "
                                  "friction; the faces between them have one coefficient")
-        view = document.get("view")
-        checks = view.get("checks") if isinstance(view, dict) else None
-        if isinstance(checks, list):
-            yieldless = any(material_from_spec(spec).yield_strength is None for spec in _material_specs(document))
-            for index, check in enumerate(checks):
-                if isinstance(check, dict) and check.get("kind") == "stress" and yieldless:
-                    raise ValueError(f"view.checks[{index}]: a stress check compares the peak with a yield strength, and a "
-                                     "material here has none; give its yield_MPa, or check the bolt_load instead")
-        holes = tuple(ref for bolt in bolts for ref in bolt.holes)
-        refs = tuple(dict.fromkeys((*(ref for group in (*fixtures, *loads) for ref in group.faces), *holes)))
-        anchors = tuple(dict.fromkeys(ref for fixture in fixtures for ref in fixture.faces))
-        needs = frozenset({"density"}) if any(load.body for load in loads) else frozenset()
+        checks = view_checks(document)
+        if isinstance(checks, list) and any(material_from_spec(spec).yield_strength is None
+                                            for _, spec in material_specs(document)):
+            refuse_stress(checks, ", and a material here has none; give its yield_MPa, or check the bolt_load instead")
+        refs, anchors, needs = face_refs(fixtures, loads, *(ref for bolt in bolts for ref in bolt.holes))
         return BoltInputs(refs, anchors, False, fixtures=fixtures, loads=loads, material_needs=needs, steps=steps,
                           model="elastic", pairs=pairs, planes=planes, bolts=bolts)
 
@@ -337,10 +274,10 @@ class BoltAnalysis(ContactAnalysis):
         import numpy as np
 
         from cadgen._internal.fea import bolt_ops, contact_ops, nonlinear_driver, operators
-        from cadgen._internal.fea.analyses.nonlinear import external_load
+        from cadgen._internal.fea.analyses.nonlinear import external_load, supported
         from cadgen._internal.fea.checks import quoted
         from cadgen._internal.fea.materials import lookup_material
-        from cadgen._internal.fea.supports import check_held, driven, held_bodies, path_to_global, supports_of
+        from cadgen._internal.fea.supports import driven, path_to_global
 
         if ctx.assembly is None:
             raise ValueError("connections: a bolt clamps two parts, and this document has one; put the parts it clamps "
@@ -351,22 +288,14 @@ class BoltAnalysis(ContactAnalysis):
         timings: dict[str, float] = {}
         warnings: list[str] = []
         started = time.perf_counter()
-        fit_plan = ctx.plan
         external = external_load(space, materials, inputs.surface_loads, inputs.body_accelerations, ctx.ordinal_of, 1.0)
-        # Fixed faces and rollers (a sloped or curved one's nodes turned into their own axes: supports.py).
-        supports = supports_of(space, inputs.fixtures, ctx.ordinal_of)
-        check_held(space, supports)
-        fixture_dofs = supports.per_fixture
-        fixed = supports.fixed
-        free = np.setdiff1d(np.arange(basis.N), fixed)
+        supports, free = supported(ctx, inputs.fixtures, [])  # never symmetric: no planes
         K = operators.stiffness(space, materials).tocsr()
 
         names = self._part_names(ctx)
         refs = [part.ref for part in ctx.assembly.parts]
-        node_part, node_body = contact_ops.body_of_nodes(space)
-        points = space.dof_locations
-        tolerance = float(ctx.study.contact_tolerance_mm) if ctx.study is not None else 0.1
-        E_of_part = {index: float(materials[min(index, len(materials) - 1)].E) for index in range(max(len(names), 1))}
+        nodes = self._nodes(ctx, materials, names)
+        node_part, node_body = nodes.part, nodes.body
 
         # The bolts: where each bears, its shank's stiffness, and the spring it becomes once locked.
         bolts: list[dict] = []
@@ -381,7 +310,8 @@ class BoltAnalysis(ContactAnalysis):
             E = lookup_material("stainless-304" if bolt.grade.startswith("A") else "steel").E
             compliance = bolt_ops.bolt_compliance(bolt.size, geometry.clamp_mm, E)
             joint = bolt_ops.joint_compliance(bolt.size.head, 2.0 * geometry.hole_radius if geometry.hole_radius else bolt.size.hole,
-                                              geometry.clamp_mm, geometry.outside_mm, min(E_of_part[head], E_of_part[nut]))
+                                              geometry.clamp_mm, geometry.outside_mm,
+                                              min(nodes.E_of_part[head], nodes.E_of_part[nut]))
             index, value = bolt_ops.shank_gradient(space, geometry)
             springs.append(bolt_ops.BoltSpring(index, value, 1.0 / compliance["total"], bolt.preload_N))
             bolts.append({"bolt": bolt, "head": head, "nut": nut, "geometry": geometry, "compliance": compliance,
@@ -399,81 +329,26 @@ class BoltAnalysis(ContactAnalysis):
                 joint_of[key] = len(pair_list)
                 pair_list.append((entry["bolt"].between, entry["bolt"].friction, entry["head"], entry["nut"]))
             entry["joint_index"] = joint_of[key]
-
-        def diagonal(parts) -> float:
-            chosen = np.isin(node_part, list(parts))
-            if not chosen.any():
-                return 0.0
-            return float(np.linalg.norm(points[chosen].max(axis=0) - points[chosen].min(axis=0)))
-
         rows: list = []
         contacts: list[dict] = []
         for n, (between, friction, i, j) in enumerate(pair_list):
             if i == j:
                 raise ValueError(f"connections (contact {n + 1}).between: both names are {quoted(names[i])}")
-            volume = ctx.assembly.parts
-            slave, master = (i, j) if volume[i].volume_mm3 <= volume[j].volume_mm3 else (j, i)
-            search = max(2.0 * tolerance, 0.1 * min(diagonal([i]), diagonal([j])))
-            spec = contact_ops.PairSpec(slave, master, friction, n)
-            found = contact_ops.pair_constraints(space, spec, node_part, min(E_of_part[i], E_of_part[j]),
-                                                 search_mm=search, tolerance_mm=tolerance)
+            found = self._pair_rows(ctx, nodes, i, j, friction, n)
             if n >= len(inputs.pairs) and not found.count:
                 raise ValueError(f"connections: {quoted(names[i])} and {quoted(names[j])} are bolted, but no faces of them "
                                  "face each other near enough to touch; the bolt clamps two parts that touch")
             rows.append(found)
-            name = f"{names[i]} on {names[j]}"
-            contacts.append({"kind": "pair", "name": name, "between": [names[i], names[j]], "refs": [refs[i], refs[j]],
-                             "friction": friction, "words": contact_words((names[i], names[j]), friction)})
-        for n, plane in enumerate(inputs.planes):
-            parts = tuple(sorted({self._part_index(ctx, name, f"rigid_planes[{n}].parts") for name in plane.parts})) \
-                if plane.parts else tuple(range(max(len(names), 1)))
-            normal = np.asarray(plane.normal, dtype=float)
-            on = np.isin(node_part, list(parts))
-            if on.any() and float((points[on].mean(axis=0) - np.asarray(plane.point)) @ normal) < 0:
-                normal = -normal
-            spec = contact_ops.PlaneSpec(plane.point, tuple(float(c) for c in normal), parts, plane.friction, n)
-            rows.append(contact_ops.plane_constraints(space, spec, node_part, E_of_part,
-                                                      search_mm=max(2.0 * tolerance, 0.1 * diagonal(parts)), tolerance_mm=tolerance))
-            label = "the rigid plane" if len(inputs.planes) == 1 else f"rigid plane {n + 1}"
-            contacts.append({"kind": "plane", "name": label, "refs": [refs[p] for p in parts], "friction": plane.friction,
-                             "normal": [float(c) for c in normal], "words": f"{' and '.join(names[p] for p in parts)} on {label}"})
+            contacts.append(self._pair_entry(f"{names[i]} on {names[j]}", names, refs, i, j, friction))
+        self._plane_rows(ctx, inputs, nodes, names, refs, rows, contacts)
         constraints = contact_ops.Constraints.concatenate(rows, space.scalar_count)
         owner = np.where(constraints.owner >= 0, constraints.owner, len(pair_list) + (-1 - constraints.owner))
-
         # What holds each body: a fixture, a rigid plane, a contact with a held body, or a bolt to one.
-        bodies = int(node_body.max()) + 1 if len(node_body) else 0
-        vdofs = contact_ops.vector_dofs(space)
-        scalar_of = np.zeros(basis.N, dtype=np.int64)
-        for c in range(3):
-            scalar_of[vdofs[:, c]] = np.arange(space.scalar_count)
-        fixed_bodies = held_bodies(space, supports, node_body[scalar_of])  # a body on rollers alone may still move
-        holds = set(fixed_bodies) | set(np.unique(node_body[constraints.node[constraints.owner < 0]]).tolist())
-        links = []
-        for k in range(len(pair_list)):
-            mine = constraints.owner == k
-            if mine.any():
-                links.append((set(np.unique(node_body[constraints.node[mine]]).tolist()),
-                              set(np.unique(node_body[constraints.master_nodes(mine)]).tolist())))
-        for entry in bolts:
-            geometry = entry["geometry"]
-            links.append((set(np.unique(node_body[geometry.head.nodes]).tolist()), set(np.unique(node_body[geometry.nut.nodes]).tolist())))
-        grown = True
-        while grown:
-            grown = False
-            for a, b in links:
-                if (a & holds) and not b <= holds or (b & holds) and not a <= holds:
-                    holds |= a | b
-                    grown = True
-        unheld = [b for b in range(bodies) if b not in holds]
-        if unheld:
-            parts_of = sorted({int(p) for p in np.unique(node_part[np.isin(node_body, unheld)])})
-            who = " and ".join(quoted(names[p]) for p in parts_of)
-            raise ValueError(
-                f"{who} {'is' if len(parts_of) == 1 else 'are'} not held by anything: fix a face of it, bolt it or put it in "
-                "contact with a held part, or give it a rigid plane to rest on"
-            )
-        loose = [b for b in range(bodies) if b not in fixed_bodies]
-        floating = [vdofs[node_body == b].ravel() for b in loose]
+        bolt_links = [(set(np.unique(node_body[entry["geometry"].head.nodes]).tolist()),
+                       set(np.unique(node_body[entry["geometry"].nut.nodes]).tolist())) for entry in bolts]
+        vdofs, loose, floating = self._loose_bodies(
+            ctx, supports, constraints, nodes, names, len(pair_list), bolt_links,
+            "fix a face of it, bolt it or put it in contact with a held part, or give it a rigid plane to rest on")
         # A part resting on contacts and bolts alone is kept from drifting by weak springs, across its bolts' axis only.
         axis_of: dict[int, np.ndarray] = {}
         for entry in bolts:
@@ -495,9 +370,9 @@ class BoltAnalysis(ContactAnalysis):
             full = problem_box[0].full(u)
             history.append((operators.von_mises(operators.stress(space, materials, full)), response, full.copy()))
 
-        solver = getattr(fit_plan, "solver", "direct") if fit_plan is not None else "direct"
+        solver = plan_value(ctx, "solver", "direct")
         method = "iterative" if solver in ("iterative", "matrix_free") else "direct"
-        adaptive = bool(getattr(fit_plan, "adaptive_steps", False)) if fit_plan is not None else False
+        adaptive = bool(plan_value(ctx, "adaptive_steps", False))
         # Step 1 tightens with the bolted faces sliding freely; their friction holds from the locked state on.
         bolted_rows = np.isin(owner, list(joint_of.values()))
         friction = constraints.friction.copy()
@@ -534,9 +409,7 @@ class BoltAnalysis(ContactAnalysis):
         timings["solve_s"] = tightened.seconds + (loaded.seconds if loaded is not None else 0.0)
         # Steps kept although their contact did not settle: the preload's, then the load's.
         unsettled = unsettled_steps(tightened, "the preload") + (unsettled_steps(loaded) if loaded is not None else [])
-        if problem.unsettled > 0.1:
-            warnings.append(f"the contact forces were still changing by {problem.unsettled * 100:.2g} % after "
-                            f"{contact_ops.MAX_AUGMENTATIONS} updates at a load step")
+        self._warn_unsettled(problem, warnings)
         collapsed = not clamped or bool(loaded is not None and loaded.collapsed)
         factor = 0.0 if not clamped else (loaded.factor if loaded is not None else 1.0)
 
@@ -547,8 +420,7 @@ class BoltAnalysis(ContactAnalysis):
             preload_frame = 0
         # Frames: the preload (the last step-1 state), then step 2's load steps.
         load_states = list(range(preload_frame + 1, len(history)))
-        frames_max = int(getattr(ctx.budget, "max_frames", 24) or 24) if ctx.budget is not None else 24
-        picked = [preload_frame] + [load_states[i] for i in pick_frames(len(load_states), max(frames_max - 1, 1))] \
+        picked = [preload_frame] + [load_states[i] for i in pick_frames(len(load_states), max(max_frames(ctx) - 1, 1))] \
             if load_states else [preload_frame]
         load_factors = [0.0] + [record.factor for record in loaded.records] if loaded is not None else [0.0]
         factor_of = {preload_frame + i: f for i, f in enumerate(load_factors)}
@@ -567,15 +439,9 @@ class BoltAnalysis(ContactAnalysis):
                     np.maximum(bearing, end.share * force / end.area, out=bearing)
             return field, np.maximum(field, bearing)
 
-        def nodal(values):
-            return np.clip(space.scalar.project(values), 0.0, float(values.max()))
-
-        stress_frames, displacement_frames, pressure_frames = [], [], []
-        for state in picked:
-            vm, _, full = history[state]
-            stress_frames.append(nodal(vm))
-            displacement_frames.append(space.nodal(full + shift))
-            pressure_frames.append(pressures(state)[1])
+        stress_frames = [nodal(space, history[state][0]) for state in picked]
+        displacement_frames = [space.nodal(history[state][2] + shift) for state in picked]
+        pressure_frames = [pressures(state)[1] for state in picked]
         final_state = picked[-1]
 
         def unheld_forces(full) -> dict[int, np.ndarray]:
@@ -583,7 +449,7 @@ class BoltAnalysis(ContactAnalysis):
             held = (drift + after) @ (full - problem.offset)
             out: dict[int, np.ndarray] = {}
             for b, dofs in zip(loose, floating):
-                spring = np.array([float(held[dofs][space.component[dofs] == k].sum()) for k in range(3)])
+                spring = np.array(totals(space, held, dofs))
                 for p in np.unique(node_part[node_body == b]):
                     out[int(p)] = out.get(int(p), np.zeros(3)) + spring
             return out
@@ -606,15 +472,14 @@ class BoltAnalysis(ContactAnalysis):
         # Each bolted joint: its clamp along the load (from the preload on), the sideways force it carries, its friction.
         joints: list[dict] = []
         moved = float(np.linalg.norm(space.nodal(final_full + shift), axis=1).max())
-        stats = self._contact_stats(contacts, constraints, owner, final_response, contact_pressure, points, 1.0, moved)
+        stats = self._contact_stats(contacts, constraints, owner, final_response, contact_pressure, nodes.points, 1.0, moved)
         loose_parts: list[dict] = []
         total = float(np.linalg.norm([factor * external[space.component == k].sum() for k in range(3)]))
-        pressing_bodies = set(np.unique(node_body[constraints.node[final_response.pressing]]).tolist())
-        pressing_bodies |= set(np.unique(node_body[constraints.master_nodes(final_response.pressing & (constraints.owner >= 0))]).tolist())
+        pressing_bodies = self._pressing_bodies(constraints, node_body, final_response)
         held = (drift + after) @ (final_full - problem.offset)  # what the drift springs took of step 2's load
         for b, dofs in zip(loose, floating):
-            spring = np.array([float(held[dofs][space.component[dofs] == k].sum()) for k in range(3)])
-            load = [float(factor * external[dofs][space.component[dofs] == k].sum()) for k in range(3)]
+            spring = np.array(totals(space, held, dofs))
+            load = [float(factor * c) for c in totals(space, external, dofs)]
             if b in pressing_bodies and b in axis_of:
                 # Clamped by a bolt: along its axis the bolt holds it, and what the drift springs take there is their
                 # share of how far the clamped parts bend (a strap pulled off lifts the link a millimetre or two), not
@@ -692,20 +557,15 @@ class BoltAnalysis(ContactAnalysis):
         residual = internal - (factor if clamped else 0.0) * problem.external
         if not clamped:
             residual = internal - (tightened.factor * preload)
-        reactions = [tuple(float(residual[dofs][space.component[dofs] == c].sum()) for c in range(3)) for dofs in fixture_dofs]
-        applied = tuple(float(factor * external[space.component == c].sum()) for c in range(3))
-        requested = tuple(float(external[space.component == c].sum()) for c in range(3))
+        reactions = [totals(space, residual, dofs) for dofs in supports.per_fixture]
+        requested = totals(space, external)
+        applied = tuple(float(factor * c) for c in requested)
         timings["stress_s"] = time.perf_counter() - started
 
-        attributes = {"von_mises": "_VON_MISES", "displacement": "_DISPLACEMENT", "contact_pressure": "_CONTACT_PRESSURE"}
         frame_values = [round(factor_of.get(state, 0.0) * 100.0, 6) for state in picked]
-        series = Series(kind="time", unit="%", default=len(picked) - 1, frames=[
-            SeriesFrame(value=value, label="Preload" if i == 0 else load_label(value / 100.0),
-                        attributes={name: attribute if i == 0 else f"{attribute}_F{i}" for name, attribute in attributes.items()})
-            for i, value in enumerate(frame_values)
-        ])
         frame_fields = {"von_mises": stress_frames, "displacement": displacement_frames, "contact_pressure": pressure_frames}
-        fields = {name: values[0] for name, values in frame_fields.items()}
+        series = self._series("%", frame_fields, [(value, "Preload" if i == 0 else load_label(value / 100.0))
+                                                  for i, value in enumerate(frame_values)])
         final_fields = {name: values[-1] for name, values in frame_fields.items()}
         curve_x = frame_values
         curves = {"bolt_force_N": {"x": curve_x, "x_unit": "%", "y_unit": "N",
@@ -719,26 +579,18 @@ class BoltAnalysis(ContactAnalysis):
         peak_node = int(final_fields["contact_pressure"].argmax())
         if not clamped:
             warnings.append("the preload could not be applied: the parts did not settle under it")
-        return AnalysisResult(
-            dof_locations=space.dof_locations, vertices=space.vertices, tets=space.tets, boundary_quadratic=space.boundary_quadratic,
-            element_dofs=space.element_dofs, fields=fields, deformation=displacement_frames[0], series=series,
-            frame_fields=frame_fields, curves=curves, reactions=reactions, applied=applied, dofs=int(basis.N), solver=how,
-            timings=timings, warnings=warnings,
-            scalars={
-                "path": path, "final": final_fields, "factor": factor, "collapsed": collapsed, "clamped": clamped,
-                "requested": requested, "model": "elastic", "adaptive": adaptive, "von_mises_gauss_max": float(final_vm.max()),
-                "frame_factors": [v / 100.0 for v in frame_values], "contacts": stats, "augmentations": problem.augmentations,
-                "contact_nodes": constraints.count, "floating_bodies": len(floating), "loose_parts": loose_parts,
-                "peak_pressure_at": [round(float(c), 3) for c in space.dof_locations[peak_node]],
-                "analysis_warnings": ([] if not collapsed else [
-                    "The preload could not be applied" if not clamped else stop_words(factor)])
-                + [unsettled_sentence(step["percent"], step["of"]) for step in unsettled[:1]],
-                "unsettled": unsettled,
-                "analysis_extras": {"unsettled": unsettled_extras(unsettled)} if unsettled else {},
-                "part_refs": refs, "part_names": names, "part_materials": part_materials(ctx), "bolts": bolts_out, "joints": joints,
-                "preload_steps": len(tightened.records), "load_steps": len(loaded.records) if loaded is not None else 0,
-            },
-        )
+        mesh = (space.dof_locations, space.boundary_quadratic, space.tets, space.element_dofs, space.vertices)
+        return self._result(mesh, frame_fields, series, curves, reactions, applied, basis, how, timings, warnings, {
+            "path": path, "final": final_fields, "factor": factor, "collapsed": collapsed, "clamped": clamped,
+            "requested": requested, "model": "elastic", "adaptive": adaptive, "von_mises_gauss_max": float(final_vm.max()),
+            "frame_factors": [v / 100.0 for v in frame_values], "contacts": stats, "augmentations": problem.augmentations,
+            "contact_nodes": constraints.count, "floating_bodies": len(floating), "loose_parts": loose_parts,
+            "peak_pressure_at": xyz(space.dof_locations[peak_node]),
+            **unsettled_scalars([] if not collapsed else ["The preload could not be applied" if not clamped else stop_words(factor)],
+                                unsettled),
+            "part_refs": refs, "part_names": names, "part_materials": part_materials(ctx), "bolts": bolts_out, "joints": joints,
+            "preload_steps": len(tightened.records), "load_steps": len(loaded.records) if loaded is not None else 0,
+        })
 
     # -- judging -------------------------------------------------------------------------------------
 
@@ -774,7 +626,7 @@ class BoltAnalysis(ContactAnalysis):
             "kind": kind, "label": label, "value": round(value, 4), "limit": round(limit, 4), "unit": "N",
             "ratio": round(min(ratio, 1e6), 6), "close_at": 0.9,
             "status": "fails" if failed else checks.check_status(ratio, 0.9),
-            "where": {"ref": None, "at": [round(c, 3) for c in at]}, "of": name,
+            "where": {"ref": None, "at": xyz(at)}, "of": name,
         }
         if kind == "joint_separation":
             joint = next(j for j in scalars["joints"] if j["name"] == name)
@@ -788,17 +640,12 @@ class BoltAnalysis(ContactAnalysis):
                  check_results: list[dict], *, assembly: bool) -> list[dict]:
         scalars = result.scalars
         found = list(super().findings(ctx, result, inputs, check_results, assembly=assembly))
-
-        def finding(severity, kind, summary, description, items=()):
-            return {"check": "fea", "severity": severity, "type": kind, "summary": summary, "description": description,
-                    "items": list(items)}
-
         if not scalars["clamped"]:
             found.append(finding("error", "preload_fails", "The bolts could not be tightened: the parts did not settle under "
                                  "the preload", "step 1 (the preload) found no equilibrium; check the bolts' holes and that "
-                                 "the clamped parts touch", []))
+                                 "the clamped parts touch"))
         for bolt in scalars["bolts"]:
-            at = [round(c, 3) for c in bolt["head_at"]]
+            at = xyz(bolt["head_at"])
             item = [{"text": f"{bolt['name']} head", "ref": None, "at": at}]
             if bolt["torque_Nm"] is not None:
                 found.append(finding("info", "bolt_preload",
@@ -821,7 +668,7 @@ class BoltAnalysis(ContactAnalysis):
                 found.append(finding("warning", "bolt_slack", f"{bolt['name'].capitalize()} goes slack: it carries no load",
                                      "the parts pushed its head and nut together past its preload", item))
         for joint in scalars["joints"]:
-            at = [round(c, 3) for c in joint["at"]]
+            at = xyz(joint["at"])
             item = [{"text": joint["name"], "ref": None, "at": at}]
             opens = joint["opens_at_percent"]
             if joint["open"]:
@@ -843,7 +690,7 @@ class BoltAnalysis(ContactAnalysis):
                     "error", "joint_slips", f"The joint slips: {joint['name']} slide over each other",
                     f"they must carry {force_words(joint['shear_N'])} sideways, and friction {joint['friction']:g} holds "
                     f"{force_words(joint['friction_holds_N'])}; the bolts' shanks bearing in the holes are not modelled", item))
-        return sorted(found, key=lambda item: {"error": 0, "warning": 1, "info": 2}[item["severity"]])
+        return by_severity(found)
 
     # -- what is written -----------------------------------------------------------------------------
 
@@ -872,16 +719,12 @@ class BoltAnalysis(ContactAnalysis):
         else:
             status = "Joint holds"
         if scalars.get("unsettled"):
-            first = scalars["unsettled"][0]
-            status = f"Not reliable: contact did not settle at {first['percent']:.0f}% of {first['of']}"
+            status = unsettled_status(scalars["unsettled"])
         checks_out = summary.pop("checks")
         summary.update({"status": status, "preload_steps": scalars["preload_steps"], "steps": scalars["load_steps"],
                         "bolts": rounded(scalars["bolts"]),
                         "joints": rounded(joints), "checks": checks_out})
         return summary
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} bolt"
 
     def extras_head(self, summary: dict) -> dict:
         return {**super().extras_head(summary), "bolts": summary["bolts"], "joints": summary["joints"]}

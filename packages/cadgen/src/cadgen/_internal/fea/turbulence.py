@@ -79,7 +79,7 @@ CFL_START, CFL_GROWTH, CFL_MAX = 5.0, 2.0, 1e6
 SHRINK, CFL_MIN = 0.9, 0.5
 #: After this many steps of progress in a row, the ceiling a stall set is doubled.
 RECOVER = 10
-VELOCITY_TOL, K_TOL = 1e-5, 1e-4
+VELOCITY_TOL = 1e-5
 MAX_STEPS = 300
 #: Krylov (the ladder's iterative rung): tolerance, restart and iteration cap of GMRES.
 KRYLOV_TOL, RESTART, MAX_KRYLOV = 1e-9, 200, 3000
@@ -390,32 +390,17 @@ def developed_turbulent(locations: "np.ndarray", rows: "np.ndarray", axis: int, 
     ``rows`` are the opening's quadratic boundary triangles (scalar node ids), flat on a plane normal to
     ``axis``; ``speed`` the mean axial speed (mm/s), ``nu`` the kinematic viscosity (mm^2/s). Every
     edge of the opening is the duct's wall."""
-    import numpy as np
-    from skfem import MeshTri
+    from cadgen._internal.fea.navier_stokes import opening_mesh, opening_mid_nodes
 
-    corners = np.unique(rows[:, :3])
-    local = {int(n): i for i, n in enumerate(corners)}
-    keep = [a for a in range(3) if a != axis]
-    points = np.ascontiguousarray(locations[corners][:, keep].T)
-    triangles = np.vectorize(local.get)(rows[:, :3]).astype(np.int64)
-    mesh = MeshTri(points, np.ascontiguousarray(triangles.T))
+    mesh, local, triangles = opening_mesh(locations, rows, axis)
     bw, bk, w, k, omega, out = _developed_on(mesh, speed, nu)
     out.w = {int(n): float(w[bw.nodal_dofs[0][i]]) for n, i in local.items()}
     out.k = {int(n): float(k[i]) for n, i in local.items()}
     out.omega = {int(n): float(omega[i]) for n, i in local.items()}
-    facet_of = {tuple(pair): j for j, pair in enumerate(np.sort(mesh.facets, axis=0).T.tolist())}
-    for row, tri in zip(rows, triangles):
-        for m in range(3, 6):
-            node = int(row[m])
-            if node in out.w:
-                continue
-            here = locations[node]
-            a, b = min(((0, 1), (1, 2), (0, 2)),
-                       key=lambda e: float(np.linalg.norm(0.5 * (locations[row[e[0]]] + locations[row[e[1]]]) - here)))
-            pair = tuple(sorted((int(tri[a]), int(tri[b]))))
-            out.w[node] = float(w[bw.facet_dofs[0][facet_of[pair]]])
-            out.k[node] = 0.5 * (float(k[pair[0]]) + float(k[pair[1]]))
-            out.omega[node] = 0.5 * (float(omega[pair[0]]) + float(omega[pair[1]]))
+    for node, facet, pair in opening_mid_nodes(locations, rows, triangles, mesh, out.w):
+        out.w[node] = float(w[bw.facet_dofs[0][facet]])
+        out.k[node] = 0.5 * (float(k[pair[0]]) + float(k[pair[1]]))
+        out.omega[node] = 0.5 * (float(omega[pair[0]]) + float(omega[pair[1]]))
     return out
 
 
@@ -506,7 +491,7 @@ def _momentum_forms():
     return momentum, weighted_mass, divergence, outflow
 
 
-def _expand(scalar, table, n: int):
+def expand_vector(scalar, table, n: int):
     """The vector operator of a scalar one: the same block on each of the three velocity components."""
     import numpy as np
     from scipy import sparse
@@ -861,6 +846,20 @@ def solve_rans(problem: RansProblem, *, solver: str = "direct", cfl: tuple[float
         nut, f1, blend, cross, kq, wq = _sst(kk.value, kk.grad, ww.value, ww.grad, s2, y, nu, floors, pinned)
         return ui, s2, nut, blend, cross, kq, wq
 
+    def wall_slip(u):
+        """The tangential speed at the wall facets' quadrature points."""
+        slip = fbV.interpolate(u).value
+        nrm = fbV.normals
+        return np.linalg.norm(slip - np.einsum("i...,i...->...", slip, nrm) * nrm, axis=0)
+
+    def node_slip(nodes):
+        """The tangential velocity at wall nodes ``nodes``, and the wall function's distance there."""
+        normal = np.array([np.mean(normals_of[int(c)], axis=0) for c in nodes]) if len(nodes) else np.zeros((0, 3))
+        normal /= np.maximum(np.linalg.norm(normal, axis=1), 1e-30)[:, None]
+        vel = space.nodal(u)[nodes]
+        nd = np.array([delta[node_rows[int(c)]].mean() for c in nodes])
+        return vel - np.einsum("ij,ij->i", vel, normal)[:, None] * normal, nd
+
     def pressure_drop(x) -> float:
         if problem.inlet_facets is None or problem.outlet_facets is None:
             return 0.0
@@ -879,7 +878,7 @@ def solve_rans(problem: RansProblem, *, solver: str = "direct", cfl: tuple[float
     x = np.zeros(n)
     ui, s2, nut, blend, cross, kq, wq = closure(u, k, omega)
     zero3 = np.zeros((3,) + q_shape)
-    K = sparse.bmat([[_expand(asm(momentum, S, b=zero3, m=0.0, nu=nu + nut, sd=0.0), table, nv), Bm.T], [Bm, None]], format="csr")
+    K = sparse.bmat([[expand_vector(asm(momentum, S, b=zero3, m=0.0, nu=nu + nut, sd=0.0), table, nv), Bm.T], [Bm, None]], format="csr")
     x = linear(K, np.concatenate([f_out, np.zeros(npr)]))
     u = x[:nv]
     cfl_now, growth = cfl
@@ -902,13 +901,10 @@ def solve_rans(problem: RansProblem, *, solver: str = "direct", cfl: tuple[float
         peclet = speed_q * hp / (2.0 * nu_eff)
         with np.errstate(divide="ignore", invalid="ignore"):
             sd = np.where(peclet > 1.0, hp / (2.0 * speed_q) * (1.0 - 1.0 / peclet), 0.0)
-        A = _expand(asm(momentum, S, b=ui.value, m=m, nu=nu_eff, sd=sd), table, nv)
-        rhs_u = f_out + _expand(asm(weighted_mass, S, c=m), table, nv) @ u
+        A = expand_vector(asm(momentum, S, b=ui.value, m=m, nu=nu_eff, sd=sd), table, nv)
+        rhs_u = f_out + expand_vector(asm(weighted_mass, S, c=m), table, nv) @ u
         if has_walls:
-            slip = fbV.interpolate(u).value
-            nrm = fbV.normals
-            tangential = slip - np.einsum("i...,i...->...", slip, nrm) * nrm
-            speed_w = np.linalg.norm(tangential, axis=0)
+            speed_w = wall_slip(u)
             tau_q = spalding_u_tau(speed_w, delta[:, None], nu)
             alpha = tau_q ** 2 / np.maximum(speed_w, 1e-30)
             # The wall's pull per unit slip grows with the slip, so taken at the last step's slip alone it can
@@ -916,7 +912,7 @@ def solve_rans(problem: RansProblem, *, solver: str = "direct", cfl: tuple[float
             if robin["alpha"] is not None:
                 alpha = ROBIN_RELAX * alpha + (1.0 - ROBIN_RELAX) * robin["alpha"]
             robin["alpha"] = alpha
-            A = A + _expand(asm(weighted_mass, fbS, c=alpha), table, nv)
+            A = A + expand_vector(asm(weighted_mass, fbS, c=alpha), table, nv)
         K = sparse.bmat([[A, Bm.T], [Bm, None]], format="csr")
         x_new = linear(K, np.concatenate([rhs_u, np.zeros(npr)]))
         u_new = x_new[:nv]
@@ -927,19 +923,11 @@ def solve_rans(problem: RansProblem, *, solver: str = "direct", cfl: tuple[float
         ui, s2, nut, blend, cross, kq, wq = closure(u, k, omega)
         fixed_nodes, k_fixed, w_fixed = [inflow], [np.asarray(problem.inflow_k, dtype=float)], [np.asarray(problem.inflow_omega, dtype=float)]
         if has_walls:
-            slip = fbV.interpolate(u).value
-            nrm = fbV.normals
-            tangential = slip - np.einsum("i...,i...->...", slip, nrm) * nrm
-            tau_q = spalding_u_tau(np.linalg.norm(tangential, axis=0), delta[:, None], nu)
+            tau_q = spalding_u_tau(wall_slip(u), delta[:, None], nu)
             u_tau_facet = 0.5 * u_tau_facet + 0.5 * tau_q.mean(axis=1)
             delta = deltas()
-            nodal = space.nodal(u)
             corner = np.setdiff1d(wall_corner_nodes, inflow)
-            nd = np.array([delta[node_rows[int(c)]].mean() for c in corner])
-            normal_c = np.array([np.mean(normals_of[int(c)], axis=0) for c in corner]) if len(corner) else np.zeros((0, 3))
-            normal_c /= np.maximum(np.linalg.norm(normal_c, axis=1), 1e-30)[:, None]
-            vel = nodal[corner]
-            tang = vel - np.einsum("ij,ij->i", vel, normal_c)[:, None] * normal_c
+            tang, nd = node_slip(corner)
             un = spalding_u_tau(np.linalg.norm(tang, axis=1), nd, nu)
             fixed_nodes.append(corner)
             k_fixed.append(un ** 2 / math.sqrt(BETA_STAR))
@@ -1001,12 +989,7 @@ def solve_rans(problem: RansProblem, *, solver: str = "direct", cfl: tuple[float
     slip_nodal = np.zeros((0, 3))
     yplus = (0.0, 0.0, 0.0)
     if has_walls:
-        nodal = space.nodal(u)
-        normal_n = np.array([np.mean(normals_of[int(c)], axis=0) for c in wall_all_nodes])
-        normal_n /= np.maximum(np.linalg.norm(normal_n, axis=1), 1e-30)[:, None]
-        vel = nodal[wall_all_nodes]
-        slip_nodal = vel - np.einsum("ij,ij->i", vel, normal_n)[:, None] * normal_n
-        nd = np.array([delta[node_rows[int(c)]].mean() for c in wall_all_nodes])
+        slip_nodal, nd = node_slip(wall_all_nodes)
         wall_u_tau = spalding_u_tau(np.linalg.norm(slip_nodal, axis=1), nd, nu)
         yp = delta * u_tau_facet / nu
         yplus = (float(yp.min()), float(yp.mean()), float(yp.max()))

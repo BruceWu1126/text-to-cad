@@ -285,7 +285,6 @@ class LinearSolver:
 
     def _iterative(self, Kff, Ff):
         import numpy as np
-        import pyamg
         import scipy.sparse.linalg as spla
 
         if self._ml is None:
@@ -318,7 +317,6 @@ class LinearSolver:
         elif worst > 2 * self._fresh_iterations + 10:
             self._ml = None  # stale: the next solve builds a hierarchy for the design as it is now
         self._previous = out
-        _ = pyamg
         return out
 
     def _build(self, Kff):
@@ -423,6 +421,14 @@ def optimise(problem: TopologyProblem, target: float, schedule: Schedule, *, rad
         projected[keep] = 1.0
         return nodal, element, projected
 
+    def record(compliance, projected, change, penalty, beta):
+        history.compliance.append(compliance)
+        history.volume.append(float(share @ projected))
+        history.change.append(change)
+        history.penalty.append(penalty)
+        history.beta.append(beta)
+        history.grey.append(float(4.0 * (share * projected * (1.0 - projected)).sum()))
+
     def nodal_frame(nodal, beta):
         values = heaviside(np.clip(nodal, 0.0, 1.0), beta)
         values[np.unique(p.tets[keep])] = 1.0
@@ -476,12 +482,7 @@ def optimise(problem: TopologyProblem, target: float, schedule: Schedule, *, rad
             x = new
             iteration += 1
             in_stage += 1
-            history.compliance.append(compliance)
-            history.volume.append(float(share @ projected))
-            history.change.append(change)
-            history.penalty.append(penalty)
-            history.beta.append(beta)
-            history.grey.append(float(4.0 * (share * projected * (1.0 - projected)).sum()))
+            record(compliance, projected, change, penalty, beta)
             if iteration % stride == 0:
                 history.frames[iteration] = nodal_frame(nodal, beta)
                 if len(history.frames) > 2 * keep_frames:
@@ -510,12 +511,7 @@ def optimise(problem: TopologyProblem, target: float, schedule: Schedule, *, rad
     nodal, element, projected = physical(x, beta)
     stiffness = EMIN + projected ** penalty * (1.0 - EMIN)
     U = solver.solve(p.assemble(stiffness))
-    history.compliance.append(float((stiffness * p.energies(U)).sum()))
-    history.volume.append(float(share @ projected))
-    history.change.append(0.0)
-    history.penalty.append(penalty)
-    history.beta.append(beta)
-    history.grey.append(float(4.0 * (share * projected * (1.0 - projected)).sum()))
+    record(float((stiffness * p.energies(U)).sum()), projected, 0.0, penalty, beta)
     history.frames[iteration + 1] = nodal_frame(nodal, beta)
     history.final_nodal = nodal_frame(nodal, beta)
     history.seconds = time.perf_counter() - started

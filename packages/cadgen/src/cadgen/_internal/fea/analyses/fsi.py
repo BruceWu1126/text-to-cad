@@ -43,12 +43,13 @@ import contextlib
 import dataclasses
 import math
 import time
+import types
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs, SolveContext
+from cadgen._internal.fea.analyses.base import AnalysisBase, AnalysisResult, FieldSpec, Inputs, SolveContext, finding, xyz
 from cadgen._internal.fea.study import DEFAULT_CHECKS, Fixture, parse_fixtures
 
 __all__ = ["FsiAnalysis", "FsiInputs", "LIMITS", "METHODS", "REGIMES", "not_converged_sentence"]
@@ -108,19 +109,13 @@ class FsiInputs(Inputs):
     max_iterations: int = MAX_ITERATIONS
 
 
-def _known(entry: dict, keys: set[str], where: str, words: str) -> None:
-    unknown = set(entry) - keys
-    if unknown:
-        raise ValueError(f"{where}: unknown keys {sorted(unknown)}; {words}")
-
-
 def _coupling(raw: Any) -> dict:
     if raw is None:
         return {}
     if not isinstance(raw, dict):
         raise ValueError('coupling: expected an object like {"method": "aitken", "tolerance": 0.001, "max_iterations": 25}')
-    _known(raw, {"method", "relaxation", "tolerance", "max_iterations"}, "coupling",
-           "it takes method (\"aitken\" or \"fixed_point\"), relaxation, tolerance and max_iterations")
+    kinds.known(raw, {"method", "relaxation", "tolerance", "max_iterations"}, "coupling",
+                "it takes method (\"aitken\" or \"fixed_point\"), relaxation, tolerance and max_iterations")
     out: dict[str, Any] = {}
     if "method" in raw:
         if raw["method"] not in METHODS:
@@ -175,16 +170,11 @@ def _speed_words(flow) -> str:
     return f"{max(i.velocity_m_s for i in flow.inlets):.3g} m/s"
 
 
-class FsiAnalysis:
+class FsiAnalysis(AnalysisBase):
     name: ClassVar[str] = "fsi"
-    tier: ClassVar[int] = 3
     word: ClassVar[str] = "Flow and bending"
-    estimate_only: ClassVar[bool] = False
     limits: ClassVar[tuple[str, ...]] = LIMITS
     study_keys: ClassVar[frozenset[str]] = frozenset({"flow", "fixtures", "coupling"})
-    material_needs: ClassVar[frozenset[str]] = frozenset()
-    mesh_orders: ClassVar[tuple[int, ...]] = (2,)
-    connection_types: ClassVar[tuple[str, ...]] = ("bonded", "free")
     fields: ClassVar[tuple[FieldSpec, ...]] = (
         FieldSpec("von_mises", "_VON_MISES", "von Mises stress", "MPa"),
         FieldSpec("pressure", "_PRESSURE", "wall pressure", "Pa", signed=True),
@@ -198,10 +188,10 @@ class FsiAnalysis:
         "field": {"drives": "field", "type": "enum", "options": ["von_mises", "pressure", "wall_shear", "displacement"]},
         "deformation": {"drives": "deformation", "type": "number", "min": 0.0, "max": None},
     }
-    upstream: ClassVar[tuple[str, ...]] = ()
     ladder: ClassVar[tuple[str, ...]] = ("continuation", "iterative", "fluid_coarsen", "local_refine")
     noun: ClassVar[str] = "this flow"
     governing_word: ClassVar[str] = "peak stress"
+    extras_word: ClassVar[str] = "flow and bending"
 
     # -- parse ---------------------------------------------------------------------------------------
 
@@ -229,20 +219,15 @@ class FsiAnalysis:
 
     # -- the flow model ------------------------------------------------------------------------------
 
-    def _engine_name(self, ctx: SolveContext, inputs: FsiInputs) -> str:
-        if inputs.regime != "auto":
-            return "cfd" if inputs.regime == "laminar" else "cfd_turbulent"
-        from cadgen._internal.fea.analyses import get_analysis
-        from cadgen._internal.fea.analyses.cfd import RE_LIMIT
-
-        setup = get_analysis("cfd").setup_of(ctx, inputs.flow)
-        return "cfd" if setup.reynolds <= RE_LIMIT[inputs.flow.kind] else "cfd_turbulent"
-
     def engine(self, ctx: SolveContext, inputs: FsiInputs):
         """The flow analysis that solves this study's flow: ``cfd`` (laminar) or ``cfd_turbulent``."""
         from cadgen._internal.fea.analyses import get_analysis
+        from cadgen._internal.fea.analyses.cfd import RE_LIMIT
 
-        return get_analysis(self._engine_name(ctx, inputs))
+        if inputs.regime != "auto":
+            return get_analysis("cfd" if inputs.regime == "laminar" else "cfd_turbulent")
+        setup = get_analysis("cfd").setup_of(ctx, inputs.flow)
+        return get_analysis("cfd" if setup.reynolds <= RE_LIMIT[inputs.flow.kind] else "cfd_turbulent")
 
     # -- the ladder ----------------------------------------------------------------------------------
 
@@ -262,7 +247,7 @@ class FsiAnalysis:
     def apply(self, rung, ctx: SolveContext, inputs: FsiInputs):
         from cadgen._internal.fea import fit
         from cadgen._internal.fea.analyses import get_analysis
-        from cadgen._internal.fea.analyses.cfd import CONTINUE_FROM
+        from cadgen._internal.fea.analyses.cfd import CONTINUE_FROM, iterative_rung
 
         plan = ctx.plan
         engine = self.engine(ctx, inputs)
@@ -280,21 +265,7 @@ class FsiAnalysis:
                             detail={"ramp": list(RAMP), "reynolds": round(setup.reynolds, 2),
                                     **({"schedule": [round(re, 2) for re in plan.re_schedule]} if plan.re_schedule else {})})
         if rung == "iterative":
-            if plan.solver != "direct":
-                return None
-            budget = ctx.budget
-            before = self.estimate(ctx, inputs)
-            plan.solver = "iterative"
-            after = self.estimate(ctx, inputs)
-            memory = before.memory_bytes > budget.memory_bytes
-            saves = after.memory_bytes < 0.95 * before.memory_bytes if memory else after.seconds < 0.95 * before.seconds
-            if not saves:
-                plan.solver = "direct"
-                return None
-            why = "fit in memory" if memory else "finish sooner"
-            return fit.Step("iterative", f"Used iterative solvers (Krylov with multigrid) for the flow and the bending to {why}",
-                            None, None, detail={"solver": "iterative", "from_bytes": int(before.memory_bytes),
-                                                "to_bytes": int(after.memory_bytes)})
+            return iterative_rung(self, ctx, inputs, "Used iterative solvers (Krylov with multigrid) for the flow and the bending")
         if rung == "fluid_coarsen":
             with _fluid_plan(ctx):
                 return engine.apply("fluid_coarsen", ctx, inputs.flow)
@@ -314,41 +285,29 @@ class FsiAnalysis:
     # -- solve ---------------------------------------------------------------------------------------
 
     def solve(self, ctx: SolveContext, inputs: FsiInputs) -> AnalysisResult:
-        import time
-
-        import numpy as np
-
-        from cadgen._internal.fea import fluid_domain
         from cadgen._internal.fea.analyses import get_analysis
-        from cadgen._internal.fea.analyses.cfd import RE_LIMIT, flow_numbers, flow_tracers, reynolds_sentence, wall_to_part
+        from cadgen._internal.fea.analyses.cfd import (
+            RE_LIMIT, flow_numbers, flow_tracers, fluid_mesh_record, mesh_flow, part_result, reynolds_sentence, wall_to_part,
+        )
         from cadgen._internal.fea.analyses.cfd_turbulent import laminar_sentence
-        from cadgen._internal.fea.femspace import FemSpace
+        from cadgen._internal.fea.analyses.static import solved_record
 
         timings: dict[str, float] = {}
-        name = self._engine_name(ctx, inputs)
-        engine = get_analysis(name)
-        turbulent = name == "cfd_turbulent"
+        engine = self.engine(ctx, inputs)
+        turbulent = engine.name == "cfd_turbulent"
         material = ctx.study.material if ctx.study is not None else ctx.materials[0]
         setup = get_analysis("cfd").setup_of(ctx, inputs.flow)   # the same fluid region for either model
         domain = setup.domain
-        timings["fluid_domain_s"] = domain.seconds
         with _fluid_plan(ctx):
             wall, far = engine.sizes(ctx, setup)
-        if ctx.log:
-            ctx.log(f"meshing the {domain.kind} flow region at {wall:.3g} mm" + (f" (free stream {far:.3g} mm)" if far > wall else ""))
-        started = time.perf_counter()
-        fluid = fluid_domain.mesh_fluid(domain, wall, far)
-        reference = FemSpace.build(fluid, 2)
-        timings["fluid_mesh_s"] = time.perf_counter() - started
+        fluid, reference, face_of, row_kind = mesh_flow(ctx, domain, wall, far, timings)
 
         started = time.perf_counter()
-        face_of = {face.index: face for face in domain.faces}
-        row_kind = np.array([face_of[int(o)].kind if int(o) in face_of else "wall" for o in fluid.boundary_ordinal])
         coupling = Coupling(ctx, inputs, engine, turbulent, setup, fluid, reference, face_of, row_kind, material)
         timings["coupling_setup_s"] = time.perf_counter() - started
 
         state = coupling.run()
-        timings.update({k: v for k, v in coupling.timings.items()})
+        timings.update(coupling.timings)
 
         started = time.perf_counter()
         final = state.flow_state
@@ -383,15 +342,11 @@ class FsiAnalysis:
 
         outcome = state.outcome
         fields = {"von_mises": outcome.von_mises, "pressure": pressure, "wall_shear": shear, "displacement": outcome.displacement}
-        from cadgen._internal.fea.analyses.static import solved_record
-
-        study = _StudyView(material, getattr(ctx.study, "margin", 2.0) if ctx.study is not None else 2.0)
+        study = types.SimpleNamespace(material=material, margin=getattr(ctx.study, "margin", 2.0) if ctx.study is not None else 2.0)
         solved = [solved_record(ctx.volume, outcome, study, ctx.ordinal_of, ctx.part_name, inputs.fixtures)]
         regime = "turbulent" if turbulent else "laminar"
-        result = AnalysisResult(
-            dof_locations=ctx.space.dof_locations, vertices=ctx.space.vertices, tets=ctx.space.tets,
-            boundary_quadratic=ctx.space.boundary_quadratic, element_dofs=ctx.space.element_dofs, fields=fields,
-            deformation=outcome.displacement, reactions=list(outcome.reactions), applied=tuple(outcome.applied),
+        return part_result(
+            ctx, fields, deformation=outcome.displacement, reactions=list(outcome.reactions), applied=tuple(outcome.applied),
             dofs=int(final.space.basis.N + final.flow.pressure_basis.N + outcome.dofs),
             solver=(f"partitioned two-way coupling ({state.method}), "
                     f"{'Taylor-Hood RANS k-omega SST' if turbulent else 'Taylor-Hood P2/P1 Navier-Stokes'}, "
@@ -401,9 +356,7 @@ class FsiAnalysis:
                 "post": post, "one_way_post": one_way_post, "reynolds": reynolds, "flow": final.flow, "regime": regime,
                 "state": state, "outcome": outcome, "one_way": coupling.one_way, "yield_MPa": material.yield_strength,
                 "wall_mm": wall, "far_mm": far,
-                "fluid_mesh": {"elements": int(len(fluid.tets)), "nodes": int(len(fluid.nodes)),
-                               "wall_size_mm": round(wall, 4), "far_size_mm": round(far, 4)},
-                "analysis_warnings": analysis_warnings,
+                "fluid_mesh": fluid_mesh_record(fluid, wall, far), "analysis_warnings": analysis_warnings,
                 "analysis_extras": {
                     "regime": regime,
                     **({"reynolds": reynolds} if not turbulent else {}),
@@ -414,10 +367,6 @@ class FsiAnalysis:
                 },
             },
         )
-        return result
-
-    def needs_finer(self, result: AnalysisResult, inputs: FsiInputs, check_results: list[dict]) -> bool:
-        return False
 
     # -- judging -------------------------------------------------------------------------------------
 
@@ -431,60 +380,36 @@ class FsiAnalysis:
     def findings(self, ctx: SolveContext, result: AnalysisResult, inputs: FsiInputs,
                  check_results: list[dict], *, assembly: bool) -> list[dict]:
         from cadgen._internal.fea import checks
-        from cadgen._internal.fea.analyses.cfd import reynolds_sentence
+        from cadgen._internal.fea.analyses.cfd import limit_findings, reynolds_sentence
         from cadgen._internal.fea.analyses.cfd_turbulent import laminar_sentence
 
         found: list[dict] = list(checks.findings(result.solved[0]))
         state = result.scalars["state"]
         if not state.converged:
-            found.append({
-                "check": "fea", "severity": "warning", "type": "coupling_not_converged",
-                "summary": "T" + not_converged_sentence(state.iterations, state.residual, inputs.tolerance)[1:],
-                "description": "raise coupling.max_iterations, lower coupling.relaxation, or ramp the flow (a slower flow first)",
-                "items": [],
-            })
+            found.append(finding(
+                "warning", "coupling_not_converged", "T" + not_converged_sentence(state.iterations, state.residual, inputs.tolerance)[1:],
+                "raise coupling.max_iterations, lower coupling.relaxation, or ramp the flow (a slower flow first)"))
         if state.ramped:
-            found.append({
-                "check": "fea", "severity": "info", "type": "coupling_ramped",
-                "summary": "The coupling grew instead of settling from rest at full speed, so the inflow was ramped up in steps "
-                           f"({', '.join(f'{100 * s:.0f}%' for s in RAMP)}) with a smaller first relaxation",
-                "description": "the steady answer is the same; it was reached in stages", "items": [],
-            })
+            found.append(finding(
+                "info", "coupling_ramped", "The coupling grew instead of settling from rest at full speed, so the inflow was "
+                f"ramped up in steps ({', '.join(f'{100 * s:.0f}%' for s in RAMP)}) with a smaller first relaxation",
+                "the steady answer is the same; it was reached in stages"))
         reynolds = result.scalars["reynolds"]
         turbulent = result.scalars["regime"] == "turbulent"
         if not turbulent and not reynolds["laminar"]:
-            found.append({"check": "fea", "severity": "warning", "type": "reynolds_past_laminar",
-                          "summary": reynolds_sentence(reynolds["value"], reynolds["limit"]),
-                          "description": "the study asked for the laminar model (flow.regime); \"auto\" would solve it turbulent",
-                          "items": []})
+            found.append(finding("warning", "reynolds_past_laminar", reynolds_sentence(reynolds["value"], reynolds["limit"]),
+                                 "the study asked for the laminar model (flow.regime); \"auto\" would solve it turbulent"))
         if turbulent and reynolds["laminar"]:
-            found.append({"check": "fea", "severity": "warning", "type": "reynolds_laminar_range",
-                          "summary": laminar_sentence(reynolds["value"], reynolds["limit"]),
-                          "description": "the study asked for the turbulent model (flow.regime); \"auto\" would solve it laminar",
-                          "items": []})
-        for check in check_results:
-            if check["kind"] != "pressure_drop" or check["status"] == "passes":
-                continue
-            value = f"{check['value']:.4g} {check['unit']}"
-            fails = check["status"] == "fails"
-            found.append({
-                "check": "fea", "severity": "error" if fails else "warning",
-                "type": f"pressure_drop_{'over_limit' if fails else 'close_to_limit'}",
-                "summary": f"The pressure drop is {value}, {'over' if fails else 'close to'} the {check['limit']:g} {check['unit']} allowed",
-                "description": f"pressure drop {value} against a {check['limit']:g} {check['unit']} limit ({check['ratio']:.2f} of it)",
-                "items": [{"text": "the pressure drop", **check["where"]}],
-            })
-        return found
+            found.append(finding("warning", "reynolds_laminar_range", laminar_sentence(reynolds["value"], reynolds["limit"]),
+                                 "the study asked for the turbulent model (flow.regime); \"auto\" would solve it laminar"))
+        return found + limit_findings(check_results, {"pressure_drop": "pressure drop"}, held=False)
 
     # -- what is written -----------------------------------------------------------------------------
 
     def deformation_scale(self, result: AnalysisResult, bbox_diagonal: float, requested: float | None) -> float | None:
-        import numpy as np
+        from cadgen._internal.fea.analyses.cfd import mapped_deformation_scale
 
-        from cadgen._internal.fea.outputs import auto_deformation_scale
-
-        magnitude = np.linalg.norm(result.fields["displacement"], axis=1)
-        return requested or auto_deformation_scale(float(magnitude.max()), bbox_diagonal)
+        return mapped_deformation_scale(result, bbox_diagonal, requested)
 
     def summary(self, result: AnalysisResult, inputs: FsiInputs, check_results: list[dict]) -> dict:
         import numpy as np
@@ -506,7 +431,7 @@ class FsiAnalysis:
         def change(two: float, one: float) -> float | None:
             return round(100.0 * (two - one) / abs(one), 4) if one else None
 
-        summary: dict[str, Any] = {
+        return {
             "flow_kind": inputs.flow.kind,
             "flow_regime": result.scalars["regime"],
             "fluid": {"name": fluid.name, "density_kg_m3": fluid.density_kg_m3, "viscosity_Pa_s": fluid.viscosity_Pa_s},
@@ -525,7 +450,7 @@ class FsiAnalysis:
             "max_von_mises_at_mm": [round(c, 3) for c in solved.peak_at],
             "yield_MPa": solved.yield_MPa,
             "max_displacement_mm": round(two_move, 6),
-            "max_displacement_at_mm": [round(float(c), 3) for c in outcome.dof_locations[int(magnitude.argmax())]],
+            "max_displacement_at_mm": xyz(outcome.dof_locations[int(magnitude.argmax())]),
             "safety_factor": floored(checks.safety_factor(solved)),
             "coupling": {
                 "method": state.method, "iterations": state.iterations, "converged": state.converged,
@@ -545,12 +470,8 @@ class FsiAnalysis:
             },
             "fluid_mesh": dict(result.scalars["fluid_mesh"]),
             "deformation_scale": result.scalars.get("deformation_scale"),
+            "checks": check_results,
         }
-        summary["checks"] = check_results
-        return summary
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} flow and bending"
 
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
         return {"von_mises": (0.0, summary["max_von_mises_MPa"]),
@@ -581,7 +502,7 @@ class FsiAnalysis:
         reynolds, coupling = summary["reynolds"], summary["coupling"]
         versus = summary["two_way_vs_one_way"]
         one = summary["one_way"]
-        lines = [
+        return [
             f"{summary['flow_kind']} {summary['flow_regime']} flow of {summary['fluid']['name']}: Re {reynolds['value']:.4g}, "
             f"coupled two ways with the part's bending",
             f"coupling: {coupling['iterations']} iterations ({coupling['method']}), "
@@ -595,15 +516,6 @@ class FsiAnalysis:
             f"peak von Mises {summary['max_von_mises_MPa']:.4g} MPa"
             + (f", safety factor {summary['safety_factor']:g}" if summary.get("safety_factor") is not None else ""),
         ]
-        return lines
-
-
-@dataclass(frozen=True)
-class _StudyView:
-    """What :func:`..static.solved_record` reads of a study: the material and the margin."""
-
-    material: Any
-    margin: float
 
 
 # -- the coupling ------------------------------------------------------------------------------------
@@ -647,6 +559,7 @@ class Coupling:
     def __init__(self, ctx, inputs: FsiInputs, engine, turbulent: bool, setup, fluid, reference, face_of, row_kind, material):
         import numpy as np
 
+        from cadgen._internal.fea.analyses.cfd import ordinals_of
         from cadgen._internal.fea.femspace import element_mesh
 
         self.ctx, self.inputs, self.engine, self.turbulent, self.setup = ctx, inputs, engine, turbulent, setup
@@ -657,7 +570,7 @@ class Coupling:
         _, self.node_to_dof = element_mesh(fluid, 2)
         self.solver = "iterative" if ctx.plan is not None and ctx.plan.solver == "iterative" else "direct"
         # The fluid's wall rows that are the part's faces, and their part ordinals.
-        ordinal_of_row = np.array([face_of[int(o)].ordinal if int(o) in face_of else 0 for o in fluid.boundary_ordinal])
+        ordinal_of_row = ordinals_of(fluid, face_of)
         self.wall_rows = np.flatnonzero(row_kind == "wall")
         self.wall_ordinal = ordinal_of_row[self.wall_rows]
         self.structure = Structure(ctx.space, ctx.volume, material, inputs.fixtures, ctx.ordinal_of, self.solver)
@@ -689,8 +602,6 @@ class Coupling:
     def flow_at(self, displacement, share: float) -> "FlowState | int":
         """The flow with the part displaced by ``displacement`` (part scalar nodes, 3) at ``share`` of the inflow.
         An int (how many elements folded) when the moved mesh folds over."""
-        import time
-
         import numpy as np
 
         from cadgen._internal.fea import navier_stokes, turbulence
@@ -748,14 +659,9 @@ class Coupling:
         mids = triangles[:, 3:]
         push = self.wall_pressure(space, flow)[:, None] * normal       # (F, 3)
         if self.turbulent:
-            shear = np.zeros((space.scalar_count, 3))
-            if len(flow.wall_nodes):
-                rho = self.inputs.flow.fluid.density_kg_m3 * 1e-12
-                tau = rho * flow.wall_u_tau ** 2
-                slip = flow.wall_slip
-                length = np.linalg.norm(slip, axis=1)
-                shear[flow.wall_nodes] = tau[:, None] * slip / np.where(length > 0, length, 1.0)[:, None]
-            return push + shear[triangles].mean(axis=1)
+            from cadgen._internal.fea.analyses.cfd_turbulent import wall_traction
+
+            return push + wall_traction(space, flow, self.inputs.flow.fluid.density_kg_m3 * 1e-12)[1][triangles].mean(axis=1)
         mu = self.inputs.flow.fluid.viscosity_Pa_s * 1e-6
         gradient = _facet_gradients(space, flow.u, space.facets_of_rows(rows), mids)   # (F, 3 mids, 3, 3)
         strain = gradient + np.swapaxes(gradient, 2, 3)
@@ -764,16 +670,10 @@ class Coupling:
 
     def wall_pressure(self, space, flow):
         """(wall rows,) MPa: the flow's pressure on each wetted wall triangle, its mean over the mid-edge nodes."""
-        import numpy as np
-
-        from cadgen._internal.fea.analyses.cfd import wall_triangles
+        from cadgen._internal.fea.analyses.cfd import pressure_nodes, wall_triangles
 
         triangles, _, _ = wall_triangles(space, self.wall_rows)
-        p = np.zeros(space.scalar_count)
-        p[: space.vertices] = flow.p[: space.vertices]
-        edges = space.mesh.edges
-        p[space.scalar.edge_dofs[0]] = 0.5 * (flow.p[edges[0]] + flow.p[edges[1]])
-        return p[triangles[:, 3:]].mean(axis=1)
+        return pressure_nodes(space, flow.p)[triangles[:, 3:]].mean(axis=1)
 
     # -- the iteration -------------------------------------------------------------------------------
 
@@ -789,14 +689,10 @@ class Coupling:
         self.one_way = {"max_displacement_mm": float(np.linalg.norm(outcome.displacement, axis=1).max()),
                         "max_von_mises_MPa": float(outcome.von_mises.max()), "outcome": outcome}
         self.one_way_post = self.post(first)
-        ramp = self.ctx.plan is not None and "continuation" in self.ctx.plan.taken
-        if ramp:
+        if self.ctx.plan is not None and "continuation" in self.ctx.plan.taken:
             return self.ramped(first, outcome, restarted=False)
-        state = self.iterate(first, outcome, zero, 1.0, inputs.relaxation, inputs.tolerance, inputs.max_iterations)
-        if state.growing:
-            restarted = self.ramped(first, outcome, restarted=True)
-            return restarted
-        return state.state
+        state, growing = self.iterate(first, outcome, zero, 1.0, inputs.relaxation, inputs.tolerance, inputs.max_iterations)
+        return self.ramped(first, outcome, restarted=True) if growing else state
 
     def ramped(self, first, outcome, *, restarted: bool) -> CouplingState:
         """The coupling settled at each share of the inflow in turn, each stage from the one before (scaled)."""
@@ -815,9 +711,8 @@ class Coupling:
                 start = guess * 0.0
                 begin = self.flow_at(start, share)
             bent, _ = self.bend(begin)
-            run = self.iterate(begin, bent, start, share, relaxation, inputs.tolerance * (1.0 if final else STAGE_LOOSEN),
-                               inputs.max_iterations)
-            state = run.state
+            state, _ = self.iterate(begin, bent, start, share, relaxation, inputs.tolerance * (1.0 if final else STAGE_LOOSEN),
+                                    inputs.max_iterations)
             history += state.history
             relaxations += state.relaxations
             iterations += state.iterations
@@ -827,9 +722,9 @@ class Coupling:
         state.flow_solves = self.flow_solves
         return state
 
-    def iterate(self, flow_state, outcome, start, share: float, omega: float, tolerance: float, cap: int) -> "_Run":
+    def iterate(self, flow_state, outcome, start, share: float, omega: float, tolerance: float, cap: int):
         """Fixed-point iteration with Aitken (or fixed) relaxation from the part displaced by ``start``, whose flow is
-        ``flow_state`` and whose bending under it is ``outcome``."""
+        ``flow_state`` and whose bending under it is ``outcome``: its state, and whether it grew instead of settling."""
         import numpy as np
 
         inputs = self.inputs
@@ -904,12 +799,10 @@ class Coupling:
             load_change=load_change if math.isfinite(load_change) else residual_norm, method=inputs.method,
             history=history, relaxations=relaxations, ramped=False, flow_solves=self.flow_solves, inverted=inverted,
         )
-        return _Run(state, growing)
+        return state, growing
 
     def bend(self, flow_state: FlowState):
         """The part's bending under the flow's traction: its outcome and its load vector."""
-        import time
-
         started = time.perf_counter()
         f = self.interface.load(flow_state.traction, flow_state.pressure_nodes, flow_state.shear)
         outcome = self.structure.solve(f)
@@ -921,12 +814,6 @@ class Coupling:
 
         post = flow_numbers(flow_state.space, self.fluid, self.face_of, self.row_kind, flow_state.flow, self.inputs.flow)
         return {"pressure_drop_Pa": post["pressure_drop_Pa"], "force_N": flow_state.force}
-
-
-@dataclass
-class _Run:
-    state: CouplingState
-    growing: bool
 
 
 def _facet_gradients(space, u, facets, mids):
@@ -1262,6 +1149,8 @@ class MeshMotion:
         from skfem import BilinearForm, asm
         from skfem.helpers import dot, grad
 
+        from cadgen._internal.fea.analyses.cfd import openings_of
+
         basis = space.scalar
         volume = np.asarray(basis.dx).sum(axis=1)
         stiffness = (volume.mean() / np.maximum(volume, 1e-300))[:, None] * np.ones_like(np.asarray(basis.dx))
@@ -1280,7 +1169,7 @@ class MeshMotion:
         self.A_fh = A[self.free][:, held]
         self.factor = splu(A[self.free][:, self.free].tocsc()) if len(self.free) else None
         # Rim nodes: on a wall and on an opening or side; they keep off the opening's normal.
-        opening_of = np.array([face_of[int(o)].opening if int(o) in face_of else None for o in fluid.boundary_ordinal], dtype=object)
+        opening_of = openings_of(fluid, face_of)
         normal_axis = np.full(self.count, -1, dtype=np.int64)
         for kind in ("inlet", "outlet", "side"):
             rows = np.flatnonzero(row_kind == kind)

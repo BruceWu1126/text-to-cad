@@ -37,10 +37,8 @@ inside the functions.
 from __future__ import annotations
 
 import math
-import tempfile
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -48,9 +46,9 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ACSolve", "AIR_EPS_R", "AIR_MU_R", "CONDUCTOR_BELOW_OHM_M", "EPS0", "Fed", "INSULATOR_ABOVE_OHM_M", "MU0", "Region",
-    "ac_solve", "air_box", "build_region", "coil_source", "curl_curl", "element_at", "face_area", "face_dofs_p2", "face_mean",
+    "ac_solve", "air_box", "build_region", "coil_source", "curl_curl", "element_at", "face_dofs_p2", "face_mean",
     "flux_load", "lorentz_force", "magnetic_force", "node_gradients", "part_region", "scalar_solve", "skin_depth_mm",
-    "stiffness", "to_part_mesh", "volume_load",
+    "stiffness", "to_part_mesh",
 ]
 
 #: Vacuum permittivity, F/mm (NIST CODATA 2022: 8.8541878188e-12 F/m).
@@ -91,10 +89,6 @@ class Region:
     _p2: Any = field(default=None, repr=False)
 
     @property
-    def AIR(self) -> int:
-        return self.parts
-
-    @property
     def space_hcurl(self):
         """Lowest-order Nédélec elements on the region's (linear) mesh: the vector potential's space."""
         if self._hcurl is None:
@@ -102,14 +96,6 @@ class Region:
 
             self._hcurl = Basis(self.space.mesh, ElementTetN0())
         return self._hcurl
-
-    def face_dofs(self, part: int, ordinal: int) -> "np.ndarray":
-        import numpy as np
-
-        rows = self.face_rows.get((part, ordinal))
-        if rows is None or len(rows) == 0:
-            return np.zeros(0, dtype=np.int64)
-        return np.unique(self.space.boundary_quadratic[rows])
 
     def part_dofs(self, part: int) -> "np.ndarray":
         import numpy as np
@@ -168,33 +154,22 @@ def build_region(shapes: list, *, around_mm, size_mm: float, far_mm: float, orde
     """
     import numpy as np
     from OCP.BRep import BRep_Builder
-    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
-    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
-    from OCP.gp import gp_Pnt
-    from OCP.TopAbs import TopAbs_FACE
-    from OCP.TopExp import TopExp
     from OCP.TopoDS import TopoDS_Compound
-    from OCP.TopTools import TopTools_IndexedMapOfShape
 
-    from cadgen._internal.fea import mesh as part_mesh
     from cadgen._internal.fea.assembly import SharedSolid, glue
-    from cadgen._internal.fea.mesh import FaceFingerprint, VolumeMesh, area_center, require_fea_stack
     from cadgen._internal.fea.femspace import FemSpace
-    from cadgen._internal.step_scene_loader import kernel_messages_on_stderr
+    from cadgen._internal.fea.fluid_domain import box_cut, faces_of, netgen_mesh
+    from cadgen._internal.fea.mesh import FaceFingerprint, VolumeMesh, area_center, require_fea_stack
 
     require_fea_stack()
     started = time.perf_counter()
     low, high = air_box(shapes, around_mm)
-    box = BRepPrimAPI_MakeBox(gp_Pnt(*low), gp_Pnt(*high)).Shape()
     tool = TopoDS_Compound()
     builder = BRep_Builder()
     builder.MakeCompound(tool)
     for shape in shapes:
         builder.Add(tool, shape)
-    cut = BRepAlgoAPI_Cut(box, tool)
-    if not cut.IsDone():
-        raise RuntimeError("the boolean that makes the air around the parts failed")
-    air = cut.Shape()
+    air = box_cut(low, high, tool, "the boolean that makes the air around the parts failed").Shape()
     n = len(shapes)
     try:
         glued = glue([*shapes, air], [(i, n, 0.0) for i in range(n)], 0.1)
@@ -202,12 +177,8 @@ def build_region(shapes: list, *, around_mm, size_mm: float, far_mm: float, orde
         raise ValueError(f"parts {fused.first + 1} and {fused.second + 1} overlap; an electric or magnetic study needs "
                          "parts that touch at most: fix the geometry") from None
 
-    faces = TopTools_IndexedMapOfShape()
-    TopExp.MapShapes_s(glued.shape, TopAbs_FACE, faces)
-    prints = []
-    for k in range(1, faces.Extent() + 1):
-        area, centre = area_center(faces.FindKey(k))
-        prints.append(FaceFingerprint(f"face {k} of the region", k, area, centre))
+    prints = [FaceFingerprint(f"face {k} of the region", k, *area_center(face))
+              for k, face in enumerate(faces_of(glued.shape), 1)]
     # Which part face each glued face is an image of; the air's own faces belong to no part.
     source: dict[int, list[tuple[int, int]]] = {}
     for i in range(n):
@@ -222,25 +193,8 @@ def build_region(shapes: list, *, around_mm, size_mm: float, far_mm: float, orde
         size_field["points"] = [list(map(float, p)) for p in points]
         size_field["radius_mm"] = float(radius_mm)
 
-    import netgen.meshing as ngmesh
-    import netgen.occ as ngocc
-
-    with tempfile.TemporaryDirectory(prefix="cadgen-em-") as tmp:
-        brep = Path(tmp) / "region.brep"
-        part_mesh.write_brep(glued.shape, brep)
-        with kernel_messages_on_stderr():
-            ngmesh.SetMessageImportance(0)
-            geometry = ngocc.OCCGeometry(str(brep))
-            mapping = part_mesh.match_faces(prints, list(geometry.faces), diagonal)
-            keys = {index: [k] for index, k in mapping.items()}
-            mesh = part_mesh.generate_mesh(geometry, ngocc, far, 1.0, order, size_field, keys)
-            coordinates = np.array(mesh.Coordinates(), dtype=float, copy=True)
-            e3 = mesh.Elements3D().NumPy().copy()
-            e2 = mesh.Elements2D().NumPy().copy()
-            del mesh, geometry
-    if len(e3) == 0:
-        raise RuntimeError("the mesher produced no elements for the parts and the air")
-    part_mesh.require_elements(e3, order)
+    coordinates, e3, e2, mapping = netgen_mesh(glued.shape, prints, diagonal, far, order, size_field, "em",
+                                               "the mesher produced no elements for the parts and the air")
     width = 10 if order == 2 else 4
     solid_part = np.array(glued.solid_part, dtype=np.int64)
     domain = solid_part[e3["index"].astype(np.int64) - 1]
@@ -398,14 +352,6 @@ def face_mean(region: Region, rows: "np.ndarray", values: "np.ndarray") -> float
     return float((area * values[nodes].mean(axis=1)).sum() / area.sum())
 
 
-def face_area(region: Region, rows: "np.ndarray") -> float:
-    import numpy as np
-
-    triangles = region.space.boundary_quadratic[rows]
-    corners = region.space.dof_locations[triangles[:, :3]]
-    return float(0.5 * np.linalg.norm(np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0]), axis=1).sum())
-
-
 def flux_load(region: Region, rows: "np.ndarray", total: float) -> "np.ndarray":
     """∫ (total / area) v over the faces of ``rows``: a current spread evenly over its faces."""
     from skfem import LinearForm, asm
@@ -422,20 +368,6 @@ def flux_load(region: Region, rows: "np.ndarray", total: float) -> "np.ndarray":
     return asm(form, boundary)
 
 
-def volume_load(region: Region, density) -> "np.ndarray":
-    """∫ q v over every element, q at the scalar basis's quadrature points."""
-    from skfem import LinearForm, asm
-
-    @LinearForm
-    def form(v, w):
-        return w["q"] * v
-
-    return asm(form, region.space.scalar, q=density)
-
-
-# -- moving fields onto the run's part mesh -------------------------------------------------------------
-
-
 def to_part_mesh(region: Region, values: "np.ndarray", target_space, target_domain: "np.ndarray | None") -> "np.ndarray":
     """A nodal field of an air region carried onto the run's part mesh: each part's nodes take the value of
     the nearest node of the same part in the region (both meshes put a node on every corner of a face)."""
@@ -447,7 +379,7 @@ def to_part_mesh(region: Region, values: "np.ndarray", target_space, target_doma
     domain = np.zeros(len(target_elements), dtype=np.int64) if target_domain is None else np.asarray(target_domain)
     source_locations = region.space.dof_locations
     for part in range(region.parts):
-        source = np.unique(region.space.element_dofs[region.domain == part])
+        source = region.part_dofs(part)
         target = np.unique(target_elements[domain == part])
         if len(source) == 0 or len(target) == 0:
             continue
@@ -646,16 +578,6 @@ def _corner_basis(mesh, element):
     return CellBasis(mesh, element, quadrature=(corners, np.full(4, 0.25 / 6.0)))
 
 
-def _components(edges: "np.ndarray", count: int) -> tuple[int, "np.ndarray"]:
-    """The connected bodies of a set of mesh edges, by node: (count, each node's body)."""
-    import numpy as np
-    import scipy.sparse as sparse
-    from scipy.sparse.csgraph import connected_components
-
-    graph = sparse.coo_matrix((np.ones(len(edges)), (edges[:, 0], edges[:, 1])), shape=(count, count))
-    return connected_components(graph, directed=False)
-
-
 def ac_solve(region: Region, mu_r: list[float], sigma: list[float], omega: float, *, J_s=None,
              fed: list[Fed] | None = None, grounds: list["np.ndarray"] | None = None,
              applied_B: "np.ndarray | None" = None, solver: str | None = None) -> ACSolve:
@@ -676,6 +598,7 @@ def ac_solve(region: Region, mu_r: list[float], sigma: list[float], omega: float
     import numpy as np
     import scipy.sparse as sparse
     import scipy.sparse.linalg as spla
+    from scipy.sparse.csgraph import connected_components
     from skfem import Basis, BilinearForm, ElementTetN0, ElementTetP2, LinearForm, asm
     from skfem.helpers import curl, dot
 
@@ -732,7 +655,9 @@ def ac_solve(region: Region, mu_r: list[float], sigma: list[float], omega: float
     if len(live):
         corners = mesh.t[:, conducting]
         edges = np.concatenate([corners[[a, b]].T for a in range(4) for b in range(a + 1, 4)])
-        count, label = _components(edges, mesh.p.shape[1])
+        nodes = mesh.p.shape[1]
+        graph = sparse.coo_matrix((np.ones(len(edges)), (edges[:, 0], edges[:, 1])), shape=(nodes, nodes))
+        _, label = connected_components(graph, directed=False)
         anchored = set(label[held_phi[held_phi < mesh.p.shape[1]]].tolist())
         for entry in fed:
             body = label[entry.into[entry.into < mesh.p.shape[1]][0]]

@@ -1,23 +1,16 @@
 /**
- * Spinning (lite): a shaft and its discs spinning on bearings, Tier 3. Its result is a series of whirl
- * shapes, one per critical speed ("Critical · 12,400 rpm · forward"; with none in the sweep, the whirls
- * at the top speed), each an orbit: its real part the deformation, its imaginary part beside it
- * (`displacement_im`), which the Whirl routine turns through so every section of the shaft walks its
- * orbit. The part is coloured by its spinning stress at the top speed. Its verdict judges the critical
- * speeds against the operating speeds ("Critical at 12,400 rpm, 14% above the 10,800 rpm top speed"),
- * the whirl's damping (log decrement) and the spinning stress, none of which a load control moves. Its
- * takeaway leads with "Lite · ", and Details lists its limits (linear bearings, bending whirl only). What
- * you see opens on the whirl picker, the field (stress, whirl) and the deformation. Its setup says how it
- * spins ("Spins 0 to 12,000 rpm about Z"), where its bearings are ("Bearings at face 3 and face 9"), the
- * discs and unbalances the study adds, and what it is made of; it reads them from the study the file
- * records (`result.study.rotor`: `spin`, `bearings`, `discs`, `unbalance`).
+ * Spinning (lite), Tier 3: a shaft and its discs spinning on bearings (linear bearings, bending whirl only).
+ * Its series is the whirl shapes, one per critical speed (with none in the sweep, the whirls at the top speed),
+ * each an orbit: its real part the deformation, its imaginary part beside it (`displacement_im`), which Whirl
+ * turns through. The part is coloured by its spinning stress at the top speed. It reads its spin, bearings,
+ * discs and unbalances from the study the file records (`result.study.rotor`).
  */
 import { rpmWords } from "../checkKinds.js";
 import { fieldAndDeformation } from "../controls.js";
 import { plainNumber } from "../numbers.js";
 import { frameControl } from "../series.js";
-import { faceLabel, madeOfRows, wholeRefs } from "../setup.js";
-import { routineOf } from "./stub.js";
+import { faceLabel, group, madeOfRows, wholeRefs } from "../setup.js";
+import { planned, routineOf } from "./stub.js";
 
 /** Whirl: a one-second loop of the chosen whirl shape walking its orbit (re·cos − im·sin), every section at once. */
 export const WHIRL = routineOf("Whirl", "vibrate");
@@ -118,7 +111,7 @@ export function unbalanceRows(result) {
     return { id: `unbalance:${index}`, label, detail: "", wrap: true, summary: `Unbalance ${label}`,
       ...(entry.faces.length ? { faces: entry.faces } : { refs: wholeRefs(result) }) };
   });
-  return rows.length ? [{ id: "unbalance", label: "Unbalance", detail: "", glyph: "load", children: rows }] : [];
+  return group("unbalance", "Unbalance", "load", rows);
 }
 
 /** Study's "Discs added": each disc the study adds to the CAD's ("2.5 kg disc at 150 mm along Z"). */
@@ -129,7 +122,7 @@ export function discRows(result) {
     const refs = wholeRefs(result);
     return { id: `disc:${index}`, label, detail: "", wrap: true, ...(refs.length ? { refs, summary: `Added ${label}` } : {}) };
   });
-  return rows.length ? [{ id: "discs", label: "Discs added", detail: "", glyph: "plane", children: rows }] : [];
+  return group("discs", "Discs added", "plane", rows);
 }
 
 /** Its setup: how it spins, its bearings, the discs and unbalances the study adds, what it is made of. */
@@ -142,21 +135,14 @@ export function whirlControls(result) {
   return [...(whirl ? [whirl] : []), field, deformation];
 }
 
-export default Object.freeze({
-  name: "rotordynamics",
-  tier: 3,
-  word: "Spinning",
-  noun: "this spin",
-  family: null,
-  estimate: false,
+export default planned({
+  name: "rotordynamics", tier: 3, word: "Spinning", noun: "this spin",
   // A critical speed, a log decrement and the stress at the top speed: no load control moves them.
-  scalesWithLoad: false,
-  checks: Object.freeze(["critical_speed", "stability", "stress"]),
-  checkLabels: Object.freeze({ stress: "Spin stress" }),
+  checks: ["critical_speed", "stability", "stress"], checkLabels: { stress: "Spin stress" },
   defaultControls: whirlControls,
   setupGroups: ROTOR_SETUP,
   routine: (result) => (result?.series ? WHIRL : null),
-  markers: Object.freeze(["bearing"]),
-  displayTitle: "Bearings",
+  markers: ["bearing"], displayTitle: "Bearings",
   limitWord: "Lite",
 });
+

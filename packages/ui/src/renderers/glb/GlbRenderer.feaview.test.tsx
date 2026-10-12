@@ -1,7 +1,7 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { BufferAttribute, BufferGeometry, Group, Mesh, Vector3 } from 'three';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 
 // An FEA result's view under the real shell and the real playbar runtime (`useGlbAnimation`, not
 // stood in): Play in preview steps a series' colours through its frames as the playbar's clock runs,
@@ -19,13 +19,15 @@ vi.mock('../../../dist/renderers/kit/shell/ShellViewport.js', () => ({
 vi.mock('../../../dist/renderers/glb/useGlbScene.js', () => ({
   useGlbScene: () => ({ scene: loaded.scene, revision: 'one', busy: false, error: null, progress: null })
 }));
-import GlbRenderer from '../../../dist/renderers/glb/GlbRenderer.js';
+import GlbRenderer, { loadFeaView } from '../../../dist/renderers/glb/GlbRenderer.js';
 import { ViewerElementContext, ViewerHostContext } from '../../../dist/host/context.js';
 import { testHost } from '../../../dist/host/testing/host.js';
 
 // Frames run by hand: each `frame(ms)` runs the callbacks waiting for the next animation frame at that time.
 let waiting: Array<(now: number) => void> = [];
 const frame = (now: number) => act(() => { const due = waiting; waiting = []; due.forEach(callback => callback(now)); });
+// The FEA viewer is its own chunk (`GlbRenderer.lazy.test.tsx`): loaded once here, a result draws as soon as it mounts.
+beforeAll(() => loadFeaView());
 beforeEach(() => {
   waiting = [];
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });

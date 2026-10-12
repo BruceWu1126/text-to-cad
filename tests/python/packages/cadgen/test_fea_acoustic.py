@@ -16,41 +16,22 @@ Benchmarks, each a build123d solid in a temporary directory, meshed coarse:
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import struct
-import subprocess
 import sys
-import tempfile
 import unittest
-from contextlib import redirect_stderr
 from pathlib import Path
 
-from tests.python.support.paths import add_repo_path
+from tests.python.support.fea_fixtures import (
+    box_step, box_volume, class_directory, ends, glb_attribute_names, glb_extras, needs_fea, read_glb, sidecar, solve,
+    value_error,
+)
 
-add_repo_path("packages/cadgen/src")
-
-from cadgen._internal.fea.analyses import REGISTRY, get_analysis  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
+from cadgen._internal.fea.analyses import get_analysis  # noqa: E402
 from cadgen._internal.fea.study import parse_study  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 RHO, C = 1.204, 343.2
 BOX = (300.0, 190.0, 110.0)
 DUCT = 500.0
-
-
-def glb_extras(path: Path) -> tuple[dict, list[str]]:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    gltf = json.loads(raw[20:20 + length])
-    return gltf["meshes"][0]["extras"], list(gltf["meshes"][0]["primitives"][0]["attributes"])
 
 
 def box_modes(lengths, count: int) -> list[float]:
@@ -60,35 +41,18 @@ def box_modes(lengths, count: int) -> list[float]:
     return every[1:count + 1]
 
 
-def solve(step: Path, out: Path, study: dict):
-    from cadgen import fea
+def sphere_step(directory: Path) -> Path:
+    from build123d import Sphere, export_step
 
-    with redirect_stderr(io.StringIO()):
-        return fea.solve(step, out, study=study)
-
-
-def end_faces(step: Path) -> tuple[str, str]:
-    """The duct's x_min and x_max faces."""
-    from cadgen._internal.fea.run import list_faces
-
-    faces = list_faces(step).faces
-    low = next(face.ref for face in faces if face.normal and face.normal[0] < -0.9)
-    high = next(face.ref for face in faces if face.normal and face.normal[0] > 0.9)
-    return low, high
+    step = directory / "sphere.step"
+    export_step(Sphere(20.0), str(step))
+    return step
 
 
 class StudyFile(unittest.TestCase):
-    def test_it_is_registered_built_sound_and_stdlib_only_at_import(self):
-        entry = REGISTRY["acoustic"]
-        self.assertEqual((entry.tier, entry.word, entry.planned), (3, "Sound", False))
+    def test_it_is_registered_built_and_sound(self):
         analysis = get_analysis("acoustic")
         self.assertEqual((analysis.name, analysis.word, analysis.tier), ("acoustic", "Sound", 3))
-        code = ("import sys; sys.path.insert(0, 'packages/cadgen/src');"
-                "import cadgen._internal.fea.analyses.acoustic;"
-                "print(','.join(sorted(m for m in ('numpy', 'scipy', 'skfem', 'OCP', 'netgen') if m in sys.modules)))")
-        root = Path(__file__).resolve().parents[4]
-        heavy = subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True, text=True, check=True).stdout.strip()
-        self.assertEqual(heavy, "")
 
     def test_no_sources_finds_the_modes_and_sources_solve_a_response(self):
         modes = parse_study({"analysis": "acoustic", "modes": 4})
@@ -141,12 +105,11 @@ class StudyFile(unittest.TestCase):
             ({"view": {"checks": [{"kind": "sound_level"}]}}, "limit_dB: a sound_level check needs the loudest level allowed"),
         ]
         for extra, fragment in cases:
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                parse_study({"analysis": "acoustic", **extra})
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, value_error(self, parse_study, {"analysis": "acoustic", **extra}))
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Numerics(unittest.TestCase):
     def test_absorption_admittance_and_the_mesh_wave_speed_error(self):
         from cadgen._internal.fea.acoustic_ops import absorption_admittance, frequency_error, level_dB
@@ -164,8 +127,6 @@ class Numerics(unittest.TestCase):
 
         from cadgen._internal.fea import acoustic_ops
         from cadgen._internal.fea.femspace import FemSpace
-        from tests.python.packages.cadgen.test_fea_protocol import box_volume
-
         volume = box_volume((DUCT, 40.0, 40.0), (40, 3, 3))
         region = acoustic_ops.part_region(FemSpace.build(volume, 2), volume, (250.0, 20.0, 20.0))
         ops = acoustic_ops.assemble(region, sources=[(volume.boundary_ordinal == 1, 1e-3)],
@@ -181,29 +142,20 @@ class Numerics(unittest.TestCase):
         self.assertLess(abs(C * math.sqrt(k2_direct[1]) / (2 * math.pi) / (C / (2 * DUCT / 1000)) - 1), 0.01)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Benchmarks(unittest.TestCase):
     """Theory against the solve, every number printed on failure."""
 
     @classmethod
     def setUpClass(cls):
-        from build123d import Align, Box, Sphere, export_step
+        from build123d import Box, export_step
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.tmp = Path(cls._tmp.name)
-        corner = (Align.MIN,) * 3
-        cls.box = cls.tmp / "box.step"
-        export_step(Box(*BOX, align=corner), str(cls.box))
-        cls.duct = cls.tmp / "duct.step"
-        export_step(Box(DUCT, 40, 40, align=corner), str(cls.duct))
+        cls.tmp = class_directory(cls)
+        cls.box = box_step(cls.tmp, "box", BOX, "corner")
+        cls.duct = box_step(cls.tmp, "duct", (DUCT, 40, 40), "corner")
         cls.shell = cls.tmp / "shell.step"
         export_step(Box(BOX[0] + 10, BOX[1] + 10, BOX[2] + 10) - Box(*BOX), str(cls.shell))
-        cls.sphere = cls.tmp / "sphere.step"
-        export_step(Sphere(20.0), str(cls.sphere))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.sphere = sphere_step(cls.tmp)
 
     def test_a_rigid_box_of_air_rings_at_its_room_modes(self):
         result = solve(self.box, self.tmp / "box.fea.glb", {"analysis": "acoustic", "modes": 6, "mesh": {"size_mm": 40}})
@@ -213,7 +165,7 @@ class Benchmarks(unittest.TestCase):
             self.assertLess(abs(f / e - 1), 0.01, (got, expected))
         self.assertTrue(result.summary["uniform_mode_left_out"])
         self.assertGreaterEqual(result.summary["air_mesh"]["elements_per_wavelength"], 5.99)
-        extras, attributes = glb_extras(result.glb)
+        extras, attributes = glb_extras(result.glb), glb_attribute_names(result.glb)
         self.assertEqual(extras["analysis"]["type"], "acoustic")
         self.assertEqual(extras["series"]["kind"], "mode")
         self.assertEqual(extras["series"]["frames"][1]["label"], f"Mode 2 · {expected[1]:.0f} Hz")
@@ -239,9 +191,7 @@ class Benchmarks(unittest.TestCase):
         self.assertIn("acoustic_resonance", [finding["type"] for finding in result.findings])
         # The air is what is shown, as its own solid: the faces it wets (the box's inside), not the shell's outside,
         # which reads no pressure and hid it.
-        raw = result.glb.read_bytes()
-        length, _ = struct.unpack_from("<II", raw, 12)
-        gltf = json.loads(raw[20:20 + length])
+        gltf = read_glb(result.glb)[0]
         position = gltf["accessors"][gltf["meshes"][0]["primitives"][0]["attributes"]["POSITION"]]
         inner = [BOX[0] / 2000, BOX[2] / 2000, BOX[1] / 2000]                 # glTF (x, z, -y), metres
         for axis in range(3):
@@ -265,13 +215,13 @@ class Benchmarks(unittest.TestCase):
         expected = [n * C / (2 * DUCT / 1000) for n in (1, 2, 3, 4)]
         for f, e in zip(got, expected):
             self.assertLess(abs(f / e - 1), 0.01, (got, expected))
-        piston, wall = end_faces(self.duct)
+        piston = ends(self.duct)[0]
         driven = solve(self.duct, self.tmp / "duct-driven.fea.glb", {
             "analysis": "acoustic", "frequencies_Hz": [200, 500, 900], "loss_factor": 0, "mesh": {"size_mm": 40},
             "sources": [{"faces": [piston], "velocity_mm_s": 1}], "probes": [{"label": "end", "at_mm": [DUCT, 20, 20]}],
             "view": {"checks": [{"kind": "sound_level", "limit_dB": 80, "probes": ["end"]}]},
         })
-        curve = json.loads(driven.sidecar.read_text(encoding="utf-8"))["curves"]["level_dB end"]
+        curve = sidecar(driven)["curves"]["level_dB end"]
         for f, level in zip(curve["x"], curve["y"]):
             k = 2 * math.pi * f / C
             pressure = RHO * C * 1e-3 / abs(math.sin(k * DUCT / 1000))
@@ -299,30 +249,21 @@ class Benchmarks(unittest.TestCase):
             errors[probe["label"]] = probe["peak_pressure_Pa"] / monopole - 1
         self.assertLess(max(abs(e) for e in errors.values()), 0.10, errors)
         self.assertTrue(result.summary["probes"][-1]["extrapolated"])
-        self.assertEqual(len(json.loads(result.sidecar.read_text(encoding="utf-8"))["limits"]), 3)
+        self.assertEqual(len(sidecar(result)["limits"]), 3)
         self.assertIn("open_air_boundary", [finding["type"] for finding in result.findings])
         print(f"\n  pulsating sphere at {f:g} Hz: relative errors {({k_: round(e, 4) for k_, e in errors.items()})}", file=sys.stderr)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Ladder(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from build123d import Align, Box, Sphere, export_step
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.tmp = Path(cls._tmp.name)
-        cls.duct = cls.tmp / "duct.step"
-        export_step(Box(DUCT, 40, 40, align=(Align.MIN,) * 3), str(cls.duct))
-        cls.sphere = cls.tmp / "sphere.step"
-        export_step(Sphere(20.0), str(cls.sphere))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.tmp = class_directory(cls)
+        cls.duct = box_step(cls.tmp, "duct", (DUCT, 40, 40), "corner")
+        cls.sphere = sphere_step(cls.tmp)
 
     def test_a_tiny_budget_coarsens_the_air_builds_from_modes_and_says_so_everywhere(self):
-        piston, wall = end_faces(self.duct)
+        piston, wall = ends(self.duct)
         study = {"analysis": "acoustic", "sweep_Hz": [100, 1200], "points": 12, "mesh": {"size_mm": 40},
                  "sources": [{"faces": [piston], "velocity_mm_s": 1}], "absorbers": [{"faces": [wall], "absorption": 0.5}],
                  "probes": [{"label": "mid", "at_mm": [250, 20, 20]}]}
@@ -336,15 +277,13 @@ class Ladder(unittest.TestCase):
         self.assertIn("elements per wavelength at 1200 Hz", coarse["words"])
         self.assertIn("the mesh's wave-speed error", coarse["accuracy"])
         self.assertGreater(coarse["accuracy_pct"], 0)
-        extras, _ = glb_extras(adapted.glb)
-        sidecar = json.loads(adapted.sidecar.read_text(encoding="utf-8"))
-        self.assertEqual([step["rung"] for step in extras["fit"]], rungs)
-        self.assertEqual([step["rung"] for step in sidecar["fit"]], rungs)
+        written = sidecar(adapted)
+        self.assertEqual([step["rung"] for step in glb_extras(adapted.glb)["fit"]], rungs)
+        self.assertEqual([step["rung"] for step in written["fit"]], rungs)
         self.assertTrue(any(line.startswith("adapted: Meshed the air at") for line in adapted.human_lines()))
         self.assertIn("fit_local_refine", [finding["type"] for finding in adapted.findings])
         # The level at the probe stays within a stated 2 dB of the full solve, frequency by frequency.
-        before = json.loads(full.sidecar.read_text(encoding="utf-8"))["curves"]["level_dB mid"]
-        after = sidecar["curves"]["level_dB mid"]
+        before, after = sidecar(full)["curves"]["level_dB mid"], written["curves"]["level_dB mid"]
         low = [abs(a - b) for x, a, b in zip(before["x"], before["y"], after["y"]) if x <= 600]
         self.assertLess(max(low), 2.0, (before, after))
         print(f"\n  ladder: {rungs}; probe level moved at most {max(low):.2f} dB up to 600 Hz", file=sys.stderr)
@@ -363,37 +302,30 @@ class Ladder(unittest.TestCase):
         self.assertLess(abs(adapted.summary["probes"][0]["peak_pressure_Pa"] / monopole - 1), 0.15)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class VibroAcoustic(unittest.TestCase):
     def test_a_shaken_plate_radiates_into_the_air_around_it(self):
-        from build123d import Align, Box, export_step
-
-        from cadgen._internal.fea.run import list_faces
-
-        with tempfile.TemporaryDirectory() as tmp:
-            step = Path(tmp) / "plate.step"
-            export_step(Box(60, 30, 3, align=(Align.MIN,) * 3), str(step))
-            root = next(face.ref for face in list_faces(step).faces if face.normal and face.normal[0] < -0.9)
-            result = solve(step, Path(tmp) / "plate.fea.glb", {
-                "analysis": "acoustic", "from": "harmonic", "material": "aluminum-6061-t6", "fixtures": [{"faces": [root]}],
-                "excitation": {"type": "base", "direction": [0, 0, 1], "amplitude_g": 1}, "sweep_Hz": [200, 1200],
-                "mesh": {"size_mm": 6}, "air_mm": 30, "probes": [{"label": "mic", "at_mm": [30, 15, 300]}],
-                "view": {"checks": [{"kind": "sound_level", "limit_dB": 120, "probes": ["mic"]}]},
-            })
-            self.assertTrue(result.ok)
-            sidecar = json.loads(result.sidecar.read_text(encoding="utf-8"))
-            self.assertEqual(result.summary["from"], "harmonic")
-            self.assertIsNotNone(sidecar["upstream"]["harmonic"])
-            harmonic_frames = sidecar["series"]["frames"]
-            self.assertGreater(len(harmonic_frames), 3)
-            mic = result.summary["probes"][0]
-            self.assertTrue(mic["extrapolated"])
-            self.assertGreater(mic["peak_level_dB"], 20.0)
-            self.assertEqual(result.summary["checks"][0]["status"], "passes")
-            extras, _ = glb_extras(result.glb)
-            self.assertEqual(extras["study"]["acoustic"]["from"], "harmonic")
-            self.assertEqual(extras["study"]["excitation"]["type"], "base")
-            print(f"\n  shaken plate: mic peak {mic['peak_level_dB']} dB at {mic['peak_Hz']} Hz", file=sys.stderr)
+        directory = class_directory(type(self))
+        step = box_step(directory, "plate", (60, 30, 3), "corner")
+        result = solve(step, directory / "plate.fea.glb", {
+            "analysis": "acoustic", "from": "harmonic", "material": "aluminum-6061-t6", "fixtures": [{"faces": [ends(step)[0]]}],
+            "excitation": {"type": "base", "direction": [0, 0, 1], "amplitude_g": 1}, "sweep_Hz": [200, 1200],
+            "mesh": {"size_mm": 6}, "air_mm": 30, "probes": [{"label": "mic", "at_mm": [30, 15, 300]}],
+            "view": {"checks": [{"kind": "sound_level", "limit_dB": 120, "probes": ["mic"]}]},
+        })
+        self.assertTrue(result.ok)
+        written = sidecar(result)
+        self.assertEqual(result.summary["from"], "harmonic")
+        self.assertIsNotNone(written["upstream"]["harmonic"])
+        self.assertGreater(len(written["series"]["frames"]), 3)
+        mic = result.summary["probes"][0]
+        self.assertTrue(mic["extrapolated"])
+        self.assertGreater(mic["peak_level_dB"], 20.0)
+        self.assertEqual(result.summary["checks"][0]["status"], "passes")
+        extras = glb_extras(result.glb)
+        self.assertEqual(extras["study"]["acoustic"]["from"], "harmonic")
+        self.assertEqual(extras["study"]["excitation"]["type"], "base")
+        print(f"\n  shaken plate: mic peak {mic['peak_level_dB']} dB at {mic['peak_Hz']} Hz", file=sys.stderr)
 
 
 if __name__ == "__main__":

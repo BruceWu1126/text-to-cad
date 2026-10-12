@@ -10,15 +10,14 @@ ordinals, the cut faces given :data:`PLANE_ORDINAL` + the plane's index), and
 :func:`unfold_volume` / :func:`unfold_fields` mirror the solved half back into
 the whole part for the GLB, the checks and the findings.
 
-The mirror check compares every face's area, kind and centre with a face at
-its mirror image (a part is symmetric when every face has its image). OCP
-imports live inside the functions.
+The mirror check compares every face's area, kind and centre with a face at its mirror image (a part is symmetric when
+every face has its image). OCP imports live inside the functions.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import numpy as np
@@ -65,12 +64,9 @@ class Plane:
 
 
 def _centre_of_mass(shape) -> tuple[float, float, float]:
-    from OCP.BRepGProp import BRepGProp
-    from OCP.GProp import GProp_GProps
+    from cadgen._internal.fea.assembly import gprops
 
-    props = GProp_GProps()
-    BRepGProp.VolumeProperties_s(shape, props)
-    c = props.CentreOfMass()
+    c = gprops(shape, "Volume").CentreOfMass()
     return (c.X(), c.Y(), c.Z())
 
 
@@ -228,6 +224,4 @@ def unfold_fields(plane: Plane, vertices: int, locations: "np.ndarray", keep: "n
 
 def unfold_force(plane: Plane, force) -> tuple[float, float, float]:
     """A force on the half plus its mirror image: the whole part's."""
-    out = [float(c) for c in force]
-    out[plane.component] = 0.0
-    return tuple(2.0 * c if k != plane.component else 0.0 for k, c in enumerate(out))
+    return tuple(2.0 * float(c) if k != plane.component else 0.0 for k, c in enumerate(force))

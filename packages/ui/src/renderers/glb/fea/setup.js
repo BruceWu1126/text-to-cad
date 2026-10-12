@@ -21,7 +21,7 @@ export function faceLabel(ref) {
 export const spaced = (name) => String(name).replace(/_/g, " ");
 
 /** Faces after a word: "face 17", "faces 17, 18". */
-function facesWords(refs) {
+export function facesWords(refs) {
   const names = refs.map((ref) => faceNumber(ref) ?? ref);
   return `${names.length === 1 ? "face" : "faces"} ${names.join(", ")}`;
 }
@@ -99,6 +99,34 @@ export function faceTitle(result, ref) {
 /** The whole result, for a prompt: its occurrence, else every part it holds. */
 export const wholeRefs = (result) => (result.occurrence ? [result.occurrence] : result.parts.map((part) => part.ref).filter(Boolean));
 
+/** A setup group: its heading row over these rows, or none where there are no rows. */
+export const group = (id, label, glyph, rows) => (rows.length ? [{ id, label, detail: "", glyph, children: rows }] : []);
+
+/** These groups with each row under them rewritten by `row`. */
+export const mapRows = (groups, row) => groups.map((entry) => ({ ...entry, children: entry.children.map(row) }));
+
+/** A row about the whole part (no faces of its own), chosen with the whole part. */
+export function wholeRow(result, id, label, summary, hint = "") {
+  const refs = wholeRefs(result);
+  return { id, label, detail: "", wrap: true, ...(hint ? { hint } : {}), ...(refs.length ? { refs, summary } : {}) };
+}
+
+/** Every fixed face, else the whole part, as a row's choice: where a base shake comes in. null for neither. */
+export function heldRefs(result) {
+  const faces = (result.study?.fixtures || []).flatMap((fixture) => fixture.faces);
+  return faces.length ? { faces } : wholeRefs(result).length ? { refs: wholeRefs(result) } : null;
+}
+
+/** One row per entry (`label`, optional `hint`, `summary(faces)`), its faces under it, shut until opened. */
+export function faceEntryRows(result, id, entries) {
+  return entries.map((entry, index) => ({
+    id: `${id}:${index}`, label: entry.label, detail: "", faces: entry.faces, summary: entry.summary(entry.faces), collapsed: true,
+    ...(entry.hint ? { hint: entry.hint } : {}),
+    children: entry.faces.map((ref) => ({ id: `${id}:${index}:${ref}`, label: faceTitle(result, ref), detail: "", faces: [ref], wrap: true,
+      summary: entry.summary([ref]) })),
+  }));
+}
+
 /**
  * Study's "Held at": one row per fixed face, its name alone ("Face 9", "base · face 9"), under the
  * fixture glyph; then, right after it, "Slides on" (`slidesOnRows`), so every analysis that says where
@@ -109,7 +137,7 @@ export function heldRows(result) {
   const fixed = study.fixtures.flatMap((fixture, index) => (isRoller(fixture) ? [] : fixture.faces.map((ref) => ({
     id: `fixed:${index}:${ref}`, label: faceTitle(result, ref), detail: "", faces: [ref], summary: faceSummary(study, ref), wrap: true,
   }))));
-  return [...(fixed.length ? [{ id: "fixed", label: "Held at", detail: "", glyph: "fixture", children: fixed }] : []), ...slidesOnRows(result)];
+  return [...group("fixed", "Held at", "fixture", fixed), ...slidesOnRows(result)];
 }
 
 /**
@@ -123,7 +151,7 @@ export function slidesOnRows(result) {
     id: `roller:${index}:${ref}`, label: faceTitle(result, ref), detail: "", faces: [ref], summary: faceSummary(study, ref), wrap: true,
     hint: "May slide along the face, not move off it",
   })) : []));
-  return rows.length ? [{ id: "roller", label: "Slides on", detail: "", glyph: "roller", children: rows }] : [];
+  return group("roller", "Slides on", "roller", rows);
 }
 
 /**
@@ -150,8 +178,7 @@ export function pushedRows(result) {
     return { id: `body:${index}`, label, detail: "", ...(load.type === "acceleration" ? { hint: "Accelerated: every part of it pushed the other way" } : {}),
       ...(refs.length ? { refs, summary } : {}) };
   });
-  const loads = [...faceLoads, ...bodyLoads];
-  return loads.length ? [{ id: "loads", label: "Pushed", detail: "", glyph: "load", children: loads }] : [];
+  return group("loads", "Pushed", "load", [...faceLoads, ...bodyLoads]);
 }
 
 /** A body load as its row says it: "1 g down", "5 g along +X". */
@@ -173,7 +200,7 @@ function faceEntryGroup(result, { id, label, glyph, entries }) {
         summary: study.fixtures.some((fixture) => fixture.faces.includes(ref)) ? faceSummary(study, ref) : words.summary([ref]) })),
     };
   });
-  return rows.length ? [{ id, label, detail: "", glyph, children: rows }] : [];
+  return group(id, label, glyph, rows);
 }
 
 /** Study's "Kept at", under a thermometer: each fixed temperature ("25 °C"), its faces under it. */
@@ -240,8 +267,7 @@ export function shakenRows(result) {
   if (!shake?.kind || shake.kind === "force") return [];
   const along = shake.direction ? ` along ${axisWords(shake.direction)}` : "";
   const label = shake.kind === "psd" ? `At random${along}` : shake.kind === "srs" ? `A shock${along}` : `${shake.amplitudeG === null ? "Shaken" : `${plainNumber(shake.amplitudeG)} g`}${along}`;
-  const faces = study.fixtures.flatMap((fixture) => fixture.faces);
-  const refs = faces.length ? { faces } : wholeRefs(result).length ? { refs: wholeRefs(result) } : null;
+  const refs = heldRefs(result);
   return [{ id: "shaken", label: "Shaken", detail: "", glyph: "wave", children: [{ id: "shaken:0", label, detail: "", wrap: true,
     ...(refs ? { ...refs, summary: `Shaken where it is held: ${label.charAt(0).toLowerCase()}${label.slice(1)}` } : {}) }] }];
 }
@@ -282,7 +308,7 @@ export function flowRows(result) {
     ...flow.outlets.map((outlet, index) => row(`outlet:${index}`,
       `Out${outlet.pressure === null ? "" : ` at ${plainNumber(outlet.pressure)} Pa`}${outlet.opening ? `, ${openingWords(outlet.opening) || outlet.opening}` : ""}`)),
   ];
-  return rows.length ? [{ id: "flow", label: "Flow in/out", detail: "", glyph: "flow", children: rows }] : [];
+  return group("flow", "Flow in/out", "flow", rows);
 }
 
 /** Study's "Rigid floor", under a plane: each rigid plane, which way it faces, chosen with the whole part. */
@@ -314,16 +340,17 @@ export function madeOfRows(result) {
   const each = result.parts.map((part) => part.material || fallback).filter(Boolean);
   const counts = new Map();
   for (const name of each) counts.set(name, (counts.get(name) || 0) + 1);
+  // Each material with the parts made of it, in the parts' order.
+  const byMaterial = new Map();
+  for (const part of result.parts) {
+    const name = part.material || fallback;
+    if (name) byMaterial.set(name, [...(byMaterial.get(name) || []), spaced(part.name || part.ref)]);
+  }
   let label = fallback;
   let hint = "";
   if (counts.size === 1) label = each[0];
   else if (counts.size > 1 && counts.size <= INLINE_MATERIALS) {
-    const partsOf = new Map();
-    for (const part of result.parts) {
-      const name = part.material || fallback;
-      if (name) partsOf.set(name, [...(partsOf.get(name) || []), spaced(part.name || part.ref)]);
-    }
-    label = [...partsOf].map(([name, names]) => (names.length < 3 ? `${name} ${names.join(" and ")}` : `${name} (${names.length} parts)`)).join(", ");
+    label = [...byMaterial].map(([name, names]) => (names.length < 3 ? `${name} ${names.join(" and ")}` : `${name} (${names.length} parts)`)).join(", ");
   } else if (counts.size > 1) {
     const [top, count] = [...counts].sort((a, b) => b[1] - a[1])[0];
     label = count * 2 > each.length ? `Mostly ${top}` : `${counts.size} materials`;
@@ -333,11 +360,6 @@ export function madeOfRows(result) {
   // Chosen, it carries the whole result into a prompt, each material with the parts made of it.
   const refs = result.parts.length ? result.parts.map((part) => part.ref).filter(Boolean) : wholeRefs(result);
   const yieldMPa = result.study.material?.yieldMPa;
-  const byMaterial = new Map();
-  for (const part of result.parts) {
-    const name = part.material || fallback;
-    if (name) byMaterial.set(name, [...(byMaterial.get(name) || []), spaced(part.name || part.ref)]);
-  }
   const summary = byMaterial.size > 1
     ? `Made of ${[...byMaterial].map(([name, names]) => `${name} (${names.join(", ")})`).join(" and ")}`
     : `Made of ${counts.size === 1 ? each[0] : label}${counts.size <= 1 && yieldMPa !== null && yieldMPa !== undefined ? ` (yield ${plainNumber(yieldMPa)} MPa)` : ""}`;

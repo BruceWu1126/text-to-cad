@@ -1,32 +1,23 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
 import { checkLine, checkTitle, hoursWords } from '../checkKinds.js';
 import { fieldWord } from '../fields.js';
-import { feaControls, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, feaVerdict, studyRows } from '../../feaResult.js';
 import { activeFrame, activeFrameIndex } from '../series.js';
 import { heldRows, madeOfRows, pushedRows } from '../setup.js';
 import { feaAnalysis } from './index.js';
 import creep, { CREEP_SETUP, PLAY, runawayCaption } from './creep.js';
+import { feaFile, plain, vec } from '../../__tests__/feaFile.js';
 
 const LIMIT = 'Isotropic, small strain: creep keeps the volume and follows the von Mises stress; rotations stay small';
 
 // A cantilever held for 10,000 h, as cadgen writes it: three time frames, the end the default, its stress relaxing.
 function heldResult(extras: Record<string, unknown> = {}) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.04, 0, 0, 0, 0.006, 0]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_von_mises', new BufferAttribute(new Float32Array([67, 10, 30]), 1));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_creep_strain', new BufferAttribute(new Float32Array([0, 0, 0]), 1));
-  for (const index of [1, 2]) {
-    geometry.setAttribute(`_von_mises_f${index}`, new BufferAttribute(new Float32Array([67 - 9 * index, 10, 30]), 1));
-    geometry.setAttribute(`_displacement_f${index}`, new BufferAttribute(new Float32Array([0, 0, 0, 0, 0, -0.00008 * index, 0, 0, 0]), 3));
-    geometry.setAttribute(`_creep_strain_f${index}`, new BufferAttribute(new Float32Array([0.4 * index, 0, 0.1]), 1));
-  }
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 1]), 1));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  const frames = Object.fromEntries([1, 2].flatMap((index) => [[`_von_mises_f${index}`, [67 - 9 * index, 10, 30]],
+    [`_displacement_f${index}`, vec([0, 0, 0, 0, 0, -0.00008 * index, 0, 0, 0])], [`_creep_strain_f${index}`, [0.4 * index, 0, 0.1]]]));
+  return feaFile({
+    position: [0, 0, 0, 0.04, 0, 0, 0, 0.006, 0], _von_mises: [67, 10, 30], _displacement: vec(9), _creep_strain: [0, 0, 0], ...frames,
+    _face: [0, 0, 1],
+  }, {
     generator: 'cadgen fea', name: 'bar creep', deformation_scale: 19, faces: ['#o1.f1', '#o1.f2'], occurrence: '#o1',
     duration_h: 10000, reached_h: 10000, stopped: false,
     analysis: { type: 'creep', tier: 3, word: 'Creep', estimate: false, limits: [LIMIT], noun: 'this load', reference_C: null, warnings: [] },
@@ -49,9 +40,6 @@ function heldResult(extras: Record<string, unknown> = {}) {
     findings: [],
     ...extras,
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 describe('creep', () => {
@@ -106,7 +94,6 @@ describe('creep', () => {
   it('words its check as cadgen writes it', () => {
     const check = { kind: 'creep_strain', value: 0.8, shown: 0.8, limit: 1, unit: '%', at: { frame: 2, value: 10000, unit: 'h' } };
     expect(['fails', 'close', 'passes'].map((status) => checkTitle(check, status))).toEqual(['Creeps too far', 'Close to the limit', 'Holds its shape']);
-    const plain = (text: string) => text.replace(/[  ]/g, ' ');
     expect(plain(checkLine(check))).toBe('0.8 % creep after 10,000 h, limit 1 %');
     expect(plain(checkLine({ ...check, at: { frame: 1, value: 250, unit: 'h' } }))).toBe('0.8 % creep after 250 h, limit 1 %');
     expect(plain(checkLine({ ...check, at: undefined }))).toBe('0.8 % creep, limit 1 %');

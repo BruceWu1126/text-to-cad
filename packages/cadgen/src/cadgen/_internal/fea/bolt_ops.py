@@ -356,12 +356,11 @@ def locate(space: "FemSpace", boundary_ordinal: "np.ndarray", node_part: "np.nda
         # stepped part has several): the face the head (nut) sits on.
         edge = np.linalg.norm(points[corners_of[:, 0]] - points[corners_of[:, 1]], axis=1)
         near = (n @ outward >= ALONG) & (radius_of(centroid_c) <= outer + edge)
-        if not near.any():
-            raise ValueError(f"{where}: no face of the {word} part faces outward around the hole, under the "
-                             f"{size.head:.3g} mm the {size.name} {word} bears on")
-        along = centroid_c @ outward
-        top = float(along[near].max())
-        found = _bearing(space, candidates[near & (np.abs(along - top) <= PLANE_SHARE * size.d + 1e-9)], annulus)
+        found = None
+        if near.any():
+            along = centroid_c @ outward
+            top = float(along[near].max())
+            found = _bearing(space, candidates[near & (np.abs(along - top) <= PLANE_SHARE * size.d + 1e-9)], annulus)
         if found is None:
             raise ValueError(f"{where}: no face of the {word} part faces outward around the hole, under the "
                              f"{size.head:.3g} mm the {size.name} {word} bears on")

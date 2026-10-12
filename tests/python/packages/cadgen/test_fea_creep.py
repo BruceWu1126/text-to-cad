@@ -17,29 +17,16 @@ STEP. Parse tests are stdlib only; the solves need the fea extra.
 
 from __future__ import annotations
 
-import io
-import json
-import struct
 import tempfile
 import unittest
-from contextlib import redirect_stderr
 from pathlib import Path
 
-from tests.python.support.paths import add_repo_path
+from tests.python.support.fea_fixtures import box_step, ends, glb_extras, needs_fea, sidecar, solve
 
-add_repo_path("packages/cadgen/src")
-
-from cadgen._internal.fea.analyses import REGISTRY, get_analysis  # noqa: E402
+from cadgen._internal.fea.analyses import get_analysis  # noqa: E402
 from cadgen._internal.fea.analyses.creep import DEFAULT_STEPS, hours_label  # noqa: E402
 from cadgen._internal.fea.materials import material_from_spec  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
 from cadgen._internal.fea.study import parse_study  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 E, NU = 200_000.0, 0.3
 # Illustrative Norton constants (not a grade's data): 100 MPa creeps 1.875e-6 per hour.
@@ -54,7 +41,6 @@ def _study(**more) -> dict:
 
 class StudyFile(unittest.TestCase):
     def test_it_is_built_and_takes_static_fixtures_and_loads_a_duration_and_a_creep_check(self):
-        self.assertFalse(REGISTRY["creep"].planned)
         parsed = parse_study(_study())
         inputs = parsed.inputs
         self.assertEqual((parsed.analysis, inputs.duration_h, inputs.steps, inputs.temperature_C), ("creep", 1000.0, DEFAULT_STEPS, None))
@@ -109,7 +95,7 @@ class StudyFile(unittest.TestCase):
         self.assertEqual([hours_label(t) for t in (0.0, 2.5, 250.0, 10_000.0)], ["0 h", "2.5 h", "250 h", "10,000 h"])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class NortonLaw(unittest.TestCase):
     def test_the_tangent_is_the_derivative_of_the_stress(self):
         import numpy as np
@@ -199,9 +185,10 @@ def _march(space, held, external, material, duration, *, u0=None, steps=DEFAULT_
     return problem, path, frames, curve
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Bars(unittest.TestCase):
     STRESS, HOURS = 100.0, 1000.0
+    benchmark: dict = {}
 
     def test_a_bar_under_constant_stress_creeps_a_sigma_to_the_n_t(self):
         space, held, _, pull, stretch = _bar()
@@ -218,7 +205,6 @@ class Bars(unittest.TestCase):
                 self.assertAlmostEqual(stretch(frames[0][1]) / (self.STRESS / E), 1.0, delta=1e-6)
                 self.assertEqual((path.rejected, path.stopped), (0, False))
                 self.assertEqual(frames[-1][0], self.HOURS)
-                self.__class__.benchmark = getattr(self.__class__, "benchmark", {})
                 self.benchmark[f"constant stress m={m}"] = (creep, exact)
 
     def test_a_bar_held_at_a_fixed_stretch_relaxes_as_the_closed_form(self):
@@ -243,35 +229,25 @@ class Bars(unittest.TestCase):
                 # The stress falls frame by frame: relaxation shows in the series.
                 peaks = [float(vm.max()) for _, _, vm, _ in frames]
                 self.assertTrue(all(b <= a + 1e-9 for a, b in zip(peaks, peaks[1:])))
-                self.__class__.benchmark = getattr(self.__class__, "benchmark", {})
                 self.benchmark[f"relaxation adaptive={adaptive} ({path.steps} steps, {path.rejected} cut)"] = (relaxed, exact)
 
     @classmethod
     def tearDownClass(cls):
-        for name, (got, exact) in getattr(cls, "benchmark", {}).items():
+        for name, (got, exact) in cls.benchmark.items():
             print(f"creep benchmark {name}: {got:.6g} against {exact:.6g} ({(got / exact - 1) * 100:+.2f} %)")
 
 
-def _glb(path: Path) -> dict:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    return json.loads(raw[20:20 + length])
+def _cantilever(directory: Path, **more):
+    """A 40 x 6 x 6 mm creeping bar clamped at x = 0 and loaded down at its tip, held 10,000 h; its creep law is the 600 °C one."""
+    step = box_step(directory, "bar", (40.0, 6.0, 6.0), "corner")
+    fixed, tip = ends(step)
+    study = {"analysis": "creep", "material": {**CREEPING, "creep": {**CREEPING["creep"], "temperature_C": 600}},
+             "mesh": {"size_mm": 3.0}, "duration_h": 10_000, "steps": 8,
+             "fixtures": [{"faces": [fixed]}], "loads": [{"faces": [tip], "type": "force", "vector_N": [0, 0, -60]}], **more}
+    return solve(step, directory / "bar.fea.glb", study)
 
 
-def _box(directory: Path, name: str, size: tuple[float, float, float], axis: int) -> tuple[Path, str, str]:
-    """A box written to a STEP, and its two end faces along ``axis`` (low, high)."""
-    from build123d import Align, Box, export_step
-
-    from cadgen import fea
-
-    step = directory / f"{name}.step"
-    export_step(Box(*size, align=(Align.MIN, Align.MIN, Align.MIN)), str(step))
-    ends = {face.center_mm[axis]: face.ref for face in fea.faces(step).faces
-            if face.normal is not None and abs(abs(face.normal[axis]) - 1) < 1e-6}
-    return step, ends[min(ends)], ends[max(ends)]
-
-
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Ladder(unittest.TestCase):
     def test_adaptive_steps_cut_the_estimate(self):
         from cadgen._internal.fea import fit
@@ -295,20 +271,12 @@ class Ladder(unittest.TestCase):
         # passing on the hours never solved.
         from unittest import mock
 
-        from cadgen import fea
         from cadgen._internal.fea import timestep
 
-        with tempfile.TemporaryDirectory() as name:
-            directory = Path(name)
-            step, fixed, tip = _box(directory, "bar", (40.0, 6.0, 6.0), 0)
-            study = {"analysis": "creep", "material": {**CREEPING, "creep": {**CREEPING["creep"], "temperature_C": 600}},
-                     "mesh": {"size_mm": 3.0}, "duration_h": 10_000, "temperature_C": 600, "steps": 8,
-                     "fixtures": [{"faces": [fixed]}], "loads": [{"faces": [tip], "type": "force", "vector_N": [0, 0, -60]}],
-                     "fit": {"seconds": 1e-6, "allow": []},
-                     "view": {"checks": [{"kind": "creep_strain", "limit_percent": 50}, {"kind": "displacement", "limit_mm": 500}]}}
-            with mock.patch.object(timestep, "LIMIT_FLOOR_S", 0.0), redirect_stderr(io.StringIO()):
-                result = fea.solve(step, directory / "bar.fea.glb", study=study)
-            extras = _glb(result.glb)["meshes"][0]["extras"]
+        with tempfile.TemporaryDirectory() as name, mock.patch.object(timestep, "LIMIT_FLOOR_S", 0.0):
+            result = _cantilever(Path(name), temperature_C=600, fit={"seconds": 1e-6, "allow": []}, view={"checks": [
+                {"kind": "creep_strain", "limit_percent": 50}, {"kind": "displacement", "limit_mm": 500}]})
+            extras = glb_extras(result.glb)
         summary = result.summary
         self.assertTrue(result.ok)
         self.assertEqual((summary["steps"], summary["stopped"], summary["timed_out"]), (1, False, True))
@@ -320,21 +288,12 @@ class Ladder(unittest.TestCase):
         self.assertTrue(any(w.startswith("Stopped at its time limit") for w in extras["analysis"]["warnings"]))
 
     def test_a_clamped_bar_over_a_tiny_budget_completes_by_adapting_and_says_so(self):
-        from cadgen import fea
-
         with tempfile.TemporaryDirectory() as name:
-            directory = Path(name)
-            step, fixed, tip = _box(directory, "bar", (40.0, 6.0, 6.0), 0)
-            study = {"analysis": "creep", "material": {**CREEPING, "creep": {**CREEPING["creep"], "temperature_C": 600}},
-                     "mesh": {"size_mm": 3.0}, "duration_h": 10_000, "temperature_C": 650, "steps": 8,
-                     "fixtures": [{"faces": [fixed]}], "loads": [{"faces": [tip], "type": "force", "vector_N": [0, 0, -60]}],
-                     "fit": {"seconds": 0.001, "allow": ["iterative", "adaptive_steps"]},
-                     "view": {"checks": [{"kind": "creep_strain", "limit_percent": 1}, {"kind": "stress"},
-                                         {"kind": "displacement", "limit_mm": 5}]}}
-            with redirect_stderr(io.StringIO()):
-                result = fea.solve(step, directory / "bar.fea.glb", study=study)
-            extras = _glb(result.glb)["meshes"][0]["extras"]
-            sidecar = json.loads(result.sidecar.read_text(encoding="utf-8"))
+            result = _cantilever(Path(name), temperature_C=650, fit={"seconds": 0.001, "allow": ["iterative", "adaptive_steps"]},
+                                 view={"checks": [{"kind": "creep_strain", "limit_percent": 1}, {"kind": "stress"},
+                                                  {"kind": "displacement", "limit_mm": 5}]})
+            extras = glb_extras(result.glb)
+            written = sidecar(result)
         self.assertTrue(result.ok)
         rungs = [step["rung"] for step in result.fit]
         self.assertIn("adaptive_steps", rungs)
@@ -368,11 +327,11 @@ class Ladder(unittest.TestCase):
         self.assertEqual(frames[1]["attributes"],
                          {"von_mises": "_VON_MISES_F1", "displacement": "_DISPLACEMENT_F1", "creep_strain": "_CREEP_STRAIN_F1"})
         self.assertEqual((extras["study"]["duration_h"], extras["study"]["temperature_C"]), (10_000, 650))
-        self.assertIn("max_von_mises_MPa", sidecar["curves"])
-        self.assertTrue(any("600 °C" in warning and "650 °C" in warning for warning in [*result.warnings, *sidecar.get("warnings", [])]))
+        self.assertIn("max_von_mises_MPa", written["curves"])
+        self.assertTrue(any("600 °C" in warning and "650 °C" in warning for warning in [*result.warnings, *written.get("warnings", [])]))
         words = next(step["words"] for step in result.fit if step["rung"] == "adaptive_steps")
         self.assertIn(words, [step["words"] for step in extras["fit"]])
-        self.assertIn(words, [step["words"] for step in sidecar["fit"]])
+        self.assertIn(words, [step["words"] for step in written["fit"]])
         self.assertTrue(any(line.startswith(f"adapted: {words}") for line in result.human_lines()))
         found = [finding["type"] for finding in result.findings]
         self.assertIn("fit_adaptive_steps", found)

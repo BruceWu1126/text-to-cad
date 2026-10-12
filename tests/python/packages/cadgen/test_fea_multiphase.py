@@ -22,37 +22,20 @@ fea extra.
 from __future__ import annotations
 
 import io
-import json
 import math
-import struct
-import tempfile
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
+from unittest import mock
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
-
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
+from tests.python.support.fea_fixtures import (
+    box_duct_step, class_directory, glb_attribute_names, glb_extras, needs_fea, sidecar, solve, value_error,
+)
 
 G0 = 9.80665
 WATER, AIR = 998.2, 1.204
 # The tank: a 60 x 10 x 50 mm inside, 2 mm walls, open on top.
 INSIDE, WALL = (60.0, 10.0, 50.0), 2.0
-
-
-def glb_extras(path: Path) -> tuple[dict, list[str]]:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    gltf = json.loads(raw[20:20 + length])
-    return gltf["meshes"][0]["extras"], list(gltf["meshes"][0]["primitives"][0]["attributes"])
 
 
 def tank_step(directory: Path) -> Path:
@@ -66,11 +49,41 @@ def tank_step(directory: Path) -> Path:
     return step
 
 
-def solve(step: Path, study: dict):
-    from cadgen import fea
+def run(step: Path, study: dict):
+    return solve(step, step.with_name("tank.fea.glb"), study)
 
-    with redirect_stderr(io.StringIO()):
-        return fea.solve(step, step.with_name("tank.fea.glb"), study=study)
+
+def tank_study(end_s: float, **study) -> dict:
+    """The tank a quarter full (25 mm of its 50), meshed at 5 mm."""
+    return {"analysis": "multiphase", "fill": {"level_mm": 25}, "end_s": end_s, "mesh": {"size_mm": 5}, **study}
+
+
+def shake(amplitude_g: float) -> dict:
+    """A 50 ms half-sine shake along x."""
+    return {"direction": [1, 0, 0], "amplitude_g": amplitude_g, "history": {"shape": "half_sine", "duration_s": 0.05}}
+
+
+def water_over_air(mesh, distance, log=None, **problem):
+    """The 2D two-fluid solver for water under air, gravity down y; ``problem`` adds TwoPhaseProblem's options."""
+    from cadgen._internal.fea.multiphase_ops import Phases, TwoPhaseProblem, TwoPhaseSolver
+
+    return TwoPhaseSolver(TwoPhaseProblem(mesh, Phases(WATER, AIR, 1.002e-3, 1.81e-5), distance, [0, -G0], **problem), log=log)
+
+
+def open_tank(depth: float, amplitude_g: float, **opening):
+    """A 2D tank 60 mm wide and 40 mm tall, open on top, filled to ``depth`` m, shaken along x by a 0.2 s half-sine."""
+    import numpy as np
+    from skfem import MeshTri
+
+    from cadgen._internal.fea.multiphase_ops import Opening
+
+    mesh = MeshTri.init_tensor(np.linspace(0, 0.06, 13), np.linspace(0, 0.04, 9))
+    top = mesh.facets_satisfying(lambda x: np.isclose(x[1], 0.04), boundaries_only=True)
+
+    def acceleration(t, g=amplitude_g * G0):
+        return np.array([g * math.sin(math.pi * t / 0.2) if t < 0.2 else 0.0, 0.0])
+
+    return mesh, water_over_air(mesh, depth - mesh.p[1], acceleration=acceleration, openings=[Opening(top, "outlet", **opening)])
 
 
 def zero_crossings(t, y) -> list[float]:
@@ -132,9 +145,8 @@ class StudyFile(unittest.TestCase):
             ({"flow": {}}, "multiphase studies take analysis"),
         ]
         for change, fragment in cases:
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                self.parse(**change)
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, value_error(self, self.parse, **change))
 
     def test_a_spill_fails_the_fill_level_and_says_how_much_left(self):
         # Fixed gap: a tank that lost 6.4 % of its liquid over the brim read "Fill level: 40 mm against a 40 mm limit,
@@ -178,7 +190,7 @@ class StudyFile(unittest.TestCase):
                          ["Half full of water", "A quarter full of oil", "40 % full of water"])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class TwoDimensional(unittest.TestCase):
     """The numerics on triangles: the benchmarks that are two-dimensional by nature."""
 
@@ -186,15 +198,13 @@ class TwoDimensional(unittest.TestCase):
         import numpy as np
         from skfem import MeshTri
 
-        from cadgen._internal.fea.multiphase_ops import Phases, TwoPhaseProblem, TwoPhaseSolver
-
         width, height, depth, n = 0.1, 0.06, 0.03, 20
         mesh = MeshTri.init_tensor(np.linspace(0, width, n + 1), np.linspace(0, height, 13))
         points = mesh.p.copy()
         inner = ~np.isin(np.arange(points.shape[1]), mesh.boundary_nodes())
         points[:, inner] += np.random.default_rng(0).uniform(-0.3, 0.3, (2, int(inner.sum()))) * width / n
         mesh = MeshTri(points, mesh.t)
-        solver = TwoPhaseSolver(TwoPhaseProblem(mesh, Phases(WATER, AIR, 1.002e-3, 1.81e-5), depth - mesh.p[1], [0, -G0]))
+        solver = water_over_air(mesh, depth - mesh.p[1])
         speeds = []
         state = solver.run(0.3, dt_max=0.005, on_step=lambda s: speeds.append(s.max_speed))
         floor = state.p[np.isclose(mesh.p[1], 0)].mean() - state.p[np.isclose(mesh.p[1], height)].mean()
@@ -207,13 +217,10 @@ class TwoDimensional(unittest.TestCase):
         import numpy as np
         from skfem import MeshTri
 
-        from cadgen._internal.fea.multiphase_ops import Phases, TwoPhaseProblem, TwoPhaseSolver
-
         length, height, depth, amplitude = 0.1, 0.08, 0.05, 0.005
         mesh = MeshTri.init_tensor(np.linspace(0, length, 21), np.linspace(0, height, 17))
         k = math.pi / length
-        solver = TwoPhaseSolver(TwoPhaseProblem(mesh, Phases(WATER, AIR, 1.002e-3, 1.81e-5),
-                                                depth + amplitude * np.cos(k * mesh.p[0]) - mesh.p[1], [0, -G0]))
+        solver = water_over_air(mesh, depth + amplitude * np.cos(k * mesh.p[0]) - mesh.p[1])
         period = theory_period(length, depth)
         times, modes, volumes = [], [], []
 
@@ -271,15 +278,14 @@ class TwoDimensional(unittest.TestCase):
         import numpy as np
         from skfem import MeshTri
 
-        from cadgen._internal.fea.multiphase_ops import Opening, Phases, TwoPhaseProblem, TwoPhaseSolver
+        from cadgen._internal.fea.multiphase_ops import Opening
 
         length, height, depth = 0.03, 0.01, 0.005
         mesh = MeshTri.init_tensor(np.linspace(0, length, 37), np.linspace(0, height, 13))
         inlet = mesh.facets_satisfying(lambda x: np.isclose(x[0], 0), boundaries_only=True)
         top = mesh.facets_satisfying(lambda x: np.isclose(x[1], height), boundaries_only=True)
         openings = [Opening(inlet, "inlet", velocity=np.zeros(2), phase=1.0), Opening(top, "outlet")]
-        solver = TwoPhaseSolver(TwoPhaseProblem(mesh, Phases(WATER, AIR, 1.002e-3, 1.81e-5), depth - mesh.p[1], [0, -G0],
-                                                openings=openings))
+        solver = water_over_air(mesh, depth - mesh.p[1], openings=openings)
         speeds = []
         state = solver.run(0.02, dt_max=5e-4, on_step=lambda s: speeds.append(s.max_speed))
         self.assertLess(max(speeds), 1e-6)                       # m/s: still to round-off
@@ -292,20 +298,13 @@ class TwoDimensional(unittest.TestCase):
         # level stuck at the brim. Air now comes in as air. Still, the tank keeps its liquid; sloshed to just below
         # the brim, it keeps it within 1% (it may only lose what the smeared surface spills) and its surface settles.
         import numpy as np
-        from skfem import MeshTri
 
-        from cadgen._internal.fea.multiphase_ops import Opening, Phases, TwoPhaseProblem, TwoPhaseSolver, interface_heights
+        from cadgen._internal.fea.multiphase_ops import interface_heights
 
-        length, height, depth, shake = 0.06, 0.04, 0.016, 0.2
-        mesh = MeshTri.init_tensor(np.linspace(0, length, 13), np.linspace(0, height, 9))
-        top = mesh.facets_satisfying(lambda x: np.isclose(x[1], height), boundaries_only=True)
-        start = length * depth
+        depth = 0.016
+        start = 0.06 * depth
         for amplitude in (0.0, 0.35):
-            def acceleration(t, g=amplitude * G0):
-                return np.array([g * math.sin(math.pi * t / shake) if t < shake else 0.0, 0.0])
-
-            solver = TwoPhaseSolver(TwoPhaseProblem(mesh, Phases(WATER, AIR, 1.002e-3, 1.81e-5), depth - mesh.p[1], [0, -G0],
-                                                    acceleration=acceleration, openings=[Opening(top, "outlet")]))
+            mesh, solver = open_tank(depth, amplitude)
             volumes, levels = [], []
 
             def record(state):
@@ -325,20 +324,8 @@ class TwoDimensional(unittest.TestCase):
         # Fixed gap: liquid sloshed out over the brim left only a net inflow in the summary (-6.4 % on a gallery tank)
         # and nothing said so. The solver counts what leaves through an open side nobody named (the brim): all of the
         # volume lost, to round-off; a tank that is never shaken loses only what its smeared surface leaks.
-        import numpy as np
-        from skfem import MeshTri
-
-        from cadgen._internal.fea.multiphase_ops import Opening, Phases, TwoPhaseProblem, TwoPhaseSolver
-
-        length, height, depth, shake = 0.06, 0.04, 0.032, 0.2
-        mesh = MeshTri.init_tensor(np.linspace(0, length, 13), np.linspace(0, height, 9))
-        top = mesh.facets_satisfying(lambda x: np.isclose(x[1], height), boundaries_only=True)
         for amplitude in (0.0, 1.0):
-            def acceleration(t, g=amplitude * G0):
-                return np.array([g * math.sin(math.pi * t / shake) if t < shake else 0.0, 0.0])
-
-            solver = TwoPhaseSolver(TwoPhaseProblem(mesh, Phases(WATER, AIR, 1.002e-3, 1.81e-5), depth - mesh.p[1], [0, -G0],
-                                                    acceleration=acceleration, openings=[Opening(top, "outlet", spill=True)]))
+            _, solver = open_tank(0.032, amplitude, spill=True)
             state = solver.run(0.5, dt_max=0.01)
             with self.subTest(amplitude_g=amplitude):
                 lost = solver.volume0 - state.volume
@@ -352,18 +339,14 @@ class TwoDimensional(unittest.TestCase):
     def test_a_march_past_its_time_limit_stops_where_it_got_to_and_says_how_far_on_the_way(self):
         # Fixed bug: the march had no time limit and said nothing while it ran (a 4 mm tank ran 1 h 46 min with an
         # empty log). It now prints a line every PROGRESS_S and stops after the step that passes limit_s.
-        from unittest import mock
-
         import numpy as np
         from skfem import MeshTri
 
         from cadgen._internal.fea import timestep
-        from cadgen._internal.fea.multiphase_ops import Phases, TwoPhaseProblem, TwoPhaseSolver
 
         mesh = MeshTri.init_tensor(np.linspace(0, 0.06, 13), np.linspace(0, 0.04, 9))
         said: list[str] = []
-        solver = TwoPhaseSolver(TwoPhaseProblem(mesh, Phases(WATER, AIR, 1.002e-3, 1.81e-5), 0.02 - mesh.p[1], [0, -G0]),
-                                log=said.append)
+        solver = water_over_air(mesh, 0.02 - mesh.p[1], log=said.append)
         with mock.patch.object(timestep, "PROGRESS_S", 0.0):
             state = solver.run(1.0, dt_max=0.01, limit_s=0.0)
         self.assertEqual(state.step, 1)
@@ -371,7 +354,7 @@ class TwoDimensional(unittest.TestCase):
         self.assertLess(solver.stopped_at, 1.0)
         self.assertEqual(len(said), 1)
         self.assertTrue(said[0].startswith(f"two fluids: t = {state.t:.4g} s of 1 s, 1 steps"), said[0])
-        whole = TwoPhaseSolver(TwoPhaseProblem(mesh, Phases(WATER, AIR, 1.002e-3, 1.81e-5), 0.02 - mesh.p[1], [0, -G0]))
+        whole = water_over_air(mesh, 0.02 - mesh.p[1])
         self.assertAlmostEqual(whole.run(0.05, dt_max=0.01).t, 0.05)
         self.assertIsNone(whole.stopped_at)
 
@@ -382,30 +365,24 @@ class TwoDimensional(unittest.TestCase):
         import numpy as np
         from skfem import MeshTri
 
-        from cadgen._internal.fea.multiphase_ops import PROFILE_TOL, Phases, TwoPhaseProblem, TwoPhaseSolver
+        from cadgen._internal.fea.multiphase_ops import PROFILE_TOL
 
         mesh = MeshTri.init_tensor(np.linspace(0, 0.03, 13), np.linspace(0, 0.01, 5))
-        solver = TwoPhaseSolver(TwoPhaseProblem(mesh, Phases(WATER, AIR, 1.002e-3, 1.81e-5), 0.005 - mesh.p[1], [0, -G0]))
+        solver = water_over_air(mesh, 0.005 - mesh.p[1])
         self.assertLess(solver.profile_error(0.005 - mesh.p[1]), 1e-9)
         self.assertGreater(solver.profile_error(4.0 * (0.005 - mesh.p[1])), PROFILE_TOL)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Tank(unittest.TestCase):
     """The whole analysis on a tank netgen meshes: a STEP in, a GLB and a sidecar out."""
 
-    def setUp(self):
-        self.directory = Path(tempfile.mkdtemp(prefix="cadgen-multiphase-"))
-        self.step = tank_step(self.directory)
-
-    def tearDown(self):
-        import shutil
-
-        shutil.rmtree(self.directory, ignore_errors=True)
+    @classmethod
+    def setUpClass(cls):
+        cls.step = tank_step(class_directory(cls))
 
     def test_a_still_tank_stays_still_with_hydrostatic_walls(self):
-        result = solve(self.step, {"analysis": "multiphase", "fill": {"level_mm": 25}, "end_s": 0.05, "mesh": {"size_mm": 5},
-                                   "view": {"checks": [{"kind": "fill_level"}, {"kind": "wall_pressure", "limit_Pa": 1000}]}})
+        result = run(self.step, tank_study(0.05, view={"checks": [{"kind": "fill_level"}, {"kind": "wall_pressure", "limit_Pa": 1000}]}))
         summary = result.summary
         floor = WATER * G0 * 0.025 + AIR * G0 * 0.025
         self.assertLess(abs(summary["max_wall_pressure_Pa"] - floor) / floor, 0.01)
@@ -417,7 +394,7 @@ class Tank(unittest.TestCase):
         self.assertAlmostEqual(summary["checks"][0]["value"], 25.0, delta=0.5)
         self.assertEqual(summary["checks"][0]["limit"], INSIDE[2])
 
-        extras, attributes = glb_extras(result.glb)
+        extras, attributes = glb_extras(result.glb), glb_attribute_names(result.glb)
         self.assertEqual(extras["analysis"]["type"], "multiphase")
         self.assertEqual(extras["analysis"]["fill"]["fraction"], 0.5)
         self.assertEqual([f["field"] for f in extras["fields"]], ["water_fraction", "pressure"])
@@ -427,29 +404,27 @@ class Tank(unittest.TestCase):
         self.assertGreaterEqual(len(frames), 3)
         self.assertIn("_WATER_FRACTION_F1", attributes)
         self.assertIn("_PRESSURE_F1", attributes)
-        sidecar = json.loads(result.sidecar.read_text(encoding="utf-8"))
-        self.assertEqual(sidecar["analysis"], "multiphase")
-        self.assertIn("sloshing_force_x_N", sidecar["curves"])
+        written = sidecar(result)
+        self.assertEqual(written["analysis"], "multiphase")
+        self.assertIn("sloshing_force_x_N", written["curves"])
         self.assertTrue(any("Half full of water" in line for line in result.human_lines()))
 
     def test_a_shaken_tank_sloshes_at_its_first_mode(self):
         import numpy as np
 
-        result = solve(self.step, {"analysis": "multiphase", "fill": {"level_mm": 25}, "end_s": 0.9, "mesh": {"size_mm": 5},
-                                   "acceleration": {"direction": [1, 0, 0], "amplitude_g": 0.1,
-                                                    "history": {"shape": "half_sine", "duration_s": 0.05}}})
-        sidecar = json.loads(result.sidecar.read_text(encoding="utf-8"))
+        result = run(self.step, tank_study(0.9, acceleration=shake(0.1)))
+        written = sidecar(result)
         period = theory_period(INSIDE[0] / 1000, 0.025)
-        self.assertAlmostEqual(1.0 / sidecar["summary"]["first_sloshing_Hz"], period, places=6)
-        curve = sidecar["curves"]["sloshing_force_x_N"]
+        self.assertAlmostEqual(1.0 / written["summary"]["first_sloshing_Hz"], period, places=6)
+        curve = written["curves"]["sloshing_force_x_N"]
         t, force = np.array(curve["x"]), np.array(curve["y"])
         later = t > 0.1                                           # after the shake
         crossings = zero_crossings(t[later], force[later] - force[later].mean())
         measured = 2.0 * float(np.mean(np.diff(crossings)))
         self.assertLess(abs(measured - period) / period, 0.05, f"period {measured:.4f} s against {period:.4f} s")
-        self.assertLess(abs(sidecar["summary"]["volume"]["max_change_percent"]), 1.0)
+        self.assertLess(abs(written["summary"]["volume"]["max_change_percent"]), 1.0)
         # It sloshed: the liquid rose at the walls and the walls felt a sideways push.
-        summary = sidecar["summary"]
+        summary = written["summary"]
         self.assertGreater(summary["peak_fill_level_mm"], 25.5)
         self.assertGreater(summary["force_N"]["sloshing_peak_N"], 1e-3)
         # The fill level is the highest point of the surface anywhere, and says where: on the inside, at that height
@@ -470,15 +445,11 @@ class Tank(unittest.TestCase):
         # --verbose, the march prints a line as it goes and stops at its time limit (twice fit.seconds, at least
         # LIMIT_FLOOR_S, here patched to 0): a GLB and sidecar written, a warning saying where it stopped, and no
         # check passing on what was never solved.
-        from unittest import mock
-
         from cadgen import fea
         from cadgen._internal.fea import timestep
 
-        study = {"analysis": "multiphase", "fill": {"level_mm": 25}, "end_s": 0.6, "mesh": {"size_mm": 5},
-                 "acceleration": {"direction": [1, 0, 0], "amplitude_g": 0.1, "history": {"shape": "half_sine", "duration_s": 0.05}},
-                 "fit": {"seconds": 1e-6, "allow": []},
-                 "view": {"checks": [{"kind": "fill_level"}, {"kind": "wall_pressure", "limit_Pa": 1e5}]}}
+        study = tank_study(0.6, acceleration=shake(0.1), fit={"seconds": 1e-6, "allow": []},
+                           view={"checks": [{"kind": "fill_level"}, {"kind": "wall_pressure", "limit_Pa": 1e5}]})
         printed = io.StringIO()
         with mock.patch.object(timestep, "LIMIT_FLOOR_S", 0.0), mock.patch.object(timestep, "PROGRESS_S", 0.0), \
                 redirect_stderr(printed):
@@ -494,40 +465,26 @@ class Tank(unittest.TestCase):
         self.assertEqual([c["status"] for c in summary["checks"]], ["close", "close"])
         self.assertTrue(all("(stopped at " in c["label"] for c in summary["checks"]))
         self.assertFalse(any(f["type"].endswith("_close_to_limit") for f in result.findings))
-        extras, _ = glb_extras(result.glb)
+        extras = glb_extras(result.glb)
         self.assertTrue(any(line.startswith("Stopped at its time limit") for line in extras["analysis"]["warnings"]))
         self.assertAlmostEqual(extras["series"]["frames"][-1]["value"], summary["stopped_at_s"], places=6)
 
     def test_a_run_past_its_budget_takes_the_ladder_and_says_so(self):
-        result = solve(self.step, {"analysis": "multiphase", "fill": {"level_mm": 25}, "end_s": 0.6, "mesh": {"size_mm": 5},
-                                   "acceleration": {"direction": [1, 0, 0], "amplitude_g": 0.05,
-                                                    "history": {"shape": "half_sine", "duration_s": 0.05}},
-                                   "fit": {"seconds": 3}})
+        result = run(self.step, tank_study(0.6, acceleration=shake(0.05), fit={"seconds": 3}))
         rungs = [step["rung"] for step in result.fit]
         self.assertEqual(rungs[:3], ["adaptive_steps", "local_refine", "fluid_coarsen"])
-        extras, _ = glb_extras(result.glb)
-        sidecar = json.loads(result.sidecar.read_text(encoding="utf-8"))
+        extras, written = glb_extras(result.glb), sidecar(result)
         self.assertEqual([step["rung"] for step in extras["fit"]], rungs)
-        self.assertEqual([step["rung"] for step in sidecar["fit"]], rungs)
+        self.assertEqual([step["rung"] for step in written["fit"]], rungs)
         self.assertIn("only where its surface moves", extras["fit"][1]["words"])
         self.assertIsNotNone(extras["fit"][0]["accuracy"])
-        self.assertTrue({f"fit_{rung}" for rung in rungs} <= {finding["type"] for finding in sidecar["findings"]})
+        self.assertTrue({f"fit_{rung}" for rung in rungs} <= {finding["type"] for finding in written["findings"]})
         self.assertTrue(any(line.startswith("adapted: Let the time step grow") for line in result.human_lines()))
-        self.assertEqual(sidecar["summary"]["march"]["cfl"], 1.0)
-        self.assertLess(abs(sidecar["summary"]["volume"]["max_change_percent"]), 1.0)
+        self.assertEqual(written["summary"]["march"]["cfl"], 1.0)
+        self.assertLess(abs(written["summary"]["volume"]["max_change_percent"]), 1.0)
 
 
-def box_duct_step(directory: Path, side: float, length: float, wall: float = 1.0) -> Path:
-    """A square passage through a block along x: sharp corners where the inlet meets the walls."""
-    from build123d import Align, Box, export_step
-
-    step = directory / "duct.step"
-    along = (Align.MIN, Align.CENTER, Align.CENTER)
-    export_step(Box(length, side + 2 * wall, side + 2 * wall, align=along) - Box(length, side, side, align=along), str(step))
-    return step
-
-
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class BoxDuct(unittest.TestCase):
     """Water fed at 0.05 m/s into a half-full square duct (sharp corners at its inlet) through one end, out of the other.
 
@@ -543,10 +500,9 @@ class BoxDuct(unittest.TestCase):
 
     def test_a_square_duct_fills_at_its_inflow_and_nothing_outruns_a_free_fall(self):
         inflow, side, length, end = 0.05, 10.0, 30.0, 0.02
-        with tempfile.TemporaryDirectory() as tmp:
-            step = box_duct_step(Path(tmp), side, length, wall=2.0)
-            result = solve(step, {"analysis": "multiphase", "fill": {"fraction": 0.5}, "end_s": end, "mesh": {"size_mm": 3},
-                                  "inlets": [{"opening": "x_min", "velocity_m_s": inflow}], "outlets": [{"opening": "x_max"}]})
+        step = box_duct_step(class_directory(type(self)), side, length, wall=2.0)
+        result = run(step, {"analysis": "multiphase", "fill": {"fraction": 0.5}, "end_s": end, "mesh": {"size_mm": 3},
+                            "inlets": [{"opening": "x_min", "velocity_m_s": inflow}], "outlets": [{"opening": "x_max"}]})
         self.assertTrue(result.ok)
         summary = result.summary
         self.assertLess(summary["max_speed_m_s"], inflow + math.sqrt(2.0 * G0 * side * 1e-3))
@@ -563,11 +519,10 @@ class BoxDuct(unittest.TestCase):
         brim cannot reach and ran away (2.9e6 m/s, the volume 1900% off). Solved as the liquid's flow alone, the duct
         carries plug flow at the inlet's speed, and the result says it was solved so."""
         inflow, side, length = 0.05, 10.0, 30.0
-        with tempfile.TemporaryDirectory() as tmp:
-            step = box_duct_step(Path(tmp), side, length, wall=2.0)
-            result = solve(step, {"analysis": "multiphase", "fill": {"fraction": 1.0}, "end_s": 0.02, "mesh": {"size_mm": 3},
-                                  "inlets": [{"opening": "x_min", "velocity_m_s": inflow}], "outlets": [{"opening": "x_max"}]})
-            extras, _ = glb_extras(result.glb)
+        step = box_duct_step(class_directory(type(self)), side, length, wall=2.0)
+        result = run(step, {"analysis": "multiphase", "fill": {"fraction": 1.0}, "end_s": 0.02, "mesh": {"size_mm": 3},
+                            "inlets": [{"opening": "x_min", "velocity_m_s": inflow}], "outlets": [{"opening": "x_max"}]})
+        extras = glb_extras(result.glb)
         self.assertTrue(result.ok)
         summary = result.summary
         self.assertAlmostEqual(summary["max_speed_m_s"] / inflow, 1.0, delta=0.1)

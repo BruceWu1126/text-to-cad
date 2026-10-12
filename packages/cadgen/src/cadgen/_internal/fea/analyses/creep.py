@@ -40,8 +40,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Series, SeriesFrame, SolveContext
-from cadgen._internal.fea.analyses.nonlinear import NonlinearAnalysis, external_load, material_specs, PathOutcome
+from cadgen._internal.fea.analyses.base import (
+    AnalysisResult, FieldSpec, SolveContext, by_severity, finding, max_frames, plan_value, xyz,
+)
+from cadgen._internal.fea.analyses.nonlinear import (
+    NonlinearAnalysis, SolidProblem, external_load, field_peak, figure, material_specs, nodal, parse_steps, peak_check,
+    refuse_stress, supported, symmetry_planes, totals, unfold, view_checks,
+)
 from cadgen._internal.fea.analyses.static import StaticAnalysis, StaticInputs
 from cadgen._internal.fea.timestep import stopped_check, stopped_finding, stopped_sentence, time_limit
 
@@ -68,7 +73,6 @@ DEFAULT_CREEP_LIMIT = 1.0
 NEWTON_PER_STEP, STEPS_PER_STEP = 3.0, 1.5
 #: Quadrature points per quadratic tet, for the state's memory.
 POINTS_PER_TET = 11
-MAX_FRAMES = 24
 
 #: What this lite solver leaves out, written into its output, its verdict's Details and the skill.
 LIMITS = (
@@ -80,18 +84,13 @@ LIMITS = (
 )
 
 
-def _figure(value: float) -> str:
-    text = f"{value:.3g}"
-    return text if "e" not in text else f"{value:.0f}"
-
-
 def hours_label(hours: float) -> str:
     """A time as the scrubber says it: "0 h", "2.5 h", "250 h", "10,000 h"."""
     if hours >= 1000.0:
         return f"{hours:,.0f} h"
     if hours >= 10.0:
         return f"{hours:.0f} h"
-    return f"{_figure(hours)} h"
+    return f"{figure(hours)} h"
 
 
 @dataclass(frozen=True)
@@ -125,31 +124,16 @@ def _duration(document: dict) -> float:
     return kinds.number(document["duration_h"], where="duration_h", positive=True)
 
 
-def _steps(document: dict) -> int:
-    raw = document.get("steps", DEFAULT_STEPS)
-    if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= MAX_STEPS:
-        raise ValueError(f"steps: the number of time steps to start with, a whole number from 1 to {MAX_STEPS}, "
-                         f"got {kinds.json_text(raw)}")
-    return raw
-
-
 # -- the problem the driver solves -----------------------------------------------------------------------
 
 
-class _CreepProblem:
+class _CreepProblem(SolidProblem):
     """The part over one time step: the free DOF, the constant load, the committed creep state."""
 
     def __init__(self, space, free, external, params):
         from cadgen._internal.fea.creep_law import CreepState
-        from cadgen._internal.fea.plasticity import ElementOps
 
-        self.space = space
-        self.ops = ElementOps(space.basis)
-        self.size = int(space.basis.N)
-        self.free = free
-        self.external = external
-        self.locations = space.locations
-        self.component = space.component
+        super().__init__(space, free, external)
         self.params = params
         self.state = CreepState.zeros(tuple(self.ops.dx.shape))
         self.t0 = self.t1 = 0.0
@@ -165,19 +149,7 @@ class _CreepProblem:
                              tangent=tangent)
 
     def evaluate(self, u, *, tangent):
-        import numpy as np
-
-        update = self.update(u, tangent)
-        if not tangent:
-            return self.ops.force(update.stress), None
-        # Mean dilatation, as J2: the deviatoric tangent at the points, the bulk modulus on each element's mean volume change.
-        C = update.tangent
-        bulk = np.broadcast_to(np.asarray(self.params.bulk, dtype=float), self.ops.dx.shape)
-        for i in range(3):
-            for k in range(3):
-                C[i, i, k, k] -= bulk
-        K = self.ops.matrix(C) + self.ops.volumetric_matrix(bulk[:, 0])
-        return self.ops.force(update.stress), K
+        return self.mean_dilatation(self.update(u, tangent), tangent)  # as J2
 
     def error(self, update) -> float:
         """The step's local error: the largest over the points that carry at least ERROR_FLOOR of the peak stress."""
@@ -338,14 +310,9 @@ def _march(problem: _CreepProblem, duration: float, steps: int, *, solver: str, 
 
 class CreepAnalysis(NonlinearAnalysis):
     name: ClassVar[str] = "creep"
-    tier: ClassVar[int] = 3
     word: ClassVar[str] = "Creep"
-    estimate_only: ClassVar[bool] = False
     limits: ClassVar[tuple[str, ...]] = LIMITS
     study_keys: ClassVar[frozenset[str]] = frozenset({"fixtures", "loads", "duration_h", "steps", "temperature_C"})
-    material_needs: ClassVar[frozenset[str]] = frozenset()
-    mesh_orders: ClassVar[tuple[int, ...]] = (2,)
-    connection_types: ClassVar[tuple[str, ...]] = ("bonded", "free")
     fields: ClassVar[tuple[FieldSpec, ...]] = (
         FieldSpec("von_mises", "_VON_MISES", "von Mises stress", "MPa", per_frame=True),
         FieldSpec("displacement", "_DISPLACEMENT", "displacement", "mm", 3, 1000.0, per_frame=True),
@@ -353,17 +320,13 @@ class CreepAnalysis(NonlinearAnalysis):
     )
     checks: ClassVar[tuple] = (kinds.CREEP_STRAIN, kinds.STRESS, kinds.DISPLACEMENT)
     default_checks: ClassVar[tuple[dict, ...]] = ({"kind": "creep_strain", "limit_percent": DEFAULT_CREEP_LIMIT},)
-    # No load_scale: creep is not proportional to the load (σ^n), so a load multiple says nothing.
-    drives: ClassVar[tuple[str, ...]] = ("field", "deformation", "threshold", "frame")
+    # No load_scale (nonlinear's drives): creep is not proportional to the load (σ^n), so a load multiple says nothing.
     default_controls: ClassVar[dict[str, dict]] = {
         "frame": {"drives": "frame", "type": "number", "min": 0.0, "max": None},
         "field": {"drives": "field", "type": "enum", "options": ["von_mises", "displacement", "creep_strain"]},
         "deformation": {"drives": "deformation", "type": "number", "min": 0.0, "max": None},
     }
-    upstream: ClassVar[tuple[str, ...]] = ()
-    ladder: ClassVar[tuple[str, ...]] = ("iterative", "adaptive_steps", "local_refine", "defeature", "symmetry")
-    noun: ClassVar[str] = "this load"
-    governing_word: ClassVar[str] = "peak stress"
+    extras_word: ClassVar[str] = "creep"
 
     # -- parse ---------------------------------------------------------------------------------------
 
@@ -371,18 +334,13 @@ class CreepAnalysis(NonlinearAnalysis):
         static = StaticAnalysis().parse(document)
         materials = _require_creep(document)
         duration = _duration(document)
-        steps = _steps(document)
+        steps = parse_steps(document, DEFAULT_STEPS, MAX_STEPS, "time")
         temperature = None
         if "temperature_C" in document:
             temperature = kinds.number(document["temperature_C"], where="temperature_C")
-        view = document.get("view")
-        checks = view.get("checks") if isinstance(view, dict) else None
-        if isinstance(checks, list):
-            yieldless = any(material.yield_strength is None for _, material in materials)
-            for index, check in enumerate(checks):
-                if isinstance(check, dict) and check.get("kind") == "stress" and yieldless:
-                    raise ValueError(f"view.checks[{index}]: a stress check compares the peak with a yield strength; give "
-                                     "the material's yield_MPa, or check its creep strain")
+        checks = view_checks(document)
+        if isinstance(checks, list) and any(material.yield_strength is None for _, material in materials):
+            refuse_stress(checks, "; give the material's yield_MPa, or check its creep strain")
         return CreepInputs(
             static.face_refs, static.anchor_refs, True, fixtures=static.fixtures, loads=static.loads,
             material_needs=static.material_needs, duration_h=duration, steps=steps, temperature_C=temperature,
@@ -409,8 +367,6 @@ class CreepAnalysis(NonlinearAnalysis):
     def apply(self, rung, ctx: SolveContext, inputs: CreepInputs):
         from cadgen._internal.fea import fit
 
-        if rung == "iterative":
-            return self._apply_iterative(ctx, inputs)
         if rung == "adaptive_steps":
             if ctx.plan.adaptive_steps:
                 return None
@@ -421,7 +377,7 @@ class CreepAnalysis(NonlinearAnalysis):
                 f"still cutting any step whose error passes {TOLERANCE * 100:g} % of the stress, to fit the time target",
                 None, None, detail={"starting_steps": inputs.steps, "max_growth": MAX_GROWTH, "tolerance": TOLERANCE},
             )
-        return fit.apply_generic(rung, self, ctx, inputs)
+        return super().apply(rung, ctx, inputs)
 
     def governing(self, result: AnalysisResult):
         """local_refine follows the largest stress over the time; two passes compare its peak."""
@@ -436,7 +392,7 @@ class CreepAnalysis(NonlinearAnalysis):
         import numpy as np
 
         from cadgen._internal.fea.creep_law import creep_params
-        from cadgen._internal.fea.supports import Turned, check_held, supports_of
+        from cadgen._internal.fea.supports import Turned
 
         space = ctx.space
         basis = space.basis
@@ -444,20 +400,10 @@ class CreepAnalysis(NonlinearAnalysis):
         timings: dict[str, float] = {}
         warnings: list[str] = []
         started = time.perf_counter()
-        fit_plan = ctx.plan
-        planes = list(fit_plan.prepared.planes) if fit_plan is not None and fit_plan.prepared is not None else []
+        planes = symmetry_planes(ctx)
         share = 0.5 ** len(planes)
         external = external_load(space, materials, inputs.surface_loads, inputs.body_accelerations, ctx.ordinal_of, share)
-        plane_dofs = []
-        for plane in planes:
-            dofs = basis.get_dofs(space.facets_of_ordinals([plane.ordinal], "a symmetry plane")).all()
-            plane_dofs.append(dofs[space.component[dofs] == plane.component])
-        # Fixed faces, rollers (a sloped or curved one's nodes turned into their own axes: supports.py) and planes.
-        supports = supports_of(space, inputs.fixtures, ctx.ordinal_of, held=plane_dofs)
-        check_held(space, supports)
-        fixture_dofs = supports.per_fixture
-        fixed = supports.fixed
-        free = np.setdiff1d(np.arange(basis.N), fixed)
+        supports, free = supported(ctx, inputs.fixtures, planes)
         if not any(m.creep for m in materials):
             raise ValueError("material.creep: no part of this study has a creep law; add a creep block to its material")
         if len(materials) > 1 and not all(m.creep for m in materials):
@@ -465,12 +411,10 @@ class CreepAnalysis(NonlinearAnalysis):
         problem = _CreepProblem(space, free, external, creep_params(space, materials))
         timings["assemble_s"] = time.perf_counter() - started
 
-        solver = getattr(fit_plan, "solver", "direct") if fit_plan is not None else "direct"
-        adaptive = bool(getattr(fit_plan, "adaptive_steps", False)) if fit_plan is not None else False
-        frames_max = int(getattr(ctx.budget, "max_frames", MAX_FRAMES) or MAX_FRAMES) if ctx.budget is not None else MAX_FRAMES
+        adaptive = bool(plan_value(ctx, "adaptive_steps", False))
         marched = Turned(problem, supports, free) if supports.turned else problem
-        path, frames, curve = _march(marched, inputs.duration_h, inputs.steps, solver=solver, adaptive=adaptive,
-                                     keep=max(frames_max, 2), log=ctx.log, limit_s=time_limit(ctx))
+        path, frames, curve = _march(marched, inputs.duration_h, inputs.steps, solver=plan_value(ctx, "solver", "direct"),
+                                     adaptive=adaptive, keep=max(max_frames(ctx), 2), log=ctx.log, limit_s=time_limit(ctx))
         if supports.turned:  # a sloped or curved roller: the march's displacements back in global axes
             frames = [(t, supports.global_vector(u), vm, eq) for t, u, vm, eq in frames]
         timings["solve_s"] = path.seconds
@@ -486,63 +430,27 @@ class CreepAnalysis(NonlinearAnalysis):
                                     "creep changes steeply with temperature, so use data for the temperature it runs at")
 
         started = time.perf_counter()
-
-        def nodal(values):
-            # The L2 projection, never past the quadrature points' own range (it overshoots where a field turns sharply).
-            return np.clip(space.scalar.project(values), 0.0, float(values.max()))
-
-        stress_frames = [nodal(vm_q) for _, _, vm_q, _ in frames]
-        displacement_frames = [space.nodal(u) for _, u, _, _ in frames]
-        creep_frames = [nodal(100.0 * p_q) for _, _, _, p_q in frames]
         gauss_peaks = [float(vm_q.max()) for _, _, vm_q, _ in frames]
-        final_u = frames[-1][1]
-        internal, _ = problem.evaluate(final_u, tangent=False)
-        residual = internal - external
-        reactions = [tuple(float(residual[dofs][space.component[dofs] == c].sum()) for c in range(3)) for dofs in fixture_dofs]
-        applied = tuple(float(external[space.component == c].sum()) for c in range(3))
+        internal, _ = problem.evaluate(frames[-1][1], tangent=False)
+        reactions = [totals(space, internal - external, dofs) for dofs in supports.per_fixture]
         creep_gauss = float(problem.state.equivalent.max()) * 100.0
-        dof_locations, boundary, tets, element_dofs, vertices = (space.dof_locations, space.boundary_quadratic, space.tets,
-                                                                  space.element_dofs, space.vertices)
-        if planes:
-            from cadgen._internal.fea import symmetry
-
-            volume = ctx.volume
-            for plane in reversed(planes):
-                whole, keep = symmetry.unfold_volume(volume, plane)
-                scalars = {f"vm{i}": values for i, values in enumerate(stress_frames)}
-                scalars.update({f"cs{i}": values for i, values in enumerate(creep_frames)})
-                vectors = {f"u{i}": values for i, values in enumerate(displacement_frames)}
-                dof_locations, scalars, vectors, boundary, tets, element_dofs, vertices = symmetry.unfold_fields(
-                    plane, vertices, dof_locations, keep, scalars=scalars, vectors=vectors, boundary=boundary, tets=tets,
-                    element_dofs=element_dofs,
-                )
-                stress_frames = [scalars[f"vm{i}"] for i in range(len(stress_frames))]
-                creep_frames = [scalars[f"cs{i}"] for i in range(len(creep_frames))]
-                displacement_frames = [vectors[f"u{i}"] for i in range(len(displacement_frames))]
-                reactions = [symmetry.unfold_force(plane, r) for r in reactions]
-                applied = symmetry.unfold_force(plane, applied)
-                volume = whole
-            ctx.volume = volume
+        mesh, scalars, vectors, reactions, (applied,) = unfold(
+            ctx, planes, {"von_mises": [nodal(space, vm_q) for _, _, vm_q, _ in frames],
+                          "creep_strain": [nodal(space, 100.0 * p_q) for _, _, _, p_q in frames]},
+            {"displacement": [space.nodal(u) for _, u, _, _ in frames]}, reactions, totals(space, external))
         timings["stress_s"] = time.perf_counter() - started
 
         times = [t for t, _, _, _ in frames]
-        attributes = {"von_mises": "_VON_MISES", "displacement": "_DISPLACEMENT", "creep_strain": "_CREEP_STRAIN"}
-        series = Series(kind="time", unit="h", default=len(frames) - 1, frames=[
-            SeriesFrame(value=round(t, 6), label=hours_label(t),
-                        attributes={name: attribute if i == 0 else f"{attribute}_F{i}" for name, attribute in attributes.items()})
-            for i, t in enumerate(times)
-        ])
-        frame_fields = {"von_mises": stress_frames, "displacement": displacement_frames, "creep_strain": creep_frames}
-        fields = {name: values[0] for name, values in frame_fields.items()}
-        final_fields = {name: values[-1] for name, values in frame_fields.items()}
-        peaks = [float(values.max()) for values in stress_frames]
-        peak_frame = int(np.argmax(peaks))
+        frame_fields = {"von_mises": scalars["von_mises"], "displacement": vectors["displacement"],
+                        "creep_strain": scalars["creep_strain"]}
+        series = self._series("h", frame_fields, [(round(t, 6), hours_label(t)) for t in times])
+        peak_frame = int(np.argmax([float(values.max()) for values in frame_fields["von_mises"]]))
         curve_x = [round(t, 6) for t, _, _, _ in curve]
         curves = {
             "max_von_mises_MPa": {"x": curve_x, "x_unit": "h", "y": [round(c[2], 6) for c in curve], "y_unit": "MPa"},
             "max_creep_strain_percent": {"x": curve_x, "x_unit": "h", "y": [round(100.0 * c[3], 8) for c in curve], "y_unit": "%"},
             "max_displacement_mm": {"x": [round(t, 6) for t in times], "x_unit": "h", "y_unit": "mm",
-                                    "y": [round(float(np.linalg.norm(d, axis=1).max()), 6) for d in displacement_frames]},
+                                    "y": [round(float(np.linalg.norm(d, axis=1).max()), 6) for d in frame_fields["displacement"]]},
         }
         analysis_warnings = []
         if path.stopped:
@@ -550,18 +458,13 @@ class CreepAnalysis(NonlinearAnalysis):
         if path.timed_out:
             analysis_warnings.append(stopped_sentence(hours_label(reached), hours_label(inputs.duration_h), time_limit(ctx)))
         how = f"{path.how}, {path.steps} {'adaptive ' if adaptive else ''}backward Euler time steps"
-        return AnalysisResult(
-            dof_locations=dof_locations, vertices=vertices, tets=tets, boundary_quadratic=boundary, element_dofs=element_dofs,
-            fields=fields, deformation=displacement_frames[0], series=series, frame_fields=frame_fields, curves=curves,
-            reactions=reactions, applied=applied, dofs=int(basis.N), solver=how, timings=timings, warnings=warnings,
-            scalars={
-                "path": path, "final": final_fields, "reached_h": reached, "stopped": path.stopped, "adaptive": adaptive,
-                "timed_out": path.timed_out,
-                "von_mises_gauss_peaks": gauss_peaks, "creep_gauss_max": creep_gauss, "peak_frame": peak_frame,
-                "frame_times": times, "analysis_warnings": analysis_warnings, "data_temperatures": sorted(data_temperatures),
-                "part_refs": None if ctx.assembly is None else [part.ref for part in ctx.assembly.parts],
-            },
-        )
+        return self._result(mesh, frame_fields, series, curves, reactions, applied, basis, how, timings, warnings, {
+            "path": path, "final": {name: values[-1] for name, values in frame_fields.items()}, "reached_h": reached,
+            "stopped": path.stopped, "adaptive": adaptive, "timed_out": path.timed_out,
+            "von_mises_gauss_peaks": gauss_peaks, "creep_gauss_max": creep_gauss, "peak_frame": peak_frame,
+            "frame_times": times, "analysis_warnings": analysis_warnings, "data_temperatures": sorted(data_temperatures),
+            "part_refs": None if ctx.assembly is None else [part.ref for part in ctx.assembly.parts],
+        })
 
     # -- judging -------------------------------------------------------------------------------------
 
@@ -569,66 +472,23 @@ class CreepAnalysis(NonlinearAnalysis):
         frame = len(result.series.frames) - 1 if frame is None else frame
         return {"frame": frame, "value": result.series.frames[frame].value, "unit": "h"}
 
-    def _solved_at(self, ctx: SolveContext, result: AnalysisResult, inputs: CreepInputs, frame: int):
-        """The stress check's numbers at one frame: the peak, and the yield of the part it is in."""
-        import numpy as np
-
-        from cadgen._internal.fea import checks
-        from cadgen._internal.fea.analyses.static import peak_face
-
-        stress = result.frame_fields["von_mises"][frame]
-        moved = np.linalg.norm(result.frame_fields["displacement"][frame], axis=1)
-        peak = int(stress.argmax())
-        node_moved = int(moved.argmax())
-        materials = list(ctx.materials)
-        material = materials[0]
-        if len(materials) > 1 and ctx.volume.domain is not None:
-            element = int(np.flatnonzero((result.element_dofs == peak).any(axis=1))[0])
-            material = materials[int(ctx.volume.domain[element])]
-        volume = ctx.volume
-        fixed = {ctx.ordinal_of[ref] for fixture in inputs.fixtures for ref in fixture.faces}
-        outcome = PathOutcome(result.boundary_quadratic, result.dof_locations)
-        extent = result.dof_locations.max(axis=0) - result.dof_locations.min(axis=0)
-        return checks.Solved(
-            material_name=material.name, yield_MPa=material.yield_strength, peak_MPa=float(stress[peak]),
-            peak_gauss_MPa=float(result.scalars["von_mises_gauss_peaks"][frame]),
-            peak_at=tuple(float(c) for c in result.dof_locations[peak]),
-            peak_face=peak_face(volume, outcome, peak, fixed),
-            fixed_faces=tuple(volume.faces[o].ref for o in sorted(fixed) if o in volume.faces),
-            max_displacement_mm=float(moved[node_moved]),
-            displacement_at=tuple(float(c) for c in result.dof_locations[node_moved]),
-            bbox_diagonal_mm=float(np.linalg.norm(extent)), margin=ctx.study.margin if ctx.study is not None else 2.0,
-            coarser_peak_MPa=None, part=ctx.part_name, dofs=result.dofs,
-        )
-
     def judge(self, check: dict, index: int, ctx: SolveContext, result: AnalysisResult, inputs: CreepInputs) -> dict:
-        import numpy as np
-
         from cadgen._internal.fea import checks
 
-        final = result.scalars["final"]
-        where = f"view.checks[{index}]"
-        common = dict(boundary=result.boundary_quadratic, boundary_ordinal=ctx.volume.boundary_ordinal,
-                      locations=result.dof_locations, face_ref=ctx.volume.faces, ordinal_of=ctx.ordinal_of, where=where)
         if check["kind"] == "stress":
             frame = result.scalars["peak_frame"]
-            judged = checks.stress_check(self._solved_at(ctx, result, inputs, frame), label=check.get("label"))
+            fields = result.frame_fields
+            judged = checks.stress_check(self._solved(ctx, result, inputs, fields["von_mises"][frame], fields["displacement"][frame],
+                                                      result.scalars["von_mises_gauss_peaks"][frame]), label=check.get("label"))
             judged["at"] = self._at(result, frame)
         elif check["kind"] == "displacement":
-            peak = kinds.field_max_over(np.linalg.norm(final["displacement"], axis=1), tuple(check.get("faces", ())), **common)
-            judged = checks.displacement_check(peak.value, check["limit_mm"], at=peak.at, ref=peak.ref, faces=peak.faces,
-                                               label=check.get("label"))
+            judged = self._displacement_check(check, index, ctx, result)
             judged["at"] = self._at(result)
         else:
-            peak = kinds.field_max_over(final["creep_strain"], (), **common)
-            limit = float(check["limit_percent"])
-            ratio = peak.value / limit
-            judged = {
-                "kind": "creep_strain", "label": check.get("label") or kinds.CREEP_STRAIN.default_label,
-                "value": round(peak.value, 6), "limit": limit, "unit": "%", "ratio": round(ratio, 6), "close_at": 0.9,
-                "status": checks.check_status(ratio, 0.9), "where": {"ref": peak.ref, "at": [round(c, 3) for c in peak.at]},
-                "duration_h": round(result.scalars["reached_h"], 6),
-            }
+            judged = peak_check("creep_strain", check.get("label") or kinds.CREEP_STRAIN.default_label,
+                                field_peak(ctx, result, result.scalars["final"]["creep_strain"], (), index),
+                                float(check["limit_percent"]), "%")
+            judged["duration_h"] = round(result.scalars["reached_h"], 6)
             judged["at"] = self._at(result)
         if result.scalars["stopped"]:
             # The creep ran away before the whole time: whatever the numbers when it stopped, the check fails.
@@ -647,11 +507,6 @@ class CreepAnalysis(NonlinearAnalysis):
         path = scalars["path"]
         whole = "The assembly" if assembly else "The part"
         found: list[dict] = []
-
-        def finding(severity, kind, summary, description, items=()):
-            return {"check": "fea", "severity": severity, "type": kind, "summary": summary, "description": description,
-                    "items": list(items)}
-
         if scalars.get("timed_out"):
             found += [stopped_finding(sentence) for sentence in scalars["analysis_warnings"]
                       if sentence.startswith("Stopped at its time limit")]
@@ -683,7 +538,7 @@ class CreepAnalysis(NonlinearAnalysis):
                 "info", "time_steps_cut",
                 f"Cut {path.rejected} time steps to keep each step's error under {TOLERANCE * 100:g} % of the stress",
                 f"the smallest step taken was {path.smallest_step:.3g} h", []))
-        return sorted(found, key=lambda item: {"error": 0, "warning": 1, "info": 2}[item["severity"]])
+        return by_severity(found)
 
     # -- what is written -----------------------------------------------------------------------------
 
@@ -706,51 +561,30 @@ class CreepAnalysis(NonlinearAnalysis):
                        else f"Stopped at its time limit after {hours_label(reached)}" if scalars.get("timed_out")
                        else f"Held for {hours_label(inputs.duration_h)}"),
             **({"timed_out": True} if scalars.get("timed_out") else {}),
-            "stopped": scalars["stopped"],
-            "duration_h": round(inputs.duration_h, 6),
-            "reached_h": round(reached, 6),
-            "temperature_C": inputs.temperature_C,
-            "creep_data_temperature_C": scalars["data_temperatures"] or None,
+            "stopped": scalars["stopped"], "duration_h": round(inputs.duration_h, 6), "reached_h": round(reached, 6),
+            "temperature_C": inputs.temperature_C, "creep_data_temperature_C": scalars["data_temperatures"] or None,
             "max_creep_strain_percent": round(float(creep[node]), 6),
             "max_creep_strain_gauss_percent": round(scalars["creep_gauss_max"], 6),
-            "max_creep_strain_at_mm": [round(float(c), 3) for c in result.dof_locations[node]],
+            "max_creep_strain_at_mm": xyz(result.dof_locations[node]),
             "initial_max_von_mises_MPa": round(start, 4),
             "max_von_mises_MPa": round(end, 4),
             "max_von_mises_gauss_MPa": round(scalars["von_mises_gauss_peaks"][-1], 4),
-            "max_von_mises_at_mm": [round(float(c), 3) for c in result.dof_locations[peak]],
+            "max_von_mises_at_mm": xyz(result.dof_locations[peak]),
             "relaxation_percent": round((1.0 - end / start) * 100.0, 4) if start > 0 else 0.0,
             "initial_max_displacement_mm": round(float(np.linalg.norm(result.frame_fields["displacement"][0], axis=1).max()), 6),
             "max_displacement_mm": round(float(moved[node_moved]), 6),
-            "max_displacement_at_mm": [round(float(c), 3) for c in result.dof_locations[node_moved]],
+            "max_displacement_at_mm": xyz(result.dof_locations[node_moved]),
             "applied_force_N": [round(x, 4) for x in result.applied],
             "reaction_force_N": [round(sum(r[c] for r in result.reactions), 4) for c in range(3)],
-            "steps_requested": inputs.steps,
-            "steps": path.steps,
-            "steps_cut": path.rejected + path.cuts,
-            "smallest_step_h": round(path.smallest_step, 9),
-            "largest_step_h": round(path.largest_step, 6),
+            "steps_requested": inputs.steps, "steps": path.steps, "steps_cut": path.rejected + path.cuts,
+            "smallest_step_h": round(path.smallest_step, 9), "largest_step_h": round(path.largest_step, 6),
             "newton_iterations": path.iterations,
-            "adaptive": scalars["adaptive"],
-            "frames": len(result.series.frames),
-            "deformation_scale": scalars.get("deformation_scale"),
+            **self._frames_record(result),
         }
         if scalars.get("part_refs"):
             summary["parts"] = [{"ref": ref} for ref in scalars["part_refs"]]
         summary["checks"] = check_results
         return summary
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} creep"
-
-    def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
-        import numpy as np
-
-        frames = result.frame_fields
-        return {
-            "von_mises": (0.0, round(max(float(f.max()) for f in frames["von_mises"]), 4)),
-            "displacement": (0.0, round(max(float(np.linalg.norm(f, axis=1).max()) for f in frames["displacement"]), 6)),
-            "creep_strain": (0.0, round(max(float(f.max()) for f in frames["creep_strain"]), 6)),
-        }
 
     def extras_head(self, summary: dict) -> dict:
         return {"duration_h": summary["duration_h"], "reached_h": summary["reached_h"], "stopped": summary["stopped"]}

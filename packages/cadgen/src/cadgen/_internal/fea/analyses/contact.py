@@ -33,31 +33,29 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Series, SeriesFrame, SolveContext
-from cadgen._internal.fea.analyses.nonlinear import NonlinearAnalysis, NonlinearInputs, load_label, part_materials, pick_frames, with_materials
+from cadgen._internal.fea.analyses.base import (
+    AnalysisResult, FieldSpec, SolveContext, by_severity, finding, max_frames, plan_value, xyz,
+)
+from cadgen._internal.fea.analyses.nonlinear import (
+    NonlinearAnalysis, NonlinearInputs, field_peak, load_label, material_specs, nodal, parse_steps, part_materials,
+    peak_check, pick_frames, refuse_stress, symmetry_planes, totals, unfold, view_checks, with_materials,
+)
 from cadgen._internal.fea.study import parse_fixtures, parse_loads
-
-if TYPE_CHECKING:
-    import numpy as np
 
 __all__ = [
     "ContactAnalysis", "ContactInputs", "ContactPair", "DEFAULT_STEPS", "LIMITS", "RigidPlane", "contact_words",
-    "mark_unsettled", "parse_rigid_planes", "path_deadline", "parse_steps", "unsettled_extras", "unsettled_sentence", "unsettled_steps",
+    "mark_unsettled", "parse_rigid_planes", "path_deadline", "unsettled_extras", "unsettled_sentence", "unsettled_steps",
 ]
 
 #: Load steps a study starts with when it names none.
 DEFAULT_STEPS = 5
-#: The most starting steps a study may ask for.
-MAX_STEPS = 200
 #: The largest Coulomb coefficient a study may give.
 MAX_FRICTION = 2.0
 #: The Uzawa updates a load step takes on average, as extra Newton solves, for the cost estimate.
 AUGMENT_COST = 2.0
-#: Frames a series keeps when the budget does not say.
-MAX_FRAMES = 24
 #: The contact forces still changing by more than this share after the last Uzawa update is worth a warning.
 UNSETTLED = 0.1
 #: A body resting on contacts whose drift springs carry more than this share of its load (or of the whole load) is not
@@ -107,9 +105,9 @@ def contact_words(between: tuple[str, str], friction: float) -> str:
     return f"{between[0]} presses on {between[1]}, " + (f"friction {friction:g}" if friction else "no friction")
 
 
-def _friction(entry: dict, where: str) -> float:
+def parse_friction(entry: dict, where: str, default: float = 0.0) -> float:
     if "friction" not in entry:
-        return 0.0
+        return default
     value = kinds.number(entry["friction"], where=f"{where}.friction")
     if not 0.0 <= value <= MAX_FRICTION:
         raise ValueError(f"{where}.friction: Coulomb's coefficient, from 0 (frictionless) to {MAX_FRICTION:g}, like 0.2 "
@@ -117,28 +115,38 @@ def _friction(entry: dict, where: str) -> float:
     return value
 
 
-def _pairs(document: dict) -> tuple[ContactPair, ...]:
+def parse_between(entry: dict, where: str, example: str) -> tuple[str, str]:
+    between = entry.get("between")
+    if not isinstance(between, list) or len(between) != 2 or not all(isinstance(n, str) and n.strip() for n in between):
+        raise ValueError(f"{where}.between: name the two parts, like {example}")
+    return between[0].strip(), between[1].strip()
+
+
+def parse_connections(document: dict, bolt: Callable[[dict, str], Any] | None = None) -> tuple[tuple[ContactPair, ...], tuple]:
+    """The ``contact`` connections, and (bolt studies: ``bolt`` parses each) the ``bolt`` ones."""
     entries = document.get("connections")
     if not isinstance(entries, list):
-        return ()
-    pairs = []
+        return (), ()
+    pairs, bolts = [], []
     for index, entry in enumerate(entries):
         where = f"connections[{index}]"
         if not isinstance(entry, dict):
             continue  # study._connections says what is wrong with it
+        kind = entry.get("type")
+        if bolt is not None and kind == "bolt":
+            bolts.append(bolt(entry, where))
+            continue
         unknown = set(entry) - {"between", "type", "friction"}
         if unknown:
-            raise ValueError(f"{where}: unknown keys {sorted(unknown)}; a connection takes between, type and (contact) friction")
-        if entry.get("type") != "contact":
+            named = "a connection" if bolt is None else f"a {kinds.json_text(kind)} connection"
+            raise ValueError(f"{where}: unknown keys {sorted(unknown)}; {named} takes between, type and (contact) friction")
+        if kind != "contact":
             if "friction" in entry:
-                raise ValueError(f"{where}.friction: only a contact connection slides; {kinds.json_text(entry.get('type'))} "
-                                 "parts are glued or apart")
+                raise ValueError(f"{where}.friction: only a contact {'' if bolt is None else 'or bolt '}connection slides; "
+                                 f"{kinds.json_text(kind)} parts are glued or apart")
             continue
-        between = entry.get("between")
-        if not isinstance(between, list) or len(between) != 2 or not all(isinstance(n, str) and n.strip() for n in between):
-            raise ValueError(f'{where}.between: name the two parts, like ["pin", "plate"]')
-        pairs.append(ContactPair((between[0].strip(), between[1].strip()), _friction(entry, where)))
-    return tuple(pairs)
+        pairs.append(ContactPair(parse_between(entry, where, '["pin", "plate"]'), parse_friction(entry, where)))
+    return tuple(pairs), tuple(bolts)
 
 
 def parse_rigid_planes(document: dict) -> tuple[RigidPlane, ...]:
@@ -171,24 +179,24 @@ def parse_rigid_planes(document: dict) -> tuple[RigidPlane, ...]:
         if not isinstance(parts, list) or not all(isinstance(p, str) and p.strip() for p in parts):
             raise ValueError(f'{where}.parts: the parts that rest on it by name, like ["plate"] (leave it out for every part)')
         planes.append(RigidPlane(vectors[0], tuple(c / length for c in vectors[1]), tuple(p.strip() for p in parts),
-                                 _friction(entry, where)))
+                                 parse_friction(entry, where)))
     return tuple(planes)
 
 
-def parse_steps(document: dict) -> int:
-    raw = document.get("steps", DEFAULT_STEPS)
-    if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= MAX_STEPS:
-        raise ValueError(f"steps: the number of load steps to start with, a whole number from 1 to {MAX_STEPS}, "
-                         f"got {kinds.json_text(raw)}")
-    return raw
+def require_held(fixtures, planes) -> None:
+    if not fixtures and not planes:
+        raise ValueError(
+            "study: nothing holds the parts still: add 'fixtures' (faces held fixed), or 'rigid_planes' "
+            "(a rigid floor they rest on)"
+        )
 
 
-def _material_specs(document: dict) -> list[Any]:
-    specs = [document["material"]] if "material" in document else []
-    parts = document.get("parts")
-    if isinstance(parts, dict):
-        specs += [entry["material"] for entry in parts.values() if isinstance(entry, dict) and "material" in entry]
-    return specs
+def face_refs(fixtures, loads, *more: str) -> tuple[tuple[str, ...], tuple[str, ...], frozenset]:
+    """(every face named, the fixtures' faces, the material needs): a part may rest on a contact or a rigid plane
+    alone, so requires_anchor is False and solve() says when nothing holds one."""
+    refs = tuple(dict.fromkeys((*(ref for group in (*fixtures, *loads) for ref in group.faces), *more)))
+    anchors = tuple(dict.fromkeys(ref for fixture in fixtures for ref in fixture.faces))
+    return refs, anchors, frozenset({"density"}) if any(load.body for load in loads) else frozenset()
 
 
 def unsettled_sentence(percent: float, of: str = "the load") -> str:
@@ -205,6 +213,19 @@ def unsettled_steps(path, of: str = "the load") -> list[dict]:
 def unsettled_extras(unsettled: list[dict]) -> dict:
     """``extras.analysis.unsettled``: the shares of the load whose contact did not settle, and the first."""
     return {"at_percent": [step["percent"] for step in unsettled], "first_percent": unsettled[0]["percent"]}
+
+
+def unsettled_scalars(stopped: list[str], unsettled: list[dict]) -> dict:
+    """The result scalars that say a path stopped short (``stopped``: its sentence) or kept unsettled steps."""
+    return {
+        "analysis_warnings": stopped + [unsettled_sentence(step["percent"], step["of"]) for step in unsettled[:1]],
+        "unsettled": unsettled,
+        "analysis_extras": {"unsettled": unsettled_extras(unsettled)} if unsettled else {},
+    }
+
+
+def unsettled_status(unsettled: list[dict]) -> str:
+    return f"Not reliable: contact did not settle at {unsettled[0]['percent']:.0f}% of {unsettled[0]['of']}"
 
 
 def path_deadline(ctx) -> float:
@@ -231,24 +252,37 @@ def mark_unsettled(judged: dict, scalars: dict) -> dict:
     return judged
 
 
-def _pair_name(pair: ContactPair) -> str:
-    return f"{pair.between[0]} on {pair.between[1]}"
-
-
 def _plane_name(index: int, count: int) -> str:
     return "the rigid plane" if count == 1 else f"rigid plane {index + 1}"
 
 
+def _diagonal(points, node_part, parts) -> float:
+    import numpy as np
+
+    chosen = np.isin(node_part, list(parts))
+    if not chosen.any():
+        return 0.0
+    return float(np.linalg.norm(points[chosen].max(axis=0) - points[chosen].min(axis=0)))
+
+
+@dataclass
+class _Nodes:
+    """The parts' nodes as contact sees them: which part and connected body each is in, where, and the contact
+    tolerance and each part's Young's modulus."""
+
+    part: Any
+    body: Any
+    points: Any
+    tolerance: float
+    E_of_part: dict[int, float]
+
+
 class ContactAnalysis(NonlinearAnalysis):
     name: ClassVar[str] = "contact"
-    tier: ClassVar[int] = 3
     word: ClassVar[str] = "Contact"
-    estimate_only: ClassVar[bool] = False
     collapse_fails: ClassVar[bool] = False
     limits: ClassVar[tuple[str, ...]] = LIMITS
     study_keys: ClassVar[frozenset[str]] = frozenset({"fixtures", "loads", "steps", "rigid_planes"})
-    material_needs: ClassVar[frozenset[str]] = frozenset()
-    mesh_orders: ClassVar[tuple[int, ...]] = (2,)
     # The one analysis that accepts contact pairs (study._connections reads this); bonded stays the default.
     connection_types: ClassVar[tuple[str, ...]] = ("bonded", "free", "contact")
     fields: ClassVar[tuple[FieldSpec, ...]] = (
@@ -258,17 +292,19 @@ class ContactAnalysis(NonlinearAnalysis):
     )
     checks: ClassVar[tuple] = (kinds.STRESS, kinds.DISPLACEMENT, kinds.CONTACT_PRESSURE)
     default_checks: ClassVar[tuple[dict, ...]] = ({"kind": "stress"},)
-    # No load_scale: contact is not proportional to the load (it opens, closes and slides).
-    drives: ClassVar[tuple[str, ...]] = ("field", "deformation", "threshold", "frame")
+    # No load_scale (nonlinear's drives): contact is not proportional to the load (it opens, closes and slides).
     default_controls: ClassVar[dict[str, dict]] = {
         "frame": {"drives": "frame", "type": "number", "min": 0.0, "max": 100.0},
         "field": {"drives": "field", "type": "enum", "options": ["von_mises", "displacement", "contact_pressure"]},
         "deformation": {"drives": "deformation", "type": "number", "min": 0.0, "max": None},
     }
-    upstream: ClassVar[tuple[str, ...]] = ()
-    ladder: ClassVar[tuple[str, ...]] = ("iterative", "adaptive_steps", "local_refine", "defeature", "symmetry")
-    noun: ClassVar[str] = "this load"
     governing_word: ClassVar[str] = "peak contact pressure"
+    extras_word: ClassVar[str] = "contact"
+    _adaptive_words = ("Let the load steps grow (up to {growth}× the {steps} starting ones) while the contacts settle in "
+                       "a few Newton iterations, cutting them where they do not, to fit the time target")
+
+    def _adaptive_accuracy(self, inputs) -> str | None:
+        return "friction's slip is followed along the load in larger steps; the final contact is solved to the same tolerance"
 
     # -- parse ---------------------------------------------------------------------------------------
 
@@ -277,32 +313,22 @@ class ContactAnalysis(NonlinearAnalysis):
 
         fixtures = parse_fixtures(document, required=False)
         loads = parse_loads(document)
-        steps = parse_steps(document)
-        pairs = _pairs(document)
+        steps = parse_steps(document, DEFAULT_STEPS)
+        pairs, _ = parse_connections(document)
         planes = parse_rigid_planes(document)
         if not pairs and not planes:
             raise ValueError(
                 'study: a contact study needs a contact: connections like [{"between": ["pin", "plate"], "type": "contact", '
                 '"friction": 0.2}], or rigid_planes like [{"point_mm": [0, 0, 0], "normal": [0, 0, 1]}] for a rigid floor'
             )
-        if not fixtures and not planes:
-            raise ValueError(
-                "study: nothing holds the parts still: add 'fixtures' (faces held fixed), or 'rigid_planes' "
-                "(a rigid floor they rest on)"
-            )
-        view = document.get("view")
-        checks = view.get("checks") if isinstance(view, dict) else None
-        stress = [(i, c) for i, c in enumerate(checks)] if isinstance(checks, list) else [(None, {"kind": "stress"})]
-        yieldless = any(material_from_spec(spec).yield_strength is None for spec in _material_specs(document))
-        for index, check in stress:
-            if isinstance(check, dict) and check.get("kind") == "stress" and yieldless:
-                where = f"view.checks[{index}]" if index is not None else "view.checks"
-                raise ValueError(f"{where}: a stress check compares the peak with a yield strength, and a material here has "
-                                 "none; give its yield_MPa, or check the contact_pressure or displacement instead")
-        refs = tuple(dict.fromkeys(ref for group in (*fixtures, *loads) for ref in group.faces))
-        anchors = tuple(dict.fromkeys(ref for fixture in fixtures for ref in fixture.faces))
-        needs = frozenset({"density"}) if any(load.body for load in loads) else frozenset()
-        # requires_anchor is False: a part may rest on a contact or a rigid plane alone; solve() says when nothing holds one.
+        require_held(fixtures, planes)
+        checks = view_checks(document)
+        if any(material_from_spec(spec).yield_strength is None for _, spec in material_specs(document)):
+            words = ", and a material here has none; give its yield_MPa, or check the contact_pressure or displacement instead"
+            if not isinstance(checks, list):
+                raise ValueError(f"view.checks: a stress check compares the peak with a yield strength{words}")
+            refuse_stress(checks, words)
+        refs, anchors, needs = face_refs(fixtures, loads)
         return ContactInputs(refs, anchors, False, fixtures=fixtures, loads=loads, material_needs=needs, steps=steps,
                              model="elastic", pairs=pairs, planes=planes)
 
@@ -314,24 +340,6 @@ class ContactAnalysis(NonlinearAnalysis):
 
         base = super().estimate(ctx, inputs)
         return fit.Estimate(dofs=base.dofs, memory_bytes=base.memory_bytes, seconds=base.seconds * AUGMENT_COST)
-
-    def apply(self, rung, ctx: SolveContext, inputs: ContactInputs):
-        from cadgen._internal.fea import fit
-
-        if rung == "adaptive_steps":
-            if ctx.plan.adaptive_steps:
-                return None
-            ctx.plan.adaptive_steps = True
-            from cadgen._internal.fea.nonlinear_driver import MAX_GROWTH
-
-            return fit.Step(
-                "adaptive_steps",
-                f"Let the load steps grow (up to {MAX_GROWTH}× the {inputs.steps} starting ones) while the contacts "
-                "settle in a few Newton iterations, cutting them where they do not, to fit the time target",
-                "friction's slip is followed along the load in larger steps; the final contact is solved to the same "
-                "tolerance", None, detail={"starting_steps": inputs.steps, "max_growth": MAX_GROWTH},
-            )
-        return super().apply(rung, ctx, inputs)
 
     def symmetric_about(self, plane, inputs: ContactInputs, ctx: SolveContext) -> bool:
         """Static's rule (one part only), and every rigid plane lies across the symmetry plane (its normal in it)."""
@@ -360,15 +368,118 @@ class ContactAnalysis(NonlinearAnalysis):
     def _part_names(self, ctx: SolveContext) -> list[str]:
         return list(ctx.assembly.names) if ctx.assembly is not None else [ctx.part_name or "the part"]
 
+    def _nodes(self, ctx: SolveContext, materials: list, names: list[str]) -> _Nodes:
+        from cadgen._internal.fea import contact_ops
+
+        node_part, node_body = contact_ops.body_of_nodes(ctx.space)
+        tolerance = float(ctx.study.contact_tolerance_mm) if ctx.study is not None else 0.1
+        E_of_part = {index: float(materials[min(index, len(materials) - 1)].E) for index in range(max(len(names), 1))}
+        return _Nodes(node_part, node_body, ctx.space.dof_locations, tolerance, E_of_part)
+
+    def _pair_rows(self, ctx: SolveContext, nodes: _Nodes, i: int, j: int, friction: float, n: int):
+        """Contact ``n``'s constraint rows between parts ``i`` and ``j``: the smaller part's nodes on the other's surface."""
+        from cadgen._internal.fea import contact_ops
+
+        volume = (lambda k: ctx.assembly.parts[k].volume_mm3) if ctx.assembly is not None else (lambda k: 0.0)
+        slave, master = (i, j) if volume(i) <= volume(j) else (j, i)
+        search = max(2.0 * nodes.tolerance, 0.1 * min(_diagonal(nodes.points, nodes.part, [i]),
+                                                       _diagonal(nodes.points, nodes.part, [j])))
+        return contact_ops.pair_constraints(ctx.space, contact_ops.PairSpec(slave, master, friction, n), nodes.part,
+                                            min(nodes.E_of_part[i], nodes.E_of_part[j]), search_mm=search,
+                                            tolerance_mm=nodes.tolerance)
+
+    @staticmethod
+    def _pair_entry(name: str, names: list[str], refs: list[str], i: int, j: int, friction: float) -> dict:
+        return {"kind": "pair", "name": name, "between": [names[i], names[j]], "refs": [refs[i], refs[j]],
+                "friction": friction, "words": contact_words((names[i], names[j]), friction)}
+
+    def _plane_rows(self, ctx: SolveContext, inputs: ContactInputs, nodes: _Nodes, names: list[str], refs: list[str],
+                    rows: list, contacts: list[dict]) -> None:
+        """Each rigid plane's constraint rows and contact entry, appended to ``rows`` and ``contacts``."""
+        import numpy as np
+
+        from cadgen._internal.fea import contact_ops
+
+        for n, plane in enumerate(inputs.planes):
+            parts = tuple(sorted({self._part_index(ctx, name, f"rigid_planes[{n}].parts") for name in plane.parts})) \
+                if plane.parts and ctx.assembly is not None else tuple(range(max(len(names), 1)))
+            normal = np.asarray(plane.normal, dtype=float)
+            on = np.isin(nodes.part, list(parts))
+            if on.any() and float((nodes.points[on].mean(axis=0) - np.asarray(plane.point)) @ normal) < 0:
+                normal = -normal  # it faces the parts it holds up
+            spec = contact_ops.PlaneSpec(plane.point, tuple(float(c) for c in normal), parts, plane.friction, n)
+            rows.append(contact_ops.plane_constraints(
+                ctx.space, spec, nodes.part, nodes.E_of_part, tolerance_mm=nodes.tolerance,
+                search_mm=max(2.0 * nodes.tolerance, 0.1 * _diagonal(nodes.points, nodes.part, parts))))
+            label = _plane_name(n, len(inputs.planes))
+            contacts.append({"kind": "plane", "name": label, "refs": [refs[p] for p in parts], "friction": plane.friction,
+                             "normal": [float(c) for c in normal], "words": f"{' and '.join(names[p] for p in parts)} on {label}"})
+
+    def _loose_bodies(self, ctx: SolveContext, supports, constraints, nodes: _Nodes, names: list[str], pair_count: int,
+                      links: list, words: str):
+        """(vector DOF per node, the bodies no support holds, each one's vector DOF). What holds each body (a connected
+        piece of mesh): a support, a rigid plane, or a contact (or ``links``: more (bodies, bodies) pairs) with a held
+        body; a body held by none is a study error ending in ``words``."""
+        import numpy as np
+
+        from cadgen._internal.fea import contact_ops
+        from cadgen._internal.fea.checks import quoted
+        from cadgen._internal.fea.supports import held_bodies
+
+        space, node_body = ctx.space, nodes.body
+        bodies = int(node_body.max()) + 1 if len(node_body) else 0
+        scalar_of = np.zeros(space.basis.N, dtype=np.int64)
+        vdofs = contact_ops.vector_dofs(space)
+        for c in range(3):
+            scalar_of[vdofs[:, c]] = np.arange(space.scalar_count)
+        fixed_bodies = held_bodies(space, supports, node_body[scalar_of])  # a body on rollers alone may still move
+        holds = set(fixed_bodies) | set(np.unique(node_body[constraints.node[constraints.owner < 0]]).tolist())
+        pair_links = []
+        for k in range(pair_count):
+            mine = constraints.owner == k
+            if mine.any():
+                pair_links.append((set(np.unique(node_body[constraints.node[mine]]).tolist()),
+                                   set(np.unique(node_body[constraints.master_nodes(mine)]).tolist())))
+        grown = True
+        while grown:
+            grown = False
+            for a, b in pair_links + links:
+                if (a & holds) and not b <= holds or (b & holds) and not a <= holds:
+                    holds |= a | b
+                    grown = True
+        unheld = [b for b in range(bodies) if b not in holds]
+        if unheld:
+            parts_of = sorted({int(p) for p in np.unique(nodes.part[np.isin(node_body, unheld)])})
+            who = " and ".join(quoted(names[p]) for p in parts_of)
+            raise ValueError(f"{who} {'is' if len(parts_of) == 1 else 'are'} not held by anything: {words}")
+        loose = [b for b in range(bodies) if b not in fixed_bodies]
+        return vdofs, loose, [vdofs[node_body == b].ravel() for b in loose]
+
+    @staticmethod
+    def _pressing_bodies(constraints, node_body, response) -> set:
+        """The bodies a contact presses at ``response``: either side of a pair, the part on a plane."""
+        import numpy as np
+
+        pressing = set(np.unique(node_body[constraints.node[response.pressing]]).tolist())
+        return pressing | set(np.unique(node_body[constraints.master_nodes(response.pressing & (constraints.owner >= 0))]).tolist())
+
+    @staticmethod
+    def _warn_unsettled(problem, warnings: list[str]) -> None:
+        from cadgen._internal.fea import contact_ops
+
+        if problem.unsettled > UNSETTLED:
+            warnings.append(f"the contact forces were still changing by {problem.unsettled * 100:.2g} % after "
+                            f"{contact_ops.MAX_AUGMENTATIONS} updates at a load step")
+
     def solve(self, ctx: SolveContext, inputs: ContactInputs) -> AnalysisResult:
         import time
 
         import numpy as np
 
         from cadgen._internal.fea import contact_ops, nonlinear_driver, operators
-        from cadgen._internal.fea.analyses.nonlinear import external_load
+        from cadgen._internal.fea.analyses.nonlinear import external_load, supported
         from cadgen._internal.fea.checks import quoted
-        from cadgen._internal.fea.supports import check_held, driven, held_bodies, path_to_global, supports_of
+        from cadgen._internal.fea.supports import driven, path_to_global
 
         space = ctx.space
         basis = space.basis
@@ -376,20 +487,10 @@ class ContactAnalysis(NonlinearAnalysis):
         timings: dict[str, float] = {}
         warnings: list[str] = []
         started = time.perf_counter()
-        fit_plan = ctx.plan
-        planes = list(fit_plan.prepared.planes) if fit_plan is not None and fit_plan.prepared is not None else []
+        planes = symmetry_planes(ctx)
         share = 0.5 ** len(planes)
         external = external_load(space, materials, inputs.surface_loads, inputs.body_accelerations, ctx.ordinal_of, share)
-        plane_dofs = []
-        for plane in planes:
-            dofs = basis.get_dofs(space.facets_of_ordinals([plane.ordinal], "a symmetry plane")).all()
-            plane_dofs.append(dofs[space.component[dofs] == plane.component])
-        # Fixed faces, rollers (a sloped or curved one's nodes turned into their own axes: supports.py) and planes.
-        supports = supports_of(space, inputs.fixtures, ctx.ordinal_of, held=plane_dofs)
-        check_held(space, supports)
-        fixture_dofs = supports.per_fixture
-        fixed = supports.fixed
-        free = np.setdiff1d(np.arange(basis.N), fixed)
+        supports, free = supported(ctx, inputs.fixtures, planes)
         K = operators.stiffness(space, materials).tocsr()
 
         # The contacts: pairs between parts, then rigid planes.
@@ -398,17 +499,8 @@ class ContactAnalysis(NonlinearAnalysis):
             refs = [part.ref for part in ctx.assembly.parts]
         else:  # one part: its occurrence, as its faces' refs name it
             refs = [next((face.ref.rpartition(".f")[0] for face in ctx.volume.faces.values()), "")]
-        node_part, node_body = contact_ops.body_of_nodes(space)
-        points = space.dof_locations
-        tolerance = float(ctx.study.contact_tolerance_mm) if ctx.study is not None else 0.1
-        E_of_part = {index: float(materials[min(index, len(materials) - 1)].E) for index in range(max(len(names), 1))}
-
-        def diagonal(parts) -> float:
-            chosen = np.isin(node_part, list(parts))
-            if not chosen.any():
-                return 0.0
-            return float(np.linalg.norm(points[chosen].max(axis=0) - points[chosen].min(axis=0)))
-
+        nodes = self._nodes(ctx, materials, names)
+        node_part, node_body = nodes.part, nodes.body
         rows: list = []
         contacts: list[dict] = []
         for n, pair in enumerate(inputs.pairs):
@@ -416,65 +508,16 @@ class ContactAnalysis(NonlinearAnalysis):
             i, j = (self._part_index(ctx, name, f"{where}.between") for name in pair.between)
             if i == j:
                 raise ValueError(f"{where}.between: both names are {quoted(names[i])}")
-            volume = (lambda k: ctx.assembly.parts[k].volume_mm3) if ctx.assembly is not None else (lambda k: 0.0)
-            slave, master = (i, j) if volume(i) <= volume(j) else (j, i)
-            search = max(2.0 * tolerance, 0.1 * min(diagonal([i]), diagonal([j])))
-            spec = contact_ops.PairSpec(slave, master, pair.friction, len(contacts))
-            found = contact_ops.pair_constraints(space, spec, node_part, min(E_of_part[i], E_of_part[j]),
-                                                 search_mm=search, tolerance_mm=tolerance)
-            rows.append(found)
-            contacts.append({"kind": "pair", "name": _pair_name(pair), "between": [names[i], names[j]], "refs": [refs[i], refs[j]],
-                             "friction": pair.friction, "words": contact_words((names[i], names[j]), pair.friction)})
-        for n, plane in enumerate(inputs.planes):
-            parts = tuple(sorted({self._part_index(ctx, name, f"rigid_planes[{n}].parts") for name in plane.parts})) \
-                if plane.parts and ctx.assembly is not None else tuple(range(max(len(names), 1)))
-            normal = np.asarray(plane.normal, dtype=float)
-            on = np.isin(node_part, list(parts))
-            if on.any() and float((points[on].mean(axis=0) - np.asarray(plane.point)) @ normal) < 0:
-                normal = -normal  # it faces the parts it holds up
-            spec = contact_ops.PlaneSpec(plane.point, tuple(float(c) for c in normal), parts, plane.friction, n)
-            found = contact_ops.plane_constraints(space, spec, node_part, E_of_part,
-                                                  search_mm=max(2.0 * tolerance, 0.1 * diagonal(parts)), tolerance_mm=tolerance)
-            rows.append(found)
-            contacts.append({"kind": "plane", "name": _plane_name(n, len(inputs.planes)), "refs": [refs[p] for p in parts],
-                             "friction": plane.friction, "normal": [float(c) for c in normal],
-                             "words": f"{' and '.join(names[p] for p in parts)} on {_plane_name(n, len(inputs.planes))}"})
+            rows.append(self._pair_rows(ctx, nodes, i, j, pair.friction, n))
+            contacts.append(self._pair_entry(f"{pair.between[0]} on {pair.between[1]}", names, refs, i, j, pair.friction))
+        self._plane_rows(ctx, inputs, nodes, names, refs, rows, contacts)
         # Plane rows are owned by ``-1 - plane index``; number them after the pairs for one list of contacts.
         constraints = contact_ops.Constraints.concatenate(rows, space.scalar_count)
         owner = np.where(constraints.owner >= 0, constraints.owner, len(inputs.pairs) + (-1 - constraints.owner))
-
-        # What holds each body (a connected piece of mesh): a fixture, a rigid plane, or a contact with a held body.
-        bodies = int(node_body.max()) + 1 if len(node_body) else 0
-        scalar_of = np.zeros(basis.N, dtype=np.int64)
-        vdofs = contact_ops.vector_dofs(space)
-        for c in range(3):
-            scalar_of[vdofs[:, c]] = np.arange(space.scalar_count)
-        fixed_bodies = held_bodies(space, supports, node_body[scalar_of])  # a body on rollers alone may still move
-        holds = set(fixed_bodies)
-        holds |= set(np.unique(node_body[constraints.node[constraints.owner < 0]]).tolist())
-        links = []
-        for k in range(len(inputs.pairs)):
-            mine = constraints.owner == k
-            if mine.any():
-                links.append((set(np.unique(node_body[constraints.node[mine]]).tolist()),
-                              set(np.unique(node_body[constraints.master_nodes(mine)]).tolist())))
-        grown = True
-        while grown:
-            grown = False
-            for a, b in links:
-                if (a & holds) and not b <= holds or (b & holds) and not a <= holds:
-                    holds |= a | b
-                    grown = True
-        unheld = [b for b in range(bodies) if b not in holds]
-        if unheld:
-            parts_of = sorted({int(p) for p in np.unique(node_part[np.isin(node_body, unheld)])})
-            who = " and ".join(quoted(names[p]) for p in parts_of)
-            raise ValueError(
-                f"{who} {'is' if len(parts_of) == 1 else 'are'} not held by anything: fix a face of it, put it in contact "
-                "with a held part (the faces must face each other, near enough to touch), or give it a rigid plane to rest on"
-            )
-        loose = [b for b in range(bodies) if b not in fixed_bodies]
-        floating = [vdofs[node_body == b].ravel() for b in loose]
+        vdofs, loose, floating = self._loose_bodies(
+            ctx, supports, constraints, nodes, names, len(inputs.pairs), [],
+            "fix a face of it, put it in contact with a held part (the faces must face each other, near enough to touch), "
+            "or give it a rigid plane to rest on")
         stabilise = contact_ops.stabilising_springs(K, basis.N, floating)
         # A body resting on contacts alone first moves, rigidly, along its load until it touches (a stress-free move).
         shift = contact_ops.close_gaps(constraints, node_body, vdofs, external, loose)
@@ -486,9 +529,9 @@ class ContactAnalysis(NonlinearAnalysis):
             vm = operators.von_mises(operators.stress(space, materials, u))
             history.append((vm, response))
 
-        solver = getattr(fit_plan, "solver", "direct") if fit_plan is not None else "direct"
+        solver = plan_value(ctx, "solver", "direct")
         method = "iterative" if solver in ("iterative", "matrix_free") else "direct"
-        adaptive = bool(getattr(fit_plan, "adaptive_steps", False)) if fit_plan is not None else False
+        adaptive = bool(plan_value(ctx, "adaptive_steps", False))
         problem = contact_ops.ContactProblem(space, K, free, external, constraints, stabilise, method=method,
                                              on_commit=record)
         if ctx.log:
@@ -499,94 +542,58 @@ class ContactAnalysis(NonlinearAnalysis):
                                                           deadline_s=path_deadline(ctx)), supports)
         timings["solve_s"] = path.seconds
         warnings += path.warnings
-        if problem.unsettled > UNSETTLED:
-            warnings.append(f"the contact forces were still changing by {problem.unsettled * 100:.2g} % after "
-                            f"{contact_ops.MAX_AUGMENTATIONS} updates at a load step")
+        self._warn_unsettled(problem, warnings)
         if ctx.log:
             ctx.log(f"followed the load to {path.factor * 100:.4g}% in {len(path.records)} steps, {path.iterations} Newton "
                     f"iterations and {problem.augmentations} contact updates, in {path.seconds:.1f}s")
 
         started = time.perf_counter()
-        frames_max = int(getattr(ctx.budget, "max_frames", MAX_FRAMES) or MAX_FRAMES) if ctx.budget is not None else MAX_FRAMES
         records = path.records
         if not records:  # not even the smallest first step: the unloaded parts are the one frame
             zeros = np.zeros(problem.size)
             records = [nonlinear_driver.StepRecord(0.0, 0, zeros, 0.0)]
             history = [(np.zeros(basis.dx.shape), problem.response(zeros))]
-        picked = pick_frames(len(records), max(frames_max, 1))
+        picked = pick_frames(len(records), max(max_frames(ctx), 1))
         # A step kept although its contact did not settle is always among the frames, and its label says so.
         loose_steps = {i for i, record in enumerate(records) if not record.settled}
         picked = sorted(set(picked) | loose_steps)
-
-        def nodal(values):
-            return np.clip(space.scalar.project(values), 0.0, float(values.max()))
-
-        stress_frames, displacement_frames, pressure_frames = [], [], []
-        for index in picked:
-            vm_q, response = history[index]
-            stress_frames.append(nodal(vm_q))
-            displacement_frames.append(space.nodal(records[index].u + shift))
-            pressure_frames.append(contact_ops.pressure_field(space, constraints, response.normal_force))
+        stress_frames = [nodal(space, history[index][0]) for index in picked]
+        displacement_frames = [space.nodal(records[index].u + shift) for index in picked]
+        pressure_frames = [contact_ops.pressure_field(space, constraints, history[index][1].normal_force) for index in picked]
         final = records[-1]
         final_response = history[-1][1]
         final_pressure = pressure_frames[-1]  # the last step is always among the frames
         # A body resting on contacts alone whose load its drift springs take (more than a hair of it) is not held:
         # it comes loose when none of its contacts presses, else it slides away (friction cannot hold it sideways).
-        pressing_bodies = set(np.unique(node_body[constraints.node[final_response.pressing]]).tolist())
-        pressing_bodies |= set(np.unique(node_body[constraints.master_nodes(final_response.pressing & (constraints.owner >= 0))]).tolist())
+        pressing_bodies = self._pressing_bodies(constraints, node_body, final_response)
         loose_parts: list[dict] = []
         total = float(np.linalg.norm([final.factor * external[space.component == k].sum() for k in range(3)]))
         for b, dofs in zip(loose, floating):
-            spring = [float((stabilise[dofs] * final.u[dofs])[space.component[dofs] == k].sum()) for k in range(3)]
-            load = [float(final.factor * external[dofs][space.component[dofs] == k].sum()) for k in range(3)]
-            unheld = math.sqrt(sum(c * c for c in spring))
+            unheld = math.sqrt(sum(c * c for c in totals(space, stabilise * final.u, dofs)))
+            load = [float(final.factor * c) for c in totals(space, external, dofs)]
             if unheld > LOOSE_SHARE * max(math.sqrt(sum(c * c for c in load)), total, 1e-300):
                 loose_parts.append({"parts": sorted({names[int(p)] for p in np.unique(node_part[node_body == b])}),
                                     "pressing": b in pressing_bodies, "unheld_N": unheld / share})
-        stats = self._contact_stats(contacts, constraints, owner, final_response, final_pressure, points, share,
+        stats = self._contact_stats(contacts, constraints, owner, final_response, final_pressure, nodes.points, share,
                                     float(np.linalg.norm(space.nodal(final.u + shift), axis=1).max()))
         internal, _ = problem.evaluate(final.u, tangent=False) if path.records else (np.zeros(problem.size), None)
         residual = internal - final.factor * external
-        reactions = [tuple(float(residual[dofs][space.component[dofs] == c].sum()) for c in range(3)) for dofs in fixture_dofs]
-        applied = tuple(float(final.factor * external[space.component == c].sum()) for c in range(3))
-        requested = tuple(float(external[space.component == c].sum()) for c in range(3))
+        reactions = [totals(space, residual, dofs) for dofs in supports.per_fixture]
+        requested = totals(space, external)
+        applied = tuple(float(final.factor * c) for c in requested)
         vm_gauss = float(history[-1][0].max())
-        dof_locations, boundary, tets, element_dofs, vertices = (space.dof_locations, space.boundary_quadratic, space.tets,
-                                                                  space.element_dofs, space.vertices)
-        if planes:
-            from cadgen._internal.fea import symmetry
-
-            volume = ctx.volume
-            for plane in reversed(planes):
-                whole, keep = symmetry.unfold_volume(volume, plane)
-                scalars = {f"vm{i}": values for i, values in enumerate(stress_frames)}
-                scalars.update({f"cp{i}": values for i, values in enumerate(pressure_frames)})
-                vectors = {f"u{i}": values for i, values in enumerate(displacement_frames)}
-                dof_locations, scalars, vectors, boundary, tets, element_dofs, vertices = symmetry.unfold_fields(
-                    plane, vertices, dof_locations, keep, scalars=scalars, vectors=vectors, boundary=boundary, tets=tets,
-                    element_dofs=element_dofs,
-                )
-                stress_frames = [scalars[f"vm{i}"] for i in range(len(stress_frames))]
-                pressure_frames = [scalars[f"cp{i}"] for i in range(len(pressure_frames))]
-                displacement_frames = [vectors[f"u{i}"] for i in range(len(displacement_frames))]
-                reactions = [symmetry.unfold_force(plane, r) for r in reactions]
-                applied = symmetry.unfold_force(plane, applied)
-                requested = symmetry.unfold_force(plane, requested)
-                volume = whole
-            ctx.volume = volume
+        mesh, scalars, vectors, reactions, (applied, requested) = unfold(
+            ctx, planes, {"von_mises": stress_frames, "contact_pressure": pressure_frames},
+            {"displacement": displacement_frames}, reactions, applied, requested)
         timings["stress_s"] = time.perf_counter() - started
 
         factors = [records[i].factor for i in picked]
-        attributes = {"von_mises": "_VON_MISES", "displacement": "_DISPLACEMENT", "contact_pressure": "_CONTACT_PRESSURE"}
         unsettled = unsettled_steps(path)
-        series = Series(kind="time", unit="%", default=len(picked) - 1, frames=[
-            SeriesFrame(value=round(records[i].factor * 100.0, 6),
-                        label=load_label(records[i].factor) + (" · did not settle" if i in loose_steps else ""),
-                        attributes={name: attribute if n == 0 else f"{attribute}_F{n}" for name, attribute in attributes.items()})
-            for n, i in enumerate(picked)
-        ])
-        frame_fields = {"von_mises": stress_frames, "displacement": displacement_frames, "contact_pressure": pressure_frames}
-        fields = {name: values[0] for name, values in frame_fields.items()}
+        frame_fields = {"von_mises": scalars["von_mises"], "displacement": vectors["displacement"],
+                        "contact_pressure": scalars["contact_pressure"]}
+        series = self._series("%", frame_fields, [
+            (round(records[i].factor * 100.0, 6), load_label(records[i].factor) + (" · did not settle" if i in loose_steps else ""))
+            for i in picked])
         final_fields = {name: values[-1] for name, values in frame_fields.items()}
         curve_x = [round(record.factor * 100.0, 6) for record in path.records]
         curves = {
@@ -597,24 +604,16 @@ class ContactAnalysis(NonlinearAnalysis):
         }
         how = f"{path.how}, {len(path.records)} {'adaptive ' if adaptive else ''}load steps, {problem.augmentations} contact updates"
         peak_node = int(final_fields["contact_pressure"].argmax())
-        return AnalysisResult(
-            dof_locations=dof_locations, vertices=vertices, tets=tets, boundary_quadratic=boundary, element_dofs=element_dofs,
-            fields=fields, deformation=displacement_frames[0], series=series, frame_fields=frame_fields, curves=curves,
-            reactions=reactions, applied=applied, dofs=int(basis.N), solver=how, timings=timings, warnings=warnings,
-            scalars={
-                "path": path, "final": final_fields, "factor": path.factor if path.records else 0.0, "collapsed": path.collapsed,
-                "requested": requested, "model": "elastic", "adaptive": adaptive, "von_mises_gauss_max": vm_gauss,
-                "frame_factors": factors, "contacts": stats, "augmentations": problem.augmentations,
-                "contact_nodes": constraints.count, "floating_bodies": len(floating), "loose_parts": loose_parts,
-                "peak_pressure_at": [round(float(c), 3) for c in dof_locations[peak_node]],
-                "analysis_warnings": ([stop_words(path.factor)] if path.collapsed else [])
-                + [unsettled_sentence(step["percent"], step["of"]) for step in unsettled[:1]],
-                "unsettled": unsettled,
-                "analysis_extras": {"unsettled": unsettled_extras(unsettled)} if unsettled else {},
-                "part_refs": None if ctx.assembly is None else [part.ref for part in ctx.assembly.parts],
-                "part_names": names, "part_materials": part_materials(ctx),
-            },
-        )
+        return self._result(mesh, frame_fields, series, curves, reactions, applied, basis, how, timings, warnings, {
+            "path": path, "final": final_fields, "factor": path.factor if path.records else 0.0, "collapsed": path.collapsed,
+            "requested": requested, "model": "elastic", "adaptive": adaptive, "von_mises_gauss_max": vm_gauss,
+            "frame_factors": factors, "contacts": stats, "augmentations": problem.augmentations,
+            "contact_nodes": constraints.count, "floating_bodies": len(floating), "loose_parts": loose_parts,
+            "peak_pressure_at": xyz(mesh[0][peak_node]),
+            **unsettled_scalars([stop_words(path.factor)] if path.collapsed else [], unsettled),
+            "part_refs": None if ctx.assembly is None else [part.ref for part in ctx.assembly.parts],
+            "part_names": names, "part_materials": part_materials(ctx),
+        })
 
     def _contact_stats(self, contacts, constraints, owner, response, pressure, points, share: float,
                        moved: float) -> list[dict]:
@@ -649,21 +648,11 @@ class ContactAnalysis(NonlinearAnalysis):
     # -- judging -------------------------------------------------------------------------------------
 
     def judge(self, check: dict, index: int, ctx: SolveContext, result: AnalysisResult, inputs: ContactInputs) -> dict:
-        from cadgen._internal.fea import checks
-
         if check["kind"] != "contact_pressure":
             return mark_unsettled(super().judge(check, index, ctx, result, inputs), result.scalars)
-        common = dict(boundary=result.boundary_quadratic, boundary_ordinal=ctx.volume.boundary_ordinal,
-                      locations=result.dof_locations, face_ref=ctx.volume.faces, ordinal_of=ctx.ordinal_of,
-                      where=f"view.checks[{index}]")
-        peak = kinds.field_max_over(result.scalars["final"]["contact_pressure"], tuple(check.get("faces", ())), **common)
-        limit = float(check["limit_MPa"])
-        ratio = peak.value / limit
-        judged = {
-            "kind": "contact_pressure", "label": check.get("label") or kinds.CONTACT_PRESSURE.default_label,
-            "value": round(peak.value, 6), "limit": limit, "unit": "MPa", "ratio": round(ratio, 6), "close_at": 0.9,
-            "status": checks.check_status(ratio, 0.9), "where": {"ref": peak.ref, "at": [round(c, 3) for c in peak.at]},
-        }
+        peak = field_peak(ctx, result, result.scalars["final"]["contact_pressure"], tuple(check.get("faces", ())), index)
+        judged = peak_check("contact_pressure", check.get("label") or kinds.CONTACT_PRESSURE.default_label, peak,
+                            float(check["limit_MPa"]), "MPa")
         if check.get("faces"):
             judged["faces"] = list(peak.faces)
         judged["at"] = self._at(result)
@@ -675,11 +664,6 @@ class ContactAnalysis(NonlinearAnalysis):
         scalars = result.scalars
         path = scalars["path"]
         found: list[dict] = []
-
-        def finding(severity, kind, summary, description, items=()):
-            return {"check": "fea", "severity": severity, "type": kind, "summary": summary, "description": description,
-                    "items": list(items)}
-
         for step in (scalars.get("unsettled") or [])[:1]:
             others = len(scalars["unsettled"]) - 1
             found.append(finding(
@@ -724,15 +708,16 @@ class ContactAnalysis(NonlinearAnalysis):
                 ))
         for contact in scalars["contacts"]:
             name = contact["name"]
+            title = f"{name[0].upper()}{name[1:]}"
             if not contact["touching"]:
                 found.append(finding(
                     "warning", "contact_separates",
-                    f"{name[0].upper()}{name[1:]}: they separate under this load and no longer touch"
+                    f"{title}: they separate under this load and no longer touch"
                     if contact["kind"] == "pair" else f"Nothing presses on {name}: the part lifts off it",
                     "no point of the contact carries a force at the last load, so it passes no load (a contact never pulls)",
                 ))
                 continue
-            at = [round(c, 3) for c in contact["peak_at"]]
+            at = xyz(contact["peak_at"])
             found.append(finding(
                 "info", "contact_presses",
                 f"{contact['words'].split(',')[0]}: {contact['force_N']:.4g} N over {contact['area_mm2']:.3g} mm², "
@@ -745,24 +730,24 @@ class ContactAnalysis(NonlinearAnalysis):
                 if share > 0:
                     found.append(finding(
                         "info", "contact_slides",
-                        f"{name[0].upper()}{name[1:]} slides over {share * 100:.0f} % of the contact (friction {contact['friction']:g}), "
+                        f"{title} slides over {share * 100:.0f} % of the contact (friction {contact['friction']:g}), "
                         f"up to {contact['max_slide_mm']:.3g} mm",
                         "where the sideways force reaches friction times the pressure the surfaces slip; elsewhere they stick",
                     ))
                 else:
                     found.append(finding("info", "contact_sticks",
-                                         f"{name[0].upper()}{name[1:]} sticks: friction {contact['friction']:g} holds it from sliding",
+                                         f"{title} sticks: friction {contact['friction']:g} holds it from sliding",
                                          "the sideways force stays under friction times the pressure everywhere in the contact"))
             elif contact["slides"]:
                 found.append(finding(
                     "info", "contact_slides",
-                    f"{name[0].upper()}{name[1:]} slides freely (no friction), up to {contact['max_slide_mm']:.3g} mm",
+                    f"{title} slides freely (no friction), up to {contact['max_slide_mm']:.3g} mm",
                     "with no friction nothing holds the surfaces from sliding along each other",
                 ))
         touching = [c for c in scalars["contacts"] if c["touching"]]
         if touching:
             top = max(touching, key=lambda c: c["peak_MPa"])
-            at = [round(c, 3) for c in top["peak_at"]]
+            at = xyz(top["peak_at"])
             found.append(finding(
                 "info", "peak_contact_pressure",
                 f"The contact pressure peaks at {top['peak_MPa']:.4g} MPa where {top['name']} touch" if top["kind"] == "pair"
@@ -775,85 +760,44 @@ class ContactAnalysis(NonlinearAnalysis):
                 "info", "load_steps_cut",
                 f"Cut the load steps down to {path.smallest_step * 100:.3g} % to get through where the contacts open, close or slip",
                 f"{path.cuts} steps did not converge at first and were halved"))
-        return sorted(found, key=lambda item: {"error": 0, "warning": 1, "info": 2}[item["severity"]])
+        return by_severity(found)
 
     # -- what is written -----------------------------------------------------------------------------
 
     def summary(self, result: AnalysisResult, inputs: ContactInputs, check_results: list[dict]) -> dict:
-        import numpy as np
-
         scalars = result.scalars
         path = scalars["path"]
-        final = scalars["final"]
-        moved = np.linalg.norm(final["displacement"], axis=1)
-        peak = int(final["von_mises"].argmax())
-        node_moved = int(moved.argmax())
-        factor = scalars["factor"]
-        pressure = final["contact_pressure"]
+        pressure = scalars["final"]["contact_pressure"]
 
         def rounded(contact: dict) -> dict:
-            out = {}
-            for key, value in contact.items():
-                if isinstance(value, float):
-                    out[key] = round(value, 6)
-                elif key == "peak_at" and value is not None:
-                    out[key] = [round(c, 3) for c in value]
-                else:
-                    out[key] = value
-            return out
+            return {key: round(value, 6) if isinstance(value, float) else xyz(value) if key == "peak_at" and value is not None
+                    else value for key, value in contact.items()}
 
         unsettled = scalars.get("unsettled") or []
-        status = stop_words(factor) if scalars["collapsed"] else "Carries the full load"
+        status = stop_words(scalars["factor"]) if scalars["collapsed"] else "Carries the full load"
         if unsettled:
-            status = f"Not reliable: contact did not settle at {unsettled[0]['percent']:.0f}% of {unsettled[0]['of']}"
+            status = unsettled_status(unsettled)
         summary: dict[str, Any] = {
             "status": status,
             "collapsed": scalars["collapsed"],
             "unsettled_at_percent": [step["percent"] for step in unsettled],
-            "load_percent": round(factor * 100.0, 4),
+            "load_percent": round(scalars["factor"] * 100.0, 4),
             # The path stopped because it got through no step for the study's time target, not for want of equilibrium.
             "out_of_time": bool(getattr(path, "out_of_time", False)),
-            "max_von_mises_MPa": round(float(final["von_mises"][peak]), 4),
-            "max_von_mises_gauss_MPa": round(scalars["von_mises_gauss_max"], 4),
-            "max_von_mises_at_mm": [round(float(c), 3) for c in result.dof_locations[peak]],
-            "max_displacement_mm": round(float(moved[node_moved]), 6),
-            "max_displacement_at_mm": [round(float(c), 3) for c in result.dof_locations[node_moved]],
+            **self._peaks(result),
             "max_contact_pressure_MPa": round(float(pressure.max()), 4),
             "max_contact_pressure_at_mm": scalars["peak_pressure_at"] if float(pressure.max()) > 0 else None,
             "contacts": [rounded(c) for c in scalars["contacts"]],
-            "yield_MPa": scalars.get("yield_MPa"),
-            "applied_force_N": [round(x, 4) for x in result.applied],
-            "requested_force_N": [round(x, 4) for x in scalars["requested"]],
-            "reaction_force_N": [round(sum(r[c] for r in result.reactions), 4) for c in range(3)],
-            "steps_requested": inputs.steps,
-            "steps": len(path.records),
-            "step_cuts": path.cuts,
-            "smallest_step_percent": round(path.smallest_step * 100.0, 6),
-            "newton_iterations": path.iterations,
+            **self._path_record(result, inputs),
             "contact_updates": scalars["augmentations"],
             "contact_nodes": scalars["contact_nodes"],
-            "adaptive": scalars["adaptive"],
-            "frames": len(result.series.frames),
-            "deformation_scale": scalars.get("deformation_scale"),
+            **self._frames_record(result),
         }
         if scalars.get("part_refs"):
             summary["parts"] = with_materials([{"ref": ref, "name": name} for ref, name in zip(scalars["part_refs"], scalars["part_names"])],
                                               scalars)
         summary["checks"] = check_results
         return summary
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} contact"
-
-    def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
-        import numpy as np
-
-        frames = result.frame_fields
-        return {
-            "von_mises": (0.0, round(max(float(f.max()) for f in frames["von_mises"]), 4)),
-            "displacement": (0.0, round(max(float(np.linalg.norm(f, axis=1).max()) for f in frames["displacement"]), 6)),
-            "contact_pressure": (0.0, round(max(float(f.max()) for f in frames["contact_pressure"]), 4)),
-        }
 
     def extras_head(self, summary: dict) -> dict:
         head = {"load_percent": summary["load_percent"], "collapsed": summary["collapsed"], "contacts": summary["contacts"]}
@@ -885,8 +829,7 @@ class ContactAnalysis(NonlinearAnalysis):
                 lines.append(f"{contact['name']}: no longer touching")
         lines.append(f"followed in {summary['steps']} {'adaptive ' if summary['adaptive'] else ''}load steps "
                      f"({summary['newton_iterations']} Newton iterations, {summary['contact_updates']} contact updates"
-                     + (f", {summary['step_cuts']} cut, smallest {summary['smallest_step_percent']:g} %" if summary["step_cuts"] else "")
-                     + ")")
+                     + self._cut_words(summary) + ")")
         return lines
 
 

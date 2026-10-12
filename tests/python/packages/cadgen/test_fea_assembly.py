@@ -12,29 +12,30 @@ import io
 import json
 import tempfile
 import unittest
-from contextlib import contextmanager, redirect_stderr, redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
-
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
+from tests.python.support.fea_fixtures import (
+    class_directory, glb_array, glb_attribute_names, glb_extras, needs_fea, quiet, sidecar, solve,
+)
 
 TOLERANCE = 0.1
+MESH = {"size_mm": 4.0}
 
 
-@contextmanager
-def quiet():
-    """The CLI's progress lines go to stderr; a test that is not about them keeps them out of the run's output."""
-    with redirect_stderr(io.StringIO()):
-        yield
+def _box(label: str, at: tuple[float, float, float], size: tuple[float, float, float]):
+    from build123d import Align, Box, Pos
+
+    box = Pos(*at) * Box(*size, align=Align.MIN)
+    box.label = label
+    return box
+
+
+def _export(path: Path, *children) -> Path:
+    from build123d import Compound, export_step
+
+    export_step(Compound(children=list(children)), str(path))
+    return path
 
 
 def _write_assembly(
@@ -47,36 +48,19 @@ def _write_assembly(
     a plate on the post's top; with ``overlap_block``, a block sunk 1 mm into the base's
     +X end (they share 100 mm^3); with ``corner_block``, a block whose corner is sunk
     that far (mm) into the base's +X/+Y top corner on all three axes."""
-    from build123d import Align, Box, Compound, Pos, export_step
-
-    base = Box(40, 20, 10, align=Align.MIN)
-    base.label = "base"
-    post = Pos(15, 5, 10 + lift) * Box(10, 10, 30, align=Align.MIN)
-    post.label = "post"
-    children = [base, post]
+    children = [_box("base", (0, 0, 0), (40, 20, 10)), _box("post", (15, 5, 10 + lift), (10, 10, 30))]
     if edge_block:
-        block = Pos(40, 20, 0) * Box(10, 10, 10, align=Align.MIN)
-        block.label = "block"
-        children.append(block)
+        children.append(_box("block", (40, 20, 0), (10, 10, 10)))
     if far_block is not None:
-        block = Pos(40 + far_block, 0, 0) * Box(10, 10, 10, align=Align.MIN)
-        block.label = "block"
-        children.append(block)
+        children.append(_box("block", (40 + far_block, 0, 0), (10, 10, 10)))
     if overlap_block:
-        block = Pos(39, 5, 0) * Box(10, 10, 10, align=Align.MIN)
-        block.label = "block"
-        children.append(block)
+        children.append(_box("block", (39, 5, 0), (10, 10, 10)))
     if corner_block is not None:
-        block = Pos(40 - corner_block, 20 - corner_block, 10 - corner_block) * Box(10, 10, 10, align=Align.MIN)
-        block.label = "block"
-        children.append(block)
+        sunk = corner_block
+        children.append(_box("block", (40 - sunk, 20 - sunk, 10 - sunk), (10, 10, 10)))
     if cap:
-        plate = Pos(12, 2, 40 + lift) * Box(16, 16, 5, align=Align.MIN)
-        plate.label = "cap"
-        children.append(plate)
-    path = directory / f"{name}.step"
-    export_step(Compound(children=children), str(path))
-    return path
+        children.append(_box("cap", (12, 2, 40 + lift), (16, 16, 5)))
+    return _export(directory / f"{name}.step", *children)
 
 
 def _refs(scene) -> dict[str, str]:
@@ -85,17 +69,6 @@ def _refs(scene) -> dict[str, str]:
 
 def _refs_of(parts) -> dict[str, str]:
     return {part.name: part.ref for part in parts}
-
-
-def _face_at(scene, part_ref: str, z: float) -> str:
-    """The ref of the part's horizontal face whose centre is at height ``z``."""
-    from cadgen._internal.fea.mesh import face_area_center
-
-    for selection in scene.resolve(part_ref).entities("face"):
-        _, centre = face_area_center(selection.shape())
-        if abs(centre[2] - z) < 1e-6:
-            return selection.ref
-    raise AssertionError(f"no face of {part_ref} at z = {z}")
 
 
 def _face_where(scene, part_ref: str, axis: int, value: float) -> str:
@@ -109,21 +82,46 @@ def _face_where(scene, part_ref: str, axis: int, value: float) -> str:
     raise AssertionError(f"no face of {part_ref} at {'xyz'[axis]} = {value}")
 
 
-@unittest.skipUnless(HAVE_FEA, "cadgen[fea] is not installed")
+def _face_at(scene, part_ref: str, z: float) -> str:
+    """The ref of the part's horizontal face whose centre is at height ``z``."""
+    return _face_where(scene, part_ref, 2, z)
+
+
+def _scene(step: Path):
+    from cadgen.step_scene import read_scene
+
+    scene = read_scene(step)
+    return scene, _refs(scene)
+
+
+def _pushed(step: Path, part: str, z: float, force: float = 1000, **extra) -> dict:
+    """A 6061 study of ``step``: the base's bottom held, ``part``'s face at height ``z`` pushed along +X."""
+    scene, refs = _scene(step)
+    return {"material": "6061", **extra, "fixtures": [{"faces": [_face_at(scene, refs["base"], 0.0)]}],
+            "loads": [{"faces": [_face_at(scene, refs[part], z)], "type": "force", "vector_N": [force, 0, 0]}]}
+
+
+def _temporary(case: unittest.TestCase) -> Path:
+    tmp = tempfile.TemporaryDirectory()
+    case.addCleanup(tmp.cleanup)
+    return Path(tmp.name)
+
+
+@needs_fea
 class DetectContactsTest(unittest.TestCase):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.tmp = Path(self._tmp.name)
+        self.tmp = _temporary(self)
 
-    def tearDown(self):
-        self._tmp.cleanup()
-
-    def _contacts(self, **kwargs):
-        from cadgen._internal.fea.assembly import detect_contacts, list_parts
+    def _parts(self, **kwargs):
+        from cadgen._internal.fea.assembly import list_parts
         from cadgen.step_scene import read_scene
 
-        scene = read_scene(_write_assembly(self.tmp, **kwargs))
-        parts = list_parts(scene)
+        return list_parts(read_scene(_write_assembly(self.tmp, **kwargs)))
+
+    def _contacts(self, **kwargs):
+        from cadgen._internal.fea.assembly import detect_contacts
+
+        parts = self._parts(**kwargs)
         return parts, detect_contacts(parts, TOLERANCE)
 
     def test_lists_each_part_with_its_name_and_volume(self):
@@ -158,10 +156,9 @@ class DetectContactsTest(unittest.TestCase):
         self.assertEqual(len(contacts), 1)
 
     def test_two_boxes_that_overlap_by_a_millimetre_share_a_hundred_cubic_millimetres(self):
-        from cadgen._internal.fea.assembly import detect_contacts, detect_overlaps, list_parts
-        from cadgen.step_scene import read_scene
+        from cadgen._internal.fea.assembly import detect_contacts, detect_overlaps
 
-        parts = list_parts(read_scene(_write_assembly(self.tmp, overlap_block=True, name="sunk")))
+        parts = self._parts(overlap_block=True, name="sunk")
         (overlap,) = detect_overlaps(parts)
         refs = _refs_of(parts)
         self.assertEqual({overlap.a, overlap.b}, {refs["base"], refs["block"]})
@@ -172,10 +169,9 @@ class DetectContactsTest(unittest.TestCase):
         self.assertEqual([c for c in detect_contacts(parts, TOLERANCE, skip=skip) if refs["block"] in (c.a, c.b)], [])
 
     def test_an_overlap_no_thicker_than_the_tolerance_is_an_interference_to_bond(self):
-        from cadgen._internal.fea.assembly import detect_overlaps, interferences, list_parts
-        from cadgen.step_scene import read_scene
+        from cadgen._internal.fea.assembly import detect_overlaps, interferences
 
-        parts = list_parts(read_scene(_write_assembly(self.tmp, lift=-0.01, name="pressed")))
+        parts = self._parts(lift=-0.01, name="pressed")
         refs = _refs_of(parts)
         (overlap,) = detect_overlaps(parts)
         self.assertAlmostEqual(overlap.thickness_mm, 0.01, delta=1e-4)
@@ -185,58 +181,37 @@ class DetectContactsTest(unittest.TestCase):
         self.assertEqual(contact.gap_mm, 0.0)
         self.assertAlmostEqual(contact.interference_mm, 0.01, delta=1e-4)
         self.assertAlmostEqual(contact.area_mm2, 100.0, delta=1.0)
-
-    def test_an_overlap_thicker_than_the_tolerance_stays_an_overlap(self):
-        from cadgen._internal.fea.assembly import detect_overlaps, interferences, list_parts
-        from cadgen.step_scene import read_scene
-
-        parts = list_parts(read_scene(_write_assembly(self.tmp, overlap_block=True, name="sunk")))
-        (overlap,) = detect_overlaps(parts)
-        self.assertAlmostEqual(overlap.thickness_mm, 1.0, places=6)  # 1 x 10 x 10 mm: its volume over its largest face
-        self.assertEqual(interferences([overlap], TOLERANCE), ([], [overlap]))
-
-    def test_a_corner_sunk_into_the_base_on_every_axis_stays_an_overlap(self):
-        from cadgen._internal.fea.assembly import detect_overlaps, interferences, list_parts
-        from cadgen.step_scene import read_scene
-
-        # A 0.25 mm cube in common: 2 V / A alone reads a third of its depth (0.083 mm), inside the tolerance.
-        parts = list_parts(read_scene(_write_assembly(self.tmp, corner_block=0.25, name="corner")))
-        (overlap,) = detect_overlaps(parts)
-        self.assertAlmostEqual(overlap.volume_mm3, 0.25**3, places=6)
-        self.assertAlmostEqual(overlap.thickness_mm, 0.25, places=6)
-        self.assertEqual(interferences([overlap], TOLERANCE), ([], [overlap]))
-
-    def test_a_flat_press_fit_up_to_the_tolerance_is_an_interference(self):
-        from cadgen._internal.fea.assembly import detect_overlaps, interferences, list_parts
-        from cadgen.step_scene import read_scene
-
+        # A flat press fit stays an interference up to the tolerance.
         for depth in (0.05, 0.09):
             with self.subTest(depth=depth):
-                parts = list_parts(read_scene(_write_assembly(self.tmp, lift=-depth, name=f"pressed{depth}")))
-                (overlap,) = detect_overlaps(parts)
+                (overlap,) = detect_overlaps(self._parts(lift=-depth, name=f"pressed{depth}"))
                 (contact,), left = interferences([overlap], TOLERANCE)
                 self.assertEqual(left, [])
                 self.assertAlmostEqual(contact.interference_mm, depth, delta=1e-4)
 
+    def test_an_overlap_thicker_than_the_tolerance_stays_an_overlap(self):
+        from cadgen._internal.fea.assembly import detect_overlaps, interferences
+
+        (overlap,) = detect_overlaps(self._parts(overlap_block=True, name="sunk"))
+        self.assertAlmostEqual(overlap.thickness_mm, 1.0, places=6)  # 1 x 10 x 10 mm: its volume over its largest face
+        self.assertEqual(interferences([overlap], TOLERANCE), ([], [overlap]))
+        # A corner sunk on every axis: a 0.25 mm cube in common, which 2 V / A alone reads as a third of its depth
+        # (0.083 mm), inside the tolerance.
+        (overlap,) = detect_overlaps(self._parts(corner_block=0.25, name="corner"))
+        self.assertAlmostEqual(overlap.volume_mm3, 0.25**3, places=6)
+        self.assertAlmostEqual(overlap.thickness_mm, 0.25, places=6)
+        self.assertEqual(interferences([overlap], TOLERANCE), ([], [overlap]))
+
     def test_parts_that_only_touch_do_not_overlap(self):
         from cadgen._internal.fea.assembly import detect_overlaps
 
-        parts, _ = self._contacts()
-        self.assertEqual(detect_overlaps(parts), [])
+        self.assertEqual(detect_overlaps(self._parts()), [])
 
     def test_a_row_of_parts_is_checked_only_between_neighbours(self):
-        from build123d import Align, Box, Compound, Pos, export_step
-
         from cadgen._internal.fea.assembly import detect_contacts, list_parts
         from cadgen.step_scene import read_scene
 
-        row = []
-        for n in range(12):
-            box = Pos(10 * n, 0, 0) * Box(10, 10, 10, align=Align.MIN)
-            box.label = f"box{n}"
-            row.append(box)
-        path = self.tmp / "row.step"
-        export_step(Compound(children=row), str(path))
+        path = _export(self.tmp / "row.step", *(_box(f"box{n}", (10 * n, 0, 0), (10, 10, 10)) for n in range(12)))
         parts = list_parts(read_scene(path))
         said = []
         contacts = detect_contacts(parts, TOLERANCE, log=said.append)
@@ -244,16 +219,11 @@ class DetectContactsTest(unittest.TestCase):
         self.assertEqual(said, ["checking 11 close part pairs for touching faces"])  # not 66 pairs
 
 
-@unittest.skipUnless(HAVE_FEA, "cadgen[fea] is not installed")
+@needs_fea
 class MeshAssemblyTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.tmp = Path(cls._tmp.name)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.tmp = class_directory(cls)
 
     def _glued(self, lift: float = 0.0):
         from cadgen._internal.fea.assembly import detect_contacts, list_parts
@@ -362,20 +332,19 @@ class MeshAssemblyTest(unittest.TestCase):
         self.assertEqual(len(volume.interface_faces), 2)
 
 
-@unittest.skipUnless(HAVE_FEA, "cadgen[fea] is not installed")
+@needs_fea
 class FeaPartsVerbTest(unittest.TestCase):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.tmp = Path(self._tmp.name)
+        self.tmp = _temporary(self)
 
-    def tearDown(self):
-        self._tmp.cleanup()
-
-    def test_lists_parts_and_their_bonded_pair(self):
+    def _parts(self, **kwargs):
         from cadgen import fea
 
         with quiet():
-            result = fea.parts(_write_assembly(self.tmp))
+            return fea.parts(_write_assembly(self.tmp, **kwargs))
+
+    def test_lists_parts_and_their_bonded_pair(self):
+        result = self._parts()
         self.assertEqual([part.name for part in result.parts], ["base", "post"])
         self.assertEqual(len(result.pairs), 1)
         pair = result.pairs[0]
@@ -396,53 +365,33 @@ class FeaPartsVerbTest(unittest.TestCase):
         self.assertTrue(any("found 1 touching or near pairs" in line for line in lines), lines)
 
     def test_an_overlap_is_listed_with_its_volume_and_is_not_a_touching_pair(self):
-        from cadgen import fea
-
-        with quiet():
-            result = fea.parts(_write_assembly(self.tmp, overlap_block=True))
+        result = self._parts(overlap_block=True)
         self.assertEqual([(pair.type, pair.between) for pair in result.pairs], [("bonded", ("post", "base")), ("overlapping", ("block", "base"))])
         self.assertAlmostEqual(result.pairs[1].overlap_mm3, 100.0, places=3)
         self.assertTrue(result.human_lines()[0].endswith(": 3 parts, 1 touching pairs, 1 overlapping"))
         self.assertIn("block ↔ base · overlapping · 100 mm³", result.human_lines())
 
     def test_a_corner_sunk_on_every_axis_is_listed_as_overlapping(self):
-        from cadgen import fea
-
-        with quiet():
-            result = fea.parts(_write_assembly(self.tmp, corner_block=0.25, name="corner"))
+        result = self._parts(corner_block=0.25, name="corner")
         self.assertIn(("overlapping", ("block", "base")), [(pair.type, pair.between) for pair in result.pairs])
 
     def test_an_interference_within_the_tolerance_is_listed_as_bonded(self):
-        from cadgen import fea
-
-        with quiet():
-            result = fea.parts(_write_assembly(self.tmp, lift=-0.01))
+        result = self._parts(lift=-0.01)
         (pair,) = result.pairs
         self.assertEqual((pair.type, pair.between, pair.gap_mm), ("bonded", ("post", "base"), 0.0))
         self.assertAlmostEqual(pair.interference_mm, 0.01, delta=1e-4)
         self.assertTrue(result.human_lines()[0].endswith(": 2 parts, 1 touching pairs"))
         self.assertTrue(any(line.startswith("post ↔ base · ") and line.endswith(" · interference 0.01 mm · bonded") for line in result.human_lines()))
 
-    def test_a_near_miss_is_not_counted_as_a_touching_pair(self):
-        from cadgen import fea
-
-        with quiet():
-            result = fea.parts(_write_assembly(self.tmp, lift=0.3))
+    def test_a_near_miss_is_listed_as_not_connected_and_not_counted_as_a_touching_pair(self):
+        result = self._parts(lift=0.3)
         self.assertTrue(result.human_lines()[0].endswith(": 2 parts, 0 touching pairs, 1 near miss"), result.human_lines()[0])
-
-    def test_a_near_miss_is_listed_as_not_connected(self):
-        from cadgen import fea
-
-        with quiet():
-            result = fea.parts(_write_assembly(self.tmp, lift=0.3))
         self.assertEqual([pair.type for pair in result.pairs], ["not_connected"])
         self.assertIn("post ↔ base · gap 0.3 mm · not connected", result.human_lines())
 
     def test_it_needs_only_what_contact_detection_needs_not_the_fea_extra(self):
         import builtins
         from unittest import mock
-
-        from cadgen import fea
 
         real = builtins.__import__
 
@@ -451,17 +400,16 @@ class FeaPartsVerbTest(unittest.TestCase):
                 raise ImportError(name)
             return real(name, *args, **kwargs)
 
-        with mock.patch("builtins.__import__", refuse), quiet():
-            result = fea.parts(_write_assembly(self.tmp))
+        with mock.patch("builtins.__import__", refuse):
+            result = self._parts()
         self.assertEqual([pair.type for pair in result.pairs], ["bonded"])
 
     def test_json_output(self):
         from cadgen.cli.fea_parts import main
 
-        path = _write_assembly(self.tmp)
         out = io.StringIO()
         with redirect_stdout(out), quiet():
-            code = main([str(path), "--json"])
+            code = main([str(_write_assembly(self.tmp)), "--json"])
         self.assertEqual(code, 0)
         payload = json.loads(out.getvalue().strip().splitlines()[-1])
         self.assertTrue(payload["ok"])
@@ -470,40 +418,26 @@ class FeaPartsVerbTest(unittest.TestCase):
         self.assertAlmostEqual(payload["pairs"][0]["area_mm2"], 100.0, places=2)
 
 
-@unittest.skipUnless(HAVE_FEA, "cadgen[fea] is not installed")
+@needs_fea
 class DuplicateNamesTest(unittest.TestCase):
     """A base with two posts that are both called ``bar``: the study has to say which."""
 
     @classmethod
     def setUpClass(cls):
-        from build123d import Align, Box, Compound, Pos, export_step
-
         from cadgen.step_scene import read_scene
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.tmp = Path(cls._tmp.name)
-        base = Box(40, 20, 10, align=Align.MIN)
-        base.label = "base"
-        children = [base]
-        for x in (2, 26):
-            bar = Pos(x, 5, 10) * Box(10, 10, 30, align=Align.MIN)
-            bar.label = "bar"
-            children.append(bar)
-        cls.step = cls.tmp / "bars.step"
-        export_step(Compound(children=children), str(cls.step))
+        cls.tmp = class_directory(cls)
+        cls.step = _export(cls.tmp / "bars.step", _box("base", (0, 0, 0), (40, 20, 10)),
+                           *(_box("bar", (x, 5, 10), (10, 10, 30)) for x in (2, 26)))
         cls.scene = read_scene(cls.step)
         cls.base, cls.first, cls.second = [leaf.ref for leaf in cls.scene.leaves()]
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def study(self, **extra) -> dict:
         return {
             "material": "6061",
             "fixtures": [{"faces": [_face_at(self.scene, self.base, 0.0)]}],
             "loads": [{"faces": [_face_at(self.scene, self.first, 40.0)], "type": "force", "vector_N": [500, 0, 0]}],
-            "mesh": {"size_mm": 4.0},
+            "mesh": MESH,
             **extra,
         }
 
@@ -516,11 +450,8 @@ class DuplicateNamesTest(unittest.TestCase):
         self.assertIn(f"bar ({self.second}) ↔ base · 100 mm² · bonded", lines)
 
     def test_a_study_can_name_each_bar_by_its_ref(self):
-        from cadgen import fea
-
         study = self.study(parts={self.first: {"material": "steel"}, self.second: {"material": "6061"}, "base": {"material": "6061"}})
-        with quiet():
-            result = fea.solve(self.step, self.tmp / "refs.glb", study=study)
+        result = solve(self.step, self.tmp / "refs.glb", study)
         self.assertTrue(result.ok)
         names = [part["name"] for part in result.summary["parts"]]
         self.assertEqual(names, ["base", f"bar ({self.first})", f"bar ({self.second})"])
@@ -528,10 +459,7 @@ class DuplicateNamesTest(unittest.TestCase):
         self.assertTrue(materials[self.first].startswith("Steel"))  # the ref chose the material
 
     def test_sentences_name_a_shared_name_with_its_ref(self):
-        from cadgen import fea
-
-        with quiet():
-            result = fea.solve(self.step, self.tmp / "default.glb", study=self.study(parts={"base": {"material": "6061"}}))
+        result = solve(self.step, self.tmp / "default.glb", self.study(parts={"base": {"material": "6061"}}))
         summaries = [f["summary"] for f in result.findings if f["type"] == "default_material"]
         self.assertEqual(sorted(summaries), [
             f"'bar' ({self.first}) uses the default material (Aluminum 6061-T6): is that right?",
@@ -539,22 +467,15 @@ class DuplicateNamesTest(unittest.TestCase):
         ])
 
     def test_a_name_both_bars_share_is_an_error_naming_the_refs(self):
-        from cadgen import fea
-
-        with self.assertRaisesRegex(ValueError, rf"parts\['bar'\]: 'bar' names 2 parts \({self.first}, {self.second}\); use a ref"), quiet():
-            fea.solve(self.step, self.tmp / "ambiguous.glb", study=self.study(parts={"bar": {"material": "steel"}}))
+        with self.assertRaisesRegex(ValueError, rf"parts\['bar'\]: 'bar' names 2 parts \({self.first}, {self.second}\); use a ref"):
+            solve(self.step, self.tmp / "ambiguous.glb", self.study(parts={"bar": {"material": "steel"}}))
         connections = [{"between": ["bar", "base"], "type": "free"}]
-        with self.assertRaisesRegex(ValueError, rf"connections\[0\].between: 'bar' names 2 parts \({self.first}, {self.second}\); use a ref"), quiet():
-            fea.solve(self.step, self.tmp / "ambiguous.glb", study=self.study(connections=connections))
+        with self.assertRaisesRegex(ValueError, rf"connections\[0\].between: 'bar' names 2 parts \({self.first}, {self.second}\); use a ref"):
+            solve(self.step, self.tmp / "ambiguous.glb", self.study(connections=connections))
 
     def test_a_connection_can_name_a_bar_by_its_ref_and_the_other_part_by_name(self):
-        from cadgen import fea
-
         # Freeing the second bar from the base leaves it unheld, and the error says which bar.
-        connections = [{"between": [self.second, "base"], "type": "free"}]
-        study = self.study(connections=connections)
-        with quiet():
-            result = fea.solve(self.step, self.tmp / "free.glb", study=study)
+        result = solve(self.step, self.tmp / "free.glb", self.study(connections=[{"between": [self.second, "base"], "type": "free"}]))
         self.assertFalse(result.ok)
         (finding,) = result.findings
         self.assertEqual(finding["type"], "not_connected")
@@ -605,32 +526,26 @@ class AssemblyStudyFileTest(unittest.TestCase):
                 self._parse(**extra)
 
 
-@unittest.skipUnless(HAVE_FEA, "cadgen[fea] is not installed")
+@needs_fea
 class SolveAssemblyTest(unittest.TestCase):
     """Base 6061 plus a steel post, base bottom fixed, 1000 N along +X on the post's top."""
 
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.tmp = Path(cls._tmp.name)
-        from cadgen.step_scene import read_scene
-
+        cls.tmp = class_directory(cls)
         cls.step = _write_assembly(cls.tmp)
-        scene = read_scene(cls.step)
-        cls.refs = _refs(scene)
-        cls.fixed = _face_at(scene, cls.refs["base"], 0.0)
-        cls.load = _face_at(scene, cls.refs["post"], 40.0)
-        cls.scene = scene
+        cls.scene, cls.refs = _scene(cls.step)
+        cls.fixed = _face_at(cls.scene, cls.refs["base"], 0.0)
+        cls.load = _face_at(cls.scene, cls.refs["post"], 40.0)
+        # The post alone: held at its foot, pushed at its top.
+        cls.alone = {"material": "steel", "fixtures": [{"faces": [_face_at(cls.scene, cls.refs["post"], 10.0)]}],
+                     "loads": [{"faces": [cls.load], "type": "force", "vector_N": [1000, 0, 0]}], "mesh": MESH}
         with quiet():
             # Its checks: the stress check and one displacement check over a face of each part, both passing.
-            cls.mixed = cls.solve(cls.step, {"base": "6061", "post": "steel"}, name="mixed", view={"checks": [
+            cls.mixed = cls.solve_parts({"base": "6061", "post": "steel"}, name="mixed", view={"checks": [
                 {"kind": "stress"}, {"kind": "displacement", "limit_mm": 100.0, "faces": [cls.load, cls.fixed], "label": "Post and base"}]})
-            cls.steel = cls.solve(cls.step, {"base": "steel", "post": "steel"}, name="steel")
-            cls.aluminium = cls.solve(cls.step, {"base": "6061", "post": "6061"}, name="aluminium")
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+            cls.steel = cls.solve_parts({"base": "steel", "post": "steel"}, name="steel")
+            cls.aluminium = cls.solve_parts({"base": "6061", "post": "6061"}, name="aluminium")
 
     @classmethod
     def study(cls, materials: dict | None, **extra) -> dict:
@@ -639,15 +554,16 @@ class SolveAssemblyTest(unittest.TestCase):
             **({"parts": {name: {"material": material} for name, material in materials.items()}} if materials else {}),
             "fixtures": [{"faces": [cls.fixed]}],
             "loads": [{"faces": [cls.load], "type": "force", "vector_N": [1000, 0, 0]}],
-            "mesh": {"size_mm": 4.0},
+            "mesh": MESH,
             **extra,
         }
 
     @classmethod
-    def solve(cls, step, materials, name, **extra):
+    def solve_parts(cls, materials, name, **extra):
+        """The study of the base and post solved, its progress lines left on stderr."""
         from cadgen import fea
 
-        return fea.solve(step, cls.tmp / f"{name}.glb", study=cls.study(materials, **extra))
+        return fea.solve(cls.step, cls.tmp / f"{name}.glb", study=cls.study(materials, **extra))
 
     def _types(self, result) -> list[str]:
         return [finding["type"] for finding in result.findings]
@@ -655,7 +571,7 @@ class SolveAssemblyTest(unittest.TestCase):
     def test_a_study_says_its_planning_stages_at_default_verbosity(self):
         err = io.StringIO()
         with redirect_stderr(err):
-            self.solve(self.step, {"base": "6061", "post": "steel"}, name="quiet")
+            self.solve_parts({"base": "6061", "post": "steel"}, name="quiet")
         text = err.getvalue()
         for stage in ("reading the parts", "found 1 touching pairs", "gluing 1 bonded pairs of 2 parts", "meshing the glued shape"):
             self.assertIn(stage, text)
@@ -717,9 +633,7 @@ class SolveAssemblyTest(unittest.TestCase):
         self.assertEqual(both["where"]["ref"], self.load)
         self.assertAlmostEqual(both["value"], summary["max_displacement_mm"], delta=0.05 * summary["max_displacement_mm"])
         self.assertEqual(both["status"], "passes")
-        from tests.python.packages.cadgen.test_fea import _glb_extras
-
-        self.assertEqual(_glb_extras(self.mixed.glb)["checks"], summary["checks"])
+        self.assertEqual(glb_extras(self.mixed.glb)["checks"], summary["checks"])
 
     def test_each_part_that_falls_short_is_named_in_its_findings(self):
         (yields,) = [f for f in self.mixed.findings if f["type"] == "yields"]
@@ -736,42 +650,38 @@ class SolveAssemblyTest(unittest.TestCase):
 
     def test_a_part_the_study_does_not_name_uses_the_default_material(self):
         with quiet():
-            result = self.solve(self.step, {"post": "steel"}, "default")
+            result = self.solve_parts({"post": "steel"}, "default")
         (finding,) = [f for f in result.findings if f["type"] == "default_material"]
         self.assertEqual(finding["summary"], "'base' uses the default material (Aluminum 6061-T6): is that right?")
         self.assertNotIn("default_material", self._types(self.mixed))
 
     def test_the_sidecar_records_the_joint(self):
-        sidecar = json.loads(self.mixed.sidecar.read_text(encoding="utf-8"))
-        (joint,) = sidecar["connections"]
+        written = sidecar(self.mixed)
+        (joint,) = written["connections"]
         self.assertEqual((joint["between"], joint["type"]), (["post", "base"], "bonded"))
         self.assertAlmostEqual(joint["area_mm2"], 100.0, places=3)
-        self.assertEqual(sidecar["summary"]["parts"], self.mixed.summary["parts"])
+        self.assertEqual(written["summary"]["parts"], self.mixed.summary["parts"])
 
     def test_the_glb_tags_every_vertex_with_its_part(self):
         import numpy as np
 
-        from tests.python.packages.cadgen.test_fea import _glb_attribute, _glb_extras
-
         glb = self.mixed.glb
-        part = _glb_attribute(glb, "_PART", 1)[:, 0]
-        position = _glb_attribute(glb, "POSITION", 3)  # glTF metres, Y up: CAD z is glTF y
+        part = glb_array(glb, "_PART")[:, 0]
+        position = glb_array(glb, "POSITION", 3)  # glTF metres, Y up: CAD z is glTF y
         self.assertEqual(set(np.unique(part)), {0.0, 1.0})
         height = position[:, 1] * 1000.0
         # The tip moves under load, never by as much as a part's own height.
         self.assertTrue((height[part == 1.0] > 10 - 1.0).all())
         self.assertTrue((height[part == 0.0] < 10 + 1.0).all())
         self.assertGreater((height[part == 1.0] > 10 + 1.0).sum(), 0)
-        extras = _glb_extras(glb)
+        extras = glb_extras(glb)
         self.assertEqual([p["name"] for p in extras["parts"]], ["base", "post"])
         self.assertEqual(extras["parts"][1]["ref"], self.refs["post"])
 
     def test_every_vertexs_face_belongs_to_its_part(self):
-        from tests.python.packages.cadgen.test_fea import _glb_attribute, _glb_extras
-
-        extras = _glb_extras(self.mixed.glb)
-        part = _glb_attribute(self.mixed.glb, "_PART", 1)[:, 0].astype(int)
-        face = _glb_attribute(self.mixed.glb, "_FACE", 1)[:, 0].astype(int)
+        extras = glb_extras(self.mixed.glb)
+        part = glb_array(self.mixed.glb, "_PART")[:, 0].astype(int)
+        face = glb_array(self.mixed.glb, "_FACE")[:, 0].astype(int)
         for part_index, face_index in set(zip(part.tolist(), face.tolist())):
             self.assertTrue(
                 extras["faces"][face_index].startswith(extras["parts"][part_index]["ref"] + ".f"),
@@ -785,22 +695,17 @@ class SolveAssemblyTest(unittest.TestCase):
         self.assertEqual(sorted(refs, key=_face_key), ["#o1.1.f30", "#o1.2.f9", "#o1.2.f10", "#o1.10.f2"])
 
     def test_the_glb_parts_match_the_sidecar(self):
-        from tests.python.packages.cadgen.test_fea import _glb_extras
-
-        extras = _glb_extras(self.mixed.glb)
-        sidecar = json.loads(self.mixed.sidecar.read_text(encoding="utf-8"))
+        extras = glb_extras(self.mixed.glb)
+        summary = sidecar(self.mixed)["summary"]
         keys = ("ref", "name", "material", "yield_MPa", "peak_MPa", "safety_factor", "max_displacement_mm")
-        self.assertEqual(extras["parts"], [{k: part[k] for k in keys} for part in sidecar["summary"]["parts"]])
-        summary = sidecar["summary"]
+        self.assertEqual(extras["parts"], [{k: part[k] for k in keys} for part in summary["parts"]])
         self.assertEqual(extras["weakest_part"], "post")
         self.assertEqual(extras["weakest_part_peak_MPa"], summary["weakest_part_peak_MPa"])
         self.assertEqual(extras["safety_factor"], summary["safety_factor"])
         self.assertEqual(extras["max_displacement_mm"], summary["max_displacement_mm"])
 
     def test_the_glb_connection_lists_the_interface_faces_of_both_sides(self):
-        from tests.python.packages.cadgen.test_fea import _glb_extras
-
-        extras = _glb_extras(self.mixed.glb)
+        extras = glb_extras(self.mixed.glb)
         (joint,) = extras["connections"]
         self.assertEqual(joint["between"], [self.refs["post"], self.refs["base"]])
         self.assertEqual((joint["names"], joint["type"]), (["post", "base"], "bonded"))
@@ -809,69 +714,38 @@ class SolveAssemblyTest(unittest.TestCase):
         # The post's bottom and the base's top, as the GLB's own face list names them.
         self.assertEqual(set(joint["faces"]), {_face_at(self.scene, self.refs["post"], 10.0), _face_at(self.scene, self.refs["base"], 10.0)})
         self.assertTrue(set(joint["faces"]) <= set(extras["faces"]))
-        sidecar = json.loads(self.mixed.sidecar.read_text(encoding="utf-8"))
-        self.assertEqual(sidecar["connections"][0]["faces"], joint["faces"])
+        self.assertEqual(sidecar(self.mixed)["connections"][0]["faces"], joint["faces"])
 
     def test_occurrence_solves_one_part_alone_through_the_single_part_path(self):
-        import struct
-
-        from cadgen import fea
-        from tests.python.packages.cadgen.test_fea import _glb_extras
-
-        study = {
-            "material": "steel",
-            "fixtures": [{"faces": [_face_at(self.scene, self.refs["post"], 10.0)]}],
-            "loads": [{"faces": [self.load], "type": "force", "vector_N": [1000, 0, 0]}],
-            "mesh": {"size_mm": 4.0},
-        }
-        with quiet():
-            result = fea.solve(self.step, self.tmp / "alone.glb", study=study, occurrence=self.refs["post"])
+        post = self.refs["post"]
+        result = solve(self.step, self.tmp / "alone.glb", self.alone, occurrence=post)
         self.assertTrue(result.ok)
-        self.assertEqual(result.occurrence, self.refs["post"])
+        self.assertEqual(result.occurrence, post)
         self.assertNotIn("parts", result.summary)
-        extras = _glb_extras(result.glb)
+        extras = glb_extras(result.glb)
         for key in ("parts", "connections", "weakest_part"):
             self.assertNotIn(key, extras)
-        raw = result.glb.read_bytes()
-        (json_length,) = struct.unpack_from("<I", raw, 12)
-        attributes = json.loads(raw[20:20 + json_length])["meshes"][0]["primitives"][0]["attributes"]
-        self.assertNotIn("_PART", attributes)
-        self.assertNotIn("connections", json.loads(result.sidecar.read_text(encoding="utf-8")))
+        self.assertNotIn("_PART", glb_attribute_names(result.glb))
+        self.assertNotIn("connections", sidecar(result))
         # The same study without it is an assembly study of the document.
-        with self.assertRaisesRegex(ValueError, "--occurrence"), quiet():
-            fea.solve(self.step, self.tmp / "stray.glb", study=self.study(None), occurrence=self.refs["post"])
-        with self.assertRaisesRegex(ValueError, "unknown occurrence"), quiet():
-            fea.solve(self.step, self.tmp / "nope.glb", study=study, occurrence="#o9")
+        with self.assertRaisesRegex(ValueError, "--occurrence"):
+            solve(self.step, self.tmp / "stray.glb", self.study(None), occurrence=post)
+        with self.assertRaisesRegex(ValueError, "unknown occurrence"):
+            solve(self.step, self.tmp / "nope.glb", self.alone, occurrence="#o9")
 
     def test_occurrence_says_the_studys_parts_and_connections_are_ignored(self):
-        from cadgen import fea
-
-        study = {
-            "material": "steel",
-            "parts": {"post": {"material": "6061"}},
-            "fixtures": [{"faces": [_face_at(self.scene, self.refs["post"], 10.0)]}],
-            "loads": [{"faces": [self.load], "type": "force", "vector_N": [1000, 0, 0]}],
-            "mesh": {"size_mm": 4.0},
-        }
-        with quiet():
-            result = fea.solve(self.step, self.tmp / "ignored.glb", study=study, occurrence=self.refs["post"])
+        study = {**self.alone, "parts": {"post": {"material": "6061"}}}
+        result = solve(self.step, self.tmp / "ignored.glb", study, occurrence=self.refs["post"])
         self.assertTrue(any("ignored" in w and "parts" in w for w in result.warnings), result.warnings)
-        with quiet():
-            plain = fea.solve(self.step, self.tmp / "plain.glb", study={k: v for k, v in study.items() if k != "parts"}, occurrence=self.refs["post"])
+        plain = solve(self.step, self.tmp / "plain.glb", self.alone, occurrence=self.refs["post"])
         self.assertFalse(any("ignored" in w for w in plain.warnings))
 
     def test_the_cli_takes_occurrence(self):
         from cadgen.cli.fea_solve import main
 
-        study = {
-            "material": "steel",
-            "fixtures": [{"faces": [_face_at(self.scene, self.refs["post"], 10.0)]}],
-            "loads": [{"faces": [self.load], "type": "force", "vector_N": [1000, 0, 0]}],
-            "mesh": {"size_mm": 4.0},
-        }
         out = io.StringIO()
         with redirect_stdout(out), quiet():
-            code = main([str(self.step), str(self.tmp / "cli.glb"), "--study", json.dumps(study), "--occurrence", self.refs["post"], "--json"])
+            code = main([str(self.step), str(self.tmp / "cli.glb"), "--study", json.dumps(self.alone), "--occurrence", self.refs["post"], "--json"])
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out.getvalue().strip().splitlines()[-1])["occurrence"], self.refs["post"])
 
@@ -879,11 +753,10 @@ class SolveAssemblyTest(unittest.TestCase):
         """The mixed study solved once at the first mesh size, with the outcome and the mesh it was solved on."""
         from unittest import mock
 
-        from cadgen import fea
-        from cadgen._internal.fea import solve
+        from cadgen._internal.fea import solve as solve_module
 
         seen = []
-        real = solve.solve_linear_static
+        real = solve_module.solve_linear_static
 
         def spy(volume, *args, **kwargs):
             outcome = real(volume, *args, **kwargs)
@@ -892,7 +765,7 @@ class SolveAssemblyTest(unittest.TestCase):
 
         with mock.patch("cadgen._internal.fea.checks.needs_finer", return_value=False), \
                 mock.patch("cadgen._internal.fea.solve.solve_linear_static", spy), quiet():
-            result = fea.solve(self.step, self.tmp / f"{name}.glb", study=self.study({"base": "6061", "post": "steel"}))
+            result = self.solve_parts({"base": "6061", "post": "steel"}, name)
         (volume, outcome), = seen
         return result, volume, outcome
 
@@ -900,7 +773,7 @@ class SolveAssemblyTest(unittest.TestCase):
         import numpy as np
 
         result, volume, outcome = self._first_solve_only("once")
-        self.assertIsNone(json.loads(result.sidecar.read_text(encoding="utf-8"))["refined"])
+        self.assertIsNone(sidecar(result)["refined"])
         fields = outcome.von_mises_parts
         # A node in the middle of the joint: z = 10, inside the post's footprint.
         at = outcome.dof_locations
@@ -923,7 +796,7 @@ class SolveAssemblyTest(unittest.TestCase):
         coarse, _, _ = self._first_solve_only("coarse")
         before = {part["name"]: part["peak_MPa"] for part in coarse.summary["parts"]}
         weakest = coarse.summary["weakest_part"]
-        refined = json.loads(self.mixed.sidecar.read_text(encoding="utf-8"))["refined"]
+        refined = sidecar(self.mixed)["refined"]
         self.assertEqual(refined["part"], weakest)
         self.assertEqual(refined["from_max_von_mises_MPa"], before[weakest])
         after = {part["name"]: part["peak_MPa"] for part in self.mixed.summary["parts"]}
@@ -954,83 +827,34 @@ class SolveAssemblyTest(unittest.TestCase):
         self.assertIsNone(payload["glb"])
         self.assertEqual(payload["findings"][0]["type"], "not_connected")
 
-    def test_a_gap_that_is_closed_to_bond_is_said(self):
-        from cadgen import fea
-        from cadgen.step_scene import read_scene
-
-        step = _write_assembly(self.tmp, lift=0.08, name="lifted")
-        scene = read_scene(step)
-        refs = _refs(scene)
-        study = {
-            "material": "6061",
-            "parts": {"base": {"material": "6061"}, "post": {"material": "steel"}},
-            "fixtures": [{"faces": [_face_at(scene, refs["base"], 0.0)]}],
-            "loads": [{"faces": [_face_at(scene, refs["post"], 40.08)], "type": "force", "vector_N": [1000, 0, 0]}],
-            "mesh": {"size_mm": 4.0},
-        }
-        with quiet():
-            result = fea.solve(step, self.tmp / "lifted.glb", study=study)
+    def _closed(self, lift: float, name: str, **extra):
+        """The post lifted (or, below 0, pressed into the base) by ``lift``, glued anyway: the study solves."""
+        step = _write_assembly(self.tmp, lift=lift, name=name)
+        result = solve(step, self.tmp / f"{name}.glb", _pushed(step, "post", 40.0 + lift, mesh=MESH, **extra))
         (finding,) = [f for f in result.findings if f["type"] == "gap_closed"]
-        self.assertEqual(finding["summary"], "Closed a 0.08 mm gap between 'post' and 'base' to bond them")
         self.assertAlmostEqual(result.summary["reaction_force_N"][0], -1000.0, delta=0.5)
+        return result, finding["summary"]
+
+    def test_a_gap_that_is_closed_to_bond_is_said(self):
+        _, said = self._closed(0.08, "lifted", parts={"base": {"material": "6061"}, "post": {"material": "steel"}})
+        self.assertEqual(said, "Closed a 0.08 mm gap between 'post' and 'base' to bond them")
 
     def test_an_interference_that_is_closed_to_bond_is_said(self):
-        from cadgen import fea
-        from cadgen.step_scene import read_scene
-
-        step = _write_assembly(self.tmp, lift=-0.01, name="pressed")
-        scene = read_scene(step)
-        refs = _refs(scene)
-        study = {
-            "material": "6061",
-            "parts": {"base": {"material": "6061"}, "post": {"material": "steel"}},
-            "fixtures": [{"faces": [_face_at(scene, refs["base"], 0.0)]}],
-            "loads": [{"faces": [_face_at(scene, refs["post"], 39.99)], "type": "force", "vector_N": [1000, 0, 0]}],
-            "mesh": {"size_mm": 4.0},
-        }
-        with quiet():
-            result = fea.solve(step, self.tmp / "pressed.glb", study=study)
+        result, said = self._closed(-0.01, "pressed", parts={"base": {"material": "6061"}, "post": {"material": "steel"}})
         self.assertTrue(result.ok)
         self.assertNotIn("overlapping_parts", self._types(result))
-        (finding,) = [f for f in result.findings if f["type"] == "gap_closed"]
-        self.assertEqual(finding["summary"], "Closed a 0.01 mm interference between 'post' and 'base' to bond them")
-        self.assertAlmostEqual(result.summary["reaction_force_N"][0], -1000.0, delta=0.5)
-        (joint,) = json.loads(result.sidecar.read_text(encoding="utf-8"))["connections"]
+        self.assertEqual(said, "Closed a 0.01 mm interference between 'post' and 'base' to bond them")
+        (joint,) = sidecar(result)["connections"]
         self.assertEqual(joint["type"], "bonded")
 
     def test_a_press_fit_just_inside_the_tolerance_is_closed_to_bond(self):
-        from cadgen import fea
-        from cadgen.step_scene import read_scene
-
-        step = _write_assembly(self.tmp, lift=-0.09, name="pressed-deep")
-        scene = read_scene(step)
-        refs = _refs(scene)
-        study = {
-            "material": "6061",
-            "fixtures": [{"faces": [_face_at(scene, refs["base"], 0.0)]}],
-            "loads": [{"faces": [_face_at(scene, refs["post"], 39.91)], "type": "force", "vector_N": [1000, 0, 0]}],
-            "mesh": {"size_mm": 4.0},
-        }
-        with quiet():
-            result = fea.solve(step, self.tmp / "pressed-deep.glb", study=study)
+        result, said = self._closed(-0.09, "pressed-deep")
         self.assertTrue(result.ok)
-        (finding,) = [f for f in result.findings if f["type"] == "gap_closed"]
-        self.assertEqual(finding["summary"], "Closed a 0.09 mm interference between 'post' and 'base' to bond them")
-        self.assertAlmostEqual(result.summary["reaction_force_N"][0], -1000.0, delta=0.5)
+        self.assertEqual(said, "Closed a 0.09 mm interference between 'post' and 'base' to bond them")
 
     def test_a_corner_sunk_on_every_axis_is_refused_as_an_overlap(self):
-        from cadgen.step_scene import read_scene
-
         step = _write_assembly(self.tmp, corner_block=0.25, name="corner")
-        scene = read_scene(step)
-        refs = _refs(scene)
-        study = {
-            "material": "6061",
-            "fixtures": [{"faces": [_face_at(scene, refs["base"], 0.0)]}],
-            "loads": [{"faces": [_face_at(scene, refs["block"], 19.75)], "type": "force", "vector_N": [1000, 0, 0]}],
-            "mesh": {"size_mm": 4.0},
-        }
-        (error,) = self._not_solved(step, study).findings
+        (error,) = self._not_solved(step, _pushed(step, "block", 19.75, mesh=MESH)).findings
         self.assertEqual(error["type"], "not_connected")
         self.assertEqual(
             error["summary"],
@@ -1053,83 +877,54 @@ class SolveAssemblyTest(unittest.TestCase):
     def _not_solved(self, step, study):
         from unittest import mock
 
-        from cadgen import fea
-
-        with mock.patch("cadgen._internal.fea.solve.solve_linear_static", side_effect=AssertionError("solved")), quiet():
-            result = fea.solve(step, self.tmp / "none.glb", study=study)
+        with mock.patch("cadgen._internal.fea.solve.solve_linear_static", side_effect=AssertionError("solved")):
+            result = solve(step, self.tmp / "none.glb", study)
         self.assertFalse(result.ok)
         self.assertIsNone(result.glb)
         self.assertFalse((self.tmp / "none.glb").exists())
         return result
 
     def test_a_floating_part_stops_the_study_before_the_solve(self):
-        from cadgen.step_scene import read_scene
-
         step = _write_assembly(self.tmp, far_block=20.0, name="floating")
-        scene = read_scene(step)
-        refs = _refs(scene)
-        study = {
-            "material": "6061",
-            "fixtures": [{"faces": [_face_at(scene, refs["base"], 0.0)]}],
-            "loads": [{"faces": [_face_at(scene, refs["post"], 40.0)], "type": "force", "vector_N": [1000, 0, 0]}],
-        }
-        result = self._not_solved(step, study)
+        result = self._not_solved(step, _pushed(step, "post", 40.0))
         (finding,) = result.findings
         self.assertEqual((finding["severity"], finding["type"]), ("error", "not_connected"))
         self.assertEqual(
             finding["summary"], "'block' isn't connected to anything that is held: nearest part 'base' is 20 mm away"
         )
-        self.assertEqual(finding["items"][0]["ref"], refs["block"])
+        self.assertEqual(finding["items"][0]["ref"], _scene(step)[1]["block"])
         self.assertIn("error: 'block' isn't connected", result.human_lines()[1])
 
     def _with_sunk_block(self, held_block: bool, **extra):
-        from cadgen.step_scene import read_scene
-
         step = _write_assembly(self.tmp, overlap_block=True, name=f"sunk{held_block}")
-        scene = read_scene(step)
-        refs = _refs(scene)
-        fixed = [_face_at(scene, refs["base"], 0.0)] + ([_face_at(scene, refs["block"], 0.0)] if held_block else [])
-        study = {
-            "material": "6061",
-            "fixtures": [{"faces": fixed}],
-            "loads": [{"faces": [_face_at(scene, refs["post"], 40.0)], "type": "force", "vector_N": [1000, 0, 0]}],
-            "mesh": {"size_mm": 4.0},
-            **extra,
-        }
+        study = _pushed(step, "post", 40.0, mesh=MESH, **extra)
+        if held_block:
+            scene, refs = _scene(step)
+            study["fixtures"][0]["faces"].append(_face_at(scene, refs["block"], 0.0))
         return step, study
 
     def test_overlapping_parts_are_not_bonded_and_the_study_suggests_fixing_them(self):
-        from cadgen import fea
-
         step, study = self._with_sunk_block(held_block=True)
-        with quiet():
-            result = fea.solve(step, self.tmp / "sunk.glb", study=study)
+        result = solve(step, self.tmp / "sunk.glb", study)
         (finding,) = [f for f in result.findings if f["type"] == "overlapping_parts"]
         self.assertEqual(finding["severity"], "warning")
         self.assertEqual(
             finding["summary"],
             "'block' and 'base' overlap by 100 mm³: real parts can't, so the model may be wrong; fix the geometry or mark them free",
         )
-        sidecar = json.loads(result.sidecar.read_text(encoding="utf-8"))
-        self.assertEqual([c["between"] for c in sidecar["connections"]], [["post", "base"]])
-        self.assertEqual([o["between"] for o in sidecar["overlaps"]], [["block", "base"]])
+        written = sidecar(result)
+        self.assertEqual([c["between"] for c in written["connections"]], [["post", "base"]])
+        self.assertEqual([o["between"] for o in written["overlaps"]], [["block", "base"]])
 
     def test_marking_an_overlapping_pair_free_silences_the_suggestion(self):
-        from cadgen import fea
-
         step, study = self._with_sunk_block(held_block=True, connections=[{"between": ["block", "base"], "type": "free"}])
-        with quiet():
-            result = fea.solve(step, self.tmp / "sunk-free.glb", study=study)
-        self.assertNotIn("overlapping_parts", [f["type"] for f in result.findings])
+        result = solve(step, self.tmp / "sunk-free.glb", study)
+        self.assertNotIn("overlapping_parts", self._types(result))
 
     def test_an_overlap_cannot_be_bonded(self):
-        from cadgen import fea
-
-        step, study = self._with_sunk_block(
-            held_block=True, connections=[{"between": ["block", "base"], "type": "bonded"}]
-        )
-        with self.assertRaisesRegex(ValueError, r"overlap by 100 mm³, so they can't be bonded"), quiet():
-            fea.solve(step, self.tmp / "sunk-bonded.glb", study=study)
+        step, study = self._with_sunk_block(held_block=True, connections=[{"between": ["block", "base"], "type": "bonded"}])
+        with self.assertRaisesRegex(ValueError, r"overlap by 100 mm³, so they can't be bonded"):
+            solve(step, self.tmp / "sunk-bonded.glb", study)
 
     def test_a_part_an_overlap_leaves_unheld_says_so(self):
         result = self._not_solved(*self._with_sunk_block(held_block=False))
@@ -1151,71 +946,42 @@ class SolveAssemblyTest(unittest.TestCase):
         )
 
     def test_a_fixture_or_load_on_a_face_wholly_a_joint_is_a_study_error(self):
-        from cadgen import fea
-
         joint = _face_at(self.scene, self.refs["post"], 10.0)
-        study = self.study(None)
-        study["loads"] = [{"faces": [joint], "type": "force", "vector_N": [0, 0, -1]}]
-        with self.assertRaisesRegex(ValueError, rf"{joint} is where 'post' is bonded to 'base'"), quiet():
-            fea.solve(self.step, self.tmp / "joint.glb", study=study)
+        study = self.study(None, loads=[{"faces": [joint], "type": "force", "vector_N": [0, 0, -1]}])
+        with self.assertRaisesRegex(ValueError, rf"{joint} is where 'post' is bonded to 'base'"):
+            solve(self.step, self.tmp / "joint.glb", study)
 
     def test_a_face_partly_covered_by_a_joint_loads_its_exposed_area(self):
-        from cadgen import fea
-
-        study = self.study(None)
-        study["loads"] = [{"faces": [_face_at(self.scene, self.refs["base"], 10.0)], "type": "force", "vector_N": [0, 0, -100]}]
-        with quiet():
-            result = fea.solve(self.step, self.tmp / "exposed.glb", study=study)
+        study = self.study(None, loads=[{"faces": [_face_at(self.scene, self.refs["base"], 10.0)], "type": "force", "vector_N": [0, 0, -100]}])
+        result = solve(self.step, self.tmp / "exposed.glb", study)
         self.assertEqual(result.summary["applied_force_N"], [0.0, 0.0, -100.0])
         self.assertAlmostEqual(result.summary["reaction_force_N"][2], 100.0, delta=0.1)
 
     def test_bolt_is_not_yet(self):
-        from cadgen import fea
-
-        with self.assertRaisesRegex(ValueError, "not yet supported"), quiet():
-            fea.solve(self.step, self.tmp / "bolt.glb", study=self.study(None, connections=[{"between": ["post", "base"], "type": "bolt"}]))
+        with self.assertRaisesRegex(ValueError, "not yet supported"):
+            solve(self.step, self.tmp / "bolt.glb", self.study(None, connections=[{"between": ["post", "base"], "type": "bolt"}]))
 
     def test_the_parts_the_study_names_must_exist(self):
-        from cadgen import fea
-
-        with self.assertRaisesRegex(ValueError, r"parts\['lid'\]: no part named 'lid'; the parts are 'base', 'post'"), quiet():
-            fea.solve(self.step, self.tmp / "lid.glb", study=self.study({"lid": "steel"}))
+        with self.assertRaisesRegex(ValueError, r"parts\['lid'\]: no part named 'lid'; the parts are 'base', 'post'"):
+            solve(self.step, self.tmp / "lid.glb", self.study({"lid": "steel"}))
         far = _write_assembly(self.tmp, far_block=20.0, name="far")
-        with self.assertRaisesRegex(ValueError, "don't touch within 0.1 mm"), quiet():
-            fea.solve(far, self.tmp / "far.glb", study=self.study(None, connections=[{"between": ["block", "base"], "type": "bonded"}]))
+        with self.assertRaisesRegex(ValueError, "don't touch within 0.1 mm"):
+            solve(far, self.tmp / "far.glb", self.study(None, connections=[{"between": ["block", "base"], "type": "bonded"}]))
+
+    def _two_posts(self, name: str, right_x: float) -> Path:
+        """Posts 'left' at x = 0 and 'right' at ``right_x`` side by side on the base: both bonded to it."""
+        return _export(self.tmp / f"{name}.step", _box("base", (0, 0, 0), (40, 20, 10)),
+                       _box("left", (0, 5, 10), (10, 10, 30)), _box("right", (right_x, 5, 10), (10, 10, 30)))
 
     def test_one_joint_cannot_be_freed_inside_a_bonded_group(self):
-        from cadgen import fea
-        from cadgen.step_scene import read_scene
-
-        from build123d import Align, Box, Compound, Pos, export_step
-
-        base = Box(40, 20, 10, align=Align.MIN)
-        base.label = "base"
-        left = Pos(0, 5, 10) * Box(10, 10, 30, align=Align.MIN)
-        left.label = "left"
-        right = Pos(10, 5, 10) * Box(10, 10, 30, align=Align.MIN)
-        right.label = "right"
-        step = self.tmp / "two-posts.step"
-        export_step(Compound(children=[base, left, right]), str(step))
-        scene = read_scene(step)
-        refs = _refs(scene)
-        study = {
-            "material": "6061",
-            "fixtures": [{"faces": [_face_at(scene, refs["base"], 0.0)]}],
-            "loads": [{"faces": [_face_at(scene, refs["right"], 40.0)], "type": "force", "vector_N": [100, 0, 0]}],
-            "connections": [{"between": ["left", "right"], "type": "free"}],
-        }
-        with self.assertRaisesRegex(ValueError, "'left' and 'right' are also joined through other bonded parts"), quiet():
-            fea.solve(step, self.tmp / "two.glb", study=study)
+        step = self._two_posts("two-posts", 10)
+        study = _pushed(step, "right", 40.0, 100, connections=[{"between": ["left", "right"], "type": "free"}])
+        with self.assertRaisesRegex(ValueError, "'left' and 'right' are also joined through other bonded parts"):
+            solve(step, self.tmp / "two.glb", study)
 
     def test_a_free_joint_that_splits_the_assembly_glues_each_group_apart(self):
-        from cadgen import fea
-        from cadgen.step_scene import read_scene
-
         step = _write_assembly(self.tmp, cap=True, name="capped")
-        scene = read_scene(step)
-        refs = _refs(scene)
+        scene, refs = _scene(step)
         study = {
             "material": "6061",
             "parts": {name: {"material": "6061"} for name in ("base", "post", "cap")},
@@ -1225,42 +991,21 @@ class SolveAssemblyTest(unittest.TestCase):
             ],
             "loads": [{"faces": [_face_where(scene, refs["post"], 0, 25.0)], "type": "force", "vector_N": [100, 0, 0]}],
             "connections": [{"between": ["cap", "post"], "type": "free"}],
-            "mesh": {"size_mm": 4.0},
+            "mesh": MESH,
         }
-        with quiet():
-            result = fea.solve(step, self.tmp / "capped.glb", study=study)
+        result = solve(step, self.tmp / "capped.glb", study)
         self.assertTrue(result.ok)
-        self.assertNotIn("not_connected", [f["type"] for f in result.findings])
-        sidecar = json.loads(result.sidecar.read_text(encoding="utf-8"))
-        self.assertEqual({c["between"][0]: c["type"] for c in sidecar["connections"]}, {"post": "bonded", "cap": "free"})
+        self.assertNotIn("not_connected", self._types(result))
+        self.assertEqual({c["between"][0]: c["type"] for c in sidecar(result)["connections"]}, {"post": "bonded", "cap": "free"})
         # The 100 N is held by the base alone: the cap carries nothing across the free joint.
         self.assertAlmostEqual(result.summary["reaction_force_N"][0], -100.0, delta=0.5)
 
     def test_two_parts_that_overlap_and_are_bonded_through_a_third_are_refused(self):
-        from build123d import Align, Box, Compound, Pos, export_step
-
-        from cadgen import fea
-        from cadgen.step_scene import read_scene
-
-        base = Box(40, 20, 10, align=Align.MIN)
-        base.label = "base"
-        left = Pos(0, 5, 10) * Box(10, 10, 30, align=Align.MIN)
-        left.label = "left"
-        right = Pos(8, 5, 10) * Box(10, 10, 30, align=Align.MIN)  # 2 mm into left
-        right.label = "right"
-        step = self.tmp / "overlapping-posts.step"
-        export_step(Compound(children=[base, left, right]), str(step))
-        scene = read_scene(step)
-        refs = _refs(scene)
-        study = {
-            "material": "6061",
-            "fixtures": [{"faces": [_face_at(scene, refs["base"], 0.0)]}],
-            "loads": [{"faces": [_face_at(scene, refs["right"], 40.0)], "type": "force", "vector_N": [100, 0, 0]}],
-            "mesh": {"size_mm": 4.0},
-        }
+        step = self._two_posts("overlapping-posts", 8)  # right 2 mm into left
+        study = _pushed(step, "right", 40.0, 100, mesh=MESH)
         for connections in ([], [{"between": ["left", "right"], "type": "free"}]):
-            with self.assertRaisesRegex(ValueError, r"'left' and 'right' overlap by .* mm³ and are joined through 'base'"), quiet():
-                fea.solve(step, self.tmp / "overlapping.glb", study={**study, "connections": connections})
+            with self.assertRaisesRegex(ValueError, r"'left' and 'right' overlap by .* mm³ and are joined through 'base'"):
+                solve(step, self.tmp / "overlapping.glb", {**study, "connections": connections})
 
     def test_gluing_refuses_a_solid_two_parts_both_became(self):
         from cadgen._internal.fea.assembly import glue
@@ -1287,34 +1032,26 @@ class SolveAssemblyTest(unittest.TestCase):
         self.assertEqual(_unheld_after_meshing(apart, {ordinal}, 2), [[1]])
 
 
-@unittest.skipUnless(HAVE_FEA, "cadgen[fea] is not installed")
+@needs_fea
 class RoundPartTest(unittest.TestCase):
     """A cylinder pin bonded onto a plate: the curved part's volume is what the mesher's linear tets undercount."""
 
     def test_a_round_pin_on_a_plate_is_meshed_and_solved(self):
-        from build123d import Align, Box, Compound, Cylinder, Pos, export_step
-
-        from cadgen import fea
-        from cadgen.step_scene import read_scene
+        from build123d import Align, Cylinder, Pos
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
-            plate = Box(40, 40, 10, align=Align.MIN)
-            plate.label = "plate"
             pin = Pos(20, 20, 10) * Cylinder(5, 30, align=(Align.CENTER, Align.CENTER, Align.MIN))
             pin.label = "pin"
-            step = tmp / "pin.step"
-            export_step(Compound(children=[plate, pin]), str(step))
-            scene = read_scene(step)
-            refs = _refs(scene)
+            step = _export(tmp / "pin.step", _box("plate", (0, 0, 0), (40, 40, 10)), pin)
+            scene, refs = _scene(step)
             study = {
                 "material": "6061",
                 "fixtures": [{"faces": [_face_at(scene, refs["plate"], 0.0)]}],
                 "loads": [{"faces": [_face_at(scene, refs["pin"], 40.0)], "type": "force", "vector_N": [100, 0, 0]}],
-                "mesh": {"size_mm": 4.0},
+                "mesh": MESH,
             }
-            with quiet():
-                result = fea.solve(step, tmp / "pin.glb", study=study)
+            result = solve(step, tmp / "pin.glb", study)
         self.assertTrue(result.ok)
         self.assertAlmostEqual(result.summary["reaction_force_N"][0], -100.0, delta=0.5)
 

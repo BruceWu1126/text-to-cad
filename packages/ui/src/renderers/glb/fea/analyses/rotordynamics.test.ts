@@ -1,31 +1,23 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
 import { checkLine, checkTitle } from '../checkKinds.js';
-import { feaControls, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, feaVerdict, studyRows } from '../../feaResult.js';
 import { madeOfRows } from '../setup.js';
 import { deformationAt } from '../series.js';
 import { fieldWord } from '../fields.js';
 import { feaAnalysis } from './index.js';
 import rotordynamics, { ROTOR_SETUP, WHIRL, bearingRows, discRows, rotorOf, rpmWords, spinRows, spinWords, unbalanceRows } from './rotordynamics.js';
+import { feaFile, plain, vec } from '../../__tests__/feaFile.js';
 
 const LIMIT = 'Linear bearings: each a spring and a damper (it may change with speed); no fluid-film nonlinearity';
-const plain = (text: string) => text.replace(/[  ]/g, ' ');
 
 // A shaft with a disc spinning 0 to 10,800 rpm about Z in bearings at faces 3 and 9, as cadgen writes it: a forward
 // critical at 12,400 rpm (14.8% above the top speed), whirl shapes at two criticals, the spinning stress.
 function spinningResult(extras: Record<string, unknown> = {}) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.01, 0, 0, 0, 0, 0.3]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_von_mises', new BufferAttribute(new Float32Array([12, 3, 30]), 1));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array([0.001, 0, 0, 0.0005, 0, 0, 0, 0, 0]), 3));
-  geometry.setAttribute('_whirl_f1', new BufferAttribute(new Float32Array([0, 0.001, 0, 0, 0.0005, 0, 0, 0, 0]), 3));
-  geometry.setAttribute('_displacement_im_f0', new BufferAttribute(new Float32Array([0, -0.001, 0, 0, -0.0005, 0, 0, 0, 0]), 3));
-  geometry.setAttribute('_displacement_im_f1', new BufferAttribute(new Float32Array([0.001, 0, 0, 0.0005, 0, 0, 0, 0, 0]), 3));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 1]), 1));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  return feaFile({
+    position: [0, 0, 0, 0.01, 0, 0, 0, 0, 0.3], _von_mises: [12, 3, 30], _displacement: vec([0.001, 0, 0, 0.0005, 0, 0, 0, 0, 0]),
+    _whirl_f1: vec([0, 0.001, 0, 0, 0.0005, 0, 0, 0, 0]), _displacement_im_f0: vec([0, -0.001, 0, 0, -0.0005, 0, 0, 0, 0]),
+    _displacement_im_f1: vec([0.001, 0, 0, 0.0005, 0, 0, 0, 0, 0]), _face: [0, 0, 1],
+  }, {
     generator: 'cadgen fea', name: 'rotor spinning', deformation_scale: 20, faces: ['#o1.f3', '#o1.f9'], occurrence: '#o1',
     analysis: { type: 'rotordynamics', tier: 3, word: 'Spinning', estimate: false, limits: [LIMIT], noun: 'this spin', reference_C: null, warnings: [] },
     fields: [
@@ -56,9 +48,6 @@ function spinningResult(extras: Record<string, unknown> = {}) {
     findings: [],
     ...extras,
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 const critical = (value: number, limit: number, reference: number, status: string, mode: number | null = 1) => ({

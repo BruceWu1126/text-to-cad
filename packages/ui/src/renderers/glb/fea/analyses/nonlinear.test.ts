@@ -1,31 +1,22 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
 import { checkLine, checkTitle } from '../checkKinds.js';
-import { feaControls, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, feaVerdict, studyRows } from '../../feaResult.js';
 import { activeFrame, activeFrameIndex } from '../series.js';
 import { heldRows, madeOfRows, pushedRows } from '../setup.js';
 import { feaAnalysis } from './index.js';
 import nonlinear, { NONLINEAR_SETUP, PLAY, collapseCaption } from './nonlinear.js';
+import { feaFile, vec } from '../../__tests__/feaFile.js';
 
 const LIMIT = 'No rate or temperature effects: the material answers the same however fast it is loaded';
 
 // A cantilever pushed past its collapse, as cadgen writes it: three load steps, the last it carried the default.
 function bentResult(extras: Record<string, unknown> = {}) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.08, 0, 0, 0, 0.006, 0]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_von_mises', new BufferAttribute(new Float32Array([80, 10, 40]), 1));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_plastic_strain', new BufferAttribute(new Float32Array([0, 0, 0]), 1));
-  for (const index of [1, 2]) {
-    geometry.setAttribute(`_von_mises_f${index}`, new BufferAttribute(new Float32Array([250, 30, 120]), 1));
-    geometry.setAttribute(`_displacement_f${index}`, new BufferAttribute(new Float32Array([0, 0, 0, 0, 0, -0.004 * index, 0, 0, 0]), 3));
-    geometry.setAttribute(`_plastic_strain_f${index}`, new BufferAttribute(new Float32Array([2.6 * index, 0, 0.1]), 1));
-  }
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 1]), 1));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  const frames = Object.fromEntries([1, 2].flatMap((index) => [[`_von_mises_f${index}`, [250, 30, 120]],
+    [`_displacement_f${index}`, vec([0, 0, 0, 0, 0, -0.004 * index, 0, 0, 0])], [`_plastic_strain_f${index}`, [2.6 * index, 0, 0.1]]]));
+  return feaFile({
+    position: [0, 0, 0, 0.08, 0, 0, 0, 0.006, 0], _von_mises: [80, 10, 40], _displacement: vec(9), _plastic_strain: [0, 0, 0], ...frames,
+    _face: [0, 0, 1],
+  }, {
     generator: 'cadgen fea', name: 'cantilever nonlinear', deformation_scale: 1, faces: ['#o1.f1', '#o1.f2'], occurrence: '#o1',
     load_percent: 69.7, collapsed: true,
     analysis: { type: 'nonlinear', tier: 3, word: 'Permanent bend / Stretch', estimate: false, limits: [LIMIT], noun: 'this load',
@@ -49,9 +40,6 @@ function bentResult(extras: Record<string, unknown> = {}) {
     findings: [],
     ...extras,
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 describe('nonlinear', () => {

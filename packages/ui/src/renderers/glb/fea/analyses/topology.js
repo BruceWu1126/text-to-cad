@@ -1,19 +1,14 @@
 /**
- * Lighten it (lite): topology optimisation, where the material should go, Tier 3. Its series is the
- * design over the iterations ("Iteration 12" ... "Final design"), opening on the final design. Its
- * verdict judges the mass saved ("Saves 62 % of the mass, needs 25 %"), and the stress and the
- * displacement of the verified design (the thresholded design solved as a static part); none moves
- * with a load control. Its takeaway leads with "Lite · "; Details lists its limits. What you see
- * opens on the iteration scrubber, the field (Material kept first) and a "Show above" threshold at
- * 0.5 on the material kept, so the material that goes is drawn grey; its routine plays the design
- * forming. Its setup: held at, pushed, then "Lighten" ("Keep 30% of the material", "Kept solid:
- * face 2, face 7") and made of.
+ * Lighten it (lite), Tier 3: topology optimisation, where the material should go. Its series is the design
+ * over the iterations, opening on the final design. It judges the mass saved, and the stress and displacement
+ * of the verified design (the thresholded design solved as a static part). "Show above" 0.5 on the material
+ * kept draws the material that goes grey.
  */
 import { fieldOptions } from "../controls.js";
 import { plainNumber } from "../numbers.js";
 import { frameControl } from "../series.js";
-import { faceLabel, heldRows, madeOfRows, pushedRows, wholeRefs } from "../setup.js";
-import { routineOf } from "./stub.js";
+import { faceLabel, group, heldRows, madeOfRows, pushedRows, wholeRefs } from "../setup.js";
+import { planned, routineOf } from "./stub.js";
 
 /** The design forming: the iterations one after another, interpolated (GlbRenderer plays a series this way). */
 export const FORMING = routineOf("Watch it form", "play");
@@ -46,7 +41,7 @@ export function lightenRows(result) {
     rows.push({ id: "lighten:solid", label: solid, detail: "", wrap: true, faces: kept, summary: solid,
       hint: "The material near these faces stays: fixtures, loads, bolt holes and the faces the study keeps" });
   }
-  return rows.length ? [{ id: "lighten", label: "Lighten", detail: "", glyph: "material", children: rows }] : [];
+  return group("lighten", "Lighten", "material", rows);
 }
 
 export const TOPOLOGY_SETUP = Object.freeze([heldRows, pushedRows, lightenRows, madeOfRows]);
@@ -74,21 +69,13 @@ export function topologyControls(result) {
   return controls;
 }
 
-export default Object.freeze({
-  name: "topology",
-  tier: 3,
-  word: "Lighten it",
-  noun: "this load",
-  family: null,
-  estimate: false,
-  scalesWithLoad: false,
-  checks: Object.freeze(["mass_saved", "stress", "displacement"]),
-  checkLabels: Object.freeze({}),
+export default planned({
+  name: "topology", tier: 3, word: "Lighten it",
+  checks: ["mass_saved", "stress", "displacement"],
   defaultControls: topologyControls,
   setupGroups: TOPOLOGY_SETUP,
   routine: (result) => (result?.series ? FORMING : null),
-  markers: Object.freeze(["load", "fixture"]),
-  displayTitle: "Loads and fixtures",
-  // A Tier 3 analysis's short limit word, which leads its verdict's takeaway.
+  markers: ["load", "fixture"],
   limitWord: "Lite",
 });
+

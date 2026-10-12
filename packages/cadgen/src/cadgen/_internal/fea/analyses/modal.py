@@ -23,13 +23,17 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs, Series, SeriesFrame, SolveContext
+from cadgen._internal.fea.analyses.base import (
+    AnalysisBase, AnalysisResult, FieldSpec, Inputs, Series, SeriesFrame, SolveContext, assembly_parts, by_severity,
+    finding, max_frames, node_domain, xyz, yield_at,
+)
 from cadgen._internal.fea.study import Fixture, parse_fixtures
 
 if TYPE_CHECKING:
     import numpy as np
 
 __all__ = ["MAX_MODES", "ModalAnalysis", "ModalInputs"]
+# ``finding`` and ``max_frames`` are base's, still imported from here by the analyses that share these words.
 
 #: The most modes a study may ask for (spec 5.3).
 MAX_MODES = 30
@@ -42,8 +46,6 @@ RIGID_FRACTION = 0.01
 _CLOSE_AT = 0.9
 #: Without a ladder plan, a model past this many free DOF is solved without a factorisation.
 EIGEN_DIRECT_BELOW = 250_000
-#: Series frames written to the GLB, when no budget says (fit.Budget.max_frames).
-_MAX_FRAMES = 24
 _TWO_PI = 2.0 * math.pi
 
 
@@ -70,15 +72,16 @@ def parse_modes(document: dict, default: int, where: str = "modes") -> int:
     return modes
 
 
-def raw_checks(document: dict, spec) -> tuple[dict, ...]:
-    """The study's checks of ``spec``'s kind, parsed; a malformed one is left for the study's own parse to name."""
+def raw_checks(document: dict, *specs) -> tuple[dict, ...]:
+    """The study's checks of ``specs``' kinds, parsed; a malformed one is left for the study's own parse to name."""
     view = document.get("view")
     entries = view.get("checks") if isinstance(view, dict) else None
+    by_kind = {spec.kind: spec for spec in specs}
     found = []
     for index, entry in enumerate(entries if isinstance(entries, list) else ()):
-        if isinstance(entry, dict) and entry.get("kind") == spec.kind:
+        if isinstance(entry, dict) and entry.get("kind") in by_kind:
             try:
-                found.append(spec.parse(entry, f"view.checks[{index}]"))
+                found.append(by_kind[entry["kind"]].parse(entry, f"view.checks[{index}]"))
             except ValueError:
                 continue
     return tuple(found)
@@ -93,11 +96,6 @@ def held_supports(space, fixtures: tuple[Fixture, ...], ordinal_of: dict[str, in
     if require:
         check_held(space, supports)
     return supports
-
-
-def fixed_dofs(space, fixtures: tuple[Fixture, ...], ordinal_of: dict[str, int]) -> "np.ndarray":
-    """Every vector DOF the fixtures hold (a roller's in its nodes' own axes: :func:`held_supports`)."""
-    return held_supports(space, fixtures, ordinal_of).fixed
 
 
 def floating_bodies(space, fixtures: tuple[Fixture, ...], ordinal_of: dict[str, int]) -> "np.ndarray":
@@ -198,10 +196,6 @@ def solver_method(ctx: SolveContext, free: int) -> str:
     return "lobpcg" if plan is None and free > EIGEN_DIRECT_BELOW else "arpack"
 
 
-def max_frames(ctx: SolveContext) -> int:
-    return int(getattr(getattr(ctx, "budget", None), "max_frames", _MAX_FRAMES) or _MAX_FRAMES)
-
-
 def mode_shapes(space, vectors: "np.ndarray") -> tuple[list["np.ndarray"], list[int]]:
     """Each mode (a full vector DOF column) per node, scaled so its largest motion is 1 mm, and the node
     where that is. The sign is fixed (the largest component positive) so a run repeats exactly."""
@@ -236,26 +230,29 @@ def mode_series(values: list[float], text: Callable[[float], str], unit: str, fr
     )
 
 
-def where_moves(ctx: SolveContext, result: AnalysisResult, magnitude: "np.ndarray", index: int) -> dict:
-    """``where`` of a check about a mode: the face and point that move most in it."""
-    peak = kinds.field_max_over(
-        magnitude, (), boundary=result.boundary_quadratic, boundary_ordinal=ctx.volume.boundary_ordinal,
+def field_peak(ctx: SolveContext, result: AnalysisResult, values: "np.ndarray", faces, index: int):
+    """The largest of a nodal field over ``faces`` (all of it when none), for check ``index``: a kinds.FieldMax."""
+    return kinds.field_max_over(
+        values, tuple(faces), boundary=result.boundary_quadratic, boundary_ordinal=ctx.volume.boundary_ordinal,
         locations=result.dof_locations, face_ref=ctx.volume.faces, ordinal_of=ctx.ordinal_of, where=f"view.checks[{index}]",
     )
+
+
+def where_moves(ctx: SolveContext, result: AnalysisResult, magnitude: "np.ndarray", index: int) -> dict:
+    """``where`` of a check about a mode: the face and point that move most in it."""
+    peak = field_peak(ctx, result, magnitude, (), index)
     return {"ref": peak.ref, "at": [round(c, 3) for c in peak.at]}
 
 
-def finding(severity: str, kind: str, summary: str, description: str, items: list[dict]) -> dict:
-    return {"check": "fea", "severity": severity, "type": kind, "summary": summary, "description": description, "items": items}
+def scaled_deformation(largest: float, bbox_diagonal: float, requested: float | None) -> float:
+    """The deformation scale: the one asked for, else the automatic one for a largest motion of ``largest`` mm."""
+    from cadgen._internal.fea.outputs import auto_deformation_scale
+
+    return requested or auto_deformation_scale(largest, bbox_diagonal)
 
 
-def check_finding(check: dict, verbs: dict[str, tuple[str, str]], sentence: str, description: str) -> dict | None:
-    """A finding for a check that fails (error) or is close (warning); ``verbs`` maps status to (type, adjective)."""
-    if check["status"] not in verbs:
-        return None
-    kind, _ = verbs[check["status"]]
-    severity = "error" if check["status"] == "fails" else "warning"
-    return finding(severity, kind, sentence, description, [{"text": check["label"], **check["where"]}])
+def fixtures_echo(fixtures, bare) -> list[dict]:
+    return [{"type": fixture.type, "faces": bare(fixture.faces)} for fixture in fixtures]
 
 
 def eigen_estimate(ctx: SolveContext, modes: int, *, static_solves: int = 0):
@@ -292,7 +289,11 @@ def eigen_estimate(ctx: SolveContext, modes: int, *, static_solves: int = 0):
     return fit.Estimate(dofs=n, memory_bytes=int(memory), seconds=float(seconds))
 
 
-def apply_eigen_rung(analysis, rung, ctx: SolveContext, inputs, *, words: str):
+#: The iterative rung's words for finding modes.
+ITERATIVE_WORDS = "Found the modes with an iterative solver (LOBPCG with multigrid) instead of factorising the stiffness"
+
+
+def apply_eigen_rung(analysis, rung, ctx: SolveContext, inputs, *, words: str = ITERATIVE_WORDS):
     """The rungs an eigen analysis takes its own way (``iterative``: LOBPCG; ``idealise`` and ``symmetry``
     are not taken for eigenproblems yet), the rest the shared way (:func:`fit.apply_generic`)."""
     from cadgen._internal.fea import fit
@@ -388,16 +389,13 @@ def _frequency_check(check: dict, frequencies: list[float]) -> dict:
             "at": {"frame": index, "value": round(f, 4), "unit": "Hz"}}
 
 
-class ModalAnalysis:
+class ModalAnalysis(AnalysisBase):
     name: ClassVar[str] = "modal"
     tier: ClassVar[int] = 1
     word: ClassVar[str] = "Vibration"
-    estimate_only: ClassVar[bool] = False
-    limits: ClassVar[tuple[str, ...]] = ()
+    extras_word: ClassVar[str] = "vibration"
     study_keys: ClassVar[frozenset[str]] = frozenset({"fixtures", "modes", "range_Hz"})
     material_needs: ClassVar[frozenset[str]] = frozenset({"density"})
-    mesh_orders: ClassVar[tuple[int, ...]] = (2,)
-    connection_types: ClassVar[tuple[str, ...]] = ("bonded", "free")
     # One field, the mode shape, a vector per frame: the viewer reads its magnitude for colour and its
     # vector to deform by. With no scalar field, run.py colours the GLB by the shape's magnitude.
     fields: ClassVar[tuple[FieldSpec, ...]] = (
@@ -410,7 +408,6 @@ class ModalAnalysis:
         "mode": {"drives": "mode", "type": "enum", "options": None},
         "deformation": {"drives": "deformation", "type": "number", "min": 0.0, "max": None},
     }
-    upstream: ClassVar[tuple[str, ...]] = ()
     ladder: ClassVar[tuple[str, ...]] = (
         "iterative", "local_refine", "defeature", "linear_elements", "idealise", "symmetry", "reduce_modes",
     )
@@ -464,8 +461,7 @@ class ModalAnalysis:
             return fit.Step("reduce_modes", f"Found the first {fewer} of the {inputs.modes} modes asked for, to fit"
                             + ("; every mode a check names is kept" if inputs.check_modes else ""), None, None,
                             detail={"from_modes": inputs.modes, "to_modes": fewer})
-        return apply_eigen_rung(self, rung, ctx, inputs, words="Found the modes with an iterative solver (LOBPCG with "
-                                "multigrid) instead of factorising the stiffness")
+        return apply_eigen_rung(self, rung, ctx, inputs)
 
     def governing(self, result: AnalysisResult) -> tuple["np.ndarray", float]:
         """What local_refine's two passes follow and compare: where mode 1 strains the part, and its frequency."""
@@ -575,10 +571,7 @@ class ModalAnalysis:
                 "magnitudes": [np.linalg.norm(shape, axis=1) for shape in shapes],
                 "governing_field": governing,
                 "analysis_warnings": list(warnings),
-                "parts": None if ctx.assembly is None else [
-                    {"ref": part.ref, "name": name, "material": material.name}
-                    for part, name, material in zip(ctx.assembly.parts, ctx.assembly.names, ctx.assembly.materials)
-                ],
+                "parts": assembly_parts(ctx),
             },
             dofs=int(space.dofs),
             solver=how,
@@ -693,27 +686,23 @@ class ModalAnalysis:
         found: list[dict] = []
         judged = check_results or [self.judge(check, i, ctx, result, inputs) for i, check in enumerate(ctx.study.checks)]
         for check in judged:
-            f, label = check["value"], check["label"]
+            if check["status"] not in ("fails", "close"):
+                continue
+            f, label, fails = check["value"], check["label"], check["status"] == "fails"
             if "avoid_Hz" in check:
                 low, high = check["avoid_Hz"]
-                band = f"{low:g}–{high:g} Hz"
-                if check["status"] == "fails":
-                    sentence = f"Mode {check['mode']} rings at {hz_text(f)}, inside the {band} band to keep clear of ({label})"
-                else:
-                    sentence = f"Mode {check['mode']} rings at {hz_text(f)}, close to the {band} band to keep clear of ({label})"
-                item = check_finding(check, {"fails": ("resonates_in_band", ""), "close": ("close_to_band", "")}, sentence,
-                                     f"mode {check['mode']} at {f:.4g} Hz, {abs(f - check['limit']):.3g} Hz from the band's edge")
+                kind = "resonates_in_band" if fails else "close_to_band"
+                sentence = (f"Mode {check['mode']} rings at {hz_text(f)}, {'inside' if fails else 'close to'} the "
+                            f"{low:g}–{high:g} Hz band to keep clear of ({label})")
+                description = f"mode {check['mode']} at {f:.4g} Hz, {abs(f - check['limit']):.3g} Hz from the band's edge"
             else:
-                mode = check["mode"]
-                which = "first mode" if mode == 1 else f"mode {mode}"
-                if check["status"] == "fails":
-                    sentence = f"{whole}'s {which} is {hz_text(f)}, under the {check['limit']:g} Hz it must stay above ({label})"
-                else:
-                    sentence = f"{whole}'s {which} is {hz_text(f)}, within 10 % of the {check['limit']:g} Hz it must stay above ({label})"
-                item = check_finding(check, {"fails": ("frequency_too_low", ""), "close": ("frequency_close", "")}, sentence,
-                                     f"{which} {f:.4g} Hz against a {check['limit']:g} Hz minimum")
-            if item is not None:
-                found.append(item)
+                which = "first mode" if check["mode"] == 1 else f"mode {check['mode']}"
+                kind = "frequency_too_low" if fails else "frequency_close"
+                sentence = (f"{whole}'s {which} is {hz_text(f)}, {'under' if fails else 'within 10 % of'} the "
+                            f"{check['limit']:g} Hz it must stay above ({label})")
+                description = f"{which} {f:.4g} Hz against a {check['limit']:g} Hz minimum"
+            found.append(finding("error" if fails else "warning", kind, sentence, description,
+                                 [{"text": label, **check["where"]}]))
         if scalars["rigid_body_modes"]:
             bodies = scalars["free_bodies"]
             held = "nothing holds it" if not inputs.fixtures else (
@@ -733,7 +722,7 @@ class ModalAnalysis:
             found.append(finding(
                 "info", "first_mode", f"First mode {hz_text(frequencies[0])}{along}",
                 "the lowest natural frequency; a vibration near it (a motor, a fan, a road) makes the part resonate",
-                [{"text": "moves most here", "ref": None, "at": [round(float(c), 3) for c in result.dof_locations[node]]}],
+                [{"text": "moves most here", "ref": None, "at": xyz(result.dof_locations[node])}],
             ))
         coarser = scalars.get("coarser_frequencies_Hz")
         if coarser:
@@ -743,21 +732,16 @@ class ModalAnalysis:
                 f"The first mode moved {moved * 100:.1f} % on a finer mesh ({hz_text(coarser[0])} to {hz_text(frequencies[0])})",
                 "a check was close, so the part was solved again finer; the finer answer is the one reported", [],
             ))
-        return sorted(found, key=lambda item: {"error": 0, "warning": 1, "info": 2}[item["severity"]])
+        return by_severity(found)
 
     # -- what is written -----------------------------------------------------------------------------
 
     def deformation_scale(self, result: AnalysisResult, bbox_diagonal: float, requested: float | None) -> float | None:
-        from cadgen._internal.fea.outputs import auto_deformation_scale
-
-        return requested or auto_deformation_scale(1.0, bbox_diagonal)
+        return scaled_deformation(1.0, bbox_diagonal, requested)
 
     def summary(self, result: AnalysisResult, inputs: ModalInputs, check_results: list[dict]) -> dict:
         scalars = result.scalars
-        modes = [
-            {"mode": i + 1, "frequency_Hz": round(f, 4), "effective_mass_fraction": [round(x, 4) for x in share]}
-            for i, (f, share) in enumerate(zip(scalars["frequencies_Hz"], scalars["effective_mass_fractions"]))
-        ]
+        modes = [row for _, row in mode_rows(scalars)]
         summary: dict[str, Any] = {
             "modes": modes,
             "first_frequency_Hz": modes[0]["frequency_Hz"] if modes else None,
@@ -767,13 +751,7 @@ class ModalAnalysis:
             "range_Hz": None if inputs.range_Hz is None else list(inputs.range_Hz),
             "deformation_scale": scalars["deformation_scale"],
         }
-        if scalars.get("parts"):
-            summary["parts"] = scalars["parts"]
-        summary["checks"] = check_results
-        return summary
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} vibration"
+        return finish_summary(summary, scalars, check_results)
 
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
         # Every shape is scaled to a largest motion of 1 mm, so one range holds across the frames.
@@ -786,10 +764,7 @@ class ModalAnalysis:
         return {"parts": summary.get("parts", [])}
 
     def study_echo(self, inputs: ModalInputs, bare: Callable[[tuple[str, ...]], list[str]]) -> dict:
-        echo: dict[str, Any] = {
-            "fixtures": [{"type": fixture.type, "faces": bare(fixture.faces)} for fixture in inputs.fixtures],
-            "modes_requested": inputs.modes,
-        }
+        echo: dict[str, Any] = {"fixtures": fixtures_echo(inputs.fixtures, bare), "modes_requested": inputs.modes}
         if inputs.range_Hz is not None:
             echo["range_Hz"] = list(inputs.range_Hz)
         return echo
@@ -804,3 +779,277 @@ class ModalAnalysis:
             lines.append(f"free in space: {summary['rigid_body_modes']} rigid-body modes left out")
         lines.append(f"total mass {summary.get('total_mass_kg'):.4g} kg")
         return lines
+
+
+def mode_rows(scalars: dict) -> list[tuple[int, dict]]:
+    """Each mode's summary row (number, frequency, effective mass fractions), by its 0-based index."""
+    return [(i, {"mode": i + 1, "frequency_Hz": round(f, 4), "effective_mass_fraction": [round(x, 4) for x in share]})
+            for i, (f, share) in enumerate(zip(scalars["frequencies_Hz"], scalars["effective_mass_fractions"]))]
+
+
+def finish_summary(summary: dict, scalars: dict, check_results: list[dict], *, kept_share: bool = False) -> dict:
+    """A summary's tail: the share reduce_modes kept (``kept_share``), an assembly's parts, then the checks."""
+    if kept_share and scalars["kept_share"] is not None:
+        summary["kept_share"] = round(scalars["kept_share"], 4)
+    if scalars.get("parts"):
+        summary["parts"] = scalars["parts"]
+    summary["checks"] = check_results
+    return summary
+
+
+# -- what the modal responses share (harmonic, random vibration, shock, transient) --------------------
+
+G0_MM_S2 = 9806.65
+#: reduce_modes keeps the fewest modes holding this share of the mass moving along the shake (or of the response).
+KEEP_SHARE = 0.9
+#: The modes the ladder assumes before the solve has found them, and after reduce_modes.
+GUESS_MODES, REDUCED_GUESS = 20, 6
+_AXES = "XYZ"
+
+
+def axis_words(direction) -> str:
+    """"Z", "-X" or "(0.71, 0, 0.71)": the line a shake moves along."""
+    for c, name in enumerate(_AXES):
+        if abs(abs(direction[c]) - 1) < 1e-9:
+            return name
+    return "(" + ", ".join(f"{v:.2g}" for v in direction) + ")"
+
+
+def unit_vector(vector, where: str, named: str = "it is shaken along", axis: str = "it is shaken along"):
+    """A direction as a unit vector; ``named`` and ``axis`` say it in the errors ("of the shock", "the shock comes along")."""
+    if not isinstance(vector, list) or len(vector) != 3:
+        raise ValueError(f"{where}: the direction {named} as [x, y, z], like [0, 0, 1] for Z")
+    values = [kinds.number(v, where=where) for v in vector]
+    size = math.sqrt(sum(v * v for v in values))
+    if size == 0:
+        raise ValueError(f"{where}: the direction is zero; give the axis {axis}, like [0, 0, 1]")
+    return tuple(v / size for v in values)  # type: ignore[return-value]
+
+
+def parse_damping(document: dict) -> float:
+    zeta = kinds.number(document.get("damping_ratio", 0.02), where="damping_ratio", positive=True)
+    if zeta >= 1:
+        raise ValueError(f"damping_ratio: a share of critical damping, like 0.02 for 2 %; must be under 1, got {zeta:g}")
+    return zeta
+
+
+def modes_text(count: int) -> str:
+    return f"{count} mode{'s' if count != 1 else ''}"
+
+
+def modes_estimate(ctx: SolveContext):
+    """(modes, their eigen estimate, nodes, its seconds plus each mode's stress): what a modal response's estimate
+    adds its own work to."""
+    from cadgen._internal.fea import fit
+
+    plan = getattr(ctx, "plan", None)
+    modes = int(getattr(plan, "modes", None) or GUESS_MODES)
+    base = eigen_estimate(ctx, modes)
+    nodes = base.dofs / 3.0
+    seconds = base.seconds + modes * fit.SECONDS_PER_ELEMENT.get(getattr(plan, "order", 2), 2.5e-4) * nodes / 1.7
+    return modes, base, nodes, seconds
+
+
+def fewest_modes_rung(ctx: SolveContext, direction):
+    """reduce_modes: keep only the fewest modes holding 90 % of the mass moving along the shake; the solve finds the
+    modes, then says how many it kept and the share they hold (``settle_steps``)."""
+    from cadgen._internal.fea import fit
+
+    plan = ctx.plan
+    if plan.modes is not None and plan.modes <= REDUCED_GUESS:
+        return None
+    plan.modes = REDUCED_GUESS
+    along = "" if direction is None else f" along {axis_words(direction)}"
+    return fit.Step("reduce_modes", f"Kept only the fewest modes holding {KEEP_SHARE * 100:.0f}% of the mass moving{along}, "
+                    "to fit", None, None, detail={"keep_share": KEEP_SHARE})
+
+
+def kept_step(found, kept, share: float | None, what: str) -> dict:
+    """reduce_modes' words once the modes are found, for ``settle_steps``: ``what`` the kept ones hold."""
+    return {"words": f"Kept {len(kept)} of the {len(found)} modes up to {hz_text(found.searched_Hz)}, the ones holding "
+                     f"{(share or 0.0) * 100:.0f}% {what}, to fit",
+            "detail": {"kept_modes": len(kept), "found_modes": len(found), "kept_share": round(share or 0.0, 4)}}
+
+
+def response_operators(ctx: SolveContext, fixtures):
+    """(materials, K, M, the supports): the fixtures must hold the part."""
+    from cadgen._internal.fea import operators
+
+    materials = materials_of(ctx)
+    K = operators.stiffness(ctx.space, materials)
+    M = operators.mass(ctx.space, materials)
+    return materials, K, M, held_supports(ctx.space, fixtures, ctx.ordinal_of, require=True)
+
+
+def mass_enough(Mr: "np.ndarray", total_along: float) -> Callable:
+    """find_modes' ``enough``: the modes found hold KEEP_SHARE of the mass moving along the shake."""
+    def enough(omega2, vectors, free):
+        return float(((vectors.T @ Mr[free]) ** 2).sum()) / total_along >= KEEP_SHARE
+
+    return enough
+
+
+def response_modes(ctx: SolveContext, K, M, held, top_Hz: float, enough, timings: dict, warnings: list[str],
+                   name: str | None = None):
+    """The modes up to ``top_Hz`` (:func:`superposition.find_modes`), equal frequencies lined up with the axes."""
+    import time
+
+    from cadgen._internal.fea import superposition as sp
+
+    space = ctx.space
+    started = time.perf_counter()
+    found = sp.find_modes(K, M, held, top_Hz, method=solver_method(ctx, space.dofs - len(held.fixed)),
+                          locations=space.locations, component=space.component, enough=enough)
+    warnings.extend(found.warnings)
+    found.vectors = align_degenerate(found.vectors, M, found.frequencies_Hz, space.component)
+    timings["eigen_s"] = time.perf_counter() - started
+    if name and ctx.log:
+        ctx.log(f"{name}: {len(found)} modes up to {found.frequencies_Hz[-1]:.4g} Hz ({found.how})")
+    return found
+
+
+def stress_scalars(ctx: SolveContext) -> dict:
+    """What judging a stress against the yield where it peaks reads, in ``scalars``."""
+    return {"study_checks": tuple(getattr(ctx.study, "checks", ()) or ()),
+            "margin": float(getattr(ctx.study, "margin", 2.0) or 2.0), "parts": assembly_parts(ctx),
+            "yields": [m.yield_strength for m in ctx.materials], "node_domain": node_domain(ctx.space)}
+
+
+def yield_check(ctx: SolveContext, result: AnalysisResult, node: int, peak: float, label, fixtures=()) -> dict:
+    """The stress check of ``peak`` MPa at ``node`` against the yield of the part it is in."""
+    from cadgen._internal.fea import checks
+    from cadgen._internal.fea.analyses.static import peak_face
+
+    fixed = {ctx.ordinal_of[ref] for fixture in fixtures for ref in fixture.faces}
+    at = tuple(float(c) for c in result.dof_locations[node])
+    solved = checks.Solved(
+        material_name="", yield_MPa=yield_at(result.scalars, node), peak_MPa=peak, peak_gauss_MPa=peak, peak_at=at,
+        peak_face=peak_face(ctx.volume, result, node, fixed), fixed_faces=(), max_displacement_mm=0.0,
+        displacement_at=at, bbox_diagonal_mm=0.0, margin=result.scalars["margin"], coarser_peak_MPa=None, part="",
+    )
+    return checks.stress_check(solved, label=label)
+
+
+def displacement_judged(ctx: SolveContext, result: AnalysisResult, values, check: dict, index: int):
+    """(the displacement check of the largest of ``values`` over the check's faces, that peak)."""
+    from cadgen._internal.fea import checks
+
+    peak = field_peak(ctx, result, values, check.get("faces", ()), index)
+    return checks.displacement_check(peak.value, check["limit_mm"], at=peak.at, ref=peak.ref, faces=peak.faces,
+                                     label=check.get("label")), peak
+
+
+def response_findings(check_results: list[dict], kind: str, lead: Callable[[dict], str], whole: str,
+                      described: Callable[[dict], str], *, after: str = "",
+                      moved: str = "the displacement is relative to where it is held", other=None) -> list[dict]:
+    """What the failing and close checks say: a stress past (or near) yield, a displacement close to its limit, and
+    ``other(check, severity, item)``'s finding for any other kind. ``lead(check)`` starts the sentence ("At 2 ms,")."""
+    found = []
+    for check in check_results:
+        status = check["status"]
+        if status not in ("fails", "close"):
+            continue
+        fails = status == "fails"
+        severity, item = "error" if fails else "warning", [{"text": check["label"], **check["where"]}]
+        if check["kind"] == "stress":
+            limit = (f"over its {check['limit']:g} MPa yield" if fails
+                     else f"inside the {check['margin']:g}× margin under its {check['limit']:g} MPa yield")
+            found.append(finding(severity, f"{kind}_yields" if fails else f"{kind}_close_to_yield",
+                                 f"{lead(check)} {whole} reaches {check['value']:.3g} MPa{after}, {limit} ({check['label']})",
+                                 described(check), item))
+        elif check["kind"] == "displacement" and not fails:
+            found.append(finding("warning", "displacement_close",
+                                 f"{lead(check)} it moves {check['value']:.3g} mm{after}, close to the {check['limit']:g} mm "
+                                 f"allowed ({check['label']})", moved, item))
+        elif other is not None and (said := other(check, severity, item)) is not None:
+            found.append(said)
+    return found
+
+
+def converged_finding(what: str, peak: float, coarser: float) -> dict:
+    moved = abs(peak - coarser) / coarser if coarser > 0 else 0.0
+    return finding("warning" if moved > 0.1 else "info", "mesh_not_converged" if moved > 0.1 else "mesh_converged",
+                   f"{what} moved {moved * 100:.1f} % on a finer mesh ({coarser:.3g} to {peak:.3g} MPa)",
+                   "a check was close, so the part was solved again finer; the finer answer is the one reported", [])
+
+
+def missing_mass_finding(scalars: dict, share: float, top: str) -> dict:
+    along = axis_words(scalars["direction"])
+    return finding("warning", "modes_missing_mass",
+                   f"The modes up to {hz_text(scalars['searched_Hz'])} move only {share * 100:.0f}% of the mass along "
+                   f"{along}: the rest answers above them, so the response may read a little low",
+                   f"effective mass of the modes found {share:.3f} of the total along {along}; "
+                   f"a fixed face's own mass never moves, and modes above 1.5× the {top} top are left out", [])
+
+
+def no_resonance_finding(kind: str, low: float, high: float, whole: str, frequencies, description: str) -> dict:
+    return finding("info", kind, f"No natural frequency lies between {low:g} and {high:g} Hz: {whole} follows the shake "
+                   "without resonating" + (f"; its first mode is {hz_text(frequencies[0])}" if frequencies else ""),
+                   description, [])
+
+
+def modes_line(summary: dict) -> str:
+    line = f"{modes_text(summary['modes_used'])} up to {hz_text(summary['modes_up_to_Hz'])}"
+    if summary.get("effective_mass_fraction") is not None:
+        line += f", holding {summary['effective_mass_fraction'] * 100:.0f}% of the mass along {summary['effective_mass_axis']}"
+    return line
+
+
+def load_echo(load, bare) -> dict:
+    return {"type": load.type, "faces": bare(load.faces),
+            **({"vector_N": [float(c) for c in load.vector]} if load.type == "force" else {"pressure_MPa": load.pressure})}
+
+
+class ModalResponse(AnalysisBase):
+    """What harmonic, random vibration, shock and transient share: modes found up to a top frequency, a stress
+    judged against the yield of the part where it peaks (``_peak(result, inputs)``: node, MPa), reduce_modes settled
+    once the modes are found."""
+
+    tier: ClassVar[int] = 1
+    material_needs: ClassVar[frozenset[str]] = frozenset({"density"})
+    #: The field local_refine follows and its two passes compare the peak of.
+    envelope: ClassVar[str] = "von_mises"
+
+    def apply(self, rung, ctx: SolveContext, inputs):
+        """``reduce_modes``: the fewest modes holding 90 % of the mass along the shake. ``iterative``: LOBPCG instead of
+        factorising. The mesh rungs the shared way; ``symmetry`` and ``idealise`` are not taken for a modal response yet."""
+        if rung == "reduce_modes":
+            return fewest_modes_rung(ctx, inputs.direction)
+        return apply_eigen_rung(self, rung, ctx, inputs)
+
+    def governing(self, result: AnalysisResult) -> tuple["np.ndarray", float]:
+        field = result.fields[self.envelope]
+        return field, float(field.max())
+
+    def settle_steps(self, result: AnalysisResult, steps: list) -> list:
+        """reduce_modes' step said again once the modes are found (run.py calls this after the solve; the solve
+        leaves the words in ``reduce_step``)."""
+        from cadgen._internal.fea import fit
+
+        return fit.settle_step(steps, "reduce_modes", result.scalars.get("reduce_step"), marker="keep_share")
+
+    def needs_finer(self, result: AnalysisResult, inputs, check_results: list[dict]) -> bool:
+        """Solve once more finer when a check is close, or the stress peak lies between yield over the margin and yield."""
+        if check_results:
+            return any(check["status"] == "close" for check in check_results)
+        if not any(check.get("kind") == "stress" for check in result.scalars["study_checks"]):
+            return False
+        node, peak = self._peak(result, inputs)
+        ratio = peak / yield_at(result.scalars, node)
+        return 1.0 / result.scalars["margin"] < ratio <= 1.0
+
+    def refined_record(self, result: AnalysisResult, size_mm: float, finer_mm: float, *, assembly: bool) -> dict:
+        return {"from_size_mm": round(size_mm, 4), "from_max_von_mises_MPa": round(self._peak(result)[1], 4),
+                "size_mm": round(finer_mm, 4), "max_von_mises_MPa": None}
+
+    def merge_finer(self, coarse: AnalysisResult, finer: AnalysisResult, refined: dict) -> AnalysisResult:
+        refined["max_von_mises_MPa"] = round(self._peak(finer)[1], 4)
+        finer.scalars["coarser_peak_MPa"] = self._peak(coarse)[1]
+        return finer
+
+    def _yield_check(self, ctx: SolveContext, result: AnalysisResult, inputs, label) -> dict:
+        node, peak = self._peak(result, inputs)
+        return yield_check(ctx, result, node, peak, label, inputs.fixtures)
+
+    def extras_assembly(self, summary: dict) -> dict:
+        return {"parts": summary.get("parts", [])}

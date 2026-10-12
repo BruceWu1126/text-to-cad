@@ -20,12 +20,7 @@ axial force and both bending moments give sigma = N/A + z M_y/I_y - y M_z/I_z,
 torsion tau = T r / J; transverse shear stress is not added (under 2% of the
 bending stress at this slenderness).
 
-Static is the first adopter. Modal and buckling would add, per element in the
-same frame: a consistent mass (rho A on the translations, rho I_p on the twist,
-rho I on the bending rotations for rotary inertia) and the geometric stiffness
-of this solve's axial force (N / (30 L) times the standard 4 x 4 bending block
-in each plane, with its shear-flexible correction). :func:`element_stiffness`
-is where they would join.
+Static is the first adopter.
 """
 
 from __future__ import annotations
@@ -262,9 +257,7 @@ def solve(analysis, ctx, inputs):
     nodes = count + 1
     size = 6 * nodes
     local = element_stiffness(L, E, G, bar.area, bar.Iy, bar.Iz, bar.J, k)
-    T = np.zeros((12, 12))
-    for b in range(4):
-        T[3 * b:3 * b + 3, 3 * b:3 * b + 3] = frame
+    T = shell.rotation_blocks(frame[None], 4)[0]
     Ke = T.T @ local @ T
     connectivity = (6 * np.arange(count)[:, None] + np.arange(12)[None, :])
     K = shell.assemble(np.broadcast_to(Ke, (count, 12, 12)).copy(), connectivity, size)

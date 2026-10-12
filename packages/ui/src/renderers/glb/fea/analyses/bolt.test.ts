@@ -1,32 +1,23 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
 import { checkLine, checkTitle, forceWords } from '../checkKinds.js';
-import { feaControls, feaPresets, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, feaPresets, feaVerdict, studyRows } from '../../feaResult.js';
 import { activeFrameIndex } from '../series.js';
 import { heldRows, madeOfRows, pushedRows, rigidFloorRows } from '../setup.js';
 import { contactRows } from './contact.js';
 import { feaAnalysis } from './index.js';
 import bolt, { BOLT_SETUP, boltRows, boltWords } from './bolt.js';
 import { boltMotion } from '../poses.js';
+import { feaFile, plain, vec } from '../../__tests__/feaFile.js';
 
 const LIMIT = 'Each bolt is a pretensioned spring along its axis, not meshed';
-const plain = (text: string) => text.replace(/[\u00a0\u202f]/g, ' ');
 
 // An M6 bolt clamping a plate to a bracket, as cadgen writes it: the preload, then one load step, the last the default.
 function boltedResult(extras: Record<string, unknown> = {}) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.01, 0, 0, 0, 0.01, 0]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_von_mises', new BufferAttribute(new Float32Array([150, 10, 20]), 1));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_contact_pressure', new BufferAttribute(new Float32Array([180, 0, 60]), 1));
-  geometry.setAttribute('_von_mises_f1', new BufferAttribute(new Float32Array([170, 20, 40]), 1));
-  geometry.setAttribute('_displacement_f1', new BufferAttribute(new Float32Array([0, 0, 0.001, 0, 0, 0, 0, 0, 0]), 3));
-  geometry.setAttribute('_contact_pressure_f1', new BufferAttribute(new Float32Array([220, 0, 30]), 1));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 1]), 1));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  return feaFile({
+    position: [0, 0, 0, 0.01, 0, 0, 0, 0.01, 0], _von_mises: [150, 10, 20], _displacement: vec(9), _contact_pressure: [180, 0, 60],
+    _von_mises_f1: [170, 20, 40], _displacement_f1: vec([0, 0, 0.001, 0, 0, 0, 0, 0, 0]), _contact_pressure_f1: [220, 0, 30],
+    _face: [0, 0, 1],
+  }, {
     generator: 'cadgen fea', name: 'joint bolt', deformation_scale: 1, faces: ['#o1.1.f1', '#o1.2.f6'], load_percent: 100, collapsed: false,
     analysis: { type: 'bolt', tier: 3, word: 'Bolted joint', estimate: false, limits: [LIMIT], noun: 'this load', reference_C: null, warnings: [] },
     fields: [
@@ -58,9 +49,6 @@ function boltedResult(extras: Record<string, unknown> = {}) {
     findings: [],
     ...extras,
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 describe('bolt', () => {

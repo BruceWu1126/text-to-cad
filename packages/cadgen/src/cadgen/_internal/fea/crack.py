@@ -48,11 +48,13 @@ numeric and OCP work inside the functions.
 
 from __future__ import annotations
 
+import itertools
 import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from cadgen._internal.fea.defeature import Prepared
+from cadgen._internal.fea.laminate import json_text
 
 if TYPE_CHECKING:
     import numpy as np
@@ -84,18 +86,9 @@ MIN_ELEMENTS_ACROSS = 3.0
 MM_PER_M = 1000.0
 
 
-def _json(value: Any) -> str:
-    import json
-
-    try:
-        return json.dumps(value, ensure_ascii=False)
-    except (TypeError, ValueError):
-        return repr(value)
-
-
 def _number(value: Any, where: str, *, positive: bool = False) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
-        raise ValueError(f"{where}: expected a number, got {_json(value)}")
+        raise ValueError(f"{where}: expected a number, got {json_text(value)}")
     if positive and not value > 0:
         raise ValueError(f"{where}: must be > 0, got {value}")
     return float(value)
@@ -104,8 +97,7 @@ def _number(value: Any, where: str, *, positive: bool = False) -> float:
 def _vector(value: Any, where: str, words: str) -> tuple[float, float, float]:
     if not isinstance(value, list) or len(value) != 3:
         raise ValueError(f"{where}: {words}, as [x, y, z]")
-    out = tuple(_number(c, where) for c in value)
-    return out  # type: ignore[return-value]
+    return tuple(_number(c, where) for c in value)  # type: ignore[return-value]
 
 
 def _unit(vector: tuple[float, float, float], where: str) -> tuple[float, float, float]:
@@ -153,7 +145,7 @@ def parse_crack(raw: Any, where: str = "crack") -> CrackSpec:
         raise ValueError(f"{where}: unknown keys {sorted(unknown)}; a crack takes {sorted(CRACK_KEYS)}")
     kind = raw.get("kind")
     if kind not in KINDS:
-        raise ValueError(f"{where}.kind: {_json(kind)} is not one of {list(KINDS)} (edge: straight across the section from a "
+        raise ValueError(f"{where}.kind: {json_text(kind)} is not one of {list(KINDS)} (edge: straight across the section from a "
                          "face; through: through the thickness; surface: a half-ellipse on a face; embedded: inside)")
     if "size_mm" not in raw:
         words = {"edge": "its depth from the face", "surface": "its depth from the face", "through": "half its length",
@@ -165,7 +157,7 @@ def parse_crack(raw: Any, where: str = "crack") -> CrackSpec:
                          f'({", ".join(sorted(set(PLANES)))}), exactly one')
     if "plane" in raw:
         if raw["plane"] not in PLANES:
-            raise ValueError(f"{where}.plane: {_json(raw['plane'])} is not one of {sorted(set(PLANES))}")
+            raise ValueError(f"{where}.plane: {json_text(raw['plane'])} is not one of {sorted(set(PLANES))}")
         normal = PLANES[raw["plane"]]
     else:
         normal = _unit(_vector(raw["normal"], f"{where}.normal", "the crack plane's normal"), f"{where}.normal")
@@ -270,19 +262,15 @@ def _inside(shape, point, tolerance: float) -> bool:
     return classifier.State() == TopAbs_IN
 
 
-def _diagonal(shape) -> float:
-    from cadgen._internal.fea.mesh import shape_diagonal
-
-    return shape_diagonal(shape)
-
-
 def resolve(spec: CrackSpec, shape, face=None, face_ref: str | None = None) -> CrackGeometry:
     """The crack on the part ``shape`` (OCP), ``face`` the OCP face ``spec.face`` names. A ValueError says
     in a sentence what is wrong with where the crack is."""
     import numpy as np
 
+    from cadgen._internal.fea.mesh import shape_diagonal
+
     n = np.array(spec.normal, dtype=float)
-    diagonal = _diagonal(shape)
+    diagonal = shape_diagonal(shape)
     reach = 4.0 * max(diagonal, spec.size_mm, 1.0)
     at = np.array(spec.at, dtype=float)
     a = spec.size_mm
@@ -376,9 +364,7 @@ def _ellipse(geometry: CrackGeometry):
 def crack_face(geometry: CrackGeometry):
     """The crack as an OCP face in its plane, reaching past the part where it runs across it."""
     reach = geometry.reach
-    if geometry.kind == "edge":
-        return _rectangle(geometry, (-geometry.a, geometry.a), (-reach, reach))
-    if geometry.kind == "through":
+    if geometry.kind in ("edge", "through"):
         return _rectangle(geometry, (-geometry.a, geometry.a), (-reach, reach))
     return _ellipse(geometry)
 
@@ -459,9 +445,7 @@ def front_polylines(geometry: CrackGeometry, shape) -> list:
 
     def line(offset: float):
         span = (corners - at) @ t
-        lo, hi = float(span.min()), float(span.max())
-        count = 400
-        return [at + offset * d + v * t for v in np.linspace(lo, hi, count)]
+        return [at + offset * d + v * t for v in np.linspace(float(span.min()), float(span.max()), 400)]
 
     if geometry.kind == "edge":
         return [line(geometry.a)]
@@ -689,32 +673,24 @@ def join_fronts(fronts: list[Front], tolerance: float) -> list[Front]:
     """Fronts whose ends meet joined into one (a half front and its mirror image); a chain whose ends meet closes."""
     import numpy as np
 
+    def oriented(front: Front, flip: bool):
+        return (front.points[::-1], front.e1[::-1]) if flip else (front.points, front.e1)
+
+    def first_join():
+        for i, j in itertools.permutations(range(len(fronts)), 2):
+            if fronts[i].closed or fronts[j].closed:
+                continue
+            for flip_a, flip_b in itertools.product((False, True), repeat=2):
+                a, b = oriented(fronts[i], flip_a), oriented(fronts[j], flip_b)
+                if np.linalg.norm(a[0][-1] - b[0][0]) <= tolerance:
+                    return i, j, a, b
+        return None
+
     fronts = list(fronts)
-    joined = True
-    while joined:
-        joined = False
-        for i in range(len(fronts)):
-            for j in range(len(fronts)):
-                if i == j or fronts[i].closed or fronts[j].closed:
-                    continue
-                a, b = fronts[i], fronts[j]
-                for flip_a in (False, True):
-                    for flip_b in (False, True):
-                        pa = a.points[::-1] if flip_a else a.points
-                        pb = b.points[::-1] if flip_b else b.points
-                        if np.linalg.norm(pa[-1] - pb[0]) <= tolerance:
-                            ea = a.e1[::-1] if flip_a else a.e1
-                            eb = b.e1[::-1] if flip_b else b.e1
-                            merged = Front(np.concatenate([pa, pb[1:]]), np.concatenate([ea, eb[1:]]), a.n)
-                            fronts = [f for k, f in enumerate(fronts) if k not in (i, j)] + [merged]
-                            joined = True
-                            break
-                    if joined:
-                        break
-                if joined:
-                    break
-            if joined:
-                break
+    while (found := first_join()) is not None:
+        i, j, (pa, ea), (pb, eb) = found
+        merged = Front(np.concatenate([pa, pb[1:]]), np.concatenate([ea, eb[1:]]), fronts[i].n)
+        fronts = [f for k, f in enumerate(fronts) if k not in (i, j)] + [merged]
     for front in fronts:
         if not front.closed and len(front.points) > 3 and np.linalg.norm(front.points[0] - front.points[-1]) <= tolerance:
             front.points, front.e1, front.closed = front.points[:-1], front.e1[:-1], True
@@ -945,7 +921,6 @@ def stress_intensity(locations, element_dofs, displacement, E: float, nu: float,
         aux_eps = 0.5 * (aux_H + np.swapaxes(aux_H, 2, 3))
         aux_trace = np.trace(aux_eps, axis1=2, axis2=3)
         aux_sigma = 2.0 * mu * aux_eps + lam * aux_trace[..., None, None] * np.eye(3)
-        shape = H.shape[:2]
         sig = sigma.reshape(-1, 3, 3)
         Hg = H.reshape(-1, 3, 3)                              # [p, j, m] = du_j/dx_m
         W_int = np.einsum("pjk,mpjk->mp", sig, aux_eps)
@@ -958,7 +933,6 @@ def stress_intensity(locations, element_dofs, displacement, E: float, nu: float,
         lookup = np.full(len(locations), -1)
         lookup[node_ids] = np.arange(len(node_ids))
         stations, width = _stations(front, spacing)
-        s_dense = front.s
         length = front.length
         for centre in stations:
             hat_nodes = _hat(node_s, centre, width, length, front.closed)
@@ -995,7 +969,6 @@ def stress_intensity(locations, element_dofs, displacement, E: float, nu: float,
             out.J_N_mm.append(J)
             out.K_eq_second.append(math.sqrt(max(k2[0], 0.0) ** 2 + k2[1] ** 2 + k2[2] ** 2 / (1.0 - nu)) * scale)
             out.end.append(bool(not front.closed and (centre <= 1e-9 * length or centre >= length * (1 - 1e-9))))
-        del shape, s_dense
     return out
 
 

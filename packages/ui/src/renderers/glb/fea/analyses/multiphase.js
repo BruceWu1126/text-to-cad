@@ -1,25 +1,17 @@
 /**
- * Two fluids (lite): a liquid and a gas inside the part over time (sloshing in a shaken tank, filling or
- * draining, a rising bubble), Tier 3. Its fields are on the part's wetted walls, one per time frame: the
- * water fraction (1 where the liquid touches the wall, 0 where the gas does) and the wall pressure (Pa,
- * signed); mapped onto the structure (one-way), the part's stress and displacement join them and it
- * deforms. Its verdict judges the highest point the liquid's surface reaches anywhere inside (against the
- * brim or a limit: "Spills over", "Close to the brim", "Stays in") and the hardest it presses on the walls,
- * none of which a load control moves, and choosing a check jumps the scrubber to when it peaked. Its
- * takeaway leads with "Laminar · "; liquid that left over the brim is the takeaway itself ("Spills over the
- * brim: 2.3 mL left the tank (6.4 % of the liquid)"), and a run stopped at its time limit leads it
- * ("Stopped at its time limit at 0.42 s · ").
- * What you see opens on the Time scrubber (on the moment the liquid rises highest) and the field, water
- * fraction first; Play runs the frames over three seconds. Its setup says how full it starts and how it
- * is shaken ("Half full of water, shaken 0.3 g along X"), where fluid goes in and out, and, mapped, where
- * it is held and what it is made of.
+ * Two fluids (lite), Tier 3: a liquid and a gas inside the part over time (sloshing in a shaken tank, filling
+ * or draining, a rising bubble). Its fields are on the wetted walls, per frame: the water fraction (1 where
+ * the liquid touches the wall) and the wall pressure; mapped onto the structure (one-way), the stress and
+ * displacement join them. It judges the highest the liquid rises (against the brim or a limit) and the
+ * hardest it presses on the walls. Liquid that left over the brim is the takeaway itself, and a run stopped
+ * at its time limit says so first.
  */
-import { fieldAndDeformation } from "../controls.js";
+import { fieldAndDeformation, mapsStructure } from "../controls.js";
 import { plainNumber } from "../numbers.js";
 import { frameControl } from "../series.js";
-import { axisWords, heldRows, madeOfRows, wholeRefs } from "../setup.js";
-import { planned } from "./stub.js";
-import { PLAY, historyWords } from "./transient.js";
+import { axisWords, group, heldRows, madeOfRows, wholeRefs } from "../setup.js";
+import { planned, playSeries } from "./stub.js";
+import { historyWords } from "./transient.js";
 
 const record = (raw) => (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : null);
 
@@ -100,7 +92,7 @@ export function openingRows(result) {
     ...(Array.isArray(study.outlets) ? study.outlets : []).map((outlet, index) => row(`outlet:${index}`,
       `Out${Number.isFinite(outlet.pressure_Pa) ? ` at ${plainNumber(outlet.pressure_Pa)} Pa` : ""}, ${sideWords(outlet.opening)}`)),
   ].map((entry) => ({ ...entry, label: entry.label.charAt(0).toUpperCase() + entry.label.slice(1) }));
-  return rows.length ? [{ id: "flow", label: "Flow in/out", detail: "", glyph: "flow", children: rows }] : [];
+  return group("flow", "Flow in/out", "flow", rows);
 }
 
 /** Two fluids' setup: filled (and shaken), flow in/out, then (mapped onto the structure) held and made of. */
@@ -113,18 +105,17 @@ export const TWO_FLUIDS_SETUP = Object.freeze([filledRows, openingRows, heldRows
 export function twoFluidControls(result) {
   const [field, deformation] = fieldAndDeformation(result);
   const time = frameControl(result, "frame");
-  const mapped = result.fields.some((entry) => String(entry.attribute).toLowerCase() === "_displacement");
-  return [...(time ? [time] : []), field, ...(mapped ? [deformation] : [])];
+  return [...(time ? [time] : []), field, ...(mapsStructure(result) ? [deformation] : [])];
 }
 
 export default planned({
-  name: "multiphase", tier: 3, word: "Two fluids", noun: "this shake", limitWord: "Laminar", family: null, scalesWithLoad: false,
+  name: "multiphase", tier: 3, word: "Two fluids", noun: "this shake", limitWord: "Laminar",
   // The flow's wall stress grows with its speed squared and more: no check is a multiple of the load.
   scaling: "none",
   checks: ["fill_level", "wall_pressure", "stress", "displacement"],
   defaultControls: twoFluidControls,
   setupGroups: TWO_FLUIDS_SETUP,
-  routine: (result) => (result?.series ? PLAY : null),
+  routine: playSeries,
   markers: ["inlet", "outlet", "fixture"], displayTitle: "Flow openings",
   // A spill is the takeaway, not the fill level's "Rises to 40 mm, limit: the brim" (the fluid ends at the brim).
   caption: spillCaption,

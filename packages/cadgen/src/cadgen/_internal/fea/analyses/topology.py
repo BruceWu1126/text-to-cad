@@ -37,7 +37,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Series, SeriesFrame, SolveContext
+from cadgen._internal.fea.analyses.base import (
+    AnalysisBase, AnalysisResult, FieldSpec, Series, SeriesFrame, SolveContext, by_severity, finding, frame_attributes,
+    max_frames, plan_value, xyz,
+)
+from cadgen._internal.fea.analyses.nonlinear import external_load, supported, symmetry_planes, unfold, view_checks
 from cadgen._internal.fea.analyses.static import StaticAnalysis, StaticInputs
 from cadgen._internal.fea.study import Load, parse_fixtures, parse_loads
 
@@ -262,19 +266,15 @@ def connected_to(tets: "np.ndarray", kept: "np.ndarray", seeds: "np.ndarray", no
 # -- the analysis ----------------------------------------------------------------------------------------
 
 
-class TopologyAnalysis:
+class TopologyAnalysis(AnalysisBase):
     name: ClassVar[str] = "topology"
-    tier: ClassVar[int] = 3
     word: ClassVar[str] = "Lighten it"
-    estimate_only: ClassVar[bool] = False
     limits: ClassVar[tuple[str, ...]] = LIMITS
     study_keys: ClassVar[frozenset[str]] = frozenset({
         "fixtures", "loads", "load_cases", "objective", "volume_fraction", "keep", "min_member_mm", "penalty", "symmetry",
         "extrusion", "iterations",
     })
-    material_needs: ClassVar[frozenset[str]] = frozenset()
     mesh_orders: ClassVar[tuple[int, ...]] = (1,)
-    connection_types: ClassVar[tuple[str, ...]] = ("bonded", "free")
     fields: ClassVar[tuple[FieldSpec, ...]] = (
         FieldSpec("material_kept", "_MATERIAL_KEPT", "material kept", "", per_frame=True),
         FieldSpec("von_mises", "_VON_MISES", "von Mises stress", "MPa"),
@@ -288,10 +288,11 @@ class TopologyAnalysis:
         "field": {"drives": "field", "type": "enum", "options": ["material_kept", "von_mises", "displacement"]},
         "threshold": {"drives": "threshold", "type": "number", "field": "material_kept", "min": 0.0, "max": 1.0, "default": 0.5},
     }
-    upstream: ClassVar[tuple[str, ...]] = ()
     ladder: ClassVar[tuple[str, ...]] = ("iterative", "symmetry", "coarse_design")
     noun: ClassVar[str] = "this load"
     governing_word: ClassVar[str] = "compliance"
+    extras_word: ClassVar[str] = "topology"
+    # needs_finer stays AnalysisBase's False: the design mesh is fixed for the whole run.
 
     # -- parse ---------------------------------------------------------------------------------------
 
@@ -303,23 +304,18 @@ class TopologyAnalysis:
             raise ValueError(f"objective: {kinds.json_text(objective)} is not one of {list(OBJECTIVES)} "
                              "(stiffest: the stiffest part from the material kept; lightest: the least material that holds)")
         fraction = _fraction(document, objective)
-        keep: tuple[str, ...] = ()
-        if "keep" in document:
-            keep = kinds.faces({"faces": document["keep"]}, where="keep")
-        member = None
-        if "min_member_mm" in document:
-            member = kinds.number(document["min_member_mm"], where="min_member_mm", positive=True)
+        keep = kinds.faces({"faces": document["keep"]}, where="keep") if "keep" in document else ()
+        member = kinds.number(document["min_member_mm"], where="min_member_mm", positive=True) \
+            if "min_member_mm" in document else None
         penalty = 3.0
         if "penalty" in document:
             penalty = kinds.number(document["penalty"], where="penalty", positive=True)
             if not 1.0 <= penalty <= 6.0:
                 raise ValueError(f"penalty: SIMP's exponent, from 1 to 6 (3 is usual), got {penalty:g}")
         loads = tuple(load for _, case in cases for load in case)
-        refs = tuple(dict.fromkeys(ref for group in (*fixtures, *loads) for ref in group.faces))
-        refs = tuple(dict.fromkeys((*refs, *keep)))
+        refs = tuple(dict.fromkeys((*(ref for group in (*fixtures, *loads) for ref in group.faces), *keep)))
         anchors = tuple(dict.fromkeys(ref for fixture in fixtures for ref in fixture.faces))
-        view = document.get("view")
-        checks = view.get("checks") if isinstance(view, dict) else None
+        checks = view_checks(document)
         if objective == "lightest" and isinstance(checks, list) and checks and not any(
                 isinstance(c, dict) and c.get("kind") in ("stress", "displacement") for c in checks):
             raise ValueError("view.checks: a lightest study needs a limit to stay within: add a stress check (its safety "
@@ -390,9 +386,7 @@ class TopologyAnalysis:
         ordinals = {ctx.ordinal_of[ref] for ref in inputs.keep}
         if {plane.mirror.get(o) for o in ordinals} != ordinals:
             return False
-        if inputs.extrusion is not None and abs(inputs.extrusion[plane.component]) > 1e-9:
-            return False
-        return True
+        return not (inputs.extrusion is not None and abs(inputs.extrusion[plane.component]) > 1e-9)
 
     # -- solve ---------------------------------------------------------------------------------------
 
@@ -403,8 +397,6 @@ class TopologyAnalysis:
         from scipy.spatial import cKDTree
 
         from cadgen._internal.fea import operators, topology_ops as topo
-        from cadgen._internal.fea.analyses.nonlinear import external_load
-        from cadgen._internal.fea.supports import check_held, supports_of
 
         if ctx.assembly is not None:
             raise ValueError("topology studies lighten one part: solve it with --occurrence, or study each part on its own")
@@ -417,8 +409,7 @@ class TopologyAnalysis:
         timings: dict[str, float] = {}
         warnings: list[str] = []
         started = time.perf_counter()
-        fit_plan = ctx.plan
-        planes = list(fit_plan.prepared.planes) if fit_plan is not None and fit_plan.prepared is not None else []
+        planes = symmetry_planes(ctx)
         share = 0.5 ** len(planes)
 
         points = space.dof_locations
@@ -426,13 +417,7 @@ class TopologyAnalysis:
         Ke, element_volume, gradients = topo.tet_stiffness(points, tets, operators.elasticity_matrix(material))
         node_dofs = np.stack([basis.nodal_dofs[c] for c in range(3)], axis=1)
         element_dofs = node_dofs[tets].reshape(len(tets), 12)
-        plane_dofs = []
-        for plane in planes:
-            dofs = basis.get_dofs(space.facets_of_ordinals([plane.ordinal], "a symmetry plane")).all()
-            plane_dofs.append(dofs[space.component[dofs] == plane.component])
-        supports = supports_of(space, inputs.fixtures, ctx.ordinal_of, held=plane_dofs)
-        check_held(space, supports)
-        free = np.setdiff1d(np.arange(basis.N), supports.fixed)
+        supports, free = supported(ctx, inputs.fixtures, planes)
         F = np.stack([external_load(space, [material], loads, (), ctx.ordinal_of, share) for _, loads in inputs.cases], axis=1)
 
         # The element size the design mesh resolves, and the thinnest member the filter lets form.
@@ -500,9 +485,9 @@ class TopologyAnalysis:
             ndof=int(basis.N), loads=F, free=free, keep=keep, frame=supports if supports.turned else None,
             near_nullspace=operators.rigid_body_modes(space.locations, space.component),
         )
-        method = "iterative" if fit_plan is not None and fit_plan.solver != "direct" else "auto"
+        method = "iterative" if plan_value(ctx, "solver", "direct") != "direct" else "auto"
         schedule = topo.Schedule(penalty=inputs.penalty, max_iterations=inputs.iterations)
-        frames_max = int(getattr(ctx.budget, "max_frames", 24) or 24) if ctx.budget is not None else 24
+        frames_max = max_frames(ctx)
         timings["assemble_s"] = time.perf_counter() - started
 
         # The full part, solid: the baseline the design's compliance is measured against.
@@ -510,7 +495,7 @@ class TopologyAnalysis:
         solid_compliance = float(problem.energies(solver.solve(problem.assemble(np.ones(len(tets))))).sum())
 
         def verify(projected):
-            return self._verify(ctx, inputs, volume, space, tets, element_volume, Ke, projected, supports, planes, material)
+            return self._verify(ctx, inputs, volume, space, tets, element_volume, Ke, projected, planes, material)
 
         started = time.perf_counter()
         rounds: list[dict] = []
@@ -531,44 +516,25 @@ class TopologyAnalysis:
         # Mirror the half back into the whole part.
         started = time.perf_counter()
         frames = topo.frames_to_keep(history, frames_max)
-        frame_values = [history.frames[k].astype(float) for k in frames]
-        vm = verified["von_mises"]
-        disp = verified["displacement"]
-        dof_locations, boundary, out_tets, out_elements, vertices = (space.dof_locations, space.boundary_quadratic, space.tets,
-                                                                     space.element_dofs, space.vertices)
+        (dof_locations, boundary, out_tets, out_elements, vertices), scalars, vectors, reactions, (applied,) = unfold(
+            ctx, planes, {"material_kept": [history.frames[k].astype(float) for k in frames], "von_mises": [verified["von_mises"]]},
+            {"displacement": [verified["displacement"]]}, list(verified["reactions"]), tuple(verified["applied"]))
+        frame_values, (vm,), (disp,) = scalars["material_kept"], scalars["von_mises"], vectors["displacement"]
         element_projected = projected
-        reactions, applied = list(verified["reactions"]), tuple(verified["applied"])
-        for plane in reversed(planes):
-            from cadgen._internal.fea import symmetry
-
-            whole, kept_rows = symmetry.unfold_volume(volume, plane)
-            scalars = {f"m{i}": values for i, values in enumerate(frame_values)}
-            scalars["vm"] = vm
-            dof_locations, scalars, vectors, boundary, out_tets, out_elements, vertices = symmetry.unfold_fields(
-                plane, vertices, dof_locations, kept_rows, scalars=scalars, vectors={"u": disp}, boundary=boundary,
-                tets=out_tets, element_dofs=out_elements,
-            )
-            frame_values = [scalars[f"m{i}"] for i in range(len(frame_values))]
-            vm, disp = scalars["vm"], vectors["u"]
+        for _ in planes:
             element_projected = np.concatenate([element_projected, element_projected])
-            reactions = [symmetry.unfold_force(plane, r) for r in reactions]
-            applied = symmetry.unfold_force(plane, applied)
-            volume = whole
-        ctx.volume = volume
         whole_factor = 2.0 ** len(planes)
 
         # The design's surface at rho = 0.5, smoothed for rebuilding in CAD.
-        final_nodal = frame_values[-1]
-        surface_vertices, surface_triangles, fixed = topo.iso_surface(dof_locations, out_tets, final_nodal, boundary)
+        surface_vertices, surface_triangles, fixed = topo.iso_surface(dof_locations, out_tets, frame_values[-1], boundary)
         smoothed = topo.smooth(surface_vertices, surface_triangles, fixed)
         surface_volume = topo.enclosed_volume(smoothed, surface_triangles) if len(surface_triangles) else 0.0
         timings["surface_s"] = time.perf_counter() - started
 
-        attributes = {"material_kept": "_MATERIAL_KEPT"}
         last = len(frames) - 1
         series = Series(kind="time", unit="", default=last, frames=[
             SeriesFrame(value=float(k), label="Final design" if i == last else f"Iteration {k}",
-                        attributes={name: attr if i == 0 else f"{attr}_F{i}" for name, attr in attributes.items()})
+                        attributes=frame_attributes({"material_kept": "_MATERIAL_KEPT"}, i))
             for i, k in enumerate(frames)
         ])
         iterations = len(history.compliance) - 1
@@ -585,8 +551,7 @@ class TopologyAnalysis:
         domain_volume = float(element_volume.sum()) * whole_factor
         density = getattr(material, "density", None)
         return AnalysisResult(
-            dof_locations=dof_locations, vertices=vertices, tets=out_tets, boundary_quadratic=boundary,
-            element_dofs=out_elements,
+            dof_locations=dof_locations, vertices=vertices, tets=out_tets, boundary_quadratic=boundary, element_dofs=out_elements,
             fields={"material_kept": frame_values[0], "von_mises": vm, "displacement": disp},
             deformation=disp, series=series, frame_fields={"material_kept": frame_values}, curves=curves,
             reactions=reactions, applied=applied, dofs=int(basis.N),
@@ -608,7 +573,7 @@ class TopologyAnalysis:
             },
         )
 
-    def _verify(self, ctx, inputs, volume, space, tets, element_volume, Ke, projected, supports, planes, material) -> dict:
+    def _verify(self, ctx, inputs, volume, space, tets, element_volume, Ke, projected, planes, material) -> dict:
         """The thresholded design (rho > 0.5, the pieces a fixture holds) solved as a static part: its stress,
         displacement, compliance and reactions, each field on every node of the design mesh (0 off the design)."""
         import numpy as np
@@ -714,11 +679,6 @@ class TopologyAnalysis:
             best = (x, projected, history, used, verified, rounds[-1]["volume_fraction"])
         return (*best, rounds)
 
-    # -- the automatic finer solve: not for a fixed design mesh ----------------------------------------
-
-    def needs_finer(self, result: AnalysisResult, inputs: TopologyInputs, check_results: list[dict]) -> bool:
-        return False
-
     # -- judging -------------------------------------------------------------------------------------
 
     def _mass_saved(self, result: AnalysisResult) -> float:
@@ -760,11 +720,6 @@ class TopologyAnalysis:
 
         s = result.scalars
         found: list[dict] = []
-
-        def finding(severity, kind, summary, description, items=()):
-            return {"check": "fea", "severity": severity, "type": kind, "summary": summary, "description": description,
-                    "items": list(items)}
-
         saved = self._mass_saved(result)
         ratio = s["verified_compliance"] / s["solid_compliance"] if s["verified_compliance"] and s["solid_compliance"] else None
         found.append(finding(
@@ -792,7 +747,7 @@ class TopologyAnalysis:
                 found.append(finding("error", "barely_lighter",
                                      f"The design saves {check['value']:.0f} % of the mass, less than the {check['limit']:g} % asked",
                                      "keep less material (a lower volume_fraction), or keep fewer faces solid"))
-        return sorted(found, key=lambda item: {"error": 0, "warning": 1, "info": 2}[item["severity"]])
+        return by_severity(found)
 
     # -- what is written -----------------------------------------------------------------------------
 
@@ -812,12 +767,9 @@ class TopologyAnalysis:
         solved = s["solved"]
         summary: dict[str, Any] = {
             "objective": inputs.objective,
-            "volume_fraction_target": round(s["target_fraction"], 6),
-            "volume_fraction": round(s["volume_fraction"], 6),
-            "design_volume_fraction": round(s["design_fraction"], 6),
-            "mass_saved_percent": round(saved, 4),
-            "part_volume_mm3": round(domain, 4),
-            "design_volume_mm3": round(domain * s["design_fraction"], 4),
+            "volume_fraction_target": round(s["target_fraction"], 6), "volume_fraction": round(s["volume_fraction"], 6),
+            "design_volume_fraction": round(s["design_fraction"], 6), "mass_saved_percent": round(saved, 4),
+            "part_volume_mm3": round(domain, 4), "design_volume_mm3": round(domain * s["design_fraction"], 4),
             "surface_volume_mm3": round(s["surface_volume_mm3"], 4),
             "part_mass_kg": None if not density else round(density * domain * 1000.0, 6),
             "design_mass_kg": None if not density else round(density * domain * s["design_fraction"] * 1000.0, 6),
@@ -825,37 +777,25 @@ class TopologyAnalysis:
             "verified_compliance_Nmm": None if s["verified_compliance"] is None else round(s["verified_compliance"], 6),
             "solid_compliance_Nmm": round(s["solid_compliance"], 6),
             "compliance_ratio": None if not s["verified_compliance"] else round(s["verified_compliance"] / s["solid_compliance"], 6),
-            "iterations": s["iterations"],
-            "converged": s["converged"],
-            "final_stage_start": s["final_stage_start"],
-            "penalty": inputs.penalty,
-            "grey_percent": round(100.0 * s["grey"], 4),
-            "min_member_mm": round(s["min_member_mm"], 4),
-            "design_element_mm": round(s["design_size_mm"], 4),
-            "kept_solid": s["kept_faces"],
-            "kept_solid_percent": round(100.0 * s["kept_share"], 4),
-            "load_cases": s["cases"],
+            "iterations": s["iterations"], "converged": s["converged"], "final_stage_start": s["final_stage_start"],
+            "penalty": inputs.penalty, "grey_percent": round(100.0 * s["grey"], 4),
+            "min_member_mm": round(s["min_member_mm"], 4), "design_element_mm": round(s["design_size_mm"], 4),
+            "kept_solid": s["kept_faces"], "kept_solid_percent": round(100.0 * s["kept_share"], 4), "load_cases": s["cases"],
             "max_von_mises_MPa": round(float(vm.max()), 4),
-            "max_von_mises_at_mm": [round(float(c), 3) for c in result.dof_locations[int(vm.argmax())]],
+            "max_von_mises_at_mm": xyz(result.dof_locations[int(vm.argmax())]),
             "max_displacement_mm": round(float(moved.max()), 6),
-            "max_displacement_at_mm": [round(float(c), 3) for c in result.dof_locations[int(moved.argmax())]],
-            "safety_factor": None,
-            "dropped_elements": s["dropped_pieces"],
-            "frames": len(result.series.frames),
+            "max_displacement_at_mm": xyz(result.dof_locations[int(moved.argmax())]),
+            "safety_factor": None, "dropped_elements": s["dropped_pieces"], "frames": len(result.series.frames),
             "deformation_scale": s.get("deformation_scale"),
         }
         if solved is not None:
             from cadgen._internal.fea import checks
 
-            summary["safety_factor"] = checks.floored_factor(solved)
-            summary["yield_MPa"] = solved.yield_MPa
+            summary.update(safety_factor=checks.floored_factor(solved), yield_MPa=solved.yield_MPa)
         if s["rounds"]:
             summary["lightest_rounds"] = s["rounds"]
         summary["checks"] = check_results
         return summary
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} topology"
 
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
         import numpy as np

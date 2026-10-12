@@ -11,58 +11,19 @@ directories. The ladder's own logic runs on a fake analysis, stdlib only.
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import struct
-import tempfile
 import unittest
-from contextlib import redirect_stderr
 from pathlib import Path
+from types import SimpleNamespace
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
+from tests.python.support.fea_fixtures import (
+    box_step, box_volume, class_directory, ends, glb_extras, needs_fea, sidecar, solve,
+)
 
 from cadgen._internal.fea import fit  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 #: Small enough that nothing fits: every rung the study allows is taken.
 TINY = {"memory_GB": 1e-6, "seconds": 1e-3}
-
-
-def quiet():
-    return redirect_stderr(io.StringIO())
-
-
-def _extras(path: Path) -> dict:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    return json.loads(raw[20:20 + length])["meshes"][0]["extras"]
-
-
-def _sidecar(result) -> dict:
-    return json.loads(result.sidecar.read_text(encoding="utf-8"))
-
-
-def _end_faces(listing) -> tuple[str, str]:
-    by_x = {face.center_mm[0]: face.ref for face in listing.faces
-            if face.surface == "plane" and face.normal is not None and abs(abs(face.normal[0]) - 1) < 1e-6}
-    return by_x[min(by_x)], by_x[max(by_x)]
-
-
-def _cantilever(directory: Path, length=40.0, side=4.0) -> Path:
-    from build123d import Align, Box, export_step
-
-    path = directory / "cantilever.step"
-    export_step(Box(length, side, side, align=(Align.MIN, Align.CENTER, Align.CENTER)), str(path))
-    return path
 
 
 # -- the ladder itself, on a fake analysis ----------------------------------------------------------
@@ -143,10 +104,7 @@ class Ladder(unittest.TestCase):
         finding = step.finding()
         self.assertEqual((finding["severity"], finding["type"]), ("info", "fit_defeature"))
 
-    def test_plan_counts_is_public_and_keeps_its_old_name(self):
-        from types import SimpleNamespace
-
-        self.assertIs(fit._plan_counts, fit.plan_counts)
+    def test_plan_counts_is_public(self):
         geometry = fit.Geometry(volume_mm3=1e5, area_mm2=1.4e4, bbox_diagonal_mm=80.0)
         ctx = SimpleNamespace(plan=fit.FitPlan(size_mm=2.0), volume=None, geometry=geometry)
         elements, nodes, two = fit.plan_counts(ctx)
@@ -174,8 +132,6 @@ class Ladder(unittest.TestCase):
         self.assertEqual(fit.settle_step(steps, "reduce_modes", None), steps)
 
     def test_the_dynamic_analyses_settle_their_steps_through_run_and_mutate_no_frozen_step(self):
-        from types import SimpleNamespace
-
         from cadgen._internal.fea.analyses import get_analysis
 
         run_source = (Path(fit.__file__).parent / "run.py").read_text(encoding="utf-8")
@@ -193,8 +149,6 @@ class Ladder(unittest.TestCase):
         self.assertEqual(step.words, "Kept only the fewest modes")
 
     def test_idealise_is_not_taken_for_vibration_or_buckling_and_the_skill_says_so(self):
-        from types import SimpleNamespace
-
         from cadgen._internal.fea.analyses import get_analysis
 
         skill = Path(__file__).resolve().parents[4] / "skills" / "fea" / "references"
@@ -229,46 +183,34 @@ def _assert_said(test, result, rung: str):
     rungs = [step["rung"] for step in result.fit]
     test.assertIn(rung, rungs)
     step = next(step for step in result.fit if step["rung"] == rung)
-    test.assertEqual(_extras(result.glb)["fit"], list(result.fit))
-    test.assertEqual(_sidecar(result)["fit"], list(result.fit))
+    test.assertEqual(glb_extras(result.glb)["fit"], list(result.fit))
+    test.assertEqual(sidecar(result)["fit"], list(result.fit))
     lines = result.human_lines()
     test.assertIn(f"adapted: {step['words']}" + (f" ({step['accuracy']})" if step["accuracy"] else ""), lines)
     test.assertIn(f"fit_{rung}", [f["type"] for f in result.findings if f["severity"] == "info"])
     return step
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Cantilever(unittest.TestCase):
     """One cantilever, solved as it is and then through single rungs: iterative, linear elements, symmetry, none."""
 
     @classmethod
     def setUpClass(cls):
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.directory = Path(cls._tmp.name)
-        cls.step = _cantilever(cls.directory)
-        cls.fixed, cls.loaded = _end_faces(fea.faces(cls.step))
+        cls.directory = class_directory(cls)
+        cls.step = box_step(cls.directory, "cantilever", (40.0, 4.0, 4.0), "x")
+        cls.fixed, cls.loaded = ends(cls.step)
         cls.base = {"material": "steel", "fixtures": [{"faces": [cls.fixed]}], "mesh": {"size_mm": 1.0},
                     "loads": [{"faces": [cls.loaded], "type": "force", "vector_N": [0, 0, -20]}]}
-        with quiet():
-            cls.plain = fea.solve(cls.step, cls.directory / "plain.glb", study=cls.base)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.plain = solve(cls.step, cls.directory / "plain.glb", cls.base)
 
     def solve(self, name: str, allow: list[str], **study):
-        from cadgen import fea
-
-        with quiet():
-            return fea.solve(self.step, self.directory / f"{name}.glb",
-                             study={**self.base, **study, "fit": {**TINY, "allow": allow}})
+        return solve(self.step, self.directory / f"{name}.glb", {**self.base, **study, "fit": {**TINY, "allow": allow}})
 
     def test_a_study_that_fits_writes_no_fit(self):
         self.assertEqual(self.plain.fit, ())
-        self.assertNotIn("fit", _extras(self.plain.glb))
-        self.assertNotIn("fit", _sidecar(self.plain))
+        self.assertNotIn("fit", glb_extras(self.plain.glb))
+        self.assertNotIn("fit", sidecar(self.plain))
         self.assertFalse(any(line.startswith("adapted:") for line in self.plain.human_lines()))
 
     def test_iterative_matrix_free_gives_the_same_answer(self):
@@ -277,10 +219,7 @@ class Cantilever(unittest.TestCase):
         self.assertIn("matrix-free", step["words"])
         self.assertIn("matrix-free cg", result.mesh["solver"])
         self.assertIsNone(step["accuracy"])
-        with quiet():
-            from cadgen import fea
-
-            direct = fea.solve(self.step, self.directory / "direct.glb", study={**self.base, "mesh": {"size_mm": 2.0}})
+        direct = solve(self.step, self.directory / "direct.glb", {**self.base, "mesh": {"size_mm": 2.0}})
         self.assertAlmostEqual(result.summary["max_displacement_mm"] / direct.summary["max_displacement_mm"], 1.0, delta=1e-4)
         # The closing step says what to expect, since even this misses a kilobyte budget.
         self.assertEqual(result.fit[-1]["rung"], fit.TAIL)
@@ -290,15 +229,13 @@ class Cantilever(unittest.TestCase):
         result = self.solve("linear", ["linear_elements"])
         step = _assert_said(self, result, "linear_elements")
         self.assertEqual(result.mesh["order"], 1)
-        self.assertEqual(_extras(result.glb)["study"]["mesh"]["order"], 1)
+        self.assertEqual(glb_extras(result.glb)["study"]["mesh"]["order"], 1)
         self.assertEqual(step["accuracy"], fit.LINEAR_TABLE_NOTE)
         # Linear tets are stiff in bending: the tip moves less, within the note's 30 % (widened to 40 %).
         ratio = result.summary["max_displacement_mm"] / self.plain.summary["max_displacement_mm"]
         self.assertTrue(0.6 < ratio < 1.0, ratio)
 
     def test_linear_elements_measure_their_accuracy_where_a_quadratic_pass_fits(self):
-        from types import SimpleNamespace
-
         from cadgen.step_scene import read_scene
 
         occurrence = next(iter(read_scene(self.step).leaves()))
@@ -311,11 +248,8 @@ class Cantilever(unittest.TestCase):
 
         # Quadratic misses at the asked 1 mm and fits at the measurement's first coarser size, 1.41 mm.
         budget_gb = 0.5 * (memory(1.0) + memory(2 ** 0.5)) / fit.GIB
-        from cadgen import fea
-
-        with quiet():
-            result = fea.solve(self.step, self.directory / "measured.glb",
-                               study={**self.base, "fit": {"memory_GB": budget_gb, "seconds": 600, "allow": ["linear_elements"]}})
+        result = solve(self.step, self.directory / "measured.glb",
+                       {**self.base, "fit": {"memory_GB": budget_gb, "seconds": 600, "allow": ["linear_elements"]}})
         step = _assert_said(self, result, "linear_elements")
         self.assertTrue(step["detail"]["measured"], step)
         self.assertIn("against quadratic ones on a 1.41 mm check pass", step["accuracy"])
@@ -333,7 +267,7 @@ class Cantilever(unittest.TestCase):
         self.assertAlmostEqual(half["reaction_force_N"][2], 20.0, delta=1e-3)
         self.assertAlmostEqual(half["applied_force_N"][1], 0.0, delta=1e-9)
         # The written GLB is the whole part: every face of it, both halves of the surface.
-        self.assertEqual(_extras(result.glb)["faces"], _extras(self.plain.glb)["faces"])
+        self.assertEqual(glb_extras(result.glb)["faces"], glb_extras(self.plain.glb)["faces"])
         self.assertEqual(result.warnings, ())
 
     def test_a_load_across_the_plane_is_not_mirrored(self):
@@ -351,7 +285,7 @@ class Cantilever(unittest.TestCase):
         self.assertEqual(result.summary["max_displacement_mm"], self.plain.summary["max_displacement_mm"])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class PlateWithHole(unittest.TestCase):
     """A plate with a hole in tension: two passes keep the hole fine and read Peterson's Kt within 5 %."""
 
@@ -362,23 +296,15 @@ class PlateWithHole(unittest.TestCase):
     def setUpClass(cls):
         from build123d import Box, Cylinder, Pos, export_step
 
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
+        directory = class_directory(cls)
         step = directory / "plate.step"
         export_step(Pos(cls.LENGTH / 2, 0, 0) * Box(cls.LENGTH, cls.WIDTH, cls.THICK)
                     - Pos(cls.LENGTH / 2, 0, 0) * Cylinder(cls.HOLE / 2, cls.THICK), str(step))
-        fixed, loaded = _end_faces(fea.faces(step))
-        study = {"material": "steel", "fixtures": [{"faces": [fixed]}], "mesh": {"size_mm": cls.FINE},
-                 "loads": [{"faces": [loaded], "type": "force", "vector_N": [cls.FORCE, 0, 0]}],
-                 "fit": {**TINY, "allow": ["local_refine"]}}
-        with quiet():
-            cls.result = fea.solve(step, directory / "plate.glb", study=study)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        fixed, loaded = ends(step)
+        cls.result = solve(step, directory / "plate.glb", {
+            "material": "steel", "fixtures": [{"faces": [fixed]}], "mesh": {"size_mm": cls.FINE},
+            "loads": [{"faces": [loaded], "type": "force", "vector_N": [cls.FORCE, 0, 0]}],
+            "fit": {**TINY, "allow": ["local_refine"]}})
 
     def test_the_peak_holds_peterson_within_five_percent(self):
         ratio = self.HOLE / self.WIDTH
@@ -392,12 +318,12 @@ class PlateWithHole(unittest.TestCase):
         self.assertIn("peak stress moved", step["accuracy"])
         self.assertIn("between the coarse and the refined pass", step["accuracy"])
         self.assertGreater(step["detail"]["to_size_mm"], self.FINE)
-        refined = _sidecar(self.result)["refined"]
+        refined = sidecar(self.result)["refined"]
         self.assertEqual(refined["size_mm"], self.FINE)
         self.assertGreater(refined["from_size_mm"], self.FINE)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Defeature(unittest.TestCase):
     """A bar with two small rimmed holes mid-span and a loaded fillet at its tip: the holes go, the fillet stays."""
 
@@ -407,8 +333,7 @@ class Defeature(unittest.TestCase):
 
         from cadgen import fea
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
+        directory = class_directory(cls)
         bar = Box(80.0, 20.0, 10.0, align=(Align.MIN, Align.CENTER, Align.CENTER))
         tip = bar.edges().filter_by(Axis.Y).group_by(Axis.X)[-1].group_by(Axis.Z)[-1]
         bar = fillet(tip, radius=2.0)
@@ -419,17 +344,12 @@ class Defeature(unittest.TestCase):
         step = directory / "bar.step"
         export_step(bar, str(step))
         listing = fea.faces(step)
-        fixed, _ = _end_faces(listing)
+        fixed = ends(listing)[0]
         cls.loaded = max((face for face in listing.faces if face.surface == "cylinder"), key=lambda face: face.center_mm[0]).ref
         base = {"material": "steel", "fixtures": [{"faces": [fixed]}], "mesh": {"size_mm": 3.0},
                 "loads": [{"faces": [cls.loaded], "type": "force", "vector_N": [0, 0, -200]}]}
-        with quiet():
-            cls.whole = fea.solve(step, directory / "whole.glb", study=base)
-            cls.result = fea.solve(step, directory / "defeatured.glb", study={**base, "fit": {**TINY, "allow": ["defeature"]}})
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.whole = solve(step, directory / "whole.glb", base)
+        cls.result = solve(step, directory / "defeatured.glb", {**base, "fit": {**TINY, "allow": ["defeature"]}})
 
     def test_far_features_are_left_out_and_the_loaded_fillet_stays(self):
         step = _assert_said(self, self.result, "defeature")
@@ -444,7 +364,7 @@ class Defeature(unittest.TestCase):
         self.assertLess(self.result.mesh["elements"], self.whole.mesh["elements"])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class NoRefusal(unittest.TestCase):
     def test_past_the_dof_limit_the_solve_goes_ahead(self):
         from unittest import mock
@@ -452,8 +372,6 @@ class NoRefusal(unittest.TestCase):
         from cadgen._internal.fea import solve
         from cadgen._internal.fea.materials import lookup_material
         from cadgen._internal.fea.study import Fixture, Load
-        from tests.python.packages.cadgen.test_fea_protocol import box_volume
-
         volume = box_volume()
         with mock.patch.object(solve, "DOF_LIMIT", 10):
             outcome = solve.solve_linear_static(volume, lookup_material("steel"), (Fixture(("#o1.f1",)),),

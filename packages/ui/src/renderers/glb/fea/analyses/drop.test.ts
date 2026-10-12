@@ -1,20 +1,16 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
-import { feaControls, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, feaVerdict, studyRows } from '../../feaResult.js';
 import drop, { dropG, droppedEstimateRows } from './drop.js';
 import { ANALYSES } from './index.js';
 import { LOAD_RAMP } from './static.js';
 import { DROP } from '../fall.js';
+import { feaFile, vec } from '../../__tests__/feaFile.js';
 
 /** A drop result as cadgen writes one (`analysis drop`): a static result's fields, the drop echoed, its stress check "Drop". */
 function dropResult(study: Record<string, unknown> = {}, fall: Record<string, unknown> | null = null) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), 3));
-  geometry.setAttribute('_von_mises', new BufferAttribute(new Float32Array([0, 2, 4]), 1));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 0]), 1));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  return feaFile({
+    position: [0, 0, 0, 1, 0, 0, 0, 1, 0], _von_mises: [0, 2, 4], _displacement: vec(9), _face: [0, 0, 0],
+  }, {
     generator: 'cadgen fea', name: 'block drop (estimate)', deformation_scale: 1000, safety_factor: 10,
     fields: [{ attribute: '_VON_MISES', name: 'von Mises stress', units: 'MPa', min: 0, max: 4, attribute_scale: 1, field: 'von_mises' },
       { attribute: '_DISPLACEMENT', name: 'displacement', units: 'mm', min: 0, max: 0.001, attribute_scale: 1000, field: 'displacement' }],
@@ -25,10 +21,7 @@ function dropResult(study: Record<string, unknown> = {}, fall: Record<string, un
     study: { material: { name: 'ABS', yield_MPa: 40 }, fixtures: [{ type: 'fixed', faces: ['#o1.f5'] }],
       loads: [{ type: 'acceleration', vector_g: [0, 0, 500] }], mesh: { size_mm: 5, refined_from_mm: null },
       drop: { height_mm: 1000, onto: ['#o1.f5'], stop_mm: 2, direction: [0, 0, -1], G: 500 }, ...study },
-  });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
+  }, { index: false, color: false });
 }
 
 describe('drop', () => {

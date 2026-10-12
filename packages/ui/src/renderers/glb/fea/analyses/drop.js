@@ -1,18 +1,14 @@
 /**
- * Drop (estimate): a drop as one equivalent steady load, Tier 2. The landing faces are held and the
- * whole part carries G g toward them, so it is a static result in every number: stress and
- * displacement, both k times larger at k times this drop, under the Load ramp. Its verdict's
- * takeaway leads with "Estimate · " (the tier says so). Its setup says how it was dropped (the
- * landing faces under it, how it stops and the g that became its hint) and what it is made of; the
- * equivalent load is that row, not a second "Pushed" one. Where the file says the fall, it moves as a drop does
- * (`../fall.js`, `../motion.js`): What you see's Time row scrubs it falling from its height onto the floor, the stop it
- * assumed (the stress and the deformation ramping to the estimated peak and back) and its rest, with the states
- * Released, Contact, Peak and At rest, and Preview plays it as Drop.
+ * Drop (estimate), Tier 2: a drop as one equivalent steady load. The landing faces are held and the whole
+ * part carries G g toward them, so it is a static result in every number, k times larger at k times this
+ * drop. The equivalent load is the Dropped row's hint, not a second "Pushed" row. Where the file says the
+ * fall it moves as a drop does (`../fall.js`, `../motion.js`): from its height onto the floor, the stop it
+ * assumed (the stress and the deformation ramping to the estimated peak and back) and its rest.
  */
 import { fieldAndDeformation } from "../controls.js";
 import { plainNumber } from "../numbers.js";
 import { DROP, fallMotion } from "../fall.js";
-import { droppedRows, madeOfRows } from "../setup.js";
+import { droppedRows, madeOfRows, mapRows } from "../setup.js";
 import { LOAD_RAMP } from "./static.js";
 import { planned } from "./stub.js";
 
@@ -35,10 +31,7 @@ export function droppedEstimateRows(result) {
   const g = dropG(result.study?.drop);
   if (!groups.length || g === null) return groups;
   const words = `about ${plainNumber(g)} g steady`;
-  return groups.map((group) => ({
-    ...group,
-    children: group.children.map((row) => ({ ...row, hint: row.hint ? `${row.hint}, ${words}` : words })),
-  }));
+  return mapRows(groups, (row) => ({ ...row, hint: row.hint ? `${row.hint}, ${words}` : words }));
 }
 
 export default planned({

@@ -29,16 +29,14 @@ more. Say so, and use a larger safety factor than for a machined metal part.
 
 ## Strength, fatigue and heat
 
-The properties other analyses read. Ultimate strength and fatigue (`fatigue`,
-Goodman and the S-N line), conductivity (`thermal`, `thermal_transient`,
-`thermal_stress`), expansion (`thermal_stress`) and specific heat
-(`thermal_transient`). Override any of them in the material object:
-`uts_MPa`, `endurance_MPa` with `endurance_cycles` (also accepted as
-`fatigue_strength_MPa` and `fatigue_cycles`), `conductivity_W_mK`,
-`expansion_per_K` (per kelvin, so `23.6e-6`), `specific_heat_J_kgK`, and for
-`nonlinear` the plastic tangent `plasticity: {"tangent_MPa": ...}` or a
-hyperelastic `hyperelastic: {"model": "neo_hookean", "mu_MPa": ..., "bulk_MPa": ...}`.
-An analysis that needs a value the material lacks says which key to add.
+The properties other analyses read. Ultimate strength and fatigue (`fatigue`, Goodman and the S-N
+line), conductivity (`thermal`, `thermal_transient`, `thermal_stress`), expansion (`thermal_stress`)
+and specific heat (`thermal_transient`). Override any of them in the material object: `uts_MPa`,
+`endurance_MPa` with `endurance_cycles` (also accepted as `fatigue_strength_MPa` and
+`fatigue_cycles`), `conductivity_W_mK`, `expansion_per_K` (per kelvin, so `23.6e-6`),
+`specific_heat_J_kgK`, and for `nonlinear` the plastic tangent `plasticity: {"tangent_MPa": ...}` or
+a hyperelastic `hyperelastic: {"model": "neo_hookean", "mu_MPa": ..., "bulk_MPa": ...}`. An analysis
+that needs a value the material lacks says which key to add.
 
 | name | UTS (MPa) | endurance (MPa) | at cycles | k (W/(m·K)) | α (1e-6/K) | c (J/(kg·K)) | sources |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -55,36 +53,31 @@ An analysis that needs a value the material lacks says which key to add.
 
 Notes, value by value:
 
-- `steel` is generic structural steel, read as ASTM A36. UTS 400 MPa is A36's
-  minimum (MatWeb: 400 to 550). The endurance limit is Shigley's rule
-  Se' = 0.5·Sut (200 MPa, which MakeItFrom also gives), taken at the rule's
-  usual 1e6 cycles; the page fetched did not state the cycle count. k, α and c
-  are MakeItFrom's A36 values (MatWeb's A36 bar sheet has no thermal data).
-- `stainless-304`, annealed: UTS, k (0 to 100 °C), α (0 to 100 °C) and c from
-  ASM. ASM gives no fatigue value; 240 MPa at 1e7 reversed-bending cycles is
-  from a secondary page citing INCO/NiDI publication 2978 (MakeItFrom gives
-  210 MPa), so treat it as approximate.
+- `steel` is generic structural steel, read as ASTM A36. UTS 400 MPa is A36's minimum (MatWeb: 400
+  to 550). The endurance limit is Shigley's rule Se' = 0.5·Sut (200 MPa, which MakeItFrom also
+  gives), taken at the rule's usual 1e6 cycles; the page fetched did not state the cycle count. k, α
+  and c are MakeItFrom's A36 values (MatWeb's A36 bar sheet has no thermal data).
+- `stainless-304`, annealed: UTS, k (0 to 100 °C), α (0 to 100 °C) and c from ASM. ASM gives no
+  fatigue value; 240 MPa at 1e7 reversed-bending cycles is from a secondary page citing INCO/NiDI
+  publication 2978 (MakeItFrom gives 210 MPa), so treat it as approximate.
 - `aluminum-6061-t6` and `aluminum-7075-t6`: every value from ASM; the
   endurance is the R. R. Moore fully reversed strength at 5e8 cycles
   (aluminium has no true endurance limit). α over 20 to 100 °C.
 - `titanium-6al-4v`, annealed grade 5: every value from ASM; 510 MPa at 1e7 is
   unnotched (ASM gives 240 MPa notched, Kt 3.3).
-- `brass`, C36000 half hard: Copper Development Association, rod under 12 mm,
-  the row that carries the fatigue strength (393 MPa UTS, 138 MPa at 1e8).
-  Thicker rod is 380 to 400 MPa.
+- `brass`, C36000 half hard: Copper Development Association, rod under 12 mm, the row that carries
+  the fatigue strength (393 MPa UTS, 138 MPa at 1e8). Thicker rod is 380 to 400 MPa.
 - `abs`: UTS 43 MPa is Novodur 433's tensile yield stress (ISO 527), the
   strength ABS datasheets quote; k, α and c are Röchling SustaABS's (NETZSCH
   gives c 1260 to 1680 J/(kg·K), α 80 to 100e-6/K).
-- `pla`: Prusament's PLA datasheet gives tensile yield only (57 MPa filament,
-  51 MPa printed flat, 59 MPa upright) and no thermal properties. UTS 60 MPa is
-  the table's starting value and is unverified. k and c from MakeItFrom; α
-  from Omnexus's CLTE table (85e-6/K).
+- `pla`: Prusament's PLA datasheet gives tensile yield only (57 MPa filament, 51 MPa printed flat,
+  59 MPa upright) and no thermal properties. UTS 60 MPa is the table's starting value and is
+  unverified. k and c from MakeItFrom; α from Omnexus's CLTE table (85e-6/K).
 - `petg`: UTS 50 MPa is Prusament PETG's tensile yield printed upright (47 flat).
   Prusament gives no thermal properties; k, α and c are from the HIPEX G PETG
   sheet (Eastman Eastar 6763 gives k 0.21, α 51e-6/K, c 1300 at 60 °C).
-- `nylon-pa12`, EOS PA 2200 (SLS): UTS 48 MPa in X/Y (42 in Z) from EOS's
-  current datasheet; k (0.144 across the layers, 0.127 along them), α and c
-  from EOS's 2010 product information.
+- `nylon-pa12`, EOS PA 2200 (SLS): UTS 48 MPa in X/Y (42 in Z) from EOS's current datasheet; k
+  (0.144 across the layers, 0.127 along them), α and c from EOS's 2010 product information.
 
 ### Why some values are none
 
@@ -113,12 +106,11 @@ Notes, value by value:
 
 ## Fracture
 
-What `fracture` reads: the plane-strain fracture toughness K_IC (the crack grows
-where its stress intensity K reaches it) and, for crack growth, Paris's law
-da/dN = C (ΔK)^m. Override them in the material object:
-`fracture_toughness_MPa_sqrt_m`, `paris_C` (m per cycle, with ΔK in MPa√m) and
-`paris_m`. Room temperature, in air. A value no source gives for the grade is
-none, and a study that needs it asks for it.
+What `fracture` reads: the plane-strain fracture toughness K_IC (the crack grows where its stress
+intensity K reaches it) and, for crack growth, Paris's law da/dN = C (ΔK)^m. Override them in the
+material object: `fracture_toughness_MPa_sqrt_m`, `paris_C` (m per cycle, with ΔK in MPa√m) and
+`paris_m`. Room temperature, in air. A value no source gives for the grade is none, and a study that
+needs it asks for it.
 
 | name | K_IC (MPa√m) | Paris C (m/cycle) | Paris m | sources |
 | --- | --- | --- | --- | --- |
@@ -140,12 +132,11 @@ Notes, value by value:
   the plate or bar is known may use its own direction's value.
 - `aluminum-6061-t6`: ASM gives 29 MPa√m, T-L orientation.
 - `titanium-6al-4v`, annealed grade 5: ASM gives 75 MPa√m (no orientation stated).
-- `steel` and `stainless-304`: Barsom's Paris fits for ferritic-pearlitic and
-  austenitic stainless steels, from Norton's Machine Design table 6-2. The SI
-  column there is labelled mm/cycle, but its U.S. column (3.60e-10 in/cycle,
-  ksi√in, for ferritic-pearlitic) converts to 6.9e-12 m/cycle with ΔK in MPa√m,
-  so C is per metre, as Barsom gives it. They are fits over many steels: a
-  study that matters uses the grade's own da/dN data.
+- `steel` and `stainless-304`: Barsom's Paris fits for ferritic-pearlitic and austenitic stainless
+  steels, from Norton's Machine Design table 6-2. The SI column there is labelled mm/cycle, but its
+  U.S. column (3.60e-10 in/cycle, ksi√in, for ferritic-pearlitic) converts to 6.9e-12 m/cycle with
+  ΔK in MPa√m, so C is per metre, as Barsom gives it. They are fits over many steels: a study that
+  matters uses the grade's own da/dN data.
 - K_IC is a plane-strain value: thinner sections are tougher (plane stress),
   so it is conservative for thin parts.
 
@@ -162,15 +153,13 @@ Notes, value by value:
 
 ## Electrical and magnetic
 
-What `electromagnetic` reads: resistivity (steady current; a material under
-1 ohm·m is a conductor, an equipotential in electrostatics; over 1000 ohm·m
-it carries no current), relative permittivity (electrostatics, dielectrics
-only) and relative permeability (magnetostatics). Override them in the material
-object: `resistivity_ohm_m`, `relative_permittivity`, `relative_permeability`.
-Room temperature, DC (permittivity at the frequency given). The air around
-the parts is eps_r 1.00059 [HyperPhysics dielectrics], mu_r 1.00000037
-[EngToolbox permeability]; vacuum eps0 8.8541878188e-12 F/m [NIST eps0] and
-mu0 1.25663706127e-6 N/A² [NIST mu0]. Dry air breaks down at about 3 kV/mm
+What `electromagnetic` reads: resistivity (steady current; a material under 1 ohm·m is a conductor,
+an equipotential in electrostatics; over 1000 ohm·m it carries no current), relative permittivity
+(electrostatics, dielectrics only) and relative permeability (magnetostatics). Override them in the
+material object: `resistivity_ohm_m`, `relative_permittivity`, `relative_permeability`. Room
+temperature, DC (permittivity at the frequency given). The air around the parts is eps_r 1.00059
+[HyperPhysics dielectrics], mu_r 1.00000037 [EngToolbox permeability]; vacuum eps0 8.8541878188e-12
+F/m [NIST eps0] and mu0 1.25663706127e-6 N/A² [NIST mu0]. Dry air breaks down at about 3 kV/mm
 [Physics Factbook air], less at sharp edges and over long gaps.
 
 | name | resistivity (ohm·m) | eps_r | mu_r | sources |
@@ -188,27 +177,22 @@ mu0 1.25663706127e-6 N/A² [NIST mu0]. Dry air breaks down at about 3 kV/mm
 
 Notes, value by value:
 
-- Resistivity from % IACS is 1.7241e-8 ohm·m / (% IACS / 100): A36 12 % gives
-  1.4368e-7, C36000 26 % gives 6.6312e-8. ASM's metals are given in ohm·cm
-  (x 0.01).
+- Resistivity from % IACS is 1.7241e-8 ohm·m / (% IACS / 100): A36 12 % gives 1.4368e-7, C36000 26 %
+  gives 6.6312e-8. ASM's metals are given in ohm·cm (x 0.01).
 - `aluminum-*`: the permeability is Engineering Toolbox's for aluminium, not
   for the alloy. `titanium-6al-4v`: ASM's 1.00005 at 1.6 kA/m.
 - `brass`: no brass permeability was found; copper's is 0.999994
   ([EngToolbox permeability]), so 1.0 is used, unverified.
 - `abs`: Röchling SustaABS gives 10^15 ohm·cm and eps_r 3.1 (IEC 60250, frequency
   not stated); INEOS Novodur P2H-AT gives eps_r 2.9 at 1 MHz and > 1e13 ohm·m.
-- `pla`: no datasheet with PLA's resistivity or permittivity could be fetched;
-  1e14 ohm·m and 3.0 are typical polyester values, unverified. A study of 3D
-  printed PLA measured eps_r 1.78 to 2.81, falling with infill
-  ([PLA printed permittivity]).
-- `petg`: Eastman Eastar 6763, 10^15 ohm·cm (ASTM D257) and eps_r 2.6 at 1 kHz
-  (2.4 at 1 MHz).
-- `nylon-pa12`: EOS PA 2200 gives 10^13 to 10^15 ohm·cm and eps_r 3.8 at 1 kHz,
-  both strongly dependent on temperature and humidity; 1e12 ohm·m is the
-  middle of that range.
-- Polymers' permeability: 1.0 for all four, the usual assumption for a
-  non-magnetic plastic; no source states it for these grades (Engineering
-  Toolbox gives 1 for PTFE), so it is unverified.
+- `pla`: no datasheet with PLA's resistivity or permittivity could be fetched; 1e14 ohm·m and 3.0
+  are typical polyester values, unverified. A study of 3D printed PLA measured eps_r 1.78 to 2.81,
+  falling with infill ([PLA printed permittivity]).
+- `petg`: Eastman Eastar 6763, 10^15 ohm·cm (ASTM D257) and eps_r 2.6 at 1 kHz (2.4 at 1 MHz).
+- `nylon-pa12`: EOS PA 2200 gives 10^13 to 10^15 ohm·cm and eps_r 3.8 at 1 kHz, both strongly
+  dependent on temperature and humidity; 1e12 ohm·m is the middle of that range.
+- Polymers' permeability: 1.0 for all four, the usual assumption for a non-magnetic plastic; no
+  source states it for these grades (Engineering Toolbox gives 1 for PTFE), so it is unverified.
 
 ### Why some values are none (electrical)
 
@@ -294,18 +278,15 @@ Notes:
 - TP-226's c66 for PZT-5A (2.26) and PZT-5H (2.35) are not exactly (c11 − c12)/2
   (2.28 and 2.325): its own rounding. The table keeps TP-226's numbers, so the
   ceramic is very slightly anisotropic about its poling axis.
-- No yield strength: a ceramic is brittle. A `stress` check needs `yield_MPa` in
-  the material object; TP-226 section V gives a static tensile strength of
-  11 000 psi (76 MPa) for all three, and a dynamic (peak) one of 3 500 psi (24 MPa)
-  for PZT-4 and 4 000 psi (28 MPa) for PZT-5A and PZT-5H: use the dynamic one for a
-  part that is driven.
-- Room temperature, low field, freshly poled. Batches vary by several percent, and
-  the constants age (TP-226 section IV: PZT-4's k_p falls 1.7 % per decade of time, PZT-5A's
-  and PZT-5H's 0.2 % or less).
-  A study that matters uses the supplier's datasheet, in the block below.
+- No yield strength: a ceramic is brittle. A `stress` check needs `yield_MPa` in the material
+  object; TP-226 section V gives a static tensile strength of 11 000 psi (76 MPa) for all three, and
+  a dynamic (peak) one of 3 500 psi (24 MPa) for PZT-4 and 4 000 psi (28 MPa) for PZT-5A and PZT-5H:
+  use the dynamic one for a part that is driven.
+- Room temperature, low field, freshly poled. Batches vary by several percent, and the constants age
+  (TP-226 section IV: PZT-4's k_p falls 1.7 % per decade of time, PZT-5A's and PZT-5H's 0.2 % or
+  less). A study that matters uses the supplier's datasheet, in the block below.
 
-A ceramic of your own takes the full matrices (from the supplier's datasheet;
-never invent them):
+A ceramic of your own takes the full matrices (from the supplier's datasheet; never invent them):
 
 ```json
 {"name": "my PZT", "density_t_per_mm3": 7.8e-9, "yield_MPa": 24,

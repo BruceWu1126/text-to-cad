@@ -1,24 +1,18 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
 import { checkTitle } from '../checkKinds.js';
-import { feaControls, feaDefaults, feaShownControls, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, feaDefaults, feaShownControls, studyRows } from '../../feaResult.js';
 import { feaAnalysis } from './index.js';
 import random, { fieldAndSigma, psdGrms, psdWords, shakenAtRandomRows } from './random_vibration.js';
+import { feaFile, vec } from '../../__tests__/feaFile.js';
 
 const TABLE = [[20, 0.01], [80, 0.04], [350, 0.04], [2000, 0.007]];
 
 // A cantilever shaken at random as cadgen writes one: RMS stress first, RMS displacement beside it, nothing deformed.
 function shaken(study: Record<string, unknown> = {}) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.1, 0, 0, 0.1, 0, 0.006]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_von_mises_rms', new BufferAttribute(new Float32Array([9.6, 2, 0]), 1));
-  geometry.setAttribute('_displacement_rms', new BufferAttribute(new Float32Array([0, 0.02, 0.045]), 1));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 1, 1]), 1));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  return feaFile({
+    position: [0, 0, 0, 0.1, 0, 0, 0.1, 0, 0.006], _displacement: vec(9), _von_mises_rms: [9.6, 2, 0], _displacement_rms: [0, 0.02, 0.045],
+    _face: [0, 1, 1],
+  }, {
     generator: 'cadgen fea', name: 'beam random vibration', deformation_scale: null, faces: ['#o1.f1', '#o1.f2'],
     analysis: { type: 'random_vibration', tier: 1, word: 'Random vibration', estimate: false, limits: [], noun: 'this shake', reference_C: null, warnings: [] },
     fields: [
@@ -36,9 +30,6 @@ function shaken(study: Record<string, unknown> = {}) {
       status: 'passes', where: { ref: '#o1.f1', at: [0, 3, 3] } }],
     findings: [],
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 describe('random_vibration', () => {

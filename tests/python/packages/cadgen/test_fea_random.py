@@ -13,29 +13,16 @@ Parse and PSD tests need no mesh; the beam needs the fea extra.
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import struct
-import tempfile
 import unittest
-from contextlib import redirect_stderr
-from pathlib import Path
 from types import SimpleNamespace
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
+from tests.python.support.fea_fixtures import (
+    box_step, class_directory, ends, glb_array, glb_extras, needs_fea, read_glb, sidecar, solve,
+)
 
 from cadgen._internal.fea.analyses import get_analysis  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
 from cadgen._internal.fea.study import parse_study  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 LENGTH, SIDE = 100.0, 6.0
 G0 = 9806.65
@@ -76,6 +63,8 @@ class StudyFile(unittest.TestCase):
             ({"damping_ratio": 1.5}, "must be under 1"),
             ({"fixtures": []}, "at least one"),
             ({"loads": []}, "unknown keys"),
+            ({"view": {"checks": [{"kind": "acceleration", "limit_g": 10}]}}, "not a check this cadgen makes"),
+            ({"view": {"controls": [{"drives": "frame", "type": "number"}]}}, "not one of"),
         ):
             with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, words):
                 parse_study({**_study(), **bad})
@@ -86,10 +75,6 @@ class StudyFile(unittest.TestCase):
             "presets": [{"label": "Typical", "sigma": 1}]}))
         self.assertEqual([check["kind"] for check in parsed.checks], ["stress", "displacement"])
         self.assertEqual(parsed.view["presets"], [{"label": "Typical", "sigma": 1}])
-        with self.assertRaisesRegex(ValueError, "not a check this cadgen makes"):
-            parse_study(_study(view={"checks": [{"kind": "acceleration", "limit_g": 10}]}))
-        with self.assertRaisesRegex(ValueError, "not one of"):
-            parse_study(_study(view={"controls": [{"drives": "frame", "type": "number"}]}))
 
 
 class Psd(unittest.TestCase):
@@ -182,59 +167,21 @@ class Ladder(unittest.TestCase):
             self.assertIsNone(analysis.apply(rung, ctx, inputs))
 
 
-def _glb(path: Path) -> tuple[dict, bytes]:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    return json.loads(raw[20:20 + length]), raw[20 + length + 8:]
-
-
-def _attribute(path: Path, name: str):
-    """A vertex attribute of the GLB's mesh as an (n,) or (n, 3) float array."""
-    import numpy as np
-
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    gltf = json.loads(raw[20:20 + length])
-    binary = raw[20 + length + 8:]
-    accessor = gltf["accessors"][gltf["meshes"][0]["primitives"][0]["attributes"][name]]
-    view = gltf["bufferViews"][accessor["bufferView"]]
-    width = 3 if accessor["type"] == "VEC3" else 1
-    values = np.frombuffer(binary, dtype="<f4", count=accessor["count"] * width, offset=view["byteOffset"])
-    return values.reshape(-1, 3) if width == 3 else values
-
-
-def _ends(listing) -> tuple[str, str]:
-    by_x = {face.center_mm[0]: face.ref for face in listing.faces
-            if face.surface == "plane" and face.normal is not None and abs(abs(face.normal[0]) - 1) < 1e-6}
-    return by_x[min(by_x)], by_x[max(by_x)]
-
-
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class ShakenAtRandom(unittest.TestCase):
     """The clamped beam under a flat 0.04 g²/Hz from 20 to 1000 Hz along Z, judged at 3σ."""
 
     @classmethod
     def setUpClass(cls):
-        from build123d import Align, Box, export_step
-
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.directory = Path(cls._tmp.name)
-        cls.step = cls.directory / "beam.step"
-        export_step(Box(LENGTH, SIDE, SIDE, align=(Align.MIN, Align.CENTER, Align.CENTER)), str(cls.step))
-        cls.fixed, cls.tip = _ends(fea.faces(cls.step))
+        cls.directory = class_directory(cls)
+        cls.step = box_step(cls.directory, "beam", (LENGTH, SIDE, SIDE), "x")
+        cls.fixed, cls.tip = ends(cls.step)
         cls.study = _study(fixtures=[{"faces": [cls.fixed]}], mesh={"size_mm": 2.0}, view={"checks": [
             {"kind": "stress"}, {"kind": "displacement", "limit_mm": 0.05, "faces": [cls.tip], "label": "Tip"}]})
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(cls.step, cls.directory / "beam.fea.glb", study=cls.study)
+        cls.result = solve(cls.step, cls.directory / "beam.fea.glb", cls.study)
         cls.summary = cls.result.summary
         cls.f1 = cls.summary["modes"][0]["frequency_Hz"]
-        cls.sidecar = json.loads(cls.result.sidecar.read_text(encoding="utf-8"))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.sidecar = sidecar(cls.result)
 
     def _miles(self) -> float:
         omega1 = 2 * math.pi * self.f1
@@ -262,7 +209,7 @@ class ShakenAtRandom(unittest.TestCase):
         self.assertIn("mode 1 at 490 Hz carries", found["random_response"]["summary"])
 
     def test_the_glb_carries_the_rms_fields_and_the_psd(self):
-        gltf, _ = _glb(self.result.glb)
+        gltf, _ = read_glb(self.result.glb)
         extras = gltf["meshes"][0]["extras"]
         attributes = gltf["meshes"][0]["primitives"][0]["attributes"]
         self.assertEqual(extras["analysis"]["type"], "random_vibration")
@@ -283,8 +230,7 @@ class ShakenAtRandom(unittest.TestCase):
 
         from cadgen._internal.fea import motion as motions
 
-        gltf, _ = _glb(self.result.glb)
-        motion = gltf["meshes"][0]["extras"]["analysis"]["motion"]
+        motion = glb_extras(self.result.glb)["analysis"]["motion"]
         self.assertEqual((motion["kind"], motion["label"], motion["direction"]), ("base_shake", "Random shake", [0.0, 0.0, 1.0]))
         self.assertAlmostEqual(motion["rms_g"], self.summary["grms_input"], delta=1e-3 * self.summary["grms_input"])
         f, amplitude = motions.random_lines(self.study["psd"]["table"])
@@ -296,7 +242,7 @@ class ShakenAtRandom(unittest.TestCase):
         self.assertAlmostEqual(t[-1] * first["frequency_Hz"], 10.0, delta=0.2)
         fastest = max(mode["frequency_Hz"] for mode in motion["modes"])
         self.assertGreaterEqual(1.0 / (motion["step_s"] * fastest), 8.0)
-        shape = _attribute(self.result.glb, first["attribute"])
+        shape = glb_array(self.result.glb, first["attribute"], 3)
         self.assertAlmostEqual(float(np.linalg.norm(shape, axis=1).max()), 0.001, delta=1e-6)   # 1 mm, in glTF metres
         rms = float(np.sqrt(np.mean(np.square(first["q_mm"]))))
         self.assertLess(abs(math.log(rms / self.summary["max_displacement_rms_mm"])), math.log(2.0))
@@ -313,20 +259,16 @@ class ShakenAtRandom(unittest.TestCase):
         self.assertTrue(lines[3].startswith("2 modes up to 1500 Hz, holding"))
 
     def test_an_oversized_model_completes_with_fewer_modes_and_a_coarser_grid(self):
-        from cadgen import fea
-
         study = {**self.study, "fit": {"memory_GB": 0.01, "allow": ["reduce_modes", "frequency_grid"]}}
-        with redirect_stderr(io.StringIO()):
-            result = fea.solve(self.step, self.directory / "tight.fea.glb", study=study)
+        result = solve(self.step, self.directory / "tight.fea.glb", study)
         self.assertTrue(result.ok)
         self.assertEqual([step["rung"] for step in result.fit][:2], ["reduce_modes", "frequency_grid"])
         words = "Kept 1 of the 2 modes up to 1500 Hz, the ones holding 61% of the mass moving along Z, to fit"
         self.assertEqual(result.fit[0]["words"], words)
         self.assertIsNotNone(result.fit[1]["accuracy"])
         self.assertEqual((result.summary["modes_used"], result.summary["points_per_bandwidth"]), (1, 10))
-        gltf, _ = _glb(result.glb)
-        self.assertIn(words, [step["words"] for step in gltf["meshes"][0]["extras"]["fit"]])
-        self.assertIn(words, [step["words"] for step in json.loads(result.sidecar.read_text(encoding="utf-8"))["fit"]])
+        self.assertIn(words, [step["words"] for step in glb_extras(result.glb)["fit"]])
+        self.assertIn(words, [step["words"] for step in sidecar(result)["fit"]])
         self.assertIn(f"adapted: {words}", result.human_lines())
         self.assertTrue({"fit_reduce_modes", "fit_frequency_grid"} <= {finding["type"] for finding in result.findings})
         # The mode that carries the shake is kept, on a grid that still resolves it: Miles still holds.

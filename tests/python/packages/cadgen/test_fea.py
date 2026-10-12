@@ -14,32 +14,19 @@ from __future__ import annotations
 import io
 import json
 import math
-import os
 import tempfile
 import unittest
-from contextlib import contextmanager, redirect_stderr, redirect_stdout
+from contextlib import redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
+from tests.python.support.fea_fixtures import (
+    box_step, class_directory, ends, glb_array, glb_extras, needs_fea, quiet, read_glb, sidecar, solve, value_error,
+)
 
 from cadgen._internal.fea.materials import lookup_material  # noqa: E402
 from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
 from cadgen._internal.fea.study import parse_study  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
-
-@contextmanager
-def quiet():
-    """The CLI's progress lines go to stderr; a test that is not about them keeps them out of the run's output."""
-    with redirect_stderr(io.StringIO()):
-        yield
-
 
 # The cantilever: length along +X, fixed at x = 0, loaded at x = L in -Z.
 # Light enough that steel keeps a safety factor above 3, so it solves once.
@@ -62,58 +49,13 @@ def _bending_stress(x: float) -> float:
 TIP = _timoshenko_tip_deflection()
 
 
-def _write_cantilever(directory: Path, length: float = LENGTH, side: float = WIDTH) -> Path:
-    from build123d import Align, Box, export_step
-
-    path = directory / "cantilever.step"
-    export_step(Box(length, side, side, align=(Align.MIN, Align.CENTER, Align.CENTER)), str(path))
-    return path
-
-
-def _end_faces(listing) -> tuple[str, str]:
-    """The refs of the faces at x = 0 and at the far end."""
-    by_x = {}
-    for face in listing.faces:
-        if face.surface == "plane" and face.normal is not None and abs(abs(face.normal[0]) - 1) < 1e-6:
-            by_x[face.center_mm[0]] = face.ref
-    return by_x[min(by_x)], by_x[max(by_x)]
-
-
-def _glb_extras(path: Path) -> dict:
-    import struct
-
-    raw = path.read_bytes()
-    json_length, _ = struct.unpack_from("<II", raw, 12)
-    return json.loads(raw[20:20 + json_length])["meshes"][0]["extras"]
-
-
-def _glb_attribute(path: Path, name: str, width: int) -> "np.ndarray":
-    """One vertex attribute of the result GLB, (count, width) floats."""
-    import struct
-
-    import numpy as np
-
-    raw = path.read_bytes()
-    json_length, _ = struct.unpack_from("<II", raw, 12)
-    gltf = json.loads(raw[20:20 + json_length])
-    binary = raw[20 + json_length + 8:]
-    accessor = gltf["accessors"][gltf["meshes"][0]["primitives"][0]["attributes"][name]]
-    view = gltf["bufferViews"][accessor["bufferView"]]
-    data = np.frombuffer(binary, np.float32, accessor["count"] * width, view["byteOffset"])
-    return data.reshape(-1, width).astype(float)
-
-
 def _glb_indices(path: Path) -> "np.ndarray":
-    import struct
-
     import numpy as np
 
-    raw = path.read_bytes()
-    json_length, _ = struct.unpack_from("<II", raw, 12)
-    gltf = json.loads(raw[20:20 + json_length])
+    gltf, binary = read_glb(path)
     accessor = gltf["accessors"][gltf["meshes"][0]["primitives"][0]["indices"]]
     view = gltf["bufferViews"][accessor["bufferView"]]
-    return np.frombuffer(raw[20 + json_length + 8:], np.uint32, accessor["count"], view["byteOffset"])
+    return np.frombuffer(binary, np.uint32, accessor["count"], view["byteOffset"])
 
 
 class _CountingSolve:
@@ -138,26 +80,26 @@ class _CountingSolve:
 
 def _glb_peak_at(path: Path) -> list[float]:
     """The undeformed CAD-mm position of the GLB vertex with the highest ``_VON_MISES``."""
-    import struct
+    vertex = int(glb_array(path, "_VON_MISES").argmax())
+    scale = glb_extras(path)["deformation_scale"]
+    x, y, z = glb_array(path, "POSITION", 3)[vertex] - scale * glb_array(path, "_DISPLACEMENT", 3)[vertex]
+    return [x * 1000.0, -z * 1000.0, y * 1000.0]  # glTF (x, z, -y) metres back to CAD mm
 
+
+def _vtu_von_mises(path: Path) -> "tuple[np.ndarray, np.ndarray]":
+    """The VTU's corner-node positions (N, 3) and von Mises (N,)."""
     import numpy as np
 
-    raw = path.read_bytes()
-    json_length, _ = struct.unpack_from("<II", raw, 12)
-    gltf = json.loads(raw[20:20 + json_length])
-    binary = raw[20 + json_length + 8:]
-    primitive = gltf["meshes"][0]["primitives"][0]
+    vtu = path.read_text(encoding="utf-8")
 
-    def read(name: str, width: int) -> np.ndarray:
-        accessor = gltf["accessors"][primitive["attributes"][name]]
-        view = gltf["bufferViews"][accessor["bufferView"]]
-        data = np.frombuffer(binary, np.float32, accessor["count"] * width, view["byteOffset"])
-        return data.reshape(-1, width).astype(float)
+    def block(marker: str) -> np.ndarray:
+        start = vtu.index(">", vtu.index(marker) + len(marker)) + 1
+        return np.array(vtu[start:vtu.index("</DataArray>", start)].split(), dtype=float)
 
-    vertex = int(read("_VON_MISES", 1).argmax())
-    scale = gltf["meshes"][0]["extras"]["deformation_scale"]
-    x, y, z = read("POSITION", 3)[vertex] - scale * read("_DISPLACEMENT", 3)[vertex]
-    return [x * 1000.0, -z * 1000.0, y * 1000.0]  # glTF (x, z, -y) metres back to CAD mm
+    return block("<Points><DataArray").reshape(-1, 3), block('Name="von_mises"')
+
+
+BASE = {"material": "steel", "fixtures": [{"faces": ["#o1.f1"]}], "loads": [{"faces": ["#o1.f2"], "type": "force", "vector_N": [1, 0, 0]}]}
 
 
 class StudyFile(unittest.TestCase):
@@ -197,28 +139,24 @@ class StudyFile(unittest.TestCase):
         self.assertEqual(own.name, "Copper C110")
 
     def test_the_errors_name_the_field(self):
-        base = {"material": "steel", "fixtures": [{"faces": ["#o1.f1"]}], "loads": [{"faces": ["#o1.f2"], "type": "force", "vector_N": [1, 0, 0]}]}
         cases = [
-            ({**base, "material": "unobtainium"}, "unknown material"),
-            ({**base, "fixtures": []}, "fixtures"),
-            ({**base, "loads": [{"faces": ["#o1.f2"], "type": "force", "vector_N": [0, 0, 0]}]}, "vector_N"),
-            ({**base, "loads": [{"faces": ["#o1.f2"], "type": "torque"}]}, "loads[0].type"),
-            ({**base, "mesh": {"size_mm": -1}}, "mesh.size_mm"),
-            ({**base, "bogus": 1}, "unknown keys"),
+            ({**BASE, "material": "unobtainium"}, "unknown material"),
+            ({**BASE, "fixtures": []}, "fixtures"),
+            ({**BASE, "loads": [{"faces": ["#o1.f2"], "type": "force", "vector_N": [0, 0, 0]}]}, "vector_N"),
+            ({**BASE, "loads": [{"faces": ["#o1.f2"], "type": "torque"}]}, "loads[0].type"),
+            ({**BASE, "mesh": {"size_mm": -1}}, "mesh.size_mm"),
+            ({**BASE, "bogus": 1}, "unknown keys"),
         ]
         for document, fragment in cases:
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                parse_study(document)
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, value_error(self, parse_study, document))
 
     def test_the_margin_defaults_to_two_and_must_be_positive(self):
-        base = {"material": "steel", "fixtures": [{"faces": ["#o1.f1"]}], "loads": [{"faces": ["#o1.f2"], "type": "force", "vector_N": [1, 0, 0]}]}
-        self.assertEqual(parse_study(base).margin, 2.0)
-        self.assertEqual(parse_study({**base, "margin": 1.5}).margin, 1.5)
+        self.assertEqual(parse_study(BASE).margin, 2.0)
+        self.assertEqual(parse_study({**BASE, "margin": 1.5}).margin, 1.5)
         for bad in (0, -1, 0.5, "2", True):
-            with self.subTest(margin=bad), self.assertRaises(ValueError) as caught:
-                parse_study({**base, "margin": bad})
-            self.assertIn("margin", str(caught.exception))
+            with self.subTest(margin=bad):
+                self.assertIn("margin", value_error(self, parse_study, {**BASE, "margin": bad}))
 
     def test_inline_json_and_a_file_are_accepted(self):
         text = json.dumps({"material": "pla", "fixtures": [{"faces": ["#o1.f1"]}], "loads": [{"faces": ["#o1.f2"], "type": "force", "vector_N": [0, 1, 0]}]})
@@ -229,9 +167,7 @@ class StudyFile(unittest.TestCase):
             self.assertEqual(parse_study(str(path)).material.name, "PLA")
 
     def test_no_study_is_a_teaching_error(self):
-        with self.assertRaises(ValueError) as caught:
-            parse_study(None)
-        self.assertIn("--study", str(caught.exception))
+        self.assertIn("--study", value_error(self, parse_study, None))
 
 
 # The agent's view of a result: which controls Study's Result shows, named states, and the markers.
@@ -250,8 +186,6 @@ VIEW = {
 class StudyView(unittest.TestCase):
     """The study's optional ``view``: checked like the rest of the study, before any heavy import."""
 
-    BASE = {"material": "steel", "fixtures": [{"faces": ["#o1.f1"]}], "loads": [{"faces": ["#o1.f2"], "type": "force", "vector_N": [1, 0, 0]}]}
-
     def _view(self, **changes):
         return {**VIEW, **changes}
 
@@ -260,34 +194,31 @@ class StudyView(unittest.TestCase):
         return self._view(controls=controls)
 
     def test_a_view_parses_as_written_and_no_view_is_none(self):
-        self.assertIsNone(parse_study(self.BASE).view)
-        self.assertEqual(parse_study({**self.BASE, "view": VIEW}).view, VIEW)
+        self.assertIsNone(parse_study(BASE).view)
+        self.assertEqual(parse_study({**BASE, "view": VIEW}).view, VIEW)
 
     def test_a_bare_control_takes_its_type_and_range_defaults(self):
-        view = parse_study({**self.BASE, "view": {"controls": [{"drives": "deformation", "max": 40}, {"drives": "load_scale", "max": 2}]}}).view
+        view = parse_study({**BASE, "view": {"controls": [{"drives": "deformation", "max": 40}, {"drives": "load_scale", "max": 2}]}}).view
         # A deformation with no default leaves it to the result's own exaggeration; a load_scale starts at a tenth of the load.
         self.assertEqual(view["controls"][0], {"drives": "deformation", "type": "number", "min": 0.0, "max": 40.0})
         self.assertEqual(view["controls"][1], {"drives": "load_scale", "type": "number", "min": 0.1, "max": 2.0, "default": 1.0})
         # One with no range at all runs to four times the result's own exaggeration, which the viewer reads; half a range is refused.
-        bare = parse_study({**self.BASE, "view": {"controls": [{"drives": "deformation", "label": "Exaggerate"}]}}).view
+        bare = parse_study({**BASE, "view": {"controls": [{"drives": "deformation", "label": "Exaggerate"}]}}).view
         self.assertEqual(bare["controls"], [{"drives": "deformation", "type": "number", "label": "Exaggerate"}])
-        with self.assertRaises(ValueError) as caught:
-            parse_study({**self.BASE, "view": {"controls": [{"drives": "deformation", "default": 12}]}})
-        self.assertIn("leave min, max and default all out", str(caught.exception))
+        self.assertIn("leave min, max and default all out",
+                      value_error(self, parse_study, {**BASE, "view": {"controls": [{"drives": "deformation", "default": 12}]}}))
 
     def test_show_parts_overrides_when_the_parts_panel_shows_either_way(self):
         for shown in (True, False):
-            self.assertEqual(parse_study({**self.BASE, "view": {"show": {"parts": shown}}}).view, {"show": {"parts": shown}})
+            self.assertEqual(parse_study({**BASE, "view": {"show": {"parts": shown}}}).view, {"show": {"parts": shown}})
 
     def test_presets_with_no_controls_set_the_default_field_and_deformation(self):
         presets = [{"label": "Exaggerated", "deformation": 40, "field": "displacement"}]
-        self.assertEqual(parse_study({**self.BASE, "view": {"presets": presets}}).view, {"presets": [{"label": "Exaggerated", "deformation": 40.0, "field": "displacement"}]})
-        with self.assertRaises(ValueError) as caught:
-            parse_study({**self.BASE, "view": {"presets": [{"label": "Heavy", "load_scale": 2}]}})
-        self.assertIn("a preset here can set only label, deformation, field", str(caught.exception))
-        with self.assertRaises(ValueError) as caught:
-            parse_study({**self.BASE, "view": {"presets": [{"label": "Inside out", "deformation": -1}]}})
-        self.assertIn("view.presets[0].deformation: -1 must be 0 or more", str(caught.exception))
+        self.assertEqual(parse_study({**BASE, "view": {"presets": presets}}).view, {"presets": [{"label": "Exaggerated", "deformation": 40.0, "field": "displacement"}]})
+        self.assertIn("a preset here can set only label, deformation, field",
+                      value_error(self, parse_study, {**BASE, "view": {"presets": [{"label": "Heavy", "load_scale": 2}]}}))
+        self.assertIn("view.presets[0].deformation: -1 must be 0 or more",
+                      value_error(self, parse_study, {**BASE, "view": {"presets": [{"label": "Inside out", "deformation": -1}]}}))
 
     def test_a_malformed_view_is_a_study_error_in_a_plain_sentence(self):
         threshold_on_safety = self._control("threshold", field="safety_factor")
@@ -321,13 +252,11 @@ class StudyView(unittest.TestCase):
             (self._view(show={"parts": 1}), "view.show.parts: true or false, got 1"),
         ]
         for view, fragment in cases:
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                parse_study({**self.BASE, "view": view})
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, value_error(self, parse_study, {**BASE, "view": view}))
         # A preset may only set what a declared control drives.
-        with self.assertRaises(ValueError) as caught:
-            parse_study({**self.BASE, "view": {"controls": [VIEW["controls"][0]], "presets": [{"label": "Heavy", "load_scale": 2}]}})
-        self.assertIn("'load_scale' is not a control", str(caught.exception))
+        self.assertIn("'load_scale' is not a control", value_error(self, parse_study, {**BASE, "view": {
+            "controls": [VIEW["controls"][0]], "presets": [{"label": "Heavy", "load_scale": 2}]}}))
 
     def test_checks_sections_and_when_parse_as_written(self):
         view = {
@@ -335,7 +264,7 @@ class StudyView(unittest.TestCase):
             "sections": ["verdict", "controls"],
             "controls": [{"drives": "load_scale", "max": 2, "when": "failing"}],
         }
-        study = parse_study({**self.BASE, "view": view})
+        study = parse_study({**BASE, "view": view})
         self.assertEqual(study.view["checks"], [
             {"kind": "stress", "margin": 2.0, "label": "Strength"}, {"kind": "displacement", "limit_mm": 0.5, "faces": ["#o1.f2"], "label": "Tip sag"}])
         self.assertEqual(study.view["sections"], ["verdict", "controls"])
@@ -343,12 +272,12 @@ class StudyView(unittest.TestCase):
         self.assertEqual(study.check_faces, ("#o1.f2",))
         # The stress check's margin is the study's.
         self.assertEqual(study.margin, 2.0)
-        self.assertEqual(parse_study({**self.BASE, "view": {"checks": [{"kind": "stress", "margin": 3}]}}).margin, 3.0)
+        self.assertEqual(parse_study({**BASE, "view": {"checks": [{"kind": "stress", "margin": 3}]}}).margin, 3.0)
 
     def test_with_no_checks_the_stress_check_alone_judges_the_result(self):
-        self.assertEqual(parse_study(self.BASE).checks, ({"kind": "stress"},))
-        self.assertEqual(parse_study({**self.BASE, "view": {"show": {"loads": True}}}).checks, ({"kind": "stress"},))
-        self.assertEqual(parse_study(self.BASE).check_faces, ())
+        self.assertEqual(parse_study(BASE).checks, ({"kind": "stress"},))
+        self.assertEqual(parse_study({**BASE, "view": {"show": {"loads": True}}}).checks, ({"kind": "stress"},))
+        self.assertEqual(parse_study(BASE).check_faces, ())
 
     def test_a_malformed_check_section_or_when_is_a_plain_sentence(self):
         cases = [
@@ -369,13 +298,12 @@ class StudyView(unittest.TestCase):
             ({"controls": [{"drives": "load_scale", "max": 2, "when": "sometimes"}]}, 'view.controls[0].when: "sometimes" is not one of'),
         ]
         for view, fragment in cases:
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                parse_study({**self.BASE, "view": view})
-            self.assertIn(fragment, str(caught.exception))
-            self.assertNotIn("\u2014", str(caught.exception))
-        with self.assertRaises(ValueError) as caught:
-            parse_study({**self.BASE, "margin": 2, "view": {"checks": [{"kind": "stress", "margin": 3}]}})
-        self.assertIn("the stress check's margin (3) is not the study's margin (2); give it once", str(caught.exception))
+            with self.subTest(fragment=fragment):
+                message = value_error(self, parse_study, {**BASE, "view": view})
+                self.assertIn(fragment, message)
+                self.assertNotIn("\u2014", message)
+        self.assertIn("the stress check's margin (3) is not the study's margin (2); give it once", value_error(
+            self, parse_study, {**BASE, "margin": 2, "view": {"checks": [{"kind": "stress", "margin": 3}]}}))
 
 
 class GlbJson(unittest.TestCase):
@@ -394,22 +322,20 @@ class GlbJson(unittest.TestCase):
             self.assertFalse(path.exists())
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Cantilever(unittest.TestCase):
     """One solve, many assertions: the run is the expensive part."""
 
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        cls.step = _write_cantilever(directory)
         from unittest import mock
 
         from cadgen import fea
 
-        listing = fea.faces(cls.step)
-        cls.fixed_ref, cls.load_ref = _end_faces(listing)
-        cls.listing = listing
+        directory = class_directory(cls)
+        cls.step = box_step(directory, "cantilever", (LENGTH, WIDTH, WIDTH), "x")
+        cls.listing = fea.faces(cls.step)
+        cls.fixed_ref, cls.load_ref = ends(cls.listing)
         cls.study = {
             "material": "steel",
             "fixtures": [{"faces": [cls.fixed_ref], "type": "fixed"}],
@@ -425,12 +351,8 @@ class Cantilever(unittest.TestCase):
         }
         cls.out = directory / "results" / "cantilever.glb"
         cls.solver = _CountingSolve()
-        with mock.patch("cadgen._internal.fea.solve.solve_linear_static", cls.solver), quiet():
-            cls.result = fea.solve(cls.step, cls.out, study=cls.study, vtu=True)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        with mock.patch("cadgen._internal.fea.solve.solve_linear_static", cls.solver):
+            cls.result = solve(cls.step, cls.out, cls.study, vtu=True)
 
     def test_the_face_listing_names_the_six_faces_with_hints(self):
         self.assertEqual(len(self.listing.faces), 6)
@@ -467,15 +389,7 @@ class Cantilever(unittest.TestCase):
         # Probe the VTU: von Mises at the corner nodes on the top face near x = L/4.
         import numpy as np
 
-        vtu = self.result.vtu.read_text(encoding="utf-8")
-
-        def block(marker: str) -> np.ndarray:
-            """The numbers of the DataArray whose opening tag holds ``marker``."""
-            start = vtu.index(">", vtu.index(marker) + len(marker)) + 1
-            return np.array(vtu[start:vtu.index("</DataArray>", start)].split(), dtype=float)
-
-        xyz = block("<Points><DataArray").reshape(-1, 3)
-        values = block('Name="von_mises"')
+        xyz, values = _vtu_von_mises(self.result.vtu)
         probe = (np.abs(xyz[:, 0] - LENGTH / 4) < 1.01) & (np.abs(xyz[:, 2] - HEIGHT / 2) < 1e-6) & (np.abs(xyz[:, 1]) < WIDTH / 2 - 1e-6)
         self.assertGreater(probe.sum(), 0)
         expected = _bending_stress(LENGTH / 4)
@@ -485,21 +399,21 @@ class Cantilever(unittest.TestCase):
         self.assertEqual(self.result.glb, self.out)
         self.assertEqual(self.result.sidecar, self.out.with_suffix(".json"))
         self.assertTrue(self.result.glb.is_file() and self.result.sidecar.is_file() and self.result.vtu.is_file())
-        sidecar = json.loads(self.result.sidecar.read_text(encoding="utf-8"))
-        self.assertEqual(sidecar["study"], self.study)
-        self.assertEqual(sidecar["summary"], self.result.summary)
-        self.assertEqual(sidecar["fields"][0]["max"], self.result.summary["max_von_mises_MPa"])
-        self.assertEqual(sidecar["mesh"]["order"], 2)
+        written = sidecar(self.result)
+        self.assertEqual(written["study"], self.study)
+        self.assertEqual(written["summary"], self.result.summary)
+        self.assertEqual(written["fields"][0]["max"], self.result.summary["max_von_mises_MPa"])
+        self.assertEqual(written["mesh"]["order"], 2)
 
     def test_the_view_names_only_fields_the_glb_writes(self):
         from cadgen._internal.fea.study import VIEW_FIELDS
 
-        written = {field["attribute"] for field in _glb_extras(self.result.glb)["fields"]}
+        written = {field["attribute"] for field in glb_extras(self.result.glb)["fields"]}
         self.assertLessEqual({f"_{name.upper()}" for name in VIEW_FIELDS}, written)
 
     def test_the_studys_view_is_copied_into_the_glb_and_the_sidecar(self):
-        self.assertEqual(_glb_extras(self.result.glb)["view"], self.study["view"])
-        self.assertEqual(json.loads(self.result.sidecar.read_text(encoding="utf-8"))["view"], self.study["view"])
+        self.assertEqual(glb_extras(self.result.glb)["view"], self.study["view"])
+        self.assertEqual(sidecar(self.result)["view"], self.study["view"])
 
     def test_a_displacement_check_measures_the_tip_against_beam_theory(self):
         stress, whole, tip, clamp = self.result.summary["checks"]
@@ -526,17 +440,16 @@ class Cantilever(unittest.TestCase):
 
     def test_the_checks_are_written_into_the_glb_the_sidecar_and_the_lines(self):
         checks = self.result.summary["checks"]
-        self.assertEqual(_glb_extras(self.result.glb)["checks"], checks)
-        self.assertEqual(json.loads(self.result.sidecar.read_text(encoding="utf-8"))["summary"]["checks"], checks)
+        self.assertEqual(glb_extras(self.result.glb)["checks"], checks)
+        self.assertEqual(sidecar(self.result)["summary"]["checks"], checks)
         lines = self.result.human_lines()
         tip = checks[2]
         self.assertIn(f"check 'Tip sag': {tip['value']:g} mm against a {tip['limit']:g} mm limit, {tip['ratio']:.2f}× it, close", lines)
         self.assertEqual(sum(line.startswith("check '") for line in lines), 4)
 
     def test_the_glb_names_its_step_relative_to_its_own_folder(self):
-        self.assertEqual(_glb_extras(self.result.glb)["document"], f"../{self.step.name}")
-        sidecar = json.loads(self.result.sidecar.read_text(encoding="utf-8"))
-        self.assertEqual(sidecar["document"], str(self.step))
+        self.assertEqual(glb_extras(self.result.glb)["document"], f"../{self.step.name}")
+        self.assertEqual(sidecar(self.result)["document"], str(self.step))
 
     def test_the_glb_names_its_step_absolutely_when_no_relative_path_exists(self):
         from unittest import mock
@@ -555,11 +468,10 @@ class Cantilever(unittest.TestCase):
         json_length, json_type = struct.unpack_from("<II", raw, 12)
         self.assertEqual(json_type, 0x4E4F534A)
         gltf = json.loads(raw[20:20 + json_length])
+        # The attribute names and the fields' order: test_fea_protocol's Golden, on the same static output.
         attributes = gltf["meshes"][0]["primitives"][0]["attributes"]
-        self.assertEqual(set(attributes), {"POSITION", "NORMAL", "COLOR_0", "_VON_MISES", "_DISPLACEMENT", "_FACE"})
         extras = gltf["meshes"][0]["extras"]
         self.assertEqual(extras["deformation_scale"], self.result.summary["deformation_scale"])
-        self.assertEqual([f["attribute"] for f in extras["fields"]], ["_VON_MISES", "_DISPLACEMENT"])
         self.assertEqual((extras["fields"][0]["units"], extras["fields"][0]["max"]), ("MPa", self.result.summary["max_von_mises_MPa"]))
         self.assertEqual(extras["fields"][1]["max"], self.result.summary["max_displacement_mm"])
         self.assertEqual(len(extras["ramp"]), 5)
@@ -573,7 +485,7 @@ class Cantilever(unittest.TestCase):
         self.assertAlmostEqual(position["max"][0], LENGTH / 1000.0, places=2)  # the scaled deformation stretches the tip a little
 
     def test_the_glb_records_its_study_with_bare_face_refs(self):
-        study = _glb_extras(self.result.glb)["study"]
+        study = glb_extras(self.result.glb)["study"]
         self.assertEqual(study["material"]["name"], "Steel (structural, generic)")
         self.assertEqual(set(study["material"]), {"name", "yield_MPa", "youngs_GPa", "poisson"})
         self.assertAlmostEqual(study["material"]["youngs_GPa"], 200.0, delta=15)
@@ -588,14 +500,14 @@ class Cantilever(unittest.TestCase):
     def test_every_surface_triangle_traces_to_a_source_face(self):
         import numpy as np
 
-        extras = _glb_extras(self.result.glb)
+        extras = glb_extras(self.result.glb)
         self.assertEqual(extras["faces"], [face.ref for face in self.listing.faces])
-        face = _glb_attribute(self.result.glb, "_FACE", 1)[:, 0].astype(int)
+        face = glb_array(self.result.glb, "_FACE", 1)[:, 0].astype(int)
         indices = _glb_indices(self.result.glb).reshape(-1, 3)
         self.assertTrue(((face >= 0) & (face < len(extras["faces"]))).all())
         # a triangle's three vertices lie on one face
         self.assertTrue((face[indices[:, 0]] == face[indices[:, 1]]).all() and (face[indices[:, 0]] == face[indices[:, 2]]).all())
-        undeformed = _glb_attribute(self.result.glb, "POSITION", 3) - extras["deformation_scale"] * _glb_attribute(self.result.glb, "_DISPLACEMENT", 3)
+        undeformed = glb_array(self.result.glb, "POSITION", 3) - extras["deformation_scale"] * glb_array(self.result.glb, "_DISPLACEMENT", 3)
         x_mm = undeformed[:, 0] * 1000.0
         fixed = face == extras["faces"].index(self.fixed_ref)
         load = face == extras["faces"].index(self.load_ref)
@@ -619,30 +531,22 @@ class Cantilever(unittest.TestCase):
     def test_a_comfortable_part_solves_once_and_has_nothing_to_say(self):
         self.assertEqual(self.solver.calls, 1)
         self.assertEqual(self.result.findings, ())
-        sidecar = json.loads(self.result.sidecar.read_text(encoding="utf-8"))
-        self.assertEqual(sidecar["findings"], [])
-        self.assertIsNone(sidecar["refined"])
-        self.assertEqual(_glb_extras(self.result.glb)["findings"], [])
+        written = sidecar(self.result)
+        self.assertEqual(written["findings"], [])
+        self.assertIsNone(written["refined"])
+        self.assertEqual(glb_extras(self.result.glb)["findings"], [])
         self.assertEqual(self.result.mesh["size_mm"], 2.0)
 
     def test_a_face_on_a_different_part_or_a_non_face_is_refused(self):
-        from cadgen import fea
-
-        with self.assertRaises(ValueError) as caught, quiet():
-            fea.solve(self.step, study={**self.study, "fixtures": [{"faces": [self.fixed_ref.rsplit(".", 1)[0]]}]})
-        self.assertIn("faces", str(caught.exception))
-        with self.assertRaises(ValueError), quiet():
-            fea.solve(self.step, study={**self.study, "loads": [{"faces": ["#o1.f99"], "type": "force", "vector_N": [1, 0, 0]}]})
+        self.assertIn("faces", value_error(self, solve, self.step, None, {
+            **self.study, "fixtures": [{"faces": [self.fixed_ref.rsplit(".", 1)[0]]}]}))
+        value_error(self, solve, self.step, None, {**self.study, "loads": [{"faces": ["#o1.f99"], "type": "force", "vector_N": [1, 0, 0]}]})
 
     def test_out_must_be_a_glb(self):
-        from cadgen import fea
-
-        with self.assertRaises(ValueError) as caught, quiet():
-            fea.solve(self.step, self.out.with_suffix(".vtu"), study=self.study)
-        self.assertIn(".glb", str(caught.exception))
+        self.assertIn(".glb", value_error(self, solve, self.step, self.out.with_suffix(".vtu"), self.study))
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Yielding(unittest.TestCase):
     """A 3 mm square steel bar, 40 mm long, under 100 N: about 900 MPa at the root."""
 
@@ -652,12 +556,9 @@ class Yielding(unittest.TestCase):
     def setUpClass(cls):
         from unittest import mock
 
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        cls.step = _write_cantilever(directory, length=40.0, side=3.0)
-        cls.fixed_ref, cls.load_ref = _end_faces(fea.faces(cls.step))
+        cls.directory = class_directory(cls)
+        cls.step = box_step(cls.directory, "cantilever", (40.0, 3.0, 3.0), "x")
+        cls.fixed_ref, cls.load_ref = ends(cls.step)
         # The fixture names its face with the document prefix, as the viewer copies it.
         cls.study = {
             "material": "steel",
@@ -675,31 +576,27 @@ class Yielding(unittest.TestCase):
             return real_mesh(occurrence, **kwargs)
 
         with mock.patch("cadgen._internal.fea.solve.solve_linear_static", cls.solver), \
-                mock.patch("cadgen._internal.fea.mesh.mesh_occurrence", mesh_spy), quiet():
-            cls.result = fea.solve(cls.step, directory / "bar.glb", study=cls.study)
-        cls.sidecar = json.loads(cls.result.sidecar.read_text(encoding="utf-8"))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+                mock.patch("cadgen._internal.fea.mesh.mesh_occurrence", mesh_spy):
+            cls.result = solve(cls.step, cls.directory / "bar.glb", cls.study)
+        cls.sidecar = sidecar(cls.result)
 
     def test_it_yields_as_an_error_in_the_sidecar_the_glb_and_the_cli(self):
         first = self.sidecar["findings"][0]
         self.assertEqual((first["check"], first["severity"], first["type"]), ("fea", "error", "yields"))
         self.assertIn("The cantilever yields", first["summary"])
-        self.assertEqual(_glb_extras(self.result.glb)["findings"], self.sidecar["findings"])
+        self.assertEqual(glb_extras(self.result.glb)["findings"], self.sidecar["findings"])
         self.assertEqual(list(self.result.findings), self.sidecar["findings"])
         self.assertIn(f"error: {first['summary']}", self.result.human_lines())
 
     def test_a_study_without_a_view_writes_none(self):
-        self.assertNotIn("view", _glb_extras(self.result.glb))
+        self.assertNotIn("view", glb_extras(self.result.glb))
         self.assertNotIn("view", self.sidecar)
 
     def test_with_no_view_the_stress_check_alone_says_what_the_safety_factor_says(self):
         (check,) = self.result.summary["checks"]
         self.assertEqual((check["kind"], check["status"]), ("stress", "fails"))
         self.assertEqual(check["ratio"], round(1 / self.result.summary["safety_factor"], 6))
-        self.assertEqual(_glb_extras(self.result.glb)["checks"], [check])
+        self.assertEqual(glb_extras(self.result.glb)["checks"], [check])
         # The stress check's findings are the yields finding already made; it adds none of its own.
         self.assertEqual([f["type"] for f in self.result.findings].count("yields"), 1)
         self.assertNotIn("displacement_over_limit", [f["type"] for f in self.result.findings])
@@ -710,8 +607,8 @@ class Yielding(unittest.TestCase):
         refined = self.sidecar["refined"]
         self.assertEqual((refined["from_size_mm"], refined["size_mm"]), (self.SIZE, self.SIZE / 2))
         self.assertEqual(refined["max_von_mises_MPa"], self.result.summary["max_von_mises_MPa"])
-        self.assertEqual(_glb_extras(self.result.glb)["fields"][0]["max"], self.result.summary["max_von_mises_MPa"])
-        mesh = _glb_extras(self.result.glb)["study"]["mesh"]
+        self.assertEqual(glb_extras(self.result.glb)["fields"][0]["max"], self.result.summary["max_von_mises_MPa"])
+        mesh = glb_extras(self.result.glb)["study"]["mesh"]
         self.assertEqual((mesh["size_mm"], mesh["refined_from_mm"]), (self.SIZE / 2, self.SIZE))
 
     def test_the_finer_solve_refines_curved_features_by_the_same_ratio(self):
@@ -727,8 +624,6 @@ class Yielding(unittest.TestCase):
             self.assertAlmostEqual(got, want, delta=1e-3)
 
     def test_the_safety_factor_is_floored_never_rounded_up(self):
-        import math
-
         sf = self.result.summary["safety_factor"]
         self.assertEqual(sf, math.floor(sf * 1000) / 1000)
 
@@ -736,17 +631,15 @@ class Yielding(unittest.TestCase):
         import dataclasses
         from unittest import mock
 
-        from cadgen import fea
-
         def halve(outcome):
             return dataclasses.replace(
                 outcome, von_mises=outcome.von_mises / 2, von_mises_gauss_max=outcome.von_mises_gauss_max / 2
             )
 
         solver = _CountingSolve(later=halve)
-        with mock.patch("cadgen._internal.fea.solve.solve_linear_static", solver), quiet():
-            result = fea.solve(self.step, Path(self._tmp.name) / "lower.glb", study=self.study)
-        refined = json.loads(result.sidecar.read_text(encoding="utf-8"))["refined"]
+        with mock.patch("cadgen._internal.fea.solve.solve_linear_static", solver):
+            result = solve(self.step, self.directory / "lower.glb", self.study)
+        refined = sidecar(result)["refined"]
         self.assertLess(refined["max_von_mises_MPa"], refined["from_max_von_mises_MPa"])
         self.assertAlmostEqual(result.summary["safety_factor"], 250.0 / result.summary["max_von_mises_MPa"], places=2)
         self.assertNotAlmostEqual(result.summary["safety_factor"], 250.0 / refined["from_max_von_mises_MPa"], places=2)
@@ -762,12 +655,9 @@ class Yielding(unittest.TestCase):
     def test_a_failed_finer_solve_keeps_the_first_result(self):
         from unittest import mock
 
-        from cadgen import fea
-
         solver = _CountingSolve(fail_after=1)
-        out = Path(self._tmp.name) / "failed-resolve.glb"
-        with mock.patch("cadgen._internal.fea.solve.solve_linear_static", solver), quiet():
-            result = fea.solve(self.step, out, study=self.study)
+        with mock.patch("cadgen._internal.fea.solve.solve_linear_static", solver):
+            result = solve(self.step, self.directory / "failed-resolve.glb", self.study)
         self.assertEqual(solver.calls, 2)
         self.assertEqual(result.mesh["size_mm"], self.SIZE)
         types = [finding["type"] for finding in result.findings]
@@ -775,11 +665,10 @@ class Yielding(unittest.TestCase):
         self.assertNotIn("mesh_not_converged", types)
         (why,) = [warning for warning in result.warnings if "finer" in warning]
         self.assertIn("the mesher gave up at this size", why)
-        sidecar = json.loads(result.sidecar.read_text(encoding="utf-8"))
-        self.assertIsNone(sidecar["refined"]["max_von_mises_MPa"])
+        self.assertIsNone(sidecar(result)["refined"]["max_von_mises_MPa"])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class FinerMeshSize(unittest.TestCase):
     """The automatic re-solve halves the element size unless that would pass the DOF budget."""
 
@@ -822,7 +711,7 @@ class FinerMeshSize(unittest.TestCase):
         self.assertIsNone(finer_mesh_size(2.0, 1_400_000))
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class MeshOrderGuard(unittest.TestCase):
     def _elements(self, second_order: bool):
         import netgen.occ as ngocc
@@ -833,23 +722,21 @@ class MeshOrderGuard(unittest.TestCase):
         return mesh.Elements3D().NumPy().copy()
 
     def test_first_order_mesh_is_refused(self):
-        from cadgen._internal.fea.mesh import _require_ten_node_tets
+        from cadgen._internal.fea.mesh import require_elements
 
         with self.assertRaises(RuntimeError):
-            _require_ten_node_tets(self._elements(second_order=False))
+            require_elements(self._elements(second_order=False), 2)
 
     def test_second_order_mesh_is_accepted(self):
-        from cadgen._internal.fea.mesh import _require_ten_node_tets
+        from cadgen._internal.fea.mesh import require_elements
 
-        _require_ten_node_tets(self._elements(second_order=True))
+        require_elements(self._elements(second_order=True), 2)
 
 
 class PeakFace(unittest.TestCase):
     """Which face the peak node sits on, from the boundary triangles alone."""
 
     def _peak_face(self, peak_node: int, fixed: set[int]):
-        from types import SimpleNamespace
-
         import numpy as np
 
         from cadgen._internal.fea.analyses.static import peak_face as _peak_face
@@ -880,8 +767,6 @@ class PeakFace(unittest.TestCase):
 
     def _near_miss(self, distance: float):
         """A peak node on free face f2, ``distance`` mm (elements of 1 mm) from fixed face f1's nodes."""
-        from types import SimpleNamespace
-
         import numpy as np
 
         from cadgen._internal.fea.analyses.static import peak_face as _peak_face
@@ -930,7 +815,7 @@ class DofWarning(unittest.TestCase):
         self.assertIn("a larger mesh.size_mm won't help much", text)
 
 
-@unittest.skipUnless(HAVE_FEA, "cadgen[fea] is not installed")
+@needs_fea
 class SmallFeatures(unittest.TestCase):
     """A part of small fillets meshes by its own size, not by a ten-times larger element size asked for."""
 
@@ -941,8 +826,7 @@ class SmallFeatures(unittest.TestCase):
         from cadgen._internal.fea.mesh import mesh_occurrence
         from cadgen.step_scene import read_scene
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        tmp = Path(cls._tmp.name)
+        tmp = class_directory(cls)
         plain, rounded = Box(60, 40, 10), fillet(Box(60, 40, 10).edges(), 0.3)
         meshes = []
         for name, shape in (("plain", plain), ("rounded", rounded)):
@@ -950,10 +834,6 @@ class SmallFeatures(unittest.TestCase):
             occurrence = next(iter(read_scene(tmp / f"{name}.step").leaves()))
             meshes.append(mesh_occurrence(occurrence, max_h=15.0))
         cls.plain, cls.rounded = meshes
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def test_a_fillet_does_not_multiply_the_mesh(self):
         # netgen's own defaults made 187k tets of this 60 x 40 x 10 plate at 15 mm; _MESHING makes about 64k.
@@ -968,20 +848,7 @@ class SmallFeatures(unittest.TestCase):
         self.assertLess(size, 1.0)
 
 
-def _vtu_von_mises(path: Path) -> "tuple[np.ndarray, np.ndarray]":
-    """The VTU's corner-node positions (N, 3) and von Mises (N,)."""
-    import numpy as np
-
-    vtu = path.read_text(encoding="utf-8")
-
-    def block(marker: str) -> np.ndarray:
-        start = vtu.index(">", vtu.index(marker) + len(marker)) + 1
-        return np.array(vtu[start:vtu.index("</DataArray>", start)].split(), dtype=float)
-
-    return block("<Points><DataArray").reshape(-1, 3), block('Name="von_mises"')
-
-
-@unittest.skipUnless(HAVE_FEA, "cadgen[fea] is not installed")
+@needs_fea
 class DefaultSizeAccuracy(unittest.TestCase):
     """Round and holed parts at the default element size, against closed forms, within 10%.
 
@@ -1001,42 +868,28 @@ class DefaultSizeAccuracy(unittest.TestCase):
     def setUpClass(cls):
         from build123d import Align, Box, Cylinder, Pos, Rot, export_step
 
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        tmp = Path(cls._tmp.name)
-
-        def ends(step: Path) -> tuple[str, str]:
-            planes = [f for f in fea.faces(step).faces if f.surface == "plane" and f.normal and abs(abs(f.normal[0]) - 1) < 1e-6]
-            return min(planes, key=lambda f: f.center_mm[0]).ref, max(planes, key=lambda f: f.center_mm[0]).ref
-
+        tmp = class_directory(cls)
         rod = tmp / "rod.step"
         export_step(Rot(0, 90, 0) * Cylinder(cls.ROD_RADIUS, cls.ROD_LENGTH, align=(Align.CENTER, Align.CENTER, Align.MIN)), str(rod))
         fixed, loaded = ends(rod)
-        with quiet():
-            cls.rod = fea.solve(rod, tmp / "rod.glb", vtu=True, study={
-                "material": "steel",
-                "fixtures": [{"faces": [fixed]}],
-                "loads": [{"faces": [loaded], "type": "force", "vector_N": [0, 0, -cls.ROD_FORCE]}],
-            })
+        cls.rod = solve(rod, tmp / "rod.glb", {
+            "material": "steel",
+            "fixtures": [{"faces": [fixed]}],
+            "loads": [{"faces": [loaded], "type": "force", "vector_N": [0, 0, -cls.ROD_FORCE]}],
+        }, vtu=True)
 
         plate = tmp / "plate.step"
         body = Box(cls.PLATE_LENGTH, cls.PLATE_WIDTH, cls.PLATE_THICKNESS, align=(Align.MIN, Align.CENTER, Align.CENTER))
         export_step(body - Pos(cls.PLATE_LENGTH / 2, 0, 0) * Cylinder(cls.HOLE / 2, 2 * cls.PLATE_THICKNESS), str(plate))
         fixed, loaded = ends(plate)
-        with quiet():
-            cls.plate = fea.solve(plate, tmp / "plate.glb", study={
-                "material": "steel",
-                "fixtures": [{"faces": [fixed]}],
-                "loads": [{"faces": [loaded], "type": "force", "vector_N": [cls.PULL, 0, 0]}],
-            })
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.plate = solve(plate, tmp / "plate.glb", {
+            "material": "steel",
+            "fixtures": [{"faces": [fixed]}],
+            "loads": [{"faces": [loaded], "type": "force", "vector_N": [cls.PULL, 0, 0]}],
+        })
 
     def test_the_rod_is_meshed_at_the_default_size(self):
-        self.assertIsNone(json.loads(self.rod.sidecar.read_text(encoding="utf-8"))["refined"])
+        self.assertIsNone(sidecar(self.rod)["refined"])
         self.assertGreater(self.rod.mesh["size_mm"], 0.8 * self.ROD_RADIUS)
 
     def test_the_round_rods_tip_deflection_matches_beam_theory(self):
@@ -1074,7 +927,7 @@ class DefaultSizeAccuracy(unittest.TestCase):
         self.assertAlmostEqual(self.plate.summary["max_von_mises_MPa"] / (kt * net), 1.0, delta=0.10)
 
 
-@unittest.skipUnless(HAVE_FEA, "cadgen[fea] is not installed")
+@needs_fea
 class FinerAtCurves(unittest.TestCase):
     """A part whose 0.5 mm fillets set its mesh: a smaller element size alone leaves it as it was."""
 
@@ -1085,17 +938,12 @@ class FinerAtCurves(unittest.TestCase):
         from cadgen._internal.fea.mesh import mesh_occurrence
         from cadgen.step_scene import read_scene
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        step = Path(cls._tmp.name) / "rounded.step"
+        step = class_directory(cls) / "rounded.step"
         export_step(fillet(Box(30, 20, 6).edges(), 0.5), str(step))
         occurrence = next(iter(read_scene(step).leaves()))
         cls.first = len(mesh_occurrence(occurrence, max_h=8.0).tets)
         cls.halved = len(mesh_occurrence(occurrence, max_h=4.0).tets)
         cls.refined = len(mesh_occurrence(occurrence, max_h=4.0, refine=2.0).tets)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def test_halving_the_element_size_alone_barely_changes_a_fillet_governed_mesh(self):
         self.assertLess(self.halved, 1.3 * self.first)
@@ -1104,7 +952,7 @@ class FinerAtCurves(unittest.TestCase):
         self.assertGreater(self.refined, 2.0 * self.first)
 
 
-@unittest.skipUnless(HAVE_FEA, "cadgen[fea] is not installed")
+@needs_fea
 class MultigridRetry(unittest.TestCase):
     """A multigrid attempt that diverges is stopped and tried again, not left to run to the iteration cap."""
 
@@ -1135,14 +983,14 @@ class MultigridRetry(unittest.TestCase):
     def _run(self, diverging: list[bool]):
         from unittest import mock
 
-        from cadgen._internal.fea.solve import _solve_system
+        from cadgen._internal.fea.operators import solve_spd
 
         K, f, free, locations, component = self._system()
         self.starts: list = []
         fakes = iter(self._fake(d, K, f, self.starts) for d in diverging)
         warnings: list[str] = []
         with mock.patch("pyamg.smoothed_aggregation_solver", side_effect=lambda *a, **k: next(fakes)):
-            _, how = _solve_system(K, f, free, locations, component, warnings)
+            _, how = solve_spd(K, f, free, locations, component, warnings)
         return how, warnings
 
     def test_a_diverging_attempt_is_retried(self):
@@ -1172,7 +1020,7 @@ class MultigridRetry(unittest.TestCase):
         self.assertIn("did not converge in 3 attempts", warnings[0])
 
 
-@unittest.skipUnless(HAVE_FEA, "cadgen[fea] is not installed")
+@needs_fea
 class PartProjection(unittest.TestCase):
     """One part's von Mises field: the L2 projection over its own elements, zero on the rest."""
 
@@ -1224,7 +1072,7 @@ def _write_link_bar(directory: Path) -> Path:
     return path
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class CurvedFacetLoads(unittest.TestCase):
     """A load on a curved face: the facet integrals need each quadrature point's place in its element, which
     scikit-fem's Newton search fails to find on a strongly curved quadratic tet."""
@@ -1285,14 +1133,11 @@ class CurvedFacetLoads(unittest.TestCase):
 
     def test_a_force_on_a_pin_hole_solves_and_balances(self):
         """Before the fix this solve raised "Newton iteration didn't converge" building the pin hole's facet basis."""
-        from cadgen import fea
-
-        with tempfile.TemporaryDirectory() as tmp, quiet():
-            step = _write_link_bar(Path(tmp))
+        with tempfile.TemporaryDirectory() as tmp:
             # Light enough to keep a safety factor over 3: one solve, at the size that met the stalling element.
             study = {"material": "aluminum-7075-t6", "fixtures": [{"faces": ["#o1.f7"]}],
                      "loads": [{"faces": ["#o1.f8"], "type": "force", "vector_N": [3600, 0, 0]}], "mesh": {"size_mm": 3.585}}
-            result = fea.solve(step, Path(tmp) / "bar.fea.glb", study=study)
+            result = solve(_write_link_bar(Path(tmp)), Path(tmp) / "bar.fea.glb", study)
         self.assertTrue(result.ok)
         self.assertEqual(result.summary["applied_force_N"], [3600.0, 0.0, 0.0])
         self.assertAlmostEqual(result.summary["reaction_force_N"][0], -3600.0, places=3)

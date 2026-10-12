@@ -41,15 +41,13 @@ if TYPE_CHECKING:
     from cadgen._internal.fea.mesh import VolumeMesh
 
 __all__ = [
-    "AIR_DOMAINS", "AirRegion", "FLUIDS", "Fluid", "Operators", "absorption_admittance", "assemble", "build_air",
+    "AirRegion", "FLUIDS", "Fluid", "Operators", "absorption_admittance", "assemble", "build_air",
     "cavity_modes", "face_mass", "frequency_error", "from_part_surface", "level_dB", "part_region", "probe_matrix",
     "solve_frequency", "system_at", "to_part_surface", "wall_normals",
 ]
 
 #: Fluids by name at 20 °C: density kg/m³, speed of sound m/s, and the reference pressure its levels are in (Pa).
 FLUIDS = {"air": (1.204, 343.2, 20e-6), "water": (998.2, 1482.0, 1e-6)}
-#: Where the air is: the part itself, closed inside the part, or around it out to an absorbing box.
-AIR_DOMAINS = ("part", "inside", "outside")
 #: The inside air's box stands off the part by this share of its diagonal (only the closed cavities are kept).
 STANDOFF = 0.1
 #: mm -> m: lengths, areas and volumes.
@@ -125,39 +123,11 @@ def part_region(space: "FemSpace", volume: "VolumeMesh", centre_mm) -> AirRegion
                      wetted=set(int(o) for o in np.unique(ordinals) if o))
 
 
-def _bounds(shape):
-    from OCP.Bnd import Bnd_Box
-    from OCP.BRepBndLib import BRepBndLib
-
-    box = Bnd_Box()
-    BRepBndLib.AddOptimal_s(shape, box, False, False)
-    xmin, ymin, zmin, xmax, ymax, zmax = box.Get()
-    return [xmin, ymin, zmin], [xmax, ymax, zmax]
-
-
-def _shapes_of(shape, kind):
-    from OCP.TopAbs import TopAbs_FACE, TopAbs_SOLID
-    from OCP.TopExp import TopExp
-    from OCP.TopTools import TopTools_IndexedMapOfShape
-
-    found = TopTools_IndexedMapOfShape()
-    TopExp.MapShapes_s(shape, TopAbs_SOLID if kind == "solid" else TopAbs_FACE, found)
-    return found
-
-
-def _properties(shape, volume: bool):
-    from OCP.BRepGProp import BRepGProp
-    from OCP.GProp import GProp_GProps
-
-    props = GProp_GProps()
-    (BRepGProp.VolumeProperties_s if volume else BRepGProp.SurfaceProperties_s)(shape, props)
-    centre = props.CentreOfMass()
-    return float(props.Mass()), (centre.X(), centre.Y(), centre.Z())
-
-
 def _on_box(face, low, high, tol: float) -> bool:
     """Whether a face lies flat on a side of the box."""
-    f_low, f_high = _bounds(face)
+    from cadgen._internal.fea.fluid_domain import bounds
+
+    f_low, f_high = bounds(face)
     for axis in range(3):
         if f_high[axis] - f_low[axis] <= tol and (abs(f_low[axis] - low[axis]) <= tol or abs(f_high[axis] - high[axis]) <= tol):
             return True
@@ -170,76 +140,33 @@ def build_air(shape, kind: str, refs: dict[int, str], *, pad_mm: float, wall_mm:
     faces, up to ``far_mm`` away from them. ``refs`` names the part's faces by cadgen ordinal. ValueError
     for a part with no air closed inside it."""
     import numpy as np
-    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
-    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
-    from OCP.gp import gp_Pnt
 
-    from cadgen._internal.entity_ordinals import entity_map
     from cadgen._internal.fea import fluid_domain
     from cadgen._internal.fea.femspace import FemSpace
 
     started = time.perf_counter()
-    low, high = _bounds(shape)
+    low, high = fluid_domain.bounds(shape)
     diagonal = math.dist(low, high)
     tol = 1e-6 * max(diagonal, 1.0)
     reach = STANDOFF * diagonal if kind == "inside" else pad_mm
     box_low = [c - reach for c in low]
     box_high = [c + reach for c in high]
-    cut = BRepAlgoAPI_Cut(BRepPrimAPI_MakeBox(gp_Pnt(*box_low), gp_Pnt(*box_high)).Shape(), shape)
-    if not cut.IsDone():
-        raise RuntimeError("the boolean that makes the air from the part failed")
-    solids_map = _shapes_of(cut.Shape(), "solid")
-    solids = [solids_map.FindKey(i) for i in range(1, solids_map.Extent() + 1)]
+    cut = fluid_domain.box_cut(box_low, box_high, shape, "the boolean that makes the air from the part failed")
 
     def touches_box(solid) -> bool:
-        faces = _shapes_of(solid, "face")
-        return any(_on_box(faces.FindKey(i), box_low, box_high, tol) for i in range(1, faces.Extent() + 1))
+        return any(_on_box(face, box_low, box_high, tol) for face in fluid_domain.faces_of(solid))
 
-    keep = [s for s in solids if touches_box(s) == (kind == "outside")]
+    keep = [s for s in fluid_domain.solids_of(cut.Shape()) if touches_box(s) == (kind == "outside")]
     if not keep:
         if kind == "inside":
             raise ValueError("domain: the part closes no air inside it (no space walled in on every side); use "
                              "\"domain\": \"part\" when the part's own solid is the air, or \"outside\" for the air around it")
         raise RuntimeError("the boolean that makes the air around the part left no air")
-    if len(keep) == 1:
-        air = keep[0]
-    else:
-        from OCP.BRep import BRep_Builder
-        from OCP.TopoDS import TopoDS_Compound
-
-        air = TopoDS_Compound()
-        builder = BRep_Builder()
-        builder.MakeCompound(air)
-        for solid in keep:
-            builder.Add(air, solid)
-
+    air = fluid_domain.compound(keep)
     # Each face of the air: an image of one of the part's faces (its ordinal), or a box side.
-    part_faces = entity_map(shape, "face")
-    image_of = []
-    for ordinal in range(1, part_faces.Extent() + 1):
-        face = part_faces.FindKey(ordinal)
-        modified = list(cut.Modified(face))
-        if modified:
-            image_of += [(image, ordinal) for image in modified]
-        elif not cut.IsDeleted(face):
-            image_of.append((face, ordinal))
-    air_faces = _shapes_of(air, "face")
-    wall_of: dict[int, int] = {}
-    for image, ordinal in image_of:
-        index = air_faces.FindIndex(image)
-        if index > 0:
-            wall_of[index] = ordinal
-    faces = []
-    for index in range(1, air_faces.Extent() + 1):
-        face = air_faces.FindKey(index)
-        area, centre = _properties(face, False)
-        if index in wall_of:
-            faces.append(fluid_domain.FluidFace(index, "wall", area, 0.0, centre, wall_of[index], refs.get(wall_of[index])))
-        elif kind == "outside" and _on_box(face, box_low, box_high, tol):
-            faces.append(fluid_domain.FluidFace(index, "side", area, 0.0, centre))
-        else:
-            faces.append(fluid_domain.FluidFace(index, "wall", area, 0.0, centre))
-    volume_mm3 = sum(_properties(solid, True)[0] for solid in keep)
+    faces = fluid_domain.classify_faces(
+        air, cut, shape, refs, lambda face: ("side", None) if kind == "outside" and _on_box(face, box_low, box_high, tol) else None)
+    volume_mm3 = sum(fluid_domain.volume_of(solid) for solid in keep)
     domain = fluid_domain.FluidDomain(
         shape=air, kind="external" if kind == "outside" else "internal", faces=faces, volume_mm3=volume_mm3,
         part_box=(tuple(low), tuple(high)), box=(tuple(box_low), tuple(box_high)), length_mm=max(h - l for l, h in zip(low, high)),
@@ -504,6 +431,17 @@ def frequency_error(elements_per_wavelength: float, order: int = 2) -> float:
 # -- onto the part ----------------------------------------------------------------------------------
 
 
+def _wetted_nodes(region: AirRegion, part_space, part_volume):
+    """Each wetted part face's air nodes and part nodes (scalar DOF), where it has both."""
+    import numpy as np
+
+    for ordinal in sorted(region.wetted):
+        air = np.unique(region.space.boundary_quadratic[region.row_ordinal == ordinal])
+        part = np.unique(part_space.boundary_quadratic[part_volume.boundary_ordinal == ordinal])
+        if len(air) and len(part):
+            yield air, part
+
+
 def to_part_surface(region: AirRegion, part_space, part_volume, values: "np.ndarray") -> tuple["np.ndarray", "np.ndarray"]:
     """Air nodal ``values`` carried onto the part's surface nodes, face by face (nearest air node on the
     same face); (values on the part's scalar DOF, the part nodes the air wets). A dry face reads 0."""
@@ -511,15 +449,9 @@ def to_part_surface(region: AirRegion, part_space, part_volume, values: "np.ndar
     from scipy.spatial import cKDTree
 
     out = np.zeros(part_space.scalar_count, dtype=np.asarray(values).dtype)
-    air_boundary = region.space.boundary_quadratic
-    locations = region.space.dof_locations
     wet = []
-    for ordinal in sorted(region.wetted):
-        source = np.unique(air_boundary[region.row_ordinal == ordinal])
-        target = np.unique(part_space.boundary_quadratic[part_volume.boundary_ordinal == ordinal])
-        if len(source) == 0 or len(target) == 0:
-            continue
-        _, nearest = cKDTree(locations[source]).query(part_space.dof_locations[target])
+    for source, target in _wetted_nodes(region, part_space, part_volume):
+        _, nearest = cKDTree(region.space.dof_locations[source]).query(part_space.dof_locations[target])
         out[target] = np.asarray(values)[source[nearest]]
         wet.append(target)
     return out, (np.unique(np.concatenate(wet)) if wet else np.zeros(0, dtype=np.int64))
@@ -531,12 +463,7 @@ def from_part_surface(region: AirRegion, part_space, part_volume, vectors: "np.n
     from scipy.spatial import cKDTree
 
     out = np.zeros((region.space.scalar_count, 3), dtype=np.asarray(vectors).dtype)
-    air_boundary = region.space.boundary_quadratic
-    for ordinal in sorted(region.wetted):
-        target = np.unique(air_boundary[region.row_ordinal == ordinal])
-        source = np.unique(part_space.boundary_quadratic[part_volume.boundary_ordinal == ordinal])
-        if len(source) == 0 or len(target) == 0:
-            continue
+    for target, source in _wetted_nodes(region, part_space, part_volume):
         _, nearest = cKDTree(part_space.dof_locations[source]).query(region.space.dof_locations[target])
         out[target] = np.asarray(vectors)[source[nearest]]
     return out

@@ -667,7 +667,6 @@ def interpolate(stations: Sequence[float], values: "np.ndarray", s: "np.ndarray"
     return out.reshape((len(s),) + values.shape[1:])
 
 
-
 # -- the rotor line from the CAD -------------------------------------------------------------------------
 
 #: A run of sections is a disc when it is this many times as stiff-wide (the radius of the solid circle with its
@@ -952,9 +951,7 @@ def build_line(parts, frame: Frame, extent: tuple[float, float], radius: float, 
             elements_out[k] = Element(slabs[k].length, EI, kGA, 0.0, 0.0, 0.0)
     rotor_nodes = tuple(nodes)
     near = lambda s: min(range(len(rotor_nodes)), key=lambda i: abs(rotor_nodes[i] - s))  # noqa: E731
-    discs = [Disc(near(d.centre), d.mass, d.diametral, d.polar) for d in found] if lumped else []
-    discs += [Disc(near(d.centre), d.mass, d.diametral, d.polar) for d in added]
+    discs = [Disc(near(d.centre), d.mass, d.diametral, d.polar) for d in [*(found if lumped else []), *added]]
     if log:
         log(f"rotordynamics: rotor line of {len(elements_out)} elements, {len(found)} disc{'s' if len(found) != 1 else ''} found")
-    line = Line(Rotor(rotor_nodes, tuple(elements_out), tuple(discs)), frame, [*found, *added], slabs, lumped)
-    return line
+    return Line(Rotor(rotor_nodes, tuple(elements_out), tuple(discs)), frame, [*found, *added], slabs, lumped)

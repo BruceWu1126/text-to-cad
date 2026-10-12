@@ -138,10 +138,6 @@ class ThermalSystem:
         return np.concatenate(dofs).astype(np.int64), np.concatenate(values)
 
 
-def _materials(materials) -> list:
-    return list(materials) if isinstance(materials, (list, tuple)) else [materials]
-
-
 def assemble(
     space: "FemSpace",
     materials: "Material | Sequence[Material]",
@@ -275,7 +271,8 @@ def heat_flux(space: "FemSpace", materials: "Material | Sequence[Material]", T: 
 
     from cadgen._internal.fea import operators
 
-    k = operators.domain_values(space, [m.conductivity for m in _materials(materials)], space.scalar)
+    materials = materials if isinstance(materials, (list, tuple)) else [materials]
+    k = operators.domain_values(space, [m.conductivity for m in materials], space.scalar)
     grad = space.scalar.interpolate(T).grad                          # (3, elements, quadrature)
     magnitude = np.sqrt((grad ** 2).sum(axis=0)) * k
     return np.maximum(space.scalar.project(magnitude), 0.0) * 1e3
@@ -342,8 +339,6 @@ class _RadiatingStepper(_Stepper):
         self.newton = 0
 
     def step(self, T: "np.ndarray", t: float, dt: float) -> "np.ndarray":
-        import numpy as np
-
         from cadgen._internal.fea import radiation
 
         t1 = t + dt

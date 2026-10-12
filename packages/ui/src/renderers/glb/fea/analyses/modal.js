@@ -1,14 +1,10 @@
 /**
- * Vibration: the part's natural frequencies and the shape it rings in at each. Its result is a series
- * of modes (`Mode 2 · 118 Hz`), each mode's shape scaled to a largest motion of 1 mm, mode 1's also
- * the displacement baked into the file. Its verdict judges frequencies (a mode that must stay above a
- * minimum, a band no mode may sit in), which no load control moves. What you see opens on the mode
- * picker and the deformation; its setup says where it is held, or that nothing holds it (free in
- * space, its rigid-body motions left out), and what it is made of; its routine is Vibrate.
+ * Vibration: the part's natural frequencies and the shape it rings in at each (`Mode 2 · 118 Hz`), each
+ * shape scaled to a largest motion of 1 mm, mode 1's also the displacement baked into the file. A part
+ * nothing holds is free in space, its rigid-body motions left out.
  */
-import { seriesControls } from "../controls.js";
 import { heldRows, madeOfRows, wholeRefs } from "../setup.js";
-import { routineOf } from "./stub.js";
+import { planned, routineOf } from "./stub.js";
 
 /** Vibrate: a one-second loop of the chosen mode's shape, out one way, through rest and back the other. */
 export const VIBRATE = routineOf("Vibrate", "vibrate");
@@ -23,20 +19,11 @@ export function freeRows(result) {
   }] }];
 }
 
-export default Object.freeze({
-  name: "modal",
-  tier: 1,
-  word: "Vibration",
-  noun: "this shake",
-  family: null,
-  estimate: false,
-  scalesWithLoad: false,
-  checks: Object.freeze(["frequency"]),
-  checkLabels: Object.freeze({}),
-  defaultControls: seriesControls,
-  setupGroups: Object.freeze([heldRows, freeRows, madeOfRows]),
+export default planned({
+  name: "modal", word: "Vibration", noun: "this shake",
+  checks: ["frequency"],
+  setupGroups: [heldRows, freeRows, madeOfRows],
   routine: () => VIBRATE,
-  markers: Object.freeze(["fixture"]),
-  displayTitle: "Fixtures",
-  limitWord: "",
+  markers: ["fixture"], displayTitle: "Fixtures",
 });
+

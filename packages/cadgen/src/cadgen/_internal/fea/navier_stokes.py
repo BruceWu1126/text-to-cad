@@ -128,16 +128,10 @@ def developed_profile(locations: "np.ndarray", rows: "np.ndarray", axis: int) ->
     pipe), so that is solved on the opening itself with quadratic triangles, each node taking its
     own value. Nodes on the opening's edge are 0.
     """
-    import numpy as np
-    from skfem import Basis, BilinearForm, ElementTriP2, LinearForm, MeshTri, asm, condense, solve
+    from skfem import Basis, BilinearForm, ElementTriP2, LinearForm, asm, condense, solve
     from skfem.helpers import dot, grad
 
-    corners = np.unique(rows[:, :3])
-    local = {int(n): k for k, n in enumerate(corners)}
-    keep = [a for a in range(3) if a != axis]
-    points = np.ascontiguousarray(locations[corners][:, keep].T)
-    triangles = np.vectorize(local.get)(rows[:, :3]).astype(np.int64)
-    mesh = MeshTri(points, np.ascontiguousarray(triangles.T))
+    mesh, local, triangles = opening_mesh(locations, rows, axis)
     basis = Basis(mesh, ElementTriP2())
 
     @BilinearForm
@@ -156,19 +150,42 @@ def developed_profile(locations: "np.ndarray", rows: "np.ndarray", axis: int) ->
     w = w / mean
     out = {int(n): float(w[basis.nodal_dofs[0][k]]) for n, k in local.items()}
     # Each mid-edge node: the quadratic edge DOF of the edge between the two corners it sits between.
+    for node, facet, _ in opening_mid_nodes(locations, rows, triangles, mesh, out):
+        out[node] = float(w[basis.facet_dofs[0][facet]])
+    return out
+
+
+def opening_mesh(locations: "np.ndarray", rows: "np.ndarray", axis: int):
+    """An opening's boundary triangles ``rows`` (scalar node ids, flat on a plane normal to ``axis``) as a skfem
+    triangle mesh of their corners: (mesh, scalar node -> mesh vertex, the triangles in mesh vertices)."""
+    import numpy as np
+    from skfem import MeshTri
+
+    corners = np.unique(rows[:, :3])
+    local = {int(n): k for k, n in enumerate(corners)}
+    keep = [a for a in range(3) if a != axis]
+    points = np.ascontiguousarray(locations[corners][:, keep].T)
+    triangles = np.vectorize(local.get)(rows[:, :3]).astype(np.int64)
+    return MeshTri(points, np.ascontiguousarray(triangles.T)), local, triangles
+
+
+def opening_mid_nodes(locations, rows, triangles, mesh, done):
+    """Each mid-edge node of ``rows`` not in ``done`` (read as it goes, so the caller fills it), with the skfem
+    facet of the edge it sits halfway along and that edge's two mesh vertices (sorted)."""
+    import numpy as np
+
     facet_of = {tuple(pair): k for k, pair in enumerate(np.sort(mesh.facets, axis=0).T.tolist())}
     for row, tri in zip(rows, triangles):
         for m in range(3, 6):
             node = int(row[m])
-            if node in out:
+            if node in done:
                 continue
             # The mid node sits halfway between two of the corners: find which pair by place.
             here = locations[node]
-            best = min(((a, b) for a, b in ((0, 1), (1, 2), (0, 2))),
+            a, b = min(((0, 1), (1, 2), (0, 2)),
                        key=lambda e: float(np.linalg.norm(0.5 * (locations[row[e[0]]] + locations[row[e[1]]]) - here)))
-            pair = tuple(sorted((int(tri[best[0]]), int(tri[best[1]]))))
-            out[node] = float(w[basis.facet_dofs[0][facet_of[pair]]])
-    return out
+            pair = tuple(sorted((int(tri[a]), int(tri[b]))))
+            yield node, facet_of[pair], pair
 
 
 def unreached_pressures(B, velocity_held: "np.ndarray") -> "np.ndarray":
@@ -375,15 +392,12 @@ class _System:
         return jacobian, jacobian @ u
 
     def reduced_rhs(self, K, rhs):
-        x = self._lifted()
-        return rhs[self.I] - K[self.I][:, self.D] @ self.xD, x
-
-    def _lifted(self):
+        """The free rows' right-hand side with the held values moved over, and the state holding them."""
         import numpy as np
 
         x = np.zeros(self.n)
         x[self.D] = self.xD
-        return x
+        return rhs[self.I] - K[self.I][:, self.D] @ self.xD, x
 
     def residual(self, K, x, rhs=None) -> "np.ndarray":
         rhs = self.f if rhs is None else rhs
@@ -437,11 +451,8 @@ class _System:
             x, info = minres(K_II, b, M=M, rtol=KRYLOV_TOL, maxiter=MAX_KRYLOV)
         else:
             x, info = gmres(K_II, b, M=M, rtol=KRYLOV_TOL, restart=RESTART, maxiter=MAX_KRYLOV // RESTART + 1)
-        if info != 0 or not np.all(np.isfinite(x)):
-            if not self.warnings:
-                self.warnings.append("the iterative flow solver stalled, so the direct solver finished the step")
-            return None
-        if np.linalg.norm(K_II @ x - b) > 1e-6 * max(np.linalg.norm(b), 1e-300):
+        if (info != 0 or not np.all(np.isfinite(x))
+                or np.linalg.norm(K_II @ x - b) > 1e-6 * max(np.linalg.norm(b), 1e-300)):
             if not self.warnings:
                 self.warnings.append("the iterative flow solver stalled, so the direct solver finished the step")
             return None

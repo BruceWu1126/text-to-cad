@@ -1,19 +1,14 @@
 /**
- * Cracks (lite): a crack the study describes, cut into the part and opened, judged by linear-elastic
- * fracture mechanics, Tier 3. Its verdict judges the crack's largest stress intensity K against the
- * material's toughness ("K 18 MPa√m at the deepest point, toughness 29 MPa√m"), which grows with the
- * load, so it has the load control and the Load ramp; with crack growth, the cycles until the crack
- * grows to its critical size against the cycles needed. Its takeaway leads with "Lite · ", and
- * Details lists its limits (LEFM only, small-scale yielding, no ductile tearing). What you see is
- * static's: the field (stress, displacement, which shows the crack opening) and the deformation. Its
- * setup is static's held at and pushed, then the crack in plain words ("2 mm edge crack on face 4",
- * its K the hint, chosen with the face it opens from tinted), then the material. It draws dots along
- * the crack's front.
+ * Cracks (lite), Tier 3: a crack the study describes, cut into the part and opened, judged by linear-elastic
+ * fracture mechanics: its largest stress intensity K against the material's toughness, which grows with the
+ * load (so it has the load control and the Load ramp), and with crack growth the cycles until it reaches its
+ * critical size.
  */
 import { fieldAndDeformation } from "../controls.js";
 import { plainNumber } from "../numbers.js";
 import { faceLabel, heldRows, madeOfRows, pushedRows, wholeRefs } from "../setup.js";
 import { LOAD_RAMP } from "./static.js";
+import { planned } from "./stub.js";
 
 const KINDS = Object.freeze(["edge", "through", "surface", "embedded"]);
 const finite = (value) => (Number.isFinite(Number(value)) && value !== null && value !== "" ? Number(value) : null);
@@ -81,22 +76,15 @@ export function crackRows(result) {
 /** Its setup: where it is held, what pushes it, the crack, what it is made of. */
 export const FRACTURE_SETUP = Object.freeze([heldRows, pushedRows, crackRows, madeOfRows]);
 
-export default Object.freeze({
-  name: "fracture",
-  tier: 3,
-  word: "Cracks",
-  noun: "this load",
-  family: null,
-  estimate: false,
+export default planned({
+  name: "fracture", tier: 3, word: "Cracks",
   // K is linear in the load: the load control moves the fracture check (a crack life does not move).
   scalesWithLoad: true,
-  checks: Object.freeze(["fracture", "crack_life", "stress", "displacement"]),
-  checkLabels: Object.freeze({}),
+  checks: ["fracture", "crack_life", "stress", "displacement"],
   defaultControls: fieldAndDeformation,
   setupGroups: FRACTURE_SETUP,
   routine: () => LOAD_RAMP,
-  markers: Object.freeze(["load", "fixture", "body_load", "crack_front"]),
-  displayTitle: "Loads, fixtures and the crack",
-  // A Tier 3 analysis's short limit word, which leads its verdict's takeaway.
+  markers: ["load", "fixture", "body_load", "crack_front"], displayTitle: "Loads, fixtures and the crack",
   limitWord: "Lite",
 });
+

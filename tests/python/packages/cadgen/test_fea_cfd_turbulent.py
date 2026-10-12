@@ -12,26 +12,12 @@ directory.
 
 from __future__ import annotations
 
-import io
-import json
-import math
-import struct
-import tempfile
 import unittest
-from contextlib import redirect_stderr
-from pathlib import Path
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
-
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
+from tests.python.support.fea_fixtures import (
+    assert_tracers_cross, box_duct_step, class_directory, glb_attribute_names, glb_extras, needs_fea, sidecar, solve,
+    tube_step, value_error,
+)
 
 R, WALL, LENGTH = 5.0, 1.0, 15.0
 RHO, MU = 998.2, 1.002e-3
@@ -49,32 +35,9 @@ def pipe(reynolds: float, **changes) -> dict:
                      "outlets": [{"opening": "x_max", "pressure_Pa": 0}]}, **changes}
 
 
-def glb_extras(path: Path) -> tuple[dict, list[str]]:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    gltf = json.loads(raw[20:20 + length])
-    return gltf["meshes"][0]["extras"], list(gltf["meshes"][0]["primitives"][0]["attributes"])
-
-
-def tube_step(directory: Path) -> Path:
-    from build123d import Align, Cylinder, Rotation, export_step
-
-    step = directory / "tube.step"
-    along = (Align.CENTER, Align.CENTER, Align.MIN)
-    export_step(Rotation(0, 90, 0) * (Cylinder(R + WALL, LENGTH, align=along) - Cylinder(R, LENGTH, align=along)), str(step))
-    return step
-
-
 def friction(summary: dict, reynolds: float) -> float:
     """Darcy's friction factor of the solved pressure drop."""
     return summary["pressure_drop_Pa"] * (2 * R / LENGTH) / (0.5 * RHO * speed_for(reynolds) ** 2)
-
-
-def solve(step: Path, out: Path, study: dict):
-    from cadgen import fea
-
-    with redirect_stderr(io.StringIO()):
-        return fea.solve(step, out, study=study)
 
 
 class StudyFile(unittest.TestCase):
@@ -112,27 +75,15 @@ class StudyFile(unittest.TestCase):
             ({"view": {"checks": [{"kind": "stress"}]}}, "add map_to_structure"),
             ({"flow": None}, "study.flow"),
         ):
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                self.parse(**changes)
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, value_error(self, self.parse, **changes))
 
-    def test_it_is_registered_built_and_stdlib_only_at_import(self):
-        import subprocess
-        import sys
-
-        from cadgen._internal.fea.analyses import REGISTRY, get_analysis
+    def test_it_is_registered_and_built(self):
+        from cadgen._internal.fea.analyses import get_analysis
 
         turbulent = get_analysis("cfd_turbulent")
-        self.assertFalse(REGISTRY["cfd_turbulent"].planned)
         self.assertEqual((turbulent.tier, turbulent.word, turbulent.limits), (3, "Turbulent flow", (LIMIT_TEXT,)))
         self.assertEqual(turbulent.ladder, ("fluid_coarsen", "continuation", "iterative"))
-        code = (
-            "import sys; sys.path.insert(0, 'packages/cadgen/src');"
-            "import cadgen._internal.fea.analyses.cfd_turbulent;"
-            "print(','.join(m for m in ('numpy', 'scipy', 'skfem', 'netgen', 'OCP') if m in sys.modules))"
-        )
-        root = Path(__file__).resolve().parents[4]
-        self.assertEqual(subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True, text=True, check=True).stdout.strip(), "")
 
     def test_the_laminar_warning_points_here_and_colebrook_is_the_moody_chart(self):
         from cadgen._internal.fea.analyses.cfd import reynolds_sentence
@@ -146,7 +97,7 @@ class StudyFile(unittest.TestCase):
         self.assertAlmostEqual(colebrook(1e5), 0.0180, delta=0.0002)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class MoodyChart(unittest.TestCase):
     """Fully developed water in the 10 mm pipe at Re 10,000 and Re 50,000: Colebrook's friction within 10 %."""
 
@@ -154,27 +105,15 @@ class MoodyChart(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        step = tube_step(directory)
+        directory = class_directory(cls)
+        step = tube_step(directory, R, WALL, LENGTH)
         study = pipe(cls.LOW, view={"checks": [{"kind": "pressure_drop", "limit_Pa": 25}, {"kind": "velocity", "limit_m_s": 5}]})
         cls.low = solve(step, directory / "low.glb", study)
         cls.high = solve(step, directory / "high.glb", pipe(cls.HIGH))
-        cls.extras, cls.attributes = glb_extras(cls.low.glb)
-        cls.sidecar = json.loads(cls.low.sidecar.read_text(encoding="utf-8"))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.extras, cls.attributes = glb_extras(cls.low.glb), glb_attribute_names(cls.low.glb)
 
     def test_its_tracers_cross_from_inlet_to_outlet(self):
-        """The viewer's Flow routine: particles let go at the inlet (x = 0), carried along the duct to its outlet."""
-        motion = self.extras["analysis"]["motion"]
-        self.assertEqual(motion["kind"], "tracers")
-        starts = [path[0] for path in motion["paths"]]
-        self.assertLess(max(starts), 0.05 * LENGTH)
-        across = [path[-3] for path in motion["paths"] if path[-3] > 0.8 * LENGTH]
-        self.assertGreater(len(across), len(motion["paths"]) / 2)
+        assert_tracers_cross(self, self.low.glb, LENGTH)
 
     def test_the_pressure_drop_follows_colebrook(self):
         from cadgen._internal.fea.turbulence import colebrook
@@ -201,7 +140,7 @@ class MoodyChart(unittest.TestCase):
         self.assertGreaterEqual(turbulence["wall_yplus"]["min"], 29.9)
         self.assertEqual(self.extras["analysis"]["type"], "cfd_turbulent")
         self.assertEqual(self.extras["analysis"]["limits"], [LIMIT_TEXT])
-        self.assertEqual(self.sidecar["limits"], [LIMIT_TEXT])
+        self.assertEqual(sidecar(self.low)["limits"], [LIMIT_TEXT])
         self.assertEqual(self.extras["analysis"]["warnings"], [])
         self.assertNotIn("reynolds", self.extras["analysis"])
 
@@ -228,22 +167,17 @@ class MoodyChart(unittest.TestCase):
         self.assertIn("(cfd_turbulent)", lines)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Ladder(unittest.TestCase):
     """A tiny time target: the pipe at Re 20,000 on a coarser mesh still completes, with its steps said,
     and still lands within a widened 15 % of Colebrook."""
 
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
+        directory = class_directory(cls)
         study = pipe(20000, mesh={"size_mm": 1.25}, fit={"seconds": 0.5})
-        cls.result = solve(tube_step(directory), directory / "fit.glb", study)
-        cls.extras, _ = glb_extras(cls.result.glb)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.result = solve(tube_step(directory, R, WALL, LENGTH), directory / "fit.glb", study)
+        cls.extras = glb_extras(cls.result.glb)
 
     def test_it_completes_and_says_each_step(self):
         from cadgen._internal.fea.turbulence import colebrook
@@ -261,25 +195,13 @@ class Ladder(unittest.TestCase):
         self.assertLess(abs(friction(self.result.summary, 20000) - expected) / expected, 0.15)
 
 
-def box_duct_step(directory: Path, side: float, length: float, wall: float = 1.0) -> Path:
-    """A square passage through a block along x: sharp corners where the inlet meets the walls."""
-    from build123d import Align, Box, export_step
-
-    step = directory / "duct.step"
-    along = (Align.MIN, Align.CENTER, Align.CENTER)
-    export_step(Box(length, side + 2 * wall, side + 2 * wall, align=along) - Box(length, side, side, align=along), str(step))
-    return step
-
-
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class BoxDuct(unittest.TestCase):
     """A square duct (sharp corners at its inlet) solves turbulent and loses pressure along it."""
 
     def test_a_square_duct_solves(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            directory = Path(tmp)
-            result = solve(box_duct_step(directory, 6.0, 12.0), directory / "duct.glb",
-                           {**pipe(10000), "mesh": {"size_mm": 1.5}})
+        directory = class_directory(type(self))
+        result = solve(box_duct_step(directory, 6.0, 12.0), directory / "duct.glb", {**pipe(10000), "mesh": {"size_mm": 1.5}})
         self.assertTrue(result.ok)
         self.assertGreater(result.summary["pressure_drop_Pa"], 0)
 

@@ -1,27 +1,15 @@
 /**
- * Bolted joint (lite): bolts with a preload clamping parts that touch through frictional contact,
- * Tier 3. Its series opens on the preload ("Preload", 0 %) and follows the load steps ("60 % load"),
- * on the last load solved. Its verdict judges each bolt's force after loading, whether the clamped
- * faces open, and whether they slip (friction against the sideways force); none moves with a load
- * control (the preload is there before any load, so nothing is proportional to it). Its takeaway leads
- * with "Lite · ", and Details lists its limits. What you see opens on the load-step scrubber, the
- * field (stress, displacement, contact pressure) and the deformation; Play runs the steps. Its setup is
- * static's held at and pushed, then one row per bolt in plain words ("M6 bolt, 5 kN preload, clamps
- * plate and bracket", its force after loading its hint), any other contact pair, the rigid floor and
- * the material.
+ * Bolted joint (lite), Tier 3: bolts with a preload clamping parts that touch through frictional contact.
+ * Its series opens on the preload ("Preload", 0 %) and follows the load steps ("60 % load"). It judges each
+ * bolt's force after loading, whether the clamped faces open and whether they slip; the preload is there
+ * before any load, so nothing is proportional to it and no load control moves them.
  */
 import { forceWords } from "../checkKinds.js";
-import { seriesControls } from "../controls.js";
-import { heldRows, madeOfRows, pushedRows, rigidFloorRows, spaced } from "../setup.js";
-import { contactRows } from "./contact.js";
-import { stopSentence } from "./nonlinear.js";
+import { group, heldRows, madeOfRows, pushedRows, rigidFloorRows, spaced } from "../setup.js";
+import { contactRows, list, outcomeRefs } from "./contact.js";
+import { stopsCaption } from "./nonlinear.js";
 import { boltMotion, poseRoutine } from "../poses.js";
-import { routineOf } from "./stub.js";
-
-/** Play: the preload, then the load steps one after another, interpolated (GlbRenderer plays it). */
-export const PLAY = routineOf("Play", "play");
-
-const list = (value) => (Array.isArray(value) ? value.filter((entry) => entry && typeof entry === "object") : []);
+import { planned } from "./stub.js";
 
 /** A bolt as its row says it: "M6 bolt, 5 kN preload, clamps plate and bracket". */
 export function boltWords(bolt) {
@@ -50,39 +38,29 @@ export function boltRows(result) {
     const label = boltWords(bolt);
     if (!label) return null;
     const outcome = outcomes[index];
-    const refs = Array.isArray(outcome?.refs) ? outcome.refs.filter((ref) => typeof ref === "string" && ref) : [];
+    const refs = outcomeRefs(outcome);
     const hint = outcomeWords(outcome);
     return { id: `bolt:${index}`, label, detail: "", wrap: true, ...(hint ? { hint } : {}),
       ...(refs.length ? { refs, summary: `Bolt: ${label}` } : {}) };
   }).filter(Boolean);
-  return rows.length ? [{ id: "bolts", label: "Bolted", detail: "", glyph: "load", children: rows }] : [];
+  return group("bolts", "Bolted", "load", rows);
 }
 
 /** Its setup: where it is held, what pushes it, its bolts, any other contact, the rigid floor, what it is made of. */
 export const BOLT_SETUP = Object.freeze([heldRows, pushedRows, boltRows, contactRows, rigidFloorRows, madeOfRows]);
 
-export default Object.freeze({
-  name: "bolt",
-  tier: 3,
-  word: "Bolted joint",
-  noun: "this load",
-  family: null,
-  estimate: false,
-  scalesWithLoad: false,
+export default planned({
+  name: "bolt", tier: 3, word: "Bolted joint",
   // Not linear in the load: every check is judged as solved, its takeaway its own sentence, never "OK up to 18× this load".
   scaling: "none",
-  checks: Object.freeze(["bolt_load", "joint_separation", "joint_slip", "stress", "displacement", "contact_pressure"]),
-  checkLabels: Object.freeze({}),
+  checks: ["bolt_load", "joint_separation", "joint_slip", "stress", "displacement", "contact_pressure"],
   // The load-step scrubber (from the preload), the field, the deformation.
-  defaultControls: seriesControls,
   setupGroups: BOLT_SETUP,
   // Tighten and load: the bolt tightened (ramped), then the service load's steps, on a Load row (`../poses.js`).
   motion: boltMotion,
   routine: (result) => poseRoutine(boltMotion(result)),
-  markers: Object.freeze(["load", "fixture", "rigid_plane"]),
-  displayTitle: "Loads and fixtures",
-  // A Tier 3 analysis's short limit word, which leads its verdict's takeaway.
+  markers: ["load", "fixture", "rigid_plane"],
   limitWord: "Lite",
-  // A load path that could not be followed to the full load leads the takeaway: "Stops at about 20 % of the load · ".
-  stopCaption: (result) => stopSentence(result, "Stops"),
+  stopCaption: stopsCaption,
 });
+

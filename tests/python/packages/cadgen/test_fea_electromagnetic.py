@@ -16,29 +16,15 @@ Each STEP is a build123d solid or compound in a temporary directory; meshes are 
 
 from __future__ import annotations
 
-import io
-import json
 import math
 import re
-import struct
-import tempfile
 import unittest
-from contextlib import redirect_stderr
 from pathlib import Path
 
 from tests.python.support import markdown
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
+from tests.python.support.fea_fixtures import box_step, class_directory, glb_extras, glb_rows, needs_fea, sidecar, solve, value_error
 
 from cadgen._internal.fea.materials import MATERIALS, NONE_REASONS, lookup_material  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 REFERENCE = Path(__file__).resolve().parents[4] / "skills" / "fea" / "references" / "materials.md"
 EPS0_F_M = 8.8541878188e-12
@@ -51,23 +37,6 @@ def parse(document: dict):
     return parse_study({"analysis": "electromagnetic", "material": "aluminum-6061-t6", **document})
 
 
-def glb(path: Path, names: tuple[str, ...]) -> tuple[dict, dict]:
-    """A result GLB's extras and the named vertex attributes as lists of rows."""
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    gltf = json.loads(raw[20:20 + length])
-    binary = raw[20 + length + 8:]
-    primitive = gltf["meshes"][0]["primitives"][0]
-    out = {}
-    for name in names:
-        accessor = gltf["accessors"][primitive["attributes"][name]]
-        view = gltf["bufferViews"][accessor["bufferView"]]
-        width = {"SCALAR": 1, "VEC3": 3}[accessor["type"]]
-        values = struct.unpack_from(f"<{accessor['count'] * width}f", binary, view["byteOffset"])
-        out[name] = [values[i:i + width] for i in range(0, len(values), width)]
-    return gltf["meshes"][0]["extras"], out
-
-
 def planes_along(step: Path, axis: int, occurrence: str | None = None) -> dict[float, str]:
     """Plane faces whose normal is along ``axis``, by their position on it."""
     from cadgen import fea
@@ -76,20 +45,7 @@ def planes_along(step: Path, axis: int, occurrence: str | None = None) -> dict[f
             if face.surface == "plane" and face.normal and abs(abs(face.normal[axis]) - 1) < 1e-6}
 
 
-def solve(step: Path, out: Path, study: dict):
-    from cadgen import fea
-
-    with redirect_stderr(io.StringIO()):
-        return fea.solve(step, out, study=study)
-
-
 class StudyFile(unittest.TestCase):
-    def test_it_is_built_and_registered_no_longer_planned(self):
-        from cadgen._internal.fea.analyses import REGISTRY, get_analysis
-
-        self.assertFalse(REGISTRY["electromagnetic"].planned)
-        self.assertEqual(get_analysis("electromagnetic").word, "Magnetic / electric")
-
     def test_each_mode_reads_its_own_keys_and_writes_its_own_fields(self):
         electro = parse({"mode": "electrostatic", "material": "petg", "air": {"around_mm": 5},
                          "voltages": [{"faces": ["#o1.f1"], "V": 1000, "name": "top"}, {"faces": ["#o1.f2"], "V": 0}],
@@ -100,7 +56,8 @@ class StudyFile(unittest.TestCase):
         self.assertEqual(electro.checks[0], {"kind": "electric_field", "limit_kV_mm": 3.0})
         from cadgen._internal.fea.analyses import get_analysis
 
-        analysis = get_analysis("electromagnetic")
+        analysis = get_analysis("electromagnetic")  # registered and built: test_fea_protocol's Registry
+        self.assertEqual(analysis.word, "Magnetic / electric")
         self.assertEqual([f.name for f in analysis.fields], ["potential", "electric_field"])
         current = parse({"mode": "current", "voltages": [{"faces": ["#o1.f2"], "V": 0}], "currents": [{"faces": ["#o1.f1"], "A": 2}],
                          "electro_thermal": {"convection": [{"faces": ["#o1.f3"], "h_W_m2K": 10, "ambient_C": 20}]}})
@@ -133,9 +90,8 @@ class StudyFile(unittest.TestCase):
              "relative_permeability"),
         ]
         for changes, fragment in cases:
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                parse(changes)
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, value_error(self, parse, changes))
 
 
 class Materials(unittest.TestCase):
@@ -174,7 +130,7 @@ class Materials(unittest.TestCase):
             self.assertTrue(rows[key][3].strip(), "the sources column is empty")
 
 
-@unittest.skipUnless(HAVE_FEA, "needs the [fea] extra")
+@needs_fea
 class SteadyCurrent(unittest.TestCase):
     """The bar: R = rho L / A to 1 %, the Joule heat I² R exactly, and the heat handed on to a thermal solve."""
 
@@ -182,12 +138,8 @@ class SteadyCurrent(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from build123d import Align, Box, export_step
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        step = directory / "bar.step"
-        export_step(Box(cls.LENGTH, cls.SIDE, cls.SIDE, align=(Align.MIN, Align.CENTER, Align.CENTER)), str(step))
+        directory = class_directory(cls)
+        step = box_step(directory, "bar", (cls.LENGTH, cls.SIDE, cls.SIDE), "x")
         ends = planes_along(step, 0)
         cls.left, cls.right = ends[0.0], ends[cls.LENGTH]
         cls.study = {"analysis": "electromagnetic", "mode": "current", "material": "aluminum-6061-t6", "mesh": {"size_mm": 4.0},
@@ -195,16 +147,13 @@ class SteadyCurrent(unittest.TestCase):
                      "electro_thermal": {"convection": [{"faces": [cls.left, cls.right], "h_W_m2K": 10, "ambient_C": 20}]},
                      "view": {"checks": [{"kind": "temperature", "max_C": 60}]}}
         cls.result = solve(step, directory / "bar.glb", cls.study)
-        cls.extras, cls.attributes = glb(cls.result.glb, ("_POTENTIAL", "_CURRENT_DENSITY", "_TEMPERATURE"))
+        cls.extras = glb_extras(cls.result.glb)
+        cls.attributes = glb_rows(cls.result.glb, "_POTENTIAL", "_CURRENT_DENSITY", "_TEMPERATURE")
         # The same bar fed a current through one end instead (the other held at ground).
         cls.fed = solve(step, directory / "fed.glb", {
             "analysis": "electromagnetic", "mode": "current", "material": "aluminum-6061-t6", "mesh": {"size_mm": 4.0},
             "currents": [{"faces": [cls.left], "A": 10, "name": "in"}], "voltages": [{"faces": [cls.right], "V": 0, "name": "out"}]})
         cls.directory, cls.step = directory, step
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def resistance(self) -> float:
         return lookup_material("aluminum-6061-t6").resistivity * (self.LENGTH / 1000) / (self.SIDE / 1000) ** 2
@@ -260,21 +209,18 @@ class SteadyCurrent(unittest.TestCase):
         words = next(step["words"] for step in result.fit if step["rung"] == "symmetry")
         self.assertIn("Solved one quarter of the part", words)
         self.assertAlmostEqual(result.summary["resistance_ohm"] / self.resistance(), 1.0, delta=0.01)
-        sidecar = json.loads(result.sidecar.read_text(encoding="utf-8"))
-        self.assertIn(words, [step["words"] for step in sidecar["fit"]])
+        self.assertIn(words, [step["words"] for step in sidecar(result)["fit"]])
         self.assertIn("fit_symmetry", [finding["type"] for finding in result.findings])
-        extras, _ = glb(result.glb, ())
-        self.assertIn(words, [step["words"] for step in extras["fit"]])
+        self.assertIn(words, [step["words"] for step in glb_extras(result.glb)["fit"]])
 
 
-@unittest.skipUnless(HAVE_FEA, "needs the [fea] extra")
+@needs_fea
 class Electrostatics(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         from build123d import Box, Compound, Cylinder, Pos, export_step
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
+        directory = class_directory(cls)
         # A PETG slab with electrodes painted on its two faces.
         slab = directory / "slab.step"
         export_step(Box(20.0, 20.0, 2.0), str(slab))
@@ -307,10 +253,6 @@ class Electrostatics(unittest.TestCase):
             "view": {"checks": [{"kind": "electric_field", "limit_kV_mm": 3}]},
             # A small budget: the air is coarsened away from the plates to fit (the ladder's air rung).
             "fit": {"memory_GB": 0.01, "seconds": 0.001}})
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def test_a_slab_holds_eps_a_over_d(self):
         expected = EPS0_F_M * 2.6 * (0.02 ** 2) / 0.002 * 1e12
@@ -359,7 +301,7 @@ class Electrostatics(unittest.TestCase):
         self.assertGreater(self.plates.summary["region"]["air_mm"], 4.5)
 
 
-@unittest.skipUnless(HAVE_FEA, "needs the [fea] extra")
+@needs_fea
 class Magnetostatics(unittest.TestCase):
     A1, A2, B = 8.0, 10.0, 2.0
 
@@ -367,15 +309,14 @@ class Magnetostatics(unittest.TestCase):
     def setUpClass(cls):
         from build123d import Compound, Cylinder, Pos, export_step
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
+        directory = class_directory(cls)
         coil = directory / "coil.step"
         export_step(Cylinder(cls.A2, 2 * cls.B) - Cylinder(cls.A1, 2 * cls.B), str(coil))
         cls.coil = solve(coil, directory / "coil.glb", {
             "analysis": "electromagnetic", "mode": "magnetostatic", "material": "aluminum-6061-t6", "mesh": {"size_mm": 1.0},
             "coils": [{"turns": 100, "A": 2, "axis": {"direction": [0, 0, 1], "point_mm": [0, 0, 0]}}],
             "probes": [{"at_mm": [0, 0, 0], "label": "centre"}]})
-        cls.extras, cls.attributes = glb(cls.coil.glb, ("_MAGNETIC_FIELD",))
+        cls.extras, cls.attributes = glb_extras(cls.coil.glb), glb_rows(cls.coil.glb, "_MAGNETIC_FIELD")
         lower = Pos(0, 0, -3) * (Cylinder(cls.A2, 2) - Cylinder(cls.A1, 2))
         lower.label = "lower"
         upper = Pos(0, 0, 3) * (Cylinder(cls.A2, 2) - Cylinder(cls.A1, 2))
@@ -389,10 +330,6 @@ class Magnetostatics(unittest.TestCase):
                       {"part": "upper", "turns": 100, "A": 5, "axis": {"direction": [0, 0, 1]}}],
             "map_to_structure": {"part": "upper", "fixtures": [{"faces": [top]}]},
             "view": {"checks": [{"kind": "stress"}]}})
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def test_the_field_at_a_coils_centre_is_biot_savarts(self):
         a1, a2, b = self.A1 / 1000, self.A2 / 1000, self.B / 1000
@@ -452,7 +389,7 @@ class Magnetostatics(unittest.TestCase):
         # The force grows with the current squared, and so does the stress: the viewer's headroom in current is a root.
         self.assertEqual(check["scaling"], "quadratic")
         self.assertGreater(summary["structure"]["max_von_mises_MPa"], 0.0)
-        extras, _ = glb(self.pair.glb, ())
+        extras = glb_extras(self.pair.glb)
         self.assertEqual(extras["checks"][0]["scaling"], "quadratic")
         self.assertEqual([entry["field"] for entry in extras["fields"]], ["magnetic_field", "von_mises", "displacement"])
 

@@ -1,23 +1,15 @@
 /**
- * Magnetic / electric (lite), Tier 3: a static electric field, a steady (DC) current, a static
- * magnetic field or an AC one at a frequency (`ac_magnetic`: eddy currents, skin effect, induction
- * heating), by the study's `mode`. Its fields are on the parts' surface: the voltage (signed)
- * and the electric field, the voltage and the current density, or the magnetic field; with the Joule
- * heat handed to a thermal solve the temperature joins, and with the magnetic force handed to a static
- * solve the stress and displacement join and it deforms; an AC field carries the eddy current and the
- * magnetic field (amplitudes), and the temperature its loss makes. Its verdict judges the strongest electric
- * field against the gap's limit ("Arcs over"), the temperature, or the stress and displacement; no
- * load control moves them (a field grows with the voltage, a force with the current squared). Its
- * takeaway leads with "Static · ", or "AC · " for a field at a frequency. What you see opens on the Field select (and the deformation
- * when the force was mapped); its setup says where it is held at a voltage, where a current goes in,
- * which coils drive it (at what frequency: "Coil 2 A at 50 kHz", "Field 10 mT at 500 Hz"), where it is kept at a temperature or cooled, where it is held (mapped) and
- * what it is made of. It plays no routine. A magnetic result also says the force on each part
- * (`facts`: "Force on the plunger", "0.424 N down, its magnetic pull"), with no limit: rows after any
- * checks, and with none, its verdict ("Pulls the plunger with 0.424 N").
+ * Magnetic / electric (lite), Tier 3, by the study's `mode`: a static electric field, a steady (DC) current,
+ * a static magnetic field or an AC one at a frequency (`ac_magnetic`: eddy currents, skin effect, induction
+ * heating). Its fields are on the parts' surface: the voltage and the electric field, the current density or
+ * the magnetic field (an AC field's as amplitudes); the Joule heat handed to a thermal solve adds the
+ * temperature, and the magnetic force handed to a static solve adds the stress and displacement, so it
+ * deforms. A field grows with the voltage and a force with the current squared, so no load control moves
+ * them. A magnetic result also states the force on each part (`facts`), with no limit.
  */
-import { fieldAndDeformation } from "../controls.js";
+import { fieldAndMappedDeformation } from "../controls.js";
 import { plainNumber, threeFigures } from "../numbers.js";
-import { cooledRows, faceTitle, forceDirection, heldRows, keptAtRows, madeOfRows, spaced, wholeRefs } from "../setup.js";
+import { cooledRows, faceEntryRows, facesWords, forceDirection, group, heldRows, keptAtRows, madeOfRows, spaced, wholeRefs } from "../setup.js";
 import { acMotion, poseRoutine } from "../poses.js";
 import { planned } from "./stub.js";
 
@@ -45,22 +37,6 @@ const atFrequency = (result) => {
   return hz === null ? "" : ` at ${hertz(hz)}`;
 };
 
-/** Faces in a prompt's words: "face 3", "faces 3, 4". */
-function facesWords(faces) {
-  const names = faces.map((ref) => /\.f(\d+)$/.exec(ref)?.[1] ?? ref);
-  return `${names.length === 1 ? "face" : "faces"} ${names.join(", ")}`;
-}
-
-/** One row per entry, its faces under it, shut until opened. */
-function entryRows(result, id, entries) {
-  return entries.map((entry, index) => ({
-    id: `${id}:${index}`, label: entry.label, detail: "", faces: entry.faces, summary: entry.summary(entry.faces), collapsed: true,
-    ...(entry.hint ? { hint: entry.hint } : {}),
-    children: entry.faces.map((ref) => ({ id: `${id}:${index}:${ref}`, label: faceTitle(result, ref), detail: "", faces: [ref], wrap: true,
-      summary: entry.summary([ref]) })),
-  }));
-}
-
 /** Study's "Electrodes": "Held at 1000 V" per held voltage, "2 A in" ("2 A in at 50 kHz") per current put in, each its faces under it. */
 export function electrodeRows(result) {
   const study = studyOf(result);
@@ -76,8 +52,7 @@ export function electrodeRows(result) {
     const label = amps === null ? `A current in${at}` : `${plainNumber(amps)} A in${at}`;
     return { faces: entry.faces, label, summary: (faces) => `${label} through ${facesWords(faces)}` };
   });
-  const rows = entryRows(result, "electrode", [...held, ...fed].filter((entry) => entry.faces.length));
-  return rows.length ? [{ id: "electrodes", label: "Electrodes", detail: "", glyph: "fixture", children: rows }] : [];
+  return group("electrodes", "Electrodes", "fixture", faceEntryRows(result, "electrode", [...held, ...fed].filter((entry) => entry.faces.length)));
 }
 
 /**
@@ -107,7 +82,7 @@ export function coilRows(result) {
     const along = axis.length === 3 && axis.filter((c) => c !== 0).length === 1 ? ` along ${"xyz"[axis.findIndex((c) => c !== 0)]}` : "";
     rows.push({ id: "field", label, detail: "", summary: `A uniform${mT === null ? "" : ` ${plainNumber(mT)} mT`} field${along}${at}` });
   }
-  return rows.length ? [{ id: "coils", label: "Driven by", detail: "", glyph: "wave", children: rows }] : [];
+  return group("coils", "Driven by", "wave", rows);
 }
 
 /** What leads the takeaway: "AC" for a field at a frequency, else the static word. */
@@ -123,12 +98,6 @@ function heatOutRows(result) {
 }
 
 export const ELECTROMAGNETIC_SETUP = Object.freeze([electrodeRows, coilRows, heatOutRows, heldRows, madeOfRows]);
-
-/** The field select (every field it carries), and the deformation only when the force was mapped onto the structure. */
-export function electromagneticControls(result) {
-  const [field, deformation] = fieldAndDeformation(result);
-  return result.fields.some((entry) => String(entry.attribute).toLowerCase() === "_displacement") ? [field, deformation] : [field];
-}
 
 // What makes a part's force, in plain words.
 const FORCE_BY = Object.freeze({ "J x B": "the current in the field", "Maxwell stress": "its magnetic pull" });
@@ -169,11 +138,11 @@ export function electromagneticFacts(result) {
 }
 
 export default planned({
-  name: "electromagnetic", tier: 3, word: "Magnetic / electric", noun: "this voltage", limitWord: "Static", family: null,
-  scalesWithLoad: false,
+  name: "electromagnetic", tier: 3, word: "Magnetic / electric", noun: "this voltage", limitWord: "Static",
   checks: ["electric_field", "temperature", "stress", "displacement"],
   limitWordOf: electromagneticLimitWord,
-  defaultControls: electromagneticControls,
+  // The field select (every field it carries), and the deformation only when the force was mapped onto the structure.
+  defaultControls: fieldAndMappedDeformation,
   setupGroups: ELECTROMAGNETIC_SETUP,
   // An AC field turning through its cycle, on a Phase row (`../poses.js`); a static field has none.
   motion: acMotion,

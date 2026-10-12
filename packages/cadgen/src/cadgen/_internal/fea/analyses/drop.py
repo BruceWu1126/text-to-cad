@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from typing import ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, SolveContext
+from cadgen._internal.fea.analyses.base import AnalysisResult, SolveContext, finding
 from cadgen._internal.fea.analyses.static import G0_MM_S2, StaticAnalysis, StaticInputs
 from cadgen._internal.fea.study import Fixture, Load
 
@@ -184,6 +184,15 @@ def _outward_normal(volume, ordinals: list[int]) -> tuple[float, float, float]:
     return tuple(float(c) for c in total)
 
 
+def _inertia(G: float, travel) -> tuple[Load, ...]:
+    """The equivalent load: ``G`` g on the whole part against ``travel`` (+ 0.0: no "-0.0" in the echo)."""
+    return (Load((), "acceleration", vector_g=tuple(-G * c + 0.0 for c in travel)),)
+
+
+def _stop(inputs: "DropInputs") -> dict:
+    return {"stop_mm": inputs.stop_mm} if inputs.stop_mm is not None else {"impact_ms": inputs.impact_ms}
+
+
 def _unit(vector) -> tuple[float, float, float]:
     size = math.sqrt(sum(c * c for c in vector))
     unit = [c / size for c in vector]
@@ -197,6 +206,7 @@ class DropAnalysis(StaticAnalysis):
     name: ClassVar[str] = "drop"
     tier: ClassVar[int] = 2
     word: ClassVar[str] = "Drop (estimate)"
+    extras_word: ClassVar[str] = "drop (estimate)"
     estimate_only: ClassVar[bool] = True
     limits: ClassVar[tuple[str, ...]] = (
         "An estimate: the drop becomes one equivalent steady load (G g on the whole part, the landing faces held), "
@@ -214,9 +224,7 @@ class DropAnalysis(StaticAnalysis):
         drop = _drop(document)
         G = drop_g(drop["height_mm"], stop_mm=drop["stop_mm"], impact_ms=drop["impact_ms"])
         onto = drop["onto"]
-        loads: tuple[Load, ...] = ()
-        if drop["direction"] is not None:
-            loads = (Load((), "acceleration", vector_g=tuple(-G * c + 0.0 for c in drop["direction"])),)
+        loads = () if drop["direction"] is None else _inertia(G, drop["direction"])
         return DropInputs(
             onto, onto, True, fixtures=(Fixture(onto),), loads=loads, material_needs=frozenset({"density"}),
             G=G, **drop,
@@ -237,11 +245,7 @@ class DropAnalysis(StaticAnalysis):
                 )
             travel = _unit(normal)
         inputs.resolved["direction"] = travel
-        vector_g = tuple(-inputs.G * c + 0.0 for c in travel)  # + 0.0: no "-0.0" in the echo
-        inputs.resolved["vector_g"] = vector_g
-        solved = dataclasses.replace(inputs, loads=(Load((), "acceleration", vector_g=vector_g),))
-        result = super().solve(ctx, solved)
-        result.scalars["drop"] = {"direction": travel, "vector_g": vector_g}
+        result = self._steady(ctx, inputs, travel, inputs.G)
         if inputs.dynamic:
             result = self._dynamic(ctx, inputs, travel, result)
         # What the viewer's Drop routine plays: the fall onto the floor and how long the stop it assumed lasts.
@@ -249,6 +253,14 @@ class DropAnalysis(StaticAnalysis):
 
         result.scalars.setdefault("analysis_extras", {})["fall"] = fall_record(
             ctx.volume.nodes, travel, inputs.height_mm, impact_ms=round(stop_s(inputs, result.scalars.get("dynamic")) * 1e3, 9))
+        return result
+
+    def _steady(self, ctx: SolveContext, inputs: DropInputs, travel, G: float) -> AnalysisResult:
+        """The static solve at ``G`` g toward the landing faces."""
+        loads = _inertia(G, travel)
+        inputs.resolved["vector_g"] = loads[0].vector_g
+        result = super().solve(ctx, dataclasses.replace(inputs, loads=loads))
+        result.scalars["drop"] = {"direction": travel, "vector_g": loads[0].vector_g}
         return result
 
     def _dynamic(self, ctx: SolveContext, inputs: DropInputs, travel, result: AnalysisResult) -> AnalysisResult:
@@ -287,12 +299,8 @@ class DropAnalysis(StaticAnalysis):
             "G_reported": round(inputs.G, 4),
         }
         if ratio > 1.0:
-            factor = ratio
-            vector_g = tuple(-inputs.G * factor * c + 0.0 for c in travel)
-            inputs.resolved["vector_g"] = vector_g
-            result = super().solve(ctx, dataclasses.replace(inputs, loads=(Load((), "acceleration", vector_g=vector_g),)))
-            result.scalars["drop"] = {"direction": travel, "vector_g": vector_g}
-            record.update(governs=True, G_reported=round(inputs.G * factor, 4))
+            result = self._steady(ctx, inputs, travel, inputs.G * ratio)
+            record.update(governs=True, G_reported=round(inputs.G * ratio, 4))
         result.scalars["dynamic"] = record
         return result
 
@@ -308,21 +316,15 @@ class DropAnalysis(StaticAnalysis):
         found = super().findings(ctx, result, inputs, check_results, assembly=assembly)
         assumed = (f"the {_figure(inputs.stop_mm)} mm stopping distance" if inputs.stop_mm is not None
                    else f"the {_figure(inputs.impact_ms)} ms impact")
-        found.append({
-            "check": "fea",
-            "severity": "info",
-            "type": "drop_estimate",
-            "summary": (f"This is an estimate of a {height_words(inputs.height_mm)} drop as a steady {_figure(inputs.G)} g load, "
-                        f"not an impact simulation: {assumed} sets the answer, so say what you assumed"),
-            "description": estimate_line(inputs.height_mm, inputs.G, stop_mm=inputs.stop_mm, impact_ms=inputs.impact_ms),
-            "items": [],
-        })
+        found.append(finding(
+            "info", "drop_estimate",
+            f"This is an estimate of a {height_words(inputs.height_mm)} drop as a steady {_figure(inputs.G)} g load, "
+            f"not an impact simulation: {assumed} sets the answer, so say what you assumed",
+            estimate_line(inputs.height_mm, inputs.G, stop_mm=inputs.stop_mm, impact_ms=inputs.impact_ms)))
         if "dynamic" in result.scalars:
-            found.append({"check": "fea", "severity": "info", "type": "drop_dynamic",
-                          "summary": dynamic_line(result.scalars["dynamic"]),
-                          "description": "the transient check: the landing faces held and shaken by a half-sine pulse of the "
-                                         "same peak and speed change; the larger of it and the steady estimate is reported",
-                          "items": []})
+            found.append(finding("info", "drop_dynamic", dynamic_line(result.scalars["dynamic"]),
+                                 "the transient check: the landing faces held and shaken by a half-sine pulse of the "
+                                 "same peak and speed change; the larger of it and the steady estimate is reported"))
         return sorted(found, key=lambda finding: finding["severity"] != "error")
 
     # -- what is written -----------------------------------------------------------------------------
@@ -335,7 +337,7 @@ class DropAnalysis(StaticAnalysis):
         summary["estimate_line"] = estimate_line(inputs.height_mm, inputs.G, stop_mm=inputs.stop_mm, impact_ms=inputs.impact_ms)
         summary["drop"] = {
             "height_mm": inputs.height_mm,
-            **({"stop_mm": inputs.stop_mm} if inputs.stop_mm is not None else {"impact_ms": inputs.impact_ms}),
+            **_stop(inputs),
             "impact_speed_m_s": round(math.sqrt(2.0 * G0_MM_S2 * inputs.height_mm) / 1000.0, 4),
             "G": round(inputs.G, 4),
             "direction": [round(c, 6) for c in resolved["direction"]],
@@ -346,20 +348,15 @@ class DropAnalysis(StaticAnalysis):
         summary["checks"] = checks
         return summary
 
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} drop (estimate)"
-
     def study_echo(self, inputs: DropInputs, bare: Callable[[tuple[str, ...]], list[str]]) -> dict:
         vector_g = inputs.resolved.get("vector_g")
-        echoed = dataclasses.replace(
-            inputs, loads=() if vector_g is None else (Load((), "acceleration", vector_g=vector_g),)
-        )
+        echoed = dataclasses.replace(inputs, loads=() if vector_g is None else (Load((), "acceleration", vector_g=vector_g),))
         echo = super().study_echo(echoed, bare)
         direction = inputs.resolved.get("direction", inputs.direction)
         echo["drop"] = {
             "height_mm": inputs.height_mm,
             "onto": bare(inputs.onto),
-            **({"stop_mm": inputs.stop_mm} if inputs.stop_mm is not None else {"impact_ms": inputs.impact_ms}),
+            **_stop(inputs),
             **({} if direction is None else {"direction": [float(c) for c in direction]}),
             "G": round(inputs.G, 4),
             **({"dynamic": True} if inputs.dynamic else {}),

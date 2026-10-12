@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs, SolveContext
+from cadgen._internal.fea.analyses.base import AnalysisBase, AnalysisResult, FieldSpec, Inputs, SolveContext, finding, xyz
 
 __all__ = [
     "Convection", "FixedTemperature", "HeatInput", "RADIATION_KEY", "Radiating", "ThermalAnalysis", "ThermalInputs",
@@ -213,6 +213,13 @@ def parse_radiation(document: dict) -> tuple[Radiating, ...]:
     return tuple(radiation)
 
 
+def heat_refs(temperatures, heat, convection, radiation) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """``(face_refs, anchor_refs)`` of a heat study: every face it names, and those that hold or carry heat away."""
+    refs = tuple(dict.fromkeys(ref for group in (*temperatures, *heat, *convection, *radiation) for ref in group.faces))
+    anchors = tuple(dict.fromkeys(ref for group in (*temperatures, *convection, *radiation) for ref in group.faces))
+    return refs, anchors
+
+
 def reference_of(temperatures, convection, *extra: float) -> float:
     """The coolest temperature the study sets: held, ambient, or ``extra`` (a transient's start)."""
     values = [entry.celsius for entry in temperatures] + [entry.ambient for entry in convection] + list(extra)
@@ -245,14 +252,8 @@ def temperature_check(check: dict, value: float, reference: float, *, at, ref, f
     limit = check["max_C"]
     ratio = (value - reference) / (limit - reference)
     return {
-        "kind": "temperature",
-        "label": check.get("label") or "Heat",
-        "value": round(value, 4),
-        "limit": limit,
-        "unit": "°C",
-        "ratio": round(ratio, 6),
-        "close_at": CLOSE_AT,
-        "status": check_status(ratio, CLOSE_AT),
+        "kind": "temperature", "label": check.get("label") or "Heat", "value": round(value, 4), "limit": limit, "unit": "°C",
+        "ratio": round(ratio, 6), "close_at": CLOSE_AT, "status": check_status(ratio, CLOSE_AT),
         "where": {"ref": ref, "at": [round(c, 3) for c in at]},
         **({"faces": list(faces)} if faces else {}),
         "reference": round(reference, 4),
@@ -278,12 +279,10 @@ def temperature_findings(check_results: list[dict], *, assembly: bool) -> list[d
             summary = (f"{subject} {'get' if subject == 'The checked faces' else 'gets'} to {result['value']:.4g} °C{when}, "
                        f"close to the {result['limit']:g} °C allowed")
             severity, kind = "warning", "temperature_close_to_limit"
-        found.append({
-            "check": "fea", "severity": severity, "type": kind, "summary": summary,
-            "description": f"hottest {result['value']:.4g} °C against a {result['limit']:g} °C limit, "
-                           f"measured from {result['reference']:g} °C: {result['ratio']:.2f} of the room used",
-            "items": [{"text": "the hottest point", **result["where"]}],
-        })
+        found.append(finding(severity, kind, summary,
+                             f"hottest {result['value']:.4g} °C against a {result['limit']:g} °C limit, "
+                             f"measured from {result['reference']:g} °C: {result['ratio']:.2f} of the room used",
+                             [{"text": "the hottest point", **result["where"]}]))
     return found
 
 
@@ -382,6 +381,13 @@ def part_maxima(ctx: SolveContext, values) -> list[float]:
     return [float(values[np.unique(dofs[volume.domain == index])].max()) for index in range(len(plan.parts))]
 
 
+def parts_summary(result: AnalysisResult) -> list[dict]:
+    """An assembly's parts in the summary, each its hottest temperature."""
+    plan = result.scalars["parts"]
+    return [{"ref": part.ref, "name": plan.names[i], "material": plan.materials[i].name,
+             "max_temperature_C": round(result.scalars["part_max"][i], 4)} for i, part in enumerate(plan.parts)]
+
+
 def ladder_estimate(ctx: SolveContext, *, steps: int = 0, frames: int = 0):
     """The ladder's estimate of the plan's scalar (temperature) problem: one solve, and ``steps`` more on its matrix.
 
@@ -410,16 +416,13 @@ def ladder_estimate(ctx: SolveContext, *, steps: int = 0, frames: int = 0):
     return fit.Estimate(dofs=base.dofs, memory_bytes=base.memory_bytes, seconds=base.seconds + steps * per_step)
 
 
-class ThermalAnalysis:
+class ThermalAnalysis(AnalysisBase):
     name: ClassVar[str] = "thermal"
     tier: ClassVar[int] = 1
     word: ClassVar[str] = "Heat"
-    estimate_only: ClassVar[bool] = False
-    limits: ClassVar[tuple[str, ...]] = ()
+    extras_word: ClassVar[str] = "temperature"
     study_keys: ClassVar[frozenset[str]] = frozenset({*HEAT_KEYS, RADIATION_KEY})
     material_needs: ClassVar[frozenset[str]] = frozenset({"conductivity"})
-    mesh_orders: ClassVar[tuple[int, ...]] = (2,)
-    connection_types: ClassVar[tuple[str, ...]] = ("bonded", "free")
     fields: ClassVar[tuple[FieldSpec, ...]] = (
         FieldSpec("temperature", "_TEMPERATURE", "temperature", "°C", signed=True),
         FieldSpec("heat_flux", "_HEAT_FLUX", "heat flux", "W/m²"),
@@ -430,7 +433,6 @@ class ThermalAnalysis:
     default_controls: ClassVar[dict[str, dict]] = {
         "field": {"drives": "field", "type": "enum", "options": ["temperature", "heat_flux"]},
     }
-    upstream: ClassVar[tuple[str, ...]] = ()
     ladder: ClassVar[tuple[str, ...]] = ("iterative", "local_refine", "defeature", "linear_elements", "symmetry")
     noun: ClassVar[str] = "this heat"
     #: What the ladder's two passes compare, in its words ("the hottest temperature moved 0.4% between ...").
@@ -449,8 +451,7 @@ class ThermalAnalysis:
             )
         reference = reference_of(temperatures, convection, *(entry.ambient for entry in radiation))
         check_limits(document, reference)
-        refs = tuple(dict.fromkeys(ref for group in (*temperatures, *heat, *convection, *radiation) for ref in group.faces))
-        anchors = tuple(dict.fromkeys(ref for group in (*temperatures, *convection, *radiation) for ref in group.faces))
+        refs, anchors = heat_refs(temperatures, heat, convection, radiation)
         return ThermalInputs(refs, anchors, True, temperatures=temperatures, heat=heat, convection=convection,
                              reference_C=reference, radiation=radiation)
 
@@ -511,9 +512,6 @@ class ThermalAnalysis:
         result.scalars["summary"] = self.summary(result, inputs, [])
         return result
 
-    def needs_finer(self, result: AnalysisResult, inputs: ThermalInputs, check_results: list[dict]) -> bool:
-        return False
-
     # -- judging -------------------------------------------------------------------------------------
 
     def judge(self, check: dict, index: int, ctx: SolveContext, result: AnalysisResult, inputs: ThermalInputs) -> dict:
@@ -529,26 +527,17 @@ class ThermalAnalysis:
         found = temperature_findings(check_results, assembly=assembly)
         balance = result.scalars["balance"]
         if balance["imbalance"] > BALANCE_WARN:
-            found.append({
-                "check": "fea", "severity": "warning", "type": "heat_balance",
-                "summary": f"The heat in ({balance['in_W']:.4g} W) and out ({balance['out_W']:.4g} W) differ by "
-                           f"{balance['imbalance']:.1%}: the temperatures may not have settled",
-                "description": "the solve's residual leaves heat unaccounted for; a finer mesh or another solver should close it",
-                "items": [],
-            })
+            found.append(finding(
+                "warning", "heat_balance", f"The heat in ({balance['in_W']:.4g} W) and out ({balance['out_W']:.4g} W) "
+                                           f"differ by {balance['imbalance']:.1%}: the temperatures may not have settled",
+                "the solve's residual leaves heat unaccounted for; a finer mesh or another solver should close it"))
         if not inputs.heat and len({*(e.celsius for e in inputs.temperatures), *(e.ambient for e in inputs.convection),
                                     *(e.ambient for e in inputs.radiation)}) == 1:
-            found.append({
-                "check": "fea", "severity": "info", "type": "no_heat",
-                "summary": f"No heat goes in, so the whole part sits at {inputs.reference_C:g} °C",
-                "description": "every held temperature and ambient is the same and nothing heats it", "items": [],
-            })
+            found.append(finding("info", "no_heat", f"No heat goes in, so the whole part sits at {inputs.reference_C:g} °C",
+                                 "every held temperature and ambient is the same and nothing heats it"))
         return found
 
     # -- what is written -----------------------------------------------------------------------------
-
-    def deformation_scale(self, result: AnalysisResult, bbox_diagonal: float, requested: float | None) -> float | None:
-        return None
 
     def summary(self, result: AnalysisResult, inputs: ThermalInputs, check_results: list[dict]) -> dict:
         T, flux = result.fields["temperature"], result.fields["heat_flux"]
@@ -557,7 +546,7 @@ class ThermalAnalysis:
         summary = {
             "max_temperature_C": round(float(T.max()), 4),
             "min_temperature_C": round(float(T.min()), 4),
-            "max_at_mm": [round(float(c), 3) for c in result.dof_locations[hottest]],
+            "max_at_mm": xyz(result.dof_locations[hottest]),
             "max_heat_flux_W_m2": round(float(flux.max()), 4),
             "heat_in_W": round(balance["in_W"], 6),
             "heat_out_W": round(balance["out_W"], 6),
@@ -567,17 +556,9 @@ class ThermalAnalysis:
         if "radiation" in result.scalars:
             summary["radiation"] = result.scalars["radiation"]
         if "part_max" in result.scalars:
-            plan = result.scalars["parts"]
-            summary["parts"] = [
-                {"ref": part.ref, "name": plan.names[i], "material": plan.materials[i].name,
-                 "max_temperature_C": round(result.scalars["part_max"][i], 4)}
-                for i, part in enumerate(plan.parts)
-            ]
+            summary["parts"] = parts_summary(result)
         summary["checks"] = check_results
         return summary
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} temperature"
 
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
         return {"temperature": (summary["min_temperature_C"], summary["max_temperature_C"]),

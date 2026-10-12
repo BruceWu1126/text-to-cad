@@ -9,34 +9,24 @@ cantilever STEP into a temporary directory and solves it twice.
 
 from __future__ import annotations
 
-import io
-import json
-import struct
 import tempfile
 import unittest
-from contextlib import redirect_stderr
 from pathlib import Path
 
-from tests.python.support.paths import add_repo_path
+from tests.python.support.fea_fixtures import (
+    box_step, box_volume, class_directory, ends, glb_attribute_names, heavy_at_import, needs_fea, read_glb, sidecar,
+    solve, value_error,
+)
 
-add_repo_path("packages/cadgen/src")
+from cadgen._internal.fea.analyses import ANALYSIS_NAMES, REGISTRY, get_analysis
 
-from cadgen._internal.fea.analyses import ANALYSIS_NAMES, REGISTRY, get_analysis  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
-
-# Section 2 and 2.1 of the spec, in order.
+# Section 2 and 2.1 of the spec, in order; every name of 2.1 is built since (registered in the same place).
 TIER_1 = ("static", "modal", "buckling", "thermal", "thermal_transient", "thermal_stress", "harmonic",
           "random_vibration", "shock", "transient", "fatigue")
-PLANNED = ("cfd_turbulent", "cfd_compressible", "creep", "composite", "bolt", "electromagnetic")
-# Of section 2.1's names, those built since (registered in the same place, no longer planned).
-BUILT_SINCE = ("cfd_turbulent", "cfd_compressible", "creep", "composite", "bolt", "electromagnetic")
-
+SPEC_2_1 = ("cfd_turbulent", "cfd_compressible", "creep", "composite", "bolt", "electromagnetic")
+# Built after spec 2.1's names, each registered after them: tier 3, its word.
+LATER = (("topology", "Lighten it"), ("acoustic", "Sound"), ("fracture", "Cracks"), ("conjugate_heat", "Cooled by flow"),
+         ("rotordynamics", "Spinning"), ("fsi", "Flow and bending"), ("piezo", "Piezo"), ("multiphase", "Two fluids"))
 
 
 def planned_entry(name: str):
@@ -48,112 +38,43 @@ def planned_entry(name: str):
     return mock.patch.dict(REGISTRY, {name: Entry(name, 3, f"cadgen._internal.fea.analyses.{name}", "Unbuilt", "Not built", True)})
 
 
-# netgen's edge order of a 10-node tet, and of a 6-node triangle's mid-edge nodes.
-_TET_EDGES = ((0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3))
-_TRIG_EDGES = ((1, 2), (0, 2), (0, 1))
-
-
-def box_volume(lengths=(4.0, 1.0, 1.0), cells=(4, 1, 1)):
-    """A box of 10-node tets as the mesher hands one over: faces 1-6 are x-, x+, y-, y+, z-, z+."""
-    import numpy as np
-    from skfem import MeshTet
-
-    from cadgen._internal.fea.mesh import FaceFingerprint, VolumeMesh
-
-    mesh = MeshTet.init_tensor(*(np.linspace(0.0, size, count + 1) for size, count in zip(lengths, cells)))
-    points = list(mesh.p.T)
-    middle: dict[tuple[int, int], int] = {}
-
-    def mid(a: int, b: int) -> int:
-        key = (min(a, b), max(a, b))
-        if key not in middle:
-            middle[key] = len(points)
-            points.append(0.5 * (mesh.p[:, a] + mesh.p[:, b]))
-        return middle[key]
-
-    tets = [list(t) + [mid(t[a], t[b]) for a, b in _TET_EDGES] for t in mesh.t.T]
-    facets = mesh.facets[:, mesh.boundary_facets()].T
-    boundary = [list(f) + [mid(f[a], f[b]) for a, b in _TRIG_EDGES] for f in facets]
-    nodes = np.array(points)
-    centres = nodes[facets].mean(axis=1)
-    ordinal = np.zeros(len(facets), dtype=np.int64)
-    for axis in range(3):
-        ordinal[np.isclose(centres[:, axis], 0.0)] = 2 * axis + 1
-        ordinal[np.isclose(centres[:, axis], lengths[axis])] = 2 * axis + 2
-    faces = {}
-    for o in range(1, 7):
-        axis, high = divmod(o - 1, 2)
-        centre = [size / 2 for size in lengths]
-        centre[axis] = lengths[axis] if high else 0.0
-        area = float(np.prod([size for i, size in enumerate(lengths) if i != axis]))
-        faces[o] = FaceFingerprint(f"#o1.f{o}", o, area, tuple(centre))
-    diagonal = float(np.linalg.norm(lengths))
-    return VolumeMesh(nodes=nodes, tets=np.array(tets, dtype=np.int64), boundary=np.array(boundary, dtype=np.int64),
-                      boundary_ordinal=ordinal, faces=faces, max_h=max(lengths) / max(cells), bbox_diagonal=diagonal, seconds=0.0)
-
-
 class Registry(unittest.TestCase):
     def test_every_analysis_is_registered_in_order(self):
-        self.assertEqual(ANALYSIS_NAMES[:len(TIER_1)], TIER_1)
-        self.assertEqual(ANALYSIS_NAMES[len(TIER_1):len(TIER_1) + 5], ("drop", "cfd", "impact", "nonlinear", "contact"))
         after = len(TIER_1) + 5
-        self.assertEqual(ANALYSIS_NAMES[after:after + len(PLANNED)], PLANNED)
-        # Built after spec 2.1's names, each registered after them: topology ("Lighten it") among them.
-        self.assertIn("topology", ANALYSIS_NAMES[after + len(PLANNED):])
-        self.assertEqual((REGISTRY["topology"].tier, REGISTRY["topology"].word, REGISTRY["topology"].planned), (3, "Lighten it", False))
-        self.assertIn("acoustic", ANALYSIS_NAMES[after + len(PLANNED):])
-        self.assertEqual((REGISTRY["acoustic"].tier, REGISTRY["acoustic"].word, REGISTRY["acoustic"].planned), (3, "Sound", False))
-        self.assertIn("fracture", ANALYSIS_NAMES[after + len(PLANNED):])
-        self.assertEqual((REGISTRY["fracture"].tier, REGISTRY["fracture"].word, REGISTRY["fracture"].planned), (3, "Cracks", False))
-        self.assertIn("conjugate_heat", ANALYSIS_NAMES[after + len(PLANNED):])
-        self.assertEqual((REGISTRY["conjugate_heat"].tier, REGISTRY["conjugate_heat"].word, REGISTRY["conjugate_heat"].planned),
-                         (3, "Cooled by flow", False))
-        self.assertIn("rotordynamics", ANALYSIS_NAMES[after + len(PLANNED):])
-        self.assertEqual((REGISTRY["rotordynamics"].tier, REGISTRY["rotordynamics"].word, REGISTRY["rotordynamics"].planned),
-                         (3, "Spinning", False))
-        self.assertIn("fsi", ANALYSIS_NAMES[after + len(PLANNED):])
-        self.assertEqual((REGISTRY["fsi"].tier, REGISTRY["fsi"].word, REGISTRY["fsi"].planned), (3, "Flow and bending", False))
-        self.assertIn("piezo", ANALYSIS_NAMES[after + len(PLANNED):])
-        self.assertEqual((REGISTRY["piezo"].tier, REGISTRY["piezo"].word, REGISTRY["piezo"].planned), (3, "Piezo", False))
-        self.assertIn("multiphase", ANALYSIS_NAMES[after + len(PLANNED):])
-        self.assertEqual((REGISTRY["multiphase"].tier, REGISTRY["multiphase"].word, REGISTRY["multiphase"].planned),
-                         (3, "Two fluids", False))
+        self.assertEqual(ANALYSIS_NAMES[:len(TIER_1)], TIER_1)
+        self.assertEqual(ANALYSIS_NAMES[len(TIER_1):after], ("drop", "cfd", "impact", "nonlinear", "contact"))
+        self.assertEqual(ANALYSIS_NAMES[after:after + len(SPEC_2_1)], SPEC_2_1)
+        for name, word in LATER:
+            with self.subTest(name=name):
+                self.assertIn(name, ANALYSIS_NAMES[after + len(SPEC_2_1):])
+                self.assertEqual((REGISTRY[name].tier, REGISTRY[name].word, REGISTRY[name].planned), (3, word, False))
         self.assertEqual([REGISTRY[name].tier for name in ("static", "drop", "cfd")], [1, 2, 3])
         self.assertEqual(REGISTRY["modal"].word, "Vibration")
-        self.assertTrue(all(REGISTRY[name].planned != (name in BUILT_SINCE) for name in PLANNED))
+        self.assertFalse(any(REGISTRY[name].planned for name in SPEC_2_1))
 
     def test_an_unknown_name_lists_every_name(self):
-        with self.assertRaises(ValueError) as caught:
-            get_analysis("stress")
-        self.assertIn("'stress' is not an analysis", str(caught.exception))
-        self.assertIn("modal", str(caught.exception))
+        message = value_error(self, get_analysis, "stress")
+        self.assertIn("'stress' is not an analysis", message)
+        self.assertIn("modal", message)
 
     def test_an_unbuilt_name_says_it_is_planned_never_an_import_error(self):
         # Every name of spec 2.1 is built now: a planned entry whose module is not in this cadgen stands in.
-        for name in ("cfd_multiphase",):
-            with self.subTest(name=name), self.assertRaises(ValueError) as caught, planned_entry(name):
-                get_analysis(name)
-            self.assertIn(f"'{name}' is planned but not in this cadgen yet; available: static", str(caught.exception))
+        with planned_entry("cfd_multiphase"):
+            message = value_error(self, get_analysis, "cfd_multiphase")
+        self.assertIn("'cfd_multiphase' is planned but not in this cadgen yet; available: static", message)
 
-    def test_static_is_built_and_stdlib_only_at_import(self):
-        import subprocess
-        import sys
-
+    def test_static_is_built_and_every_analysis_is_stdlib_only_at_import(self):
         static = get_analysis("static")
         self.assertEqual((static.name, static.tier, static.word), ("static", 1, "Strength"))
         self.assertIs(get_analysis("static"), static)
-        code = (
-            "import sys; sys.path.insert(0, 'packages/cadgen/src');"
-            "import cadgen._internal.fea.analyses.static, cadgen._internal.fea.analyses.kinds;"
-            "heavy = sorted(m for m in ('numpy', 'scipy', 'skfem', 'OCP', 'netgen') if m in sys.modules);"
-            "print(','.join(heavy))"
-        )
-        root = Path(__file__).resolve().parents[4]
-        heavy = subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True, text=True, check=True).stdout.strip()
-        self.assertEqual(heavy, "")
+        # Every analysis module, the check kinds, and the thermal and gas-flow helpers (thermal_ops, compressible) load
+        # without numpy, scipy, scikit-fem, netgen or OCP: a malformed study fails before any of them is imported.
+        modules = sorted({entry.module for entry in REGISTRY.values()})
+        extra = ("cadgen._internal.fea.analyses.kinds", "cadgen._internal.fea.thermal_ops", "cadgen._internal.fea.compressible")
+        self.assertEqual(heavy_at_import(*modules, *extra), "")
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Operators(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -213,7 +134,6 @@ class Operators(unittest.TestCase):
     def test_a_free_thermal_strain_moves_without_stress(self):
         import numpy as np
 
-        from cadgen._internal.fea import operators
         from cadgen._internal.fea.solve import solve_linear_static
         from cadgen._internal.fea.study import Fixture
 
@@ -225,7 +145,6 @@ class Operators(unittest.TestCase):
         far = np.isclose(outcome.dof_locations[:, 0], 4.0)
         self.assertAlmostEqual(float(outcome.displacement[far, 0].mean()) / (alpha * rise * 4.0), 1.0, delta=0.05)
         self.assertLess(abs(sum(outcome.applied)), 1e-9)
-        self.assertIsNotNone(operators)
 
     def test_the_solver_choices_agree(self):
         import numpy as np
@@ -292,33 +211,27 @@ class StudyDispatch(unittest.TestCase):
 
         for name, fragment in (("vibration", "is not an analysis cadgen knows"), ("cfd_multiphase", "planned but not in this cadgen yet"),
                                (3, "expected the analysis's name")):
-            with self.subTest(name=name), self.assertRaises(ValueError) as caught, planned_entry("cfd_multiphase"):
-                parse_study({**BASE, "analysis": name})
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(name=name), planned_entry("cfd_multiphase"):
+                self.assertIn(fragment, value_error(self, parse_study, {**BASE, "analysis": name}))
 
     def test_unknown_keys_name_the_analysis_and_what_it_takes(self):
         from cadgen._internal.fea.study import parse_study
 
-        with self.assertRaises(ValueError) as caught:
-            parse_study({**BASE, "modes": 6})
-        self.assertIn("unknown keys ['modes']; static studies take analysis, material, fixtures, loads", str(caught.exception))
+        self.assertIn("unknown keys ['modes']; static studies take analysis, material, fixtures, loads",
+                      value_error(self, parse_study, {**BASE, "modes": 6}))
 
     def test_a_check_static_does_not_make_is_refused(self):
         from cadgen._internal.fea.study import parse_study
 
-        with self.assertRaises(ValueError) as caught:
-            parse_study({**BASE, "view": {"checks": [{"kind": "frequency", "min_Hz": 60}]}})
-        self.assertIn("is not a check this cadgen makes; use one of ['stress', 'displacement']", str(caught.exception))
-        with self.assertRaises(ValueError) as caught:
-            parse_study({**BASE, "view": {"controls": [{"drives": "mode"}]}})
-        self.assertIn("'mode' is not one of ['field', 'deformation', 'load_scale', 'threshold']", str(caught.exception))
+        self.assertIn("is not a check this cadgen makes; use one of ['stress', 'displacement']",
+                      value_error(self, parse_study, {**BASE, "view": {"checks": [{"kind": "frequency", "min_Hz": 60}]}}))
+        self.assertIn("'mode' is not one of ['field', 'deformation', 'load_scale', 'threshold']",
+                      value_error(self, parse_study, {**BASE, "view": {"controls": [{"drives": "mode"}]}}))
 
     def test_static_refuses_linear_elements_as_before(self):
         from cadgen._internal.fea.study import parse_study
 
-        with self.assertRaises(ValueError) as caught:
-            parse_study({**BASE, "mesh": {"order": 1}})
-        self.assertIn("only quadratic (order 2) elements are supported", str(caught.exception))
+        self.assertIn("only quadratic (order 2) elements are supported", value_error(self, parse_study, {**BASE, "mesh": {"order": 1}}))
 
     def test_fit_parses_and_never_refuses_a_model(self):
         from cadgen._internal.fea.study import parse_study
@@ -328,9 +241,8 @@ class StudyDispatch(unittest.TestCase):
         self.assertEqual(parse_study({**BASE, "fit": {"allow": []}}).fit, {"allow": []})
         for fit, fragment in (({"memory_GB": 0}, "fit.memory_GB: must be > 0"), ({"allow": ["shrink"]}, "fit.allow[0]: \"shrink\" is not one of"),
                               ({"budget": 1}, "fit: unknown keys ['budget']"), ({"allow": "iterative"}, "fit.allow: list")):
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                parse_study({**BASE, "fit": fit})
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, value_error(self, parse_study, {**BASE, "fit": fit}))
 
     def test_body_loads_have_no_faces_and_need_a_density(self):
         from cadgen._internal.fea.study import parse_study
@@ -348,9 +260,8 @@ class StudyDispatch(unittest.TestCase):
              "static studies need the density"),
         ]
         for change, fragment in cases:
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                parse_study({**BASE, **change})
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, value_error(self, parse_study, {**BASE, **change}))
 
 
 class CheckKinds(unittest.TestCase):
@@ -386,11 +297,10 @@ class CheckKinds(unittest.TestCase):
             ("velocity", {"kind": "velocity", "limit_Pa": 1}, "c: unknown keys ['limit_Pa']; a velocity check takes"),
         ]
         for kind, entry, fragment in cases:
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                CHECK_SPECS[kind].parse(entry, "c")
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, value_error(self, CHECK_SPECS[kind].parse, entry, "c"))
 
-    @unittest.skipUnless(HAVE_FEA, "numpy comes with the fea extra")
+    @needs_fea
     def test_field_max_over_takes_the_faces_nodes_or_every_node(self):
         import numpy as np
 
@@ -406,12 +316,6 @@ class CheckKinds(unittest.TestCase):
         self.assertEqual((on_one.node, on_one.value, on_one.ref, on_one.faces, on_one.at), (2, 2.0, "#o1.f1", ("#o1.f1",), (6.0, 7.0, 8.0)))
         self.assertEqual(field_max_over(values, (), **common).node, 5)
         self.assertIsNone(field_max_over(values, (), **common).ref)
-
-
-def _glb_parts(path: Path) -> tuple[dict, bytes]:
-    raw = path.read_bytes()
-    json_length, _ = struct.unpack_from("<II", raw, 12)
-    return json.loads(raw[20:20 + json_length]), raw[20 + json_length + 8:]
 
 
 class CliLines(unittest.TestCase):
@@ -488,37 +392,21 @@ class CliLines(unittest.TestCase):
 
 
 def _cantilever(directory: Path) -> Path:
-    from build123d import Align, Box, export_step
-
-    path = directory / "cantilever.step"
-    export_step(Box(40.0, 4.0, 4.0, align=(Align.MIN, Align.CENTER, Align.CENTER)), str(path))
-    return path
+    return box_step(directory, "cantilever", (40.0, 4.0, 4.0), "x")
 
 
-def _end_faces(listing) -> tuple[str, str]:
-    by_x = {face.center_mm[0]: face.ref for face in listing.faces
-            if face.surface == "plane" and face.normal is not None and abs(abs(face.normal[0]) - 1) < 1e-6}
-    return by_x[min(by_x)], by_x[max(by_x)]
-
-
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class MeshOptions(unittest.TestCase):
     """mesh.py's ``order`` and ``size_field``: linear tets end to end, and local sizes that refine."""
 
     @classmethod
     def setUpClass(cls):
-        from cadgen import fea
         from cadgen.step_scene import read_scene
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.directory = Path(cls._tmp.name)
+        cls.directory = class_directory(cls)
         cls.step = _cantilever(cls.directory)
-        cls.fixed, cls.loaded = _end_faces(fea.faces(cls.step))
+        cls.fixed, cls.loaded = ends(cls.step)
         cls.occurrence = next(iter(read_scene(cls.step).leaves()))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def test_linear_elements_mesh_solve_and_write(self):
         import numpy as np
@@ -543,7 +431,7 @@ class MeshOptions(unittest.TestCase):
                   triangles6=outcome.boundary_quadratic, face_of_triangle=np.zeros(len(volume.boundary), dtype=np.int64),
                   scale=1.0, value_range=(0.0, float(outcome.von_mises.max())), extras={"faces": ["#o1.f1"]},
                   extra_attributes={"_TEMPERATURE": outcome.von_mises, "_HEAT_FLUX": outcome.displacement})
-        gltf, _ = _glb_parts(path)
+        gltf, _ = read_glb(path)
         primitive = gltf["meshes"][0]["primitives"][0]
         self.assertEqual(gltf["accessors"][primitive["indices"]]["count"], 3 * len(volume.boundary))
         self.assertEqual(list(primitive["attributes"])[-2:], ["_TEMPERATURE", "_HEAT_FLUX"])
@@ -640,7 +528,6 @@ class SkillDocs(unittest.TestCase):
             self.assertIn(f"references/{page}", text)
 
 
-
 class PrivateNames(unittest.TestCase):
     """No fea module reaches into another's private names: each shares what others use under a public name."""
 
@@ -670,75 +557,50 @@ class PrivateNames(unittest.TestCase):
         self.assertEqual(found, [])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Golden(unittest.TestCase):
-    """Static moved, not rewritten: a study with and without ``"analysis": "static"`` writes the same GLB, byte for byte."""
+    """Static moved, not rewritten: a study with and without ``"analysis": "static"`` writes the same GLB, byte for byte,
+    with von Mises beside the displacement as before."""
 
     def test_naming_static_changes_no_byte(self):
-        from cadgen import fea
-
-        with tempfile.TemporaryDirectory() as tmp, redirect_stderr(io.StringIO()):
+        with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
             step = _cantilever(directory)
-            fixed, loaded = _end_faces(fea.faces(step))
+            fixed, loaded = ends(step)
             study = {"material": "steel", "fixtures": [{"faces": [fixed]}], "mesh": {"size_mm": 2.0},
                      "loads": [{"faces": [loaded], "type": "force", "vector_N": [0, 0, -20]}],
                      "view": {"checks": [{"kind": "stress"}, {"kind": "displacement", "limit_mm": 1, "faces": [loaded]}]}}
-            bare = fea.solve(step, directory / "bare.glb", study=study)
-            named = fea.solve(step, directory / "named.glb", study={"analysis": "static", **study})
+            bare = solve(step, directory / "bare.glb", study)
+            named = solve(step, directory / "named.glb", {"analysis": "static", **study})
             self.assertEqual(bare.glb.read_bytes(), named.glb.read_bytes())
-            gltf, _ = _glb_parts(named.glb)
-            extras = gltf["meshes"][0]["extras"]
+            self.assertEqual(glb_attribute_names(named.glb), ["POSITION", "NORMAL", "COLOR_0", "_VON_MISES", "_DISPLACEMENT", "_FACE"])
+            extras = read_glb(named.glb)[0]["meshes"][0]["extras"]
             self.assertNotIn("analysis", extras)
             self.assertEqual([f["attribute"] for f in extras["fields"]], ["_VON_MISES", "_DISPLACEMENT"])
             self.assertEqual(set(extras["fields"][0]), {"attribute", "name", "units", "min", "max", "attribute_scale"})
-            first, second = (json.loads(r.sidecar.read_text(encoding="utf-8")) for r in (bare, named))
-            for sidecar in (first, second):
-                sidecar.pop("study")
-                sidecar.pop("timings")
-                sidecar["files"].pop("glb")
+            first, second = sidecar(bare), sidecar(named)
+            for written in (first, second):
+                written.pop("study")
+                written.pop("timings")
+                written["files"].pop("glb")
             self.assertEqual(first, second)
             self.assertNotIn("analysis", second)
             self.assertEqual(named.analysis, "static")
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class WrittenAttributes(unittest.TestCase):
     """What run.py writes beyond static: a study that names no face, and each field under its own attribute only."""
 
-    @classmethod
-    def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.directory = Path(cls._tmp.name)
-        cls.step = _cantilever(cls.directory)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
-
-    def test_static_writes_von_mises_beside_displacement_as_before(self):
-        from cadgen import fea
-
-        fixed, loaded = _end_faces(fea.faces(self.step))
-        study = {"material": "steel", "fixtures": [{"faces": [fixed]}], "mesh": {"size_mm": 4.0},
-                 "loads": [{"faces": [loaded], "type": "force", "vector_N": [0, 0, -20]}]}
-        with redirect_stderr(io.StringIO()):
-            result = fea.solve(self.step, self.directory / "static.glb", study=study)
-        gltf, _ = _glb_parts(result.glb)
-        self.assertEqual(list(gltf["meshes"][0]["primitives"][0]["attributes"]),
-                         ["POSITION", "NORMAL", "COLOR_0", "_VON_MISES", "_DISPLACEMENT", "_FACE"])
-
     def test_a_free_free_modal_study_names_no_face_and_solves_end_to_end(self):
-        from cadgen import fea
-
-        with redirect_stderr(io.StringIO()):
-            result = fea.solve(self.step, self.directory / "free.glb",
-                               study={"analysis": "modal", "material": "steel", "modes": 2, "mesh": {"size_mm": 4.0}})
+        with tempfile.TemporaryDirectory() as tmp:
+            result = solve(_cantilever(Path(tmp)), Path(tmp) / "free.glb",
+                           {"analysis": "modal", "material": "steel", "modes": 2, "mesh": {"size_mm": 4.0}})
+            gltf, _ = read_glb(result.glb)
         self.assertTrue(result.ok)
         self.assertEqual((result.analysis, result.occurrence), ("modal", "#o1"))
         self.assertEqual(result.summary["rigid_body_modes"], 6)
         self.assertEqual(len(result.summary["modes"]), 2)
-        gltf, _ = _glb_parts(result.glb)
         attributes = gltf["meshes"][0]["primitives"][0]["attributes"]
         # The mode shape is a vector: the surface is coloured by its magnitude, and no stress copy rides along.
         self.assertNotIn("_VON_MISES", attributes)

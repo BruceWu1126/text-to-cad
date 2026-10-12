@@ -33,11 +33,13 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Series, SeriesFrame, SolveContext
+from cadgen._internal.fea.analyses.base import (
+    AnalysisResult, FieldSpec, Series, SeriesFrame, SolveContext, finding, frame_attributes, max_frames, xyz,
+)
 from cadgen._internal.fea.analyses.thermal import (
-    HEAT_KEYS, RADIATION_KEY, ThermalAnalysis, ThermalInputs, build_system, check_limits, heat_echo, ladder_estimate,
-    parse_heat_keys, parse_radiation, plan_solver, radiation_line, radiation_summary, reference_of, space_result,
-    temperature_check,
+    HEAT_KEYS, RADIATION_KEY, ThermalAnalysis, ThermalInputs, build_system, check_limits, heat_echo, heat_refs,
+    ladder_estimate, parse_heat_keys, parse_radiation, part_maxima, parts_summary, plan_solver, radiation_line,
+    radiation_summary, reference_of, space_result, temperature_check, temperature_findings,
 )
 
 __all__ = ["ThermalTransientAnalysis", "TransientInputs", "time_label"]
@@ -80,6 +82,7 @@ def time_label(seconds: float) -> str:
 class ThermalTransientAnalysis(ThermalAnalysis):
     name: ClassVar[str] = "thermal_transient"
     word: ClassVar[str] = "Heat over time"
+    extras_word: ClassVar[str] = "temperature over time"
     study_keys: ClassVar[frozenset[str]] = frozenset({*HEAT_KEYS, RADIATION_KEY, "initial_C", "end_s", "step_s"})
     material_needs: ClassVar[frozenset[str]] = frozenset({"conductivity", "specific_heat", "density"})
     fields: ClassVar[tuple[FieldSpec, ...]] = (
@@ -115,8 +118,7 @@ class ThermalTransientAnalysis(ThermalAnalysis):
                 raise ValueError(f"step_s: the step ({step:g} s) is longer than the run ({end:g} s); use a shorter step or \"auto\"")
         reference = reference_of(temperatures, convection, initial, *(entry.ambient for entry in radiation))
         check_limits(document, reference)
-        refs = tuple(dict.fromkeys(ref for group in (*temperatures, *heat, *convection, *radiation) for ref in group.faces))
-        anchors = tuple(dict.fromkeys(ref for group in (*temperatures, *convection, *radiation) for ref in group.faces))
+        refs, anchors = heat_refs(temperatures, heat, convection, radiation)
         return TransientInputs(refs, anchors, False, temperatures=temperatures, heat=heat, convection=convection,
                                reference_C=reference, initial_C=initial, end_s=end, step_s=step, radiation=radiation)
 
@@ -130,8 +132,7 @@ class ThermalTransientAnalysis(ThermalAnalysis):
             steps = max(1, steps // 2)
         if inputs.radiation:
             steps *= 3  # Newton on the T⁴: a few solves a step
-        frames = int(getattr(ctx.budget, "max_frames", MAX_FRAMES) or MAX_FRAMES)
-        return ladder_estimate(ctx, steps=steps, frames=frames)
+        return ladder_estimate(ctx, steps=steps, frames=max_frames(ctx, MAX_FRAMES))
 
     def apply(self, rung, ctx: SolveContext, inputs: TransientInputs):
         if rung != "adaptive_steps":
@@ -171,11 +172,11 @@ class ThermalTransientAnalysis(ThermalAnalysis):
         capacity = operators.capacity(ctx.space, list(ctx.materials))
         timings["assemble_s"] = time.perf_counter() - started
         adaptive = bool(getattr(ctx.plan, "adaptive_steps", False))
-        frames = int(getattr(ctx.budget, "max_frames", MAX_FRAMES) or MAX_FRAMES)
         started = time.perf_counter()
         run = thermal_ops.march(
             system, capacity, inputs.initial_C, inputs.end_s, inputs.first_step, warnings,
-            frames=frames, adaptive=adaptive, solver=plan_solver(ctx), log=ctx.log, limit_s=timestep.time_limit(ctx),
+            frames=max_frames(ctx, MAX_FRAMES), adaptive=adaptive, solver=plan_solver(ctx), log=ctx.log,
+            limit_s=timestep.time_limit(ctx),
         )
         timings["solve_s"] = time.perf_counter() - started
         reached = inputs.end_s if run.stopped_at is None else run.stopped_at
@@ -186,10 +187,8 @@ class ThermalTransientAnalysis(ThermalAnalysis):
         temperatures = [state for _, state in run.frames]
         fluxes = [thermal_ops.heat_flux(ctx.space, list(ctx.materials), state) for state in temperatures]
         series = Series(kind="time", unit="s", default=run.hottest_frame, frames=[
-            SeriesFrame(value=round(t, 9), label=time_label(t), attributes={
-                "temperature": "_TEMPERATURE" if i == 0 else f"_TEMPERATURE_F{i}",
-                "heat_flux": "_HEAT_FLUX" if i == 0 else f"_HEAT_FLUX_F{i}",
-            })
+            SeriesFrame(value=round(t, 9), label=time_label(t),
+                        attributes=frame_attributes({"temperature": "_TEMPERATURE", "heat_flux": "_HEAT_FLUX"}, i))
             for i, (t, _) in enumerate(run.frames)
         ])
         how = ("multigrid CG" if plan_solver(ctx) or system.size >= operators.DIRECT_SOLVE_BELOW else "superlu") + \
@@ -211,8 +210,6 @@ class ThermalTransientAnalysis(ThermalAnalysis):
             # What the faces radiate at the end of the run.
             result.scalars["radiation"] = radiated
         if ctx.assembly is not None:
-            from cadgen._internal.fea.analyses.thermal import part_maxima
-
             result.scalars["part_max"] = part_maxima(ctx, run.node_peak)
             result.scalars["parts"] = ctx.assembly
         result.scalars["summary"] = self.summary(result, inputs, [])
@@ -239,7 +236,6 @@ class ThermalTransientAnalysis(ThermalAnalysis):
 
     def findings(self, ctx: SolveContext, result: AnalysisResult, inputs: TransientInputs,
                  check_results: list[dict], *, assembly: bool) -> list[dict]:
-        from cadgen._internal.fea.analyses.thermal import temperature_findings
         from cadgen._internal.fea.timestep import stopped_finding
 
         run = result.scalars["march"]
@@ -248,13 +244,9 @@ class ThermalTransientAnalysis(ThermalAnalysis):
         found += temperature_findings([c for c in check_results if not c.get("passed_until_stop")], assembly=assembly)
         if run.stopped_at is None and run.hottest_time >= inputs.end_s * (1 - 1e-9) and run.hottest > inputs.initial_C + 1e-6:
             last = run.curve_max[-2] if len(run.curve_max) > 1 else run.hottest
-            found.append({
-                "check": "fea", "severity": "info", "type": "still_heating",
-                "summary": f"Still warming at the end ({run.hottest:.4g} °C at {time_label(inputs.end_s)}): "
-                           "run longer to see where it settles, or solve it steady",
-                "description": f"the hottest point rose {run.hottest - last:.3g} °C over the last step",
-                "items": [],
-            })
+            found.append(finding("info", "still_heating", f"Still warming at the end ({run.hottest:.4g} °C at "
+                                 f"{time_label(inputs.end_s)}): run longer to see where it settles, or solve it steady",
+                                 f"the hottest point rose {run.hottest - last:.3g} °C over the last step"))
         return found
 
     # -- what is written -----------------------------------------------------------------------------
@@ -267,7 +259,7 @@ class ThermalTransientAnalysis(ThermalAnalysis):
         summary = {
             "max_temperature_C": round(run.hottest, 4),
             "max_at_s": round(run.hottest_time, 9),
-            "max_at_mm": [round(float(c), 3) for c in result.dof_locations[hottest_node]],
+            "max_at_mm": xyz(result.dof_locations[hottest_node]),
             "min_temperature_C": round(min(float(state.min()) for state in temperatures), 4),
             "final_max_temperature_C": round(float(run.final.max()), 4),
             "max_heat_flux_W_m2": round(max(float(flux.max()) for flux in result.frame_fields["heat_flux"]), 4),
@@ -285,17 +277,9 @@ class ThermalTransientAnalysis(ThermalAnalysis):
         if "radiation" in result.scalars:
             summary["radiation_at_end"] = result.scalars["radiation"]
         if "part_max" in result.scalars:
-            plan = result.scalars["parts"]
-            summary["parts"] = [
-                {"ref": part.ref, "name": plan.names[i], "material": plan.materials[i].name,
-                 "max_temperature_C": round(result.scalars["part_max"][i], 4)}
-                for i, part in enumerate(plan.parts)
-            ]
+            summary["parts"] = parts_summary(result)
         summary["checks"] = check_results
         return summary
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} temperature over time"
 
     def study_echo(self, inputs: TransientInputs, bare: Callable[[tuple[str, ...]], list[str]]) -> dict:
         return {**heat_echo(inputs, bare), "initial_C": inputs.initial_C, "end_s": inputs.end_s,

@@ -1,8 +1,7 @@
 """Modal superposition: a held part's steady response to a shake, built from its natural modes.
 
-A part held at its fixtures and shaken (its fixtures moved together, a "base"
-excitation) or pushed by forces that swing at one frequency answers, in each
-mode ``i``, like a single mass on a spring with modal damping ζ:
+A part held at its fixtures and shaken (its fixtures moved together, a "base" excitation) or pushed by forces that swing
+at one frequency answers, in each mode ``i``, like a single mass on a spring with modal damping ζ:
 
 - mode shapes are mass-normalised (φᵢᵀ M φᵢ = 1) and zero on held DOF;
 - base excitation: the participation factor Γᵢ = φᵢᵀ M r, r the part moved
@@ -13,16 +12,13 @@ mode ``i``, like a single mass on a spring with modal damping ζ:
 - the effective mass of mode i along r is Γᵢ² (tonnes); all modes together hold
   rᵀ M r, so a few modes holding most of it are enough to shake the part.
 
-The response is complex: the motion is Re(U e^{iωt}) = Re U cos ωt − Im U sin ωt.
-A vector's largest size over a cycle is exact (:func:`vector_peak`); von Mises
-is not linear in the phase, so its peak is sampled at :data:`PHASES` phases
+The response is complex: the motion is Re(U e^{iωt}) = Re U cos ωt − Im U sin ωt. A vector's largest size over a cycle
+is exact (:func:`vector_peak`); von Mises is not linear in the phase, so its peak is sampled at :data:`PHASES` phases
 over half a cycle (σ at θ + π is −σ at θ, the same von Mises).
 
-Every function here is what the dynamic analyses share: ``harmonic`` (sine
-sweep), ``random_vibration`` (PSD), ``shock`` (response spectrum) and
-``transient`` (modal method). Units are the engine's: mm, N, tonne, s, MPa;
-frequencies in rad/s unless a name says Hz. Numeric imports live inside the
-functions, so importing this module stays instant.
+Every function here is what the dynamic analyses share: ``harmonic`` (sine sweep), ``random_vibration`` (PSD), ``shock``
+(response spectrum) and ``transient`` (modal method). Units are the engine's: mm, N, tonne, s, MPa; frequencies in rad/s
+unless a name says Hz. Numeric imports live inside the functions, so importing this module stays instant.
 """
 
 from __future__ import annotations
@@ -94,31 +90,20 @@ class Modes:
 
 # -- finding the modes -------------------------------------------------------------------------------
 
-def find_modes(
-    K,
-    M,
-    fixed: "np.ndarray",
-    top_Hz: float,
-    *,
-    method: str = "arpack",
-    locations: "np.ndarray | None" = None,
-    component: "np.ndarray | None" = None,
-    start: int = START_MODES,
-    cap: int = MAX_MODES,
-    enough: "Callable[[np.ndarray, np.ndarray, np.ndarray], bool] | None" = None,
-) -> Modes:
+def find_modes(K, M, fixed: "np.ndarray", top_Hz: float, *, method: str = "arpack",
+               locations: "np.ndarray | None" = None, component: "np.ndarray | None" = None, start: int = START_MODES,
+               cap: int = MAX_MODES, enough: "Callable[[np.ndarray, np.ndarray, np.ndarray], bool] | None" = None
+               ) -> Modes:
     """Every mode of ``K φ = ω² M φ`` (held DOF ``fixed`` removed) up to ``top_Hz``, at least one.
 
     ``fixed`` is the held DOF, or a :class:`~cadgen._internal.fea.supports.Supports` (rollers on a sloped or curved
     face are held in their nodes' own axes; the modes come back in the global ones).
 
-    The search asks for ``start`` modes and doubles until the highest found
-    passes ``top_Hz``, until ``cap`` modes, or until ``enough(omega2, vectors,
-    free)`` says the modes so far are enough (the ladder's reduce_modes: they
-    hold the share of the mass it keeps). ``method`` ``"arpack"`` factorises
-    ``K`` (shift-invert at 0); ``"lobpcg"`` uses a multigrid preconditioner
-    (``locations`` and ``component`` of the free DOF help it) and no
-    factorisation. The part must be held: with nothing held, ``K`` is singular.
+    The search asks for ``start`` modes and doubles until the highest found passes ``top_Hz``, until ``cap`` modes, or
+    until ``enough(omega2, vectors, free)`` says the modes so far are enough (the ladder's reduce_modes: they hold the
+    share of the mass it keeps). ``method`` ``"arpack"`` factorises ``K`` (shift-invert at 0); ``"lobpcg"`` uses a
+    multigrid preconditioner (``locations`` and ``component`` of the free DOF help it) and no factorisation. The part
+    must be held: with nothing held, ``K`` is singular.
     """
     import numpy as np
 

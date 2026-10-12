@@ -21,27 +21,13 @@ without a plate between them. Each STEP is a build123d solid in a temporary dire
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import struct
-import tempfile
 import unittest
-from contextlib import redirect_stderr
 from pathlib import Path
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
+from tests.python.support.fea_fixtures import box_step, class_directory, ends, glb_extras, needs_fea, sidecar, solve, value_error
 
 from cadgen._internal.fea.materials import lookup_material  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 SIGMA = 5.670374419e-8
 KELVIN = 273.15
@@ -57,19 +43,6 @@ def opposed_squares(a: float, c: float) -> float:
         + Y * math.sqrt(1 + X * X) * math.atan(Y / math.sqrt(1 + X * X))
         - X * math.atan(X) - Y * math.atan(Y)
     )
-
-
-def glb_extras(path: Path) -> dict:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    return json.loads(raw[20:20 + length])["meshes"][0]["extras"]
-
-
-def solve(step: Path, out: Path, study: dict):
-    from cadgen import fea
-
-    with redirect_stderr(io.StringIO()):
-        return fea.solve(step, out, study=study)
 
 
 class StudyFile(unittest.TestCase):
@@ -106,15 +79,13 @@ class StudyFile(unittest.TestCase):
              "already radiates in radiation[0]"),
         ]
         for radiation, words in cases:
-            with self.subTest(words=words), self.assertRaises(ValueError) as caught:
-                self.parse(radiation=radiation)
-            self.assertIn(words, str(caught.exception))
+            with self.subTest(words=words):
+                self.assertIn(words, value_error(self, self.parse, radiation=radiation))
 
     def test_nothing_to_take_the_heat_still_names_radiation(self):
-        with self.assertRaises(ValueError) as caught:
-            self.parse(heat=[{"faces": ["#o1.f1"], "W": 5}])
-        self.assertIn("nowhere for the heat to go, has no steady temperature", str(caught.exception))
-        self.assertIn("'radiation' entry", str(caught.exception))
+        message = value_error(self, self.parse, heat=[{"faces": ["#o1.f1"], "W": 5}])
+        self.assertIn("nowhere for the heat to go, has no steady temperature", message)
+        self.assertIn("'radiation' entry", message)
 
     def test_a_transient_study_takes_radiation_and_nothing_else_needed(self):
         from cadgen._internal.fea.study import parse_study
@@ -132,7 +103,7 @@ class StudyFile(unittest.TestCase):
         self.assertEqual([(entry.faces, entry.emissivity) for entry in study.inputs.thermal.radiation], [(("#o1.f2",), 0.9)])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class ViewFactors(unittest.TestCase):
     """The view factor routine alone, on two triangulated squares facing each other (no mesher)."""
 
@@ -193,31 +164,16 @@ class ViewFactors(unittest.TestCase):
             self.assertEqual(count, radiation.MAX_PATCHES, faces)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Benchmarks(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.dir = Path(self.tmp.name)
-
-    def tearDown(self):
-        self.tmp.cleanup()
-
-    def plate(self):
-        from build123d import Align, Box, export_step
-
-        from cadgen import fea
-
-        step = self.dir / "plate.step"
-        export_step(Box(100, 100, 2, align=(Align.CENTER, Align.CENTER, Align.MIN)), str(step))
-        faces = fea.faces(step).faces
-        top = next(f.ref for f in faces if f.normal and f.normal[2] > 0.9)
-        bottom = next(f.ref for f in faces if f.normal and f.normal[2] < -0.9)
-        return step, top, bottom
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = class_directory(cls)
 
     def test_a_plate_radiating_to_its_surroundings_settles_where_the_closed_form_says(self):
-        step, top, bottom = self.plate()
-        out = self.dir / "plate.glb"
-        result = solve(step, out, {**BASE, "mesh": {"size_mm": 10}, "heat": [{"faces": [bottom], "W": 100}],
+        step = box_step(self.dir, "plate", (100, 100, 2), "base")
+        bottom, top = ends(step, 2)
+        result = solve(step, self.dir / "plate.glb", {**BASE, "mesh": {"size_mm": 10}, "heat": [{"faces": [bottom], "W": 100}],
                                    "radiation": [{"faces": [top], "emissivity": 0.9, "ambient_C": 25}]})
         self.assertTrue(result.ok)
         expected = (100 / (0.9 * SIGMA * 0.01) + (25 + KELVIN) ** 4) ** 0.25 - KELVIN
@@ -225,12 +181,10 @@ class Benchmarks(unittest.TestCase):
         # The radiating face is the plate's coolest; its rise over the surroundings within 1 % of the closed form.
         radiating = summary["min_temperature_C"]
         self.assertLess(abs(radiating - expected) / (expected - 25), 0.01, (radiating, expected))
-        self.assertLess(abs(radiating + KELVIN - (expected + KELVIN)) / (expected + KELVIN), 0.01)
         self.assertAlmostEqual(summary["radiation"]["entries"][0]["net_W"], 100.0, places=3)
         self.assertLess(summary["heat_balance"], 1e-6)
         self.assertIn("Newton", result.mesh["solver"])
-        extras = glb_extras(out)
-        self.assertEqual(extras["study"]["radiation"], [{"faces": [top], "emissivity": 0.9, "ambient_C": 25.0}])
+        self.assertEqual(glb_extras(result.glb)["study"]["radiation"], [{"faces": [top], "emissivity": 0.9, "ambient_C": 25.0}])
         self.assertTrue(any(line.startswith("radiated 100 W from") for line in result.human_lines()))
         print(f"\n  plate to its surroundings: {radiating:.4f} °C against {expected:.4f} °C closed form "
               f"({100 * (radiating - expected) / (expected - 25):+.3f}% of the rise)")
@@ -273,19 +227,15 @@ class Benchmarks(unittest.TestCase):
               f"exchange {exchange:.4f} W against {expected_Q:.4f} W ({100 * (exchange - expected_Q) / expected_Q:+.2f}%)")
 
     def cube_cooling(self, study_changes: dict):
-        from build123d import Box, export_step
-
         from cadgen import fea
 
-        step = self.dir / "cube.step"
-        export_step(Box(10, 10, 10), str(step))
+        step = box_step(self.dir, "cube", (10, 10, 10))
         faces = [face.ref for face in fea.faces(step).faces]
         study = {"analysis": "thermal_transient", "material": "aluminum-6061-t6", "mesh": {"size_mm": 5},
                  "initial_C": 500, "end_s": 300, "step_s": 1.0,
                  "radiation": [{"faces": faces, "emissivity": 0.9, "ambient_C": 25}], **study_changes}
-        out = self.dir / "cube.glb"
-        result = solve(step, out, study)
-        return result, json.loads(out.with_suffix(".json").read_text(encoding="utf-8"))
+        result = solve(step, self.dir / "cube.glb", study)
+        return result, sidecar(result)
 
     @staticmethod
     def lumped(t: float) -> float:

@@ -1,28 +1,20 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
-import { feaControls, feaVerdict, readFeaResult, reynoldsWarning, studyRows } from '../../feaResult.js';
+import { feaControls, feaVerdict, reynoldsWarning, studyRows } from '../../feaResult.js';
 import { colourBarText } from '../../FeaColourBar.jsx';
 import { coolantRows, cooledRows, flowRows, heatedRows, keptAtRows, madeOfRows } from '../setup.js';
 import conjugateHeat, { COOLED_SETUP, cooledLimitWord } from './conjugate_heat.js';
 import { feaAnalysis } from './index.js';
+import { feaFile, vec } from '../../__tests__/feaFile.js';
 
 const LIMIT = 'Steady; the flow carries the heat but is not changed by it (no buoyancy, constant properties).';
 
 // A cooled-by-flow result as cadgen writes one: the part's temperature first, the fluid's beside it, nothing deformed.
 function cooledResult(analysis: Record<string, unknown> = {}, extras: Record<string, unknown> = {}) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.024, 0, 0, 0, 0.004, 0]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_temperature', new BufferAttribute(new Float32Array([23.5, 24.1, 23.8]), 1));
-  geometry.setAttribute('_fluid_temperature', new BufferAttribute(new Float32Array([20, 21.9, 21]), 1));
-  geometry.setAttribute('_wall_heat_flux', new BufferAttribute(new Float32Array([4000, 2500, 3000]), 1));
-  geometry.setAttribute('_heat_transfer_coefficient', new BufferAttribute(new Float32Array([1100, 1300, 1200]), 1));
-  geometry.setAttribute('_pressure', new BufferAttribute(new Float32Array([0.48, 0, 0.24]), 1));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 1]), 1));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  return feaFile({
+    position: [0, 0, 0, 0.024, 0, 0, 0, 0.004, 0], _displacement: vec(9), _temperature: [23.5, 24.1, 23.8],
+    _fluid_temperature: [20, 21.9, 21], _wall_heat_flux: [4000, 2500, 3000], _heat_transfer_coefficient: [1100, 1300, 1200],
+    _pressure: [0.48, 0, 0.24], _face: [0, 0, 1],
+  }, {
     generator: 'cadgen fea', name: 'cold plate cooled by flow', deformation_scale: null, faces: ['#o1.f3', '#o1.f7'], occurrence: '#o1',
     analysis: { type: 'conjugate_heat', tier: 3, word: 'Cooled by flow', estimate: false, limits: [LIMIT], noun: 'this heat',
       reference_C: 20, warnings: [], reynolds: { value: 39.85, limit: 2000, kind: 'internal', length_mm: 4 }, regime: 'laminar', ...analysis },
@@ -45,9 +37,6 @@ function cooledResult(analysis: Record<string, unknown> = {}, extras: Record<str
     findings: [],
     ...extras,
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 describe('conjugate_heat', () => {

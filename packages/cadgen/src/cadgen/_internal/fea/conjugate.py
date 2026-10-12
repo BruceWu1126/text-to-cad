@@ -46,7 +46,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import numpy as np
@@ -61,8 +61,6 @@ __all__ = [
 FLUID_HEAT = {"air": (0.0263, 1007.0), "water": (0.606, 4181.0)}
 #: The turbulent Prandtl number of the eddy diffusivity and the thermal wall function.
 PRANDTL_T = 0.85
-#: The law of the wall's constants (as the turbulence model's wall function): κ, E.
-KAPPA, E_WALL = 0.41, 9.793
 #: GMRES on the coupled system: relative tolerance and iteration cap.
 KRYLOV_TOL, MAX_KRYLOV = 1e-10, 2000
 
@@ -386,7 +384,6 @@ def local_mixed_temperature(space, u: "np.ndarray", T: "np.ndarray", points: "np
 def boundary_flux(space, rows: "np.ndarray", u: "np.ndarray", T: "np.ndarray", rho_cp: float) -> tuple[float, float]:
     """Over boundary triangles ``rows`` of the fluid: the volume flow ∫ u · n (mm³/s) and the heat carried
     ∫ ρ c_p (u · n) T (mW), n out of the fluid, with the quadratic velocity and the linear temperature."""
-    import numpy as np
     from skfem import ElementTetP1, Functional, asm
     from skfem.helpers import dot
 

@@ -1,28 +1,22 @@
 """Turbulent flow (lite): steady RANS (k-omega SST) through or around the part, and its push on the part.
 
-The study is the laminar flow's (:mod:`.cfd`, spec 5.14): ``flow`` (``internal``
-with inlets and outlets on sides of the part's bounding box, or ``external``
-with a free stream), the fluid, and an optional ``map_to_structure``. Each
-inlet (and an external flow) may add its ``turbulence_intensity`` (a share,
-0.05 = 5 %). The fluid region and its mesh are the laminar flow's
-(:mod:`..fluid_domain`); the flow is :mod:`..turbulence`: the Taylor-Hood mean
-flow with Menter's k-omega SST eddy viscosity, SUPG-stabilised k and omega,
-wall functions (Spalding's law, the first element kept in the log layer), and
-pseudo-transient continuation from a Stokes start.
+The study is the laminar flow's (:mod:`.cfd`, spec 5.14), and each inlet (and an
+external flow) may add its ``turbulence_intensity`` (a share, 0.05 = 5 %). The
+fluid region and its mesh are the laminar flow's (:mod:`..fluid_domain`); the
+flow is :mod:`..turbulence`: the Taylor-Hood mean flow with Menter's k-omega SST
+eddy viscosity, SUPG-stabilised k and omega, wall functions (Spalding's law, the
+first element kept in the log layer), and pseudo-transient continuation from a
+Stokes start.
 
 An inlet's ``"developed"`` profile is the settled turbulent flow of a long
 straight duct of the opening's shape, solved on the opening by the same model
 (axial speed, k and omega), so a pipe fed that way is fully developed from its
 inlet; ``"uniform"`` is one speed with k and omega from the intensity.
 
-What comes out is the laminar flow's: the wall ``pressure`` (Pa, gauge) and
-``wall_shear`` (Pa, the wall function's rho u_tau^2) and the ``speed`` near the
-wall (m/s, the fastest flow within a passage width) on the part's wetted faces,
-the pressure drop, flow rates, fastest speed and force in the summary, checks
-``pressure_drop`` and ``velocity``, and with ``map_to_structure`` the wall
-pressure applied to a static solve of the part (stress and displacement join).
-The summary adds the turbulence: the eddy-to-fluid viscosity ratio (mean and
-largest), the wall function's y+ and the march's steps.
+What comes out, the checks and ``map_to_structure`` are the laminar flow's, the
+``wall_shear`` being the wall function's rho u_tau^2. The summary adds the
+turbulence: the eddy-to-fluid viscosity ratio (mean and largest), the wall
+function's y+ and the march's steps.
 
 Its limits are written into every result: "Steady RANS (k-omega SST), wall
 functions, incompressible". Below Re 2000 (internal, the inlet's hydraulic
@@ -31,20 +25,19 @@ it still solves, and says the laminar ``cfd`` is the better model there.
 
 Stdlib only at import.
 """
-
 from __future__ import annotations
 
 import dataclasses
-import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, SolveContext
+from cadgen._internal.fea.analyses.base import AnalysisResult, SolveContext, finding
 from cadgen._internal.fea.analyses.cfd import (
-    DENSITY, PASCAL, RE_LIMIT, SPEED, VISCOSITY, CfdAnalysis, CfdInputs, flux_of, flow_numbers, flow_tracers, speed_reach,
-    speed_to_part, wall_to_part, wall_triangles,
+    ASSEMBLE_S, DENSITY, FLOW_WORDS, MESH_S, PASCAL, RE_LIMIT, SPEED, VISCOSITY, CfdAnalysis, CfdInputs, balance_sentence,
+    flow_lines, flow_numbers, flow_summary, flow_tracers, fluid_mesh_record, flux_of, limit_findings, mesh_flow, openings_of,
+    part_result, reynolds_record, structure_line, structure_summary, wall_fields, wall_triangles,
 )
 
 __all__ = ["CfdTurbulentAnalysis", "CfdTurbulentInputs", "LIMITS", "laminar_sentence"]
@@ -70,8 +63,6 @@ FAST_SHARE = 0.85
 FACTORS, REUSE_SHARE, ASSEMBLIES = 3.0, 0.2, 2.0
 #: A Krylov solve here (the rotated walls, the eddy viscosity's spread) costs this many laminar ones.
 ITERATIVE_FACTOR = 4.0
-#: A check is close once its value passes this share of its limit.
-CLOSE_AT = 0.9
 
 
 def laminar_sentence(value: float, limit: int) -> str:
@@ -119,15 +110,27 @@ def _strip(document: dict) -> tuple[dict, tuple[float, ...], float]:
     return {**document, "flow": flow}, tuple(intensities), intensity
 
 
+def wall_traction(space, flow, rho: float):
+    """At every node: the wall function's shear stress rho u_tau^2 (MPa), and its traction along the slip."""
+    import numpy as np
+
+    shear = np.zeros(space.scalar_count)
+    traction = np.zeros((space.scalar_count, 3))
+    if len(flow.wall_nodes):
+        tau = rho * flow.wall_u_tau ** 2
+        slip = flow.wall_slip
+        length = np.linalg.norm(slip, axis=1)
+        shear[flow.wall_nodes] = tau
+        traction[flow.wall_nodes] = tau[:, None] * slip / np.where(length > 0, length, 1.0)[:, None]
+    return shear, traction
+
+
 class CfdTurbulentAnalysis(CfdAnalysis):
     name: ClassVar[str] = "cfd_turbulent"
-    tier: ClassVar[int] = 3
     word: ClassVar[str] = "Turbulent flow"
     limits: ClassVar[tuple[str, ...]] = LIMITS
     ladder: ClassVar[tuple[str, ...]] = ("fluid_coarsen", "continuation", "iterative")
-    noun: ClassVar[str] = "this flow"
-
-    # -- parse ---------------------------------------------------------------------------------------
+    extras_word: ClassVar[str] = "turbulent flow"
 
     def parse(self, document: dict) -> CfdTurbulentInputs:
         stripped, intensities, intensity = _strip(document)
@@ -154,29 +157,11 @@ class CfdTurbulentAnalysis(CfdAnalysis):
         return super().sizes(ctx, setup)
 
     def estimate(self, ctx: SolveContext, inputs: CfdTurbulentInputs):
-        from cadgen._internal.fea import fit
-        from cadgen._internal.fea.analyses import cfd
-
-        setup = self._setup(ctx, inputs)
         plan = ctx.plan
-        wall, far = self.sizes(ctx, setup)
-        tets = self._tets(setup, wall, far)
-        n = 3.0 * cfd.NODES_PER_TET * tets + 0.25 * tets
+        tets, n, per, memory = self._cost(ctx, self.setup_of(ctx, inputs), ITERATIVE_FACTOR)
         steps = STEPS[inputs.kind] * (FAST_SHARE if "continuation" in plan.taken else 1.0)
-        build = cfd.BYTES_PER_TET * tets
-        matrix = 12.0 * cfd.NNZ_PER_ROW * n
-        if plan.solver == "iterative":
-            per, memory = ITERATIVE_FACTOR * cfd.ITERATIVE_S * n, build + matrix * (1.0 + fit.AMG_COPIES)
-            solves = steps + 1.0
-        else:
-            per, memory = cfd.DIRECT_S * n ** 1.5, build + matrix * 2.0 + 16.0 * cfd.FILL * n ** 1.5
-            solves = FACTORS + REUSE_SHARE * steps
-        seconds = cfd.MESH_S * tets + solves * per + steps * ASSEMBLIES * cfd.ASSEMBLE_S * tets
-        if inputs.mapped:
-            structure = fit.solid_estimate(ctx)
-            memory = max(memory, structure.memory_bytes - fit.BASE_BYTES)
-            seconds += structure.seconds
-        return fit.Estimate(dofs=int(n), memory_bytes=int(fit.BASE_BYTES + memory), seconds=float(seconds))
+        solves = steps + 1.0 if plan.solver == "iterative" else FACTORS + REUSE_SHARE * steps
+        return self._estimate(ctx, inputs, n, memory, MESH_S * tets + solves * per + steps * ASSEMBLIES * ASSEMBLE_S * tets)
 
     def apply(self, rung, ctx: SolveContext, inputs: CfdTurbulentInputs):
         from cadgen._internal.fea import fit
@@ -196,26 +181,15 @@ class CfdTurbulentAnalysis(CfdAnalysis):
     def solve(self, ctx: SolveContext, inputs: CfdTurbulentInputs) -> AnalysisResult:
         import time
 
-        import numpy as np
-
-        from cadgen._internal.fea import fluid_domain, turbulence
-        from cadgen._internal.fea.femspace import FemSpace
+        from cadgen._internal.fea import turbulence
 
         timings: dict[str, float] = {}
-        setup = self._setup(ctx, inputs)
+        setup = self.setup_of(ctx, inputs)
         domain = setup.domain
-        timings["fluid_domain_s"] = domain.seconds
         wall, far = self.sizes(ctx, setup)
-        if ctx.log:
-            ctx.log(f"meshing the {domain.kind} flow region at {wall:.3g} mm" + (f" (free stream {far:.3g} mm)" if far > wall else ""))
-        started = time.perf_counter()
-        fluid = fluid_domain.mesh_fluid(domain, wall, far)
-        space = FemSpace.build(fluid, 2)
-        timings["fluid_mesh_s"] = time.perf_counter() - started
+        fluid, space, face_of, row_kind = mesh_flow(ctx, domain, wall, far, timings)
 
         started = time.perf_counter()
-        face_of = {face.index: face for face in domain.faces}
-        row_kind = np.array([face_of[int(o)].kind if int(o) in face_of else "wall" for o in fluid.boundary_ordinal])
         problem, developed = self._problem(space, fluid, face_of, row_kind, inputs, setup)
         timings["inlet_s"] = time.perf_counter() - started
         started = time.perf_counter()
@@ -228,51 +202,38 @@ class CfdTurbulentAnalysis(CfdAnalysis):
 
         started = time.perf_counter()
         post = flow_numbers(space, fluid, face_of, row_kind, flow, inputs)
-        self._wall_function_shear(space, row_kind, flow, post, inputs.fluid.density_kg_m3 * DENSITY)
-        pressure, shear = wall_to_part(ctx, space, fluid, face_of, row_kind, post)
-        speed, reach = speed_to_part(ctx, space, fluid, face_of, row_kind, np.linalg.norm(post["nodal_velocity"], axis=1) / SPEED,
-                                     speed_reach(inputs.kind, setup.length_mm, wall))
+        self.wall_function_shear(space, row_kind, flow, post, inputs.fluid.density_kg_m3 * DENSITY)
+        pressure, shear, speed, reach = wall_fields(ctx, space, fluid, face_of, row_kind, post, inputs.kind, setup.length_mm, wall)
         timings["post_s"] = time.perf_counter() - started
         started = time.perf_counter()
         tracers = flow_tracers(space, row_kind, post, domain, label="Turbulent flow")
         timings["tracers_s"] = time.perf_counter() - started
 
-        warnings = list(flow.warnings)
         analysis_warnings = []
         limit = RE_LIMIT[inputs.kind]
-        reynolds = {"value": round(setup.reynolds, 2), "limit": limit, "kind": inputs.kind,
-                    "length_mm": round(setup.length_mm, 4), "turbulent": setup.reynolds >= limit}
+        reynolds = {**reynolds_record(setup, inputs.kind), "turbulent": setup.reynolds >= limit}
         if setup.reynolds < limit:
             analysis_warnings.append(laminar_sentence(setup.reynolds, limit))
         if post["imbalance"] > 0.01:
-            analysis_warnings.append(f"the flow in and out differ by {post['imbalance']:.1%}: the solve did not settle; "
-                                     "check the result with a finer mesh")
+            analysis_warnings.append(balance_sentence(post["imbalance"]))
         if not flow.converged:
             analysis_warnings += [w for w in flow.warnings if w.startswith("the turbulent flow stopped")]
 
-        fields = {"pressure": pressure, "wall_shear": shear, "speed": speed}
-        result = AnalysisResult(
-            dof_locations=ctx.space.dof_locations, vertices=ctx.space.vertices, tets=ctx.space.tets,
-            boundary_quadratic=ctx.space.boundary_quadratic, element_dofs=ctx.space.element_dofs, fields=fields,
+        result = part_result(
+            ctx, {"pressure": pressure, "wall_shear": shear, "speed": speed},
             dofs=int(space.basis.N + flow.pressure_basis.N + 2 * flow.pressure_basis.N),
             solver=f"Taylor-Hood P2/P1 RANS, k-omega SST (P1, SUPG), {'GMRES + multigrid' if solver == 'iterative' else 'direct'}",
-            timings={**timings, **{f"flow_{k}": v for k, v in flow.timings.items()}}, warnings=warnings,
+            timings={**timings, **{f"flow_{k}": v for k, v in flow.timings.items()}}, warnings=list(flow.warnings),
             scalars={
                 "post": post, "reynolds": reynolds, "flow": flow, "wall_mm": wall, "far_mm": far, "developed": developed,
-                "speed_reach_mm": reach,
-                "fluid_mesh": {"elements": int(len(fluid.tets)), "nodes": int(len(fluid.nodes)),
-                               "wall_size_mm": round(wall, 4), "far_size_mm": round(far, 4)},
+                "speed_reach_mm": reach, "fluid_mesh": fluid_mesh_record(fluid, wall, far),
                 "analysis_warnings": analysis_warnings,
                 "analysis_extras": {"turbulence": {"model": "k-omega SST", "reynolds": reynolds["value"],
                                                    "kind": inputs.kind, "viscosity_ratio_max": round(flow.nut_ratio[1], 2)},
                                     **({"motion": tracers} if tracers else {})},
             },
         )
-        if inputs.mapped:
-            started = time.perf_counter()
-            self._structure(ctx, inputs, result, pressure)
-            result.timings["structure_s"] = time.perf_counter() - started
-        return result
+        return self._mapped(ctx, inputs, result, pressure)
 
     def _problem(self, space, fluid, face_of, row_kind, inputs: CfdTurbulentInputs, setup):
         """The RANS problem: inlets (velocity, k and omega), slip sides, outlets, and the walls the law acts on."""
@@ -290,7 +251,7 @@ class CfdTurbulentAnalysis(CfdAnalysis):
         w_in: dict[int, float] = {}
         outlets = []
         developed: dict[str, dict] = {}
-        opening_of = np.array([face_of[int(o)].opening if int(o) in face_of else None for o in fluid.boundary_ordinal], dtype=object)
+        opening_of = openings_of(fluid, face_of)
         inlet_rows = np.flatnonzero(row_kind == "inlet")
         outlet_rows = np.flatnonzero(row_kind == "outlet")
         if inputs.kind == "external":
@@ -360,23 +321,12 @@ class CfdTurbulentAnalysis(CfdAnalysis):
         """The RANS problem on the fluid's space: what :func:`..turbulence.solve_rans` takes."""
         return self._problem(space, fluid, face_of, row_kind, inputs, setup)[0]
 
-    def wall_function_shear(self, space, row_kind, flow, post: dict, rho: float) -> None:
-        """The wall shear (and the force on the part) from the wall function, into ``post``."""
-        self._wall_function_shear(space, row_kind, flow, post, rho)
-
     @staticmethod
-    def _wall_function_shear(space, row_kind, flow, post: dict, rho: float) -> None:
-        """The wall shear is the wall function's, rho u_tau^2 along the slip; the force on the part follows it."""
+    def wall_function_shear(space, row_kind, flow, post: dict, rho: float) -> None:
+        """Into ``post``: the wall shear, the wall function's rho u_tau^2 along the slip, and the force on the part."""
         import numpy as np
 
-        shear = np.zeros(space.scalar_count)
-        traction = np.zeros((space.scalar_count, 3))
-        if len(flow.wall_nodes):
-            tau = rho * flow.wall_u_tau ** 2                       # MPa
-            slip = flow.wall_slip
-            length = np.linalg.norm(slip, axis=1)
-            shear[flow.wall_nodes] = tau
-            traction[flow.wall_nodes] = tau[:, None] * slip / np.where(length > 0, length, 1.0)[:, None]
+        shear, traction = wall_traction(space, flow, rho)
         post["shear_nodes_Pa"] = shear * PASCAL
         walls = np.flatnonzero(row_kind == "wall")
         if len(walls):
@@ -393,108 +343,46 @@ class CfdTurbulentAnalysis(CfdAnalysis):
                  check_results: list[dict], *, assembly: bool) -> list[dict]:
         from cadgen._internal.fea import checks
 
-        found: list[dict] = []
-        if result.solved:
-            found += checks.findings(result.solved[0])
+        found: list[dict] = list(checks.findings(result.solved[0])) if result.solved else []
         reynolds = result.scalars["reynolds"]
         if not reynolds["turbulent"]:
-            found.append({
-                "check": "fea", "severity": "warning", "type": "reynolds_laminar_range",
-                "summary": laminar_sentence(reynolds["value"], reynolds["limit"]),
-                "description": f"Re {reynolds['value']:.0f} from the {'inlet hydraulic diameter' if inputs.kind == 'internal' else 'part length'} "
-                               f"of {reynolds['length_mm']:.4g} mm",
-                "items": [],
-            })
+            found.append(finding(
+                "warning", "reynolds_laminar_range", laminar_sentence(reynolds["value"], reynolds["limit"]),
+                f"Re {reynolds['value']:.0f} from the {'inlet hydraulic diameter' if inputs.kind == 'internal' else 'part length'} "
+                f"of {reynolds['length_mm']:.4g} mm"))
         flow = result.scalars["flow"]
         if not flow.converged:
-            found.append({
-                "check": "fea", "severity": "warning", "type": "turbulent_unsettled",
-                "summary": f"The turbulent flow was still changing by {flow.residual:.1e} of its speed a step when it stopped",
-                "description": "its numbers are approximate; a finer or a coarser mesh may settle", "items": [],
-            })
-        for check in check_results:
-            if check["kind"] not in ("pressure_drop", "velocity") or check["status"] == "passes":
-                continue
-            if check.get("settled") is False and check["ratio"] <= check["close_at"]:
-                continue   # held back from passing only because the flow did not settle: the finding above says so
-            what = "pressure drop" if check["kind"] == "pressure_drop" else "fastest flow"
-            value = f"{check['value']:.4g} {check['unit']}"
-            fails = check["status"] == "fails"
-            found.append({
-                "check": "fea", "severity": "error" if fails else "warning",
-                "type": f"{check['kind']}_{'over_limit' if fails else 'close_to_limit'}",
-                "summary": f"The {what} is {value}, {'over' if fails else 'close to'} the {check['limit']:g} {check['unit']} allowed",
-                "description": f"{what} {value} against a {check['limit']:g} {check['unit']} limit ({check['ratio']:.2f} of it)",
-                "items": [{"text": f"the {what}", **check["where"]}],
-            })
+            found.append(finding(
+                "warning", "turbulent_unsettled",
+                f"The turbulent flow was still changing by {flow.residual:.1e} of its speed a step when it stopped",
+                "its numbers are approximate; a finer or a coarser mesh may settle"))
+        found += limit_findings(check_results, FLOW_WORDS)
         post = result.scalars["post"]
         if post["imbalance"] > 0.01:
-            found.append({
-                "check": "fea", "severity": "warning", "type": "flow_balance",
-                "summary": f"The flow in and out differ by {post['imbalance']:.1%}: the flow may not have settled",
-                "description": "the solve leaves fluid unaccounted for; a finer mesh should close it", "items": [],
-            })
+            found.append(finding(
+                "warning", "flow_balance", f"The flow in and out differ by {post['imbalance']:.1%}: the flow may not have settled",
+                "the solve leaves fluid unaccounted for; a finer mesh should close it"))
         return found
 
     def summary(self, result: AnalysisResult, inputs: CfdTurbulentInputs, check_results: list[dict]) -> dict:
-        import numpy as np
-
-        post, flow, reynolds = result.scalars["post"], result.scalars["flow"], result.scalars["reynolds"]
-        wet = post["wetted_nodes"]
-        pressure, shear = result.fields["pressure"], result.fields["wall_shear"]
-        summary: dict[str, Any] = {
-            "flow_kind": inputs.kind,
-            "fluid": {"name": inputs.fluid.name, "density_kg_m3": inputs.fluid.density_kg_m3,
-                      "viscosity_Pa_s": inputs.fluid.viscosity_Pa_s},
-            "reynolds": dict(reynolds),
-            "max_velocity_m_s": round(post["max_velocity_m_s"], 6),
-            "max_velocity_at_mm": [round(float(c), 3) for c in post["max_velocity_at"]],
-            "flow_rate_m3_s": float(f"{post['flow_rate_m3_s']:.6g}"),
-            "flow_rate_L_min": round(post["flow_rate_m3_s"] * 60000.0, 6),
-            "outflow_rate_m3_s": float(f"{post['outflow_rate_m3_s']:.6g}"),
-            "flow_balance": round(post["imbalance"], 6),
-            "pressure_drop_Pa": round(post["pressure_drop_Pa"], 6),
-            "inlet_pressure_Pa": round(post["inlet_pressure_Pa"], 6),
-            "outlet_pressure_Pa": round(post["outlet_pressure_Pa"], 6),
-            "max_wall_pressure_Pa": round(float(pressure[wet].max()), 6) if len(wet) else 0.0,
-            "min_wall_pressure_Pa": round(float(pressure[wet].min()), 6) if len(wet) else 0.0,
-            "max_wall_shear_Pa": round(float(shear[wet].max()), 6) if len(wet) else 0.0,
-            "max_speed_near_wall_m_s": round(float(result.fields["speed"][wet].max()), 6) if len(wet) else 0.0,
-            "speed_reach_mm": round(result.scalars["speed_reach_mm"], 4),
-            "force_N": [round(float(c), 9) for c in post["force_N"]],
+        flow = result.scalars["flow"]
+        developed = result.scalars.get("developed") or {}
+        return {
+            **flow_summary(result, inputs),
             "turbulence": {
                 "model": "k-omega SST", "wall_treatment": "wall functions (Spalding, y+ >= 30)",
                 "viscosity_ratio_mean": round(flow.nut_ratio[0], 3), "viscosity_ratio_max": round(flow.nut_ratio[1], 3),
                 "wall_yplus": {"min": round(flow.yplus[0], 2), "mean": round(flow.yplus[1], 2), "max": round(flow.yplus[2], 2)},
             },
-            "solve": {"steps": flow.steps, "linear_solves": flow.linear_solves, "factorizations": flow.factorizations, "residual": float(f"{flow.residual:.3g}"),
-                      "converged": flow.converged, "solver": flow.solver},
+            "solve": {"steps": flow.steps, "linear_solves": flow.linear_solves, "factorizations": flow.factorizations,
+                      "residual": float(f"{flow.residual:.3g}"), "converged": flow.converged, "solver": flow.solver},
             "fluid_mesh": dict(result.scalars["fluid_mesh"]),
             "deformation_scale": result.scalars.get("deformation_scale"),
+            **({"developed_inlets": {opening: {"friction_factor": round(entry["friction_factor"], 6)}
+                                     for opening, entry in developed.items()}} if developed else {}),
+            **structure_summary(result),
+            "checks": check_results,
         }
-        developed = result.scalars.get("developed") or {}
-        if developed:
-            summary["developed_inlets"] = {opening: {"friction_factor": round(entry["friction_factor"], 6)}
-                                           for opening, entry in developed.items()}
-        if result.solved:
-            from cadgen._internal.fea import checks
-            from cadgen._internal.fea.analyses.static import floored
-
-            outcome = result.scalars["outcome"]
-            magnitude = np.linalg.norm(outcome.displacement, axis=1)
-            solved = result.solved[0]
-            summary.update({
-                "max_von_mises_MPa": round(float(outcome.von_mises.max()), 4),
-                "max_von_mises_at_mm": [round(c, 3) for c in solved.peak_at],
-                "yield_MPa": solved.yield_MPa,
-                "max_displacement_mm": round(float(magnitude.max()), 6),
-                "safety_factor": floored(checks.safety_factor(solved)),
-            })
-        summary["checks"] = check_results
-        return summary
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} turbulent flow"
 
     def study_echo(self, inputs: CfdTurbulentInputs, bare: Callable[[tuple[str, ...]], list[str]]) -> dict:
         echo = super().study_echo(inputs, bare)
@@ -512,17 +400,12 @@ class CfdTurbulentAnalysis(CfdAnalysis):
             f"{summary['flow_kind']} turbulent flow of {summary['fluid']['name']}: Re {reynolds['value']:.4g} "
             f"({'turbulent' if reynolds['turbulent'] else 'in the laminar range, below Re ' + str(reynolds['limit'])}), "
             "k-omega SST with wall functions",
-            f"pressure drop {summary['pressure_drop_Pa']:.4g} Pa, flow {summary['flow_rate_L_min']:.4g} L/min, "
-            f"fastest {summary['max_velocity_m_s']:.4g} m/s",
-            f"wall pressure {summary['min_wall_pressure_Pa']:.4g} to {summary['max_wall_pressure_Pa']:.4g} Pa, "
-            f"wall shear up to {summary['max_wall_shear_Pa']:.4g} Pa, force on the part {summary['force_N']} N",
+            *flow_lines(summary),
             f"eddy viscosity up to {turbulence['viscosity_ratio_max']:.4g}x the fluid's (mean {turbulence['viscosity_ratio_mean']:.3g}x), "
             f"wall y+ {turbulence['wall_yplus']['min']:.3g} to {turbulence['wall_yplus']['max']:.3g}",
             f"solved in {solve['steps']} pseudo-time steps, last change {solve['residual']:.1e}"
             + ("" if solve["converged"] else " (not settled)"),
         ]
         if "max_von_mises_MPa" in summary:
-            lines.append(f"under the flow's pressure: peak von Mises {summary['max_von_mises_MPa']:.4g} MPa, "
-                         f"largest displacement {summary['max_displacement_mm']:.4g} mm"
-                         + (f", safety factor {summary['safety_factor']:g}" if summary.get("safety_factor") is not None else ""))
+            lines.append(structure_line(summary, "under the flow's pressure"))
         return lines

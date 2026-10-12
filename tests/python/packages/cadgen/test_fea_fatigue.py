@@ -17,28 +17,15 @@ calculation on the solve's own numbers.
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import struct
-import tempfile
 import unittest
-from contextlib import redirect_stderr
-from pathlib import Path
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
+from tests.python.support.fea_fixtures import (
+    box_step, class_directory, ends, glb_attribute_names, glb_extras, needs_fea, sidecar, solve, value_error,
+)
 
 from cadgen._internal.fea.analyses import get_analysis  # noqa: E402
 from cadgen._internal.fea.materials import lookup_material  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 FIXTURES = [{"faces": ["#o1.f1"]}]
 LOADS = [{"faces": ["#o1.f2"], "type": "force", "vector_N": [0, 0, -100]}]
@@ -157,9 +144,7 @@ class Parse(unittest.TestCase):
         return parse_study(document)
 
     def error(self, document) -> str:
-        with self.assertRaises(ValueError) as caught:
-            self.parse(document)
-        return str(caught.exception)
+        return value_error(self, self.parse, document)
 
     def test_a_static_source_with_its_defaults(self):
         study = self.parse(_study())
@@ -227,42 +212,29 @@ class Parse(unittest.TestCase):
                 self.assertIn(fragment, self.error(document))
 
 
-def _extras(glb: Path) -> dict:
-    raw = glb.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    return json.loads(raw[20:20 + length])["meshes"][0]["extras"]
+def _beam(cls) -> tuple:
+    """A 60 mm 6 x 6 cantilever along x in the class's temporary directory: its STEP, clamped end and tip."""
+    directory = class_directory(cls)
+    step = box_step(directory, "beam", (60, 6, 6), "x")
+    return directory, step, *ends(step)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Cantilever(unittest.TestCase):
     """A 60 mm 6 x 6 7075-T6 cantilever, its tip loaded from zero to 150 N and back, a million times."""
 
     @classmethod
     def setUpClass(cls):
-        from build123d import Align, Box, export_step
-
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        step = directory / "beam.step"
-        export_step(Box(60, 6, 6, align=(Align.MIN, Align.CENTER, Align.CENTER)), str(step))
-        planes = {face.center_mm[0]: face.ref for face in fea.faces(step).faces
-                  if face.surface == "plane" and face.normal and abs(abs(face.normal[0]) - 1) < 1e-6}
+        directory, step, fixed, tip = _beam(cls)
         cls.study = {
             "analysis": "fatigue", "material": "aluminum-7075-t6", "mesh": {"size_mm": 3},
-            "fixtures": [{"faces": [planes[min(planes)]]}],
-            "loads": [{"faces": [planes[max(planes)]], "type": "force", "vector_N": [0, 0, -150]}],
+            "fixtures": [{"faces": [fixed]}],
+            "loads": [{"faces": [tip], "type": "force", "vector_N": [0, 0, -150]}],
             "fatigue": {"from": "static", "loading": "zero_based", "cycles": 1e6, "surface": "machined"},
             "view": {"checks": [{"kind": "fatigue", "margin": 1.5}, {"kind": "fatigue", "cycles": 1e9, "label": "Service life"}]},
         }
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(step, directory / "beam.glb", study=cls.study)
-        cls.extras = _extras(cls.result.glb)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.result = solve(step, directory / "beam.glb", cls.study)
+        cls.extras = glb_extras(cls.result.glb)
 
     def hand(self) -> dict:
         """Goodman and Basquin longhand on the solve's own peak von Mises stress."""
@@ -314,9 +286,9 @@ class Cantilever(unittest.TestCase):
                          {"type": "fatigue", "tier": 1, "estimate": False})
         self.assertEqual(self.extras["study"]["fatigue"], {"from": "static", "loading": "zero_based", "stress_ratio": 0.0,
                                                          "cycles": 1e6, "surface": "machined", "factor": 1.0})
-        sidecar = json.loads(self.result.sidecar.read_text(encoding="utf-8"))
-        self.assertEqual(sidecar["analysis"], "fatigue")
-        self.assertIn("min_fatigue_factor", sidecar["summary"])
+        written = sidecar(self.result)
+        self.assertEqual(written["analysis"], "fatigue")
+        self.assertIn("min_fatigue_factor", written["summary"])
 
     def test_it_writes_the_load_cycle_it_plays(self):
         """The viewer's Load cycle routine: from zero to the load (R = 0), the stress at its peak at every node (the
@@ -338,43 +310,20 @@ class Cantilever(unittest.TestCase):
         self.assertIn("check 'Fatigue life'", lines)
 
 
-
-def _shaken_beam(directory: Path) -> tuple[Path, str]:
-    """A 60 mm 6 x 6 cantilever in a temporary STEP, and its clamped end's face."""
-    from build123d import Align, Box, export_step
-
-    from cadgen import fea
-
-    step = directory / "beam.step"
-    export_step(Box(60, 6, 6, align=(Align.MIN, Align.CENTER, Align.CENTER)), str(step))
-    planes = {face.center_mm[0]: face.ref for face in fea.faces(step).faces
-              if face.surface == "plane" and face.normal and abs(abs(face.normal[0]) - 1) < 1e-6}
-    return step, planes[min(planes)]
-
-
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class HarmonicDwell(unittest.TestCase):
     """A steel cantilever shaken at 80 g from 10 to 2500 Hz, dwelling a minute at its peak (its first mode)."""
 
     @classmethod
     def setUpClass(cls):
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        step, fixed = _shaken_beam(directory)
+        directory, step, fixed, _ = _beam(cls)
         cls.study = {
             "analysis": "fatigue", "material": "steel", "mesh": {"size_mm": 3}, "fixtures": [{"faces": [fixed]}],
             "excitation": {"type": "base", "direction": [0, 0, 1], "amplitude_g": 80}, "sweep_Hz": [10, 2500],
             "fatigue": {"from": "harmonic", "dwell_s": 60},
         }
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(step, directory / "beam.glb", study=cls.study)
-        cls.extras = _extras(cls.result.glb)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.result = solve(step, directory / "beam.glb", cls.study)
+        cls.extras = glb_extras(cls.result.glb)
 
     def test_the_cycles_are_the_peak_frequency_times_the_dwell(self):
         summary = self.result.summary
@@ -407,30 +356,21 @@ class HarmonicDwell(unittest.TestCase):
         self.assertIn("(modified Goodman)", lines)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class RandomShake(unittest.TestCase):
     """A 6061-T6 cantilever under a flat 16 g²/Hz from 20 to 2500 Hz for an hour: Steinberg's bands, Miner's rule."""
 
     @classmethod
     def setUpClass(cls):
-        from cadgen import fea
-
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        step, fixed = _shaken_beam(directory)
+        directory, step, fixed, _ = _beam(cls)
         cls.study = {
             "analysis": "fatigue", "material": "aluminum-6061-t6", "mesh": {"size_mm": 3}, "fixtures": [{"faces": [fixed]}],
             "psd": {"direction": [0, 0, 1], "table": [[20, 16], [2500, 16]]},
             "fatigue": {"from": "random_vibration", "duration_s": 3600},
             "view": {"checks": [{"kind": "fatigue"}, {"kind": "fatigue", "cycles": 1e8, "label": "Service"}]},
         }
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(step, directory / "beam.glb", study=cls.study)
-        cls.extras = _extras(cls.result.glb)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.result = solve(step, directory / "beam.glb", cls.study)
+        cls.extras = glb_extras(cls.result.glb)
 
     def hand(self, cycles: float) -> tuple[float, float]:
         """Steinberg longhand on the solve's own peak RMS stress: Miner's damage per cycle and the factor over ``cycles``."""
@@ -464,10 +404,7 @@ class RandomShake(unittest.TestCase):
         self.assertEqual([(level["sigma"], level["share"]) for level in motion["levels"]], [(1.0, 0.683), (2.0, 0.271), (3.0, 0.0433)])
         self.assertAlmostEqual(motion["frequency_Hz"], self.result.summary["zero_crossing_Hz"], delta=1e-3)
         # Fatigue plays its cycle, not the shake: none of the random shake's mode shapes ride along.
-        raw = self.result.glb.read_bytes()
-        length, _ = struct.unpack_from("<II", raw, 12)
-        names = json.loads(raw[20:20 + length])["meshes"][0]["primitives"][0]["attributes"]
-        self.assertFalse(any(name.startswith("_MOTION_") for name in names))
+        self.assertFalse(any(name.startswith("_MOTION_") for name in glb_attribute_names(self.result.glb)))
 
     def test_it_writes_life_and_factor_but_no_shape(self):
         fields = [entry["attribute"] for entry in self.extras["fields"]]

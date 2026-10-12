@@ -1,26 +1,19 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
-import { feaControls, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, feaVerdict, studyRows } from '../../feaResult.js';
 import { flowRows, heldRows, madeOfRows } from '../setup.js';
 import fsi, { FSI_SETUP, bentRows, couplingOf, partName } from './fsi.js';
 import { feaAnalysis } from './index.js';
+import { feaFile, plain, vec } from '../../__tests__/feaFile.js';
 
 const LIMIT = 'Steady flow two-way coupled to a linear elastic part: no flutter, vortex shedding or other unsteady '
   + 'motion; small-to-moderate deflection, the flow mesh following the part (ALE mesh motion).';
 
 // A flow-and-bending result as cadgen writes one: stress first, the wall pressure and shear beside it, deformed.
 function fsiResult(coupling: Record<string, unknown> = {}, analysis: Record<string, unknown> = {}, extras: Record<string, unknown> = {}) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.012, 0, 0, 0, 0.003, 0]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_von_mises', new BufferAttribute(new Float32Array([0.27, 0.01, 0.1]), 1));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array([0, 0, 0, 0, 0, 0, 0.0005, 0, 0]), 3));
-  geometry.setAttribute('_pressure', new BufferAttribute(new Float32Array([1400, 0, 700]), 1));
-  geometry.setAttribute('_wall_shear', new BufferAttribute(new Float32Array([20, 20, 20]), 1));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 0, 0]), 1));
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  return feaFile({
+    position: [0, 0, 0, 0.012, 0, 0, 0, 0.003, 0], _von_mises: [0.27, 0.01, 0.1], _displacement: vec([0, 0, 0, 0, 0, 0, 0.0005, 0, 0]),
+    _pressure: [1400, 0, 700], _wall_shear: [20, 20, 20], _face: [0, 0, 0],
+  }, {
     generator: 'cadgen fea', name: 'flap flow and bending', deformation_scale: 5, safety_factor: 3.7, faces: ['#o1.f4', '#o1.f9'],
     occurrence: '#o1',
     analysis: { type: 'fsi', tier: 3, word: 'Flow and bending', estimate: false, limits: [LIMIT], noun: 'this flow', reference_C: null,
@@ -49,9 +42,6 @@ function fsiResult(coupling: Record<string, unknown> = {}, analysis: Record<stri
     findings: [],
     ...extras,
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 describe('fsi', () => {
@@ -117,7 +107,6 @@ describe('fsi', () => {
       { kind: 'pressure_drop', label: 'Flow resistance', value: 5471, limit: 10000, unit: 'Pa', ratio: 0.5471, close_at: 0.9, status: 'passes', where: at },
     ];
     const view = { checks: [{ kind: 'stress' }, { kind: 'displacement', limit_mm: 0.2, label: 'Bore swell' }, { kind: 'pressure_drop', limit_Pa: 10000 }] };
-    const plain = (text: string) => text.replace(/[\u00a0\u202f]/g, ' ');
     expect(plain(feaVerdict(fsiResult({}, {}, { checks, view })).caption)).toBe('Laminar · Moves 0.0925 mm, limit 0.2 mm');
     // The rows in the same order: the named check first, then the rest by how much of their limit they use.
     expect(feaVerdict(fsiResult({}, {}, { checks, view })).rows.map((row: { label: string }) => row.label))

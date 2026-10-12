@@ -43,7 +43,13 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs, Series, SeriesFrame, SolveContext
+from cadgen._internal.fea.analyses.base import (
+    AnalysisBase, AnalysisResult, FieldSpec, Inputs, Series, SeriesFrame, SolveContext, finding, frame_attributes,
+)
+from cadgen._internal.fea.analyses.cfd import (
+    Fluid, fluid_object, iterative_rung, map_structure, mapped_deformation_scale, parse_mapping, parse_opening, part_result, structure_echo,
+    structure_line, structure_ranges, structure_summary,
+)
 
 __all__ = ["GASES", "LIQUIDS", "LIMITS", "SPILL_SHARE", "MultiphaseAnalysis", "MultiphaseInputs", "fill_words",
            "sloshing_frequency", "spill_sentence"]
@@ -65,7 +71,6 @@ def full(setup) -> bool:
     """Whether the liquid fills the whole inside at the start (a fraction of 1, or a level at the brim)."""
     return setup.fraction is not None and setup.fraction >= 1.0 - 1e-9
 WALLS = ("slip", "no_slip")
-OPENINGS = ("x_min", "x_max", "y_min", "y_max", "z_min", "z_max")
 #: A check is close once its value passes this share of its limit.
 CLOSE_AT = 0.9
 #: Time steps per period of the first sloshing mode (auto), and with the adaptive_steps rung; the CFL number for each.
@@ -86,13 +91,6 @@ SPILL_SHARE = 0.01
 TETS_VOLUME, TETS_SURFACE, DOFS_PER_TET = 4.5, 2.0, 6.0
 ASSEMBLE_S, LEVEL_SET_S, DIRECT_S, ITERATIVE_S, MESH_S = 6e-5, 1.2e-5, 1.4e-7, 3e-5, 2.5e-4
 BYTES_PER_TET, FILL_BYTES, ITERATIVE_BYTES = 45_000.0, 40.0, 2_000.0
-
-
-@dataclass(frozen=True)
-class Fluid:
-    name: str
-    density_kg_m3: float
-    viscosity_Pa_s: float
 
 
 @dataclass(frozen=True)
@@ -160,12 +158,6 @@ def fill_words(fraction: float | None, liquid: str) -> str:
 # -- parse --------------------------------------------------------------------------------------------
 
 
-def _known(entry: dict, keys: set[str], where: str, words: str) -> None:
-    unknown = set(entry) - keys
-    if unknown:
-        raise ValueError(f"{where}: unknown keys {sorted(unknown)}; {words}")
-
-
 def _fluid(raw: Any, table: dict, where: str, example: str) -> Fluid:
     if isinstance(raw, str):
         if raw not in table:
@@ -174,15 +166,7 @@ def _fluid(raw: Any, table: dict, where: str, example: str) -> Fluid:
         return Fluid(raw, *table[raw])
     if not isinstance(raw, dict):
         raise ValueError(f"{where}: a name like {example} or {{\"density_kg_m3\": 1000, \"viscosity_Pa_s\": 0.001}}")
-    _known(raw, {"name", "density_kg_m3", "viscosity_Pa_s"}, where, "a fluid takes density_kg_m3, viscosity_Pa_s and a name")
-    for key in ("density_kg_m3", "viscosity_Pa_s"):
-        if key not in raw:
-            raise ValueError(f"{where}.{key}: a fluid object needs density_kg_m3 and viscosity_Pa_s")
-    name = raw.get("name", "fluid")
-    if not isinstance(name, str) or not name.strip():
-        raise ValueError(f"{where}.name: expected a short piece of text")
-    return Fluid(name.strip(), kinds.number(raw["density_kg_m3"], where=f"{where}.density_kg_m3", positive=True),
-                 kinds.number(raw["viscosity_Pa_s"], where=f"{where}.viscosity_Pa_s", positive=True))
+    return fluid_object(raw, where)
 
 
 def _vector(raw: Any, where: str, words: str) -> tuple[float, float, float]:
@@ -215,7 +199,7 @@ def _fill(raw: Any) -> dict:
         return {"box_mm": [list(low), list(high)]}
     if not isinstance(value, dict):
         raise ValueError('fill.bubble: {"center_mm": [x, y, z], "radius_mm": r}, a bubble of gas in a full part')
-    _known(value, {"center_mm", "radius_mm"}, "fill.bubble", "a bubble takes center_mm and radius_mm")
+    kinds.known(value, {"center_mm", "radius_mm"}, "fill.bubble", "a bubble takes center_mm and radius_mm")
     if "center_mm" not in value or "radius_mm" not in value:
         raise ValueError("fill.bubble: give center_mm and radius_mm")
     return {"bubble": {"center_mm": list(_vector(value["center_mm"], "fill.bubble.center_mm", "the centre as [x, y, z] in mm")),
@@ -229,7 +213,7 @@ def _history(raw: Any, where: str):
     if raw is None:
         return History("step")
     if isinstance(raw, dict) and raw.get("shape") == "sine":
-        _known(raw, {"shape", "frequency_Hz"}, where, "a sine takes shape and frequency_Hz")
+        kinds.known(raw, {"shape", "frequency_Hz"}, where, "a sine takes shape and frequency_Hz")
         if "frequency_Hz" not in raw:
             raise ValueError(f"{where}.frequency_Hz: how fast it shakes back and forth, Hz")
         return ("sine", kinds.number(raw["frequency_Hz"], where=f"{where}.frequency_Hz", positive=True))
@@ -260,7 +244,7 @@ def _acceleration(raw: Any):
     if not isinstance(raw, dict):
         raise ValueError('acceleration: the part\'s own acceleration, like {"direction": [1, 0, 0], "amplitude_g": 0.3, '
                          '"history": {"shape": "half_sine", "duration_s": 0.2}}')
-    _known(raw, {"direction", "amplitude_g", "history"}, "acceleration", "it takes direction, amplitude_g and history")
+    kinds.known(raw, {"direction", "amplitude_g", "history"}, "acceleration", "it takes direction, amplitude_g and history")
     if "direction" not in raw or "amplitude_g" not in raw:
         raise ValueError("acceleration: give direction ([x, y, z]) and amplitude_g")
     direction = _vector(raw["direction"], "acceleration.direction", "the direction as [x, y, z], like [1, 0, 0]")
@@ -281,12 +265,9 @@ def _openings(document: dict) -> tuple[Opening, ...]:
             raise ValueError(f"{key}: a list like [{{\"opening\": \"z_max\", ...}}]")
         for index, entry in enumerate(raw):
             where = f"{key}[{index}]"
-            opening = entry.get("opening")
-            if opening not in OPENINGS:
-                raise ValueError(f"{where}.opening: {kinds.json_text(opening)} is not a side of the part's bounding box; "
-                                 f"use one of {list(OPENINGS)}")
+            opening = parse_opening(entry, where)
             if kind == "inlet":
-                _known(entry, {"opening", "velocity_m_s", "fluid"}, where, "an inlet takes opening, velocity_m_s and fluid")
+                kinds.known(entry, {"opening", "velocity_m_s", "fluid"}, where, "an inlet takes opening, velocity_m_s and fluid")
                 if "velocity_m_s" not in entry:
                     raise ValueError(f"{where}.velocity_m_s: the speed the fluid comes in at, m/s")
                 fluid = entry.get("fluid", "liquid")
@@ -295,7 +276,7 @@ def _openings(document: dict) -> tuple[Opening, ...]:
                 out.append(Opening(opening, "inlet", kinds.number(entry["velocity_m_s"], where=f"{where}.velocity_m_s", positive=True),
                                    fluid))
             else:
-                _known(entry, {"opening", "pressure_Pa"}, where, "an outlet takes opening and pressure_Pa")
+                kinds.known(entry, {"opening", "pressure_Pa"}, where, "an outlet takes opening and pressure_Pa")
                 out.append(Opening(opening, "outlet", pressure_Pa=kinds.number(entry.get("pressure_Pa", 0.0), where=f"{where}.pressure_Pa")))
     named = [o.opening for o in out]
     for opening in named:
@@ -312,7 +293,7 @@ def _probes(raw: Any) -> tuple[Probe, ...]:
     out = []
     for index, entry in enumerate(raw):
         where = f"probes[{index}]"
-        _known(entry, {"label", "at_mm"}, where, "a probe takes label and at_mm")
+        kinds.known(entry, {"label", "at_mm"}, where, "a probe takes label and at_mm")
         label = entry.get("label")
         if not isinstance(label, str) or not label.strip():
             raise ValueError(f"{where}.label: a short name for it, like \"left wall\"")
@@ -344,21 +325,16 @@ class _Setup:
     area_mm2: float
 
 
-class MultiphaseAnalysis:
+class MultiphaseAnalysis(AnalysisBase):
     name: ClassVar[str] = "multiphase"
-    tier: ClassVar[int] = 3
     word: ClassVar[str] = "Two fluids"
-    estimate_only: ClassVar[bool] = False
     limits: ClassVar[tuple[str, ...]] = LIMITS
     study_keys: ClassVar[frozenset[str]] = frozenset({
         "fluids", "fill", "gravity_m_s2", "acceleration", "inlets", "outlets", "end_s", "step_s", "walls", "probes",
         "map_to_structure",
     })
-    material_needs: ClassVar[frozenset[str]] = frozenset()
     #: The material is the structure's, and only a mapped study has one (study.parse_study reads this).
     material_required: ClassVar[bool] = False
-    mesh_orders: ClassVar[tuple[int, ...]] = (2,)
-    connection_types: ClassVar[tuple[str, ...]] = ("bonded", "free")
     fields: ClassVar[tuple[FieldSpec, ...]] = (
         FieldSpec("water_fraction", "_WATER_FRACTION", "water fraction", "", per_frame=True),
         FieldSpec("pressure", "_PRESSURE", "wall pressure", "Pa", signed=True, per_frame=True),
@@ -372,9 +348,9 @@ class MultiphaseAnalysis:
         "frame": {"drives": "frame", "type": "number", "min": 0.0, "max": None},
         "field": {"drives": "field", "type": "enum", "options": ["water_fraction", "pressure"]},
     }
-    upstream: ClassVar[tuple[str, ...]] = ()
     ladder: ClassVar[tuple[str, ...]] = ("adaptive_steps", "iterative", "local_refine", "fluid_coarsen")
     noun: ClassVar[str] = "this shake"
+    extras_word: ClassVar[str] = "two fluids"
 
     def __init__(self):
         self._setups: dict[tuple, _Setup] = {}
@@ -382,13 +358,10 @@ class MultiphaseAnalysis:
     # -- parse ---------------------------------------------------------------------------------------
 
     def parse(self, document: dict) -> MultiphaseInputs:
-        from cadgen._internal.fea.materials import material_from_spec
-        from cadgen._internal.fea.study import parse_fixtures
-
         fluids = document.get("fluids") or {}
         if not isinstance(fluids, dict):
             raise ValueError('fluids: the two fluids, like {"liquid": "water", "gas": "air", "surface_tension_N_m": 0.072}')
-        _known(fluids, {"liquid", "gas", "surface_tension_N_m"}, "fluids", "it takes liquid, gas and surface_tension_N_m")
+        kinds.known(fluids, {"liquid", "gas", "surface_tension_N_m"}, "fluids", "it takes liquid, gas and surface_tension_N_m")
         liquid = _fluid(fluids.get("liquid", "water"), LIQUIDS, "fluids.liquid", '"water"')
         gas = _fluid(fluids.get("gas", "air"), GASES, "fluids.gas", '"air"')
         if not liquid.density_kg_m3 > gas.density_kg_m3:
@@ -413,30 +386,7 @@ class MultiphaseAnalysis:
         if walls not in WALLS:
             raise ValueError(f"walls: {kinds.json_text(walls)} is not \"slip\" (the fluid slides along the walls, the default) "
                              "or \"no_slip\" (it sticks to them)")
-        mapping = document.get("map_to_structure")
-        fixtures: tuple = ()
-        material = None
-        if mapping is not None:
-            if not isinstance(mapping, dict):
-                raise ValueError('map_to_structure: expected an object like {"material": "aluminum-6061-t6", '
-                                 '"fixtures": [{"faces": ["#o1.f1"]}]}')
-            _known(mapping, {"material", "fixtures"}, "map_to_structure",
-                   "it takes the part's material and its fixtures (where it is held while the fluids push on it)")
-            spec = mapping.get("material", document.get("material"))
-            if spec is None:
-                raise ValueError("map_to_structure.material: the part's material, to solve its stress under the fluids' pressure")
-            material = material_from_spec(spec)
-            try:
-                fixtures = parse_fixtures(mapping)
-            except ValueError as exc:
-                raise ValueError(f"map_to_structure.{exc}") from None
-        view = document.get("view")
-        checks = view.get("checks") if isinstance(view, dict) else None
-        if material is None and isinstance(checks, list):
-            for index, check in enumerate(checks):
-                if isinstance(check, dict) and check.get("kind") in ("stress", "displacement"):
-                    raise ValueError(f"view.checks[{index}]: a {check['kind']} check needs the fluids' pressure on the part: "
-                                     "add map_to_structure with the part's material and fixtures")
+        fixtures, material = parse_mapping(document, "the fluids push", "the fluids' pressure")
         refs = tuple(dict.fromkeys(ref for fixture in fixtures for ref in fixture.faces))
         return MultiphaseInputs(
             refs, refs, material is not None, liquid=liquid, gas=gas, surface_tension_N_m=sigma, fill=_fill(document.get("fill")),
@@ -448,16 +398,15 @@ class MultiphaseAnalysis:
     # -- the inside and its numbers ------------------------------------------------------------------
 
     def _setup(self, ctx: SolveContext, inputs: MultiphaseInputs) -> _Setup:
-        geometry = ctx.geometry
-        shape = getattr(geometry, "shape", None)
-        if ctx.assembly is not None or shape is None:
-            raise ValueError("a two-fluid study fills one part: name it with --occurrence (#o1.2)")
-        key = (id(shape), id(inputs))
-        if key in self._setups:
-            return self._setups[key]
+        from cadgen._internal.fea.analyses.cfd import cached_setup
+
+        return cached_setup(self._setups, ctx, inputs, "a two-fluid study fills one part: name it with --occurrence (#o1.2)",
+                            lambda shape, refs: self._build_setup(shape, refs, inputs))
+
+    @staticmethod
+    def _build_setup(shape, refs: dict, inputs: MultiphaseInputs) -> _Setup:
         from cadgen._internal.fea import cavity
 
-        refs = {face.ordinal: face.ref for face in geometry.faces}
         domain = cavity.build_cavity(shape, refs=refs)
         named = {o.opening for o in inputs.openings}
         have = {face.opening for face in domain.faces if face.kind == "opening"}
@@ -496,11 +445,7 @@ class MultiphaseAnalysis:
         period = 1.0 / frequency if frequency > 0 else math.inf
         size = max(math.sqrt(sum(e * e for e in extents)) / ACROSS, min(extents) / NARROWEST)
         area = sum(face.area for face in domain.faces)
-        setup = _Setup(domain, up, floor, height, level_mm, fraction, length, period, size, area)
-        if len(self._setups) > 4:
-            self._setups.clear()
-        self._setups[key] = setup
-        return setup
+        return _Setup(domain, up, floor, height, level_mm, fraction, length, period, size, area)
 
     def sizes(self, ctx: SolveContext, setup: _Setup) -> tuple[float, float]:
         """(fine, away) fluid element sizes, mm: the study's size (or the default), and away from the interface's band."""
@@ -575,7 +520,7 @@ class MultiphaseAnalysis:
     def apply(self, rung, ctx: SolveContext, inputs: MultiphaseInputs):
         from cadgen._internal.fea import fit
 
-        plan, budget = ctx.plan, ctx.budget
+        plan = ctx.plan
         setup = self._setup(ctx, inputs)
         before = self.estimate(ctx, inputs)
         if rung == "adaptive_steps":
@@ -593,18 +538,7 @@ class MultiphaseAnalysis:
                             2.2,
                             detail={"cfl": ADAPTIVE_CFL, "steps_per_period": ADAPTIVE_STEPS_PER_PERIOD})
         if rung == "iterative":
-            if plan.solver != "direct":
-                return None
-            plan.solver = "iterative"
-            after = self.estimate(ctx, inputs)
-            memory = before.memory_bytes > budget.memory_bytes
-            saves = after.memory_bytes < 0.95 * before.memory_bytes if memory else after.seconds < 0.95 * before.seconds
-            if not saves:
-                plan.solver = "direct"
-                return None
-            why = "fit in memory" if memory else "finish sooner"
-            return fit.Step("iterative", f"Used an iterative two-fluid solver (Krylov with multigrid) to {why}", None, None,
-                            detail={"solver": "iterative", "from_bytes": int(before.memory_bytes), "to_bytes": int(after.memory_bytes)})
+            return iterative_rung(self, ctx, inputs, "Used an iterative two-fluid solver (Krylov with multigrid)")
         if rung == "local_refine":
             band = self._band(ctx, inputs, setup)
             fine, away = self.sizes(ctx, setup)
@@ -653,7 +587,7 @@ class MultiphaseAnalysis:
         import numpy as np
 
         from cadgen._internal.fea import cavity, multiphase_ops as ops, timestep
-        from cadgen._internal.fea.analyses.modal import max_frames
+        from cadgen._internal.fea.analyses.base import max_frames
 
         timings: dict[str, float] = {}
         setup = self._setup(ctx, inputs)
@@ -911,11 +845,10 @@ class MultiphaseAnalysis:
         times = sorted(frames)
         level_peak = int(np.argmax(level))
         default = int(np.argmin([abs(tt - t[level_peak]) for tt in times]))
+        attributes = {"water_fraction": "_WATER_FRACTION", "pressure": "_PRESSURE"}
         series = Series(kind="time", unit="s", default=default, frames=[
-            SeriesFrame(value=round(tt, 9), label=time_label(tt), attributes={
-                "water_fraction": "_WATER_FRACTION" if n == 0 else f"_WATER_FRACTION_F{n}",
-                "pressure": "_PRESSURE" if n == 0 else f"_PRESSURE_F{n}",
-            }) for n, tt in enumerate(times)
+            SeriesFrame(value=round(tt, 9), label=time_label(tt), attributes=frame_attributes(attributes, n))
+            for n, tt in enumerate(times)
         ])
         share_frames = [frames[tt]["share"] for tt in times]
         pressure_frames = [frames[tt]["pressure"] for tt in times]
@@ -946,10 +879,8 @@ class MultiphaseAnalysis:
         if march.stopped_at is not None:
             stopped = timestep.stopped_sentence(time_label(march.stopped_at), time_label(planned_end), timestep.time_limit(ctx))
             analysis_warnings.append(stopped)
-        result = AnalysisResult(
-            dof_locations=ctx.space.dof_locations, vertices=ctx.space.vertices, tets=ctx.space.tets,
-            boundary_quadratic=ctx.space.boundary_quadratic, element_dofs=ctx.space.element_dofs,
-            fields={"water_fraction": share_frames[0], "pressure": pressure_frames[0]},
+        result = part_result(
+            ctx, {"water_fraction": share_frames[0], "pressure": pressure_frames[0]},
             series=series, frame_fields={"water_fraction": share_frames, "pressure": pressure_frames},
             curves=curves, dofs=int(march.n),
             solver=f"Taylor-Hood P2/P1 two-fluid Navier-Stokes, level set, BDF2, {'GMRES + multigrid' if march.solver == 'iterative' else 'direct'}",
@@ -980,38 +911,10 @@ class MultiphaseAnalysis:
         if inputs.mapped:
             peak = record["peaks"].get("force") or record["peaks"].get("pressure")
             pressure = peak[1]["pressure"] if peak is not None else pressure_frames[0]
-            self._structure(ctx, inputs, result, pressure)
+            # One-way: the wall pressure at that moment, face by face, as a static load on the part.
+            map_structure(ctx, inputs, result, pressure[ctx.space.boundary_quadratic].mean(axis=1) / 1e6)
             result.scalars["mapped_at_s"] = peak[1]["t"] if peak is not None else 0.0
         return result
-
-    def _structure(self, ctx: SolveContext, inputs: MultiphaseInputs, result: AnalysisResult, pressure) -> None:
-        """One-way: the wall pressure at one moment, face by face, as a static load on the part; its fields and checks join."""
-        import types
-
-        from cadgen._internal.fea import solve
-        from cadgen._internal.fea.analyses.static import solved_record
-
-        volume = ctx.volume
-        per_row = pressure[ctx.space.boundary_quadratic].mean(axis=1) / 1e6
-        extra: dict[str, Any] = {"space": ctx.space, "facet_pressures": per_row}
-        if ctx.plan is not None and ctx.plan.solver != "direct":
-            extra["solver"] = "iterative"
-        outcome = solve.solve_linear_static(volume, inputs.structure_material, inputs.fixtures, (), ctx.ordinal_of,
-                                            log=ctx.log, automatic=ctx.automatic, **extra)
-        study = types.SimpleNamespace(material=inputs.structure_material,
-                                      margin=getattr(ctx.study, "margin", 2.0) if ctx.study is not None else 2.0)
-        result.solved = [solved_record(volume, outcome, study, ctx.ordinal_of, ctx.part_name, inputs.fixtures)]
-        result.fields["von_mises"] = outcome.von_mises
-        result.fields["displacement"] = outcome.displacement
-        result.deformation = outcome.displacement
-        result.reactions = list(outcome.reactions)
-        result.applied = tuple(outcome.applied)
-        result.warnings += [w for w in outcome.warnings if w not in result.warnings]
-        result.scalars["outcome"] = outcome
-        result.scalars["yield_MPa"] = inputs.structure_material.yield_strength
-
-    def needs_finer(self, result: AnalysisResult, inputs: MultiphaseInputs, check_results: list[dict]) -> bool:
-        return False
 
     # -- judging -------------------------------------------------------------------------------------
 
@@ -1074,18 +977,16 @@ class MultiphaseAnalysis:
         from cadgen._internal.fea import checks
         from cadgen._internal.fea.timestep import stopped_finding
 
-        found: list[dict] = []
-        if result.solved:
-            found += checks.findings(result.solved[0])
+        found: list[dict] = list(checks.findings(result.solved[0])) if result.solved else []
         scalars = result.scalars
         if scalars.get("time_limit"):
             found.append(stopped_finding(scalars["time_limit"]))
         if scalars.get("spill"):
             vol = scalars["volume"]
-            found.append({"check": "fea", "severity": "error", "type": "spills_over_brim", "summary": scalars["spill"],
-                          "description": f"{scalars['spilled_m3'] * 1e6:.4g} mL of the {float(vol[0]) * 1e6:.4g} mL of liquid "
-                                         f"left through the open top over the run (more than {SPILL_SHARE * 100:g} %, past "
-                                         "what the smeared surface alone carries out)", "items": []})
+            found.append(finding("error", "spills_over_brim", scalars["spill"],
+                                 f"{scalars['spilled_m3'] * 1e6:.4g} mL of the {float(vol[0]) * 1e6:.4g} mL of liquid "
+                                 f"left through the open top over the run (more than {SPILL_SHARE * 100:g} %, past "
+                                 "what the smeared surface alone carries out)"))
         for check in check_results:
             if check["kind"] not in ("fill_level", "wall_pressure") or check["status"] == "passes":
                 continue
@@ -1101,36 +1002,24 @@ class MultiphaseAnalysis:
             else:
                 summary = (f"The wall pressure reaches {check['value']:.4g} Pa at {when:.3g} s, "
                            f"{'over' if fails else 'close to'} the {check['limit']:g} Pa allowed")
-            found.append({
-                "check": "fea", "severity": "error" if fails else "warning",
-                "type": f"{check['kind']}_{'over_limit' if fails else 'close_to_limit'}", "summary": summary,
-                "description": f"{check['value']:.4g} {check['unit']} against {check['limit']:g} {check['unit']} ({check['ratio']:.2f} of it)",
-                "items": [],
-            })
+            found.append(finding(
+                "error" if fails else "warning", f"{check['kind']}_{'over_limit' if fails else 'close_to_limit'}", summary,
+                f"{check['value']:.4g} {check['unit']} against {check['limit']:g} {check['unit']} ({check['ratio']:.2f} of it)"))
         for sentence in result.scalars.get("analysis_warnings", ()):
             if sentence in (scalars.get("spill"), scalars.get("time_limit")):
                 continue
             if sentence == SINGLE_FLUID:
-                found.append({"check": "fea", "severity": "info", "type": "single_fluid", "summary": sentence,
-                              "description": "a completely full inside has no free surface: the liquid's flow alone is "
-                                             "solved, with no level set and no gas", "items": []})
+                found.append(finding("info", "single_fluid", sentence, "a completely full inside has no free surface: the "
+                                     "liquid's flow alone is solved, with no level set and no gas"))
                 continue
-            found.append({"check": "fea", "severity": "warning", "type": "volume_drift", "summary": sentence,
-                          "description": "the level set's volume is put back every step; a large drift means the mesh is coarse "
-                                         "for how fast the surface moves", "items": []})
+            found.append(finding("warning", "volume_drift", sentence, "the level set's volume is put back every step; a "
+                                 "large drift means the mesh is coarse for how fast the surface moves"))
         return found
 
     # -- what is written -----------------------------------------------------------------------------
 
     def deformation_scale(self, result: AnalysisResult, bbox_diagonal: float, requested: float | None) -> float | None:
-        if "displacement" not in result.fields:
-            return None
-        import numpy as np
-
-        from cadgen._internal.fea.outputs import auto_deformation_scale
-
-        magnitude = np.linalg.norm(result.fields["displacement"], axis=1)
-        return requested or auto_deformation_scale(float(magnitude.max()), bbox_diagonal)
+        return mapped_deformation_scale(result, bbox_diagonal, requested)
 
     def summary(self, result: AnalysisResult, inputs: MultiphaseInputs, check_results: list[dict]) -> dict:
         import numpy as np
@@ -1204,34 +1093,15 @@ class MultiphaseAnalysis:
             summary["stopped_at_s"] = round(float(s["stopped_at"]), 9)
             summary["planned_end_s"] = round(float(s["planned_end_s"]), 9)
         if result.solved:
-            from cadgen._internal.fea import checks
-            from cadgen._internal.fea.analyses.static import floored
-
-            outcome = s["outcome"]
-            magnitude = np.linalg.norm(outcome.displacement, axis=1)
-            solved = result.solved[0]
-            summary.update({
-                "mapped_at_s": round(float(s.get("mapped_at_s", 0.0)), 9),
-                "max_von_mises_MPa": round(float(outcome.von_mises.max()), 4),
-                "max_von_mises_at_mm": [round(c, 3) for c in solved.peak_at],
-                "yield_MPa": solved.yield_MPa,
-                "max_displacement_mm": round(float(magnitude.max()), 6),
-                "safety_factor": floored(checks.safety_factor(solved)),
-            })
+            summary.update({"mapped_at_s": round(float(s.get("mapped_at_s", 0.0)), 9), **structure_summary(result)})
         summary["checks"] = check_results
         return summary
 
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} two fluids"
-
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
         pressures = result.frame_fields["pressure"]
-        ranges = {"water_fraction": (0.0, 1.0),
-                  "pressure": (min(float(p.min()) for p in pressures), max(float(p.max()) for p in pressures))}
-        if "max_von_mises_MPa" in summary:
-            ranges["von_mises"] = (0.0, summary["max_von_mises_MPa"])
-            ranges["displacement"] = (0.0, summary["max_displacement_mm"])
-        return ranges
+        return {"water_fraction": (0.0, 1.0),
+                "pressure": (min(float(p.min()) for p in pressures), max(float(p.max()) for p in pressures)),
+                **structure_ranges(summary)}
 
     def extras_head(self, summary: dict) -> dict:
         return {"safety_factor": summary["safety_factor"]} if "safety_factor" in summary else {}
@@ -1256,13 +1126,7 @@ class MultiphaseAnalysis:
                 "probes": [{"label": p.label, "at_mm": list(p.at_mm)} for p in inputs.probes],
             },
         }
-        if inputs.mapped:
-            material = inputs.structure_material
-            echo["material"] = {"name": material.name, "yield_MPa": material.yield_strength,
-                                "youngs_GPa": round(material.E / 1000.0, 6), "poisson": material.nu}
-            echo["fixtures"] = [{"type": fixture.type, "faces": bare(fixture.faces)} for fixture in inputs.fixtures]
-            echo["loads"] = []
-        return echo
+        return {**echo, **structure_echo(inputs, bare)}
 
     def human_lines(self, summary: dict) -> list[str]:
         fill = summary["fill"]
@@ -1289,7 +1153,5 @@ class MultiphaseAnalysis:
                 lines.append(f"probe {probe['label']} (its vertical line through {at} mm): surface up to {probe['peak_mm']:.4g} mm "
                              f"at {probe['peak_at_s']:.3g} s")
         if "max_von_mises_MPa" in summary:
-            lines.append(f"under the fluids' pressure at {summary['mapped_at_s']:.3g} s: peak von Mises "
-                         f"{summary['max_von_mises_MPa']:.4g} MPa, largest displacement {summary['max_displacement_mm']:.4g} mm"
-                         + (f", safety factor {summary['safety_factor']:g}" if summary.get("safety_factor") is not None else ""))
+            lines.append(structure_line(summary, f"under the fluids' pressure at {summary['mapped_at_s']:.3g} s"))
         return lines

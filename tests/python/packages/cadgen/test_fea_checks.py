@@ -47,10 +47,23 @@ class ChecksTest(unittest.TestCase):
         self.assertEqual(f["summary"], "The bracket yields: peak stress 310 MPa is above the 276 MPa yield strength of 6061-T6")
         self.assertEqual(f["items"][0]["ref"], "#o1.f12")
 
-    def test_low_margin(self):
-        (f,) = findings(solved(peak_MPa=197.0, peak_gauss_MPa=200.0))  # SF 1.40
-        self.assertEqual((f["severity"], f["type"]), ("warning", "low_margin"))
-        self.assertEqual(f["summary"], "It holds, but only 1.4× the load: under the 2× margin")
+    def test_a_single_finding_in_plain_words(self):
+        holds = "It holds, but only {}× the load: under the 2× margin"
+        for case, changes, kind, summary in (
+            ("low margin", dict(peak_MPa=197.0, peak_gauss_MPa=200.0), ("warning", "low_margin"), holds.format("1.4")),  # SF 1.40
+            ("a factor just under the margin never reads as the margin", dict(peak_MPa=276.0 / 1.96, peak_gauss_MPa=100.0),
+             ("warning", "low_margin"), holds.format("1.9")),
+            ("a factor of exactly one holds", dict(peak_MPa=276.0, peak_gauss_MPa=276.0), ("warning", "low_margin"), holds.format("1.0")),
+            ("yields prints more decimals when the numbers would tie", dict(peak_MPa=276.4, peak_gauss_MPa=276.4), ("error", "yields"),
+             "The bracket yields: peak stress 276.4 MPa is above the 276.0 MPa yield strength of 6061-T6"),
+            ("large displacement", dict(max_displacement_mm=1.6), ("warning", "large_displacement"),  # 1.8% of 90
+             "It moves 1.6 mm, about 2% of its size: check the fit if it mates with another part"),
+            ("no load reaches it", dict(peak_MPa=0.0, peak_gauss_MPa=0.0), ("warning", "no_load"),
+             "No load reaches the part: check the loads are on faces connected to the fixed ones"),
+        ):
+            with self.subTest(case):
+                (f,) = findings(solved(**changes))
+                self.assertEqual(((f["severity"], f["type"]), f["summary"]), (kind, summary))
 
     def test_margin_is_the_studys(self):
         self.assertEqual(findings(solved(peak_MPa=197.0, peak_gauss_MPa=200.0, margin=1.25)), [])
@@ -132,10 +145,6 @@ class ChecksTest(unittest.TestCase):
         (low, *_rest) = findings(solved(peak_MPa=150.0, peak_gauss_MPa=300.0, peak_face="#o1.f12", coarser_peak_MPa=100.0))
         self.assertIn("kept rising on a finer mesh, so the real stress is likely lower", low["summary"])
 
-    def test_an_unresolved_peak_at_the_fixture_still_raises_it(self):
-        types = [f["type"] for f in findings(solved(peak_MPa=150.0, peak_gauss_MPa=160.0, peak_face="#o1.f3", coarser_peak_MPa=100.0))]
-        self.assertEqual(types, ["low_margin", "peak_at_fixture", "mesh_not_converged"])
-
     def test_a_rising_peak_says_the_real_stress_is_likely_lower(self):
         # The stepped shaft: 175 then 337 MPa, peak at the fixed journal.
         (f, peak, moved) = findings(solved(
@@ -152,8 +161,10 @@ class ChecksTest(unittest.TestCase):
         self.assertNotIn("fixed face)", f["summary"])
 
     def test_a_rising_low_margin_peak_carries_the_same_clause_once(self):
-        (low, *_rest) = findings(solved(peak_MPa=150.0, peak_gauss_MPa=160.0, peak_face="#o1.f3", coarser_peak_MPa=100.0))
-        self.assertEqual(low["summary"], "It holds, but only 1.8× the load: under the 2× margin, but this peak kept rising on a finer mesh, so the real stress is likely lower")
+        found = findings(solved(peak_MPa=150.0, peak_gauss_MPa=160.0, peak_face="#o1.f3", coarser_peak_MPa=100.0))
+        self.assertEqual(found[0]["summary"], "It holds, but only 1.8× the load: under the 2× margin, but this peak kept rising on a finer mesh, so the real stress is likely lower")
+        # An unresolved peak at the fixture still raises it.
+        self.assertEqual([f["type"] for f in found], ["low_margin", "peak_at_fixture", "mesh_not_converged"])
 
     def test_a_falling_peak_keeps_its_old_qualifier(self):
         (low, *_rest) = findings(solved(peak_MPa=150.0, peak_gauss_MPa=160.0, peak_face="#o1.f3", coarser_peak_MPa=200.0))
@@ -168,29 +179,6 @@ class ChecksTest(unittest.TestCase):
         (f,) = findings(solved(peak_MPa=276.0 / 1.684, peak_gauss_MPa=100.0))
         self.assertEqual(f["summary"], "It holds, but only 1.6× the load: under the 2× margin")
         self.assertEqual(f["description"], "safety factor 1.6, margin 2")
-
-    def test_large_displacement(self):
-        (f,) = findings(solved(max_displacement_mm=1.6))  # 1.8% of 90
-        self.assertEqual(f["type"], "large_displacement")
-        self.assertEqual(f["summary"], "It moves 1.6 mm, about 2% of its size: check the fit if it mates with another part")
-
-    def test_no_load_reaches_it(self):
-        (f,) = findings(solved(peak_MPa=0.0, peak_gauss_MPa=0.0))
-        self.assertEqual((f["severity"], f["type"]), ("warning", "no_load"))
-        self.assertEqual(f["summary"], "No load reaches the part: check the loads are on faces connected to the fixed ones")
-
-    def test_a_factor_just_under_the_margin_never_reads_as_the_margin(self):
-        (f,) = findings(solved(peak_MPa=276.0 / 1.96, peak_gauss_MPa=100.0))
-        self.assertEqual(f["summary"], "It holds, but only 1.9× the load: under the 2× margin")
-
-    def test_a_factor_of_exactly_one_holds(self):
-        (f,) = findings(solved(peak_MPa=276.0, peak_gauss_MPa=276.0))
-        self.assertEqual((f["severity"], f["type"]), ("warning", "low_margin"))
-        self.assertEqual(f["summary"], "It holds, but only 1.0× the load: under the 2× margin")
-
-    def test_yields_prints_more_decimals_when_the_numbers_would_tie(self):
-        (f,) = findings(solved(peak_MPa=276.4, peak_gauss_MPa=276.4))
-        self.assertEqual(f["summary"], "The bracket yields: peak stress 276.4 MPa is above the 276.0 MPa yield strength of 6061-T6")
 
     def test_finer_only_when_close(self):
         self.assertTrue(needs_finer(2.99))
@@ -276,10 +264,6 @@ class AssemblyChecksTest(unittest.TestCase):
         self.assertEqual([f["type"] for f in found], ["yields", "low_margin"])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class StudyChecksTest(unittest.TestCase):
     """The study's checks (``view.checks``) judged from the solve's numbers, and the findings of those that fail."""
 
@@ -322,3 +306,7 @@ class StudyChecksTest(unittest.TestCase):
         faces = check_findings([displacement_check(2.1, 0.5, at=at, ref=None, faces=("#o1.f2",))])[0]["summary"]
         self.assertEqual(faces, "The checked faces move 2.1 mm, more than the 0.5 mm allowed")
         self.assertEqual(check_findings([displacement_check(0.48, 0.5, at=at, ref=None)]), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

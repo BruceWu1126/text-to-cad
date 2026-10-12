@@ -19,8 +19,9 @@ if TYPE_CHECKING:
     from cadgen._internal.fea.mesh import VolumeMesh
 
 __all__ = [
-    "Analysis", "AnalysisResult", "CheckSpec", "FieldSpec", "Inputs", "Rung", "Scaling", "Series", "SeriesFrame",
-    "SeriesKind", "SolveContext", "Tier",
+    "Analysis", "AnalysisBase", "AnalysisResult", "CheckSpec", "FieldSpec", "Inputs", "Rung", "Scaling", "Series",
+    "SeriesFrame", "SeriesKind", "SolveContext", "Tier", "by_severity", "finding", "frame_attributes", "plan_value",
+    "max_frames", "mirrored", "unfold_result", "xyz",
 ]
 
 Tier = Literal[1, 2, 3]
@@ -154,3 +155,138 @@ class Analysis(Protocol):
     def summary(self, result: AnalysisResult, inputs: Inputs, check_results: list[dict]) -> dict: ...  # rounded
     def human_lines(self, summary: dict) -> list[str]: ...
     def deformation_scale(self, result: AnalysisResult, bbox_diagonal: float, requested: float | None) -> float | None: ...
+
+
+class AnalysisBase:
+    """The protocol's defaults: a subclass states only what is its own.
+
+    Optional hooks that ``run.py`` and ``fit.py`` probe with ``hasattr`` (``governing``, ``refined_record``,
+    ``upstream_for``, ``settle_steps``, ``write_files``, ``symmetric_about``) are never defined here."""
+
+    tier: ClassVar[Tier] = 3
+    estimate_only: ClassVar[bool] = False
+    limits: ClassVar[tuple[str, ...]] = ()
+    material_needs: ClassVar[frozenset[str]] = frozenset()
+    mesh_orders: ClassVar[tuple[int, ...]] = (2,)
+    connection_types: ClassVar[tuple[str, ...]] = ("bonded", "free")
+    upstream: ClassVar[tuple[str, ...]] = ()
+    #: What follows the document's stem in the GLB's extras name: "bracket creep".
+    extras_word: ClassVar[str] = ""
+
+    def needs_finer(self, result: AnalysisResult, inputs: Inputs, check_results: list[dict]) -> bool:
+        return False
+
+    def deformation_scale(self, result: AnalysisResult, bbox_diagonal: float, requested: float | None) -> float | None:
+        return None
+
+    def extras_name(self, stem: str) -> str:
+        return f"{stem} {self.extras_word}"
+
+
+def finding(severity: str, kind: str, summary: str, description: str, items=()) -> dict:
+    """One entry of a study's findings."""
+    return {"check": "fea", "severity": severity, "type": kind, "summary": summary, "description": description,
+            "items": list(items)}
+
+
+_SEVERITY = {"error": 0, "warning": 1, "info": 2}
+
+
+def by_severity(found: list[dict]) -> list[dict]:
+    """Findings errors first, then warnings, then notes; stable within each."""
+    return sorted(found, key=lambda item: _SEVERITY[item["severity"]])
+
+
+def xyz(point, digits: int = 3) -> list[float]:
+    """A point as the summary writes it: ``[12.5, 0.0, 3.25]``."""
+    return [round(float(c), digits) for c in point]
+
+
+def frame_attributes(attributes: dict[str, str], index: int) -> dict[str, str]:
+    """Series frame ``index``'s attributes: frame 0 under each field's own attribute, the others ``_F<index>`` after it."""
+    return {name: attribute if index == 0 else f"{attribute}_F{index}" for name, attribute in attributes.items()}
+
+
+def plan_value(ctx: SolveContext, name: str, default: Any) -> Any:
+    """``ctx.plan.<name>``, or ``default`` with no plan or no such choice."""
+    return default if ctx.plan is None else getattr(ctx.plan, name, default)
+
+
+def max_frames(ctx: SolveContext, default: int = 24) -> int:
+    """The most series frames the budget allows (``default`` with no budget or none set)."""
+    return default if ctx.budget is None else int(getattr(ctx.budget, "max_frames", default) or default)
+
+
+def mirrored(plane, ctx: SolveContext, groups) -> bool:
+    """Each face group in ``groups``, and every check's faces, maps onto itself across the symmetry ``plane``."""
+    checks = ctx.study.checks if ctx.study is not None else ()
+    for refs in (*groups, *(tuple(check["faces"]) for check in checks if check.get("faces"))):
+        ordinals = {ctx.ordinal_of[ref] for ref in refs}
+        if {plane.mirror.get(o) for o in ordinals} != ordinals:
+            return False
+    return True
+
+
+def assembly_parts(ctx: SolveContext) -> list[dict] | None:
+    """An assembly's parts as a summary lists them (ref, name, material); None for one part."""
+    if ctx.assembly is None:
+        return None
+    assembly = ctx.assembly
+    return [{"ref": part.ref, "name": name, "material": material.name}
+            for part, name, material in zip(assembly.parts, assembly.names, assembly.materials)]
+
+
+def node_domain(space) -> "np.ndarray | None":
+    """Each node's part (the domain of an element it belongs to), for an assembly; None for one part."""
+    import numpy as np
+
+    if space.domain is None:
+        return None
+    out = np.zeros(space.scalar_count, dtype=np.int64)
+    out[space.scalar.element_dofs] = np.asarray(space.domain)[None, :]
+    return out
+
+
+def yield_at(scalars: dict, node: int) -> float:
+    """The yield strength at ``node``: its own part's in an assembly (``scalars``' "yields" and "node_domain")."""
+    domains, yields = scalars["node_domain"], scalars["yields"]
+    return yields[0] if domains is None or len(yields) == 1 else yields[int(domains[node])]
+
+
+def unfold_result(ctx: SolveContext, result: AnalysisResult, planes, *, vectors=frozenset(), scalars=()) -> None:
+    """The solved half (or quarter) mirrored back into the whole part: every field and series frame, the deformation,
+    the reactions and the ``result.scalars`` arrays named in ``scalars``. ``vectors``: the fields that are vectors."""
+    import numpy as np
+
+    from cadgen._internal.fea import symmetry
+
+    volume = ctx.volume
+    for plane in reversed(planes):
+        whole, keep = symmetry.unfold_volume(volume, plane)
+        split: tuple[dict, dict] = ({}, {})      # (scalars, vectors) by key
+        for name, values in result.fields.items():
+            split[name in vectors][f"f:{name}"] = np.asarray(values)
+        for name, frames in result.frame_fields.items():
+            for i, values in enumerate(frames):
+                split[name in vectors][f"{name}:{i}"] = np.asarray(values)
+        for name in scalars:
+            split[0][f"s:{name}"] = np.asarray(result.scalars[name])
+        if result.deformation is not None:
+            split[1]["deformation"] = np.asarray(result.deformation)
+        locations, s_out, v_out, boundary, tets, elements, vertices = symmetry.unfold_fields(
+            plane, result.vertices, result.dof_locations, keep, scalars=split[0], vectors=split[1],
+            boundary=result.boundary_quadratic, tets=result.tets, element_dofs=result.element_dofs,
+        )
+        merged = {**s_out, **v_out}
+        result.fields = {name: merged[f"f:{name}"] for name in result.fields}
+        result.frame_fields = {name: [merged[f"{name}:{i}"] for i in range(len(frames))]
+                               for name, frames in result.frame_fields.items()}
+        for name in scalars:
+            result.scalars[name] = merged[f"s:{name}"]
+        if result.deformation is not None:
+            result.deformation = merged["deformation"]
+        result.reactions = [symmetry.unfold_force(plane, r) for r in result.reactions]
+        result.dof_locations, result.boundary_quadratic = locations, boundary
+        result.tets, result.element_dofs, result.vertices = tets, elements, vertices
+        volume = whole
+    ctx.volume = volume

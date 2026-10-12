@@ -1,8 +1,7 @@
 """Generalized symmetric eigenproblems: the modes of a vibration study and the shapes of a buckling one.
 
-One question, :func:`solve_generalized`: the ``k`` eigenpairs at one end of the
-spectrum of ``A φ = μ B φ``, ``A`` symmetric and ``B`` symmetric positive
-definite. Two ways to answer it:
+One question, :func:`solve_generalized`: the ``k`` eigenpairs at one end of the spectrum of ``A φ = μ B φ``, ``A``
+symmetric and ``B`` symmetric positive definite. Two ways to answer it:
 
 - ``"arpack"``: Lanczos (scipy's ``eigsh``) on ``B⁻¹A``, with ``B`` factorised
   once (SuperLU) or solved by an operator the caller passes (``solve_B``). A
@@ -21,9 +20,8 @@ in space (its rigid-body modes at ω² = 0 included); σ at the bottom of a
 frequency window, where ``K - σM`` is indefinite, gives the window's. ``M`` is
 well conditioned, which keeps the modes of a nearly singular ``K`` orthogonal.
 
-Every vector comes back ``B``-normalised. Units are whatever the operators are
-in; nothing here knows about frequencies. Numeric imports live inside the
-functions.
+Every vector comes back ``B``-normalised. Units are whatever the operators are in; nothing here knows about frequencies.
+Numeric imports live inside the functions.
 """
 
 from __future__ import annotations
@@ -103,31 +101,18 @@ def _normalised(vectors: "np.ndarray", B) -> "np.ndarray":
     return vectors / np.where(norms > 0, norms, 1.0)
 
 
-def solve_generalized(
-    A,
-    B_spd,
-    k: int,
-    *,
-    solve_B=None,
-    precond=None,
-    which: str = "LA",
-    method: str | None = None,
-    tol: float | None = None,
-    maxiter: int | None = None,
-    seed: int = 0,
-    constraints: "np.ndarray | None" = None,
-) -> EigenResult:
+def solve_generalized(A, B_spd, k: int, *, solve_B=None, precond=None, which: str = "LA", method: str | None = None,
+                      tol: float | None = None, maxiter: int | None = None, seed: int = 0,
+                      constraints: "np.ndarray | None" = None) -> EigenResult:
     """The ``k`` eigenpairs of ``A φ = μ B φ`` with the largest (``which="LA"``), smallest (``"SA"``) or
     largest in magnitude (``"LM"``, ARPACK only; returned largest first) ``μ``.
 
-    ``B_spd`` must be symmetric positive definite; ``A`` symmetric. ``method``
-    is ``"arpack"`` (``solve_B`` an operator for ``B⁻¹``, else ``B`` is
-    factorised here) or ``"lobpcg"`` (``precond`` an approximate inverse of the
-    matrix whose smallest eigenvalues are wanted, ``A`` for ``SA`` and ``B``
-    for ``LA``; built by AMG here when not given; ``constraints``, columns the
-    vectors are kept ``B``-orthogonal to, such as known rigid-body modes). ``None`` takes LOBPCG when a
-    preconditioner is passed and no ``solve_B``, else ARPACK. A small problem
-    is solved densely whatever the method. Vectors are ``B``-normalised.
+    ``B_spd`` must be symmetric positive definite; ``A`` symmetric. ``method`` is ``"arpack"`` (``solve_B`` an operator
+    for ``B⁻¹``, else ``B`` is factorised here) or ``"lobpcg"`` (``precond`` an approximate inverse of the matrix whose
+    smallest eigenvalues are wanted, ``A`` for ``SA`` and ``B`` for ``LA``; built by AMG here when not given;
+    ``constraints``, columns the vectors are kept ``B``-orthogonal to, such as known rigid-body modes). ``None`` takes
+    LOBPCG when a preconditioner is passed and no ``solve_B``, else ARPACK. A small problem is solved densely whatever
+    the method. Vectors are ``B``-normalised.
     """
     import numpy as np
     import scipy.sparse.linalg as spla

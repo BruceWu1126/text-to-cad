@@ -17,10 +17,9 @@ Three integrators the time-dependent analyses share:
 - :func:`theta`: C u̇ + K u = f(t) by the θ method (θ = 1 backward Euler,
   θ = 1/2 Crank-Nicolson), with step doubling when ``adaptive``.
 
-Each takes the matrices on the free DOF already (held DOF removed) and calls
-``on_step(t, u, ...)`` at t = 0 and after every accepted step, so an analysis
-keeps what it needs (a curve, an envelope, the frames) without the run storing
-every state. Units are the caller's; numeric imports live inside the functions.
+Each takes the matrices on the free DOF already (held DOF removed) and calls ``on_step(t, u, ...)`` at t = 0 and after
+every accepted step, so an analysis keeps what it needs (a curve, an envelope, the frames) without the run storing every
+state. Units are the caller's; numeric imports live inside the functions.
 """
 
 from __future__ import annotations
@@ -92,9 +91,10 @@ def stopped_sentence(reached: str, planned: str, limit_s: float) -> str:
 
 def stopped_finding(sentence: str) -> dict:
     """The warning finding (``time_limit``) of a march that stopped at its time limit, :func:`stopped_sentence`'s words."""
-    return {"check": "fea", "severity": "warning", "type": "time_limit", "summary": sentence,
-            "description": "the march ran past its time limit (twice the study's fit.seconds, at least 30 s) and stopped "
-                           "there; the frames, curves and checks cover only the time it reached", "items": []}
+    from cadgen._internal.fea.analyses.base import finding
+
+    return finding("warning", "time_limit", sentence, "the march ran past its time limit (twice the study's fit.seconds, "
+                   "at least 30 s) and stopped there; the frames, curves and checks cover only the time it reached")
 
 
 def stopped_check(judged: dict, reached: str | None) -> dict:
@@ -183,6 +183,17 @@ class _Solver:
         return x
 
 
+def _cached(cache: dict, dt: float, build: Callable[[float], _Solver], run: March) -> _Solver:
+    """The solver for step ``dt``: built the first time (one factorisation), the oldest dropped past ``_CACHE``."""
+    key = float(dt)
+    if key not in cache:
+        if len(cache) >= _CACHE:
+            cache.pop(next(iter(cache)))
+        cache[key] = build(dt)
+        run.factorisations += 1
+    return cache[key]
+
+
 def _clamp_to(t: float, dt: float, stops: Sequence[float], end: float) -> float:
     """``dt``, shortened so the step lands on the next stop (a load's corner, the end) rather than passing it."""
     for stop in stops:
@@ -191,40 +202,23 @@ def _clamp_to(t: float, dt: float, stops: Sequence[float], end: float) -> float:
     return min(dt, end - t)
 
 
-def newmark(
-    M,
-    C,
-    K,
-    load: Callable[[float], "np.ndarray"],
-    end_s: float,
-    step_s: float,
-    *,
-    u0: "np.ndarray | None" = None,
-    v0: "np.ndarray | None" = None,
-    beta: float = 0.25,
-    gamma: float = 0.5,
-    adaptive: bool = False,
-    tolerance: float = NEWMARK_TOLERANCE,
-    largest_step: float | None = None,
-    stops: Sequence[float] = (),
-    solver: str = "direct",
-    near_null=None,
-    error_modes: "np.ndarray | None" = None,
-    on_step: Callable[[float, "np.ndarray", "np.ndarray", "np.ndarray"], None] | None = None,
-    log: Callable[[str], None] | None = None,
-    limit_s: float | None = None,
-) -> March:
+def newmark(M, C, K, load: Callable[[float], "np.ndarray"], end_s: float, step_s: float, *,
+            u0: "np.ndarray | None" = None, v0: "np.ndarray | None" = None, beta: float = 0.25, gamma: float = 0.5,
+            adaptive: bool = False, tolerance: float = NEWMARK_TOLERANCE, largest_step: float | None = None,
+            stops: Sequence[float] = (), solver: str = "direct", near_null=None,
+            error_modes: "np.ndarray | None" = None,
+            on_step: Callable[[float, "np.ndarray", "np.ndarray", "np.ndarray"], None] | None = None,
+            log: Callable[[str], None] | None = None, limit_s: float | None = None) -> March:
     """M ü + C u̇ + K u = load(t) from t = 0 to ``end_s`` by Newmark's method, first step ``step_s``.
 
-    ``C`` may be ``None`` (undamped). ``stops`` are times a step must land on (a load's corners), as is
-    ``end_s``. ``solver`` is ``"direct"`` (SuperLU of K + C γ/(βΔt) + M/(βΔt²), once per step size) or
-    ``"iterative"`` (multigrid CG, warm-started; ``near_null`` its near-nullspace, the rigid motions).
-    ``adaptive`` controls the step by :func:`newmark_error` (see the module), its size measured on
-    ``error_modes`` (mass-normalised columns, the lowest modes: the motion that matters) when given, else
-    in the mass norm. ``on_step(t, u, v, a)`` sees
-    t = 0 and every accepted step; the arrays are the integrator's own, so copy what is kept. ``log`` gets a progress
-    line at most every ``PROGRESS_S``; past ``limit_s`` seconds of wall time it stops after the step it is on, and the
-    march's ``stopped_at`` says where.
+    ``C`` may be ``None`` (undamped). ``stops`` are times a step must land on (a load's corners), as is ``end_s``.
+    ``solver`` is ``"direct"`` (SuperLU of K + C γ/(βΔt) + M/(βΔt²), once per step size) or ``"iterative"`` (multigrid
+    CG, warm-started; ``near_null`` its near-nullspace, the rigid motions). ``adaptive`` controls the step by
+    :func:`newmark_error` (see the module), its size measured on ``error_modes`` (mass-normalised columns, the lowest
+    modes: the motion that matters) when given, else in the mass norm. ``on_step(t, u, v, a)`` sees t = 0 and every
+    accepted step; the arrays are the integrator's own, so copy what is kept. ``log`` gets a progress line at most every
+    ``PROGRESS_S``; past ``limit_s`` seconds of wall time it stops after the step it is on, and the march's
+    ``stopped_at`` says where.
     """
     import numpy as np
     import scipy.sparse.linalg as spla
@@ -246,17 +240,11 @@ def newmark(
         on_step(0.0, u, v, a)
     cache: dict[float, _Solver] = {}
 
-    def solver_for(dt: float) -> _Solver:
-        key = float(dt)
-        if key not in cache:
-            if len(cache) >= _CACHE:
-                cache.pop(next(iter(cache)))
-            A = K + M * (1.0 / (beta * dt * dt))
-            if C is not None:
-                A = A + C * (gamma / (beta * dt))
-            cache[key] = _Solver(A, solver, near_null)
-            run.factorisations += 1
-        return cache[key]
+    def build(dt: float) -> _Solver:
+        A = K + M * (1.0 / (beta * dt * dt))
+        if C is not None:
+            A = A + C * (gamma / (beta * dt))
+        return _Solver(A, solver, near_null)
 
     watched = None if error_modes is None else (M @ error_modes)
 
@@ -288,7 +276,7 @@ def newmark(
             c4 = gamma / beta - 1.0
             c5 = h * (gamma / (2.0 * beta) - 1.0)
             rhs = rhs + C @ (c1 * u + c4 * v + c5 * a)
-        u_new = solver_for(h)(rhs)
+        u_new = _cached(cache, h, build, run)(rhs)
         a_new = a0 * (u_new - u) - a2 * v - a3 * a
         v_new = v + h * ((1.0 - gamma) * a + gamma * a_new)
         if adaptive:
@@ -371,21 +359,10 @@ def modal_march(omega: "np.ndarray", zeta, times: "np.ndarray", P: "np.ndarray",
     return Q, V
 
 
-def theta(
-    C,
-    K,
-    load: Callable[[float], "np.ndarray"],
-    end_s: float,
-    step_s: float,
-    *,
-    u0: "np.ndarray | None" = None,
-    theta: float = 1.0,
-    adaptive: bool = False,
-    tolerance: float = THETA_TOLERANCE,
-    largest_step: float | None = None,
-    solver: str = "direct",
-    on_step: Callable[[float, "np.ndarray"], None] | None = None,
-) -> March:
+def theta(C, K, load: Callable[[float], "np.ndarray"], end_s: float, step_s: float, *, u0: "np.ndarray | None" = None,
+          theta: float = 1.0, adaptive: bool = False, tolerance: float = THETA_TOLERANCE,
+          largest_step: float | None = None, solver: str = "direct",
+          on_step: Callable[[float, "np.ndarray"], None] | None = None) -> March:
     """C u̇ + K u = load(t) from ``u0`` by the θ method: (C/Δt + θK) uₙ₊₁ = (C/Δt − (1−θ)K) uₙ + θfₙ₊₁ + (1−θ)fₙ.
 
     ``adaptive`` takes each step whole and as two halves; a step whose two answers differ by more than
@@ -400,20 +377,11 @@ def theta(
     run = March(how=("superlu" if solver == "direct" else "multigrid CG") + f", θ = {theta:g}")
     cache: dict[float, _Solver] = {}
 
-    def solve(dt: float, rhs):
-        key = float(dt)
-        if key not in cache:
-            if len(cache) >= _CACHE:
-                cache.pop(next(iter(cache)))
-            cache[key] = _Solver(C * (1.0 / dt) + K * theta, solver)
-            run.factorisations += 1
-        return cache[key](rhs)
-
     def step(state, t: float, dt: float):
         rhs = C @ state * (1.0 / dt) - (1.0 - theta) * (K @ state) + theta * load(t + dt)
         if theta < 1.0:
             rhs = rhs + (1.0 - theta) * load(t)
-        return solve(dt, rhs)
+        return _cached(cache, dt, lambda dt: _Solver(C * (1.0 / dt) + K * theta, solver), run)(rhs)
 
     if on_step:
         on_step(0.0, u)

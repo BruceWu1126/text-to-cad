@@ -13,27 +13,15 @@ build123d solid in a temporary directory.
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import struct
-import tempfile
 import unittest
-from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
-
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
+from tests.python.support.fea_fixtures import (
+    assert_tracers_cross, box_duct_step, class_directory, glb_attribute_names, glb_extras, needs_fea, sidecar, solve,
+    tube_step, value_error,
+)
 
 GAMMA, R_AIR, T0 = 1.4, 287.0, 293.15
 P_OUT = 101325.0
@@ -130,19 +118,8 @@ def choked_mass(p0: float) -> float:
     return p0 * math.pi * (R_THROAT / 1000) ** 2 * math.sqrt(g / (R_AIR * T0)) * (2 / (g + 1)) ** ((g + 1) / (2 * (g - 1)))
 
 
-# -- running a study ----------------------------------------------------------------------------------
-
-
-def glb_extras(path: Path) -> tuple[dict, list[str]]:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    gltf = json.loads(raw[20:20 + length])
-    return gltf["meshes"][0]["extras"], list(gltf["meshes"][0]["primitives"][0]["attributes"])
-
-
-def solve(step: Path, out: Path, study: dict):
+def solve_capturing(step: Path, out: Path, study: dict):
     """Run the study; also hand back the gas flow's own space and solution (the volume's Mach numbers)."""
-    from cadgen import fea
     from cadgen._internal.fea.analyses.cfd_compressible import CfdCompressibleAnalysis
 
     captured: dict = {}
@@ -152,9 +129,8 @@ def solve(step: Path, out: Path, study: dict):
         captured["space"], captured["flow"] = space, flow
         return original(self, space, fluid, face_of, row_kind, flow, inputs, setup)
 
-    with redirect_stderr(io.StringIO()), mock.patch.object(CfdCompressibleAnalysis, "_post", keep):
-        result = fea.solve(step, out, study=study)
-    return result, captured
+    with mock.patch.object(CfdCompressibleAnalysis, "_post", keep):
+        return solve(step, out, study), captured
 
 
 def section_mach(captured: dict, x: float, half: float = 0.5) -> float:
@@ -208,9 +184,8 @@ class StudyFile(unittest.TestCase):
             ({"view": {"checks": [{"kind": "mach"}]}}, "a mach check needs the fastest Mach number allowed"),
             ({"flow": None}, "study.flow"),
         ):
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                self.parse(**changes)
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, value_error(self, self.parse, **changes))
 
     def test_the_mach_check_is_a_kind_of_its_own(self):
         from cadgen._internal.fea.analyses.kinds import CHECK_SPECS
@@ -221,24 +196,13 @@ class StudyFile(unittest.TestCase):
         parsed = self.parse(view={"checks": [{"kind": "mach", "limit": 0.8}, {"kind": "pressure_drop", "limit_Pa": 3000}]})
         self.assertEqual([check["kind"] for check in parsed.checks], ["mach", "pressure_drop"])
 
-    def test_it_is_registered_built_and_stdlib_only_at_import(self):
-        import subprocess
-        import sys
-
-        from cadgen._internal.fea.analyses import REGISTRY, get_analysis
+    def test_it_is_registered_and_built(self):
+        from cadgen._internal.fea.analyses import get_analysis
 
         analysis = get_analysis("cfd_compressible")
-        self.assertFalse(REGISTRY["cfd_compressible"].planned)
         self.assertEqual((analysis.tier, analysis.word, analysis.limits), (3, "Fast gas flow", (LIMIT_TEXT,)))
         self.assertEqual(analysis.ladder, ("fluid_coarsen", "continuation", "iterative"))
         self.assertEqual([spec.name for spec in analysis.fields][:3], ["pressure", "mach", "temperature"])
-        code = (
-            "import sys; sys.path.insert(0, 'packages/cadgen/src');"
-            "import cadgen._internal.fea.analyses.cfd_compressible, cadgen._internal.fea.compressible;"
-            "print(','.join(m for m in ('numpy', 'scipy', 'skfem', 'netgen', 'OCP') if m in sys.modules))"
-        )
-        root = Path(__file__).resolve().parents[4]
-        self.assertEqual(subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True, text=True, check=True).stdout.strip(), "")
 
     def test_the_tables_this_file_checks_against(self):
         # Textbook values (gamma 1.4): A/A* 1.6875 at Mach 0.37 and 2.0 at 0.306; the shock relations at Mach 2.
@@ -247,7 +211,7 @@ class StudyFile(unittest.TestCase):
         self.assertAlmostEqual(pressure_ratio(1.0), 0.5283, places=4)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class SubsonicNozzle(unittest.TestCase):
     """p_out / p0 = 0.95: subsonic everywhere (Mach 0.51 at the throat); each section on the isentropic area-Mach curve."""
 
@@ -255,26 +219,14 @@ class SubsonicNozzle(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
+        directory = class_directory(cls)
         study = nozzle_study(cls.RATIO, view={"checks": [{"kind": "mach", "limit": 0.55}, {"kind": "pressure_drop", "limit_Pa": 5000}]})
-        cls.result, cls.captured = solve(nozzle_step(directory), directory / "nozzle.glb", study)
-        cls.extras, cls.attributes = glb_extras(cls.result.glb)
-        cls.sidecar = json.loads(cls.result.sidecar.read_text(encoding="utf-8"))
+        cls.result, cls.captured = solve_capturing(nozzle_step(directory), directory / "nozzle.glb", study)
+        cls.extras, cls.attributes = glb_extras(cls.result.glb), glb_attribute_names(cls.result.glb)
         cls.summary = cls.result.summary
 
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
-
     def test_its_tracers_cross_from_inlet_to_outlet(self):
-        """The viewer's Flow routine: particles let go at the inlet (x = 0), carried along the duct to its outlet."""
-        motion = self.extras["analysis"]["motion"]
-        self.assertEqual((motion["kind"], motion["label"]), ("tracers", "Gas flow"))
-        starts = [path[0] for path in motion["paths"]]
-        self.assertLess(max(starts), 0.05 * LENGTH)
-        across = [path[-3] for path in motion["paths"] if path[-3] > 0.8 * LENGTH]
-        self.assertGreater(len(across), len(motion["paths"]) / 2)
+        assert_tracers_cross(self, self.result.glb, LENGTH, "Gas flow")
 
     def test_every_section_is_on_the_isentropic_area_mach_curve(self):
         m_exit = exit_mach(self.RATIO)
@@ -309,7 +261,7 @@ class SubsonicNozzle(unittest.TestCase):
         coldest = (T0 / (1 + 0.2 * fields["mach"]["max"] ** 2)) - 273.15
         self.assertAlmostEqual(fields["temperature"]["min"], coldest, delta=1.0)
         self.assertEqual(self.extras["analysis"]["limits"], [LIMIT_TEXT])
-        self.assertEqual(self.sidecar["limits"], [LIMIT_TEXT])
+        self.assertEqual(sidecar(self.result)["limits"], [LIMIT_TEXT])
         self.assertEqual(self.extras["analysis"]["mach"]["regime"], "subsonic")
         self.assertEqual(self.extras["analysis"]["walls"], "slip")
         self.assertEqual(self.extras["study"]["flow"]["inlets"][0]["opening"], "x_min")
@@ -329,7 +281,7 @@ class SubsonicNozzle(unittest.TestCase):
         self.assertIn("mach_close_to_limit", [finding["type"] for finding in self.result.findings])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class ChokedNozzle(unittest.TestCase):
     """p_out / p0 = 0.75 with a one-second time target: the ladder steps the pressure ratio up (continuation),
     the nozzle chokes, and a normal shock stands where the shock relations put it (x = 27.6 mm, Mach 1.69 ahead).
@@ -343,16 +295,11 @@ class ChokedNozzle(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
+        directory = class_directory(cls)
         study = nozzle_study(cls.RATIO, fit={"seconds": 1, "allow": ["continuation"]})
-        cls.result, cls.captured = solve(nozzle_step(directory), directory / "choked.glb", study)
-        cls.extras, _ = glb_extras(cls.result.glb)
+        cls.result, cls.captured = solve_capturing(nozzle_step(directory), directory / "choked.glb", study)
+        cls.extras = glb_extras(cls.result.glb)
         cls.summary = cls.result.summary
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def test_the_ladder_steps_the_pressure_ratio_up_and_says_so(self):
         rungs = [step["rung"] for step in self.result.fit]
@@ -419,7 +366,7 @@ def solve_gas_with(**options):
     return mock.patch.object(compressible, "solve_gas", run), flows
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class ChokingStage(unittest.TestCase):
     """The gallery's conical nozzle at half its drive (p0 = 118 kPa to 101 kPa): the gas speeds up through a low
     residual on its way to choking. The stabilisation's coefficients used to be held there, still subsonic ones,
@@ -431,10 +378,9 @@ class ChokingStage(unittest.TestCase):
 
         lines: list[str] = []
         patch, flows = solve_gas_with(schedule=(0.5,), log=lines.append)
-        with tempfile.TemporaryDirectory() as tmp, patch:
-            directory = Path(tmp)
-            study = {**nozzle_study(101325.0 / 135100.0), "mesh": {"size_mm": 2.0}}
-            solve(cone_nozzle_step(directory), directory / "cone.glb", study)
+        directory = class_directory(type(self))
+        with patch:
+            solve(cone_nozzle_step(directory), directory / "cone.glb", {**nozzle_study(101325.0 / 135100.0), "mesh": {"size_mm": 2.0}})
         flow = flows[0]
         self.assertTrue(flow.converged)                 # at the stage's own tolerance
         self.assertLess(flow.steps, MAX_STEPS // 2)
@@ -443,103 +389,65 @@ class ChokingStage(unittest.TestCase):
         self.assertLess(max(peaks), 2.0)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class UnsettledMarch(unittest.TestCase):
     """A march stopped short of its tolerance (three steps a stage here) is not a settled pass: every check says
     the flow did not settle and none passes outright, and the finding says why."""
 
-    @classmethod
-    def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        study = nozzle_study(0.95, view={"checks": [{"kind": "mach", "limit": 2.0}, {"kind": "pressure_drop", "limit_Pa": 50000}]})
-        patch, cls.flows = solve_gas_with(max_steps=3)
-        with patch:
-            cls.result, _ = solve(nozzle_step(directory), directory / "unsettled.glb", study)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
-
     def test_its_checks_are_labelled_not_settled_and_none_passes(self):
-        self.assertFalse(self.result.summary["solve"]["converged"])
-        for check in self.result.summary["checks"]:
+        directory = class_directory(type(self))
+        study = nozzle_study(0.95, view={"checks": [{"kind": "mach", "limit": 2.0}, {"kind": "pressure_drop", "limit_Pa": 50000}]})
+        with solve_gas_with(max_steps=3)[0]:
+            result = solve(nozzle_step(directory), directory / "unsettled.glb", study)
+        self.assertFalse(result.summary["solve"]["converged"])
+        for check in result.summary["checks"]:
             with self.subTest(kind=check["kind"]):
                 self.assertLess(check["ratio"], 0.9)    # a pass, had the flow settled
                 self.assertEqual((check["status"], check["settled"]), ("close", False))
                 self.assertTrue(check["label"].endswith("(flow not settled)"))
-        lines = "\n".join(self.result.human_lines())
+        lines = "\n".join(result.human_lines())
         self.assertIn("check 'Mach number (flow not settled)'", lines)
         self.assertIn("(not settled)", lines)
-        types = [finding["type"] for finding in self.result.findings]
+        types = [finding["type"] for finding in result.findings]
         self.assertIn("gas_flow_unsettled", types)
         self.assertFalse(any(kind.endswith("_close_to_limit") for kind in types))
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class LowSpeedLimit(unittest.TestCase):
     """0.5 m/s of air (Mach 0.0015, Re 140) through the cfd tests' tube: laminar walls, the incompressible pressure drop."""
 
-    @classmethod
-    def setUpClass(cls):
-        from build123d import Align, Cylinder, Rotation, export_step
-
+    def test_it_is_the_incompressible_flow_within_2_percent(self):
         from cadgen._internal.fea.compressible import AIR, sutherland
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        step = directory / "tube.step"
-        along = (Align.CENTER, Align.CENTER, Align.MIN)
-        export_step(Rotation(0, 90, 0) * (Cylinder(3.0, 16.0, align=along) - Cylinder(2.0, 16.0, align=along)), str(step))
+        directory = class_directory(type(self))
+        step = tube_step(directory, 2.0, 1.0, 16.0)  # the cfd tests' tube
         density, viscosity, speed = P_OUT / (R_AIR * T0), sutherland(AIR, T0), 0.5
-        cls.mass = density * speed * math.pi * 0.002 ** 2
+        mass = density * speed * math.pi * 0.002 ** 2
         incompressible = {"analysis": "cfd", "mesh": {"size_mm": 1.0},
                           "flow": {"kind": "internal", "fluid": {"density_kg_m3": density, "viscosity_Pa_s": viscosity},
                                    "inlets": [{"opening": "x_min", "velocity_m_s": speed}], "outlets": [{"opening": "x_max", "pressure_Pa": 0}]}}
         gas = {"analysis": "cfd_compressible", "mesh": {"size_mm": 1.0},
-               "flow": {"kind": "internal", "gas": "air", "inlets": [{"opening": "x_min", "mass_flow_kg_s": cls.mass}],
+               "flow": {"kind": "internal", "gas": "air", "inlets": [{"opening": "x_min", "mass_flow_kg_s": mass}],
                         "outlets": [{"opening": "x_max", "pressure_Pa": P_OUT}]}}
-        from cadgen import fea
-
-        with redirect_stderr(io.StringIO()):
-            cls.cfd = fea.solve(step, directory / "cfd.glb", study=incompressible)
-        cls.gas, _ = solve(step, directory / "gas.glb", gas)
-        cls.extras, _ = glb_extras(cls.gas.glb)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
-
-    def test_it_is_the_incompressible_flow_within_2_percent(self):
-        summary = self.gas.summary
+        cfd, gas = solve(step, directory / "cfd.glb", incompressible), solve(step, directory / "gas.glb", gas)
+        summary = gas.summary
         self.assertEqual(summary["walls"], "no_slip")
         self.assertLess(summary["reynolds"]["value"], 2000)
-        self.assertAlmostEqual(summary["mass_flow_kg_s"], self.mass, delta=1e-3 * self.mass)
-        drop, expected = summary["pressure_drop_Pa"], self.cfd.summary["pressure_drop_Pa"]
+        self.assertAlmostEqual(summary["mass_flow_kg_s"], mass, delta=1e-3 * mass)
+        drop, expected = summary["pressure_drop_Pa"], cfd.summary["pressure_drop_Pa"]
         self.assertLess(abs(drop / expected - 1), 0.02, (drop, expected))
         self.assertTrue(any("nearly incompressible here, so the cfd analysis gives the same answer" in line
-                            for line in self.extras["analysis"]["warnings"]))
+                            for line in glb_extras(gas.glb)["analysis"]["warnings"]))
 
 
-def box_duct_step(directory: Path, side: float, length: float, wall: float = 1.0) -> Path:
-    """A square passage through a block along x: sharp corners where the inlet meets the walls."""
-    from build123d import Align, Box, export_step
-
-    step = directory / "duct.step"
-    along = (Align.MIN, Align.CENTER, Align.CENTER)
-    export_step(Box(length, side + 2 * wall, side + 2 * wall, align=along) - Box(length, side, side, align=along), str(step))
-    return step
-
-
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class BoxDuct(unittest.TestCase):
     """A square duct (sharp corners at its inlet) carries a gas flow."""
 
     def test_a_square_duct_solves(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            directory = Path(tmp)
-            result, _ = solve(box_duct_step(directory, 4.0, 16.0), directory / "duct.glb",
-                              {**nozzle_study(0.95), "mesh": {"size_mm": 1.5}})
+        directory = class_directory(type(self))
+        result = solve(box_duct_step(directory, 4.0, 16.0), directory / "duct.glb", {**nozzle_study(0.95), "mesh": {"size_mm": 1.5}})
         self.assertTrue(result.ok)
         self.assertGreater(result.summary["mass_flow_kg_s"], 0)
         self.assertGreater(result.summary["pressure_drop_Pa"], 0)

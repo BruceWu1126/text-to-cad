@@ -15,20 +15,17 @@ way: the part is running away (a plastic hinge has formed). A step that still do
 the smallest size is where the part stops carrying more load: the path ends
 there, ``collapsed``, at the last converged λ: a result, never a refusal.
 
-With ``adaptive`` (the ladder's ``adaptive_steps`` rung) the step also grows
-again, doubling up to :data:`MAX_GROWTH` times the starting step, after a step
-Newton got through in :data:`EASY_ITERATIONS` iterations or fewer: fewer
-solves where the response is smooth.
+With ``adaptive`` (the ladder's ``adaptive_steps`` rung) the step also grows again, doubling up to :data:`MAX_GROWTH`
+times the starting step, after a step Newton got through in :data:`EASY_ITERATIONS` iterations or fewer: fewer solves
+where the response is smooth.
 
 A problem may settle a converged step further (contact's Uzawa updates: its optional ``settle`` and
 ``rollback``): a step that does not settle is cut the same way, and one that still does not at the
 smallest step is kept, marked (``StepRecord.settled``), with a warning; never a refusal.
 
-Each Newton step's linear solve is direct (SuperLU) or, on the ladder's
-``iterative`` rung, Newton-Krylov: GMRES preconditioned by smoothed-aggregation
-AMG on the tangent (the six rigid-body modes as its near-nullspace), the
-hierarchy kept for the whole load step and rebuilt when GMRES stalls.
-Numeric imports live inside the functions.
+Each Newton step's linear solve is direct (SuperLU) or, on the ladder's ``iterative`` rung, Newton-Krylov: GMRES
+preconditioned by smoothed-aggregation AMG on the tangent (the six rigid-body modes as its near-nullspace), the
+hierarchy kept for the whole load step and rebuilt when GMRES stalls. Numeric imports live inside the functions.
 """
 
 from __future__ import annotations
@@ -278,19 +275,10 @@ def _elastic_reach(problem: NonlinearProblem, linear: LinearSolver) -> float | N
     return reach if reach > 0 else None
 
 
-def solve_path(
-    problem: NonlinearProblem,
-    *,
-    steps: int,
-    solver: str = "direct",
-    adaptive: bool = False,
-    max_halvings: int = MAX_HALVINGS,
-    max_iterations: int = MAX_ITERATIONS,
-    tolerance: float = TOLERANCE,
-    runaway: float | None = RUNAWAY,
-    log: Callable[[str], None] | None = None,
-    deadline_s: float | None = None,
-) -> PathResult:
+def solve_path(problem: NonlinearProblem, *, steps: int, solver: str = "direct", adaptive: bool = False,
+               max_halvings: int = MAX_HALVINGS, max_iterations: int = MAX_ITERATIONS, tolerance: float = TOLERANCE,
+               runaway: float | None = RUNAWAY, log: Callable[[str], None] | None = None,
+               deadline_s: float | None = None) -> PathResult:
     """Follow the load from λ = 0 to 1 in ``steps`` starting steps (module docstring). Never raises for a load
     the part cannot carry: the result is ``collapsed`` at the last converged load factor.
 

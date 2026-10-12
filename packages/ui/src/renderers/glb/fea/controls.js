@@ -37,6 +37,15 @@ export function fieldAndDeformation(result) {
   ];
 }
 
+/** Whether a flow or a field was mapped onto the structure: its displacement is among the fields. */
+export const mapsStructure = (result) => result.fields.some((entry) => String(entry.attribute).toLowerCase() === "_displacement");
+
+/** The field select, and the deformation only where the result was mapped onto the structure: an unmapped flow or field moves nothing. */
+export function fieldAndMappedDeformation(result) {
+  const [field, deformation] = fieldAndDeformation(result);
+  return mapsStructure(result) ? [field, deformation] : [field];
+}
+
 /** Whether the result carries a vector to deform the model by: the displacement baked in, or a frame's displacement or mode shape. */
 export function deforms(result) {
   const geometry = result.mesh?.geometry;

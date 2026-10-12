@@ -1,28 +1,19 @@
-import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
 import { checkCaption, checkLine, checkTitle } from '../checkKinds.js';
 import { fieldWord } from '../fields.js';
-import { feaControls, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, studyRows } from '../../feaResult.js';
 import { activeFrameIndex } from '../series.js';
 import acoustic, { RING, airWords } from './acoustic.js';
 import { feaAnalysis } from './index.js';
+import { feaFile, plain, vec } from '../../__tests__/feaFile.js';
 
-const plain = (text: string) => text.replace(/[  ]/g, ' ');
 
 // A result as cadgen writes one: the air's modes (a signed pressure shape per mode), or a driven sweep
 // (the level in dB and the pressure in Pa per frequency frame), the study echoed under `acoustic`.
 function sound(kind: 'modes' | 'response', acousticStudy: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) {
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.1, 0, 0, 0.1, 0, 0.006]), 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
-  geometry.setAttribute('_displacement', new BufferAttribute(new Float32Array(9), 3));
-  geometry.setAttribute('_face', new BufferAttribute(new Float32Array([0, 1, 1]), 1));
   const values = kind === 'modes' ? [572, 903] : [100, 500, 900];
   const names = kind === 'modes' ? ['_sound_pressure'] : ['_sound_level', '_sound_pressure'];
-  values.forEach((_, index) => names.forEach((name) => {
-    geometry.setAttribute(index ? `${name}_f${index}` : name, new BufferAttribute(new Float32Array([1, -0.5, 0]), 1));
-  }));
+  const frames = Object.fromEntries(values.flatMap((_, index) => names.map((name) => [index ? `${name}_f${index}` : name, [1, -0.5, 0]])));
   const fields = kind === 'modes'
     ? [{ attribute: '_SOUND_PRESSURE', name: 'sound pressure (mode shape)', units: '', min: -1, max: 1, attribute_scale: 1, field: 'sound_pressure', signed: true, per_frame: true }]
     : [{ attribute: '_SOUND_LEVEL', name: 'sound pressure level', units: 'dB', min: 60, max: 84, attribute_scale: 1, field: 'sound_level', per_frame: true },
@@ -32,8 +23,7 @@ function sound(kind: 'modes' | 'response', acousticStudy: Record<string, unknown
       attributes: { sound_pressure: index ? `_SOUND_PRESSURE_F${index}` : '_SOUND_PRESSURE' } })) }
     : { kind: 'frequency', unit: 'Hz', default: 2, frames: values.map((value, index) => ({ value, label: `${value} Hz`, attributes: {
       sound_level: index ? `_SOUND_LEVEL_F${index}` : '_SOUND_LEVEL', sound_pressure: index ? `_SOUND_PRESSURE_F${index}` : '_SOUND_PRESSURE' } })) };
-  const mesh = new Mesh(geometry);
-  Object.assign(mesh.userData, {
+  return feaFile({ position: [0, 0, 0, 0.1, 0, 0, 0.1, 0, 0.006], _displacement: vec(9), _face: [0, 1, 1], ...frames }, {
     generator: 'cadgen fea', name: 'duct sound', deformation_scale: null, faces: ['#o1.f1', '#o1.f2'],
     analysis: { type: 'acoustic', tier: 3, word: 'Sound', estimate: false, limits: ['Linear acoustics: small sound pressures.'], noun: 'this sound',
       reference_C: null, warnings: [], acoustic: { solve: kind, domain: 'inside' } },
@@ -48,9 +38,6 @@ function sound(kind: 'modes' | 'response', acousticStudy: Record<string, unknown
       status: 'fails', where: { ref: null, at: [499, 20, 20] }, probe: 'end', at: { frame: 2, value: 900, unit: 'Hz' } }],
     findings: [],
   });
-  const root = new Group();
-  root.add(mesh);
-  return readFeaResult(root)!;
 }
 
 describe('acoustic', () => {

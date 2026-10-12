@@ -11,27 +11,17 @@ every joule put in is stored, so its mean temperature rises as P t / (ρ c V).
 from __future__ import annotations
 
 import io
-import json
 import math
 import tempfile
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
-add_repo_path(".")
+from tests.python.support.fea_fixtures import (
+    box_step, class_directory, glb_extras, glb_rows, needs_fea, sidecar, solve, value_error,
+)
 
 from cadgen._internal.fea.materials import lookup_material  # noqa: E402
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
-from tests.python.packages.cadgen.test_fea_thermal import box_step, glb_extras_and_attributes  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
 
 ALUMINIUM = lookup_material("aluminum-6061-t6")
 SIDE, H, T0, AIR = 10.0, 100.0, 100.0, 20.0
@@ -83,14 +73,12 @@ class StudyFile(unittest.TestCase):
             ({"material": {"name": "x", "E_MPa": 1e3, "nu": 0.3, "yield_MPa": 10, "density_t_per_mm3": 1e-9, "conductivity_W_mK": 1}},
              "specific_heat_J_kgK"),
         ]
-        for changes, fragment in cases:
-            document = {**BASE, **changes}
-            document = {key: value for key, value in document.items() if value is not None}
-            with self.subTest(changes=changes), self.assertRaises(ValueError) as caught:
-                from cadgen._internal.fea.study import parse_study
+        from cadgen._internal.fea.study import parse_study
 
-                parse_study(document)
-            self.assertIn(fragment, str(caught.exception))
+        for changes, fragment in cases:
+            document = {key: value for key, value in {**BASE, **changes}.items() if value is not None}
+            with self.subTest(changes=changes):
+                self.assertIn(fragment, value_error(self, parse_study, document))
 
     def test_its_view_has_a_time_scrubber(self):
         study = self.parse(view={"controls": [{"drives": "frame", "label": "Time"}, {"drives": "field"}]})
@@ -102,7 +90,7 @@ class StudyFile(unittest.TestCase):
         self.assertEqual([time_label(t) for t in (0, 0.012, 1.5, 45, 300, 9000)], ["0 s", "12 ms", "1.5 s", "45 s", "5 min", "2.5 h"])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class LumpedCooling(unittest.TestCase):
     END = 2 * TAU
 
@@ -110,24 +98,18 @@ class LumpedCooling(unittest.TestCase):
     def setUpClass(cls):
         from cadgen import fea
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        step = box_step(directory, "cube", (SIDE, SIDE, SIDE))
+        directory = class_directory(cls)
+        step = box_step(directory, "cube", (SIDE, SIDE, SIDE), "x")
         every = [face.ref for face in fea.faces(step).faces]
         cls.top = next(face.ref for face in fea.faces(step).faces if face.normal and face.normal[2] > 0.999)
         study = {"analysis": "thermal_transient", "material": "aluminum-6061-t6", "mesh": {"size_mm": 5.0},
                  "initial_C": T0, "end_s": cls.END,
                  "convection": [{"faces": every, "h_W_m2K": H, "ambient_C": AIR}],
                  "view": {"checks": [{"kind": "temperature", "max_C": 120, "faces": [cls.top], "label": "Lid"}]}}
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(step, directory / "cube.glb", study=study)
-        cls.extras, cls.attributes = glb_extras_and_attributes(
-            cls.result.glb, ("_TEMPERATURE", "_TEMPERATURE_F1", "_HEAT_FLUX_F1"))
-        cls.sidecar = json.loads(cls.result.sidecar.read_text(encoding="utf-8"))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.result = solve(step, directory / "cube.glb", study)
+        cls.extras = glb_extras(cls.result.glb)
+        cls.attributes = glb_rows(cls.result.glb, "_TEMPERATURE", "_TEMPERATURE_F1", "_HEAT_FLUX_F1")
+        cls.sidecar = sidecar(cls.result)
 
     def test_it_cools_as_one_lump(self):
         curve = self.sidecar["curves"]["max_temperature_C"]
@@ -169,7 +151,7 @@ class LumpedCooling(unittest.TestCase):
         self.assertIn("in 200 steps", lines[2])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class StepDoubling(unittest.TestCase):
     """The march on a scikit-fem cube: adaptive steps keep the lumped answer with fewer steps, and store every joule."""
 
@@ -262,7 +244,7 @@ class Ladder(unittest.TestCase):
         self.assertEqual(free, analysis.estimate(ctx, inputs))
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class OverBudget(unittest.TestCase):
     """A run that misses a tiny time target completes by taking adaptive_steps, and says so everywhere."""
 
@@ -270,21 +252,15 @@ class OverBudget(unittest.TestCase):
     def setUpClass(cls):
         from cadgen import fea
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        step = box_step(directory, "cube", (SIDE, SIDE, SIDE))
+        directory = class_directory(cls)
+        step = box_step(directory, "cube", (SIDE, SIDE, SIDE), "x")
         every = [face.ref for face in fea.faces(step).faces]
         study = {"analysis": "thermal_transient", "material": "aluminum-6061-t6", "mesh": {"size_mm": 5.0},
                  "initial_C": T0, "end_s": 2 * TAU, "convection": [{"faces": every, "h_W_m2K": H, "ambient_C": AIR}],
                  "fit": {"seconds": 0.001, "allow": ["adaptive_steps"]}}
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(step, directory / "cube.glb", study=study)
-        cls.extras, _ = glb_extras_and_attributes(cls.result.glb, ())
-        cls.sidecar = json.loads(cls.result.sidecar.read_text(encoding="utf-8"))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.result = solve(step, directory / "cube.glb", study)
+        cls.extras = glb_extras(cls.result.glb)
+        cls.sidecar = sidecar(cls.result)
 
     def test_it_completes_by_taking_adaptive_steps(self):
         self.assertTrue(self.result.ok)
@@ -304,7 +280,7 @@ class OverBudget(unittest.TestCase):
         self.assertIn("fit_adaptive_steps", [finding["type"] for finding in self.result.findings])
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class PastTimeLimit(unittest.TestCase):
     """Fixed gap: the march had no time limit and said nothing but a line every 100 steps at debug level. Past its limit
     (twice fit.seconds, the 30 s floor patched to 0 here) it stops where it got to, prints as it goes without --verbose,
@@ -318,7 +294,7 @@ class PastTimeLimit(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as name:
             directory = Path(name)
-            step = box_step(directory, "cube", (SIDE, SIDE, SIDE))
+            step = box_step(directory, "cube", (SIDE, SIDE, SIDE), "x")
             every = [face.ref for face in fea.faces(step).faces]
             study = {"analysis": "thermal_transient", "material": "aluminum-6061-t6", "mesh": {"size_mm": 5.0},
                      "initial_C": T0, "end_s": 2 * TAU, "convection": [{"faces": every, "h_W_m2K": H, "ambient_C": AIR}],
@@ -327,7 +303,7 @@ class PastTimeLimit(unittest.TestCase):
             with mock.patch.object(timestep, "LIMIT_FLOOR_S", 0.0), mock.patch.object(timestep, "PROGRESS_S", 0.0), \
                     redirect_stderr(printed):
                 result = fea.solve(step, directory / "cube.glb", study=study)
-            extras, _ = glb_extras_and_attributes(result.glb, ())
+            extras = glb_extras(result.glb)
         self.assertIn("[fea] time march: t = ", printed.getvalue())
         summary = result.summary
         self.assertEqual(summary["steps"], 1)

@@ -45,9 +45,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs, Series, SeriesFrame, SolveContext
+from cadgen._internal.fea.analyses.base import (
+    AnalysisResult, FieldSpec, Inputs, Series, SeriesFrame, SolveContext, by_severity, finding, frame_attributes,
+    max_frames, xyz, yield_at,
+)
 from cadgen._internal.fea.analyses.modal import (
-    align_degenerate, eigen_estimate, held_supports, hz_text, materials_of, max_frames, solver_method,
+    G0_MM_S2, GUESS_MODES, ITERATIVE_WORDS, KEEP_SHARE, REDUCED_GUESS, ModalResponse, axis_words, converged_finding,
+    displacement_judged, eigen_estimate, finish_summary, fixtures_echo, hz_text, kept_step, load_echo, mass_enough,
+    materials_of, modes_text, response_findings, response_modes, response_operators, scaled_deformation, solver_method,
+    stress_scalars, unit_vector, yield_check,
 )
 from cadgen._internal.fea.analyses.thermal_transient import time_label
 from cadgen._internal.fea.study import Fixture, Load, parse_fixtures, parse_loads
@@ -57,7 +63,6 @@ if TYPE_CHECKING:
 
 __all__ = ["Excitation", "History", "TransientAnalysis", "TransientInputs", "parse_time_history", "time_grid"]
 
-G0_MM_S2 = 9806.65
 SHAPES = ("step", "ramp", "half_sine")
 METHODS = ("modal", "direct")
 #: Modes are found up to this multiple of the loads' highest frequency (spec 5.11).
@@ -72,17 +77,9 @@ STEPS_PER_PERIOD = 40
 MAX_AUTO_STEPS = 20_000
 #: A load that jumps has every frequency: the modes followed are those of 1 / (this × the step).
 JUMP_STEPS = 20
-#: reduce_modes keeps the fewest modes holding this share of the response.
-KEEP_SHARE = 0.9
-#: The modes the ladder assumes before the solve has found them, and after reduce_modes.
-GUESS_MODES = 20
-REDUCED_GUESS = 6
 #: Stress is evaluated at every step while that costs under this many multiply-adds, else at a stride.
 STRESS_WORK = 2e10
-#: A check is close at 90 % of its limit.
-_CLOSE_AT = 0.9
 _TWO_PI = 2.0 * math.pi
-_AXES = "XYZ"
 
 
 # -- histories ---------------------------------------------------------------------------------------
@@ -264,23 +261,6 @@ class TransientInputs(Inputs):
         return TOP_FACTOR * self.content_Hz()
 
 
-def _unit(vector, where: str) -> tuple[float, float, float]:
-    if not isinstance(vector, list) or len(vector) != 3:
-        raise ValueError(f"{where}: the direction it is shaken along as [x, y, z], like [0, 0, 1] for Z")
-    values = [kinds.number(v, where=where) for v in vector]
-    size = math.sqrt(sum(v * v for v in values))
-    if size == 0:
-        raise ValueError(f"{where}: the direction is zero; give the axis it is shaken along, like [0, 0, 1]")
-    return tuple(v / size for v in values)  # type: ignore[return-value]
-
-
-def axis_words(direction) -> str:
-    for c, name in enumerate(_AXES):
-        if abs(abs(direction[c]) - 1) < 1e-9:
-            return name
-    return "(" + ", ".join(f"{v:.2g}" for v in direction) + ")"
-
-
 def _figure(value: float) -> str:
     return f"{value:.3g}" if abs(value) < 1000 else f"{value:.0f}"
 
@@ -294,17 +274,12 @@ def load_words(load: Load, history: History) -> str:
     return f"{size} {history.words()}"
 
 
-class TransientAnalysis:
+class TransientAnalysis(ModalResponse):
     name: ClassVar[str] = "transient"
-    tier: ClassVar[int] = 1
     word: ClassVar[str] = "Over time"
-    estimate_only: ClassVar[bool] = False
-    limits: ClassVar[tuple[str, ...]] = ()
+    extras_word: ClassVar[str] = "over time"
     study_keys: ClassVar[frozenset[str]] = frozenset(
         {"fixtures", "loads", "excitation", "end_s", "step_s", "damping_ratio", "method"})
-    material_needs: ClassVar[frozenset[str]] = frozenset({"density"})
-    mesh_orders: ClassVar[tuple[int, ...]] = (2,)
-    connection_types: ClassVar[tuple[str, ...]] = ("bonded", "free")
     fields: ClassVar[tuple[FieldSpec, ...]] = (
         FieldSpec("von_mises", "_VON_MISES", "von Mises stress", "MPa", per_frame=True),
         FieldSpec("displacement", "_DISPLACEMENT", "displacement", "mm", 3, 1000.0, per_frame=True),
@@ -319,11 +294,11 @@ class TransientAnalysis:
         "field": {"drives": "field", "type": "enum", "options": ["von_mises", "displacement", "von_mises_peak", "displacement_peak"]},
         "deformation": {"drives": "deformation", "type": "number", "min": 0.0, "max": None},
     }
-    upstream: ClassVar[tuple[str, ...]] = ()
     ladder: ClassVar[tuple[str, ...]] = ("reduce_modes", "iterative", "local_refine", "defeature", "linear_elements", "symmetry",
                                          "adaptive_steps")
     noun: ClassVar[str] = "this load"
     governing_word: ClassVar[str] = "peak stress"
+    envelope: ClassVar[str] = "von_mises_peak"
 
     # -- parse ---------------------------------------------------------------------------------------
 
@@ -348,7 +323,7 @@ class TransientAnalysis:
             if "direction" not in raw:
                 raise ValueError("excitation.direction: the direction it is shaken along as [x, y, z], like [0, 0, 1] for Z")
             excitation = Excitation(
-                _unit(raw["direction"], "excitation.direction"),
+                unit_vector(raw["direction"], "excitation.direction"),
                 kinds.number(raw.get("amplitude_g", 1.0), where="excitation.amplitude_g", positive=True),
                 parse_time_history(raw.get("history"), "excitation.history"),
             )
@@ -450,8 +425,7 @@ class TransientAnalysis:
             before = self.estimate(ctx, inputs)
             plan.solver = "iterative"
             after = self.estimate(ctx, inputs)
-            words = ("Found the modes with an iterative solver (LOBPCG with multigrid) instead of factorising the stiffness"
-                     if method == "modal" else "Solved each time step with an iterative solver (multigrid CG) instead of a factor")
+            words = (ITERATIVE_WORDS if method == "modal" else "Solved each time step with an iterative solver (multigrid CG) instead of a factor")
             if before.memory_bytes > ctx.budget.memory_bytes and after.memory_bytes < before.memory_bytes:
                 return fit.Step("iterative", f"{words}, to fit in memory", None, None,
                                 detail={"from_bytes": before.memory_bytes, "to_bytes": after.memory_bytes})
@@ -477,11 +451,6 @@ class TransientAnalysis:
             return None
         return fit.apply_generic(rung, self, ctx, inputs)
 
-    def governing(self, result: AnalysisResult) -> tuple["np.ndarray", float]:
-        """local_refine keeps the mesh fine where the part is stressed most over all time."""
-        envelope = result.fields["von_mises_peak"]
-        return envelope, float(envelope.max())
-
     # -- solve ---------------------------------------------------------------------------------------
 
     def solve(self, ctx: SolveContext, inputs: TransientInputs) -> AnalysisResult:
@@ -497,12 +466,8 @@ class TransientAnalysis:
         timings: dict[str, float] = {}
         warnings: list[str] = []
         started = time.perf_counter()
-        materials = materials_of(ctx)
-        K = operators.stiffness(space, materials)
-        M = operators.mass(space, materials)
-        held = held_supports(space, inputs.fixtures, ctx.ordinal_of, require=True)
-        fixed = held.fixed
-        free = np.setdiff1d(np.arange(space.dofs), fixed)
+        materials, K, M, held = response_operators(ctx, inputs.fixtures)
+        free = np.setdiff1d(np.arange(space.dofs), held.fixed)
         # Each load vector with its history: the face loads, then the shake as the inertia it puts in, -M r a.
         vectors: list[np.ndarray] = [sp.load_vector(space, (load,), ctx.ordinal_of) for load in inputs.loads]
         if inputs.excitation is not None:
@@ -550,10 +515,8 @@ class TransientAnalysis:
         else:
             default = int(np.argmax(disp_max))
         series = Series(kind="time", unit="s", default=default, frames=[
-            SeriesFrame(value=round(t, 9), label=time_label(t), attributes={
-                "von_mises": "_VON_MISES" if n == 0 else f"_VON_MISES_F{n}",
-                "displacement": "_DISPLACEMENT" if n == 0 else f"_DISPLACEMENT_F{n}",
-            })
+            SeriesFrame(value=round(t, 9), label=time_label(t),
+                        attributes=frame_attributes({"von_mises": "_VON_MISES", "displacement": "_DISPLACEMENT"}, n))
             for n, t in enumerate(frame_t)
         ])
         curve_t, curve_d = march["curve_t"], march["curve_d"]
@@ -593,14 +556,7 @@ class TransientAnalysis:
                 "analysis_warnings": analysis_warnings,
                 "stopped_at": stopped,
                 "planned_end_s": march.get("planned_end_s", march["end_s"]),
-                "study_checks": tuple(getattr(ctx.study, "checks", ()) or ()),
-                "margin": float(getattr(ctx.study, "margin", 2.0) or 2.0),
-                "parts": None if ctx.assembly is None else [
-                    {"ref": part.ref, "name": name, "material": material.name}
-                    for part, name, material in zip(ctx.assembly.parts, ctx.assembly.names, ctx.assembly.materials)
-                ],
-                "yields": [m.yield_strength for m in ctx.materials],
-                "node_domain": _node_domain(space),
+                **stress_scalars(ctx),
             },
             dofs=int(space.dofs),
             solver=march["solver"],
@@ -636,18 +592,8 @@ class TransientAnalysis:
         r = None if inputs.excitation is None else sp.rigid_translation(space.component, inputs.excitation.direction)
         Mr = None if r is None else M @ r
         total_along = 0.0 if r is None else float(r @ Mr)
-        enough = None
-        if reduce and base and total_along > 0:
-            def enough(omega2, vectors, free):
-                return float(((vectors.T @ Mr[free]) ** 2).sum()) / total_along >= KEEP_SHARE
-
-        started = time.perf_counter()
-        method = solver_method(ctx, space.dofs - len(fixed.fixed))
-        found = sp.find_modes(K, M, fixed, inputs.top_Hz, method=method, locations=space.locations,
-                              component=space.component, enough=enough)
-        warnings.extend(found.warnings)
-        found.vectors = align_degenerate(found.vectors, M, found.frequencies_Hz, space.component)
-        timings["eigen_s"] = time.perf_counter() - started
+        enough = mass_enough(Mr, total_along) if reduce and base and total_along > 0 else None
+        found = response_modes(ctx, K, M, fixed, inputs.top_Hz, enough, timings, warnings)
         Pm = found.vectors.T @ F                                                  # (m, J) modal loads per unit history
         kept = np.arange(len(found))
         kept_share = None
@@ -660,7 +606,8 @@ class TransientAnalysis:
                 kept, kept_share = sp.fewest_modes(sp.participation(found, M, r) ** 2, total_along, KEEP_SHARE)
             else:
                 kept, kept_share = sp.fewest_modes(weights, float(weights.sum()), KEEP_SHARE)
-            reduce_step = self._reduce_step(found, kept, kept_share, base)
+            what = "of the mass moving with the shake" if base else "of the response to the loads"
+            reduce_step = kept_step(found, kept, kept_share, f"{what}, the rest by their steady share")
         used = found.take(kept)
         Pu = Pm[kept]
         # The static correction: each load's steady answer less what the kept modes carry of it.
@@ -724,17 +671,15 @@ class TransientAnalysis:
         frame_vm = [sp.von_mises_of((Z[i] @ flat_s).reshape(6, nodes)) for i in chosen]
         timings["march_s"] = time.perf_counter() - started
         participation = None
-        if r is not None:
-            along = float((sp.participation(found, M, r) ** 2).sum() / total_along) if total_along > 0 else None
-            participation = along
-        modes_words = f"{len(used)} mode{'s' if len(used) != 1 else ''}"
+        if r is not None and total_along > 0:
+            participation = float((sp.participation(found, M, r) ** 2).sum() / total_along)
         return {
             "steps": count - 1, "first_step_s": dt, "smallest": float(np.diff(times).min()) if count > 1 else 0.0,
             "largest": float(np.diff(times).max()) if count > 1 else 0.0, "adaptive": False, "end_s": end,
             "curve_t": times.tolist(), "curve_d": curve.tolist(),
             "frame_t": [float(times[i]) for i in chosen], "frame_u": frame_u, "frame_vm": frame_vm,
             "vm_peak": vm_peak, "vm_peak_t": vm_peak_t, "u_peak": u_peak, "u_peak_t": u_peak_t,
-            "solver": f"{found.how}; modal superposition of {modes_words}, each integrated exactly, with the static "
+            "solver": f"{found.how}; modal superposition of {modes_text(len(used))}, each integrated exactly, with the static "
                       "correction for the modes left out",
             "scalars": {
                 "frequencies_Hz": [float(f) for f in found.frequencies_Hz],
@@ -854,22 +799,6 @@ class TransientAnalysis:
             },
         }
 
-    @staticmethod
-    def _reduce_step(found, kept, share: float | None, by_mass: bool) -> dict:
-        """reduce_modes' words once the modes are found, for :meth:`settle_steps` (like harmonic's)."""
-        what = "of the mass moving with the shake" if by_mass else "of the response to the loads"
-        words = (f"Kept {len(kept)} of the {len(found)} modes up to {hz_text(found.searched_Hz)}, the ones holding "
-                 f"{(share or 0.0) * 100:.0f}% {what}, the rest by their steady share, to fit")
-        return {"words": words,
-                "detail": {"kept_modes": len(kept), "found_modes": len(found), "kept_share": round(share or 0.0, 4)}}
-
-    def settle_steps(self, result: AnalysisResult, steps: list) -> list:
-        """reduce_modes' step said again once the modes are found: how many it kept and the share they hold
-        (run.py calls this after the solve, before writing; the solve leaves the words in ``reduce_step``)."""
-        from cadgen._internal.fea import fit
-
-        return fit.settle_step(steps, "reduce_modes", result.scalars.get("reduce_step"), marker="keep_share")
-
     # -- checks, findings ----------------------------------------------------------------------------
 
     def _frame_at(self, result: AnalysisResult, when: float) -> int:
@@ -885,31 +814,8 @@ class TransientAnalysis:
         node = int(envelope.argmax())
         return node, float(envelope[node]), float(result.scalars["vm_peak_t"][node])
 
-    def _yield_at(self, result: AnalysisResult, node: int) -> float:
-        domains = result.scalars["node_domain"]
-        yields = result.scalars["yields"]
-        if domains is None or len(yields) == 1:
-            return yields[0]
-        return yields[int(domains[node])]
-
-    def needs_finer(self, result: AnalysisResult, inputs: TransientInputs, check_results: list[dict]) -> bool:
-        """Solve once more finer when a check is close, or the peak stress lies between yield over the margin and yield."""
-        if check_results:
-            return any(check["status"] == "close" for check in check_results)
-        if not any(check.get("kind") == "stress" for check in result.scalars["study_checks"]):
-            return False
-        node, peak, _ = self._stress_peak(result)
-        ratio = peak / self._yield_at(result, node)
-        return 1.0 / result.scalars["margin"] < ratio <= 1.0
-
-    def refined_record(self, result: AnalysisResult, size_mm: float, finer_mm: float, *, assembly: bool) -> dict:
-        return {"from_size_mm": round(size_mm, 4), "from_max_von_mises_MPa": round(self._stress_peak(result)[1], 4),
-                "size_mm": round(finer_mm, 4), "max_von_mises_MPa": None}
-
-    def merge_finer(self, coarse: AnalysisResult, finer: AnalysisResult, refined: dict) -> AnalysisResult:
-        refined["max_von_mises_MPa"] = round(self._stress_peak(finer)[1], 4)
-        finer.scalars["coarser_peak_MPa"] = self._stress_peak(coarse)[1]
-        return finer
+    def _peak(self, result: AnalysisResult, inputs=None) -> tuple[int, float]:
+        return self._stress_peak(result)[:2]
 
     def judge(self, check: dict, index: int, ctx: SolveContext, result: AnalysisResult, inputs: TransientInputs) -> dict:
         from cadgen._internal.fea.timestep import stopped_check
@@ -918,56 +824,23 @@ class TransientAnalysis:
         return stopped_check(self._judge_kind(check, index, ctx, result, inputs), None if stopped is None else time_label(stopped))
 
     def _judge_kind(self, check: dict, index: int, ctx: SolveContext, result: AnalysisResult, inputs: TransientInputs) -> dict:
-        from cadgen._internal.fea import checks
-        from cadgen._internal.fea.analyses.static import peak_face
-
         if check["kind"] == "stress":
             node, peak, when = self._stress_peak(result)
-            fixed = {ctx.ordinal_of[ref] for fixture in inputs.fixtures for ref in fixture.faces}
-            at = tuple(float(c) for c in result.dof_locations[node])
-            solved = checks.Solved(
-                material_name="", yield_MPa=self._yield_at(result, node), peak_MPa=peak, peak_gauss_MPa=peak, peak_at=at,
-                peak_face=peak_face(ctx.volume, result, node, fixed), fixed_faces=(), max_displacement_mm=0.0,
-                displacement_at=at, bbox_diagonal_mm=0.0, margin=result.scalars["margin"], coarser_peak_MPa=None, part="",
-            )
-            return {**checks.stress_check(solved, label=check.get("label")), "at": self._at(result, when)}
-        peak = kinds.field_max_over(
-            result.fields["displacement_peak"], tuple(check.get("faces", ())), boundary=result.boundary_quadratic,
-            boundary_ordinal=ctx.volume.boundary_ordinal, locations=result.dof_locations, face_ref=ctx.volume.faces,
-            ordinal_of=ctx.ordinal_of, where=f"view.checks[{index}]",
-        )
-        judged = checks.displacement_check(peak.value, check["limit_mm"], at=peak.at, ref=peak.ref, faces=peak.faces,
-                                           label=check.get("label"))
+            return {**yield_check(ctx, result, node, peak, check.get("label"), inputs.fixtures), "at": self._at(result, when)}
+        judged, peak = displacement_judged(ctx, result, result.fields["displacement_peak"], check, index)
         return {**judged, "at": self._at(result, float(result.scalars["u_peak_t"][peak.node]))}
 
     def findings(self, ctx: SolveContext, result: AnalysisResult, inputs: TransientInputs,
                  check_results: list[dict], *, assembly: bool) -> list[dict]:
-        from cadgen._internal.fea.analyses.modal import finding
         from cadgen._internal.fea.timestep import stopped_finding
 
         scalars = result.scalars
-        whole = "the assembly" if assembly else "the part"
         found: list[dict] = [stopped_finding(sentence) for sentence in scalars.get("analysis_warnings", ())]
-        for check in check_results:
-            status = check["status"]
-            if status not in ("fails", "close") or check.get("passed_until_stop"):
-                continue
-            when = time_label(check["at"]["value"])
-            severity = "error" if status == "fails" else "warning"
-            item = [{"text": check["label"], **check["where"]}]
-            if check["kind"] == "stress":
-                if status == "fails":
-                    sentence = (f"At {when}, {whole} reaches {check['value']:.3g} MPa, over its {check['limit']:g} MPa yield "
-                                f"({check['label']})")
-                else:
-                    sentence = (f"At {when}, {whole} reaches {check['value']:.3g} MPa, inside the {check['margin']:g}× margin "
-                                f"under its {check['limit']:g} MPa yield ({check['label']})")
-                found.append(finding(severity, "transient_yields" if status == "fails" else "transient_close_to_yield", sentence,
-                                     f"peak von Mises over time {check['value']:.4g} MPa at {check['at']['value']:.4g} s", item))
-            elif check["kind"] == "displacement" and status == "close":
-                found.append(finding("warning", "displacement_close",
-                                     f"At {when}, it moves {check['value']:.3g} mm, close to the {check['limit']:g} mm allowed "
-                                     f"({check['label']})", "the largest displacement over time", item))
+        found += response_findings(
+            [check for check in check_results if not check.get("passed_until_stop")], "transient",
+            lambda check: f"At {time_label(check['at']['value'])},", "the assembly" if assembly else "the part",
+            lambda check: f"peak von Mises over time {check['value']:.4g} MPa at {check['at']['value']:.4g} s",
+            moved="the largest displacement over time")
         envelope = result.fields["displacement_peak"]
         node = int(envelope.argmax())
         peak_mm = float(envelope[node])
@@ -980,7 +853,7 @@ class TransientAnalysis:
             f"Moves most at {time_label(when)}: {peak_mm:.3g} mm{relative}"
             + (f", {ratio:.2f}× its steady response to the same loads" if ratio is not None else ""),
             "a load applied quickly moves a part further than the same load held steady (up to 2× for a sudden step)",
-            [{"text": "moves most here", "ref": None, "at": [round(float(c), 3) for c in result.dof_locations[node]]}],
+            [{"text": "moves most here", "ref": None, "at": xyz(result.dof_locations[node])}],
         ))
         end = scalars["end_s"]
         curve = result.curves["max_displacement_mm"]
@@ -991,23 +864,14 @@ class TransientAnalysis:
                 f"Still moving further at the end ({time_label(end)}): run longer (end_s) to see the peak",
                 "the largest displacement was still growing at the last step", [],
             ))
-        coarser = scalars.get("coarser_peak_MPa")
-        if coarser:
-            _, peak, _ = self._stress_peak(result)
-            moved = abs(peak - coarser) / coarser if coarser > 0 else 0.0
-            found.append(finding(
-                "warning" if moved > 0.1 else "info", "mesh_not_converged" if moved > 0.1 else "mesh_converged",
-                f"The peak stress moved {moved * 100:.1f} % on a finer mesh ({coarser:.3g} to {peak:.3g} MPa)",
-                "a check was close, so the part was solved again finer; the finer answer is the one reported", [],
-            ))
-        return sorted(found, key=lambda item: {"error": 0, "warning": 1, "info": 2}[item["severity"]])
+        if coarser := scalars.get("coarser_peak_MPa"):
+            found.append(converged_finding("The peak stress", self._stress_peak(result)[1], coarser))
+        return by_severity(found)
 
     # -- what is written -----------------------------------------------------------------------------
 
     def deformation_scale(self, result: AnalysisResult, bbox_diagonal: float, requested: float | None) -> float | None:
-        from cadgen._internal.fea.outputs import auto_deformation_scale
-
-        return requested or auto_deformation_scale(float(result.fields["displacement_peak"].max()), bbox_diagonal)
+        return scaled_deformation(float(result.fields["displacement_peak"].max()), bbox_diagonal, requested)
 
     def summary(self, result: AnalysisResult, inputs: TransientInputs, check_results: list[dict]) -> dict:
         scalars = result.scalars
@@ -1015,7 +879,7 @@ class TransientAnalysis:
         envelope = result.fields["displacement_peak"]
         d_node = int(envelope.argmax())
         d_peak = float(envelope[d_node])
-        yield_MPa = self._yield_at(result, s_node)
+        yield_MPa = yield_at(scalars, s_node)
         factor = yield_MPa / s_peak if s_peak > 0 else None
         static = scalars["static_max_mm"]
         loads = []
@@ -1050,12 +914,12 @@ class TransientAnalysis:
             "peak_s": round(scalars["frame_t"][result.series.default], 9),
             "max_von_mises_MPa": round(s_peak, 4),
             "max_von_mises_at_s": round(s_when, 9),
-            "max_von_mises_at_mm": [round(float(c), 3) for c in result.dof_locations[s_node]],
+            "max_von_mises_at_mm": xyz(result.dof_locations[s_node]),
             "yield_MPa": yield_MPa,
             "safety_factor": None if factor is None else math.floor(factor * 1000) / 1000,
             "max_displacement_mm": round(d_peak, 6),
             "max_displacement_at_s": round(float(scalars["u_peak_t"][d_node]), 9),
-            "max_displacement_at_mm": [round(float(c), 3) for c in result.dof_locations[d_node]],
+            "max_displacement_at_mm": xyz(result.dof_locations[d_node]),
             "static_displacement_mm": round(static, 6),
             "static_von_mises_MPa": round(scalars["static_von_mises_MPa"], 4),
             "dynamic_amplification": None if not static > 0 else round(d_peak / static, 4),
@@ -1080,13 +944,7 @@ class TransientAnalysis:
                                    "beta_s": float(f"{rayleigh['beta_s']:.6g}"),
                                    "modes_Hz": [round(f, 4) for f in rayleigh["modes_Hz"]]}
             summary["rejected_steps"] = scalars["rejected_steps"]
-        if scalars.get("parts"):
-            summary["parts"] = scalars["parts"]
-        summary["checks"] = check_results
-        return summary
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} over time"
+        return finish_summary(summary, scalars, check_results)
 
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
         import numpy as np
@@ -1100,18 +958,11 @@ class TransientAnalysis:
     def extras_head(self, summary: dict) -> dict:
         return {"peak_s": summary["peak_s"], "safety_factor": summary["safety_factor"]}
 
-    def extras_assembly(self, summary: dict) -> dict:
-        return {"parts": summary.get("parts", [])}
-
     def study_echo(self, inputs: TransientInputs, bare: Callable[[tuple[str, ...]], list[str]]) -> dict:
-        def load_echo(load: Load, history: History) -> dict:
-            return {"type": load.type, "faces": bare(load.faces),
-                    **({"vector_N": [float(c) for c in load.vector]} if load.type == "force" else {"pressure_MPa": load.pressure}),
-                    "history": history.echo()}
-
         echo: dict[str, Any] = {
-            "fixtures": [{"type": fixture.type, "faces": bare(fixture.faces)} for fixture in inputs.fixtures],
-            "loads": [load_echo(load, history) for load, history in zip(inputs.loads, inputs.histories)],
+            "fixtures": fixtures_echo(inputs.fixtures, bare),
+            "loads": [{**load_echo(load, bare), "history": history.echo()}
+                      for load, history in zip(inputs.loads, inputs.histories)],
         }
         if inputs.excitation is not None:
             ex = inputs.excitation
@@ -1127,11 +978,10 @@ class TransientAnalysis:
             ex = summary["excitation"]
             what.append(f"shaken {ex['amplitude_g']:g} g along {axis_words(ex['direction'])}, {ex['history']}")
         if summary["method"] == "modal":
-            how = (f"modal: {summary['modes_used']} mode{'s' if summary['modes_used'] != 1 else ''} up to "
-                   f"{hz_text(summary['modes_up_to_Hz'])}, each followed exactly")
+            how = f"modal: {modes_text(summary['modes_used'])} up to {hz_text(summary['modes_up_to_Hz'])}, each followed exactly"
         else:
             how = "direct: Newmark average acceleration" + (", adaptive steps" if summary["adaptive"] else "")
-        lines = [
+        return [
             f"{'; '.join(what)}; followed for {time_label(summary['end_s'])} in {summary['steps']} steps "
             f"({how}, {summary['damping_ratio'] * 100:g}% damping)",
             f"peak stress {summary['max_von_mises_MPa']:.4g} MPa at {time_label(summary['max_von_mises_at_s'])}; moves up to "
@@ -1139,7 +989,6 @@ class TransientAnalysis:
             + (f", {summary['dynamic_amplification']:.2f}× its steady {summary['static_displacement_mm']:.4g} mm"
                if summary["dynamic_amplification"] is not None else ""),
         ]
-        return lines
 
 
 def _frame_steps(times: "np.ndarray", frames: int, specials: set[int]) -> list[int]:
@@ -1162,13 +1011,3 @@ def _frame_steps(times: "np.ndarray", frames: int, specials: set[int]) -> list[i
         else:
             break
     return chosen
-
-
-def _node_domain(space) -> "np.ndarray | None":
-    import numpy as np
-
-    if space.domain is None:
-        return None
-    out = np.zeros(space.scalar_count, dtype=np.int64)
-    out[space.scalar.element_dofs] = np.asarray(space.domain)[None, :]
-    return out

@@ -18,16 +18,17 @@ says). Stdlib only at import; numeric imports live inside the methods.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
-from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, SolveContext
+from cadgen._internal.fea.analyses.base import (
+    AnalysisBase, AnalysisResult, FieldSpec, SolveContext, by_severity, finding, max_frames, xyz,
+)
 from cadgen._internal.fea.analyses.modal import (
-    apply_eigen_rung, eigen_estimate, factor_text, finding, governing_field, held_supports, materials_of, max_frames,
-    mode_series, mode_shapes, parse_modes, raw_checks, solver_method, where_moves,
+    apply_eigen_rung, eigen_estimate, factor_text, governing_field, held_supports, materials_of, mode_series, mode_shapes,
+    parse_modes, raw_checks, solver_method, where_moves,
 )
 from cadgen._internal.fea.analyses.static import StaticAnalysis, StaticInputs
 
@@ -65,16 +66,12 @@ def _buckling_check(check: dict, factors: list[float]) -> dict:
     return judged
 
 
-class BucklingAnalysis:
+class BucklingAnalysis(AnalysisBase):
     name: ClassVar[str] = "buckling"
     tier: ClassVar[int] = 1
     word: ClassVar[str] = "Buckling"
-    estimate_only: ClassVar[bool] = False
-    limits: ClassVar[tuple[str, ...]] = ()
+    extras_word: ClassVar[str] = "buckling"
     study_keys: ClassVar[frozenset[str]] = frozenset({"fixtures", "loads", "modes"})
-    material_needs: ClassVar[frozenset[str]] = frozenset()
-    mesh_orders: ClassVar[tuple[int, ...]] = (2,)
-    connection_types: ClassVar[tuple[str, ...]] = ("bonded", "free")
     # The shape first (the field the viewer opens on), then the prestress's stress, the same in every
     # frame; the stress is the scalar the GLB is coloured by.
     fields: ClassVar[tuple[FieldSpec, ...]] = (
@@ -88,7 +85,6 @@ class BucklingAnalysis:
         "mode": {"drives": "mode", "type": "enum", "options": None},
         "deformation": {"drives": "deformation", "type": "number", "min": 0.0, "max": None},
     }
-    upstream: ClassVar[tuple[str, ...]] = ()
     ladder: ClassVar[tuple[str, ...]] = (
         "iterative", "local_refine", "defeature", "linear_elements", "idealise", "symmetry", "reduce_modes",
     )
@@ -191,12 +187,9 @@ class BucklingAnalysis:
         shapes, _ = mode_shapes(space, full[:, :frames])
         governing = governing_field(space, materials, full[:, 0] / max(float(np.abs(full[:, 0]).max()), 1e-300))
         applied = np.asarray(prestress.applied, dtype=float)
-        result = AnalysisResult(
-            dof_locations=prestress.dof_locations,
-            vertices=prestress.vertices,
-            tets=prestress.tets,
-            boundary_quadratic=prestress.boundary_quadratic,
-            element_dofs=prestress.element_dofs,
+        return AnalysisResult(
+            dof_locations=prestress.dof_locations, vertices=prestress.vertices, tets=prestress.tets,
+            boundary_quadratic=prestress.boundary_quadratic, element_dofs=prestress.element_dofs,
             fields={"von_mises": outcome.von_mises, "mode_shape": shapes[0]},
             fields_by_part=dict(prestress.fields_by_part),
             deformation=shapes[0],
@@ -211,15 +204,11 @@ class BucklingAnalysis:
                 "analysis_warnings": list(warnings),
                 "part_refs": None if ctx.assembly is None else [part.ref for part in ctx.assembly.parts],
             },
-            reactions=prestress.reactions,
-            applied=prestress.applied,
-            dofs=int(space.dofs),
-            solver=f"{prestress.solver}; {found.how}",
+            reactions=prestress.reactions, applied=prestress.applied, dofs=int(space.dofs), solver=f"{prestress.solver}; {found.how}",
             timings={**timings, **{k: v for k, v in prestress.timings.items() if k == 'mesh_to_fem_s'}},
             warnings=list(prestress.warnings) + warnings,
             solved=prestress.solved,
         )
-        return result
 
     # -- checks, findings ----------------------------------------------------------------------------
 
@@ -274,10 +263,10 @@ class BucklingAnalysis:
                 "info", "first_buckling_mode",
                 f"First buckling at {factor_text(factors[0])} this load ({critical:.4g} N in all)",
                 "linear buckling of the perfect shape; a real part, never perfectly straight or loaded dead centre, "
-                "buckles earlier, so keep a margin", [{"text": "bulges most here", "ref": None,
-                                                      "at": [round(float(c), 3) for c in result.dof_locations[node]]}],
+                "buckles earlier, so keep a margin",
+                [{"text": "bulges most here", "ref": None, "at": xyz(result.dof_locations[node])}],
             ))
-            weakest = min(result.solved, key=lambda part: math.inf if checks.safety_factor(part) is None else checks.safety_factor(part))
+            weakest = StaticAnalysis.weakest(result)
             yields_at = checks.safety_factor(weakest)
             if yields_at is not None and yields_at < factors[0]:
                 found.append(finding(
@@ -299,7 +288,7 @@ class BucklingAnalysis:
                 f"{factor_text(factors[0])})",
                 "the check was close, so the part was solved again finer; the finer answer is the one reported", [],
             ))
-        return sorted(found, key=lambda item: {"error": 0, "warning": 1, "info": 2}[item["severity"]])
+        return by_severity(found)
 
     # -- what is written -----------------------------------------------------------------------------
 
@@ -317,7 +306,7 @@ class BucklingAnalysis:
         factors = scalars["load_factors"]
         outcome = scalars["outcome"]
         peak = int(outcome.von_mises.argmax())
-        weakest = min(result.solved, key=lambda part: math.inf if checks.safety_factor(part) is None else checks.safety_factor(part))
+        weakest = StaticAnalysis.weakest(result)
         yields_at = checks.floored_factor(weakest)
         summary: dict[str, Any] = {
             "load_factors": [round(f, 4) for f in factors],
@@ -327,7 +316,7 @@ class BucklingAnalysis:
             "applied_force_N": [round(x, 4) for x in result.applied],
             "reaction_force_N": [round(sum(r[c] for r in result.reactions), 4) for c in range(3)],
             "max_von_mises_MPa": round(float(outcome.von_mises[peak]), 4),
-            "max_von_mises_at_mm": [round(float(c), 3) for c in outcome.dof_locations[peak]],
+            "max_von_mises_at_mm": xyz(outcome.dof_locations[peak]),
             "yield_MPa": weakest.yield_MPa,
             # How many times this load before the weakest part yields: compare it with the first load factor.
             "yield_factor": yields_at,
@@ -342,9 +331,6 @@ class BucklingAnalysis:
             ]
         summary["checks"] = check_results
         return summary
-
-    def extras_name(self, stem: str) -> str:
-        return f"{stem} buckling"
 
     def field_ranges(self, summary: dict, result: AnalysisResult) -> dict[str, tuple[float, float]]:
         return {"mode_shape": (0.0, 1.0), "von_mises": (0.0, summary["max_von_mises_MPa"])}

@@ -499,11 +499,9 @@ class System:
 
     def sweep_direct(self, b: "np.ndarray", omegas, loss: float):
         """The scaled reduced complex answers at each ω (rad/s): (K(1 + iη) - ω² M) on the displacement."""
-        import numpy as np
         import scipy.sparse as sparse
         import scipy.sparse.linalg as spla
 
-        m = self.m_u
         damp = sparse.bmat([[self.Kr, None], [None, sparse.csr_matrix((self.m_p, self.m_p))]], format="csc")
         Mfull = sparse.bmat([[self.Mr, None], [None, sparse.csr_matrix((self.m_p, self.m_p))]], format="csc")
         A = self.A.astype(complex)
@@ -511,7 +509,6 @@ class System:
         for omega in omegas:
             system = (A + 1j * loss * damp - omega ** 2 * Mfull).tocsc()
             out.append(spla.spsolve(system, b.astype(complex)))
-        del m
         return out
 
     def sweep_modal(self, b: "np.ndarray", omegas, loss: float, values: "np.ndarray", vectors: "np.ndarray"):

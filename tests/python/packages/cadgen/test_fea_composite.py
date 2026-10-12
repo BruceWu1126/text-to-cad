@@ -19,26 +19,13 @@ The STEPs are written by build123d into temporary directories.
 
 from __future__ import annotations
 
-import io
-import json
 import math
-import struct
-import tempfile
 import unittest
-from contextlib import redirect_stderr
 from pathlib import Path
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
-
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
+from tests.python.support.fea_fixtures import (
+    box_step, class_directory, glb_array, glb_attribute_names, glb_extras, needs_fea, sidecar, solve, value_error,
+)
 
 #: T300/5208 carbon-epoxy, Tsai and Hahn's textbook lamina (MPa).
 CFRP = {"E1_MPa": 181000, "E2_MPa": 10300, "nu12": 0.28, "G12_MPa": 7170, "Xt_MPa": 1500, "Xc_MPa": 1500,
@@ -55,44 +42,20 @@ def _glb(path: Path):
     """The GLB's undeformed CAD-mm positions, its CAD-mm displacement and its extras."""
     import numpy as np
 
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    gltf = json.loads(raw[20:20 + length])
-    binary = raw[20 + length + 8:]
-    primitive = gltf["meshes"][0]["primitives"][0]
-
-    def read(name: str, width: int):
-        accessor = gltf["accessors"][primitive["attributes"][name]]
-        view = gltf["bufferViews"][accessor["bufferView"]]
-        return np.frombuffer(binary, np.float32, accessor["count"] * width, view["byteOffset"]).reshape(-1, width).astype(float)
-
-    extras = gltf["meshes"][0]["extras"]
-    moved = read("_DISPLACEMENT", 3)
-    at = read("POSITION", 3) - extras["deformation_scale"] * moved
+    extras = glb_extras(path)
+    moved = glb_array(path, "_DISPLACEMENT", 3)
+    at = glb_array(path, "POSITION", 3) - extras["deformation_scale"] * moved
     to_cad = lambda v: np.c_[v[:, 0], -v[:, 2], v[:, 1]] * 1000.0  # noqa: E731  glTF (x, z, -y) metres -> CAD mm
-    return to_cad(at), to_cad(moved), extras, set(primitive["attributes"])
-
-
-def _attribute(path: Path, name: str):
-    """One scalar vertex attribute of a GLB."""
-    import numpy as np
-
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    gltf = json.loads(raw[20:20 + length])
-    accessor = gltf["accessors"][gltf["meshes"][0]["primitives"][0]["attributes"][name]]
-    view = gltf["bufferViews"][accessor["bufferView"]]
-    return np.frombuffer(raw[20 + length + 8:], np.float32, accessor["count"], view["byteOffset"]).astype(float)
+    return to_cad(at), to_cad(moved), extras, set(glb_attribute_names(path))
 
 
 class Parsing(unittest.TestCase):
     """Stdlib: the registry, the study and the orthotropic material object."""
 
     def test_composite_is_built_and_its_check_parses(self):
-        from cadgen._internal.fea.analyses import REGISTRY, get_analysis
+        from cadgen._internal.fea.analyses import get_analysis
         from cadgen._internal.fea.analyses.kinds import CHECK_SPECS
 
-        self.assertFalse(REGISTRY["composite"].planned)
         analysis = get_analysis("composite")
         self.assertEqual((analysis.name, analysis.tier, analysis.word), ("composite", 3, "Composite"))
         self.assertEqual(analysis.ladder, ("iterative", "local_refine", "symmetry"))
@@ -102,9 +65,7 @@ class Parsing(unittest.TestCase):
         self.assertEqual(spec.parse({"kind": "ply_failure"}, "c"), {"kind": "ply_failure"})
         self.assertEqual(spec.parse({"kind": "ply_failure", "criterion": "tsai_wu", "label": "Skin"}, "c"),
                          {"kind": "ply_failure", "criterion": "tsai_wu", "label": "Skin"})
-        with self.assertRaises(ValueError) as caught:
-            spec.parse({"kind": "ply_failure", "criterion": "hashin"}, "c")
-        self.assertIn("c.criterion", str(caught.exception))
+        self.assertIn("c.criterion", value_error(self, spec.parse, {"kind": "ply_failure", "criterion": "hashin"}, "c"))
 
     def test_a_study_parses_and_its_errors_say_what_to_add(self):
         from cadgen._internal.fea.study import parse_study
@@ -128,9 +89,8 @@ class Parsing(unittest.TestCase):
             ({"loads": [{"type": "gravity", "vector_g": [0, 0, -1]}]}, "needs every ply material's density_t_per_mm3"),
         ]
         for change, fragment in cases:
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                parse_study({**base, **change})
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, value_error(self, parse_study, {**base, **change}))
 
     def test_an_orthotropic_material_object(self):
         from cadgen._internal.fea.materials import material_from_spec, mirror_symmetric
@@ -155,12 +115,11 @@ class Parsing(unittest.TestCase):
              "not physically possible (the material would gain energy"),
         ]
         for spec, fragment in cases:
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                material_from_spec({"name": "ud", "orthotropic": spec})
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, value_error(self, material_from_spec, {"name": "ud", "orthotropic": spec}))
 
 
-@unittest.skipUnless(HAVE_FEA, "numpy comes with the fea extra")
+@needs_fea
 class LaminateTheory(unittest.TestCase):
     """CLT and the failure criteria by hand."""
 
@@ -239,13 +198,10 @@ class LaminateTheory(unittest.TestCase):
 
 
 def _block_volume(directory: Path, size=(10.0, 10.0, 20.0), h=4.0):
-    from build123d import Align, Box, export_step
-
     from cadgen._internal.fea.mesh import mesh_occurrence
     from cadgen.step_scene import read_scene
 
-    step = directory / "block.step"
-    export_step(Box(*size, align=(Align.MIN, Align.MIN, Align.MIN)), str(step))
+    step = box_step(directory, "block", size, "corner")
     volume = mesh_occurrence(next(iter(read_scene(step).leaves())), max_h=h)
 
     def face(axis: int, level: float) -> int:
@@ -255,7 +211,7 @@ def _block_volume(directory: Path, size=(10.0, 10.0, 20.0), h=4.0):
     return volume, face
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class OrthotropicSolid(unittest.TestCase):
     """A 10 x 10 x 20 mm block on rollers (x = 0, y = 0, z = 0), pulled along Z with 1000 N: uniaxial stress."""
 
@@ -264,13 +220,9 @@ class OrthotropicSolid(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
-        cls.volume, face = _block_volume(Path(cls._tmp.name))
+        cls.directory = class_directory(cls)
+        cls.volume, face = _block_volume(cls.directory)
         cls.face = staticmethod(face)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def _pull(self, material, solver=None):
         from cadgen._internal.fea import solve
@@ -324,13 +276,10 @@ class OrthotropicSolid(unittest.TestCase):
         self.assertLess(np.abs(a.displacement - b.displacement).max() / np.abs(a.displacement).max(), 1e-8)
 
     def test_modal_takes_the_orthotropic_stiffness(self):
-        from build123d import Box, export_step
-
         from cadgen import fea
 
-        directory = Path(self._tmp.name)
-        step = directory / "bar.step"
-        export_step(Box(60, 6, 6), str(step))
+        directory = self.directory
+        step = box_step(directory, "bar", (60, 6, 6))
         end = min((f for f in fea.faces(step).faces if f.surface == "plane"), key=lambda f: f.center_mm[0])
         base = {"analysis": "modal", "fixtures": [{"faces": [end.ref]}], "modes": 2, "mesh": {"size_mm": 3}}
         block = {**self.BLOCK, "density_t_per_mm3": 1.6e-9}
@@ -338,16 +287,14 @@ class OrthotropicSolid(unittest.TestCase):
 
         def first(axes):
             material = {"name": "ud", "density_t_per_mm3": 1.6e-9, "orthotropic": {**ortho, "axes": axes}}
-            with redirect_stderr(io.StringIO()):
-                result = fea.solve(step, directory / "bar.glb", study={**base, "material": material})
-            return result.summary["first_frequency_Hz"]
+            return solve(step, directory / "bar.glb", {**base, "material": material}).summary["first_frequency_Hz"]
 
         along, across = first([[1, 0, 0], [0, 1, 0]]), first([[0, 1, 0], [0, 0, 1]])
         # Fibres along the cantilever: E1 bends it; across, the much softer E3 (11 GPa) of that frame does.
         self.assertGreater(along / across, 2.5)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class CrossPlyStrip(unittest.TestCase):
     """A 100 x 400 x 1 mm [0/90]s T300 strip clamped on its long sides under 0.001 MPa: cylindrical bending across X."""
 
@@ -355,28 +302,19 @@ class CrossPlyStrip(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from build123d import Box, export_step
-
         from cadgen import fea
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        step = directory / "strip.step"
-        export_step(Box(cls.A, cls.B, cls.T), str(step))
+        directory = class_directory(cls)
+        step = box_step(directory, "strip", (cls.A, cls.B, cls.T))
         faces = fea.faces(step).faces
         cls.long_sides = [f.ref for f in faces if f.normal is not None and abs(abs(f.normal[0]) - 1) < 1e-6]
         top = next(f.ref for f in faces if f.normal is not None and f.normal[2] > 0.99)
-        with redirect_stderr(io.StringIO()):
-            cls.result = fea.solve(step, directory / "strip.glb", study={
-                "analysis": "composite", "laminae": {"cfrp": CFRP}, "layup": _layup((0, 90, 90, 0), 0.25),
-                "fixtures": [{"faces": cls.long_sides}],
-                "loads": [{"faces": [top], "type": "pressure", "pressure_MPa": cls.Q}],
-            })
+        cls.result = solve(step, directory / "strip.glb", {
+            "analysis": "composite", "laminae": {"cfrp": CFRP}, "layup": _layup((0, 90, 90, 0), 0.25),
+            "fixtures": [{"faces": cls.long_sides}],
+            "loads": [{"faces": [top], "type": "pressure", "pressure_MPa": cls.Q}],
+        })
         cls.at, cls.moved, cls.extras, cls.attributes = _glb(cls.result.glb)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def test_it_is_a_laminated_shell_and_says_so(self):
         summary = self.result.summary
@@ -440,42 +378,35 @@ class CrossPlyStrip(unittest.TestCase):
         (field,) = [f for f in self.extras["fields"] if f["field"] == "failure_index"]
         check = self.result.summary["checks"][0]
         self.assertEqual(field["max"], check["value"])
-        self.assertAlmostEqual(float(_attribute(self.result.glb, "_FAILURE_INDEX").max()), check["value"], delta=1e-6)  # float32 against six decimals
+        self.assertAlmostEqual(float(glb_array(self.result.glb, "_FAILURE_INDEX").max()), check["value"], delta=1e-6)  # float32 against six decimals
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class ThickLaminate(unittest.TestCase):
     """A 40 x 40 x 8 mm [0/90]s plate (2 mm plies) clamped on two sides under 5 MPa: a layered solid."""
 
     @classmethod
     def setUpClass(cls):
-        from build123d import Box, Cylinder, export_step
+        from build123d import Cylinder, export_step
 
         from cadgen import fea
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        cls.step = directory / "thick.step"
-        export_step(Box(40, 40, 8), str(cls.step))
+        cls.directory = directory = class_directory(cls)
+        cls.step = box_step(directory, "thick", (40, 40, 8))
         faces = fea.faces(cls.step).faces
         sides = [f.ref for f in faces if f.normal is not None and abs(abs(f.normal[0]) - 1) < 1e-6]
         top = next(f.ref for f in faces if f.normal is not None and f.normal[2] > 0.99)
         cls.study = {"analysis": "composite", "laminae": {"cfrp": {**CFRP, "nu23": 0.4}}, "layup": _layup((0, 90, 90, 0), 2.0),
                      "fixtures": [{"faces": sides}], "loads": [{"faces": [top], "type": "pressure", "pressure_MPa": 5}],
                      "mesh": {"size_mm": 4}}
-        with redirect_stderr(io.StringIO()):
-            cls.full = fea.solve(cls.step, directory / "full.glb", study=cls.study)
-            cls.adapted = fea.solve(cls.step, directory / "adapted.glb", study={
-                **cls.study, "fit": {**TINY, "allow": ["iterative", "local_refine", "symmetry"]}})
+        cls.full = solve(cls.step, directory / "full.glb", cls.study)
+        cls.adapted = solve(cls.step, directory / "adapted.glb", {
+            **cls.study, "fit": {**TINY, "allow": ["iterative", "local_refine", "symmetry"]}})
         cls.rod = directory / "rod.step"
         export_step(Cylinder(5, 60), str(cls.rod))
 
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
-
     def test_the_failure_index_field_tops_out_at_the_checks_value(self):
-        extras = _glb(self.full.glb)[2]
+        extras = glb_extras(self.full.glb)
         (field,) = [f for f in extras["fields"] if f["field"] == "failure_index"]
         self.assertEqual(field["max"], self.full.summary["max_failure_index"])
         self.assertEqual(self.full.summary["checks"][0]["value"], self.full.summary["max_failure_index"])
@@ -493,9 +424,8 @@ class ThickLaminate(unittest.TestCase):
         rungs = [step["rung"] for step in result.fit]
         for rung in ("iterative", "local_refine", "symmetry"):
             self.assertIn(rung, rungs)
-        extras = _glb(result.glb)[2]
-        self.assertEqual(extras["fit"], list(result.fit))
-        self.assertEqual(json.loads(result.sidecar.read_text(encoding="utf-8"))["fit"], list(result.fit))
+        self.assertEqual(glb_extras(result.glb)["fit"], list(result.fit))
+        self.assertEqual(sidecar(result)["fit"], list(result.fit))
         self.assertIn("fit_symmetry", [f["type"] for f in result.findings if f["severity"] == "info"])
         refine = next(step for step in result.fit if step["rung"] == "local_refine")
         self.assertIn("peak failure index moved", refine["accuracy"])
@@ -505,16 +435,12 @@ class ThickLaminate(unittest.TestCase):
     def test_a_part_that_is_not_a_plate_or_a_layup_too_thin_is_a_plain_error(self):
         from cadgen import fea
 
-        with self.assertRaises(ValueError) as caught, redirect_stderr(io.StringIO()):
-            fea.solve(self.step, Path(self._tmp.name) / "thin.glb", study={**self.study, "layup": _layup((0, 90, 90, 0), 1.0)})
-        self.assertIn("the plies add up to 4 mm, but the plate is 8 mm thick", str(caught.exception))
-        faces = fea.faces(self.rod).faces
-        ends = [f.ref for f in faces if f.surface == "plane"]
-        with self.assertRaises(ValueError) as caught, redirect_stderr(io.StringIO()):
-            fea.solve(self.rod, Path(self._tmp.name) / "rod.glb", study={
-                **self.study, "fixtures": [{"faces": [ends[0]]}],
-                "loads": [{"faces": [ends[1]], "type": "pressure", "pressure_MPa": 1}]})
-        self.assertIn("a layup needs a flat plate of even thickness", str(caught.exception))
+        thin = value_error(self, solve, self.step, self.directory / "thin.glb", {**self.study, "layup": _layup((0, 90, 90, 0), 1.0)})
+        self.assertIn("the plies add up to 4 mm, but the plate is 8 mm thick", thin)
+        ends = [f.ref for f in fea.faces(self.rod).faces if f.surface == "plane"]
+        rod = value_error(self, solve, self.rod, self.directory / "rod.glb", {
+            **self.study, "fixtures": [{"faces": [ends[0]]}], "loads": [{"faces": [ends[1]], "type": "pressure", "pressure_MPa": 1}]})
+        self.assertIn("a layup needs a flat plate of even thickness", rod)
 
 
 if __name__ == "__main__":

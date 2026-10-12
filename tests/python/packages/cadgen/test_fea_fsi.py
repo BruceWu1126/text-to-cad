@@ -20,26 +20,17 @@ in a temporary directory.
 from __future__ import annotations
 
 import io
-import json
 import math
-import struct
 import tempfile
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 
-from tests.python.support.paths import add_repo_path
-
-add_repo_path("packages/cadgen/src")
-
-from cadgen._internal.fea.mesh import require_fea_stack  # noqa: E402
-
-try:
-    require_fea_stack()
-    HAVE_FEA = True
-except RuntimeError:
-    HAVE_FEA = False
+from tests.python.support.fea_fixtures import (
+    assert_tracers_cross, box_duct_step, class_directory, ends, glb_attribute_names, glb_extras, needs_fea, sidecar,
+    solve_keeping, tube_step, value_error,
+)
 
 LIMIT_TEXT = ("Steady flow two-way coupled to a linear elastic part: no flutter, vortex shedding or other unsteady "
               "motion; small-to-moderate deflection, the flow mesh following the part (ALE mesh motion).")
@@ -48,13 +39,6 @@ BORE_L, BORE_R, FLAP_T, FLAP_W, FLAP_TOP, FLAP_X = 12.0, 2.5, 0.4, 2.0, 0.5, 4.0
 SYRUP = {"name": "syrup", "density_kg_m3": 1000, "viscosity_Pa_s": 1.0}
 # The soft tube.
 TUBE_R, TUBE_T, TUBE_L, TUBE_E, TUBE_NU, TUBE_MU, TUBE_U = 2.0, 0.2, 16.0, 1.0, 0.3, 10.0, 0.01
-
-
-def glb_extras(path: Path) -> tuple[dict, list[str]]:
-    raw = path.read_bytes()
-    length, _ = struct.unpack_from("<II", raw, 12)
-    gltf = json.loads(raw[20:20 + length])
-    return gltf["meshes"][0]["extras"], list(gltf["meshes"][0]["primitives"][0]["attributes"])
 
 
 def flap_step(directory: Path) -> Path:
@@ -69,54 +53,19 @@ def flap_step(directory: Path) -> Path:
     return step
 
 
-def tube_step(directory: Path) -> Path:
-    from build123d import Align, Cylinder, Rotation, export_step
-
-    step = directory / "tube.step"
-    along = (Align.CENTER, Align.CENTER, Align.MIN)
-    export_step(Rotation(0, 90, 0) * (Cylinder(TUBE_R + TUBE_T, TUBE_L, align=along) - Cylinder(TUBE_R, TUBE_L, align=along)),
-                str(step))
-    return step
-
-
-def plane_face(step: Path, axis: int, value: float) -> str:
-    from cadgen import fea
-
-    return next(face.ref for face in fea.faces(step).faces
-                if face.surface == "plane" and abs(face.center_mm[axis] - value) < 1e-6)
-
-
 def flap_study(step: Path, **changes) -> dict:
     return {"analysis": "fsi", "material": {"name": "soft", "E_MPa": 5.0, "nu": 0.3, "yield_MPa": 1.0},
-            "fixtures": [{"faces": [plane_face(step, 2, -BORE_R - 1)]}], "mesh": {"size_mm": 0.8},
+            "fixtures": [{"faces": [ends(step, 2)[0]]}], "mesh": {"size_mm": 0.8},
             "flow": {"kind": "internal", "fluid": SYRUP, "inlets": [{"opening": "x_min", "velocity_m_s": 0.05}],
                      "outlets": [{"opening": "x_max", "pressure_Pa": 0}]}, **changes}
 
 
 def tube_study(step: Path, **changes) -> dict:
     return {"analysis": "fsi", "material": {"name": "soft", "E_MPa": TUBE_E, "nu": TUBE_NU, "yield_MPa": 1.0},
-            "fixtures": [{"faces": [plane_face(step, 0, 0.0)]}, {"faces": [plane_face(step, 0, TUBE_L)]}],
-            "mesh": {"size_mm": 0.8},
+            "fixtures": [{"faces": [end]} for end in ends(step)], "mesh": {"size_mm": 0.8},
             "flow": {"kind": "internal", "fluid": {"name": "syrup", "density_kg_m3": 1000, "viscosity_Pa_s": TUBE_MU},
                      "inlets": [{"opening": "x_min", "velocity_m_s": TUBE_U}], "outlets": [{"opening": "x_max", "pressure_Pa": 0}]},
             **changes}
-
-
-def solve(step: Path, out: Path, study: dict):
-    """Run the study, and hand back the analysis's own result too (the fields on the part's nodes)."""
-    from cadgen import fea
-    from cadgen._internal.fea.analyses.fsi import FsiAnalysis
-
-    captured = {}
-    original = FsiAnalysis.solve
-
-    def keep(self, ctx, inputs):
-        captured["result"] = original(self, ctx, inputs)
-        return captured["result"]
-
-    with redirect_stderr(io.StringIO()), mock.patch.object(FsiAnalysis, "solve", keep):
-        result = fea.solve(step, out, study=study)
-    return result, captured["result"]
 
 
 _SHARED: dict = {}
@@ -132,10 +81,10 @@ def shared(name: str):
             step = flap_step(directory)
             study = flap_study(step, view={"checks": [{"kind": "stress"}, {"kind": "displacement", "limit_mm": 1.0},
                                                       {"kind": "pressure_drop", "limit_Pa": 5000}]})
-            _SHARED[name] = (step, *solve(step, directory / "flap.glb", study))
+            _SHARED[name] = (step, *solve_keeping("fsi", step, directory / "flap.glb", study))
         else:
-            step = tube_step(directory)
-            _SHARED[name] = (step, *solve(step, directory / "tube.glb", tube_study(step)))
+            step = tube_step(directory, TUBE_R, TUBE_T, TUBE_L)
+            _SHARED[name] = (step, *solve_keeping("fsi", step, directory / "tube.glb", tube_study(step)))
     return _SHARED[name]
 
 
@@ -151,15 +100,15 @@ def tip_deflection(own) -> float:
     return float(np.linalg.norm(own.fields["displacement"], axis=1).max())
 
 
-def bore_swelling(own, x0: float) -> tuple[float, float]:
-    """The bore's mean radial displacement (mm) and its mean wall pressure (MPa) within 0.4 mm of x0."""
+def bore_swelling(own, x0: float):
+    """The bore's radial displacements (mm) within 0.4 mm of x0, and its mean wall pressure there (MPa)."""
     import numpy as np
 
     where, moved = own.dof_locations, own.fields["displacement"]
     radius = np.hypot(where[:, 1], where[:, 2])
     on = (np.abs(where[:, 0] - x0) < 0.4) & (np.abs(radius - TUBE_R) < 1e-3)
     radial = (moved[on, 1] * where[on, 1] + moved[on, 2] * where[on, 2]) / radius[on]
-    return float(radial.mean()), float(own.fields["pressure"][on].mean()) / 1e6
+    return radial, float(own.fields["pressure"][on].mean()) / 1e6
 
 
 class StudyFile(unittest.TestCase):
@@ -203,48 +152,29 @@ class StudyFile(unittest.TestCase):
             ({"map_to_structure": {}}, "fsi studies take"),
             ({"view": {"checks": [{"kind": "velocity", "limit_m_s": 1}]}}, "velocity"),
         ):
-            with self.subTest(fragment=fragment), self.assertRaises(ValueError) as caught:
-                self.parse(**changes)
-            self.assertIn(fragment, str(caught.exception))
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, value_error(self, self.parse, **changes))
 
-    def test_it_is_registered_built_and_stdlib_only_at_import(self):
-        import subprocess
-        import sys
-
+    def test_it_is_registered_and_built(self):
         from cadgen._internal.fea.analyses import get_analysis
 
         fsi = get_analysis("fsi")
         self.assertEqual((fsi.tier, fsi.word, fsi.limits), (3, "Flow and bending", (LIMIT_TEXT,)))
         self.assertEqual(fsi.ladder, ("continuation", "iterative", "fluid_coarsen", "local_refine"))
         self.assertEqual([spec.name for spec in fsi.fields], ["von_mises", "pressure", "wall_shear", "displacement"])
-        code = (
-            "import sys; sys.path.insert(0, 'packages/cadgen/src');"
-            "import cadgen._internal.fea.analyses.fsi;"
-            "print(','.join(m for m in ('numpy', 'scipy', 'skfem', 'netgen', 'OCP') if m in sys.modules))"
-        )
-        root = Path(__file__).resolve().parents[4]
-        out = subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True, text=True, check=True)
-        self.assertEqual(out.stdout.strip(), "")
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class FlexibleFlap(unittest.TestCase):
     """A soft flap in a slow syrup: two-way it leans less than one-way, and an independent iteration agrees."""
 
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
         cls.step, cls.result, cls.own = shared("flap")
-        cls.extras, cls.attributes = glb_extras(cls.result.glb)
-        cls.sidecar = json.loads(cls.result.sidecar.read_text(encoding="utf-8"))
+        cls.extras, cls.attributes = glb_extras(cls.result.glb), glb_attribute_names(cls.result.glb)
         # The independent iteration: a fixed relaxation of 0.7, no Aitken, to ten times tighter tolerance.
         fixed = flap_study(cls.step, coupling={"method": "fixed_point", "relaxation": 0.7, "tolerance": 1e-4, "max_iterations": 40})
-        cls.fixed, cls.fixed_own = solve(cls.step, directory / "fixed.glb", fixed)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.fixed, cls.fixed_own = solve_keeping("fsi", cls.step, class_directory(cls) / "fixed.glb", fixed)
 
     def test_the_coupling_settles_to_its_tolerance_and_says_how(self):
         coupling = self.result.summary["coupling"]
@@ -297,7 +227,7 @@ class FlexibleFlap(unittest.TestCase):
         self.assertEqual(study["flow"]["regime"], "auto")
         self.assertEqual(len(study["fixtures"]), 1)
         self.assertEqual(study["coupling"]["method"], "aitken")
-        self.assertEqual(self.sidecar["analysis"], "fsi")
+        self.assertEqual(sidecar(self.result)["analysis"], "fsi")
 
     def test_the_checks_and_the_cli(self):
         checks = {check["kind"]: check for check in self.result.summary["checks"]}
@@ -312,7 +242,7 @@ class FlexibleFlap(unittest.TestCase):
         self.assertIn("(one-way ", lines)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class CompliantTube(unittest.TestCase):
     """A soft tube swells under its own flow: the thin-wall formula with the flow's pressure, and the drop where
     Poiseuille's law and the swelling agree."""
@@ -322,19 +252,14 @@ class CompliantTube(unittest.TestCase):
         cls.step, cls.result, cls.own = shared("tube")
 
     def test_its_tracers_cross_from_inlet_to_outlet(self):
-        """The viewer's Flow routine: particles let go at the inlet (x = 0), carried along the duct to its outlet."""
-        motion = glb_extras(self.result.glb)[0]["analysis"]["motion"]
-        self.assertEqual((motion["kind"], motion["label"]), ("tracers", "Flow"))
-        starts = [path[0] for path in motion["paths"]]
-        self.assertLess(max(starts), 0.05 * TUBE_L)
-        across = [path[-3] for path in motion["paths"] if path[-3] > 0.8 * TUBE_L]
-        self.assertGreater(len(across), len(motion["paths"]) / 2)
+        assert_tracers_cross(self, self.result.glb, TUBE_L, "Flow")
 
     def test_the_bore_swells_by_the_thin_wall_formula_with_the_flows_pressure(self):
         self.assertTrue(self.result.summary["coupling"]["converged"])
         mean_radius = TUBE_R + TUBE_T / 2
         for x0 in (4.0, 6.0, 8.0, 10.0):
-            swelling, pressure = bore_swelling(self.own, x0)
+            radial, pressure = bore_swelling(self.own, x0)
+            swelling = radial.mean()
             thin_wall = pressure * mean_radius ** 2 * (1 - TUBE_NU ** 2) / (TUBE_E * TUBE_T)
             with self.subTest(x_mm=x0):
                 self.assertGreater(pressure, 0.0)
@@ -356,15 +281,15 @@ class CompliantTube(unittest.TestCase):
         self.assertLess(summary["two_way_vs_one_way"]["pressure_drop_change_pct"], -2.0)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class NotSettled(unittest.TestCase):
     """Two iterations are not enough for the soft tube: it still answers, with the last state, said plainly."""
 
     def test_the_last_state_is_reported_as_not_converged(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            step = tube_step(Path(tmp))
-            result, _ = solve(step, Path(tmp) / "short.glb", tube_study(step, coupling={"max_iterations": 2}))
-            extras, _ = glb_extras(result.glb)
+        directory = class_directory(type(self))
+        step = tube_step(directory, TUBE_R, TUBE_T, TUBE_L)
+        result, _ = solve_keeping("fsi", step, directory / "short.glb", tube_study(step, coupling={"max_iterations": 2}))
+        extras = glb_extras(result.glb)
         self.assertTrue(result.ok)
         coupling = result.summary["coupling"]
         self.assertEqual((coupling["converged"], coupling["iterations"]), (False, 2))
@@ -378,7 +303,7 @@ class NotSettled(unittest.TestCase):
         self.assertIn("NOT converged", "\n".join(result.human_lines()))
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class TimeBudget(unittest.TestCase):
     """Fixed bug: the coupling's flow solves ran with no log and no time limit, so a laminar flow past a flap in water
     at Re 1600 sat over 100 minutes on its first solve with nothing printed. Each flow solve now prints progress and
@@ -389,13 +314,13 @@ class TimeBudget(unittest.TestCase):
         from cadgen._internal.fea import navier_stokes
         from cadgen._internal.fea.analyses import fsi
 
-        with tempfile.TemporaryDirectory() as tmp:
-            step = tube_step(Path(tmp))
-            printed = io.StringIO()
-            with redirect_stderr(printed), mock.patch.object(fsi, "COUPLING_BUDGET", 1e-9), \
-                    mock.patch.object(navier_stokes, "PROGRESS_S", 0.0):
-                result = fea.solve(step, Path(tmp) / "budget.glb", study=tube_study(step), verbose=True)
-            extras, _ = glb_extras(result.glb)
+        directory = class_directory(type(self))
+        step = tube_step(directory, TUBE_R, TUBE_T, TUBE_L)
+        printed = io.StringIO()
+        with redirect_stderr(printed), mock.patch.object(fsi, "COUPLING_BUDGET", 1e-9), \
+                mock.patch.object(navier_stokes, "PROGRESS_S", 0.0):
+            result = fea.solve(step, directory / "budget.glb", study=tube_study(step), verbose=True)
+        extras = glb_extras(result.glb)
         self.assertTrue(result.ok)
         coupling = result.summary["coupling"]
         self.assertEqual((coupling["converged"], coupling["iterations"]), (False, 1))   # the one-way state
@@ -403,7 +328,7 @@ class TimeBudget(unittest.TestCase):
         self.assertTrue(any("stopped at its time budget" in sentence for sentence in extras["analysis"]["warnings"]))
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class SoftThickTube(unittest.TestCase):
     """A soft silicone tube (bore 4 mm, wall 0.5 mm, E 0.5 MPa) under a syrup flow.
 
@@ -415,20 +340,14 @@ class SoftThickTube(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from build123d import Align, Cylinder, Rotation, export_step
-
         from cadgen._internal.fea.analyses import fsi
 
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
-        step = directory / "thick_tube.step"
-        along = (Align.CENTER, Align.CENTER, Align.MIN)
-        export_step(Rotation(0, 90, 0) * (Cylinder(2.5, 16.0, align=along) - Cylinder(2.0, 16.0, align=along)), str(step))
+        directory = class_directory(cls)
+        step = tube_step(directory, 2.0, 0.5, 16.0, name="thick_tube")
 
         def study(E, **changes):
             return {"analysis": "fsi", "material": {"name": "silicone", "E_MPa": E, "nu": 0.45, "yield_MPa": 3.0},
-                    "fixtures": [{"faces": [plane_face(step, 0, 0.0)]}, {"faces": [plane_face(step, 0, 16.0)]}],
-                    "mesh": {"size_mm": 0.8},
+                    "fixtures": [{"faces": [end]} for end in ends(step)], "mesh": {"size_mm": 0.8},
                     "flow": {"kind": "internal", "fluid": {"name": "syrup", "density_kg_m3": 1300, "viscosity_Pa_s": 1.0},
                              "inlets": [{"opening": "x_min", "velocity_m_s": 0.1}],
                              "outlets": [{"opening": "x_max", "pressure_Pa": 0}]}, **changes}
@@ -442,13 +361,9 @@ class SoftThickTube(unittest.TestCase):
             return original(self, flow_state)
 
         with mock.patch.object(fsi.Coupling, "bend", bend):
-            cls.soft, cls.own = solve(step, directory / "soft.glb", study(0.5))
+            cls.soft, cls.own = solve_keeping("fsi", step, directory / "soft.glb", study(0.5))
         cls.coupling, cls.flow = captured["coupling"], captured["flow"]
-        cls.stiff, _ = solve(step, directory / "stiff.glb", study(2.0, coupling={"max_iterations": 1}))
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+        cls.stiff, _ = solve_keeping("fsi", step, directory / "stiff.glb", study(2.0, coupling={"max_iterations": 1}))
 
     def test_an_even_pressure_reaches_the_part_as_a_static_pressure_load_does(self):
         import numpy as np
@@ -493,13 +408,7 @@ class SoftThickTube(unittest.TestCase):
         self.assertLess(self.soft.summary["pressure_drop_Pa"], self.soft.summary["one_way"]["pressure_drop_Pa"])
 
     def test_the_bore_swells_evenly_by_the_thin_wall_formula(self):
-        import numpy as np
-
-        where, moved = self.own.dof_locations, self.own.fields["displacement"]
-        radius = np.hypot(where[:, 1], where[:, 2])
-        on = (np.abs(where[:, 0] - 8.0) < 0.4) & (np.abs(radius - 2.0) < 1e-3)
-        radial = (moved[on, 1] * where[on, 1] + moved[on, 2] * where[on, 2]) / radius[on]
-        pressure = float(self.own.fields["pressure"][on].mean()) / 1e6
+        radial, pressure = bore_swelling(self.own, 8.0)      # its bore is TUBE_R too
         thin_wall = pressure * 2.25 ** 2 * (1 - 0.45 ** 2) / (0.5 * 0.5)
         self.assertLess(abs(radial.mean() - thin_wall) / thin_wall, 0.15, (radial.mean(), thin_wall))
         # Round, neither dented nor bent sideways (0.13 to 0.15 with the pressure taken by triangle): what spread
@@ -507,7 +416,7 @@ class SoftThickTube(unittest.TestCase):
         self.assertLess(radial.std() / radial.mean(), 0.05)
 
 
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class Ladder(unittest.TestCase):
     """A tiny time target: the flap coarsens its flow's core (its walls kept at the size asked for) and still
     leans within 5 % of the full answer; the tube, its continuation threshold lowered, ramps its inflow up in
@@ -515,22 +424,17 @@ class Ladder(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls._tmp = tempfile.TemporaryDirectory()
-        directory = Path(cls._tmp.name)
+        directory = class_directory(cls)
         flap = flap_step(directory)
-        cls.flap, cls.flap_own = solve(flap, directory / "flap.glb",
-                                       flap_study(flap, fit={"seconds": 1, "allow": ["fluid_coarsen", "local_refine"]}))
+        cls.flap, cls.flap_own = solve_keeping("fsi", flap, directory / "flap.glb",
+                                               flap_study(flap, fit={"seconds": 1, "allow": ["fluid_coarsen", "local_refine"]}))
         _, cls.flap_full, cls.flap_full_own = shared("flap")
-        cls.flap_extras, _ = glb_extras(cls.flap.glb)
-        tube = tube_step(directory)
+        cls.flap_extras = glb_extras(cls.flap.glb)
+        tube = tube_step(directory, TUBE_R, TUBE_T, TUBE_L)
         with mock.patch("cadgen._internal.fea.analyses.cfd.CONTINUE_FROM", 0.0):
-            cls.tube, cls.tube_own = solve(tube, directory / "ramp.glb",
-                                           tube_study(tube, fit={"seconds": 0.5, "allow": ["continuation"]}))
+            cls.tube, cls.tube_own = solve_keeping("fsi", tube, directory / "ramp.glb",
+                                                   tube_study(tube, fit={"seconds": 0.5, "allow": ["continuation"]}))
         _, cls.tube_full, cls.tube_full_own = shared("tube")
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
 
     def test_fluid_coarsen_keeps_the_walls_fine_and_the_deflection_within_5_percent(self):
         step = next(step for step in self.flap.fit if step["rung"] == "fluid_coarsen")
@@ -555,36 +459,24 @@ class Ladder(unittest.TestCase):
         self.assertTrue(coupling["ramped"])
         self.assertTrue(coupling["converged"])
         self.assertIn("fit_continuation", [finding["type"] for finding in self.tube.findings])
-        ramped, full = bore_swelling(self.tube_own, 8.0)[0], bore_swelling(self.tube_full_own, 8.0)[0]
+        ramped, full = bore_swelling(self.tube_own, 8.0)[0].mean(), bore_swelling(self.tube_full_own, 8.0)[0].mean()
         self.assertLess(abs(ramped - full) / full, 0.01, (ramped, full))
         self.assertLess(abs(self.tube.summary["pressure_drop_Pa"] - self.tube_full.summary["pressure_drop_Pa"])
                         / self.tube_full.summary["pressure_drop_Pa"], 0.01)
 
 
-def box_duct_step(directory: Path, side: float, length: float, wall: float = 1.0) -> Path:
-    """A square passage through a block along x: sharp corners where the inlet meets the walls."""
-    from build123d import Align, Box, export_step
-
-    step = directory / "duct.step"
-    along = (Align.MIN, Align.CENTER, Align.CENTER)
-    export_step(Box(length, side + 2 * wall, side + 2 * wall, align=along) - Box(length, side, side, align=along), str(step))
-    return step
-
-
-@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
+@needs_fea
 class BoxDuct(unittest.TestCase):
     """A soft square duct (sharp corners at its inlet) bends under its flow: the laminar flow under it solves."""
 
     def test_a_square_duct_solves(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            directory = Path(tmp)
-            step = box_duct_step(directory, 3.0, 12.0, wall=0.5)
-            study = {"analysis": "fsi", "material": {"name": "soft", "E_MPa": 5.0, "nu": 0.3, "yield_MPa": 1.0},
-                     "fixtures": [{"faces": [plane_face(step, 0, 0.0)]}, {"faces": [plane_face(step, 0, 12.0)]}],
-                     "mesh": {"size_mm": 1.0},
-                     "flow": {"kind": "internal", "fluid": SYRUP, "inlets": [{"opening": "x_min", "velocity_m_s": 0.01}],
-                              "outlets": [{"opening": "x_max", "pressure_Pa": 0}]}}
-            result, _ = solve(step, directory / "duct.glb", study)
+        directory = class_directory(type(self))
+        step = box_duct_step(directory, 3.0, 12.0, wall=0.5)
+        study = {"analysis": "fsi", "material": {"name": "soft", "E_MPa": 5.0, "nu": 0.3, "yield_MPa": 1.0},
+                 "fixtures": [{"faces": [end]} for end in ends(step)], "mesh": {"size_mm": 1.0},
+                 "flow": {"kind": "internal", "fluid": SYRUP, "inlets": [{"opening": "x_min", "velocity_m_s": 0.01}],
+                          "outlets": [{"opening": "x_max", "pressure_Pa": 0}]}}
+        result, _ = solve_keeping("fsi", step, directory / "duct.glb", study)
         self.assertTrue(result.ok)
         self.assertGreater(result.summary["pressure_drop_Pa"], 0)
 
