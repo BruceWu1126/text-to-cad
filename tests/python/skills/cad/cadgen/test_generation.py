@@ -188,10 +188,7 @@ class CadGenerationTests(unittest.TestCase):
         *,
         with_dxf: bool = False,
         dxf_before_step: bool = False,
-        dict_return: dict[str, str] | None = None,
     ) -> Path:
-        # A @step returns a bare shape. ``dict_return`` writes the retired dict
-        # envelope instead, for the one test that asserts it is refused.
         prologue = [
             "from pathlib import Path",
             f'DISPLAY_NAME = "{name}"',
@@ -211,21 +208,12 @@ class CadGenerationTests(unittest.TestCase):
             "    return build123d.Box(1, 1, 1)",
             "",
         ]
-        if dict_return is None:
-            return_lines = ["    return _shape()"]
-        else:
-            return_lines = [
-                "    return {",
-                "        'shape': _shape(),",
-                *[f"        {key!r}: {value!r}," for key, value in dict_return.items()],
-                "    }",
-            ]
         step_block = [
             "from cadgen import step",
             "@step",
             "def model():",
             "    _record('gen_step')",
-            *return_lines,
+            "    return _shape()",
             "",
         ]
         del dxf_before_step  # gen_dxf lives in a dedicated <name>.py sibling now
@@ -378,15 +366,6 @@ class CadGenerationTests(unittest.TestCase):
 
         self.assertEqual(script_path.with_suffix(".step"), spec.step_path)
         self.assertEqual(self._cad_ref("missing_output"), spec.cad_ref)
-
-    def test_generated_source_rejects_a_dict_return(self) -> None:
-        # The dict envelope is gone: a @step returns a bare shape, and any dict
-        # -- whatever it carries -- is refused with the decorators to use instead.
-        for extra in ({"step_output": "custom/renamed.step"}, {"stl": "flat.stl"}, {}):
-            with self.subTest(extra=sorted(extra)):
-                script_path = self._generator_script("flat", dict_return=extra)
-                with self.assertRaisesRegex(ValueError, r"returns a dict.*@stl/@threemf/@glb"):
-                    self._spec(script_path)
 
     def test_generated_dxf_defaults_output_to_sibling_stem(self) -> None:
         script_path = self._dxf_generator_script("flat")

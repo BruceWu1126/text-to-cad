@@ -402,11 +402,10 @@ def _check_step_return(
 ) -> None:
     """A @step returns ONE build123d shape and nothing else.
 
-    A dict return is refused here, statically, with the decorators that replaced
-    the old ``{"shape": ..., "stl": ...}`` envelope named in the message; the
-    runtime check in ``generation_runner`` says the same thing for a dict that
-    only appears at run time. Nothing else about the return is inferred: how the
-    build packages the geometry follows the shape it actually gets.
+    A return of nothing is refused here, statically; any other value that is not
+    a shape is refused by the runtime check in ``generation_runner``. Nothing
+    else about the return is inferred: how the build packages the geometry
+    follows the shape it actually gets.
     """
     for node in ast.walk(function):
         if not isinstance(node, ast.Return):
@@ -414,10 +413,4 @@ def _check_step_return(
         if node.value is None or (isinstance(node.value, ast.Constant) and node.value.value is None):
             raise ValueError(
                 f"{_display_path(script_path)} {function.name}() must return a build123d shape"
-            )
-        if isinstance(node.value, ast.Dict):
-            raise ValueError(
-                f"{_display_path(script_path)} {function.name}() returns a dict; a @step "
-                "model returns a build123d shape and nothing else. Declare mesh exports "
-                "with @stl/@threemf/@glb stacked on the model."
             )
