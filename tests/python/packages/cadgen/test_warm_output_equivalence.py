@@ -144,7 +144,7 @@ def _manifest(root: pathlib.Path, *, daemon_env: dict) -> dict[str, str]:
 
     Lock and progress files are transient scaffolding, not output.
     """
-    # View resolution now lazily extracts SURF artifacts. It is part of the
+    # A view derives the display data the store lacks. It is part of the
     # build under comparison, so use that build's executor, never an ambient
     # daemon another test (or a developer) can stop independently.
     with mock.patch.dict(os.environ, daemon_env):

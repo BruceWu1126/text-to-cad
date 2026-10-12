@@ -16,7 +16,7 @@ from typing import Any
 _MAX_INPUTS = 128
 _MAX_PREPARED = 8
 _MAX_BREP_BYTES = 768 * 1024
-_MAX_SURF_BYTES = 4 * 1024 * 1024
+_MAX_TOPOLOGY_BYTES = 4 * 1024 * 1024
 _MAX_TREE_BYTES = 64 * 1024
 _MAX_COMPONENTS = 16
 _MAX_OCCURRENCES = 64
@@ -41,7 +41,7 @@ class _Construction:
     prepared: dict[int, _Prepared] = field(default_factory=dict)
     attempted: bool = False
     brep_bytes: int = 0
-    surf_bytes: int = 0
+    topology_bytes: int = 0
 
 
 def _budget(tree: str):
@@ -66,11 +66,11 @@ def _budget(tree: str):
     occurrences = data.get("occurrences") or []
     if not components or len(components) > _MAX_COMPONENTS or len(occurrences) > _MAX_OCCURRENCES:
         return None
-    breps, surfs = set(), set()
+    breps, topologies = set(), set()
     for entry in components.values():
         breps.add(entry["brep"])
-        if entry.get("eagerSurface"):
-            surfs.add(entry["eagerSurface"])
+        if entry.get("topology"):
+            topologies.add(entry["topology"])
 
     def verified_size(digests, limit):
         total = 0
@@ -90,13 +90,13 @@ def _budget(tree: str):
     brep_bytes = verified_size(breps, _MAX_BREP_BYTES)
     if brep_bytes is None:
         return None
-    surf_bytes = verified_size(surfs, _MAX_SURF_BYTES)
-    if surf_bytes is None:
+    topology_bytes = verified_size(topologies, _MAX_TOPOLOGY_BYTES)
+    if topology_bytes is None:
         return None
     from cadgen._internal.component_package import validate_geometry_component
     for cid, entry in components.items():
         validate_geometry_component(entry, read_verified_object(entry["brep"]), cid=cid)
-    return brep_bytes, surf_bytes, (tree, *sorted(breps | surfs)), data
+    return brep_bytes, topology_bytes, (tree, *sorted(breps | topologies)), data
 
 
 def _materialize_snapshot(tree, label, snapshot):
@@ -150,9 +150,9 @@ def prepare_for(waiting) -> None:
             budget = _budget(tree)
             if budget is None:
                 continue
-            brep_bytes, surf_bytes, objects, snapshot = budget
+            brep_bytes, topology_bytes, objects, snapshot = budget
             if (construction.brep_bytes + brep_bytes > _MAX_BREP_BYTES
-                    or construction.surf_bytes + surf_bytes > _MAX_SURF_BYTES):
+                    or construction.topology_bytes + topology_bytes > _MAX_TOPOLOGY_BYTES):
                 continue
             private = _materialize_snapshot(tree, label, snapshot)
         except Exception:
@@ -161,7 +161,7 @@ def prepare_for(waiting) -> None:
             continue
         construction.prepared[id(child)] = _Prepared(child, tree, label, private, objects)
         construction.brep_bytes += brep_bytes
-        construction.surf_bytes += surf_bytes
+        construction.topology_bytes += topology_bytes
 
 
 def take_prepared(owner, tree: str, label: str):

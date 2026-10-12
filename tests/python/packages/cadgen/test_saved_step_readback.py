@@ -364,7 +364,7 @@ class SavedStepReadbackTest(unittest.TestCase):
                         **record, "glb": {**record["glb"], "object": put_object(b"hash-valid unreadable mesh")},
                     })
                 with mock.patch("cadgen._internal.step_scene_loader.load_step_scene", side_effect=AssertionError("native hit parsed STEP")), \
-                        mock.patch("cadgen._internal.surface_extract.extract_surface_component", side_effect=AssertionError("native read extracted SURF")):
+                        mock.patch("cadgen._internal.surface_extract.extract_topology_facts", side_effect=AssertionError("native read extracted topology facts")):
                     scene = scene_from_render_package(self.root / "part.step", step_hash=expected[3])
                     self.assertIsNotNone(scene)
                     actual_colors = sorted(color for recipe in scene.prototype_face_colors.values()
@@ -447,7 +447,8 @@ class SavedStepReadbackTest(unittest.TestCase):
         expected = self.seed()
         tree_hash = expected[2]["documentTree"]
         native = next(iter(capture_tree(tree_hash, retain_payloads=False)[0]["components"].values()))
-        surface = put_object(parts._surface(native, *parts._decoded(native)))
+        from cadgen._internal.topology_facts import topology_facts_bytes
+        surface = put_object(topology_facts_bytes(parts._topology(native, parts._decoded(native)[0])))
         for mode in ("unreadable-native", "absent-face", "eager-only", "singular-placement"):
             with self.subTest(mode=mode):
                 tree = get_tree(tree_hash)
@@ -459,12 +460,12 @@ class SavedStepReadbackTest(unittest.TestCase):
                 elif mode == "absent-face":
                     entry["faceColors"]["999"] = [1., 0., 0., 1.]
                 elif mode == "eager-only":
-                    entry.update(kind="eager-only", eagerSurface=surface)
+                    entry.update(kind="eager-only", topology=surface)
                 else:
                     tree["occurrences"][0]["transform"][:12] = [0.] * 12
                 entry["contentHash"] = cp.geometry_component_hash(
                     entry["codec"], payload, entry["faceColors"], kind=entry["kind"],
-                    eager_surface=entry.get("eagerSurface"),
+                    topology=entry.get("topology"),
                 )
                 new_cid = entry["contentHash"][:16]
                 tree["components"] = {new_cid: entry}

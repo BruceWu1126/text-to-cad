@@ -20,7 +20,7 @@ from cadgen.store.trees import flatten_tree
 ALGORITHM = "component_bbox.canonical_full_placement.algorithm1"
 MAX_TREE_BYTES = 64 * 1024
 MAX_BREP_BYTES = 768 * 1024
-MAX_SURF_BYTES = 4 * 1024 * 1024
+MAX_TOPOLOGY_BYTES = 4 * 1024 * 1024
 MAX_COMPONENTS = 16
 MAX_OCCURRENCES = 64
 MAX_TREES = 32
@@ -160,7 +160,7 @@ class Snapshot:
             _read(digest, len(payload))
 
     def capture_appearance(self) -> Snapshot:
-        """Own the captured intrinsic recipes before callback, without SURF reads."""
+        """Own the captured intrinsic recipes before callback, reading no object."""
         from cadgen._internal.component_package import _normalized_face_colors
         colors, retained = [], 0
         for cid, entry in self.descriptor()["components"].items():
@@ -261,8 +261,8 @@ def capture_links(draft: dict[str, Any]) -> Snapshot:
         raise Ineligible("only complete pinned links are supported")
     draft = json.loads(_json_bytes(draft))
     payloads, memo, active = {}, {}, set()
-    used = {"tree": 0, "brep": 0, "surf": 0}
-    limits = {"tree": MAX_TREE_BYTES, "brep": MAX_BREP_BYTES, "surf": MAX_SURF_BYTES}
+    used = {"tree": 0, "brep": 0, "topology": 0}
+    limits = {"tree": MAX_TREE_BYTES, "brep": MAX_BREP_BYTES, "topology": MAX_TOPOLOGY_BYTES}
     kinds = {}
 
     def flatten_checked(tree, digest=None):
@@ -304,12 +304,12 @@ def capture_links(draft: dict[str, Any]) -> Snapshot:
         tree = json.loads(read(digest, "tree"))
         from cadgen.store.trees import _validate_structure
         from cadgen._internal.component_package import validate_geometry_component
-        from cadgen._internal.surf_container import validate_surface_bytes
+        from cadgen._internal.topology_facts import read_topology_facts
         _validate_structure(tree)
         for cid, entry in tree.get("components", {}).items():
             validate_geometry_component(entry, read(entry["brep"], "brep"), cid=cid)
-            if entry.get("eagerSurface"):
-                validate_surface_bytes(read(entry["eagerSurface"], "surf"))
+            if entry.get("topology"):
+                read_topology_facts(read(entry["topology"], "topology"))
         for link in tree.get("links", []):
             visit(link["tree"], depth + 1)
         flatten_checked(tree, digest)

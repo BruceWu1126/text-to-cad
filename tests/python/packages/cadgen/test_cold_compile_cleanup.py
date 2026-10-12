@@ -157,7 +157,7 @@ class ColdCompileCleanupTest(unittest.TestCase):
             derived = sorted((self.root / "store/index/part").iterdir())
             self.assertEqual(len(derived), 2, "the compile derived each part's display data before it reported done")
             with mock.patch.object(step_scene_package, "_load_step_scene_text", side_effect=AssertionError("warm compile reparsed STEP")), \
-                 mock.patch.object(surface_extract, "extract_surface_component", side_effect=AssertionError("display work in warm compile")), \
+                 mock.patch.object(surface_extract, "extract_topology_facts", side_effect=AssertionError("display work in warm compile")), \
                  mock.patch.object(occt_mesh, "mesh_component", side_effect=AssertionError("display work in warm compile")):
                 second = self.compile(document)
         self.assertEqual(second["tree"], first["tree"])

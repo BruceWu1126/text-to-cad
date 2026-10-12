@@ -66,7 +66,7 @@ class ImportedCompileSnapshot(unittest.TestCase):
         with mock.patch.object(trees, "capture_tree", wraps=trees.capture_tree) as capture, \
              mock.patch.object(artifact, "load_step_scene_exact", side_effect=forbidden), \
              mock.patch.object(component_package, "decode_geometry_component", side_effect=forbidden), \
-             mock.patch.object(surface_extract, "extract_surface_component", side_effect=forbidden), \
+             mock.patch.object(surface_extract, "extract_topology_facts", side_effect=forbidden), \
              mock.patch.object(catalog, "result_tree_for", side_effect=forbidden), \
              mock.patch.object(trees, "tree_kind_for", side_effect=forbidden):
             current = self.compile(document)

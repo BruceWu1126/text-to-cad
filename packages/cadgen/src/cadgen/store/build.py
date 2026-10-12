@@ -15,7 +15,7 @@ subtree that is a child model's materialized geometry, found intact, becomes a
 Each native component is privately decoded and validated before publication.
 Surface extraction is a separate artifact derivation and never delays native
 geometry readiness. A component without an admitted native codec explicitly
-pins its eager surface; no later producer receives the original live shape.
+pins its topology facts; no later producer receives the original live shape.
 
 A model's final result contains its authored source geometry, reconstructed
 from canonical BREP bytes, whether it declares STEP or only meshes. A STEP
@@ -571,7 +571,7 @@ def _publish_tree(
         payload = prepared["payload"] if prepared is not None else read_verified_object(entry["brep"])
         validate_geometry_component(entry, payload, cid=cid)
         ready = not force
-        for object_key in ("brep", "eagerSurface"):
+        for object_key in ("brep", "topology"):
             if not entry.get(object_key):
                 continue
             try:
@@ -581,15 +581,15 @@ def _publish_tree(
         # Reused bytes are claimed for this publish, so a sweep that started
         # before it cannot take them (STORE.md §8); ones a sweep already took
         # are written again from the bytes in hand.
-        if ready and all(claim_object(entry[key]) for key in ("brep", "eagerSurface") if entry.get(key)):
+        if ready and all(claim_object(entry[key]) for key in ("brep", "topology") if entry.get(key)):
             reused.append(cid)
         else:
             # Capture owns these exact bytes; repair does not ask the live
             # authored shape or a newer child result to replace this input.
             put_object(payload, repair=True)
-            if entry.get("eagerSurface"):
-                surface = prepared["surface"] if prepared is not None else read_verified_object(entry["eagerSurface"])
-                put_object(surface, repair=True)
+            if entry.get("topology"):
+                topology = prepared["topology"] if prepared is not None else read_verified_object(entry["topology"])
+                put_object(topology, repair=True)
             built.append(cid)
         write_entry("component", cid, {"schemaVersion": 1, **entry})
         progress.advance()

@@ -3,16 +3,17 @@
 A ref someone copies (``#o1.2.f7``), the facts a tool reports for it and the
 sets the viewer's connected selection grows it to (an edge's chain, a face's
 tangent group) all come from this one table. It is derived from the exact
-BREP and the component's SURF index, extracted in memory -- the SURF holds the
-exact metrics, surface and curve types, parameters and edge classes; the BREP
-adds what the SURF does not carry: the vertices, which edge ends where, and the
-tangent directions the chains follow -- and stored as one of a part's two
-objects, beside its display mesh (``cadgen.store.parts``), whose mesher reads
-its faces' areas and edges' classes. The page joins its rows to the mesh's face
-and edge tables by ordinal and composes ``occurrenceId + "." + localId``; it
-mints nothing. The CLI reads the same table (``cadgen.assembly_lookup``).
+BREP and the component's topology facts, extracted in memory
+(``surface_extract``) -- the facts hold the exact metrics, surface and curve
+types, parameters, loops and edge classes; the BREP adds what they do not
+carry: the vertices, which edge ends where, and the tangent directions the
+chains follow -- and stored as one of a part's two objects, beside its display
+mesh (``cadgen.store.parts``), whose mesher reads its faces' areas and edges'
+classes. The page joins its rows to the mesh's face and edge tables by ordinal
+and composes ``occurrenceId + "." + localId``; it mints nothing. The CLI reads
+the same table (``cadgen.assembly_lookup``).
 
-Ordinals are the ``TopExp.MapShapes_s`` order the SURF and the mesh share, so
+Ordinals are the ``TopExp.MapShapes_s`` order the facts and the mesh share, so
 a face row, its triangles and its ref name one face.
 """
 
@@ -157,10 +158,10 @@ def _vertex_facts(shape, edges: list[dict[str, Any]]):
     edge_map = TopTools_IndexedMapOfShape()
     TopExp.MapShapes_s(shape, TopAbs_EDGE, edge_map)
     if edge_map.Extent() != len(edges):
-        raise ValueError("the SURF index does not describe this shape: its edge count differs")
+        raise ValueError("the topology facts do not describe this shape: its edge count differs")
     vertex_ord = {_shape_hash(vertex_map.FindKey(i)): i for i in range(1, vertex_map.Extent() + 1)}
 
-    # Solid membership, decided as the SURF decides a face's or edge's.
+    # Solid membership, decided as the facts decide a face's or edge's.
     shape_by_vertex: dict[int, int] = {}
     for ordinal, sub in enumerate(shape_entities(shape), start=1):
         sub_vertices = TopTools_IndexedMapOfShape()
@@ -276,12 +277,13 @@ def capabilities() -> dict[str, Any]:
     }
 
 
-def build_selector_table(shape, index: Mapping[str, Any]) -> dict[str, Any]:
-    """The table of one unlocated component: ``shape`` (a ``TopoDS_Shape``) and the
-    SURF index extracted from it (``surf_container.read_surf``)."""
-    faces = list(index.get("faces") or [])
-    edges = list(index.get("edges") or [])
-    shapes_meta = list(index.get("shapes") or [{"ord": 1, "kind": "shape", "volume": None}])
+def build_selector_table(shape, facts: Mapping[str, Any]) -> dict[str, Any]:
+    """The table of one unlocated component: ``shape`` (a ``TopoDS_Shape``) and its
+    topology facts (``surface_extract.extract_topology_facts``, or the object an
+    eager-only component's tree pins)."""
+    faces = list(facts["faces"])
+    edges = list(facts["edges"])
+    shapes_meta = list(facts["shapes"])
     face_row = {int(face["ord"]): row for row, face in enumerate(faces)}
     edge_row = {int(edge["ord"]): row for row, edge in enumerate(edges)}
     positions, shape_by_vertex, ends, tangents = _vertex_facts(shape, edges)
@@ -310,8 +312,8 @@ def build_selector_table(shape, index: Mapping[str, Any]) -> dict[str, Any]:
         start = len(face_edge_rows)
         seen: set[int] = set()
         for loop in face.get("loops") or []:
-            for pcurve in loop:
-                row = edge_row.get(int(pcurve.get("edgeOrd") or 0))
+            for edge_ord in loop:
+                row = edge_row.get(int(edge_ord or 0))
                 if row is not None and row not in seen:
                     seen.add(row)
                     face_edge_rows.append(row)
@@ -394,11 +396,9 @@ def build_selector_table(shape, index: Mapping[str, Any]) -> dict[str, Any]:
         face_start, face_count = edge_faces[ordinal]
         vertex_start, vertex_count = edge_vertices[ordinal]
         params = edge.get("params")
-        curve = edge.get("curve") if isinstance(edge.get("curve"), Mapping) else None
-        if curve is not None and curve.get("kind") == "circle":
-            span = curve.get("range")
-            if isinstance(span, list) and len(span) == 2 and all(isinstance(v, (int, float)) for v in span):
-                params = {**(params or {}), "sweepRadians": abs(float(span[1]) - float(span[0]))}
+        if edge.get("sweepRadians") is not None:
+            # A circular edge's params carry its sweep, so no reader derives it.
+            params = {**(params or {}), "sweepRadians": float(edge["sweepRadians"])}
         edge_rows.append([
             f"{OCCURRENCE_ID}.e{ordinal}", f"e{ordinal}", OCCURRENCE_ID,
             f"{OCCURRENCE_ID}.s{int(edge.get('shape') or 1)}", ordinal, curve_type, length,

@@ -50,7 +50,7 @@ def _load_component_shapes(package_dir: Path, descriptor: Mapping[str, Any]) -> 
         canonical = {key: entry[key] for key in ("kind", "codec", "contentHash", "faceColors")}
         canonical["brep"] = digest
         if entry.get("kind") == "eager-only":
-            canonical["eagerSurface"] = entry["eagerSurface"]
+            canonical["topology"] = entry["topology"]
         shapes[cid] = decode_geometry_component(canonical, payload)
     return shapes
 

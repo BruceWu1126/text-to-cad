@@ -6,17 +6,17 @@ and read back.
 A part is a component under one surface producer, the kernel that derives it. Its key,
 ``index/part/<digest>-v<PART_VERSION>``, carries no tolerance: the digest hashes the
 component's geometry input (its ``contentHash``: kind, codec, BREP bytes, face colours and
-an eager-only component's pinned surface) and the producer, and the version is bumped by
-any change to the extractor, the selector table, the mesher or the GLB payload. The record
-is ``{"glb": {...}, "selectors": {...}}``: each object's address and byte length and what a
-reader sizes it by without opening it -- the mesh's decoded-bytes estimate and counts (and
-``unmeshedFaceCount`` when a face could not be meshed), the table's counts. One probe
-answers whether a part's display data is stored.
+an eager-only component's pinned topology facts) and the producer, and the version is
+bumped by any change to the extractor, the selector table, the mesher or the GLB payload.
+The record is ``{"glb": {...}, "selectors": {...}}``: each object's address and byte
+length and what a reader sizes it by without opening it -- the mesh's decoded-bytes
+estimate and counts (and ``unmeshedFaceCount`` when a face could not be meshed), the
+table's counts. One probe answers whether a part's display data is stored.
 
-Derivation extracts the component's SURF in memory (an eager-only component's is the
-geometry object its tree pins), builds the selector table from it, meshes the component
+Derivation extracts the component's topology facts in memory (an eager-only component's
+are the object its tree pins), builds the selector table from them, meshes the component
 from the table and its face colours, writes the two objects and then the record, so a
-record always names complete objects. Nothing stores the SURF. A mesh export at another
+record always names complete objects. Nothing stores the facts. A mesh export at another
 tolerance meshes from the stored table the same way and stores nothing (``mesh_at``).
 """
 from __future__ import annotations
@@ -183,7 +183,7 @@ def geometry_entry(view_entry: dict) -> dict:
     entry = {"kind": view_entry["kind"], "codec": view_entry["codec"], "brep": view_entry["brepObject"],
              "faceColors": view_entry["faceColors"], "contentHash": view_entry["contentHash"]}
     if view_entry["kind"] == "eager-only":
-        entry["eagerSurface"] = view_entry["eagerSurface"]
+        entry["topology"] = view_entry["topology"]
     return entry
 
 
@@ -324,14 +324,16 @@ def _decoded(entry: dict) -> tuple[Any, dict]:
     return topods, effective_face_colors(topods, entry["faceColors"])
 
 
-def _surface(entry: dict, topods: Any, colors: dict) -> bytes:
-    """The component's SURF: an eager-only component's is the object its tree pins, any
-    other's is extracted here, in memory."""
+def _topology(entry: dict, topods: Any) -> dict:
+    """The component's topology facts: an eager-only component's are the object its tree
+    pins, any other's are extracted here, in memory."""
     if entry["kind"] == "eager-only":
-        return read_verified_object(entry["eagerSurface"])
-    from cadgen._internal.surface_extract import extract_surface_component
+        from cadgen._internal.topology_facts import read_topology_facts
 
-    return extract_surface_component(topods, face_colors=colors)
+        return read_topology_facts(read_verified_object(entry["topology"]))
+    from cadgen._internal.surface_extract import extract_topology_facts
+
+    return extract_topology_facts(topods)
 
 
 def _derive(entry: dict, key: str, keep_going: Callable[[], bool] | None = None) -> dict | None:
@@ -344,13 +346,11 @@ def _derive(entry: dict, key: str, keep_going: Callable[[], bool] | None = None)
         return None
     from cadgen._internal.occt_mesh import mesh_component
     from cadgen._internal.selector_table import build_selector_table, selector_table_bytes
-    from cadgen._internal.surf_container import read_surf
     from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
     with _meshing():
         topods, colors = _decoded(entry)
-        index, _payload = read_surf(_surface(entry, topods, colors))
-        table = build_selector_table(topods, index)
+        table = build_selector_table(topods, _topology(entry, topods))
         # The extraction and the table read the shape; the mesher, last, triangulates it.
         glb = mesh_component(topods, table, colors, part=key, chord=DISPLAY_TESSELLATION["chordTolerance"],
                              angle=DISPLAY_TESSELLATION["angleTolerance"])
@@ -362,7 +362,7 @@ def mesh_at(entry: dict, key: str, chord: float, angle: float) -> bytes:
     and stored nowhere: a mesh export at a tolerance other than the display one
     (``_internal/mesh_export.py``), whose file is the output. ``entry`` is the component's
     tree entry. The mesher reads what the display mesh's read -- the part's stored
-    selector table and the component's face colours -- so no SURF is extracted."""
+    selector table and the component's face colours -- so nothing is extracted."""
     from cadgen._internal.occt_mesh import MeshProductionError, mesh_component
     from cadgen._internal.selector_table import read_selector_table
 
