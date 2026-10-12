@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 from cadgen._internal.glb_topology import STEP_EDGE_VISIBILITY_CLASSES
 from cadgen._internal.glb_topology import normalize_step_edge_render_visibility_classes
@@ -12,10 +11,6 @@ from cadgen._internal.step_scene import SelectorBundle
 from cadgen._internal.step_scene import SelectorOptions
 from cadgen._internal.step_scene import adaptive_mesh_resolution_for_scene
 from cadgen.catalog import CadSource
-from cadgen.catalog import find_source_by_path
-from cadgen.catalog import iter_cad_sources
-from cadgen.catalog import normalize_cad_ref
-from cadgen.catalog import normalize_source_ref
 from cadgen.cli_logging import CliLogger
 from cadgen.cli_progress import cli_progress_line
 from cadgen.metadata import GeneratorMetadata
@@ -138,22 +133,6 @@ def _display_name_for_path(path: Path) -> str:
 _display_path = relative_to_cwd
 
 
-def _resolve_discovery_root(root: Path | str) -> Path:
-    candidate = Path(root)
-    resolved = candidate.resolve() if candidate.is_absolute() else (Path.cwd() / candidate).resolve()
-    if not resolved.exists():
-        raise FileNotFoundError(f"CAD discovery directory does not exist: {relative_to_cwd(resolved)}")
-    if not resolved.is_dir():
-        raise NotADirectoryError(f"CAD discovery path is not a directory: {relative_to_cwd(resolved)}")
-    return resolved
-
-
-def list_entry_specs(root: Path | None = None) -> list[EntrySpec]:
-    root = Path.cwd().resolve() if root is None else root
-    specs = [_entry_spec_from_source(source) for source in iter_cad_sources(_resolve_discovery_root(root))]
-    return sorted(specs, key=lambda spec: spec.source_ref)
-
-
 def _entry_spec_from_source(source: CadSource) -> EntrySpec:
     generator_metadata = source.generator_metadata
     script_path = source.script_path
@@ -182,52 +161,6 @@ def _entry_spec_from_source(source: CadSource) -> EntrySpec:
         ),
         step_output=bool(getattr(generator_metadata, "step_output", True)),
     )
-
-
-def selected_entry_specs(all_specs: Sequence[EntrySpec], source_refs: Sequence[str]) -> list[EntrySpec]:
-    if not source_refs:
-        raise ValueError("At least one CAD target is required")
-    by_source = {spec.source_ref: spec for spec in all_specs}
-    by_cad_ref = {spec.cad_ref: spec for spec in all_specs}
-    by_step_path = {
-        spec.step_path.resolve(): spec
-        for spec in all_specs
-        if spec.step_path is not None
-    }
-    selected: list[EntrySpec] = []
-    for source_ref in source_refs:
-        spec = _spec_for_source_ref(source_ref, by_source=by_source, by_cad_ref=by_cad_ref, by_step_path=by_step_path)
-        if spec is None:
-            raise FileNotFoundError(f"CAD source not found: {source_ref}")
-        selected.append(spec)
-    return selected
-
-
-def _spec_for_source_ref(
-    raw_ref: str,
-    *,
-    by_source: dict[str, EntrySpec],
-    by_cad_ref: dict[str, EntrySpec],
-    by_step_path: dict[Path, EntrySpec],
-) -> EntrySpec | None:
-    source_ref = normalize_source_ref(raw_ref)
-    if source_ref and source_ref in by_source:
-        return by_source[source_ref]
-    cad_ref = normalize_cad_ref(raw_ref)
-    if cad_ref and cad_ref in by_cad_ref:
-        return by_cad_ref[cad_ref]
-    candidate = Path(str(raw_ref or "").strip())
-    if candidate:
-        resolved = candidate.resolve() if candidate.is_absolute() else (
-            Path.cwd() / candidate
-        )
-        resolved = resolved.resolve()
-        if resolved in by_step_path:
-            return by_step_path[resolved]
-        source = find_source_by_path(resolved)
-        if source is not None:
-            return by_source.get(source.source_ref)
-    return None
 
 
 def _selector_options_for_part(spec: EntrySpec, *, scene: LoadedStepScene | None = None) -> SelectorOptions:

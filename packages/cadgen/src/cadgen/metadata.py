@@ -10,14 +10,6 @@ from cadgen.render import relative_to_cwd as _display_path
 from cadgen.tessellation_policy import tolerance_refusal
 
 
-class InvalidModelScriptError(ValueError):
-    """A script whose model DECLARATION is malformed in a way directory
-    discovery should skip-with-a-note rather than abort on (e.g. a file holding
-    several models named without its ``::function``). Contract violations inside a single model (a dict return,
-    bad decorator arguments) stay plain ValueErrors and DO abort, because an
-    explicitly-targeted build must fail loudly."""
-
-
 @dataclass(frozen=True)
 class GeneratorMetadata:
     script_path: Path
@@ -308,13 +300,13 @@ def parse_generator_metadata(script_path: Path, function: str | None = None) -> 
         chosen = [entry for entry in decorated if entry[0].name == function]
         if not chosen:
             declared = ", ".join(f"{fn.name}()" for fn, _, _, _ in decorated)
-            raise InvalidModelScriptError(
+            raise ValueError(
                 f"{_display_path(script_path)} declares no model {function}() (it declares {declared})"
             )
         decorated = chosen
     elif len(decorated) > 1:
         joined = ", ".join(f"{fn.name}()" for fn, _, _, _ in decorated)
-        raise InvalidModelScriptError(
+        raise ValueError(
             f"{_display_path(script_path)} declares several models ({joined}); name one as "
             f"{_display_path(script_path)}::{decorated[0][0].name}"
         )
@@ -398,7 +390,7 @@ def imported_model(script_path: Path, function: str):
                 _load_generator_module(resolved)
             defn = registered_model(resolved, function)
     if defn is None:
-        raise InvalidModelScriptError(
+        raise ValueError(
             f"{_display_path(resolved)} declares {function}() but importing it registered no such model"
         )
     return defn

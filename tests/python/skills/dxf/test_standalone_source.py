@@ -61,18 +61,6 @@ class StandaloneDxfSourceTests(unittest.TestCase):
             self.assertIsNone(source.step_path)
             self.assertEqual(script_path.with_suffix(".dxf"), source.dxf_path)
 
-    def test_directory_catalog_lists_any_decorated_dxf_source(self) -> None:
-        # Library-first: any plain .py declaring a @dxf model is a first-class
-        # drawing entry — the retired .dxf.py naming carried no meaning worth
-        # keeping once the decorator is the declaration.
-        with temporary_directory(prefix="dxf-skill") as root:
-            script_path = _write_standalone_source(Path(root))
-            sources = cad_catalog.iter_cad_sources(Path(root))
-
-            self.assertEqual(1, len(sources))
-            self.assertIsNotNone(sources[0].dxf_path)
-            self.assertEqual(script_path, sources[0].script_path)
-
     def test_generate_dxf_targets_always_writes_the_sibling(self) -> None:
         # The .dxf IS the product: every run
         # writes it, no package exists, and only the output record remains — in
