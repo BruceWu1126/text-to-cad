@@ -24,7 +24,7 @@ import {
   partHighlightSurfaceColor
 } from "../lib/viewer/partHighlight.js";
 import { applyRecordTubeSkin, attachTubeSkins, tubeSkinPose } from "./tubeSkin.js";
-import { MESH_EDGE_CLASSES } from "../lib/surf/tessellationCache.js";
+import { MESH_EDGE_CLASSES } from "../lib/parts/tessellationCache.js";
 import { quadTubeTrack } from "./__tests__/tubeSkinsFixture.js";
 
 /** The scene tests' quad, bent by a skin: stood at z = 2 and turned a quarter about +Z. */

@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 
 import * as THREE from "three";
 import { packageSourceFromBaseUrl } from "@text-to-cad/core/common/source.js";
-import { decodeComponentTessellation } from "@text-to-cad/core/lib/surf/tessellationCache.js";
+import { decodeComponentTessellation } from "@text-to-cad/core/lib/parts/tessellationCache.js";
 import { articulationControls, jointDeltas, openingControlValues } from "@text-to-cad/core/common/articulation.js";
 import { loadSourceAnimation } from "@text-to-cad/core/common/animationRuntime.js";
 

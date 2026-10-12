@@ -8,7 +8,7 @@ import { readCadWorkerTicket } from "../../client/resources.js";
 // other object) and join it to the mesh. Decoding, copying into render-owned
 // arrays and the join run here, off the page's main thread.
 
-import { buildComponentMeshData } from "./surfMeshData.js";
+import { buildComponentMeshData } from "./partMeshData.js";
 import { joinSelectorTable, parseSelectorTable } from "./selectorTable.js";
 import { meshDataTransferList } from "../render/meshTransfer.js";
 import { decodeComponentTessellation } from "./tessellationCache.js";

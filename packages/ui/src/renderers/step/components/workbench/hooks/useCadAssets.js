@@ -14,7 +14,7 @@ import { viewerOriginUrl } from "@text-to-cad/core/client";
 import {
   isTessellationCacheProbeMissError,
   partSelectorsPath,
-} from "@text-to-cad/core/lib/surf/tessellationCache.js";
+} from "@text-to-cad/core/lib/parts/tessellationCache.js";
 import {
   installRuntimePackageDescriptor,
   loadPackageDescriptor,

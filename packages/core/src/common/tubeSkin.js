@@ -1,5 +1,5 @@
-import { buildCadEdgeLines } from "../lib/surf/surfMeshData.js";
-import { MESH_TABLE_COLUMNS } from "../lib/surf/tessellationCache.js";
+import { buildCadEdgeLines } from "../lib/parts/partMeshData.js";
+import { MESH_TABLE_COLUMNS } from "../lib/parts/tessellationCache.js";
 import { applyTubeBraidMaterial } from "./tubeBraidMaterial.js";
 import {
   TUBE_MATERIAL_ATTRIBUTE,

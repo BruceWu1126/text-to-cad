@@ -13,7 +13,7 @@ colours.
 The shapes are built here, not read from ``models/``. Run from the repository
 root with the repo's Python whenever cadgen's selector table or mesh output changes:
 
-    .venv/bin/python packages/core/src/lib/surf/fixtures/make_fixtures.py
+    .venv/bin/python packages/core/src/lib/parts/fixtures/make_fixtures.py
 """
 
 from __future__ import annotations

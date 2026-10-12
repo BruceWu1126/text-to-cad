@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createCadClient, PartResolutionError } from "@text-to-cad/core/client";
-import { isTessellationCacheProbeMissError, tessellationDecodedBytes } from "@text-to-cad/core/lib/surf/tessellationCache.js";
+import { isTessellationCacheProbeMissError, tessellationDecodedBytes } from "@text-to-cad/core/lib/parts/tessellationCache.js";
 import { createSurfaceTicketBatches, createTessellationBodyBatches } from "./packageBatchReads.js";
 import { createInitialDisplayPlans } from "../../../render/initialDisplay.js";
 

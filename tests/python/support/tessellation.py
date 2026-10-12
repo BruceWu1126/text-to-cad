@@ -10,7 +10,7 @@ import shutil
 import struct
 import subprocess
 
-CORE = Path(__file__).resolve().parents[3] / "packages/core/src/lib/surf"
+CORE = Path(__file__).resolve().parents[3] / "packages/core/src/lib/parts"
 
 
 def _floats(*values: float) -> bytes:

@@ -6,8 +6,8 @@ import { frameClipboard } from './clipboard';
 import { chatReach, createChatPromptContext } from './prompt';
 import { createServer, type SyncReply, type SyncRequest, type ViewEvent } from './server';
 import { createViewSync, LOST_AFTER, NEWS_MS, SYNC_MS } from './sync';
-import { createHttpTessellationCacheProvider, partRow } from '@text-to-cad/core/lib/surf/tessellationCache.js';
-import { encodeMeshFixture, partMeshFacts, testPartKey } from '@text-to-cad/core/lib/surf/testing.js';
+import { createHttpTessellationCacheProvider, partRow } from '@text-to-cad/core/lib/parts/tessellationCache.js';
+import { encodeMeshFixture, partMeshFacts, testPartKey } from '@text-to-cad/core/lib/parts/testing.js';
 import { createTunnelClient, createTunnelFetch, decodeBase64, TUNNEL_ORIGIN, TUNNEL_REPLY_MAX_BYTES } from './tunnel';
 
 /** A host frame: records what the page posts and answers with `respond`. */

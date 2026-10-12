@@ -103,7 +103,7 @@ test('an issued URL worker ticket cannot publish after its resource generation r
   const { scopeCadResources } = await import('./resources.js');
   const glb = await import('../lib/render/glbMeshWorkerClient.js');
   const stl = await import('../lib/render/stlMeshWorkerClient.js');
-  const surf = await import('../lib/surf/surfWorkerClient.js');
+  const surf = await import('../lib/parts/partWorkerClient.js');
   const original = globalThis.Worker;
   const workers=[];
   globalThis.Worker = class {
@@ -115,7 +115,7 @@ test('an issued URL worker ticket cannot publish after its resource generation r
   };
   t.after(()=>{globalThis.Worker=original;});
   // A surf request carries its part's stored mesh; the resource is its selector table.
-  const { encodeMeshFixture, testPartKey } = await import('../lib/surf/__tests__/meshFixtures.js');
+  const { encodeMeshFixture, testPartKey } = await import('../lib/parts/__tests__/meshFixtures.js');
   const identity = { part: testPartKey('d') };
   const entry = encodeMeshFixture({ positions: new Float32Array(9), normals: new Float32Array(9),
     indices: new Uint32Array([0, 1, 2]), faceRanges: [{ ord: 1, color: null, indexStart: 0, indexCount: 3 }], edges: [],

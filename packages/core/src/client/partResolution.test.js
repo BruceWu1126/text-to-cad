@@ -3,7 +3,7 @@ import test from "node:test";
 import { createCadClient } from "./client.js";
 
 import { resolveParts as resolveWithClient, PartResolutionError } from "./partResolution.js";
-import { tessellationDecodedBytes } from "../lib/surf/tessellationCache.js";
+import { tessellationDecodedBytes } from "../lib/parts/tessellationCache.js";
 
 function resolveParts(descriptor, requests, options = {}) {
   const client = options.client || createCadClient();

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildComposedPackageMeshData } from "@text-to-cad/core/lib/assembly/meshData.js";
-import { partRow, tessellationDecodedBytes } from "@text-to-cad/core/lib/surf/tessellationCache.js";
+import { partRow, tessellationDecodedBytes } from "@text-to-cad/core/lib/parts/tessellationCache.js";
 import { completedPackages, createCompletedPackageCache, renderAssetCacheStatsWithPackages } from "./completedPackageCache.js";
 import { renderMemoryAccounting } from "./renderMemoryAccounting.js";
 

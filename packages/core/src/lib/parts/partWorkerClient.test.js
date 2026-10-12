@@ -10,7 +10,7 @@ import {
   reclaimIdleSurfWorkers,
   releaseSurfWorkerPoolWhenIdle,
   surfWorkerMemoryStats,
-} from "./surfWorkerClient.js";
+} from "./partWorkerClient.js";
 import { createTessellationCache, isTessellationCacheProbeMissError } from "./tessellationCache.js";
 import { encodeMeshFixture, partRowFor, testPartKey } from "./__tests__/meshFixtures.js";
 
@@ -44,7 +44,7 @@ const loadSurfComponentInWorker = (url, options = {}) => loadWorker(url, {
 });
 
 test('worker leases preserve another renderer through abort and release after the last owner', async (t) => {
-  const { retainSurfWorkerPool } = await import('./surfWorkerClient.js');
+  const { retainSurfWorkerPool } = await import('./partWorkerClient.js');
   const previous = globalThis.Worker;
   const workers = [];
   globalThis.Worker = class {

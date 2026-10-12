@@ -9,8 +9,8 @@ import {
   reclaimIdleSurfWorkers as reclaimIdleSurfWorkerPool,
   releaseSurfWorkerPoolWhenIdle,
   surfWorkerMemoryStats as surfWorkerMemoryStatsFromPool,
-} from "./surf/surfWorkerClient.js";
-import { TessellationCacheProbeMissError } from "./surf/tessellationCache.js";
+} from "./parts/partWorkerClient.js";
+import { TessellationCacheProbeMissError } from "./parts/tessellationCache.js";
 import {
   assertAssetSourceScope,
   assetSourceScopeMatches,
@@ -354,7 +354,7 @@ export function peekRender3Mf(url, { resources } = {}) {
 // --- Exact topology ----------------------------------------------------------
 //
 // cadgen's selector table carries a part's topology, and the page joins it to
-// the stored mesh (surf/selectorTable.js).
+// the stored mesh (parts/selectorTable.js).
 // Worker requests declare whether they need render data, selectors, or both.
 // Display uses render only; selection and measurement join the table on
 // demand, to the same mesh.
@@ -534,9 +534,9 @@ async function loadSurfPayloadInline(url, { signal, resources, identity, capabil
     { buildComponentMeshData },
     { joinSelectorTable, parseSelectorTable },
   ] = await Promise.all([
-    import("./surf/tessellationCache.js"),
-    import("./surf/surfMeshData.js"),
-    import("./surf/selectorTable.js"),
+    import("./parts/tessellationCache.js"),
+    import("./parts/partMeshData.js"),
+    import("./parts/selectorTable.js"),
   ]);
   const part = String(identity?.part || "");
   const probe = identity?.tessellationProbe || null;
@@ -573,7 +573,7 @@ async function loadSurfPayload(url, {
 } = {}) {
   const cacheKey = `${identityCacheKey(identity)}#cap=${capabilityCacheKey(capabilities)}`;
   const payload = await loadCached(surfPayloadCache, cacheKey, async () => {
-    const { loadSurfComponentInWorker } = await import("./surf/surfWorkerClient.js");
+    const { loadSurfComponentInWorker } = await import("./parts/partWorkerClient.js");
     const workerPayload = loadSurfComponentInWorker(url, {
       signal,
       resources,

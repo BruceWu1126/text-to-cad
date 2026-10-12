@@ -9,11 +9,11 @@ import {
   partCacheKey,
 } from "./renderAssetClient.js";
 import { setRenderAssetSourceScope } from "./renderAssetSourceScope.js";
-import { createTessellationCache } from "./surf/tessellationCache.js";
-import { everyKeyMeshProvider } from "./surf/__tests__/meshFixtures.js";
+import { createTessellationCache } from "./parts/tessellationCache.js";
+import { everyKeyMeshProvider } from "./parts/__tests__/meshFixtures.js";
 
 // What a selector read fetches: the part's selector table.
-const table = readFileSync(new URL("./surf/fixtures/sun_gear.selectors.json", import.meta.url));
+const table = readFileSync(new URL("./parts/fixtures/sun_gear.selectors.json", import.meta.url));
 // The host's part store, holding the gear's mesh for any part asked.
 const store = everyKeyMeshProvider("sun_gear");
 const tessellationCache = createTessellationCache({ provider: store });

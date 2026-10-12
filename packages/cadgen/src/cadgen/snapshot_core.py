@@ -1315,7 +1315,7 @@ def route_file(pathname: str, prefix: str, root: Path) -> Path:
 # The snapshot page draws the same stored meshes the viewer and the mesh
 # exports do (immutable objects named by index/part; the record in
 # cadgen/store/parts.py, the codec in cadgen/store/meshes.py and
-# packages/core/src/lib/surf/tessellationCache.js). The page cannot touch the
+# packages/core/src/lib/parts/tessellationCache.js). The page cannot touch the
 # filesystem, so the host serves the store (cadgen/store/tess_cache.py): a probe
 # answers the parts' records, and GET /__tess_cache/<part>.glb and the batch
 # route read exact objects: the display meshes the build derived, or the view's

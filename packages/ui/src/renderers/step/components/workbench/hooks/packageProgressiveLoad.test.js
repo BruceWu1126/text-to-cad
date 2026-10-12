@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { buildComposedPackageMeshData } from "@text-to-cad/core/lib/assembly/meshData.js";
-import { partRow, tessellationDecodedBytes } from "@text-to-cad/core/lib/surf/tessellationCache.js";
+import { partRow, tessellationDecodedBytes } from "@text-to-cad/core/lib/parts/tessellationCache.js";
 
 import {
   PROGRESSIVE_PUBLISH_FIRST_BYTES,

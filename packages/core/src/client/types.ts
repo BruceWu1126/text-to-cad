@@ -1,5 +1,5 @@
-import type { PartRow, TessellationCache } from '../lib/surf/cacheTypes.js';
-export type { PartRow, TessellationCache, TessellationCacheEntry, TessellationCacheProvider, TessellatedComponent } from '../lib/surf/cacheTypes.js';
+import type { PartRow, TessellationCache } from '../lib/parts/cacheTypes.js';
+export type { PartRow, TessellationCache, TessellationCacheEntry, TessellationCacheProvider, TessellatedComponent } from '../lib/parts/cacheTypes.js';
 export type CadJson = null | boolean | number | string | CadJson[] | { [key: string]: CadJson };
 export interface CadEntry {
   /** The file's absolute path, `/`-separated. */

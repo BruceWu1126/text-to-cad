@@ -32,7 +32,7 @@ ROOT = REPO_ROOT
 
 class SelectorTableSchemaVersionMirrorTest(unittest.TestCase):
     def test_python_and_js_declare_the_same_selector_table_schema_version(self) -> None:
-        source = (ROOT / "packages/core/src/lib/surf/selectorTable.js").read_text(encoding="utf-8")
+        source = (ROOT / "packages/core/src/lib/parts/selectorTable.js").read_text(encoding="utf-8")
         match = re.search(r"^export const SELECTOR_TABLE_SCHEMA_VERSION = (\d+);$", source, re.MULTILINE)
         self.assertIsNotNone(match, "@text-to-cad/core must declare SELECTOR_TABLE_SCHEMA_VERSION")
         self.assertEqual(

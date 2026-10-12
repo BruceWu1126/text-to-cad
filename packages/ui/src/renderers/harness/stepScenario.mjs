@@ -28,7 +28,7 @@ const read = (name) => readFile(new URL(name, FIXTURE));
  * so the harness's store can serve it for any part, and its selector table.
  */
 export async function loadStepFixture() {
-  const { decodeComponentTessellation } = await import('@text-to-cad/core/lib/surf/tessellationCache.js');
+  const { decodeComponentTessellation } = await import('@text-to-cad/core/lib/parts/tessellationCache.js');
   const assembly = await read('assembly.json');
   const sidecar = JSON.parse(await read('hinge_block.step.json'));
   const articulation = JSON.parse(await read('hinge_block.articulation.json'));
@@ -174,8 +174,8 @@ export function reviseFixture(fixture, revision) {
  */
 async function meshStore(fixture, { warm = false } = {}) {
   const [cache, { encodeMeshFixture, partMeshFacts, partSelectorFacts }] = await Promise.all([
-    import('@text-to-cad/core/lib/surf/tessellationCache.js'),
-    import('@text-to-cad/core/lib/surf/testing.js'),
+    import('@text-to-cad/core/lib/parts/tessellationCache.js'),
+    import('@text-to-cad/core/lib/parts/testing.js'),
   ]);
   const stored = new Map();
   const digest = bytes => createHash('sha256').update(bytes).digest('hex');

@@ -1,4 +1,4 @@
-// Pooled client for surfWorker.js.
+// Pooled client for partWorker.js.
 //
 // Unlike the single-worker GLB client this is a POOL: a large assembly has
 // hundreds of independent components, and decoding each one's mesh into
@@ -244,7 +244,7 @@ function handleWorkerError(slot, event) {
 }
 
 function createWorkerSlot(index, generation) {
-  const worker = new Worker(new URL("./surfWorker.js", import.meta.url), { type: "module" });
+  const worker = new Worker(new URL("./partWorker.js", import.meta.url), { type: "module" });
   const slot = {
     worker,
     index,

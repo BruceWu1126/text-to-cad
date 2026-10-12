@@ -1,10 +1,10 @@
 import { encodeBase64 } from './base64.js';
 import { requestViewerJson, ViewerRequestError } from "./request.js";
-import { retainSurfWorkerPool } from '../lib/surf/surfWorkerClient.js';
+import { retainSurfWorkerPool } from '../lib/parts/partWorkerClient.js';
 import { retainGlbMeshWorker } from '../lib/render/glbMeshWorkerClient.js';
 import { retainStlMeshWorker } from '../lib/render/stlMeshWorkerClient.js';
 import { applyViewerOriginToEntries, normalizeViewerOrigin, viewerOriginUrl } from './origin.js';
-import { createHttpTessellationCacheProvider, createTessellationCache } from '../lib/surf/tessellationCache.js';
+import { createHttpTessellationCacheProvider, createTessellationCache } from '../lib/parts/tessellationCache.js';
 
 import { resolveParts } from './partResolution.js';
 import { observeEditingPreview } from './editingPreviewFeed.js';

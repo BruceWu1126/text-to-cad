@@ -32,8 +32,8 @@ import {
   isTessellationCacheProbeMissError,
   createTessellationCache,
   partSelectorsPath,
-} from "./surf/tessellationCache.js";
-import { everyKeyMeshProvider, partRowFor, selectorTableFixture } from "./surf/__tests__/meshFixtures.js";
+} from "./parts/tessellationCache.js";
+import { everyKeyMeshProvider, partRowFor, selectorTableFixture } from "./parts/__tests__/meshFixtures.js";
 
 // The part store every surf load reads: it holds the gear's mesh for any part asked.
 let meshStore = everyKeyMeshProvider();
@@ -59,7 +59,7 @@ const loadRenderSurfSelectorBundle = async (name, options = {}) => {
   return loadSurfSelectors(selectorsUrl, { identity, tessellationCache, ...options });
 };
 const sunGearTable = () => {
-  const bytes = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "surf/fixtures/sun_gear.selectors.json"));
+  const bytes = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "parts/fixtures/sun_gear.selectors.json"));
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 };
 

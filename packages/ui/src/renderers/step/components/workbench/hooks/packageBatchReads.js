@@ -13,7 +13,7 @@ import {
   TESS_PROBE_MAX_KEYS,
   TessellationCacheProbeMissError,
   tessBatchMaxBytes,
-} from "@text-to-cad/core/lib/surf/tessellationCache.js";
+} from "@text-to-cad/core/lib/parts/tessellationCache.js";
 import { PROGRESSIVE_PUBLISH_FIRST_BYTES, PROGRESSIVE_PUBLISH_FIRST_COMPONENTS } from "./packageProgressiveLoad.js";
 
 function abortError() {

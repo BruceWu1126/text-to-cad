@@ -1,4 +1,4 @@
-import { isPartKey, partRow } from "../lib/surf/tessellationCache.js";
+import { isPartKey, partRow } from "../lib/parts/tessellationCache.js";
 const DIGEST_RE = /^[0-9a-f]{64}$/;
 const INITIAL_POLL_MS = 80;
 const MAX_POLL_MS = 640;
