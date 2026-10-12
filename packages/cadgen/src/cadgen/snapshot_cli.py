@@ -1,11 +1,9 @@
 """Snapshot below the options boundary: job resolution and the run loop.
 
-There is no parser here any more. Snapshot used to be the schema's one ADAPTER
-— a hand-written argv scanner plus a declared option surface a policy test
-pinned — and that exception is retired: the verbs in
-:mod:`cadgen._internal.snapshot_door` are MIRRORS, and their generated parsers
-hand this module a :class:`SnapshotOptions` already built. What remains is
-everything downstream of that:
+There is no parser here: the verbs in :mod:`cadgen._internal.snapshot_door` are
+MIRRORS, and their generated parsers hand this module a
+:class:`SnapshotOptions` already built. This module is everything downstream of
+that:
 
     run_snapshot(options, kinds=("step", "stp"), runtime_dir=...)
 

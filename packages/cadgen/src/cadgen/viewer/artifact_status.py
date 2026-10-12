@@ -106,11 +106,7 @@ def owns_step_path(file_path) -> bool:
 
 
 def owns_dxf_path(file_path=None) -> bool:
-    """Always false.
-
-    Generated-DXF entries were ``.dxf.py`` scripts; scripts are no longer
-    entries, and a plain ``.dxf`` renders directly with no artifact to manage.
-    """
+    """Always false: a ``.dxf`` renders directly, with no artifact to manage."""
     return False
 
 

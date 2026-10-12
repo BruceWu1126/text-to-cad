@@ -490,8 +490,7 @@ class _StageTimer:
 # interpretation change): that re-keys every user's store, so it is rare and
 # deliberate. An extractor, selector-table or mesher fix bumps the version of
 # that derived artifact (cadgen.store.parts.PART_VERSION) and never this
-# string. There is no global cache-schema salt any more; STORE.md "Geometry
-# identity and versions" records the rule and the retired salt's history.
+# string. STORE.md "Geometry identity and versions" records the rule.
 GEOMETRY_SCHEME = "cadgen-geometry-input-v3"
 GEOMETRY_CODECS = frozenset({"bintools-v4", "bintools-v3", "breptools-ascii-v3"})
 COMPONENT_KINDS = frozenset({"native", "eager-only"})

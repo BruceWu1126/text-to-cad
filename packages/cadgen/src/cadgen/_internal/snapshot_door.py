@@ -1,16 +1,13 @@
 """The public ``snapshot`` verbs — MIRRORS, one signature per format shape.
 
-Snapshot used to be the schema's one adapter: a hand-written parser whose
-option surface a policy test pinned by declaration. That exception is retired
-(user directive, 2026-08-30): every rich option is typed ``str | dict | None``
-— CLI-side one string (a saved name, inline JSON, or a path) interpreted by
-the loaders the verb already uses; library-side a real dict through the same
-parameter — so the signature IS the surface and ``cli_from_function`` derives
-the CLI exactly as it does for ``build`` and ``validate``.
+Every rich option is typed ``str | dict | None`` — CLI-side one string (a
+saved name, inline JSON, or a path) interpreted by the loaders the verb
+already uses; library-side a real dict through the same parameter — so the
+signature IS the surface and ``cli_from_function`` derives the CLI exactly as
+it does for ``build`` and ``validate``.
 
-Four signature shapes cover the seven doors honestly (the old shared
-signature advertised STEP-only options to every door and refused them at
-runtime):
+Four signature shapes cover the seven doors, each advertising only the
+options its formats take:
 
 - STEP: the full surface — display, kinematics, animation, focus/hide.
 - mesh (stl/3mf/glb): view/list renders of untyped geometry.

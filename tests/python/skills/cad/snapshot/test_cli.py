@@ -2209,8 +2209,7 @@ class JobDisplayResolutionTests(unittest.TestCase):
 class StepPoseParameterTests(unittest.TestCase):
     """The job's `kinematics` key drives the model's declarative kinematics
     block — the ONE parameter transport, spelled the same as the flag and the
-    sidecar section. The retired spellings (`stepParameters`, --params-path,
-    stepParametersPath, descriptor paramsPath) are hard teaching errors."""
+    sidecar section. Any other key is an unknown key of the closed job schema."""
 
     POSE = {
         "mates": [{"name": "stroke", "kind": "slider", "parent": "#body", "child": "#occ",
@@ -2361,7 +2360,7 @@ class StepPoseParameterTests(unittest.TestCase):
         self.assertEqual([clip["id"] for clip in resolved["animation"]["clips"]], ["demo"])
         self.assertNotIn("articulation", resolved)
 
-    def test_parameters_without_kinematics_teach_the_migration(self) -> None:
+    def test_pose_values_on_a_model_without_kinematics_are_refused(self) -> None:
         self._step(pose=False)
         with self.assertRaisesRegex(SnapshotError, "declares no kinematics"):
             self._resolve(self._job(kinematics={"stroke": 1}))
