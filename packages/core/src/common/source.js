@@ -9,21 +9,6 @@ import {
   decodeComponentTessellation,
   tessBatchMaxBytes,
 } from "../lib/surf/tessellationCache.js";
-import {
-  loadRenderDisplayEdgeBundle,
-  loadRenderGlb,
-  loadRenderSelectorBundle
-} from "../lib/stepRenderAssetClient.js";
-import {
-  buildDisplayEdgeRuntime,
-  buildSelectorRuntime
-} from "../lib/selectors/runtime.js";
-import {
-  isRenderAssetSourceScopeError,
-  renderAssetSourceScope,
-  renderAssetSourceScopeForJob,
-  setRenderAssetSourceScope
-} from "../lib/renderAssetSourceScope.js";
 import { normalizeControlValues } from "./articulation.js";
 
 // A render source is a STEP document: its model is composed here and built by `buildModel`
@@ -84,46 +69,6 @@ function assertStepOnlyOption(kind, value, label) {
   }
   if (!sourceIsStep(kind)) {
     throw new Error(`${label} is supported only for STEP/STP sources`);
-  }
-}
-
-async function loadStepMeshFromGlb(glbUrl, options) {
-  // A plain (non-package) GLB URL is a single mesh blob — assemblies are component-GLB
-  // packages loaded via loadPackageMeshData, not self-contained monolith GLBs.
-  return loadRenderGlb(glbUrl, options);
-}
-
-async function loadSelectorRuntime(glbUrl, { cadPath = "", resources, signal } = {}) {
-  if (!glbUrl) {
-    return null;
-  }
-  try {
-    const selectorBundle = await loadRenderSelectorBundle(glbUrl, { resources, signal });
-    return buildSelectorRuntime(selectorBundle, {
-      copyCadPath: cadPath
-    });
-  } catch (error) {
-    // Missing or unreadable selector topology is a normal condition and degrades to null. A
-    // cross-source cache collision is not: swallowing it would render a plausible wrong image at
-    // exit 0, which is the failure this scope check exists to make loud.
-    if (isRenderAssetSourceScopeError(error)) {
-      throw error;
-    }
-    return null;
-  }
-}
-
-async function loadDisplayEdgeRuntime(glbUrl, options) {
-  if (!glbUrl) {
-    return null;
-  }
-  try {
-    return buildDisplayEdgeRuntime(await loadRenderDisplayEdgeBundle(glbUrl, options));
-  } catch (error) {
-    if (isRenderAssetSourceScopeError(error)) {
-      throw error;
-    }
-    return null;
   }
 }
 
@@ -300,11 +245,6 @@ async function loadPackageMeshData(packageInfo, diagnostics = null, tessellation
   return meshData;
 }
 
-async function loadMeshDataFromUrl(url, kind, options) {
-  if (!sourceIsStep(kind)) throw new Error(`Unsupported render source kind: ${kind || SOURCE_KIND.UNKNOWN}; a render source is a STEP/STP document`);
-  return loadStepMeshFromGlb(url, options);
-}
-
 // The POSE half of a STEP source: cadgen's articulation of its kinematics at a control
 // vector cadgen validated (a snapshot job's `resolved.controls`; the opening when none is
 // given). This is the `stepParameters` object `buildModel` plays.
@@ -373,85 +313,26 @@ export async function loadSource(input, options = {}) {
   assertStepOnlyOption(kind, animation, "sourceAnimation");
   const pose = stepPose(kind, articulation, controls);
 
-  let meshData = explicitMeshData;
-  // Component-GLB package: the canonical assembly artifact is a directory, so there is
-  // no single GLB to load. Fetch each unique component GLB and compose them in world
-  // space from the descriptor (transforms baked per occurrence). Picking is not wired
-  // for packages yet, so the selector runtime is left empty (renders, no selection).
+  // A STEP document is drawn from its package: each component's stored mesh, composed in world
+  // space from the descriptor (transforms baked per occurrence). A caller that already holds
+  // the mesh data passes it instead. No selector runtime is composed here: a caller that has
+  // one passes it.
   const packageInfo = isObject(inputObject.package) ? inputObject.package : (
     isObject(resolved.package) ? resolved.package : null
   );
-  if (!meshData && packageInfo) {
+  const selectorRuntime = inputObject.selectorRuntime || options.selectorRuntime || null;
+  if (!explicitMeshData && packageInfo) {
     const diagnostics = options.stageTimings ? {} : null;
-    meshData = await loadPackageMeshData(packageInfo, diagnostics, options.tessellationCache, options);
+    const meshData = await loadPackageMeshData(packageInfo, diagnostics, options.tessellationCache, options);
     if (diagnostics) options.stageTimings.sourceLoad = diagnostics;
-    const packageSelectorRuntime = inputObject.selectorRuntime || options.selectorRuntime || null;
-    return {
-      kind: "step",
-      meshData,
-      selectorRuntime: packageSelectorRuntime,
-      displayEdgeRuntime: inputObject.displayEdgeRuntime || options.displayEdgeRuntime || null,
-      // The articulation carries the composed occurrence ids each joint moves, so a package
-      // poses with no selector runtime at all.
-      pose,
-      animation,
-      resolved,
-      url: "",
-      glbUrl: "",
-      cadPath
-    };
+    // The articulation carries the composed occurrence ids each joint moves, so a package
+    // poses with no selector runtime at all.
+    return { kind: SOURCE_KIND.STEP, meshData, selectorRuntime, pose, animation, resolved, cadPath };
   }
-  const glbUrl = String(inputObject.glbUrl || resolved.glbUrl || options.glbUrl || "").trim();
-  const url = String(typeof input === "string" ? input : inputObject.url || resolved.url || glbUrl || "").trim();
-
-  // Render asset caches live for the whole page, so every entry a resolved job populates must be
-  // tagged with the source it belongs to. This is the only place a resolved job meets those caches,
-  // so it is where the scope is declared; the scope is restored afterwards so one job can never
-  // leave its identity attached to another caller's loads. Callers with no resolved job keep the
-  // unscoped default and are unaffected.
-  const previousSourceScope = renderAssetSourceScope();
-  if (glbUrl || url) {
-    setRenderAssetSourceScope(renderAssetSourceScopeForJob(inputObject));
+  if (!explicitMeshData) {
+    throw new Error("loadSource requires a STEP document's package (package or resolved.package) or its meshData");
   }
-  try {
-    if (!meshData) {
-      if (!url) {
-        throw new Error("loadSource requires meshData, a source URL, or resolved.glbUrl");
-      }
-      meshData = await loadMeshDataFromUrl(sourceIsStep(kind) ? glbUrl || url : url, kind, options);
-    }
-
-    // Selector/display-edge runtimes ride in STEP topology GLB extras. Direct mesh
-    // kinds have none, and loading them anyway re-downloads the mesh binary just to
-    // fail the GLB container parse — gate by kind so "no selectors for meshes" is
-    // intent, not a swallowed error (matches the CLI's mesh-input validation).
-    // A still whose display mode is Render does not draw CAD edges and has no
-    // pointer interaction, so it must not pull selector topology solely because
-    // its source is STEP. Explicit runtimes remain an opt-in demand (the shared
-    // interactive loader can carry them while switching display modes).
-    const renderOnlyLoad = String(inputObject.display?.mode || "").trim().toLowerCase() === "render";
-    const stepSidecarsEnabled = sourceIsStep(kind) && !renderOnlyLoad;
-    const selectorRuntime = inputObject.selectorRuntime || options.selectorRuntime || (
-      stepSidecarsEnabled ? await loadSelectorRuntime(glbUrl || url, { cadPath, resources, signal: options.signal }) : null
-    );
-    const displayEdgeRuntime = inputObject.displayEdgeRuntime || options.displayEdgeRuntime || (
-      stepSidecarsEnabled ? await loadDisplayEdgeRuntime(glbUrl || url, options) : null
-    );
-    return {
-      kind,
-      meshData,
-      selectorRuntime,
-      displayEdgeRuntime,
-      pose,
-      animation,
-      resolved,
-      url,
-      glbUrl,
-      cadPath
-    };
-  } finally {
-    setRenderAssetSourceScope(previousSourceScope);
-  }
+  return { kind, meshData: explicitMeshData, selectorRuntime, pose, animation, resolved, cadPath };
 }
 
 // Exported for tests only: the component-fetch retry is the recovery path for a

@@ -1,11 +1,4 @@
 import { cadResourceCacheKey } from "../client/resources.js";
-import {
-  STEP_EDGE_BARYCENTRIC_ATTRIBUTE,
-  STEP_EDGE_CLASS_ATTRIBUTE,
-  STEP_TOPOLOGY_EXTENSION,
-  STEP_TOPOLOGY_SCHEMA_VERSION,
-  isCurrentStepTopologySchemaVersion
-} from "../common/stepTopology.mjs";
 import { buildGlbDocumentFromBuffer, buildMeshDataFromGlbBuffer } from "./render/glbMeshData.js";
 import { buildMeshDataFromStlBuffer } from "./render/stlMeshData.js";
 import { buildMeshDataFrom3MfBuffer } from "./render/threeMfMeshData.js";
@@ -24,10 +17,6 @@ import {
   releaseAssetSourceScope
 } from "./renderAssetSourceScope.js";
 
-function isObject(value) {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
 function fetchError(url, response) {
   return new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`);
 }
@@ -39,8 +28,6 @@ const glbCache = new Map();
 const stlCache = new Map();
 const threeMfCache = new Map();
 const selectorCache = new Map();
-const displayEdgeCache = new Map();
-const topologyIndexCache = new Map();
 const robotCache = new Map();
 const GIT_LFS_POINTER_PREFIX = "version https://git-lfs.github.com/spec/v1";
 const GIT_LFS_POINTER_SCAN_BYTES = 512;
@@ -364,246 +351,18 @@ export function peekRender3Mf(url, { resources } = {}) {
   return peekCached(threeMfCache, cadResourceCacheKey(resources, url));
 }
 
-function parseGlbContainer(arrayBuffer) {
-  const data = new DataView(arrayBuffer);
-  if (data.byteLength < 20 || data.getUint32(0, true) !== 0x46546c67 || data.getUint32(4, true) !== 2) {
-    throw new Error("Invalid GLB topology container");
-  }
-  const totalLength = Math.min(data.getUint32(8, true), data.byteLength);
-  let offset = 12;
-  let json = null;
-  let bin = null;
-  while (offset + 8 <= totalLength) {
-    const chunkLength = data.getUint32(offset, true);
-    const chunkType = data.getUint32(offset + 4, true);
-    offset += 8;
-    if (offset + chunkLength > totalLength) {
-      throw new Error("Invalid GLB chunk length");
-    }
-    if (chunkType === 0x4e4f534a) {
-      json = JSON.parse(new TextDecoder("utf-8").decode(arrayBuffer.slice(offset, offset + chunkLength)).trim());
-    } else if (chunkType === 0x004e4942) {
-      bin = {
-        buffer: arrayBuffer,
-        byteOffset: offset,
-        byteLength: chunkLength,
-      };
-    }
-    offset += chunkLength;
-  }
-  if (!json || !bin) {
-    throw new Error("GLB topology requires JSON and BIN chunks");
-  }
-  return { json, bin };
-}
-
-function glbBufferViewRange(gltf, bin, viewIndex) {
-  const index = Number(viewIndex);
-  const view = Array.isArray(gltf?.bufferViews) ? gltf.bufferViews[index] : null;
-  if (!Number.isInteger(index) || !view || Number(view.buffer || 0) !== 0) {
-    return null;
-  }
-  const byteOffset = bin.byteOffset + Number(view.byteOffset || 0);
-  const byteLength = Number(view.byteLength || 0);
-  if (!Number.isFinite(byteOffset) || !Number.isFinite(byteLength) || byteLength < 0) {
-    return null;
-  }
-  if (byteOffset < bin.byteOffset || byteOffset + byteLength > bin.byteOffset + bin.byteLength) {
-    return null;
-  }
-  return { byteOffset, byteLength };
-}
-
-function buildTypedView(glb, view) {
-  if (!isObject(view)) {
-    return null;
-  }
-  const range = glbBufferViewRange(glb.json, glb.bin, view.bufferView);
-  if (!range) {
-    return null;
-  }
-  const count = Number(view.count || 0);
-  const relativeOffset = Number(view.byteOffset || 0);
-  if (!Number.isFinite(count) || count < 0 || !Number.isFinite(relativeOffset) || relativeOffset < 0) {
-    return null;
-  }
-  const byteOffset = range.byteOffset + relativeOffset;
-  if (view.dtype === "float32") {
-    return new Float32Array(glb.bin.buffer, byteOffset, count);
-  }
-  if (view.dtype === "uint32") {
-    return new Uint32Array(glb.bin.buffer, byteOffset, count);
-  }
-  return null;
-}
-
-function buildSelectorBuffers(manifest, glb) {
-  const views = manifest?.buffers?.views;
-  if (!isObject(views)) {
-    return {};
-  }
-  const output = {};
-  for (const [name, view] of Object.entries(views)) {
-    const typed = buildTypedView(glb, view);
-    if (typed) {
-      output[name] = typed;
-    }
-  }
-  return output;
-}
-
-function glbPrimitivesHaveSurfaceEdgeAttributes(glb) {
-  const meshes = Array.isArray(glb?.json?.meshes) ? glb.json.meshes : [];
-  let primitiveCount = 0;
-  for (const mesh of meshes) {
-    for (const primitive of Array.isArray(mesh?.primitives) ? mesh.primitives : []) {
-      primitiveCount += 1;
-      const attributes = primitive?.attributes || {};
-      if (
-        attributes[STEP_EDGE_BARYCENTRIC_ATTRIBUTE] === undefined ||
-        attributes[STEP_EDGE_CLASS_ATTRIBUTE] === undefined
-      ) {
-        return false;
-      }
-    }
-  }
-  return primitiveCount > 0;
-}
-
-function stepTopologyExtension(glb) {
-  const extension = glb.json?.extensions?.[STEP_TOPOLOGY_EXTENSION];
-  if (!isObject(extension)) {
-    throw new Error(`GLB is missing ${STEP_TOPOLOGY_EXTENSION}`);
-  }
-  if (!isCurrentStepTopologySchemaVersion(extension.schemaVersion)) {
-    throw new Error(`Unsupported ${STEP_TOPOLOGY_EXTENSION} schemaVersion ${extension.schemaVersion || "unknown"}; expected ${STEP_TOPOLOGY_SCHEMA_VERSION}`);
-  }
-  if (extension.edgeView === undefined || extension.edgeView === null) {
-    throw new Error(`${STEP_TOPOLOGY_EXTENSION} edgeView is not available`);
-  }
-  if (!glbPrimitivesHaveSurfaceEdgeAttributes(glb)) {
-    throw new Error(`${STEP_TOPOLOGY_EXTENSION} requires ${STEP_EDGE_BARYCENTRIC_ATTRIBUTE} and ${STEP_EDGE_CLASS_ATTRIBUTE} on every STEP mesh primitive`);
-  }
-  return extension;
-}
-
-function parseJsonBufferView(glb, viewIndex, encoding = "utf-8") {
-  const range = glbBufferViewRange(glb.json, glb.bin, viewIndex);
-  if (!range) {
-    return null;
-  }
-  const bytes = new Uint8Array(glb.bin.buffer, range.byteOffset, range.byteLength);
-  return JSON.parse(new TextDecoder(String(encoding || "utf-8")).decode(bytes));
-}
-
-function topologyIndexFromGlbBuffer(arrayBuffer) {
-  const glb = parseGlbContainer(arrayBuffer);
-  const extension = stepTopologyExtension(glb);
-  const manifest = parseJsonBufferView(glb, extension.indexView, extension.encoding);
-  if (!isObject(manifest)) {
-    throw new Error(`${STEP_TOPOLOGY_EXTENSION} indexView is invalid`);
-  }
-  if (!isCurrentStepTopologySchemaVersion(manifest.schemaVersion)) {
-    throw new Error(`Unsupported ${STEP_TOPOLOGY_EXTENSION} index schemaVersion ${manifest.schemaVersion || "unknown"}; expected ${STEP_TOPOLOGY_SCHEMA_VERSION}`);
-  }
-  return manifest;
-}
-
-function selectorBundleFromGlbBuffer(arrayBuffer) {
-  const glb = parseGlbContainer(arrayBuffer);
-  const extension = stepTopologyExtension(glb);
-  const manifest = parseJsonBufferView(glb, extension.selectorView, extension.encoding);
-  if (!isObject(manifest)) {
-    throw new Error(`${STEP_TOPOLOGY_EXTENSION} selectorView is not available`);
-  }
-  if (!isCurrentStepTopologySchemaVersion(manifest.schemaVersion)) {
-    throw new Error(`Unsupported ${STEP_TOPOLOGY_EXTENSION} selector schemaVersion ${manifest.schemaVersion || "unknown"}; expected ${STEP_TOPOLOGY_SCHEMA_VERSION}`);
-  }
-  if (manifest?.buffers?.littleEndian === false) {
-    throw new Error("Big-endian selector buffers are not supported");
-  }
-  return {
-    manifest,
-    buffers: buildSelectorBuffers(manifest, glb),
-  };
-}
-
-function displayEdgeBundleFromGlbBuffer(arrayBuffer) {
-  const glb = parseGlbContainer(arrayBuffer);
-  const extension = stepTopologyExtension(glb);
-  const manifest = parseJsonBufferView(glb, extension.edgeView, extension.encoding);
-  if (!isObject(manifest)) {
-    throw new Error(`${STEP_TOPOLOGY_EXTENSION} edgeView is not available`);
-  }
-  if (!isCurrentStepTopologySchemaVersion(manifest.schemaVersion)) {
-    throw new Error(`Unsupported ${STEP_TOPOLOGY_EXTENSION} edgeView schemaVersion ${manifest.schemaVersion || "unknown"}; expected ${STEP_TOPOLOGY_SCHEMA_VERSION}`);
-  }
-  if (String(manifest.profile || "") !== "surface-edges") {
-    throw new Error(`${STEP_TOPOLOGY_EXTENSION} edgeView has unsupported profile ${manifest.profile || "unknown"}`);
-  }
-  if (manifest?.buffers?.littleEndian === false) {
-    throw new Error("Big-endian edgeView buffers are not supported");
-  }
-  return {
-    manifest,
-    buffers: buildSelectorBuffers(manifest, glb),
-  };
-}
-
-export async function loadRenderTopologyIndex(glbUrl, { signal, resources } = {}) {
-  const cacheKey = cadResourceCacheKey(resources, glbUrl);
-  const manifest = await loadCached(topologyIndexCache, cacheKey, async () => {
-    const arrayBuffer = await loadRenderArrayBuffer(glbUrl, { signal, resources });
-    assertNotGitLfsPointer(arrayBuffer, glbUrl, "GLB topology asset");
-    return topologyIndexFromGlbBuffer(arrayBuffer);
-  }, { cachePending: !signal });
-  return finalizeCached(topologyIndexCache, cacheKey, manifest);
-}
-
-export function peekRenderTopologyIndex(glbUrl, { resources } = {}) {
-  return peekCached(topologyIndexCache, cadResourceCacheKey(resources, glbUrl));
-}
-
-export async function loadRenderSelectorBundle(glbUrl, { signal, resources } = {}) {
-  const cacheKey = cadResourceCacheKey(resources, glbUrl);
-  const bundle = await loadCached(selectorCache, cacheKey, async () => {
-    const arrayBuffer = await loadRenderArrayBuffer(glbUrl, { signal, resources });
-    assertNotGitLfsPointer(arrayBuffer, glbUrl, "GLB selector topology asset");
-    return selectorBundleFromGlbBuffer(arrayBuffer);
-  }, { cachePending: !signal });
-  return finalizeCached(selectorCache, cacheKey, bundle);
-}
-
-export function peekRenderSelectorBundle(glbUrl, { resources } = {}) {
-  return peekCached(selectorCache, cadResourceCacheKey(resources, glbUrl));
-}
-
-export async function loadRenderDisplayEdgeBundle(glbUrl, { signal, resources } = {}) {
-  const cacheKey = cadResourceCacheKey(resources, glbUrl);
-  const bundle = await loadCached(displayEdgeCache, cacheKey, async () => {
-    const arrayBuffer = await loadRenderArrayBuffer(glbUrl, { signal, resources });
-    assertNotGitLfsPointer(arrayBuffer, glbUrl, "GLB display edge topology asset");
-    return displayEdgeBundleFromGlbBuffer(arrayBuffer);
-  }, { cachePending: !signal });
-  return finalizeCached(displayEdgeCache, cacheKey, bundle);
-}
-
-export function peekRenderDisplayEdgeBundle(glbUrl, { resources } = {}) {
-  return peekCached(displayEdgeCache, cadResourceCacheKey(resources, glbUrl));
-}
-
 // --- Exact topology ----------------------------------------------------------
 //
-// cadgen's selector table carries the topology the GLB's STEP_TOPOLOGY tables
-// did, and the page joins it to the stored mesh (surf/selectorTable.js).
+// cadgen's selector table carries a part's topology, and the page joins it to
+// the stored mesh (surf/selectorTable.js).
 // Worker requests declare whether they need render data, selectors, or both.
 // Display uses render only; selection and measurement join the table on
 // demand, to the same mesh.
 
 const surfPayloadCache = new Map();
 
-// Every surf entry — a component's payload, its selector bundle, its
-// display-edge bundle — lives on ONE bounded LRU leash. The consumers own
+// Every surf entry — a component's payload, its mesh data, its selector
+// bundle — lives on ONE bounded LRU leash. The consumers own
 // what they keep: the package's componentMeshDataByCid holds every displayed
 // meshData, the reference composition holds the bundles of the occurrences it
 // composed. Retaining a second
@@ -717,7 +476,6 @@ export function renderAssetCacheStats({ excludeBuffers = [] } = {}) {
   for (const [name, cache] of [
     ["surfPayload", surfPayloadCache],
     ["selector", selectorCache],
-    ["displayEdge", displayEdgeCache],
     ["glb", glbCache],
   ]) {
     let typedBytes = 0;

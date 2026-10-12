@@ -2,20 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import {
   isAbortError,
   loadRenderSurf,
-  loadRenderSelectorBundle,
   loadRenderSurfSelectorBundle,
   partCacheKey,
-  peekRenderGlb,
-  peekRenderSelectorBundle,
   peekRenderSurf,
-  peekRenderTopologyIndex,
   prewarmSurfWorkers,
   releaseSurfWorkers
 } from "@text-to-cad/core/lib/renderAssetClient.js";
-import {
-  applyOccurrenceDisplay,
-  assemblyRootFromTopology
-} from "@text-to-cad/core/lib/assembly/meshData.js";
+import { applyOccurrenceDisplay } from "@text-to-cad/core/lib/assembly/meshData.js";
 import { mapWithConcurrency } from "@text-to-cad/core/lib/async/concurrency.js";
 import { viewerOriginUrl } from "@text-to-cad/core/client";
 import {
@@ -48,9 +41,7 @@ import { ASSET_STATUS, REFERENCE_STATUS } from "../../../workbench/constants.js"
 import {
   entryAssetUrl,
   entryMeshAssetSignature,
-  entryReferenceAssetSignature,
-  entrySelectorTopologyAssetUrl,
-  entryTopologyAssetUrl
+  entryReferenceAssetSignature
 } from "@text-to-cad/core/lib/entryAssets.js";
 import { reclaimIdleSurfWorkers } from "@text-to-cad/core/lib/renderAssetClient.js";
 import { PERF_MEASURE_NAMES, perfMeasure, perfStart } from "@text-to-cad/core/lib/viewer/perfMarks.js";
@@ -149,14 +140,6 @@ function packageComponentLoadConcurrency() {
   return Math.max(4, Math.min(PACKAGE_COMPONENT_LOAD_CONCURRENCY, Math.floor(hardwareConcurrency)));
 }
 
-function createAssemblyPreviewMeshData(meshData, topologyManifest = null) {
-  return {
-    ...meshData,
-    parts: null,
-    assemblyRoot: assemblyRootFromTopology(topologyManifest)
-  };
-}
-
 function completedPackageMeshState(entry, meshData) {
   return {
     file: entry.file, kind: entry.kind, meshHash: entryMeshAssetSignature(entry), meshData,
@@ -207,41 +190,11 @@ export function useCadAssets({
     return entryMeshAssetSignature(entry);
   }, [resources]);
 
-  const buildAssemblyPreviewMeshState = useCallback((entry, meshData, topologyManifest = null) => {
-    const previewMeshData = createAssemblyPreviewMeshData(meshData, topologyManifest);
-    return {
-      file: entry.file,
-      kind: entry.kind,
-      meshHash: getAssemblyMeshHash(entry),
-      meshData: previewMeshData,
-      assemblyStructureReady: !!previewMeshData.assemblyRoot,
-      assemblyInteractionReady: false,
-      assemblyBackgroundError: "",
-      assemblyBackgroundErrorMeshHash: "",
-      assemblyFailedParts: [],
-      assemblyUnmeshedParts: []
-    };
-  }, [getAssemblyMeshHash, resources]);
-
+  // Complete STEP packages may exceed the per-component SURF LRU. Reuse their
+  // bounded CPU working set, with fresh occurrence metadata for this mount.
   const restoreCompletedPackage = useCallback(entry => entryHasMesh(entry)
     ? completedPackages.get(client, entry, { descriptor: peekPackageDescriptor(entryAssetUrl(entry, "glb"), { resources }) })
     : null, [client, entryHasMesh]);
-
-  const getCachedMeshState = useCallback((entry) => {
-    if (!entryHasMesh(entry)) {
-      return null;
-    }
-    // Complete STEP packages may exceed the per-component SURF LRU. Reuse their
-    // bounded CPU working set, with fresh occurrence metadata for this mount.
-    const completed = restoreCompletedPackage(entry);
-    if (completed) return completedPackageMeshState(entry, completed.meshData);
-    const previewMeshData = peekRenderGlb(entryAssetUrl(entry, "glb"), { resources });
-    if (!previewMeshData) {
-      return null;
-    }
-    const topologyManifest = peekRenderTopologyIndex(entryTopologyAssetUrl(entry), { resources });
-    return topologyManifest ? null : buildAssemblyPreviewMeshState(entry, previewMeshData);
-  }, [buildAssemblyPreviewMeshState, entryHasMesh, restoreCompletedPackage, resources]);
 
   // FileViewer remounts file-owned controls. Restore immutable warm assets on
   // the first render, as main's in-place tab activation did, without retaining
@@ -250,7 +203,7 @@ export function useCadAssets({
   if (initialPackageRef.current === undefined) initialPackageRef.current = restoreCompletedPackage(initialEntry);
   const initialPackage = initialPackageRef.current;
   const [meshState, setMeshState] = useState(() => (
-    initialPackage ? completedPackageMeshState(initialEntry, initialPackage.meshData) : getCachedMeshState(initialEntry)
+    initialPackage ? completedPackageMeshState(initialEntry, initialPackage.meshData) : null
   ));
   const meshStateRef = useRef(meshState);
   meshStateRef.current = meshState;
@@ -303,14 +256,6 @@ export function useCadAssets({
     publishMeshCostAccounting({ ...initialPackage, loaded: count, total: count, final: true, meshRevision: initialPackage.meshHash });
     syncDisplayedMemory(initialPackage.componentMeshDataByCid);
   }, [initialPackage, resources]);
-
-  const getCachedReferenceState = useCallback((entry) => {
-    if (!entryHasReferences(entry)) {
-      return null;
-    }
-    const bundle = peekRenderSelectorBundle(entrySelectorTopologyAssetUrl(entry), { resources });
-    return bundle ? buildNormalizedReferenceState(entry, bundle) : null;
-  }, [buildNormalizedReferenceState, entryHasReferences, resources]);
 
   const cancelMeshLoad = useCallback(() => {
     requestIdRef.current += 1;
@@ -400,17 +345,6 @@ export function useCadAssets({
     const previousCompletePackage = atomicSameFileReplacement
       ? matchingDisplayedPackageContext(displayedPackageRef.current, meshStateRef.current, entry.file)
       : null;
-    const cachedMeshState = surfaceViewReplacement ? null : getCachedMeshState(entry);
-    if (cachedMeshState && !atomicSameFileReplacement) {
-      displayedPackageRef.current = null;
-      displayedReferenceCompositionRef.current = null;
-      setMeshState(cachedMeshState);
-      setStatus(ASSET_STATUS.READY);
-      setError("");
-      if (entry?.kind !== "assembly" || cachedMeshState.assemblyInteractionReady || cachedMeshState.assemblyBackgroundError) {
-        return;
-      }
-    }
 
     const controller = new AbortController();
     meshAbortControllerRef.current = controller;
@@ -431,9 +365,7 @@ export function useCadAssets({
     referenceCompositionRef.current = null;
     const stageWholeReplacement = atomicSameFileReplacement || surfaceViewReplacement;
     const keepRenderedAssemblyVisible = entry?.kind === "assembly" && (
-      !!cachedMeshState || atomicSameFileReplacement || (
-        surfaceViewReplacement && meshStateRef.current?.file === entry.file
-      )
+      atomicSameFileReplacement || (surfaceViewReplacement && meshStateRef.current?.file === entry.file)
     );
     let assemblyPreviewVisible = keepRenderedAssemblyVisible;
     if (!keepRenderedAssemblyVisible) {
@@ -836,8 +768,7 @@ export function useCadAssets({
         meshAbortControllerRef.current = null;
       }
     }
-  }, [buildAssemblyPreviewMeshState, cancelMeshLoad, entryHasMesh, getAssemblyMeshHash, getCachedMeshState,
-    client, restoreCompletedPackage]);
+  }, [cancelMeshLoad, entryHasMesh, getAssemblyMeshHash, client, restoreCompletedPackage]);
 
   surfaceViewReplacementRef.current = (entry, meshUrl, replacementView) => {
     if (!replacementView?.viewId) return Promise.resolve();
@@ -876,9 +807,8 @@ export function useCadAssets({
     const isCurrent = () => session.requestId === referenceRequestIdRef.current && !controller.signal.aborted;
     const batchStart = perfStart();
     try {
-      // Component-GLB package: there is no whole-assembly selector bundle. Compose the
-      // per-component selector runtimes (each placed by its occurrence transform and namespaced
-      // by occurrence id) so nested faces/edges become pickable.
+      // Component-GLB package: compose the per-component selector runtimes (each placed by its
+      // occurrence transform and namespaced by occurrence id) so nested faces/edges become pickable.
       const glbUrl = entryAssetUrl(entry, "glb");
       const packageDescriptor = glbUrl
         ? await loadPackageDescriptor(glbUrl, { resources, signal: controller.signal })
@@ -889,7 +819,7 @@ export function useCadAssets({
         // expanded in the tree (requestedOccurrenceIds), not every component. Loading all of them up
         // front made expanding one nested node fetch + compose the whole model's topology (regressed
         // in 8b12837d). A single-component part has no tree, so it loads its one component.
-        // loadRenderSelectorBundle is cache-backed, so each new expansion only fetches the
+        // loadRenderSurfSelectorBundle is cache-backed, so each new expansion only fetches the
         // newly-needed component; previously loaded ones are free.
         const isSingleComponentPart = String(entry?.kind || "").trim() === "part";
         const { occurrencesToLoad, neededCids, loadedTopologyKey } = selectRequestedAssemblyComponents(
@@ -1015,20 +945,10 @@ export function useCadAssets({
         });
         return "published";
       }
-
-      const bundle = await loadRenderSelectorBundle(
-        entrySelectorTopologyAssetUrl(entry),
-        { resources, signal: controller.signal }
+      // A missing or non-package descriptor is a stale or unbuilt artifact, as the mesh load reports.
+      throw new Error(
+        `STEP file ${entry.file || "(unknown)"} is not a component-GLB package; regenerate it to produce an assembly.json package.`
       );
-      if (!isCurrent()) {
-        return "stale";
-      }
-      const nextReferenceState = buildNormalizedReferenceState(entry, bundle);
-      setReferenceState(nextReferenceState);
-      syncAssetCacheMemory();
-      // One whole-document bundle answers every request.
-      session.publish(session.desired, nextReferenceState, { whole: true });
-      return "published";
     } finally {
       // A first pick can be the last consumer of the tessellation pool.
       // Reclaim its isolates after all sibling loads drain, just like initial
@@ -1073,14 +993,6 @@ export function useCadAssets({
     const sessionCurrent = Boolean(session && session.key === key && session.loader === loadReferenceBatch && !session.failed
       && session.requestId === referenceRequestIdRef.current && !session.controller.signal.aborted);
     if (!sessionCurrent) {
-      const cachedReferenceState = getCachedReferenceState(entry);
-      if (cachedReferenceState) {
-        cancelReferenceLoad();
-        setReferenceState(cachedReferenceState);
-        setReferenceStatus(cachedReferenceState.disabledReason ? REFERENCE_STATUS.DISABLED : REFERENCE_STATUS.READY);
-        setReferenceError(cachedReferenceState.disabledReason || "");
-        return Promise.resolve();
-      }
       cancelReferenceLoad();
       if (referenceComposerRef.current.key !== key) {
         referenceComposerRef.current.composer.reset();
@@ -1136,8 +1048,8 @@ export function useCadAssets({
       setReferenceLoadStage("");
     }
     return request.promise || Promise.resolve();
-  }, [cancelReferenceLoad, entryHasReferences, failReferenceSession, getAssemblyMeshHash, getCachedReferenceState,
-    loadReferenceBatch, resources]);
+  }, [cancelReferenceLoad, entryHasReferences, failReferenceSession, getAssemblyMeshHash, loadReferenceBatch,
+    resources]);
 
   useEffect(() => () => {
     abortLoad(meshAbortControllerRef);
@@ -1165,8 +1077,6 @@ export function useCadAssets({
     referenceError,
     setReferenceError,
     referenceLoadStage,
-    getCachedMeshState,
-    getCachedReferenceState,
     cancelMeshLoad,
     cancelReferenceLoad,
     loadMeshForEntry,

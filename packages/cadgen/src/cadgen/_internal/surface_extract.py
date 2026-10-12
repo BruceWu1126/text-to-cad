@@ -61,7 +61,7 @@ SURF_VERSION = 3
 
 
 def _enum_name_geomabs(value) -> str:
-    # Same spelling the STEP_TOPOLOGY manifest has always used
+    # The type names selector refs and the page read
     # (step_scene_loader._enum_name with the GeomAbs_ prefix stripped,
     # lowercased): "plane", "cylinder", "bsplinesurface", "line", ...
     from cadgen._internal.step_scene_types import _enum_name
@@ -455,9 +455,9 @@ def extract_surface_component(
             "shape": shape_by_face.get(ordinal, 1),
             "reversed": face.Orientation() == TopAbs_Orientation.TopAbs_REVERSED,
             "uv": [u0, u1, v0, v1],
-            # Selector-table columns (surfaceType/params in the exact
-            # spelling the STEP_TOPOLOGY manifest has always used), with
-            # EXACT metrics from GProps/BndLib — reading, not meshing.
+            # Selector-table columns (surfaceType/params, spelled as
+            # _enum_name_geomabs spells them), with EXACT metrics from
+            # GProps/BndLib — reading, not meshing.
             "surfaceType": _enum_name_geomabs(adaptor.GetType()),
             **_face_metrics(face),
             "surface": _surface_payload(face, bin_out),

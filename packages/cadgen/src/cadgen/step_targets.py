@@ -126,9 +126,7 @@ def _path_identity(path: Path) -> str:
     then reads as the workspace-relative path the caller typed — else its own
     parent is the reference root, which leaves the bare name. Same rule as
     ``snapshot_cli.reference_root_for_input`` (cwd when the input is inside it,
-    else the input's parent) composed with
-    ``step_topology_artifact._relative_to_base`` (relative under the root,
-    else absolute).
+    else the input's parent), with the path taken relative to that root.
 
     A bare name is a legal cad-path token; a path rooted somewhere else is not,
     which is why the token grammar (no '/', no '..') still describes LOGICAL

@@ -21,21 +21,8 @@ from typing import Any, Mapping
 PACKAGE_KIND = "assembly-package"
 COMPONENT_DIRNAME = "components"
 DESCRIPTOR_NAME = "assembly.json"
-# Source-provenance keys stripped from a component GLB's embedded STEP_TOPOLOGY so the
-# component is a pure function of geometry+tolerances (content-addressable). All of this
-# is model-level and lives in assembly.json or the source sidecar
-# (the .step.json sidecar), not the reusable leaf.
-COMPONENT_PROVENANCE_KEYS = (
-    "sourceKind",
-    "sourcePath",
-    "kinematics",
-    "sourceHash",
-    "sourceClosureHash",
-    "sourceClosureFiles",
-    "stepPath",
-    "stepHash",
-    "generatedAt",
-)
+
+
 def is_assembly_package(path: Path) -> bool:
     """True when ``path`` is a view directory (has assembly.json)."""
     return path.is_dir() and (path / DESCRIPTOR_NAME).is_file()

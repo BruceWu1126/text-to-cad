@@ -70,9 +70,6 @@ REQUIRED=(
   "cadgen/daemon/pool.py"
   "cadgen/daemon/worker.py"
   "cadgen/cli/daemon_status.py"
-  # Doubles as a rename sentinel: step_artifacts.py became step_topology_artifact.py, so a
-  # merge that resurrected the old name would ship a wheel missing this one.
-  "cadgen/step_topology_artifact.py"
   "cadgen/_runtime/browser/snapshot-render.js"
   "cadgen/_runtime/browser/render.html"
   "cadgen/_runtime/viewer/index.html"

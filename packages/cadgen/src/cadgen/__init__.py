@@ -47,7 +47,6 @@ __all__ = [
     "StepScene",
     "Occurrence",
     "Selection",
-    "ensure_step_topology_artifact",
     "label_text",
     "label_shape",
     "report",
@@ -84,10 +83,6 @@ def __getattr__(name: str):
         import cadgen.build123d as _bd
 
         return _bd
-    if name == "ensure_step_topology_artifact":
-        from cadgen.step_topology_artifact import ensure_step_topology_artifact
-
-        return ensure_step_topology_artifact
     if name in {"AssemblyHelper", "MateTarget", "label_shape", "label_text", "target"}:
         from cadgen.assembly import AssemblyHelper, MateTarget, label_shape, label_text, target
 
@@ -145,7 +140,6 @@ if TYPE_CHECKING:
         Occurrence,
         Selection,
     )
-    from cadgen.step_topology_artifact import ensure_step_topology_artifact
 
 
 @_cache

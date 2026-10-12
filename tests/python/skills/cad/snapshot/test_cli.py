@@ -1835,7 +1835,6 @@ class SnapshotCliTests(unittest.TestCase):
             models = root / "models"
             models.mkdir()
             (models / "assembly.step").write_text("ISO-10303-21;\nEND-ISO-10303-21;\n", encoding="utf-8")
-            (models / ".assembly.step.glb").write_bytes(b"glb")
 
             original_ensure = snapshot_main.ensure_step_topology_artifact
             try:
@@ -1858,7 +1857,6 @@ class SnapshotCliTests(unittest.TestCase):
             models = root / "models"
             models.mkdir()
             (models / "assembly.step").write_text("ISO-10303-21;\nEND-ISO-10303-21;\n", encoding="utf-8")
-            (models / ".assembly.step.glb").write_bytes(b"glb")
 
             original_ensure = snapshot_main.ensure_step_topology_artifact
             try:

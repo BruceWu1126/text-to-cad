@@ -21,11 +21,6 @@ function toTransformArray(value) {
   return value.map((component, index) => Number.isFinite(Number(component)) ? Number(component) : IDENTITY_TRANSFORM[index]);
 }
 
-export function assemblyRootFromTopology(topologyManifest) {
-  const root = topologyManifest?.assembly?.root;
-  return root && typeof root === "object" ? root : null;
-}
-
 function toVectorArray(value) {
   if (!Array.isArray(value) || value.length < 3) {
     return null;

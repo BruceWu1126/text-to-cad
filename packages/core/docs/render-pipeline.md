@@ -292,31 +292,27 @@ import { loadSource } from "@text-to-cad/core/common/source.js";
   kind,
   meshData,
   selectorRuntime,
-  displayEdgeRuntime,
   pose,        // {articulation, values} or null: what buildModel's stepParameters takes
   animation,   // the baked animation section, or null
   resolved,
-  url,
-  glbUrl,
   cadPath
 }
 ```
 
 Accepted input fields:
 
-- `kind`: `step` or `stp`, or inferred from a URL. A GLB, STL, 3MF, URDF, SRDF
-  or SDF is refused by name: it is drawn by its own scene builder
+- `kind`: `step` or `stp`. A GLB, STL, 3MF, URDF, SRDF or SDF, named by its kind or
+  by a URL's extension, is refused by name: it is drawn by its own scene builder
   (`common/headlessScene.js`), never flattened into mesh data here.
-- `meshData`: already-loaded mesh data. If present, no mesh URL fetch is needed.
-- `glbUrl` or `resolved.glbUrl`: STEP/STP hidden GLB sidecar URL.
+- `package` or `resolved.package`: the document's tree (`descriptor`, as cadgen serves
+  it for display) and, off a static host, each component's mesh file (`meshUrls`,
+  which `packageSourceFromBaseUrl` maps from a package directory). Each component is
+  drawn from its part's stored mesh, composed in world space. A snapshot job always
+  carries one.
+- `meshData`: already-loaded mesh data, in place of a package.
 - `cadPath` or `resolved.inputPath`: CAD path used by STEP selectors.
-- A caller that passes a `resolved` packet together with any source URL must also pass
-  `resolved.inputPath`. Render asset caches are page-lifetime, so a resolved job has to name the
-  source its cache entries belong to; a resolved job without `inputPath` is rejected rather than
-  cached under an unidentified source. Callers with no `resolved` packet (the interactive viewer and
-  the docs hero renderer) render one source per page and need nothing.
-- `selectorRuntime` and `displayEdgeRuntime`: preloaded runtimes when a caller
-  already owns sidecar loading.
+- `selectorRuntime`: a selector runtime the caller already holds; `loadSource`
+  composes none.
 - `articulation` or `resolved.articulation`: cadgen's articulation of the model's
   kinematics (`cadgen.articulation`), and `controls` or `resolved.controls`: the
   control vector to pose it at, which cadgen resolved from the job's `kinematics`
@@ -675,15 +671,16 @@ Interactive viewer/docs usage:
 
 ```js
 import * as THREE from "three";
-import { loadSource } from "@text-to-cad/core/common/source.js";
+import { loadSource, packageSourceFromBaseUrl } from "@text-to-cad/core/common/source.js";
 import { buildModel } from "@text-to-cad/core/common/cadScene.js";
 import { renderModel } from "@text-to-cad/core/common/renderModel.js";
 
-// `articulation` and `sourceAnimation` are what cadgen resolved the model's sidecar into:
-// a catalog entry's, a snapshot job's `resolved`, or a static package's files.
+// A static package: its tree beside each component's mesh. `articulation` and
+// `sourceAnimation` are what cadgen resolved the model's sidecar into: a catalog entry's,
+// a snapshot job's `resolved`, or a static package's files.
+const descriptor = await (await fetch("/models/part/assembly.json")).json();
 const source = await loadSource({
-  kind: "step",
-  glbUrl: "/models/.part.step.glb",
+  ...packageSourceFromBaseUrl("/models/part", descriptor),
   cadPath: "models/part.step",
   articulation,
   controls: { drive: 180 },

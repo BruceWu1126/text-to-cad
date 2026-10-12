@@ -5,8 +5,6 @@
 import { AnimationMixer, LoadingManager, Box3, Group, LoopOnce, Matrix3, Matrix4, Vector3 } from "three";
 
 const GLB_CAD_UNIT_SCALE = 1000;
-const GENERATED_STEP_DEFAULT_BASE_COLOR = Object.freeze([0.72, 0.72, 0.72, 1]);
-const BASE_COLOR_EPSILON = 1e-6;
 
 function createBoundsAccumulator() {
   return {
@@ -45,15 +43,6 @@ function rawBaseColorFactor(rawMaterial) {
   return Array.isArray(value) ? value : null;
 }
 
-function colorFactorsEqual(left, right) {
-  if (!Array.isArray(left) || !Array.isArray(right)) {
-    return false;
-  }
-  return right.every((expected, index) => (
-    Math.abs(Number(left[index] ?? (index === 3 ? 1 : 0)) - expected) <= BASE_COLOR_EPSILON
-  ));
-}
-
 function rawMaterialSourceColorHint(rawMaterial) {
   const value = rawMaterial?.extras?.cadSourceColor;
   return value === true || value === false ? value : null;
@@ -64,25 +53,12 @@ function materialSourceColorHint(material) {
   return value === true || value === false ? value : null;
 }
 
-function isGeneratedStepDefaultMaterial(rawMaterial, material) {
-  return (
-    colorFactorsEqual(rawBaseColorFactor(rawMaterial), GENERATED_STEP_DEFAULT_BASE_COLOR) &&
-    material?.color?.getHexString?.() === "dddddd"
-  );
-}
-
-function colorFromMaterial(material, useSourceColors, {
-  rawMaterial = null,
-  stepTopology = false
-} = {}) {
+function colorFromMaterial(material, useSourceColors, { rawMaterial = null } = {}) {
   if (!useSourceColors || !material?.color) {
     return null;
   }
   const sourceColorHint = materialSourceColorHint(material) ?? rawMaterialSourceColorHint(rawMaterial);
   if (sourceColorHint === false) {
-    return null;
-  }
-  if (stepTopology && sourceColorHint !== true && isGeneratedStepDefaultMaterial(rawMaterial, material)) {
     return null;
   }
   return {
@@ -240,7 +216,7 @@ function inspectGlbPrimitive(
   convertYUpToCad,
   primitiveIndex = 0,
   partIndex = 0,
-  { rawMaterial = null, stepTopology = false } = {}
+  { rawMaterial = null } = {}
 ) {
   const geometry = mesh?.geometry;
   const positions = geometry?.getAttribute?.("position");
@@ -272,10 +248,7 @@ function inspectGlbPrimitive(
     return null;
   }
 
-  const color = colorFromMaterial(material, useSourceColors, {
-    rawMaterial,
-    stepTopology
-  });
+  const color = colorFromMaterial(material, useSourceColors, { rawMaterial });
   const cadOccurrenceId = cadOccurrenceIdForObject(mesh);
   const label = String(authoredGlbNameForObject(mesh) || cadOccurrenceId || mesh?.name || mesh?.parent?.name || `glb:${partIndex}`).trim();
   const id = cadOccurrenceId || `glb:${partIndex}`;
@@ -399,19 +372,16 @@ function buildMeshDataFromGltf(gltf) {
   const declaredMaterials = Array.isArray(gltf?.parser?.json?.materials) && gltf.parser.json.materials.length > 0;
   const rawMaterials = Array.isArray(gltf?.parser?.json?.materials) ? gltf.parser.json.materials : [];
   const rootCorrection = buildGlbCadRootCorrection(gltf?.scene);
-  const hasStepTopology = !!gltf?.parser?.json?.extensions?.STEP_topology;
   // Honour a declaration; fall back to the glTF SPEC when there is none.
   //
-  // `declared` is what the writer said (see declaredCadUpAxis). Files that predate the
-  // field — every GLB already on disk, and every foreign one — declare nothing and take
-  // the fallback: glTF is Y-up by definition, so an undeclared file is converted unless
-  // it carries STEP topology, whose payload is authored in CAD space already.
+  // The declaration is what the writer said (`declaredCadUpAxis`). A file that declares
+  // nothing (every foreign one) takes the fallback: glTF is Y-up by definition, so an
+  // undeclared file is converted.
   //
-  // `rootCorrection` vetoes in BOTH branches. It exists only when the file itself carries
+  // `rootCorrection` vetoes in BOTH cases. It exists only when the file itself carries
   // an explicit build123d axis-correction node, which the loader inverts and applies to
   // the geometry; rotating on top of that would correct twice.
-  const declared = declaredCadUpAxis(gltf?.scene);
-  const convertYUpToCad = !rootCorrection && (declared ? declared === "y" : !hasStepTopology);
+  const convertYUpToCad = !rootCorrection && declaredCadUpAxis(gltf?.scene) !== "z";
   const descriptors = [];
   const colorSet = new Set();
   let totalVertexCount = 0;
@@ -436,10 +406,7 @@ function buildMeshDataFromGltf(gltf) {
         convertYUpToCad,
         primitiveIndexBase + primitiveIndex,
         descriptors.length,
-        {
-          rawMaterial: rawMaterialForGroup(rawMaterials, group),
-          stepTopology: hasStepTopology
-        }
+        { rawMaterial: rawMaterialForGroup(rawMaterials, group) }
       );
       if (!descriptor) {
         return;
@@ -588,9 +555,7 @@ function playableGlbAnimationClips(gltf) {
 
 function nativeCadRootMatrix(gltf) {
   const rootCorrection = buildGlbCadRootCorrection(gltf?.scene);
-  const hasStepTopology = !!gltf?.parser?.json?.extensions?.STEP_topology;
-  const declared = declaredCadUpAxis(gltf?.scene);
-  const convertYUpToCad = !rootCorrection && (declared ? declared === "y" : !hasStepTopology);
+  const convertYUpToCad = !rootCorrection && declaredCadUpAxis(gltf?.scene) !== "z";
   const orientation = rootCorrection || (convertYUpToCad
     ? new Matrix4().makeRotationX(Math.PI / 2)
     : new Matrix4());
@@ -651,21 +616,20 @@ function sampledAnimatedBounds(scene, clips, cadRootMatrix) {
 
 /**
  * Say, on each native material, whether its colour is a SOURCE colour. A file with
- * no materials, a material its writer flagged (`cadSourceColor: false`) and the
- * grey a STEP export stamps on uncoloured parts are not: a viewer paints those
- * with its own surface colour, exactly as the flattened mesh path drops them.
- * The answer is `material.userData.cadSourceColor` (true/false), one rule for both.
+ * no materials and a material its writer flagged (`cadSourceColor: false`) are not:
+ * a viewer paints those with its own surface colour, exactly as the flattened mesh
+ * path drops them. The answer is `material.userData.cadSourceColor` (true/false),
+ * one rule for both.
  */
 function markGlbSourceColors(gltf) {
   const json = gltf?.parser?.json;
   const rawMaterials = Array.isArray(json?.materials) ? json.materials : [];
-  const stepTopology = !!json?.extensions?.STEP_topology;
   gltf?.scene?.traverse?.((object) => {
     for (const material of Array.isArray(object?.material) ? object.material : [object?.material]) {
       if (!material?.color || !material.userData) continue;
       const rawMaterial = rawMaterials[gltf.parser?.associations?.get(material)?.materials] || null;
       material.userData.cadSourceColor = Boolean(rawMaterials.length > 0 &&
-        colorFromMaterial(material, true, { rawMaterial, stepTopology }));
+        colorFromMaterial(material, true, { rawMaterial }));
     }
   });
 }

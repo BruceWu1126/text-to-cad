@@ -19,7 +19,6 @@ from cadgen._internal.step_scene import (
     load_step_scene,
     scene_occurrence_shape,
 )
-from cadgen._internal.glb_topology import STEP_TOPOLOGY_SCHEMA_VERSION
 from tests.python.support.tmp_root import temporary_directory
 
 

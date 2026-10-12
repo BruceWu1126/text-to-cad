@@ -8,9 +8,9 @@ it references. Split across two numbers, a fix ships half applied: the descripto
 advances while content-addressed payloads are reused unchanged, and the package
 reports itself current while serving the old bytes.
 
-The second: ``STEP_TOPOLOGY_SCHEMA_VERSION`` is a Python->JS wire contract, and the
-JS client throws on a mismatch. It is declared once in each language, so nothing
-but this test stops the two from drifting -- which is the same
+The second: ``SELECTOR_TABLE_SCHEMA_VERSION`` is a Python->JS wire contract, and the
+page refuses a table of another schema. It is declared once in each language, so
+nothing but this test stops the two from drifting -- which is the same
 "a second hand-copied number is how the two drift" failure that put the package
 version in a stdlib-only module in the first place.
 """
@@ -25,7 +25,6 @@ from tests.python.support.paths import REPO_ROOT, add_repo_path
 
 add_repo_path("packages/cadgen/src")
 
-from cadgen._internal.glb_topology import STEP_TOPOLOGY_SCHEMA_VERSION
 from cadgen._internal.selector_table import SELECTOR_TABLE_SCHEMA_VERSION
 
 ROOT = REPO_ROOT
@@ -41,19 +40,6 @@ class SelectorTableSchemaVersionMirrorTest(unittest.TestCase):
             int(match.group(1)),
             "cadgen and @text-to-cad/core disagree on the selector table's schemaVersion; the page refuses "
             "a table of another schema, so a bump has to land in both languages together",
-        )
-
-
-class TopologySchemaVersionMirrorTest(unittest.TestCase):
-    def test_python_and_js_declare_the_same_topology_schema_version(self) -> None:
-        source = (ROOT / "packages/core/src/common/stepTopology.mjs").read_text(encoding="utf-8")
-        match = re.search(r"STEP_TOPOLOGY_SCHEMA_VERSION\s*=\s*(\d+)", source)
-        self.assertIsNotNone(match, "@text-to-cad/core must declare STEP_TOPOLOGY_SCHEMA_VERSION")
-        self.assertEqual(
-            STEP_TOPOLOGY_SCHEMA_VERSION,
-            int(match.group(1)),
-            "cadgen and @text-to-cad/core disagree on STEP_topology schemaVersion; the JS client throws "
-            "on a mismatch, so a bump has to land in both languages together",
         )
 
 

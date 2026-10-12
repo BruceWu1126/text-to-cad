@@ -141,7 +141,6 @@ async function prepareRenderJob(job) {
   const renderJob = {
     ...job,
     selectorRuntime: source.selectorRuntime,
-    displayEdgeRuntime: source.displayEdgeRuntime,
     stepAnimation
   };
   const prepared = {

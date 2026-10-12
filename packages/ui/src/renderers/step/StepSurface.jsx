@@ -64,7 +64,6 @@ import {
   uniqueStringList
 } from "./workbench/referenceSelection.js";
 import {
-  entryAssetHash,
   entryHasMesh,
   entryHasReferences,
   entryMeshAssetSignature
@@ -801,7 +800,7 @@ function StepSurfaceBody({ view, data }) {
 
   useEffect(() => {
     const fileRef = fileKey(selectedEntry);
-    const stepHash = String(selectedEntry?.hash || entryAssetHash(selectedEntry, "topology") || "").trim();
+    const stepHash = String(selectedEntry?.hash || "").trim();
     if (!fileRef) {
       selectedEntryBuildSnapshotRef.current = {
         fileRef: "",

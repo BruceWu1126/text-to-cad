@@ -309,7 +309,7 @@ export function useStepSceneSync(layers) {
       runtime: initialSelectorRuntime
     } : null);
     const displaySelectorRuntime = initialEdgeRuntimes.selectorRuntime;
-    const displayEdgesRuntime = initialRecordTopologyEdgeTransforms ? null : initialEdgeRuntimes.topologyRuntime;
+    const displayEdgesRuntime = initialRecordTopologyEdgeTransforms ? null : displaySelectorRuntime;
     runtime.topologyDisplayEdgeTransformByRecord = initialRecordTopologyEdgeTransforms;
 
     syncTopologyDisplayEdgeLine(runtime, displayEdgesRuntime, {

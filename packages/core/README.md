@@ -141,7 +141,7 @@ src/
                    #   effects pass), recordEffects (effects onto records),
                    #   source (render-source loading), sceneSettings (shared
                    #   CAD/Render contract), camera, themeSettings internals,
-                   #   displaySettings, stepTopology
+                   #   displaySettings
   lib/             # subsystems: surf/ (part reads, decode + caches), selectors/
                    #   (ref runtime), assembly/ (package composition),
                    #   render/ (format mesh loaders; the GLB and mesh scene
