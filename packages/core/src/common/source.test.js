@@ -69,6 +69,30 @@ test("a package's meshes are read from the store; one it lacks is an error, neve
   await assert.rejects(loadSource(rollerPackage()), /component roller has no mesh; cadgen meshes every component/);
 });
 
+// A component cadgen could not mesh says why in its tree entry (cadgen.store.view): the page leaves
+// it out on its own, as the viewer's loader does (`componentFailed`), and draws the rest. Only a
+// package none of whose components is left fails, with the first failure.
+test("a component cadgen could not mesh is left out and the rest drawn; with none left the load fails", async (t) => {
+  const requested = [];
+  const roller = meshFixture("cam_follower_roller");
+  setTessellationCacheProvider(recordingMeshStore(requested, { stored: [roller.bytes] }));
+  t.after(() => setTessellationCacheProvider(null));
+  const failure = "MeshProductionError: ValueError: boom";
+  const job = rollerPackage();
+  const { descriptor } = job.package;
+  descriptor.components.peg = { part: `${"1".repeat(64)}-v1`, failure };
+  descriptor.occurrences.push({ id: "o1.2", name: "peg", component: "peg" });
+  descriptor.assembly.root.children.push({ id: "o1.2", name: "peg", nodeType: "part", children: [] });
+  const stages = {};
+  const source = await loadSource(job, { stageTimings: stages });
+  assert.deepEqual(source.meshData.parts.map((part) => part.occurrenceId), ["o1.1"]);
+  assert.deepEqual(requested, [roller.part], "nothing is asked of the store for the part cadgen could not mesh");
+  assert.equal(stages.sourceLoad.componentCount, 1);
+  descriptor.components.roller.failure = failure;
+  await assert.rejects(loadSource(job),
+    /component roller could not be meshed \(MeshProductionError: ValueError: boom\)/);
+});
+
 // A body the store named but did not hand back is read again, alone, before its component is a
 // miss; and one that stays unreadable says so, not that nothing meshed it.
 test("a stored mesh whose batched read fails is read again alone; one that stays unreadable says so", async (t) => {

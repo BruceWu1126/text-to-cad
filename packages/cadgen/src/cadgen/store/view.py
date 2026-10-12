@@ -14,7 +14,9 @@ directories. A consumer of that layout gets a **view**:
   present a tree as if it were a view directory without writing anything.
 
 Each component of a view names its part (``part``: ``cadgen.store.parts``), the key
-a page reads its display mesh and selector table by.
+a page reads its display mesh and selector table by. A view a snapshot draws
+(:func:`view_dir_for`) goes on without a part no mesh could be made of, as the CAD
+Viewer does: that component names why instead (``failure``), and the page leaves it out.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ import atexit
 import contextlib
 import json
 import os
+import re
 import shutil
 import tempfile
 import threading
@@ -149,13 +152,20 @@ def stored_parts(descriptor: dict, cids: list[str] | None = None) -> dict:
     return result
 
 
-def materialize_parts(descriptor: dict, cids: list[str] | None = None) -> tuple[dict, dict]:
+def materialize_parts(descriptor: dict, cids: list[str] | None = None, *,
+                      drawable: bool = False) -> tuple[dict, dict]:
     """``(descriptor, {cid: record})``: the part records of ``cids`` (every component when
     None), each stored. The build that made the tree derived them; a part the store lacks
     (a cleared, evicted or older store) is derived by ONE build-pool job for all of them
     (``kind: display``), never in this process. A view whose producer this runtime
     cannot implement is replaced by one under this runtime's: the descriptor returned
-    is the one the records belong to."""
+    is the one the records belong to.
+
+    A part that job could not derive fails the request, named by the occurrences that place
+    it (``#o1.3 ball could not be meshed (...)``) -- unless the view is ``drawable``: then it
+    is left out, as the CAD Viewer leaves it out, its component carrying why (``failure``,
+    the reason in those parentheses) and the records holding the rest. A drawable view
+    none of whose parts is left fails as any other: there is nothing to draw."""
     from cadgen.daemon.artifacts import ArtifactJobError, resolve_artifact
     from cadgen.store import parts
 
@@ -171,10 +181,7 @@ def materialize_parts(descriptor: dict, cids: list[str] | None = None) -> tuple[
         # (``MeshProductionError`` and ``ProducerUnavailable`` are ValueErrors).
         except (ArtifactJobError, ValueError) as error:
             if not parts.producer_unavailable(error):
-                failure = _display_failure(descriptor, missing, error)
-                if failure is error:
-                    raise
-                raise failure from error
+                return _without_failed_parts(descriptor, wanted, missing, error, drawable=drawable)
             current = resolve_artifact({"kind": "producer"})
             if parts.producer_key(current) == parts.producer_key(producer):
                 raise
@@ -186,40 +193,87 @@ def materialize_parts(descriptor: dict, cids: list[str] | None = None) -> tuple[
                 raise FileNotFoundError("geometry disappeared during producer replacement") from error
             if descriptor.get("documentHash"):
                 _attest(descriptor["documentHash"], tree, current)
-            return materialize_parts(replacement, cids)
+            return materialize_parts(replacement, cids, drawable=drawable)
         records = stored_parts(descriptor, wanted)
     if any(cid not in records for cid in wanted):
         raise FileNotFoundError("display data disappeared before view publication")
     return descriptor, records
 
 
-def _display_failure(descriptor: dict, cids: list[str], error: Exception) -> Exception:
-    """A display job's failure as its reader says it: the parts it left missing, named by
-    the occurrences that place them (``#o1.3 ball``), and the job's own reason -- never a
-    component id and a worker's traceback. ``error`` itself for any other failure, or when
-    every part is stored."""
+# How a display job's failure names each part it could not derive, however the job ran
+# (raised where it was submitted, or the text of a pooled worker's refusal):
+# ``component <cid>: <that part's MeshProductionError>``, the parts joined by "; "
+# (``parts.derive``).
+_FAILED_COMPONENT = re.compile(r"component ([0-9a-f]{16}): ")
+# What a pooled job's failure wraps its last line in (``daemon/artifacts.py``, ``daemon/client.py``).
+_JOB_FAILURE_PREFIXES = ("artifact request failed: ", "artifact worker failed or returned no result: ",
+                         "cadgen._internal.occt_mesh.MeshProductionError: ", "MeshProductionError: ")
+
+
+def _without_failed_parts(descriptor: dict, wanted: list[str], missing: list[str], error: Exception, *,
+                          drawable: bool) -> tuple[dict, dict]:
+    """``materialize_parts`` once its display job failed with ``error``. A ``drawable`` view
+    with a part left is returned without the parts the job left missing, each of their
+    components carrying why; otherwise those parts' failure is raised as a reader says it
+    (:func:`failed_parts_error`). ``error`` itself is raised for any other failure, or when
+    every part is stored after all."""
+    failed = _failed_parts(descriptor, missing, error)
+    if not failed:
+        raise error
+    if not drawable or len(failed) == len(wanted):
+        from cadgen.store.meshes import placements
+
+        raise failed_parts_error(failed, placements(descriptor.get("occurrences"))) from error
+    for cid, reason in failed.items():
+        descriptor["components"][cid]["failure"] = reason
+    records = stored_parts(descriptor, wanted)
+    if any(cid not in records and cid not in failed for cid in wanted):
+        raise FileNotFoundError("display data disappeared before view publication")
+    return descriptor, records
+
+
+def _failed_parts(descriptor: dict, cids: list[str], error: Exception) -> dict[str, str]:
+    """The parts of ``cids`` a display job that failed with ``error`` left missing, each with
+    its reason -- the part's own ``MeshProductionError`` as a build words it
+    (``MeshProductionError: ValueError: boom``, ``parts.ensure_display``), or, where the
+    failure names no part (a worker that died, a service that did not answer), the
+    failure's last line. Never a component id or a worker's traceback. ``{}`` for any other
+    failure, or when every part is stored after all."""
     from cadgen.daemon.artifacts import ArtifactJobError
 
     if not isinstance(error, ArtifactJobError) and type(error).__name__ != "MeshProductionError":
-        return error
+        return {}
     from cadgen._internal.occt_mesh import MeshProductionError
-    from cadgen.store.meshes import placed_parts
 
     stored = stored_parts(descriptor, cids)
     failed = [cid for cid in cids if cid not in stored]
     if not failed:
-        return error
-    placed: dict[str, list[tuple[str, str]]] = {}
-    for row in descriptor.get("occurrences") or ():
-        if isinstance(row, dict) and row.get("component") in failed and row.get("id"):
-            placed.setdefault(str(row["component"]), []).append((str(row["id"]), str(row.get("name") or "")))
-    lines = [line.strip() for line in str(error).splitlines() if line.strip()]
+        return {}
+    text = str(error)
+    own: dict[str, str] = {}
+    for line in text.splitlines():
+        named = list(_FAILED_COMPONENT.finditer(line))
+        for index, match in enumerate(named):
+            end = named[index + 1].start() if index + 1 < len(named) else len(line)
+            own[match.group(1)] = f"{MeshProductionError.__name__}: {line[match.end():end].strip().removesuffix(';')}"
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
     reason = lines[-1] if lines else type(error).__name__
-    for prefix in ("artifact request failed: ", "artifact worker failed or returned no result: ",
-                   "cadgen._internal.occt_mesh.MeshProductionError: ", "MeshProductionError: "):
-        reason = reason[len(prefix):] if reason.startswith(prefix) else reason
-    names = "; ".join(placed_parts(placed[cid]) if placed.get(cid) else f"part {cid}" for cid in failed)
-    return MeshProductionError(f"{names} could not be meshed ({reason})")
+    for prefix in _JOB_FAILURE_PREFIXES:
+        reason = reason.removeprefix(prefix)
+    return {cid: own.get(cid, reason) for cid in failed}
+
+
+def failed_parts_error(failed: dict[str, str], placed: dict[str, list[tuple[str, str]]]) -> Exception:
+    """The ``MeshProductionError`` of parts no mesh could be made of, where nothing goes on
+    without them: each of ``failed`` (``{cid: reason}``) named by the occurrences that place
+    it (``placed``, ``{cid: [(ref, name)]}``), ``#o1.3 ball could not be meshed (...)``, the
+    parts joined by "; " in the order ``placed`` places them."""
+    from cadgen._internal.occt_mesh import MeshProductionError
+    from cadgen.store.meshes import failed_part
+
+    ordered = [*(cid for cid in placed if cid in failed), *(cid for cid in failed if cid not in placed)]
+    return MeshProductionError("; ".join(failed_part(placed.get(cid) or [], failed[cid], component=cid)
+                                         for cid in ordered))
 
 
 def component_object_for_tree(tree_hash: str, ref: str) -> tuple[str, str] | None:
@@ -268,10 +322,28 @@ def _cleanup_views() -> None:
     shutil.rmtree(views_root(), ignore_errors=True)
 
 
+def _left_out(descriptor: dict) -> set[str]:
+    """The components a drawable view left out, no mesh having been made of them
+    (``failure``, :func:`materialize_parts`)."""
+    components = descriptor.get("components")
+    return {cid for cid, entry in (components.items() if isinstance(components, dict) else ())
+            if isinstance(entry, dict) and entry.get("failure")}
+
+
+def _written(view: Path | None) -> dict | None:
+    """The descriptor a view directory was written with; None when it has none."""
+    try:
+        written = json.loads((view / DESCRIPTOR_NAME).read_text(encoding="utf-8")) if view is not None else None
+    except (OSError, ValueError):
+        return None
+    return written if isinstance(written, dict) else None
+
+
 def view_dir_for(tree_hash: str, *, producer: dict | None = None, document_hash: str | None = None) -> Path:
     """A view (assembly.json + components/) of ``tree_hash``, built once per process and
     removed at exit. The adapter for consumers that need a DIRECTORY (the
-    selector-index composer, the snapshot page)."""
+    selector-index composer, the snapshot page). It is drawable: a part no mesh could be
+    made of is left out of it, its component saying why (``materialize_parts``)."""
     global _VIEW_CLEANUP_REGISTERED
     descriptor = descriptor_for_view(tree_hash, producer=producer, document_hash=document_hash)
     if descriptor is None:
@@ -282,16 +354,20 @@ def view_dir_for(tree_hash: str, *, producer: dict | None = None, document_hash:
     with _VIEW_LOCK:
         existing = _VIEW_DIRS.get(view_key)
     # The directory holds copies of the selector tables; its readers take the display
-    # meshes from the store, so a part evicted since it was written derives it again.
-    if existing is not None and (existing / DESCRIPTOR_NAME).is_file() and len(stored_parts(descriptor)) == len(
-            descriptor["components"]):
-        return existing
+    # meshes from the store, so a part evicted since it was written derives it again. A
+    # part it left out is not asked for again while the store still lacks it.
+    written = _written(existing)
+    if written is not None:
+        stored, left_out = stored_parts(descriptor), _left_out(written)
+        if all((cid in stored) != (cid in left_out) for cid in descriptor["components"]):
+            return existing
     # Never hold a process-wide view lock while waiting for pooled native work.
-    descriptor, records = materialize_parts(descriptor)
+    descriptor, records = materialize_parts(descriptor, drawable=True)
     view_key = (descriptor["viewId"], document_hash)
     with _VIEW_LOCK:
         existing = _VIEW_DIRS.get(view_key)
-        if existing is not None and (existing / DESCRIPTOR_NAME).is_file():
+        written = _written(existing)
+        if written is not None and _left_out(written) == _left_out(descriptor):
             return existing
         if not _VIEW_CLEANUP_REGISTERED:
             atexit.register(_cleanup_views)
@@ -325,10 +401,14 @@ def export_view(
 
 def _write_view(descriptor: dict, records: dict, root: Path) -> Path:
     """The view's files: each of ``records``' components' BREP and selector table (it
-    names ``selectors``), then assembly.json."""
+    names ``selectors``), then assembly.json. A component the view left out has none."""
     comp_dir = root / COMPONENT_DIRNAME
     comp_dir.mkdir(parents=True, exist_ok=True)
     components = descriptor.get("components") or {}
+    for cid in _left_out(descriptor):
+        # Nothing of it stays from an earlier view written to this directory.
+        for suffix in (".brep", SELECTOR_TABLE_SUFFIX):
+            (comp_dir / f"{cid}{suffix}").unlink(missing_ok=True)
     for cid, record in records.items():
         entry = components[cid]
         entry["selectors"] = f"{COMPONENT_DIRNAME}/{cid}{SELECTOR_TABLE_SUFFIX}"

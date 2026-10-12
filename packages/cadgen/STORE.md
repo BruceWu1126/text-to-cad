@@ -371,7 +371,8 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   in parallel jobs, and a parent's tree holds its children's components, which
   their own jobs derived before they reported done, so a parent normally finds
   nothing missing. A part that fails to derive is a warning on the build, never
-  its failure: the geometry is published, and a view shows that part as failed.
+  its failure: the geometry is published, and a view goes on without that part,
+  saying so (below).
   A build's kinematics read components only where a selector is named: a mate's
   parent and child resolve in the result tree's occurrences, group nodes and
   their labels, with no component read, and an `axis={"ref": ...}` derives
@@ -385,7 +386,13 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   by ONE build-pool job for the request (`kind: display`,
   `daemon/artifacts.py`): one request, one job, one worker. No server or
   snapshot process derives in its own process, and correctness never depends on
-  a store hit.
+  a store hit. A part that job cannot derive is left out of a view, which names
+  it by the occurrences that place it, as a build's warning does: the CAD
+  Viewer draws the rest under a warning, a snapshot and a list draw and list
+  the rest and warn (the snapshot view's component carries why, `failure`,
+  `store/view.py`), and one with nothing else to show fails. A mesh export
+  fails instead, naming its file and the part: a file without a part is not
+  the file asked for.
 
   A part's display data is ONE index entry, `index/part/<key>`
   (`store/parts.py`), naming TWO objects -- its display mesh and its selector

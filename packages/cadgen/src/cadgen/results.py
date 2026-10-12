@@ -224,7 +224,7 @@ class SnapshotResult:
     parts: tuple[dict, ...] = ()
     #: Non-fatal notes from the renderer (an unresolved selector, a clamped
     #: frame budget, a part drawn or counted without the faces no mesher could
-    #: cover). ``ok`` stays true.
+    #: cover, a part no mesh could be made of, left out). ``ok`` stays true.
     warnings: tuple[str, ...] = ()
     timings: SnapshotTimings = field(default_factory=SnapshotTimings)
     #: ``--debug`` only: artifact resolution and measured browser stages,
@@ -247,11 +247,15 @@ class SnapshotResult:
             else f"saved snapshot: {entry.path}"
             for entry in self.files
         ]
-        lines += [f"warning: {warning}" for warning in self.warnings]
         # `--debug` without `--json` still answers: one compact JSON line per input,
         # so the diagnostics asked for are never computed and then thrown away.
         lines += [f"debug: {json.dumps(entry, separators=(',', ':'), sort_keys=True)}" for entry in self.debug]
         return lines
+
+    def warning_lines(self) -> list[str]:
+        """What the human form says on stderr, beside the answer on stdout: one ``warning:``
+        line each, for a view and a list alike (a list's stdout is its inventory alone)."""
+        return [f"warning: {warning}" for warning in self.warnings]
 
 
 @dataclass(frozen=True)

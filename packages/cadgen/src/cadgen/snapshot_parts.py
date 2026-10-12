@@ -16,7 +16,10 @@ descriptor's order:
 
 A part whose mesh leaves out a face no mesher could cover is listed, drawn and
 counted without it, and :func:`unmeshed_warnings` names the faces in the result's
-warnings, for a list and a view alike.
+warnings, for a list and a view alike. A part no mesh could be made of at all is
+left out of both, as the CAD Viewer leaves it out, and :func:`failed_part_warnings`
+names it in the words a build uses (``#o1.2 peg could not be meshed (...)``); only
+a list or a view that would show nothing else fails (:func:`fail_if_nothing_left`).
 
 ``focus``/``hide`` select the same way the page's scene does for a view: an
 occurrence matches a ref that IS its id, an ancestor group's id (``o1.2``
@@ -29,7 +32,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-__all__ = ["LIST_BOUNDS_DECIMALS", "filter_occurrences", "list_rows", "unmeshed_warnings"]
+__all__ = ["LIST_BOUNDS_DECIMALS", "fail_if_nothing_left", "failed_part_warnings", "failed_parts",
+           "filter_occurrences", "list_rows", "unmeshed_warnings"]
 
 # Three decimals of a millimetre is a nanometre: far below any tolerance a model
 # is built to, and a fifth of the payload full float64 noise would be.
@@ -116,21 +120,58 @@ def unmeshed_warnings(
     mesher could cover undrawn (``cadgen.store.meshes``), naming the faces, the
     occurrences of ``rows`` that place it, and ``consequence``. A probe per component
     when none is missing."""
-    from cadgen.store.meshes import unmeshed_warning
+    from cadgen.store.meshes import placements, unmeshed_warning
     from cadgen.store.parts import stored_unmeshed_faces
 
     components = descriptor.get("components") if isinstance(descriptor.get("components"), Mapping) else {}
-    placed: dict[str, list[tuple[str, str]]] = {}
-    for row in rows:
-        if row.get("component"):
-            placed.setdefault(str(row["component"]), []).append((str(row["id"]), str(row.get("name") or "")))
+    failed = failed_parts(descriptor)
     warnings = []
-    for cid, occurrences in placed.items():
+    for cid, occurrences in placements(rows).items():
         key = str((components.get(cid) or {}).get("part") or "")
-        faces = stored_unmeshed_faces(key) if key else []
+        faces = stored_unmeshed_faces(key) if key and cid not in failed else []
         if faces:
             warnings.append(unmeshed_warning(occurrences, faces, consequence))
     return warnings
+
+
+def failed_parts(descriptor: Mapping[str, Any]) -> dict[str, str]:
+    """``{cid: reason}``: the components the view left out, no mesh having been made of
+    them (their ``failure``, ``cadgen.store.view.materialize_parts``)."""
+    components = descriptor.get("components") if isinstance(descriptor.get("components"), Mapping) else {}
+    return {str(cid): str(entry["failure"]) for cid, entry in components.items()
+            if isinstance(entry, Mapping) and entry.get("failure")}
+
+
+def failed_part_warnings(
+    descriptor: Mapping[str, Any],
+    rows: Sequence[Mapping[str, Any]],
+    consequence: str,
+) -> list[str]:
+    """A warning per component of ``rows`` the view left out (:func:`failed_parts`), in the
+    words a build says it in -- the occurrences of ``rows`` that place it and why
+    (``#o1.2 peg could not be meshed (...)``) -- and ``consequence``."""
+    from cadgen.store.meshes import failed_part_warning, placements
+
+    failed = failed_parts(descriptor)
+    if not failed:
+        return []
+    return [failed_part_warning(occurrences, failed[cid], consequence)
+            for cid, occurrences in placements(rows).items() if cid in failed]
+
+
+def fail_if_nothing_left(descriptor: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]) -> None:
+    """Raise when the view left out every part ``rows`` place (:func:`failed_parts`): there
+    is nothing to draw or list, and the failure is theirs -- the ``MeshProductionError``
+    naming them (``cadgen.store.view.failed_parts_error``), as a view none of whose parts
+    could be meshed fails."""
+    from cadgen.store.meshes import placements
+
+    failed = failed_parts(descriptor)
+    placed = placements(rows)
+    if failed and placed and all(cid in failed for cid in placed):
+        from cadgen.store.view import failed_parts_error
+
+        raise failed_parts_error({cid: failed[cid] for cid in placed}, placed)
 
 
 def list_rows(
@@ -142,7 +183,9 @@ def list_rows(
     """The ``--mode list`` rows for a STEP tree (see the module docstring)."""
     from cadgen.assembly_lookup import assembly_occurrence_rows
 
-    rows = filter_occurrences(assembly_occurrence_rows(descriptor, package_dir), selection)
+    failed = failed_parts(descriptor)
+    rows = [row for row in filter_occurrences(assembly_occurrence_rows(descriptor, package_dir), selection)
+            if str(row.get("component") or "") not in failed]
     records = _records(descriptor, sorted({str(row["component"]) for row in rows if row.get("component")}))
     listed = []
     for row in rows:

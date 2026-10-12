@@ -40,6 +40,7 @@ import json
 import math
 import re
 import struct
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -432,6 +433,16 @@ def unmeshed_faces(payload: bytes) -> list[int]:
     return list(_payload_json(payload)[1].get(_UNMESHED, []))
 
 
+def placements(rows: Any) -> dict[str, list[tuple[str, str]]]:
+    """Which occurrences of ``rows`` (a tree's ``occurrences``, or a selector's rows: each with
+    ``component``, ``id`` and ``name``) place each component: ``{cid: [(ref, name)]}``."""
+    placed: dict[str, list[tuple[str, str]]] = {}
+    for row in rows or ():
+        if isinstance(row, Mapping) and row.get("component") and row.get("id"):
+            placed.setdefault(str(row["component"]), []).append((str(row["id"]), str(row.get("name") or "")))
+    return placed
+
+
 def placed_parts(placed: list[tuple[str, str]]) -> str:
     """The occurrences that place a component (``[(ref, name)]``) as a reader names them:
     ``#o1.2 pin, #o1.3 pin and 4 more``."""
@@ -447,3 +458,16 @@ def unmeshed_warning(placed: list[tuple[str, str]], faces: list[int], consequenc
     named = ", ".join(f"f{ordinal}" for ordinal in faces[:8]) + (", ..." if len(faces) > 8 else "")
     noun, them = ("face", "it") if len(faces) == 1 else ("faces", "them")
     return f"{where}: {len(faces)} {noun} ({named}) could not be meshed, so {consequence.format(them=them)}"
+
+
+def failed_part(placed: list[tuple[str, str]], reason: str, *, component: str = "") -> str:
+    """A component no mesh could be made of, as every reader names it -- a build, a view, a
+    list, an export: the occurrences that place it (``[(ref, name)]``; ``part <component>``
+    when none does) and why."""
+    return f"{placed_parts(placed) if placed else f'part {component}'} could not be meshed ({reason})"
+
+
+def failed_part_warning(placed: list[tuple[str, str]], reason: str, consequence: str) -> str:
+    """What a reader that goes on without such a component says of it: :func:`failed_part`
+    and ``consequence``, whose ``{them}`` names the occurrences as one or several."""
+    return f"{failed_part(placed, reason)}, so {consequence.format(them='it' if len(placed) == 1 else 'them')}"

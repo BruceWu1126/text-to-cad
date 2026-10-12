@@ -155,9 +155,9 @@ class ResultShape(unittest.TestCase):
         self.assertEqual(result.human_lines(), [
             # The platform's own spelling of the path: backslashes on Windows.
             f"saved snapshot: {Path('/tmp/a.png')}",
-            "warning: low light",
             'debug: {"input":"part.step","stageTimings":{"renderMs":12}}',
         ])
+        self.assertEqual(result.warning_lines(), ["warning: low light"])
 
     def test_an_empty_inventory_still_prints_itself(self) -> None:
         # List mode with zero parts answers `[]`, not silence.
@@ -217,34 +217,38 @@ class JsonShape(unittest.TestCase):
         self.assertNotIn(", ", printed)  # compact separators
         self.assertEqual(json.loads(printed)["files"][0]["path"], native("/tmp/review.png"))
 
-    def test_the_human_form_names_the_paths_and_the_warnings(self) -> None:
-        stdout = io.StringIO()
-        emit(
+    def test_the_human_form_names_the_paths_and_says_the_warnings_on_stderr(self) -> None:
+        stdout, stderr = io.StringIO(), io.StringIO()
+        code = emit(
             lambda: snapshot_result(VIEW_RESULT),
             prog="cadgen step snapshot",
             as_json=False,
             stdout=stdout,
+            stderr=stderr,
         )
-        self.assertEqual(
-            stdout.getvalue().splitlines(),
-            [
-                f"saved snapshot: {native('/tmp/review.png')}",
-                "warning: one part had no material",
-            ],
-        )
+        self.assertEqual(code, 0, "a warning is not a failure")
+        self.assertEqual(stdout.getvalue().splitlines(), [f"saved snapshot: {native('/tmp/review.png')}"])
+        self.assertEqual(stderr.getvalue().splitlines(), ["warning: one part had no material"])
 
     def test_list_mode_prints_the_inventory_and_nothing_else(self) -> None:
-        listing = {"ok": True, "mode": "list", "parts": [{"ref": "#o1.1", "name": "plate"}]}
-        stdout = io.StringIO()
-        emit(
+        # A list's warnings were once dropped from its human form: its stdout is the
+        # inventory alone, so they are said on stderr.
+        listing = {"ok": True, "mode": "list", "parts": [{"ref": "#o1.1", "name": "plate"}],
+                   "warnings": ["#o1.2 pin could not be meshed (boom), so the list leaves it out"]}
+        stdout, stderr = io.StringIO(), io.StringIO()
+        code = emit(
             lambda: snapshot_result(listing),
             prog="cadgen step snapshot",
             as_json=False,
             stdout=stdout,
+            stderr=stderr,
         )
+        self.assertEqual(code, 0)
         self.assertEqual(
             json.loads(stdout.getvalue()), [{"ref": "#o1.1", "name": "plate"}]
         )
+        self.assertEqual(stderr.getvalue().splitlines(),
+                         ["warning: #o1.2 pin could not be meshed (boom), so the list leaves it out"])
 
     def test_a_failure_is_the_schema_error_line(self) -> None:
         stdout = io.StringIO()

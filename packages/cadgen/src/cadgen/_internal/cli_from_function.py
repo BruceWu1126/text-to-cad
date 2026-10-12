@@ -330,6 +330,13 @@ def result_lines(result: Any) -> list[str]:
     ]
 
 
+def result_warning_lines(result: Any) -> list[str]:
+    """What the human rendering says on stderr: the Result's own ``warning_lines()`` when
+    it has one -- its warnings, which are not its answer."""
+    renderer = getattr(result, "warning_lines", None)
+    return [str(line) for line in renderer()] if callable(renderer) else []
+
+
 def report_failure(
     exc: BaseException,
     *,
@@ -394,8 +401,9 @@ def emit(
 
     Every command in the schema prints through here, generated or not, so a
     hand-written ADAPTER cannot end up serializing differently from a mirror:
-    one JSON line under ``--json``, the Result's human lines otherwise, and
-    ``{"ok": false, "error": ...}`` + exit 1 for an exception.
+    one JSON line under ``--json``, the Result's human lines otherwise (and its
+    warning lines on stderr), and ``{"ok": false, "error": ...}`` + exit 1 for an
+    exception.
     """
     out = stdout if stdout is not None else sys.stdout
     try:
@@ -413,6 +421,8 @@ def emit(
     else:
         for line in result_lines(result):
             print(line, file=out)
+        for line in result_warning_lines(result):
+            print(line, file=stderr if stderr is not None else sys.stderr)
     return 0 if getattr(result, "ok", True) else 1
 
 
