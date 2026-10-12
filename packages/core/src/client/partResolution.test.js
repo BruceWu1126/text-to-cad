@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createCadClient } from "./client.js";
 
-import { resolveSurfaceComponents as resolveWithClient, SurfaceResolutionError } from "./surfaceResolution.js";
+import { resolveParts as resolveWithClient, PartResolutionError } from "./partResolution.js";
 import { tessellationDecodedBytes } from "../lib/surf/tessellationCache.js";
 
-function resolveSurfaceComponents(descriptor, requests, options = {}) {
+function resolveParts(descriptor, requests, options = {}) {
   const client = options.client || createCadClient();
   return resolveWithClient(descriptor, requests, { ...options, client });
 }
@@ -40,7 +40,7 @@ function ready(object = O) {
   return { viewId: VIEW, components: { part: readyRow(P, object) } };
 }
 
-test("surface resolution forwards frozen pins and answers each component with its part's row", async (t) => {
+test("part resolution forwards frozen pins and answers each component with its part's row", async (t) => {
   const original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });
   let request;
@@ -48,7 +48,7 @@ test("surface resolution forwards frozen pins and answers each component with it
     request = { url, options, body: JSON.parse(options.body) };
     return json(ready());
   };
-  const result = await resolveSurfaceComponents(descriptor, [{ cid: "part", part: P }]);
+  const result = await resolveParts(descriptor, [{ cid: "part", part: P }]);
   assert.deepEqual(result.get("part"), { part: P, ...record() });
   assert.ok(Object.isFrozen(result.get("part")));
   // A ready row whose record is not a whole part record is no ticket.
@@ -57,16 +57,16 @@ test("surface resolution forwards frozen pins and answers each component with it
     { ...record(), selectors: { ...record().selectors, byteLength: 0 } }];
   for (const value of broken) {
     globalThis.fetch = async () => json({ ...ready(), components: { part: { ...readyRow(), record: value } } });
-    await assert.rejects(resolveSurfaceComponents(descriptor, [{ cid: "part", part: P }]), /no valid part record/);
+    await assert.rejects(resolveParts(descriptor, [{ cid: "part", part: P }]), /no valid part record/);
   }
-  assert.equal(request.url, "/__cad/surfaces");
+  assert.equal(request.url, "/__cad/parts");
   assert.equal(request.options.headers["x-cadgen-viewer"], "1");
   assert.deepEqual(request.body, {
     tree: TREE, viewId: VIEW, producer: descriptor.producer,
     components: [{ cid: "part", part: P }],
   });
   // A component is asked for by the part its view pins, and nothing else is one.
-  await assert.rejects(resolveSurfaceComponents(descriptor, [{ cid: "part", part: "d".repeat(64) }]), /must be a part key/);
+  await assert.rejects(resolveParts(descriptor, [{ cid: "part", part: "d".repeat(64) }]), /must be a part key/);
 });
 
 test("pending resolution polls the same request and subscriber token", async (t) => {
@@ -80,7 +80,7 @@ test("pending resolution polls the same request and subscriber token", async (t)
       components: { part: { part: P, state: "pending", job: "job-1" } },
     }) : json(ready());
   };
-  const result = await resolveSurfaceComponents(descriptor, [{ cid: "part", part: P }]);
+  const result = await resolveParts(descriptor, [{ cid: "part", part: P }]);
   assert.equal(result.get("part").glb.object, O);
   assert.equal(bodies.length, 2);
   assert.equal(bodies[1].job, "job-1");
@@ -101,7 +101,7 @@ test("a row ready before the rest of its request is announced at once, and once"
   };
   const announced = [];
   const deriving = [];
-  const result = await resolveSurfaceComponents(descriptor, [{ cid: "part", part: P }, { cid: "other", part: P2 }],
+  const result = await resolveParts(descriptor, [{ cid: "part", part: P }, { cid: "other", part: P2 }],
     { onReady: (cid, ticket) => announced.push([cid, polls, ticket.glb.object]), onPending: (cid) => deriving.push([cid, polls]) });
   assert.deepEqual(announced, [["part", 1, O], ["other", 2, O2]]);
   assert.deepEqual(deriving, [["other", 1]], "the one cadgen was still deriving, while it was");
@@ -126,7 +126,7 @@ test("a failed component fails alone, with its own error, and the request goes o
   const requests = [{ cid: "bad", part: P3 }, { cid: "part", part: P }, { cid: "other", part: P2 }];
   const announced = [];
   const failures = [];
-  const result = await resolveSurfaceComponents(descriptor, requests, {
+  const result = await resolveParts(descriptor, requests, {
     onReady: (cid) => announced.push([cid, polls]),
     onFailed: (cid, error) => failures.push([cid, error]),
   });
@@ -134,15 +134,15 @@ test("a failed component fails alone, with its own error, and the request goes o
   assert.equal(failures.length, 1, "a failure is heard once");
   const [[cid, error]] = failures;
   assert.equal(cid, "bad");
-  assert.ok(error instanceof SurfaceResolutionError);
+  assert.ok(error instanceof PartResolutionError);
   assert.deepEqual([error.cid, error.code, error.message], ["bad", "mesh", "component bad: OCCT did not mesh 1 face(s)"]);
   assert.deepEqual([...result.keys()], ["part", "other"]);
   // Without `onFailed` the first failure is the request's, once the response's ready rows are heard.
   polls = 1;
   const heard = [];
   await assert.rejects(
-    resolveSurfaceComponents(descriptor, requests.slice(0, 2), { onReady: (ready) => heard.push(ready) }),
-    (rejection) => rejection instanceof SurfaceResolutionError && rejection.cid === "bad",
+    resolveParts(descriptor, requests.slice(0, 2), { onReady: (ready) => heard.push(ready) }),
+    (rejection) => rejection instanceof PartResolutionError && rejection.cid === "bad",
   );
   assert.deepEqual(heard, ["part"]);
 });
@@ -152,7 +152,7 @@ test("a failed component fails alone, with its own error, and the request goes o
 // `setTimeout(0)`, which makes the assertion depend on how fast the runner drains
 // its loop: a slow box aborts before the first poll is even in flight, and a
 // loaded one reads `calls` before the cancel lands.
-test("abort detaches only the known surface subscriber", async (t) => {
+test("abort detaches only the known part subscriber", async (t) => {
   const original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });
   const calls = [];
@@ -173,7 +173,7 @@ test("abort detaches only the known surface subscriber", async (t) => {
       components: { part: { part: P, state: "pending", job: "job-cancel" } },
     });
   };
-  const pending = resolveSurfaceComponents(descriptor, [{ cid: "part", part: P }], {
+  const pending = resolveParts(descriptor, [{ cid: "part", part: P }], {
     signal: controller.signal,
   });
   // The job id only exists once the first poll has answered (an abort before that waits
@@ -183,7 +183,7 @@ test("abort detaches only the known surface subscriber", async (t) => {
   await assert.rejects(pending, (error) => error.name === "AbortError");
   await cancelled;
   assert.deepEqual(calls.at(-1), {
-    url: "/__cad/surfaces/cancel", body: { job: "job-cancel" },
+    url: "/__cad/parts/cancel", body: { job: "job-cancel" },
   });
 });
 
@@ -196,14 +196,14 @@ test("an abort while the first post is in flight cancels the job its answer open
   const firstPost = new Promise((resolve) => { posted = resolve; });
   const client = {
     // As fetch does: an abort rejects a request in flight.
-    requestSurfaces: (_body, { signal } = {}) => new Promise((resolve, reject) => {
+    requestParts: (_body, { signal } = {}) => new Promise((resolve, reject) => {
       signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
       answer = () => resolve({ viewId: VIEW, components: { part: { part: P, state: "pending", job: "job-early" } } });
       posted();
     }),
-    cancelSurfaceRequest: async (body) => { cancels.push(body); },
+    cancelPartRequest: async (body) => { cancels.push(body); },
   };
-  const pending = resolveSurfaceComponents(descriptor, [{ cid: "part", part: P }], { client, signal: controller.signal });
+  const pending = resolveParts(descriptor, [{ cid: "part", part: P }], { client, signal: controller.signal });
   await firstPost;
   controller.abort();
   answer();
@@ -219,8 +219,8 @@ test("failed, replacement and mismatched ready responses never produce tickets",
     components: { part: { part: P, state: "failed", error: "bad face", code: "extract" } },
   });
   await assert.rejects(
-    resolveSurfaceComponents(descriptor, [{ cid: "part", part: P }]),
-    (error) => error instanceof SurfaceResolutionError && error.code === "extract",
+    resolveParts(descriptor, [{ cid: "part", part: P }]),
+    (error) => error instanceof PartResolutionError && error.code === "extract",
   );
   const replacementView = {
     ...descriptor,
@@ -230,13 +230,13 @@ test("failed, replacement and mismatched ready responses never produce tickets",
   };
   globalThis.fetch = async () => json({ ...ready(), replacementView });
   await assert.rejects(
-    resolveSurfaceComponents(descriptor, [{ cid: "part", part: P }]),
-    (error) => error instanceof SurfaceResolutionError && error.code === "replacement-view"
+    resolveParts(descriptor, [{ cid: "part", part: P }]),
+    (error) => error instanceof PartResolutionError && error.code === "replacement-view"
       && error.replacementView.viewId === replacementView.viewId,
   );
   // A ready row for another part is not this component's.
   globalThis.fetch = async () => json({ ...ready(), components: { part: readyRow(`${"0".repeat(64)}-v1`) } });
-  await assert.rejects(resolveSurfaceComponents(descriptor, [{ cid: "part", part: P }]), /omitted part/);
+  await assert.rejects(resolveParts(descriptor, [{ cid: "part", part: P }]), /omitted part/);
 });
 
 test("independent renderer clients each ask their own backend", async () => {
@@ -244,10 +244,10 @@ test("independent renderer clients each ask their own backend", async () => {
   const objects = ["1".repeat(64), "2".repeat(64)];
   const clients = ["http://127.0.0.1:4101", "http://127.0.0.1:4102"].map((origin, index) => ({
     origin,
-    requestSurfaces: async (body, options) => { calls.push({ origin, body, signal: options.signal }); return ready(objects[index]); },
+    requestParts: async (body, options) => { calls.push({ origin, body, signal: options.signal }); return ready(objects[index]); },
   }));
   const controller = new AbortController();
-  const results = await Promise.all(clients.map(client => resolveSurfaceComponents(descriptor, [{ cid: "part", part: P }], { client, signal: controller.signal })));
+  const results = await Promise.all(clients.map(client => resolveParts(descriptor, [{ cid: "part", part: P }], { client, signal: controller.signal })));
   assert.deepEqual(calls.map(({ origin }) => origin), clients.map(({ origin }) => origin));
   for (let i=0; i<2; i++) {
     assert.equal(results[i].get("part").glb.object, objects[i], "each answer is its own backend's");
@@ -265,12 +265,12 @@ test("a request for more components than one POST may name is sent in chunks of 
     const body = JSON.parse(options.body);
     bodies.push(body);
     if (body.components.length < 1 || body.components.length > 64) {
-      return json({ error: "surface request must name between 1 and 64 components" }, 400);
+      return json({ error: "part request must name between 1 and 64 components" }, 400);
     }
     return json({ viewId: VIEW, components: Object.fromEntries(body.components.map(({ cid }) => [cid, readyRow()])) });
   };
   const requests = Array.from({ length: 150 }, (_, index) => ({ cid: `part${index}`, part: P }));
-  const result = await resolveSurfaceComponents(descriptor, requests);
+  const result = await resolveParts(descriptor, requests);
   assert.deepEqual(bodies.map((body) => body.components.length), [64, 64, 22]);
   assert.deepEqual([...result.keys()], requests.map(({ cid }) => cid));
   assert.deepEqual(bodies.flatMap((body) => body.components.map(({ cid }) => cid)), requests.map(({ cid }) => cid));
@@ -286,7 +286,7 @@ test("a failing chunk fails the whole request with its own error", async (t) => 
       : readyRow()])) });
   };
   const requests = Array.from({ length: 100 }, (_, index) => ({ cid: `part${index}`, part: P }));
-  await assert.rejects(resolveSurfaceComponents(descriptor, requests), (error) => error instanceof SurfaceResolutionError && error.cid === "part70");
+  await assert.rejects(resolveParts(descriptor, requests), (error) => error instanceof PartResolutionError && error.cid === "part70");
 });
 
 // A daemon whose worker never announces itself keeps a derivation pending for two minutes before it
@@ -297,11 +297,11 @@ test("a derivation pending for two minutes is asked at a tenth of its wait, at m
   const asks = [];
   const client = {
     origin: "",
-    async requestSurfaces() {
+    async requestParts() {
       asks.push(Date.now());
       return { viewId: VIEW, job: "job-1", components: { part: { part: P, state: "pending", job: "job-1" } } };
     },
-    async cancelSurfaceRequest() { return {}; },
+    async cancelPartRequest() { return {}; },
   };
   const controller = new AbortController();
   const settled = resolveWithClient(descriptor, [{ cid: "part", part: P }], { client, signal: controller.signal })

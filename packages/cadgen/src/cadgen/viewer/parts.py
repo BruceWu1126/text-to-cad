@@ -25,7 +25,7 @@ from cadgen.store.objects import object_path
 from cadgen.store.paths import store_root
 from cadgen.store.trees import capture_tree
 
-LOG = logging.getLogger("cadgen.viewer.surfaces")
+LOG = logging.getLogger("cadgen.viewer.parts")
 
 MAX_COMPONENTS = 64
 MAX_SUBSCRIBERS = 256
@@ -106,42 +106,42 @@ def _pinned(tree: str, cids=()) -> _Pin:
 
 def _request(body: bytes) -> tuple[dict, dict, dict, str | None]:
     if len(body) > 128 * 1024:
-        raise ValueError("surface request is too large")
+        raise ValueError("part request is too large")
     value = json.loads(body)
     fields = {"tree", "viewId", "producer", "components"}
     if type(value) is not dict or not fields <= set(value) or set(value) - fields - {"job"}:
-        raise ValueError("surface request requires tree, viewId, producer and components")
+        raise ValueError("part request requires tree, viewId, producer and components")
     producer = parts.producer_fields(value["producer"])
     tree = value["tree"]
     if not _is_digest(tree):
-        raise ValueError("surface request names no tree")
+        raise ValueError("part request names no tree")
     pin = _pinned(tree)
     view_id = parts._view_id(tree, producer)
     if value["viewId"] != view_id:
-        raise ValueError("surface request mixes runtime views")
+        raise ValueError("part request mixes runtime views")
     components = value["components"]
     if type(components) is not list or not 0 < len(components) <= MAX_COMPONENTS:
-        raise ValueError("surface request must name between 1 and 64 components")
+        raise ValueError("part request must name between 1 and 64 components")
     selected = {}
     for item in components:
         if type(item) is not dict or set(item) != {"cid", "part"}:
-            raise ValueError("invalid surface component request")
+            raise ValueError("invalid part component request")
         cid = item["cid"]
         entry = pin.components.get(cid) if type(cid) is str else None
         key = parts.part_key(entry, producer) if entry is not None else None
         if entry is None or cid in selected or item["part"] != key:
-            raise ValueError("surface request names an unpinned component or part")
+            raise ValueError("part request names an unpinned component or part")
         selected[cid] = key
     job = value.get("job")
     if job is not None and (type(job) is not str or len(job) != 32 or any(c not in "0123456789abcdef" for c in job)):
-        raise ValueError("invalid surface subscriber token")
+        raise ValueError("invalid part subscriber token")
     operation = {"kind": "display", "tree": value["tree"], "cids": sorted(selected), "producer": producer}
     # The named components' objects, still on disk; the map itself is read-only.
     _pinned(tree, selected)
     return {"viewId": view_id}, selected, operation, job
 
 
-class SurfaceSubscribers:
+class PartSubscribers:
     def __init__(self):
         self._guard = threading.Lock()
         self._changed = threading.Condition(self._guard)
@@ -183,7 +183,7 @@ class SurfaceSubscribers:
                     self._changed.wait(max(.001, deadline - time.monotonic()))
                 self._prune()
 
-        self._reaper = threading.Thread(target=reap, name="cadgen-surface-subscribers", daemon=True)
+        self._reaper = threading.Thread(target=reap, name="cadgen-part-subscribers", daemon=True)
         self._reaper.start()
 
     def resolve(self, body: bytes) -> dict:
@@ -197,7 +197,7 @@ class SurfaceSubscribers:
             with self._guard:
                 job = self._jobs.get(token)
                 if job is None or job["request"] != request_identity:
-                    raise ValueError("surface subscriber is expired, cancelled, or belongs to different inputs")
+                    raise ValueError("part subscriber is expired, cancelled, or belongs to different inputs")
                 job["touched"] = time.monotonic()
                 self._changed.notify_all()
                 future = job["future"]
@@ -224,7 +224,7 @@ class SurfaceSubscribers:
         if future is None:
             with self._guard:
                 if len(self._jobs) >= MAX_SUBSCRIBERS:
-                    raise ValueError("surface request capacity reached; retry after an active request finishes")
+                    raise ValueError("part request capacity reached; retry after an active request finishes")
                 # The one job for this request's missing components (its first answer's: a poll
                 # names the same inputs). Each HTTP consumer owns one future; the daemon
                 # coalesces the native work, so cancelling this token cannot detach another.

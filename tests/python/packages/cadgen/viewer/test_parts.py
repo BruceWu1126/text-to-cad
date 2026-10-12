@@ -22,7 +22,7 @@ from cadgen.store.build import build_tree_from_compound
 from cadgen.store.index import remove_entry
 from cadgen.store.objects import object_path
 from cadgen.store.view import descriptor_for_view
-from cadgen.viewer.surfaces import SurfaceSubscribers, _request
+from cadgen.viewer.parts import PartSubscribers, _request
 
 
 class SubscriberFuture(Future):
@@ -43,9 +43,9 @@ def _row_tree() -> tuple[str, dict]:
     return tree, geometry
 
 
-class SurfaceRequests(unittest.TestCase):
+class PartRequests(unittest.TestCase):
     def setUp(self):
-        self.tmp = generated_cad_directory(prefix="surface-http-")
+        self.tmp = generated_cad_directory(prefix="part-http-")
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         env = mock.patch.dict(os.environ, {
@@ -66,7 +66,7 @@ class SurfaceRequests(unittest.TestCase):
             "tree": self.tree, "viewId": self.view["viewId"], "producer": self.producer,
             "components": [{"cid": self.cid, "part": self.part}],
         }
-        self.manager = SurfaceSubscribers()
+        self.manager = PartSubscribers()
         self.addCleanup(lambda: [self.manager.cancel(token) for token in list(self.manager._jobs)])
 
     def resolve(self, request=None):
@@ -208,7 +208,7 @@ class SurfaceRequests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.resolve({"tree": self.tree, "viewId": view["viewId"], "producer": other, "job": token,
                           "components": [{"cid": self.cid, "part": view["components"][self.cid]["part"]}]})
-        with mock.patch("cadgen.viewer.surfaces.store_root", return_value=self.root / "other-store"):
+        with mock.patch("cadgen.viewer.parts.store_root", return_value=self.root / "other-store"):
             with self.assertRaises(ValueError):
                 self.resolve({**self.request, "job": token})
 
@@ -301,7 +301,7 @@ class SurfaceRequests(unittest.TestCase):
         detached = threading.Event()
         future.detach = detached.set
         with mock.patch("cadgen.daemon.artifacts.submit_artifact", return_value=future), \
-             mock.patch("cadgen.viewer.surfaces.SUBSCRIBER_IDLE_SECONDS", .03):
+             mock.patch("cadgen.viewer.parts.SUBSCRIBER_IDLE_SECONDS", .03):
             self.resolve()
             self.assertTrue(detached.wait(2), "an abandoned subscriber kept native work alive")
         self.assertFalse(self.manager._jobs)
@@ -345,9 +345,9 @@ print(json.dumps({cid: entry['part'] for cid, entry in view['components'].items(
         fixture = ServerFixture()
         self.addCleanup(fixture.close)
         body = json.dumps(self.request).encode()
-        self.assertEqual(fixture.request("POST", "/__cad/surfaces", body=body)[0], 403)
+        self.assertEqual(fixture.request("POST", "/__cad/parts", body=body)[0], 403)
         record = parts.derive(self.tree)[self.cid]
-        status, _, payload = fixture.request("POST", "/__cad/surfaces", body=body,
+        status, _, payload = fixture.request("POST", "/__cad/parts", body=body,
                                              headers={"x-cadgen-viewer": "1"})
         self.assertEqual(status, 200, payload)
         self.assertEqual(json.loads(payload)["components"][self.cid],

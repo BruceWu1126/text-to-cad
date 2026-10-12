@@ -56,9 +56,9 @@ import { syncSurfWorkerMemory } from "../../../render/surfWorkerMemoryPolicy.js"
 import { componentMemoryAccounting, syncSelectorCacheAccounting } from "../../../render/renderMemoryAccounting.js";
 import { completedPackages, renderAssetCacheStatsWithPackages } from "../../../render/completedPackageCache.js";
 import {
-  resolveSurfaceComponents,
-  SurfaceResolutionError,
-} from "../../../workbench/surfaceResolution.js";
+  resolveParts,
+  PartResolutionError,
+} from "../../../workbench/partResolution.js";
 // Only the STEP renderer mounts this hook, and it is only ever handed STEPs (its `matches`
 // excludes every other format by extension). So where this used to ask whether an entry
 // was a STEP, it asks whether there is one: the same answer for every input it receives.
@@ -476,7 +476,7 @@ export function useCadAssets({
             if (planned === undefined) return undefined;
             return !planned ? packageDescriptor.components[cid] : false;
           },
-          resolve: (requested, options) => resolveSurfaceComponents(packageDescriptor, requested, {
+          resolve: (requested, options) => resolveParts(packageDescriptor, requested, {
             ...options, client,
             onPending: () => {
               if (meshing || requestId !== requestIdRef.current || controller.signal.aborted) return;
@@ -503,7 +503,7 @@ export function useCadAssets({
           retryCacheProbeMiss: isTessellationCacheProbeMissError,
           // A component cadgen could not derive or mesh (its own failed row) is left out: the rest
           // of the model is drawn, and the final publish reports it as the load's background error.
-          componentFailed: (error, cid) => error instanceof SurfaceResolutionError
+          componentFailed: (error, cid) => error instanceof PartResolutionError
             && !error.replacementView && error.cid === cid,
           // The part's stored mesh, as cadgen made it. Same meshData contract as the
           // component GLB this replaced.
@@ -548,7 +548,7 @@ export function useCadAssets({
             // Cold: the request has cadgen derive the part, and answers with its record. A retry
             // after a missing body asks again, alone, so a part the store lost is derived anew.
             const row = afresh || skipCacheProbes
-              ? (await resolveSurfaceComponents(packageDescriptor, [{ cid, part: component.part }],
+              ? (await resolveParts(packageDescriptor, [{ cid, part: component.part }],
                 { client, signal: controller.signal })).get(cid)
               : await surfaceTickets.ticket(cid, component);
             if (!producedDisplayPlan(row)) throw new Error(`Component ${cid} has no display mesh`);
@@ -722,7 +722,7 @@ export function useCadAssets({
       if (requestId !== requestIdRef.current || isAbortError(err) || controller.signal.aborted) {
         return;
       }
-      if (err instanceof SurfaceResolutionError && err.replacementView && !surfaceViewReplacement) {
+      if (err instanceof PartResolutionError && err.replacementView && !surfaceViewReplacement) {
         return surfaceViewReplacementRef.current?.(
           entry, entryAssetUrl(entry, "glb"), err.replacementView,
         );
@@ -834,7 +834,7 @@ export function useCadAssets({
         const unresolved = neededCids.filter((cid) => packageDescriptor.components?.[cid] && !componentIdentityByCid[cid])
           .map((cid) => ({ cid, part: packageDescriptor.components[cid].part }));
         if (unresolved.length) {
-          const resolved = await resolveSurfaceComponents(packageDescriptor, unresolved, { client,
+          const resolved = await resolveParts(packageDescriptor, unresolved, { client,
             signal: controller.signal,
           });
           for (const { cid } of unresolved) componentIdentityByCid[cid] = resolved.get(cid);
@@ -857,7 +857,7 @@ export function useCadAssets({
           } catch (error) {
             if (controller.signal.aborted || !isTessellationCacheProbeMissError(error)) throw error;
           }
-          const resolved = await resolveSurfaceComponents(packageDescriptor, [{
+          const resolved = await resolveParts(packageDescriptor, [{
             cid, part: packageDescriptor.components[cid].part,
           }], { client, signal: controller.signal });
           componentIdentityByCid[cid] = resolved.get(cid);
@@ -959,7 +959,7 @@ export function useCadAssets({
     if (session.requestId !== referenceRequestIdRef.current || session.controller.signal.aborted || isAbortError(err)) {
       return;
     }
-    if (err instanceof SurfaceResolutionError && err.replacementView) {
+    if (err instanceof PartResolutionError && err.replacementView) {
       await surfaceViewReplacementRef.current?.(
         session.entry, entryAssetUrl(session.entry, "glb"), err.replacementView,
       );

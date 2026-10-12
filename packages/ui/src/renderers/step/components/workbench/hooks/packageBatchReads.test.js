@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createCadClient, SurfaceResolutionError } from "@text-to-cad/core/client";
+import { createCadClient, PartResolutionError } from "@text-to-cad/core/client";
 import { isTessellationCacheProbeMissError, tessellationDecodedBytes } from "@text-to-cad/core/lib/surf/tessellationCache.js";
 import { createSurfaceTicketBatches, createTessellationBodyBatches } from "./packageBatchReads.js";
 import { createInitialDisplayPlans } from "../../../render/initialDisplay.js";
@@ -184,9 +184,9 @@ test("the first eight cold components resolve alone, the rest up to 64 to a requ
   assert.equal(tickets.stats().components, 200);
 });
 
-test("a surface request that fails fails each of its components still waiting", async () => {
+test("a part request that fails fails each of its components still waiting", async () => {
   const order = cids(20);
-  const failure = new Error("surface derivation failed for c12");
+  const failure = new Error("part derivation failed for c12");
   const tickets = createSurfaceTicketBatches({ order, alone: 0,
     needs: cid => ({ part: partOf(cid) }),
     resolve: async (requested, { onReady }) => { onReady("c0", rowFor("c0")); throw failure; } });
@@ -213,11 +213,11 @@ test("a component that failed in its request fails alone; the ready ones beside 
   const order = ["bad", "c0", "c2"];
   const tickets = createSurfaceTicketBatches({ order, alone: 0,
     needs: cid => ({ part: parts[cid] }),
-    resolve: (requested, options) => client.resolveSurfaceComponents(view, requested, options) });
+    resolve: (requested, options) => client.resolveParts(view, requested, options) });
   const [bad, c0, c2] = await Promise.allSettled(order.map(cid => tickets.ticket(cid, {})));
   assert.equal(tickets.stats().requests, 1);
   assert.equal(bad.status, "rejected");
-  assert.ok(bad.reason instanceof SurfaceResolutionError);
+  assert.ok(bad.reason instanceof PartResolutionError);
   assert.deepEqual([bad.reason.cid, bad.reason.code, bad.reason.message], ["bad", "mesh", "component bad: OCCT did not mesh 2 face(s)"]);
   assert.deepEqual([c0.status, c0.value?.part, c0.value?.glb.object, c2.status, c2.value?.part],
     ["fulfilled", parts.c0, hex("e"), "fulfilled", parts.c2]);

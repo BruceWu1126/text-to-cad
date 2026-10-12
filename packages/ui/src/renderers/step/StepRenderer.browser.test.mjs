@@ -1412,7 +1412,7 @@ test('a warm package opens with a probe per chunk and its bodies in batches, and
   assert.equal(sent(/^POST \/one\/__tess_cache\/probe$/), 3, 'a probe for each chunk: eight, sixteen and the last one');
   assert.equal(sent(/^POST \/one\/__tess_cache\/batch$/), 3, 'a read for each batch: eight, sixteen and the last one');
   assert.equal(sent(/^GET \/one\/__tess_cache\//), 0, 'no body read alone');
-  assert.equal(sent(/\/__cad\/surfaces/), 0, 'no surface resolved');
+  assert.equal(sent(/\/__cad\/parts/), 0, 'no surface resolved');
   assert.equal(sent(/^(GET|HEAD) \/one\/__cad\/store\?file=[^&]*\.surf(&|$)/), 0, 'no SURF read');
   assert.deepEqual(errors, []);
 });

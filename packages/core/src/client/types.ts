@@ -136,13 +136,13 @@ export interface CadRuntimeView {
   components?: Record<string, {part: string; [key: string]: unknown}>;
   [key: string]: unknown;
 }
-export interface CadSurfaceComponentRequest { cid: string; part: string }
-export interface CadSurfaceRequest {
+export interface CadPartComponentRequest { cid: string; part: string }
+export interface CadPartRequest {
   tree: string; viewId: string; producer: CadProducer;
-  components: CadSurfaceComponentRequest[];
+  components: CadPartComponentRequest[];
   job?: string;
 }
-export interface CadSurfaceResponse {
+export interface CadPartResponse {
   viewId: string; job?: string; replacementView?: CadRuntimeView;
   components: Record<string, {state: 'pending' | 'ready' | 'failed'; part: string; record?: Omit<PartRow, 'part'>; job?: string; error?: string; code?: string}>;
 }
@@ -217,7 +217,7 @@ export interface CadWorkspaceService {
    * awaited. `onFailed` hears each component cadgen could not derive or mesh, with its own error,
    * and the request resolves with the rest; without it, a failed component fails the request.
    */
-  resolveSurfaceComponents(view: CadRuntimeView, requested: CadSurfaceComponentRequest[],
+  resolveParts(view: CadRuntimeView, requested: CadPartComponentRequest[],
     options?: CadRequestOptions & {
       onReady?: (cid: string, row: PartRow) => void;
       onFailed?: (cid: string, error: Error) => void;
@@ -229,8 +229,8 @@ export interface CadWorkspaceService {
 /** Reusable HTTP implementation, also used by existing catalog adapters. */
 export interface CadClient extends CadWorkspaceService {
   readonly origin: string;
-  requestSurfaces(body: CadSurfaceRequest, options?: CadRequestOptions): Promise<CadSurfaceResponse>;
-  cancelSurfaceRequest(body: { job: string }, options?: CadRequestOptions): Promise<{ok?: boolean}>;
+  requestParts(body: CadPartRequest, options?: CadRequestOptions): Promise<CadPartResponse>;
+  cancelPartRequest(body: { job: string }, options?: CadRequestOptions): Promise<{ok?: boolean}>;
   editingPreview(file: string, options?: CadRequestOptions & { after?: string }): Promise<CadEditingPreview>;
 }
 export interface CadClientOptions {

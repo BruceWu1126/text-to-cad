@@ -6,7 +6,7 @@ import { retainStlMeshWorker } from '../lib/render/stlMeshWorkerClient.js';
 import { applyViewerOriginToEntries, normalizeViewerOrigin, viewerOriginUrl } from './origin.js';
 import { createHttpTessellationCacheProvider, createTessellationCache } from '../lib/surf/tessellationCache.js';
 
-import { resolveSurfaceComponents } from './surfaceResolution.js';
+import { resolveParts } from './partResolution.js';
 import { observeEditingPreview } from './editingPreviewFeed.js';
 import { createHttpCadResourceProvider, scopeCadResources } from './resources.js';
 export * from './origin.js';
@@ -302,23 +302,23 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
       if (!file) return Promise.reject(new Error('Missing file'));
       return request('/__cad/robot', { file, signal, timeoutMs: 10_000, operation: 'robot' });
     },
-    requestSurfaces(body, { signal } = {}) {
-      return request('/__cad/surfaces', {
-        body, signal, method: 'POST', operation: 'surfaces',
+    requestParts(body, { signal } = {}) {
+      return request('/__cad/parts', {
+        body, signal, method: 'POST', operation: 'parts',
         headers: { 'content-type': 'application/json', 'x-cadgen-viewer': '1' },
       });
     },
-    cancelSurfaceRequest(body, { signal } = {}) {
-      return request('/__cad/surfaces/cancel', {
-        body, signal, method: 'POST', operation: 'cancel-surfaces',
+    cancelPartRequest(body, { signal } = {}) {
+      return request('/__cad/parts/cancel', {
+        body, signal, method: 'POST', operation: 'cancel-parts',
         headers: { 'content-type': 'application/json', 'x-cadgen-viewer': '1' },
       });
     },
     editingPreview(file, { after = '', signal } = {}) {
       return request('/__cad/preview', { file, signal, params: { after }, operation: 'preview' });
     },
-    resolveSurfaceComponents(descriptor, requested, options) {
-      return resolveSurfaceComponents(descriptor, requested, { ...options, client });
+    resolveParts(descriptor, requested, options) {
+      return resolveParts(descriptor, requested, { ...options, client });
     },
     // A host that already hears a file's build feed (on a call it makes anyway) hands it in as
     // `editingPreviewFeed`, and nothing here asks the route.

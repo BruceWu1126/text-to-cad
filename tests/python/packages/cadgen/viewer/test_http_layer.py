@@ -723,7 +723,7 @@ class RequestBodies(HttpLayerTestCase):
 
         for path, limit in (("/__tess_cache/probe", TESS_CACHE_METADATA_MAX_BYTES),
                             ("/__tess_cache/batch", TESS_CACHE_METADATA_MAX_BYTES),
-                            ("/__cad/surfaces", 128 * 1024), ("/__cad/surfaces/cancel", 128 * 1024)):
+                            ("/__cad/parts", 128 * 1024), ("/__cad/parts/cancel", 128 * 1024)):
             with self.subTest(path=path):
                 raw = self.fixture.raw(
                     f"POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n"

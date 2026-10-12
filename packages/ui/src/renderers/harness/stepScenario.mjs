@@ -14,9 +14,9 @@ import { chromium } from 'playwright';
 // the catalog names a store view, the view names each component's part (its key),
 // and the part store answers a part's record -- its display mesh and its selector
 // table (`components/<cid>.selectors.json`, cadgen's), each read by the part's key and
-// the object the record names -- for a part the store holds; `POST /__cad/surfaces`
+// the object the record names -- for a part the store holds; `POST /__cad/parts`
 // answers the same record for one cadgen has to derive first, as this server does
-// for a cold store (`client/surfaceResolution.js` validates it).
+// for a cold store (`client/partResolution.js` validates it).
 
 const FIXTURE = new URL('../step/__fixtures__/step/', import.meta.url);
 
@@ -71,7 +71,7 @@ const ARM_COUNT = 24, BASE_AT = 19;
  * with two inputs that produce it -- so the twenty-four arms are twenty-four parts served
  * from one arm's mesh. They are HELD by part, one gate per batch, so each publish is a
  * test's to place rather than a race -- held the way cadgen holds a part it is still
- * meshing: the store does not list it, and its surface row answers `pending` until the
+ * meshing: the store does not list it, and its part row answers `pending` until the
  * gate opens, so the page asks again. No response is ever held
  * open. A browser keeps six connections to a host and the loader runs up to eight lanes
  * (`navigator.hardwareConcurrency`), so a held body could fill every connection and starve
@@ -168,7 +168,7 @@ export function reviseFixture(fixture, revision) {
  * cadgen's part store as the harness serves it: every component of `fixture` has its part -- its
  * display mesh, encoded as the store keeps it for whatever part names it (a staged component shares
  * its shape's mesh), and its selector table -- under the record that names both. `warm` holds every
- * part already, as a build leaves it; otherwise a part is stored once a surface request names its
+ * part already, as a build leaves it; otherwise a part is stored once a part request names its
  * component (`derive`), as cadgen's one job derives what a cleared store lacks. Answers the routes
  * the client reads it by: a probe, a batch read and a single read of either object.
  */
@@ -294,7 +294,7 @@ function harnessBundle() {
  *   declares. `singlePart` serves the base alone as a cadgen single-part STEP
  *   (`stageSinglePartFixture`), its part named `base` in `hinge_base.step`. `warmCache` serves a mesh
  *   store that already holds every component's display mesh (`meshStore`); without it the
- *   store is cold, and a component's mesh is made when its surface request asks for it.
+ *   store is cold, and a component's mesh is made when its part request asks for it.
  */
 export async function serveStepHarness(t, { progressive = false, singlePart = false, warmCache = false } = {}) {
   const loaded = await loadStepFixture();
@@ -354,8 +354,8 @@ export async function serveStepHarness(t, { progressive = false, singlePart = fa
         : { state: 'compiled' });
       return;
     }
-    if (url.pathname.endsWith('/__cad/surfaces/cancel')) { response.statusCode = 204; response.end(); return; }
-    if (url.pathname.endsWith('/__cad/surfaces')) {
+    if (url.pathname.endsWith('/__cad/parts/cancel')) { response.statusCode = 204; response.end(); return; }
+    if (url.pathname.endsWith('/__cad/parts')) {
       const body = await readBody(request);
       const shown = views.get(body.tree) || fixture;
       // A held component is still being meshed: its row is pending under the request's
