@@ -65,23 +65,8 @@ function viewFor(bytes) {
   return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 }
 
-export function writeUInt16LE(bytes, offset, value) {
-  viewFor(bytes).setUint16(offset, value, true);
-}
-
 export function writeUInt32LE(bytes, offset, value) {
   viewFor(bytes).setUint32(offset, value, true);
-}
-
-export function writeFloatLE(bytes, offset, value) {
-  viewFor(bytes).setFloat32(offset, value, true);
-}
-
-export function writeAscii(bytes, offset, text, maxLength) {
-  const source = String(text).slice(0, maxLength);
-  for (let index = 0; index < source.length; index += 1) {
-    bytes[offset + index] = source.charCodeAt(index) & 0x7f;
-  }
 }
 
 export function align4Buffer(buffer, fill = 0x20) {

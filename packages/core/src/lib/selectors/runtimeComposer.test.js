@@ -7,7 +7,6 @@ import { test } from "node:test";
 import {
   buildSelectorCompositionPart,
   buildSelectorRuntime,
-  buildTransformedSelectorRuntime,
   composeSelectorRuntimes,
   createSelectorRuntimeComposer,
 } from "./runtime.js";
@@ -200,7 +199,6 @@ function assertSameComposition(actual, expected, label) {
 
 test("the incremental composer composes exactly what composing whole runtimes does", () => {
   const bundles = [makeBundle(11, { faces: 5 }), makeBundle(12, { faces: 3, shapes: 1, faceProxy: false }), makeBundle(13, { faces: 6, detail: 2 })];
-  const fine = makeBundle(13, { faces: 6, detail: 5 });
   const revised = makeBundle(21, { faces: 4, stepHash: "h2" });
   const composer = createSelectorRuntimeComposer();
   const parts = new Map();
@@ -218,15 +216,13 @@ test("the incremental composer composes exactly what composing whole runtimes do
     ["a part inserted in the middle", [item(0), item(1), item(6), item(2), item(3), item(4), item(5)]],
     ["a part removed", [item(0), item(6), item(2), item(3), item(4), item(5)]],
     ["the first part removed", [item(6), item(2), item(3), item(4), item(5)]],
-    ["a component swapped to a finer level", [item(6), item(2, fine), item(3), item(4), item(5, fine)]],
-    ["swapped back", [item(6), item(2), item(3), item(4), item(5)]],
-    ["appended after a swap", [item(6), item(2), item(3), item(4), item(5), item(7), item(8)]],
+    ["appended after a removal", [item(6), item(2), item(3), item(4), item(5), item(7), item(8)]],
     ["down to one part", [item(4)]],
     ["a changed revision", [item(0, revised, { copyCadPath: "cars/hypercar_v2.step" }), item(1, revised, { copyCadPath: "cars/hypercar_v2.step" })]],
     ["a single-component part", [item(0, bundles[0], { single: true }), item(1, bundles[0], { single: true })]],
   ];
   for (const [label, items] of steps) {
-    const incremental = composer.compose(items.map((entry) => partFor(entry, `${entry.index}:${bundles.indexOf(entry.bundle)}:${entry.bundle === fine ? "fine" : entry.bundle === revised ? "revised" : ""}:${entry.options.partId}:${entry.options.copyCadPath}`)));
+    const incremental = composer.compose(items.map((entry) => partFor(entry, `${entry.index}:${bundles.indexOf(entry.bundle)}:${entry.bundle === revised ? "revised" : ""}:${entry.options.partId}:${entry.options.copyCadPath}`)));
     assertSameComposition(incremental, composeFresh(items), label);
   }
 });

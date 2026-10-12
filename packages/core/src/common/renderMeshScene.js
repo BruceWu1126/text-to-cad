@@ -11,10 +11,7 @@ import {
   CAMERA_PROJECTION,
   resolveDisplayEdgeSettings
 } from "./displaySettings.js";
-import {
-  buildModel,
-  normalizedSelectorValues
-} from "./cadScene.js";
+import { normalizedSelectorValues } from "./cadScene.js";
 import {
   applyDisplayRecordTransform
 } from "./displayRecordTransform.js";

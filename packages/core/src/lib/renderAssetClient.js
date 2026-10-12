@@ -33,7 +33,6 @@ function fetchError(url, response) {
 }
 
 const jsonCache = new Map();
-const textCache = new Map();
 const arrayBufferCache = new Map();
 const arrayBufferPendingCache = new Map();
 const glbCache = new Map();
@@ -53,15 +52,6 @@ async function fetchJson(url, { signal, resources } = {}) {
     throw fetchError(url, response);
   }
   return response.json();
-}
-
-async function fetchText(url, { signal, resources } = {}) {
-  if (resources) return resources.readText(url, { signal });
-  const response = await fetch(url, { signal });
-  if (!response.ok) {
-    throw fetchError(url, response);
-  }
-  return response.text();
 }
 
 async function fetchArrayBuffer(url, { signal, resources } = {}) {
@@ -212,12 +202,6 @@ export async function loadRenderJson(url, { signal, resources } = {}) {
 
 export function peekRenderJson(url, { resources } = {}) {
   return peekCached(jsonCache, cadResourceCacheKey(resources, url));
-}
-
-export async function loadRenderText(url, { signal, resources } = {}) {
-  const cacheKey = cadResourceCacheKey(resources, url);
-  const payload = await loadCached(textCache, cacheKey, () => fetchText(url, { signal, resources }), { cachePending: !signal });
-  return finalizeCached(textCache, cacheKey, payload);
 }
 
 export async function loadRenderArrayBuffer(url, { signal, resources } = {}) {

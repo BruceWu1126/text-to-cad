@@ -91,7 +91,6 @@ export function createHttpCadResourceProvider({ origin = '', fetch: fetchImpl = 
     get signal() { return lifetimeSignal; },
     cacheKey: url => `http-resource:${id}:${resourceUrl(url)}`,
     async readJson(url, options) { const response = await request(url, options); const value = await response.json(); aborted(options?.signal); aborted(lifetimeSignal); return value; },
-    async readText(url, options) { const response = await request(url, options); const value = await response.text(); aborted(options?.signal); aborted(lifetimeSignal); return value; },
     async readBytes(url, options = {}) { const response = await request(url, options); const bytes = await responseBytes(response, options.maxBytes); aborted(options.signal); aborted(lifetimeSignal); return bytes; },
     async byteLength(url, options) {
       const response = await request(url, { ...options, method: 'HEAD' });
@@ -144,7 +143,7 @@ export function scopeCadResources(provider, signal) {
     resolveDependency(...args) { aborted(signal); return provider.resolveDependency(...args); },
     invalidate() { active.abort(); active = new AbortController(); generation += 1; currentSignal = generationSignal(); },
   };
-  for (const method of ['readJson', 'readText', 'readBytes', 'byteLength', 'workerTicket']) {
+  for (const method of ['readJson', 'readBytes', 'byteLength', 'workerTicket']) {
     scoped[method] = async (url, options = {}) => {
       aborted(signal); aborted(options.signal);
       const combined = AbortSignal.any([currentSignal, ...(options.signal ? [options.signal] : [])]);

@@ -36,17 +36,6 @@ function selectorTypeForKind(kind) {
   return "vertex";
 }
 
-export function normalizeCadPath(rawCadPath) {
-  let normalized = String(rawCadPath || "").replace(/\\/g, "/").trim().replace(/^\/+|\/+$/g, "");
-  if (!normalized) {
-    return "";
-  }
-  if (normalized.split("/").some((part) => !part || part === "." || part === "..")) {
-    return "";
-  }
-  return normalized;
-}
-
 function parseStructuredSelector(rawSelector, { inheritedOccurrenceId = "", inheritedLabel = "" } = {}) {
   const selector = String(rawSelector || "").trim().replace(/^#/, "");
   if (!selector) {

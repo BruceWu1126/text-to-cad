@@ -4,7 +4,6 @@ import { readFileSync } from "node:fs";
 // circle of radius 40/pi mm about (0, 40/pi, 0) over one second, joints 2 mm
 // apart, and the sidecar animation they bind: both written by cadgen
 // (`make_fixture.py`), so the suites read what cadgen serves.
-export const CURL_RADIUS = 40 / Math.PI;
 export const CORD_RADIUS = 0.8;
 
 export function tubeSkinsFixture() {

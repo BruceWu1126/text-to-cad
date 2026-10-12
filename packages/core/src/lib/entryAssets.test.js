@@ -17,7 +17,6 @@ import {
   entrySelectorTopologyAssetUrl,
   entryTopologyAssetUrl,
   entryPoseUrl,
-  entrySourceSidecarUrl,
   entryUrdfAssetHash
 } from "./entryAssets.js";
 
@@ -77,12 +76,10 @@ test("entry topology urls resolve to the primary STEP GLB", () => {
   assert.equal(entryTopologyAssetUrl(stepEntry()), "/assets/bracket.glb");
 });
 
-test("STEP module urls are explicit catalog data instead of guessed sidecars", () => {
+test("a STEP's pose URL is explicit catalog data, never a guessed sidecar", () => {
   assert.equal(entryPoseUrl(stepEntry()), "");
   assert.equal(entryPoseUrl(stepEntry({ poseUrl: " /assets/part.step.json " })), "/assets/part.step.json");
   assert.equal(entryPoseUrl({ kind: "stl", poseUrl: "/assets/not-step.json" }), "");
-  assert.equal(entrySourceSidecarUrl(stepEntry({ sourceUrl: " /assets/part.step.json?v=2 " })), "/assets/part.step.json?v=2");
-  assert.equal(entrySourceSidecarUrl({ kind: "stl", sourceUrl: "/assets/not-step.json" }), "");
 });
 
 test("entry availability helpers preserve existing viewer gates", () => {

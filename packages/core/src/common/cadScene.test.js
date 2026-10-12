@@ -1797,7 +1797,7 @@ test("direct viewer effects and clip passes synchronize shared surfaces without 
   assert.equal(record.surfaceInstance.set, set);
   assert.equal(set.object.material.envMapIntensity, 3.25, "material-only reflection changes reach the shared pass");
 
-  syncRuntimeStepClipPlane(runtime, { enabled: true, axis: "x", offsets: { x: 0.25 } });
+  syncRuntimeStepClipPlane(runtime, { enabled: true, axis: "x", at: 0.25 });
   assert.equal(set.object.material.clippingPlanes.length, 1, "clip-only update reaches the shared draw");
   assert.equal(set.object.material.clippingPlanes[0].constant, record.material.clippingPlanes[0].constant);
   syncRuntimeStepClipPlane(runtime, { enabled: false });

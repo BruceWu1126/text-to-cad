@@ -4,8 +4,7 @@ import { applyTubeBraidMaterial } from "./tubeBraidMaterial.js";
 import {
   TUBE_MATERIAL_ATTRIBUTE,
   TUBE_SKIN_STAGE,
-  ensureTubeMaterialStage,
-  tubeMaterialStage
+  ensureTubeMaterialStage
 } from "./tubeMaterialShader.js";
 
 // A bending tube, played. cadgen works out where a tube is

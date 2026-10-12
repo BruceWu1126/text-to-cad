@@ -5,9 +5,6 @@
 // effects pass over the records already built instead of rebuilding them — so
 // it is tested against a REAL model, by record identity, rather than against a
 // mock that would agree with anything.
-//
-// The schedule those frames follow is arithmetic that now lives beside its own
-// module: framePlan.test.js.
 
 import assert from "node:assert/strict";
 import test from "node:test";

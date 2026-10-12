@@ -9,10 +9,6 @@ export const TUBE_SKIN_STAGE = "skin";
 export const TUBE_BRAID_STAGE = "braid";
 const STAGE_ORDER = [TUBE_SKIN_STAGE, TUBE_BRAID_STAGE];
 
-export function tubeMaterialStage(material, name) {
-  return material?.userData?.cadTubeShader?.stages[name] || null;
-}
-
 // Returns the named stage, creating it with `create()` -> {uniforms, apply}
 // on first use. `apply(shader, stages)` edits the shader text; `stages` lets a
 // consumer see which producers are present.

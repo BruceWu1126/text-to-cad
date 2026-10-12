@@ -158,9 +158,3 @@ export function entryPoseUrl(entry) {
     ? normalizeString(entry?.poseUrl)
     : "";
 }
-
-export function entrySourceSidecarUrl(entry) {
-  return entrySourceFormat(entry) === RENDER_FORMAT.STEP
-    ? normalizeString(entry?.sourceUrl)
-    : "";
-}

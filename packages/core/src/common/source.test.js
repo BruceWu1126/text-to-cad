@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import path from "node:path";
 import test from "node:test";
 
 import { loadSource as loadSourceInput, packageSourceFromBaseUrl } from "./source.js";

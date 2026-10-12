@@ -62,8 +62,6 @@ test("clips normalize by id in the order the model declares them", () => {
   assert.deepEqual(Object.keys(clips), ["zoom", "approach"]);
   assert.deepEqual(clips.zoom, { id: "zoom", label: "Zoom", duration: 2, loop: false, tracks: [], order: 0 });
   assert.equal(isAnimationClip(clips.approach), true);
-  // The retired module form, a clip with an update function, is not a clip.
-  assert.equal(isAnimationClip({ duration: 1, update() {} }), false);
   assert.equal(isAnimationClip(null), false);
 });
 

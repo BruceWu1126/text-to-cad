@@ -220,7 +220,7 @@ test("the still's tight frame fits a skinned and morphed GLB where it is drawn; 
   camera.lookAt(0, 0, 0);
   camera.updateMatrixWorld(true);
   const frame = projectedVisibleGeometryFrame(model.displayRecords, camera);
-  // The L the GPU draws: x from -1000 to 100, z from -500 to 1100 (DEFORMED_EXTENT in CAD mm).
+  // The L the GPU draws (`deformedGlb.js`, in CAD mm): x from -1000 to 100, z from -500 to 1100.
   assert.ok(Math.abs(frame.spanX - 1100) < 1e-3 && Math.abs(frame.spanY - 1600) < 1e-3, JSON.stringify(frame));
   assert.deepEqual(model.bounds.min.map(Math.round), [-1000, -100, -500]);
   const flattened = await buildMeshDataFromGlbBuffer(bytes.slice(0));

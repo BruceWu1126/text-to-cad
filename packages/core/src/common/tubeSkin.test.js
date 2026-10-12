@@ -5,7 +5,6 @@ import * as THREE from "three";
 import { normalizeAnimationClips } from "./animationRuntime.js";
 import { CORD_RADIUS, distanceFromCurl, tubeSkinsFixture } from "./__tests__/tubeSkinsFixture.js";
 import { applyRecordTubeSkin, attachTubeSkins, decodeTubeSkins, tubeSkinPose } from "./tubeSkin.js";
-import { tubeMaterialStage, TUBE_SKIN_STAGE } from "./tubeMaterialShader.js";
 
 // cadgen's skins for a 20 mm cord its clip curls into a quarter circle
 // (`fixtures/tube_skins`), played on a bare record the way the scene plays one.
@@ -78,7 +77,7 @@ test("on the GPU the record keeps its rest points and draws from a joint texture
   applyRecordTubeSkin(THREE, record, tubeSkinPose(track, "o1.1", track.times.length - 1, 0));
   const state = record.tubeSkinState;
   const geometry = record.mesh.geometry;
-  assert.ok(tubeMaterialStage(record.material, TUBE_SKIN_STAGE), "the material skins");
+  assert.match(record.material.customProgramCacheKey(), /:cad-tube:skin$/, "the material compiles the skin stage");
   assert.equal(state.gpu.uniforms.cadTubeJointCount.value, 11);
   assert.equal(state.gpu.texture.image.data.length, 11 * 12);
   assert.deepEqual([...geometry.attributes.position.array], [...state.binding.positions], "nothing posed on the CPU yet");

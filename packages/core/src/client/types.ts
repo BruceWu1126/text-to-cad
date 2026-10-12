@@ -121,7 +121,6 @@ export interface CadResourceProvider {
   /** Stable within one immutable authorization/generation scope; change it when that scope changes. */
   cacheKey?(url: string): string;
   readJson(url: string, options?: CadRequestOptions): Promise<unknown>;
-  readText(url: string, options?: CadRequestOptions): Promise<string>;
   readBytes(url: string, options?: CadResourceReadOptions): Promise<ArrayBuffer>;
   byteLength(url: string, options?: CadRequestOptions): Promise<number | null>;
   resolveDependency(source: string, reference: string, options?: { kind?: 'relative' | 'package' }): string;
