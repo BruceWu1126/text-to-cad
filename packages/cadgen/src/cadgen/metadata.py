@@ -421,29 +421,3 @@ def _check_step_return(
                 "model returns a build123d shape and nothing else. Declare mesh exports "
                 "with @stl/@threemf/@glb stacked on the model."
             )
-
-
-def _is_multi_item_sequence_expression(
-    expression: ast.expr,
-    *,
-    local_assignments: dict[str, ast.expr],
-    seen_names: set[str] | None = None,
-) -> bool:
-    if isinstance(expression, ast.Name):
-        seen_names = set(seen_names or set())
-        if expression.id in seen_names:
-            return False
-        target = local_assignments.get(expression.id)
-        if target is None:
-            return False
-        seen_names.add(expression.id)
-        return _is_multi_item_sequence_expression(
-            target,
-            local_assignments=local_assignments,
-            seen_names=seen_names,
-        )
-    if isinstance(expression, (ast.List, ast.Tuple, ast.Set)):
-        return len(expression.elts) > 1
-    return False
-
-
