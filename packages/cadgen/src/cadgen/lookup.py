@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -21,40 +20,6 @@ def _table_rows(manifest: dict[str, Any], table_name: str, columns_name: str) ->
     return materialized
 
 
-def _buffer_rows(buffers: Mapping[str, Any] | None, view_name: object) -> list[int]:
-    if not isinstance(view_name, str) or buffers is None:
-        return []
-    values = buffers.get(view_name)
-    if values is None:
-        return []
-    try:
-        return [int(value) for value in values]
-    except (TypeError, ValueError):
-        return []
-
-
-def _relations(manifest: dict[str, Any], buffers: Mapping[str, Any] | None = None) -> dict[str, list[int]]:
-    relations = manifest.get("relations")
-    if not isinstance(relations, dict):
-        return {"faceEdgeRows": [], "edgeFaceRows": [], "edgeVertexRows": [], "vertexEdgeRows": []}
-
-    def rows(name: str) -> list[int]:
-        inline = relations.get(name)
-        if isinstance(inline, list):
-            try:
-                return [int(value) for value in inline]
-            except (TypeError, ValueError):
-                return []
-        return _buffer_rows(buffers, relations.get(f"{name}View"))
-
-    return {
-        "faceEdgeRows": rows("faceEdgeRows"),
-        "edgeFaceRows": rows("edgeFaceRows"),
-        "edgeVertexRows": rows("edgeVertexRows"),
-        "vertexEdgeRows": rows("vertexEdgeRows"),
-    }
-
-
 @dataclass(frozen=True)
 class SelectorIndex:
     occurrences: list[dict[str, Any]]
@@ -62,7 +27,6 @@ class SelectorIndex:
     faces: list[dict[str, Any]]
     edges: list[dict[str, Any]]
     vertices: list[dict[str, Any]]
-    relations: dict[str, list[int]]
     occurrence_by_id: dict[str, dict[str, Any]]
     shape_by_id: dict[str, dict[str, Any]]
     face_by_id: dict[str, dict[str, Any]]
@@ -84,13 +48,12 @@ class SelectorIndex:
     group_nodes: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
-def build_selector_index(manifest: dict[str, Any], *, buffers: Mapping[str, Any] | None = None) -> SelectorIndex:
+def build_selector_index(manifest: dict[str, Any]) -> SelectorIndex:
     occurrences = _table_rows(manifest, "occurrences", "occurrenceColumns")
     shapes = _table_rows(manifest, "shapes", "shapeColumns")
     faces = _table_rows(manifest, "faces", "faceColumns")
     edges = _table_rows(manifest, "edges", "edgeColumns")
     vertices = _table_rows(manifest, "vertices", "vertexColumns")
-    relations = _relations(manifest, buffers=buffers)
 
     occurrence_by_id = {str(row.get("id")): row for row in occurrences if row.get("id")}
     shape_by_id = {str(row.get("id")): row for row in shapes if row.get("id")}
@@ -115,7 +78,6 @@ def build_selector_index(manifest: dict[str, Any], *, buffers: Mapping[str, Any]
         faces=faces,
         edges=edges,
         vertices=vertices,
-        relations=relations,
         occurrence_by_id=occurrence_by_id,
         shape_by_id=shape_by_id,
         face_by_id=face_by_id,
@@ -209,57 +171,3 @@ def lookup_selector(selector: str, index: SelectorIndex) -> tuple[str, dict[str,
     if normalized in index.vertex_by_id:
         return "vertex", index.vertex_by_id[normalized]
     return None
-
-
-def face_adjacent_edge_selectors(face_row: dict[str, Any], index: SelectorIndex) -> list[str]:
-    start = int(face_row.get("edgeStart") or 0)
-    count = int(face_row.get("edgeCount") or 0)
-    selectors: list[str] = []
-    for edge_row_index in index.relations.get("faceEdgeRows", [])[start : start + count]:
-        if 0 <= int(edge_row_index) < len(index.edges):
-            selectors.append(str(index.edges[int(edge_row_index)].get("id")))
-    return selectors
-
-
-def edge_adjacent_face_selectors(edge_row: dict[str, Any], index: SelectorIndex) -> list[str]:
-    start = int(edge_row.get("faceStart") or 0)
-    count = int(edge_row.get("faceCount") or 0)
-    selectors: list[str] = []
-    for face_row_index in index.relations.get("edgeFaceRows", [])[start : start + count]:
-        if 0 <= int(face_row_index) < len(index.faces):
-            selectors.append(str(index.faces[int(face_row_index)].get("id")))
-    return selectors
-
-
-def edge_adjacent_vertex_selectors(edge_row: dict[str, Any], index: SelectorIndex) -> list[str]:
-    start = int(edge_row.get("vertexStart") or 0)
-    count = int(edge_row.get("vertexCount") or 0)
-    selectors: list[str] = []
-    for vertex_row_index in index.relations.get("edgeVertexRows", [])[start : start + count]:
-        if 0 <= int(vertex_row_index) < len(index.vertices):
-            selectors.append(str(index.vertices[int(vertex_row_index)].get("id")))
-    return selectors
-
-
-def vertex_adjacent_edge_selectors(vertex_row: dict[str, Any], index: SelectorIndex) -> list[str]:
-    start = int(vertex_row.get("edgeStart") or 0)
-    count = int(vertex_row.get("edgeCount") or 0)
-    selectors: list[str] = []
-    for edge_row_index in index.relations.get("vertexEdgeRows", [])[start : start + count]:
-        if 0 <= int(edge_row_index) < len(index.edges):
-            selectors.append(str(index.edges[int(edge_row_index)].get("id")))
-    return selectors
-
-
-def vertex_adjacent_face_selectors(vertex_row: dict[str, Any], index: SelectorIndex) -> list[str]:
-    selectors: list[str] = []
-    seen: set[str] = set()
-    for edge_selector in vertex_adjacent_edge_selectors(vertex_row, index):
-        edge_row = index.edge_by_id.get(edge_selector)
-        if edge_row is None:
-            continue
-        for face_selector in edge_adjacent_face_selectors(edge_row, index):
-            if face_selector not in seen:
-                seen.add(face_selector)
-                selectors.append(face_selector)
-    return selectors
