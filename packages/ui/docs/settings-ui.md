@@ -182,11 +182,13 @@ again, as it was.
 A tree is Select's panel, so it is used under Select; a tree row's menu action
 returns to Select before it acts.
 
-**No tool panel folds, and only a kept effect's has an X.** Measure's, Explode's,
-Clip's and Position's panels have an X only once kept, their tool not in hand: it
-removes the effect (clears the results, resets the pose). In hand, they have none:
-another tool puts them down. Animation's X puts it down and returns to Select, the
-default tool, which cannot itself be put down. Draw's panel is a toolbar with no
+**An X is there while an effect is set.** Measure's, Explode's, Clip's and Position's
+panels have an X whenever their effect is set — results taken, an amount or a cut
+applied, a pose off its default — with the tool in hand or kept: it removes the effect
+(clears the results, resets the pose), leaving the tool in hand as it is. It comes in
+lightly as the effect is set (a 150ms fade and grow; none under reduced motion). Unset,
+there is no X: another tool puts them down. Animation's X puts it down and returns to
+Select, the default tool, which cannot itself be put down. Draw's panel is a toolbar with no
 heading and no X. A robot's Links has an X too, which closes the tree alone and leaves Select
 the tool; a press on Select while it is up opens it again (see
 [Closing the tree](#the-tool-stack)). A STEP's Features has none. SDF folds instead.
@@ -239,9 +241,10 @@ parts, `LARGE_TREE_ROWS`) a part's row coming on screen asks for nothing: the
 pointer resting on the part in the viewport (150ms) or pressing it asks.
 
 **Draw.** Its **Drawing** panel leads the stack while Draw is up, with no heading
-and no X: choosing another tool puts it down. It holds the tools, then a rule
+and no X: choosing another tool puts it down. It holds the tools — the ones that draw
+first, the pen leading, then Select and move and Pan at the end — then a rule
 across the panel, then a row of Color, Stroke width (Thin, Medium, Bold — a shape's
-1, 2 or 4px, the pen drawn to look the same weight, its glyph a level line), Line
+1, 2 or 4px, the pen drawn to look the same weight, its glyph a dot 3, 5 or 7px across), Line
 style (Solid, Dashed, Dotted — a shape's line; the pen's freehand ink is always
 solid; its glyph a diagonal line, drawn in the style), Undo, Redo and Clear; both
 are grids of 24px columns spread across the panel's width, their columns lined up,
@@ -253,9 +256,8 @@ with it (Undo has nothing to bring back), and leaves Draw the tool, on the tool,
 colour, weight and line style in hand. Undo and Redo are disabled when their
 history is empty. The select tool uses lucide's SquareMousePointer. The pencil and
 the shapes share one default stroke width. The Drawing panel always ends in a
-full-row **Copy Drawing** (**Copy** where the panel is too narrow for its name),
-disabled until there is ink, which writes the view with its ink to the clipboard as
-a PNG and then says **Copied**, a tick where the shortcut was; the copy shortcut
+full-row **Copy Drawing** (**Copy** where the panel is too narrow for its name), which
+writes the view with its ink — or without any yet — to the clipboard as a PNG and then says **Copied**, a tick where the shortcut was; the copy shortcut
 does the same. A sketch begun opens
 [Quick Edit](#quick-edit), whose header says **drawing** while the ink is there. Draw disables the cube without hiding it.
 
@@ -294,12 +296,12 @@ as Select's does: the ruler badged with the mode's glyph (`data-measure-mode`).
 Completed measurements are the panel's body, and keep the panel in the
 stack when another tool is taken up: kept, its heading is its title and an X alone,
 no mode menu, and a press on Measure takes it up again, results and all. A press on
-Measure while it is up does nothing. The kept panel's X clears the results. Removing
+Measure while it is up does nothing. Its X, there whenever it has results, clears them
+(Measure, in hand, stays the tool). Removing
 the last result leaves Measure picking, its panel empty. There is no Clear All footer.
 
-**Measure, Explode and Clip** do not fold: their X — there only while kept, their
-tool not in hand — is how a person is done with one (it clears the results or
-removes the effect).
+**Measure, Explode and Clip** do not fold: their X — there while the effect is set —
+is how a person is done with one (it clears the results or removes the effect).
 
 **Position kept.** A pose that is not the default stays when Position is put down,
 and shows as a small panel in the stack, as a kept effect does (`KeptPositionPanel`):
@@ -309,7 +311,8 @@ dropdown of Default, the named poses, and Custom while the joints are set by han
 switch poses without taking the tool up (Default puts the pose back, and the panel goes).
 With no named pose, the heading says Custom beside the title instead. A press on
 Position takes the tool up again, its full panel and joint handles with it. The Position
-panel itself has no X: its heading's Reset puts the pose back, another tool puts it down.
+panel itself has its X — "Reset position", the default pose back — while the pose is off
+its default. Another tool puts it down.
 
 **Explode and Clip** have no enabled checkbox, and are drawn alike: the
 amount in the heading beside the title, one row for a body — Explode's a
@@ -404,8 +407,8 @@ stack.
   panel (`ToolPanelClose` is its X) and `panel: { id, label }` on the tool it
   belongs to; the frame draws the mark, routes the press and starts the panel
   (`RendererShell.jsx`).
-- **Folding.** Only Select's SDF panel and a robot's Reference fold: every tool
-  panel and a STEP's Reference has an X alone. A folding panel folds to its first row and unfolds again,
+- **Folding.** Only Select's SDF panel and a robot's Reference fold: every other panel
+  has an X or nothing. A folding panel folds to its first row and unfolds again,
   by a chevron at that row's trailing end: up while open (fold), down while
   folded (open), with `aria-expanded` and the panel's name ("Collapse sdf").
   Folded content stays mounted.
@@ -417,16 +420,15 @@ stack.
   headings' text (11px, regular, `TOOL_PANEL_HEADING_TEXT_CLASS`), 28px tall,
   8px in — a title; a summary where there is one (Explode's and Clip's amount);
   then, at its right
-  end, its own actions (a mode or settings menu — Measure's — or Position's
-  Reset), the chevron where it folds, and an X where a kept effect can be removed.
+  end, its own actions (a mode or settings menu — Measure's), the chevron where it
+  folds, and an X where an effect is set and can be removed.
   Every small button in a heading or a filter row is 20px, 2px apart and 4px from
   the edge, so the icons line up down the stack. The Reference's heading is the
   reference itself, then an X that clears the selection; a kept panel's X removes
   the effect.
 - **Footers.** A panel can end in one full-row button under its body, which
   never scrolls (`footer`, `ToolPanelFooterButton`): the Reference's **Copy
-  References**, every one selected, and Drawing's **Copy Drawing**, disabled until there
-  is ink. Where the button is too narrow for its name and shortcut (under 9rem), it says
+  References**, every one selected, and Drawing's **Copy Drawing**. Where the button is too narrow for its name and shortcut (under 9rem), it says
   **Copy**. The button shows the copy shortcut in the
   platform's form (a phone shows none); after a copy it says **Copied** for a
   moment, a tick where the shortcut was.
@@ -590,8 +592,8 @@ the person comes back to the page.
 
 ## Position and references
 
-The **Position** panel is headed "Position", with a small Reset icon and its
-X in its heading, and is sized like the tree: its content's height, capped at
+The **Position** panel is headed "Position", with, while the pose is off its default,
+its X ("Reset position") in its heading, and is sized like the tree: its content's height, capped at
 the stack's, with its corner grip. Its first row is "Pose" — a label
 beside its dropdown (`KinematicsPoseRow`) — only when there is a named pose to
 choose; the dropdown includes Default, and manual edits show Custom. No divider

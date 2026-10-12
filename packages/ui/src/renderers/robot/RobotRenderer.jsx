@@ -10,7 +10,7 @@ import { usePreviewState, useRendererShell } from "../kit/shell/useRendererShell
 import { failureAlert } from "../kit/status/loadAlerts.js";
 import JointHandleOverlay from "../kit/tools/pose/JointHandleOverlay.jsx";
 import ToolPanel from "../kit/tools/ToolPanel.jsx";
-import { KeptPositionPanel, MotionResetButton, PositionToolIcon, positionValuesAreDefault } from "../kit/inspector/kinematicsControls.jsx";
+import { KeptPositionPanel, PositionToolIcon, positionValuesAreDefault } from "../kit/inspector/kinematicsControls.jsx";
 
 /** What a kept robot pose is: its group state's name where it is at one, otherwise Custom. */
 function keptPoseLabel(pose) {
@@ -221,10 +221,10 @@ function RobotSurface({ view, data }) {
   // Whether the pose is not the opening one, for the kept Position panel: a boolean read off the
   // pose store, so moving a control re-renders this only when it flips.
   const noPose = useCallback(() => () => {}, []);
-  // Read only while Position is not the tool (the kept line's case), so a pose step under the tool
-  // renders nothing here even as it swings past the default.
+  // Whether the pose is off its default: the Position panel's X and the kept panel. A boolean read
+  // off the pose store, so a pose step renders this only as the pose leaves or reaches the default.
   const poseCustom = useSyncExternalStore(pose ? pose.subscribe : noPose,
-    () => !poseActive && Boolean(pose) && !positionValuesAreDefault(pose.getSnapshot().values, pose.defaults));
+    () => Boolean(pose) && !positionValuesAreDefault(pose.getSnapshot().values, pose.defaults));
   // Position is offered where a control can be driven; until the robot has loaded that is not
   // known, and it is shown, idle, meanwhile.
   const tools = [
@@ -243,10 +243,10 @@ function RobotSurface({ view, data }) {
     {kind === "sdf" ? <ToolPanel id="sdf" title="SDF" label="SDF" fit="details" defaultCollapsed hidden={!linksShown}>
       <SdfSection info={robot?.robot?.sdf || null} />
     </ToolPanel> : null}
-    {/* Headed "Position" with its Reset; sized like the tree: its content's height, up to the
-        stack's. No X: Select puts Position down, and the pose stays. */}
-    {posable && pose ? <ToolPanel id="position" title="Position" actions={<MotionResetButton onReset={pose.reset} />} label="Position controls"
-      fit="details" resizable collapsible={false} hidden={!poseActive} lead={poseActive}>
+    {/* Headed "Position", and its X while the pose is off its default (the X resets it); sized like
+        the tree. Select puts Position down, and the pose stays. */}
+    {posable && pose ? <ToolPanel id="position" title="Position" label="Position controls" closeLabel="Reset position"
+      onClose={poseCustom ? pose.reset : null} fit="details" resizable collapsible={false} hidden={!poseActive} lead={poseActive}>
       <PositionControls key={robot.revision} pose={pose} />
     </ToolPanel> : null}
     {/* A pose that is not the default, kept while Position is not the tool: one line, its X the Reset. */}

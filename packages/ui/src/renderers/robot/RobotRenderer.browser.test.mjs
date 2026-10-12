@@ -135,6 +135,9 @@ async function open(t, file, { panel = true } = {}) {
       .filter(panel => panel.getClientRects().length > 0).map(panel => panel.getAttribute('aria-label'))),
     linksPanel: () => pane.locator('[data-tool-panel][aria-label="Links"]'),
     position: () => pane.locator('[data-tool-panel][aria-label="Position controls"]'),
+    // The Position panel's X, there while the pose is off its default: the one render a pose step
+    // may cause beyond the host's record, as the pose leaves or reaches the default.
+    posedMark: () => pane.locator('[data-tool-panel][aria-label="Position controls"] [data-tool-panel-heading] button[aria-label="Reset position"]').count(),
     section: name => pane.getByRole('region', { name, exact: true }),
     settle: () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))),
     // The viewport's own pixels, without any chrome over them: what a host capture returns.
@@ -187,12 +190,11 @@ test('a robot can enter Position with sidebar controls: knobs drag joints, the c
   assert.equal(await robot.displayPanel().count(), 0, 'Display is never where a file opens');
   assert.equal(await pane.getByRole('tab').count(), 0, 'no tabs');
   assert.deepEqual(await robot.stack(), ['Position controls']);
-  // Headed "Position", with its Reset and the fold chevron in the heading.
+  // Headed "Position"; at the default pose, nothing to fold and no X (it resets a pose off it).
   const positionHeading = robot.position().locator('[data-tool-panel-heading]');
   assert.equal((await positionHeading.getByRole('heading').innerText()).trim(), 'Position');
-  assert.equal(await positionHeading.getByRole('button', { name: 'Reset', exact: true }).count(), 1);
-  // It does not fold: its heading is Reset, then the X that puts Position down.
-  assert.deepEqual(await positionHeading.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))), ['Reset'], 'no X: Select puts Position down');
+  assert.deepEqual(await positionHeading.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
+    [], 'no X at the default pose');
   await robot.openPosition();
   // One knob per moving joint row of the articulation: no fixed joint; a mimic follower's knob
   // writes its leader. A slider exists per CONTROL, so the follower has none, nor the fixed joint.
@@ -263,13 +265,17 @@ test('a robot can enter Position with sidebar controls: knobs drag joints, the c
   await robot.waitCursor('grabbing');
   const radius = Math.hypot(shoulder.x - shoulder.pivotX, shoulder.y - shoulder.pivotY);
   const bearing = Math.atan2(shoulder.y - shoulder.pivotY, shoulder.x - shoulder.pivotX);
-  // Whether the pose is off its default is read only while Position is not the tool (the kept
-  // line's case), so a step under the tool renders nothing, even leaving the default.
+  // The Position panel's X (the pose is off its default) is the one thing a step may render, and
+  // only as the pose leaves or reaches its default: counted, never per step.
+  let flips = 0, marked = await robot.posedMark();
   for (let step = 1; step <= 9; step += 1) {
     const angle = bearing + (step * Math.PI) / 18;
     await page.mouse.move(...at(shoulder.pivotX + radius * Math.cos(angle), shoulder.pivotY + radius * Math.sin(angle)));
     await robot.settle();
+    const now = await robot.posedMark();
+    if (now !== marked) { flips += 1; marked = now; }
   }
+  assert.ok(flips <= 1, 'a drag one way leaves the default once at most');
   await page.waitForFunction(start => Math.abs(window.__cadJointHandles().find(handle => handle.id === 'shoulder').value - start) > 20, home);
   const held = (await robot.handles()).shoulder.value;
   assert.match(await pane.locator('[data-cad-joint-handle-label]').textContent(), /^shoulder\s+-?\d+\.\d°$/);
@@ -294,7 +300,7 @@ test('a robot can enter Position with sidebar controls: knobs drag joints, the c
   assert.equal(dragged.lastPoseWrites, 1, 'a pose step writes the one joint that changed');
   assert.ok(dragged.poseWrites - before.poseWrites >= 5 && dragged.poseWrites - before.poseWrites <= 12, JSON.stringify({ before, dragged }));
   // (The one render a drag may cost is the host storing the debounced record, not a step.)
-  assert.ok(dragged.surfaceRenders - before.surfaceRenders <= 1, `no React state sits in the per-pose path: ${JSON.stringify({ before, dragged })}`);
+  assert.ok(dragged.surfaceRenders - before.surfaceRenders <= 1 + flips, `no React state sits in the per-pose path: ${JSON.stringify({ before, dragged, flips })}`);
   assert.equal((await poseSelect.innerText()).trim(), 'Custom', 'a joint moved by hand releases the named pose');
 
   // A sliding joint's knob sits ON its pivot, its track runs through it, and it drags to its limit and no further.
@@ -353,7 +359,7 @@ test('a robot can enter Position with sidebar controls: knobs drag joints, the c
   assert.equal((await robot.handles()).lift.value, 0.2);
   assert.equal((await robot.handles()).grip.value, 0.03, 'a named pose merges over the pose as it is');
   assert.equal((await poseSelect.innerText()).trim(), 'raised');
-  assert.deepEqual(await shoulderFrames(() => position.getByRole('button', { name: 'Reset', exact: true }).click(), round6(home)), [round6(raised), round6(home)], 'Reset jumps, back to the SRDF home pose');
+  assert.deepEqual(await shoulderFrames(() => position.getByRole('button', { name: 'Reset position', exact: true }).click(), round6(home)), [round6(raised), round6(home)], 'the X jumps, back to the SRDF home pose');
   assert.equal((await robot.handles()).grip.value, 0);
   assert.equal((await poseSelect.innerText()).trim(), 'Default');
 
@@ -763,19 +769,23 @@ test('a pose step costs the same on a long chain: one matrix, no component', asy
   await page.waitForFunction(() => document.querySelector('[data-testid="one"] [data-cad-joint-handle-label]')?.textContent.startsWith('j0'));
   await page.mouse.down();
   const before = await robot.stats();
+  // The Position panel's X turning on or off as the swing leaves or passes the default is the
+  // one render allowed beyond the host's record; read it between steps.
+  let flips = 0, marked = await robot.posedMark();
   const STEPS = 30;
   for (let step = 1; step <= STEPS; step += 1) {
     const angle = bearing + Math.sin((step / STEPS) * Math.PI * 2) * 0.6;
     await page.mouse.move(surface.x + knob.pivotX + radius * Math.cos(angle), surface.y + knob.pivotY + radius * Math.sin(angle));
     await robot.settle();
+    const now = await robot.posedMark();
+    if (now !== marked) { flips += 1; marked = now; }
   }
   await page.mouse.up();
   const moved = await robot.stats();
   // The root joint carries all 29 links below it, and still one matrix is written per step.
   assert.equal(moved.lastPoseWrites, 1, 'a step writes the one joint that moved');
   assert.ok(moved.poseWrites - before.poseWrites >= STEPS * 0.8 && moved.poseWrites - before.poseWrites <= STEPS, JSON.stringify({ before, moved }));
-  // Whether the pose is kept (not the default) is read only while Position is not the tool, so a
-  // swing past the default renders nothing either.
-  assert.ok(moved.surfaceRenders - before.surfaceRenders <= 2, `no component of the renderer renders for a pose step: ${JSON.stringify({ before, moved })}`);
+  assert.ok(moved.surfaceRenders - before.surfaceRenders <= 2 + flips, `no component of the renderer renders for a pose step: ${JSON.stringify({ before, moved, flips })}`);
+  assert.ok(flips <= 4, `the X turns only as the swing leaves and reaches the default: ${flips}`);
   assert.deepEqual(robot.errors, []);
 });

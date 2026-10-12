@@ -1,6 +1,4 @@
-import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
-import { RotateCcw, Spline } from "lucide-react";
-import { Button } from "@text-to-cad/ui/primitives/button";
+import { Spline } from "lucide-react";
 import { cn } from "@text-to-cad/ui/utils";
 import { FILE_SHEET_FIELD_LABEL_CLASSES, FileSheetSelectRow } from "./FileSheet.js";
 import ToolPanel from "../tools/ToolPanel.jsx";
@@ -19,7 +17,7 @@ export function positionValuesAreDefault(values, defaults) {
 /**
  * The Pose row of a Position panel: a "Pose" label beside its dropdown, drawn only when there is a
  * named pose to choose; Default leads the options when the panel can reset. Without a named pose
- * there is no row: Reset is the panel heading's (`MotionResetButton`).
+ * there is no row: the panel's X puts the default pose back.
  */
 export function KinematicsPoseRow({ poses = [], activeValue, onSelect, onReset }) {
   if (!poses.length) return null;
@@ -55,11 +53,3 @@ export function KeptPositionPanel({ summary = "Custom", onReset, poseRow = null 
   </ToolPanel>;
 }
 
-/** A Position panel's Reset: in its heading, before the fold chevron. */
-export function MotionResetButton({ onReset }) {
-  if (!onReset) return null;
-  return <TooltipHint content="Reset motion"><Button variant="ghost" size="icon-xs" className="size-5 shrink-0 text-muted-foreground"
-    onClick={onReset} aria-label="Reset">
-    <RotateCcw className="size-3" aria-hidden="true" />
-  </Button></TooltipHint>;
-}

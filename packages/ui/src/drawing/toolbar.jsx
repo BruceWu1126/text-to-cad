@@ -25,14 +25,14 @@ const INK_TOOLS = [
   { id: 'fill', label: 'Fill area', Icon: PaintBucket },
   { id: 'eraser', label: 'Eraser', Icon: Eraser },
 ];
-// Navigation comes first, followed by ink tools.
+// Selecting and panning come after the ink tools: the tools that draw lead.
 /** @type {readonly { id: DrawingTool, label: string, Icon: typeof Hand }[]} */
 const HANDLING_TOOLS = [
   { id: 'selection', label: 'Select and move drawings', Icon: SquareMousePointer },
   { id: 'hand', label: 'Pan view', Icon: Hand },
 ];
 /** @type {readonly { id: DrawingTool, label: string, Icon: typeof Hand }[]} */
-export const DRAWING_TOOLBAR_TOOLS = [...HANDLING_TOOLS, ...INK_TOOLS];
+export const DRAWING_TOOLBAR_TOOLS = [...INK_TOOLS, ...HANDLING_TOOLS];
 /** @type {readonly DrawingTool[]} */
 export const DRAWING_TOOLS = DRAWING_TOOLBAR_TOOLS.map(tool => tool.id);
 
@@ -67,12 +67,16 @@ export const DRAWING_STROKE_STYLES = [
   { value: 'dashed', label: 'Dashed' },
   { value: 'dotted', label: 'Dotted' },
 ];
-// The style as a 2px line across a button, on the diagonal (the weight is the level line beside it), dashed or dotted as it draws.
+// The style as a 2px line across a button, on the diagonal, dashed or dotted as it draws.
 const STYLE_DASHES = Object.freeze({ solid: undefined, dashed: '4 2.5', dotted: '0.01 3.5' });
 const styleGlyph = style => <svg aria-hidden="true" viewBox="0 0 12 12" className="size-3" fill="none" stroke="currentColor"
   strokeWidth="2" strokeLinecap="round"><path d="M2 10L10 2" strokeDasharray={STYLE_DASHES[style]} /></svg>;
-// The weight as a line across a button: 1px, 2px or 3px drawn, whatever it draws on the model.
-const strokeGlyph = width => <span aria-hidden="true" className="block w-3 rounded-full bg-current" style={{ height: `${width === 1 ? 1 : width === 2 ? 2 : 3}px` }} />;
+// The weight as a dot, 3px, 5px or 7px across, whatever it draws on the model: a dot, so it never
+// reads as a line style.
+const strokeGlyph = width => {
+  const size = width === 1 ? 3 : width === 2 ? 5 : 7;
+  return <span aria-hidden="true" className="block rounded-full bg-current" style={{ width: `${size}px`, height: `${size}px` }} />;
+};
 
 // Two rows of seven by default, the width of the block fixed by that count; a
 // container narrower than it wraps the same buttons into more rows.

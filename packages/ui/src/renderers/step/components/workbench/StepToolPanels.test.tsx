@@ -209,7 +209,7 @@ it('Explode and Clip open neutral, stack under the strip one width, are headed b
   fireEvent.keyDown(slider('Clip amount'), { key: 'PageUp' });
   expect(viewSettings.clip.enabled).toBe(true);
   // Neither folds: a heading of its name and its amount; each a fixed panel the one width. The X is
-  // a kept panel's alone: Clip, in hand, has none; Explode, kept, has its own.
+  // there while the effect is set, in hand or kept: both are applied.
   const buttons = (label: string) => [...region(label)!.querySelector<HTMLElement>('[data-tool-panel-heading]')!.querySelectorAll('button')]
     .map(button => button.getAttribute('aria-label'));
   for (const [name, label] of [['Explode', 'Explode controls'], ['Clip', 'Clip controls']]) {
@@ -218,7 +218,7 @@ it('Explode and Clip open neutral, stack under the strip one width, are headed b
     expect(heading.textContent).toMatch(new RegExp(`^${name}\\d+%$`));
     expect([region(label)!.getAttribute('data-tool-panel'), region(label)!.style.width]).toEqual(['fixed', `${TOOL_PANEL_WIDTH}px`]);
   }
-  expect([buttons('Explode controls'), buttons('Clip controls')]).toEqual([['Close explode controls'], []]);
+  expect([buttons('Explode controls'), buttons('Clip controls')]).toEqual([['Close explode controls'], ['Close clip controls']]);
   // A second press on the tool in hand does nothing. The panel of the tool in hand leads the stack.
   await user.click(tool('Clip'));
   expect([pressed(), shown()]).toEqual([['Clip'], ['Explode controls', 'Clip controls']]);
@@ -232,9 +232,13 @@ it('Explode and Clip open neutral, stack under the strip one width, are headed b
   expect(shown()).toEqual(['Explode controls', 'Clip controls']);
   expect(leads()).toEqual([]);
   expect([buttons('Explode controls'), buttons('Clip controls')]).toEqual([['Close explode controls'], ['Close clip controls']]);
-  // A press on a kept Clip takes it up again as it is; its X goes while it is in hand.
+  // A press on a kept Clip takes it up again as it is, its X still there: the cut is set.
   await user.click(tool('Clip'));
-  expect([pressed(), viewSettings.clip.enabled, buttons('Clip controls')]).toEqual([['Clip'], true, []]);
+  expect([pressed(), viewSettings.clip.enabled, buttons('Clip controls')]).toEqual([['Clip'], true, ['Close clip controls']]);
+  // In hand, its X takes the cut away and leaves Clip the tool, its panel neutral and without an X.
+  await user.click(within(region('Clip controls')!).getByRole('button', { name: 'Close clip controls' }));
+  expect([pressed(), viewSettings.clip.enabled, buttons('Clip controls')]).toEqual([['Clip'], false, []]);
+  fireEvent.keyDown(slider('Clip amount'), { key: 'PageUp' });
   await user.click(tool('Select'));
   // The kept Clip's X removes it; Explode keeps its amount.
   await user.click(within(region('Clip controls')!).getByRole('button', { name: 'Close clip controls' }));
@@ -325,20 +329,21 @@ function Position({ active = true }: { active?: boolean }) {
   const position = buildPositionSection({ poseRuntime: runtime })!;
   return <>
     <button type="button" aria-label="Position"><PositionToolIcon /></button>
-    <ToolPanel id="position" title={position.title} actions={position.actions} label="Position controls" fit="details" resizable
-      collapsible={false} hidden={!active}>{position.content}</ToolPanel>
+    <ToolPanel id="position" title={position.title} label="Position controls" fit="details" resizable collapsible={false} hidden={!active}
+      closeLabel="Reset position" onClose={position.custom ? position.onReset : null}>{position.content}</ToolPanel>
     {position.custom && !active ? <KeptPositionPanel summary={position.summary} onReset={position.onReset} poseRow={position.poseRow} /> : null}
   </>;
 }
 
-it("Position is headed with its Reset and no X, offers Default beside a named pose, names every joint's slider, and keeps a pose off its default as one line once put down", async () => {
+it("Position is headed with, off the default pose, its X, offers Default beside a named pose, names every joint's slider, and keeps a pose off its default once put down", async () => {
   const user = userEvent.setup({ pointerEventsCheck: 0 });
   const view = render(<Position />);
   const panel = screen.getByRole('region', { name: 'Position controls' });
   const heading = panel.querySelector<HTMLElement>('[data-tool-panel-heading]')!;
   expect(within(heading).getByRole('heading').textContent).toBe('Position');
-  // It does not fold, and has no X (another tool puts it down): Reset alone.
-  expect([...heading.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['Reset']);
+  // At the default pose, nothing to fold and no X.
+  const headingButtons = () => [...panel.querySelector<HTMLElement>('[data-tool-panel-heading]')!.querySelectorAll('button')].map(button => button.getAttribute('aria-label'));
+  expect(headingButtons()).toEqual([]);
   const preset = within(panel).getByRole('combobox', { name: 'Pose' });
   const value = within(panel).getByLabelText('hinge slider value') as HTMLInputElement;
   expect(preset.textContent).toBe('Default');
@@ -352,10 +357,16 @@ it("Position is headed with its Reset and no X, offers Default beside a named po
   await user.click(preset);
   await user.click(screen.getByRole('option', { name: 'Default' }));
   expect([value.value, preset.textContent]).toEqual(['0.00°', 'Default']);
-  // The strip's icon is the spline alone, posed or not.
+  // The strip's icon is the spline alone, posed or not. Off the default, the X comes, and puts the
+  // default pose back.
   await user.clear(value);
   await user.type(value, '25{Enter}');
   expect(preset.textContent).toBe('Custom');
+  expect(headingButtons()).toEqual(['Reset position']);
+  await user.click(within(panel).getByRole('button', { name: 'Reset position' }));
+  expect([value.value, preset.textContent, headingButtons()]).toEqual(['0.00°', 'Default', []]);
+  await user.clear(value);
+  await user.type(value, '25{Enter}');
   expect(screen.getByRole('button', { name: 'Position' }).querySelectorAll('svg')).toHaveLength(1);
   // Put down, the pose off its default is kept: headed "Position" with its X, and the Pose row to
   // switch between the named poses, Custom while the joints are set by hand.

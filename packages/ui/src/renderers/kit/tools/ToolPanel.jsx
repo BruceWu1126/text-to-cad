@@ -73,6 +73,10 @@ function CollapseButton({ panel, className }) {
   </button>;
 }
 
+// An X comes in lightly as it appears (a kept effect set, a pose moved off its default): a short
+// fade and grow, none under reduced motion.
+const REVEAL_CLASS = "animate-in fade-in-0 zoom-in-75 duration-150 motion-reduce:animate-none";
+
 /**
  * The X that closes the panel it is drawn in, for a closable panel whose first row is its
  * content's own: a tree's filter row. Drawn at that row's trailing end, inside a `closable`
@@ -229,7 +233,7 @@ export default function ToolPanel({ id, title = null, name = "", label, summary 
     {actions}
     {folding ? <CollapseButton panel={folding} /> : null}
     {onClose ? <button type="button" aria-label={closeLabel || `Close ${label.toLowerCase()}`}
-      className={TOOL_PANEL_BUTTON_CLASS} onClick={onClose}><X className="size-3" aria-hidden="true" /></button> : null}
+      className={cn(TOOL_PANEL_BUTTON_CLASS, REVEAL_CLASS)} onClick={onClose}><X className="size-3" aria-hidden="true" /></button> : null}
   </div>
     // No heading of its own: a folding panel's name stands in for one, beside its chevron.
     : folding ? <div className="flex min-h-7 shrink-0 items-center gap-0.5 pl-2 pr-1" data-tool-panel-heading="">

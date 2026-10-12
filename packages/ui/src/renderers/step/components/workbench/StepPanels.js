@@ -137,10 +137,12 @@ export function useStepPanels({
         disabled={disabled} onClick={selectionCopy.onCopy}/> : null}>
       <div className="px-2 pb-1.5">{selectionDetails.content}</div>
     </ToolPanel> : null}
-    {/* Headed "Position" with its Reset; sized like every resizable panel: its content's height, up
-        to the stack's. No X: another tool puts Position down, and the values stay. */}
-    {position ? <ToolPanel id="position" title={position.title} actions={position.actions} label="Position controls" fit="details" resizable
-      collapsible={false} hidden={!positionActive} lead={positionActive}>{position.content}</ToolPanel> : null}
+    {/* Headed "Position", and its X while the pose is off its default (the X resets it); sized like
+        every resizable panel: its content's height, up to the stack's. Another tool puts Position
+        down, and the values stay. */}
+    {position ? <ToolPanel id="position" title={position.title} label="Position controls" fit="details" resizable collapsible={false}
+      hidden={!positionActive} lead={positionActive} closeLabel="Reset position"
+      onClose={position.custom && position.onReset ? position.onReset : null}>{position.content}</ToolPanel> : null}
     {/* A pose that is not the default, kept while Position is not the tool: one line, its X the Reset. */}
     {position?.custom && !positionActive && position.onReset ? <KeptPositionPanel summary={position.summary} onReset={position.onReset}
       poseRow={position.poseRow} /> : null}

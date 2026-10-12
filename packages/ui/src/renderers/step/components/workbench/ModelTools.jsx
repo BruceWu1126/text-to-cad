@@ -23,8 +23,8 @@ function ClipIcon(props) {
  * stack that outlives the tool being in hand. Measure's is up while it is the tool — its snapping
  * a menu in its heading (`measure.actions`), its results, if any, the body — and stays while it
  * has results (`measure.shown`). A press on one in hand does nothing; on a kept one it takes it
- * up again, as it is. A panel's X — removing the effect — is there only while it is kept, its
- * tool not in hand.
+ * up again, as it is. A panel's X — removing the effect — is there while the effect is set
+ * (`measure.removable`: there are results), in hand or kept; in hand, the tool stays up.
  *
  * A tool the file cannot offer is not on the strip: Explode needs two parts to separate. While
  * the mesh is still loading that is not known yet, so Explode is shown, idle, until it is.
@@ -78,9 +78,11 @@ export function useModelTools({ modelKey, view, features, store, mesh, disabled,
     if (id === "measure") { measure.onRemove(); return; }
     else if (id === "exploded") store.patch({ exploded: { enabled: false, amount: 0 } });
     else store.patch({ clip: { enabled: false, axis: "x", invert: false } });
-    setPanels(current => ({ modelKey, ids: current.ids.filter(value => value !== id) }));
-    if (selectedTool === id) onSelect("references");
+    // In hand, the tool stays up, its panel neutral; kept, the panel goes with the effect.
+    if (selectedTool !== id) setPanels(current => ({ modelKey, ids: current.ids.filter(value => value !== id) }));
   };
+  // Set: measurements taken, an explode or a cut applied — what an X can take away.
+  const set = id => id === "measure" ? Boolean(measure?.removable) : applied.includes(id);
   return {
     tools: definitions.filter(tool => tool.id !== "measure" && !tool.unavailable).map(({ id, label, Icon }) => ({
       // Lit while it is the tool alone: a kept effect shows in the stack, not on the strip.
@@ -103,11 +105,10 @@ export function useModelTools({ modelKey, view, features, store, mesh, disabled,
       {[...(measure?.shown ? ["measure"] : []), ...panelIds].map(id => {
         const tool = definitions.find(value => value.id === id);
         // Measure's results can run long, so they give way like a details panel; Explode and
-        // Clip are one slider and keep their height. None of them folds. The X is how a person
-        // is done with a kept one, there only while its tool is not in hand: in hand, another
-        // tool puts it down.
+        // Clip are one slider and keep their height. None of them folds. The X is there while the
+        // effect is set, in hand or kept, and takes it away; another tool puts the tool down.
         return tool ? <ToolPanel key={id} id={id} title={tool.label} label={`${tool.label} controls`} summary={tool.summary} actions={tool.actions}
-          fit={id === "measure" ? "details" : "fixed"} collapsible={false} onClose={selectedTool === id ? null : () => remove(id)}
+          fit={id === "measure" ? "details" : "fixed"} collapsible={false} onClose={set(id) ? () => remove(id) : null}
           lead={selectedTool === id}>
           <div className="space-y-1 pb-1">{tool.controls}</div>
         </ToolPanel> : null;

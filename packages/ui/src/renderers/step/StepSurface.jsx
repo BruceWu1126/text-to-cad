@@ -3127,16 +3127,15 @@ function StepSurfaceBody({ view, data }) {
   const selectDisabled = viewerLoading || !selectedMeshData || referenceSelectionPending ||
     referenceSelectionUnavailable || topologySelectionDeferred;
   const toolIdle = viewerLoading || !selectedMeshData;
-  const removeMeasurements = () => {
-    measure.clear();
-    if (tabToolMode === TAB_TOOL_MODE.MEASURE) handleSelectTabToolMode(TAB_TOOL_MODE.REFERENCES);
-  };
+  // Clears the results; Measure, in hand, stays the tool.
+  const removeMeasurements = () => measure.clear();
   const modelEffects = useModelTools({ modelKey: selectedEntry?.file, view: desiredScene.view,
     features: viewFeatures, store: viewSettingsStore, mesh: selectedDisplayMeshData,
     disabled: toolIdle, selectedTool: tabToolMode, onSelect: handleSelectTabToolMode,
     measure: {
       // Up while Measure is the tool, empty or not, and kept while it has results.
       shown: tabToolMode === TAB_TOOL_MODE.MEASURE || measureMeasurements.length > 0,
+      removable: measureMeasurements.length > 0,
       onRemove: removeMeasurements,
       // Its snapping, a mode menu in the panel's heading while Measure is the tool; kept, the
       // heading has its X alone.

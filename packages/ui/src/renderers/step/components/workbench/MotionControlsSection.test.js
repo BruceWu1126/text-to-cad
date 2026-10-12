@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildPositionSection } from './MotionControlsSection.js';
 import PoseControlsSection from './PoseControlsSection.js';
-import { KinematicsPoseRow, MotionResetButton, NO_PRESET_VALUE } from '../../../kit/inspector/kinematicsControls.jsx';
+import { KinematicsPoseRow, NO_PRESET_VALUE } from '../../../kit/inspector/kinematicsControls.jsx';
 import { FileSheetSliderField } from '../../../kit/inspector/FileSheet.js';
 import { elements } from '../../../../../scripts/reactHarness.mjs';
 
@@ -29,7 +29,9 @@ test('one global Reset calls the coordinated host command', () => {
   const header = elements(PoseControlsSection(controls.props)).find(node => node.type === KinematicsPoseRow);
   header.props.onReset();
   assert.deepEqual(calls, ['both']);
-  assert.equal(elements(section.content).some(node => node.type === MotionResetButton), false, 'no separate bottom Reset');
+  // The panel's X is the same reset (`StepPanels.js`): the section hands it over, and no heading button.
+  assert.equal(section.onReset, pose.onResetMotion);
+  assert.equal('actions' in section, false, 'no Reset button of its own');
 });
 
 test("the pose row and the joints are ONE section's rows, with no section of their own; either can exist alone", () => {

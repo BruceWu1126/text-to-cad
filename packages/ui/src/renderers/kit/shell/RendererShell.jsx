@@ -180,12 +180,11 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
   // history, or the Animation tool's routine, transport and settings, whose X puts it down, back to
   // the default tool -- no X where Animation is the file's one tool, never put down. The
   // renderer's follow.
-  // Draw's controls, and Copy Drawing (the view with its ink) always at their foot, disabled until
-  // there is ink.
+  // Draw's controls, and Copy Drawing (the view with its ink, or without any yet) always at their foot.
   const shellPanels = <>
     {frame.drawToolActive ? <ToolPanel id="drawing" label="Drawing controls" collapsible={false}
       footer={<ToolPanelFooterButton label="Copy Drawing" shortLabel="Copy" shortcut={mobile ? "" : frame.copyShortcut}
-        disabled={viewerLoading || !scene || !frame.drawing.hasContent} onClick={frame.copyDrawing} />}>
+        disabled={viewerLoading || !scene} onClick={frame.copyDrawing} />}>
       <DrawingToolbar drawing={frame.drawing} layout="panel" className="p-1" />
     </ToolPanel> : null}
     {frame.animateToolActive ? <AnimationPanel runtime={playbackRuntime} autoplay={shell.autoplay}

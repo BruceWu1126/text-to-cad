@@ -70,12 +70,12 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   // then the marks; then, with no rule between, the colour, weight and line style they are made in, undo/redo and Clear.
   assert.deepEqual(await menu.getByRole('group', { name: 'Drawing tools' }).getByRole('button')
     .evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-  ['Select and move drawings', 'Pan view', 'Pen', 'Line', 'Arrow', 'Rectangle', 'Ellipse', 'Text', 'Fill area', 'Eraser']);
+  ['Pen', 'Line', 'Arrow', 'Rectangle', 'Ellipse', 'Text', 'Fill area', 'Eraser', 'Select and move drawings', 'Pan view']);
   assert.deepEqual(await menu.getByRole('group', { name: 'Drawing settings' }).getByRole('button')
     .evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
   ['Color', 'Stroke width', 'Line style', 'Undo', 'Redo', 'Clear drawing']);
-  // Copy Drawing is always there, disabled until there is ink.
-  assert.equal(await menu.getByRole('button', { name: 'Copy Drawing', exact: true }).isDisabled(), true, 'no ink: nothing to copy');
+  // Copy Drawing is always there, and live with no ink yet: it copies the view as it is.
+  assert.equal(await menu.getByRole('button', { name: 'Copy Drawing', exact: true }).isDisabled(), false, 'Copy Drawing with no ink');
   assert.equal(await pane.locator('.layer-ui__wrapper').isVisible(), false, 'the SDK has no controls of its own here');
   // Clear of the tool stack at the overlay's left, where the Drawing panel sits.
   const box = await pane.locator('[data-cad-drawing-overlay]').boundingBox();

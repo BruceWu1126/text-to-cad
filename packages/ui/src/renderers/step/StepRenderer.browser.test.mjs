@@ -825,7 +825,7 @@ test('Position drives the mate and repaints, a named pose jumps, the Position kn
   await page.getByRole('option', { name: 'open', exact: true }).click();
   await page.waitForFunction(() => /^90(\.0+)?°$/.test(document.querySelector('input[aria-label="hinge slider value"]').value));
   assert.equal((await preset.innerText()).trim(), 'open');
-  await panel.getByRole('button', { name: 'Reset', exact: true }).click();
+  await panel.getByRole('button', { name: 'Reset position', exact: true }).click();
   await page.waitForFunction(() => /^0(\.0+)?°$/.test(document.querySelector('input[aria-label="hinge slider value"]').value));
   await page.waitForFunction(rest => JSON.stringify(Array.from(window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix.slice(12, 15))) === JSON.stringify(rest), restArm)
     .catch(() => {});
@@ -879,7 +879,7 @@ test('Position drives the mate and repaints, a named pose jumps, the Position kn
   await slider.press('Enter');
   await page.waitForFunction(() => Math.abs(window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix[13]) > 1);
   const posedStage = await studioFloor();
-  await panel.getByRole('button', { name: 'Reset', exact: true }).click();
+  await panel.getByRole('button', { name: 'Reset position', exact: true }).click();
   await page.waitForFunction(() => /^0(\.0+)?°$/.test(document.querySelector('input[aria-label="hinge slider value"]').value));
   const restStage = await studioFloor();
   const boxShift = Math.max(...[0, 1, 2].flatMap(axis => [
