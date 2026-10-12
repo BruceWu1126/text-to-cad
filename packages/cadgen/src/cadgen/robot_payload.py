@@ -27,8 +27,8 @@ The payload::
 - ``placement`` is a row-major 4x4 in the robot's REST space (the description as written,
   every joint at zero): a link's is its frame, a visual's its mesh's -- the link frame, the
   visual's origin and the mesh's scale composed, so the page sets it on a mesh and nothing
-  else. A link's visuals sit under the joint that carries the link; the joint's delta
-  (``articulation.joint_matrices``) moves them. A visual's ``id`` is ``<link>:v<n>`` and its
+  else. A link's visuals sit under the joint that carries the link, and the joint's delta
+  (``cadgen.articulation``) moves them. A visual's ``id`` is ``<link>:v<n>`` and its
   ``label`` what a row calls it: the ``name`` the description gave it, else its geometry (the
   mesh file's name, or ``box``, ``cylinder``, ``sphere``, ``capsule``).
 - An SDF model's nested models (SDFormat 1.6+) are part of the robot: their links, frames

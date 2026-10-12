@@ -49,7 +49,6 @@ from cadgen.store.meshes import GLB_BIN_CHUNK, GLB_JSON_CHUNK, GLB_MAGIC, GLB_VE
 __all__ = [
     "TUBE_SKINS_SCHEMA_VERSION",
     "build_tube_skins",
-    "decode_tube_skins",
     "tube_skins_bytes",
     "tube_tracks",
 ]
@@ -132,33 +131,6 @@ def _glb(content: dict, arrays: list[np.ndarray]) -> bytes:
     total = 12 + 8 + len(text) + 8 + len(binary)
     return (struct.pack("<III", GLB_MAGIC, GLB_VERSION, total) + struct.pack("<II", len(text), GLB_JSON_CHUNK) + text
             + struct.pack("<II", len(binary), GLB_BIN_CHUNK) + binary)
-
-
-def decode_tube_skins(data: bytes) -> dict:
-    """The payload's content with every array field replaced by its numpy array
-    (flat, in its stored dtype): what a view reads, for tests and checks."""
-    magic, version, total = struct.unpack_from("<III", data)
-    if (magic, version) != (GLB_MAGIC, GLB_VERSION) or total != len(data):
-        raise ValueError("not a tube skins payload")
-    length, kind = struct.unpack_from("<II", data, 12)
-    gltf = json.loads(data[20:20 + length])
-    binary_length, binary_kind = struct.unpack_from("<II", data, 20 + length)
-    if kind != GLB_JSON_CHUNK or binary_kind != GLB_BIN_CHUNK:
-        raise ValueError("not a tube skins payload")
-    start = 28 + length
-    content = gltf["extras"]["cadgenTubeSkins"]
-    views = gltf["bufferViews"]
-    dtypes = {"indices": "<u4", "sourceTriangles": "<u4", "edgeOrdinals": "<u4", "edgeClasses": "|u1"}
-
-    def read(field: str, index: int) -> np.ndarray:
-        entry = views[index]
-        dtype = np.dtype(dtypes.get(field, "<f4"))
-        return np.frombuffer(data, dtype, entry["byteLength"] // dtype.itemsize, start + entry["byteOffset"])
-
-    bindings = [{field: (read(field, value) if field not in ("occurrence", "joints") else value)
-                 for field, value in binding.items()} for binding in content["bindings"]]
-    tracks = [{**track, "keys": read("keys", track["keys"])} for track in content["tracks"]]
-    return {"schemaVersion": content["schemaVersion"], "bindings": bindings, "tracks": tracks}
 
 
 def tube_skins_bytes(*, tree: str, document_hash: str, animation: Any) -> bytes | None:

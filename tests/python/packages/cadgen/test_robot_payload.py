@@ -24,7 +24,7 @@ from tests.python.support.paths import REPO_ROOT, add_repo_path
 add_repo_path("packages/cadgen/src")
 
 from cadgen import robot_payload  # noqa: E402
-from cadgen.articulation import joint_matrices, joint_values  # noqa: E402
+from tests.python.support.articulation import joint_matrices, joint_values  # noqa: E402
 from cadgen.robot_payload import (  # noqa: E402
     FOUR_BAR_CURVE_TOLERANCE_DEG,
     ROBOT_PAYLOAD_SCHEMA_VERSION,

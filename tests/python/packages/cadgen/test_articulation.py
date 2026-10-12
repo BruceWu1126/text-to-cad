@@ -3,7 +3,8 @@
 Every fact a player could otherwise have decided is minted here -- the control ids and their
 limits, the joint rows a coupling adds a term to, which occurrences a joint carries (a nested
 end goes to the deepest joint), what a drag writes, the named poses and the opening -- and the
-reference evaluator at the bottom of the module says where a pose puts a joint, in closed form.
+reference evaluator (tests/python/support/articulation.py) says where a pose puts a joint, in
+closed form.
 """
 
 from __future__ import annotations
@@ -13,14 +14,8 @@ import math
 import unittest
 from pathlib import Path
 
-from cadgen.articulation import (
-    ARTICULATION_SCHEMA_VERSION,
-    articulation_control_values,
-    joint_matrices,
-    joint_values,
-    row_value,
-    step_articulation,
-)
+from cadgen.articulation import ARTICULATION_SCHEMA_VERSION, articulation_control_values, step_articulation
+from tests.python.support.articulation import joint_matrices, joint_values, row_value
 
 REPO = Path(__file__).resolve().parents[4]
 BROWSER_FIXTURE = REPO / "packages/ui/src/renderers/step/__fixtures__/step"

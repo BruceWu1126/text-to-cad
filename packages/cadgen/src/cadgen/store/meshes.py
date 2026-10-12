@@ -74,7 +74,6 @@ _PART = re.compile(r"[0-9a-f]{64}-v[0-9]+")
 # them.
 _CAD_VALUES = ("part", "bounds", "faceColors")
 _UNMESHED = "unmeshedFaces"
-COUNT_FIELDS = ("vertexCount", "indexCount", "faceCount", "edgeCount", "edgePointCount")
 
 
 def _integer(value: Any) -> bool:

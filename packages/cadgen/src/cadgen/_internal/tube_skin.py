@@ -321,31 +321,3 @@ def bind_occurrence(component, transform, rest: td.Path, spacing: float, fractio
         material=skinned.material, edge_positions=edge_positions, edge_along=edge_along,
         edge_ordinals=edge_ordinals, edge_classes=edge_classes,
     )
-
-
-def skin(joints: Joints, rest: Joints, tube: SkinnedTube) -> np.ndarray:
-    """``tube``'s vertices posed by ``joints``, as a glTF player skins them: the
-    weighted sum of each joint's pose times its inverse bind. A reference for tests
-    and checks; no renderer calls it."""
-    binds = np.transpose(inverse_binds(rest), (0, 2, 1))  # row-major again
-    q = joints.rotations
-    x, y, z, w = q[:, 0], q[:, 1], q[:, 2], q[:, 3]
-    pose = np.zeros((len(q), 4, 4))
-    pose[:, 0, 0] = 1 - 2 * (y * y + z * z)
-    pose[:, 0, 1] = 2 * (x * y - z * w)
-    pose[:, 0, 2] = 2 * (x * z + y * w)
-    pose[:, 1, 0] = 2 * (x * y + z * w)
-    pose[:, 1, 1] = 1 - 2 * (x * x + z * z)
-    pose[:, 1, 2] = 2 * (y * z - x * w)
-    pose[:, 2, 0] = 2 * (x * z - y * w)
-    pose[:, 2, 1] = 2 * (y * z + x * w)
-    pose[:, 2, 2] = 1 - 2 * (x * x + y * y)
-    pose[:, :3, 3] = joints.translations
-    pose[:, 3, 3] = 1.0
-    matrices = pose @ binds
-    p = np.column_stack([tube.positions.astype(np.float64), np.ones(len(tube.positions))])
-    out = np.zeros((len(p), 4))
-    for slot in range(2):
-        index = tube.joints[:, slot].astype(np.int64)
-        out += tube.weights[:, slot, None] * np.einsum("vij,vj->vi", matrices[index], p)
-    return out[:, :3]

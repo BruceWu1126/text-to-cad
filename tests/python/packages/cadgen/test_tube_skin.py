@@ -12,7 +12,7 @@ import unittest
 import numpy as np
 
 from tests.python.support.paths import add_repo_path
-from tests.python.support.tube_skins import view_skin
+from tests.python.support.tube_skins import decode_tube_skins, skin, view_skin
 
 add_repo_path("packages/cadgen/src")
 
@@ -66,7 +66,7 @@ class Posed:
         self.tube = tube_skin.bind(_tube(length, radius), self.rest, spacing, self.fractions)
         self.rest_joints = tube_skin.joints_on(self.rest, self.fractions)
         self.joints = tube_skin.key_joints(key, rest_spec, self.rest, self.fractions)
-        self.positions = tube_skin.skin(self.joints, self.rest_joints, self.tube)
+        self.positions = skin(self.joints, self.rest_joints, self.tube)
 
 
 class TheJoints(unittest.TestCase):
@@ -217,7 +217,7 @@ class ThePayload(unittest.TestCase):
                  "tube": [None, {"path": _quarter_circle(bend), "twistDeg": 0.0}]}
         animation = {"clips": [{"id": "curl", "label": "Curl", "duration": 1.0, "loop": False, "tracks": [
             {"targets": ["o1.1"], "times": [0.0], "opacity": [0.5]}, track]}]}
-        skins = tube_skin_payload.decode_tube_skins(
+        skins = decode_tube_skins(
             tube_skin_payload.build_tube_skins(descriptor, {"c1": component}, animation))
         self.assertEqual(1, skins["schemaVersion"])
         (binding,) = skins["bindings"]
