@@ -301,7 +301,6 @@ function StepSurfaceBody({ view, data }) {
     setReferenceState,
     referenceStatus,
     setReferenceStatus,
-    setReferenceError,
     cancelReferenceLoad,
     loadMeshForEntry,
     loadReferencesForEntry,
@@ -1019,14 +1018,12 @@ function StepSurfaceBody({ view, data }) {
       cancelReferenceLoad();
       setReferenceState(null);
       setReferenceStatus(REFERENCE_STATUS.DISABLED);
-      setReferenceError("");
       return;
     }
     if (!referenceLoadingEnabled) {
       cancelReferenceLoad();
       setReferenceState(null);
       setReferenceStatus(REFERENCE_STATUS.IDLE);
-      setReferenceError("");
       return;
     }
     // Complete: nothing to load — but an assembly's loader still hears the request, so a batch
@@ -1035,9 +1032,8 @@ function StepSurfaceBody({ view, data }) {
     if (selectedReferencesComplete && !isAssemblyView) {
       return;
     }
-    loadReferencesForEntry(selectedEntry, requestedStepTreeTopologyNodeIds).catch((err) => {
+    loadReferencesForEntry(selectedEntry, requestedStepTreeTopologyNodeIds).catch(() => {
       setReferenceStatus(REFERENCE_STATUS.ERROR);
-      setReferenceError(err instanceof Error ? err.message : String(err));
     });
   }, [
     cancelReferenceLoad,

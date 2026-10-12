@@ -77,21 +77,12 @@ export function buildNormalizedReferenceState(entry, referencePayload = null, {
   const references = normalizeReferenceList(selectorRuntime.references);
   return {
     fileRef: fileKey(entry),
-    kind: entry.kind,
     referenceHash: buildReferenceCacheKey(entry),
-    stepRelPath: fileKey(entry),
-    stepHash: String(selectorRuntime.stepHash || entry?.hash || ""),
-    counts: {
-      faces: Number(selectorRuntime.faces?.length || 0),
-      edges: Number(selectorRuntime.edges?.length || 0)
-    },
-    parts: [],
     selectorRuntime,
     references,
     loadedTopologyKey,
     // The part ids an assembly composition holds (its key's members); null for a whole document.
-    loadedTopologyIds: Array.isArray(loadedTopologyIds) ? loadedTopologyIds : null,
-    disabledReason: ""
+    loadedTopologyIds: Array.isArray(loadedTopologyIds) ? loadedTopologyIds : null
   };
 }
 
