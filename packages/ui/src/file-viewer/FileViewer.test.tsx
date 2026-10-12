@@ -19,7 +19,7 @@ const renderer = defineFileRenderer({
 // A host that shows one file and browses nothing, has no home and can do nothing with the file.
 const host = {
   files: { id: 'one', stat: async (path: string) => ({ path, name: path.split('/').pop()!, kind: 'file' as const, extension: 'step', size: 1 }) },
-  clipboard: { writeText: async () => {}, readText: async () => '', writeImage: async () => {} },
+  clipboard: { writeText: async () => {}, writeImage: async () => {} },
   promptContext: unavailablePromptContext, environment: { colorScheme: 'light' as const }, navigation: { openFile(_path: string) {} },
 };
 const open = (props: { host?: object; file?: string | null; presentation?: object }) =>

@@ -120,8 +120,9 @@ in [the drawing contract](../ui/docs/drawing.md); the mechanism is
   resizing the stage during playback.
 - **No shipped bytes**: core neither meshes nor writes an export. cadgen meshes
   every component with OCCT into its store and writes STL, 3MF and GLB itself;
-  core reads those meshes and draws them. `lib/glb/writeGlb.js` writes the GLB
-  fixtures the core and UI tests load, never a file a user receives.
+  core reads those meshes and draws them. The GLBs its tests and the UI's open
+  are files cadgen wrote, and one compressed sample (`lib/render/fixtures`): no
+  JS writes a GLB.
 - **Loud failure**: unresolved refs, unknown labels, and unknown presets
   throw with the known set listed; nothing renders a plausible wrong frame.
 
@@ -152,8 +153,7 @@ src/
                    #   drawing2d/ (a cadgen drawing payload, a DXF's ->
                    #   Canvas 2D, text by fillText:
                    #   fit/pan/zoom maths, batched Path2D, screen-width strokes),
-                   #   glb/ (a GLB writer for test fixtures), cadRefs (grammar,
-                   #   parity-tested against cad_ref_syntax.py)
+                   #   cadRefs (grammar, parity-tested against cad_ref_syntax.py)
 scripts/           # chunk-ids.mjs (the pages' builds: a chunk's debug id) and
                    #   source-maps.mjs (the pages' builds: maps into the packages'
                    #   src/), beside the package's own build and test runners
@@ -176,7 +176,7 @@ Where the mechanism is written:
 
 ## Public modules and lifetimes
 
-Use `@text-to-cad/core/client`, `/common/*`, `/lib/*` and `/glb/*` exports.
+Use `@text-to-cad/core/client`, `/common/*` and `/lib/*` exports.
 Construct `createCadClient({ origin, fetch })` in a host. Construction is
 inert; subscriptions start catalog polling, which the host's `shouldPoll` gates
 (the web's pauses while its page is hidden). The client also carries what every

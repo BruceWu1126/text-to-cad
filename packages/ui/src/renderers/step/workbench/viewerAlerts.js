@@ -1,5 +1,4 @@
 import { entryHasMesh } from "@text-to-cad/core/lib/entryAssets.js";
-import { failedStepArtifact, stepArtifactHasRenderableGlb, stepArtifactStatusMessage } from "./stepArtifactStatus.js";
 import { fileKey } from "./entryPaths.js";
 import { failureAlert, isViewerServiceFailure, noGeometryAlert } from "../../kit/status/loadAlerts.js";
 
@@ -17,26 +16,6 @@ export function buildViewerMeshAlert(entry, hasMeshData, loadError, artifact = n
       blocking: false,
       message: `${alert.message} The existing model remains visible.`
     } : alert;
-  }
-
-  const stepArtifactError = failedStepArtifact(entry);
-  if (stepArtifactError && !hasMeshData) {
-    const code = String(stepArtifactError.error || "").trim();
-    const missingGlb = code === "missing_glb";
-    const summary = missingGlb ? "STEP artifact missing" : "STEP artifact unavailable";
-    const renderableGlb = stepArtifactHasRenderableGlb(entry);
-    if (!renderableGlb || !loadError) {
-      return {
-        severity: renderableGlb ? "warning" : "error",
-        ...(renderableGlb ? { blocking: false } : {}),
-        summary,
-        title: summary,
-        message: `“${fileRef}”: ${stepArtifactStatusMessage(stepArtifactError)}`,
-        recovery: "Reload to check for rebuilt display assets. If the problem persists, check the viewer’s terminal output.",
-        details: `File: ${fileRef}\n${String(stepArtifactError.message || code)}`,
-        reload: true
-      };
-    }
   }
 
   if (loadError && hasMeshData && failedParts.length) {

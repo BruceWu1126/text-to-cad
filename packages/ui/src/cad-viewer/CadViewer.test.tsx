@@ -36,7 +36,7 @@ function cadClient() {
   };
 }
 const ports = (client: ReturnType<typeof cadClient>, extra: object = {}) => ({ files: createCadFileSource(client as never),
-  clipboard: { writeText: async () => {}, readText: async () => '', writeImage: async () => {} },
+  clipboard: { writeText: async () => {}, writeImage: async () => {} },
   promptContext: unavailablePromptContext, environment: { colorScheme: 'light' as const }, ...extra });
 const library = { list: async () => [], change: async () => [], thumbnail: async () => null, open: async () => {} };
 const props = () => viewer.props!;

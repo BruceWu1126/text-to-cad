@@ -221,7 +221,6 @@ export function useCadAssets({
   const referenceStateRef = useRef(referenceState);
   referenceStateRef.current = referenceState;
   const [referenceStatus, setReferenceStatus] = useState(REFERENCE_STATUS.IDLE);
-  const [referenceError, setReferenceError] = useState("");
   const [referenceLoadStage, setReferenceLoadStage] = useState("");
 
   const requestIdRef = useRef(0);
@@ -788,7 +787,6 @@ export function useCadAssets({
       displayedReferenceCompositionRef.current = null;
       setReferenceState(null);
       setReferenceStatus(REFERENCE_STATUS.PENDING);
-      setReferenceError("");
       await loadMeshForEntry({ ...entry, runtimeSurfaceViewReplacement: true });
     })().finally(() => {
       if (surfaceViewReplacementTaskRef.current?.promise === task) {
@@ -969,7 +967,6 @@ export function useCadAssets({
     }
     session.failed = true;
     setReferenceStatus(REFERENCE_STATUS.ERROR);
-    setReferenceError(err instanceof Error ? err.message : String(err));
     setReferenceLoadStage("");
   }, [resources]);
 
@@ -984,7 +981,6 @@ export function useCadAssets({
       referenceCompositionRef.current = null;
       setReferenceState(null);
       setReferenceStatus(REFERENCE_STATUS.DISABLED);
-      setReferenceError("");
       return Promise.resolve();
     }
 
@@ -1022,12 +1018,10 @@ export function useCadAssets({
         onLoading: () => {
           loopStart = perfStart();
           setReferenceStatus(REFERENCE_STATUS.LOADING);
-          setReferenceError("");
           setReferenceLoadStage("loading topology");
         },
-        onSettled: (state) => {
-          setReferenceStatus(state?.disabledReason ? REFERENCE_STATUS.DISABLED : REFERENCE_STATUS.READY);
-          setReferenceError(state?.disabledReason || "");
+        onSettled: () => {
+          setReferenceStatus(REFERENCE_STATUS.READY);
           setReferenceLoadStage("");
           perfMeasure(PERF_MEASURE_NAMES.topologySettled, loopStart, { parts: session.desired.length, batches: session.batches });
         },
@@ -1042,9 +1036,7 @@ export function useCadAssets({
     if (request.settled) {
       // Already published (a request settling back, or a revision's topology carried into a new
       // session): the status says so, whatever an interrupted load left it at.
-      const state = session.published?.state;
-      setReferenceStatus(state?.disabledReason ? REFERENCE_STATUS.DISABLED : REFERENCE_STATUS.READY);
-      setReferenceError(state?.disabledReason || "");
+      setReferenceStatus(REFERENCE_STATUS.READY);
       setReferenceLoadStage("");
     }
     return request.promise || Promise.resolve();
@@ -1074,8 +1066,6 @@ export function useCadAssets({
     setReferenceState,
     referenceStatus,
     setReferenceStatus,
-    referenceError,
-    setReferenceError,
     referenceLoadStage,
     cancelMeshLoad,
     cancelReferenceLoad,

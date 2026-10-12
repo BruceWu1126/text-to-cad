@@ -13,12 +13,10 @@ const definition = { url: '/hinge.step.json', articulation };
 
 test('Position is poses and joints: without a pose runtime there is no section', () => {
   assert.equal(buildPositionSection(), null);
-  for (const props of [{ poseRuntime: { definition } }, { poseRuntime: { error: 'Invalid joints' } }]) {
-    const section = buildPositionSection(props);
-    assert.equal(section.id, 'position');
-    assert.equal(section.title, 'Position');
-    assert.deepEqual(elements(section.content).filter(node => node.type === PoseControlsSection).length, 1);
-  }
+  const section = buildPositionSection({ poseRuntime: { definition } });
+  assert.equal(section.id, 'position');
+  assert.equal(section.title, 'Position');
+  assert.deepEqual(elements(section.content).filter(node => node.type === PoseControlsSection).length, 1);
 });
 
 test('one global Reset calls the coordinated host command', () => {

@@ -300,7 +300,6 @@ function StepSurfaceBody({ view, data }) {
     setReferenceState,
     referenceStatus,
     setReferenceStatus,
-    setReferenceError,
     cancelReferenceLoad,
     loadMeshForEntry,
     loadReferencesForEntry,
@@ -419,11 +418,10 @@ function StepSurfaceBody({ view, data }) {
   // ---- motion: the articulation and Position, the routines and playback ------------------------
   const motion = useStepMotion({
     entry: selectedEntry, fileKey: selectedKey, resources: client.resources,
-    readStored: () => session.readStored(), clipboard: host.clipboard,
-    reportError: (message) => shellRef.current?.reportActionError(message)
+    readStored: () => session.readStored()
   });
   const {
-    definition: selectedStepModuleDefinition, loading: selectedStepModuleLoading,
+    definition: selectedStepModuleDefinition,
     parameterValues: stepModuleParameterValues,
     animationState, animationRuntime: selectedAnimationRuntime, animationError: selectedAnimationError
   } = motion;
@@ -648,7 +646,7 @@ function StepSurfaceBody({ view, data }) {
     (selectedArtifactGenerating || !artifactBlocksRender) &&
     status !== ASSET_STATUS.ERROR &&
     ((!selectedMeshMatches && !retainedPreviousStepMeshError) ||
-      status === ASSET_STATUS.LOADING || selectedStepModuleLoading);
+      status === ASSET_STATUS.LOADING);
   const effectiveViewerLoading = viewerLoading || selectedArtifactGenerating;
   // The file explorer spins the entry the viewer is actually working on. Artifact
   // generation is only half of that -- a built package still has to be fetched and
@@ -794,7 +792,6 @@ function StepSurfaceBody({ view, data }) {
       setHiddenPartIds(restored.tree.hiddenPartIds);
       setIsolatedAssemblyNodeIds(restored.tree.isolatedAssemblyNodeIds);
       setLargeFileState(normalizeLargeFileState(restored.largeFile));
-      motion.restore(restored);
     }
   });
 
@@ -1019,14 +1016,12 @@ function StepSurfaceBody({ view, data }) {
       cancelReferenceLoad();
       setReferenceState(null);
       setReferenceStatus(REFERENCE_STATUS.DISABLED);
-      setReferenceError("");
       return;
     }
     if (!referenceLoadingEnabled) {
       cancelReferenceLoad();
       setReferenceState(null);
       setReferenceStatus(REFERENCE_STATUS.IDLE);
-      setReferenceError("");
       return;
     }
     // Complete: nothing to load — but an assembly's loader still hears the request, so a batch
@@ -1035,9 +1030,8 @@ function StepSurfaceBody({ view, data }) {
     if (selectedReferencesComplete && !isAssemblyView) {
       return;
     }
-    loadReferencesForEntry(selectedEntry, requestedStepTreeTopologyNodeIds).catch((err) => {
+    loadReferencesForEntry(selectedEntry, requestedStepTreeTopologyNodeIds).catch(() => {
       setReferenceStatus(REFERENCE_STATUS.ERROR);
-      setReferenceError(err instanceof Error ? err.message : String(err));
     });
   }, [
     cancelReferenceLoad,

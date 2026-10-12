@@ -45,16 +45,17 @@ function saved(revision: number, { mates = [swing], poses = OPEN, routine = '', 
 }
 
 /**
- * The hook over one entry, as StepSurface mounts it; at every render, `offered` is whether Position
- * is offered (its `poseAvailable`) and `listed` how many routines the Animation tool has.
+ * The hook over one entry, as StepSurface mounts it, over a stored view whose pose is `stored`; at
+ * every render, `offered` is whether Position is offered (its `poseAvailable`) and `listed` how many
+ * routines the Animation tool has.
  */
-function mount(entry: ReturnType<typeof saved>) {
+function mount(entry: ReturnType<typeof saved>, stored: object | null = null) {
   const clock = createAnimationClock();
   const offered: boolean[] = [];
   const listed: number[] = [];
   const hook = renderHook(({ entry }) => {
     const motion = useStepMotion({ entry, fileKey: entry.file, resources: null,
-      readStored: () => ({ pose: null }), clipboard: null, reportError: () => {} });
+      readStored: () => ({ pose: stored }) });
     offered.push(stepPosableHandles(motion.definition).length > 0);
     listed.push(motion.animationControls.clips.length);
     return motion;
@@ -62,24 +63,25 @@ function mount(entry: ReturnType<typeof saved>) {
     wrapper: ({ children }: { children: ReactNode }) => <AnimationClockProvider value={clock}>{children}</AnimationClockProvider> });
   return { ...hook, offered, listed };
 }
-const loaded = async (result: { current: { definition: { url?: string } | null } }, revision: number) =>
-  waitFor(() => expect(result.current.definition?.url).toMatch(new RegExp(`v=${revision}$`)));
+// The articulation is the entry's own: in hand in the render the entry arrives in.
+const inHand = (result: { current: { definition: { url?: string } | null } }, revision: number) =>
+  expect(result.current.definition?.url).toMatch(new RegExp(`v=${revision}$`));
 
-it('a rebuild keeps Position, and the pose set on it, while its sidecar is read again and its joints are the same; changed joints start over', async () => {
+it('a rebuild keeps Position, and the pose set on it, while its joints are the same; changed joints start over', () => {
   const { result, rerender, offered } = mount(saved(1));
-  await loaded(result, 1);
+  inHand(result, 1);
   act(() => result.current.onParameterChange('swing', 30));
 
   offered.length = 0;
   rerender({ entry: saved(2) });
-  await loaded(result, 2);
+  inHand(result, 2);
   expect(offered).not.toContain(false);
   expect(result.current.parameterValues).toEqual({ swing: 30 });
 
   // A save that changed the joint starts it at the new default: the old pose is not fitted onto it,
   // though 30° would still fit inside the new range.
   rerender({ entry: saved(3, { mates: [{ ...swing, max: 40 }] }) });
-  await loaded(result, 3);
+  inHand(result, 3);
   expect(result.current.parameterValues).toEqual({ swing: 0 });
 
   // A save that takes the mates out takes Position with them.
@@ -87,26 +89,34 @@ it('a rebuild keeps Position, and the pose set on it, while its sidecar is read 
   expect(stepPosableHandles(result.current.definition)).toEqual([]);
 });
 
-it('a rebuild keeps the named pose chosen while the joints and named poses are the same, and drops it with the pose when they changed', async () => {
+it('a rebuild keeps the named pose chosen while the joints and named poses are the same, and drops it with the pose when they changed', () => {
   const { result, rerender } = mount(saved(1));
-  await loaded(result, 1);
   act(() => result.current.positionControls.onApplyPose('open'));
   const chosen = () => [result.current.positionControls.activePose, result.current.parameterValues];
   expect(chosen()).toEqual(['open', { swing: 90 }]);
 
   rerender({ entry: saved(2) });
-  await loaded(result, 2);
+  inHand(result, 2);
   expect(chosen()).toEqual(['open', { swing: 90 }]);
 
   // The named pose itself changed: the pose starts over, and the dropdown names none.
   rerender({ entry: saved(3, { poses: { open: { swing: 45 } } }) });
-  await loaded(result, 3);
   expect(chosen()).toEqual(['', { swing: 0 }]);
+});
+
+it('the first articulation takes the stored pose within its limits, also one that arrives after the open', () => {
+  const stored = { parameterValues: { swing: 200, stray: 4 } };
+  expect(mount(saved(1), stored).result.current.parameterValues).toEqual({ swing: 120 });
+
+  // A file listed before it was built has no articulation yet: its first one takes the stored pose.
+  const { result, rerender } = mount(saved(1, { mates: [] }), stored);
+  expect(result.current.parameterValues).toEqual({});
+  rerender({ entry: saved(2) });
+  expect(result.current.parameterValues).toEqual({ swing: 120 });
 });
 
 it('an update that leaves the routine as it was neither stops nor rewinds it, and keeps the pose it set aside; a changed routine is loaded again, at rest', async () => {
   const { result, rerender } = mount(saved(1, { routine: 'swing-1' }));
-  await loaded(result, 1);
   await waitFor(() => expect(result.current.animationControls.clips).toHaveLength(1));
   act(() => result.current.onParameterChange('swing', 30));
   // Play takes the pose: Position's values are set aside, and the routine plays from rest.
@@ -114,7 +124,7 @@ it('an update that leaves the routine as it was neither stops nor rewinds it, an
   expect([result.current.animationState.playing, result.current.parameterValues]).toEqual([true, { swing: 0 }]);
 
   rerender({ entry: saved(2, { routine: 'swing-1' }) });
-  await loaded(result, 2);
+  inHand(result, 2);
   expect(loads.count).toBe(1);
   expect(result.current.animationState).toMatchObject({ activeClipId: 'swing', enabled: true, playing: true });
   expect(result.current.animationControls.clips).toHaveLength(1);
@@ -133,7 +143,6 @@ it('an update that leaves the routine as it was neither stops nor rewinds it, an
 it('a changed routine is read again behind the routines in hand: the model goes to rest, Position gets its values back, and the routine chosen stays chosen', async () => {
   const flutter = { ...SWING_CLIP, id: 'flutter', label: 'Flutter' };
   const { result, rerender, listed } = mount(saved(1, { routine: 'pair-1', clips: [SWING_CLIP, flutter] }));
-  await loaded(result, 1);
   await waitFor(() => expect(result.current.animationControls.clips).toHaveLength(2));
   act(() => result.current.onParameterChange('swing', 30));
   act(() => result.current.animationControls.onClipSelect('flutter'));

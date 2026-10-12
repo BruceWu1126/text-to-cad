@@ -125,13 +125,11 @@ export function useGlbAnimation(document, requestRender) {
 
   // The mixer exists exactly while a routine owns the pose.
   const clip = state.enabled ? activeClip?.clip || null : null;
-  const mixerRef = useRef(null);
   const frameRef = useRef(null);
   usePlaybackFrames(clock, state.playing, frameRef);
   useEffect(() => {
     if (!document?.scene || !clip) return undefined;
     const mixer = createGlbAnimationRuntime(THREE, document.scene, clip);
-    mixerRef.current = mixer;
     // One function, two callers: React for a scrub or a new clip, the clock per playing tick.
     frameRef.current = (elapsedSec) => {
       setGlbAnimationTime(mixer, elapsedSec);
@@ -140,7 +138,6 @@ export function useGlbAnimation(document, requestRender) {
     frameRef.current(playbackFrameTime(clock, stateRef.current));
     return () => {
       frameRef.current = null;
-      mixerRef.current = null;
       disposeGlbAnimationRuntime(mixer);
       requestRenderRef.current?.();
     };

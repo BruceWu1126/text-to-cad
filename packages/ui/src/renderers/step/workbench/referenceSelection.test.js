@@ -90,8 +90,6 @@ test("reference state normalization trims reference metadata and preserves cache
   assert.equal(buildReferenceCacheKey(STEP_ENTRY), "models/assy.step:selector-hash");
   assert.equal(referenceState.fileRef, "models/assy.step");
   assert.equal(referenceState.referenceHash, "models/assy.step:selector-hash");
-  assert.equal(referenceState.stepHash, "selector-hash");
-  assert.deepEqual(referenceState.counts, { faces: 1, edges: 1 });
   assert.deepEqual(
     referenceState.references.map((reference) => reference.copyText),
     [

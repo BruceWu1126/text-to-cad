@@ -100,24 +100,6 @@ test("status and timeout failures also identify the processing service", () => {
   }
 });
 
-test("failed STEP artifact explains what is missing and retains a renderable fallback", () => {
-  for (const [code, reason] of [["missing_glb", "Generated GLB is missing"], ["missing_step_topology", "missing STEP topology metadata"]]) {
-    const entry = { ...step, artifact: { ok: false, error: code, message: "Original diagnostic" } };
-    const alert = buildViewerMeshAlert(entry, false, "");
-    assert.equal(alert.severity, "error");
-    assert.ok(alert.message.includes(reason));
-    assert.match(alert.details, /Original diagnostic/);
-    assert.equal(buildViewerMeshAlert(entry, true, ""), null);
-    const fallback = { ...entry, url: "/models/.part.step.glb", hash: "glb-hash" };
-    const warning = buildViewerMeshAlert(fallback, false, "");
-    assert.equal(warning.severity, "warning");
-    assert.equal(warning.blocking, false);
-    const failedFallback = buildViewerMeshAlert(fallback, false, "GLB parser failed");
-    assert.equal(failedFallback.summary, "Mesh load failed");
-    assert.match(failedFallback.reason, /GLB parser failed/);
-  }
-});
-
 test("mesh errors also recognize browser transport messages", () => {
   for (const kind of ["stl", "3mf", "glb", "dxf"]) {
     const entry = { file: `parts/panel.${kind}`, kind };

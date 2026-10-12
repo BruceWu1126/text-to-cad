@@ -8,7 +8,6 @@ export interface ClipboardPort {
    * starts inside the gesture that asked for it and takes the text when it arrives.
    */
   writeText(text: string | Promise<string>): Promise<void>;
-  readText(): Promise<string>;
   writeImage(image: Blob | Promise<Blob>): Promise<void>;
 }
 /**

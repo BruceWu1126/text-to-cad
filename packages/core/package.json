@@ -14,7 +14,6 @@
       "import": "./dist/client/index.js"
     },
     "./common/*": "./dist/common/*",
-    "./glb/*": "./dist/lib/glb/*",
     "./lib/*": "./dist/lib/*",
     "./package.json": "./package.json",
     "./prompt": {

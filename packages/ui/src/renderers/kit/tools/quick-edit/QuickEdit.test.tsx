@@ -125,7 +125,7 @@ it('copies the note with its references by their files\' absolute paths, and its
   let copied: Promise<string> | string = '';
   const saved: string[] = [];
   const host = testHost({
-    clipboard: { writeText: async text => { copied = text; }, readText: async () => '', writeImage: async () => {} },
+    clipboard: { writeText: async text => { copied = text; }, writeImage: async () => {} },
     attachments: { save: async (_png, name) => { saved.push(name); return `/tmp/cadgen-sketches/${name}`; } },
   });
   const sketch = { ink: true, capture: async () => new Blob(['png'], { type: 'image/png' }) };

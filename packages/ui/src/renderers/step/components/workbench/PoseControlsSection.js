@@ -89,8 +89,6 @@ export default function PoseControlsSection({ runtime = null }) {
   const onReset = runtime?.onResetMotion || runtime?.onResetParameters;
   const definition = runtime?.definition || null;
   const controls = articulationControls(definition?.articulation);
-  const status = String(runtime?.status || "").trim();
-  const error = String(runtime?.error || "").trim();
   const values = runtime?.parameterValues || {};
   const { poseNames, activePose } = posePresetSelection(runtime);
   // Back-drive routing: which members a coupling drives, and what every row's
@@ -108,70 +106,57 @@ export default function PoseControlsSection({ runtime = null }) {
 
   return (
     <>
-      {status === "loading" ? (
-        <FileSheetStatusText className="py-2">Loading pose...</FileSheetStatusText>
+      {poseNames.length ? (
+        <KinematicsPoseRow
+          poses={poseNames.map((poseName) => ({ value: poseName, label: poseName }))}
+          activeValue={activePose}
+          onReset={onReset}
+          onSelect={(poseName) => runtime?.onApplyPose?.(poseName)}
+        />
       ) : null}
-      {error ? (
-        <FileSheetStatusText tone="error" className="py-2">{error}</FileSheetStatusText>
-      ) : null}
-
-      {definition ? (
-        <>
-          {poseNames.length ? (
-            <KinematicsPoseRow
-              poses={poseNames.map((poseName) => ({ value: poseName, label: poseName }))}
-              activeValue={activePose}
-              onReset={onReset}
-              onSelect={(poseName) => runtime?.onApplyPose?.(poseName)}
+      {controls.map((control) => {
+        const driver = drivenDofs[control.id] || null;
+        const label = String(control.label || control.id);
+        const currentValue = poseControlDisplayValue({
+          driven: drivenDofs,
+          displayValues,
+          values,
+          parameter: control
+        });
+        const controlStep = resolveParameterNumberControlStep(control);
+        return (
+          <FileSheetSliderField
+            key={control.id}
+            label={label}
+            labelTitle={driver ? `${label} · driven by ${driver.control}` : label}
+            value={`${formatControlNumber(currentValue)}${unitSuffix(control.unit)}`}
+            onValueCommit={(nextValue) => {
+              changeParameter(control.id, parseFileSheetNumberInput(nextValue, {
+                fallback: currentValue,
+                min: control.min,
+                max: control.max
+              }));
+            }}
+            valueInputProps={{ ariaLabel: `${label} slider value` }}
+          >
+            <Slider
+              className={FILE_SHEET_PRECISION_SLIDER_CLASSES}
+              value={[Number(currentValue) || 0]}
+              min={control.min}
+              max={control.max}
+              step={controlStep}
+              onValueChange={(nextValue) => changeParameter(control.id, nextValue?.[0] ?? currentValue)}
+              thumbProps={{ "aria-label": label }}
             />
-          ) : null}
-          {controls.map((control) => {
-            const driver = drivenDofs[control.id] || null;
-            const label = String(control.label || control.id);
-            const currentValue = poseControlDisplayValue({
-              driven: drivenDofs,
-              displayValues,
-              values,
-              parameter: control
-            });
-            const controlStep = resolveParameterNumberControlStep(control);
-            return (
-              <FileSheetSliderField
-                key={control.id}
-                label={label}
-                labelTitle={driver ? `${label} · driven by ${driver.control}` : label}
-                value={`${formatControlNumber(currentValue)}${unitSuffix(control.unit)}`}
-                onValueCommit={(nextValue) => {
-                  changeParameter(control.id, parseFileSheetNumberInput(nextValue, {
-                    fallback: currentValue,
-                    min: control.min,
-                    max: control.max
-                  }));
-                }}
-                valueInputProps={{ ariaLabel: `${label} slider value` }}
-              >
-                <Slider
-                  className={FILE_SHEET_PRECISION_SLIDER_CLASSES}
-                  value={[Number(currentValue) || 0]}
-                  min={control.min}
-                  max={control.max}
-                  step={controlStep}
-                  onValueChange={(nextValue) => changeParameter(control.id, nextValue?.[0] ?? currentValue)}
-                  thumbProps={{ "aria-label": label }}
-                />
-              </FileSheetSliderField>
-            );
-          })}
-          {!controls.length && !poseNames.length ? <FileSheetStatusText>No pose controls.</FileSheetStatusText> : null}
-        </>
-      ) : null}
+          </FileSheetSliderField>
+        );
+      })}
+      {!controls.length && !poseNames.length ? <FileSheetStatusText>No pose controls.</FileSheetStatusText> : null}
     </>
   );
 }
 
-// Whether the pose controls would render any content for this runtime.
+// Whether the pose controls would render any content for this runtime: an articulation to pose.
 export function poseControlsHaveContent(runtime) {
-  const status = String(runtime?.status || "").trim();
-  const error = String(runtime?.error || "").trim();
-  return Boolean(runtime?.definition || status === "loading" || error);
+  return Boolean(runtime?.definition);
 }
