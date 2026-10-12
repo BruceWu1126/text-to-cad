@@ -76,20 +76,12 @@ MESH_DOORS = ("stl", "3mf", "glb")
 
 
 class InputKindTests(unittest.TestCase):
-    def test_a_script_classifies_as_python_whatever_it_declares(self):
-        # DOCUMENTS-ONLY: every `.py` is one kind, because the resolver's only
-        # use for it is refusing it by naming the run. Which format the script
-        # declares no longer matters — nothing downstream will render it.
-        for sample in ("panel.dxf.py", "panel.py", "bracket.py"):
-            with self.subTest(sample=sample):
-                self.assertEqual("python", input_kind(Path(sample)))
-
     def test_every_kind_it_names_has_a_resolver_or_is_a_generator(self):
         for sample in ("a.step", "a.stp", "a.glb", "a.stl", "a.3mf",
                        "a.urdf", "a.srdf", "a.sdf", "a.dxf"):
             kind = input_kind(Path(sample))
             self.assertTrue(kind, f"{sample} resolved to no kind")
-            self.assertIn(kind, set(KIND_RESOLVERS) | {"python", "dxf"}, sample)
+            self.assertIn(kind, set(KIND_RESOLVERS) | {"dxf"}, sample)
 
 
 class EnabledKindsTests(unittest.TestCase):

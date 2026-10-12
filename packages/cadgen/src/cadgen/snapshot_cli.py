@@ -424,10 +424,6 @@ def input_kind(file_path: Path) -> str:
         return "stp"
     if suffix == ".dxf":
         return "dxf"
-    if suffix == ".py":
-        # DOCUMENTS-ONLY: a model script is a program. The kind survives only so
-        # the resolver can refuse it by naming the run.
-        return "python"
     if suffix == ".glb":
         return "glb"
     if suffix == ".stl":
@@ -804,12 +800,6 @@ def prepare_render_job(
 
     input_path = resolve_input_path(raw_input, cwd=resolved_cwd)
     kind = input_kind(input_path)
-    if kind == "python":
-        # Scripts are RUN, never rendered: `python <script>` writes the
-        # document, and snapshot renders the document.
-        from cadgen._internal.doors import script_target_message
-
-        raise SnapshotError(script_target_message(input_path))
     if kinds is not None:
         reject_unsupported_kind(kind, input_path, kinds)
     if kind not in KIND_RESOLVERS:
@@ -817,8 +807,8 @@ def prepare_render_job(
             f"snapshot cannot render {input_path.suffix or 'that file'} inputs: {input_path}"
         )
 
-    # After the refusals above: a script or a foreign file is told what IT is,
-    # not what its display settings would have meant. A job's own `display` gets
+    # After the refusals above: a foreign file is told what IT is, not what its
+    # display settings would have meant. A job's own `display` gets
     # the same treatment as the --display flag — a mode name, an inline JSON
     # object, or a path to a display JSON — and is validated ONCE: here, unless
     # the flag already put a validated one on the job.

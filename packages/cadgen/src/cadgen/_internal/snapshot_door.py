@@ -204,8 +204,8 @@ def step_snapshot_verb(door: str):
         about the model changes, though a STEP input whose tree is missing
         builds one.
 
-        target: the model to render — a .step/.stp document (a model script
-            is refused by naming the run that writes the document).
+        target: the model to render — a .step/.stp document. Run a model
+            script first, then snapshot the document it writes.
         out: destination path, written EXACTLY there — .png (--video writes
             .mp4/.gif) — or a directory for a generated timestamped name.
         job: a render-job JSON file — one job, an array of them, or

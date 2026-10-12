@@ -111,15 +111,18 @@ class DoorArguments(unittest.TestCase):
             self.assertEqual(0, stl_build.main([str(self.document), "meshes/sample.stl"]))
         self.assertEqual([("stl", Path("meshes/sample.stl"))], export.call_args.args[1])
 
-    def test_a_model_script_is_refused_by_naming_the_run(self):
-        # The REAL engine: it owns the one validation of TARGET, and refuses a
-        # script before it looks anything up.
+    def test_a_model_script_is_not_a_document(self):
+        # The REAL engine: it owns the one validation of TARGET, and refuses
+        # anything but a STEP document before it looks anything up.
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):
             self.assertEqual(1, stl_build.main(["parts/sample.py"]))
-        # The teaching error prints the path in the NATIVE spelling, so that is
-        # what a Windows reader can paste back into a shell.
-        self.assertIn(f"python {os.path.join('parts', 'sample.py')}", stderr.getvalue())
+        # TARGET reaches the engine as a Path, so the message names it in the
+        # NATIVE spelling.
+        self.assertIn(
+            f"this command takes a .step/.stp document: {os.path.join('parts', 'sample.py')}",
+            stderr.getvalue(),
+        )
 
     def test_tolerances_force_and_verbose_reach_the_engine(self):
         with _engine() as export:

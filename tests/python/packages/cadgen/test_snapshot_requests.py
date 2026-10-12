@@ -102,7 +102,7 @@ class RefusedRequestsLeaveOutUntouched(_Workspace):
             (stl_door, [self.stl, self.out, "--display", '{"clip":{"axis":"x"}}'], r"display\.clip applies to STEP"),
             (stl_door, [self.stl, self.out, "--display", '{"lighting":{"fill":9}}'], r"display\.lighting\.fill"),
             (step_door, [self.stl, self.out], r"does not render \.stl inputs"),
-            (step_door, [script, self.out], r"a model script is a program"),
+            (step_door, [script, self.out], r"does not render \.py inputs"),
             (stl_door, [self.stl, self.out, "--mode", "orbit"], r"Unsupported render mode: orbit"),
             (stl_door, ["--job", job], r"unknown render job key\(s\): framerate"),
             (stl_door, [self.stl, self.out, "--width", "0"], r"output width must be a positive whole number"),

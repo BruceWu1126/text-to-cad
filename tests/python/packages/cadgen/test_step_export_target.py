@@ -102,14 +102,14 @@ class StepExportTargetTests(unittest.TestCase):
         self.assertIn("does_not_exist.step", str(cm.exception))
         self.assertFalse((self.out_dir / "missing.stl").exists())
 
-    def test_a_model_script_is_refused_by_naming_the_run(self) -> None:
+    def test_a_model_script_is_not_a_document(self) -> None:
         # The ENGINE owns the one validation of TARGET (doors.document_target), so a
         # direct caller is refused exactly as a door's user is.
         script = self.temp_root / "box.py"
         script.write_text(BOX_GENERATOR, encoding="utf-8")
         with self.assertRaises(ValueError) as cm:
             step_export_target.export_cad_target(script, [("stl", None)])
-        self.assertIn("a model script is a program", str(cm.exception))
+        self.assertIn("this command takes a .step/.stp document", str(cm.exception))
         self.assertFalse(script.with_suffix(".stl").exists())
 
     def test_export_cad_target_rejects_step_format(self) -> None:
