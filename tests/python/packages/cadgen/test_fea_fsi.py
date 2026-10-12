@@ -450,11 +450,25 @@ class SoftThickTube(unittest.TestCase):
         coupling, interface = self.coupling, self.coupling.interface
         space = coupling.ctx.space
         normal = wall_triangles(self.flow.space, coupling.wall_rows)[2]
-        pressure = np.full(len(normal), 1e-3)                         # MPa
-        load = interface.load(pressure[:, None] * normal, pressure, 0.0 * normal)
+        pressure = np.full(self.flow.space.vertices, 1e-3)            # MPa
+        load = interface.load(1e-3 * normal, pressure, 0.0 * normal)
         exact = asm(LinearForm(lambda v, w: -1e-3 * (w.n[0] * v[0] + w.n[1] * v[1] + w.n[2] * v[2])),
                     space.basis.boundary(space.facets_of_rows(interface.part_rows)))
         self.assertLess(np.linalg.norm(load - exact) / np.linalg.norm(exact), 1e-9)   # 5% off, with a net force, before
+
+    def test_a_pressure_falling_along_the_flow_pushes_the_tube_nowhere_sideways(self):
+        """A pressure falling along the bore, as the flow's does, pushes a straight tube along it and nowhere
+        sideways. Taken as the nearest fluid triangle's mean (a step at each triangle's edge), it left a net sideways
+        push of 0.4 % of the pressure's sideways total, set by how the two meshes' triangles fell: the soft tube bent
+        sideways by a sixth of its swelling, an out-of-round bore that changed with the mesher's build."""
+        import numpy as np
+
+        interface, fluid = self.coupling.interface, self.flow.space
+        x = fluid.dof_locations[: fluid.vertices, 0]
+        load = interface.load(np.zeros((len(interface.fluid_normal), 3)), 1e-3 * (1.0 - x / 16.0), None)
+        component = self.coupling.ctx.space.component
+        sideways = [abs(load[component == k].sum()) / np.abs(load[component == k]).sum() for k in (1, 2)]
+        self.assertLess(max(sideways), 1e-5, sideways)                # 4e-3 by triangle
 
     def test_one_way_goes_as_one_over_E_and_two_way_settles_below_it(self):
         one_soft = self.soft.summary["one_way"]["max_displacement_mm"]
@@ -479,7 +493,9 @@ class SoftThickTube(unittest.TestCase):
         pressure = float(self.own.fields["pressure"][on].mean()) / 1e6
         thin_wall = pressure * 2.25 ** 2 * (1 - 0.45 ** 2) / (0.5 * 0.5)
         self.assertLess(abs(radial.mean() - thin_wall) / thin_wall, 0.15, (radial.mean(), thin_wall))
-        self.assertLess(radial.std() / radial.mean(), 0.15)            # round, not dented
+        # Round, neither dented nor bent sideways (0.13 to 0.15 with the pressure taken by triangle): what spread
+        # is left is the swelling's own fall along the flow across the 0.8 mm band.
+        self.assertLess(radial.std() / radial.mean(), 0.05)
 
 
 @unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")

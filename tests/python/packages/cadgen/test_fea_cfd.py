@@ -471,16 +471,29 @@ class SharpOrifice(unittest.TestCase):
         straight = 8 * WATER_MU * 0.010 * self.result.summary["flow_rate_m3_s"] / (math.pi * 0.003 ** 4)
         self.assertGreater(self.result.summary["pressure_drop_Pa"], 5 * straight)
 
-    def test_newton_reaches_re_300_directly_and_says_where_it_is(self):
+    def test_newton_converges_quadratically_at_re_300_and_says_where_it_is(self):
+        """With the whole Jacobian, Newton's last steps at the target square the residual (linear convergence cut
+        it by about half a step). Whether it gets there straight from the Stokes flow or by continuation is not
+        asserted: the damped steps from Stokes at Re 300 follow the mesh to the last bit (netgen's mesh of this
+        orifice differs between Apple silicon, x86 macOS and Linux), so one build goes straight in 16 Newton steps
+        and another runs out of its 25 and steps the Reynolds number up."""
+        import re
+
         from cadgen._internal.fea import navier_stokes
 
         lines: list[str] = []
         with mock.patch.object(navier_stokes, "PROGRESS_S", 0.0):
             flow = navier_stokes.solve_flow(self.problems[0], log=lines.append)
         self.assertTrue(flow.converged)
-        self.assertEqual((flow.stages, flow.continued), ([1.0], False))
+        self.assertEqual(flow.stages[-1], 1.0)
         # Every step said where it was: the progress line a long solve prints.
         self.assertIn(f"flow: Newton step {flow.newton} at 1 of the target Re", "\n".join(lines))
+        # The target's last Newton steps: once under 1e-2, each cuts the residual by fifty times or more.
+        last = [float(found.group(1)) for line in lines
+                if (found := re.match(r"flow: Newton step \d+ at 1 of the target Re, residual (\S+) ", line))]
+        tail = last[next(i for i, r in enumerate(last) if r < 1e-2 and all(later < 1e-2 for later in last[i:])):]
+        self.assertGreaterEqual(len(tail), 2, last)
+        self.assertTrue(all(after < 0.02 * before for before, after in zip(tail, tail[1:])), last)
 
     def test_at_its_deadline_it_stops_at_the_target_and_says_so(self):
         from cadgen._internal.fea import navier_stokes

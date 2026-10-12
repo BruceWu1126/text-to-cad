@@ -323,7 +323,12 @@ class SubsonicNozzle(unittest.TestCase):
 @unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
 class ChokedNozzle(unittest.TestCase):
     """p_out / p0 = 0.75 with a one-second time target: the ladder steps the pressure ratio up (continuation),
-    the nozzle chokes, and a normal shock stands where the shock relations put it (x = 27.6 mm, Mach 1.69 ahead)."""
+    the nozzle chokes, and a normal shock stands where the shock relations put it (x = 27.6 mm, Mach 1.69 ahead).
+
+    The mesh differs by platform (CI's Linux one ended unsettled). On four of twenty sizes tried around 1.6 mm on
+    macOS the stabilisation's coefficients left the residual on a floor just above FREEZE_AT (1.1e-3 to 2.8e-3), so
+    they were never held and the march stalled there, unsettled; a stall with the peak Mach number settled now holds
+    them, from the best state, and those settle."""
 
     RATIO = 0.75
 

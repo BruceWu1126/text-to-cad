@@ -569,7 +569,41 @@ def progress_log(logger: CliLogger):
     return log
 
 
+def one_blas_thread():
+    """A context in which BLAS runs on one thread: every study is solved in one.
+
+    SuperLU, which makes nearly every linear solve here, factors by many small dense blocks, and OpenBLAS (scipy's
+    BLAS on Linux and Windows) spreads each block over every core: the threads cost far more than they save. The 1 Hz
+    coil's complex factorisation (``test_fea_electromagnetic_ac``) took 105 s on twelve OpenBLAS threads and 11 s on
+    one; on CI, four test files at once on four cores, it and a bolted joint's contact settling ran past 15 minutes.
+    One thread also leaves the numbers independent of the core count. Accelerate (macOS's) is not reached and needs
+    nothing. The BLAS libraries are loaded first: a limit reaches only those already loaded."""
+    import contextlib
+
+    try:
+        import scipy.sparse.linalg  # noqa: F401
+        from threadpoolctl import threadpool_limits
+    except ImportError:
+        return contextlib.nullcontext()
+    return threadpool_limits(limits=1, user_api="blas")
+
+
 def solve_study(
+    target: Path,
+    out: Path | None,
+    *,
+    study,
+    occurrence: str | None = None,
+    mesh_size: float | None = None,
+    vtu: bool = False,
+    verbose: bool = False,
+) -> FeaResult:
+    """Mesh, solve and check one study, then write its GLB and sidecar (with BLAS on one thread: :func:`one_blas_thread`)."""
+    with one_blas_thread():
+        return _solve_study(target, out, study=study, occurrence=occurrence, mesh_size=mesh_size, vtu=vtu, verbose=verbose)
+
+
+def _solve_study(
     target: Path,
     out: Path | None,
     *,

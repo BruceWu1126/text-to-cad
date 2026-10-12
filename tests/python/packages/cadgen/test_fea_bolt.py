@@ -450,21 +450,18 @@ class LapJoint(unittest.TestCase):
                                  "friction": 0.2, "holes": self.holes}],
                 "fixtures": [{"faces": [self.held]}], **more}
 
-    def test_a_part_held_only_by_its_bolt_is_clamped_with_the_whole_preload(self):
-        result, _, _ = _solve(self.step, self._study(), "preload-only")
-        self.assertFalse(result.summary["collapsed"])
-        (joint,) = result.summary["joints"]
-        # Nothing else holds the strap along the bolt: the faces carry all of the preload.
-        self.assertAlmostEqual(joint["preload_clamp_N"] / 12500, 1.0, delta=0.01)
-        self.assertNotIn("preload_fails", [finding["type"] for finding in result.findings])
-
     def test_a_sideways_load_under_friction_times_the_clamp_is_held(self):
-        """2000 N sideways on the strap against μ N = 0.2 × 12.5 kN = 2.5 kN: it holds by friction."""
+        """Tightened first, the strap held by nothing but the bolt, its faces carry the whole preload; then 2000 N
+        sideways on the strap against μ N = 0.2 × 12.5 kN = 2.5 kN: it holds by friction. (The preload's own check
+        reads the tightening step every bolt run solves first, so it shares this run rather than solving its own.)"""
         load = {"loads": [{"faces": [self.strap_end], "type": "force", "vector_N": [-2000, 0, 0]}], "steps": 2}
         result, _, _ = _solve(self.step, self._study(**load), "sideways")
         self.assertFalse(result.summary["collapsed"])
         checks = {check["kind"]: check for check in result.summary["checks"]}
         (joint,) = result.summary["joints"]
+        # Nothing else holds the strap along the bolt: the faces carry all of the preload.
+        self.assertAlmostEqual(joint["preload_clamp_N"] / 12500, 1.0, delta=0.01)
+        self.assertNotIn("preload_fails", [finding["type"] for finding in result.findings])
         self.assertFalse(joint["slips"])
         self.assertAlmostEqual(joint["friction_holds_N"] / (0.2 * joint["clamp_N"]), 1.0, delta=0.02)
         self.assertAlmostEqual(joint["shear_N"] / 2000, 1.0, delta=0.05)

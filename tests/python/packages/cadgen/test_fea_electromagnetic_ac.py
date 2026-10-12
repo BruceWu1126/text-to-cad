@@ -21,6 +21,7 @@ import math
 import struct
 import tempfile
 import unittest
+from unittest import mock
 from contextlib import redirect_stderr
 from pathlib import Path
 
@@ -340,7 +341,18 @@ class InductionHeatedPart(unittest.TestCase):
 @unittest.skipUnless(HAVE_FEA, "needs the [fea] extra")
 class LowFrequencyLimit(unittest.TestCase):
     def test_a_coil_at_one_hertz_has_the_magnetostatic_field_and_inductance(self):
+        """Also: its complex factorisation runs with BLAS on one thread. On twelve OpenBLAS threads (scipy's BLAS
+        on Linux) it took 105 s against 11 s on one, and on CI, beside three other test files, past 15 minutes.
+        (Accelerate, on macOS, lists no threads to count.)"""
+        import scipy.sparse.linalg
         from build123d import Cylinder, export_step
+        from threadpoolctl import threadpool_info
+
+        factor, threads = scipy.sparse.linalg.splu, []
+
+        def counted(*args, **kwargs):
+            threads.extend(pool["num_threads"] for pool in threadpool_info() if pool["user_api"] == "blas")
+            return factor(*args, **kwargs)
 
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
@@ -350,7 +362,9 @@ class LowFrequencyLimit(unittest.TestCase):
                     "coils": [{"turns": 100, "A": 2, "axis": {"direction": [0, 0, 1], "point_mm": [0, 0, 0]}}],
                     "probes": [{"at_mm": [0, 0, 0], "label": "centre"}]}
             static = solve(step, directory / "static.glb", {**base, "mode": "magnetostatic"}).summary
-            ac = solve(step, directory / "ac.glb", {**base, "mode": "ac_magnetic", "frequency_Hz": 1.0}).summary
+            with mock.patch.object(scipy.sparse.linalg, "splu", counted):
+                ac = solve(step, directory / "ac.glb", {**base, "mode": "ac_magnetic", "frequency_Hz": 1.0}).summary
+        self.assertTrue(all(count == 1 for count in threads), threads)
         self.assertAlmostEqual(ac["probes"][0]["magnetic_field_mT"] / static["probes"][0]["magnetic_field_mT"], 1.0, delta=0.02)
         self.assertAlmostEqual(ac["impedance"]["L_uH"] / static["inductance_uH"], 1.0, delta=0.02)
         # A stranded coil with no conductor near it loses nothing: R is 0.

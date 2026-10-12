@@ -44,7 +44,10 @@ that would move the gas by more than a fifth of the speed of sound is cut
 back, and once the residual is a thousandth of its largest and the peak Mach
 number has settled the stabilisation's coefficients are held, so the march
 ends as Newton on fixed discrete equations. A march whose residual stops
-falling (a limit cycle) stops early at its best state, unsettled. Inlets are held by total pressure and total temperature (the
+falling with the peak Mach number settled holds them there (the floor their
+own steps leave the residual at is above a thousandth on some meshes); one
+that stops falling again, or before the flow settles (a limit cycle), stops
+early at its best state, unsettled. Inlets are held by total pressure and total temperature (the
 inflow's direction held, its speed free, pushed by the static pressure the
 total pressure leaves at that speed) or by mass flow (the inflow speed from
 the mass, the inlet's static pressure and the speed's own temperature,
@@ -193,7 +196,8 @@ RESIDUAL_TOL, CHANGE_TOL = 1e-7, 1e-6
 STAGE_RESIDUAL, STAGE_CHANGE = 1e-4, 1e-2
 MAX_STEPS = 150
 #: A march whose last STALL_STEPS steps have not cut its best residual by STALL_GAIN has stalled (a limit cycle at
-#: the shock or along a wall: each step moves the gas by the step limit and back) and stops there.
+#: the shock or along a wall: each step moves the gas by the step limit and back) and stops there; the first time, if
+#: the peak Mach number has settled and the coefficients still follow the flow, it holds them and goes on instead.
 STALL_STEPS, STALL_GAIN = 40, 0.5
 #: Continuation: the shares of the drive each stage solves at.
 CONTINUATION = (0.5, 1.0)
@@ -521,6 +525,8 @@ def solve_gas(problem: GasProblem, *, schedule: tuple[float, ...] = (), solver: 
         history = []
         peaks: list[float] = []
         best = (math.inf, x, 0, 0)                     # (residual, its state, its shock cells, its step)
+        held_at_stall, since = False, 0                # the coefficients held because the march stalled; from when
+        best_held = (None, 0.0)
         for steps in range(1, steps_left + 1):
             targets = [inflow_speed(i, share, p, speed) for i, speed in enumerate(speeds)]
             speeds = [s + INLET_RELAX * (t - s) for s, t in zip(speeds, targets)]
@@ -536,6 +542,7 @@ def solve_gas(problem: GasProblem, *, schedule: tuple[float, ...] = (), solver: 
             residual = residual_abs / max(largest, 1e-300)
             if residual < best[0]:
                 best = (residual, x, shocks, steps)
+                best_held = (frozen["last"], peak)     # the coefficients the best state was evaluated with
             peaks.append(peak)
             x_new = linear(K, rhs, values)
             # A step that would move the gas by more than STEP_LIMIT of the speed of sound (or its pressure by that
@@ -565,11 +572,25 @@ def solve_gas(problem: GasProblem, *, schedule: tuple[float, ...] = (), solver: 
             inflow_settled = all(abs(t - s) <= 10 * change_tol * max(abs(t), 1e-12) for s, t in zip(speeds, targets))
             if residual < residual_tol and change < change_tol and inflow_settled:
                 return True, x, residual, steps, shocks, history
-            if steps > STALL_STEPS and min(history[-STALL_STEPS:]) > STALL_GAIN * min(history[:-STALL_STEPS]):
-                if log:
-                    log(f"gas flow: share {share:.3g}, the residual has not halved in {STALL_STEPS} steps (best "
-                        f"{best[0]:.1e}): the march has stalled, so it stops at its best state")
-                break
+            window = history[since:]
+            if len(window) > STALL_STEPS and min(window[-STALL_STEPS:]) > STALL_GAIN * min(window[:-STALL_STEPS]):
+                if frozen["coefficients"] is None and not held_at_stall and max(recent) - min(recent) <= THAW * max(recent):
+                    # The regime is set (the peak Mach number within what would thaw held coefficients) but the residual
+                    # sits on the floor the coefficients' own steps leave it at, above FREEZE_AT on some meshes (1.1e-3
+                    # on one of the choked nozzle test's), or the gas steps back and forth across the shock as they
+                    # follow it: go back to the best state, hold the coefficients it was evaluated with and go on.
+                    frozen["coefficients"], frozen["peak"] = best_held
+                    x = best[1]
+                    u, p = x[:nv], x[nv:]
+                    held_at_stall, since = True, len(history)
+                    if log:
+                        log(f"gas flow: share {share:.3g}, the residual has not halved in {STALL_STEPS} steps (best "
+                            f"{best[0]:.1e}) with the peak Mach number settled: the stabilisation is held from here")
+                else:
+                    if log:
+                        log(f"gas flow: share {share:.3g}, the residual has not halved in {STALL_STEPS} steps (best "
+                            f"{best[0]:.1e}): the march has stalled, so it stops at its best state")
+                    break
             # Switched evolution relaxation on the steady residual; a cut step or a growing residual halves the CFL.
             if alpha < 1.0 or residual > 2.0 * last:
                 cfl_now = max(cfl_now / 2.0, CFL_MIN)

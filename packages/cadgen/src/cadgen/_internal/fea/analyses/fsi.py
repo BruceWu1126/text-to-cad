@@ -618,6 +618,8 @@ class FlowState:
     pressure: Any = None
     #: (fluid wall rows, 3) MPa: the rest of the traction: the shear, and the pressure's turn as the wall moved.
     shear: Any = None
+    #: (fluid vertices,) MPa: the flow's linear pressure, which the part takes at its own points (:meth:`Interface.load`).
+    pressure_nodes: Any = None
 
 
 @dataclass
@@ -727,7 +729,7 @@ class Coupling:
         # Split along the wall's normal at rest: what the wall has turned since (a leaning flap's pressure, turned with
         # it) stays in the rest, so the part still feels its pressure follow the bent wall.
         shear = traction - pressure[:, None] * self.interface.fluid_normal
-        return FlowState(space, flow, traction, force, pressure, shear)
+        return FlowState(space, flow, traction, force, pressure, shear, flow.p[: space.vertices])
 
     def traction(self, space, flow):
         """(wall rows, 3) MPa: the fluid's push on the part over each wetted wall triangle, its mean over the
@@ -906,7 +908,7 @@ class Coupling:
         import time
 
         started = time.perf_counter()
-        f = self.interface.load(flow_state.traction, flow_state.pressure, flow_state.shear)
+        f = self.interface.load(flow_state.traction, flow_state.pressure_nodes, flow_state.shear)
         outcome = self.structure.solve(f)
         self.timings["structure_s"] += time.perf_counter() - started
         return outcome, f
@@ -1021,8 +1023,9 @@ class Structure:
 class Interface:
     """Where the fluid's walls meet the part's faces, both ways: the part's displacement onto the fluid's wall
     nodes (the P2 field on the part's surface triangles, evaluated where each fluid node sits), and the fluid's
-    traction onto the part's wetted triangles (each takes the mean traction of the nearest fluid wall triangle on
-    the same face). Built once, on the meshes at rest."""
+    traction onto the part's wetted triangles: its pressure evaluated at the part's own load points (the fluid's
+    linear pressure on the nearest fluid wall triangle of the same face), the rest of it the mean over that
+    triangle. Built once, on the meshes at rest."""
 
     def __init__(self, space, volume, fluid_space, wall_rows, wall_ordinal):
         import numpy as np
@@ -1064,6 +1067,28 @@ class Interface:
             self.facet_order = np.array([position[int(facet)] for facet in self.part_basis.find], dtype=np.int64)
         else:
             self.facet_order = np.zeros(0, dtype=np.int64)
+        # The fluid's pressure at each of the part's load points, from its corners' pressures: the fluid's linear
+        # pressure on the nearest fluid wall triangle of the same face, at the point's place on it.
+        self.pressure_matrix = sparse.csr_matrix((0, fluid_space.vertices))
+        if self.part_basis is not None:
+            points = self.part_basis.global_coordinates().value               # (3, facets, points per facet)
+            flat = points.reshape(3, -1).T
+            point_ordinal = np.repeat(part_ordinal[self.facet_order], points.shape[2])
+            rows_p, cols_p, values_p = [], [], []
+            for ordinal in wetted:
+                here = np.flatnonzero(point_ordinal == ordinal)
+                on_fluid = np.flatnonzero(wall_ordinal == ordinal)
+                if len(here) == 0 or len(on_fluid) == 0:
+                    continue
+                weights, chosen = _locate(flat[here], fluid_locations, fluid_boundary[on_fluid])
+                for k in range(3):
+                    rows_p.append(here)
+                    cols_p.append(fluid_boundary[on_fluid[chosen], k])
+                    values_p.append(weights[:, k])
+            if rows_p:
+                self.pressure_matrix = sparse.csr_matrix(
+                    (np.concatenate(values_p), (np.concatenate(rows_p), np.concatenate(cols_p))),
+                    shape=(len(flat), fluid_space.vertices))
         corners = fluid_locations[fluid_boundary[:, :3]]
         self.fluid_area = 0.5 * np.linalg.norm(np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0]), axis=1)
         # The quadratic triangle's consistent load under an even traction: nothing at the corners, a third of the
@@ -1130,12 +1155,19 @@ class Interface:
     def load(self, traction, pressure=None, shear=None):
         """The part's load vector (N) from the traction on each fluid wall row (MPa, on the part).
 
-        With ``pressure`` (MPa per fluid wall row) and ``shear`` (the rest of the traction, MPa: the traction less
-        the pressure along the fluid wall's normal at rest), the pressure is taken as that scalar along the part's own
-        normal, integrated over its curved faces as a static pressure load is, and only the rest as a vector. (Taken as a vector, the pressure carried the normal of the nearest fluid triangle, up to
+        With ``pressure`` (MPa at each of the fluid's vertices) and ``shear`` (the rest of the traction, MPa per fluid
+        wall row: the traction less the pressure along the fluid wall's normal at rest), the pressure is taken as a
+        scalar along the part's own normal, integrated over its curved faces as a static pressure load is, and only
+        the rest as a vector. (Taken as a vector, the pressure carried the normal of the nearest fluid triangle, up to
         ten degrees off the part's on a bore meshed at a different size: a sideways push of a sixth of the pressure,
         varying from triangle to triangle, that a thin wall takes in bending, its softest way. A soft tube's bore
-        dented in by four times its true swelling, and the coupling chased that noise and never settled.)"""
+        dented in by four times its true swelling, and the coupling chased that noise and never settled.)
+
+        The pressure is the fluid's own linear field at each of the part's load points. Taken as the nearest fluid
+        triangle's mean, a step at every triangle's edge, it was off by the pressure's fall along the flow over the
+        distance between the two meshes' triangles: on a tube that fall left a net sideways push (0.4 % of the
+        pressure's sideways total on the soft tube, where the fluid felt none), which bent the soft tube sideways
+        by a sixth of its swelling, by mesh: the bore read as out of round."""
         import numpy as np
         from skfem import LinearForm, asm
 
@@ -1147,11 +1179,10 @@ class Interface:
             for k in range(3):
                 np.add.at(f, self.dof_table[self.part_mids[:, k]].ravel(), per.ravel())
             return f
-        pressure = np.asarray(pressure, dtype=float)
         shear = np.zeros_like(traction) if shear is None else np.asarray(shear, dtype=float)
         basis = self.part_basis
         q = basis.X.shape[1]
-        on_p = np.repeat(pressure[self.source][self.facet_order][:, None], q, axis=1)
+        on_p = (self.pressure_matrix @ np.asarray(pressure, dtype=float)).reshape(-1, q)
         on_s = np.repeat(shear[self.source][self.facet_order].T[:, :, None], q, axis=2)    # (3, F, Q)
 
         @LinearForm
