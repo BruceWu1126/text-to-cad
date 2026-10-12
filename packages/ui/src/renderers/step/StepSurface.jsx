@@ -422,7 +422,7 @@ function StepSurfaceBody({ view, data }) {
     readStored: () => session.readStored()
   });
   const {
-    definition: selectedStepModuleDefinition, loading: selectedStepModuleLoading,
+    definition: selectedStepModuleDefinition,
     parameterValues: stepModuleParameterValues,
     animationState, animationRuntime: selectedAnimationRuntime, animationError: selectedAnimationError
   } = motion;
@@ -647,7 +647,7 @@ function StepSurfaceBody({ view, data }) {
     (selectedArtifactGenerating || !artifactBlocksRender) &&
     status !== ASSET_STATUS.ERROR &&
     ((!selectedMeshMatches && !retainedPreviousStepMeshError) ||
-      status === ASSET_STATUS.LOADING || selectedStepModuleLoading);
+      status === ASSET_STATUS.LOADING);
   const effectiveViewerLoading = viewerLoading || selectedArtifactGenerating;
   // The file explorer spins the entry the viewer is actually working on. Artifact
   // generation is only half of that -- a built package still has to be fetched and
@@ -793,7 +793,6 @@ function StepSurfaceBody({ view, data }) {
       setHiddenPartIds(restored.tree.hiddenPartIds);
       setIsolatedAssemblyNodeIds(restored.tree.isolatedAssemblyNodeIds);
       setLargeFileState(normalizeLargeFileState(restored.largeFile));
-      motion.restore(restored);
     }
   });
 

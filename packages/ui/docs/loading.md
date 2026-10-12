@@ -150,9 +150,10 @@ replacement stages or fails. Reuse requires the same part; placements and
 appearance come from the new tree. Selection, measurements and reference copying wait for matching
 new geometry. A failed replacement preserves the view and reports its error;
 only that file/hash stops retrying automatically. A first load that fails part
-way keeps the parts it drew under its error. STEP pose and animation
-metadata use their normal loading path, without a promise to retain the
-previous pose. Snapshot source isolation is unchanged.
+way keeps the parts it drew under its error. A STEP's articulation arrives with its
+entry and its routines load on their own path; whether a pose outlives a replacement
+is [Position's rule](cad-renderer.md#position), not the mesh load's. Snapshot source
+isolation is unchanged.
 
 **Overlapping loads.** Geometry and reference loads own their cancellation
 independently; a superseded request cannot cancel its replacement. Topology

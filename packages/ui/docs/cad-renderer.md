@@ -1167,10 +1167,10 @@ to Select first. No other tool ever sees a selection, so none needs a rule for o
 Position edits persist when switching tools or tabs, or closing the panel. A STEP's
 Position is over the articulation cadgen resolved from its sidecar's kinematics, inline on
 its catalog entry (`entry.articulation`, versioned by `poseUrl`); the page reads no sidecar.
-A rebuild keeps Position the tool while the new articulation arrives behind the one in
-hand (`workbench/useStepMotion.js`), and keeps the values, and the named pose they were
+A rebuild keeps Position the tool, its new articulation in hand in the render its entry
+arrives in (`workbench/useStepMotion.js`), and keeps the values, and the named pose they were
 chosen as, when the new articulation's controls and named poses are the ones in hand
-(`stepPoseLogic`, `workbench/poseLoad.js`); when they changed, the pose starts at the
+(`stepPoseLogic`, `workbench/motionRestore.js`); when they changed, the pose starts at the
 new defaults — the old values are never fitted onto other joints. A robot's new revision
 follows the same rule over its driven joints and named poses (`poseLogic`,
 `robot/poseStore.js`). Position goes only when the articulation has nothing left to move. Reset

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   animationClipList,
   animationRenderFrame,
@@ -9,8 +9,7 @@ import { loadSourceAnimation } from "@text-to-cad/core/common/animationRuntime.j
 import { entryPoseUrl } from "@text-to-cad/core/lib/entryAssets.js";
 import { useAnimationClockStore } from "./animationClockStore.js";
 import { fileKey as fileKeyOf } from "./entryPaths.js";
-import { restoreMotionAnimation, restoreMotionParameters } from "./motionRestore.js";
-import { resolvePoseLoad, stepPoseLogic } from "./poseLoad.js";
+import { restoreMotionAnimation, restoreMotionParameters, stepPoseLogic } from "./motionRestore.js";
 import { useStepMotionControls } from "./useStepMotionControls.js";
 
 function sourceAnimationForEntry(entry) { return entry?.animation || null; }
@@ -42,12 +41,11 @@ export function stepMotionSources(entry) {
  * the playback over them — resolved and held apart (a model may ship either, both, or neither),
  * with one command boundary over both (`useStepMotionControls`).
  *
- * In: the entry on screen, and the stored view to restore the pose from as the articulation
- * resolves.
- * Out: what the Position panel and the playbar read and call, what the viewport draws a frame
- * from (`animationRuntime`), and `restore`, which the file's view calls once before the
- * first paint. A routine is never restored: every open starts at rest, and the speed and
- * loop it plays with are the shell's (the Animation tool's, the file's; preview's, its own).
+ * In: the entry on screen, and the stored view, whose pose the file's first articulation takes.
+ * Out: what the Position panel and the playbar read and call, and what the viewport draws a
+ * frame from (`animationRuntime`). A routine is never restored: every open starts at rest, and
+ * the speed and loop it plays with are the shell's (the Animation tool's, the file's; preview's,
+ * its own).
  *
  * @param {{ entry: object, fileKey: string, resources: object,
  *   readStored: () => { pose: object | null } }} options
@@ -59,13 +57,9 @@ export function useStepMotion({ entry, fileKey, resources, readStored }) {
   readStoredRef.current = readStored;
   const { moduleUrl, articulation, sourceAnimation, animationKey } = stepMotionSources(entry);
 
-  const [stepModuleLoadState, setStepModuleLoadState] = useState({
-    url: "",
-    file: "",
-    status: "idle",
-    error: "",
-    definition: null
-  });
+  // The articulation is cadgen's, inline on the entry: the definition is the entry's own, in hand
+  // in the render the entry arrives in, so a rebuild never leaves Position without one.
+  const definition = useMemo(() => (articulation ? { url: moduleUrl, articulation } : null), [moduleUrl, articulation]);
   const [stepModuleParameterValues, setStepModuleParameterValues] = useState({});
   // The ANIMATION system, loaded and held entirely apart from the kinematics
   // state above: kinematics and choreography are independent declarations in
@@ -83,109 +77,44 @@ export function useStepMotion({ entry, fileKey, resources, readStored }) {
   const animationStateRef = useRef(animationState);
   const motionRevisionRef = useRef(0);
 
-  // A rebuild writes this file's sidecar again (a new version, bound to the new document), and its
-  // articulation arrives again: until it lands, what the last one declared stays in hand, so the
-  // model stays posed and Position stays the tool. Whether the pose outlives it is the load's to say.
-  const kinematicsInHand = stepModuleLoadState.url === moduleUrl ||
-    (Boolean(moduleUrl) && stepModuleLoadState.file === fileKey && stepModuleLoadState.status === "ready");
-  const definition = kinematicsInHand ? stepModuleLoadState.definition : null;
-  // The routines the same way: a rebuild that changed them reads them again, and until the new ones
-  // land the ones in hand stay, with the model at rest, so the Animation tool stays up and keeps
-  // its routine.
+  // A rebuild that changed the routines reads them again, and until the new ones land the ones in
+  // hand stay, with the model at rest, so the Animation tool stays up and keeps its routine.
   const animationInHand = animationLoadState.url === animationKey ||
     (Boolean(animationKey) && animationLoadState.file === fileKey && animationLoadState.status === "ready");
   const clips = animationInHand ? animationLoadState.clips : null;
   const animationStatus = animationKey ? (animationLoadState.url === animationKey ? animationLoadState.status : "loading") : "idle";
   const animationLoadError = animationLoadState.url === animationKey ? animationLoadState.error : "";
-  const status = moduleUrl ? (kinematicsInHand ? stepModuleLoadState.status : "loading") : "idle";
-  const error = kinematicsInHand ? stepModuleLoadState.error : "";
-  const loading = Boolean(moduleUrl && status === "loading");
 
   // The pose the person PICKED, which the dropdown shows until they move a DOF. Without
   // it the name is re-derived from the values every frame, so a pose read as "None"
   // for the whole of its own transition and only became itself once it arrived.
   const [appliedPoseName, setAppliedStepPoseName] = useState("");
 
-  useEffect(() => {
-    if (!moduleUrl) {
-      setStepModuleLoadState({
-        url: "",
-        file: fileKey,
-        status: "idle",
-        error: "",
-        definition: null
-      });
+  // The values over the definition, fitted whenever it changes and before the paint that shows
+  // it. A rebuild whose joints and named poses are unchanged keeps the values in hand, and the
+  // named pose chosen with them; one that changed them starts at the new defaults, with no attempt
+  // to fit the old pose onto the new joints. The file's first articulation takes the stored pose,
+  // within its limits, whatever the transport opened on: the clip a model's routines open with is
+  // not a routine anyone ran, so only a rebuild weighs a routine that owns the pose. An entry with
+  // no articulation (an animation-only model) has no values, and no Position.
+  const fittedRef = useRef(null);
+  useLayoutEffect(() => {
+    const previous = fittedRef.current;
+    fittedRef.current = definition && { file: fileKey, definition };
+    if (!definition) {
       stepModuleParameterValuesRef.current = {};
       setStepModuleParameterValues({});
-      return undefined;
+      return;
     }
-    let cancelled = false;
-
-    // The same file's sidecar read again keeps the last one's definition and values in hand
-    // (above) while it loads; only a first load starts from nothing.
-    const reloading = stepModuleLoadState.file === fileKey && stepModuleLoadState.status === "ready";
-    const poseLogicInHand = reloading ? stepPoseLogic(stepModuleLoadState.definition) : "";
-    if (!reloading) {
-      setStepModuleLoadState({
-        url: moduleUrl,
-        file: fileKey,
-        status: "loading",
-        error: "",
-        definition: null
-      });
-      stepModuleParameterValuesRef.current = {};
-      setStepModuleParameterValues({});
-    }
-
-    // The articulation is cadgen's, inline on the entry: nothing is fetched or validated here.
-    // It resolves on the next tick, as a load does, so a rebuild's pose carries over below.
-    Promise.resolve().then(() => (articulation ? { url: moduleUrl, articulation } : null)).then((definition) => {
-      if (cancelled) {
-        return;
-      }
-      // A reload whose joints and named poses are unchanged keeps the values in hand, and the
-      // named pose chosen with them; one that changed them starts at the new defaults, with no
-      // attempt to fit the old pose onto the new joints. A first load reads the stored pose,
-      // against the articulation as it is now.
-      const kept = reloading && stepPoseLogic(definition) === poseLogicInHand;
-      const restoredPose = kept ? { parameterValues: stepModuleParameterValuesRef.current }
-        : reloading ? null : readStoredRef.current().pose;
-      // An entry with no articulation resolves to a NULL definition — an animation-only model
-      // has a sidecar and lands here — so the ready state is committed from one place that
-      // expects that (workbench/poseLoad); the Position section is then absent, not empty.
-      const resolved = resolvePoseLoad({
-        url: moduleUrl,
-        definition,
-        restored: restoredPose
-      });
-      setStepModuleLoadState({ ...resolved.loadState, file: fileKey });
-      // A first load restores the stored pose whatever the transport opened on: the clip a
-      // model's routines open with is not a routine anyone ran, and whether the clips or the
-      // kinematics load first is a race. Only a reload weighs a routine that owns the pose.
-      const parameterValues = restoreMotionParameters(definition, resolved.parameterValues,
-        reloading ? animationStateRef.current : null);
-      stepModuleParameterValuesRef.current = parameterValues;
-      setStepModuleParameterValues(parameterValues);
-      if (!kept) setAppliedStepPoseName("");
-    }).catch((error) => {
-      if (cancelled) {
-        return;
-      }
-      setStepModuleLoadState({
-        url: moduleUrl,
-        file: fileKey,
-        status: "error",
-        error: error instanceof Error ? error.message : String(error),
-        definition: null
-      });
-      stepModuleParameterValuesRef.current = {};
-      setStepModuleParameterValues({});
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [fileKey, entry, moduleUrl]);
+    const rebuilt = previous?.file === fileKey;
+    const kept = rebuilt && stepPoseLogic(definition) === stepPoseLogic(previous.definition);
+    const values = kept ? stepModuleParameterValuesRef.current
+      : rebuilt ? null : readStoredRef.current().pose?.parameterValues;
+    const parameterValues = restoreMotionParameters(definition, values, rebuilt ? animationStateRef.current : null);
+    stepModuleParameterValuesRef.current = parameterValues;
+    setStepModuleParameterValues(parameterValues);
+    if (!kept) setAppliedStepPoseName("");
+  }, [definition, fileKey]);
 
   // The animation half loads the keyframes in the selected sidecar. A document
   // with no animation resolves to no clips and no Animation tool, and a broken
@@ -308,19 +237,9 @@ export function useStepMotion({ entry, fileKey, resources, readStored }) {
 
   const animationError = animationLoadError;
 
-  // The stored pose, once, before the first paint (the file's view calls it). The values are
-  // normalized against the articulation when it resolves.
-  const restore = (restored) => {
-    const values = restored.pose?.parameterValues;
-    if (values) {
-      stepModuleParameterValuesRef.current = values;
-      setStepModuleParameterValues(values);
-    }
-  };
-
   // What the Position panel and the playbar read and call.
   const positionControls = {
-    status, error, definition,
+    definition,
     parameterValues: stepModuleParameterValues,
     onParameterChange: commands.handleStepModuleParameterChange,
     onResetParameters: commands.handleResetStepModuleParameters,
@@ -357,9 +276,9 @@ export function useStepMotion({ entry, fileKey, resources, readStored }) {
   };
 
   return {
-    definition, loading, parameterValues: stepModuleParameterValues,
+    definition, parameterValues: stepModuleParameterValues,
     animationState, animationStateRef, animationRuntime, animationError, positionControls, animationControls,
     onParameterChange: commands.handleStepModuleParameterChange, onPlayToggle: commands.handleAnimationPlayToggle,
-    releaseAnimation: commands.releaseAnimation, restore
+    releaseAnimation: commands.releaseAnimation
   };
 }

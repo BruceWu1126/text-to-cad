@@ -6,7 +6,7 @@ import {
   articulationControl, articulationPoses, clampControlValue, normalizeControlValues, poseControlValues
 } from "@text-to-cad/core/common/articulation.js";
 import { useAnimationClockStore } from "./animationClockStore.js";
-import { stepPoseLogic } from "./poseLoad.js";
+import { stepPoseLogic } from "./motionRestore.js";
 
 // Single command boundary for STEP motion. Refs are published synchronously so
 // queued playback callbacks cannot resurrect the previous motion owner.
