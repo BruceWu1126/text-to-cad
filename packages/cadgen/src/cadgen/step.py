@@ -144,10 +144,4 @@ def build(
     )
 
 
-def __getattr__(name: str):
-    if name in {"inspect", "INSPECTIONS"}:
-        raise ImportError("step.inspect has been removed; use cadgen.read_scene and cadgen.geometry in a Python script")
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
 callable_namespace(__name__, "step")

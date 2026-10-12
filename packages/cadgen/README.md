@@ -180,9 +180,7 @@ revision-scoped occurrence/selector views with caller-owned world geometry.
 `topology_errors`, `boundary_edges`, `self_intersections` and
 `mass_properties`. These operations accept native geometry and return facts;
 selection, units, thresholds, exclusions and verdicts belong to the caller's
-script. The inspect
-CLI and `step.inspect` are removed, with an immediate migration error.
-The contracts live in [`step_scene.py`](src/cadgen/step_scene.py) and
+script. The contracts live in [`step_scene.py`](src/cadgen/step_scene.py) and
 [`geometry.py`](src/cadgen/geometry.py). They import no kernel at namespace
 load and require no display artifacts.
 

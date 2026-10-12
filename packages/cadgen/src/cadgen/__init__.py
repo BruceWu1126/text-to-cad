@@ -93,8 +93,7 @@ def __getattr__(name: str):
             "label_shape": label_shape,
             "target": target,
         }[name]
-    if name in {"read_step", "read_scene", "StepScene", "Occurrence", "Selection",
-                "load_step_scene", "located_shape", "occurrence_selector_id", "scene_occurrence_shape"}:
+    if name in {"read_step", "read_scene", "StepScene", "Occurrence", "Selection"}:
         from cadgen import step_scene
 
         return getattr(step_scene, name)
@@ -117,9 +116,8 @@ def __getattr__(name: str):
 
 if TYPE_CHECKING:
     # Mirrors the lazy __getattr__ above so type checkers and editors see the root exports
-    # without importing OCP. Every name here must have a branch there. An earlier version
-    # of this block pulled two names from the api alias module, since deleted -- they come
-    # from their real modules now.
+    # without importing OCP. Every name here must have a branch there, and comes from the
+    # module that defines it.
     from cadgen import build123d, dxf, glb, step, stl, threemf
     from cadgen.assembly import AssemblyHelper, MateTarget, label_shape, label_text, target
     from cadgen.color import (
