@@ -1,6 +1,7 @@
 """A part's display data (STORE.md §2): ONE record per part, keyed by the component's geometry
 and the producer, naming its display mesh and selector table; derived once, read back bound
-to that record, and carried by a view for the CLI's readers. A tiny box in a fresh store."""
+to that record, and carried by a view for the CLI's readers; a part that fails to mesh is
+named once the rest are stored. A tiny box in a fresh store."""
 
 from __future__ import annotations
 
@@ -54,6 +55,44 @@ class PartStoreTest(unittest.TestCase):
         self.assertEqual(entry_path("part", self.key).stat().st_mtime_ns, written, "a second derive writes nothing")
         remove_entry("part", self.key)
         self.assertEqual(parts.derive(self.tree), {self.cid: record}, "the same inputs give the same part")
+
+    def test_a_part_that_fails_to_mesh_is_named_once_the_rest_are_stored(self) -> None:
+        from build123d import Box, Compound, Cylinder, Pos
+
+        from cadgen._internal import occt_mesh
+
+        tree, geometry, _ = build_tree_from_compound(
+            Compound(children=[Box(4, 4, 4), Pos(10, 0, 0) * Cylinder(2, 4)]), root_name="pair")
+        keys = [parts.part_key(entry, self.producer) for entry in geometry["components"].values()]
+        real, failed = occt_mesh.mesh_component, []
+
+        def mesher(topods, table, face_colors, *, part, **options):
+            # Whatever fails, not only OCCT's own refusal: the first part meshed fails every
+            # time, as a body its encoding refuses would.
+            if failed in ([], [part]):
+                failed[:] = [part]
+                raise ValueError("invalid tessellation JSON length")
+            return real(topods, table, face_colors, part=part, **options)
+
+        def stored():
+            return {key: parts.probe(key) is not None for key in keys}
+
+        # A view's job names the component, after storing the other.
+        named = r"^component [0-9a-f]{16}: ValueError: invalid tessellation JSON length$"
+        with mock.patch.object(occt_mesh, "mesh_component", side_effect=mesher), \
+                self.assertRaisesRegex(occt_mesh.MeshProductionError, named):
+            parts.derive(tree)
+        others = {key: key != failed[0] for key in keys}
+        self.assertEqual(stored(), others, "the other part was stored before the failure was reported")
+        # A build's derivation returns the one failure and fails nothing (what the build then
+        # prints: test_build_derives_display).
+        with mock.patch.object(occt_mesh, "mesh_component", side_effect=mesher):
+            [_failure] = parts.ensure_display(tree)
+        self.assertEqual(stored(), others)
+        # An interrupt is not a part's failure.
+        with mock.patch.object(occt_mesh, "mesh_component", side_effect=KeyboardInterrupt), \
+                self.assertRaises(KeyboardInterrupt):
+            parts.ensure_display(tree)
 
     def test_part_keys_carry_their_version_and_an_older_one_is_obsolete(self) -> None:
         digest = self.key.rsplit("-v", 1)[0]

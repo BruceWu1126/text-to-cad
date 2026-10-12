@@ -16,7 +16,6 @@ import base64
 import json
 import os
 import re
-import shutil
 import struct
 import subprocess
 import tempfile
@@ -30,14 +29,6 @@ add_repo_path("packages/cadgen/src")
 
 ROOT = Path(__file__).resolve().parents[3]
 TESSELLATION_CACHE_JS = ROOT / "packages" / "core" / "src" / "lib" / "surf" / "tessellationCache.js"
-
-
-def _node() -> str:
-    """The development Node that evaluates the client's half of the contract."""
-    node = shutil.which("node")
-    if node is None:
-        raise AssertionError("node is required to evaluate the JavaScript half of the part-store contract")
-    return node
 
 
 def _unmeshed_part(fixture: dict) -> tuple[str, bytes, bytes]:
@@ -74,7 +65,7 @@ class PartStoreContractSyncTest(unittest.TestCase):
 
     def test_a_record_cadgen_stores_is_a_row_the_client_reads_whole(self) -> None:
         from cadgen.store import parts
-        from tests.python.support.tessellation import part_fixture, store_part
+        from tests.python.support.tessellation import node, part_fixture, store_part
 
         fixture = part_fixture()
         key, glb, table = _unmeshed_part(fixture)
@@ -91,7 +82,7 @@ console.log(JSON.stringify(JSON.parse(fs.readFileSync(0, "utf8")).map(([part, re
   return [row, row !== null && partMeshMatches(new Uint8Array(Buffer.from(glb, "base64")), row)];
 }})));
 '''
-        result = subprocess.run([_node(), "--input-type=module", "-e", script],
+        result = subprocess.run([node(), "--input-type=module", "-e", script],
                                 input=json.dumps([[part, record, body] for part, (record, body) in stored.items()]),
                                 text=True, capture_output=True, check=True)
         self.assertEqual(json.loads(result.stdout),

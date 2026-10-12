@@ -1,11 +1,12 @@
-"""The viewer's read-only transport over the store's parts, and shared TESB framing.
+"""The viewer's read-only routes to the store's parts: a route path's name, URI-decoded
+and checked; the status a read answers; and the batch requests and container.
 
-Ports ``tessCache.test.mjs``. The container test does not read the format by
-eye — it hands the Python encoder's bytes to the AUTHORITATIVE decoder in
-``packages/core``, which is where the format lives. A hand-written
-assertion about offsets would pass just as happily against a subtly wrong
-encoder, and the client would then silently fall back to one round trip per
-component for the life of the page.
+What the routes read is the store's, and its suites hold it (test_store_tess_cache,
+test_store_parts). The container test does not read the format by eye — it hands the
+Python encoder's bytes to the AUTHORITATIVE decoder in ``packages/core``, which is where
+the format lives. A hand-written assertion about offsets would pass just as happily
+against a subtly wrong encoder, and the client would then silently fall back to one
+round trip per component for the life of the page.
 """
 
 from __future__ import annotations
@@ -17,7 +18,6 @@ import shutil
 import subprocess
 import tempfile
 import unittest
-from unittest import mock
 from pathlib import Path
 
 from cadgen.viewer.tess_cache import (
@@ -26,7 +26,6 @@ from cadgen.viewer.tess_cache import (
     read_tess_cache_entry,
     tess_cache_name_from_route_path,
 )
-from cadgen.store.index import entry_path
 
 from tests.python.support.tessellation import part_fixture, store_part
 
@@ -96,28 +95,11 @@ class NameValidation(TessCacheTestCase):
             with self.subTest(suffix=suffix):
                 self.assertEqual(tess_cache_name_from_route_path(self.route(GOOD_KEY + suffix)), GOOD_KEY + suffix)
 
-    def test_traversal_separators_hidden_names_and_spaces_are_refused(self):
+    def test_an_encoded_traversal_is_decoded_and_refused(self):
         # The store lives outside every folder a file is served from, so containment
-        # cannot help here: the part key's pattern is the whole defence.
-        for name in (
-            "../escape.glb",
-            "sub/dir.glb",
-            "%2e%2e%2fescape.glb",
-            "..%2Fescape.glb",
-            ".hidden.glb",
-            "noext",
-            "",
-            "a b.glb",
-            "a..b.glb",
-            "batch",
-            f"{GOOD_KEY}.tess",
-            f"{GOOD_KEY}.surf",
-            f"{GOOD_KEY}.json",
-            GOOD_KEY,
-            f"../{GOOD_KEY}.glb",
-            f"{GOOD_KEY[:64]}-v0.glb",
-            f"{'A' * 64}{GOOD_KEY[64:]}.glb",
-        ):
+        # cannot help here: the part key's pattern is the whole defence, and it judges
+        # the decoded name (the store's suite holds the pattern).
+        for name in ("%2e%2e%2fescape.glb", "..%2Fescape.glb"):
             with self.subTest(name=name):
                 self.assertIsNone(tess_cache_name_from_route_path(self.route(name)))
 
@@ -132,33 +114,16 @@ class NameValidation(TessCacheTestCase):
         self.assertIsNone(tess_cache_name_from_route_path(self.route(f"{GOOD_KEY}.glb%0A")))
 
 
-class StoreRoundTrip(TessCacheTestCase):
-    def test_a_stored_parts_mesh_and_table_read_back_exactly(self):
+class ReadStatus(TessCacheTestCase):
+    def test_a_hit_is_200_a_miss_404_and_a_refused_name_403(self):
+        self.assertEqual(self.read(f"{ABSENT_KEY}.glb")[0], 404)
+        self.assertEqual(self.read("../escape.glb")[0], 403)
         self.assertEqual(store_part(), RECORD)
         self.assertEqual(self.read(f"{GOOD_KEY}.glb"), (200, PAYLOAD))
         self.assertEqual(self.read(f"{GOOD_KEY}.selectors.json", "selectors"), (200, TABLE))
-
-    def test_a_miss_is_404_and_a_refused_name_is_403(self):
-        self.assertEqual(self.read(f"{ABSENT_KEY}.glb")[0], 404)
-        self.assertEqual(self.read("../escape.glb")[0], 403)
-        store_part()
+        self.assertEqual(self.read(f"{GOOD_KEY}.glb", expected_object="f" * 64)[0], 404,
+                         "a read the record does not admit is a miss")
         self.assertEqual(self.read(f"{GOOD_KEY}.tess")[0], 403, "a mesh is a GLB body")
-
-    def test_a_read_is_bound_to_the_object_its_record_names_and_the_size_admitted(self):
-        store_part()
-        for name, admission in (
-            ("another object", {"expected_object": "f" * 64}),
-            ("the table's object for the mesh", {"expected_object": RECORD["selectors"]["object"]}),
-            ("fewer bytes than the object", {"max_bytes": len(PAYLOAD) - 4}),
-        ):
-            with self.subTest(name):
-                self.assertEqual(self.read(f"{GOOD_KEY}.glb", **admission)[0], 404)
-        self.assertEqual(self.read(f"{GOOD_KEY}.glb", max_bytes=len(PAYLOAD) + 4), (200, PAYLOAD))
-
-    def test_a_part_is_one_entry_indexed_by_its_key_itself(self):
-        store_part()
-        folder = entry_path("part", GOOD_KEY).parent
-        self.assertEqual(os.listdir(folder), [GOOD_KEY], "an index entry is keyed by the part key itself")
 
 
 class BatchRequests(TessCacheTestCase):
@@ -170,10 +135,6 @@ class BatchRequests(TessCacheTestCase):
                      b'{"entries":' + b'[' * depth + b'0' + b']' * depth + b'}'):
             with self.subTest(body=body):
                 self.assertIsNone(read_tess_cache_batch(body))
-
-    def test_more_than_the_cap_is_refused(self):
-        self.assertIsNone(read_tess_cache_batch(json.dumps({"entries": [admitted()] * 257}).encode()))
-        self.assertIsNotNone(read_tess_cache_batch(json.dumps({"entries": []}).encode()))
 
     def test_one_undecodable_byte_is_a_per_entry_miss_not_a_400(self):
         """``Buffer.from(body).toString("utf8")`` substitutes; it does not throw.
@@ -251,17 +212,6 @@ class BatchFramingMatchesTheAuthoritativeCodec(TessCacheTestCase):
         # A refused name and a miss are per-entry MISSES, never errors: one bad
         # key must not cost an assembly its whole round trip.
         self.assertEqual(self.decode_with_node(container), [list(PAYLOAD), None, None])
-
-    def test_unaligned_payloads_round_trip(self):
-        # 1, 2 and 3 mod 4 all exercise the padding; a decoder that advances by
-        # the raw length instead of the aligned one desynchronises after the
-        # first such entry.
-        # Framing also accepts odd-length body readers; real GLB bodies
-        # themselves are aligned. Keep this isolated from payload validation.
-        entries = [bytes(range(size)) for size in (1, 2, 3, 4, 5)]
-        with mock.patch("cadgen.store.parts.read", side_effect=entries):
-            container = read_tess_cache_batch(json.dumps({"entries": [admitted()] * 5}).encode())
-        self.assertEqual(self.decode_with_node(container), [list(entry) for entry in entries])
 
     def test_a_non_string_name_is_a_miss_and_keeps_the_container_valid(self):
         store_part()

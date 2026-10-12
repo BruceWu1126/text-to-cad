@@ -1,13 +1,14 @@
 """cadgen's mesher on what an ordinary part is not, and the STL cut from it.
 
 A component of one vertex, a failure inside OCCT, a face OCCT's pass leaves
-empty -- meshed again whole, or refused and tessellated over its own parameters --,
-the singular points of a cone or a sphere, a free edge or vertex beside a solid, a
-mirrored placement inside a component: each once broke a mesh, the export cut
-from it or the view drawing it. Shapes are built here; meshing needs no store,
-except where a whole tree is meshed. OCCT refuses a face for what a real model's
-booleans leave in it, and a shape small enough to build here leaves nothing it
-refuses, so a test that needs a refusal makes OCCT refuse.
+empty -- meshed again whole, refused and tessellated over its own parameters, or
+left empty when it is smaller than the mesh resolves --, the singular points of a
+cone or a sphere, a free edge or vertex beside a solid, a mirrored placement inside
+a component: each once broke a mesh, the export cut from it or the view drawing it.
+Shapes are built here; meshing needs no store, except where a whole tree is meshed.
+OCCT refuses a face for what a real model's booleans leave in it, and a shape small
+enough to build here leaves nothing it refuses, so a test that needs a refusal makes
+OCCT refuse.
 """
 
 from __future__ import annotations
@@ -39,15 +40,15 @@ def _surf_index(topods) -> dict:
     return read_surf(extract_surface_component(topods))[0]
 
 
-def _mesh(shape, *, chord=CHORD, angle=ANGLE):
-    """``shape`` meshed as the store meshes a component, from its selector table: its GLB
-    body, decoded."""
+def _mesh(shape, *, chord=CHORD, angle=ANGLE, table=None):
+    """``shape`` meshed as the store meshes a component, from its selector table (``table``
+    when given): its GLB body, decoded."""
     from cadgen._internal.mesh_formats import decode_tessellation
     from cadgen._internal.occt_mesh import mesh_component
     from cadgen._internal.selector_table import build_selector_table
 
     topods = getattr(shape, "wrapped", shape)
-    table = build_selector_table(topods, _surf_index(topods))
+    table = build_selector_table(topods, _surf_index(topods)) if table is None else table
     body = mesh_component(topods, table, {}, part=PART, chord=chord, angle=angle)
     return body, decode_tessellation(body)
 
@@ -180,7 +181,8 @@ def _range_area(mesh, ordinal: int) -> float:
 
 
 class EmptyFace(unittest.TestCase):
-    """OCCT's pass leaves the bore of a plate empty: the bore is meshed all the same."""
+    """OCCT's pass leaves the bore of a plate empty: the bore is meshed all the same,
+    unless it is smaller than the mesh resolves."""
 
     def setUp(self):
         from build123d import Box, Cylinder
@@ -193,7 +195,7 @@ class EmptyFace(unittest.TestCase):
         self.faces = TopTools_IndexedMapOfShape()
         TopExp.MapShapes_s(self.topods, TopAbs_FACE, self.faces)
 
-    def mesh(self, refuses):
+    def mesh(self, refuses, table=None):
         """Mesh the plate while OCCT leaves its bore empty after each call ``refuses``
         names (the shape it was asked to mesh, and the call's number)."""
         from OCP import BRepMesh
@@ -209,7 +211,7 @@ class EmptyFace(unittest.TestCase):
             return result
 
         with mock.patch.object(BRepMesh, "BRepMesh_IncrementalMesh", side_effect=mesher):
-            self.body, mesh = _mesh(self.topods)
+            self.body, mesh = _mesh(self.topods, table=table)
         return mesh
 
     def assertBoreMeshed(self, mesh):
@@ -251,6 +253,25 @@ class EmptyFace(unittest.TestCase):
         bore = next(row for row in mesh.face_ranges if row["ord"] == self.bore)
         self.assertEqual(bore["indexCount"], 0, "the bore is left out")
         self.assertEqual(decode_payload(self.body).unmeshed_faces, [self.bore], "and named")
+
+    def test_a_face_under_what_the_mesh_resolves_may_be_left_empty_and_unnamed(self):
+        # The bore made a sliver: its area in the selector table is under the square of
+        # the component's deflection. No mesher covers it, and nothing has to say so.
+        from cadgen._internal import face_fallback
+        from cadgen._internal.occt_mesh import _bounding_diagonal
+        from cadgen._internal.selector_table import build_selector_table
+        from cadgen.store.meshes import decode_payload
+
+        deflection = CHORD * _bounding_diagonal(self.topods)
+        table = build_selector_table(self.topods, _surf_index(self.topods))
+        columns = table["tables"]["faceColumns"]
+        for row in table["faces"]:
+            if row[columns.index("ordinal")] == self.bore:
+                row[columns.index("area")] = deflection * deflection / 4
+        with mock.patch.object(face_fallback, "tessellate_face", return_value=None):
+            mesh = self.mesh(lambda shape, call: True, table=table)
+        bore = next(row for row in mesh.face_ranges if row["ord"] == self.bore)
+        self.assertEqual((bore["indexCount"], decode_payload(self.body).unmeshed_faces), (0, []))
 
 
 def _with_a_stray_degenerated_edge(topods):

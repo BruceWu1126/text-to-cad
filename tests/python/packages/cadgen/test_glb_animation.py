@@ -27,7 +27,7 @@ add_repo_path("packages/cadgen/src")
 
 import numpy as np  # noqa: E402
 
-from cadgen._internal import tube_skin, tube_skin_payload  # noqa: E402
+from cadgen._internal import tube_skin  # noqa: E402
 from cadgen._internal.animation_bake import LENGTH_FLOOR, _apply_point, _pose_at  # noqa: E402
 from cadgen._internal.glb_animation import (  # noqa: E402
     _transform_mix,
@@ -40,7 +40,6 @@ from cadgen._internal.glb_animation import (  # noqa: E402
     windowed,
 )
 from cadgen._internal.mesh_animation import MAX_LOOP_REPEATS  # noqa: E402
-from tests.python.support.tube_skins import view_skin  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[4]
 SQRT_HALF = math.sqrt(0.5)
@@ -491,40 +490,22 @@ class ARealDocumentPlaysItsClip(unittest.TestCase):
             self.assert_one_skeleton(gltf, under=names["pivot 0 offset"])
             self.assert_curled(gltf, binary, carried=90.0)
 
-            # A CAD view reads the same tubes from the viewer's route, bound in the cord
-            # component's own frame; a second read is the store's, binding nothing again.
+            # A CAD view reads the same tubes from the viewer's route (where a view's skin
+            # puts them: test_tube_skin); a second read is the store's, binding nothing again,
+            # and a read for other bytes of the document is a conflict.
             probe = run("-c", textwrap.dedent("""\
                 import json, sys
-                from pathlib import Path
                 from cadgen._internal import tube_skin_payload
-                from cadgen.store.view import descriptor_for_view
-                from cadgen.viewer.store_paths import result_snapshot
                 from cadgen.viewer.tube_skins import tube_skins_response
 
                 status, body = tube_skins_response(sys.argv[1])
-                Path(sys.argv[2]).write_bytes(body)
                 tube_skin_payload.build_tube_skins = None
                 again, cached = tube_skins_response(sys.argv[1])
-                document, tree = result_snapshot(sys.argv[1])
                 stale, _ = tube_skins_response(sys.argv[1], "0" * 64)
-                placed = {o["id"]: o["transform"] for o in descriptor_for_view(tree, document_hash=document)["occurrences"]}
-                print(json.dumps({"status": [status, again, stale], "same": cached == body, "placed": placed}))
-                """), str(root / "arm.step"), str(root / "skins.glb"))
+                print(json.dumps({"status": [status, again, stale], "same": cached == body}))
+                """), str(root / "arm.step"))
             answer = json.loads(probe.stdout.strip().splitlines()[-1])
             self.assertEqual(([200, 200, 409], True), (answer["status"], answer["same"]))
-            skins = tube_skin_payload.decode_tube_skins((root / "skins.glb").read_bytes())
-            (track,) = [entry for entry in skins["tracks"] if entry["clip"] == "bend"]
-            binding = skins["bindings"][track["bindings"][0]]
-            self.assertEqual(11, binding["joints"])
-            placement = np.asarray(answer["placed"][binding["occurrence"]], dtype=np.float64).reshape(4, 4)
-            keys = track["keys"].reshape(-1, 11, 7)
-            local = binding["positions"].reshape(-1, 3).astype(np.float64)
-            p = view_skin(local, binding["along"], binding["rest"].reshape(-1, 7), keys[-1], placement)
-            from_axis = np.hypot(np.hypot(p[:, 0], p[:, 1] - (10.0 + CURL_RADIUS)) - CURL_RADIUS, p[:, 2] - 2.0)
-            near = np.hypot(local @ placement[:3, :3].T[:, 1] + placement[1, 3] - 10.0,
-                            local @ placement[:3, :3].T[:, 2] + placement[2, 3] - 2.0) > 0.79
-            self.assertGreater(int(near.sum()), 0)
-            self.assertLessEqual(float(np.max(np.abs(from_axis[near] - 0.8))), 0.02)
 
 
 if __name__ == "__main__":

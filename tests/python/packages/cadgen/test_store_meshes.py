@@ -71,14 +71,13 @@ class MeshCodecContract(unittest.TestCase):
             target[path[-1]] = value
         return _with_json(self.payload, gltf)
 
-    def test_python_and_the_js_reader_read_the_same_facts_and_part(self):
-        from tests.python.support.tessellation import js_reader
-
+    def test_a_body_reads_back_its_part_counts_and_faces(self):
+        # That the client reads the same facts off the same body is the part-store
+        # contract's (tests/python/global/test_cache_root_sync.py).
         facts = meshes.body_facts(self.payload)
-        [[js_facts, part]] = js_reader([self.payload])
-        self.assertEqual({"part": part, **js_facts}, facts)
-        self.assertEqual(part, self.key)
-        self.assertEqual([facts[name] for name in meshes.COUNT_FIELDS], [3, 3, 1, 1, 3])
+        self.assertEqual(facts["part"], self.key)
+        counts = ("vertexCount", "indexCount", "faceCount", "edgeCount", "edgePointCount")
+        self.assertEqual([facts[name] for name in counts], [3, 3, 1, 1, 3])
         decoded = meshes.decode_payload(self.payload)
         self.assertEqual(decoded.face_ranges(), [{"ord": 1, "color": [0.2, 0.4, 0.6, 1.0], "indexStart": 0,
                                                   "indexCount": 3}])
@@ -107,19 +106,15 @@ class MeshCodecContract(unittest.TestCase):
 
     def test_malformed_bodies_are_rejected_in_python_and_shared_js(self):
         cad = ["extras", "cadgen"]
-        json_cases = [
+        # The shared JS reader's own suite (packages/core tessellationCache.test.js) makes
+        # these damages itself; the ones only this list makes are handed to it below.
+        shared_cases = [
             ("no part", [*cad, "part"], _DELETE),
             ("a part key without its version", [*cad, "part"], "1" * 64),
-            ("bounds object", [*cad, "bounds"], None),
-            ("bounds vector", [*cad, "bounds", "min"], [0, 0]),
-            ("bounds scalar type", [*cad, "bounds", "min"], [False, 0, 0]),
             ("reversed bounds", [*cad, "bounds", "min"], [4, 0, 0]),
-            ("nonfinite JSON", [*cad, "bounds", "min"], [float("nan"), 0, 0]),
             ("palette colour", [*cad, "faceColors"], [[0, 1, 0]]),
-            ("palette boolean", [*cad, "faceColors"], [[1, 0, 0, True]]),
             ("class names", [*cad, "edgeClasses"], ["none"]),
             ("face table count", [*cad, "faces", "count"], 2),
-            ("face table view", [*cad, "faces", "bufferView"], 4),
             ("no edge table", [*cad, "edges"], _DELETE),
             ("unknown extras field", [*cad, "invented"], 1),
             ("other extras", ["extras", "invented"], {}),
@@ -132,21 +127,30 @@ class MeshCodecContract(unittest.TestCase):
             ("primitive mode", ["meshes", 0, "primitives", 0, "mode"], 1),
             ("an extension", ["extensionsUsed"], ["KHR_mesh_quantization"]),
         ]
+        only_here = [
+            ("bounds object", [*cad, "bounds"], None),
+            ("bounds vector", [*cad, "bounds", "min"], [0, 0]),
+            ("bounds scalar type", [*cad, "bounds", "min"], [False, 0, 0]),
+            ("nonfinite JSON", [*cad, "bounds", "min"], [float("nan"), 0, 0]),
+            ("palette boolean", [*cad, "faceColors"], [[1, 0, 0, True]]),
+            ("face table view", [*cad, "faces", "bufferView"], 4),
+        ]
         payloads = []
-        for label, path, value in json_cases:
-            payload = self.rewritten(path, value)
-            with self.subTest(label=label):
-                with self.assertRaises(ValueError):
-                    meshes.body_facts(payload)
-                with self.assertRaises(ValueError):
-                    meshes.decode_payload(payload)
-            payloads.append(payload)
+        for cases, to_js in ((shared_cases, False), (only_here, True)):
+            for label, path, value in cases:
+                payload = self.rewritten(path, value)
+                with self.subTest(label=label):
+                    with self.assertRaises(ValueError):
+                        meshes.body_facts(payload)
+                    with self.assertRaises(ValueError):
+                        meshes.decode_payload(payload)
+                if to_js:
+                    payloads.append(payload)
         for label, offset, value in (("a TESS body", 0, 0x53534554), ("glTF 1", 4, 1)):
             other_format = bytearray(self.payload)
             other_format[offset:offset + 4] = value.to_bytes(4, "little")
             with self.subTest(label=label), self.assertRaises(ValueError):
                 meshes.body_facts(bytes(other_format))
-            payloads.append(bytes(other_format))
         table_cases = [
             ("face ordinal", "cadgen.faces", 0, 0),
             ("face range start", "cadgen.faces", 1, 3),
@@ -162,7 +166,6 @@ class MeshCodecContract(unittest.TestCase):
             payload = _with_word(self.payload, view, word, value)
             with self.subTest(label=label), self.assertRaises(ValueError):
                 meshes.decode_payload(payload)
-            payloads.append(payload)
 
         from tests.python.support.tessellation import js_reader
         self.assertEqual(js_reader(payloads), [[None, None]] * len(payloads))
@@ -192,23 +195,24 @@ class MeshCodecContract(unittest.TestCase):
         payload = encode([2])
         self.assertEqual(meshes.decode_payload(payload).unmeshed_faces, [2])
         self.assertEqual(meshes.unmeshed_faces(payload), [2])
-        facts = meshes.body_facts(payload)
-        self.assertEqual(facts["unmeshedFaceCount"], 1)
-        [[js_facts, part]] = js_reader([payload])
-        self.assertEqual({"part": part, **js_facts}, facts)
+        # The record counts it, and the client reads the same count off the body (the
+        # part-store contract, tests/python/global/test_cache_root_sync.py).
+        self.assertEqual(meshes.body_facts(payload)["unmeshedFaceCount"], 1)
         # A body that leaves nothing out says nothing: no value, no count.
         whole = encode([])
         self.assertNotIn("unmeshedFaces", _json(whole)["extras"]["cadgen"])
         self.assertNotIn("unmeshedFaceCount", meshes.body_facts(whole))
-        # A named face is one of the table's empty faces, named once, in order.
+        # A named face is one of the table's empty faces, named once, in order. The shared
+        # reader's own suite makes the other damages; this one is handed to it here.
+        broken = {}
         for label, value in (("a face with triangles", [1]), ("an empty list", []), ("out of order", [2, 2]),
                              ("not a face", [3]), ("not an ordinal", [0])):
             gltf = _json(payload)
             gltf["extras"]["cadgen"]["unmeshedFaces"] = value
-            broken = _with_json(payload, gltf)
+            broken[label] = _with_json(payload, gltf)
             with self.subTest(label=label), self.assertRaises(ValueError):
-                meshes.decode_payload(broken)
-            self.assertEqual(js_reader([broken]), [[None, None]], label)
+                meshes.decode_payload(broken[label])
+        self.assertEqual(js_reader([broken["not an ordinal"]]), [[None, None]])
         with self.assertRaises(ValueError):
             encode([2], second=3)
 

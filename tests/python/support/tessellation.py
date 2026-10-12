@@ -74,13 +74,18 @@ def store_part(fixture: dict | None = None) -> dict:
     return _write(fixture["key"], base64.b64decode(fixture["glb"]), base64.b64decode(fixture["selectors"]))
 
 
+def node() -> str:
+    """The development Node that runs the client's half of the mesh contract."""
+    found = shutil.which("node")
+    if found is None:
+        raise RuntimeError("Node is required to verify the shared mesh contract")
+    return found
+
+
 def js_reader(payloads: list[bytes]) -> list[list]:
     """What the shared JS reader makes of each body: ``[facts, part]`` -- what a part's record
     says of it (``testing.js partMeshFacts``) and the part it names -- or ``[None, None]``
     for a body it refuses."""
-    node = shutil.which("node")
-    if node is None:
-        raise RuntimeError("Node is required to verify the shared mesh contract")
     script = """
 import fs from 'node:fs';
 const api = await import(process.argv[1]);
@@ -91,7 +96,7 @@ console.log(JSON.stringify(JSON.parse(fs.readFileSync(0, 'utf8')).map((body) => 
   return decoded ? [testing.partMeshFacts(bytes), decoded.part] : [null, null];
 })));
 """
-    result = subprocess.run([node, "--input-type=module", "-e", script, (CORE / "tessellationCache.js").as_uri(),
+    result = subprocess.run([node(), "--input-type=module", "-e", script, (CORE / "tessellationCache.js").as_uri(),
                              (CORE / "testing.js").as_uri()],
                             input=json.dumps([base64.b64encode(payload).decode() for payload in payloads]),
                             text=True, capture_output=True, check=True, timeout=30)
