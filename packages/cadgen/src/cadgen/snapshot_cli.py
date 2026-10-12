@@ -881,23 +881,6 @@ def resolve_prepared_render_job(prepared: PreparedRenderJob) -> dict[str, object
     )
 
 
-def resolve_render_job(
-    raw_job: object,
-    *,
-    cwd: Path | None = None,
-    timestamp: str | None = None,
-    kinds: frozenset[str] | None = None,
-    job_index: int = 0,
-    job_count: int = 1,
-) -> dict[str, object]:
-    return resolve_prepared_render_job(
-        prepare_render_job(
-            raw_job, cwd=cwd, timestamp=timestamp, kinds=kinds,
-            job_index=job_index, job_count=job_count,
-        )
-    )
-
-
 def check_step_render_job(
     job: dict[str, object],
     *,

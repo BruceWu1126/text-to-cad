@@ -45,7 +45,6 @@ SERIALIZATION_VERSIONS = {"glb": 5, "stl": 1, "3mf": 2}
 # Declarable formats, and the decorator that declares each (the digit rule
 # forbids ``@3mf``, so 3MF's decorator is ``@threemf``).
 MESH_EXPORT_FORMATS = ("stl", "3mf", "glb")
-MESH_DECORATOR_FORMATS = {"stl": "stl", "glb": "glb", "threemf": "3mf"}
 MESH_FORMAT_SUFFIX = {"stl": ".stl", "3mf": ".3mf", "glb": ".glb"}
 
 

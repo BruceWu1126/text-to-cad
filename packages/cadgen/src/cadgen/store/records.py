@@ -141,16 +141,6 @@ def remove_record(model: Path | str) -> None:
     remove_entry("model", record_key(model))
 
 
-def update_record(model: Path | str, **fields: Any) -> dict[str, Any] | None:
-    """Merge ``fields`` into an existing record (atomic rewrite). None if absent."""
-    record = read_record(model)
-    if record is None:
-        return None
-    record.update(fields)
-    write_record(model, record)
-    return record
-
-
 def _resolved(path: Path | str) -> str:
     try:
         return str(Path(path).expanduser().resolve())

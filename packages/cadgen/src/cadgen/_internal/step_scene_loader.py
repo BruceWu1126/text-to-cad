@@ -35,8 +35,6 @@ from OCP.XCAFDoc import XCAFDoc_ColorTool
 from OCP.XCAFDoc import XCAFDoc_DocumentTool
 from OCP.XCAFDoc import XCAFDoc_ShapeTool
 
-from cadgen._internal.step_hash import step_file_hash
-
 from cadgen._internal.step_scene_types import ColorRGBA, LoadedStepScene, OccurrenceNode, _identity_transform_matrix
 
 
@@ -606,22 +604,5 @@ def load_step_scene(step_path: Path, *, named: Path | None = None) -> LoadedStep
     )
 
 
-def _scene_step_hash(scene: LoadedStepScene) -> str:
-    if scene.step_hash is None:
-        scene.step_hash = _step_hash(scene.step_path)
-    return scene.step_hash
-
-
 def _selector_id(path: tuple[int, ...]) -> str:
     return "o" + ".".join(str(segment) for segment in path)
-
-
-def _relative_path_from_directory(path: Path, base_dir: Path) -> str:
-    return os.path.relpath(
-        path.expanduser().resolve(),
-        start=base_dir.expanduser().resolve(),
-    ).replace(os.sep, "/")
-
-
-def _step_hash(step_path: Path) -> str:
-    return step_file_hash(step_path)

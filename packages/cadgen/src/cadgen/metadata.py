@@ -96,7 +96,6 @@ def resolve_model_output_path(
 
 
 _MESH_DECORATOR_NAMES = ("stl", "glb", "threemf")
-_MESH_DECORATOR_FMT = {"stl": "stl", "glb": "glb", "threemf": "3mf"}
 _MESH_SUFFIX = {"stl": ".stl", "3mf": ".3mf", "glb": ".glb"}
 
 
@@ -422,22 +421,6 @@ def _check_step_return(
                 "model returns a build123d shape and nothing else. Declare mesh exports "
                 "with @stl/@threemf/@glb stacked on the model."
             )
-
-
-def _call_tail_name(function: ast.expr) -> str | None:
-    if isinstance(function, ast.Name):
-        return function.id
-    if isinstance(function, ast.Attribute):
-        return function.attr
-    return None
-
-
-def _is_nonempty_expression(expression: ast.expr) -> bool:
-    if isinstance(expression, ast.Constant) and expression.value is None:
-        return False
-    if isinstance(expression, (ast.List, ast.Tuple, ast.Set)):
-        return bool(expression.elts)
-    return True
 
 
 def _is_multi_item_sequence_expression(

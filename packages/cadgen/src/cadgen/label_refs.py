@@ -22,9 +22,6 @@ from typing import Any, Iterable, Mapping, Sequence
 from cadgen.cad_ref_syntax import LABEL_SELECTOR_RE, parse_selector
 
 
-AMBIGUOUS = "__ambiguous__"
-
-
 class LabelResolutionError(ValueError):
     """A label selector that cannot be turned into exactly one occurrence id."""
 
