@@ -95,8 +95,8 @@ that information is in the wrong place.
 **The store is what the sources imply; the sidecar is what the author meant.**
 
 The store holds itself to a size cap (`CADGEN_STORE_MAX`, default 20 GB): the
-daemon, when idle, evicts derived entries (part, component, bounds, drawing)
-least recently written first and sweeps what nothing reaches, and retires on
+daemon, when idle, evicts derived entries (part, component, bounds, drawing,
+skin, robot) least recently written first and sweeps what nothing reaches, and retires on
 sight the index kinds an older cadgen left (`index/op`, and `index/surface`,
 `index/selector` and `index/mesh`). A record,
 a document entry or an output entry is never evicted. `cadgen store gc` does
@@ -449,7 +449,7 @@ src/cadgen/
                          #   kinematics_resolve (mate axes to numbers),
                          #   animation_bake
                          #   (clips to keyframes), mesh_export (the mesh
-                         #   writers, a clip's GLB sampling, their ledger),
+                         #   writers, a clip's keys in a GLB, their ledger),
                          #   cli_from_function, doors (documents by bytes),
                          #   build_timing (where a build's time went;
                          #   --profile),

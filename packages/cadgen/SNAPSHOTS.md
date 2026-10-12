@@ -105,9 +105,9 @@ ignored, and gone is not silent. `--camera`, `--display`, `--mode` and
 refused by name — what the flag meant, why a flat drawing has no such thing, and
 what to pass instead — rather than reported as an unrecognized argument. A job
 (or `cadgen snapshot` routing a `.dxf`) that carries `camera`,
-any `display` key but `appearance`, `mode` other than `view`, `section`,
-`scale`, an output `label`/`viewLabel`, or `output.padding`, `output.viewLabels`
-or `output.tightFrame` is refused by name with what a drawing is — in the same
+any `display` key but `appearance`, `mode` other than `view`, `scale`, an
+output `label`/`viewLabel`, or `output.padding`, `output.viewLabels` or
+`output.tightFrame` is refused by name with what a drawing is — in the same
 words, because the flag and the job key are one request arriving two ways.
 
 ## Requests and OUT
@@ -140,7 +140,7 @@ exact box placed by the occurrence's transform (rounded to 1e-3), and
 counts them: the mesh a view draws. The build derived it; a part the store has none for is derived by one
 build-pool job before the list is read ([`STORE.md`](STORE.md) §3), as for a
 view. `--focus` and
-`--hide` narrow the rows the way they narrow a section.
+`--hide` narrow the rows the way they narrow a view.
 
 A part whose stored mesh leaves out a face no mesher could cover (its body's
 `unmeshedFaces`, [`STORE.md`](STORE.md) §3) is listed, counted and drawn without
@@ -223,8 +223,8 @@ include waiting for that work; these fields are browser wall times, not GPU
 profiler measurements. `captureMs` contains `waitViewportMs` and the output
 stages, so do not add those overlapping durations together.
 
-Only stages actually reported by the runtime are included. List, section and
-video results do not invent still-image measurements. Invalid/nonfinite
+Only stages actually reported by the runtime are included. List and video
+results do not invent still-image measurements. Invalid/nonfinite
 values and image payloads are excluded from diagnostic output. Measurements
 belong to one render call and cannot carry over from a previous job.
 

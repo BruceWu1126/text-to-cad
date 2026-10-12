@@ -43,12 +43,11 @@ is redeployed from its tag). The Vercel project's Root Directory setting (in
 Vercel, not this repo) must point at `apps/docs`.
 
 Hero STEP assets under `public/hero/planetary/` are a view of the tree behind the
-planetary gear STEP (`assembly.json` + each component's mesh, `<cid>.glb`, as
-cadgen made it at the default tolerances: the one level the hero draws) plus what
-cadgen resolves its sidecar into: the articulation of its mates
-(`articulation.json`) and its baked animation keyframes (`animation.json`), committed
-as PLAIN files (never LFS — Vercel serves them statically with no backend). The page
-reads no sidecar. Refresh them after rebuilding the model:
+planetary gear STEP (`assembly.json` + each component's display mesh, `<cid>.glb`,
+the mesh every view of the model draws) plus what cadgen resolves its sidecar into:
+the articulation of its mates (`articulation.json`) and its baked animation keyframes
+(`animation.json`), committed as PLAIN files (never LFS — Vercel serves them statically
+with no backend). The page reads no sidecar. Refresh them after rebuilding the model:
 
 ```
 python models/assemblies/src/planetary_gear_assembly/planetary_gear_assembly.py
