@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-STEP_TOPOLOGY_SCHEMA_VERSION = 2
 STEP_TOPOLOGY_EDGE_CLASSIFICATION_ALGORITHM = "oc-brep-continuity-v1"
 STEP_TOPOLOGY_SURFACE_EDGE_ALGORITHM = "oc-polygon-on-triangulation-v1"
 STEP_TOPOLOGY_EDGE_ANGULAR_TOLERANCE_DEG = 2

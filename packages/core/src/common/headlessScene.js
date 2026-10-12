@@ -42,8 +42,8 @@ function jobFile(job) {
 }
 
 // A mesh file's decode lives in page-lifetime caches shared by every job in a packet, so a
-// resolved job declares whose it is while it loads (`renderAssetSourceScope.js`), exactly as a
-// STEP source does; the declaration never outlives the load.
+// resolved job declares whose it is while it loads (`renderAssetSourceScope.js`); the
+// declaration never outlives the load.
 async function inSourceScope(job, load) {
   const previous = renderAssetSourceScope();
   setRenderAssetSourceScope(renderAssetSourceScopeForJob(job));

@@ -2,18 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  STEP_TOPOLOGY_SCHEMA_VERSION
-} from "../common/stepTopology.mjs";
-import {
   gitLfsPointerDetailsFromBuffer,
   loadRender3Mf,
   loadRenderArrayBuffer,
   loadRenderGlb,
   loadRenderJson,
   loadRenderRobot,
-  loadRenderDisplayEdgeBundle,
-  loadRenderSelectorBundle,
-  loadRenderTopologyIndex,
   loadRenderSurf as loadSurf,
   loadRenderSurfSelectorBundle as loadSurfSelectors,
   peekRenderJson,
@@ -31,6 +25,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  renderAssetSourceScopeForJob,
   setRenderAssetSourceScope
 } from "./renderAssetSourceScope.js";
 import {
@@ -67,108 +62,6 @@ const sunGearTable = () => {
   const bytes = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "surf/fixtures/sun_gear.selectors.json"));
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 };
-
-function pad4(buffer, byte = 0) {
-  const padding = (4 - (buffer.length % 4)) % 4;
-  return padding ? Buffer.concat([buffer, Buffer.alloc(padding, byte)]) : buffer;
-}
-
-function topologyGlb(manifest, buffers = {}, { schemaVersion = STEP_TOPOLOGY_SCHEMA_VERSION } = {}) {
-  const bufferViews = [];
-  let binary = Buffer.alloc(0);
-  function addBufferView(payload) {
-    binary = pad4(binary);
-    const byteOffset = binary.length;
-    binary = Buffer.concat([binary, payload]);
-    const index = bufferViews.length;
-    bufferViews.push({ buffer: 0, byteOffset, byteLength: payload.length });
-    return index;
-  }
-
-  const selectorManifest = JSON.parse(JSON.stringify(manifest));
-  selectorManifest.schemaVersion = schemaVersion;
-  selectorManifest.profile = "selector";
-  selectorManifest.buffers = { littleEndian: true, views: {} };
-  for (const [name, { dtype, payload, count, itemSize }] of Object.entries(buffers)) {
-    selectorManifest.buffers.views[name] = {
-      dtype,
-      bufferView: addBufferView(payload),
-      byteOffset: 0,
-      byteLength: payload.length,
-      count,
-      itemSize,
-    };
-  }
-  const edgeManifest = {
-    schemaVersion,
-    profile: "surface-edges",
-    stepHash: manifest.stepHash || "",
-    classCodes: { none: 0, feature: 1, tangent: 2, seam: 3, degenerate: 4, boundary: 5, nonManifold: 6, unknown: 7 },
-    primitiveAttributes: {
-      barycentric: "_CAD_EDGE_BARYCENTRIC",
-      class: "_CAD_EDGE_CLASS",
-    },
-    halfEdgeColumns: ["edgeRow", "faceRow", "occurrenceRow", "primitiveIndex", "triangleIndex", "side", "classCode"],
-    halfEdgesView: "surfaceHalfEdges",
-    buffers: {
-      littleEndian: true,
-      views: Object.fromEntries(
-        Object.entries(selectorManifest.buffers.views)
-          .filter(([name]) => name === "surfaceHalfEdges")
-      )
-    }
-  };
-  const indexManifest = {
-    schemaVersion,
-    profile: "index",
-    entryKind: manifest.entryKind || "part",
-    cadRef: manifest.cadRef,
-    stats: manifest.stats || {},
-    tables: manifest.tables?.occurrenceColumns ? { occurrenceColumns: manifest.tables.occurrenceColumns } : {},
-    occurrences: manifest.occurrences || [],
-    ...(manifest.assembly ? { assembly: manifest.assembly } : {}),
-  };
-  const indexView = addBufferView(Buffer.from(JSON.stringify(indexManifest), "utf8"));
-  const edgeView = addBufferView(Buffer.from(JSON.stringify(edgeManifest), "utf8"));
-  const selectorView = addBufferView(Buffer.from(JSON.stringify(selectorManifest), "utf8"));
-  binary = pad4(binary);
-  const gltf = {
-    asset: { version: "2.0" },
-    buffers: [{ byteLength: binary.length }],
-    bufferViews,
-    meshes: [{
-      primitives: [{
-        attributes: {
-          _CAD_EDGE_BARYCENTRIC: 0,
-          _CAD_EDGE_CLASS: 1,
-        },
-      }],
-    }],
-    extensionsUsed: ["STEP_topology"],
-    extensions: {
-      STEP_topology: {
-        schemaVersion,
-        entryKind: indexManifest.entryKind,
-        indexView,
-        edgeView,
-        selectorView,
-        encoding: "utf-8",
-      },
-    },
-  };
-  const jsonChunk = pad4(Buffer.from(JSON.stringify(gltf), "utf8"), 0x20);
-  const header = Buffer.alloc(12);
-  const jsonHeader = Buffer.alloc(8);
-  const binHeader = Buffer.alloc(8);
-  header.writeUInt32LE(0x46546c67, 0);
-  header.writeUInt32LE(2, 4);
-  header.writeUInt32LE(12 + 8 + jsonChunk.length + 8 + binary.length, 8);
-  jsonHeader.writeUInt32LE(jsonChunk.length, 0);
-  jsonHeader.write("JSON", 4, "latin1");
-  binHeader.writeUInt32LE(binary.length, 0);
-  binHeader.write("BIN\0", 4, "latin1");
-  return Buffer.concat([header, jsonHeader, jsonChunk, binHeader, binary]);
-}
 
 function abortError() {
   return new DOMException("The operation was aborted.", "AbortError");
@@ -276,69 +169,6 @@ test("Git LFS pointer stubs are detected before mesh parsing", async (t) => {
   );
 });
 
-test("selector bundles decode STEP_topology bufferViews from GLB", async (t) => {
-  const originalFetch = globalThis.fetch;
-  const glbUrl = `/topology-${Date.now()}-${Math.random()}.glb`;
-  const edgeIds = Buffer.alloc(8);
-  edgeIds.writeUInt32LE(7, 0);
-  edgeIds.writeUInt32LE(11, 4);
-  const surfaceHalfEdges = Buffer.alloc(28);
-  surfaceHalfEdges.writeUInt32LE(7, 0);
-  surfaceHalfEdges.writeUInt32LE(11, 4);
-  const requests = [];
-  const glb = topologyGlb(
-    { cadRef: "fixtures/box", tables: {}, occurrences: [], shapes: [], faces: [], edges: [] },
-    {
-      edgeIds: { dtype: "uint32", payload: edgeIds, count: 2, itemSize: 4 },
-      surfaceHalfEdges: { dtype: "uint32", payload: surfaceHalfEdges, count: 7, itemSize: 4 }
-    }
-  );
-
-  globalThis.fetch = async (requestUrl) => {
-    requests.push(String(requestUrl));
-    assert.equal(String(requestUrl), glbUrl);
-    return new Response(glb, { status: 200 });
-  };
-
-  t.after(() => {
-    globalThis.fetch = originalFetch;
-  });
-
-  const retainedBefore = renderAssetCacheStats().selector.typedBytes;
-  const bundle = await loadRenderSelectorBundle(glbUrl);
-  assert.deepEqual(Array.from(bundle.buffers.edgeIds), [7, 11]);
-  assert.equal(
-    renderAssetCacheStats().selector.typedBytes - retainedBefore,
-    glb.byteLength,
-    "buffer views charge the complete GLB allocation they retain",
-  );
-  const displayBundle = await loadRenderDisplayEdgeBundle(glbUrl);
-  assert.deepEqual(Array.from(displayBundle.buffers.surfaceHalfEdges.slice(0, 2)), [7, 11]);
-  assert.equal(displayBundle.manifest.profile, "surface-edges");
-  assert.equal((await loadRenderTopologyIndex(glbUrl)).cadRef, "fixtures/box");
-  assert.deepEqual(requests, [glbUrl]);
-});
-
-test("STEP_topology client rejects old schema artifacts", async (t) => {
-  const originalFetch = globalThis.fetch;
-  const glbUrl = `/old-topology-${Date.now()}-${Math.random()}.glb`;
-  const glb = topologyGlb(
-    { cadRef: "fixtures/old", tables: {}, occurrences: [], shapes: [], faces: [], edges: [] },
-    {},
-    { schemaVersion: STEP_TOPOLOGY_SCHEMA_VERSION - 1 }
-  );
-
-  globalThis.fetch = async () => new Response(glb, { status: 200 });
-  t.after(() => {
-    globalThis.fetch = originalFetch;
-  });
-
-  await assert.rejects(
-    loadRenderTopologyIndex(glbUrl),
-    new RegExp(`Unsupported STEP_topology schemaVersion ${STEP_TOPOLOGY_SCHEMA_VERSION - 1}`)
-  );
-});
-
 test("a robot payload loads through the render cache, by file and revision, and only at this build's schema", async () => {
   const file = `/robots/arm-${Date.now()}-${Math.random()}.urdf`;
   let calls = 0;
@@ -353,6 +183,17 @@ test("a robot payload loads through the render cache, by file and revision, and 
   const stale = { robot: async () => ({ schemaVersion: ROBOT_PAYLOAD_SCHEMA_VERSION + 1 }) };
   await assert.rejects(loadRenderRobot(`${file}-stale`, { client: stale }),
     new RegExp(`schemaVersion ${ROBOT_PAYLOAD_SCHEMA_VERSION + 1}.*reads version ${ROBOT_PAYLOAD_SCHEMA_VERSION}`));
+});
+
+test("a resolved job's scope is its document, and a resolved job that names none is refused", () => {
+  assert.equal(renderAssetSourceScopeForJob({ kind: "stl", url: "/models/part.stl" }), "", "no resolved job: the unscoped default");
+  assert.equal(renderAssetSourceScopeForJob({ resolved: { inputPath: " /models/part.stl " } }), "/models/part.stl");
+  // A blank or non-string source is not a source: it fails closed rather than coerce into the
+  // same bucket as the interactive viewer's unscoped default.
+  for (const inputPath of [undefined, "", "   ", 0, false, {}, ["/models/part.stl"]]) {
+    assert.throws(() => renderAssetSourceScopeForJob({ resolved: { rootPath: "/models", inputPath } }),
+      /require resolved\.inputPath to scope the render asset cache/, JSON.stringify(inputPath));
+  }
 });
 
 test("a cached render asset is not reused across source scopes", async (t) => {
