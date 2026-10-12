@@ -140,18 +140,6 @@ def attach_label_aliases(index: Any) -> Any:
     return replace(index, label_aliases=built)
 
 
-def label_ref_for_occurrence(alias_map: Mapping[str, Any], occurrence_id: str) -> str:
-    """The `#alias` a user should paste for this occurrence, or "" when it has none."""
-    aliases = alias_map.get("aliases") if isinstance(alias_map, Mapping) else None
-    if not isinstance(aliases, Mapping):
-        return ""
-    target = str(occurrence_id or "").strip()
-    for alias, mapped in aliases.items():
-        if mapped == target:
-            return f"#{alias}"
-    return ""
-
-
 class TreeNames:
     """The ``#name`` namespace of an instance tree, groups and parts alike, under the
     rule ``read_scene`` keeps: a name means the one node it names, and a name several
@@ -242,12 +230,3 @@ def resolve_label_selectors(
 
 
 _KIND_FOR_TYPE = {"shape": "s", "face": "f", "edge": "e", "vertex": "v"}
-
-
-def selectors_contain_label(selectors: Iterable[str]) -> bool:
-    """True when any selector needs an alias map to resolve."""
-    for raw in selectors or []:
-        parsed = parse_selector(str(raw or "").strip())
-        if parsed is not None and parsed.label:
-            return True
-    return False
