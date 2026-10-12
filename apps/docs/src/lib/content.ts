@@ -7,13 +7,22 @@ import { siteConfig } from "@/lib/site";
 
 // What the plugin is: its long description, as every plugin manifest says it.
 export const pluginDescription =
-  "The text-to-cad plugin gives your agent local workflows for generating 3D models as STEP, GLB, STL or 3MF files. It also does design for manufacturing checks, generates engineering drawings, and connects to popular 3D printing, sheet metal and CNC fabrication services.";
+  "The text-to-cad plugin gives your agent local workflows for generating 3D models as STEP, GLB, STL or 3MF files. It also does design for manufacturing checks, generates engineering drawings, and connects to popular 3D printing, sheet metal and CNC fabrication services. It runs locally through uv, which needs to be installed first.";
 
 // Who it is for: the sentence after the description, the skills framework linked.
 export const support = {
   before: "It is supported by all popular agents that support plugins or the",
   link: { text: "skills", href: "https://skills.sh" },
   after: "framework, including Claude Code, Codex, Cursor, Gemini and Grok.",
+};
+
+// What every install needs first, said before them all, plugin directories included: uv, which runs
+// CAD. The README says it word for word. Its command is in backticks, which the page sets as code.
+export const uvRequirement = {
+  before: "text-to-cad runs on your computer through",
+  link: { text: "uv", href: "https://docs.astral.sh/uv/getting-started/installation/" },
+  after:
+    ", whichever way you install it. Check that `uv --version` works; if it doesn't, install uv, then quit your agent app completely and reopen it so it finds uv.",
 };
 
 // The install: a message for the agent, which finds the install for its own app in the repository

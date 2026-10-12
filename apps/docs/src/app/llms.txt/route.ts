@@ -9,6 +9,7 @@ import {
   skillGroups,
   support,
   telemetryNote,
+  uvRequirement,
 } from "@/lib/content";
 import { absoluteUrl, siteConfig } from "@/lib/site";
 
@@ -25,6 +26,8 @@ export function GET() {
     `${support.before} [${support.link.text}](${support.link.href}) ${support.after}`,
     "",
     "## Install",
+    "",
+    `${uvRequirement.before} [${uvRequirement.link.text}](${uvRequirement.link.href})${uvRequirement.after}`,
     "",
     agentInstallByline,
     "",

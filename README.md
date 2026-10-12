@@ -25,13 +25,18 @@ Give your agent CAD superpowers.
 The text-to-cad plugin gives your agent local workflows for generating 3D models
 as STEP, GLB, STL or 3MF files. It also does design for manufacturing checks,
 generates engineering drawings, and connects to popular 3D printing, sheet metal
-and CNC fabrication services.
+and CNC fabrication services. It runs locally through uv, which needs to be
+installed first.
 
 It is supported by all popular agents that support plugins or the
 [skills](https://skills.sh) framework, including Claude Code, Codex, Cursor,
 Gemini and Grok.
 
 ## 💻 Install
+
+text-to-cad runs on your computer through [uv](https://docs.astral.sh/uv/getting-started/installation/),
+whichever way you install it. Check that `uv --version` works; if it doesn't,
+install uv, then quit your agent app completely and reopen it so it finds uv.
 
 ### Ask your agent (recommended)
 
@@ -48,12 +53,9 @@ the rest.
 
 Or install it yourself:
 
-1. CAD runs through [uv](https://docs.astral.sh/uv/): check that it is installed
-   (`uv --version`), and if it is missing, install it with
-   [uv's installer](https://docs.astral.sh/uv/getting-started/installation/).
-2. Run the commands under your agent app's heading below, or under
+1. Run the commands under your agent app's heading below, or under
    [Other Agents](#other-agents) if it has none.
-3. Restart the app. Its first start downloads CAD's runtime, so it needs a network
+2. Restart the app. Its first start downloads CAD's runtime, so it needs a network
    connection.
 
 The plugin for your agent app brings the skills and CAD's viewer, a local server

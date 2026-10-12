@@ -98,6 +98,10 @@ class PluginManifestPolicyTest(unittest.TestCase):
         # What it sends, said under the message: the same sentence, however the README wraps it.
         note = re.search(r'const telemetryNote =\s*"([^"]+)"', page).group(1)
         self.assertIn(note, " ".join(readme.split()))
+        # What every install needs first, before them all: the same sentence, uv linked alike.
+        uv = re.search(r'const uvRequirement = \{\s*before: "([^"]+)",\s*link: \{ text: "([^"]+)", href: "([^"]+)" \},'
+                       r'\s*after:\s*"([^"]+)"', page).groups()
+        self.assertIn("{} [{}]({}){}".format(*uv), " ".join(readme.split("### Ask your agent")[0].split()))
         commands = [command.replace("\\n", "\n")
                     for command in re.findall(r'\b(?:command|update|remove):\s*"([^"]+)"', page)]
         self.assertGreaterEqual(len(commands), 16)

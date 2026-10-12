@@ -20,6 +20,7 @@ import {
   skillGroups,
   support,
   telemetryNote,
+  uvRequirement,
 } from "@/lib/content";
 import { absoluteUrl, siteConfig } from "@/lib/site";
 
@@ -56,14 +57,32 @@ function AgentMessage() {
   );
 }
 
+// Copy with its commands in backticks, set as code.
+function withCode(text: string) {
+  return text.split("`").map((part, index) =>
+    index % 2 ? <code key={index} className="font-mono text-foreground">{part}</code> : part,
+  );
+}
+
+// What every install needs first (src/lib/content.ts), before them all.
+function UvRequirement() {
+  return (
+    <p className="text-sm leading-6 text-muted-foreground">
+      {uvRequirement.before}{" "}
+      <a href={uvRequirement.link.href} target="_blank" rel="noreferrer" className="text-foreground underline underline-offset-4">
+        {uvRequirement.link.text}
+      </a>
+      {withCode(uvRequirement.after)}
+    </p>
+  );
+}
+
 // What text-to-cad sends, under the message (src/lib/content.ts): its command set as code, and the
 // privacy policy, which says the rest.
 function TelemetryNote() {
   return (
     <p className="text-sm leading-6 text-muted-foreground">
-      {telemetryNote.split("`").map((part, index) =>
-        index % 2 ? <code key={index} className="font-mono text-foreground">{part}</code> : part,
-      )}{" "}
+      {withCode(telemetryNote)}{" "}
       See the{" "}
       <a href="/privacy-policy" className="text-foreground underline underline-offset-4">
         privacy policy
@@ -302,6 +321,7 @@ export default function Home() {
 
           <section id="install" aria-labelledby="install-title" className="scroll-mt-20 space-y-3 py-6">
             <SectionIntro section="install" title="Install" />
+            <UvRequirement />
             <div id="ask-your-agent" className="scroll-mt-20 space-y-3">
               <div>
                 <h3 className="text-base font-semibold text-foreground">
