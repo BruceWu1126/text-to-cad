@@ -351,11 +351,6 @@ def apply_option_overrides_to_payload(payload: object, options: SnapshotOptions,
 
 def read_job_file(raw_job: str, *, cwd: Path) -> object:
     """The render-job JSON ``--job`` names. A job is a FILE: there is no stdin form."""
-    if raw_job.strip() == "-":
-        raise SnapshotError(
-            "--job takes the path of a render-job JSON file; reading a job from stdin "
-            "(--job -) was removed — write the job to a file and pass its path"
-        )
     job_path = (cwd / Path(raw_job).expanduser()).resolve()
     if not job_path.exists():
         raise _missing(f"--job file does not exist: {raw_job}")

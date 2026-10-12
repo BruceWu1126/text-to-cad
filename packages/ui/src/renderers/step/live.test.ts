@@ -63,7 +63,7 @@ describe('live CAD viewer binding', () => {
     expect((await view.controller.setDisplaySettings({ mode: 'render' })).display.mode).toBe('render');
     expect(frames).toBe(3);
   });
-  it('rejects retired public display schema before dispatch', async () => {
+  it('rejects a display mode or field outside the public schema before dispatch', async () => {
     const view = harness();
     await expect(view.controller.setDisplaySettings({ mode: 'shaded_edges' })).rejects.toThrow('display.mode');
     await expect(view.controller.setDisplaySettings({ render: { exposure: 1 } })).rejects.toThrow('Unsupported');

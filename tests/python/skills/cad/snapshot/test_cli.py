@@ -319,7 +319,7 @@ class SnapshotCliTests(unittest.TestCase):
         for key, value in (("projection", "orthographic"), ("focalLength", 85)):
             with self.subTest(key=key), self.assertRaisesRegex(SnapshotError, "belongs in display.camera"):
                 self._display_job(json.dumps({key: value}))
-            with self.subTest(key=key), self.assertRaisesRegex(SnapshotError, "belongs in display.camera"):
+            with self.subTest(key=key), self.assertRaisesRegex(SnapshotError, rf"camera has unknown key\(s\): {key}"):
                 job_from_argv(["part.step", "tmp/out.png", "--camera", json.dumps({key: value})])
         job = self._display_job('{"camera":{"projection":"perspective","focalLength":85}}')
         self.assertEqual(job["display"]["camera"], {"projection": "perspective", "focalLength": 85})
