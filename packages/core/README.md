@@ -58,7 +58,7 @@ in [the drawing contract](../ui/docs/drawing.md); the mechanism is
 - **Reuse never changes what is exact**: recomposition, instanced draws,
   frustum culling and material pass keys may all reuse previous work, but
   none may change exact geometry, persistent cache identity or occurrence
-  identity. Canonical geometry trees carry no surface-producer selection;
+  identity. Canonical geometry trees carry no producer selection;
   reuse requires the same part and display-mesh object.
   Mechanism: [docs/resource-ownership.md](docs/resource-ownership.md) §3.
 - **Worker isolation**: each decode worker runs one request at a time;
@@ -143,7 +143,7 @@ src/
                    #   source (render-source loading), sceneSettings (shared
                    #   CAD/Render contract), camera, themeSettings internals,
                    #   displaySettings
-  lib/             # subsystems: surf/ (part reads, decode + caches), selectors/
+  lib/             # subsystems: parts/ (part reads, decode + caches), selectors/
                    #   (ref runtime), assembly/ (package composition),
                    #   render/ (format mesh loaders; the GLB and mesh scene
                    #   builders), viewer/ (exploded view, part visual state,
@@ -163,7 +163,7 @@ docs/              # subsystem docs (the map below)
 Contract mirrors that must stay in lockstep (each has a sync test):
 `lib/cadRefs.js` ↔ `cadgen/cad_ref_syntax.py`;
 part keys and records, GLB bodies (their canonical JSON and tables)
-(`lib/surf/tessellationCache.js`, a reader only: cadgen is the one writer) ↔
+(`lib/parts/tessellationCache.js`, a reader only: cadgen is the one writer) ↔
 `cadgen/store/meshes.py` and `cadgen/store/parts.py`.
 
 Where the mechanism is written:
@@ -217,7 +217,7 @@ file's entry current as polling refreshes it. A cancelled or older request
 cannot overwrite a newer file revision. `folder(path)` lists one folder and
 `search(path, query)` finds the CAD files under it, for the explorer.
 
-`CadWorkspaceService` exposes typed surface resolution, preview observation and
+`CadWorkspaceService` exposes typed part resolution, preview observation and
 a scoped `resources` provider. Its HTTP adapter owns the protocol; renderers
 consume domain results and resource tickets. See [workspace services and resource
 transport](docs/workspace-resources.md) for worker transfer, nested dependencies,

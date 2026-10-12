@@ -29,7 +29,7 @@ and only at it: it opens there and stays there, whatever the camera, the size of
 its assembly or the memory left. The tolerance is cadgen's alone; the page never
 names one. Each component of a view names its **part** (`part` in `assembly.json`),
 and the part's record names the display mesh the page reads to draw it
-(`partRow`, `@text-to-cad/core/lib/surf/tessellationCache.js`).
+(`partRow`, `@text-to-cad/core/lib/parts/tessellationCache.js`).
 
 Every mesh the viewer draws is cadgen's (OCCT's mesh of the exact BREP, stored
 by cadgen, derived by the build that made the model before it reported done); the
@@ -38,7 +38,7 @@ of components at a time and their meshes read a batch at a time
 (`createInitialDisplayPlans` in `renderers/step/render/initialDisplay.js`,
 `packageBatchReads.js`), the first of each the size of the first publish, so the
 first geometry waits on no more than it draws. A component whose part the probe
-does not find is asked for in the `/__cad/surfaces` request, whose ready row
+does not find is asked for in the `/__cad/parts` request, whose ready row
 carries the part's record, which the component then reads like a stored one;
 a part the store lacks altogether (a cleared or evicted store) is derived by one
 cadgen build-pool job for the request, the loading screen saying it is meshing

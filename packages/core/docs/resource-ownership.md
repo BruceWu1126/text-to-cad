@@ -38,7 +38,7 @@ Render-only loads do not construct selector topology until it is requested.
 Selector topology is cadgen's
 selector table (the part record's other object, read by its part and object:
 `partSelectorsPath`) joined to the component's stored mesh by ordinal
-(`lib/surf/selectorTable.js`):
+(`lib/parts/selectorTable.js`):
 the ids, metrics, flags, adjacency, chains and tangent groups are the table's,
 and the join adds only each face's triangle range and each edge's segment
 range in the mesh on screen.
@@ -136,7 +136,7 @@ the shared surface material.
 
 ### Revision reuse
 
-Canonical geometry trees contain no surface-producer selection. A runtime view
+Canonical geometry trees contain no producer selection. A runtime view
 names each component's part, cadgen's key for its display data under the view's
 producer, and render/selector reuse requires that part and its display mesh's
 object. Other snapshot source scopes remain isolated. Placement and appearance
@@ -157,7 +157,7 @@ workers. Idle pressure reclamation preserves active and queued consumers.
   environments where workers cannot start.
 - A pool starts with one isolate and grows only for ready concurrent requests,
   or when a package load finds its first components cached: it starts the
-  isolates its lanes will decode on (`prewarmSurfWorkerPool`, at most the
+  isolates its lanes will decode on (`prewarmPartWorkerPool`, at most the
   lanes' count), so their start overlaps the batch read of those bodies instead
   of following it. Sequential topology reads reuse that isolate until the drain
   becomes idle; they do not create a maximum-size pool for each component.
@@ -191,7 +191,7 @@ framed bytes are charged to the Viewer envelope before it is read and released
 once its last component has taken its body; each component's decode is still
 admitted on its own before it runs, and an entry the batch could not read or
 verify is that component's strict-read miss alone. The parts the probe did not
-find resolve up to 64 to a `/__cad/surfaces` request, each the moment its own
+find resolve up to 64 to a `/__cad/parts` request, each the moment its own
 row is ready; each row carries the part's record, from the store the build
 filled (a part the store lacks is derived by one cadgen build-pool job for the
 request).

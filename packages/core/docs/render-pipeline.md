@@ -445,7 +445,7 @@ and Color by part policy without app state.
 (copied out of the decoded GLB body's one buffer, its u16 indices widened to
 u32) and is never expanded per triangle corner.
 
-**CAD edges are not a surface shader.** `surfMeshData.js` emits indexed line
+**CAD edges are not a surface shader.** `partMeshData.js` emits indexed line
 segments (`cadEdgePositions` + `cadEdgeIndices` + `cadEdgeClassRanges`, from
 the same mesh's edge table and points, ~1.5 bytes per surface triangle)
 and `cadScene.js` draws them as ONE instanced screen-space line draw per
