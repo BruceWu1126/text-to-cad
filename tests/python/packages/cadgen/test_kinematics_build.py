@@ -263,7 +263,7 @@ class KinematicsBuildTests(unittest.TestCase):
         from cadgen.assembly_lookup import index_with_assembly_occurrences
         from cadgen.lookup import build_selector_index
         from cadgen.selector_types import SelectorBundle
-        from cadgen.step_topology_artifact import StepTopologyArtifact
+        from cadgen.step_targets import StepTopologyArtifact
         from cadgen.store import view
         from cadgen.store.index import model_ref
         from cadgen.store.records import read_record

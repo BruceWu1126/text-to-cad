@@ -787,9 +787,9 @@ def _generate_part_outputs(
 
     with ExitStack() as publication_cleanup:
         artifact_results.update(_run_artifact_jobs(jobs, logger=logger))
-    # The render artifact is the tree; whole-model selector topology is
-    # extracted on demand by ensure_step_topology_artifact (selection renders,
-    # read_scene), so generation returns no selector bundle.
+    # The render artifact is the tree; each part's selector table is derived
+    # with its display data (_ensure_display, below), so generation returns no
+    # selector bundle.
     tree_result = artifact_results.get("tree") or {}
     # The record is written: a part that fails to derive now never makes the geometry rebuild.
     _ensure_display(str(tree_result.get("documentTree") or tree_result.get("tree") or ""), progress=progress,
