@@ -44,8 +44,7 @@ import cadgen.lookup as lookup
 from cadgen.assets import browser_runtime_dir
 from cadgen._internal.doors import document_snapshot
 # A drawing's refusals are written once, beside the signature whose absences
-# they explain, so the flag that is gone and the job key that is refused say
-# the same thing about the same request.
+# they explain.
 from cadgen._internal.snapshot_door import (
     DRAWING_IS,
     DRAWING_NO_VIEW_NAME,
@@ -1192,17 +1191,11 @@ def check_drawing_render_job(
 ) -> None:
     """What a drawing cannot be asked for: anything that describes a 3D scene.
 
-    This door used to render a DXF as a 3D flat pattern, so it took a camera,
-    display settings and a render mode. It does not any more — the viewer shows
-    a drawing, and what the viewer cannot show the CLI does not render — and
-    every one of those requests is refused BY NAME here rather than accepted
-    and quietly ignored. This is also the path `cadgen snapshot` routes a `.dxf`
-    through, so the two cannot disagree.
-
-    The flag half of the same cutover (`cadgen dxf snapshot --camera`) is
-    refused while parsing, from the same sentences
-    (`cadgen._internal.snapshot_door.DRAWING_RETIRED_OPTIONS`): one request, one
-    answer, whichever surface it arrives on.
+    A DXF is drawn the way the viewer shows it, flat, and what the viewer cannot
+    show the CLI does not render: a camera, display settings, a render mode or a
+    view label in a job is refused BY NAME here rather than accepted and quietly
+    ignored. This is also the path `cadgen snapshot` routes a `.dxf` through, so
+    the two cannot disagree.
     """
     label = input_path.name
     display = job.get("display") if is_plain_object(job.get("display")) else {}

@@ -259,14 +259,11 @@ def step_snapshot_verb(door: str):
 
 
 # --- what a drawing is not ---------------------------------------------------
-# The sentences BOTH refusal paths say. A `.dxf` reaches a refusal two ways: a
-# flag this door used to take (`--camera`, refused while parsing, below) and a
-# key in a job packet (`"camera"`, refused by
-# `cadgen.snapshot_cli.check_drawing_render_job`, which `cadgen snapshot` routes
-# a `.dxf` through too). They are one cutover and must read as one, so the
-# wording lives here -- beside the signature whose absences it explains -- and
-# both paths compose it. Stdlib-only strings: this module stays off the CAD
-# stack, and `--help` with it.
+# The sentences a job's 3D-scene keys are refused with for a `.dxf`
+# (`cadgen.snapshot_cli.check_drawing_render_job`, the path a `--job` packet and
+# `cadgen snapshot` both take). They live here, beside the drawing signature
+# whose absences they explain. Stdlib-only strings: this module stays off the
+# CAD stack, and `--help` with it.
 
 # What a drawing IS, said once: every refusal opens with it.
 DRAWING_IS = "a DXF is drawn as a flat 2D drawing, fitted to the image and painted head on"
@@ -307,27 +304,6 @@ def drawing_scene_refusal(named: str, subject: str, *, plural: bool) -> str:
     )
 
 
-# The flags this door took while a DXF was rendered as a 3D flat pattern. They
-# are gone from the signature above, so each one is declared here with what it
-# meant, why a drawing has no such thing, and what to do instead; the command
-# name and the flag are supplied by the parser
-# (`cadgen._internal.cli_from_function.retired_options`).
-DRAWING_RETIRED_OPTIONS: dict[str, str] = {
-    "--camera": (
-        f"{drawing_camera_refusal('a drawing')} Drop the flag; there is no view to ask for."
-    ),
-    "--display": drawing_scene_refusal("display", "a drawing", plural=False),
-    "--mode": (
-        f"mode chose between view and list; {drawing_mode_refusal('a drawing')} "
-        "Drop the flag."
-    ),
-    "--view-labels": (
-        f"view labels burnt the camera's view name into the image; {DRAWING_IS} — "
-        f"{DRAWING_NO_VIEW_NAME}. Drop the flag."
-    ),
-}
-
-
 def drawing_snapshot_verb(door: str):
     """The DRAWING-shaped verb: a flat 2D render of a ``.dxf``.
 
@@ -341,9 +317,9 @@ def drawing_snapshot_verb(door: str):
     ``appearance`` is what survives of display, because a default pen has no
     colour until a background is chosen.
 
-    Absent is not silent: each of those four is declared in
-    :data:`DRAWING_RETIRED_OPTIONS` and refused by name, in the same words the
-    job-packet check uses for the same request.
+    Absent is not silent: the parser refuses each of those flags as an
+    unrecognized argument, and a job packet's key of the same name is refused
+    by the drawing check in :mod:`cadgen.snapshot_cli`.
     """
     kinds = DOOR_KINDS[door]
     suffixes = ", ".join(f".{kind}" for kind in kinds)
@@ -412,10 +388,6 @@ def drawing_snapshot_verb(door: str):
         )
 
     snapshot.__doc__ = snapshot.__doc__.replace("{suffixes}", suffixes)
-    # The four flags the 3D flat pattern took. Absent from the signature, and
-    # therefore from `--help`, but still REFUSED BY NAME rather than reported
-    # as noise: the parser keeps them as hidden entries that only ever raise.
-    snapshot.__cadgen_retired_options__ = dict(DRAWING_RETIRED_OPTIONS)
     return snapshot
 
 
