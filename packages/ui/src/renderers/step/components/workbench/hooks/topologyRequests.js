@@ -93,7 +93,6 @@ export function createTopologyRequestSession({
   const satisfied = () => {
     const published = session.published;
     if (!published) return false;
-    if (published.whole) return true;
     if (published.failed?.length && published.requests !== session.requests) return false;
     return sameTopologyIds(published.ids, asking());
   };
@@ -152,12 +151,11 @@ export function createTopologyRequestSession({
     if (!topologyIdsWithin(ids, session.desired)) return false;
     return !session.published || topologyIdsWithin(session.published.ids.filter((id) => wanted.has(id)), ids);
   };
-  session.publish = (ids, state, { whole = false, failed = [] } = {}) => {
+  session.publish = (ids, state, { failed = [] } = {}) => {
     // A failure stands for the rest of its request, beside those of the request's earlier batches.
     const loaded = new Set(ids);
     const failures = new Set([...failedNow(), ...failed].filter((id) => !loaded.has(id)));
-    session.published = { ids: [...ids], state, failed: [...failures], requests: session.requests,
-      ...(whole ? { whole: true } : {}) };
+    session.published = { ids: [...ids], state, failed: [...failures], requests: session.requests };
     session.batches += 1;
   };
   session.satisfied = satisfied;

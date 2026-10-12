@@ -1,5 +1,3 @@
-import { entryAssetHash } from "@text-to-cad/core/lib/entryAssets.js";
-
 // The STEP renderer's own slices of the file's view (`kit/shell/fileView.js`): what it was
 // left looking at and posed to. The shell keeps the camera and the Display settings;
 // everything here is a STEP's alone, and it is view state only — never the selection, the
@@ -25,10 +23,7 @@ const idList = value => (Array.isArray(value) ? [...new Set(value.map(text).filt
  * @returns {{ tree: string, pose: string, largeFile: string }}
  */
 export function stepViewSignatures(entry) {
-  const geometry = [
-    text(entry?.kind).toLowerCase(), text(entry?.hash),
-    entryAssetHash(entry, "selectorTopology"), entryAssetHash(entry, "topology"), entryAssetHash(entry, "glb")
-  ].filter(Boolean).join(":") || text(entry?.file);
+  const geometry = [text(entry?.kind).toLowerCase(), text(entry?.hash)].filter(Boolean).join(":") || text(entry?.file);
   const motion = text(entry?.hash);
   return { tree: geometry, pose: motion, largeFile: geometry };
 }

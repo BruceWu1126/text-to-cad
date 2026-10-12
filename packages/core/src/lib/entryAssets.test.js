@@ -5,7 +5,6 @@ import {
   entryAssetHash,
   entryAssetBytes,
   entryAssetUrl,
-  entryHasDisplayEdges,
   entryHasMesh,
   entryHasReferences,
   entryMeshAssetBytes,
@@ -13,9 +12,6 @@ import {
   entryMeshAssetSignature,
   entryMeshAssetUrl,
   entryReferenceAssetSignature,
-  entryDisplayEdgeTopologyAssetUrl,
-  entrySelectorTopologyAssetUrl,
-  entryTopologyAssetUrl,
   entryPoseUrl,
   entryUrdfAssetHash
 } from "./entryAssets.js";
@@ -70,12 +66,6 @@ test("entry mesh signatures distinguish assemblies from simple mesh sidecars", (
   }), "stl-hash");
 });
 
-test("entry topology urls resolve to the primary STEP GLB", () => {
-  assert.equal(entrySelectorTopologyAssetUrl(stepEntry()), "/assets/bracket.glb");
-  assert.equal(entryDisplayEdgeTopologyAssetUrl(stepEntry()), "/assets/bracket.glb");
-  assert.equal(entryTopologyAssetUrl(stepEntry()), "/assets/bracket.glb");
-});
-
 test("a STEP's pose URL is explicit catalog data, never a guessed sidecar", () => {
   assert.equal(entryPoseUrl(stepEntry()), "");
   assert.equal(entryPoseUrl(stepEntry({ poseUrl: " /assets/part.step.json " })), "/assets/part.step.json");
@@ -85,11 +75,8 @@ test("a STEP's pose URL is explicit catalog data, never a guessed sidecar", () =
 test("entry availability helpers preserve existing viewer gates", () => {
   assert.equal(entryHasMesh(stepEntry()), true);
   assert.equal(entryHasReferences(stepEntry()), true);
-  assert.equal(entryHasDisplayEdges(stepEntry()), true);
   assert.equal(entryHasMesh(stepEntry({ artifact: { ok: false } })), true);
   assert.equal(entryHasReferences(stepEntry({ artifact: { ok: false } })), true);
-  assert.equal(entryHasDisplayEdges(stepEntry({ artifact: { ok: false } })), true);
-  assert.equal(entryHasDisplayEdges(stepEntry({ hash: "" })), false);
   assert.equal(entryHasReferences(stepEntry({ hash: "" })), false);
 });
 
