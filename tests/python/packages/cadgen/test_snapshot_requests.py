@@ -154,7 +154,7 @@ class RefusedRequestsLeaveOutUntouched(_Workspace):
         """Preparation is what runs before the clear, so it may not compile a tree."""
         step = self.write("part.step", "ISO-10303-21;\nEND-ISO-10303-21;\n")
         with mock.patch.object(snapshot_cli, "document_snapshot", side_effect=AssertionError("compiled")), \
-             mock.patch.object(snapshot_cli, "ensure_step_topology_artifact", side_effect=AssertionError("built")):
+             mock.patch.object(snapshot_cli, "ensure_step_artifact", side_effect=AssertionError("built")):
             single, prepared = snapshot_cli.prepare_render_job_packet(
                 {"input": str(step), "display": {"clip": {"axis": "y"}},
                  "selection": {"hide": ["#o1.2"]}, "outputs": [{"path": str(self.root / "cut.png")}]},

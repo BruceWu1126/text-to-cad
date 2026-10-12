@@ -524,7 +524,7 @@ def _index_with_assembly_occurrences(index: SelectorIndex, artifact: object) -> 
 
 def index_with_assembly_occurrences(index: SelectorIndex, artifact: object) -> SelectorIndex:
     """The whole instance tree -- occurrences AND their entities -- keyed off a
-    ``StepTopologyArtifact``, plus the label aliases for whatever rows survive.
+    ``StepArtifact``, plus the label aliases for whatever rows survive.
 
     Lives here rather than at either call site because there are TWO of them and they had already
     drifted: ``snapshot_cli.artifact_selector_index`` serves ``--focus``/``--hide``, while

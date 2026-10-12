@@ -66,7 +66,7 @@ def _demo_compound() -> Compound:
 
 
 class _FakeArtifact:
-    """Stands in for StepTopologyArtifact: composition reads `kind` and `artifact_path` only."""
+    """Stands in for StepArtifact: composition reads `kind` and `artifact_path` only."""
 
     def __init__(self, kind: str, artifact_path: Path) -> None:
         self.kind = kind
