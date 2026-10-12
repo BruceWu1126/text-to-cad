@@ -391,17 +391,10 @@ export function FileSheetInlineControlRow({ label, children, className }) {
   );
 }
 
-// Loading / empty / info line, or an error with tone="error". The one style
-// for every in-sheet message.
-export function FileSheetStatusText({ children, tone = "muted", className }) {
+// An empty or info line. The one style for every in-sheet message.
+export function FileSheetStatusText({ children, className }) {
   return (
-    <p
-      className={cn(
-        FILE_SHEET_STATUS_TEXT_CLASSES,
-        tone === "error" && "whitespace-pre-line text-destructive",
-        className
-      )}
-    >
+    <p className={cn(FILE_SHEET_STATUS_TEXT_CLASSES, className)}>
       {children}
     </p>
   );
