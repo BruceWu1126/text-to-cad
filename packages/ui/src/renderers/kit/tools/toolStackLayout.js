@@ -10,7 +10,7 @@
 //   closed     whether a panel a person can close (`closable`: a tree) is closed, by
 //              panel id — their own choice, once they have closed or opened it, which then holds
 //              in every file of the tab over how the panel starts (`toolPanelClosed`);
-//   hidden     whether the whole column — the strip and every panel under it — is put away
+//   hidden     whether the stack — every panel under the strip, never the strip — is put away
 //              (`ToolColumn.jsx`): absent until the person hides it (`true`) or shows it (`false`),
 //              and then their choice, in every file of the tab, over how it starts (`toolStackHidden`).
 //
@@ -50,7 +50,7 @@ const flags = value => {
  * person has set (`{ width?, height? }` by id, each bounded; a panel with neither is absent), the
  * panels whose folded state differs from nothing at all (`true` folded, `false` unfolded against a
  * panel that starts folded), the closable panels a person has closed (`true`) or opened (`false`),
- * and, once they have chosen, whether they hid the whole column (`hidden`, absent until then).
+ * and, once they have chosen, whether they hid the stack (`hidden`, absent until then).
  * @returns {{ panels: Record<string, { width?: number, height?: number }>, collapsed: Record<string, boolean>, closed: Record<string, boolean>, hidden?: boolean }}
  */
 export function normalizeToolStack(value) {
@@ -66,7 +66,7 @@ export function normalizeToolStack(value) {
 }
 
 /**
- * Whether the column — the strip and the panels under it — is put away: as the person left it,
+ * Whether the stack — the panels under the strip — is put away: as the person left it,
  * their choice holding in every file of the tab, and otherwise as it starts: hidden on a phone, so
  * the model has the screen, and shown elsewhere.
  * @param {{ hidden?: boolean } | null | undefined} layout

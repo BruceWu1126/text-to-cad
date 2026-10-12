@@ -241,19 +241,22 @@ it("robot Links closes by its X and Select brings it back: marked while it is cl
   robot.client.dispose();
 });
 
-it('on a phone the tools start hidden; shown, robot Links starts closed, Select marked, until Select is pressed', async () => {
+it('on a phone the strip is up and the panels start hidden; robot Links starts closed, Select marked, until Select is pressed', async () => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
     { x: 0, y: 0, left: 0, top: 0, right: 390, bottom: 844, width: 390, height: 844, toJSON: noop } as DOMRect);
   const robot = await openRobot();
   expect(robot.pane.querySelector('[data-viewer-layout]')!.getAttribute('data-viewer-layout')).toBe('mobile');
-  // The model has the phone's screen: the tools are away until the person shows them.
-  expect(within(robot.pane).queryByRole('group', { name: 'Interaction tools' })).toBeNull();
-  fireEvent.click(within(robot.pane).getByRole('button', { name: 'Show tools' }));
+  // The strip is up; the stack shows no panel, so it has no toggle.
+  expect(within(robot.pane).getByRole('group', { name: 'Interaction tools' })).toBeTruthy();
   expect(robot.stack()).toEqual([]);
+  expect(within(robot.pane).queryByRole('button', { name: /^(?:Hide|Show) panels$/ })).toBeNull();
   expect(robot.tool('Select').querySelector('[data-tool-panel-closed]')).not.toBeNull();
   robot.open('Select');
   expect(robot.stack()).toEqual(['Links']);
   expect(robot.tool('Select').querySelector('[data-tool-panel-closed]')).toBeNull();
+  // Opened, Links is in the stack the phone keeps away until the person shows it.
+  fireEvent.click(await within(robot.pane).findByRole('button', { name: 'Show panels' }));
+  expect(within(robot.pane).getByRole('region', { name: 'Links' })).toBeTruthy();
   robot.client.dispose();
 });
 

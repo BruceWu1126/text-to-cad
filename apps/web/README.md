@@ -237,7 +237,7 @@ pan, zoom, snapshot and Quick Edit, without a 3D toolbar or tool stack.
 
 The explorer is a popover under the file's name: the file's folder, one folder at a
 time, with "Filter files..." to find a file anywhere under it. Below 720px of
-FileViewer width the tools start hidden (their toggle, at the top-left, shows them), and a
+FileViewer width the tool panels start hidden (their toggle, under the strip, shows them), and a
 robot's Links starts closed (Select, pressed, opens it); a STEP's Features shows as on a desktop. Preview is the shared shell's button beside Display: it takes the whole page,
 hiding the navbar, toolbar, tool stack and
 Quick Edit, orbits by default, plays routines (on entry only with Autoplay on)

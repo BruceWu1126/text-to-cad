@@ -182,10 +182,10 @@ export default function RendererShell({ shell, tools, toolPanels = null, navbarC
     return { ...tool, panelClosed: true, description: tool.description || `${tool.panel.label} closed`,
       onSelect: () => { if (tool.active) reopen(); tool.onSelect(); } };
   });
-  // The whole column — the strip and every panel under it — is the person's to put away, by its
-  // toggle at the strip's right end, and to bring back. Until they choose it starts hidden on a
-  // phone and shown elsewhere; once they have, their choice holds in every file of the tab. Nothing
-  // else shows or hides it: a pick, a tool or a key leaves it as the person left it.
+  // The stack — every panel under the strip, never the strip — is the person's to put away, by its
+  // toggle at the top panel's top-right corner, and to bring back. Until they choose it starts hidden
+  // on a phone and shown elsewhere; once they have, their choice holds in every file of the tab.
+  // Nothing else shows or hides it: a pick, a tool or a key leaves it as the person left it.
   const toolsAway = toolStackHidden(frame.toolStack, { mobile });
   // The shell's own tools' panels lead the stack while their tool is up: Draw's tools, color and
   // history, or the Animation tool's routine, transport and settings, whose X puts it down, back to
@@ -332,10 +332,9 @@ export default function RendererShell({ shell, tools, toolPanels = null, navbarC
                     autoplay={shell.autoplay} onAutoplayChange={shell.setAutoplay} />} /> : null}>
 
               {/* The file explorer floats over this corner, above the tools, which stay drawn under it.
-                  The column's toggle is there while it has something to put away: a strip, or the
-                  panel of a file's one tool (which needs no strip). */}
+                  The stack's toggle is there while the stack shows a panel to put away. */}
               {toolsHidden ? null : <ToolColumn style={TOOLBAR_POSITION} mobile={mobile} tools={stripTools}
-                toggle={stripTools.length > 0 || frame.animateToolActive} hidden={toolsAway} onHiddenChange={hidden => frame.changeToolStack({ hidden })}>
+                hidden={toolsAway} onHiddenChange={hidden => frame.changeToolStack({ hidden })}>
                 <ToolStack hidden={previewing} mobile={mobile} layout={frame.toolStack} onLayoutChange={frame.changeToolStack}>{shellPanels}{toolPanels}</ToolStack>
               </ToolColumn>}
               {/* The top-right: the host's notice once a model is on screen (`view.notice`), and Quick Edit

@@ -230,9 +230,9 @@ it('a heading panel folds to its heading by its chevron, its content kept mounte
 
 it("on a phone the tree starts closed, with Select marked and nothing stored; opened, its cap is the whole column", () => {
   const { preferences } = frame({ mobile: true });
-  // The tools start hidden on a phone; shown, the tree is still as it starts there.
+  // The panels start hidden on a phone; shown, the tree is still as it starts there.
   expect(layout(preferences)).toEqual({ panels: {}, collapsed: {}, closed: {} });
-  fireEvent.click(screen.getByRole('button', { name: 'Show tools' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Show panels' }));
   expect(shown()).toEqual(['Harness reference']);
   expect(tool('Select').querySelector('[data-tool-panel-closed]')).not.toBeNull();
   expect(layout(preferences)).toEqual({ panels: {}, collapsed: {}, closed: {}, hidden: false });
@@ -245,115 +245,125 @@ it("on a phone the tree starts closed, with Select marked and nothing stored; op
   expect([shown(), layout(preferences).closed]).toEqual([['Harness reference'], { tree: true }]);
 });
 
-// The column's own toggle, and the three parts of the column it moves: the strip's row, the strip
-// on it, and the stack under it.
-const toggle = () => screen.getByRole('button', { name: /^(?:Hide|Show) tools$/ });
+// The stack's own toggle, the strip it leaves alone and the stack it moves.
+const toggle = () => screen.getByRole('button', { name: /^(?:Hide|Show) panels$/ });
+const toggleBox = () => document.querySelector<HTMLElement>('[data-cad-tools-toggle]')!;
 const column = () => ({ row: document.querySelector<HTMLElement>('[data-cad-tool-row]')!,
-  strip: document.querySelector<HTMLElement>('[data-cad-toolbar]')!.parentElement!,
   stack: document.querySelector<HTMLElement>('[data-cad-tool-stack]')!.parentElement! });
 const pressedTools = () => [...document.querySelectorAll('[data-cad-toolbar] button[aria-pressed="true"]')].map(button => button.getAttribute('aria-label'));
 
-it("the toggle at the strip's right end puts the strip and every panel away, mounted but out of reach and out of the accessibility tree, and brings them back: one write a press, and nothing else shows them", () => {
+it("the toggle at the top panel's top-right corner puts every panel away, mounted but out of reach and out of the accessibility tree, and brings them back, the strip staying: one write a press, and nothing else shows them", () => {
   const { preferences, remount } = frame();
   const stage = (name: string) => act(() => { fireEvent.click(document.querySelector(`[data-harness-stage="${name}"]`)!); });
   fireEvent.click(tool('Keep'));
   const panels = ['Harness tree', 'Harness reference', 'Kept controls'];
-  // On the strip's row, after the strip: a strip of one, named for what it does, the strip and the
-  // stack under its control.
-  expect([...column().row.children].map(child => child.hasAttribute('data-cad-tools-toggle') ? 'toggle' : child.querySelector('[role=group]') ? 'strip' : child.tagName))
-    .toEqual(['strip', 'toggle']);
-  expect([toggle().getAttribute('aria-label'), toggle().getAttribute('aria-expanded')]).toEqual(['Hide tools', 'true']);
-  expect(toggle().getAttribute('aria-controls')!.split(' ').map(id => document.getElementById(id))).toEqual([column().strip, column().stack]);
+  // Not on the strip's row: floating 2px past the top panel's right edge (jsdom lays it out at 0),
+  // centred on its first row, the stack under its control.
+  expect([...column().row.children].map(child => child.hasAttribute('data-cad-toolbar'))).toEqual([true]);
+  expect(toggleBox().style.transform).toMatch(/^translate\(2px, -?\d+px\)$/);
+  expect([toggle().getAttribute('aria-label'), toggle().getAttribute('aria-expanded')]).toEqual(['Hide panels', 'true']);
+  expect(document.getElementById(toggle().getAttribute('aria-controls')!)).toBe(column().stack);
   expect(toggle().querySelector('svg')!.getAttribute('class')).toMatch(/\blucide-panel-left-close\b/);
   for (const name of panels) expect(screen.getByRole('region', { name })).toBeTruthy();
-  expect([column().row.style.transform, column().stack.style.transform]).toEqual(['', '']);
+  expect(column().stack.style.transform).toBe('');
   expect(preferences.writes).toBe(0);
 
   fireEvent.click(toggle());
   expect([preferences.writes, layout(preferences).hidden]).toEqual([1, true]);
-  // The strip, its tools and every panel are out of reach and out of the accessibility tree...
-  expect(screen.queryByRole('group', { name: 'Interaction tools' })).toBeNull();
+  // Every panel is out of reach and out of the accessibility tree; the strip stays as it was.
   for (const name of panels) expect(screen.queryByRole('region', { name })).toBeNull();
-  expect([column().strip.hasAttribute('inert'), column().stack.hasAttribute('inert')]).toEqual([true, true]);
-  // ...but mounted as they were: the tree with its rows, the kept effect's panel, the tool in hand.
+  expect(column().stack.hasAttribute('inert')).toBe(true);
+  expect(screen.getByRole('group', { name: 'Interaction tools' })).toBeTruthy();
+  expect([column().row.hasAttribute('inert'), column().row.style.transform]).toEqual([false, '']);
+  // ...and mounted as they were: the tree with its rows, the kept effect's panel, the tool in hand.
   expect(shown()).toEqual(panels);
   expect(within(panel('Harness tree')!).getByText('Row 1')).toBeTruthy();
   expect(pressedTools()).toEqual(['Select', 'Keep']);
-  // The row slides left by the strip's width, so the toggle comes to rest on the strip's line where
-  // the strip began; the stack slides out past its own width and the inset.
-  expect([column().row.style.transform, column().stack.style.transform]).toEqual(['translateX(calc(-100% + 34px))', 'translateX(calc(-100% - 8px))']);
-  expect([toggle().getAttribute('aria-label'), toggle().getAttribute('aria-expanded')]).toEqual(['Show tools', 'false']);
+  // The stack slides out past its own width and the inset; the toggle comes to rest where the stack
+  // began, under the strip's first button.
+  expect(column().stack.style.transform).toBe('translateX(calc(-100% - 8px))');
+  expect(toggleBox().style.transform).toMatch(/^translate\(5px, -?\d+px\)$/);
+  expect([toggle().getAttribute('aria-label'), toggle().getAttribute('aria-expanded')]).toEqual(['Show panels', 'false']);
   expect(toggle().querySelector('svg')!.getAttribute('class')).toMatch(/\blucide-panel-left-open\b/);
 
   // Nothing but the toggle shows them: not a reload of the model, not a trip to preview, not a remount.
   stage('finding');
   expect(document.querySelector('[data-cad-tools-toggle]')).toBeNull();
   stage('idle');
-  expect(screen.queryByRole('group', { name: 'Interaction tools' })).toBeNull();
+  expect(screen.queryByRole('region', { name: 'Harness tree' })).toBeNull();
   act(() => { fireEvent.click(document.querySelector('[data-harness-ask-preview]')!); });
-  expect(screen.queryByRole('button', { name: /^(?:Hide|Show) tools$/ })).toBeNull();
+  expect(screen.queryByRole('button', { name: /^(?:Hide|Show) panels$/ })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Exit preview' }));
-  expect(toggle().getAttribute('aria-label')).toBe('Show tools');
+  expect(toggle().getAttribute('aria-label')).toBe('Show panels');
   remount();
-  expect(screen.queryByRole('group', { name: 'Interaction tools' })).toBeNull();
+  expect(screen.queryByRole('region', { name: 'Harness tree' })).toBeNull();
   expect(preferences.writes).toBe(1);
 
   fireEvent.click(toggle());
   expect([preferences.writes, layout(preferences).hidden]).toEqual([2, false]);
-  expect(screen.getByRole('group', { name: 'Interaction tools' })).toBeTruthy();
   for (const name of ['Harness tree', 'Harness reference']) expect(screen.getByRole('region', { name })).toBeTruthy();
-  expect([column().strip.hasAttribute('inert'), column().stack.hasAttribute('inert'), column().stack.style.transform]).toEqual([false, false, '']);
-  expect([toggle().getAttribute('aria-label'), toggle().getAttribute('aria-expanded')]).toEqual(['Hide tools', 'true']);
+  expect([column().stack.hasAttribute('inert'), column().stack.style.transform]).toEqual([false, '']);
+  expect([toggle().getAttribute('aria-label'), toggle().getAttribute('aria-expanded')]).toEqual(['Hide panels', 'true']);
 });
 
-it("on a phone the tools start hidden, nothing stored, until the person shows them; their choice then holds over how the column starts, on a phone or a desktop", () => {
+it('a stack that shows no panel has no toggle; the first panel to show brings it', async () => {
+  frame({ name: 'plain.harness' });
+  expect(screen.getByRole('group', { name: 'Interaction tools' })).toBeTruthy();
+  expect(document.querySelector('[data-cad-tools-toggle]')).toBeNull();
+  fireEvent.click(tool('Draw'));
+  expect(shown()).toEqual(['Drawing controls']);
+  expect((await screen.findByRole('button', { name: 'Hide panels' })).getAttribute('aria-expanded')).toBe('true');
+  fireEvent.click(tool('Draw'));
+  await waitFor(() => expect(document.querySelector('[data-cad-tools-toggle]')).toBeNull());
+});
+
+it("on a phone the panels start hidden, the strip shown, nothing stored, until the person shows them; their choice then holds over how the stack starts, on a phone or a desktop", () => {
   const preferences = tabSettings();
   const phone = frame({ mobile: true, preferences });
-  expect(screen.queryByRole('group', { name: 'Interaction tools' })).toBeNull();
+  expect(screen.getByRole('group', { name: 'Interaction tools' })).toBeTruthy();
   expect(screen.queryByRole('region', { name: 'Harness reference' })).toBeNull();
-  expect([toggle().getAttribute('aria-label'), toggle().getAttribute('aria-expanded')]).toEqual(['Show tools', 'false']);
+  expect([toggle().getAttribute('aria-label'), toggle().getAttribute('aria-expanded')]).toEqual(['Show panels', 'false']);
   expect([preferences.writes, layout(preferences)]).toEqual([0, { panels: {}, collapsed: {}, closed: {} }]);
   fireEvent.click(toggle());
   expect([preferences.writes, layout(preferences).hidden]).toEqual([1, false]);
-  expect(screen.getByRole('group', { name: 'Interaction tools' })).toBeTruthy();
+  expect(screen.getByRole('region', { name: 'Harness reference' })).toBeTruthy();
   phone.unmount();
-  // Shown by the person, a phone opens with the tools up...
+  // Shown by the person, a phone opens with the panels up...
   frame({ mobile: true, preferences });
-  expect(toggle().getAttribute('aria-label')).toBe('Hide tools');
-  expect(screen.getByRole('group', { name: 'Interaction tools' })).toBeTruthy();
+  expect(toggle().getAttribute('aria-label')).toBe('Hide panels');
+  expect(screen.getByRole('region', { name: 'Harness reference' })).toBeTruthy();
   cleanup();
-  // ...and hidden by the person, a desktop opens with them away.
+  // ...and hidden by the person, a desktop opens with them away, the strip up.
   frame({ preferences: tabSettings({ toolStack: { panels: {}, collapsed: {}, closed: {}, hidden: true } }) });
-  expect(screen.queryByRole('group', { name: 'Interaction tools' })).toBeNull();
-  expect(toggle().getAttribute('aria-label')).toBe('Show tools');
+  expect(screen.queryByRole('region', { name: 'Harness tree' })).toBeNull();
+  expect(screen.getByRole('group', { name: 'Interaction tools' })).toBeTruthy();
+  expect(toggle().getAttribute('aria-label')).toBe('Show panels');
 });
 
-it("the column slides out and fades in 150ms, easing in, and back in 200ms, easing out, by transform and opacity alone; under reduced motion, the system's or the app's, it is simply gone, and back", () => {
+it("the stack slides out and fades in 150ms, easing in, and back in 200ms, easing out, by transform and opacity alone, the toggle with it; under reduced motion, the system's or the app's, it is simply gone, and back", () => {
   const motion = (node: Element) => node.className.split(/\s+/).filter(name => /^(?:transition|duration-|ease-)/.test(name)).sort();
-  // The moving parts: the strip's row, the strip, the stack and the toggle's box.
-  const parts = () => { const { row, strip, stack } = column(); return [row, strip, stack, document.querySelector('[data-cad-tools-toggle] > span[aria-hidden]')!]; };
+  // The moving parts: the stack and the toggle's box.
+  const parts = () => [column().stack, toggleBox()];
   frame();
-  // Shown, nothing in the column transitions visibility: whatever hides the column (preview, a
+  // Shown, nothing in the stack transitions visibility: whatever hides the column (preview, a
   // capture) hides it at once.
-  expect(parts().map(motion)).toEqual([['duration-200', 'ease-out', 'transition-transform'], ['duration-200', 'ease-out', 'transition-opacity'],
-    ['duration-200', 'ease-out', 'transition-[transform,opacity]'], ['duration-200', 'ease-out', 'transition-opacity']]);
+  expect(parts().map(motion)).toEqual([['duration-200', 'ease-out', 'transition-[transform,opacity]'], ['duration-200', 'ease-out', 'transition-transform']]);
   fireEvent.click(toggle());
   // Going, visibility steps at the end of the slide.
-  expect(parts().map(motion)).toEqual([['duration-150', 'ease-in', 'transition-transform'], ['duration-150', 'ease-in', 'transition-[opacity,visibility]'],
-    ['duration-150', 'ease-in', 'transition-[transform,opacity,visibility]'], ['duration-150', 'ease-in', 'transition-opacity']]);
+  expect(parts().map(motion)).toEqual([['duration-150', 'ease-in', 'transition-[transform,opacity,visibility]'], ['duration-150', 'ease-in', 'transition-transform']]);
   // Gone is transparent and, once the slide ends, invisible.
-  expect([column().strip.style.opacity, column().strip.style.visibility, column().stack.style.opacity, column().stack.style.visibility]).toEqual(['0', 'hidden', '0', 'hidden']);
+  expect([column().stack.style.opacity, column().stack.style.visibility]).toEqual(['0', 'hidden']);
   cleanup();
   for (const still of ['system', 'app']) {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: still === 'system' && query === '(prefers-reduced-motion: reduce)', media: query,
       addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));
     frame(still === 'app' ? { environment: { colorScheme: 'light', reducedMotion: true } } : {});
-    expect(parts().map(motion), still).toEqual([[], [], [], []]);
+    expect(parts().map(motion), still).toEqual([[], []]);
     fireEvent.click(toggle());
-    expect(parts().map(motion), still).toEqual([[], [], [], []]);
-    expect(screen.queryByRole('group', { name: 'Interaction tools' })).toBeNull();
+    expect(parts().map(motion), still).toEqual([[], []]);
+    expect(screen.queryByRole('region', { name: 'Harness tree' })).toBeNull();
     fireEvent.click(toggle());
-    expect(screen.getByRole('group', { name: 'Interaction tools' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Harness tree' })).toBeTruthy();
     cleanup();
   }
 });

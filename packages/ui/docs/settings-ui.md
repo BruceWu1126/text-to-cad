@@ -109,8 +109,8 @@ none.
   early. Keep typing to narrow the search." Up and Down move between the filter and the
   rows on screen, the rows of a folder open inline among them. A pick opens the file and
   closes it, as do Escape and a press anywhere outside it.
-- **Toolbar** at top-left, 8px in — the gap between it and the stack under it — and 8px after it
-  on its line, the toggle that hides the tools ([Hiding the tools](#the-tool-stack)).
+- **Toolbar** at top-left, 8px in — the gap between it and the stack under it. It always stays:
+  only the stack under it can be put away ([Hiding the panels](#the-tool-stack)).
 - **Tool stack** beneath the toolbar: the panels of the tool in hand and of the
   effects a person keeps (see [The tool stack](#the-tool-stack)). The column is
   exactly the height the stack may take: it stops 8px above the cube, so it never runs
@@ -323,20 +323,23 @@ whose tool is not up is `hidden`, not unmounted: a tree keeps its expansion,
 filter and scroll across a trip to another tool. Preview hides the whole
 stack.
 
-- **Hiding the tools.** The strip's row ends, 8px after the strip, in the column's toggle: a
-  strip of one, the strip's button with lucide's `PanelLeftClose`, **Hide tools**. A press
-  slides the strip and every panel out to the left as they fade (150ms, easing in), the row
-  carrying the toggle to where the strip began; there it stays, the bare `PanelLeftOpen` at 60%
-  (opaque under the pointer or the keyboard's focus), **Show tools**, which brings them back the
-  same way (200ms, easing out). Transform and opacity only; under reduced motion, the system's
-  or the app's (`environment.reducedMotion`), nothing moves. Hidden, they are inert and out of
-  the accessibility tree but stay mounted, as the panels of a tool not in hand do. The toggle
-  has `aria-expanded` and keeps its hint while expanded: it discloses the column beside it, not
-  a popup. Until the person chooses, the tools start hidden on a phone and shown elsewhere; then
+- **Hiding the panels.** The stack's toggle floats just outside its top panel's top-right
+  corner — 2px past the panel's right edge, centred on its 28px first row — as a transparent
+  button, the strip's 24px button with no surface of its own: lucide's `PanelLeftClose`,
+  **Hide panels**. It hides the stack alone; the toolbar above it always stays. A press slides
+  every panel out to the left as they fade (150ms, easing in), the toggle going with them to rest
+  where the stack began, under the strip's first button: the bare `PanelLeftOpen` at 60% (opaque
+  under the pointer or the keyboard's focus), **Show panels**, which brings them back the same
+  way (200ms, easing out). It follows the top panel: a panel coming or going above it, or a
+  person widening it. Transform and opacity only; under reduced motion, the system's or the
+  app's (`environment.reducedMotion`), nothing moves. Hidden, the panels are inert and out of the
+  accessibility tree but stay mounted, as the panels of a tool not in hand do. The toggle has
+  `aria-expanded` and keeps its hint while expanded: it discloses the stack beside it, not a
+  popup. Until the person chooses, the panels start hidden on a phone and shown elsewhere; then
   their choice holds in every file of the tab, and nothing else changes it: a pick, a tool, a
   key, a trip to preview (which hides the whole column, toggle and all, while it lasts) or a
-  reload leaves the tools as the person left them. A column with no strip has the toggle alone
-  on that row, and one with nothing in it has none (`kit/tools/ToolColumn.jsx`).
+  reload leaves the panels as the person left them. A stack that shows no panel (a part file
+  under Select) has no toggle (`kit/tools/ToolColumn.jsx`).
 - **Two kinds of panel.** The tree (Features, Links), the **Reference** and
   **Position** are *resizable*: the person's to size, each on its own. The
   Reference sits under the tree as a box of its own, sized apart from it:
@@ -424,16 +427,16 @@ stack.
   platform's form (a phone shows none); after a copy it says **Copied** for a
   moment, a tick where the shortcut was.
 - **The layout is the person's.** The sizes, the folded panels, the closed
-  Links and the hidden tools are one of the tab's settings, across its files (`CadPreferences.toolStack`:
+  Links and the hidden panels are one of the tab's settings, across its files (`CadPreferences.toolStack`:
   `{ panels: { [panel id]: { width?, height? } }, collapsed: { [panel id]: boolean }, closed: { [panel id]: boolean }, hidden?: boolean }`,
   kept beside the appearance). `panels` holds only what a person set, by
   resizable panel — the tree, the Reference and Position each under its own
   id; `collapsed` only what differs from a panel's start (the SDF panel starts
   folded); `closed` the person's own choice, once they have closed (`true`) or
   opened (`false`) Links, which then holds in every file over how it starts (a
-  phone closed); `hidden`, absent until then, the same for the tools, once they
-  have hidden or shown them. A new tab (a cleared record) puts every panel back at the one
-  width and its default cap, and Links and the tools as they start. Every size is written back once, when the pointer
+  phone closed); `hidden`, absent until then, the same for the stack, once they
+  have hidden or shown its panels. A new tab (a cleared record) puts every panel back at the one
+  width and its default cap, and Links and the panels as they start. Every size is written back once, when the pointer
   lets go (or per key), never per pointer move; a hide or a show once, per press.
 - **Surfaces.** Two, defined once (`lib/floatingSurface.js`), with one border: the
   toolbar and the stack's panels, which stay up beside the model, share
@@ -474,9 +477,9 @@ Model, link and explorer filters share `TreeFilterInput`; the explorer's rows ar
 24px lines, as the trees' are, but in 12px text.
 
 **Mobile** is below 720px of FileViewer width — the one viewer breakpoint
-(`useViewerMobile`); chrome never uses window breakpoints. The tools start
-hidden, their toggle at the top-left, so the model has the screen until the person
-shows them. The tool stack is then
+(`useViewerMobile`); chrome never uses window breakpoints. The strip shows as on a
+desktop, but the panels under it start hidden, their toggle under the strip's first
+button, so the model has the screen until the person shows them. The tool stack is then
 the same stack, but a robot's Links starts closed, Select marked, until the person
 presses Select; a STEP's Features shows as it does
 on a desktop. The
@@ -835,14 +838,14 @@ pressed in while focus is on the page. Editable targets keep their own keys.
 Every hint is a `TooltipHint`: compact text, one surface and arrow, a 400ms
 delay. No native `title` anywhere in chrome. Prefer one or two words; show a
 full technical name only when it is truncated (`overflowOnly`). Quick Edit's buttons, the
-strip's buttons and the tools' toggle, the navbar's right-hand controls (the update, an alert's icon, Full size,
+strip's buttons and the panels' toggle, the navbar's right-hand controls (the update, an alert's icon, Full size,
 Display, Preview), preview's corner (Orbit, Display, Exit preview) and the playbar's
-Routines are hinted by name — the strip's, the toggle's and the playbar's hints above their buttons, the
-others' below; there is no hint on the navbar's left (the logo,
+Routines are hinted by name — the strip's and the playbar's hints above their buttons, the panels'
+toggle's to its right, the others' below; there is no hint on the navbar's left (the logo,
 the file's name and the ⋯ say what they are), on Playback settings, X,
 the rest of the transport (play, pause, the scrubber), drawing tools or labelled text
 buttons (Quick Edit's alone say what they do). A disabled, selected or expanded control has none
-(the tools' toggle, a disclosure of the column beside it rather than a popup, keeps its hint
+(the panels' toggle, a disclosure of the stack beside it rather than a popup, keeps its hint
 expanded: `disclosure`); pressing or leaving cancels a
 pending one. A hint appears on focus only for keyboard navigation (a Tab), never
 when a closing menu hands focus back.
