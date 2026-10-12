@@ -5,7 +5,7 @@ A tree holds the geometry a model made itself (``components``, placed by its
 child are two links to one tree. Nothing of a child is copied::
 
     {
-      "kind": "geometry-tree", "schemaVersion": 2,
+      "kind": "geometry-tree", "schemaVersion": 3,
       "label": "robot", "entryKind": "assembly",
       "components": {"<cid>": {"kind": "native", "codec": "bintools-v4", "brep": "<object>", "faceColors": {}, "contentHash": "…"}},
       "occurrences": [{"id": "o1.1", "name": "housing", "component": "<cid>", "transform": [16 floats]}],
@@ -55,7 +55,11 @@ from cadgen.store.objects import (  # noqa: F401 - the stamp helpers stay import
 )
 
 TREE_KIND = "geometry-tree"
-TREE_SCHEMA = 2
+# A format change bumps it (STORE.md §2, §8): a tree of another version is never
+# read, and a sweeper that finds a newer one stands down. 3: an eager-only
+# component pins its topology facts as ``topology``, a field an older sweeper
+# does not mark.
+TREE_SCHEMA = 3
 FLAT_KIND = "assembly-package"
 
 # Metadata readers need an independently owned flattened descriptor but not the
@@ -91,11 +95,11 @@ _METADATA_CAPTURE_STAMP_BYTES = 512
 # Component entries validated against their object's bytes (``validate_geometry_component``,
 # a pure function of the two), by object, cid and the sha256 of the canonical
 # entry -- a digest, since the table is bounded by count and an entry's
-# faceColors grow with its faces; SURF containers validated, by object. With
-# the object still at its verified identity, the check holds without the bytes.
+# faceColors grow with its faces; pinned topology facts validated, by object.
+# With the object still at its verified identity, the check holds without the bytes.
 _VALIDATED_CAPACITY = 1 << 16
 _VALIDATED_COMPONENTS: OrderedDict[tuple[str, str, bytes], None] = OrderedDict()
-_VALIDATED_SURFACES: OrderedDict[str, None] = OrderedDict()
+_VALIDATED_TOPOLOGY: OrderedDict[str, None] = OrderedDict()
 
 IDENTITY_16 = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 
@@ -135,7 +139,7 @@ def tree_objects(tree_hash: str, *, _seen: set[str] | None = None) -> set[str]:
         for entry in tree["components"].values():
             if not isinstance(entry, dict):
                 continue
-            for field in ("brep", "eagerSurface"):
+            for field in ("brep", "topology"):
                 if entry.get(field):
                     try:
                         read_verified_object(entry[field])
@@ -591,7 +595,7 @@ def _reset_metadata_capture_cache() -> None:
         _METADATA_CAPTURE_CACHE.clear()
         _METADATA_CAPTURE_CACHE_SIZE = 0
         _VALIDATED_COMPONENTS.clear()
-        _VALIDATED_SURFACES.clear()
+        _VALIDATED_TOPOLOGY.clear()
     _reset_verified()
 
 
@@ -640,7 +644,7 @@ def _capture(
     and remembers what it verified all the same.
     """
     from cadgen._internal.component_package import canonical_json_bytes, validate_geometry_component
-    from cadgen._internal.surf_container import validate_surface_bytes
+    from cadgen._internal.topology_facts import read_topology_facts
 
     cache_key = _metadata_capture_key(tree_hash)
     flight = None
@@ -731,18 +735,18 @@ def _capture(
             settled = True
         paths.add(key)
         if entry["kind"] == "eager-only":
-            surf = entry["eagerSurface"]
-            known = surf in _VALIDATED_SURFACES
-            key = held(surf) if known and not retain_payloads else None
+            topology = entry["topology"]
+            known = topology in _VALIDATED_TOPOLOGY
+            key = held(topology) if known and not retain_payloads else None
             if key is None:
-                payload, key, surf_settled = verified(surf)
+                payload, key, topology_settled = verified(topology)
                 if not known:
-                    validate_surface_bytes(payload)
-                    _note_validated(_VALIDATED_SURFACES, surf)
+                    read_topology_facts(payload)
+                    _note_validated(_VALIDATED_TOPOLOGY, topology)
                 if retain:
-                    captured[surf] = payload
+                    captured[topology] = payload
                 del payload
-                settled = settled and surf_settled
+                settled = settled and topology_settled
             paths.add(key)
         return settled
 

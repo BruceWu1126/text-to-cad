@@ -408,8 +408,8 @@ class MaterializedIdentityTest(unittest.TestCase):
         remove_entry("component", cid)
         with mock.patch.object(
             surface_extract,
-            "extract_surface_component",
-            wraps=surface_extract.extract_surface_component,
+            "extract_topology_facts",
+            wraps=surface_extract.extract_topology_facts,
         ) as extracted:
             _result, descriptor, stats = build_tree_from_compound(child, root_name="reindexed")
         self.assertEqual(extracted.call_count, 0)

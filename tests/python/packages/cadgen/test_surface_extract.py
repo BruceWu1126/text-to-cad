@@ -1,58 +1,29 @@
-"""`.surf` extraction: one component's exact topology for its readers.
+"""A component's topology facts: what its selector table is built from.
 
-A `.surf` is read by the selector table a part's derivation builds from it --
-never tessellated (cadgen meshes components with OCCT).
-So the oracle here is OCCT itself for every analytic value a reader uses, and
-the contract for everything else is what those readers take: loops as ordered
-edge references, B-spline surfaces as degrees and pole counts (and a bilinear
-patch's corners), swept
-surfaces by axis or direction, general curves by kind and range.
+The facts are read by the selector table a part's derivation builds from them --
+never tessellated (cadgen meshes components with OCCT). So the oracle here is
+OCCT itself for every value a reader uses, and the contract for everything else
+is what the table takes: three ordinal tables holding exactly its inputs, loops
+as ordered edge ordinals, a plane's oriented normal, a circle's sweep -- and
+their object form, which an eager-only component's tree pins.
 """
 
 from __future__ import annotations
 
 import json
 import math
-import struct
 import unittest
 
 from tests.python.support.paths import add_repo_path
 
 add_repo_path("packages/cadgen/src")
 
-
-def _floats(binbuf, ref):
-    offset, count = ref
-    return struct.unpack_from(f"<{count}f", binbuf, offset * 4)
-
-
-def _analytic_point(surface, u, v):
-    ox, oy, oz = surface["origin"]
-    xd, yd, zd = surface["xdir"], surface["ydir"], surface["zdir"]
-
-    def mix(px, py, pz):
-        return tuple(ox_ + px * x + py * y + pz * z for ox_, x, y, z in
-                     zip((ox, oy, oz), xd, yd, zd))
-
-    kind = surface["kind"]
-    if kind == "plane":
-        return mix(u, v, 0.0)
-    if kind == "cylinder":
-        r = surface["radius"]
-        return mix(r * math.cos(u), r * math.sin(u), v)
-    if kind == "cone":
-        r = surface["radius"] + v * math.sin(surface["semiAngle"])
-        return mix(r * math.cos(u), r * math.sin(u),
-                   v * math.cos(surface["semiAngle"]))
-    if kind == "sphere":
-        r = surface["radius"]
-        return mix(r * math.cos(v) * math.cos(u), r * math.cos(v) * math.sin(u),
-                   r * math.sin(v))
-    if kind == "torus":
-        big, small = surface["majorRadius"], surface["minorRadius"]
-        ring = big + small * math.cos(v)
-        return mix(ring * math.cos(u), ring * math.sin(u), small * math.sin(v))
-    raise AssertionError(f"unexpected analytic kind {kind}")
+SHAPE_KEYS = {"ord", "kind", "volume"}
+FACE_KEYS = {"ord", "shape", "surfaceType", "area", "center", "bbox", "loops"}
+FACE_OPTIONAL = {"normal", "params"}
+EDGE_KEYS = {"ord", "shape", "class", "continuity", "dihedralDeg", "flags", "adjacentFaceCount", "curveType",
+             "faceOrds", "length", "center", "bbox"}
+EDGE_OPTIONAL = {"params", "sweepRadians"}
 
 
 def _build_fixture():
@@ -75,14 +46,14 @@ def _build_fixture():
     # Full revolve of a spline profile: a swept surface of revolution.
     with bd.BuildPart() as revolved:
         with bd.BuildSketch(bd.Plane.XZ):
-            with bd.BuildLine() as profile:
+            with bd.BuildLine():
                 bd.Spline((8, -2), (10.5, 0), (8, 2))
                 bd.Line((8, 2), (8, -2))
             bd.make_face()
         bd.revolve(axis=bd.Axis.Z)
     revolved_part = revolved.part.moved(bd.Location((0, 0, 60)))
-    # A square lofted to a smaller, turned square with ruled sides: each side is
-    # a bilinear B-spline patch, the one NURBS kind whose corners a .surf keeps.
+    # A square lofted to a smaller, turned square with ruled sides: bilinear
+    # B-spline patches, whose facts are their type and metrics like any other's.
     with bd.BuildPart() as twisted:
         with bd.BuildSketch(bd.Plane.XY.offset(70)):
             bd.Rectangle(10, 10)
@@ -92,15 +63,13 @@ def _build_fixture():
     return bd.Compound(children=[fused, torus, lofted.part, revolved_part, twisted.part])
 
 
-class SurfaceExtractTest(unittest.TestCase):
+class TopologyFactsTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        from cadgen._internal.surf_container import read_surf
-        from cadgen._internal.surface_extract import extract_surface_component
+        from cadgen._internal.surface_extract import extract_topology_facts
 
         cls.shape = _build_fixture().wrapped
-        cls.data = extract_surface_component(cls.shape)
-        cls.index, cls.binbuf = read_surf(bytes(cls.data))
+        cls.facts = extract_topology_facts(cls.shape)
 
         from OCP.TopAbs import TopAbs_FACE, TopAbs_EDGE
         from OCP.TopExp import TopExp
@@ -116,86 +85,76 @@ class SurfaceExtractTest(unittest.TestCase):
 
         return TopoDS.Face_s(self.face_map.FindKey(entry["ord"]))
 
-    def test_counts_match_topology_ordinals(self) -> None:
-        self.assertEqual(self.index["counts"]["faces"], self.face_map.Extent())
-        self.assertEqual(self.index["counts"]["edges"], self.edge_map.Extent())
-        self.assertEqual([f["ord"] for f in self.index["faces"]],
-                         list(range(1, self.face_map.Extent() + 1)))
+    def edge(self, entry):
+        from OCP.TopoDS import TopoDS
+
+        return TopoDS.Edge_s(self.edge_map.FindKey(entry["ord"]))
+
+    def test_three_tables_in_ordinal_order(self) -> None:
+        self.assertEqual(set(self.facts), {"shapes", "faces", "edges"})
+        self.assertEqual([f["ord"] for f in self.facts["faces"]], list(range(1, self.face_map.Extent() + 1)))
+        self.assertEqual([e["ord"] for e in self.facts["edges"]], list(range(1, self.edge_map.Extent() + 1)))
+        self.assertEqual([s["ord"] for s in self.facts["shapes"]], [1, 2, 3, 4, 5], "one entity per solid")
+        self.assertTrue(all(s["kind"] == "solid" and s["volume"] > 0 for s in self.facts["shapes"]))
+        self.assertEqual({f["shape"] for f in self.facts["faces"]}, {1, 2, 3, 4, 5})
+        self.assertEqual({e["shape"] for e in self.facts["edges"]}, {1, 2, 3, 4, 5})
+
+    def test_rows_hold_what_the_selector_table_reads_and_nothing_else(self) -> None:
+        for row in self.facts["shapes"]:
+            self.assertEqual(set(row), SHAPE_KEYS)
+        for row in self.facts["faces"]:
+            self.assertTrue(FACE_KEYS <= set(row) <= FACE_KEYS | FACE_OPTIONAL, row.keys())
+            self.assertEqual("normal" in row, row["surfaceType"] == "plane")
+        for row in self.facts["edges"]:
+            self.assertTrue(EDGE_KEYS <= set(row) <= EDGE_KEYS | EDGE_OPTIONAL, row.keys())
+            self.assertEqual("sweepRadians" in row, row["curveType"] == "circle" and row["class"] != "degenerate")
 
     def test_fixture_exercises_analytics_swept_surfaces_and_nurbs(self) -> None:
-        kinds = {f["surface"]["kind"] for f in self.index["faces"]}
-        self.assertLessEqual({"plane", "cylinder", "torus", "revolution", "nurbs"}, kinds)
+        kinds = {f["surfaceType"] for f in self.facts["faces"]}
+        self.assertLessEqual({"plane", "cylinder", "torus", "surfaceofrevolution", "bsplinesurface"}, kinds)
 
-    def test_analytic_surfaces_match_occt(self) -> None:
-        from OCP.BRep import BRep_Tool
+    def test_metrics_and_analytic_parameters_are_occts(self) -> None:
+        from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
+        from OCP.BRepGProp import BRepGProp
+        from OCP.GProp import GProp_GProps
+        from OCP.TopAbs import TopAbs_Orientation
 
-        for entry in self.index["faces"]:
-            if entry["surface"]["kind"] in ("nurbs", "revolution", "extrusion", "freeform"):
-                continue
-            geom = BRep_Tool.Surface_s(self.face(entry))
-            u0, u1, v0, v1 = entry["uv"]
-            for s, t in ((0.1, 0.2), (0.5, 0.5), (0.9, 0.7)):
-                u = u0 + s * (u1 - u0)
-                v = v0 + t * (v1 - v0)
-                truth = geom.Value(u, v)
-                mine = _analytic_point(entry["surface"], u, v)
-                for a, b in zip((truth.X(), truth.Y(), truth.Z()), mine):
-                    self.assertAlmostEqual(a, b, places=5,
-                                           msg=f"face {entry['ord']} "
-                                               f"{entry['surface']['kind']}")
+        for entry in self.facts["faces"]:
+            face = self.face(entry)
+            props = GProp_GProps()
+            BRepGProp.SurfaceProperties_s(face, props)
+            self.assertEqual(entry["area"], props.Mass())
+            self.assertEqual(entry["center"], [props.CentreOfMass().X(), props.CentreOfMass().Y(), props.CentreOfMass().Z()])
+            adaptor = BRepAdaptor_Surface(face)
+            if entry["surfaceType"] == "plane":
+                direction = adaptor.Plane().Position().Direction()
+                sign = -1.0 if face.Orientation() == TopAbs_Orientation.TopAbs_REVERSED else 1.0
+                self.assertEqual(entry["normal"], [sign * direction.X(), sign * direction.Y(), sign * direction.Z()])
+                self.assertEqual(entry["params"]["origin"], [adaptor.Plane().Location().X(), adaptor.Plane().Location().Y(),
+                                                             adaptor.Plane().Location().Z()])
+            elif entry["surfaceType"] == "cylinder":
+                self.assertEqual(entry["params"]["radius"], adaptor.Cylinder().Radius())
+            elif entry["surfaceType"] == "torus":
+                self.assertEqual((entry["params"]["majorRadius"], entry["params"]["minorRadius"]),
+                                 (adaptor.Torus().MajorRadius(), adaptor.Torus().MinorRadius()))
+        for entry in self.facts["edges"]:
+            edge = self.edge(entry)
+            props = GProp_GProps()
+            BRepGProp.LinearProperties_s(edge, props)
+            self.assertEqual(entry["length"], props.Mass())
+            if "sweepRadians" in entry:
+                curve = BRepAdaptor_Curve(edge)
+                self.assertEqual(entry["sweepRadians"], abs(curve.LastParameter() - curve.FirstParameter()))
+                self.assertEqual(entry["params"]["radius"], curve.Circle().Radius())
 
-    def test_swept_surfaces_carry_their_axis_or_direction_alone(self) -> None:
-        from OCP.BRepAdaptor import BRepAdaptor_Surface
-
-        checked = 0
-        for entry in self.index["faces"]:
-            payload = entry["surface"]
-            if payload["kind"] == "revolution":
-                axis = BRepAdaptor_Surface(self.face(entry)).AxeOfRevolution()
-                location, direction = axis.Location(), axis.Direction()
-                self.assertEqual(payload, {"kind": "revolution",
-                                           "origin": [location.X(), location.Y(), location.Z()],
-                                           "dir": [direction.X(), direction.Y(), direction.Z()]})
-                checked += 1
-            elif payload["kind"] == "extrusion":
-                direction = BRepAdaptor_Surface(self.face(entry)).Direction()
-                self.assertEqual(payload, {"kind": "extrusion", "dir": [direction.X(), direction.Y(), direction.Z()]})
-                checked += 1
-        self.assertGreater(checked, 0, "fixture has no swept faces")
-
-    def test_b_splines_carry_no_net_and_a_bilinear_patch_its_corners(self) -> None:
-        from OCP.BRep import BRep_Tool
-
-        bilinear = 0
-        for entry in self.index["faces"]:
-            payload = entry["surface"]
-            if payload["kind"] != "nurbs":
-                continue
-            surface = BRep_Tool.Surface_s(self.face(entry))
-            self.assertEqual({key: payload[key] for key in ("degU", "degV", "nu", "nv")},
-                             {"degU": surface.UDegree(), "degV": surface.VDegree(),
-                              "nu": surface.NbUPoles(), "nv": surface.NbVPoles()})
-            self.assertFalse({"knotsU", "knotsV", "weights"} & set(payload), "no knots or weights")
-            if (payload["degU"], payload["degV"], payload["nu"], payload["nv"]) != (1, 1, 2, 2):
-                self.assertNotIn("poles", payload, f"face {entry['ord']} keeps no control net")
-                continue
-            corners = _floats(self.binbuf, payload["poles"])
-            expected = [c for i in (1, 2) for j in (1, 2)
-                        for c in (surface.Pole(i, j).X(), surface.Pole(i, j).Y(), surface.Pole(i, j).Z())]
-            for got, want in zip(corners, expected, strict=True):
-                self.assertAlmostEqual(got, want, places=4)
-            bilinear += 1
-        self.assertEqual(bilinear, 4, "the twisted loft's four ruled sides")
-        self.assertEqual(len(self.binbuf), 4 * 12 * 4, "the float chunk is the bilinear corners alone")
-
-    def test_loops_are_ordered_edge_references(self) -> None:
+    def test_loops_are_ordered_edge_ordinals(self) -> None:
         from OCP.BRepTools import BRepTools_WireExplorer
         from OCP.TopAbs import TopAbs_WIRE
         from OCP.TopExp import TopExp_Explorer
         from OCP.TopoDS import TopoDS
 
-        edges = {edge["ord"]: edge for edge in self.index["edges"]}
-        for entry in self.index["faces"]:
+        edges = {edge["ord"]: edge for edge in self.facts["edges"]}
+        for entry in self.facts["faces"]:
             face = self.face(entry)
             walked = []
             wires = TopExp_Explorer(face, TopAbs_WIRE)
@@ -207,45 +166,76 @@ class SurfaceExtractTest(unittest.TestCase):
                     walker.Next()
                 walked.append(loop)
                 wires.Next()
-            self.assertEqual([[ref["edgeOrd"] for ref in loop] for loop in entry["loops"]], walked)
+            self.assertEqual(entry["loops"], walked)
             for loop in entry["loops"]:
-                for ref in loop:
-                    self.assertEqual(set(ref), {"edgeOrd", "reversed"})
-                    self.assertIn(entry["ord"], edges[ref["edgeOrd"]]["faceOrds"])
+                for ordinal in loop:
+                    self.assertIn(entry["ord"], edges[ordinal]["faceOrds"])
 
-    def test_edge_classes_and_curves(self) -> None:
-        classes = {e["class"] for e in self.index["edges"]}
+    def test_edge_classes(self) -> None:
+        classes = {e["class"] for e in self.facts["edges"]}
         self.assertIn("feature", classes)
         self.assertIn("seam", classes)  # cylinder + torus both have seams
         self.assertIn("tangent", classes)  # fillet blends meet faces G1
-        kinds = set()
-        for entry in self.index["edges"]:
-            curve = entry["curve"]
-            if curve is None:
-                continue
-            kinds.add(curve["kind"])
-            if curve["kind"] == "bspline":
-                self.assertEqual(set(curve), {"kind", "range"}, "a general curve is its kind and range")
-        self.assertLessEqual({"line", "circle", "bspline"}, kinds)
+        self.assertLessEqual({"line", "circle", "bsplinecurve"}, {e["curveType"] for e in self.facts["edges"]})
+        for entry in self.facts["edges"]:
+            self.assertEqual(entry["adjacentFaceCount"], len(entry["faceOrds"]))
+            if entry["class"] == "feature" and entry["continuity"] == "c0":
+                self.assertGreater(entry["dihedralDeg"], 0)
 
-    def test_container_roundtrip_and_the_previous_format_still_reads(self) -> None:
-        from cadgen._internal.surf_container import read_surf
-        from cadgen._internal.surface_extract import SURF_VERSION
-        from cadgen._internal.surf_container import validate_surface_bytes
 
-        index, _ = read_surf(bytes(self.data))
-        self.assertEqual((index["version"], SURF_VERSION), (3, 3))
-        self.assertEqual(validate_surface_bytes(bytes(self.data))["version"], 3)
+class TopologyFactsObjectTest(unittest.TestCase):
+    """The facts as an eager-only component's tree pins them, read without the kernel."""
+
+    def facts(self) -> dict:
+        return {
+            "shapes": [{"ord": 1, "kind": "solid", "volume": 6.0}],
+            "faces": [{"ord": 1, "shape": 1, "surfaceType": "plane", "area": 1.0, "center": [0.5, 0.5, 0.0],
+                       "bbox": [0.0, 0.0, 0.0, 1.0, 1.0, 0.0], "normal": [0.0, 0.0, -1.0],
+                       "params": {"origin": [0.0, 0.0, 0.0], "axis": [0.0, 0.0, 1.0]}, "loops": [[1]]}],
+            "edges": [{"ord": 1, "shape": 1, "class": "feature", "continuity": "c0", "dihedralDeg": 90.0, "flags": 1,
+                       "adjacentFaceCount": 1, "curveType": "circle", "faceOrds": [1], "length": 6.283185307179586,
+                       "center": [0.0, 0.0, 0.0], "bbox": [-1.0, -1.0, 0.0, 1.0, 1.0, 0.0], "sweepRadians": 6.283185307179586}],
+        }
+
+    def test_round_trip_keeps_every_value_and_the_extractors_order(self) -> None:
+        from cadgen._internal.topology_facts import read_topology_facts, topology_facts_bytes
+
+        payload = topology_facts_bytes(self.facts())
+        self.assertEqual(read_topology_facts(payload), self.facts())
+        self.assertEqual(list(json.loads(payload)["faces"][0]["params"]), ["origin", "axis"])
+        self.assertEqual(read_topology_facts(payload)["edges"][0]["sweepRadians"], 2 * math.pi)
+
+    def test_anything_but_whole_ordinal_tables_is_refused(self) -> None:
+        from cadgen._internal.topology_facts import read_topology_facts, topology_facts_bytes
+
+        with self.assertRaisesRegex(ValueError, "invalid topology facts JSON"):
+            read_topology_facts(b"SURF\x03")
+        for broken in (
+            {**self.facts(), "counts": {}},
+            {name: rows for name, rows in self.facts().items() if name != "shapes"},
+            {**self.facts(), "edges": [{**self.facts()["edges"][0], "ord": 2}]},
+            {**self.facts(), "faces": [self.facts()["faces"][0], self.facts()["faces"][0]]},
+            {**self.facts(), "shapes": [["not", "a", "row"]]},
+        ):
+            with self.assertRaisesRegex(ValueError, "invalid topology facts"):
+                read_topology_facts(json.dumps(broken).encode())
+            with self.assertRaisesRegex(ValueError, "invalid topology facts"):
+                topology_facts_bytes(broken)
         with self.assertRaises(ValueError):
-            read_surf(b"GLBX" + bytes(self.data[4:]))
-        # A version-2 surface an older build pinned (an eager-only component's)
-        # still validates: version 3 only removed fields.
-        previous = json.dumps({**index, "version": 2}, separators=(",", ":")).encode()
-        legacy = b"SURF" + struct.pack("<II", 2, len(previous)) + previous
-        self.assertEqual(validate_surface_bytes(legacy)["version"], 2)
-        mixed = b"SURF" + struct.pack("<II", 3, len(previous)) + previous
-        with self.assertRaisesRegex(ValueError, "invalid SURF index"):
-            validate_surface_bytes(mixed)
+            topology_facts_bytes({**self.facts(), "shapes": [{"ord": 1, "kind": "solid", "volume": math.nan}]})
+
+    def test_the_table_takes_the_pinned_object_as_it_takes_the_live_facts(self) -> None:
+        from build123d import Box, Cylinder
+
+        from cadgen._internal.selector_table import build_selector_table, selector_table_bytes
+        from cadgen._internal.surface_extract import extract_topology_facts
+        from cadgen._internal.topology_facts import read_topology_facts, topology_facts_bytes
+
+        shape = (Box(4, 5, 3) - Cylinder(1, 6)).wrapped
+        facts = extract_topology_facts(shape)
+        live = selector_table_bytes(build_selector_table(shape, facts))
+        pinned = selector_table_bytes(build_selector_table(shape, read_topology_facts(topology_facts_bytes(facts))))
+        self.assertEqual(live, pinned)
 
 
 class TightBoundsTest(unittest.TestCase):
@@ -265,12 +255,11 @@ class TightBoundsTest(unittest.TestCase):
         return BRepBuilderAPI_NurbsConvert(solid.wrapped, True).Shape()
 
     def test_nurbs_cylinder_face_bounds_match_the_radius(self) -> None:
-        from cadgen._internal.surf_container import read_surf
-        from cadgen._internal.surface_extract import extract_surface_component
+        from cadgen._internal.surface_extract import extract_topology_facts
 
         radius, height = 7.5, 4.0
-        index, _ = read_surf(bytes(extract_surface_component(self._nurbs_cylinder(radius, height))))
-        lateral = [f for f in index["faces"] if f["surface"]["kind"] == "nurbs" and f["bbox"][5] - f["bbox"][2] > height / 2]
+        facts = extract_topology_facts(self._nurbs_cylinder(radius, height))
+        lateral = [f for f in facts["faces"] if f["surfaceType"] == "bsplinesurface" and f["bbox"][5] - f["bbox"][2] > height / 2]
         self.assertTrue(lateral, "fixture must produce a NURBS lateral face")
         for face in lateral:
             xmin, ymin, _zmin, xmax, ymax, _zmax = face["bbox"]
@@ -279,93 +268,15 @@ class TightBoundsTest(unittest.TestCase):
 
     def test_component_bounds_match_the_radius(self) -> None:
         from cadgen._internal.selector_table import build_selector_table
-        from cadgen._internal.surf_container import read_surf
-        from cadgen._internal.surface_extract import extract_surface_component
+        from cadgen._internal.surface_extract import extract_topology_facts
 
         radius, height = 7.5, 4.0
         shape = self._nurbs_cylinder(radius, height)
-        index, _ = read_surf(bytes(extract_surface_component(shape)))
-        bbox = build_selector_table(shape, index)["bbox"]
+        bbox = build_selector_table(shape, extract_topology_facts(shape))["bbox"]
         self.assertAlmostEqual(bbox["max"][0], radius, places=4)
         self.assertAlmostEqual(bbox["max"][1], radius, places=4)
         self.assertAlmostEqual(bbox["min"][0], -radius, places=4)
         self.assertAlmostEqual(bbox["max"][2], height / 2, places=4)
-
-
-class ClampedUvBoundsTest(unittest.TestCase):
-    """UVBounds_s can return a bound a floating-point hair OUTSIDE the
-    surface's own domain (vendor STEPs: -0.0 vs 0.0, a few 1e-6 past a
-    trimmed span). A face's recorded ``uv`` window is pulled into the domain in each
-    non-periodic direction, so it names parameters the surface has (Waveshare
-    ESP32 driver board regression)."""
-
-    def _bspline_patch(self):
-        # A non-periodic B-spline with the exact domain [0,1]x[0,0.015] from
-        # the reported failure (solid #194 face #101 had V 0.0150 vs 0.0180,
-        # solid #215 face #112 had U -0.0 vs 0.0).
-        from OCP.Geom import Geom_Plane, Geom_RectangularTrimmedSurface
-        from OCP.GeomConvert import GeomConvert
-        from OCP.gp import gp_Pln
-
-        trimmed = Geom_RectangularTrimmedSurface(
-            Geom_Plane(gp_Pln()), 0.0, 1.0, 0.0, 0.015)
-        return GeomConvert.SurfaceToBSplineSurface_s(trimmed)
-
-    def test_hairline_overshoot_is_clamped_and_trims(self) -> None:
-        from unittest import mock
-
-        from OCP.Geom import Geom_RectangularTrimmedSurface
-
-        from cadgen._internal import surface_extract
-
-        surface = self._bspline_patch()
-        raw = (-1e-17, 1.0, 0.0, 0.015 + 5e-6)
-
-        # The raw bounds are exactly what OCCT rejects.
-        with self.assertRaises(Exception):
-            Geom_RectangularTrimmedSurface(surface, *raw)
-
-        fake_tools = mock.Mock()
-        fake_tools.UVBounds_s.return_value = raw
-        with mock.patch.object(surface_extract, "BRepTools", fake_tools):
-            clamped = surface_extract._clamped_uv_bounds(object(), surface)
-
-        self.assertEqual((0.0, 1.0, 0.0, 0.015), clamped)
-        # And the clamped window constructs cleanly.
-        Geom_RectangularTrimmedSurface(surface, *clamped)
-
-    def test_interior_bounds_pass_through_unchanged(self) -> None:
-        from unittest import mock
-
-        from cadgen._internal import surface_extract
-
-        surface = self._bspline_patch()
-        raw = (0.25, 0.75, 0.001, 0.014)
-        fake_tools = mock.Mock()
-        fake_tools.UVBounds_s.return_value = raw
-        with mock.patch.object(surface_extract, "BRepTools", fake_tools):
-            clamped = surface_extract._clamped_uv_bounds(object(), surface)
-        self.assertEqual(raw, clamped)
-
-    def test_periodic_direction_is_left_alone(self) -> None:
-        # A periodic direction wraps: a window past Bounds() is legitimate
-        # there (booleans re-anchor pcurves whole periods away) and must not
-        # be clamped into one span.
-        from unittest import mock
-
-        from OCP.Geom import Geom_CylindricalSurface
-        from OCP.gp import gp_Ax3
-
-        from cadgen._internal import surface_extract
-
-        surface = Geom_CylindricalSurface(gp_Ax3(), 5.0)
-        self.assertTrue(surface.IsUPeriodic())
-        raw = (6.0, 7.0, -3.0, 3.0)  # u window a whole period out
-        fake_tools = mock.Mock()
-        fake_tools.UVBounds_s.return_value = raw
-        with mock.patch.object(surface_extract, "BRepTools", fake_tools):
-            clamped = surface_extract._clamped_uv_bounds(object(), surface)
-        self.assertEqual(raw, clamped)
 
 
 if __name__ == "__main__":

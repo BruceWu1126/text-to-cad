@@ -497,11 +497,10 @@ class _StageTimer:
 # bytes, its intrinsic face colours, and this scheme string; nothing else.
 # Bump it only when the same bytes must map to a different tree (a codec or
 # interpretation change): that re-keys every user's store, so it is rare and
-# deliberate. An extractor, mesher or surface fix bumps the version of that
-# derived artifact (SURF_VERSION, the tessellation scheme, the index payload
-# contracts) and never this string. There is no global cache-schema salt any
-# more; STORE.md "Geometry identity and versions" records the rule and the
-# retired salt's history.
+# deliberate. An extractor, selector-table or mesher fix bumps the version of
+# that derived artifact (cadgen.store.parts.PART_VERSION) and never this
+# string. There is no global cache-schema salt any more; STORE.md "Geometry
+# identity and versions" records the rule and the retired salt's history.
 GEOMETRY_SCHEME = "cadgen-geometry-input-v3"
 GEOMETRY_CODECS = frozenset({"bintools-v4", "bintools-v3", "breptools-ascii-v3"})
 COMPONENT_KINDS = frozenset({"native", "eager-only"})
@@ -534,20 +533,23 @@ def canonical_json_bytes(value: Any) -> bytes:
     return json.dumps(json_value(value), sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
 
 def geometry_component_hash(codec: str, payload: bytes, face_colors: dict, *,
-                   kind: str = "native", eager_surface: str | None = None) -> str:
+                   kind: str = "native", topology: str | None = None) -> str:
+    """The complete geometry-input identity: the scheme, kind, codec, BREP bytes and
+    face colours, and -- an eager-only component's -- the object its topology facts
+    are pinned as (``topology``)."""
     from cadgen.store.objects import is_object_hash
 
     if codec not in GEOMETRY_CODECS or kind not in COMPONENT_KINDS:
         raise ValueError("unsupported geometry codec/kind")
-    if (kind == "eager-only") != is_object_hash(eager_surface):
-        raise ValueError("eager-only geometry must pin its required surface")
+    if (kind == "eager-only") != is_object_hash(topology):
+        raise ValueError("eager-only geometry must pin its topology facts")
     digest = hashlib.sha256()
     digest.update(GEOMETRY_SCHEME.encode() + b"\0" + kind.encode() + b"\0" + codec.encode() + b"\0")
     digest.update(len(payload).to_bytes(8, "big"))
     digest.update(payload)
     digest.update(canonical_json_bytes(face_colors))
-    if eager_surface is not None:
-        digest.update(b"\0" + eager_surface.encode())
+    if topology is not None:
+        digest.update(b"\0" + topology.encode())
     return digest.hexdigest()
 
 def effective_face_colors(shape: Any, colors: Any) -> dict:
@@ -639,9 +641,9 @@ def _ascii_v3_bytes(shape: Any) -> bytes:
 
 class NativeShape:
     """A decoded component as the build pool's kernel work reads it: the bare
-    ``TopoDS_Shape`` and its face colours. Surfaces, selector tables and meshes
-    read only those, and a build123d wrapper would cost a worker that starts
-    for one job most of its start: importing build123d."""
+    ``TopoDS_Shape`` and its face colours. Topology facts, selector tables and
+    meshes read only those, and a build123d wrapper would cost a worker that
+    starts for one job most of its start: importing build123d."""
 
     __slots__ = ("wrapped", "cad_face_ordinal_colors")
 
@@ -707,12 +709,10 @@ def prepare_geometry_component(shape: Any, *, face_colors: object = None) -> dic
     No store write occurs here. Ordinary v4 decoding preserves the existing
     canonical worker semantics; exact native point records fence the known
     parameter-loss cases. Alternate codecs require full original-native bytes
-    and their own byte fixed point. Failure retains an explicit eager surface,
-    never a falsely readable native entry.
+    and their own byte fixed point. Failure pins the live shape's topology
+    facts explicitly (``topology``, the bytes an eager-only component's tree
+    pins), never a falsely readable native entry.
     """
-    from cadgen._internal.surface_extract import extract_surface_component
-    from cadgen._internal.surf_container import validate_surface_bytes
-
     try:
         encoded = _encode_brep(shape)
         kind = "native"
@@ -728,18 +728,22 @@ def prepare_geometry_component(shape: Any, *, face_colors: object = None) -> dic
     payload = encoded["bytes"]
     entry = {"kind": kind, "codec": encoded["codec"],
              "brep": hashlib.sha256(payload).hexdigest(), "faceColors": colors}
-    surface = None
+    topology = None
     if kind == "eager-only":
         from OCP.TopLoc import TopLoc_Location
-        surface = extract_surface_component(getattr(shape, "wrapped", shape).Located(TopLoc_Location()), face_colors=colors)
-        validate_surface_bytes(surface)
-        entry["eagerSurface"] = hashlib.sha256(surface).hexdigest()
+
+        from cadgen._internal.surface_extract import extract_topology_facts
+        from cadgen._internal.topology_facts import topology_facts_bytes
+
+        topology = topology_facts_bytes(
+            extract_topology_facts(getattr(shape, "wrapped", shape).Located(TopLoc_Location())))
+        entry["topology"] = hashlib.sha256(topology).hexdigest()
     entry["contentHash"] = geometry_component_hash(
-        entry["codec"], payload, colors, kind=kind, eager_surface=entry.get("eagerSurface"),
+        entry["codec"], payload, colors, kind=kind, topology=entry.get("topology"),
     )
     if private is not None:
         private.cad_face_ordinal_colors = dict(colors)
-    return {"entry": entry, "payload": payload, "shape": private, "surface": surface}
+    return {"entry": entry, "payload": payload, "shape": private, "topology": topology}
 
 
 def prepare_published_component(shape: Any, *, face_colors: object = None) -> dict[str, Any]:
@@ -776,7 +780,7 @@ def prepare_published_component(shape: Any, *, face_colors: object = None) -> di
         if published and canonical_json_bytes(published) == canonical_json_bytes(entry):
             prototype = _build123d_shape_from_topods(wrapped)
             prototype.cad_face_ordinal_colors = dict(colors)
-            return {"entry": entry, "payload": payload, "shape": prototype, "surface": None}
+            return {"entry": entry, "payload": payload, "shape": prototype, "topology": None}
     return prepare_geometry_component(shape, face_colors=face_colors)
 
 
@@ -808,7 +812,7 @@ def decode_display_shape(entry: dict[str, Any], payload: bytes, *, native: bool 
     A native component is :func:`decode_geometry_component`. An eager-only
     component's bytes failed the exact round-trip fence, so they never stand in
     for its geometry -- but they decode, with the same topology and ordinals as
-    the eager surface taken from the live shape, and a display mesh tolerates
+    the topology facts taken from the live shape, and a display mesh tolerates
     the known point-parameter loss the fence exists for.
     """
     if entry["kind"] != "eager-only":
@@ -828,7 +832,7 @@ def validate_geometry_component(entry: Any, payload: bytes, *, cid: str | None =
         raise ValueError("unsupported geometry component")
     allowed = {"kind", "codec", "brep", "faceColors", "contentHash", "color"}
     if entry["kind"] == "eager-only":
-        allowed.add("eagerSurface")
+        allowed.add("topology")
     if set(entry) - allowed:
         raise ValueError("unknown geometry component field")
     if not isinstance(payload, bytes) or not payload.startswith(_BREP_HEADERS[entry["codec"]]):
@@ -839,6 +843,6 @@ def validate_geometry_component(entry: Any, payload: bytes, *, cid: str | None =
     if canonical_json_bytes(colors) != canonical_json_bytes(entry.get("faceColors")):
         raise ValueError("noncanonical intrinsic appearance recipe")
     full = geometry_component_hash(entry["codec"], payload, colors, kind=entry["kind"],
-                                   eager_surface=entry.get("eagerSurface"))
+                                   topology=entry.get("topology"))
     if entry.get("contentHash") != full or (cid is not None and cid != full[:16]):
         raise ValueError("geometry input identity mismatch")

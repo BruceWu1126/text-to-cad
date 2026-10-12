@@ -33,11 +33,10 @@ PART = "1" * 64 + "-v1"
 IDENTITY = [1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0]
 
 
-def _surf_index(topods) -> dict:
-    from cadgen._internal.surf_container import read_surf
-    from cadgen._internal.surface_extract import extract_surface_component
+def _facts(topods) -> dict:
+    from cadgen._internal.surface_extract import extract_topology_facts
 
-    return read_surf(extract_surface_component(topods))[0]
+    return extract_topology_facts(topods)
 
 
 def _mesh(shape, *, chord=CHORD, angle=ANGLE, table=None):
@@ -48,7 +47,7 @@ def _mesh(shape, *, chord=CHORD, angle=ANGLE, table=None):
     from cadgen._internal.selector_table import build_selector_table
 
     topods = getattr(shape, "wrapped", shape)
-    table = build_selector_table(topods, _surf_index(topods)) if table is None else table
+    table = build_selector_table(topods, _facts(topods)) if table is None else table
     body = mesh_component(topods, table, {}, part=PART, chord=chord, angle=angle)
     return body, decode_tessellation(body)
 
@@ -191,7 +190,7 @@ class EmptyFace(unittest.TestCase):
         from OCP.TopTools import TopTools_IndexedMapOfShape
 
         self.topods = (Box(20, 20, 10) - Cylinder(4, 10)).wrapped
-        self.bore = next(row["ord"] for row in _surf_index(self.topods)["faces"] if row["surfaceType"] == "cylinder")
+        self.bore = next(row["ord"] for row in _facts(self.topods)["faces"] if row["surfaceType"] == "cylinder")
         self.faces = TopTools_IndexedMapOfShape()
         TopExp.MapShapes_s(self.topods, TopAbs_FACE, self.faces)
 
@@ -263,7 +262,7 @@ class EmptyFace(unittest.TestCase):
         from cadgen.store.meshes import decode_payload
 
         deflection = CHORD * _bounding_diagonal(self.topods)
-        table = build_selector_table(self.topods, _surf_index(self.topods))
+        table = build_selector_table(self.topods, _facts(self.topods))
         columns = table["tables"]["faceColumns"]
         for row in table["faces"]:
             if row[columns.index("ordinal")] == self.bore:

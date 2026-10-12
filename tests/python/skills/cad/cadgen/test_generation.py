@@ -45,8 +45,8 @@ class CadGenerationTests(unittest.TestCase):
 
         prepared = prepare_geometry_component(Solid.make_box(1, 1, 1))
         put_object(prepared["payload"])
-        if prepared["surface"] is not None:
-            put_object(prepared["surface"])
+        if prepared["topology"] is not None:
+            put_object(prepared["topology"])
         entry = prepared["entry"]
         cid = entry["contentHash"][:16]
         tree = {

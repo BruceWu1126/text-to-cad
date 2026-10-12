@@ -2,8 +2,8 @@
 
 Tiny generated BREPs, built here: a box (every edge and face alone), a box with
 its vertical edges filleted (tangent groups), and an extruded slot (a chain of
-lines and arcs). The table is derived from the exact BREP and its SURF index, so
-each expectation is a fact of the shape, not of a tessellation.
+lines and arcs). The table is derived from the exact BREP and its topology
+facts, so each expectation is a fact of the shape, not of a tessellation.
 """
 
 from __future__ import annotations
@@ -25,14 +25,12 @@ from cadgen._internal.selector_table import (  # noqa: E402
     read_selector_table,
     selector_table_bytes,
 )
-from cadgen._internal.surf_container import read_surf  # noqa: E402
-from cadgen._internal.surface_extract import extract_surface_component  # noqa: E402
+from cadgen._internal.surface_extract import extract_topology_facts  # noqa: E402
 
 
 def _table(part):
     shape = part.wrapped
-    index, _ = read_surf(extract_surface_component(shape))
-    return build_selector_table(shape, index)
+    return build_selector_table(shape, extract_topology_facts(shape))
 
 
 def _rows(table, name):
@@ -158,7 +156,7 @@ class SlotChainTest(unittest.TestCase):
         verticals = [row for row in edges if row["curveType"] == "line" and abs(row["bbox"]["max"][2] - row["bbox"]["min"][2]) > 4]
         self.assertEqual(len(verticals), 4)
         self.assertTrue(all(len(by_chain[row["chain"]]) == 1 for row in verticals))
-        # A circular edge's params carry its sweep, so a reader need not re-derive it from the SURF.
+        # A circular edge's params carry its sweep, so no reader re-derives it from the curve.
         for row in edges:
             if row["curveType"] == "circle":
                 self.assertAlmostEqual(row["params"]["sweepRadians"], 3.141592653589793, places=6)

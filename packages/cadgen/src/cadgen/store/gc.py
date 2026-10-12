@@ -88,7 +88,7 @@ _UNITS = {"": 1, "k": 1024, "m": 1024**2, "g": 1024**3, "t": 1024**4}
 # What each derived kind names in objects/. A retired kind's entries are read
 # for any top-level object pointer: their readers are gone with their schema.
 _NAMED_FIELDS = {
-    "component": ("brep", "eagerSurface"),
+    "component": ("brep", "topology"),
     "drawing": ("object",),
     "skin": ("object",),
     # A robot entry names its payload and the primitive meshes the payload draws.
@@ -401,7 +401,7 @@ def protected_objects(found: Scan, *, should_stop: Callable[[], bool] = lambda: 
         marked.add(digest)
         for component in tree["components"].values():
             if isinstance(component, dict):
-                marked.update(component.get(name) for name in ("brep", "eagerSurface")
+                marked.update(component.get(name) for name in ("brep", "topology")
                               if component.get(name) in found.objects)
         pending.extend(link["tree"] for link in tree["links"])
     return marked

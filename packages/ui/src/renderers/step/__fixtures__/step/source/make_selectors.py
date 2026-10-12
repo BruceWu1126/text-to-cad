@@ -3,10 +3,10 @@
 The harness serves these as cadgen's part store does (each part record's
 ``selectors``, read at ``/__tess_cache/<part>.selectors.json``): one table per component, as
 ``cadgen._internal.selector_table`` builds it from the part's exact BREP and
-its SURF. The two parts are rebuilt here from ``hinge_block.py``'s shapes; a
-part whose edges a newer build orders differently is written in the committed
-``.surf``'s ordinals, matched as ``make_meshes.py`` matches them, so every id
-the tests use holds and the tables name the committed meshes' edges.
+its topology facts. The two parts are rebuilt here from ``hinge_block.py``'s
+shapes; a part whose edges a newer build orders differently is written in the
+committed table's ordinals, matched as ``make_meshes.py`` matches them, so every
+id the tests use holds and the tables name the committed meshes' edges.
 
 Run from the repository root with the repo's Python, after ``make_meshes.py``
 when the parts are rebuilt, or whenever the table's schema or scheme moves:
@@ -58,19 +58,18 @@ def _remap_edges(table: dict, mapping: dict[int, int]) -> dict:
 def main() -> None:
     from cadgen._internal.component_package import decode_display_shape, prepare_geometry_component
     from cadgen._internal.selector_table import build_selector_table, read_selector_table, selector_table_bytes
-    from cadgen._internal.surf_container import read_surf
-    from cadgen._internal.surface_extract import extract_surface_component
+    from cadgen._internal.surface_extract import extract_topology_facts
 
-    from make_meshes import _match, shapes
+    from make_meshes import _match, committed_rows, shapes
 
     view = json.loads((FIXTURE / "assembly.json").read_text(encoding="utf-8"))
     names = {occurrence["component"]: occurrence["name"] for occurrence in view["occurrences"]}
     built = shapes()
     for cid in view["components"]:
-        committed, _ = read_surf((FIXTURE / "components" / f"{cid}.surf").read_bytes())
+        committed = committed_rows(cid)
         prepared = prepare_geometry_component(built[names[cid]])
         live = decode_display_shape(prepared["entry"], prepared["payload"])
-        fresh, _ = read_surf(extract_surface_component(live.wrapped))
+        fresh = extract_topology_facts(live.wrapped)
         faces = _match(committed["faces"], fresh["faces"], "area")
         if any(fresh_ord != ordinal for fresh_ord, ordinal in faces.items()):
             raise SystemExit(f"{cid}: face order changed; this generator only re-maps edges")

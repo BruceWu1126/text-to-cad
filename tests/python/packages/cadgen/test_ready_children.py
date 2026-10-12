@@ -76,7 +76,7 @@ class ReadyChildren(unittest.TestCase):
         self.addCleanup(self.leave_execution)
         self.stats = dict(scopes=0, attempts=0, prepared=0, consumed=0, failed=0,
                           discarded=0, revalidationFallbacks=0, maxPreparedCount=0,
-                          maxPreparedBrepBytes=0, maxPreparedSurfBytes=0)
+                          maxPreparedBrepBytes=0, maxPreparedTopologyBytes=0)
         self.constructions = []
         original_construction = candidate._Construction
         original_budget = candidate._budget
@@ -110,7 +110,7 @@ class ReadyChildren(unittest.TestCase):
             if value is not None:
                 for key, observed in (('maxPreparedCount', len(value.prepared)),
                                       ('maxPreparedBrepBytes', value.brep_bytes),
-                                      ('maxPreparedSurfBytes', value.surf_bytes)):
+                                      ('maxPreparedTopologyBytes', value.topology_bytes)):
                     self.stats[key] = max(self.stats[key], observed)
 
         def take(owner, tree, label):

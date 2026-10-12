@@ -199,7 +199,6 @@ class TreeReflectsWrittenStep(unittest.TestCase):
         from cadgen.store import parts
         from cadgen.store.objects import object_path
         from cadgen.store.trees import capture_tree
-        from cadgen._internal.surf_container import read_surf
 
         with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.store)}):
             descriptor = result_descriptor_for(step_path)
@@ -215,11 +214,11 @@ class TreeReflectsWrittenStep(unittest.TestCase):
 
             result = json.loads(object_path(read_record(self.project / "rig.py")["tree"]).read_text(encoding="utf-8"))
             self.assertEqual({link["name"] for link in result["links"]}, {"pin_left", "pin_right"})
-            # The vendor part's face colours came back through the document: the SURF its
-            # part's derivation extracts carries them.
+            # The vendor part's face colours came back through the document: the effective
+            # recipe its part's derivation meshes with carries them, by face ordinal.
             vendor = capture_tree(descriptor["tree"], retain_payloads=False)[0]["components"][by_name["vendor"]["component"]]
-            index, _ = read_surf(parts._surface(vendor, *parts._decoded(vendor)))
-            coloured = {tuple(round(c, 3) for c in face["color"][:3]) for face in index["faces"] if face.get("color")}
+            _topods, colours = parts._decoded(vendor)
+            coloured = {tuple(round(c, 3) for c in colour[:3]) for colour in colours.values()}
             self.assertEqual(coloured, {(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)})
 
 

@@ -60,7 +60,7 @@ class _Pin:
         self.components = components
         self.paths: dict[str, tuple[str, ...]] = {}
         for cid, entry in components.items():
-            self.paths[cid] = tuple(str(object_path(entry[field])) for field in ("brep", "eagerSurface")
+            self.paths[cid] = tuple(str(object_path(entry[field])) for field in ("brep", "topology")
                                     if entry.get(field))
         self.tree_path = str(object_path(tree))
 

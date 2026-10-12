@@ -34,10 +34,11 @@ def materialize_snapshot(descriptor, captured):
     return materialize_descriptor(descriptor, shapes=shapes)
 
 
-def surface_of(digest, cid):
-    """The SURF a part's derivation extracts for ``cid`` (``parts._surface``): in memory, stored nowhere."""
+def facts_of(digest, cid):
+    """The topology facts a part's derivation takes for ``cid`` (``parts._topology``): extracted
+    in memory and stored nowhere, or an eager-only component's pinned object."""
     entry = capture_tree(digest, retain_payloads=False)[0]["components"][cid]
-    return parts._surface(entry, *((None, {}) if entry["kind"] == "eager-only" else parts._decoded(entry)))
+    return parts._topology(entry, None if entry["kind"] == "eager-only" else parts._decoded(entry)[0])
 
 
 def part_objects(records):
@@ -49,8 +50,8 @@ def store_component(shape, _unused=None, meta=None):
     prepared = cp.prepare_geometry_component(shape)
     entry = prepared["entry"]
     put_object(prepared["payload"], repair=True)
-    if prepared["surface"] is not None:
-        put_object(prepared["surface"], repair=True)
+    if prepared["topology"] is not None:
+        put_object(prepared["topology"], repair=True)
     return entry["contentHash"][:16], entry
 
 
@@ -97,10 +98,10 @@ class GeometryInputs(unittest.TestCase):
         export_build123d_step_file(shape,path)
         return path.read_bytes()
 
-    def test_geometry_and_native_read_do_not_extract_surfaces(self):
+    def test_geometry_and_native_read_extract_nothing(self):
         from cadgen._internal import surface_extract
         scene=self.scene(nested=True)
-        with mock.patch.object(surface_extract, 'extract_surface_component', side_effect=AssertionError('SURF forbidden')):
+        with mock.patch.object(surface_extract, 'extract_topology_facts', side_effect=AssertionError('extraction forbidden')):
             digest, tree=publish_document(scene)
             self.assertTrue(all(c['kind']=='native' for c in tree['components'].values()))
             shape=materialize(digest)
@@ -116,7 +117,7 @@ class GeometryInputs(unittest.TestCase):
         expected=parts.derive(digest)
         for result in part_objects(expected): object_path(result).unlink()
         shutil.rmtree(self.root/'store/index/part')
-        with mock.patch.object(surface_extract,'extract_surface_component',side_effect=AssertionError('SURF forbidden')), \
+        with mock.patch.object(surface_extract,'extract_topology_facts',side_effect=AssertionError('extraction forbidden')), \
              mock.patch.object(occt_mesh,'mesh_component',side_effect=AssertionError('mesh forbidden')):
             self.assertGreater(materialize(digest).volume,0)
         self.assertEqual(parts.derive(digest),expected)
@@ -185,7 +186,7 @@ class GeometryInputs(unittest.TestCase):
     def test_extraction_failure_never_publishes_a_part(self):
         from cadgen._internal import surface_extract
         digest,tree=publish_document(self.scene())
-        with mock.patch.object(surface_extract,'extract_surface_component',side_effect=ValueError('injected extraction failure')):
+        with mock.patch.object(surface_extract,'extract_topology_facts',side_effect=ValueError('injected extraction failure')):
             with self.assertRaisesRegex(ValueError,'injected'):parts.derive(digest)
         self.assertFalse(any((self.root/'store/index/part').glob('*')))
         self.assertGreater(materialize(digest).volume,0)
@@ -200,7 +201,7 @@ class GeometryInputs(unittest.TestCase):
     def test_a_surface_producer_is_the_kernel_alone(self):
         producer = parts.producer_identity()
         self.assertEqual(set(producer), {"build123d", "ocp", "cadqueryOcp"})
-        # An older cadgen's hint also named its extraction scheme and SURF format.
+        # An older cadgen's hint also named its extraction scheme and format.
         for malformed in ({**producer, "scheme": 20, "surfFormat": 3}, {"build123d": producer["build123d"]}):
             with self.assertRaisesRegex(ValueError, "unsupported surface producer"):
                 parts.producer_key(malformed)
@@ -338,7 +339,7 @@ class GeometryInputs(unittest.TestCase):
 
     def test_actual_binary_throw_and_silent_loss_use_faithful_v3_artifacts(self):
         from cadgen._internal.component_package import _shape_brep_bytes
-        from cadgen._internal.surface_extract import extract_surface_component
+        from cadgen._internal.surface_extract import extract_topology_facts
         from cadgen._internal.component_package import _binary_v3_bytes as binary_v3_bytes
         for parameter in (1e-295,1e-300):
             with self.subTest(parameter=parameter):
@@ -350,15 +351,15 @@ class GeometryInputs(unittest.TestCase):
                 decoded=cp._decode_brep(entry['codec'],read_verified_object(entry['brep']))
                 self.assertEqual(_shape_brep_bytes(decoded),native_before)
                 self.assertEqual(binary_v3_bytes(decoded),read_verified_object(entry['brep']))
-                expected=extract_surface_component(original.wrapped,face_colors=original.cad_face_ordinal_colors)
-                self.assertEqual(surface_of(digest,cid),expected)
+                expected=extract_topology_facts(original.wrapped)
+                self.assertEqual(facts_of(digest,cid),expected)
                 output=materialize(digest)
                 self.assertEqual(_shape_brep_bytes(output),native_before)
                 output.cad_face_ordinal_colors[1]=(0.,0.,0.,1.)
                 self.assertEqual(_shape_brep_bytes(original),native_before)
                 self.assertEqual(materialize(digest).cad_face_ordinal_colors[1],original.cad_face_ordinal_colors[1])
 
-    def test_explicit_eager_surface_is_required_and_never_lazily_extracted(self):
+    def test_explicit_eager_topology_is_required_and_never_lazily_extracted(self):
         from build123d import Solid
         from cadgen._internal import component_package as _geometry_codec
         from cadgen._internal import surface_extract
@@ -366,11 +367,12 @@ class GeometryInputs(unittest.TestCase):
         with mock.patch.object(_geometry_codec,'_encode_brep',side_effect=_geometry_codec.CodecFidelityError('unsupported native fidelity')):
             digest,tree,cid,entry=self.component_tree(shape)
         self.assertEqual(entry['kind'],'eager-only')
-        required=read_verified_object(entry['eagerSurface'])
-        with mock.patch.object(surface_extract,'extract_surface_component',side_effect=AssertionError('live fallback forbidden')):
+        from cadgen._internal.topology_facts import read_topology_facts
+        required=read_verified_object(entry['topology'])
+        with mock.patch.object(surface_extract,'extract_topology_facts',side_effect=AssertionError('live fallback forbidden')):
             first=parts.derive(digest)
-            self.assertEqual(surface_of(digest,cid),required)
-        object_path(entry['eagerSurface']).unlink()
+            self.assertEqual(facts_of(digest,cid),read_topology_facts(required))
+        object_path(entry['topology']).unlink()
         with self.assertRaises(FileNotFoundError):capture_tree(digest)
         with self.assertRaises(FileNotFoundError):parts.derive(digest)
         put_object(required,repair=True)
@@ -404,7 +406,7 @@ class GeometryInputs(unittest.TestCase):
         from OCP.gp import gp_Pnt,gp_Dir
         from cadgen._internal.component_package import _ascii_v3_bytes as ascii_v3_bytes
         from cadgen._internal.component_package import _shape_brep_bytes
-        from cadgen._internal.surface_extract import extract_surface_component
+        from cadgen._internal.surface_extract import extract_topology_facts
         shape=self.point_box(.125)
         mapping=TopTools_IndexedMapOfShape();TopExp.MapShapes_s(shape.wrapped,TopAbs_VERTEX,mapping)
         vertex=next(TopoDS.Vertex_s(mapping.FindKey(i)) for i in range(1,mapping.Extent()+1)
@@ -420,8 +422,8 @@ class GeometryInputs(unittest.TestCase):
         decoded=cp._decode_brep(entry['codec'],payload)
         self.assertEqual(_shape_brep_bytes(decoded),original)
         self.assertEqual(ascii_v3_bytes(decoded),payload)
-        self.assertEqual(surface_of(digest,cid),
-                         extract_surface_component(shape.wrapped,face_colors=shape.cad_face_ordinal_colors))
+        self.assertEqual(facts_of(digest,cid),
+                         extract_topology_facts(shape.wrapped))
         self.assertEqual(_shape_brep_bytes(materialize(digest)),original)
         for wrong in ('bintools-v4','bintools-v3'):
             with self.assertRaisesRegex(ValueError,'declared codec'):cp._decode_brep(wrong,payload)
@@ -434,10 +436,10 @@ class GeometryInputs(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'duplicate canonical JSON key'):
             cp.canonical_json_bytes({1:'a','1':'b'})
 
-    def test_normal_surface_bytes_match_existing_extractor(self):
+    def test_native_facts_are_the_extractors(self):
         from build123d import Box, Cylinder, Solid
         from OCP.BRepBuilderAPI import BRepBuilderAPI_NurbsConvert
-        from cadgen._internal.surface_extract import extract_surface_component
+        from cadgen._internal.surface_extract import extract_topology_facts
         for shape in (Box(2, 3, 4), Box(4, 5, 3) - Cylinder(1, 6),
                       Solid(BRepBuilderAPI_NurbsConvert(Cylinder(2, 4).wrapped, True).Shape())):
             shape.cad_face_ordinal_colors = {1: (.2, .3, .4, 1.)}
@@ -445,8 +447,8 @@ class GeometryInputs(unittest.TestCase):
             payload = read_verified_object(entry["brep"])
             self.assertEqual(payload, cp._shape_brep_bytes(shape))
             private = cp._build123d_shape_from_brep_bytes(payload)
-            expected = extract_surface_component(private.wrapped, face_colors=shape.cad_face_ordinal_colors)
-            self.assertEqual(surface_of(digest, cid), expected)
+            expected = extract_topology_facts(private.wrapped)
+            self.assertEqual(facts_of(digest, cid), expected)
 
     def test_geometry_gc_retains_partial_closure_and_surface_is_independent(self):
         from build123d import Box, Cylinder, Compound, Location
@@ -500,7 +502,8 @@ class GeometryInputs(unittest.TestCase):
         from cadgen.store._descriptor_bounds import Snapshot
         shape = Solid.make_box(2, 3, 4)
         digest, source, cid, entry = self.component_tree(shape)
-        surface = put_object(surface_of(digest, cid))
+        from cadgen._internal.topology_facts import topology_facts_bytes
+        surface = put_object(topology_facts_bytes(facts_of(digest, cid)))
         for mode in ("absent-face", "eager-only"):
             with self.subTest(mode=mode):
                 tree = copy.deepcopy(source)
@@ -509,12 +512,12 @@ class GeometryInputs(unittest.TestCase):
                     variant["faceColors"] = {999: (1., 0., 0., 1.)}
                     error = ValueError
                 else:
-                    variant.update(kind="eager-only", eagerSurface=surface)
+                    variant.update(kind="eager-only", topology=surface)
                     error = cp.NativeUnavailable
                 payload = read_verified_object(entry["brep"])
                 variant["contentHash"] = cp.geometry_component_hash(
                     variant["codec"], payload, variant["faceColors"], kind=variant["kind"],
-                    eager_surface=variant.get("eagerSurface"),
+                    topology=variant.get("topology"),
                 )
                 other = variant["contentHash"][:16]
                 tree["components"][other] = variant
