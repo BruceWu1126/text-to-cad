@@ -12,10 +12,9 @@ derived from the leaf ids on that basis rather than read out of ``assembly.json`
 which keeps it in step with how the runtime resolves a group instead of introducing
 another opinion about what the tree contains.
 
-This module exists because there were about to be two copies of that opinion --
-``snapshot``'s and ``step inspect``'s -- and the interesting part is the near-miss
-hint, which is exactly the kind of text that drifts unnoticed between two
-implementations until the two commands disagree about what a document contains.
+Every command that accepts a group ref reads this one copy of that opinion, near-miss
+hint included: that hint is exactly the kind of text that drifts unnoticed between two
+implementations until two commands disagree about what a document contains.
 """
 
 from __future__ import annotations

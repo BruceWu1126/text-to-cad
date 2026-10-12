@@ -171,35 +171,6 @@ def _format_usage(noun: str) -> str:
     )
 
 
-# Law 8: every retired surface fails loudly with a teaching error naming its
-# replacement -- never an alias, never a shim. Matched on the leading words of argv;
-# `step inspect` keeps its own module (it is also reachable as `python -m`).
-_RETIRED: dict[tuple[str, ...], str] = {
-    ("gen",): (
-        "cadgen gen has been removed: generation has no CLI. A model script is a program "
-        "-- run it: python <model>.py (it gates, builds, and writes the STEP/DXF, the "
-        "sidecar and every declared mesh). Per-run flags ride the script's argv: "
-        "--force, --json, --verbose, --profile."
-    ),
-    ("step", "export"): (
-        "cadgen step export has been removed: each mesh format is its own door. Use "
-        "cadgen stl build IN.step [OUT.stl], cadgen 3mf build IN.step [OUT.3mf] or "
-        "cadgen glb build IN.step [OUT.glb]; to write a new STEP document use "
-        "cadgen step build IN.step OUT.step. A model's maintained meshes are declared "
-        "with @stl/@threemf/@glb and written by python <model>.py."
-    ),
-    ("analytics",): (
-        "cadgen analytics has been renamed: use cadgen telemetry status|on|off. DO_NOT_TRACK=1 or "
-        "CADGEN_TELEMETRY=0 in an app's environment turns it off there."
-    ),
-    ("srdf", "snapshot"): (
-        "cadgen srdf snapshot does not exist: an SRDF's geometry comes from the URDF "
-        "beside it, so it has no snapshot door of its own. Use cadgen snapshot "
-        "<file>.srdf [OUT.png], which routes it by suffix."
-    ),
-}
-
-
 def _harden_std_stream_errors() -> None:
     """Make an unencodable character survive as an escape instead of killing the write.
 
@@ -283,15 +254,6 @@ def _main(argv: list[str] | None) -> int:
 
         sys.stdout.write(f"cadgen {__version__}\n")
         return 0
-
-    if argv[:2] == ["step", "inspect"]:
-        from cadgen.cli.step_inspect.cli import main as retired_inspect
-
-        return retired_inspect(argv[2:])
-    for words, message in _RETIRED.items():
-        if tuple(argv[: len(words)]) == words:
-            sys.stderr.write(message + "\n")
-            return 2
 
     # Longest match first, so `step build` beats a hypothetical `step`.
     command, rest = " ".join(argv[:2]), argv[2:]
