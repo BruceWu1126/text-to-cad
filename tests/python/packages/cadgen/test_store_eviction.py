@@ -23,6 +23,7 @@ add_repo_path("packages/cadgen/src")
 
 HOUR = 3600.0
 DAY = 24 * HOUR
+WEEK = 7 * DAY
 
 
 class StoreSweepCase(unittest.TestCase):
@@ -78,8 +79,8 @@ class StoreSweepCase(unittest.TestCase):
         self.old(folder / key, age)
         return folder / key
 
-    def op_entry(self, key: str, payload: dict, age: float = 3 * HOUR) -> None:
-        """An entry of the operation cache cadgen 0.7.4 and earlier wrote."""
+    def op_entry(self, key: str, payload: dict, age: float = WEEK + 3 * HOUR) -> None:
+        """An entry of the operation cache cadgen 0.7.4 and earlier wrote, long ago."""
         self.raw_entry("op", key, payload, age)
 
     def snapshot(self) -> dict[str, tuple[int, int]]:
@@ -566,7 +567,7 @@ class RetiredDisplayData(StoreSweepCase):
             "surface", "selector table", "mesh", "older part's mesh", "older part's table",
             "newer part's mesh", "newer part's table")}
         for kind, name in (("surface", "surface"), ("selector", "selector table"), ("mesh", "mesh")):
-            self.raw_entry(kind, "1" * 64, {"schemaVersion": 1, "object": objects[name]}, age=HOUR * 3)
+            self.raw_entry(kind, "1" * 64, {"schemaVersion": 1, "object": objects[name]}, age=WEEK + HOUR)
         self.part_entry(PART_VERSION - 1, "1", (objects["older part's mesh"], objects["older part's table"]))
         self.part_entry(PART_VERSION + 1, "2", (objects["newer part's mesh"], objects["newer part's table"]))
         return objects
@@ -619,6 +620,51 @@ class RetiredDisplayData(StoreSweepCase):
             self.old(path, old)
         self.assertEqual(gc.collect(retired_only=True).obsolete, {"part": 1}, "a week later it goes")
         self.assertFalse(any(has_object(digest) for digest in objects.values()))
+        self.assertTrue(has_object(tree) and has_object(brep))
+
+    def test_a_retired_kind_goes_a_week_after_its_last_write(self) -> None:
+        """The release before parts still reads index/surface, index/selector and
+        index/mesh: a pass keeps what it wrote in the last week, with the objects
+        it names, so a cadgen of that release sharing the store derives each again
+        at most once a week; once a week old it goes like an obsolete part."""
+        from cadgen.store import gc
+        from cadgen.store.objects import has_object
+
+        tree, brep = self.seed_document()
+        kinds = ("surface", "selector", "mesh")
+        young = {kind: self.old_object(f"young {kind}".encode()) for kind in kinds}
+        aged = {kind: self.old_object(f"aged {kind}".encode(), age=WEEK + HOUR) for kind in kinds}
+        for kind in kinds:
+            self.raw_entry(kind, "1" * 64, {"schemaVersion": 1, "object": young[kind]}, age=3 * HOUR)
+            self.raw_entry(kind, "2" * 64, {"schemaVersion": 1, "object": aged[kind]}, age=WEEK + HOUR)
+
+        # A full pass -- what `cadgen store gc` runs -- holds to the same week as the daemon's.
+        report = gc.collect()
+        self.assertEqual(report.retired, {kind: 1 for kind in kinds})
+        self.assertTrue(all(has_object(digest) for digest in young.values()), "a young entry keeps its objects")
+        self.assertFalse(any(has_object(digest) for digest in aged.values()))
+        self.assertTrue(all((self.store / "index" / kind / ("1" * 64)).is_file() for kind in kinds))
+        self.assertTrue(has_object(tree) and has_object(brep))
+
+        for kind in kinds:
+            self.old(self.store / "index" / kind / ("1" * 64), WEEK + HOUR)
+        self.assertEqual(gc.collect(retired_only=True).retired, {kind: 1 for kind in kinds}, "a week later it goes")
+        self.assertFalse(any(has_object(digest) for digest in young.values()))
+        self.assertFalse(any((self.store / "index" / kind).exists() for kind in kinds))
+        self.assertTrue(has_object(tree) and has_object(brep))
+
+    def test_under_a_cap_a_young_retired_entry_is_evicted_like_a_derived_one(self) -> None:
+        from cadgen.store import gc
+        from cadgen.store.objects import has_object
+
+        tree, brep = self.seed_document()
+        mesh = self.old_object(b"m" * 5000, age=5 * HOUR)
+        self.raw_entry("mesh", "1" * 64, {"schemaVersion": 1, "object": mesh}, age=5 * HOUR)
+        report = gc.collect(max_bytes=4000)
+        self.assertEqual(report.evicted, {"mesh": 1})
+        self.assertEqual(report.retired, {})
+        self.assertFalse(has_object(mesh))
+        self.assertFalse((self.store / "index" / "mesh" / ("1" * 64)).exists())
         self.assertTrue(has_object(tree) and has_object(brep))
 
     def test_an_obsolete_part_written_again_during_the_pass_stays(self) -> None:

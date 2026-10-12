@@ -1035,10 +1035,12 @@ class StoreCli(StoreCase):
         old = time.time() - 7200
         for path in (object_path(cached), entry_path("drawing", "d" * 64)):
             os.utime(path, (old, old))
+        week_old = time.time() - 8 * 24 * 3600  # a retired kind's entry goes a week after its last write
+        os.utime(retired / ("e" * 64), (week_old, week_old))
 
         code, out = self.run_cli(["gc", "--dry-run", "--max-size", "1"])
         self.assertEqual(code, 0)
-        self.assertIn("index/op is retired: would remove 1 entries", out)
+        self.assertIn("index/op is retired: would remove 1 entries a week old", out)
         self.assertIn("would evict 1 drawing", out)
         self.assertTrue(has_object(cached) and (retired / ("e" * 64)).is_file(), "a dry run deletes nothing")
         code, out = self.run_cli(["info", "--json"])

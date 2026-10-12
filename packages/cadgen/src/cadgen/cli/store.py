@@ -103,7 +103,8 @@ def _cmd_info(as_json: bool) -> int:
     for kind, count in payload["index"].items():
         print(f"index/{kind:<10} {count} {labels[kind]}")
     for kind, count in payload["retired"].items():
-        print(f"index/{kind:<10} {count} entries of a kind this cadgen retired; the daemon removes them when idle, or `cadgen store gc`")
+        print(f"index/{kind:<10} {count} entries of a kind this cadgen retired; each goes a week after its last write "
+              "(the daemon when idle, or `cadgen store gc`)")
     for kind in payload["unknown"]:
         print(f"index/{kind:<10} a folder this cadgen does not know; it never touches it")
     if deferred:
@@ -243,7 +244,7 @@ def _cmd_gc(dry_run: bool, grace_hours: float, max_size: str | None, as_json: bo
         return 0
     verb = "would remove" if dry_run else "removed"
     for kind, count in sorted(report.retired.items()):
-        print(f"index/{kind} is retired: {verb} {count} entries, then the objects only they named")
+        print(f"index/{kind} is retired: {verb} {count} entries a week old, then the objects only they named")
     for kind, count in sorted(report.obsolete.items()):
         print(f"{kind} entries another version of cadgen wrote are obsolete: {verb} {count}, then the objects only they named")
     if max_size is not None:
@@ -298,8 +299,8 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
         "gc",
         help="retire old index kinds, mark and sweep unreachable objects; with --max-size, evict to a cap first",
         description=(
-            "Removes the index kinds this cadgen no longer defines (index/op, index/surface, index/selector, index/mesh) "
-            "and every object nothing reaches: "
+            "Removes the entries of the index kinds this cadgen no longer defines (index/op, index/surface, "
+            "index/selector, index/mesh) once a week old, and every object nothing reaches: "
             "not a record's or a document's tree, not named by a part, component, bounds, drawing, skin or robot "
             "entry, and not written or claimed within the grace window. --max-size first evicts those derived "
             "entries, least recently written first, until the store fits 80%% of the cap (the newest keep a "

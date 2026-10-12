@@ -80,13 +80,16 @@ Nothing else lives under the root. A build's progress is process state, not
 content: the daemon's job ledger, read over its socket (§7, §9). Editing
 previews use the same immutable objects, with ephemeral request handles in
 that ledger (§9b); there is no preview directory or persistent session index.
-A **retired kind** is one an older cadgen wrote and nothing reads any more:
+A **retired kind** is one an older cadgen wrote and this one never reads:
 `RETIRED_KINDS` in `store/paths.py` -- `index/op`, the operation cache of
 cadgen 0.7.4 and earlier, and `index/surface`, `index/selector` and
 `index/mesh`, a part's display data as three entries (its SURF, its selector
 table bound to that SURF, and its mesh at one tessellation) before `index/part`
-named its two objects in one. The sweeper removes a retired kind with every
-object only it named (§8). Retiring a kind means moving it from `INDEX_KINDS`
+named its two objects in one. The sweeper removes a retired kind's entries a
+week after their last write, with every object only they named (§8): the
+release before parts still reads `index/surface`, `index/selector` and
+`index/mesh`, and one sharing the store derives each again at most once a week.
+Retiring a kind means moving it from `INDEX_KINDS`
 to `RETIRED_KINDS`. Any other folder under `index/` belongs to a newer cadgen
 or to none, and nothing here touches it.
 
@@ -1349,11 +1352,12 @@ One sweeper, `cadgen.store.gc`: by hand as `cadgen store gc [--dry-run]
 pass scans the store once (names, sizes, mtimes), marks once, and removes three
 kinds of thing:
 
-1. **Retired kinds and obsolete entries.** The folders in `RETIRED_KINDS`
-   (`index/op`, `index/surface`, `index/selector`, `index/mesh`, §2) go, and so
-   do the obsolete part entries a week old (§2), with every object only those
-   entries named; a younger obsolete entry stays, objects and all, like a
-   current one. An entry naming
+1. **Retired kinds and obsolete entries.** The entries of the folders in
+   `RETIRED_KINDS` (`index/op`, `index/surface`, `index/selector`, `index/mesh`,
+   §2) and the obsolete part entries go once a week old (§2), with every object
+   only those entries named; a younger one stays, objects and all, like a
+   current one, and a retired kind's younger entry is evicted under a cap like
+   a derived one. An entry naming
    an object the grace window still keeps waits for the next pass, so that
    object goes with its entry rather than with the next full sweep, and an
    entry written again since the scan stays. The records and document entries
@@ -1439,8 +1443,8 @@ reads, like any older cadgen's, and its records and document entries, at keys
 this cadgen does not own, are retired. The other way round needs only a week: a newer
 cadgen treats an older format as garbage, which is how an upgrade frees the
 space the old one used, and an older cadgen still in use rebuilds what it
-needs -- an obsolete part entry, a record or a document entry, at most once a
-week (§2). Until then each version keeps its
+needs -- a retired kind's or an obsolete part entry, a record or a document
+entry, at most once a week (§2). Until then each version keeps its
 own record and document entry at its own key, so neither recompiles a
 document or rebuilds a model because the other one did. A pass
 never touches anything outside its own folders: object shards
@@ -1465,13 +1469,13 @@ with every request):
 
 - larger than `max(cap, after + cap/5)` -- `after` being where its last pass
   under that cap ended -- gets a full pass with the cap;
-- otherwise, a store holding a retired kind, or holding parts, records or
-  document entries that no retiring pass under this cadgen's versions
-  (`gc.producer_versions`: the part version) has looked at for a day, gets a
+- otherwise, a store holding a retired kind, parts, records or document
+  entries that no retiring pass under this cadgen's versions
+  (`gc.producer_versions`: the part version) has looked at for a day gets a
   retiring pass,
-  which retires the retired entries and the week-old obsolete ones -- the
-  records and document entries at keys this cadgen does not own among them --
-  and sweeps only the objects the retired and obsolete derived entries named. Obsolete entries cannot be told from a stat
+  which retires the week-old entries of the retired kinds and the week-old
+  obsolete ones -- the records and document entries at keys this cadgen does
+  not own among them -- and sweeps only the objects those entries named. Obsolete entries cannot be told from a stat
   walk, so when that pass ran is noted per store and per versions, in a note of
   its own beside `after`'s: a daemon of another release sharing the store keeps
   its own and never moves this one. So a store gets one such pass after an

@@ -7,14 +7,15 @@ for ``QUIET_SECONDS``, one look -- a stat walk that keeps nothing per file:
    ``after`` being where that store's last pass ended under the same cap, a
    full pass with the cap (retire, evict, sweep). ``band`` is the fifth of the
    cap between the cap and its low watermark.
-2. **Otherwise, a retired index kind** (``index/op``, or the display data's old
-   ``index/surface``, ``index/selector`` and ``index/mesh``), **or a store holding
-   parts, records or document entries that no pass under these versions has
-   looked at for a day**: a pass that retires the retired and the week-old
+2. **Otherwise, a store holding a retired index kind** (``index/op``, or the
+   display data's old ``index/surface``, ``index/selector`` and ``index/mesh``,
+   which the release before this one still reads), **parts, records or document
+   entries, that no pass under these versions has looked at for a day**: a pass
+   that retires the week-old entries of the retired kinds and the week-old
    obsolete entries -- the records and document entries at keys this cadgen does
-   not own among them -- and sweeps only the objects the retired and obsolete
-   derived entries named. Obsolete entries -- the parts an older derivation of
-   cadgen's wrote among them -- are not told apart by a look that keeps nothing
+   not own among them -- and sweeps only the objects those entries named.
+   Week-old entries -- the parts an older derivation of cadgen's wrote among
+   them -- are not told apart by a look that keeps nothing
    per file, so the daemon notes when its last retiring pass ran, per
    store and per the versions it ran under (``gc.producer_versions``), in a
    file of their own: a daemon of another release sharing the store keeps a
@@ -78,7 +79,6 @@ class Housekeeper:
         self._state_dir = state_dir or _default_state_dir
         self._guard = threading.Lock()
         self._due: dict[str, int | None] = {}
-        self._retired_at: dict[str, float] = {}
         self._last_activity = clock()
         self._stopping = False
         self._worker: threading.Thread | None = None
@@ -150,7 +150,7 @@ class Housekeeper:
 
     def look(self, root: str, cap: int | None) -> str | None:
         """What this store needs now, done; a log line, or None for nothing."""
-        from cadgen.store.gc import DEFAULT_GRACE_SECONDS, producer_versions, scan
+        from cadgen.store.gc import producer_versions, scan
 
         resolved = Path(root).expanduser().resolve()
         found = scan(resolved, keep=False)
@@ -162,17 +162,15 @@ class Housekeeper:
             self._remember(root, cap=cap, after=int(report["bytes_after"]))
             self._note_retired(root, versions)
             return _summary(report)
-        # A full pass retires obsolete entries too; without one, a store that holds
-        # parts, records or documents earns a pass when none under these versions
-        # ran today.
-        obsolete = (any((resolved / "index" / kind).is_dir() for kind in ("part", "model", "document"))
-                    and self._retire_due(root, versions))
-        retired = found.retired and self._clock() - self._retired_at.get(root, float("-inf")) >= DEFAULT_GRACE_SECONDS
-        if obsolete or retired:
+        # A full pass retires too; without one, a store that holds a retired kind,
+        # parts, records or documents earns a pass when none under these versions ran
+        # today. Everything it retires goes a week after its last write (another
+        # cadgen sharing the store may still read it), so a pass a day is enough.
+        holding = found.retired or any((resolved / "index" / kind).is_dir() for kind in ("part", "model", "document"))
+        if holding and self._retire_due(root, versions):
             report = self._pass(resolved, ["--retired-only"])
             if report is None:
                 return self._resume(root, cap)
-            self._retired_at[root] = self._clock()
             self._note_retired(root, versions)
             return _summary(report)
         return None

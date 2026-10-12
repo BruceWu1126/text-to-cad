@@ -3,16 +3,19 @@
 One pass scans the store once (names, sizes, mtimes), marks once, and removes
 three kinds of thing:
 
-- **Retired kinds and obsolete entries.** The ``index/`` folders in
-  ``RETIRED_KINDS`` (the operation cache's ``index/op``; the surface, selector
-  and mesh entries a part's display data was before ``index/part``) go, with
-  every object only their entries named; so do the part entries an older
-  version of cadgen's derivation wrote, which no reader of this cadgen asks for
-  again (``parts.obsolete_key``), and the records and document entries at
-  keys this cadgen does not own (another schema version's, ``owned_key``),
-  once last written ``OBSOLETE_RETIRE_AFTER_SECONDS`` ago (a week): another
-  cadgen sharing the store may still read them, and a read never writes. Until
-  then the trees such a record or document entry names stay reachable.
+- **Retired kinds and obsolete entries.** The entries of the ``index/``
+  folders in ``RETIRED_KINDS`` (the operation cache's ``index/op``; the
+  surface, selector and mesh entries a part's display data was before
+  ``index/part``, which the release before this one still reads), the part
+  entries an older version of cadgen's derivation wrote, which no reader of
+  this cadgen asks for again (``parts.obsolete_key``), and the records and
+  document entries at keys this cadgen does not own (another schema
+  version's, ``owned_key``) go, with every object only they named, once last
+  written ``OBSOLETE_RETIRE_AFTER_SECONDS`` ago (a week): another cadgen
+  sharing the store may still read them, and a read never writes. Until then
+  they keep what they name, the trees such a record or document entry names
+  among it, and a retired kind's entries are evicted under a cap like any
+  derived entry.
 - **Evicted entries**, only under a cap: derived entries (``DERIVED_KINDS``),
   least recently written first, until the store fits ``LOW_WATERMARK`` of the
   cap. A record, a document entry or an output entry is never evicted.
@@ -55,7 +58,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from cadgen.store.index import entry_path, key_version, read_entry
+from cadgen.store.index import key_version, read_entry
 from cadgen._internal.atomic_replace import move_atomic
 from cadgen.store.objects import delete_unclaimed, is_object_hash, object_path, swept_address
 from cadgen.store.paths import DERIVED_KINDS, INDEX_KINDS, RETIRED_KINDS, store_root
@@ -447,6 +450,19 @@ def _split_obsolete(rows: list[_Entry], retire_before: float) -> tuple[list[_Ent
     return current, obsolete
 
 
+def _split_retired(rows: list[_Entry], retire_before: float) -> tuple[list[_Entry], list[_Entry]]:
+    """A retired kind's ``rows`` as (held, retiring): those last written by
+    ``retire_before`` go; a younger one is another cadgen's display data in use
+    -- the release before this one still reads index/surface, index/selector and
+    index/mesh -- and stays with its objects, evictable under a cap, like a
+    younger obsolete part."""
+    held: list[_Entry] = []
+    retiring: list[_Entry] = []
+    for row in rows:
+        (retiring if row.mtime <= retire_before else held).append(row)
+    return held, retiring
+
+
 def producer_versions() -> dict[str, list[int]]:
     """The versions an entry is obsolete against. The daemon notes, per store and
     per these versions, when its last retiring pass ran (``daemon/housekeeping.py``)."""
@@ -540,11 +556,11 @@ def collect(
     found: Scan | None = None,
 ) -> GcReport:
     """One pass. ``max_bytes`` adds eviction, when the store is over that cap,
-    down to :func:`eviction_target`. ``retired_only`` retires ``RETIRED_KINDS``,
-    the obsolete entries a week old and the records and document entries at keys
-    this cadgen does not own a week old, and sweeps only the objects the retired
-    and obsolete derived entries named -- the daemon's automatic retirement, which
-    collects nothing else. ``should_stop`` is polled
+    down to :func:`eviction_target`. ``retired_only`` retires the entries of
+    ``RETIRED_KINDS``, the obsolete entries and the records and document entries
+    at keys this cadgen does not own, each once a week old, and sweeps only the
+    objects the retired and obsolete derived entries named -- the daemon's
+    automatic retirement, which collects nothing else. ``should_stop`` is polled
     throughout; stopping early leaves a consistent store, as every step does.
     ``found`` is a scan the caller just took. A store a newer cadgen writes to
     is left alone: nothing is removed, and ``deferred`` says why."""
@@ -569,7 +585,9 @@ def collect(
                                       retire_before=retire_before)
         report.protected_bytes = sum(found.objects[d][0] for d in protected)
         derived, obsolete = _split_obsolete(_read_entries(found, DERIVED_KINDS, stop), retire_before)
-        retired = _read_entries(found, found.retired, stop) + obsolete + unowned
+        held, aged = _split_retired(_read_entries(found, found.retired, stop), retire_before)
+        derived += held
+        retired = aged + obsolete + unowned
         fresh = {digest for digest, (_, mtime) in found.objects.items() if mtime > cutoff}
 
         victims: list[_Entry] = []
@@ -604,7 +622,7 @@ def _evict(victims: list[_Entry], dry_run: bool, stop: Callable[[], bool], repor
     for count, row in enumerate(victims):
         if count % _STOP_EVERY == 0 and stop():
             raise _Stopped
-        path = entry_path(row.kind, row.key)
+        path = store_root() / "index" / row.kind / row.key
         try:
             if path.stat().st_mtime != row.mtime:
                 continue
@@ -713,7 +731,8 @@ def reachable_objects() -> set[str]:
     retire_before = time.time() - OBSOLETE_RETIRE_AFTER_SECONDS
     live = protected_objects(found, retire_before=retire_before)
     rows = _read_entries(found, DERIVED_KINDS, lambda: False)
-    for row in _split_obsolete(rows, retire_before)[0]:
+    held = _split_retired(_read_entries(found, found.retired, lambda: False), retire_before)[0]
+    for row in _split_obsolete(rows, retire_before)[0] + held:
         live.update(row.named)
     return live
 
