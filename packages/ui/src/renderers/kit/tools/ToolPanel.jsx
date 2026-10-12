@@ -116,19 +116,20 @@ export function ToolPanelClose({ className }) {
  * (a single part's: `toolPanelClosed`). `hidden` keeps a panel mounted while its tool is
  * not up, so a tree keeps its expansion, filter and scroll across a trip to another tool. `header`
  * never scrolls; the body under it does, for a panel that gives way; `footer` (a
- * `ToolPanelFooterButton`) is under the body and never scrolls either.
+ * `ToolPanelFooterButton`) is under the body and never scrolls either. `lead`: the panel of the
+ * tool in hand, drawn at the top of the stack above every kept panel, wherever it sits among them.
  *
  * @param {{ id: string, title?: import("react").ReactNode, name?: string, label: string, summary?: import("react").ReactNode,
  *   actions?: import("react").ReactNode,
  *   header?: import("react").ReactNode, footer?: import("react").ReactNode, collapsible?: boolean, closable?: boolean, onClose?: (() => void) | null, closeLabel?: string,
  *   fit?: "fixed" | "tree" | "details", resizable?: boolean, hidden?: boolean, defaultCollapsed?: boolean,
- *   children?: import("react").ReactNode }} props
+ *   lead?: boolean, children?: import("react").ReactNode }} props
  *   `label` names the panel for assistive technology ("Clip controls"), with a heading or
  *   without; the chevron, the X and the grip take their names from it, unless the X says
  *   what it does itself (`closeLabel`, "Clear selection").
  */
 export default function ToolPanel({ id, title = null, name = "", label, summary = null, actions = null, header = null, footer = null, collapsible = true, closable = false, onClose = null, closeLabel = "",
-  fit = "fixed", resizable = false, hidden = false, defaultCollapsed = false, children }) {
+  fit = "fixed", resizable = false, hidden = false, defaultCollapsed = false, lead = false, children }) {
   const stack = useContext(ToolStackContext);
   const kept = Boolean(stack && id);
   // Folded: the person's, kept by the stack across files; a panel drawn alone keeps its own.
@@ -238,9 +239,9 @@ export default function ToolPanel({ id, title = null, name = "", label, summary 
 
   const dragging = draft !== null;
   return <section ref={section} aria-label={label} hidden={hidden || closed} data-tool-panel={fit} data-tool-panel-id={id || undefined}
-    data-collapsed={collapsed ? "" : undefined} data-closed={closed ? "" : undefined} data-resizable={sized ? "" : undefined}
+    data-collapsed={collapsed ? "" : undefined} data-closed={closed ? "" : undefined} data-resizable={sized ? "" : undefined} data-tool-panel-lead={lead ? "" : undefined}
     className={cn("pointer-events-auto relative flex max-w-full flex-col rounded-md text-tiny", FLOATING_CHROME_SURFACE_CLASS, collapsed ? "shrink-0" : FIT[fit])}
-    style={{ width, maxHeight: collapsed || cap === null ? undefined : `${cap}px`, minHeight }}>
+    style={{ width, maxHeight: collapsed || cap === null ? undefined : `${cap}px`, minHeight, order: lead ? -1 : undefined }}>
     <ToolPanelContext.Provider value={panel}>
       {heading}
       {header}

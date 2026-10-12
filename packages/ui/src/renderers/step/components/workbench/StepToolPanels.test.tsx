@@ -219,14 +219,18 @@ it('Explode and Clip open neutral, stack under the strip one width, are headed b
     expect([region(label)!.getAttribute('data-tool-panel'), region(label)!.style.width]).toEqual(['fixed', `${TOOL_PANEL_WIDTH}px`]);
   }
   expect([buttons('Explode controls'), buttons('Clip controls')]).toEqual([['Close explode controls'], []]);
-  // A second press on the tool in hand does nothing.
+  // A second press on the tool in hand does nothing. The panel of the tool in hand leads the stack.
   await user.click(tool('Clip'));
   expect([pressed(), shown()]).toEqual([['Clip'], ['Explode controls', 'Clip controls']]);
+  const leads = () => [...document.querySelectorAll<HTMLElement>('[data-cad-tool-stack] section[data-tool-panel]')]
+    .filter(panel => panel.style.order === '-1').map(panel => panel.getAttribute('aria-label'));
+  expect(leads()).toEqual(['Clip controls']);
   // Select is the tool again; both applied effects keep their panels, in the order they were taken
   // up, each with its X, and neither tool lit.
   await user.click(tool('Select'));
   expect(pressed()).toEqual(['Select']);
   expect(shown()).toEqual(['Explode controls', 'Clip controls']);
+  expect(leads()).toEqual([]);
   expect([buttons('Explode controls'), buttons('Clip controls')]).toEqual([['Close explode controls'], ['Close clip controls']]);
   // A press on a kept Clip takes it up again as it is; its X goes while it is in hand.
   await user.click(tool('Clip'));
@@ -323,7 +327,7 @@ function Position({ active = true }: { active?: boolean }) {
     <button type="button" aria-label="Position"><PositionToolIcon /></button>
     <ToolPanel id="position" title={position.title} actions={position.actions} label="Position controls" fit="details" resizable
       collapsible={false} hidden={!active}>{position.content}</ToolPanel>
-    {position.custom && !active ? <KeptPositionPanel summary={position.summary} onReset={position.onReset} /> : null}
+    {position.custom && !active ? <KeptPositionPanel summary={position.summary} onReset={position.onReset} poseRow={position.poseRow} /> : null}
   </>;
 }
 
@@ -353,11 +357,17 @@ it("Position is headed with its Reset and no X, offers Default beside a named po
   await user.type(value, '25{Enter}');
   expect(preset.textContent).toBe('Custom');
   expect(screen.getByRole('button', { name: 'Position' }).querySelectorAll('svg')).toHaveLength(1);
-  // Put down, the pose off its default is kept: one line, "Position" and what it is, its X the Reset.
+  // Put down, the pose off its default is kept: headed "Position" with its X, and the Pose row to
+  // switch between the named poses, Custom while the joints are set by hand.
   view.rerender(<Position active={false} />);
-  const kept = screen.getByRole('region', { name: 'Position kept' });
-  expect(kept.querySelector('[data-tool-panel-heading]')!.textContent).toBe('PositionCustom');
-  await user.click(within(kept).getByRole('button', { name: 'Reset position' }));
+  const kept = () => screen.getByRole('region', { name: 'Position kept' });
+  expect(kept().querySelector('[data-tool-panel-heading]')!.textContent).toBe('Position');
+  expect(within(kept()).getByRole('combobox', { name: 'Pose' }).textContent).toBe('Custom');
+  await user.click(within(kept()).getByRole('combobox', { name: 'Pose' }));
+  await user.click(screen.getByRole('option', { name: 'open' }));
+  expect([value.value, within(kept()).getByRole('combobox', { name: 'Pose' }).textContent]).toEqual(['90.0°', 'open']);
+  // Its X puts the default pose back, and the kept panel goes.
+  await user.click(within(kept()).getByRole('button', { name: 'Reset position' }));
   expect(screen.queryByRole('region', { name: 'Position kept' })).toBeNull();
   expect(value.value).toBe('0.00°');
 });

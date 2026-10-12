@@ -169,7 +169,8 @@ function PoseControlRow({ pose, control }) {
   return <ControlRow control={control} value={value} onValueChange={pose.write} />;
 }
 
-function PoseGroupStateRow({ pose }) {
+/** The Pose row, a named SRDF group state to choose, or null where the robot declares none. */
+export function PoseGroupStateRow({ pose }) {
   const read = () => pose.getSnapshot();
   const { groupStateId, values } = useSyncExternalStore(pose.subscribe, read, read);
   return <KinematicsPoseRow

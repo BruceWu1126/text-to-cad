@@ -20,7 +20,7 @@ function keptPoseLabel(pose) {
 }
 import { PointerPick } from "../kit/tools/select/usePointerPick.js";
 import { useDeclinedSelectReference, useWorkspaceDocument, workspaceLoadAlert } from "../workspace/useWorkspaceDocument.js";
-import PositionControls from "./PositionControls.jsx";
+import PositionControls, { PoseGroupStateRow } from "./PositionControls.jsx";
 import LinksSection from "./LinksSection.jsx";
 import SdfSection from "./SdfSection.jsx";
 import { prepareRobotJointHandles, robotJointHandles } from "./jointHandles.js";
@@ -246,11 +246,12 @@ function RobotSurface({ view, data }) {
     {/* Headed "Position" with its Reset; sized like the tree: its content's height, up to the
         stack's. No X: Select puts Position down, and the pose stays. */}
     {posable && pose ? <ToolPanel id="position" title="Position" actions={<MotionResetButton onReset={pose.reset} />} label="Position controls"
-      fit="details" resizable collapsible={false} hidden={!poseActive}>
+      fit="details" resizable collapsible={false} hidden={!poseActive} lead={poseActive}>
       <PositionControls key={robot.revision} pose={pose} />
     </ToolPanel> : null}
     {/* A pose that is not the default, kept while Position is not the tool: one line, its X the Reset. */}
-    {posable && pose && poseCustom && !poseActive && !shell.previewing ? <KeptPositionPanel summary={keptPoseLabel(pose)} onReset={pose.reset} /> : null}
+    {posable && pose && poseCustom && !poseActive && !shell.previewing ? <KeptPositionPanel summary={keptPoseLabel(pose)} onReset={pose.reset}
+      poseRow={pose.groupStates.length ? <PoseGroupStateRow pose={pose} /> : null} /> : null}
   </>;
 
   return <RendererShell shell={shell} tools={tools} toolPanels={toolPanels}

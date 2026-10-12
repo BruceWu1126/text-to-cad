@@ -41,14 +41,18 @@ export function PositionToolIcon() {
 }
 
 /**
- * Position kept: while the pose is not the default and Position is not the tool, one line in the
- * tool stack, as a kept Explode or Clip is — "Position", what the pose is (`summary`: the named
- * pose, or "Custom"), and an X that puts the pose back to the default. A press on Position takes
- * the tool up again, with its full panel.
+ * Position kept: while the pose is not the default and Position is not the tool, a small panel in
+ * the tool stack, as a kept Explode or Clip is — headed "Position" with an X that puts the pose back
+ * to the default, and, where the file has named poses, its Pose dropdown (`poseRow`: Default, the
+ * poses, Custom while the joints are set by hand) to switch between them without taking the tool
+ * up. With no named pose, what the pose is (`summary`, Custom) sits in the heading instead. A press
+ * on Position takes the tool up again, with its full panel.
  */
-export function KeptPositionPanel({ summary = "Custom", onReset }) {
-  return <ToolPanel id="position-kept" title="Position" summary={summary} label="Position kept" collapsible={false}
-    closeLabel="Reset position" onClose={onReset} />;
+export function KeptPositionPanel({ summary = "Custom", onReset, poseRow = null }) {
+  return <ToolPanel id="position-kept" title="Position" summary={poseRow ? null : summary} label="Position kept" collapsible={false}
+    closeLabel="Reset position" onClose={onReset}>
+    {poseRow ? <div className="pb-1.5 pt-0.5">{poseRow}</div> : null}
+  </ToolPanel>;
 }
 
 /** A Position panel's Reset: in its heading, before the fold chevron. */

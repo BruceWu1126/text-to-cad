@@ -107,7 +107,8 @@ export function useModelTools({ modelKey, view, features, store, mesh, disabled,
         // is done with a kept one, there only while its tool is not in hand: in hand, another
         // tool puts it down.
         return tool ? <ToolPanel key={id} id={id} title={tool.label} label={`${tool.label} controls`} summary={tool.summary} actions={tool.actions}
-          fit={id === "measure" ? "details" : "fixed"} collapsible={false} onClose={selectedTool === id ? null : () => remove(id)}>
+          fit={id === "measure" ? "details" : "fixed"} collapsible={false} onClose={selectedTool === id ? null : () => remove(id)}
+          lead={selectedTool === id}>
           <div className="space-y-1 pb-1">{tool.controls}</div>
         </ToolPanel> : null;
       })}

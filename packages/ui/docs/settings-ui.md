@@ -302,11 +302,14 @@ tool not in hand — is how a person is done with one (it clears the results or
 removes the effect).
 
 **Position kept.** A pose that is not the default stays when Position is put down,
-and shows as one line in the stack, as a kept effect does (`KeptPositionPanel`):
-"Position", what the pose is — the named pose it is at, or Custom — and an X
-("Reset position") that puts the default pose back. A press on Position takes the tool
-up again, its full panel and joint handles with it. The Position panel itself has no
-X: its heading's Reset puts the pose back, another tool puts it down.
+and shows as a small panel in the stack, as a kept effect does (`KeptPositionPanel`):
+headed "Position" with an X ("Reset position") that puts the default pose back, and,
+where the file has named poses, the Position panel's own Pose row under it — its
+dropdown of Default, the named poses, and Custom while the joints are set by hand — to
+switch poses without taking the tool up (Default puts the pose back, and the panel goes).
+With no named pose, the heading says Custom beside the title instead. A press on
+Position takes the tool up again, its full panel and joint handles with it. The Position
+panel itself has no X: its heading's Reset puts the pose back, another tool puts it down.
 
 **Explode and Clip** have no enabled checkbox, and are drawn alike: the
 amount in the heading beside the title, one row for a body — Explode's a
@@ -330,7 +333,9 @@ Under the toolbar, in one column: the shell's tools' panels (**Drawing** while
 Draw is up, **Animation** while Animation is); Select's **Features** (STEP; a
 robot's **Links**) and, whenever something is selected, its **Reference** (then
 a `.sdf`'s **SDF**); Position's **Position**; then the panels
-of the effects a person keeps (**Measurements**, **Explode**, **Clip**). A panel
+of the effects a person keeps (**Measurements**, **Explode**, **Clip**, a kept
+**Position**). The panel of the tool in hand always leads, above every kept one
+(`ToolPanel`'s `lead`): with Measure kept and Explode in hand, Explode is on top. A panel
 whose tool is not up is `hidden`, not unmounted: a tree keeps its expansion,
 filter and scroll across a trip to another tool. Preview hides the whole
 stack.
