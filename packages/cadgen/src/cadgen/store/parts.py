@@ -7,7 +7,8 @@ A part is a component under one producer, the kernel that derives it. Its key,
 ``index/part/<digest>-v<PART_VERSION>``, carries no tolerance: the digest hashes the
 component's geometry input (its ``contentHash``: kind, codec, BREP bytes, face colours and
 an eager-only component's pinned topology facts) and the producer, and the version is
-bumped by any change to the extractor, the selector table, the mesher or the GLB payload.
+bumped by any change to the extractor, the selector table, the mesher or the GLB payload,
+or in how the digest is hashed.
 The record is ``{"glb": {...}, "selectors": {...}}``: each object's address and byte
 length and what a reader sizes it by without opening it -- the mesh's decoded-bytes
 estimate and counts (and ``unmeshedFaceCount`` when a face could not be meshed), the
@@ -34,7 +35,9 @@ from cadgen.store.objects import is_object_hash, object_path, put_object, read_v
 
 # 1: one record per part names its display GLB and its selector table (the surface,
 # selector and mesh kinds before it are retired).
-PART_VERSION = 1
+# 2: the producer key's tag and the selector table's edge-line algorithm name a producer
+# and edge lines: every part has a new key, and its table new bytes.
+PART_VERSION = 2
 INDEX_KIND = "part"
 MAX_INDEX_BYTES = 16 * 1024
 _KEY = re.compile(rf"[0-9a-f]{{64}}-v{PART_VERSION}")
@@ -89,8 +92,9 @@ def producer_key(value: dict) -> str:
     definition = {key: item for key, item in value.items() if key != "producerKey"}
     validate_producer(definition)
     # The tag's bytes are in every producer key, part key and view id: a new spelling
-    # would re-key every stored part.
-    return hashlib.sha256(b"cadgen-surface-producer-v2\0" + canonical_bytes(definition)).hexdigest()
+    # re-keys every stored part, and moves PART_VERSION with it so the parts at the
+    # keys before it are obsolete (``obsolete_key``) and the sweeper retires them.
+    return hashlib.sha256(b"cadgen-producer-v1\0" + canonical_bytes(definition)).hexdigest()
 
 
 def producer_fields(value: dict) -> dict:
