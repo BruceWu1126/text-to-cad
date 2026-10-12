@@ -893,8 +893,8 @@ def _ensure_display(tree: str, *, producer: dict | None = None, progress: object
     """Derive here the display data of every part of ``tree`` the store lacks -- its
     display mesh and selector table (``store.parts.ensure_display``) -- before the
     build reports done, so a view of what it built only reads. A part that
-    cannot be derived is a warning on the build, never its failure: a view shows that
-    part as failed. The parts of a child the build composed are normally there
+    cannot be derived is a warning on the build, never its failure: a view, a snapshot
+    and a list leave that part out and name it. The parts of a child the build composed are normally there
     already: the child's own job derived them before it reported done."""
     if not tree:
         return
@@ -913,12 +913,12 @@ def _ensure_display(tree: str, *, producer: dict | None = None, progress: object
     try:
         with logger.timed("display data") if logger is not None else nullcontext():
             failures = ensure_display(tree, producer=producer, progress=counted)
+        texts = [f"{failure}; views leave it out" for failure in failures]
     except Exception as error:  # noqa: BLE001 - the build's result stands; its display data waits for a view
-        failures = [f"{type(error).__name__}: {error}"]
+        texts = [f"display data not derived ({type(error).__name__}: {error}); the first view derives it"]
     from cadgen._internal.build_timing import note_warning
 
-    for failure in failures:
-        text = f"{failure}; views show it as failed"
+    for text in texts:
         # On the done event, which reaches the root from a child whose own output is
         # dropped; outside a build, stderr (stdout is the result channel).
         if not note_warning(text):

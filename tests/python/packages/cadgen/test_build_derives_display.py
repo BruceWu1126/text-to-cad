@@ -189,7 +189,7 @@ class BuildDerivesDisplayData(unittest.TestCase):
     def test_a_part_that_cannot_be_meshed_is_a_warning_on_the_build_naming_it(self) -> None:
         self.assertEqual(self.build(failing(3))[0], "built", "the build stands")
         warnings = [line for line in self.output.splitlines() if "could not be meshed" in line]
-        self.assertEqual(warnings, [f"[cadgen] warning: pair: {PEG_FAILED}; views show it as failed"])
+        self.assertEqual(warnings, [f"[cadgen] warning: pair: {PEG_FAILED}; views leave it out"])
 
     def test_a_snapshot_and_a_list_go_on_without_a_part_that_cannot_be_meshed_naming_it(self) -> None:
         """As the CAD Viewer does: a snapshot draws the rest of the model and a list lists it,

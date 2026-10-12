@@ -279,7 +279,7 @@ class BuildWarnings(unittest.TestCase):
     done event and the root prints it once, after its time line, in every mode."""
 
     def test_a_done_events_warnings_follow_the_time_line_once_in_every_mode(self):
-        warning = "#o1.2 pin could not be meshed (MeshProductionError: boom); views show it as failed"
+        warning = "#o1.2 pin could not be meshed (MeshProductionError: boom); views leave it out"
         for mode in ("tty", "plain", "json"):
             with self.subTest(mode=mode):
                 out = _Tty() if mode == "tty" else io.StringIO()
