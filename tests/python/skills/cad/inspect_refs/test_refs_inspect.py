@@ -117,7 +117,7 @@ class StepSceneTests(unittest.TestCase):
         with mock.patch.object(component_package, "decode_geometry_component", wraps=component_package.decode_geometry_component) as decoded, \
              mock.patch("cadgen.store.parts.derive", side_effect=AssertionError("inspection requested display data")), \
              mock.patch("cadgen.store.parts.ensure_display", side_effect=AssertionError("inspection requested display data")), \
-             mock.patch("cadgen._internal.surface_extract.extract_topology_facts", side_effect=AssertionError("inspection extracted surfaces")):
+             mock.patch("cadgen._internal.topology_extract.extract_topology_facts", side_effect=AssertionError("inspection extracted topology facts")):
             scene = read_scene(self.path)
             scene.resolve("#housing")
             list(scene.leaves())
@@ -188,7 +188,7 @@ class StepSceneTests(unittest.TestCase):
             put_object(saved, repair=True)
 
     def test_face_edge_and_shape_ordinals_match_display_extraction(self):
-        from cadgen._internal.surface_extract import extract_topology_facts
+        from cadgen._internal.topology_extract import extract_topology_facts
         # Compare using the scene's canonical BREP, before its world placement.
         scene = read_scene(self.path)
         selection = scene.resolve("#pin_1")

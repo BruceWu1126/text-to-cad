@@ -42,11 +42,11 @@ class MaterializeCacheTest(unittest.TestCase):
     def test_intrinsic_recipes_are_private_and_require_no_extraction(self):
         from build123d import Solid
         from cadgen.store.build import build_tree_from_compound
-        from cadgen._internal import surface_extract
+        from cadgen._internal import topology_extract
         shape = Solid.make_box(2, 3, 4)
         shape.cad_face_ordinal_colors = {1: (.2, .3, .4, 1.)}
         tree = build_tree_from_compound(shape, root_name="box")[0]
-        with mock.patch.object(surface_extract, "extract_topology_facts", side_effect=AssertionError("extraction")):
+        with mock.patch.object(topology_extract, "extract_topology_facts", side_effect=AssertionError("extraction")):
             first = self.materialize.materialize(tree)
             first.cad_face_ordinal_colors[1] = (1., 0., 0., 1.)
             self.materialize.reset_memo()

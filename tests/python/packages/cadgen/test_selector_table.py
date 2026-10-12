@@ -25,7 +25,7 @@ from cadgen._internal.selector_table import (  # noqa: E402
     read_selector_table,
     selector_table_bytes,
 )
-from cadgen._internal.surface_extract import extract_topology_facts  # noqa: E402
+from cadgen._internal.topology_extract import extract_topology_facts  # noqa: E402
 
 
 def _table(part):

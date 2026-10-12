@@ -732,7 +732,7 @@ def prepare_geometry_component(shape: Any, *, face_colors: object = None) -> dic
     if kind == "eager-only":
         from OCP.TopLoc import TopLoc_Location
 
-        from cadgen._internal.surface_extract import extract_topology_facts
+        from cadgen._internal.topology_extract import extract_topology_facts
         from cadgen._internal.topology_facts import topology_facts_bytes
 
         topology = topology_facts_bytes(

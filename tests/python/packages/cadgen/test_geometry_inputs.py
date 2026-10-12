@@ -99,9 +99,9 @@ class GeometryInputs(unittest.TestCase):
         return path.read_bytes()
 
     def test_geometry_and_native_read_extract_nothing(self):
-        from cadgen._internal import surface_extract
+        from cadgen._internal import topology_extract
         scene=self.scene(nested=True)
-        with mock.patch.object(surface_extract, 'extract_topology_facts', side_effect=AssertionError('extraction forbidden')):
+        with mock.patch.object(topology_extract, 'extract_topology_facts', side_effect=AssertionError('extraction forbidden')):
             digest, tree=publish_document(scene)
             self.assertTrue(all(c['kind']=='native' for c in tree['components'].values()))
             shape=materialize(digest)
@@ -112,12 +112,12 @@ class GeometryInputs(unittest.TestCase):
             self.assertFalse((self.root/'store/index/part').exists())
 
     def test_display_data_loss_never_blocks_geometry_and_repairs_exactly(self):
-        from cadgen._internal import occt_mesh, surface_extract
+        from cadgen._internal import occt_mesh, topology_extract
         digest,tree=publish_document(self.scene(nested=True))
         expected=parts.derive(digest)
         for result in part_objects(expected): object_path(result).unlink()
         shutil.rmtree(self.root/'store/index/part')
-        with mock.patch.object(surface_extract,'extract_topology_facts',side_effect=AssertionError('extraction forbidden')), \
+        with mock.patch.object(topology_extract,'extract_topology_facts',side_effect=AssertionError('extraction forbidden')), \
              mock.patch.object(occt_mesh,'mesh_component',side_effect=AssertionError('mesh forbidden')):
             self.assertGreater(materialize(digest).volume,0)
         self.assertEqual(parts.derive(digest),expected)
@@ -184,9 +184,9 @@ class GeometryInputs(unittest.TestCase):
             self.assertEqual(parts.probe(key),record)
 
     def test_extraction_failure_never_publishes_a_part(self):
-        from cadgen._internal import surface_extract
+        from cadgen._internal import topology_extract
         digest,tree=publish_document(self.scene())
-        with mock.patch.object(surface_extract,'extract_topology_facts',side_effect=ValueError('injected extraction failure')):
+        with mock.patch.object(topology_extract,'extract_topology_facts',side_effect=ValueError('injected extraction failure')):
             with self.assertRaisesRegex(ValueError,'injected'):parts.derive(digest)
         self.assertFalse(any((self.root/'store/index/part').glob('*')))
         self.assertGreater(materialize(digest).volume,0)
@@ -339,7 +339,7 @@ class GeometryInputs(unittest.TestCase):
 
     def test_actual_binary_throw_and_silent_loss_use_faithful_v3_artifacts(self):
         from cadgen._internal.component_package import _shape_brep_bytes
-        from cadgen._internal.surface_extract import extract_topology_facts
+        from cadgen._internal.topology_extract import extract_topology_facts
         from cadgen._internal.component_package import _binary_v3_bytes as binary_v3_bytes
         for parameter in (1e-295,1e-300):
             with self.subTest(parameter=parameter):
@@ -362,14 +362,14 @@ class GeometryInputs(unittest.TestCase):
     def test_explicit_eager_topology_is_required_and_never_lazily_extracted(self):
         from build123d import Solid
         from cadgen._internal import component_package as _geometry_codec
-        from cadgen._internal import surface_extract
+        from cadgen._internal import topology_extract
         shape=Solid.make_box(2,3,4)
         with mock.patch.object(_geometry_codec,'_encode_brep',side_effect=_geometry_codec.CodecFidelityError('unsupported native fidelity')):
             digest,tree,cid,entry=self.component_tree(shape)
         self.assertEqual(entry['kind'],'eager-only')
         from cadgen._internal.topology_facts import read_topology_facts
         required=read_verified_object(entry['topology'])
-        with mock.patch.object(surface_extract,'extract_topology_facts',side_effect=AssertionError('live fallback forbidden')):
+        with mock.patch.object(topology_extract,'extract_topology_facts',side_effect=AssertionError('live fallback forbidden')):
             first=parts.derive(digest)
             self.assertEqual(facts_of(digest,cid),read_topology_facts(required))
         object_path(entry['topology']).unlink()
@@ -406,7 +406,7 @@ class GeometryInputs(unittest.TestCase):
         from OCP.gp import gp_Pnt,gp_Dir
         from cadgen._internal.component_package import _ascii_v3_bytes as ascii_v3_bytes
         from cadgen._internal.component_package import _shape_brep_bytes
-        from cadgen._internal.surface_extract import extract_topology_facts
+        from cadgen._internal.topology_extract import extract_topology_facts
         shape=self.point_box(.125)
         mapping=TopTools_IndexedMapOfShape();TopExp.MapShapes_s(shape.wrapped,TopAbs_VERTEX,mapping)
         vertex=next(TopoDS.Vertex_s(mapping.FindKey(i)) for i in range(1,mapping.Extent()+1)
@@ -439,7 +439,7 @@ class GeometryInputs(unittest.TestCase):
     def test_native_facts_are_the_extractors(self):
         from build123d import Box, Cylinder, Solid
         from OCP.BRepBuilderAPI import BRepBuilderAPI_NurbsConvert
-        from cadgen._internal.surface_extract import extract_topology_facts
+        from cadgen._internal.topology_extract import extract_topology_facts
         for shape in (Box(2, 3, 4), Box(4, 5, 3) - Cylinder(1, 6),
                       Solid(BRepBuilderAPI_NurbsConvert(Cylinder(2, 4).wrapped, True).Shape())):
             shape.cad_face_ordinal_colors = {1: (.2, .3, .4, 1.)}

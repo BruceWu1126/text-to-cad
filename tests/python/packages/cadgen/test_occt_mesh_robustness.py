@@ -34,7 +34,7 @@ IDENTITY = [1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0]
 
 
 def _facts(topods) -> dict:
-    from cadgen._internal.surface_extract import extract_topology_facts
+    from cadgen._internal.topology_extract import extract_topology_facts
 
     return extract_topology_facts(topods)
 

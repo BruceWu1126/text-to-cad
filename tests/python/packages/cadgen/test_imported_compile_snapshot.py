@@ -52,7 +52,7 @@ class ImportedCompileSnapshot(unittest.TestCase):
 
     def test_hit_captures_once_without_source_surface_or_native_work(self):
         from cadgen import catalog, step_artifact_cli as artifact
-        from cadgen._internal import component_package, surface_extract
+        from cadgen._internal import component_package, topology_extract
         from cadgen.store import trees
 
         document = self.document()
@@ -66,7 +66,7 @@ class ImportedCompileSnapshot(unittest.TestCase):
         with mock.patch.object(trees, "capture_tree", wraps=trees.capture_tree) as capture, \
              mock.patch.object(artifact, "load_step_scene_exact", side_effect=forbidden), \
              mock.patch.object(component_package, "decode_geometry_component", side_effect=forbidden), \
-             mock.patch.object(surface_extract, "extract_topology_facts", side_effect=forbidden), \
+             mock.patch.object(topology_extract, "extract_topology_facts", side_effect=forbidden), \
              mock.patch.object(catalog, "result_tree_for", side_effect=forbidden), \
              mock.patch.object(trees, "tree_kind_for", side_effect=forbidden):
             current = self.compile(document)

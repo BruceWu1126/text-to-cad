@@ -1,6 +1,6 @@
 """A component's topology facts as an object, read without the kernel.
 
-``surface_extract.extract_topology_facts`` reads a component's topology facts
+``topology_extract.extract_topology_facts`` reads a component's topology facts
 off its BREP with OCCT, and the selector table is built from them
 (``selector_table``). They are a plain JSON structure -- three ordinal tables,
 ``shapes``, ``faces`` and ``edges`` -- and nothing stores them but an

@@ -77,7 +77,7 @@ def main() -> None:
     from cadgen._internal import occt_mesh
     from cadgen._internal.component_package import decode_display_shape, prepare_geometry_component
     from cadgen._internal.selector_table import build_selector_table
-    from cadgen._internal.surface_extract import extract_topology_facts
+    from cadgen._internal.topology_extract import extract_topology_facts
     from cadgen.store.meshes import decode_payload, encode_payload
     from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 

@@ -66,7 +66,7 @@ def _build_fixture():
 class TopologyFactsTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        from cadgen._internal.surface_extract import extract_topology_facts
+        from cadgen._internal.topology_extract import extract_topology_facts
 
         cls.shape = _build_fixture().wrapped
         cls.facts = extract_topology_facts(cls.shape)
@@ -228,7 +228,7 @@ class TopologyFactsObjectTest(unittest.TestCase):
         from build123d import Box, Cylinder
 
         from cadgen._internal.selector_table import build_selector_table, selector_table_bytes
-        from cadgen._internal.surface_extract import extract_topology_facts
+        from cadgen._internal.topology_extract import extract_topology_facts
         from cadgen._internal.topology_facts import read_topology_facts, topology_facts_bytes
 
         shape = (Box(4, 5, 3) - Cylinder(1, 6)).wrapped
@@ -255,7 +255,7 @@ class TightBoundsTest(unittest.TestCase):
         return BRepBuilderAPI_NurbsConvert(solid.wrapped, True).Shape()
 
     def test_nurbs_cylinder_face_bounds_match_the_radius(self) -> None:
-        from cadgen._internal.surface_extract import extract_topology_facts
+        from cadgen._internal.topology_extract import extract_topology_facts
 
         radius, height = 7.5, 4.0
         facts = extract_topology_facts(self._nurbs_cylinder(radius, height))
@@ -268,7 +268,7 @@ class TightBoundsTest(unittest.TestCase):
 
     def test_component_bounds_match_the_radius(self) -> None:
         from cadgen._internal.selector_table import build_selector_table
-        from cadgen._internal.surface_extract import extract_topology_facts
+        from cadgen._internal.topology_extract import extract_topology_facts
 
         radius, height = 7.5, 4.0
         shape = self._nurbs_cylinder(radius, height)

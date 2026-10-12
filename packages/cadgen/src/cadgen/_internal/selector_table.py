@@ -4,7 +4,7 @@ A ref someone copies (``#o1.2.f7``), the facts a tool reports for it and the
 sets the viewer's connected selection grows it to (an edge's chain, a face's
 tangent group) all come from this one table. It is derived from the exact
 BREP and the component's topology facts, extracted in memory
-(``surface_extract``) -- the facts hold the exact metrics, surface and curve
+(``topology_extract``) -- the facts hold the exact metrics, surface and curve
 types, parameters, loops and edge classes; the BREP adds what they do not
 carry: the vertices, which edge ends where, and the tangent directions the
 chains follow -- and stored as one of a part's two objects, beside its display
@@ -279,7 +279,7 @@ def capabilities() -> dict[str, Any]:
 
 def build_selector_table(shape, facts: Mapping[str, Any]) -> dict[str, Any]:
     """The table of one unlocated component: ``shape`` (a ``TopoDS_Shape``) and its
-    topology facts (``surface_extract.extract_topology_facts``, or the object an
+    topology facts (``topology_extract.extract_topology_facts``, or the object an
     eager-only component's tree pins)."""
     faces = list(facts["faces"])
     edges = list(facts["edges"])

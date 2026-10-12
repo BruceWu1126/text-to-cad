@@ -331,7 +331,7 @@ def _topology(entry: dict, topods: Any) -> dict:
         from cadgen._internal.topology_facts import read_topology_facts
 
         return read_topology_facts(read_verified_object(entry["topology"]))
-    from cadgen._internal.surface_extract import extract_topology_facts
+    from cadgen._internal.topology_extract import extract_topology_facts
 
     return extract_topology_facts(topods)
 

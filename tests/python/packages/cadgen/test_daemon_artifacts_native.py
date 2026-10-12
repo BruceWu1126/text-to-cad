@@ -187,7 +187,7 @@ sys.addaudithook(audit)
         script = self.source_guard() + f"""
 import time
 import build123d
-from cadgen._internal import component_package,surface_extract
+from cadgen._internal import component_package,topology_extract
 from cadgen.daemon import artifacts,broker
 from cadgen.store import parts
 original=parts.derive

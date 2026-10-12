@@ -55,7 +55,7 @@ class NativeDocumentDoors(unittest.TestCase):
         derived = sorted(path.name for path in (self.store / "index/part").glob("*"))
         with contextlib.ExitStack() as stack:
             for name in ("cadgen.daemon.artifacts.submit_artifact", "cadgen.daemon.artifacts.resolve_artifact",
-                         "cadgen.store.parts._derive", "cadgen._internal.surface_extract.extract_topology_facts",
+                         "cadgen.store.parts._derive", "cadgen._internal.topology_extract.extract_topology_facts",
                          "cadgen.catalog.result_view_dir", "cadgen.store.view.export_view"):
                 stack.enter_context(mock.patch(name, side_effect=AssertionError(f"native-only operation invoked {name}")))
             stack.enter_context(mock.patch("builtins.open", side_effect=guard(original_open)))
