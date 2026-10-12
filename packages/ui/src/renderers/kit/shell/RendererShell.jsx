@@ -15,9 +15,9 @@ import DisplayPopover from "./DisplayPopover.jsx";
 import { DrawingToolbar } from "../../../drawing/toolbar.jsx";
 import ToolPanel, { ToolPanelFooterButton } from "../tools/ToolPanel.jsx";
 import PlaybackMenu, { OrbitMenu, RoutineMenu } from "../tools/PlaybackMenu.jsx";
-import ToolColumn from "../tools/ToolColumn.jsx";
+import FloatingToolBar from "../tools/FloatingToolBar.js";
 import ToolStack from "../tools/ToolStack.jsx";
-import { toolPanelClosed, toolStackHidden } from "../tools/toolStackLayout.js";
+import { toolPanelClosed } from "../tools/toolStackLayout.js";
 import AnimationPanel from "../tools/playbar/AnimationPanel.jsx";
 import { ViewportAnimationBar, animationControlsHaveContent } from "../tools/playbar/ViewportAnimationBar.js";
 import QuickEdit from "../tools/quick-edit/QuickEdit.jsx";
@@ -73,8 +73,7 @@ function NavbarControl({ label, disabled = false, onClick, children }) {
  *   `toolPanels`: the tool stack's panels, top to bottom — each a `ToolPanel`
  *   (`kit/tools/ToolPanel.jsx`), shown or `hidden` by the renderer as its tools say: what
  *   the tool in hand shows (Select's tree and Reference, Position's joints), then the
- *   effects a person keeps. The stack is one column the viewer's height, gone in preview, and put
- *   away with the strip by the column's own toggle (`kit/tools/ToolColumn.jsx`). The
+ *   effects a person keeps. The stack is one column the viewer's height, gone in preview. The
  *   shell's own tools' panels lead it: Draw's, and the Animation tool's.
  *   `navbarControls`: what the renderer puts at the navbar's right end, immediately before Display
  *   (the Select tool's modes, while it is the tool in hand), drawn as Display is: with the view's
@@ -182,11 +181,6 @@ export default function RendererShell({ shell, tools, toolPanels = null, navbarC
     return { ...tool, panelClosed: true, description: tool.description || `${tool.panel.label} closed`,
       onSelect: () => { if (tool.active) reopen(); tool.onSelect(); } };
   });
-  // The stack — every panel under the strip, never the strip — is the person's to put away, by its
-  // toggle at the top panel's top-right corner, and to bring back. Until they choose it starts hidden
-  // on a phone and shown elsewhere; once they have, their choice holds in every file of the tab.
-  // Nothing else shows or hides it: a pick, a tool or a key leaves it as the person left it.
-  const toolsAway = toolStackHidden(frame.toolStack, { mobile });
   // The shell's own tools' panels lead the stack while their tool is up: Draw's tools, color and
   // history, or the Animation tool's routine, transport and settings, whose X puts it down, back to
   // the default tool -- no X where Animation is the file's one tool, never put down. The
@@ -331,12 +325,12 @@ export default function RendererShell({ shell, tools, toolPanels = null, navbarC
                   trailing={<PlaybackMenu animation={playbackRuntime} onOpenChange={menu("playback")}
                     autoplay={shell.autoplay} onAutoplayChange={shell.setAutoplay} />} /> : null}>
 
-              {/* The file explorer floats over this corner, above the tools, which stay drawn under it.
-                  The stack's toggle is there while the stack shows a panel to put away. */}
-              {toolsHidden ? null : <ToolColumn style={TOOLBAR_POSITION} mobile={mobile} tools={stripTools}
-                hidden={toolsAway} onHiddenChange={hidden => frame.changeToolStack({ hidden })}>
+              {/* The file explorer floats over this corner, above the tools, which stay drawn under it. */}
+              {toolsHidden ? null : <div className="group/tool-stack pointer-events-none absolute z-20 flex flex-col items-start gap-2" style={TOOLBAR_POSITION}
+                data-mobile={mobile ? "" : undefined} data-cad-tool-groups="">
+                <FloatingToolBar tools={stripTools} />
                 <ToolStack hidden={previewing} mobile={mobile} layout={frame.toolStack} onLayoutChange={frame.changeToolStack}>{shellPanels}{toolPanels}</ToolStack>
-              </ToolColumn>}
+              </div>}
               {/* The top-right: the host's notice once a model is on screen (`view.notice`), and Quick Edit
                   under it -- hidden, not unmounted, while the view loads: a note being written outlives a
                   reload of the model. */}

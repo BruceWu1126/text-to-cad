@@ -68,11 +68,10 @@ function navbarSlot() {
   return slot;
 }
 afterEach(() => document.querySelectorAll('[data-test-navbar]').forEach(slot => slot.remove()));
-function frame({ name = 'panel.harness', preferences = tabSettings(), state = undefined as unknown, mobile = false, onStateChange = (_: unknown) => {}, onFullscreenChange = vi.fn(), appearance = { colorScheme: 'light' } as object, notice = null as React.ReactNode, features = undefined as object | undefined, environment = undefined as object | undefined } = {}) {
+function frame({ name = 'panel.harness', preferences = tabSettings(), state = undefined as unknown, mobile = false, onStateChange = (_: unknown) => {}, onFullscreenChange = vi.fn(), appearance = { colorScheme: 'light' } as object, notice = null as React.ReactNode, features = undefined as object | undefined } = {}) {
   const props = { source: { id: 'one' }, file: { path: `/models/${name}`, name, kind: 'file' }, document: null, notice, features,
     navbarSlot: navbarSlot(), onFullscreenChange, onReady() {}, onOpenFile() {}, appearance, state, onStateChange, reload() {}, data: { services: { preferences } } };
-  const host = testHost(environment ? { environment } as any : {});
-  const element = () => <ViewerHostContext.Provider value={host}><ViewerMobileContext.Provider value={mobile}>
+  const element = () => <ViewerHostContext.Provider value={testHost()}><ViewerMobileContext.Provider value={mobile}>
     <HarnessRenderer {...(props as any)} /></ViewerMobileContext.Provider></ViewerHostContext.Provider>;
   const view = render(element());
   return { ...view, preferences, remount: () => { view.unmount(); return render(element()); } };
@@ -230,12 +229,9 @@ it('a heading panel folds to its heading by its chevron, its content kept mounte
 
 it("on a phone the tree starts closed, with Select marked and nothing stored; opened, its cap is the whole column", () => {
   const { preferences } = frame({ mobile: true });
-  // The panels start hidden on a phone; shown, the tree is still as it starts there.
-  expect(layout(preferences)).toEqual({ panels: {}, collapsed: {}, closed: {} });
-  fireEvent.click(screen.getByRole('button', { name: 'Show panels' }));
   expect(shown()).toEqual(['Harness reference']);
   expect(tool('Select').querySelector('[data-tool-panel-closed]')).not.toBeNull();
-  expect(layout(preferences)).toEqual({ panels: {}, collapsed: {}, closed: {}, hidden: false });
+  expect(layout(preferences)).toEqual({ panels: {}, collapsed: {}, closed: {} });
   fireEvent.click(tool('Select'));
   expect(shown()).toEqual(['Harness tree', 'Harness reference']);
   expect(tool('Select').querySelector('[data-tool-panel-closed]')).toBeNull();
@@ -243,129 +239,6 @@ it("on a phone the tree starts closed, with Select marked and nothing stored; op
   expect(layout(preferences).closed).toEqual({ tree: false });
   fireEvent.click(within(panel('Harness tree')!).getByRole('button', { name: 'Close harness tree' }));
   expect([shown(), layout(preferences).closed]).toEqual([['Harness reference'], { tree: true }]);
-});
-
-// The stack's own toggle, the strip it leaves alone and the stack it moves.
-const toggle = () => screen.getByRole('button', { name: /^(?:Hide|Show) panels$/ });
-const toggleBox = () => document.querySelector<HTMLElement>('[data-cad-tools-toggle]')!;
-const column = () => ({ row: document.querySelector<HTMLElement>('[data-cad-tool-row]')!,
-  stack: document.querySelector<HTMLElement>('[data-cad-tool-stack]')!.parentElement! });
-const pressedTools = () => [...document.querySelectorAll('[data-cad-toolbar] button[aria-pressed="true"]')].map(button => button.getAttribute('aria-label'));
-
-it("the toggle at the top panel's top-right corner puts every panel away, mounted but out of reach and out of the accessibility tree, and brings them back, the strip staying: one write a press, and nothing else shows them", () => {
-  const { preferences, remount } = frame();
-  const stage = (name: string) => act(() => { fireEvent.click(document.querySelector(`[data-harness-stage="${name}"]`)!); });
-  fireEvent.click(tool('Keep'));
-  const panels = ['Harness tree', 'Harness reference', 'Kept controls'];
-  // Not on the strip's row: floating 2px past the top panel's right edge (jsdom lays it out at 0),
-  // centred on its first row, the stack under its control.
-  expect([...column().row.children].map(child => child.hasAttribute('data-cad-toolbar'))).toEqual([true]);
-  expect(toggleBox().style.transform).toMatch(/^translate\(2px, -?\d+px\)$/);
-  expect([toggle().getAttribute('aria-label'), toggle().getAttribute('aria-expanded')]).toEqual(['Hide panels', 'true']);
-  expect(document.getElementById(toggle().getAttribute('aria-controls')!)).toBe(column().stack);
-  expect(toggle().querySelector('svg')!.getAttribute('class')).toMatch(/\blucide-panel-left-close\b/);
-  for (const name of panels) expect(screen.getByRole('region', { name })).toBeTruthy();
-  expect(column().stack.style.transform).toBe('');
-  expect(preferences.writes).toBe(0);
-
-  fireEvent.click(toggle());
-  expect([preferences.writes, layout(preferences).hidden]).toEqual([1, true]);
-  // Every panel is out of reach and out of the accessibility tree; the strip stays as it was.
-  for (const name of panels) expect(screen.queryByRole('region', { name })).toBeNull();
-  expect(column().stack.hasAttribute('inert')).toBe(true);
-  expect(screen.getByRole('group', { name: 'Interaction tools' })).toBeTruthy();
-  expect([column().row.hasAttribute('inert'), column().row.style.transform]).toEqual([false, '']);
-  // ...and mounted as they were: the tree with its rows, the kept effect's panel, the tool in hand.
-  expect(shown()).toEqual(panels);
-  expect(within(panel('Harness tree')!).getByText('Row 1')).toBeTruthy();
-  expect(pressedTools()).toEqual(['Select', 'Keep']);
-  // The stack slides out past its own width and the inset; the toggle comes to rest where the stack
-  // began, under the strip's first button.
-  expect(column().stack.style.transform).toBe('translateX(calc(-100% - 8px))');
-  expect(toggleBox().style.transform).toMatch(/^translate\(5px, -?\d+px\)$/);
-  expect([toggle().getAttribute('aria-label'), toggle().getAttribute('aria-expanded')]).toEqual(['Show panels', 'false']);
-  expect(toggle().querySelector('svg')!.getAttribute('class')).toMatch(/\blucide-panel-left-open\b/);
-
-  // Nothing but the toggle shows them: not a reload of the model, not a trip to preview, not a remount.
-  stage('finding');
-  expect(document.querySelector('[data-cad-tools-toggle]')).toBeNull();
-  stage('idle');
-  expect(screen.queryByRole('region', { name: 'Harness tree' })).toBeNull();
-  act(() => { fireEvent.click(document.querySelector('[data-harness-ask-preview]')!); });
-  expect(screen.queryByRole('button', { name: /^(?:Hide|Show) panels$/ })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Exit preview' }));
-  expect(toggle().getAttribute('aria-label')).toBe('Show panels');
-  remount();
-  expect(screen.queryByRole('region', { name: 'Harness tree' })).toBeNull();
-  expect(preferences.writes).toBe(1);
-
-  fireEvent.click(toggle());
-  expect([preferences.writes, layout(preferences).hidden]).toEqual([2, false]);
-  for (const name of ['Harness tree', 'Harness reference']) expect(screen.getByRole('region', { name })).toBeTruthy();
-  expect([column().stack.hasAttribute('inert'), column().stack.style.transform]).toEqual([false, '']);
-  expect([toggle().getAttribute('aria-label'), toggle().getAttribute('aria-expanded')]).toEqual(['Hide panels', 'true']);
-});
-
-it('a stack that shows no panel has no toggle; the first panel to show brings it', async () => {
-  frame({ name: 'plain.harness' });
-  expect(screen.getByRole('group', { name: 'Interaction tools' })).toBeTruthy();
-  expect(document.querySelector('[data-cad-tools-toggle]')).toBeNull();
-  fireEvent.click(tool('Draw'));
-  expect(shown()).toEqual(['Drawing controls']);
-  expect((await screen.findByRole('button', { name: 'Hide panels' })).getAttribute('aria-expanded')).toBe('true');
-  fireEvent.click(tool('Draw'));
-  await waitFor(() => expect(document.querySelector('[data-cad-tools-toggle]')).toBeNull());
-});
-
-it("on a phone the panels start hidden, the strip shown, nothing stored, until the person shows them; their choice then holds over how the stack starts, on a phone or a desktop", () => {
-  const preferences = tabSettings();
-  const phone = frame({ mobile: true, preferences });
-  expect(screen.getByRole('group', { name: 'Interaction tools' })).toBeTruthy();
-  expect(screen.queryByRole('region', { name: 'Harness reference' })).toBeNull();
-  expect([toggle().getAttribute('aria-label'), toggle().getAttribute('aria-expanded')]).toEqual(['Show panels', 'false']);
-  expect([preferences.writes, layout(preferences)]).toEqual([0, { panels: {}, collapsed: {}, closed: {} }]);
-  fireEvent.click(toggle());
-  expect([preferences.writes, layout(preferences).hidden]).toEqual([1, false]);
-  expect(screen.getByRole('region', { name: 'Harness reference' })).toBeTruthy();
-  phone.unmount();
-  // Shown by the person, a phone opens with the panels up...
-  frame({ mobile: true, preferences });
-  expect(toggle().getAttribute('aria-label')).toBe('Hide panels');
-  expect(screen.getByRole('region', { name: 'Harness reference' })).toBeTruthy();
-  cleanup();
-  // ...and hidden by the person, a desktop opens with them away, the strip up.
-  frame({ preferences: tabSettings({ toolStack: { panels: {}, collapsed: {}, closed: {}, hidden: true } }) });
-  expect(screen.queryByRole('region', { name: 'Harness tree' })).toBeNull();
-  expect(screen.getByRole('group', { name: 'Interaction tools' })).toBeTruthy();
-  expect(toggle().getAttribute('aria-label')).toBe('Show panels');
-});
-
-it("the stack slides out and fades in 150ms, easing in, and back in 200ms, easing out, by transform and opacity alone, the toggle with it; under reduced motion, the system's or the app's, it is simply gone, and back", () => {
-  const motion = (node: Element) => node.className.split(/\s+/).filter(name => /^(?:transition|duration-|ease-)/.test(name)).sort();
-  // The moving parts: the stack and the toggle's box.
-  const parts = () => [column().stack, toggleBox()];
-  frame();
-  // Shown, nothing in the stack transitions visibility: whatever hides the column (preview, a
-  // capture) hides it at once.
-  expect(parts().map(motion)).toEqual([['duration-200', 'ease-out', 'transition-[transform,opacity]'], ['duration-200', 'ease-out', 'transition-transform']]);
-  fireEvent.click(toggle());
-  // Going, visibility steps at the end of the slide.
-  expect(parts().map(motion)).toEqual([['duration-150', 'ease-in', 'transition-[transform,opacity,visibility]'], ['duration-150', 'ease-in', 'transition-transform']]);
-  // Gone is transparent and, once the slide ends, invisible.
-  expect([column().stack.style.opacity, column().stack.style.visibility]).toEqual(['0', 'hidden']);
-  cleanup();
-  for (const still of ['system', 'app']) {
-    vi.stubGlobal('matchMedia', (query: string) => ({ matches: still === 'system' && query === '(prefers-reduced-motion: reduce)', media: query,
-      addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));
-    frame(still === 'app' ? { environment: { colorScheme: 'light', reducedMotion: true } } : {});
-    expect(parts().map(motion), still).toEqual([[], []]);
-    fireEvent.click(toggle());
-    expect(parts().map(motion), still).toEqual([[], []]);
-    expect(screen.queryByRole('region', { name: 'Harness tree' })).toBeNull();
-    fireEvent.click(toggle());
-    expect(screen.getByRole('region', { name: 'Harness tree' })).toBeTruthy();
-    cleanup();
-  }
 });
 
 const displayPopover = () => document.querySelector<HTMLElement>('[data-display-popover]');
@@ -516,7 +389,6 @@ it('a host showing the view small gets the model alone: no tools, no view action
   frame({ appearance: { colorScheme: 'light', compact: true } });
   expect(screen.queryByRole('group', { name: 'Interaction tools' })).toBeNull();
   expect(document.querySelector('[data-cad-tool-stack]')).toBeNull();
-  expect(document.querySelector('[data-cad-tools-toggle]')).toBeNull();
   expect(barButtons()).toEqual([]);
   expect(document.querySelector('[data-quick-edit]')).toBeNull();
   expect(viewportProps.current.viewCube).toBe(false);

@@ -73,8 +73,8 @@ use the [explicit fake host](../src/host/testing/host.ts).
 The controls of a CAD renderer (STEP, GLB, mesh, robot, DXF) are panels of its own tool
 stack over the viewport (`settings-ui.md#the-tool-stack`), and nothing it does opens or
 closes the explorer (only the file's name opens that). The tool stack's layout — the
-sizes a person dragged the tree, the Reference and Position panels to, the folded panels,
-whether the tree is closed and whether the panels are hidden — is one
+sizes a person dragged the tree, the Reference and Position panels to, the folded panels
+and whether the tree is closed — is one
 of the tab's settings (`settings.toolStack` of the tab record, `@text-to-cad/ui/tab-store`),
 beside the appearance and the home's layout.
 
