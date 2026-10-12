@@ -687,9 +687,9 @@ function enrichPackageAssemblyNode(node, partById, previous = null) {
     : (children.length
       ? children.flatMap((child) => child.leafPartIds)
       : (id ? [id] : []));
-  // Tessellation changes triangle ranges and buffers, but usually leaves tree
-  // metadata identical. Preserve those objects (and their leaf-ID arrays) so
-  // tree consumers do not allocate a new full assembly on every LOD swap.
+  // A progressive publish adds components and their buffers, but usually leaves
+  // tree metadata identical. Preserve those objects (and their leaf-ID arrays) so
+  // tree consumers do not allocate a new full assembly on every publish.
   if (previous && previous.children.length === children.length
     && children.every((child, index) => child === previous.children[index])
     && previous.id === id && previous.occurrenceId === id

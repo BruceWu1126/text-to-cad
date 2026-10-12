@@ -9,13 +9,13 @@
  *
  * ## Presets
  *
- * `preset: "render"` -- indexed, welded, quantized, meshopt-compressed. For artifacts the
- * CAD Viewer loads; the viewer registers the decoder.
+ * `preset: "export"` (the default) -- indexed and welded, **unquantized and uncompressed**:
+ * plain glTF that any loader reads with no decoder registered: every fixture but the
+ * compressed one.
  *
- * `preset: "export"` -- indexed and welded, but **unquantized and uncompressed**. Most
- * slicers and stock glTF importers cannot read `EXT_meshopt_compression`, and several read
- * `KHR_mesh_quantization` poorly. A shared writer with shared defaults would silently ship
- * an export nothing can open, so the export preset trades bytes for portability.
+ * `preset: "render"` -- indexed, welded, quantized, meshopt-compressed: the compressed GLB
+ * that proves the GLB loader decodes `EXT_meshopt_compression` and `KHR_mesh_quantization`
+ * (`glbMeshoptRoundTrip.test.js`), as a GLB a person opens may be.
  *
  * ## Input
  *
@@ -36,8 +36,7 @@
  *   name?: string, units?: string }
  * ```
  *
- * One node per primitive by default, so a caller can drive visibility per group (G-code
- * layer scrubbing) without re-meshing. A caller that needs a node to mean something
+ * One node per primitive by default. A caller that needs a node to mean something
  * else -- one glTF node per CAD OCCURRENCE, so an animation channel has something to
  * target -- gives its primitives a shared `node` key and they become the primitives of
  * one mesh instead.

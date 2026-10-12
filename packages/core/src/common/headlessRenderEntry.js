@@ -154,7 +154,7 @@ async function prepareRenderJob(job) {
   return prepared;
 }
 
-/** A 2D drawing cadgen resolved -- a `.dxf`, or a STEP section's exact cut -- not a scene. */
+/** A 2D drawing cadgen resolved (a `.dxf`), not a scene. */
 function jobIsDrawing(job) {
   return Boolean(job?.resolved?.drawingUrl);
 }
@@ -163,7 +163,6 @@ export async function runHeadlessRenderJob(job) {
   // A drawing never enters the mesh pipeline: there is no source to fetch, no
   // model to build and no viewport to fit. It is painted on a 2D canvas with
   // the code the viewer's DXF pane paints with (./headlessDrawingRender.js).
-  // A STEP section is one: cadgen cut the exact solids and drew the result.
   if (jobIsDrawing(job)) {
     return runHeadlessDrawingJob(job);
   }
@@ -178,7 +177,7 @@ export async function runHeadlessRenderJob(job) {
 // --- video: prepare once, then move only the clock -------------------------
 //
 // A still throws its source and model away when it is done. Rendering a clip
-// that way would re-fetch and re-tessellate the whole document for every frame
+// that way would re-fetch and re-decode the whole document for every frame
 // — minutes of load per second of video — so a sequence prepares ONCE and then
 // answers per-frame capture requests against the model already on the GPU.
 //

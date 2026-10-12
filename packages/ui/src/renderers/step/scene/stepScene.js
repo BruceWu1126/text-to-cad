@@ -3,13 +3,12 @@ import { buildModel } from "@text-to-cad/core/common/cadScene.js";
 // The STEP renderer's kit scene (`kit/scene.js`): ONE identity for as long as a file
 // is mounted, around whatever core's `buildModel` has built for it right now.
 //
-// A STEP does not arrive once. A large assembly is published in pieces, each
-// component's detail is swapped as the camera moves, and a display mode that changes
-// how records are BUILT replaces the whole build. None of that is a new scene to the
-// viewport: the roots below never change, so the viewport adopts this object once
-// and is told (`viewport.commitScene()`) when what is inside it changed. Re-adopting
-// a fresh identity per publish would re-dress every material and re-walk every mesh
-// six times while a big model opens.
+// A STEP does not arrive once. A large assembly is published in pieces, and a display
+// mode that changes how records are BUILT replaces the whole build. None of that is a
+// new scene to the viewport: the roots below never change, so the viewport adopts this
+// object once and is told (`viewport.commitScene()`) when what is inside it changed.
+// Re-adopting a fresh identity per publish would re-dress every material and re-walk
+// every mesh six times while a big model opens.
 //
 // Ownership. The build (`cadScene`) owns its records, materials and the geometries it
 // created. Component geometry is SHARED between builds and between scenes through

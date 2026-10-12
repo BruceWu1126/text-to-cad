@@ -264,7 +264,7 @@ function StepSurfaceBody({ view, data }) {
   }, []);
   const { display: displaySettings, scene: desiredScene, store: viewSettingsStore } = useViewSettings(resolvedColorSchemeMode);
   // The viewport's handle, and the ONE coordinator that drives it. Both are this
-  // renderer's: what it loads, and how much detail it asks for, is decided from the
+  // renderer's: what it loads is decided from the
   // RESOLVED view — long before it can describe its own load to the shell.
   const viewerRef = useRef(null);
   // ONE scene per mounted file, made HERE rather than in the viewport: the shell hook is
@@ -385,7 +385,7 @@ function StepSurfaceBody({ view, data }) {
   // Before that, while the rewritten file's next revision is still being built, the entry has no
   // mesh at all: the model on screen stays through that too (`awaitingSameFileRevision`), so a
   // rebuild is only ever an update, never the loading screen again. A model with motion is no
-  // exception: its new revision's module poses the new mesh once that is published.
+  // exception: its new revision's articulation poses the new mesh once that is published.
   const retainingPreviousStepMesh = retainsPreviousStepMesh(meshState, selectedEntry,
     { entryHasMesh: selectedEntryHasMesh, meshHash: selectedMeshHash });
   const retainedPreviousStepMeshError = retainingPreviousStepMesh &&
@@ -417,7 +417,7 @@ function StepSurfaceBody({ view, data }) {
   // Short of the parts cadgen could not mesh for good, not still updating: the viewport warns instead.
   const selectedMeshSettledShort = selectedMeshMatches && meshStateSettledShort(meshState);
 
-  // ---- motion: the kinematics module and Position, the routines and playback -------------------
+  // ---- motion: the articulation and Position, the routines and playback ------------------------
   const motion = useStepMotion({
     entry: selectedEntry, fileKey: selectedKey, resources: client.resources,
     readStored: () => session.readStored(), clipboard: host.clipboard,
@@ -432,8 +432,8 @@ function StepSurfaceBody({ view, data }) {
   const assemblyRoot = selectedAssemblyStructureReady
     ? selectedMeshData?.assemblyRoot || null
     : null;
-  // An assembly tree already contains its occurrence metadata. Display-only
-  // tessellation changes must not invalidate tree consumers through meshData.
+  // An assembly tree already contains its occurrence metadata. A publish that only
+  // adds display buffers must not invalidate tree consumers through meshData.
   const stepPartMeshData = assemblyRoot ? null : selectedMeshData;
   const stepTreeRoot = useMemo(() => buildStepTreeRoot({
     selectedEntry,

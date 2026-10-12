@@ -5,8 +5,7 @@ import { readCadWorkerTicket } from "../../client/resources.js";
 // verified) and an explicit capability set. Ordinary display asks only for
 // render data, which the mesh alone carries; picking/measurement asks for
 // selectors, which also read the part's selector table (cadgen's, its record's
-// other object) and join it to the mesh; refinement of active topology asks for
-// both so triangle ranges stay aligned. Decoding, copying into render-owned
+// other object) and join it to the mesh. Decoding, copying into render-owned
 // arrays and the join run here, off the page's main thread.
 
 import { buildComponentMeshData } from "./surfMeshData.js";

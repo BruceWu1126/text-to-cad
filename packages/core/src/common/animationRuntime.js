@@ -153,7 +153,7 @@ export function evaluateAnimationClip(THREE, clip, t) {
 }
 
 // Merge an evaluated frame into the viewer's per-part effect records — the same
-// records the kinematics module writes through ctx.effects, so animation
+// records the articulation writes (`applyArticulationToEffects`), so animation
 // COMPOSES OVER pose without either system knowing about the other. The
 // animation matrix premultiplies whatever is already there (pose first, then
 // choreography on top, in world space). Returns the number of parts whose

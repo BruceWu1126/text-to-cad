@@ -945,7 +945,7 @@ const ShellViewport = forwardRef(function ShellViewport({
     return () => { cancelled = true; };
   }, [viewUpdate?.revision, viewUpdate?.binding, viewerReadyTick]);
 
-  // A scene that changes IN PLACE (it arrives in pieces, swaps its detail, is rebuilt under
+  // A scene that changes IN PLACE (it arrives in pieces, is rebuilt under
   // the same identity) says so from its own effect, and the viewport adopts it THEN: placed
   // objects, bounds, stage, depth range and the framing rules, synchronously, so whatever the
   // renderer does next in that effect pass already sees the fitted stage. A child's effects

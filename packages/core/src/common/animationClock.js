@@ -6,9 +6,9 @@ import { isAnimationClip } from "./animationRuntime.js";
 // document sidecar, loaded and interpolated by @text-to-cad/core/common/animationRuntime;
 // this module owns only the transport around it.
 //
-// Independence, restated in code: nothing here reads a step-module definition,
-// a DOF, or a pose preset. The Pose tab and the Animation tab share a model and
-// nothing else.
+// Independence, restated in code: nothing here reads an articulation, a control
+// or a named pose. Position and the Animation tool share a model and nothing
+// else.
 
 // Whether the transport drives the model is a GATE, not a selection: the
 // Animation section's enable switch. With it off the evaluator never runs and

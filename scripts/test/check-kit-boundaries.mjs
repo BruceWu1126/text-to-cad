@@ -19,7 +19,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 export const KIT_ROOT = 'packages/ui/src/renderers/kit';
 
 // Core modules that belong to one file family, or to the STEP assembly pipeline.
-const FAMILY_CORE_IMPORT = /^@text-to-cad\/core\/(?:glb\/|lib\/(?:assembly|dxf|export|glb|render|selectors|step|surf|urdf)\/|lib\/(?:cadRefs|entryAssets|fileFormats|renderCapabilities|renderAssetClient|stepRenderAssetClient)\.js|common\/(?:cadScene|renderMeshScene|recordEffects|articulation|topology\w*|applySceneState)\.js)/;
+const FAMILY_CORE_IMPORT = /^@text-to-cad\/core\/(?:glb\/|lib\/(?:assembly|dxf|glb|render|selectors|step|surf|urdf)\/|lib\/(?:cadRefs|entryAssets|fileFormats|renderCapabilities|renderAssetClient|stepRenderAssetClient)\.js|common\/(?:cadScene|renderMeshScene|recordEffects|articulation|topology\w*|applySceneState)\.js)/;
 
 const FORBIDDEN_WORDS = [
   ['a file format', /urdf|srdf|(?<![a-z])sdf(?![a-z])|glb|gltf|dxf|(?<![a-z])stl(?![a-z])|3mf|b-?rep(?![a-z])/i],
@@ -29,7 +29,7 @@ const FORBIDDEN_WORDS = [
   ['selectors', /(?<!query)selector/i],
   ['STEP display records', /displayRecord/],
   ['explode', /explod/i],
-  ['section clipping', /clipplane(?!s)|sectioncap|clip(?:settings|bounds|axis|offset)/i],
+  ['section clipping', /clipplane(?!s)|sectioncap|clip(?:settings|bounds|axis|amount)/i],
 ];
 
 // The view-settings model names its opt-in sections (rule above). `edges` is not a

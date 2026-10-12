@@ -151,8 +151,8 @@ function dispatchQueuedRequests() {
           });
         } else post();
       }
-      // Sequential refinement needs one isolate. Grow only for ready work
-      // that existing slots cannot start, never merely for a cache waiter.
+      // Grow only for ready work that existing slots cannot start, never
+      // merely for a cache waiter.
       if (pool === currentPool && poolGeneration === generation && nextReadyRequest(generation) && currentPool.length < poolGrowthLimit) {
         try {
           currentPool.push(createWorkerSlot(currentPool.length, generation));
@@ -280,7 +280,7 @@ function ensurePool() {
 }
 
 // Shed only isolates that own no request. Memory admission can fail while a
-// progressive package load is still alive because completed tessellations
+// progressive package load is still alive because completed decodes
 // leave their workers' high-water heaps resident. The caller may retry the
 // same allocation after this synchronous reclamation without canceling work:
 // active slots remain, requests waiting for a cache read remain queued, and at
@@ -341,7 +341,7 @@ export function surfWorkerMemoryStats() {
 }
 
 // Hand the pool's isolates back once they are idle. A worker keeps the heap it
-// grew for the largest component it tessellated, and eight of those, on a model
+// grew for the largest component it decoded, and eight of those, on a model
 // whose biggest component decodes to tens of megabytes, is memory the renderer
 // process never returns while the pool lives — measured as the bulk of the gap
 // between what the scene retains and the renderer's RSS on the tendon hand.

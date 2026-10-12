@@ -151,9 +151,9 @@ export function entryHasDisplayEdges(entry) {
 }
 
 export function entryPoseUrl(entry) {
-  // The sidecar URL for a STEP model that declares kinematics — the source of
-  // the viewer's Pose tab. The block is authored on the decorator and travels
-  // in the sidecar.
+  // The sidecar URL of a STEP model with kinematics: it versions the articulation
+  // cadgen resolved from that sidecar, which travels inline on the entry
+  // (`articulation`).
   return entrySourceFormat(entry) === RENDER_FORMAT.STEP
     ? normalizeString(entry?.poseUrl)
     : "";
