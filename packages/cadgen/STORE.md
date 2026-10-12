@@ -1766,9 +1766,7 @@ active shared work is not killed merely to recover budget.
 | `CADGEN_COMPONENT_MEMORY_MB` | 384 MiB per extraction subprocess |
 
 The per-worker reservation and the dependency headroom have no settings; the
-pool calibrates both. Setting the removed `CADGEN_WORKER_MEMORY_MB` or
-`CADGEN_DEPENDENCY_MEMORY_MB` is an error at policy construction rather than a
-value silently ignored.
+pool calibrates both.
 
 This is a soft admission envelope, not a native allocator limit. A single
 OCCT operation may grow between RSS samples. Where RSS cannot be enumerated,
