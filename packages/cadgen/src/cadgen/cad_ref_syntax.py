@@ -13,7 +13,6 @@ from dataclasses import dataclass
 # with a label, its ':' qualifiers, or an entity's '.'.
 # JSON-quoted paths mirror the JS parser, including literal filename delimiters.
 QUOTED_PATH_PATTERN = r'"(?:[^"\\\r\n]|\\.)*"'
-CAD_TOKEN_RE = re.compile(rf'^\s*({QUOTED_PATH_PATTERN}|[^#"\s]*)#([^\s]*)')
 QUOTED_PREFIX_RE = re.compile(rf"^({QUOTED_PATH_PATTERN})#")
 OCCURRENCE_SELECTOR_RE = re.compile(r"^o((?:\d+)(?:\.\d+)*)$")
 OCCURRENCE_ENTITY_SELECTOR_RE = re.compile(r"^o((?:\d+)(?:\.\d+)*)\.([sfev])(\d+)$")
@@ -44,14 +43,6 @@ class ParsedSelector:
     label: str = ""
 
 
-@dataclass(frozen=True)
-class ParsedToken:
-    line: int
-    token: str
-    cad_path: str
-    selectors: tuple[str, ...]
-
-
 def _selector_type_for_kind(kind: str) -> str:
     if kind == "s":
         return "shape"
@@ -60,33 +51,6 @@ def _selector_type_for_kind(kind: str) -> str:
     if kind == "e":
         return "edge"
     return "vertex"
-
-
-def parse_cad_tokens(text: str) -> list[ParsedToken]:
-    tokens: list[ParsedToken] = []
-    for line_no, line in enumerate(text.splitlines() or [text], start=1):
-        match = CAD_TOKEN_RE.match(line)
-        if match is None:
-            continue
-        # The prefix is kept RAW: a resolver matches it as a segment-aligned suffix of the
-        # document's own path (`path_has_suffix`), so normalizing it here -- dropping its
-        # extension, say -- would break that contract.
-        cad_path = str(match.group(1) or "")
-        if cad_path.startswith('"'):
-            try:
-                cad_path = json.loads(cad_path)
-            except ValueError:
-                continue
-        selector_text = str(match.group(2) or "")
-        tokens.append(
-            ParsedToken(
-                line=line_no,
-                token=match.group(0),
-                cad_path=cad_path,
-                selectors=tuple(normalize_selector_list(selector_text)),
-            )
-        )
-    return tokens
 
 
 def _path_segments(path: str) -> list[str]:
@@ -133,8 +97,8 @@ def split_cad_ref(text: str) -> tuple[str, str]:
     """One ref as ``(file prefix, selector text)``; the prefix is ``""`` when it has none.
 
     A prefix naming a path with a space, a quote, a ``#`` or a backslash -- any absolute Windows
-    path -- is JSON-quoted (:func:`build_cad_token`), so it is decoded here rather than cut at its
-    first ``#``.
+    path -- is JSON-quoted (the viewer copies it so: ``buildCadRefToken`` in
+    ``@text-to-cad/core/lib/cadRefs.js``), so it is decoded here rather than cut at its first ``#``.
     """
     stripped = str(text or "").strip()
     quoted = QUOTED_PREFIX_RE.match(stripped)
@@ -170,12 +134,7 @@ def ensure_ref_file_matches(file_prefix: str, document_path: str, *, source_labe
     )
 
 
-def parse_selector(
-    raw_selector: str,
-    *,
-    inherited_occurrence_id: str = "",
-    inherited_label: str = "",
-) -> ParsedSelector | None:
+def parse_selector(raw_selector: str) -> ParsedSelector | None:
     # Only a LEADING "#" is the token marker. str.replace() takes the first "#"
     # anywhere, splicing "o1#f2" into the label "o1f2"; the JS parser strips /^#/
     # and leaves the rest opaque, and the two are one language.
@@ -211,23 +170,6 @@ def parse_selector(
     if entity_match:
         kind = str(entity_match.group(1))
         ordinal = int(entity_match.group(2))
-        if inherited_occurrence_id:
-            return ParsedSelector(
-                selector_type=_selector_type_for_kind(kind),
-                occurrence_id=inherited_occurrence_id,
-                ordinal=ordinal,
-                canonical=f"{inherited_occurrence_id}.{kind}{ordinal}",
-            )
-        # An inherited label carries forward exactly like an inherited occurrence id, so
-        # "#eye_shank.f45,f46" names two faces on the same part.
-        if inherited_label:
-            return ParsedSelector(
-                selector_type=_selector_type_for_kind(kind),
-                occurrence_id="",
-                ordinal=ordinal,
-                canonical=f"{inherited_label}.{kind}{ordinal}",
-                label=inherited_label,
-            )
         return ParsedSelector(
             selector_type=_selector_type_for_kind(kind),
             occurrence_id="",
@@ -268,38 +210,3 @@ def parse_selector(
         ordinal=None,
         canonical=selector,
     )
-
-
-def normalize_selector_list(raw_selector_list: str) -> list[str]:
-    normalized: list[str] = []
-    inherited_occurrence_id = ""
-    inherited_label = ""
-    for raw_selector in str(raw_selector_list or "").split(","):
-        parsed = parse_selector(
-            raw_selector,
-            inherited_occurrence_id=inherited_occurrence_id,
-            inherited_label=inherited_label,
-        )
-        if parsed is None:
-            continue
-        normalized.append(parsed.canonical)
-        # Whichever naming scheme the selector used becomes the context for the bare entity
-        # selectors that follow it, and clears the other one.
-        if parsed.occurrence_id:
-            inherited_occurrence_id = parsed.occurrence_id
-            inherited_label = ""
-        elif parsed.label:
-            inherited_label = parsed.label
-            inherited_occurrence_id = ""
-    return normalized
-
-
-def build_cad_token(cad_path: str, selector: str = "") -> str:
-    """Assemble `<file>#<selectors>`; the file half is omitted when empty.
-
-    `<prefix>#` with no selectors is meaningful -- it names a whole file.
-    """
-    prefix = str(cad_path or "").strip()
-    if re.search(r'[\s#"\\]', prefix):
-        prefix = json.dumps(prefix, ensure_ascii=False)
-    return f"{prefix}#{selector or ''}"
