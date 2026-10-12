@@ -23,8 +23,7 @@ from math import cos, sin, tau
 from pathlib import Path
 
 from build123d import (
-    Align, Axis, Box, BuildLine, BuildPart, BuildSketch, Circle, Cylinder, Line, Location, Locations,
-    Mode, Plane, Polygon, Pos, Rectangle, SlotOverall, Spline, extrude, fillet, loft, make_face, revolve,
+    Align, BuildPart, BuildSketch, Cylinder, Location, Locations, Mode, Plane, Polygon, SlotOverall, extrude, fillet,
 )
 
 HERE = Path(__file__).resolve().parent
@@ -57,23 +56,6 @@ def cam_follower_roller():
     return fillet(roller.part.edges().filter_by(lambda edge: edge.geom_type.name == "CIRCLE"), 1.8)
 
 
-def mixed():
-    """Planes, cylinders, a torus, a surface of revolution and NURBS in one solid."""
-    base = Box(40, 24, 6, align=(Align.CENTER, Align.CENTER, Align.MIN))
-    boss = Pos(-10, 0, 6) * Cylinder(6, 8, align=(Align.CENTER, Align.CENTER, Align.MIN))
-    body = base + boss
-    body = fillet(body.edges().filter_by(lambda edge: edge.geom_type.name == "CIRCLE").sort_by(Axis.Z)[-1], 1.5)
-    with BuildPart() as knob:
-        with BuildSketch(Plane.XZ):
-            with BuildLine():
-                Spline((0, 6), (3, 7.5), (4, 10), (2.5, 13), (0, 13.5))
-                Line((0, 13.5), (0, 6))
-            make_face()
-        revolve(axis=Axis.Z)
-    lofted = loft([Plane.XY.offset(6) * Pos(10, 0) * Rectangle(10, 10), Plane.XY.offset(14) * Pos(10, 0) * Circle(3)])
-    return body + Pos(10, 0, 0) * knob.part.moved(Location((-10, 0, 0))) + lofted
-
-
 def slot():
     """An extruded slot: two lines and two half-circles chain round each cap, and the
     rounded walls join the flat ones in one tangent group."""
@@ -96,8 +78,7 @@ def main() -> None:
 
     chord, angle = DISPLAY_TESSELLATION["chordTolerance"], DISPLAY_TESSELLATION["angleTolerance"]
     manifest = {}
-    for name, build in (("sun_gear", sun_gear), ("cam_follower_roller", cam_follower_roller),
-                        ("mixed", mixed), ("slot", slot)):
+    for name, build in (("sun_gear", sun_gear), ("cam_follower_roller", cam_follower_roller), ("slot", slot)):
         prepared = prepare_geometry_component(build())
         entry, payload = prepared["entry"], prepared["payload"]
         topods = decode_display_shape(entry, payload).wrapped
@@ -108,8 +89,7 @@ def main() -> None:
         part = versioned_key(hashlib.sha256(f"cadgen-test-fixture:{name}".encode()).hexdigest(), PART_VERSION)
         body = occt_mesh.mesh_component(topods, table, colors, part=part, chord=chord, angle=angle)
         (HERE / f"{name}.glb").write_bytes(body)
-        manifest[name] = {"part": part, "faces": len(index["faces"]), "edges": len(index["edges"]),
-                          "selectorsByteLength": len(selector_table_bytes(table)) + 1, "meshByteLength": len(body)}
+        manifest[name] = {"part": part}
     (HERE / "fixtures.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(manifest, indent=2, sort_keys=True))
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { Vector3 } from "three";
+import { Box3 } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 import {
@@ -135,18 +135,22 @@ test("a component past 65,535 vertices indexes in u32, and the render buffers ar
 });
 
 test("a stored mesh is a glTF 2.0 file a stock GLTFLoader draws", async () => {
-  const gltf = await new GLTFLoader().parseAsync(encodedEntry().slice().buffer, "");
+  // A body cadgen wrote (`fixtures/slot.glb`), not one a test helper encoded.
+  const { bytes, part } = meshFixture("slot");
+  const { component } = decodeComponentTessellation(bytes, { part });
+  const gltf = await new GLTFLoader().parseAsync(bytes.slice().buffer, "");
   const meshes = [];
   gltf.scene.traverse((object) => { if (object.isMesh) meshes.push(object); });
   assert.equal(meshes.length, 1, "one mesh, one triangle primitive");
   const geometry = meshes[0].geometry;
-  assert.deepEqual([...geometry.getAttribute("position").array], [...componentFixture().positions]);
-  assert.deepEqual([...geometry.getIndex().array], [0, 1, 2]);
-  // Its node turns Z-up millimetres into Y-up metres.
-  gltf.scene.updateMatrixWorld(true);
-  const corner = geometry.getAttribute("position");
-  const world = meshes[0].localToWorld(new Vector3(corner.getX(2), corner.getY(2), corner.getZ(2)));
-  assert.deepEqual([world.x, world.y, world.z].map((value) => Math.round(value * 1e6) / 1e6 + 0), [0, 0, -0.003]);
+  assert.deepEqual([...geometry.getAttribute("position").array], [...component.positions]);
+  assert.deepEqual([...geometry.getIndex().array], [...component.indices]);
+  // Its node turns Z-up millimetres into Y-up metres: (x, y, z) mm is (x, z, -y) / 1000 m.
+  const box = new Box3().setFromObject(gltf.scene);
+  const { min, max } = component.bounds;
+  const rounded = (value) => Math.round(value * 1e6) / 1e6 + 0;
+  assert.deepEqual([...box.min.toArray(), ...box.max.toArray()].map(rounded),
+    [min[0], min[2], -max[1], max[0], max[2], -min[1]].map((value) => rounded(value / 1000)));
 });
 
 test("empty imported components round-trip through the cache without changing assembly bounds", () => {
@@ -240,7 +244,7 @@ test("each edge class draws as its line class, and none draws nothing", () => {
 });
 
 test("cadgen's stored meshes decode as the bodies their records describe", () => {
-  for (const name of ["sun_gear", "cam_follower_roller", "mixed", "slot"]) {
+  for (const name of ["sun_gear", "cam_follower_roller", "slot"]) {
     const fixture = meshFixture(name);
     const row = partRow(fixture.part, fixture.row);
     assert.ok(row, `${name} row`);

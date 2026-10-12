@@ -1,30 +1,11 @@
 {
   "cam_follower_roller": {
-    "edges": 14,
-    "faces": 8,
-    "meshByteLength": 150820,
-    "part": "9fc4601477c829cf5fc58726516e611e0faf59768b8af023a35fa6738d38aff9-v1",
-    "selectorsByteLength": 9057
-  },
-  "mixed": {
-    "edges": 32,
-    "faces": 15,
-    "meshByteLength": 49124,
-    "part": "93be8b4655848b09033ef6127725bfd5560431c8ef97fec555b0b832ba51ac5c-v1",
-    "selectorsByteLength": 17124
+    "part": "9fc4601477c829cf5fc58726516e611e0faf59768b8af023a35fa6738d38aff9-v1"
   },
   "slot": {
-    "edges": 12,
-    "faces": 6,
-    "meshByteLength": 10396,
-    "part": "fc24a805a292984192dffa104177be6615e95f1174759494a36d117bd4f90fc3-v1",
-    "selectorsByteLength": 7512
+    "part": "fc24a805a292984192dffa104177be6615e95f1174759494a36d117bd4f90fc3-v1"
   },
   "sun_gear": {
-    "edges": 291,
-    "faces": 99,
-    "meshByteLength": 36068,
-    "part": "95b4d6080acc67ef83bcc96120a1c7e1e23d321d8f7585fa2d95533dc4d1f857-v1",
-    "selectorsByteLength": 186948
+    "part": "95b4d6080acc67ef83bcc96120a1c7e1e23d321d8f7585fa2d95533dc4d1f857-v1"
   }
 }

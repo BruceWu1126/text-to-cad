@@ -60,15 +60,6 @@ for (const name of ["sun_gear", "cam_follower_roller", "slot"]) {
     }
     assert.equal(bundle.buffers.edgeIds.length, segmentCursor);
     assert.equal(bundle.buffers.edgeIndices.length, 2 * segmentCursor);
-    // The face runs cover the mesh once, naming the table's rows.
-    const runs = bundle.buffers.faceRuns;
-    assert.equal(runs.length, 5 * rangeByOrd.size);
-    let covered = 0;
-    for (let offset = 0; offset < runs.length; offset += 5) {
-      covered += runs[offset + 3];
-      assert.equal(faces[runs[offset + 4]].triangleStart, runs[offset + 2]);
-    }
-    assert.equal(covered, component.indices.length / 3);
     for (const relation of ["faceEdgeRows", "edgeFaceRows", "edgeVertexRows", "vertexEdgeRows"]) {
       assert.deepEqual(Array.from(bundle.buffers[relation]), table.relations[relation]);
     }

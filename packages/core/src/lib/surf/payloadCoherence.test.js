@@ -47,10 +47,12 @@ function assertCoherent(label, component, meshData, bundle) {
   assert.equal(runTriangles, meshTriangles, `${label}: faceRuns cover exactly the mesh triangles`);
   const faceRanges = meshFaceRanges(component);
   assert.equal(rows.length, faceRanges.length, `${label}: one run per face range`);
+  const ordinal = bundle.manifest.tables.faceColumns.indexOf("ordinal");
   faceRanges.forEach((range, rangeIndex) => {
     const row = rows[rangeIndex];
     assert.equal(row.triangleStart, range.indexStart / 3, `${label}: run ${rangeIndex} start`);
     assert.equal(row.triangleCount, range.indexCount / 3, `${label}: run ${rangeIndex} count`);
+    assert.equal(bundle.manifest.faces[row.faceRow][ordinal], range.ord, `${label}: run ${rangeIndex} names its face's row`);
   });
   // Runs must tile [0, meshTriangles) without gaps or overlaps: contiguous
   // face highlights depend on it.
