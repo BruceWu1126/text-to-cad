@@ -481,13 +481,6 @@ def read_source_sidecar(
     return payload
 
 
-def model_is_generated(step_path: Path | str) -> bool:
-    """Whether this artifact carries a sidecar this cadgen reads. Never
-    raises: classification is not a render, and the loud refusal belongs to
-    the readers of the SECTIONS."""
-    return source_sidecar_matches_document(step_path)
-
-
 def source_sidecar_matches_document(
     step_path: Path | str,
     *,

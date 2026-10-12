@@ -118,16 +118,14 @@ class SidecarSchemaGate(unittest.TestCase):
             read_source_sidecar(self.document)
 
     def test_classification_treats_another_schema_as_no_sidecar(self) -> None:
-        """The generated-vs-imported fast yes never raises — a badge is not a
-        render — so a sidecar this cadgen does not read is simply not a marker.
-        Mirrors artifactStatus.mjs."""
-        from cadgen._internal.source_sidecar import model_is_generated
-
-        self.assertFalse(model_is_generated(self.document))
+        """A sidecar this cadgen does not read is simply not a current one: the
+        predicate a build's currency check asks answers no and never raises, since
+        the loud refusal belongs to the readers of the sections."""
+        self.assertFalse(source_sidecar_matches_document(self.document))
         self._write_at_schema(SOURCE_SIDECAR_SCHEMA_VERSION - 1)
-        self.assertFalse(model_is_generated(self.document))
+        self.assertFalse(source_sidecar_matches_document(self.document))
         write_source_sidecar(self.document, CURRENT_SIDECAR)
-        self.assertTrue(model_is_generated(self.document))
+        self.assertTrue(source_sidecar_matches_document(self.document))
 
     def test_a_sidecar_for_replaced_step_bytes_is_refused(self) -> None:
         write_source_sidecar(self.document, CURRENT_SIDECAR)
