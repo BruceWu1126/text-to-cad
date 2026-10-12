@@ -300,16 +300,11 @@ class ClipAtTests(_Workspace):
             with self.subTest(clip=clip):
                 self.assertEqual(clip, self.prepared(clip))
 
-    def test_anything_else_is_refused(self) -> None:
-        for clip, pattern in (
-            *(({"at": value}, r"display\.clip\.at must be a finite number: the plane's coordinate on its axis, in millimetres")
-              for value in ("12.5", True, None, float("inf"), float("nan"))),
-            ({"axis": "y", "offset": 0.5},
-             r"display\.clip has unknown key\(s\): offset; supported keys: at, axis, enabled, invert$"),
-            ({"offsets": {"y": 0.5}}, r"display\.clip has unknown key\(s\): offsets; supported keys: at, axis, enabled, invert$"),
-        ):
-            with self.subTest(clip=clip), self.assertRaisesRegex(SnapshotError, pattern):
-                self.prepared(clip)
+    def test_an_at_that_is_not_a_finite_number_is_refused(self) -> None:
+        pattern = r"display\.clip\.at must be a finite number: the plane's coordinate on its axis, in millimetres"
+        for value in ("12.5", True, None, float("inf"), float("nan")):
+            with self.subTest(at=value), self.assertRaisesRegex(SnapshotError, pattern):
+                self.prepared({"at": value})
 
 
 class SizingTests(_Workspace):

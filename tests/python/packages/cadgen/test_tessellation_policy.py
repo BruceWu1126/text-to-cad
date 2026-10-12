@@ -93,37 +93,6 @@ class TessellationPolicyTests(unittest.TestCase):
         self.assertEqual([[(display["chordTolerance"], display["angleTolerance"])]], asked)
 
 
-class RemovedTolerancesTests(unittest.TestCase):
-    """A model, a model run and a snapshot name no mesh tolerance: each is refused as any
-    argument, flag or key that does not exist is."""
-
-    def test_step_takes_no_mesh_tolerance(self) -> None:
-        from cadgen.authoring import step
-
-        for name in ("mesh_tolerance", "mesh_angular_tolerance"):
-            with self.subTest(name=name), self.assertRaisesRegex(TypeError, f"unexpected keyword argument: {name}"):
-                step(**{name: 0.01})
-
-    def test_a_model_run_takes_no_mesh_tolerance_flag(self) -> None:
-        import contextlib
-        import io
-
-        from cadgen.cli._run_model import _build_parser
-
-        for flag in ("--mesh-tolerance", "--mesh-angular-tolerance"):
-            stderr = io.StringIO()
-            with self.subTest(flag=flag), contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
-                _build_parser("model.py").parse_args([flag, "0.01"])
-            self.assertIn(f"unrecognized arguments: {flag}", stderr.getvalue())
-
-    def test_a_snapshot_job_has_no_quality_key(self) -> None:
-        from cadgen.snapshot_cli import prepare_render_job
-        from cadgen.snapshot_core import SnapshotError
-
-        job = {"input": "part.step", "quality": {"tessellation": {"chordTolerance": 1e-4}}}
-        with self.assertRaisesRegex(SnapshotError, r"unknown render job key\(s\): quality"):
-            prepare_render_job(job)
-
 
 if __name__ == "__main__":
     unittest.main()

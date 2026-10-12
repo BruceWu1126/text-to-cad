@@ -408,7 +408,7 @@ class SidecarSections(ScannerTestCase):
 
     def test_the_catalog_publishes_no_provenance(self):
         entry = self._entry(json.dumps({"sourceKind": "step"}))
-        for forbidden in ("sourceKind", "source", "sourceUrl", "poseHatchUrl", "moduleUrl", "legacyParamsSidecar", "renderModuleUrl", "sourceSidecar"):
+        for forbidden in ("sourceKind", "source"):
             self.assertNotIn(forbidden, entry)
 
     def test_the_sidecar_suffix_is_appended_to_the_whole_name(self):

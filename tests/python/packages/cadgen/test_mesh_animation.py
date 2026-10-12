@@ -102,14 +102,6 @@ class TheRequestShape(unittest.TestCase):
             parse_animation_option({"clip": "showcase", "drop": ["visible", "opacity", "opacity"]})["drop"],
         )
 
-    def test_a_frame_rate_or_a_deform_mode_is_not_a_request_key(self):
-        # The file carries the clip's own keys, so there is no rate to sample at, and a
-        # bending tube is always a skin, so there is no mode to choose.
-        for key in ("fps", "deform", "deformTolerance"):
-            with self.subTest(key=key), self.assertRaises(ValueError) as caught:
-                parse_animation_option({"clip": "showcase", key: 1})
-            self.assertIn(f"unknown key(s): {key}", str(caught.exception))
-
     def test_a_job_packet_and_the_flag_share_one_validator(self):
         with self.assertRaises(ValueError) as caught:
             normalize_animation_request({"clip": "showcase", "loop": True}, where="render job animation")

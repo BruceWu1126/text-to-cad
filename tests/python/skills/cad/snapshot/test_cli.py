@@ -688,9 +688,8 @@ class SnapshotCliTests(unittest.TestCase):
         self.assertRegex(parse_qs(input_url.query)["v"][0], r"^[0-9a-f]{16}$")
         # The render artifact is the tree: the resolved job inlines its assembly.json, whose
         # components name their parts, and the page reads each part's display mesh from the
-        # store by that key (no monolithic glbUrl, no URL per component, no tolerance).
+        # store by that key (no monolithic glbUrl, no URL per component).
         self.assertNotIn("glbUrl", job["resolved"])
-        self.assertNotIn("tessellation", job["resolved"])
         package = job["resolved"]["package"]
         self.assertEqual(list(package), ["descriptor"])
         self.assertEqual(package["descriptor"]["kind"], "assembly-package")

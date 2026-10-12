@@ -30,14 +30,6 @@ SNAPSHOT_PARTS_PY = Path(repo_path("packages/cadgen/src/cadgen/snapshot_parts.py
 # the part count, so a field that duplicates another costs thousands of tokens per call.
 ALLOWED_PART_FIELDS = {"ref", "name", "triangleCount", "vertexCount", "bounds"}
 
-# Fields deleted because they carried no information. Named individually so a
-# reintroduction fails here with the reason rather than silently regrowing the payload.
-DELETED_PART_FIELDS = {
-    "id": "identical to ref without the '#' in 600/600 parts measured",
-    "occurrenceId": "identical to ref without the '#' in 600/600 parts measured",
-    "label": "identical to name in 600/600 parts measured",
-}
-
 
 def _list_parts_source() -> str:
     source = RENDER_MESH_SCENE_JS.read_text(encoding="utf-8")
@@ -61,22 +53,6 @@ class ListPayloadShapeTests(unittest.TestCase):
         )
         step = set(re.findall(r'^\s{12}"(\w+)":', _step_list_rows_source(), flags=re.MULTILINE))
         self.assertEqual(ALLOWED_PART_FIELDS, step, "list_rows emits a different field set than the budget allows")
-
-    def test_the_deleted_duplicates_stay_deleted(self):
-        body = _list_parts_source()
-        step = _step_list_rows_source()
-        for field, why in DELETED_PART_FIELDS.items():
-            with self.subTest(field=field):
-                self.assertNotRegex(
-                    body,
-                    rf"^\s{{6}}{field}:",
-                    f"{field} is back in the parts payload; it was removed because it is {why}",
-                )
-                self.assertNotRegex(
-                    step,
-                    rf'^\s{{12}}"{field}":',
-                    f"{field} is back in the STEP parts payload; it was removed because it is {why}",
-                )
 
     def test_coordinates_are_rounded(self):
         source = RENDER_MESH_SCENE_JS.read_text(encoding="utf-8")

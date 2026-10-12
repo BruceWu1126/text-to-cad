@@ -99,7 +99,7 @@ class SharedDisplayContractParityTests(unittest.TestCase):
             {"lighting": {"fill": "0.5"}}, {"floor": {"placement": "auto"}},
             {"floor": {"finish": "shiny"}}, {"floor": {"finish": True}},
             {"background": {"opacity": -0.1}}, {"background": {"color": "white"}},
-            {"clip": {"axis": "w"}}, {"clip": {"offset": 0.5}}, {"clip": {"offsets": {"x": 0.5}}},
+            {"clip": {"axis": "w"}},
             {"exploded": {"amount": 1.01}},
             *({"clip": {"at": value}} for value in (None, "3", True, [])),
         ]

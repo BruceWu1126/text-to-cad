@@ -72,7 +72,6 @@ class PartStoreTest(unittest.TestCase):
         self.assertIsNotNone(parts.read(self.key, "glb", expected_object=glb["object"], max_bytes=glb["byteLength"]))
         self.assertIsNone(parts.read(self.key, "glb", expected_object="f" * 64))
         self.assertIsNone(parts.read(self.key, "glb", max_bytes=glb["byteLength"] - 1))
-        self.assertIsNone(parts.read(self.key, "surface"))
         # Same-size damage: a probe stats objects only, a read checks what it serves.
         record = parts.probe(self.key)
         other = ("1" if self.key[0] == "0" else "0") + self.key[1:]

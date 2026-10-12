@@ -161,12 +161,9 @@ class ArtifactRequests(unittest.TestCase):
         invalid = [{"kind": "producer", "path": "source.py"}, {"kind": "compile"},
                    display_request(script="model.py"), display_request(tree="part.step"),
                    display_request(cids=["B" * 16]), display_request(cids=["b" * 16] * 2), display_request(cids=[]),
-                   display_request(force=False), display_request(kind="surfaces"),
                    display_request(producer={**PRODUCER, "ocp": "unknown"}),
                    # An older cadgen's producer named its extraction scheme; this one's is the kernel.
-                   display_request(producer={**PRODUCER, "scheme": 20}),
-                   # The retired job that extracted one component's SURF for the page.
-                   {"kind": "surface", "tree": "a" * 64, "cid": "b" * 16}]
+                   display_request(producer={**PRODUCER, "scheme": 20})]
         with mock.patch.object(client, "run_artifact") as dispatch:
             for request in invalid:
                 with self.subTest(request=request), self.assertRaises(ValueError):

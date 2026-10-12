@@ -4,10 +4,10 @@ The decorators are metadata-attachers lowered into EntrySpec.mesh_exports;
 production runs through the ONE mesh engine the `cadgen stl|3mf|glb build`
 doors use, gated by the shared content-keyed ledger. Contracts pinned here:
 stacking order is behavior-neutral (AST scanning sees the whole decorator
-list), duplicates and @dxf misuse fail loudly, bare declarations land beside
-the STEP artifact, script runs produce/heal declared exports without rebuilding
-the model, and the format door byte-matches the script run, shares its ledger,
-and writes nothing outside its own format.
+list), duplicates, @dxf misuse and a keyword @step does not take fail loudly,
+bare declarations land beside the STEP artifact, script runs produce/heal
+declared exports without rebuilding the model, and the format door byte-matches
+the script run, shares its ledger, and writes nothing outside its own format.
 """
 
 from __future__ import annotations
@@ -134,6 +134,12 @@ class MeshExportMetadataTest(unittest.TestCase):
                         "    from cadgen import build123d as bd\n"
                         "    return bd.Rectangle(10, 5)\n"
                     )
+
+    def test_step_refuses_a_keyword_it_does_not_take(self) -> None:
+        from cadgen.authoring import step
+
+        with self.assertRaisesRegex(TypeError, "@step got an unexpected keyword argument: colour, size"):
+            step(size=1, colour="red")
 
     def test_runtime_decorators_converge_both_orders(self) -> None:
         from cadgen.authoring import step as step_deco, stl as stl_deco
