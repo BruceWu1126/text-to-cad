@@ -527,9 +527,8 @@ class CadApp:
                     response.send_json(200, self._version())
                 else:
                     # An unrecognised /__cad/* path is a bad API call, not a
-                    # page. Falling through to the SPA answered typo'd and
-                    # retired routes with index.html at 200, so a client doing
-                    # res.json() got an HTML parse error instead of a status.
+                    # page: a 404 a client doing res.json() can read, never the
+                    # SPA's index.html at 200.
                     response.send_json(404, {"error": "Not found"})
             except Exception as error:  # noqa: BLE001
                 self._crashed(error, bugs_only=True)  # a bad request is the caller's; a mistake in our code is a crash

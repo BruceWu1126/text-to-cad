@@ -8,7 +8,7 @@ point. The rules:
 * a refused request leaves an existing OUT untouched; an accepted one clears it
   before anything is built;
 * an option an input cannot honour is refused BY NAME, never ignored;
-* each setting has one name, and a retired name says which replaced it;
+* each setting has one name, and any other is an unknown name;
 * sizes and timeouts are closed and ranged here, not in the page.
 """
 
@@ -102,7 +102,7 @@ class RefusedRequestsLeaveOutUntouched(_Workspace):
             (stl_door, [self.stl, self.out, "--display", '{"clip":{"axis":"x"}}'], r"display\.clip applies to STEP"),
             (stl_door, [self.stl, self.out, "--display", '{"lighting":{"fill":9}}'], r"display\.lighting\.fill"),
             (step_door, [self.stl, self.out], r"does not render \.stl inputs"),
-            (step_door, [script, self.out], r"a model script is a program"),
+            (step_door, [script, self.out], r"does not render \.py inputs"),
             (stl_door, [self.stl, self.out, "--mode", "orbit"], r"Unsupported render mode: orbit"),
             (stl_door, ["--job", job], r"unknown render job key\(s\): framerate"),
             (stl_door, [self.stl, self.out, "--width", "0"], r"output width must be a positive whole number"),
@@ -319,12 +319,6 @@ class SizingTests(_Workspace):
         for name, expected in snapshot_core.SIZE_PROFILES.items():
             with self.subTest(profile=name):
                 self.assertEqual(expected, self.size(output={"sizeProfile": name}))
-        for retired, replacement in snapshot_core.RETIRED_SIZE_PROFILES.items():
-            self.assertIn(replacement, snapshot_core.SIZE_PROFILES)
-            with self.subTest(retired=retired), self.assertRaisesRegex(
-                SnapshotError, rf"size profile '{retired}' was removed; use '{replacement}'"
-            ):
-                self.size(output={"sizeProfile": retired})
         with self.assertRaisesRegex(SnapshotError, r"Unknown size profile: 'nonsense'\. Size profiles: simple \(1200x900\)"):
             self.size(output={"sizeProfile": "nonsense"})
         # No case or underscore folding: exactly the listed names.
@@ -429,7 +423,8 @@ class JobFileAndDisplayFileTests(_Workspace):
     """S5/S11: a job is a file, and a path that is not one is said so."""
 
     def test_there_is_no_stdin_job(self) -> None:
-        with self.assertRaisesRegex(SnapshotError, r"reading a job from stdin \(--job -\) was removed"):
+        # `-` is a path like any other: no file of that name, no job.
+        with self.assertRaisesRegex(SnapshotError, r"--job file does not exist: -"):
             load_job_from_options(SnapshotOptions(job="-"), cwd=self.root)
         with self.assertRaisesRegex(SnapshotError, r"render requires a TARGET or --job") as caught:
             load_job_from_options(SnapshotOptions(), cwd=self.root)
@@ -459,20 +454,13 @@ class OneNamePerSettingTests(_Workspace):
     def test_selection_is_focus_or_hide(self) -> None:
         self.write("part.step", "ISO-10303-21;\nEND-ISO-10303-21;\n")
         with self.assertRaisesRegex(
-            SnapshotError, r"selection has unknown key\(s\): refs; supported keys: focus, hide; "
-                           r"selection\.refs was removed; use selection\.focus"
+            SnapshotError, r"selection has unknown key\(s\): refs; supported keys: focus, hide$"
         ):
             self.resolve({"input": "part.step", "selection": {"refs": ["#o1.2"]}, "outputs": [{"path": "o.png"}]})
         with self.assertRaisesRegex(SnapshotError, "selection must be a"):
             self.resolve({"input": "part.step", "selection": ["#o1.2"], "outputs": [{"path": "o.png"}]})
 
     def test_each_view_has_one_camera_preset(self) -> None:
-        for retired, replacement in snapshot_core.RETIRED_CAMERA_PRESETS.items():
-            for camera in (retired, {"preset": retired}):
-                with self.subTest(camera=camera), self.assertRaisesRegex(
-                    SnapshotError, rf"camera preset '{retired}' was removed; use '{replacement}'"
-                ):
-                    self.resolve(self.stl_job(camera=camera))
         for preset in snapshot_core.CAMERA_PRESETS:
             self.resolve(self.stl_job(camera=preset))
         self.resolve(self.stl_job(camera="35:-20"))
@@ -484,9 +472,6 @@ class OneNamePerSettingTests(_Workspace):
         block = re.search(r"RENDER_CAMERA_PRESETS = Object\.freeze\(\{(.*?)\n\}\);", source, re.S)
         self.assertEqual(set(re.findall(r"^\s+(\w+): Object\.freeze", block.group(1), re.M)),
                          set(snapshot_core.CAMERA_PRESETS))
-        retired = re.search(r"RETIRED_CAMERA_PRESETS = Object\.freeze\(\{(.*?)\}\)", source, re.S)
-        self.assertEqual(dict(re.findall(r'(\w+): "(\w+)"', retired.group(1))),
-                         snapshot_core.RETIRED_CAMERA_PRESETS)
 
 
 class DisplayIsValidatedOncePerJob(_Workspace):

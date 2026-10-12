@@ -50,16 +50,11 @@ from cadgen._internal.atomic_replace import replace_atomic, temp_suffix
 # path from the artifact (:func:`source_sidecar_path`), or match the artifact
 # suffix too (`.step.json` / `.stp.json`).
 SOURCE_SIDECAR_SUFFIX = ".json"
-# 7: documentHash binds resolved kinematics to the exact STEP bytes they name.
-# 6: the animation and meshExports sections were removed. A mesh door
-#    tessellates the document's tree and writes the file
-#    it was asked for, and what a model declares lives in its record. A sidecar
-#    is written for kinematics alone. 5 moved provenance OUT of the sidecar.
-# 8: intrinsic PBR finishes were inline occurrence annotations.
-# 9: named material libraries + assignments, and embedded animation.
-# 10: animation is baked keyframes over document occurrences, never code: glTF's
-#     LINEAR keys (a transform is [d, q] about its pivot, lerped and slerped), and
-#     for a tube, centerline keys cadgen poses as a skin's joints (tube_skin).
+# The one schema read and written: optional kinematics (resolved mates,
+# couplings, poses), appearance (named material definitions assigned to
+# canonical leaf occurrences) and animation (keyframes baked from the model's
+# Python clips, cadgen._internal.animation_bake), bound to the saved STEP's bytes
+# by documentHash. A sidecar declaring any other schema is refused, never read.
 SOURCE_SIDECAR_SCHEMA_VERSION = 10
 
 # What a sidecar may CONTAIN: declarations plus the exact-document binding.

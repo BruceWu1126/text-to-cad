@@ -120,24 +120,6 @@ class LazyCompound(Compound):
         return self.__dict__.get("_lazy_shape") is not None
 
     @property
-    def cad_material(self):
-        raise AttributeError(
-            "cad_material authoring was removed; declare named materials with "
-            "@step(materials={'definitions': ..., 'assignments': ...})"
-        )
-
-    @cad_material.setter
-    def cad_material(self, value) -> None:
-        raise AttributeError(
-            "cad_material authoring was removed; declare named materials with "
-            "@step(materials={'definitions': ..., 'assignments': ...})"
-        )
-
-    @cad_material.deleter
-    def cad_material(self) -> None:
-        raise AttributeError("cad_material authoring was removed; remove the @step materials= assignment instead")
-
-    @property
     def cad_face_ordinal_colors(self):
         """The pinned root face colors, with the same ownership as material."""
         if "cad_face_ordinal_colors" not in self.__dict__ and not self._forced:

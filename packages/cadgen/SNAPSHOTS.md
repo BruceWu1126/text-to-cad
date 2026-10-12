@@ -27,7 +27,7 @@ section view. `--camera` or a job/output `camera` specifies pose and framing;
 `display.camera` specifies projection and focal length (20–200 mm). Render
 defaults to perspective; other presets use orthographic projection. Opacity is
 0 for transparent and 1 for opaque, including partially transparent PNG
-backgrounds. Unknown keys and retired modes are refused.
+backgrounds. Unknown keys and modes are refused.
 
 A STEP model with no surfaces -- empty, or only curves and points -- has nothing a
 view draws. Its snapshot is still written, with a warning that says the model has

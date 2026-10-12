@@ -221,10 +221,6 @@ def _materialized_metadata(node: Any, *, root: bool) -> tuple:
     if color is not None and type(color) is not Color:
         raise ValueError("materialized color is not a build123d Color")
     rgba = None if color is None else tuple(float(v) for v in color)
-    if "cad_material" in node.__dict__:
-        raise ValueError(
-            "cad_material authoring was removed; declare named materials with @step(materials=...)"
-        )
     authored_material = node.__dict__.get("_cadgen_material")
     if authored_material is None:
         authored_material = {}

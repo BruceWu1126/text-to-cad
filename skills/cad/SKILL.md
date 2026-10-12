@@ -21,7 +21,7 @@ Use the installed local skill files for the current interface.
 | **See a model, a pose or a clip** | `cadgen step snapshot`, or a mesh format's `snapshot`. | [Snapshots](references/snapshot-review.md) |
 | **Articulate or animate a model** | `kinematics=` or `animation=` on the model's decorator. | [Kinematics and animation](references/kinematics.md) |
 | **Open an existing STEP/STP, STL, 3MF or GLB** | Show it to the user. | [Show the model](#show-the-model) |
-| **A message names a sidecar schema or a retired interface** | Its migration: until then the model renders as a plain part, without kinematics, materials or animation. | [Migrations](references/migrations.md) |
+| **A sidecar schema is refused, or source or commands written for another cadgen version fail** | Their migration: until a refused sidecar is migrated the model renders as a plain part, without kinematics, materials or animation. | [Migrations](references/migrations.md) |
 
 For 2D DXF drawings use `$dxf`; this skill owns any 3D part the drawing projects.
 Use the corresponding robot-description skill for URDF, SRDF or SDF.

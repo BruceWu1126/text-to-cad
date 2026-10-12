@@ -2,15 +2,20 @@
 
 Read this file when source, command syntax or sidecars target a different
 cadgen version. `cadgen doctor <skill-dir>` compares the installed version with
-the skill's pin. cadgen cuts interfaces over without compatibility aliases: a
-retired interface fails with an error naming its replacement.
+the skill's pin. cadgen cuts interfaces over with no compatibility layer: a
+retired command, flag, argument, key or import is gone, and fails the way an
+unknown one does (an unknown command, an unrecognized argument, an unknown key,
+an `ImportError`) without naming what replaced it. The sections below map old
+forms to current ones.
 
 ## Migration messages
 
-A build, snapshot or check can report that a model needs migrating: a sidecar
-refused for its schema version, or a retired decorator argument or command named
-by an error. The CAD Viewer does not flag such a model: until it is migrated it
-shows as a plain part, without its kinematics, materials or animation.
+A build, snapshot or check names one migration itself: a sidecar refused for
+its schema version. Source or commands written for an older cadgen fail with the
+current contract's ordinary errors instead; compare them with the sections
+below. The CAD Viewer does not flag a model whose sidecar is refused: until it is
+migrated it shows as a plain part, without its kinematics, materials or
+animation.
 
 - A refused sidecar (`unsupported sidecar schema N (expected M)`) is replaced by
   rerunning the model's script (`python <model>.py`). An imported STEP with no

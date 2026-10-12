@@ -18,11 +18,6 @@ __all__ = ["read_step", "read_scene", "StepScene", "Occurrence", "Selection"]
 
 EntityKind = Literal["shape", "face", "edge", "vertex"]
 
-def __getattr__(name: str):
-    if name in {"load_step_scene", "located_shape", "occurrence_selector_id", "scene_occurrence_shape"}:
-        raise ImportError(f"{name} has been removed; use read_scene(path), scene.resolve(ref) and selection.shape()")
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
 
 def _resolve_input(step_path: Path | str, *, reader: str) -> Path:
     """Resolve a STEP a model asked for: it must exist, and must not be an

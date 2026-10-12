@@ -17,8 +17,7 @@ Two verbs make documents, and the difference is what lands on disk:
   which is what tells the two verbs apart at the command line.
 
 Model scripts are RUN, never passed here: ``python model.py`` is the one source
-door (README law 7). Every verb takes a DOCUMENT and refuses a ``.py`` by
-naming the run.
+door (README law 7). Every verb takes a DOCUMENT.
 
 Import discipline: nothing here may pull in OCP/build123d at module scope. A
 model script pays this import before its freshness gate runs, and the whole
@@ -142,12 +141,6 @@ def build(
         skipped=bool(payload.get("skipped")),
         sidecar_only=bool(payload.get("sidecarOnly")),
     )
-
-
-def __getattr__(name: str):
-    if name in {"inspect", "INSPECTIONS"}:
-        raise ImportError("step.inspect has been removed; use cadgen.read_scene and cadgen.geometry in a Python script")
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 callable_namespace(__name__, "step")

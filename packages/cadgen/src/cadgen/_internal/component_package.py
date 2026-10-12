@@ -262,16 +262,7 @@ _MATERIAL_KEYS = ("roughness", "metalness", "clearcoat", "clearcoatRoughness", "
 
 
 def _occurrence_material(child: Any) -> dict[str, Any] | None:
-    """Private material metadata restored from a pinned model tree.
-
-    Public ``cad_material`` mutation was replaced by ``@step(materials=...)``;
-    finding that dynamic attribute is therefore a hard authoring error.
-    """
-    if "cad_material" in getattr(child, "__dict__", {}):
-        raise ValueError(
-            "cad_material authoring was removed; declare named materials with "
-            "@step(materials={'definitions': ..., 'assignments': ...})"
-        )
+    """Private material metadata restored from a pinned model tree."""
     material = getattr(child, "_cadgen_material", None)
     if not isinstance(material, dict):
         return None
@@ -499,8 +490,7 @@ class _StageTimer:
 # interpretation change): that re-keys every user's store, so it is rare and
 # deliberate. An extractor, selector-table or mesher fix bumps the version of
 # that derived artifact (cadgen.store.parts.PART_VERSION) and never this
-# string. There is no global cache-schema salt any more; STORE.md "Geometry
-# identity and versions" records the rule and the retired salt's history.
+# string. STORE.md "Geometry identity and versions" records the rule.
 GEOMETRY_SCHEME = "cadgen-geometry-input-v3"
 GEOMETRY_CODECS = frozenset({"bintools-v4", "bintools-v3", "breptools-ascii-v3"})
 COMPONENT_KINDS = frozenset({"native", "eager-only"})

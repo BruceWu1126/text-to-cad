@@ -1,8 +1,8 @@
 """The direct-run front door: `python <model>.py` (cadgen.cli._run_model).
 
-The gen CLI is retired (library-first); a model script dispatches its own argv
-through the @step/@dxf decorator into this runner. These tests pin the argv
-contract and the teaching errors that route agents to the migration doc.
+A model script dispatches its own argv through the @step/@dxf decorator into
+this runner. These tests pin the argv contract, and that a script failing it
+gets the current contract's own errors.
 """
 
 from __future__ import annotations

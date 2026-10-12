@@ -25,8 +25,8 @@ from cadgen.results import MeshExportResult
 
 __all__ = ["build", "snapshot"]
 
-#: ``cadgen stl snapshot``'s verb: render an STL mesh. The mesh half of what
-#: ``step snapshot`` used to carry, now behind the door that writes the format.
+#: ``cadgen stl snapshot``'s verb: render an STL mesh, behind the door that
+#: writes the format.
 snapshot = mesh_snapshot_verb("stl")
 
 

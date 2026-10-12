@@ -96,8 +96,6 @@ SUPPORTED_JOB_KEYS = frozenset(
 SUPPORTED_OUTPUT_SETTINGS_KEYS = frozenset(
     {"sizeProfile", "padding", "viewLabels", "tightFrame", "transparent", "renderScale"}
 )
-# One name per setting: a key that used to be accepted names its replacement.
-RETIRED_OUTPUT_SETTINGS_KEYS = {"paddingPercent": "padding"}
 # The ranges the renderer honours (renderOptions.js framePadding and
 # configurePngRenderer clamp to exactly these). A value outside one used to be
 # clamped in the page without a word, so it is refused here instead.
@@ -130,20 +128,6 @@ SIZE_PROFILES: dict[str, tuple[int, int]] = {
 }
 # What a snapshot is sized as when it names no profile and no width/height.
 DEFAULT_SIZE_PROFILE = "diagnostic"
-# Names that used to be accepted for the same sizes. One name per profile; an old
-# one is refused with the name that replaced it.
-RETIRED_SIZE_PROFILES = {
-    "square": "simple-square",
-    "simple-part": "simple",
-    "unlabeled": "simple",
-    "hero": "presentation-large",
-    "large-presentation": "presentation-large",
-    "complex-assembly": "assembly",
-    "complex-assembly-large": "assembly-large",
-    "contactsheet": "contact-sheet",
-    "dimensioned": "labeled",
-    "section": "labeled",
-}
 # The largest side an output may ask for. Past it the browser clamps the drawing
 # buffer without saying so and the file comes back a different size than was
 # requested, so the request is refused with this number instead. At the
@@ -185,17 +169,10 @@ CAMERA_OPTION_KEYS = frozenset({
 # One name per view. Mirrored as RENDER_CAMERA_PRESETS in
 # packages/core/src/common/camera.js (the parity is tested).
 CAMERA_PRESETS = frozenset({"front", "back", "right", "left", "top", "bottom", "iso"})
-RETIRED_CAMERA_PRESETS = {"isometric": "iso", "side": "right"}
 # Keys a caller reaches for inside `display` that live somewhere else.
 DISPLAY_KEY_HOMES = {
     "projection": "display.camera", "focalLength": "display.camera",
     "orthographicHalfHeight": "camera",
-}
-# Display groups that were replaced, and what replaced each.
-RETIRED_DISPLAY_KEYS = {
-    "render": "display.lighting, display.background and display.floor",
-    "guides": "display.grid and display.axes",
-    "partColor": "display.surfaces",
 }
 class SnapshotError(RuntimeError):
     pass
@@ -384,10 +361,6 @@ def validate_camera_name(camera: str) -> str:
     name = camera.strip().lower()
     if name in CAMERA_PRESETS:
         return camera
-    if name in RETIRED_CAMERA_PRESETS:
-        raise SnapshotError(
-            f"camera preset {camera!r} was removed; use {RETIRED_CAMERA_PRESETS[name]!r}"
-        )
     parts = name.split(":")
     if len(parts) >= 2:
         try:
@@ -425,11 +398,6 @@ def validate_camera_option(value: object, *, source_label: str) -> dict[str, obj
     if not is_plain_object(value):
         raise SnapshotError(f"camera must be a preset name or camera object ({source_label})")
     payload = dict(value)
-    moved = sorted(set(payload) & {"projection", "focalLength"})
-    if moved:
-        raise SnapshotError(
-            f"camera {', '.join(moved)} belongs in display.camera; --camera controls pose and framing"
-        )
     unknown = sorted(set(payload) - CAMERA_OPTION_KEYS)
     if unknown:
         raise SnapshotError(
@@ -508,7 +476,6 @@ def validate_display_settings_values(
     unknown = sorted(set(payload) - DISPLAY_OPTION_KEYS)
     if unknown:
         hints = [f"{key} belongs in {DISPLAY_KEY_HOMES[key]}" for key in unknown if key in DISPLAY_KEY_HOMES]
-        hints += [f"display.{key} was removed; use {RETIRED_DISPLAY_KEYS[key]}" for key in unknown if key in RETIRED_DISPLAY_KEYS]
         raise SnapshotError(
             f"display has unknown key(s): {', '.join(unknown)} ({source_label})"
             + (f"; {'; '.join(hints)}" if hints else "")
@@ -735,15 +702,9 @@ def validate_output_settings(value: object) -> dict[str, object]:
     output = dict(value)
     unknown = sorted(set(output) - SUPPORTED_OUTPUT_SETTINGS_KEYS)
     if unknown:
-        retired = [
-            f"output.{key} was removed; use output.{RETIRED_OUTPUT_SETTINGS_KEYS[key]}"
-            for key in unknown
-            if key in RETIRED_OUTPUT_SETTINGS_KEYS
-        ]
         raise SnapshotError(
             f"output has unknown key(s): {', '.join(unknown)}; "
             f"supported keys: {', '.join(sorted(SUPPORTED_OUTPUT_SETTINGS_KEYS))}"
-            + (f"; {'; '.join(retired)}" if retired else "")
         )
     if "sizeProfile" in output:
         output["sizeProfile"] = validate_size_profile(output["sizeProfile"])
@@ -761,10 +722,6 @@ def validate_size_profile(value: object) -> str:
     """One of :data:`SIZE_PROFILES`, exactly as listed."""
     if isinstance(value, str) and value in SIZE_PROFILES:
         return value
-    if isinstance(value, str) and value in RETIRED_SIZE_PROFILES:
-        raise SnapshotError(
-            f"size profile {value!r} was removed; use {RETIRED_SIZE_PROFILES[value]!r}"
-        )
     sizes = ", ".join(f"{name} ({width}x{height})" for name, (width, height) in SIZE_PROFILES.items())
     raise SnapshotError(f"Unknown size profile: {value!r}. Size profiles: {sizes}")
 
@@ -1183,7 +1140,6 @@ def selection_value_list(value: object) -> list[str]:
         return []
     return [entry.strip() for entry in text.split(",") if entry.strip()]
 SELECTION_KEYS = ("focus", "hide")
-RETIRED_SELECTION_KEYS = {"refs": "focus"}
 
 
 def validate_selection_keys(job: Mapping[str, object]) -> None:
@@ -1195,15 +1151,9 @@ def validate_selection_keys(job: Mapping[str, object]) -> None:
         raise SnapshotError('selection must be a {"focus": [refs]} or {"hide": [refs]} object')
     unknown = sorted(set(selection) - set(SELECTION_KEYS))
     if unknown:
-        retired = [
-            f"selection.{key} was removed; use selection.{RETIRED_SELECTION_KEYS[key]}"
-            for key in unknown
-            if key in RETIRED_SELECTION_KEYS
-        ]
         raise SnapshotError(
             f"selection has unknown key(s): {', '.join(unknown)}; "
             f"supported keys: {', '.join(SELECTION_KEYS)}"
-            + (f"; {'; '.join(retired)}" if retired else "")
         )
 
 

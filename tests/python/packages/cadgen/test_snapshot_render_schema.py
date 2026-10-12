@@ -131,9 +131,6 @@ class RenderDisplaySchemaTest(unittest.TestCase):
         normalize(output=output)
         with self.assertRaisesRegex(SnapshotError, "output has unknown key"):
             normalize(output={"pixels": 2})
-        # One name per setting: the old second spelling of `padding` names its replacement.
-        with self.assertRaisesRegex(SnapshotError, r"output\.paddingPercent was removed; use output\.padding"):
-            normalize(output={"paddingPercent": 0.1})
 
 
 if __name__ == "__main__":

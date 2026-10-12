@@ -10,7 +10,6 @@ from tests.python.support.paths import add_repo_path
 add_repo_path("packages/cadgen/src")
 
 from cadgen._internal import generation_runner
-from cadgen.metadata import parse_generator_metadata
 from cadgen.step_export import _create_bin_xcaf_doc, export_build123d_step_scene
 from cadgen._internal.step_scene import _bbox_from_shape, scene_leaf_occurrences, scene_occurrence_shape
 
@@ -26,45 +25,11 @@ def _srgb_to_linear(component: float) -> float:
 
 
 class CompoundAssemblyGenerationTests(unittest.TestCase):
-    def test_step_payload_rejects_a_dict_and_names_the_decorators(self) -> None:
-        # A @step returns a bare shape. The dict envelope is gone; a dict of ANY
-        # shape is refused at run time with the decorators that replaced it.
-        for payload in (
-            {"shape": object()},
-            {"shape": object(), "stl": "part.stl"},
-            {"shape": object(), "mesh_tolerance": 0.01},
-            {"shape": object(), "params": "tom.params.js"},
-        ):
-            with self.subTest(payload=sorted(payload)):
-                with self.assertRaisesRegex(TypeError, r"returned a dict.*@stl/@threemf/@glb"):
-                    generation_runner._normalize_step_payload(payload, script_path=Path("part.py"))
-
     def test_step_payload_rejects_non_shapes(self) -> None:
-        with self.assertRaisesRegex(TypeError, r"must return a build123d Shape, got NoneType"):
-            generation_runner._normalize_step_payload(None, script_path=Path("part.py"))
-
-    def test_static_metadata_rejects_a_dict_return(self) -> None:
-        # The static parser refuses the same thing before a build starts, with
-        # the same guidance.
-        with tempfile.TemporaryDirectory(prefix="cadgen-dict-return-") as tempdir:
-            script_path = Path(tempdir) / "assembly.py"
-            script_path.write_text(
-                "\n".join(
-                    [
-                        "from cadgen import step",
-                        "",
-                        "@step",
-                        "def model():",
-                        "    return {'shape': object(), 'params': 'tom.params.js'}",
-                        "",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-
-            with self.assertRaisesRegex(ValueError, r"returns a dict.*@stl/@threemf/@glb"):
-                parse_generator_metadata(script_path)
-
+        for payload, named in ((None, "NoneType"), ({"shape": object()}, "dict")):
+            with self.subTest(payload=named):
+                with self.assertRaisesRegex(TypeError, rf"must return a build123d Shape, got {named}$"):
+                    generation_runner._normalize_step_payload(payload, script_path=Path("part.py"))
 
     def test_a_compound_with_children_packages_as_occurrences(self) -> None:
         # Packaging follows the shape and nothing else: a Compound placing

@@ -1,11 +1,9 @@
 """Snapshot below the options boundary: job resolution and the run loop.
 
-There is no parser here any more. Snapshot used to be the schema's one ADAPTER
-— a hand-written argv scanner plus a declared option surface a policy test
-pinned — and that exception is retired: the verbs in
-:mod:`cadgen._internal.snapshot_door` are MIRRORS, and their generated parsers
-hand this module a :class:`SnapshotOptions` already built. What remains is
-everything downstream of that:
+There is no parser here: the verbs in :mod:`cadgen._internal.snapshot_door` are
+MIRRORS, and their generated parsers hand this module a
+:class:`SnapshotOptions` already built. This module is everything downstream of
+that:
 
     run_snapshot(options, kinds=("step", "stp"), runtime_dir=...)
 
@@ -44,8 +42,7 @@ import cadgen.lookup as lookup
 from cadgen.assets import browser_runtime_dir
 from cadgen._internal.doors import document_snapshot
 # A drawing's refusals are written once, beside the signature whose absences
-# they explain, so the flag that is gone and the job key that is refused say
-# the same thing about the same request.
+# they explain.
 from cadgen._internal.snapshot_door import (
     DRAWING_IS,
     DRAWING_NO_VIEW_NAME,
@@ -352,11 +349,6 @@ def apply_option_overrides_to_payload(payload: object, options: SnapshotOptions,
 
 def read_job_file(raw_job: str, *, cwd: Path) -> object:
     """The render-job JSON ``--job`` names. A job is a FILE: there is no stdin form."""
-    if raw_job.strip() == "-":
-        raise SnapshotError(
-            "--job takes the path of a render-job JSON file; reading a job from stdin "
-            "(--job -) was removed — write the job to a file and pass its path"
-        )
     job_path = (cwd / Path(raw_job).expanduser()).resolve()
     if not job_path.exists():
         raise _missing(f"--job file does not exist: {raw_job}")
@@ -430,10 +422,6 @@ def input_kind(file_path: Path) -> str:
         return "stp"
     if suffix == ".dxf":
         return "dxf"
-    if suffix == ".py":
-        # DOCUMENTS-ONLY: a model script is a program. The kind survives only so
-        # the resolver can refuse it by naming the run.
-        return "python"
     if suffix == ".glb":
         return "glb"
     if suffix == ".stl":
@@ -810,12 +798,6 @@ def prepare_render_job(
 
     input_path = resolve_input_path(raw_input, cwd=resolved_cwd)
     kind = input_kind(input_path)
-    if kind == "python":
-        # Scripts are RUN, never rendered: `python <script>` writes the
-        # document, and snapshot renders the document.
-        from cadgen._internal.doors import script_target_message
-
-        raise SnapshotError(script_target_message(input_path))
     if kinds is not None:
         reject_unsupported_kind(kind, input_path, kinds)
     if kind not in KIND_RESOLVERS:
@@ -823,8 +805,8 @@ def prepare_render_job(
             f"snapshot cannot render {input_path.suffix or 'that file'} inputs: {input_path}"
         )
 
-    # After the refusals above: a script or a foreign file is told what IT is,
-    # not what its display settings would have meant. A job's own `display` gets
+    # After the refusals above: a foreign file is told what IT is, not what its
+    # display settings would have meant. A job's own `display` gets
     # the same treatment as the --display flag — a mode name, an inline JSON
     # object, or a path to a display JSON — and is validated ONCE: here, unless
     # the flag already put a validated one on the job.
@@ -1192,17 +1174,11 @@ def check_drawing_render_job(
 ) -> None:
     """What a drawing cannot be asked for: anything that describes a 3D scene.
 
-    This door used to render a DXF as a 3D flat pattern, so it took a camera,
-    display settings and a render mode. It does not any more — the viewer shows
-    a drawing, and what the viewer cannot show the CLI does not render — and
-    every one of those requests is refused BY NAME here rather than accepted
-    and quietly ignored. This is also the path `cadgen snapshot` routes a `.dxf`
-    through, so the two cannot disagree.
-
-    The flag half of the same cutover (`cadgen dxf snapshot --camera`) is
-    refused while parsing, from the same sentences
-    (`cadgen._internal.snapshot_door.DRAWING_RETIRED_OPTIONS`): one request, one
-    answer, whichever surface it arrives on.
+    A DXF is drawn the way the viewer shows it, flat, and what the viewer cannot
+    show the CLI does not render: a camera, display settings, a render mode or a
+    view label in a job is refused BY NAME here rather than accepted and quietly
+    ignored. This is also the path `cadgen snapshot` routes a `.dxf` through, so
+    the two cannot disagree.
     """
     label = input_path.name
     display = job.get("display") if is_plain_object(job.get("display")) else {}

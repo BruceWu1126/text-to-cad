@@ -43,7 +43,7 @@ def _plain_child(child: Any, frame: Any) -> bool:
         and (raw.get("_lazy_placement") is None or type(raw["_lazy_placement"]) in (Location, Pos, Rot))
         and not raw.get("_NodeMixin__children")
         and not any(key in raw for key in (
-            "cad_material", "_cadgen_material", "_cadgen_material_id",
+            "_cadgen_material", "_cadgen_material_id",
             "cad_face_ordinal_colors", "_occurrence_tree",
             "__cadgen_tree__", "__cadgen_tree_shape__", "__cadgen_tree_root_loc__",
             "__cadgen_component_identity__",

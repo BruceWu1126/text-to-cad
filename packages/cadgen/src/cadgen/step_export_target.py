@@ -265,8 +265,8 @@ def export_cad_target(
         mesh_angular_tolerance, field_name="mesh_angular_tolerance"
     )
     # THE one validation of TARGET for a mesh build, door or direct call: a
-    # `.py` is refused by naming the run, any other suffix by naming what this
-    # takes, a missing file by saying so (cadgen._internal.doors).
+    # suffix this does not take is refused by naming what it takes, a missing
+    # file by saying so (cadgen._internal.doors).
     from cadgen._internal.doors import document_target
 
     step_path = document_target(target, suffixes=STEP_SUFFIXES)

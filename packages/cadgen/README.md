@@ -180,9 +180,7 @@ revision-scoped occurrence/selector views with caller-owned world geometry.
 `topology_errors`, `boundary_edges`, `self_intersections` and
 `mass_properties`. These operations accept native geometry and return facts;
 selection, units, thresholds, exclusions and verdicts belong to the caller's
-script. The inspect
-CLI and `step.inspect` are removed, with an immediate migration error.
-The contracts live in [`step_scene.py`](src/cadgen/step_scene.py) and
+script. The contracts live in [`step_scene.py`](src/cadgen/step_scene.py) and
 [`geometry.py`](src/cadgen/geometry.py). They import no kernel at namespace
 load and require no display artifacts.
 
@@ -223,8 +221,15 @@ call both from `__main__`; every flag must mean the same thing for each.
 
 ### 8. No backwards compatibility
 
-Hard cutovers only. Every retired surface fails loudly with a teaching
-error naming its replacement — never an alias, never a shim.
+Hard cutovers only. A retired surface does not exist: no alias, no shim, and
+no error that recognizes its old spelling to explain what replaced it. A
+removed command, flag, argument, key, module or name gets what the current
+contract's ordinary validation says — an unknown command, an unrecognized
+argument, an unknown key, an `ImportError`. A version-gated refusal (a sidecar
+written to another schema) states what is required and the remedy, never what
+changed.
+*Pressure-test*: use a removed spelling; the error must read exactly as it
+would for a name that never existed.
 
 The explicit exception is `cadgen.assembly.AssemblyHelper`: it is softly
 deprecated and still works. Construction emits a visible `FutureWarning`
@@ -234,8 +239,8 @@ This does not change geometry, model freshness or child sharing.
 
 ### 9. Closed vocabularies
 
-Every declaration surface has a closed key/kind set. Unknown keys are
-teaching errors, never silently ignored.
+Every declaration surface has a closed key/kind set. An unknown key is an
+error naming the supported set, never silently ignored.
 
 ### 10. Loud failure or correct output, nothing between
 
@@ -334,9 +339,8 @@ not provenance. An old schema or a mismatched digest must be rebuilt or
 re-annotated, never silently applied. Compiling an imported STEP preserves
 its authored sidecar bytes.
 
-The retired `meshExports` section copied mesh decorator declarations that only
-a door read back; a door now tessellates the document's tree and writes the
-file it was asked for.
+A sidecar declares nothing about meshes: a door tessellates the document's
+tree and writes the file it was asked for.
 *Pressure-test*: build a part that declares meshes but no kinematics,
 materials, or animation; no
 `.step.json` may appear beside it.

@@ -74,13 +74,6 @@ class ConstructorTests(unittest.TestCase):
         self.assertEqual(mate.limits, {"value": [0.0, 150.0]})
         self.assertEqual(mate.dof_ids(), ("elbow",))
 
-    def test_default_is_a_teaching_error(self) -> None:
-        # Zero IS the artifact as written; a "default" slider value would
-        # displace geometry the moment a panel opened.
-        with self.assertRaisesRegex(ValueError, "default= was dropped"):
-            revolute("elbow", parent="#a", child="#b", axis="#b.f1",
-                     limits=(0, 150), default=90)
-
     def test_literal_axes_take_origin_and_direction(self) -> None:
         mate = slider("lift", parent="#base", child="#mast",
                       origin=(0, 0, 5), direction=(0, 0, 1), limits=(0, 100))

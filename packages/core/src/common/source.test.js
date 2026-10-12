@@ -316,13 +316,3 @@ test("loadSource composes STEP documents and refuses every other file family by 
   assert.equal(fetches, 0);
 });
 
-test("retired render snapshot field is rejected before loading a source", async (t) => {
-  const originalFetch = globalThis.fetch;
-  let fetches = 0;
-  globalThis.fetch = async () => { fetches += 1; throw new Error("unexpected fetch"); };
-  t.after(() => { globalThis.fetch = originalFetch; });
-  for (const render of [null, false, "dark", { unknown: true }]) {
-    await assert.rejects(() => loadSource({ kind: "step", url: "/never.step", render }), /Unsupported snapshot field: render/);
-  }
-  assert.equal(fetches, 0);
-});

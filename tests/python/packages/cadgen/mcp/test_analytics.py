@@ -150,7 +150,7 @@ class NoMeansNoTest(_Tmp):
     """A no is kept, and nothing undoes it."""
 
     def test_a_no_survives_restarts_updates_and_a_larger_disclosure(self) -> None:
-        choose(False, by="app", path=self.path)  # the menu's toggle, `cadgen analytics off`, or the agent
+        choose(False, by="app", path=self.path)  # the menu's toggle, `cadgen telemetry off`, or the agent
         no = {"sharing": False, "reason": "choice", "id": None}
         self.assertEqual(status(path=self.path), no)  # a restart: read from the state directory again
         with mock.patch("cadgen.analytics.SCHEMA", 2):  # an update that changes what a batch looks like
@@ -713,12 +713,6 @@ class NoticeTest(_Tmp):
                 cli.main(argv)
             cli.main(["--help"])
         self.assertEqual(told.call_count, 3)
-
-    def test_the_old_command_names_the_new_one(self) -> None:
-        err = io.StringIO()
-        with mock.patch("sys.stderr", err):
-            self.assertEqual(cli.main(["analytics", "off"]), 2)
-        self.assertIn("cadgen telemetry", err.getvalue())
 
     def test_cadgen_telemetry_says_it_where_a_person_looks(self) -> None:
         out, err = io.StringIO(), io.StringIO()
