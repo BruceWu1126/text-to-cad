@@ -17,17 +17,10 @@ class CadSource:
     cad_ref: str
     source_path: Path
     source: str
-    origin_path: Path
     script_path: Path | None = None
     generator_metadata: GeneratorMetadata | None = None
     step_path: Path | None = None
     dxf_path: Path | None = None
-
-    @property
-    def entry_path(self) -> Path | None:
-        # The actual on-disk ENTRY file the tree is keyed by: the `.step.py` generator
-        # for a generated model, or the `.step`/`.stp` itself for an imported one.
-        return self.script_path if self.script_path is not None else self.step_path
 
 
 def source_from_path(
@@ -311,7 +304,6 @@ def _dxf_generator_source(resolved_script_path: Path, metadata: GeneratorMetadat
         cad_ref=cad_ref_from_dxf_path(dxf_path),
         source_path=resolved_script_path,
         source="generated",
-        origin_path=resolved_script_path,
         script_path=resolved_script_path,
         generator_metadata=metadata,
         step_path=None,
@@ -336,7 +328,6 @@ def _read_python_source(script_path: Path, *, function: str | None = None) -> Ca
         cad_ref=cad_ref_from_step_path(step_path),
         source_path=resolved_script_path,
         source="generated",
-        origin_path=resolved_script_path,
         script_path=resolved_script_path,
         generator_metadata=metadata,
         step_path=step_path,
@@ -357,7 +348,6 @@ def _read_step_source(step_path: Path) -> CadSource:
         cad_ref=cad_ref,
         source_path=resolved_step_path,
         source="imported",
-        origin_path=resolved_step_path,
         step_path=resolved_step_path,
     )
 
