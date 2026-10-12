@@ -174,7 +174,9 @@ export function useStepSceneSync(layers) {
       pickMode
     });
     const materialSettings = { ...normalizedMaterialSettings };
-    const modelStepParameters = stepParameterRuntime?.definition
+    // The pose the scene is built at: cadgen's articulation at the Position values, as the
+    // renderer hands it over (`{ articulation, values }`), so the first frame is drawn posed.
+    const modelStepParameters = stepParameterRuntime?.articulation
       ? {
           ...stepParameterRuntime,
           selectorRuntime
