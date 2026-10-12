@@ -235,7 +235,7 @@ def assembly_occurrence_rows(
     """Instance-tree occurrences as selector-index rows, in world coordinates at rest.
 
     Column names mirror the topology sidecar's ``occurrenceColumns`` so that consumers written
-    against that table (``entry_summary``, ``reporting``) need no special case for assemblies.
+    against that table (``entry_summary``) need no special case for assemblies.
     With ``package_dir`` None no component's table is read and no row has a ``bbox``: the
     rows are the occurrence namespace alone, what a kinematics mate's ends resolve in.
     """

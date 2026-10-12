@@ -288,13 +288,3 @@ def vertex_adjacent_face_selectors(vertex_row: dict[str, Any], index: SelectorIn
                 seen.add(face_selector)
                 selectors.append(face_selector)
     return selectors
-
-
-def topology_payload(index: SelectorIndex) -> dict[str, list[str]]:
-    return {
-        "occurrences": [display_selector(str(row.get("id")), index) for row in index.occurrences if row.get("id")],
-        "shapes": [display_selector(str(row.get("id")), index) for row in index.shapes if row.get("id")],
-        "faces": [display_selector(str(row.get("id")), index) for row in index.faces if row.get("id")],
-        "edges": [display_selector(str(row.get("id")), index) for row in index.edges if row.get("id")],
-        "vertices": [display_selector(str(row.get("id")), index) for row in index.vertices if row.get("id")],
-    }
