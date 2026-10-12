@@ -210,6 +210,7 @@ class Superposition(unittest.TestCase):
         chosen, share = sp.fewest_modes(np.array([0.61, 0.0]), 1.0)
         self.assertEqual((chosen.tolist(), round(share, 6)), ([0], 0.61))
 
+    @unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
     def test_lobpcg_finds_the_modes_a_factorisation_does(self):
         import numpy as np
         import scipy.sparse as sparse

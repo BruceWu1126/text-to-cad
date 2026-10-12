@@ -822,6 +822,7 @@ class FinerMeshSize(unittest.TestCase):
         self.assertIsNone(finer_mesh_size(2.0, 1_400_000))
 
 
+@unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
 class MeshOrderGuard(unittest.TestCase):
     def _elements(self, second_order: bool):
         import netgen.occ as ngocc
