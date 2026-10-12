@@ -1,6 +1,6 @@
 import { encodeBase64 } from './base64.js';
 import { requestViewerJson, ViewerRequestError } from "./request.js";
-import { retainSurfWorkerPool } from '../lib/parts/partWorkerClient.js';
+import { retainPartWorkerPool } from '../lib/parts/partWorkerClient.js';
 import { retainGlbMeshWorker } from '../lib/render/glbMeshWorkerClient.js';
 import { retainStlMeshWorker } from '../lib/render/stlMeshWorkerClient.js';
 import { applyViewerOriginToEntries, normalizeViewerOrigin, viewerOriginUrl } from './origin.js';
@@ -330,7 +330,7 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
       if (disposed) throw new Error('This CAD client has been disposed.');
       if (file) activeFiles.set(file, (activeFiles.get(file) || 0) + 1);
       const controller = new AbortController();
-      const releases = [retainSurfWorkerPool(), retainGlbMeshWorker(), retainStlMeshWorker()];
+      const releases = [retainPartWorkerPool(), retainGlbMeshWorker(), retainStlMeshWorker()];
       tessellationCache ??= createTessellationCache({
         provider: createHttpTessellationCacheProvider({ origin, headers: { 'x-cadgen-viewer': '1' }, fetch: fetchImpl, maxBatchBytes }),
       });

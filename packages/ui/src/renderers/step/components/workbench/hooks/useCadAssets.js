@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   isAbortError,
-  loadRenderSurf,
-  loadRenderSurfSelectorBundle,
+  loadRenderPart,
+  loadRenderPartSelectorBundle,
   partCacheKey,
-  peekRenderSurf,
-  prewarmSurfWorkers,
-  releaseSurfWorkers
+  peekRenderPart,
+  prewarmPartWorkers,
+  releasePartWorkers
 } from "@text-to-cad/core/lib/renderAssetClient.js";
 import { applyOccurrenceDisplay } from "@text-to-cad/core/lib/assembly/meshData.js";
 import { mapWithConcurrency } from "@text-to-cad/core/lib/async/concurrency.js";
@@ -43,7 +43,7 @@ import {
   entryMeshAssetSignature,
   entryReferenceAssetSignature
 } from "@text-to-cad/core/lib/entryAssets.js";
-import { reclaimIdleSurfWorkers } from "@text-to-cad/core/lib/renderAssetClient.js";
+import { reclaimIdlePartWorkers } from "@text-to-cad/core/lib/renderAssetClient.js";
 import { PERF_MEASURE_NAMES, perfMeasure, perfStart } from "@text-to-cad/core/lib/viewer/perfMarks.js";
 import {
   composePackageSelectorRuntime,
@@ -83,7 +83,7 @@ function syncAssetCacheMemory(excludeBuffers = []) {
   const caches = renderAssetCacheStatsWithPackages({ excludeBuffers });
   syncSelectorCacheAccounting(viewerMemoryPolicy, Number(caches.selector?.typedBytes) || 0);
   const assetCaches = Object.entries(caches).reduce((sum, [name, stats]) => (
-    name === "surfLeash" || name === "selector" ? sum : sum + (Number(stats?.typedBytes) || 0) + (Number(stats?.metadataBytes) || 0)
+    name === "partLeash" || name === "selector" ? sum : sum + (Number(stats?.typedBytes) || 0) + (Number(stats?.metadataBytes) || 0)
   ), 0);
   viewerMemoryPolicy.setRetained("assetCaches", assetCaches);
 }
@@ -437,7 +437,7 @@ export function useCadAssets({
         const prewarmForBatches = () => {
           if (prewarmed) return;
           prewarmed = true;
-          prewarmSurfWorkers(Math.min(readCids.length, packageComponentLoadConcurrency()));
+          prewarmPartWorkers(Math.min(readCids.length, packageComponentLoadConcurrency()));
         };
         // Every component is drawn from its part's one display mesh. A cold part is derived in the
         // request that answers with its record, and nothing is tessellated here.
@@ -466,7 +466,7 @@ export function useCadAssets({
           }),
           release: token => viewerMemoryPolicy.release(token),
           // A payload this page already holds needs no body read.
-          skip: (cid, row) => Boolean(peekRenderSurf(row)),
+          skip: (cid, row) => Boolean(peekRenderPart(row)),
           signal: controller.signal,
         });
         const surfaceTickets = createSurfaceTicketBatches({
@@ -515,7 +515,7 @@ export function useCadAssets({
             } finally {
               firstBodyRead();
             }
-            return loadRenderSurf({
+            return loadRenderPart({
               resources, tessellationCache, signal: controller.signal,
               identity: { part: row.part, tessellationProbe: row,
                 ...(tessellationEntry ? { tessellationEntry } : {}) },
@@ -574,7 +574,7 @@ export function useCadAssets({
               syncAssetCacheMemory(componentMemoryAccounting(displayedPackageRef.current?.componentMeshDataByCid).buffers);
               return true;
             }
-            const reclaimed = reclaimIdleSurfWorkers();
+            const reclaimed = reclaimIdlePartWorkers();
             syncSurfWorkerMemory();
             if (reclaimed.reclaimedSlots > 0 || reclaimed.fullyReleased) return true;
             // Every package decode has drained at this point. If another
@@ -582,7 +582,7 @@ export function useCadAssets({
             // generation to finish, then retry this unchanged reservation
             // once. Generation fencing prevents this waiter from clearing a
             // replacement pool's accounting.
-            const released = await releaseSurfWorkers();
+            const released = await releasePartWorkers();
             syncSurfWorkerMemory();
             return released;
           },
@@ -705,7 +705,7 @@ export function useCadAssets({
           // process instead of holding the heap each grew for the largest
           // component it decoded. Also on the failure path: an aborted load
           // is exactly when the memory is most worth returning.
-          releaseSurfWorkers().then(() => {
+          releasePartWorkers().then(() => {
             syncSurfWorkerMemory();
           }).catch(() => {
             syncSurfWorkerMemory();
@@ -817,7 +817,7 @@ export function useCadAssets({
         // expanded in the tree (requestedOccurrenceIds), not every component. Loading all of them up
         // front made expanding one nested node fetch + compose the whole model's topology (regressed
         // in 8b12837d). A single-component part has no tree, so it loads its one component.
-        // loadRenderSurfSelectorBundle is cache-backed, so each new expansion only fetches the
+        // loadRenderPartSelectorBundle is cache-backed, so each new expansion only fetches the
         // newly-needed component; previously loaded ones are free.
         const isSingleComponentPart = String(entry?.kind || "").trim() === "part";
         const { occurrencesToLoad, neededCids, loadedTopologyKey } = selectRequestedAssemblyComponents(
@@ -848,7 +848,7 @@ export function useCadAssets({
         // no longer holds is cadgen's to derive again, and the read goes on with the record it
         // answered.
         const loadSelectorBundle = async (cid) => {
-          const read = (row) => loadRenderSurfSelectorBundle(viewerOriginUrl(client.origin, partSelectorsPath(row)), {
+          const read = (row) => loadRenderPartSelectorBundle(viewerOriginUrl(client.origin, partSelectorsPath(row)), {
             resources, tessellationCache, signal: controller.signal,
             identity: { part: row.part, tessellationProbe: row },
           });
@@ -951,7 +951,7 @@ export function useCadAssets({
       // A first pick can be the last consumer of the tessellation pool.
       // Reclaim its isolates after all sibling loads drain, just like initial
       // display; a topology-only interaction must not pin eight heaps.
-      releaseSurfWorkers().then(syncSurfWorkerMemory, syncSurfWorkerMemory);
+      releasePartWorkers().then(syncSurfWorkerMemory, syncSurfWorkerMemory);
     }
   }, [buildNormalizedReferenceState, getAssemblyMeshHash, resources]);
 

@@ -5,10 +5,10 @@ import { buildMeshDataFrom3MfBuffer } from "./render/threeMfMeshData.js";
 import { loadGlbMeshDataInWorker } from "./render/glbMeshWorkerClient.js";
 import { loadStlMeshDataInWorker } from "./render/stlMeshWorkerClient.js";
 import {
-  prewarmSurfWorkerPool,
-  reclaimIdleSurfWorkers as reclaimIdleSurfWorkerPool,
-  releaseSurfWorkerPoolWhenIdle,
-  surfWorkerMemoryStats as surfWorkerMemoryStatsFromPool,
+  prewarmPartWorkerPool,
+  reclaimIdlePartWorkers as reclaimIdlePartWorkerPool,
+  releasePartWorkerPoolWhenIdle,
+  partWorkerMemoryStats as partWorkerMemoryStatsFromPool,
 } from "./parts/partWorkerClient.js";
 import { TessellationCacheProbeMissError } from "./parts/tessellationCache.js";
 import {
@@ -264,7 +264,7 @@ export async function loadRenderGlbDocument(url, { signal, resources } = {}) {
  * the part's key and its row (`partRow`), and `tessellationEntry` when a batched read already
  * holds the mesh's verified bytes.
  */
-export async function loadRenderSurf({
+export async function loadRenderPart({
   signal,
   resources,
   identity,
@@ -276,7 +276,7 @@ export async function loadRenderSurf({
   // the selector join and the selector table request.
   const cacheKey = identityCacheKey(identity);
   const meshData = await loadCached(glbCache, cacheKey, async () => {
-    return (await loadSurfPayload("", {
+    return (await loadPartPayload("", {
       signal,
       resources,
       identity,
@@ -286,31 +286,31 @@ export async function loadRenderSurf({
     })).meshData;
   }, { cachePending: !signal });
   finalizeCached(glbCache, cacheKey, meshData);
-  // On the surf leash too: the package's componentMeshDataByCid owns the
+  // On the part leash too: the package's componentMeshDataByCid owns the
   // displayed arrays, and a pinned entry here kept a previous model's
   // geometry alive across a file switch.
-  retainSurfEntry(glbCache, cacheKey);
+  retainPartEntry(glbCache, cacheKey);
   return meshData;
 }
 
-// Hand the surf worker pool's isolates back once nothing is loading. The
+// Hand the part worker pool's isolates back once nothing is loading. The
 // generation-scoped wait prevents an overlapping package/topology request from
 // leaving its conservative retained-memory estimate charged after it drains.
-export async function releaseSurfWorkers() {
-  return releaseSurfWorkerPoolWhenIdle();
+export async function releasePartWorkers() {
+  return releasePartWorkerPoolWhenIdle();
 }
 
-/** Start the isolates a package load will decode on (`prewarmSurfWorkerPool`). */
-export function prewarmSurfWorkers(count) {
-  return prewarmSurfWorkerPool(count);
+/** Start the isolates a package load will decode on (`prewarmPartWorkerPool`). */
+export function prewarmPartWorkers(count) {
+  return prewarmPartWorkerPool(count);
 }
 
-export function reclaimIdleSurfWorkers() {
-  return reclaimIdleSurfWorkerPool();
+export function reclaimIdlePartWorkers() {
+  return reclaimIdlePartWorkerPool();
 }
 
-export function surfWorkerMemoryStats() {
-  return surfWorkerMemoryStatsFromPool();
+export function partWorkerMemoryStats() {
+  return partWorkerMemoryStatsFromPool();
 }
 
 export async function loadRenderStl(url, { signal, resources } = {}) {
@@ -359,9 +359,9 @@ export function peekRender3Mf(url, { resources } = {}) {
 // Display uses render only; selection and measurement join the table on
 // demand, to the same mesh.
 
-const surfPayloadCache = new Map();
+const partPayloadCache = new Map();
 
-// Every surf entry — a component's payload, its mesh data, its selector
+// Every part entry — a component's payload, its mesh data, its selector
 // bundle — lives on ONE bounded LRU leash. The consumers own
 // what they keep: the package's componentMeshDataByCid holds every displayed
 // meshData, the reference composition holds the bundles of the occurrences it
@@ -378,30 +378,30 @@ const surfPayloadCache = new Map();
 // ceiling evicts oldest-first until the decoded bytes fit; the count floor
 // keeps a few entries whatever they weigh, so small models behave as before
 // (their whole working set fits under the ceiling anyway).
-const SURF_CACHE_LIMIT = 24;
-const SURF_CACHE_MIN_ENTRIES = 4;
-const SURF_CACHE_MAX_BYTES = 256 * 1024 * 1024;
-const surfLeashConfig = { limit: SURF_CACHE_LIMIT, minEntries: SURF_CACHE_MIN_ENTRIES, maxBytes: SURF_CACHE_MAX_BYTES };
-const surfEntries = [];
+const PART_CACHE_LIMIT = 24;
+const PART_CACHE_MIN_ENTRIES = 4;
+const PART_CACHE_MAX_BYTES = 256 * 1024 * 1024;
+const partLeashConfig = { limit: PART_CACHE_LIMIT, minEntries: PART_CACHE_MIN_ENTRIES, maxBytes: PART_CACHE_MAX_BYTES };
+const partEntries = [];
 
 // Test seam: lower the ceilings to exercise eviction with small fixtures.
 // Returns the previous configuration so a test can restore it.
-export function configureSurfLeash(next = {}) {
-  const previous = { ...surfLeashConfig };
+export function configurePartLeash(next = {}) {
+  const previous = { ...partLeashConfig };
   for (const key of ["limit", "minEntries", "maxBytes"]) {
     if (Number.isFinite(Number(next[key]))) {
-      surfLeashConfig[key] = Number(next[key]);
+      partLeashConfig[key] = Number(next[key]);
     }
   }
   return previous;
 }
 
 // Decoded typed-array bytes the leash retains, each buffer counted once (a
-// surf payload and its meshData entry share arrays). Pending entries weigh zero.
-function surfLeashBytes() {
+// part payload and its meshData entry share arrays). Pending entries weigh zero.
+function partLeashBytes() {
   const seen = new Set();
   let total = 0;
-  for (const entry of surfEntries) {
+  for (const entry of partEntries) {
     const value = entry.cache.get(entry.key);
     if (value && typeof value.then !== "function") {
       total += typedArrayBytesOf(value, seen);
@@ -410,25 +410,25 @@ function surfLeashBytes() {
   return total;
 }
 
-function evictOldestSurfEntry() {
-  const evicted = surfEntries.shift();
+function evictOldestPartEntry() {
+  const evicted = partEntries.shift();
   if (evicted.cache.get(evicted.key)?.then === undefined) {
     evicted.cache.delete(evicted.key);
     releaseAssetSourceScope(evicted.cache, evicted.key);
   }
 }
 
-function retainSurfEntry(cache, key) {
-  const existing = surfEntries.findIndex((entry) => entry.cache === cache && entry.key === key);
+function retainPartEntry(cache, key) {
+  const existing = partEntries.findIndex((entry) => entry.cache === cache && entry.key === key);
   if (existing !== -1) {
-    surfEntries.splice(existing, 1);
+    partEntries.splice(existing, 1);
   }
-  surfEntries.push({ cache, key });
-  while (surfEntries.length > surfLeashConfig.limit) {
-    evictOldestSurfEntry();
+  partEntries.push({ cache, key });
+  while (partEntries.length > partLeashConfig.limit) {
+    evictOldestPartEntry();
   }
-  while (surfEntries.length > surfLeashConfig.minEntries && surfLeashBytes() > surfLeashConfig.maxBytes) {
-    evictOldestSurfEntry();
+  while (partEntries.length > partLeashConfig.minEntries && partLeashBytes() > partLeashConfig.maxBytes) {
+    evictOldestPartEntry();
   }
 }
 
@@ -474,7 +474,7 @@ export function renderAssetCacheStats({ excludeBuffers = [] } = {}) {
   const seen = new Set(excludeBuffers);
   const stats = {};
   for (const [name, cache] of [
-    ["surfPayload", surfPayloadCache],
+    ["partPayload", partPayloadCache],
     ["selector", selectorCache],
     ["glb", glbCache],
   ]) {
@@ -494,18 +494,18 @@ export function renderAssetCacheStats({ excludeBuffers = [] } = {}) {
     }
     stats[name] = { entries, typedBytes, manifestRows };
   }
-  stats.surfLeash = {
-    entries: surfEntries.length,
-    limit: surfLeashConfig.limit,
-    bytes: surfLeashBytes(),
-    maxBytes: surfLeashConfig.maxBytes,
-    minEntries: surfLeashConfig.minEntries
+  stats.partLeash = {
+    entries: partEntries.length,
+    limit: partLeashConfig.limit,
+    bytes: partLeashBytes(),
+    maxBytes: partLeashConfig.maxBytes,
+    minEntries: partLeashConfig.minEntries
   };
   return stats;
 }
 
-/** The display payload `loadRenderSurf` already holds for the part `row` names, or null. */
-export function peekRenderSurf(row) {
+/** The display payload `loadRenderPart` already holds for the part `row` names, or null. */
+export function peekRenderPart(row) {
   return peekCached(glbCache, partCacheKey(row));
 }
 
@@ -528,7 +528,7 @@ function capabilityCacheKey(capabilities) {
   return `${capabilities.render ? "r" : ""}${capabilities.selectors ? "s" : ""}`;
 }
 
-async function loadSurfPayloadInline(url, { signal, resources, identity, capabilities, tessellationCache } = {}) {
+async function loadPartPayloadInline(url, { signal, resources, identity, capabilities, tessellationCache } = {}) {
   const [
     { decodeComponentTessellation },
     { buildComponentMeshData },
@@ -540,7 +540,7 @@ async function loadSurfPayloadInline(url, { signal, resources, identity, capabil
   ]);
   const part = String(identity?.part || "");
   const probe = identity?.tessellationProbe || null;
-  // As the worker path takes them (`loadSurfComponentInWorker`): bytes a batched read already
+  // As the worker path takes them (`loadPartInWorker`): bytes a batched read already
   // verified for this probe, else the part's mesh read here. cadgen produces every mesh; one
   // the store does not hold is a probe miss, which the caller answers by asking for it.
   const readEntry = identity?.tessellationEntry instanceof Uint8Array ? identity.tessellationEntry : null;
@@ -563,7 +563,7 @@ async function loadSurfPayloadInline(url, { signal, resources, identity, capabil
   };
 }
 
-async function loadSurfPayload(url, {
+async function loadPartPayload(url, {
   signal,
   resources,
   identity,
@@ -572,9 +572,9 @@ async function loadSurfPayload(url, {
   capabilities = { render: true, selectors: true },
 } = {}) {
   const cacheKey = `${identityCacheKey(identity)}#cap=${capabilityCacheKey(capabilities)}`;
-  const payload = await loadCached(surfPayloadCache, cacheKey, async () => {
-    const { loadSurfComponentInWorker } = await import("./parts/partWorkerClient.js");
-    const workerPayload = loadSurfComponentInWorker(url, {
+  const payload = await loadCached(partPayloadCache, cacheKey, async () => {
+    const { loadPartInWorker } = await import("./parts/partWorkerClient.js");
+    const workerPayload = loadPartInWorker(url, {
       signal,
       resources,
       identity,
@@ -588,16 +588,16 @@ async function loadSurfPayload(url, {
       // is only the path for environments where Workers never started.
       return workerPayload;
     }
-    return loadSurfPayloadInline(url, { signal, resources, identity, capabilities, tessellationCache });
+    return loadPartPayloadInline(url, { signal, resources, identity, capabilities, tessellationCache });
   }, { cachePending: !signal });
-  finalizeCached(surfPayloadCache, cacheKey, payload);
-  retainSurfEntry(surfPayloadCache, cacheKey);
+  finalizeCached(partPayloadCache, cacheKey, payload);
+  retainPartEntry(partPayloadCache, cacheKey);
   return payload;
 }
 
 /** The selector bundle of one part: cadgen's selector table (`selectorsUrl`, read for the row in
  * `identity`) joined to its display mesh. */
-export async function loadRenderSurfSelectorBundle(selectorsUrl, {
+export async function loadRenderPartSelectorBundle(selectorsUrl, {
   signal,
   resources,
   identity,
@@ -606,7 +606,7 @@ export async function loadRenderSurfSelectorBundle(selectorsUrl, {
 } = {}) {
   const cacheKey = identityCacheKey(identity);
   const bundle = await loadCached(selectorCache, cacheKey, async () => {
-    return (await loadSurfPayload(selectorsUrl, {
+    return (await loadPartPayload(selectorsUrl, {
       signal,
       resources,
       identity,
@@ -616,7 +616,7 @@ export async function loadRenderSurfSelectorBundle(selectorsUrl, {
     })).bundle;
   }, { cachePending: !signal });
   finalizeCached(selectorCache, cacheKey, bundle);
-  retainSurfEntry(selectorCache, cacheKey);
+  retainPartEntry(selectorCache, cacheKey);
   return bundle;
 }
 

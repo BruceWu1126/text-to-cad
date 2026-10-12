@@ -109,8 +109,8 @@ it('restores all 317 STEP components after remount without a descriptor, probe o
     expect(first.result.current.meshState.meshData.parts).toHaveLength(317);
     const firstVertices = first.result.current.meshState.meshData.parts[0].sourceMesh.vertices;
     expect(bodies).toHaveBeenCalledTimes(317);
-    expect(renderAssetCacheStats().surfLeash.limit).toBe(24);
-    expect(renderAssetCacheStats().surfLeash.entries).toBeLessThanOrEqual(24);
+    expect(renderAssetCacheStats().partLeash.limit).toBe(24);
+    expect(renderAssetCacheStats().partLeash.entries).toBeLessThanOrEqual(24);
     first.unmount();
     session.dispose();
     expect(completedPackages.stats().entries).toBe(1);

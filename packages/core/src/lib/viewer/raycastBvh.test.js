@@ -6,7 +6,7 @@ import { builtGeometryBvhBytes, ensureFacePickBvh, estimateGeometryBvhBytes, sch
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-// Two triangles over four SHARED vertices (the indexed surf shape), the second
+// Two triangles over four SHARED vertices (the indexed shape of a part's mesh), the second
 // one raised so a ray down each column hits a known face index.
 function indexedGeometry() {
   const geometry = new THREE.BufferGeometry();

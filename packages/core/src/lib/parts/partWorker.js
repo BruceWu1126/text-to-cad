@@ -1,5 +1,5 @@
 import { readCadWorkerTicket } from "../../client/resources.js";
-// Surf component worker.
+// Part worker.
 //
 // One request = one part's stored mesh (bytes the client thread read and
 // verified) and an explicit capability set. Ordinary display asks only for
@@ -43,7 +43,7 @@ self.addEventListener("message", async (event) => {
     activeControllers.delete(id);
     return;
   }
-  if (message.type !== "loadSurf") {
+  if (message.type !== "loadPart") {
     return;
   }
   const controller = new AbortController();
@@ -51,11 +51,11 @@ self.addEventListener("message", async (event) => {
   try {
     const capabilities = requestedCapabilities(message);
     if (!capabilities.render && !capabilities.selectors) {
-      throw new Error("Surf worker request has no capabilities");
+      throw new Error("Part worker request has no capabilities");
     }
     const cached = decodeComponentTessellation(message.cachedEntry, { part: String(message.part || "") });
     if (!cached) {
-      throw new Error("Surf worker request carries no readable mesh for this component");
+      throw new Error("Part worker request carries no readable mesh for this component");
     }
     const meshData = capabilities.render ? buildComponentMeshData(cached.component) : null;
     let bundle = null;

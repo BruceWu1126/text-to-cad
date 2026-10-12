@@ -113,7 +113,7 @@ export function buildComponentMeshData(component) {
   };
 
   const part = {
-    id: "surf:0",
+    id: "part:0",
     occurrenceId: "",
     primitiveIndex: 0,
     name: "",

@@ -1,6 +1,6 @@
 // Named imports, never `import("three")`: a namespace import of three defeats
 // Rollup's tree-shaking and drags the whole renderer (~730 kB) into every
-// bundle that reaches this module -- which includes the GLB and surf WORKERS,
+// bundle that reaches this module -- which includes the GLB and part WORKERS,
 // where nothing else needs three at all. Three classes are all this file uses.
 import { AnimationMixer, LoadingManager, Box3, Group, LoopOnce, Matrix3, Matrix4, Vector3 } from "three";
 

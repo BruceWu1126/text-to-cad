@@ -1,4 +1,4 @@
-import { surfWorkerMemoryStats } from "@text-to-cad/core/lib/renderAssetClient.js";
+import { partWorkerMemoryStats } from "@text-to-cad/core/lib/renderAssetClient.js";
 
 import { viewerMemoryPolicy } from "./viewerMemoryPolicy.js";
 
@@ -9,7 +9,7 @@ export function workerResidentBytesFromStats(stats) {
 
 export function installSurfWorkerMemoryProvider(
   policy = viewerMemoryPolicy,
-  readStats = surfWorkerMemoryStats,
+  readStats = partWorkerMemoryStats,
 ) {
   policy.setRetainedProvider(
     "workerResidentEstimated",

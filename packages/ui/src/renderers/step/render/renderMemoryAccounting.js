@@ -294,7 +294,7 @@ export function renderMemoryAccounting(runtime) {
   viewerMemoryPolicy.setRetained("deformation", totals.deformationBytes);
   syncSelectorCacheAccounting(viewerMemoryPolicy, Number(additionalAssetCaches.selector?.typedBytes) || 0, selectorCpuBytes);
   viewerMemoryPolicy.setRetained("assetCaches", Object.entries(additionalAssetCaches).reduce(
-    (sum, [name, stats]) => name === "surfLeash" || name === "selector"
+    (sum, [name, stats]) => name === "partLeash" || name === "selector"
       ? sum
       : sum + (Number(stats?.typedBytes) || 0) + (Number(stats?.metadataBytes) || 0),
     0

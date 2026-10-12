@@ -302,7 +302,7 @@ test("buildModel renders solid part records and updates theme without rebuilding
 });
 
 test("Render shadow receivers update in place for opaque meshes and surface instances", () => {
-  const scene = buildModel(THREE, composedPackage(surfComponentMeshData(), 4), {
+  const scene = buildModel(THREE, composedPackage(partMeshData(), 4), {
     renderPartsIndividually: true,
     receiveShadows: true
   });
@@ -483,8 +483,8 @@ test("buildModel selection can focus and hide subassembly occurrence descendants
   hidden.dispose();
 });
 
-// A surf component: indexed triangles plus CAD edge segments grouped by class.
-function surfComponentMeshData() {
+// A part's mesh data: indexed triangles plus CAD edge segments grouped by class.
+function partMeshData() {
   return {
     vertices: new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]),
     indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
@@ -503,7 +503,7 @@ function surfComponentMeshData() {
       { classId: "degenerate", pointStart: 6, pointCount: 2, segmentStart: 4, segmentCount: 1 }
     ],
     bounds: { min: [0, 0, 0], max: [1, 1, 0] },
-    parts: [{ id: "surf:0", vertexOffset: 0, vertexCount: 4, triangleOffset: 0, triangleCount: 2, bounds: { min: [0, 0, 0], max: [1, 1, 0] } }]
+    parts: [{ id: "part:0", vertexOffset: 0, vertexCount: 4, triangleOffset: 0, triangleCount: 2, bounds: { min: [0, 0, 0], max: [1, 1, 0] } }]
   };
 }
 
@@ -521,8 +521,8 @@ function assertClose(actual, expected, message, epsilon = 1e-3) {
   }
 }
 
-test("buildModel draws a surf component's CAD edges as ONE instanced screen-space draw with per-class colour, opacity and thickness", () => {
-  const scene = buildModel(THREE, surfComponentMeshData(), {
+test("buildModel draws a part's CAD edges as ONE instanced screen-space draw with per-class colour, opacity and thickness", () => {
+  const scene = buildModel(THREE, partMeshData(), {
     theme: cloneThemePresetSettings("workbench-light"),
     displayMode: CAD_DISPLAY_MODE.SHADED_EDGES,
     renderPartsIndividually: true,
@@ -566,7 +566,7 @@ test("buildModel draws a surf component's CAD edges as ONE instanced screen-spac
 
   // Selection recolours every class to edges.highlightColor at full opacity and
   // moves the occurrence to the highlight pass; deselection restores the class styles.
-  scene.update({ selection: { selectedPartIds: ["surf:0"] } });
+  scene.update({ selection: { selectedPartIds: ["part:0"] } });
   let state = set.readSlot(slot);
   assertClose(state.color, linearRgb("#8dc5ff"), "selected edge colour");
   assert.equal(state.opacity, 1);
@@ -589,7 +589,7 @@ test("buildModel draws a surf component's CAD edges as ONE instanced screen-spac
   assert.equal(set.readSlot(slot).visible, true);
 
   // Show-through modes drop the depth test on the edge draw.
-  const transparent = buildModel(THREE, surfComponentMeshData(), {
+  const transparent = buildModel(THREE, partMeshData(), {
     theme: cloneThemePresetSettings("workbench-light"),
     displayMode: CAD_DISPLAY_MODE.TRANSPARENT,
     renderPartsIndividually: true
@@ -599,11 +599,11 @@ test("buildModel draws a surf component's CAD edges as ONE instanced screen-spac
   transparent.dispose();
 
   // Rendered mode draws no linework at all; wireframe draws the mesh wires instead.
-  const rendered = buildModel(THREE, surfComponentMeshData(), { displayMode: CAD_DISPLAY_MODE.SHADED, renderPartsIndividually: true });
+  const rendered = buildModel(THREE, partMeshData(), { displayMode: CAD_DISPLAY_MODE.SHADED, renderPartsIndividually: true });
   assert.equal(rendered.displayRecords[0].edges, null);
   assert.equal(rendered.displayRecords[0].edgeInstance, null);
   rendered.dispose();
-  const wire = buildModel(THREE, surfComponentMeshData(), { displayMode: CAD_DISPLAY_MODE.WIREFRAME, renderPartsIndividually: true });
+  const wire = buildModel(THREE, partMeshData(), { displayMode: CAD_DISPLAY_MODE.WIREFRAME, renderPartsIndividually: true });
   assert.equal(wire.displayRecords[0].edges.geometry.type, "WireframeGeometry");
   assert.equal(wire.displayRecords[0].edgeInstance, null);
   wire.dispose();
@@ -635,7 +635,7 @@ function composedPackage(sourceMesh, count) {
 }
 
 test("a component's occurrences share one surface draw and one instanced edge draw", () => {
-  const sourceMesh = surfComponentMeshData();
+  const sourceMesh = partMeshData();
   const first = buildModel(THREE, composedPackage(sourceMesh, 4), { renderPartsIndividually: true });
   const geometries = new Set();
   const buffers = new Set();
@@ -670,7 +670,7 @@ test("a component's occurrences share one surface draw and one instanced edge dr
 });
 
 test("surface instances follow transforms and keep the unaffected majority instanced through hover/selection", () => {
-  const sourceMesh = surfComponentMeshData();
+  const sourceMesh = partMeshData();
   const scene = buildModel(THREE, composedPackage(sourceMesh, 4), { renderPartsIndividually: true });
   const record = scene.displayRecords[2];
   const { set, slot } = record.surfaceInstance;
@@ -783,7 +783,7 @@ test("instanced edge GPU budget: edge bytes stay under 10% of surface bytes and 
 });
 
 test("a bent tube leaves the instanced edge draw for a private line drawn from its skin; the component buffers stay shared", () => {
-  const sourceMesh = surfComponentMeshData();
+  const sourceMesh = partMeshData();
   const savedPositions = sourceMesh.vertices.slice();
   const savedNormals = sourceMesh.normals.slice();
   const meshData = {
@@ -838,7 +838,7 @@ test("a bent tube leaves the instanced edge draw for a private line drawn from i
 });
 
 test("appearance preserves CAD ink, geometry, instance slots and segment textures", () => {
-  const source = surfComponentMeshData();
+  const source = partMeshData();
   const scene = buildModel(THREE, source, {
     appearance: "light", displayMode: CAD_DISPLAY_MODE.SHADED_EDGES, renderPartsIndividually: true
   });
@@ -1316,8 +1316,8 @@ function recordSnapshot(record) {
 }
 
 test("update({ source }) reconciles records across publishes into the state a one-shot build produces", () => {
-  const componentA = surfComponentMeshData();
-  const componentB = surfComponentMeshData();
+  const componentA = partMeshData();
+  const componentB = partMeshData();
   const settings = {
     theme: cloneThemePresetSettings("workbench-light"),
     renderPartsIndividually: true,
@@ -1373,8 +1373,8 @@ test("update({ source }) reconciles records across publishes into the state a on
 });
 
 test("static revision adoption touches only changed immutable rows and preserves picking and resource ownership", () => {
-  const componentA = surfComponentMeshData();
-  const componentB = surfComponentMeshData();
+  const componentA = partMeshData();
+  const componentB = partMeshData();
   const descriptor = (moved = -1, material = null) => {
     const occurrences = Array.from({ length: 24 }, (_, index) => ({
       id: `o${index}`,
@@ -1459,7 +1459,7 @@ test("static revision adoption touches only changed immutable rows and preserves
 });
 
 test("exact source-part identity skips work only for rows owned by the current composer result", () => {
-  const component = surfComponentMeshData();
+  const component = partMeshData();
   const descriptor = {
     kind: "assembly-package",
     entryKind: "assembly",
@@ -1577,7 +1577,7 @@ test("mutable public mesh rows observe replacement parent geometry and topology"
 });
 
 test("in-place mutable settings changes are compared with the last applied snapshot", () => {
-  const component = surfComponentMeshData();
+  const component = partMeshData();
   const descriptor = {
     kind: "assembly-package",
     entryKind: "assembly",
@@ -1602,7 +1602,7 @@ test("in-place mutable settings changes are compared with the last applied snaps
 });
 
 test("update({ source }) keeps a bent tube's skin geometry and state", () => {
-  const component = surfComponentMeshData();
+  const component = partMeshData();
   const scene = buildModel(THREE, twoComponentPackage(component, component, [0]), { renderPartsIndividually: true });
   const record = scene.displayRecords[0];
   record.gpuTubeSkinAllowed = false;
@@ -1630,8 +1630,8 @@ test("update({ source }) keeps a bent tube's skin geometry and state", () => {
 });
 
 test("a republication preserves unaffected surface sets and retires only replaced geometry", () => {
-  const componentA = surfComponentMeshData();
-  const componentB = surfComponentMeshData();
+  const componentA = partMeshData();
+  const componentB = partMeshData();
   const order = [0, 1, 2, 3, 4, 5];
   const scene = buildModel(THREE, twoComponentPackage(componentA, componentB, order), { renderPartsIndividually: true });
   const a = scene.displayRecords[0];
@@ -1646,7 +1646,7 @@ test("a republication preserves unaffected surface sets and retires only replace
   const matrixVersion = aMatrix.version;
 
   for (let revision = 0; revision < 4; revision += 1) {
-    const replacement = surfComponentMeshData();
+    const replacement = partMeshData();
     const next = twoComponentPackage(componentA, replacement, [...order].reverse());
     scene.update({ source: next });
     assert.deepEqual(scene.displayRecords.map((item) => item.partId), [...order].reverse().map((id) => `o${id}`));
@@ -1667,7 +1667,7 @@ test("a republication preserves unaffected surface sets and retires only replace
 });
 
 test("selection slots remain inactive across source publications and reactivate without rebuilding", () => {
-  const component = surfComponentMeshData();
+  const component = partMeshData();
   const scene = buildModel(THREE, composedPackage(component, 4), { renderPartsIndividually: true });
   const selected = scene.displayRecords[0];
   const { set, slot } = selected.surfaceInstance;
@@ -1703,7 +1703,7 @@ test("selection slots remain inactive across source publications and reactivate 
 });
 
 test("a bent occurrence leaves its surface slot inactive through progressive publications", () => {
-  const component = surfComponentMeshData();
+  const component = partMeshData();
   const scene = buildModel(THREE, composedPackage(component, 4), { renderPartsIndividually: true });
   const bent = scene.displayRecords[0];
   const { set, slot } = bent.surfaceInstance;
@@ -1729,7 +1729,7 @@ test("a bent occurrence leaves its surface slot inactive through progressive pub
 });
 
 test("source appearance and mirror changes invalidate only their surface pass membership", () => {
-  const component = surfComponentMeshData();
+  const component = partMeshData();
   const scene = buildModel(THREE, composedPackage(component, 4), { renderPartsIndividually: true });
   const initialSet = scene.displayRecords[0].surfaceInstance.set;
   const next = composedPackage(component, 4);
@@ -1748,7 +1748,7 @@ test("source appearance and mirror changes invalidate only their surface pass me
 });
 
 test("direct viewer effects and clip passes synchronize shared surfaces without a source update", () => {
-  const source = composedPackage(surfComponentMeshData(), 4);
+  const source = composedPackage(partMeshData(), 4);
   const theme = cloneThemePresetSettings("workbench-light");
   theme.materials.emissiveIntensity = 0;
   const scene = buildModel(THREE, source, { renderPartsIndividually: true, theme });
@@ -1816,7 +1816,7 @@ test("direct viewer effects and clip passes synchronize shared surfaces without 
 });
 
 test("update({ source }) rebuilds when the build settings change with it", () => {
-  const component = surfComponentMeshData();
+  const component = partMeshData();
   const scene = buildModel(THREE, twoComponentPackage(component, component, [0, 1]), { renderPartsIndividually: true });
   const before = scene.displayRecords[0];
   scene.update({ source: twoComponentPackage(component, component, [0, 1, 2]), displayMode: CAD_DISPLAY_MODE.WIREFRAME });
@@ -1827,8 +1827,8 @@ test("update({ source }) rebuilds when the build settings change with it", () =>
 });
 
 test("departed components free their GPU buffers, BVH and edge draw; a returning one re-uploads from the cache", () => {
-  const componentA = surfComponentMeshData();
-  const componentB = surfComponentMeshData();
+  const componentA = partMeshData();
+  const componentB = partMeshData();
   const scene = buildModel(THREE, twoComponentPackage(componentA, componentB, [0, 1, 3]), { renderPartsIndividually: true });
   const [o0, o1, o3] = scene.displayRecords;
   const geometryB = o1.geometry;
@@ -1873,8 +1873,8 @@ test("departed components free their GPU buffers, BVH and edge draw; a returning
 });
 
 test("shared component GPU resources survive another scene's removal and disposal", () => {
-  const componentA = surfComponentMeshData();
-  const componentB = surfComponentMeshData();
+  const componentA = partMeshData();
+  const componentB = partMeshData();
   const source = twoComponentPackage(componentA, componentB, [0, 1, 3]);
   const first = buildModel(THREE, source, { renderPartsIndividually: true });
   const second = buildModel(THREE, source, { renderPartsIndividually: true });
@@ -1903,7 +1903,7 @@ test("shared component GPU resources survive another scene's removal and disposa
 });
 
 test("shared wireframe geometry is freed only after its last scene, and retained uploads can be released later", () => {
-  const component = surfComponentMeshData();
+  const component = partMeshData();
   const source = twoComponentPackage(component, component, [0, 1]);
   const settings = { renderPartsIndividually: true, displayMode: CAD_DISPLAY_MODE.WIREFRAME };
   const first = buildModel(THREE, source, settings);
@@ -1928,7 +1928,7 @@ test("shared wireframe geometry is freed only after its last scene, and retained
 });
 
 test("a bent tube's private edges keep per-class thickness", () => {
-  const sourceMesh = surfComponentMeshData();
+  const sourceMesh = partMeshData();
   const meshData = {
     vertices: new Float32Array(0), indices: new Uint32Array(0),
     bounds: sourceMesh.bounds,
@@ -1977,7 +1977,7 @@ test("a bent tube's private edges keep per-class thickness", () => {
 });
 
 test("failed surface-instance disposal retains reachability and retries only unfinished resources", () => {
-  const component = surfComponentMeshData();
+  const component = partMeshData();
   const scene = buildModel(THREE, twoComponentPackage(component, component, [0, 1, 2]), { renderPartsIndividually: true });
   const set = [...scene.runtime.cadSurfaceInstanceSets][0];
   assert.ok(set);
@@ -1997,7 +1997,7 @@ test("failed surface-instance disposal retains reachability and retries only unf
 });
 
 test("failed edge-instance disposal retains its set and another scene's shared segment texture", () => {
-  const component = surfComponentMeshData(), input = twoComponentPackage(component, component, [0, 1]);
+  const component = partMeshData(), input = twoComponentPackage(component, component, [0, 1]);
   const scene = buildModel(THREE, input, { renderPartsIndividually: true });
   const other = buildModel(THREE, input, { renderPartsIndividually: true });
   const set = scene.displayRecords[0].edgeInstance.set;

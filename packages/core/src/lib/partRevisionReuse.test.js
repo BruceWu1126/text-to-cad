@@ -4,8 +4,8 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
-  loadRenderSurf,
-  loadRenderSurfSelectorBundle,
+  loadRenderPart,
+  loadRenderPartSelectorBundle,
   partCacheKey,
 } from "./renderAssetClient.js";
 import { setRenderAssetSourceScope } from "./renderAssetSourceScope.js";
@@ -35,8 +35,8 @@ test("a part's payloads are cached by its part and its mesh's object, and a load
   for (const probe of [undefined, {}, { part }, { glb: row.glb }]) {
     assert.equal(partCacheKey(probe), "");
     const options = { identity: { part, tessellationProbe: probe }, tessellationCache };
-    await assert.rejects(loadRenderSurf(options), /Missing asset cache key/);
-    await assert.rejects(loadRenderSurfSelectorBundle(url("a"), options), /Missing asset cache key/);
+    await assert.rejects(loadRenderPart(options), /Missing asset cache key/);
+    await assert.rejects(loadRenderPartSelectorBundle(url("a"), options), /Missing asset cache key/);
   }
 });
 
@@ -47,13 +47,13 @@ test("revisions reuse meshes and exact selector payloads without fetching unchan
     return new Response(table);
   });
   const options = { identity, tessellationCache };
-  const mesh = await loadRenderSurf(options);
+  const mesh = await loadRenderPart(options);
   // The next revision names the same part, and its probe answers the same row.
-  assert.equal(await loadRenderSurf({ identity: await identityFor("test part"), tessellationCache }), mesh);
-  const selectors = await loadRenderSurfSelectorBundle(url("1"), options);
+  assert.equal(await loadRenderPart({ identity: await identityFor("test part"), tessellationCache }), mesh);
+  const selectors = await loadRenderPartSelectorBundle(url("1"), options);
   assert.ok(selectors.manifest);
   const firstFetches = fetches;
-  assert.equal(await loadRenderSurfSelectorBundle(url("2"), options), selectors);
+  assert.equal(await loadRenderPartSelectorBundle(url("2"), options), selectors);
   assert.equal(fetches, firstFetches);
 });
 
@@ -62,9 +62,9 @@ test("snapshot source collision guard remains active even with a part identity",
   const scoped = await identityFor("scoped part");
   setRenderAssetSourceScope("snapshot-A.step");
   try {
-    await loadRenderSurf({ identity: scoped, tessellationCache });
+    await loadRenderPart({ identity: scoped, tessellationCache });
     setRenderAssetSourceScope("snapshot-B.step");
-    await assert.rejects(loadRenderSurf({ identity: scoped, tessellationCache }),
+    await assert.rejects(loadRenderPart({ identity: scoped, tessellationCache }),
       { name: "RenderAssetSourceScopeError" });
   } finally {
     setRenderAssetSourceScope("");

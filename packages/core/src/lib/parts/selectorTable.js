@@ -115,7 +115,7 @@ export function joinSelectorTable(table, component) {
     },
     faces,
     edges,
-    faceProxy: { source: "surf", runsView: "faceRuns", runColumns: [...FACE_RUN_COLUMNS] },
+    faceProxy: { source: "part", runsView: "faceRuns", runColumns: [...FACE_RUN_COLUMNS] },
     edgeProxy: { positionsView: "edgePositions", indicesView: "edgeIndices", edgeIdsView: "edgeIds" },
     relations: Object.fromEntries(RELATIONS.map((name) => [`${name}View`, name])),
     buffers: { littleEndian: true },
