@@ -31,6 +31,7 @@ import {
   zoomTransform
 } from "@text-to-cad/core/lib/drawing2d/transform.js";
 import { IDLE_PIXEL_RATIO_CAP, getPixelRatioCap } from "../viewport/pixelRatio.js";
+import { capturePointer, releasePointer } from "../../../lib/pointerCapture.js";
 
 /** How far a press may wander and still be a tap rather than a pan, in CSS pixels. */
 export const TAP_SLOP_PX = 4;
@@ -257,7 +258,7 @@ export function usePlaneView({ content, bounds, restored = null, colorScheme = "
       // Primary press only: a secondary or middle press belongs to whatever the
       // host puts on them, not to panning.
       if (event.pointerType === "mouse" && event.button !== 0) return;
-      canvas.setPointerCapture?.(event.pointerId);
+      capturePointer(canvas, event.pointerId);
       const point = local(event);
       pointers.set(event.pointerId, point);
       press = pointers.size === 1 ? { id: event.pointerId, x: point.x, y: point.y } : null;
@@ -291,7 +292,7 @@ export function usePlaneView({ content, bounds, restored = null, colorScheme = "
     };
     const onPointerUp = (event) => {
       if (!pointers.delete(event.pointerId)) return;
-      canvas.releasePointerCapture?.(event.pointerId);
+      releasePointer(canvas, event.pointerId);
       if (pointers.size === 2) measurePinch();
       if (pointers.size === 0) setDragging(false);
       const tapped = press && press.id === event.pointerId && event.type === "pointerup";
