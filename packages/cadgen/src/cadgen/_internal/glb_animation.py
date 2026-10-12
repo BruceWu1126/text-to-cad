@@ -51,10 +51,10 @@ def _seconds(value: float) -> str:
     return f"{text or '0'}s"
 
 
-def _summarize(ids, limit: int = 6) -> str:
+def _summarize(ids) -> str:
     ordered = sorted(ids)
-    shown = ", ".join(ordered[:limit])
-    return shown if len(ordered) <= limit else f"{shown} and {len(ordered) - limit} more"
+    shown = ", ".join(ordered[:6])
+    return shown if len(ordered) <= 6 else f"{shown} and {len(ordered) - 6} more"
 
 
 def gltf_point(p: Sequence[float]) -> list[float]:

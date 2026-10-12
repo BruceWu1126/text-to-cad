@@ -165,7 +165,7 @@ def _seconds(value: float) -> str:
     return f"{round(value, 3):g}s"
 
 
-def resolve_frame_plan(video: dict[str, object], clip: dict[str, object], *, label: str = "video") -> dict[str, object]:
+def resolve_frame_plan(video: dict[str, object], clip: dict[str, object]) -> dict[str, object]:
     """The frames of a video over one clip: ``{fps, seconds, start, times, warnings}``,
     ``times`` the moment of the clip each frame shows. The page renders exactly these.
 
@@ -183,7 +183,7 @@ def resolve_frame_plan(video: dict[str, object], clip: dict[str, object], *, lab
     looping = clip.get("loop") is not False
     if start >= duration:
         raise SnapshotError(
-            f"{label} start {_seconds(start)} is at or past the end of a {_seconds(duration)} clip: "
+            f"video start {_seconds(start)} is at or past the end of a {_seconds(duration)} clip: "
             "every frame would be the same one"
         )
     seconds = video.get("seconds")
@@ -191,13 +191,13 @@ def resolve_frame_plan(video: dict[str, object], clip: dict[str, object], *, lab
     count = max(1, math.floor(seconds * fps + 0.5))
     if count > MAX_VIDEO_FRAMES:
         raise SnapshotError(
-            f"{label} {_seconds(seconds)} at {fps} fps schedules {count} frames, past the "
+            f"video {_seconds(seconds)} at {fps} fps schedules {count} frames, past the "
             f"{MAX_VIDEO_FRAMES}-frame ceiling"
         )
     warnings = []
     if not looping and start + seconds - duration > 1e-9:
         warnings.append(
-            f"{label} covers {_seconds(start)}..{_seconds(start + seconds)} of a {_seconds(duration)} clip "
+            f"video covers {_seconds(start)}..{_seconds(start + seconds)} of a {_seconds(duration)} clip "
             "that does not loop: every frame past its end is the same final pose"
         )
     return {"fps": fps, "seconds": seconds, "start": start,

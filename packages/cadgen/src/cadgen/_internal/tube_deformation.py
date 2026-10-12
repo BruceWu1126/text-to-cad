@@ -1158,13 +1158,9 @@ class Deformation:
     maps_rest: bool = False
 
 
-def normalize_tube_deformation(spec: Mapping[str, Any], *, rest_spec: dict | None = None) -> Deformation:
+def normalize_tube_deformation(spec: Mapping[str, Any]) -> Deformation:
     """A deformation spec, validated: ``{rest, path, twistDeg?, maxSegmentLength?,
-    braid?, mapsRest?}``. Compiles nothing.
-
-    ``rest_spec`` is ``spec["rest"]`` already canonical (``canonical_path_spec``),
-    for a caller posing one tube many times: every deformation it makes then
-    shares that one copy."""
+    braid?, mapsRest?}``. Compiles nothing."""
     _keys(spec, _DEFORMATION_KEYS, "deformation")
     twist = spec.get("twistDeg")
     twist = 0.0 if twist is None else twist
@@ -1186,7 +1182,7 @@ def normalize_tube_deformation(spec: Mapping[str, Any], *, rest_spec: dict | Non
     else:
         braid = None
     return Deformation(
-        rest_spec=canonical_path_spec(spec.get("rest")) if rest_spec is None else rest_spec,
+        rest_spec=canonical_path_spec(spec.get("rest")),
         path_spec=canonical_path_spec(spec.get("path")),
         twist_deg=float(twist),
         max_segment_length=float(step),

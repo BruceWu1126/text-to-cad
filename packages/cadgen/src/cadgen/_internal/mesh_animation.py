@@ -95,12 +95,12 @@ def normalize_animation_request(value: object, *, where: str) -> dict[str, objec
     return {"clip": clip.strip(), "seconds": seconds, "start": start, "drop": drop}
 
 
-def _finite_number(value: object, *, where: str, field: str, unit: str = "seconds") -> float:
+def _finite_number(value: object, *, where: str, field: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{where} {field} must be a number of {unit}, got {value!r}")
+        raise ValueError(f"{where} {field} must be a number of seconds, got {value!r}")
     number = float(value)
     if not math.isfinite(number):
-        raise ValueError(f"{where} {field} must be a finite number of {unit}, got {value!r}")
+        raise ValueError(f"{where} {field} must be a finite number of seconds, got {value!r}")
     return number
 
 

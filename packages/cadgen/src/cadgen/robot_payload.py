@@ -381,7 +381,7 @@ def _urdf_material_color(material: ET.Element | None, named: dict[str, str]) -> 
     return named.get(name, ""), name
 
 
-def _resolve_urdf_mesh(filename: str, *, source_path: Path, package_map: dict[str, Path] | None, where: str) -> dict:
+def _resolve_urdf_mesh(filename: str, *, source_path: Path, where: str) -> dict:
     from cadgen.urdf_source import MeshUriKind, classify_mesh_uri, resolve_mesh_uri
 
     try:
@@ -394,7 +394,7 @@ def _resolve_urdf_mesh(filename: str, *, source_path: Path, package_map: dict[st
             f"{where} names {filename!r}, which is not a local file: the viewer draws the meshes beside "
             "the description; copy the file next to it and name it by a relative path"
         )
-    path = resolve_mesh_uri(filename, package_map=package_map)
+    path = resolve_mesh_uri(filename)
     if path is None:
         raise RobotReadError(
             f"{where} names {filename!r}, a package this cannot resolve: name the mesh by a path relative "
@@ -428,10 +428,10 @@ def _four_bar_facts(four_bar: dict[str, Any] | None) -> dict[str, Any] | None:
             "inputZero": four_bar["input_zero"], "outputZero": four_bar["output_zero"]}
 
 
-def _read_urdf(path: Path, *, package_map: dict[str, Path] | None = None) -> _Description:
+def _read_urdf(path: Path) -> _Description:
     from cadgen.urdf_source import validate_urdf_file
 
-    source, findings = validate_urdf_file(path, package_map=package_map)
+    source, findings = validate_urdf_file(path)
     if findings.errors or source is None:
         raise RobotReadError(format_findings(findings.errors))
     try:
@@ -463,7 +463,7 @@ def _read_urdf(path: Path, *, package_map: dict[str, Path] | None = None) -> _De
             try:
                 if mesh_element is not None:
                     filename = str(mesh_element.attrib.get("filename") or "").strip()
-                    mesh = _resolve_urdf_mesh(filename, source_path=path, package_map=package_map, where=where)
+                    mesh = _resolve_urdf_mesh(filename, source_path=path, where=where)
                     scale = _numbers(mesh_element.attrib.get("scale"), 3, where=f"{where} mesh scale", default=[1.0, 1.0, 1.0])
                     facts["path"] = mesh["path"]
                     label = PurePosixPath(filename).name or "mesh"
@@ -1003,7 +1003,7 @@ def paired_urdf_for_srdf(srdf_path: Path) -> Path:
     )
 
 
-def _read_srdf(path: Path, *, package_map: dict[str, Path] | None = None) -> _Description:
+def _read_srdf(path: Path) -> _Description:
     from cadgen.srdf_source import parse_srdf_file
     from cadgen.srdf_validation import _link_names_for_group, read_urdf_robot, validate_srdf_against_urdf
 
@@ -1017,7 +1017,7 @@ def _read_srdf(path: Path, *, package_map: dict[str, Path] | None = None) -> _De
     validate_srdf_against_urdf(source, urdf_robot=robot, result=findings)
     if findings.errors:
         raise RobotReadError(format_findings(findings.errors))
-    description = _read_urdf(urdf_path, package_map=package_map)
+    description = _read_urdf(urdf_path)
     description.kind = "srdf"
     joints = {joint.name: joint for joint in description.joints}
     groups_by_name = {group.name: group for group in source.planning_groups}
@@ -1452,7 +1452,7 @@ def _payload(description: _Description) -> dict[str, Any]:
     }
 
 
-def read_robot_description(path: Path | str, *, package_map: dict[str, Path] | None = None) -> dict[str, Any]:
+def read_robot_description(path: Path | str) -> dict[str, Any]:
     """The payload of the description at ``path`` (``.urdf``, ``.sdf`` or ``.srdf``), read
     now: validated through its format's validator, its frames resolved, its primitives meshed
     into the store. ``RobotReadError`` names what to change."""
@@ -1463,11 +1463,11 @@ def read_robot_description(path: Path | str, *, package_map: dict[str, Path] | N
     if not resolved.is_file():
         raise RobotReadError(f"no file is at {resolved}")
     if kind == ".urdf":
-        description = _read_urdf(resolved, package_map=package_map)
+        description = _read_urdf(resolved)
     elif kind == ".sdf":
         description = _read_sdf(resolved)
     else:
-        description = _read_srdf(resolved, package_map=package_map)
+        description = _read_srdf(resolved)
     return _payload(description)
 
 

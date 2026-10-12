@@ -226,14 +226,13 @@ def view_dir_for(tree_hash: str, *, producer: dict | None = None, document_hash:
 
 
 def export_view(
-    tree_hash: str, dest: Path | None = None, *, producer: dict | None = None, document_hash: str | None = None,
-    cids: list[str] | None = None,
+    tree_hash: str, dest: Path | None = None, *, producer: dict | None = None, cids: list[str] | None = None,
 ) -> Path:
     """Write a view directory (assembly.json + components/) for ``tree_hash``; return its path.
     With ``dest`` None a fresh temporary directory is created (caller removes). ``cids`` limits
     ``components/`` to those components, and the display work to theirs; assembly.json still
     describes the whole tree."""
-    descriptor = descriptor_for_view(tree_hash, producer=producer, document_hash=document_hash)
+    descriptor = descriptor_for_view(tree_hash, producer=producer)
     if descriptor is None:
         raise FileNotFoundError(f"tree object missing: {tree_hash}")
     if cids is not None and any(cid not in descriptor["components"] for cid in cids):
