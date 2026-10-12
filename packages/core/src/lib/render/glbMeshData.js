@@ -170,12 +170,11 @@ function authoredGlbNameForObject(object) {
 /**
  * The coordinate space this GLB DECLARES, or "" when it declares none.
  *
- * `cadUpAxis` is written into node extras by cadgen's GLB writer and by the test writer
- * `glb/writeGlb.js` (GLTFLoader copies extras
+ * `cadUpAxis` is written into node extras by cadgen's GLB writer (GLTFLoader copies extras
  * into `userData`), so a cadgen-written GLB says outright whether its positions are glTF
  * Y-up or already CAD Z-up. That replaces an inference that was not merely weak but FALSE:
- * the old test was "does any node carry a cadOccurrenceId", and both writer presets stamp
- * that id on every node they write, whichever space those positions are in. So the proxy
+ * the old test was "does any node carry a cadOccurrenceId", and cadgen stamps that id on
+ * every node it writes, whichever space those positions are in. So the proxy
  * answered "already CAD space" for every file cadgen produced, the Y-up correction was
  * skipped, and models rendered at the right size rotated -90 degrees about X — on their
  * side.

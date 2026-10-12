@@ -1,35 +1,23 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { build } from 'esbuild';
 import { chromium } from 'playwright';
 import { PNG } from 'pngjs';
-import { writeGlb } from '@text-to-cad/core/glb/writeGlb.js';
 
-// Inline fixtures, served from memory: two boxes with authored colours, the same
-// pair with one box driven by a clip whose first key IS the rest pose, and bytes
-// that are not a GLB at all.
-function box([x, y, z], size) {
-  const [a, b, c] = [x + size, y + size, z + size];
-  const corners = [[x, y, z], [a, y, z], [a, b, z], [x, b, z], [x, y, c], [a, y, c], [a, b, c], [x, b, c]];
-  const faces = [[0, 2, 1, 0, 3, 2], [4, 5, 6, 4, 6, 7], [0, 1, 5, 0, 5, 4], [2, 3, 7, 2, 7, 6], [1, 2, 6, 1, 6, 5], [3, 0, 4, 3, 4, 7]];
-  return new Float32Array(faces.flat().flatMap(index => corners[index]));
-}
-const primitives = [
-  { name: 'base', node: 'base', positions: box([0, 0, 0], 0.02), color: '#d02020' },
-  { name: 'rider', node: 'rider', positions: box([0.03, 0, 0], 0.01), color: '#2040d0' },
-];
-const bytes = glb => Buffer.from(glb.buffer, glb.byteOffset, glb.byteLength);
+// Fixtures, served from memory: cadgen's exports of two boxes with authored colours (core's
+// `lib/render/fixtures`), static and with the clip that slides one of them from its rest pose,
+// and bytes that are not a GLB at all.
+const CORE_FIXTURES = join(dirname(createRequire(import.meta.url).resolve('@text-to-cad/core/lib/render/glbMeshData.js')), 'fixtures');
 const FILES = {
-  'static.glb': bytes(writeGlb({ primitives }, { preset: 'export' })),
-  'animated.glb': bytes(writeGlb({ primitives }, { preset: 'export', animations: [{
-    name: 'slide', times: new Float32Array([0, 1]),
-    channels: [{ node: 'rider', translation: new Float32Array([0, 0, 0, 0, 0.03, 0]) }],
-  }] })),
+  'static.glb': readFileSync(join(CORE_FIXTURES, 'pair.glb')),
+  'animated.glb': readFileSync(join(CORE_FIXTURES, 'pair.slide.glb')),
   'broken.glb': Buffer.from('glTF is not what this is'),
 };
 

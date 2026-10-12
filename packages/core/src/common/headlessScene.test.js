@@ -5,10 +5,10 @@
 // robot is posed, and that a family scene never takes a CAD model's steps.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import * as THREE from "three";
 
-import { writeGlb } from "../lib/glb/writeGlb.js";
 import { deformedGlb } from "../lib/render/__tests__/deformedGlb.js";
 import { buildGlbDocumentFromBuffer, buildMeshDataFromGlbBuffer } from "../lib/render/glbMeshData.js";
 import { buildMeshDataFromStlBuffer } from "../lib/render/stlMeshData.js";
@@ -27,12 +27,11 @@ function box([x, y, z], size) {
   const faces = [[0, 2, 1, 0, 3, 2], [4, 5, 6, 4, 6, 7], [0, 1, 5, 0, 5, 4], [2, 3, 7, 2, 7, 6], [1, 2, 6, 1, 6, 5], [3, 0, 4, 3, 4, 7]];
   return new Float32Array(faces.flat().flatMap(index => corners[index]));
 }
-function glbBytes() {
-  const glb = writeGlb({ primitives: [
-    { name: "base", node: "base", occurrenceId: "o1.1", positions: box([0, 0, 0], 0.02), color: "#d02020", material: { roughness: 0.05, metalness: 1 } },
-    { name: "rider", node: "rider", occurrenceId: "o1.2", positions: box([0.03, 0, 0], 0.01), color: "#2040d0" }
-  ] }, { preset: "export" });
-  return glb.buffer.slice(glb.byteOffset, glb.byteOffset + glb.byteLength);
+// cadgen's exports of two boxes, a polished red base and a blue rider (`fixtures/make_fixtures.py`):
+// `pair.glb` static, and `pair.slide.glb` with the rider's clip, one named node per occurrence.
+function glbBytes(name = "pair.glb") {
+  const bytes = readFileSync(new URL(`../lib/render/fixtures/${name}`, import.meta.url));
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 }
 // A binary STL of two separate boxes: 24 triangles, one object.
 function stlBytes() {
@@ -102,9 +101,9 @@ test("a family scene on the headless stage wears exactly the look the viewer's v
 });
 
 test("the look is really worn: Inspect's finish in Solid, a GLB's authored finish in Render, shadows only under the lights", async () => {
-  const solid = headlessSceneModel(THREE, headlessSceneFamily(job("glb")).build(THREE, await buildGlbDocumentFromBuffer(glbBytes())),
+  const solid = headlessSceneModel(THREE, headlessSceneFamily(job("glb")).build(THREE, await buildGlbDocumentFromBuffer(glbBytes("pair.slide.glb"))),
     headlessSceneDress(settingsFor(DISPLAYS["solid light"], "glb")));
-  const render = headlessSceneModel(THREE, headlessSceneFamily(job("glb")).build(THREE, await buildGlbDocumentFromBuffer(glbBytes())),
+  const render = headlessSceneModel(THREE, headlessSceneFamily(job("glb")).build(THREE, await buildGlbDocumentFromBuffer(glbBytes("pair.slide.glb"))),
     headlessSceneDress(settingsFor(DISPLAYS.render, "glb")));
   const base = model => model.displayRecords.find(({ mesh }) => mesh.parent?.name === "base" || mesh.name === "base").mesh;
   const inspect = settingsFor(DISPLAYS["solid light"], "glb").theme.materials;
@@ -158,10 +157,8 @@ test("a posed robot keeps its REST box for the ground while its live box follows
 });
 
 test("a GLB with clips is framed and grounded on the box sampled over every clip, as the viewer frames it", async () => {
-  const glb = writeGlb({ primitives: [{ name: "rider", node: "rider", positions: box([0, 0, 0], 0.01), color: "#2040d0" }] },
-    { preset: "export", animations: [{ name: "slide", times: new Float32Array([0, 1]),
-      channels: [{ node: "rider", translation: new Float32Array([0, 0, 0, 0.1, 0, 0]) }] }] });
-  const document = await buildGlbDocumentFromBuffer(glb.buffer.slice(glb.byteOffset, glb.byteOffset + glb.byteLength));
+  // The rider slides 60 mm along +X.
+  const document = await buildGlbDocumentFromBuffer(glbBytes("pair.slide.glb"));
   const model = headlessSceneModel(THREE, headlessSceneFamily(job("glb")).build(THREE, document), headlessSceneDress(settingsFor(DISPLAYS["solid light"], "glb")));
   assert.deepEqual(model.restBounds, document.animatedBounds);
   assert.ok(model.restBounds.max[0] > document.restBounds.max[0] + 50, "the clip's travel is inside the ground's box");
@@ -237,7 +234,7 @@ test("a family scene takes none of a CAD model's steps: no edges or explode, and
     context.displaySettings.exploded.enabled, context.displaySettings.clip.enabled], [false, false, false, false, false]);
   assert.deepEqual(resolveViewSceneSettings({ display: { mode: "solid", edges: { enabled: true } }, features: EDGELESS_VIEW_FEATURES }).view.edges.enabled, false);
 
-  const model = headlessSceneModel(THREE, headlessSceneFamily(job("glb")).build(THREE, await buildGlbDocumentFromBuffer(glbBytes())),
+  const model = headlessSceneModel(THREE, headlessSceneFamily(job("glb")).build(THREE, await buildGlbDocumentFromBuffer(glbBytes("pair.slide.glb"))),
     headlessSceneDress(context.sceneSettings));
   assert.equal(model.runtime, undefined, "no CAD runtime: captureModel skips the exploded view, topology edges and line widths");
   const listed = await captureModel({ model, context: { ...context, mode: "list" } }, { job: job("glb") });
