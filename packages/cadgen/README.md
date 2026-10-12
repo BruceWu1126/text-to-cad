@@ -339,9 +339,8 @@ not provenance. An old schema or a mismatched digest must be rebuilt or
 re-annotated, never silently applied. Compiling an imported STEP preserves
 its authored sidecar bytes.
 
-The retired `meshExports` section copied mesh decorator declarations that only
-a door read back; a door now tessellates the document's tree and writes the
-file it was asked for.
+A sidecar declares nothing about meshes: a door tessellates the document's
+tree and writes the file it was asked for.
 *Pressure-test*: build a part that declares meshes but no kinematics,
 materials, or animation; no
 `.step.json` may appear beside it.
