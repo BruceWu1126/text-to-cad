@@ -122,10 +122,10 @@ class StepReemitTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "OUT is the input document"):
             step_namespace.build(self.vendor, self.vendor)
 
-    def test_a_model_script_is_refused_by_naming_the_run(self) -> None:
+    def test_a_model_script_is_not_a_document(self) -> None:
         from cadgen import step as step_namespace
 
-        with self.assertRaisesRegex(ValueError, "run it: python"):
+        with self.assertRaisesRegex(ValueError, r"this command takes a \.step/\.stp document"):
             step_namespace.build(self.root / "hinge.py", self.out)
 
     def test_the_annotation_lands_in_the_outputs_sidecar(self) -> None:
