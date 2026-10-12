@@ -81,7 +81,6 @@ export function useViewerRuntime({
   floorMode,
   renderMode = false,
   onViewportResize,
-  onContextLost,
   onContextRestored,
   onInitializationError,
   onFramePresented,
@@ -379,7 +378,6 @@ export function useViewerRuntime({
         event.preventDefault();
         clearKeyboardOrbitState(keyboardOrbitState);
         setError("WebGL context was lost. Restoring CAD Viewer...");
-        onContextLost?.();
       };
       const handleContextRestored = () => {
         interactionState.shadowsDirty = true;

@@ -108,7 +108,7 @@ const ShellViewport = forwardRef(function ShellViewport({
   // What happens to the WebGL runtime UNDER the scene, for a renderer that hangs its own
   // objects or in-flight work on it: `onRelease(runtime, { handoff })` at teardown, while the
   // renderer is still alive (`handoff` says a replacement runtime follows: a context recovery,
-  // not an unmount); `onContextLost()`; `onInitializationError(error)`.
+  // not an unmount).
   runtimeLifecycle = null,
   // A renderer's own layer over the canvas: a node, or `(viewport) => node` for one that
   // needs the viewport itself ({ runtimeRef, hostRef, mountRef, viewerReadyTick, commitScene }:
@@ -467,10 +467,8 @@ const ShellViewport = forwardRef(function ShellViewport({
     setRuntimeResetToken((value) => value + 1);
   }, []);
   const handleRuntimeInitializationError = useCallback((runtimeError) => {
-    runtimeLifecycleRef.current?.onInitializationError?.(runtimeError);
     viewerAlertChangeRef.current?.(buildRuntimeInitializationAlert(runtimeError));
   }, []);
-  const handleRuntimeContextLost = useCallback(() => { runtimeLifecycleRef.current?.onContextLost?.(); }, []);
   // The scene is its renderer's: teardown detaches it and leaves disposal to its owner.
   const detachScene = useCallback((runtime) => {
     runtime?.kitScene?.object3D?.removeFromParent?.();
@@ -505,7 +503,7 @@ const ShellViewport = forwardRef(function ShellViewport({
     INTERACTION_IDLE_DELAY_MS, TRACKPAD_PINCH_ZOOM_SPEED, COARSE_POINTER_PINCH_ZOOM_SPEED, ACCELERATED_WHEEL_ZOOM_SPEED,
     KEYBOARD_ORBIT_NUDGE_RAD, defaultGridRadius, sceneScaleMode: normalizedSceneScaleMode, floorMode: resolvedFloorMode,
     renderMode, onInitializationError: handleRuntimeInitializationError, onFramePresented: handleFramePresented,
-    presentationRequestRef, onContextLost: handleRuntimeContextLost, onContextRestored: handleRuntimeContextRestored,
+    presentationRequestRef, onContextRestored: handleRuntimeContextRestored,
     preserveInteractionPixelRatio, runtimeResetToken
   });
 

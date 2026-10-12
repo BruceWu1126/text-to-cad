@@ -154,9 +154,9 @@ const NO_CHOICE = Object.freeze({});
  *   what is stored as it is: a renderer that has not loaded yet, or one with no slices of its own.
  * @param {boolean} [options.preserveInteractionPixelRatio]  The scene is drawn with hairlines just now: keep the
  *   idle pixel ratio while the camera moves, instead of dropping it for the duration of the gesture.
- * @param {{ onRelease?(runtime: object, detail: { handoff: boolean }): void, onContextLost?(): void,
- *   onInitializationError?(error: unknown): void }} [options.runtimeLifecycle]  What happens to the WebGL runtime
- *   under the scene, for a renderer that hangs its own objects or in-flight work on it (`ShellViewport.jsx`).
+ * @param {{ onRelease?(runtime: object, detail: { handoff: boolean }): void }} [options.runtimeLifecycle]  What
+ *   happens to the WebGL runtime under the scene, for a renderer that hangs its own objects or in-flight work on
+ *   it (`ShellViewport.jsx`).
  * @param {(alert: object | null) => void} [options.onRuntimeAlert]  The viewport reported an alert, or
  *   cleared one. A renderer that folds the viewport's alert into an alert of its own keeps that state
  *   itself and hands the composed result back as `load.alert`; the shell then holds none of its own.
@@ -322,9 +322,7 @@ export function useRendererShell({
   const runtimeLifecycleRef = useRef(runtimeLifecycle);
   runtimeLifecycleRef.current = runtimeLifecycle;
   const stableRuntimeLifecycle = useMemo(() => ({
-    onRelease: (runtime, detail) => runtimeLifecycleRef.current?.onRelease?.(runtime, detail),
-    onContextLost: () => runtimeLifecycleRef.current?.onContextLost?.(),
-    onInitializationError: (error) => runtimeLifecycleRef.current?.onInitializationError?.(error)
+    onRelease: (runtime, detail) => runtimeLifecycleRef.current?.onRelease?.(runtime, detail)
   }), []);
   const handlePerspectiveChange = useCallback((nextPerspective) => {
     if (previewing) return;

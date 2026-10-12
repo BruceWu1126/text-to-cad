@@ -131,8 +131,7 @@ function HarnessSurface({ view, data }) {
   // What became of the WebGL runtime under the scene, in order.
   const [runtimeEvents, setRuntimeEvents] = useState([]);
   const runtimeLifecycle = useMemo(() => ({
-    onRelease: (runtime, { handoff }) => setRuntimeEvents(events => [...events, `release:${runtime?.renderer ? "live" : "gone"}:${handoff ? "handoff" : "final"}`]),
-    onContextLost: () => setRuntimeEvents(events => [...events, "lost"])
+    onRelease: (runtime, { handoff }) => setRuntimeEvents(events => [...events, `release:${runtime?.renderer ? "live" : "gone"}:${handoff ? "handoff" : "final"}`])
   }), []);
   const [stage, setStage] = useState("idle");
   // The revision on screen, which lags the one being loaded while a stage says so.
