@@ -45,7 +45,7 @@ def read_scene(step_path: Path | str) -> StepScene:
     """Open one saved STEP revision, using its canonical native cache.
 
     A cache miss compiles the document, never its source. No tessellation or
-    display-surface extraction is required. STEP coordinates are in mm.
+    display derivation is required. STEP coordinates are in mm.
     Keep this scene open for repeated queries; calling again reads/hashes the
     document again so a replacement cannot masquerade as the old revision.
     """

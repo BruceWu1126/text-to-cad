@@ -151,7 +151,7 @@ def tree_objects(tree_hash: str, *, _seen: set[str] | None = None) -> set[str]:
 
 
 def tree_complete(tree_hash: str) -> bool:
-    """Full verified geometry closure; disposable surfaces are not required.
+    """Full verified geometry closure; parts' display data is not required.
 
     Verified once per process. The gate asks for the same closures many times
     in one build, so this is the metadata capture: a closure already verified

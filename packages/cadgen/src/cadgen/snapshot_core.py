@@ -1323,7 +1323,7 @@ def route_file(pathname: str, prefix: str, root: Path) -> Path:
 #
 # TRANSPORT: bulk bytes must NOT go through Playwright at all. CDP serializes
 # every fulfilled body as base64 over the devtools pipe at ~20 MB/s, which made
-# a warm moonwatch snapshot spend ~8s moving ~180 MB of surfs + cache entries.
+# a warm moonwatch snapshot spend ~8s moving ~180 MB of display data + cache entries.
 # Worse, INTERCEPTION alone costs the pipe in the other direction: a routed
 # request's body reaches the driver as escaped text in one protocol message, so
 # a large body can exceed Node's string limit and kill the renderer (reported

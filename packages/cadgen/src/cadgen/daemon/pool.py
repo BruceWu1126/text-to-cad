@@ -539,7 +539,7 @@ class Pool:
                 return
             # Subject-less borrowers return after one job. Replacing them while busy
             # discards each returning warm kernel in favour of a cold import,
-            # turning a stream of surface requests into one import per job.
+            # turning a stream of part requests into one import per job.
             borrowed = sum(worker.busy and not worker.model for worker in self._workers)
             want = spare_count() - len(self._spares_locked()) - borrowed - self._spares_pending
             if self._policy.limit_bytes:

@@ -11,7 +11,7 @@ from typing import Sequence
 
 from cadgen.catalog import source_from_path
 from cadgen.cli_logging import CliLogger
-from cadgen._internal.glb_topology import build_step_topology_index_manifest
+from cadgen._internal.glb_topology import build_step_index_manifest
 from cadgen.coordination import (
     DRAWING_PACKAGE,
     PHASE_GENERATE,
@@ -277,13 +277,13 @@ def _assembly_provenance_manifest(selector_options: SelectorOptions) -> dict[str
     read the whole saved document once per build.
     """
 
-    from cadgen._internal.glb_topology import step_topology_capabilities
+    from cadgen._internal.glb_topology import step_edge_capabilities
 
     # STEP-pure by contract: nothing here may derive from the Python source.
     # Source-derived state (provenance, pose, mates) rides the source sidecar
     # (_source_sidecar_payload below) — the tree keys on geometry alone.
-    return build_step_topology_index_manifest({
-        "capabilities": step_topology_capabilities(selector_options.edge_visibility_classes),
+    return build_step_index_manifest({
+        "capabilities": step_edge_capabilities(selector_options.edge_visibility_classes),
         "edgeRendering": {"visibilityClasses": list(selector_options.edge_visibility_classes)},
     })
 

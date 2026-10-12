@@ -1,7 +1,7 @@
 """Input-addressed index entries: records, bounds, mesh entries.
 
 Every entry is a small JSON file written temp + rename. The key is what
-PRODUCED the entry (a model's script, measured bytes, a surface × tolerance),
+PRODUCED the entry (a model's script, measured bytes, a component × producer),
 never the content — that is the one distinction between ``index/`` and
 ``objects/``. What the entry's value depends on is in its key too, its
 format included (``versioned_key``), so two cadgens sharing a store each read
