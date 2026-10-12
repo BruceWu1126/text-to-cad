@@ -1,11 +1,9 @@
 import contextlib
-import hashlib
 import io
 import json
 import shutil
 import types
 import unittest
-from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
@@ -14,70 +12,10 @@ from cadgen._internal import generation as cad_generation
 from cadgen._internal.generation_spec import list_entry_specs, selected_entry_specs
 from cadgen import catalog as cad_catalog
 from cadgen._internal import source_hash as cad_source_hash
-from cadgen._internal.glb_topology import STEP_TOPOLOGY_SCHEMA_VERSION
-from cadgen._internal.step_scene import LoadedStepScene, OccurrenceNode, SelectorBundle
 from tests.python.support.cad_test_roots import IsolatedCadRoots
 
 
 IDENTITY_TRANSFORM = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
-
-
-def _summary_manifest(cad_ref: str) -> dict[str, object]:
-    return {
-        "schemaVersion": STEP_TOPOLOGY_SCHEMA_VERSION,
-        "profile": "summary",
-        "cadPath": cad_ref,
-        "stepPath": f"{cad_ref}.step",
-        "stepHash": "step-hash-123",
-        "bbox": {"min": [0.0, 0.0, 0.0], "max": [1.0, 1.0, 1.0]},
-        "stats": {
-            "occurrenceCount": 1,
-            "leafOccurrenceCount": 1,
-            "shapeCount": 1,
-            "faceCount": 6,
-            "edgeCount": 12,
-        },
-        "tables": {
-            "occurrenceColumns": [
-                "id",
-                "path",
-                "name",
-                "sourceName",
-                "parentId",
-                "transform",
-                "bbox",
-                "shapeStart",
-                "shapeCount",
-                "faceStart",
-                "faceCount",
-                "edgeStart",
-                "edgeCount",
-            ],
-            "shapeColumns": [],
-            "faceColumns": [],
-            "edgeColumns": [],
-        },
-        "occurrences": [
-            [
-                "o1",
-                "1",
-                "Part",
-                "Part",
-                None,
-                IDENTITY_TRANSFORM,
-                {"min": [0.0, 0.0, 0.0], "max": [1.0, 1.0, 1.0]},
-                0,
-                1,
-                0,
-                6,
-                0,
-                12,
-            ]
-        ],
-        "shapes": [],
-        "faces": [],
-        "edges": [],
-    }
 
 
 class CadGenerationTests(unittest.TestCase):
@@ -1183,41 +1121,6 @@ class CadGenerationTests(unittest.TestCase):
         self.assertIs(scene, package_calls[0]["scene"])
         self.assertTrue(cad_catalog.result_view_dir(step_path).is_dir())
 
-    # --- Incremental-regen freshness gate (D) --------------------------------
-
-    def _write_part_with_dependency(self, prefix: str) -> tuple[Path, Path]:
-        """A generated part whose generator imports a sibling helper module, so
-        its captured source closure spans more than its own file."""
-        helper = self.temp_root / f"{prefix}_dims.py"
-        helper.write_text("WIDTH = 3.0\n", encoding="utf-8")
-        script = self.temp_root / f"{prefix}.py"
-        script.write_text(
-            f"import {prefix}_dims as dims\n"
-            "from cadgen import step\n"
-            "@step\n"
-            "def model():\n"
-            "    import build123d\n"
-            "    return build123d.Box(dims.WIDTH, 2.0, 1.0)\n",
-            encoding="utf-8",
-        )
-        return script, helper
-
-    def _part_spec(self, script: Path) -> cad_generation.EntrySpec:
-        _all, selected = cad_generation._selected_specs_for_targets([str(script)])
-        return selected[0]
-
-
-
-    def _spec(self, ref: str, step_name: str) -> cad_generation.EntrySpec:
-        return cad_generation.EntrySpec(
-            source_ref=ref,
-            cad_ref=ref,
-            source_path=self.temp_root / f"{ref}.py",
-            display_name=ref,
-            source="generated",
-            script_path=self.temp_root / f"{ref}.py",
-            step_path=self.temp_root / step_name,
-        )
 
 if __name__ == "__main__":
     unittest.main()

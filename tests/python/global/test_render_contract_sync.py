@@ -10,23 +10,10 @@ derivation of a store key or a format version left to compare.
 
 from __future__ import annotations
 
-import json
-import os
-import re
-import subprocess
-import sys
-import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
-
-
-def _extract(pattern: str, path: Path, flags: int = re.MULTILINE) -> str:
-    match = re.search(pattern, path.read_text(), flags)
-    assert match, f"{pattern!r} not found in {path}"
-    return match.group(1)
 
 
 class RenderContractSyncTest(unittest.TestCase):

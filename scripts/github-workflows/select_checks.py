@@ -310,9 +310,6 @@ RULES: tuple[Rule, ...] = (
 )
 
 
-# Rules for files that must not exist: they match nothing until someone adds one.
-ABSENT_ON_PURPOSE: frozenset[str] = frozenset()
-
 
 def compile_glob(pattern: str) -> re.Pattern[str]:
     """`**` crosses directories, `*` and `?` do not."""

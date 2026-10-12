@@ -94,12 +94,6 @@ class MeshExportStoreReuseTest(unittest.TestCase):
             "PYTHONPATH": str(REPO / "packages/cadgen/src"),
         })
 
-    def _run(self, argv: list[str], cwd: Path) -> subprocess.CompletedProcess:
-        return subprocess.run(
-            [PYTHON, *argv], cwd=str(cwd), env=self.env,
-            capture_output=True, text=True, timeout=600,
-        )
-
     def _door(self, fmt: str, target: str, *flags: str) -> subprocess.CompletedProcess:
         module = {"stl": "stl_build", "3mf": "threemf_build", "glb": "glb_build"}[fmt]
         code = f"from cadgen.cli.{module} import main; raise SystemExit(main())"

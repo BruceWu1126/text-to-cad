@@ -231,16 +231,6 @@ class InvalidUtf8(ArtifactStatusTestCase):
     descriptor, so these are real files, not hypothetical ones.
     """
 
-    #: Latin-1 ``é``: a lone 0xE9 with no continuation byte, invalid as UTF-8.
-    BAD = b"\xe9"
-
-    def _corrupt(self, path, marker: bytes = b"NAME_HERE") -> None:
-        path = Path(path)
-        body = path.read_bytes()
-        self.assertIn(marker, body, "precondition: the fixture carries the marker")
-        path.write_bytes(body.replace(marker, self.BAD))
-
-
     def test_no_backend_reader_opens_a_text_file_strictly(self):
         """The sweep, as a rule rather than three cases.
 

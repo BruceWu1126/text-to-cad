@@ -29,7 +29,6 @@ import os
 import subprocess
 import sys
 import tempfile
-import unittest
 from pathlib import Path
 
 from tests.python.support.paths import REPO_ROOT
@@ -115,30 +114,3 @@ def served(marker: str) -> bool:
     except OSError:
         return False
     return any("-> exit" in line and marker in line for line in text.splitlines())
-
-
-def warm_env(base: dict | None = None, **overrides: str) -> dict:
-    """``base`` (default ``os.environ``) with model runs routed through the warm daemon.
-
-    The caller's own keys win, so a test can still pin ``CADGEN_JOBS`` or a store root.
-    """
-    environment = dict(os.environ if base is None else base)
-    environment.update(warm_entries())
-    # A worker sets this on the children it spawns; inheriting it would send the
-    # subprocess straight back to the inline path this helper exists to avoid.
-    environment.pop("CADGEN_DAEMON_CHILD", None)
-    environment.update(overrides)
-    return environment
-
-
-def warm_environ(testcase: unittest.TestCase, **overrides: str) -> None:
-    """Put :func:`warm_env` on ``os.environ`` for the duration of ``testcase``.
-
-    For tests that build IN PROCESS through cadgen's own API and would otherwise read
-    ``CADGEN_DAEMON=0`` off the environment.
-    """
-    from unittest import mock
-
-    patch = mock.patch.dict(os.environ, warm_env(**overrides))
-    patch.start()
-    testcase.addCleanup(patch.stop)

@@ -9,10 +9,7 @@ from tests.python.support.paths import add_repo_path
 
 add_repo_path("skills/cad/scripts")
 
-from tests.python.support.tmp_root import CAD_TEST_TMP_ROOT, temporary_directory
-
-
-IGNORED_TEST_ROOT = CAD_TEST_TMP_ROOT
+from tests.python.support.tmp_root import temporary_directory
 
 
 class IsolatedCadRoots:

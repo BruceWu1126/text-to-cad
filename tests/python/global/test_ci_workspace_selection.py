@@ -128,8 +128,6 @@ class TheTableHoldsToTheTree(unittest.TestCase):
         present = TRACKED + [path.relative_to(REPO_ROOT).as_posix() for path in (REPO_ROOT / "scripts").rglob("*")]
         for rule in selector.RULES:
             for pattern in rule.patterns:
-                if pattern in selector.ABSENT_ON_PURPOSE:
-                    continue
                 with self.subTest(pattern=pattern):
                     compiled = selector.compile_glob(pattern)
                     self.assertTrue(any(compiled.match(path) for path in present), "a rule for nothing")

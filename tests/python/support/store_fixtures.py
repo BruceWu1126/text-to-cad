@@ -4,7 +4,6 @@ document's result straight into the store without a kernel."""
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -148,7 +147,3 @@ def seed_result(
     if model is not None:
         note_output(document, owner)
     return tree_hash
-
-
-def read_view_descriptor(view_dir: Path | str) -> dict[str, Any]:
-    return json.loads((Path(view_dir) / "assembly.json").read_text(encoding="utf-8"))
