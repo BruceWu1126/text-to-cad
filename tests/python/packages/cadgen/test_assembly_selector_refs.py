@@ -4,8 +4,7 @@
 occurrences -- `#o1.12 shoulder_yaw_yoke` -- while `inspect refs` and `snapshot --focus/--hide`
 resolved against the whole-assembly topology sidecar, which is extracted from the COMPOSED
 compound and therefore describes any assembly as ONE occurrence. Every ref a user could pick was
-rejected by every tool that could measure it, and `--facts` reported `occurrenceCount: 1` for a
-160-part assembly.
+rejected by every tool that could measure it.
 
 These cover the merge itself (real package, real descriptor) and the transform arithmetic, which
 is the part with a wrong answer that looks plausible.
@@ -125,17 +124,6 @@ class AssemblyOccurrenceRefsTest(_AssemblyDisplayFixture, unittest.TestCase):
         )
         self.assertIsNotNone(lookup.lookup_selector("#o1", merged))
         self.assertEqual(flat.single_occurrence_id, merged.single_occurrence_id)
-
-    def test_the_reported_occurrence_count_stops_saying_one(self) -> None:
-        merged = assembly_lookup.merge_assembly_occurrences(
-            self._flat_index(), self.descriptor, self.package_dir
-        )
-        summary = lookup.entry_summary(merged)
-        self.assertGreater(
-            int(summary["occurrenceCount"]),
-            1,
-            "`inspect refs --facts` reported occurrenceCount 1 for a whole assembly",
-        )
 
     def test_a_part_artifact_is_composed_like_any_tree(self) -> None:
         """A tree's selector tables live in its components, a part's single component
@@ -650,11 +638,6 @@ class AssemblyGroupNodesTest(unittest.TestCase):
             lookup.build_selector_index(manifest), self.descriptor, self.package_dir
         )
         self.assertEqual("bar_pair", merged.group_nodes["o1.1"]["name"])
-        # And the count stays a LEAF count: a group resolves by expanding to leaves that
-        # are already in it.
-        self.assertEqual(
-            len(merged.occurrence_by_id), int(lookup.entry_summary(merged)["occurrenceCount"])
-        )
 
 
 if __name__ == "__main__":

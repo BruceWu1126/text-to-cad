@@ -57,7 +57,6 @@ def _relations(manifest: dict[str, Any], buffers: Mapping[str, Any] | None = Non
 
 @dataclass(frozen=True)
 class SelectorIndex:
-    manifest: dict[str, Any]
     occurrences: list[dict[str, Any]]
     shapes: list[dict[str, Any]]
     faces: list[dict[str, Any]]
@@ -70,7 +69,6 @@ class SelectorIndex:
     edge_by_id: dict[str, dict[str, Any]]
     vertex_by_id: dict[str, dict[str, Any]]
     single_occurrence_id: str
-    leaf_occurrence_ids: tuple[str, ...]
     # Label aliases for this index's occurrences, filled in by
     # cadgen.label_refs.attach_label_aliases once the row set is final. Empty until then, and
     # empty forever for inputs whose parts carry no usable labels -- those stay reachable by
@@ -112,7 +110,6 @@ def build_selector_index(manifest: dict[str, Any], *, buffers: Mapping[str, Any]
     single_occurrence_id = leaf_occurrence_ids[0] if len(leaf_occurrence_ids) == 1 else ""
 
     return SelectorIndex(
-        manifest=manifest,
         occurrences=occurrences,
         shapes=shapes,
         faces=faces,
@@ -125,23 +122,7 @@ def build_selector_index(manifest: dict[str, Any], *, buffers: Mapping[str, Any]
         edge_by_id=edge_by_id,
         vertex_by_id=vertex_by_id,
         single_occurrence_id=single_occurrence_id,
-        leaf_occurrence_ids=leaf_occurrence_ids,
     )
-
-
-def entry_summary(index: SelectorIndex) -> dict[str, Any]:
-    stats = index.manifest.get("stats") if isinstance(index.manifest.get("stats"), dict) else {}
-    bbox = index.manifest.get("bbox") if isinstance(index.manifest.get("bbox"), dict) else None
-    return {
-        "kind": "part",
-        "occurrenceCount": int(stats.get("occurrenceCount") or len(index.occurrences)),
-        "leafOccurrenceCount": int(stats.get("leafOccurrenceCount") or len(index.leaf_occurrence_ids)),
-        "shapeCount": int(stats.get("shapeCount") or len(index.shapes)),
-        "faceCount": int(stats.get("faceCount") or len(index.faces)),
-        "edgeCount": int(stats.get("edgeCount") or len(index.edges)),
-        "vertexCount": int(stats.get("vertexCount") or len(index.vertices)),
-        "bounds": bbox,
-    }
 
 
 def label_resolution_error(raw_selector: str, index: SelectorIndex) -> str | None:

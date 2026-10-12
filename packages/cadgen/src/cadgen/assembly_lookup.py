@@ -13,8 +13,7 @@ they disagreed about what an occurrence is:
   in a single namespace ``o1.s1``/``o1.f19``.
 
 ``lookup.build_selector_index`` reads the second. So every ref the first hands out -- every ref a
-user can actually pick -- resolved to an error, and ``inspect refs --facts`` reported
-``occurrenceCount: 1`` for a 160-part assembly. The user's
+user can actually pick -- resolved to an error. The user's
 workaround was to re-identify each face by area and position in the owning part's own namespace,
 which is guesswork whenever a part appears at more than one occurrence.
 
@@ -233,8 +232,8 @@ def assembly_occurrence_rows(
 ) -> list[dict[str, Any]]:
     """Instance-tree occurrences as selector-index rows, in world coordinates at rest.
 
-    Column names mirror the topology sidecar's ``occurrenceColumns`` so that consumers written
-    against that table (``entry_summary``) need no special case for assemblies.
+    Column names mirror the selector table's ``occurrenceColumns``, so a reader of either
+    needs no special case for assemblies.
     With ``package_dir`` None no component's table is read and no row has a ``bbox``: the
     rows are the occurrence namespace alone, what a kinematics mate's ends resolve in.
     """
@@ -565,27 +564,16 @@ def merge_assembly_occurrences(
         added += 1
     if not added:
         return replace(index, group_nodes=group_nodes) if group_nodes else index
-    # occurrenceCount came from the sidecar's stats and said 1 for a 160-part assembly, which is
-    # what `inspect refs --facts` reported. It is a count of what this index can resolve.
-    # It stays a LEAF count: a group ref resolves by expanding to the leaves already
-    # counted here, so counting the interior nodes too would double-count the tree.
-    manifest = dict(index.manifest)
-    stats = dict(manifest.get("stats")) if isinstance(manifest.get("stats"), Mapping) else {}
-    stats["occurrenceCount"] = len(occurrences)
     # The rows are the tree's leaves (groups travel separately as group_nodes). A
     # document with exactly one leaf -- a part -- keeps the bare grammar: `#f19`
     # canonicalizes to that leaf's `f19`, which is what single_occurrence_id is for.
     leaf_ids = [str(row.get("id")) for row in rows if row.get("id")]
-    stats["leafOccurrenceCount"] = len(leaf_ids)
-    manifest["stats"] = stats
     single = index.single_occurrence_id or (leaf_ids[0] if len(leaf_ids) == 1 else "")
     return replace(
         index,
-        manifest=manifest,
         occurrences=occurrences,
         occurrence_by_id=occurrence_by_id,
         group_nodes=group_nodes,
-        leaf_occurrence_ids=leaf_ids,
         single_occurrence_id=single,
     )
 
