@@ -770,6 +770,9 @@ class ElectromagneticAnalysis:
         result.scalars["analysis_extras"] = {"mode": inputs.mode, "noun": NOUNS[inputs.mode]}
         if inputs.frequency_Hz is not None:
             result.scalars["analysis_extras"]["frequency_Hz"] = inputs.frequency_Hz
+        if result.scalars.get("analysis_extras_motion"):
+            # What the viewer's AC routine plays: the field turning through its cycle.
+            result.scalars["analysis_extras"]["motion"] = result.scalars.pop("analysis_extras_motion")
         if result.scalars.get("forces"):
             # The force on each part (J x B on a coil, the Maxwell stress on a magnetic part), for the viewer's Study.
             result.scalars["analysis_extras"]["forces"] = [
@@ -1288,6 +1291,7 @@ class ElectromagneticAnalysis:
                 j_nodal[touched] = 0.0
         fields = {"eddy_current": em_ops.to_part_mesh(region, j_nodal, ctx.space, ctx.volume.domain),
                   "magnetic_field": em_ops.to_part_mesh(region, b_nodal * 1e3, ctx.space, ctx.volume.domain)}
+        self._ac_motion(ctx, region, solved, eddy, volumes, frequency, scalars)
         scalars["region"] = {"elements": int(len(region.volume.tets)), "dofs": int(solved.dofs),
                              "size_mm": round(region.size_mm, 4), "air_mm": round(region.far_mm, 4),
                              "box_mm": [list(map(float, c)) for c in region.box]}
@@ -1298,6 +1302,47 @@ class ElectromagneticAnalysis:
                               warnings=warnings, scalars=scalars)
         result.dofs = int(solved.dofs)
         return result
+
+    @staticmethod
+    def _ac_motion(ctx: SolveContext, region, solved, eddy: list[int], volumes, frequency: float, scalars: dict) -> None:
+        """What the viewer's AC routine plays (``extras.analysis.motion``, kind ``ac``): each field's real and
+        imaginary parts at every vertex (hidden attributes: the flux density in mT, the eddy current in A/mm²), so a
+        phase ωt of the cycle is re·cos ωt − im·sin ωt and its strength the field at that instant. Each is averaged
+        onto the part's nodes as its amplitude is (the flux density per part, the current in the conductors only)."""
+        import numpy as np
+
+        from cadgen._internal.fea import em_ops
+
+        n = region.space.scalar_count
+        dofs_all = region.space.scalar.element_dofs.T                # (E, 4)
+        b = np.zeros((n, 3), dtype=complex)
+        j = np.zeros((n, 3), dtype=complex)
+        corner_J = solved.corner_J                                   # (3, E, 4)
+        for part in range(region.parts):
+            inside = region.domain == part
+            dofs = dofs_all[inside]
+            weights = np.repeat(volumes[inside], dofs.shape[1])
+            count = np.bincount(dofs.ravel(), weights=weights, minlength=n)
+            touched = count > 0
+            for c in range(3):
+                for target, values in ((b, np.repeat(solved.B[inside, c] * 1e9, dofs.shape[1])),
+                                       (j, (corner_J[c][inside] if part in eddy and corner_J is not None else
+                                            np.zeros(dofs.shape, dtype=complex)).ravel())):
+                    total = (np.bincount(dofs.ravel(), weights=values.real * weights, minlength=n)
+                             + 1j * np.bincount(dofs.ravel(), weights=values.imag * weights, minlength=n))
+                    target[touched, c] = total[touched] / count[touched]
+        attributes = {}
+        named = {}
+        for field, values, prefix in (("eddy_current", j, "_MOTION_J"), ("magnetic_field", b, "_MOTION_B")):
+            if field == "eddy_current" and not eddy:
+                continue
+            for part_name, take in (("re", np.real), ("im", np.imag)):
+                attributes[f"{prefix}_{part_name.upper()}"] = np.column_stack([
+                    em_ops.to_part_mesh(region, take(values[:, c]), ctx.space, ctx.volume.domain) for c in range(3)])
+            # A vector attribute is written in glTF metres (mm / 1000): the viewer multiplies by 1000 to read the units.
+            named[field] = {"re": f"{prefix}_RE", "im": f"{prefix}_IM", "attribute_scale": 1000.0}
+        scalars["analysis_extras_motion"] = {"kind": "ac", "frequency_Hz": frequency, "fields": named}
+        scalars["motion_attributes"] = attributes
 
     def _loss_onto_parts(self, ctx: SolveContext, region, solved, eddy: list[int]):
         """The time-averaged loss density (W/mm³) at the run's mesh's quadrature points: each point takes its nearest

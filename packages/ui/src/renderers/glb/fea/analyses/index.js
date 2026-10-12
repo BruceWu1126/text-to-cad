@@ -5,7 +5,8 @@
  * field), whether its checks follow the load control (`scalesWithLoad`), the check kinds it judges
  * (`checks`, with any `checkLabels` of its own: shock's stress is "Shock"), What you see's controls
  * when the view names none (`defaultControls(result)`), Study's setup groups (`setupGroups`), its
- * preview routine (`routine(result)`, a descriptor or null), the marker kinds it draws (`markers`)
+ * preview routine (`routine(result)`, a descriptor or null), its motion where its part moves as a whole
+ * (`motion(result)`, optional: `../motion.js`), the marker kinds it draws (`markers`)
  * and its Display gate's title (`displayTitle`). Pure: no three.js, no React.
  */
 import { FEA_CHECK_KINDS } from "../checkKinds.js";

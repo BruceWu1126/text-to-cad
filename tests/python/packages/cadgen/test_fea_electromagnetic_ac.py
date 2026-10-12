@@ -155,6 +155,36 @@ class SkinEffect(unittest.TestCase):
     def tearDownClass(cls):
         cls._tmp.cleanup()
 
+    def test_it_writes_the_fields_phase_for_the_ac_routine(self):
+        """The viewer's AC routine: each field's real and imaginary parts at every vertex, so a phase of the cycle is
+        re·cos ωt − im·sin ωt; their size is the amplitude the field says, never more."""
+        import numpy as np
+
+        raw = self.result.glb.read_bytes()
+        length, _ = struct.unpack_from("<II", raw, 12)
+        gltf = json.loads(raw[20:20 + length])
+        binary = raw[20 + length + 8:]
+        extras = gltf["meshes"][0]["extras"]
+        motion = extras["analysis"]["motion"]
+        self.assertEqual((motion["kind"], sorted(motion["fields"])), ("ac", ["eddy_current", "magnetic_field"]))
+        self.assertAlmostEqual(motion["frequency_Hz"], self.frequency, delta=1e-6 * self.frequency)
+        attributes = gltf["meshes"][0]["primitives"][0]["attributes"]
+
+        def read(name):
+            accessor = gltf["accessors"][attributes[name]]
+            view = gltf["bufferViews"][accessor["bufferView"]]
+            width = 3 if accessor["type"] == "VEC3" else 1
+            return np.frombuffer(binary, "<f4", accessor["count"] * width, view["byteOffset"]).reshape(accessor["count"], -1)
+
+        for field, attribute in (("eddy_current", "_EDDY_CURRENT"), ("magnetic_field", "_MAGNETIC_FIELD")):
+            pair = motion["fields"][field]
+            scale = pair["attribute_scale"]
+            size = np.sqrt((read(pair["re"]) ** 2 + read(pair["im"]) ** 2).sum(axis=1)) * scale
+            amplitude = read(attribute)[:, 0]
+            with self.subTest(field=field):
+                self.assertLessEqual(float(size.max()), float(amplitude.max()) * 1.001)
+                self.assertGreater(float(size.max()), 0.85 * float(amplitude.max()))
+
     def test_the_ac_resistance_is_bessels(self):
         expected = bessel_ratio(self.RADIUS / 1000, self.depth / 1000)
         self.assertGreater(expected, 1.4)                             # the skin is a fraction of the radius

@@ -168,7 +168,10 @@ Keys (on top of the common keys):
 - Checks: `temperature` with `electro_thermal` (as [thermal.md](thermal.md)).
 - Fields: `eddy_current` (Eddy current, A/mm², the amplitude of the current density in the
   conductors: induced, or a fed conductor's current crowding to its skin), `magnetic_field` (|B|
-  amplitude, mT), and `temperature` with `electro_thermal`.
+  amplitude, mT), and `temperature` with `electro_thermal`. For the viewer each AC field also carries its
+  real and imaginary parts (`extras.analysis.motion`, kind `ac`), so a Phase row turns it through one
+  cycle at its real frequency (slowed, said), each point's strength at that phase on the amplitude's
+  colours; presets Peak (where it opens), 0° and 90°.
 
 Numbers in the summary: `loss_W` and `losses` (per part, W, time-averaged),
 `max_eddy_current_A_mm2` and `max_at_mm`, `max_field_mT`, `energy_J` (time-averaged magnetic

@@ -470,6 +470,9 @@ class RandomVibrationAnalysis:
         timings["psd_s"] = time.perf_counter() - started
 
         curves = self._curves(inputs, used, gamma, grid, S_a, stresses[:, :, s_node], shapes[:, d_node, :], zeta)
+        started = time.perf_counter()
+        motion, motion_attributes = self._motion(inputs, used, gamma, shapes, C0)
+        timings["motion_s"] = time.perf_counter() - started
         in_band = [i for i, f in enumerate(found.frequencies_Hz) if inputs.band_Hz[0] <= f <= inputs.band_Hz[1]]
         return AnalysisResult(
             dof_locations=space.dof_locations,
@@ -501,6 +504,9 @@ class RandomVibrationAnalysis:
                 "displacement_zero_crossing_Hz": nu_disp,
                 "stress_zero_crossing_Hz": nu_stress,
                 "analysis_warnings": [],
+                # What the viewer's Shake routine plays: a shake synthesised from the PSD and the modes' answer to it.
+                "analysis_extras": {"motion": motion} if motion else {},
+                "motion_attributes": motion_attributes,
                 "study_checks": tuple(getattr(ctx.study, "checks", ()) or ()),
                 "margin": float(getattr(ctx.study, "margin", 2.0) or 2.0),
                 "parts": None if ctx.assembly is None else [
@@ -516,6 +522,38 @@ class RandomVibrationAnalysis:
             timings=timings,
             warnings=warnings,
         )
+
+    @staticmethod
+    def _motion(inputs: RandomVibrationInputs, used, gamma, shapes, C0) -> tuple[dict | None, dict]:
+        """What the viewer plays: a stretch of a random base acceleration whose spectrum is the PSD (one line per hertz
+        at the PSD's level, phases from a fixed seed: :func:`motion.random_lines`) and the part's motion relative to
+        the base, the modes that carry most of it (each mode's variance at its largest node, ``C0ᵢᵢ·max|φᵢ|²``)
+        answering every line exactly (:func:`motion.random_history`), over ten cycles of the slowest of them."""
+        import numpy as np
+
+        from cadgen._internal.fea import motion
+
+        if not len(used):
+            return None, {}
+        reach = np.linalg.norm(shapes, axis=2).max(axis=1)                         # (m,) each mode's largest node
+        contribution = np.diag(C0) * reach ** 2
+        chosen = motion.choose_modes(contribution)
+        frequencies = used.frequencies_Hz[chosen]
+        window = motion.RANDOM_CYCLES / float(frequencies.min())
+        step, count, kept = motion.sampling(frequencies, window)
+        chosen = [chosen[i] for i in np.argsort(frequencies)[:kept]]
+        f, amplitude = motion.random_lines(inputs.table)
+        times = np.arange(count) * step
+        base, q = motion.random_history(f, amplitude, used.omega[chosen], gamma[chosen], inputs.damping_ratio, times)
+        attributes, peaks = motion.mode_attributes(shapes[chosen])
+        modes = [{"attribute": name, "frequency_Hz": float(used.frequencies_Hz[i]), "q_mm": q[k] * peaks[k]}
+                 for k, (name, i) in enumerate(zip(attributes, chosen))]
+        share = float(contribution[chosen].sum() / contribution.sum()) if contribution.sum() > 0 else 1.0
+        record = motion.shake_record(
+            label="Random shake", step_s=step, base_g=base / G0_MM_S2, modes=modes, direction=inputs.direction,
+            words="synthesised from the PSD", rms_g=round(float(np.sqrt((np.abs(amplitude) ** 2).sum() / 2.0)) / G0_MM_S2, 6),
+            share=round(share, 4), seed=motion.SEED)
+        return record, attributes
 
     @staticmethod
     def _curves(inputs, used, gamma, grid, S_a, psi, phi, zeta) -> dict:

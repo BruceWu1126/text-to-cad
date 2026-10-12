@@ -26,6 +26,9 @@
  *   camera frames, what 100% zoom means and what the ground is sized from. A scene that knows
  *   its whole box before all of it has arrived (a STEP package's declared `bbox`) reports that
  *   box from the start. Absent means `bounds` never moves.
+ * @property {SceneBounds} [previewBounds]  What Preview frames instead of `restBounds`, where a routine
+ *   carries the scene far past its rest placement (an FEA drop falling from its height). Absent means
+ *   Preview frames `restBounds` as the tools view does.
  * @property {() => void} dispose  Release everything the scene created.
  * @property {(look: SurfaceLook) => void} [setSurfaceLook]  Wear the look the host resolved.
  *   Called on adoption and whenever it changes; a scene applies it to its own materials.

@@ -325,6 +325,8 @@ class Run:
     extended: bool = False
     #: It ran past its time limit (``limit_s``) and stopped at ``end_s``, short of where it would have.
     timed_out: bool = False
+    #: (3,) each frame's centre of mass travel from first contact, mm: with ``frame_u`` the part's whole motion.
+    frame_centre: list = field(default_factory=list)
 
 
 class _Elements:
@@ -476,8 +478,9 @@ def simulate(
     planned = float(end_s)
     stride_frames = max(2, frames - 1) * (2 if stop_after_pulse else 1)
     snap_times = list(np.linspace(0.0, planned, stride_frames + 1))
-    snaps: list[tuple[float, np.ndarray, np.ndarray]] = []
-    peak_snap: tuple[float, np.ndarray, np.ndarray] | None = None
+    # (time, displacement relative to the centre of mass, element von Mises, the centre of mass's travel)
+    snaps: list[tuple[float, np.ndarray, np.ndarray, np.ndarray]] = []
+    peak_snap: tuple[float, np.ndarray, np.ndarray, np.ndarray] | None = None
     peak_vm = -1.0
     vm_peak = np.zeros(model.elements)
     vm_peak_t = np.zeros(model.elements)
@@ -563,7 +566,8 @@ def simulate(
     def record(time_now: float, force: float, step: float) -> float:
         """Envelopes, snapshots and the filtered force after a step of ``step``; returns the filtered force."""
         nonlocal peak_vm, peak_snap
-        rel = u - (mass[:, None] * u).sum(axis=0) / total_mass
+        centre = (mass[:, None] * u).sum(axis=0) / total_mass
+        rel = u - centre
         size = np.linalg.norm(rel, axis=1)
         higher = size > u_peak
         u_peak[higher] = size[higher]
@@ -590,9 +594,9 @@ def simulate(
         top = float(vm.max())
         if top > peak_vm:
             peak_vm = top
-            peak_snap = (time_now, rel.astype(np.float32), vm.astype(np.float32))
+            peak_snap = (time_now, rel.astype(np.float32), vm.astype(np.float32), centre.copy())
         while snap_times and time_now >= snap_times[0] - eps:
-            snaps.append((time_now, rel.astype(np.float32), vm.astype(np.float32)))
+            snaps.append((time_now, rel.astype(np.float32), vm.astype(np.float32), centre.copy()))
             snap_times.pop(0)
         return raw["force_f"]
 
@@ -667,8 +671,8 @@ def simulate(
     end = t
     kept = [snap for snap in snaps if snap[0] <= end + eps]
     if not kept or kept[-1][0] < end - eps:
-        rel = u - (mass[:, None] * u).sum(axis=0) / total_mass
-        kept.append((end, rel.astype(np.float32), vm_f.astype(np.float32)))
+        centre = (mass[:, None] * u).sum(axis=0) / total_mass
+        kept.append((end, (u - centre).astype(np.float32), vm_f.astype(np.float32), centre))
     chosen = _choose_frames([s[0] for s in kept], frames - 1, end)
     picked = [kept[i] for i in chosen]
     if peak_snap is not None and all(abs(s[0] - peak_snap[0]) > eps for s in picked):
@@ -696,6 +700,7 @@ def simulate(
         peak_force_t=raw["peak_t"], watched={name: (abs(a), t_at) for name, (a, t_at) in group_peak.items()},
         peak_t=None if peak_snap is None else float(peak_snap[0]),
         subcycle=n, fine_share=float(touching.mean()) if n > 1 else 0.0, timed_out=timed_out,
+        frame_centre=[np.asarray(s[3], dtype=float) for s in picked],
         energy={"kinetic_start_J": 0.5 * total_mass * drop.speed ** 2 * 1e-3, "kinetic_end_J": kinetic * 1e-3,
                 "centre_velocity_end_mm_s": float((mass @ v) @ d) / total_mass,
                 "mass_t": total_mass, "physical_mass_t": physical_mass},

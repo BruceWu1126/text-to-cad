@@ -1,9 +1,11 @@
 import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
-import { feaControls, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
-import { activeFrameIndex } from '../series.js';
+import { feaControls, feaPresets, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
+import { motionSpan } from '../motion.js';
+import { activeFrameIndex, frameText } from '../series.js';
 import impact, { PLAY, fallWords, impactDroppedRows } from './impact.js';
 import { ANALYSES, feaAnalysis } from './index.js';
+import { DROP } from '../fall.js';
 
 const LIMITS = 'Rigid floor; linear tets; elastic unless plasticity is given.';
 
@@ -61,9 +63,39 @@ describe('impact', () => {
       markers: ['drop', 'rigid_plane'], displayTitle: 'Drop and floor', limitWord: 'Rigid floor' });
     const result = impactResult();
     expect(feaAnalysis(result)).toBe(impact);
+    // A file from before cadgen wrote the fall plays its frames.
     expect(impact.routine(result)).toBe(PLAY);
     expect(PLAY).toEqual({ id: 'fea:play', label: 'Play', kind: 'play' });
     expect(impact.routine({ series: null })).toBeNull();
+  });
+
+  it('plays Drop where the file says the fall: its rebound and its centre of mass at each frame read with it', () => {
+    const fall = { height_mm: 1000, direction: [0, 0, -1], speed_m_s: 4.4287, floor: { point_mm: [0, 0, 0], normal: [0, 0, 1] },
+      impact_ms: 0.0396, end_ms: 0.119, rebound_m_s: 4.1, centre_mm: [[0, 0, 0], [0, 0, -0.02], [0, 0, -0.04], [0, 0, 0.3]] };
+    const result = impactResult({}, { analysis: { type: 'impact', tier: 3, word: 'Drop impact', estimate: false, limits: [LIMITS], noun: 'this drop',
+      reference_C: null, warnings: [], fall } });
+    expect(impact.routine(result)).toBe(DROP);
+    expect(result.analysis.fall).toMatchObject({ heightMm: 1000, impactMs: 0.0396, endMs: 0.119, reboundMs: 4.1,
+      centres: [[0, 0, 0], [0, 0, -0.02], [0, 0, -0.04], [0, 0, 0.3]] });
+    // Moved as kinematics is: a Time row over the whole motion leads What you see, in place of the frames' scrubber,
+    // opening on the peak frame, its value field the real time from landing; its states join the Preset row.
+    const controls = feaControls(result);
+    expect(controls.map((control: { drives: string }) => control.drives)).toEqual(['motion', 'field', 'deformation']);
+    const time = controls[0];
+    const motion = impact.motion(result)!;
+    expect(time).toMatchObject({ id: 'motion', label: 'Time', min: 0, max: motion.duration, defaultValue: motion.atFrame(2) });
+    expect(frameText(time, motion.atFrame(2))).toBe('10.1 µs');
+    expect(time.frameLabels[0]).toBe('\u22120.45 s');
+    expect(time.frameLabels[time.snaps.length - 1]).toBe('At rest');
+    // Every solved frame is a stop of the scrubber, at its moment on the slowed impact.
+    for (const index of [0, 1, 2, 3]) expect(time.snaps).toContain(motion.atFrame(index));
+    expect(motion.atFrame(3) - motion.atFrame(0)).toBeCloseTo(1.19e-4 * motion.plan.impactSlow, 9);
+    const presets = feaPresets(result, controls);
+    expect(presets.map((preset: { label: string }) => preset.label)).toEqual(['Released', 'Contact', 'Peak', 'At rest']);
+    expect(presets[1].values).toMatchObject({ motion: motion.atFrame(0) });
+    // Preview's playbar plays the same timeline; with reduced motion, only the impact where it lands.
+    expect(motionSpan(motion)).toEqual({ from: 0, duration: motion.duration });
+    expect(motionSpan(motion, true)).toEqual({ from: motion.atFrame(0), duration: motion.atFrame(3) - motion.atFrame(0) });
   });
 
   it('opens on the Time scrubber at the peak, then the field and the deformation, with no load control', () => {

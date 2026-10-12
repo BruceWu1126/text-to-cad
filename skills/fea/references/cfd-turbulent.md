@@ -62,6 +62,8 @@ mapped). One key is added:
 
 ## What comes out
 
+- Tracers for the viewer, as [cfd.md](cfd.md)'s: particles let go at the inlets and carried by the solved (mean) velocity, streamed in Preview.
+
 - Fields on the part's surface: `pressure` (wall pressure, Pa gauge, signed), `wall_shear` (Pa,
   the wall function's ρ u_τ²) and `speed` (m/s, the fastest flow within a passage width of each
   wetted point, as `cfd`'s: the velocity check's value is its top). A face the fluid does not wet

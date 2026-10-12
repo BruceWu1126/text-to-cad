@@ -7,10 +7,11 @@
  * moves; nothing deforms. Its takeaway leads with the flow model the file solved ("Laminar · ", "Turbulent · ").
  * What you see opens on the field alone, temperature first, with the fluid temperature among its options; its
  * setup says where the flow goes in and out, the coolant and its temperature, where heat goes in, where it is
- * kept at a temperature or cooled by air, and what it is made of. It plays no routine.
+ * kept at a temperature or cooled by air, and what it is made of. Its routine moves tracers along the solved flow.
  */
 import { fieldOnly } from "./thermal.js";
 import { coolantRows, cooledRows, flowRows, heatedRows, keptAtRows, madeOfRows } from "../setup.js";
+import { tracersRoutine } from "../poses.js";
 import { planned } from "./stub.js";
 
 /** Cooled by flow's setup: flow in/out, the coolant, heated, kept at, cooled by air, made of. */
@@ -28,6 +29,7 @@ export default planned({
   checks: ["temperature", "pressure_drop", "velocity"],
   defaultControls: fieldOnly,
   setupGroups: COOLED_SETUP,
-  routine: () => null,
+  // Tracers carried by the solved flow, in Preview (`../poses.js`, drawn by `../../feaTracers.js`).
+  routine: tracersRoutine,
   markers: ["inlet", "outlet", "heat", "temperature", "convection"], displayTitle: "Flow openings and heat",
 });

@@ -221,6 +221,15 @@ class Pipe(unittest.TestCase):
     def tearDownClass(cls):
         cls.tmp.cleanup()
 
+    def test_its_tracers_cross_from_inlet_to_outlet(self):
+        """The viewer's Flow routine: particles let go at the inlet (x = 0), carried along the duct to its outlet."""
+        motion = glb_extras(self.out)[0]["analysis"]["motion"]
+        self.assertEqual((motion["kind"], motion["label"]), ("tracers", "Coolant flow"))
+        starts = [path[0] for path in motion["paths"]]
+        self.assertLess(max(starts), 0.05 * LENGTH)
+        across = [path[-3] for path in motion["paths"] if path[-3] > 0.8 * LENGTH]
+        self.assertGreater(len(across), len(motion["paths"]) / 2)
+
     def test_the_developed_nusselt_number_is_graetzs(self):
         x1, x2 = 8.0, 28.0   # 2 and 7 diameters in: past the thermal entry (x / (D Pe) > 0.05)
         theta1, theta2 = (80.0 - section_bulk(self.own, x) for x in (x1, x2))

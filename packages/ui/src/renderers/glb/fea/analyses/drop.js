@@ -4,10 +4,14 @@
  * displacement, both k times larger at k times this drop, under the Load ramp. Its verdict's
  * takeaway leads with "Estimate · " (the tier says so). Its setup says how it was dropped (the
  * landing faces under it, how it stops and the g that became its hint) and what it is made of; the
- * equivalent load is that row, not a second "Pushed" one.
+ * equivalent load is that row, not a second "Pushed" one. Where the file says the fall, it moves as a drop does
+ * (`../fall.js`, `../motion.js`): What you see's Time row scrubs it falling from its height onto the floor, the stop it
+ * assumed (the stress and the deformation ramping to the estimated peak and back) and its rest, with the states
+ * Released, Contact, Peak and At rest, and Preview plays it as Drop.
  */
 import { fieldAndDeformation } from "../controls.js";
 import { plainNumber } from "../numbers.js";
+import { DROP, fallMotion } from "../fall.js";
 import { droppedRows, madeOfRows } from "../setup.js";
 import { LOAD_RAMP } from "./static.js";
 import { planned } from "./stub.js";
@@ -39,7 +43,12 @@ export function droppedEstimateRows(result) {
 
 export default planned({
   name: "drop", tier: 2, word: "Drop (estimate)", noun: "this drop", family: "static", estimate: true, scalesWithLoad: true,
-  checks: ["stress", "displacement"], checkLabels: { stress: "Drop" }, routine: () => LOAD_RAMP,
+  checks: ["stress", "displacement"], checkLabels: { stress: "Drop" },
+  // Drop: the fall from its height, the stop slowed down (the load ramping to its peak and back) and the rest; a
+  // file from before cadgen wrote the fall ramps the load as static does.
+  routine: (result) => (result?.analysis?.fall ? DROP : LOAD_RAMP),
+  // Its motion (`../motion.js`): the Time row, the states and the routine over the fall.
+  motion: fallMotion,
   defaultControls: fieldAndDeformation,
   setupGroups: [droppedEstimateRows, madeOfRows],
   markers: ["drop", "fixture"],

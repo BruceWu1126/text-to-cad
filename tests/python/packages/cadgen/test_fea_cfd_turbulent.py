@@ -167,6 +167,15 @@ class MoodyChart(unittest.TestCase):
     def tearDownClass(cls):
         cls._tmp.cleanup()
 
+    def test_its_tracers_cross_from_inlet_to_outlet(self):
+        """The viewer's Flow routine: particles let go at the inlet (x = 0), carried along the duct to its outlet."""
+        motion = self.extras["analysis"]["motion"]
+        self.assertEqual(motion["kind"], "tracers")
+        starts = [path[0] for path in motion["paths"]]
+        self.assertLess(max(starts), 0.05 * LENGTH)
+        across = [path[-3] for path in motion["paths"] if path[-3] > 0.8 * LENGTH]
+        self.assertGreater(len(across), len(motion["paths"]) / 2)
+
     def test_the_pressure_drop_follows_colebrook(self):
         from cadgen._internal.fea.turbulence import colebrook
 

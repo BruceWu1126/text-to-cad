@@ -10,6 +10,7 @@
  */
 import { fieldAndDeformation } from "../controls.js";
 import { plainNumber, threeFigures } from "../numbers.js";
+import { poseRoutine, shakeMotion } from "../poses.js";
 import { axisWords, heldRows, madeOfRows, wholeRefs } from "../setup.js";
 
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
@@ -80,7 +81,9 @@ export default Object.freeze({
   checkLabels: Object.freeze({ stress: "Shock" }),
   defaultControls: fieldAndDeformation,
   setupGroups: Object.freeze([heldRows, shockedRows, madeOfRows]),
-  routine: () => null,
+  // Shock: a base pulse matched to the spectrum and the part's modes ringing, scrubbed on its Time row (`../poses.js`).
+  motion: shakeMotion,
+  routine: (result) => poseRoutine(shakeMotion(result)),
   markers: Object.freeze(["fixture", "base_excitation"]),
   displayTitle: "Shaker and fixtures",
   limitWord: "",

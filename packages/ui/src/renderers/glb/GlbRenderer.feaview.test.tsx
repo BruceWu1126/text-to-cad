@@ -153,3 +153,79 @@ it('a GLB that is not a result has no Clip', () => {
   mount(null);
   expect(screen.queryByRole('button', { name: 'Clip' })).toBeNull();
 });
+
+// A 1 m drop (estimate) as `cadgen fea solve` writes one with its fall: landing flat on its y = 0 edge (glTF), falling
+// straight down, stopping in 2 mm (0.9 ms). Its motion is moved as kinematics is: a Time row, named states, the playbar.
+const DROPPED = {
+  generator: 'cadgen fea', name: 'plate drop (estimate)', deformation_scale: 1, document: 'part.step', occurrence: 'o1', faces: ['#o1.f1', '#o1.f2'],
+  analysis: { type: 'drop', tier: 2, word: 'Drop (estimate)', estimate: true, limits: [], noun: 'this drop', warnings: [],
+    fall: { height_mm: 1000, direction: [0, 0, -1], speed_m_s: 4.4287, floor: { point_mm: [500, 0, 0], normal: [0, 0, 1] }, impact_ms: 0.9 } },
+  fields: [{ attribute: '_TEMPERATURE', name: 'von Mises stress', units: 'MPa', min: 0, max: 75, attribute_scale: 1, field: 'von_mises' }],
+  study: { drop: { height_mm: 1000, onto: ['#o1.f1'], stop_mm: 2, direction: [0, 0, -1] }, material: { name: 'ABS', yield_MPa: 40 } },
+};
+
+it('a drop moves as kinematics does: a Time row and named states pose it in the tools view, and Preview plays the fall', () => {
+  const mesh = mount(DROPPED);
+  const height = () => { mesh.updateMatrixWorld(true); return new Vector3().setFromMatrixPosition(mesh.matrixWorld).y; };
+  // It opens on the peak of the stop, on the floor, its Time row saying the real time from landing.
+  const time = screen.getByRole('slider', { name: 'Time' });
+  const said = () => (screen.getByLabelText('Time slider value') as HTMLInputElement).value;
+  expect(height()).toBeCloseTo(0, 6);
+  expect(said()).toBe('450 µs');
+  // Dragged to its start, it is up at its height, released: as Released, the named state, puts it.
+  act(() => { fireEvent.keyDown(time, { key: 'Home' }); });
+  expect(height()).toBeCloseTo(1, 6);
+  expect(said()).toBe('\u22120.45 s');
+  act(() => { fireEvent.keyDown(time, { key: 'End' }); });
+  expect(height()).toBeCloseTo(0, 6);
+  expect(said()).toBe('At rest');
+  // Preview's playbar plays the same timeline as Drop: from its height, falling, the readout in plain words.
+  act(() => { fireEvent.click(screen.getByRole('button', { name: 'Preview' })); });
+  act(() => { fireEvent.click(screen.getByRole('button', { name: 'Play animation' })); });
+  frame(0);
+  frame(100);
+  expect(height()).toBeCloseTo(1, 6);
+  expect(document.querySelector('[data-fea-fall-time]')!.textContent).toBe('1 m above the floor');
+  frame(700);
+  expect(height()).toBeLessThan(1);
+  expect(height()).toBeGreaterThan(0);
+  const floor = mesh.parent!.getObjectByName('fea-drop-floor')!;
+  expect(floor.visible).toBe(true);
+  frame(1200);
+  expect(document.querySelector('[data-fea-fall-scale]')!.textContent).toBe('slowed 2,000×');
+  // Leaving preview puts it back where the Time row has it, the readout gone.
+  act(() => { fireEvent.click(screen.getByRole('button', { name: 'Exit preview' })); });
+  expect(height()).toBeCloseTo(0, 6);
+  expect((document.querySelector('[data-fea-fall-clock]') as HTMLElement).style.display).toBe('none');
+});
+
+// Heat stress as `cadgen fea solve` writes it: its motion is the heat coming on, on a Heat row.
+const HEATED = {
+  generator: 'cadgen fea', name: 'strip heat stress', deformation_scale: 1, document: 'part.step', occurrence: 'o1', faces: ['#o1.f1', '#o1.f2'],
+  analysis: { type: 'thermal_stress', tier: 1, word: 'Heat stress', reference_C: 25 },
+  fields: [{ attribute: '_TEMPERATURE', name: 'temperature', units: '°C', min: 25, max: 75, attribute_scale: 1, field: 'temperature', signed: true }],
+};
+
+it('a motion\'s row plays in place: its play button runs the timeline in the tools view, pressed again or dragged it stops', () => {
+  mount(HEATED);
+  const said = () => (screen.getByLabelText('Heat slider value') as HTMLInputElement).value;
+  expect(said()).toBe('100 % of the heat');
+  // At its end, play starts it over from ambient and the row follows the clock.
+  act(() => { fireEvent.click(screen.getByRole('button', { name: 'Play the motion' })); });
+  frame(0);
+  frame(500);
+  expect(said()).toBe('25 % of the heat');
+  // Pressed again it pauses where it is.
+  act(() => { fireEvent.click(screen.getByRole('button', { name: 'Pause' })); });
+  frame(1000);
+  expect(said()).toBe('25 % of the heat');
+  // Playing again from there; a drag of the row pauses it and takes the row's value.
+  act(() => { fireEvent.click(screen.getByRole('button', { name: 'Play the motion' })); });
+  frame(1000);
+  frame(1500);
+  expect(said()).toBe('50 % of the heat');
+  act(() => { fireEvent.keyDown(screen.getByRole('slider', { name: 'Heat' }), { key: 'Home' }); });
+  expect(screen.getByRole('button', { name: 'Play the motion' })).toBeTruthy();
+  frame(2000);
+  expect(said()).toBe('0 % of the heat');
+});

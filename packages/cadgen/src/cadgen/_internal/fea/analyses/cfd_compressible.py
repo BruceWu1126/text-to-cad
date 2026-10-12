@@ -50,8 +50,8 @@ from typing import Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
 from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs, SolveContext
-from cadgen._internal.fea.analyses.cfd import (OPENINGS, PASCAL, RE_LIMIT, CfdAnalysis, speed_reach, speed_to_part, surface_integral,
-                                              unsettled_check, wall_triangles)
+from cadgen._internal.fea.analyses.cfd import (OPENINGS, PASCAL, RE_LIMIT, CfdAnalysis, flow_tracers, speed_reach, speed_to_part,
+                                              surface_integral, unsettled_check, wall_triangles)
 
 __all__ = ["CfdCompressibleAnalysis", "CfdCompressibleInputs", "GASES", "GasInletSpec", "LIMITS", "MACH_CHECKED", "mach_sentence"]
 
@@ -505,6 +505,9 @@ class CfdCompressibleAnalysis(CfdAnalysis):
             analysis_warnings += [w for w in flow.warnings if w.startswith("the gas flow stopped")]
 
         fields = {name: mapped[name] for name in ("pressure", "mach", "temperature", "speed")}
+        started = time.perf_counter()
+        tracers = flow_tracers(space, row_kind, {"nodal_velocity": space.nodal(flow.u)}, domain, label="Gas flow")
+        timings["tracers_s"] = time.perf_counter() - started
         result = AnalysisResult(
             dof_locations=ctx.space.dof_locations, vertices=ctx.space.vertices, tets=ctx.space.tets,
             boundary_quadratic=ctx.space.boundary_quadratic, element_dofs=ctx.space.element_dofs, fields=fields,
@@ -517,7 +520,7 @@ class CfdCompressibleAnalysis(CfdAnalysis):
                 "fluid_mesh": {"elements": int(len(fluid.tets)), "nodes": int(len(fluid.nodes)),
                                "wall_size_mm": round(wall, 4), "far_size_mm": round(far, 4)},
                 "analysis_warnings": analysis_warnings,
-                "analysis_extras": {"mach": mach, "walls": setup.walls},
+                "analysis_extras": {"mach": mach, "walls": setup.walls, **({"motion": tracers} if tracers else {})},
             },
         )
         if inputs.mapped:

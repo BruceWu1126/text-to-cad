@@ -39,7 +39,11 @@ const HIGHLIGHT = "#ff40f2";
 export const GHOST_OPACITY = 0.25;
 // A rigid floor's plane: see-through, this many diagonals across.
 const PLANE_OPACITY = 0.14;
-const PLANE_SIZE = 1.6;
+export const PLANE_SIZE = 1.6;
+
+/** A rigid floor's see-through material: the plane the markers draw, and the floor a Drop routine lands on. */
+export const floorPlaneMaterial = (THREE) => new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: PLANE_OPACITY,
+  side: THREE.DoubleSide, depthWrite: false, toneMapped: false });
 
 /**
  * Every kind of marker, by name: what it is drawn as (`shape`), in which of the two tones (`tone`:
@@ -747,8 +751,7 @@ export function createFeaMarkers(THREE, result) {
   }
   // A rigid plane: one see-through quad each, never ghosted (it is see-through already), facing along its normal.
   const planeSites = placed.sites.filter((site) => site.kind === "rigid_plane");
-  const planeMaterial = planeSites.length ? new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: PLANE_OPACITY, side: THREE.DoubleSide,
-    depthWrite: false, toneMapped: false }) : null;
+  const planeMaterial = planeSites.length ? floorPlaneMaterial(THREE) : null;
   const planeGeometry = planeSites.length ? new THREE.PlaneGeometry(PLANE_SIZE * placed.diagonal, PLANE_SIZE * placed.diagonal) : null;
   if (planeGeometry) geometries.push(planeGeometry);
   const planes = planeSites.map((site, index) => {

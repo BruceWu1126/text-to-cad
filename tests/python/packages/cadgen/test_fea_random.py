@@ -188,6 +188,21 @@ def _glb(path: Path) -> tuple[dict, bytes]:
     return json.loads(raw[20:20 + length]), raw[20 + length + 8:]
 
 
+def _attribute(path: Path, name: str):
+    """A vertex attribute of the GLB's mesh as an (n,) or (n, 3) float array."""
+    import numpy as np
+
+    raw = path.read_bytes()
+    length, _ = struct.unpack_from("<II", raw, 12)
+    gltf = json.loads(raw[20:20 + length])
+    binary = raw[20 + length + 8:]
+    accessor = gltf["accessors"][gltf["meshes"][0]["primitives"][0]["attributes"][name]]
+    view = gltf["bufferViews"][accessor["bufferView"]]
+    width = 3 if accessor["type"] == "VEC3" else 1
+    values = np.frombuffer(binary, dtype="<f4", count=accessor["count"] * width, offset=view["byteOffset"])
+    return values.reshape(-1, 3) if width == 3 else values
+
+
 def _ends(listing) -> tuple[str, str]:
     by_x = {face.center_mm[0]: face.ref for face in listing.faces
             if face.surface == "plane" and face.normal is not None and abs(abs(face.normal[0]) - 1) < 1e-6}
@@ -260,6 +275,32 @@ class ShakenAtRandom(unittest.TestCase):
                                                   "grms": round(math.sqrt(P * 980), 6)})
         self.assertEqual((extras["study"]["sigma"], extras["study"]["damping_ratio"]), (3, ZETA))
         self.assertEqual(extras["grms_input"], self.summary["grms_input"])
+
+    def test_the_shake_it_plays_has_the_psds_rms_and_the_modes_answer_it(self):
+        """The viewer's Shake routine: a base acceleration with the PSD's spectrum (its lines' rms is the input's g rms,
+        its samples their sum), and mode 1's motion relative to the base over ten of its cycles, the size of the RMS."""
+        import numpy as np
+
+        from cadgen._internal.fea import motion as motions
+
+        gltf, _ = _glb(self.result.glb)
+        motion = gltf["meshes"][0]["extras"]["analysis"]["motion"]
+        self.assertEqual((motion["kind"], motion["label"], motion["direction"]), ("base_shake", "Random shake", [0.0, 0.0, 1.0]))
+        self.assertAlmostEqual(motion["rms_g"], self.summary["grms_input"], delta=1e-3 * self.summary["grms_input"])
+        f, amplitude = motions.random_lines(self.study["psd"]["table"])
+        t = np.arange(motion["count"]) * motion["step_s"]
+        base = (amplitude[:, None] * np.exp(2j * math.pi * np.outer(f, t))).real.sum(axis=0) / G0
+        self.assertLess(float(np.abs(np.array(motion["base_g"]) - base).max()), 1e-3 * float(np.abs(base).max()))
+        first = motion["modes"][0]
+        self.assertAlmostEqual(first["frequency_Hz"], self.f1, delta=0.01)
+        self.assertAlmostEqual(t[-1] * first["frequency_Hz"], 10.0, delta=0.2)
+        fastest = max(mode["frequency_Hz"] for mode in motion["modes"])
+        self.assertGreaterEqual(1.0 / (motion["step_s"] * fastest), 8.0)
+        shape = _attribute(self.result.glb, first["attribute"])
+        self.assertAlmostEqual(float(np.linalg.norm(shape, axis=1).max()), 0.001, delta=1e-6)   # 1 mm, in glTF metres
+        rms = float(np.sqrt(np.mean(np.square(first["q_mm"]))))
+        self.assertLess(abs(math.log(rms / self.summary["max_displacement_rms_mm"])), math.log(2.0))
+        # Ten cycles of one narrow-band resonance: the window's rms is the RMS within a factor of two, never exact.
 
     def test_the_sidecar_and_the_cli_lines(self):
         self.assertEqual((self.sidecar["analysis"], sorted(self.sidecar["curves"])),

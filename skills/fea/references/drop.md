@@ -72,6 +72,16 @@ a safety factor under 2 fails at 1 mm.
 - The GLB's `extras.analysis` has `estimate: true`, `tier: 2` and the limits; the viewer's verdict
   reads "Estimate · OK up to 1.6× this drop". `extras.study.drop` echoes the drop, and the
   equivalent load is echoed in `loads` as an `acceleration`.
+- `extras.analysis.fall` is what the viewer moves it by: `height_mm`, the unit `direction`, `speed_m_s`,
+  the `floor` (`point_mm`, where it lands first, and `normal`, facing up) and `impact_ms`, how long the
+  stop it assumed lasts (2 d / v for `stop_mm`, the half-sine for `impact_ms`, the dynamic check's
+  pulse with `dynamic`).
+- The viewer shows the drop as kinematics shows motion: the part turned so it falls straight down onto
+  a see-through floor, a **Time** row in What you see that scrubs it from its height to the floor, the
+  stop (the stress and deformation ramping to the estimate's peak and back) and at rest, its value the
+  real time from landing; the Preset row has Released, Contact, Peak and At rest, and it opens on Peak.
+  Preview's playbar plays it as **Drop**, the stop slowed down ("slowed 2,000×"). The motion is
+  illustrative: the numbers are the estimate's steady load, nothing in between is solved.
 - An `info` finding `drop_estimate` says it is an estimate and names the stopping distance assumed.
 - The load control scales the drop: 2× is the same drop stopping in half the distance.
 

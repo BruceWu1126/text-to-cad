@@ -170,6 +170,15 @@ def _ends(listing) -> tuple[str, str]:
     return by_x[min(by_x)], by_x[max(by_x)]
 
 
+def _attribute(path: Path, name: str):
+    import numpy as np
+
+    gltf, binary = _glb(path)
+    accessor = gltf["accessors"][gltf["meshes"][0]["primitives"][0]["attributes"][name]]
+    view = gltf["bufferViews"][accessor["bufferView"]]
+    return np.frombuffer(binary, dtype="<f4", count=accessor["count"] * 3, offset=view["byteOffset"]).reshape(-1, 3)
+
+
 @unittest.skipUnless(HAVE_FEA, "the fea extra (netgen-mesher, scikit-fem, pyamg) is not installed")
 class ShockedCantilever(unittest.TestCase):
     """The clamped beam shocked along Z, 50 g above 100 Hz, its modes up to 4 kHz combined by SRSS."""
@@ -209,6 +218,27 @@ class ShockedCantilever(unittest.TestCase):
         self.assertAlmostEqual(self.summary["max_displacement_mm"] / self._theory(), 1.0, delta=0.10)
         # The first mode alone carries nearly all of it.
         self.assertAlmostEqual(self.mode["peak_mm"] / self.summary["max_displacement_mm"], 1.0, delta=0.02)
+
+    def test_the_pulse_it_plays_meets_the_spectrum_and_the_mode_rings_to_its_peak(self):
+        """The viewer's Shock routine: a base pulse synthesised to the spectrum, starting and ending at rest, and mode 1
+        answering it, its largest motion the spectrum's peak for it within how closely the pulse meets the spectrum."""
+        import numpy as np
+
+        gltf, _ = _glb(self.result.glb)
+        motion = gltf["meshes"][0]["extras"]["analysis"]["motion"]
+        self.assertEqual((motion["kind"], motion["label"]), ("base_shake", "Shock"))
+        self.assertEqual(len(motion["base_g"]), motion["count"])
+        self.assertEqual((motion["base_g"][0], abs(motion["base_g"][-1]) < 1e-6), (0.0, True))
+        self.assertTrue(all(abs(m - 1.0) < 0.1 for m in motion["match"]), motion["match"])
+        first = motion["modes"][0]
+        self.assertAlmostEqual(first["frequency_Hz"], self.f1, delta=0.01)
+        peak = float(np.abs(first["q_mm"]).max())
+        self.assertAlmostEqual(peak / self.mode["peak_mm"], motion["match"][0], delta=0.03)
+        shape = _attribute(self.result.glb, first["attribute"])
+        self.assertAlmostEqual(float(np.linalg.norm(shape, axis=1).max()), 0.001, delta=1e-6)
+        # It rings down: the last tenth of the window moves under a tenth of the peak.
+        tail = np.abs(first["q_mm"][-len(first["q_mm"]) // 10:]).max()
+        self.assertLess(float(tail), 0.1 * peak)
 
     def test_cqc_equals_srss_for_these_well_separated_modes(self):
         from cadgen import fea

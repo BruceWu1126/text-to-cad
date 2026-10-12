@@ -885,14 +885,14 @@ exactly as it always was.
     motion (a piezo bimorph's stroke, a disc's mode) is clearly seen; an Exaggerate past that is kept,
     and 0 stays 0. The static family's Load ramp is drawn as it always was, and Play's frames as the
     scrubber shows them.
-  - **Load ramp** (the static family, drop, a static piezo result's voltage going on; buckling's is called **Buckle**): in preview the playbar
+  - **Load ramp** (the static family, a drop from before cadgen wrote its fall, a static piezo result's voltage going on; buckling's is called **Buckle**): in preview the playbar
     plays the load going on, from none to the load chosen, over two seconds, the colours climbing
     under the bar of that load and the deformation and markers following.
   - **Vibrate** (modal, harmonic, piezo's modes and sweep): one swing a second, the shape shown drawn × sin 2πt, out one way
     and back the other through rest; a harmonic frame turns through its phase, re·cos − im·sin, by
     its imaginary part.
-  - **Play** (a series of times or load steps: heat over time, over time, drop impact, permanent
-    bend): the frames in turn over three seconds, each colour and position blended linearly into the
+  - **Play** (a series of times or load steps: heat over time, over time, a drop impact from before
+    cadgen wrote its fall, permanent bend): the frames in turn over three seconds, each colour and position blended linearly into the
     next's. Two frames moved by the same vector (heat over time, whose displacement is the file's one
     in every frame) are that vector: Play then steps the colours alone, rewriting no position, normal
     or marker for a model that does not move.
@@ -903,10 +903,98 @@ exactly as it always was.
     those, `analysis.acoustic.shown: "air"`), as the part's own air is: the part's outside reads no
     pressure and would hide it. The walls around it are drawn as a faint grey outline (cadgen writes
     their edges, `analysis.acoustic.walls_mm`), whatever Display's gate, so the enclosure reads.
-  - None for heat, random vibration, shock, fatigue, flow and contact: what they show does not move.
+  - **Tracers** (flow, turbulent flow, fast gas flow, cooled by flow, flow and bending: the file's
+    `analysis.motion`, kind `tracers`, read by `readTracers` in `glb/fea/poses.js`, drawn by
+    `glb/feaTracers.js`): dots carried along the paths cadgen traced through the solved velocity field
+    from the inlets (as dense as the flow through them; an external flow's across the part's width),
+    six to a path, each starting again at its inlet at the path's end, so the flow streams. They move at
+    the real speed times one round factor, the median trip about four seconds on screen (a fast flow
+    slowed, a creeping one sped up), and the readout says how long of real flow has passed and the
+    factor ("12 ms of flow", "slowed 200×"). They are drawn as the markers are, solid in view and a
+    faint ghost where the part hides them, under the result mesh, so the file's Clip cuts them, and a
+    flow's preview keeps its cut (preview suspends it for every other result) so they stream inside
+    the part it opens. A flow has no row: the playbar's Speed sets their pace.
+  - None for steady heat, a static electric or magnetic field and a composite: what they show does not move.
+- **A motion** (`glb/fea/motion.js`): a result whose part moves as a whole through time is moved as a
+  STEP's kinematics is, not only played. Its analysis supplies the motion (`motion(result)`: its
+  timeline, the moment it opens on, its named states, the words for the real time at each moment, a
+  solved frame's moment), and the viewer draws it the one way for every analysis: What you see leads
+  with a **Time** row (named by the motion where time is not its axis, `row`: Cycle, Phase, Load, Heat; a scrubber over the whole timeline, in place of a series' own scrubber, that
+  stops at evenly spaced moments, the states and each solved frame, its value field the real time
+  there), its states join the **Preset** row after the view's own presets (each a full state, the
+  Time row at its moment), a chosen check jumps the Time row to its frame's moment, and its routine
+  (`kind: "motion"`) plays the same timeline in preview, from the Time row's moment back to it when
+  let go. The Time row has a **play** button beside its value field (`FeaStudyPanel.jsx`, through
+  `parameterRow`'s `action`: a ghost icon button the joint value boxes' size, a play triangle hinted
+  "Play the motion", a pause hinted "Pause" while it plays), so a person sees the motion plays without
+  finding Preview: a press plays the same timeline in place in the tools view, once, from the row's
+  moment (from its start where the row is at its end), the slider and the value field following it
+  and the readout showing; a second press pauses it there, and dragging the row, choosing a preset,
+  another result, another tool or entering preview stops it where it is. It honours reduced motion as
+  the playbar does (only its `play` span). Preview keeps its playbar. The Time row's moment is the
+  file's view (`motion`, written once chosen). With reduced
+  motion (the host's `reducedMotion` or the system's), the playbar plays only the motion's `play`
+  span, where the part stays put. A motion is drawn one of two ways, a drop's fall or a pose:
+  - **Drop** (a drop estimate and a drop impact whose file carries `extras.analysis.fall`:
+    `glb/fea/fall.js` keeps the time, `glb/feaFall.js` draws it). The part is drawn turned so the way
+    it falls points down, the point it meets first on a see-through floor (the rigid floor's look,
+    as wide; an impact's own floor marker stands for it while the part is on the floor). The
+    timeline: it waits half a second at its height, falls under gravity at real time (1 m in 0.45 s;
+    a fall under 0.4 s slowed to last that long), meets the floor, and the impact, milliseconds long,
+    lasts about 2.5 s, slowed by a round factor (1, 2 or 5 × 10ⁿ): an impact's frames by their
+    times, its centre of mass carried where the file says (`fall.centre_mm`); an estimate's load
+    ramping to its peak and back as a half-sine over the stop it assumed. An impact that rebounds
+    (`fall.rebound_m_s`) hops off the floor at that speed under gravity and comes back; it rests
+    for a second, on its last frame's shape (an estimate at rest). The part is never drawn through
+    the floor (an exaggerated squash lifts it), and on it once at rest. The Time row says the real
+    time from landing ("−0.45 s" falling, "0 s", "10.1 µs", "At rest"); the states are Released,
+    Contact, Peak (where it opens: an impact's peak frame, the middle of an estimate's stop) and At
+    rest. Off the floor the markers and their labels are put away. While the routine plays, a small
+    readout over the colour bar (`FeaFallClock.jsx`) says the real time in words ("1 m above the
+    floor", "0.32 s", "0.21 ms after landing", "At rest") and, while slowed, by how much ("slowed
+    2,000×"); with reduced motion it plays the impact alone.
+  - **A pose** (`kind: "pose"`, `glb/fea/poses.js`; drawn by `paintPose` in `GlbRenderer.jsx`): the part
+    stays where it is held and what it shows changes; at each moment the motion says the frame, the
+    colours (scaled with its load, or its own values then: `recolorByField`'s `values`) and the
+    displacement (vector attributes and their weights, drawn at the Deformation shown, or for a shake
+    raised so its largest motion is a tenth of the model's size, `poseScale` in `glb/feaPose.js`, and the
+    readout says "drawn 3,000× larger"). The readout says the real time and the slow motion while it
+    plays. Every pose is drawn from what cadgen solved and wrote (`extras.analysis.motion`), never
+    invented; where it ramps a linear result it says "ramped":
+    - **Shake** (random vibration) and **Shock**: the part's motion relative to its shaker, a few mode
+      shapes (hidden `_MOTION_MODE_n` attributes, each 1 mm at its largest) times their histories over
+      the window cadgen sampled. A random shake is synthesised from the PSD (one line a hertz at its
+      level, phases from a fixed seed: its spectrum and its g rms) and the modes answer every line
+      exactly; a shock's base pulse is synthesised to match its spectrum (wavelets, as a shaker
+      controller does, its match at each mode in the file) and each mode's answer integrated exactly.
+      Slowed so the slowest mode swings about once a second, ten seconds at most. Time row; states
+      Start (a shock's Pulse starts, Pulse ends) and Largest swing, where it opens; the readout adds the
+      base's acceleration ("1.5 ms · base 3.2 g"). The colours are the field's (an RMS, a peak envelope).
+    - **Load cycle** (fatigue): the load swinging between R times its peak and its peak (`ratio`), the
+      stress (Show's **Stress**, `_cycle_stress`, the cycle's peak von Mises) and the deformation with it,
+      the life and the margin standing (they are of the whole cycle). A static load four cycles, one a
+      second (the readout: "the load gives no rate"); a sweep's at its frequency, slowed; a random
+      shake's 23 cycles at 1σ, 2σ and 3σ in Steinberg's shares. Cycle row ("Cycle 2 · 100 %"); states
+      Max, where it opens, and Min (a random shake's 3σ peak and trough); the readout says how many
+      cycles the weakest point lasts.
+    - **AC cycle** (AC magnetics): the field shown (eddy current, magnetic field) turning through one
+      cycle at its real frequency, slowed to two seconds: each vertex's strength re·cos θ − im·sin θ from
+      its real and imaginary parts (`_MOTION_J_RE`/`_IM`, `_MOTION_B_RE`/`_IM`), on the amplitude's
+      colour range; a temperature stands. Phase row ("90° · 5 ms"); states Peak (the strongest point at
+      its peak, where it opens), 0° and 90°.
+    - **Tighten and load** (bolted joint): the bolt tightened from snug to its preload (the preload's
+      solve ramped: "ramped") over two seconds, then the service load's solved steps, a second each,
+      blended. Load row ("Tightening 50 %", then each step's label); states Snug, Preloaded and Service
+      load; it opens on the series' default step, and a check jumps to its step.
+    - **Heat up** (heat stress): every temperature the same share of the way from the reference to the
+      solved one, the stress and the deformation growing with it (a linear result: each moment exact for
+      that share; "ramped"). Heat row ("62 % of the heat"); states Ambient and Heated, where it opens.
+  The tools view frames the part on the floor through its impact; Preview frames the whole fall,
+  from its height to the floor (the scene's `previewBounds`), so the camera never moves while it plays.
   Preview frames the camera once, on the box the model is drawn in over its whole series and its
   routine as it plays (`glb/feaBounds.js`: every frame, a Load ramp from no load to the load it
-  opens on, a Vibrate out both ways, each at the scale the routine plays at), so the moving part
+  opens on, a Vibrate out both ways, each at the scale the routine plays at; a pose over its whole
+  timeline, `feaPoseBounds` in `glb/feaPose.js`), so the moving part
   stays in view and the camera never zooms while it plays.
   Letting go puts the model back at the frame and load chosen. The colour bar steps up above the
   playbar while it is there.
@@ -972,7 +1060,7 @@ exactly as it always was.
   Clip panel stacked under them, a press on the model still picks, and a person reads the study and
   moves the cut without a trip through Select. The cut is the file's Display settings' (`clip`: a result's view offers the Clip
   section, `EDGELESS_VIEW_FEATURES` and `clip`), so Display's Reset removes it and the file reopens cut;
-  preview suspends it. It is one plane through the box the result is drawn in over its whole series
+  preview suspends it, but for a flow's, whose tracers stream inside what it opens. It is one plane through the box the result is drawn in over its whole series
   (`glb/feaClip.js`), set on whatever material the mesh draws with, so it follows Inspect's and
   Render's looks; it discards what lies past it and never recolours, so the colour bar reads as before.
   There is no cap over the cut: a result is its surfaces, drawn both sides, and the cut opens onto

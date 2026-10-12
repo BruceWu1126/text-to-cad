@@ -267,6 +267,15 @@ class SubsonicNozzle(unittest.TestCase):
     def tearDownClass(cls):
         cls._tmp.cleanup()
 
+    def test_its_tracers_cross_from_inlet_to_outlet(self):
+        """The viewer's Flow routine: particles let go at the inlet (x = 0), carried along the duct to its outlet."""
+        motion = self.extras["analysis"]["motion"]
+        self.assertEqual((motion["kind"], motion["label"]), ("tracers", "Gas flow"))
+        starts = [path[0] for path in motion["paths"]]
+        self.assertLess(max(starts), 0.05 * LENGTH)
+        across = [path[-3] for path in motion["paths"] if path[-3] > 0.8 * LENGTH]
+        self.assertGreater(len(across), len(motion["paths"]) / 2)
+
     def test_every_section_is_on_the_isentropic_area_mach_curve(self):
         m_exit = exit_mach(self.RATIO)
         sonic = math.pi * R_EXIT ** 2 / area_ratio(m_exit)

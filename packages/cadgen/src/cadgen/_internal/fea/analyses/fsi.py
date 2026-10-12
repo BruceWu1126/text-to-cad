@@ -320,7 +320,7 @@ class FsiAnalysis:
 
         from cadgen._internal.fea import fluid_domain
         from cadgen._internal.fea.analyses import get_analysis
-        from cadgen._internal.fea.analyses.cfd import RE_LIMIT, flow_numbers, reynolds_sentence, wall_to_part
+        from cadgen._internal.fea.analyses.cfd import RE_LIMIT, flow_numbers, flow_tracers, reynolds_sentence, wall_to_part
         from cadgen._internal.fea.analyses.cfd_turbulent import laminar_sentence
         from cadgen._internal.fea.femspace import FemSpace
 
@@ -357,6 +357,8 @@ class FsiAnalysis:
             engine.wall_function_shear(final.space, row_kind, final.flow, post, inputs.flow.fluid.density_kg_m3 * 1e-12)
         pressure, shear = wall_to_part(ctx, reference, fluid, face_of, row_kind, post)
         one_way_post = coupling.one_way_post
+        # Tracers through the flow as it settled, round the part as it is bent (the moved mesh).
+        tracers = flow_tracers(final.space, row_kind, post, domain)
         timings["post_s"] = time.perf_counter() - started
 
         warnings = list(final.flow.warnings)
@@ -408,6 +410,7 @@ class FsiAnalysis:
                     "coupling": {"iterations": state.iterations, "converged": state.converged,
                                  "residual": float(f"{state.residual:.3g}"), "tolerance": inputs.tolerance,
                                  "method": state.method},
+                    **({"motion": tracers} if tracers else {}),
                 },
             },
         )

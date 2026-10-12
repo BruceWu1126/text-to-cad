@@ -22,6 +22,8 @@ export const FIELDS = Object.freeze({
   _mode_shape: field("Mode shape"),
   _life: field("Life", { log: true, lowWorst: true }),
   _fatigue_factor: field("Fatigue margin", { lowWorst: true }),
+  // Fatigue's load cycle: the stress it swings to at the cycle's peak, which its Load cycle routine cycles.
+  _cycle_stress: field("Stress"),
   _pressure: field("Pressure", { signed: true }),
   _wall_shear: field("Wall shear"),
   // A flow's speed by its wetted walls: the wall itself is still (no slip), so the fastest the fluid moves within

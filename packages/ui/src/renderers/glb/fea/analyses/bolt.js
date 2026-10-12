@@ -15,6 +15,7 @@ import { seriesControls } from "../controls.js";
 import { heldRows, madeOfRows, pushedRows, rigidFloorRows, spaced } from "../setup.js";
 import { contactRows } from "./contact.js";
 import { stopSentence } from "./nonlinear.js";
+import { boltMotion, poseRoutine } from "../poses.js";
 import { routineOf } from "./stub.js";
 
 /** Play: the preload, then the load steps one after another, interpolated (GlbRenderer plays it). */
@@ -75,7 +76,9 @@ export default Object.freeze({
   // The load-step scrubber (from the preload), the field, the deformation.
   defaultControls: seriesControls,
   setupGroups: BOLT_SETUP,
-  routine: (result) => (result?.series ? PLAY : null),
+  // Tighten and load: the bolt tightened (ramped), then the service load's steps, on a Load row (`../poses.js`).
+  motion: boltMotion,
+  routine: (result) => poseRoutine(boltMotion(result)),
   markers: Object.freeze(["load", "fixture", "rigid_plane"]),
   displayTitle: "Loads and fixtures",
   // A Tier 3 analysis's short limit word, which leads its verdict's takeaway.

@@ -67,6 +67,8 @@ On top of the common keys in [study-file.md](study-file.md#common-keys):
 
 ## What comes out
 
+- Tracers for the viewer, as [cfd.md](cfd.md)'s: particles let go at the inlets and carried by the solved velocity, streamed in Preview past the part as it is bent (the moved fluid mesh).
+
 - Fields on the part: `von_mises` (MPa, the colour it opens on), `pressure` (the wall pressure, Pa,
   signed), `wall_shear` (Pa) and `displacement` (the deformed shape, drawn exaggerated by the
   deformation control). All at the settled state.

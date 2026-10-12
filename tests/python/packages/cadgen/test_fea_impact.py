@@ -287,6 +287,25 @@ class BarDroppedEndOn(unittest.TestCase):
         self.assertEqual(extras["study"]["window_ms"], "auto")
         self.assertEqual(extras["study"]["mesh"]["order"], 1)
 
+    def test_the_glb_carries_the_fall_its_rebound_and_where_its_centre_of_mass_is_at_each_frame(self):
+        fall = self.extras["analysis"]["fall"]
+        summary = self.result.summary
+        self.assertEqual((fall["height_mm"], fall["direction"], fall["speed_m_s"]), (HEIGHT, [0.0, 0.0, -1.0], round(SPEED / 1000, 4)))
+        # The bar lands on its end (z = 0), the floor facing up under it.
+        self.assertEqual(fall["floor"], {"point_mm": fall["floor"]["point_mm"], "normal": [0.0, 0.0, 1.0]})
+        self.assertEqual(fall["floor"]["point_mm"][2], 0.0)
+        self.assertLess(max(abs(c) for c in fall["floor"]["point_mm"][:2]), SIDE / 2)
+        self.assertEqual((fall["impact_ms"], fall["end_ms"], fall["rebound_m_s"]),
+                         (summary["contact_ms"], summary["end_ms"], summary["rebound_speed_m_s"]))
+        # One centre of mass per frame, at first contact where it starts; pressed on the floor it goes on down while
+        # the floor's constant push turns it round, v t_c / 4 at most (the wave theory's bar), then lifts off.
+        centres = fall["centre_mm"]
+        self.assertEqual(len(centres), len(self.extras["series"]["frames"]))
+        self.assertEqual(centres[0], [0.0, 0.0, 0.0])
+        deepest = min(centre[2] for centre in centres)
+        self.assertAlmostEqual(-deepest / (SPEED * CONTACT_S / 4), 1.0, delta=0.15)
+        self.assertGreater(centres[-1][2], deepest)
+
     def test_the_sidecar_curves_the_cli_lines_and_the_findings_say_the_limits(self):
         curves = self.sidecar["curves"]
         force, g = curves["contact_force_N"], curves["rigid_body_g"]

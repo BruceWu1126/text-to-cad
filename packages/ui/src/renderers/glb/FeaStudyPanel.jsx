@@ -2,6 +2,8 @@ import { useState } from "react";
 import { cn } from "@text-to-cad/ui/utils";
 import { TREE_INDENT_PX, TreeRowChevron, TreeRowGuides, TreeRowLabel, TreeRowSurface } from "@text-to-cad/ui/primitives/tree-row";
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
+import { Button } from "@text-to-cad/ui/primitives/button";
+import { Pause, Play } from "lucide-react";
 import { InfoRow, MonoValue } from "../kit/inspector/referenceRows.jsx";
 import { KinematicsPoseRow } from "../kit/inspector/kinematicsControls.jsx";
 import { parameterRow } from "../kit/inspector/parameterRow.jsx";
@@ -24,13 +26,21 @@ const controlText = (value, control) => frameText(control, value)
  * presets (Default, each preset, Custom once a control has moved). The file carries every field and
  * the true displacement (feaResult.js), so each is a choice, not a readout. `values` by control id.
  */
-function FeaResultControls({ controls, values, presets, preset, onChange, onPreset, onReset }) {
+function FeaResultControls({ controls, values, presets, preset, onChange, onPreset, onReset, motionPlay = null }) {
+  // A motion's Time row has a play/pause beside its value: it plays the timeline in place, the row following it.
+  const playButton = motionPlay ? <TooltipHint content={motionPlay.playing ? "Pause" : "Play the motion"}>
+    <Button type="button" variant="ghost" size="icon-xs" className="size-6 text-muted-foreground" data-fea-motion-play=""
+      aria-label={motionPlay.playing ? "Pause" : "Play the motion"} aria-pressed={motionPlay.playing} onClick={motionPlay.onToggle}>
+      {motionPlay.playing ? <Pause className="size-3" aria-hidden="true" /> : <Play className="size-3" aria-hidden="true" />}
+    </Button>
+  </TooltipHint> : null;
   return (
     // A select gives way before its label in the narrow panel ("Displacement" would squeeze "Show" away).
     <div className="flex flex-col gap-1.5 [&_span:has(+span>[data-slot=select-trigger])]:shrink-0 [&_span:has(>[data-slot=select-trigger])]:min-w-0 [&_span:has(>[data-slot=select-trigger])]:shrink [&_[data-slot=select-trigger]]:min-w-0 [&_[data-slot=select-trigger]]:max-w-full">
       {presets.length ? <KinematicsPoseRow label="Preset" poses={presets} activeValue={preset} onSelect={onPreset} onReset={onReset} /> : null}
       {controls.map((control) => parameterRow({
         parameter: control, value: values[control.id], labelTitle: control.labelTitle, valueText: controlText, step: control.step, wideLabel: control.wideLabel === true,
+        action: control.drives === "motion" ? playButton : null,
         onChange: (value) => onChange(control.id, value),
       }))}
     </div>

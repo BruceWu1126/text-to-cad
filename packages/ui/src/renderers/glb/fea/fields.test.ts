@@ -6,7 +6,7 @@ describe('the fields', () => {
     expect(FIELD_WORDS._von_mises).toBe('Stress');
     expect(FIELD_WORDS._displacement).toBe('Displacement');
     expect(Object.values(FIELDS).map((entry) => entry.word)).toEqual(['Stress', 'Displacement', 'Peak stress', 'Peak displacement', 'Temperature', 'Heat flow', 'Fluid temperature', 'Heat into the flow', 'Heat transfer coefficient', 'Mode shape', 'Life',
-      'Fatigue margin', 'Pressure', 'Wall shear', 'Speed', 'Mach number', 'Plastic strain', 'Contact pressure', 'Creep strain', 'Failure index', 'Voltage', 'Electric field', 'Current density', 'Magnetic field', 'Eddy current', 'Sound pressure', 'Sound level at the surface', 'Material kept', 'Stress (1σ)', 'Displacement (1σ)', 'Whirl',
+      'Fatigue margin', 'Stress', 'Pressure', 'Wall shear', 'Speed', 'Mach number', 'Plastic strain', 'Contact pressure', 'Creep strain', 'Failure index', 'Voltage', 'Electric field', 'Current density', 'Magnetic field', 'Eddy current', 'Sound pressure', 'Sound level at the surface', 'Material kept', 'Stress (1σ)', 'Displacement (1σ)', 'Whirl',
       'Water fraction']);
     // FIELD_WORDS is FIELDS' words, by attribute.
     expect(Object.keys(FIELD_WORDS)).toEqual(Object.keys(FIELDS));

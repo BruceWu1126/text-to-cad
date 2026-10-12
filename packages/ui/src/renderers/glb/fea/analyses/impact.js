@@ -7,10 +7,13 @@
  * permanent strain, and choosing a check jumps the scrubber to when it peaked (`at.frame`); its
  * takeaway leads with "Rigid floor · " (the tier's limit word). A drop's stress grows with the
  * impact speed, not in step with the drop height, so there is no load control. What you see opens
- * on the Time scrubber, on the peak (the series' default), the field and the deformation; Play runs
- * the frames over three seconds. Its setup says how it was dropped ("1 m drop onto a rigid floor",
+ * on the Time scrubber, on the peak (the series' default), the field and the deformation. Where the file
+ * says the fall, the Time row is the whole motion's (`../fall.js`, `../motion.js`): it falls from its
+ * height, its solved frames slowed down where it meets the floor, and it rebounds and rests, with the
+ * states Released, Contact, Peak and At rest; Preview plays it as Drop. Its setup says how it was dropped ("1 m drop onto a rigid floor",
  * the way it falls and any friction its hint, the faces that landed under it) and what it is made of.
  */
+import { DROP, fallMotion } from "../fall.js";
 import { plainNumber } from "../numbers.js";
 import { droppedRows, forceDirection, madeOfRows } from "../setup.js";
 import { PLAY, timeFieldAndDeformation } from "./transient.js";
@@ -55,7 +58,11 @@ export default Object.freeze({
   checkLabels: Object.freeze({ acceleration: "Peak g" }),
   defaultControls: timeFieldAndDeformation,
   setupGroups: Object.freeze([impactDroppedRows, madeOfRows]),
-  routine: (result) => (result?.series ? PLAY : null),
+  // Drop: the fall from its height, its solved frames slowed down where it meets the floor, its rebound and rest;
+  // a file from before cadgen wrote the fall plays its frames.
+  routine: (result) => (result?.series ? (result.analysis?.fall ? DROP : PLAY) : null),
+  // Its motion (`../motion.js`): the Time row over the fall and its solved frames, the states, the routine.
+  motion: fallMotion,
   markers: Object.freeze(["drop", "rigid_plane"]),
   displayTitle: "Drop and floor",
   limitWord: "Rigid floor",

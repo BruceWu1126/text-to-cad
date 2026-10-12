@@ -364,12 +364,14 @@ class FatigueAnalysis(StaticAnalysis):
         FieldSpec("life", "_LIFE", "fatigue life", "log10 cycles"),
         FieldSpec("fatigue_factor", "_FATIGUE_FACTOR", "fatigue safety factor", ""),
         FieldSpec("displacement", "_DISPLACEMENT", "displacement", "mm", 3, 1000.0),
+        # The stress the cycle swings to at its peak (the source's von Mises), which the Load cycle routine cycles.
+        FieldSpec("cycle_stress", "_CYCLE_STRESS", "von Mises stress at the cycle's peak", "MPa"),
     )
     checks: ClassVar[tuple] = (kinds.FATIGUE,)
     default_checks: ClassVar[tuple[dict, ...]] = ({"kind": "fatigue", "margin": 1.5},)
     drives: ClassVar[tuple[str, ...]] = ("field", "deformation", "threshold")
     default_controls: ClassVar[dict[str, dict]] = {
-        "field": {"drives": "field", "type": "enum", "options": ["life", "fatigue_factor", "displacement"]},
+        "field": {"drives": "field", "type": "enum", "options": ["life", "fatigue_factor", "displacement", "cycle_stress"]},
         "deformation": {"drives": "deformation", "type": "number", "min": 0.0, "max": None},
     }
     # The default source's; a study's own is its `fatigue.from` (upstream_for).
@@ -484,6 +486,7 @@ class FatigueAnalysis(StaticAnalysis):
             warnings=list(source.warnings),
             solved=source.solved,
         )
+        _cycle_motion(result, inputs, stress, inputs.cycles, None)
         return result
 
     def _solve_vibration(self, ctx: SolveContext, inputs: FatigueInputs) -> AnalysisResult:
@@ -519,7 +522,7 @@ class FatigueAnalysis(StaticAnalysis):
             factor, life, governing = _random_nodal(groups, curves, rate * inputs.duration_s, len(stress))
             extra.update({"zero_crossing_rate": rate, "zero_crossing_Hz": rate_at_peak,
                           "need_cycles": rate_at_peak * inputs.duration_s})
-        return AnalysisResult(
+        result = AnalysisResult(
             dof_locations=source.dof_locations,
             vertices=source.vertices,
             tets=source.tets,
@@ -536,6 +539,9 @@ class FatigueAnalysis(StaticAnalysis):
             timings=dict(source.timings),
             warnings=list(source.warnings),
         )
+        _cycle_motion(result, inputs, stress, extra["need_cycles"],
+                      extra["peak_Hz"] if inputs.source == "harmonic" else extra["zero_crossing_Hz"])
+        return result
 
     def _need(self, result: AnalysisResult, inputs: FatigueInputs) -> float:
         """The cycles the study needs: its own (static), or f × dwell_s, or ν0+ × duration_s at the peak (vibration)."""
@@ -761,6 +767,8 @@ class FatigueAnalysis(StaticAnalysis):
         }
         if "displacement" in result.fields:
             ranges["displacement"] = (0.0, summary["max_displacement_mm"])
+        if "cycle_stress" in result.fields:
+            ranges["cycle_stress"] = (0.0, round(float(result.fields["cycle_stress"].max()), 6))
         return ranges
 
     def extras_name(self, stem: str) -> str:
@@ -907,3 +915,36 @@ def _nodal(groups, curves, inputs: FatigueInputs, cycles: float, nodes: int):
 
 def _finding(severity: str, kind: str, summary: str, description: str, items: list[dict]) -> dict:
     return {"check": "fea", "severity": severity, "type": kind, "summary": summary, "description": description, "items": items}
+
+
+#: The cycle's stress for the viewer's routine: its peak von Mises at every node, MPa (the ``cycle_stress`` field).
+CYCLE_STRESS = "_CYCLE_STRESS"
+
+
+def _cycle_motion(result: AnalysisResult, inputs: FatigueInputs, stress, need_cycles: float, frequency_Hz: float | None) -> None:
+    """What the viewer's Load cycle routine plays (``extras.analysis.motion``, kind ``cycle``): the stress swinging
+    between its minimum and maximum, R times the peak and the peak (static: the study's loading; a vibration source
+    fully reversed about zero), its peak von Mises at every node (the ``cycle_stress`` field; a random shake's at 3σ), how fast it cycles (a sweep's
+    peak frequency, a random shake's zero-crossing rate; none for a static load, which says no rate), the cycles it
+    needs and the fewest the part lasts. A random source's cycles come at 1σ, 2σ and 3σ in Steinberg's shares. It
+    replaces any motion a vibration source carried: fatigue plays its cycle, not the shake."""
+    import numpy as np
+
+    stress = np.asarray(stress, dtype=float)
+    if inputs.source == "random_vibration":
+        # A random shake's cycles reach 3σ at most (Steinberg's top band): its peak is three times the RMS.
+        stress = 3.0 * stress
+    life = np.asarray(result.scalars["life_cycles"], dtype=float)
+    record = {
+        "kind": "cycle", "source": inputs.source, "ratio": float(inputs.ratio), "stress_attribute": CYCLE_STRESS,
+        "stress_max_MPa": round(float(stress.max()), 6) if len(stress) else 0.0,
+        "frequency_Hz": None if frequency_Hz is None else round(float(frequency_Hz), 6),
+        "need_cycles": None if need_cycles is None else float(f"{float(need_cycles):.6g}"),
+        "life_cycles": float(f"{float(life.min()):.6g}") if len(life) and np.isfinite(life.min()) else None,
+    }
+    if inputs.source == "random_vibration":
+        record["levels"] = [{"sigma": level, "share": share} for level, share in STEINBERG]
+    result.scalars["analysis_extras"] = {**{key: value for key, value in (result.scalars.get("analysis_extras") or {}).items()
+                                            if key != "motion"}, "motion": record}
+    result.scalars["motion_attributes"] = {}
+    result.fields["cycle_stress"] = stress

@@ -40,6 +40,8 @@ import { clamp } from "@text-to-cad/core/common/numbers.js";
 import { feaAnalysis } from "./fea/analyses/index.js";
 import { CHECK_KINDS, FEA_CHECK_KINDS, checkCaption, checkLabel as kindLabel, checkLine as kindLine, checkTitle, loadCaption } from "./fea/checkKinds.js";
 import { deformationRange, fieldOptions } from "./fea/controls.js";
+import { readFall } from "./fea/fall.js";
+import { motionControl, motionPresets } from "./fea/motion.js";
 import { flooredFactor, plainNumber, threeFigures } from "./fea/numbers.js";
 import { DISPLACEMENT, SIGMA_LEVELS, frameControl, isRms, sigmaControl, snapFrame } from "./fea/series.js";
 import { detailRows, faceLabel, facePartIndex, faceSummary, isRoller, loadWords, spaced, wholeRefs } from "./fea/setup.js";
@@ -259,6 +261,8 @@ function readAnalysis(raw) {
     ...(readWalls(own.acoustic) ? { walls: readWalls(own.acoustic) } : {}),
     ...(readResonances(own.modes) ? { resonances: readResonances(own.modes) } : {}),
     ...(readForces(own.forces) ? { forces: readForces(own.forces) } : {}),
+    // A drop's fall, for its Drop routine: the height, the way it falls, the floor, the impact's time.
+    ...(readFall(own.fall) ? { fall: readFall(own.fall) } : {}),
   };
 }
 
@@ -782,15 +786,17 @@ function vertexParts(mesh) {
  * load ramp plays the values climb toward the range). `threshold`: `{ field, value, scale }`, every
  * vertex whose value of that field (times `scale`) is under `value` drawn grey. `blend`: `{ field,
  * weight }`, a series playing between two frames, the values that far toward the other frame's
- * (`field` the same field at that frame).
+ * (`field` the same field at that frame). `values`: a motion's own values at its moment, per vertex (an AC
+ * field's strength at a phase), in place of the field's, named by `stamp` so the same moment is not redrawn.
  * Returns true when the colours changed; false when that field and tint were already shown.
  */
 export function recolorByField(mesh, field, ramp = DEFAULT_RAMP, highlight = null, parts = null, softParts = null,
-  { valueScale = 1, rangeScale = 1, threshold = null, blend = null } = {}) {
+  { valueScale = 1, rangeScale = 1, threshold = null, blend = null, values: given = null, stamp = "" } = {}) {
   const color = mesh.geometry.getAttribute("color");
   // The attribute's presence, not its values: a ramp playing recolours every frame, and keptValues
-  // reads them once per field.
-  const own = mesh.geometry.getAttribute(field.attribute) && keptValues(mesh, field);
+  // reads them once per field. A motion may give the values at its moment itself (`values`, named by `stamp`).
+  const own = given && given.length === mesh.geometry.getAttribute("position")?.count ? given
+    : mesh.geometry.getAttribute(field.attribute) && keptValues(mesh, field);
   const toward = own && blend?.field && blend.weight > 0 && mesh.geometry.getAttribute(blend.field.attribute) ? keptValues(mesh, blend.field) : null;
   const values = toward ? blended(mesh, own, toward, blend.weight) : own;
   if (!color || !values) {
@@ -806,7 +812,7 @@ export function recolorByField(mesh, field, ramp = DEFAULT_RAMP, highlight = nul
   const sorted = (set) => (set ? [...set].sort((a, b) => a - b).join(",") : "");
   const cut = under ? `${threshold.field.attribute}<${threshold.value}x${threshold.scale}` : "";
   const mix = toward ? `~${blend.field.attribute}@${blend.weight}` : "";
-  const key = `${field.attribute}${mix}x${valueScale}/${rangeScale}|${cut}|${sorted(tinted)}|${sorted(tintedParts)}|${sorted(lightParts)}`;
+  const key = `${field.attribute}${own === given ? `@${stamp}` : ""}${mix}x${valueScale}/${rangeScale}|${cut}|${sorted(tinted)}|${sorted(tintedParts)}|${sorted(lightParts)}`;
   if (kept.field === key) {
     return false;
   }
@@ -978,7 +984,10 @@ const finiteNumber = (value) => typeof value === "number" && Number.isFinite(val
 export function feaControls(result) {
   const every = result.fields.map((entry) => entry.attribute);
   const chosen = result.view?.controls ? viewControls(result, every) : [];
-  const controls = chosen.length ? keptDeformation(result, chosen) : feaAnalysis(result).defaultControls(result);
+  const own = chosen.length ? keptDeformation(result, chosen) : feaAnalysis(result).defaultControls(result);
+  // A result that moves as a whole (a drop: `fea/motion.js`) leads with its Time row, which also scrubs its frames.
+  const motion = feaMotion(result);
+  const controls = motion ? [motionControl(motion), ...own.filter((control) => control.drives !== "frame" && control.drives !== "motion")] : own;
   // A displacement too small to mean anything has no Deformation to set: it is drawn at rest.
   return result.motionless ? controls.filter((control) => control.drives !== "deformation") : controls;
 }
@@ -1101,6 +1110,15 @@ function presetOption(result, control, value) {
  */
 export function feaPresets(result, controls) {
   const defaults = feaDefaults(controls);
+  // A motion's named states (a drop's Released, Contact, Peak, At rest) follow the view's own, as a kinematics pose does.
+  const motion = controls.some((control) => control.drives === "motion") ? feaMotion(result) : null;
+  return [...viewPresets(result, controls, defaults), ...(motion ? motionPresets(motion, defaults) : [])];
+}
+
+/** The motion a result moves through as a whole (`fea/motion.js`: a drop's fall), as its analysis says; null for none. */
+export const feaMotion = (result) => feaAnalysis(result).motion?.(result) || null;
+
+function viewPresets(result, controls, defaults) {
   return (result.view?.presets || []).map((preset, index) => {
     const values = { ...defaults };
     for (const control of controls) {

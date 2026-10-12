@@ -43,8 +43,8 @@ from typing import Any, ClassVar
 from cadgen._internal.fea.analyses import kinds
 from cadgen._internal.fea.analyses.base import AnalysisResult, SolveContext
 from cadgen._internal.fea.analyses.cfd import (
-    DENSITY, PASCAL, RE_LIMIT, SPEED, VISCOSITY, CfdAnalysis, CfdInputs, flux_of, flow_numbers, speed_reach, speed_to_part,
-    wall_to_part, wall_triangles,
+    DENSITY, PASCAL, RE_LIMIT, SPEED, VISCOSITY, CfdAnalysis, CfdInputs, flux_of, flow_numbers, flow_tracers, speed_reach,
+    speed_to_part, wall_to_part, wall_triangles,
 )
 
 __all__ = ["CfdTurbulentAnalysis", "CfdTurbulentInputs", "LIMITS", "laminar_sentence"]
@@ -233,6 +233,9 @@ class CfdTurbulentAnalysis(CfdAnalysis):
         speed, reach = speed_to_part(ctx, space, fluid, face_of, row_kind, np.linalg.norm(post["nodal_velocity"], axis=1) / SPEED,
                                      speed_reach(inputs.kind, setup.length_mm, wall))
         timings["post_s"] = time.perf_counter() - started
+        started = time.perf_counter()
+        tracers = flow_tracers(space, row_kind, post, domain, label="Turbulent flow")
+        timings["tracers_s"] = time.perf_counter() - started
 
         warnings = list(flow.warnings)
         analysis_warnings = []
@@ -261,7 +264,8 @@ class CfdTurbulentAnalysis(CfdAnalysis):
                                "wall_size_mm": round(wall, 4), "far_size_mm": round(far, 4)},
                 "analysis_warnings": analysis_warnings,
                 "analysis_extras": {"turbulence": {"model": "k-omega SST", "reynolds": reynolds["value"],
-                                                   "kind": inputs.kind, "viscosity_ratio_max": round(flow.nut_ratio[1], 2)}},
+                                                   "kind": inputs.kind, "viscosity_ratio_max": round(flow.nut_ratio[1], 2)},
+                                    **({"motion": tracers} if tracers else {})},
             },
         )
         if inputs.mapped:

@@ -7,11 +7,12 @@
  * flow's speed); its takeaway leads with the flow's regime ("Laminar · ", "Turbulent · ") and, where
  * the coupling did not settle, "not converged". What you see opens on the field and the deformation;
  * its setup says what bends it ("Water at 0.5 m/s bends the flap"), where the flow goes in and out,
- * where it is held and what it is made of; Details add the coupling's iterations. It plays no routine.
+ * where it is held and what it is made of; Details add the coupling's iterations. Its routine moves tracers along the solved flow.
  */
 import { fieldAndDeformation } from "../controls.js";
 import { plainNumber } from "../numbers.js";
 import { flowRows, heldRows, madeOfRows, wholeRefs } from "../setup.js";
+import { tracersRoutine } from "../poses.js";
 import { planned } from "./stub.js";
 
 /** What the file says of its coupling (`extras.analysis.coupling`): iterations, converged, residual, tolerance, method. null for none. */
@@ -83,6 +84,7 @@ export default planned({
   defaultControls: fieldAndDeformation,
   setupGroups: FSI_SETUP,
   detailRows: couplingRows,
-  routine: () => null,
+  // Tracers carried by the solved flow, in Preview (`../poses.js`, drawn by `../../feaTracers.js`).
+  routine: tracersRoutine,
   markers: ["inlet", "outlet", "fixture"], displayTitle: "Flow openings and fixtures",
 });

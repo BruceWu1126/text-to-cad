@@ -78,7 +78,14 @@ That table is 6.06 g rms from 20 to 2000 Hz.
   Mises's equivalent PSD at the stress peak) and `displacement_psd_mm2_Hz` (at
   the most-moving node), against frequency.
 - The GLB: `_VON_MISES_RMS` and `_DISPLACEMENT_RMS`, both 1σ (the viewer
-  calls them "Stress (1σ)" and "Displacement (1σ)"), no series.
+  calls them "Stress (1σ)" and "Displacement (1σ)"), no series. For the
+  viewer's Shake it also carries a stretch of a base acceleration synthesised
+  from the PSD (one line a hertz at the PSD's level, phases from a fixed seed,
+  so its spectrum and g rms are the input's) and the part's motion relative to
+  the shaker over ten cycles of its slowest mode played, from the few modes
+  that carry most of it, each answering every line exactly
+  (`extras.analysis.motion`, the shapes as `_MOTION_MODE_n`): a Time row
+  scrubs it and Preview's playbar plays it, slowed.
 - Findings, in plain words: a failing stress check is an error ("Shaken at
   random at 6.06 g rms along Z, the part reaches 312 MPa at 3σ, over its 276
   MPa yield"), a close one a warning; `random_response` (info) gives the RMS

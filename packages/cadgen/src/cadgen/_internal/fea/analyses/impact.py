@@ -48,7 +48,7 @@ from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs
 if TYPE_CHECKING:
     import numpy as np
 
-__all__ = ["ImpactAnalysis", "ImpactInputs", "LIMITS_LINE", "contact_time_estimate", "time_words"]
+__all__ = ["ImpactAnalysis", "ImpactInputs", "LIMITS_LINE", "contact_time_estimate", "fall_record", "floor_point", "time_words"]
 
 G0_MM_S2 = 9806.65
 DROP_KEYS = frozenset({"height_mm", "direction", "floor", "friction"})
@@ -125,6 +125,33 @@ def time_words(seconds: float) -> str:
 
 def _figure(value: float) -> str:
     return f"{value:.3g}" if abs(value) < 1000 else f"{value:,.0f}"
+
+
+def floor_point(nodes, direction) -> list[float]:
+    """Where the part first meets the floor: the middle of its points lowest along the fall (a face's middle when a
+    face lands flat, the corner when a corner lands first), mm."""
+    import numpy as np
+
+    points = np.asarray(nodes, dtype=float)
+    height = points @ np.asarray(direction, dtype=float)
+    top = float(height.max())
+    lowest = points[height >= top - 1e-6 * max(float(height.max() - height.min()), 1e-9)]
+    return [round(float(c), 4) + 0.0 for c in lowest.mean(axis=0)]
+
+
+def fall_record(nodes, direction, height_mm: float, **more) -> dict:
+    """``extras.analysis.fall``, what the viewer's Drop routine plays the fall from: the height, the way it falls (unit,
+    the part's own axes), the impact speed, the floor (the point it meets first, facing up against the fall) and what
+    each analysis adds (how long the impact lasts, an impact's rebound and its centre of mass's travel per frame)."""
+    speed = math.sqrt(2.0 * G0_MM_S2 * height_mm)
+    unit = [round(float(c), 6) + 0.0 for c in direction]
+    return {
+        "height_mm": float(height_mm),
+        "direction": unit,
+        "speed_m_s": round(speed / 1000.0, 4),
+        "floor": {"point_mm": floor_point(nodes, direction), "normal": [0.0 - c for c in unit]},
+        **more,
+    }
 
 
 def height_words(height_mm: float) -> str:
@@ -534,6 +561,15 @@ class ImpactAnalysis:
                     time_words(run.end_s), time_words(extend_to or window), timestep.time_limit(ctx))],
                 "elements": model.elements, "length_mm": _length_along(model, inputs.direction), "subcycle": run.subcycle,
                 "settled_steps": settled_steps,
+                # What the viewer's Drop routine needs: the fall onto the floor, the impact's time, the rebound
+                # and where the centre of mass is at each frame (the frames' displacement is relative to it).
+                "analysis_extras": {"fall": fall_record(
+                    model.nodes, inputs.direction, inputs.height_mm,
+                    impact_ms=None if run.pulse_end_s is None else round(run.pulse_end_s * 1e3, 9),
+                    end_ms=round(run.end_s * 1e3, 9),
+                    rebound_m_s=round(-run.energy["centre_velocity_end_mm_s"] / 1000.0, 4) + 0.0,
+                    centre_mm=[[round(float(c), 6) + 0.0 for c in centre] for centre in run.frame_centre],
+                )},
             },
             dofs=3 * model.count,
             solver=(f"explicit central difference, lumped mass, {run.steps} steps of {run.dt * 1e6:.3g} µs"

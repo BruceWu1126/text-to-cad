@@ -1000,6 +1000,8 @@ def _solve_study(
         for spec in analysis.fields:
             if spec.attribute not in written and spec.name in result.fields:
                 extra_attributes[spec.attribute] = result.fields[spec.name]
+        # What the viewer's routine plays from (motion.py: a shake's mode shapes, a load cycle's stress), listed nowhere.
+        extra_attributes.update(result.scalars.get("motion_attributes") or {})
     frames = []
     if result.series is not None:
         for index, frame in enumerate(result.series.frames):

@@ -196,6 +196,16 @@ class Solve(unittest.TestCase):
         self.assertIn(f"adapted: {refined['words']} ({refined['accuracy']})", lines)
         self.assertEqual([step["rung"] for step in json.loads(self.fitted.sidecar.read_text(encoding="utf-8"))["fit"]], rungs)
 
+    def test_the_glb_carries_the_fall_the_viewer_s_drop_routine_plays(self):
+        fall = _extras(self.drop.glb)[0]["analysis"]["fall"]
+        speed = math.sqrt(2 * G0 * 1000.0)
+        self.assertEqual((fall["height_mm"], fall["direction"], fall["speed_m_s"]), (1000.0, [0.0, 0.0, -1.0], round(speed / 1000, 4)))
+        # The floor is where the landing face is, facing up against the fall; the stop lasts 2 d / v.
+        self.assertEqual(fall["floor"]["normal"], [0.0, 0.0, 1.0])
+        self.assertEqual(fall["floor"]["point_mm"][2], -5.0)
+        self.assertLess(max(abs(fall["floor"]["point_mm"][0]), abs(fall["floor"]["point_mm"][1])), 5.0)
+        self.assertAlmostEqual(fall["impact_ms"], 2 * 2.0 / speed * 1e3, places=6)
+
     def test_the_check_is_labelled_drop_and_the_study_echoes_the_drop(self):
         extras, _ = _extras(self.drop.glb)
         self.assertEqual([(check["kind"], check["label"]) for check in extras["checks"]], [("stress", "Drop")])
@@ -269,6 +279,8 @@ class Dynamic(unittest.TestCase):
         self.assertAlmostEqual(self.arm.summary["max_von_mises_MPa"] / dynamic["max_von_mises_MPa"], 1.0, delta=0.05)
         extras, _ = _extras(self.arm.glb)
         self.assertTrue(extras["study"]["drop"]["dynamic"])
+        # The viewer's Drop routine plays the stop as long as the dynamic check's pulse.
+        self.assertEqual(extras["analysis"]["fall"]["impact_ms"], dynamic["pulse_ms"])
         self.assertIn("the transient governs, reported as an equivalent", self.arm.human_lines()[2])
 
 

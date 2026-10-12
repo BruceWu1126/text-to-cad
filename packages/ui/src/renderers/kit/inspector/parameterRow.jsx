@@ -33,8 +33,9 @@ const defaultValueText = (value, parameter) => `${formatControlNumber(value)}${u
  *   `valueText`: a number's text in its value field (default: its compact figure and unit).
  *   `props.step`: a slider's increment, where the panel sets it; otherwise about a thousandth of its range.
  *   `wideLabel`: a number's label runs over its value field (`FileSheetSliderField`).
+ *   `action`: a compact icon button beside a number's value field (an FEA motion's play/pause).
  */
-export function parameterRow({ parameter, value, onChange, labelTitle, valueText = defaultValueText, step, wideLabel = false }) {
+export function parameterRow({ parameter, value, onChange, labelTitle, valueText = defaultValueText, step, wideLabel = false, action = null }) {
   const label = parameter.label;
   if (parameter.type === "boolean") {
     return <FileSheetCheckboxRow key={parameter.id} label={label} checked={value === true} onCheckedChange={(checked) => onChange(checked)} />;
@@ -68,6 +69,7 @@ export function parameterRow({ parameter, value, onChange, labelTitle, valueText
       label={label}
       labelTitle={labelTitle || label}
       wideLabel={wideLabel}
+      action={action}
       value={valueText(value, parameter)}
       onValueCommit={(draft) => onChange(parseFileSheetNumberInput(draft, { fallback: value, min: parameter.min, max: parameter.max }))}
       valueInputProps={{ ariaLabel: parameter.ariaLabel ? `${parameter.ariaLabel} value` : `${label} slider value` }}

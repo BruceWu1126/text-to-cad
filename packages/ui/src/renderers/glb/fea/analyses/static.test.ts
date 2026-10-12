@@ -46,7 +46,7 @@ describe('the analyses', () => {
     expect(FEA_ANALYSES.map((name) => [name, routine(name, { frames: [] })])).toEqual([
       ['static', 'Load ramp'], ['modal', 'Vibrate'], ['buckling', 'Buckle'], ['thermal', null], ['thermal_transient', 'Play'],
       ['thermal_stress', 'Load ramp'], ['harmonic', 'Vibrate'], ['random_vibration', null], ['shock', null], ['transient', 'Play'],
-      ['fatigue', null], ['drop', 'Load ramp'], ['cfd', null], ['impact', 'Play'], ['nonlinear', 'Play'], ['contact', 'Play'], ['bolt', 'Play'],
+      ['fatigue', null], ['drop', 'Load ramp'], ['cfd', null], ['impact', 'Play'], ['nonlinear', 'Play'], ['contact', 'Play'], ['bolt', null],
       ['creep', 'Play'], ['composite', null], ['electromagnetic', null], ['cfd_turbulent', null], ['cfd_compressible', null],
       ['topology', 'Watch it form'], ['acoustic', null], ['conjugate_heat', null], ['fracture', 'Load ramp'], ['rotordynamics', 'Whirl'], ['fsi', null], ['piezo', null],
       ['multiphase', 'Play']]);

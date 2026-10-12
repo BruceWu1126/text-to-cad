@@ -73,6 +73,8 @@ A fixed mass flow instead: `"inlets": [{"opening": "x_min", "mass_flow_kg_s": 0.
 
 ## What comes out
 
+- Tracers for the viewer, as [cfd.md](cfd.md)'s: particles let go at the inlets and carried by the solved velocity, streamed in Preview.
+
 - Fields on the part's wetted surface: `pressure` (Pa above the outlet's, signed), `mach` (the gas's
   speed over its local speed of sound) and `temperature` (the gas's, °C: it cools as it speeds
   up, T = T0 / (1 + 0.2 M²) in air) and `speed` (m/s, the fastest flow within a passage width of

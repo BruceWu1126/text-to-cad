@@ -321,6 +321,15 @@ class CompliantTube(unittest.TestCase):
     def setUpClass(cls):
         cls.step, cls.result, cls.own = shared("tube")
 
+    def test_its_tracers_cross_from_inlet_to_outlet(self):
+        """The viewer's Flow routine: particles let go at the inlet (x = 0), carried along the duct to its outlet."""
+        motion = glb_extras(self.result.glb)[0]["analysis"]["motion"]
+        self.assertEqual((motion["kind"], motion["label"]), ("tracers", "Flow"))
+        starts = [path[0] for path in motion["paths"]]
+        self.assertLess(max(starts), 0.05 * TUBE_L)
+        across = [path[-3] for path in motion["paths"] if path[-3] > 0.8 * TUBE_L]
+        self.assertGreater(len(across), len(motion["paths"]) / 2)
+
     def test_the_bore_swells_by_the_thin_wall_formula_with_the_flows_pressure(self):
         self.assertTrue(self.result.summary["coupling"]["converged"])
         mean_radius = TUBE_R + TUBE_T / 2

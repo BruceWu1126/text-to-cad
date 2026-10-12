@@ -7,10 +7,11 @@
  * of which a load control moves, and its takeaway leads with "Laminar · " (past the laminar range,
  * "Laminar · unreliable above Re 2000 · "). What you see opens on the field (Pressure first) and,
  * mapped, the deformation; its setup says where the flow goes in and out, where it is held (mapped)
- * and what it is made of. It plays no routine.
+ * and what it is made of. Its routine moves tracers along the solved flow.
  */
 import { fieldAndDeformation } from "../controls.js";
 import { flowRows, heldRows, madeOfRows } from "../setup.js";
+import { tracersRoutine } from "../poses.js";
 import { planned } from "./stub.js";
 
 /** Flow's setup: flow in/out, then (mapped onto the structure) held and made of. */
@@ -32,6 +33,7 @@ export default planned({
   checks: ["pressure_drop", "velocity", "stress", "displacement"],
   defaultControls: flowControls,
   setupGroups: FLOW_SETUP,
-  routine: () => null,
+  // Tracers carried by the solved flow, in Preview (`../poses.js`, drawn by `../../feaTracers.js`).
+  routine: tracersRoutine,
   markers: ["inlet", "outlet", "fixture"], displayTitle: "Flow openings",
 });

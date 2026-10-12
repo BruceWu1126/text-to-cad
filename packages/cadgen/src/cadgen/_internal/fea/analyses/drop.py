@@ -79,6 +79,16 @@ def pulse_s(height_mm: float, G: float) -> float:
     return math.pi * math.sqrt(2.0 * G0_MM_S2 * height_mm) / (2.0 * G * G0_MM_S2)
 
 
+def stop_s(inputs: "DropInputs", dynamic: dict | None = None) -> float:
+    """How long the stop it assumes lasts, s: the dynamic check's pulse, the half-sine's ``impact_ms``, or a constant
+    deceleration over ``stop_mm`` from the impact speed (2 d / v)."""
+    if dynamic is not None:
+        return dynamic["pulse_ms"] / 1e3
+    if inputs.impact_ms is not None:
+        return inputs.impact_ms / 1e3
+    return 2.0 * inputs.stop_mm / math.sqrt(2.0 * G0_MM_S2 * inputs.height_mm)
+
+
 def _figure(value: float) -> str:
     """Three significant figures, whole numbers from 100 up: 500, 694, 2.5."""
     return f"{value:.3g}" if abs(value) < 100 else f"{value:.0f}"
@@ -234,6 +244,11 @@ class DropAnalysis(StaticAnalysis):
         result.scalars["drop"] = {"direction": travel, "vector_g": vector_g}
         if inputs.dynamic:
             result = self._dynamic(ctx, inputs, travel, result)
+        # What the viewer's Drop routine plays: the fall onto the floor and how long the stop it assumed lasts.
+        from cadgen._internal.fea.analyses.impact import fall_record
+
+        result.scalars.setdefault("analysis_extras", {})["fall"] = fall_record(
+            ctx.volume.nodes, travel, inputs.height_mm, impact_ms=round(stop_s(inputs, result.scalars.get("dynamic")) * 1e3, 9))
         return result
 
     def _dynamic(self, ctx: SolveContext, inputs: DropInputs, travel, result: AnalysisResult) -> AnalysisResult:

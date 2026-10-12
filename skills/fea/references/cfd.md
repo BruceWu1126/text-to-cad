@@ -89,6 +89,10 @@ External flow (around the part):
   fastest point of the flow, so the `velocity` check's value is the top of its colour bar. A face
   the fluid does not wet (a pipe's outside) reads 0. Mapped:
   `von_mises` and `displacement` too, and the part deforms.
+- Tracers for the viewer (`extras.analysis.motion`, kind `tracers`): 64 particles let go at the inlets
+  (as dense as the flow through them; an external flow's across the part's width) and carried by the
+  solved velocity (P2, midpoint steps), each path's points `step_s` of real time apart. Preview streams
+  dots along them, slowed or sped up by one round factor it says, inside the file's Clip cut.
 - Summary: `reynolds` (`value`, `limit`, `kind`, `length_mm`, `laminar`), `max_velocity_m_s` and
   where, `flow_rate_m3_s` and `flow_rate_L_min` (in), `outflow_rate_m3_s`, `flow_balance` (their
   mismatch), `pressure_drop_Pa`, `inlet_pressure_Pa`, `outlet_pressure_Pa` (area means),

@@ -72,7 +72,10 @@ keys in [study-file.md](study-file.md#common-keys):
   - `stress`, `displacement`, `contact_pressure`: as `contact` (a stress check needs every
     material's yield).
 - No load control: a preloaded joint does not answer in proportion to the load. View drives: `frame`
-  (the load-step scrubber, from "Preload"), `field`, `deformation`, `threshold`.
+  (the load-step scrubber, from "Preload"), `field`, `deformation`, `threshold`. The viewer shows it on
+  a Load row instead, as kinematics: the bolt tightened from snug to its preload (the preload's solve
+  ramped, and it says "ramped"), then the solved load steps; presets Snug, Preloaded and Service load;
+  Preview's playbar plays the same.
 
 A plate bolted to a bracket with one M6, tightened to 9 N·m, pulled off by 3 kN:
 

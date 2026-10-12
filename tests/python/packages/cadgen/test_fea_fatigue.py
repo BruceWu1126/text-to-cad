@@ -304,7 +304,7 @@ class Cantilever(unittest.TestCase):
 
     def test_the_glb_carries_life_and_fatigue_factor(self):
         fields = {entry["attribute"]: entry for entry in self.extras["fields"]}
-        self.assertEqual(list(fields), ["_LIFE", "_FATIGUE_FACTOR", "_DISPLACEMENT"])
+        self.assertEqual(list(fields), ["_LIFE", "_FATIGUE_FACTOR", "_DISPLACEMENT", "_CYCLE_STRESS"])
         self.assertEqual((fields["_LIFE"]["field"], fields["_LIFE"]["units"]), ("life", "log10 cycles"))
         self.assertAlmostEqual(fields["_LIFE"]["min"], math.log10(self.result.summary["min_life_cycles"]), places=3)
         # The lightly loaded tip outlasts the data: the field stops at the line's end.
@@ -317,6 +317,18 @@ class Cantilever(unittest.TestCase):
         sidecar = json.loads(self.result.sidecar.read_text(encoding="utf-8"))
         self.assertEqual(sidecar["analysis"], "fatigue")
         self.assertIn("min_fatigue_factor", sidecar["summary"])
+
+    def test_it_writes_the_load_cycle_it_plays(self):
+        """The viewer's Load cycle routine: from zero to the load (R = 0), the stress at its peak at every node (the
+        static stress the life is judged on), no rate (a static load has none), the cycles needed and the fewest lasted."""
+        motion = self.extras["analysis"]["motion"]
+        self.assertEqual((motion["kind"], motion["source"], motion["ratio"], motion["frequency_Hz"]), ("cycle", "static", 0.0, None))
+        self.assertEqual((motion["stress_attribute"], motion["need_cycles"]), ("_CYCLE_STRESS", 1e6))
+        self.assertAlmostEqual(motion["stress_max_MPa"], self.result.summary["max_von_mises_MPa"], delta=1e-3)
+        self.assertGreater(motion["life_cycles"], 0)
+        stress = {field["attribute"]: field for field in self.extras["fields"]}["_CYCLE_STRESS"]
+        self.assertEqual((stress["field"], stress["units"], stress["min"]), ("cycle_stress", "MPa", 0.0))
+        self.assertAlmostEqual(stress["max"], motion["stress_max_MPa"], delta=1e-4)
 
     def test_the_cli_says_the_method_in_words(self):
         lines = "\n".join(self.result.human_lines())
@@ -385,7 +397,7 @@ class HarmonicDwell(unittest.TestCase):
 
     def test_it_writes_the_shake_and_says_the_dwell(self):
         fields = [entry["attribute"] for entry in self.extras["fields"]]
-        self.assertEqual(fields, ["_LIFE", "_FATIGUE_FACTOR", "_DISPLACEMENT"])
+        self.assertEqual(fields, ["_LIFE", "_FATIGUE_FACTOR", "_DISPLACEMENT", "_CYCLE_STRESS"])
         self.assertGreater(self.result.summary["max_displacement_mm"], 0.0)  # its widest swing, not the resonance's real part
         self.assertEqual(self.extras["study"]["fatigue"], {"from": "harmonic", "loading": "fully_reversed", "stress_ratio": -1.0,
                                                           "dwell_s": 60.0, "surface": "machined", "factor": 1.0})
@@ -446,9 +458,20 @@ class RandomShake(unittest.TestCase):
         self.assertLessEqual(summary["min_fatigue_factor"], self.hand(summary["cycles"])[1] * 1.01)
         self.assertGreater(summary["min_fatigue_factor"], 1.0)
 
+    def test_its_cycles_come_at_steinbergs_levels_at_the_zero_crossing_rate(self):
+        motion = self.extras["analysis"]["motion"]
+        self.assertEqual((motion["kind"], motion["source"], motion["ratio"]), ("cycle", "random_vibration", -1.0))
+        self.assertEqual([(level["sigma"], level["share"]) for level in motion["levels"]], [(1.0, 0.683), (2.0, 0.271), (3.0, 0.0433)])
+        self.assertAlmostEqual(motion["frequency_Hz"], self.result.summary["zero_crossing_Hz"], delta=1e-3)
+        # Fatigue plays its cycle, not the shake: none of the random shake's mode shapes ride along.
+        raw = self.result.glb.read_bytes()
+        length, _ = struct.unpack_from("<II", raw, 12)
+        names = json.loads(raw[20:20 + length])["meshes"][0]["primitives"][0]["attributes"]
+        self.assertFalse(any(name.startswith("_MOTION_") for name in names))
+
     def test_it_writes_life_and_factor_but_no_shape(self):
         fields = [entry["attribute"] for entry in self.extras["fields"]]
-        self.assertEqual(fields, ["_LIFE", "_FATIGUE_FACTOR"])
+        self.assertEqual(fields, ["_LIFE", "_FATIGUE_FACTOR", "_CYCLE_STRESS"])
         self.assertEqual(self.extras["study"]["fatigue"], {"from": "random_vibration", "loading": "fully_reversed",
                                                           "stress_ratio": -1.0, "duration_s": 3600.0, "surface": "machined",
                                                           "factor": 1.0})

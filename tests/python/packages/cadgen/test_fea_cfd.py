@@ -231,6 +231,28 @@ class Poiseuille(unittest.TestCase):
         self.assertTrue(self.summary["solve"]["converged"])
         self.assertLess(self.summary["solve"]["residual"], 1e-8)
 
+    def test_its_tracers_move_at_the_parabolas_speed_from_the_inlet(self):
+        """The viewer's Flow routine: particles let go at the inlet (x = 0), each carried along the tube at the solved
+        speed at its radius, 2U(1 − r²/R²), every ``step_s`` of real time."""
+        import numpy as np
+
+        motion = self.extras["analysis"]["motion"]
+        self.assertEqual((motion["kind"], motion["label"]), ("tracers", "Flow"))
+        self.assertGreater(len(motion["paths"]), 32)
+        for path in motion["paths"]:
+            points = np.array(path).reshape(-1, 3)
+            self.assertLess(points[0, 0], 0.05 * LENGTH)
+            # Its mean speed over the tube's middle (points are written to 0.01 mm, so one step's is coarse).
+            inside = np.flatnonzero((points[:, 0] > 0.2 * LENGTH) & (points[:, 0] < 0.8 * LENGTH))
+            if len(inside) < 3:
+                continue
+            first, last = inside[0], inside[-1]
+            r = float(np.hypot(points[inside, 1], points[inside, 2]).mean())
+            if r > 0.8 * R:
+                continue
+            moved = (points[last, 0] - points[first, 0]) / ((last - first) * motion["step_s"]) / 1000.0      # m/s
+            self.assertAlmostEqual(moved / (2 * self.U * (1 - (r / R) ** 2)), 1.0, delta=0.03)
+
     def test_the_glb_carries_wall_pressure_and_shear_on_the_part(self):
         fields = {entry["field"]: entry for entry in self.extras["fields"]}
         self.assertEqual(set(fields), {"pressure", "wall_shear", "speed"})

@@ -73,6 +73,8 @@ External (a part in a stream):
 
 ## What comes out
 
+- Tracers for the viewer, as [cfd.md](cfd.md)'s: particles let go at the inlets and carried by the solved coolant velocity, streamed in Preview.
+
 - Fields on the part's surface:
   - `temperature`: the part's (°C, signed; the colour bar runs from its own coolest);
   - `fluid_temperature` ("Fluid temperature"): the fluid's mixed (bulk, mixing-cup) temperature

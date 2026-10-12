@@ -16,15 +16,22 @@ import { PointerPick } from "../kit/tools/select/usePointerPick.js";
 import FeaStudyPanel, { FEA_PARTS_PANEL_ID, FEA_STUDY_PANEL_ID } from "./FeaStudyPanel.jsx";
 import FeaColourBar from "./FeaColourBar.jsx";
 import FeaLoadLabels from "./FeaLoadLabels.jsx";
+import FeaFallClock from "./FeaFallClock.jsx";
 import { FileSheetStatusText } from "../kit/inspector/FileSheet.js";
 import { DEFAULT_POSE_VALUE, NO_PRESET_VALUE, positionValuesAreDefault } from "../kit/inspector/kinematicsControls.jsx";
 import {
-  applyDeformation, faceIndices, facePartDetail, faceTitle, facePromptSummary, faceRole, feaControls, feaDefaults, feaMarkerShow, feaPresets, feaSections, feaShownControls,
+  applyDeformation, faceIndices, facePartDetail, faceTitle, facePromptSummary, faceRole, feaControls, feaDefaults, feaMarkerShow, feaMotion, feaPresets, feaSections, feaShownControls,
   feaShowsParts, feaVerdict, findingSelector, pickFace, readFeaResult, recolorByField, resultSourcePath, partRows, routineScale, studySections, symmetricRange,
   weakestPartIndex
 } from "./feaResult.js";
-import { createFeaMarkers, markerGateText } from "./feaMarkers.js";
+import { PLANE_SIZE, createFeaMarkers, floorPlaneMaterial, markerGateText } from "./feaMarkers.js";
 import { feaDrawnBounds } from "./feaBounds.js";
+import { fallFrame, fallMatrix, feaFallBounds, pastFloor } from "./feaFall.js";
+import { fallAt, fallWords, framesAtTime, shortTime } from "./fea/fall.js";
+import { motionSpan } from "./fea/motion.js";
+import { paceWords, readTracers } from "./fea/poses.js";
+import { feaPoseBounds, poseScale } from "./feaPose.js";
+import { createFeaTracers } from "./feaTracers.js";
 import { framingInset } from "./feaChrome.js";
 import { createFeaClip } from "./feaClip.js";
 import { feaAnalysis } from "./fea/analyses/index.js";
@@ -34,12 +41,14 @@ import { useGlbAnimation } from "./useGlbAnimation.js";
 import { useGlbScene } from "./useGlbScene.js";
 
 const LIVE = Object.freeze({ declined: GLB_DECLINED_LIVE_COMMANDS });
-const NO_CHOICE = Object.freeze({ field: null, scale: null, loadScale: null, threshold: null, preset: null, markers: null, mode: null, frame: null, sigma: null });
-// What a series adds to the file's view, written only once chosen, so a result with none keeps the slice it always had.
-const SERIES_KEYS = Object.freeze(["mode", "frame", "sigma"]);
+const NO_CHOICE = Object.freeze({ field: null, scale: null, loadScale: null, threshold: null, preset: null, markers: null, mode: null, frame: null, sigma: null,
+  motion: null });
+// What a series or a motion adds to the file's view, written only once chosen, so a result with none keeps the slice it always had.
+const SERIES_KEYS = Object.freeze(["mode", "frame", "sigma", "motion"]);
 // Where each control's value is kept in the file's view: the field and the deformation scale as they always were.
-const DRIVE_KEYS = Object.freeze({ field: "field", deformation: "scale", load_scale: "loadScale", threshold: "threshold", mode: "mode", frame: "frame", sigma: "sigma" });
-const NO_VALUES = Object.freeze({ field: null, scale: null, loadScale: null, threshold: null, mode: null, frame: null, sigma: null });
+const DRIVE_KEYS = Object.freeze({ field: "field", deformation: "scale", load_scale: "loadScale", threshold: "threshold", mode: "mode", frame: "frame", sigma: "sigma",
+  motion: "motion" });
+const NO_VALUES = Object.freeze({ field: null, scale: null, loadScale: null, threshold: null, mode: null, frame: null, sigma: null, motion: null });
 // Each routine an analysis plays (`routine`, fea/analyses), and how long one pass of it is: the Load ramp
 // (the load going on, from none to all of it; buckling's Buckle), Vibrate (one swing a second) and
 // Play (a series' frames, start to end); Ring (a sound mode's pressure swinging through its cycle, once a second).
@@ -53,6 +62,8 @@ const MARKER_COLOURS = Object.freeze({
 const EMPTY = Object.freeze([]);
 // `refs`: what Quick Edit gets when it is not the faces' own (a part's or a joint's parts); `parts`: parts to tint.
 const NO_FACES = Object.freeze({ result: null, id: "", faces: EMPTY, refs: EMPTY, parts: EMPTY, softParts: EMPTY, summary: "" });
+// Whether motion should be kept small: the app's own setting, or the system's.
+const prefersReducedMotion = () => typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
 const SELECT_ICON = <MousePointer2 className="size-3" strokeWidth={2} aria-hidden="true" />;
 const CLIP_ICON = <ClipIcon className="size-3" strokeWidth={2} aria-hidden="true" />;
 // A result offers Clip besides what any GLB view does: a cut through it shows what is inside (a channel's
@@ -112,13 +123,20 @@ function markerChosen(faces, site) {
  * the fit, so a panel closed or widened since counts as it is then), and Preview, which puts the panels away,
  * takes the whole width. Installed before the shell's first fit of the result: a child's layout effect runs first.
  */
-function FeaFraming({ runtimeRef, hostRef }) {
+function FeaFraming({ runtimeRef, hostRef, sync, syncRef }) {
   useLayoutEffect(() => {
     const runtime = runtimeRef.current;
     if (!runtime) return undefined;
     runtime.framingInset = () => framingInset(hostRef.current);
     return () => { if (runtime.framingInset) delete runtime.framingInset; };
   }, [runtimeRef, hostRef]);
+  // How the renderer tells the viewport its scene's bounds moved (a drop lifted off the floor), so the stage and the
+  // camera's near and far planes follow it.
+  useLayoutEffect(() => {
+    if (!syncRef) return undefined;
+    syncRef.current = sync || null;
+    return () => { syncRef.current = null; };
+  }, [sync, syncRef]);
   return null;
 }
 
@@ -140,12 +158,21 @@ function GlbSurface({ view, data }) {
   // The box the model is drawn in over its whole series and its routine (`feaBounds.js`), at the deformation and load
   // it opens on, grown on the scene before the shell frames it (Preview frames on it once) and fits the camera's near
   // and far planes to it: a strap stretched at its last load step is never sliced off, nor a piezo tip at its ramp's top.
+  // A drop's motion (`fea/fall.js`) draws the part turned the way it falls, on the floor: that is the box the tools view
+  // frames, and Preview frames the whole fall from its height (`previewBounds`), as a kinematics pose leaves the
+  // camera on the model at rest while a routine moves it.
   useMemo(() => {
     const opening = fea ? feaControls(fea) : EMPTY;
     const scale = opening.find((control) => control.drives === "deformation")?.defaultValue ?? fea?.deformationScale;
     const load = fea && feaAnalysis(fea).scalesWithLoad ? opening.find((control) => control.drives === "load_scale")?.defaultValue ?? 1 : 1;
-    const grown = feaDrawnBounds(THREE, scene, fea, { scale, load });
+    const landed = fea && feaMotion(fea)?.kind === "fall" ? feaFallBounds(THREE, scene, fea, { scale, height: false }) : null;
+    const grown = landed || feaDrawnBounds(THREE, scene, fea, { scale, load });
     if (grown) Object.assign(scene, { bounds: grown, restBounds: grown });
+    if (landed) scene.previewBounds = feaFallBounds(THREE, scene, fea, { scale });
+    // A pose motion (`fea/poses.js`: a shake, a load cycle, a bolt tightened) is drawn moving over its whole timeline.
+    const posing = fea ? feaMotion(fea) : null;
+    const posed = posing?.poseAt ? feaPoseBounds(THREE, scene, fea, posing, { scale }) : null;
+    if (posed) Object.assign(scene, { bounds: posed, restBounds: posed });
   }, [scene, fea]);
   const analysis = fea ? feaAnalysis(fea) : null;
   const controls = useMemo(() => (fea ? feaControls(fea) : EMPTY), [fea]);
@@ -167,6 +194,13 @@ function GlbSurface({ view, data }) {
   const seriesControl = controls.find((control) => control.drives === "mode" || control.drives === "frame") || null;
   const frameIndex = fea ? activeFrameIndex(fea, seriesControl ? effective : { mode: choice.mode }) : 0;
   const sigma = fea && effective.sigma !== undefined && effective.sigma !== null ? Number(effective.sigma) : null;
+  // The moment of a motion the Time row shows (`fea/motion.js`), where it has one.
+  // While the Time row's own play button plays it in place (`inPlace`), the moment it has reached.
+  const [inPlace, setInPlace] = useState(null);
+  const inPlaceRef = useRef(null);
+  inPlaceRef.current = inPlace;
+  const hasMotionRow = controls.some((control) => control.drives === "motion");
+  const motionAt = hasMotionRow ? (inPlace ? inPlace.at : Number(effective.motion)) : null;
   // The load shown moves the colours and the deformation only where the analysis follows the load.
   const fieldLoad = analysis?.scalesWithLoad ? loadScale : 1;
   // The load as a multiple of the solved one (a linear study scales exactly), and what is drawn grey under a threshold.
@@ -227,6 +261,20 @@ function GlbSurface({ view, data }) {
   }, [fea, source, faces]);
 
   const requestRenderRef = useMemo(() => ({ current: null }), []);
+  // A result that moves as a whole (`fea/motion.js`; a drop's fall, `fea/fall.js`, drawn by `feaFall.js`): the Time
+  // row's value poses it, and Preview's playbar plays the same timeline (with reduced motion, only its `play` span).
+  const reducedMotion = host.environment?.reducedMotion === true || prefersReducedMotion();
+  const motion = useMemo(() => (fea ? feaMotion(fea) : null), [fea]);
+  const fall = useMemo(() => {
+    const frame = motion?.kind === "fall" ? fallFrame(THREE, fea) : null;
+    return frame ? { frame, plan: motion.plan } : null;
+  }, [fea, motion]);
+  const fallShownRef = useRef(null);
+  const syncBoundsRef = useRef(null);
+  // A flow's tracers (`fea/poses.js`, drawn by `feaTracers.js`): its routine streams them along the solved flow.
+  const tracers = useMemo(() => (fea && feaAnalysis(fea).routine(fea)?.kind === "tracers" ? readTracers(fea) : null), [fea]);
+  const tracersShownRef = useRef(null);
+  const clockRef = useRef(null);
   // The routine playing, `{ kind, value }`, or null while none plays: a Load ramp's share of the load
   // put on (0 to 1), Vibrate's phase (radians), Play's share of the way through the frames (0 to 1);
   // and the one pass that draws the colours, the deformation and the markers for what is shown.
@@ -238,10 +286,13 @@ function GlbSurface({ view, data }) {
   // a series' Play (its frames in turn, each blended into the next); none for one with nothing to play.
   const ownClips = useMemo(() => {
     const routine = fea ? feaAnalysis(fea).routine(fea) : null;
-    const duration = routine ? ROUTINE_SECONDS[routine.kind] : 0;
+    // A motion's routine plays its timeline (`motionSpan`): its value is the moment on it, as the Time row's is.
+    const span = routine?.kind === "motion" && motion ? motionSpan(motion, reducedMotion) : null;
+    // A routine that says how long it is (a flow's tracers' longest trip) plays that long.
+    const duration = span ? span.duration : routine ? routine.duration || ROUTINE_SECONDS[routine.kind] || 0 : 0;
     if (!duration) return EMPTY;
     const swings = routine.kind === "vibrate" || routine.kind === "pulse";
-    const valueAt = (elapsedSec) => (swings ? (2 * Math.PI * elapsedSec) / duration : clamp(elapsedSec / duration, 0, 1));
+    const valueAt = (elapsedSec) => (span ? span.from + clamp(elapsedSec, 0, duration) : routine.kind === "tracers" ? elapsedSec : swings ? (2 * Math.PI * elapsedSec) / duration : clamp(elapsedSec / duration, 0, 1));
     return [{
       id: routine.id, label: routine.label, duration,
       play: {
@@ -249,7 +300,7 @@ function GlbSurface({ view, data }) {
         release() { routineRef.current = null; paintRef.current?.(); },
       },
     }];
-  }, [fea]);
+  }, [fea, motion, reducedMotion]);
   const animation = useGlbAnimation(scene?.document || null, () => requestRenderRef.current?.(), ownClips);
   const shellRef = useRef(null);
   const choose = useCallback((patch) => {
@@ -258,6 +309,9 @@ function GlbSurface({ view, data }) {
   }, [signature]);
   jumpRef.current = (index) => {
     if (!fea?.series || index < 0 || index >= fea.series.frames.length) return;
+    // A motion's Time row scrubs its frames too: it moves to the frame's moment.
+    const at = motion?.atFrame?.(index);
+    if (Number.isFinite(at)) { choose({ motion: at, preset: null }); return; }
     choose(seriesControl?.drives === "frame" ? { frame: seriesControl.snaps[index], preset: null } : { mode: String(index), preset: null });
   };
   // The markers built for the result (below), whose kinds Display's gate names.
@@ -288,7 +342,8 @@ function GlbSurface({ view, data }) {
     clipRef.current = clip;
     return () => { clipRef.current = null; clip.dispose(); requestRenderRef.current?.(); };
   }, [fea, scene, requestRenderRef]);
-  const cut = shell.previewing ? null : shell.frame.resolvedScene?.view?.clip || null;
+  // A flow keeps its cut in preview, so the tracers stream inside the part it opens.
+  const cut = shell.previewing && !tracers ? null : shell.frame.resolvedScene?.view?.clip || null;
   const clipBounds = scene?.restBounds || scene?.bounds || null;
   useEffect(() => { if (clipRef.current?.set(cut, clipBounds)) requestRenderRef.current?.(); }, [fea, cut, clipBounds, requestRenderRef]);
   // Its panel is a kept effect's, as a STEP's is: up from a press on Clip until its X, while the view cuts,
@@ -320,9 +375,173 @@ function GlbSurface({ view, data }) {
   // A series shows the frame chosen: its fields' colours from that frame's attributes and the model
   // deformed by its displacement or mode shape; Play blends each frame into the next, and Vibrate
   // swings the shape (a harmonic frame turning through its phase, re·cos − im·sin).
+  // A drop's motion, drawn at a moment of it (the Time row's, or the routine's as it plays): the colours and the
+  // deformation of that moment (an impact's frames by their real time; an estimate's load ramping to its peak and back
+  // while it stops), and the mesh turned the way it falls, lifted and carried as the fall says, never through the
+  // floor, which is drawn beside it. Off the floor (falling, hopping) the markers and their labels are put away; while
+  // the routine plays, the readout says the real time and the slow motion.
+  const paintFall = (at, playing) => {
+    const { frame, plan } = fall;
+    const mesh = fea.mesh;
+    const state = fallAt(plan, frame.fall, at);
+    let shown = fallShownRef.current;
+    if (!shown) {
+      mesh.updateMatrix();
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), floorPlaneMaterial(THREE));
+      floor.name = "fea-drop-floor";
+      floor.renderOrder = 9;
+      floor.raycast = () => {};
+      floor.matrixAutoUpdate = false;
+      mesh.parent?.add(floor);
+      shown = { mesh, rest: mesh.matrix.clone(), floor, local: new THREE.Matrix4(), placed: false, off: false };
+      fallShownRef.current = shown;
+    }
+    const frames = fea.series?.frames || [];
+    const level = sigmaScale(activeField, sigma);
+    let index = 0;
+    let blend = null;
+    let centre = null;
+    let share = 1;
+    if (frames.length) {
+      // Before it lands, the first frame (first contact, at rest); after, the last; between, the frames by their times.
+      const between = state.phase === "impact" ? framesAtTime(fea.series, state.sinceContactS)
+        : state.phase === "hold" || state.phase === "fall" ? { from: 0, to: 0, weight: 0 } : { from: frames.length - 1, to: frames.length - 1, weight: 0 };
+      index = between.from;
+      blend = between.weight > 0 ? { to: between.to, weight: between.weight } : null;
+      const centres = frame.centres;
+      if (centres?.[between.from]) centre = centres[between.from].clone().lerp(centres[between.to] || centres[between.from], between.weight);
+    } else {
+      // An estimate's stop: the load goes on and comes off again as a half-sine over the impact.
+      share = state.phase === "impact" ? Math.sin(Math.PI * state.share) : 0;
+    }
+    const field = fieldAtFrame(fea, activeField, index);
+    const mixed = blend ? { field: fieldAtFrame(fea, activeField, blend.to), weight: blend.weight } : null;
+    const threshold = thresholdField ? { field: fieldAtFrame(fea, thresholdField, index), value: thresholdValue, scale: share * fieldLoad } : null;
+    recolorByField(mesh, field, fea.ramp, tinted, faces.parts, faces.softParts,
+      { valueScale: share * fieldLoad * level, rangeScale: fieldLoad * level, threshold, ...(mixed ? { blend: mixed } : {}) });
+    const { attribute } = deformationAt(fea, index);
+    const next = blend ? deformationAt(fea, blend.to).attribute || attribute : attribute;
+    const vector = blend && next !== attribute ? [[attribute, 1 - blend.weight], [next, blend.weight]] : attribute;
+    const positions = mesh.geometry.getAttribute("position").array;
+    if (vector && applyDeformation(mesh, activeScale * share * (frames.length ? 1 : fieldLoad), fea.deformationScale, vector)) {
+      markersRef.current?.update(positions);
+    }
+    // Never through the floor; on it once it has come to rest (and as it hops off it).
+    const past = pastFloor(positions, frame, centre);
+    const settled = state.phase === "rest" || state.phase === "hop";
+    const lift = state.lift / 1000 + (settled ? past : Math.max(0, past));
+    mesh.matrixAutoUpdate = false;
+    mesh.matrix.copy(shown.rest).multiply(fallMatrix(THREE, frame, { lift, centre }, shown.local));
+    mesh.matrixWorldNeedsUpdate = true;
+    if (!shown.placed) {
+      // The floor: level through the point it meets first, under the part, as wide as the markers' rigid floor.
+      mesh.geometry.computeBoundingSphere();
+      const sphere = mesh.geometry.boundingSphere;
+      const size = PLANE_SIZE * Math.max((sphere?.radius || 0) * 2, 1e-3);
+      shown.floor.geometry.dispose();
+      shown.floor.geometry = new THREE.PlaneGeometry(size, size).rotateX(-Math.PI / 2);
+      const middle = (sphere?.center || new THREE.Vector3()).clone().applyMatrix4(fallMatrix(THREE, frame, {}));
+      shown.floor.matrix.copy(shown.rest).multiply(new THREE.Matrix4().makeTranslation(middle.x, frame.pivot.y, middle.z));
+      shown.floor.matrixWorldNeedsUpdate = true;
+      shown.placed = true;
+    }
+    // Off the floor the markers (where the study loads it, its own rigid floor) would ride up with it: put away.
+    shown.off = state.lift > 0;
+    // Off the floor, or playing, the scene's bounds are the whole fall's: the camera's near and far planes and the
+    // stage follow `bounds`, and the part up at its height would be cut off by a near plane fitted to it on the floor.
+    const wanted = (shown.off || playing) && scene.previewBounds ? scene.previewBounds : scene.restBounds;
+    if (wanted && scene.bounds !== wanted) {
+      shown.scene = scene;
+      shown.landed = scene.restBounds;
+      scene.bounds = wanted;
+      syncBoundsRef.current?.();
+    }
+    const markers = markersRef.current;
+    if (markers) markers.object3D.visible = !shown.off;
+    // An impact's markers draw its rigid floor already, on the floor while it is.
+    shown.floor.visible = shown.off || !(markers && markersOn && markerShow?.fixtures && markers.kinds.includes("rigid_plane"));
+    shown.floor.material.color.set(colours.fixture);
+    clockRef.current?.(playing ? fallWords(state, frame.fall) : null);
+    requestRenderRef.current?.();
+  };
+  // Puts back what the motion changed (a result whose Time row is gone): the mesh where it was, the floor gone, the markers, the readout.
+  const endFall = () => {
+    const shown = fallShownRef.current;
+    if (!shown) return;
+    fallShownRef.current = null;
+    const mesh = shown.mesh;
+    mesh.matrix.copy(shown.rest);
+    mesh.matrixAutoUpdate = true;
+    mesh.matrixWorldNeedsUpdate = true;
+    shown.floor.removeFromParent();
+    shown.floor.geometry.dispose();
+    shown.floor.material.dispose();
+    if (markersRef.current) markersRef.current.object3D.visible = true;
+    if (shown.scene && shown.scene.bounds !== shown.landed) { shown.scene.bounds = shown.landed; syncBoundsRef.current?.(); }
+    clockRef.current?.(null);
+    requestRenderRef.current?.();
+  };
+  const endFallRef = useRef(endFall);
+  endFallRef.current = endFall;
+  useEffect(() => () => endFallRef.current(), [fea]);
+  // A pose motion (`fea/poses.js`), drawn at a moment of it (the row's, or the routine's as it plays): its frame, its
+  // colours (scaled with its load, or its own values at that moment: an AC phase, a temperature ramped), its
+  // displacement and the markers on it; while it plays the readout says the real time, how much it is slowed and,
+  // where it was drawn larger to be seen, by how much.
+  const paintPose = (at, playing) => {
+    const pose = motion.poseAt(Number.isFinite(at) ? at : motion.defaultAt, { field: activeField }) || {};
+    const index = Number.isInteger(pose.frame) ? pose.frame : frameIndex;
+    const field = fieldAtFrame(fea, activeField, index);
+    const blend = pose.blend?.weight > 0 ? { field: fieldAtFrame(fea, activeField, pose.blend.to), weight: pose.blend.weight } : null;
+    const level = sigmaScale(activeField, sigma);
+    const share = Number.isFinite(pose.valueScale) ? pose.valueScale : 1;
+    const threshold = thresholdField ? { field: fieldAtFrame(fea, thresholdField, index), value: thresholdValue, scale: fieldLoad * share } : null;
+    let changed = recolorByField(fea.mesh, field, fea.ramp, tinted, faces.parts, faces.softParts,
+      { valueScale: fieldLoad * level * share, rangeScale: fieldLoad * level, threshold, ...(blend ? { blend } : {}),
+        ...(pose.values ? { values: pose.values, stamp: pose.stamp || "" } : {}) });
+    let vector = pose.vector || null;
+    if (!vector) {
+      const { attribute } = deformationAt(fea, index);
+      const next = blend ? deformationAt(fea, pose.blend.to).attribute || attribute : attribute;
+      vector = attribute && blend && next !== attribute ? [[attribute, 1 - blend.weight], [next, blend.weight]] : attribute;
+    }
+    const { scale, raised } = poseScale(fea.mesh, pose, activeScale);
+    if (vector && applyDeformation(fea.mesh, scale * fieldLoad, fea.deformationScale, vector)) {
+      markersRef.current?.update(fea.mesh.geometry.getAttribute("position").array);
+      changed = true;
+    }
+    const larger = raised ? `drawn ${Math.round(raised * fieldLoad).toLocaleString("en-US")}× larger` : "";
+    clockRef.current?.(playing && pose.words ? { time: pose.words.time, scale: [pose.words.scale, larger].filter(Boolean).join(" · ") } : null);
+    if (changed) requestRenderRef.current?.();
+  };
+  // A flow's tracers while its routine plays: built on the first moment, moved every frame, put away when it stops.
+  const paintTracers = (routine) => {
+    let shown = tracersShownRef.current;
+    if (routine?.kind !== "tracers" || !tracers) {
+      if (shown) { tracersShownRef.current = null; shown.dispose(); clockRef.current?.(null); requestRenderRef.current?.(); }
+      return;
+    }
+    if (!shown) {
+      shown = createFeaTracers(THREE, tracers, fea.mesh);
+      tracersShownRef.current = shown;
+    }
+    shown.style({ colour: colours.load });
+    shown.update(routine.value);
+    const seconds = routine.value / tracers.slow;
+    clockRef.current?.({ time: `${shortTime(seconds)} of flow`, scale: paceWords(tracers.slow) });
+    requestRenderRef.current?.();
+  };
+  const paintTracersRef = useRef(paintTracers);
+  paintTracersRef.current = paintTracers;
+  useEffect(() => () => paintTracersRef.current(null), [fea]);
   paintRef.current = () => {
     if (!fea) return;
     const routine = routineRef.current;
+    paintTracers(routine);
+    if (motion?.poseAt) { paintPose(routine?.kind === "motion" ? routine.value : motionAt, routine?.kind === "motion" || Boolean(inPlace)); return; }
+    // A motion is always drawn at a moment of it: the routine's as it plays, else the Time row's.
+    if (fall) { paintFall(routine?.kind === "motion" ? routine.value : motionAt, routine?.kind === "motion" || Boolean(inPlace)); return; }
+    endFall();
     const shownLoad = routine?.kind === "load_ramp" ? routine.value * fieldLoad : fieldLoad;
     const between = routine?.kind === "play" ? framesBetween(fea, routine.value) : null;
     const index = between ? between.from : frameIndex;
@@ -358,7 +577,7 @@ function GlbSurface({ view, data }) {
     }
     if (changed) requestRenderRef.current?.();
   };
-  useEffect(() => { paintRef.current?.(); }, [fea, activeField, tinted, faces.parts, faces.softParts, activeScale, fieldLoad, thresholdField, thresholdValue, frameIndex, sigma]);
+  useEffect(() => { paintRef.current?.(); }, [fea, activeField, tinted, faces.parts, faces.softParts, activeScale, fieldLoad, thresholdField, thresholdValue, frameIndex, sigma, motionAt]);
 
   // Where the study loads and holds the part, on the model (`feaMarkers.js`): built once per result,
   // standing on the positions drawn, the chosen load's or fixture's in the chosen colour.
@@ -385,7 +604,7 @@ function GlbSurface({ view, data }) {
     requestRenderRef.current?.();
   }, [markers, colours, markersOn, markerShow, faces, requestRenderRef]);
   // A label goes with its marker when Clip cuts away where the load acts (read each frame, as the cut is).
-  const loadLabels = useCallback(() => (markers && markersOn
+  const loadLabels = useCallback(() => (markers && markersOn && !fallShownRef.current?.off
     ? markers.labels(fieldLoad, { loads: markerShow.loads, fixtures: markerShow.fixtures })
       .filter((label) => !clipRef.current || clipRef.current.keeps(label.face || label.at, fea.mesh)) : EMPTY), [markers, markersOn, markerShow, fieldLoad, fea]);
 
@@ -408,12 +627,54 @@ function GlbSurface({ view, data }) {
     catch (error) { shellRef.current?.reportActionError(error instanceof Error ? error.message : "Could not copy reference"); return false; }
   }, [single, source, host.clipboard]);
   const copySelection = selectActive && single ? copyFace : null;
+  // The Time row's play button: the motion's timeline in place, in the tools view, its value following it, as the
+  // playbar plays it in preview (with reduced motion only its `play` span); once through, then it stops there.
+  const motionPlaying = Boolean(inPlace);
+  useEffect(() => {
+    if (!motionPlaying || !motion) return undefined;
+    const span = motionSpan(motion, reducedMotion);
+    const end = span.from + span.duration;
+    let previous = null;
+    let frameId = 0;
+    const tick = (now) => {
+      const current = inPlaceRef.current;
+      if (!current) return;
+      const at = Math.min(current.at + (previous === null ? 0 : Math.max(now - previous, 0) / 1000), end);
+      previous = now;
+      if (at >= end) { setInPlace(null); choose({ motion: end, preset: null }); return; }
+      setInPlace({ at });
+      frameId = window.requestAnimationFrame(tick);
+    };
+    frameId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [motionPlaying, motion, reducedMotion, choose]);
+  // It stops where it is when the result, the tool or preview changes.
+  useEffect(() => {
+    const current = inPlaceRef.current;
+    if (!current) return;
+    setInPlace(null);
+    if (Number.isFinite(current.at)) choose({ motion: current.at, preset: null });
+  }, [fea, shell.toolMode, shell.previewing]); // eslint-disable-line react-hooks/exhaustive-deps
+  const toggleMotion = () => {
+    if (inPlace) { setInPlace(null); choose({ motion: inPlace.at, preset: null }); return; }
+    if (!motion) return;
+    const span = motionSpan(motion, reducedMotion);
+    const end = span.from + span.duration;
+    const from = Number.isFinite(motionAt) && motionAt >= span.from && motionAt < end - 1e-6 * Math.max(end, 1) ? motionAt : span.from;
+    setInPlace({ at: from });
+  };
   // Study's What you see: each control writes its value, and a moved control leaves the preset (Custom).
   const resultControls = {
-    controls: shownControls, values, presets, preset: activePreset,
-    // A scrubber snaps to the frame nearest where it is let go.
-    onChange: (id, value) => choose({ [DRIVE_KEYS[id]]: id === "frame" ? snapFrame(seriesControl, value) : value, preset: null }),
+    controls: shownControls, values: inPlace ? { ...values, motion: inPlace.at } : values, presets, preset: activePreset,
+    motionPlay: hasMotionRow && motion ? { playing: motionPlaying, onToggle: toggleMotion } : null,
+    // A scrubber snaps to the frame nearest where it is let go; dragging the Time row pauses its play.
+    onChange: (id, value) => {
+      if (id === "motion" && inPlaceRef.current) setInPlace(null);
+      const control = controls.find((entry) => entry.id === id);
+      choose({ [DRIVE_KEYS[id]]: control?.snaps ? snapFrame(control, value) : value, preset: null });
+    },
     onPreset: (value) => {
+      if (inPlaceRef.current) setInPlace(null);
       const preset = presets.find((entry) => entry.value === value);
       if (preset) choose({ ...Object.fromEntries(Object.entries(preset.values).map(([id, entry]) => [DRIVE_KEYS[id], entry])), preset: value });
     },
@@ -433,7 +694,8 @@ function GlbSurface({ view, data }) {
   </> : null;
 
   const overlay = fea ? (viewport) => <>
-    <FeaFraming runtimeRef={viewport.runtimeRef} hostRef={viewport.hostRef} />
+    <FeaFraming runtimeRef={viewport.runtimeRef} hostRef={viewport.hostRef} sync={viewport.syncSceneBounds} syncRef={syncBoundsRef} />
+    {fall || motion?.poseAt || tracers ? <FeaFallClock clockRef={clockRef} /> : null}
     <PointerPick viewport={viewport} scene={pickScene} enabled={selectActive} onPick={pick} />
     <FeaColourBar result={fea} field={activeField} loadScale={loadScale} sigma={sigma} raised={Boolean(animation) && shell.previewing} />
     {markers ? <FeaLoadLabels runtimeRef={viewport.runtimeRef} hostRef={viewport.hostRef} mesh={fea.mesh} labels={loadLabels}

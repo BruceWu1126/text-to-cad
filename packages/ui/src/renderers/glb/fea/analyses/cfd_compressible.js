@@ -8,9 +8,10 @@
  * the pressure drop, the fastest flow and the highest Mach number (and the stress and displacement when
  * mapped), none of which a load control moves, and its takeaway leads with "Ideal gas · ". What you see
  * opens on the field (Pressure first, then Mach number and Temperature) and, mapped, the deformation; its
- * setup and markers are Flow's. It plays no routine.
+ * setup and markers are Flow's. Its routine moves tracers along the solved flow.
  */
 import { FLOW_SETUP, flowControls } from "./cfd.js";
+import { tracersRoutine } from "../poses.js";
 import { planned } from "./stub.js";
 
 export default planned({
@@ -20,6 +21,7 @@ export default planned({
   checks: ["pressure_drop", "velocity", "mach", "stress", "displacement"],
   defaultControls: flowControls,
   setupGroups: FLOW_SETUP,
-  routine: () => null,
+  // Tracers carried by the solved flow, in Preview (`../poses.js`, drawn by `../../feaTracers.js`).
+  routine: tracersRoutine,
   markers: ["inlet", "outlet", "fixture"], displayTitle: "Flow openings",
 });

@@ -634,6 +634,7 @@ class ACSolve:
     vertex_J: "np.ndarray" = None    # (E, 4) |J| amplitude at each element's corners, A/mm²
     fed_V: list = field(default_factory=list)   # each fed conductor's input voltage (complex amplitude), V
     basis_p2: Any = None
+    corner_J: "np.ndarray" = None    # (3, E, 4) complex J at each element's corners, A/mm² (an AC routine's phase)
 
 
 def _corner_basis(mesh, element):
@@ -811,7 +812,7 @@ def ac_solve(region: Region, mu_r: list[float], sigma: list[float], omega: float
     corner_J = current(_corner_basis(mesh, ElementTetN0()), _corner_basis(mesh, ElementTetP2()))
     vertex_J = np.sqrt((np.abs(corner_J) ** 2).sum(axis=0))
     fed_V = [complex(phi[entry.into[0]]) for entry in fed]
-    return ACSolve(A, phi, B, J, loss, by_domain, energy, how, int(len(free_a) + m), vertex_J, fed_V, p2)
+    return ACSolve(A, phi, B, J, loss, by_domain, energy, how, int(len(free_a) + m), vertex_J, fed_V, p2, corner_J)
 
 
 def face_dofs_p2(region: Region, rows: "np.ndarray") -> "np.ndarray":

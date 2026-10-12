@@ -86,8 +86,18 @@ the fall and c = √(E/ρ) (5.05 km/s for steel and aluminium, 1.45 km/s for ABS
   four element transits, `filter_us`), like a crash test's channel filter: the single-step bump of
   the first node to land, and the ringing a coarse mesh adds behind a wave front, are not the part's.
   The unfiltered peaks are in `summary.unfiltered`; quote the filtered ones.
-- The viewer: Time scrubber, Field and Deformation, a Play routine, a "Dropped" row ("1 m drop onto
-  a rigid floor"), the drop arrow and a see-through floor; its takeaway starts "Rigid floor · ".
+- The fall, for the viewer (`extras.analysis.fall`): `height_mm`, the unit `direction` it falls,
+  `speed_m_s`, the `floor` (`point_mm`, where it meets the floor first, and `normal`, facing up),
+  `impact_ms` (the contact time, or null while still on the floor), `end_ms`, `rebound_m_s` (as the
+  summary's) and `centre_mm` (the centre of mass's travel from first contact at each frame, mm).
+- The viewer moves it as kinematics moves a STEP: the part is drawn turned so the fall points down,
+  on a see-through floor, and What you see's **Time** row scrubs the whole motion (released at its
+  height, falling, the solved frames where it meets the floor, its rebound, at rest), its value the
+  real time from landing ("−0.45 s", "10.1 µs"); the Preset row has Released, Contact, Peak and At
+  rest. It opens on the peak frame. Preview's playbar plays it as **Drop**: the fall at real time,
+  the impact slowed by a round factor ("slowed 2,000×") to a couple of seconds, the hop and the rest;
+  with reduced motion, only the impact where it lands. Then Field and Deformation, a "Dropped" row
+  ("1 m drop onto a rigid floor") and the drop arrow; its takeaway starts "Rigid floor · ".
 
 ## How to judge the answer (hand checks)
 

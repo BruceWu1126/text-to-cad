@@ -1,12 +1,13 @@
 import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
 import { checkLine, checkTitle, forceWords } from '../checkKinds.js';
-import { feaControls, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
+import { feaControls, feaPresets, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
 import { activeFrameIndex } from '../series.js';
 import { heldRows, madeOfRows, pushedRows, rigidFloorRows } from '../setup.js';
 import { contactRows } from './contact.js';
 import { feaAnalysis } from './index.js';
-import bolt, { BOLT_SETUP, PLAY, boltRows, boltWords } from './bolt.js';
+import bolt, { BOLT_SETUP, boltRows, boltWords } from './bolt.js';
+import { boltMotion } from '../poses.js';
 
 const LIMIT = 'Each bolt is a pretensioned spring along its axis, not meshed';
 const plain = (text: string) => text.replace(/[\u00a0\u202f]/g, ' ');
@@ -63,26 +64,40 @@ function boltedResult(extras: Record<string, unknown> = {}) {
 }
 
 describe('bolt', () => {
-  it('is Bolted joint, Tier 3 and Lite: no load control, its checks and markers, playing its steps', () => {
+  it('is Bolted joint, Tier 3 and Lite: no load control, its checks and markers, tightened then loaded', () => {
     expect(bolt).toMatchObject({ name: 'bolt', tier: 3, word: 'Bolted joint', noun: 'this load', family: null, scalesWithLoad: false,
       limitWord: 'Lite', checks: ['bolt_load', 'joint_separation', 'joint_slip', 'stress', 'displacement', 'contact_pressure'],
       displayTitle: 'Loads and fixtures' });
     expect(BOLT_SETUP).toEqual([heldRows, pushedRows, boltRows, contactRows, rigidFloorRows, madeOfRows]);
     const result = boltedResult();
     expect(feaAnalysis(result)).toBe(bolt);
-    expect(bolt.routine(result)).toBe(PLAY);
+    expect(bolt.routine(result)).toMatchObject({ kind: 'motion', label: 'Tighten and load' });
     expect(bolt.routine({ series: null })).toBeNull();
   });
 
-  it('opens on a load-step scrubber from the preload, the field (with the contact pressure) and the deformation, on the last step', () => {
+  it('opens on a Load row from snug through the preload to the load, the field (with the contact pressure) and the deformation, on the last step', () => {
     const result = boltedResult();
     const [step, field, deformation] = feaControls(result);
-    expect(step).toMatchObject({ drives: 'frame', type: 'number', label: 'Load step', min: 0, max: 100, defaultValue: 100, unit: '%',
-      snaps: [0, 100], frameLabels: ['Preload', '100 % load'] });
+    // Two seconds of tightening, then a second per load step; it opens on the series' default, the last step.
+    expect(step).toMatchObject({ drives: 'motion', type: 'number', label: 'Load', min: 0, max: 3, defaultValue: 3 });
+    expect(step.snaps).toEqual(expect.arrayContaining([0, 2, 3]));
+    expect([0, 1, 2, 3].map((at) => step.frameLabels[step.snaps.indexOf(at)])).toEqual(['Tightening 0 %', 'Tightening 50 %', 'Preload', '100 % load']);
+    expect(feaPresets(result, feaControls(result)).map((preset: { label: string }) => preset.label)).toEqual(['Snug', 'Preloaded', 'Service load']);
     expect(field.options.map((option: { label: string }) => option.label)).toEqual(['Stress', 'Displacement', 'Contact pressure']);
     expect(deformation).toMatchObject({ drives: 'deformation' });
     expect(feaControls(result).some((control: { drives: string }) => control.drives === 'load_scale')).toBe(false);
     expect(activeFrameIndex(result)).toBe(1);
+  });
+
+  it('tightens the preload ramped from none, then puts the load on in its solved steps', () => {
+    const motion = boltMotion(boltedResult())!;
+    expect(motion.atFrame(0)).toBe(2);
+    expect(motion.atFrame(1)).toBe(3);
+    // Half tightened: the preload's frame at half its size, colours and displacement, and the readout says it is ramped.
+    expect(motion.poseAt(1)).toEqual({ frame: 0, valueScale: 0.5, vector: [['_displacement', 0.5]], words: { time: 'Tightening 50 %', scale: 'ramped' } });
+    // Half way through the load step: the preload's frame blended half into the load's.
+    expect(motion.poseAt(2.5)).toEqual({ frame: 0, blend: { to: 1, weight: 0.5 }, words: { time: '100 % load', scale: '' } });
+    expect(motion.poseAt(3)).toMatchObject({ frame: 0, blend: { to: 1, weight: 1 } });
   });
 
   it('names each bolt in its setup in plain words, with its force after loading', () => {

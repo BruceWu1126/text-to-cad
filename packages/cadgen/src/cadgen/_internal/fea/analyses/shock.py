@@ -354,6 +354,9 @@ class ShockAnalysis:
         # What each mode alone does: the most it moves the part, and its share of the combined peak stress.
         mode_peak_mm = np.abs(q) * np.linalg.norm(shapes, axis=2).max(axis=1) if len(used) else np.zeros(0)
         below = [int(i) for i, f in zip(kept, used.frequencies_Hz) if f < inputs.table[0][0]]
+        started = time.perf_counter()
+        motion, motion_attributes = self._motion(inputs, used, used_gamma, shapes, mode_peak_mm)
+        timings["motion_s"] = time.perf_counter() - started
         closely = self._close_pairs(used.frequencies_Hz, masses[kept] / max(total_along, 1e-300), kept)
         return AnalysisResult(
             dof_locations=space.dof_locations,
@@ -383,6 +386,9 @@ class ShockAnalysis:
                 "total_mass_kg": float(sum((M @ (space.component == 0).astype(float)))) * 1000.0,
                 "displacement_magnitude": magnitude,
                 "analysis_warnings": [],
+                # What the viewer's Shock routine plays: a base pulse matched to the spectrum and the modes ringing.
+                "analysis_extras": {"motion": motion} if motion else {},
+                "motion_attributes": motion_attributes,
                 "study_checks": tuple(getattr(ctx.study, "checks", ()) or ()),
                 "margin": float(getattr(ctx.study, "margin", 2.0) or 2.0),
                 "parts": None if ctx.assembly is None else [
@@ -398,6 +404,47 @@ class ShockAnalysis:
             timings=timings,
             warnings=warnings,
         )
+
+    @staticmethod
+    def _motion(inputs: ShockInputs, used, gamma, shapes, mode_peak_mm) -> tuple[dict | None, dict]:
+        """What the viewer plays: a base pulse whose response spectrum matches the study's (wavelets,
+        :func:`motion.srs_pulse`) from a quarter of the slowest mode played up to the spectrum's top, and each of the
+        modes that move the part most answering it exactly (:func:`motion.sdof`), from rest until its ringing has died
+        to about 2 % (four time constants of the slowest). A spectrum gives each mode's peak, not a time history; this
+        is one history that has that spectrum, and the record says how closely it meets it at each mode."""
+        import numpy as np
+
+        from cadgen._internal.fea import motion
+
+        if not len(used):
+            return None, {}
+        chosen = motion.choose_modes(np.asarray(mode_peak_mm) ** 2)
+        frequencies = used.frequencies_Hz[chosen]
+        top = float(inputs.table[-1][0])
+        low = min(max(float(inputs.table[0][0]), float(frequencies.min()) / 4.0), top / 2.0)
+        zeta = inputs.damping_ratio
+        tail = 4.0 / (zeta * _TWO_PI * float(frequencies.min()))
+        fine = 1.0 / (20.0 * max(top, float(frequencies.max())))
+        t, a, _, _ = motion.srs_pulse(inputs.table, zeta, (low, top), step_s=fine, tail_s=tail)
+        step, count, kept = motion.sampling(frequencies, float(t[-1]))
+        chosen = [chosen[i] for i in np.argsort(frequencies)[:kept]]
+        times = np.arange(count) * step
+        attributes, peaks = motion.mode_attributes(shapes[chosen])
+        modes = []
+        match = []
+        for k, (name, i) in enumerate(zip(attributes, chosen)):
+            omega = float(used.omega[i])
+            z = motion.sdof(a, fine, omega, zeta)
+            modes.append({"attribute": name, "frequency_Hz": float(used.frequencies_Hz[i]),
+                          "q_mm": np.interp(times, t, z) * float(gamma[i]) * peaks[k]})
+            # The spectrum the pulse reaches at this mode against the study's.
+            reached = float(motion.srs_of(a, fine, [used.frequencies_Hz[i]], zeta)[0]) / G0_MM_S2
+            match.append(round(reached / spectrum_g(inputs.table, float(used.frequencies_Hz[i])), 4))
+        record = motion.shake_record(
+            label="Shock", step_s=step, base_g=np.interp(times, t, a) / G0_MM_S2, modes=modes, direction=inputs.direction,
+            words="a pulse matched to the spectrum", band_Hz=[round(low, 3), round(top, 3)], match=match,
+            pulse_s=round(float(t[-1]) - tail, 9), peak_g=round(float(np.abs(a).max()) / G0_MM_S2, 4))
+        return record, attributes
 
     @staticmethod
     def _close_pairs(frequencies, shares, indices) -> list[list[int]]:

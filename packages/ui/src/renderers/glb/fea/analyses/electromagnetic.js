@@ -18,6 +18,7 @@
 import { fieldAndDeformation } from "../controls.js";
 import { plainNumber, threeFigures } from "../numbers.js";
 import { cooledRows, faceTitle, forceDirection, heldRows, keptAtRows, madeOfRows, spaced, wholeRefs } from "../setup.js";
+import { acMotion, poseRoutine } from "../poses.js";
 import { planned } from "./stub.js";
 
 /** The study as the viewer read it (`readStudy`: its voltages, currents, coils, AC field and heat out); {} for none. */
@@ -174,7 +175,9 @@ export default planned({
   limitWordOf: electromagneticLimitWord,
   defaultControls: electromagneticControls,
   setupGroups: ELECTROMAGNETIC_SETUP,
-  routine: () => null,
+  // An AC field turning through its cycle, on a Phase row (`../poses.js`); a static field has none.
+  motion: acMotion,
+  routine: (result) => poseRoutine(acMotion(result)),
   facts: electromagneticFacts,
   markers: ["fixture"], displayTitle: "Electrodes and coils",
 });

@@ -125,10 +125,15 @@ line alone that is n = (cycles × D(σ))^b.
 
 ## What comes out
 
+- The viewer's Load cycle (`extras.analysis.motion`, kind `cycle`): a Cycle row scrubs the load
+  swinging between R times its peak and its peak (a vibration source fully reversed, a random one's
+  cycles at 1σ, 2σ and 3σ in Steinberg's shares), the stress and the deformation following it; a sweep's
+  cycles at its frequency, slowed. Presets Max (where it opens) and Min.
 - Fields: `life` (log10 cycles, the colour bar in powers of ten, at most N_e: past the material's
   data it says nothing more) and `fatigue_factor` (n at the study's cycles, at most 100), plus the
   static case's `displacement` (a harmonic dwell's: the peak frame at its widest swing; a random
-  vibration writes none).
+  vibration writes none) and `cycle_stress` (Stress: the von Mises the cycle swings to at its peak, a
+  random shake's at 3σ; a view may pick it as a field).
 - A vibration source's summary says `method` (`goodman` or `steinberg_miner`), `cycles` (the count
   it made), and `dwell_s` and `peak_Hz` with the stress amplitude (harmonic), or `duration_s`,
   `zero_crossing_Hz`, the peak RMS stress and the `bands` (random_vibration).

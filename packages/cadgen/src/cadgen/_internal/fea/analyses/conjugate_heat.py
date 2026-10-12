@@ -301,7 +301,8 @@ class ConjugateHeatAnalysis:
 
         from cadgen._internal.fea import conjugate, fluid_domain, navier_stokes, turbulence
         from cadgen._internal.fea.analyses.cfd import (
-            DENSITY, RE_LIMIT, SPEED, VISCOSITY, flow_numbers, reynolds_sentence, speed_reach, speed_to_part, wall_to_part,
+            DENSITY, RE_LIMIT, SPEED, VISCOSITY, flow_numbers, flow_tracers, reynolds_sentence, speed_reach, speed_to_part,
+            wall_to_part,
         )
         from cadgen._internal.fea.analyses.cfd_turbulent import MARCH, MARCH_FAST, laminar_sentence
         from cadgen._internal.fea.analyses.thermal import build_system
@@ -346,6 +347,8 @@ class ConjugateHeatAnalysis:
         speed, speed_reach_mm = speed_to_part(ctx, space, fluid, face_of, row_kind,
                                               np.linalg.norm(post["nodal_velocity"], axis=1) / SPEED,
                                               speed_reach(flow_inputs.kind, setup.length_mm, wall))
+
+        tracers = flow_tracers(space, row_kind, post, domain, label="Coolant flow")
 
         # The heat: the fluid's energy and the part's conduction, tied at the wetted walls.
         started = time.perf_counter()
@@ -520,7 +523,8 @@ class ConjugateHeatAnalysis:
                 "fluid_mesh": {"elements": int(len(fluid.tets)), "nodes": int(len(fluid.nodes)),
                                "wall_size_mm": round(wall, 4), "far_size_mm": round(far, 4)},
                 "reference_C": inputs.reference_C, "analysis_warnings": analysis_warnings,
-                "analysis_extras": {"reynolds": reynolds, "regime": regime},
+                "analysis_extras": {"reynolds": reynolds, "regime": regime,
+                                    **({"motion": tracers} if tracers else {})},
                 "wall_nodes": wall_nodes, "wall_flux": q, "wall_temperature": wall_T, "local_fluid": fluid_T,
                 "hydraulic_mm": setup.length_mm, "fluid_space": space, "speed_reach_mm": speed_reach_mm,
             },

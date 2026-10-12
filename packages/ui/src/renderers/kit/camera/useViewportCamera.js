@@ -122,8 +122,9 @@ export function useViewportCamera({
       if (entering) {
         saved.runtime = runtime;
         runtime.userMovedCamera = false;
-        // Preview puts the tools away: nothing covers the view, so the fit takes all of it.
-        zoomRuntimeToBounds(runtime, runtimeFramingBounds(runtime), sceneScaleModeRef.current, {
+        // Preview puts the tools away: nothing covers the view, so the fit takes all of it. A scene whose routine
+        // moves it far past where it rests (an FEA drop falling from its height) says the box that holds it all.
+        zoomRuntimeToBounds(runtime, runtime.kitScene?.previewBounds || runtimeFramingBounds(runtime), sceneScaleModeRef.current, {
           animate: false, modelOffset: modelTransformRef.current.offset,
           viewDirection: DEFAULT_VIEW_DIRECTION, viewUp: WORLD_UP, insetLeft: 0,
         });

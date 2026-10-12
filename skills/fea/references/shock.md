@@ -47,8 +47,14 @@ On top of the common keys in [study-file.md](study-file.md#common-keys):
     relative to the fixtures.
 - View drives: `field` (`von_mises`, `displacement`), `deformation`,
   `load_scale` (k times this shock), `threshold`. With no view, the viewer
-  opens on the field and the deformation. There is no scrubber and no
-  routine: a spectrum gives peaks, not a motion over time.
+  opens on a Time row, the field and the deformation. A spectrum gives peaks,
+  not a motion over time, so for the viewer to show one cadgen synthesises a
+  base pulse whose spectrum matches the study's (wavelets, as a shaker
+  controller does; `extras.analysis.motion.match` says how close at each mode)
+  and integrates each of the modes that move the part most answering it
+  exactly: the Time row scrubs the part's motion relative to the shaker
+  (states "Pulse starts", "Pulse ends", "Largest swing", where it opens), and
+  Preview's playbar plays it, slowed. The fields stay the SRSS/CQC answer.
 
 ```json
 {"analysis": "shock", "material": "aluminum-6061-t6",

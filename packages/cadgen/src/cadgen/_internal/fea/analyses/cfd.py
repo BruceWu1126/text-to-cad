@@ -45,7 +45,7 @@ from cadgen._internal.fea.analyses import kinds
 from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, Inputs, SolveContext
 
 __all__ = ["CfdAnalysis", "CfdInputs", "FLUIDS", "Fluid", "Inlet", "LIMITS", "Outlet", "RE_LIMIT", "SPEED_WALLS", "fastest_near",
-           "flow_solve_budget", "reynolds_sentence", "speed_reach", "speed_to_part", "unsettled_check"]
+           "flow_solve_budget", "flow_tracers", "reynolds_sentence", "speed_reach", "speed_to_part", "unsettled_check"]
 
 #: Fluids by name at 20 °C: density kg/m³, dynamic viscosity Pa·s.
 FLUIDS = {"air": (1.204, 1.81e-5), "water": (998.2, 1.002e-3)}
@@ -529,6 +529,9 @@ class CfdAnalysis:
         speed, reach = speed_to_part(ctx, space, fluid, face_of, row_kind, np.linalg.norm(post["nodal_velocity"], axis=1) / SPEED,
                                      speed_reach(inputs.kind, setup.length_mm, wall))
         timings["post_s"] = time.perf_counter() - started
+        started = time.perf_counter()
+        tracers = flow_tracers(space, row_kind, post, domain)
+        timings["tracers_s"] = time.perf_counter() - started
 
         warnings = list(flow.warnings)
         analysis_warnings = []
@@ -558,7 +561,7 @@ class CfdAnalysis:
                                "wall_size_mm": round(wall, 4), "far_size_mm": round(far, 4)},
                 "analysis_warnings": analysis_warnings,
                 # Structured, beside the sentence: what extras.analysis carries for the viewer.
-                "analysis_extras": {"reynolds": reynolds},
+                "analysis_extras": {"reynolds": reynolds, **({"motion": tracers} if tracers else {})},
             },
         )
         if inputs.mapped:
@@ -859,6 +862,16 @@ class CfdAnalysis:
 
 
 # -- the flow solve's budget ---------------------------------------------------------------------------
+
+
+def flow_tracers(space, row_kind, post: dict, domain, label: str = "Flow") -> dict | None:
+    """What the viewer's Flow routine plays (``extras.analysis.motion``, kind ``tracers``): particles let go at the
+    inlets and carried by the solved velocity (:func:`motion.tracer_record`); an external flow's across the part's
+    own width. None where the flow has no inlet to let them go from."""
+    from cadgen._internal.fea import motion
+
+    near = domain.part_box if getattr(domain, "kind", "internal") == "external" else None
+    return motion.tracer_record(space, row_kind, post["nodal_velocity"], label=label, near_box=near)
 
 
 def flow_solve_budget(reynolds: float, schedule: tuple[float, ...] = ()) -> int:

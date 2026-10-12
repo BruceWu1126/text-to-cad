@@ -14,7 +14,10 @@ describe('thermal_stress', () => {
   it('is Heat stress: of the static family, its stress and displacement following the load control, "this heat"', () => {
     expect(thermalStress).toMatchObject({ name: 'thermal_stress', tier: 1, word: 'Heat stress', noun: 'this heat', family: 'static',
       scalesWithLoad: true, checks: ['stress', 'displacement'], displayTitle: 'Loads, fixtures and heat' });
-    expect(thermalStress.routine(result)).toBe(LOAD_RAMP);
+    // Heat up, on its Heat row (`../poses.js`); a file with no temperature field ramps its load as static does.
+    expect(thermalStress.routine(result)).toMatchObject({ kind: 'motion', label: 'Heat up' });
+    expect(thermalStress.motion(result)).toMatchObject({ row: 'Heat', duration: 2, defaultAt: 2 });
+    expect(thermalStress.routine({ ...result, fields: result.fields.slice(0, 2) })).toBe(LOAD_RAMP);
   });
 
   it('draws its loads and fixtures and its heat', () => {
