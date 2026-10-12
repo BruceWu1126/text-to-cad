@@ -83,9 +83,9 @@ that ledger (§9b); there is no preview directory or persistent session index.
 A **retired kind** is one an older cadgen wrote and this one never reads:
 `RETIRED_KINDS` in `store/paths.py` -- `index/op`, the operation cache of
 cadgen 0.7.4 and earlier, and `index/surface`, `index/selector` and
-`index/mesh`, a part's display data as three entries (its SURF, its selector
-table bound to that SURF, and its mesh at one tessellation) before `index/part`
-named its two objects in one. The sweeper removes a retired kind's entries a
+`index/mesh`, a part's display data as three entries (its extraction, its
+selector table bound to that extraction, and its mesh at one tessellation)
+before `index/part` named its two objects in one. The sweeper removes a retired kind's entries a
 week after their last write, with every object only they named (§8): the
 release before parts still reads `index/surface`, `index/selector` and
 `index/mesh`, and one sharing the store derives each again at most once a week.
@@ -216,7 +216,7 @@ the store makes:
 
 - **Content-addressed** (`objects/`): the name is `sha256(bytes)`. Geometry
   objects are a **component** (the `.brep` bytes of one solid, and an
-  eager-only component's pinned `.surf`) and a **tree** (JSON); a part's
+  eager-only component's pinned topology facts) and a **tree** (JSON); a part's
   display mesh and selector table are derived objects beside them. Writing an
   object is idempotent; valid bytes are never changed. Geometry completeness
   requires the entire verified required closure before publication. Display
@@ -272,7 +272,7 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
 ```json
 {
   "kind": "geometry-tree",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "label": "link_arm",
   "entryKind": "assembly",
   "units": "mm",
@@ -325,8 +325,13 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   both alternates require full original native bytes and their own byte fixed
   point. Declared headers are checked before decoding. This is a specific
   known-hazard fence, not an equivalence claim for every possible native state.
-  If no codec passes, an explicit `eager-only` component pins the required
-  `eagerSurface` in its geometry identity. Native access raises
+  If no codec passes, an explicit `eager-only` component pins its topology
+  facts, extracted from the live shape at capture, as an object in its geometry
+  identity (`topology`): the facts its selector table is built from, as a JSON
+  object (`_internal/topology_facts.py`), since the lossy bytes cannot stand in
+  for the shape. What the facts hold is therefore part of an eager-only
+  component's content hash and of no native component's; this cadgen's
+  eager-only hashes moved with the pin. Native access raises
   `NativeUnavailable`; a saved-file reader may privately reparse its exact
   selected STEP bytes. Authored child pins never substitute a saved document.
   A saved-document read-back skips that private decode for a parsed prototype
@@ -342,8 +347,9 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   key its display data is stored and read by, `<digest>-v<version>`
   (`parts.part_key`). The digest hashes the component's `contentHash` (its
   kind, codec, BREP bytes, face colours and an eager-only component's pinned
-  surface) and the producer; the version (`parts.PART_VERSION`) is bumped by any
-  change to the extractor, the selector table, the mesher or the mesh payload.
+  topology facts) and the producer; the version (`parts.PART_VERSION`) is bumped
+  by any change to the extractor, the selector table, the mesher or the mesh
+  payload.
   No tolerance is in the key: a part has one display mesh. Unknown versions
   cannot create a shared persistent namespace. Derivation privately decodes
   only captured inputs; no source, model record, latest child or live authored
@@ -387,25 +393,26 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   `unmeshedFaceCount` when a face could not be meshed), the table's counts. One
   probe answers whether a part's display data is stored: the entry is valid and
   both objects are present at their sizes. Derivation (`parts._derive`) decodes
-  the component's BREP once, extracts its **SURF** in memory
-  (`_internal/surface_extract.py`; an eager-only component's SURF is the
-  geometry object its tree pins), builds the selector table from the BREP and
-  the SURF, meshes the component, writes both objects and then the entry, so an
-  entry always names complete objects. Nothing stores a SURF, and nothing
-  outside a derivation reads one. A format-3 SURF holds what the selector table
-  takes and no tessellation input: loops are edge references, a B-spline surface
-  keeps its degrees and pole counts (a bilinear patch its four corners), a swept
-  surface its axis or direction, a general curve its range. Format 2 stays
-  readable: an older build may have pinned one in an eager-only component's
-  identity.
+  the component's BREP once, extracts its **topology facts** in memory
+  (`_internal/surface_extract.py`: three ordinal tables -- each solid's kind
+  and volume; each face's surface type, exact area, centroid and tight box, a
+  plane's oriented normal, its analytic parameters and its loops as edge
+  ordinals; each edge's class, continuity, dihedral angle, flags, adjacent
+  faces, exact length, centroid, tight box, curve type, analytic parameters and
+  a circle's sweep -- exactly what the selector table reads and no tessellation
+  input; an eager-only component's are the object its tree pins), builds the
+  selector table from the BREP and the facts, meshes the component, writes both
+  objects and then the entry, so an entry always names complete objects.
+  Nothing stores the facts but that pin, and nothing outside a derivation reads
+  them.
 
   The **selector table** (`_internal/selector_table.py`) is the one place a
-  ref's facts are minted. From the exact BREP and the SURF, per face, edge and
-  vertex, the local id a ref ends in (`f7`, `e3`, `v2`), the exact metrics and
-  parameters the SURF carries, the plane normals, whether an entity can be
-  referenced, its relevance, every adjacency (face–edge, edge–vertex), each
-  edge's chain and each face's tangent group — the sets the viewer's connected
-  selection grows a pick to. The CAD Viewer reads it when it needs it -- a pick,
+  ref's facts are minted. From the exact BREP and the topology facts, per face,
+  edge and vertex, the local id a ref ends in (`f7`, `e3`, `v2`), the exact
+  metrics and parameters the facts carry, the plane normals, whether an entity
+  can be referenced, its relevance, every adjacency (face–edge, edge–vertex),
+  each edge's chain and each face's tangent group — the sets the viewer's
+  connected selection grows a pick to. The CAD Viewer reads it when it needs it -- a pick,
   a measure, a node opened -- by the part's key, bound to the object its entry
   names (`GET /__tess_cache/<part>.selectors.json`), and joins it to the mesh's
   face and edge tables by ordinal, composing `occurrenceId + "." + localId`; the
@@ -442,7 +449,7 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   writes the stored display meshes; one at any other tolerance meshes each part
   in the exporting process from the very inputs its display mesh was made from
   -- the BREP, the stored selector table and the face colours (`parts.mesh_at`),
-  so no SURF is extracted -- and stores nothing (the file is the output;
+  so nothing is extracted -- and stores nothing (the file is the output;
   `_internal/mesh_export.py`). Tolerances outside the tessellation policy's
   bounds (`tessellation_policy.tolerance_refusal`) are refused, never meshed. No
   client writes a part: every reader probes and reads, and the routes refuse a
@@ -467,8 +474,8 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
 
   Saved readback may reconstruct a private scene from that document index
   when the freshly emitted STEP has an already-seen exact digest. It verifies
-  one snapshot of the root tree and every required BREP/eager-surface object against
-  its content address; document trees containing source links are rejected.
+  one snapshot of the root tree and every required BREP and pinned topology object
+  against its content address; document trees containing source links are rejected.
   Missing, unreadable or damaged objects cause a raw STEP parse. New output
   bytes and forced builds also use the raw parser. Both paths retain the same
   placement, face-color and complete authored-to-written correspondence checks.
@@ -610,8 +617,9 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   Document mappings use payload schema 7 (the producer hint names the kernel
   alone): saved bytes stay authoritative and are reparsed without guessing
   colours that the document does not contain. There are no directory or document-byte-key salts. Trees
-  use only geometry schema2; there is no optional old-tree decoder. Schema2
-  admits resolved named intrinsic appearance on authored trees. Document indexes may carry an
+  use only geometry schema 3; there is no optional old-tree decoder. Schema 3
+  admits resolved named intrinsic appearance on authored trees and pins an
+  eager-only component's topology facts as `topology`. Document indexes may carry an
   optional exact loaded `surfaceProducer` hint outside the tree. A same-tree
   rewrite preserves a valid hint and external mesh ledger; a tree replacement
   drops both unless an attested producer is supplied. A reader selects tree and
@@ -1262,7 +1270,7 @@ Decided mechanically from the returned geometry and occurrence metadata.
   document does. Arbitrary direct preview callbacks retain the ordinary order.
 - Admission allows at most 64 occurrences, 16 components, 32 trees and depth 32;
   aggregate tree bytes and the flattened descriptor each have a 64 KiB limit.
-  BREP bytes are limited to 768 KiB, required eager-only SURF bytes to 4 MiB, and retained appearance
+  BREP bytes are limited to 768 KiB, pinned eager-only topology facts to 4 MiB, and retained appearance
   recipes to 256 KiB. This bounds additional encoded payload/recipe retention to
   5.125 MiB, plus bounded Python structures and invocation-owned native shapes;
   it is not a native allocator RSS guarantee. No native shape enters a
@@ -1840,7 +1848,7 @@ The original attachment-triggered force starts preparation; anytree still
 performs its own validation, attachment and error rollback. Nested constructors,
 arbitrary iterators, subclasses and child reparenting keep ordinary forcing.
 Admission permits at most eight small unlinked trees,
-with 768 KiB of verified BREP bytes and 4 MiB of required eager-only SURF bytes in total;
+with 768 KiB of verified BREP bytes and 4 MiB of pinned eager-only topology facts in total;
 tree size and component/occurrence counts are also bounded. These limit extra
 work and retention, not native allocator RSS. No native cache or thread is added.
 
