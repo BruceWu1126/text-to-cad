@@ -20,6 +20,7 @@ models/
 ├── tendon_hand/      tendon-driven research hand (source-only)
 ├── falcon_heavy/     SpaceX public-source reconstruction
 ├── juno/ lyra/       authored robot description packages (URDF/SRDF)
+├── usd-brep-demo/    EXPERIMENTAL: parts modeled with NVIDIA usd-brep, bridged to OpenCascade
 ```
 
 The demo corpus is split three ways on purpose — a part is one script, an
@@ -123,6 +124,13 @@ Models that need a **folder of their own** rather than a single loose script.
   sibling; regenerate that sibling first — a missing one is a build error
   naming its generator. `validation/` and `website/` carry its validation
   programs and standalone HTML presentation.
+
+### Kernel experiments
+
+- [usd-brep-demo/](usd-brep-demo/src/README.md): EXPERIMENTAL — parts modeled
+  with NVIDIA's usd-brep (SMLib) kernel and handed to cadgen as exact
+  OpenCascade B-rep by `cadgen.usd_brep_bridge`; needs CPython 3.12 with
+  `usd-brep` installed (Linux/Windows). `verify_bridge.py` checks the bridge.
 
 ### SpaceX reconstruction package
 
