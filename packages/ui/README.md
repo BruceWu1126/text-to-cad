@@ -40,7 +40,7 @@ and 10px metadata (see [settings UI](docs/settings-ui.md)). Document headings
 and code retain their content styles.
 Dropdown, select-popup and context-menu primitives default to the same 11px
 compact text (`text-tiny`, 16px line height), including checkbox/radio items
-and submenus. Menu shortcuts use 10px metadata. These defaults belong to the
+and submenus. These defaults belong to the
 primitives, including desktop's app-level equivalents; consumers do not add
 per-menu font-size overrides. Portals set their own compact text size rather
 than inheriting the trigger or host body's size.
