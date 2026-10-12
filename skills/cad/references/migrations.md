@@ -109,3 +109,32 @@ longer tessellate, and nothing cadgen runs needs Node.
   parts again, once (`Meshing parts n/total`); a STEP no build has touched since
   is meshed on its first view or snapshot. `cadgen store gc` reclaims what the
   older cadgen stored.
+
+## Snapshot and GLB requests in 0.8
+
+- Section mode is gone: `--mode section` is refused (`Unsupported render mode:
+  section. Modes: list, view`), and so are `--section` and a job's `section`
+  key. Clip a view and look straight at the cut
+  ([cross-sections](snapshot-review.md#cross-sections)): the section plane's
+  normal is the clip's `axis` (`XY` is `z`, `XZ` is `y`, `YZ` is `x`), its
+  offset is the clip's `at`, and the camera faces the cut (`top`, `back`,
+  `right`). A view writes `.png`; nothing writes an SVG outline. So
+  `--mode section --section XZ:12.5` becomes:
+
+  ```bash
+  cadgen step snapshot STEP/housing.step tmp/cut.png --camera back --display '{"clip": {"axis": "y", "at": 12.5}}'
+  ```
+
+- `display.clip` places its plane with `at`, the plane's coordinate on its axis
+  in millimetres, in the model's own frame. `offset` and `offsets`, fractions of
+  the model's extent along the axis, are refused (`display.clip has unknown
+  key(s): offset`). `{"axis": "y", "offset": 0.25}` becomes `{"axis": "y", "at":
+  Y}` with `Y = min + 0.25 × (max − min)` over the model's Y extent, which the
+  `bounds` that `--mode list` prints give. With no `at` the plane goes through
+  the middle. `offsets` kept a fraction for each axis; a clip cuts across its
+  one `axis`, so name that axis and its `at`.
+- `cadgen glb build --animation` takes no `fps`, `deform` or `deformTolerance`
+  (`--animation has unknown key(s): fps; supported keys: clip, drop, seconds,
+  start`). The file carries the clip's own keys, not samples at a rate, and
+  every bending tube as a glTF skin, so there is no rate or mode to choose:
+  delete the keys. `clip`, `seconds`, `start` and `drop` keep their meaning.
