@@ -227,17 +227,8 @@ def _mate(
     origin: object = None,
     direction: object = None,
     limits: object = None,
-    default: object = None,
 ) -> Mate:
     mate_name = _mate_name(name)
-    if default is not None:
-        # ZERO IS THE ARTIFACT: every DOF's rest value is 0 (the placement as
-        # written), so a "default" slider value would displace geometry the
-        # moment a panel opened — the ambiguity is designed out.
-        raise _fail(
-            f"mate {mate_name!r}: default= was dropped — 0 is always the "
-            "artifact as written; declare a preset under poses instead"
-        )
     if kind == "fastened":
         if axis is not None or origin is not None or direction is not None:
             raise _fail(f"fastened mate {mate_name!r} takes no axis: it declares no DOF")
@@ -254,22 +245,22 @@ def _mate(
     )
 
 
-def revolute(name, *, parent, child, axis=None, origin=None, direction=None, limits=None, default=None) -> Mate:
+def revolute(name, *, parent, child, axis=None, origin=None, direction=None, limits=None) -> Mate:
     """A 1-DOF rotation about the declared axis; degrees, zero = authored placement."""
     return _mate("revolute", name, parent=parent, child=child, axis=axis,
-                 origin=origin, direction=direction, limits=limits, default=default)
+                 origin=origin, direction=direction, limits=limits)
 
 
-def slider(name, *, parent, child, axis=None, origin=None, direction=None, limits=None, default=None) -> Mate:
+def slider(name, *, parent, child, axis=None, origin=None, direction=None, limits=None) -> Mate:
     """A 1-DOF translation along the declared axis; model units, zero = authored placement."""
     return _mate("slider", name, parent=parent, child=child, axis=axis,
-                 origin=origin, direction=direction, limits=limits, default=default)
+                 origin=origin, direction=direction, limits=limits)
 
 
-def cylindrical(name, *, parent, child, axis=None, origin=None, direction=None, limits=None, default=None) -> Mate:
+def cylindrical(name, *, parent, child, axis=None, origin=None, direction=None, limits=None) -> Mate:
     """Rotation + translation about one axis: sub-DOFs ``<name>.turn`` and ``<name>.travel``."""
     return _mate("cylindrical", name, parent=parent, child=child, axis=axis,
-                 origin=origin, direction=direction, limits=limits, default=default)
+                 origin=origin, direction=direction, limits=limits)
 
 
 def fastened(name, *, parent, child) -> Mate:
