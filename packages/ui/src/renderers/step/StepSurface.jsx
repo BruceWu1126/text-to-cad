@@ -420,8 +420,7 @@ function StepSurfaceBody({ view, data }) {
   // ---- motion: the articulation and Position, the routines and playback ------------------------
   const motion = useStepMotion({
     entry: selectedEntry, fileKey: selectedKey, resources: client.resources,
-    readStored: () => session.readStored(), clipboard: host.clipboard,
-    reportError: (message) => shellRef.current?.reportActionError(message)
+    readStored: () => session.readStored()
   });
   const {
     definition: selectedStepModuleDefinition, loading: selectedStepModuleLoading,

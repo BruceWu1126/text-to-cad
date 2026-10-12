@@ -119,14 +119,6 @@ it('selecting a named position after paused scrubbing resets animation and appli
   expect(result.current.values).toEqual({ hinge: 80, slide: 2 });
 });
 
-it('parameter paste participates in the same ownership/reset contract', () => {
-  const { result, clock } = setup();
-  act(() => result.current.handleAnimationPlayToggle()); advance();
-  act(() => result.current.applyStepModuleParameterValues({ hinge: 500, slide: 40, unknown: 9 }));
-  expect(result.current.values).toEqual({ hinge: 90, slide: 40 });
-  expect(result.current.frame).toBeNull(); expect(clock.getAnimationClock()).toBe(0);
-});
-
 it.each(['playback', 'position'])('global motion reset clears %s and all pending producers without claiming animation time zero', state => {
   const { result, clock } = setup();
   if (state === 'playback') {

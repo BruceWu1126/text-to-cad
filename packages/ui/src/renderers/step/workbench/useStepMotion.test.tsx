@@ -54,7 +54,7 @@ function mount(entry: ReturnType<typeof saved>) {
   const listed: number[] = [];
   const hook = renderHook(({ entry }) => {
     const motion = useStepMotion({ entry, fileKey: entry.file, resources: null,
-      readStored: () => ({ pose: null }), clipboard: null, reportError: () => {} });
+      readStored: () => ({ pose: null }) });
     offered.push(stepPosableHandles(motion.definition).length > 0);
     listed.push(motion.animationControls.clips.length);
     return motion;

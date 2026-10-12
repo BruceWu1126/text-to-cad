@@ -73,12 +73,6 @@ export function useStepMotionControls({
     writeParameters({ ...stepModuleParameterValuesRef.current, [id]: clampControlValue(control, value) });
   }, [activatePositionControls, articulation, writeParameters]);
 
-  const applyStepModuleParameterValues = useCallback((values) => {
-    if (!articulation) return;
-    activatePositionControls();
-    setAppliedStepPoseName("");
-    writeParameters(normalizeControlValues(articulation, { ...stepModuleParameterValuesRef.current, ...values }));
-  }, [activatePositionControls, articulation, writeParameters]);
   const handleResetStepModuleParameters = resetMotion;
 
   const handleApplyPose = useCallback((poseName) => {
@@ -323,7 +317,7 @@ export function useStepMotionControls({
     setAnimationClock(elapsedSec);
   }, [selectedAnimationClips, activateAnimationControls]);
 
-  return { handleStepModuleParameterChange, applyStepModuleParameterValues, handleResetStepModuleParameters,
+  return { handleStepModuleParameterChange, handleResetStepModuleParameters,
     handleApplyPose, handleAnimationClipSelect, handleAnimationPlayToggle, handleAnimationRestart,
     handleAnimationScrub, handleAnimationSpeedChange, handleAnimationLoopToggle, resetMotion, resetPosition,
     releaseAnimation, savePlayback, resetPlayback, restorePlayback };

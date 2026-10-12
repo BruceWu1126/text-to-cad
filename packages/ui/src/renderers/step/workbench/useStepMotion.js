@@ -1,17 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   animationClipList,
   animationRenderFrame,
   buildDefaultAnimationState,
   findAnimationClip
 } from "@text-to-cad/core/common/animationClock.js";
-import { articulationControls } from "@text-to-cad/core/common/articulation.js";
 import { loadSourceAnimation } from "@text-to-cad/core/common/animationRuntime.js";
 import { entryPoseUrl } from "@text-to-cad/core/lib/entryAssets.js";
 import { useAnimationClockStore } from "./animationClockStore.js";
 import { fileKey as fileKeyOf } from "./entryPaths.js";
 import { restoreMotionAnimation, restoreMotionParameters } from "./motionRestore.js";
-import { buildParameterValuesCopyText, parseParameterValuesPasteText } from "./parameterControls.js";
 import { resolvePoseLoad, stepPoseLogic } from "./poseLoad.js";
 import { useStepMotionControls } from "./useStepMotionControls.js";
 
@@ -52,16 +50,13 @@ export function stepMotionSources(entry) {
  * loop it plays with are the shell's (the Animation tool's, the file's; preview's, its own).
  *
  * @param {{ entry: object, fileKey: string, resources: object,
- *   readStored: () => { pose: object | null }, clipboard: object,
- *   reportError: (message: string) => void }} options
+ *   readStored: () => { pose: object | null } }} options
  */
-export function useStepMotion({ entry, fileKey, resources, readStored, clipboard, reportError }) {
+export function useStepMotion({ entry, fileKey, resources, readStored }) {
   const animationClock = useAnimationClockStore();
   const { resetAnimationClock, setAnimationClock } = animationClock;
   const readStoredRef = useRef(readStored);
   readStoredRef.current = readStored;
-  const reportErrorRef = useRef(reportError);
-  reportErrorRef.current = reportError;
   const { moduleUrl, articulation, sourceAnimation, animationKey } = stepMotionSources(entry);
 
   const [stepModuleLoadState, setStepModuleLoadState] = useState({
@@ -313,36 +308,6 @@ export function useStepMotion({ entry, fileKey, resources, readStored, clipboard
 
   const animationError = animationLoadError;
 
-  // Copy and Paste of the Position values, as text a person can keep and paste back.
-  const { applyStepModuleParameterValues } = commands;
-  const copyParameters = useCallback(async () => {
-    if (!articulationControls(definition?.articulation).length) {
-      reportErrorRef.current("No STEP parameters to copy");
-      return;
-    }
-    try {
-      await clipboard.writeText(buildParameterValuesCopyText(definition, stepModuleParameterValues));
-    } catch (error) {
-      reportErrorRef.current(error instanceof Error ? error.message : "Clipboard write failed");
-    }
-  }, [clipboard, definition, stepModuleParameterValues]);
-  const pasteParameters = useCallback(async () => {
-    if (!articulationControls(definition?.articulation).length) {
-      reportErrorRef.current("No STEP parameters to paste");
-      return;
-    }
-    try {
-      const clipboardText = await clipboard.readText();
-      const { values } = parseParameterValuesPasteText(definition, clipboardText, {
-        label: "STEP parameter",
-        unknownLabel: "STEP parameter"
-      });
-      applyStepModuleParameterValues(values);
-    } catch (error) {
-      reportErrorRef.current(error instanceof Error ? error.message : "Clipboard paste failed");
-    }
-  }, [applyStepModuleParameterValues, clipboard, definition]);
-
   // The stored pose, once, before the first paint (the file's view calls it). The values are
   // normalized against the articulation when it resolves.
   const restore = (restored) => {
@@ -362,9 +327,7 @@ export function useStepMotion({ entry, fileKey, resources, readStored, clipboard
     onApplyPose: commands.handleApplyPose,
     activePose: animationState.enabled !== false ? "" : appliedPoseName,
     positionActive: !animationRuntime,
-    onResetMotion: commands.resetMotion,
-    onCopyParams: copyParameters,
-    onPasteParams: pasteParameters
+    onResetMotion: commands.resetMotion
   };
   const animationControls = {
     status: animationStatus,
