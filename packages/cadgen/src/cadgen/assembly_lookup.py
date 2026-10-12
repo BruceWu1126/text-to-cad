@@ -112,8 +112,7 @@ def transform_bbox(matrix: list[float], bbox: object) -> dict[str, list[float]] 
 # counts, flags and areas -- and is why `params` is transformed key-by-key rather than wholesale.
 #
 # The param key sets are the COMPLETE vocabulary of `step_scene_geometry._curve_params` and
-# `_surface_params`, which is what writes the `params` this places (and the same set
-# `step_scene_geometry._transform_param_dict` classifies). A point is spelled `origin`
+# `_surface_params`, which is what writes the `params` this places. A point is spelled `origin`
 # (plane/cylinder/cone/line) or `center` (circle/ellipse/hyperbola/parabola/sphere/torus),
 # never both, so a list that knows only one spelling silently leaves half the analytic types
 # in component-local coordinates -- which is what sent `inspect measure` between a circular
