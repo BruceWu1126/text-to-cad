@@ -269,10 +269,10 @@ def capabilities() -> dict[str, Any]:
             "samples": STEP_EDGE_SAMPLE_COUNT,
         },
         # The mesh carries the CAD edge lines, so the page's own topology line pass stays off.
-        # The algorithm's name is in every stored table's bytes: a new spelling would be a
-        # new table for every part.
+        # The algorithm's name is in every stored table's bytes: a new spelling is a new
+        # table for every part, and so a new PART_VERSION.
         "surfaceEdgeRendering": {
-            "algorithm": "surf-edge-lines-v1",
+            "algorithm": "edge-lines-v1",
             "visibilityClasses": list(STEP_EDGE_RENDER_VISIBILITY_CLASSES),
         },
         "connectedSelection": {"edgeChain": {"alignmentDeg": CHAIN_ALIGNMENT_DEG}, "tangentFaces": True},

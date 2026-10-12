@@ -349,7 +349,8 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   kind, codec, BREP bytes, face colours and an eager-only component's pinned
   topology facts) and the producer; the version (`parts.PART_VERSION`) is bumped
   by any change to the extractor, the selector table, the mesher or the mesh
-  payload.
+  payload, and by any change in how the digest is hashed, so the parts at every
+  key before it are obsolete (§2).
   No tolerance is in the key: a part has one display mesh. Unknown versions
   cannot create a shared persistent namespace. Derivation privately decodes
   only captured inputs; no source, model record, latest child or live authored
