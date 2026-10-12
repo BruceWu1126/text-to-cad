@@ -6,14 +6,16 @@
  * picker chooses one and Vibrate plays it; a static result plays the Load ramp, the voltage going on. Harmonic: a series of frequencies across the sweep, each
  * its displacement, stress and voltage amplitude; the Frequency scrubber chooses one. Its verdict
  * judges stress, displacement, an open electrode's signal (`voltage`: "0.82 V, needs at least 0.5 V")
- * or a frequency; no load control moves them. Its takeaway leads with "Linear · " (small signal, no
+ * or a frequency; no load control moves them. A resonance also says each mode's resonance, anti-resonance
+ * and coupling (`facts`: "Mode 1", "6.5 kHz, anti-resonance 7.1 kHz, k_eff 0.40"), with no limit; with no
+ * checks they are its verdict, headed by the first ("First resonance 6.5 kHz"), in no tone. Its takeaway leads with "Linear · " (small signal, no
  * depolarisation). Its setup says each electrode ("1 V on the top electrode", "The out electrode, open"),
  * how each part is poled ("Poled along Z"), where it is held and pushed, and what it is made of.
  */
 import { fieldAndDeformation } from "../controls.js";
-import { plainNumber } from "../numbers.js";
+import { plainNumber, threeFigures, unbrokenHalves } from "../numbers.js";
 import { frameControl } from "../series.js";
-import { axisWords, faceTitle, heldRows, madeOfRows, pushedRows, spaced } from "../setup.js";
+import { axisWords, faceTitle, heldRows, madeOfRows, pushedRows, spaced, wholeRefs } from "../setup.js";
 import { VIBRATE as HARMONIC_VIBRATE } from "./harmonic.js";
 import { VIBRATE } from "./modal.js";
 import { LOAD_RAMP } from "./static.js";
@@ -104,6 +106,36 @@ export function piezoRoutine(result) {
   return result?.series ? null : LOAD_RAMP;
 }
 
+/** A frequency as the mode picker says it: "850 Hz", "6.5 kHz", "1.2 MHz". */
+export function hertzWords(hertz) {
+  const f = Math.abs(Number(hertz) || 0);
+  return f >= 1e6 ? `${threeFigures(hertz / 1e6)} MHz` : f >= 1e3 ? `${threeFigures(hertz / 1e3)} kHz` : `${threeFigures(hertz)} Hz`;
+}
+
+/**
+ * A resonance's modes, each as the verdict's row (no limit, so no tone and no bar): "Mode 1", "6.5 kHz,
+ * anti-resonance 7.1 kHz, k_eff 0.40", chosen with the whole result and its mode shown. With no checks they are
+ * the verdict: "First resonance 6.5 kHz", "Anti-resonance 7.1 kHz, coupling k_eff 0.40". null for anything else.
+ */
+export function piezoFacts(result) {
+  const modes = result?.analysis?.resonances;
+  if (!modes?.length) return null;
+  const refs = wholeRefs(result);
+  const frames = result.series?.frames || [];
+  const rows = modes.map((entry) => {
+    const coupling = `k_eff ${entry.kEff.toFixed(2)}`;
+    const summary = `Mode ${entry.mode}: resonance ${hertzWords(entry.resonanceHz)}, anti-resonance ${hertzWords(entry.antiresonanceHz)}, ${coupling}`;
+    const frame = frames.findIndex((each) => each.value === entry.mode);
+    return { id: `fact:mode:${entry.mode}`, kind: "resonance", status: "none", label: `Mode ${entry.mode}`, part: "",
+      line: unbrokenHalves([hertzWords(entry.resonanceHz), `anti-resonance ${hertzWords(entry.antiresonanceHz)}`, coupling]),
+      use: null, margin: null,
+      choice: { id: `fact:mode:${entry.mode}`, ...(refs.length ? { refs } : {}), summary, ...(frame >= 0 ? { frame } : {}) } };
+  });
+  const [first] = modes;
+  return { title: `First resonance ${hertzWords(first.resonanceHz)}`,
+    caption: `Anti-resonance ${hertzWords(first.antiresonanceHz)}, coupling k_eff ${first.kEff.toFixed(2)}`, rows };
+}
+
 export default planned({
   name: "piezo", tier: 3, word: "Piezo", noun: "this voltage", limitWord: "Linear", family: null,
   scalesWithLoad: false,
@@ -111,5 +143,6 @@ export default planned({
   defaultControls: piezoControls,
   setupGroups: PIEZO_SETUP,
   routine: piezoRoutine,
+  facts: piezoFacts,
   markers: ["fixture", "load", "electrode"], displayTitle: "Electrodes and fixtures",
 });

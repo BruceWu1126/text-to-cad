@@ -149,6 +149,39 @@ class StudyFile(unittest.TestCase):
         self.assertEqual([force_words(800), force_words(5000), force_words(12500)], ["800 N", "5 kN", "12.5 kN"])
 
 
+class StoppedShort(unittest.TestCase):
+    """A load path that stops short (the contact could not be followed) judges each check on its own number."""
+
+    def _stopped(self, *, slips: bool):
+        from types import SimpleNamespace
+
+        joint = {"name": "link and base_strap", "at": (80.0, 0.0, 6.0), "preload_clamp_N": 12500.0, "clamp_N": 9785.1,
+                 "clamp_lost_N": 2714.9, "open": False, "opens_at_percent": 227.3, "friction_holds_N": 1957.02,
+                 "shear_N": 1957.46 if slips else 1200.0, "slips": slips}
+        bolt = {"name": "bolt 1", "force_N": 12193.4, "proof_N": 21228.0, "head_at": (80.0, 0.0, 12.0)}
+        scalars = {"collapsed": True, "factor": 0.4625, "bolts": [bolt], "joints": [joint], "unsettled": []}
+        return SimpleNamespace(scalars=scalars, series=SimpleNamespace(frames=[SimpleNamespace(value=0.0), SimpleNamespace(value=46.25)]))
+
+    def test_a_stop_leaves_each_check_its_own_status(self):
+        analysis = get_analysis("bolt")
+        result = self._stopped(slips=True)
+        judged = {kind: analysis.judge({"kind": kind}, 0, None, result, None)
+                  for kind in ("bolt_load", "joint_separation", "joint_slip")}
+        self.assertEqual({kind: check["status"] for kind, check in judged.items()},
+                         {"bolt_load": "passes", "joint_separation": "passes", "joint_slip": "fails"})
+        self.assertEqual({check["collapsed_at_percent"] for check in judged.values()}, {46.25})
+
+    def test_the_cli_says_which_way_the_slip_goes(self):
+        analysis = get_analysis("bolt")
+        for slips, words in ((True, "reaching the 1957.02 N friction holds, so it slips"), (False, "under the 1957.02 N friction holds")):
+            (joint,) = self._stopped(slips=slips).scalars["joints"]
+            summary = {"status": "Stops at about 46 % of the load", "max_von_mises_MPa": 642.0, "max_displacement_mm": 3.8,
+                       "max_contact_pressure_MPa": 395.0, "bolts": [], "joints": [joint], "preload_steps": 2, "steps": 17,
+                       "adaptive": False, "newton_iterations": 123, "contact_updates": 57}
+            with self.subTest(slips=slips):
+                self.assertTrue(analysis.human_lines(summary)[1].endswith(words))
+
+
 class HandCalcs(unittest.TestCase):
     def test_the_bolt_and_joint_stiffness_are_vdi_2230s(self):
         k_b, k_c, phi = hand_load_factor()

@@ -770,6 +770,10 @@ class ElectromagneticAnalysis:
         result.scalars["analysis_extras"] = {"mode": inputs.mode, "noun": NOUNS[inputs.mode]}
         if inputs.frequency_Hz is not None:
             result.scalars["analysis_extras"]["frequency_Hz"] = inputs.frequency_Hz
+        if result.scalars.get("forces"):
+            # The force on each part (J x B on a coil, the Maxwell stress on a magnetic part), for the viewer's Study.
+            result.scalars["analysis_extras"]["forces"] = [
+                {"part": f["part"], "force_N": [float(f"{c:.6g}") for c in f["N"]], "by": f["by"]} for f in result.scalars["forces"]]
         result.timings["electromagnetic_s"] = time.perf_counter() - started
         result.scalars["summary"] = self.summary(result, inputs, [])
         return result

@@ -5,10 +5,12 @@
  * together ("this heat"), and it plays the Load ramp. What you see opens on today's field and
  * deformation, the field over stress, displacement and temperature; its setup says where it is held,
  * what pushes it, where it is kept at a temperature, heated and cooled, and what it is made of.
- * Where the file finds the peak on a clamped edge (`singular_clamped_edge`), the stress check's row
- * says that peak is a singularity to read away from (`checkHint`).
+ * Where the file finds the peak on a clamped edge (`singular_clamped_edge`), cadgen judges strength a
+ * little away from it (the check's value is where the colours stop, `edge_peak` the edge's own), and
+ * the stress check's row says so (`checkHint`); an older file, judged at the edge, says to read away.
  */
 import { fieldAndDeformation } from "../controls.js";
+import { plainNumber } from "../numbers.js";
 import { cooledRows, heatedRows, heldRows, keptAtRows, madeOfRows, pushedRows } from "../setup.js";
 import { LOAD_RAMP } from "./static.js";
 
@@ -32,6 +34,13 @@ export default Object.freeze({
   displayTitle: "Loads, fixtures and heat",
   limitWord: "",
   /** The stress check's hint where the file finds its peak on a clamped edge; "" for anything else. */
-  checkHint: (result, check) => (check.kind === "stress" && result.findings.some((finding) => finding.type === "singular_clamped_edge")
-    ? SINGULAR_HINT : ""),
+  checkHint: (result, check) => {
+    if (check.kind !== "stress") return "";
+    if (check.edgePeak) {
+      // The edge's peak at the load shown, as the check's own value is.
+      const peak = check.edgePeak * (Number.isFinite(check.shown) && check.value > 0 ? check.shown / check.value : 1);
+      return `Judged a little away from the clamped edge: the peak there, ${plainNumber(peak)} MPa, is a singularity that grows as the mesh is refined`;
+    }
+    return result.findings.some((finding) => finding.type === "singular_clamped_edge") ? SINGULAR_HINT : "";
+  },
 });

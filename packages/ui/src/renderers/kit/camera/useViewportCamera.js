@@ -122,9 +122,10 @@ export function useViewportCamera({
       if (entering) {
         saved.runtime = runtime;
         runtime.userMovedCamera = false;
+        // Preview puts the tools away: nothing covers the view, so the fit takes all of it.
         zoomRuntimeToBounds(runtime, runtimeFramingBounds(runtime), sceneScaleModeRef.current, {
           animate: false, modelOffset: modelTransformRef.current.offset,
-          viewDirection: DEFAULT_VIEW_DIRECTION, viewUp: WORLD_UP,
+          viewDirection: DEFAULT_VIEW_DIRECTION, viewUp: WORLD_UP, insetLeft: 0,
         });
       } else {
         applyPerspectiveSnapshot(runtime, saved.camera, { scheduleIdle: false });

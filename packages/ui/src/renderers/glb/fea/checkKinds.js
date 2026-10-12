@@ -267,7 +267,15 @@ export const CHECK_KINDS = Object.freeze({
   // The sideways force a bolted joint carries against what friction holds (μ times its clamp).
   joint_slip: kind({
     titles: titles("Joint slips", "Close to slipping", "Joint holds by friction"), defaultLabel: "Joint slip", unit: "N",
-    line: (check) => unbrokenHalves([`Sideways ${forceWords(check.shown)}`, `friction holds ${forceWords(check.limit)}`]),
+    // Which way it goes. At a slip the two are equal (friction gives all it has), so it says so rather than two equal
+    // numbers: "Sideways 2 kN, at the friction limit: slips"; past it, "Sideways 3 kN, friction holds only 2 kN";
+    // where it holds, "Sideways 950 N, friction holds up to 1 kN".
+    line: (check) => {
+      const slips = check.status ? check.status === "fails" : check.shown >= check.limit;
+      const atLimit = slips && check.limit > 0 && Math.abs(check.shown - check.limit) <= 0.01 * check.limit;
+      return unbrokenHalves([`Sideways ${forceWords(check.shown)}`, atLimit ? "at the friction limit: slips"
+        : `friction holds ${slips ? "only" : "up to"} ${forceWords(check.limit)}`]);
+    },
   }),
   // A gas flow's fastest Mach number (its speed over the local speed of sound) against the most allowed.
   mach: kind({

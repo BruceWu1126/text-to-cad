@@ -611,7 +611,9 @@ exactly as it always was.
         margin (`study.margin`, else cadgen's 2) and **Strong enough** from it up; a displacement
         check **Moves too much**, **Close to the limit** (within a tenth of its limit) or **Stiff
         enough**. Several say how many fail ("Fails both checks", "Fails 1 of 2 checks"), else
-        **Close to the limit** or **Passes all checks**.
+        **Close to the limit** or **Passes all checks**. A load path that stopped short of the full
+        load (`collapsed`) whose checks all hold at the last load it carried is headed **Stops short of
+        the load**, in the warning tone, never a pass.
       - **What it means for the load**, one line: how many times this load the weakest check takes
         before its limit, floored ("OK only to 0.4× this load" under 1, "OK up to 1.6× this load"),
         the noun the analysis's ("this shake", "this drop", "this heat"); buckling's load factor
@@ -622,7 +624,9 @@ exactly as it always was.
         (creep, a permanent bend, contact, a bolted joint, a composite, a drop impact, flow, flow and
         bending, two fluids) never says a load multiple: cadgen tags its checks `scaling: "none"` and its
         registry entry says `scaling: "none"` for a file older than that, so the worst check's own
-        sentence is the line ("Steady creep · Peak 100 MPa, limit 250 MPa"). Where the worst check's kind does not
+        sentence is the line ("Steady creep · Peak 100 MPa, limit 250 MPa"); of the checks as bad as the
+        worst, the first the person named in the study's view (`view.checks[].label`, "Bore swell": their
+        question) says it, before a default one that uses more of its limit. Where the worst check's kind does not
         move with the load (a frequency, a temperature, a pressure drop), its own sentence instead
         ("First mode 85 Hz, must stay above 60 Hz", "Hottest 84 °C, 16 °C under its limit"). The
         line says how far to trust it, and nothing else: an estimate (Tier 2, drop) leads with
@@ -633,7 +637,8 @@ exactly as it always was.
         after its word, "Ideal gas · past Mach 1.8 · " (the limit the file names), or "Ideal gas ·
         supersonic outlet · " where the peak is within it but the gas leaves faster than sound. A
         load path that stopped short of the full load (`collapsed`, the analysis's `stopCaption`) leads
-        with that before anything else: a contact or bolt solve "Stops at about 20 % of the load · ", a
+        with that before anything else (each check is still judged on its own number where it stopped: a
+        bolt under its proof load holds): a contact or bolt solve "Stops at about 20 % of the load · ", a
         permanent bend "Collapses at about 70 % of the load · " (the file's sentence, else from its
         `load_percent`), then its limit word and its worst check. Two fluids stopped at its time limit
         (the file's "Stopped at its time limit at t = 420 ms of 1.5 s ..." in `analysis.warnings`) leads
@@ -649,7 +654,7 @@ exactly as it always was.
         step with an accuracy note) ends with " · adapted". A Tier 1 result that took none is as
         ever.
       - **Each check, the same way**, worst first (failing before close before passing, then the
-        most of its limit used), under a hairline: its icon and name in its own tone (its name in
+        checks the person named in the view, in their order, then the most of its limit used), under a hairline: its icon and name in its own tone (its name in
         the person's words, "Bulkhead top sag", or Strength), a thin bar of how much of its limit it
         uses (a `meter`: filled to the value over the limit, held at full past it with its end
         striped, and for a stress check a tick at the margin, which the meter's text names), and its
@@ -659,9 +664,21 @@ exactly as it always was.
         the colours on the parts' surface show, says so: "Peak 4.5 kV/mm, in the air by hv-rod, limit 3
         kV/mm". An analysis may add a muted hint under a check's line (its registry entry's
         `checkHint`): heat stress, where the file finds the peak on a clamped edge (the
-        `singular_clamped_edge` finding, written where its colours stop below that peak), says under
-        Strength "Peak at the clamped edge: a singularity that grows as the mesh is refined. Read the
-        stress a little away from the edge". A line is kept whole in pieces that break between them, never inside a word ("Factor
+        `singular_clamped_edge` finding, written where its colours stop below that peak), judges strength
+        (and the headline's multiple, through the file's safety factor) on the stress a little away from
+        the edge, where the colours stop, the check keeping the edge's own peak (`edge_peak`), and says under
+        Strength "Judged a little away from the clamped edge: the peak there, 1882 MPa, is a singularity
+        that grows as the mesh is refined"; a file older than that, judged at the edge, says "Peak at the
+        clamped edge: a singularity that grows as the mesh is refined. Read the stress a little away from
+        the edge". A bolted joint's slip says which way it goes ("Sideways 950 N, friction holds up to 1
+        kN"; slipping, where the two are equal, "Sideways 2 kN, at the friction limit: slips"; past it, "…friction holds only 2 kN"). An analysis may
+        also add rows of its own with no limit (its registry entry's `facts`): a piezo resonance, each mode
+        ("Mode 1", "6.5 kHz, anti-resonance 7.1 kHz, k_eff 0.40", `analysis.modes`), in no tone and with no
+        bar, after any checks, each chosen with the whole result and showing its mode; with no checks
+        they are the verdict, headed by the first ("First resonance 6.5 kHz", "Linear · Anti-resonance
+        7.1 kHz, coupling k_eff 0.40"), in no tone. A magnetic result's force on each part is such a row too
+        (`analysis.forces`: "Force on the plunger", "0.424 N down, its magnetic pull"; on a coil "the current
+        in the field"); with no checks, "Pulls the plunger with 0.424 N". A line is kept whole in pieces that break between them, never inside a word ("Factor
         4.0 at 100 million cycles, needs 1.5" breaks before "at"). Each check is
         chosen on a press, as Study's rows are: it tints the faces it is over (`faces`), else the face
         it peaks on (`where.ref`), else names the whole result, and carries its sentence into Quick
@@ -695,7 +712,8 @@ exactly as it always was.
       and its arrows); and **Made of** (a swatch), the material's name ("Aluminum 6061-T6"; its
       yield is the verdict's to say). Each material is called by its display name, cadgen's: a table
       entry's ("PZT-5A", "Steel (structural, generic)", also for an object that extends it, `{"name":
-      "pzt-5a", "piezo": ...}`), or an object's own `name` as written. In an assembly whose parts differ
+      "pzt-5a", "piezo": ...}`), or an object's own `name`, tidied as cadgen writes it ("Soft silicone",
+      "Copper C110"; a file older than that, its first letter capitalised). In an assembly whose parts differ
       in two or three materials, each is named inline with its parts ("Copper C110 coil, Stainless steel
       304 shaft"; a material of three parts or more with how many, "Steel (3 parts)"); past three,
       "Mostly Aluminum 6061-T6" where one material has most of the parts, else "4 materials", each
@@ -800,7 +818,17 @@ exactly as it always was.
     touching no other), so a result written before its study was recorded has its verdict, if it
     has a safety factor, and What you see alone. Study keeps the one width: the verdict and the
     setup wrap to fit it. It opens at its content's height (see Heights), so the sliders of What
-    you see are in view.
+    you see are in view. What you see, where only Details follows it in the view's order, sits with
+    Details at the panel's foot, which never scrolls (`footer`): a short stack scrolls the verdict and
+    the setup above it, and the controls stay in view; a view that puts What you see earlier keeps every
+    section in the scrolling body, in its order. While the body has more under its fold its foot fades
+    (`data-tool-panel-more`, every panel that gives way), so a row the fold cuts never reads as the last.
+  - **Framing.** The camera frames a result right of Select's panels and above the colour bar: whenever
+    the viewport fits the camera (opening, Zoom to Fit, a reset) it reads how much of its width the shown
+    panels cover and how much of its height the colour bar does (`runtime.framingInset`, `framingInset` in
+    `glb/feaChrome.js`) and fits the model into what they leave, panned to the middle of it (`insetLeft`,
+    `insetBottom` in `kit/camera/viewportCameraFit.js`); it orbits about that point, as after a pan. A panel
+    opened or closed later does not reframe; Preview, which puts the panels away, frames in the whole width.
 
   A GLB that is not a result has no strip at all.
 - **Choosing faces.** A fixed face, a load or a load's face chosen in Study tints its triangles
@@ -826,7 +854,8 @@ exactly as it always was.
   (`FLOATING_CHROME_SURFACE_CLASS`, no pointer events), one playbar's height higher while the
   playbar is under the model (in preview). It is only the scale, on one row 20rem wide (less on a
   narrow viewport): the field in Show's words ("Stress", "Displacement"; a field the file names for
-  the view by that name, "Mode shape"), then its range and units
+  the view by that name, "Mode shape"; a sound's level, drawn on the surface, "Sound level at the surface",
+  so it is not read as the level at a check's microphone), then its range and units
   along the ramp ("0", "47.3 MPa"). A signed field (a temperature, a pressure) runs from its own
   minimum ("20.0", "84.0 °C"); a log field (a life in cycles) says powers of ten ("10³", "10⁹
   cycles"); a per-frame field's range is the file's, across every frame, so the colours compare
@@ -836,7 +865,7 @@ exactly as it always was.
   lowest red as a stress's peak is, and the bar's ends swap to say so ("Fatigue margin 100 … 4.09"). A stress whose colours stop below its
   singular peak (the field's `capped`: a crack front, a heat-stressed clamped edge) says its top as "≥361 MPa",
   and its title says the percentile and the peak ("Colours stop at the 99th percentile; the peak is 948 MPa");
-  the verdict still judges the peak. The load shown scales
+  the verdict judges the peak, but where it is a clamped edge's in heat stress, which it judges where the colours stop. The load shown scales
   the range only where the analysis follows the load. What the numbers mean for the part is the verdict's, so the bar
   says none of it. It has no controls.
 - **Findings stay in the file for the agent.** The result's checks (`findings` in the GLB's extras,
@@ -885,16 +914,20 @@ exactly as it always was.
   each loaded face one to five arrows (more on a bigger face), spread over it, each 8% of the
   model's diagonal long whatever the load, pointing along the force with its tip on the face (a
   pulling force stands on the face by its tail); a pressure's arrows run along the inward normal;
-  a label beside each load's arrows, past one arrow's free end (a push's tail, a pull's tip, so off the part:
-  of several, the one nearest their middle, never the middle itself, which arrows all round a shaft or
-  a shake held at both ends put inside the part), carried on along that arrow, says its amount at the load shown ("300 N",
-  "2 MPa"). A label is never on or inside the part: one whose arrow's ends lie inside the model's
-  box (a load in a pin hole, a body load through the middle) is carried along the arrow's line out
-  of the box by the nearer way (`labelOutside` in `glb/feaMarkers.js`), and on screen every label is
-  carried on past the outline of the model's box (`pastOutline`: the hull of its corners, which
-  holds a back face's arrows too), from its free end or back from where it acts, whichever leaves
-  sooner, so a body load's "1 g down" stands beside the model, a shaker under the part is labelled
-  below it and a sideways load on a hidden face stands clear of the part. On each fixed face, small cones point into it; on a roller's face (Slides on), the
+  a label beside each load's arrows, past one arrow's free end (a push's tail, a pull's tip: of several,
+  the one nearest their middle, never the middle itself, which arrows all round a shaft or a shake held at
+  both ends put inside the part), says its amount at the load shown ("300 N", "2 MPa"). A label is never
+  drawn on, inside or behind the part. It stands at that arrow's own outer end, a few pixels on along it, its
+  text running on the way the arrow points (centred over an arrow that stands up; `besideEnd` in
+  `glb/feaChrome.js`), only where that end is in sight and the label drawn there lies over none of the model
+  (two rays: from the eye to the end, and through the label); otherwise, and always for a marker drawn through
+  or all over the part (a body load, a shaker, the air, heat), it is carried along the arrow's line out of the
+  model's box by the nearer way (`labelOutside` in `glb/feaMarkers.js`) and on screen past the outline of the
+  model's box (`pastOutline`: the hull of its corners), so "1 g down" stands beside the model and a load in a
+  pin hole is labelled outside it. No label is drawn past the view's edge (it is drawn whole against it), under
+  the tool strip and Select's panels at the view's left (`chromeCover`: one there moves right of them) or over
+  the colour bar (`colourBarCover`: above it), nor over another label: each in turn is nudged up or down
+  clear of those before it (`settleLabels`), every frame, however the view has been turned. On each fixed face, small cones point into it; on a roller's face (Slides on), the
   same grey cone stands on a small plate on two balls resting on the face, pointing into it along
   its normal, unlabelled, drawn wherever fixtures are. They stand on the deformed shape as it is
   drawn, in two passes, the x-ray look: what is in view solid, depth-tested as the model is,

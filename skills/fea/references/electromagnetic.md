@@ -99,7 +99,8 @@ Numbers in the summary: `capacitance_pF`, `energy_J`, each electrode's `charge_n
 `max_field_kV_mm` and where; `resistance_ohm`, `current_A`, each electrode's current,
 `joule_heat_W` (= I² R), `max_current_density_A_mm2`, the temperatures; `inductance_uH` (one coil,
 2 W / I²), `energy_J`, `max_field_mT`, each coil's cross-section and current density, `forces`
-(J x B on a coil, the Maxwell stress on a magnetic part), and each probe's reading.
+(J x B on a coil, the Maxwell stress on a magnetic part; also in the GLB's `analysis.forces`, which Study
+shows as a row per part, "Force on the plunger: 0.424 N down"), and each probe's reading.
 
 ## Examples
 

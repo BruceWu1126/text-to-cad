@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -412,6 +413,18 @@ def lookup_material(name: str) -> Material:
     return material
 
 
+def display_name(name: str) -> str:
+    """An object material's own name, tidied as the table's names read: its first letter capitalised ("soft silicone" is
+    "Soft silicone"), and a slug's words spaced, an alloy code among them in capitals ("copper-c110" is "Copper C110").
+    Nothing else changes: "rubber 50A (estimate)" is "Rubber 50A (estimate)"."""
+    text = " ".join(name.split())
+    if not text:
+        return "Custom"
+    if " " not in text and re.search(r"[A-Za-z][-_]+[A-Za-z0-9]", text):
+        text = " ".join(word.upper() if any(c.isdigit() for c in word) else word for word in re.split(r"[-_]+", text) if word)
+    return text[0].upper() + text[1:]
+
+
 def _json_text(value: Any) -> str:
     try:
         return json.dumps(value, ensure_ascii=False)
@@ -641,9 +654,9 @@ def material_from_spec(spec: Any) -> Material:
     if tangent is not None and not tangent < E:
         raise ValueError(f"material.tangent_MPa: the plastic tangent ({tangent:g} MPa) must be below E ({E:g} MPa)")
     # An object that extends a table entry ({"name": "pzt-5a", "piezo": {...}}) is called by the entry's display name
-    # ("PZT-5A"), as the table name alone is; one of its own keeps its name as written.
+    # ("PZT-5A"), as the table name alone is; one of its own keeps its name, tidied (display_name: "Copper C110").
     return Material(
-        base.name if base is not None else str(spec.get("name", "custom")), E, nu, yield_strength, density,
+        base.name if base is not None else display_name(str(spec.get("name", "custom"))), E, nu, yield_strength, density,
         uts=_optional(spec, ("uts_MPa",), table("uts"), where="material"),
         endurance=_optional(spec, ("endurance_MPa", "fatigue_strength_MPa"), table("endurance"), where="material"),
         endurance_cycles=_optional(spec, ("endurance_cycles", "fatigue_cycles"), table("endurance_cycles"), where="material"),

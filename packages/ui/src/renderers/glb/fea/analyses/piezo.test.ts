@@ -128,4 +128,24 @@ describe('piezo', () => {
     expect(piezo.routine(result)).toBe(VIBRATE);
     expect(feaVerdict(result).title).toBe('Clear of vibration');
   });
+
+  it('says each mode\'s resonance, anti-resonance and coupling in Study, with no limit: its verdict when nothing is judged', () => {
+    const modes = [{ mode: 1, resonance_Hz: 6503.29, antiresonance_Hz: 7100.05, k_eff: 0.401294 },
+      { mode: 2, resonance_Hz: 13834.94, antiresonance_Hz: 13834.95, k_eff: 0.000657 }];
+    const analysis = { ...RESONANCE.analysis, modes };
+    const plain = (text: string) => text.replace(/[\u00a0\u202f]/g, ' ');
+    const verdict = feaVerdict(piezoResult({ ...RESONANCE, analysis, checks: [] }, FRAME_ONE));
+    expect(verdict).toMatchObject({ status: 'none', title: 'First resonance 6.5 kHz' });
+    expect(verdict.caption).toBe('Linear · Anti-resonance 7.1 kHz, coupling k_eff 0.40');
+    expect(verdict.rows.map((row: { label: string; line: string; use: unknown }) => [row.label, plain(row.line), row.use])).toEqual([
+      ['Mode 1', '6.5 kHz, anti-resonance 7.1 kHz, k_eff 0.40', null], ['Mode 2', '13.8 kHz, anti-resonance 13.8 kHz, k_eff 0.00', null]]);
+    // Chosen, a mode carries its sentence with the whole result and shows that mode.
+    expect(verdict.rows[1].choice).toMatchObject({ summary: 'Mode 2: resonance 13.8 kHz, anti-resonance 13.8 kHz, k_eff 0.00', frame: 1 });
+    // With a check, the check heads the verdict and the modes follow it.
+    const checked = feaVerdict(piezoResult({ ...RESONANCE, analysis }, FRAME_ONE));
+    expect(checked.title).toBe('Clear of vibration');
+    expect(checked.rows.map((row: { label: string }) => row.label)).toEqual(['Vibration', 'Mode 1', 'Mode 2']);
+    // A file older than the modes has no verdict with nothing judged.
+    expect(feaVerdict(piezoResult({ ...RESONANCE, checks: [] }, FRAME_ONE))).toBeNull();
+  });
 });

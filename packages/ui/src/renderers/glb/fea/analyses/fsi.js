@@ -28,9 +28,15 @@ export function couplingOf(result) {
 
 const capital = (text) => (text ? `${text.charAt(0).toUpperCase()}${text.slice(1)}` : "");
 
-/** The part's name as the file gives it ("flap" of "flap flow and bending"), else "the part". */
-function partName(result) {
-  const name = String(result?.name || "").replace(/ flow and bending$/, "").replace(/_/g, " ").trim();
+/**
+ * The part's name as the file gives it ("flap" of "flap flow and bending"), tidied as a sentence says it: a file's
+ * underscores and hyphens spaced and its version numbers dropped ("flap_channel2" is "the flap channel",
+ * "soft_tube-e2" "the soft tube"); else "the part".
+ */
+export function partName(result) {
+  const name = String(result?.name || "").replace(/ flow and bending$/, "").split(/[\s_-]+/)
+    // A version tag ("e2", "v3", "2") goes, and a version number on a word ("channel2" is "channel").
+    .map((word) => (/^[a-z]?\d+$/i.test(word) ? "" : word.replace(/(?<=[a-z]{2})\d+$/i, ""))).filter(Boolean).join(" ");
   return name ? `the ${name}` : "the part";
 }
 

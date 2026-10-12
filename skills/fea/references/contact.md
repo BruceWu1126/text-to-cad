@@ -95,7 +95,8 @@ A pin pressed into a plate that rests on a bench, dry steel:
   Study names each pair ("pin presses on plate, friction 0.2") with what it did under the load, and
   each rigid plane under "Rigid floor".
 - Summary: `status` ("Carries the full load", or "Stops at about 70 % of the load" when Newton finds
-  no equilibrium past it), `max_von_mises_MPa`, `max_displacement_mm`, `max_contact_pressure_MPa`
+  no equilibrium past it: each check is then judged on its own number at the last load carried, with
+  `collapsed_at_percent`, and the stop leads the viewer's takeaway), `max_von_mises_MPa`, `max_displacement_mm`, `max_contact_pressure_MPa`
   and where each is, and `contacts`, one per pair and plane: `touching`, `force_N` (the force it
   passes), `area_mm2` (the area pressing), `peak_MPa` and `peak_at`, `friction_N` (the sideways
   force friction carries), `slipping_share` (the share of the contact that slips, with friction),

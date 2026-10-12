@@ -41,9 +41,10 @@ export const FIELDS = Object.freeze({
   _magnetic_field: field("Magnetic field"),
   // An AC field's eddy currents (and a fed conductor's current crowding to its skin), their amplitude.
   _eddy_current: field("Eddy current"),
-  // Sound: the pressure (a mode's shape is signed; a driven response is its amplitude) and its level in dB.
+  // Sound: the pressure (a mode's shape is signed; a driven response is its amplitude) and its level in dB, both on
+  // the surface drawn; the level says so, since a check's level is read at a microphone away from it, far lower.
   _sound_pressure: field("Sound pressure", { signed: true }),
-  _sound_level: field("Sound level"),
+  _sound_level: field("Sound level at the surface"),
   // A lightened design's density: 1 where the material stays, 0 where it goes.
   _material_kept: field("Material kept"),
   // Random vibration's RMS fields, one standard deviation; the viewer's sigma control multiplies them.

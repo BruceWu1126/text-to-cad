@@ -73,12 +73,12 @@ describe('acoustic', () => {
     const [frequency, field] = feaControls(swept);
     expect(frequency).toMatchObject({ drives: 'frame', label: 'Frequency', min: 100, max: 900, defaultValue: 900, unit: 'Hz' });
     expect(field).toMatchObject({ drives: 'field' });
-    expect(field.options.map((option: { label: string }) => option.label)).toEqual(['Sound level', 'Sound pressure']);
+    expect(field.options.map((option: { label: string }) => option.label)).toEqual(['Sound level at the surface', 'Sound pressure']);
     expect(activeFrameIndex(swept)).toBe(2);
   });
 
-  it('calls its fields Sound level and Sound pressure, the pressure signed', () => {
-    expect(fieldWord({ attribute: '_sound_level_f2', name: 'sound pressure level' })).toBe('Sound level');
+  it('calls its level the level at the surface, not at a check\'s microphone, and its pressure Sound pressure, signed', () => {
+    expect(fieldWord({ attribute: '_sound_level_f2', name: 'sound pressure level' })).toBe('Sound level at the surface');
     expect(fieldWord({ attribute: '_sound_pressure', name: 'sound pressure (mode shape)' })).toBe('Sound pressure');
   });
 

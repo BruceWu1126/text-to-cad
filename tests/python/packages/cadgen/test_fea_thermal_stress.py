@@ -9,8 +9,10 @@ it cannot grow, and its middle carries σ = -E α ΔT, pushing on both walls.
 
 from __future__ import annotations
 
+import dataclasses
 import io
 import json
+import math
 import tempfile
 import unittest
 from contextlib import redirect_stderr
@@ -146,10 +148,10 @@ class HeatedBar(unittest.TestCase):
         self.assertIsNotNone(extras["safety_factor"])
         self.assertIn("max_temperature_C", self.clamped_sidecar["upstream"]["thermal"])
 
-    def test_the_clamped_edge_spike_does_not_swamp_the_colours_but_the_check_judges_it(self):
+    def test_the_clamped_edge_spike_does_not_swamp_the_colours_or_the_check(self):
         """A clamped edge is singular in heat stress: its peak (here ~4x the bar's E α ΔT) once set the colour bar's
         top, so the rest of the part read all blue. The colours stop at the 99th percentile, the entry says so and
-        keeps the peak, and the stress check still judges the peak."""
+        keeps the peak, and the stress check judges the stress there, a little away from the edge, keeping the peak."""
         import numpy as np
 
         peak = self.clamped.summary["max_von_mises_MPa"]
@@ -158,7 +160,8 @@ class HeatedBar(unittest.TestCase):
         self.assertLess(stress["max"] * 1.1, peak)
         self.assertGreater(stress["max"], STEEL.E * STEEL.expansion * RISE)  # the bar's own stress is inside the range
         check = next(check for check in self.clamped_extras["checks"] if check["kind"] == "stress")
-        self.assertEqual(check["value"], peak)
+        self.assertEqual((check["value"], check["edge_peak"]), (stress["max"], peak))
+        self.assertAlmostEqual(self.clamped_extras["safety_factor"], math.floor(STEEL.yield_strength / stress["max"] * 1000) / 1000)
         # A field with no spike keeps its colours to the peak and says nothing.
         from cadgen._internal.fea.analyses.static import colour_range
 
@@ -201,6 +204,27 @@ class HeatedBar(unittest.TestCase):
         # The peak away from the fixtures (a corner), or a field with no spike: nothing singular to say.
         self.assertIsNone(singular(SimpleNamespace(solved=[dataclasses.replace(held, peak_face="#o1.f3")], fields={"von_mises": spike})))
         self.assertIsNone(singular(SimpleNamespace(solved=[held], fields={"von_mises": np.linspace(0.0, 900.0, 1000)})))
+
+    def test_strength_is_judged_away_from_a_singular_clamped_edge(self):
+        """The strength check and the safety factor judge the stress where the colours stop (a little away from the
+        singular edge), not the edge's peak, which grows with the mesh; the check keeps the peak beside it."""
+        from types import SimpleNamespace
+
+        import numpy as np
+
+        from cadgen._internal.fea.analyses.thermal_stress import ThermalStressAnalysis
+        from cadgen._internal.fea.checks import Solved
+
+        spike = np.concatenate([np.full(999, 100.0), [900.0]])
+        held = Solved(material_name="Steel", yield_MPa=250.0, peak_MPa=900.0, peak_gauss_MPa=800.0, peak_at=(0.0, 0.0, 0.0),
+                      peak_face="#o1.f1", fixed_faces=("#o1.f1",), max_displacement_mm=0.01, displacement_at=(0.0, 0.0, 0.0),
+                      bbox_diagonal_mm=100.0, margin=2.0, coarser_peak_MPa=600.0, part="bar")
+        analysis = ThermalStressAnalysis()
+        check = analysis.judge({"kind": "stress"}, 0, None, SimpleNamespace(solved=[held], fields={"von_mises": spike}), None)
+        self.assertEqual((check["value"], check["edge_peak"], check["ratio"], check["status"]), (100.0, 900.0, 0.4, "passes"))
+        # A peak on a face that is not held is judged as ever.
+        free = SimpleNamespace(solved=[dataclasses.replace(held, peak_face="#o1.f2")], fields={"von_mises": spike})
+        self.assertEqual(analysis.judge({"kind": "stress"}, 0, None, free, None)["value"], 900.0)
 
     def test_the_findings_and_the_cli_say_it_was_heated(self):
         heated = [finding for finding in self.clamped.findings if finding["type"] == "heated"]

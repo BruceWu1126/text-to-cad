@@ -11,11 +11,13 @@
  * takeaway leads with "Static · ", or "AC · " for a field at a frequency. What you see opens on the Field select (and the deformation
  * when the force was mapped); its setup says where it is held at a voltage, where a current goes in,
  * which coils drive it (at what frequency: "Coil 2 A at 50 kHz", "Field 10 mT at 500 Hz"), where it is kept at a temperature or cooled, where it is held (mapped) and
- * what it is made of. It plays no routine.
+ * what it is made of. It plays no routine. A magnetic result also says the force on each part
+ * (`facts`: "Force on the plunger", "0.424 N down, its magnetic pull"), with no limit: rows after any
+ * checks, and with none, its verdict ("Pulls the plunger with 0.424 N").
  */
 import { fieldAndDeformation } from "../controls.js";
 import { plainNumber, threeFigures } from "../numbers.js";
-import { cooledRows, faceTitle, heldRows, keptAtRows, madeOfRows, spaced } from "../setup.js";
+import { cooledRows, faceTitle, forceDirection, heldRows, keptAtRows, madeOfRows, spaced, wholeRefs } from "../setup.js";
 import { planned } from "./stub.js";
 
 /** The study as the viewer read it (`readStudy`: its voltages, currents, coils, AC field and heat out); {} for none. */
@@ -127,6 +129,44 @@ export function electromagneticControls(result) {
   return result.fields.some((entry) => String(entry.attribute).toLowerCase() === "_displacement") ? [field, deformation] : [field];
 }
 
+// What makes a part's force, in plain words.
+const FORCE_BY = Object.freeze({ "J x B": "the current in the field", "Maxwell stress": "its magnetic pull" });
+
+/** Which way a force points: "down", "along +X", near enough to an axis (within about 18°) to say so, else as it is. */
+function forceWay(vector) {
+  const size = Math.hypot(...vector);
+  if (!(size > 0)) return "";
+  const axis = vector.findIndex((value) => Math.abs(value) / size >= 0.95);
+  return forceDirection(axis >= 0 ? vector.map((value, k) => (k === axis ? Math.sign(value) : 0)) : vector);
+}
+
+/** A force in newtons as the verdict says it, three figures: "0.424 N", "12.5 N". */
+const newtons = (value) => `${threeFigures(value)} N`;
+
+/**
+ * A magnetic result's force on each part, as the verdict's rows with no limit: "Force on the plunger",
+ * "0.424 N down, its magnetic pull", chosen with the whole result. With no checks they are its verdict,
+ * headed by the largest ("Pulls the plunger with 0.424 N", "0.424 N down"). null with none written.
+ */
+export function electromagneticFacts(result) {
+  const forces = result?.analysis?.forces;
+  if (!forces?.length) return null;
+  const refs = wholeRefs(result);
+  const named = (force) => (force.part ? `the ${spaced(force.part)}` : "the part");
+  const rows = forces.map((force, index) => {
+    const size = Math.hypot(...force.vector);
+    const way = forceWay(force.vector);
+    const by = FORCE_BY[force.by] || "";
+    const line = [`${newtons(size)}${way ? ` ${way}` : ""}`, by].filter(Boolean).join(", ");
+    const label = `Force on ${named(force)}`;
+    return { id: `fact:force:${index}`, kind: "force", status: "none", label, part: "", line, use: null, margin: null,
+      choice: { id: `fact:force:${index}`, ...(refs.length ? { refs } : {}), summary: `${label}: ${line}` } };
+  });
+  const largest = forces.reduce((best, force) => (Math.hypot(...force.vector) > Math.hypot(...best.vector) ? force : best));
+  const size = Math.hypot(...largest.vector);
+  return { title: `Pulls ${named(largest)} with ${newtons(size)}`, caption: `${newtons(size)} ${forceWay(largest.vector)} on ${named(largest)}`.replace("  ", " "), rows };
+}
+
 export default planned({
   name: "electromagnetic", tier: 3, word: "Magnetic / electric", noun: "this voltage", limitWord: "Static", family: null,
   scalesWithLoad: false,
@@ -135,5 +175,6 @@ export default planned({
   defaultControls: electromagneticControls,
   setupGroups: ELECTROMAGNETIC_SETUP,
   routine: () => null,
+  facts: electromagneticFacts,
   markers: ["fixture"], displayTitle: "Electrodes and coils",
 });

@@ -2,14 +2,14 @@ import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
 import { feaControls, feaVerdict, readFeaResult, studyRows } from '../../feaResult.js';
 import { flowRows, heldRows, madeOfRows } from '../setup.js';
-import fsi, { FSI_SETUP, bentRows, couplingOf } from './fsi.js';
+import fsi, { FSI_SETUP, bentRows, couplingOf, partName } from './fsi.js';
 import { feaAnalysis } from './index.js';
 
 const LIMIT = 'Steady flow two-way coupled to a linear elastic part: no flutter, vortex shedding or other unsteady '
   + 'motion; small-to-moderate deflection, the flow mesh following the part (ALE mesh motion).';
 
 // A flow-and-bending result as cadgen writes one: stress first, the wall pressure and shear beside it, deformed.
-function fsiResult(coupling: Record<string, unknown> = {}, analysis: Record<string, unknown> = {}) {
+function fsiResult(coupling: Record<string, unknown> = {}, analysis: Record<string, unknown> = {}, extras: Record<string, unknown> = {}) {
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 0.012, 0, 0, 0, 0.003, 0]), 3));
   geometry.setIndex([0, 1, 2]);
@@ -47,6 +47,7 @@ function fsiResult(coupling: Record<string, unknown> = {}, analysis: Record<stri
         status: 'passes', where: { ref: null, at: [0, 0, 0] } },
     ],
     findings: [],
+    ...extras,
   });
   const root = new Group();
   root.add(mesh);
@@ -99,5 +100,31 @@ describe('fsi', () => {
     expect(coupling.label).toBe('Coupling: did not settle in 25 iterations');
     expect(coupling.hint).toBe('Still changing by 1.8e-2, short of 1e-3: the last state, not an answer');
     expect(feaVerdict(fsiResult({}, { regime: 'turbulent' })).caption.startsWith('Turbulent · ')).toBe(true);
+  });
+
+  it('names the part bent in a tidy sentence: a file\'s underscores spaced and its version number dropped', () => {
+    expect(partName({ name: 'flap_channel2 flow and bending' })).toBe('the flap channel');
+    expect(partName({ name: 'soft_tube-e2 flow and bending' })).toBe('the soft tube');
+    expect(partName({ name: 'flap flow and bending' })).toBe('the flap');
+    expect(partName({ name: '' })).toBe('the part');
+  });
+
+  it('leads its takeaway with the check the person named, their question, over a default one using more of its limit', () => {
+    const at = { ref: null, at: [0, 0, 0] };
+    const checks = [
+      { kind: 'stress', label: 'Strength', value: 0.0267, limit: 3, unit: 'MPa', ratio: 0.0089, close_at: 0.5, margin: 2, status: 'passes', where: at },
+      { kind: 'displacement', label: 'Bore swell', value: 0.0925, limit: 0.2, unit: 'mm', ratio: 0.4623, close_at: 0.9, status: 'passes', where: at },
+      { kind: 'pressure_drop', label: 'Flow resistance', value: 5471, limit: 10000, unit: 'Pa', ratio: 0.5471, close_at: 0.9, status: 'passes', where: at },
+    ];
+    const view = { checks: [{ kind: 'stress' }, { kind: 'displacement', limit_mm: 0.2, label: 'Bore swell' }, { kind: 'pressure_drop', limit_Pa: 10000 }] };
+    const plain = (text: string) => text.replace(/[\u00a0\u202f]/g, ' ');
+    expect(plain(feaVerdict(fsiResult({}, {}, { checks, view })).caption)).toBe('Laminar · Moves 0.0925 mm, limit 0.2 mm');
+    // The rows in the same order: the named check first, then the rest by how much of their limit they use.
+    expect(feaVerdict(fsiResult({}, {}, { checks, view })).rows.map((row: { label: string }) => row.label))
+      .toEqual(['Bore swell', 'Flow resistance', 'Strength']);
+    // Unnamed, the check using the most of its limit leads, as ever; and a worse check still leads a named one.
+    expect(plain(feaVerdict(fsiResult({}, {}, { checks })).caption)).toBe('Laminar · Drop 5471 Pa, limit 10000 Pa');
+    const failing = checks.map((check) => (check.kind === 'pressure_drop' ? { ...check, value: 12000, ratio: 1.2, status: 'fails' } : check));
+    expect(plain(feaVerdict(fsiResult({}, {}, { checks: failing, view })).caption)).toBe('Laminar · Drop 12000 Pa, limit 10000 Pa');
   });
 });

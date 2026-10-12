@@ -146,12 +146,15 @@ function readFindings(raw) {
 const text = (value) => (typeof value === "string" ? value : "");
 const faceRefs = (raw) => (Array.isArray(raw) ? raw.filter((ref) => typeof ref === "string" && ref) : []);
 const finiteOrNull = (value) => (Number.isFinite(value) ? Number(value) : null);
+// A material as the table's names read: cadgen writes it tidied ("Soft silicone"); a file older than that, its first
+// letter capitalised ("soft silicone" reads "Soft silicone").
+const materialName = (value) => { const name = text(value).trim(); return name ? `${name[0].toUpperCase()}${name.slice(1)}` : ""; };
 
 /** An assembly's parts in `_PART` order (a malformed entry keeps its place, empty); [] for a single part. */
 function readParts(raw) {
   if (!Array.isArray(raw)) return [];
   return raw.map((part) => ({
-    ref: text(part?.ref), name: text(part?.name), material: text(part?.material), yieldMPa: finiteOrNull(part?.yield_MPa),
+    ref: text(part?.ref), name: text(part?.name), material: materialName(part?.material), yieldMPa: finiteOrNull(part?.yield_MPa),
     peakMPa: finiteOrNull(part?.peak_MPa), safetyFactor: finiteOrNull(part?.safety_factor), maxDisplacementMm: finiteOrNull(part?.max_displacement_mm),
   }));
 }
@@ -181,6 +184,8 @@ function readView(raw) {
     controls: Array.isArray(raw.controls) ? raw.controls.filter((control) => control && typeof control === "object") : null,
     presets: Array.isArray(raw.presets) ? raw.presets.filter((preset) => preset && typeof preset.label === "string" && preset.label.trim()) : [],
     show: raw.show && typeof raw.show === "object" ? raw.show : {},
+    // The checks the person named, by their own labels ("Bore swell"): the study's question, which the takeaway follows.
+    named: Array.isArray(raw.checks) ? raw.checks.filter((check) => typeof check?.label === "string" && check.label.trim()).map((check) => check.label) : [],
   };
 }
 
@@ -227,6 +232,8 @@ function readChecks(raw, kinds) {
       ...(check.scaling === "none" ? { scaling: "none" } : {}),
       // A field's peak out in the air (electrostatic, no faces named), above what the colours on the parts show.
       ...(check.where?.in === "air" ? { inAir: { near: text(check.where.near) } } : {}),
+      // A heat stress judged a little away from a singular clamped edge: the edge's own peak, which grows with the mesh.
+      ...(Number.isFinite(check.edge_peak) && check.edge_peak > 0 ? { edgePeak: Number(check.edge_peak) } : {}),
     }));
 }
 
@@ -250,7 +257,32 @@ function readAnalysis(raw) {
     ...(readMach(own.mach) ? { mach: readMach(own.mach) } : {}),
     ...(readUnsettled(own.unsettled) ? { unsettled: readUnsettled(own.unsettled) } : {}),
     ...(readWalls(own.acoustic) ? { walls: readWalls(own.acoustic) } : {}),
+    ...(readResonances(own.modes) ? { resonances: readResonances(own.modes) } : {}),
+    ...(readForces(own.forces) ? { forces: readForces(own.forces) } : {}),
   };
+}
+
+/**
+ * A magnetic result's force on each part as the file states it (`analysis.forces`: each `part`, its
+ * `force_N` vector and what makes it, `by`: "J x B" on a coil, "Maxwell stress" on a magnetic part):
+ * `[{ part, vector, by }]`. null for none.
+ */
+function readForces(raw) {
+  const forces = (Array.isArray(raw) ? raw : []).filter((entry) => entry && Array.isArray(entry.force_N) && entry.force_N.length === 3
+    && entry.force_N.every(Number.isFinite))
+    .map((entry) => ({ part: text(entry.part), vector: entry.force_N.map(Number), by: text(entry.by) }));
+  return forces.length ? forces : null;
+}
+
+/**
+ * A piezo resonance's modes as the file states them (`analysis.modes`: each `mode`, `resonance_Hz`,
+ * `antiresonance_Hz`, `k_eff`): `[{ mode, resonanceHz, antiresonanceHz, kEff }]`. null for none.
+ */
+function readResonances(raw) {
+  const modes = (Array.isArray(raw) ? raw : []).filter((entry) => entry && Number.isInteger(entry.mode) && Number.isFinite(entry.resonance_Hz)
+    && Number.isFinite(entry.antiresonance_Hz) && Number.isFinite(entry.k_eff))
+    .map((entry) => ({ mode: entry.mode, resonanceHz: Number(entry.resonance_Hz), antiresonanceHz: Number(entry.antiresonance_Hz), kEff: Number(entry.k_eff) }));
+  return modes.length ? modes : null;
 }
 
 /**
@@ -523,7 +555,7 @@ function readLaminae(raw) {
 function readStudy(raw) {
   if (!raw || typeof raw !== "object") return null;
   const material = raw.material && typeof raw.material === "object"
-    ? { name: text(raw.material.name), yieldMPa: finiteOrNull(raw.material.yield_MPa) } : null;
+    ? { name: materialName(raw.material.name), yieldMPa: finiteOrNull(raw.material.yield_MPa) } : null;
   const mesh = raw.mesh && typeof raw.mesh === "object"
     ? { sizeMm: finiteOrNull(raw.mesh.size_mm), refinedFromMm: finiteOrNull(raw.mesh.refined_from_mm) } : null;
   return {
@@ -1421,24 +1453,42 @@ export function feaVerdict(result, loadScale = 1) {
     if (!checks.length || unloaded) {
       return stress.max > 0 && !unloaded ? null : { status: "none", title: "No stress", caption: "Check the load reaches the part", rows: [] };
     }
-  } else if (!checks.length) return null;
+  }
+  // What the analysis reports with no limit to judge it by (a piezo resonance's modes): rows of their own, after
+  // any checks; with no checks, its own headline and takeaway, in no tone.
+  const facts = typeof analysis.facts === "function" ? analysis.facts(result) : null;
+  if (!checks.length) {
+    if (!facts) return null;
+    const { lead, tail } = captionFrame(result, analysis);
+    return { status: "none", title: facts.title, caption: `${lead}${facts.caption}${tail}`, rows: facts.rows };
+  }
   const noun = nounOf(result);
   const weakest = result.parts[weakestPartIndex(result)] || null;
   const weakestName = result.weakestPart ? spaced(result.weakestPart) : weakest?.name ? spaced(weakest.name) : "";
+  // The checks the person named in the study's view ("Bore swell": their question) come first among those as bad, in
+  // their order; then the most of its limit used.
+  const named = new Set(result.view?.named || []);
+  const ownRank = (check) => (named.has(check.label) ? 0 : 1);
   const judged = checks.map((check, index) => ({ ...checkAt(result, check, k), index }))
-    .sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status] || b.use - a.use || a.index - b.index);
+    .sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status] || ownRank(a) - ownRank(b)
+      || (ownRank(a) === 0 ? a.index - b.index : b.use - a.use || a.index - b.index));
   const [worst] = judged;
   const failing = judged.filter((check) => check.status === "fails").length;
-  const title = judged.length === 1 ? checkTitle(worst, worst.status)
+  // A load path that stopped short of the full load (`collapsed`) judges each check at the last load it carried, so
+  // checks that all hold there do not make it pass: its headline says it stopped, in the warning tone.
+  const stoppedShort = result.collapsed === true && !failing;
+  const title = stoppedShort ? "Stops short of the load" : judged.length === 1 ? checkTitle(worst, worst.status)
     : failing ? failedTitle(failing, judged.length) : worst.status === "close" ? "Close to the limit" : "Passes all checks";
   // The load the weakest check takes, over the checks that scale with the load.
   const times = judged.filter((check) => check.times !== null).map((check) => check.times);
   const { lead, tail } = captionFrame(result, analysis);
-  // An analysis may say the takeaway itself (a collapse: "Collapses at about 70 % of the load"), else the worst check's.
+  // An analysis may say the takeaway itself (a collapse: "Collapses at about 70 % of the load"), else the first check's:
+  // the worst, and of those as bad, the first the person named ("Bore swell"), their study's question.
   const own = typeof analysis.caption === "function" ? analysis.caption(result) : "";
+  const first = worst;
   return {
-    status: TONE_OF[worst.status], title,
-    caption: `${lead}${own || checkCaption(worst, { times: worst.times !== null ? Math.min(...times) : null, noun })}${tail}`,
+    status: stoppedShort ? TONE_OF.close : TONE_OF[worst.status], title,
+    caption: `${lead}${own || checkCaption(first, { times: first.times !== null ? Math.min(...times) : null, noun })}${tail}`,
     rows: judged.map((check) => {
       const part = check.kind === "stress" ? (check.part ? spaced(check.part) : weakestName) : "";
       const label = kindLabel(check, analysis.checkLabels);
@@ -1446,7 +1496,7 @@ export function feaVerdict(result, loadScale = 1) {
       const hint = typeof analysis.checkHint === "function" ? analysis.checkHint(result, check) : "";
       return { id: `check:${check.index}`, kind: check.kind, status: TONE_OF[check.status], label, part, line: kindLine(check, { bare: true, noun }),
         ...(hint ? { hint } : {}), use: check.use, margin: check.margin, choice: checkChoice(result, check, part, label) };
-    }),
+    }).concat(facts ? facts.rows : []),
   };
 }
 

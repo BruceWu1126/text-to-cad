@@ -3,7 +3,10 @@
 Isotropic, linear, room temperature. Name one in the study's `material`, or
 give the numbers yourself. These are textbook values for a first pass; a
 study that matters uses the supplier's datasheet through the object form
-(`{"name": "...", "E_MPa": ..., "nu": ..., "yield_MPa": ...}`).
+(`{"name": "...", "E_MPa": ..., "nu": ..., "yield_MPa": ...}`). An object named by a table name or
+alias extends that entry and is called by its name ("Steel (structural, generic)"); one of its own is
+called by its name tidied: its first letter capitalised ("soft silicone" is "Soft silicone") and a
+slug's words spaced, an alloy code in capitals ("copper-c110" is "Copper C110").
 
 | name (and aliases) | E (MPa) | ν | yield (MPa) | density (t/mm³) | notes |
 | --- | --- | --- | --- | --- | --- |

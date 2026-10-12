@@ -279,6 +279,9 @@ class NonlinearAnalysis:
     #: Its solids are the same in every direction: study.parse_study refuses an orthotropic material (contact, bolt
     #: and creep inherit this).
     isotropic_only: ClassVar[bool] = True
+    #: A load path that stops short is the part collapsing: every check fails. Contact (and bolt) stop where the
+    #: contact cannot be followed, which says nothing of the part, so their checks judge their own numbers.
+    collapse_fails: ClassVar[bool] = True
     limits: ClassVar[tuple[str, ...]] = LIMITS
     study_keys: ClassVar[frozenset[str]] = frozenset({"fixtures", "loads", "steps"})
     material_needs: ClassVar[frozenset[str]] = frozenset()
@@ -628,8 +631,11 @@ class NonlinearAnalysis:
         # Not linear in the load: the check holds at this load only, so the verdict says its own sentence, no load multiple.
         judged["scaling"] = "none"
         if result.scalars["collapsed"]:
-            # It does not carry the load: whatever the numbers at the last load it carried, the check fails.
-            judged["status"] = "fails"
+            # A part that collapses does not carry the load: whatever the numbers at the last load it carried, the
+            # check fails. A contact path that could not be followed further (`collapse_fails` False) is no such
+            # verdict on the part: each check says its own number there, and the stop leads the caption.
+            if self.collapse_fails:
+                judged["status"] = "fails"
             judged["collapsed_at_percent"] = round(result.scalars["factor"] * 100.0, 4)
         return judged
 

@@ -25,7 +25,9 @@ from typing import Any, ClassVar
 
 from cadgen._internal.fea.analyses import kinds
 from cadgen._internal.fea.analyses.base import AnalysisResult, FieldSpec, SolveContext
-from cadgen._internal.fea.analyses.static import StaticAnalysis, StaticInputs, colour_range, solved_record, solved_part_record
+from cadgen._internal.fea.analyses.static import (
+    StaticAnalysis, StaticInputs, colour_range, floored, solved_record, solved_part_record,
+)
 from cadgen._internal.fea.analyses.thermal import HEAT_KEYS, RADIATION_KEY, ThermalAnalysis, heat_echo
 from cadgen._internal.fea.study import VIEW_DRIVES, parse_fixtures, parse_loads
 
@@ -139,11 +141,10 @@ class ThermalStressAnalysis(StaticAnalysis):
 
     # -- judging and findings ------------------------------------------------------------------------
 
-    def singular_edge(self, result: AnalysisResult) -> dict | None:
-        """The finding for a peak on a clamped face whose colours stop below it (:func:`colour_range` capped), else None.
-
-        A face held fast while heat makes the part grow is a singular edge in heat stress: its peak grows every time
-        the mesh is refined, so the number at the edge is the mesh's, and the stress is read a little away from it."""
+    def clamped_edge(self, result: AnalysisResult) -> tuple | None:
+        """``(solved, cap, quantile)`` where the peak sits on a clamped face and the colours stop below it
+        (:func:`colour_range` capped): the weakest part's record, the stress the colours stop at and its quantile.
+        None otherwise."""
         import numpy as np
 
         solved = self.weakest(result)
@@ -152,16 +153,50 @@ class ThermalStressAnalysis(StaticAnalysis):
         ranged = colour_range(np.asarray(result.fields["von_mises"], dtype=float), solved.peak_MPa)
         if len(ranged) < 3:
             return None
-        cap, peak = ranged[1], solved.peak_MPa
+        return solved, ranged[1], ranged[2]["quantile"]
+
+    def read_away(self, result: AnalysisResult) -> tuple | None:
+        """``(solved, peak)`` where the peak is a clamped edge's singularity: the weakest part's record with its peak
+        replaced by the stress a little away from the edge (where the colours stop), which the strength check and the
+        safety factor judge, and the singular peak itself. None where the peak is not such an edge's."""
+        import dataclasses
+
+        edge = self.clamped_edge(result)
+        if edge is None:
+            return None
+        solved, cap, _ = edge
+        return dataclasses.replace(solved, peak_MPa=cap, peak_gauss_MPa=min(solved.peak_gauss_MPa, cap)), solved.peak_MPa
+
+    def judge(self, check: dict, index: int, ctx: SolveContext, result: AnalysisResult, inputs: ThermalStressInputs) -> dict:
+        """Static's, but where the peak is a clamped edge's singularity (:meth:`singular_edge`), strength is judged on
+        the stress a little away from the edge, the colour bar's top, and the check keeps the singular peak beside it."""
+        from cadgen._internal.fea import checks
+
+        away = self.read_away(result) if check["kind"] == "stress" else None
+        if away is None:
+            return super().judge(check, index, ctx, result, inputs)
+        solved, peak = away
+        return {**checks.stress_check(solved, label=check.get("label")), "edge_peak": round(peak, 4)}
+
+    def singular_edge(self, result: AnalysisResult) -> dict | None:
+        """The finding for a peak on a clamped face whose colours stop below it (:func:`colour_range` capped), else None.
+
+        A face held fast while heat makes the part grow is a singular edge in heat stress: its peak grows every time
+        the mesh is refined, so the number at the edge is the mesh's, and the stress is read a little away from it."""
+        edge = self.clamped_edge(result)
+        if edge is None:
+            return None
+        solved, cap, quantile = edge
+        peak = solved.peak_MPa
         coarser = solved.coarser_peak_MPa
         rose = f" (it already rose from {mpa(coarser)} to {mpa(peak)} MPa on a finer mesh)" if coarser and peak > coarser else ""
         return {
             "check": "fea", "severity": "warning", "type": "singular_clamped_edge",
             "summary": f"The peak stress ({mpa(peak)} MPa) sits on the clamped edge, where a part held fast while heat "
-                       f"makes it grow has a singularity: it grows every time the mesh is refined{rose}, so read the "
-                       f"stress a little away from the edge, where the colour bar stops at {mpa(cap)} MPa",
-            "description": f"colours stop at the {round(ranged[2]['quantile'] * 100)}th percentile of the stress, {mpa(cap)} MPa; "
-                           f"nodal peak {mpa(peak)} MPa at the fixed face",
+                       f"makes it grow has a singularity: it grows every time the mesh is refined{rose}, so strength is "
+                       f"judged a little away from the edge, where the colour bar stops at {mpa(cap)} MPa",
+            "description": f"colours stop at the {round(quantile * 100)}th percentile of the stress, {mpa(cap)} MPa, which "
+                           f"the strength check and the safety factor judge; nodal peak {mpa(peak)} MPa at the fixed face",
             "items": [{"text": "the peak stress", "ref": solved.peak_face, "at": list(solved.peak_at)}],
         }
 
@@ -197,6 +232,14 @@ class ThermalStressAnalysis(StaticAnalysis):
         summary = super().summary(result, inputs, check_results)
         temperature = result.fields["temperature"]
         checks = summary.pop("checks")
+        away = self.read_away(result)
+        if away is not None:
+            # The safety factor is the strength check's: the stress a little away from the singular clamped edge.
+            from cadgen._internal.fea import checks as judged
+
+            solved, peak = away
+            summary["safety_factor"] = floored(judged.safety_factor(solved))
+            summary["judged_away_from_edge_MPa"] = round(solved.peak_MPa, 4)
         summary.update({
             "max_temperature_C": round(float(temperature.max()), 4),
             "min_temperature_C": round(float(temperature.min()), 4),
@@ -220,9 +263,11 @@ class ThermalStressAnalysis(StaticAnalysis):
 
     def human_lines(self, summary: dict) -> list[str]:
         factor = summary.get("safety_factor")
+        away = summary.get("judged_away_from_edge_MPa")
         lines = [
             f"max von Mises {summary['max_von_mises_MPa']:g} MPa at {summary['max_von_mises_at_mm']} mm "
-            f"(yield {summary['yield_MPa']:g} MPa" + (f", safety factor {factor:g})" if factor is not None else ")"),
+            + (f"on the clamped edge (singular); judged {away:g} MPa a little away from it " if away is not None else "")
+            + f"(yield {summary['yield_MPa']:g} MPa" + (f", safety factor {factor:g})" if factor is not None else ")"),
             f"max displacement {summary['max_displacement_mm']:g} mm at {summary['max_displacement_at_mm']} mm",
             f"temperatures {summary['min_temperature_C']:g} to {summary['max_temperature_C']:g} °C, "
             f"stress-free at {summary['reference_C']:g} °C",

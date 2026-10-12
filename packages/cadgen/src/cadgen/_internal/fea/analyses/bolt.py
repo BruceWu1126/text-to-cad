@@ -47,7 +47,7 @@ from cadgen._internal.fea.analyses import kinds
 from cadgen._internal.fea.analyses.base import AnalysisResult, Series, SeriesFrame, SolveContext
 from cadgen._internal.fea.analyses.contact import (
     LIMITS as CONTACT_LIMITS, MAX_FRICTION, ContactAnalysis, ContactInputs, ContactPair, parse_rigid_planes, parse_steps, contact_words,
-    mark_unsettled, path_deadline, stop_words, unsettled_extras, unsettled_sentence, unsettled_steps,
+    mark_stopped, mark_unsettled, path_deadline, stop_words, unsettled_extras, unsettled_sentence, unsettled_steps,
 )
 from cadgen._internal.fea.analyses.nonlinear import load_label, part_materials, pick_frames
 from cadgen._internal.fea.bolt_ops import DEFAULT_GRADE, DEFAULT_NUT_FACTOR, PROOF_MPa, SIZES, BoltSize, bolt_size
@@ -782,10 +782,7 @@ class BoltAnalysis(ContactAnalysis):
                 judged["opens_at_percent"] = round(joint["opens_at_percent"], 4)
         judged["at"] = self._at(result)
         judged["scaling"] = "none"  # preload, contact and friction: not linear in the load
-        if scalars["collapsed"]:
-            judged["status"] = "fails"
-            judged["collapsed_at_percent"] = round(scalars["factor"] * 100.0, 4)
-        return mark_unsettled(judged, scalars)
+        return mark_unsettled(mark_stopped(judged, scalars), scalars)
 
     def findings(self, ctx: SolveContext, result: AnalysisResult, inputs: BoltInputs,
                  check_results: list[dict], *, assembly: bool) -> list[dict]:
@@ -908,7 +905,9 @@ class BoltAnalysis(ContactAnalysis):
             opens = joint["opens_at_percent"]
             lines.append(f"{joint['name']}: {'open' if joint['open'] else 'clamped'} with {joint['clamp_N']:g} N of "
                          f"{joint['preload_clamp_N']:g} N" + (f", opens at about {opens:.3g} % of this load" if opens is not None else "")
-                         + f"; sideways {joint['shear_N']:g} N, friction holds {joint['friction_holds_N']:g} N")
+                         + f"; sideways {joint['shear_N']:g} N, "
+                         + (f"reaching the {joint['friction_holds_N']:g} N friction holds, so it slips" if joint["slips"]
+                            else f"under the {joint['friction_holds_N']:g} N friction holds"))
         lines.append(f"preload in {summary['preload_steps']} steps, then {summary['steps']} "
                      f"{'adaptive ' if summary['adaptive'] else ''}load steps ({summary['newton_iterations']} Newton iterations, "
                      f"{summary['contact_updates']} contact updates)")

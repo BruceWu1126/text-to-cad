@@ -214,6 +214,14 @@ def path_deadline(ctx) -> float:
     return float(getattr(budget, "seconds", 0.0) or 600.0)
 
 
+def mark_stopped(judged: dict, scalars: dict) -> dict:
+    """A check of a load path that stopped short of the full load says where it stopped and is judged on its own
+    number at the last load carried: the stop leads the caption, so a bolt under its proof load still holds."""
+    if scalars["collapsed"]:
+        judged["collapsed_at_percent"] = round(scalars["factor"] * 100.0, 4)
+    return judged
+
+
 def mark_unsettled(judged: dict, scalars: dict) -> dict:
     """A check of a result with an unsettled step fails, saying at what share of the load (the first)."""
     unsettled = scalars.get("unsettled") or []
@@ -236,6 +244,7 @@ class ContactAnalysis(NonlinearAnalysis):
     tier: ClassVar[int] = 3
     word: ClassVar[str] = "Contact"
     estimate_only: ClassVar[bool] = False
+    collapse_fails: ClassVar[bool] = False
     limits: ClassVar[tuple[str, ...]] = LIMITS
     study_keys: ClassVar[frozenset[str]] = frozenset({"fixtures", "loads", "steps", "rigid_planes"})
     material_needs: ClassVar[frozenset[str]] = frozenset()
@@ -659,10 +668,7 @@ class ContactAnalysis(NonlinearAnalysis):
             judged["faces"] = list(peak.faces)
         judged["at"] = self._at(result)
         judged["scaling"] = "none"  # contact opens, closes and slides: not linear in the load
-        if result.scalars["collapsed"]:
-            judged["status"] = "fails"
-            judged["collapsed_at_percent"] = round(result.scalars["factor"] * 100.0, 4)
-        return mark_unsettled(judged, result.scalars)
+        return mark_unsettled(mark_stopped(judged, result.scalars), result.scalars)
 
     def findings(self, ctx: SolveContext, result: AnalysisResult, inputs: ContactInputs,
                  check_results: list[dict], *, assembly: bool) -> list[dict]:

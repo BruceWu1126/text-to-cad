@@ -567,6 +567,11 @@ class PiezoAnalysis:
         result.timings = {**timings, **result.timings, "piezo_s": time.perf_counter() - started}
         result.scalars["solve"] = inputs.solve
         result.scalars["analysis_extras"] = {"solve": inputs.solve}
+        if inputs.solve == "resonance":
+            # Each mode's resonance, anti-resonance and coupling, for the viewer's Study (no limit: what it is, not a check).
+            result.scalars["analysis_extras"]["modes"] = [
+                {"mode": m["mode"], "resonance_Hz": round(m["resonance_Hz"], 4), "antiresonance_Hz": round(m["antiresonance_Hz"], 4),
+                 "k_eff": round(m["k_eff"], 6)} for m in result.scalars["modes"]]
         result.scalars["poling"] = self._poling(ctx)
         inputs.resolved["poling"] = result.scalars["poling"]
         if planes:

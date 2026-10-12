@@ -168,4 +168,19 @@ describe('electromagnetic', () => {
     expect(coilRows(ac)[0].children.map((row: { label: string }) => row.label)).toEqual(['Coil 2 A at 50 kHz', 'Field 10 mT at 50 kHz']);
     expect(feaVerdict(ac).caption.startsWith('AC · ')).toBe(true);
   });
+
+  it('says the force on each part, with no limit: rows after its checks, its verdict with none', () => {
+    const forces = [{ part: 'coil', force_N: [0.000126, 0.0000257, 0.419763], by: 'J x B' },
+      { part: 'plunger', force_N: [-0.0000514, 0.00200567, -0.424379], by: 'Maxwell stress' }];
+    const analysis = { type: 'electromagnetic', tier: 3, word: 'Magnetic / electric', estimate: false, limits: [], noun: 'this current',
+      reference_C: null, warnings: [], mode: 'magnetostatic', forces };
+    const stress = { kind: 'stress', label: 'Plunger strength', value: 0.0053, limit: 250, unit: 'MPa', ratio: 2.1e-5, close_at: 0.5,
+      margin: 2, status: 'passes', where: { ref: '#o1.2.f3', at: [0, 0, 48] }, part: 'plunger', scaling: 'quadratic' };
+    const checked = feaVerdict(electricResult({ analysis, checks: [stress] }));
+    expect(checked.rows.map((row: { label: string; line: string }) => [row.label, row.line])).toEqual([
+      ['Plunger strength', checked.rows[0].line], ['Force on the coil', '0.42 N up, the current in the field'],
+      ['Force on the plunger', '0.424 N down, its magnetic pull']]);
+    const alone = feaVerdict(electricResult({ analysis, checks: [] }));
+    expect(alone).toMatchObject({ status: 'none', title: 'Pulls the plunger with 0.424 N', caption: 'Static · 0.424 N down on the plunger' });
+  });
 });

@@ -140,19 +140,24 @@ function StudyRow({ row, depth, chosen, collapsed, toggle, onChoose, contents })
  * rows it opens with shut (every part but the weakest). Which rows are open is the panel's own, kept
  * while it is mounted (closed or not).
  */
-function StudyTreePanel({ id, title, blocks, startsCollapsed, fit, hidden, chosen, onChoose, contents }) {
+function StudyTreePanel({ id, title, blocks, foot = NONE, startsCollapsed, fit, hidden, chosen, onChoose, contents }) {
   const [collapsed, setCollapsed] = useState(() => new Set(startsCollapsed));
   const toggle = (rowId) => setCollapsed((current) => {
     const next = new Set(current);
     if (!next.delete(rowId)) next.add(rowId);
     return next;
   });
-  return <ToolPanel id={id} title={title} label={title} actions={<ToolPanelClose />} fit={fit} resizable fitContent closable collapsible={false} hidden={hidden}>
-    {blocks.map((block, index) => (block.rows
-      ? <ul key={index} className="flex flex-col px-1 pb-1 text-tiny" aria-label={title}>
-        {block.rows.map((row) => <StudyRow key={row.id} row={row} depth={0} {...{ chosen, collapsed, toggle, onChoose, contents }} />)}
-      </ul>
-      : <div key={index} className={index ? "pt-1" : undefined}>{block.element}</div>))}
+  const draw = (list) => list.map((block, index) => (block.rows
+    ? <ul key={index} className="flex flex-col px-1 pb-1 text-tiny" aria-label={title}>
+      {block.rows.map((row) => <StudyRow key={row.id} row={row} depth={0} {...{ chosen, collapsed, toggle, onChoose, contents }} />)}
+    </ul>
+    : <div key={index} className={index ? "pt-1" : undefined}>{block.element}</div>));
+  // What you see (and Details after it) at the panel's foot, which never scrolls: when the stack is short and the
+  // panel gives way, the verdict and the setup scroll above it and the controls stay in view.
+  const footer = foot.length ? <div className="shrink-0 border-t border-foreground/10 pt-1" data-study-foot="">{draw(foot)}</div> : null;
+  return <ToolPanel id={id} title={title} label={title} actions={<ToolPanelClose />} fit={fit} resizable fitContent closable collapsible={false} hidden={hidden}
+    footer={footer}>
+    {draw(blocks)}
   </ToolPanel>;
 }
 
@@ -175,6 +180,18 @@ function studyBlocks(sections, { verdict, setup, controls, details }) {
     else blocks.push({ rows });
   }
   return blocks;
+}
+
+/**
+ * Study's sections split where the panel's foot begins: What you see, when it comes after everything but
+ * Details, goes to the foot with Details after it (`foot`), so it stays in view while the rest (`body`)
+ * scrolls; a view that puts it earlier keeps every section in the body, in its order.
+ */
+function footSections(sections) {
+  const at = sections.indexOf("controls");
+  const after = at < 0 ? [] : sections.slice(at + 1);
+  if (at < 0 || after.some((name) => name !== "details")) return { body: sections, foot: NONE };
+  return { body: sections.slice(0, at), foot: sections.slice(at) };
 }
 
 // What the view shows and how: the study view's controls, under the setup and above Details by default.
@@ -216,11 +233,14 @@ export default function FeaStudyPanel({ active, parts = NONE, openPart = -1, set
     [RESULT_ROW.id]: <FeaResultControls {...result} />,
   };
   const controls = result.controls.length || result.presets.length ? [RESULT_ROW] : NONE;
+  const studied = { verdict: verdict ? <FeaVerdict verdict={verdict} chosen={chosen} onChoose={onChoose} /> : null, setup, controls, details };
+  // With no controls there is nothing to keep in view: every section stays in the body.
+  const split = controls.length ? footSections(sections) : { body: sections, foot: NONE };
   const panels = [
     parts.length ? { id: FEA_PARTS_PANEL_ID, title: "Parts", blocks: [{ rows: parts }], startsCollapsed: parts.filter((_, index) => index !== openPart).map((row) => row.id), fit: "tree" } : null,
     // Under Parts, Study gives way only after Parts has, as a details panel does, so Result stays in view.
     { id: FEA_STUDY_PANEL_ID, title: "Study", startsCollapsed: collapsedIds([...setup, ...details]), fit: parts.length ? "details" : "tree",
-      blocks: studyBlocks(sections, { verdict: verdict ? <FeaVerdict verdict={verdict} chosen={chosen} onChoose={onChoose} /> : null, setup, controls, details }) },
+      blocks: studyBlocks(split.body, studied), foot: controls.length ? studyBlocks(split.foot, studied) : NONE },
   ].filter(Boolean);
   return <>
     {/* Each headed with its X; Select, pressed while it is the tool, opens the closed ones again. */}

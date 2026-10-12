@@ -470,6 +470,9 @@ function labelEnds(pose, arrow) {
 // The enclosure's outline around a sound result's air: faint, so the air's colours stay what is read.
 const WALL_OPACITY = 0.45;
 
+// The kinds whose label always stands outside the model's outline: their markers run through it or cover it.
+const OUTSIDE_ONLY = new Set(["body_load", "base_excitation", "convection", "heat"]);
+
 // A label stands this share of the model's diagonal clear of its box once it is moved out of it.
 const LABEL_CLEARANCE = 0.03;
 
@@ -581,8 +584,10 @@ function wavePoints(THREE, from, to, amplitude, periods, x = 0) {
  * `object3D` (a group), `update(positions)` to stand them on the positions on screen,
  * `style({ colours, visible: { loads, fixtures }, chosen })` (`chosen(site)` true for a marker of the
  * entry chosen in Study), `labels(loadScale, visible)`: each entry's text and where it goes (`at`,
- * the middle of its markers' free ends, off the part, and `face`, of the ends where it acts, in the
- * mesh's space; `kind` and `group` say whose), `kinds` (the kinds it draws) and `dispose()`.
+ * past the free end of the marker nearest the middle of its markers' free ends, out of the model's box
+ * along it, and `face`, where it runs from, in the mesh's space, with the box's `corners`; and for a kind
+ * whose marker stands on its face, `end`: that marker's own outer end and where it acts, to sit at when
+ * in sight; `kind` and `group` say whose), `kinds` (the kinds it draws) and `dispose()`.
  *
  * Loads and fixtures are the six instanced meshes they always were (shafts, heads and cones, each
  * with its ghost); every other kind adds its own after them, only where it has markers.
@@ -860,9 +865,14 @@ export function createFeaMarkers(THREE, result) {
         const away = (end) => length(sub(end.free, middle));
         const chosen = ends.reduce((best, end) => (away(end) < away(best) ? end : best));
         // Never on or inside the part: on along its line out of the model's box (`labelOutside`); FeaLoadLabels
-        // then takes it past the outline on screen (`pastOutline`, from the box's `corners`).
+        // then takes it past the outline on screen (`pastOutline`, from the box's `corners`). A kind whose marker
+        // stands on a face it acts on (a load, a fixed temperature, an electrode, a flow's opening, a drop) also
+        // offers its own arrow's outer end (`end`), which FeaLoadLabels uses only where that end is in sight and
+        // the label drawn there is clear of the model; one drawn all over or through the part (a body load, a
+        // shaker, the air, heat) always stands outside.
         const { at, face } = labelOutside(chosen, box, placed.diagonal);
-        return { kind, group: index, text, at, face, ...(box ? { corners: boxCorners(box) } : {}) };
+        const end = OUTSIDE_ONLY.has(kind) ? {} : { end: { at: chosen.free, face: chosen.anchor } };
+        return { kind, group: index, text, at, face, ...end, ...(box ? { corners: boxCorners(box) } : {}) };
       }).filter(Boolean);
     },
     dispose() {

@@ -19,6 +19,7 @@ vi.mock('../../../dist/renderers/glb/useGlbScene.js', () => ({
 // The renderer's own clips (its analysis's routine) are kept to be played by hand.
 vi.mock('../../../dist/renderers/glb/useGlbAnimation.js', () => ({ useGlbAnimation: (_document: any, _render: any, own: any) => { loaded.own = own; return loaded.animation; } }));
 import GlbRenderer from '../../../dist/renderers/glb/GlbRenderer.js';
+import FeaVerdict from '../../../dist/renderers/glb/FeaVerdict.js';
 import { routineScale } from '../../../dist/renderers/glb/feaResult.js';
 import { writeFileView } from '../../../dist/renderers/kit/shell/fileView.js';
 import { createAnimationClock } from '../../../dist/renderers/kit/tools/playbar/animationClock.js';
@@ -245,6 +246,24 @@ it('Study reads in plain words: where it is held, what pushes it and what it is 
   expect(screen.getByRole('button', { name: 'Expand Details' }).getAttribute('aria-expanded')).toBe('false');
   act(() => { fireEvent.click(screen.getByRole('button', { name: 'Expand Details' })); });
   expect(plain().slice(-2)).toEqual(['Details', 'Mesh1.9 mm elements']);
+  // What you see and Details sit at the panel's foot, which never scrolls: a short stack scrolls the verdict and
+  // the setup above them, and the controls stay in view.
+  const foot = study.querySelector('[data-study-foot]')!;
+  expect(rowTexts(foot)[0]).toBe('What you see');
+  expect(foot.closest('[data-tool-panel-body]')).toBeNull();
+  expect(foot.querySelector('[role="combobox"][aria-label="Result field"]')).toBeTruthy();
+  expect(rowTexts(study.querySelector('[data-tool-panel-body]') as HTMLElement)).toEqual(['Held at', 'Face 1', 'Pushed', '2500 N down', 'Face 2', 'Made of', '6061-T6']);
+  // While the body has more under its fold, its foot fades: a row the fold cuts never reads as the last.
+  const body = study.querySelector('[data-tool-panel-body]') as HTMLElement;
+  const scrolled = (top: number) => {
+    Object.defineProperties(body, { scrollHeight: { value: 500, configurable: true }, clientHeight: { value: 200, configurable: true },
+      scrollTop: { value: top, configurable: true } });
+    act(() => { fireEvent.scroll(body); });
+  };
+  scrolled(0);
+  expect(study.querySelector('[data-tool-panel-more]')).toBeTruthy();
+  scrolled(300);
+  expect(study.querySelector('[data-tool-panel-more]')).toBeNull();
   // It opens at its content's height, so Result's slider is not under its foot; a person's own cap still holds.
   expect(study.style.maxHeight).toBe('');
   cleanup();
@@ -519,15 +538,15 @@ it('each slider\'s thumb stands at its control\'s value, and the slider takes th
 });
 
 it('at twice the load, the bar and the deformation are twice the solved ones, what each part holds is half, and a part flips to yields', () => {
-  const parts = [{ ref: '#o1.1', name: 'post', material: 'steel', safety_factor: 5.83 }, { ref: '#o1.2', name: 'base', material: 'steel', safety_factor: 1.5 }];
+  const parts = [{ ref: '#o1.1', name: 'post', material: 'Steel', safety_factor: 5.83 }, { ref: '#o1.2', name: 'base', material: 'Steel', safety_factor: 1.5 }];
   const { container, mesh } = mount({ ...VIEWED, view: { controls: [VIEWED.view.controls[0], VIEWED.view.controls[5]], show: { parts: true } }, parts });
   const colours = colourBytes(mesh);
   const tip = mesh.geometry.getAttribute('position').getZ(2);
   const partDetails = () => Array.from(screen.getByRole('region', { name: 'Parts' }).querySelectorAll('[data-study-detail]')).map(detail => detail.textContent!.replace(/\u00a0/g, ' '));
-  expect(partDetails()).toEqual(['steel · holds 5.8×', 'steel · holds 1.5×']);
+  expect(partDetails()).toEqual(['Steel · holds 5.8×', 'Steel · holds 1.5×']);
   setValue('Rider weight slider value', '2');
   expect(container.querySelector('[data-fea-max]')!.textContent).toBe('94.6 MPa');
-  expect(partDetails()).toEqual(['steel · holds 2.9×', 'steel · yields']);
+  expect(partDetails()).toEqual(['Steel · holds 2.9×', 'Steel · yields']);
   // The colours keep their place on a bar that now reads twice as high; the displacement is drawn twice as far.
   expect(colourBytes(mesh)).toEqual(colours);
   // The file baked in 10x of vertex 2's 0.002 m: 12x at the solved load, 24x at twice it.
@@ -987,4 +1006,13 @@ it('a harmonic result vibrates its frame through its phase, the real part then t
   expect(zOf(mesh, 2)).toBeCloseTo(-0.02 - 0.001 * swing, 6);
   release();
   expect(zOf(mesh, 2)).toBeCloseTo(0, 6);
+});
+
+it('draws a fact with no limit (a piezo resonance\'s mode) as a row with no bar, in no tone', () => {
+  const fact = { id: 'fact:mode:1', kind: 'resonance', status: 'none', label: 'Mode 1', part: '', line: '6.5 kHz, anti-resonance 7.1 kHz, k_eff 0.40',
+    use: null, margin: null, choice: { id: 'fact:mode:1', summary: 'Mode 1: resonance 6.5 kHz', frame: 0 } };
+  render(<FeaVerdict verdict={{ status: 'none', title: 'First resonance 6.5 kHz', caption: 'Linear · Anti-resonance 7.1 kHz', rows: [fact] }} />);
+  expect(screen.getByText('First resonance 6.5 kHz')).toBeTruthy();
+  expect(document.querySelector('[data-fea-check="none"] [data-fea-check-line]')!.textContent).toBe(fact.line);
+  expect(screen.queryByRole('meter')).toBeNull();
 });

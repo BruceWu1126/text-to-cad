@@ -366,6 +366,12 @@ class ThicknessMode(unittest.TestCase):
         self.assertEqual(frames[1]["attributes"], {"mode_shape": "_MODE_SHAPE_F1", "von_mises": "_VON_MISES_F1",
                                                    "potential": "_POTENTIAL_F1"})
         self.assertTrue(frames[0]["label"].startswith("Mode 1 · 1.9"))
+        # Each mode's resonance, anti-resonance and coupling, for Study's verdict, as the summary has them.
+        raw = self.result.glb.read_bytes()
+        (length,) = struct.unpack("<I", raw[12:16])
+        modes = json.loads(raw[20:20 + length])["meshes"][0]["extras"]["analysis"]["modes"]
+        self.assertEqual(modes, [{key: mode[key] for key in ("mode", "resonance_Hz", "antiresonance_Hz", "k_eff")}
+                                 for mode in self.result.summary["modes"]])
 
     def test_a_sweep_draws_omega_C_at_low_frequency_and_by_modes_agrees(self):
         capacitance = self.static.summary["capacitance_F"]

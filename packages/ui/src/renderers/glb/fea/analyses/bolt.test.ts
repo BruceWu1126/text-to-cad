@@ -116,7 +116,10 @@ describe('bolt', () => {
       .toEqual(['Joint slips', 'Close to slipping', 'Joint holds by friction']);
     expect(plain(checkLine(check('bolt_load', 6057, 11658)))).toBe('Bolt 6.1 kN, limit 12 kN');
     expect(plain(checkLine(check('joint_separation', 1943, 5000)))).toBe('Lost 1.9 kN, of 5 kN clamp');
-    expect(plain(checkLine(check('joint_slip', 950, 1000)))).toBe('Sideways 950 N, friction holds 1 kN');
+    // Which way it goes: at a slip the two are equal, so the words say it.
+    expect(plain(checkLine(check('joint_slip', 950, 1000)))).toBe('Sideways 950 N, friction holds up to 1 kN');
+    expect(plain(checkLine({ ...check('joint_slip', 1957.46, 1957.02), status: 'fails' }))).toBe('Sideways 2 kN, at the friction limit: slips');
+    expect(plain(checkLine({ ...check('joint_slip', 3000, 2000), status: 'fails' }))).toBe('Sideways 3 kN, friction holds only 2 kN');
     expect([forceWords(800), forceWords(5000), forceWords(12500)]).toEqual(['800 N', '5 kN', '13 kN']);
   });
 
@@ -142,5 +145,22 @@ describe('bolt', () => {
       analysis: { type: 'bolt', tier: 3, word: 'Bolted joint', limits: [LIMIT], warnings: [] } });
     expect(plain(feaVerdict(unsaid).caption)).toBe('Stops at about 46 % of the load · Lite · Peak 300 MPa, limit 250 MPa');
     expect(plain(feaVerdict(boltedResult({ checks })).caption)).toBe('Lite · Peak 300 MPa, limit 250 MPa');
+  });
+
+  it('judges each check of a stopped path on its own number, and never says a stop passes', () => {
+    const at = { ref: null, at: [0, 0, 0] };
+    const stopped = { collapsed: true, load_percent: 46.25,
+      analysis: { type: 'bolt', tier: 3, word: 'Bolted joint', limits: [LIMIT], warnings: ['Stops at about 46 % of the load'] } };
+    const bolt = { kind: 'bolt_load', label: 'Bolt load', value: 12193, limit: 21228, unit: 'N', ratio: 0.574, close_at: 0.9, status: 'passes',
+      where: at, scaling: 'none', collapsed_at_percent: 46.25 };
+    const slip = { kind: 'joint_slip', label: 'Joint slip', value: 1957.46, limit: 1957.02, unit: 'N', ratio: 1.0002, close_at: 0.9,
+      status: 'fails', where: at, scaling: 'none', collapsed_at_percent: 46.25 };
+    const verdict = feaVerdict(boltedResult({ ...stopped, checks: [bolt, slip] }));
+    expect(verdict.title).toBe('Fails 1 of 2 checks');
+    expect(verdict.rows.map((row: { status: string }) => row.status)).toEqual(['weak', 'strong']);
+    expect(plain(verdict.caption)).toMatch(/^Stops at about 46 % of the load · Lite · /);
+    // Every check holds at the last load carried: still not a pass, since the full load was never reached.
+    const held = feaVerdict(boltedResult({ ...stopped, checks: [bolt] }));
+    expect(held).toMatchObject({ title: 'Stops short of the load', status: 'close' });
   });
 });

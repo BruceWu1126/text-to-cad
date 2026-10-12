@@ -158,6 +158,30 @@ describe('loads and fixtures on the model', () => {
     expect(label.face[1]).toBeCloseTo(0.5, 6);
     markers.dispose();
   });
+
+  it('offers a load its own arrow\'s outer end, but stands it outside the model\'s box wherever that end is inside it', () => {
+    // Down along the +X face: its arrows' tails lie inside the model's box. The label's place is out of the box,
+    // along the arrow; the arrow's own end is offered beside it, for the view to use only where it is in sight.
+    const result = cube({ fixtures: [], loads: [{ type: 'force', faces: ['#o1.f1'], vector_N: [0, 0, -300] }] });
+    const markers = createFeaMarkers(THREE, result);
+    markers.update(positionsOf(result));
+    const [label] = markers.labels();
+    const inside = (p: number[]) => p.every((v) => Math.abs(v) <= 0.5 + 1e-9);
+    expect(inside(label.end.at)).toBe(true);
+    expect(inside(label.at)).toBe(false);
+    expect(label.corners).toHaveLength(8);
+    const own = markers.poses().filter((pose: any) => pose.kind === 'load');
+    const mine = own.find((pose: any) => pose.tail.every((value: number, k: number) => Math.abs(value - label.end.at[k]) < 1e-9));
+    near(label.end.face, mine.tip);
+    markers.dispose();
+    // The air (and a body load, a shaker, heat) cover the part: always outside, no end offered.
+    const heated = cube(HEATED, [0, 0, 0], { analysis: { type: 'thermal' } });
+    const thermal = createFeaMarkers(THREE, heated);
+    thermal.update(positionsOf(heated));
+    const byKind = Object.fromEntries(thermal.labels().map((entry: any) => [entry.kind, entry]));
+    expect([byKind.convection.end, byKind.heat.end, byKind.temperature.end === undefined]).toEqual([undefined, undefined, false]);
+    thermal.dispose();
+  });
 });
 
 // Track V1: every other kind of marker, from one table, each in the ink or the muted grey.

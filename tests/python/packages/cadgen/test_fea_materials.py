@@ -103,6 +103,19 @@ class MaterialObject(unittest.TestCase):
         self.assertEqual((steel.yield_strength, steel.uts, steel.conductivity), (355.0, 470.0, 45.0))
         self.assertEqual(steel.specific_heat, MATERIALS["steel"].specific_heat)
 
+    def test_an_object_is_called_by_a_tidy_name(self):
+        """A table entry's display name where the name is one or an alias; an object's own name tidied, never left raw."""
+        own = {"E_MPa": 10, "nu": 0.45, "yield_MPa": 8}
+        names = {
+            "steel": "Steel (structural, generic)", "Mild_Steel": "Steel (structural, generic)", "stainless": "Stainless steel 304",
+            "copper-c110": "Copper C110", "soft silicone": "Soft silicone", "rubber reed": "Rubber reed",
+            "rubber 50A (estimate)": "Rubber 50A (estimate)", "Viton": "Viton",
+        }
+        for written, shown in names.items():
+            with self.subTest(written=written):
+                self.assertEqual(material_from_spec({"name": written, **own}).name, shown)
+        self.assertEqual(material_from_spec(own).name, "Custom")
+
     def test_a_polymer_gains_fatigue_data_under_either_name(self):
         for keys in (("endurance_MPa", "endurance_cycles"), ("fatigue_strength_MPa", "fatigue_cycles")):
             with self.subTest(keys=keys):
@@ -168,8 +181,8 @@ class Requires(unittest.TestCase):
             with self.assertRaises(ValueError) as caught:
                 parse_study(document)
             message = str(caught.exception)
-            self.assertIn("static studies need the yield strength, and rubber has none", message)
-            self.assertIn('add yield_MPa to the material object, like {"name": "rubber", "yield_MPa": 10}', message)
+            self.assertIn("static studies need the yield strength, and Rubber has none", message)
+            self.assertIn('add yield_MPa to the material object, like {"name": "Rubber", "yield_MPa": 10}', message)
         # Judged by displacement alone it needs no yield strength; given one, the stress check is judged.
         moved = parse_study({**study, "view": {"checks": [{"kind": "displacement", "limit_mm": 1}]}})
         self.assertIsNone(moved.material.yield_strength)

@@ -53,7 +53,10 @@ keys in [study-file.md](study-file.md#common-keys):
   A step (of the preload or the load) whose contact forces do not settle is cut, and at the
   smallest step kept and marked as `contact` does ([contact.md](contact.md)): "Contact did not
   settle at 80% of the preload: ... not reliable", every check failing.
-- Checks, each judged at the last load solved (the default is the first three):
+- Checks, each judged at the last load solved (the default is the first three). A path that stops
+  short of the full load ("Stops at about 46 % of the load", the contact could not be followed
+  further) judges each check on its own number there: the stop leads the takeaway, and a joint whose
+  checks all hold where it stopped is headed "Stops short of the load", never a pass.
   - `bolt_load`: each bolt's force after loading against `limit_N`, else its proof load. Fails past
     it, close past 0.9 of it. "Bolt overloaded" / "Close to the limit" / "Bolt holds", row line
     "Bolt 6.1 kN, limit 12 kN".
@@ -63,7 +66,9 @@ keys in [study-file.md](study-file.md#common-keys):
     row line "Lost 1.9 kN, of 5 kN clamp".
   - `joint_slip`: the sideways force the clamped faces carry against what friction holds there
     (friction times the clamp). Fails past it, close past 0.9. "Joint slips" / "Close to slipping" /
-    "Joint holds by friction", row line "Sideways 950 N, friction holds 1 kN".
+    "Joint holds by friction", row line "Sideways 950 N, friction holds up to 1 kN" (slipping, the two
+    are equal: "Sideways 2 kN, at the friction limit: slips"; past it "Sideways 3 kN, friction holds only 2 kN"; the CLI: "sideways 1957 N, reaching the
+    1957 N friction holds, so it slips").
   - `stress`, `displacement`, `contact_pressure`: as `contact` (a stress check needs every
     material's yield).
 - No load control: a preloaded joint does not answer in proportion to the load. View drives: `frame`

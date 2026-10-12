@@ -418,6 +418,8 @@ class Magnetostatics(unittest.TestCase):
         self.assertEqual(self.extras["fields"][0]["units"], "mT")
         self.assertGreater(max(row[0] for row in self.attributes["_MAGNETIC_FIELD"]), 0.0)
         self.assertEqual(self.extras["analysis"]["mode"], "magnetostatic")
+        # The force on each part, for Study, as the summary has it.
+        self.assertEqual(self.extras["analysis"]["forces"], self.coil.summary["forces"])
 
     def test_two_coils_pull_together_by_the_biot_savart_force(self):
         import numpy as np

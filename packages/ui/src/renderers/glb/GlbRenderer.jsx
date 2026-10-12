@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { MousePointer2 } from "lucide-react";
 import { clamp, finiteOr } from "@text-to-cad/core/common/numbers.js";
@@ -25,6 +25,7 @@ import {
 } from "./feaResult.js";
 import { createFeaMarkers, markerGateText } from "./feaMarkers.js";
 import { feaDrawnBounds } from "./feaBounds.js";
+import { framingInset } from "./feaChrome.js";
 import { createFeaClip } from "./feaClip.js";
 import { feaAnalysis } from "./fea/analyses/index.js";
 import { activeFrameIndex, deformationAt, fieldAtFrame, framesBetween, sigmaScale, snapFrame } from "./fea/series.js";
@@ -103,6 +104,22 @@ function markerChosen(faces, site) {
   if (!faces.faces.includes(site.ref)) return false;
   if (own) return ofRow;
   return kind !== "joint";
+}
+
+/**
+ * A result's camera frames the model right of Select's panels (Study, an assembly's Parts) and above the
+ * colour bar: the viewport reads what they cover whenever it fits the camera (`runtime.framingInset`, read at
+ * the fit, so a panel closed or widened since counts as it is then), and Preview, which puts the panels away,
+ * takes the whole width. Installed before the shell's first fit of the result: a child's layout effect runs first.
+ */
+function FeaFraming({ runtimeRef, hostRef }) {
+  useLayoutEffect(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime) return undefined;
+    runtime.framingInset = () => framingInset(hostRef.current);
+    return () => { if (runtime.framingInset) delete runtime.framingInset; };
+  }, [runtimeRef, hostRef]);
+  return null;
 }
 
 function GlbSurface({ view, data }) {
@@ -416,6 +433,7 @@ function GlbSurface({ view, data }) {
   </> : null;
 
   const overlay = fea ? (viewport) => <>
+    <FeaFraming runtimeRef={viewport.runtimeRef} hostRef={viewport.hostRef} />
     <PointerPick viewport={viewport} scene={pickScene} enabled={selectActive} onPick={pick} />
     <FeaColourBar result={fea} field={activeField} loadScale={loadScale} sigma={sigma} raised={Boolean(animation) && shell.previewing} />
     {markers ? <FeaLoadLabels runtimeRef={viewport.runtimeRef} hostRef={viewport.hostRef} mesh={fea.mesh} labels={loadLabels}

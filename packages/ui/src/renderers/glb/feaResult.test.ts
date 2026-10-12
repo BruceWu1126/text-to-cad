@@ -482,11 +482,11 @@ describe('the study\'s view', () => {
 describe('a load other than the solved one', () => {
   it('halves what each part holds at twice the load, and a part can flip to yields', () => {
     const { mesh, root } = resultMesh();
-    mesh.userData.parts = [{ ref: '#o1.1', name: 'post', material: 'steel', safety_factor: 3.1 }, { ref: '#o1.2', name: 'base', material: 'steel', safety_factor: 1.5 }];
+    mesh.userData.parts = [{ ref: '#o1.1', name: 'post', material: 'Steel', safety_factor: 3.1 }, { ref: '#o1.2', name: 'base', material: 'Steel', safety_factor: 1.5 }];
     const result = readFeaResult(root)!;
-    expect(partRows(result).map((row: any) => row.detail)).toEqual(['steel · holds 3.1×', 'steel · holds 1.5×']);
-    expect(partRows(result, 2).map((row: any) => row.detail)).toEqual(['steel · holds 1.5×', 'steel · yields']);
-    expect(partRows(result, 0).map((row: any) => row.detail)).toEqual(['steel', 'steel']);
+    expect(partRows(result).map((row: any) => row.detail)).toEqual(['Steel · holds 3.1×', 'Steel · holds 1.5×']);
+    expect(partRows(result, 2).map((row: any) => row.detail)).toEqual(['Steel · holds 1.5×', 'Steel · yields']);
+    expect(partRows(result, 0).map((row: any) => row.detail)).toEqual(['Steel', 'Steel']);
   });
 
   it('draws the values at the load over the range at that load, and the values alone climbing while a ramp plays', () => {
@@ -592,6 +592,14 @@ describe('the verdict', () => {
     const four = [part('a', 'Steel'), part('b', 'Copper'), part('c', 'PZT-5A'), part('d', 'Brass')];
     expect(made(four)).toMatchObject({ label: '4 materials', hint: 'Steel: 1 part, Copper: 1 part, PZT-5A: 1 part, Brass: 1 part' });
     expect(made([...four, part('e', 'Steel'), part('f', 'Steel'), part('g', 'Steel')])).toMatchObject({ label: 'Mostly Steel' });
+  });
+
+  it('reads a material named in lower case, as an older file wrote it, with its first letter capitalised', () => {
+    const study = { ...STUDY, material: { ...STUDY.material, name: 'soft silicone' } };
+    const material = (studyRows(studyResult({ study, faces: [] }).result) as any[]).find((row) => row.id === 'material');
+    expect(material.children[0].label).toBe('Soft silicone');
+    const part = { ...ASSEMBLY.parts[0], material: 'copper-c110' };
+    expect(studyResult({ ...ASSEMBLY, parts: [part] }).result.parts[0].material).toBe('Copper-c110');
   });
 });
 
@@ -773,6 +781,16 @@ describe('another analysis', () => {
     // Without that finding, or in another analysis, the row is as ever.
     expect(feaVerdict(analysisResult({ analysis: { type: 'thermal_stress' }, checks: [weak] }))!.rows[0]).not.toHaveProperty('hint');
     expect(feaVerdict(analysisResult({ checks: [weak], findings: [singular] }))!.rows[0]).not.toHaveProperty('hint');
+  });
+
+  it('heat stress: a check cadgen judged away from the singular clamped edge says so, and the headline follows that stress', () => {
+    const singular = { check: 'fea', severity: 'warning', type: 'singular_clamped_edge', summary: 'The peak stress sits on the clamped edge', items: [] };
+    const away = { ...STRESS_CHECK, value: 503, limit: 250, ratio: 2.012, status: 'fails', edge_peak: 1882 };
+    const verdict = feaVerdict(analysisResult({ analysis: { type: 'thermal_stress', noun: 'this heat' }, checks: [away], findings: [singular],
+      safety_factor: 0.497 }))!;
+    expect(verdict.caption).toBe('OK only to 0.4× this heat');
+    expect(plain(verdict.rows[0].line)).toBe('503 MPa, limit 250 MPa');
+    expect(verdict.rows[0].hint).toBe('Judged a little away from the clamped edge: the peak there, 1882 MPa, is a singularity that grows as the mesh is refined');
   });
 });
 

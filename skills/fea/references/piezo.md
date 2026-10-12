@@ -126,6 +126,9 @@ Its resonance and anti-resonance: the same with `"solve": "resonance"` (no sweep
 - Resonance: a mode series (pick it in the viewer's Mode control), each frame its shape, stress and
   voltage with the shape scaled to 1 mm. Summary `modes`: each `resonance_Hz`, `antiresonance_Hz`,
   `k_eff` and `k_eff2`; `blocked_capacitance_F` (1 V on the first driven electrode, the part held still).
+  The GLB's `analysis.modes` carries each mode's `resonance_Hz`, `antiresonance_Hz` and `k_eff`, which
+  Study shows as rows with no limit ("Mode 1", "6.5 kHz, anti-resonance 7.1 kHz, k_eff 0.40"); with no
+  checks they are its verdict, "First resonance 6.5 kHz".
 - Harmonic: a frequency series (the viewer's scrubber), each frame its displacement, stress (peak
   over the cycle) and voltage amplitude. Curves in the sidecar: `max_displacement_mm`,
   `current_mA` and `admittance_S` (the driven electrode: the one with the largest voltage), and
