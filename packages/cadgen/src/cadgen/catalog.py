@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import sys
 import threading
-from collections.abc import Sequence
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
@@ -134,16 +133,6 @@ def source_from_path(
         return _read_python_source(resolved, function=function, allow_dxf_only=True)
     if resolved.suffix.lower() in STEP_SUFFIXES:
         return _read_step_source(resolved)
-    return None
-
-
-def find_source_by_source_ref(source_ref: str, root: Path | None = None) -> CadSource | None:
-    normalized = normalize_source_ref(source_ref)
-    if not normalized:
-        return None
-    for source in iter_cad_sources(root):
-        if source.source_ref == normalized:
-            return source
     return None
 
 
@@ -562,49 +551,6 @@ def _looks_like_generator_script(script_path: Path) -> bool:
     except OSError:
         return False
     return any(marker in source_bytes for marker in GENERATOR_NAME_MARKERS)
-
-
-def normalize_step_color(
-    raw_value: object,
-    *,
-    base_path: Path,
-    field_name: str,
-) -> tuple[float, float, float, float] | None:
-    if raw_value is None:
-        return None
-    if isinstance(raw_value, str):
-        value = raw_value.strip()
-        if value.startswith("#"):
-            value = value[1:]
-        if len(value) not in {6, 8}:
-            raise CadSourceError(f"{_display_path(base_path)} {field_name} must be #RRGGBB or #RRGGBBAA")
-        try:
-            components = [int(value[index : index + 2], 16) / 255.0 for index in range(0, len(value), 2)]
-        except ValueError as exc:
-            raise CadSourceError(f"{_display_path(base_path)} {field_name} must be valid hex") from exc
-    elif (
-        isinstance(raw_value, Sequence)
-        and not isinstance(raw_value, (bytes, bytearray))
-        and len(raw_value) in {3, 4}
-    ):
-        components = []
-        for component in raw_value:
-            try:
-                number = float(component)
-            except (TypeError, ValueError) as exc:
-                raise CadSourceError(
-                    f"{_display_path(base_path)} {field_name} components must be numeric"
-                ) from exc
-            if not 0.0 <= number <= 1.0:
-                raise CadSourceError(
-                    f"{_display_path(base_path)} {field_name} components must be between 0 and 1"
-                )
-            components.append(number)
-    else:
-        raise CadSourceError(f"{_display_path(base_path)} {field_name} must be an RGB/RGBA array or hex string")
-    if len(components) == 3:
-        components.append(1.0)
-    return (float(components[0]), float(components[1]), float(components[2]), float(components[3]))
 
 
 def _source_label(source: CadSource) -> str:
