@@ -140,10 +140,10 @@ not create a photographic environment. Authored materials are read-only. Color
 overrides are presentation settings, not edits to the model or its material
 assignments.
 
-| Lighting quality | Screen error | Shadow map | Environment | Capture scale |
-| --- | --- | --- | --- | --- |
-| Preview | 1 px | 2048 px | 256 px | 1× |
-| Final | 0.25 px | 4096 px | 512 px | 2× |
+| Lighting quality | Shadow map | Environment | Capture scale |
+| --- | --- | --- | --- |
+| Preview | 2048 px | 256 px | 1× |
+| Final | 4096 px | 512 px | 2× |
 
 The interactive viewer retains one WebGL renderer, canvas and camera controls
 across every preset and settings edit. It uses shadow-compatible conventional

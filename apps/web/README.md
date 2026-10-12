@@ -143,8 +143,8 @@ detection only; it keeps serving.
 - **Verify a link by loading the page**, never by curling `/__cad/asset` —
   that route serves raw files; generated entries render through a
   different route, so probing it 404s whether or not anything is wrong.
-- **Warm work survives navigation.** The app retains one client across navigation, so its
-  bounded mesh-cache write queue survives file switches. The shared renderer
+- **Warm work survives navigation.** The app retains one client across navigation, so the
+  caches keyed to its resources stay valid across file switches. The shared renderer
   retains completed STEP working sets in a bounded CPU cache, so reopening a
   warm assembly does not reload each component. Origin and revision identities
   isolate reuse; changed files and evicted entries load normally.

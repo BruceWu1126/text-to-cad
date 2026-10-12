@@ -1,7 +1,7 @@
 # @text-to-cad/core
 
 The shared JavaScript half of cadgen: everything the distribution and its
-clients need to turn cached geometry into pixels, meshes, and motion.
+clients need to turn cached geometry into pixels and motion.
 Source builds to ordinary ESM and package-owned declarations in `dist/`.
 Apps and UI consume compiled exports; the snapshot bundler carries a
 self-contained output in the Python distribution. Consumers neither alias
@@ -149,8 +149,8 @@ src/
                    #   the surface look, the scene contract), urdf/ (a robot
                    #   payload's meshes loaded; the robot parts and scene
                    #   builder, played by common/articulation),
-                   #   drawing2d/ (a cadgen drawing payload -- a DXF's, or a
-                   #   STEP section's exact cut -> Canvas 2D, text by fillText:
+                   #   drawing2d/ (a cadgen drawing payload, a DXF's ->
+                   #   Canvas 2D, text by fillText:
                    #   fit/pan/zoom maths, batched Path2D, screen-width strokes),
                    #   glb/ (a GLB writer for test fixtures), cadRefs (grammar,
                    #   parity-tested against cad_ref_syntax.py)

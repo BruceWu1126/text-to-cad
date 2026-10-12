@@ -97,10 +97,7 @@ a placed copy of the proxy or lookup maps. The composer re-places a part's
 references only when its offsets move, and a composition that begins with the
 previous one extends that result instead of rebuilding it. The result is value
 for value the whole-runtime `composeSelectorRuntimes` result for the same
-components in the same order (`runtimeComposer.test.js`). An edge's chain
-endpoints are read lazily from the bundle's unplaced positions, placed and
-rounded as the placed proxy stores them; copies of a reference carry the
-accessor rather than reading it.
+components in the same order (`runtimeComposer.test.js`).
 
 ### Instancing and culling
 
@@ -108,8 +105,8 @@ Repeated compatible opaque surfaces share instanced draws and retain
 occurrence identity; mirrors, transparency and deformation use explicit
 fallback paths.
 
-Detail publications retain compatible surface instance sets and their original
-occurrence slots. Only changed membership or render passes replace those sets;
+Later publications of the same model retain compatible surface instance sets and
+their original occurrence slots. Only changed membership or render passes replace those sets;
 selected, hidden and deformed occurrences keep inactive slots until eligible
 again. Transform passes reuse each mesh's matrix while observing mutable
 source transforms and effect matrices on every update.

@@ -87,12 +87,13 @@ until explicitly supplied. Surface opacity multiplies authored source opacity;
 color modes change presentation without mutating authored materials.
 
 Clip keeps coordinates below its plane by default (`invert: false`); Flip keeps
-coordinates above it. Its offset remains measured from the bounds minimum to
-maximum regardless of Flip. The neutral boundary is therefore offset 1 normally,
-or offset 0 when flipped. Interactive viewers and snapshots share this policy;
-orbiting the camera never changes the clipped half. Clip coordinates use original
-model bounds in both snapshot and interactive paths; posing or exploding the
-model cannot silently change the plane represented by a slider/input value. A
+coordinates above it. The plane stands at `at`, a coordinate on its axis in the
+model's millimetres, or without one at the middle of the model at rest; Flip never
+moves it. Interactive viewers and snapshots share this policy;
+orbiting the camera never changes the clipped half. The default plane and the
+Clip amount are measured against the model at rest in both snapshot and
+interactive paths; posing or exploding the model cannot silently change the
+plane represented by a slider/input value. A
 snapshot cuts and caps with the viewer's own sync (`syncRuntimeStepClipPlane`,
 its plane measured against `restBounds`) on a renderer with local clipping on.
 
@@ -505,8 +506,8 @@ positions or normals acquire writable attributes before deforming them;
 material refreshes leave component data unchanged. This keeps large assemblies
 from duplicating these buffers for display. Assemblies keep geometry in their
 component buffers; they allocate no combined copy of all positions, normals and
-indices. Rendering and section views visit the placed components directly, and
-the Viewer accepts that component geometry.
+indices. Rendering visits the placed components directly, and the Viewer
+accepts that component geometry.
 
 ### `common/renderModel.js`
 

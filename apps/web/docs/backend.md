@@ -3,8 +3,8 @@
 The browser host talks to `cadgen.viewer`, the HTTP service shipped in the
 `cadgen` Python distribution. Its source lives in
 `packages/cadgen/src/cadgen/viewer/`; this app owns the React host and its build.
-The wheel includes that build at `cadgen/_runtime/viewer`, alongside the Node
-and browser runtimes used by the CLI. Skills invoke the installed distribution.
+The wheel includes that build at `cadgen/_runtime/viewer`, alongside the browser
+runtime the CLI renders snapshots with. Skills invoke the installed distribution.
 
 The HTTP layer uses Python's standard library and requires Python 3.11 or newer.
 It imports the lightweight cadgen catalog and store helpers, but never imports

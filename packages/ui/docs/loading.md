@@ -43,9 +43,9 @@ carries the part's record, which the component then reads like a stored one;
 a part the store lacks altogether (a cleared or evicted store) is derived by one
 cadgen build-pool job for the request, the loading screen saying it is meshing
 parts meanwhile. Both are
-sized by the stored body before their decode is admitted; one above the
-concurrent decode cap runs alone only when the shared Viewer memory envelope
-can reserve its complete estimate.
+admitted by what their part's record says the stored body and its decode cost
+(`glb.byteLength + glb.decodedBytes`); one above the concurrent decode cap runs
+alone only when the shared Viewer memory envelope can reserve all of it.
 
 Preview draws the scene one quality tier up (`kit/viewport/renderProfile.js`: pixel
 ratio, shadow and environment maps) at the same meshes. The chrome does not report
