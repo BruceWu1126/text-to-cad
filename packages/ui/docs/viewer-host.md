@@ -187,7 +187,7 @@ CAD app's tunnel reads it a range at a time), and the loader sees it whole.
 
 Context actions use `PromptContextPort.deliver(context)`. Desktop
 inserts into a compatible draft; web prepares clipboard representations. Ordinary
-explicit copy/paste controls use the separate `ClipboardPort`. Delivery never
+explicit copy controls use the separate `ClipboardPort`. Delivery never
 submits a prompt. `send(context)`, present only where the host has a chat to post
 to, posts the context as the person's message now (`sent`); absent, nothing can
 send one.

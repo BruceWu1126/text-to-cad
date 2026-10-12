@@ -164,7 +164,7 @@ it('a clipboard destination has no snapshot in the navbar, and Draw copies its i
   const writeImage = vi.fn(async () => {}), deliver = vi.fn();
   const { navigation } = mount(testHost({
     promptContext: { getSnapshot: () => destination, subscribe: () => () => {}, deliver } as any,
-    clipboard: { writeText: async () => {}, readText: async () => '', writeImage },
+    clipboard: { writeText: async () => {}, writeImage },
   }));
   expect(navigation.mock.calls.flatMap(([actions]) => actions)).toEqual([]);
   fireEvent.click(screen.getByRole('button', { name: 'Draw' }));

@@ -89,7 +89,7 @@ async function openRobot() {
     },
     navigation: { openFile: noop },
     environment: { colorScheme: 'light' },
-    clipboard: { writeText: async () => {}, readText: async () => '', writeImage: async () => {} },
+    clipboard: { writeText: async () => {}, writeImage: async () => {} },
     promptContext: { getSnapshot: () => destination, subscribe: () => noop, deliver: async () => ({ status: 'added', partIds: [] }) },
   };
   // The tab's state, held as a host holds it.

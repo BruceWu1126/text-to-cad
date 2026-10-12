@@ -90,7 +90,7 @@ async function openDrawing(destinationKind = 'composer', notice: ReactNode = nul
     },
     navigation: { openFile: noop },
     environment: { colorScheme: 'light' },
-    clipboard: { writeText: async () => {}, readText: async () => '', writeImage: async () => {} },
+    clipboard: { writeText: async () => {}, writeImage: async () => {} },
     promptContext: {
       getSnapshot: () => destination, subscribe: () => noop,
       deliver: async (context: any) => {
