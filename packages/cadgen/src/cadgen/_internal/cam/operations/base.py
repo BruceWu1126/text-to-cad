@@ -1,7 +1,9 @@
 """The protocol every operation implements.
 
-An operation is what a job writes in ``"op"``: it reads its own keys (``parse``), turns them into moves
-(``plan``), says what is wrong with them (``checks``) and says its numbers in a line or two (``human_lines``).
+An operation is what a job writes in ``"op"``: it reads its own keys (``parse``), turns them into a toolpath
+(``plan``, given a :class:`~cadgen._internal.cam.operations.context.PlanContext`, returning a
+:class:`~cadgen._internal.cam.operations.context.Planned`: the toolpath, its numbers and its findings), says what is
+wrong with it (``checks``) and says its numbers in a line or two (``human_lines``, from ``Planned.stats``).
 The job parser reads the keys every operation shares (``job.COMMON_KEYS``) and checks the operation's
 ``machine_kinds``, ``tool_types`` and ``targets`` before handing the rest to ``parse``.
 
@@ -49,7 +51,7 @@ class Operation(Protocol):
     target_required: ClassVar[bool]           # False when it has a whole-part default (facing)
 
     def parse(self, raw: dict, ctx: ParseContext) -> Any: ...       # stdlib; ValueError names the field
-    def plan(self, params: Any, ctx: Any) -> list: ...              # the moves (toolpath.Move), in order
+    def plan(self, params: Any, ctx: Any) -> Any: ...               # context.Planned: toolpath, stats, findings
     def checks(self, params: Any, ctx: Any, moves: list) -> list[dict]: ...   # findings (``finding``)
     def human_lines(self, stats: dict) -> list[str]: ...
 

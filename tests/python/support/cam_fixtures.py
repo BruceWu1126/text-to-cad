@@ -466,3 +466,50 @@ def assert_backplot(case: unittest.TestCase, text: str, post: str, toolpaths, *,
                 case.assertLessEqual(abs(got.feed - expected.feed), feed_tol, label)
             case.assertAlmostEqual(got.dwell_s, expected.dwell_s, delta=1e-3, msg=label)
         case.assertTrue(all(move.kind == "rapid" for move in rest[len(want):]), f"{post}: only rapids after the cut")
+
+
+# --- Sweeping a toolpath -------------------------------------------------------------------------------
+# Points along a toolpath's moves, for the checks the operation suites make with geometry2d.intrusion.
+
+def path_points(toolpath, step: float = 0.5) -> list[tuple[float, float, float]]:
+    """Points along every move of ``toolpath`` (cycles expanded), no further apart than ``step`` mm, each move's
+    end included; arcs and helices along their curve."""
+    from cadgen._internal.cam.toolpath import arc_sweep, expand_cycle, walk
+
+    out = [tuple(toolpath.start)]
+    for start, move in walk(toolpath.moves, toolpath.start):
+        parts = expand_cycle(move, start) if move.kind == "cycle" else (move,)
+        for here, part in walk(parts, start):
+            if part.kind in ("arc_cw", "arc_ccw"):
+                cx, cy = part.center
+                radius = math.hypot(here[0] - cx, here[1] - cy)
+                a0 = math.atan2(here[1] - cy, here[0] - cx)
+                sweep = arc_sweep(here, part)
+                count = max(2, math.ceil(abs(sweep) * radius / step))
+                for k in range(1, count + 1):
+                    f = k / count
+                    out.append((cx + radius * math.cos(a0 + sweep * f), cy + radius * math.sin(a0 + sweep * f),
+                                here[2] + (part.xyz[2] - here[2]) * f))
+            else:
+                count = max(1, math.ceil(math.dist(here, part.xyz) / step))
+                out += [tuple(here[n] + (part.xyz[n] - here[n]) * k / count for n in range(3)) for k in range(1, count + 1)]
+    return out
+
+
+def swept_at(points, z: float, radius: float):
+    """The area a tool of ``radius`` sweeps at height ``z``: round each run of ``points`` that stays at ``z``."""
+    from shapely.geometry import LineString, Point
+    from shapely.ops import unary_union
+
+    runs, run = [], []
+    for point in points:
+        if abs(point[2] - z) < 1e-6:
+            run.append(point[:2])
+        else:
+            if run:
+                runs.append(run)
+            run = []
+    if run:
+        runs.append(run)
+    shapes = [LineString(r) if len(r) > 1 else Point(r[0]) for r in runs]
+    return unary_union([shape.buffer(radius, quad_segs=64) for shape in shapes])
