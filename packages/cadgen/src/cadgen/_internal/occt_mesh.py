@@ -286,10 +286,12 @@ def _tessellate(topods, face_map, ordinals: list[int], deflection: float, angle:
     """Give each face of ``ordinals`` the triangles ``face_fallback`` builds over its
     parameters, when they cover its own area to ``_FALLBACK_AREA_TOLERANCE``; a face
     left without keeps what OCCT gave it -- none, for a face it refuses, which the body
-    names. A face OCCT did mesh, off its surface or with a gap, takes the new triangles
-    only if the part's mesh has no more open edges with them than it had: the tessellator
-    splits its neighbours' triangles to meet them, and where a split fails the two part
-    (an airframe skin forced through it opened 884 edges), so it is undone."""
+    names. The faces OCCT refused go first. The faces it did mesh, off their surface or
+    with a gap, then take theirs together, and keep them only if the part's mesh has no
+    more open edges with them than it had: the tessellator splits its neighbours'
+    triangles to meet its own, and where a split fails the two part (an airframe skin
+    forced through it opened 884 edges), so every split they made is undone and they keep
+    OCCT's triangles. Either way the part is read twice, however many faces there are."""
     from cadgen._internal import face_fallback
     from OCP.BRep import BRep_Builder, BRep_Tool
     from OCP.BRepGProp import BRepGProp
@@ -297,20 +299,30 @@ def _tessellate(topods, face_map, ordinals: list[int], deflection: float, angle:
     from OCP.TopLoc import TopLoc_Location
     from OCP.TopoDS import TopoDS
 
-    for ordinal in ordinals:
-        face = TopoDS.Face_s(face_map.FindKey(ordinal))
+    def tessellated(face):
         exact = GProp_GProps()
         BRepGProp.SurfaceProperties_s(face, exact)
         area = exact.Mass()
-        previous = BRep_Tool.Triangulation_s(face, TopLoc_Location())
-        opened = _open_edges(_read_faces(topods, face_map)) if previous is not None else None
-        tessellated = face_fallback.tessellate_face(
+        return face_fallback.tessellate_face(
             topods, face, deflection, angle, lambda covered: abs(covered - area) <= _FALLBACK_AREA_TOLERANCE * area)
-        if tessellated is None:
-            continue
-        triangulation, undo = tessellated
-        BRep_Builder().UpdateFace(face, triangulation)
-        if opened is not None and _open_edges(_read_faces(topods, face_map)) > opened:
+
+    faces = [TopoDS.Face_s(face_map.FindKey(ordinal)) for ordinal in ordinals]
+    meshed = [(face, BRep_Tool.Triangulation_s(face, TopLoc_Location())) for face in faces]
+    for face, previous in meshed:
+        if previous is None and (result := tessellated(face)) is not None:
+            BRep_Builder().UpdateFace(face, result[0])
+    meshed = [(face, previous) for face, previous in meshed if previous is not None]
+    if not meshed:
+        return
+    opened = _open_edges(_read_faces(topods, face_map))
+    taken = []
+    for face, previous in meshed:
+        if (result := tessellated(face)) is not None:
+            BRep_Builder().UpdateFace(face, result[0])
+            taken.append((face, previous, result[1]))
+    if taken and _open_edges(_read_faces(topods, face_map)) > opened:
+        # Last split first: a later face may have split an earlier one's triangles.
+        for face, previous, undo in reversed(taken):
             undo()
             BRep_Builder().UpdateFace(face, previous)
 
