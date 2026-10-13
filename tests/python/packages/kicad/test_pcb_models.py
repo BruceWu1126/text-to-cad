@@ -161,23 +161,23 @@ class PcbModelsTest(unittest.TestCase):
         self.write("blinky.py", board_source(decorators="@pcb(gerber=True, bom=True, pos=True)"))
         built = self.run_script("blinky.py")
         self.assertEqual(built.returncode, 0, built.stderr)
-        gerbers = (self.folder / "build" / "blinky.gerbers.zip").read_bytes()
+        gerbers = (self.folder / "blinky.gerbers.zip").read_bytes()
         names = zipfile.ZipFile(io.BytesIO(gerbers)).namelist()
         self.assertIn("blinky-F_Cu.gtl", names)
         self.assertIn("blinky-PTH.drl", names)
-        placement = (self.folder / "build" / "blinky.pos.csv").read_text(encoding="utf-8").splitlines()
+        placement = (self.folder / "blinky.pos.csv").read_text(encoding="utf-8").splitlines()
         self.assertEqual(placement[0], "Designator,Val,Package,Mid X,Mid Y,Rotation,Layer")
         self.assertIn("R1,1k,R_0603_1608Metric,0.000000,5.000000,90.000000,top", placement)
-        self.assertIn('"1k","R1"', (self.folder / "build" / "blinky.bom.csv").read_text(encoding="utf-8"))
+        self.assertIn('"1k","R1"', (self.folder / "blinky.bom.csv").read_text(encoding="utf-8"))
         self.assertEqual(self.run_script("blinky.py", "--force").returncode, 0)
-        self.assertEqual((self.folder / "build" / "blinky.gerbers.zip").read_bytes(), gerbers)
+        self.assertEqual((self.folder / "blinky.gerbers.zip").read_bytes(), gerbers)
 
         self.write("blinky.py", board_source(decorators="@pcb(gerber=True)", route_led=False))
-        (self.folder / "build" / "blinky.gerbers.zip").unlink()
+        (self.folder / "blinky.gerbers.zip").unlink()
         draft = self.run_script("blinky.py")
         self.assertNotEqual(draft.returncode, 0)
         self.assertIn("write manufacturing files only for a finished board", draft.stderr)
-        self.assertFalse((self.folder / "build" / "blinky.gerbers.zip").exists())
+        self.assertFalse((self.folder / "blinky.gerbers.zip").exists())
 
     def test_a_board_with_a_3d_export_composes_into_an_enclosure(self) -> None:
         self.write("blinky.py", board_source(decorators="@step\n@pcb", imports="pcb, step"))
@@ -218,60 +218,6 @@ class PcbModelsTest(unittest.TestCase):
         )
         for library in ("Device.kicad_sym", "power.kicad_sym", "R_0603_1608Metric.kicad_mod"):
             self.assertIn(library, why.stdout, why.stdout)
-
-    def test_a_folder_is_checked_and_exported_as_its_one_project(self) -> None:
-        from cadgen import pcb
-
-        self.write("blinky.py", board_source())
-        self.assertEqual(self.run_script("blinky.py").returncode, 0)
-        self.assertTrue(pcb.validate(self.folder).ok)
-        exported = pcb.export(self.folder)
-        self.assertEqual(
-            sorted(entry.path.relative_to(self.folder).as_posix() for entry in exported.files),
-            ["build/blinky.bom.csv", "build/blinky.gerbers.zip", "build/blinky.pos.csv"],
-        )
-        self.assertEqual(
-            (self.folder / "build" / "blinky.gerbers.zip").read_bytes(),
-            pcb.export(self.folder / "blinky.kicad_pro").files[0].path.read_bytes(),
-        )
-
-        self.write("blinky.py", board_source(route_led=False))
-        self.assertEqual(self.run_script("blinky.py").returncode, 0)  # a draft
-        for entry in exported.files:
-            entry.path.unlink()
-        with self.assertRaisesRegex(RuntimeError, "is not finished"):
-            pcb.export(self.folder)
-        self.assertFalse(any((self.folder / "build").iterdir()))
-
-    def test_project_libraries_reach_kicad_through_the_projects_lib_tables(self) -> None:
-        import shutil
-
-        from cadgen import pcb
-        from cadgen.kicad.install import find_kicad
-
-        install = find_kicad()
-        parts = self.folder / "parts"
-        (parts / "parts.pretty").mkdir(parents=True)
-        shutil.copy2(install.symbol_dir / "Device.kicad_sym", parts / "parts.kicad_sym")
-        shutil.copy2(install.footprint_dir / "Resistor_SMD.pretty" / "R_0603_1608Metric.kicad_mod", parts / "parts.pretty")
-        source = board_source().replace(
-            'board = pcb.Board(outline=outline.sketch)', 'board = pcb.Board(outline=outline.sketch, libraries=["parts"])'
-        ).replace(
-            'board.part("Device:R", footprint="Resistor_SMD:R_0603_1608Metric"', 'board.part("parts:R", footprint="parts:R_0603_1608Metric"'
-        )
-        self.write("blinky.py", source)
-        built = self.run_script("blinky.py")
-        self.assertEqual(built.returncode, 0, built.stderr)
-        sym = (self.folder / "sym-lib-table").read_text(encoding="utf-8")
-        self.assertIn('(name "parts")(type "KiCad")(uri "${KIPRJMOD}/parts/parts.kicad_sym")', sym)
-        self.assertIn('(uri "${KIPRJMOD}/parts/parts.pretty")', (self.folder / "fp-lib-table").read_text(encoding="utf-8"))
-        checked = pcb.validate(self.folder / "blinky.kicad_pcb")
-        self.assertTrue(checked.ok, checked.issues)
-        self.assertFalse([issue for issue in checked.issues if "lib" in issue.code], checked.issues)
-
-        self.write("blinky.py", board_source())  # the board stops reading the project library
-        self.assertEqual(self.run_script("blinky.py").returncode, 0)
-        self.assertFalse((self.folder / "sym-lib-table").exists())
 
 
 if __name__ == "__main__":

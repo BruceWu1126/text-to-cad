@@ -45,7 +45,7 @@ REGULATOR = textwrap.dedent(
         vin, gnd = board.net("VIN", power_flag=True), board.net("GND", power_flag=True)
         vout = board.net("VOUT")
         u1 = board.part("Regulator_Linear:AMS1117-3.3", footprint="Package_TO_SOT_SMD:SOT-223-3_TabPin2")
-        c1 = board.part("Device:C", footprint="Capacitor_SMD:C_0603_1608Metric", value="10u", properties={{"LCSC": "C19702"}})
+        c1 = board.part("Device:C", footprint="Capacitor_SMD:C_0603_1608Metric", value="10u")
         board.connect(vin, u1["VI"], c1[1])
         board.connect(vout, u1["VO"])
         board.connect(gnd, u1["GND"], c1[2])
@@ -166,8 +166,7 @@ class PcbPlotAndValidateTest(unittest.TestCase):
         self.assertEqual(built.returncode, 0, built.stderr)
         payload = build_plot(project / "regulator.kicad_pcb")
         review = [finding for finding in payload["board"]["findings"] if finding["check"] == "review"]
-        self.assertEqual([finding["type"] for finding in review], ["decoupling_far", "part_unsourced"])
-        self.assertEqual(review[1]["summary"], "U1 has no LCSC or MPN to order it by")  # C1's LCSC reached the board
+        self.assertEqual([finding["type"] for finding in review], ["decoupling_far"])
         self.assertIn("aim for under 3 mm", review[0]["summary"])
         self.assertTrue(all(item["ref"] for item in review[0]["items"]))
         checked = pcb.validate(project / "regulator.kicad_pcb")

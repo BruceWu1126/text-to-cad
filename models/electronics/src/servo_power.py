@@ -47,7 +47,7 @@ def ldo(c, vin, vout, gnd):
 
 
 @step(out="../STEP/servo_power.step")
-@pcb(out="../PCB/servo_power/servo_power.kicad_pcb", gerber=True, bom=True, pos=True)
+@pcb(out="../PCB/servo_power.kicad_pcb", gerber=True, bom=True, pos=True)
 def servo_power():
     with bd.BuildSketch() as outline:
         bd.RectangleRounded(WIDTH, HEIGHT, CORNER)

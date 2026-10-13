@@ -36,7 +36,7 @@ from pathlib import Path
 
 __all__ = ["FAB_FORMATS", "FAB_SUFFIX", "MANUFACTURING", "export", "require_finished"]
 
-#: The export kinds, and the suffix of the file each writes (in the project's build/ by default).
+#: The export kinds, and the file each writes beside the board by default.
 FAB_SUFFIX = {"gerber": ".gerbers.zip", "bom": ".bom.csv", "pos": ".pos.csv"}
 FAB_FORMATS = tuple(FAB_SUFFIX)
 #: The kinds a board must be finished for.

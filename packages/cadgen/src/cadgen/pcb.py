@@ -2,9 +2,8 @@
 
 ``@pcb`` DECLARES a printed circuit board model (``@pcb(gerber=True, bom=True,
 pos=True)`` with its manufacturing files); ``pcb.Board`` is what its function
-builds and returns; ``pcb.validate(...)`` checks any KiCad project,
-``pcb.gerber``/``pcb.bom``/``pcb.pos`` write a saved board's manufacturing files,
-and ``pcb.export(...)`` writes all three into the project's ``build/`` folder.
+builds and returns; ``pcb.validate(...)`` checks any KiCad project, and
+``pcb.gerber``/``pcb.bom``/``pcb.pos`` write a saved board's manufacturing files.
 They are the same object -- this module is callable (see
 :mod:`cadgen._internal.format_namespace`) -- so ``from cadgen import pcb``
 gives a model script all three.
@@ -61,7 +60,6 @@ __all__ = [
     "SimulationError",
     "Testbench",
     "bom",
-    "export",
     "find_footprints",
     "find_symbols",
     "gerber",
@@ -91,8 +89,7 @@ def validate(path: Path, *, strict: bool = False, verbose: bool = False) -> Vali
     like any other error. Positions are millimetres from the board's
     drill/place origin, y up.
 
-    path: the project's .kicad_pcb, .kicad_sch or .kicad_pro, or a folder: its one
-        shallowest .kicad_pro (cadgen.kicad.project_find).
+    path: the project's .kicad_pcb, .kicad_sch or .kicad_pro.
     strict: treat warnings as blocking.
     verbose: narrate the target on stderr.
     """
@@ -102,13 +99,6 @@ def validate(path: Path, *, strict: bool = False, verbose: bool = False) -> Vali
     from cadgen.results import ValidationIssue
 
     target = resolved_target(path, label="pcb")
-    if target.is_dir():
-        from cadgen.kicad.project_find import canonical_project
-
-        try:
-            target = canonical_project(target)
-        except (FileNotFoundError, ValueError) as error:
-            return failed(target, str(error))
     if verbose:
         print(f"[pcb] validating {target}", file=sys.stderr)
     if target.suffix.lower() not in _SUFFIXES:
@@ -153,7 +143,7 @@ def gerber(board: Path, out: Path | None = None, *, verbose: bool = False) -> Fa
     connections or DRC errors.
 
     board: the .kicad_pcb to export.
-    out: destination file. Omitted, writes build/<name>.gerbers.zip in the project folder.
+    out: destination file. Omitted, writes the sibling <name>.gerbers.zip beside BOARD.
     verbose: narrate the target on stderr.
     """
     from cadgen._internal.fab_door import board_export
@@ -168,29 +158,12 @@ def bom(board: Path, out: Path | None = None, *, verbose: bool = False) -> FabEx
     marked do-not-populate are left out. What @pcb(bom=True) writes.
 
     board: the .kicad_pcb to export (its .kicad_sch beside it).
-    out: destination file. Omitted, writes build/<name>.bom.csv in the project folder.
+    out: destination file. Omitted, writes the sibling <name>.bom.csv beside BOARD.
     verbose: narrate the target on stderr.
     """
     from cadgen._internal.fab_door import board_export
 
     return board_export("bom", board, out, verbose=verbose)
-
-
-def export(project: Path, out: Path | None = None, *, verbose: bool = False) -> FabExportResult:
-    """Write a KiCad project's manufacturing files into its build/ folder: Gerbers and drills, BOM, placement.
-
-    The files @pcb(gerber=True, bom=True, pos=True) writes, for any finished
-    project -- one a @pcb model wrote or one a person drew in KiCad -- in one call,
-    as KiStack's export does: KiCad's ERC and DRC run first, and a project with
-    unrouted connections or an error gets none of them.
-
-    project: the project's .kicad_pcb or .kicad_pro, or a folder: its one shallowest .kicad_pro.
-    out: destination folder. Omitted, writes build/ in the project's folder.
-    verbose: narrate the target on stderr.
-    """
-    from cadgen._internal.fab_door import project_export
-
-    return project_export(project, out, verbose=verbose)
 
 
 def pos(board: Path, out: Path | None = None, *, verbose: bool = False) -> FabExportResult:
@@ -202,7 +175,7 @@ def pos(board: Path, out: Path | None = None, *, verbose: bool = False) -> FabEx
     connections or DRC errors.
 
     board: the .kicad_pcb to export.
-    out: destination file. Omitted, writes build/<name>.pos.csv in the project folder.
+    out: destination file. Omitted, writes the sibling <name>.pos.csv beside BOARD.
     verbose: narrate the target on stderr.
     """
     from cadgen._internal.fab_door import board_export

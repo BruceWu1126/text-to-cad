@@ -75,11 +75,10 @@ properties={"Sim.Enable": "0"}
 - Without `Sim.Pins`, pins are taken in number order as the model's: diode A K, BJT C B E,
   MOSFET D G S, a subcircuit in its port order. An order the symbol's own pin names
   contradict (a GSD MOSFET read as DGS) is refused, with the `Sim.Pins` to add.
-- `Sim.Library` paths start at the folder of the script that made the testbench, or the
-  board. Keep model files in `models/` beside the scripts: a board's build writes the same
-  file's path from its project folder (`../../src/models/x.lib` for a board in
-  `PCB/<board>/`), which is where KiCad starts. An absolute path and
-  `${KICAD10_SYMBOL_DIR}/Simulation_SPICE.sp` are written as they are. The file is read
+- `Sim.Library` paths start at the folder of the script that made the testbench. Keep model
+  files in `models/` beside the scripts: KiCad resolves the same relative path from its
+  project folder, which is the board script's folder unless `@pcb(out=...)` moves it. An
+  absolute path and `${KICAD10_SYMBOL_DIR}/Simulation_SPICE.sp` work too. The file is read
   when the testbench is simulated.
 - To replace an IC you have no model for, leave it out (`Sim.Enable=0`) and drive its
   output net from the testbench: an LDO becomes `tb.source(vout, dc=3.3)`.

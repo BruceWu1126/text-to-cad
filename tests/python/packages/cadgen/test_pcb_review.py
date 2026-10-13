@@ -19,14 +19,9 @@ def pad(part, number, net, at, type="passive", name=None):
     return Pad(part=part, number=number, name=name, net=net, type=type, side="top", at=at, polygon=())
 
 
-def part(ref, pads, dnp=False, fields=None, footprint=""):
-    fields = {"LCSC": f"C-{ref}"} if fields is None else fields  # sourced unless a test says otherwise
-    return Part(ref=ref, value="", footprint=footprint, side="top", at=pads[0].at, rotation=0.0, fields=fields, dnp=dnp,
+def part(ref, pads, dnp=False):
+    return Part(ref=ref, value="", footprint="", side="top", at=pads[0].at, rotation=0.0, fields={}, dnp=dnp,
                 outline=(), pads=tuple(pads))
-
-
-def resistor(ref, fields, footprint="Resistor_SMD:R_0603_1608Metric", dnp=False):
-    return part(ref, [pad(ref, "1", "A", (0.0, 0.0)), pad(ref, "2", "B", (1.0, 0.0))], dnp=dnp, fields=fields, footprint=footprint)
 
 
 def ic(at=(0.0, 0.0)):
@@ -113,69 +108,6 @@ class ReviewTest(unittest.TestCase):
             self.assertEqual(net_currents(project), {})
             self.assertEqual(net_currents(Path(folder) / "missing.kicad_pro"), {})
             self.assertEqual(net_currents(None), {})
-
-    def test_a_part_with_nothing_to_order_it_by(self):
-        (found,) = review(board(resistor("R1", {"Script": "board.py:12"})))
-        self.assertEqual((found.check, found.severity, found.type), ("review", "warning", "part_unsourced"))
-        self.assertEqual(found.summary, "R1 has no LCSC or MPN to order it by")
-        self.assertEqual([item.ref for item in found.items], ["#R1"])
-
-    def test_an_lcsc_or_an_mpn_alone_is_enough(self):
-        for fields in ({"LCSC": "C21190"}, {"MPN": "RC0603FR-071KL"}, {"lcsc": "C1"}, {" mpn ": "X"}):
-            self.assertEqual(review(board(resistor("R1", fields))), (), fields)
-
-    def test_a_number_in_a_field_the_bom_never_reads_is_no_number(self):
-        # The BOM's columns are the LCSC and MPN fields: a part numbered only elsewhere has an empty row.
-        for fields in ({"Mfr PN": "X"}, {"Manufacturer Part Number": "X"}, {"LCSC Part #": "C1"}):
-            (found,) = review(board(resistor("R1", fields)))
-            self.assertEqual(found.type, "part_unsourced", fields)
-        self.assertEqual(len(review(board(resistor("R1", {"LCSC": "  "})))), 1)  # blank is nothing
-
-    def test_every_part_without_a_number_is_one_finding(self):
-        parts = [resistor(f"R{n}", {}) for n in (10, 2, 1)] + [resistor("C1", {"LCSC": "C1"})]
-        (found,) = review(board(*parts))
-        self.assertEqual(found.summary, "3 parts have no LCSC or MPN to order them by: R1, R2, R10")
-        self.assertEqual([item.ref for item in found.items], ["#R1", "#R2", "#R10"])
-        (many,) = review(board(*[resistor(f"R{n}", {}) for n in range(1, 13)]))
-        self.assertEqual(many.summary, "12 parts have no LCSC or MPN to order them by: R1, R2, R3, R4, R5, R6, R7, R8 and 4 more")
-        self.assertEqual(len(many.items), 12)
-
-    def test_holes_test_points_fiducials_and_unfitted_parts_are_not_ordered(self):
-        for ref in ("H1", "MH2", "TP3", "FID1", "LOGO1"):
-            self.assertEqual(review(board(resistor(ref, {}))), (), ref)
-        self.assertEqual(review(board(resistor("R1", {}, dnp=True))), ())
-        padless = Part(ref="G1", value="", footprint="", side="top", at=(0.0, 0.0), rotation=0.0, fields={}, dnp=False, outline=(), pads=())
-        self.assertEqual(review(board(padless)), ())
-
-    def test_a_part_the_bom_leaves_out_is_not_ordered(self):
-        from cadgen import build123d as bd
-        from cadgen.kicad import sexpr
-        from cadgen.kicad.board_index import read_index
-        from cadgen.kicad.design import Board
-        from cadgen.kicad.project import project_texts
-        from tests.python.support.kicad_library import write_test_library
-
-        with tempfile.TemporaryDirectory() as folder:
-            with bd.BuildSketch() as outline:
-                bd.Rectangle(20, 20)
-            pcb = Board(outline=outline.sketch, libraries=[write_test_library(Path(folder))])
-            jumper = pcb.part("Test:FIDUCIAL", footprint="Test:ONE_PAD", ref="JP1")  # (in_bom no), a ref the rule can't skip
-            resistor_ = pcb.part("Test:R", footprint="Test:R_0603", ref="R1")
-            pcb.no_connect(jumper[1], resistor_[1], resistor_[2])
-            pcb.place(jumper, at=(-5, 0))
-            pcb.place(resistor_, at=(5, 0))
-            index = read_index(sexpr.parse(project_texts(pcb, name="b").pcb), project=None)
-        self.assertEqual([(part.ref, part.in_bom) for part in index.parts], [("JP1", False), ("R1", True)])
-        (found,) = review(index)
-        self.assertEqual(found.summary, "R1 has no LCSC or MPN to order it by")
-
-    def test_one_part_number_on_two_footprints(self):
-        (found,) = review(board(resistor("R1", {"LCSC": "C21190"}), resistor("R4", {"LCSC": "C21190"}, footprint="Resistor_SMD:R_0402_1005Metric"),
-                                resistor("R2", {"LCSC": "C21190"})))
-        self.assertEqual(found.type, "mpn_footprints")
-        self.assertEqual(found.summary, "C21190 is on R1, R2 (R_0603_1608Metric) and R4 (R_0402_1005Metric)")
-        self.assertEqual([item.ref for item in found.items], ["#R1", "#R2", "#R4"])
-        self.assertEqual(review(board(resistor("R1", {"LCSC": "C21190"}), resistor("R2", {"LCSC": "C21190"}))), ())
 
     def test_the_review_never_blocks_a_build(self):
         from cadgen.kicad.check import is_blocking

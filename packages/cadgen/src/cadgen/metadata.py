@@ -106,15 +106,14 @@ class GeneratorMetadata:
 class FabExportDecl:
     """One declared manufacturing export: ``@pcb(gerber=, bom=, pos=)`` or ``@harness(bom=)``.
 
-    ``out`` is the raw script-relative target, ``None`` meaning the default: a board's
-    project ``build/`` folder (``build/board.gerbers.zip``, ``build/board.bom.csv``,
-    ``build/board.pos.csv``), a harness's sibling (``cable.bom.csv``)."""
+    ``out`` is the raw script-relative target, ``None`` meaning the sibling of the
+    board file (``board.gerbers.zip``, ``board.bom.csv``, ``board.pos.csv``)."""
 
     fmt: str
     out: str | None = None
 
 
-#: The suffix of the file each manufacturing export writes by default.
+#: The file a manufacturing export writes beside its board by default.
 FAB_SUFFIX = {"gerber": ".gerbers.zip", "bom": ".bom.csv", "pos": ".pos.csv"}
 
 
@@ -123,16 +122,7 @@ def fab_output_path(script_path: Path | str, decl: "FabExportDecl", board_file: 
     if decl.out:
         target = Path(decl.out)
         return (target if target.is_absolute() else Path(script_path).resolve().parent / target).resolve()
-    if extension_of(board_file) == ".kicad_pcb":
-        return fab_build_path(board_file, decl.fmt).resolve()
     return fab_sibling(board_file, decl.fmt).resolve()
-
-
-def fab_build_path(board: Path, fmt: str) -> Path:
-    """A board's ``fmt`` export by default: in its project's ``build/`` folder, named by its stem
-    (``PCB/servo/servo.kicad_pcb`` -> ``PCB/servo/build/servo.gerbers.zip``), so every derived
-    file stays out of the folder of files KiCad opens."""
-    return board.parent / "build" / (board.name[: -len(".kicad_pcb")] + FAB_SUFFIX[fmt])
 
 
 def fab_sibling(document: Path, fmt: str) -> Path:

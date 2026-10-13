@@ -128,7 +128,6 @@ class Part:
     dnp: bool
     outline: tuple[XY, ...]  # the courtyard, else the box around its pads and fabrication drawing
     pads: tuple[Pad, ...] = ()
-    in_bom: bool = True  # False when the footprint is excluded from the BOM (or on the board only)
 
     kind = "part"
 
@@ -835,7 +834,6 @@ def _read_footprint(node: list, table, copper: Sequence[str], uuids: dict) -> tu
             fields[str(item[1])] = str(item[2])
     attr = sexpr.find(node, "attr")
     dnp = attr is not None and any(str(flag) == "dnp" for flag in attr[1:])
-    in_bom = attr is None or not any(str(flag) in ("exclude_from_bom", "board_only") for flag in attr[1:])
     own = str(sexpr.value(node, "uuid") or "")
     if own:
         uuids[own] = ("part", ref)
@@ -897,7 +895,6 @@ def _read_footprint(node: list, table, copper: Sequence[str], uuids: dict) -> tu
         dnp=dnp,
         outline=tuple(outline),
         pads=_counted(pads),
-        in_bom=in_bom,
     )
     return part, holes, zones, edges
 

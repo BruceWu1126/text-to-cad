@@ -76,7 +76,7 @@ For manual edge-case checks and debugging, use [tests/](tests/README.md). Automa
   one script each, artifacts in `DXF/`.
 - [electronics/](electronics/src/README.md): a circuit board, its case and a
   cable as one cad-project: an autorouted `@pcb` board (KiCad project, JLCPCB
-  Gerbers/BOM/placement in its own `PCB/<board>/` folder, its 3D in `STEP/`), the `@step` case
+  Gerbers/BOM/placement and its 3D in `PCB/` and `STEP/`), the `@step` case
   that composes the board, and a `@harness` cable read from the board's
   netlist (`HARNESS/`).
 

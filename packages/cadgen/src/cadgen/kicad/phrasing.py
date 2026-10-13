@@ -140,8 +140,6 @@ _TITLES = {
     "decoupling_missing": "No decoupling capacitor",
     "decoupling_far": "Decoupling capacitor too far",
     "track_current": "Track too thin for its current",
-    "part_unsourced": "Part without a part number",
-    "mpn_footprints": "One part number, two footprints",
 }
 
 
