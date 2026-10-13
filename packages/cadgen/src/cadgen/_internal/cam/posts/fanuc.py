@@ -11,6 +11,7 @@
   machine's parameters set (RD1 / RD2), assumed +X; a cycle shifting another way is expanded with ``M19`` (the usual
   spindle orient code).
 - Peck clearance (G83) and chip-break back-off (G73) are the machine's parameters 5115 and 5114.
+- The end cancels the tool length offset (``G49``) after going home.
 """
 
 from __future__ import annotations
@@ -35,9 +36,13 @@ class FanucPost(PostBase):
     dwell_unit = "ms"
     safe_start = "G0 G17 G40 G49 G80 G90 G94"
     end_code = "M30"
+    end_lines = ("G49",)
 
     def home_lines(self) -> list[str]:
         return ["G91 G28 Z0.", "G90"]
+
+    def extra_header(self) -> list[str]:
+        return ["Rigid tap written as M29 S then G84; check your control's rigid tap mode (some want M29 before M3)"]
 
     def route(self, move, where):
         route = super().route(move, where)

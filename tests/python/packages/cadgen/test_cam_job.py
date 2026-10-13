@@ -68,6 +68,8 @@ class ValidJob(unittest.TestCase):
             self.assertEqual(parse_job(str(path)), job)
             self.assertEqual(parse_job(json.dumps(JOB)), job)
         self.assertEqual((job.machine.post, job.machine.travel_mm, job.material.name), ("grbl", (800.0, 600.0, 120.0), "aluminum-6061"))
+        self.assertIsNone(job.machine.spindle_spinup_s)   # the post's own default
+        self.assertEqual(parsed(changed("machine.spindle_spinup_s", 2)).machine.spindle_spinup_s, 2.0)
         self.assertEqual(job.stock.margin_mm, (2.0, 2.0, 1.0, 0.0))
         self.assertEqual(job.setups[0].fixture.size, {"jaw_height_mm": 20.0, "grip_mm": 5.0, "parallels_mm": 10.0})
         self.assertEqual(job.tool("T1").holder, Holder(32.0, 40.0))
@@ -140,6 +142,8 @@ class BadJobs(unittest.TestCase):
         ("post for another machine", changed("machine.post", "fanuc_lathe"), "machine.post: fanuc_lathe writes for a lathe, not a mill"),
         ("5-axis post on a 3-axis mill", changed("machine.post", "haas_umc"),
          "machine.post: haas_umc writes for a 5-axis mill, and this one has 3 axes"),
+        ("negative spin-up", changed("machine.spindle_spinup_s", -1), "machine.spindle_spinup_s: must be 0 or more, got -1"),
+        ("spin-up not a number", changed("machine.spindle_spinup_s", "3s"), 'machine.spindle_spinup_s: expected a number, got "3s"'),
         ("wrong units", changed("machine.units", "cm"), 'machine.units: "cm" is not one of mm or inch'),
         ("unknown material", changed("material", "unobtainium"),
          'material: "unobtainium" is not in the table (aluminum-6061, aluminum-7075, mild-steel, stainless-304, brass, '

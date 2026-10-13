@@ -9,6 +9,9 @@
 - Dwell P is seconds: Mach3's General Config option "G04 Dwell param in Ms" must be off (its default); the header
   says so.
 - ``G91.1`` (arc centres incremental) is stated in the safe start, since Mach3's IJ mode is a setting.
+- Mach3 waits its own spin-up delay after M3 (Spindle Setup, "Spin UP"); the header says to set it. A job's
+  ``machine.spindle_spinup_s`` adds a G4 after every M3 as well.
+- The end cancels the tool length offset (``G49``).
 """
 
 from __future__ import annotations
@@ -26,6 +29,9 @@ class Mach3Post(PostBase):
     dwell_unit = "s"
     safe_start = "G90 G94 G17 G40 G49 G80 G91.1"
     end_code = "M30"
+    end_lines = ("G49",)
 
     def extra_header(self) -> list[str]:
-        return ["Dwell P is seconds: General Config G04 Dwell param in Ms must be off"]
+        return ["Dwell P is seconds: General Config G04 Dwell param in Ms must be off",
+                "G84 is a floating-holder tap: Mach3 reverses the spindle but does not synchronise the feed to it",
+                "Set the spindle spin-up delay in Spindle Setup: Mach3 waits it after M3 before cutting"]

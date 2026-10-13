@@ -169,22 +169,30 @@ def slotted_block_step(directory, name: str = "block"):
 
 # --- G-code back-plot ----------------------------------------------------------------------------------
 # Reads any phase-1 post's program back into moves (absolute, mm, cycles expanded the way expand_cycle does), so a
-# test can assert "the posted program is the planned toolpath".
+# test can assert "the posted program is the planned toolpath". It is stricter than the controllers where a program
+# would be wrong: it refuses a cut while the spindle is stopped, a block other than a bare X/Y while a canned cycle
+# is modal (write G80 first), and a boring bar's shift off the wall while its spindle is not oriented.
 
 import math  # noqa: E402
 import re  # noqa: E402
-from dataclasses import dataclass, fields  # noqa: E402
+from dataclasses import dataclass  # noqa: E402
 
 _WORD = re.compile(r"([A-Za-z])\s*([-+]?(?:\d+\.?\d*|\.\d+))")
 _CYCLE_KINDS = {"81": "drill", "82": "spot", "83": "peck", "73": "chip_break", "84": "tap", "85": "ream",
                 "89": "ream", "86": "bore", "76": "fine_bore", "87": "back_bore"}
+#: What a dwell's P means on each controller, as its own documentation says (not as the post says): Fanuc whole
+#: milliseconds; Haas seconds when P has a decimal point, else milliseconds; the rest seconds.
+_DWELL_UNIT = {"fanuc": "ms", "haas": "point", "linuxcnc": "s", "mach3": "s", "grbl": "s"}
+#: The longest sideways rapid read as a boring bar's shift off the wall (a dog-leg out, along Z, and back), mm.
+_SHIFT_MM = 5.0
 
 
 @dataclass(frozen=True)
 class Plotted:
     """One move read back from a program: ``kind`` is rapid (G0), feed (G1), arc_cw or arc_ccw; ``xyz`` in mm, an
     axis ``None`` while the program has not said where it is (after a tool change or a move in machine coordinates);
-    ``segment`` counts the tool changes before it."""
+    ``segment`` counts the tool changes before it; ``spindle`` is on, off, oriented, or cycle (inside a canned
+    cycle, which runs the spindle itself)."""
 
     kind: str
     xyz: tuple
@@ -192,47 +200,29 @@ class Plotted:
     center: tuple | None = None
     dwell_s: float = 0.0
     segment: int = 0
+    spindle: str = "on"
 
 
 def _plain(move) -> str:
     return {"rapid": "rapid", "arc_cw": "arc_cw", "arc_ccw": "arc_ccw"}.get(move.kind, "feed")
 
 
-def _cycle(kind: str, r: float, z: float, *, peck=None, pitch=None, shift=None, shift_xy=None, dwell=0.0):
-    from cadgen._internal.cam.toolpath import Cycle
-
-    kwargs = {"peck_mm": peck if kind in ("peck", "chip_break") else None,
-              "pitch_mm": pitch if kind in ("tap", "rigid_tap") else None,
-              "shift_mm": shift if kind in ("fine_bore", "back_bore") else None, "dwell_s": dwell}
-    if shift_xy is not None and "shift_xy" in {field.name for field in fields(Cycle)}:
-        kwargs["shift_xy"] = shift_xy
-    return Cycle(kind, r, z, **kwargs)
-
-
-def _expanded(move, start):
-    from cadgen._internal.cam.toolpath import expand_cycle
-
-    shift = getattr(move.cycle, "shift_xy", None)
-    if shift is not None:
-        length = math.hypot(*shift)
-        return expand_cycle(move, start, shift_direction=(shift[0] / length, shift[1] / length))
-    return expand_cycle(move, start)
-
-
 def backplot(text: str, post: str) -> list[Plotted]:
-    """The moves a program makes, read back. ``post`` names the dialect (it decides what a dwell's P means)."""
-    from cadgen._internal.cam.toolpath import Move, walk
+    """The moves a program makes, read back; ValueError naming the line where it would cut wrong. ``post`` names the
+    controller (its documented dwell unit)."""
+    from cadgen._internal.cam.toolpath import Cycle, Move, expand_cycle
 
+    unit = _DWELL_UNIT[post]
     scale, pos, motion, feed, rpm, segment = 1.0, [None, None, None], None, None, None, 0
-    cycle, return_r, initial = None, False, None
+    cycle, return_r, initial, spindle, just_started = None, False, None, "off", False
     out: list[Plotted] = []
 
-    def add(kind, xyz, *, center=None, at_feed=None, dwell=0.0):
-        out.append(Plotted(kind, tuple(xyz), at_feed, center, dwell, segment))
+    def add(kind, xyz, *, center=None, at_feed=None, dwell=0.0, state=None):
+        out.append(Plotted(kind, tuple(xyz), at_feed, center, dwell, segment, state or spindle))
         pos[:] = list(xyz)
 
     def dwell_seconds(raw: str) -> float:
-        if post == "fanuc" or (post == "haas" and "." not in raw):
+        if unit == "ms" or (unit == "point" and "." not in raw):
             return float(raw) / 1000.0
         return float(raw)
 
@@ -245,6 +235,14 @@ def backplot(text: str, post: str) -> list[Plotted]:
         ms = [int(float(raw)) for letter, raw in words if letter == "M"]
         vals = {letter: raw for letter, raw in words if letter not in ("G", "M")}
         num = {letter: float(raw) for letter, raw in vals.items()}
+        where = f"line {number} ({line})"
+        if "80" in gs:
+            cycle, motion = None, None
+        codes = [code for code in gs if code in _CYCLE_KINDS]
+        if cycle is not None and (codes or [code for code in gs if code not in ("98", "99")] or ms
+                                  or not ("X" in num or "Y" in num) or "Z" in num):
+            raise ValueError(f"{where}: a canned cycle is still modal; only a bare X / Y repeats it, so end it "
+                             "with G80 first")
         if "20" in gs:
             scale = 25.4
         if "21" in gs:
@@ -253,12 +251,19 @@ def backplot(text: str, post: str) -> list[Plotted]:
             rpm = num["S"]
         if "F" in num:
             feed = num["F"] * scale
+        for code in ms:
+            if code in (3, 4):
+                spindle, just_started = "on", True
+            elif code in (5, 0, 6):
+                spindle = "off"
+            elif code == 19:
+                spindle = "oriented"
         if 6 in ms or 0 in ms:
             segment += 1
             pos[:] = [None, None, None]
         if "91" in gs:
             if "28" not in gs:
-                raise ValueError(f"line {number}: incremental moves are not read: {line}")
+                raise ValueError(f"{where}: incremental moves are not read")
             pos[2] = None
             continue
         if "53" in gs:
@@ -267,28 +272,31 @@ def backplot(text: str, post: str) -> list[Plotted]:
                     pos[axis] = None
             continue
         if "4" in gs:
+            if just_started:
+                just_started = False   # the spindle's spin-up wait, not a dwell of the toolpath's
+                continue
             last = out[-1]
             out[-1] = Plotted(last.kind, last.xyz, last.feed, last.center, last.dwell_s + dwell_seconds(vals["P"]),
-                              last.segment)
+                              last.segment, last.spindle)
             continue
-        if "80" in gs:
-            cycle, motion = None, None
         if "98" in gs:
             return_r = False
         if "99" in gs:
             return_r = True
         target = [num[letter] * scale if letter in num else pos[axis] for axis, letter in enumerate("XYZ")]
+        cuts = codes or "33.1" in gs or (any(code in gs for code in ("1", "2", "3"))
+                                         and any(letter in num for letter in "XYZ"))
+        if cuts and spindle != "on":
+            raise ValueError(f"{where}: cuts while the spindle is {'stopped' if spindle == 'off' else spindle}")
         if "33.1" in gs:
+            just_started = False
             top = tuple(pos)
             add("feed", (pos[0], pos[1], num["Z"] * scale), at_feed=num["K"] * scale * rpm)
             add("feed", top, at_feed=num["K"] * scale * rpm)
             continue
-        codes = [code for code in gs if code in _CYCLE_KINDS]
         if codes:
-            if cycle is None:
-                initial = pos[2]
-            previous = cycle or {}
-            cycle = {**previous, "kind": _CYCLE_KINDS[codes[0]]}
+            initial = pos[2]
+            cycle = {"kind": _CYCLE_KINDS[codes[0]]}
             for letter in "ZRQIJ":
                 if letter in num:
                     cycle[letter] = num[letter] * scale
@@ -299,38 +307,73 @@ def backplot(text: str, post: str) -> list[Plotted]:
             motion = next(code for code in gs if code in ("0", "1", "2", "3"))
         if not any(letter in num for letter in "XYZ"):
             continue
+        just_started = False
         if motion == "cycle":
             kind = cycle["kind"]
             shift, shift_xy = cycle.get("Q"), None
             if kind in ("fine_bore", "back_bore") and ("I" in cycle or "J" in cycle):
                 shift_xy = (cycle.get("I", 0.0), cycle.get("J", 0.0))
                 shift = math.hypot(*shift_xy)
-            built = _cycle(kind, cycle["R"], cycle["Z"], peck=cycle.get("Q"),
-                           pitch=None if not rpm else cycle["F"] / rpm, shift=shift, shift_xy=shift_xy,
-                           dwell=cycle["P"])
+            built = Cycle(kind, cycle["R"], cycle["Z"],
+                          peck_mm=cycle.get("Q") if kind in ("peck", "chip_break") else None,
+                          pitch_mm=cycle["F"] / rpm if kind in ("tap", "rigid_tap") else None,
+                          shift_mm=shift if kind in ("fine_bore", "back_bore") else None,
+                          dwell_s=cycle["P"], shift_xy=shift_xy)
             end_z = cycle["R"] if return_r else initial
             move = Move("cycle", (target[0], target[1], end_z), cycle["F"], cycle=built)
-            start = tuple(pos)
-            for part in _expanded(move, start):
-                add(_plain(part), part.xyz, at_feed=part.feed, dwell=part.dwell_s)
+            for part in expand_cycle(move, tuple(pos)):
+                add(_plain(part), part.xyz, at_feed=part.feed, dwell=part.dwell_s, state="cycle")
         elif motion in ("2", "3"):
             center = (pos[0] + num.get("I", 0.0) * scale, pos[1] + num.get("J", 0.0) * scale)
             add("arc_cw" if motion == "2" else "arc_ccw", target, center=center, at_feed=feed)
         elif motion in ("0", "1"):
             add("rapid" if motion == "0" else "feed", target, at_feed=None if motion == "0" else feed)
         else:
-            raise ValueError(f"line {number}: a move with no motion mode: {line}")
+            raise ValueError(f"{where}: a move with no motion mode")
+    _check_shifts(out)
     return out
+
+
+def _check_shifts(out: list[Plotted]) -> None:
+    """A boring bar's shift (a short sideways rapid, then along Z, then back to where it was) is made with the
+    spindle oriented, as is any sideways rapid straight after a cut that went down or across (the tool is still at
+    the bottom of its hole; a cut up and out, a ream's, is not)."""
+    def xy(move):
+        return move.xyz[0], move.xyz[1]
+
+    def sideways(a, b) -> float:
+        if None in (*a, *b):
+            return math.inf
+        return math.hypot(b[0] - a[0], b[1] - a[1])
+
+    for index in range(1, len(out)):
+        before, move = out[index - 1], out[index]
+        if move.kind != "rapid" or move.spindle in ("oriented", "cycle") or before.segment != move.segment:
+            continue
+        across = sideways(xy(before), xy(move))
+        if not 1e-9 < across < math.inf:
+            continue
+        came_from = out[index - 2].xyz[2] if index >= 2 else None
+        at_bottom = came_from is None or before.xyz[2] is None or before.xyz[2] <= came_from + 1e-9
+        if before.kind != "rapid" and before.spindle != "cycle" and at_bottom:
+            raise ValueError(f"a sideways rapid to {move.xyz} straight after a cut, with the spindle {move.spindle}: "
+                             "a boring bar shifts off the wall only when oriented (M19)")
+        if index + 2 < len(out) and across <= _SHIFT_MM:
+            up, back = out[index + 1], out[index + 2]
+            if (up.kind == back.kind == "rapid" and sideways(xy(move), xy(up)) < 1e-9
+                    and sideways(xy(back), xy(before)) < 1e-9):
+                raise ValueError(f"a boring bar's shift to {move.xyz} with the spindle {move.spindle}, not oriented "
+                                 "(M19)")
 
 
 def planned_moves(toolpaths) -> list[Plotted]:
     """The toolpaths' moves as a back-plot reads them: cycles expanded, plunges and leads as feeds."""
-    from cadgen._internal.cam.toolpath import walk
+    from cadgen._internal.cam.toolpath import expand_cycle, walk
 
     out = []
     for toolpath in toolpaths:
         for start, move in walk(toolpath.moves, toolpath.start):
-            parts = _expanded(move, start) if move.kind == "cycle" else (move,)
+            parts = expand_cycle(move, start) if move.kind == "cycle" else (move,)
             for part in parts:
                 out.append(Plotted(_plain(part), part.xyz, part.feed, part.center, part.dwell_s))
     return out

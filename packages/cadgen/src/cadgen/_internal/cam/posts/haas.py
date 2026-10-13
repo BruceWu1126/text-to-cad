@@ -11,6 +11,7 @@
 - Dwell P is seconds written with a decimal point (``P0.5``, ``P2.``): Haas reads a P with no point as milliseconds.
   G81, G83, G73, G84 and G86 take no P here, so one with a dwell is expanded (a tap with one is refused).
 - Air is the auto air jet: ``M83`` on, ``M84`` off.
+- The end cancels the tool length offset (``G49``) after going up.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ class HaasPost(PostBase):
     dwell_unit = "s."
     safe_start = "G0 G17 G40 G49 G80 G90 G94"
     end_code = "M30"
+    end_lines = ("G49",)
     coolant_codes = {"flood": "M8", "mist": "M7", "air": "M83"}
     coolant_off_codes = {"air": "M84"}
 

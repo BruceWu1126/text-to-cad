@@ -56,7 +56,8 @@ MACHINE_KINDS: dict[str, tuple[int, ...]] = {
     "mill": (3, 4, 5), "router": (3, 4, 5), "lathe": (2,), "laser": (2,), "plasma": (2,), "waterjet": (2,),
     "wire_edm": (2, 4), "sinker_edm": (3,),
 }
-MACHINE_KEYS = ("kind", "axes", "post", "travel_mm", "max_rpm", "max_feed_mm_min", "rapid_mm_min", "units")
+MACHINE_KEYS = ("kind", "axes", "post", "travel_mm", "max_rpm", "max_feed_mm_min", "rapid_mm_min", "units",
+                "spindle_spinup_s")
 UNITS = ("mm", "inch")
 
 # --- material, stock, setups -----------------------------------------------------------------------------
@@ -171,6 +172,9 @@ class Machine:
     max_feed_mm_min: float | None = None
     rapid_mm_min: float | None = None
     units: str = "mm"
+    #: Seconds to wait after the spindle starts before cutting (G4 after M3); ``None``: the post's default (3 s on
+    #: grbl, which does not wait for the spindle; 0 on the controllers that do).
+    spindle_spinup_s: float | None = None
 
 
 @dataclass(frozen=True)
@@ -418,7 +422,10 @@ def _machine(raw: Any, post_override: str | None) -> Machine:
                        for index, value in enumerate(raw_travel))
     limits = _sizes(machine, ("max_rpm", "max_feed_mm_min", "rapid_mm_min"), where="machine")
     units = choice(machine.get("units", "mm"), UNITS, where="machine.units")
-    return Machine(kind, axes, post, travel, units=units, **limits)
+    spinup = None
+    if "spindle_spinup_s" in machine:
+        spinup = number(machine["spindle_spinup_s"], where="machine.spindle_spinup_s", minimum=0)
+    return Machine(kind, axes, post, travel, units=units, spindle_spinup_s=spinup, **limits)
 
 
 def _material(raw: Any) -> Material:

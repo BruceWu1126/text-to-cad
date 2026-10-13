@@ -13,7 +13,14 @@ writes everything else the same way for all of them:
 
 Numbers are written the same way every time: rounded to the unit's resolution (0.001 mm, 0.0001 in), trailing zeros
 trimmed, never ``-0``; a dialect that reads ``X10`` as 10 micrometres (Fanuc, Haas) keeps the decimal point
-(``X10.``). An inch program converts every coordinate, centre offset, feed and cycle depth; the engine stays in mm.
+(``X10.``). A depth never comes out deeper than planned: a cut's Z rounds up (toward safe) and a canned cycle's
+depth toward its R plane; everything else rounds to nearest. An inch program converts every coordinate, centre
+offset, feed and cycle depth; the engine stays in mm.
+
+Every ``M3`` is followed by ``G4`` when there is a spin-up wait (``machine.spindle_spinup_s``, else the post's
+default: grbl does not wait for its spindle, the others do). A post that tells the operator where to zero or lifts
+on its own (grbl, Mach3) goes up to the program's safe height before the spindle starts. A program that bores with
+an oriented bar says in its header which way the bar shifts and so which way its tip must point.
 
 A post refuses (ValueError naming the post and the operation) what its controller cannot run safely, never writing a
 plausible program instead (README law 10): a tap on a controller with no tapping (an expanded tap, with the spindle
@@ -30,7 +37,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import ClassVar, Sequence
 
-from cadgen._internal.cam.toolpath import Move, Toolpath, expand_cycle, walk
+from cadgen._internal.cam.toolpath import Move, Toolpath, cycle_return, expand_cycle, walk
 
 __all__ = ["CYCLE_CODES", "MM_PER_INCH", "PROVE_LINE", "PostBase", "Route", "fmt", "safe_comment"]
 
@@ -46,9 +53,15 @@ _COMMENT_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
 _EPS = 1e-6
 
 
-def fmt(value: float, decimals: int, *, point: bool = False) -> str:
-    """``value`` rounded to ``decimals``, trailing zeros trimmed, never ``-0``; ``point`` keeps a bare ``.``."""
-    rounded = round(float(value), decimals)
+def fmt(value: float, decimals: int, *, point: bool = False, toward: int = 0) -> str:
+    """``value`` rounded to ``decimals``, trailing zeros trimmed, never ``-0``; ``point`` keeps a bare ``.``.
+    ``toward`` +1 rounds up and -1 down (a depth that must never come out deeper than planned), 0 to nearest."""
+    if toward:
+        scaled = float(value) * 10 ** decimals
+        step = math.ceil(scaled - 1e-6) if toward > 0 else math.floor(scaled + 1e-6)
+        rounded = round(step / 10 ** decimals, decimals)
+    else:
+        rounded = round(float(value), decimals)
     if rounded == 0:
         rounded = 0.0
     text = f"{rounded:.{decimals}f}"
@@ -82,12 +95,11 @@ def _expand(move: Move, start) -> tuple[Move, ...]:
     return expand_cycle(move, start)
 
 
-def _returns_to_r(move: Move) -> bool:
-    """G99 (back to the R plane) rather than G98 (back to the height the cycle started from)."""
-    return_to = getattr(move.cycle, "return_to", None)
-    if return_to is not None:
-        return return_to == "r"
-    return abs(move.xyz[2] - move.cycle.r) <= _EPS
+def _direction(shift: tuple[float, float]) -> str:
+    for name, axis in (("+X", (1, 0)), ("-X", (-1, 0)), ("+Y", (0, 1)), ("-Y", (0, -1))):
+        if math.hypot(shift[0] - axis[0], shift[1] - axis[1]) < 1e-9:
+            return name
+    return f"X{fmt(shift[0], 4)} Y{fmt(shift[1], 4)}"
 
 
 @dataclass(frozen=True)
@@ -142,6 +154,11 @@ class PostBase:
     coolant_codes: ClassVar[dict] = {"flood": "M8", "mist": "M7"}
     #: Codes that turn a coolant off, by mode (M9 for the rest).
     coolant_off_codes: ClassVar[dict] = {}
+    #: Seconds to wait after M3 before cutting (G4) when the job does not say (``machine.spindle_spinup_s``): 0 for
+    #: a controller that waits for the spindle itself.
+    spinup_s: ClassVar[float] = 0.0
+    #: Lines after the retract and before the program end (cancel the tool length offset, G49).
+    end_lines: ClassVar[tuple[str, ...]] = ()
 
     # --- what a dialect writes ------------------------------------------------------------------------------
 
@@ -184,7 +201,9 @@ class PostBase:
     def native_cycle_words(self, prog: "_Program", move: Move) -> list[str]:
         """The canned cycle block's words after G98/G99 and the code, before F."""
         cycle = move.cycle
-        words = [f"X{prog.coord(move.xyz[0])}", f"Y{prog.coord(move.xyz[1])}", f"Z{prog.coord(cycle.z)}",
+        # the depth rounds toward R, never deeper than planned
+        toward = -1 if cycle.kind == "back_bore" else 1
+        words = [f"X{prog.coord(move.xyz[0])}", f"Y{prog.coord(move.xyz[1])}", f"Z{prog.coord(cycle.z, toward=toward)}",
                  f"R{prog.coord(cycle.r)}"]
         if cycle.peck_mm is not None:
             words.append(f"Q{prog.coord(cycle.peck_mm)}")
@@ -211,6 +230,9 @@ class PostBase:
 
     def extra_header(self) -> list[str]:
         return []
+
+    def safe_start_line(self, inch: bool) -> str:
+        return self.safe_start
 
     def check_line(self, text: str) -> None:
         """ValueError when a line is one the controller cannot take."""
@@ -242,6 +264,8 @@ class PostBase:
         if not toolpaths:
             raise ValueError(f"{self.name} post: setup {setup.id!r} has no toolpaths to post")
         prog = _Program(self, job.machine.units == "inch")
+        spinup = getattr(job.machine, "spindle_spinup_s", None)
+        prog.spinup = self.spinup_s if spinup is None else spinup
         routes = self._check(job, toolpaths)
         prog.safe_z = max(max(_heights(tp)) for tp in toolpaths)
         number = self.program_number if number is None else number
@@ -251,7 +275,7 @@ class PostBase:
             prog.raw(f"O{number:0{self.program_digits}d} ({safe_comment(part or 'program', upper=True)[:24]})")
         self._header(prog, job, setup, toolpaths, part, job_name)
         prog.code("G20" if prog.inch else "G21")
-        prog.code(self.safe_start)
+        prog.code(self.safe_start_line(prog.inch))
         prog.code("G54")
         for toolpath in toolpaths:
             self._toolpath(prog, job, toolpath, routes)
@@ -261,6 +285,8 @@ class PostBase:
         if prog.lines[-1] != ("code", "M9"):
             prog.code("M9")
         self._retract(prog)
+        for line in self.end_lines:
+            prog.code(line)
         prog.code(self.end_code)
         if self.tape:
             prog.raw("%")
@@ -297,6 +323,18 @@ class PostBase:
         prog.comment(f"Post: {self.name}, for {self.controller}, units {unit}, dwell P in {dwell}")
         for line in self.extra_header():
             prog.comment(line)
+        if prog.spinup:
+            prog.comment(f"Spindle spin-up: G4 P {fmt(prog.spinup, 3)} s after every M3")
+        shifts = []
+        for toolpath in toolpaths:
+            for move in toolpath.moves:
+                if move.kind == "cycle" and move.cycle.kind in _ORIENTED:
+                    direction = _direction(_shift(move.cycle))
+                    if direction not in shifts:
+                        shifts.append(direction)
+        for direction in shifts:
+            prog.comment(f"Boring bar: the bar shifts {direction} off the wall, so orient it with its tip pointing "
+                         f"opposite, {_opposite(direction)}, at the spindle orient position")
         tools: dict[str, list[str]] = {}
         for toolpath in toolpaths:
             feeds = [move.feed for move in toolpath.moves if move.feed is not None]
@@ -371,8 +409,8 @@ class PostBase:
                 prog.code("M0")
             prog.forget(x=True, y=True, z=True)
             prog.tool = tool.number
-            prog.spindle(toolpath.rpm)
             prog.motion("G0", (None, None, prog.safe_z))
+            prog.spindle(toolpath.rpm)
             prog.motion("G0", (x, y, None))
             prog.motion("G0", (None, None, z))
             return
@@ -384,15 +422,23 @@ class PostBase:
         prog.code(f"T{tool.number} M6", tool_change=True)
         prog.tool = tool.number
         prog.forget(x=True, y=True, z=True)
-        prog.spindle(toolpath.rpm)
         if self.positioning == "home":
+            prog.spindle(toolpath.rpm)
             prog.motion("G0", (x, y, None))
             prog.motion("G43", (None, None, z), extra=[f"H{tool.number}"], force_z=True)
         else:
             prog.code(f"G43 H{tool.number}")
             prog.motion("G0", (None, None, prog.safe_z))
+            prog.spindle(toolpath.rpm)
             prog.motion("G0", (x, y, None))
             prog.motion("G0", (None, None, z))
+
+
+def _opposite(direction: str) -> str:
+    if direction[0] in "+-" and direction[1:] in ("X", "Y"):
+        return ("-" if direction[0] == "+" else "+") + direction[1:]
+    x, y = (float(word[1:]) for word in direction.split())
+    return f"X{fmt(-x, 4)} Y{fmt(-y, 4)}"
 
 
 def _point(point) -> str:
@@ -424,13 +470,15 @@ class _Program:
         #: wants it to turn at.
         self.rpm: int | None = None
         self.speed: int | None = None
+        self.spinup = 0.0
         self.coolant = "off"
         self.tool: int | None = None
         self.safe_z = 0.0
 
     # numbers
-    def coord(self, mm: float) -> str:
-        return fmt(mm / MM_PER_INCH if self.inch else mm, 4 if self.inch else 3, point=self.post.decimal_point)
+    def coord(self, mm: float, *, toward: int = 0) -> str:
+        return fmt(mm / MM_PER_INCH if self.inch else mm, 4 if self.inch else 3, point=self.post.decimal_point,
+                   toward=toward)
 
     def pitch(self, mm: float) -> str:
         """A thread pitch: finer than a coordinate, since its error adds up every turn (1 mm is 0.03937 in)."""
@@ -480,8 +528,14 @@ class _Program:
         """The spindle turning forward at the toolpath's speed (again, after a rigid tap's G80 on Fanuc)."""
         if self.speed is not None and self.rpm != self.speed:
             self.cancel_cycle()
-            self.code(f"S{self.speed} M3")
+            self.start_spindle()
             self.rpm = self.speed
+
+    def start_spindle(self) -> None:
+        """``S M3``, then the spin-up wait when there is one."""
+        self.code(f"S{self.speed} M3")
+        if self.spinup > 0:
+            self.code("G4 " + self.post.dwell_words(self.spinup))
 
     def set_coolant(self, mode: str) -> None:
         if mode == self.coolant:
@@ -493,12 +547,14 @@ class _Program:
             if old in self.post.coolant_codes:
                 self.code(off)
             else:
-                self.comment(f"Coolant {old} off: this controller has no standard code for it; switch it off by hand")
+                self.comment(f"Coolant {old} off: this controller has no standard code for it, "
+                             "so switch it off by hand")
         if mode != "off":
             if mode in self.post.coolant_codes:
                 self.code(self.post.coolant_codes[mode])
             else:
-                self.comment(f"Coolant {mode}: this controller has no standard code for it; switch it on by hand")
+                self.comment(f"Coolant {mode}: this controller has no standard code for it, "
+                             "so switch it on by hand")
         self.coolant = mode
 
     def cancel_cycle(self) -> None:
@@ -510,12 +566,16 @@ class _Program:
 
     # motion
     def motion(self, g: str, xyz, *, feed: float | None = None, extra=(), force_z: bool = False,
-               force_xy: bool = False, exact_feed: bool = False) -> None:
+               force_xy: bool = False, exact_feed: bool = False, z_toward: int | None = None) -> None:
+        """A move; on a cutting move (with a feed) Z rounds up, toward safe, so it never cuts deeper than planned
+        (``z_toward`` says otherwise: a back bore cuts upward, so its top rounds down)."""
+        if z_toward is None:
+            z_toward = 1 if feed is not None else 0
         words = [g]
         for axis, (letter, value) in enumerate(zip("XYZ", xyz)):
             if value is None:
                 continue
-            text = self.coord(value)
+            text = self.coord(value, toward=z_toward if axis == 2 else 0)
             if text != self.written[axis] or (force_z and axis == 2) or (force_xy and axis < 2):
                 words.append(letter + text)
                 self.written[axis] = text
@@ -534,7 +594,7 @@ class _Program:
         if seconds > 0:
             self.code("G4 " + self.post.dwell_words(seconds))
 
-    def move(self, move: Move, start) -> None:
+    def move(self, move: Move, start, *, z_toward: int | None = None) -> None:
         if move.kind != "rapid":
             self.ensure_spindle()
         if move.kind == "rapid":
@@ -544,7 +604,7 @@ class _Program:
             extra = [f"I{self.coord(cx - start[0])}", f"J{self.coord(cy - start[1])}"]
             self.motion("G2" if move.kind == "arc_cw" else "G3", move.xyz, feed=move.feed, extra=extra, force_xy=True)
         else:
-            self.motion("G1", move.xyz, feed=move.feed)
+            self.motion("G1", move.xyz, feed=move.feed, z_toward=z_toward)
         self.dwell(move.dwell_s)
 
     def native_cycle(self, move: Move, start) -> None:
@@ -552,7 +612,7 @@ class _Program:
             raise ValueError(f"{self.post.name} post: a canned cycle must start from a known position")
         self.ensure_spindle()
         cycle = move.cycle
-        g99 = _returns_to_r(move)
+        g99 = cycle_return(move, start) == "r"
         code = "G89" if cycle.kind == "ream" and cycle.dwell_s else CYCLE_CODES[cycle.kind]
         key = (cycle, move.feed, g99)
         tap = cycle.kind in _TAPS
@@ -586,14 +646,15 @@ class _Program:
                         self.code(line)
                     running = False
                 if part.kind in ("plunge", "feed") and not running:
-                    self.code(f"S{self.speed} M3")
+                    self.start_spindle()
                     running = True
-            self.move(part, part_start)
+            upward = cycle.kind == "back_bore" and part.kind == "feed"
+            self.move(part, part_start, z_toward=-1 if upward else None)
             if cycle.kind == "bore" and part.kind == "plunge":
                 self.code("M5")
                 running = False
         if not running:
-            self.code(f"S{self.speed} M3")
+            self.start_spindle()
 
     # out
     def text(self) -> str:
