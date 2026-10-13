@@ -60,7 +60,7 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from cadgen._internal.cam.operations.base import OperationBase, ParseContext, finding
+from cadgen._internal.cam.operations.base import OperationBase, ParseContext, PlanError, finding
 from cadgen._internal.cam.values import choice, known, number
 
 if TYPE_CHECKING:
@@ -88,6 +88,9 @@ TAP_DIAMETER_TOL_MM = 0.15
 BACK_BORE_PASS_MM = 0.1
 
 _EPS = 1e-6
+#: How :meth:`_HoleOperation.unsuited` says a hole is out of this setup's reach rather than the wrong size for the tool
+#: (the PlanError's kind: ``unreachable``, else ``tool_too_large``: the tool does not fit the hole).
+_OUT_OF_REACH = ("has no counterbore", "has its counterbore on", "is blind")
 
 
 @dataclass(frozen=True)
@@ -179,14 +182,16 @@ class _HoleOperation(OperationBase):
                 seen[found.feature.ref] = index
                 why = self.unsuited(params, ctx, found)
                 if why:
-                    raise ValueError(f"{ctx.where}.features[{index}]: {ref} {why}")
+                    kind = "unreachable" if why.startswith(_OUT_OF_REACH) else "tool_too_large"
+                    raise PlanError(kind, f"{ctx.where}.features[{index}]: {ref} {why}",
+                                    items=[{"text": f"{ctx.label} {ref}", "ref": ref, "operation": ctx.label}])
             return named
         reached = [(found.feature.ref, found) for found in ctx.features if found.feature.kind == "hole"]
         suited = [(ref, found) for ref, found in reached if not self.unsuited(params, ctx, found)]
         if not suited:
             sizes = ", ".join(f"{ref} {found.feature.size['diameter_mm']:g} mm" for ref, found in reached) or "none"
-            raise ValueError(f"{ctx.where}.all: no hole setup {ctx.setup.setup.id} reaches suits {ctx.tool.id} "
-                             f"({self._tool_words(ctx)}); holes reached: {sizes}")
+            raise PlanError("empty_operation", f"{ctx.where}.all: no hole setup {ctx.setup.setup.id} reaches suits "
+                            f"{ctx.tool.id} ({self._tool_words(ctx)}); holes reached: {sizes}")
         return suited
 
     def _tool_words(self, ctx: "PlanContext") -> str:
@@ -212,8 +217,8 @@ class _HoleOperation(OperationBase):
         if params.depth_mm is not None:
             reach = top - params.depth_mm
             if reach < bottom - _EPS:
-                raise ValueError(f"{ctx.where}.depth_mm: {params.depth_mm:g} mm is deeper than {ref}, which is "
-                                 f"{top - bottom:g} mm {'through' if through else 'deep'}")
+                raise PlanError("too_deep", f"{ctx.where}.depth_mm: {params.depth_mm:g} mm is deeper than {ref}, "
+                                f"which is {top - bottom:g} mm {'through' if through else 'deep'}")
             if not through or reach > bottom + _EPS:
                 return self._blind(ctx, ref, reach, None if through else bottom, size, point)
         if through:
@@ -249,10 +254,11 @@ class _HoleOperation(OperationBase):
         tip, stats, found_ = self.tip_z(params, ctx, ref, found)
         if params.kind == "back_bore":
             if tip <= r + _EPS:
-                raise ValueError(f"{ctx.where}: {ref}'s counterbore top z {tip:g} is not over the R plane z {r:g}")
+                raise PlanError("empty_operation", f"{ctx.where}: {ref} has nothing to cut: the back bore's top "
+                                f"z {tip:g} is not over its R plane z {r:g}")
         elif tip >= r - _EPS:
-            raise ValueError(f"{ctx.where}: {ref} has nothing to cut: its depth z {tip:g} is not under the R plane "
-                             f"z {r:g}")
+            raise PlanError("empty_operation", f"{ctx.where}: {ref} has nothing to cut: its depth z {tip:g} is not "
+                            f"under the R plane z {r:g}")
         kind = params.kind
         dwell = params.dwell_s
         if kind == "drill" and dwell:
@@ -410,7 +416,7 @@ class SpotDrillOperation(_HoleOperation):
             depth = spot / 2 / math.tan(math.radians(angle) / 2)
         deepest = found.bottom[2] - float(found.feature.size.get("point_mm", 0.0))
         if not found.feature.size.get("through") and top - depth < deepest - _EPS:
-            raise ValueError(f"{ctx.where}: a {depth:g} mm deep spot goes past the bottom of {ref}")
+            raise PlanError("too_deep", f"{ctx.where}: a {depth:g} mm deep spot goes past the bottom of {ref}")
         stats = {"spot_depth_mm": round(depth, 6)}
         if spot is not None:
             stats["spot_diameter_mm"] = round(spot, 6)
@@ -526,7 +532,8 @@ class CounterboreOperation(_HoleOperation):
         tip = floor - pilot
         deepest = found.bottom[2] - float(found.feature.size.get("point_mm", 0.0))
         if not found.feature.size.get("through") and tip < deepest - _EPS:
-            raise ValueError(f"{ctx.where}: {ctx.tool.id}'s {pilot:g} mm pilot would go past the bottom of {ref}")
+            raise PlanError("too_deep", f"{ctx.where}: {ctx.tool.id}'s {pilot:g} mm pilot would go past the bottom "
+                            f"of {ref}")
         return tip, {"counterbore_floor_z": round(floor, 6)}, []
 
 

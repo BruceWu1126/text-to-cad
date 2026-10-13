@@ -194,11 +194,23 @@ class Drilling(unittest.TestCase):
                       value_error(self, parse_job, {**JOB, "operations": [{"op": "tap", "tool": "T1", "all": True}]}))
         self.assertIn("tools[0].pitch_mm", value_error(self, parse_job, {
             **JOB, "tools": [{"id": "T4", "type": "tap", "diameter_mm": 6}], "operations": []}))
-        self.assertIn("operations[0].features[0]: #o1.f7 is a 5 mm hole, and T1 is a 6 mm drill",
-                      value_error(self, plan_one, {"op": "drill", "tool": "T1", "features": [BLIND]}))
+        def plan_error(operation, tools=TOOLS):
+            from cadgen._internal.cam.operations.base import PlanError
+
+            with self.assertRaises(PlanError) as caught:
+                plan_one(operation, tools)
+            return caught.exception.kind, str(caught.exception)
+
+        kind, text = plan_error({"op": "drill", "tool": "T1", "features": [BLIND]})
+        self.assertEqual(kind, "tool_too_large")
+        self.assertIn("operations[0].features[0]: #o1.f7 is a 5 mm hole, and T1 is a 6 mm drill", text)
         tap8 = [{"id": "T9", "type": "tap", "diameter_mm": 8, "pitch_mm": 1.25}]
-        self.assertIn("no hole setup top reaches suits T9",
-                      value_error(self, plan_one, {"op": "tap", "tool": "T9", "all": True}, tap8))
+        kind, text = plan_error({"op": "tap", "tool": "T9", "all": True}, tap8)
+        self.assertEqual(kind, "empty_operation")
+        self.assertIn("no hole setup top reaches suits T9", text)
+        self.assertEqual(plan_error({"op": "drill", "tool": "T2", "features": [BLIND], "depth_mm": 8})[0], "too_deep")
+        cbore = [{"id": "T7", "type": "counterbore", "diameter_mm": 9}]
+        self.assertEqual(plan_error({"op": "counterbore", "tool": "T7", "features": [LEFT]}, cbore)[0], "unreachable")
         self.assertIn("needs shift_mm", value_error(self, parse_job, {**JOB, "operations": [
             {"op": "boring_cycle", "tool": "T6", "all": True, "cycle": "fine_bore"}]}))
 
