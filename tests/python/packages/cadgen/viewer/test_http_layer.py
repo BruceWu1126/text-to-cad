@@ -298,6 +298,30 @@ class ExplorerRoutes(HttpLayerTestCase):
             self.assertEqual(self.read("folder", folder)[0], 403)
 
 
+class KernelVariants(HttpLayerTestCase):
+    """A model's kernel variants (``kernels.py``): the same model built on other kernels, by file name."""
+
+    def variants(self, path):
+        status, _, body = self.fixture.request("GET", f"/__cad/kernels?file={quote(str(path), safe='')}")
+        return status, json.loads(body)
+
+    def test_any_member_answers_the_whole_family_own_file_first(self):
+        step = Path(self.fixture.tmp.name, "kernels", "STEP")
+        for name in ("bracket.step", ".kernels/usd-brep/bracket.step", ".kernels/sdm/bracket.stl",
+                     ".kernels/sdm/other.stl", ".kernels/empty/.keep", "lonely.step"):
+            (step / name).parent.mkdir(parents=True, exist_ok=True)
+            (step / name).write_bytes(b"x")
+        slashed = lambda p: str(p).replace(os.sep, "/")  # noqa: E731
+        family = [("brep", step / "bracket.step"), ("sdm", step / ".kernels/sdm/bracket.stl"),
+                  ("usd-brep", step / ".kernels/usd-brep/bracket.step")]
+        for opened in (step / "bracket.step", step / ".kernels/sdm/bracket.stl"):
+            with self.subTest(opened=opened.name):
+                self.assertEqual(self.variants(opened), (200, {"variants": [
+                    {"kernel": kernel, "file": slashed(file), "current": file == opened} for kernel, file in family]}))
+        self.assertEqual(self.variants(step / "lonely.step"), (200, {"variants": []}))
+        self.assertEqual(self.variants("STEP/bracket.step")[0], 400)
+
+
 class Pick(HttpLayerTestCase):
     """The home's Open: the desktop's chooser, held for the page (and never opened by a test)."""
 

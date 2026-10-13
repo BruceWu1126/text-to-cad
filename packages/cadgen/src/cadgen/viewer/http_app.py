@@ -499,6 +499,10 @@ class CadApp:
                     response.send_json(200, self.read_catalog(query.get("file")))
                 elif pathname in ("/__cad/folder", "/__cad/search"):
                     self._handle_folder(response, pathname, query)
+                elif pathname == "/__cad/kernels":
+                    from .kernels import kernel_variants
+
+                    response.send_json(200, kernel_variants(query.get("file")))
                 elif pathname == "/__cad/recents":
                     response.send_json(200, self._recents_payload())
                 elif pathname == "/__cad/thumbnail":

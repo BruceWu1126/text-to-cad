@@ -1,0 +1,10 @@
+{
+  "name": "kernels-three",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "three": "0.160.0",
+    "three-bvh-csg": "0.0.16",
+    "three-mesh-bvh": "0.7.8"
+  }
+}

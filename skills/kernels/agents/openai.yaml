@@ -1,0 +1,4 @@
+interface:
+  display_name: "CAD Kernels"
+  short_description: "Build a model on alternate CAD kernels and compare."
+  default_prompt: "Use $kernels to build this model on another CAD kernel and compare it with the OpenCASCADE result."

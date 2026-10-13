@@ -1,0 +1,11 @@
+{
+  "id": "_template-python",
+  "label": "My Python kernel",
+  "detail": "what it is, in a few words",
+  "exact": false,
+  "input": "program",
+  "output": "stl",
+  "command": ["{python}", "{here}/runner.py", "{program}", "{stl}"],
+  "setup": "What to install if the command can't run.",
+  "tolerance": 0.01
+}

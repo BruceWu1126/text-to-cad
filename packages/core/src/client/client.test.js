@@ -142,6 +142,18 @@ test('a folder is read one at a time, and a search under it asks the server with
   ]);
 });
 
+test('a file\'s kernel variants are read by its path, and only their list comes back', async (t) => {
+  const calls = [];
+  const variants = [{ kernel: 'brep', file: '/m/STEP/a.step', current: true }, { kernel: 'sdm', file: '/m/STEP/.kernels/sdm/a.stl', current: false }];
+  const client = createCadClient({ origin: 'http://one.test', pollIntervalMs: 0, fetch: async (url) => {
+    calls.push(new URL(url));
+    return json({ variants });
+  } });
+  t.after(() => client.dispose());
+  assert.deepEqual(await client.kernelVariants('/m/STEP/a.step'), variants);
+  assert.deepEqual(calls.map((url) => [url.pathname, Object.fromEntries(url.searchParams)]), [['/__cad/kernels', { file: '/m/STEP/a.step' }]]);
+});
+
 test('polling reads the files on screen again, and only those', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const calls = [];

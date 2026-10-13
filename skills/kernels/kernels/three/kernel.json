@@ -1,0 +1,11 @@
+{
+  "id": "three",
+  "label": "three.js",
+  "detail": "mesh CSG with three-bvh-csg",
+  "exact": false,
+  "input": "program",
+  "output": "stl",
+  "command": ["{node}", "{here}/runner.mjs", "{runtime}", "{program}", "{stl}"],
+  "setup": "Needs Node.js 20 or newer on PATH, and the three kernel's setup.sh run once for its packages.",
+  "tolerance": 0.005
+}

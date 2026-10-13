@@ -135,6 +135,12 @@ export const skillGroups = [
       "Creates and edits CAD models from plain-language or image requests, with STEP as the main output along with options to export to STL, 3MF and GLB.",
   },
   {
+    name: "Kernels",
+    path: "skills/kernels",
+    summary:
+      "Builds a model on other CAD kernels (NVIDIA usd-brep, Emergent Matter SDM, signed distance fields, three.js) to compare with OpenCASCADE; each kernel is a plugin folder.",
+  },
+  {
     name: "step.parts",
     path: "skills/step-parts",
     summary:

@@ -223,6 +223,12 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
     search(path, query, { signal } = {}) {
       return request('/__cad/search', { params: { path, q: query }, signal, timeoutMs: 10_000, operation: 'search' });
     },
+    // The model on screen built on other CAD kernels, saved beside it (`<folder>/.kernels/<kernel>/`):
+    // its own file first, then each kernel's. Empty when it has none. Names only: nothing is built.
+    kernelVariants(file, { signal } = {}) {
+      return request('/__cad/kernels', { params: { file }, signal, timeoutMs: 10_000, operation: 'kernels' })
+        .then((reply) => reply.variants);
+    },
     // What every CAD view on this machine shares, and the host's own effects, through this client's
     // fetch: the web page's own server, or the CAD app's through its tunnel. The home's library of
     // models and their pictures, Open with the desktop's chooser, Reveal, the person's analytics

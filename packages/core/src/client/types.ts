@@ -153,6 +153,12 @@ export interface CadRenderSession {
   signal: AbortSignal;
   dispose(): void;
 }
+/** One build of a model: the file a kernel wrote, and whether it is the one on screen. */
+export interface CadKernelVariant {
+  kernel: string;
+  file: string;
+  current: boolean;
+}
 /** Domain service consumed by renderers; HTTP metadata stays on its adapter. */
 export interface CadWorkspaceService {
   getSnapshot(): CadCatalogSnapshot;
@@ -162,6 +168,12 @@ export interface CadWorkspaceService {
   serverInfo(options?: CadRequestOptions & { fresh?: boolean }): Promise<CadServerInfo>;
   folder(path: string, options?: CadRequestOptions): Promise<CadFolder>;
   search(path: string, query: string, options?: CadRequestOptions): Promise<CadSearch>;
+  /**
+   * The model a file belongs to, built on other CAD kernels and saved beside it: its own file
+   * (kernel `brep`) first, then each kernel's, by kernel name. Empty when it has none. Optional:
+   * a client without it offers no kernel menu.
+   */
+  kernelVariants?(file: string, options?: CadRequestOptions): Promise<CadKernelVariant[]>;
   /** The home's library, newest first. */
   recents(options?: CadRequestOptions): Promise<CadRecent[]>;
   /** A change to the library (`open`, `pin`, `unpin`, `remove`, `thumbnail`): the library as it now is. */

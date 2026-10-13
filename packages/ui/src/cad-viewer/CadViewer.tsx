@@ -15,6 +15,7 @@ import type { LibraryLayout } from '../tab-store/tabRecord.js';
 import type { TabStore } from '../tab-store/tabStore.js';
 import { useTabViewerState } from '../tab-store/useTabViewerState.js';
 import { normalizePath } from './catalog.js';
+import { KernelMenu, useKernelVariants } from './KernelMenu.js';
 
 export interface CadViewerProps<Model extends LibraryModel = LibraryModel> {
   /** The CAD client: the catalog of the files on screen, and every document's resources. */
@@ -135,6 +136,10 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
     if (wanted && wanted !== latest.current.path) latest.current.onShow(wanted);
   }, []);
   const homed = Boolean(library);
+  // The model's builds on other kernels (the kernels skill's `.kernels/` beside it): the navbar's
+  // Kernel menu shows one in this view, as the explorer would. A view that shows its file alone has none.
+  const kernelVariants = useKernelVariants(client, homed ? shown ?? '' : '');
+  const variants = useMemo(() => <KernelMenu variants={kernelVariants} onOpen={openFile} />, [kernelVariants, openFile]);
   const home = useCallback(() => latest.current.onShow(''), []);
   const viewerHost = useMemo<ViewerHost>(() => ({ ...host, navigation: homed ? { openFile, home } : {} }), [host, openFile, home, homed]);
 
@@ -177,7 +182,7 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   }), [library, layout, changeLayout, path, picture, host.links, update, fullSize, onError, goHome]);
   return <>
     <FileViewer file={path || null} host={viewerHost} renderers={renderers} state={state} onStateChange={onStateChange}
-      displayActions={displayActions} appSettings={appSettings} update={update} fullSize={fullSize} history={history} features={features} notice={notice} onError={onError} presentation={presentation} />
+      displayActions={displayActions} appSettings={appSettings} update={update} variants={variants} fullSize={fullSize} history={history} features={features} notice={notice} onError={onError} presentation={presentation} />
     {drawing && !path ? <OffscreenPicture key={drawing.source.file} source={drawing.source} host={host} preferences={preferences} onDone={drawn} /> : null}
   </>;
 }

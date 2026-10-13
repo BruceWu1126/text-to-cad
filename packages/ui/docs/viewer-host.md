@@ -382,11 +382,20 @@ files can be browsed (`files.list` and `files.search`), and is plain text where 
 cannot; the ⋯ offers Copy path and Reveal in Finder / Show in Explorer / Show in file
 manager, each where `fileActions` can do it, and is absent where it can do none (no
 right-click on the name). Right, only what a host or a file adds: the host's update button
-first (`update`, while its install is behind), the renderer's navigation actions, the
+first (`update`, while its install is behind), the file's other builds (`variants`: the CAD
+viewer's Kernel menu, below), the renderer's navigation actions, the
 host's Full size where it shows the view small
 (`fullSize`, the inline card's way to full size, in the home's row too) and, last, the
 renderer's view controls in their box (`navbarSlot`: a 3D view's Display and Preview). The
 navbar holds no settings.
+
+The Kernel menu is `CadViewer`'s, for a model built on other CAD kernels: the kernels skill saves
+each build beside the model's own file (`.kernels/<kernel>/<stem>.step|.stl`) and the client lists
+them (`kernelVariants`, `GET /__cad/kernels`; a client without it offers no menu). It names the
+build on screen, BREP for the model's own, and choosing another shows that file in this view
+through `navigation.openFile`, as the explorer does, so a view that shows its file alone has none.
+It builds nothing: a build is the skill's, run beside the agent, never the viewer's (cadgen's law 12).
+The list is read when the file changes and when the page comes back into focus.
 
 The app menu is FileViewer's, built from the host's `navigation.home`, `links` and
 `environment.platform` and the person's `FileViewerProps.appSettings` (which `CadViewer`

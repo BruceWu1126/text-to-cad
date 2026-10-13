@@ -191,6 +191,7 @@ cache reads and writes.
 | `GET /__cad/catalog?file=...` | One file's catalog row and its `revision`. |
 | `GET /__cad/folder?path=...` | One folder's subfolders and CAD files. |
 | `GET /__cad/search?path=...&q=...` | The CAD files under a folder whose path holds `q`, bounded. |
+| `GET /__cad/kernels?file=...` | The model's builds on other CAD kernels, saved beside it as `.kernels/<kernel>/<stem>.*`: its own file (`brep`) first, then each kernel's, each `{kernel, file, current}`; empty when it has none. File names only: nothing is built. |
 | `GET /__cad/asset?file=...` | A CAD file's or sidecar's bytes. |
 | `GET /__cad/store?file=...` | Virtual render assets from the shared store. |
 | `GET /__cad/drawing?file=...` | A `.dxf` flattened to 2D render primitives; the DXF pane's only source. |

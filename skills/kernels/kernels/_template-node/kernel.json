@@ -1,0 +1,11 @@
+{
+  "id": "_template-node",
+  "label": "My JavaScript kernel",
+  "detail": "what it is, in a few words",
+  "exact": false,
+  "input": "program",
+  "output": "stl",
+  "command": ["{node}", "{here}/runner.mjs", "{program}", "{stl}"],
+  "setup": "Needs Node.js 20 or newer on PATH.",
+  "tolerance": 0.01
+}

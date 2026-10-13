@@ -73,6 +73,7 @@ export const ViewerNavbar: ComponentType<{
   trailing?: ReactNode;
   /** The host's update button, first among the controls, while its install is behind. */
   update?: ReactNode;
+  variants?: ReactNode;
   /** The host's Full size button, where it shows the view small. */
   fullSize?: ReactNode;
   /** The box, last in the row, the renderer draws its view controls into (a 3D view's Display and Preview). */

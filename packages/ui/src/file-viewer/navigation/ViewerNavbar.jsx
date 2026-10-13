@@ -25,7 +25,8 @@ import { FolderExplorer } from "./FolderExplorer.jsx";
  * the file.
  *
  * Right, only what a host or a file adds: the host's update button while its install is behind
- * (`update`, the blue `UpdateButton` from `@text-to-cad/ui/update`); the file's own actions (the
+ * (`update`, the blue `UpdateButton` from `@text-to-cad/ui/update`); the file's other builds
+ * (`variants`: the CAD viewer's Kernel menu, for a model built on other CAD kernels); the file's own actions (the
  * CAD viewer's one: a dismissed alert's icon, which brings its card back); the host's way to show
  * the view full size (`fullSize`), where it shows it small; and last the renderer's own view
  * controls (`controlsRef`, the box it draws them into: a 3D view's Display and Preview). Preview
@@ -126,11 +127,12 @@ function FileName({ path, explorer }) {
  *   onAction(action: import("./entry-menu.js").EntryAction, path: string): void } | null} [props.fileMenu]
  * @param {import("react").ReactNode} [props.trailing] The file's actions.
  * @param {import("react").ReactNode} [props.update] The host's update button, first among the controls.
+ * @param {import("react").ReactNode} [props.variants] The file's other builds (the CAD viewer's Kernel menu), after the update button.
  * @param {import("react").ReactNode} [props.fullSize] The host's Full size button, where it shows the view small.
  * @param {(element: HTMLDivElement | null) => void} [props.controlsRef] The box, last in the row, the renderer draws its view controls into.
  * @param {string} [props.className]
  */
-export function ViewerNavbar({ onHome, menu = null, history = null, file = null, explorer = null, fileMenu = null, trailing = null, update = null, fullSize = null, controlsRef, className }) {
+export function ViewerNavbar({ onHome, menu = null, history = null, file = null, explorer = null, fileMenu = null, trailing = null, update = null, variants = null, fullSize = null, controlsRef, className }) {
   return (
     <header className={cn(NAVBAR_ROW_CLASS, "border-border bg-background text-foreground", className)} data-viewer-navbar="">
       <nav aria-label="Viewer" className="flex min-w-0 flex-1 items-center overflow-hidden text-sm">
@@ -143,6 +145,7 @@ export function ViewerNavbar({ onHome, menu = null, history = null, file = null,
       </nav>
       <div className={NAVBAR_CONTROLS_CLASS}>
         {update}
+        {variants}
         {trailing}
         {fullSize}
         <div ref={controlsRef} className="contents" data-view-controls="" />

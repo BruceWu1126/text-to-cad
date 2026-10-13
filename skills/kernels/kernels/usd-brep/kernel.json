@@ -1,0 +1,11 @@
+{
+  "id": "usd-brep",
+  "label": "NVIDIA usd-brep",
+  "detail": "SMLib through keel",
+  "exact": true,
+  "input": "model",
+  "output": "step",
+  "command": ["{env:CAD_KEEL_BIN|keel}", "{here}/runner.py", "{model}", "{function}", "{step}"],
+  "setup": "Install keel (github.com/amywork777/keel) and put its bin/keel on PATH, or set CAD_KEEL_BIN to it. keel runs natively once built (native/build.sh), otherwise in Docker, which needs this project and this skill under the working directory.",
+  "tolerance": 0.0001
+}

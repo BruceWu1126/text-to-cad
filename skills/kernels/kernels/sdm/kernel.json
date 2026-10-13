@@ -1,0 +1,11 @@
+{
+  "id": "sdm",
+  "label": "Emergent Matter SDM",
+  "detail": "JAX signed distance field, marching cubes",
+  "exact": false,
+  "input": "program",
+  "output": "stl",
+  "command": ["{env:CAD_SDM_PYTHON|<runtime>/.venv/bin/python}", "{here}/runner.py", "{program}", "{stl}"],
+  "setup": "Run the sdm kernel's setup.sh once (needs uv and Python 3.13), or set CAD_SDM_PYTHON to a Python with emergent-matter-sdm-core[export].",
+  "tolerance": 0.01
+}
