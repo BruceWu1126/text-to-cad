@@ -14,7 +14,7 @@ from cadgen.results import CamFeaturesResult, CamResult
 __all__ = ["list_features", "plan_job"]
 
 
-def list_features(target: Path, *, occurrence: str | None = None, setup: str | None = None,
+def list_features(target: Path, *, occurrence: str | None = None, direction: str | None = None,
                   verbose: bool = False) -> CamFeaturesResult:
     raise NotImplementedError("phase 1 task 4: cam features is not built yet")
 

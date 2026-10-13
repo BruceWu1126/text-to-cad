@@ -53,7 +53,7 @@ The agent never contacts a machine. Like the `gcode` skill, CAM writes files; a 
 (package README: import discipline, ~0.2 s pre-gate).
 
 ```python
-def features(target: Path, *, occurrence: str | None = None, setup: str | None = None,
+def features(target: Path, *, occurrence: str | None = None, direction: str | None = None,
              verbose: bool = False) -> CamFeaturesResult:
     """List what a part offers a machinist: faces, holes, pockets, slots, bosses, turned diameters,
     each with the viewer's selector (#o1.f17), its size and the direction it can be reached from."""
@@ -88,13 +88,14 @@ Closed vocabulary (README law 9): an unknown key or value is a `ValueError` nami
     "max_rpm": 24000, "max_feed_mm_min": 5000,
     "units": "mm"
   },
-  "material": "aluminum-6061",      // or {"name", "sfm", "chipload_mm": {...}, "hardness_hb"}
-  "stock": {"type": "box", "margin_mm": [2, 2, 1]},   // box | cylinder | {"from": "stock.step"} | sheet (2D)
+  "material": "aluminum-6061",      // or {"name", "surface_m_min", "chipload_mm": {...}, "hardness_hb"}
+  "stock": {"type": "box", "margin_mm": [2, 2, 1, 1]},   // box | cylinder | {"from": "stock.step"} | sheet (2D)
   "setups": [{
     "id": "top",
     "direction": "+Z",              // tool axis in part frame; "#o1.f4" to face a part face
     "origin": "stock_top_center",   // WCS: stock_top_center | stock_top_corner | part_bbox_* | [x, y, z]
-    "fixture": {"type": "vise", "jaw_height_mm": 20}   // vise | plate | chuck | collet | sheet | none; used for collisions
+    "clearance_mm": 10, "retract_mm": 3,   // heights above the stock top (these defaults); an operation may override
+    "fixture": {"type": "vise", "jaw_height_mm": 20, "grip_mm": 5}   // vise | plate | chuck | collet | sheet | none; used for collisions
   }],
   "tools": [
     {"id": "T1", "type": "flat_endmill", "diameter_mm": 6, "flutes": 3, "flute_length_mm": 18,
@@ -109,6 +110,15 @@ Closed vocabulary (README law 9): an unknown key or value is a `ValueError` nami
   "view": {"show": {"rapids": true, "stock": "final"}}
 }
 ```
+
+Box stock's `margin_mm` is `[x, y, z_top, z_bottom]`: added on each side in x and in y, above the part and below
+it (that one form only). A cylinder's `diameter_mm` and a radial margin exclude each other. A vise or chuck's
+`grip_mm` is how much of the stock its jaws hold, and a vise may take `parallels_mm`; both feed the fixture and
+holder collision checks. A `*_corner` origin is the min-X, min-Y corner (front left). A setup's `clearance_mm`
+(default 10) is the height above the stock top the tool moves between features at, `retract_mm` (default 3) the
+height it lifts to between passes; retract is above zero and at or under clearance, and an operation may override
+either. A custom material states `surface_m_min` (the job is all metric; the material table is in m/min too).
+`acrylic` is in the table. A post not built yet is refused like an operation not built yet.
 
 Feeds and speeds are computed (below) unless an operation states `rpm`, `feed_mm_min`, `plunge_mm_min`.
 Every operation takes `features` (selectors from `cam features`) or, where it makes sense, `region`
@@ -185,7 +195,7 @@ machine, so cadgen never guesses (the same rule as the `gcode` skill's presets).
 
 Phase 1: `grbl`, `linuxcnc`, `fanuc`, `haas`, `mach3`. Phase 3: `fanuc_lathe`, `linuxcnc_lathe`, `grbl_laser`
 (M4 dynamic power), `linuxcnc_plasma`, `waterjet`, `fanuc_wire`, `sinker_iso`. Phase 4: `linuxcnc_5x`,
-`fanuc_5x`, `haas_umc` (TCP), and a generic 3+2 post using G68.2.
+`fanuc_5x`, `haas_umc` (TCP), and `fanuc_g68_2`, a generic 3+2 post using G68.2.
 
 Every `.nc` file opens with a comment block: part, job, setup, WCS, tools, and the line "Prove this program on
 the machine: single block, feed override low, in air first."

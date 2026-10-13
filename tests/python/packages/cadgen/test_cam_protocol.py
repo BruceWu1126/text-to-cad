@@ -36,6 +36,14 @@ class Surface(unittest.TestCase):
         for word in ("--job", "--post", "--occurrence", "--verbose", "--json", "TARGET [OUT]"):
             self.assertIn(word, out.getvalue())
 
+    def test_features_help_names_the_tool_direction(self):
+        from cadgen import cli
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.suppress(SystemExit):
+            cli.main(["cam", "features", "--help"])
+        self.assertIn("--direction", out.getvalue())
+
     def test_the_public_namespace_imports_no_kernel_geometry_or_numerics(self):
         self.assertEqual(heavy_at_import("cadgen.cam", "cadgen.cli.cam_plan", "cadgen.cli.cam_features"), "")
 
@@ -52,13 +60,13 @@ class Registry(unittest.TestCase):
 
     def test_an_unknown_name_lists_every_name(self):
         message = value_error(self, get_operation, "pocket")
-        self.assertIn("operation: 'pocket' is not an operation cadgen knows; use one of facing, contour_2d", message)
+        self.assertIn("operation: \"pocket\" is not an operation cadgen knows; use one of facing, contour_2d", message)
         self.assertIn("flowline_5x", message)
 
     def test_an_unbuilt_name_says_its_phase_never_an_import_error(self):
-        self.assertIn("operation: 'adaptive_3d' is phase 2, not built yet; built today: none yet",
+        self.assertIn("operation: \"adaptive_3d\" is phase 2, not built yet; built today: none yet",
                       value_error(self, get_operation, "adaptive_3d"))
-        self.assertIn("'facing' is phase 1, not built yet", value_error(self, get_operation, "facing"))
+        self.assertIn("\"facing\" is phase 1, not built yet", value_error(self, get_operation, "facing"))
 
     def test_an_operation_is_built_once_its_family_module_defines_its_class(self):
         with stub_operations("facing"):

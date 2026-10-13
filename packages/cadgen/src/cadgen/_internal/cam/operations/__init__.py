@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from cadgen._internal.cam.operations.base import Phase
+from cadgen._internal.cam.values import json_text
 
 if TYPE_CHECKING:
     from cadgen._internal.cam.operations.base import Operation
@@ -126,16 +127,16 @@ def built() -> tuple[str, ...]:
 
 def get_operation(name: str) -> "Operation":
     """The operation's instance. An unknown name: ValueError listing every name. A registered name not built
-    yet: ValueError "operation: 'adaptive_3d' is phase 2, not built yet; built today: ...". Never ImportError."""
+    yet: ValueError 'operation: "adaptive_3d" is phase 2, not built yet; built today: ...'. Never ImportError."""
     entry = REGISTRY.get(name) if isinstance(name, str) else None
     if entry in _INSTANCES:
         return _INSTANCES[entry]
     if entry is None:
-        raise ValueError(f"operation: {name!r} is not an operation cadgen knows; use one of {', '.join(OPERATION_NAMES)}")
+        raise ValueError(f"operation: {json_text(name)} is not an operation cadgen knows; use one of {', '.join(OPERATION_NAMES)}")
     cls = _cls(entry)
     if cls is None:
         today = ", ".join(built()) or "none yet"
-        raise ValueError(f"operation: {name!r} is phase {entry.phase}, not built yet; built today: {today}")
+        raise ValueError(f"operation: {json_text(name)} is phase {entry.phase}, not built yet; built today: {today}")
     instance = cls()
     _INSTANCES[entry] = instance
     return instance

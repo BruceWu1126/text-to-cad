@@ -625,11 +625,11 @@ class CamFeaturesResult:
     document: Path
     occurrence: str
     #: The tool direction the list was limited to, or ``None`` for every axis direction.
-    setup: str | None = None
+    direction: str | None = None
     features: tuple[CamFeature, ...] = ()
 
     def human_lines(self) -> list[str]:
-        scope = f", reached from {self.setup}" if self.setup else ""
+        scope = f", reached from {self.direction}" if self.direction else ""
         lines = [f"{self.occurrence} in {_display(self.document)}: {len(self.features)} features{scope}"]
         for feature in self.features:
             reach = f"  from {' '.join(feature.reach)}" if feature.reach else ""

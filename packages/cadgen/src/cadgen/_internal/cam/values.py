@@ -80,25 +80,29 @@ def known(entry: dict, keys, *, where: str, takes: str = "") -> None:
 
 
 def selectors(value: Any, *, where: str, kinds: tuple[str, ...] = ("face", "edge")) -> tuple[str, ...]:
-    """A non-empty list of the viewer's selectors (``#o1.f12``), each a face or edge (or a label naming one).
+    """A non-empty list of the viewer's selectors (``#o1.f12``), each a face or edge (or a label naming one), each once.
 
-    Only the syntax is checked here: what a selector points at is resolved when the part is opened.
+    A single string stands for a list of one, and its errors name ``where`` itself, with no ``[0]``. Only the syntax is
+    checked here: what a selector points at is resolved when the part is opened.
     """
     from cadgen.cad_ref_syntax import parse_selector, split_cad_ref  # stdlib only
 
-    if isinstance(value, str):
-        value = [value]
-    if not isinstance(value, list) or not value:
+    single = isinstance(value, str)
+    items = [value] if single else value
+    if not isinstance(items, list) or not items:
         raise ValueError(f"{where}: list the selectors `cadgen cam features` prints, like [\"#o1.f12\"]")
-    refs = []
-    for index, ref in enumerate(value):
+    refs: list[str] = []
+    for index, ref in enumerate(items):
+        at = where if single else f"{where}[{index}]"
         if not isinstance(ref, str) or not ref.strip():
-            raise ValueError(f"{where}[{index}]: expected a selector like \"#o1.f12\", got {json_text(ref)}")
+            raise ValueError(f"{at}: expected a selector like \"#o1.f12\", got {json_text(ref)}")
         parsed = parse_selector(split_cad_ref(ref.strip())[1])
         kind = None if parsed is None else parsed.selector_type
         if kind not in (*kinds, "label"):
-            what = "an occurrence" if kind == "occurrence" else "not a selector"
-            raise ValueError(f"{where}[{index}]: {json_text(ref)} is {what}; name a {words(kinds)} "
-                             f"`cadgen cam features` lists, like \"#o1.f12\"")
+            what = f"an {kind}" if kind in ("edge", "occurrence") else f"a {kind}" if kind else "not a selector"
+            raise ValueError(f"{at}: {json_text(ref)} is {what}; name a {words(kinds)} `cadgen cam features` lists, "
+                             f"like \"#o1.f12\"")
+        if ref.strip() in refs:
+            raise ValueError(f"{at}: {json_text(ref)} is listed twice")
         refs.append(ref.strip())
     return tuple(refs)

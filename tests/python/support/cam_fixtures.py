@@ -10,6 +10,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import unittest
+from contextlib import contextmanager
 
 from tests.python.support.paths import REPO_ROOT, add_repo_path
 
@@ -85,3 +86,25 @@ def stub_operations(*names: str):
     entries = {name: Entry(name, REGISTRY[name].phase, __name__, STUBS[name], REGISTRY[name].word)
                for name in (names or STUBS)}
     return mock.patch.dict(REGISTRY, entries)
+
+
+class StubPost:
+    """Stands in for a post until task 8 builds them."""
+
+
+def stub_posts(*names: str):
+    """The posts' ``REGISTRY`` with these posts (grbl and haas by default) built as :class:`StubPost`."""
+    from dataclasses import replace
+    from unittest import mock
+
+    from cadgen._internal.cam.posts import REGISTRY
+
+    entries = {name: replace(REGISTRY[name], module=__name__, cls="StubPost") for name in (names or ("grbl", "haas"))}
+    return mock.patch.dict(REGISTRY, entries)
+
+
+@contextmanager
+def stubbed():
+    """The four stand-in operations and the grbl and haas posts, built, for a job that parses."""
+    with stub_operations(), stub_posts():
+        yield

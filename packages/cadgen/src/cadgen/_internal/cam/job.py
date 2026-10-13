@@ -5,10 +5,10 @@ A job is JSON (a path, an inline JSON string, or a dict from a library caller) o
     {
       "machine": {"kind": "mill", "axes": 3, "post": "grbl", "travel_mm": [800, 600, 120],
                   "max_rpm": 24000, "max_feed_mm_min": 5000, "rapid_mm_min": 5000, "units": "mm"},
-      "material": "aluminum-6061",                 # or {"name", "sfm", "chipload_mm", "hardness_hb"}
-      "stock": {"type": "box", "margin_mm": [2, 2, 1]},   # box | cylinder | sheet | {"from": "stock.step"}
-      "setups": [{"id": "top", "direction": "+Z", "origin": "stock_top_center",
-                  "fixture": {"type": "vise", "jaw_height_mm": 20}}],
+      "material": "aluminum-6061",                 # or {"name", "surface_m_min", "chipload_mm", "hardness_hb"}
+      "stock": {"type": "box", "margin_mm": [2, 2, 1, 1]},   # box | cylinder | sheet | {"from": "stock.step"}
+      "setups": [{"id": "top", "direction": "+Z", "origin": "stock_top_center", "clearance_mm": 10, "retract_mm": 3,
+                  "fixture": {"type": "vise", "jaw_height_mm": 20, "grip_mm": 5}}],
       "tools": [{"id": "T1", "type": "flat_endmill", "diameter_mm": 6, "flutes": 3, "flute_length_mm": 18,
                  "stickout_mm": 30, "holder": {"diameter_mm": 32, "length_mm": 40}, "material": "carbide"}],
       "operations": [{"op": "pocket_2d", "setup": "top", "tool": "T1", "features": ["#o1.f12"]}],
@@ -17,15 +17,23 @@ A job is JSON (a path, an inline JSON string, or a dict from a library caller) o
 
 Every key and every enum is a closed vocabulary (README law 9): an unknown one is a ValueError naming its path
 (``operations[2].stepover: ...``). ``machine.post`` is required and never guessed: a wrong post can crash a
-machine. An operation's own keys are read by the operation (``operations/``); this module reads the keys every
-operation shares (:data:`COMMON_KEYS`) and checks what an operation names exists and suits it: its setup, its
-tool (a tap cannot pocket) and the machine. Units: mm, mm/min, rpm; ``machine.units: "inch"`` changes only what
-the G-code is written in. Stdlib only, so a malformed job fails in milliseconds, before any part is opened.
+machine; a post not built yet is refused like an operation not built yet. An operation's own keys are read by the
+operation (``operations/``); this module reads the keys every operation shares (:data:`COMMON_KEYS`) and checks
+what an operation names exists and suits it: its setup, its tool (a tap cannot pocket) and the machine.
+
+Units: mm, mm/min, m/min, rpm, everywhere in the job; ``machine.units: "inch"`` changes only what the G-code is
+written in. Box stock's margin is ``[x, y, z_top, z_bottom]``: added on each side in x and in y, above the part and
+below it. A setup's ``clearance_mm`` (default 10) is the height above the stock top the tool moves between features
+at, and ``retract_mm`` (default 3) the height above the stock top it lifts to between passes; an operation may
+override either. The ``*_corner`` origins are the min-X, min-Y corner (front left, looking down the tool).
+
+Stdlib only, so a malformed job fails in milliseconds, before any part is opened.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,9 +42,9 @@ from typing import Any
 from cadgen._internal.cam.values import choice, flag, json_text, known, number, obj, selectors, whole, words
 
 __all__ = [
-    "AXIS_DIRECTIONS", "COMMON_KEYS", "COOLANTS", "FIXTURES", "Fixture", "Holder", "Job", "MACHINE_KINDS", "MATERIALS",
-    "Machine", "Material", "ORIGINS", "Operation", "POSTS", "STOCK_TYPES", "Setup", "Stock", "TOOL_MATERIALS",
-    "TOOL_TYPES", "Tool", "parse_job",
+    "AXIS_DIRECTIONS", "COMMON_KEYS", "COOLANTS", "DEFAULT_CLEARANCE_MM", "DEFAULT_RETRACT_MM", "FIXTURES", "Fixture",
+    "Holder", "Job", "MACHINE_KINDS", "MATERIALS", "Machine", "Material", "ORIGINS", "Operation", "STOCK_TYPES",
+    "Setup", "Stock", "TOOL_MATERIALS", "TOOL_TYPES", "Tool", "parse_job",
 ]
 
 JOB_KEYS = ("machine", "material", "stock", "setups", "tools", "operations", "view")
@@ -50,33 +58,14 @@ MACHINE_KINDS: dict[str, tuple[int, ...]] = {
 }
 MACHINE_KEYS = ("kind", "axes", "post", "travel_mm", "max_rpm", "max_feed_mm_min", "rapid_mm_min", "units")
 UNITS = ("mm", "inch")
-#: Every post (G-code dialect) by name: the phase it is built in, the machines it writes for, and the fewest axes
-#: those machines have (a 5-axis post writes rotary moves a 3-axis machine has no axis for).
-POSTS: dict[str, tuple[int, tuple[str, ...], int]] = {
-    "grbl": (1, ("mill", "router"), 2),
-    "linuxcnc": (1, ("mill", "router"), 2),
-    "fanuc": (1, ("mill", "router"), 2),
-    "haas": (1, ("mill",), 2),
-    "mach3": (1, ("mill", "router"), 2),
-    "fanuc_lathe": (3, ("lathe",), 2),
-    "linuxcnc_lathe": (3, ("lathe",), 2),
-    "grbl_laser": (3, ("laser",), 2),
-    "linuxcnc_plasma": (3, ("plasma",), 2),
-    "waterjet": (3, ("waterjet",), 2),
-    "fanuc_wire": (3, ("wire_edm",), 2),
-    "sinker_iso": (3, ("sinker_edm",), 2),
-    "linuxcnc_5x": (4, ("mill",), 5),
-    "fanuc_5x": (4, ("mill",), 5),
-    "haas_umc": (4, ("mill",), 5),
-    "generic_3plus2": (4, ("mill",), 5),
-}
 
 # --- material, stock, setups -----------------------------------------------------------------------------
 
-#: The material table's names (feeds.py holds their numbers).
-MATERIALS = ("aluminum-6061", "aluminum-7075", "mild-steel", "stainless-304", "brass", "acetal", "hdpe", "mdf",
-             "plywood", "hardwood")
-MATERIAL_KEYS = ("name", "sfm", "chipload_mm", "hardness_hb")
+#: The material table's names (feeds.py holds their numbers, surface speed in m/min).
+MATERIALS = ("aluminum-6061", "aluminum-7075", "mild-steel", "stainless-304", "brass", "acetal", "hdpe", "acrylic",
+             "mdf", "plywood", "hardwood")
+MATERIAL_KEYS = ("name", "surface_m_min", "chipload_mm", "hardness_hb")
+_CUSTOM_MATERIAL = '{"name", "surface_m_min", "chipload_mm"}'
 #: Each stock type and the keys it takes besides ``type``.
 STOCK_TYPES: dict[str, tuple[str, ...]] = {
     "box": ("margin_mm",),
@@ -91,15 +80,20 @@ STOCK_FOR_KIND: dict[str, tuple[str, ...]] = {
 }
 AXES = ("X", "Y", "Z")
 AXIS_DIRECTIONS = ("+X", "-X", "+Y", "-Y", "+Z", "-Z")
-#: Where a setup's work coordinate zero sits, by keyword; or ``[x, y, z]`` in the part's frame.
+#: Where a setup's work coordinate zero sits, by keyword; or ``[x, y, z]`` in the part's frame. A ``*_corner`` is
+#: the min-X, min-Y corner (front left).
 ORIGINS = ("stock_top_center", "stock_top_corner", "part_bbox_top_center", "part_bbox_top_corner",
            "part_bbox_center", "part_bbox_bottom_center", "part_bbox_bottom_corner")
-SETUP_KEYS = ("id", "direction", "origin", "fixture")
-#: Each fixture type and the sizes it takes (mm) besides ``type``; collisions are checked against it.
+SETUP_KEYS = ("id", "direction", "origin", "clearance_mm", "retract_mm", "fixture")
+#: Heights above the stock top, mm: where the tool moves between features, and where it lifts between passes.
+DEFAULT_CLEARANCE_MM = 10.0
+DEFAULT_RETRACT_MM = 3.0
+#: Each fixture type and the sizes it takes (mm) besides ``type``; collisions are checked against it. ``grip_mm`` is
+#: how much of the stock the jaws hold; ``parallels_mm`` the height of the parallels the stock sits on in a vise.
 FIXTURES: dict[str, tuple[str, ...]] = {
-    "vise": ("jaw_height_mm", "jaw_width_mm"),
+    "vise": ("jaw_height_mm", "jaw_width_mm", "grip_mm", "parallels_mm"),
     "plate": ("thickness_mm",),
-    "chuck": ("diameter_mm", "jaw_length_mm"),
+    "chuck": ("diameter_mm", "jaw_length_mm", "grip_mm"),
     "collet": ("diameter_mm",),
     "sheet": (),
     "none": (),
@@ -113,11 +107,14 @@ FIXTURES_FOR_KIND: dict[str, tuple[str, ...]] = {
 # --- tools ---------------------------------------------------------------------------------------------
 
 TOOL_MATERIALS = ("carbide", "hss")
-#: Keys every tool takes.
+#: Keys every tool held in a holder takes.
 TOOL_COMMON = ("id", "type", "material", "stickout_mm", "holder", "comment")
+#: Keys a beam, jet or wire takes: it has no holder, stickout or tool material.
+KERF_COMMON = ("id", "type", "comment")
+KERF_TOOLS = ("laser", "plasma", "waterjet", "wire")
 #: A rotating cutter's optional keys.
 _CUTTER = ("flutes", "flute_length_mm", "shank_diameter_mm")
-#: Each tool type: (the keys it needs, the keys it may take), beyond :data:`TOOL_COMMON`.
+#: Each tool type: (the keys it needs, the keys it may take), beyond :data:`TOOL_COMMON` (or :data:`KERF_COMMON`).
 TOOL_TYPES: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     # Milling cutters.
     "flat_endmill": (("diameter_mm",), _CUTTER),
@@ -154,7 +151,7 @@ _TOOL_ID = re.compile(r"T([1-9][0-9]{0,3})")
 
 #: The keys every operation takes; the rest are the operation's own (its ``keys``).
 COMMON_KEYS = ("op", "setup", "tool", "features", "region", "all", "rpm", "feed_mm_min", "plunge_mm_min",
-               "stock_to_leave_mm", "coolant")
+               "stock_to_leave_mm", "coolant", "clearance_mm", "retract_mm")
 COOLANTS = ("off", "flood", "mist", "air")
 VIEW_KEYS = ("show",)
 #: What the viewer draws: booleans, and which stock (``none`` hides it).
@@ -178,8 +175,8 @@ class Machine:
 @dataclass(frozen=True)
 class Material:
     name: str
-    #: Surface speed (feet per minute) and chip load (mm per tooth), set only when the job states them.
-    sfm: float | None = None
+    #: Surface speed (m/min) and chip load (mm per tooth), set only when the job states them.
+    surface_m_min: float | None = None
     #: A chip load for every tool, or ``((diameter_mm, chip load), ...)`` by tool diameter, smallest first.
     chipload_mm: float | tuple[tuple[float, float], ...] | None = None
     hardness_hb: float | None = None
@@ -193,9 +190,9 @@ class Material:
 @dataclass(frozen=True)
 class Stock:
     type: str                                   # box | cylinder | sheet | from
-    #: box ``(x, y, z)``, cylinder ``(radial, axial)``, sheet ``(x, y)``; zero when not stated.
+    #: box ``(x, y, z_top, z_bottom)``, cylinder ``(radial, axial)``, sheet ``(x, y)``; zero when not stated.
     margin_mm: tuple[float, ...] = ()
-    diameter_mm: float | None = None            # cylinder: the bar size, when stated
+    diameter_mm: float | None = None            # cylinder: the bar size, when stated (then no radial margin)
     axis: str = "Z"                             # cylinder: its axis in the part's frame
     thickness_mm: float | None = None           # sheet: when stated, else the part's
     path: Path | None = None                    # from: the blank's STEP
@@ -204,7 +201,7 @@ class Stock:
 @dataclass(frozen=True)
 class Fixture:
     type: str
-    #: Its sizes, mm, by key (``jaw_height_mm``).
+    #: Its sizes, mm, by key (``jaw_height_mm``, ``grip_mm``).
     size: dict = field(default_factory=dict)
 
 
@@ -216,6 +213,9 @@ class Setup:
     #: An :data:`ORIGINS` keyword, or a point ``(x, y, z)`` in the part's frame, mm.
     origin: str | tuple[float, float, float] = "stock_top_center"
     fixture: Fixture = Fixture("none")
+    #: Heights above the stock top, mm (see the module's docstring).
+    clearance_mm: float = DEFAULT_CLEARANCE_MM
+    retract_mm: float = DEFAULT_RETRACT_MM
 
 
 @dataclass(frozen=True)
@@ -229,7 +229,8 @@ class Tool:
     id: str                                     # "T1"
     number: int                                 # 1: the machine's tool table slot
     type: str
-    material: str = "carbide"
+    #: ``None`` for a beam, jet or wire.
+    material: str | None = "carbide"
     diameter_mm: float | None = None
     flutes: int | None = None
     flute_length_mm: float | None = None
@@ -255,6 +256,9 @@ class Operation:
     plunge_mm_min: float | None = None
     stock_to_leave_mm: float = 0.0
     coolant: str = "off"
+    #: The setup's heights, or the operation's own when it overrides them.
+    clearance_mm: float = DEFAULT_CLEARANCE_MM
+    retract_mm: float = DEFAULT_RETRACT_MM
     #: What the operation's own ``parse`` made of its keys.
     params: Any = None
 
@@ -269,7 +273,7 @@ class Job:
     operations: tuple[Operation, ...]
     #: What the viewer draws (``{"show": {...}}``), checked; ``None`` for its defaults.
     view: dict | None = None
-    #: The raw document, echoed into the sidecar so a result names its inputs.
+    #: The document as plain JSON (a copy, never the caller's), echoed into the sidecar so a result names its inputs.
     source: dict = field(default_factory=dict, compare=False)
 
     def setup(self, setup_id: str) -> Setup:
@@ -281,19 +285,34 @@ class Job:
 
 # --- loading -------------------------------------------------------------------------------------------
 
+def _refuse_constant(name: str):
+    raise ValueError(f"{name} is not a number a job can hold")
+
+
+def _parse_text(text: str, what: str) -> Any:
+    try:
+        return json.loads(text, parse_constant=_refuse_constant)
+    except ValueError as exc:  # JSONDecodeError is a ValueError
+        raise ValueError(f"{what} does not parse as JSON: {exc}") from exc
+
+
 def _load_document(job: str | dict | Path) -> tuple[dict, Path]:
-    """The job document, and the folder its relative paths (``stock.from``) are read from."""
+    """The job document as plain JSON, and the folder its relative paths (``stock.from``) are read from.
+
+    A dict is copied through JSON, so it is read exactly as the same job in a file would be (tuples become lists),
+    NaN and infinity are refused, and nothing parsed shares the caller's lists.
+    """
     if isinstance(job, dict):
-        return job, Path.cwd()
+        try:
+            text = json.dumps(job, allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"job: not plain JSON: {exc}") from exc
+        return json.loads(text), Path.cwd()
     if isinstance(job, Path):
         return _read_json_file(job), job.parent
     text = str(job).strip()
     if text.startswith("{"):
-        try:
-            document = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"job: inline JSON does not parse: {exc}") from exc
-        return document, Path.cwd()
+        return _parse_text(text, "job: inline JSON"), Path.cwd()
     path = Path(text).expanduser()
     return _read_json_file(path), path.parent
 
@@ -301,10 +320,7 @@ def _load_document(job: str | dict | Path) -> tuple[dict, Path]:
 def _read_json_file(path: Path) -> dict:
     if not path.is_file():
         raise FileNotFoundError(f"job file does not exist: {path}")
-    try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"job file {path} does not parse as JSON: {exc}") from exc
+    document = _parse_text(path.read_text(encoding="utf-8"), f"job file {path}")
     if not isinstance(document, dict):
         raise ValueError(f"job file {path} must hold one JSON object")
     return document
@@ -320,46 +336,76 @@ def _entries(document: dict, key: str, example: str) -> list[dict]:
     return raw
 
 
+def _id(value: Any, *, where: str, example: str) -> str:
+    """A setup's name: text, with no space around it (operations name it exactly)."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{where}: name it, like {example}; operations name it")
+    if value != value.strip():
+        raise ValueError(f"{where}: {json_text(value)} has space around it; write {json_text(value.strip())}")
+    return value
+
+
 def _sizes(entry: dict, keys, *, where: str) -> dict:
     """The positive sizes (mm, degrees) among ``keys`` that ``entry`` states."""
     return {key: number(entry[key], where=f"{where}.{key}", positive=True) for key in keys if key in entry}
 
 
-def _triple(value: Any, *, where: str, count: int, words_: str) -> tuple[float, ...]:
-    """A list of ``count`` numbers, each zero or more, or one number for all of them."""
-    if not isinstance(value, list):
+def _margins(value: Any, *, where: str, count: int, names: str, single: bool) -> tuple[float, ...]:
+    """A list of ``count`` margins, each zero or more; or, where ``single``, one number for all of them."""
+    if single and not isinstance(value, list):
         return (number(value, where=where, minimum=0),) * count
-    if len(value) != count:
-        raise ValueError(f"{where}: {words_}, got {json_text(value)}")
+    if not isinstance(value, list) or len(value) != count:
+        either = "one margin for every side, or " if single else ""
+        raise ValueError(f"{where}: {either}{names} in mm, got {json_text(value)}")
     return tuple(number(item, where=f"{where}[{index}]", minimum=0) for index, item in enumerate(value))
+
+
+def _heights(entry: dict, where: str, clearance: float, retract: float) -> tuple[float, float]:
+    """``clearance_mm`` and ``retract_mm`` above the stock top, each defaulting to the one given: retract at or under
+    clearance, both above the stock."""
+    if "clearance_mm" in entry:
+        clearance = number(entry["clearance_mm"], where=f"{where}.clearance_mm", positive=True)
+    if "retract_mm" in entry:
+        retract = number(entry["retract_mm"], where=f"{where}.retract_mm", positive=True)
+    if retract > clearance:
+        key = "retract_mm" if "retract_mm" in entry else "clearance_mm"
+        raise ValueError(f"{where}.{key}: the retract height ({retract:g} mm) must be at or under the clearance height "
+                         f"({clearance:g} mm), both above the stock top")
+    return clearance, retract
 
 
 # --- sections ------------------------------------------------------------------------------------------
 
 def _machine(raw: Any, post_override: str | None) -> Machine:
+    from cadgen._internal.cam.posts import REGISTRY as POSTS, built, get_post
+
     machine = obj(raw, where="machine", example='{"kind": "mill", "post": "grbl"}')
     known(machine, MACHINE_KEYS, where="machine", takes=f"a machine takes {', '.join(MACHINE_KEYS)}")
     if "kind" not in machine:
         raise ValueError(f"machine.kind: required, one of {words(MACHINE_KINDS)}")
     kind = choice(machine["kind"], MACHINE_KINDS, where="machine.kind")
-    axes_allowed = MACHINE_KINDS[kind]
-    axes = machine.get("axes", axes_allowed[0])
-    if isinstance(axes, bool) or axes not in axes_allowed:
-        raise ValueError(f"machine.axes: a {kind} has {words(axes_allowed)} axes, got {json_text(axes)}")
-    posts = [name for name, (_, kinds, fewest) in POSTS.items() if kind in kinds and fewest <= axes]
+    allowed = MACHINE_KINDS[kind]
+    axes = whole(machine.get("axes", allowed[0]), where="machine.axes", low=2, high=5)
+    if axes not in allowed:
+        raise ValueError(f"machine.axes: a {kind} has {words(allowed)} axes, got {axes}")
+    today = ", ".join(built(kind, axes)) or "none yet"
     post = post_override if post_override is not None else machine.get("post")
     where = "--post" if post_override is not None else "machine.post"
     if post is None:
         raise ValueError(f"machine.post: required, and never guessed: a wrong post can crash a machine. Name the "
-                         f"controller's dialect, one of {words(posts)} for a {kind} (or pass --post)")
-    if not isinstance(post, str) or post not in POSTS:
-        raise ValueError(f"{where}: {json_text(post)} is not a post cadgen knows; one of {words(posts)} for a {kind}")
-    if kind not in POSTS[post][1]:
-        raise ValueError(f"{where}: {post} writes for a {words(POSTS[post][1])}, not a {kind}; "
-                         f"one of {words(posts)} for a {kind}")
-    if POSTS[post][2] > axes:
-        raise ValueError(f"{where}: {post} writes for a {POSTS[post][2]}-axis {kind}, and this one has {axes} axes; "
-                         f"one of {words(posts)}")
+                         f"controller's dialect (or pass --post); built today for a {kind}: {today}")
+    entry = POSTS.get(post) if isinstance(post, str) else None
+    if entry is None:
+        raise ValueError(f"{where}: {json_text(post)} is not a post cadgen knows; built today for a {kind}: {today}")
+    if kind not in entry.kinds:
+        raise ValueError(f"{where}: {post} writes for a {words(entry.kinds)}, not a {kind}; built today for a {kind}: {today}")
+    if entry.fewest_axes > axes:
+        raise ValueError(f"{where}: {post} writes for a {entry.fewest_axes}-axis {kind}, and this one has {axes} axes; "
+                         f"built today for it: {today}")
+    try:
+        get_post(post)
+    except ValueError as exc:
+        raise ValueError(f"{where}: {str(exc).removeprefix('post: ')}") from None
     travel = None
     if "travel_mm" in machine:
         count = 2 if kind == "lathe" else 3
@@ -377,24 +423,26 @@ def _machine(raw: Any, post_override: str | None) -> Machine:
 def _material(raw: Any) -> Material:
     if raw is None:
         raise ValueError(f"material: required: feeds and speeds are worked out from it; one of {words(MATERIALS)}, "
-                         'or {"name", "sfm", "chipload_mm"}')
+                         f"or {_CUSTOM_MATERIAL} for another")
     if isinstance(raw, str):
-        return Material(choice(raw, MATERIALS, where="material"))
-    material = obj(raw, where="material", example='{"name": "bronze", "sfm": 300, "chipload_mm": 0.03}')
+        if raw.strip() not in MATERIALS:
+            raise ValueError(f"material: {json_text(raw)} is not in the table ({words(MATERIALS)}); for another "
+                             f"material give {_CUSTOM_MATERIAL}")
+        return Material(raw.strip())
+    material = obj(raw, where="material", example='{"name": "bronze", "surface_m_min": 90, "chipload_mm": 0.03}')
     known(material, MATERIAL_KEYS, where="material", takes=f"a material takes {', '.join(MATERIAL_KEYS)}")
     name = material.get("name")
     if not isinstance(name, str) or not name.strip():
         raise ValueError("material.name: name the material, like \"bronze\"")
+    name = name.strip()
     if name not in MATERIALS:
-        missing = [key for key in ("sfm", "chipload_mm") if key not in material]
+        missing = [key for key in ("surface_m_min", "chipload_mm") if key not in material]
         if missing:
-            raise ValueError(f"material: {name!r} is not in the table, so give its {' and '.join(missing)} "
+            raise ValueError(f"material: {json_text(name)} is not in the table, so give its {' and '.join(missing)} "
                              f"(the table has {words(MATERIALS)})")
-    chipload = None
-    if "chipload_mm" in material:
-        chipload = _chipload(material["chipload_mm"])
-    sizes = _sizes(material, ("sfm", "hardness_hb"), where="material")
-    return Material(name.strip(), chipload_mm=chipload, **sizes)
+    chipload = _chipload(material["chipload_mm"]) if "chipload_mm" in material else None
+    sizes = _sizes(material, ("surface_m_min", "hardness_hb"), where="material")
+    return Material(name, chipload_mm=chipload, **sizes)
 
 
 def _chipload(raw: Any) -> float | tuple[tuple[float, float], ...]:
@@ -403,24 +451,26 @@ def _chipload(raw: Any) -> float | tuple[tuple[float, float], ...]:
         return number(raw, where="material.chipload_mm", positive=True)
     if not raw:
         raise ValueError('material.chipload_mm: a chip load, or one per tool diameter like {"3": 0.02, "6": 0.04}')
-    bands = []
+    bands: dict[float, float] = {}
     for key, value in raw.items():
         try:
             diameter = float(key)
         except ValueError:
-            diameter = 0.0
-        if not diameter > 0:
-            raise ValueError(f"material.chipload_mm: {key!r} is not a tool diameter in mm; "
+            diameter = math.nan
+        if not (math.isfinite(diameter) and diameter > 0):
+            raise ValueError(f"material.chipload_mm: {json_text(key)} is not a tool diameter in mm; "
                              'key each chip load by diameter, like {"3": 0.02, "6": 0.04}')
-        bands.append((diameter, number(value, where=f"material.chipload_mm[{key!r}]", positive=True)))
-    return tuple(sorted(bands))
+        if diameter in bands:
+            raise ValueError(f"material.chipload_mm: {json_text(key)} is a {diameter:g} mm tool diameter listed twice")
+        bands[diameter] = number(value, where=f"material.chipload_mm.{key}", positive=True)
+    return tuple(sorted(bands.items()))
 
 
 def _stock(raw: Any, kind: str, base: Path) -> Stock:
     allowed = STOCK_FOR_KIND[kind]
     if raw is None:
         raise ValueError(f"stock: required: what the {kind} starts from, one of {words(allowed)}")
-    stock = obj(raw, where="stock", example='{"type": "box", "margin_mm": [2, 2, 1]}')
+    stock = obj(raw, where="stock", example='{"type": "box", "margin_mm": [2, 2, 1, 1]}')
     if "from" in stock:
         known(stock, ("from",), where="stock", takes="a stock read from a file takes only from")
         if "from" not in allowed:
@@ -438,16 +488,20 @@ def _stock(raw: Any, kind: str, base: Path) -> Stock:
         raise ValueError(f"stock.type: a {kind} starts from {words(allowed)}, not {stock_type}")
     keys = STOCK_TYPES[stock_type]
     known(stock, ("type", *keys), where="stock", takes=f"a {stock_type} stock takes type, {', '.join(keys)}")
-    count, names = {"box": (3, "[x, y, z]"), "cylinder": (2, "[radial, axial]"), "sheet": (2, "[x, y]")}[stock_type]
-    margin = _triple(stock.get("margin_mm", 0), where="stock.margin_mm", count=count,
-                     words_=f"one margin for every side, or {names} in mm")
+    count, names, single = {"box": (4, "[x, y, z_top, z_bottom]", False), "cylinder": (2, "[radial, axial]", True),
+                            "sheet": (2, "[x, y]", True)}[stock_type]
+    margin = _margins(stock.get("margin_mm", [0] * count), where="stock.margin_mm", count=count, names=names,
+                      single=single)
     sizes = _sizes(stock, ("diameter_mm", "thickness_mm"), where="stock")
+    if "diameter_mm" in sizes and margin[0] > 0:
+        raise ValueError(f"stock.diameter_mm: a bar of a stated diameter takes no radial margin "
+                         f"(margin_mm gives {margin[0]:g} mm); give one or the other")
     axis = choice(stock.get("axis", "Z"), AXES, where="stock.axis")
     return Stock(stock_type, margin, axis=axis, **sizes)
 
 
 def _fixture(raw: Any, kind: str, where: str) -> Fixture:
-    fixture = obj(raw, where=where, example='{"type": "vise", "jaw_height_mm": 20}')
+    fixture = obj(raw, where=where, example='{"type": "vise", "jaw_height_mm": 20, "grip_mm": 5}')
     if "type" not in fixture:
         raise ValueError(f"{where}.type: required, one of {words(FIXTURES)}")
     fixture_type = choice(fixture["type"], FIXTURES, where=f"{where}.type")
@@ -461,15 +515,13 @@ def _fixture(raw: Any, kind: str, where: str) -> Fixture:
 
 
 def _setups(document: dict, kind: str) -> tuple[Setup, ...]:
-    setups = []
+    setups: list[Setup] = []
     for index, entry in enumerate(_entries(document, "setups", '{"id": "top", "direction": "+Z"}')):
         where = f"setups[{index}]"
         known(entry, SETUP_KEYS, where=where, takes=f"a setup takes {', '.join(SETUP_KEYS)}")
-        setup_id = entry.get("id")
-        if not isinstance(setup_id, str) or not setup_id.strip():
-            raise ValueError(f"{where}.id: name the setup, like \"top\"; operations name it")
+        setup_id = _id(entry.get("id"), where=f"{where}.id", example='"top"')
         if any(setup.id == setup_id for setup in setups):
-            raise ValueError(f"{where}.id: {setup_id!r} is the id of an earlier setup too")
+            raise ValueError(f"{where}.id: {json_text(setup_id)} is the id of an earlier setup too")
         direction = entry.get("direction", "+Z")
         if direction not in AXIS_DIRECTIONS:
             if not isinstance(direction, str) or "#" not in direction:
@@ -482,9 +534,11 @@ def _setups(document: dict, kind: str) -> tuple[Setup, ...]:
                 raise ValueError(f"{where}.origin: a point is [x, y, z] in mm, got {json_text(origin)}")
             origin = tuple(number(value, where=f"{where}.origin[{i}]") for i, value in enumerate(origin))
         elif not isinstance(origin, str) or origin not in ORIGINS:
-            raise ValueError(f"{where}.origin: {json_text(origin)} is not one of {words(ORIGINS)} or a point [x, y, z]")
+            raise ValueError(f"{where}.origin: {json_text(origin)} is not one of {words(ORIGINS)} (a corner is the "
+                             "min-X, min-Y corner, front left) or a point [x, y, z]")
+        clearance, retract = _heights(entry, where, DEFAULT_CLEARANCE_MM, DEFAULT_RETRACT_MM)
         fixture = _fixture(entry["fixture"], kind, f"{where}.fixture") if "fixture" in entry else Fixture("none")
-        setups.append(Setup(setup_id, direction, origin, fixture))
+        setups.append(Setup(setup_id, direction, origin, fixture, clearance, retract))
     return tuple(setups)
 
 
@@ -503,8 +557,10 @@ def _tools(document: dict) -> tuple[Tool, ...]:
             raise ValueError(f"{where}.type: required, one of {words(TOOL_TYPES)}")
         tool_type = choice(entry["type"], TOOL_TYPES, where=f"{where}.type")
         needs, may = TOOL_TYPES[tool_type]
-        keys = (*TOOL_COMMON, *needs, *may)
-        known(entry, keys, where=where, takes=f"a {tool_type} takes {', '.join(keys)}")
+        kerf = tool_type in KERF_TOOLS
+        keys = (*(KERF_COMMON if kerf else TOOL_COMMON), *needs, *may)
+        known(entry, keys, where=where, takes=f"a {tool_type} takes {', '.join(keys)}"
+              + (" (a beam, jet or wire has no holder, stickout or tool material)" if kerf else ""))
         missing = [key for key in needs if key not in entry]
         if missing:
             raise ValueError(f"{where}.{missing[0]}: a {tool_type} needs its {missing[0]}")
@@ -513,18 +569,19 @@ def _tools(document: dict) -> tuple[Tool, ...]:
             sizes["flutes"] = whole(entry["flutes"], where=f"{where}.flutes", high=32)
         if "tip_angle_deg" in sizes and not sizes["tip_angle_deg"] < 180:
             raise ValueError(f"{where}.tip_angle_deg: an included angle under 180, got {sizes['tip_angle_deg']:g}")
-        _tool_sizes_agree(sizes, tool_type, where)
+        _tool_sizes_agree(sizes, where)
         holder = None
         if "holder" in entry:
             raw = obj(entry["holder"], where=f"{where}.holder", example='{"diameter_mm": 32, "length_mm": 40}')
             known(raw, ("diameter_mm", "length_mm"), where=f"{where}.holder", takes="a holder takes diameter_mm, length_mm")
-            if set(raw) != {"diameter_mm", "length_mm"}:
-                raise ValueError(f"{where}.holder: give both diameter_mm and length_mm; collisions are checked against it")
+            for key in ("diameter_mm", "length_mm"):
+                if key not in raw:
+                    raise ValueError(f"{where}.holder.{key}: required; collisions are checked against the holder")
             holder = Holder(**_sizes(raw, ("diameter_mm", "length_mm"), where=f"{where}.holder"))
         comment = entry.get("comment")
         if comment is not None and (not isinstance(comment, str) or not comment.strip()):
             raise ValueError(f"{where}.comment: expected a short piece of text")
-        material = choice(entry.get("material", "carbide"), TOOL_MATERIALS, where=f"{where}.material")
+        material = None if kerf else choice(entry.get("material", "carbide"), TOOL_MATERIALS, where=f"{where}.material")
         explicit = {key: sizes.pop(key) for key in ("diameter_mm", "flutes", "flute_length_mm", "stickout_mm",
                                                      "shank_diameter_mm") if key in sizes}
         tools.append(Tool(tool_id, int(match.group(1)), tool_type, material, holder=holder, size=sizes,
@@ -532,7 +589,7 @@ def _tools(document: dict) -> tuple[Tool, ...]:
     return tuple(tools)
 
 
-def _tool_sizes_agree(sizes: dict, tool_type: str, where: str) -> None:
+def _tool_sizes_agree(sizes: dict, where: str) -> None:
     """The sizes a tool states describe a tool that can exist."""
     diameter = sizes.get("diameter_mm")
     if "corner_radius_mm" in sizes and diameter is not None and sizes["corner_radius_mm"] > diameter / 2:
@@ -547,15 +604,20 @@ def _tool_sizes_agree(sizes: dict, tool_type: str, where: str) -> None:
 
 
 def _region(raw: Any, where: str) -> tuple[tuple[float, float], ...]:
-    """A closed outline: at least three ``[x, y]`` points in the setup's plane, mm."""
+    """A closed outline: at least three distinct ``[x, y]`` points in the setup's plane, mm, enclosing an area."""
+    example = "like [[0, 0], [40, 0], [40, 20]]"
     if not isinstance(raw, list) or len(raw) < 3:
-        raise ValueError(f"{where}: a closed outline of at least three [x, y] points in the setup's plane, "
-                         "like [[0, 0], [40, 0], [40, 20]]")
-    points = []
+        raise ValueError(f"{where}: a closed outline of at least three [x, y] points in the setup's plane, {example}")
+    points: list[tuple[float, float]] = []
     for index, point in enumerate(raw):
         if not isinstance(point, list) or len(point) != 2:
             raise ValueError(f"{where}[{index}]: a point is [x, y] in mm, got {json_text(point)}")
         points.append(tuple(number(value, where=f"{where}[{index}][{i}]") for i, value in enumerate(point)))
+    if len(set(points)) < 3:
+        raise ValueError(f"{where}: an outline needs at least three different points, {example}")
+    area = sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(points, points[1:] + points[:1])) / 2
+    if abs(area) < 1e-9:
+        raise ValueError(f"{where}: the points lie on one line and enclose no area, {example}")
     return tuple(points)
 
 
@@ -591,10 +653,11 @@ def _operations(document: dict, machine: Machine, material: Material, setups: tu
                  for key in ("rpm", "feed_mm_min", "plunge_mm_min") if key in entry}
         stock_to_leave = number(entry.get("stock_to_leave_mm", 0.0), where=f"{where}.stock_to_leave_mm", minimum=0)
         coolant = choice(entry.get("coolant", "off"), COOLANTS, where=f"{where}.coolant")
+        clearance, retract = _heights(entry, where, setup.clearance_mm, setup.retract_mm)
         own = {key: value for key, value in entry.items() if key not in COMMON_KEYS}
         params = operation.parse(own, ParseContext(where, machine, material, setup, tool))
         operations.append(Operation(name, setup.id, tool.id, stock_to_leave_mm=stock_to_leave, coolant=coolant,
-                                    params=params, **target, **feeds))
+                                    clearance_mm=clearance, retract_mm=retract, params=params, **target, **feeds))
     return tuple(operations)
 
 
@@ -658,6 +721,8 @@ def parse_job(job: str | dict | Path | None, *, post: str | None = None) -> Job:
             "feature selectors"
         )
     document, base = _load_document(job)
+    if not isinstance(document, dict):
+        raise ValueError("job: expected one JSON object")
     known(document, JOB_KEYS, where="job", takes=f"a job takes {', '.join(JOB_KEYS)}")
     if "machine" not in document:
         raise ValueError("machine: required: its kind and its post, like {\"kind\": \"mill\", \"post\": \"grbl\"}")
