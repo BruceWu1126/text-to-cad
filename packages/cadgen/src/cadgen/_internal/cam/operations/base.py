@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol
 if TYPE_CHECKING:
     from cadgen._internal.cam.job import Machine, Material, Setup, Tool
 
-__all__ = ["Operation", "OperationBase", "ParseContext", "Phase", "TARGETS", "by_severity", "finding"]
+__all__ = ["Operation", "OperationBase", "ParseContext", "PlanError", "Phase", "TARGETS", "by_severity", "finding"]
 
 #: The phase an operation is built in (the design's four): 2.5D, 3D, turning/cutting/EDM, multi-axis.
 Phase = Literal[1, 2, 3, 4]
@@ -78,6 +78,23 @@ def finding(severity: str, kind: str, summary: str, description: str, items=()) 
     """One entry of a plan's findings, in the KiCad findings' shape."""
     return {"check": "cam", "severity": severity, "type": kind, "summary": summary, "description": description,
             "items": list(items)}
+
+
+class PlanError(ValueError):
+    """An operation that is well formed but cannot be planned on this part: nothing to cut, deeper than the floor,
+    a tool that does not fit, a feature out of reach. ``plan`` raises it; the run turns it into an error finding of
+    type ``kind`` (one of the spec's codes, such as ``empty_operation``, ``too_deep``, ``unreachable``) and the job
+    returns ``ok=False`` with no G-code. A malformed key or value is still a plain ``ValueError`` from ``parse``."""
+
+    def __init__(self, kind: str, summary: str, description: str = "", items=()):
+        super().__init__(summary)
+        self.kind = kind
+        self.summary = summary
+        self.description = description
+        self.items = tuple(items)
+
+    def finding(self) -> dict:
+        return finding("error", self.kind, self.summary, self.description, self.items)
 
 
 _SEVERITY = {"error": 0, "warning": 1, "info": 2}
