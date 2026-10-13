@@ -33,7 +33,7 @@ JOB = {
         {"op": "chamfer_2d", "tool": "T3", "features": [OUTLINE, POCKET]},
         {"op": "engrave", "tool": "T1", "region": RECT},
         {"op": "engrave", "tool": "T1", "region": RECT, "max_depth_mm": 2, "clear_tool": "T2", "stepdown_mm": 1},
-        {"op": "trace", "tool": "T4", "region": SQUARE, "depth_mm": 1, "offset": "left"},
+        {"op": "trace", "tool": "T4", "region": SQUARE, "depth_mm": 1, "offset": "inside"},
     ],
 }
 TOP = 0.0
@@ -178,17 +178,59 @@ class Edges(unittest.TestCase):
 
     # --- trace ---------------------------------------------------------------------------------------------
 
-    def test_a_trace_runs_at_its_depth_on_its_side_of_the_curve(self):
+    def level_points(self, toolpath, z):
+        points = [p for p in path_points(toolpath, step=0.3) if abs(p[2] - z) < 1e-6]
+        self.assertGreater(len(points), 100)
+        self.assertAlmostEqual(min(p[2] for p in path_points(toolpath)), z, delta=1e-6)
+        return points
+
+    def test_a_trace_round_a_loop_runs_at_its_depth_inside_or_outside_it(self):
         from shapely.geometry import Point, Polygon
 
-        ctx, planned = self.contexts[3], self.planned[3]
         square = Polygon(SQUARE)
-        level = [p for p in path_points(planned.toolpath, step=0.3) if abs(p[2] - (TOP - 1)) < 1e-6]
-        self.assertGreater(len(level), 100)
-        self.assertAlmostEqual(min(p[2] for p in path_points(planned.toolpath)), TOP - 1, delta=1e-6)
-        for p in level:                                          # counter-clockwise points: left is inside
-            self.assertTrue(square.contains(Point(p[:2])))
-            self.assertAlmostEqual(square.exterior.distance(Point(p[:2])), 1.0, delta=ctx.tol)
+        ctx, planned = self.contexts[3], self.planned[3]
+        document = copy.deepcopy(JOB)
+        document["operations"][3]["offset"] = "outside"
+        _, run = self.plan(document, 3)
+        for inside, toolpath in ((True, planned.toolpath), (False, run().toolpath)):
+            for p in self.level_points(toolpath, TOP - 1):
+                self.assertEqual(square.contains(Point(p[:2])), inside)
+                self.assertAlmostEqual(square.exterior.distance(Point(p[:2])), 1.0, delta=ctx.tol)
+        document["operations"][3]["offset"] = "left"
+        _, run = self.plan(document, 3)
+        self.assertIn("operations[3].offset: region is a closed loop; offset it inside or outside, not left",
+                      value_error(self, run))
+
+    def test_an_open_chain_of_edges_is_walked_from_its_start(self):
+        from shapely.geometry import LineString, Point, box
+
+        from cadgen._internal.cam.operations.edges_2d import _edge_points
+
+        ctx = self.contexts[3]
+        top = next(f for f in ctx.part.faces if f.surface == "plane" and f.normal[2] > 0.99 and f.center[2] > 9.99
+                   and f.area > 5000)
+        edges = []                                                # the plate's top outline but its front edge
+        for e in sorted(top.outer_edges):
+            ends = [ctx.to_setup(p) for p in _edge_points(ctx, e)]
+            if not all(abs(p[1] + 30) < 1e-6 for p in ends):
+                edges.append(f"#o1.e{e}")
+        self.assertEqual(len(edges), 3)
+        document = copy.deepcopy(JOB)
+        document["operations"][3] = {"op": "trace", "tool": "T4", "features": edges, "depth_mm": 1, "offset": "left"}
+        _, run = self.plan(document, 3)
+        self.assertIn("operations[3].start:", value_error(self, run))
+        chain = LineString([(-50, -30), (-50, 30), (50, 30), (50, -30)])
+        plate = box(-50, -30, 50, 30)
+        for start, inside in (([-50, -30], False), ([50, -30], True)):   # walked clockwise, left is outside
+            document["operations"][3]["start"] = start
+            ctx, run = self.plan(document, 3)
+            for p in self.level_points(run().toolpath, TOP - 1):
+                self.assertAlmostEqual(chain.distance(Point(p[:2])), 1.0, delta=ctx.tol)
+                if abs(p[1] + 30) > 1.5:
+                    self.assertEqual(plate.contains(Point(p[:2])), inside, (start, p))
+        document["operations"][3]["offset"] = "inside"
+        _, run = self.plan(document, 3)
+        self.assertIn("is an open path with no inside; offset it left or right", value_error(self, run))
 
 
 if __name__ == "__main__":

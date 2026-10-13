@@ -34,18 +34,26 @@ cuts a circle of radius ``tip radius + h x tan(half angle)``; every depth below 
     than that, then the V-bit cuts the walls down to it (round the flat's edge at that depth). A carve that needs
     a flat bottom and has no ``clear_tool`` is refused, as is one deeper than the V-bit's cone. ``stepdown_mm``
     (none: one pass) splits the carve into levels, each following the axis no deeper than its level; it is the
-    clearing's stepdown too (default half the flat's diameter). The V-bit enters the axis where it meets the
-    surface (a corner), or where it has already cut at least as deep, and descends along the carve itself at the
-    V's own slope (a pointed tool cutting on its centre); an axis piece with no such end is ramped into along
-    itself no steeper than 3 degrees and never deeper than the carve, and a round area with no axis but its middle
-    is spiralled into along its cone. Single-line text is not built.
+    clearing's stepdown too (default half the flat's diameter). Single-line text is not built.
+
+    How the V-bit goes down (the one exception to entering material only by a ramp at or under the ramp angle):
+    a V-bit follows the carve down at the cone's own slope from a point already cut at least as deep, or from the
+    surface (where the axis meets a corner of the area at no depth). It is a pointed tool cutting on its centre,
+    and the carve's depth at each point is the deepest its cone may go there, so a gentler descent would mean
+    leaving the carve. An axis piece with neither kind of end is ramped into along itself no steeper than 3
+    degrees and never deeper than the carve; a round area whose axis is only its middle is spiralled into along
+    its cone, averaging no steeper than 3 degrees.
 
 ``trace``
     Cuts along a curve ``depth_mm`` deep: a chain of the part's edges (``features``: edge selectors, followed
     end to end, open or closed, and level in the setup's plane; the depth is below the edges) or a ``region``
-    (closed; the depth is below the top of the material). ``offset`` ``none`` (the default) puts the tool's centre
-    on the curve; ``left`` or ``right`` (looking along the curve, the region in the order its points are listed)
-    moves it the cutting radius at the top of the cut to that side. In ``stepdown_mm`` levels (half the tool's
+    (always closed; the depth is below the top of the material; its points' order is its direction). ``offset``
+    ``none`` (the default) puts the tool's centre on the curve. A closed loop (a region, or a chain of edges that
+    closes) takes ``inside`` or ``outside``: the tool's centre moves the cutting radius at the top of the cut into
+    or out of the loop. An open chain takes ``left`` or ``right`` of its direction, which the job must state with
+    ``start``: a point ``[x, y]`` (setup frame) at one of its ends, or the edge selector it starts with; the chain
+    is walked from there. ``left``/``right`` on a loop, ``inside``/``outside`` on an open path, and an open chain
+    offset with no ``start`` are refused naming the field. In ``stepdown_mm`` levels (half the tool's
     diameter), each entered down a ramp along the curve no steeper than ``ramp_angle_deg`` (3), or plunged where
     the tool is off the stock.
 """
@@ -780,28 +788,43 @@ def _below(path: list, previous: float, level: float) -> list[list]:
 @dataclass(frozen=True)
 class TraceParams:
     depth_mm: float
-    offset: str                  # none | left | right
+    offset: str                  # none | inside | outside (a closed loop) | left | right (an open path)
     stepdown_mm: float
     ramp_angle_deg: float
+    #: Where an open edge chain starts: a point (x, y) in the setup's frame, or an edge selector; ``None`` unstated.
+    start: tuple[float, float] | str | None = None
+
+
+_SIDES = ("none", "inside", "outside", "left", "right")
 
 
 class TraceOperation(OperationBase):
     name, phase, word = "trace", 1, "Trace"
-    keys = frozenset({"depth_mm", "offset", "stepdown_mm", "ramp_angle_deg"})
+    keys = frozenset({"depth_mm", "offset", "stepdown_mm", "ramp_angle_deg", "start"})
     tool_types = ("flat_endmill", "ball_endmill", "bull_endmill", "v_bit", "chamfer_mill")
     targets = ("features", "region")
 
     def parse(self, raw: dict, ctx: ParseContext) -> TraceParams:
         from cadgen._internal.cam.operations.emit import DEFAULT_RAMP_DEG
+        from cadgen._internal.cam.values import json_text, selectors
 
         known(raw, self.keys, where=ctx.where, takes=f"trace takes {', '.join(sorted(self.keys))}")
         if "depth_mm" not in raw:
             raise ValueError(f"{ctx.where}.depth_mm: how deep the cut runs under the curve, like 0.5")
         depth = number(raw["depth_mm"], where=f"{ctx.where}.depth_mm", positive=True)
-        side = choice(raw.get("offset", "none"), ("none", "left", "right"), where=f"{ctx.where}.offset")
+        side = choice(raw.get("offset", "none"), _SIDES, where=f"{ctx.where}.offset")
         angle = number(raw.get("ramp_angle_deg", DEFAULT_RAMP_DEG), where=f"{ctx.where}.ramp_angle_deg",
                        positive=True, below=90)
-        return TraceParams(depth, side, _mm(raw, "stepdown_mm", ctx.where, float(ctx.tool.diameter_mm) / 2), angle)
+        start = raw.get("start")
+        if isinstance(start, str):
+            start = selectors(start, where=f"{ctx.where}.start", kinds=("edge",))[0]
+        elif start is not None:
+            if not isinstance(start, list) or len(start) != 2:
+                raise ValueError(f"{ctx.where}.start: where an open chain of edges starts: a point [x, y] in the "
+                                 f"setup's frame or an edge selector like \"#o1.e12\"; got {json_text(start)}")
+            start = tuple(number(v, where=f"{ctx.where}.start[{i}]") for i, v in enumerate(start))
+        return TraceParams(depth, side, _mm(raw, "stepdown_mm", ctx.where, float(ctx.tool.diameter_mm) / 2), angle,
+                           start)
 
     def plan(self, params: TraceParams, ctx: "PlanContext") -> "Planned":
         from cadgen._internal.cam.operations import geometry2d as g2
@@ -810,12 +833,18 @@ class TraceOperation(OperationBase):
         from cadgen._internal.cam.toolpath import PLUNGE
 
         if params.depth_mm > ctx.profile.cutting_length_mm + 1e-9:
-            raise PlanError("too_deep", f"{ctx.where}.depth_mm: {params.depth_mm:g} mm is past {ctx.tool.id}'s cutting length "
-                             f"of {ctx.profile.cutting_length_mm:g} mm")
+            raise PlanError("too_deep", f"{ctx.where}.depth_mm: {params.depth_mm:g} mm is past {ctx.tool.id}'s "
+                            f"cutting length of {ctx.profile.cutting_length_mm:g} mm")
         reach = min(ctx.radius, ctx.profile.radius_at(params.depth_mm)) if params.offset != "none" else 0.0
         emitter = Emitter(ctx)
         stats: dict = {"curves": [], "offset": params.offset, "offset_mm": round(reach, 6)}
-        for ref, points, closed, base in self._curves(ctx):
+        for ref, points, closed, base in self._curves(ctx, params):
+            if closed and params.offset in ("left", "right"):
+                raise ValueError(f"{ctx.where}.offset: {ref} is a closed loop; offset it inside or outside, not "
+                                 f"{params.offset}")
+            if not closed and params.offset in ("inside", "outside"):
+                raise ValueError(f"{ctx.where}.offset: {ref} is an open path with no inside; offset it left or right "
+                                 "of its direction (from start), not " + params.offset)
             xy = _offset_curve(points, closed, params.offset, reach, ctx.tol, f"{ctx.where}: {ref}")
             floor = base - params.depth_mm
             levels = g2.depth_steps(base, floor, params.stepdown_mm)
@@ -838,8 +867,9 @@ class TraceOperation(OperationBase):
         return Planned(emitter.toolpath(), stats, _feed_findings(ctx))
 
     @staticmethod
-    def _curves(ctx: "PlanContext") -> list[tuple[str, list, bool, float]]:
-        """``[(ref, [(x, y)], closed, z)]``: the region, or the selected edges chained end to end."""
+    def _curves(ctx: "PlanContext", params: TraceParams) -> list[tuple[str, list, bool, float]]:
+        """``[(ref, [(x, y)], closed, z)]``: the region (closed, in the order its points are listed), or the selected
+        edges chained end to end; an open chain walked from ``start``."""
         if ctx.operation.region is not None:
             points = [tuple(map(float, p)) for p in ctx.operation.region]
             if points[0] != points[-1]:
@@ -848,11 +878,12 @@ class TraceOperation(OperationBase):
         pieces = []
         for index, ref in enumerate(ctx.operation.features):
             at = f"{ctx.where}.features[{index}]"
-            ordinal = _ordinal(_local(ref, ctx.part.ref), "e")
+            local = _local(ref, ctx.part.ref)
+            ordinal = _ordinal(local, "e")
             if ordinal is None:
                 raise ValueError(f"{at}: trace follows edges (like \"#o1.e12\") or a region; {ref} is not an edge")
-            pieces.append((ref, [ctx.to_setup(p) for p in _edge_points(ctx, ordinal)]))
-        out = []
+            pieces.append((local, [ctx.to_setup(p) for p in _edge_points(ctx, ordinal)]))
+        out, used_start = [], False
         while pieces:
             ref, chain = pieces.pop(0)
             refs = [ref]
@@ -864,11 +895,12 @@ class TraceOperation(OperationBase):
                         run = points[::-1] if flip else points
                         if math.dist(chain[-1], run[0]) <= 1e-3:
                             chain = chain + run[1:]
+                            refs.append(other)
                         elif math.dist(chain[0], run[-1]) <= 1e-3:
                             chain = run[:-1] + chain
+                            refs.insert(0, other)
                         else:
                             continue
-                        refs.append(other)
                         pieces.pop(index)
                         grown = True
                         break
@@ -876,19 +908,56 @@ class TraceOperation(OperationBase):
                         break
             zs = [p[2] for p in chain]
             if max(zs) - min(zs) > 1e-3:
-                raise PlanError("unreachable", f"{ctx.where}: the edges {', '.join(refs)} climb {max(zs) - min(zs):.3g} mm; trace "
-                                 "follows a curve level in the setup's plane")
+                raise PlanError("unreachable", f"{ctx.where}: the edges {', '.join(refs)} climb "
+                                f"{max(zs) - min(zs):.3g} mm; trace follows a curve level in the setup's plane")
             closed = len(chain) > 2 and math.dist(chain[0], chain[-1]) <= 1e-3
+            if not closed:
+                flip = _walk_from(ctx, params, refs, chain)
+                if flip is None and params.offset in ("left", "right"):
+                    raise ValueError(f"{ctx.where}.start: {'+'.join(refs)} is an open chain of edges; say where it "
+                                     f"starts (a point [x, y] at one of its ends, or its first edge) so {params.offset} "
+                                     "has a direction")
+                if flip is not None:
+                    used_start = True
+                if flip:
+                    chain, refs = chain[::-1], refs[::-1]
             xy = [(round(p[0], 6), round(p[1], 6)) for p in chain]
             if closed:
                 xy[-1] = xy[0]
             out.append(("+".join(refs), xy, closed, max(zs)))
+        if params.start is not None and not used_start:
+            raise ValueError(f"{ctx.where}.start: {_start_text(params.start)} is not an end of an open chain of the "
+                             "edges traced")
         return out
 
     def human_lines(self, stats: dict) -> list[str]:
-        side = "" if stats["offset"] == "none" else f", {stats['offset_mm']:g} mm to the {stats['offset']}"
+        side = "" if stats["offset"] == "none" else f", {stats['offset_mm']:g} mm {stats['offset']}"
         return [f"{c['ref']}: {c['length_mm']:.1f} mm {'loop' if c['closed'] else 'path'} to z {c['floor_z']:g} in "
                 f"{len(c['levels'])} level(s){side}" for c in stats["curves"]]
+
+
+def _start_text(start) -> str:
+    return f"[{start[0]:g}, {start[1]:g}]" if isinstance(start, tuple) else start
+
+
+def _walk_from(ctx: "PlanContext", params: TraceParams, refs: list, chain: list) -> bool | None:
+    """Whether the open ``chain`` must be reversed to start where ``params.start`` says; ``None`` when the start is
+    not stated or names neither of its ends."""
+    start = params.start
+    if start is None:
+        return None
+    if isinstance(start, str):
+        local = _local(start, ctx.part.ref)
+        if refs[0] == local:
+            return False
+        if refs[-1] == local:
+            return True
+        return None
+    if math.dist(start, chain[0][:2]) <= 1e-3:
+        return False
+    if math.dist(start, chain[-1][:2]) <= 1e-3:
+        return True
+    return None
 
 
 def _edge_points(ctx: "PlanContext", ordinal: int) -> list[tuple[float, float, float]]:
@@ -913,8 +982,8 @@ def _edge_points(ctx: "PlanContext", ordinal: int) -> list[tuple[float, float, f
 
 
 def _offset_curve(points: list, closed: bool, side: str, distance: float, tol: float, where: str) -> list:
-    """The curve moved ``distance`` to its ``side`` (looking along it), round at its corners, in the same direction;
-    as it is for ``none``."""
+    """The curve moved ``distance`` to its ``side``: ``inside`` or ``outside`` a closed loop, ``left`` or ``right``
+    of an open path looking along it; round at its corners, in the same direction; as it is for ``none``."""
     from shapely.geometry import LineString, Polygon
 
     from cadgen._internal.cam.operations import geometry2d as g2
@@ -925,7 +994,7 @@ def _offset_curve(points: list, closed: bool, side: str, distance: float, tol: f
     if closed:
         poly = Polygon(points)
         ccw_given = sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(points, points[1:])) > 0
-        inward = (side == "left") == ccw_given
+        inward = side == "inside"
         moved = poly.buffer(-distance if inward else distance, quad_segs=segs, join_style="round")
         found = g2.polygons(moved)
         if len(found) != 1:
