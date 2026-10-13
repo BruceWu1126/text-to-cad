@@ -1,8 +1,8 @@
 """Run a cadgen model on NVIDIA's usd-brep kernel through keel and write STEP.
 
-Runs under keel's Python (``keel/bin/keel``), which has no cadgen: keel ships a
-build123d-compatible layer (``keel.build123d``) over usd-brep, so the model
-program runs unchanged with that layer standing in for build123d. keel writes
+Runs under keel's Python (``keel/bin/keel``), which has no cadgen: keel ships
+keel123d, build123d's API over usd-brep, so the model program runs unchanged
+with it standing in for build123d. keel writes
 the STEP itself, in the face and edge order OpenCASCADE reads back, so refs
 picked in the CAD Viewer name the same faces keel numbers.
 
@@ -23,7 +23,7 @@ import cadgen_stub  # noqa: E402
 
 
 def _install_shims(kb):
-    """Fill the gaps between keel.build123d and build123d's builder API."""
+    """Fill the gaps between keel123d and build123d's builder API."""
     if not hasattr(kb.BuildPart, "edges"):
         kb.BuildPart.edges = lambda self: self.part.edges()
         kb.BuildPart.faces = lambda self: self.part.faces()
@@ -42,7 +42,7 @@ def _install_shims(kb):
 
 
 def run(model_path: str, function: str, step_path: str) -> dict:
-    import keel.build123d as kb
+    import keel123d as kb
     from keel.step import write_step
 
     _install_shims(kb)

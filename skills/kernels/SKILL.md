@@ -55,7 +55,7 @@ rebuilt by `python model.py`. A failed run leaves no file.
 
 | id | Kernel | Takes | Writes | Setup |
 | --- | --- | --- | --- | --- |
-| `usd-brep` | [NVIDIA usd-brep](https://github.com/NVIDIA-Omniverse/usd-brep) through [keel](https://github.com/amywork777/keel)'s build123d layer | the model | exact STEP | keel on PATH or `CAD_KEEL_BIN` |
+| `usd-brep` | [NVIDIA usd-brep](https://github.com/NVIDIA-Omniverse/usd-brep) through [keel](https://github.com/amywork777/keel)'s keel123d (build123d's API) | the model | exact STEP | keel on PATH or `CAD_KEEL_BIN` |
 | `sdm` | [Emergent Matter SDM](https://github.com/EmergentMatter/emergent-matter-sdm), JAX signed distance fields | the recorded program | STL | `kernels/sdm/setup.sh` or `CAD_SDM_PYTHON` |
 | `implicit` | signed distance field, surface nets | the recorded program | STL | Node.js 20+ |
 | `three` | three.js primitives with `three-bvh-csg` | the recorded program | STL | Node.js 20+, `kernels/three/setup.sh` |
