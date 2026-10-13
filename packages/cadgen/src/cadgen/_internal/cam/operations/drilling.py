@@ -61,6 +61,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from cadgen._internal.cam.operations.base import OperationBase, ParseContext, PlanError, finding
+from cadgen._internal.cam.operations.common import mm
 from cadgen._internal.cam.values import choice, known, number
 
 if TYPE_CHECKING:
@@ -123,12 +124,6 @@ def tour(points: dict[str, tuple[float, float]], start: tuple[float, float]) -> 
 
 # --- parsing --------------------------------------------------------------------------------------------------
 
-def _mm(raw: dict, key: str, ctx: ParseContext, default=None, *, zero: bool = False):
-    if key not in raw:
-        return default
-    return number(raw[key], where=f"{ctx.where}.{key}", minimum=0 if zero else None, positive=not zero)
-
-
 def _shift_xy(raw: dict, ctx: ParseContext) -> tuple[float, float] | None:
     if "shift_xy" not in raw:
         return None
@@ -160,10 +155,10 @@ class _HoleOperation(OperationBase):
         known(raw, self.keys, where=ctx.where, takes=f"{self.name} takes {', '.join(sorted(self.keys))}")
         return HoleParams(
             kind=self.cycle_kind,
-            depth_mm=_mm(raw, "depth_mm", ctx),
-            breakthrough_mm=_mm(raw, "breakthrough_mm", ctx, DEFAULT_BREAKTHROUGH_MM, zero=True),
-            diameter_tol_mm=_mm(raw, "diameter_tol_mm", ctx, self.tol_default, zero=True),
-            dwell_s=_mm(raw, "dwell_s", ctx, self.default_dwell, zero=True),
+            depth_mm=mm(raw, "depth_mm", ctx.where),
+            breakthrough_mm=mm(raw, "breakthrough_mm", ctx.where, DEFAULT_BREAKTHROUGH_MM, zero=True),
+            diameter_tol_mm=mm(raw, "diameter_tol_mm", ctx.where, self.tol_default, zero=True),
+            dwell_s=mm(raw, "dwell_s", ctx.where, self.default_dwell, zero=True),
         )
 
     # --- which holes ---------------------------------------------------------------------------------------
@@ -354,7 +349,7 @@ class DrillOperation(_HoleOperation):
     def parse(self, raw: dict, ctx: ParseContext) -> HoleParams:
         params = super().parse(raw, ctx)
         kind = choice(raw.get("cycle", self.cycle_kind), ("drill", "peck", "chip_break"), where=f"{ctx.where}.cycle")
-        peck = _mm(raw, "peck_mm", ctx)
+        peck = mm(raw, "peck_mm", ctx.where)
         if peck is not None and kind == "drill":
             raise ValueError(f"{ctx.where}.peck_mm: a plain drill cycle goes down in one; give cycle peck or "
                              "chip_break to peck")
@@ -384,13 +379,12 @@ class SpotDrillOperation(_HoleOperation):
         if "spot_diameter_mm" in raw and "depth_mm" in raw:
             raise ValueError(f"{ctx.where}: give spot_diameter_mm (the spot's diameter at the hole's opening) or "
                              "depth_mm (below the opening), not both")
-        spot = _mm(raw, "spot_diameter_mm", ctx)
+        spot = mm(raw, "spot_diameter_mm", ctx.where)
         if spot is not None and spot > float(ctx.tool.diameter_mm) + 1e-9:
             raise ValueError(f"{ctx.where}.spot_diameter_mm: a {spot:g} mm spot is wider than {ctx.tool.id}'s "
                              f"{ctx.tool.diameter_mm:g} mm")
-        return HoleParams("spot", depth_mm=_mm(raw, "depth_mm", ctx), dwell_s=_mm(raw, "dwell_s", ctx, DEFAULT_DWELL_S,
-                                                                                  zero=True),
-                          spot_diameter_mm=spot)
+        return HoleParams("spot", depth_mm=mm(raw, "depth_mm", ctx.where),
+                          dwell_s=mm(raw, "dwell_s", ctx.where, DEFAULT_DWELL_S, zero=True), spot_diameter_mm=spot)
 
     def _spot(self, params: HoleParams, found: "SetupFeature") -> float | None:
         if params.depth_mm is not None:
@@ -466,7 +460,7 @@ class BoringCycleOperation(_HoleOperation):
     def parse(self, raw: dict, ctx: ParseContext) -> HoleParams:
         params = super().parse(raw, ctx)
         kind = choice(raw.get("cycle", "bore"), ("bore", "fine_bore"), where=f"{ctx.where}.cycle")
-        shift, xy = _mm(raw, "shift_mm", ctx), _shift_xy(raw, ctx)
+        shift, xy = mm(raw, "shift_mm", ctx.where), _shift_xy(raw, ctx)
         if kind == "bore" and (shift is not None or xy is not None):
             raise ValueError(f"{ctx.where}: a bore cycle (G86) does not shift off the wall; give cycle fine_bore "
                              "to shift")
@@ -505,8 +499,9 @@ class CounterboreOperation(_HoleOperation):
 
     def parse(self, raw: dict, ctx: ParseContext) -> HoleParams:
         known(raw, self.keys, where=ctx.where, takes=f"{self.name} takes {', '.join(sorted(self.keys))}")
-        return HoleParams(self.cycle_kind, diameter_tol_mm=_mm(raw, "diameter_tol_mm", ctx, DIAMETER_TOL_MM, zero=True),
-                          dwell_s=_mm(raw, "dwell_s", ctx, self.default_dwell, zero=True))
+        return HoleParams(self.cycle_kind,
+                          diameter_tol_mm=mm(raw, "diameter_tol_mm", ctx.where, DIAMETER_TOL_MM, zero=True),
+                          dwell_s=mm(raw, "dwell_s", ctx.where, self.default_dwell, zero=True))
 
     def unsuited(self, params, ctx, found):
         side = _counterbore_side(ctx, found)
@@ -551,9 +546,10 @@ class BackBoreOperation(CounterboreOperation):
         if "shift_mm" not in raw:
             raise ValueError(f"{ctx.where}.shift_mm: how far the bar moves off centre to pass through the hole; "
                              "required, with shift_xy if it is not +X")
-        return HoleParams(self.cycle_kind, diameter_tol_mm=_mm(raw, "diameter_tol_mm", ctx, DIAMETER_TOL_MM, zero=True),
-                          dwell_s=_mm(raw, "dwell_s", ctx, 0.0, zero=True), shift_mm=_mm(raw, "shift_mm", ctx),
-                          shift_xy=_shift_xy(raw, ctx))
+        return HoleParams(self.cycle_kind,
+                          diameter_tol_mm=mm(raw, "diameter_tol_mm", ctx.where, DIAMETER_TOL_MM, zero=True),
+                          dwell_s=mm(raw, "dwell_s", ctx.where, 0.0, zero=True),
+                          shift_mm=mm(raw, "shift_mm", ctx.where), shift_xy=_shift_xy(raw, ctx))
 
     def unsuited(self, params, ctx, found):
         why = super().unsuited(params, ctx, found)

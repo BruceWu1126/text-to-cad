@@ -52,20 +52,19 @@ over the edge's (never under :data:`ARC_FEED_FLOOR` of it), as a machinist compe
 from __future__ import annotations
 
 import math
-from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from cadgen._internal.cam.operations.base import OperationBase, ParseContext, PlanError
-from cadgen._internal.cam.operations.milling_2d import (
-    _angle,
-    _diameter,
-    _feed_findings,
-    _floor_from,
-    _floor_keys,
-    _fraction,
-    _mm,
-    _region_polygon,
+from cadgen._internal.cam.operations.common import (
+    feed_findings,
+    floor_from,
+    floor_keys,
+    fraction,
+    mm,
+    ramp_angle,
+    region_polygon,
+    tool_diameter,
 )
 from cadgen._internal.cam.values import choice, flag, known, number
 
@@ -115,20 +114,16 @@ def _line(a: float, b: float):
     return lambda f: a + (b - a) * f
 
 
-@contextmanager
-def _edge_feed(emitter, centre_radius: float, edge_radius: float):
-    """The emitter's feed scaled so the tool's edge on an internal arc moves at the feed."""
-    before = emitter.feed
-    if edge_radius > 0:
-        emitter.feed = before * max(ARC_FEED_FLOOR, min(1.0, centre_radius / edge_radius))
-    try:
-        yield
-    finally:
-        emitter.feed = before
+def _edge_feed(ctx: "PlanContext", centre_radius: float, edge_radius: float) -> float:
+    """The feed for the tool's centre on an internal arc, so its edge moves at the operation's feed."""
+    feed = ctx.feeds.feed_mm_min
+    if edge_radius <= 0:
+        return feed
+    return feed * max(ARC_FEED_FLOOR, min(1.0, centre_radius / edge_radius))
 
 
 def _breakthrough(raw: dict, ctx: ParseContext) -> float:
-    return _mm(raw, "breakthrough_mm", ctx, BREAKTHROUGH_MM, zero=True)
+    return mm(raw, "breakthrough_mm", ctx.where, BREAKTHROUGH_MM, zero=True)
 
 
 def _hole_floor(ctx: "PlanContext", found, depth, z, breakthrough: float) -> tuple[float, bool]:
@@ -137,7 +132,7 @@ def _hole_floor(ctx: "PlanContext", found, depth, z, breakthrough: float) -> tup
     size = found.feature.size
     bottom = found.bottom[2]
     through = bool(size.get("through")) and bottom <= ctx.part_bottom_z + 1e-6
-    floor = _floor_from(ctx, depth, z, bottom - (breakthrough if through else 0.0),
+    floor = floor_from(ctx, depth, z, bottom - (breakthrough if through else 0.0),
                         deepest=None if through else bottom, what=f"the bottom of {found.feature.ref}")
     return floor, through
 
@@ -207,9 +202,10 @@ class SlotOperation(OperationBase):
 
     def parse(self, raw: dict, ctx: ParseContext) -> SlotParams:
         known(raw, self.keys, where=ctx.where, takes=f"slot takes {', '.join(sorted(self.keys))}")
-        depth, z = _floor_keys(raw, ctx)
-        return SlotParams(_mm(raw, "stepdown_mm", ctx, _diameter(ctx) / 4), _fraction(raw, "stepover", ctx, 0.4),
-                          _mm(raw, "finish_mm", ctx, 0.0, zero=True), _angle(raw, ctx), depth, z)
+        depth, z = floor_keys(raw, ctx.where)
+        return SlotParams(mm(raw, "stepdown_mm", ctx.where, tool_diameter(ctx) / 4),
+                          fraction(raw, "stepover", ctx.where, 0.4), mm(raw, "finish_mm", ctx.where, 0.0, zero=True),
+                          ramp_angle(raw, ctx.where), depth, z)
 
     # --- the slots ----------------------------------------------------------------------------------------
 
@@ -222,7 +218,7 @@ class SlotOperation(OperationBase):
     def _from_region(params: SlotParams, ctx: "PlanContext") -> _Slot:
         from cadgen._internal.cam.operations import geometry2d as g2
 
-        poly = _region_polygon(ctx)
+        poly = region_polygon(ctx)
         rect = poly.minimum_rotated_rectangle
         (x0, y0), (x1, y1), (x2, y2) = list(rect.exterior.coords)[:3]
         a, b = math.hypot(x1 - x0, y1 - y0), math.hypot(x2 - x1, y2 - y1)
@@ -232,7 +228,7 @@ class SlotOperation(OperationBase):
             raise ValueError(f"{ctx.where}.region: a slot is straight; draw it as a rectangle or an obround round its "
                              "centre line")
         kind = "round" if rect.area - poly.area > 0.1 * width * width else "square"
-        floor = _floor_from(ctx, params.depth_mm, params.z_mm, None, deepest=None, what="")
+        floor = floor_from(ctx, params.depth_mm, params.z_mm, None, deepest=None, what="")
         if poly.intersection(g2.shadow(ctx, floor)).area > 1e-6:
             raise PlanError("gouge", f"{ctx.where}.region: the slot runs into the part above z {floor:g}")
         centre = (round(rect.centroid.x, 6), round(rect.centroid.y, 6))
@@ -255,7 +251,7 @@ class SlotOperation(OperationBase):
         norm = math.hypot(nx, ny)
         u = _canonical(-ny / norm, nx / norm)
         width = float(feature.size["width_mm"])
-        floor = _floor_from(ctx, params.depth_mm, params.z_mm, found.bottom[2], deepest=found.bottom[2],
+        floor = floor_from(ctx, params.depth_mm, params.z_mm, found.bottom[2], deepest=found.bottom[2],
                             what=f"the floor of {ref}")
         cx, cy = found.bottom[0], found.bottom[1]
         material = g2.section(ctx, (found.bottom[2] + found.top[2]) / 2)
@@ -331,7 +327,7 @@ class SlotOperation(OperationBase):
             stats["slots"].append({"ref": slot.ref, "width_mm": round(cut_width, 6), "floor_z": round(slot.floor, 6),
                                    "levels": [round(z, 6) for z in levels], "ends": [back[0], on[0]],
                                    "rings": len(rings), "finish_mm": params.finish_mm})
-        return Planned(emitter.toolpath(), stats, _feed_findings(ctx))
+        return Planned(emitter.toolpath(), stats, feed_findings(ctx))
 
     @staticmethod
     def _end(slot: _Slot, end: tuple[str, float], sign: float, u, r: float, stl: float) -> tuple[float, float]:
@@ -402,21 +398,21 @@ class CircularOperation(OperationBase):
     def parse(self, raw: dict, ctx: ParseContext) -> CircularParams:
         known(raw, self.keys, where=ctx.where, takes=f"circular takes {', '.join(sorted(self.keys))}")
         boss = flag(raw["boss"], where=f"{ctx.where}.boss") if "boss" in raw else None
-        clear = _mm(raw, "clear_mm", ctx)
+        clear = mm(raw, "clear_mm", ctx.where)
         if clear is not None and boss is False:
             raise ValueError(f"{ctx.where}.clear_mm: how far round a boss to clear; a pocket has none")
-        depth, z = _floor_keys(raw, ctx)
-        return CircularParams(boss, _mm(raw, "stepdown_mm", ctx, _diameter(ctx) / 2),
-                              _fraction(raw, "stepover", ctx, 0.4), _angle(raw, ctx), clear, _breakthrough(raw, ctx),
-                              depth, z)
+        depth, z = floor_keys(raw, ctx.where)
+        return CircularParams(boss, mm(raw, "stepdown_mm", ctx.where, tool_diameter(ctx) / 2),
+                              fraction(raw, "stepover", ctx.where, 0.4), ramp_angle(raw, ctx.where), clear,
+                              _breakthrough(raw, ctx), depth, z)
 
     def _targets(self, params: CircularParams, ctx: "PlanContext") -> list[dict]:
         """``{ref, boss, cx, cy, radius, floor}`` per target."""
         import shapely
 
         if ctx.operation.region is not None:
-            poly = _region_polygon(ctx)
-            floor = _floor_from(ctx, params.depth_mm, params.z_mm, None, deepest=None, what="")
+            poly = region_polygon(ctx)
+            floor = floor_from(ctx, params.depth_mm, params.z_mm, None, deepest=None, what="")
             if params.boss:
                 circle = shapely.minimum_bounding_circle(poly)
                 radius = shapely.minimum_bounding_radius(poly)
@@ -441,7 +437,7 @@ class CircularOperation(OperationBase):
             cx, cy, radius = _cylinder_of(ctx, found)
             bottom = found.bottom[2]
             through = bottom <= ctx.part_bottom_z + 1e-6
-            floor = _floor_from(ctx, params.depth_mm, params.z_mm, bottom - (params.breakthrough_mm if through else 0),
+            floor = floor_from(ctx, params.depth_mm, params.z_mm, bottom - (params.breakthrough_mm if through else 0),
                                 deepest=None if through else bottom, what=f"the foot of {ref}")
             out.append({"ref": ref, "boss": True, "cx": cx, "cy": cy, "radius": radius, "floor": floor,
                         "region": False})
@@ -467,7 +463,7 @@ class CircularOperation(OperationBase):
                                      "diameter_mm": round(2 * target["radius"], 6),
                                      "floor_z": round(target["floor"], 6), "levels": [round(z, 6) for z in levels],
                                      **done})
-        return Planned(emitter.toolpath(), stats, _feed_findings(ctx))
+        return Planned(emitter.toolpath(), stats, feed_findings(ctx))
 
     @staticmethod
     def _pocket(params: CircularParams, ctx, emitter, target: dict, levels: list[float]) -> dict:
@@ -496,8 +492,7 @@ class CircularOperation(OperationBase):
             circle = _round_path(cx, cy, 0.0, 2 * math.pi, _const(last), _const(z), tol)
             entry = PLUNGE if in_air(ctx, spiral[0][:2]) else Helix((cx, cy), params.ramp_angle_deg)
             emitter.go(spiral, rapid_to=previous, entry=entry)
-            with _edge_feed(emitter, last, last + r):
-                emitter.cut(circle[1:])
+            emitter.cut(circle[1:], feed=_edge_feed(ctx, last, last + r))
             previous = z
         return {"turns": turns, "diameter_cut_mm": round(2 * (last + r), 6)}
 
@@ -566,10 +561,11 @@ class BoreOperation(OperationBase):
     def parse(self, raw: dict, ctx: ParseContext) -> BoreParams:
         known(raw, self.keys, where=ctx.where, takes=f"bore takes {', '.join(sorted(self.keys))}")
         target = choice(raw.get("target", "hole"), ("hole", "counterbore"), where=f"{ctx.where}.target")
-        depth, z = _floor_keys(raw, ctx)
+        depth, z = floor_keys(raw, ctx.where)
         if target == "counterbore" and (depth is not None or z is not None):
             raise ValueError(f"{ctx.where}: a counterbore is bored to its own depth; leave depth_mm and z_mm out")
-        return BoreParams(_mm(raw, "pitch_mm", ctx), target, _breakthrough(raw, ctx), depth, z, _angle(raw, ctx))
+        return BoreParams(mm(raw, "pitch_mm", ctx.where), target, _breakthrough(raw, ctx), depth, z,
+                          ramp_angle(raw, ctx.where))
 
     def plan(self, params: BoreParams, ctx: "PlanContext") -> "Planned":
         from cadgen._internal.cam.operations.context import Planned
@@ -615,13 +611,12 @@ class BoreOperation(OperationBase):
             helix = _round_path(cx, cy, 0.0, sweep, _const(room), _line(top, floor), tol)
             circle = _round_path(cx, cy, sweep, 2 * math.pi, _const(room), _const(floor), tol)
             emitter.go([helix[0]], rapid_to=top)
-            with _edge_feed(emitter, room, room + r):
-                emitter.cut(helix[1:] + circle[1:])
+            emitter.cut(helix[1:] + circle[1:], feed=_edge_feed(ctx, room, room + r))
             emitter.cut([(cx, cy, floor)])          # off the wall to the axis; the toolpath lifts straight up
             stats["holes"].append({"ref": ref, "target": params.target, "diameter_mm": round(2 * (room + r), 6),
                                    "pitch_mm": pitch, "turns": round(sweep / (2 * math.pi), 6),
                                    "floor_z": round(floor, 6)})
-        return Planned(emitter.toolpath(), stats, _feed_findings(ctx))
+        return Planned(emitter.toolpath(), stats, feed_findings(ctx))
 
     def human_lines(self, stats: dict) -> list[str]:
         return [f"{h['ref']}: {h['target']} bored to {h['diameter_mm']:g} mm, {h['pitch_mm']:g} mm per turn to z "
@@ -653,7 +648,7 @@ class ThreadMillOperation(OperationBase):
         if abs(own - pitch) > 1e-9:
             raise ValueError(f"{ctx.where}.pitch_mm: {ctx.tool.id} is a thread mill for a {own:g} mm pitch, not "
                              f"{pitch:g} mm; name a thread mill ground for that pitch")
-        depth = _mm(raw, "thread_depth_mm", ctx, round(ISO_THREAD_DEPTH * pitch, 6))
+        depth = mm(raw, "thread_depth_mm", ctx.where, round(ISO_THREAD_DEPTH * pitch, 6))
         hand = choice(raw.get("hand", "right"), ("right", "left"), where=f"{ctx.where}.hand")
         external = flag(raw["external"], where=f"{ctx.where}.external") if "external" in raw else False
         return ThreadParams(pitch, depth, hand, external, _breakthrough(raw, ctx))
@@ -705,15 +700,14 @@ class ThreadMillOperation(OperationBase):
                 emitter.cut(helix[1:] + lead_out[1:])
             else:
                 emitter.go([(cx, cy, z0)], rapid_to=ctx.top_z)
-                with _edge_feed(emitter, room, room + r):
-                    emitter.cut(lead_in + helix[1:] + lead_out[1:])
+                emitter.cut(lead_in + helix[1:] + lead_out[1:], feed=_edge_feed(ctx, room, room + r))
                 emitter.cut([(cx, cy, z1)])
             diameter = 2 * (room - r) if params.external else 2 * (room + r)
             stats["threads"].append({
                 "ref": ref, "external": params.external, "hand": params.hand, "pitch_mm": pitch,
                 "thread_depth_mm": depth, ("minor_diameter_mm" if params.external else "major_diameter_mm"):
                 round(diameter, 6), "turns": turns, "from_z": round(z0, 6), "to_z": round(z1, 6)})
-        return Planned(emitter.toolpath(), stats, _feed_findings(ctx))
+        return Planned(emitter.toolpath(), stats, feed_findings(ctx))
 
     def human_lines(self, stats: dict) -> list[str]:
         lines = []

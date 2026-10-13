@@ -65,6 +65,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from cadgen._internal.cam.operations.base import OperationBase, ParseContext, PlanError, finding
+from cadgen._internal.cam.operations.common import feed_findings, mm, region_polygon
 from cadgen._internal.cam.values import choice, known, number
 
 if TYPE_CHECKING:
@@ -96,23 +97,6 @@ def cone(tool, profile) -> tuple[float, float, float]:
     return half, float(tool.size.get("tip_diameter_mm", 0.0)) / 2, float(profile.tip_length_mm)
 
 
-def _mm(raw: dict, key: str, where: str, default=None, *, zero: bool = False):
-    if key not in raw:
-        return default
-    if zero:
-        return number(raw[key], where=f"{where}.{key}", minimum=0)
-    return number(raw[key], where=f"{where}.{key}", positive=True)
-
-
-def _region_polygon(ctx: "PlanContext"):
-    from shapely.geometry import Polygon
-
-    poly = Polygon(ctx.operation.region)
-    if not poly.is_valid:
-        raise ValueError(f"{ctx.where}.region: the outline crosses itself")
-    return poly
-
-
 def _local(ref: str, occurrence: str) -> str:
     ref = ref.strip()
     return ref if ref.startswith("#") else f"{occurrence}.{ref}"
@@ -129,10 +113,6 @@ def _faced(ctx: "PlanContext", what: str) -> None:
         raise PlanError("unreachable", f"{ctx.where}: {what} starts from the part's top at z {ctx.part_top_z:g}, and the stock still "
                          f"stands {ctx.top_z - ctx.part_top_z:g} mm over it; face it first (a facing before this "
                          "operation in the same setup)")
-
-
-def _feed_findings(ctx: "PlanContext") -> tuple[dict, ...]:
-    return tuple(ctx.feeds.findings)
 
 
 def _widest(profile, low: float, high: float) -> float:
@@ -206,8 +186,8 @@ class Chamfer2dOperation(OperationBase):
         known(raw, self.keys, where=ctx.where, takes=f"chamfer_2d takes {', '.join(sorted(self.keys))}")
         angle = number(raw.get("ramp_angle_deg", DEFAULT_RAMP_DEG), where=f"{ctx.where}.ramp_angle_deg",
                        positive=True, below=90)
-        return ChamferParams(_mm(raw, "width_mm", ctx.where),
-                             _mm(raw, "tip_offset_mm", ctx.where, DEFAULT_TIP_OFFSET_MM, zero=True), angle)
+        return ChamferParams(mm(raw, "width_mm", ctx.where),
+                             mm(raw, "tip_offset_mm", ctx.where, DEFAULT_TIP_OFFSET_MM, zero=True), angle)
 
     def _named(self, ctx: "PlanContext") -> list:
         """``[(selector, SetupFeature)]``: the features pointed at, a chamfer face standing for its feature."""
@@ -281,7 +261,7 @@ class Chamfer2dOperation(OperationBase):
             stats["edges"].append({"ref": edge.ref, "side": edge.side, "width_mm": round(edge.width_mm, 6),
                                    "depth_mm": round(depth, 6), "top_z": round(edge.top_z, 6),
                                    "tip_z": round(tip_z, 6), "modelled": edge.modelled})
-        return Planned(emitter.toolpath(), stats, _feed_findings(ctx))
+        return Planned(emitter.toolpath(), stats, feed_findings(ctx))
 
     def human_lines(self, stats: dict) -> list[str]:
         return [f"{e['ref']} {e['side']}: {e['width_mm']:g} mm chamfer, {e['depth_mm']:g} mm down the wall"
@@ -533,7 +513,7 @@ class EngraveOperation(OperationBase):
         if clear == ctx.tool.id:
             raise ValueError(f"{ctx.where}.clear_tool: {clear} is the V-bit itself; name a flat end mill to clear the "
                              "flat bottom with")
-        return EngraveParams(_mm(raw, "max_depth_mm", ctx.where), clear, _mm(raw, "stepdown_mm", ctx.where))
+        return EngraveParams(mm(raw, "max_depth_mm", ctx.where), clear, mm(raw, "stepdown_mm", ctx.where))
 
     def plan(self, params: EngraveParams, ctx: "PlanContext") -> "Planned":
         from shapely.geometry import Point
@@ -550,13 +530,13 @@ class EngraveOperation(OperationBase):
         tol, angle = ctx.tol, DEFAULT_RAMP_DEG
         areas = []                                    # (ref, polygon, surface z, deepest allowed below it)
         if ctx.operation.region is not None:
-            areas.append(("region", _region_polygon(ctx), ctx.top_z, params.max_depth_mm))
+            areas.append(("region", region_polygon(ctx), ctx.top_z, params.max_depth_mm))
         else:
             _faced(ctx, "a V-carve of a pocket's outline")
             for ref, found in ctx.targets(self.kinds):
                 cap = found.depth if params.max_depth_mm is None else min(params.max_depth_mm, found.depth)
                 areas.append((ref, g2.feature_region(ctx, found, found.top[2]), found.top[2], cap))
-        v_ctx, clear_paths, findings = ctx, [], list(_feed_findings(ctx))
+        v_ctx, clear_paths, findings = ctx, [], list(feed_findings(ctx))
         plans, stats = [], {"areas": []}
         for ref, poly, surface, cap in areas:
             from shapely.ops import polylabel
@@ -683,7 +663,7 @@ class EngraveOperation(OperationBase):
         from cadgen._internal.cam.feeds import feeds_for
         from cadgen._internal.cam.operations import geometry2d as g2
         from cadgen._internal.cam.operations.emit import Emitter
-        from cadgen._internal.cam.operations.milling_2d import Pocket2dOperation, PocketParams
+        from cadgen._internal.cam.operations.milling_2d import PocketParams, clear_pocket_level
         from cadgen._internal.cam.tools import profile
 
         at = f"{ctx.where}.clear_tool"
@@ -708,7 +688,7 @@ class EngraveOperation(OperationBase):
         emitter = Emitter(clear)
         previous = surface
         for z in g2.depth_steps(surface, floor, step):
-            Pocket2dOperation()._level(emitter, clear, pocket, centres, z, previous, None)
+            clear_pocket_level(emitter, clear, pocket, centres, z, previous)
             previous = z
         left = flat.difference(g2.offset(centres, r, ctx.tol)).area
         found = []
@@ -826,7 +806,7 @@ class TraceOperation(OperationBase):
                 raise ValueError(f"{ctx.where}.start: where an open chain of edges starts: a point [x, y] in the "
                                  f"setup's frame or an edge selector like \"#o1.e12\"; got {json_text(start)}")
             start = tuple(number(v, where=f"{ctx.where}.start[{i}]") for i, v in enumerate(start))
-        return TraceParams(depth, side, _mm(raw, "stepdown_mm", ctx.where, float(ctx.tool.diameter_mm) / 2), angle,
+        return TraceParams(depth, side, mm(raw, "stepdown_mm", ctx.where, float(ctx.tool.diameter_mm) / 2), angle,
                            start)
 
     def plan(self, params: TraceParams, ctx: "PlanContext") -> "Planned":
@@ -867,7 +847,7 @@ class TraceOperation(OperationBase):
             stats["curves"].append({"ref": ref, "closed": closed, "floor_z": round(floor, 6),
                                     "levels": [round(z, 6) for z in levels], "length_mm": round(
                                         sum(math.dist(a, b) for a, b in zip(xy, xy[1:])), 6)})
-        return Planned(emitter.toolpath(), stats, _feed_findings(ctx))
+        return Planned(emitter.toolpath(), stats, feed_findings(ctx))
 
     @staticmethod
     def _curves(ctx: "PlanContext", params: TraceParams) -> list[tuple[str, list, bool, float]]:

@@ -18,7 +18,8 @@ its entry starts and how high the uncut material stands over it. :class:`Emitter
   the tool's widest part that reaches down past a fixture's top); a fixture in the way is a ``PlanError``
   (``unreachable``).
 - :meth:`Emitter.cut` cuts on from where the tool is, without lifting: arcs and lines through
-  :func:`~cadgen._internal.cam.toolpath.fit_arcs` at half the tolerance. A straight drop is a plunge at the plunge
+  :func:`~cadgen._internal.cam.toolpath.fit_arcs` at half the tolerance, at the operation's feed or at the ``feed``
+  given for those moves (an internal arc's, scaled to the tool's edge). A straight drop is a plunge at the plunge
   feed, and only in air: a drop where the tool is not in air is a ValueError (``internal: vertical drop into
   material``), since a descent into material goes through a ramp or a helix (:func:`ramp_down`, :func:`entry_for`).
 - :func:`ramp_down` zig-zags down along a stretch of a pass, never steeper than the ramp angle, ending where the
@@ -337,16 +338,16 @@ class Emitter:
         self.plunge = ctx.feeds.plunge_mm_min
 
     def go(self, path: Sequence[Sequence[float]], *, rapid_to: float,
-           entry: Plunge | Ramp | Helix | AlongPath = PLUNGE) -> None:
+           entry: Plunge | Ramp | Helix | AlongPath = PLUNGE, feed: float | None = None) -> None:
         """Link to ``path[0]``, enter it from ``rapid_to`` (the top of the uncut material over the entry) and cut along
-        the path."""
+        the path (at ``feed`` when given, see :meth:`cut`)."""
         ctx = self.ctx
         end = tuple(float(c) for c in path[0])
         rapid_to = max(min(rapid_to, ctx.heights.retract), end[2])
         if isinstance(entry, AlongPath):
             descent = _descent(path, rapid_to, entry.angle_deg) if rapid_to > end[2] + 1e-9 else [end]
             self.go(descent, rapid_to=rapid_to, entry=PLUNGE)
-            self.cut(path[1:])
+            self.cut(path[1:], feed=feed)
             return
         feed = self.plunge if isinstance(entry, Plunge) else self.feed
         if self.here is None:
@@ -367,12 +368,13 @@ class Emitter:
             moves = link(self.here, end, heights=ctx.heights, retract_is_clear=True, feed=feed, op=self.op,
                          entry=entry, rapid_to=rapid_to)
         self._add(moves)
-        self.cut(path[1:])
+        self.cut(path[1:], feed=feed)
 
-    def cut(self, path: Sequence[Sequence[float]]) -> None:
+    def cut(self, path: Sequence[Sequence[float]], *, feed: float | None = None) -> None:
         """Cut on from where the tool is through ``path`` without lifting: a straight drop is a plunge at the plunge
         feed (in air only: a drop where :func:`in_air` says no is a ValueError, ``internal: vertical drop into
-        material``), the rest lines and arcs at the feed."""
+        material``), the rest lines and arcs at the operation's feed, or at ``feed`` (mm/min) when the operation gives
+        these moves their own (the feed at the tool's edge on an internal arc)."""
         if self.here is None:
             raise ValueError(f"{self.ctx.label}: a cut must start with go(), which brings the tool to it")
         kept: list[Point] = []
@@ -392,26 +394,27 @@ class Emitter:
                 if not in_air(self.ctx, point):
                     raise ValueError(f"internal: vertical drop into material at ({point[0]:g}, {point[1]:g}, "
                                      f"{point[2]:g}); a descent into material goes through a ramp or a helix")
-                self._flush(run)
+                self._flush(run, feed)
                 self._add([Move("plunge", point, self.plunge, self.op)])
                 run = [point]
             else:
                 run.append(point)
-        self._flush(run)
+        self._flush(run, feed)
 
-    def _flush(self, run: list[Point]) -> None:
+    def _flush(self, run: list[Point], feed: float | None = None) -> None:
         """Lines and arcs through ``run``, fitted apart on either side of a vertex where a long straight edge meets a
         finely sampled curve (one segment four times the other's length): an arc's start stays its own vertex, so a
         line is never stretched a few micrometres round into the arc, which would leave a kink on a finished wall."""
         if len(run) < 2:
             return
+        feed = self.feed if feed is None else feed
         start = 0
         for k in range(1, len(run) - 1):
             before, after = math.dist(run[k - 1], run[k]), math.dist(run[k], run[k + 1])
             if before > _BREAK * after or after > _BREAK * before:
-                self._add(fit_arcs(run[start:k + 1], self.ctx.tol / 2, feed=self.feed, op=self.op))
+                self._add(fit_arcs(run[start:k + 1], self.ctx.tol / 2, feed=feed, op=self.op))
                 start = k
-        self._add(fit_arcs(run[start:], self.ctx.tol / 2, feed=self.feed, op=self.op))
+        self._add(fit_arcs(run[start:], self.ctx.tol / 2, feed=feed, op=self.op))
 
     def _add(self, moves) -> None:
         for move in moves:

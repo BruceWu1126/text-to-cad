@@ -56,13 +56,23 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from cadgen._internal.cam.operations.base import OperationBase, ParseContext
+from cadgen._internal.cam.operations.common import (
+    feed_findings,
+    floor_from,
+    floor_keys,
+    fraction,
+    mm,
+    ramp_angle,
+    region_polygon,
+    tool_diameter,
+)
 from cadgen._internal.cam.values import choice, known, number, obj, whole
 
 if TYPE_CHECKING:
     from cadgen._internal.cam.operations.context import PlanContext, Planned
 
 __all__ = ["Contour2dOperation", "ContourParams", "FacingOperation", "FacingParams", "Pocket2dOperation",
-           "PocketParams", "Tabs", "facing_floor", "tab_height"]
+           "PocketParams", "Tabs", "clear_pocket_level", "facing_floor", "tab_height"]
 
 _END_MILLS = ("flat_endmill", "bull_endmill")
 #: How far a facing's tool hangs over the edge of what it faces, as a fraction of its radius (a tenth of its diameter).
@@ -71,83 +81,10 @@ _OVERHANG = 0.2
 _HOVER_MM = 0.5
 
 
-# --- shared parsing ---------------------------------------------------------------------------------------------
-
-def _fraction(raw: dict, key: str, ctx: ParseContext, default: float) -> float:
-    """A fraction of the tool's diameter, over 0 and up to 1."""
-    if key not in raw:
-        return default
-    value = number(raw[key], where=f"{ctx.where}.{key}", positive=True)
-    if value > 1:
-        raise ValueError(f"{ctx.where}.{key}: a fraction of the tool's diameter, over 0 and up to 1, got {value:g}")
-    return value
-
-
-def _mm(raw: dict, key: str, ctx: ParseContext, default: float | None = None, *, zero: bool = False) -> float | None:
-    if key not in raw:
-        return default
-    if zero:
-        return number(raw[key], where=f"{ctx.where}.{key}", minimum=0)
-    return number(raw[key], where=f"{ctx.where}.{key}", positive=True)
-
-
-def _floor_keys(raw: dict, ctx: ParseContext) -> tuple[float | None, float | None]:
-    """``depth_mm`` (below the material top) or ``z_mm`` (setup frame), at most one."""
-    if "depth_mm" in raw and "z_mm" in raw:
-        raise ValueError(f"{ctx.where}: give depth_mm (below the top of the material) or z_mm (in the setup's frame), "
-                         "not both")
-    depth = _mm(raw, "depth_mm", ctx)
-    z = number(raw["z_mm"], where=f"{ctx.where}.z_mm") if "z_mm" in raw else None
-    return depth, z
-
-
-def _angle(raw: dict, ctx: ParseContext) -> float:
-    from cadgen._internal.cam.operations.emit import DEFAULT_RAMP_DEG
-
-    if "ramp_angle_deg" not in raw:
-        return DEFAULT_RAMP_DEG
-    return number(raw["ramp_angle_deg"], where=f"{ctx.where}.ramp_angle_deg", positive=True, below=90)
-
-
-def _diameter(ctx: ParseContext) -> float:
-    return float(ctx.tool.diameter_mm)
-
+# --- shared ---------------------------------------------------------------------------------------------------
 
 def _stepdown(raw: dict, ctx: ParseContext, default: float) -> float:
-    return _mm(raw, "stepdown_mm", ctx, default)
-
-
-def _region_polygon(ctx: "PlanContext"):
-    from shapely.geometry import Polygon
-
-    poly = Polygon(ctx.operation.region)
-    if not poly.is_valid:
-        raise ValueError(f"{ctx.where}.region: the outline crosses itself")
-    return poly
-
-
-def _floor_from(ctx: "PlanContext", depth: float | None, z: float | None, default: float | None, *,
-                deepest: float | None, what: str) -> float:
-    """The floor z: ``z_mm``, ``depth_mm`` below the material top, else ``default``; never under ``deepest``."""
-    if z is not None:
-        floor = z
-    elif depth is not None:
-        floor = ctx.top_z - depth
-    elif default is not None:
-        floor = default
-    else:
-        raise ValueError(f"{ctx.where}: a region has no depth of its own; give depth_mm (below the top of the "
-                         "material) or z_mm (in the setup's frame)")
-    if deepest is not None and floor < deepest - 1e-6:
-        from cadgen._internal.cam.operations.base import PlanError
-
-        raise PlanError("too_deep", f"{ctx.where}: cutting to z {floor:g} goes {deepest - floor:g} mm under {what} at "
-                        f"z {deepest:g}, into the part")
-    return floor
-
-
-def _feed_findings(ctx: "PlanContext") -> tuple[dict, ...]:
-    return tuple(ctx.feeds.findings)
+    return mm(raw, "stepdown_mm", ctx.where, default)
 
 
 def _xy(points) -> list[tuple[float, float]]:
@@ -214,11 +151,11 @@ class FacingOperation(OperationBase):
 
     def parse(self, raw: dict, ctx: ParseContext) -> FacingParams:
         known(raw, self.keys, where=ctx.where, takes=f"facing takes {', '.join(sorted(self.keys))}")
-        stepover = _fraction(raw, "stepover", ctx, 0.7 if ctx.tool.type == "face_mill" else 0.4)
+        stepover = fraction(raw, "stepover", ctx.where, 0.7 if ctx.tool.type == "face_mill" else 0.4)
         pattern = choice(raw.get("pattern", "zigzag"), ("zigzag", "one_way"), where=f"{ctx.where}.pattern")
-        depth, z = _floor_keys(raw, ctx)
+        depth, z = floor_keys(raw, ctx.where)
         return FacingParams(stepover, _stepdown(raw, ctx, 1.0), pattern, depth, z,
-                            _mm(raw, "finish_mm", ctx, 0.0, zero=True))
+                            mm(raw, "finish_mm", ctx.where, 0.0, zero=True))
 
     def plan(self, params: FacingParams, ctx: "PlanContext") -> "Planned":
         from shapely.geometry import LineString
@@ -241,7 +178,7 @@ class FacingOperation(OperationBase):
         if ctx.operation.region is not None:
             # Inside a region the tool's centre stays a tenth of its diameter short of reaching the region's edge
             # with its own: it hangs over the edge by that much and no further.
-            centre = g2.offset(_region_polygon(ctx), -(r - _OVERHANG * r), tol)
+            centre = g2.offset(region_polygon(ctx), -(r - _OVERHANG * r), tol)
             if centre.is_empty:
                 raise PlanError("tool_too_large", f"{ctx.where}: the {2 * r:g} mm tool does not fit in the region",
                                 items=["region"])
@@ -296,7 +233,7 @@ class FacingOperation(OperationBase):
         rows = len(rows_at[heights[0]]) if heights else 0
         stats = {"floor_z": round(floor, 6), "levels": [round(z, 6) for z in heights], "rows": rows,
                  "stepover_mm": round(step, 6), "pattern": params.pattern}
-        return Planned(emitter.toolpath(), stats, _feed_findings(ctx))
+        return Planned(emitter.toolpath(), stats, feed_findings(ctx))
 
     @staticmethod
     def _stock_band(ctx: "PlanContext", z: float, above: float):
@@ -407,9 +344,9 @@ class Contour2dOperation(OperationBase):
     def parse(self, raw: dict, ctx: ParseContext) -> ContourParams:
         known(raw, self.keys, where=ctx.where, takes=f"contour_2d takes {', '.join(sorted(self.keys))}")
         side = choice(raw["side"], ("outside", "inside", "on"), where=f"{ctx.where}.side") if "side" in raw else None
-        diameter = _diameter(ctx)
+        diameter = tool_diameter(ctx)
         passes = whole(raw.get("finish_passes", 0), where=f"{ctx.where}.finish_passes", low=0, high=10)
-        finish = _mm(raw, "finish_mm", ctx, 0.0, zero=True)
+        finish = mm(raw, "finish_mm", ctx.where, 0.0, zero=True)
         if finish and not passes:
             raise ValueError(f"{ctx.where}.finish_mm: {finish:g} mm is left for finishing passes; give finish_passes "
                              "too")
@@ -428,10 +365,10 @@ class Contour2dOperation(OperationBase):
             if side == "on":
                 raise ValueError(f"{ctx.where}.tabs: tabs hold a part cut free round an outline; side on cuts along "
                                  "it and frees nothing")
-        depth, z = _floor_keys(raw, ctx)
+        depth, z = floor_keys(raw, ctx.where)
         return ContourParams(side, _stepdown(raw, ctx, diameter / 2), passes, finish, tabs,
-                             _mm(raw, "lead_radius_mm", ctx, diameter / 2, zero=True), _angle(raw, ctx), depth, z,
-                             _mm(raw, "breakthrough_mm", ctx, None, zero=True))
+                             mm(raw, "lead_radius_mm", ctx.where, diameter / 2, zero=True),
+                             ramp_angle(raw, ctx.where), depth, z, mm(raw, "breakthrough_mm", ctx.where, None, zero=True))
 
     # The targets: {ref, side, own (the side the target is cut from), outline (a function of z), bottom (z, None for a
     # region), through}.
@@ -441,7 +378,7 @@ class Contour2dOperation(OperationBase):
 
         found = []
         if ctx.operation.region is not None:
-            poly = _region_polygon(ctx)
+            poly = region_polygon(ctx)
             found.append({"ref": "region", "side": params.side or "outside", "own": "outside",
                           "outline": lambda z, p=poly: p, "bottom": None, "through": False})
             return found
@@ -482,11 +419,11 @@ class Contour2dOperation(OperationBase):
         for target in self._targets(params, ctx):
             side = target["side"]
             if target["bottom"] is None:
-                floor = _floor_from(ctx, params.depth_mm, params.z_mm, None, deepest=None, what="")
+                floor = floor_from(ctx, params.depth_mm, params.z_mm, None, deepest=None, what="")
             else:
                 default = target["bottom"] - (breakthrough if target["through"] else 0.0)
                 deepest = None if target["through"] else target["bottom"]
-                floor = _floor_from(ctx, params.depth_mm, params.z_mm, default, deepest=deepest,
+                floor = floor_from(ctx, params.depth_mm, params.z_mm, default, deepest=deepest,
                                     what=f"the bottom of {target['ref']}")
             final = 0.0 if side == "on" else r + stl
             rough = final + params.finish_mm if side != "on" else 0.0
@@ -535,7 +472,7 @@ class Contour2dOperation(OperationBase):
         if params.tabs:
             stats["tabs"] = {"count": params.tabs.count, "width_mm": params.tabs.width_mm,
                              "height_mm": round(max(heights), 6) if heights else params.tabs.height_mm}
-        return Planned(emitter.toolpath(), stats, _feed_findings(ctx))
+        return Planned(emitter.toolpath(), stats, feed_findings(ctx))
 
     @staticmethod
     def _rings(outline, side: str, own: str, distance: float, z: float, tol: float, ctx, ref: str):
@@ -693,10 +630,10 @@ class Pocket2dOperation(OperationBase):
     def parse(self, raw: dict, ctx: ParseContext) -> PocketParams:
         known(raw, self.keys, where=ctx.where, takes=f"pocket_2d takes {', '.join(sorted(self.keys))}")
         pattern = choice(raw.get("pattern", "offset"), ("offset", "zigzag"), where=f"{ctx.where}.pattern")
-        depth, z = _floor_keys(raw, ctx)
-        return PocketParams(pattern, _fraction(raw, "stepover", ctx, 0.4), _stepdown(raw, ctx, _diameter(ctx) / 2),
-                            _mm(raw, "finish_mm", ctx, 0.0, zero=True), _mm(raw, "finish_floor_mm", ctx, 0.0, zero=True),
-                            _angle(raw, ctx), depth, z)
+        depth, z = floor_keys(raw, ctx.where)
+        return PocketParams(pattern, fraction(raw, "stepover", ctx.where, 0.4),
+                            _stepdown(raw, ctx, tool_diameter(ctx) / 2), mm(raw, "finish_mm", ctx.where, 0.0, zero=True),
+                            mm(raw, "finish_floor_mm", ctx.where, 0.0, zero=True), ramp_angle(raw, ctx.where), depth, z)
 
     def plan(self, params: PocketParams, ctx: "PlanContext") -> "Planned":
         from cadgen._internal.cam.operations import geometry2d as g2
@@ -710,13 +647,13 @@ class Pocket2dOperation(OperationBase):
         emitter = Emitter(ctx)
         stats: dict = {"pockets": [], "corner_left": [], "full_slot_mm": 0.0}
         if ctx.operation.region is not None:
-            poly = _region_polygon(ctx)
+            poly = region_polygon(ctx)
             targets = [("region", lambda z, p=poly: p.difference(g2.shadow(ctx, z)), None, None)]
         else:
             targets = [(ref, lambda z, f=found: g2.feature_region(ctx, f, z), found.bottom[2], found)
                        for ref, found in ctx.targets(("pocket",))]
         for ref, region_at, bottom, found in targets:
-            floor = _floor_from(ctx, params.depth_mm, params.z_mm, bottom, deepest=bottom,
+            floor = floor_from(ctx, params.depth_mm, params.z_mm, bottom, deepest=bottom,
                                 what=f"the floor of {ref}")
             rough_floor = floor + params.finish_floor_mm
             levels = [(z, r + stl + params.finish_mm) for z in g2.depth_steps(ctx.top_z, rough_floor, params.stepdown_mm)]
@@ -738,7 +675,7 @@ class Pocket2dOperation(OperationBase):
                 wall = None  # wall stock with no floor pass to take it: one ring at the final depth
                 if params.finish_mm > 0 and params.finish_floor_mm == 0 and index == len(levels) - 1:
                     wall = g2.offset(region, -(r + stl), ctx.tol)
-                self._level(emitter, ctx, params, area, z, previous, wall, stats)
+                clear_pocket_level(emitter, ctx, params, area, z, previous, wall, stats)
                 previous = z
             stats["pockets"].append({"ref": ref, "floor_z": round(floor, 6),
                                      "levels": [round(z, 6) for z, _ in levels], "pattern": params.pattern})
@@ -748,104 +685,7 @@ class Pocket2dOperation(OperationBase):
                     stats["corner_left"].append({"ref": ref, "corner_radius_mm": corner,
                                                  "tool_leaves_radius_mm": round(r + stl, 6)})
         stats["full_slot_mm"] = round(stats["full_slot_mm"], 6)
-        return Planned(emitter.toolpath(), stats, _feed_findings(ctx))
-
-    def _level(self, emitter, ctx, params: PocketParams, area, z: float, above: float, wall, stats=None) -> None:
-        """One level of every separate area: the clearing, then (at the last rough level) the finishing ring, entered
-        from the cleared area at this level (dropped in from the level above and stepped across), never from the top.
-        Links cut at depth from one ring or row to the next add their length to ``stats["full_slot_mm"]``."""
-        from cadgen._internal.cam.operations import geometry2d as g2
-
-        step = params.stepover * 2 * ctx.radius
-        for root in g2.polygons(area):
-            if params.pattern == "offset":
-                sequence = self._offset_rings(root, step, z, ctx.tol)
-            else:
-                sequence = self._zigzag(root, step, z)
-            for fresh, path, near in sequence:
-                self._cut(emitter, ctx, params, root, path, z, above, fresh=fresh, near=near, stats=stats)
-            if wall is not None:
-                for piece in g2.polygons(wall):
-                    if piece.intersects(root):
-                        for ring in g2.ring_paths(piece, z, material="outside"):
-                            self._cut(emitter, ctx, params, piece, ring, z, above, fresh=False, cleared=root)
-
-    @staticmethod
-    def _cut(emitter, ctx, params: PocketParams, root, path: list, z: float, above: float, *, fresh: bool,
-             near=None, stats=None, cleared=None) -> None:
-        """Cut ``path`` at ``z``: straight on from where the tool is when that stays inside ``root`` (a link at
-        depth), else from the area ``cleared`` at this level (dropped in from ``above`` and stepped across), else
-        through an entry (:func:`~.emit.entry_for`) from ``above``."""
-        from shapely.geometry import Point
-        from shapely.ops import nearest_points
-
-        from cadgen._internal.cam.operations.emit import entry_for
-        from cadgen._internal.cam.toolpath import PLUNGE
-
-        here = emitter.here
-        if not fresh and here is not None and abs(here[2] - z) < 1e-9:
-            if path[0] == path[-1] and len(path) > 2:
-                path = _rotate_nearest(path, here)
-            if _within(root, here, path[0], ctx.tol):
-                if stats is not None:
-                    stats["full_slot_mm"] += math.dist(here[:2], path[0][:2])
-                emitter.cut(path)
-                return
-        if cleared is not None:
-            start = Point(path[0][0], path[0][1])
-            q = nearest_points(cleared.boundary, start)[0]
-            drop = (round(q.x, 6), round(q.y, 6), z)
-            if _within(root, drop, path[0], ctx.tol):
-                emitter.go([drop] + list(path), rapid_to=above, entry=PLUNGE)
-                return
-        entry, cut = entry_for(ctx, path, angle_deg=params.ramp_angle_deg, area=root, helix=True, near=near)
-        emitter.go(cut, rapid_to=above, entry=entry)
-
-    @staticmethod
-    def _offset_rings(root, step: float, z: float, tol: float) -> list[tuple[bool, list, Any]]:
-        """Rings offset inward from ``root`` by ``step`` until nothing is left, ordered innermost first: each branch
-        of the nesting from its innermost ring out (a new branch is ``fresh``: entered again), its own outer ring
-        last."""
-        from cadgen._internal.cam.operations import geometry2d as g2
-
-        def children(poly):
-            return g2.polygons(g2.offset(poly, -step, tol))
-
-        def visit(poly) -> list[tuple[bool, list, Any]]:
-            out: list[tuple[bool, list, Any]] = []
-            for child in children(poly):
-                out += visit(child)
-            rings = g2.ring_paths(poly, z, material="outside")
-            if not out:  # the innermost ring of a branch: entered afresh, with a helix in its middle
-                return [(True, rings[0], poly)] + [(False, ring, None) for ring in rings[1:]]
-            return out + [(False, ring, None) for ring in rings]
-
-        return visit(root)
-
-    @staticmethod
-    def _zigzag(root, step: float, z: float) -> list[tuple[bool, list, Any]]:
-        """Rows along X across ``root``, back and forth, then its rings round the walls and islands."""
-        from shapely.geometry import LineString
-
-        from cadgen._internal.cam.operations import geometry2d as g2
-
-        x0, y0, x1, y1 = root.bounds
-        count = max(1, math.ceil((y1 - y0) / step - 1e-9))
-        out: list[tuple[bool, list, Any]] = []
-        flip = False
-        for k in range(count):
-            y = y0 + (y1 - y0) * (k + 0.5) / count
-            line = LineString([(x0 - 1, y), (x1 + 1, y)]).intersection(root)
-            pieces = [line] if line.geom_type == "LineString" else list(getattr(line, "geoms", ()))
-            pieces = sorted((p for p in pieces if p.length > 1e-6), key=lambda p: p.bounds[0])
-            for piece in (reversed(pieces) if flip else pieces):
-                (ax, _), (bx, _) = piece.coords[0], piece.coords[-1]
-                a, b = sorted((ax, bx))
-                row = [(b, y, z), (a, y, z)] if flip else [(a, y, z), (b, y, z)]
-                out.append((not out, row, None))
-            flip = not flip
-        out += [(False, ring, None) for ring in g2.ring_paths(root, z, material="outside")]
-        return out
+        return Planned(emitter.toolpath(), stats, feed_findings(ctx))
 
     def human_lines(self, stats: dict) -> list[str]:
         lines = [f"{p['ref']}: {len(p['levels'])} level(s) to z {p['floor_z']:g}, {p['pattern']}" for p in stats["pockets"]]
@@ -853,3 +693,105 @@ class Pocket2dOperation(OperationBase):
             lines.append(f"{corner['ref']}: R{corner['corner_radius_mm']:g} inside corners left at "
                          f"R{corner['tool_leaves_radius_mm']:g} by this tool")
         return lines
+
+
+def clear_pocket_level(emitter, ctx: "PlanContext", params: PocketParams, area, z: float, above: float,
+                       wall=None, stats: dict | None = None) -> None:
+    """One level of a pocket's clearing at ``z``, from ``above`` (the level before, or the material's top), with
+    ``params``' pattern, stepover and ramp angle, for every separate piece of ``area`` (where the tool's centre may
+    go): the clearing, then, given the ``wall`` area (at the last rough level), the finishing ring round it, entered
+    from the cleared area at this level (dropped in from the level above and stepped across), never from the top.
+    Links cut at depth from one ring or row to the next add their length to ``stats["full_slot_mm"]``. How
+    ``pocket_2d`` clears each level, and an engraving's ``clear_tool`` its flat bottom."""
+    from cadgen._internal.cam.operations import geometry2d as g2
+
+    step = params.stepover * 2 * ctx.radius
+    for root in g2.polygons(area):
+        if params.pattern == "offset":
+            sequence = _offset_rings(root, step, z, ctx.tol)
+        else:
+            sequence = _zigzag_rows(root, step, z)
+        for fresh, path, near in sequence:
+            _pocket_cut(emitter, ctx, params, root, path, z, above, fresh=fresh, near=near, stats=stats)
+        if wall is not None:
+            for piece in g2.polygons(wall):
+                if piece.intersects(root):
+                    for ring in g2.ring_paths(piece, z, material="outside"):
+                        _pocket_cut(emitter, ctx, params, piece, ring, z, above, fresh=False, cleared=root)
+
+
+def _pocket_cut(emitter, ctx, params: PocketParams, root, path: list, z: float, above: float, *, fresh: bool,
+                near=None, stats=None, cleared=None) -> None:
+    """Cut ``path`` at ``z``: straight on from where the tool is when that stays inside ``root`` (a link at
+    depth), else from the area ``cleared`` at this level (dropped in from ``above`` and stepped across), else
+    through an entry (:func:`~.emit.entry_for`) from ``above``."""
+    from shapely.geometry import Point
+    from shapely.ops import nearest_points
+
+    from cadgen._internal.cam.operations.emit import entry_for
+    from cadgen._internal.cam.toolpath import PLUNGE
+
+    here = emitter.here
+    if not fresh and here is not None and abs(here[2] - z) < 1e-9:
+        if path[0] == path[-1] and len(path) > 2:
+            path = _rotate_nearest(path, here)
+        if _within(root, here, path[0], ctx.tol):
+            if stats is not None:
+                stats["full_slot_mm"] += math.dist(here[:2], path[0][:2])
+            emitter.cut(path)
+            return
+    if cleared is not None:
+        start = Point(path[0][0], path[0][1])
+        q = nearest_points(cleared.boundary, start)[0]
+        drop = (round(q.x, 6), round(q.y, 6), z)
+        if _within(root, drop, path[0], ctx.tol):
+            emitter.go([drop] + list(path), rapid_to=above, entry=PLUNGE)
+            return
+    entry, cut = entry_for(ctx, path, angle_deg=params.ramp_angle_deg, area=root, helix=True, near=near)
+    emitter.go(cut, rapid_to=above, entry=entry)
+
+
+def _offset_rings(root, step: float, z: float, tol: float) -> list[tuple[bool, list, Any]]:
+    """Rings offset inward from ``root`` by ``step`` until nothing is left, ordered innermost first: each branch
+    of the nesting from its innermost ring out (a new branch is ``fresh``: entered again), its own outer ring
+    last."""
+    from cadgen._internal.cam.operations import geometry2d as g2
+
+    def children(poly):
+        return g2.polygons(g2.offset(poly, -step, tol))
+
+    def visit(poly) -> list[tuple[bool, list, Any]]:
+        out: list[tuple[bool, list, Any]] = []
+        for child in children(poly):
+            out += visit(child)
+        rings = g2.ring_paths(poly, z, material="outside")
+        if not out:  # the innermost ring of a branch: entered afresh, with a helix in its middle
+            return [(True, rings[0], poly)] + [(False, ring, None) for ring in rings[1:]]
+        return out + [(False, ring, None) for ring in rings]
+
+    return visit(root)
+
+
+def _zigzag_rows(root, step: float, z: float) -> list[tuple[bool, list, Any]]:
+    """Rows along X across ``root``, back and forth, then its rings round the walls and islands."""
+    from shapely.geometry import LineString
+
+    from cadgen._internal.cam.operations import geometry2d as g2
+
+    x0, y0, x1, y1 = root.bounds
+    count = max(1, math.ceil((y1 - y0) / step - 1e-9))
+    out: list[tuple[bool, list, Any]] = []
+    flip = False
+    for k in range(count):
+        y = y0 + (y1 - y0) * (k + 0.5) / count
+        line = LineString([(x0 - 1, y), (x1 + 1, y)]).intersection(root)
+        pieces = [line] if line.geom_type == "LineString" else list(getattr(line, "geoms", ()))
+        pieces = sorted((p for p in pieces if p.length > 1e-6), key=lambda p: p.bounds[0])
+        for piece in (reversed(pieces) if flip else pieces):
+            (ax, _), (bx, _) = piece.coords[0], piece.coords[-1]
+            a, b = sorted((ax, bx))
+            row = [(b, y, z), (a, y, z)] if flip else [(a, y, z), (b, y, z)]
+            out.append((not out, row, None))
+        flip = not flip
+    out += [(False, ring, None) for ring in g2.ring_paths(root, z, material="outside")]
+    return out
