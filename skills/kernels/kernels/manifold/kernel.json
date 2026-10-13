@@ -1,0 +1,11 @@
+{
+  "id": "manifold",
+  "label": "Manifold",
+  "detail": "robust mesh booleans (OpenSCAD's)",
+  "exact": false,
+  "input": "program",
+  "output": "stl",
+  "command": ["{node}", "{here}/runner.mjs", "{runtime}", "{program}", "{stl}"],
+  "setup": "Needs Node.js 20 or newer on PATH, and the manifold kernel's setup.sh run once for its package.",
+  "tolerance": 0.002
+}

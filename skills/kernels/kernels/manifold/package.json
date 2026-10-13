@@ -1,0 +1,8 @@
+{
+  "name": "kernels-manifold",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "manifold-3d": "3.5.4"
+  }
+}

@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -79,6 +80,26 @@ def _last_json(stdout: str):
     return None
 
 
+def _run_bounded(argv: list[str], cwd: Path, env: dict, timeout: float) -> subprocess.CompletedProcess:
+    """Run a kernel's command, stopping it and everything it started after ``timeout`` seconds.
+
+    The runner gets its own process group: killing only the runner would leave
+    its children (a JAX worker, a container) holding the output pipes open."""
+    group = os.name == "posix"
+    proc = subprocess.Popen(argv, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            start_new_session=group)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if group:
+            os.killpg(proc.pid, signal.SIGKILL)
+        else:
+            proc.kill()
+        proc.communicate()
+        raise
+    return subprocess.CompletedProcess(argv, proc.returncode, out, err)
+
+
 def run(kernel: Kernel, target: str, *, cwd: Path | None = None, env: dict | None = None) -> dict:
     """Build ``target`` (``model.py`` or ``model.py::function``) on ``kernel``.
 
@@ -115,8 +136,7 @@ def run(kernel: Kernel, target: str, *, cwd: Path | None = None, env: dict | Non
             # following it would leave the venv behind.
             executable = os.path.normpath(os.path.join(cwd, executable))
         try:
-            proc = subprocess.run([executable, *command[1:]], cwd=cwd, env=env,
-                                  capture_output=True, text=True, check=False, timeout=kernel.timeout)
+            proc = _run_bounded([executable, *command[1:]], cwd, env, kernel.timeout)
         except subprocess.TimeoutExpired:
             raise KernelError(f"{kernel.label} gave no result within {kernel.timeout:g} s and was stopped "
                               f'("timeout" in its kernel.json)') from None

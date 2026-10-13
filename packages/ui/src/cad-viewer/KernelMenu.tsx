@@ -7,7 +7,7 @@ import { FLOATING_SURFACE_CLASS } from '../lib/floatingSurface.js';
 import { cn } from '../lib/utils.js';
 
 // The model's own build is build123d's, on OpenCASCADE; every other kernel is named by its folder.
-const KERNEL_NAMES: Record<string, string> = { brep: 'BREP', 'usd-brep': 'NVIDIA usd-brep', sdm: 'Emergent Matter SDM', implicit: 'Implicits', three: 'three.js' };
+const KERNEL_NAMES: Record<string, string> = { brep: 'BREP', 'usd-brep': 'NVIDIA usd-brep', sdm: 'Emergent Matter SDM', implicit: 'Implicits', manifold: 'Manifold', three: 'three.js' };
 export const kernelName = (kernel: string) => KERNEL_NAMES[kernel] ?? kernel;
 
 /**

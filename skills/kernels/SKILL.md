@@ -1,6 +1,6 @@
 ---
 name: kernels
-description: Build a cadgen model on alternate CAD kernels (NVIDIA usd-brep, Emergent Matter SDM, signed distance fields, three.js mesh CSG) to compare them with the default build123d/OpenCASCADE result, and add or try new kernels as plugins. Use when the user asks to rebuild a model on another kernel, compare kernels, or add, test or swap a modeling kernel.
+description: Build a cadgen model on alternate CAD kernels (NVIDIA usd-brep, Emergent Matter SDM, signed distance fields, Manifold and three.js mesh CSG) to compare them with the default build123d/OpenCASCADE result, and add or try new kernels as plugins. Use when the user asks to rebuild a model on another kernel, compare kernels, or add, test or swap a modeling kernel.
 license: MIT
 ---
 
@@ -58,6 +58,7 @@ rebuilt by `python model.py`. A failed run leaves no file.
 | `usd-brep` | [NVIDIA usd-brep](https://github.com/NVIDIA-Omniverse/usd-brep) through [keel](https://github.com/amywork777/keel)'s keel123d (build123d's API) | the model | exact STEP | keel on PATH or `CAD_KEEL_BIN` |
 | `sdm` | [Emergent Matter SDM](https://github.com/EmergentMatter/emergent-matter-sdm), JAX signed distance fields | the recorded program | STL | `kernels/sdm/setup.sh` or `CAD_SDM_PYTHON` |
 | `implicit` | signed distance field, surface nets | the recorded program | STL | Node.js 20+ |
+| `manifold` | [Manifold](https://github.com/elalish/manifold)'s mesh booleans (OpenSCAD's) | the recorded program | STL | Node.js 20+, `kernels/manifold/setup.sh` |
 | `three` | three.js primitives with `three-bvh-csg` | the recorded program | STL | Node.js 20+, `kernels/three/setup.sh` |
 
 `list` shows them with their setup notes. A kernel whose runtime is missing
@@ -68,9 +69,9 @@ fails with that note.
   recorder covers the common builder and algebra subset; a model using
   anything else fails with the name of what's missing, never a guess.
 - **Edges.** Fillets and chamfers on edges parallel to an axis become rounded
-  or cut sketch corners in `implicit` and `three`. SDM has no edge fillets, so
-  it draws them sharp. Every approximation is listed in the run's notes:
-  report them with the result.
+  or cut sketch corners in `implicit`, `manifold` and `three`. SDM has no edge
+  fillets, so it draws them sharp. Every approximation is listed in the run's
+  notes: report them with the result.
 - **Comparing.** Compare kernels by volume and bounds within a tolerance,
   never by file bytes. `check` prints each kernel's volume error on eight
   fixture parts against OpenCASCADE's.

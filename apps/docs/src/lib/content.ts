@@ -138,7 +138,7 @@ export const skillGroups = [
     name: "Kernels",
     path: "skills/kernels",
     summary:
-      "Builds a model on other CAD kernels (NVIDIA usd-brep, Emergent Matter SDM, signed distance fields, three.js) to compare with OpenCASCADE; each kernel is a plugin folder.",
+      "Builds a model on other CAD kernels (NVIDIA usd-brep, Emergent Matter SDM, signed distance fields, Manifold, three.js) to compare with OpenCASCADE; each kernel is a plugin folder.",
   },
   {
     name: "step.parts",

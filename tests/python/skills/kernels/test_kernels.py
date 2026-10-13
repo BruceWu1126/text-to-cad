@@ -15,6 +15,7 @@ import struct
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from pathlib import Path
 
@@ -68,7 +69,7 @@ def _stl_volume(path: Path) -> float:
 class ManifestTests(unittest.TestCase):
     def test_every_plugin_parses(self):
         ids = [k.id for k in manifest.load_all()]
-        for kernel_id in ("usd-brep", "sdm", "implicit", "three"):
+        for kernel_id in ("usd-brep", "sdm", "implicit", "three", "manifold"):
             self.assertIn(kernel_id, ids)
         self.assertFalse([i for i in ids if i.startswith("_")], "templates and _shared are not kernels")
 
@@ -150,13 +151,18 @@ class ModelTests(unittest.TestCase):
     def test_a_hung_runner_is_stopped(self):
         plugin = self.tmp / "sleeper"
         plugin.mkdir()
-        (plugin / "runner.py").write_text("import sys, time\nopen(sys.argv[2], 'w').write('half')\ntime.sleep(60)\n",
-                                          encoding="utf-8")
+        # The runner's child inherits the output pipe: stopping only the runner would wait on it.
+        (plugin / "runner.py").write_text(
+            "import subprocess, sys, time\nopen(sys.argv[2], 'w').write('half')\n"
+            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\ntime.sleep(60)\n",
+            encoding="utf-8")
         kernel = manifest.parse({"id": "sleeper", "label": "Sleeper", "input": "program", "output": "stl", "timeout": 0.5,
                                  "command": ["{python}", "{here}/runner.py", "{program}", "{stl}"]},
                                 "sleeper", plugin)
+        started = time.monotonic()
         with self.assertRaisesRegex(KernelError, r"Sleeper gave no result within 0.5 s"):
             run(kernel, f"{self.script}::pill", cwd=self.tmp)
+        self.assertLess(time.monotonic() - started, 30, "the runner's children were stopped too")
         self.assertFalse((self.tmp / "STEP" / ".kernels" / "sleeper" / "pill.stl").exists())
 
 
