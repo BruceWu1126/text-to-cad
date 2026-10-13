@@ -41,6 +41,20 @@ class Geometry(unittest.TestCase):
         self.assertLess(turn(ring_paths(box(0, 0, 10, 10), -1.0, material="inside")[0]), 0)  # round a part: clockwise
         self.assertGreater(turn(ring_paths(box(0, 0, 10, 10), -1.0, material="inside", climb=False)[0]), 0)
 
+    def test_a_ramp_down_zigzags_no_steeper_than_its_angle_and_ends_where_it_starts(self):
+        import math
+
+        from cadgen._internal.cam.operations.emit import ramp_down
+
+        run = [(0.0, 0.0, -2.0), (10.0, 0.0, -2.0), (10.0, 50.0, -2.0)]
+        points = [(0.0, 0.0, 0.0)] + ramp_down(run, 0.0, 3.0)
+        self.assertEqual(points[-1], run[0])
+        slopes = [(a[2] - b[2]) / math.dist(a[:2], b[:2]) for a, b in zip(points, points[1:])]
+        self.assertLessEqual(max(slopes), math.tan(math.radians(3.0)) + 1e-12)
+        self.assertGreater(min(slopes), 0)                   # always going down
+        self.assertEqual(len(points), 5)                     # two legs: 19.08 mm along the run and back
+        self.assertEqual(ramp_down(run, -2.0, 3.0), [])
+
 
 if __name__ == "__main__":
     unittest.main()

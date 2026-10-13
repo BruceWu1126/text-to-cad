@@ -1,8 +1,11 @@
 """2.5D milling on the plate: facing, contour_2d and pocket_2d.
 
 For every operation: the posted program, read back, is the planned toolpath (linuxcnc and fanuc); the swept tool never
-enters the part beyond the tolerance; the walls and floor it is aimed at are reached within stock-to-leave plus the
-tolerance; no rapid moves sideways under the retract plane; the same job plans the same moves twice.
+enters the part beyond the tolerance, read both from the slices (geometry2d.intrusion) and from the B-rep by the kernel
+(cam_fixtures.brep_intrusion); no descent goes into material steeper than the ramp angle (cam_fixtures.descents_ok);
+the walls and floor it is aimed at are reached within stock-to-leave plus the tolerance; no rapid moves sideways under
+the retract plane; the same job plans the same moves twice. Then the same checks on what the plate does not have: a
+bar of stock, a side setup, a vise, a wall that bulges between its top and bottom, a facing inside a region.
 """
 
 from __future__ import annotations
@@ -12,7 +15,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.python.support.cam_fixtures import PLATE, assert_backplot, path_points, plate_step, swept_at, value_error
+from tests.python.support.cam_fixtures import (
+    PLATE, assert_backplot, brep_intrusion, descents_ok, path_points, plate_step, swept_at, value_error,
+)
 
 #: The plate's faces as `cadgen cam features` names them (test_cam_features pins these).
 POCKET, OUTLINE = "#o1.f19", "#o1.f2"
@@ -38,6 +43,46 @@ JOB = {
     ],
 }
 TOP, POCKET_FLOOR, BOTTOM = -1.0, -6.0, -11.0
+
+
+def plan_all(step, document, shared: dict) -> list:
+    """``[(ctx, planned)]`` for every operation of ``document`` on ``step``."""
+    from cadgen._internal.cam.job import parse_job
+    from cadgen._internal.cam.operations import get_operation
+    from cadgen._internal.cam.operations.context import PlanContext
+
+    job = parse_job(document)
+    out = []
+    for index in range(len(job.operations)):
+        ctx = PlanContext.from_step(step, job, index, shared=shared)
+        out.append((ctx, get_operation(ctx.operation.op).plan(ctx.params, ctx)))
+    return out
+
+
+def assert_sound(case: unittest.TestCase, ctx, planned, *, slices: bool = False) -> None:
+    """What every toolpath must be: no gouge (read from the B-rep; from the slices too when ``slices``, which is
+    cheap only where the plan sliced those heights already and exact only on straight walls: it reads a leaning wall
+    up to a quantum lower), no steep descent into material, no sideways rapid under the retract plane, every move
+    its operation's."""
+    from cadgen._internal.cam.operations.geometry2d import intrusion
+    from cadgen._internal.cam.toolpath import rapids_below
+
+    tp = planned.toolpath
+    if slices:
+        case.assertLessEqual(intrusion(ctx, path_points(tp)), ctx.tol)
+    case.assertLessEqual(brep_intrusion(ctx.part_shape, tp, ctx.profile), ctx.tol)
+    case.assertEqual(descents_ok(tp, ctx), [])
+    case.assertEqual(rapids_below(tp.moves, start=tp.start, z=ctx.heights.retract), [])
+    case.assertEqual({move.op for move in tp.moves}, {ctx.index})
+
+
+def plan_error(case: unittest.TestCase, call, *args):
+    """The PlanError ``call(*args)`` must raise."""
+    from cadgen._internal.cam.operations.base import PlanError
+
+    with case.assertRaises(PlanError) as caught:
+        call(*args)
+    return caught.exception
 
 
 class Plate(unittest.TestCase):
@@ -73,20 +118,11 @@ class Plate(unittest.TestCase):
                 text = get_post(post).program(self.job, self.job.setups[0], [planned.toolpath], part="plate")
                 assert_backplot(self, text, post, [planned.toolpath])
 
-    def test_the_tool_never_enters_the_part(self):
-        from cadgen._internal.cam.operations.geometry2d import intrusion
-
+    def test_no_gouge_no_steep_descent_into_material_no_low_rapid(self):
         for ctx, planned in self.each():
-            self.assertLessEqual(intrusion(ctx, path_points(planned.toolpath)), ctx.tol)
-
-    def test_no_rapid_moves_sideways_under_the_retract_plane(self):
-        from cadgen._internal.cam.toolpath import rapids_below
-
-        for ctx, planned in self.each():
+            assert_sound(self, ctx, planned, slices=True)
             tp = planned.toolpath
-            self.assertEqual(rapids_below(tp.moves, start=tp.start, z=ctx.heights.retract), [])
             self.assertEqual((tp.tool, tp.rpm, tp.coolant), (ctx.tool.id, ctx.feeds.rpm, ctx.operation.coolant))
-            self.assertEqual({move.op for move in tp.moves}, {ctx.index})
 
     def test_the_same_job_plans_the_same_moves(self):
         from cadgen._internal.cam.operations import get_operation
@@ -216,17 +252,156 @@ class Plate(unittest.TestCase):
         self.assertIn("T3 is a ball_endmill, and pocket_2d cuts with a flat_endmill or bull_endmill",
                       value_error(self, parse_job, document))
 
-    def test_a_pocket_deeper_than_its_floor_is_refused(self):
+    def test_what_cannot_be_planned_says_why(self):
         import copy
 
         from cadgen._internal.cam.operations import get_operation
         from cadgen._internal.cam.operations.context import PlanContext
 
-        document = copy.deepcopy(JOB)
-        document["operations"][2]["depth_mm"] = 6
-        ctx = PlanContext.from_step(self.step, document, 2, shared=self.shared)
+        def refused(index, tools=(), **keys):
+            document = copy.deepcopy(JOB)
+            document["tools"] += list(tools)
+            document["operations"][index].update(keys)
+            ctx = PlanContext.from_step(self.step, document, index, shared=self.shared)
+            return plan_error(self, get_operation(ctx.operation.op).plan, ctx.params, ctx)
+
+        deep = refused(2, depth_mm=6)
+        self.assertEqual(deep.kind, "too_deep")
         self.assertIn("operations[2]: cutting to z -7 goes 1 mm under the floor of #o1.f19 at z -6, into the part",
-                      value_error(self, get_operation("pocket_2d").plan, ctx.params, ctx))
+                      str(deep))
+        self.assertEqual(refused(0, z_mm=-3).kind, "too_deep")                    # facing into the part
+        self.assertEqual(refused(5, z_mm=1).kind, "empty_operation")              # a floor over the material
+        wide = refused(2, [{"id": "T9", "type": "flat_endmill", "diameter_mm": 24}], tool="T9")
+        self.assertEqual((wide.kind, wide.finding()["type"]), ("tool_too_large", "tool_too_large"))
+
+    def test_a_vertical_drop_into_material_is_an_internal_error(self):
+        from cadgen._internal.cam.operations.emit import Emitter
+
+        emitter = Emitter(self.contexts[2])
+        emitter.go([(0.0, 0.0, -2.0), (5.0, 0.0, -2.0)], rapid_to=TOP)     # in the pocket, cut clear by a pass
+        self.assertIn("internal: vertical drop into material at (5, 0, -3)",
+                      value_error(self, emitter.cut, [(5.0, 0.0, -3.0)]))
+
+
+class Elsewhere(unittest.TestCase):
+    """The plate, and a filleted block, on what the plate job does not have."""
+
+    @classmethod
+    def setUpClass(cls):
+        tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(tmp.cleanup)
+        cls.dir = Path(tmp.name)
+        cls.step = plate_step(cls.dir)
+        cls.block = bulging_block_step(cls.dir)
+
+    def plan(self, step, document):
+        planned = plan_all(step, document, {})
+        for ctx, done in planned:
+            with self.subTest(op=f"{ctx.index} {ctx.operation.op}"):
+                assert_sound(self, ctx, done)
+        return planned
+
+    def test_a_region_facing_keeps_its_tool_inside_the_region(self):
+        from shapely.geometry import box
+
+        region = [[-15, -5], [15, -5], [15, 5], [-15, 5]]
+        for pattern in ("zigzag", "one_way"):
+            document = dict(JOB, operations=[{"op": "facing", "tool": "T1", "region": region, "z_mm": -4,
+                                              "pattern": pattern, "stepdown_mm": 2}])
+            [(ctx, planned)] = self.plan(self.step, document)
+            points = path_points(planned.toolpath, step=0.2)
+            low = [p for p in points if p[2] < ctx.heights.retract - 1e-6]
+            reach = max(max(abs(p[0]) for p in low), max(abs(p[1]) - 10 for p in low) + 15)
+            self.assertLessEqual(reach + ctx.radius, 15 + 0.2 * ctx.radius + ctx.tol)   # a tenth of the diameter over
+            # All of it is faced but the corners a round tool hanging that little over cannot reach.
+            left = box(-15, -5, 15, 5).difference(swept_at(points, -4.0, ctx.radius).buffer(ctx.tol))
+            self.assertLess(left.area, 0.8)
+            for piece in getattr(left, "geoms", [left]):
+                self.assertGreater(abs(piece.centroid.x), 14)
+                self.assertGreater(abs(piece.centroid.y), 4)
+            # It lifts to the retract plane once per level, not once per row.
+            rises = [k for k, (a, b) in enumerate(zip(points, points[1:]))
+                     if a[2] < ctx.heights.retract - 1e-6 <= b[2]]
+            self.assertLessEqual(len(rises), len(planned.stats["levels"]))
+
+    def test_bar_stock_is_faced_level_by_level_and_never_plunged_into(self):
+        document = dict(JOB, stock={"type": "cylinder", "axis": "X", "margin_mm": [2, 2]},
+                        operations=[{"op": "facing", "tool": "T2", "stepdown_mm": 5, "stepover": 0.8},
+                                    {"op": "pocket_2d", "tool": "T1", "features": [POCKET]}])
+        (face, faced), (pocket, _) = self.plan(self.step, document)
+        self.assertEqual(pocket.top_z, faced.stats["floor_z"])    # the facing covered the whole bar
+        swept = swept_at(path_points(faced.toolpath, step=0.2), faced.stats["floor_z"], face.radius)
+        from cadgen._internal.cam.operations.geometry2d import stock_outline
+
+        self.assertLess(stock_outline(face, faced.stats["floor_z"]).difference(swept.buffer(face.tol)).area, 1e-4)
+
+    def test_a_side_setup(self):
+        document = dict(JOB, setups=[{"id": "side", "direction": "+X"}],
+                        operations=[{"op": "facing", "tool": "T1", "setup": "side"},
+                                    {"op": "contour_2d", "tool": "T1", "setup": "side", "all": True, "depth_mm": 4},
+                                    {"op": "pocket_2d", "tool": "T1", "setup": "side", "depth_mm": 3,
+                                     "region": [[-12, -20], [4, -20], [4, 20], [-12, 20]]}])
+        planned = self.plan(self.step, document)
+        self.assertEqual([p.stats.get("floor_z", None) for _, p in planned][:1], [-2.0])
+
+    def test_a_vise_keeps_the_leads_out_of_its_jaws(self):
+        document = dict(JOB, stock={"type": "box", "margin_mm": [2, 7, 1, 1]},
+                        setups=[{"id": "top", "fixture": {"type": "vise", "grip_mm": 6}}],
+                        operations=[{"op": "contour_2d", "tool": "T1", "all": True, "lead_radius_mm": 8}])
+        [(ctx, planned)] = self.plan(self.step, document)
+        jaws = [volume for volume in ctx.setup.fixture.volumes if "jaw" in volume.name]
+        self.assertEqual({volume.max[2] for volume in jaws}, {-6.0})
+        from shapely.geometry import Point, box
+
+        for x, y, z in path_points(planned.toolpath, step=0.2):
+            for jaw in jaws:
+                if z < jaw.max[2]:
+                    footprint = box(jaw.min[0], jaw.min[1], jaw.max[0], jaw.max[1])
+                    self.assertGreaterEqual(footprint.distance(Point(x, y)), ctx.radius, (x, y, z, jaw.name))
+        levels = planned.stats["targets"][0]["depths"]
+        self.assertTrue(any(z < -6 for z in levels) and any(z > -6 for z in levels))
+        # Gripped closer than the cut can pass, the outline cannot be reached at all.
+        document["stock"] = {"type": "box", "margin_mm": [2, 2, 1, 1]}
+        from cadgen._internal.cam.operations import get_operation
+        from cadgen._internal.cam.operations.context import PlanContext
+
+        ctx = PlanContext.from_step(self.step, document, 0)
+        self.assertEqual(plan_error(self, get_operation("contour_2d").plan, ctx.params, ctx).kind, "unreachable")
+
+    def test_sheet_defaults_and_a_finishing_pass_dropped_into_the_rough_slot(self):
+        document = dict(JOB, machine={"kind": "router", "post": "linuxcnc"},
+                        stock={"type": "sheet", "margin_mm": [5, 5]},
+                        operations=[{"op": "contour_2d", "tool": "T1", "all": True, "lead_radius_mm": 0,
+                                     "finish_passes": 1, "finish_mm": 0.3, "tabs": {"count": 4}}])
+        [(ctx, planned)] = self.plan(self.step, document)
+        target = planned.stats["targets"][0]
+        bottom = ctx.part_bottom_z
+        self.assertAlmostEqual(target["floor_z"], bottom - 0.3)                   # through sheet: 0.3 mm on
+        self.assertAlmostEqual(planned.stats["tabs"]["height_mm"], 0.25 * 10.3)   # a quarter of the cut
+        moves = planned.toolpath.moves
+        drops = [k for k, move in enumerate(moves) if move.kind == "rapid" and abs(move.xyz[2] - (bottom - 0.3)) < 1e-9]
+        self.assertEqual(len(drops), 1)                  # the finishing ring: straight down into the rough slot,
+        step = moves[drops[0] + 1]                       # then across onto its own offset
+        self.assertEqual(step.kind, "feed")
+        self.assertAlmostEqual(math.dist(step.xyz[:2], moves[drops[0]].xyz[:2]), 0.3, delta=1e-6)
+
+    def test_a_wall_that_bulges_between_its_top_and_bottom_is_not_cut(self):
+        document = dict(JOB, stock={"type": "box", "margin_mm": [5, 5, 0, 0]},
+                        operations=[{"op": "pocket_2d", "tool": "T1", "z_mm": -9.5,
+                                     "region": [[20, -25], [40, -25], [40, 25], [20, 25]]}])
+        self.plan(self.block, document)
+
+
+def bulging_block_step(directory, name: str = "bulging"):
+    """A 60 x 40 x 10 mm block standing on z = 0, centred, its top and bottom edges filleted R4.99: its sides stand
+    straight for only 0.02 mm at mid-height and lean in above and below."""
+    from build123d import Align, Box, export_step, fillet
+
+    block = Box(60, 40, 10, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    block = fillet(block.faces().sort_by().first.edges() + block.faces().sort_by().last.edges(), 4.99)
+    step = Path(directory) / f"{name}.step"
+    export_step(block, str(step))
+    return step
 
 
 if __name__ == "__main__":

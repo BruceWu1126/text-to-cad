@@ -9,12 +9,20 @@ its entry starts and how high the uncut material stands over it. :class:`Emitter
   It rapids down only to ``rapid_to``, which the operation passes as the top of the uncut material over the entry
   (the stock top, an earlier facing's floor, or the previous pass's floor where that pass already cut the entry
   point clear), and enters from there.
-- :func:`entry_for` picks the entry: a plunge only where the tool is in air (its whole circle off the stock), a helix
-  in a closed pocket where one fits, a ramp along the pass's first straight run, or (a closed pass with no straight
-  run to ramp along, such as a circle) laps of the pass itself sloping down (:class:`AlongPath`).
+- :func:`entry_for` picks the entry: a plunge only where the tool is in air (:func:`in_air`: its whole circle off the
+  stock's footprint and off every fixture standing above the entry's depth), a helix in a closed pocket where one
+  fits, a ramp along the pass's first straight run, or (a closed pass with no straight run to ramp along, such as a
+  circle) laps of the pass itself sloping down (:class:`AlongPath`). No entry at all is a
+  :class:`~cadgen._internal.cam.operations.base.PlanError` (``unreachable``).
+- :meth:`Emitter.go` checks the straight-down rapid at the entry against the fixtures too (:func:`fixtures_clear`,
+  the tool's widest part that reaches down past a fixture's top); a fixture in the way is a ``PlanError``
+  (``unreachable``).
 - :meth:`Emitter.cut` cuts on from where the tool is, without lifting: arcs and lines through
-  :func:`~cadgen._internal.cam.toolpath.fit_arcs` at half the tolerance, a straight drop as a plunge at the plunge
-  feed.
+  :func:`~cadgen._internal.cam.toolpath.fit_arcs` at half the tolerance. A straight drop is a plunge at the plunge
+  feed, and only in air: a drop where the tool is not in air is a ValueError (``internal: vertical drop into
+  material``), since a descent into material goes through a ramp or a helix (:func:`ramp_down`, :func:`entry_for`).
+- :func:`ramp_down` zig-zags down along a stretch of a pass, never steeper than the ramp angle, ending where the
+  stretch starts: how a pass gets back down after it lifts (over a tab, between facing rows).
 - :func:`lead_arc` gives a quarter-circle lead on or off a pass, tangent to it, on the air side.
 - :meth:`Emitter.toolpath` lifts to the clearance height and returns the :class:`~cadgen._internal.cam.toolpath.Toolpath`
   with the operation's tool, spindle speed and coolant.
@@ -33,7 +41,8 @@ from cadgen._internal.cam.toolpath import PLUNGE, Helix, Move, Plunge, Ramp, Too
 if TYPE_CHECKING:
     from cadgen._internal.cam.operations.context import PlanContext
 
-__all__ = ["AlongPath", "DEFAULT_RAMP_DEG", "Emitter", "entry_for", "in_air", "lead_arc", "retract_clear"]
+__all__ = ["AlongPath", "DEFAULT_RAMP_DEG", "Emitter", "entry_for", "fixtures_clear", "in_air", "lead_arc",
+           "ramp_down", "retract_clear"]
 
 Point = tuple[float, float, float]
 
@@ -42,9 +51,11 @@ DEFAULT_RAMP_DEG = 3.0
 #: The shortest step a cut keeps, mm: under the coarsest post resolution (0.0001 in is 0.00254 mm), so every move the
 #: toolpath holds is one the program writes.
 MIN_STEP_MM = 3e-3
+#: How much longer one segment of a cut is than the next where the fitting keeps their shared vertex (see _flush).
+_BREAK = 4.0
 #: A helix's radius as a fraction of the tool's, when it fits, and the least it may be before a ramp is used.
 HELIX_FRACTION = 0.5
-HELIX_MIN_FRACTION = 0.1
+HELIX_MIN_FRACTION = 0.25
 
 
 def retract_clear(ctx: "PlanContext", a: Sequence[float], b: Sequence[float]) -> bool:
@@ -71,13 +82,40 @@ def retract_clear(ctx: "PlanContext", a: Sequence[float], b: Sequence[float]) ->
 
 
 def in_air(ctx: "PlanContext", xy: Sequence[float], z: float | None = None) -> bool:
-    """The tool's whole circle at ``xy`` is off the stock (by the tolerance): nothing to cut under it, so it may plunge
-    there."""
+    """The tool may plunge at ``xy`` down to ``z`` (``xy[2]`` when ``xy`` is a point, else as deep as any fixture
+    goes): its whole circle is off the stock's footprint (the whole stock projected down the tool axis, never just
+    its top; nothing an earlier cut took away is subtracted) by the tolerance, and the straight drop there is clear
+    of every fixture volume standing above ``z`` (:func:`fixtures_clear`)."""
     from shapely.geometry import Point as ShapelyPoint
 
     from cadgen._internal.cam.operations.geometry2d import stock_outline
 
-    return stock_outline(ctx, z).distance(ShapelyPoint(xy[0], xy[1])) >= ctx.radius + ctx.tol
+    if z is None:
+        z = xy[2] if len(xy) > 2 else -math.inf
+    point = ShapelyPoint(xy[0], xy[1])
+    return stock_outline(ctx).distance(point) >= ctx.radius + ctx.tol and fixtures_clear(ctx, point, z)
+
+
+def fixtures_clear(ctx: "PlanContext", geom, z: float) -> bool:
+    """The tool going down to ``z`` (setup frame) over ``geom`` (shapely, x and y: a point, a lead's line) stays clear
+    of the fixture: every fixture volume whose top stands above ``z`` is further from ``geom`` than the widest part
+    of the tool that reaches below that top (the cutter's radius, or its shank's or holder's where those reach
+    down past it), by the tolerance."""
+    from shapely.geometry import Point as ShapelyPoint, box
+
+    for volume in ctx.setup.fixture.volumes:
+        top = volume.max[2] if hasattr(volume, "max") else volume.z_max
+        if top <= z + ctx.tol:
+            continue
+        reach = max([envelope.radius for envelope in ctx.profile.envelope() if envelope.z0 < top - z],
+                    default=ctx.radius)
+        if hasattr(volume, "max"):
+            footprint = box(volume.min[0], volume.min[1], volume.max[0], volume.max[1])
+        else:
+            footprint = ShapelyPoint(*volume.center).buffer(volume.radius)
+        if geom.distance(footprint) < reach + ctx.tol:
+            return False
+    return True
 
 
 def entry_for(ctx: "PlanContext", path: Sequence[Sequence[float]], *, angle_deg: float = DEFAULT_RAMP_DEG,
@@ -92,8 +130,10 @@ def entry_for(ctx: "PlanContext", path: Sequence[Sequence[float]], *, angle_deg:
     clearing) or at the middle of the piece of ``area`` the path starts in; from the last two the tool feeds
     straight from the helix's end to the path's start, which must stay inside ``area`` too.
     """
+    from cadgen._internal.cam.operations.base import PlanError
+
     start = tuple(path[0])
-    if in_air(ctx, start[:2]):
+    if in_air(ctx, start):
         return PLUNGE, list(path)
     toward = _along(path)
     if helix and area is not None:
@@ -107,8 +147,8 @@ def entry_for(ctx: "PlanContext", path: Sequence[Sequence[float]], *, angle_deg:
         return Ramp(toward, angle_deg), list(path)
     if closed:
         return AlongPath(angle_deg), list(path)
-    raise ValueError(f"{ctx.label}: no room to ramp into the cut at ({start[0]:g}, {start[1]:g}) and the tool is not "
-                     "in air there; a plunge would bury it")
+    raise PlanError("unreachable", f"{ctx.label}: no room to ramp into the cut at ({start[0]:g}, {start[1]:g}) and "
+                    "the tool is not in air there; a plunge would bury it")
 
 
 @dataclass(frozen=True)
@@ -197,10 +237,63 @@ def _helix(ctx: "PlanContext", start: Point, toward, area, near, angle_deg: floa
     return None
 
 
+def _shapely_point(xy):
+    from shapely.geometry import Point as ShapelyPoint
+
+    return ShapelyPoint(xy[0], xy[1])
+
+
 def _polys(area):
     from cadgen._internal.cam.operations.geometry2d import polygons
 
     return polygons(area)
+
+
+def ramp_down(run: Sequence[Sequence[float]], top: float, angle_deg: float) -> list[Point]:
+    """Zig-zag down from ``top`` over ``run[0]`` to ``run[0]`` itself: legs forth and back along the polyline ``run``
+    (the stretch of the pass ahead of its start, at the pass's depth), each sloping evenly and never steeper than
+    ``angle_deg``, an even number of them so the last ends at ``run[0]``. It uses only as much of ``run`` as two legs
+    need, more legs where ``run`` is shorter. The points after the start (the tool is at ``run[0]`` raised to
+    ``top``); empty when ``top`` is not above ``run[0]``."""
+    z = run[0][2]
+    drop = top - z
+    if drop <= 1e-9:
+        return []
+    slope = math.tan(math.radians(angle_deg))
+    need = drop / (2 * slope)
+    stretch = [tuple(float(c) for c in run[0])]
+    walked = 0.0
+    for point in run[1:]:
+        point = tuple(float(c) for c in point)
+        span = math.dist(stretch[-1][:2], point[:2])
+        if span < 1e-12:
+            continue
+        if walked + span >= need:
+            f = (need - walked) / span
+            a = stretch[-1]
+            stretch.append(tuple(a[n] + (point[n] - a[n]) * f for n in range(3)))
+            walked = need
+            break
+        stretch.append(point)
+        walked += span
+    length = walked
+    if length < 1e-9:
+        raise ValueError("ramp_down: the stretch to ramp along has no length")
+    legs = 2 * max(1, math.ceil(drop / (2 * length * slope) - 1e-9))
+    along = [0.0]
+    for a, b in zip(stretch, stretch[1:]):
+        along.append(along[-1] + math.dist(a[:2], b[:2]))
+    total = legs * length
+    out: list[Point] = []
+    for leg in range(legs):
+        if leg % 2 == 0:
+            steps = [(along[k], stretch[k]) for k in range(1, len(stretch))]
+        else:
+            steps = [(length - along[k], stretch[k]) for k in range(len(stretch) - 2, -1, -1)]
+        for done, point in steps:
+            out.append((point[0], point[1], top - drop * (leg * length + done) / total))
+    out[-1] = stretch[0]
+    return out
 
 
 def lead_arc(path: Sequence[Sequence[float]], radius: float, *, at_end: bool, air_left: bool, tol: float) -> list[Point]:
@@ -264,6 +357,12 @@ class Emitter:
         moves = link(self.here, end, heights=ctx.heights, retract_is_clear=False, feed=feed, op=self.op, entry=entry,
                      rapid_to=rapid_to)
         across = [move for move in moves if move.kind == "rapid"]
+        over = across[-1].xyz if across else self.here
+        if not fixtures_clear(ctx, _shapely_point(over), end[2]):
+            from cadgen._internal.cam.operations.base import PlanError
+
+            raise PlanError("unreachable", f"{ctx.label}: the tool cannot come down at ({over[0]:g}, {over[1]:g}) to z "
+                            f"{end[2]:g}: the fixture stands in the way", "Grip the stock so the fixture stands clear of the cut, or move the cut.")
         if across and retract_clear(ctx, self.here, across[-1].xyz):
             moves = link(self.here, end, heights=ctx.heights, retract_is_clear=True, feed=feed, op=self.op,
                          entry=entry, rapid_to=rapid_to)
@@ -272,7 +371,8 @@ class Emitter:
 
     def cut(self, path: Sequence[Sequence[float]]) -> None:
         """Cut on from where the tool is through ``path`` without lifting: a straight drop is a plunge at the plunge
-        feed, the rest lines and arcs at the feed."""
+        feed (in air only: a drop where :func:`in_air` says no is a ValueError, ``internal: vertical drop into
+        material``), the rest lines and arcs at the feed."""
         if self.here is None:
             raise ValueError(f"{self.ctx.label}: a cut must start with go(), which brings the tool to it")
         kept: list[Point] = []
@@ -289,6 +389,9 @@ class Emitter:
         for point in kept:
             last = run[-1]
             if math.dist(point[:2], last[:2]) < 1e-9 and point[2] < last[2] - 1e-9:
+                if not in_air(self.ctx, point):
+                    raise ValueError(f"internal: vertical drop into material at ({point[0]:g}, {point[1]:g}, "
+                                     f"{point[2]:g}); a descent into material goes through a ramp or a helix")
                 self._flush(run)
                 self._add([Move("plunge", point, self.plunge, self.op)])
                 run = [point]
@@ -297,8 +400,18 @@ class Emitter:
         self._flush(run)
 
     def _flush(self, run: list[Point]) -> None:
-        if len(run) > 1:
-            self._add(fit_arcs(run, self.ctx.tol / 2, feed=self.feed, op=self.op))
+        """Lines and arcs through ``run``, fitted apart on either side of a vertex where a long straight edge meets a
+        finely sampled curve (one segment four times the other's length): an arc's start stays its own vertex, so a
+        line is never stretched a few micrometres round into the arc, which would leave a kink on a finished wall."""
+        if len(run) < 2:
+            return
+        start = 0
+        for k in range(1, len(run) - 1):
+            before, after = math.dist(run[k - 1], run[k]), math.dist(run[k], run[k + 1])
+            if before > _BREAK * after or after > _BREAK * before:
+                self._add(fit_arcs(run[start:k + 1], self.ctx.tol / 2, feed=self.feed, op=self.op))
+                start = k
+        self._add(fit_arcs(run[start:], self.ctx.tol / 2, feed=self.feed, op=self.op))
 
     def _add(self, moves) -> None:
         for move in moves:

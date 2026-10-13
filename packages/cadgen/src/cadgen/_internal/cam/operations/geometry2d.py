@@ -10,7 +10,8 @@ would add the mesh's own error on top, so it is not used.
   :data:`NUDGE_MM` above it, so a floor is never part of the material over it.
 - :func:`shadow`: the part's material at that height or anywhere above it: what a straight-sided tool whose tip
   is at that height must stay out of (its side reaches up past every level above).
-- :func:`stock_outline`: the stock at a height.
+- :func:`levels`: the heights the part's outline changes at (horizontal faces, face ends, silhouettes).
+- :func:`stock_outline`: the stock at a height, or its footprint (the whole stock projected down the tool).
 - :func:`feature_region`: the area a feature gives the tool at a height: a pocket's or a hole's open area (islands
   as holes), or a profile's outline (holes filled).
 - :func:`offset`: a shapely buffer with round joins fine enough that its arcs stray at most :func:`deflection`.
@@ -18,6 +19,9 @@ would add the mesh's own error on top, so it is not used.
   ready for :func:`~cadgen._internal.cam.toolpath.fit_arcs`.
 - :func:`depth_steps`: the levels a pass steps down through, the last exactly the floor.
 - :func:`intrusion`: how far the swept tool enters the part at points along a path (negative: its clearance).
+
+A feature that gives nothing to cut, or cannot be cut as asked, is a
+:class:`~cadgen._internal.cam.operations.base.PlanError`.
 
 shapely and numpy are imported inside the functions; this module is stdlib-only at import.
 """
@@ -79,7 +83,16 @@ def _multi(found):
 # --- slices ------------------------------------------------------------------------------------------------
 
 def levels(ctx: "PlanContext") -> tuple[float, ...]:
-    """The heights (z in the setup's frame) of the part's faces square to the tool, and its top and bottom."""
+    """The heights (z in the setup's frame) where the part's outline may change how it changes: its top and bottom,
+    its faces square to the tool, both ends of every face's z extent, and the silhouette height of every curved face
+    whose widest outline is inside it (a cylinder or torus lying across the tool, a sphere). Between two of them the
+    part's outline grows or shrinks steadily, except over a face :func:`shadow` samples densely (see
+    ``_complex_spans``)."""
+    return _face_levels(ctx)[0]
+
+
+def _flat_levels(ctx: "PlanContext") -> tuple[float, ...]:
+    """The heights of the part's faces square to the tool, its top and its bottom: where a slice is taken just above."""
     def make():
         from cadgen._internal.cam.part import parallel
 
@@ -90,11 +103,69 @@ def levels(ctx: "PlanContext") -> tuple[float, ...]:
                 found.add(round(ctx.to_setup(face.center)[2], _SNAP_DIGITS))
         return tuple(sorted(found))
 
-    return ctx.cached("levels", make)
+    return ctx.cached("flat_levels", make)
+
+
+#: How close to square to the tool (or along it) an axis counts, as the size of a unit vector's other part.
+_AXIS_EPS = 1e-6
+#: The most a slab over a face of no known shape goes unsampled, mm.
+_DENSE_MM = 0.5
+
+
+def _face_levels(ctx: "PlanContext"):
+    """``(levels, spans)``: :func:`levels`, and the z ranges of faces whose outline may bulge anywhere between them
+    (a tilted cylinder, a B-spline), which :func:`shadow` samples every :data:`_DENSE_MM`."""
+    def make():
+        from OCP.Bnd import Bnd_Box
+        from OCP.BRepAdaptor import BRepAdaptor_Surface
+        from OCP.BRepBndLib import BRepBndLib
+        from OCP.GeomAbs import GeomAbs_Cone, GeomAbs_Cylinder, GeomAbs_Plane, GeomAbs_Sphere, GeomAbs_Torus
+        from OCP.TopAbs import TopAbs_FACE
+        from OCP.TopExp import TopExp_Explorer
+        from OCP.TopoDS import TopoDS
+
+        found = set(_flat_levels(ctx))
+        spans = []
+        explorer = TopExp_Explorer(ctx.part_shape, TopAbs_FACE)
+        while explorer.More():
+            face = TopoDS.Face_s(explorer.Current())
+            explorer.Next()
+            box = Bnd_Box()
+            BRepBndLib.AddOptimal_s(face, box, False, False)
+            if box.IsVoid():
+                continue
+            _, _, low, _, _, high = box.Get()
+            found.update((round(low, _SNAP_DIGITS), round(high, _SNAP_DIGITS)))
+            surface = BRepAdaptor_Surface(face)
+            kind = surface.GetType()
+            if kind == GeomAbs_Plane:
+                continue
+            silhouette = None
+            if kind in (GeomAbs_Cylinder, GeomAbs_Cone, GeomAbs_Torus):
+                read = {GeomAbs_Cylinder: surface.Cylinder, GeomAbs_Cone: surface.Cone, GeomAbs_Torus: surface.Torus}
+                gp = read[kind]()
+                axis = gp.Axis()
+                tilt = abs(axis.Direction().Z())
+                if tilt > 1 - _AXIS_EPS:          # about the tool axis: its outline changes steadily with z
+                    if kind == GeomAbs_Torus:
+                        silhouette = axis.Location().Z()
+                    else:
+                        continue
+                elif tilt < _AXIS_EPS and kind == GeomAbs_Cylinder:   # lying across the tool: widest at its axis
+                    silhouette = axis.Location().Z()
+            elif kind == GeomAbs_Sphere:
+                silhouette = surface.Sphere().Location().Z()
+            if silhouette is None:
+                spans.append((low, high))
+            elif low < silhouette < high:
+                found.add(round(silhouette, _SNAP_DIGITS))
+        return tuple(sorted(found)), tuple(spans)
+
+    return ctx.cached("face_levels", make)
 
 
 def _on_level(ctx: "PlanContext", z: float) -> bool:
-    return any(abs(z - level) < NUDGE_MM / 2 for level in levels(ctx))
+    return any(abs(z - level) < NUDGE_MM / 2 for level in _flat_levels(ctx))
 
 
 def _slice(shape, z: float, tol: float, inside) -> Any:
@@ -170,8 +241,9 @@ def section(ctx: "PlanContext", z: float):
 
 def shadow(ctx: "PlanContext", z: float):
     """The part's material at height ``z`` or above it (setup frame): what a straight-sided tool whose tip is at
-    ``z`` must keep out of. Sliced at ``z`` and just inside both ends of every slab between the levels above it, so
-    a straight or tapered wall is held at its widest."""
+    ``z`` must keep out of. Each slab between :func:`levels` above ``z`` is sliced just inside both its ends and at
+    its middle (every :data:`_DENSE_MM` where a face of no known shape spans it), so a wall that bulges between
+    two horizontal faces (a fillet, a boss lying on its side) is held at its widest."""
     from shapely.ops import unary_union
 
     z = round(float(z), _SNAP_DIGITS) + 0.0
@@ -181,7 +253,13 @@ def shadow(ctx: "PlanContext", z: float):
         if not above:
             return section(ctx, z)
         high = above[0]
-        slab = [z, z + NUDGE_MM, high - NUDGE_MM] if high - z > 3 * NUDGE_MM else [z, (z + high) / 2]
+        if high - z > 3 * NUDGE_MM:
+            slab = [z, z + NUDGE_MM, (z + high) / 2, high - NUDGE_MM]
+            if any(low < high and z < top for low, top in _face_levels(ctx)[1]):
+                count = math.ceil((high - z) / _DENSE_MM)
+                slab += [z + (high - z) * k / count for k in range(1, count)]
+        else:
+            slab = [z, (z + high) / 2]
         # The slab up to the next level, then everything from that level up (kept, so each height costs one slab).
         return _multi(unary_union([section(ctx, h) for h in slab] + [shadow(ctx, high)]))
 
@@ -189,14 +267,18 @@ def shadow(ctx: "PlanContext", z: float):
 
 
 def stock_outline(ctx: "PlanContext", z: float | None = None):
-    """The stock at height ``z`` (setup frame; just under its top by default), as a MultiPolygon."""
+    """The stock at height ``z`` (setup frame; just under its top when ``z`` is above that), as a MultiPolygon. With
+    no ``z``, the stock's footprint: its whole outline projected down the tool axis (for a bar lying across the tool,
+    the rectangle it covers, not its top line), grown by the mesh's deflection so it never reads short."""
     from shapely.geometry import box
 
     top = ctx.setup.stock_top_z
-    z = top - NUDGE_MM if z is None else min(float(z), top - NUDGE_MM)
     if ctx.stock.type in ("box", "sheet") and _square(ctx):
         (x0, y0, _), (x1, y1, _) = ctx.setup.stock_bounds
         return _multi(box(x0, y0, x1, y1))
+    if z is None:
+        return ctx.cached("stock_footprint", lambda: _footprint(ctx.stock_shape, ctx.tol))
+    z = min(float(z), top - NUDGE_MM)
 
     def inside(x, y, h):
         from OCP.BRepClass3d import BRepClass3d_SolidClassifier
@@ -208,6 +290,39 @@ def stock_outline(ctx: "PlanContext", z: float | None = None):
         return classifier.State() == TopAbs_IN
 
     return ctx.cached(("stock", round(z, _SNAP_DIGITS)), lambda: _slice(ctx.stock_shape, z, ctx.tol, inside))
+
+
+def _footprint(shape, tol: float):
+    """A solid's outline projected down Z: the union of its mesh's triangles, grown by the mesh's deflection."""
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Copy
+    from OCP.BRepMesh import BRepMesh_IncrementalMesh
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.TopoDS import TopoDS
+    from shapely.geometry import Polygon
+    from shapely.ops import unary_union
+
+    limit = deflection(tol)
+    copy = BRepBuilderAPI_Copy(shape).Shape()   # meshing writes into the shape; never into the context's
+    BRepMesh_IncrementalMesh(copy, limit, False, 0.1, False)
+    pieces = []
+    explorer = TopExp_Explorer(copy, TopAbs_FACE)
+    while explorer.More():
+        location = TopLoc_Location()
+        mesh = BRep_Tool.Triangulation_s(TopoDS.Face_s(explorer.Current()), location)
+        explorer.Next()
+        if mesh is None:
+            continue
+        trsf = location.Transformation()
+        nodes = [mesh.Node(k).Transformed(trsf) for k in range(1, mesh.NbNodes() + 1)]
+        for k in range(1, mesh.NbTriangles() + 1):
+            a, b, c = mesh.Triangle(k).Get()
+            triangle = Polygon([(nodes[i - 1].X(), nodes[i - 1].Y()) for i in (a, b, c)])
+            if triangle.area > _AREA_EPS:
+                pieces.append(triangle)
+    return _multi(unary_union(pieces).buffer(limit, quad_segs=1, join_style="mitre") if pieces else None)
 
 
 def _square(ctx: "PlanContext") -> bool:
@@ -228,6 +343,8 @@ def feature_region(ctx: "PlanContext", found: "SetupFeature", z: float):
     """
     from shapely.geometry import Point, Polygon, box
 
+    from cadgen._internal.cam.operations.base import PlanError
+
     feature = found.feature
     top, bottom = found.top[2], found.bottom[2]
     at = min(max(z, bottom + NUDGE_MM), top - NUDGE_MM) if top - bottom > 2 * NUDGE_MM else (top + bottom) / 2
@@ -241,14 +358,16 @@ def feature_region(ctx: "PlanContext", found: "SetupFeature", z: float):
             if poly.contains(probe):
                 outer = Polygon(poly.exterior)
                 if outer.bounds[0] <= x0 - span + 1e-6:
-                    raise ValueError(f"{feature.ref}: the {feature.kind} is open to the side at z {z:g}; "
-                                     "it has no closed outline to cut")
+                    raise PlanError("unreachable", f"{feature.ref}: the {feature.kind} is open to the side at z "
+                                    f"{z:g}; it has no closed outline to cut", items=[feature.ref])
                 return poly
-        raise ValueError(f"{feature.ref}: no open area round the {feature.kind} at z {z:g}")
+        raise PlanError("empty_operation", f"{feature.ref}: no open area round the {feature.kind} at z {z:g}",
+                        items=[feature.ref])
     if feature.kind == "profile":
         near = [poly for poly in polygons(material) if poly.exterior.distance(probe) < 10 * NUDGE_MM]
         if not near:
-            raise ValueError(f"{feature.ref}: the outline is not found at z {z:g}")
+            raise PlanError("empty_operation", f"{feature.ref}: the outline is not found at z {z:g}",
+                            items=[feature.ref])
         return Polygon(near[0].exterior)
     raise ValueError(f"{feature.ref}: a {feature.kind} gives no area to cut round")
 

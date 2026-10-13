@@ -513,3 +513,345 @@ def swept_at(points, z: float, radius: float):
         runs.append(run)
     shapes = [LineString(r) if len(r) > 1 else Point(r[0]) for r in runs]
     return unary_union([shape.buffer(radius, quad_segs=64) for shape in shapes])
+
+
+# --- Gouges and descents, measured independently of the planner ---------------------------------------
+# brep_intrusion asks the kernel (BRepExtrema_DistShapeShape) how far the tool's cutting envelope enters the part's
+# B-rep; descents_ok checks that every steep descent ends in air or in material an earlier cut already took away.
+
+#: Segments per quarter circle where a tool's outline curves (a ball's end, a bull's corner).
+_ARC_STEPS = 64
+
+
+def _tool_outline(profile) -> list[tuple[float, float]]:
+    """The tool's cutting envelope as ``(r, z)`` from the axis at the tip, round its side, to the axis at the top of
+    its cutting length; arcs sampled finely (inside the true arc, so it never reads a gouge that is not there)."""
+    top = profile.cutting_length_mm
+    points = [(0.0, 0.0)]
+    for section in profile.sections:
+        if section.z0 > top + 1e-12:
+            break
+        if section.arc is not None:
+            zc, rc, radius = section.arc
+            a0 = math.asin(max(-1.0, min(1.0, (section.z0 - zc) / radius)))
+            a1 = math.asin(max(-1.0, min(1.0, (min(section.z1, top) - zc) / radius)))
+            steps = [(rc + radius * math.cos(a0 + (a1 - a0) * k / _ARC_STEPS),
+                      zc + radius * math.sin(a0 + (a1 - a0) * k / _ARC_STEPS)) for k in range(_ARC_STEPS + 1)]
+        else:
+            steps = [(section.r0, section.z0), (section.radius(min(section.z1, top)), min(section.z1, top))]
+        points += [p for p in steps if p != points[-1]]
+    if points[-1][1] < top:
+        points.append((points[-1][0], top))
+    points.append((0.0, top))
+    return points
+
+
+class _ToolSolids:
+    """The pieces a toolpath's swept cutting envelope is made of, shrunk by ``shrink`` mm all round (so touching
+    is not reading as entering): the tool at a point, a straight level move as a prism of the tool's cross-section,
+    a level arc as that cross-section turned about the arc's centre."""
+
+    def __init__(self, profile):
+        from shapely.geometry import Polygon
+
+        half = _tool_outline(profile)
+        self.width = max(r for r, _ in half)
+        self.full = Polygon([(r, z) for r, z in half] + [(-r, z) for r, z in reversed(half)]).buffer(0)
+        self._cache: dict = {}
+
+    def _section(self, shrink: float):
+        """The cross-section through the axis, shrunk: a shapely polygon in (u, z), u across the axis; or None."""
+        if shrink not in self._cache:
+            section = self.full.buffer(-shrink, join_style="mitre") if shrink > 0 else self.full
+            polys = [section] if section.geom_type == "Polygon" else list(getattr(section, "geoms", ()))
+            polys = [poly for poly in polys if poly.area > 1e-9]
+            self._cache[shrink] = max(polys, key=lambda poly: poly.area) if polys else None
+        return self._cache[shrink]
+
+    @staticmethod
+    def _face(points):
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakePolygon
+        from OCP.gp import gp_Pnt
+
+        polygon = BRepBuilderAPI_MakePolygon()
+        for x, y, z in points:
+            polygon.Add(gp_Pnt(x, y, z))
+        polygon.Close()
+        return BRepBuilderAPI_MakeFace(polygon.Wire(), True).Face()
+
+    @staticmethod
+    def _placed(shape, angle: float, at):
+        from OCP.gp import gp_Ax1, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
+        from OCP.TopLoc import TopLoc_Location
+
+        turn, move = gp_Trsf(), gp_Trsf()
+        turn.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), angle)
+        move.SetTranslation(gp_Vec(*at))
+        return shape.Moved(TopLoc_Location(move.Multiplied(turn)))
+
+    def tool(self, shrink: float):
+        """The tool at the origin (tip there, axis +Z), shrunk; ``None`` when nothing is left."""
+        key = ("tool", shrink)
+        if key not in self._cache:
+            from OCP.BRepPrimAPI import BRepPrimAPI_MakeRevol
+            from OCP.gp import gp_Ax1, gp_Dir, gp_Pnt
+            from shapely.geometry import box
+
+            section = self._section(shrink)
+            half = None if section is None else section.intersection(box(0, -1e3, 1e3, 1e3))
+            if half is None or half.is_empty or half.geom_type != "Polygon":
+                self._cache[key] = None
+            else:
+                face = self._face([(u, 0.0, z) for u, z in list(half.exterior.coords)[:-1]])
+                self._cache[key] = BRepPrimAPI_MakeRevol(face, gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1))).Shape()
+        return self._cache[key]
+
+    def piece(self, spec, shrink: float):
+        """One piece, from its spec: ``("at", xyz)``, ``("line", a, b)`` (level) or ``("arc", a, centre, sweep)``."""
+        from OCP.BRepPrimAPI import BRepPrimAPI_MakePrism, BRepPrimAPI_MakeRevol
+        from OCP.gp import gp_Ax1, gp_Dir, gp_Pnt, gp_Vec
+
+        if spec[0] == "bound":
+            return _compound([self.piece(item, shrink) for item in spec[1:2] + spec[3:]])
+        if spec[0] == "at":
+            tool = self.tool(shrink)
+            return None if tool is None else self._placed(tool, 0.0, spec[1])
+        section = self._section(shrink)
+        if section is None:
+            return None
+        coords = list(section.exterior.coords)[:-1]
+        if spec[0] == "line":
+            _, a, b = spec
+            length = math.dist(a[:2], b[:2])
+            face = self._face([(0.0, u, z) for u, z in coords])
+            prism = BRepPrimAPI_MakePrism(face, gp_Vec(length, 0, 0)).Shape()
+            return self._placed(prism, math.atan2(b[1] - a[1], b[0] - a[0]), a)
+        _, a, centre, sweep = spec
+        radius = math.hypot(a[0] - centre[0], a[1] - centre[1])
+        start = math.atan2(a[1] - centre[1], a[0] - centre[0]) + min(sweep, 0.0)
+        if radius < self.width:
+            # Tighter than the tool: what lies past the arc's centre is swept by the tool's other side, so the
+            # cross-section is cut there (its turned sector and the tool at both ends are then the swept volume).
+            from shapely.geometry import box
+
+            clipped = section.intersection(box(-radius, -1e3, 1e3, 1e3))
+            if clipped.is_empty or clipped.geom_type != "Polygon":
+                return None
+            coords = list(clipped.exterior.coords)[:-1]
+        face = self._face([(radius + u, 0.0, z) for u, z in coords])
+        turned = BRepPrimAPI_MakeRevol(face, gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), abs(sweep)).Shape()
+        return self._placed(turned, start, (centre[0], centre[1], a[2]))
+
+
+def _pieces(toolpath, solids: _ToolSolids, step: float) -> list:
+    """The specs of the pieces a toolpath sweeps: level lines and arcs whole (the tool itself where one ends and the
+    next does not carry straight on), every other move sampled ``step`` apart."""
+    from cadgen._internal.cam.toolpath import arc_sweep, expand_cycle, walk
+
+    def heading(here, move, at_end: bool):
+        if move.kind in ("arc_cw", "arc_ccw"):
+            cx, cy = move.center
+            p = move.xyz if at_end else here
+            sign = 1.0 if move.kind == "arc_ccw" else -1.0
+            return (-(p[1] - cy) * sign, (p[0] - cx) * sign)
+        return (move.xyz[0] - here[0], move.xyz[1] - here[1])
+
+    flat = []
+    for start, move in walk(toolpath.moves, toolpath.start):
+        parts = expand_cycle(move, start) if move.kind == "cycle" else (move,)
+        flat += list(walk(parts, start))
+    specs = [("at", tuple(float(c) for c in toolpath.start))]
+    for index, (here, part) in enumerate(flat):
+        end = tuple(part.xyz)
+        level = abs(end[2] - here[2]) < 1e-9
+        piece = None
+        if level and part.kind in ("arc_cw", "arc_ccw"):
+            piece = ("arc", tuple(here), tuple(part.center), arc_sweep(here, part))
+        elif level and math.dist(here[:2], end[:2]) > 1e-9:
+            piece = ("line", tuple(here), end)
+        if piece is None:
+            # A move that changes height: first as its level counterpart at its lowest point (all it sweeps, below
+            # the top of the cutting length), sampled only where that one touches the part.
+            low = min(here[2], end[2])
+            a, b = (here[0], here[1], low), (end[0], end[1], low)
+            if part.kind in ("arc_cw", "arc_ccw"):
+                bound = ("arc", a, tuple(part.center), arc_sweep(here, part))
+            elif math.dist(a[:2], b[:2]) > 1e-9:
+                bound = ("line", a, b)
+            else:
+                bound = ("at", a)
+            samples = [("at", point) for point in _along_move(here, part, step)]
+            specs.append(("bound", bound, samples, ("at", a), ("at", b)))
+            continue
+        specs.append(piece)
+        following = flat[index + 1] if index + 1 < len(flat) else None
+        if following is not None and abs(following[1].xyz[2] - end[2]) < 1e-9:
+            a, b = heading(here, part, True), heading(following[0], following[1], False)
+            size = math.hypot(*a) * math.hypot(*b)
+            if size > 0 and (a[0] * b[0] + a[1] * b[1]) / size > math.cos(math.radians(1.0)):
+                continue   # carries straight on: the next piece starts with the tool's whole cross-section here
+        specs.append(("at", end))
+    return specs
+
+
+def _along_move(here, move, step: float) -> list[tuple[float, float, float]]:
+    """Points along one move after its start, no further apart than ``step`` mm, its end included."""
+    from cadgen._internal.cam.toolpath import arc_sweep
+
+    if move.kind in ("arc_cw", "arc_ccw"):
+        cx, cy = move.center
+        radius = math.hypot(here[0] - cx, here[1] - cy)
+        a0 = math.atan2(here[1] - cy, here[0] - cx)
+        sweep = arc_sweep(here, move)
+        count = max(2, math.ceil(math.hypot(abs(sweep) * radius, move.xyz[2] - here[2]) / step))
+        return [(cx + radius * math.cos(a0 + sweep * k / count), cy + radius * math.sin(a0 + sweep * k / count),
+                 here[2] + (move.xyz[2] - here[2]) * k / count) for k in range(1, count + 1)]
+    count = max(1, math.ceil(math.dist(here, move.xyz) / step))
+    return [tuple(here[n] + (move.xyz[n] - here[n]) * k / count for n in range(3)) for k in range(1, count + 1)]
+
+
+def _compound(shapes):
+    from OCP.BRep import BRep_Builder
+    from OCP.TopoDS import TopoDS_Compound
+
+    shapes = [shape for shape in shapes if shape is not None]
+    if not shapes:
+        return None
+    compound, builder = TopoDS_Compound(), BRep_Builder()
+    builder.MakeCompound(compound)
+    for shape in shapes:
+        builder.Add(compound, shape)
+    return compound
+
+
+def _distance(part_shape, shapes) -> float:
+    from OCP.BRepExtrema import BRepExtrema_DistShapeShape
+
+    compound = _compound(shapes)
+    if compound is None:
+        return math.inf
+    measure = BRepExtrema_DistShapeShape(part_shape, compound)
+    if not measure.IsDone():
+        raise RuntimeError("the kernel could not measure the tool against the part")
+    return 0.0 if measure.InnerSolution() else measure.Value()
+
+
+def brep_intrusion(part_shape, toolpath, profile, step: float = 0.5, *, probe: float = 0.005) -> float:
+    """How far (mm) the tool's cutting envelope (``profile``, up its cutting length) enters ``part_shape`` (the part's
+    B-rep in the setup's frame) anywhere along ``toolpath``, read by the kernel (BRepExtrema_DistShapeShape): level
+    lines and arcs as their exact swept solids, every other move as the tool at points ``step`` mm apart (tried
+    first as its level counterpart at its lowest point, which sweeps all it does).
+
+    The envelope is shrunk by ``probe`` all round first, so a tool that only touches (a finished wall, a floor) reads
+    as clear: the answer is then ``probe`` less the clearance the kernel found (at most ``probe``). Where the shrunk
+    envelope still meets the part, the pieces that meet it are shrunk further until none does (bisection, to 1 um):
+    the depth of the deepest point of the part inside the tool (from the tool's side or its bottom, whichever is
+    nearer), at most the tool's radius.
+    """
+    solids = _ToolSolids(profile)
+    specs = _pieces(toolpath, solids, step)
+
+    def touching(chunk: list) -> list:
+        if _distance(part_shape, [solids.piece(spec, probe) for spec in chunk]) > 1e-9:
+            return []
+        if len(chunk) == 1:
+            return touching(chunk[0][2]) if chunk[0][0] == "bound" else chunk
+        middle = len(chunk) // 2
+        return touching(chunk[:middle]) + touching(chunk[middle:])
+
+    clearance = _distance(part_shape, [solids.piece(spec, probe) for spec in specs])
+    if clearance > 1e-9:
+        return probe - clearance
+    found = touching(specs)
+    low, high = probe, solids.width
+    while high - low > 1e-3:
+        middle = (low + high) / 2
+        if _distance(part_shape, [solids.piece(spec, middle) for spec in found]) > 1e-9:
+            high = middle
+        else:
+            low = middle
+    return high
+
+
+def _stock_shadow(ctx, z: float):
+    """The stock at height ``z`` or above it (setup frame), as shapely: what a tool coming down to ``z`` meets. Above
+    the material's top (``ctx.top_z``: an earlier facing took the rest off), nothing."""
+    from shapely.ops import unary_union
+
+    from cadgen._internal.cam.operations.geometry2d import stock_outline
+
+    top = ctx.setup.stock_top_z
+    if z >= ctx.top_z - 1e-9:
+        return None
+    key = ("test_stock_shadow", round(z, 4))
+    if key not in ctx.cache:
+        count = max(2, math.ceil(top - z) + 1)
+        heights = [z + (top - z) * k / count for k in range(count + 1)]
+        if ctx.stock.type == "cylinder":
+            (x0, y0, z0), (x1, y1, z1) = ctx.stock.bounds
+            middle = ctx.to_setup(((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2))[2]
+            if z < middle < top:
+                heights.append(middle)
+        ctx.cache[key] = unary_union([stock_outline(ctx, h) for h in heights])
+    return ctx.cache[key]
+
+
+def descents_ok(toolpath, ctx, angle_deg: float | None = None) -> list[str]:
+    """The descents in ``toolpath`` that go into material too steeply: every move down (a rapid, a plunge, a feed or
+    a helix's arc) steeper than ``angle_deg`` (the operation's ``ramp_angle_deg``, else the default ramp angle) must
+    end where the tool's whole circle is in air (off the stock standing at that height or above it) or in material
+    an earlier cut of the same toolpath already took away (swept by the tool at that height or lower). Empty when
+    every descent is fine; else one line per offending move."""
+    import numpy as np
+    from shapely.geometry import MultiLineString, Point
+
+    from cadgen._internal.cam.operations.emit import DEFAULT_RAMP_DEG
+    from cadgen._internal.cam.toolpath import arc_sweep, walk
+
+    if angle_deg is None:
+        angle_deg = getattr(ctx.params, "ramp_angle_deg", DEFAULT_RAMP_DEG)
+    slope = math.tan(math.radians(angle_deg)) * (1 + 1e-3)   # arc fitting may shorten a ramp's run a hair
+    r, tol = ctx.radius, ctx.tol
+    cut: list[tuple[tuple, tuple]] = []
+    problems = []
+
+    def cleared(p) -> bool:
+        material = _stock_shadow(ctx, p[2])
+        circle = Point(p[0], p[1]).buffer(r - tol, quad_segs=32)
+        if material is None:
+            return True
+        left = circle.intersection(material)
+        if left.area < 1e-6:
+            return True
+        if not cut:
+            return False
+        segs = np.asarray(cut, dtype=float)
+        low = np.maximum(segs[:, 0, 2], segs[:, 1, 2]) <= p[2] + 1e-6
+        a, b = segs[:, 0, :2], segs[:, 1, :2]
+        ab = b - a
+        span = np.maximum((ab * ab).sum(axis=1), 1e-18)
+        t = np.clip(((np.asarray(p[:2]) - a) * ab).sum(axis=1) / span, 0.0, 1.0)
+        near = np.hypot(*(a + ab * t[:, None] - np.asarray(p[:2])).T) <= 2 * r
+        chosen = segs[low & near]
+        if not len(chosen):
+            return False
+        lines = [[tuple(s[0, :2]), tuple(s[1, :2] if np.hypot(*(s[1, :2] - s[0, :2])) > 1e-9 else s[0, :2] + 1e-6)]
+                 for s in chosen]
+        swept = MultiLineString(lines).buffer(r, quad_segs=32)
+        return left.difference(swept).area < 1e-6
+
+    for here, move in walk(toolpath.moves, toolpath.start):
+        end = tuple(move.xyz)
+        if move.kind in ("arc_cw", "arc_ccw"):
+            across = abs(arc_sweep(here, move)) * math.hypot(here[0] - move.center[0], here[1] - move.center[1])
+            points = [tuple(here)] + _along_move(here, move, 0.25)
+        else:
+            across = math.dist(here[:2], end[:2])
+            points = [tuple(here), end]
+        drop = here[2] - end[2]
+        if drop > 1e-9 and (move.kind == "rapid" or drop > slope * across) and not cleared(end):
+            problems.append(f"{move.kind} down to ({end[0]:g}, {end[1]:g}, {end[2]:g}) from z {here[2]:g} goes into "
+                            "material")
+        if move.kind != "rapid":
+            cut += [(tuple(a), tuple(b)) for a, b in zip(points, points[1:])]
+    return problems

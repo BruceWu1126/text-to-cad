@@ -140,8 +140,8 @@ class PlanContext:
 
     def targets(self, kinds: tuple[str, ...]) -> list[tuple[str, "SetupFeature"]]:
         """The operation's ``features``, each resolved to the feature it names among those the setup's tool reaches:
-        ``[(selector, feature)]`` in the job's order. A selector naming no such feature (another kind, or one this
-        setup cannot reach) is a ValueError naming its field."""
+        ``[(selector, feature)]`` in the job's order. A selector naming no such feature (another kind) is a
+        ValueError naming its field; one this setup's tool cannot reach is a ``PlanError`` (``unreachable``)."""
         from cadgen._internal.cam.features import feature_for, recognize
         from cadgen._internal.cam.values import words
 
@@ -157,8 +157,10 @@ class PlanContext:
                     raise ValueError(f"{at}: {ref} is not part of a feature `cadgen cam features` lists")
                 if other.kind not in kinds:
                     raise ValueError(f"{at}: {ref} is a {other.kind}, and {self.operation.op} cuts a {words(kinds)}")
-                raise ValueError(f"{at}: {ref} ({other.kind}) is not reached from setup {self.setup.setup.id}'s "
-                                 f"tool direction {self.setup.setup.direction}")
+                from cadgen._internal.cam.operations.base import PlanError
+
+                raise PlanError("unreachable", f"{at}: {ref} ({other.kind}) is not reached from setup "
+                                f"{self.setup.setup.id}'s tool direction {self.setup.setup.direction}", items=[ref])
             out.append((ref, next(found for found in self.features if found.feature is feature)))
         return out
 
@@ -232,13 +234,30 @@ def _face_normal(part: "Part", ref: str):
 
 def material_top(job: "Job", index: int, setup: "SetupFrame") -> float:
     """The top of the material ``job.operations[index]`` starts from, z in the setup's frame: the lowest floor of an
-    earlier whole-stock facing in the same setup, else the stock top. Other operations only cut where they cut, so
-    nothing else lowers it (there is no stock simulation before phase 2)."""
+    earlier facing in the same setup that covered the stock's whole footprint, else the stock top. A whole-stock
+    facing covers it level by level; a region facing only when its region holds the stock's footprint (a box or
+    sheet seen square, whose footprint is its bounds), since the tool's centre stays inside the region. Other
+    operations only cut where they cut, so nothing else lowers it (there is no stock simulation before phase 2)."""
     top = setup.stock_top_z
     for operation in job.operations[:index]:
-        if operation.op != "facing" or operation.setup != setup.setup.id or operation.region is not None:
+        if operation.op != "facing" or operation.setup != setup.setup.id:
+            continue
+        if operation.region is not None and not _region_covers(operation.region, job, setup):
             continue
         from cadgen._internal.cam.operations.milling_2d import facing_floor
 
         top = min(top, facing_floor(operation.params, setup))
     return top
+
+
+def _region_covers(region, job: "Job", setup: "SetupFrame") -> bool:
+    """A facing region holds the stock's whole footprint."""
+    from shapely.geometry import Polygon, box
+
+    rotation = setup.frame.rotation
+    square = all(sorted(abs(round(c, 9)) for c in row) == [0.0, 0.0, 1.0] for row in rotation)
+    if job.stock.type not in ("box", "sheet") or not square:
+        return False
+    (x0, y0, _), (x1, y1, _) = setup.stock_bounds
+    poly = Polygon(region)
+    return poly.is_valid and poly.buffer(1e-6).contains(box(x0, y0, x1, y1))
