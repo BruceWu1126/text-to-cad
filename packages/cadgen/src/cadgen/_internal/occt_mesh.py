@@ -144,13 +144,17 @@ def _faulty(faces: dict, face_map, required: list[int], kinds: dict[int, str], d
 
     holed = (_holed(faces, face_map, [ordinal for ordinal in required if ordinal in faces], deflection)
              if gaps else set())
+    # The part's freeform faces are screened together; only those it cannot clear are looked at alone.
+    suspects = (_screened(faces, [ordinal for ordinal in required if ordinal in faces and ordinal not in holed
+                                  and kinds.get(ordinal) not in (None, "plane", *_GRIDDED)],
+                          _STRAY_FACTOR * deflection) if freeform else set())
     faulty = []
     for ordinal in required:
         if ordinal not in faces or ordinal in holed:
             faulty.append(ordinal)
             continue
         kind = kinds.get(ordinal)
-        if kind in (None, "plane") or (kind not in _GRIDDED and not freeform):
+        if kind not in _GRIDDED and ordinal not in suspects:
             continue
         face = TopoDS.Face_s(face_map.FindKey(ordinal))
         positions, normals, triangles = faces[ordinal]
@@ -259,6 +263,33 @@ def _xyz(point) -> np.ndarray:
     return np.array([point.X(), point.Y(), point.Z()])
 
 
+def _edge_sags(points: np.ndarray, normals: np.ndarray, corners: np.ndarray) -> np.ndarray:
+    """Each triangle edge's sag as its ends' normals tell it -- its length times the angle
+    between them, over eight, as a circle's -- the triangles' first edges, then their
+    second, then their third."""
+    ends = np.concatenate([corners[:, [0, 1]], corners[:, [1, 2]], corners[:, [2, 0]]])
+    first, second = normals[ends[:, 0]], normals[ends[:, 1]]
+    lengths = np.linalg.norm(first, axis=1) * np.linalg.norm(second, axis=1)
+    cosines = np.clip((first * second).sum(axis=1) / np.maximum(lengths, 1e-30), -1.0, 1.0)
+    return np.linalg.norm(points[ends[:, 0]] - points[ends[:, 1]], axis=1) * np.arccos(cosines) / 8
+
+
+def _screened(faces: dict, ordinals: list[int], limit: float) -> set[int]:
+    """Those of ``ordinals`` with an edge the screen says sags more than ``limit``, the
+    faces screened together in one pass over their joined triangles."""
+    blocks = [faces[ordinal] for ordinal in ordinals if len(faces[ordinal][2])]
+    kept = [ordinal for ordinal in ordinals if len(faces[ordinal][2])]
+    if not blocks:
+        return set()
+    starts = np.cumsum([0] + [len(block[0]) for block in blocks])[:-1]
+    points = np.concatenate([block[0] for block in blocks]).astype(np.float64)
+    normals = np.concatenate([block[1] for block in blocks]).astype(np.float64)
+    corners = np.concatenate([block[2].astype(np.int64) + start for block, start in zip(blocks, starts)])
+    worst = _edge_sags(points, normals, corners).reshape(3, -1).max(axis=0)
+    firsts = np.cumsum([0] + [len(block[2]) for block in blocks])[:-1]
+    return {ordinal for ordinal, sag in zip(kept, np.maximum.reduceat(worst, firsts)) if sag > limit}
+
+
 def _freeform_distance(face, positions: np.ndarray, normals: np.ndarray, triangles: np.ndarray,
                        bound: float) -> float | None:
     """How far a freeform face's triangles lie from its surface at most, where a screen says
@@ -275,12 +306,8 @@ def _freeform_distance(face, positions: np.ndarray, normals: np.ndarray, triangl
     from OCP.gp import gp_Pnt, gp_Pnt2d
 
     corners = triangles.astype(np.int64)
-    ends = np.concatenate([corners[:, [0, 1]], corners[:, [1, 2]], corners[:, [2, 0]]])
-    points, directions = positions.astype(np.float64), normals.astype(np.float64)
-    first, second = directions[ends[:, 0]], directions[ends[:, 1]]
-    lengths = np.linalg.norm(first, axis=1) * np.linalg.norm(second, axis=1)
-    cosines = np.clip((first * second).sum(axis=1) / np.maximum(lengths, 1e-30), -1.0, 1.0)
-    sags = np.linalg.norm(points[ends[:, 0]] - points[ends[:, 1]], axis=1) * np.arccos(cosines) / 8
+    points = positions.astype(np.float64)
+    sags = _edge_sags(points, normals.astype(np.float64), corners)
     if not len(sags) or sags.max() <= bound:
         return None
     location = TopLoc_Location()
