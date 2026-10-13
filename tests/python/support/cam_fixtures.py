@@ -89,7 +89,7 @@ def stub_operations(*names: str):
 
 
 class StubPost:
-    """Stands in for a post until task 8 builds them."""
+    """Stands in for a post in tests that only parse jobs (a real post imports nothing heavy either)."""
 
 
 def stub_posts(*names: str):
@@ -166,3 +166,211 @@ def slotted_block_step(directory, name: str = "block"):
     step = Path(directory) / f"{name}.step"
     export_step(block, str(step))
     return step
+
+# --- G-code back-plot ----------------------------------------------------------------------------------
+# Reads any phase-1 post's program back into moves (absolute, mm, cycles expanded the way expand_cycle does), so a
+# test can assert "the posted program is the planned toolpath".
+
+import math  # noqa: E402
+import re  # noqa: E402
+from dataclasses import dataclass, fields  # noqa: E402
+
+_WORD = re.compile(r"([A-Za-z])\s*([-+]?(?:\d+\.?\d*|\.\d+))")
+_CYCLE_KINDS = {"81": "drill", "82": "spot", "83": "peck", "73": "chip_break", "84": "tap", "85": "ream",
+                "89": "ream", "86": "bore", "76": "fine_bore", "87": "back_bore"}
+
+
+@dataclass(frozen=True)
+class Plotted:
+    """One move read back from a program: ``kind`` is rapid (G0), feed (G1), arc_cw or arc_ccw; ``xyz`` in mm, an
+    axis ``None`` while the program has not said where it is (after a tool change or a move in machine coordinates);
+    ``segment`` counts the tool changes before it."""
+
+    kind: str
+    xyz: tuple
+    feed: float | None = None
+    center: tuple | None = None
+    dwell_s: float = 0.0
+    segment: int = 0
+
+
+def _plain(move) -> str:
+    return {"rapid": "rapid", "arc_cw": "arc_cw", "arc_ccw": "arc_ccw"}.get(move.kind, "feed")
+
+
+def _cycle(kind: str, r: float, z: float, *, peck=None, pitch=None, shift=None, shift_xy=None, dwell=0.0):
+    from cadgen._internal.cam.toolpath import Cycle
+
+    kwargs = {"peck_mm": peck if kind in ("peck", "chip_break") else None,
+              "pitch_mm": pitch if kind in ("tap", "rigid_tap") else None,
+              "shift_mm": shift if kind in ("fine_bore", "back_bore") else None, "dwell_s": dwell}
+    if shift_xy is not None and "shift_xy" in {field.name for field in fields(Cycle)}:
+        kwargs["shift_xy"] = shift_xy
+    return Cycle(kind, r, z, **kwargs)
+
+
+def _expanded(move, start):
+    from cadgen._internal.cam.toolpath import expand_cycle
+
+    shift = getattr(move.cycle, "shift_xy", None)
+    if shift is not None:
+        length = math.hypot(*shift)
+        return expand_cycle(move, start, shift_direction=(shift[0] / length, shift[1] / length))
+    return expand_cycle(move, start)
+
+
+def backplot(text: str, post: str) -> list[Plotted]:
+    """The moves a program makes, read back. ``post`` names the dialect (it decides what a dwell's P means)."""
+    from cadgen._internal.cam.toolpath import Move, walk
+
+    scale, pos, motion, feed, rpm, segment = 1.0, [None, None, None], None, None, None, 0
+    cycle, return_r, initial = None, False, None
+    out: list[Plotted] = []
+
+    def add(kind, xyz, *, center=None, at_feed=None, dwell=0.0):
+        out.append(Plotted(kind, tuple(xyz), at_feed, center, dwell, segment))
+        pos[:] = list(xyz)
+
+    def dwell_seconds(raw: str) -> float:
+        if post == "fanuc" or (post == "haas" and "." not in raw):
+            return float(raw) / 1000.0
+        return float(raw)
+
+    for number, line in enumerate(text.splitlines(), 1):
+        line = re.sub(r"\([^)]*\)", "", line).split(";")[0].strip()
+        if not line or line == "%" or line.upper().startswith("O"):
+            continue
+        words = [(letter.upper(), raw) for letter, raw in _WORD.findall(line) if letter.upper() != "N"]
+        gs = [raw.rstrip(".") if raw.endswith(".") else raw for letter, raw in words if letter == "G"]
+        ms = [int(float(raw)) for letter, raw in words if letter == "M"]
+        vals = {letter: raw for letter, raw in words if letter not in ("G", "M")}
+        num = {letter: float(raw) for letter, raw in vals.items()}
+        if "20" in gs:
+            scale = 25.4
+        if "21" in gs:
+            scale = 1.0
+        if "S" in num:
+            rpm = num["S"]
+        if "F" in num:
+            feed = num["F"] * scale
+        if 6 in ms or 0 in ms:
+            segment += 1
+            pos[:] = [None, None, None]
+        if "91" in gs:
+            if "28" not in gs:
+                raise ValueError(f"line {number}: incremental moves are not read: {line}")
+            pos[2] = None
+            continue
+        if "53" in gs:
+            for axis, letter in enumerate("XYZ"):
+                if letter in num:
+                    pos[axis] = None
+            continue
+        if "4" in gs:
+            last = out[-1]
+            out[-1] = Plotted(last.kind, last.xyz, last.feed, last.center, last.dwell_s + dwell_seconds(vals["P"]),
+                              last.segment)
+            continue
+        if "80" in gs:
+            cycle, motion = None, None
+        if "98" in gs:
+            return_r = False
+        if "99" in gs:
+            return_r = True
+        target = [num[letter] * scale if letter in num else pos[axis] for axis, letter in enumerate("XYZ")]
+        if "33.1" in gs:
+            top = tuple(pos)
+            add("feed", (pos[0], pos[1], num["Z"] * scale), at_feed=num["K"] * scale * rpm)
+            add("feed", top, at_feed=num["K"] * scale * rpm)
+            continue
+        codes = [code for code in gs if code in _CYCLE_KINDS]
+        if codes:
+            if cycle is None:
+                initial = pos[2]
+            previous = cycle or {}
+            cycle = {**previous, "kind": _CYCLE_KINDS[codes[0]]}
+            for letter in "ZRQIJ":
+                if letter in num:
+                    cycle[letter] = num[letter] * scale
+            cycle["P"] = dwell_seconds(vals["P"]) if "P" in vals else 0.0
+            cycle["F"] = feed
+            motion = "cycle"
+        elif any(code in gs for code in ("0", "1", "2", "3")):
+            motion = next(code for code in gs if code in ("0", "1", "2", "3"))
+        if not any(letter in num for letter in "XYZ"):
+            continue
+        if motion == "cycle":
+            kind = cycle["kind"]
+            shift, shift_xy = cycle.get("Q"), None
+            if kind in ("fine_bore", "back_bore") and ("I" in cycle or "J" in cycle):
+                shift_xy = (cycle.get("I", 0.0), cycle.get("J", 0.0))
+                shift = math.hypot(*shift_xy)
+            built = _cycle(kind, cycle["R"], cycle["Z"], peck=cycle.get("Q"),
+                           pitch=None if not rpm else cycle["F"] / rpm, shift=shift, shift_xy=shift_xy,
+                           dwell=cycle["P"])
+            end_z = cycle["R"] if return_r else initial
+            move = Move("cycle", (target[0], target[1], end_z), cycle["F"], cycle=built)
+            start = tuple(pos)
+            for part in _expanded(move, start):
+                add(_plain(part), part.xyz, at_feed=part.feed, dwell=part.dwell_s)
+        elif motion in ("2", "3"):
+            center = (pos[0] + num.get("I", 0.0) * scale, pos[1] + num.get("J", 0.0) * scale)
+            add("arc_cw" if motion == "2" else "arc_ccw", target, center=center, at_feed=feed)
+        elif motion in ("0", "1"):
+            add("rapid" if motion == "0" else "feed", target, at_feed=None if motion == "0" else feed)
+        else:
+            raise ValueError(f"line {number}: a move with no motion mode: {line}")
+    return out
+
+
+def planned_moves(toolpaths) -> list[Plotted]:
+    """The toolpaths' moves as a back-plot reads them: cycles expanded, plunges and leads as feeds."""
+    from cadgen._internal.cam.toolpath import walk
+
+    out = []
+    for toolpath in toolpaths:
+        for start, move in walk(toolpath.moves, toolpath.start):
+            parts = _expanded(move, start) if move.kind == "cycle" else (move,)
+            for part in parts:
+                out.append(Plotted(_plain(part), part.xyz, part.feed, part.center, part.dwell_s))
+    return out
+
+
+def assert_backplot(case: unittest.TestCase, text: str, post: str, toolpaths, *, tol: float = 1e-3,
+                    feed_tol: float = 0.06) -> None:
+    """The program's back-plot is the toolpaths: per tool, after the rapids that bring the tool to its toolpath's
+    start, the same moves within ``tol`` mm (feeds within ``feed_tol`` mm/min), then only rapids (the retract)."""
+    segments: dict[int, list[Plotted]] = {}
+    for move in backplot(text, post):
+        segments.setdefault(move.segment, []).append(move)
+    runs: list[list] = []
+    for toolpath in toolpaths:
+        if runs and runs[-1][-1].tool == toolpath.tool:
+            runs[-1].append(toolpath)
+        else:
+            runs.append([toolpath])
+    got_segments = [moves for moves in segments.values() if moves]
+    case.assertEqual(len(got_segments), len(runs), f"{post}: one stretch of moves per tool")
+
+    def close(a, b) -> bool:
+        return all(x is not None and abs(x - y) <= tol for x, y in zip(a, b))
+
+    for moves, run in zip(got_segments, runs):
+        start = run[0].start
+        k = next((index for index, move in enumerate(moves) if move.kind == "rapid" and close(move.xyz, start)), None)
+        case.assertIsNotNone(k, f"{post}: the tool never reaches {start}")
+        case.assertTrue(all(move.kind == "rapid" for move in moves[:k]), f"{post}: only rapids bring the tool to its start")
+        rest, want = moves[k + 1:], planned_moves(run)
+        case.assertGreaterEqual(len(rest), len(want), f"{post}: {len(rest)} moves, planned {len(want)}")
+        for index, (got, expected) in enumerate(zip(rest, want)):
+            label = f"{post} {run[0].tool} move {index}: got {got}, planned {expected}"
+            case.assertEqual(got.kind, expected.kind, label)
+            case.assertTrue(close(got.xyz, expected.xyz), label)
+            if expected.center is not None:
+                case.assertTrue(close(got.center, expected.center), label)
+            if expected.feed is None:
+                case.assertIsNone(got.feed, label)
+            else:
+                case.assertLessEqual(abs(got.feed - expected.feed), feed_tol, label)
+            case.assertAlmostEqual(got.dwell_s, expected.dwell_s, delta=1e-3, msg=label)
+        case.assertTrue(all(move.kind == "rapid" for move in rest[len(want):]), f"{post}: only rapids after the cut")

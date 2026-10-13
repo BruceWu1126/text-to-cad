@@ -1,7 +1,7 @@
 """The job file: one valid job parses the same from every form, and each kind of bad job names its field.
 
-Stdlib only. No operation and no post is built yet, so the ones the jobs name are stand-ins (``stubbed``),
-registered the way a built one is.
+Stdlib only. No operation is built yet, so the ones the jobs name are stand-ins (``stubbed``), registered the way a
+built one is; grbl and haas are stand-ins too, so these tests read only the job.
 """
 
 from __future__ import annotations
@@ -133,9 +133,10 @@ class BadJobs(unittest.TestCase):
         ("wrong axes", changed("machine.axes", 2), "machine.axes: a mill has 3, 4 or 5 axes, got 2"),
         ("missing post", changed("machine.post", delete=True),
          "machine.post: required, and never guessed: a wrong post can crash a machine. Name the controller's dialect "
-         "(or pass --post); built today for a mill: grbl, haas"),
-        ("unknown post", changed("machine.post", "marlin"), 'machine.post: "marlin" is not a post cadgen knows; built today for a mill: grbl, haas'),
-        ("unbuilt post", changed("machine.post", "linuxcnc"), 'machine.post: "linuxcnc" is phase 1, not built yet; built today: grbl, haas'),
+         "(or pass --post); built today for a mill: grbl, linuxcnc, fanuc, haas, mach3"),
+        ("unknown post", changed("machine.post", "marlin"), 'machine.post: "marlin" is not a post cadgen knows; built today for a mill: grbl, linuxcnc, fanuc, haas, mach3'),
+        ("unbuilt post", changed("machine", {"kind": "mill", "axes": 5, "post": "linuxcnc_5x"}),
+         'machine.post: "linuxcnc_5x" is phase 4, not built yet; built today: grbl, linuxcnc, fanuc, haas, mach3'),
         ("post for another machine", changed("machine.post", "fanuc_lathe"), "machine.post: fanuc_lathe writes for a lathe, not a mill"),
         ("5-axis post on a 3-axis mill", changed("machine.post", "haas_umc"),
          "machine.post: haas_umc writes for a 5-axis mill, and this one has 3 axes"),
@@ -221,7 +222,8 @@ class BadJobs(unittest.TestCase):
         with stubbed():
             self.assertIn("--post: fanuc_wire writes for a wire_edm, not a mill", value_error(self, parse_job, JOB, post="fanuc_wire"))
             self.assertIn('--post: "marlin" is not a post cadgen knows', value_error(self, parse_job, JOB, post="marlin"))
-            self.assertIn('--post: "mach3" is phase 1, not built yet', value_error(self, parse_job, JOB, post="mach3"))
+            five_axis = changed("machine.axes", 5)
+            self.assertIn('--post: "fanuc_5x" is phase 4, not built yet', value_error(self, parse_job, five_axis, post="fanuc_5x"))
 
 
 if __name__ == "__main__":
