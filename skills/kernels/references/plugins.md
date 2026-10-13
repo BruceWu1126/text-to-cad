@@ -19,6 +19,7 @@ Every field is checked; an unknown field is an error.
 | `command` | The command to run, as an array of strings (placeholders below). |
 | `setup` | What to install, shown when the command can't run. |
 | `tolerance` | Allowed relative volume error against OpenCASCADE in `check` (default `0.01`). |
+| `timeout` | Seconds a run may take before it is stopped and reported as failed (default `300`). |
 
 ## The command
 

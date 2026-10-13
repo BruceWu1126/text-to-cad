@@ -116,7 +116,10 @@ def run(kernel: Kernel, target: str, *, cwd: Path | None = None, env: dict | Non
             executable = os.path.normpath(os.path.join(cwd, executable))
         try:
             proc = subprocess.run([executable, *command[1:]], cwd=cwd, env=env,
-                                  capture_output=True, text=True, check=False)
+                                  capture_output=True, text=True, check=False, timeout=kernel.timeout)
+        except subprocess.TimeoutExpired:
+            raise KernelError(f"{kernel.label} gave no result within {kernel.timeout:g} s and was stopped "
+                              f'("timeout" in its kernel.json)') from None
         except OSError as exc:
             hint = f" {kernel.setup}" if kernel.setup else ""
             raise KernelError(f"{kernel.label}: can't run {command[0]} ({exc.strerror}).{hint}") from None

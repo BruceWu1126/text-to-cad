@@ -15,8 +15,9 @@ from pathlib import Path
 KERNELS_DIR = Path(__file__).resolve().parents[2] / "kernels"
 INPUTS = ("model", "program")
 OUTPUTS = ("step", "stl")
-FIELDS = {"id", "label", "detail", "exact", "input", "output", "command", "setup", "tolerance"}
+FIELDS = {"id", "label", "detail", "exact", "input", "output", "command", "setup", "tolerance", "timeout"}
 PLACEHOLDERS = {"model", "function", "program", "step", "stl", "here", "runtime", "python", "node"}
+DEFAULT_TIMEOUT = 300  # seconds: a run longer than this is a hang, not a slow kernel
 DEFAULT_TOLERANCE = 0.01
 _ID = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _TOKEN = re.compile(r"\{([^{}]+)\}")
@@ -44,6 +45,7 @@ class Kernel:
     command: tuple
     setup: str
     tolerance: float
+    timeout: float
     folder: Path
 
 
@@ -86,6 +88,9 @@ def parse(raw, folder: str, path: Path | None = None) -> Kernel:
     tolerance = raw.get("tolerance", DEFAULT_TOLERANCE)
     if not isinstance(tolerance, (int, float)) or tolerance <= 0:
         _fail(folder, "tolerance must be a positive number")
+    timeout = raw.get("timeout", DEFAULT_TIMEOUT)
+    if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or timeout <= 0:
+        _fail(folder, "timeout must be a positive number of seconds")
     return Kernel(
         id=kernel_id,
         label=label.strip(),
@@ -96,6 +101,7 @@ def parse(raw, folder: str, path: Path | None = None) -> Kernel:
         command=tuple(command),
         setup=str(raw.get("setup") or "").strip(),
         tolerance=float(tolerance),
+        timeout=float(timeout),
         folder=path or KERNELS_DIR / folder,
     )
 

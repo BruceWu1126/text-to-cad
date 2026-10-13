@@ -82,6 +82,7 @@ class ManifestTests(unittest.TestCase):
             "unknown placeholder": ({**good, "command": [*good["command"], "{gpu}"]}, "x"),
             "must pass {stl}": ({**good, "command": ["{python}", "{program}"]}, "x"),
             "output must be one of": ({**good, "output": "obj"}, "x"),
+            "timeout must be a positive": ({**good, "timeout": 0}, "x"),
         }
         for message, (raw, folder) in cases.items():
             with self.subTest(message), self.assertRaisesRegex(manifest.ManifestError, message):
@@ -144,6 +145,19 @@ class ModelTests(unittest.TestCase):
         with self.assertRaisesRegex(KernelError, "Liar: gave up"):
             run(kernel, f"{self.script}::pill", cwd=self.tmp)
         self.assertFalse(stale.exists())
+
+
+    def test_a_hung_runner_is_stopped(self):
+        plugin = self.tmp / "sleeper"
+        plugin.mkdir()
+        (plugin / "runner.py").write_text("import sys, time\nopen(sys.argv[2], 'w').write('half')\ntime.sleep(60)\n",
+                                          encoding="utf-8")
+        kernel = manifest.parse({"id": "sleeper", "label": "Sleeper", "input": "program", "output": "stl", "timeout": 0.5,
+                                 "command": ["{python}", "{here}/runner.py", "{program}", "{stl}"]},
+                                "sleeper", plugin)
+        with self.assertRaisesRegex(KernelError, r"Sleeper gave no result within 0.5 s"):
+            run(kernel, f"{self.script}::pill", cwd=self.tmp)
+        self.assertFalse((self.tmp / "STEP" / ".kernels" / "sleeper" / "pill.stl").exists())
 
 
 class FixtureTests(unittest.TestCase):
