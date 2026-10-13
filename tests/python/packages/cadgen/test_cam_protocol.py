@@ -64,16 +64,17 @@ class Registry(unittest.TestCase):
         self.assertIn("flowline_5x", message)
 
     def test_an_unbuilt_name_says_its_phase_never_an_import_error(self):
-        self.assertIn("operation: \"adaptive_3d\" is phase 2, not built yet; built today: none yet",
+        self.assertIn(f"operation: \"adaptive_3d\" is phase 2, not built yet; built today: {', '.join(built())}",
                       value_error(self, get_operation, "adaptive_3d"))
-        self.assertIn("\"facing\" is phase 1, not built yet", value_error(self, get_operation, "facing"))
+        self.assertIn("\"lathe_face\" is phase 3, not built yet", value_error(self, get_operation, "lathe_face"))
 
     def test_an_operation_is_built_once_its_family_module_defines_its_class(self):
-        with stub_operations("facing"):
-            self.assertEqual(built(), ("facing",))
-            self.assertEqual(get_operation("facing").word, "Face")
-            self.assertIn("built today: facing", value_error(self, get_operation, "pocket_2d"))
-        self.assertEqual(built(), ())
+        self.assertLessEqual({"facing", "contour_2d", "pocket_2d"}, set(built()))
+        before = built()
+        with stub_operations("drill"):
+            self.assertIn("drill", built())
+            self.assertEqual(get_operation("drill").word, "Drill")
+        self.assertEqual(built(), before)
 
     def test_the_registry_and_every_built_operation_are_stdlib_only_at_import(self):
         modules = sorted({REGISTRY[name].module for name in built()})
