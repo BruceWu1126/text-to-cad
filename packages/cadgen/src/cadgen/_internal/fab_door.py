@@ -27,9 +27,11 @@ def _absolute(path: Path) -> Path:
 
 
 def _destination(document: Path, fmt: str, out: Path | None) -> Path:
-    from cadgen.metadata import fab_sibling
+    from cadgen.metadata import fab_build_path, fab_sibling
 
-    return _absolute(out) if out is not None else fab_sibling(document, fmt)
+    if out is not None:
+        return _absolute(out)
+    return fab_build_path(document, fmt) if format_of(document) == "kicad_pcb" else fab_sibling(document, fmt)
 
 
 def _write(destination: Path, data: bytes, fmt: str) -> FabExportResult:

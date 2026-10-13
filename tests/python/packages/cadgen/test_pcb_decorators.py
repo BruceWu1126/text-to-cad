@@ -92,7 +92,7 @@ class PcbDecoratorsTest(unittest.TestCase):
         self.assertEqual(
             sorted(outputs("fabricated")),
             sorted(["fab/board.kicad_pcb", "fab/board.kicad_sch", "fab/board.kicad_pro", "fab/board.kicad_dru",
-                    "fab/board.gerbers.zip", "fab/parts.csv", "fab/board.pos.csv"]),
+                    "fab/build/board.gerbers.zip", "fab/parts.csv", "fab/build/board.pos.csv"]),
         )
 
     def test_manufacturing_files_are_a_boards_arguments(self) -> None:

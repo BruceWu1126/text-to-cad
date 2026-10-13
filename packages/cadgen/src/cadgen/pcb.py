@@ -143,7 +143,7 @@ def gerber(board: Path, out: Path | None = None, *, verbose: bool = False) -> Fa
     connections or DRC errors.
 
     board: the .kicad_pcb to export.
-    out: destination file. Omitted, writes the sibling <name>.gerbers.zip beside BOARD.
+    out: destination file. Omitted, writes build/<name>.gerbers.zip in the project folder.
     verbose: narrate the target on stderr.
     """
     from cadgen._internal.fab_door import board_export
@@ -158,7 +158,7 @@ def bom(board: Path, out: Path | None = None, *, verbose: bool = False) -> FabEx
     marked do-not-populate are left out. What @pcb(bom=True) writes.
 
     board: the .kicad_pcb to export (its .kicad_sch beside it).
-    out: destination file. Omitted, writes the sibling <name>.bom.csv beside BOARD.
+    out: destination file. Omitted, writes build/<name>.bom.csv in the project folder.
     verbose: narrate the target on stderr.
     """
     from cadgen._internal.fab_door import board_export
@@ -175,7 +175,7 @@ def pos(board: Path, out: Path | None = None, *, verbose: bool = False) -> FabEx
     connections or DRC errors.
 
     board: the .kicad_pcb to export.
-    out: destination file. Omitted, writes the sibling <name>.pos.csv beside BOARD.
+    out: destination file. Omitted, writes build/<name>.pos.csv in the project folder.
     verbose: narrate the target on stderr.
     """
     from cadgen._internal.fab_door import board_export
