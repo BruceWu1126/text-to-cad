@@ -241,7 +241,7 @@ class OnlyCadBytesLeave(SecurityTestCase):
         # mesh, #611): a bare "Not found" named nothing to fix.
         missing = self.fixture.path("meshes/upper_arm.stl")
         status, _, body = self.fixture.asset(missing)
-        self.assertEqual((status, json.loads(body)["error"]), (404, f"No file at {missing}"))
+        self.assertEqual((status, json.loads(body)["error"]), (404, f"No file at {os.path.normpath(missing)}"))
         refused = self.fixture.path("meshes/upper_arm.dae")
         status, _, body = self.fixture.asset(refused)
         self.assertEqual(status, 404)
