@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cadgen._internal.fea.checks import quoted
+from cadgen._internal.step_open import open_scene, pick_occurrence
 from cadgen.cli_logging import CliLogger
 from cadgen.results import FeaFace, FeaFacesResult, FeaPair, FeaPart, FeaPartsResult, FeaResult
 
@@ -19,13 +20,6 @@ if TYPE_CHECKING:
 __all__ = ["list_assembly_parts", "list_faces", "progress_log", "solve_study"]
 
 _AXES = {"X": (1.0, 0.0, 0.0), "Y": (0.0, 1.0, 0.0), "Z": (0.0, 0.0, 1.0)}
-
-
-def _open(target: Path) -> "StepScene":
-    from cadgen._internal.doors import STEP_SUFFIXES, document_target
-    from cadgen.step_scene import read_scene
-
-    return read_scene(document_target(target, suffixes=STEP_SUFFIXES))
 
 
 def _resolve_faces(scene: "StepScene", refs: "tuple[str, ...]") -> tuple[dict[str, "Selection"], set[str]]:
@@ -81,19 +75,7 @@ def list_faces(target: Path, *, occurrence: str | None = None, verbose: bool = F
     from cadgen._internal.fea.mesh import face_area_center
 
     logger = CliLogger("fea", verbose=verbose)
-    scene = _open(Path(target))
-    if occurrence:
-        owner = scene.resolve(occurrence)
-        if owner.kind != "occurrence":
-            raise ValueError(f"{occurrence} is not an occurrence reference")
-    else:
-        leaves = list(scene.leaves())
-        if len(leaves) != 1:
-            raise ValueError(
-                f"the document has {len(leaves)} part occurrences; pass --occurrence "
-                f"{' or '.join(leaf.ref for leaf in leaves[:4])}{' ...' if len(leaves) > 4 else ''}"
-            )
-        owner = leaves[0]
+    owner = pick_occurrence(open_scene(Path(target)), occurrence)
     logger.debug(f"listing faces of {owner.ref}")
 
     faces = []
@@ -146,7 +128,7 @@ def list_assembly_parts(target: Path, *, contact_tolerance_mm: float = 0.1, verb
         raise ValueError("contact_tolerance_mm must be zero or more")
     logger = CliLogger("fea", verbose=verbose)
     logger.info("reading the parts")
-    parts = list_parts(_open(Path(target)))
+    parts = list_parts(open_scene(Path(target)))
     logger.info(f"read {len(parts)} parts; looking for pairs within {max(contact_tolerance_mm, _NEAR_MISS_MM)} mm")
     name = dict(zip((part.ref for part in parts), display_names(parts)))
     found, overlaps, near = _detect_pairs(parts, contact_tolerance_mm, max(contact_tolerance_mm, _NEAR_MISS_MM), logger)
@@ -609,7 +591,7 @@ def _solve_study(document: Path, out: Path | None, study, occurrence: str | None
     from cadgen._internal.fea.mesh import default_mesh_size, mesh_assembly, mesh_occurrence, require_fea_stack, small_feature_mm
 
     require_fea_stack()
-    scene = _open(document)
+    scene = open_scene(document)
     resolved, owners = _resolve_faces(scene, tuple(dict.fromkeys((*parsed.face_refs, *parsed.check_faces))))
     # A document of several parts is an assembly, whichever faces the study names; one part's study keeps the one-part path.
     plan = None

@@ -613,7 +613,7 @@ class CamFeature:
     size: dict = field(default_factory=dict)
     #: The tool directions that reach it (``+Z``, ``-X``, ...).
     reach: tuple[str, ...] = ()
-    #: ``hole, 6 mm through, from +Z`` -- words an agent can match to a request.
+    #: ``6 mm through, 10 mm deep, axis Z, at X -35 Y 15`` -- words an agent can match to a request.
     hint: str = ""
 
 
