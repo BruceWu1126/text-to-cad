@@ -580,7 +580,7 @@ class EngraveOperation(OperationBase):
                 raise PlanError("too_deep", f"{ctx.where}: {ref} is carved {reach:.3g} mm deep, past {ctx.tool.id}'s cutting "
                                  f"length of {ctx.profile.cutting_length_mm:g} mm")
             # The axis, sampled finely, each point at the depth where the cone touches the nearest side.
-            paths, seeded = [], {}
+            paths = []
             for chain in medial_axis(poly, tol):
                 if len(chain) > 1:
                     chain = [p[:2] for p in densify([(x, y, 0.0) for x, y in chain], max_segment=AXIS_STEP_MM)]
@@ -591,14 +591,13 @@ class EngraveOperation(OperationBase):
             if floor_depth is not None:
                 ring_z = surface - floor_depth
                 flat = g2.offset(poly, -(tip + floor_depth * tan), tol)
-                rings = [list(ring) for ring in g2.ring_paths(flat, ring_z, material="outside")]
-                paths += rings
-                # The clear tool takes the flat down to the floor first: the V-bit enters these rings in air.
-                seeded.update({(round(p[0], 6), round(p[1], 6)): ring_z for ring in rings for p in ring})
+                # Round the flat's edge at the floor: the clear tool takes the flat down first, but the V-bit's cone
+                # over that edge is in the wall still standing, so it enters these rings like any other run.
+                paths += [list(ring) for ring in g2.ring_paths(flat, ring_z, material="outside")]
                 cleared, left = self._clear(params, ctx, ref, flat, surface, ring_z)
                 clear_paths.append(cleared)
                 findings += left
-            plans.append((ref, poly, surface, paths, floor_depth, seeded))
+            plans.append((ref, poly, surface, paths, floor_depth))
             stats["areas"].append({"ref": ref, "surface_z": round(surface, 6), "deepest_mm": round(deepest, 6),
                                    "floor_z": None if ring_z is None else round(ring_z, 6)})
         before = ()
@@ -611,14 +610,14 @@ class EngraveOperation(OperationBase):
             findings += [f for f in clear_ctx.feeds.findings]
             v_ctx = replace(ctx, start=None)          # the V-bit comes in after a tool change
         emitter = Emitter(v_ctx)
-        for ref, poly, surface, paths, floor_depth, seeded in plans:
+        for ref, poly, surface, paths, floor_depth in plans:
             levels = [surface - (floor_depth if floor_depth is not None else max(surface - min(p[2] for path in paths
                                                                                                   for p in path), 0.0))]
             if params.stepdown_mm is not None:
                 from cadgen._internal.cam.operations.geometry2d import depth_steps
 
                 levels = depth_steps(surface, levels[0], params.stepdown_mm) or levels
-            previous, cut = surface, dict(seeded)
+            previous, cut = surface, {}
             for level in levels:
                 runs = [run for path in paths for run in _below(path, previous, level)]
                 self._carve_runs(emitter, runs, surface, cut, angle, tol)
@@ -631,9 +630,11 @@ class EngraveOperation(OperationBase):
         """Cut each run, carrying on without lifting where the next one starts where the tool is. Otherwise the next
         is the nearest run end the tool can enter without descending into material: one on the surface, or one the
         tool has already cut at least as deep (``cut``: the depth cut so far by (x, y), kept across levels), where it
-        drops through the cut it made; only
-        when no run has such an end is one entered down a ramp along itself (laps of a closed run, back and forth
-        along an open one), never deeper than the run at any point and no steeper than ``angle_deg``."""
+        drops through the cut it made; only when no run has such an end is one entered down a ramp along itself
+        (laps of a closed run, back and forth along an open one), from as deep as the V-bit has already cut at its
+        start (else the surface), never deeper than the run at any point and no steeper than ``angle_deg``. Only
+        the V-bit's own cuts count: a clear tool's flat leaves the wall over its edge standing, where the cone
+        reaches."""
         from cadgen._internal.cam.operations.emit import AlongPath
         from cadgen._internal.cam.toolpath import PLUNGE
 
@@ -664,12 +665,14 @@ class EngraveOperation(OperationBase):
                 emitter.cut(run[1:])
             elif rank == 1:
                 emitter.go(run, rapid_to=run[0][2] if key(run[0]) in cut else surface, entry=PLUNGE)
-            elif len(run) > 2 and run[0] == run[-1]:
-                emitter.go(run, rapid_to=surface, entry=AlongPath(angle_deg))
             else:
-                if len(run) == 1:
-                    raise ValueError("a single carve point is entered by its spiral")
-                emitter.go(_descent(run, surface, angle_deg) + run[1:], rapid_to=surface, entry=PLUNGE)
+                top = max(min(surface, cut.get(key(run[0]), surface)), run[0][2])
+                if len(run) > 2 and run[0] == run[-1]:
+                    emitter.go(run, rapid_to=top, entry=AlongPath(angle_deg))
+                else:
+                    if len(run) == 1:
+                        raise ValueError("a single carve point is entered by its spiral")
+                    emitter.go(_descent(run, top, angle_deg) + run[1:], rapid_to=top, entry=PLUNGE)
             for point in run:
                 cut[key(point)] = min(point[2], cut.get(key(point), math.inf))
 

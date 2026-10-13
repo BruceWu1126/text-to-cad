@@ -565,24 +565,37 @@ def _tool_outline(profile) -> list[tuple[float, float]]:
 class _ToolSolids:
     """The pieces a toolpath's swept cutting envelope is made of, shrunk by ``shrink`` mm all round (so touching
     is not reading as entering): the tool at a point, a straight level move as a prism of the tool's cross-section,
-    a level arc as that cross-section turned about the arc's centre."""
+    a level arc as that cross-section turned about the arc's centre; and a ``rise``: what a move that changes height
+    sweeps above the top of the cutting length at its lowest point, a column of the tool's top radius ``rise`` tall
+    over a level piece (the cutter's radius never shrinks going up its cutting length, so the level piece at the
+    lowest point and that column hold everything the move sweeps)."""
 
     def __init__(self, profile):
         from shapely.geometry import Polygon
 
         half = _tool_outline(profile)
         self.width = max(r for r, _ in half)
+        self.top = half[-1][1]
+        self.top_radius = max(r for r, z in half if abs(z - self.top) < 1e-12)
         self.full = Polygon([(r, z) for r, z in half] + [(-r, z) for r, z in reversed(half)]).buffer(0)
         self._cache: dict = {}
 
-    def _section(self, shrink: float):
-        """The cross-section through the axis, shrunk: a shapely polygon in (u, z), u across the axis; or None."""
-        if shrink not in self._cache:
-            section = self.full.buffer(-shrink, join_style="mitre") if shrink > 0 else self.full
+    def _section(self, shrink: float, rise: float = 0.0):
+        """The cross-section through the axis, shrunk: a shapely polygon in (u, z), u across the axis; or None. With
+        ``rise``, the column over the cutting length instead."""
+        key = ("section", shrink, rise)
+        if key not in self._cache:
+            if rise:
+                from shapely.geometry import box
+
+                whole = box(-self.top_radius, self.top, self.top_radius, self.top + rise)
+            else:
+                whole = self.full
+            section = whole.buffer(-shrink, join_style="mitre") if shrink > 0 else whole
             polys = [section] if section.geom_type == "Polygon" else list(getattr(section, "geoms", ()))
             polys = [poly for poly in polys if poly.area > 1e-9]
-            self._cache[shrink] = max(polys, key=lambda poly: poly.area) if polys else None
-        return self._cache[shrink]
+            self._cache[key] = max(polys, key=lambda poly: poly.area) if polys else None
+        return self._cache[key]
 
     @staticmethod
     def _face(points):
@@ -605,15 +618,16 @@ class _ToolSolids:
         move.SetTranslation(gp_Vec(*at))
         return shape.Moved(TopLoc_Location(move.Multiplied(turn)))
 
-    def tool(self, shrink: float):
-        """The tool at the origin (tip there, axis +Z), shrunk; ``None`` when nothing is left."""
-        key = ("tool", shrink)
+    def tool(self, shrink: float, rise: float = 0.0):
+        """The tool at the origin (tip there, axis +Z), shrunk (with ``rise``, its column); ``None`` when nothing is
+        left."""
+        key = ("tool", shrink, rise)
         if key not in self._cache:
             from OCP.BRepPrimAPI import BRepPrimAPI_MakeRevol
             from OCP.gp import gp_Ax1, gp_Dir, gp_Pnt
             from shapely.geometry import box
 
-            section = self._section(shrink)
+            section = self._section(shrink, rise)
             half = None if section is None else section.intersection(box(0, -1e3, 1e3, 1e3))
             if half is None or half.is_empty or half.geom_type != "Polygon":
                 self._cache[key] = None
@@ -622,17 +636,20 @@ class _ToolSolids:
                 self._cache[key] = BRepPrimAPI_MakeRevol(face, gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1))).Shape()
         return self._cache[key]
 
-    def piece(self, spec, shrink: float):
-        """One piece, from its spec: ``("at", xyz)``, ``("line", a, b)`` (level) or ``("arc", a, centre, sweep)``."""
+    def piece(self, spec, shrink: float, rise: float = 0.0):
+        """One piece, from its spec: ``("at", xyz)``, ``("line", a, b)`` (level), ``("arc", a, centre, sweep)``,
+        ``("rise", height, level spec)`` (the column over that level piece) or ``("bound", ...)``."""
         from OCP.BRepPrimAPI import BRepPrimAPI_MakePrism, BRepPrimAPI_MakeRevol
         from OCP.gp import gp_Ax1, gp_Dir, gp_Pnt, gp_Vec
 
         if spec[0] == "bound":
             return _compound([self.piece(item, shrink) for item in spec[1:2] + spec[3:]])
+        if spec[0] == "rise":
+            return self.piece(spec[2], shrink, spec[1])
         if spec[0] == "at":
-            tool = self.tool(shrink)
+            tool = self.tool(shrink, rise)
             return None if tool is None else self._placed(tool, 0.0, spec[1])
-        section = self._section(shrink)
+        section = self._section(shrink, rise)
         if section is None:
             return None
         coords = list(section.exterior.coords)[:-1]
@@ -687,7 +704,8 @@ def _pieces(toolpath, solids: _ToolSolids, step: float) -> list:
             piece = ("line", tuple(here), end)
         if piece is None:
             # A move that changes height: first as its level counterpart at its lowest point (all it sweeps, below
-            # the top of the cutting length), sampled only where that one touches the part.
+            # the top of the cutting length there) with the column of the tool's top radius over it (all it sweeps
+            # above that), sampled only where those touch the part.
             low = min(here[2], end[2])
             a, b = (here[0], here[1], low), (end[0], end[1], low)
             if part.kind in ("arc_cw", "arc_ccw"):
@@ -697,7 +715,10 @@ def _pieces(toolpath, solids: _ToolSolids, step: float) -> list:
             else:
                 bound = ("at", a)
             samples = [("at", point) for point in _along_move(here, part, step)]
-            specs.append(("bound", bound, samples, ("at", a), ("at", b)))
+            # Above the top of its cutting length there, the column of the tool's top radius over the same path.
+            under = [bound] if bound[0] == "at" else [bound, ("at", a), ("at", b)]
+            rise = [("rise", abs(end[2] - here[2]), item) for item in under]
+            specs.append(("bound", bound, samples, ("at", a), ("at", b), *rise))
             continue
         specs.append(piece)
         following = flat[index + 1] if index + 1 < len(flat) else None
@@ -756,7 +777,8 @@ def brep_intrusion(part_shape, toolpath, profile, step: float = 0.5, *, probe: f
     """How far (mm) the tool's cutting envelope (``profile``, up its cutting length) enters ``part_shape`` (the part's
     B-rep in the setup's frame) anywhere along ``toolpath``, read by the kernel (BRepExtrema_DistShapeShape): level
     lines and arcs as their exact swept solids, every other move as the tool at points ``step`` mm apart (tried
-    first as its level counterpart at its lowest point, which sweeps all it does).
+    first as its level counterpart at its lowest point with the column of its top radius above that, which together
+    sweep all it does).
 
     The envelope is shrunk by ``probe`` all round first, so a tool that only touches (a finished wall, a floor) reads
     as clear: the answer is then ``probe`` less the clearance the kernel found (at most ``probe``). Where the shrunk
@@ -812,17 +834,20 @@ def _stock_shadow(ctx, z: float):
     return ctx.cache[key]
 
 
-def descents_ok(toolpath, ctx, angle_deg: float | None = None) -> list[str]:
+def descents_ok(toolpath, ctx, angle_deg: float | None = None, *, excuse=None) -> list[str]:
     """The descents in ``toolpath`` that go into material too steeply: every move down (a rapid, a plunge, a feed or
-    a helix's arc) steeper than ``angle_deg`` (the operation's ``ramp_angle_deg``, else the default ramp angle) must
-    end where the tool's whole circle is in air (off the stock standing at that height or above it) or in material
-    an earlier cut of the same toolpath already took away (swept by the tool at that height or lower). Empty when
-    every descent is fine; else one line per offending move."""
+    a helix's arc; a canned cycle's own moves too, expanded) steeper than ``angle_deg`` (the operation's
+    ``ramp_angle_deg``, else the default ramp angle) must end where the tool's whole circle is in air (off the stock
+    standing at that height or above it) or in material an earlier cut of the same toolpath already took away (swept
+    by the tool at that height or lower). ``excuse(here, move, cycle, cut)`` may pass a descent that is sound for a
+    reason of its own (``cycle``: the canned cycle move it is part of, else ``None``; ``cut``: the segments cut so
+    far); :func:`assert_sound` gives the only ones there are. Empty when every descent is fine; else one line per
+    offending move."""
     import numpy as np
     from shapely.geometry import MultiLineString, Point
 
     from cadgen._internal.cam.operations.emit import DEFAULT_RAMP_DEG
-    from cadgen._internal.cam.toolpath import arc_sweep, walk
+    from cadgen._internal.cam.toolpath import arc_sweep, expand_cycle, walk
 
     if angle_deg is None:
         angle_deg = getattr(ctx.params, "ramp_angle_deg", DEFAULT_RAMP_DEG)
@@ -856,7 +881,13 @@ def descents_ok(toolpath, ctx, angle_deg: float | None = None) -> list[str]:
         swept = MultiLineString(lines).buffer(r, quad_segs=32)
         return left.difference(swept).area < 1e-6
 
-    for here, move in walk(toolpath.moves, toolpath.start):
+    flat = []
+    for start, move in walk(toolpath.moves, toolpath.start):
+        if move.kind == "cycle":
+            flat += [(here, part, move) for here, part in walk(expand_cycle(move, start), start)]
+        else:
+            flat.append((start, move, None))
+    for here, move, cycle in flat:
         end = tuple(move.xyz)
         if move.kind in ("arc_cw", "arc_ccw"):
             across = abs(arc_sweep(here, move)) * math.hypot(here[0] - move.center[0], here[1] - move.center[1])
@@ -865,9 +896,289 @@ def descents_ok(toolpath, ctx, angle_deg: float | None = None) -> list[str]:
             across = math.dist(here[:2], end[:2])
             points = [tuple(here), end]
         drop = here[2] - end[2]
-        if drop > 1e-9 and (move.kind == "rapid" or drop > slope * across) and not cleared(end):
+        if drop > 1e-9 and (move.kind == "rapid" or drop > slope * across) and not cleared(end) and \
+                not (excuse is not None and excuse(tuple(here), move, cycle, cut)):
             problems.append(f"{move.kind} down to ({end[0]:g}, {end[1]:g}, {end[2]:g}) from z {here[2]:g} goes into "
                             "material")
         if move.kind != "rapid":
             cut += [(tuple(a), tuple(b)) for a, b in zip(points, points[1:])]
     return problems
+
+
+# --- Soundness: what every planned toolpath must be ----------------------------------------------------
+# assert_sound runs the independent checks above on each toolpath an operation plans (its own tool's, and any it
+# runs before with another tool). What they excuse is written here, each with the reason it is sound, and nothing
+# else: no tolerance is widened for any operation.
+
+#: The descents descents_ok passes for a reason of their own (:func:`_excuse`), and why each is sound.
+EXCUSED_DESCENTS = {
+    "canned_cycle": "a drilling operation's canned cycle goes down the tool's axis into its hole: that is what a "
+                    "drill, tap, reamer or boring bar does, and the cycle's motion is the controller's",
+    "v_carve": "a V-bit in engrave follows the carve down no steeper than its cone's slope, or drops straight onto a "
+               "point it has already cut at least as deep: a pointed tool cutting on its centre, whose carve at each "
+               "point is the deepest its cone may go there, so its cone higher up is inside the cut (edges_2d)",
+    "thread_axis": "an internal thread_mill feeds down its hole's axis, the tool narrower than the hole, only inside "
+                   "the hole an earlier operation made, which phase 1 has no stock simulation to see (holes_2d)",
+}
+#: Moves brep_intrusion does not sweep, and why.
+UNSWEPT = {
+    "oriented_bar": "an oriented boring bar's shift (fine_bore, back_bore) moves its one-sided edge off the wall or "
+                    "passes its eccentric head through the hole; a round envelope cannot stand for that bar, so the "
+                    "shifted moves are left out and the bar is checked on its axis, cutting",
+}
+#: What an operation is meant to cut out of the part as modelled (the model does not show it), by operation:
+#: brep_intrusion measures against the part less exactly that volume, so the tool may go that far and no further.
+INTENDED_CUTS = {
+    "chamfer_2d": "the chamfer asked for along each top edge the part does not model as chamfered",
+    "tap": "the thread: the tap's diameter over the length of a hole drilled at its tap drill size",
+    "rigid_tap": "the thread: the tap's diameter over the length of a hole drilled at its tap drill size",
+    "thread_mill": "the thread: thread_depth_mm into the hole's wall (or the boss's), over its length",
+    "engrave": "a region carved into the part's surface: the region, down to its deepest carve or max_depth_mm",
+    "trace": "a region's curve cut into the part's surface: the groove the tool's cutting radius makes along it on "
+             "its offset side, depth_mm deep",
+}
+
+
+def assert_sound(case: unittest.TestCase, ctx, planned, *, slices: bool = False) -> None:
+    """What every toolpath of ``planned`` must be: no gouge (read from the B-rep less the operation's
+    :data:`INTENDED_CUTS`; from the slices too when ``slices``, which is cheap only where the plan sliced those heights
+    already and exact only on straight walls: it reads a leaning wall up to a quantum lower), no steep descent into
+    material (but :data:`EXCUSED_DESCENTS`), no sideways rapid under the retract plane, every move its operation's.
+    A toolpath run with another tool (an engraving's clear_tool) is checked with that tool."""
+    from cadgen._internal.cam.operations.geometry2d import intrusion
+    from cadgen._internal.cam.toolpath import rapids_below
+
+    for tp in planned.toolpaths:
+        tool_ctx = toolpath_context(ctx, tp)
+        with case.subTest(tool=tp.tool):
+            if slices:
+                case.assertLessEqual(intrusion(tool_ctx, path_points(tp)), ctx.tol)
+            part = intended_part(tool_ctx, planned)
+            for run in swept_runs(tp):
+                case.assertLessEqual(brep_intrusion(part, run, tool_ctx.profile), ctx.tol)
+            case.assertEqual(descents_ok(tp, tool_ctx, excuse=lambda *args: _excuse(tool_ctx, *args)), [])
+            case.assertEqual(rapids_below(tp.moves, start=tp.start, z=ctx.heights.retract), [])
+            case.assertEqual({move.op for move in tp.moves}, {ctx.index})
+
+
+def toolpath_context(ctx, toolpath):
+    """``ctx`` with the tool that runs ``toolpath`` (the operation's own, or another of the job's)."""
+    from dataclasses import replace
+
+    from cadgen._internal.cam.tools import profile
+
+    if toolpath.tool == ctx.tool.id:
+        return ctx
+    tool = ctx.job.tool(toolpath.tool)
+    return replace(ctx, tool=tool, profile=profile(tool))
+
+
+def _excuse(ctx, here, move, cycle, cut) -> str | None:
+    """The :data:`EXCUSED_DESCENTS` key that passes this descent, else ``None``."""
+    from cadgen._internal.cam.operations import REGISTRY
+    from cadgen._internal.cam.toolpath import arc_sweep
+
+    op = ctx.operation.op
+    if cycle is not None:
+        return "canned_cycle" if REGISTRY[op].module.endswith(".drilling") else None
+    end = tuple(move.xyz)
+    vertical = math.dist(here[:2], end[:2]) < 1e-9
+    if op == "engrave" and ctx.tool.type == "v_bit":
+        if move.kind in ("feed", "arc_cw", "arc_ccw"):
+            if move.kind == "feed":
+                across = math.dist(here[:2], end[:2])
+            else:
+                across = abs(arc_sweep(here, move)) * math.hypot(here[0] - move.center[0], here[1] - move.center[1])
+            half = math.radians(float(ctx.tool.size["tip_angle_deg"]) / 2)
+            if here[2] - end[2] <= across / math.tan(half) * (1 + 1e-3):
+                return "v_carve"
+        if vertical and any(_on_segment(end, a, b) for a, b in cut):
+            return "v_carve"
+    if op == "thread_mill" and not ctx.params.external and vertical and move.kind != "rapid":
+        for _, found in ctx.targets(("hole",)):
+            if math.dist(found.top[:2], end[:2]) < 1e-6 and ctx.radius < found.feature.size["diameter_mm"] / 2:
+                return "thread_axis"
+    return None
+
+
+def _on_segment(point, a, b) -> bool:
+    """``point`` is on the cut from ``a`` to ``b`` (x, y within a micrometre), which went at least as deep there."""
+    ax, ay, az = a
+    dx, dy, dz = b[0] - ax, b[1] - ay, b[2] - az
+    span = dx * dx + dy * dy
+    t = 0.0 if span < 1e-18 else max(0.0, min(1.0, ((point[0] - ax) * dx + (point[1] - ay) * dy) / span))
+    x, y, z = ax + dx * t, ay + dy * t, az + dz * t
+    return math.hypot(point[0] - x, point[1] - y) < 1e-3 and z <= point[2] + 1e-6
+
+
+def swept_runs(toolpath) -> list:
+    """``toolpath`` as brep_intrusion sweeps it: whole, but for an oriented boring bar's cycles (:data:`UNSWEPT`),
+    which are expanded with their shifted moves left out, the toolpath split where they were."""
+    from dataclasses import replace
+
+    from cadgen._internal.cam.toolpath import expand_cycle, walk
+
+    if not any(move.kind == "cycle" and move.cycle.kind in ("fine_bore", "back_bore") for move in toolpath.moves):
+        return [toolpath]
+    runs, start, run = [], tuple(toolpath.start), []
+    for here, move in walk(toolpath.moves, toolpath.start):
+        if move.kind != "cycle" or move.cycle.kind not in ("fine_bore", "back_bore"):
+            run.append(move)
+            continue
+        axis = move.xyz[:2]
+        for index, (at, part) in enumerate(walk(expand_cycle(move, here), here)):
+            off = math.dist(part.xyz[:2], axis) > 1e-9 or (index and math.dist(at[:2], axis) > 1e-9)
+            if off:
+                if run:
+                    runs.append(replace(toolpath, start=start, moves=tuple(run)))
+                run, start = [], tuple(part.xyz)
+            else:
+                run.append(part)
+    if run:
+        runs.append(replace(toolpath, start=start, moves=tuple(run)))
+    return runs
+
+
+def intended_part(ctx, planned):
+    """The part as the operation is meant to leave it, in the setup's frame: ``ctx.part_shape`` less its
+    :data:`INTENDED_CUTS` (the part itself for any other operation)."""
+    op = ctx.operation.op
+    if op not in INTENDED_CUTS:
+        return ctx.part_shape
+    key = ("test_intended_part", repr(ctx.operation))
+    if key not in ctx.cache:
+        if op == "chamfer_2d":
+            ctx.cache[key] = _chamfered(ctx, planned.stats)
+        else:
+            ctx.cache[key] = _less(ctx.part_shape, _intended_solids(ctx))
+    return ctx.cache[key]
+
+
+def _intended_solids(ctx) -> list:
+    """The solids :func:`intended_part` takes away, setup frame."""
+    import shapely
+
+    params, op = ctx.params, ctx.operation.op
+    out = []
+    if op in ("tap", "rigid_tap"):
+        for found in ctx.features:
+            if found.feature.kind == "hole" and found.feature.size["diameter_mm"] / 2 < ctx.radius - 1e-6:
+                out.append(_cylinder(found.top[:2], ctx.radius, found.bottom[2] - 1.0, found.top[2]))
+    elif op == "thread_mill":
+        kind = "profile" if params.external else "hole"
+        for ref, found in ctx.targets((kind,)):
+            if params.external:
+                wall = next(ctx.part.face(int(r.rsplit(".f", 1)[1])) for r in found.feature.refs
+                            if ctx.part.face(int(r.rsplit(".f", 1)[1])).surface == "cylinder")
+                (cx, cy, _), radius = ctx.to_setup(wall.axis_point), wall.radius
+                ring = _less(_cylinder((cx, cy), radius + 1.0, found.bottom[2], found.top[2]),
+                             [_cylinder((cx, cy), radius - params.thread_depth_mm, found.bottom[2] - 1.0,
+                                        found.top[2] + 1.0)])
+                out.append(ring)
+            else:
+                radius = found.feature.size["diameter_mm"] / 2 + params.thread_depth_mm
+                out.append(_cylinder(found.top[:2], radius, found.bottom[2] - 1.0, found.top[2]))
+    elif op == "engrave" and ctx.operation.region is not None:
+        poly = shapely.Polygon(ctx.operation.region)
+        v_bit = ctx.job.tool(ctx.operation.tool)        # the clear_tool's pass is checked against the same carve
+        half = math.radians(float(v_bit.size["tip_angle_deg"]) / 2)
+        tip = float(v_bit.size.get("tip_diameter_mm", 0.0)) / 2
+        inscribed = shapely.maximum_inscribed_circle(poly, ctx.tol / 4).length
+        depth = max(0.0, inscribed - tip) / math.tan(half)
+        if params.max_depth_mm is not None:
+            depth = min(depth, params.max_depth_mm)
+        out.append(_prism(poly, ctx.top_z - depth, ctx.top_z + 100.0))
+    elif op == "trace" and ctx.operation.region is not None:
+        poly = shapely.Polygon(ctx.operation.region)
+        reach = ctx.profile.radius_at(params.depth_mm)
+        groove = {"none": lambda: poly.boundary.buffer(reach, quad_segs=64),
+                  "inside": lambda: poly.difference(poly.buffer(-2 * reach, quad_segs=64)),
+                  "outside": lambda: poly.buffer(2 * reach, quad_segs=64).difference(poly)}[params.offset]()
+        out.append(_prism(groove, ctx.top_z - params.depth_mm, ctx.top_z + 100.0))
+    return out
+
+
+def _chamfered(ctx, stats):
+    """The part with the chamfers of a chamfer_2d's ``stats`` that it does not model, in the setup's frame."""
+    from OCP.BRepAdaptor import BRepAdaptor_Curve
+    from OCP.BRepFilletAPI import BRepFilletAPI_MakeChamfer
+
+    from cadgen._internal.cam.part import same
+    from cadgen._internal.cam.stock import occ_shape
+
+    part = ctx.part
+    direction = tuple(float(c) for c in ctx.setup.direction)
+    half = math.radians(float(ctx.tool.size["tip_angle_deg"]) / 2)
+    maker = BRepFilletAPI_MakeChamfer(occ_shape(part.shape))
+    added = 0
+    for edge in stats["edges"]:
+        if edge["modelled"]:
+            continue
+        found = next(f for f in ctx.features if f.feature.ref == edge["ref"] or edge["ref"] in f.feature.refs)
+        walls = [int(r.rsplit(".f", 1)[1]) for r in found.feature.refs]
+        walls = [w for w in walls if part.is_wall(w, direction)]
+        for wall in walls:
+            for ordinal in sorted(part.face(wall).edges):
+                others = [f for f in part._edge_faces[ordinal] if f != wall]
+                top = next((part.face(f) for f in others if part.face(f).surface == "plane"
+                            and same(part.face(f).normal, direction)), None)
+                if top is None:
+                    continue
+                curve = BRepAdaptor_Curve(part.edge(ordinal))
+                middle = curve.Value((curve.FirstParameter() + curve.LastParameter()) / 2)
+                if abs(ctx.to_setup((middle.X(), middle.Y(), middle.Z()))[2] - edge["top_z"]) > 1e-3:
+                    continue
+                maker.Add(edge["width_mm"], edge["width_mm"] / math.tan(half), part.edge(ordinal), top.face)
+                added += 1
+    if not added:
+        return ctx.part_shape
+    maker.Build()
+    if not maker.IsDone():
+        raise RuntimeError("the kernel could not chamfer the part's edges")
+    return ctx.setup.frame.shape_to_setup(maker.Shape())
+
+
+def _cylinder(xy, radius: float, z0: float, z1: float):
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+
+    return BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(xy[0], xy[1], z0), gp_Dir(0, 0, 1)), radius, z1 - z0).Shape()
+
+
+def _prism(area, z0: float, z1: float):
+    """A shapely area (holes allowed) stood up from ``z0`` to ``z1``, as an OCP solid (a compound of several)."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakePolygon
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakePrism
+    from OCP.gp import gp_Pnt, gp_Vec
+    from shapely.geometry.polygon import orient
+
+    from cadgen._internal.cam.operations.geometry2d import polygons
+
+    def wire(ring):
+        polygon = BRepBuilderAPI_MakePolygon()
+        for x, y in list(ring.coords)[:-1]:
+            polygon.Add(gp_Pnt(x, y, z0))
+        polygon.Close()
+        return polygon.Wire()
+
+    solids = []
+    for poly in polygons(area):
+        poly = orient(poly, 1.0)
+        maker = BRepBuilderAPI_MakeFace(wire(poly.exterior), True)
+        for interior in poly.interiors:
+            maker.Add(wire(interior))
+        solids.append(BRepPrimAPI_MakePrism(maker.Face(), gp_Vec(0, 0, z1 - z0)).Shape())
+    return _compound(solids)
+
+
+def _less(shape, tools):
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+
+    for tool in tools:
+        if tool is None:
+            continue
+        cut = BRepAlgoAPI_Cut(shape, tool)
+        if not cut.IsDone():
+            raise RuntimeError("the kernel could not take the intended cut out of the part")
+        shape = cut.Shape()
+    return shape

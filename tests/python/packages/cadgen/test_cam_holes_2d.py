@@ -1,8 +1,9 @@
 """Slots and round features: slot, circular, bore and thread_mill.
 
 For every operation: the posted program, read back, is the planned toolpath (linuxcnc and fanuc); the swept tool reaches
-the walls it is aimed at and goes no further (a thread mill exactly its thread's depth further); no rapid moves
-sideways under the retract plane; the same job plans the same moves twice. Then the sizes: a bore's diameter, a slot's
+the walls it is aimed at and goes no further (a thread mill exactly its thread's depth further); it is sound
+(cam_fixtures.assert_sound: no gouge, no steep descent into material, no sideways rapid under the retract plane); the
+same job plans the same moves twice. Then the sizes: a bore's diameter, a slot's
 width, a helix's pitch, a thread's hand; and the refusals of a tool that does not fit.
 """
 
@@ -16,6 +17,7 @@ from pathlib import Path
 
 from tests.python.support.cam_fixtures import (
     assert_backplot,
+    assert_sound,
     path_points,
     round_features_step,
     slotted_block_step,
@@ -114,13 +116,9 @@ class Holes(unittest.TestCase):
             else:
                 self.assertAlmostEqual(reach, 0.0, delta=ctx.tol)
 
-    def test_no_rapid_moves_sideways_under_the_retract_plane(self):
-        from cadgen._internal.cam.toolpath import rapids_below
-
+    def test_no_gouge_no_steep_descent_into_material_no_low_rapid(self):
         for name, job, ctx, planned in self.each():
-            tp = planned.toolpath
-            self.assertEqual(rapids_below(tp.moves, start=tp.start, z=ctx.heights.retract), [])
-            self.assertEqual({move.op for move in tp.moves}, {ctx.index})
+            assert_sound(self, ctx, planned)
 
     def test_the_same_job_plans_the_same_moves(self):
         fresh = {"round": {}, "block": {}}
@@ -140,12 +138,13 @@ class Holes(unittest.TestCase):
         ctx, planned = self.run_of("round", 1)
         (hole,) = planned.stats["holes"]
         self.assertEqual((hole["diameter_mm"], hole["floor_z"]), (20.0, -16.5))   # through, 0.5 mm past the bottom
-        self.assertEqual(hole["pitch_mm"], 2.0)                                     # 0.2 x the 10 mm tool
+        # 0.2 x the 10 mm tool is 2 mm, steeper than the 3 degree ramp angle at the centre's 5 mm circle.
+        self.assertEqual(hole["pitch_mm"], 1.6464)
         helices = self.helices(planned.toolpath)
         self.assertTrue(helices)
         for sweep, dz in helices:
             self.assertGreater(sweep, 0)                                            # climb: counter-clockwise
-            self.assertAlmostEqual(-dz / sweep * 2 * math.pi, 2.0, delta=1e-3)
+            self.assertAlmostEqual(-dz / sweep * 2 * math.pi, 1.6464, delta=1e-3)
         points = path_points(planned.toolpath, step=0.2)
         self.assertAlmostEqual(max(math.hypot(p[0] + 20, p[1]) for p in points if abs(p[2] + 16.5) < 1e-6)
                                + ctx.radius, 10.0, delta=ctx.tol)

@@ -1,6 +1,7 @@
 """2D edge work on the plate: chamfer_2d, engrave (V-carve) and trace.
 
-The posted program, read back, is the planned toolpath (linuxcnc and fanuc); the same job plans the same moves twice;
+The posted program, read back, is the planned toolpath (linuxcnc and fanuc); every toolpath is sound
+(cam_fixtures.assert_sound, the engraving's clear_tool pass too); the same job plans the same moves twice;
 a chamfer is as wide as asked at the top and touches nothing under it; a V-carve goes as deep as its widest point
 allows and its cone never crosses the region's boundary; a trace runs at its depth, its side of the curve.
 """
@@ -13,7 +14,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.python.support.cam_fixtures import assert_backplot, path_points, plate_step, value_error
+from tests.python.support.cam_fixtures import assert_backplot, assert_sound, path_points, plate_step, value_error
 
 POCKET, OUTLINE = "#o1.f19", "#o1.f2"
 RECT = [[-10, 15], [10, 15], [10, 25], [-10, 25]]          # 20 x 10 mm on the plate's top, clear of the pocket
@@ -73,16 +74,18 @@ class Edges(unittest.TestCase):
 
     def test_the_posted_program_read_back_is_the_toolpath(self):
         from cadgen._internal.cam.posts import get_post
-        from cadgen._internal.cam.toolpath import rapids_below
 
         for ctx, planned in self.each():
             for post in ("linuxcnc", "fanuc"):
                 text = get_post(post).program(self.job, self.job.setups[0], planned.toolpaths, part="plate")
                 assert_backplot(self, text, post, planned.toolpaths)
             for tp in planned.toolpaths:
-                self.assertEqual(rapids_below(tp.moves, start=tp.start, z=ctx.heights.retract), [])
                 self.assertFalse([m for m in tp.moves if m.kind == "plunge" and m.xyz[2] < TOP - 1e-6
                                   and tp.tool == ctx.tool.id and ctx.operation.op != "engrave"])
+
+    def test_no_gouge_no_steep_descent_into_material_no_low_rapid(self):
+        for ctx, planned in self.each():
+            assert_sound(self, ctx, planned)
 
     def test_the_same_job_plans_the_same_moves(self):
         from cadgen._internal.cam.operations import get_operation

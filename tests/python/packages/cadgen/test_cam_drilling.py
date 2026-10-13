@@ -3,8 +3,8 @@
 Every cycle, posted, reads back as the planned toolpath: natively on fanuc, natively or expanded on linuxcnc, expanded
 on grbl (which refuses taps and oriented bores in its own words). Holes go in a nearest-neighbour tour, not file
 order; a blind hole's tool never passes the hole's floor; a through hole's full diameter breaks through by
-breakthrough_mm; the tool stays at the R plane between holes (G99) only when the way across is clear; the same job
-plans the same moves twice.
+breakthrough_mm; the tool stays at the R plane between holes (G99) only when the way across is clear; every cycle is
+sound (cam_fixtures.assert_sound); the same job plans the same moves twice.
 """
 
 from __future__ import annotations
@@ -14,7 +14,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.python.support.cam_fixtures import assert_backplot, plate_step, slotted_block_step, value_error
+from tests.python.support.cam_fixtures import (
+    assert_backplot, assert_sound, plate_step, slotted_block_step, value_error,
+)
 
 #: The plate's holes as `cadgen cam features` names them: the 5 mm blind hole at (35, -15), the 6 mm through holes
 #: at (-35, 15) and (35, 15).
@@ -112,6 +114,10 @@ class Drilling(unittest.TestCase):
                     self.assertIn(FANUC[kind], text)
                 if post == "grbl":
                     self.assertNotRegex(text, r"G(7[36]|8[1-9])\b")
+
+    def test_no_gouge_no_steep_descent_into_material_no_low_rapid(self):
+        for job, ctx, result in self.each():
+            assert_sound(self, ctx, result)
 
     def test_holes_go_in_a_nearest_neighbour_tour_from_where_the_tool_is(self):
         from cadgen._internal.cam.operations import get_operation

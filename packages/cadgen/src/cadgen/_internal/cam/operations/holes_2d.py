@@ -32,8 +32,9 @@ over the edge's (never under :data:`ARC_FEED_FLOOR` of it), as a machinist compe
 ``bore``
     Helical interpolation of a ``hole`` to size: the tool's centre on a circle of the hole's radius less the tool's,
     down from the top of the material at ``pitch_mm`` per turn (default: 0.2 x the tool's diameter, and no steeper
-    than a 10 degree helix at the centre's circle) to the bottom, a whole circle there, then over to the hole's axis
-    and straight up. Through holes go ``breakthrough_mm`` (0.5) past the bottom. ``target: counterbore`` bores the
+    at the centre's circle than ``ramp_angle_deg``, 3, the steepest the tool goes down into material) to the bottom,
+    a whole circle there, then over to the hole's axis and straight up. A ``pitch_mm`` steeper than that is refused
+    (``unreachable``). Through holes go ``breakthrough_mm`` (0.5) past the bottom. ``target: counterbore`` bores the
     hole's counterbore to its diameter and depth instead. Refused when the tool does not fit, when it is within a
     tenth of its radius of the hole's size (drill or ream it), and when it would leave a core standing in the middle
     (a hole over twice the tool's diameter: use ``circular``).
@@ -81,9 +82,8 @@ _END_MILLS = ("flat_endmill", "bull_endmill")
 ARC_FEED_FLOOR = 0.25
 #: The ISO metric thread's depth, x pitch (ISO 68-1: h3 = 0.6134 P).
 ISO_THREAD_DEPTH = 0.6134
-#: A bore's default pitch, x the tool's diameter, and the steepest its helix may be at the tool's centre, degrees.
+#: A bore's default pitch, x the tool's diameter (no steeper than its ramp angle at the tool's centre).
 BORE_PITCH = 0.2
-BORE_MAX_DEG = 10.0
 #: How far past a through hole's bottom the round operations go by default, mm.
 BREAKTHROUGH_MM = 0.5
 #: How close to the hole's size a tool may be before interpolating it makes no sense, x the tool's radius.
@@ -555,11 +555,12 @@ class BoreParams:
     breakthrough_mm: float
     depth_mm: float | None
     z_mm: float | None
+    ramp_angle_deg: float
 
 
 class BoreOperation(OperationBase):
     name, phase, word = "bore", 1, "Helical bore"
-    keys = frozenset({"pitch_mm", "target", "breakthrough_mm", "depth_mm", "z_mm"})
+    keys = frozenset({"pitch_mm", "target", "breakthrough_mm", "depth_mm", "z_mm", "ramp_angle_deg"})
     tool_types = _END_MILLS
 
     def parse(self, raw: dict, ctx: ParseContext) -> BoreParams:
@@ -568,7 +569,7 @@ class BoreOperation(OperationBase):
         depth, z = _floor_keys(raw, ctx)
         if target == "counterbore" and (depth is not None or z is not None):
             raise ValueError(f"{ctx.where}: a counterbore is bored to its own depth; leave depth_mm and z_mm out")
-        return BoreParams(_mm(raw, "pitch_mm", ctx), target, _breakthrough(raw, ctx), depth, z)
+        return BoreParams(_mm(raw, "pitch_mm", ctx), target, _breakthrough(raw, ctx), depth, z, _angle(raw, ctx))
 
     def plan(self, params: BoreParams, ctx: "PlanContext") -> "Planned":
         from cadgen._internal.cam.operations.context import Planned
@@ -599,9 +600,16 @@ class BoreOperation(OperationBase):
             if floor >= top - 1e-9:
                 raise PlanError("empty_operation", f"{ctx.where}: {ref} has nothing to bore: its bottom at z {floor:g} is not under the "
                                  f"top of the material at z {top:g}")
+            steepest = 2 * math.pi * room * math.tan(math.radians(params.ramp_angle_deg))
             pitch = params.pitch_mm
             if pitch is None:
-                pitch = round(min(BORE_PITCH * 2 * r, 2 * math.pi * room * math.tan(math.radians(BORE_MAX_DEG))), 4)
+                pitch = math.floor(min(BORE_PITCH * 2 * r, steepest) * 1e4) / 1e4
+            elif pitch > steepest + 1e-9:
+                angle = math.degrees(math.atan(pitch / (2 * math.pi * room)))
+                raise PlanError("unreachable", f"{ctx.where}.pitch_mm: {pitch:g} mm per turn round {what} is a "
+                                f"{angle:.3g} degree helix at the tool's centre, steeper than ramp_angle_deg "
+                                f"{params.ramp_angle_deg:g} lets the tool go down into material; give pitch_mm "
+                                f"{math.floor(steepest * 1e4) / 1e4:g} or less, or a larger ramp_angle_deg")
             cx, cy = round(found.top[0], 6), round(found.top[1], 6)
             sweep = 2 * math.pi * (top - floor) / pitch
             helix = _round_path(cx, cy, 0.0, sweep, _const(room), _line(top, floor), tol)

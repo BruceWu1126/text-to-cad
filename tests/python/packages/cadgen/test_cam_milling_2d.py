@@ -16,7 +16,7 @@ import unittest
 from pathlib import Path
 
 from tests.python.support.cam_fixtures import (
-    PLATE, assert_backplot, brep_intrusion, descents_ok, path_points, plate_step, swept_at, value_error,
+    PLATE, assert_backplot, assert_sound, path_points, plate_step, swept_at, value_error,
 )
 
 #: The plate's faces as `cadgen cam features` names them (test_cam_features pins these).
@@ -57,23 +57,6 @@ def plan_all(step, document, shared: dict) -> list:
         ctx = PlanContext.from_step(step, job, index, shared=shared)
         out.append((ctx, get_operation(ctx.operation.op).plan(ctx.params, ctx)))
     return out
-
-
-def assert_sound(case: unittest.TestCase, ctx, planned, *, slices: bool = False) -> None:
-    """What every toolpath must be: no gouge (read from the B-rep; from the slices too when ``slices``, which is
-    cheap only where the plan sliced those heights already and exact only on straight walls: it reads a leaning wall
-    up to a quantum lower), no steep descent into material, no sideways rapid under the retract plane, every move
-    its operation's."""
-    from cadgen._internal.cam.operations.geometry2d import intrusion
-    from cadgen._internal.cam.toolpath import rapids_below
-
-    tp = planned.toolpath
-    if slices:
-        case.assertLessEqual(intrusion(ctx, path_points(tp)), ctx.tol)
-    case.assertLessEqual(brep_intrusion(ctx.part_shape, tp, ctx.profile), ctx.tol)
-    case.assertEqual(descents_ok(tp, ctx), [])
-    case.assertEqual(rapids_below(tp.moves, start=tp.start, z=ctx.heights.retract), [])
-    case.assertEqual({move.op for move in tp.moves}, {ctx.index})
 
 
 def plan_error(case: unittest.TestCase, call, *args):
