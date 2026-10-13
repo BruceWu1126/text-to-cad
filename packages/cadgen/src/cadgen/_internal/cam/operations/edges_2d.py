@@ -139,7 +139,7 @@ def _descent(path: list, top: float, angle_deg: float) -> list:
         if walked >= need / 2:
             break
     if walked <= 1e-9:
-        raise ValueError("the curve has no length to ramp along")
+        raise PlanError("unreachable", "the curve has no length to ramp along into the material")
     legs = max(2, math.ceil(need / walked - 1e-9))
     legs += legs % 2                       # an even number of legs ends where it started
     out, done, total = [(prefix[0][0], prefix[0][1], top)], 0.0, legs * walked
@@ -959,7 +959,7 @@ def _edge_points(ctx: "PlanContext", ordinal: int) -> list[tuple[float, float, f
     else:
         sampler = GCPnts_QuasiUniformDeflection(curve, deflection(ctx.tol), first, last)
         if not sampler.IsDone():
-            raise ValueError(f"{ctx.part.ref}.e{ordinal}: the kernel could not sample the edge")
+            raise PlanError("unreachable", f"{ctx.part.ref}.e{ordinal}: the kernel could not sample the edge")
         values = [sampler.Value(index) for index in range(1, sampler.NbPoints() + 1)]
     return [(p.X(), p.Y(), p.Z()) for p in values]
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from cadgen._internal.cam.operations.base import PlanError
 from cadgen._internal.cam.values import number
 
 if TYPE_CHECKING:
@@ -76,8 +77,8 @@ def region_polygon(ctx: "PlanContext"):
 def floor_from(ctx: "PlanContext", depth: float | None, z: float | None, default: float | None, *,
                deepest: float | None, what: str) -> float:
     """The floor z: ``z_mm``, ``depth_mm`` below the material top, else ``default``; never under ``deepest`` (a
-    ``PlanError``, ``too_deep``). No default and neither key (a region, which has no depth of its own) is a
-    ValueError naming the keys."""
+    ``PlanError``, ``too_deep``). No default and neither key (a region, which has no depth of its own) leaves
+    nothing to cut: a ``PlanError``, ``empty_operation``, naming the keys."""
     if z is not None:
         floor = z
     elif depth is not None:
@@ -85,11 +86,9 @@ def floor_from(ctx: "PlanContext", depth: float | None, z: float | None, default
     elif default is not None:
         floor = default
     else:
-        raise ValueError(f"{ctx.where}: a region has no depth of its own; give depth_mm (below the top of the "
-                         "material) or z_mm (in the setup's frame)")
+        raise PlanError("empty_operation", f"{ctx.where}: a region has no depth of its own; give depth_mm (below the "
+                        "top of the material) or z_mm (in the setup's frame)", items=["region"])
     if deepest is not None and floor < deepest - 1e-6:
-        from cadgen._internal.cam.operations.base import PlanError
-
         raise PlanError("too_deep", f"{ctx.where}: cutting to z {floor:g} goes {deepest - floor:g} mm under {what} at "
                         f"z {deepest:g}, into the part")
     return floor

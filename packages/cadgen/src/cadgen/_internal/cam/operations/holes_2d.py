@@ -138,8 +138,8 @@ def _hole_floor(ctx: "PlanContext", found, depth, z, breakthrough: float) -> tup
 
 
 def _cylinder_of(ctx: "PlanContext", found) -> tuple[float, float, float]:
-    """``(cx, cy, radius)`` of a round profile (a boss) in the setup's frame; ValueError when its walls are not one
-    whole cylinder along the tool."""
+    """``(cx, cy, radius)`` of a round profile (a boss) in the setup's frame; a ``PlanError`` (``unreachable``) when
+    its walls are not one whole cylinder along the tool."""
     from cadgen._internal.cam.part import parallel
 
     feature = found.feature
@@ -153,8 +153,8 @@ def _cylinder_of(ctx: "PlanContext", found) -> tuple[float, float, float]:
         round_ = all(math.dist(c, centres[0]) < 1e-6 for c in centres) and \
             sum(w.span for w in walls) >= 2 * math.pi - 1e-6
     if not round_:
-        raise ValueError(f"{ctx.where}: {feature.ref} is not a round boss (its outline is not one whole cylinder "
-                         "along the tool); cut it with contour_2d")
+        raise PlanError("unreachable", f"{ctx.where}: {feature.ref} is not a round boss (its outline is not one whole "
+                        "cylinder along the tool); cut it with contour_2d", items=[feature.ref])
     cx, cy = ctx.to_setup(first.axis_point)[:2]
     return round(cx, 6), round(cy, 6), float(first.radius)
 

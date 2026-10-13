@@ -76,6 +76,15 @@ class Registry(unittest.TestCase):
             self.assertEqual(get_operation("drill").word, "Drill")
         self.assertEqual(built(), before)
 
+    def test_a_plan_error_is_one_of_the_known_kinds(self):
+        from cadgen._internal.cam.operations.base import PLAN_ERROR_KINDS, PlanError
+
+        self.assertEqual(PLAN_ERROR_KINDS, ("empty_operation", "too_deep", "unreachable", "tool_too_large",
+                                            "tool_too_small", "gouge"))
+        self.assertEqual(PlanError("gouge", "operations[0]: x").finding()["type"], "gouge")
+        self.assertIn("internal: PlanError kind 'too_big' is not one of empty_operation, too_deep",
+                      value_error(self, PlanError, "too_big", "operations[0]: x"))
+
     def test_the_registry_and_every_built_operation_are_stdlib_only_at_import(self):
         modules = sorted({REGISTRY[name].module for name in built()})
         self.assertEqual(heavy_at_import("cadgen._internal.cam.operations", "cadgen._internal.cam.values", *modules), "")

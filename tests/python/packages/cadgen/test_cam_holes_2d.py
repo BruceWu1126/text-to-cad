@@ -202,7 +202,9 @@ class Holes(unittest.TestCase):
             _plan(self.steps[name], document, index, self.shared[name])
         return caught.exception.kind, str(caught.exception)
 
-    def test_a_tool_that_does_not_fit_is_refused(self):
+    def test_a_tool_that_does_not_fit_or_a_region_with_no_depth_is_refused(self):
+        from cadgen._internal.cam.operations.base import PlanError
+
         self.assertEqual(self.refused("block", 0, tool="T3"),
                          ("tool_too_large", "operations[0]: the 10 mm tool is wider than #o1.f4, a 8 mm slot"))
         kind, message = self.refused("round", 1, tool="T5")
@@ -211,6 +213,12 @@ class Holes(unittest.TestCase):
         kind, message = self.refused("round", 1, tool="T2")
         self.assertEqual(kind, "tool_too_small")
         self.assertIn("would leave a core 8 mm across standing in its middle; use circular", message)
+        document = copy.deepcopy(BLOCK)
+        del document["operations"][2]["depth_mm"]
+        with self.assertRaises(PlanError) as caught:
+            _plan(self.steps["block"], document, 2, self.shared["block"])
+        self.assertEqual(caught.exception.kind, "empty_operation")
+        self.assertIn("a region has no depth of its own", str(caught.exception))
         from cadgen._internal.cam.job import parse_job
 
         document = copy.deepcopy(ROUND)

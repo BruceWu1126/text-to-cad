@@ -19,13 +19,18 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol
 if TYPE_CHECKING:
     from cadgen._internal.cam.job import Machine, Material, Setup, Tool
 
-__all__ = ["Operation", "OperationBase", "ParseContext", "PlanError", "Phase", "TARGETS", "by_severity", "finding"]
+__all__ = ["Operation", "OperationBase", "PLAN_ERROR_KINDS", "ParseContext", "PlanError", "Phase", "TARGETS",
+           "by_severity", "finding"]
 
 #: The phase an operation is built in (the design's four): 2.5D, 3D, turning/cutting/EDM, multi-axis.
 Phase = Literal[1, 2, 3, 4]
 #: What an operation can be pointed at: feature selectors, a closed region drawn in the setup's plane, or the
 #: whole part (``all: true``).
 TARGETS = ("features", "region", "all")
+#: Why an operation cannot be planned (:class:`PlanError`'s ``kind``, the error finding's ``type``): nothing to cut,
+#: deeper than the part allows, no way in (or out of the fixture's way), a tool too large or too small for the
+#: feature, and a cut that would go into the part.
+PLAN_ERROR_KINDS = ("empty_operation", "too_deep", "unreachable", "tool_too_large", "tool_too_small", "gouge")
 
 
 @dataclass(frozen=True)
@@ -83,10 +88,13 @@ def finding(severity: str, kind: str, summary: str, description: str, items=()) 
 class PlanError(ValueError):
     """An operation that is well formed but cannot be planned on this part: nothing to cut, deeper than the floor,
     a tool that does not fit, a feature out of reach. ``plan`` raises it; the run turns it into an error finding of
-    type ``kind`` (one of the spec's codes, such as ``empty_operation``, ``too_deep``, ``unreachable``) and the job
-    returns ``ok=False`` with no G-code. A malformed key or value is still a plain ``ValueError`` from ``parse``."""
+    type ``kind``, one of :data:`PLAN_ERROR_KINDS` (any other is refused: an ``internal:`` ValueError), and the job
+    returns ``ok=False`` with no G-code. A malformed key or value, or a selector naming the wrong thing, is still a
+    plain ``ValueError`` naming its field."""
 
     def __init__(self, kind: str, summary: str, description: str = "", items=()):
+        if kind not in PLAN_ERROR_KINDS:
+            raise ValueError(f"internal: PlanError kind {kind!r} is not one of {', '.join(PLAN_ERROR_KINDS)}")
         super().__init__(summary)
         self.kind = kind
         self.summary = summary
