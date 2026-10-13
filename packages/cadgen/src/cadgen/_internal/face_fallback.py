@@ -1,4 +1,4 @@
-"""A face OCCT's mesher refuses, tessellated over its own parameters.
+"""A face OCCT's mesher refuses, or meshes wrong, tessellated over its own parameters.
 
 OCCT's mesher discretizes a face's whole boundary and refuses the face outright when
 that boundary, as it reads it, crosses itself or does not close: what a boolean's
@@ -13,8 +13,9 @@ clipped to the boundary and ear-clipped, so a defect costs at most the cell it l
 The boundary takes the points the whole pass gave the meshed neighbours along each
 shared edge, so the face meets them; where the clipping adds a point to that boundary,
 the neighbour's triangle along it is split to take the point too, and the two meshes
-share every vertex (an STL of them welds closed). OCCT computes the normals from the
-surface, as it does for its own triangles.
+share every vertex (an STL of them welds closed). Whether the triangles are kept is
+settled before any neighbour is split, and the splits can be undone. OCCT computes the
+normals from the surface, as it does for its own triangles.
 
 Those points are spaced for the deflection, and a face narrower than the deflection
 can lie between a curved edge and its chord: the f14d wing's 686 mm slivers, 1.2 mm
@@ -30,7 +31,7 @@ along it takes the point too.
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
@@ -65,11 +66,12 @@ _MAX_CROSSING_PAIRS = 2_000_000
 _BOUNDARY_SHARE = 0.05
 
 
-def tessellate_face(topods, face, deflection: float, angle: float):
-    """``face``'s triangulation (a ``Poly_Triangulation`` with UV nodes) and the area its
-    triangles cover, built over its parameters at ``deflection`` and ``angle``, the
-    triangles of meshed neighbours split where its boundary takes a point theirs lack;
-    None when the face bounds no region."""
+def tessellate_face(topods, face, deflection: float, angle: float, keep: Callable[[float], bool]):
+    """``face``'s triangulation (a ``Poly_Triangulation`` with UV nodes), built over its
+    parameters at ``deflection`` and ``angle``, and a callable that undoes what it did to the
+    neighbours: the triangles of meshed neighbours are split where its boundary takes a point
+    theirs lack. None when the face bounds no region, or when ``keep`` refuses the area its
+    triangles cover, and then no neighbour is touched."""
     from OCP.BRep import BRep_Tool
     from OCP.TopLoc import TopLoc_Location
 
@@ -123,8 +125,12 @@ def tessellate_face(topods, face, deflection: float, angle: float):
     mesh.place(surface)
     _refine(mesh, surface, deflection * _REFINE_SHARE, angle, _normal_scale(surface, box))
     mesh.weld()
-    _conform_neighbours(mesh, boundary, segments, shared, sources, by_cell, grid_u, grid_v)
-    return mesh.triangulation(), mesh.area()
+    # Whether the triangles are kept is settled before any neighbour is split to meet them:
+    # a refused tessellation must leave its neighbours as they were.
+    if not keep(mesh.area()):
+        return None
+    undo = _conform_neighbours(mesh, boundary, segments, shared, sources, by_cell, grid_u, grid_v)
+    return mesh.triangulation(), undo
 
 
 class _Mesh:
@@ -702,12 +708,12 @@ def _ear_clip(polygon: list, tiny: float) -> list:
 
 
 def _conform_neighbours(mesh: _Mesh, boundary: set, segments: np.ndarray, shared: list, sources: list,
-                        by_cell: dict, grid_u: np.ndarray, grid_v: np.ndarray) -> None:
+                        by_cell: dict, grid_u: np.ndarray, grid_v: np.ndarray) -> Callable[[], None]:
     """Split each meshed neighbour's triangle along a shared edge where this face's boundary
     took a point the neighbour lacks -- a grid line crossing it, or a point ``_uncrossed``
     put on the edge's curve -- so the two meshes share every vertex along it. The
     neighbour's triangulation is grown in place: its own nodes keep their numbers, which
-    its edges' discretizations name."""
+    its edges' discretizations name. Returns what puts every neighbour back as it was."""
     from OCP.BRep import BRep_Tool
     from OCP.BRepAdaptor import BRepAdaptor_Curve2d
     from OCP.gp import gp_Pnt, gp_Pnt2d
@@ -746,8 +752,20 @@ def _conform_neighbours(mesh: _Mesh, boundary: set, segments: np.ndarray, shared
         if index is not None and index in used:
             edge, _curve, _pcurve, _start, end = sources[segment]
             runs.setdefault(segment, []).append((neighbour[5], index, (edge, end)))
+    # Each grown neighbour: its triangulation, and its node count and triangles before.
+    grown: list = []
+
+    def undo() -> None:
+        for triangulation, count, before in grown:
+            if triangulation.HasNormals():
+                triangulation.RemoveNormals()
+            triangulation.ResizeNodes(count, True)
+            triangulation.ResizeTriangles(len(before), True)
+            for k, (p, q, r) in enumerate(before, 1):
+                triangulation.SetTriangle(k, Poly_Triangle(p, q, r))
+
     if not runs:
-        return
+        return undo
     # One neighbour edge may run along several of this face's segments: its points are split
     # into its triangle together.
     by_neighbour: list = []
@@ -764,6 +782,7 @@ def _conform_neighbours(mesh: _Mesh, boundary: set, segments: np.ndarray, shared
             triangulation.RemoveNormals()
         count = triangulation.NbNodes()
         triangles = [list(triangulation.Triangle(k).Get()) for k in range(1, triangulation.NbTriangles() + 1)]
+        before = [tuple(triangle) for triangle in triangles]
         owner = {}
         for k, (p, q, r) in enumerate(triangles):
             for first, second in ((p, q), (q, r), (r, p)):
@@ -796,6 +815,7 @@ def _conform_neighbours(mesh: _Mesh, boundary: set, segments: np.ndarray, shared
                 owner[(third, c0)] = at
         if not added:
             continue
+        grown.append((triangulation, count, before))
         triangulation.ResizeNodes(count + len(added), True)
         for k, (point, node_a, node_b, t, on_edge) in enumerate(added, count + 1):
             triangulation.SetNode(k, point)
@@ -811,5 +831,6 @@ def _conform_neighbours(mesh: _Mesh, boundary: set, segments: np.ndarray, shared
         triangulation.ResizeTriangles(len(triangles), True)
         for k, (p, q, r) in enumerate(triangles, 1):
             triangulation.SetTriangle(k, Poly_Triangle(p, q, r))
+    return undo
 
 

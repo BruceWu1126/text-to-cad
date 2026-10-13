@@ -209,6 +209,22 @@ class OnTheSurface(unittest.TestCase):
             _mesh(far, chord=DISPLAY_TESSELLATION["chordTolerance"], angle=DISPLAY_TESSELLATION["angleTolerance"])
         self.assertEqual(mesher.call_count, 1)
 
+    def test_a_tessellation_that_would_open_the_part_is_undone(self):
+        """A round no finer pass meshes on its surface goes to the tessellator, whose points
+        along a shared edge split its neighbours' triangles to meet them. Where that fails the
+        faces part, and the round keeps OCCT's triangles: off its surface, but closed. Here no
+        neighbour is split at all."""
+        from build123d import Axis, Pos, RectangleRounded, revolve
+        from cadgen._internal import face_fallback
+        from cadgen.tessellation_policy import DISPLAY_TESSELLATION
+
+        band = revolve(Pos(230, 0, 0) * RectangleRounded(8, 24, 1), Axis.Y, revolution_arc=360)
+        with mock.patch.object(face_fallback, "_conform_neighbours", return_value=lambda: None) as conform:
+            _body, mesh = _mesh(band, chord=DISPLAY_TESSELLATION["chordTolerance"] / 10,
+                                angle=DISPLAY_TESSELLATION["angleTolerance"])
+        self.assertTrue(conform.called, "a round went to the tessellator")
+        self.assertEqual(_open_edges(mesh), 0)
+
 
 class ExportAtSingularPoints(unittest.TestCase):
     def test_an_export_of_poles_and_apexes_is_manifold_and_watertight_in_every_format(self):
@@ -307,21 +323,71 @@ class EmptyFace(unittest.TestCase):
                                msg="the bore's own area, a 4 mm radius 10 deep")
         self.assertEqual(_open_edges(mesh), 0, "the bore shares every vertex with the faces around it")
 
-    def test_a_tessellation_that_misses_the_faces_area_is_not_kept(self):
+    def test_a_tessellation_that_misses_the_faces_area_is_not_kept_and_splits_no_neighbour(self):
         from cadgen._internal import face_fallback
         from cadgen.store.meshes import decode_payload
 
         real = face_fallback.tessellate_face
 
-        def overcounted(*args):
-            triangulation, covered = real(*args)
-            return triangulation, covered * 2
+        def overcounted(topods, face, deflection, angle, keep):
+            return real(topods, face, deflection, angle, lambda covered: keep(covered * 2))
 
+        with mock.patch.object(face_fallback, "tessellate_face", return_value=None):
+            untessellated = self.mesh(lambda shape, call: shape.IsSame(self.topods))
         with mock.patch.object(face_fallback, "tessellate_face", side_effect=overcounted):
             mesh = self.mesh(lambda shape, call: shape.IsSame(self.topods))
         bore = next(row for row in mesh.face_ranges if row["ord"] == self.bore)
         self.assertEqual(bore["indexCount"], 0, "the bore is left out")
         self.assertEqual(decode_payload(self.body).unmeshed_faces, [self.bore], "and named")
+        # Its neighbours were split to meet the triangles before they were refused, and kept
+        # the splits: a vendor motor's two refused faces left 88 open edges around them.
+        self.assertEqual([row["indexCount"] for row in mesh.face_ranges],
+                         [row["indexCount"] for row in untessellated.face_ranges], "no neighbour was split")
+
+    def test_a_component_whose_first_pass_is_slow_is_not_meshed_again_whole(self):
+        # An F1 floor's B-spline took ten seconds to mesh once; with a faulty face, meshing it
+        # again whole at half and a quarter of its deflection cost it four times over.
+        from cadgen._internal import occt_mesh
+
+        with mock.patch.object(occt_mesh, "_RETRY_SECONDS", -1.0):
+            mesh = self.mesh(lambda shape, call: call == 1)
+        self.assertEqual(len(self.meshed), 1, "one pass: the bore went straight to the tessellator")
+        self.assertBoreMeshed(mesh)
+        self.assertEqual(_open_edges(mesh), 0, "the bore meets its neighbours along every edge")
+
+    def test_a_face_the_pass_leaves_a_gap_in_is_meshed_again(self):
+        # OCCT reports a failure when it leaves part of a face uncovered -- a sixth of the
+        # radial engine's cylinder head around a B-spline's pole -- and a gap inside a face
+        # drew as a hole. Here the plate's largest face loses a triangle on the first pass.
+        from OCP import BRepMesh
+        from OCP.BRep import BRep_Tool
+        from OCP.Poly import Poly_Triangle
+        from OCP.TopLoc import TopLoc_Location
+        from OCP.TopoDS import TopoDS
+
+        real, meshed = BRepMesh.BRepMesh_IncrementalMesh, []
+
+        class Failed:
+            def GetStatusFlags(self):
+                return 0x4  # IMeshData_Failure
+
+        def mesher(shape, *args):
+            result = real(shape, *args)
+            meshed.append(shape)
+            if len(meshed) > 1:
+                return result
+            largest = max((BRep_Tool.Triangulation_s(TopoDS.Face_s(self.faces.FindKey(o)), TopLoc_Location())
+                           for o in range(1, self.faces.Extent() + 1)), key=lambda t: t.NbTriangles())
+            kept = [largest.Triangle(k).Get() for k in range(2, largest.NbTriangles() + 1)]
+            largest.ResizeTriangles(len(kept), True)
+            for k, corners in enumerate(kept, 1):
+                largest.SetTriangle(k, Poly_Triangle(*corners))
+            return Failed()
+
+        with mock.patch.object(BRepMesh, "BRepMesh_IncrementalMesh", side_effect=mesher):
+            _body, mesh = _mesh(self.topods)
+        self.assertGreater(len(meshed), 1, "the component was meshed again")
+        self.assertEqual(_open_edges(mesh), 0, "and no face has a gap")
 
     def test_a_face_under_what_the_mesh_resolves_may_be_left_empty_and_unnamed(self):
         # The bore made a sliver: its area in the selector table is under the square of
@@ -509,6 +575,28 @@ class Normals(unittest.TestCase):
                 facets = facets[covering] / lengths[covering, None]
                 normals = mesh.normals[mesh.indices.reshape(-1, 3)[covering]].astype(np.float64)
                 self.assertGreater(float(np.einsum("tj,tkj->tk", facets, normals).min()), 0.0)
+
+    def test_a_triangle_facing_away_from_its_corners_normals_is_wound_the_other_way(self):
+        # OCCT's Delaunay leaves the odd needle across a B-spline folded over in space -- a
+        # bracelet link's five, half a deflection wide -- which a two-sided material drew dark.
+        # Here the mesher's pass comes back with one triangle of a box folded over.
+        from build123d import Box
+        from cadgen._internal import occt_mesh
+
+        real = occt_mesh._mesh
+
+        def folding(*args):
+            faces = real(*args)
+            _positions, _normals, triangles = next(iter(faces.values()))
+            triangles[0] = triangles[0][[0, 2, 1]]
+            return faces
+
+        with mock.patch.object(occt_mesh, "_mesh", side_effect=folding):
+            _body, mesh = _mesh(Box(4, 4, 4))
+        corners = _corners(mesh)
+        facets = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
+        normals = mesh.normals[mesh.indices.reshape(-1, 3)].astype(np.float64)
+        self.assertGreater(float(np.einsum("tj,tkj->tk", facets, normals).min()), 0.0)
 
     def test_the_writers_reading_and_the_face_by_face_one_are_the_same_bytes(self):
         from build123d import Cone, Sphere

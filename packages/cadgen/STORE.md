@@ -432,11 +432,13 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   (`_internal/occt_mesh.py`) runs OCCT's `BRepMesh_IncrementalMesh` on the exact
   BREP at the display tolerance (`tessellation_policy.DISPLAY_TESSELLATION`: the
   chord tolerance a fraction of the component's bounding diagonal, the angle in
-  radians; each cylinder, cone, sphere and torus is measured against its exact
-  surface, which OCCT does not do, and a part with a face left empty or off its
-  surface is meshed again, whole and finer; a face no pass gets right is
-  tessellated over its own parameters by `_internal/face_fallback.py`),
-  reading what the triangles do not say from the
+  radians; each pass is checked for a face left empty, holed where OCCT reports a
+  failure, or -- a cylinder, cone, sphere or torus, which OCCT does not measure --
+  off its exact surface, and a part with such a face is meshed again, whole and
+  finer, unless its first pass took seconds; a face no pass gets right is
+  tessellated over its own parameters by `_internal/face_fallback.py` where that
+  leaves the mesh no more open; a triangle folded against its corners' normals is
+  wound the other way), reading what the triangles do not say from the
   part's selector table (each face's area, each edge's class) and the
   component's face colours. A body (`store/meshes.py`) is glTF 2.0 binary in
   the component's own units: ONE triangle primitive (positions, normals, u16

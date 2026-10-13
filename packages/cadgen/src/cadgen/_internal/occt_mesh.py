@@ -14,20 +14,27 @@ component -- the order its selector table and every selector use -- and the
 mesher reads what the triangles do not say from the component's selector table
 (each face's area, each edge's display class) and its intrinsic face colours:
 the one input a display mesh and a mesh export at another tolerance are both
-made from (``cadgen.store.parts``). OCCT's mesher drops the odd tiny face at one
-deflection and meshes it at the next, and it holds a freeform face's triangles to
-the deflection but grids a cylinder, cone, sphere or torus by formula without
-measuring them: across a thin round swept along a long arc (the motorbike's
-fender) the grid can skip the round's inner rows and span it five times the
-deflection off its surface. So each of those faces is measured exactly after the
-pass, and a component whose pass leaves a face empty that the mesh can resolve, or
-off its surface, is meshed again, whole and finer, in a fixed order. A face no
-whole pass meshes is one OCCT refuses -- it reads the face's boundary as crossing
-itself or open, what a boolean's leftovers do to a valid face -- and no setting or
-repair of OCCT's meshes it, so it is tessellated over its own parameters as
-cadgen's earlier tessellator did (``face_fallback``), against the meshed
-neighbours, and kept when its triangles cover the face's own area; so is a face no
-whole pass meshes on its surface. A face that still has none is left out of the
+made from (``cadgen.store.parts``). Every pass is checked for what OCCT gets
+wrong, and a face it gets wrong is faulty. OCCT drops the odd tiny face at one
+deflection and meshes it at the next. It can leave a gap inside a face, and says so
+in its status (the radial engine's cylinder head lost a sixth of a B-spline around
+its pole): the faces of such a pass are looked at for outer edges of their
+triangles that are no part of their own edges. And it holds a freeform face's
+triangles to the deflection but grids a cylinder, cone, sphere or torus by formula
+without measuring them: across a thin round swept along a long arc (the
+motorbike's fender) the grid can skip the round's inner rows and span it five
+times the deflection off its surface, so each of those faces is measured exactly. A
+component with a faulty face is meshed again, whole and finer, in a fixed order --
+unless its first pass took seconds (an F1 floor's B-spline), when a finer whole pass
+would cost it far more than its faulty faces are worth. A face no whole pass meshes
+is one OCCT refuses -- it reads the face's boundary as crossing itself or open, what
+a boolean's leftovers do to a valid face -- and no setting or repair of OCCT's
+meshes it, so it is tessellated over its own parameters as cadgen's earlier
+tessellator did (``face_fallback``), against the meshed neighbours, and kept when
+its triangles cover the face's own area; so is any face still faulty, where its new
+triangles leave the mesh no more open than it was. Last, a triangle facing away from
+all three of its corners' normals -- a needle OCCT's Delaunay folds over across a
+B-spline -- is wound the other way. A face that still has none is left out of the
 component, which is drawn without it, and the body names it (``unmeshedFaces``,
 ``cadgen.store.meshes``): one face no mesher covers never fails a view, a list or
 an export of the whole document, and each of them says which faces of which part
@@ -51,6 +58,7 @@ import json
 import math
 import struct
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +77,16 @@ _STRAY_FACTOR = 2.0
 # The surfaces OCCT grids by formula without measuring, by the selector table's names:
 # only their faces are measured against their surfaces after a pass.
 _GRIDDED = frozenset({"cylinder", "cone", "sphere", "torus"})
+# OCCT's status bits for a pass that did not mesh every face as it was asked to
+# (IMeshData_OpenWire, _SelfIntersectingWire, _Failure): only such a pass's faces are
+# looked at for a gap inside them.
+_TROUBLED_PASS = 0x1 | 0x2 | 0x4
+# A component whose first pass takes longer than this -- an F1 floor's B-spline of 3,919
+# by 38 poles took ten seconds and a gigabyte -- is not meshed again whole, which would
+# cost it four times over: its faulty faces go straight to the tessellator.
+_RETRY_SECONDS = 2.0
+# The triangles the needle check takes at a time, to bound its memory on a huge part.
+_NEEDLE_CHUNK = 1 << 18
 # A face OCCT refuses is tessellated over its own parameters; its triangles are kept
 # when they cover the face's own area to this share -- a chord across a curved
 # boundary takes area off a small face, nothing near this much.
@@ -103,16 +121,20 @@ def _maps(topods):
     return faces, edges
 
 
-def _faulty(faces: dict, face_map, required: list[int], gridded: set[int], deflection: float) -> list[int]:
-    """Those of ``required`` the pass left without triangles, and those of them in
-    ``gridded`` it left off their surface."""
+def _faulty(faces: dict, face_map, required: list[int], gridded: set[int], deflection: float,
+            status: int) -> list[int]:
+    """Those of ``required`` the pass left without triangles, with a gap inside them when
+    OCCT's ``status`` says the pass went wrong (``_holed``), or -- those of them in
+    ``gridded`` -- off their surface."""
     from OCP.BRepAdaptor import BRepAdaptor_Surface
     from OCP.BRepMesh import BRepMesh_ShapeTool
     from OCP.TopoDS import TopoDS
 
+    holed = (_holed(faces, face_map, [ordinal for ordinal in required if ordinal in faces], deflection)
+             if status & _TROUBLED_PASS else set())
     faulty = []
     for ordinal in required:
-        if ordinal not in faces:
+        if ordinal not in faces or ordinal in holed:
             faulty.append(ordinal)
             continue
         if ordinal not in gridded:
@@ -130,6 +152,47 @@ def _faulty(faces: dict, face_map, required: list[int], gridded: set[int], defle
                 float(np.spacing(np.abs(positions).max()))):
             faulty.append(ordinal)
     return faulty
+
+
+def _holed(faces: dict, face_map, ordinals: list[int], deflection: float) -> set[int]:
+    """Those of ``ordinals`` whose triangles leave a gap inside the face: outer edges of
+    theirs, longer than the deflection together, that are no segment of the discretization
+    of the face's own edges (either way round a seam). OCCT reports a failure when it leaves
+    one -- the radial engine's cylinder head lost a sixth of a B-spline face around its pole
+    at every deflection -- so a pass is looked at only when it does."""
+    from OCP.BRep import BRep_Tool
+    from OCP.TopAbs import TopAbs_EDGE
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.TopoDS import TopoDS
+
+    holed = set()
+    for ordinal in ordinals:
+        positions, _normals, triangles = faces[ordinal]
+        face = TopoDS.Face_s(face_map.FindKey(ordinal))
+        location = TopLoc_Location()
+        triangulation = BRep_Tool.Triangulation_s(face, location)
+        size = len(positions)
+        corners = triangles.astype(np.int64)
+        pairs = np.sort(np.concatenate([corners[:, [0, 1]], corners[:, [1, 2]], corners[:, [2, 0]]]), axis=1)
+        keys, counts = np.unique(pairs[:, 0] * size + pairs[:, 1], return_counts=True)
+        segments = set()
+        explorer = TopExp_Explorer(face, TopAbs_EDGE)
+        while explorer.More():
+            edge = TopoDS.Edge_s(explorer.Current())
+            for way in (edge, TopoDS.Edge_s(edge.Reversed())):
+                polygon = BRep_Tool.PolygonOnTriangulation_s(way, triangulation, location)
+                if polygon is not None:
+                    nodes = polygon.Nodes()
+                    run = [nodes.Value(k) - 1 for k in range(nodes.Lower(), nodes.Upper() + 1)]
+                    segments.update(min(a, b) * size + max(a, b) for a, b in zip(run, run[1:]))
+            explorer.Next()
+        gaps = np.array([key for key in keys[counts == 1].tolist() if key not in segments], np.int64)
+        if len(gaps):
+            ends = positions.astype(np.float64)
+            if np.linalg.norm(ends[gaps // size] - ends[gaps % size], axis=1).sum() > deflection:
+                holed.add(ordinal)
+    return holed
 
 
 def _surface_distance(surface, positions: np.ndarray, triangles: np.ndarray) -> float | None:
@@ -176,29 +239,37 @@ def _xyz(point) -> np.ndarray:
 
 def _mesh(topods, face_map, required: list[int], gridded: set[int], deflection: float, angle: float) -> dict[int, tuple]:
     """Mesh the component and read its faces back, and while a face of ``required`` is
-    left empty or (of ``gridded``) off its surface, mesh it all again, cleaned, at the
-    retry deflections. A face no whole pass gets right -- one OCCT refuses, or one it
-    keeps gridding off its surface -- is tessellated over its own parameters against its
-    meshed neighbours, once the component is meshed at its own deflection again."""
+    faulty (``_faulty``: empty, holed, or off its surface), mesh it all again, cleaned, at
+    the retry deflections -- unless its first pass took over ``_RETRY_SECONDS``. A face no
+    whole pass gets right -- one OCCT refuses, or keeps meshing wrong -- is tessellated over
+    its own parameters against its meshed neighbours, at the component's own deflection."""
     from OCP.BRepMesh import BRepMesh_IncrementalMesh
     from OCP.BRepTools import BRepTools
     from OCP.Precision import Precision
 
-    BRepMesh_IncrementalMesh(topods, deflection, False, angle, True)
-    faces = _read_faces(topods, face_map)
-    for scale in _RETRY_SCALES:
-        if not _faulty(faces, face_map, required, gridded, deflection):
+    def mesh(scale: float) -> list[int]:
+        nonlocal faces
+        # OCCT refuses a deflection under its confusion tolerance.
+        status = BRepMesh_IncrementalMesh(topods, max(deflection * scale, Precision.Confusion_s()),
+                                          False, angle, True).GetStatusFlags()
+        faces = _read_faces(topods, face_map)
+        return _faulty(faces, face_map, required, gridded, deflection, status)
+
+    faces: dict = {}
+    started = time.perf_counter()
+    faulty = mesh(1.0)
+    retries = _RETRY_SCALES if time.perf_counter() - started <= _RETRY_SECONDS else ()
+    for scale in retries:
+        if not faulty:
             return faces
         BRepTools.Clean_s(topods)
-        # OCCT refuses a deflection under its confusion tolerance.
-        BRepMesh_IncrementalMesh(topods, max(deflection * scale, Precision.Confusion_s()), False, angle, True)
-        faces = _read_faces(topods, face_map)
-    if not _faulty(faces, face_map, required, gridded, deflection):
+        faulty = mesh(scale)
+    if not faulty:
         return faces
-    BRepTools.Clean_s(topods)
-    BRepMesh_IncrementalMesh(topods, deflection, False, angle, True)
-    _tessellate(topods, face_map, _faulty(_read_faces(topods, face_map), face_map, required, gridded, deflection),
-                deflection, angle)
+    if retries:
+        BRepTools.Clean_s(topods)
+        faulty = mesh(1.0)
+    _tessellate(topods, face_map, faulty, deflection, angle)
     return _read_faces(topods, face_map)
 
 
@@ -215,23 +286,65 @@ def _tessellate(topods, face_map, ordinals: list[int], deflection: float, angle:
     """Give each face of ``ordinals`` the triangles ``face_fallback`` builds over its
     parameters, when they cover its own area to ``_FALLBACK_AREA_TOLERANCE``; a face
     left without keeps what OCCT gave it -- none, for a face it refuses, which the body
-    names."""
+    names. A face OCCT did mesh, off its surface or with a gap, takes the new triangles
+    only if the part's mesh has no more open edges with them than it had: the tessellator
+    splits its neighbours' triangles to meet them, and where a split fails the two part
+    (an airframe skin forced through it opened 884 edges), so it is undone."""
     from cadgen._internal import face_fallback
-    from OCP.BRep import BRep_Builder
+    from OCP.BRep import BRep_Builder, BRep_Tool
     from OCP.BRepGProp import BRepGProp
     from OCP.GProp import GProp_GProps
+    from OCP.TopLoc import TopLoc_Location
     from OCP.TopoDS import TopoDS
 
     for ordinal in ordinals:
         face = TopoDS.Face_s(face_map.FindKey(ordinal))
-        tessellated = face_fallback.tessellate_face(topods, face, deflection, angle)
-        if tessellated is None:
-            continue
-        triangulation, covered = tessellated
         exact = GProp_GProps()
         BRepGProp.SurfaceProperties_s(face, exact)
-        if abs(covered - exact.Mass()) <= _FALLBACK_AREA_TOLERANCE * exact.Mass():
-            BRep_Builder().UpdateFace(face, triangulation)
+        area = exact.Mass()
+        previous = BRep_Tool.Triangulation_s(face, TopLoc_Location())
+        opened = _open_edges(_read_faces(topods, face_map)) if previous is not None else None
+        tessellated = face_fallback.tessellate_face(
+            topods, face, deflection, angle, lambda covered: abs(covered - area) <= _FALLBACK_AREA_TOLERANCE * area)
+        if tessellated is None:
+            continue
+        triangulation, undo = tessellated
+        BRep_Builder().UpdateFace(face, triangulation)
+        if opened is not None and _open_edges(_read_faces(topods, face_map)) > opened:
+            undo()
+            BRep_Builder().UpdateFace(face, previous)
+
+
+def _unfold_needles(positions: np.ndarray, normals: np.ndarray, triangles: np.ndarray) -> None:
+    """Wind the other way, in place, each triangle that faces away from all three of its
+    corners' normals. OCCT's Delaunay leaves the odd needle across a B-spline whose corners
+    lie in a line in its parameters folded over in space -- a bracelet link's five, half a
+    deflection wide and a thousand long -- and a two-sided material draws it dark."""
+    for start in range(0, len(triangles), _NEEDLE_CHUNK):
+        chunk = triangles[start:start + _NEEDLE_CHUNK]
+        corners = positions[chunk].astype(np.float64)
+        facets = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
+        folded = (np.einsum("tj,tkj->tk", facets, normals[chunk].astype(np.float64)) < 0).all(axis=1)
+        if folded.any():
+            chunk[folded] = chunk[folded][:, [0, 2, 1]]
+
+
+def _open_edges(faces: dict) -> int:
+    """How many edges of the part's mesh, its faces welded where their vertices are one
+    point, only one triangle has: where a closed part is cracked or holed."""
+    if not faces:
+        return 0
+    blocks = list(faces.values())
+    # Adding zero makes a negative zero positive: one point, one welded vertex.
+    positions = np.ascontiguousarray(np.concatenate([block[0] for block in blocks]).astype(np.float32) + np.float32(0))
+    starts = np.cumsum([0] + [len(block[0]) for block in blocks])[:-1]
+    triangles = np.concatenate([block[2].astype(np.int64) + start for block, start in zip(blocks, starts)])
+    _, welded = np.unique(positions.view(np.dtype((np.void, 12))).ravel(), return_inverse=True)
+    corners = welded.ravel()[triangles]
+    pairs = np.sort(np.concatenate([corners[:, [0, 1]], corners[:, [1, 2]], corners[:, [2, 0]]]), axis=1)
+    pairs = pairs[pairs[:, 0] != pairs[:, 1]]  # a pole's run of vertices is one point
+    _, counts = np.unique(pairs[:, 0] * (int(welded.max()) + 1) + pairs[:, 1], return_counts=True)
+    return int((counts == 1).sum())
 
 
 def _triangulated_faces(topods, face_map) -> list[tuple[int, Any, Any, Any]]:
@@ -468,6 +581,7 @@ def _mesh_component(topods, table: dict, face_colors: dict, *, part: str, chord:
     positions = np.concatenate(position_parts).astype("<f4") if position_parts else np.zeros((0, 3), "<f4")
     normals = np.concatenate(normal_parts).astype("<f4") if normal_parts else np.zeros((0, 3), "<f4")
     indices = np.concatenate(index_parts).astype("<u4") if index_parts else np.zeros(0, "<u4")
+    _unfold_needles(positions, normals, indices.reshape(-1, 3))
 
     adjacent = _edge_faces(topods, face_map, edge_map)
     edges = []
