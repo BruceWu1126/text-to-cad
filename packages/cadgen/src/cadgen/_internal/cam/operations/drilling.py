@@ -88,9 +88,9 @@ TAP_DIAMETER_TOL_MM = 0.15
 BACK_BORE_PASS_MM = 0.1
 
 _EPS = 1e-6
-#: How :meth:`_HoleOperation.unsuited` says a hole is out of this setup's reach rather than the wrong size for the tool
-#: (the PlanError's kind: ``unreachable``, else ``tool_too_large``: the tool does not fit the hole).
-_OUT_OF_REACH = ("has no counterbore", "has its counterbore on", "is blind")
+#: Why a hole does not suit a tool, as :meth:`_HoleOperation.unsuited` returns it with its sentence: the tool does not
+#: fit the hole (its size, either way), or what the tool must reach is not there from this setup.
+TOOL_TOO_LARGE, UNREACHABLE = "tool_too_large", "unreachable"
 
 
 @dataclass(frozen=True)
@@ -181,13 +181,13 @@ class _HoleOperation(OperationBase):
                                      f"features[{seen[found.feature.ref]}]; each hole is cut once")
                 seen[found.feature.ref] = index
                 why = self.unsuited(params, ctx, found)
-                if why:
-                    kind = "unreachable" if why.startswith(_OUT_OF_REACH) else "tool_too_large"
-                    raise PlanError(kind, f"{ctx.where}.features[{index}]: {ref} {why}",
+                if why is not None:
+                    kind, sentence = why
+                    raise PlanError(kind, f"{ctx.where}.features[{index}]: {ref} {sentence}",
                                     items=[{"text": f"{ctx.label} {ref}", "ref": ref, "operation": ctx.label}])
             return named
         reached = [(found.feature.ref, found) for found in ctx.features if found.feature.kind == "hole"]
-        suited = [(ref, found) for ref, found in reached if not self.unsuited(params, ctx, found)]
+        suited = [(ref, found) for ref, found in reached if self.unsuited(params, ctx, found) is None]
         if not suited:
             sizes = ", ".join(f"{ref} {found.feature.size['diameter_mm']:g} mm" for ref, found in reached) or "none"
             raise PlanError("empty_operation", f"{ctx.where}.all: no hole setup {ctx.setup.setup.id} reaches suits "
@@ -197,14 +197,15 @@ class _HoleOperation(OperationBase):
     def _tool_words(self, ctx: "PlanContext") -> str:
         return f"a {ctx.tool.diameter_mm:g} mm {ctx.tool.type.replace('_', ' ')}"
 
-    def unsuited(self, params: HoleParams, ctx: "PlanContext", found: "SetupFeature") -> str:
-        """Why the tool does not suit the hole, or ""."""
+    def unsuited(self, params: HoleParams, ctx: "PlanContext", found: "SetupFeature") -> tuple[str, str] | None:
+        """Why the tool does not suit the hole, ``(kind, sentence)`` (the kind a PlanError takes:
+        :data:`TOOL_TOO_LARGE` or :data:`UNREACHABLE`), or ``None`` when it does."""
         hole = found.feature.size["diameter_mm"]
         tool = float(ctx.tool.diameter_mm)
         if abs(tool - hole) > params.diameter_tol_mm + 1e-9:
-            return (f"is a {hole:g} mm hole, and {ctx.tool.id} is {self._tool_words(ctx)}: more than "
+            return TOOL_TOO_LARGE, (f"is a {hole:g} mm hole, and {ctx.tool.id} is {self._tool_words(ctx)}: more than "
                     f"diameter_tol_mm ({params.diameter_tol_mm:g} mm) {'over' if tool > hole else 'under'} it")
-        return ""
+        return None
 
     # --- depth -----------------------------------------------------------------------------------------------
 
@@ -399,12 +400,12 @@ class SpotDrillOperation(_HoleOperation):
         size = found.feature.size
         return float(size["countersink"]["diameter_mm"]) if "countersink" in size else float(size["diameter_mm"])
 
-    def unsuited(self, params: HoleParams, ctx: "PlanContext", found: "SetupFeature") -> str:
+    def unsuited(self, params: HoleParams, ctx: "PlanContext", found: "SetupFeature") -> tuple[str, str] | None:
         spot = self._spot(params, found)
         if spot is not None and spot > float(ctx.tool.diameter_mm) + 1e-9:
-            return (f"wants a {spot:g} mm spot, wider than {ctx.tool.id}'s {ctx.tool.diameter_mm:g} mm; give "
+            return TOOL_TOO_LARGE, (f"wants a {spot:g} mm spot, wider than {ctx.tool.id}'s {ctx.tool.diameter_mm:g} mm; give "
                     "spot_diameter_mm or depth_mm")
-        return ""
+        return None
 
     def tip_z(self, params, ctx, ref, found):
         top = found.top[2]
@@ -438,10 +439,10 @@ class TapOperation(_HoleOperation):
         major = float(ctx.tool.diameter_mm)
         drill = major - float(ctx.tool.size["pitch_mm"])
         if min(abs(hole - major), abs(hole - drill)) > params.diameter_tol_mm + 1e-9:
-            return (f"is a {hole:g} mm hole, and {ctx.tool.id} is {self._tool_words(ctx)}: the hole is neither its "
+            return TOOL_TOO_LARGE, (f"is a {hole:g} mm hole, and {ctx.tool.id} is {self._tool_words(ctx)}: the hole is neither its "
                     f"major diameter nor its {drill:g} mm tap drill within diameter_tol_mm "
                     f"({params.diameter_tol_mm:g} mm)")
-        return ""
+        return None
 
 
 class RigidTapOperation(TapOperation):
@@ -510,20 +511,20 @@ class CounterboreOperation(_HoleOperation):
     def unsuited(self, params, ctx, found):
         side = _counterbore_side(ctx, found)
         if side is None:
-            return "has no counterbore"
+            return UNREACHABLE, "has no counterbore"
         if side != self.side:
             other = "back_bore from below" if self.side == "near" else "counterbore from this side"
-            return f"has its counterbore on the {side} side; cut it with a {other}"
+            return UNREACHABLE, f"has its counterbore on the {side} side; cut it with a {other}"
         bore = float(found.feature.size["counterbore"]["diameter_mm"])
         tool = float(ctx.tool.diameter_mm)
         if abs(tool - bore) > params.diameter_tol_mm + 1e-9:
-            return (f"has a {bore:g} mm counterbore, and {ctx.tool.id} is {self._tool_words(ctx)}: more than "
+            return TOOL_TOO_LARGE, (f"has a {bore:g} mm counterbore, and {ctx.tool.id} is {self._tool_words(ctx)}: more than "
                     f"diameter_tol_mm ({params.diameter_tol_mm:g} mm) {'over' if tool > bore else 'under'} it")
         pilot = ctx.tool.size.get("pilot_diameter_mm")
         hole = float(found.feature.size["diameter_mm"])
         if self.side == "near" and pilot is not None and float(pilot) > hole + 1e-9:
-            return f"is a {hole:g} mm hole, too small for {ctx.tool.id}'s {float(pilot):g} mm pilot"
-        return ""
+            return TOOL_TOO_LARGE, f"is a {hole:g} mm hole, too small for {ctx.tool.id}'s {float(pilot):g} mm pilot"
+        return None
 
     def tip_z(self, params, ctx, ref, found):
         depth = float(found.feature.size["counterbore"]["depth_mm"])
@@ -556,16 +557,16 @@ class BackBoreOperation(CounterboreOperation):
 
     def unsuited(self, params, ctx, found):
         why = super().unsuited(params, ctx, found)
-        if why:
+        if why is not None:
             return why
         if not found.feature.size.get("through"):
-            return "is blind; a back bore reaches its counterbore through the hole"
+            return UNREACHABLE, "is blind; a back bore reaches its counterbore through the hole"
         hole, tool = float(found.feature.size["diameter_mm"]), float(ctx.tool.diameter_mm)
         least = (tool - hole) / 2 + BACK_BORE_PASS_MM
         if params.shift_mm < least - 1e-9 or params.shift_mm >= hole / 2:
-            return (f"is a {hole:g} mm hole: {ctx.tool.id}'s {tool:g} mm head passes through it shifted at least "
+            return TOOL_TOO_LARGE, (f"is a {hole:g} mm hole: {ctx.tool.id}'s {tool:g} mm head passes through it shifted at least "
                     f"{least:g} mm and under {hole / 2:g} mm off centre, not shift_mm {params.shift_mm:g}")
-        return ""
+        return None
 
     def r_plane(self, ctx: "PlanContext") -> float:
         head = ctx.profile.cutting_length_mm
