@@ -219,6 +219,30 @@ class PcbModelsTest(unittest.TestCase):
         for library in ("Device.kicad_sym", "power.kicad_sym", "R_0603_1608Metric.kicad_mod"):
             self.assertIn(library, why.stdout, why.stdout)
 
+    def test_a_folder_is_checked_and_exported_as_its_one_project(self) -> None:
+        from cadgen import pcb
+
+        self.write("blinky.py", board_source())
+        self.assertEqual(self.run_script("blinky.py").returncode, 0)
+        self.assertTrue(pcb.validate(self.folder).ok)
+        exported = pcb.export(self.folder)
+        self.assertEqual(
+            sorted(entry.path.relative_to(self.folder).as_posix() for entry in exported.files),
+            ["build/blinky.bom.csv", "build/blinky.gerbers.zip", "build/blinky.pos.csv"],
+        )
+        self.assertEqual(
+            (self.folder / "build" / "blinky.gerbers.zip").read_bytes(),
+            pcb.export(self.folder / "blinky.kicad_pro").files[0].path.read_bytes(),
+        )
+
+        self.write("blinky.py", board_source(route_led=False))
+        self.assertEqual(self.run_script("blinky.py").returncode, 0)  # a draft
+        for entry in exported.files:
+            entry.path.unlink()
+        with self.assertRaisesRegex(RuntimeError, "is not finished"):
+            pcb.export(self.folder)
+        self.assertFalse(any((self.folder / "build").iterdir()))
+
     def test_project_libraries_reach_kicad_through_the_projects_lib_tables(self) -> None:
         import shutil
 

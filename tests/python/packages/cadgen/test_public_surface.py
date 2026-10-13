@@ -68,6 +68,7 @@ MIRRORS: dict[str, tuple[str, str]] = {
     "pcb gerber": ("cadgen.pcb", "gerber"),
     "pcb bom": ("cadgen.pcb", "bom"),
     "pcb pos": ("cadgen.pcb", "pos"),
+    "pcb export": ("cadgen.pcb", "export"),
     "harness bom": ("cadgen.harness", "bom"),
     # Snapshot was the schema's LAST adapter. Its rich options are typed
     # `str | dict | None` — one string CLI-side, a real dict library-side — so

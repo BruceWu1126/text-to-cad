@@ -7,6 +7,9 @@ a model run cannot write different bytes. A door never runs a script. Gerbers
 and the placement file are refused for a board with unrouted connections or DRC
 errors.
 
+``cadgen pcb export`` takes a whole project -- its file, or a folder holding one --
+and writes all three into the project's ``build/`` folder, checked once.
+
 ``cadgen harness bom`` takes a wiring harness's ``.harness.yml``: its BOM is
 WireViz's list of the document's parts (``cadgen.wireviz.bom``), the exporter
 ``@harness(bom=)`` writes through.
@@ -58,6 +61,26 @@ def board_export(fmt: str, target: Path, out: Path | None, *, verbose: bool = Fa
     if fmt in MANUFACTURING:
         require_finished(board, fmt=fmt)
     return _write(destination, export(fmt, board, **options), fmt)
+
+
+def project_export(target: Path, out: Path | None, *, verbose: bool = False) -> FabExportResult:
+    """``cadgen pcb export``: every manufacturing file of the finished project ``target``."""
+    from cadgen.kicad.fab import FAB_FORMATS, FAB_SUFFIX, export, require_finished
+    from cadgen.kicad.project_find import canonical_project
+
+    project = canonical_project(_absolute(target))
+    board = project.with_suffix(".kicad_pcb")
+    if project.suffix not in {".kicad_pcb", ".kicad_pro"}:
+        raise ValueError(f"{project.name} is not a KiCad project: cadgen pcb export takes a .kicad_pro, a .kicad_pcb or a folder")
+    if not board.is_file():
+        raise FileNotFoundError(f"no board at {board}")
+    folder = _absolute(out) if out is not None else board.parent / "build"
+    if verbose:
+        print(f"[pcb export] {board} -> {folder}", file=sys.stderr)
+    require_finished(board, fmt="manufacturing")
+    stem = board.name[: -len(".kicad_pcb")]
+    made = [(folder / (stem + FAB_SUFFIX[fmt]), export(fmt, board), fmt) for fmt in FAB_FORMATS]
+    return FabExportResult(ok=True, files=tuple(file for path, data, fmt in made for file in _write(path, data, fmt).files))
 
 
 def harness_bom(target: Path, out: Path | None, *, verbose: bool = False) -> FabExportResult:
