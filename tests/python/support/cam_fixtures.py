@@ -170,6 +170,22 @@ def slotted_block_step(directory, name: str = "block"):
     return step
 
 
+def round_features_step(directory, name: str = "round"):
+    """An 80 x 60 x 10 mm plate standing on z = 0, centred in x and y: a 20 mm through hole at (-20, 0), and a 30 mm
+    round boss 5 mm tall standing on the top at (18, 0)."""
+    from pathlib import Path
+
+    from build123d import Align, Box, Cylinder, Pos, export_step
+
+    base = (Align.CENTER, Align.CENTER, Align.MIN)
+    plate = Box(80, 60, 10, align=base)
+    plate -= Pos(-20, 0, -1) * Cylinder(10, 12, align=base)
+    plate += Pos(18, 0, 10) * Cylinder(15, 5, align=base)
+    step = Path(directory) / f"{name}.step"
+    export_step(plate, str(step))
+    return step
+
+
 #: A drill's point: 118 degrees included, so its length past the full diameter is the radius / tan(59 degrees).
 DRILL_POINT_DEG = 118.0
 
