@@ -344,6 +344,55 @@ class EmptyFace(unittest.TestCase):
         self.assertEqual([row["indexCount"] for row in mesh.face_ranges],
                          [row["indexCount"] for row in untessellated.face_ranges], "no neighbour was split")
 
+    def test_a_tessellation_that_would_fold_a_neighbour_out_is_refused_and_splits_none(self):
+        # A point the tessellator lays on its boundary must be a point of the edge it shares:
+        # one that is not, split into a neighbour, folded a vendor button's B-spline 399
+        # deflections out. Here every point is taken to lie far from the edge.
+        from cadgen._internal import face_fallback
+        from cadgen.store.meshes import decode_payload
+
+        with mock.patch.object(face_fallback, "tessellate_face", return_value=None):
+            untessellated = self.mesh(lambda shape, call: shape.IsSame(self.topods))
+        with mock.patch.object(face_fallback, "_off_segment", return_value=float("inf")):
+            mesh = self.mesh(lambda shape, call: shape.IsSame(self.topods))
+        self.assertEqual(decode_payload(self.body).unmeshed_faces, [self.bore], "the bore is left out and named")
+        self.assertEqual([row["indexCount"] for row in mesh.face_ranges],
+                         [row["indexCount"] for row in untessellated.face_ranges], "no neighbour was split")
+
+    def test_a_tessellation_off_its_surface_is_undone(self):
+        # The tessellator's triangles are measured as OCCT's are: a vendor nut's tessellated
+        # face lay 25 deflections off. Here the bore is taken to lie off its surface however it
+        # is meshed, so it goes to the tessellator, whose triangles are then undone.
+        from cadgen._internal import face_fallback, occt_mesh
+
+        real = occt_mesh._surface_distance
+
+        def bore_off(surface, positions, triangles):
+            from OCP.GeomAbs import GeomAbs_Cylinder
+
+            return 1e9 if surface.GetType() == GeomAbs_Cylinder else real(surface, positions, triangles)
+
+        with mock.patch.object(face_fallback, "tessellate_face", return_value=None):
+            occt_only = self.mesh(lambda shape, call: False)
+        with mock.patch.object(occt_mesh, "_surface_distance", side_effect=bore_off), \
+                mock.patch.object(face_fallback, "tessellate_face", wraps=face_fallback.tessellate_face) as tessellator:
+            mesh = self.mesh(lambda shape, call: False)
+        self.assertTrue(tessellator.called, "the bore went to the tessellator")
+        self.assertEqual([row["indexCount"] for row in mesh.face_ranges],
+                         [row["indexCount"] for row in occt_only.face_ranges], "and kept OCCT's triangles")
+        self.assertEqual(_open_edges(mesh), 0)
+
+    def test_triangles_a_stored_brep_carries_are_not_kept(self):
+        # A BREP can come with triangles some earlier tool made, which OCCT keeps where they are
+        # fine enough for it, whatever they are: every component is meshed from none.
+        from build123d import Sphere
+        from OCP.BRepMesh import BRepMesh_IncrementalMesh
+
+        fresh = _mesh(Sphere(5))[1].indices.size
+        carried = Sphere(5)
+        BRepMesh_IncrementalMesh(carried.wrapped, 0.001, False, 0.05, True)
+        self.assertEqual(_mesh(carried)[1].indices.size, fresh)
+
     def test_a_component_whose_first_pass_is_slow_is_not_meshed_again_whole(self):
         # An F1 floor's B-spline took ten seconds to mesh once; with a faulty face, meshing it
         # again whole at half and a quarter of its deflection cost it four times over.
@@ -576,27 +625,28 @@ class Normals(unittest.TestCase):
                 normals = mesh.normals[mesh.indices.reshape(-1, 3)[covering]].astype(np.float64)
                 self.assertGreater(float(np.einsum("tj,tkj->tk", facets, normals).min()), 0.0)
 
-    def test_a_triangle_facing_away_from_its_corners_normals_is_wound_the_other_way(self):
-        # OCCT's Delaunay leaves the odd needle across a B-spline folded over in space -- a
+    def test_a_needle_folded_over_its_neighbour_is_unfolded_and_keeps_its_edges_running_both_ways(self):
+        # OCCT's Delaunay leaves the odd needle across a B-spline folded over its neighbour -- a
         # bracelet link's five, half a deflection wide -- which a two-sided material drew dark.
-        # Here the mesher's pass comes back with one triangle of a box folded over.
+        # The edge the two share is flipped: wound the other way instead, the needle's edges
+        # would run the way its neighbours' run, and a mesh export's orientation checks fail.
+        from cadgen._internal.occt_mesh import _unfold_needles
+
+        a, b, c, d = 0, 1, 2, 3
+        positions = np.array([[0, 0, 0], [4, 0, 0], [2, -0.5, 0], [2, -2, 0]], np.float32)
+        normals = np.tile(np.array([0, 0, 1], np.float32), (4, 1))
+        triangles = np.array([[a, b, c], [b, a, d]], np.uint32)  # c lies inside the other: folded
+        _unfold_needles(positions, normals, triangles)
+        self.assertEqual(sorted(map(tuple, triangles.tolist())), [(a, d, c), (d, b, c)])
+
+    def test_every_part_is_unfolded(self):
         from build123d import Box
         from cadgen._internal import occt_mesh
 
-        real = occt_mesh._mesh
-
-        def folding(*args):
-            faces = real(*args)
-            _positions, _normals, triangles = next(iter(faces.values()))
-            triangles[0] = triangles[0][[0, 2, 1]]
-            return faces
-
-        with mock.patch.object(occt_mesh, "_mesh", side_effect=folding):
+        with mock.patch.object(occt_mesh, "_unfold_needles", wraps=occt_mesh._unfold_needles) as unfold:
             _body, mesh = _mesh(Box(4, 4, 4))
-        corners = _corners(mesh)
-        facets = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
-        normals = mesh.normals[mesh.indices.reshape(-1, 3)].astype(np.float64)
-        self.assertGreater(float(np.einsum("tj,tkj->tk", facets, normals).min()), 0.0)
+        self.assertEqual(unfold.call_count, 1)
+        self.assertEqual(unfold.call_args.args[2].size, mesh.indices.size, "the whole part's triangles")
 
     def test_the_writers_reading_and_the_face_by_face_one_are_the_same_bytes(self):
         from build123d import Cone, Sphere

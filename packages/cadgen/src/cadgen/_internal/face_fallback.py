@@ -129,7 +129,12 @@ def tessellate_face(topods, face, deflection: float, angle: float, keep: Callabl
     # a refused tessellation must leave its neighbours as they were.
     if not keep(mesh.area()):
         return None
-    undo = _conform_neighbours(mesh, boundary, segments, shared, sources, by_cell, grid_u, grid_v)
+    from OCP.BRepMesh import BRepMesh_ShapeTool
+
+    reach = 2 * max(deflection, BRepMesh_ShapeTool.MaxFaceTolerance_s(face))
+    undo = _conform_neighbours(mesh, boundary, segments, shared, sources, by_cell, grid_u, grid_v, reach)
+    if undo is None:
+        return None
     return mesh.triangulation(), undo
 
 
@@ -707,13 +712,26 @@ def _ear_clip(polygon: list, tiny: float) -> list:
     return triangles
 
 
+def _off_segment(point, start, end) -> float:
+    """How far ``point`` lies from the segment from ``start`` to ``end`` (``gp_Pnt``s)."""
+    p, a, b = (np.array([q.X(), q.Y(), q.Z()]) for q in (point, start, end))
+    span = b - a
+    length = float(span @ span)
+    t = min(max(float((p - a) @ span) / length, 0.0), 1.0) if length > 0 else 0.0
+    return float(np.linalg.norm(p - (a + t * span)))
+
+
 def _conform_neighbours(mesh: _Mesh, boundary: set, segments: np.ndarray, shared: list, sources: list,
-                        by_cell: dict, grid_u: np.ndarray, grid_v: np.ndarray) -> Callable[[], None]:
+                        by_cell: dict, grid_u: np.ndarray, grid_v: np.ndarray, reach: float) -> Callable[[], None] | None:
     """Split each meshed neighbour's triangle along a shared edge where this face's boundary
     took a point the neighbour lacks -- a grid line crossing it, or a point ``_uncrossed``
     put on the edge's curve -- so the two meshes share every vertex along it. The
     neighbour's triangulation is grown in place: its own nodes keep their numbers, which
-    its edges' discretizations name. Returns what puts every neighbour back as it was."""
+    its edges' discretizations name. Returns what puts every neighbour back as it was; or
+    None, every neighbour untouched, when a point would lie further than ``reach`` from the
+    edge of the neighbour's triangle it splits: such a point is no point of the edge they
+    share, and the neighbour would fold out to it (a vendor button's B-spline went 399
+    deflections off its surface)."""
     from OCP.BRep import BRep_Tool
     from OCP.BRepAdaptor import BRepAdaptor_Curve2d
     from OCP.gp import gp_Pnt, gp_Pnt2d
@@ -815,6 +833,10 @@ def _conform_neighbours(mesh: _Mesh, boundary: set, segments: np.ndarray, shared
                 owner[(third, c0)] = at
         if not added:
             continue
+        for point, node_a, node_b, _t, _on_edge in added:
+            if _off_segment(point, triangulation.Node(node_a), triangulation.Node(node_b)) > reach:
+                undo()
+                return None
         grown.append((triangulation, count, before))
         triangulation.ResizeNodes(count + len(added), True)
         for k, (point, node_a, node_b, t, on_edge) in enumerate(added, count + 1):

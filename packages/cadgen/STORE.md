@@ -437,9 +437,9 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   off its exact surface, and a part with such a face is meshed again, whole and
   finer, unless its first pass took seconds; a face no pass gets right is
   tessellated over its own parameters by `_internal/face_fallback.py` where that
-  leaves the mesh no more open; a triangle folded against its corners' normals is
-  wound the other way), reading what the triangles do not say from the
-  part's selector table (each face's area, each edge's class) and the
+  does no harm; a needle folded over its neighbour is unfolded), reading what the
+  triangles do not say from the part's selector table (each face's area, each
+  edge's class) and the
   component's face colours. A body (`store/meshes.py`) is glTF 2.0 binary in
   the component's own units: ONE triangle primitive (positions, normals, u16
   indices up to 65,535 vertices, else u32), a face table whose rows give each

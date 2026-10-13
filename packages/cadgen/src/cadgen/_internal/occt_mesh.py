@@ -32,9 +32,11 @@ a boolean's leftovers do to a valid face -- and no setting or repair of OCCT's
 meshes it, so it is tessellated over its own parameters as cadgen's earlier
 tessellator did (``face_fallback``), against the meshed neighbours, and kept when
 its triangles cover the face's own area; so is any face still faulty, where its new
-triangles leave the mesh no more open than it was. Last, a triangle facing away from
-all three of its corners' normals -- a needle OCCT's Delaunay folds over across a
-B-spline -- is wound the other way. A face that still has none is left out of the
+triangles lie on its surface, fold no neighbour out, and leave the mesh no more open
+than it was. Every component is meshed from no triangles, whatever its stored BREP
+carries. Last, a needle OCCT's Delaunay folds over its neighbour across a B-spline,
+facing away from all three of its corners' normals, is unfolded by flipping the edge
+the two share. A face that still has none is left out of the
 component, which is drawn without it, and the body names it (``unmeshedFaces``,
 ``cadgen.store.meshes``): one face no mesher covers never fails a view, a list or
 an export of the whole document, and each of them says which faces of which part
@@ -256,6 +258,9 @@ def _mesh(topods, face_map, required: list[int], gridded: set[int], deflection: 
         return _faulty(faces, face_map, required, gridded, deflection, status)
 
     faces: dict = {}
+    # A stored BREP can carry triangles some earlier tool made: OCCT keeps those it deems fine,
+    # whatever they are, so every component is meshed from none.
+    BRepTools.Clean_s(topods)
     started = time.perf_counter()
     faulty = mesh(1.0)
     retries = _RETRY_SCALES if time.perf_counter() - started <= _RETRY_SECONDS else ()
@@ -269,7 +274,7 @@ def _mesh(topods, face_map, required: list[int], gridded: set[int], deflection: 
     if retries:
         BRepTools.Clean_s(topods)
         faulty = mesh(1.0)
-    _tessellate(topods, face_map, faulty, deflection, angle)
+    _tessellate(topods, face_map, faulty, gridded, deflection, angle)
     return _read_faces(topods, face_map)
 
 
@@ -282,16 +287,18 @@ def _read_faces(topods, face_map) -> dict[int, tuple[np.ndarray, np.ndarray, np.
     return _faces_one_by_one(triangulated) if faces is None else faces
 
 
-def _tessellate(topods, face_map, ordinals: list[int], deflection: float, angle: float) -> None:
+def _tessellate(topods, face_map, ordinals: list[int], gridded: set[int], deflection: float, angle: float) -> None:
     """Give each face of ``ordinals`` the triangles ``face_fallback`` builds over its
     parameters, when they cover its own area to ``_FALLBACK_AREA_TOLERANCE``; a face
     left without keeps what OCCT gave it -- none, for a face it refuses, which the body
-    names. The faces OCCT refused go first. The faces it did mesh, off their surface or
-    with a gap, then take theirs together, and keep them only if the part's mesh has no
-    more open edges with them than it had: the tessellator splits its neighbours'
-    triangles to meet its own, and where a split fails the two part (an airframe skin
-    forced through it opened 884 edges), so every split they made is undone and they keep
-    OCCT's triangles. Either way the part is read twice, however many faces there are."""
+    names. The faces OCCT refused go first, then the ones it meshed wrong, each group
+    together, and a group keeps its triangles only if they did no harm: the tessellator
+    splits its neighbours' triangles to meet its own (and refuses where a split would fold
+    a neighbour out), and where a split goes wrong the faces part (an airframe skin forced
+    through it opened 884 edges). So a group whose triangles lie off their surface, or --
+    for faces OCCT did mesh -- leave the part with more open edges, is undone, every split
+    with it, and its faces keep what OCCT gave them. The part is read twice a group,
+    however many faces it has."""
     from cadgen._internal import face_fallback
     from OCP.BRep import BRep_Builder, BRep_Tool
     from OCP.BRepGProp import BRepGProp
@@ -306,39 +313,80 @@ def _tessellate(topods, face_map, ordinals: list[int], deflection: float, angle:
         return face_fallback.tessellate_face(
             topods, face, deflection, angle, lambda covered: abs(covered - area) <= _FALLBACK_AREA_TOLERANCE * area)
 
-    faces = [TopoDS.Face_s(face_map.FindKey(ordinal)) for ordinal in ordinals]
-    meshed = [(face, BRep_Tool.Triangulation_s(face, TopLoc_Location())) for face in faces]
-    for face, previous in meshed:
-        if previous is None and (result := tessellated(face)) is not None:
-            BRep_Builder().UpdateFace(face, result[0])
-    meshed = [(face, previous) for face, previous in meshed if previous is not None]
-    if not meshed:
-        return
-    opened = _open_edges(_read_faces(topods, face_map))
-    taken = []
-    for face, previous in meshed:
-        if (result := tessellated(face)) is not None:
-            BRep_Builder().UpdateFace(face, result[0])
-            taken.append((face, previous, result[1]))
-    if taken and _open_edges(_read_faces(topods, face_map)) > opened:
-        # Last split first: a later face may have split an earlier one's triangles.
-        for face, previous, undo in reversed(taken):
-            undo()
-            BRep_Builder().UpdateFace(face, previous)
+    def group(members: list[tuple[int, Any, Any]], may_open: bool) -> None:
+        opened = None if may_open else _open_edges(_read_faces(topods, face_map))
+        taken = []
+        for ordinal, face, previous in members:
+            if (result := tessellated(face)) is not None:
+                BRep_Builder().UpdateFace(face, result[0])
+                taken.append((ordinal, face, previous, result[1]))
+        if not taken:
+            return
+        after = _read_faces(topods, face_map)
+        harmed = (_faulty(after, face_map, [ordinal for ordinal, *_rest in taken], gridded, deflection, 0)
+                  or (opened is not None and _open_edges(after) > opened))
+        if harmed:
+            # Last split first: a later face may have split an earlier one's triangles.
+            for _ordinal, face, previous, undo in reversed(taken):
+                undo()
+                BRep_Builder().UpdateFace(face, previous)
+
+    members = [(ordinal, face, BRep_Tool.Triangulation_s(face, TopLoc_Location()))
+               for ordinal, face in ((ordinal, TopoDS.Face_s(face_map.FindKey(ordinal))) for ordinal in ordinals)]
+    for refused, may_open in ((True, True), (False, False)):
+        chosen = [member for member in members if (member[2] is None) == refused]
+        if chosen:
+            group(chosen, may_open)
+
+
+
+def _facing(positions: np.ndarray, normals: np.ndarray, triangles) -> np.ndarray:
+    """Per triangle, each corner's normal dotted with the triangle's facet, (n, 3)."""
+    corners = positions[triangles].astype(np.float64)
+    facets = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
+    return np.einsum("tj,tkj->tk", facets, normals[triangles].astype(np.float64))
 
 
 def _unfold_needles(positions: np.ndarray, normals: np.ndarray, triangles: np.ndarray) -> None:
-    """Wind the other way, in place, each triangle that faces away from all three of its
-    corners' normals. OCCT's Delaunay leaves the odd needle across a B-spline whose corners
-    lie in a line in its parameters folded over in space -- a bracelet link's five, half a
-    deflection wide and a thousand long -- and a two-sided material draws it dark."""
-    for start in range(0, len(triangles), _NEEDLE_CHUNK):
-        chunk = triangles[start:start + _NEEDLE_CHUNK]
-        corners = positions[chunk].astype(np.float64)
-        facets = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
-        folded = (np.einsum("tj,tkj->tk", facets, normals[chunk].astype(np.float64)) < 0).all(axis=1)
-        if folded.any():
-            chunk[folded] = chunk[folded][:, [0, 2, 1]]
+    """Unfold, in place, each triangle that faces away from all three of its corners'
+    normals. OCCT's Delaunay leaves the odd needle across a B-spline whose corners lie in a
+    line in its parameters folded over its neighbour -- a bracelet link's five, half a
+    deflection wide and a thousand long -- and a two-sided material draws it dark. The edge
+    it shares with the triangle across its longest side is flipped, the two becoming the two
+    halves of the quad their four corners make, where both halves then face their corners'
+    normals. (Wound the other way instead, its edges would run the way its neighbours' do,
+    which a mesh export's orientation checks refuse.)"""
+    folded = np.concatenate([np.flatnonzero((_facing(positions, normals, triangles[start:start + _NEEDLE_CHUNK]) < 0)
+                                            .all(axis=1)) + start
+                             for start in range(0, len(triangles), _NEEDLE_CHUNK)] or [np.zeros(0, np.int64)])
+    if not len(folded):
+        return
+    # Every directed edge, by the triangle that runs it: the one across a needle's side runs it back.
+    size = len(positions)
+    corners = triangles.astype(np.int64)
+    keys = np.concatenate([corners[:, 0] * size + corners[:, 1], corners[:, 1] * size + corners[:, 2],
+                           corners[:, 2] * size + corners[:, 0]])
+    order = np.argsort(keys, kind="stable")
+    keys, owners = keys[order], np.tile(np.arange(len(corners)), 3)[order]
+    changed: set[int] = set()
+    for needle in folded.tolist():
+        if needle in changed:
+            continue
+        a, b, c = (int(n) for n in triangles[needle])
+        points = positions[[a, b, c]].astype(np.float64)
+        longest = int(np.argmax(np.linalg.norm(points - np.roll(points, -1, axis=0), axis=1)))
+        a, b, c = [(a, b, c), (b, c, a), (c, a, b)][longest]
+        at = int(np.searchsorted(keys, b * size + a))
+        if at == len(keys) or keys[at] != b * size + a:
+            continue
+        across = int(owners[at])
+        if across in changed or across == needle:
+            continue
+        d = next(int(n) for n in triangles[across] if int(n) not in (a, b))
+        halves = np.array([[a, d, c], [d, b, c]], triangles.dtype)
+        if (_facing(positions, normals, halves) > 0).all():
+            triangles[needle], triangles[across] = halves
+            changed.update((needle, across))
 
 
 def _open_edges(faces: dict) -> int:
