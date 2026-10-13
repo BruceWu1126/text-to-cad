@@ -12,7 +12,8 @@ def controller():
     ...
 ```
 
-`python controller.py` then writes, beside the KiCad project:
+`python controller.py` then writes, in the KiCad project's `build/` folder (so the folder
+KiCad opens holds only what KiCad edits, as KiStack and Backplane keep a project):
 
 - `controller.gerbers.zip`: Gerber X2 files for every copper, mask, paste and silkscreen
   layer and the outline, the Gerber job file, and Excellon drill files (millimetres,
@@ -29,11 +30,13 @@ So the files are the same whichever fab makes the board: only the limits it is c
 against change with `fab=`. A path instead of `True` moves a file
 (`@pcb(gerber="../fab/controller.zip")`). The same board always writes the same bytes.
 `gerber=` and `pos=` refuse a draft: the build fails and lists what is left to route. For a
-board drawn elsewhere, the doors take the `.kicad_pcb`:
+saved project (a board drawn in KiCad included), one door writes all three into its `build/`,
+after KiCad's ERC and DRC pass; one file at a time is a door of its own:
 
 ```bash
+cadgen pcb export PCB/controller                # the folder's one .kicad_pro -> PCB/controller/build/
 cadgen pcb gerber board.kicad_pcb fab/board.gerbers.zip
-cadgen pcb bom board.kicad_pcb       # needs board.kicad_sch beside it
+cadgen pcb bom board.kicad_pcb                  # needs board.kicad_sch beside it
 cadgen pcb pos board.kicad_pcb
 ```
 
@@ -88,7 +91,8 @@ Never order on the user's behalf: hand them the files and the steps.
 - The build's last line says `built`, not `draft`, and there were no warnings you did not
   read.
 - The board was checked against the fab it will be ordered from (`fab=`).
-- Every part has a value, and parts to be assembled have an `LCSC` (JLCPCB) or `MPN` field.
+- Every part has a value, and parts to be assembled have an `LCSC` (JLCPCB) or `MPN` field:
+  the review's sourcing suggestions name any that do not ([parts](parts.md)).
 - The silkscreen labels connectors and polarity (pin 1, +/-, LED and diode orientation).
 - Mounting holes and connectors match the enclosure (compose the board with `@step` into
   the case and look at it).

@@ -91,8 +91,8 @@ python blinky.py      # built blinky.kicad_pcb
 
 The run writes `blinky.kicad_pro`, `blinky.kicad_sch`, `blinky.kicad_pcb` and
 `blinky.kicad_dru` (the board's custom design rules, empty without `board.rule`) beside the
-script (`@pcb(out="../PCB/blinky.kicad_pcb")` moves them; the four always share a stem and a
-folder). The schematic is generated from the netlist: every connected pin gets a short
+script (`@pcb(out="../PCB/blinky/blinky.kicad_pcb")` moves them; the four always share a stem
+and a folder). The schematic is generated from the netlist: every connected pin gets a short
 stub and a global label with its net's name, unused pins marked no-connect get KiCad's X,
 and nets with `power_flag=True` get a `PWR_FLAG`. It is correct by construction; you never
 draw it.
@@ -112,6 +112,25 @@ DRC with the schematic-to-board parity check (on the board), on a staged copy:
 An unchanged script is a no-op (`current blinky.kicad_pcb`); `--force` rebuilds;
 `cadgen store why blinky.py` says why a board is stale. The library files a board read are
 its inputs: a KiCad update that changes a part's footprint makes the board stale.
+
+## Project layout
+
+One board is one KiCad project folder, the unit KiCad, a fab and a reviewer open:
+
+```text
+src/blinky.py                      the source: edit this, never the files below
+src/parts/parts.kicad_sym, .pretty/  project libraries (libraries=["parts"]), when KiCad's lack a part
+src/models/*.lib                   SPICE models (simulation)
+PCB/blinky/blinky.kicad_{pro,sch,pcb,dru}   @pcb(out="../PCB/blinky/blinky.kicad_pcb")
+PCB/blinky/sym-lib-table, fp-lib-table      written when the board has project libraries
+PCB/blinky/build/                  Gerbers, BOM, placement: everything derived from the project
+```
+
+Give each board its own folder under `PCB/`, even the only one: tools that look for a project
+(`cadgen pcb validate PCB/blinky`, `cadgen pcb export PCB/blinky`, KiCad itself) then find
+exactly one, and the folder's lib tables are that board's alone. Manufacturing files land in the folder's `build/`, never beside the
+KiCad files. A project drawn in KiCad, not by a script, follows
+[native projects](references/native-projects.md).
 
 ## The board API
 
@@ -152,7 +171,9 @@ pcb.find_footprints("sot-223")     # ["Package_TO_SOT_SMD:SOT-223", ...]
 A wrong name fails with the closest real ones (`did you mean Resistor_SMD, ...`). A symbol's
 pins must have pads on its footprint (checked when the part is made). For a part KiCad's
 libraries lack, keep a project library (`parts.kicad_sym`, `parts.pretty/`) and pass its
-folder as `libraries=`; parts on step.parts or LCSC usually come with KiCad files.
+folder as `libraries=`; the build writes the project's lib tables for it, so the project
+opens in KiCad with them. Parts on step.parts or LCSC usually come with KiCad files
+([parts](references/parts.md)).
 
 Write subcircuits as plain functions of a circuit, so the board and a simulation testbench
 share them:
@@ -189,9 +210,9 @@ saved board:
 
 | Declaration | Writes | Door |
 | --- | --- | --- |
-| `@pcb(gerber=True)` | `blinky.gerbers.zip`: every copper, mask, paste and silkscreen layer, the outline, Excellon drills: what every fab makes boards from | `cadgen pcb gerber BOARD [OUT]` |
-| `@pcb(bom=True)` | `blinky.bom.csv`: the parts to buy and place, one row per distinct part | `cadgen pcb bom BOARD [OUT]` |
-| `@pcb(pos=True)` | `blinky.pos.csv`: pick-and-place, each part's position (mm from the script's origin), rotation and side | `cadgen pcb pos BOARD [OUT]` |
+| `@pcb(gerber=True)` | `build/blinky.gerbers.zip`: every copper, mask, paste and silkscreen layer, the outline, Excellon drills: what every fab makes boards from | `cadgen pcb gerber BOARD [OUT]` |
+| `@pcb(bom=True)` | `build/blinky.bom.csv`: the parts to buy and place, one row per distinct part | `cadgen pcb bom BOARD [OUT]` |
+| `@pcb(pos=True)` | `build/blinky.pos.csv`: pick-and-place, each part's position (mm from the script's origin), rotation and side | `cadgen pcb pos BOARD [OUT]` |
 | `@step`, `@glb`, `@stl`, `@threemf` | the populated board in 3D (KiCad's own model of it) | `cadgen step build`/`glb build` of the STEP |
 
 `gerber=` and `pos=` refuse a draft: a board that declares either fails its build, naming
@@ -225,12 +246,15 @@ reads it. The enclosure itself is
 
 ```bash
 cadgen pcb validate path/to/board.kicad_pcb            # ERC + DRC with parity, never writes into the project
+cadgen pcb validate PCB/blinky                         # a folder: its one .kicad_pro
+cadgen pcb export PCB/blinky                           # Gerbers, BOM, placement into PCB/blinky/build/
 cadgen pcb validate path/to/board.kicad_pcb --json     # {"ok", "path", "issues": [...], "summary"}
 cadgen pcb snapshot path/to/board.kicad_pcb tmp/board.png
 cadgen pcb snapshot path/to/board.kicad_sch tmp/schematic.png
 ```
 
-`validate` takes any KiCad 10 project, one drawn in KiCad included; positions are
+`validate` takes any KiCad 10 project, one drawn in KiCad included (editing one:
+[native projects](references/native-projects.md)); positions are
 millimetres from the board's drill/place origin, y up. A snapshot is the CAD Viewer's
 picture: KiCad's own plot of the board (all layers, back to front, ratsnest on a draft) or
 of every schematic sheet.
@@ -268,8 +292,8 @@ What the user points at in the viewer reaches you as a board reference
 ## Handoff
 
 Report the files written, the build's last line (built or draft, and what is unrouted), the
-checks that ran (KiCad's ERC and DRC run on every build; simulations you ran), the parts
-without an LCSC or MPN field, and assumptions (ratings, footprints chosen, rules). Show the
+checks that ran (KiCad's ERC and DRC run on every build; simulations you ran), the review's
+suggestions you left (parts without an LCSC or MPN field among them), and assumptions (ratings, footprints chosen, rules). Show the
 board and schematic ([Show the model](#show-the-model)).
 
 ## References
@@ -279,4 +303,6 @@ board and schematic ([Show the model](#show-the-model)).
 - [Routing](references/routing.md): hand routing and Freerouting.
 - [Simulation](references/simulation.md): SPICE testbenches over the board's own subcircuits.
 - [Manufacturing](references/manufacturing.md): Gerbers, BOM, placement and ordering.
+- [Parts](references/parts.md): symbols, footprints, project libraries and the fields a BOM orders by.
+- [Native projects](references/native-projects.md): checking, editing and exporting a project drawn in KiCad.
 - [Inspection](references/inspection.md): board and schematic references from the viewer, `pcb.read_board`, `pcb.read_schematic`, and the script line behind each part.

@@ -152,7 +152,7 @@ def half_duplex(board, v3, gnd, u1txd, u1rxd, data):
 
 @glb(out="../GLB/bus_servo_hat.glb")
 @step(out="../STEP/bus_servo_hat.step")
-@pcb(out="../PCB/bus_servo_hat.kicad_pcb", gerber=True, bom=True, pos=True)
+@pcb(out="../PCB/bus_servo_hat/bus_servo_hat.kicad_pcb", gerber=True, bom=True, pos=True)
 def bus_servo_hat():
     board = pcb.Board(outline=outline(), fab=pcb.JLCPCB, title="Bus servo HAT")
     vin = board.net("VIN", power_flag=True)  # the servo supply, 9-12.6 V; its current paths are drawn
