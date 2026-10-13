@@ -1,9 +1,11 @@
 """The review: what a person reviewing a board checks that KiCad's ERC and DRC do not.
 
-Three checks, each a warning (advice, never a gate): an IC's power input (not a connector's,
+Each check is a warning (advice, never a gate): an IC's power input (not a connector's,
 jumper's, test point's or hole's, nor an unfitted part's) with no decoupling capacitor to ground, the nearest one too far from it, and a net's tracks too thin for the
 current its script gives it (``board.net("VBUS", current=2.0)``, kept in the ``.kicad_pro``
-because KiCad keeps no current per net). Each finding names what it is about in board
+because KiCad keeps no current per net). Then the BOM's two, Backplane's sourcing rules: the
+parts to buy (in the BOM, fitted, not a hole or test point) with no LCSC or MPN field to order
+them by, as one finding, and one part number on parts with different footprints. Each finding names what it is about in board
 references, so the viewer selects it and an agent resolves it.
 """
 
@@ -26,6 +28,11 @@ _COPPER_MILS = 1.378  # 1 oz copper
 _GROUND = re.compile(r"(?:.*/)?(?:[ADP]?GND\w*|VSS\w*|0V)", re.IGNORECASE)
 _CAPACITOR = re.compile(r"C\d+")
 _NOT_AN_IC = re.compile(r"(?:J|P|CN|CON|JP|TP|H|MH)\d+")  # KiCad's library marks a connector's supply pins power_in
+_NOT_BOUGHT = re.compile(r"(?:H|MH|TP|FID|LOGO)\d+")  # holes, test points, fiducials, artwork: made, not bought
+_NAMED = 8  # parts a sourcing sentence names before "and N more"
+# The fields the BOM's columns are read from (cadgen.kicad.fab): a number anywhere else never reaches it.
+_LCSC = ("lcsc",)
+_MPN = ("mpn",)
 
 
 def is_ground(net: str | None) -> bool:
@@ -111,4 +118,58 @@ def review(index: BoardIndex, currents: Mapping[str, float] | None = None) -> tu
                 f"narrowest {thinnest.width:g} mm on {thinnest.layer}.",
                 [FindingItem(text=f"the {net} track", ref=Net(name=net, netclass="").selector, at=thinnest.points[0])],
             ))
+    found.extend(_sourcing(index))
     return tuple(found)
+
+
+def _field(part, names: tuple[str, ...]) -> str:
+    """The first of ``names`` (any case) the part has a value for, else ""."""
+    for key, value in part.fields.items():
+        if key.strip().lower() in names and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def _natural(ref: str) -> tuple:
+    return tuple(int(piece) if piece.isdigit() else piece for piece in re.findall(r"\d+|\D+", ref))
+
+
+def _sourcing(index: BoardIndex) -> list[Finding]:
+    """Parts with nothing to order them by, then part numbers placed on two footprints."""
+    found: list[Finding] = []
+    bought = sorted((part for part in index.parts
+                     if part.pads and part.in_bom and not part.dnp and not _NOT_BOUGHT.fullmatch(part.ref)),
+                    key=lambda part: _natural(part.ref))
+    by_number: dict[str, list] = {}
+    unsourced = []
+    for part in bought:
+        numbers = [number for number in (_field(part, _LCSC), _field(part, _MPN)) if number]
+        if not numbers:
+            unsourced.append(part)
+        for number in dict.fromkeys(numbers):
+            by_number.setdefault(number, []).append(part)
+    if unsourced:
+        # One finding for them all: a board drawn before its parts were chosen has dozens.
+        refs = [part.ref for part in unsourced]
+        named = ", ".join(refs[:_NAMED]) + (f" and {len(refs) - _NAMED} more" if len(refs) > _NAMED else "")
+        found.append(_finding(
+            "part_unsourced",
+            f"{refs[0]} has no LCSC or MPN to order it by" if len(refs) == 1
+            else f"{len(refs)} parts have no LCSC or MPN to order them by: {named}",
+            "No LCSC or MPN field, so no BOM row says which part to buy: "
+            + "; ".join(f"{part.ref} ({part.value or 'no value'}, {part.footprint or 'no footprint'})" for part in unsourced) + ".",
+            [FindingItem(text=part.ref, ref=part.selector, at=part.at) for part in unsourced],
+        ))
+    for number, parts in by_number.items():
+        footprints: dict[str, list[str]] = {}
+        for part in parts:
+            footprints.setdefault(part.footprint.split(":")[-1] or "no footprint", []).append(part.ref)
+        if len(footprints) < 2:
+            continue
+        groups = [f"{', '.join(refs)} ({footprint})" for footprint, refs in footprints.items()]
+        found.append(_finding(
+            "mpn_footprints", f"{number} is on {', '.join(groups[:-1])} and {groups[-1]}",
+            f"One part number, {number}, on {len(footprints)} footprints: an assembler places one package for it.",
+            [FindingItem(text=part.ref, ref=part.selector, at=part.at) for part in sorted(parts, key=lambda part: _natural(part.ref))],
+        ))
+    return found
