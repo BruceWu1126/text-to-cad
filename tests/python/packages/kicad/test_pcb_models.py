@@ -219,6 +219,36 @@ class PcbModelsTest(unittest.TestCase):
         for library in ("Device.kicad_sym", "power.kicad_sym", "R_0603_1608Metric.kicad_mod"):
             self.assertIn(library, why.stdout, why.stdout)
 
+    def test_project_libraries_reach_kicad_through_the_projects_lib_tables(self) -> None:
+        import shutil
+
+        from cadgen import pcb
+        from cadgen.kicad.install import find_kicad
+
+        install = find_kicad()
+        parts = self.folder / "parts"
+        (parts / "parts.pretty").mkdir(parents=True)
+        shutil.copy2(install.symbol_dir / "Device.kicad_sym", parts / "parts.kicad_sym")
+        shutil.copy2(install.footprint_dir / "Resistor_SMD.pretty" / "R_0603_1608Metric.kicad_mod", parts / "parts.pretty")
+        source = board_source().replace(
+            'board = pcb.Board(outline=outline.sketch)', 'board = pcb.Board(outline=outline.sketch, libraries=["parts"])'
+        ).replace(
+            'board.part("Device:R", footprint="Resistor_SMD:R_0603_1608Metric"', 'board.part("parts:R", footprint="parts:R_0603_1608Metric"'
+        )
+        self.write("blinky.py", source)
+        built = self.run_script("blinky.py")
+        self.assertEqual(built.returncode, 0, built.stderr)
+        sym = (self.folder / "sym-lib-table").read_text(encoding="utf-8")
+        self.assertIn('(name "parts")(type "KiCad")(uri "${KIPRJMOD}/parts/parts.kicad_sym")', sym)
+        self.assertIn('(uri "${KIPRJMOD}/parts/parts.pretty")', (self.folder / "fp-lib-table").read_text(encoding="utf-8"))
+        checked = pcb.validate(self.folder / "blinky.kicad_pcb")
+        self.assertTrue(checked.ok, checked.issues)
+        self.assertFalse([issue for issue in checked.issues if "lib" in issue.code], checked.issues)
+
+        self.write("blinky.py", board_source())  # the board stops reading the project library
+        self.assertEqual(self.run_script("blinky.py").returncode, 0)
+        self.assertFalse((self.folder / "sym-lib-table").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -46,8 +46,9 @@ def write_board(
     reported, and a board with unrouted connections is written as a draft --
     unless it declares a manufacturing export (``@pcb(gerber=, pos=)``), which a
     draft cannot have: then the build fails, naming what is left to route.
-    The declared exports are written after the project, from the files just
-    written.
+    The board's project libraries (``pcb.Board(libraries=)``) get the project's
+    ``sym-lib-table`` and ``fp-lib-table``. The declared exports are written after
+    the project, from the files just written.
     """
     from cadgen._internal.atomic_replace import write_bytes_atomic
     from cadgen.coordination import PHASE_CHECK_BOARD, resolve as resolve_progress
@@ -55,6 +56,7 @@ def write_board(
     from cadgen.kicad.check import build_board, fixes
     from cadgen.kicad.design import Board
     from cadgen.kicad.fab import MANUFACTURING, export
+    from cadgen.kicad.lib_tables import lib_tables, write_lib_tables
     from cadgen.metadata import fab_output_path
     from cadgen.render import relative_to_cwd as display
 
@@ -103,6 +105,10 @@ def write_board(
         target = output_path.with_suffix(suffix)
         write_bytes_atomic(target, text.encode("utf-8"))
         written.append(target)
+    tables, note = write_lib_tables(output_path.parent, output_path.stem, lib_tables(result.libraries.project, output_path.parent))
+    written.extend(tables)
+    if note:
+        logger.info(f"{label} {note}")
     logger.debug(f"wrote KiCad project: {display(output_path)}")
     for decl in fab_exports:
         target = fab_output_path(script_path, decl, output_path.resolve())
