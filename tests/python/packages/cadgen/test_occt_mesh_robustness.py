@@ -226,6 +226,55 @@ class OnTheSurface(unittest.TestCase):
         self.assertEqual(_open_edges(mesh), 0)
 
 
+class FreeformSurfaces(unittest.TestCase):
+    """OCCT holds a freeform face's triangles to the deflection as it meshes it, but on some
+    B-splines -- an F1 floor panel, the hand's palm, a Juno forearm -- it left them up to 48
+    times off, where main's tessellator held them. A cylinder's side as a B-spline, meshed ten
+    times coarser than it is measured, stands in for such a face."""
+
+    def setUp(self):
+        from build123d import Cylinder
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_NurbsConvert
+        from cadgen._internal import occt_mesh
+        from cadgen._internal.selector_table import build_selector_table
+
+        self.topods = BRepBuilderAPI_NurbsConvert(Cylinder(10, 20).wrapped, True).Shape()
+        self.face_map, _edges = occt_mesh._maps(self.topods)
+        table = build_selector_table(self.topods, _facts(self.topods))
+        self.kinds = dict(occt_mesh._rows(table, "faces", "surfaceType"))
+        # Every face is a B-spline now; the side is the largest, and the one that is curved.
+        self.side = max(occt_mesh._rows(table, "faces", "area"), key=lambda row: row[1])[0]
+        self.assertEqual(self.kinds[self.side], "bsplinesurface")
+
+    def faulty(self, meshed_at, freeform=True):
+        from OCP.BRepMesh import BRepMesh_IncrementalMesh
+        from OCP.BRepTools import BRepTools
+        from cadgen._internal import occt_mesh
+
+        BRepTools.Clean_s(self.topods)
+        BRepMesh_IncrementalMesh(self.topods, meshed_at, False, 0.8, True)
+        faces = occt_mesh._read_faces(self.topods, self.face_map)
+        return occt_mesh._faulty(faces, self.face_map, list(faces), self.kinds, 0.05, False, freeform)
+
+    def test_a_freeform_face_meshed_coarser_than_it_is_held_to_is_off_its_surface(self):
+        self.assertIn(self.side, self.faulty(meshed_at=0.5))
+
+    def test_a_freeform_face_meshed_at_its_deflection_is_not(self):
+        self.assertEqual(self.faulty(meshed_at=0.05), [])
+
+    def test_a_component_whose_first_pass_is_slow_goes_unmeasured(self):
+        self.assertEqual(self.faulty(meshed_at=0.5, freeform=False), [])
+        from cadgen._internal import occt_mesh
+
+        with mock.patch.object(occt_mesh, "_RETRY_SECONDS", -1.0), \
+                mock.patch.object(occt_mesh, "_freeform_distance", wraps=occt_mesh._freeform_distance) as measured:
+            _mesh(self.topods)
+        self.assertFalse(measured.called)
+        with mock.patch.object(occt_mesh, "_freeform_distance", wraps=occt_mesh._freeform_distance) as measured:
+            _mesh(self.topods)
+        self.assertTrue(measured.called)
+
+
 class ExportAtSingularPoints(unittest.TestCase):
     def test_an_export_of_poles_and_apexes_is_manifold_and_watertight_in_every_format(self):
         import trimesh
@@ -344,6 +393,29 @@ class EmptyFace(unittest.TestCase):
         self.assertEqual([row["indexCount"] for row in mesh.face_ranges],
                          [row["indexCount"] for row in untessellated.face_ranges], "no neighbour was split")
 
+    def test_the_tessellator_meets_the_pass_that_left_the_least_wrong(self):
+        # A finer pass can close what the component's own deflection leaves: an actuator kept 32
+        # open edges at a quarter of its deflection and 443 when it was meshed at its own again.
+        from OCP import BRepMesh
+        from cadgen._internal import occt_mesh
+
+        real_mesher, real_faulty, deflections, calls = BRepMesh.BRepMesh_IncrementalMesh, occt_mesh._faulty, [], []
+
+        def mesher(shape, deflection, *args):
+            deflections.append(deflection)
+            return real_mesher(shape, deflection, *args)
+
+        def faulty(faces, face_map, required, *args):
+            calls.append(None)
+            real_faulty(faces, face_map, required, *args)
+            # Two faces wrong at its own deflection and at a quarter, one at half.
+            return [self.bore, 1][:1 if len(calls) == 2 else 2] if len(calls) <= 3 else []
+
+        with mock.patch.object(BRepMesh, "BRepMesh_IncrementalMesh", side_effect=mesher), \
+                mock.patch.object(occt_mesh, "_faulty", side_effect=faulty):
+            _mesh(self.topods)
+        self.assertEqual([round(d / deflections[0], 3) for d in deflections], [1.0, 0.5, 0.25, 0.5])
+
     def test_a_tessellation_that_would_fold_a_neighbour_out_is_refused_and_splits_none(self):
         # A point the tessellator lays on its boundary must be a point of the edge it shares:
         # one that is not, split into a neighbour, folded a vendor button's B-spline 399
@@ -405,9 +477,9 @@ class EmptyFace(unittest.TestCase):
         self.assertEqual(_open_edges(mesh), 0, "the bore meets its neighbours along every edge")
 
     def test_a_face_the_pass_leaves_a_gap_in_is_meshed_again(self):
-        # OCCT reports a failure when it leaves part of a face uncovered -- a sixth of the
-        # radial engine's cylinder head around a B-spline's pole -- and a gap inside a face
-        # drew as a hole. Here the plate's largest face loses a triangle on the first pass.
+        # OCCT leaves part of a face uncovered now and then -- a sixth of the radial engine's
+        # cylinder head around a B-spline's pole -- and a gap inside a face drew as a hole. Here
+        # the plate's largest face loses a triangle on the first pass.
         from OCP import BRepMesh
         from OCP.BRep import BRep_Tool
         from OCP.Poly import Poly_Triangle
@@ -415,10 +487,6 @@ class EmptyFace(unittest.TestCase):
         from OCP.TopoDS import TopoDS
 
         real, meshed = BRepMesh.BRepMesh_IncrementalMesh, []
-
-        class Failed:
-            def GetStatusFlags(self):
-                return 0x4  # IMeshData_Failure
 
         def mesher(shape, *args):
             result = real(shape, *args)
@@ -431,8 +499,10 @@ class EmptyFace(unittest.TestCase):
             largest.ResizeTriangles(len(kept), True)
             for k, corners in enumerate(kept, 1):
                 largest.SetTriangle(k, Poly_Triangle(*corners))
-            return Failed()
+            return result
 
+        # OCCT reports nothing: it left the W16's, the hand's and the rear suspension's gaps
+        # without a word, so a pass whose mesh has an open edge is looked at.
         with mock.patch.object(BRepMesh, "BRepMesh_IncrementalMesh", side_effect=mesher):
             _body, mesh = _mesh(self.topods)
         self.assertGreater(len(meshed), 1, "the component was meshed again")

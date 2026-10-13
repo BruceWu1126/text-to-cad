@@ -432,10 +432,11 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   (`_internal/occt_mesh.py`) runs OCCT's `BRepMesh_IncrementalMesh` on the exact
   BREP at the display tolerance (`tessellation_policy.DISPLAY_TESSELLATION`: the
   chord tolerance a fraction of the component's bounding diagonal, the angle in
-  radians; each pass is checked for a face left empty, holed where OCCT reports a
-  failure, or -- a cylinder, cone, sphere or torus, which OCCT does not measure --
-  off its exact surface, and a part with such a face is meshed again, whole and
-  finer, unless its first pass took seconds; a face no pass gets right is
+  radians; each pass is checked for a face left empty, holed (where OCCT reports a
+  failure or the mesh has an open edge), or off its exact surface (each cylinder,
+  cone, sphere and torus, which OCCT does not measure, and each freeform face a
+  screen of its triangles picks), and a part with such a face is meshed again,
+  whole and finer, unless its first pass took seconds; a face no pass gets right is
   tessellated over its own parameters by `_internal/face_fallback.py` where that
   does no harm; a needle folded over its neighbour is unfolded), reading what the
   triangles do not say from the part's selector table (each face's area, each
