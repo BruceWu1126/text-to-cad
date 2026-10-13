@@ -210,7 +210,7 @@ def _library_property_at(symbol: Symbol, key: str) -> tuple[float, float, float]
 
 
 def schematic_document(
-    board: Board, *, project: str, net_of_pin, power_flag_nets: list[str], script_root=None
+    board: Board, *, project: str, net_of_pin, power_flag_nets: list[str], script_root=None, project_dir=None
 ) -> tuple[list, dict[str, str]]:
     """The ``.kicad_sch`` tree, and each reference's symbol path for the board's footprints.
 
@@ -277,7 +277,7 @@ def schematic_document(
             # The library symbol's own fields travel with it (a diode's Sim.Device, so KiCad's
             # simulator can read the schematic), then the part's properties= and the script line
             # that made it (the footprint carries the same: KiCad's parity check compares them).
-            fields.extend((key_, value_, True) for key_, value_ in sorted(unit.part.document_fields(script_root).items()))
+            fields.extend((key_, value_, True) for key_, value_ in sorted(unit.part.document_fields(script_root, project_dir).items()))
         else:
             fields.append(("Footprint", "", True))
             fields.append(("Datasheet", "", True))

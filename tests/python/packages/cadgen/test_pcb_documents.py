@@ -225,6 +225,28 @@ class PcbDocumentsTest(unittest.TestCase):
         overridden = self.board().part("Test:FIDUCIAL", footprint="Test:ONE_PAD", properties={"Sim.Enable": "1"})
         self.assertEqual(overridden.fields, {"Sim.Enable": "1"})
 
+    def test_a_relative_sim_library_starts_at_the_script_in_the_project_too(self) -> None:
+        # A testbench reads Sim.Library from the script's folder, KiCad from the project's: the
+        # written project's path is the same file, from the project folder.
+        board = self.board()
+        model = {"Sim.Library": "models/hat.lib", "Sim.Name": "D1N4148"}
+        fixed = {"Sim.Library": "${KICAD10_SYMBOL_DIR}/x.lib", "Sim.Name": "X"}
+        for ref, properties in (("D1", model), ("D2", fixed)):
+            diode = board.part("Test:R", footprint="Test:R_0603", ref=ref, properties=properties)
+            board.no_connect(diode[1], diode[2])
+            board.place(diode, at=(-12, -8 if ref == "D1" else 8))
+        root = Path(self._tmp.name)
+        texts = project_texts(board, name="amp", script_root=root / "src", project_dir=root / "PCB" / "amp")
+
+        def fields(node: list) -> dict[str, str]:
+            return {str(prop[1]): str(prop[2]) for prop in sexpr.find_all(node, "property")}
+
+        for ref, library in (("D1", "../../src/models/hat.lib"), ("D2", "${KICAD10_SYMBOL_DIR}/x.lib")):
+            self.assertEqual(fields(_footprint(texts.pcb_tree, ref))["Sim.Library"], library)
+        self.assertIn('(property "Sim.Library" "../../src/models/hat.lib"', texts.sch)
+        unmoved = project_texts(board, name="amp")  # no folders given: the field as written
+        self.assertEqual(fields(_footprint(unmoved.pcb_tree, "D1"))["Sim.Library"], "models/hat.lib")
+
     def test_each_part_and_hole_names_the_script_line_that_made_it(self) -> None:
         # board.part() and board.hole() remember the first line outside cadgen that called them,
         # and both documents carry it as a hidden Script field: the symbol's and the footprint's
