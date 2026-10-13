@@ -49,9 +49,9 @@ REGISTRY: dict[str, Entry] = {entry.name: entry for entry in (
     _entry("bore", 1, "holes_2d", "Helical bore"),
     _entry("circular", 1, "holes_2d", "Round pocket or boss"),
     _entry("thread_mill", 1, "holes_2d", "Thread mill"),
-    _entry("chamfer_2d", 1, "milling_2d", "Chamfer"),
-    _entry("engrave", 1, "milling_2d", "V-carve"),
-    _entry("trace", 1, "milling_2d", "Trace"),
+    _entry("chamfer_2d", 1, "edges_2d", "Chamfer"),
+    _entry("engrave", 1, "edges_2d", "V-carve"),
+    _entry("trace", 1, "edges_2d", "Trace"),
     # Phase 1: drilling and hole cycles.
     _entry("drill", 1, "drilling", "Drill"),
     _entry("spot_drill", 1, "drilling", "Spot drill"),

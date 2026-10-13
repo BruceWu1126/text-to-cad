@@ -129,6 +129,14 @@ class Part:
     def face(self, ordinal: int) -> PartFace:
         return self.faces[ordinal - 1]
 
+    def edge(self, ordinal: int) -> Any:
+        """The edge ``#o1.eN`` as a TopoDS_Edge in the document frame; a ValueError when the part has no such edge."""
+        from OCP.TopoDS import TopoDS
+
+        if not 1 <= ordinal <= self._edge_map.Extent():
+            raise ValueError(f"{self.ref}.e{ordinal}: the part has edges e1 to e{self._edge_map.Extent()}")
+        return TopoDS.Edge_s(self._edge_map.FindKey(ordinal))
+
     def neighbours(self, ordinal: int, edges=None) -> list[int]:
         """The faces sharing an edge with this one (only across ``edges`` when given), in ordinal order."""
         found: set[int] = set()

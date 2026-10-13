@@ -6,7 +6,8 @@
 the feeds, the travel heights, the stock, where the tool is before it starts, the tolerance and a logger.
 
 ``plan`` returns a :class:`Planned`: the toolpath, the numbers its ``human_lines`` and the checks read (``stats``),
-and any findings it made on the way (the feeds' clamps first).
+and any findings it made on the way (the feeds' clamps first). An operation that cuts with a second tool too puts
+that toolpath in ``before``.
 
 Tests build a context straight from a STEP and a job document with :meth:`PlanContext.from_step`, without
 ``run.py``; they pass one ``shared`` dict per part so the part is opened, and each setup placed and recognised, once.
@@ -48,6 +49,14 @@ class Planned:
     toolpath: "Toolpath"
     stats: dict = field(default_factory=dict)
     findings: tuple[dict, ...] = ()
+    #: Toolpaths the operation runs before :attr:`toolpath`, each with its own tool (an engraving's flat-bottom
+    #: clearing with its ``clear_tool``); most operations have none. :attr:`toolpaths` lists them in running order.
+    before: tuple["Toolpath", ...] = ()
+
+    @property
+    def toolpaths(self) -> tuple["Toolpath", ...]:
+        """Every toolpath the operation runs, in order: :attr:`before`, then :attr:`toolpath`."""
+        return (*self.before, self.toolpath)
 
 
 @dataclass
