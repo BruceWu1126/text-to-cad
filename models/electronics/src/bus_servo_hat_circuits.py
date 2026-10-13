@@ -21,9 +21,9 @@ C_1206 = "Capacitor_SMD:C_1206_3216Metric"
 SOD_323 = "Diode_SMD:D_SOD-323"
 SOT_23_5 = "Package_TO_SOT_SMD:SOT-23-5"
 
-# A testbench reads a model path from this folder, KiCad from the board's project folder
-# (`../PCB`); this one reaches the same file from both.
-MODELS = "../src/models/hat.lib"
+# From this folder, as every path in a script is; the board's build writes the same file's
+# path from the project folder (`../PCB`), where KiCad reads it.
+MODELS = "models/hat.lib"
 # A connector, or an IC with no model: left out of simulation.
 UNSIMULATED = {"Sim.Enable": "0"}
 

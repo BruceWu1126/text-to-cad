@@ -88,7 +88,8 @@ Never order on the user's behalf: hand them the files and the steps.
 - The build's last line says `built`, not `draft`, and there were no warnings you did not
   read.
 - The board was checked against the fab it will be ordered from (`fab=`).
-- Every part has a value, and parts to be assembled have an `LCSC` (JLCPCB) or `MPN` field.
+- Every part has a value, and parts to be assembled have an `LCSC` (JLCPCB) or `MPN` field:
+  the review's sourcing suggestions name any that do not ([parts](parts.md)).
 - The silkscreen labels connectors and polarity (pin 1, +/-, LED and diode orientation).
 - Mounting holes and connectors match the enclosure (compose the board with `@step` into
   the case and look at it).

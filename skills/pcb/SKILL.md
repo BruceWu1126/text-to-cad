@@ -152,7 +152,8 @@ pcb.find_footprints("sot-223")     # ["Package_TO_SOT_SMD:SOT-223", ...]
 A wrong name fails with the closest real ones (`did you mean Resistor_SMD, ...`). A symbol's
 pins must have pads on its footprint (checked when the part is made). For a part KiCad's
 libraries lack, keep a project library (`parts.kicad_sym`, `parts.pretty/`) and pass its
-folder as `libraries=`; parts on step.parts or LCSC usually come with KiCad files.
+folder as `libraries=`; parts on step.parts or LCSC usually come with KiCad files
+([parts](references/parts.md)).
 
 Write subcircuits as plain functions of a circuit, so the board and a simulation testbench
 share them:
@@ -230,7 +231,8 @@ cadgen pcb snapshot path/to/board.kicad_pcb tmp/board.png
 cadgen pcb snapshot path/to/board.kicad_sch tmp/schematic.png
 ```
 
-`validate` takes any KiCad 10 project, one drawn in KiCad included; positions are
+`validate` takes any KiCad 10 project, one drawn in KiCad included (keep those in
+`PCB/imported/`, as the CAD skill keeps outside STEPs: [imported boards](references/imported-boards.md)); positions are
 millimetres from the board's drill/place origin, y up. A snapshot is the CAD Viewer's
 picture: KiCad's own plot of the board (all layers, back to front, ratsnest on a draft) or
 of every schematic sheet.
@@ -268,8 +270,8 @@ What the user points at in the viewer reaches you as a board reference
 ## Handoff
 
 Report the files written, the build's last line (built or draft, and what is unrouted), the
-checks that ran (KiCad's ERC and DRC run on every build; simulations you ran), the parts
-without an LCSC or MPN field, and assumptions (ratings, footprints chosen, rules). Show the
+checks that ran (KiCad's ERC and DRC run on every build; simulations you ran), the review's
+suggestions you left (parts without an LCSC or MPN field among them), and assumptions (ratings, footprints chosen, rules). Show the
 board and schematic ([Show the model](#show-the-model)).
 
 ## References
@@ -279,4 +281,6 @@ board and schematic ([Show the model](#show-the-model)).
 - [Routing](references/routing.md): hand routing and Freerouting.
 - [Simulation](references/simulation.md): SPICE testbenches over the board's own subcircuits.
 - [Manufacturing](references/manufacturing.md): Gerbers, BOM, placement and ordering.
+- [Parts](references/parts.md): symbols, footprints, project libraries and the fields a BOM orders by.
+- [Imported boards](references/imported-boards.md): checking, editing and ordering a board drawn in KiCad.
 - [Inspection](references/inspection.md): board and schematic references from the viewer, `pcb.read_board`, `pcb.read_schematic`, and the script line behind each part.
