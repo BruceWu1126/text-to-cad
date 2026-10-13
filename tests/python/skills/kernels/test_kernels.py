@@ -26,7 +26,9 @@ add_repo_path("skills/kernels/kernels/_shared")
 import cadgen_stub  # noqa: E402
 from kernel_tools import manifest  # noqa: E402
 from kernel_tools.record import trace_model  # noqa: E402
-from kernel_tools.run import KernelError, run  # noqa: E402
+from kernel_tools.run import KernelError, describe, run  # noqa: E402
+
+import kernels as kernels_cli  # noqa: E402
 
 FIXTURES = repo_path("skills/kernels/fixtures")
 REFERENCE = json.loads((FIXTURES / "reference.json").read_text(encoding="utf-8"))
@@ -107,6 +109,24 @@ class ModelTests(unittest.TestCase):
         with self.assertRaisesRegex(KernelError, r"declares 2 models; name one: parts.py::block"):
             run(manifest.by_id("implicit"), str(self.script), cwd=self.tmp)
 
+    def test_models_sharing_a_file_write_their_own_names(self):
+        # cadgen's rule: the file's models each write <function>.<fmt>, unless out= names one.
+        self.assertEqual(describe(f"{self.script}::block").outs["step"], (self.tmp / "src" / "block.step").resolve())
+        self.assertEqual(describe(f"{self.script}::pill").outs["step"], (self.tmp / "STEP" / "pill.step").resolve())
+        self.script.write_text("from cadgen import build123d as bd, step\n\n"
+                               "@step\ndef only():\n    return bd.Box(1, 1, 1)\n", encoding="utf-8")
+        self.assertEqual(describe(str(self.script)).outs["step"], (self.tmp / "src" / "parts.step").resolve())
+
+    def test_a_model_that_fails_on_import_is_an_error_not_a_traceback(self):
+        self.script.write_text("from cadgen import build123d as bd, step\n\nTWIST = bd.Helix(1, 2, 3)\n\n"
+                               "@step\ndef twist():\n    return TWIST\n", encoding="utf-8")
+        for kernel in ("usd-brep", "implicit"):
+            with self.subTest(kernel), self.assertRaisesRegex(KernelError, "can't load parts.py: .*Helix"):
+                run(manifest.by_id(kernel), str(self.script), cwd=self.tmp)
+        self.script.write_text("from cadgen import build123d as bd, step\n\n1 / 0\n", encoding="utf-8")
+        with self.assertRaisesRegex(KernelError, "can't load parts.py: ZeroDivisionError"):
+            run(manifest.by_id("implicit"), str(self.script), cwd=self.tmp)
+
     def test_records_the_named_model(self):
         program = trace_model(f"{self.script}::pill")
         self.assertEqual(program["model"], "pill")
@@ -144,6 +164,24 @@ class ModelTests(unittest.TestCase):
         with self.assertRaisesRegex(KernelError, "Liar: gave up"):
             run(kernel, f"{self.script}::pill", cwd=self.tmp)
         self.assertFalse(stale.exists())
+
+
+class CheckTests(unittest.TestCase):
+    def test_a_kernel_that_never_ran_is_not_a_pass(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from unittest import mock
+
+        def missing(kernel, *_args, **_kwargs):
+            raise KernelError(f"{kernel.label}: can't run nothing (No such file or directory).")
+
+        out = StringIO()
+        with mock.patch.object(kernels_cli, "run", missing), redirect_stdout(out):
+            code = kernels_cli.main(["check", "--json", "implicit"])
+        self.assertEqual(code, 1)
+        report = json.loads(out.getvalue())
+        self.assertFalse(report["ok"])
+        self.assertIn("skipped", report["results"][0])
 
 
 class FixtureTests(unittest.TestCase):

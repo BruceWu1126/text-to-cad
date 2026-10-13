@@ -107,7 +107,10 @@ def load(script, function: str | None = None) -> Model:
     else:
         raise Unsupported(f"{script.name} declares {len(models)} models; name one: {script.name}::{sorted(models)[0]}")
     fn = models[name]
-    outs = {fmt: (script.parent / out if out else script.parent / f"{script.stem}.{fmt}").resolve()
+    # cadgen's default name: a file's sole model writes <file>.<fmt>; models
+    # sharing a file each write <function>.<fmt>, so they never collide.
+    stem = name if len(models) > 1 and name != script.stem else script.stem
+    outs = {fmt: (script.parent / out if out else script.parent / f"{stem}.{fmt}").resolve()
             for fmt, out in fn.__kernel_model__.items()}
     return Model(script=script, function=name, call=fn, outs=outs)
 

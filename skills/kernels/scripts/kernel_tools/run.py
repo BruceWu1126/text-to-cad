@@ -44,8 +44,11 @@ def describe(target: str) -> cadgen_stub.Model:
     cadgen_stub.install(record._recording_module())
     try:
         return cadgen_stub.load(script, function)
-    except cadgen_stub.Unsupported as exc:
-        raise KernelError(str(exc)) from None
+    except (cadgen_stub.Unsupported, record.Unsupported) as exc:
+        raise KernelError(f"can't load {Path(script).name}: {exc}") from None
+    except Exception as exc:
+        # The model is a program: importing it runs its top level, which can raise anything.
+        raise KernelError(f"can't load {Path(script).name}: {type(exc).__name__}: {exc}") from None
     finally:
         for name, module in saved.items():
             if module is not None:

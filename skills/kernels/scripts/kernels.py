@@ -81,10 +81,12 @@ def cmd_check(args) -> int:
                     report = run(kernel, str(project / f"{name}.py"), cwd=project)
                 except KernelError as exc:
                     if "can't run" in str(exc):
-                        row.update(skipped=str(exc))
+                        # A kernel that never ran is not a pass.
+                        failed = True
+                        row.update(ok=False, skipped=str(exc))
                         results.append(row)
                         if not args.json:
-                            print(f"  skipped: {exc}")
+                            print(f"  SKIP {exc}")
                         break
                     failed = True
                     row.update(ok=False, error=str(exc))
@@ -102,6 +104,8 @@ def cmd_check(args) -> int:
                     notes = "; ".join(w for w in report.get("warnings", []) if not w.startswith("meshed at"))
                     print(f"  {'ok  ' if ok else 'FAIL'} {name:<9} {report['volume']:>9.2f} vs {expected['volume']:>9.2f}"
                           f"  {error:>+8.2%}  {ms:>6} ms" + (f"  ({notes})" if notes else ""))
+    if not results:
+        failed = True
     if args.json:
         print(json.dumps({"ok": not failed, "results": results}))
     return 1 if failed else 0

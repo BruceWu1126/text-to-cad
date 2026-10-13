@@ -725,6 +725,8 @@ def trace_model(target: str | Path) -> dict:
         return {"ok": False, "error": str(exc), "unsupported": True}
     except NameError as exc:
         return {"ok": False, "error": f"{exc} (not modeled by the recorder yet)", "unsupported": True}
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     finally:
         _STACK.clear()
         for name, module in saved.items():

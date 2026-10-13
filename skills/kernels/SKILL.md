@@ -73,7 +73,8 @@ fails with that note.
   report them with the result.
 - **Comparing.** Compare kernels by volume and bounds within a tolerance,
   never by file bytes. `check` prints each kernel's volume error on eight
-  fixture parts against OpenCASCADE's.
+  fixture parts against OpenCASCADE's. A kernel that can't run fails the
+  check: set it up, or name only the kernels you have.
 
 ## Add or try a kernel
 
