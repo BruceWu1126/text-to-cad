@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 __all__ = ["LINEAR_TOL", "PROBE_MM", "Part", "PartFace", "Vec", "add", "cross", "dot", "open_part", "parallel",
-           "perpendicular", "same", "scale", "sub", "unit"]
+           "perpendicular", "refuse_mirrored", "same", "scale", "sub", "unit"]
 
 Vec = tuple[float, float, float]
 
@@ -91,6 +91,8 @@ class PartFace:
     v_range: tuple[float, float] | None = None
     #: A cylinder whose axis lies outside the material (a hole wall or an inside corner), not a boss.
     concave: bool = False
+    #: A cone's half angle, radians.
+    half_angle: float | None = None
 
 
 class Part:
@@ -118,6 +120,7 @@ class Part:
             self._edge_faces[edge] = tuple(faces)
         self.faces: tuple[PartFace, ...] = tuple(self._read_face(i) for i in range(1, self._face_map.Extent() + 1))
         self._intersector = None
+        self._classifiers: list | None = None
         self._spans: dict[tuple[int, Vec, Vec], tuple[float, float, float, float, float, float]] = {}
         self._samples: dict[int, list[tuple[Vec, Vec]]] = {}
 
@@ -178,9 +181,11 @@ class Part:
             radial = sub(p, add(info.axis_point, scale(info.axis, dot(sub(p, info.axis_point), info.axis))))
             info.concave = dot(n, radial) < 0
         elif kind == GeomAbs_Cone:
+            cone = adaptor.Cone()
             info.surface = "cone"
-            info.axis = _vec(adaptor.Cone().Axis().Direction())
-            info.axis_point = _vec(adaptor.Cone().Axis().Location())
+            info.axis = _vec(cone.Axis().Direction())
+            info.axis_point = _vec(cone.Axis().Location())
+            info.half_angle = abs(float(cone.SemiAngle()))
         elif kind == GeomAbs_SurfaceOfExtrusion:
             info.surface = "extrusion"
             info.axis = _vec(adaptor.Direction())
@@ -276,12 +281,36 @@ class Part:
         return self._intersector.IsDone() and self._intersector.NbPnt() == 0
 
     def inside(self, point: Vec) -> bool:
-        """``point`` is in the material (not in air, not on the surface)."""
+        """``point`` is in the material of any of the part's solids (not in air, not on the surface)."""
         from OCP.BRepClass3d import BRepClass3d_SolidClassifier
         from OCP.gp import gp_Pnt
         from OCP.TopAbs import TopAbs_IN
 
-        return BRepClass3d_SolidClassifier(self.shape, gp_Pnt(*point), 1e-7).State() == TopAbs_IN
+        from cadgen._internal.entity_ordinals import shape_entities
+
+        if self._classifiers is None:  # one per solid, loaded once: building one costs far more than a query
+            self._classifiers = [BRepClass3d_SolidClassifier(solid) for solid in shape_entities(self.shape)]
+        for classifier in self._classifiers:
+            classifier.Perform(gp_Pnt(*point), 1e-7)
+            if classifier.State() == TopAbs_IN:
+                return True
+        return False
+
+    def longest_line(self, ordinal: int) -> Vec | None:
+        """The direction of the face's longest straight edge, or ``None`` when it has none."""
+        from OCP.BRepAdaptor import BRepAdaptor_Curve
+        from OCP.GeomAbs import GeomAbs_Line
+        from OCP.TopoDS import TopoDS
+
+        best, direction = 0.0, None
+        for edge in sorted(self.face(ordinal).edges):
+            curve = BRepAdaptor_Curve(TopoDS.Edge_s(self._edge_map.FindKey(edge)))
+            if curve.GetType() != GeomAbs_Line:
+                continue
+            length = curve.LastParameter() - curve.FirstParameter()
+            if length > best + LINEAR_TOL:
+                best, direction = length, _vec(curve.Line().Direction())
+        return direction
 
 
 def perpendicular(direction: Vec) -> Vec:
@@ -301,6 +330,16 @@ def _keys(indexed_map) -> list:
     return [indexed_map.FindKey(index) for index in range(1, indexed_map.Extent() + 1)]
 
 
+def refuse_mirrored(ref: str, location) -> None:
+    """A ValueError for an occurrence placed with a mirroring transform (a TopLoc_Location, or None for none).
+
+    Refused rather than baked in: a mirror turns every face inside out, and a part is machined as it is made.
+    """
+    if location is not None and location.Transformation().IsNegative():
+        raise ValueError(f"{ref} is placed mirrored in its assembly; cam machines a part as it is made, so export "
+                         "the mirrored part as a solid of its own and plan that")
+
+
 def open_part(target: Path, occurrence: str | None = None) -> Part:
     """The part ``target`` holds (or its ``occurrence``), opened and picked as ``cadgen fea`` does."""
     from cadgen._internal.step_open import open_scene, pick_occurrence
@@ -311,8 +350,13 @@ def open_part(target: Path, occurrence: str | None = None) -> Part:
         leaves = [leaf.ref for leaf in scene.leaves() if leaf.ref.startswith(owner.ref + ".")]
         raise ValueError(f"{owner.ref} is a group of {len(leaves)} parts; cam machines one part, so pass --occurrence "
                          f"{' or '.join(leaves[:4])}{' ...' if len(leaves) > 4 else ''}")
-    part = Part(Path(target), owner.ref, owner.shape().wrapped)
-    count = sum(1 for _ in owner.entities("face"))
-    if count != len(part.faces):  # the copy must number its faces as the scene does, or every selector is wrong
-        raise RuntimeError(f"{owner.ref}: the scene lists {count} faces but its geometry has {len(part.faces)}")
+    refuse_mirrored(owner.ref, owner._node.location)
+    # The placed occurrence shares its faces with the scene's prototype, so its face N is the scene's #fN: checked
+    # face by face, since a wrong number would send every selector to the wrong face.
+    part = Part(Path(target), owner.ref, scene._placed(owner))
+    table = scene._table(owner, "face")
+    if table.Extent() != len(part.faces) or not all(
+            face.face.IsPartner(table.FindKey(face.ordinal)) for face in part.faces):
+        raise RuntimeError(f"{owner.ref}: its faces are numbered differently from the scene's selectors; "
+                           "cam cannot name them")
     return part

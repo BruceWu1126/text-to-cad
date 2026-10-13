@@ -126,11 +126,11 @@ PLATE = {
 }
 
 
-def plate_step(directory, name: str = "plate"):
-    """:data:`PLATE` written to ``directory/name.step``."""
+def plate_step(directory, name: str = "plate", turned_deg: float = 0.0):
+    """:data:`PLATE` written to ``directory/name.step``, turned ``turned_deg`` about Z when asked."""
     from pathlib import Path
 
-    from build123d import Align, Axis, Box, Cylinder, Pos, export_step, fillet
+    from build123d import Align, Axis, Box, Cylinder, Pos, Rot, export_step, fillet
 
     base = (Align.CENTER, Align.CENTER, Align.MIN)
     length, width, height = PLATE["size_mm"]
@@ -144,6 +144,8 @@ def plate_step(directory, name: str = "plate"):
         plate -= Pos(x, y, -1) * Cylinder(PLATE["through_diameter_mm"] / 2, height + 2, align=base)
     depth = PLATE["blind_depth_mm"]
     plate -= Pos(*PLATE["blind_hole"], height - depth) * Cylinder(PLATE["blind_diameter_mm"] / 2, depth + 1, align=base)
+    if turned_deg:
+        plate = Rot(0, 0, turned_deg) * plate
     step = Path(directory) / f"{name}.step"
     export_step(plate, str(step))
     return step
@@ -165,6 +167,53 @@ def slotted_block_step(directory, name: str = "block"):
     block -= Pos(-25, 12, 16) * Cylinder(4.5, 10, align=base)
     step = Path(directory) / f"{name}.step"
     export_step(block, str(step))
+    return step
+
+
+#: A drill's point: 118 degrees included, so its length past the full diameter is the radius / tan(59 degrees).
+DRILL_POINT_DEG = 118.0
+
+
+def drilled_block_step(directory, name: str = "drilled"):
+    """A 60 x 40 x 30 mm block standing on z = 0, centred in x and y, drilled from the top (+Z):
+
+    - at (-15, 0): a 6.8 mm blind hole, 12 mm of full diameter and a 118 degree drill point below;
+    - at (15, 10): a 5 mm through hole under a 10 mm, 90 degree countersink;
+    - at (15, -10): a 6 mm through hole, crossed at z = 15 by a 6 mm hole along x right through the block.
+    """
+    import math
+    from pathlib import Path
+
+    from build123d import Align, Box, Cone, Cylinder, Pos, Rot, export_step
+
+    base = (Align.CENTER, Align.CENTER, Align.MIN)
+    block = Box(60, 40, 30, align=base)
+    point = 3.4 / math.tan(math.radians(DRILL_POINT_DEG / 2))
+    block -= Pos(-15, 0, 18) * Cylinder(3.4, 13, align=base)
+    block -= Pos(-15, 0, 18) * Cone(0, 3.4, point, align=(Align.CENTER, Align.CENTER, Align.MAX))
+    block -= Pos(15, 10, -1) * Cylinder(2.5, 32, align=base)
+    block -= Pos(15, 10, 27.5) * Cone(2.5, 6, 3.5, align=base)  # radius 5 at the top face, 1 mm overshoot
+    block -= Pos(15, -10, -1) * Cylinder(3, 32, align=base)
+    block -= Pos(0, -10, 15) * Rot(0, 90, 0) * Cylinder(3, 62)
+    step = Path(directory) / f"{name}.step"
+    export_step(block, str(step))
+    return step
+
+
+def island_pocket_step(directory, name: str = "island"):
+    """An 80 x 60 x 10 mm plate standing on z = 0, centred: a 50 x 40 x 5 mm pocket with R4 corners from the top,
+    and a 10 x 10 mm island standing in its middle up to the top face."""
+    from pathlib import Path
+
+    from build123d import Align, Axis, Box, Pos, export_step, fillet
+
+    base = (Align.CENTER, Align.CENTER, Align.MIN)
+    plate = Box(80, 60, 10, align=base)
+    cutter = Pos(0, 0, 5) * Box(50, 40, 6, align=base)
+    plate -= fillet(cutter.edges().filter_by(Axis.Z), 4)
+    plate += Pos(0, 0, 5) * Box(10, 10, 5, align=base)
+    step = Path(directory) / f"{name}.step"
+    export_step(plate, str(step))
     return step
 
 # --- G-code back-plot ----------------------------------------------------------------------------------
