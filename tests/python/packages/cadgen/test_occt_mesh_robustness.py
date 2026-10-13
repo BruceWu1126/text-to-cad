@@ -140,6 +140,76 @@ class AtTheFloors(unittest.TestCase):
         self.assertEqual(0, _open_edges(finest))
 
 
+class OnTheSurface(unittest.TestCase):
+    def test_a_thin_round_swept_along_an_arc_stays_within_its_deflection(self):
+        """The motorbike's front fender: a band of rounded section revolved through 120 degrees,
+        its 4 mm corners swept along a 230 mm arc. OCCT measures its triangles against the surface
+        only on freeform faces unless told to on every face, and at this band's display deflection
+        its grid on a toroidal corner skipped the corner's inner rows: triangles spanning the whole
+        corner sat 1.2 mm off it, five times the deflection, and every view drew a saw-toothed edge."""
+        import math
+
+        from build123d import Axis, Plane, Pos, RectangleRounded, revolve
+        from OCP.BRep import BRep_Tool
+        from OCP.BRepAdaptor import BRepAdaptor_Surface
+        from OCP.GeomAbs import GeomAbs_Plane
+        from OCP.gp import gp_Pnt
+        from OCP.TopAbs import TopAbs_FACE
+        from OCP.TopExp import TopExp_Explorer
+        from OCP.TopLoc import TopLoc_Location
+        from OCP.TopoDS import TopoDS
+
+        from cadgen._internal.occt_mesh import _bounding_diagonal
+        from cadgen.tessellation_policy import DISPLAY_TESSELLATION
+
+        start = math.radians(30)
+        axle = (595.0, 0.0, 205.0)
+        plane = Plane(origin=axle, x_dir=(math.cos(start), 0, math.sin(start)), z_dir=(-math.sin(start), 0, math.cos(start)))
+        band = revolve((Pos(228, 0, 0) * RectangleRounded(12, 92, 4)).moved(plane.location),
+                       Axis(axle, (0, -1, 0)), revolution_arc=120)
+        chord, angle = DISPLAY_TESSELLATION["chordTolerance"], DISPLAY_TESSELLATION["angleTolerance"]
+        _mesh(band, chord=chord, angle=angle)  # meshing leaves its triangulation on the shape
+        deflection = chord * _bounding_diagonal(band.wrapped)
+        # Each triangle's centre against the surface at its centre's parameters: a triangle across
+        # a corner it should have stepped round sits that corner's sag off it.
+        worst = 0.0
+        explorer = TopExp_Explorer(band.wrapped, TopAbs_FACE)
+        while explorer.More():
+            face = TopoDS.Face_s(explorer.Current())
+            explorer.Next()
+            surface = BRepAdaptor_Surface(face, False)
+            if surface.GetType() == GeomAbs_Plane:
+                continue
+            triangulation = BRep_Tool.Triangulation_s(face, TopLoc_Location())
+            for index in range(1, triangulation.NbTriangles() + 1):
+                nodes = triangulation.Triangle(index).Get()
+                u = sum(triangulation.UVNode(node).X() for node in nodes) / 3
+                v = sum(triangulation.UVNode(node).Y() for node in nodes) / 3
+                a, b, c = (triangulation.Node(node).XYZ() for node in nodes)
+                worst = max(worst, surface.Value(u, v).Distance(gp_Pnt((a + b + c).Divided(3))))
+        self.assertLess(worst, 2 * deflection, f"{worst:.3f} mm off the surface at a {deflection:.3f} mm deflection")
+
+    def test_a_part_far_from_its_origin_is_not_meshed_again_for_its_rounding(self):
+        """Faces are measured on the single-precision positions the mesh is read in. A 10 mm
+        part built a kilometre from its origin rounds them by up to 0.06 mm, several times its
+        deflection, which no finer pass changes: held to its deflection alone, every round of
+        it counted as off its surface, and it was meshed four times and its rounds tessellated
+        over their parameters, cracked where they met their neighbours."""
+        from build123d import Box, Cylinder, fillet
+        from OCP import BRepMesh
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+        from OCP.gp import gp_Trsf, gp_Vec
+        from cadgen.tessellation_policy import DISPLAY_TESSELLATION
+
+        shift = gp_Trsf()
+        shift.SetTranslation(gp_Vec(1e6, 0, 0))
+        far = BRepBuilderAPI_Transform((fillet(Box(10, 10, 10).edges(), radius=2) - Cylinder(2, 20)).wrapped,
+                                       shift, True).Shape()
+        with mock.patch.object(BRepMesh, "BRepMesh_IncrementalMesh", wraps=BRepMesh.BRepMesh_IncrementalMesh) as mesher:
+            _mesh(far, chord=DISPLAY_TESSELLATION["chordTolerance"], angle=DISPLAY_TESSELLATION["angleTolerance"])
+        self.assertEqual(mesher.call_count, 1)
+
+
 class ExportAtSingularPoints(unittest.TestCase):
     def test_an_export_of_poles_and_apexes_is_manifold_and_watertight_in_every_format(self):
         import trimesh

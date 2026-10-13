@@ -37,7 +37,9 @@ from cadgen.store.objects import is_object_hash, object_path, put_object, read_v
 # selector and mesh kinds before it are retired).
 # 2: the producer key's tag and the selector table's edge-line algorithm name a producer
 # and edge lines: every part has a new key, and its table new bytes.
-PART_VERSION = 2
+# 3: the mesher measures each cylinder, cone, sphere and torus against its surface and
+# meshes a part again where one strays: a part whose round OCCT gridded off it has a new mesh.
+PART_VERSION = 3
 INDEX_KIND = "part"
 MAX_INDEX_BYTES = 16 * 1024
 _KEY = re.compile(rf"[0-9a-f]{{64}}-v{PART_VERSION}")

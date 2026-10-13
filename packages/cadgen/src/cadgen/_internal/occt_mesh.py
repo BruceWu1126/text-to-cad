@@ -15,21 +15,27 @@ mesher reads what the triangles do not say from the component's selector table
 (each face's area, each edge's display class) and its intrinsic face colours:
 the one input a display mesh and a mesh export at another tolerance are both
 made from (``cadgen.store.parts``). OCCT's mesher drops the odd tiny face at one
-deflection and meshes it at the next, so a component whose pass leaves a face
-empty that the mesh can resolve is meshed again, whole and finer, in a fixed
-order. A face no whole pass meshes is one OCCT refuses -- it reads the face's
-boundary as crossing itself or open, what a boolean's leftovers do to a valid face
--- and no setting or repair of OCCT's meshes it, so it is tessellated over its own
-parameters as cadgen's earlier tessellator did (``face_fallback``), against the
-meshed neighbours, and kept when its triangles cover the face's own area. A face
-that still has none is left out of the component, which is drawn without it, and
-the body names it (``unmeshedFaces``, ``cadgen.store.meshes``): one face no mesher
-covers never fails a view, a list or an export of the whole document, and each of
-them says which faces of which part it does not draw or write. A face smaller than
-the mesh can resolve -- its area under the square of the chord tolerance, inside the
-error every triangle may carry -- may have none and is not named, and such a face
-earns no finer pass. Any failure inside OCCT is the component's error. A component
-with no faces meshes nothing: its edges are sampled from their own curves.
+deflection and meshes it at the next, and it holds a freeform face's triangles to
+the deflection but grids a cylinder, cone, sphere or torus by formula without
+measuring them: across a thin round swept along a long arc (the motorbike's
+fender) the grid can skip the round's inner rows and span it five times the
+deflection off its surface. So each of those faces is measured exactly after the
+pass, and a component whose pass leaves a face empty that the mesh can resolve, or
+off its surface, is meshed again, whole and finer, in a fixed order. A face no
+whole pass meshes is one OCCT refuses -- it reads the face's boundary as crossing
+itself or open, what a boolean's leftovers do to a valid face -- and no setting or
+repair of OCCT's meshes it, so it is tessellated over its own parameters as
+cadgen's earlier tessellator did (``face_fallback``), against the meshed
+neighbours, and kept when its triangles cover the face's own area; so is a face no
+whole pass meshes on its surface. A face that still has none is left out of the
+component, which is drawn without it, and the body names it (``unmeshedFaces``,
+``cadgen.store.meshes``): one face no mesher covers never fails a view, a list or
+an export of the whole document, and each of them says which faces of which part
+it does not draw or write. A face smaller than the mesh can resolve -- its area
+under the square of the chord tolerance, inside the error every triangle may
+carry -- may have none and is not named, and such a face earns no finer pass. Any
+failure inside OCCT is the component's error. A component with no faces meshes
+nothing: its edges are sampled from their own curves.
 
 The arrays leave OCCT through its own glTF writer (``RWGltf_CafWriter``, one
 primitive per face), not one Python call per vertex: that is what keeps a large
@@ -54,8 +60,15 @@ import numpy as np
 # point: the floor under the scale of a component with no extent.
 _SCALE_FLOOR = 1e-6
 # The deflections, as multiples of the component's, at which a component whose
-# pass left a face empty is meshed again, whole: the first that leaves none wins.
+# pass left a face empty or off its surface is meshed again, whole: the first that
+# leaves none wins.
 _RETRY_SCALES = (0.5, 0.25)
+# How far a face's triangles may lie from its exact surface, as a multiple of the
+# deflection the face can be held to, before it counts as off its surface.
+_STRAY_FACTOR = 2.0
+# The surfaces OCCT grids by formula without measuring, by the selector table's names:
+# only their faces are measured against their surfaces after a pass.
+_GRIDDED = frozenset({"cylinder", "cone", "sphere", "torus"})
 # A face OCCT refuses is tessellated over its own parameters; its triangles are kept
 # when they cover the face's own area to this share -- a chord across a curved
 # boundary takes area off a small face, nothing near this much.
@@ -90,47 +103,119 @@ def _maps(topods):
     return faces, edges
 
 
-def _empty(face_map, ordinals: list[int]) -> list[int]:
-    """Those of ``ordinals`` whose face the mesher left without triangles."""
-    from OCP.BRep import BRep_Tool
-    from OCP.TopLoc import TopLoc_Location
+def _faulty(faces: dict, face_map, required: list[int], gridded: set[int], deflection: float) -> list[int]:
+    """Those of ``required`` the pass left without triangles, and those of them in
+    ``gridded`` it left off their surface."""
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.BRepMesh import BRepMesh_ShapeTool
     from OCP.TopoDS import TopoDS
 
-    empty = []
-    for ordinal in ordinals:
-        triangulation = BRep_Tool.Triangulation_s(TopoDS.Face_s(face_map.FindKey(ordinal)), TopLoc_Location())
-        if triangulation is None or triangulation.NbTriangles() == 0:
-            empty.append(ordinal)
-    return empty
+    faulty = []
+    for ordinal in required:
+        if ordinal not in faces:
+            faulty.append(ordinal)
+            continue
+        if ordinal not in gridded:
+            continue
+        face = TopoDS.Face_s(face_map.FindKey(ordinal))
+        positions, _normals, triangles = faces[ordinal]
+        distance = _surface_distance(BRepAdaptor_Surface(face, False), positions, triangles)
+        # A face is held to the component's deflection, or to what no pass can do better than
+        # where that is coarser: OCCT's floor of twice the face's own tolerance (radial's
+        # boolean-cut sphere, its edges 0.16 mm loose, at a 0.08 mm deflection), and the
+        # spacing of the single-precision positions it is read from (a part a kilometre from
+        # its origin rounds to 0.06 mm).
+        if distance is not None and distance > _STRAY_FACTOR * max(
+                deflection, 2.0 * BRepMesh_ShapeTool.MaxFaceTolerance_s(face),
+                float(np.spacing(np.abs(positions).max()))):
+            faulty.append(ordinal)
+    return faulty
 
 
-def _mesh(topods, face_map, required: list[int], deflection: float, angle: float) -> None:
-    """Mesh the component, and while a face of ``required`` is left empty, mesh it all
-    again, cleaned, at the retry deflections. A face no whole pass meshes is one OCCT
-    refuses: the component is meshed at its own deflection once more, and each face
-    still empty is tessellated over its own parameters against its meshed neighbours."""
+def _surface_distance(surface, positions: np.ndarray, triangles: np.ndarray) -> float | None:
+    """How far the triangles' centres and edge midpoints lie from ``surface`` at most, when
+    it is the cylinder, cone, sphere or torus OCCT grids without measuring: their closed
+    forms measure it exactly. None for any other surface, which OCCT measures itself."""
+    from OCP.GeomAbs import GeomAbs_Cone, GeomAbs_Cylinder, GeomAbs_Sphere, GeomAbs_Torus
+
+    kind = surface.GetType()
+    if kind not in (GeomAbs_Cylinder, GeomAbs_Cone, GeomAbs_Sphere, GeomAbs_Torus) or not len(triangles):
+        return None
+    corners = positions.astype(np.float64)[triangles]
+    points = np.concatenate([corners.mean(axis=1), ((corners + np.roll(corners, 1, axis=1)) / 2).reshape(-1, 3)])
+
+    def about(axis, origin: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Each point's height along ``axis`` from ``origin``, and its distance from the axis."""
+        direction = _xyz(axis.Direction())
+        offset = points - origin
+        height = offset @ direction
+        return height, np.linalg.norm(offset - np.outer(height, direction), axis=1)
+
+    if kind == GeomAbs_Sphere:
+        sphere = surface.Sphere()
+        gap = np.linalg.norm(points - _xyz(sphere.Location()), axis=1) - sphere.Radius()
+    elif kind == GeomAbs_Cylinder:
+        cylinder = surface.Cylinder()
+        gap = about(cylinder.Axis(), _xyz(cylinder.Location()))[1] - cylinder.Radius()
+    elif kind == GeomAbs_Torus:
+        torus = surface.Torus()
+        height, radial = about(torus.Axis(), _xyz(torus.Location()))
+        gap = np.hypot(radial - torus.MajorRadius(), height) - torus.MinorRadius()
+    else:
+        # In each point's plane through the axis, the distance from the line through the apex.
+        cone = surface.Cone()
+        height, radial = about(cone.Axis(), _xyz(cone.Apex()))
+        slope = abs(cone.SemiAngle())
+        gap = radial * math.cos(slope) - np.abs(height) * math.sin(slope)
+    return float(np.abs(gap).max())
+
+
+def _xyz(point) -> np.ndarray:
+    return np.array([point.X(), point.Y(), point.Z()])
+
+
+def _mesh(topods, face_map, required: list[int], gridded: set[int], deflection: float, angle: float) -> dict[int, tuple]:
+    """Mesh the component and read its faces back, and while a face of ``required`` is
+    left empty or (of ``gridded``) off its surface, mesh it all again, cleaned, at the
+    retry deflections. A face no whole pass gets right -- one OCCT refuses, or one it
+    keeps gridding off its surface -- is tessellated over its own parameters against its
+    meshed neighbours, once the component is meshed at its own deflection again."""
     from OCP.BRepMesh import BRepMesh_IncrementalMesh
     from OCP.BRepTools import BRepTools
     from OCP.Precision import Precision
 
     BRepMesh_IncrementalMesh(topods, deflection, False, angle, True)
+    faces = _read_faces(topods, face_map)
     for scale in _RETRY_SCALES:
-        if not _empty(face_map, required):
-            return
+        if not _faulty(faces, face_map, required, gridded, deflection):
+            return faces
         BRepTools.Clean_s(topods)
         # OCCT refuses a deflection under its confusion tolerance.
         BRepMesh_IncrementalMesh(topods, max(deflection * scale, Precision.Confusion_s()), False, angle, True)
-    if not _empty(face_map, required):
-        return
+        faces = _read_faces(topods, face_map)
+    if not _faulty(faces, face_map, required, gridded, deflection):
+        return faces
     BRepTools.Clean_s(topods)
     BRepMesh_IncrementalMesh(topods, deflection, False, angle, True)
-    _tessellate_refused(topods, face_map, _empty(face_map, required), deflection, angle)
+    _tessellate(topods, face_map, _faulty(_read_faces(topods, face_map), face_map, required, gridded, deflection),
+                deflection, angle)
+    return _read_faces(topods, face_map)
 
 
-def _tessellate_refused(topods, face_map, ordinals: list[int], deflection: float, angle: float) -> None:
+def _read_faces(topods, face_map) -> dict[int, tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    """Each meshed face's (positions, normals, local triangles), by ordinal."""
+    triangulated = _triangulated_faces(topods, face_map)
+    if not triangulated:
+        return {}
+    faces = _faces_from_gltf(topods, triangulated)
+    return _faces_one_by_one(triangulated) if faces is None else faces
+
+
+def _tessellate(topods, face_map, ordinals: list[int], deflection: float, angle: float) -> None:
     """Give each face of ``ordinals`` the triangles ``face_fallback`` builds over its
     parameters, when they cover its own area to ``_FALLBACK_AREA_TOLERANCE``; a face
-    left without stays empty, and the body names it."""
+    left without keeps what OCCT gave it -- none, for a face it refuses, which the body
+    names."""
     from cadgen._internal import face_fallback
     from OCP.BRep import BRep_Builder
     from OCP.BRepGProp import BRepGProp
@@ -363,12 +448,8 @@ def _mesh_component(topods, table: dict, face_colors: dict, *, part: str, chord:
     # left a 1,529-face case meshed three times over, fifteen times as long, for a
     # face under what the mesh can resolve.
     required = [ordinal for ordinal, area in table_faces if float(area or 0.0) >= deflection * deflection]
-    if face_map.Extent():
-        _mesh(topods, face_map, required, deflection, angle)
-    triangulated = _triangulated_faces(topods, face_map)
-    faces = (_faces_from_gltf(topods, triangulated) if triangulated else {})
-    if faces is None:
-        faces = _faces_one_by_one(triangulated)
+    gridded = {ordinal for ordinal, kind in _rows(table, "faces", "surfaceType") if kind in _GRIDDED}
+    faces = _mesh(topods, face_map, required, gridded, deflection, angle) if face_map.Extent() else {}
     # A face no mesher covered is left out, and the body names it: every reader says so.
     unmeshed = [ordinal for ordinal in required if ordinal not in faces]
 
