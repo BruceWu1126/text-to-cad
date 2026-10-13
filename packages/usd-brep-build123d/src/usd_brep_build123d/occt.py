@@ -1,20 +1,26 @@
-"""usd-brep BrepArray -> OpenCascade topology (the implementation behind
-``cadgen.usd_brep_bridge``). Imports OCP at module load: only ever imported from
-inside a bridge call, never at a model's gate.
+"""Exact conversion of a usd-brep body to OpenCascade B-rep: same planes, cylinders, cones,
+spheres, tori and NURBS, same topology, never a mesh.
 
-Pipeline: ``usd.export_brep`` writes a BrepArray ``.usda``; ``read_brep_arrays``
-parses its packed arrays (no ``pxr``); ``arrays_to_occt`` rebuilds one TopoDS
-edge per BrepArray edge, shared by every face that uses it, loops in BrepArray
-order, faces oriented by the solid region's faceuses; ShapeFix completes pcurves
-and tolerances. Conventions the schema does not state, checked on real output:
-NURBS surface control points are packed V-fastest; cylinders arrive as zero-angle
-cones; every circle is a 9-point rational quadratic NURBS; poles are bare
-vertices and seams are edges used twice by one face.
+Not needed to model with this package (its native output is USD); it is how the tests prove
+a result equals build123d's, and how a part reaches OpenCascade-only tools (STEP, say).
+Needs OCP (``pip install build123d``); imported only by whoever calls it.
+
+    from usd_brep_build123d.occt import to_occt, to_build123d
+
+Pipeline: ``usd.export_brep`` writes a BrepArray ``.usda``; ``read_brep_arrays`` parses
+its packed arrays (no ``pxr``); ``arrays_to_occt`` rebuilds one TopoDS edge per BrepArray
+edge, shared by every face that uses it, loops in BrepArray order, faces oriented by the
+solid region's faceuses; ShapeFix completes pcurves and tolerances. Every result is
+validated (BRepCheck plus a volume match against usd-brep's own integral); a conversion
+that does not validate raises ``BridgeError`` rather than returning a wrong solid.
+Conventions the schema does not state, checked on real output: NURBS surface control
+points are packed V-fastest; cylinders arrive as zero-angle cones; every circle is a
+9-point rational quadratic NURBS; poles are bare vertices and seams are edges used twice
+by one face.
 """
 
 from __future__ import annotations
 
-import contextlib
 import math
 import os
 import re
@@ -41,9 +47,14 @@ from OCP.TopAbs import TopAbs_FORWARD, TopAbs_REVERSED
 from OCP.TopoDS import TopoDS_Compound, TopoDS_Edge, TopoDS_Face, TopoDS_Shell, TopoDS_Solid, TopoDS_Wire
 from OCP.gp import gp_Ax1, gp_Ax2, gp_Ax3, gp_Dir, gp_Dir2d, gp_Pnt, gp_Pnt2d, gp_Vec
 
-from cadgen.usd_brep_bridge import BridgeError
+from .exporters import quiet_native_stderr
 
 _TWO_PI = 2 * math.pi
+
+
+class BridgeError(RuntimeError):
+    """A usd-brep -> OpenCascade conversion that did not validate."""
+
 
 # --------------------------------------------------------------------- arrays
 _ATTR = re.compile(r"^\s*uniform\s+(\w+)\[\]\s+([\w:]+)\s*=\s*\[(.*?)\]\s*$", re.M | re.S)
@@ -68,23 +79,7 @@ def read_brep_arrays(usda_text: str) -> dict:
     return out
 
 
-@contextlib.contextmanager
-def _quiet_native_stderr():
-    """usd-brep's bundled OpenUSD prints a warning per library when it cannot find
-    a ``pxr`` Python package; a build log is not the place for them. Errors still
-    arrive as Python exceptions, which carry the kernel trace."""
-    try:
-        saved = os.dup(2)
-    except OSError:
-        yield
-        return
-    try:
-        with open(os.devnull, "w") as null:
-            os.dup2(null.fileno(), 2)
-            yield
-    finally:
-        os.dup2(saved, 2)
-        os.close(saved)
+_quiet_native_stderr = quiet_native_stderr
 
 
 # ------------------------------------------------------------------- geometry
@@ -457,16 +452,24 @@ STRATEGIES = (
 _VALIDATION = {"fast": (1e-3, 2e-2), "strict": (1e-8, 1e-6)}  # (usd-brep accuracy, relative tolerance)
 
 
-def _occt_volume(shape):
+def _occt_volume(shape, accuracy):
+    """OpenCascade's volume to a relative accuracy: its default integration is off by ~1%
+    on rational NURBS faces, which are most of what usd-brep writes."""
     props = GProp_GProps()
-    BRepGProp.VolumeProperties_s(shape, props)
+    BRepGProp.VolumeProperties_s(shape, props, accuracy)
     return props.Mass()
 
 
 def brep_to_occt(brep, *, validate="fast", report=None):
+    """usd_brep.Brep (or a shape of this package) -> OCP TopoDS_Shape.
+
+    ``validate``: ``"fast"`` (BRepCheck + volume within 2% of usd-brep's default
+    integral), ``"strict"`` (volume to 1e-6; seconds on large parts) or ``False``.
+    """
     import usd_brep
 
-    with tempfile.TemporaryDirectory(prefix="cadgen-usd-brep-") as tmp:
+    brep = getattr(brep, "_brep", brep)
+    with tempfile.TemporaryDirectory(prefix="usd-brep-build123d-") as tmp:
         path = os.path.join(tmp, "brep.usda")
         with _quiet_native_stderr():
             usd_brep.usd.export_brep(brep.copy(), path)  # a copy: export caches UV trims on its input
@@ -486,10 +489,26 @@ def brep_to_occt(brep, *, validate="fast", report=None):
             tried.append(f"strategy {i}: {type(exc).__name__}: {exc}")
             continue
         valid = BRepCheck_Analyzer(shape).IsValid()
-        rel = abs(_occt_volume(shape) - want) / abs(want) if want else 0.0
+        rel = abs(_occt_volume(shape, accuracy) - want) / abs(want) if want else 0.0
         if valid and rel < rel_tol:
             if report is not None:
                 report.update(strategy=i, volume_rel_err=rel)
             return shape
         tried.append(f"strategy {i}: valid={valid} volume_rel_err={rel:.2e}")
     raise BridgeError("usd-brep -> OpenCascade conversion did not validate: " + "; ".join(tried))
+
+
+to_occt = brep_to_occt
+
+
+def to_build123d(shape, *, label=None, validate="fast"):
+    """A shape of this package (or a usd_brep.Brep) as a build123d Solid or Compound."""
+    import build123d as bd
+    from OCP.TopAbs import TopAbs_SOLID
+
+    occ = brep_to_occt(shape, validate=validate)
+    obj = bd.Solid(occ) if occ.ShapeType() == TopAbs_SOLID else bd.Compound(occ)
+    name = label if label is not None else getattr(shape, "label", "")
+    if name:
+        obj.label = name
+    return obj

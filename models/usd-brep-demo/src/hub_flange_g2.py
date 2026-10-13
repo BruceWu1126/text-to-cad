@@ -1,17 +1,15 @@
 """A hub flange whose hub-to-plate blend is curvature-continuous (G2).
 
-The showcase for what usd-brep adds: build123d/OpenCascade fillets are circular
-(G1, a curvature jump where the round meets each face), while usd-brep's blend
-cross-section can be G2. The exact NURBS blend surface survives the bridge into
-OpenCascade and on into the STEP and the GLB.
+The showcase for what usd-brep adds: build123d/OpenCascade fillets are circular (G1, a
+curvature jump where the round meets each face), while usd-brep's blend cross-section can
+be G2. ``bd.blend`` is the package's one extension to build123d's language for it; the rest
+is plain build123d. The exact NURBS blend surface is written to OpenUSD.
 """
 from __future__ import annotations
 
-from math import cos, sin, tau
+from pathlib import Path
 
-from cadgen import glb, step
-from cadgen import usd_brep as ub
-from cadgen.usd_brep_bridge import to_build123d
+import usd_brep_build123d as bd
 
 PLATE_RADIUS = 40.0
 PLATE_THICKNESS = 8.0
@@ -23,36 +21,26 @@ BOLT_RADIUS = 3.0
 BOLT_CIRCLE_RADIUS = 30.0
 BLEND = 4.0  # hub-to-plate G2 blend
 EDGE_ROUND = 1.0
+OUT = Path(__file__).resolve().parents[1] / "USD" / "hub_flange_g2.usda"
 
 
-def circles_at(brep, radius, z, tol=1e-6):
-    out = []
-    for edge in brep.edges():
-        (x0, y0, z0), (x1, y1, z1) = edge.bounding_box(tight=True)
-        if abs(z0 - z) < tol and abs(z1 - z) < tol and abs((x1 - x0) - 2 * radius) < tol and abs((y1 - y0) - 2 * radius) < tol:
-            out.append(edge)
-    return out
-
-
-@step(out="../STEP/hub_flange_g2.step")
-@glb(out="../GLB/hub_flange_g2.glb")
 def hub_flange_g2():
-    part = ub.boolean_union(
-        ub.create_cylinder((0, 0, 0), PLATE_RADIUS, PLATE_THICKNESS),
-        ub.create_cylinder((0, 0, PLATE_THICKNESS), HUB_RADIUS, HUB_HEIGHT),
-    )
-    part = ub.boolean_difference(part, ub.create_cylinder((0, 0, -1), BORE_RADIUS, PLATE_THICKNESS + HUB_HEIGHT + 2))
-    for i in range(BOLT_COUNT):
-        a = tau * i / BOLT_COUNT
-        bolt = ub.create_cylinder((BOLT_CIRCLE_RADIUS * cos(a), BOLT_CIRCLE_RADIUS * sin(a), -1), BOLT_RADIUS, PLATE_THICKNESS + 2)
-        part = ub.boolean_difference(part, bolt)
-
-    # xsect_type=2 is usd-brep's blend cross-section; continuity=2 makes it G2.
-    part = ub.fillet_edges(part, circles_at(part, HUB_RADIUS, PLATE_THICKNESS), radius=BLEND, xsect_type=2, continuity=2)
-    rims = circles_at(part, PLATE_RADIUS, 0.0) + circles_at(part, PLATE_RADIUS, PLATE_THICKNESS)
-    part = ub.fillet_edges(part, rims, radius=EDGE_ROUND)
-    return to_build123d(part, label="hub_flange_g2")
+    with bd.BuildPart() as hub:
+        bd.Cylinder(PLATE_RADIUS, PLATE_THICKNESS, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+        with bd.Locations((0, 0, PLATE_THICKNESS)):
+            bd.Cylinder(HUB_RADIUS, HUB_HEIGHT, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+        bd.Hole(BORE_RADIUS)
+        with bd.PolarLocations(BOLT_CIRCLE_RADIUS, BOLT_COUNT):
+            bd.Hole(BOLT_RADIUS)
+        circles = hub.edges().filter_by(bd.GeomType.CIRCLE)
+        bd.blend(circles.filter_by(lambda e: abs(e.radius - HUB_RADIUS) < 1e-6).group_by(bd.Axis.Z)[0], radius=BLEND, continuity=2)
+        rims = hub.edges().filter_by(bd.GeomType.CIRCLE).filter_by(lambda e: abs(e.radius - PLATE_RADIUS) < 1e-6)
+        bd.fillet(rims, radius=EDGE_ROUND)
+    hub.part.label = "hub_flange_g2"
+    return hub.part
 
 
 if __name__ == "__main__":
-    hub_flange_g2()
+    OUT.parent.mkdir(exist_ok=True)
+    bd.export_usd(hub_flange_g2(), OUT)
+    print(f"wrote {OUT}")
