@@ -432,6 +432,8 @@ def arrays_to_occt(a: dict, *, canonical: bool = True, periodic_pcurves: bool = 
                 B.Add(solid, sh)
             solids.append(solid)
 
+    if not solids:  # e.g. a fillet usd-brep "completes" by leaving faces with no material
+        raise BridgeError("the Brep has no solid region; the bridge converts solids only")
     if len(solids) == 1:
         shape = solids[0]
     else:
@@ -474,6 +476,8 @@ def brep_to_occt(brep, *, validate="fast", report=None):
         return arrays_to_occt(arrays)
     accuracy, rel_tol = _VALIDATION["strict" if validate == "strict" else "fast"]
     want = brep.volume(relative_accuracy=accuracy) if brep.is_manifold_solid() else None
+    if want is not None and want <= 0:
+        raise BridgeError(f"usd-brep reports a volume of {want:g} for this solid; it is not a valid body")
     tried = []
     for i, strategy in enumerate(STRATEGIES):
         try:
