@@ -11,8 +11,10 @@ The outline is built from straight sections and quarter arcs (a ball's end, a bu
 
 What a job leaves out is filled in as follows, and only here:
 
-- ``flute_length_mm``: 3 x diameter (a standard-length cutter). For a boring bar or back-bore it is the reach:
-  how deep the narrow neck goes before the shank.
+- ``flute_length_mm``: 3 x diameter (a standard-length cutter), cut short so the tool's body ends at a stated
+  ``stickout_mm``: a stated stickout always wins over a defaulted flute length (a 10 mm cutter stated 25 mm out
+  of its holder is drawn with 25 mm of flutes, not 30, and its holder at 25 mm). For a boring bar or back-bore it
+  is the reach: how deep the narrow neck goes before the shank.
 - ``shank_diameter_mm``: the diameter; 3 mm for a flat, ball, bull or thread mill under 3 mm (small cutters sit
   on a bigger shank, and a check that assumed a 1 mm shank would pass tools that cannot fit).
 - ``stickout_mm``: the flute length plus one diameter.
@@ -20,6 +22,9 @@ What a job leaves out is filled in as follows, and only here:
 - A boring bar's or back-bore's head is a quarter of its diameter tall, on a neck 0.6 x its diameter.
 - A counterbore's pilot (``pilot_diameter_mm``) is as long as it is wide.
 - A holder is drawn and checked only when the job states one.
+
+A stated stickout shorter than what the job itself fixes below the holder (stated flutes over a counterbore's
+pilot, a drill's point, a ball's end) is a ValueError naming ``stickout_mm``: the job contradicts itself.
 
 A thread mill is modelled as a multi-form cutter (full diameter for its flute length), the larger envelope of
 the two kinds. A tap is a cylinder of its major diameter; its lead chamfer is not drawn.
@@ -230,12 +235,17 @@ def profile(tool: "Tool") -> ToolProfile:
     diameter = float(tool.diameter_mm)
     radius = diameter / 2
     size = tool.size
+    stated_stickout = float(tool.stickout_mm) if tool.stickout_mm is not None else None
     flute = float(tool.flute_length_mm) if tool.flute_length_mm is not None else 3 * diameter
+    if tool.flute_length_mm is None and stated_stickout is not None:
+        # A counterbore's flutes start above its pilot; every other tool's at its tip.
+        below = float(size.get("pilot_diameter_mm", 0.0)) if tool.type == "counterbore" else 0.0
+        flute = max(min(flute, stated_stickout - below), 0.0)
     default_shank = diameter
     if tool.type in _SMALL_SHANK_TYPES and diameter < _SMALL_SHANK_MM:
         default_shank = _SMALL_SHANK_MM
     shank = float(tool.shank_diameter_mm) if tool.shank_diameter_mm is not None else default_shank
-    stickout = float(tool.stickout_mm) if tool.stickout_mm is not None else flute + diameter
+    stickout = stated_stickout if stated_stickout is not None else flute + diameter
 
     sections: list[Section] = []
     cutting = flute
@@ -283,6 +293,10 @@ def profile(tool: "Tool") -> ToolProfile:
 
     # The shank, from the top of what was drawn up to the holder face.
     body_top, body_r = sections[-1].z1, sections[-1].r1
+    if stated_stickout is not None and body_top > stated_stickout + 1e-9:
+        raise ValueError(f"{tool.id}.stickout_mm: {stated_stickout:g} mm out of the holder is shorter than the "
+                         f"{body_top:g} mm this {tool.type.replace('_', ' ')} needs below its holder (its tip, "
+                         "pilot and stated flutes); state a longer stickout or shorter flutes")
     stickout = max(stickout, body_top)
     if stickout > body_top:
         if shank / 2 != body_r:

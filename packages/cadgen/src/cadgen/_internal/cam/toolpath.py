@@ -11,7 +11,9 @@ first. Every function here that measures moves takes that ``start``.
 - ``arc_cw`` / ``arc_ccw``: an arc in the XY plane round ``center`` (G2 / G3), looking down the tool. Z may
   change along it (a helix, linear in the angle). An arc sweeps less than a full turn: a full turn is two arcs.
 - ``cycle``: a canned drilling cycle (G81 ... G87) at the hole ``xyz[:2]``; ``cycle`` holds its parameters and
-  ``xyz[2]`` is the height it returns to: its R plane (G99) or the height it started from (G98).
+  ``xyz[2]`` is the height it returns to: its R plane (G99) or the height it started from (G98). The cycle may
+  say which (``Cycle.return_to``); :func:`cycle_return` gives it either way. Before cutting, the tool rapids
+  across at the height it starts from to above the hole: :func:`rapids_below` counts that move.
   :func:`expand_cycle` gives the plain moves it stands for, for a post that has no such cycle, for timing and for
   the back-plot.
 
@@ -36,8 +38,9 @@ from typing import Iterable, Iterator, Sequence
 
 __all__ = [
     "ARC_RADIUS_TOL_MM", "CYCLE_KINDS", "CHIP_BREAK_MM", "Cycle", "Heights", "Helix", "Lengths", "MOVE_KINDS", "Move",
-    "PECK_CLEARANCE_MM", "PLUNGE", "Plunge", "Ramp", "Toolpath", "arc_sweep", "bounds", "check", "expand_cycle",
-    "fit_arcs", "lengths", "link", "move_length", "move_seconds", "rapids_below", "timed", "walk",
+    "PECK_CLEARANCE_MM", "PLUNGE", "Plunge", "RETURN_TO", "Ramp", "Toolpath", "arc_sweep", "bounds", "check",
+    "cycle_return", "densify", "expand_cycle", "fit_arcs", "lengths", "link", "move_length", "move_seconds",
+    "rapids_below", "sample_curve", "timed", "walk",
 ]
 
 MOVE_KINDS = ("rapid", "feed", "plunge", "arc_cw", "arc_ccw", "lead", "cycle")
@@ -59,6 +62,9 @@ CYCLE_KINDS = (
 _CYCLE_NEEDS = {"peck": ("peck_mm",), "chip_break": ("peck_mm",), "tap": ("pitch_mm",), "rigid_tap": ("pitch_mm",),
                 "fine_bore": ("shift_mm",), "back_bore": ("shift_mm",)}
 _CYCLE_DWELLS = frozenset(CYCLE_KINDS) - {"drill"}
+
+#: What a cycle returns to: the height it started from (G98) or its R plane (G99).
+RETURN_TO = ("initial", "r")
 
 #: How close a peck drill comes back down above the last peck's bottom before feeding again (G83's "d", a
 #: controller setting), and how far a chip-breaking cycle backs off between pecks (G73's "d"), mm.
@@ -95,6 +101,11 @@ class Cycle:
     bore, which starts below the part (``r``) and cuts up to ``z``. ``peck_mm`` (peck, chip_break), ``pitch_mm``
     (tap, rigid_tap, mm per turn) and ``shift_mm`` (fine_bore, back_bore: how far the tool moves off the wall) are
     given exactly when the kind takes them; ``dwell_s`` is a pause at the depth (any kind but drill).
+
+    ``return_to`` (``"initial"``: G98, ``"r"``: G99) says which height the move's ``xyz[2]`` is; ``None`` leaves it
+    to be read from the heights (:func:`cycle_return`). A back bore returns to where it started, never to its R
+    plane, which is under the part. ``shift_xy`` is the (x, y) way an oriented boring bar moves off the wall
+    (fine_bore, back_bore), any length but 0; ``None`` means +X, ``(1, 0)``.
     """
 
     kind: str
@@ -104,6 +115,8 @@ class Cycle:
     pitch_mm: float | None = None
     shift_mm: float | None = None
     dwell_s: float = 0.0
+    return_to: str | None = None
+    shift_xy: tuple[float, float] | None = None
 
     def __post_init__(self):
         if self.kind not in CYCLE_KINDS:
@@ -130,6 +143,18 @@ class Cycle:
                              "so r must be under z")
         if self.kind != "back_bore" and not self.z < self.r:
             raise ValueError(f"cycle: the depth z={self.z:g} must be under the R plane r={self.r:g}")
+        if self.return_to is not None and self.return_to not in RETURN_TO:
+            raise ValueError(f"cycle.return_to: {self.return_to!r} is not one of initial (G98), r (G99), or None")
+        if self.kind == "back_bore" and self.return_to == "r":
+            raise ValueError("cycle.return_to: a back bore returns to the height it started from; its R plane is "
+                             "under the part")
+        if self.shift_xy is not None:
+            if self.shift_mm is None:
+                raise ValueError(f"cycle.shift_xy: a {self.kind} cycle does not shift off the wall")
+            shift = _point(self.shift_xy, 2, "cycle.shift_xy")
+            if math.hypot(*shift) <= _EPS:
+                raise ValueError("cycle.shift_xy: the way the tool shifts must not be (0, 0)")
+            object.__setattr__(self, "shift_xy", shift)
 
 
 @dataclass(frozen=True)
@@ -226,7 +251,8 @@ def expand_cycle(move: Move, start: Sequence[float], *, peck_clearance_mm: float
     move's end height. Cutting down is ``plunge``, cutting up (a ream's or a tap's way out, a back bore) ``feed``,
     the dwell sits on the move that reaches the depth. ``peck_clearance_mm`` and ``chip_break_mm`` are the
     controller's G83 and G73 settings; ``shift_direction`` is the way an oriented boring bar moves off the wall
-    (G76, G87). A tap's expansion is motion only: the spindle reversal at the bottom is the post's to write.
+    (G76, G87) when the cycle's own ``shift_xy`` is ``None``. A tap's expansion is motion only: the spindle
+    reversal at the bottom is the post's to write.
     """
     if move.kind != "cycle":
         raise ValueError(f"expand_cycle: a {move.kind} move is not a cycle")
@@ -235,6 +261,8 @@ def expand_cycle(move: Move, start: Sequence[float], *, peck_clearance_mm: float
     cycle, feed, op = move.cycle, move.feed, move.op
     x, y, end_z = move.xyz
     r, z = cycle.r, cycle.z
+    if cycle.shift_xy is not None:
+        shift_direction = cycle.shift_xy
     out: list[Move] = []
 
     def go(kind: str, px: float, py: float, pz: float, *, dwell: float = 0.0):
@@ -305,6 +333,27 @@ def _check_cycle(start: Point, move: Move) -> None:
     if abs(end_z - cycle.r) > _EPS and abs(end_z - start[2]) > _EPS:
         raise ValueError(f"cycle: a cycle returns to its R plane ({cycle.r:g}) or to the height it started from "
                          f"({start[2]:g}), not {end_z:g}")
+    if cycle.return_to == "r" and abs(end_z - cycle.r) > _EPS:
+        raise ValueError(f"cycle: return_to r, so it ends at its R plane ({cycle.r:g}), not {end_z:g}")
+    if cycle.return_to == "initial" and abs(end_z - start[2]) > _EPS:
+        raise ValueError(f"cycle: return_to initial, so it ends at the height it started from ({start[2]:g}), "
+                         f"not {end_z:g}")
+
+
+def cycle_return(move: Move, start: Sequence[float]) -> str:
+    """``"initial"`` (G98) or ``"r"`` (G99): what a cycle move returns to, from ``start`` (where the tool is before
+    it). The cycle's ``return_to`` when set; else read from the heights: its R plane when it ends there and started
+    above it, else the height it started from (a cycle starting on its R plane is G98 and G99 at once; it reads as
+    ``"initial"``)."""
+    if move.kind != "cycle":
+        raise ValueError(f"cycle_return: a {move.kind} move is not a cycle")
+    start = _point(start, 3, "start")
+    _check_cycle(start, move)
+    if move.cycle.return_to is not None:
+        return move.cycle.return_to
+    if move.cycle.kind != "back_bore" and abs(move.xyz[2] - move.cycle.r) <= _EPS < start[2] - move.cycle.r:
+        return "r"
+    return "initial"
 
 
 def _expanded(start: Point, move: Move) -> tuple[Move, ...]:
@@ -414,12 +463,17 @@ def rapids_below(moves: Iterable[Move], *, start: Sequence[float], z: float) -> 
     """The indices of the rapids that move sideways with either end under ``z`` (the retract plane).
 
     Straight down and straight up are not counted: up leaves the cut, and down is onto a height the caller
-    declared clear. A cycle's own motion is the cycle's; it is not looked into.
+    declared clear. A cycle counts when its approach does: it rapids across at the height it starts from to above
+    its hole, so a cycle starting under ``z`` away from its hole (the next hole of a G99 chain, at the R plane) is
+    listed. The rest of a cycle's motion (pecks, a boring bar's shift inside its hole) is the cycle's own; it is not
+    looked into.
     """
     found = []
     for index, (here, move) in enumerate(walk(moves, start)):
         sideways = math.hypot(move.xyz[0] - here[0], move.xyz[1] - here[1]) > _EPS
         if move.kind == "rapid" and sideways and min(here[2], move.xyz[2]) < z - _EPS:
+            found.append(index)
+        elif move.kind == "cycle" and sideways and here[2] < z - _EPS:
             found.append(index)
     return found
 
@@ -492,6 +546,11 @@ def fit_arcs(points: Sequence[Sequence[float]], tol: float, *, feed: float, op: 
     Z changes linearly along it) spanning as many of them as stay within ``tol`` mm, the longer of the two
     winning, a line on a tie. An arc turns no more than half a turn, so a full circle comes back as two arcs.
     Deterministic: the same points give the same moves.
+
+    The points must be sampled finer than ``tol``: an arc is fitted only where every chord of the polyline sags
+    from it by less than ``tol``, so a circle sampled coarsely (a 90-gon of radius 20 sags 0.012 mm) stays lines at
+    ``tol`` 0.01. Sample curves with a chord deflection of ``tol / 4`` or less (:func:`sample_curve`, or
+    :func:`densify` for a polyline that already is the shape).
     """
     if not (isinstance(tol, (int, float)) and math.isfinite(tol) and tol > 0):
         raise ValueError(f"fit_arcs: tol must be above 0 mm, got {tol!r}")
@@ -519,6 +578,61 @@ def fit_arcs(points: Sequence[Sequence[float]], tol: float, *, feed: float, op: 
             out.append(Move("feed", pts[j_line], feed, op))
             i = j_line
     return tuple(out)
+
+
+def sample_curve(curve, t0: float, t1: float, *, max_deflection: float, min_segments: int = 4,
+                 max_depth: int = 20) -> list[Point]:
+    """Points along ``curve(t)`` (a function giving ``(x, y, z)``) from ``t0`` to ``t1``, close enough that no chord
+    strays more than about ``max_deflection`` mm from the curve: each of ``min_segments`` equal steps is halved
+    until the curve's midpoint lies within ``max_deflection`` of the chord. Smooth curves only: a feature narrower
+    than a step can be missed. For :func:`fit_arcs` at ``tol``, pass ``max_deflection=tol / 4``.
+    """
+    if not (isinstance(max_deflection, (int, float)) and math.isfinite(max_deflection) and max_deflection > 0):
+        raise ValueError(f"sample_curve: max_deflection must be above 0 mm, got {max_deflection!r}")
+    if not (isinstance(min_segments, int) and min_segments >= 1):
+        raise ValueError(f"sample_curve: min_segments must be a whole number 1 or more, got {min_segments!r}")
+
+    def at(t: float) -> Point:
+        return tuple(float(value) for value in _point(tuple(curve(t)), 3, f"curve({t:g})"))
+
+    out = [at(t0)]
+
+    def split(ta: float, pa: Point, tb: float, pb: Point, depth: int):
+        tm = (ta + tb) / 2
+        pm = at(tm)
+        if depth < max_depth and _segment_distance(pm, pa, pb) > max_deflection:
+            split(ta, pa, tm, pm, depth + 1)
+            split(tm, pm, tb, pb, depth + 1)
+        else:
+            out.append(pb)
+
+    ts = [t0 + (t1 - t0) * k / min_segments for k in range(min_segments + 1)]
+    points = [out[0]] + [at(t) for t in ts[1:]]
+    for k in range(min_segments):
+        split(ts[k], points[k], ts[k + 1], points[k + 1], 0)
+    return out
+
+
+def densify(points: Sequence[Sequence[float]], *, max_segment: float) -> list[Point]:
+    """The polyline with every segment split evenly into pieces no longer than ``max_segment`` mm. It adds points
+    on the chords, so it cannot bring a polyline closer to the curve it was sampled from: resample curves with
+    :func:`sample_curve` instead. Use it where the polyline is the shape (a pocket's straight walls) and a later
+    step wants points no further apart than ``max_segment``."""
+    if not (isinstance(max_segment, (int, float)) and math.isfinite(max_segment) and max_segment > 0):
+        raise ValueError(f"densify: max_segment must be above 0 mm, got {max_segment!r}")
+    pts = [tuple(float(value) for value in _point(point, 3, f"points[{index}]")) for index, point in enumerate(points)]
+    out = pts[:1]
+    for a, b in zip(pts, pts[1:]):
+        pieces = max(1, math.ceil(math.dist(a, b) / max_segment - 1e-9))
+        out.extend(tuple(a[n] + (b[n] - a[n]) * k / pieces for n in range(3)) for k in range(1, pieces + 1))
+    return out
+
+
+def _segment_distance(p: Sequence[float], a: Sequence[float], b: Sequence[float]) -> float:
+    ab = [b[k] - a[k] for k in range(3)]
+    span = sum(value * value for value in ab)
+    s = 0.0 if span <= 0 else max(0.0, min(1.0, sum((p[k] - a[k]) * ab[k] for k in range(3)) / span))
+    return math.dist(p, [a[k] + s * ab[k] for k in range(3)])
 
 
 def _extend(i: int, pts: list, fits) -> int:
@@ -607,8 +721,16 @@ class Heights:
 
     @classmethod
     def above(cls, stock_top_z: float, *, clearance_mm: float, retract_mm: float) -> "Heights":
-        """From an operation's ``clearance_mm`` and ``retract_mm``, which are above the stock top."""
+        """From ``clearance_mm`` and ``retract_mm`` above a stock top z. Operations use :meth:`from_frame`."""
         return cls(stock_top_z + clearance_mm, stock_top_z + retract_mm)
+
+    @classmethod
+    def from_frame(cls, frame, operation=None) -> "Heights":
+        """An operation's heights in a placed setup (a :class:`~cadgen._internal.cam.setups.SetupFrame`): its
+        ``clearance_mm`` and ``retract_mm``, or the setup's when ``operation`` is ``None``, through
+        ``SetupFrame.above_stock``, the one place a height above the stock becomes a z."""
+        source = frame.setup if operation is None else operation
+        return cls(frame.above_stock(source.clearance_mm), frame.above_stock(source.retract_mm))
 
 
 @dataclass(frozen=True)
@@ -658,13 +780,17 @@ def link(start: Sequence[float], end: Sequence[float], *, heights: Heights, retr
        nothing stands above it between the two points: no clamp, jaw or uncut boss), else the clearance plane.
        A tool already higher stays at its height.
     2. Rapid across, at that height, to above where the entry starts.
-    3. Rapid straight down to ``rapid_to``: by default the retract plane (or ``end`` when that is higher). A lower
-       ``rapid_to`` is the caller's declaration that no stock stands above it anywhere over the entry (the last
-       pass's floor, or air beside the stock); it must be at or above ``end``.
+    3. Rapid straight down to ``rapid_to``: by default (``None``) the retract plane (or ``end`` when that is
+       higher). A lower ``rapid_to`` is the caller's declaration that no stock stands above it anywhere over the
+       entry (the last pass's floor, or air beside the stock); it must be at or above ``end``.
     4. Enter, from ``rapid_to`` down to ``end``, at ``feed``: a plunge (``PLUNGE``), a :class:`Ramp` or a
        :class:`Helix`.
 
     The only rapid under the retract plane is step 3's straight-down one.
+
+    Callers should pass ``rapid_to``: the stock top over uncut stock, or the last pass's floor where the stock is
+    already cut away. Left at the retract plane, a ramp or helix starts its descent up in the air and spends that
+    part of its length cutting nothing (a ramp 5 mm into the stock from a 3 mm retract drops 3 of its 8 mm in air).
     """
     start = _point(start, 3, "start")
     end = _point(end, 3, "end")

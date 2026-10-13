@@ -10,7 +10,9 @@
   margin on each side; its length is the part's along the axis plus the axial margin at each end.
 - ``sheet``: the part's outline in X and Y grown by ``margin_mm`` ``[x, y]`` on each side, from the part's bottom up
   by ``thickness_mm`` (the part's height when not stated).
-- ``from``: the blank read from a STEP, as it sits in the part's frame.
+- ``from``: the blank read from a STEP, as it sits in the part's frame. It holds the part when its bounding box
+  does and the part less the blank (a boolean cut) leaves no volume: a blank with a pocket where the part stands
+  out is refused, though its box holds the part's.
 
 A stock that does not hold the part (a stated bar too thin, a blank beside the part) is a ValueError: a plan cut
 from it would be plausible and wrong (README law 10).
@@ -28,12 +30,16 @@ __all__ = ["Bounds", "StockSolid", "bounds_of", "make_stock", "occ_shape"]
 #: ``((x_min, y_min, z_min), (x_max, y_max, z_max))``, mm.
 Bounds = tuple[tuple[float, float, float], tuple[float, float, float]]
 
-#: Digits the bounds are rounded to (a nanometre): kernel noise below it never reaches a plan.
-_DIGITS = 9
+#: Digits the bounds are rounded to: 6 in mm is a nanometre (as in the toolpath), so kernel noise never reaches a plan.
+_DIGITS = 6
 #: How far a part may stand outside its stock, mm, before the stock is refused (the kernel's own slop).
 _CONTAIN_MM = 1e-4
-#: The chord deflection the part is meshed at to find its radius about a bar's centre line, mm.
-_RADIUS_DEFLECTION_MM = 0.002
+#: The chord deflection the part is meshed at to find its radius about a bar's centre line, mm. A face not turned
+#: about that line can stand out of the mesh by up to this, so it is the containment slop: a bar the check passes is
+#: never thinner than the part by more than the check allows anywhere else.
+_RADIUS_DEFLECTION_MM = _CONTAIN_MM
+#: The part's volume a ``from`` blank may leave outside it, as a fraction of the part's volume (boolean noise).
+_OUTSIDE_FRACTION = 1e-6
 
 
 @dataclass(frozen=True)
@@ -138,6 +144,28 @@ def _radius_about(shape: Any, axis: str, center: tuple[float, float]) -> float:
     return float(np.sqrt((array * array).sum(axis=1)).max())
 
 
+def _volume(shape: Any) -> float:
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+
+    props = GProp_GProps()
+    BRepGProp.VolumeProperties_s(shape, props)
+    return abs(props.Mass())
+
+
+def _volume_outside(part: Any, blank: Any) -> float | None:
+    """The part's volume outside the blank, mm3, when it is more than boolean noise; else ``None``."""
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+
+    part = occ_shape(part)
+    total = _volume(part)
+    cut = BRepAlgoAPI_Cut(part, occ_shape(blank))
+    if not cut.IsDone():
+        raise ValueError("stock.from: the kernel could not compare the blank with the part")
+    outside = _volume(cut.Shape())
+    return outside if outside > _OUTSIDE_FRACTION * max(total, 1.0) else None
+
+
 def _contains(outer: Bounds, inner: Bounds) -> bool:
     return all(o <= i + _CONTAIN_MM for o, i in zip(outer[0], inner[0])) and all(
         o >= i - _CONTAIN_MM for o, i in zip(outer[1], inner[1]))
@@ -176,6 +204,11 @@ def make_stock(stock, part: Any) -> StockSolid:
         if not _contains(found, part_bounds):
             raise ValueError(f"stock.from: the blank in {stock.path.name} ({_fmt(found)}) does not hold the part "
                              f"({_fmt(part_bounds)}); model the blank where it sits around the part")
+        outside = _volume_outside(part, shape)
+        if outside is not None:
+            raise ValueError(f"stock.from: the blank in {stock.path.name} does not hold the part: {outside:,.4g} mm3 "
+                             "of the part stands outside it, though its bounding box holds the part's; model the "
+                             "blank where it sits around the part")
         return StockSolid("from", shape, found)
     raise ValueError(f"stock.type: {stock.type!r} is not a stock cadgen makes")
 

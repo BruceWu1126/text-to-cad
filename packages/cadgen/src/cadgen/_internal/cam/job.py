@@ -89,7 +89,8 @@ SETUP_KEYS = ("id", "direction", "origin", "clearance_mm", "retract_mm", "fixtur
 DEFAULT_CLEARANCE_MM = 10.0
 DEFAULT_RETRACT_MM = 3.0
 #: Each fixture type and the sizes it takes (mm) besides ``type``; collisions are checked against it. ``grip_mm`` is
-#: how much of the stock the jaws hold; ``parallels_mm`` the height of the parallels the stock sits on in a vise.
+#: how far the jaws reach up the stock from its bottom; ``parallels_mm`` the height of the parallels the stock sits
+#: on in a vise, whose grip is its ``jaw_height_mm`` less them (``setups`` holds the model).
 FIXTURES: dict[str, tuple[str, ...]] = {
     "vise": ("jaw_height_mm", "jaw_width_mm", "grip_mm", "parallels_mm"),
     "plate": ("thickness_mm",),

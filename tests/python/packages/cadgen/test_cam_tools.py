@@ -9,7 +9,7 @@ from collections import Counter
 from tests.python.support.cam_fixtures import value_error
 
 from cadgen._internal.cam.job import Holder, Tool
-from cadgen._internal.cam.tools import PROFILE_TYPES, profile
+from cadgen._internal.cam.tools import PROFILE_TYPES, Envelope, profile
 
 
 def tool(kind: str, **size) -> Tool:
@@ -41,6 +41,16 @@ class ToolsTest(unittest.TestCase):
                          (3.0, 16.0, 16.0, 0.0))
         self.assertEqual([(part.part, part.radius) for part in flat.envelope()],
                          [("cutter", 3.0), ("shank", 3.0), ("holder", 16.0)])
+
+    def test_a_stated_stickout_wins_over_a_default_flute_length(self):
+        flat = profile(Tool("T1", 1, "flat_endmill", diameter_mm=10, stickout_mm=25, holder=Holder(32, 40)))
+        self.assertEqual((flat.cutting_length_mm, flat.stickout_mm, flat.length_mm), (25, 25, 65))
+        self.assertEqual(flat.envelope()[-1], Envelope("holder", 25, 65, 16))
+        counterbore = profile(Tool("T2", 2, "counterbore", diameter_mm=11, stickout_mm=30,
+                                   size={"pilot_diameter_mm": 6.6}))
+        self.assertEqual((counterbore.cutting_length_mm, counterbore.length_mm), (30, 30))
+        self.assertIn("T3.stickout_mm: 2 mm out of the holder is shorter",
+                      value_error(self, profile, Tool("T3", 3, "drill", diameter_mm=10, stickout_mm=2)))
 
     def test_every_mesh_is_closed_outward_and_deterministic(self):
         import numpy as np

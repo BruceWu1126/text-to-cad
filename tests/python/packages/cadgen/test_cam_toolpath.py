@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import math
 import unittest
+from dataclasses import replace
 
 from tests.python.support.cam_fixtures import heavy_at_import, value_error
 
 from cadgen._internal.cam.toolpath import (
-    PLUNGE, Cycle, Heights, Helix, Move, Ramp, Toolpath, expand_cycle, fit_arcs, link, move_seconds, rapids_below,
-    walk,
+    PLUNGE, Cycle, Heights, Helix, Move, Ramp, Toolpath, cycle_return, densify, expand_cycle, fit_arcs, link,
+    move_seconds, rapids_below, sample_curve, walk,
 )
 
 
@@ -80,6 +81,19 @@ class Arcs(unittest.TestCase):
         self.assertEqual({move.kind for move in tight}, {"feed"})
         self.assertEqual(len(tight), 64)
 
+    def test_a_true_circle_sampled_at_a_quarter_tol_fits_where_a_90_gon_cannot(self):
+        # A 90-gon of radius 20 sags 0.012 mm: at tol 0.01 it stays 90 lines.
+        self.assertEqual({move.kind for move in fit_arcs(polygon(20, 90), 0.01, feed=800)}, {"feed"})
+        circle = sample_curve(lambda t: (20 * math.cos(t), 20 * math.sin(t), 0.0), 0.0, 2 * math.pi,
+                              max_deflection=0.01 / 4)
+        self.assertEqual([(move.kind, move.center) for move in fit_arcs(circle, 0.01, feed=800)],
+                         [("arc_ccw", (0, 0)), ("arc_ccw", (0, 0))])
+        square = [(0, 0, 0), (10, 0, 0), (10, 10, 0), (0, 10, 0), (0, 0, 0)]
+        dense = densify(square, max_segment=3)
+        self.assertEqual(len(dense), 17)
+        self.assertEqual([move.xyz for move in fit_arcs(dense, 0.01, feed=800)],
+                         [(10, 0, 0), (10, 10, 0), (0, 10, 0), (0, 0, 0)])
+
     def test_clockwise_and_helical_arcs_fit_too(self):
         turn = [(10 * math.cos(-math.pi * k / 32), 10 * math.sin(-math.pi * k / 32), -k / 32) for k in range(33)]
         moves = fit_arcs(turn, 0.05, feed=800)
@@ -118,6 +132,44 @@ class Cycles(unittest.TestCase):
         cycle = Move("cycle", (0, 0, 7), 100, cycle=Cycle("drill", r=2, z=-5))
         self.assertIn("returns to its R plane (2) or to the height it started from (10), not 7",
                       value_error(self, expand_cycle, cycle, (0, 0, 10)))
+
+    def test_chip_break_fine_bore_and_back_bore_expand_to_g73_g76_and_g87(self):
+        g73 = Move("cycle", (0, 0, 10), 100, cycle=Cycle("chip_break", r=2, z=-3, peck_mm=2))
+        self.assertEqual([(move.kind, move.xyz[2]) for move in expand_cycle(g73, (0, 0, 10), chip_break_mm=0.2)], [
+            ("rapid", 2), ("plunge", 0), ("rapid", 0.2), ("plunge", -2), ("rapid", -1.8), ("plunge", -3), ("rapid", 10),
+        ])
+        g76 = Move("cycle", (0, 0, 2), 100, cycle=Cycle("fine_bore", r=2, z=-10, shift_mm=0.5, return_to="r",
+                                                        shift_xy=(0, -3)))
+        self.assertEqual([(move.kind, move.xyz) for move in expand_cycle(g76, (0, 0, 10))], [
+            ("rapid", (0, 0, 2)), ("plunge", (0, 0, -10)), ("rapid", (0, -0.5, -10)), ("rapid", (0, -0.5, 2)),
+            ("rapid", (0, 0, 2)),
+        ])
+        g87 = Move("cycle", (0, 0, 5), 100, cycle=Cycle("back_bore", r=-12, z=-8, shift_mm=1, dwell_s=0.5))
+        self.assertEqual([(move.kind, move.xyz, move.dwell_s) for move in expand_cycle(g87, (0, 0, 5))], [
+            ("rapid", (1, 0, 5), 0), ("rapid", (1, 0, -12), 0), ("rapid", (0, 0, -12), 0), ("feed", (0, 0, -8), 0.5),
+            ("rapid", (1, 0, -8), 0), ("rapid", (1, 0, 5), 0), ("rapid", (0, 0, 5), 0),
+        ])
+        self.assertEqual((cycle_return(g76, (0, 0, 10)), cycle_return(g87, (0, 0, 5))), ("r", "initial"))
+        self.assertIn("back bore returns to the height it started from",
+                      value_error(self, Cycle, "back_bore", -12, -8, shift_mm=1, return_to="r"))
+        self.assertIn("does not shift off the wall", value_error(self, Cycle, "drill", 2, -5, shift_xy=(1, 0)))
+
+    def test_return_to_says_which_height_the_cycle_ends_at(self):
+        g99 = Move("cycle", (0, 0, 2), 100, cycle=Cycle("drill", r=2, z=-5))
+        self.assertEqual(cycle_return(g99, (0, 0, 10)), "r")
+        self.assertEqual(cycle_return(Move("cycle", (0, 0, 10), 100, cycle=Cycle("drill", r=2, z=-5)), (0, 0, 10)),
+                         "initial")
+        wrong = Move("cycle", (0, 0, 10), 100, cycle=Cycle("drill", r=2, z=-5, return_to="r"))
+        self.assertIn("return_to r, so it ends at its R plane (2), not 10", value_error(self, expand_cycle, wrong,
+                                                                                       (0, 0, 10)))
+
+    def test_a_g99_chain_moving_to_its_next_hole_at_the_r_plane_is_a_low_rapid(self):
+        chain = [Move("cycle", (x, 5, 2), 100, cycle=Cycle("peck", r=2, z=-5, peck_mm=2, return_to="r"))
+                 for x in (5, 15, 25)]
+        self.assertEqual(rapids_below(chain, start=(0, 0, 10), z=3), [1, 2])
+        g98 = [replace(move, xyz=(*move.xyz[:2], 10), cycle=replace(move.cycle, return_to="initial"))
+               for move in chain]
+        self.assertEqual(rapids_below(g98, start=(0, 0, 10), z=3), [])
 
     def test_a_tap_feeds_at_rpm_times_pitch(self):
         tap = Move("cycle", (0, 0, 2), 900, cycle=Cycle("tap", r=2, z=-8, pitch_mm=1))

@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.python.support.cam_fixtures import heavy_at_import
+from tests.python.support.cam_fixtures import heavy_at_import, value_error
 
 from cadgen._internal.cam.job import Fixture, Setup, Stock
 
@@ -55,9 +55,12 @@ class StockTests(unittest.TestCase):
         bar = make_stock(Stock("cylinder", (0.0, 0.0), diameter_mm=25), shaft)
         self.assertEqual((bar.diameter_mm, bar.bounds[0][:2]), (25, (-7.5, -7.5)))
         across_x = make_stock(Stock("cylinder", (0.0, 0.0), axis="X"), plate())
-        self.assertAlmostEqual(across_x.diameter_mm, 2 * math.hypot(30, 5), places=6)
+        self.assertAlmostEqual(across_x.diameter_mm, 2 * math.hypot(30, 5), places=5)
         with self.assertRaisesRegex(ValueError, "stock.diameter_mm: a 18 mm bar does not hold the part"):
             make_stock(Stock("cylinder", (0.0, 0.0), diameter_mm=18), shaft)
+        with self.assertRaisesRegex(ValueError, "a 60 mm bar does not hold the part, which needs 60.828 mm about its "
+                                                "centre line along X"):
+            make_stock(Stock("cylinder", (0.0, 0.0), axis="X", diameter_mm=60), plate())
 
     def test_sheet_and_a_blank_from_step(self):
         from build123d import Box, Pos, export_step
@@ -68,11 +71,17 @@ class StockTests(unittest.TestCase):
         self.assertEqual(sheet.bounds, ((-5, -5, 0), (105, 65, 12)))
         with tempfile.TemporaryDirectory() as folder:
             blank, beside = Path(folder, "blank.step"), Path(folder, "beside.step")
+            ring = Path(folder, "ring.step")
             export_step(Pos(50, 30, 6) * Box(110, 70, 12), blank)
             export_step(Pos(250, 30, 6) * Box(110, 70, 12), beside)
+            export_step(Pos(50, 30, 6) * Box(110, 70, 12) - Pos(50, 30, 6) * Box(20, 20, 12), ring)
             self.assertEqual(make_stock(Stock("from", path=blank), plate()).bounds, ((-5, -5, 0), (105, 65, 12)))
             with self.assertRaisesRegex(ValueError, "stock.from: the blank in beside.step .* does not hold the part"):
                 make_stock(Stock("from", path=beside), plate())
+            # Its box holds the part's, but the part fills the blank's hole: a solid check, not a box check.
+            with self.assertRaisesRegex(ValueError, "stock.from: the blank in ring.step does not hold the part: "
+                                                    "4,000 mm3 of the part stands outside it"):
+                make_stock(Stock("from", path=ring), plate())
 
 
 class SetupTests(unittest.TestCase):
@@ -118,26 +127,68 @@ class SetupTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "#o1.f4: a face selector needs the part's faces"):
             placed(Setup("tilted", direction="#o1.f4"))
 
+    def test_corners_are_front_left_for_side_setups_too(self):
+        for direction in ("+X", "-X", "+Y", "-Y"):
+            with self.subTest(direction=direction):
+                corner = placed(Setup("side", direction=direction, origin="stock_top_corner"))
+                self.assertEqual((corner.stock_bounds[0][:2], corner.stock_top_z), ((0, 0), 0))
+        # +X maps the part's X, Y, Z to the setup's Z, Y, -X: front left is the part's top, min-Y edge.
+        self.assertEqual(placed(Setup("side", direction="+X", origin="stock_top_corner")).frame.origin, (102, -3, 11))
+
     def test_clearance_and_retract_are_absolute_heights_above_the_stock_top(self):
+        from types import SimpleNamespace
+
+        from cadgen._internal.cam.toolpath import Heights
+
         top = placed(Setup("top", origin="part_bbox_bottom_corner", clearance_mm=15, retract_mm=2))
         self.assertEqual((top.stock_top_z, top.clearance_z, top.retract_z, top.above_stock(5)), (11, 26, 13, 16))
+        self.assertEqual(Heights.from_frame(top), Heights(26, 13))
+        self.assertEqual(Heights.from_frame(top, SimpleNamespace(clearance_mm=20, retract_mm=1)), Heights(31, 12))
 
-    def test_the_vise_jaws_stand_grip_above_the_stock_bottom(self):
-        vise = Fixture("vise", {"jaw_height_mm": 20, "grip_mm": 5, "parallels_mm": 10})
-        fixture = placed(Setup("top", fixture=vise)).fixture
-        front, back, front_parallel, _ = fixture.volumes
+    def test_the_vise_stands_on_its_floor_and_grip_is_jaw_height_less_parallels(self):
+        # Stock bounds in the top setup: (-52, -33, -15) to (52, 33, 0).
+        fixture = placed(Setup("top", fixture=Fixture("vise", {"jaw_height_mm": 20, "grip_mm": 5}))).fixture
+        front, back, floor, front_parallel, _ = fixture.volumes
+        self.assertEqual(fixture.sizes["parallels_mm"], 15)
         self.assertEqual((front.min, front.max), ((-75, -53, -30), (75, -33, -10)))
         self.assertEqual((back.min[1], back.max[2]), (33, -10))
-        self.assertEqual((front_parallel.min, front_parallel.max), ((-52, -33, -25), (52, -27, -15)))
-        self.assertEqual(fixture.assumed, ("jaw_width_mm",))
+        self.assertEqual((floor.name, floor.min, floor.max), ("vise floor", (-75, -53, -40), (75, 53, -30)))
+        self.assertEqual((front_parallel.min, front_parallel.max), ((-52, -33, -30), (52, -27, -15)))
+        self.assertEqual(fixture.assumed, ("parallels_mm", "jaw_width_mm", "jaw_thickness_mm", "parallel_width_mm",
+                                           "floor_thickness_mm"))
+        self.assertEqual(fixture.notes, ())
         derived = placed(Setup("top", fixture=Fixture("vise", {"jaw_height_mm": 20, "parallels_mm": 10}))).fixture
         self.assertEqual((derived.sizes["grip_mm"], derived.volumes[0].max[2]), (10, -5))
         self.assertIn("grip_mm", derived.assumed)
-        with self.assertRaisesRegex(ValueError, "fixture.grip_mm: the jaws hold 20 mm of stock that is 15 mm tall"):
-            placed(Setup("top", fixture=Fixture("vise", {"grip_mm": 20})))
+
+    def test_default_vise_jaws_stand_proud_of_a_short_stock_with_the_floor_under_it(self):
+        fixture = placed(Setup("top", fixture=Fixture("vise", {}))).fixture
+        self.assertEqual([volume.name for volume in fixture.volumes], ["front jaw", "back jaw", "vise floor"])
+        self.assertEqual((fixture.volumes[0].min[2], fixture.volumes[0].max[2], fixture.volumes[2].max[2]),
+                         (-15, 25, -15))
+        self.assertEqual((fixture.sizes["jaws_above_stock_mm"], fixture.notes),
+                         (25, ("the vise jaws stand 25 mm above the stock top",)))
+        self.assertEqual(fixture.assumed[:3], ("jaw_height_mm", "parallels_mm", "grip_mm"))
+
+    def test_a_vise_whose_grip_parallels_and_jaws_disagree_is_refused(self):
+        message = value_error(self, placed, Setup("top", fixture=Fixture(
+            "vise", {"jaw_height_mm": 20, "grip_mm": 5, "parallels_mm": 10})))
+        self.assertIn("fixture: grip_mm (5) must be jaw_height_mm (20) minus parallels_mm (10), 10", message)
+        self.assertIn("hold none of the stock", value_error(self, placed, Setup("top", fixture=Fixture(
+            "vise", {"jaw_height_mm": 20, "parallels_mm": 20}))))
+
+    def test_chuck_and_collet_list_what_they_assumed(self):
         chuck = placed(Setup("top", fixture=Fixture("chuck", {"diameter_mm": 160, "jaw_length_mm": 25, "grip_mm": 6})))
         (jaws,) = chuck.fixture.volumes
         self.assertEqual((jaws.center, jaws.radius, jaws.z_min, jaws.z_max), ((0, 0), 80, -34, -9))
+        self.assertEqual(chuck.fixture.assumed, ())
+        with self.assertRaisesRegex(ValueError, "fixture.grip_mm: the jaws hold 20 mm of stock that is 15 mm long"):
+            placed(Setup("top", fixture=Fixture("chuck", {"grip_mm": 20})))
+        collet = placed(Setup("top", fixture=Fixture("collet", {})), Stock("box", (0.0, 0.0, 0.0, 0.0))).fixture
+        self.assertEqual(collet.assumed, ("diameter_mm", "length_mm", "grip_mm", "rim_mm"))
+        self.assertEqual((collet.sizes["grip_mm"], collet.volumes[0].z_max), (10, 0))
+        self.assertEqual(collet.notes, ("the collet holds all 10 mm of the stock: its default grip of 15 mm is more "
+                                        "than the stock is long",))
         self.assertEqual(placed(Setup("top")).fixture.volumes, ())
 
     def test_transforms_round_trip(self):

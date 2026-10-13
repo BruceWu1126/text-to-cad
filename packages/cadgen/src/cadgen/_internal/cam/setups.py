@@ -26,16 +26,29 @@ The fixture
     Boxes and cylinders in the setup's frame, for the collision checks (:class:`FixtureEnvelope`). A size the job does
     not state takes the default below and is listed in ``assumed``, so a finding can say what it assumed.
 
-    - vise: two jaws closing along the setup's Y on the stock's front and back faces, ``jaw_width_mm`` wide in X
-      about the stock's centre. Their tops stand ``grip_mm`` above the stock's bottom (the depth of stock they hold);
-      their bottoms ``jaw_height_mm`` below their tops. ``parallels_mm`` is the height of two parallels under the
-      stock's front and back edges. With no ``grip_mm``, the jaws hold ``jaw_height_mm - parallels_mm`` of the stock
-      (the stock sits on the parallels on the vise's floor), at most all of it.
+    - vise: modelled as it stands on the table. The stock sits on two parallels ``parallels_mm`` tall (0: on the
+      vise's floor), so the floor is ``parallels_mm`` under the stock's bottom. Two jaws ``jaw_height_mm`` tall stand
+      on the floor and close along the setup's Y on the stock's front and back faces, ``jaw_width_mm`` wide in X
+      about the stock's centre. ``grip_mm`` is not a size of its own: it is the height of the jaws' top above the
+      stock's bottom, ``jaw_height_mm - parallels_mm``. So any two of the three give the third; a job that states
+      all three must state them agreeing within 0.01 mm, else a ValueError names them. With ``grip_mm`` alone the
+      jaws are the default height (or ``grip_mm``, when taller) and the parallels make up the rest. A grip of 0 or
+      less (the parallels as tall as the jaws) holds nothing and is a ValueError. Jaws taller than the stock
+      stand proud of its top; that is real, so it is no error: the jaws are in the envelope at their full height
+      and ``notes`` says how far they stand above the stock top (``sizes["jaws_above_stock_mm"]`` holds the
+      number), for a finding to word. The floor (a slab :data:`VISE_FLOOR_MM` thick, as wide as the jaws and
+      reaching across both) and any parallels are in the envelope too, so a cut through the stock sees what is
+      under it.
     - plate: a plate ``thickness_mm`` thick under the stock, wider than it by :data:`PLATE_BORDER_MM` all round.
     - chuck: a cylinder about the setup's Z axis through the stock's centre, ``diameter_mm`` across, its jaw face
       ``grip_mm`` above the stock's bottom and ``jaw_length_mm`` long below it.
-    - collet: a cylinder ``diameter_mm`` across holding :data:`COLLET_GRIP_MM` of the stock's bottom.
+    - collet: a cylinder ``diameter_mm`` across holding :data:`COLLET_GRIP_MM` of the stock's bottom,
+      :data:`COLLET_LENGTH_MM` long.
     - sheet, none: nothing to collide with.
+
+    ``assumed`` lists, by key, every size the fixture used that the job did not state (the ones a job cannot state,
+    such as a vise's ``jaw_thickness_mm`` or a plate's ``border_mm``, always). ``notes`` says in plain words what
+    the model adjusted or what stands out (a default grip cut to a short stock, jaws proud of the stock).
 
 Reach
     :func:`reachable` says whether a 3-axis setup's tool can come at a surface from the direction it needs.
@@ -53,15 +66,20 @@ from cadgen._internal.cam.stock import Bounds, StockSolid, bounds_of, occ_shape
 
 __all__ = [
     "COLLET_GRIP_MM", "Cylinder", "Envelope", "FixtureEnvelope", "Frame", "PLATE_BORDER_MM", "SetupFrame",
-    "VISE_DEFAULTS", "BoxVolume", "direction_vector", "fixture_envelope", "reachable", "rotation_to", "setup_frame",
-    "setup_frames",
+    "VISE_DEFAULTS", "VISE_FLOOR_MM", "BoxVolume", "direction_vector", "fixture_envelope", "reachable", "rotation_to",
+    "setup_frame", "setup_frames",
 ]
 
-_DIGITS = 9
+#: Digits coordinates are rounded to: 6 in mm is a nanometre, as in the toolpath.
+_DIGITS = 6
+_UNIT_DIGITS = 12
 
 #: A vise's sizes when the job does not state them, mm.
 VISE_DEFAULTS = {"jaw_height_mm": 40.0, "jaw_width_mm": 150.0, "parallels_mm": 0.0, "jaw_thickness_mm": 20.0,
-                 "parallel_width_mm": 6.0}
+                 "parallel_width_mm": 6.0, "floor_thickness_mm": 10.0}
+VISE_FLOOR_MM = VISE_DEFAULTS["floor_thickness_mm"]
+#: How closely a stated ``grip_mm`` must agree with ``jaw_height_mm - parallels_mm``, mm.
+VISE_AGREE_MM = 0.01
 #: How far a plate reaches past the stock on every side, mm, and its thickness when not stated.
 PLATE_BORDER_MM = 25.0
 PLATE_THICKNESS_MM = 12.0
@@ -80,13 +98,19 @@ REACH_TOLERANCE_DEG = 0.01
 _AXES = {"+X": (1, 0, 0), "-X": (-1, 0, 0), "+Y": (0, 1, 0), "-Y": (0, -1, 0), "+Z": (0, 0, 1), "-Z": (0, 0, -1)}
 
 
-def _clean(value: float) -> float:
-    value = round(float(value), _DIGITS)
+def _clean(value: float, digits: int = _DIGITS) -> float:
+    value = round(float(value), digits)
     return 0.0 if value == 0 else value
 
 
-def _vec(values) -> tuple[float, float, float]:
-    return tuple(_clean(value) for value in values)
+def _vec(values, digits: int = _DIGITS) -> tuple[float, float, float]:
+    return tuple(_clean(value, digits) for value in values)
+
+
+def _unit(values) -> tuple[float, float, float]:
+    """A direction or a rotation row: unitless, so rounded finer than a coordinate (6 digits would bend a
+    rotation by a micrometre per metre)."""
+    return _vec(values, _UNIT_DIGITS)
 
 
 # --- frames --------------------------------------------------------------------------------------------
@@ -102,7 +126,7 @@ def direction_vector(direction: str, face_normal: Callable[[str], Sequence[float
     length = math.sqrt(sum(value * value for value in normal))
     if len(normal) != 3 or not length > 1e-12:
         raise ValueError(f"setup direction {direction}: the face has no normal to point the tool along (is it planar?)")
-    return _vec(value / length for value in normal)
+    return _unit(value / length for value in normal)
 
 
 def rotation_to(direction: Sequence[float]) -> tuple[tuple[float, float, float], ...]:
@@ -125,7 +149,7 @@ def rotation_to(direction: Sequence[float]) -> tuple[tuple[float, float, float],
         k = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
         setup_to_part = np.eye(3) + k + k @ k / (1 + c)
     # setup_to_part's columns are the setup's axes in the part's frame; its transpose maps part to setup.
-    return tuple(_vec(row) for row in setup_to_part.T)
+    return tuple(_unit(row) for row in setup_to_part.T)
 
 
 @dataclass(frozen=True)
@@ -238,6 +262,8 @@ class FixtureEnvelope:
     #: The sizes it used, mm (stated or assumed), and the keys it assumed because the job did not state them.
     sizes: dict = field(default_factory=dict)
     assumed: tuple[str, ...] = ()
+    #: Plain sentences about the model: a default cut to fit, jaws standing proud of the stock.
+    notes: tuple[str, ...] = ()
 
     def shapes(self) -> list:
         return [volume.shape() for volume in self.volumes]
@@ -252,61 +278,101 @@ def fixture_envelope(fixture, stock_bounds: Bounds, *, where: str = "fixture") -
     if kind in ("none", "sheet"):
         return FixtureEnvelope(kind)
     if kind == "vise":
-        sizes = {key: stated.get(key, default) for key, default in VISE_DEFAULTS.items()}
-        if "grip_mm" in stated:
-            grip = stated["grip_mm"]
-        else:
-            grip = min(height, max(sizes["jaw_height_mm"] - sizes["parallels_mm"], 0.0))
-        assumed = tuple(key for key in ("jaw_height_mm", "jaw_width_mm", "grip_mm", "parallels_mm")
-                        if key not in stated)
-        if grip > height + 1e-9:
-            raise ValueError(f"{where}.grip_mm: the jaws hold {grip:g} mm of stock that is {height:g} mm tall; "
-                             "they would stand above the stock top")
-        sizes["grip_mm"] = grip
-        top = z0 + grip
-        bottom = top - sizes["jaw_height_mm"]
-        cx = (x0 + x1) / 2
-        half = sizes["jaw_width_mm"] / 2
-        jaw = sizes["jaw_thickness_mm"]
-        volumes: list[Envelope] = [
-            BoxVolume("front jaw", _vec((cx - half, y0 - jaw, bottom)), _vec((cx + half, y0, top))),
-            BoxVolume("back jaw", _vec((cx - half, y1, bottom)), _vec((cx + half, y1 + jaw, top))),
-        ]
-        parallels = sizes["parallels_mm"]
-        if parallels > 0:
-            width = min(sizes["parallel_width_mm"], (y1 - y0) / 4)
-            volumes += [
-                BoxVolume("front parallel", _vec((x0, y0, z0 - parallels)), _vec((x1, y0 + width, z0))),
-                BoxVolume("back parallel", _vec((x0, y1 - width, z0 - parallels)), _vec((x1, y1, z0))),
-            ]
-        return FixtureEnvelope(kind, tuple(volumes), sizes, assumed)
+        return _vise(stated, stock_bounds, where)
     if kind == "plate":
         thickness = stated.get("thickness_mm", PLATE_THICKNESS_MM)
         border = PLATE_BORDER_MM
         box = BoxVolume("plate", _vec((x0 - border, y0 - border, z0 - thickness)), _vec((x1 + border, y1 + border, z0)))
-        return FixtureEnvelope(kind, (box,), {"thickness_mm": thickness},
-                               () if "thickness_mm" in stated else ("thickness_mm",))
+        assumed = (*(() if "thickness_mm" in stated else ("thickness_mm",)), "border_mm")
+        return FixtureEnvelope(kind, (box,), {"thickness_mm": thickness, "border_mm": border}, assumed)
     center = ((x0 + x1) / 2, (y0 + y1) / 2)
     stock_radius = math.hypot(x1 - x0, y1 - y0) / 2
-    if kind == "chuck":
-        diameter = stated.get("diameter_mm", 2 * (stock_radius + CHUCK_RIM_MM))
-        length = stated.get("jaw_length_mm", CHUCK_JAW_LENGTH_MM)
-        grip = stated.get("grip_mm", min(CHUCK_GRIP_MM, height))
-        if grip > height + 1e-9:
-            raise ValueError(f"{where}.grip_mm: the jaws hold {grip:g} mm of stock that is {height:g} mm long; "
-                             "they would stand past its end")
+    if kind in ("chuck", "collet"):
+        chuck = kind == "chuck"
+        rim = CHUCK_RIM_MM if chuck else COLLET_RIM_MM
+        default_grip = CHUCK_GRIP_MM if chuck else COLLET_GRIP_MM
+        diameter = stated.get("diameter_mm", 2 * (stock_radius + rim))
+        length_key = "jaw_length_mm" if chuck else "length_mm"
+        length = stated.get(length_key, CHUCK_JAW_LENGTH_MM if chuck else COLLET_LENGTH_MM)
+        notes: list[str] = []
+        if "grip_mm" in stated:
+            grip = stated["grip_mm"]
+            if grip > height + 1e-9:
+                raise ValueError(f"{where}.grip_mm: the jaws hold {grip:g} mm of stock that is {height:g} mm long; "
+                                 "they would stand past its end")
+        else:
+            grip = min(default_grip, height)
+            if grip < default_grip:
+                notes.append(f"the {kind} holds all {grip:g} mm of the stock: its default grip of "
+                             f"{default_grip:g} mm is more than the stock is long")
         top = z0 + grip
-        volume = Cylinder("chuck", _vec(center)[:2], _clean(diameter / 2), _clean(top - length), _clean(top))
-        assumed = tuple(key for key in ("diameter_mm", "jaw_length_mm", "grip_mm") if key not in stated)
-        return FixtureEnvelope(kind, (volume,), {"diameter_mm": diameter, "jaw_length_mm": length, "grip_mm": grip},
-                               assumed)
-    if kind == "collet":
-        diameter = stated.get("diameter_mm", 2 * (stock_radius + COLLET_RIM_MM))
-        top = z0 + min(COLLET_GRIP_MM, height)
-        volume = Cylinder("collet", _vec(center)[:2], _clean(diameter / 2), _clean(top - COLLET_LENGTH_MM), _clean(top))
-        return FixtureEnvelope(kind, (volume,), {"diameter_mm": diameter},
-                               () if "diameter_mm" in stated else ("diameter_mm",))
+        volume = Cylinder(kind, _vec(center)[:2], _clean(diameter / 2), _clean(top - length), _clean(top))
+        assumed = [key for key in ("diameter_mm", length_key, "grip_mm") if key not in stated]
+        if "diameter_mm" not in stated:
+            assumed.append("rim_mm")
+        sizes = {"diameter_mm": diameter, length_key: length, "grip_mm": grip, "rim_mm": rim}
+        return FixtureEnvelope(kind, (volume,), sizes, tuple(assumed), tuple(notes))
     raise ValueError(f"{where}.type: {kind!r} is not a fixture cadgen knows")
+
+
+def _vise(stated: dict, stock_bounds: Bounds, where: str) -> FixtureEnvelope:
+    """A vise as it stands: floor, parallels, jaws (see the module's docstring)."""
+    (x0, y0, z0), (x1, y1, z1) = stock_bounds
+    given = {key for key in ("jaw_height_mm", "parallels_mm", "grip_mm") if key in stated}
+    jaw_height = stated.get("jaw_height_mm")
+    parallels = stated.get("parallels_mm")
+    grip = stated.get("grip_mm")
+    if grip is None:
+        jaw_height = VISE_DEFAULTS["jaw_height_mm"] if jaw_height is None else jaw_height
+        parallels = VISE_DEFAULTS["parallels_mm"] if parallels is None else parallels
+        grip = jaw_height - parallels
+    elif jaw_height is not None and parallels is not None:
+        if abs(jaw_height - parallels - grip) > VISE_AGREE_MM:
+            raise ValueError(f"{where}: grip_mm ({grip:g}) must be jaw_height_mm ({jaw_height:g}) minus parallels_mm "
+                             f"({parallels:g}), {jaw_height - parallels:g}: the jaws' top stands that far above the "
+                             "stock's bottom; state two of the three")
+    elif jaw_height is not None:
+        parallels = jaw_height - grip
+        if parallels < 0:
+            raise ValueError(f"{where}: grip_mm ({grip:g}) is more than jaw_height_mm ({jaw_height:g}): the jaws' top "
+                             "stands grip_mm above the stock's bottom, which rests on the floor at the lowest")
+    elif parallels is not None:
+        jaw_height = grip + parallels
+    else:
+        jaw_height = max(VISE_DEFAULTS["jaw_height_mm"], grip)
+        parallels = jaw_height - grip
+    if grip <= 0:
+        raise ValueError(f"{where}: the jaws ({jaw_height:g} mm) are no taller than the parallels ({parallels:g} mm), "
+                         "so they hold none of the stock")
+    sizes = {"jaw_height_mm": jaw_height, "parallels_mm": parallels, "grip_mm": grip}
+    for key in ("jaw_width_mm", "jaw_thickness_mm", "parallel_width_mm", "floor_thickness_mm"):
+        sizes[key] = stated.get(key, VISE_DEFAULTS[key])
+    assumed = tuple(key for key in ("jaw_height_mm", "parallels_mm", "grip_mm") if key not in given) + tuple(
+        key for key in ("jaw_width_mm", "jaw_thickness_mm", "parallel_width_mm", "floor_thickness_mm")
+        if key not in stated)
+    floor = z0 - parallels
+    top = floor + jaw_height
+    cx = (x0 + x1) / 2
+    half = sizes["jaw_width_mm"] / 2
+    jaw = sizes["jaw_thickness_mm"]
+    volumes: list[Envelope] = [
+        BoxVolume("front jaw", _vec((cx - half, y0 - jaw, floor)), _vec((cx + half, y0, top))),
+        BoxVolume("back jaw", _vec((cx - half, y1, floor)), _vec((cx + half, y1 + jaw, top))),
+        BoxVolume("vise floor", _vec((cx - half, y0 - jaw, floor - sizes["floor_thickness_mm"])),
+                  _vec((cx + half, y1 + jaw, floor))),
+    ]
+    if parallels > 0:
+        width = min(sizes["parallel_width_mm"], (y1 - y0) / 4)
+        volumes += [
+            BoxVolume("front parallel", _vec((x0, y0, floor)), _vec((x1, y0 + width, z0))),
+            BoxVolume("back parallel", _vec((x0, y1 - width, floor)), _vec((x1, y1, z0))),
+        ]
+    notes: list[str] = []
+    proud = _clean(top - z1)
+    sizes["jaws_above_stock_mm"] = max(proud, 0.0)
+    if proud > 0:
+        notes.append(f"the vise jaws stand {proud:g} mm above the stock top")
+    return FixtureEnvelope("vise", tuple(volumes), sizes, assumed, tuple(notes))
 
 
 # --- setups --------------------------------------------------------------------------------------------

@@ -8,7 +8,12 @@ The arithmetic, for a milling cutter of diameter ``D`` mm with ``z`` flutes:
 - Adaptive clearing at a radial engagement under half the diameter thins the chip, so the chip load is raised by
   ``1 / (2 sqrt(e (1 - e)))``, ``e`` the engagement as a fraction of ``D`` (the radial chip thinning factor); it is
   capped at 3, because below about 3 % engagement the edge's hone and runout decide the chip, not the geometry.
-- Plunging (straight down along the axis) runs at 0.3 x the feed.
+- Plunging (straight down along the axis) runs at 0.3 x the feed worked out from the plain chip load: chip thinning
+  is a side cut's, and a plunge takes a full-width chip whatever the radial engagement.
+- The spindle speed is a whole number of rpm (a controller's S word takes no fraction), rounded before anything is
+  worked out from it, so the feed and the surface speed reported are the ones the machine runs.
+- A cutter whose job leaves ``flutes`` out has 2, a face mill 4 (inserted face mills carry several; 4 is the
+  smallest common one).
 
 Hole makers move along their axis, so their feed is per revolution and their plunge is their feed:
 
@@ -17,7 +22,10 @@ Hole makers move along their axis, so their feed is per revolution and their plu
 - A reamer runs at two thirds of the drill's speed and twice its feed per rev (the handbook's rule of thumb).
 - A boring bar or back-bore is a single point at 0.7 x ``Vc``, ``1.5 x fz`` per rev.
 - A tap runs at 0.08 x ``Vc`` and feeds exactly ``rpm x pitch``: anything else strips the thread or breaks the
-  tap. When the machine's feed limit is under that, the spindle slows instead, so the two still agree.
+  tap. When the machine's feed limit is under that, the spindle slows instead (to a whole rpm under the limit), so
+  the two still agree. The 0.08 is already a tap's own speed: tapping charts (Machinery's Handbook) give HSS taps,
+  the common kind, about 15 to 30 m/min in aluminium, which is 0.08 x 400. So a tap is never derated again for
+  being HSS; a carbide tap runs at the same speed, which is safe, not optimised.
 - A thread mill mills at half the chip load (its whole thread form is in the cut).
 
 The chip load comes from the material's table of diameters, interpolated linearly between the two bands either
@@ -152,7 +160,8 @@ def feeds_for(tool: "Tool", material: "Material", machine: "Machine", *, where: 
         raise ValueError(f"{tool.id}: a {tool.type} has no diameter to work out a spindle speed from")
     diameter = float(tool.diameter_mm)
     surface, bands = _material_numbers(material)
-    surface *= _SPEED_FACTOR.get(tool.type, 1.0) * (HSS_FACTOR if tool.material == "hss" else 1.0)
+    hss = HSS_FACTOR if tool.material == "hss" and tool.type != "tap" else 1.0   # a tap's factor is its own speed
+    surface *= _SPEED_FACTOR.get(tool.type, 1.0) * hss
     base_chip = chipload_at(bands, diameter)
     label = f"{where}, " if where else ""
     item = [{"text": f"{where} {tool.id}".strip(), "tool": tool.id, **({"operation": where} if where else {})}]
@@ -170,14 +179,16 @@ def feeds_for(tool: "Tool", material: "Material", machine: "Machine", *, where: 
         per_rev = chip = 1.5 * base_chip
     else:
         chip = base_chip * (0.5 if tool.type == "thread_mill" else 1.0)
+        teeth = tool.flutes or (4 if tool.type == "face_mill" else 2)
+        plunge_per_rev = chip * teeth          # a plunge's chip is never thinned
         if radial_engagement is not None:
             chip *= chip_thinning(radial_engagement)
-        per_rev = chip * (tool.flutes or 2)
+        per_rev = chip * teeth
 
-    want_rpm = rpm if rpm is not None else rpm_for(surface, diameter)
+    want_rpm = float(round(rpm if rpm is not None else rpm_for(surface, diameter)))
     spindle = want_rpm
     if machine.max_rpm is not None and spindle > machine.max_rpm:
-        spindle = machine.max_rpm
+        spindle = float(math.floor(machine.max_rpm))
         source = "the operation asks for" if rpm is not None else "the material and tool call for"
         found.append(finding(
             "warning", "rpm_clamped",
@@ -191,10 +202,21 @@ def feeds_for(tool: "Tool", material: "Material", machine: "Machine", *, where: 
     if tool.type == "tap":
         feed = spindle * per_rev
         if feed_mm_min is not None and abs(feed_mm_min - feed) > _TAP_AGREE * feed:
-            raise ValueError(f"{where or tool.id}.feed_mm_min: a tap feeds exactly rpm x pitch, {_mm(spindle)} x "
-                             f"{per_rev:g} = {feed:g} mm/min, not {feed_mm_min:g}; leave feed_mm_min out or set rpm")
+            wanted = want_rpm * per_rev
+            if spindle < want_rpm and abs(feed_mm_min - wanted) <= _TAP_AGREE * wanted:
+                # The stated feed was rpm x pitch at the speed asked for; the spindle was clamped, so it follows.
+                found.append(finding(
+                    "warning", "feed_clamped",
+                    f"{label}{tool.id} taps at {feed:g} mm/min, not the {feed_mm_min:g} mm/min the operation asks "
+                    f"for: the spindle runs at {_mm(spindle)} rpm, not {_mm(want_rpm)}",
+                    "a tap's feed is exactly rpm x pitch, so the feed slows with the spindle and the two still agree",
+                    item))
+            else:
+                raise ValueError(f"{where or tool.id}.feed_mm_min: a tap feeds exactly rpm x pitch, {_mm(spindle)} x "
+                                 f"{per_rev:g} = {feed:g} mm/min, not {feed_mm_min:g}; leave feed_mm_min out or set "
+                                 "rpm")
         if machine.max_feed_mm_min is not None and feed > machine.max_feed_mm_min:
-            slower = machine.max_feed_mm_min / per_rev
+            slower = float(math.floor(machine.max_feed_mm_min / per_rev))
             found.append(finding(
                 "warning", "feed_clamped",
                 f"{label}{tool.id} taps at {_mm(slower)} rpm, not {_mm(spindle)} rpm: rpm x pitch must stay under the "
@@ -207,8 +229,12 @@ def feeds_for(tool: "Tool", material: "Material", machine: "Machine", *, where: 
         feed = feed_mm_min if feed_mm_min is not None else spindle * per_rev
         if tool.type in (*_DRILLS, "reamer", *_BORING):
             plunge = plunge_mm_min if plunge_mm_min is not None else feed
+        elif plunge_mm_min is not None:
+            plunge = plunge_mm_min
+        elif feed_mm_min is not None:
+            plunge = PLUNGE_FRACTION * feed
         else:
-            plunge = plunge_mm_min if plunge_mm_min is not None else PLUNGE_FRACTION * feed
+            plunge = PLUNGE_FRACTION * spindle * plunge_per_rev
         limit = machine.max_feed_mm_min
         if limit is not None and (feed > limit or plunge > limit):
             over = [f"feed {_mm(feed)}" if feed > limit else "", f"plunge {_mm(plunge)}" if plunge > limit else ""]

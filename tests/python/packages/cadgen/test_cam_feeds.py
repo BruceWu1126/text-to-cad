@@ -44,7 +44,11 @@ class FeedsTest(unittest.TestCase):
 
     def test_hss_runs_slower_than_carbide(self):
         hss = feeds_for(Tool("T1", 1, "flat_endmill", "hss", diameter_mm=6, flutes=3), AL, MILL)
-        self.assertAlmostEqual(hss.rpm / feeds_for(ENDMILL, AL, MILL).rpm, 0.3)
+        self.assertAlmostEqual(hss.rpm / feeds_for(ENDMILL, AL, MILL).rpm, 0.3, places=4)
+        # A tap's speed factor is already a tap's own (HSS) speed: it is not derated twice.
+        tap = {"diameter_mm": 6, "size": {"pitch_mm": 1.0}}
+        self.assertEqual(feeds_for(Tool("T3", 3, "tap", "hss", **tap), AL, MILL).rpm,
+                         feeds_for(Tool("T3", 3, "tap", **tap), AL, MILL).rpm)
 
     def test_a_machine_too_slow_clamps_rpm_and_says_so(self):
         router = Machine("router", 3, "grbl", max_rpm=12000, max_feed_mm_min=10000)
@@ -71,6 +75,25 @@ class FeedsTest(unittest.TestCase):
         self.assertEqual([item["type"] for item in slow.findings], ["feed_clamped"])
         self.assertIn("rpm x pitch", value_error(self, feeds_for, tap, AL, MILL, rpm=600, feed_mm_min=700))
 
+    def test_rpm_is_whole_and_a_tap_feeds_exactly_the_rounded_rpm_times_pitch(self):
+        tap = Tool("T3", 3, "tap", diameter_mm=8, size={"pitch_mm": 1.25})
+        feeds = feeds_for(tap, AL, MILL)
+        self.assertEqual(feeds.rpm, int(feeds.rpm))
+        self.assertEqual(feeds.feed_mm_min, feeds.rpm * 1.25)
+        slow = feeds_for(tap, AL, Machine("mill", 3, "grbl", max_feed_mm_min=1000))
+        self.assertEqual((slow.rpm, slow.feed_mm_min), (800, 1000))
+        self.assertEqual(feeds_for(ENDMILL, AL, MILL, rpm=9000.4).rpm, 9000)
+        # A feed stated as rpm x pitch at a speed the machine cannot reach follows the slower spindle.
+        clamped = feeds_for(tap, AL, Machine("mill", 3, "grbl", max_rpm=500), rpm=800, feed_mm_min=1000)
+        self.assertEqual((clamped.rpm, clamped.feed_mm_min), (500, 625))
+        self.assertEqual([item["type"] for item in clamped.findings], ["rpm_clamped", "feed_clamped"])
+
+    def test_plunge_is_not_raised_by_chip_thinning_and_a_face_mill_has_four_teeth(self):
+        plain, thinned = feeds_for(ENDMILL, AL, MILL), feeds_for(ENDMILL, AL, MILL, radial_engagement=0.1)
+        self.assertEqual(thinned.plunge_mm_min, plain.plunge_mm_min)
+        face = feeds_for(Tool("T5", 5, "face_mill", diameter_mm=50), AL, MILL)
+        self.assertAlmostEqual(face.feed_mm_min, face.rpm * 4 * face.chipload_mm)
+
     def test_a_drill_feeds_per_revolution_and_plunges_at_its_feed(self):
         drill = Tool("T2", 2, "drill", diameter_mm=6)
         feeds = feeds_for(drill, AL, MILL)
@@ -80,7 +103,7 @@ class FeedsTest(unittest.TestCase):
     def test_a_custom_material_uses_its_own_numbers(self):
         bronze = Material("bronze", surface_m_min=90, chipload_mm=0.03)
         feeds = feeds_for(ENDMILL, bronze, MILL)
-        self.assertAlmostEqual(feeds.rpm, 1000 * 90 / (math.pi * 6))
+        self.assertEqual(feeds.rpm, round(1000 * 90 / (math.pi * 6)))
         self.assertAlmostEqual(feeds.chipload_mm, 0.03)
 
     def test_feeds_and_tools_are_stdlib_only_at_import(self):
