@@ -19,6 +19,9 @@ from pathlib import Path
 
 __all__ = [
     "BuildResult",
+    "CamFeature",
+    "CamFeaturesResult",
+    "CamResult",
     "CompileResult",
     "FeaFace",
     "FeaFacesResult",
@@ -591,4 +594,101 @@ class FeaPartsResult:
                 lines.append(f"{a} ↔ {b} · {pair.area_mm2:.4g} mm²{gap} · bonded")
             else:
                 lines.append(f"{a} ↔ {b} · gap {pair.gap_mm:.3g} mm · not connected")
+        return lines
+
+
+@dataclass(frozen=True)
+class CamFeature:
+    """One thing a part offers a machinist, as ``cadgen cam features`` lists it: the selector a job names it
+    by, what it is, its size and the tool directions that reach it."""
+
+    #: The viewer's selector a job names it by (``#o1.f17``): the face that identifies it (a hole's wall, a
+    #: pocket's floor).
+    ref: str
+    #: ``face``, ``hole``, ``pocket``, ``slot``, ``boss``, ``profile`` or ``turned``.
+    kind: str
+    #: Every face the feature is made of, ``ref`` first.
+    refs: tuple[str, ...] = ()
+    #: Its size in mm, by name: ``{"diameter_mm": 6.0, "depth_mm": 10.0, "through": True}`` for a hole.
+    size: dict = field(default_factory=dict)
+    #: The tool directions that reach it (``+Z``, ``-X``, ...).
+    reach: tuple[str, ...] = ()
+    #: ``hole, 6 mm through, from +Z`` -- words an agent can match to a request.
+    hint: str = ""
+
+
+@dataclass(frozen=True)
+class CamFeaturesResult:
+    """The outcome of ``cadgen cam features``: what one part occurrence offers a machinist."""
+
+    ok: bool
+    document: Path
+    occurrence: str
+    #: The tool direction the list was limited to, or ``None`` for every axis direction.
+    setup: str | None = None
+    features: tuple[CamFeature, ...] = ()
+
+    def human_lines(self) -> list[str]:
+        scope = f", reached from {self.setup}" if self.setup else ""
+        lines = [f"{self.occurrence} in {_display(self.document)}: {len(self.features)} features{scope}"]
+        for feature in self.features:
+            reach = f"  from {' '.join(feature.reach)}" if feature.reach else ""
+            lines.append(f"  {feature.ref:<10} {feature.kind:<8} {feature.hint}{reach}")
+        return lines
+
+
+def _duration(seconds: float) -> str:
+    """A machining time as a machinist says it: ``38 s``, ``4 min 12 s``, ``1 h 05 min``."""
+    whole = int(round(float(seconds)))
+    if whole < 60:
+        return f"{whole} s"
+    if whole < 3600:
+        return f"{whole // 60} min {whole % 60:02d} s"
+    return f"{whole // 3600} h {whole % 3600 // 60:02d} min"
+
+
+@dataclass(frozen=True)
+class CamResult:
+    """The outcome of ``cadgen cam plan``: where the G-code, the result GLB and the sidecar went, and the numbers.
+
+    ``summary`` carries what a machinist asks for first: cycle time, cut and rapid length, tool changes and the
+    volume removed. ``operations`` has one entry per operation in job order (its tool, time and lengths).
+    ``findings`` is what an engineer would say about the plan, errors first, in the KiCad findings' shape. A job
+    that cannot be planned is ``ok=False`` with findings and writes no G-code (README law 10).
+    """
+
+    ok: bool
+    document: Path
+    occurrence: str
+    #: One G-code file per setup, in setup order; empty when the job was not planned.
+    nc: tuple[Path, ...] = ()
+    glb: Path | None = None
+    sidecar: Path | None = None
+    summary: dict = field(default_factory=dict)
+    operations: tuple[dict, ...] = ()
+    timings: dict = field(default_factory=dict)
+    warnings: tuple[str, ...] = ()
+    findings: tuple[dict, ...] = ()
+
+    def human_lines(self) -> list[str]:
+        if not self.ok:
+            return [f"not planned: {_display(self.document)}"] + [
+                f"{finding['severity']}: {finding['summary']}" for finding in self.findings
+            ]
+        s = self.summary
+        lines = [
+            f"planned {self.occurrence} of {_display(self.document)}: {len(self.operations)} operations, "
+            f"cycle time {_duration(s.get('cycle_time_s', 0.0))}, {s.get('tool_changes', 0)} tool changes",
+        ]
+        for index, op in enumerate(self.operations):
+            lines.append(
+                f"  {index + 1}. {op.get('op')} ({op.get('setup')}, {op.get('tool')}): {_duration(op.get('time_s', 0.0))}, "
+                f"cut {op.get('cut_length_mm', 0.0):g} mm, rapid {op.get('rapid_length_mm', 0.0):g} mm"
+            )
+        if "removed_volume_mm3" in s:
+            lines.append(f"removed {s['removed_volume_mm3']:g} mm^3")
+        nc = ", ".join(_display(path) for path in self.nc)
+        lines.append(f"wrote G-code: {nc}, GLB: {_display(self.glb)}, sidecar: {_display(self.sidecar)}")
+        lines += [f"{finding['severity']}: {finding['summary']}" for finding in self.findings]
+        lines += [f"warning: {warning}" for warning in self.warnings]
         return lines

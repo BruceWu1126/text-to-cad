@@ -68,6 +68,10 @@ _COMMANDS: dict[str, tuple[str, str]] = {
     "fea faces": ("cadgen.cli.fea_faces", "list a part's faces with their #o1.fN selectors"),
     "fea parts": ("cadgen.cli.fea_parts", "list an assembly's parts and the pairs that touch"),
     "fea solve": ("cadgen.cli.fea_solve", "run a linear static stress study on a STEP part"),
+    # Computer-aided manufacturing. `features` lists what a part offers a machinist with the
+    # selectors a job names; `plan` turns a job into G-code, a result GLB and its JSON sidecar.
+    "cam features": ("cadgen.cli.cam_features", "list a part's holes, pockets and faces for a CAM job"),
+    "cam plan": ("cadgen.cli.cam_plan", "plan a CAM job: G-code, toolpath GLB and sidecar"),
     # Generic / services
     "doctor": ("cadgen.cli.doctor", "print installed cadgen and verify a skill's pin"),
     # The store. `store why <model>` is the debugging surface STORE.md describes.
