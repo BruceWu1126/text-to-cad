@@ -896,6 +896,9 @@ class TraceOperation(OperationBase):
             closed = len(chain) > 2 and math.dist(chain[0], chain[-1]) <= 1e-3
             if not closed:
                 flip = _walk_from(ctx, params, refs, chain)
+                if flip is None and params.start is not None and params.offset in ("left", "right"):
+                    raise ValueError(f"{ctx.where}.start: {_start_text(params.start)} is not an end of an open chain "
+                                     f"of the edges traced ({'+'.join(refs)})")
                 if flip is None and params.offset in ("left", "right"):
                     raise ValueError(f"{ctx.where}.start: {'+'.join(refs)} is an open chain of edges; say where it "
                                      f"starts (a point [x, y] at one of its ends, or its first edge) so {params.offset} "

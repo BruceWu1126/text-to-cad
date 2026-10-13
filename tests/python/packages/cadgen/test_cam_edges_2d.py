@@ -212,25 +212,33 @@ class Edges(unittest.TestCase):
         ctx = self.contexts[3]
         top = next(f for f in ctx.part.faces if f.surface == "plane" and f.normal[2] > 0.99 and f.center[2] > 9.99
                    and f.area > 5000)
-        edges = []                                                # the plate's top outline but its front edge
+        edges, at = [], {}                                        # the plate's top outline but its front edge
         for e in sorted(top.outer_edges):
             ends = [ctx.to_setup(p) for p in _edge_points(ctx, e)]
             if not all(abs(p[1] + 30) < 1e-6 for p in ends):
                 edges.append(f"#o1.e{e}")
-        self.assertEqual(len(edges), 3)
+                side = "left" if all(abs(p[0] + 50) < 1e-6 for p in ends) else \
+                    "right" if all(abs(p[0] - 50) < 1e-6 for p in ends) else "back"
+                at[side] = f"#o1.e{e}"
+        self.assertEqual((len(edges), sorted(at)), (3, ["back", "left", "right"]))
         document = copy.deepcopy(JOB)
         document["operations"][3] = {"op": "trace", "tool": "T4", "features": edges, "depth_mm": 1, "offset": "left"}
         _, run = self.plan(document, 3)
         self.assertIn("operations[3].start:", value_error(self, run))
         chain = LineString([(-50, -30), (-50, 30), (50, 30), (50, -30)])
         plate = box(-50, -30, 50, 30)
-        for start, inside in (([-50, -30], False), ([50, -30], True)):   # walked clockwise, left is outside
+        # Walked clockwise (from its left end, or its first edge the left one), left is outside.
+        for start, inside in (([-50, -30], False), ([50, -30], True), (at["left"], False), (at["right"], True)):
             document["operations"][3]["start"] = start
             ctx, run = self.plan(document, 3)
             for p in self.level_points(run().toolpath, TOP - 1):
                 self.assertAlmostEqual(chain.distance(Point(p[:2])), 1.0, delta=ctx.tol)
                 if abs(p[1] + 30) > 1.5:
                     self.assertEqual(plate.contains(Point(p[:2])), inside, (start, p))
+        document["operations"][3]["start"] = at["back"]                  # an edge in the middle of the chain
+        _, run = self.plan(document, 3)
+        self.assertIn(f"operations[3].start: {at['back']} is not an end of an open chain", value_error(self, run))
+        document["operations"][3]["start"] = at["left"]
         document["operations"][3]["offset"] = "inside"
         _, run = self.plan(document, 3)
         self.assertIn("is an open path with no inside; offset it left or right", value_error(self, run))
