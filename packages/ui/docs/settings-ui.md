@@ -131,12 +131,13 @@ none.
   neither does a view drawn as a picture, one that is loading or failed to load, or
   preview, which has the page to itself and draws its own in their place (see
   [preview](#camera-animation-and-preview)).
-- **Playbar** (preview's, a file with routines only) sits at bottom-centre, on a
+- **Playbar** (a file with routines only: preview's, or the Animation tool's while it is up) sits at bottom-centre, on a
   line 1.75rem up (a host whose control floats over the view's bottom moves it
   with `--cad-viewport-bottom-center`), and nothing else does; a static file has
   nothing at the bottom. The routines lead it at its left end, as a playlist, and the
   routine's settings end it at its right (see [preview](#camera-animation-and-preview)).
-  Outside preview the transport is the Animation tool's panel, in the stack.
+  The Animation tool's is the transport alone: its routines and settings are the tool's
+  chevron menu on the strip (a file with no strip, an animated GLB, has them at its ends).
 - **Model update status** sits at top-centre of the viewport, vertically centred
   in the same 34px row as the top-left toolbar (24px tiles, an even 4px between tools, a chevron touching its tool) in every host.
   It is renderer chrome: the navbar carries no status.
@@ -177,7 +178,7 @@ again, as it was.
 | Measure | Arms picking and shows the Measure panel: its snapping modes, then its results; kept, a press takes it up again, results and all | Unfinished picks are cancelled; completed measurements and their panel stay, kept |
 | Explode / Clip | Opens a neutral panel; an edit applies the effect (Explode's, as a motion: see below); kept, a press takes it up again as it is | A neutral panel goes; an applied effect and its panel stay, kept |
 | Position | Shows joint handles and the Position panel | Handles and panel hide; joint values stay, and a pose that is not the default is kept: one line in the stack |
-| Animation | Shows the Animation panel: its settings in the heading, the routine and the transport; starts the routine when Autoplay is on, unless a frame is kept, which it takes up as it was; its X puts it down | The routine pauses where it is: a frame past its start is kept, one line in the stack, and one at its start is at rest; the Routine, Speed and Loop stay |
+| Animation | Its button plays and pauses (Play, or Pause while playing), taking the tool up: the playbar at the bottom centre, play/pause and the scrubber; its chevron's menu has the routines (two or more) then Speed, Loop and Autoplay. Another tool puts it down | The routine pauses where it is: a frame past its start is kept, one line in the stack, and one at its start is at rest; the Routine, Speed and Loop stay |
 
 **One motion at a time.** Every tool's state stands beside every other's — the selection,
 measurements, the drawing, Clip — except three that move the parts: **Explode**, the

@@ -21,8 +21,8 @@ Routes (every one carries ``x-cadgen-viewer: 1``, GETs included: these files are
 the person's, and the header keeps another site's page from reading them):
 
 * ``POST /__cad/prompt-files``, body ``{"name", "input", "views": [{"label",
-  "camera", "display"?, "kinematics"?, "jointValues"?, "selection"?, "width"?,
-  "height"?}], "sketch": {...} | null}`` -> ``202 {"ok": true, "id", "retryMs"}``
+  "camera", "display"?, "kinematics"?, "jointValues"?, "animation"?, "selection"?,
+  "width"?, "height"?}], "sketch": {...} | null}`` -> ``202 {"ok": true, "id", "retryMs"}``
   at once, the request accepted (its shape, the sketch's outer shape and the job
   as snapshot prepares it); ``400 {"ok": false, "error"}`` when it is not.
 * ``GET /__cad/prompt-files?id=<id>`` -> ``202 {"ok": true, "id", "retryMs"}``
@@ -68,7 +68,7 @@ KEEP_SECONDS = 600.0
 # How long the browser stays open without a prompt to render.
 IDLE_SECONDS = 300.0
 _REQUEST_KEYS = frozenset({"name", "input", "views", "sketch"})
-_VIEW_KEYS = frozenset({"label", "camera", "display", "kinematics", "jointValues", "selection", "width", "height"})
+_VIEW_KEYS = frozenset({"label", "camera", "display", "kinematics", "jointValues", "animation", "selection", "width", "height"})
 _SKETCH_KEYS = frozenset({"units", "parts", "marks"})
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 _FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\.(png|json)")
@@ -239,7 +239,7 @@ class PromptFiles:
             if sketch_path is not None:
                 job["sketch"] = str(sketch_path)
             job["camera"] = view["camera"]
-            for key in ("display", "kinematics", "jointValues", "selection"):
+            for key in ("display", "kinematics", "jointValues", "animation", "selection"):
                 if view.get(key) is not None:
                     job[key] = view[key]
             job["output"] = {"padding": 0, "tightFrame": False}

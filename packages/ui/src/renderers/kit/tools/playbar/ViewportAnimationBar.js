@@ -8,7 +8,7 @@ import { FILE_SHEET_PRECISION_SLIDER_CLASSES } from "../../inspector/FileSheet.j
 
 // The transport owns play/pause and scrubbing; the routines and the routine's speed, loop and
 // autoplay are the playbar's two menus at either end of it (`PlaybackMenu.jsx`), which the shell
-// hands it, and the Animation tool's panel's (`AnimationPanel.jsx`).
+// hands it, and the Animation tool's chevron menu (`AnimationPanel.jsx`'s `AnimationToolMenu`).
 //
 // Every animation source shares this transport UI. It only edits the clip and clock state of
 // the runtime it is handed; evaluating a clip is its owner's. Routines play in preview, where

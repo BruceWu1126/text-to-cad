@@ -506,8 +506,8 @@ A copied reference names its file by its absolute path (`<path>#<selector>`), an
 does a copied Quick Edit: every view spells a file the same way, so a reference pasted
 into a chat or a tool says exactly which file it means.
 
-Preview's playback bars centre on one line, `3.5rem` above the viewport's bottom
-edge; nothing else sits at the bottom centre. A host whose own control floats over
+The playback bars — preview's, and the Animation tool's while it is up — centre on one
+line, `3.5rem` above the viewport's bottom edge; nothing else sits at the bottom centre. A host whose own control floats over
 that edge (a chat's composer) sets `--cad-viewport-bottom-center` on an ancestor
 to put the line on its control's, and `--cad-host-bottom-inset` to the height it
 covers: the model library scrolls its last rows clear of it. Both are lengths, like

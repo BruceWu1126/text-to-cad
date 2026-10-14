@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Clapperboard, Redo2, Undo2 } from "lucide-react";
+import { Pause, Play, Redo2, Undo2 } from "lucide-react";
 import { clonePerspectiveSnapshot } from "@text-to-cad/core/lib/perspective.js";
 import { VIEWER_SCENE_SCALE } from "@text-to-cad/core/lib/viewer/sceneScale.js";
 import { ViewerElementContext, useViewerHost, usePromptDestination } from "../../../host/context.js";
@@ -7,6 +7,7 @@ import { hasOpenPopup } from "../../../lib/popups.js";
 import { useDrawingSession } from "../../../drawing/session.js";
 import { DRAWING_PENCIL_TOOLS, DRAWING_SHAPE_TOOLS, InkStyleSubmenus } from "../../../drawing/toolbar.jsx";
 import ToolModeMenu from "../tools/ToolModeMenu.jsx";
+import { AnimationToolMenu } from "../tools/playbar/AnimationPanel.jsx";
 import { useViewerHistory } from "./useViewerHistory.js";
 import { promptView, promptViews } from "../../../drawing/views.js";
 import { sceneBackdropEdgeColor } from "../look/chromeBackdrop.js";
@@ -684,17 +685,23 @@ export function useRendererShell({
         icon: <Redo2 className="size-3" strokeWidth={2} aria-hidden="true" />, active: false,
         disabled: idle || previewing || !history.canRedo, onSelect: () => history.redo() },
     ],
-    // The file's routines, played without leaving the tools view: the playbar and its settings are
-    // a panel in the tool stack while it is up (`RendererShell.jsx`). Null for a file with none.
-    // Taking it up starts the routine when Autoplay is on, as entering preview does — unless a frame
-    // is kept, which it takes up as it was; a second press does nothing, and the panel's X puts it down.
+    // The file's routines, played without leaving the tools view. Null for a file with none. Its
+    // button plays and pauses — Play, or Pause while the routine plays — taking the tool up (from a
+    // kept frame, where it was); its playbar is the viewport's, at the bottom centre while the tool
+    // is up (`RendererShell.jsx`); its chevron's menu has the routines and the settings.
     animate: routines ? stripTool({ id: SHELL_TOOL.ANIMATE, label: "Animation",
-      icon: <Clapperboard className="size-3" strokeWidth={2} aria-hidden="true" />,
+      icon: animation.playing ? <Pause className="size-3" strokeWidth={2} aria-hidden="true" />
+        : <Play className="size-3" strokeWidth={2} aria-hidden="true" />,
       onSelect: () => {
         const takingUp = toolMode !== SHELL_TOOL.ANIMATE;
         selectTool(SHELL_TOOL.ANIMATE);
-        if (takingUp && autoplay && !animationKept && !animation.playing) animation.onPlayToggle();
-      } }) : null,
+        if (!takingUp || !animation.playing) animation.onPlayToggle();
+      },
+      menu: <AnimationToolMenu disabled={idle} autoplay={autoplay} onAutoplayChange={setAutoplay}
+        runtime={{ ...animation,
+          onSpeedChange: value => { chooseRoutinePlayback({ speed: value }); animation.onSpeedChange(value); },
+          onLoopToggle: value => { chooseRoutinePlayback({ loop: value }); animation.onLoopToggle(value); } }}
+        onRoutine={id => { selectTool(SHELL_TOOL.ANIMATE); animation.onClipSelect(id); }} /> }) : null,
   };
 
   return {

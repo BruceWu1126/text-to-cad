@@ -25,6 +25,9 @@ test("a view is the viewer's camera at the prompt's size, with what places or hi
     selection: { hide: ['o1.2'] },
   });
   assert.equal(promptView(null), null);
+  // Explode is the view's where it spreads the parts, never on at no amount.
+  const spread = amount => promptView({ camera: camera(), width: 800, height: 600 }, { display: { exploded: { enabled: true, amount } } }).display;
+  assert.deepEqual([spread(0), spread(0.5)], [undefined, { exploded: { enabled: true, amount: 0.5 } }]);
 });
 
 test("a routine's kept frame is the view's animation, a snapshot job's {clip, time}", () => {

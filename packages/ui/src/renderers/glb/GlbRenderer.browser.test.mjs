@@ -302,26 +302,26 @@ test('a static GLB opens on its native scene with no tools: display settings, or
   assert.deepEqual(errors, []);
 });
 
-test('an animated GLB opens at rest with its Animation panel up, plays there and in preview, and preview leaves the panel\'s routine as it was', async (t) => {
+test('an animated GLB opens at rest with its playbar up, plays there and in preview, and preview leaves the tools view\'s routine as it was', async (t) => {
   // The file's preview settings as a previous session left them: Orbit off, so the preview
   // camera holds still and what moves in a capture is the model alone.
   const { page, pane, errors } = await open(t, 'animated.glb', { record: { version: 2, settings: {},
     files: { [JSON.stringify(['/models/animated.glb', 'glb'])]: { version: 2, playback: { orbit: false } } } } });
   await ready(pane);
-  // Animation is its one tool, up from the open: the panel at the top-left, with no strip to take it
-  // up from and no X to put it down.
-  const panel = pane.getByRole('region', { name: 'Animation controls', exact: true });
+  // Animation is its one tool, up from the open: its playbar at the bottom centre, with no strip to
+  // take it up from, so the playbar carries its settings itself.
+  const panel = pane.getByRole('toolbar', { name: 'Animation playback', exact: true });
   await panel.waitFor();
   assert.equal(await pane.getByRole('group', { name: 'Interaction tools' }).count(), 0, 'one tool needs no strip');
-  assert.equal(await panel.getByRole('button', { name: 'Close animation controls', exact: true }).count(), 0, 'and is never put down');
+  assert.equal(await panel.getByRole('button', { name: 'Playback settings', exact: true }).count(), 1, 'its settings are on its playbar');
   await page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
   const toolsRest = await stillCapture(page);
   const panelTime = () => page.evaluate(() => Number(document.querySelector(
-    '[data-testid="one"] [aria-label="Animation controls"] [role="slider"][aria-label="Animation time"]')?.getAttribute('aria-valuenow')));
+    '[data-testid="one"] [aria-label="Animation playback"] [role="slider"][aria-label="Animation time"]')?.getAttribute('aria-valuenow')));
   // The panel plays the clip in the tools view, and its start is the rest pose.
   await panel.getByRole('button', { name: 'Play animation', exact: true }).click();
   await page.waitForFunction(() => Number(document.querySelector(
-    '[data-testid="one"] [aria-label="Animation controls"] [role="slider"][aria-label="Animation time"]')?.getAttribute('aria-valuenow')) > 0.25);
+    '[data-testid="one"] [aria-label="Animation playback"] [role="slider"][aria-label="Animation time"]')?.getAttribute('aria-valuenow')) > 0.25);
   await panel.getByRole('button', { name: 'Pause animation', exact: true }).click();
   assert.ok(differingPixels(toolsRest, await capture(page)) > 200, 'the panel moved the rider');
   await panel.getByRole('slider', { name: 'Animation time', exact: true }).focus();
@@ -331,7 +331,7 @@ test('an animated GLB opens at rest with its Animation panel up, plays there and
   // The panel's routine left at its end: preview has a routine of its own, at rest.
   await page.keyboard.press('End');
   await page.waitForFunction(() => Number(document.querySelector(
-    '[data-testid="one"] [aria-label="Animation controls"] [role="slider"][aria-label="Animation time"]')?.getAttribute('aria-valuenow')) > 0.25);
+    '[data-testid="one"] [aria-label="Animation playback"] [role="slider"][aria-label="Animation time"]')?.getAttribute('aria-valuenow')) > 0.25);
   const panelHeld = await panelTime();
   const heldCapture = await stillCapture(page);
   assert.ok(differingPixels(toolsRest, heldCapture) > 200, 'the panel holds the rider at the end of its clip');
@@ -393,11 +393,12 @@ test('an animated GLB opens at rest with its Animation panel up, plays there and
   assert.deepEqual(errors, []);
 });
 
-test('an animated GLB\'s preview opens at the clip\'s own Speed and Loop and forgets what it chose, the panel keeping its own, and Orbit off stays off', async (t) => {
+test('an animated GLB\'s preview opens at the clip\'s own Speed and Loop and forgets what it chose, the tools view keeping its own, and Orbit off stays off', async (t) => {
   const { page, pane, errors } = await open(t, 'animated.glb', { record: { version: 2, settings: {},
     files: { [JSON.stringify(['/models/animated.glb', 'glb'])]: { version: 2, playback: { orbit: false } } } } });
   await ready(pane);
-  const panelSettings = pane.getByRole('region', { name: 'Animation controls', exact: true }).getByRole('button', { name: 'Animation settings' });
+  // The tools view's settings are its playbar's own (no strip for the tool's menu), as preview's are.
+  const panelSettings = pane.getByRole('toolbar', { name: 'Animation playback' }).getByRole('button', { name: 'Playback settings' });
   const previewSettings = pane.getByRole('toolbar', { name: 'Animation playback' }).getByRole('button', { name: 'Playback settings' });
   const enter = async () => {
     await pane.getByRole('button', { name: 'Preview', exact: true }).click();
@@ -435,15 +436,15 @@ test('an animated GLB\'s preview opens at the clip\'s own Speed and Loop and for
     await menu.waitFor({ state: 'detached' });
     return checked;
   };
-  await choose(panelSettings, 'Animation settings', 2);
-  assert.deepEqual(await settings(panelSettings, 'Animation settings'), ['Animation speed: 2×', 'false']);
+  await choose(panelSettings, 'Playback settings', 2);
+  assert.deepEqual(await settings(panelSettings, 'Playback settings'), ['Animation speed: 2×', 'false']);
   await enter();
   assert.deepEqual(await settings(previewSettings, 'Playback settings'), ['Animation speed: 1×', 'true'], 'preview opens at the clip\'s own');
   assert.equal(await orbitChecked(), 'false', 'the file\'s Orbit, off');
   await choose(previewSettings, 'Playback settings', 0.5);
   assert.deepEqual(await settings(previewSettings, 'Playback settings'), ['Animation speed: 0.5×', 'false']);
   await exit();
-  assert.deepEqual(await settings(panelSettings, 'Animation settings'), ['Animation speed: 2×', 'false'], 'the panel keeps its own');
+  assert.deepEqual(await settings(panelSettings, 'Playback settings'), ['Animation speed: 2×', 'false'], 'the panel keeps its own');
   await enter();
   assert.deepEqual(await settings(previewSettings, 'Playback settings'), ['Animation speed: 1×', 'true'], 'and preview forgot its own');
   assert.equal(await orbitChecked(), 'false', 'Orbit off stays off');

@@ -19,7 +19,7 @@ import { useCopyFlash } from "../inspector/copyFlash.js";
 import PlaybackMenu, { OrbitMenu, RoutineMenu } from "../tools/PlaybackMenu.jsx";
 import FloatingToolBar from "../tools/FloatingToolBar.js";
 import ToolStack from "../tools/ToolStack.jsx";
-import AnimationPanel, { KeptAnimationPanel } from "../tools/playbar/AnimationPanel.jsx";
+import { KeptAnimationPanel } from "../tools/playbar/AnimationPanel.jsx";
 import { ViewportAnimationBar, animationControlsHaveContent } from "../tools/playbar/ViewportAnimationBar.js";
 import QuickEdit from "../tools/quick-edit/QuickEdit.jsx";
 import { ViewportTopRight } from "./ViewportTopRight.jsx";
@@ -66,7 +66,8 @@ function NavbarControl({ label, disabled = false, onClick, children }) {
  * mode's controls. The same
  * structure, classes and data attributes for every renderer: hosts, stylesheets and tests key on
  * them. A file's controls are never a sidebar: they are panels in the tool stack, shown by the
- * tool they belong to. Nothing sits at the bottom centre but preview's playbar.
+ * tool they belong to. Nothing sits at the bottom centre but a playbar: preview's, or the
+ * Animation tool's while it is up.
  *
  * @param {{ shell: ReturnType<typeof import("./useRendererShell.js").useRendererShell>,
  *   tools: import("../tools/FloatingToolBar.js").ViewportTool[],
@@ -228,10 +229,8 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
     if (wasHeld.current && !routineHeld) putDownRef.current?.();
     wasHeld.current = routineHeld;
   }, [routineHeld]);
-  // The shell's own tools' panels lead the stack while their tool is up: the Animation tool's
-  // routine, transport and settings, whose X puts it down, back to
-  // the default tool -- no X where Animation is the file's one tool, never put down. A routine's
-  // frame kept with the tool down is one line, its X back to rest. The renderer's follow.
+  // The shell's own panels lead the stack: a routine's frame kept with the Animation tool down is
+  // one line, its X back to rest. The renderer's follow.
   // The drawing: one sketch, its ink in the model from every angle. While there is ink, a heading
   // alone, "Drawing", with its Copy (a picture of the view, ink and all) and the X that clears it —
   // as Measure's panel is kept with its results. What the next mark looks like is the Draw tools'
@@ -240,9 +239,6 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
     {frame.drawing.hasDrawing ? <ToolPanel id="drawing" title="Drawing" label="Drawing controls" collapsible={false} lead={frame.drawToolActive}
       actions={<CopyDrawingButton capture={frame.captureView} disabled={viewerLoading || !scene} />}
       closeLabel="Clear drawing" onClose={frame.drawing.clear} /> : null}
-    {frame.animateToolActive ? <AnimationPanel runtime={playbackRuntime} autoplay={shell.autoplay}
-      onAutoplayChange={shell.setAutoplay} onClose={frame.animateToolFixed ? null : shell.selectDefaultTool}
-      disabled={viewerLoading || !scene} /> : null}
     {frame.animationKept ? <KeptAnimationPanel runtime={animation} /> : null}
   </>;
 
@@ -409,6 +405,15 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
               {/* The top-right: the host's notice once a model is on screen (`view.notice`), and Quick Edit
                   under it -- hidden, not unmounted, while the view loads: a note being written outlives a
                   reload of the model. */}
+              {/* The Animation tool's playbar, bottom centre while it is up: play/pause and the scrubber.
+                  Its routines and settings are its menu's on the strip — or, for a file whose one tool
+                  it is (no strip), the playbar's own ends, as preview's are. Preview has its own. */}
+              {frame.animateToolActive && hasAnimation && !toolsHidden ? <ViewportAnimationBar key={frame.modelKey} runtime={animation}
+                className="pointer-events-auto" disabled={viewerLoading || !scene}
+                leading={tools.length ? null : <RoutineMenu animation={animation} />}
+                trailing={tools.length ? null : <PlaybackMenu animation={playbackRuntime} autoplay={shell.autoplay}
+                  onAutoplayChange={shell.setAutoplay} />} /> : null}
+
               <ViewportTopRight notice={chromeHidden ? null : view.notice} belowStrip={!toolsHidden}>
                 {compact || !references ? null : <QuickEdit key={frame.modelKey} className="self-stretch" hidden={chromeHidden}
                   resource={frame.resource} references={references} chips={referenceChips} nameReference={nameReference} sketch={sketch} prompt={frame.quickEditPrompt}

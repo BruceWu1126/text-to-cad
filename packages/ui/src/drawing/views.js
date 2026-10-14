@@ -37,7 +37,8 @@ export function promptView(viewport, { display = {}, state = null } = {}) {
   const view = { camera: viewport.camera, width: Math.round(viewport.width * scale), height: Math.round(viewport.height * scale) };
   const placed = {};
   if (display?.clip?.enabled) placed.clip = display.clip;
-  if (display?.exploded?.enabled) placed.exploded = display.exploded;
+  // Explode only where it spreads the parts: on at no amount is the model as it stands.
+  if (display?.exploded?.enabled && Number(display.exploded.amount) > 0) placed.exploded = display.exploded;
   if (filled(placed)) view.display = placed;
   if (filled(state?.kinematics)) view.kinematics = state.kinematics;
   if (filled(state?.jointValues)) view.jointValues = state.jointValues;

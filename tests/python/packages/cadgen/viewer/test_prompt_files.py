@@ -131,6 +131,8 @@ class PromptFilesRouteTest(unittest.TestCase):
             # snapshot's own preparation: a camera key it does not take, a pose a mesh does not have
             (self.request(views=[{"label": "a", "camera": {"projection": "perspective"}}]), "display.camera"),
             (self.request(views=[{"label": "a", "camera": "iso", "kinematics": {"x": 1}}]), "kinematics"),
+            # a routine's frame reaches snapshot's own check: a mesh has none
+            (self.request(views=[{"label": "a", "camera": "iso", "animation": {"clip": "spin", "time": 1}}]), "animation in its sidecar"),
         ):
             status, body, _ = self.call("POST", "/__cad/prompt-files", request)
             self.assertEqual(status, 400, request)
