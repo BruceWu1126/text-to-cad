@@ -364,6 +364,15 @@ class Selection(list):
     def __getitem__(self, index):
         return self._custom(f"[{index}]")
 
+    # The recorder has no geometry to test edges against, so a model that picks
+    # edges in its own Python (for edge in part.edges(): ...) must fail here:
+    # an empty list would let it skip the fillet and build the wrong part.
+    def __iter__(self):
+        raise Unsupported(f"looping over part.{self.kind}() in Python (picking them by their geometry)")
+
+    def __len__(self):
+        raise Unsupported(f"counting part.{self.kind}() in Python")
+
     def edges(self):
         return Selection(self.owner, "edges", self.select)
 

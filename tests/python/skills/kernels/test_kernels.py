@@ -133,6 +133,17 @@ class ModelTests(unittest.TestCase):
         self.assertFalse(program["ok"])
         self.assertIn("Helix", program["error"])
 
+    def test_edges_picked_in_python_are_refused_not_skipped(self):
+        # an empty edge list would let a safe_chamfer-style helper skip the chamfer silently
+        self.script.write_text(
+            "from cadgen import build123d as bd, step\n\n@step\ndef block():\n"
+            "    with bd.BuildPart() as part:\n        bd.Box(10, 10, 10)\n"
+            "    top = [e for e in part.edges() if e.center().Z > 4]\n"
+            "    return bd.chamfer(top, length=1) if top else part.part\n", encoding="utf-8")
+        program = trace_model(str(self.script))
+        self.assertFalse(program["ok"])
+        self.assertIn("looping over part.edges()", program["error"])
+
     @unittest.skipUnless(shutil.which("node"), "the implicit kernel runs on Node.js")
     def test_run_writes_beside_the_models_output(self):
         report = run(manifest.by_id("implicit"), f"{self.script}::pill", cwd=self.tmp)
