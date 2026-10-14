@@ -1,4 +1,4 @@
-"""CAM's protocol: the public verbs and their generated CLIs, and the operation registry.
+"""CAM's protocol: the public verbs and their generated CLIs, the operation registry, and the skill held to it.
 
 Stdlib only: nothing here opens a part or plans a toolpath.
 """
@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import contextlib
 import io
+import re
 import unittest
+from pathlib import Path
 
 from tests.python.support.cam_fixtures import heavy_at_import, stub_operations, value_error
 
@@ -88,6 +90,85 @@ class Registry(unittest.TestCase):
     def test_the_registry_and_every_built_operation_are_stdlib_only_at_import(self):
         modules = sorted({REGISTRY[name].module for name in built()})
         self.assertEqual(heavy_at_import("cadgen._internal.cam.operations", "cadgen._internal.cam.values", *modules), "")
+
+
+class SkillDocs(unittest.TestCase):
+    """The skill says what the registry says: every built operation runs today, every other one says its phase, and
+    every link in the skill resolves."""
+
+    SKILL = Path(__file__).resolve().parents[4] / "skills" / "cam"
+
+    def _rows(self, path: Path, heading: str) -> list[list[str]]:
+        text = path.read_text(encoding="utf-8")
+        section = re.split(r"\n#{2,3} ", text.split(heading, 1)[1], maxsplit=1)[0]
+        lines = [line for line in section.splitlines() if line.startswith("|") and "---" not in line]
+        return [[cell.strip() for cell in line.strip().strip("|").split("|")] for line in lines[1:]]  # past the header
+
+    def test_every_built_operation_has_a_runs_today_row_and_every_other_its_phase(self):
+        today = set(built())
+        # SKILL.md's "Choose the operations": the operations are the `names` of the second column, the status the
+        # fourth.
+        status_of: dict[str, list[str]] = {}
+        for cells in self._rows(self.SKILL / "SKILL.md", "## Choose the operations"):
+            for name in re.findall(r"`([a-z0-9_]+)`", cells[1]):
+                status_of.setdefault(name, []).append(cells[3])
+        self.assertEqual(sorted(status_of), sorted(OPERATION_NAMES))
+        for name in OPERATION_NAMES:
+            with self.subTest(table="SKILL.md", operation=name):
+                if name in today:
+                    self.assertTrue(all(status == "**Runs today**" for status in status_of[name]), status_of[name])
+                else:
+                    self.assertTrue(all(status.startswith(f"phase {REGISTRY[name].phase}, not built yet")
+                                        for status in status_of[name]), status_of[name])
+        # job-file.md's operations table: each phase 1 name with its word and status.
+        table = {}
+        for cells in self._rows(self.SKILL / "references" / "job-file.md", "## `operations`"):
+            found = re.fullmatch(r"`([a-z0-9_]+)`", cells[0])
+            if found and len(cells) == 4 and cells[1] != "plain word":  # past the second table's header
+                table[found.group(1)] = (cells[1], cells[2])
+        self.assertEqual(sorted(table), sorted(name for name in OPERATION_NAMES if REGISTRY[name].phase == 1))
+        for name, (word, status) in table.items():
+            with self.subTest(table="job-file.md", operation=name):
+                self.assertEqual(word, REGISTRY[name].word)
+                self.assertEqual(status, "runs today" if name in today else "phase 1, not built yet")
+
+    def test_every_plan_error_kind_is_in_the_findings_tables(self):
+        from cadgen._internal.cam.operations.base import PLAN_ERROR_KINDS
+
+        for path, heading in ((self.SKILL / "SKILL.md", "## Read the findings"),
+                              (self.SKILL / "references" / "findings.md", "### Raised today")):
+            codes = {re.fullmatch(r"`([a-z_]+)`", cells[0]).group(1) for cells in self._rows(path, heading)}
+            with self.subTest(path=path.name):
+                self.assertLessEqual(set(PLAN_ERROR_KINDS) | {"rpm_clamped", "feed_clamped"}, codes)
+
+    def test_every_link_resolves_and_every_reference_is_linked(self):
+        def anchors(path: Path) -> set[str]:
+            heads = re.findall(r"^#+ (.+)$", path.read_text(encoding="utf-8"), re.M)
+            return {re.sub(r"[^a-z0-9 _-]", "", head.lower()).replace(" ", "-") for head in heads}
+
+        pages = sorted(self.SKILL.rglob("*.md"))
+        linked = set()
+        for page in pages:
+            for target in re.findall(r"\]\(([^)\s]+)\)", page.read_text(encoding="utf-8")):
+                if re.match(r"[a-z]+:", target):
+                    continue
+                file, _, anchor = target.partition("#")
+                resolved = (page.parent / file).resolve() if file else page
+                with self.subTest(page=page.name, link=target):
+                    self.assertTrue(resolved.is_file(), f"{target} is not a file")
+                    if anchor:
+                        self.assertIn(anchor, anchors(resolved))
+                linked.add(resolved)
+        references = {path.resolve() for path in (self.SKILL / "references").glob("*.md")}
+        self.assertEqual(sorted(path.name for path in references - linked), [])
+
+    def test_the_description_is_short_and_the_prose_has_no_em_dash(self):
+        text = (self.SKILL / "SKILL.md").read_text(encoding="utf-8")
+        description = re.search(r"^description: (.*)$", text, re.M).group(1)
+        self.assertLess(len(description), 600)
+        for path in [*self.SKILL.rglob("*.md"), *self.SKILL.rglob("*.yaml")]:
+            with self.subTest(path=path.name):
+                self.assertNotIn("\u2014", path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

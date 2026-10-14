@@ -194,6 +194,12 @@ export const skillGroups = [
       "Runs a linear static stress study on a STEP part, reporting peak stress, safety factor and displacement with a colour-mapped result.",
   },
   {
+    name: "CAM",
+    path: "skills/cam",
+    summary:
+      "Plans CNC milling and drilling of a STEP part: toolpaths, feeds and speeds, and G-code for grbl, LinuxCNC, Fanuc, Haas or Mach3, with the toolpaths shown on the part.",
+  },
+  {
     name: "G-code",
     path: "skills/gcode",
     summary:

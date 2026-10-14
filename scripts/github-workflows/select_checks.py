@@ -186,6 +186,11 @@ def _mcp_change(path: str) -> Select:
     return select(flags=["packaging"], cadgen=_cadgen_tests_naming(_NAMES_MCP, ("mcp",)))
 
 
+def _cam_tests(path: str) -> Select:
+    """Every CAM suite: what a change to CAM's code can break, whichever module it is."""
+    return select(cadgen=[test.relative_to(ROOT).as_posix() for test in sorted((ROOT / CADGEN_SUITE).glob("test_cam*.py"))])
+
+
 _MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 
 
@@ -246,6 +251,11 @@ RULES: tuple[Rule, ...] = (
         f"{CADGEN_SRC}/results.py", "packages/cadgen/pyproject.toml", "skills/fea/**",
         f"{CADGEN_SUITE}/test_fea*.py",
     ), select(flags=["fea"])),
+    # CAM needs no extra, so its suites run in the cadgen job: its code reaches every
+    # test_cam*.py (a test file still runs itself, below), and its skill the protocol suite,
+    # which holds the skill's tables and links to the operation registry.
+    Rule((f"{CADGEN_SRC}/_internal/cam/**", f"{CADGEN_SRC}/cam.py", f"{CADGEN_SRC}/cli/cam_*"), _cam_tests),
+    Rule(("skills/cam/**",), select(cadgen=[f"{CADGEN_SUITE}/test_cam_protocol.py"])),
 
     # The shared UI and the apps. The snapshot runtime is built from core alone, so ui
     # reaches the two hosts and the wheel, not cadgen's suites.

@@ -279,6 +279,26 @@ class ChangesRunWhatCanBreak(unittest.TestCase):
         self.assertEqual(jobs_for(f"{CADGEN}/test_fea.py"), {"cadgen-linux", "cadgen-windows", "fea", "skills"})
         self.assertNotIn("fea", jobs_for("packages/cadgen/src/cadgen/step.py"))
 
+    def test_cam_runs_in_the_cadgen_job_with_no_extra(self):
+        cadgen = {"cadgen-linux", "cadgen-windows", "skills"}
+        # Its code reaches every CAM suite (and, as cadgen, the whole package suite and its consumers).
+        on_disk = sorted(f"{CADGEN}/{path.name}" for path in (REPO_ROOT / CADGEN).glob("test_cam*.py"))
+        self.assertIn(f"{CADGEN}/test_cam_protocol.py", on_disk)
+        self.assertEqual(selector._cam_tests("packages/cadgen/src/cadgen/cam.py").cadgen, frozenset(on_disk))
+        for path in ("packages/cadgen/src/cadgen/_internal/cam/run.py", "packages/cadgen/src/cadgen/cam.py",
+                     "packages/cadgen/src/cadgen/cli/cam_plan.py"):
+            with self.subTest(path=path):
+                self.assertEqual(jobs_for(path), GATED - {"core-js", "mcp", "api", "docs", "fea"})
+                self.assertEqual(tests_for(path)["cadgen_tests"], [CADGEN])
+        # Its skill is read by the protocol suite alone, which holds its tables to the registry.
+        for path in ("skills/cam/SKILL.md", "skills/cam/references/job-file.md", "skills/cam/agents/openai.yaml"):
+            with self.subTest(path=path):
+                self.assertEqual(jobs_for(path), cadgen)
+                self.assertEqual(tests_for(path)["cadgen_tests"], [f"{CADGEN}/test_cam_protocol.py"])
+        # A CAM test file runs itself, in the cadgen job.
+        self.assertEqual(jobs_for(f"{CADGEN}/test_cam_plan.py"), cadgen)
+        self.assertEqual(tests_for(f"{CADGEN}/test_cam_plan.py")["cadgen_tests"], [f"{CADGEN}/test_cam_plan.py"])
+
     def test_the_viewer_and_the_mcp_server_reach_only_what_reaches_them(self):
         viewer = tests_for("packages/cadgen/src/cadgen/viewer/scanner.py")
         self.assertIn(f"{CADGEN}/viewer/test_launcher.py", viewer["cadgen_tests"])
