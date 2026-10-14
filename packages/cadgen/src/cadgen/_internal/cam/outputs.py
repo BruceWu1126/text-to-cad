@@ -64,8 +64,10 @@ _MATERIALS = (
     ("stock", {"alphaMode": "BLEND", "doubleSided": True,
                "pbrMetallicRoughness": {"baseColorFactor": [0.55, 0.62, 0.72, 0.22], "metallicFactor": 0.0,
                                         "roughnessFactor": 0.9}}),
-    ("fixture", {"pbrMetallicRoughness": {"baseColorFactor": [0.32, 0.34, 0.38, 1.0], "metallicFactor": 0.4,
-                                          "roughnessFactor": 0.7}}),
+    # A see-through steel, never shiny: lit, an opaque grey fixture reads as the part's grey and the part is lost on it.
+    ("fixture", {"alphaMode": "BLEND", "doubleSided": True,
+                 "pbrMetallicRoughness": {"baseColorFactor": [0.23, 0.29, 0.37, 0.4], "metallicFactor": 0.0,
+                                          "roughnessFactor": 0.9}}),
     ("tool", {"pbrMetallicRoughness": {"baseColorFactor": [0.85, 0.66, 0.2, 1.0], "metallicFactor": 0.8,
                                        "roughnessFactor": 0.35}}),
     ("toolpath", {"pbrMetallicRoughness": {"baseColorFactor": [0.1, 0.45, 0.95, 1.0], "metallicFactor": 0.0,

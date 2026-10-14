@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   camMotion, camSummary, camTime, clockTime, jobPlayback, operationAt, operationRow, pathPointAt, playbackPace, readCamResult, setupRow, toolPlacementAt, toolRow
 } from './camResult.js';
+import { FIXTURE_LOOK, createCamTool } from './camPaths.js';
 import { DRILL, FACING, STICKOUT, camExtras, camNode, camScene } from './__tests__/camFile.js';
 
 // The pure readers of a CAM result, over a GLB built to cadgen's contract and parsed by GLTFLoader, as the viewer gets it.
@@ -81,5 +82,22 @@ describe('the words and the timeline', () => {
     expect([smooth.duration, smooth.jobTimeAt(2.5)]).toEqual([7, 2.5]);
     const stepped = jobPlayback(cam, true);
     expect([stepped.duration, stepped.jobTimeAt(0.2), stepped.jobTimeAt(0.9), stepped.jobTimeAt(1.5)]).toEqual([2, 4, 4, 7]);
+  });
+});
+
+describe('the fixtures', () => {
+  it('are drawn in a see-through steel for the theme, and get the file\'s material back on dispose', async () => {
+    const root = await camScene();
+    const fixture = camNode(root, 'fixture:top');
+    const own = fixture.material;
+    const tool = createCamTool(readCamResult(root)!);
+    const look = () => [fixture.material.transparent, fixture.material.opacity, `#${fixture.material.color.getHexString()}`];
+    tool.look('light');
+    expect(fixture.material).not.toBe(own);
+    expect(look()).toEqual([true, FIXTURE_LOOK.light.opacity, FIXTURE_LOOK.light.colour]);
+    tool.look('dark');
+    expect(look()).toEqual([true, FIXTURE_LOOK.dark.opacity, FIXTURE_LOOK.dark.colour]);
+    tool.dispose();
+    expect(fixture.material).toBe(own);
   });
 });

@@ -184,6 +184,7 @@ function useCamJob({ cv, scene, view, reducedMotion, shellRef, requestRenderRef,
   useEffect(() => {
     if (!pathsRef.current) return;
     pathsRef.current.style({ colours: cv.pathColours(viewerElement?.current || null, colorScheme), rapids: gates.rapids, hidden, isolated });
+    toolRef.current?.look(colorScheme);
     paintRef.current();
   }, [cam, cv, colorScheme, gates, hidden, isolated, viewerElement]);
   useEffect(() => { paintRef.current(); }, [cam, shownTime]);

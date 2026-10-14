@@ -163,9 +163,19 @@ export function createCamPaths(cam) {
 }
 
 /**
+ * How a fixture is drawn in each theme: a cool steel, see-through and never shiny, so the part standing on it reads
+ * apart from it (the file's own fixture grey is the part's grey once a viewer lights both).
+ */
+export const FIXTURE_LOOK = Object.freeze({
+  light: Object.freeze({ colour: "#4f6a8f", opacity: 0.2 }),
+  dark: Object.freeze({ colour: "#7d93b0", opacity: 0.28 }),
+});
+
+/**
  * The result's tools and what holds the stock, as the job is played: `place(t, show)` stands the tool cutting at job
  * time `t` on its path, turned the way its setup holds it, and hides every other tool; `show` gates the tool, the
- * stock and the fixtures (Display's). `dispose()` puts every node back as the file placed it.
+ * stock and the fixtures (Display's). `look(colorScheme)` draws the fixtures in `FIXTURE_LOOK`'s steel for the theme.
+ * `dispose()` puts every node back as the file placed it, materials included.
  */
 export function createCamTool(cam) {
   const rest = new Map();
@@ -173,9 +183,29 @@ export function createCamTool(cam) {
   for (const node of cam.nodes.tools.values()) remember(node);
   for (const node of cam.nodes.fixtures.values()) remember(node);
   remember(cam.nodes.stock);
+  // Each fixture mesh with the material the file gave it and the one it is drawn in instead, made on the first look.
+  const fixtureMeshes = [];
+  for (const node of cam.nodes.fixtures.values()) node.traverse((object) => { if (object.isMesh && object.material && !Array.isArray(object.material)) fixtureMeshes.push({ mesh: object, file: object.material, drawn: null }); });
   const point = [0, 0, 0];
   let placed = null;
   return {
+    look(colorScheme = "light") {
+      const look = FIXTURE_LOOK[colorScheme === "dark" ? "dark" : "light"];
+      for (const entry of fixtureMeshes) {
+        if (!entry.drawn) {
+          entry.drawn = entry.file.clone();
+          entry.drawn.name = `${entry.file.name || "fixture"} (themed)`;
+          if ("metalness" in entry.drawn) entry.drawn.metalness = 0;
+          if ("roughness" in entry.drawn) entry.drawn.roughness = 0.9;
+          entry.drawn.transparent = true;
+          entry.drawn.depthWrite = false;
+          entry.mesh.material = entry.drawn;
+        }
+        entry.drawn.color?.set(look.colour);
+        entry.drawn.opacity = look.opacity;
+        entry.drawn.needsUpdate = true;
+      }
+    },
     /** Where the tool stood last: the operation, the tool's id and its tip. */
     get placed() { return placed; },
     place(t, show = {}) {
@@ -196,6 +226,12 @@ export function createCamTool(cam) {
         node.visible = was.visible;
         node.position.copy(was.position);
         node.quaternion.copy(was.quaternion);
+      }
+      for (const entry of fixtureMeshes) {
+        if (!entry.drawn) continue;
+        entry.mesh.material = entry.file;
+        entry.drawn.dispose();
+        entry.drawn = null;
       }
       placed = null;
     },
