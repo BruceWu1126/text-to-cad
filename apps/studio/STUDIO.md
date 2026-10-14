@@ -1,9 +1,9 @@
 # text-to-cad Studio
 
 T3 Code made into a hardware app: agents design parts with the text-to-cad plugin, and the CAD
-view follows their work beside the thread. It is this fork's `amy/hardware` branch, copied into
-[text-to-cad](https://github.com/earthtojake/text-to-cad) as `apps/studio` (all of it but `.repos/`,
-T3's vendored Effect and Alchemy references for agents).
+view follows their work beside the thread. It is this fork's `amy/hardware` branch, exported into
+[text-to-cad](https://github.com/earthtojake/text-to-cad) as `apps/studio` with only the parts the
+desktop and web app need.
 
 ## Run it
 
@@ -44,19 +44,18 @@ Everything else is upstream T3 Code plus the fork's plugins (`FORK.md` on `main`
 
 One command takes in a new T3 Code: from the fork's `main` checkout,
 `scripts/sync-upstream.sh --push` rebases `main` and `amy/plugins` onto upstream, and
-`amy/hardware` onto `amy/plugins`, stopping at the first conflict. Then copy the branch into
-text-to-cad, from its root:
+`amy/hardware` onto `amy/plugins`, stopping at the first conflict. Then write Studio into
+text-to-cad:
 
 ```sh
-rm -rf apps/studio && mkdir apps/studio
-git -C <this checkout> archive amy/hardware -- . ':(exclude).repos' ':(exclude).claude/skills' ':(exclude)apps/mobile/**/libghostty-fat.a' | tar -x -C apps/studio
-git add -A -f apps/studio
+node scripts/export-studio.ts <text-to-cad>/apps/studio
 ```
 
-(text-to-cad tracks no symlinks and no file of 5 MiB or more, so the `.claude/skills` link and
-the mobile app's two 24 MB prebuilt iOS terminal libraries stay out; `-f` because text-to-cad's `.gitignore` covers T3's `.agents/` and `.vscode/`; the fresh copy holds
-no build output), and commit with the copied commit's hash in the message. Change Studio here, never in
-text-to-cad's copy: the next copy replaces it whole.
+It carries only what the server, web and desktop apps need to run, build, lint and test (its
+`KEEP` list): the mobile app, marketing site, relay, docs, release tooling and repository chrome
+stay here. The copy installs no git hooks, since text-to-cad owns its own, and gets a lockfile
+for exactly what it carries. Commit it in text-to-cad with the hash the script prints. Change
+Studio here, never in text-to-cad's copy: the next export replaces it.
 
 Rebases stay clean because the branch adds files rather than editing T3's: an edit to an upstream
 file is a seam of a line or a few (`scripts/fork-diff.sh amy/hardware` on `main` lists them). Keep it that

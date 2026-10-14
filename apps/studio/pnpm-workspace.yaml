@@ -288,16 +288,8 @@ packageExtensions:
       vite-plus: "catalog:"
 
 patchedDependencies:
-  alchemy@2.0.0-beta.80: patches/alchemy@2.0.0-beta.80.patch
-  expo-glass-effect@58.0.3: patches/expo-glass-effect@58.0.3.patch
-  expo-blur@58.0.3: patches/expo-blur@58.0.3.patch
-  expo-audio@58.0.4: patches/expo-audio@58.0.4.patch
-  "@clerk/expo@4.6.8": patches/@clerk__expo@4.6.8.patch
   "@effect/platform-node-shared@4.0.2": patches/@effect__platform-node-shared@4.0.2.patch
   "@effect/vitest@4.0.2": patches/@effect__vitest@4.0.2.patch
-  "@expo/metro-config@58.0.6": patches/@expo__metro-config@58.0.6.patch
-  expo-sharing@58.0.13: patches/expo-sharing@58.0.13.patch
-  expo-widgets@58.0.11: patches/expo-widgets@58.0.11.patch
   "@ff-labs/fff-node@0.11.0": patches/@ff-labs__fff-node@0.11.0.patch
   "@legendapp/list@3.3.5": patches/@legendapp__list@3.3.5.patch
   "@opencode/client@2.0.23": patches/@opencode__client@2.0.23.patch
@@ -306,16 +298,10 @@ patchedDependencies:
   # Exports the dependency-light subpaths mobile and the web diff parser import, and keeps
   # measured wrapped-row heights above an edit (fileEditorVirtualization.test.ts).
   "@pierre/diffs@1.5.2": patches/@pierre%2Fdiffs@1.5.2.patch
-  "@react-native-ai/apple@0.12.0": patches/@react-native-ai__apple@0.12.0.patch
-  "@react-native-menu/menu@2.0.0": patches/@react-native-menu__menu@2.0.0.patch
-  "@react-navigation/native-stack@7.17.6": patches/@react-navigation%2Fnative-stack@7.17.6.patch
   dbus-next@0.10.2: patches/dbus-next@0.10.2.patch
   effect@4.0.2: patches/effect@4.0.2.patch
   node-pty@1.2.0-beta.15: patches/node-pty@1.2.0-beta.15.patch
-  react-native-gesture-handler@3.2.1: patches/react-native-gesture-handler@3.2.1.patch
-  react-native-keyboard-controller@1.22.6: patches/react-native-keyboard-controller@1.22.6.patch
   # Android: a nested WebView hands a vertical drag to its scrolling parent at the page's edge.
-  react-native-webview@14.0.1: patches/react-native-webview@14.0.1.patch
 
 peerDependencyRules:
   allowAny:
