@@ -18,7 +18,7 @@ import unittest
 from pathlib import Path
 
 from tests.python.packages.cadgen.test_cam_plan import JOB, LEFT, POCKET, RIGHT
-from tests.python.support.cam_fixtures import plate_step
+from tests.python.support.cam_fixtures import glb_attribute, plate_step, read_glb
 
 #: The plate's 5 mm blind hole, 6 mm deep, as `cadgen cam features` names it.
 BLIND = "#o1.f7"
@@ -71,6 +71,12 @@ class Words:
                 text = item["summary"] + item["description"]
                 for bad in ("\u2014", "None", "{", "e-0", "1e-"):
                     self.assertNotIn(bad, text)
+                # An item that names an operation names it by its index, for the viewer to isolate it.
+                for entry in item["items"]:
+                    self.assertIsInstance(entry, dict)
+                    self.assertIsInstance(entry.get("operation", 0), int)
+                    if "operations[" in entry.get("text", ""):
+                        self.assertIn("operation", entry)
 
 
 class CleanPlate(Words, unittest.TestCase):
@@ -200,6 +206,7 @@ class GrblDrillAndTap(Words, unittest.TestCase):
                                            "and Grbl 1.1 has no tapping cycle")
         self.assertTrue(found["description"].endswith("No G-code was written"))
         self.assertEqual(verdicts(r)["no_post_support"], "error")
+        self.assertEqual(found["items"][0]["operation"], 2)
         self.assert_plain(r.findings)
 
     def test_through_the_stock_bottom_between_the_parallels(self):
@@ -362,6 +369,11 @@ class EngraveClearTool(unittest.TestCase):
         self.assertTrue(result.ok, [f["summary"] for f in result.findings if f["severity"] == "error"])
         text = result.nc[0].read_text(encoding="ascii")
         self.assertLess(text.index("(Op 1: engrave with T1)"), text.index("(Op 1: engrave with T8)"))
+        # The GLB draws the one path with each segment's own tool (T1 is tools[0], T8 tools[3]), T1's pass first.
+        gltf, binary = read_glb(result.glb)
+        mesh = next(i for i, m in enumerate(gltf["meshes"]) if m["name"] == "path:1:engrave")
+        tools = glb_attribute(gltf, binary, mesh, "_TOOL")
+        self.assertEqual(list(dict.fromkeys(tools)), [0.0, 3.0])
 
 
 if __name__ == "__main__":

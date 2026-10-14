@@ -188,7 +188,7 @@ def plan_job(target: Path, out: Path | None, *, job=None, occurrence: str | None
 
     from cadgen._internal.cam.features import features_in_frame
     from cadgen._internal.cam.operations import get_operation
-    from cadgen._internal.cam.operations.base import PlanError, by_severity
+    from cadgen._internal.cam.operations.base import PlanError, by_severity, naming_operation
     from cadgen._internal.cam.operations.context import PlanContext, _face_normal
     from cadgen._internal.cam.part import open_part
     from cadgen._internal.cam.setups import setup_frames
@@ -224,7 +224,7 @@ def plan_job(target: Path, out: Path | None, *, job=None, occurrence: str | None
         try:
             planned = get_operation(operation.op).plan(ctx.params, ctx)
         except PlanError as exc:
-            findings.append(exc.finding())
+            findings.append(naming_operation(exc.finding(), index, ctx.label))
             continue
         if planned.before and previous is not None:
             planned = dataclasses.replace(planned, before=(_join(previous, planned.before[0], ctx),
@@ -361,8 +361,12 @@ def _refused(poster, exc: Exception) -> dict:
     first, _, rest = text.partition(". ")
     description = (f"{rest.rstrip('.')}. No G-code was written" if rest else
                    "No G-code was written; use a post whose controller can run it, or change the operation")
+    item = {"text": text, "post": poster.name}
+    named = re.match(r"operations\[(\d+)\]", text)   # the post names the operation it refuses by its field path
+    if named:
+        item["operation"] = int(named.group(1))
     return finding("error", "no_post_support", f"The {poster.name} post cannot write this job: {first.rstrip('.')}",
-                   description, [{"text": text, "post": poster.name}])
+                   description, [item])
 
 
 # --- what the result says ------------------------------------------------------------------------------------
@@ -528,10 +532,13 @@ def _glb_bytes(extras: dict, part, stock, frames: dict, planned_ops: list[Planne
         tip = [round(value / 1000.0, 9) + 0.0 for value in (x, z, -y)]
         glb.triangles(f"tool:{tool.id}", positions, triangles, material="tool", translation=tip,
                       rotation=gltf_quaternion(frame.rotation))
+    tool_index = {tool.id: index for index, tool in enumerate(job.tools)}   # extras.tools is the job's, in order
     for planned_op in planned_ops:
-        segments = []
+        segments, tools = [], []
         for toolpath, t0 in zip(planned_op.planned.toolpaths, starts[planned_op.index]):
-            segments += path_segments(toolpath, t0=t0, rapid_mm_min=rapid)
-        points, attributes = lines_of(segments, planned_op.index, planned_op.ctx.setup.frame.point_to_part)
+            more = path_segments(toolpath, t0=t0, rapid_mm_min=rapid)
+            segments += more
+            tools += [tool_index[toolpath.tool]] * len(more)
+        points, attributes = lines_of(segments, planned_op.index, planned_op.ctx.setup.frame.point_to_part, tools)
         glb.lines(f"path:{planned_op.index}:{planned_op.operation.op}", points, attributes, material="toolpath")
     return glb.bytes()

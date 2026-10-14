@@ -5,8 +5,10 @@
  * (`packages/cadgen/src/cadgen/_internal/cam/outputs.py`): the whole file in the part's frame, in glTF metres and
  * axes; nodes `part`, `stock`, `fixture:<setup>`, `tool:<id>` (its mesh in the tool's own frame, the tip at the
  * origin, the axis along +Y), `path:<op index>:<op>`; on each path `_T` (the job's clock, seconds, non-decreasing
- * along it), `_KIND` (rapid 0, feed 1, plunge 2, arc 3, lead 4, cycle 5) and `_OP`, which GLTFLoader hands over
- * lower-cased. Pure: no React, and three.js only through the scene it is given.
+ * along it), `_KIND` (rapid 0, feed 1, plunge 2, arc 3, lead 4, cycle 5), `_OP` and `_TOOL` (the index in
+ * `extras.tools` of the tool cutting that segment: one operation may run two), which GLTFLoader hands over lower-cased.
+ * A finding's item names its operation by its index (`operation`) and a feature by its selector (`ref`). Pure: no
+ * React, and three.js only through the scene it is given.
  */
 
 /** What cadgen writes as `generator` on the part mesh's extras. */
@@ -41,8 +43,9 @@ export function camPartMesh(root) {
 
 /**
  * One operation's toolpath as its `LINES` primitive holds it: `positions` (six numbers a segment, start then end, in
- * the node's frame), `starts` and `ends` (the job time at each end of each segment, seconds) and `kinds` (`_KIND`
- * per segment). null for a node that is not one (no positions, or no `_t`).
+ * the node's frame), `starts` and `ends` (the job time at each end of each segment, seconds), `kinds` (`_KIND`
+ * per segment) and `tools` (`_TOOL` per segment, or null for a file without it). null for a node that is not one
+ * (no positions, or no `_t`).
  */
 export function readPath(object) {
   const geometry = object?.geometry;
@@ -50,11 +53,13 @@ export function readPath(object) {
   const time = geometry?.getAttribute?.("_t");
   if (!position || !time || position.count < 2 || time.count !== position.count) return null;
   const kind = geometry.getAttribute("_kind");
+  const tool = geometry.getAttribute("_tool");
   const count = Math.floor(position.count / 2);
   const positions = new Float32Array(count * 6);
   const starts = new Float32Array(count);
   const ends = new Float32Array(count);
   const kinds = new Uint8Array(count);
+  const tools = tool && tool.count === position.count ? new Int32Array(count) : null;
   for (let segment = 0; segment < count; segment += 1) {
     const a = segment * 2;
     const b = a + 1;
@@ -62,8 +67,22 @@ export function readPath(object) {
     starts[segment] = time.getX(a);
     ends[segment] = Math.max(time.getX(b), time.getX(a));
     kinds[segment] = kind ? Math.round(kind.getX(a)) : KIND_CODES.feed;
+    if (tools) tools[segment] = Math.round(tool.getX(a));
   }
-  return { object, positions, starts, ends, kinds, count };
+  return { object, positions, starts, ends, kinds, tools, count };
+}
+
+/** The segment of a path the tool is on at job time `t`: the last one begun by then, the first before the path starts. */
+export function segmentAt(path, t) {
+  const { starts, count } = path;
+  if (!count || t <= starts[0]) return 0;
+  let low = 0;
+  let high = count - 1;
+  while (low < high) {
+    const middle = (low + high + 1) >> 1;
+    if (starts[middle] <= t) low = middle; else high = middle - 1;
+  }
+  return low;
 }
 
 /**
@@ -74,14 +93,8 @@ export function readPath(object) {
 export function pathPointAt(path, t, out = [0, 0, 0]) {
   const { positions, starts, ends, count } = path;
   if (!count) return out;
-  // The last segment that has begun by `t`.
-  let low = 0;
-  let high = count - 1;
   if (t <= starts[0]) { out[0] = positions[0]; out[1] = positions[1]; out[2] = positions[2]; return out; }
-  while (low < high) {
-    const middle = (low + high + 1) >> 1;
-    if (starts[middle] <= t) low = middle; else high = middle - 1;
-  }
+  const low = segmentAt(path, t);
   const at = low * 6;
   const span = ends[low] - starts[low];
   const share = span > 0 ? Math.min(Math.max((t - starts[low]) / span, 0), 1) : 1;
@@ -100,12 +113,6 @@ export function segmentsBegun(starts, t) {
   return low;
 }
 
-/** The operation a finding's item names (cadgen writes "operations[2] (contour_2d)"), as its index; null where it names none. */
-function operationIndex(value) {
-  const match = /^operations\[(\d+)\]/.exec(text(value));
-  return match ? Number(match[1]) : null;
-}
-
 /** The first operation a finding is about, as its index, or null: what choosing it isolates. */
 export const findingOperation = (finding) => finding?.items?.find((item) => Number.isInteger(item.operation))?.operation ?? null;
 
@@ -115,7 +122,8 @@ function readFinding(finding, index) {
   return {
     check: text(finding.check || "cam"), severity: finding.severity === "error" ? "error" : finding.severity === "info" ? "info" : "warning",
     type: text(finding.type), summary: text(finding.summary), description: text(finding.description), index,
-    items: list(finding.items).map((item) => ({ text: text(item?.text), ref: item?.ref ? text(item.ref) : null, operation: operationIndex(item?.operation) })),
+    items: list(finding.items).map((item) => ({ text: text(item?.text), ref: item?.ref ? text(item.ref) : null,
+      operation: Number.isInteger(item?.operation) ? item.operation : null })),
   };
 }
 
@@ -203,16 +211,18 @@ export function operationAt(cam, t) {
 }
 
 /**
- * Where the tool is at job time `t`: the operation it is in, its tool's id, the tip's place (in the path's frame, which
- * is the tool node's parent's) and the setup's rotation to turn the tool by (glTF `[x, y, z, w]`). null for a result
- * with no path.
+ * Where the tool is at job time `t`: the operation it is in, its tool's id (the one cutting the segment under way, by
+ * its `_TOOL`, since an operation may run two; the operation's own for a file without it), the tip's place (in the
+ * path's frame, which is the tool node's parent's) and the setup's rotation to turn the tool by (glTF `[x, y, z, w]`).
+ * null for a result with no path.
  */
 export function toolPlacementAt(cam, t, out = [0, 0, 0]) {
   const operation = operationAt(cam, t);
   if (!operation) return null;
   const path = cam.nodes.paths.get(operation.index);
   const setup = cam.setups.find((entry) => entry.id === operation.setup) || null;
-  return { operation, tool: operation.tool || operation.tools[0] || "", point: pathPointAt(path, t, out), quaternion: setup ? setup.quaternion : [0, 0, 0, 1] };
+  const cutting = path.tools ? cam.tools[path.tools[segmentAt(path, t)]]?.id : "";
+  return { operation, tool: cutting || operation.tool || operation.tools[0] || "", point: pathPointAt(path, t, out), quaternion: setup ? setup.quaternion : [0, 0, 0, 1] };
 }
 
 /** A time on the job's clock as the panel says it: "2.5 s", "15 s", "1 min 16 s", "1 h 02 min". */

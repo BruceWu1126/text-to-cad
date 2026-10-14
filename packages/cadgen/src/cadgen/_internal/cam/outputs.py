@@ -24,10 +24,12 @@ Nodes, in this order (``scenes[0].nodes`` lists them all; every node but a tool'
       tip where the tool's first toolpath starts and its ``rotation`` is that toolpath's setup's
       (``extras.setups[i].quaternion``). A viewer playing the job sets both from the path at time t.
     - ``path:<op index>:<op name>``: one per operation that moves the tool, a ``LINES`` primitive (mode 1, two
-      vertices per segment, no indices) through all its toolpaths in running order, with three float vertex
+      vertices per segment, no indices) through all its toolpaths in running order, with four float vertex
       attributes: ``_T`` the job time at that vertex in seconds (non-decreasing along the primitive; a dwell is the
       step from one segment's end to the next one's start), ``_KIND`` the move's kind (:data:`KIND_CODES`), ``_OP``
-      the operation's index in the job. Arcs are drawn as chords within :data:`ARC_DEFLECTION_MM` of the arc,
+      the operation's index in the job, ``_TOOL`` the index in ``extras.tools`` (the job's ``tools``, in order) of
+      the tool cutting that segment: an operation may run more than one (an engraving's ``clear_tool`` first), so a
+      viewer playing the job takes the tool from the segment, not from the operation. Arcs are drawn as chords within :data:`ARC_DEFLECTION_MM` of the arc,
       helices included; a canned cycle as the moves it stands for (``toolpath.expand_cycle``), all of kind ``cycle``.
 
 Numpy is imported inside the functions; this module is stdlib-only at import.
@@ -340,13 +342,17 @@ class Glb:
                          struct.pack("<II", len(binary), 0x004E4942), binary])
 
 
-def lines_of(segments: Sequence[tuple], op: int, to_part) -> tuple["np.ndarray", dict]:
+def lines_of(segments: Sequence[tuple], op: int, to_part, tools: Sequence[int]) -> tuple["np.ndarray", dict]:
     """The vertices and attributes of one operation's ``LINES``: ``segments`` from :func:`path_segments` (setup
-    frame), ``to_part`` the setup's ``Frame.point_to_part``."""
+    frame), ``to_part`` the setup's ``Frame.point_to_part``, ``tools`` each segment's tool as its index in the job's
+    tools."""
     import numpy as np
 
+    if len(tools) != len(segments):
+        raise ValueError(f"internal: {len(segments)} segments and {len(tools)} tools")
     ends = np.asarray([point for segment in segments for point in segment[:2]], dtype=float).reshape(-1, 3)
     points = gltf_space(to_part(ends)) if len(ends) else np.zeros((0, 3), np.float32)
     times = [t for segment in segments for t in segment[2:4]]
     kinds = [segment[4] for segment in segments for _ in range(2)]
-    return points, {"_T": times, "_KIND": kinds, "_OP": [op] * len(times)}
+    return points, {"_T": times, "_KIND": kinds, "_OP": [op] * len(times),
+                    "_TOOL": [tool for tool in tools for _ in range(2)]}

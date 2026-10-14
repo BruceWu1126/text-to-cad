@@ -165,17 +165,20 @@ def check_job(job: "Job", planned_ops, *, part, stock, setups: dict, features: d
 
 
 def _operation_findings(planned_ops) -> list[dict]:
-    """The operations' own findings, with the feeds' clamps merged: one per kind, tool and sentence, listing every
-    operation it applies to (the same clamp on six operations is one thing to fix)."""
+    """The operations' own findings, each item naming its operation by index (``naming_operation``), with the feeds'
+    clamps merged: one per kind, tool and sentence, listing every operation it applies to (the same clamp on six
+    operations is one thing to fix)."""
+    from cadgen._internal.cam.operations.base import naming_operation
+
     out: list[dict] = []
     merged: dict[tuple, dict] = {}
     for planned_op in planned_ops:
         for item in planned_op.planned.findings:
             if item["type"] not in ("rpm_clamped", "feed_clamped"):
-                out.append(item)
+                out.append(naming_operation(item, planned_op.index, _label(planned_op)))
                 continue
             first = item["items"][0] if item["items"] else {}
-            where = first.get("operation", "")
+            where = first.get("where", "")
             summary = item["summary"].removeprefix(f"{where}, ") if where else item["summary"]
             key = (item["type"], first.get("tool"), summary, item["description"])
             if key not in merged:
@@ -184,8 +187,8 @@ def _operation_findings(planned_ops) -> list[dict]:
             entry = merged[key]
             if where and where not in entry["where"]:
                 entry["where"].append(where)
-            entry["items"] += [dict(i, operation=planned_op.index, text=f"{i.get('operation', '')} {i.get('tool', '')}"
-                                    .strip()) for i in item["items"]]
+            entry["items"] += [{"text": f"{i.get('where', '')} {i.get('tool', '')}".strip(), "operation": planned_op.index,
+                                "tool": i.get("tool")} for i in item["items"]]
     result = []
     for item in out:
         if "finding" not in item:

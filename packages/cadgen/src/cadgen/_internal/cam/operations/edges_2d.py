@@ -697,7 +697,8 @@ class EngraveOperation(OperationBase):
                 "warning", "rest_material",
                 f"{ctx.label}: {tool.id} leaves {left:.3g} mm2 of the flat bottom of {ref} where it does not fit",
                 "the V-bit's pass round the flat cuts the walls, but in corners tighter than the flat tool the floor "
-                "keeps a little material; a smaller clear_tool takes it", [{"text": ref, "tool": tool.id}]))
+                "keeps a little material; a smaller clear_tool takes it",
+                [{"text": f"{ctx.label} {ref}", "ref": ref, "tool": tool.id}]))
         return (clear, emitter), found
 
     def human_lines(self, stats: dict) -> list[str]:

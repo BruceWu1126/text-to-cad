@@ -4,7 +4,8 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 /**
  * A small CAM result GLB, as `cadgen cam plan` writes one (`_internal/cam/outputs.py`), built byte by byte: the part
  * (mesh 0, the job on its extras, `_FACE`), the stock, a setup's fixture, two tools (each in its own frame, placed at
- * its first path's start) and two operations' paths as `LINES` with `_T`, `_KIND` and `_OP`. In glTF metres:
+ * its first path's start) and two operations' paths as `LINES` with `_T`, `_KIND`, `_OP` and `_TOOL` (the facing's
+ * segments T1's, tools[0], the drill's T2's, tools[1], unless `pathTools` says otherwise). In glTF metres:
  *
  * - `path:0:facing` (T1, 0 to 4 s): a rapid down (0 to 1 s), a feed along +X (1 to 3 s), a feed along -Z (3 to 4 s);
  * - `path:1:drill` (T2, 5 to 7 s): a rapid down (5 to 5.5 s), then a canned cycle, down (5.5 to 6.5 s) and back up.
@@ -52,7 +53,7 @@ const ARRAY = 34962;
 const FLOAT = 5126;
 
 /** The bytes of a CAM result GLB: `extras` on the part mesh (`camExtras()` unless given). */
-export function camGlb(extras: Record<string, unknown> = camExtras()): ArrayBuffer {
+export function camGlb(extras: Record<string, unknown> = camExtras(), pathTools: Record<number, number[]> = {}): ArrayBuffer {
   const chunks: Float32Array[] = [];
   const views: object[] = [];
   const accessors: object[] = [];
@@ -81,11 +82,13 @@ export function camGlb(extras: Record<string, unknown> = camExtras()): ArrayBuff
   };
   const lines = (name: string, op: number, segments: typeof FACING) => {
     const positions = segments.flatMap((segment) => [...segment.from, ...segment.to]);
+    const tools = pathTools[op] || segments.map(() => op);
     meshes.push({ name, primitives: [{ attributes: {
       POSITION: add(positions, 'VEC3', true),
       _T: add(segments.flatMap((segment) => segment.t), 'SCALAR'),
       _KIND: add(segments.flatMap((segment) => [segment.kind, segment.kind]), 'SCALAR'),
       _OP: add(segments.flatMap(() => [op, op]), 'SCALAR'),
+      _TOOL: add(tools.flatMap((tool) => [tool, tool]), 'SCALAR'),
     }, material: 4, mode: 1 }] });
     nodes.push({ mesh: meshes.length - 1, name });
   };
@@ -124,8 +127,8 @@ export function camGlb(extras: Record<string, unknown> = camExtras()): ArrayBuff
 }
 
 /** The scene GLTFLoader makes of `camGlb(extras)`: what the viewer reads (names in `userData.name`, attributes lower-cased). */
-export async function camScene(extras?: Record<string, unknown>): Promise<Group> {
-  const gltf = await new GLTFLoader().parseAsync(camGlb(extras), '');
+export async function camScene(extras?: Record<string, unknown>, pathTools?: Record<number, number[]>): Promise<Group> {
+  const gltf = await new GLTFLoader().parseAsync(camGlb(extras, pathTools), '');
   return gltf.scene;
 }
 

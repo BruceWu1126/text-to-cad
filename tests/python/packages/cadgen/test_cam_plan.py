@@ -1,7 +1,7 @@
 """``cadgen cam plan`` end to end on the plate: the three files, the GLB's contract, the sidecar, the G-code.
 
 A four-operation job (facing, pocket_2d, contour_2d with tabs, drill) on linuxcnc writes plate.nc, plate.cam.glb and
-plate.cam.json; the GLB carries the extras on mesh 0 and one LINES primitive per operation with _T, _KIND and _OP;
+plate.cam.json; the GLB carries the extras on mesh 0 and one LINES primitive per operation with _T, _KIND, _OP and _TOOL;
 the sidecar is the result; the program reads back as the toolpaths planned; a second run writes the same bytes. Then:
 an operation that cannot be planned exits 1 with its error finding and no G-code; two setups write two programs;
 --post overrides the job's post; the CLI's --json answers ok.
@@ -94,9 +94,11 @@ class Plan(unittest.TestCase):
                 self.assertEqual(primitive["mode"], 1)
                 count = gltf["accessors"][primitive["attributes"]["POSITION"]]["count"]
                 self.assertEqual(count % 2, 0)
-                t, kind, op = (glb_attribute(gltf, binary, mesh, name) for name in ("_T", "_KIND", "_OP"))
-                self.assertEqual((len(t), len(kind), len(op)), (count, count, count))
+                t, kind, op, tool = (glb_attribute(gltf, binary, mesh, name) for name in ("_T", "_KIND", "_OP", "_TOOL"))
+                self.assertEqual((len(t), len(kind), len(op), len(tool)), (count, count, count, count))
                 self.assertEqual(set(op), {float(index)})
+                # The tool cutting each segment, as its index in extras.tools: T1 mills, T2 drills.
+                self.assertEqual(set(tool), {1.0 if index == 3 else 0.0})
                 self.assertTrue(set(kind) <= {0.0, 1.0, 2.0, 3.0, 4.0, 5.0})
                 self.assertTrue(all(a <= b for a, b in zip(t, t[1:])), "_T goes back")
         self.assertIn(5.0, glb_attribute(gltf, binary, 8, "_KIND"))   # the drill's cycles
@@ -132,7 +134,10 @@ class Plan(unittest.TestCase):
         self.assertEqual(code, 1)
         answer = json.loads(text)
         self.assertFalse(answer["ok"])
-        self.assertEqual([f["type"] for f in answer["findings"] if f["severity"] == "error"], ["tool_too_large"])
+        [error] = [f for f in answer["findings"] if f["severity"] == "error"]
+        self.assertEqual(error["type"], "tool_too_large")
+        # Its items name the operation by its index (and the pocket by its selector), not in a sentence to parse.
+        self.assertEqual([(item["operation"], item.get("ref")) for item in error["items"]], [(1, POCKET)])
         self.assertEqual(sorted(p.name for p in out.parent.iterdir()), ["plate.cam.json"])
         self.assertFalse(json.loads((out.parent / "plate.cam.json").read_text(encoding="utf-8"))["ok"])
 

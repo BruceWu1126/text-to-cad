@@ -164,7 +164,8 @@ def feeds_for(tool: "Tool", material: "Material", machine: "Machine", *, where: 
     surface *= _SPEED_FACTOR.get(tool.type, 1.0) * hss
     base_chip = chipload_at(bands, diameter)
     label = f"{where}, " if where else ""
-    item = [{"text": f"{where} {tool.id}".strip(), "tool": tool.id, **({"operation": where} if where else {})}]
+    # ``where`` is how a sentence names the operation; the job's checks put the operation's index on each item.
+    item = [{"text": f"{where} {tool.id}".strip(), "tool": tool.id, **({"where": where} if where else {})}]
     found: list[dict] = []
 
     # Per revolution (hole makers) or per tooth x teeth (milling): the mm the tool advances each turn.

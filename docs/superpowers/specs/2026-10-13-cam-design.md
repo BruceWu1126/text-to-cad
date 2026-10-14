@@ -203,7 +203,10 @@ the machine: single block, feed override low, in air first."
 ## Findings
 
 Same shape as FEA's (`check`, `severity`, `type`, `summary`, `description`, `items`), errors first, written in
-plain words an engineer agrees with and a maker cannot misread.
+plain words an engineer agrees with and a maker cannot misread. Every item is an object; one that names an
+operation carries its integer index in the job (`operation`), and one that names a feature its selector (`ref`),
+so a reader (the viewer isolating the operation a finding is about) never parses `operations[2] (pocket_2d)` out
+of a sentence.
 
 - **error**: `gouge` (path cuts into the part past its tolerance), `holder_collision` (holder or shank hits stock,
   part or fixture), `fixture_collision`, `unreachable` (feature not reachable from any setup: undercut),
@@ -231,13 +234,17 @@ plain words an engineer agrees with and a maker cannot misread.
   - stock meshes: initial, and (from phase 2) the simulated stock after each operation, for the playbar.
   - fixture meshes, and one mesh per tool (built from its profile, holder included).
   - toolpaths as glTF `LINES` primitives (mode 1), one per operation, with vertex attributes `_T` (time),
-    `_KIND` (rapid/feed/plunge/...), `_OP` (operation index). Real line primitives, so any glTF viewer shows
-    the paths; cadgen's viewer replaces them (below).
+    `_KIND` (rapid/feed/plunge/...), `_OP` (operation index) and `_TOOL` (the index in `extras.tools` of the tool
+    cutting that segment: one operation may run more than one tool, an engraving's `clear_tool` before its V-bit,
+    so the viewer takes the tool to draw from the segment, not the operation). Real line primitives, so any glTF
+    viewer shows the paths; cadgen's viewer replaces them (below).
   - As built (task 13; `_internal/cam/outputs.py` holds the contract): the whole file is in the PART's frame
     (`extras.frame`), each setup's toolpaths moved back from its setup frame. Nodes in order: `part`, `stock`,
     `fixture:<setup>` (setups with a fixture), `tool:<id>` (each tool that cuts; mesh in the tool's frame, tip at
     the origin along glTF +Y, the node's translation/rotation at its first toolpath's start in that setup), then
-    `path:<op index>:<op>`. The part mesh adds `_FACE` (face ordinal, the `N` of `#o1.fN`). `_KIND` codes: rapid
+    `path:<op index>:<op>` (with `_T`, `_KIND`, `_OP` and `_TOOL`). The part mesh adds `_FACE` (face ordinal, the
+    `N` of `#o1.fN`). The fixture material is a see-through steel (an opaque grey fixture reads as the part's grey
+    once lit, and the part is lost on it); the viewer redraws it in each theme's steel. `_KIND` codes: rapid
     0, feed 1, plunge 2, arc 3, lead 4, cycle 5; `_T` is the job clock in seconds, non-decreasing along a path;
     arcs drawn as chords within 0.05 mm, cycles as the moves they stand for. Each `extras.setups[i]` carries
     `quaternion` (setup to part rotation in glTF axes) for placing the tool.

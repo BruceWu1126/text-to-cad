@@ -179,7 +179,7 @@ class _HoleOperation(OperationBase):
                 if why is not None:
                     kind, sentence = why
                     raise PlanError(kind, f"{ctx.where}.features[{index}]: {ref} {sentence}",
-                                    items=[{"text": f"{ctx.label} {ref}", "ref": ref, "operation": ctx.label}])
+                                    items=[{"text": f"{ctx.label} {ref}", "ref": ref}])
             return named
         reached = [(found.feature.ref, found) for found in ctx.features if found.feature.kind == "hole"]
         suited = [(ref, found) for ref, found in reached if self.unsuited(params, ctx, found) is None]
@@ -238,7 +238,7 @@ class _HoleOperation(OperationBase):
                     f"{ctx.label}: {ctx.tool.id}'s full diameter stops {short:g} mm short of {ref}'s floor",
                     f"the hole has a {what} and the tool's point is {point:g} mm long, so the tip stops at the hole's "
                     "deepest point and the corner of the floor is left; finish it with a flat tool if it matters",
-                    [{"text": f"{ctx.label} {ref}", "ref": ref, "operation": ctx.label}]))
+                    [{"text": f"{ctx.label} {ref}", "ref": ref}]))
         return tip, {"through": False, "full_diameter_z": round(tip + point, 6)}, found
 
     # --- the cycle -----------------------------------------------------------------------------------------

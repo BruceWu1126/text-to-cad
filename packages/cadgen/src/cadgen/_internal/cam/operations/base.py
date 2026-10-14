@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from cadgen._internal.cam.job import Machine, Material, Setup, Tool
 
 __all__ = ["Operation", "OperationBase", "PLAN_ERROR_KINDS", "ParseContext", "PlanError", "Phase", "TARGETS",
-           "by_severity", "finding"]
+           "by_severity", "finding", "naming_operation"]
 
 #: The phase an operation is built in (the design's four): 2.5D, 3D, turning/cutting/EDM, multi-axis.
 Phase = Literal[1, 2, 3, 4]
@@ -83,6 +83,24 @@ def finding(severity: str, kind: str, summary: str, description: str, items=()) 
     """One entry of a plan's findings, in the KiCad findings' shape."""
     return {"check": "cam", "severity": severity, "type": kind, "summary": summary, "description": description,
             "items": list(items)}
+
+
+def naming_operation(found: dict, index: int, label: str) -> dict:
+    """``found`` (one operation's finding) with every item a dict that names the operation by its integer index in
+    the job (``operation``), so a reader never parses ``"operations[2] (pocket_2d)"`` back out of a sentence. An item
+    an operation wrote as a bare string (a feature's selector, ``"region"``) becomes ``{"text", "operation"}``, with
+    ``ref`` when it is a feature's selector (``#o1.f19``); a finding with no item gets one naming the operation."""
+    items = []
+    for item in found["items"] or [label]:
+        if isinstance(item, str):
+            entry = {"text": item if item == label else f"{label} {item}", "operation": index}
+            if item.startswith("#") and ".f" in item:
+                entry["ref"] = item
+        else:
+            entry = {**item, "operation": index}
+            entry.setdefault("text", label)
+        items.append(entry)
+    return {**found, "items": items}
 
 
 class PlanError(ValueError):

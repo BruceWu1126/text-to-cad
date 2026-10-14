@@ -1,7 +1,7 @@
 import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { describe, expect, it } from 'vitest';
 import {
-  camMotion, camSummary, camTime, clockTime, jobPlayback, operationAt, operationRow, pathPointAt, playbackPace, readCamResult, setupRow, toolPlacementAt, toolRow
+  camMotion, camSummary, camTime, clockTime, findingOperation, jobPlayback, operationAt, operationRow, pathPointAt, playbackPace, readCamResult, setupRow, toolPlacementAt, toolRow
 } from './camResult.js';
 import { FIXTURE_LOOK, createCamTool } from './camPaths.js';
 import { DRILL, FACING, STICKOUT, camExtras, camNode, camScene } from './__tests__/camFile.js';
@@ -55,6 +55,24 @@ describe('the tool on the path', () => {
     expect([drilling.operation.op, drilling.tool]).toEqual(['drill', 'T2']);
     expect(drilling.point.map((value) => +value.toFixed(6))).toEqual([0.01, -0.0015, -0.005]);
     expect(drilling.quaternion).toEqual([0, 0, 0, 1]);
+  });
+
+  it('is the tool cutting the segment under way, by its _TOOL: an operation may run two', async () => {
+    // The facing's first segment cut by T2 (a clearing tool, say), the rest by T1.
+    const cam = readCamResult(await camScene(undefined, { 0: [1, 0, 0] }))!;
+    expect(Array.from(cam.nodes.paths.get(0)!.tools!)).toEqual([1, 0, 0]);
+    expect([toolPlacementAt(cam, 0.5)!.tool, toolPlacementAt(cam, 2)!.tool]).toEqual(['T2', 'T1']);
+    expect([toolPlacementAt(cam, 0.5)!.operation.op, toolPlacementAt(cam, 2)!.operation.op]).toEqual(['facing', 'facing']);
+  });
+});
+
+describe('a finding', () => {
+  it('names its operation by the integer index cadgen writes on an item, never by parsing a sentence', async () => {
+    const gouge = { check: 'cam', severity: 'error', type: 'gouge', summary: 'operations[1] (drill): T2 cuts 1 mm into the part', description: '',
+      items: [{ text: 'operations[1] (drill) #o1.f16', operation: 1, ref: '#o1.f16' }, { text: 'operations[0] (facing) T1', operation: 'operations[0] (facing)' }] };
+    const cam = readCamResult(await camScene(camExtras({ findings: [gouge] })))!;
+    expect(cam.findings[0].items.map((item) => [item.operation, item.ref])).toEqual([[1, '#o1.f16'], [null, null]]);
+    expect(findingOperation(cam.findings[0])).toBe(1);
   });
 });
 
