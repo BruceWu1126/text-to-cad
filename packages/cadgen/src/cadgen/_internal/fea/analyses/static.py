@@ -188,6 +188,8 @@ def static_setup(ctx: SolveContext, inputs: StaticInputs, loads) -> tuple:
     planes = list(plan.prepared.planes) if plan is not None and plan.prepared is not None else []
     if plan is not None and plan.solver != "direct":
         extra["solver"] = plan.solver
+        # Iterative to finish sooner gives way to CalculiX, faster still; iterative to fit in memory does not.
+        extra["calculix_first"] = plan.solver_for == "time"
     if planes:
         # The half carries its share of each force (its faces are that share of the faces); a pressure,
         # a body load and a fixture act on what is there. The cut faces may slide in their plane only.

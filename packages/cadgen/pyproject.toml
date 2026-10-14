@@ -88,6 +88,8 @@ fea = [
   "pyamg>=5.2",
   "numpy>=1.26",
   "scipy>=1.11",
+  # Unpacks the CalculiX build downloaded on first use (the stdlib has zstd from 3.14).
+  "zstandard>=0.22; python_version < '3.14'",
 ]
 
 [project.urls]

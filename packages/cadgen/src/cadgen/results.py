@@ -506,8 +506,10 @@ class FeaResult:
         size = f"{self.mesh.get('elements')} tets, {self.mesh.get('dofs')} DOF, {self.mesh.get('size_mm')} mm elements"
         vtu = f", VTU: {_display(self.vtu)}" if self.vtu else ""
         if self.analysis == "static":
+            # Which solver ran: CalculiX when it is installed ("calculix 2.23 (C3D10)"), else the built-in one.
+            solver = f"; solver {self.mesh['solver']}" if self.mesh.get("solver") else ""
             lines = [
-                f"solved {self.occurrence} of {_display(self.document)}: {size}",
+                f"solved {self.occurrence} of {_display(self.document)}: {size}{solver}",
                 *_stress_lines(s, safety_factor_text),
                 *_check_lines(s),
                 f"max displacement {s.get('max_displacement_mm')} mm at {s.get('max_displacement_at_mm')}",

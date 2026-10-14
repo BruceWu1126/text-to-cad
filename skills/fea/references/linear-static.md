@@ -131,6 +131,28 @@ plain words: "To fit this machine, it meshed coarsely away from the hole; the pe
 meshed finely, and it moved 2 % between the coarse and fine passes." Never report an adapted result
 as if no step was taken.
 
+## Which solver runs: CalculiX or the built-in one
+
+- A static study is solved by CalculiX (`ccx`), which is faster, and otherwise by cadgen's built-in
+  solver. Nothing else changes: the same mesh, loads, fixtures, checks and outputs, and the same
+  answer. On a straight-edged mesh the two agree to CalculiX's seven printed digits; at a curved
+  hole or fillet they differ slightly, from how each integrates a curved element (CalculiX at 4
+  points, the built-in solver at 11): within 0.2 % on the max von Mises, the safety factor and the
+  displacement, far less than a finer mesh moves them. The one number that can differ more is the
+  Gauss-point peak at a sharp inside corner (25 % on a clevis's slot corner): a spike the mesh
+  cannot resolve with either solver. Read it as a spike, never quote it as the part's stress.
+- Nothing needs installing: the first study CalculiX suits downloads it once into cadgen's cache (9
+  to 21 MB by platform; the run prints `cadgen: downloading the CalculiX solver`). A `ccx` already
+  on the PATH is used instead; `CADGEN_CCX=/path/to/ccx` names one, and `CADGEN_CCX=0` turns it
+  off. With no network, or on a platform cadgen has no build for, the built-in solver runs, and a
+  failed download says why.
+- The built-in solver keeps what CalculiX would not solve the same way: an orthotropic or layered
+  material, a thermal strain, a roller on a sloped or curved face, linear elements, and models over
+  150 000 degrees of freedom (CalculiX's direct solver needs far more memory there).
+- The result says which ran: `mesh.solver` in the sidecar (`calculix 2.23 (C3D10)`, or the built-in
+  `superlu` or `amg+cg (…)`), also at the end of the first line the command prints. If CalculiX
+  fails, the built-in solver answers instead and a warning says why.
+
 ## Judging the answer
 
 Before trusting a run, estimate the answer by hand and compare:

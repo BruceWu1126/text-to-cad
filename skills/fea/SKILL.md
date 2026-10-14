@@ -135,6 +135,7 @@ These rules hold for every analysis.
 | **Pick the analysis** | Match the question to a row of the table above; every analysis in it runs today, and its row says whether it is an estimate or lite. | [Choose the analysis](#choose-the-analysis) |
 | **Check a part under a load** | List its faces, write the study, solve, report. The workflow below. | [Linear static checklist](references/linear-static.md) |
 | **Check an assembly** | `cadgen fea parts` first, then write the study with a material per part, solve, read the findings by part. | [Assemblies](#assemblies) |
+| **Compare variants of a design** | Get the study right on one variant, then map its faces onto each other variant and solve each. | [Compare variants](#compare-variants) |
 | **Pick the faces to fix and load** | Prefer face references the user selected in the Viewer (`part.step#o1.f17`). Otherwise list faces and match by description. | [Face selection](references/linear-static.md#choosing-faces) |
 | **Write or edit a study** | One JSON object: material, fixtures, loads, mesh; for an assembly also parts and connections. | [Study file](references/study-file.md) |
 | **Choose a material** | Use the table by name, or give E, ν and yield explicitly. | [Materials](references/materials.md) |
@@ -162,6 +163,13 @@ reuse them):
 ```bash
 uvx --no-config --managed-python --python 3.13 --from "cadgen[fea]==0.7.21" cadgen fea solve part.step --study study.json
 ```
+
+The analyses CalculiX solves run on it, faster, and the first of them downloads it once (`cadgen:
+downloading the CalculiX solver (once, about 9 MB)`, 9 to 21 MB by platform) into cadgen's cache;
+nothing needs installing. Every result names its solver. When the download cannot happen (no
+network, a platform without a build) the same study runs on cadgen's built-in solver, which gives
+the same answer on the same mesh, more slowly, and the result says so. `CADGEN_CCX=0` turns
+CalculiX off; `CADGEN_CCX=/path/to/ccx` uses that one.
 
 Units are fixed: mm for geometry, N for forces, MPa for pressure, modulus and stress, t/mm³ for
 density, and g (9.81 m/s²) for gravity and acceleration. Restate every load in those units before
@@ -307,6 +315,30 @@ Findings an assembly adds:
 `contact` connections run under the `contact` analysis and `bolt` connections under `bolt`; every
 other analysis refuses them ("not yet supported"); a pair set `free` inside a group that is glued
 through other parts is refused too.
+
+## Compare variants
+
+When the user wants one question answered for several versions of a design (a thicker wall, a
+longer arm, another material), each version is its own STEP, as `$cad` builds them: one model per
+configuration. Run the same study on each, with the faces mapped, and compare.
+
+1. **Get the study right on one variant first** (the baseline): the full [Workflow](#workflow),
+   solved and checked.
+2. **Map its faces onto every other variant.** Face numbers are not stable between versions: an
+   edit renumbers faces, and a selector reused unchecked can land on a different face with no
+   error. Run `cadgen fea faces variant.step` and match each face the study names by what it is,
+   never by its number: the same surface type and normal, a centre where the edit would move it,
+   an area that changed only as the edit explains. When two faces fit equally, or the edit removed
+   the face, ask, quoting the candidates. Write one study per variant (`study.<variant>.json`):
+   the mapped selectors, everything else identical.
+3. **Hold the mesh still.** Accuracy follows the mesh, so a difference between variants is only
+   the design's when they are meshed alike: give every study the baseline's `mesh.size_mm`.
+4. **Solve each to its own result:** `cadgen fea solve variant.step FEA/variant.fea.glb --study
+   study.<variant>.json`.
+5. **Report one table**, a row per variant: the answer's numbers (max von Mises and where, safety
+   factor, max displacement; the first frequency for `modal`), whether a finer re-solve ran, and
+   the face mapping used (`baseline #o1.f17 → #o1.f21, the mounting face`) so the user can check
+   it. Say which variant answers their question best, and by how much.
 
 ## What the result means
 

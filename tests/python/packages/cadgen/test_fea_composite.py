@@ -272,7 +272,8 @@ class OrthotropicSolid(unittest.TestCase):
         space = FemSpace.build(self.volume)
         K_iso, K_ortho = operators.stiffness(space, steel), operators.stiffness(space, ortho)
         self.assertLess(abs(K_iso - K_ortho).max() / abs(K_iso).max(), 1e-9)
-        a, b = self._pull(steel), self._pull(ortho)
+        # Both on the built-in solver: the isotropic one would go to CalculiX where it is installed (calculix.py).
+        a, b = self._pull(steel, "direct"), self._pull(ortho, "direct")
         self.assertLess(np.abs(a.displacement - b.displacement).max() / np.abs(a.displacement).max(), 1e-8)
 
     def test_modal_takes_the_orthotropic_stiffness(self):

@@ -127,6 +127,9 @@ class Step:
 @dataclass
 class FitPlan:
     solver: Literal["direct", "iterative", "matrix_free"] = "direct"
+    # Why the iterative rung changed ``solver``: to finish sooner ("time"), which CalculiX does better still where it
+    # takes the study, or to fit in memory ("memory"), where CalculiX's direct solver would not help.
+    solver_for: Literal["", "time", "memory"] = ""
     size_mm: float | None = None                 # global element size
     size_field: dict | None = None               # local sizes: {"faces": {...}, "points": [...], "radius_mm": ...}
     defeatured: tuple[str, ...] = ()             # face refs removed for meshing
@@ -311,12 +314,12 @@ def _apply_iterative(analysis, ctx, inputs) -> Step | None:
         solver = min(options, key=lambda name: (options[name].memory_bytes > budget.memory_bytes, options[name].memory_bytes))
         if options[solver].memory_bytes - BASE_BYTES > 0.95 * (before.memory_bytes - BASE_BYTES):
             return None
-        why = "fit in memory"
+        why, plan.solver_for = "fit in memory", "memory"
     else:
         solver = "iterative"
         if options[solver].seconds > 0.95 * before.seconds:
             return None
-        why = "finish sooner"
+        why, plan.solver_for = "finish sooner", "time"
     plan.solver = solver
     detail = {"solver": solver, "from_bytes": int(before.memory_bytes), "to_bytes": int(options[solver].memory_bytes)}
     if solver == "matrix_free":

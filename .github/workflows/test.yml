@@ -245,6 +245,13 @@ jobs:
       - name: Install the fea extra
         run: python -m pip install --editable "./packages/cadgen[fea]" "netgen-mesher==6.2.2608"
 
+      # The download every first solve makes (about 20 MB here), done up front so a broken pin
+      # fails here by name rather than every solve quietly falling back to the built-in solver;
+      # the CalculiX tests then compare the two solvers on the same mesh.
+      - name: Download CalculiX
+        run: |
+          python -c "import sys; from cadgen._internal.fea.calculix_install import ensure_calculix as e; c = e(say=print); print(c); sys.exit(c.path is None)"
+
       - name: Run the fea tests
         run: scripts/test/test-python.sh --select cadgen --print-weights tests/python/packages/cadgen/test_fea*.py
         shell: bash

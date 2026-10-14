@@ -1,10 +1,12 @@
-"""Linear static elasticity on a :class:`VolumeMesh`: scikit-fem assembly, pyamg solve.
+"""Linear static elasticity on a :class:`VolumeMesh`: scikit-fem assembly, pyamg solve, or CalculiX when installed.
 
 Quadratic (10-node) tetrahedra, isotropic linear elasticity, small strain. Fixed faces clamp every displacement
 component; a force is spread as a uniform traction over its faces; a pressure acts along the inward normal. The solve is
 algebraic multigrid (smoothed aggregation with the six rigid-body modes as the near-nullspace) accelerated by conjugate
 gradients, which is what makes a 150k-DOF part a seconds-long solve where SciPy's direct solver takes minutes; small
-systems go straight to the direct solver.
+systems go straight to the direct solver. Where a ``ccx`` program is installed and the study is one it solves the same
+way, CalculiX assembles and solves instead (calculix.py), on the same mesh with the same loads and held DOF, and its
+stress lands on the same quadrature points.
 
 Stress is recovered at the quadrature points from the displacement gradient, von Mises is formed there, and its nodal
 field is the L2 projection onto the quadratic scalar basis. Both maxima are reported: the Gauss-point value is the
@@ -122,8 +124,8 @@ def solve_linear_static(volume: "VolumeMesh", material: "Material | Sequence[Mat
                         fixtures: "tuple[Fixture, ...]", loads: "tuple[Load, ...]", ordinal_of: dict[str, int], *,
                         log=None, automatic: bool = False, body_loads: "Sequence[Sequence[float]]" = (),
                         initial_strain=None, facet_pressures: "np.ndarray | None" = None, solver: str | None = None,
-                        space: "FemSpace | None" = None, rollers: "Sequence[tuple[Sequence[int], int]]" = ()
-                        ) -> SolveOutcome:
+                        space: "FemSpace | None" = None, rollers: "Sequence[tuple[Sequence[int], int]]" = (),
+                        calculix_first: bool = False) -> SolveOutcome:
     """Solve one study on a meshed occurrence. ``ordinal_of`` maps face refs to ordinals.
 
     ``automatic`` marks the re-solve cadgen chose the size of, which words its warnings accordingly.
@@ -138,13 +140,18 @@ def solve_linear_static(volume: "VolumeMesh", material: "Material | Sequence[Mat
     (3, 3, elements, quadrature) tensor): its load is added and the stress is
     recovered from the elastic part. ``facet_pressures`` is one pressure (MPa,
     positive pushing in) per row of ``volume.boundary``. ``solver`` forces
-    ``"direct"``, ``"iterative"`` or ``"matrix_free"``; ``space`` reuses a
+    ``"direct"``, ``"iterative"`` or ``"matrix_free"`` (the built-in solver) or
+    asks for ``"calculix"``; ``None`` takes CalculiX when :func:`calculix.choose
+    <cadgen._internal.fea.calculix.choose>` finds it and the study suits it,
+    else the built-in solver chosen by size. ``space`` reuses a
     :class:`~cadgen._internal.fea.femspace.FemSpace` built on ``volume``.
+    ``calculix_first`` lets CalculiX take a study ``solver`` names a built-in solver for (the fit ladder's iterative
+    rung, taken to finish sooner); ``solver`` is then the built-in fallback.
     ``rollers`` hold one displacement component on faces given by mesh ordinal, ``(ordinals,
     component)`` each: a symmetry plane's (fit's ``symmetry`` rung). They carry no reaction.
     """
     import numpy as np
-    from cadgen._internal.fea import operators
+    from cadgen._internal.fea import calculix, operators
     from cadgen._internal.fea.femspace import FemSpace
     from cadgen._internal.fea.mesh import small_feature_mm
     from cadgen._internal.fea.superposition import load_vector
@@ -164,15 +171,7 @@ def solve_linear_static(volume: "VolumeMesh", material: "Material | Sequence[Mat
     locations, component = space.locations, space.component
     materials = list(material) if volume.domain is not None else material
 
-    # Stiffness
-    started = time.perf_counter()
-    if solver == "matrix_free":
-        K = operators.ElementChunkOperator(space, materials)
-    else:
-        K = operators.stiffness(space, materials)
-    timings["assemble_s"] = time.perf_counter() - started
-
-    # Loads
+    # Loads, as nodal forces whichever solver runs
     f = load_vector(space, loads, ordinal_of)
     for acceleration in body_loads:
         f += operators.body_force(space, materials, acceleration)
@@ -206,24 +205,45 @@ def solve_linear_static(volume: "VolumeMesh", material: "Material | Sequence[Mat
     free = np.setdiff1d(np.arange(basis.N), fixed)
     check_held(space, supports)
 
-    started = time.perf_counter()
-    u = np.zeros(basis.N)
-    method = {"direct": "direct", "iterative": "iterative"}.get(solver or "")
-    if supports.turned:
-        # A sloped or curved roller: solved in its nodes' own axes, then turned back (matrix-free assembles here).
-        K = operators.stiffness(space, materials) if solver == "matrix_free" else K
-        local = np.zeros(basis.N)
-        local[free], how = operators.solve_spd(supports.local(K), supports.local_vector(f), free, locations, component,
-                                               warnings, method=method)
-        u = supports.global_vector(local)
+    # CalculiX, when it is installed and the study is one it solves as the built-in solver does (calculix.declines).
+    solved = None
+    ccx, why = calculix.choose(space, materials, solver=None if calculix_first else solver,
+                               initial_strain=initial_strain, supports=supports)
+    if why:
+        warnings.append(why)
+    if ccx is not None:
+        started = time.perf_counter()
+        solved = calculix.solve_static(ccx, space, materials, f, fixed, warnings)
+        timings["solve_s"] = time.perf_counter() - started
+    if solved is not None:
+        u, residual, how = solved.u, solved.residual, solved.how
     else:
-        u[free], how = operators.solve_spd(K, f, free, locations, component, warnings, method=method)
-    timings["solve_s"] = time.perf_counter() - started
+        # Stiffness
+        started = time.perf_counter()
+        if solver == "matrix_free":
+            K = operators.ElementChunkOperator(space, materials)
+        else:
+            K = operators.stiffness(space, materials)
+        timings["assemble_s"] = time.perf_counter() - started
+
+        started = time.perf_counter()
+        u = np.zeros(basis.N)
+        method = {"direct": "direct", "iterative": "iterative"}.get(solver or "")
+        if supports.turned:
+            # A sloped or curved roller: solved in its nodes' own axes, then turned back (matrix-free assembles here).
+            K = operators.stiffness(space, materials) if solver == "matrix_free" else K
+            local = np.zeros(basis.N)
+            local[free], how = operators.solve_spd(supports.local(K), supports.local_vector(f), free, locations, component,
+                                                   warnings, method=method)
+            u = supports.global_vector(local)
+        else:
+            u[free], how = operators.solve_spd(K, f, free, locations, component, warnings, method=method)
+        timings["solve_s"] = time.perf_counter() - started
+        residual = K @ u - f
     if log:
         log(f"solved with {how} in {timings['solve_s']:.1f}s")
 
     # Reactions: K u - f on the fixed DOF, summed per fixture and component.
-    residual = K @ u - f
     reactions = [
         tuple(float(residual[dofs][component[dofs] == c].sum()) for c in range(3))
         for dofs in fixture_dofs
@@ -232,6 +252,8 @@ def solve_linear_static(volume: "VolumeMesh", material: "Material | Sequence[Mat
     # Stress recovery
     started = time.perf_counter()
     s = operators.stress(space, materials, u, initial_strain)
+    if solved is not None:
+        s = solved.stress(space, s)  # CalculiX's own on its straight elements, exact there
     von_mises_q = operators.von_mises(s)
     von_mises_parts = None
     if volume.domain is None:
