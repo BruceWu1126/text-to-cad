@@ -325,7 +325,7 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
         className="max-h-40 min-h-14 w-full rounded-md border border-input bg-background/80 transition-[border-color,box-shadow] focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 dark:focus-within:border-blue-400 dark:focus-within:ring-blue-400/20">
         <div ref={field} role="textbox" aria-multiline="true" aria-label="Describe your changes" tabIndex={0}
           contentEditable="plaintext-only" suppressContentEditableWarning data-placeholder="Describe your changes" data-quick-edit-note=""
-          className="min-h-[3.375rem] w-full whitespace-pre-wrap break-words px-2 py-1.5 text-xs leading-5 text-foreground outline-none empty:before:pointer-events-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)]"
+          className="min-h-[3.75rem] w-full whitespace-pre-wrap break-words px-2 py-1.5 text-xs leading-6 text-foreground outline-none empty:before:pointer-events-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)]"
           onInput={event => readNote(event.currentTarget)} onKeyDown={onKeyDown} onPaste={onPaste} />
       </ScrollArea>
       {error ? <p role="alert" className="text-tiny text-destructive">{error}</p> : null}

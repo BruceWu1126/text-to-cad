@@ -174,7 +174,7 @@ again, as it was.
 | Tool | Pressing it | Leaving it |
 | --- | --- | --- |
 | Select | The default tool of STEP and robots; picks parts and references, the drawing's marks and measurements (Shift adds; Delete deletes marks and measurements); shows Features (an assembly's; a robot's Links); its modes are the chevron beside it on the strip; what is picked is Quick Edit's chips | Its panel leaves the stack; the selection stays, lit and in Quick Edit, under any tool |
-| Draw | Draws on the view; its panel holds its tools (pen, the shapes behind one button, eraser), Undo and Redo, then color, weight, line style and placement | The ink stays in the model, its chip in Quick Edit; the pen is the drawing tool again |
+| Draw | Draws on the view; its panel holds its tools (pen, each shape, eraser), Undo, Redo and Clear, then color, weight, line style and placement | The ink stays in the model, its chip in Quick Edit; the pen is the drawing tool again |
 | Measure | Arms picking between points on the model; each result a chip in Quick Edit, in its colour | Unfinished picks are cancelled; completed measurements stay, Quick Edit's chips |
 | Explode / Clip | Opens a neutral panel; an edit applies the effect (Explode's, as a motion: see below); kept, a press takes it up again as it is | A neutral panel goes; an applied effect and its panel stay, kept |
 | Position | Shows joint handles and the Position panel | Handles and panel hide; joint values stay, and a pose that is not the default is kept: one line in the stack |
@@ -252,13 +252,12 @@ parts, `LARGE_TREE_ROWS`) a part's row coming on screen asks for nothing: the
 pointer resting on the part in the viewport (150ms) or pressing it asks.
 
 **Draw.** Its **Drawing** panel leads the stack while Draw is up, with no X: choosing
-another tool puts it down. Its first row is its tools — Pen; the shapes (Line, the first
-and the default; Arrow, Rectangle, Ellipse, and Text, a mark put down in place), the one
-last taken up on its button and the rest in its narrow chevron's menu; Eraser — and, at
-the row's end, **Undo** and **Redo**, the drawing's history, each disabled while there is
-nothing for it. Draw has no Select or Pan of its own (Select picks ink, a right drag or
+another tool puts it down. Its tools are a button each on a grid of six 24px columns
+spread across it: Pen, Line, Arrow, Rectangle, Ellipse and Text (a mark put down in place),
+then on the second row Eraser and, in its last three columns, **Undo** and **Redo** (the
+drawing's history) and **Clear** (the trash), each disabled while there is nothing for it. Draw has no Select or Pan of its own (Select picks ink, a right drag or
 Space orbits). Under a rule, a row of dropdowns for what is drawn next, each its value's
-glyph and a small chevron opening an ordinary menu of glyphs and names: Color, Stroke width (Thin, Medium, Bold — a shape's 1, 2 or 4px, the pen drawn
+glyph alone, no chevron, opening an ordinary menu of glyphs and names: Color, Stroke width (Thin, Medium, Bold — a shape's 1, 2 or 4px, the pen drawn
 to look the same weight, its glyph a dot 3, 5 or 7px across), Line style (Solid,
 Dashed, Dotted — a shape's line; the pen's freehand ink is always solid; its glyph a
 diagonal line, drawn in the style) and Placement (On model, the default, its glyph

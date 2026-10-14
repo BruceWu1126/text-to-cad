@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { sameView } from './views.js';
 import { useViewerHistory } from '../renderers/kit/shell/useViewerHistory.js';
 import { penWidth } from './inkGeometry.js';
-import { DRAWING_SHAPE_TOOLS } from './toolbar.jsx';
 
 /**
  * The drawing: one sketch, its ink in the model (`renderers/kit/tools/draw/ink3d.js`'s items), what
@@ -15,7 +14,6 @@ import { DRAWING_SHAPE_TOOLS } from './toolbar.jsx';
  * @typedef {object} DrawingSession
  * @property {boolean} ready  Always: the toolbar's tools are the session's own.
  * @property {import('./toolbar.jsx').DrawingTool} tool
- * @property {import('./toolbar.jsx').DrawingTool} shape  The shape last taken up (the line first): the shapes button's.
  * @property {string} color
  * @property {number} strokeWidth
  * @property {import('./toolbar.jsx').DrawingStrokeStyle} strokeStyle
@@ -54,7 +52,6 @@ import { DRAWING_SHAPE_TOOLS } from './toolbar.jsx';
 
 const DEFAULTS = Object.freeze({ tool: 'freedraw', color: '#ff2d55', strokeWidth: 2, strokeStyle: 'solid', placement: 'surface' });
 const NO_INK = Object.freeze([]);
-const SHAPES = new Set(DRAWING_SHAPE_TOOLS.map(entry => entry.id));
 
 /**
  * @param {boolean} [active]  Draw is the tool. Put down, it goes back to its first tool (the pen);
@@ -69,7 +66,6 @@ export function useDrawingSession(active = true, initial = {}, history = null) {
   const start = useMemo(() => ({ ...DEFAULTS, ...Object.fromEntries(Object.entries(initial).filter(([, value]) => value != null)) }),
     [initial.tool, initial.color, initial.strokeWidth, initial.strokeStyle, initial.placement]);
   const [tool, setTool] = useState(start.tool);
-  const [shape, setShape] = useState(/** @type {import('./toolbar.jsx').DrawingTool} */ (DRAWING_SHAPE_TOOLS[0].id));
   const [color, setColor] = useState(start.color);
   const [strokeWidth, setStrokeWidth] = useState(start.strokeWidth);
   const [strokeStyle, setStrokeStyle] = useState(start.strokeStyle);
@@ -120,10 +116,7 @@ export function useDrawingSession(active = true, initial = {}, history = null) {
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const actions = useMemo(() => ({
-    selectTool: next => {
-      setTool(next);
-      if (SHAPES.has(next)) setShape(next);
-    },
+    selectTool: next => setTool(next),
     selectColor: next => setColor(next),
     selectStrokeWidth: next => setStrokeWidth(next),
     selectStrokeStyle: next => setStrokeStyle(next),
@@ -176,7 +169,7 @@ export function useDrawingSession(active = true, initial = {}, history = null) {
     },
   }), [step, put]);
   const hasContent = ink.length > 0;
-  return { ready: true, tool, shape, color, strokeWidth, strokeStyle, placement, ink, selected, views,
+  return { ready: true, tool, color, strokeWidth, strokeStyle, placement, ink, selected, views,
     canUndo: log.canUndo, canRedo: log.canRedo, hasContent, hasDrawing: hasContent,
     add, remove, noteView, forget: actions.clear, ...actions };
 }

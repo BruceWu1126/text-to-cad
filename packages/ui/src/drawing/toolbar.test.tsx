@@ -13,10 +13,10 @@ function Panel() {
   return <DrawingToolbar drawing={session} history={history} />;
 }
 
-it("Draw's panel: its tools then its history on one row, and what is drawn next as dropdowns, placement among them", async () => {
+it("Draw's panel: every tool a button, then its history and Clear, and what is drawn next as dropdowns, placement among them", async () => {
   render(<Panel />);
   expect(within(screen.getByRole('group', { name: 'Drawing tools' })).getAllByRole('button').map(button => button.getAttribute('aria-label')))
-    .toEqual(['Pen', 'Line', 'Shapes', 'Eraser', 'Undo', 'Redo']);
+    .toEqual(['Pen', 'Line', 'Arrow', 'Rectangle', 'Ellipse', 'Text', 'Eraser', 'Undo', 'Redo', 'Clear drawing']);
   const settings = screen.getByRole('group', { name: 'Drawing settings' });
   expect(within(settings).getAllByRole('button').map(button => button.getAttribute('aria-label')))
     .toEqual(['Color', 'Stroke width', 'Line style', 'Placement']);

@@ -1386,15 +1386,13 @@ puts it on its strip; `renderers/shell-harness` also mounts it, for tests.)
 
 Draw is one tool of the strip (`shell.tools.draw`, the pencil); while it is up its
 panel leads the stack (`drawing/toolbar.jsx`'s `DrawingToolbar`, drawn by
-`RendererShell.jsx`), its tools on one row:
+`RendererShell.jsx`), its tools a button each:
 
 - Pen, smoothed as it is drawn, its width following pressure (a stylus's own, or
   simulated from speed with a mouse).
-- The shapes, behind one button showing the last one taken up, the rest in its
-  chevron's menu: Line (the default), Arrow, Rectangle (rounded corners), Ellipse,
-  and Text, written in place.
+- Line, Arrow, Rectangle (rounded corners), Ellipse, and Text, written in place.
 - Eraser.
-- Undo and Redo, the drawing's history, at the row's end.
+- Undo and Redo, the drawing's history, and Clear, at the end.
 
 Under a rule, what the next mark looks like: the Color, Stroke width, Line style and
 Placement dropdowns.

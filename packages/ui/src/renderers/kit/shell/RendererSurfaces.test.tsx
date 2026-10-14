@@ -226,27 +226,23 @@ it("under Select a press on the drawing picks its mark before anything under it;
   viewport.inkAt = null;
 });
 
-it("Draw is one tool on the strip; its panel has its tools, the shapes behind one button, then Undo and Redo, disabled with nothing to do", async () => {
+it("Draw is one tool on the strip; its panel has every tool a button, then Undo, Redo and Clear, disabled with nothing to do", async () => {
   mount(testHost(), undefined, 'panel-one.harness');
   const strip = within(screen.getByRole('group', { name: 'Interaction tools' }));
   fireEvent.click(strip.getByRole('button', { name: 'Draw' }));
   const panel = () => within(screen.getByRole('region', { name: 'Drawing controls' }));
   const tools = () => within(panel().getByRole('group', { name: 'Drawing tools' }));
-  expect(tools().getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Pen', 'Line', 'Shapes', 'Eraser', 'Undo', 'Redo']);
-  const disabled = () => ['Undo', 'Redo'].map(name => tools().getByRole('button', { name }).hasAttribute('disabled'));
-  expect(disabled()).toEqual([true, true]);
-  fireEvent.pointerDown(tools().getByRole('button', { name: 'Shapes' }), { button: 0, ctrlKey: false });
-  const menu = await screen.findByRole('menu', { name: 'Shapes' });
-  expect(within(menu).getAllByRole('menuitemradio').map(item => item.textContent)).toEqual(['Line', 'Arrow', 'Rectangle', 'Ellipse', 'Text']);
-  fireEvent.click(within(menu).getByRole('menuitemradio', { name: 'Text' }));
-  expect(viewport.props.drawing.tool).toBe('text');
-  // The shapes button shows the last one taken up.
-  expect(tools().getByRole('button', { name: 'Text' }).getAttribute('aria-pressed')).toBe('true');
-  // A step to take back enables Undo, and taking it back enables Redo.
+  expect(tools().getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Pen', 'Line', 'Arrow', 'Rectangle', 'Ellipse', 'Text', 'Eraser', 'Undo', 'Redo', 'Clear drawing']);
+  const disabled = () => ['Undo', 'Redo', 'Clear drawing'].map(name => tools().getByRole('button', { name }).hasAttribute('disabled'));
+  expect(disabled()).toEqual([true, true, true]);
+  fireEvent.click(tools().getByRole('button', { name: 'Text' }));
+  expect([viewport.props.drawing.tool, tools().getByRole('button', { name: 'Text' }).getAttribute('aria-pressed')]).toEqual(['text', 'true']);
+  // A step to take back enables Undo and Clear; taking it back enables Redo.
   act(() => viewport.props.drawing.add([ink('a')]));
+  expect(disabled()).toEqual([false, true, false]);
   fireEvent.click(tools().getByRole('button', { name: 'Undo' }));
   expect(viewport.props.drawing.ink).toEqual([]);
-  expect(disabled()).toEqual([true, false]);
+  expect(disabled()).toEqual([true, false, true]);
 });
 
 it('⌘Z and ⇧⌘Z walk the drawing\'s history from anywhere in the viewer; a text field keeps its own', () => {

@@ -1,4 +1,4 @@
-import { Axis3d, Box, ChevronDown, Circle, Eraser, MoveUpRight, Pencil, Redo2, Slash, Square, Type, Undo2 } from 'lucide-react';
+import { Axis3d, Box, Circle, Eraser, MoveUpRight, Pencil, Redo2, Slash, Square, Trash2, Type, Undo2 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger
 } from '@text-to-cad/ui/primitives/dropdown-menu';
@@ -7,8 +7,8 @@ import { cn } from '@text-to-cad/ui/utils';
 import { FLOATING_SURFACE_CLASS } from '../lib/floatingSurface.js';
 
 /**
- * Draw's panel (`DrawingToolbar`): its tools — the pen, the shapes behind one button, the eraser —
- * its history, and the colour, weight and line style of what is drawn next and where it is drawn (on
+ * Draw's panel (`DrawingToolbar`): its tools — the pen, each shape, the eraser — its history and
+ * Clear, and the colour, weight and line style of what is drawn next and where it is drawn (on
  * the model or in space), all the drawing session's (`session.js`). The same colour, weight and line
  * style dropdowns (`InkStylePickers`) restyle the ink Select has picked, on its selection's bar.
  */
@@ -21,7 +21,7 @@ import { FLOATING_SURFACE_CLASS } from '../lib/floatingSurface.js';
 // The pen, what Draw opens on, and the eraser.
 const PEN = { id: 'freedraw', label: 'Pen', Icon: Pencil };
 const ERASER = { id: 'eraser', label: 'Eraser', Icon: Eraser };
-// The shapes, behind one button: the line first, what it opens on; text with them, a mark put down in place.
+// The shapes, the line first; text with them, a mark put down in place.
 /** @type {readonly DrawingToolEntry[]} */
 export const DRAWING_SHAPE_TOOLS = [
   { id: 'line', label: 'Line', Icon: Slash },
@@ -90,15 +90,13 @@ const swatch = color => ({ backgroundColor: color, boxShadow: 'inset 0 0 0 1px c
 const ROW = 'flex min-w-0 flex-wrap items-center gap-0.5';
 
 /**
- * One of a mark's styles as a dropdown: its button shows the value with a small chevron, and opens
+ * One of a mark's styles as a dropdown: its button shows the value (no chevron), and opens
  * an ordinary menu of the choices, each its glyph and its name; one chosen closes it.
  */
 function StyleMenu({ label, options, value, glyph, onChange, disabled }) {
   return <DropdownMenu modal={false}>
     <DropdownMenuTrigger asChild>
-      <ToolbarButton tooltip={false} label={label} disabled={disabled} className="w-auto gap-0.5 px-1">
-        {glyph(value)}<ChevronDown className="size-2 shrink-0 opacity-70" strokeWidth={3} aria-hidden="true" />
-      </ToolbarButton>
+      <ToolbarButton tooltip={false} label={label} disabled={disabled}>{glyph(value)}</ToolbarButton>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="start" sideOffset={4} collisionPadding={8} aria-label={label}
       className={cn(FLOATING_SURFACE_CLASS, 'w-40 data-[state=closed]:animate-none!')}>
@@ -136,15 +134,17 @@ export function InkStylePickers({ color, width = null, dash = null, placement = 
   </div>;
 }
 
-// A shape button's chevron: narrow, at the button's height, lit by its own hover and while open.
-const CHEVRON_CLASS = 'grid h-6 w-3 shrink-0 place-items-center rounded-sm text-muted-foreground outline-none transition hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 disabled:pointer-events-none disabled:opacity-50 aria-expanded:bg-accent aria-expanded:text-foreground';
 const icon = Icon => <Icon className="size-3" strokeWidth={2} aria-hidden="true" />;
+// Draw's tools are laid on a grid of six 24px columns spread across the panel's width, so its two
+// rows line up, column for column: six tools, then the eraser at the left and the history and
+// Clear in the last three columns.
+const GRID = 'grid min-w-0 grid-cols-[repeat(6,1.5rem)] justify-between gap-y-0.5';
 
 /**
- * Draw's panel, under the strip while Draw is the tool: its tools on one row — the pen, the shapes
- * (the last one taken up on its button, every one in its chevron's menu, as a design tool's toolbar
- * groups them), the eraser — and at its end Undo and Redo, the drawing's history (`history`); then a
- * rule, then what is drawn next: its colour, weight, line style and placement dropdowns.
+ * Draw's panel, under the strip while Draw is the tool: its tools, every one a button — the pen,
+ * the line, the arrow, the rectangle, the ellipse, text, then the eraser — and at the end of their
+ * rows Undo, Redo (the drawing's history, `history`) and Clear; then a rule, then what is drawn
+ * next: its colour, weight, line style and placement dropdowns.
  * @param {{ drawing: import('./session.js').DrawingSession,
  *   history: { canUndo: boolean, canRedo: boolean, undo(): void, redo(): void } }} props
  */
@@ -154,34 +154,12 @@ export function DrawingToolbar({ drawing, history }) {
     active={!disabled && drawing.tool === id} aria-pressed={!disabled && drawing.tool === id} onClick={() => drawing.selectTool(id)}>
     {icon(Icon)}
   </ToolbarButton>;
-  const shape = DRAWING_SHAPE_TOOLS.find(tool => tool.id === drawing.shape) ?? DRAWING_SHAPE_TOOLS[0];
   return <div className="text-to-cad-drawing-toolbar p-1" data-drawing-controls="">
-    <div role="group" aria-label="Drawing tools" className={ROW}>
-      {toolButton(PEN)}
-      <span className="flex items-center" data-drawing-shapes="">
-        {toolButton(shape)}
-        <DropdownMenu modal={false}>
-          <DropdownMenuTrigger asChild>
-            <button type="button" aria-label="Shapes" disabled={disabled} className={CHEVRON_CLASS}>
-              <ChevronDown className="size-2 shrink-0" strokeWidth={3} aria-hidden="true" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" sideOffset={4} collisionPadding={8} aria-label="Shapes"
-            className={cn(FLOATING_SURFACE_CLASS, 'w-36 data-[state=closed]:animate-none!')}>
-            <DropdownMenuRadioGroup value={DRAWING_SHAPE_TOOLS.some(tool => tool.id === drawing.tool) ? drawing.tool : ''}
-              onValueChange={id => drawing.selectTool(/** @type {DrawingTool} */ (id))}>
-              {DRAWING_SHAPE_TOOLS.map(({ id, label, Icon }) => <DropdownMenuRadioItem key={id} value={id} data-drawing-shape={id}>
-                {icon(Icon)}{label}
-              </DropdownMenuRadioItem>)}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </span>
-      {toolButton(ERASER)}
-      <span className="ml-auto flex items-center gap-0.5">
-        <ToolbarButton tooltip={false} label="Undo" disabled={disabled || !history.canUndo} onClick={() => history.undo()}>{icon(Undo2)}</ToolbarButton>
-        <ToolbarButton tooltip={false} label="Redo" disabled={disabled || !history.canRedo} onClick={() => history.redo()}>{icon(Redo2)}</ToolbarButton>
-      </span>
+    <div role="group" aria-label="Drawing tools" className={GRID}>
+      {[PEN, ...DRAWING_SHAPE_TOOLS, ERASER].map(toolButton)}
+      <ToolbarButton tooltip={false} label="Undo" className="col-start-4" disabled={disabled || !history.canUndo} onClick={() => history.undo()}>{icon(Undo2)}</ToolbarButton>
+      <ToolbarButton tooltip={false} label="Redo" disabled={disabled || !history.canRedo} onClick={() => history.redo()}>{icon(Redo2)}</ToolbarButton>
+      <ToolbarButton tooltip={false} label="Clear drawing" disabled={disabled || !drawing.hasContent} onClick={() => drawing.clear()}>{icon(Trash2)}</ToolbarButton>
     </div>
     {/* The rule runs the panel's full width, through its inset. */}
     <div role="separator" aria-orientation="horizontal" className="-mx-1 my-1 h-px bg-border" data-drawing-rule="" />

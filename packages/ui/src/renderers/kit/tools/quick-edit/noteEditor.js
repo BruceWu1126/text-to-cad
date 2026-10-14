@@ -6,10 +6,10 @@ import { compactSuffix, hasPickGlyph, pickGlyphNode } from "../../inspector/pick
 // person's and whose chips are references pasted into it, each one atomic (a Backspace takes it
 // whole) and read back as the reference it stands for (`/models/base.step#o1.f2`), in its place.
 
-// 16px tall in the note's 20px line, 2px clear above and below it: centred, whatever the
-// fonts' baselines (a transform moves it without moving the line). The chips' own look
-// (`ReferenceChips.jsx`): their background, their glyph first, then their words.
-const CHIP_CLASS = "mx-px inline-flex h-4 translate-y-px select-none items-center gap-1 whitespace-nowrap rounded-sm bg-accent/70 px-1.5 align-top text-tiny leading-4 text-foreground";
+// A chip's own size and look (`ReferenceChips.jsx`): 20px tall, its background, its glyph first,
+// then its words. In the note's 24px line it sits 2px clear above and below: centred, whatever
+// the fonts' baselines (a transform moves it without moving the line).
+const CHIP_CLASS = "mx-px inline-flex h-5 translate-y-0.5 select-none items-center gap-1 whitespace-nowrap rounded-sm bg-accent/70 px-1.5 align-top text-tiny leading-5 text-foreground";
 const GLYPH_CLASS = "size-2.5 shrink-0";
 
 /**

@@ -42,11 +42,8 @@ export async function runDrawScenario({ page, pane, errors, update }) {
     await controls.getByRole('group', { name: 'Drawing settings' }).getByRole('button', { name: setting, exact: true }).click();
     await page.getByRole('menuitemradio', { name, exact: true }).click();
   };
-  // A shape from the shapes' menu.
-  const shape = async name => {
-    await drawTool('Shapes').click();
-    await page.getByRole('menuitemradio', { name, exact: true }).click();
-  };
+  // A shape: its own button in Draw's panel.
+  const shape = name => drawTool(name).click();
   const names = group => group.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')));
   const position = () => page.evaluate(() => window.cadHarness.a.controller.readState().camera.position);
   // How far the camera has moved since `from`, in model units (a readback differs in its last bits).
@@ -87,7 +84,7 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   await surface.waitFor();
   assert.equal(await draw.getAttribute('aria-pressed'), 'true', 'Draw is the tool');
   assert.equal(await drawTool('Pen').getAttribute('aria-pressed'), 'true', 'Draw opens on the pen');
-  assert.deepEqual(await names(controls.getByRole('group', { name: 'Drawing tools' })), ['Pen', 'Line', 'Shapes', 'Eraser', 'Undo', 'Redo']);
+  assert.deepEqual(await names(controls.getByRole('group', { name: 'Drawing tools' })), ['Pen', 'Line', 'Arrow', 'Rectangle', 'Ellipse', 'Text', 'Eraser', 'Undo', 'Redo', 'Clear drawing']);
   assert.deepEqual(await names(controls.getByRole('group', { name: 'Drawing settings' })), ['Color', 'Stroke width', 'Line style', 'Placement']);
   assert.equal(await panel.count(), 0, 'no Drawing chip before there is ink');
   const copy = panel;
@@ -131,7 +128,7 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   await shape('Rectangle');
   await drag(at(-60, -120), at(60, -40));
   await until('a green rectangle beside the red', seen => seen.green > 100 && seen.red > 50);
-  await panel.getByRole('button', { name: 'Remove Drawing', exact: true }).click();
+  await drawTool('Clear drawing').click();
   await until('Clear drawing removes all ink', seen => seen.red < NONE && seen.green < NONE);
   await copy.waitFor({ state: 'detached' });
 

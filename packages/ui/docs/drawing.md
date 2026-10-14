@@ -25,10 +25,9 @@ were drawn from every angle. The STEP renderer is the one that offers Draw
   screen (Explode, the pose off its default, or a routine's kept frame as
   `animation: {clip, time}`), the parts hidden and isolated, and the picture's
   size. Never how it looks.
-- `drawing/toolbar.jsx` — `DrawingToolbar`, Draw's panel: the pen, the shapes
-  behind one button (`DRAWING_SHAPE_TOOLS`: line, arrow, rectangle, ellipse,
-  text; the last one taken up on it), the eraser, then Undo and Redo (the
-  drawing's history); under a rule, what is drawn next: the Color, Stroke width,
+- `drawing/toolbar.jsx` — `DrawingToolbar`, Draw's panel: the pen, each shape
+  (`DRAWING_SHAPE_TOOLS`: line, arrow, rectangle, ellipse, text), the eraser, then
+  Undo and Redo (the drawing's history) and Clear; under a rule, what is drawn next: the Color, Stroke width,
   Line style and Placement (On model, the default, or In space) dropdowns
   (`InkStylePickers`, which the selection's bar shares). The swatches are neon, so ink stands out from a shaded model.
 - `renderers/kit/tools/draw/InkSelectionBar.jsx` — the bar over the ink Select
