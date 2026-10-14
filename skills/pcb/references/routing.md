@@ -1,8 +1,28 @@
-# Routing: by hand and with Freerouting
+# Routing: by hand, and Freerouting for what is left
 
 A board is finished when nothing is unrouted and KiCad's DRC has no error. Get there in
-this order: place, draw what must run one way, pour ground, autoroute the rest, read the
-result, look at the board.
+this order: place, plan fanouts, draw the connections by hand, pour ground, let the router
+finish what is left on a simple board, read the result, look at the board.
+
+Hand routing is the default. In a side-by-side test of agents laying out the same boards,
+on a 15-net board the router left a USB data line 5x longer than its pads' distance and
+diagonal tracks across the middle; hand-routed boards ran the servo ports' DATA, power and
+ground as straight parallel spines and took no longer. On a 10-net board both were equally
+clean and the router was 7x faster.
+
+## Hand-routing rules
+
+- Octolinear: every segment at 0, 45 or 90 degrees; a point list makes the corners.
+- Fan out first: out of each fine-pitch part (QFN, SOT-23-5, USB-C), a short stub from every
+  pin toward where its net goes, before routing anything long.
+- Buses: related signals run together as parallel, equally spaced tracks that turn together;
+  a row of identical connectors gets one straight spine per net through the same pin of each.
+- No detours: a signal track close to the straight-line distance between its pads. If it is
+  not, move a part or change layer with a via. Data pairs (USB D+/D-) side by side and short.
+- Width from current: each power track sized for its net's `current=` (the review checks it).
+- Ground: pours on both layers, a via from each SMD ground pad into the other side.
+- Check the work: snapshot after each group; `cadgen pcb review` lists thin power tracks
+  and far decoupling capacitors.
 
 ## Place first
 
@@ -46,8 +66,17 @@ Ground is a zone (`board.zone`), filled by KiCad after routing, around the route
   tracks no room for two spokes. With every SMD part on top, only through-hole pads reach the
   bottom pour, so connect it solid there (`board.zone(gnd, layers=["B.Cu"], pads="solid")`)
   and keep the top's thermals for reflow. A ground pad in a fine-pitch row (a USB-C
-  receptacle's) is reached by one spoke: tie it with a short track to the connector's own
-  ground (its shell tab) or into the pour.
+  receptacle's) is reached by one spoke, and a short track to the shell tab is not always
+  enough: connect that connector's ground pads to the pour solid with a rule:
+
+  ```python
+  board.rule("""(rule "J4 solid to pour" (constraint zone_connection solid)
+      (condition "A.memberOfFootprint('J4') && A.NetName == 'GND'"))""")
+  ```
+- **USB-C power pads**: the VBUS pads are 0.6 mm wide, in a row of 0.3 mm pads at 0.5 mm
+  pitch, so a power track must leave them at the pad's width for the first millimetre or
+  two, then widen. The review reports that stub as thinner than the net's current needs;
+  it is the connector's limit.
 - **4 layers** (signal, ground, power, signal): planes on the inner layers, and keep the
   router's tracks off them so they stay whole:
   `board.zone(gnd, layers=["In1.Cu"])`, `board.zone(v33, layers=["In2.Cu"])`,
@@ -55,7 +84,10 @@ Ground is a zone (`board.zone`), filled by KiCad after routing, around the route
   net's vias or through-hole pads passes through it: route the plane's net too (its vias
   join the plane), or skip it and put a via beside each of its pads by hand.
 
-## Autoroute the rest
+## Autoroute what is left
+
+For a simple board, or the non-critical connections left after the hand routing. Never
+for USB or other data pairs: draw those first, and the router keeps them.
 
 ```python
 board.netclass("Power", track_width=0.5, clearance=0.2)

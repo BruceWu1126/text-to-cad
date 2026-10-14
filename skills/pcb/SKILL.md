@@ -173,11 +173,16 @@ def led_driver(c, supply, gnd, colour="red"):
    outline and mounting holes (from the enclosure when there is one), layer count, fab.
 2. Choose parts with `find_symbols`/`find_footprints`; prefer parts the fab stocks (LCSC
    numbers in `properties` for JLCPCB assembly).
-3. Write the netlist, then place: connectors at the edges, decoupling capacitors at their
-   pins, the parts of one subcircuit together, nothing in a courtyard of another
-   ([layout](references/layout.md)). Run it; ERC findings come back before any routing.
-4. Route: power and sensitive nets by hand, ground as a pour, the rest by hand or with
-   `board.autoroute()`. Run until the board is no longer a draft and has no DRC errors.
+3. Write the netlist, then place one functional group at a time (a connector and what
+   serves it, a regulator and its capacitors, an IC with its decoupling and pull-ups):
+   connectors at the edges, decoupling capacitors at their pins, nothing in a courtyard of
+   another ([layout](references/layout.md)). Build and snapshot after each group. ERC
+   findings come back before any routing.
+4. Route by hand: fan out of fine-pitch parts first, then power (sized for each net's
+   `current=`), data pairs and signals, octolinear, related signals as buses of parallel
+   tracks; ground as pours. `board.autoroute()` may finish what is left on a simple board,
+   never USB or other data pairs ([routing](references/routing.md)). Run until the board is
+   no longer a draft and has no DRC errors.
 5. Check behaviour where it matters with a simulation ([simulation](references/simulation.md)).
 6. Add the outputs the job needs (below), look at the board and its snapshot, hand off.
 

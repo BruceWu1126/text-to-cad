@@ -39,7 +39,7 @@ cover what the checks cannot see. Look at every board you place (snapshot it, or
 - Signals: default width, short and direct, 45-degree corners (a point list does this).
 - Differential pairs (USB, CAN): equal lengths, side by side, no vias if possible.
 - Vias: one per layer change, at least the rules' size; several for power and thermal paths.
-- Route critical nets by hand first, then autoroute the rest ([routing](routing.md)).
+- Route by hand, fanouts first; the router only for what is left ([routing](routing.md)).
 
 ## Reading the results
 
