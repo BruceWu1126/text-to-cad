@@ -42,14 +42,13 @@ from __future__ import annotations
 import math
 import re
 from collections import deque
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
 
 from cadgen.kicad import sexpr
 from cadgen.kicad.geometry import XY, arc_points, area, bezier_points, board_origin, box, format_xy, hull, inside, script_frame
 from cadgen.kicad.naming import natural, netclass_of, project_netclasses, unescape_net_name
-from cadgen.kicad.phrasing import Finding, kind_title
 from cadgen.kicad.refs import BoardSelector, ReferenceView, format_board_selector, selector_or_none
 
 __all__ = [
@@ -305,10 +304,6 @@ class BoardIndex:
     outline: tuple[tuple[XY, ...], ...]  # Edge.Cuts as polylines; a closed one repeats its first point
     nets: tuple[tuple[str, str], ...]  # (name, class), in natural order
     origin: XY
-    findings: tuple[Finding, ...] = ()
-    # Every item's uuid: what it is, for a finding's item ("pad", ref, number), ("part", ref),
-    # ("track", net, index into tracks), ("via", net). Frame-free.
-    uuids: Mapping[str, tuple] = field(default_factory=dict, repr=False, compare=False)
 
     @property
     def pads(self) -> tuple[Pad, ...]:
@@ -342,12 +337,6 @@ class BoardIndex:
             holes=tuple(replace(hole, at=point(hole.at)) for hole in self.holes),
             outline=tuple(points(line) for line in self.outline),
             origin=point(self.origin),
-            findings=tuple(
-                replace(finding, items=tuple(
-                    replace(item, at=point(item.at) if item.at is not None else None) for item in finding.items
-                ))
-                for finding in self.findings
-            ),
         )
 
     def as_json(self, digits: int = 4) -> dict:
@@ -394,46 +383,7 @@ class BoardIndex:
             "holes": [{"at": xy(hole.at), "diameter": num(hole.diameter), "part": hole.part} for hole in self.holes],
             "outline": [path(line) for line in self.outline],
             "nets": [{"name": name, "class": netclass} for name, netclass in self.nets],
-            "findings": [
-                {
-                    "check": finding.check, "severity": finding.severity, "type": finding.type,
-                    "description": finding.description,
-                    "summary": finding.summary or finding.description,
-                    "title": kind_title(finding.type, finding.description),
-                    "items": [
-                        {"text": item.text, "ref": item.ref, "at": xy(item.at) if item.at is not None else None}
-                        for item in finding.items
-                    ],
-                }
-                for finding in self.findings
-            ],
         }
-
-    def item_ref(self, uuid: str | None, at: XY | None = None) -> str | None:
-        """A board reference to the item with ``uuid``: a pad's, its part's (for anything a
-        footprint draws), or for a track or via its net's copper at ``at`` (in the SCRIPT
-        frame); ``None`` for anything else."""
-        found = self.uuids.get(str(uuid or ""))
-        if found is None:
-            return None
-        if found[0] == "pad":
-            return selector_or_none("pad", ref=found[1], pad=found[2]) or selector_or_none("part", ref=found[1])
-        if found[0] == "part":
-            return selector_or_none("part", ref=found[1])
-        if found[0] in ("track", "via") and found[1] and at is not None:
-            return selector_or_none("copper", net=found[1], at=at)
-        return None
-
-    def on_copper(self, uuid: str | None, at: XY) -> XY:
-        """``at`` (in this frame), or the middle of the track with ``uuid`` when ``at`` is off its
-        copper: where a reference to the track's copper is resolved. KiCad's report places an arc
-        at its centre, which no copper of the arc is near."""
-        found = self.uuids.get(str(uuid or ""))
-        if found is not None and found[0] == "track" and len(found) > 2:
-            track = self.tracks[found[2]]
-            if _reach(track, at) > 0:
-                return track.points[len(track.points) // 2]
-        return at
 
 
 # --- geometry ------------------------------------------------------------------------
@@ -824,7 +774,7 @@ def _read_pad(node: list, frame: _Footprint, ref: str, table, copper: Sequence[s
     ), None
 
 
-def _read_footprint(node: list, table, copper: Sequence[str], uuids: dict) -> tuple[Part, list[Hole], list[Zone], list[list[XY]]]:
+def _read_footprint(node: list, table, copper: Sequence[str]) -> tuple[Part, list[Hole], list[Zone], list[list[XY]]]:
     frame = _Footprint(node)
     bottom = _layer_of(node) == "B.Cu"
     ref = _property(node, "Reference") or ""
@@ -836,9 +786,6 @@ def _read_footprint(node: list, table, copper: Sequence[str], uuids: dict) -> tu
     attr = sexpr.find(node, "attr")
     dnp = attr is not None and any(str(flag) == "dnp" for flag in attr[1:])
     in_bom = attr is None or not any(str(flag) in ("exclude_from_bom", "board_only") for flag in attr[1:])
-    own = str(sexpr.value(node, "uuid") or "")
-    if own:
-        uuids[own] = ("part", ref)
     pads: list[Pad] = []
     holes: list[Hole] = []
     zones: list[Zone] = []
@@ -849,18 +796,13 @@ def _read_footprint(node: list, table, copper: Sequence[str], uuids: dict) -> tu
         head = sexpr.head(child)
         if head is None:
             continue
-        child_uuid = str(sexpr.value(child, "uuid") or "")
         if head == "pad":
             pad, hole = _read_pad(child, frame, ref, table, copper)
             if pad is not None:
                 pads.append(pad)
-                if child_uuid:
-                    uuids[child_uuid] = ("pad", ref, pad.number)
             if hole is not None:
                 holes.append(hole)
             continue
-        if child_uuid:
-            uuids[child_uuid] = ("part", ref)
         if head == "zone":
             zones.extend(_read_zone(child, table, copper))  # stored in the board's frame
             continue
@@ -953,7 +895,6 @@ def read_index(text: str | list, *, project: Path | None = None) -> BoardIndex:
         raise ValueError("not a KiCad board: a .kicad_pcb starts with (kicad_pcb ...)")
     table = _net_names(tree)
     copper = _copper_layers(tree)
-    uuids: dict[str, tuple] = {}
     parts: list[Part] = []
     holes: list[Hole] = []
     zones: list[Zone] = []
@@ -963,7 +904,7 @@ def read_index(text: str | list, *, project: Path | None = None) -> BoardIndex:
     for node in tree[1:]:
         head = sexpr.head(node)
         if head in ("footprint", "module"):  # a KiCad 5 board's footprints are modules
-            part, part_holes, part_zones, part_edges = _read_footprint(node, table, copper, uuids)
+            part, part_holes, part_zones, part_edges = _read_footprint(node, table, copper)
             parts.append(part)
             holes.extend(part_holes)
             zones.extend(part_zones)
@@ -977,8 +918,6 @@ def read_index(text: str | list, *, project: Path | None = None) -> BoardIndex:
                 continue
             net = _net(node, table)
             tracks.append(Track(net=net, layer=_layer_of(node) or "", width=sexpr.number(sexpr.value(node, "width")), points=tuple(points), arc=head == "arc"))
-            if sexpr.value(node, "uuid"):
-                uuids[str(sexpr.value(node, "uuid"))] = ("track", net, len(tracks) - 1)
         elif head == "via":
             at = sexpr.pair(sexpr.find(node, "at"))
             if at is None:
@@ -988,8 +927,6 @@ def read_index(text: str | list, *, project: Path | None = None) -> BoardIndex:
                 net=net, at=at, diameter=sexpr.number(sexpr.value(node, "size")), drill=sexpr.number(sexpr.value(node, "drill")),
                 layers=tuple(_layers(node)) or ("F.Cu", "B.Cu"),
             ))
-            if sexpr.value(node, "uuid"):
-                uuids[str(sexpr.value(node, "uuid"))] = ("via", net)
         elif head == "zone":
             zones.extend(_read_zone(node, table, copper))
         elif head and head.startswith("gr_") and head[3:] in _GRAPHICS and _layer_of(node) == "Edge.Cuts":
@@ -1009,7 +946,6 @@ def read_index(text: str | list, *, project: Path | None = None) -> BoardIndex:
         outline=tuple(tuple(line) for line in _chain(edges)),
         nets=nets,
         origin=board_origin(tree),
-        uuids=uuids,
     )
 
 
@@ -1121,6 +1057,12 @@ def read_board(path: Path | str) -> BoardView:
     file and the ``.kicad_pro`` beside it (for net classes); runs nothing.
     """
     board = Path(path).expanduser()
+    return BoardView(board.resolve(), read_script_index(board))
+
+
+def read_script_index(path: Path | str) -> BoardIndex:
+    """The index of the KiCad board at ``path`` in the board script's frame (:func:`read_board`'s)."""
+    board = Path(path).expanduser()
     if board.suffix.lower() != ".kicad_pcb":
         raise ValueError(f"{board.name} is not a KiCad board (.kicad_pcb)")
     if not board.is_file():
@@ -1133,4 +1075,4 @@ def read_board(path: Path | str) -> BoardView:
         index = read_index(text, project=board.with_suffix(".kicad_pro"))
     except ValueError as error:
         raise ValueError(f"{board.name} is {error}") from None
-    return BoardView(board.resolve(), index.mapped(script_frame(index.origin)))
+    return index.mapped(script_frame(index.origin))

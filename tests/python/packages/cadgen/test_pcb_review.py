@@ -12,6 +12,7 @@ from tests.python.support.paths import add_repo_path
 add_repo_path("packages/cadgen/src")
 
 from cadgen.kicad.board_index import BoardIndex, Pad, Part, Track  # noqa: E402
+from cadgen.kicad.naming import natural  # noqa: E402
 from cadgen.kicad.review import is_ground, net_currents, required_width, review  # noqa: E402
 
 
@@ -40,8 +41,9 @@ def cap(ref, at, net="VDD", dnp=False):
 
 
 def board(*parts, tracks=()):
-    return BoardIndex(parts=tuple(parts), tracks=tuple(tracks), vias=(), zones=(), holes=(), outline=(), nets=(),
-                      origin=(0.0, 0.0))
+    # In natural order, as read_index lists a board's parts.
+    return BoardIndex(parts=tuple(sorted(parts, key=lambda part: natural(part.ref))), tracks=tuple(tracks), vias=(), zones=(),
+                      holes=(), outline=(), nets=(), origin=(0.0, 0.0))
 
 
 class ReviewTest(unittest.TestCase):
@@ -186,7 +188,7 @@ class ReviewTest(unittest.TestCase):
         for severity in ("warning", "error"):
             found = Finding(check="review", severity=severity, type="decoupling_far", description="far",
                             items=(FindingItem(text="C1", at=(1.0, 2.5)),), summary="C1 is far")
-            with tempfile.TemporaryDirectory() as folder, mock.patch("cadgen.kicad.check.reviewed", return_value=[found]):
+            with tempfile.TemporaryDirectory() as folder, mock.patch("cadgen.kicad.review.review", return_value=[found]):
                 board = Path(folder) / "b.kicad_pcb"
                 board.write_text("(kicad_pcb)", encoding="utf-8")
                 result = pcb.review(board)

@@ -811,32 +811,6 @@
     "name": "VBUS",
     "class": "Default"
    }
-  ],
-  "findings": [
-   {
-    "check": "unconnected",
-    "severity": "error",
-    "type": "unconnected_items",
-    "description": "Missing connection between items",
-    "items": [
-     {
-      "text": "Pad 2 [Net-(D1-A)] of D1 on F.Cu",
-      "ref": "#D1.2",
-      "at": [
-       20.7875,
-       24.0
-      ]
-     },
-     {
-      "text": "Pad 2 [Net-(D1-A)] of R1 on F.Cu",
-      "ref": "#R1.2",
-      "at": [
-       36.65,
-       15.0
-      ]
-     }
-    ]
-   }
   ]
  },
  "unrouted": 1

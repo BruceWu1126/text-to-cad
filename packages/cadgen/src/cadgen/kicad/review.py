@@ -1,12 +1,13 @@
 """The review: what a person reviewing a board checks that KiCad's ERC and DRC do not.
 
 Each check is a warning (advice, never a gate): an IC's power input (not a connector's,
-jumper's, test point's or hole's, nor an unfitted part's) with no decoupling capacitor to ground, the nearest one too far from it, and a net's tracks too thin for the
-current its script gives it (``board.net("VBUS", current=2.0)``, kept in the ``.kicad_pro``
-because KiCad keeps no current per net). Then the BOM's two sourcing rules: the
-parts to buy (in the BOM, fitted, not a hole or test point) with no LCSC or MPN field to order
-them by, as one finding, and one part number on parts with different footprints. Each finding names what it is about in board
-references, so the viewer selects it and an agent resolves it.
+jumper's, test point's or hole's, nor an unfitted part's) with no decoupling capacitor to
+ground, or the nearest one too far from it; a net's tracks too thin for the current its
+script gives it (``board.net("VBUS", current=2.0)``, kept in the ``.kicad_pro`` because KiCad
+keeps no current per net); the parts to buy (in the BOM, fitted, not a hole or test point)
+with no LCSC or MPN field to order them by, as one finding; and one part number on parts
+with different footprints. Each finding names its parts in board references, which an agent
+resolves (``cadgen pcb review``, the pcb-dfm skill).
 """
 
 from __future__ import annotations
@@ -31,8 +32,7 @@ _NOT_AN_IC = re.compile(r"(?:J|P|CN|CON|JP|TP|H|MH)\d+")  # KiCad's library mark
 _NOT_BOUGHT = re.compile(r"(?:H|MH|TP|FID|LOGO)\d+")  # holes, test points, fiducials, artwork: made, not bought
 _NAMED = 8  # parts a sourcing sentence names before "and N more"
 # The fields the BOM's columns are read from (cadgen.kicad.fab): a number anywhere else never reaches it.
-_LCSC = ("lcsc",)
-_MPN = ("mpn",)
+_LCSC, _MPN = "lcsc", "mpn"
 
 
 def is_ground(net: str | None) -> bool:
@@ -122,24 +122,20 @@ def review(index: BoardIndex, currents: Mapping[str, float] | None = None) -> tu
     return tuple(found)
 
 
-def _field(part, names: tuple[str, ...]) -> str:
-    """The first of ``names`` (any case) the part has a value for, else ""."""
+def _field(part, name: str) -> str:
+    """The part's value for the field ``name`` (any case), else ""."""
     for key, value in part.fields.items():
-        if key.strip().lower() in names and str(value).strip():
+        if key.strip().lower() == name and str(value).strip():
             return str(value).strip()
     return ""
-
-
-def _natural(ref: str) -> tuple:
-    return tuple(int(piece) if piece.isdigit() else piece for piece in re.findall(r"\d+|\D+", ref))
 
 
 def _sourcing(index: BoardIndex) -> list[Finding]:
     """Parts with nothing to order them by, then part numbers placed on two footprints."""
     found: list[Finding] = []
-    bought = sorted((part for part in index.parts
-                     if part.pads and part.in_bom and not part.dnp and not _NOT_BOUGHT.fullmatch(part.ref)),
-                    key=lambda part: _natural(part.ref))
+    # The index lists parts in natural order, so every list below is in it too.
+    bought = [part for part in index.parts
+              if part.pads and part.in_bom and not part.dnp and not _NOT_BOUGHT.fullmatch(part.ref)]
     by_number: dict[str, list] = {}
     unsourced = []
     for part in bought:
@@ -170,6 +166,6 @@ def _sourcing(index: BoardIndex) -> list[Finding]:
         found.append(_finding(
             "mpn_footprints", f"{number} is on {', '.join(groups[:-1])} and {groups[-1]}",
             f"One part number, {number}, on {len(footprints)} footprints: an assembler places one package for it.",
-            [FindingItem(text=part.ref, ref=part.selector, at=part.at) for part in sorted(parts, key=lambda part: _natural(part.ref))],
+            [FindingItem(text=part.ref, ref=part.selector, at=part.at) for part in parts],
         ))
     return found

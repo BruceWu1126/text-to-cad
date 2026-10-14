@@ -83,8 +83,7 @@ export function useAlertDismissal(alert, { hasContent = false, scope = "", onNav
  * output stays complete in a scrollable diagnostic, never clipped. Retry reloads the file; where
  * the host has a tracker (`links.issues`), Report Issue beside it opens a new issue saying what the
  * card says, about `file` (its path as the alert names it, absolute: the issue names only the file,
- * and carries no path of this machine); an alert about the design, not the viewer (`report: false`),
- * has none.
+ * and carries no path of this machine).
  */
 export default function ViewerAlertCard({ alert: shown, hasContent, onReload, file = "", dismissed = false, onDismiss = null }) {
   const mobile = useViewerMobile();
@@ -96,7 +95,7 @@ export default function ViewerAlertCard({ alert: shown, hasContent, onReload, fi
   const shortReason = reason.split("\n").find((line) => line.trim()) || "";
   const readableReason = shortReason.length > 360 ? `${shortReason.slice(0, 360)}…` : shortReason;
   const title = alertTitle(shown);
-  const report = shown.report === false ? "" : alertIssueUrl(host?.links?.issues, { ...shown, title },
+  const report = alertIssueUrl(host?.links?.issues, { ...shown, title },
     { file, version: host?.links?.version, platform: host?.environment.platform });
   return (
     <div className={cn("pointer-events-none absolute inset-0 z-30 flex min-w-0 items-center justify-center py-3", mobile ? "px-3" : "px-4")}>

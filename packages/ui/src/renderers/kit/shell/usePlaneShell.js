@@ -213,7 +213,7 @@ export function usePlaneShell({
   const sketch = useMemo(() => (drawToolActive ? { ink: draw.drawing.hasContent, capture: draw.capture } : null),
     [drawToolActive, draw.drawing.hasContent, draw.capture]);
   return {
-    tools, ready, copyText, dismissAlert: dismissal.dismiss,
+    tools, ready, copyText,
     frame: {
       view, plane, modelKey, resource, load, rootRef, rootElement, chromeHidden, compact, toolStack, changeToolStack,
       references, copyAction, copyDrawing, copyShortcut: host.environment?.platform === "darwin" ? "⌘C" : "Ctrl+C",

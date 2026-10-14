@@ -73,15 +73,6 @@ it('a card put away leaves its icon in the navbar, which brings it back; a chang
   expect(screen.getByRole('alert')).toBeTruthy();
 });
 
-it('a card saying what a design has against it offers no Report Issue', () => {
-  const alert = { severity: 'warning', blocking: false, title: '1 suggestion', message: '', report: false };
-  render(<ViewerHostContext.Provider value={testHost({ links: viewerLinks({ version: '0.7.5' }) }) as any}>
-    <ViewerAlertCard alert={alert} hasContent onReload={() => {}} />
-  </ViewerHostContext.Provider>);
-  expect(screen.getByRole('alert')).toBeTruthy();
-  expect(screen.queryByRole('link', { name: 'Report Issue' })).toBeNull();
-});
-
 it('offers Retry, and beside it, where the host has a tracker, Report Issue: a new issue saying what the card says', () => {
   const alert = { severity: 'error', title: 'Couldn’t load the model', message: 'No model', reason: 'EOFError', details: 'File: /Users/ada/parts/gear.step', reload: true };
   const onReload = vi.fn();

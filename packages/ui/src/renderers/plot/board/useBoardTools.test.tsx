@@ -14,18 +14,14 @@ import { useBoardIsolation } from '../../../../dist/renderers/plot/board/useBoar
 // person does to it — the tools, Escape, a double-click while measuring, a tree row's hover and eye, a
 // new revision — is decided here; the pixels are the browser suite's.
 const square = (cx: number, cy: number, w: number, h: number) => [[cx - w / 2, cy - h / 2], [cx + w / 2, cy - h / 2], [cx + w / 2, cy + h / 2], [cx - w / 2, cy + h / 2]];
-const FINDINGS = [
-  { check: 'drc', severity: 'warning', type: 'silk_overlap', description: 'Silkscreen clearance', items: [{ text: 'R1', ref: '#R1', at: [15, 20] }] },
-  { check: 'unconnected', severity: 'error', type: 'unconnected_items', description: 'Missing connection', items: [{ text: 'R1.2', ref: '#R1.2', at: [15.825, 20] }] },
-];
-const board = (findings: object[] = FINDINGS, parts = ['R1']) => ({
+const board = (parts = ['R1']) => ({
   origin: [5, 25], nets: [{ name: 'VIN', class: '' }, { name: 'GND', class: '' }],
   parts: parts.map((ref) => ({ ref, value: '10k', footprint: 'R_0603', side: 'top', at: [15, 20], rotation: 0, fields: {}, outline: square(15, 20, 3, 1.4) })),
   pads: parts.includes('R1') ? [
     { part: 'R1', number: '1', name: '', net: 'VIN', type: 'passive', side: 'top', at: [14.175, 20], polygon: square(14.175, 20, 0.8, 0.95) },
     { part: 'R1', number: '2', name: '', net: 'GND', type: 'passive', side: 'top', at: [15.825, 20], polygon: square(15.825, 20, 0.8, 0.95) },
   ] : [],
-  tracks: [], vias: [], zones: [], holes: [{ at: [3, 3], diameter: 2 }, { at: [37, 27], diameter: 2 }], outline: [], findings,
+  tracks: [], vias: [], zones: [], holes: [{ at: [3, 3], diameter: 2 }, { at: [37, 27], diameter: 2 }], outline: [],
 });
 const SHEET = { x: 0, y: 0, width: 40, height: 30 };
 const indexOf = (data = board()) => createBoardIndex(data, { x: SHEET.x, y: SHEET.y });
@@ -154,7 +150,7 @@ it('what is isolated survives a rebuild by its references, and what the new revi
   const view = mount(indexOf(), ['#R1', '#U9', '#net:VIN']);
   expect(view.result.current.isolation.isolated).toEqual(['#R1', '#net:VIN']);
   // A rebuild that took R1 off the board keeps the net.
-  view.rerender({ index: indexOf(board(FINDINGS, ['C1'])) });
+  view.rerender({ index: indexOf(board(['C1'])) });
   expect(view.result.current.isolation.isolated).toEqual(['#net:VIN']);
   act(() => view.result.current.isolation.toggle('#C1'));
   expect(view.result.current.isolation.isolated).toEqual(['#net:VIN', '#C1']);

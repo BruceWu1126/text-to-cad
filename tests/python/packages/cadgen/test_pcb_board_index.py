@@ -21,7 +21,6 @@ from tests.python.support.paths import add_repo_path
 
 add_repo_path("packages/cadgen/src")
 
-from cadgen.kicad import sexpr  # noqa: E402
 from cadgen.kicad.board_index import BoardView, Copper, Net, Pad, Part, Point, read_board, read_index, script_frame  # noqa: E402
 from cadgen.kicad.design import Board  # noqa: E402
 from cadgen.kicad.project import project_texts  # noqa: E402
@@ -196,26 +195,6 @@ class BoardIndexTest(unittest.TestCase):
         ):
             with self.subTest(ref=ref), self.assertRaisesRegex(ValueError, message):
                 self.view.resolve(ref)
-
-    def test_an_items_uuid_becomes_a_reference(self) -> None:
-        index = read_index((self.folder / "amp.kicad_pcb").read_text(encoding="utf-8"))
-        tree = sexpr.parse((self.folder / "amp.kicad_pcb").read_text(encoding="utf-8"))
-        footprint = next(node for node in sexpr.find_all(tree, "footprint") if any(p[1] == "Reference" and p[2] == "R1" for p in sexpr.find_all(node, "property")))
-        pad = next(sexpr.find_all(footprint, "pad"))
-        silk = sexpr.find(footprint, "fp_line")
-        segment = sexpr.find(tree, "segment")
-        self.assertEqual(index.item_ref(sexpr.value(pad, "uuid")), "#R1.1")
-        self.assertEqual(index.item_ref(sexpr.value(silk, "uuid")), "#R1")
-        self.assertEqual(index.item_ref(sexpr.value(segment, "uuid"), at=(1.5, 2.25)), "#net:TX/RX@x1.5y2.25")
-        self.assertIsNone(index.item_ref(sexpr.value(sexpr.find(tree, "gr_line"), "uuid")))
-        # KiCad's DRC places an arc at its centre, off its copper: the plot's reference names its middle.
-        from cadgen.kicad.plot import _findings
-
-        centre = (148.5 - 15, 105 + 2)
-        report = [("drc", "warning", "track_dangling", "Track has unconnected end", (("Track (arc) [VIN] on B.Cu", sexpr.value(sexpr.find(tree, "arc"), "uuid"), centre),))]
-        [item] = _findings(report, index)[0].items
-        self.assertEqual((item.ref, item.at), ("#net:VIN@x-15y1", centre))
-        self.assertEqual([(found.kind, found.arc) for found in self.view.resolve(item.ref).items], [("track", True)])
 
 
 class OlderBoardTest(unittest.TestCase):

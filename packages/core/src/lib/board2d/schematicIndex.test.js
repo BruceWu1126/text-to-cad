@@ -101,20 +101,3 @@ test("the overlay draws a schematic's selection on its paper", () => {
   assert.ok(calls.includes("strokeStyle=#1f6feb"));
   assert.ok(calls.filter((call) => call === "stroke").length > 8);
 });
-
-test("a schematic's ERC findings, each item on its sheet's page", () => {
-  const index = createSchematicIndex({ ...SCHEMATIC, findings: [
-    { check: "erc", severity: "error", type: "pin_not_connected", description: "Pin not connected", summary: "U2 pin 7 (VDD) isn't connected to anything",
-      items: [{ text: "Symbol U2 Pin 7", ref: "#U2.7", at: [50.8, 25.4], sheet: 0 }, { text: "Symbol U9", ref: "#U9", at: null, sheet: null }, { text: "Symbol U3 Pin 1", ref: "#U3.1", at: [30, 24.92], sheet: 1 }] },
-  ] }, LAYOUT);
-  assert.equal(index.findings.length, 1);
-  assert.equal(index.findings[0].summary, "U2 pin 7 (VDD) isn't connected to anything");
-  assert.equal(index.findings[0].items[0].ref, "#U2.7");
-  assert.deepEqual(index.findings[0].items[0].at, [50.8, 25.4]);
-  assert.deepEqual(index.findings[0].items[2].at, [40, 324.92], "an item on the second sheet is offset by where that sheet is laid out");
-  assert.equal(index.findings[0].items[1].at, null);
-});
-
-test("a schematic payload from before ERC has no findings", () => {
-  assert.deepEqual([...createSchematicIndex(SCHEMATIC, LAYOUT).findings], []);
-});

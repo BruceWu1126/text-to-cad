@@ -17,7 +17,7 @@ const BOARD = {
     pad("D", "1", "GND", [10, 5], "bottom"), pad("D", "1", "GND", [10, 6], "bottom"), pad("A", "2", "OUT", [0, 3]),
   ],
   tracks: [{ net: "GND", layer: "F.Cu", width: 0.25, points: [[0, 0], [10, 0]] }],
-  vias: [], zones: [], holes: [], outline: [], findings: [],
+  vias: [], zones: [], holes: [], outline: [],
 };
 const key = ([[ax, ay], [bx, by]]) => [`${ax},${ay}`, `${bx},${by}`].sort().join(" ");
 

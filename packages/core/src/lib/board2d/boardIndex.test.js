@@ -27,8 +27,6 @@ const BOARD = {
   zones: [{ net: "GND", layer: "B.Cu", outline: [[0, 0], [40, 0], [40, 30], [0, 30]] }],
   holes: [{ at: [3, 3], diameter: 2.75 }],
   outline: [[[0, 0], [40, 0], [40, 30], [0, 30], [0, 0]]],
-  findings: [{ check: "drc", severity: "warning", type: "silk_overlap", description: "Silkscreen clearance",
-    items: [{ text: "Reference field of R1", ref: "#R1", at: [15, 20] }, { text: "Segment", ref: null, at: null }] }],
 };
 
 test("the script frame is y up from the board's origin, wherever the sheet is laid out", () => {
@@ -88,10 +86,7 @@ test("a measurement snaps to pad centres, vias, holes and the outline", () => {
   assert.equal(index.snap([10, 10], { tolerance: 0.5 }), null);
 });
 
-test("checks keep their items' references and places", () => {
-  const index = createBoardIndex(BOARD);
-  assert.equal(index.findings[0].type, "silk_overlap");
-  assert.deepEqual(index.findings[0].items.map((item) => item.ref), ["#R1", ""]);
+test("a point in a polygon", () => {
   assert.ok(pointInPolygon([1, 1], [[0, 0], [2, 0], [2, 2], [0, 2]]));
 });
 
@@ -155,12 +150,12 @@ test("Placement draws the pads, the holes and airwires under the highlight; a po
     "GND's airwire drawn in the selection's colour");
 });
 
-test("a net is highlighted whole, a check rung, and what is off screen left out", () => {
+test("a net is highlighted whole, and what is off screen left out", () => {
   const index = createBoardIndex(BOARD);
   const { ctx, marks, filled } = recordingContext();
   drawBoardOverlay(ctx, index, {
     transform: { scale: 10, offsetX: 0, offsetY: 0 }, width: 400, height: 300, dim: true,
-    selection: [index.resolve("#net:GND")], hover: index.resolve("#U1.2"), markers: [[15, 20]],
+    selection: [index.resolve("#net:GND")], hover: index.resolve("#U1.2"),
     measure: { points: [[14.175, 20]], draft: [20, 15] },
   });
   assert.equal(marks[0].op, "fillRect", "the rest of the board steps back first");
@@ -230,7 +225,7 @@ test("a pick and a snap answer what a scan of the whole board would", () => {
     tracks.push({ net: at % 5 ? `N${at % 9}` : "", layer: at % 2 ? "F.Cu" : "B.Cu", width: 0.2 + random() * 0.3, points: [[x, y], [x + length * (random() - 0.5), y + length * (random() - 0.5)]] });
   }
   for (let at = 0; at < 40; at += 1) vias.push({ net: `N${at % 9}`, at: [random() * 60, random() * 40], diameter: 0.6 });
-  const board = { origin: [0, 40], parts, pads, tracks, vias, zones: [{ net: "N0", layer: "B.Cu", outline: rect(30, 20, 50, 30) }], holes: [], outline: [], findings: [] };
+  const board = { origin: [0, 40], parts, pads, tracks, vias, zones: [{ net: "N0", layer: "B.Cu", outline: rect(30, 20, 50, 30) }], holes: [], outline: [] };
   const index = createBoardIndex(board);
   for (let press = 0; press < 250; press += 1) {
     const at = [random() * 60, random() * 40];
@@ -256,13 +251,4 @@ test("past copper on no net, a pick takes what lies under it", () => {
   assert.equal(index.pick([15, 20]).selector, "#R1");
   // Under Nets, a pad on no net inside the ground pour is the pour's net.
   assert.equal(index.pick([15, 21], { mode: "nets" }).selector, "#net:GND");
-});
-
-test("a finding reads its summary, and KiCad's words when a payload has none", () => {
-  const index = createBoardIndex({ ...BOARD, findings: [
-    { check: "drc", severity: "error", type: "clearance", description: "Clearance violation", summary: "The SDA track and the SCL track are 0.15 mm apart; the rules need 0.2 mm", items: [] },
-    { check: "drc", severity: "error", type: "clearance", description: "Clearance violation", items: [] },
-  ] });
-  assert.equal(index.findings[0].summary, "The SDA track and the SCL track are 0.15 mm apart; the rules need 0.2 mm");
-  assert.equal(index.findings[1].summary, "Clearance violation");
 });

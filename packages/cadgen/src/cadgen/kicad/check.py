@@ -30,8 +30,7 @@ from __future__ import annotations
 import copy
 import shutil
 import tempfile
-from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 from cadgen.kicad import sexpr
@@ -83,23 +82,6 @@ _OUTLINE_ITEMS = ("gr_line", "gr_arc", "gr_circle", "gr_rect", "gr_poly", "gr_cu
 def is_blocking(finding: Finding) -> bool:
     """An error stops a build; an unrouted connection only makes the board a draft."""
     return finding.severity == "error" and finding.check != "unconnected"
-
-
-def reviewed(tree: list, project: Path, currents: Mapping[str, float] | None = None) -> list[Finding]:
-    """The review's findings on a board (``cadgen.kicad.review``), in the script's coordinates.
-
-    Never part of a build or of ``check_project``: the review is advice an agent asks for
-    (``cadgen pcb review``, the pcb-dfm skill), not a check KiCad runs.
-    """
-    from cadgen.kicad.board_index import read_index
-    from cadgen.kicad.review import net_currents, review
-
-    index = read_index(tree, project=project)
-    to_script = script_frame(board_origin(tree), digits=4)
-    return [
-        replace(found, items=tuple(replace(item, at=to_script(*item.at) if item.at else None) for item in found.items))
-        for found in review(index, net_currents(project) if currents is None else currents)
-    ]
 
 
 def fixes(findings) -> list[str]:
@@ -172,15 +154,13 @@ def _without_canary(findings: list[Finding]) -> tuple[list[Finding], bool]:
     return kept, len(kept) != len(findings)
 
 
-def build_board(
-    board: Board, *, name: str, install: KicadInstall | None = None, script_root=None, project_dir=None
-) -> BoardBuild:
+def build_board(board: Board, *, name: str, install: KicadInstall | None = None, script_root=None) -> BoardBuild:
     """The board's documents, its zones filled by KiCad, and KiCad's findings.
 
     ``script_root`` is the model script's folder, which the parts' ``Script`` fields are relative to.
     """
     install = install or find_kicad()
-    texts = project_texts(board, name=name, script_root=script_root, project_dir=project_dir)
+    texts = project_texts(board, name=name, script_root=script_root)
     pcb_tree, pcb_text = texts.pcb_tree, texts.pcb
     if board.autoroute_request is not None:
         # Freerouting routes first, so its tracks are filled around and checked like drawn ones.

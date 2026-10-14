@@ -145,18 +145,14 @@ class PcbPlotAndValidateTest(unittest.TestCase):
         self.assertEqual((j1["script"], j1["fields"]["Script"]), (f"blinky.py:{line}", f"blinky.py:{line}"))
         self.assertEqual({net["name"]: net["class"] for net in board["nets"]}["VBUS"], "Default")
 
-    def test_findings_carry_references_to_what_they_name(self) -> None:
-        _finished, draft = self.payloads()
-        [unrouted] = [finding for finding in draft["board"]["findings"] if finding["check"] == "unconnected"]
-        self.assertEqual(unrouted["severity"], "error")
-        self.assertEqual([item["ref"] for item in unrouted["items"]], ["#R1.2", "#D1.2"])
-        pads = {(pad["part"], pad["number"]): pad["at"] for pad in draft["board"]["pads"]}
-        self.assertEqual([item["at"] for item in unrouted["items"]], [pads["R1", "2"], pads["D1", "2"]])
+    def test_a_payload_carries_no_findings_and_a_draft_its_unrouted_count(self) -> None:
+        finished, draft = self.payloads()
+        self.assertNotIn("findings", draft["board"])  # the viewer only draws: checks are pcb validate's and pcb-dfm's
+        self.assertEqual((finished["unrouted"], draft["unrouted"]), (0, 1))
 
-    def test_the_review_is_asked_for_never_part_of_plot_or_validate(self) -> None:
-        """A regulator's input capacitor 10 mm past its pad (see ``REGULATOR``): pcb.review advises, the build stays KiCad's."""
+    def test_the_review_is_asked_for_never_part_of_validate(self) -> None:
+        """A regulator's input capacitor 10 mm past its pad (see ``REGULATOR``): pcb.review advises, validate stays KiCad's."""
         from cadgen import pcb
-        from cadgen.kicad.plot import build_plot
 
         project = self.folder / "regulator"
         project.mkdir()
@@ -164,9 +160,6 @@ class PcbPlotAndValidateTest(unittest.TestCase):
         env = dict(os.environ, CADGEN_DAEMON="0", PYTHONPATH=str(CADGEN_SRC))
         built = subprocess.run([sys.executable, "regulator.py"], cwd=project, env=env, capture_output=True, text=True, timeout=600)
         self.assertEqual(built.returncode, 0, built.stderr)
-        payload = build_plot(project / "regulator.kicad_pcb")
-        self.assertFalse([finding for finding in payload["board"]["findings"] if finding["check"] == "review"])
-        self.assertTrue(all(finding.get("summary") for finding in payload["board"]["findings"]))
         checked = pcb.validate(project / "regulator.kicad_pcb")
         self.assertFalse([issue for issue in checked.issues if issue.code.startswith("review.")])
         reviewed = pcb.review(project / "regulator.kicad_pcb")
@@ -202,36 +195,7 @@ class PcbPlotAndValidateTest(unittest.TestCase):
         self.assertEqual((nets["J1", "1"], nets["R1", "1"], nets["J1", "2"], nets["D1", "1"]), ("VBUS", "VBUS", "GND", "GND"))
         self.assertEqual(nets["R1", "2"], nets["D1", "2"])
         self.assertTrue(all(item["net"] for item in index["wires"] + index["labels"]))
-        findings = index["findings"]
-        self.assertIsInstance(findings, list)
-        self.assertTrue(all(finding["check"] == "erc" and finding["summary"] for finding in findings))
-
-    def test_a_pin_left_open_is_an_erc_finding_naming_its_pin(self) -> None:
-        from cadgen.kicad.plot import build_plot
-
-        # A build refuses a schematic KiCad's ERC faults, so take the finished one and cut the
-        # connector's first pin loose: its wire and the VBUS label on the wire's far end.
-        text = (self.folder / "finished" / "blinky.kicad_sch").read_text(encoding="utf-8")
-        for marker in ('(global_label "VBUS"', "(wire\n\t\t(pts\n\t\t\t(xy 33.02 31.75)"):
-            start = text.index(marker)
-            depth = 0
-            for end, char in enumerate(text[start:], start=start):
-                depth += (char == "(") - (char == ")")
-                if depth == 0:
-                    break
-            text = text[:start] + text[end + 1 :].lstrip("\n\t")
-        cut = self.folder / "cut"
-        cut.mkdir()
-        (cut / "blinky.kicad_sch").write_text(text, encoding="utf-8")
-        (cut / "blinky.kicad_pro").write_bytes((self.folder / "finished" / "blinky.kicad_pro").read_bytes())
-        index = build_plot(cut / "blinky.kicad_sch")["schematic"]
-        pads = {f"#{pin['part']}.{pin['number']}" for pin in index["pins"]}
-        unconnected = [finding for finding in index["findings"] if finding["type"] == "pin_not_connected"]
-        self.assertTrue(unconnected, index["findings"])
-        for finding in unconnected:
-            self.assertIn(finding["items"][0]["ref"], pads)
-            self.assertEqual(finding["items"][0]["sheet"], 0)
-        self.assertIn("#J1.1", [finding["items"][0]["ref"] for finding in unconnected])
+        self.assertNotIn("findings", index)
 
     def test_the_payload_is_cached_by_the_documents_bytes(self) -> None:
         from cadgen.kicad.plot import plot_payload_bytes

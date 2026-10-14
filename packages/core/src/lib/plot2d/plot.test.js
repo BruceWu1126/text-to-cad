@@ -23,7 +23,7 @@ const LAYERS = [
   layer("B.Fab", "fab", "back"), layer("B.Cu", "copper", "back", true), layer("F.Cu", "copper", "front"),
   layer("F.SilkS", "silk", "front"), layer("Edge.Cuts", "outline", "both"), layer("drills", "drill", "both")
 ];
-const INDEX = { origin: [20, 15], parts: [], pads: [], findings: [] };
+const INDEX = { origin: [20, 15], parts: [], pads: [] };
 const BOARD = {
   schemaVersion: 2, kicadVersion: "10.0.6", kind: "board", unrouted: 2,
   sheets: [{ name: "blinky", width: 40, height: 30, background: "#001023", layers: LAYERS }], board: INDEX

@@ -15,7 +15,7 @@ const MEASURE_KINDS = Object.freeze({ all: null, pads: ["pads"], copper: ["coppe
  * selects it and copies its reference, as on a STEP face (on bare board, the view fits).
  *
  * The overlay is drawn in the plot's own frame: what is isolated first, everything else stepped back
- * (`useBoardIsolation.js`), then the hover, the selection (a net or a check in focus steps the rest
+ * (`useBoardIsolation.js`), then the hover, the selection (a net in focus steps the rest
  * back) and the measurements.
  *
  * @param {object} options

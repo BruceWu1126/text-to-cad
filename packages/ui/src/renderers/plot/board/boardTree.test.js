@@ -24,7 +24,6 @@ const BOARD = {
   ],
   tracks: [{ net: "VIN", layer: "F.Cu", width: 1, points: [[5, 25.8], [17, 25.8], [17, 20]] }],
   vias: [{ net: "GND", at: [10, 10], diameter: 0.6, drill: 0.3 }], zones: [], holes: [], outline: [],
-  findings: [{ check: "drc", severity: "warning", type: "silk_overlap", description: "Silkscreen clearance", items: [{ text: "C10", ref: "#C10", at: [5, 25] }, { text: "edge", ref: null, at: [1, 1] }] }],
 };
 const index = createBoardIndex(BOARD);
 

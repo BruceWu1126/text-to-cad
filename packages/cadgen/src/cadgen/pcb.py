@@ -162,13 +162,15 @@ def review(board: Path, *, verbose: bool = False) -> ValidationResult:
         return failed(target, "target must be a KiCad board (.kicad_pcb)")
     if not target.is_file():
         return failed(target, "file not found")
-    from cadgen.kicad import sexpr
-    from cadgen.kicad.check import reviewed
+    from cadgen.kicad.board_index import read_script_index
+    from cadgen.kicad.review import net_currents
+    from cadgen.kicad.review import review as review_index
 
     try:
-        findings = reviewed(sexpr.parse(target.read_text(encoding="utf-8")), target.with_suffix(".kicad_pro"))
+        index = read_script_index(target)
     except ValueError as error:
         return failed(target, f"cadgen cannot read this board for review: {error}")
+    findings = review_index(index, net_currents(target.with_suffix(".kicad_pro")))
     issues = tuple(_issue(finding) for finding in findings)
     return ValidationResult(
         ok=True, path=target, issues=issues, summary=f"Reviewed {display_path(target)}: {len(issues)} finding(s)"

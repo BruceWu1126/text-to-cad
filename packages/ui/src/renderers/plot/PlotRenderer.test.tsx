@@ -47,7 +47,6 @@ const INDEX = {
   ],
   tracks: [{ net: 'VIN', layer: 'F.Cu', width: 0.5, points: [[14.175, 20], [14.175, 8.73], [30, 8.73]] }],
   vias: [], zones: [], holes: [], outline: [[[0, 0], [40, 0], [40, 30], [0, 30], [0, 0]]],
-  findings: [{ check: 'drc', severity: 'warning', type: 'silk_overlap', description: 'Silkscreen clearance', items: [{ text: 'Reference field of R1', ref: '#R1', at: [15, 20] }] }],
 };
 // A two-sheet schematic's index, in each sheet's millimetres: R1 and U1's first unit on the root,
 // U1's second unit (and its common pin 4) on "power".
@@ -327,37 +326,6 @@ it('cross-probing: a board selects what its schematic tells it, and tells what i
   await waitFor(() => expect(selected()).toEqual([]));
   expect(channel.told).toHaveLength(count);
   view.dispose();
-});
-
-// What KiCad found, as the plot hands it: one error and one warning.
-const FINDINGS = [
-  { check: 'drc', severity: 'error', type: 'clearance', description: 'Clearance violation', summary: 'The VIN track and the GND pad of J1 are 0.15 mm apart; the rules need 0.2 mm',
-    items: [{ text: 'Track', ref: '#net:VIN', at: [20, 8.73] }, { text: 'Pad 2 of J1', ref: '#J1.2', at: [30, 11.27] }] },
-  { check: 'drc', severity: 'warning', type: 'silk_overlap', description: 'Silkscreen clearance', items: [{ text: 'Reference field of R1', ref: '#R1', at: [15, 20] }] },
-];
-const boardWith = (findings: unknown[]) => (file: string) => (file.endsWith('.kicad_pcb') ? json({ ...BOARD, board: { ...INDEX, findings } }) : json(SCHEMATIC));
-
-it('the viewer only draws: whatever KiCad found, no card, no icon in the navbar and no Checks (pcb-dfm reviews a board)', async () => {
-  readPlot = boardWith(FINDINGS);
-  const { pane, dispose } = await open('blinky.kicad_pcb');
-  await opened(pane);
-  await within(pane).findByRole('group', { name: 'Interaction tools' });
-  expect(within(pane).queryByRole('alert')).toBeNull();
-  expect(pane.querySelector('svg.text-amber-500, svg.text-destructive')).toBeNull();
-  expect(navbarControls(pane)).toEqual(['Display']);
-  expect(pane.querySelector('[data-tool-panel-id="checks"]')).toBeNull();
-  dispose();
-});
-
-it('a schematic\'s ERC findings open no card', async () => {
-  readPlot = (file) => (file.endsWith('.kicad_sch') ? json({ ...SCHEMATIC, schematic: { ...SCHEMATIC_INDEX, findings: [
-    { check: 'erc', severity: 'error', type: 'pin_not_connected', description: 'Pin not connected', summary: 'U1 pin 8 (V+) isn\'t connected to anything', items: [{ text: 'Symbol U1 Pin 8', ref: '#U1.8', at: null }] },
-  ] } }) : json(BOARD));
-  const { pane, dispose } = await open('blinky.kicad_sch');
-  await opened(pane);
-  expect(await within(pane).findByRole('list', { name: 'Schematic' })).not.toBeNull();
-  expect(within(pane).queryByRole('alert')).toBeNull();
-  dispose();
 });
 
 it('a schematic with its index has Select alone, its symbols and nets, and hands references to Quick Edit', async () => {

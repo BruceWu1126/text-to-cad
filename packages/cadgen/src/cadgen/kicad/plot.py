@@ -28,9 +28,8 @@ not show, at a known point, and its place in that layer's SVG is the offset
 (a board whose outline's corner is at KiCad's (116, 77) lands at the sheet's
 origin). The payload's ``board`` is the board's index
 (:mod:`cadgen.kicad.board_index`) on that sheet, with ``origin``, the script's
-origin there, and ``findings``: everything the plot's one DRC run reported,
-each item with a board reference when it is a pad, a part's or copper (KiCad
-reports an arc at its centre; its reference names the arc's middle).
+origin there. Its one DRC run finds what is still unrouted: the ratsnest the
+plot draws and the payload's ``unrouted`` count.
 
 A schematic is one picture per sheet in KiCad's page order, the root first,
 and its ``schematic``: the schematic's index
@@ -54,7 +53,7 @@ import os
 import re
 import tempfile
 import unicodedata
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 from cadgen.kicad import sexpr
@@ -70,7 +69,7 @@ __all__ = [
 
 # The derivation's own revision, in the cache key beside the schema version: a fix that changes
 # what a payload holds, not its shape, bumps it so the store never serves the old payloads.
-_REVISION = 6
+_REVISION = 7
 #: KiCad's default colour theme behind a board, and behind a schematic sheet.
 BOARD_BACKGROUND = "#001023"
 SCHEMATIC_BACKGROUND = "#F5F4EF"
@@ -348,26 +347,6 @@ def _decoded(path: Path, data: bytes) -> str:
         raise PlotError(f"{path.name} is not a readable KiCad board: it is not UTF-8 text") from None
 
 
-def _findings(report: list[tuple], index) -> tuple:
-    """The DRC report's findings on the index (KiCad's frame), each item with a board reference to
-    what it names. KiCad places an arc at its centre: its reference names the arc's middle."""
-    from cadgen.kicad.geometry import script_frame
-    from cadgen.kicad.phrasing import Finding, FindingItem, summarize
-
-    to_script = script_frame(index.origin)
-    return tuple(
-        Finding(
-            check=check, severity=severity, type=kind, description=description,
-            items=tuple(
-                FindingItem(text=text, ref=index.item_ref(uuid, to_script(*index.on_copper(uuid, at)) if at else None), at=at)
-                for text, uuid, at in items
-            ),
-            summary=summarize(check, kind, description, [text for text, _uuid, _at in items]),
-        )
-        for check, severity, kind, description, items in report
-    )
-
-
 def _board_tree(inputs: _Inputs) -> list:
     path = inputs.document
     try:
@@ -451,7 +430,7 @@ def _board_payload(inputs: _Inputs, install) -> dict:
     with tempfile.TemporaryDirectory(prefix="cadgen-kicad-plot-") as folder:
         staged = stage_files(inputs.files, Path(folder))
         index = read_index(tree, project=staged.with_suffix(".kicad_pro"))
-        # One DRC: what is still unconnected (the ratsnest), and every finding the viewer lists.
+        # One DRC: what is still unconnected, the ratsnest.
         run_kicad_cli(install, ["pcb", "drc", "--format", "json", "-o", "drc.json", staged.name], cwd=staged.parent)
         report = _drc_report(staged.parent / "drc.json")
         unconnected = [finding for finding in report if finding[0] == "unconnected"]
@@ -460,7 +439,7 @@ def _board_payload(inputs: _Inputs, install) -> dict:
         mark = _marker_point(index)
         layers, page, offset = _plot_layers(install, staged, _marked(tree, unconnected, mark), stack, mark)
     width, height = _svg_size(page)
-    sheet = replace(index, findings=_findings(report, index)).mapped(lambda x, y: (x - offset[0], y - offset[1]))
+    sheet = index.mapped(lambda x, y: (x - offset[0], y - offset[1]))
     return {
         "kind": "board",
         "sheets": [{"name": path.stem, "width": width, "height": height, "background": BOARD_BACKGROUND, "layers": layers}],
@@ -471,7 +450,7 @@ def _board_payload(inputs: _Inputs, install) -> dict:
 
 def _schematic_payload(inputs: _Inputs, install) -> dict:
     from cadgen.kicad.cli import run_kicad_cli, stage_files
-    from cadgen.kicad.schematic_plot import erc_payload, payload_index
+    from cadgen.kicad.schematic_plot import payload_index
 
     path = inputs.document
     if not inputs.files[0][1].lstrip().startswith(b"(kicad_sch"):
@@ -493,8 +472,6 @@ def _schematic_payload(inputs: _Inputs, install) -> dict:
             index = payload_index(staged, install, list(pictures))
         except ValueError as error:
             raise PlotError(str(error)) from None
-        run_kicad_cli(install, ["sch", "erc", "--format", "json", "-o", "erc.json", staged.name], cwd=staged.parent)
-        index["findings"] = erc_payload(staged.parent / "erc.json", index)
         sheets = []
         for name in (sheet["name"] for sheet in index["sheets"]):  # the index's order: KiCad's pages
             svg = _strip_stamps(pictures[name].read_text(encoding="utf-8"))

@@ -12,7 +12,7 @@
  *
  * It wears a board index's face where the viewer reads both (`boardIndex.js`): `document`, `parts`
  * (each with its pins as `pads`), `pads` (a pin by `U3.9`), `nets` (each with its pins as `pads`),
- * `findings`, `pick`, `resolve` and `extent`. Pure, and found through a grid of the page
+ * `pick`, `resolve` and `extent`. Pure, and found through a grid of the page
  * (`spatialGrid.js`), as the board's.
  */
 import { formatBoardRefSelector, parseBoardRefSelector } from "../boardRefs.js";
@@ -57,15 +57,6 @@ export function createSchematicIndex(schematic, layoutSheets = EMPTY) {
     return p ? [p[0] + sheet.x, p[1] + sheet.y] : null;
   };
   const pageList = (values, sheetIndex) => (Array.isArray(values) ? values.map((value) => page(value, sheetIndex)).filter(Boolean) : []);
-
-  // What KiCad's ERC reported (`schematic.findings`), as a board's are: each item where it is on the page.
-  const findings = Object.freeze((schematic?.findings || EMPTY).map((entry, index) => ({
-    kind: "finding", index, check: String(entry?.check ?? ""), severity: String(entry?.severity ?? ""), type: String(entry?.type ?? ""),
-    description: String(entry?.description ?? ""), summary: String(entry?.summary || entry?.description || ""),
-    items: (entry?.items || EMPTY).map((item) => ({
-      text: String(item?.text ?? ""), ref: item?.ref ? String(item.ref) : "", at: item?.at && item?.sheet != null ? page(item.at, item.sheet) : null,
-    })),
-  })));
 
   const nets = new Map();
   const netNamed = (name) => {
@@ -268,7 +259,7 @@ export function createSchematicIndex(schematic, layoutSheets = EMPTY) {
   }
 
   return Object.freeze({
-    document: "schematic", sheets, parts, pads, pinShapes, nets, wires, labels, junctions, findings,
+    document: "schematic", sheets, parts, pads, pinShapes, nets, wires, labels, junctions,
     pick, resolve, extent, shapesOf
   });
 }

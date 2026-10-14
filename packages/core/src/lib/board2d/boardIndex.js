@@ -136,11 +136,6 @@ export function createBoardIndex(board, sheet = {}) {
 
   const holes = (board?.holes || EMPTY).map((entry) => ({ at: page(entry?.at), diameter: Number(entry?.diameter) || 0 })).filter((hole) => hole.at);
   const outline = (board?.outline || EMPTY).map(pageList).filter((line) => line.length > 1);
-  const findings = (board?.findings || EMPTY).map((entry, index) => ({
-    kind: "finding", index, check: String(entry?.check ?? ""), severity: String(entry?.severity ?? ""), type: String(entry?.type ?? ""),
-    description: String(entry?.description ?? ""), summary: String(entry?.summary || entry?.description || ""),
-    items: (entry?.items || EMPTY).map((item) => ({ text: String(item?.text ?? ""), ref: item?.ref ? String(item.ref) : "", at: page(item?.at) }))
-  }));
 
   // ---- what is near a point --------------------------------------------------
   const padGrid = createSpatialGrid(padShapes.map((shape) => (shape.polygon.length > 2 ? shape.box : null)));
@@ -332,7 +327,7 @@ export function createBoardIndex(board, sheet = {}) {
   /** A pin's pads: the one that names it and any repeated under its number. */
   const shapesOf = (pad) => shapesByPin.get(`${pad.ref}.${pad.number}`) || [pad];
   return Object.freeze({
-    document: "board", origin, parts, pads, padShapes, nets, tracks, vias, zones, holes, outline, findings,
+    document: "board", origin, parts, pads, padShapes, nets, tracks, vias, zones, holes, outline,
     toScript, toPage, pick, pointSelector, resolve, extent, snap, shapesOf
   });
 }

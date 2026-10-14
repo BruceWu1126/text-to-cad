@@ -1,6 +1,6 @@
 /**
  * What a person is pointing at, drawn over a board's or a schematic's plot: the hovered item, the
- * selection, the measurement in hand and the markers of a check. The plot stays KiCad's picture;
+ * selection and the measurement in hand. The plot stays KiCad's picture;
  * this draws on top of it, in the same pass, so a capture of the view shows what was selected.
  *
  * `resolved` items come from an index's `resolve()` or `pick()` (`createBoardIndex`,
@@ -29,7 +29,6 @@ export const BOARD_OVERLAY_COLORS = Object.freeze({
   hover: "rgba(141, 197, 255, 0.55)",
   dim: "rgba(0, 8, 20, 0.6)",
   measure: "#ffd166",
-  marker: "#ff6b6b",
 });
 /** On a schematic's paper the highlight is a deeper blue, and the rest is washed out, not darkened. */
 export const SCHEMATIC_OVERLAY_COLORS = Object.freeze({
@@ -38,7 +37,6 @@ export const SCHEMATIC_OVERLAY_COLORS = Object.freeze({
   fill: "rgba(31, 111, 235, 0.08)",
   dim: "rgba(245, 244, 239, 0.72)",
   measure: "#d97706",
-  marker: "#d93025",
 });
 const PART_FILL = "rgba(141, 197, 255, 0.10)";
 const PART_PAD_FILL = "rgba(141, 197, 255, 0.35)";
@@ -254,18 +252,18 @@ export function drawResolved(ctx, view, resolved, { color, toPage, weight = 1, s
 
 /**
  * The overlay for one frame. `transform` maps page millimetres to CSS pixels; the context is set to
- * `pixelRatio` here. `dim`: the rest of the board steps back (a net or a check in focus).
+ * `pixelRatio` here. `dim`: the rest of the board steps back (a net in focus).
  *
  * @param {CanvasRenderingContext2D} ctx
  * @param {ReturnType<typeof import("./boardIndex.js").createBoardIndex> | ReturnType<typeof import("./schematicIndex.js").createSchematicIndex>} index
  * @param {{ transform: object, pixelRatio?: number, width: number, height: number, hover?: object|null,
  *   selection?: object[], dim?: boolean, measure?: { points: number[][], draft?: number[]|null }|null,
- *   markers?: number[][], mirrorX?: number|null, colors?: typeof BOARD_OVERLAY_COLORS, placement?: boolean }} frame
+ *   mirrorX?: number|null, colors?: typeof BOARD_OVERLAY_COLORS, placement?: boolean }} frame
  *   `mirrorX`: the page x the board is mirrored about (the view from the bottom), or null.
  *   `placement`: a board's Placement display, its pads and airwires drawn here.
  */
 export function drawBoardOverlay(ctx, index, { transform, pixelRatio = 1, width, height, hover = null, selection = [], dim = false,
-  measure = null, markers = [], mirrorX = null, colors = null, placement = false }) {
+  measure = null, mirrorX = null, colors = null, placement = false }) {
   if (!ctx || !index || !transform || !(transform.scale > 0)) return;
   const schematic = index.document === "schematic";
   colors = colors || (schematic ? SCHEMATIC_OVERLAY_COLORS : BOARD_OVERLAY_COLORS);
@@ -293,17 +291,9 @@ export function drawBoardOverlay(ctx, index, { transform, pixelRatio = 1, width,
     if (nets.size) strokes(ctx, view, boardAirwires(index).filter((wire) => nets.has(wire.net)), colors.selection, () => 2 * view.px);
   }
   if (hover && !selection.some((resolved) => resolved.selector === hover.selector)) highlight(hover, { color: colors.hover });
-  // Back to screen pixels: the crosshairs, a check's rings and a measurement keep their size.
+  // Back to screen pixels: the crosshairs and a measurement keep their size.
   ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
   for (const { at, color } of crosshairs) crosshair(ctx, view, at, color);
-  for (const marker of markers) {
-    ctx.strokeStyle = colors.marker;
-    ctx.lineWidth = 2;
-    const [sx, sy] = view.project(marker[0], marker[1]);
-    ctx.beginPath();
-    ctx.arc(sx, sy, 9, 0, Math.PI * 2);
-    ctx.stroke();
-  }
   if (measure && measure.points.length) {
     const points = (measure.draft ? [...measure.points, measure.draft] : measure.points).map(([x, y]) => view.project(x, y));
     ctx.setLineDash([5, 4]);

@@ -16,7 +16,7 @@ const index = createBoardIndex({
     { part: 'R1', number: '1', name: '', net: 'VIN', type: 'passive', side: 'top', at: [14.175, 20], polygon: square(14.175, 20, 0.8, 0.95) },
     { part: 'R1', number: '2', name: '', net: 'GND', type: 'passive', side: 'top', at: [15.825, 20], polygon: square(15.825, 20, 0.8, 0.95) },
   ],
-  tracks: [], vias: [], zones: [], holes: [], outline: [], findings: [],
+  tracks: [], vias: [], zones: [], holes: [], outline: [],
 }, { x: 0, y: 0 });
 
 function tree(props: Record<string, unknown> = {}) {
