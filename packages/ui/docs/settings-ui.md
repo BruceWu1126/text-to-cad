@@ -174,7 +174,7 @@ again, as it was.
 | Tool | Pressing it | Leaving it |
 | --- | --- | --- |
 | Select | The default tool of STEP and robots; picks parts and references, the drawing's marks and measurements (Shift adds; Delete deletes marks and measurements); shows Features (an assembly's; a robot's Links); its modes are the chevron beside it on the strip; what is picked is Quick Edit's chips | Its panel leaves the stack; the selection stays, lit and in Quick Edit, under any tool |
-| Pencil, Shapes | Draw: the Pencil's pen or eraser, or a Shape (Line, Arrow, Rectangle, Ellipse, Text), each the last of its family on its button and the rest in its chevron's menu, which ends in color, weight, line style and placement submenus | The ink stays in the model, the Drawing heading with it |
+| Pencil, Shapes | Draw: the Pencil's pen or eraser, or a Shape (Line, Arrow, Rectangle, Ellipse, Text), each the last of its family on its button and the rest in its chevron's menu, which ends in color, weight, line style and placement submenus | The ink stays in the model, its chip in Quick Edit |
 | Measure | Arms picking, its snapping modes its chevron's menu; each result a chip in Quick Edit, in its colour | Unfinished picks are cancelled; completed measurements stay, Quick Edit's chips |
 | Explode / Clip | Opens a neutral panel; an edit applies the effect (Explode's, as a motion: see below); kept, a press takes it up again as it is | A neutral panel goes; an applied effect and its panel stay, kept |
 | Position | Shows joint handles and the Position panel | Handles and panel hide; joint values stay, and a pose that is not the default is kept: one line in the stack |
@@ -271,9 +271,9 @@ dropdowns, Fill for a closed shape, a rule, Delete.
 history, whatever tool took the step, each disabled while there is nothing for it. An update of the model forgets the sketch too, its history
 with it (Undo has nothing to bring back), and leaves Draw the tool, on the tool,
 colour, weight, line style and placement in hand. The select tool uses lucide's SquareMousePointer. The pencil and
-the shapes share one default stroke width. While there is ink, a **Drawing** heading
-leads the stack, its **Copy** writing the view with its ink to the clipboard as a PNG
-(a tick once it has; the copy shortcut does the same) and its X clearing it. A sketch begun opens
+the shapes share one default stroke width. The drawing has no panel: while there is ink
+it is Quick Edit's **Drawing** chip (its X clears it), and while Draw is up the copy
+shortcut writes the view with its ink to the clipboard as a PNG. A sketch begun opens
 [Quick Edit](#quick-edit), whose header says **drawing** while the ink is there. Draw disables the cube without hiding it.
 
 **Animation** plays a file's routines without leaving the tools view; only a
@@ -436,7 +436,7 @@ stack.
   the effect.
 - **Footers.** A panel can end in one full-row button under its body, which
   never scrolls (`footer`, `ToolPanelFooterButton`): the Reference's **Copy
-  References**, every one selected, and Drawing's **Copy Drawing**. Where the button is too narrow for its name and shortcut (under 9rem), it says
+  References**, every one selected. Where the button is too narrow for its name and shortcut (under 9rem), it says
   **Copy**. The button shows the copy shortcut in the
   platform's form (a phone shows none); after a copy it says **Copied** for a
   moment, a tick where the shortcut was.
@@ -686,10 +686,12 @@ then an X. The file always goes and is not named. Under the header, the note
 buttons at its bottom-right.
 
 While the note is empty the box follows what it would carry: it opens when something
-is picked, sketched or measured, and closes when that goes. Its chips are the drawing
-first, then each measurement (the ruler in its colour and its reading; the views the
-note carries draw every one, and its job file lists them, `measurements`), then the
-selection. A written note keeps it open whatever
+is picked, sketched or measured, and closes when that goes. Every chip leads with its
+icon — the drawing's pen, a measurement's ruler in its colour, a reference's pick glyph
+(a part's cube, a face, an edge, a vertex) — then its words. Its chips are the drawing
+first, then each measurement (the ruler in its colour and its reading; a click copies it
+as a snapshot job's `measurements` entry, what `cadgen snapshot --measurements` takes; the
+views the note carries draw every one, and its job file lists them), then the selection. A written note keeps it open whatever
 is picked, even with nothing picked or sketched, until the X. The X clears everything:
 the note, the selection (as a press on the model's background does), the sketch and the
 measurements, so the box goes. A note that has gone (Copy Prompt, Queue, Send) clears the same way.

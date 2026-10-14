@@ -154,7 +154,7 @@ export function useStepReferenceChips({ references = [], meshData = null, partsS
       if (isPartNode(item)) {
         const name = referenceName(item, meshData, partName);
         const size = boxSize(item) || partsSize?.(stepTreeNodeLeafPartIds(item)) || null;
-        chips.push({ key: `node:${id}`, label: name, ids: [id],
+        chips.push({ key: `node:${id}`, label: name, ids: [id], glyph: "solid",
           card: <PartDetail node={item} meshData={meshData} size={size}/>,
           hover: { nodeId: id } });
         continue;
@@ -177,7 +177,7 @@ export function useStepReferenceChips({ references = [], meshData = null, partsS
     }
     function chipFor(chip) {
       if (!chip.members) {
-        return { key: chip.key, label: chip.label, card: chip.card,
+        return { key: chip.key, label: chip.label, glyph: chip.glyph, card: chip.card,
           onRemove: onRemove ? () => onRemove(chip.ids) : undefined,
           onHover: onHover ? on => onHover(on ? chip.hover : null) : undefined };
       }
@@ -187,7 +187,7 @@ export function useStepReferenceChips({ references = [], meshData = null, partsS
         const [{ item }] = members;
         // Named in its own right, it shows that name; otherwise its part, glyph and number.
         const compact = !parts.own && parts.number && parts.parent ? { name: parts.parent, kind: parts.kind, number: parts.number } : undefined;
-        return { key: chip.key, label: referenceName(item, meshData, partName), ...(compact ? { compact } : {}),
+        return { key: chip.key, label: referenceName(item, meshData, partName), glyph: parts.kind, ...(compact ? { compact } : {}),
           card: <TopologyDetail reference={item}/>,
           onRemove: onRemove ? () => onRemove(ids) : undefined,
           onHover: onHover ? on => onHover(on ? { referenceId: ids[0] } : null) : undefined };

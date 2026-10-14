@@ -174,8 +174,10 @@ colour`). An unknown field is refused, never read as a default.
 
 ## Measurements
 
-A job's `measurements` are dimensions drawn over the picture, as the CAD
-Viewer's Measure draws them: a Quick Edit prompt's job carries every
+A job's `measurements` (the `--measurements` flag sets them on every job: the
+list, one measurement alone, or a file of either) are dimensions drawn over the
+picture, as the CAD Viewer's Measure draws them. A click on a measurement's
+Quick Edit chip copies it in this form; a Quick Edit prompt's job carries every
 measurement the person took, so an agent sees and reads the exact distances
 they meant. Each is drawn by the viewer's own code, every one labelled, its
 lines as heavy against the image's height as against a viewer 900 pixels tall.

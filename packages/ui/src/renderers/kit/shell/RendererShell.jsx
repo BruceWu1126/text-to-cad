@@ -1,7 +1,7 @@
 import { VIEWPORT_INSET_PX, VIEWPORT_STACK_BOTTOM, VIEWPORT_TOP_BAR_PX } from "./viewportLayout.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, Copy, Maximize2, X } from "lucide-react";
+import { Maximize2, X } from "lucide-react";
 import { Button } from "@text-to-cad/ui/primitives/button";
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { cn } from "@text-to-cad/ui/utils";
@@ -13,9 +13,7 @@ import ViewerLoadingOverlay from "../status/ViewerLoadingOverlay.js";
 import { VIEWER_RENDER_PROFILE, renderProfileKeepsPixelRatio, sceneForRenderProfile } from "../viewport/renderProfile.js";
 import { NAVBAR_CONTROL_CLASS } from "../../../lib/navbarRow.js";
 import DisplayPopover from "./DisplayPopover.jsx";
-import ToolPanel, { TOOL_PANEL_BUTTON_CLASS } from "../tools/ToolPanel.jsx";
 import { withGroups } from "../../../drawing/inkGeometry.js";
-import { useCopyFlash } from "../inspector/copyFlash.js";
 import PlaybackMenu, { OrbitMenu, RoutineMenu } from "../tools/PlaybackMenu.jsx";
 import FloatingToolBar from "../tools/FloatingToolBar.js";
 import ToolStack from "../tools/ToolStack.jsx";
@@ -26,20 +24,6 @@ import { ViewportTopRight } from "./ViewportTopRight.jsx";
 import ShellViewport from "./ShellViewport.jsx";
 import ViewportContextMenu from "./ViewportContextMenu.jsx";
 import InkSelectionBar from "../tools/draw/InkSelectionBar.jsx";
-
-// The drawing's Copy, in its panel's heading: the view as it is on screen, the drawing's ink in it
-// (from any angle: it is in the model), to the clipboard as a picture; a tick for a moment once it is.
-function CopyDrawingButton({ capture, disabled }) {
-  const flash = useCopyFlash();
-  if (!flash.canCopy) return null;
-  const Icon = flash.copied ? Check : Copy;
-  return <TooltipHint content={flash.copied ? "Copied" : "Copy drawing"}>
-    <button type="button" aria-label="Copy drawing" disabled={disabled} data-copied={flash.copied ? "" : undefined}
-      className={TOOL_PANEL_BUTTON_CLASS} onClick={() => void flash.copyImage(capture())}>
-      <Icon className="size-3" aria-hidden="true" />
-    </button>
-  </TooltipHint>;
-}
 
 // The strip and the panels under it share one column, inset from the viewer's top and left
 // edges and stopping above the cube in the bottom-left corner: the column is exactly the height
@@ -231,14 +215,9 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
   }, [routineHeld]);
   // The shell's own panels lead the stack: a routine's frame kept with the Animation tool down is
   // one line, its X back to rest. The renderer's follow.
-  // The drawing: one sketch, its ink in the model from every angle. While there is ink, a heading
-  // alone, "Drawing", with its Copy (a picture of the view, ink and all) and the X that clears it —
-  // as Measure's panel is kept with its results. What the next mark looks like is the Draw tools'
-  // menus' (`drawing/toolbar.jsx`'s `InkStyleSubmenus`), never a panel.
+  // The drawing has no panel: it is Quick Edit's Drawing chip (its X clears it, a click copies it),
+  // and what the next mark looks like is the Draw tools' menus' (`InkStyleSubmenus`).
   const shellPanels = <>
-    {frame.drawing.hasDrawing ? <ToolPanel id="drawing" title="Drawing" label="Drawing controls" collapsible={false} lead={frame.drawToolActive}
-      actions={<CopyDrawingButton capture={frame.captureView} disabled={viewerLoading || !scene} />}
-      closeLabel="Clear drawing" onClose={frame.drawing.clear} /> : null}
     {frame.animationKept ? <KeptAnimationPanel runtime={animation} /> : null}
   </>;
 

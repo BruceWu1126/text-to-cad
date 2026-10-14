@@ -1474,7 +1474,9 @@ function StepSurfaceBody({ view, data }) {
   // views are drawn with (`measureDimension.js`'s `measurementMark`, as the viewer draws them).
   const measurementChips = useMemo(() => measureMeasurements.map((item, index) => {
     const reading = measureLabelText(item.measurement);
-    return { key: `measure-${item.id}`, label: `Measurement ${index + 1}: ${reading}`, text: reading, copy: reading,
+    // A click copies it as snapshot takes it: a job's `measurements` entry, `--measurements` JSON.
+    return { key: `measure-${item.id}`, label: `Measurement ${index + 1}: ${reading}`, text: reading,
+      copy: () => JSON.stringify(measurementMark(item)),
       icon: <Ruler className="size-2.5 shrink-0" style={{ color: measureSeriesColor(item.colorIndex) }} strokeWidth={2} aria-hidden="true" />,
       card: <MeasurementCard item={item} />,
       onRemove: () => measure.onDelete(item.id), onHover: on => measure.hover(on ? item.id : "") };

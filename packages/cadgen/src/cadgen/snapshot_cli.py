@@ -145,6 +145,8 @@ class SnapshotOptions:
     joint_values_specified: bool = False
     sketch: object = None
     sketch_specified: bool = False
+    measurements: object = None
+    measurements_specified: bool = False
     focus: list[str] | None = None
     focus_specified: bool = False
     hide: list[str] | None = None
@@ -321,6 +323,32 @@ def normalize_measurements(value: object) -> list[dict[str, object]]:
     return marks
 
 
+def load_measurements_option(value: object, *, cwd: Path) -> object:
+    """``measurements`` in job form: the list itself.
+
+    A job's ``measurements`` and the ``--measurements`` flag are the same value: the
+    list, one measurement object alone (what a Quick Edit chip copies), that JSON as
+    text, or the path of a file holding it (resolved against the working folder).
+    Its fields are checked by ``normalize_measurements``.
+    """
+    if is_plain_object(value):
+        return [value]
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if text.startswith(("[", "{")):
+        parsed = load_json_text(text, "measurements")
+    else:
+        path = (cwd / Path(text).expanduser()).resolve()
+        if not path.is_file():
+            raise _missing(f"measurements file does not exist: {text}")
+        try:
+            parsed = load_json_text(path.read_text(encoding="utf-8"), str(path))
+        except (OSError, UnicodeDecodeError) as exc:
+            raise SnapshotError(f"Cannot read measurements file {text}: {exc}") from exc
+    return [parsed] if is_plain_object(parsed) else parsed
+
+
 def load_sketch_option(value: object, *, cwd: Path) -> tuple[dict[str, object], str]:
     """``sketch`` in job form: the sketch object, and the file it was read from ("" inline).
 
@@ -359,6 +387,7 @@ def apply_option_overrides_to_job(job: object, options: SnapshotOptions, *, cwd:
         [
             bool(options.input),
             options.sketch_specified,
+            options.measurements_specified,
             options.mode_specified,
             options.view_labels,
             options.debug,
@@ -381,6 +410,8 @@ def apply_option_overrides_to_job(job: object, options: SnapshotOptions, *, cwd:
         next_job["input"] = options.input
     if options.sketch_specified:
         next_job["sketch"] = options.sketch
+    if options.measurements_specified:
+        next_job["measurements"] = options.measurements
     if options.mode_specified:
         next_job["mode"] = normalize_render_mode(options.mode)
     if options.debug:
@@ -499,6 +530,8 @@ def load_job_from_options(options: SnapshotOptions, *, cwd: Path | None = None) 
         job["jointValues"] = parse_joint_values_option(options.joint_values)
     if options.sketch_specified:
         job["sketch"] = options.sketch
+    if options.measurements_specified:
+        job["measurements"] = options.measurements
     if options.debug:
         job["debug"] = True
     merge_focus_hide_options(job, options)
@@ -943,7 +976,7 @@ def prepare_render_job(
     if job.get("measurements") is not None:
         if mode != "view":
             raise SnapshotError("measurements are drawn over a view; list mode draws nothing to draw them on")
-        job["measurements"] = normalize_measurements(job["measurements"])
+        job["measurements"] = normalize_measurements(load_measurements_option(job["measurements"], cwd=resolved_cwd))
     normalized = normalize_common_job(
         job,
         mode=mode,

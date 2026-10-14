@@ -737,6 +737,29 @@ class SketchAndTargetTests(_Workspace):
             with self.subTest(job=job), self.assertRaisesRegex(SnapshotError, re.escape(said)):
                 self.resolve(job)
 
+    def test_measurements_are_a_list_one_measurement_or_a_file_of_either_and_the_flag_draws_over_every_job(self) -> None:
+        mark = {"start": [0, 0, 0], "end": [10, 0, 0], "label": "10.00 mm", "color": "#d59090"}
+        self.write("marks.json", json.dumps([mark]))
+        for value in ([mark], mark, json.dumps(mark), "marks.json"):
+            with self.subTest(value=value):
+                self.assertEqual(self.resolve(self.stl_job(measurements=value))["jobs"][0]["measurements"], [mark])
+        jobs = self.from_options(job=str(self.jobs), measurements=json.dumps(mark), measurements_specified=True)["jobs"]
+        self.assertEqual([job["measurements"] for job in jobs], [[mark]] * 2)
+        for door in (step_door, stl_door, urdf_door, any_door):
+            with self.subTest(door=door.__name__), mock.patch.object(snapshot_cli, "run_snapshot") as run:
+                run.return_value = snapshot_core.snapshot_result({"ok": True, "mode": "view", "outputs": []})
+                code, _ = run_door(door, [self.stl, self.out, "--measurements", "marks.json"])
+                self.assertEqual((code, run.call_args.args[0].measurements), (0, "marks.json"))
+        self.write("panel.dxf", "0\nEOF\n")
+        for job, said in (
+            (self.stl_job(measurements=[{**mark, "color": "red"}]), "measurements[0].color is #rrggbb"),
+            (self.stl_job(measurements="gone.json"), "measurements file does not exist: gone.json"),
+            ({"input": "part.stl", "mode": "list", "outputs": [], "measurements": [mark]}, "list mode draws nothing"),
+            ({"input": "panel.dxf", "outputs": [{"path": "o.png"}], "measurements": [mark]}, "no space to draw them in"),
+        ):
+            with self.subTest(job=job), self.assertRaisesRegex(SnapshotError, re.escape(said)):
+                self.resolve(job)
+
     def test_the_pages_refusal_of_a_mark_names_the_sketch_file(self) -> None:
         async def refused():
             raise RuntimeError("Page.evaluate: Error: sketch: marks[0].color must be a #rrggbb colour\n    at nn (x.js:1)")

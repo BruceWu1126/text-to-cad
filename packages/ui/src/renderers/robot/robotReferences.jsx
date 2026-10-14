@@ -35,12 +35,12 @@ export function useRobotReferences({ robot, components = EMPTY, selection, resou
     const chips = [
       ...selectedLinkNames.map(name => {
         const facts = robot ? robotLinkFacts(robot, name) : null;
-        return { key: `link:${name}`, label: name, ...copy(name), ...(reference(name) ? { id: name } : {}),
+        return { key: `link:${name}`, label: name, glyph: "solid", ...copy(name), ...(reference(name) ? { id: name } : {}),
           card: facts ? <RobotLinkDetails facts={facts} onOpenFile={onOpenFile} onSelectLink={selectLink} hasLinkRow={hasLinkRow}/> : null,
           onRemove: () => selectLink(name, { multiSelect: true }),
           onHover: on => hoverLink(on ? name : "") };
       }),
-      ...objects.map(component => ({ key: `object:${component.id}`, label: component.name || component.link, ...copy(component.link),
+      ...objects.map(component => ({ key: `object:${component.id}`, label: component.name || component.link, glyph: "solid", ...copy(component.link),
         card: <RobotComponentDetails components={components} selectedIds={[component.id]}/>,
         onRemove: () => select(component.id, { multiSelect: true }),
         onHover: on => hover(on ? component.id : "") })),

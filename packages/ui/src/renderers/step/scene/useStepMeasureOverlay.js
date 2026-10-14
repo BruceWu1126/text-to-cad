@@ -73,10 +73,13 @@ export function useStepMeasureOverlay({
 
     let rafId = 0;
 
-    const render = (now) => {
+    // One drawing of the overlay as the camera stands now. It runs right after every render of the
+    // scene (`scene.onAfterRender`), so a dimension moves in the same frame the model does, as the
+    // drawing's ink (in the scene) does; and on its own frames, for the snap marker's pulse while
+    // nothing re-renders the scene.
+    const draw = (now) => {
       const context = canvas.getContext("2d");
       if (!context) {
-        rafId = window.requestAnimationFrame(render);
         return;
       }
       const runtime = runtimeRef.current;
@@ -176,13 +179,35 @@ export function useStepMeasureOverlay({
         }
       }
 
-      rafId = window.requestAnimationFrame(render);
+    };
+    const tick = (now) => {
+      install();
+      draw(now);
+      rafId = window.requestAnimationFrame(tick);
+    };
+    // The scene's after-render hook, kept wrapped: another owner of it (the photographic studio) puts
+    // back what it found when it leaves, so each frame checks it is still this one's.
+    let hooked = null, previous = null;
+    const afterRender = function measureAfterRender(...args) {
+      previous?.apply(this, args);
+      const [renderer, , camera] = args;
+      const runtime = runtimeRef.current;
+      if (camera === runtime?.camera && !renderer?.getRenderTarget?.()) draw(performance.now());
+    };
+    const install = () => {
+      const scene = runtimeRef.current?.scene;
+      if (!scene || scene.onAfterRender === afterRender) return;
+      if (hooked && hooked !== scene && hooked.onAfterRender === afterRender) hooked.onAfterRender = previous;
+      previous = scene.onAfterRender === afterRender ? previous : scene.onAfterRender;
+      scene.onAfterRender = afterRender;
+      hooked = scene;
     };
 
-    rafId = window.requestAnimationFrame(render);
+    rafId = window.requestAnimationFrame(tick);
 
     return () => {
       window.cancelAnimationFrame(rafId);
+      if (hooked?.onAfterRender === afterRender) hooked.onAfterRender = previous;
     };
   }, [measureCanvasRef, measureHoverRef, measureModeActive, runtimeRef, mountRef, previewMode, viewerReadyTick, hasOverlayContent]);
 }

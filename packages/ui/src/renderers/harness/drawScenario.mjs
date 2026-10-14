@@ -30,7 +30,8 @@ const NONE = 10;
  */
 export async function runDrawScenario({ page, pane, errors, update }) {
   const viewport = pane.locator('[aria-busy] > div > canvas').first();
-  const panel = pane.locator('[data-tool-panel][aria-label="Drawing controls"]');
+  // The drawing has no panel: it is Quick Edit's Drawing chip, whose X clears it.
+  const panel = pane.locator('[data-quick-edit-ref="sketch"]');
   const strip = pane.getByRole('group', { name: 'Interaction tools' });
   const tool = name => strip.getByRole('button', { name, exact: true });
   // A setting of what is drawn next, from a submenu of the Pencil's menu.
@@ -78,14 +79,13 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   await page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
   await until('no ink before Draw', seen => seen.red < NONE && seen.green < NONE);
 
-  // The Pencil opens on the pen, with no panel of its own: what is drawn next is its menu's.
+  // The Pencil opens on the pen, with no panel: what is drawn next is its menu's.
   await draw.click();
   const surface = pane.locator('[data-cad-drawing-overlay]');
   await surface.waitFor();
   assert.equal(await draw.getAttribute('aria-pressed'), 'true', 'the Pencil is the tool');
-  assert.equal(await panel.count(), 0, 'no Drawing panel before there is ink');
-  const copy = panel.getByRole('button', { name: 'Copy drawing', exact: true });
-  assert.equal(await copy.count(), 0, 'nothing to copy before there is ink');
+  assert.equal(await panel.count(), 0, 'no Drawing chip before there is ink');
+  const copy = panel;
   // Across the middle of the view, clear of the tool stack at its left and Quick Edit at its right.
   const box = await surface.boundingBox();
   const at = (x, y) => [box.x + box.width / 2 + x, box.y + box.height / 2 + y];
@@ -126,12 +126,12 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   await shape('Rectangle');
   await drag(at(-60, -120), at(60, -40));
   await until('a green rectangle beside the red', seen => seen.green > 100 && seen.red > 50);
-  await panel.getByRole('button', { name: 'Clear drawing', exact: true }).click();
+  await panel.getByRole('button', { name: 'Remove Drawing', exact: true }).click();
   await until('Clear drawing removes all ink', seen => seen.red < NONE && seen.green < NONE);
   await copy.waitFor({ state: 'detached' });
 
-  // Left with ink drawn, Draw's surface and tools go; the ink stays in the model, under the
-  // Drawing panel's heading.
+  // Left with ink drawn, Draw's surface and tools go; the ink stays in the model, and its chip in
+  // Quick Edit.
   await draw.click();
   await drag(at(-80, 10), at(60, 40));
   await shape('Rectangle');
@@ -139,7 +139,7 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   const drawn = await until('the green stroke and rectangle are in the model', seen => seen.green > 200);
   await pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button', { name: 'Select', exact: true }).click();
   await surface.waitFor({ state: 'detached' });
-  assert.equal(await panel.isVisible(), true, 'the Drawing heading stays with the ink');
+  assert.equal(await panel.isVisible(), true, 'the Drawing chip stays with the ink');
   await until('the ink stays after Draw', seen => seen.green > 100);
 
   // Select picks a mark of the drawing as it picks a part, and Delete deletes what it picked: the

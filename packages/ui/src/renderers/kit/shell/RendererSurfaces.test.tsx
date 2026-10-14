@@ -179,7 +179,7 @@ it("a sketch opens Quick Edit, which sends the note with the files made of its v
   expect(viewport.props.drawing.hasDrawing).toBe(false);
 });
 
-it('a clipboard destination has no snapshot in the navbar, and the Drawing panel copies the view with its ink once there is some', async () => {
+it('a clipboard destination has no snapshot in the navbar; the drawing is no panel but Quick Edit\'s chip, its pen first', async () => {
   const destination = { kind: 'clipboard', available: true } as const;
   const writeImage = vi.fn(async () => {}), deliver = vi.fn();
   const { navigation } = mount(testHost({
@@ -188,12 +188,10 @@ it('a clipboard destination has no snapshot in the navbar, and the Drawing panel
   }));
   expect(navigation.mock.calls.flatMap(([actions]) => actions)).toEqual([]);
   fireEvent.click(screen.getByRole('button', { name: 'Pencil' }));
-  const controls = () => screen.getByRole('region', { name: 'Drawing controls' });
-  // No ink, no Drawing panel: nothing to copy or clear.
-  expect(screen.queryByRole('region', { name: 'Drawing controls' })).toBeNull();
   act(() => viewport.props.drawing.add([ink('a')]));
-  fireEvent.click(within(controls()).getByRole('button', { name: 'Copy drawing' }));
-  await waitFor(() => expect(writeImage).toHaveBeenCalledTimes(1));
+  expect(screen.queryByRole('region', { name: 'Drawing controls' })).toBeNull();
+  const chip = screen.getByRole('region', { name: 'Quick Edit' }).querySelector('[data-quick-edit-ref="sketch"]')!;
+  expect(chip.querySelector('svg.lucide-pencil')).not.toBeNull();
   // A clipboard destination's Quick Edit copies its prompt, and nothing else.
   expect(within(screen.getByRole('region', { name: 'Quick Edit' })).queryByRole('button', { name: 'Queue' })).toBeNull();
   expect(deliver).not.toHaveBeenCalled();

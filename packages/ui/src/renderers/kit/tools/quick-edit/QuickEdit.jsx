@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Check, Copy, ListPlus, X } from "lucide-react";
+import { ArrowUp, Check, Copy, ListPlus, Pencil, X } from "lucide-react";
 import { Button } from "@text-to-cad/ui/primitives/button";
 import { ScrollArea } from "@text-to-cad/ui/primitives/scroll-area";
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
@@ -282,7 +282,7 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
   const referenceCount = chips ? 0 : referenceIds.length;
   const sketchOf = prompt?.sketch, wipe = sketch?.clear;
   const drawingChip = useMemo(() => (sketching ? {
-    key: "sketch", label: "Drawing", ...(sketchOf ? { copy: () => JSON.stringify(sketchOf(), null, 2) } : {}), ...(wipe ? { onRemove: wipe } : {})
+    key: "sketch", label: "Drawing", icon: <Pencil className="size-2.5 shrink-0 text-muted-foreground" strokeWidth={2} aria-hidden="true" />, ...(sketchOf ? { copy: () => JSON.stringify(sketchOf(), null, 2) } : {}), ...(wipe ? { onRemove: wipe } : {})
   } : null), [sketching, sketchOf, wipe]);
   // Then a chip for each measurement, in its colour (`measurements`: the renderer's), then the references.
   const shownChips = useMemo(() => [drawingChip, ...(measurements?.chips || EMPTY), ...(chips || EMPTY)].filter(Boolean),

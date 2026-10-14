@@ -486,7 +486,7 @@ destination, Send where the prompt port has `send`. Native clipboard effects
 remain in the host implementation.
 
 STEP's Reference panel (Copy References) and Draw's
-panel (Copy Drawing, once there is ink) use `ClipboardPort` directly, including on
+copy shortcut (the view with its ink) use `ClipboardPort` directly, including on
 desktop: the references as text, the view with its ink as a PNG through
 `writeImage`. Their copy shortcut and double-click topology copy follow the same
 path. Double-clicking a component or subassembly isolates it instead; only
