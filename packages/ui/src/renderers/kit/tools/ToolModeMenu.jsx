@@ -7,9 +7,9 @@ import { FLOATING_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
 import { TOOL_PANEL_BUTTON_CLASS } from "./ToolPanel.jsx";
 
 // The strip's chevron: a small button of its own after its tool's, lit by its own hover and while
-// its menu is open, never with the tool. Sized as a design tool's toolbar has it at our 28px tile:
-// its glyph ~6px from the tool's tile, ~12px before the next tool's.
-const CHEVRON_CLASS = "ml-px mr-[5px] grid h-7 w-3.5 shrink-0 place-items-center rounded-sm text-sidebar-foreground/70 outline-none transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/45 disabled:pointer-events-none disabled:opacity-50 aria-expanded:bg-sidebar-accent aria-expanded:text-sidebar-accent-foreground";
+// its menu is open, never with the tool. As tall as the strip's 24px tile and touching it, so the
+// strip's own gap is the only space before the next tool, as between any two.
+const CHEVRON_CLASS = "grid h-6 w-3 shrink-0 place-items-center rounded-sm text-sidebar-foreground/70 outline-none transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/45 disabled:pointer-events-none disabled:opacity-50 aria-expanded:bg-sidebar-accent aria-expanded:text-sidebar-accent-foreground";
 
 /**
  * A tool's exclusive modes: an ordinary dropdown of them, each its glyph and its name, then

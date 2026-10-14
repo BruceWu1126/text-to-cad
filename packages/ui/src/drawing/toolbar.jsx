@@ -7,10 +7,11 @@ import { cn } from '@text-to-cad/ui/utils';
 import { FLOATING_SURFACE_CLASS } from '../lib/floatingSurface.js';
 
 /**
- * Draw's controls: its tools — the pen, the shapes behind one button, text and the eraser — and
- * the colour, weight and line style of what is drawn next, and where it is drawn (on the model or
- * in space), all the drawing session's (`session.js`). The same colour, weight and line style
- * pickers (`InkStylePickers`) restyle the ink Select has picked, on its selection's bar.
+ * Draw's tools, two families the strip shows as two tools (`DRAWING_PENCIL_TOOLS`,
+ * `DRAWING_SHAPE_TOOLS`), and the colour, weight and line style of what is drawn next and where it
+ * is drawn (on the model or in space), all the drawing session's (`session.js`). The same colour,
+ * weight and line style dropdowns (`InkStylePickers`) restyle the ink Select has picked, on its
+ * selection's bar.
  */
 
 /**
@@ -18,18 +19,23 @@ import { FLOATING_SURFACE_CLASS } from '../lib/floatingSurface.js';
  * @typedef {'freedraw' | 'line' | 'arrow' | 'rectangle' | 'ellipse' | 'text' | 'eraser'} DrawingTool
  */
 /** @typedef {{ id: DrawingTool, label: string, Icon: typeof Pencil }} DrawingToolEntry */
+// The Pencil's family: the pen first, what it opens on; then the eraser.
+/** @type {readonly DrawingToolEntry[]} */
+export const DRAWING_PENCIL_TOOLS = [
+  { id: 'freedraw', label: 'Pen', Icon: Pencil },
+  { id: 'eraser', label: 'Eraser', Icon: Eraser },
+];
+// The Shapes' family: the ellipse first, what it opens on; text with them, a mark put down in place.
 /** @type {readonly DrawingToolEntry[]} */
 export const DRAWING_SHAPE_TOOLS = [
+  { id: 'ellipse', label: 'Ellipse', Icon: Circle },
+  { id: 'rectangle', label: 'Rectangle', Icon: Square },
   { id: 'line', label: 'Line', Icon: Minus },
   { id: 'arrow', label: 'Arrow', Icon: MoveUpRight },
-  { id: 'rectangle', label: 'Rectangle', Icon: Square },
-  { id: 'ellipse', label: 'Ellipse', Icon: Circle },
+  { id: 'text', label: 'Text', Icon: Type },
 ];
-const PEN = { id: 'freedraw', label: 'Pen', Icon: Pencil };
-const TEXT = { id: 'text', label: 'Text', Icon: Type };
-const ERASER = { id: 'eraser', label: 'Eraser', Icon: Eraser };
-/** @type {readonly DrawingTool[]} Every tool, the pen first: what Draw opens on, and the icon of the Draw tool itself. */
-export const DRAWING_TOOLS = [PEN, ...DRAWING_SHAPE_TOOLS, TEXT, ERASER].map(tool => tool.id);
+/** @type {readonly DrawingTool[]} */
+export const DRAWING_TOOLS = [...DRAWING_PENCIL_TOOLS, ...DRAWING_SHAPE_TOOLS].map(tool => tool.id);
 
 // Saturated enough to stand out from a shaded model in either theme; black and
 // white for the cases a neon cannot cover (a white page, a dark render).
@@ -85,9 +91,6 @@ const strokeGlyph = width => {
   return <span aria-hidden="true" className="block rounded-full bg-current" style={{ width: `${size}px`, height: `${size}px` }} />;
 };
 const swatch = color => ({ backgroundColor: color, boxShadow: 'inset 0 0 0 1px color-mix(in oklab, currentColor 35%, transparent)' });
-const icon = Icon => <Icon className="size-3" strokeWidth={2} aria-hidden="true" />;
-// A shape button's chevron: narrow, at the button's height, lit by its own hover and while open.
-const CHEVRON_CLASS = 'grid h-6 w-3 shrink-0 place-items-center rounded-sm text-muted-foreground outline-none transition hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 disabled:pointer-events-none disabled:opacity-50 aria-expanded:bg-accent aria-expanded:text-foreground';
 const ROW = 'flex min-w-0 flex-wrap items-center gap-0.5';
 
 /**
@@ -139,45 +142,13 @@ export function InkStylePickers({ color, width = null, dash = null, placement = 
 }
 
 /**
- * Draw's panel: the tools on one row — the pen, the shapes (the last one used on the button, every
- * one in its chevron's menu, as a design tool's toolbar groups them), text and the eraser — then a
- * rule, then what is drawn next: its colour, weight, line style and placement.
+ * Draw's panel: what is drawn next — its colour, weight, line style and placement. Its tools are
+ * the strip's, Pencil and Shapes (`useRendererShell.js`).
  * @param {{ drawing: import('./session.js').DrawingSession, className?: string }} props
  */
 export function DrawingToolbar({ drawing, className = '' }) {
   const disabled = !drawing.ready;
-  const toolButton = ({ id, label, Icon }) => <ToolbarButton key={id} tooltip={false} label={label} disabled={disabled}
-    active={!disabled && drawing.tool === id} aria-pressed={!disabled && drawing.tool === id} onClick={() => drawing.selectTool(id)}>
-    {icon(Icon)}
-  </ToolbarButton>;
-  const shape = DRAWING_SHAPE_TOOLS.find(tool => tool.id === drawing.shape) ?? DRAWING_SHAPE_TOOLS[0];
   return <div className={`text-to-cad-drawing-toolbar ${className}`} data-drawing-controls="">
-    <div role="group" aria-label="Drawing tools" className={ROW}>
-      {toolButton(PEN)}
-      <span className="flex items-center" data-drawing-shapes="">
-        {toolButton(shape)}
-        <DropdownMenu modal={false}>
-          <DropdownMenuTrigger asChild>
-            <button type="button" aria-label="Shapes" disabled={disabled} className={CHEVRON_CLASS}>
-              <ChevronDown className="size-2 shrink-0" strokeWidth={3} aria-hidden="true" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" sideOffset={4} collisionPadding={8} aria-label="Shapes"
-            className={cn(FLOATING_SURFACE_CLASS, 'w-36 data-[state=closed]:animate-none!')}>
-            <DropdownMenuRadioGroup value={DRAWING_SHAPE_TOOLS.some(tool => tool.id === drawing.tool) ? drawing.tool : ''}
-              onValueChange={id => drawing.selectTool(/** @type {DrawingTool} */ (id))}>
-              {DRAWING_SHAPE_TOOLS.map(({ id, label, Icon }) => <DropdownMenuRadioItem key={id} value={id} data-drawing-shape={id}>
-                {icon(Icon)}{label}
-              </DropdownMenuRadioItem>)}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </span>
-      {toolButton(TEXT)}
-      {toolButton(ERASER)}
-    </div>
-    {/* The rule runs the panel's full width, through its inset. */}
-    <div role="separator" aria-orientation="horizontal" className="-mx-1 my-1 h-px bg-border" data-drawing-rule="" />
     <InkStylePickers label="Drawing settings" disabled={disabled} color={drawing.color} width={drawing.strokeWidth ?? 2}
       dash={drawing.strokeStyle ?? 'solid'} placement={drawing.placement ?? 'surface'} onColor={drawing.selectColor}
       onWidth={drawing.selectStrokeWidth} onDash={drawing.selectStrokeStyle} onPlacement={drawing.selectPlacement} />

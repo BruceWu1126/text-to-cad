@@ -1,7 +1,7 @@
 import { VIEWPORT_INSET_PX, VIEWPORT_STACK_BOTTOM, VIEWPORT_TOP_BAR_PX } from "./viewportLayout.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, Copy, Maximize2, Redo2, Undo2, X } from "lucide-react";
+import { Check, Copy, Maximize2, X } from "lucide-react";
 import { Button } from "@text-to-cad/ui/primitives/button";
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { cn } from "@text-to-cad/ui/utils";
@@ -51,8 +51,8 @@ const INSET = `${VIEWPORT_INSET_PX}px`;
 const TOOLBAR_POSITION = Object.freeze({ top: INSET, left: INSET, bottom: VIEWPORT_STACK_BOTTOM, maxWidth: "calc(100% - 3.5rem)" });
 
 /** One of the view's controls: an icon button, the navbar's, with its name on hover, below it. */
-function NavbarControl({ label, hint = label, disabled = false, onClick, children }) {
-  return <TooltipHint content={hint}>
+function NavbarControl({ label, disabled = false, onClick, children }) {
+  return <TooltipHint content={label}>
     <Button type="button" variant="ghost" size="icon-xs" aria-label={label} disabled={disabled} onClick={onClick} className={NAVBAR_CONTROL_CLASS}>
       {children}
     </Button>
@@ -382,11 +382,6 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
                   loads or after it failed to, not in a host that shows the view small, and not in
                   Preview, which has the page to itself. */}
               {view.navbarSlot && shell.previewable && !toolsHidden && !previewing ? createPortal(<>
-                {/* The file view's one history, once there is a step in it: Undo and Redo, whatever tool took it. */}
-                {frame.history.canUndo || frame.history.canRedo ? <>
-                  <NavbarControl label="Undo" hint={`Undo ${frame.undoShortcut}`} disabled={!frame.history.canUndo || shell.idle} onClick={() => frame.history.undo()}><Undo2 className="size-3.5" aria-hidden="true" /></NavbarControl>
-                  <NavbarControl label="Redo" hint={`Redo ${frame.redoShortcut}`} disabled={!frame.history.canRedo || shell.idle} onClick={() => frame.history.redo()}><Redo2 className="size-3.5" aria-hidden="true" /></NavbarControl>
-                </> : null}
                 <DisplayPopover open={displayOpen} onOpenChange={setDisplayOpen} disabled={shell.idle} boundary={frame.hostElement}>{frame.display}</DisplayPopover>
                 <NavbarControl label="Preview" disabled={shell.idle} onClick={enterPreview}><Maximize2 className="size-3.5" aria-hidden="true" /></NavbarControl>
               </>, view.navbarSlot) : null}

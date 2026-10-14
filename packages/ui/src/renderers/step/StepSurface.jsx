@@ -3233,7 +3233,7 @@ function StepSurfaceBody({ view, data }) {
       onSelect: () => { if (!poseToolActive) handleSelectTabToolMode(TAB_TOOL_MODE.POSE); } }) : null,
     // Animation follows Position; only files with routines offer it. Its panel is the shell's.
     shell.tools.animate ? { ...shell.tools.animate, disabled: toolIdle } : null,
-    { ...shell.tools.draw, disabled: toolIdle },
+    ...shell.tools.draw.map(tool => ({ ...tool, disabled: toolIdle })),
     shell.tools.own({ id: TAB_TOOL_MODE.MEASURE, label: "Measure",
       // Like Select's, the button shows the snapping mode in hand.
       icon: <MeasureModeIcon mode={measure.filter} className="size-3.5" aria-hidden="true" />,
@@ -3243,6 +3243,7 @@ function StepSurfaceBody({ view, data }) {
       menu: measureModeMenu,
       onSelect: () => { if (tabToolMode !== TAB_TOOL_MODE.MEASURE) handleSelectTabToolMode(TAB_TOOL_MODE.MEASURE); } }),
     ...modelEffects.tools,
+    ...shell.tools.history,
   ].filter(Boolean);
 
   // ---- copying the selection ----------------------------------------------------------------

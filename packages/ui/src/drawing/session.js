@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { sameView } from './views.js';
 import { useViewerHistory } from '../renderers/kit/shell/useViewerHistory.js';
 import { penWidth } from './inkGeometry.js';
-import { DRAWING_SHAPE_TOOLS } from './toolbar.jsx';
+import { DRAWING_PENCIL_TOOLS, DRAWING_SHAPE_TOOLS } from './toolbar.jsx';
 
 /**
  * The drawing: one sketch, its ink in the model (`renderers/kit/tools/draw/ink3d.js`'s items), what
@@ -15,7 +15,8 @@ import { DRAWING_SHAPE_TOOLS } from './toolbar.jsx';
  * @typedef {object} DrawingSession
  * @property {boolean} ready  Always: the toolbar's tools are the session's own.
  * @property {import('./toolbar.jsx').DrawingTool} tool
- * @property {import('./toolbar.jsx').DrawingTool} shape  The shape last taken up: the one Draw's shapes button shows.
+ * @property {import('./toolbar.jsx').DrawingTool} pencil  The Pencil's tool last taken up (the pen, the eraser): its strip button's.
+ * @property {import('./toolbar.jsx').DrawingTool} shape  The Shapes' tool last taken up (the ellipse first): its strip button's.
  * @property {string} color
  * @property {number} strokeWidth
  * @property {import('./toolbar.jsx').DrawingStrokeStyle} strokeStyle
@@ -69,7 +70,8 @@ export function useDrawingSession(active = true, initial = {}, history = null) {
   const start = useMemo(() => ({ ...DEFAULTS, ...Object.fromEntries(Object.entries(initial).filter(([, value]) => value != null)) }),
     [initial.tool, initial.color, initial.strokeWidth, initial.strokeStyle, initial.placement]);
   const [tool, setTool] = useState(start.tool);
-  const [shape, setShape] = useState(/** @type {import('./toolbar.jsx').DrawingTool} */ ('rectangle'));
+  const [pencil, setPencil] = useState(/** @type {import('./toolbar.jsx').DrawingTool} */ (DRAWING_PENCIL_TOOLS[0].id));
+  const [shape, setShape] = useState(/** @type {import('./toolbar.jsx').DrawingTool} */ (DRAWING_SHAPE_TOOLS[0].id));
   const [color, setColor] = useState(start.color);
   const [strokeWidth, setStrokeWidth] = useState(start.strokeWidth);
   const [strokeStyle, setStrokeStyle] = useState(start.strokeStyle);
@@ -123,6 +125,7 @@ export function useDrawingSession(active = true, initial = {}, history = null) {
     selectTool: next => {
       setTool(next);
       if (SHAPES.has(next)) setShape(next);
+      else setPencil(next);
     },
     selectColor: next => setColor(next),
     selectStrokeWidth: next => setStrokeWidth(next),
@@ -176,7 +179,7 @@ export function useDrawingSession(active = true, initial = {}, history = null) {
     },
   }), [step, put]);
   const hasContent = ink.length > 0;
-  return { ready: true, tool, shape, color, strokeWidth, strokeStyle, placement, ink, selected, views,
+  return { ready: true, tool, pencil, shape, color, strokeWidth, strokeStyle, placement, ink, selected, views,
     canUndo: log.canUndo, canRedo: log.canRedo, hasContent, hasDrawing: hasContent,
     add, remove, noteView, forget: actions.clear, ...actions };
 }

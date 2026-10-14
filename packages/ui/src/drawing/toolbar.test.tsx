@@ -27,18 +27,3 @@ it('sets where ink is drawn from the settings dropdowns: on the model by default
   expect(screen.queryByRole('menu', { name: 'Placement' })).toBeNull();
   expect(session.placement).toBe('space');
 });
-
-it("groups the shapes behind one button, the last one taken up on it", async () => {
-  render(<Panel />);
-  const tools = screen.getByRole('group', { name: 'Drawing tools' });
-  expect(within(tools).getAllByRole('button').map(button => button.getAttribute('aria-label')))
-    .toEqual(['Pen', 'Rectangle', 'Shapes', 'Text', 'Eraser']);
-  fireEvent.pointerDown(within(tools).getByRole('button', { name: 'Shapes' }), { button: 0, ctrlKey: false });
-  fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Arrow' }));
-  expect(session.tool).toBe('arrow');
-  expect(within(tools).getAllByRole('button').map(button => button.getAttribute('aria-label')))
-    .toEqual(['Pen', 'Arrow', 'Shapes', 'Text', 'Eraser']);
-  // The pen taken up again, the shapes button keeps the arrow.
-  fireEvent.click(within(tools).getByRole('button', { name: 'Pen' }));
-  expect(within(tools).getByRole('button', { name: 'Arrow' }).getAttribute('aria-pressed')).toBe('false');
-});

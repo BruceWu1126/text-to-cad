@@ -1,10 +1,12 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Clapperboard, Pencil } from "lucide-react";
+import { Clapperboard, Redo2, Undo2 } from "lucide-react";
 import { clonePerspectiveSnapshot } from "@text-to-cad/core/lib/perspective.js";
 import { VIEWER_SCENE_SCALE } from "@text-to-cad/core/lib/viewer/sceneScale.js";
 import { ViewerElementContext, useViewerHost, usePromptDestination } from "../../../host/context.js";
 import { hasOpenPopup } from "../../../lib/popups.js";
 import { useDrawingSession } from "../../../drawing/session.js";
+import { DRAWING_PENCIL_TOOLS, DRAWING_SHAPE_TOOLS } from "../../../drawing/toolbar.jsx";
+import ToolModeMenu from "../tools/ToolModeMenu.jsx";
 import { useViewerHistory } from "./useViewerHistory.js";
 import { promptView, promptViews } from "../../../drawing/views.js";
 import { sceneBackdropEdgeColor } from "../look/chromeBackdrop.js";
@@ -655,10 +657,31 @@ export function useRendererShell({
   const tools = {
     /** A tool of the renderer's own: `{ id, label, icon }` plus anything the strip reads. */
     own: stripTool,
-    // Its tools, color and history are a panel in the tool stack while it is up (`RendererShell.jsx`);
-    // the button is the pencil, whatever drawing tool is in hand. A second press does nothing.
-    draw: stripTool({ id: SHELL_TOOL.DRAW, label: "Draw", icon: <Pencil className="size-3" strokeWidth={2} aria-hidden="true" />,
-      onSelect: () => selectTool(SHELL_TOOL.DRAW) }),
+    // Draw's two families, Pencil (the pen, the eraser) and Shapes (the ellipse, rectangle, line,
+    // arrow and text), each a tool of the strip showing the one of it last taken up, the others in
+    // its chevron's menu. Either takes Draw up, whose colour, weight, line style and placement are a
+    // panel in the tool stack (`RendererShell.jsx`).
+    draw: [["pencil", "Pencil", "Pencil tool", DRAWING_PENCIL_TOOLS, drawing.pencil],
+      ["shapes", "Shapes", "Shape", DRAWING_SHAPE_TOOLS, drawing.shape]].map(([id, label, menuLabel, family, last]) => {
+      const current = family.find(entry => entry.id === last) ?? family[0];
+      const take = next => { drawing.selectTool(next); selectTool(SHELL_TOOL.DRAW); };
+      return stripTool({ id: `draw-${id}`, label, icon: <current.Icon className="size-3" strokeWidth={2} aria-hidden="true" />,
+        active: drawToolActive && family.some(entry => entry.id === drawing.tool),
+        onSelect: () => take(current.id),
+        menu: <ToolModeMenu label={menuLabel} trigger="chevron" disabled={idle} value={current.id} onChange={take}
+          modes={family.map(({ id: mode, label: name, Icon }) => ({ id: mode, label: name,
+            icon: <Icon className="size-3.5" strokeWidth={2} aria-hidden="true" /> }))} /> });
+    }),
+    // The file view's one history (`useViewerHistory.js`), last on the strip, always there and
+    // disabled while there is nothing for it.
+    history: [
+      { id: "undo", label: "Undo", description: host.environment.platform === "darwin" ? "⌘Z" : "Ctrl+Z", separated: true,
+        icon: <Undo2 className="size-3" strokeWidth={2} aria-hidden="true" />, active: false,
+        disabled: idle || previewing || !history.canUndo, onSelect: () => history.undo() },
+      { id: "redo", label: "Redo", description: host.environment.platform === "darwin" ? "⇧⌘Z" : "Ctrl+Y",
+        icon: <Redo2 className="size-3" strokeWidth={2} aria-hidden="true" />, active: false,
+        disabled: idle || previewing || !history.canRedo, onSelect: () => history.redo() },
+    ],
     // The file's routines, played without leaving the tools view: the playbar and its settings are
     // a panel in the tool stack while it is up (`RendererShell.jsx`). Null for a file with none.
     // Taking it up starts the routine when Autoplay is on, as entering preview does — unless a frame
@@ -697,8 +720,6 @@ export function useRendererShell({
       previewOrbitSpeed, setPreviewOrbitSpeed, toolStack, changeToolStack, viewerLoading, loading, presentationState,
       handlePresentationChange, viewerAlert, setRuntimeAlert,
       copyActionRef, copyDrawing, copyShortcut: host.environment.platform === "darwin" ? "⌘C" : "Ctrl+C",
-      undoShortcut: host.environment.platform === "darwin" ? "⌘Z" : "Ctrl+Z",
-      redoShortcut: host.environment.platform === "darwin" ? "⇧⌘Z" : "Ctrl+Y",
       // Quick Edit's: the file it is about, how a copied prompt spells its paths, its sketch, and
       // the renderer's own Escape, which an empty Quick Edit passes on.
       resource, captureView, escape: escapeView, currentView, quickEditPrompt,

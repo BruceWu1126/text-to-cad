@@ -18,11 +18,12 @@ import { FLOATING_CHROME_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
  * @property {() => void} onSelect  Every press of the button.
  * @property {string} [description]  `aria-description`.
  * @property {import("react").ReactNode} [menu]  Its modes: the chevron after its button, and the menu it opens.
+ * @property {boolean} [separated]  A rule before it: the start of a group of its own (Undo and Redo).
  */
 
-// The strip's tiles: 28px, their icons 16px (a design tool's toolbar proportion, its icon a little
-// over half its tile), whatever size the icon was handed at.
-const STRIP_BUTTON_CLASS = "size-7 [&>svg]:size-4!";
+// The strip's tiles: 24px, their icons 14px (a little over half the tile), whatever size the icon
+// was handed at.
+const STRIP_BUTTON_CLASS = "size-6 [&>svg]:size-3.5!";
 
 // A plain function, not a component: the strip's own output is the buttons. A tool with a menu is
 // its button as every tool's, then the menu's small chevron, a button of its own with its own
@@ -47,8 +48,11 @@ export default function FloatingToolBar({ tools = [] }) {
   // No tools, no strip: an empty bar is never drawn.
   if (!tools.length) return null;
   return (<div className="relative z-20 flex max-w-full shrink-0 flex-col items-end gap-1" data-cad-toolbar="tools">
-      <div role="group" aria-label="Interaction tools" className={`pointer-events-auto inline-flex min-h-9 max-w-full flex-wrap items-center gap-0.5 rounded-md p-1 ${FLOATING_CHROME_SURFACE_CLASS}`}>
-        {tools.map(tool => <Fragment key={tool.id}>{toolButton(tool)}</Fragment>)}
+      <div role="group" aria-label="Interaction tools" className={`pointer-events-auto inline-flex min-h-8 max-w-full flex-wrap items-center gap-1 rounded-md p-1 ${FLOATING_CHROME_SURFACE_CLASS}`}>
+        {tools.map(tool => <Fragment key={tool.id}>
+          {tool.separated ? <span role="separator" aria-orientation="vertical" className="mx-0.5 h-4 w-px bg-border" /> : null}
+          {toolButton(tool)}
+        </Fragment>)}
       </div>
   </div>);
 }

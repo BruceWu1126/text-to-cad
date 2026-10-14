@@ -7,9 +7,9 @@ export const VIEWPORT_BOTTOM_CENTER = "var(--cad-viewport-bottom-center, 1.75rem
 // The chrome's inset from the viewer's edges: the gap between the tool strip and the stack under
 // it, so the strip sits as far from the corner as the panels sit from the strip.
 export const VIEWPORT_INSET_PX = CHROME_INSET_PX;
-// One tool strip's height, shared by the toolbar and status row: 28px tiles in a 36px row, and its
+// One tool strip's height, shared by the toolbar and status row: 24px tiles in a 32px row, and its
 // border (`FloatingToolBar.js`).
-export const VIEWPORT_TOP_BAR_PX = 38;
+export const VIEWPORT_TOP_BAR_PX = 34;
 // The cube, in the bottom-left corner: its box hugs the left edge, and sits far enough off the
 // bottom that the axes drawn in its lower corner never touch the viewer's edge.
 export const VIEWPORT_CUBE_SIZE = "6rem";

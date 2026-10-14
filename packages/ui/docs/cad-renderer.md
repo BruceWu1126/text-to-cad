@@ -1379,14 +1379,13 @@ behind it. It is a STEP tool and appears on no other format: a GLB, an STL, a
 SHELL's — `kit/tools/draw`, `shell.tools.draw` — and STEP is the renderer that
 puts it on its strip; `renderers/shell-harness` also mounts it, for tests.)
 
-The tools are:
+Draw is two tools of the strip, each showing the one of its family last taken up and
+the rest in its chevron's menu (`shell.tools.draw`):
 
-- Pen, smoothed as it is drawn, its width following pressure (a stylus's own,
-  or simulated from speed with a mouse).
-- The shapes, behind one button that shows the last one taken up, every one in
-  its chevron's menu: Line, Arrow, Rectangle (rounded corners) and Ellipse.
-- Text, written in place.
-- Eraser.
+- **Pencil**: the pen, smoothed as it is drawn, its width following pressure (a
+  stylus's own, or simulated from speed with a mouse); the eraser.
+- **Shapes**: Ellipse (the default), Rectangle (rounded corners), Line, Arrow, and
+  Text, written in place.
 
 Draw has no Select or Move view of its own. Picking ink is the viewer's Select's: under
 Select a press on a mark picks it (and the marks drawn with it, an arrow's head) before
@@ -1445,8 +1444,8 @@ back over the new model; Draw stays the tool.
 (`kit/shell/useViewerHistory.js`): each piece of ink put down, erased, restyled or
 filled, a clear, and each measurement taken or deleted is a step; the camera and a
 selection never are. ⌘Z and ⇧⌘Z (Ctrl+Z and Ctrl+Y) walk it from anywhere in the
-viewer but a text field, and once there is a step the navbar's right end carries
-Undo and Redo, before Display. A renderer whose own tools take steps makes the
+viewer but a text field, and Undo and Redo end the strip (`shell.tools.history`),
+always there, each disabled while there is nothing for it. A renderer whose own tools take steps makes the
 history and hands it to the shell (`useRendererShell`'s `history`), as the STEP
 renderer does for its measurements; a new file's measurements take theirs out. A Quick Edit note carries the drawing as files: the
 sketch, the views it was drawn in as a snapshot job, and a picture of each

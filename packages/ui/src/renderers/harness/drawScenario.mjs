@@ -31,10 +31,15 @@ const NONE = 10;
 export async function runDrawScenario({ page, pane, errors, update }) {
   const viewport = pane.locator('[aria-busy] > div > canvas').first();
   const panel = pane.locator('[data-tool-panel][aria-label="Drawing controls"]');
-  const tools = panel.getByRole('group', { name: 'Drawing tools' });
+  const strip = pane.getByRole('group', { name: 'Interaction tools' });
   const settings = panel.getByRole('group', { name: 'Drawing settings' });
-  const tool = name => tools.getByRole('button', { name, exact: true });
+  const tool = name => strip.getByRole('button', { name, exact: true });
   const setting = name => settings.getByRole('button', { name, exact: true });
+  // A shape from the Shapes' menu, which takes Draw up on it.
+  const shape = async name => {
+    await strip.getByRole('button', { name: /^Shape: / }).click();
+    await page.getByRole('menuitemradio', { name, exact: true }).click();
+  };
   const names = group => group.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')));
   const position = () => page.evaluate(() => window.cadHarness.a.controller.readState().camera.position);
   // How far the camera has moved since `from`, in model units (a readback differs in its last bits).
@@ -64,17 +69,16 @@ export async function runDrawScenario({ page, pane, errors, update }) {
     await page.mouse.move(...from); await page.mouse.down(); await page.mouse.move(...to, { steps: 10 }); await page.mouse.up();
   };
 
-  const draw = pane.getByRole('button', { name: 'Draw', exact: true });
+  const draw = tool('Pencil');
   await viewport.waitFor();
   await page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
   await until('no ink before Draw', seen => seen.red < NONE && seen.green < NONE);
 
-  // Draw opens on the pen, its tools then its settings.
+  // The Pencil opens on the pen; Draw's panel holds what is drawn next.
   await draw.click();
   const surface = pane.locator('[data-cad-drawing-overlay]');
   await surface.waitFor();
-  assert.equal(await tool('Pen').getAttribute('aria-pressed'), 'true', 'Draw opens on the pen');
-  assert.deepEqual(await names(tools), ['Pen', 'Rectangle', 'Shapes', 'Text', 'Eraser']);
+  assert.equal(await draw.getAttribute('aria-pressed'), 'true', 'the Pencil is the tool');
   assert.deepEqual(await names(settings), ['Color', 'Stroke width', 'Line style', 'Placement']);
   const copy = panel.getByRole('button', { name: 'Copy drawing', exact: true });
   assert.equal(await copy.count(), 0, 'nothing to copy before there is ink');
@@ -116,7 +120,7 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   // Another colour for what is drawn next: a green rectangle beside the red stroke. Clear takes it all.
   await setting('Color').click();
   await page.getByRole('menuitemradio', { name: 'Neon green', exact: true }).click();
-  await tool('Rectangle').click();
+  await shape('Rectangle');
   await drag(at(-60, -120), at(60, -40));
   await until('a green rectangle beside the red', seen => seen.green > 100 && seen.red > 50);
   await panel.getByRole('button', { name: 'Clear drawing', exact: true }).click();
@@ -125,14 +129,13 @@ export async function runDrawScenario({ page, pane, errors, update }) {
 
   // Left with ink drawn, Draw's surface and tools go; the ink stays in the model, under the
   // Drawing panel's heading.
-  await tool('Pen').click();
+  await draw.click();
   await drag(at(-80, 10), at(60, 40));
-  await tool('Rectangle').click();
+  await shape('Rectangle');
   await drag(at(-60, -120), at(60, -40));
   const drawn = await until('the green stroke and rectangle are in the model', seen => seen.green > 200);
   await pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button', { name: 'Select', exact: true }).click();
   await surface.waitFor({ state: 'detached' });
-  assert.equal(await tools.count(), 0, 'its tools went with it');
   assert.equal(await panel.isVisible(), true, 'the Drawing heading stays with the ink');
   await until('the ink stays after Draw', seen => seen.green > 100);
 

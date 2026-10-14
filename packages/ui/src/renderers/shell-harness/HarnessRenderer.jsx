@@ -207,7 +207,7 @@ function HarnessSurface({ view, data }) {
     {kept ? <ToolPanel id="kept" title="Kept" label="Kept controls" onClose={() => setKept(false)}><div className="h-16 px-2">Kept</div></ToolPanel> : null}
   </>;
 
-  return <RendererShell shell={shell} tools={withPanel ? [selectTool, shell.tools.draw, keepTool, poseTool] : [shell.tools.draw]}
+  return <RendererShell shell={shell} tools={withPanel ? [selectTool, ...shell.tools.draw, keepTool, poseTool, ...shell.tools.history] : [...shell.tools.draw, ...shell.tools.history]}
     toolPanels={toolPanels} references={references} onClearReferences={() => setPicked("")}
     contextMenuItems={contextMenuItems} onContextMenuOpenChange={setMenuUp}
     frameProvider={frame => <HarnessFrameContext.Provider value={`frame:${stage}`}>{frame}</HarnessFrameContext.Provider>}

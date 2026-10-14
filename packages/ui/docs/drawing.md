@@ -8,7 +8,7 @@ were drawn from every angle. The STEP renderer is the one that offers Draw
 ## Pieces
 
 - `drawing/session.js` — `useDrawingSession`: the drawing's ink, what the tools
-  put down next (tool, the shape last taken up, color, stroke width, line style,
+  put down next (tool, the last of each family taken up, color, stroke width, line style,
   placement) and the selection. Each add, erase, restyle of the selection
   (`restyle`) or fill of a closed shape (`fill`, joining its group) is one step
   in the file view's history (`renderers/kit/shell/useViewerHistory.js`, 200
@@ -25,9 +25,9 @@ were drawn from every angle. The STEP renderer is the one that offers Draw
   screen (Explode, the pose off its default, or a routine's kept frame as
   `animation: {clip, time}`), the parts hidden and isolated, and the picture's
   size. Never how it looks.
-- `drawing/toolbar.jsx` — `DrawingToolbar`, the shared controls built from the
-  floating-toolbar button primitive: Pen, the shapes (Line, Arrow, Rectangle,
-  Ellipse behind one button and its chevron's menu), Text and Eraser, then the
+- `drawing/toolbar.jsx` — the two families of tools the strip shows as Pencil
+  and Shapes (`DRAWING_PENCIL_TOOLS`: pen, eraser; `DRAWING_SHAPE_TOOLS`: ellipse,
+  rectangle, line, arrow, text), and `DrawingToolbar`, the Drawing panel: the
   Color, Stroke width, Line style and Placement (On model, the default, or In
   space) dropdowns (`InkStylePickers`, which the selection's bar shares). The
   swatches are neon, so ink stands out from a shaded model.

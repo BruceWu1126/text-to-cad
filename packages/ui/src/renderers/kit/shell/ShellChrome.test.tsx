@@ -223,11 +223,12 @@ it('while the model loads the viewer shows none of its own chrome, and all of it
   expect(barButtons()).toEqual(['Display', 'Preview']);
   // With nothing to work on yet, the strip is idle together, and so are Display and Preview.
   stage('unready');
-  expect(strip()).toEqual(['Select', 'Draw', 'Keep', 'Pose']);
+  expect(strip()).toEqual(['Select', 'Pencil', 'Pencil tool: Pen', 'Shapes', 'Shape: Ellipse', 'Keep', 'Pose', 'Undo', 'Redo']);
   const idle = (name: string) => (['Display', 'Preview'].includes(name) ? screen.getByRole('button', { name }) : tool(name)).hasAttribute('disabled');
-  expect(['Select', 'Draw', 'Display', 'Preview'].map(idle)).toEqual([true, true, true, true]);
+  expect(['Select', 'Pencil', 'Shapes', 'Undo', 'Display', 'Preview'].map(idle)).toEqual([true, true, true, true, true, true]);
   stage('idle');
-  expect(['Select', 'Draw', 'Display', 'Preview'].map(idle)).toEqual([false, false, false, false]);
+  // Undo and Redo stay disabled with nothing to undo or redo.
+  expect(['Select', 'Pencil', 'Shapes', 'Undo', 'Display', 'Preview'].map(idle)).toEqual([false, false, false, true, false, false]);
 });
 
 it("Display and Preview are a 3D view's, as its renderer declares: a view that does not declare it has neither, not disabled ones, and a request for Preview leaves it as it is", () => {
@@ -249,7 +250,7 @@ it("Display and Preview are a 3D view's, as its renderer declares: a view that d
   ask();
   expect([viewportProps.current.previewMode, onFullscreenChange.mock.calls]).toEqual([false, []]);
   expect(document.querySelector('[data-preview-chrome]')!.hasAttribute('inert')).toBe(false);
-  expect(strip()).toEqual(['Draw']);
+  expect(strip()).toEqual(['Pencil', 'Pencil tool: Pen', 'Shapes', 'Shape: Ellipse', 'Undo', 'Redo']);
 });
 
 it('a load the model did not survive leaves only the card saying so, and a failed update it survives keeps the chrome', () => {
@@ -341,14 +342,14 @@ it("Display is the dropdown at the navbar's right end, before Preview, the persp
   const { remount } = frame();
   // The view's controls in the navbar, Display then Preview; nothing of Display on the strip.
   expect(barButtons()).toEqual(['Display', 'Preview']);
-  expect(strip()).toEqual(['Select', 'Draw', 'Keep', 'Pose']);
+  expect(strip()).toEqual(['Select', 'Pencil', 'Pencil tool: Pen', 'Shapes', 'Shape: Ellipse', 'Keep', 'Pose', 'Undo', 'Redo']);
   const display = screen.getByRole('button', { name: 'Display' });
   // Its icon is the perspective box, the drawing the Projection menu shows for Perspective.
   const box = render(<PerspectiveProjectionIcon />).container.querySelector('svg')!;
   expect(display.querySelector('svg')!.innerHTML).toBe(box.innerHTML);
   await user.click(tool('Keep'));
-  await user.click(tool('Draw'));
-  expect(tool('Draw').getAttribute('aria-pressed')).toBe('true');
+  await user.click(tool('Pencil'));
+  expect(tool('Pencil').getAttribute('aria-pressed')).toBe('true');
   // Draw's panel leads the stack, and has nothing to fold.
   const stack = shown();
   expect(stack).toEqual(['Drawing controls', 'Harness tree', 'Harness reference', 'Kept controls']);
@@ -358,7 +359,7 @@ it("Display is the dropdown at the navbar's right end, before Preview, the persp
   expect(display.getAttribute('aria-pressed')).toBe('true');
   // Nothing joins the stack, and the tool in hand, its panel and the kept effect stay.
   expect(shown()).toEqual(stack);
-  expect([tool('Draw').getAttribute('aria-pressed'), tool('Keep').getAttribute('aria-pressed')]).toEqual(['true', 'true']);
+  expect([tool('Pencil').getAttribute('aria-pressed'), tool('Keep').getAttribute('aria-pressed')]).toEqual(['true', 'true']);
   expect(viewportProps.current.drawingEnabled).toBe(true);
   // Nothing about it is a panel of the stack: its first row is the Display section's heading,
   // Reset then the X, and it holds the file's view alone, none of the host's settings.
@@ -379,7 +380,7 @@ it("Display is the dropdown at the navbar's right end, before Preview, the persp
   await user.keyboard('{Escape}');
   expect(displayPopover()).toBeNull();
   expect(shown()).toEqual(stack);
-  expect(tool('Draw').getAttribute('aria-pressed')).toBe('true');
+  expect(tool('Pencil').getAttribute('aria-pressed')).toBe('true');
   // A press outside it — on the model — puts it away too, and the kept effect stays.
   await user.click(display);
   await user.pointer({ keys: '[MouseLeft]', target: document.querySelector('[data-mock-viewport] canvas')! });

@@ -193,7 +193,7 @@ test('a robot can enter Position with sidebar controls: knobs drag joints, the c
   await robot.openPosition();
   await page.waitForFunction(() => window.__cadJointHandles?.().length > 0);
   assert.deepEqual(await robot.toolNames(), ['Select:false', 'Position:true']);
-  assert.equal(await robot.tool('Draw').count(), 0, 'Draw is a STEP tool; a robot description has none');
+  assert.equal(await robot.tool('Pencil').count(), 0, 'Draw is a STEP tool; a robot description has none');
   assert.equal(await robot.tool('Preview').count(), 0, 'Preview is no toolbar tool');
   assert.equal(await pane.getByRole('button', { name: 'Preview', exact: true }).count(), 1, 'it is the viewer’s corner button, for a robot as for any 3D file');
   // Display is the button beside Preview, shut as the file opens.

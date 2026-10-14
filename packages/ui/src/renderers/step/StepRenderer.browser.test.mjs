@@ -642,7 +642,7 @@ test('hiding a part takes it off the screen, and the viewport menus offer what t
   await page.keyboard.press('Escape');
   await page.getByRole('menu').waitFor({ state: 'detached' });
   await away();
-  for (const tool of ['Measure', 'Position', 'Animation', 'Draw']) {
+  for (const tool of ['Measure', 'Position', 'Animation', 'Pencil']) {
     await view.tool(tool).click();
     // A menu opens in the render the press causes: two frames on, it would be there.
     await page.mouse.click(...at([6, 6, 5]), { button: 'right' });
@@ -661,7 +661,7 @@ test('hiding a part takes it off the screen, and the viewport menus offer what t
     }), true, `${tool} still suppresses the native menu`);
     // And a secondary DRAG is still a pan. (Not under Draw: that tool locks the
     // view on purpose and the editor takes the drag, which its own test asserts.)
-    if (tool === 'Draw') continue;
+    if (tool === 'Pencil') continue;
     const before = await page.evaluate(() => window.__cadCamera().target);
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down({ button: 'right' });
@@ -771,7 +771,7 @@ test('Position drives the mate and repaints, a named pose jumps, the Position kn
   // A file with movable joints has Position straight after Select (and Select's mode chevron) on
   // the strip, and one with routines Animation after it.
   assert.deepEqual((await pane.getByRole('group', { name: 'Interaction tools' }).locator('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')))).slice(0, 5),
-    ['Select', 'Select mode: All', 'Position', 'Animation', 'Draw']);
+    ['Select', 'Select mode: All', 'Position', 'Animation', 'Pencil']);
   // Position shows its panel in the tool stack, in place of Select's, and enables the joint handles.
   await view.tool('Position').click();
   const panel = pane.getByRole('region', { name: 'Position controls', exact: true });
