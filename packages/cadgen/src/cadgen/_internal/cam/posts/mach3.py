@@ -31,7 +31,8 @@ class Mach3Post(PostBase):
     end_code = "M30"
     end_lines = ("G49",)
 
-    def extra_header(self) -> list[str]:
+    def extra_header(self, kinds: frozenset[str] = frozenset()) -> list[str]:
+        tap = ["G84 is a floating-holder tap: Mach3 reverses the spindle but does not synchronise the feed to it"]
         return ["Dwell P is seconds: General Config G04 Dwell param in Ms must be off",
-                "G84 is a floating-holder tap: Mach3 reverses the spindle but does not synchronise the feed to it",
+                *(tap if "tap" in kinds else []),
                 "Set the spindle spin-up delay in Spindle Setup: Mach3 waits it after M3 before cutting"]

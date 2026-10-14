@@ -273,7 +273,8 @@ def plan_job(target: Path, out: Path | None, *, job=None, occurrence: str | None
     if not any(finding["severity"] == "error" for finding in findings):
         try:
             programs = poster.programs(parsed, parsed.setups, toolpaths, part=document.name,
-                                       job_name=_job_name(job))
+                                       job_name=_job_name(job),
+                                       stock_tops={setup_id: frame.stock_top_z for setup_id, frame in frames.items()})
         except PostRefusal as exc:
             findings.append(_refused(poster, exc))
             programs = {}

@@ -36,17 +36,33 @@ what the program assumes.
 (Job: plate.job.json)
 (Setup: top, tool axis +Z)
 (WCS: G54 at stock_top_center)
+(Z0: stock_top_center, on the top of the stock. After facing, the faced top is Z-1.000)
 (Post: grbl, for Grbl 1.1, units mm, dwell P in seconds)
 (Laser mode must be off: setting 32 = 0)
 (Spindle spin-up: G4 P 3 s after every M3)
 (T1: D6 mm flat_endmill 3 flutes: 21221 rpm, feed 2546.5 mm/min, plunge 764 mm/min)
 (T2: D6 mm drill: 14854 rpm, feed 1782.5 mm/min)
+(Tool length: every Z is the tool's lowest point, a drill's, spot drill's or chamfer mill's tip, a ball's bottom. Measure each tool's length there)
 (Prove this program on the machine: single block, feed override low, in air first.)
 ```
 
-A post's own notes come after the `Post:` line (grbl's laser mode, Mach3's settings, Fanuc's rigid
-tap). A program that bores with an oriented bar (`fine_bore`, `back_bore`) also says which way the bar
-shifts off the wall, and so which way its tip must point at the spindle orient position.
+The `Z0:` line says which surface Z0 is on (the origin keyword's: the top of the stock, the part's
+top, middle or bottom), where the stock top is when that is not Z0 (`the stock top is Z2.500` with
+the work zero on the part's top), and, when the program faces, where the faced top is afterwards:
+a `stock_top_*` zero is cut away by the facing, so a tool set after it touches off on the faced top
+at that Z, not at Z0. Heights are in the program's units (`Z-0.0394` in inch).
+
+The `Tool length:` line says where every Z is measured: at the tool's lowest point, a drill's or
+spot drill's tip, a chamfer mill's tip, a ball's bottom. A piloted counterbore gets a line of its own,
+`(T5: Z is the tip of its D6.6 mm pilot, 6.6 mm below its cutting face. Measure its length there)`:
+set its length at the pilot's tip, not at the cutting face. Tell the user where to touch off each
+tool.
+
+A post's own notes come after the `Post:` line (grbl's laser mode, Mach3's settings; Fanuc's rigid
+tap and Mach3's floating tap only in a program that taps). A feed in a tool's line is written
+exactly as its `F` word (a tap's `rpm x pitch` to every digit). A program that bores with an oriented
+bar (`fine_bore`, `back_bore`) also says which way the bar shifts off the wall, and so which way its
+tip must point at the spindle orient position.
 
 ## Each post
 
@@ -54,8 +70,12 @@ shifts off the wall, and so which way its tip must point at the spindle orient p
 
 - No tool changer and no `M6`: a tool change stops the spindle and coolant, lifts to the program's
   safe height, names the tool in a comment and pauses with `M0`. The operator changes the tool,
-  zeroes Z on it, and resumes. There is no tool length offset: the new Z zero is the offset. The
-  first tool is a comment, `(Load T1, D6 mm flat_endmill and zero Z on it before starting)`.
+  sets Z on it, and resumes. There is no tool length offset: the new Z setting is the offset. The
+  first tool is a comment, `(Load T1, D6 mm flat_endmill and touch off on the stock top and set Z to
+  0.000 before starting)`. Once a facing has run, Z0 on the stock top is gone, so a later change says
+  where to touch off instead: `(Tool change: load T2, D6 mm drill, touch off on the faced top and set
+  Z to -1.000, then resume)`. With the zero on the part, the first touch-off is on the stock top at
+  its Z (`set Z to 2.500`).
 - No canned cycles: every drilling cycle is written as moves. A boring cycle's spindle stop at the
   bottom is `M5`, and `M3` after the retract.
 - **Refuses** a `tap` or `rigid_tap` (grbl has no tapping: written as moves the feed would not follow
@@ -70,7 +90,8 @@ shifts off the wall, and so which way its tip must point at the spindle orient p
   program's own safe height in work coordinates before the spindle starts and after every pause.
 - Lines stay within 127 characters and their code within 79, plain ASCII. The program ends `M2`.
 
-**Check on the machine:** `$32=0`; Z zeroed on each tool after every pause; the spindle is up to
+**Check on the machine:** `$32=0`; Z set on each tool after every pause, at the height the pause
+says; the spindle is up to
 speed in the 3 s wait (raise `spindle_spinup_s` if not).
 
 ### `linuxcnc`
@@ -105,7 +126,7 @@ header says the bar's tip must point.
   shifts another way is written as moves with `M19`.
 - Peck clearance (G83) and chip-break back-off (G73) are the machine's parameters 5115 and 5114.
 
-**Check on the machine:** the rigid tap mode (the header says some controls want `M29` before
+**Check on the machine:** the rigid tap mode (a program that rigid taps says some controls want `M29` before
 `M3`); parameters 5114 and 5115; the G76 / G87 shift direction (RD1 / RD2) is +X.
 
 ### `haas`

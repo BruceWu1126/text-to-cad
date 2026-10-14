@@ -106,9 +106,10 @@ def posted(name: str, units: str = "mm") -> str:
 GOLDEN = {
     "grbl": (
         "(Part: plate.step)\n(Job: plate.cam.json)\n(Setup: top, tool axis +Z)\n(WCS: G54 at stock_top_center)\n"
-        "(Post: grbl, for Grbl 1.1, units mm, dwell P in seconds)\n(Laser mode must be off: setting 32 = 0)\n"
+        "(Z0: stock_top_center, on the top of the stock. After facing, the faced top is Z-1.500)\n(Post: grbl, for Grbl 1.1, units mm, dwell P in seconds)\n(Laser mode must be off: setting 32 = 0)\n"
         "(Spindle spin-up: G4 P 3 s after every M3)\n",
-        "M5\nM9\n(Tool change: load T2, D5 mm drill, zero Z on it, then resume)\nM0\nG0 Z10\nS3000 M3\nG4 P3\n"
+        "M5\nM9\n(Tool change: load T2, D5 mm drill, touch off on the faced top and set Z to -1.500, then resume)\n"
+        "M0\nG0 Z10\nS3000 M3\nG4 P3\n"
         "G0 X0 Y0\n",
         "G1 X20 F1000\nG4 P0.5\nG3 X10 Y10 Z-1.5 I-10 J0\nG2 X0 Y0 I0 J-10\n",
         "G0 X5 Y5\nG0 Z2\nG1 Z-1 F200\nG0 Z2\nG0 Z-0.5\nG1 Z-4\n",
@@ -163,6 +164,58 @@ class Programs(unittest.TestCase):
                     self.assertIn(snippet, text)
             prove = "Prove this program on the machine: single block, feed override low, in air first."
             self.assertIn(f"({prove.upper() if name == 'fanuc' else prove})\n", text)
+
+    def test_the_header_says_where_z0_is_and_where_the_faced_top_is(self):
+        parsed = job()
+        for name in PHASE_1:
+            post = get_post(name)
+            with self.subTest(name):
+                text = post.program(parsed, parsed.setups[0], toolpaths_for(post), stock_top=0.0)
+                line = "Z0: stock_top_center, on the top of the stock. After facing, the faced top is Z-1.500"
+                self.assertIn(f"({line.upper() if name == 'fanuc' else line})\n", text)
+                inch = post.program(job("inch"), parsed.setups[0], toolpaths_for(post), stock_top=0.0)
+                self.assertIn("THE FACED TOP IS Z-0.0591" if name == "fanuc" else "the faced top is Z-0.0591", inch)
+        # The first tool on grbl touches off on the stock top (Z0 here); after the facing, on the faced top.
+        text = get_post("grbl").program(parsed, parsed.setups[0], toolpaths_for(get_post("grbl")), stock_top=0.0)
+        self.assertIn("(Load T1, D6 mm flat_endmill and touch off on the stock top and set Z to 0.000 before "
+                      "starting)", text)
+        # A WCS on the part's top, with the stock 2.5 mm over it.
+        part_top = copy.deepcopy(JOB)
+        part_top["setups"][0]["origin"] = "part_bbox_top_center"
+        with stub_operations():
+            other = parse_job(part_top)
+        text = get_post("linuxcnc").program(other, other.setups[0], [drill(get_post("linuxcnc"))], stock_top=2.5)
+        self.assertIn("(Z0: part_bbox_top_center, on the part's top, the stock top is Z2.500)\n", text)
+
+    def test_tool_length_is_read_at_the_lowest_point_and_a_counterbore_at_its_pilot(self):
+        document = copy.deepcopy(JOB)
+        document["tools"][1] = {"id": "T2", "type": "counterbore", "diameter_mm": 11, "pilot_diameter_mm": 6.6}
+        document["operations"] = [{"op": "counterbore", "tool": "T2", "all": True}]
+        parsed = parse_job(document)
+        cycle = Move("cycle", (0, 0, 2), 400, 0, cycle=Cycle("spot", 2, -10.6, dwell_s=0.2))
+        text = get_post("linuxcnc").program(parsed, parsed.setups[0], [Toolpath(0, "T2", 2000, "off", (0, 0, 10), (cycle,))])
+        self.assertIn("(Tool length: every Z is the tool's lowest point, a drill's, spot drill's or chamfer mill's "
+                      "tip, a ball's bottom. Measure each tool's length there)\n", text)
+        self.assertIn("(T2: Z is the tip of its D6.6 mm pilot, 6.6 mm below its cutting face. Measure its length "
+                      "there)\n", text)
+
+    def test_a_tap_note_only_in_a_program_that_taps(self):
+        parsed = job()
+        for name, note in (("fanuc", "M29"), ("mach3", "G84 is a floating-holder tap")):
+            post = get_post(name)
+            with self.subTest(name):
+                self.assertIn(note, post.program(parsed, parsed.setups[0], toolpaths_for(post)))
+                self.assertNotIn(note, post.program(parsed, parsed.setups[0], [mill(), drill(post)]))
+
+    def test_the_header_writes_a_taps_feed_as_its_f_word_does(self):
+        parsed = job()
+        move = Move("cycle", (0, 20, 2), 1591.25, 2, cycle=Cycle("tap", 2, -10, pitch_mm=1.25))
+        for name in ("linuxcnc", "haas", "mach3"):
+            with self.subTest(name):
+                text = get_post(name).program(parsed, parsed.setups[0],
+                                              [Toolpath(2, "T3", 1273, "off", (0, 20, 10), (move,))])
+                self.assertIn("feed 1591.25 mm/min", text)
+                self.assertRegex(text, r"G84 .*F1591\.25\n")
 
     def test_the_same_input_gives_the_same_bytes(self):
         for name in PHASE_1:

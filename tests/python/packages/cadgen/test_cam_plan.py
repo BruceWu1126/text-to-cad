@@ -120,6 +120,7 @@ class Plan(unittest.TestCase):
         self.assertLess(first, lines.index("(Op 1: pocket_2d with T1)"))
         self.assertTrue(lines[first + 1].startswith("G1 Z-1 F"), lines[first + 1])
         # The pocket after it starts from the faced top, Z-1: it rapids to Z0 and helixes in from there.
+        self.assertIn("(Z0: stock_top_center, on the top of the stock. After facing, the faced top is Z-1.000)", lines)
         pocket = lines[lines.index("(Op 1: pocket_2d with T1)"):]
         self.assertEqual(pocket[2], "G0 Z0")
         self.assertTrue(pocket[3].startswith("G3 "), pocket[3])

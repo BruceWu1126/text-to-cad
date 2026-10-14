@@ -41,7 +41,9 @@ class FanucPost(PostBase):
     def home_lines(self) -> list[str]:
         return ["G91 G28 Z0.", "G90"]
 
-    def extra_header(self) -> list[str]:
+    def extra_header(self, kinds: frozenset[str] = frozenset()) -> list[str]:
+        if "rigid_tap" not in kinds:
+            return []
         return ["Rigid tap written as M29 S then G84; check your control's rigid tap mode (some want M29 before M3)"]
 
     def route(self, move, where):

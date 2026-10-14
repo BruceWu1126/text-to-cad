@@ -41,7 +41,7 @@ class GrblPost(PostBase):
     spinup_s = 3.0
     coolant_codes = {"flood": "M8"}
 
-    def extra_header(self) -> list[str]:
+    def extra_header(self, kinds: frozenset[str] = frozenset()) -> list[str]:
         return ["Laser mode must be off: setting 32 = 0"]
 
     def check_line(self, text: str) -> None:

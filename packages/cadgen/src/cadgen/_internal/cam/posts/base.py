@@ -4,8 +4,9 @@ A post is a dialect: a class stating its controller's capabilities and the few b
 (the program's wrapper, its safe start, how it goes home, how it changes a tool, how it dwells). :class:`PostBase`
 writes everything else the same way for all of them:
 
-- the header comment block (part, job, setup, WCS, units, dwell units, tools with rpm, feed and plunge feed, and the
-  prove-out line), then units (G21 / G20), the safe start (G90, G17, G94, ...) and the WCS (G54);
+- the header comment block (part, job, setup, WCS, where Z0 is and where the faced top is after facing, units, dwell
+  units, tools with rpm, feed and plunge feed written as their F words are, where each tool's length is measured,
+  and the prove-out line), then units (G21 / G20), the safe start (G90, G17, G94, ...) and the WCS (G54);
 - per toolpath: a tool change when the tool changes, the spindle (``S`` as a whole number, ``M3``), the coolant;
 - per move: ``G0`` / ``G1``, ``G2`` / ``G3`` with ``I`` / ``J`` from the start (helical when Z changes), ``G4`` for a
   dwell, and canned cycles as cycles where the controller has them, else as the moves :func:`expand_cycle` gives;
@@ -19,7 +20,8 @@ offset, feed and cycle depth; the engine stays in mm.
 
 Every ``M3`` is followed by ``G4`` when there is a spin-up wait (``machine.spindle_spinup_s``, else the post's
 default: grbl does not wait for its spindle, the others do). A post that tells the operator where to zero or lifts
-on its own (grbl, Mach3) goes up to the program's safe height before the spindle starts. A program that bores with
+on its own (grbl, Mach3) goes up to the program's safe height before the spindle starts. A manual tool change (grbl's pause)
+says where to touch off: the stock top at its Z, or the faced top at its Z once a facing has run. A program that bores with
 an oriented bar says in its header which way the bar shifts and so which way its tip must point.
 
 A post refuses (ValueError naming the post and the operation) what its controller cannot run safely, never writing a
@@ -234,7 +236,9 @@ class PostBase:
     def stop_orient(self) -> list[str]:
         return ["M5", "M19"]
 
-    def extra_header(self) -> list[str]:
+    def extra_header(self, kinds: frozenset[str] = frozenset()) -> list[str]:
+        """The dialect's own header notes, given the cycle kinds the program runs (a note about tapping only in a
+        program that taps)."""
         return []
 
     def safe_start_line(self, inch: bool) -> str:
@@ -248,8 +252,11 @@ class PostBase:
 
     # --- the program ---------------------------------------------------------------------------------------
 
-    def programs(self, job, setups, toolpaths: Sequence[Toolpath], *, part: str = "", job_name: str = "") -> dict[str, str]:
-        """One program per setup that has toolpaths, by setup id in the setups' order."""
+    def programs(self, job, setups, toolpaths: Sequence[Toolpath], *, part: str = "", job_name: str = "",
+                 stock_tops: dict | None = None) -> dict[str, str]:
+        """One program per setup that has toolpaths, by setup id in the setups' order. ``stock_tops`` gives each
+        setup's stock top as Z in its work coordinates (the run's placed setups), for the header's Z0 line and a
+        manual tool change's touch-off; without it they name the origin alone."""
         setups = tuple(setups)
         ids = [setup.id for setup in setups]
         by_setup: dict[str, list[Toolpath]] = {setup_id: [] for setup_id in ids}
@@ -259,17 +266,23 @@ class PostBase:
                 raise ValueError(f"{self.name} post: operations[{toolpath.op}] runs in setup {setup_id!r}, "
                                  f"which is not among the setups to post ({', '.join(ids)})")
             by_setup[setup_id].append(toolpath)
+        tops = stock_tops or {}
         return {setup.id: self.program(job, setup, by_setup[setup.id], part=part, job_name=job_name,
-                                       number=self.program_number + index)
+                                       number=self.program_number + index, stock_top=tops.get(setup.id))
                 for index, setup in enumerate(setups) if by_setup[setup.id]}
 
     def program(self, job, setup, toolpaths: Sequence[Toolpath], *, part: str = "", job_name: str = "",
-                number: int | None = None) -> str:
+                number: int | None = None, stock_top: float | None = None) -> str:
         """The program text for one setup's toolpaths, in order. Same input, same bytes."""
         toolpaths = tuple(toolpaths)
         if not toolpaths:
             raise ValueError(f"{self.name} post: setup {setup.id!r} has no toolpaths to post")
         prog = _Program(self, job.machine.units == "inch")
+        prog.origin = setup.origin
+        # A stock_top origin puts Z0 on the stock top by definition, known or not.
+        if stock_top is None and isinstance(setup.origin, str) and setup.origin.startswith("stock_top"):
+            stock_top = 0.0
+        prog.stock_top = stock_top
         spinup = getattr(job.machine, "spindle_spinup_s", None)
         prog.spinup = self.spinup_s if spinup is None else spinup
         routes = self._check(job, toolpaths)
@@ -326,8 +339,10 @@ class PostBase:
         prog.comment(f"Job: {job_name or 'inline'}")
         prog.comment(f"Setup: {setup.id}, tool axis {setup.direction}")
         prog.comment(f"WCS: G54 at {origin}")
+        prog.comment(self._z0_line(prog, setup, _faced(job, toolpaths)))
         prog.comment(f"Post: {self.name}, for {self.controller}, units {unit}, dwell P in {dwell}")
-        for line in self.extra_header():
+        kinds = frozenset(move.cycle.kind for toolpath in toolpaths for move in toolpath.moves if move.kind == "cycle")
+        for line in self.extra_header(kinds):
             prog.comment(line)
         if prog.spinup:
             prog.comment(f"Spindle spin-up: G4 P {fmt(prog.spinup, 3)} s after every M3")
@@ -351,19 +366,55 @@ class PostBase:
                 entry["rpm"].append(rpm)
             for move in toolpath.moves:
                 if move.feed is not None:
-                    entry["plunge" if move.kind == "plunge" else "feed"].append(move.feed)
+                    # (feed, exact): as the program writes it, so the header and the F word agree to the digit
+                    entry["plunge" if move.kind == "plunge" else "feed"].append(_written_feed(move, rpm))
         for tool_id, entry in tools.items():
             tool = job.tool(tool_id)
             size = f"D{prog.coord(tool.diameter_mm)} {unit} " if tool.diameter_mm is not None else ""
             flutes = f" {tool.flutes} flutes" if tool.flutes else ""
             note = f" {tool.comment}" if tool.comment else ""
             rate = " and ".join(str(rpm) for rpm in entry["rpm"]) + " rpm"
-            if entry["feed"]:
-                rate += f", feed {prog.feed_text(max(entry['feed']))} {unit}/min"
-            if entry["plunge"]:
-                rate += f", plunge {prog.feed_text(max(entry['plunge']))} {unit}/min"
+            for key in ("feed", "plunge"):
+                if entry[key]:
+                    value, exact = max(entry[key])
+                    rate += f", {key} {prog.feed_text(value, exact=exact)} {unit}/min"
             prog.comment(f"{tool.id}: {size}{tool.type}{flutes}{note}: {rate}")
+        prog.comment("Tool length: every Z is the tool's lowest point, a drill's, spot drill's or chamfer mill's "
+                     "tip, a ball's bottom. Measure each tool's length there")
+        for tool_id in tools:
+            tool = job.tool(tool_id)
+            pilot = (tool.size or {}).get("pilot_diameter_mm") if tool.type == "counterbore" else None
+            if pilot:
+                # tools.py draws a counterbore's pilot as long as it is wide
+                prog.comment(f"{tool.id}: Z is the tip of its D{prog.coord(pilot)} {unit} pilot, "
+                             f"{prog.coord(pilot)} {unit} below its cutting face. Measure its length there")
         prog.comment(PROVE_LINE)
+
+    def _z0_line(self, prog, setup, faced: float | None) -> str:
+        """Where Z0 is, on what surface, where the stock top is, and where the faced top is after facing."""
+        origin = setup.origin
+        if isinstance(origin, str):
+            surface = _SURFACES[origin.split("_", 1)[0] + ("_top" if "_top_" in origin else
+                                                             "_bottom" if "_bottom_" in origin else "_middle")]
+        else:
+            surface = "a point in the part's frame"
+            origin = "X{} Y{} Z{} mm".format(*(fmt(value, 3) for value in origin))
+        line = f"Z0: {origin}, on {surface}"
+        top = prog.stock_top
+        if top is not None and abs(top) > _EPS:
+            line += f", the stock top is Z{prog.fixed(top)}"
+        if faced is not None:
+            line += f". After facing, the faced top is Z{prog.fixed(faced)}"
+        return line
+
+    def _touch_off(self, prog) -> str:
+        """What a manual tool change says to set Z on: the faced top once a facing has run, else the stock top."""
+        if prog.faced is not None:
+            return f"touch off on the faced top and set Z to {prog.fixed(prog.faced)}"
+        if prog.stock_top is not None:
+            return f"touch off on the stock top and set Z to {prog.fixed(prog.stock_top)}"
+        origin = prog.origin if isinstance(prog.origin, str) else "the work zero's point"
+        return f"set Z so that Z0 is at {origin}"
 
     def _retract(self, prog) -> None:
         if self.positioning == "home":
@@ -402,6 +453,10 @@ class PostBase:
             else:
                 prog.cancel_cycle()
                 prog.move(move, start)
+        if operation.op == "facing":
+            floor = _lowest_cut(toolpath)
+            if floor is not None:
+                prog.faced = floor if prog.faced is None else min(prog.faced, floor)
 
     def _change_tool(self, prog, tool, toolpath: Toolpath) -> None:
         first = prog.tool is None
@@ -415,10 +470,10 @@ class PostBase:
                                 if tool.diameter_mm is not None else "") + f" {tool.type}"
         if self.tool_change == "pause":
             if first:
-                prog.comment(f"Load {label} and zero Z on it before starting")
+                prog.comment(f"Load {label} and {self._touch_off(prog)} before starting")
             else:
                 prog.motion("G0", (None, None, prog.safe_z))
-                prog.comment(f"Tool change: load {label}, zero Z on it, then resume")
+                prog.comment(f"Tool change: load {label}, {self._touch_off(prog)}, then resume")
                 prog.code("M0")
             prog.forget(x=True, y=True, z=True)
             prog.tool = tool.number
@@ -445,6 +500,32 @@ class PostBase:
             prog.spindle(toolpath.rpm)
             prog.motion("G0", (x, y, None))
             prog.motion("G0", (None, None, z))
+
+
+#: The surface each origin keyword puts Z0 on, by its box and its height.
+_SURFACES = {"stock_top": "the top of the stock", "part_top": "the part's top",
+             "part_middle": "the middle of the part's height", "part_bottom": "the part's bottom"}
+
+
+def _lowest_cut(toolpath: Toolpath) -> float | None:
+    """The lowest Z a toolpath cuts at (a facing's floor)."""
+    cuts = [move.xyz[2] for move in toolpath.moves if move.kind != "rapid"]
+    return min(cuts) if cuts else None
+
+
+def _faced(job, toolpaths) -> float | None:
+    """The faced top after the program's facings: the lowest floor among them, or ``None`` with no facing."""
+    floors = [_lowest_cut(tp) for tp in toolpaths if job.operations[tp.op].op == "facing"]
+    floors = [floor for floor in floors if floor is not None]
+    return min(floors) if floors else None
+
+
+def _written_feed(move: Move, rpm: int) -> tuple[float, bool]:
+    """The feed a move's F word carries, and whether it is written exactly: a tap's is the spindle speed written times
+    the pitch, to the post's finest feed digits (:meth:`_Program.native_cycle`); every other feed rounds."""
+    if move.kind == "cycle" and move.cycle.kind in _TAPS:
+        return rpm * move.cycle.pitch_mm, True
+    return move.feed, False
 
 
 def _opposite(direction: str) -> str:
@@ -487,11 +568,21 @@ class _Program:
         self.coolant = "off"
         self.tool: int | None = None
         self.safe_z = 0.0
+        #: The setup's origin, its stock top as Z in the work coordinates (``None``: not known), and the faced top
+        #: once a facing has run.
+        self.origin = None
+        self.stock_top: float | None = None
+        self.faced: float | None = None
 
     # numbers
     def coord(self, mm: float, *, toward: int = 0) -> str:
         return fmt(mm / MM_PER_INCH if self.inch else mm, 4 if self.inch else 3, point=self.post.decimal_point,
                    toward=toward)
+
+    def fixed(self, mm: float) -> str:
+        """A height a person sets on the machine, to the unit's resolution with every digit: ``-1.000``."""
+        value = round(mm / MM_PER_INCH if self.inch else mm, 4 if self.inch else 3) + 0.0
+        return f"{value:.{4 if self.inch else 3}f}"
 
     def pitch(self, mm: float) -> str:
         """A thread pitch: finer than a coordinate, since its error adds up every turn (1 mm is 0.03937 in)."""
@@ -629,8 +720,8 @@ class _Program:
         code = "G89" if cycle.kind == "ream" and cycle.dwell_s else CYCLE_CODES[cycle.kind]
         key = (cycle, move.feed, g99)
         tap = cycle.kind in _TAPS
-        # a tap's feed is exactly rpm x pitch at the spindle speed written
-        feed = self.speed * cycle.pitch_mm if tap else move.feed
+        # a tap's feed is exactly rpm x pitch at the spindle speed written (as the header says it: _written_feed)
+        feed, _ = _written_feed(move, self.speed)
         if key == self.cycle_key:
             self.code(f"X{self.coord(move.xyz[0])} Y{self.coord(move.xyz[1])}")
         else:
