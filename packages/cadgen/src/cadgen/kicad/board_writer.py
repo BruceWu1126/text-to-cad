@@ -284,7 +284,6 @@ def _place_footprint(
     symbol_path: str,
     sheetfile: str,
     script_root=None,
-    project_dir=None,
 ) -> list:
     library = part.footprint
     placement = part._require_placement()
@@ -298,7 +297,7 @@ def _place_footprint(
     pad_counter = 0
     item_counter = 0
     properties_seen: set[str] = set()
-    fields = part.document_fields(script_root, project_dir)  # the symbol carries the same, Script included
+    fields = part.document_fields(script_root)  # the symbol carries the same, Script included
     for item in body:
         if not isinstance(item, list):
             continue
@@ -593,9 +592,7 @@ def _hole_refs(board: Board) -> list[str]:
     return refs
 
 
-def board_document(
-    board: Board, *, project: str, frame: Frame, symbol_paths: dict[str, str], script_root=None, project_dir=None
-) -> list:
+def board_document(board: Board, *, project: str, frame: Frame, symbol_paths: dict[str, str], script_root=None) -> list:
     """The ``.kicad_pcb`` tree. ``symbol_paths`` maps a reference to its symbol's sheet path;
     ``script_root`` is the model script's folder, which ``Script`` fields are relative to."""
     ids = Ids(project)
@@ -625,7 +622,7 @@ def board_document(
         document.append(
             _place_footprint(
                 part, frame=frame, ids=ids, board=board, symbol_path=symbol_paths[part.ref], sheetfile=sheetfile,
-                script_root=script_root, project_dir=project_dir,
+                script_root=script_root,
             )
         )
     for index, (hole, ref) in enumerate(zip(board.holes, _hole_refs(board))):

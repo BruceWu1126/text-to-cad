@@ -231,8 +231,7 @@ cadgen pcb snapshot path/to/board.kicad_pcb tmp/board.png
 cadgen pcb snapshot path/to/board.kicad_sch tmp/schematic.png
 ```
 
-`validate` takes any KiCad 10 project, one drawn in KiCad included (keep those in
-`PCB/imported/`, as the CAD skill keeps outside STEPs: [imported boards](references/imported-boards.md)); positions are
+`validate` takes any KiCad 10 project, one drawn in KiCad included; positions are
 millimetres from the board's drill/place origin, y up. A snapshot is the CAD Viewer's
 picture: KiCad's own plot of the board (all layers, back to front, ratsnest on a draft) or
 of every schematic sheet.
@@ -282,7 +281,6 @@ board and schematic ([Show the model](#show-the-model)).
 - [Simulation](references/simulation.md): SPICE testbenches over the board's own subcircuits.
 - [Manufacturing](references/manufacturing.md): Gerbers, BOM, placement and ordering.
 - [Parts](references/parts.md): symbols, footprints, project libraries and the fields a BOM orders by.
-- [Imported boards](references/imported-boards.md): checking, editing and ordering a board drawn in KiCad.
 - [Inspection](references/inspection.md): board and schematic references from the viewer, `pcb.read_board`, `pcb.read_schematic`, and the script line behind each part.
 
 Before ordering, $pcb-dfm reviews the board for fabrication, assembly and sourcing.

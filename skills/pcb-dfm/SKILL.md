@@ -97,8 +97,8 @@ A review request alone does not ask for edits or an order. When the user asks
 for fixes:
 
 - A `@pcb` board: edit its script with $pcb, rebuild, and rerun both commands.
-- A board drawn in KiCad: follow $pcb's imported-boards reference (edit in place,
-  scratch files in `tmp/`), then rerun both commands.
+- A board drawn in KiCad: say what to change where (board references and positions);
+  the person edits it in KiCad. Then rerun both commands.
 
 Recheck neighbours of every fix: a moved capacitor can open a clearance or
 silkscreen finding elsewhere. Never order on the user's behalf.

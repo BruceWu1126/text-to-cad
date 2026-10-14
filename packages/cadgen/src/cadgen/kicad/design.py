@@ -319,20 +319,11 @@ class Part:
         }
         return {**carried, **self.properties}
 
-    def document_fields(
-        self, script_root: str | os.PathLike | None = None, project_dir: str | os.PathLike | None = None
-    ) -> dict[str, str]:
+    def document_fields(self, script_root: str | os.PathLike | None = None) -> dict[str, str]:
         """:attr:`fields`, and the hidden ``Script`` field: what the part's symbol and its
-        footprint both carry in the written documents. A relative ``Sim.Library`` starts at
-        the script's folder, as a testbench reads it; written into a project in
-        ``project_dir``, it is the same file's path from there, as KiCad reads it."""
+        footprint both carry in the written documents."""
         script = script_reference(self.script, script_root)
         fields = dict(self.fields)
-        library = fields.get("Sim.Library", "")
-        if script_root is not None and project_dir is not None and library and "$" not in library \
-                and not os.path.isabs(library):
-            moved = os.path.relpath(Path(script_root, library).resolve(), Path(project_dir).resolve())
-            fields["Sim.Library"] = Path(moved).as_posix()
         if script is not None:
             fields[SCRIPT_FIELD] = script
         return fields
