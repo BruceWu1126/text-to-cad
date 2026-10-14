@@ -268,7 +268,9 @@ diff content: a comment in a module selects what the module's code would.
 Everything runs for `VERSION`, `package.json`, `package-lock.json`,
 `requirements-dev.txt`, `packages/core`, `scripts/build`, `tests/python/support`,
 the workflow, `setup-deps`, the selector and the runners' shared parts, and any
-path the table does not name. Prose inside a code tree (`packages/**/*.md`,
+path the table does not name. The exception in `tests/python/support` is a
+suite's own fixtures (`cam_fixtures.py`, `fea_fixtures.py`): a change to one runs
+the tests that import it, and the `fea` job for FEA's. Prose inside a code tree (`packages/**/*.md`,
 `apps/**/*.md`) is read by the light contracts alone — except cadgen's README,
 the wheel's description, and `apps/web`'s Markdown, whose links its tests
 resolve. Root prose, the plugin manifests and configs, the release scripts and
