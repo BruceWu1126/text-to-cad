@@ -262,8 +262,8 @@ to (cycle time, tool changes, the post): repeat the assumptions when you hand ov
 | --- | --- | --- | --- |
 | `gouge` | error | The tool would cut into the part past the operation's tolerance (swept along every move, rapids too). | Usually a region drawn into the part or a depth past the feature: redraw it inside the material, or cut the feature by its selector. |
 | `holder_collision` | error | The shank above the flutes, or the holder, hits the part or comes down into the stock. | A longer stickout, a slimmer holder, or a shallower cut; check the real tool. |
-| `fixture_collision` | error | The tool runs into the fixture: a profile into a vise jaw, a through drill into the plate under the stock. | Move the cut, or hold the stock differently: taller parallels, more stock under or round the part, a sacrificial plate. |
-| `unreachable` | error | The tool cannot get there: not reached from the setup's direction, the fixture in the way of the tool coming down, no room to ramp in. | Add a setup from the direction that reaches it, grip the stock lower or on a plate, or use the operation the summary names. |
+| `fixture_collision` | error | The tool runs into the fixture: a profile into a vise jaw, a through drill into the plate under the stock, a tool that would come down onto a jaw. | Move the cut, or hold the stock differently: taller parallels, more stock under or round the part, a sacrificial plate. |
+| `unreachable` | error | The tool cannot get there: not reached from the setup's direction, no room to ramp in. | Add a setup from the direction that reaches it, or use the operation the summary names. |
 | `tool_too_large` | error | The tool does not fit the feature, or is not the hole's size within `diameter_tol_mm`. | A smaller tool, or the tool of the hole's size. |
 | `tool_too_small` | error | A helical bore would leave a core standing in the middle of the hole. | `circular` for a hole over twice the tool's diameter. |
 | `too_deep` | error | The cut would go into the part (a floor under the feature's), or deeper than the tool's flutes, so the shank would rub. | The feature's own depth (leave `depth_mm` out), a shallower cut, or a longer tool. |
@@ -280,6 +280,7 @@ to (cycle time, tool changes, the post): repeat the assumptions when you hand ov
 | `uncut_feature` | warning | A hole, pocket or slot a setup reaches that no operation cuts. | Add the operation, or confirm with the user it stays as it is. |
 | `through_stock_bottom` | warning | A cut goes below the stock's bottom (a through drill's point). | Say what must be under it: a spoilboard, a sacrificial plate, a gap between parallels. |
 | `assumes_prepared_hole` | warning | A tap or thread mill works a hole no earlier operation makes. | Drill it first in the job, or confirm it is made before the job runs. |
+| `unmodelled_earlier_cut` | warning | A setup is placed on the raw blank though an earlier setup faced the stock in a way cadgen cannot carry over (a region, a bar, a blank from a STEP). | Check by hand where the stock sits and where its top is, or face the whole stock in the earlier setup. |
 
 The info notes are `assumed_fixture`, `unused_tool`, `cycle_time`, `tool_changes` and `post`.
 [findings.md](references/findings.md) has each finding in full, the shape a finding takes, what the

@@ -20,7 +20,8 @@ Errors
       initial stock's footprint, with nothing taken out of it, so the description says so.
     - ``fixture_collision``: any part of the tool (cutter, shank, holder) inside one of the fixture's volumes
       (``setups.FixtureEnvelope``) along any move: a contour into a vise jaw, a drill through the stock into the
-      plate or the vise floor under it. Swept analytically (vertical cylinders against boxes and cylinders).
+      plate or the vise floor under it. Swept analytically (vertical cylinders against boxes and cylinders). Also a
+      ``PlanError`` from an operation that saw a fixture in the way of the tool coming down first.
     - ``unreachable``, ``tool_too_large``, ``tool_too_small``: an operation's ``PlanError``; it is not planned.
     - ``too_deep``: an operation cuts deeper below the top of its material than the tool's flutes are long (its
       reach for a boring bar, back-bore or thread mill, which work inside a hole): the shank would be buried in the
@@ -48,6 +49,8 @@ Warnings
       there must allow it. Not said when the same cut is a ``fixture_collision``.
     - ``assumes_prepared_hole``: a tap or an internal thread mill on a hole no earlier operation drills, bores or
       mills.
+    - ``unmodelled_earlier_cut``: a setup placed on the raw blank though an earlier setup faced it in a way phase 1
+      cannot carry over (``setups.setup_frames``: a region, a bar, a blank from a STEP, a setup along a face).
 
 Notes (``info``, not checks)
     ``assumed_fixture`` (the fixture sizes the collision checks assumed), ``unused_tool`` (a tool the job lists and
@@ -64,7 +67,7 @@ import math
 from typing import TYPE_CHECKING
 
 from cadgen._internal.cam.operations.base import PLAN_ERROR_KINDS, finding
-from cadgen._internal.cam.values import an
+from cadgen._internal.cam.values import an, plain
 
 if TYPE_CHECKING:
     from cadgen._internal.cam.job import Job
@@ -78,7 +81,8 @@ __all__ = ["CHECK_KINDS", "ERROR_KINDS", "FULL_SLOT_DIAMETERS", "INFO_KINDS", "I
 ERROR_KINDS = ("gouge", "holder_collision", "fixture_collision", "unreachable", "tool_too_large", "tool_too_small",
                "too_deep", "over_travel", "no_post_support", "empty_operation")
 WARNING_KINDS = ("corner_left", "rest_material", "rpm_clamped", "feed_clamped", "full_slot", "thin_wall",
-                 "long_stickout", "uncut_feature", "through_stock_bottom", "assumes_prepared_hole")
+                 "long_stickout", "uncut_feature", "through_stock_bottom", "assumes_prepared_hole",
+                 "unmodelled_earlier_cut")
 #: Notes: what the job assumed or comes to, not checks.
 INFO_KINDS = ("assumed_fixture", "unused_tool", "cycle_time", "tool_changes", "post")
 #: The checks the result lists, each with its verdict.
@@ -108,9 +112,8 @@ _REACHING = ("boring_bar", "back_bore", "thread_mill")
 # --- words -------------------------------------------------------------------------------------------------
 
 def _n(value: float) -> str:
-    """A number as a person reads it: up to three decimals, no trailing zeros, never ``-0``."""
-    value = round(float(value), 3) + 0.0
-    return f"{value:g}"
+    """A number as a person reads it: up to three decimals, no trailing zeros, never ``-0`` (``values.plain``)."""
+    return plain(value)
 
 
 def _xyz(point) -> str:
@@ -156,6 +159,7 @@ def check_job(job: "Job", planned_ops, *, part, stock, setups: dict, features: d
         found += _corners(planned_op)
         found += _full_slot(planned_op)
     found += _over_travel(job, planned_ops, setups)
+    found += _earlier_cuts(job, planned_ops, setups)
     found += _long_stickout(job, planned_ops)
     touched = {planned_op.index: _touched(planned_op, features) for planned_op in planned_ops}
     found += _uncut(job, planned_ops, features, touched, part)
@@ -764,6 +768,28 @@ def _over_travel(job: "Job", planned_ops, setups: dict) -> list[dict]:
                 "machine.travel_mm; no placement of the work makes it fit",
                 [{"text": f"setup {setup.id} {name} {_n(span)} mm", "setup": setup.id, "axis": name,
                   "span_mm": round(span, 3)}]))
+    return out
+
+
+def _earlier_cuts(job: "Job", planned_ops, setups: dict) -> list[dict]:
+    """A setup placed on stock an earlier setup faced in a way phase 1 does not model (``setups.setup_frames``)."""
+    out = []
+    for setup in job.setups:
+        frame = setups[setup.id]
+        if not frame.unmodelled or not any(op.operation.setup == setup.id for op in planned_ops):
+            continue
+        cuts = "; ".join(f"operations[{cut.operation}] (facing) in setup {cut.setup}: {cut.why}"
+                         for cut in frame.unmodelled)
+        earlier = sorted({cut.setup for cut in frame.unmodelled})
+        out.append(finding(
+            "warning", "unmodelled_earlier_cut",
+            f"Setup {setup.id} is placed on the raw blank: an earlier facing in setup {', '.join(earlier)} is not "
+            "modelled in it",
+            f"setup {setup.id}'s bottom (or the face its fixture grips) may stand on a side setup "
+            f"{', '.join(earlier)} already cut, and cadgen checks it against the raw blank ({cuts}); phase 1 models "
+            "an earlier facing only as a plane across box or sheet stock seen square. Check by hand where the stock "
+            "really sits in the fixture and where its top is, or face square in a box or sheet",
+            [{"text": f"setup {setup.id}", "setup": setup.id, "operation": cut.operation} for cut in frame.unmodelled]))
     return out
 
 

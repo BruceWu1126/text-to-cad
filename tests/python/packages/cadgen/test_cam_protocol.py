@@ -91,7 +91,7 @@ class Registry(unittest.TestCase):
         from cadgen._internal.cam.operations.base import PLAN_ERROR_KINDS, PlanError
 
         self.assertEqual(PLAN_ERROR_KINDS, ("empty_operation", "too_deep", "unreachable", "tool_too_large",
-                                            "tool_too_small", "gouge"))
+                                            "tool_too_small", "gouge", "fixture_collision"))
         self.assertEqual(PlanError("gouge", "operations[0]: x").finding()["type"], "gouge")
         self.assertIn("internal: PlanError kind 'too_big' is not one of empty_operation, too_deep",
                       value_error(self, PlanError, "too_big", "operations[0]: x"))

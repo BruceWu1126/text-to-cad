@@ -76,7 +76,8 @@ class PlanContext:
     profile: "ToolProfile"
     feeds: "Feeds"
     heights: "Heights"
-    #: The stock in the part's frame (``stock.shape``); :attr:`stock_shape` has it in the setup's frame.
+    #: The stock the setup starts from, in the part's frame (``stock.shape``): the job's stock less what earlier
+    #: setups faced off (``setups.setup_frames``); :attr:`stock_shape` has it in the setup's frame.
     stock: "StockSolid"
     #: Where the tool is when the operation starts (the previous toolpath's end, with the same tool); ``None`` after a
     #: tool change: the toolpath then starts at the clearance height over its first entry.
@@ -190,7 +191,7 @@ class PlanContext:
         feeds = feeds_for_operation(operation, tool, job.material, job.machine,
                                     where=f"operations[{index}] ({operation.op})")
         return cls(job, operation, index, setup, part, tuple(features), tool, profile(tool), feeds,
-                   Heights.from_frame(setup, operation), stock, start=None if start is None else tuple(start),
+                   Heights.from_frame(setup, operation), setup.stock or stock, start=None if start is None else tuple(start),
                    top_z=material_top(job, index, setup), tol=tol, log=log or _quiet,
                    cache={} if cache is None else cache)
 
@@ -220,12 +221,15 @@ class PlanContext:
             shared[stock_key] = make_stock(parsed.stock, part.shape)
         stock = shared[stock_key]
         operation = parsed.operations[index]
-        setup_key = (repr(parsed.setup(operation.setup)), stock_key)
+        frames_key = ("frames", repr(parsed.setups), repr(parsed.operations), stock_key)
+        if frames_key not in shared:
+            shared[frames_key] = setup_frames(parsed, part.shape, stock, face_normal=lambda ref: _face_normal(part, ref))
+        frame = shared[frames_key][operation.setup]
+        # A setup placed the same way (its own keys, and the stock it starts from) recognises the same features.
+        setup_key = (repr(parsed.setup(operation.setup)), stock_key, frame.stock.bounds)
         if setup_key not in shared["setups"]:
-            frames = setup_frames(parsed, part.shape, stock, face_normal=lambda ref: _face_normal(part, ref))
-            frame = frames[operation.setup]
-            shared["setups"][setup_key] = (frame, features_in_frame(part, frame), {})
-        frame, features, cache = shared["setups"][setup_key]
+            shared["setups"][setup_key] = (features_in_frame(part, frame), {})
+        features, cache = shared["setups"][setup_key]
         return cls.build(parsed, index, part, stock=stock, setup=frame, features=features, start=start, tol=tol,
                          log=log, cache=cache)
 
@@ -243,7 +247,8 @@ def _face_normal(part: "Part", ref: str):
 
 def material_top(job: "Job", index: int, setup: "SetupFrame") -> float:
     """The top of the material ``job.operations[index]`` starts from, z in the setup's frame: the lowest floor of an
-    earlier facing in the same setup that covered the stock's whole footprint, else the stock top. A whole-stock
+    earlier facing in the same setup that covered the stock's whole footprint, else the stock top (of the stock the
+    setup starts from: an earlier setup's facing has already taken it down, ``setups.setup_frames``). A whole-stock
     facing covers it level by level; a region facing only when its region holds the stock's footprint (a box or
     sheet seen square, whose footprint is its bounds), since the tool's centre stays inside the region. Other
     operations only cut where they cut, so nothing else lowers it (there is no stock simulation before phase 2)."""

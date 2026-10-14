@@ -28,9 +28,10 @@ Phase = Literal[1, 2, 3, 4]
 #: whole part (``all: true``).
 TARGETS = ("features", "region", "all")
 #: Why an operation cannot be planned (:class:`PlanError`'s ``kind``, the error finding's ``type``): nothing to cut,
-#: deeper than the part allows, no way in (or out of the fixture's way), a tool too large or too small for the
-#: feature, and a cut that would go into the part.
-PLAN_ERROR_KINDS = ("empty_operation", "too_deep", "unreachable", "tool_too_large", "tool_too_small", "gouge")
+#: deeper than the part allows, no way in, a tool too large or too small for the feature, a cut that would go into
+#: the part, and a tool that would come down into the fixture.
+PLAN_ERROR_KINDS = ("empty_operation", "too_deep", "unreachable", "tool_too_large", "tool_too_small", "gouge",
+                    "fixture_collision")
 
 
 @dataclass(frozen=True)

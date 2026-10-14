@@ -180,6 +180,67 @@ class NoFixture(unittest.TestCase):
                           ("warning", "uncut_feature")])   # the pocket, and the 5 mm hole a 6 mm drill skips
 
 
+def two_sided(margin, grip_mm, *, bottom_region=None, top_region=None):
+    """The plate held twice in a vise with 30 mm jaws: faced from the top (gripping 6 mm), then turned over, faced
+    and profiled from below with the WCS on the part's top (gripping ``grip_mm`` of the stock's bottom, which is the
+    top the first setup faced)."""
+    job = copy.deepcopy(JOB)
+    job["machine"]["post"] = "fanuc"
+    job["stock"]["margin_mm"] = margin
+    job["setups"] = [
+        {"id": "op1", "direction": "+Z", "origin": "stock_top_center",
+         "fixture": {"type": "vise", "jaw_height_mm": 30, "grip_mm": 6}},
+        {"id": "op2", "direction": "-Z", "origin": "part_bbox_top_center",
+         "fixture": {"type": "vise", "jaw_height_mm": 30, "grip_mm": grip_mm}}]
+    top = {"op": "facing", "setup": "op1", "tool": "T1"}
+    if top_region is not None:
+        top["region"] = top_region
+    job["operations"] = [top, {"op": "facing", "setup": "op2", "tool": "T1"},
+                         {"op": "contour_2d", "setup": "op2", "tool": "T1", "all": True}]
+    return job
+
+
+class EarlierSetupsFacing(Words, unittest.TestCase):
+    """A setup turned over stands on the face the setup before it faced: its stock, fixture and heights start from
+    there, not from the raw blank."""
+
+    def test_the_vise_grips_from_the_faced_bottom_so_the_profile_runs_into_its_jaw(self):
+        # The blank is 1 mm over the part's top; op1 faces that off. Turned over, op2's vise grips 0.6 mm of the
+        # stock's real bottom, so its jaws reach 0.6 mm above the part's top, where the profile ends.
+        r = plan("jaw", two_sided([2, 2, 1, 1], 0.6))
+        self.assertFalse(r.ok)
+        [found] = of(r, "fixture_collision")
+        self.assertIn("front jaw", found["summary"])
+        self.assertIn("0.6 mm above the cut (setup op2)", found["summary"])
+        self.assert_plain(r.findings)
+
+    def test_a_wide_margin_profile_cuts_the_part_free_of_the_faced_stock(self):
+        # 8 mm all round keeps the tool off the jaws; op2's stock is the faced blank, so its bottom is the part's
+        # top and the profile down to the part's top goes right through it: no skin is left to hold the part.
+        r = plan("margin", two_sided([8, 8, 1, 1], 1.5))
+        self.assertTrue(r.ok, r.findings)
+        sidecar = json.loads(r.sidecar.read_text(encoding="utf-8"))
+        op1, op2 = sidecar["setups"]
+        self.assertEqual(op1["stock_bounds_mm"], [[-58, -38, -12], [58, 38, 0]])
+        self.assertEqual(op2["stock_bounds_mm"], [[-58, -38, -10], [58, 38, 1]])
+        self.assertEqual(op2["fixture"]["sizes"]["parallels_mm"], 28.5)
+        [contour] = [op for op in sidecar["operations"] if op["op"] == "contour_2d"]
+        self.assertEqual(contour["stats"]["targets"][0]["floor_z"], op2["stock_bounds_mm"][0][2])
+        self.assertEqual(of(r, "unmodelled_earlier_cut"), [])
+
+    def test_a_region_facing_in_an_earlier_setup_is_a_warning(self):
+        r = plan("region", two_sided([8, 8, 1, 1], 1.5, top_region=[[-20, -20], [20, -20], [20, 20], [-20, 20]]))
+        [found] = of(r, "unmodelled_earlier_cut")
+        self.assertEqual(found["summary"], "Setup op2 is placed on the raw blank: an earlier facing in setup op1 is "
+                                           "not modelled in it")
+        self.assertIn("operations[0] (facing) in setup op1: it faced a region, not the whole stock",
+                      found["description"])
+        self.assertEqual(found["items"], [{"text": "setup op2", "setup": "op2", "operation": 0}])
+        sidecar = json.loads(r.sidecar.read_text(encoding="utf-8"))
+        self.assertEqual(sidecar["setups"][1]["stock_bounds_mm"][0][2], -11)
+        self.assert_plain(r.findings)
+
+
 class GrblDrillAndTap(Words, unittest.TestCase):
     """grbl, a vise on 5 mm parallels: a through drill, a drill in the flat-bottomed blind hole, and a tap in a hole
     no operation drilled."""

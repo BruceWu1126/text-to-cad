@@ -8,9 +8,28 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from typing import Any
 
-__all__ = ["an", "choice", "flag", "json_text", "known", "number", "obj", "selectors", "whole", "words"]
+__all__ = ["an", "choice", "flag", "json_text", "known", "number", "obj", "plain", "plain_text", "selectors", "whole",
+           "words"]
+
+#: A number written in scientific notation (``2.6105e-05``), as Python's ``:g`` writes a very small or large one.
+_SCIENTIFIC = re.compile(r"(?<![\w.#])-?\d+(?:\.\d+)?[eE][-+]?\d+(?![\w.])")
+
+
+def plain(value: float, places: int = 3) -> str:
+    """A number as a person reads it: up to ``places`` decimals, no trailing zeros, never ``-0`` and never in
+    scientific notation (``0.000026`` is ``0``, ``1500000`` is ``1500000``)."""
+    value = round(float(value), places) + 0.0
+    text = f"{value:.{places}f}".rstrip("0").rstrip(".")
+    return "0" if text in ("", "-0") else text
+
+
+def plain_text(text: str) -> str:
+    """``text`` with any number in scientific notation written plainly (:func:`plain`): a finding never says
+    ``2.6105e-05 mm``."""
+    return _SCIENTIFIC.sub(lambda match: plain(float(match.group(0))), text)
 
 
 def json_text(value: Any) -> str:

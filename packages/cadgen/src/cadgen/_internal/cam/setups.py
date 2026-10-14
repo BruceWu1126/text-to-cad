@@ -58,6 +58,7 @@ numpy and OCP are imported inside the functions; this module is stdlib-only at i
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
@@ -65,7 +66,7 @@ from typing import Any, Callable, Sequence
 from cadgen._internal.cam.stock import Bounds, StockSolid, bounds_of, occ_shape
 
 __all__ = [
-    "COLLET_GRIP_MM", "Cylinder", "Envelope", "FixtureEnvelope", "Frame", "PLATE_BORDER_MM", "SetupFrame",
+    "COLLET_GRIP_MM", "Cylinder", "EarlierCut", "Envelope", "FixtureEnvelope", "Frame", "PLATE_BORDER_MM", "SetupFrame",
     "VISE_DEFAULTS", "VISE_FLOOR_MM", "BoxVolume", "direction_vector", "fixture_envelope", "reachable", "rotation_to",
     "setup_frame", "setup_frames",
 ]
@@ -388,6 +389,11 @@ class SetupFrame:
     stock_bounds: Bounds                        # the setup's frame
     part_bounds: Bounds                         # the setup's frame
     fixture: FixtureEnvelope
+    #: The stock this setup starts from, in the part's frame: the job's stock less what earlier setups faced off
+    #: (:func:`setup_frames`); ``None`` when placed on its own (:func:`setup_frame`), which is the job's stock.
+    stock: StockSolid | None = None
+    #: The earlier setups' facings this setup's stock does not show (:class:`EarlierCut`), for a warning.
+    unmodelled: tuple["EarlierCut", ...] = ()
 
     @property
     def stock_top_z(self) -> float:
@@ -452,11 +458,80 @@ def setup_frame(setup, part: Any, stock: StockSolid, *, face_normal: Callable[[s
     return SetupFrame(setup, direction, frame, stock_bounds, part_bounds, fixture)
 
 
+@dataclass(frozen=True)
+class EarlierCut:
+    """A facing in an earlier setup that a later setup's stock does not show: ``operation`` its index in the job,
+    ``setup`` the setup it ran in, ``why`` in plain words."""
+
+    operation: int
+    setup: str
+    why: str
+
+
+def _square(rotation) -> bool:
+    """Every axis of the frame is one of the part's (a setup along +X, -Z, ...)."""
+    return all(sorted(abs(round(c, 9)) for c in row) == [0.0, 0.0, 1.0] for row in rotation)
+
+
+def _faced(stock: StockSolid, frame: SetupFrame, floor: float) -> StockSolid:
+    """``stock`` (a box, in the part's frame) less everything above ``floor`` (z in ``frame``, a square setup)."""
+    point = [float(value) for value in frame.frame.point_to_part((0.0, 0.0, floor))]
+    axis = max(range(3), key=lambda index: abs(frame.direction[index]))
+    low, high = list(stock.bounds[0]), list(stock.bounds[1])
+    if frame.direction[axis] > 0:
+        high[axis] = min(high[axis], _clean(point[axis]))
+    else:
+        low[axis] = max(low[axis], _clean(point[axis]))
+    if high[axis] - low[axis] <= 1e-6:
+        raise ValueError(f"setup {frame.setup.id}: a facing there takes the whole stock away")
+    if (tuple(low), tuple(high)) == stock.bounds:
+        return stock
+    from cadgen._internal.cam.stock import _box_solid
+
+    return StockSolid(stock.type, _box_solid(tuple(low), tuple(high)), (tuple(low), tuple(high)))
+
+
 def setup_frames(job, part: Any, stock: StockSolid, *,
                  face_normal: Callable[[str], Sequence[float]] | None = None) -> dict[str, SetupFrame]:
-    """Every setup of the job, placed, by id in the job's order."""
-    return {setup.id: setup_frame(setup, part, stock, face_normal=face_normal, where=f"setups[{index}]")
-            for index, setup in enumerate(job.setups)}
+    """Every setup of the job, placed, by id in the job's order.
+
+    A setup starts from the stock the earlier setups left: every facing in another setup that runs before this
+    setup's first operation, when it faced the whole stock (no region, or a region holding the stock's footprint),
+    takes the stock down to its floor, so this setup's stock, origin, heights and fixture stand on the faced
+    surface. Phase 1 has no stock simulation, so that is a plane across the stock, exact for a box or a sheet seen
+    square (both setups along the part's axes); any other earlier facing (a cylinder, a blank read from a STEP, a
+    setup along a face, a region that leaves some of the top) is left out and listed in the setup's ``unmodelled``,
+    for a warning. Other operations cut only where they cut, so nothing else changes the stock a later setup sees.
+    """
+    from cadgen._internal.cam.operations.context import _region_covers
+    from cadgen._internal.cam.operations.milling_2d import facing_floor
+
+    operations = job.operations
+    first = {setup.id: next((index for index, operation in enumerate(operations) if operation.setup == setup.id),
+                            len(operations)) for setup in job.setups}
+    where = {setup.id: f"setups[{index}]" for index, setup in enumerate(job.setups)}
+    placed: dict[str, SetupFrame] = {}
+    for setup in sorted(job.setups, key=lambda setup: first[setup.id]):
+        current, unmodelled = stock, []
+        for index, operation in enumerate(operations[:first[setup.id]]):
+            if operation.op != "facing" or operation.setup == setup.id:
+                continue
+            earlier = placed[operation.setup]
+            whole = operation.region is None or _region_covers(operation.region, job, earlier)
+            if not whole:
+                why = "it faced a region, not the whole stock"
+            elif stock.type not in ("box", "sheet"):
+                why = f"the stock is {'a blank read from a STEP' if stock.type == 'from' else 'a ' + stock.type}"
+            elif not (_square(earlier.frame.rotation) and _square(rotation_to(direction_vector(setup.direction,
+                                                                                                face_normal)))):
+                why = "a setup along a face selector is not square to the stock"
+            else:
+                current = _faced(current, earlier, facing_floor(operation.params, earlier))
+                continue
+            unmodelled.append(EarlierCut(index, operation.setup, why))
+        frame = setup_frame(setup, part, current, face_normal=face_normal, where=where[setup.id])
+        placed[setup.id] = dataclasses.replace(frame, stock=current, unmodelled=tuple(unmodelled))
+    return {setup.id: placed[setup.id] for setup in job.setups}
 
 
 def reachable(direction: str | Sequence[float], setup: SetupFrame, *,

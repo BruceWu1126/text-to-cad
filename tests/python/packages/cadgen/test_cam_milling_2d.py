@@ -343,13 +343,13 @@ class Elsewhere(unittest.TestCase):
                     self.assertGreaterEqual(footprint.distance(Point(x, y)), ctx.radius, (x, y, z, jaw.name))
         levels = planned.stats["targets"][0]["depths"]
         self.assertTrue(any(z < -6 for z in levels) and any(z > -6 for z in levels))
-        # Gripped closer than the cut can pass, the outline cannot be reached at all.
+        # Gripped closer than the cut can pass, the tool would come down onto a jaw: a fixture collision.
         document["stock"] = {"type": "box", "margin_mm": [2, 2, 1, 1]}
         from cadgen._internal.cam.operations import get_operation
         from cadgen._internal.cam.operations.context import PlanContext
 
         ctx = PlanContext.from_step(self.step, document, 0)
-        self.assertEqual(plan_error(self, get_operation("contour_2d").plan, ctx.params, ctx).kind, "unreachable")
+        self.assertEqual(plan_error(self, get_operation("contour_2d").plan, ctx.params, ctx).kind, "fixture_collision")
 
     def test_sheet_defaults_and_a_finishing_pass_dropped_into_the_rough_slot(self):
         document = dict(JOB, machine={"kind": "router", "post": "linuxcnc"},

@@ -42,8 +42,8 @@ from cadgen._internal.cam.toolpath import PLUNGE, Helix, Move, Plunge, Ramp, Too
 if TYPE_CHECKING:
     from cadgen._internal.cam.operations.context import PlanContext
 
-__all__ = ["AlongPath", "DEFAULT_RAMP_DEG", "Emitter", "entry_for", "fixtures_clear", "in_air", "lead_arc",
-           "ramp_down", "retract_clear"]
+__all__ = ["AlongPath", "DEFAULT_RAMP_DEG", "Emitter", "entry_for", "fixture_in_way", "fixtures_clear", "in_air",
+           "lead_arc", "ramp_down", "retract_clear"]
 
 Point = tuple[float, float, float]
 
@@ -102,6 +102,12 @@ def fixtures_clear(ctx: "PlanContext", geom, z: float) -> bool:
     of the fixture: every fixture volume whose top stands above ``z`` is further from ``geom`` than the widest part
     of the tool that reaches below that top (the cutter's radius, or its shank's or holder's where those reach
     down past it), by the tolerance."""
+    return fixture_in_way(ctx, geom, z) is None
+
+
+def fixture_in_way(ctx: "PlanContext", geom, z: float):
+    """The first fixture volume the tool going down to ``z`` over ``geom`` would meet (see :func:`fixtures_clear`),
+    else ``None``."""
     from shapely.geometry import Point as ShapelyPoint, box
 
     for volume in ctx.setup.fixture.volumes:
@@ -115,8 +121,8 @@ def fixtures_clear(ctx: "PlanContext", geom, z: float) -> bool:
         else:
             footprint = ShapelyPoint(*volume.center).buffer(volume.radius)
         if geom.distance(footprint) < reach + ctx.tol:
-            return False
-    return True
+            return volume
+    return None
 
 
 def entry_for(ctx: "PlanContext", path: Sequence[Sequence[float]], *, angle_deg: float = DEFAULT_RAMP_DEG,
@@ -359,11 +365,17 @@ class Emitter:
                      entry=entry, rapid_to=rapid_to)
         across = [move for move in moves if move.kind == "rapid"]
         over = across[-1].xyz if across else self.here
-        if not fixtures_clear(ctx, _shapely_point(over), end[2]):
+        volume = fixture_in_way(ctx, _shapely_point(over), end[2])
+        if volume is not None:
             from cadgen._internal.cam.operations.base import PlanError
+            from cadgen._internal.cam.values import plain
 
-            raise PlanError("unreachable", f"{ctx.label}: the tool cannot come down at ({over[0]:g}, {over[1]:g}) to z "
-                            f"{end[2]:g}: the fixture stands in the way", "Grip the stock so the fixture stands clear of the cut, or move the cut.")
+            top = volume.max[2] if hasattr(volume, "max") else volume.z_max
+            raise PlanError("fixture_collision", f"{ctx.label}: the tool cannot come down at X{plain(over[0])} "
+                            f"Y{plain(over[1])} to Z{plain(end[2])}: the {volume.name} stands in the way, its top at "
+                            f"Z{plain(top)}, {plain(top - end[2])} mm above the cut (setup {ctx.setup.setup.id})",
+                            "Grip the stock so the fixture stands clear of the cut (less grip, taller parallels, more "
+                            "stock under the part), or stop the cut above the fixture.")
         if across and retract_clear(ctx, self.here, across[-1].xyz):
             moves = link(self.here, end, heights=ctx.heights, retract_is_clear=True, feed=entry_feed, op=self.op,
                          entry=entry, rapid_to=rapid_to)
