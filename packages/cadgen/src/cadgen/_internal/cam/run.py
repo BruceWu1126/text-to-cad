@@ -131,12 +131,18 @@ def _relative(path: Path, folder: Path) -> str:
         return path.resolve().as_posix()
 
 
-def _job_name(job) -> str:
+def _job_file(job) -> Path | None:
+    """The file a job was read from, or ``None`` for inline JSON or a dict."""
     if isinstance(job, Path):
-        return job.name
+        return job
     if isinstance(job, str) and not job.strip().startswith("{"):
-        return Path(job.strip()).name
-    return ""
+        return Path(job.strip())
+    return None
+
+
+def _job_name(job) -> str:
+    named = _job_file(job)
+    return named.name if named is not None else ""
 
 
 # --- the run -----------------------------------------------------------------------------------------------
@@ -175,6 +181,11 @@ def plan_job(target: Path, out: Path | None, *, job=None, occurrence: str | None
     document = Path(target)
     parsed = parse_job(job, post=post)  # stdlib, before anything heavy
     glb_path, sidecar_path, stem = output_paths(document, out)
+    named = _job_file(job)
+    if named is not None and named.resolve() in (sidecar_path.resolve(), glb_path.resolve()):
+        # The plan would write over the job it was given (part.cam.json is the sidecar's own name).
+        raise ValueError(f"job: {named.name} is where this plan writes its {'sidecar' if named.name == sidecar_path.name else 'GLB'}"
+                         f", so planning would overwrite the job; name the job file another way, like {stem}.job.json")
     if len(parsed.setups) > 1:
         for index, setup in enumerate(parsed.setups):
             if not _FILE_SAFE.fullmatch(setup.id):

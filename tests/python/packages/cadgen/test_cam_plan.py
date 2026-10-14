@@ -141,6 +141,18 @@ class Plan(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in out.parent.iterdir()), ["plate.cam.json"])
         self.assertFalse(json.loads((out.parent / "plate.cam.json").read_text(encoding="utf-8"))["ok"])
 
+    def test_a_job_file_at_the_sidecars_path_is_refused_before_it_is_overwritten(self):
+        from cadgen.cam import plan
+
+        folder = self.dir / "clash"
+        folder.mkdir()
+        job = folder / "plate.cam.json"
+        job.write_text(json.dumps(JOB), encoding="utf-8")
+        with self.assertRaises(ValueError) as caught:
+            plan(self.step, folder / "plate.cam.glb", job=str(job))
+        self.assertIn("plate.cam.json is where this plan writes its sidecar", str(caught.exception))
+        self.assertEqual(json.loads(job.read_text(encoding="utf-8")), JOB)
+
     def test_two_setups_write_two_programs(self):
         from cadgen.cam import plan
 

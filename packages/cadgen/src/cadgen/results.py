@@ -679,7 +679,8 @@ class CamResult:
         s = self.summary
         lines = [
             f"planned {self.occurrence} of {_display(self.document)} for {s.get('post', '?')}: {len(self.operations)} "
-            f"operations, cycle time {_duration(s.get('cycle_time_s', 0.0))}, {s.get('tool_changes', 0)} tool changes",
+            f"operations, cycle time {_duration(s.get('cycle_time_s', 0.0))}, {s.get('tool_changes', 0)} tool "
+            f"change{'' if s.get('tool_changes', 0) == 1 else 's'}",
         ]
         for index, op in enumerate(self.operations):
             lines.append(

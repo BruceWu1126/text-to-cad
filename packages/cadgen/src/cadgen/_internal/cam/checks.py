@@ -795,7 +795,7 @@ def _notes(job: "Job", planned_ops, setups: dict) -> list[dict]:
         return out
     seconds = max(tp.moves[-1].t for tp in toolpaths)
     minutes, rest = divmod(round(seconds), 60)
-    clock = f"{minutes} min {rest} s" if minutes else f"{rest} s"
+    clock = f"{minutes} min {rest:02d} s" if minutes else f"{rest} s"   # as the result's lines and the viewer say it
     out.append(finding(
         "info", "cycle_time", f"Cycle time {clock}: the moves at their feeds and the rapids",
         "tool changes, spindle spin-up and setup changes are not in it", []))
