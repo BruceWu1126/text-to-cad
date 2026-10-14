@@ -362,9 +362,13 @@ class Elsewhere(unittest.TestCase):
         self.assertAlmostEqual(target["floor_z"], bottom - 0.3)                   # through sheet: 0.3 mm on
         self.assertAlmostEqual(planned.stats["tabs"]["height_mm"], 0.25 * 10.3)   # a quarter of the cut
         moves = planned.toolpath.moves
-        drops = [k for k, move in enumerate(moves) if move.kind == "rapid" and abs(move.xyz[2] - (bottom - 0.3)) < 1e-9]
-        self.assertEqual(len(drops), 1)                  # the finishing ring: straight down into the rough slot,
-        step = moves[drops[0] + 1]                       # then across onto its own offset
+        # The finishing ring: a rapid down to 1 mm (the feed height) over the rough slot's floor, a plunge into it,
+        # then across onto its own offset.
+        drops = [k for k, move in enumerate(moves) if move.kind == "rapid" and abs(move.xyz[2] - (bottom + 0.7)) < 1e-9]
+        self.assertEqual(len(drops), 1)
+        self.assertEqual((moves[drops[0] + 1].kind, moves[drops[0] + 1].xyz[2]), ("plunge", bottom - 0.3))
+        drops = [drops[0] + 1]
+        step = moves[drops[0] + 1]
         self.assertEqual(step.kind, "feed")
         self.assertAlmostEqual(math.dist(step.xyz[:2], moves[drops[0]].xyz[:2]), 0.3, delta=1e-6)
 

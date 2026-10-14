@@ -599,7 +599,9 @@ def descents_ok(toolpath, ctx, angle_deg: float | None = None, *, excuse=None) -
     a helix's arc; a canned cycle's own moves too, expanded) steeper than ``angle_deg`` (the operation's
     ``ramp_angle_deg``, else the default ramp angle) must end where the tool's whole circle is in air (off the stock
     standing at that height or above it) or in material an earlier cut of the same toolpath already took away (swept
-    by the tool at that height or lower). ``excuse(here, move, cycle, cut)`` may pass a descent that is sound for a
+    by the tool at that height or lower). A rapid down must also stop a feed height (the retract height, at most
+    1 mm) over that: never a rapid onto the material, whose top is known only as well as the
+    saw or the facing left it. ``excuse(here, move, cycle, cut)`` may pass a descent that is sound for a
     reason of its own (``cycle``: the canned cycle move it is part of, else ``None``; ``cut``: the segments cut so
     far); :func:`assert_sound` gives the only ones there are. Empty when every descent is fine; else one line per
     offending move."""
@@ -613,6 +615,7 @@ def descents_ok(toolpath, ctx, angle_deg: float | None = None, *, excuse=None) -
         angle_deg = getattr(ctx.params, "ramp_angle_deg", DEFAULT_RAMP_DEG)
     slope = math.tan(math.radians(angle_deg)) * (1 + 1e-3)   # arc fitting may shorten a ramp's run a hair
     r, tol = ctx.radius, ctx.tol
+    gap = min(ctx.operation.retract_mm, 1.0) - 1e-6    # the feed height, set down here, not read from the planner
     cut: list[tuple[tuple, tuple]] = []
     problems = []
 
@@ -656,10 +659,13 @@ def descents_ok(toolpath, ctx, angle_deg: float | None = None, *, excuse=None) -
             across = math.dist(here[:2], end[:2])
             points = [tuple(here), end]
         drop = here[2] - end[2]
-        if drop > 1e-9 and (move.kind == "rapid" or drop > slope * across) and not cleared(end) and \
+        rapid = move.kind == "rapid"
+        # A rapid's end, lowered by the feed height, must be clear: the rapid stops that far over the material.
+        lowered = (end[0], end[1], end[2] - gap) if rapid else end
+        if drop > 1e-9 and (rapid or drop > slope * across) and not cleared(lowered) and \
                 not (excuse is not None and excuse(tuple(here), move, cycle, cut)):
-            problems.append(f"{move.kind} down to ({end[0]:g}, {end[1]:g}, {end[2]:g}) from z {here[2]:g} goes into "
-                            "material")
+            what = "comes within the feed height of material" if rapid else "goes into material"
+            problems.append(f"{move.kind} down to ({end[0]:g}, {end[1]:g}, {end[2]:g}) from z {here[2]:g} {what}")
         if move.kind != "rapid":
             cut += [(tuple(a), tuple(b)) for a, b in zip(points, points[1:])]
     return problems

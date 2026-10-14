@@ -6,9 +6,11 @@ its entry starts and how high the uncut material stands over it. :class:`Emitter
 - :meth:`Emitter.go` links from where the tool is to the start of a pass (:func:`~cadgen._internal.cam.toolpath.link`)
   and enters it, then cuts along it. The link travels at the retract height only when that is provably clear
   (:func:`retract_clear`: no fixture stands above it near the straight line across); else at the clearance height.
-  It rapids down only to ``rapid_to``, which the operation passes as the top of the uncut material over the entry
-  (the stock top, an earlier facing's floor, or the previous pass's floor where that pass already cut the entry
-  point clear), and enters from there.
+  It rapids down only to a feed height (:func:`feed_height`: the retract height, at most :data:`FEED_HEIGHT_MM`)
+  over ``rapid_to``, which the operation passes as the top of the uncut material over the entry (the stock top, an
+  earlier facing's floor, or the previous pass's floor where that pass already cut the entry point clear), and
+  enters from there: never a rapid onto the material, whose top is known only as well as the saw or the facing
+  left it.
 - :func:`entry_for` picks the entry: a plunge only where the tool is in air (:func:`in_air`: its whole circle off the
   stock's footprint and off every fixture standing above the entry's depth), a helix in a closed pocket where one
   fits, a ramp along the pass's first straight run, or (a closed pass with no straight run to ramp along, such as a
@@ -42,8 +44,8 @@ from cadgen._internal.cam.toolpath import PLUNGE, Helix, Move, Plunge, Ramp, Too
 if TYPE_CHECKING:
     from cadgen._internal.cam.operations.context import PlanContext
 
-__all__ = ["AlongPath", "DEFAULT_RAMP_DEG", "Emitter", "entry_for", "fixture_in_way", "fixtures_clear", "in_air",
-           "lead_arc", "ramp_down", "retract_clear"]
+__all__ = ["AlongPath", "DEFAULT_RAMP_DEG", "Emitter", "FEED_HEIGHT_MM", "entry_for", "feed_height",
+           "fixture_in_way", "fixtures_clear", "in_air", "lead_arc", "ramp_down", "retract_clear"]
 
 Point = tuple[float, float, float]
 
@@ -54,9 +56,18 @@ DEFAULT_RAMP_DEG = 3.0
 MIN_STEP_MM = 3e-3
 #: How much longer one segment of a cut is than the next where the fitting keeps their shared vertex (see _flush).
 _BREAK = 4.0
+#: The most a rapid down stops over the top of the material it enters, mm (the operation's ``retract_mm`` when that is
+#: less): the entry (a plunge in air at the plunge feed, a ramp or a helix) starts there.
+FEED_HEIGHT_MM = 1.0
 #: A helix's radius as a fraction of the tool's, when it fits, and the least it may be before a ramp is used.
 HELIX_FRACTION = 0.5
 HELIX_MIN_FRACTION = 0.25
+
+
+def feed_height(ctx: "PlanContext") -> float:
+    """How far over the material a rapid down stops, mm: the operation's retract height, at most
+    :data:`FEED_HEIGHT_MM`."""
+    return min(ctx.operation.retract_mm, FEED_HEIGHT_MM)
 
 
 def retract_clear(ctx: "PlanContext", a: Sequence[float], b: Sequence[float]) -> bool:
@@ -349,7 +360,9 @@ class Emitter:
         the path (at ``feed`` when given, see :meth:`cut`)."""
         ctx = self.ctx
         end = tuple(float(c) for c in path[0])
-        rapid_to = max(min(rapid_to, ctx.heights.retract), end[2])
+        # Never a rapid onto the material: a saw-cut or faced top is only known to a fraction of a millimetre, so the
+        # rapid stops a feed height over it and the entry feeds the rest.
+        rapid_to = max(min(rapid_to + feed_height(ctx), ctx.heights.retract), end[2])
         if isinstance(entry, AlongPath):
             descent = _descent(path, rapid_to, entry.angle_deg) if rapid_to > end[2] + 1e-9 else [end]
             self.go(descent, rapid_to=rapid_to, entry=PLUNGE)

@@ -113,6 +113,17 @@ class Plan(unittest.TestCase):
         self.assertEqual(sidecar["files"], {"nc": ["plate.nc"], "glb": "plate.cam.glb"})
         self.assertEqual(sidecar["job"], JOB)
 
+    def test_no_rapid_comes_down_onto_the_material(self):
+        # The stock top is Z0 (the saw left it, give or take): the facing rapids to Z1 and feeds the last millimetre.
+        lines = self.result.nc[0].read_text(encoding="ascii").splitlines()
+        first = lines.index("G0 Z1")
+        self.assertLess(first, lines.index("(Op 1: pocket_2d with T1)"))
+        self.assertTrue(lines[first + 1].startswith("G1 Z-1 F"), lines[first + 1])
+        # The pocket after it starts from the faced top, Z-1: it rapids to Z0 and helixes in from there.
+        pocket = lines[lines.index("(Op 1: pocket_2d with T1)"):]
+        self.assertEqual(pocket[2], "G0 Z0")
+        self.assertTrue(pocket[3].startswith("G3 "), pocket[3])
+
     def test_the_program_reads_back_as_the_planned_toolpaths(self):
         self.assertEqual(sorted({tp.op for tp in self.toolpaths}), [0, 1, 2, 3])
         assert_backplot(self, self.result.nc[0].read_text(encoding="ascii"), "linuxcnc", self.toolpaths)

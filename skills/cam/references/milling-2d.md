@@ -3,7 +3,11 @@
 Flat passes stepping down: the tool cuts at one height, steps down, cuts again. Every operation here
 climb mills (the material on the tool's right, the spindle turning clockwise), goes down into
 material only by a ramp or a helix no steeper than `ramp_angle_deg` (3 degrees) unless the tool is in
-air, and moves between cuts at the setup's retract and clearance heights. Each takes the keys every
+air, and moves between cuts at the setup's retract and clearance heights. A rapid down never lands on
+the material: it stops a feed height over the top of the material it enters (the operation's
+`retract_mm`, at most 1 mm), since a saw-cut or faced top is only known to a fraction of a
+millimetre, and the entry (a plunge in air at the plunge feed, a ramp, a helix) starts from there.
+Each takes the keys every
 operation takes ([job-file.md](job-file.md#operations)) and its own, below. Depths are in the setup's
 frame: `depth_mm` is below the top of the material, `z_mm` a height in the setup's frame (Z0 is the
 work zero); give one or the other, not both.
