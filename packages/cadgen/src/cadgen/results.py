@@ -651,8 +651,9 @@ def _duration(seconds: float) -> str:
 class CamResult:
     """The outcome of ``cadgen cam plan``: where the G-code, the result GLB and the sidecar went, and the numbers.
 
-    ``summary`` carries what a machinist asks for first: cycle time, cut and rapid length, tool changes and the
-    volume removed. ``operations`` has one entry per operation in job order (its tool, time and lengths).
+    ``summary`` carries what a machinist asks for first: cycle time, cut and rapid length, tool changes, the post (and,
+    once the stock is simulated, phase 2, the volume removed). ``operations`` has one entry per planned operation in job
+    order (its tool, time and lengths).
     ``findings`` is what an engineer would say about the plan, errors first, in the KiCad findings' shape. A job
     that cannot be planned is ``ok=False`` with findings and writes no G-code (README law 10).
     """
@@ -672,13 +673,13 @@ class CamResult:
 
     def human_lines(self) -> list[str]:
         if not self.ok:
-            return [f"not planned: {_display(self.document)}"] + [
+            return [f"not planned: {_display(self.document)}: no G-code written; sidecar: {_display(self.sidecar)}"] + [
                 f"{finding['severity']}: {finding['summary']}" for finding in self.findings
-            ]
+            ] + [f"warning: {warning}" for warning in self.warnings]
         s = self.summary
         lines = [
-            f"planned {self.occurrence} of {_display(self.document)}: {len(self.operations)} operations, "
-            f"cycle time {_duration(s.get('cycle_time_s', 0.0))}, {s.get('tool_changes', 0)} tool changes",
+            f"planned {self.occurrence} of {_display(self.document)} for {s.get('post', '?')}: {len(self.operations)} "
+            f"operations, cycle time {_duration(s.get('cycle_time_s', 0.0))}, {s.get('tool_changes', 0)} tool changes",
         ]
         for index, op in enumerate(self.operations):
             lines.append(

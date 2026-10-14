@@ -484,6 +484,32 @@ def assert_backplot(case: unittest.TestCase, text: str, post: str, toolpaths, *,
         case.assertTrue(all(move.kind == "rapid" for move in rest[len(want):]), f"{post}: only rapids after the cut")
 
 
+# --- Result GLBs ----------------------------------------------------------------------------------------
+
+def read_glb(path) -> tuple[dict, bytes]:
+    """A GLB's JSON chunk and its binary chunk's payload."""
+    import json
+    import struct
+    from pathlib import Path
+
+    raw = Path(path).read_bytes()
+    magic, version, total = struct.unpack_from("<4sII", raw, 0)
+    assert (magic, version, total) == (b"glTF", 2, len(raw)), "not a whole glTF 2.0 binary"
+    length, _ = struct.unpack_from("<II", raw, 12)
+    return json.loads(raw[20:20 + length]), raw[20 + length + 8:]
+
+
+def glb_attribute(gltf: dict, binary: bytes, mesh: int, name: str) -> list:
+    """One float32 attribute of a mesh's first primitive: a list of floats (SCALAR) or of tuples (VEC3)."""
+    import struct
+
+    accessor = gltf["accessors"][gltf["meshes"][mesh]["primitives"][0]["attributes"][name]]
+    view = gltf["bufferViews"][accessor["bufferView"]]
+    width = {"SCALAR": 1, "VEC3": 3}[accessor["type"]]
+    values = struct.unpack_from(f"<{accessor['count'] * width}f", binary, view["byteOffset"])
+    return list(values) if width == 1 else [values[i:i + width] for i in range(0, len(values), width)]
+
+
 # --- Sweeping a toolpath -------------------------------------------------------------------------------
 # Points along a toolpath's moves, for the checks the operation suites make with geometry2d.intrusion.
 

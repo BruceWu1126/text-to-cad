@@ -218,9 +218,12 @@ plain words an engineer agrees with and a maker cannot misread.
 
 - **`<stem>.nc`**, or `<stem>.<setup>.nc` per setup when a job has more than one. OUT names the GLB (must end in
   `.cam.glb` or `.glb`), and the other two sit beside it.
-- **`<stem>.cam.json`**: `generator`, `document`, `occurrence`, `job` (echo), `machine`, `post`, `setups`, `tools`
-  (with computed rpm/feed), `operations` (per op: tool, time, cut/rapid length, removed volume, engagement),
-  `summary`, `findings`, `timings`, `warnings`, `files{nc, glb}`. `allow_nan=False`, indent 2.
+- **`<stem>.cam.json`**: `generator`, `ok`, `document` (relative to the sidecar), `occurrence`, `job` (echo),
+  `machine`, `post`, `material`, `setups`, `tools` (with computed rpm/feed), `operations` (per op: tool, time,
+  cut/rapid length, its stats), `summary`, `findings`, `checks`, `warnings`, `files{nc, glb}` (names beside it).
+  `allow_nan=False`, indent 2. No `timings`: they are wall-clock numbers, so a sidecar holding them would differ on
+  every run and break README law 5 (the same job writes the same bytes); they stay on `CamResult` and `--json`.
+  Written also when the job is not planned (`ok: false`, with the findings), when no `.nc` and no GLB are.
 - **`<stem>.cam.glb`** (hand-rolled glTF 2.0 like FEA's):
   - `meshes[0]`: the part, triangles, with the extras (marker on a mesh, since the viewer's check skips
     non-meshes): `generator: "cadgen cam"`, `document`, `occurrence`, `machine`, `setups`, `tools`, `operations`,
@@ -230,6 +233,14 @@ plain words an engineer agrees with and a maker cannot misread.
   - toolpaths as glTF `LINES` primitives (mode 1), one per operation, with vertex attributes `_T` (time),
     `_KIND` (rapid/feed/plunge/...), `_OP` (operation index). Real line primitives, so any glTF viewer shows
     the paths; cadgen's viewer replaces them (below).
+  - As built (task 13; `_internal/cam/outputs.py` holds the contract): the whole file is in the PART's frame
+    (`extras.frame`), each setup's toolpaths moved back from its setup frame. Nodes in order: `part`, `stock`,
+    `fixture:<setup>` (setups with a fixture), `tool:<id>` (each tool that cuts; mesh in the tool's frame, tip at
+    the origin along glTF +Y, the node's translation/rotation at its first toolpath's start in that setup), then
+    `path:<op index>:<op>`. The part mesh adds `_FACE` (face ordinal, the `N` of `#o1.fN`). `_KIND` codes: rapid
+    0, feed 1, plunge 2, arc 3, lead 4, cycle 5; `_T` is the job clock in seconds, non-decreasing along a path;
+    arcs drawn as chords within 0.05 mm, cycles as the moves they stand for. Each `extras.setups[i]` carries
+    `quaternion` (setup to part rotation in glTF axes) for placing the tool.
 
 ## Viewer
 
