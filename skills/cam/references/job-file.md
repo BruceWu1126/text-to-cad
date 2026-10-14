@@ -211,6 +211,67 @@ Every other name is known and refused with its phase: `adaptive_2d` (Adaptive cl
 designed with `adaptive_3d` ([milling-2d.md](milling-2d.md#adaptive_2d-phase-2)); so are 3D milling,
 turning, cutting, EDM and multi-axis ([planned-next.md](planned-next.md)).
 
+## Depths and heights
+
+`z_mm` is a height in the setup's work coordinates: `"z_mm": -3` is Z-3 in the program, whatever
+was cut before. `depth_mm` is measured down from a top, and which top depends on the operation:
+
+- **A milling operation** (`pocket_2d`, `contour_2d`, `slot`, `circular`, ...): from the top of the
+  material it starts from. That is the stock top of this setup (already taken down by a whole-stock
+  facing in an earlier setup: the turned-over setup below starts on the faced side), lowered by
+  any whole-stock facing earlier in this setup.
+- **`facing` itself:** from this setup's stock top.
+- **A hole operation** (`drill`, `tap`, `ream`, ...): from the hole's opening.
+
+For example, stock 1 mm over the part with the work zero on the stock top: a facing to the part's
+top leaves the material at Z-1. A `pocket_2d` on a region after it with `"depth_mm": 3` cuts to Z-4
+(3 mm under the faced top); with `"z_mm": -3` it cuts to Z-3 (2 mm under it).
+
+## Two setups: turning the part over
+
+A part cut from a blank thicker than itself, with an outline to profile, usually takes two setups.
+The bracket here is 120 x 80 x 15 mm; the blank is 2.5 mm wider all round, 1 mm over the part and
+4 mm under it (`"margin_mm": [2.5, 2.5, 1, 4]`), 20 mm tall.
+
+```json
+"setups": [
+  {"id": "top", "direction": "+Z", "origin": "stock_top_center",
+   "fixture": {"type": "vise", "jaw_height_mm": 40, "grip_mm": 5}},
+  {"id": "bottom", "direction": "-Z", "origin": "stock_top_center",
+   "fixture": {"type": "vise", "jaw_height_mm": 40, "grip_mm": 8}}
+],
+"operations": [
+  {"op": "facing", "setup": "top", "tool": "T1"},
+  {"op": "contour_2d", "setup": "top", "tool": "T1", "features": ["#o1.f2"], "z_mm": -14},
+  {"op": "facing", "setup": "bottom", "tool": "T1"},
+  {"op": "contour_2d", "setup": "bottom", "tool": "T1", "features": ["#o1.f2"], "z_mm": -6.5}
+]
+```
+
+- **The top setup** faces 1 mm off (to Z-1, the part's top), does everything reached from the top,
+  and cuts the outline only partway: to Z-14, 13 of the part's 15 mm. The vise grips the bottom 5 mm
+  of the 20 mm blank, so its jaws' top is at Z-15, 1 mm under the deepest cut. Choose `grip_mm`
+  against the outline's depth: the stock's height less `grip_mm` must stay above the deepest cut by
+  a margin, or the profile runs into the jaws (`fixture_collision`).
+- **The bottom setup** turns the part over. cadgen carries the first setup's facing into it: its
+  stock is the 19 mm the facing left, so it stands in the vise on the faced top, the vise grips
+  8 mm of that, and its work zero on the stock top is on the raw bottom of the blank. It faces the
+  4 mm under the part off (to Z-4, the part's bottom), then finishes the outline's last 2 mm with a
+  0.5 mm overlap: to Z-6.5, where the top setup's cut reached Z-6 in this frame. Its jaws' top is
+  at Z-11, clear of that.
+- **The origin of a later setup:** `stock_top_center` puts Z0 on the raw face the operator can
+  touch off on; `part_bbox_top_center` puts Z0 on the part's face, which exists only after the
+  facing (the header then gives the stock top's Z to touch off on first). Either works: the header's
+  `Z0:` line says which surface and where the faced top is.
+
+What cadgen models of the earlier setup: a whole-stock facing, as a plane across a box or sheet
+stock seen square (stock, fixture, origin and heights of the later setup all follow it). What it
+does not, until the stock simulation (phase 2): the earlier setup's other cuts. The bottom setup
+still sees solid stock where the top setup's outline groove is, so it ramps in where a plunge
+would do and a holder check may be pessimistic, and nothing checks that the part is still held
+once both cuts meet. Any other earlier facing (a region, a bar, a blank from a STEP) is an
+`unmodelled_earlier_cut` warning.
+
 ## `view`
 
 Optional: what the Viewer draws at first. `{"show": {...}}` with `rapids`, `fixtures` and `tool`

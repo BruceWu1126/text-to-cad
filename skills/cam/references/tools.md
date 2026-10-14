@@ -79,6 +79,15 @@ What a job leaves out is filled in as follows, and drawn that way in the GLB:
 - **Holes:** a drill, reamer or boring bar must be the hole's diameter within `diameter_tol_mm`
   (0.05 mm); a tap the hole's major diameter or its tap drill (major less one pitch) within 0.15 mm.
   A hole with no drill of its size is a `bore` (helical, with an end mill) or a `circular`.
-- **Stickout:** keep it as short as the deepest cut allows. A tool out more than about 4 times its
-  diameter chatters and deflects.
+- **Stickout:** keep it as short as the deepest cut allows. An end mill or boring bar out more than
+  about 4 times its diameter chatters and deflects (`long_stickout`); drills, spot drills, taps,
+  reamers and counterbores cut along their axis and are routinely held out further.
+- **Carbide or HSS:** ask for each tool. Drills, spot drills, counterbores and taps are often HSS,
+  end mills usually carbide. When the user does not know, state `"material": "hss"` (the slower,
+  safer speed) and say you assumed it.
+- **Tool length:** every Z in the program is the tool's lowest point: a flat end mill's face, a
+  ball's bottom, a drill's, spot drill's or chamfer mill's tip, a piloted counterbore's pilot tip
+  (the pilot is as long as it is wide, unless the tool says otherwise: then tell the user). Each
+  tool's length offset is measured there; tell the user where to touch off each one (the program's
+  header has a `Tool length:` line, and one per piloted counterbore).
 - **Pitch:** a thread mill or tap is ground for one pitch; the operation's `pitch_mm` must match it.

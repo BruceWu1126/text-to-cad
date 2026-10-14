@@ -141,11 +141,35 @@ degrees. Restate the user's numbers in those units before you write them down. A
    `--json` gives every size key. A document with several parts refuses with the occurrences it
    holds; pass one with `--occurrence #o2`. Use the selector of the feature, or any face of it.
 
+   One selector can name two features: in the listing above `#o1.f2` is a flat side face and the
+   part's outline (`profile`), whose wall it is. That is fine: an operation takes the feature of the
+   kind it cuts, so `contour_2d` with `#o1.f2` cuts the outline. A slot closed at both ends (a
+   stadium, round at each end) lists as a `pocket`; cut it with `pocket_2d` or `slot` by its region.
+
 2. **Write the job** as `part.job.json` beside the part (schema in
    [job-file.md](references/job-file.md)). Not `part.cam.json`: that is the sidecar the plan writes,
    and a job there is refused before it is overwritten. Ask the user for what you cannot know: the controller
    (it decides the post), the machine's top spindle speed and feed, the material, how the stock is
    held, and the tools they have. Never guess a post.
+
+   **What blocks planning, and what you may assume.** Without the post (the controller), the
+   machine's kind, the material and the part, there is no plan: ask. Everything else has a stated
+   default you may plan on, as long as you say so when you hand over: stickouts (flute length plus
+   a diameter), flute lengths (3 x D), holders (none drawn), the machine's top speed and feed (no
+   limit), the rapid rate (5000 mm/min), the coolant (off), a spot drill's diameter, the fixture's
+   sizes. Plan on those, then list each assumption in the hand-over (the `assumed_fixture` note and
+   the run's warnings name some of them; the rest are yours to say). Ask for the ones a finding leans
+   on: a `long_stickout` or a collision near a fixture.
+
+   **Ask, for each tool, whether it is carbide or HSS.** Drills, spot drills, counterbores and taps
+   are often HSS, end mills usually carbide; HSS runs at 0.3 of carbide's surface speed, so the
+   wrong one burns the tool or crawls. When the user does not know, write `"material": "hss"` for
+   that tool (the safer speed) and say you assumed it.
+
+   **Ask about coolant** when the material is aluminium (it welds to a dry cutter: flood, mist, or
+   air blast at least) and whenever the job taps (cutting fluid or tapping oil). The job's
+   `coolant` key turns it on per operation; a controller with no code for it gets a comment asking
+   the operator to switch it by hand.
 
    ```json
    {
@@ -221,13 +245,17 @@ degrees. Restate the user's numbers in those units before you write them down. A
 5. **Look at it in the Viewer.** Open the `.cam.glb` (with `$cad`'s Show the model step) and look
    with the user: the stock, the fixture, the toolpaths over the part, rapids above the stock,
    nothing cutting where the part is. Check the work zero and the setup direction against how the
-   user will hold the part.
+   user will hold the part. When the Viewer is not available to you, tell the user to open the
+   `.cam.glb` in the CAD Viewer themselves, and name the file.
 
 6. **Hand over the `.nc`.** Report, in this order: the post and the controller it is for; the work
    zero (`WCS: G54 at stock_top_center` means X0 Y0 at the stock's centre and Z0 on its top) and
-   how to set it; each tool by its slot with diameter, rpm and feed, and its stickout; the cycle
-   time; every warning, in the user's words; what the plan assumed (fixture sizes it did not know,
-   the rapid rate). Then the prove-out line, word for word: "Prove this program on the machine:
+   how to set it, and after a facing where the faced top is (the header's `Z0:` line); each tool by
+   its slot with diameter, rpm and feed, its stickout, and where its length is set: every Z in the
+   program is the tool's lowest point (a drill's or spot drill's tip, a chamfer mill's tip, a
+   piloted counterbore's pilot tip, the header's `Tool length:` lines), so that is where it touches
+   off; the cycle time; every warning, in the user's words; what the plan assumed (fixture sizes
+   it did not know, the rapid rate, tool materials, stickouts, coolant). Then the prove-out line, word for word: "Prove this program on the machine:
    single block, feed override low, in air first."
 
 ## What the result means
@@ -247,7 +275,10 @@ degrees. Restate the user's numbers in those units before you write them down. A
   differently: post again with `--post` rather than editing the file by hand.
 - Phase 1 checks each operation against the part and the fixture; it does not simulate the stock,
   so it cannot see material an earlier operation left (a pocket cut with a larger tool, a wall a
-  chamfer meets uncut). Order the operations so each one meets what it expects.
+  chamfer meets uncut). Order the operations so each one meets what it expects. The one thing it
+  carries forward is a whole-stock facing: later operations start from the faced top, and a later
+  setup (the part turned over) stands on the faced side, with its fixture and work zero placed
+  there ([job-file.md](references/job-file.md#two-setups-turning-the-part-over)).
 
 ## Read the findings
 
