@@ -49,11 +49,12 @@ text-to-cad, from its root:
 
 ```sh
 rm -rf apps/studio && mkdir apps/studio
-git -C <this checkout> archive amy/hardware -- . ':(exclude).repos' | tar -x -C apps/studio
+git -C <this checkout> archive amy/hardware -- . ':(exclude).repos' ':(exclude).claude/skills' ':(exclude)apps/mobile/**/libghostty-fat.a' | tar -x -C apps/studio
 git add -A -f apps/studio
 ```
 
-(`-f` because text-to-cad's `.gitignore` covers T3's `.agents/` and `.vscode/`; the fresh copy holds
+(text-to-cad tracks no symlinks and no file of 5 MiB or more, so the `.claude/skills` link and
+the mobile app's two 24 MB prebuilt iOS terminal libraries stay out; `-f` because text-to-cad's `.gitignore` covers T3's `.agents/` and `.vscode/`; the fresh copy holds
 no build output), and commit with the copied commit's hash in the message. Change Studio here, never in
 text-to-cad's copy: the next copy replaces it whole.
 
