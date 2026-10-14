@@ -172,6 +172,29 @@ Every field is checked before the model loads, and a refusal names the sketch
 file and the mark (`ink.sketch.json: sketch: marks[2].color must be a #rrggbb
 colour`). An unknown field is refused, never read as a default.
 
+## Measurements
+
+A job's `measurements` are dimensions drawn over the picture, as the CAD
+Viewer's Measure draws them: a Quick Edit prompt's job carries every
+measurement the person took, so an agent sees and reads the exact distances
+they meant. Each is drawn by the viewer's own code, every one labelled, its
+lines as heavy against the image's height as against a viewer 900 pixels tall.
+A drawing (DXF) and `--mode list` take none.
+
+```json
+"measurements": [
+  { "start": [0, 0, 5], "end": [15, 0, 4], "label": "15.03 mm", "color": "#d59090" }
+]
+```
+
+- `start`, `end`: the two ends of the dimension, `[x, y, z]` in model
+  coordinates (a face-to-face reading's ends lie along the faces' normal).
+- `label`: its words as the viewer labels it (`⟂` for a face-to-face distance,
+  `C-C` for hole centres); `color`: `#rrggbb`, the measurement's own.
+
+At most 64. Every field is checked before the model loads, and a refusal names
+the measurement and the field (`measurements[0].start is [x, y, z]`).
+
 ## Listing a STEP model's parts
 
 `--mode list` on a STEP/STP input is answered by cadgen from the tree and the

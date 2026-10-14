@@ -22,7 +22,8 @@ the person's, and the header keeps another site's page from reading them):
 
 * ``POST /__cad/prompt-files``, body ``{"name", "input", "views": [{"label",
   "camera", "display"?, "kinematics"?, "jointValues"?, "animation"?, "selection"?,
-  "width"?, "height"?}], "sketch": {...} | null}`` -> ``202 {"ok": true, "id", "retryMs"}``
+  "width"?, "height"?}], "sketch": {...} | null, "measurements"?: [{"start", "end",
+  "label", "color"}]}`` (Measure's results, drawn over every view) -> ``202 {"ok": true, "id", "retryMs"}``
   at once, the request accepted (its shape, the sketch's outer shape and the job
   as snapshot prepares it); ``400 {"ok": false, "error"}`` when it is not.
 * ``GET /__cad/prompt-files?id=<id>`` -> ``202 {"ok": true, "id", "retryMs"}``
@@ -67,7 +68,7 @@ RETRY_MS = 200
 KEEP_SECONDS = 600.0
 # How long the browser stays open without a prompt to render.
 IDLE_SECONDS = 300.0
-_REQUEST_KEYS = frozenset({"name", "input", "views", "sketch"})
+_REQUEST_KEYS = frozenset({"name", "input", "views", "sketch", "measurements"})
 _VIEW_KEYS = frozenset({"label", "camera", "display", "kinematics", "jointValues", "animation", "selection", "width", "height"})
 _SKETCH_KEYS = frozenset({"units", "parts", "marks"})
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -217,7 +218,7 @@ class PromptFiles:
             request = json.loads(body or b"null")
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ValueError(f"a prompt's files are requested as JSON: {error}") from None
-        name, input_path, views, sketch = _checked(request)
+        name, input_path, views, sketch, measurements = _checked(request)
         directory = self.directory
         with self._lock:
             self._count += 1
@@ -242,6 +243,9 @@ class PromptFiles:
             for key in ("display", "kinematics", "jointValues", "animation", "selection"):
                 if view.get(key) is not None:
                     job[key] = view[key]
+            # Measure's results, drawn over every view as the viewer drew them.
+            if measurements:
+                job["measurements"] = measurements
             job["output"] = {"padding": 0, "tightFrame": False}
             job["outputs"] = [output]
             jobs.append(job)
@@ -325,10 +329,10 @@ class PromptFiles:
                 del self._renders[render_id]
 
 
-def _checked(request) -> tuple[str, str, list[dict], dict | None]:
+def _checked(request) -> tuple[str, str, list[dict], dict | None, list | None]:
     """The request's fields, each checked; ``ValueError`` names what is wrong."""
     if type(request) is not dict:
-        raise ValueError("a prompt's files are requested as an object: {name, input, views, sketch}")
+        raise ValueError("a prompt's files are requested as an object: {name, input, views, sketch, measurements}")
     unknown = sorted(set(request) - _REQUEST_KEYS)
     if unknown:
         raise ValueError(f"unknown field(s): {', '.join(unknown)}; a request has {', '.join(sorted(_REQUEST_KEYS))}")
@@ -365,7 +369,11 @@ def _checked(request) -> tuple[str, str, list[dict], dict | None]:
             raise ValueError("sketch is null or an object of units, parts and marks (a list)")
         if not all(type(mark) is dict for mark in sketch["marks"]):
             raise ValueError("sketch.marks lists objects")
-    return name or "", input_path, views, sketch
+    # Measure's results: their shape is snapshot's to check, with the job (`_accepted`).
+    measurements = request.get("measurements")
+    if measurements is not None and type(measurements) is not list:
+        raise ValueError("measurements is null or a list of {start, end, label, color}")
+    return name or "", input_path, views, sketch, measurements
 
 
 def _accepted(job_path: Path) -> None:

@@ -41,7 +41,9 @@ export function quickEditReferenceIds(selection) {
  * stroke once the pen lifts — never for an agent's selection.
  *
  * Under its header, what goes with the note is chips: first "Drawing" while Draw has ink (`sketch`:
- * a click copies the drawing as a sketch file's JSON, its X wipes the ink), then the selected references,
+ * a click copies the drawing as a sketch file's JSON, its X wipes the ink), then each measurement
+ * (`measurements.chips`: its colour's ruler and its reading; its X deletes it, resting on it lights
+ * it; the note's views carry them all, drawn over each picture), then the selected references,
  * as the renderer describes them (`chips`,
  * `ReferenceChips.jsx`: a few, then "+N more"; each a card of what it is, its picks lit while the
  * pointer is on it, its X dropping them). A renderer that describes none has its references
@@ -66,6 +68,7 @@ export function quickEditReferenceIds(selection) {
  *   references?: readonly import("@text-to-cad/core/prompt").PromptReference[],
  *   chips?: readonly import("./ReferenceChips.jsx").ReferenceChip[] | null,
  *   sketch?: { ink: boolean, clear?: () => void } | null,
+ *   measurements?: { chips: readonly import("./ReferenceChips.jsx").ReferenceChip[] } | null,
  *   prompt?: { views(): { label: string }[], files(views: { label: string }[]): Promise<object> | null,
  *     read(path: string): Promise<Blob>, sketch(): object | null } | null,
  *   nameReference?: ((reference: import("@text-to-cad/core/prompt").PromptReference) => string | import("../../inspector/pickGlyph.jsx").CompactName) | null,
@@ -79,7 +82,7 @@ export function quickEditReferenceIds(selection) {
  *   with a note keeps it, and Escape only hands the keyboard back to the view. `hidden`: out of
  *   sight with all it holds (the view is loading).
  */
-export default function QuickEdit({ resource, references = EMPTY, chips = null, sketch = null, prompt = null, nameReference = null, onCopy, onEscape, onClear, disabled = false,
+export default function QuickEdit({ resource, references = EMPTY, chips = null, sketch = null, measurements = null, prompt = null, nameReference = null, onCopy, onEscape, onClear, disabled = false,
   hidden = false, className, style }) {
   const host = useViewerHost();
   const destination = usePromptDestination();
@@ -93,7 +96,8 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
   const selection = useMemo(() => quickEditSelection(references), [references]);
   const referenceIds = useMemo(() => quickEditReferenceIds(selection), [selection]);
   const sketching = Boolean(sketch?.ink);
-  const attached = referenceIds.length > 0 || sketching;
+  const measured = measurements?.chips?.length || 0;
+  const attached = referenceIds.length > 0 || sketching || measured > 0;
   const written = Boolean(text.trim());
   const open = written || attached;
 
@@ -133,14 +137,14 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
     setTimeout(focus, 0);
   }, []);
   const referenceKey = referenceIds.join("\n");
-  const seen = useRef({ referenceKey, sketching });
+  const seen = useRef({ referenceKey, sketching, measured });
   useEffect(() => {
     const before = seen.current;
-    seen.current = { referenceKey, sketching };
+    seen.current = { referenceKey, sketching, measured };
     const picked = referenceIds.length > 0 && referenceKey !== before.referenceKey;
-    const inked = sketching && !before.sketching;
+    // Ink and a measurement are only ever the person's; a selection is theirs when it follows their press.
+    const inked = (sketching && !before.sketching) || measured > before.measured;
     if (!picked && !inked) return undefined;
-    // Ink is only ever the person's; a selection is theirs when it follows their press.
     if (!inked && performance.now() - lastPress.current >= PICK_MS) return undefined;
     // A sketch opens it mid-stroke; the keyboard waits for the pen to lift.
     if (pressed.current) {
@@ -150,7 +154,7 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
     }
     takeKeyboard();
     return undefined;
-  }, [referenceKey, sketching, takeKeyboard]);
+  }, [referenceKey, sketching, measured, takeKeyboard]);
 
   const canQueue = destination.kind === "composer" && destination.available;
   const canSend = typeof host.promptContext.send === "function";
@@ -280,7 +284,9 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
   const drawingChip = useMemo(() => (sketching ? {
     key: "sketch", label: "Drawing", ...(sketchOf ? { copy: () => JSON.stringify(sketchOf(), null, 2) } : {}), ...(wipe ? { onRemove: wipe } : {})
   } : null), [sketching, sketchOf, wipe]);
-  const shownChips = useMemo(() => [drawingChip, ...(chips || EMPTY)].filter(Boolean), [drawingChip, chips]);
+  // Then a chip for each measurement, in its colour (`measurements`: the renderer's), then the references.
+  const shownChips = useMemo(() => [drawingChip, ...(measurements?.chips || EMPTY), ...(chips || EMPTY)].filter(Boolean),
+    [drawingChip, measurements?.chips, chips]);
   return <div ref={root} className={cn("pointer-events-none flex-col items-end", hidden ? "hidden" : "flex", className)} style={style} data-quick-edit="">
     {open ? <section ref={box} aria-label="Quick Edit" data-quick-edit-box=""
       // A narrow viewer (a phone) gets it across its whole width, over the tool stack rather than beside it.

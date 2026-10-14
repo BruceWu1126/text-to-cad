@@ -2,13 +2,14 @@ import { useEffect, useRef } from "react";
 
 import {
   MEASURE_DIMENSION_DRAFT_COLOR,
-  MEASURE_DIMENSION_FADED_ALPHA,
   drawMeasureDimension,
   drawMeasureSnapChip,
   drawMeasureSnapMarker,
+  drawMeasurementMark,
   drawPulsingEndRing,
   measureLabelText,
-  measureSeriesColor,
+  measurementMark,
+  measurementMarkLayout,
   screenSpaceDimensionLayout
 } from "@text-to-cad/core/lib/viewer/measureDimension.js";
 import {
@@ -98,12 +99,15 @@ export function useStepMeasureOverlay({
         const bounds = { width: cssWidth, height: cssHeight };
         const activeId = activeIdRef.current;
 
+        // Each as a mark, drawn by the code a snapshot draws it with (`drawMeasurementMark`): the one in
+        // hand, or the one the pointer rests on, labelled.
         for (const item of state.measurements || []) {
-          const layout = screenSpaceDimensionLayout(item?.pickA, item?.pickB, item?.measurement, camera, localRect);
+          const mark = measurementMark(item);
+          const layout = measurementMarkLayout(mark, camera, localRect);
           if (!layout) {
             continue;
           }
-          const active = item.id === activeId;
+          const active = item.id === activeId || item.id === hoveredIdRef.current;
           // Picked by Select: a halo in the selection's blue behind the dimension; under the pointer,
           // a fainter one, as a part is lit before it is picked.
           const picked = selectedIdsRef.current.includes(item.id);
@@ -111,15 +115,7 @@ export function useStepMeasureOverlay({
             drawMeasureDimension(context, layout, { color: MEASURE_SELECTED_COLOR, alpha: picked ? 0.5 : 0.25, lineWidth: 8, witnessWidth: 5,
               tickWidth: 6, ringRadius: 6, ringStrokeWidth: 4, bounds });
           }
-          drawMeasureDimension(context, layout, {
-            color: measureSeriesColor(item?.colorIndex),
-            alpha: active ? 1 : MEASURE_DIMENSION_FADED_ALPHA,
-            lineWidth: active ? 2.6 : 1.4,
-            witnessWidth: active ? 1.6 : 1,
-            ringRadius: active ? 4 : 3,
-            label: active ? measureLabelText(item.measurement) : "",
-            bounds
-          });
+          drawMeasurementMark(context, layout, mark, { active, bounds });
         }
 
         const draft = state.draft;

@@ -166,7 +166,7 @@ the whole strip is disabled while loading. Unavailable and idle are different
 states.
 
 One tool owns pointer input, and it alone is lit on the strip. A kept effect (an
-Explode, Clip or Measure panel, a Position pose, a routine's frame) shows as its panel in the
+Explode or Clip panel, a Position pose, a routine's frame) shows as its panel in the
 stack, not on the strip. **A press on the tool in hand does nothing**: a tool is put down by
 taking up another (Select, most often). A press on a kept effect's tool takes it up
 again, as it was.
@@ -175,7 +175,7 @@ again, as it was.
 | --- | --- | --- |
 | Select | The default tool of STEP and robots; picks parts and references, the drawing's marks and measurements (Shift adds; Delete deletes marks and measurements); shows Features (an assembly's; a robot's Links); its modes are the chevron beside it on the strip; what is picked is Quick Edit's chips | Its panel leaves the stack; the selection stays, lit and in Quick Edit, under any tool |
 | Pencil, Shapes | Draw: the Pencil's pen or eraser, or a Shape (Line, Arrow, Rectangle, Ellipse, Text), each the last of its family on its button and the rest in its chevron's menu, which ends in color, weight, line style and placement submenus | The ink stays in the model, the Drawing heading with it |
-| Measure | Arms picking and shows the Measure panel: its snapping modes, then its results; kept, a press takes it up again, results and all | Unfinished picks are cancelled; completed measurements and their panel stay, kept |
+| Measure | Arms picking, its snapping modes its chevron's menu; each result a chip in Quick Edit, in its colour | Unfinished picks are cancelled; completed measurements stay, Quick Edit's chips |
 | Explode / Clip | Opens a neutral panel; an edit applies the effect (Explode's, as a motion: see below); kept, a press takes it up again as it is | A neutral panel goes; an applied effect and its panel stay, kept |
 | Position | Shows joint handles and the Position panel | Handles and panel hide; joint values stay, and a pose that is not the default is kept: one line in the stack |
 | Animation | Its button plays and pauses (Play, or Pause while playing), taking the tool up: the playbar at the bottom centre, play/pause and the scrubber; its chevron's menu has the routines (two or more) then Speed, Loop and Autoplay. Another tool puts it down | The routine pauses where it is: a frame past its start is kept, one line in the stack, and one at its start is at rest; the Routine, Speed and Loop stay |
@@ -303,23 +303,19 @@ for the next time. An update of the
 model that changes its routines keeps Animation up and its Routine chosen (while
 the model still has it), at rest; one that leaves no routine puts it down.
 
-**Measure.** Its **Measure** panel is up as soon as it is the tool, empty: a
-heading whose mode menu, beside its X, holds the four snapping
-modes — **All**, **Points**, **Edges**, **Faces**, plain rows with no title and
-no descriptions, each the mode's glyph at full size (All: the ruler; Points: a
-dot in a ring; Edges and Faces: Select's glyphs) — and, before the first
-measurement, one hint row the height of a measurement row ("Pick two points to
-measure"). The strip's Measure button shows the mode in hand
-as Select's does: the ruler badged with the mode's glyph (`data-measure-mode`).
-Completed measurements are the panel's body, and keep the panel in the
-stack when another tool is taken up: kept, its heading is its title and an X alone,
-no mode menu, and a press on Measure takes it up again, results and all. A press on
-Measure while it is up does nothing. Its X, there whenever it has results, clears them
-(Measure, in hand, stays the tool). Removing
-the last result leaves Measure picking, its panel empty. There is no Clear All footer.
+**Measure.** It has no panel. Its snapping modes — **All**, **Points**, **Edges**,
+**Faces**, plain rows with no title and no descriptions, each the mode's glyph at full
+size (All: the ruler; Points: a dot in a ring; Edges and Faces: Select's glyphs) — are
+its chevron's menu on the strip, and its button shows the mode in hand as Select's does:
+the ruler badged with the mode's glyph (`data-measure-mode`). Each completed measurement
+is a chip in [Quick Edit](#quick-edit): the ruler in the measurement's own colour (the
+colour of its line on the model) and its reading; its X deletes it, resting on it lights
+its line and labels it, and its card is the full reading (the distance, the angle where
+there is one, the delta along each axis, what each end bound to). Measurements stay under
+every other tool; a press on Measure while it is up does nothing.
 
-**Measure, Explode and Clip** do not fold: their X — there while the effect is set —
-is how a person is done with one (it clears the results or removes the effect).
+**Explode and Clip** do not fold: their X — there while the effect is set —
+is how a person is done with one (it removes the effect).
 
 **Position kept.** A pose that is not the default stays when Position is put down,
 and shows as a small panel in the stack, as a kept effect does (`KeptPositionPanel`):
@@ -690,10 +686,13 @@ then an X. The file always goes and is not named. Under the header, the note
 buttons at its bottom-right.
 
 While the note is empty the box follows what it would carry: it opens when something
-is picked or sketched, and closes when that goes. A written note keeps it open whatever
+is picked, sketched or measured, and closes when that goes. Its chips are the drawing
+first, then each measurement (the ruler in its colour and its reading; the views the
+note carries draw every one, and its job file lists them, `measurements`), then the
+selection. A written note keeps it open whatever
 is picked, even with nothing picked or sketched, until the X. The X clears everything:
-the note, the selection (as a press on the model's background does) and the sketch, so
-the box goes. A note that has gone (Copy Prompt, Queue, Send) clears the same way.
+the note, the selection (as a press on the model's background does), the sketch and the
+measurements, so the box goes. A note that has gone (Copy Prompt, Queue, Send) clears the same way.
 Escape in an empty box is the viewer's Escape (clearing the selection, and so the box);
 in a box with a note it only hands the keyboard back to the model.
 

@@ -184,6 +184,9 @@ const NO_CHOICE = Object.freeze({});
  *   the document I asked for" before this hook runs — a live preview deciding whether its own result has
  *   landed (`presentationIsPending` with `shellPresentationKey(modelKey, revisionKey)`). Omitted: the shell holds it.
  * @param {string} [options.sceneScaleMode]
+ * @param {{ chips: object[], marks(): object[], clear(): void } | null} [options.measurements]  The
+ *   renderer's measurements, as Quick Edit shows them (`chips`) and its prompt files draw them over
+ *   each view (`marks`, `measureDimension.js`'s `MeasurementMark`s); `clear` when the note goes.
  * @param {import("./useViewerHistory.js").ViewerHistory} [options.history]  The file view's one undo
  *   history, when the renderer's own tools take steps in it too (a measurement) and so make it before
  *   this hook runs. Omitted: the shell keeps it, and the drawing's steps are its only ones.
@@ -193,6 +196,7 @@ export function useRendererShell({
   viewSettings = null, viewerRef: providedViewerRef = null,
   animation = null, live = EMPTY, promptReferences = null, promptContext = createViewPromptContext,
   escape = EMPTY, rendererState = null, viewState = null, sketchUnits = "mm", deleteSelection = null, history: givenHistory = null,
+  measurements = null,
   onCameraSettled = null, preserveInteractionPixelRatio = false, runtimeLifecycle = null,
   onRuntimeAlert = null, presentationReport = null,
   sceneScaleMode = VIEWER_SCENE_SCALE.CAD
@@ -514,12 +518,16 @@ export function useRendererShell({
   }, []);
   // What a Quick Edit carries besides its words: the views (the one on screen as it goes, and each
   // the drawing was drawn in), and their files, made by the host at the press.
+  const measurementsRef = useRef(measurements);
+  measurementsRef.current = measurements;
   const quickEditPrompt = useMemo(() => ({
     views: () => (host.promptFiles && promptFile() ? promptViews(currentView(), drawingRef.current.views, drawingRef.current.ink) : []),
     files: views => {
       const input = promptFile();
       if (!host.promptFiles || !input || !views.length) return null;
-      return host.promptFiles.create({ name: input.split("/").pop(), input, views, sketch: sketchNow() });
+      const marks = measurementsRef.current?.marks?.() || [];
+      return host.promptFiles.create({ name: input.split("/").pop(), input, views, sketch: sketchNow(),
+        ...(marks.length ? { measurements: marks } : {}) });
     },
     read: path => host.promptFiles.read(path),
     sketch: sketchNow,
@@ -734,7 +742,7 @@ export function useRendererShell({
       resource, captureView, escape: escapeView, currentView, quickEditPrompt,
       // Select is the tool in hand (the default one), where a press on ink picks it before a part.
       selecting: !previewing && Boolean(toolModes) && toolMode === toolModes.defaultMode,
-      drawToolActive, drawing, history, deletePicked, animation, animateToolActive, animateToolFixed, animationKept, display
+      drawToolActive, drawing, history, deletePicked, measurements, animation, animateToolActive, animateToolFixed, animationKept, display
     }
   };
 }

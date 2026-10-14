@@ -19,17 +19,15 @@ function ClipIcon(props) {
 }
 
 /**
- * Explode, Clip and Measure: tools whose effects a person keeps, each with a panel in the tool
- * stack that outlives the tool being in hand. Measure's is up while it is the tool — its results,
- * if any, the body (its snapping is the chevron after its button on the strip) — and stays while it
- * has results (`measure.shown`). A press on one in hand does nothing; on a kept one it takes it
- * up again, as it is. A panel's X — removing the effect — is there while the effect is set
- * (`measure.removable`: there are results), in hand or kept; in hand, the tool stays up.
+ * Explode and Clip: tools whose effects a person keeps, each with a panel in the tool stack that
+ * outlives the tool being in hand. A press on one in hand does nothing; on a kept one it takes it
+ * up again, as it is. A panel's X — removing the effect — is there while the effect is set, in
+ * hand or kept; in hand, the tool stays up. (Measure's results are Quick Edit's chips.)
  *
  * A tool the file cannot offer is not on the strip: Explode needs two parts to separate. While
  * the mesh is still loading that is not known yet, so Explode is shown, idle, until it is.
  */
-export function useModelTools({ modelKey, view, features, store, mesh, disabled, selectedTool, onSelect, measure = null }) {
+export function useModelTools({ modelKey, view, features, store, mesh, disabled, selectedTool, onSelect }) {
   const applied = [
     ...(view.exploded.enabled && view.exploded.amount > 0 ? ["exploded"] : []),
     ...(view.clip.enabled ? ["clip"] : []),
@@ -67,24 +65,22 @@ export function useModelTools({ modelKey, view, features, store, mesh, disabled,
     });
   }, [modelKey, selectedTool, appliedKey, holding]);
   const definitions = [
-    ...(measure ? [{ ...measure, id: "measure", label: "Measure" }] : []),
     { id: "exploded", label: "Explode", Icon: ExplodeIcon, unavailable: Boolean(mesh) && explodablePartCount(mesh) <= 1,
       summary: `${Math.round((view.exploded.enabled ? view.exploded.amount : 0) * 100)}%`,
       controls: <ExplodeControls viewSettings={view} onViewSettingsPatch={store.patch} /> },
     { id: "clip", label: "Clip", Icon: ClipIcon, summary: clipSummary(view, clipBounds),
       controls: <CrossSectionControls viewSettings={view} onViewSettingsPatch={store.patch} bounds={clipBounds} /> }
-  ].filter(tool => tool.id === "measure" || features.sections.includes(tool.id));
+  ].filter(tool => features.sections.includes(tool.id));
   const remove = id => {
-    if (id === "measure") { measure.onRemove(); return; }
-    else if (id === "exploded") store.patch({ exploded: { enabled: false, amount: 0 } });
+    if (id === "exploded") store.patch({ exploded: { enabled: false, amount: 0 } });
     else store.patch({ clip: { enabled: false, axis: "x", invert: false } });
     // In hand, the tool stays up, its panel neutral; kept, the panel goes with the effect.
     if (selectedTool !== id) setPanels(current => ({ modelKey, ids: current.ids.filter(value => value !== id) }));
   };
-  // Set: measurements taken, an explode or a cut applied — what an X can take away.
-  const set = id => id === "measure" ? Boolean(measure?.removable) : applied.includes(id);
+  // Set: an explode or a cut applied — what an X can take away.
+  const set = id => applied.includes(id);
   return {
-    tools: definitions.filter(tool => tool.id !== "measure" && !tool.unavailable).map(({ id, label, Icon }) => ({
+    tools: definitions.filter(tool => !tool.unavailable).map(({ id, label, Icon }) => ({
       // Lit while it is the tool alone: a kept effect shows in the stack, not on the strip.
       id, label, active: selectedTool === id, disabled,
       icon: <Icon className="size-3" strokeWidth={2} aria-hidden="true" />,
@@ -102,13 +98,12 @@ export function useModelTools({ modelKey, view, features, store, mesh, disabled,
     // The panels sit in the tool stack as its own items (`contents`); a press in any of them holds
     // their order until the pointer lets go.
     panels: <div className="contents" data-model-tool-panels="" onPointerDownCapture={() => setHolding(true)}>
-      {[...(measure?.shown ? ["measure"] : []), ...panelIds].map(id => {
+      {panelIds.map(id => {
         const tool = definitions.find(value => value.id === id);
-        // Measure's results can run long, so they give way like a details panel; Explode and
-        // Clip are one slider and keep their height. None of them folds. The X is there while the
-        // effect is set, in hand or kept, and takes it away; another tool puts the tool down.
+        // One slider each, keeping their height; neither folds. The X is there while the effect is
+        // set, in hand or kept, and takes it away; another tool puts the tool down.
         return tool ? <ToolPanel key={id} id={id} title={tool.label} label={`${tool.label} controls`} summary={tool.summary} actions={tool.actions}
-          fit={id === "measure" ? "details" : "fixed"} collapsible={false} onClose={set(id) ? () => remove(id) : null}
+          fit="fixed" collapsible={false} onClose={set(id) ? () => remove(id) : null}
           lead={selectedTool === id}>
           <div className="space-y-1 pb-1">{tool.controls}</div>
         </ToolPanel> : null;

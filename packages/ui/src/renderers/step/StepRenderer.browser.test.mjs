@@ -463,12 +463,13 @@ test('Select picks parts and faces, a selection outlives Select, and Quick Edit\
   await page.mouse.click(...at([6, 6, 5]));
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedPartIds.length === 1);
   await view.tool('Measure').click();
-  assert.deepEqual(await view.stack(), ['Measure controls'], 'Measure shows its own panel: no Features');
+  assert.deepEqual(await view.stack(), [], 'Measure has no panel (its results are Quick Edit\'s chips): no Features');
   assert.deepEqual((await view.state()).selectedPartIds, ['o1.1'], 'the selection stays under Measure');
   assert.deepEqual(await view.chips(), ['base'], 'and Quick Edit still carries it');
-  // The Features filter row is a heading's height, as Measure's heading is.
-  const measureHeading = await pane.getByRole('region', { name: 'Measure controls', exact: true }).locator('[data-tool-panel-heading]').boundingBox();
-  assert.equal(filterRowHeight, Math.round(measureHeading.height), 'the filter row is a heading\'s height');
+  // The Features filter row is a heading's height, as Clip's heading is.
+  await view.tool('Clip').click();
+  const clipHeading = await pane.getByRole('region', { name: 'Clip controls', exact: true }).locator('[data-tool-panel-heading]').boundingBox();
+  assert.equal(filterRowHeight, Math.round(clipHeading.height), 'the filter row is a heading\'s height');
   await view.tool('Select').click();
   assert.deepEqual(await view.stack(), ['Features']);
   await pane.getByRole('button', { name: 'Select arm', exact: true }).click();
@@ -1329,20 +1330,21 @@ test('Measure reads a distance between two picks', async () => {
   await view.partMenu('base', 'Expand');
   await view.partMenu('arm', 'Expand');
   await view.tool('Measure').click();
-  // Its panel is up as soon as it is the tool, empty but for a hint.
-  const measurePanel = pane.getByRole('region', { name: 'Measure controls', exact: true });
-  await measurePanel.waitFor();
-  assert.equal((await measurePanel.locator('[data-measure-hint]').innerText()).trim(), 'Pick two points to measure');
+  // It has no panel: what it takes is Quick Edit's, a chip each.
+  assert.deepEqual(await view.stack(), []);
   // Measure says what the pointer does over the model: a crosshair, not Select's hand.
   await page.mouse.move(...at([0, 0, 5]));
   await view.waitCursor('crosshair');
-  const measurements = page.getByRole('region', { name: 'Measurements' });
-  assert.equal(await measurements.count(), 0, 'no results until something is measured');
+  const chip = pane.locator('[data-quick-edit-ref^="measure-"]');
+  assert.equal(await chip.count(), 0, 'no results until something is measured');
   await measurePoints(page, at, [0, 0, 5], [15, 0, 4]);
-  await measurements.waitFor();
-  assert.match(await measurements.innerText(), /\d+\.\d+ mm/, 'the row reads a length');
-  assert.equal(await measurements.getByRole('listitem').count(), 1, 'one ruler');
-  assert.equal(await measurePanel.locator('[data-measure-hint]').count(), 0, 'the hint gives way to the results');
+  await chip.waitFor();
+  assert.match(await chip.innerText(), /\d+\.\d+ mm/, 'its chip reads a length');
+  assert.equal(await chip.count(), 1, 'one ruler');
+  // Its X deletes it, and Quick Edit, with nothing left to carry, goes with it.
+  await chip.getByRole('button', { name: /^Remove Measurement 1: / }).click();
+  await chip.waitFor({ state: 'detached' });
+  await view.quickEdit().waitFor({ state: 'detached' });
   assert.deepEqual(errors, []);
 });
 
@@ -1725,7 +1727,7 @@ test('a reload of the tab brings back the view — camera, Display, Clip, Explod
   await view.tool('Select').click();
   // A measurement, kept under Select; a part selected in the tree.
   await view.tool('Measure').click();
-  const measurements = page.getByRole('region', { name: 'Measurements' });
+  const measurements = pane.locator('[data-quick-edit-ref^="measure-"]');
   await measurePoints(page, at, [0, 0, 5], [15, 0, 4]);
   await measurements.waitFor();
   await view.tool('Select').click();
@@ -1773,8 +1775,6 @@ test('a reload of the tab brings back the view — camera, Display, Clip, Explod
   // The tool in hand is Select, the default, and it alone is lit: Explode's and Clip's restored
   // effects are kept panels in the stack, not lit tools.
   assert.deepEqual((await view.tools()).filter(tool => tool.endsWith(':true')), ['Select:true'], 'and the tool is the default');
-  await view.tool('Measure').click();
-  assert.equal((await pane.getByRole('region', { name: 'Measure controls', exact: true }).locator('[data-measure-hint]').innerText()).trim(), 'Pick two points to measure');
   // Explode replaced the pose (one motion at a time): it came back at its default. A pose set now
   // takes Explode off, and comes back on the next reload.
   await view.tool('Position').click();

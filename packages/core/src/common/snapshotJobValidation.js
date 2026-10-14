@@ -1,4 +1,5 @@
 import { normalizeSketch } from "./sketch.js";
+import { normalizeMeasurementMarks } from "../lib/viewer/measureDimension.js";
 import { normalizeViewSettings, resolveViewSettings } from "./viewSettings.js";
 
 export function validateSnapshotRenderJob(job = {}) {
@@ -11,6 +12,8 @@ export function validateSnapshotRenderJob(job = {}) {
   normalizeViewSettings(Object.hasOwn(job, "display") ? job.display : {});
   // The ink drawn over the model (`sketch.js`): refused before anything loads, by what is wrong.
   if (job.sketch != null) normalizeSketch(job.sketch);
+  // Measure's results drawn over the picture (`measureDimension.js`), refused the same way.
+  if (job.measurements != null) normalizeMeasurementMarks(job.measurements);
   for (const camera of [job.camera, ...(Array.isArray(job.outputs) ? job.outputs.map(output => output.camera) : [])]) {
     if (camera && typeof camera === "object") {
       const moved = ["projection", "focalLength"].filter(key => Object.hasOwn(camera, key));

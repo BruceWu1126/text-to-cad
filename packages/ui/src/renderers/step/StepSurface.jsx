@@ -13,7 +13,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import { hasAuthoredMaterials } from "@text-to-cad/core/common/inspectEnvironment.js";
 import { displayRecordsBounds, mergeBoundsList } from "@text-to-cad/core/lib/viewer/autoZoom.js";
 import { VIEWER_PICK_MODE } from "@text-to-cad/core/lib/viewer/constants.js";
-import { dimensionLayoutHit, screenSpaceDimensionLayout } from "@text-to-cad/core/lib/viewer/measureDimension.js";
+import { dimensionLayoutHit, measureLabelText, measureSeriesColor, measurementMark, screenSpaceDimensionLayout } from "@text-to-cad/core/lib/viewer/measureDimension.js";
+import { Ruler } from "lucide-react";
 import { toNumber } from "@text-to-cad/core/lib/viewer/modelRuntime.js";
 import { normalizePartIdList } from "@text-to-cad/core/lib/viewer/partVisualState.js";
 import RendererShell from "../kit/shell/RendererShell.jsx";
@@ -37,7 +38,7 @@ import { useCadAssets } from "./components/workbench/hooks/useCadAssets.js";
 import { useEditingPreview } from "./components/workbench/hooks/useEditingPreview.js";
 import { useViewportLoadStatus } from "./components/workbench/hooks/useViewportLoadStatus.js";
 import { editingBuildActive } from "./workbench/editingPreview.js";
-import MeasurePanel from "./components/workbench/MeasurePanel.jsx";
+import MeasurementCard from "./components/workbench/MeasurementCard.jsx";
 import { useCadWorkspaceSelection } from "./components/workbench/hooks/useCadWorkspaceSelection.js";
 import { useCadWorkspaceSelectors } from "./components/workbench/hooks/useCadWorkspaceSelectors.js";
 import { useAppliedViewSettings } from "../kit/view-settings/useAppliedViewSettings.js";
@@ -1468,6 +1469,20 @@ function StepSurfaceBody({ view, data }) {
   // HERE, in the middle of this function, and not at the top: the hook needs a load report,
   // and what this renderer's load IS depends on the resolved view above it. Nothing about
   // hook order says otherwise — there is one function, and no early return in it.
+  // Measure's results, as Quick Edit's chips — each its colour's ruler and its reading, its X
+  // deleting it, resting on it lighting it, its card the full reading — and as the marks a note's
+  // views are drawn with (`measureDimension.js`'s `measurementMark`, as the viewer draws them).
+  const measurementChips = useMemo(() => measureMeasurements.map((item, index) => {
+    const reading = measureLabelText(item.measurement);
+    return { key: `measure-${item.id}`, label: `Measurement ${index + 1}: ${reading}`, text: reading, copy: reading,
+      icon: <Ruler className="size-2.5 shrink-0" style={{ color: measureSeriesColor(item.colorIndex) }} strokeWidth={2} aria-hidden="true" />,
+      card: <MeasurementCard item={item} />,
+      onRemove: () => measure.onDelete(item.id), onHover: on => measure.hover(on ? item.id : "") };
+  }), [measureMeasurements, measure.onDelete, measure.hover]);
+  const quickEditMeasurements = useMemo(() => (measureMeasurements.length ? {
+    chips: measurementChips, clear: measure.clear,
+    marks: () => measureMeasurements.map(measurementMark).filter(Boolean),
+  } : null), [measureMeasurements, measurementChips, measure.clear]);
   const shell = useRendererShell({
     previewable: true, preview,
     view, services, resource: promptResource, modelKey: selectedKey, revisionKey: presentationRevisionKey,
@@ -1512,7 +1527,7 @@ function StepSurfaceBody({ view, data }) {
     rendererState: session.rendererState,
     // Delete takes the measurements Select picked, beside the drawing's ink the shell deletes.
     deleteSelection: measure.removeSelected,
-    history,
+    history, measurements: quickEditMeasurements,
     preserveInteractionPixelRatio: viewPolicy.wireframeMode || viewPolicy.edgesVisible,
     runtimeLifecycle: stepRuntimeLifecycle,
     onRuntimeAlert: handleViewerAlertChange,
@@ -3208,19 +3223,9 @@ function StepSurfaceBody({ view, data }) {
   const selectDisabled = viewerLoading || !selectedMeshData || referenceSelectionPending ||
     referenceSelectionUnavailable || topologySelectionDeferred;
   const toolIdle = viewerLoading || !selectedMeshData;
-  // Clears the results; Measure, in hand, stays the tool.
-  const removeMeasurements = () => measure.clear();
   const modelEffects = useModelTools({ modelKey: selectedEntry?.file, view: desiredScene.view,
     features: viewFeatures, store: viewSettingsStore, mesh: selectedDisplayMeshData,
-    disabled: toolIdle, selectedTool: tabToolMode, onSelect: handleSelectTabToolMode,
-    measure: {
-      // Up while Measure is the tool, empty or not, and kept while it has results.
-      shown: tabToolMode === TAB_TOOL_MODE.MEASURE || measureMeasurements.length > 0,
-      removable: measureMeasurements.length > 0,
-      onRemove: removeMeasurements,
-      controls: <MeasurePanel measurements={measureMeasurements} activeId={measure.activeId}
-        onActivate={measure.setActiveId} onDelete={measure.onDelete} />
-    } });
+    disabled: toolIdle, selectedTool: tabToolMode, onSelect: handleSelectTabToolMode });
   // Select's mode and options, and Measure's snapping: each a chevron after its tool's button on
   // the strip, whose menu takes the tool up as it sets the mode. One element until what it shows changes.
   const selectModeMenu = useMemo(() => <SelectModeMenu mode={selectionFilter} assembly={isAssemblyView} disabled={selectDisabled}

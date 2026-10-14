@@ -266,7 +266,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
   };
   frame.copyActionRef.current = copyAction;
   // Quick Edit's X: nothing picked and nothing drawn, as the person would clear each.
-  const clearQuickEdit = () => { onClearReferences?.(); if (frame.drawing.hasDrawing) frame.drawing.forget(); };
+  const clearQuickEdit = () => { onClearReferences?.(); if (frame.drawing.hasDrawing) frame.drawing.forget(); frame.measurements?.clear?.(); };
   const forgetDrawing = frame.drawing.forget;
   // Quick Edit's sketch: while Draw is up or there is ink. The drawing goes with a note whenever
   // there is one (its views and sketch file, `frame.quickEditPrompt`); its Drawing chip's X wipes it.
@@ -416,7 +416,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
 
               <ViewportTopRight notice={chromeHidden ? null : view.notice} belowStrip={!toolsHidden}>
                 {compact || !references ? null : <QuickEdit key={frame.modelKey} className="self-stretch" hidden={chromeHidden}
-                  resource={frame.resource} references={references} chips={referenceChips} nameReference={nameReference} sketch={sketch} prompt={frame.quickEditPrompt}
+                  resource={frame.resource} references={references} chips={referenceChips} nameReference={nameReference} sketch={sketch} measurements={frame.measurements} prompt={frame.quickEditPrompt}
                   onCopy={copyAction} onEscape={frame.escape} onClear={clearQuickEdit} disabled={viewerLoading || !scene} />}
               </ViewportTopRight>
 

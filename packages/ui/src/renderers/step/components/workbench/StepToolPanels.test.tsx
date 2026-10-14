@@ -138,7 +138,7 @@ const neutral = () => ({ exploded: { enabled: false, amount: 0 }, clip: { enable
 const part = (id: string) => ({ id, bounds: { min: [0, 0, 0], max: [10, 10, 10] } });
 let viewSettings = neutral();
 /** Select, Measure, Explode and Clip on a strip over a stack, and the Display settings they write — as the STEP surface composes them. */
-function Workbench({ measure = null as any, extraPanels = null as React.ReactNode }) {
+function Workbench({ extraPanels = null as React.ReactNode }) {
   const [view, setView] = useState(neutral);
   const [selectedTool, setTool] = useState('references');
   const [layout, change] = useLayout();
@@ -147,7 +147,7 @@ function Workbench({ measure = null as any, extraPanels = null as React.ReactNod
     exploded: { ...current.exploded, ...patch.exploded },
     clip: { ...current.clip, ...patch.clip } })) };
   const modelTools = useModelTools({ modelKey: 'fixture', view, features: { sections: ['exploded', 'clip'] }, store,
-    mesh: { parts: [part('a'), part('b')], bounds: { min: [0, 0, 0], max: [10, 10, 10] } }, disabled: false, selectedTool, onSelect: setTool, measure });
+    mesh: { parts: [part('a'), part('b')], bounds: { min: [0, 0, 0], max: [10, 10, 10] } }, disabled: false, selectedTool, onSelect: setTool });
   const own = (id: string, label: string) => ({ id, label, active: selectedTool === id, icon: <span>{label[0]}</span>, onSelect: () => setTool(id) });
   return <>
     <FloatingToolBar tools={[own('references', 'Select'), own('measure', 'Measure'), ...modelTools.tools]} />
@@ -278,18 +278,17 @@ it('a neutral effect leaves with the next tool, an applied one stays until clear
   expect(region('Explode controls')).toBeNull();
 });
 
-it('a short viewer: the tree gives way first, then the details panels, a kept effect never; the column is bounded by the stack and scrolls rather than cutting a panel', () => {
-  const measure = { shown: true, controls: <p>0 measurements</p>, onRemove() {} };
-  render(<Workbench measure={measure} extraPanels={<SelectPanels assembly references={[face]} />} />);
+it('a short viewer: the tree gives way first, a kept effect never; the column is bounded by the stack and scrolls rather than cutting a panel', () => {
+  render(<Workbench extraPanels={<SelectPanels assembly references={[face]} />} />);
   fireEvent.click(tool('Explode'));
   fireEvent.keyDown(slider('Explode amount'), { key: 'PageUp' });
   fireEvent.click(tool('Clip'));
   fireEvent.keyDown(slider('Clip amount'), { key: 'PageUp' });
-  expect(shown()).toEqual(['Features', 'Measure controls', 'Explode controls', 'Clip controls']);
-  // How each gives way (`ToolPanel.jsx`'s fit): the tree first, then the details, the kept effects never.
+  expect(shown()).toEqual(['Features', 'Explode controls', 'Clip controls']);
+  // How each gives way (`ToolPanel.jsx`'s fit): the tree first, the kept effects never.
   expect(Object.fromEntries([...document.querySelectorAll<HTMLElement>('[data-cad-tool-stack] section[data-tool-panel]')]
     .map(panel => [panel.getAttribute('aria-label'), panel.getAttribute('data-tool-panel')]))).toEqual({
-    Features: 'tree', 'Measure controls': 'details', 'Explode controls': 'fixed', 'Clip controls': 'fixed' });
+    Features: 'tree', 'Explode controls': 'fixed', 'Clip controls': 'fixed' });
   // The panels' column is exactly the stack's height, inside the stack's own scroll region.
   const column = features().parentElement!;
   expect(column.style.maxHeight).toBe(`${STACK_HEIGHT}px`);

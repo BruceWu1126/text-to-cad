@@ -110,6 +110,14 @@ class PromptFilesRouteTest(unittest.TestCase):
         status, _, content_type = self.call("GET", "/__cad/prompt-files/part-1.job.json")
         self.assertEqual((status, content_type), (200, "application/json; charset=utf-8"))
 
+    def test_a_prompts_measurements_are_drawn_over_every_view_its_job_renders(self) -> None:
+        self.release.set()
+        mark = {"start": [0, 0, 0], "end": [10, 0, 0], "label": "10.00 mm", "color": "#d59090"}
+        _, body, _ = self.call("POST", "/__cad/prompt-files", self.request(sketch=None, measurements=[mark]))
+        self.finished(json.loads(body)["id"])
+        jobs = json.loads((self.files / "part-1.job.json").read_text(encoding="utf-8"))["jobs"]
+        self.assertEqual([job["measurements"] for job in jobs], [[mark], [mark]])
+
     def test_a_prompt_without_a_sketch_names_none_and_the_next_prompt_is_numbered_on(self) -> None:
         self.release.set()
         _, first, _ = self.call("POST", "/__cad/prompt-files", self.request(sketch=None))
@@ -131,6 +139,9 @@ class PromptFilesRouteTest(unittest.TestCase):
             # snapshot's own preparation: a camera key it does not take, a pose a mesh does not have
             (self.request(views=[{"label": "a", "camera": {"projection": "perspective"}}]), "display.camera"),
             (self.request(views=[{"label": "a", "camera": "iso", "kinematics": {"x": 1}}]), "kinematics"),
+            (self.request(measurements={}), "measurements is null or a list"),
+            # a measurement snapshot would not draw: its own check, with the job
+            (self.request(measurements=[{"start": [0, 0], "end": [1, 0, 0], "label": "", "color": "#ffffff"}]), "measurements[0].start"),
             # a routine's frame reaches snapshot's own check: a mesh has none
             (self.request(views=[{"label": "a", "camera": "iso", "animation": {"clip": "spin", "time": 1}}]), "animation in its sidecar"),
         ):

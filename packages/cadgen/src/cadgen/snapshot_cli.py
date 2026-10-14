@@ -282,6 +282,45 @@ def option_display_modes(options: SnapshotOptions) -> frozenset[str] | None:
     return display_modes_for_kind(input_kind(Path(options.input))) if options.input else None
 
 
+# A measurement's closed vocabulary, and how many a job draws at most (the viewer's own bound).
+MEASUREMENT_KEYS = frozenset({"start", "end", "label", "color"})
+MAX_MEASUREMENTS = 64
+
+
+def normalize_measurements(value: object) -> list[dict[str, object]]:
+    """A job's ``measurements``: a list of ``{start, end, label, color}``, checked.
+
+    Each is a dimension between two world points (``start``, ``end``: three finite numbers),
+    its words (``label``) and its colour (``#rrggbb``), as the viewer's Measure drew it; the
+    page draws them over the picture with the same code.
+    """
+    if not isinstance(value, list):
+        raise SnapshotError("measurements is a list of {start, end, label, color}")
+    if len(value) > MAX_MEASUREMENTS:
+        raise SnapshotError(f"measurements: at most {MAX_MEASUREMENTS}")
+    marks: list[dict[str, object]] = []
+    for index, mark in enumerate(value):
+        at = f"measurements[{index}]"
+        if not is_plain_object(mark):
+            raise SnapshotError(f"{at} is {{start, end, label, color}}")
+        unknown = sorted(set(mark) - MEASUREMENT_KEYS)
+        if unknown:
+            raise SnapshotError(f"{at} has unknown field(s): {', '.join(unknown)}")
+        for key in ("start", "end"):
+            point = mark.get(key)
+            if not (isinstance(point, list) and len(point) == 3 and all(
+                    isinstance(axis, (int, float)) and not isinstance(axis, bool) and math.isfinite(axis) for axis in point)):
+                raise SnapshotError(f"{at}.{key} is [x, y, z]")
+        if not isinstance(mark.get("label"), str):
+            raise SnapshotError(f"{at}.label is its words")
+        color = mark.get("color")
+        if not (isinstance(color, str) and len(color) == 7 and color.startswith("#")
+                and all(digit in "0123456789abcdefABCDEF" for digit in color[1:])):
+            raise SnapshotError(f"{at}.color is #rrggbb")
+        marks.append({"start": list(mark["start"]), "end": list(mark["end"]), "label": mark["label"], "color": color})
+    return marks
+
+
 def load_sketch_option(value: object, *, cwd: Path) -> tuple[dict[str, object], str]:
     """``sketch`` in job form: the sketch object, and the file it was read from ("" inline).
 
@@ -901,6 +940,10 @@ def prepare_render_job(
         if mode != "view":
             raise SnapshotError("a sketch is ink drawn over a view; list mode draws nothing to draw it on")
         job["sketch"], sketch_source = load_sketch_option(job["sketch"], cwd=resolved_cwd)
+    if job.get("measurements") is not None:
+        if mode != "view":
+            raise SnapshotError("measurements are drawn over a view; list mode draws nothing to draw them on")
+        job["measurements"] = normalize_measurements(job["measurements"])
     normalized = normalize_common_job(
         job,
         mode=mode,
@@ -1318,6 +1361,11 @@ def check_drawing_render_job(
         raise SnapshotError(
             f"a sketch is ink drawn on a model's parts in 3D; {DRAWING_IS}, so {label} has no "
             "parts or space to draw it in."
+        )
+    if job.get("measurements") is not None:
+        raise SnapshotError(
+            f"measurements are dimensions between points in 3D; {DRAWING_IS}, so {label} has no "
+            "space to draw them in."
         )
     # The refusals every non-STEP input shares (selection, poses, clips, videos,
     # tessellation). Mode is already decided above, with a sentence about

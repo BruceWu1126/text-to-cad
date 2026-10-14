@@ -21,6 +21,8 @@ import { PickGlyph, compactSuffix, hasPickGlyph } from "../../inspector/pickGlyp
  * @property {string | (() => string)} [copy]  What a click on it copies: its reference, the file's path and its
  *   id; or what it makes at the click (Quick Edit's Drawing: the sketch file's JSON).
  * @property {import("react").ReactNode} [card]  What it is, for its card: its key measurements.
+ * @property {import("react").ReactNode} [icon]  Before its words: a measurement's ruler, in its colour.
+ * @property {string} [text]  The words beside an icon, where they are shorter than its accessible `label`.
  * @property {() => void} [onRemove]  Drops these picks from the selection.
  * @property {(on: boolean) => void} [onHover]  Lights these picks in the view while the pointer is on the chip.
  */
@@ -63,6 +65,9 @@ function useHoverOpen(card) {
 // What a chip shows: its compact name where it has one (its part, then a glyph and a number), else its words.
 function ChipText({ chip }) {
   const { compact } = chip;
+  if (chip.icon) return <span className="inline-flex min-w-0 max-w-full items-center gap-1 align-top">
+    {chip.icon}<span className="min-w-0 truncate">{chip.text ?? chip.label}</span>
+  </span>;
   if (!compact || !hasPickGlyph(compact.kind)) return chip.label;
   return <span className="inline-flex min-w-0 max-w-full items-center gap-1 align-top" data-chip-compact="">
     {compact.name ? <span className="min-w-0 truncate">{compact.name}</span> : null}

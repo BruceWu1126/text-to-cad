@@ -92,6 +92,10 @@ SUPPORTED_JOB_KEYS = frozenset(
         # (SNAPSHOTS.md, "Sketches"). The file is read here and the object handed to
         # the page, which draws each mark on its part with the viewer's own code.
         "sketch",
+        # Measure's results drawn over the picture: [{start, end, label, color}], the
+        # dimension between two world points, labelled and coloured as the viewer drew it
+        # (SNAPSHOTS.md, "Measurements"). The page draws them with the viewer's own code.
+        "measurements",
         "scale",
         "debug",
         "timeoutSeconds",

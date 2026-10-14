@@ -140,8 +140,10 @@ A note from the viewer's Quick Edit reads: what the person wants, then
 `File:` (the document it is about), `References:` (one per line, as above), and
 the files of what they looked at: `Current view:` and `View 1:`… (PNGs of the
 view on screen and each view a sketch was drawn in, the sketch drawn on them —
-attached as images where the chat takes them), `Views (cadgen snapshot --job):`
-(a snapshot job file of those views) and `Sketch:` (the sketch itself).
+attached as images where the chat takes them, the person's measurements drawn
+on them), `Views (cadgen snapshot --job):` (a snapshot job file of those views;
+its `measurements` give each one's exact ends and reading) and `Sketch:` (the
+sketch itself).
 `cadgen snapshot --job <job file>` renders the same views again, sketch
 included; after an edit, render it to check the change where the person looked
 ([sketches and Quick Edit views](references/snapshot-review.md#sketches-and-quick-edit-views)).

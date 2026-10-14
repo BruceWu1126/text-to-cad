@@ -75,6 +75,7 @@ import {
 import { PHOTOGRAPHIC_STUDIO_MATERIAL_SETTINGS } from "./photographicStudioRig.js";
 import { validateSnapshotRenderJob } from "./snapshotJobValidation.js";
 import { createSketchLayer, normalizeSketch, SKETCH_REFERENCE_HEIGHT_PX } from "./sketch.js";
+import { drawMeasurementMark, measurementMarkLayout, normalizeMeasurementMarks } from "../lib/viewer/measureDimension.js";
 
 const DEFAULT_RENDER_SCALE = 1;
 const RENDER_SCENE_SCALE_SETTINGS = Object.freeze({
@@ -179,8 +180,28 @@ function configureRenderer(width, height, job, context) {
   });
 }
 
-function rendererDataUrlWithOptionalLabel(renderer, label, job, size) {
-  return sharedRendererDataUrlWithOptionalLabel(renderer, label, job, size);
+function rendererDataUrlWithOptionalLabel(renderer, label, job, size, overlay = null) {
+  return sharedRendererDataUrlWithOptionalLabel(renderer, label, job, size, overlay);
+}
+
+// The job's measurements (`job.measurements`, Measure's results as Quick Edit hands them on), drawn
+// over the picture with the viewer's own code (`drawMeasurementMark`), every one labelled: each line
+// as heavy against this output's height as it was against a viewer `SKETCH_REFERENCE_HEIGHT_PX` tall.
+function measurementsOverlay(job, camera) {
+  if (!Array.isArray(job.measurements) || !job.measurements.length) return null;
+  const marks = normalizeMeasurementMarks(job.measurements);
+  return (context, width, height) => {
+    const scale = height / SKETCH_REFERENCE_HEIGHT_PX;
+    const rect = { left: 0, top: 0, width: width / scale, height: height / scale };
+    camera.updateMatrixWorld?.();
+    context.save();
+    context.scale(scale, scale);
+    for (const mark of marks) {
+      const layout = measurementMarkLayout(mark, camera, rect);
+      if (layout) drawMeasurementMark(context, layout, mark, { active: true, bounds: rect });
+    }
+    context.restore();
+  };
 }
 
 export function disposeSnapshotSceneResources(scene, modelRoot = null, extraTextures = []) {
@@ -982,7 +1003,8 @@ export async function captureModel(viewport, captureOptions = {}) {
     // wait for that work, so this is image readback/encoding, not pure CPU PNG.
     stageStarted = performance.now();
     const viewLabel = String(output.viewLabel || output.label || resolvedCamera.name || "").toUpperCase();
-    const dataUrl = rendererDataUrlWithOptionalLabel(viewport.renderer, viewLabel, job, { width, height });
+    const dataUrl = rendererDataUrlWithOptionalLabel(viewport.renderer, viewLabel, job, { width, height },
+      measurementsOverlay(job, renderCamera));
     if (outputTimings) {
       outputTimings.encodeImageMs = Math.round(performance.now() - stageStarted);
       stageTimings.outputs.push(outputTimings);

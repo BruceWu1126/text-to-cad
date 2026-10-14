@@ -811,7 +811,9 @@ export function drawBurnedInLabel(context, label, width, height, {
   context.restore();
 }
 
-export function rendererDataUrlWithOptionalLabel(renderer, label, job, outputSize = {}) {
+// `overlay(context, width, height)`: what is drawn over the picture in output pixels, before its
+// label (a job's measurements, `renderMeshScene.js`).
+export function rendererDataUrlWithOptionalLabel(renderer, label, job, outputSize = {}, overlay = null) {
   const source = renderer.domElement;
   // `setPixelRatio` deliberately makes the WebGL drawing buffer larger than
   // the requested output for supersampling. The snapshot contract, however,
@@ -820,7 +822,7 @@ export function rendererDataUrlWithOptionalLabel(renderer, label, job, outputSiz
   const width = Math.max(1, Math.floor(toFiniteNumber(outputSize.width, toFiniteNumber(source.width, 1))));
   const height = Math.max(1, Math.floor(toFiniteNumber(outputSize.height, toFiniteNumber(source.height, 1))));
   const needsResample = source.width !== width || source.height !== height;
-  if (!needsResample && !shouldBurnInViewLabels(job)) {
+  if (!needsResample && !shouldBurnInViewLabels(job) && !overlay) {
     return dataUrlFromRenderer(renderer);
   }
   const canvas = document.createElement("canvas");
@@ -835,6 +837,7 @@ export function rendererDataUrlWithOptionalLabel(renderer, label, job, outputSiz
     context.imageSmoothingQuality = "high";
   }
   context.drawImage(source, 0, 0, source.width, source.height, 0, 0, width, height);
+  overlay?.(context, width, height);
   if (shouldBurnInViewLabels(job)) {
     drawBurnedInLabel(context, label, width, height);
   }

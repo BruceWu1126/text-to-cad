@@ -942,15 +942,14 @@ Escape clears the
 selection after any open menu has been dismissed. Input fields
 keep their own Escape behaviour.
 
-Measure starts as an exclusive picking tool, and its **Measure** panel is up at once,
-empty: its heading carries the snapping menu (All, Points, Edges, Faces:
-`MeasureModeMenu` in `SelectionModes.jsx`, over `ToolModeMenu`, passed as the panel's
-`actions`), and its button shows the mode in hand. Completed rulers are the panel's body
-(`MeasurePanel.jsx`).
-Leaving Measure cancels its draft but retains completed rulers, its panel and the
-button highlight (`useModelTools`' `measure.shown`); a mode chosen in the kept panel takes
-Measure up again without clearing. A press on Measure while it is up — results or none —
-or the panel's X clears it and puts it down. Panels use the shared `ToolPanel`.
+Measure starts as an exclusive picking tool with no panel: its snapping menu (All, Points,
+Edges, Faces: `MeasureModeMenu` in `SelectionModes.jsx`, over `ToolModeMenu`) is its chevron
+on the strip, and its button shows the mode in hand. Completed rulers are Quick Edit's chips
+(`StepSurface.jsx`'s `measurementChips`, their card `MeasurementCard.jsx`), handed to the shell
+as `useRendererShell`'s `measurements` with their marks (`measureDimension.js`'s
+`measurementMark`): the note's prompt files draw them over every view
+(`measurements` in its job), with the code the overlay draws them with (`drawMeasurementMark`).
+Leaving Measure cancels its draft but keeps completed rulers, under every other tool. Panels use the shared `ToolPanel`.
 
 Clip mode colours cut surfaces amber using stencil winding over the display
 meshes. Holes remain open for closed, consistently oriented solids. This is a
