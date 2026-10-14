@@ -270,8 +270,8 @@ What the user points at in the viewer reaches you as a board reference
 ## Handoff
 
 Report the files written, the build's last line (built or draft, and what is unrouted), the
-checks that ran (KiCad's ERC and DRC run on every build; simulations you ran), the review's
-suggestions you left (parts without an LCSC or MPN field among them), and assumptions (ratings, footprints chosen, rules). Show the
+checks that ran (KiCad's ERC and DRC run on every build; simulations you ran; $pcb-dfm if
+it was asked for), and assumptions (ratings, footprints chosen, rules). Show the
 board and schematic ([Show the model](#show-the-model)).
 
 ## References
@@ -284,3 +284,5 @@ board and schematic ([Show the model](#show-the-model)).
 - [Parts](references/parts.md): symbols, footprints, project libraries and the fields a BOM orders by.
 - [Imported boards](references/imported-boards.md): checking, editing and ordering a board drawn in KiCad.
 - [Inspection](references/inspection.md): board and schematic references from the viewer, `pcb.read_board`, `pcb.read_schematic`, and the script line behind each part.
+
+Before ordering, $pcb-dfm reviews the board for fabrication, assembly and sourcing.

@@ -88,8 +88,8 @@ board.no_connect(u1["NC"], *u1.unconnected())
   pad). KiCad's ERC otherwise reports its power inputs as undriven.
 - `current=2.0`: the net's current in amperes, positive, one value per net. KiCad keeps no
   current per net, so it is kept in the `.kicad_pro` under `"cadgen": {"net_currents": ...}`
-  for the review, which warns where the net's narrowest track is thinner than IPC-2221 asks
-  (1 oz outer copper, 10 °C rise). It sets no width: size the track or net class yourself.
+  for `cadgen pcb review` ($pcb-dfm), which warns where the net's narrowest track is thinner
+  than IPC-2221 asks (1 oz outer copper, 10 °C rise). It sets no width: size the track or net class yourself.
 - Every pin must be connected or marked no-connect: KiCad's ERC fails a floating pin.
 
 ## Placement

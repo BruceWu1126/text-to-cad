@@ -47,7 +47,8 @@ footprint alike:
 | `Manufacturer` | with the MPN, for a BOM review |
 | `Description` | a person reading the BOM |
 
-Each build's review adds two sourcing suggestions, advice that never blocks a build:
+`cadgen pcb review board.kicad_pcb` (the $pcb-dfm skill's measurement) makes two sourcing
+suggestions, advice that never blocks a build or an export:
 
 - **Part without a part number**: one suggestion naming every fitted part with pads and
   neither an `LCSC` nor an `MPN` field. Those two exact names (any case) are what the BOM's
@@ -59,5 +60,5 @@ Each build's review adds two sourcing suggestions, advice that never blocks a bu
   footprints. One of them has the wrong part number, or the wrong footprint: an assembler
   places one package for it.
 
-Both show in the viewer's Checks panel, with the parts selected. Choose parts the fab
+Each names its parts by board reference. Choose parts the fab
 stocks: for JLCPCB, its "basic" parts (no setup fee) for passives and common ICs.

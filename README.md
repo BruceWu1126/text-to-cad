@@ -337,6 +337,7 @@ robot description files, simulation, and local review.
 | Engineering Drawing | Dimensioned engineering drawings from a part, as a PDF: views, hidden lines, dimensions, hole callouts, title block. | [skills/engineering-drawing](skills/engineering-drawing/SKILL.md) |
 | DXF          | Creates 2D DXF drawings like profiles, templates, gaskets, and cut layouts from Python sources or CAD geometry.                                    | [skills/dxf](skills/dxf/SKILL.md)                   |
 | PCB          | Designs circuit boards in Python as KiCad projects that KiCad checks on every build: schematic, routed board, Gerbers, BOM, 3D for the enclosure. | [skills/pcb](skills/pcb/SKILL.md)                   |
+| PCB DFM      | Reviews a KiCad board before ordering: KiCad's checks, decoupling, track current, sourcing and the fab's limits. | [skills/pcb-dfm](skills/pcb-dfm/SKILL.md)           |
 | Harness      | Designs wiring harnesses in Python as WireViz documents checked against the boards they plug into: pinouts, wire colours, gauges, lengths, BOM. | [skills/harness](skills/harness/SKILL.md)           |
 | URDF         | Writes robot structure files with links, joints, limits, inertials, and meshes.                                                                    | [skills/urdf](skills/urdf/SKILL.md)                 |
 | SRDF         | Adds MoveIt planning groups, end effectors, poses, and collision rules to a URDF.                                                                  | [skills/srdf](skills/srdf/SKILL.md)                 |

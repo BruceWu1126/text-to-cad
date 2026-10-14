@@ -13,8 +13,9 @@ cadgen pcb validate PCB/imported/controller.kicad_pcb     # ERC + DRC with parit
 cadgen pcb snapshot PCB/imported/controller.kicad_pcb tmp/controller.png
 ```
 
-`validate` never writes into the project. It reports KiCad's errors and the review's
-suggestions (decoupling, track current, [sourcing](parts.md)).
+`validate` never writes into the project. It reports KiCad's errors and warnings; before
+ordering, review the board with $pcb-dfm (decoupling, track current, [sourcing](parts.md),
+the fab's limits).
 
 ## Edit it
 

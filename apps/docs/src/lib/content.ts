@@ -159,6 +159,12 @@ export const skillGroups = [
       "Designs circuit boards in Python as KiCad projects that KiCad checks on every build: schematic, routed board, Gerbers, BOM, 3D for the enclosure.",
   },
   {
+    name: "PCB DFM",
+    path: "skills/pcb-dfm",
+    summary:
+      "Reviews a KiCad board before ordering: KiCad's checks, decoupling, track current, sourcing and the fab's limits.",
+  },
+  {
     name: "Harness",
     path: "skills/harness",
     summary:
