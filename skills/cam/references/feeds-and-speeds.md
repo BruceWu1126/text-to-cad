@@ -33,13 +33,33 @@ Hole makers move along their axis, so their feed is per revolution and their plu
 
 | Tool | Surface speed | Feed per revolution |
 | --- | --- | --- |
-| `drill`, `spot_drill`, `counterbore` | 0.7 x `Vc` | 3 x `fz` (two lips, each about 1.5 x an end mill's chip) |
+| `drill`, `spot_drill` | 0.7 x `Vc` | 3 x `fz` (two lips, each about 1.5 x an end mill's chip) |
+| `counterbore` | 0.7 x `Vc` | 1.5 x `fz`, half a drill's: its whole flat face cuts at once, the full width of the counterbore |
 | `reamer` | two thirds of the drill's | twice the drill's |
 | `boring_bar`, `back_bore` | 0.7 x `Vc` | 1.5 x `fz` |
 | `tap` | 0.08 x `Vc` (already a tap's own speed: never derated again for HSS) | exactly the pitch |
 
 A tap feeds exactly `rpm x pitch`: anything else strips the thread or breaks the tap. A tap's
 `feed_mm_min` that is not `rpm x pitch` is refused; set `rpm` instead.
+
+## Stepdown and stepover
+
+The feed is per tooth; how much of the tool is in the cut is the stepdown (how deep each level goes)
+and the stepover (how far apart the passes are). The defaults are moderate; change them for the
+machine in front of you:
+
+| Cut | Default | A rigid mill, carbide | A small router or hobby mill, or an HSS cutter |
+| --- | --- | --- | --- |
+| `facing`, face mill | stepover 0.7 x D, stepdown 1 mm | 0.7 to 0.8 x D; 1 to 3 mm deep | stepover 0.5 x D; 0.5 mm deep |
+| `facing`, end mill | stepover 0.6 x D; stepdown half the flutes, at most 2 mm (carbide), 1 mm (HSS) | 0.6 to 0.75 x D; up to 0.5 x D deep | 0.4 to 0.5 x D; 0.3 to 0.5 mm deep |
+| `contour_2d`, `pocket_2d` levels | stepdown 0.5 x D | 0.5 to 1 x D deep (the full flute length with a light stepover is adaptive's, phase 2) | 0.1 to 0.25 x D deep in aluminium, more in wood and plastics |
+| `pocket_2d` stepover | 0.4 x D | 0.4 to 0.5 x D | 0.25 to 0.4 x D |
+
+A small router's spindle and frame flex: lighter cuts at the worked-out chip load beat deep ones at
+a lower feed, which rub. A contour that runs full width (its first level round an outline is a slot
+the width of the tool) loads the tool as hard as a slot: on a light machine take that level
+shallower. A `full_slot` warning says when a pocket's links run full width for long. Ask how rigid
+the machine is when it matters, and say what you chose.
 
 ## The machine's limits
 

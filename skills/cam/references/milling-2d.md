@@ -26,8 +26,8 @@ Tools: `face_mill`, `flat_endmill`, `bull_endmill`. Targets: none (the whole sto
 
 | Key | Meaning | Default |
 | --- | --- | --- |
-| `stepover` | the distance between rows, as a fraction of the tool's diameter (over 0, up to 1) | 0.7 for a face mill, 0.4 for an end mill |
-| `stepdown_mm` | the depth of each level; the last is exactly the floor | 1 |
+| `stepover` | the distance between rows, as a fraction of the tool's diameter (over 0, up to 1) | 0.7 for a face mill, 0.6 for an end mill |
+| `stepdown_mm` | the depth of each level; the last is exactly the floor | half the flutes, at most 2, for a carbide end mill; 1 otherwise |
 | `pattern` | `zigzag` (back and forth, staying down where the turn is in air) or `one_way` (lift and come back, every row cut the same way) | `zigzag` |
 | `depth_mm` / `z_mm` | the floor: below the stock top, or a height | the part's top |
 | `finish_mm` | leave this much for a last pass of its own | 0 |

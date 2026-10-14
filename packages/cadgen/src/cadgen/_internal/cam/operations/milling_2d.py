@@ -7,13 +7,13 @@ milling throughout (the material on the tool's right, the spindle turning clockw
 ``facing``
     Flattens the stock (``all``, the default) or a ``region`` down to the part's top, or to ``z_mm`` (setup frame) or
     ``depth_mm`` below the stock top. Rows across the setup's X, ``stepover`` apart (a fraction of the tool's
-    diameter: 0.7 for a face mill, 0.4 for an end mill). Facing the whole stock, each level's rows cover the stock
+    diameter: 0.7 for a face mill, 0.6 for an end mill, :data:`FACING_STEPOVER`). Facing the whole stock, each level's rows cover the stock
     standing between that level and the one above (a bar lying across the tool widens as it goes down) and run off
     it at both ends; ``pattern`` ``zigzag`` (the default: back and forth, staying down where the turn is in air) or
     ``one_way`` (lift and come back, every row cut the same way). In a region the tool's centre stays inside it, so
     the tool hangs over its edge by a tenth of its diameter and no further; zigzag rows stay down across the turns,
-    one-way rows lift just clear of the material to go back. ``stepdown_mm`` (1 mm) per level, the last exactly the
-    floor; ``finish_mm`` leaves that much for a last pass on its own. Refused (``too_deep``) when what the tool
+    one-way rows lift just clear of the material to go back. ``stepdown_mm`` per level (1 mm; for a carbide end mill
+    half its flutes, at most 2 mm: :func:`facing_stepdown`), the last exactly the floor; ``finish_mm`` leaves that much for a last pass on its own. Refused (``too_deep``) when what the tool
     sweeps at the floor would cut the part.
 
 ``contour_2d``
@@ -132,6 +132,24 @@ class FacingParams:
     finish_mm: float
 
 
+#: A facing's default stepover, as a fraction of the tool's diameter: a face mill's inserts reach 0.7 of it; an end
+#: mill 0.6, so its corners overlap the last row without leaving a ridge.
+FACING_STEPOVER = {"face_mill": 0.7, "flat_endmill": 0.6, "bull_endmill": 0.6}
+#: A facing's default stepdown, mm: 1, or for a carbide end mill half its flutes, at most 2 (a skim off a saw-cut
+#: top, which a rigid carbide cutter takes in one pass).
+FACING_STEPDOWN_MM = 1.0
+FACING_STEPDOWN_MAX_MM = 2.0
+
+
+def facing_stepdown(tool) -> float:
+    """The default depth of each facing level for ``tool``, mm (see :data:`FACING_STEPDOWN_MM`)."""
+    if tool.type in ("flat_endmill", "bull_endmill") and tool.material == "carbide":
+        from cadgen._internal.cam.tools import profile
+
+        return min(profile(tool).cutting_length_mm / 2, FACING_STEPDOWN_MAX_MM)
+    return FACING_STEPDOWN_MM
+
+
 def facing_floor(params: FacingParams, setup) -> float:
     """The z a facing cuts down to in its placed setup (a SetupFrame): ``z_mm``, ``depth_mm`` under the stock top,
     else the part's top."""
@@ -151,10 +169,10 @@ class FacingOperation(OperationBase):
 
     def parse(self, raw: dict, ctx: ParseContext) -> FacingParams:
         known(raw, self.keys, where=ctx.where, takes=f"facing takes {', '.join(sorted(self.keys))}")
-        stepover = fraction(raw, "stepover", ctx.where, 0.7 if ctx.tool.type == "face_mill" else 0.4)
+        stepover = fraction(raw, "stepover", ctx.where, FACING_STEPOVER.get(ctx.tool.type, 0.6))
         pattern = choice(raw.get("pattern", "zigzag"), ("zigzag", "one_way"), where=f"{ctx.where}.pattern")
         depth, z = floor_keys(raw, ctx.where)
-        return FacingParams(stepover, _stepdown(raw, ctx, 1.0), pattern, depth, z,
+        return FacingParams(stepover, _stepdown(raw, ctx, facing_stepdown(ctx.tool)), pattern, depth, z,
                             mm(raw, "finish_mm", ctx.where, 0.0, zero=True))
 
     def plan(self, params: FacingParams, ctx: "PlanContext") -> "Planned":

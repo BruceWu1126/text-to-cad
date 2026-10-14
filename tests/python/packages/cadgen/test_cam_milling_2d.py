@@ -379,6 +379,20 @@ class Elsewhere(unittest.TestCase):
         self.plan(self.block, document)
 
 
+class FacingDefaults(unittest.TestCase):
+    def test_stepover_and_stepdown_suit_the_tool(self):
+        from cadgen._internal.cam.job import parse_job
+
+        tools = [{"id": "T1", "type": "face_mill", "diameter_mm": 50},
+                 {"id": "T2", "type": "flat_endmill", "diameter_mm": 10, "flute_length_mm": 22},
+                 {"id": "T3", "type": "flat_endmill", "diameter_mm": 3, "flute_length_mm": 3},
+                 {"id": "T4", "type": "flat_endmill", "diameter_mm": 10, "material": "hss"}]
+        job = parse_job(dict(JOB, tools=tools, operations=[{"op": "facing", "tool": t["id"]} for t in tools]))
+        got = [(op.params.stepover, op.params.stepdown_mm) for op in job.operations]
+        # A face mill 0.7 of its diameter, an end mill 0.6; a carbide end mill half its flutes deep, at most 2 mm.
+        self.assertEqual(got, [(0.7, 1.0), (0.6, 2.0), (0.6, 1.5), (0.6, 1.0)])
+
+
 def bulging_block_step(directory, name: str = "bulging"):
     """A 60 x 40 x 10 mm block standing on z = 0, centred, its top and bottom edges filleted R4.99: its sides stand
     straight for only 0.02 mm at mid-height and lean in above and below."""

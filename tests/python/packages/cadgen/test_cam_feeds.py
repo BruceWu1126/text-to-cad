@@ -50,6 +50,12 @@ class FeedsTest(unittest.TestCase):
         self.assertEqual(feeds_for(Tool("T3", 3, "tap", "hss", **tap), AL, MILL).rpm,
                          feeds_for(Tool("T3", 3, "tap", **tap), AL, MILL).rpm)
 
+    def test_a_counterbore_feeds_half_a_drills_feed_per_rev(self):
+        drill = feeds_for(Tool("T2", 2, "drill", diameter_mm=11), AL, MILL)
+        cbore = feeds_for(Tool("T5", 5, "counterbore", diameter_mm=11, size={"pilot_diameter_mm": 6.6}), AL, MILL)
+        self.assertEqual(cbore.rpm, drill.rpm)
+        self.assertAlmostEqual(cbore.feed_mm_min / cbore.rpm, 0.5 * drill.feed_mm_min / drill.rpm)
+
     def test_a_machine_too_slow_clamps_rpm_and_says_so(self):
         router = Machine("router", 3, "grbl", max_rpm=12000, max_feed_mm_min=10000)
         feeds = feeds_for(ENDMILL, AL, router, where="operations[0]")

@@ -17,8 +17,9 @@ The arithmetic, for a milling cutter of diameter ``D`` mm with ``z`` flutes:
 
 Hole makers move along their axis, so their feed is per revolution and their plunge is their feed:
 
-- A drill, spot drill or counterbore runs at 0.7 x ``Vc``, feeding ``3 x fz`` mm per rev (two lips, each taking
-  about 1.5 x an end mill's chip of the same diameter).
+- A drill, spot drill or counterbore runs at 0.7 x ``Vc``. A drill or spot drill feeds ``3 x fz`` mm per rev (two
+  lips, each taking about 1.5 x an end mill's chip of the same diameter); a piloted counterbore half that,
+  ``1.5 x fz``: its whole flat face cuts at once, the full width of the counterbore.
 - A reamer runs at two thirds of the drill's speed and twice its feed per rev (the handbook's rule of thumb).
 - A boring bar or back-bore is a single point at 0.7 x ``Vc``, ``1.5 x fz`` per rev.
 - A tap runs at 0.08 x ``Vc`` and feeds exactly ``rpm x pitch``: anything else strips the thread or breaks the
@@ -173,6 +174,8 @@ def feeds_for(tool: "Tool", material: "Material", machine: "Machine", *, where: 
     if tool.type == "tap":
         pitch = float(tool.size["pitch_mm"])
         per_rev, chip = pitch, None
+    elif tool.type == "counterbore":
+        per_rev = chip = 1.5 * base_chip     # its whole face cuts: half a drill's feed per rev
     elif tool.type in _DRILLS:
         per_rev = chip = 3.0 * base_chip
     elif tool.type == "reamer":
