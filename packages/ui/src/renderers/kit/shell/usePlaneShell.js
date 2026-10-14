@@ -91,12 +91,11 @@ export function usePlaneFileView({ view, rendererState = null }) {
  *   shell writes it to the clipboard (`copyText`), as the renderer's own Copy buttons do.
  * @param {() => Promise<Blob>} [options.capture]  The view as a picture, when it is more than `plane.capture`.
  * @param {{ active?: boolean, handle?: () => boolean }} [options.escape]  Escape, innermost first.
- * @param {object | null} [options.reportAlert]  The renderer's own alert, under a load's and a failed action's.
  * @param {boolean} [options.displayInView]  The picture has Display settings of its own, the person's, in the view.
  */
 export function usePlaneShell({
   view, services, resource, modelKey, plane, load, words, toolModes = null, tool = null, live = EMPTY,
-  references = null, selectionText = null, capture: captureView = null, escape = EMPTY, reportAlert = null, displayInView = false
+  references = null, selectionText = null, capture: captureView = null, escape = EMPTY, displayInView = false
 }) {
   const host = useViewerHost();
   const destination = usePromptDestination();
@@ -130,10 +129,8 @@ export function usePlaneShell({
   const [actionError, setActionError] = useState(null);
   const failAction = useCallback((title, error) => setActionError({ title, message: error instanceof Error ? error.message : String(error) }), []);
   const clearActionError = useCallback((title) => setActionError((current) => (current?.title === title ? null : current)), []);
-  // A failure, the picture's or an action's, owns the card; the renderer's report has it otherwise.
-  const cardAlert = load.alert || (actionError ? { severity: "error", kind: "status", blocking: false, title: actionError.title, message: actionError.message } : null)
-    || reportAlert;
-  const showingReport = Boolean(reportAlert) && cardAlert === reportAlert;
+  // A failure, the picture's or an action's, owns the card.
+  const cardAlert = load.alert || (actionError ? { severity: "error", kind: "status", blocking: false, title: actionError.title, message: actionError.message } : null);
   const dismissal = useAlertDismissal(cardAlert, { hasContent: load.shown, scope: modelKey, onNavigationActionsChange: view.onNavigationActionsChange });
 
   // ---- the clipboard and the prompt -------------------------------------------
@@ -220,7 +217,7 @@ export function usePlaneShell({
     frame: {
       view, plane, modelKey, resource, load, rootRef, rootElement, chromeHidden, compact, toolStack, changeToolStack,
       references, copyAction, copyDrawing, copyShortcut: host.environment?.platform === "darwin" ? "⌘C" : "Ctrl+C",
-      escape: escapeView, drawToolActive, draw, sketch, cardAlert, showingReport, dismissal
+      escape: escapeView, drawToolActive, draw, sketch, cardAlert, dismissal
     }
   };
 }

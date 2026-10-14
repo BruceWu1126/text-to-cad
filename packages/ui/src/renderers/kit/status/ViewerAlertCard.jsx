@@ -84,9 +84,9 @@ export function useAlertDismissal(alert, { hasContent = false, scope = "", onNav
  * the host has a tracker (`links.issues`), Report Issue beside it opens a new issue saying what the
  * card says, about `file` (its path as the alert names it, absolute: the issue names only the file,
  * and carries no path of this machine); an alert about the design, not the viewer (`report: false`),
- * has none. `body`, after the alert's words, is what the renderer lists under it (a board's findings).
+ * has none.
  */
-export default function ViewerAlertCard({ alert: shown, hasContent, onReload, file = "", dismissed = false, onDismiss = null, body = null }) {
+export default function ViewerAlertCard({ alert: shown, hasContent, onReload, file = "", dismissed = false, onDismiss = null }) {
   const mobile = useViewerMobile();
   const host = useContext(ViewerHostContext);
   const follow = useFollow(host?.links);
@@ -120,7 +120,6 @@ export default function ViewerAlertCard({ alert: shown, hasContent, onReload, fi
             {shown.message ? <p className="whitespace-pre-line break-words">{shown.message}</p> : null}
             {readableReason ? <p className="break-words text-foreground">{readableReason}</p> : null}
             {shown.recovery ? <p className="break-words">{shown.recovery}</p> : null}
-            {body}
             {shown.details ? (
               <details className="text-xs">
                 <summary className="w-fit cursor-pointer rounded-sm text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">Details</summary>

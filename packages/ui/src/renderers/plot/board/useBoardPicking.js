@@ -16,7 +16,7 @@ const MEASURE_KINDS = Object.freeze({ all: null, pads: ["pads"], copper: ["coppe
  *
  * The overlay is drawn in the plot's own frame: what is isolated first, everything else stepped back
  * (`useBoardIsolation.js`), then the hover, the selection (a net or a check in focus steps the rest
- * back), a check's markers and the measurements.
+ * back) and the measurements.
  *
  * @param {object} options
  * @param {{ transformRef: { current: object | null }, canvasRef: { current: HTMLCanvasElement | null },
@@ -39,7 +39,7 @@ export function useBoardPicking({ view, index, sheet, toolMode, selection, measu
   // ---- what the canvas draws over the plot -------------------------------------
   // A new overlay is a new layer, which the view paints; the hover and Measure's draft are read
   // from their refs, so a pointer move repaints without a render.
-  const { resolved, dim, markers, hoverRef } = selection;
+  const { resolved, dim, hoverRef } = selection;
   const { start, measurements, draftRef } = measure;
   const overlay = useCallback((ctx, frame) => {
     if (!index || !frame.transform) return;
@@ -49,11 +49,11 @@ export function useBoardPicking({ view, index, sheet, toolMode, selection, measu
       drawBoardOverlay(ctx, index, { ...base, dim: true, selection: isolated, colors: { ...colors, selection: colors.hover } });
     }
     drawBoardOverlay(ctx, index, {
-      ...base, hover: hoverRef.current, selection: resolved, dim: dim && !isolated.length, markers,
+      ...base, hover: hoverRef.current, selection: resolved, dim: dim && !isolated.length,
       measure: start ? { points: [start.page], draft: draftRef.current?.page ?? null } : null, placement,
     });
     for (const measurement of measurements) drawBoardOverlay(ctx, index, { ...base, measure: { points: [measurement.a.page, measurement.b.page] } });
-  }, [index, isolated, hoverRef, resolved, dim, markers, start, draftRef, measurements, mirrorX, placement]);
+  }, [index, isolated, hoverRef, resolved, dim, start, draftRef, measurements, mirrorX, placement]);
 
   // ---- from the pane to the board ---------------------------------------------
   const toPage = useCallback(({ x, y }) => {

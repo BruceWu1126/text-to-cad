@@ -50,14 +50,14 @@ function NavbarFrame({ alert }: { alert: object | null }) {
   const { dismissed, dismiss } = useAlertDismissal(alert, { hasContent: true, onNavigationActionsChange: setActions });
   return <>
     {actions.map(({ id, label, icon: Icon, onInvoke }) => <button key={id} type="button" aria-label={label} onClick={onInvoke}><Icon /></button>)}
-    <ViewerAlertCard alert={alert} hasContent dismissed={dismissed} onDismiss={dismiss} onReload={() => {}} body={<p>The body</p>} />
+    <ViewerAlertCard alert={alert} hasContent dismissed={dismissed} onDismiss={dismiss} onReload={() => {}} />
   </>;
 }
 
 it('a card put away leaves its icon in the navbar, which brings it back; a changed alert opens again', () => {
   const first = { severity: 'error', blocking: false, title: '1 to fix', message: '', key: 'a' };
   const { rerender } = render(<NavbarFrame alert={first} />);
-  expect(screen.getByRole('alert').textContent).toContain('The body');
+  expect(screen.getByRole('alert')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
   expect(screen.queryByRole('alert')).toBeNull();
   const icon = screen.getByRole('button', { name: '1 to fix' });
@@ -76,9 +76,9 @@ it('a card put away leaves its icon in the navbar, which brings it back; a chang
 it('a card saying what a design has against it offers no Report Issue', () => {
   const alert = { severity: 'warning', blocking: false, title: '1 suggestion', message: '', report: false };
   render(<ViewerHostContext.Provider value={testHost({ links: viewerLinks({ version: '0.7.5' }) }) as any}>
-    <ViewerAlertCard alert={alert} hasContent onReload={() => {}} body={<p>A row</p>} />
+    <ViewerAlertCard alert={alert} hasContent onReload={() => {}} />
   </ViewerHostContext.Provider>);
-  expect(screen.getByRole('alert').textContent).toContain('A row');
+  expect(screen.getByRole('alert')).toBeTruthy();
   expect(screen.queryByRole('link', { name: 'Report Issue' })).toBeNull();
 });
 

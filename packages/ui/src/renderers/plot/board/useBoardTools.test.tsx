@@ -97,24 +97,6 @@ it('a selection made from another tool takes Select up cleanly, and keeps only w
   expect(view.result.current.selection.selection).toEqual(['#R1.2', '#@x1y2']);
 });
 
-it('a check in focus stays on that check in a new revision, wherever it is listed, and goes with it', () => {
-  const view = mount();
-  act(() => view.result.current.selection.select(['#R1.2'], { finding: 1 }));
-  expect(view.result.current.selection.finding.type).toBe('unconnected_items');
-  // KiCad now lists a new check first: the one in focus is the same check, one place down.
-  const added = { check: 'drc', severity: 'error', type: 'clearance', description: 'Clearance', items: [] };
-  view.rerender({ index: indexOf(board([added, ...FINDINGS])) });
-  expect(view.result.current.selection.finding.type).toBe('unconnected_items');
-  // Fixed: no check in focus, and none of the others in its place.
-  view.rerender({ index: indexOf(board([added, FINDINGS[0]])) });
-  expect(view.result.current.selection.finding).toBeNull();
-  // Leaving Select drops a check with the selection.
-  act(() => view.result.current.selection.select(['#R1'], { finding: 1 }));
-  act(() => view.result.current.selectTool(PLOT_TOOL.MEASURE));
-  expect(view.result.current.selection.finding).toBeNull();
-  expect(view.result.current.selection.selection).toEqual([]);
-});
-
 it('a new revision clears the measurements: they were taken on the board as it was', () => {
   const view = mount();
   act(() => view.result.current.selectTool(PLOT_TOOL.MEASURE));

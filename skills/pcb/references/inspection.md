@@ -68,8 +68,9 @@ reads it back. A board drawn in KiCad has none: find the part in its project ins
 2. Resolve each reference with `pcb.read_board(...)` (a schematic's with
    `pcb.read_schematic(...)`).
 3. Edit the line `part.script` names, or the copper call near the resolved points.
-4. Run the script. The viewer shows the new board; KiCad's checks run on every build, and
-   the viewer lists the board's DRC findings, each with references to the pads and parts in it.
+4. Run the script. The viewer shows the new board; KiCad's checks run on every build and
+   report in the build's output, each finding with references to the pads and parts in it.
+   The viewer only draws the board: a review before ordering is $pcb-dfm's.
 
 ## Schematics
 

@@ -3,7 +3,7 @@ import test from "node:test";
 import { createBoardIndex } from "@text-to-cad/core/lib/board2d/boardIndex.js";
 import { createSchematicIndex } from "@text-to-cad/core/lib/board2d/schematicIndex.js";
 import { boardTreeAncestors, boardTreeNodeIds, buildBoardTree, partKind } from "./boardTree.js";
-import { boardFindingFacts, boardReferenceFacts, referenceFacts } from "./boardFacts.js";
+import { boardReferenceFacts, referenceFacts } from "./boardFacts.js";
 
 const square = (cx, cy, w, h) => [[cx - w / 2, cy - h / 2], [cx + w / 2, cy - h / 2], [cx + w / 2, cy + h / 2], [cx - w / 2, cy + h / 2]];
 const BOARD = {
@@ -74,10 +74,6 @@ test("the Reference reads a part, a pad, a net, copper and a point in script mil
   assert.equal(copper.heading, "VIN · track");
   assert.equal(row(copper, "Width"), "1 mm");
   assert.equal(boardReferenceFacts(index.resolve("#@x1y2"), index).rows[0][1], "x 1, y 2");
-  const finding = boardFindingFacts(index.findings[0], index);
-  // Headed by its sentence: KiCad's message where it has no summary of its own.
-  assert.equal(finding.heading, "Silkscreen clearance");
-  assert.equal(finding.rows.find(([name]) => name === "Items")[1], "#C10, x 1, y 29");
 });
 
 test("a schematic's tree and Reference speak of pins, and of no positions", () => {

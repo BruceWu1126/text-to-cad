@@ -24,15 +24,15 @@ import { VIEWPORT_INSET_PX, VIEWPORT_TOP_BAR_PX } from "./viewportLayout.js";
  *
  * @param {{ shell: ReturnType<typeof import("./usePlaneShell.js").usePlaneShell>, label: string,
  *   surface: string, tools?: import("../tools/FloatingToolBar.js").ViewportTool[], toolPanels?: import("react").ReactNode,
- *   display?: import("react").ReactNode, reportBody?: import("react").ReactNode, onClearReferences?: (() => void) | null,
+ *   display?: import("react").ReactNode, onClearReferences?: (() => void) | null,
  *   overlay?: import("react").ReactNode, interactive?: boolean, style?: object }} props
  *   `label`: the canvas's name. `surface`: the data attribute the view's root carries (`data-<surface>`),
  *   which hosts and tests key on. `tools`: left to right, from `shell.tools`; an empty list draws no strip
- *   and no stack. `display`: Display's dropdown content, or null for a picture with none. `reportBody`: the
- *   card's body while it shows the renderer's report. `overlay`: the renderer's own layer over the canvas. `interactive`: the picture's parts can be pointed
+ *   and no stack. `display`: Display's dropdown content, or null for a picture with none.
+ *   `overlay`: the renderer's own layer over the canvas. `interactive`: the picture's parts can be pointed
  *   at, so its idle cursor is the pointer's, not a hand. `style`: the pane's, such as the chrome's alpha.
  */
-export default function PlaneShell({ shell, label, surface, tools = [], toolPanels = null, display = null, reportBody = null,
+export default function PlaneShell({ shell, label, surface, tools = [], toolPanels = null, display = null,
   onClearReferences = null, overlay = null, interactive = false, style = undefined }) {
   const frame = shell.frame;
   const { view, plane, load, draw } = frame;
@@ -73,7 +73,7 @@ export default function PlaneShell({ shell, label, surface, tools = [], toolPane
         </ViewportTopRight>
         <ViewerLoadingOverlay loading={{ opening: load.busy && !load.alert, progress: { label: load.reading } }} operationKey={frame.modelKey} />
         <ViewerAlertCard alert={frame.cardAlert} hasContent={load.shown} dismissed={frame.dismissal.dismissed} onDismiss={frame.dismissal.dismiss}
-          onReload={view.reload} file={frame.modelKey} body={frame.showingReport ? reportBody : null} />
+          onReload={view.reload} file={frame.modelKey} />
       </div>
     </div>
   );

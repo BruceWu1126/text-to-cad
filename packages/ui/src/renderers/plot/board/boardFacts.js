@@ -186,32 +186,3 @@ export function schematicReferenceFacts(resolved, index) {
 export function referenceFacts(resolved, index) {
   return index?.document === "schematic" ? schematicReferenceFacts(resolved, index) : boardReferenceFacts(resolved, index);
 }
-
-/**
- * A finding KiCad (or the review) reported, for the Reference panel when it is chosen in the alert
- * card: headed by its sentence, which its first row gives in full, then KiCad's own words.
- */
-export function boardFindingFacts(finding, index) {
-  // A schematic has no script frame: an item it cannot name reads as KiCad wrote it.
-  const located = (item) => (item.at && index?.toScript ? position(index.toScript(item.at)) : item.text);
-  const items = finding.items.map((item) => item.ref || located(item)).filter(Boolean);
-  // What it names by reference selects; what it can only place reads as words.
-  const links = finding.items.some((item) => item.ref)
-    ? finding.items.map((item) => (item.ref ? { text: item.ref, selector: item.ref } : { text: located(item) })).filter((link) => link.text) : null;
-  return {
-    heading: finding.summary || finding.description || finding.type.replaceAll("_", " "),
-    rows: [
-      // The sentence in full (the heading may be cut short), where it says more than KiCad's message.
-      ...(finding.summary && finding.summary !== finding.description ? [["Finding", finding.summary]] : []),
-      ["Check", finding.check.toUpperCase()],
-      ["Severity", titleCase(finding.severity)],
-      ["Message", finding.description],
-      ...(items.length ? [links ? ["Items", items.join(", "), links] : ["Items", items.join(", ")]] : []),
-    ],
-  };
-}
-
-/** What copying a chosen check gives: its sentence, then the references it names. */
-export function findingCopyText(finding, token) {
-  return token && finding?.summary ? `${finding.summary} · ${token}` : token;
-}

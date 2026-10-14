@@ -59,13 +59,13 @@ it('a part’s and a net’s eye isolate it without selecting it; a pad has none
 
 it('the Reference’s rows that name other things select them: a pad’s net and part, a net’s parts', () => {
   const onSelect = vi.fn();
-  const { rerender } = render(<BoardReferencePanel index={index} resolved={[index.resolve('#R1.1')]} finding={null} active onClear={() => {}} onSelect={onSelect} onCopy={() => {}} />);
+  const { rerender } = render(<BoardReferencePanel index={index} resolved={[index.resolve('#R1.1')]} active onClear={() => {}} onSelect={onSelect} onCopy={() => {}} />);
   const reference = () => within(document.querySelector('[data-board-reference]') as HTMLElement);
   fireEvent.click(reference().getByRole('button', { name: 'VIN' }));
   expect(onSelect).toHaveBeenLastCalledWith(['#net:VIN']);
   fireEvent.click(reference().getByRole('button', { name: 'R1 · 10k' }));
   expect(onSelect).toHaveBeenLastCalledWith(['#R1']);
-  rerender(<BoardReferencePanel index={index} resolved={[index.resolve('#net:GND')]} finding={null} active onClear={() => {}} onSelect={onSelect} onCopy={() => {}} />);
+  rerender(<BoardReferencePanel index={index} resolved={[index.resolve('#net:GND')]} active onClear={() => {}} onSelect={onSelect} onCopy={() => {}} />);
   fireEvent.click(reference().getByRole('button', { name: 'R1' }));
   expect(onSelect).toHaveBeenLastCalledWith(['#R1']);
   // The ID is words: the selection's own reference goes nowhere.

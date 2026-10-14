@@ -329,127 +329,34 @@ it('cross-probing: a board selects what its schematic tells it, and tells what i
   view.dispose();
 });
 
-// What KiCad and the review found, as the plot hands it: one error and two suggestions.
+// What KiCad found, as the plot hands it: one error and one warning.
 const FINDINGS = [
-  { check: 'review', severity: 'warning', type: 'decoupling_far', description: 'Decoupling capacitor far from its pin', summary: 'R1 is 9.1 mm from J1 (aim for under 3 mm)', items: [{ text: 'R1', ref: '#R1', at: null }] },
   { check: 'drc', severity: 'error', type: 'clearance', description: 'Clearance violation', summary: 'The VIN track and the GND pad of J1 are 0.15 mm apart; the rules need 0.2 mm',
     items: [{ text: 'Track', ref: '#net:VIN', at: [20, 8.73] }, { text: 'Pad 2 of J1', ref: '#J1.2', at: [30, 11.27] }] },
   { check: 'drc', severity: 'warning', type: 'silk_overlap', description: 'Silkscreen clearance', items: [{ text: 'Reference field of R1', ref: '#R1', at: [15, 20] }] },
 ];
 const boardWith = (findings: unknown[]) => (file: string) => (file.endsWith('.kicad_pcb') ? json({ ...BOARD, board: { ...INDEX, findings } }) : json(SCHEMATIC));
-const navbarAction = (pane: HTMLElement, name: string) => within(pane).queryByRole('button', { name });
 
-it('a board with nothing to report has no card, no icon in the navbar and no Checks', async () => {
-  readPlot = boardWith([]);
+it('the viewer only draws: whatever KiCad found, no card, no icon in the navbar and no Checks (pcb-dfm reviews a board)', async () => {
+  readPlot = boardWith(FINDINGS);
   const { pane, dispose } = await open('blinky.kicad_pcb');
   await opened(pane);
   await within(pane).findByRole('group', { name: 'Interaction tools' });
   expect(within(pane).queryByRole('alert')).toBeNull();
   expect(pane.querySelector('svg.text-amber-500, svg.text-destructive')).toBeNull();
+  expect(navbarControls(pane)).toEqual(['Display']);
   expect(pane.querySelector('[data-tool-panel-id="checks"]')).toBeNull();
   dispose();
 });
 
-it('a board with suggestions alone has no card and no icon: Select\'s Checks panel holds them, folded', async () => {
-  // KiCad reports a silkscreen clearance once per pair: the panel says it once, with its count and what it names.
-  readPlot = boardWith([...FINDINGS.filter((finding) => finding.severity === 'warning'),
-    { check: 'drc', severity: 'warning', type: 'silk_overlap', description: 'Silkscreen clearance', items: [{ text: 'Pad 2 of J1', ref: '#J1.2', at: [30, 11.27] }] }]);
-  const view = await open('blinky.kicad_pcb');
-  const { pane, dispose } = view;
-  await opened(pane);
-  await within(pane).findByRole('group', { name: 'Interaction tools' });
-  expect(within(pane).queryByRole('alert')).toBeNull();
-  expect(navbarControls(pane)).toEqual(['Display']);
-  const checks = pane.querySelector('[data-tool-panel-id="checks"]') as HTMLElement;
-  expect(checks.querySelector('[data-tool-panel-heading]')!.textContent).toBe('Checks');
-  const fold = within(checks).getByRole('button', { name: 'Expand checks' });
-  expect(fold.getAttribute('aria-expanded')).toBe('false');
-  await act(async () => { fold.click(); });
-  expect(fold.getAttribute('aria-expanded')).toBe('true');
-  expect(within(checks).getByRole('button', { name: 'R1 is 9.1 mm from J1 (aim for under 3 mm)' })).not.toBeNull();
-  // A finding without a sentence of its own reads as KiCad wrote it.
-  const silk = within(checks).getByRole('button', { name: 'Silkscreen clearance' });
-  expect(within(checks).getAllByRole('button').filter((button) => button.hasAttribute('data-finding-row'))).toHaveLength(2);
-  expect(silk.textContent).toBe('Silkscreen clearance2J1, R1');
-  await act(async () => { silk.click(); });
-  expect(view.controller.readState().selection[0]).toMatchObject({ target: { selectors: ['#R1', '#J1.2'] } });
-  expect(pane.querySelector('[data-tool-panel-id="reference"] [data-tool-panel-heading] h3')!.textContent).toBe('Silkscreen clearance');
-  dispose();
-});
-
-it('a board with something to fix opens its card over the board with the errors alone; the suggestions stay in Checks', async () => {
-  readPlot = boardWith(FINDINGS);
-  const { pane, dispose } = await open('blinky.kicad_pcb');
-  await opened(pane);
-  const alert = await within(pane).findByRole('alert');
-  const card = within(alert);
-  expect(card.getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['1 to fix', 'Fix before ordering']);
-  expect(card.getAllByRole('button').map((button) => button.textContent).filter((text) => text !== '')).toEqual([
-    'The VIN track and the GND pad of J1 are 0.15 mm apart; the rules need 0.2 mm',
-  ]);
-  expect(navbarAction(pane, '1 to fix')).toBeNull();
-  expect(pane.querySelector('[data-tool-panel-id="checks"]')).not.toBeNull();
-  dispose();
-});
-
-it('a finding in the card selects what it names, puts the card away and heads the Reference with its sentence', async () => {
-  readPlot = boardWith(FINDINGS);
-  const view = await open('blinky.kicad_pcb');
-  const { pane, dispose } = view;
-  await opened(pane);
-  const sentence = 'The VIN track and the GND pad of J1 are 0.15 mm apart; the rules need 0.2 mm';
-  const row = within(await within(pane).findByRole('alert')).getByRole('button', { name: sentence });
-  await act(async () => { row.click(); });
-  expect(view.controller.readState().selection[0]).toMatchObject({ target: { selectors: ['#net:VIN', '#J1.2'] }, summary: sentence });
-  expect(within(pane).queryByRole('alert')).toBeNull();
-  await waitFor(() => expect(navbarAction(pane, '1 to fix')?.querySelector('svg')!.getAttribute('class')).toMatch(/text-destructive/));
-  expect(pane.querySelector('[data-tool-panel-id="reference"] [data-tool-panel-heading] h3')!.textContent).toBe(sentence);
-  const reference = pane.querySelector('[data-board-reference]')!;
-  expect(reference.textContent).toContain('Clearance violation');
-  expect(reference.textContent).toContain('#net:VIN, #J1.2');
-  // The heading may be cut short: the sentence is read in full in the first row, which wraps.
-  const rowOf = (label: string) => [...reference.querySelectorAll('[data-info-row]')].find((element) => element.firstElementChild?.textContent === label);
-  const sentenceRow = rowOf('Finding')!;
-  expect(sentenceRow.lastElementChild!.textContent).toBe(sentence);
-  for (const element of [sentenceRow, ...sentenceRow.querySelectorAll('*')]) expect(element.getAttribute('class') || '').not.toMatch(/\btruncate\b/);
-  expect(reference.querySelector('[data-info-row]')).toBe(sentenceRow);
-  dispose();
-});
-
-it('a finding naming several things reads its own rows, then a picker over what it names', async () => {
-  readPlot = boardWith(FINDINGS);
-  const { pane, dispose } = await open('blinky.kicad_pcb');
-  await opened(pane);
-  const sentence = 'The VIN track and the GND pad of J1 are 0.15 mm apart; the rules need 0.2 mm';
-  await act(async () => { within(await within(pane).findByRole('alert')).getByRole('button', { name: sentence }).click(); });
-  const reference = pane.querySelector('[data-board-reference]')!;
-  const labels = () => [...reference.querySelectorAll('[data-info-row]')].map((element) => element.firstElementChild!.textContent);
-  // The finding's rows, then the picker, then the browsed thing's: the last named, J1's pad 2.
-  expect(labels().slice(0, 5)).toEqual(['Finding', 'Check', 'Severity', 'Message', 'Items']);
-  const picker = within(reference as HTMLElement).getByRole('button', { name: 'Choose a reference' });
-  expect(picker.textContent).toContain('J1 · pad 2');
-  expect(picker.textContent).toContain('2/2');
-  expect(labels()).toContain('Side');
-  expect(labels()).not.toContain('Tracks');
-  await act(async () => { fireEvent.pointerDown(picker, { button: 0, ctrlKey: false, pointerType: 'mouse' }); });
-  await act(async () => { (await screen.findByRole('menuitemradio', { name: 'net VIN' })).click(); });
-  await waitFor(() => expect(labels()).toContain('Tracks'));
-  expect(labels()).not.toContain('Side');
-  expect(labels().slice(0, 5)).toEqual(['Finding', 'Check', 'Severity', 'Message', 'Items']);
-  expect(pane.querySelector('[data-tool-panel-id="reference"] [data-tool-panel-heading] h3')!.textContent).toBe(sentence);
-  dispose();
-});
-
-it('a schematic\'s ERC findings are its card\'s, not its tree\'s', async () => {
+it('a schematic\'s ERC findings open no card', async () => {
   readPlot = (file) => (file.endsWith('.kicad_sch') ? json({ ...SCHEMATIC, schematic: { ...SCHEMATIC_INDEX, findings: [
     { check: 'erc', severity: 'error', type: 'pin_not_connected', description: 'Pin not connected', summary: 'U1 pin 8 (V+) isn\'t connected to anything', items: [{ text: 'Symbol U1 Pin 8', ref: '#U1.8', at: null }] },
   ] } }) : json(BOARD));
   const { pane, dispose } = await open('blinky.kicad_sch');
   await opened(pane);
-  const card = within(await within(pane).findByRole('alert'));
-  expect(card.getByRole('heading', { name: '1 to fix' })).not.toBeNull();
-  expect(within(pane).getByRole('list', { name: 'Schematic' })).not.toBeNull();
-  expect(within(pane).queryByRole('button', { name: 'Checks' })).toBeNull();
+  expect(await within(pane).findByRole('list', { name: 'Schematic' })).not.toBeNull();
+  expect(within(pane).queryByRole('alert')).toBeNull();
   dispose();
 });
 

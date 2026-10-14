@@ -14,7 +14,7 @@ import TreeRowEye, { treeRowEyeLayout } from "../../kit/inspector/TreeRowEye.jsx
 import { useTreeSearch } from "../../kit/inspector/modelTreeSearch.js";
 import { BoardMeasureModeMenu, BoardSelectModeMenu } from "./boardModes.jsx";
 import { boardTreeAncestors, boardTreeNodeIds, buildBoardTree } from "./boardTree.js";
-import { boardFindingFacts, referenceFacts } from "./boardFacts.js";
+import { referenceFacts } from "./boardFacts.js";
 
 const EMPTY = Object.freeze([]);
 const NO_IDS = Object.freeze(new Set());
@@ -191,27 +191,22 @@ function FactValue({ value, links, onSelect }) {
 /**
  * The Reference: what is selected, read back (on a board, in script millimetres). Its heading names
  * it (a picker over several), its X clears the selection, and its foot copies the references (⌘C).
- * What a row names on the document — a pad's net and part, a net's parts, a check's items — selects
+ * What a row names on the document — a pad's net and part, a net's parts — selects
  * it (`onSelect`), as a robot's Reference selects the links it names.
  */
-export function BoardReferencePanel({ index, resolved, finding: focused, active, onClear, onSelect, onCopy, copyShortcut = "" }) {
+export function BoardReferencePanel({ index, resolved, active, onClear, onSelect, onCopy, copyShortcut = "" }) {
   const items = useMemo(() => resolved.map((item) => ({ selector: item.selector, ...referenceFacts(item, index) })), [resolved, index]);
   const [browsed, setBrowsed] = useState(0);
   useEffect(() => { setBrowsed(Math.max(0, items.length - 1)); }, [items.length]);
-  const finding = focused ? boardFindingFacts(focused, index) : null;
-  if (!items.length && !finding) return null;
+  if (!items.length) return null;
   const shown = items[Math.min(browsed, items.length - 1)] || null;
   const picker = items.length > 1 ? <ReferencePicker items={items} browsed={Math.min(browsed, items.length - 1)} onBrowse={setBrowsed} /> : null;
-  // A finding is headed by its sentence, its own rows first; what it names reads below them, behind
-  // the picker when it names several things.
-  const title = finding ? finding.heading : picker || shown?.heading;
+  const title = picker || shown?.heading;
   const row = ([label, value, links], at) => <InfoRow key={`${label}-${at}`} label={label}><FactValue value={value} links={links} onSelect={onSelect} /></InfoRow>;
   return <ToolPanel id="reference" title={title} label="Reference details" closeLabel="Clear selection" fit="details" resizable hidden={!active}
     onClose={onClear}
-    footer={items.length ? <ToolPanelFooterButton label={items.length > 1 ? "Copy All" : "Copy"} shortcut={copyShortcut} onClick={onCopy} /> : null}>
+    footer={<ToolPanelFooterButton label={items.length > 1 ? "Copy All" : "Copy"} shortcut={copyShortcut} onClick={onCopy} />}>
     <div className="px-2 pb-1.5" data-board-reference="">
-      {finding ? finding.rows.map(row) : null}
-      {finding && picker ? <div className="flex min-h-7 items-center" data-finding-items="">{picker}</div> : null}
       {shown ? shown.rows.map(row) : null}
     </div>
   </ToolPanel>;
