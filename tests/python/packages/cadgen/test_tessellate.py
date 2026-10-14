@@ -315,6 +315,41 @@ class TriangulationTests(unittest.TestCase):
         self.assertEqual(6, len(crossings), "grid lines u = 2 to 7 cross the trim")
         self.assertEqual([], [grid.uv_verts[i] for i in crossings if 1 not in [ord_ for ord_, _f in boundary.get(i, [])]])
 
+    def test_a_corner_moved_across_a_cell_border_is_pinned_to_both_its_edges(self) -> None:
+        # A hand's palm whose trim turns a corner a hair left of a grid line: the grid moved the
+        # corner onto the line, into the cell to its right, where only one of its two edges runs,
+        # and pinning, held to that cell, labelled it with the one edge. The mesh edge along the
+        # other was never split to its neighbour face's points.
+        from cadgen._internal import tessellate
+
+        class Flat:
+            kind = "other"
+
+            def value(self, u: float, v: float) -> list[float]:
+                return [u, v, 0.0]
+
+        face = tessellate._Face()
+        face.ord, face.reversed, face.surface, face.uv, face.loops, face.poles = 1, False, Flat(), [0, 8, 0, 4], [], []
+        corner = [4.0 - 1e-9, 2.0]
+        ring = _ring([[1.0, 2.0], [1.0, 0.5], [7.0, 0.5], [7.0, 3.0], corner])
+        ring.ords = [3, 4, 5, 1, 2]
+        ring.metas = [None, None, None, tessellate._Meta(1, 0.0, 1.0), tessellate._Meta(2, 0.0, 1.0)]
+        shared = {}
+        for ordinal, (start, end) in ((1, ([7.0, 3.0], corner)), (2, (corner, [1.0, 2.0]))):
+            line = tessellate._Curve()
+            line.kind, line.range, line.n = "line", (0.0, 1.0), None
+            line.value = lambda t, a=start, b=end: [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]), 0.0]
+            shared[ordinal] = tessellate._sample_shared_edge(line, 1e-3)
+
+        grid = tessellate._grid_triangulate(face, [ring], math.inf, 1.0)
+        us = np.array([u for u, _v in grid.uv_verts])
+        vs = np.array([v for _u, v in grid.uv_verts])
+        boundary: dict = {}
+        tessellate._pin_boundary(grid, us, vs, [face.surface.value(u, v) for u, v in grid.uv_verts], boundary, shared)
+        [at] = [i for i, (u, v) in enumerate(grid.uv_verts) if abs(u - 4.0) < 1e-6 and abs(v - 2.0) < 1e-6]
+        self.assertEqual(4.0, grid.uv_verts[at][0], "the grid moved the corner onto its line")
+        self.assertEqual({1, 2}, {ord_ for ord_, _f in boundary.get(at, [])})
+
     def test_a_cell_a_hole_crosses_is_cut_where_the_face_is(self) -> None:
         # A cell of a plate whose round hole crosses its side, and one whose hole covers its
         # corner: what the cut covers is the cell less the hole, to the last digit.

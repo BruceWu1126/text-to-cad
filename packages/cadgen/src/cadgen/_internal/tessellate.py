@@ -26,8 +26,9 @@ Where the browser's tessellator went wrong, this one does not:
 - a cell whose triangles do not cover what the loops leave of it -- a hole crossing its side -- is
   cut again from its loops as a whole (``_cell_regions``);
 - a vertex the grid moved onto a grid line or a neighbour, by up to one source ULP, is still pinned
-  to the trim it was made on (``_pin_boundary``): the browser held vertices to a trim more tightly
-  than that, so one moved past it was never pinned, and the face beside it met it with a crack;
+  to the trim it was made on, whichever cell the move took it into (``_pin_boundary``): the browser
+  held a vertex to a trim more tightly than that and looked for the trim in the vertex's own cell
+  alone, so one moved past either was never pinned, and the face beside it met it with a crack;
 - a face whose geometry raises is left out and named, and the rest of the part is meshed; a face
   narrower than the tolerance its trim is sampled to draws as nothing and is not named.
 
@@ -1126,7 +1127,7 @@ def _grid_triangulate(face: _Face, loops: list[_Ring], chord_limit: float, angle
     curved = face.surface.kind != "plane"
     # How far a vertex can sit from the trim point it was made for: it takes the grid line's or its
     # neighbour's coordinates up to one source ULP on each axis.
-    grid.snap = math.hypot(epsilon_u, epsilon_v) if curved else 0.0
+    grid.snap = (epsilon_u, epsilon_v) if curved else (0.0, 0.0)
     floor = math.floor
 
     def vertex_id(u: float, v: float) -> int:
@@ -1467,14 +1468,17 @@ def _pin_boundary(grid: _Grid, us: np.ndarray, vs: np.ndarray, xyz: list, bounda
     """Every vertex on a trim segment of a shared edge labelled with the edge and its fraction
     there (``boundary``) and put at that fraction's point (``xyz``), the pinning label first. Each
     vertex is held against the segments of its grid cell, all at once; the few that lie on one
-    are then chosen among one by one, as the browser chose. A vertex lies on a segment within the
-    browser's tolerance or as far as the grid moved it onto a grid line or a neighbour, whichever
-    is wider: in double precision the move could pass the tolerance, and the vertex, unpinned,
-    left its neighbour face's points along the edge unmatched."""
+    are then chosen among one by one, as the browser chose. The grid moved a vertex onto a grid
+    line or a neighbour by up to one source ULP on each axis, so a vertex lies on a segment within
+    the browser's tolerance or that move, whichever is wider, and is held against the segments of
+    every cell the move can have taken it out of too: in double precision the move could pass the
+    tolerance or a cell's border, and the vertex, unpinned, left its neighbour face's points along
+    the edge unmatched."""
     eps = max(float(np.max(np.abs(us))), float(np.max(np.abs(vs))), 1) * 1e-7
     eps_sq = eps * eps
     corner_eps_sq = eps_sq * 16
-    on_eps_sq = max(eps_sq, grid.snap * grid.snap)
+    snap_u, snap_v = grid.snap
+    on_eps_sq = max(eps_sq, snap_u * snap_u + snap_v * snap_v)
     segments = grid.segments
     cells = sorted(grid.segments_by_cell)
     if not cells or not len(us):
@@ -1483,18 +1487,42 @@ def _pin_boundary(grid: _Grid, us: np.ndarray, vs: np.ndarray, xyz: list, bounda
     flat = np.array([index for key in cells for index in grid.segments_by_cell[key]], np.int64)
     starts = np.cumsum(counts_by_cell) - counts_by_cell
     cell_keys = np.array(cells, np.int64)
-    cu = np.minimum(grid.steps_u - 1, np.maximum(0, np.floor((us - grid.min_u) / grid.du))).astype(np.int64)
-    cv = np.minimum(grid.steps_v - 1, np.maximum(0, np.floor((vs - grid.min_v) / grid.dv))).astype(np.int64)
-    key = cu * grid.steps_v + cv
-    at = np.minimum(np.searchsorted(cell_keys, key), len(cell_keys) - 1)
-    crossed = cell_keys[at] == key
-    vertices = np.nonzero(crossed)[0]
-    if not len(vertices):
+
+    def cell_keys_of(u: np.ndarray, v: np.ndarray) -> np.ndarray:
+        cu = np.minimum(grid.steps_u - 1, np.maximum(0, np.floor((u - grid.min_u) / grid.du))).astype(np.int64)
+        cv = np.minimum(grid.steps_v - 1, np.maximum(0, np.floor((v - grid.min_v) / grid.dv))).astype(np.int64)
+        return cu * grid.steps_v + cv
+
+    def pairs(vertices: np.ndarray, keys: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        at = np.minimum(np.searchsorted(cell_keys, keys), len(cell_keys) - 1)
+        crossed = cell_keys[at] == keys
+        vertices, at = vertices[crossed], at[crossed]
+        counts = counts_by_cell[at]
+        offsets = np.cumsum(counts) - counts
+        return (np.repeat(vertices, counts),
+                flat[np.repeat(starts[at], counts) + (np.arange(int(counts.sum())) - np.repeat(offsets, counts))])
+
+    own = cell_keys_of(us, vs)
+    pair_vertex, pair_segment = pairs(np.arange(len(us)), own)
+    if snap_u or snap_v:
+        moved_vertices, moved_keys = [], []
+        for du, dv in ((-snap_u, -snap_v), (-snap_u, snap_v), (snap_u, -snap_v), (snap_u, snap_v)):
+            keys = cell_keys_of(us + du, vs + dv)
+            across = np.nonzero(keys != own)[0]
+            moved_vertices.append(across)
+            moved_keys.append(keys[across])
+        moved = np.unique(np.stack([np.concatenate(moved_vertices), np.concatenate(moved_keys)]), axis=1)
+        if moved.shape[1]:
+            extra_vertex, extra_segment = pairs(moved[0], moved[1])
+            width = len(segments) + 1
+            pair_ids = pair_vertex * width + pair_segment
+            extra_ids, first = np.unique(extra_vertex * width + extra_segment, return_index=True)
+            fresh = ~np.isin(extra_ids, pair_ids)
+            keep = np.sort(first[fresh])
+            pair_vertex = np.concatenate([pair_vertex, extra_vertex[keep]])
+            pair_segment = np.concatenate([pair_segment, extra_segment[keep]])
+    if not len(pair_vertex):
         return
-    counts = counts_by_cell[at[vertices]]
-    pair_vertex = np.repeat(vertices, counts)
-    offsets = np.cumsum(counts) - counts
-    pair_segment = flat[np.repeat(starts[at[vertices]], counts) + (np.arange(int(counts.sum())) - np.repeat(offsets, counts))]
     table = np.array([(x0, y0, x1, y1) for x0, y0, x1, y1, _ord, _meta in segments], np.float64).reshape(-1, 4)
     on_shared = np.array([meta is not None for *_rest, meta in segments], bool)
     px, py = us[pair_vertex], vs[pair_vertex]
