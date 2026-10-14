@@ -349,14 +349,14 @@ class Emitter:
             self.go(descent, rapid_to=rapid_to, entry=PLUNGE)
             self.cut(path[1:], feed=feed)
             return
-        feed = self.plunge if isinstance(entry, Plunge) else self.feed
+        entry_feed = self.plunge if isinstance(entry, Plunge) else self.feed
         if self.here is None:
             probe = link((end[0], end[1], ctx.heights.clearance), end, heights=ctx.heights, retract_is_clear=False,
-                         feed=feed, op=self.op, entry=entry, rapid_to=rapid_to)
+                         feed=entry_feed, op=self.op, entry=entry, rapid_to=rapid_to)
             over = next((move.xyz for move in probe if move.kind == "rapid"), end)
             self.start = self.here = (over[0], over[1], ctx.heights.clearance)
-        moves = link(self.here, end, heights=ctx.heights, retract_is_clear=False, feed=feed, op=self.op, entry=entry,
-                     rapid_to=rapid_to)
+        moves = link(self.here, end, heights=ctx.heights, retract_is_clear=False, feed=entry_feed, op=self.op,
+                     entry=entry, rapid_to=rapid_to)
         across = [move for move in moves if move.kind == "rapid"]
         over = across[-1].xyz if across else self.here
         if not fixtures_clear(ctx, _shapely_point(over), end[2]):
@@ -365,7 +365,7 @@ class Emitter:
             raise PlanError("unreachable", f"{ctx.label}: the tool cannot come down at ({over[0]:g}, {over[1]:g}) to z "
                             f"{end[2]:g}: the fixture stands in the way", "Grip the stock so the fixture stands clear of the cut, or move the cut.")
         if across and retract_clear(ctx, self.here, across[-1].xyz):
-            moves = link(self.here, end, heights=ctx.heights, retract_is_clear=True, feed=feed, op=self.op,
+            moves = link(self.here, end, heights=ctx.heights, retract_is_clear=True, feed=entry_feed, op=self.op,
                          entry=entry, rapid_to=rapid_to)
         self._add(moves)
         self.cut(path[1:], feed=feed)
