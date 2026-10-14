@@ -1,6 +1,6 @@
 # The job file
 
-One JSON object, passed as `--job job.cam.json` (or inline: `--job '{...}'`). It names the machine
+One JSON object, passed as `--job part.job.json` (or inline: `--job '{...}'`). It names the machine
 and its post, the material, the stock, the setups, the tools and the operations. This page is every
 key a job shares; each operation's own keys are on its reference page (the table under
 [`operations`](#operations)).
@@ -186,7 +186,6 @@ error.
 | `facing` | Face | runs today | [milling-2d.md](milling-2d.md#facing) |
 | `contour_2d` | Profile | runs today | [milling-2d.md](milling-2d.md#contour_2d) |
 | `pocket_2d` | Pocket | runs today | [milling-2d.md](milling-2d.md#pocket_2d) |
-| `adaptive_2d` | Adaptive clearing | phase 1, not built yet | [milling-2d.md](milling-2d.md#adaptive_2d-not-built-yet) |
 | `slot` | Slot | runs today | [milling-2d.md](milling-2d.md#slot) |
 | `bore` | Helical bore | runs today | [milling-2d.md](milling-2d.md#bore) |
 | `circular` | Round pocket or boss | runs today | [milling-2d.md](milling-2d.md#circular) |
@@ -205,8 +204,9 @@ error.
 | `counterbore` | Counterbore | runs today | [drilling.md](drilling.md#counterbore) |
 | `back_bore` | Back bore | runs today | [drilling.md](drilling.md#back_bore) |
 
-Every other name (3D milling, turning, cutting, EDM, multi-axis) is known and refused with its phase:
-[planned-next.md](planned-next.md).
+Every other name is known and refused with its phase: `adaptive_2d` (Adaptive clearing) is phase 2,
+designed with `adaptive_3d` ([milling-2d.md](milling-2d.md#adaptive_2d-phase-2)); so are 3D milling,
+turning, cutting, EDM and multi-axis ([planned-next.md](planned-next.md)).
 
 ## `view`
 
@@ -215,7 +215,7 @@ Optional: what the Viewer draws at first. `{"show": {...}}` with `rapids`, `fixt
 
 ## What comes out
 
-`cadgen cam plan part.step [OUT] --job job.cam.json` writes beside OUT (default
+`cadgen cam plan part.step [OUT] --job part.job.json` writes beside OUT (default
 `part.cam.glb` beside the part; OUT must end in `.cam.glb` or `.glb`), with the stem being OUT's name
 without that ending:
 
@@ -230,6 +230,7 @@ The sidecar's `operations[]` gives each operation's `rpm`, `feed_mm_min`, `plung
 line or two). `summary` holds `cycle_time_s`, `cut_length_mm`, `rapid_length_mm`, `tool_changes`,
 `operations`, `setups`, `programs`, `post` and `rapid_mm_min`. The same job writes the same bytes.
 
-A plan with an error finding writes only the sidecar (`"ok": false`, with the findings), removes any
-G-code and GLB an earlier run left at those paths, and exits 1. A malformed job, or a post that
-refuses an operation, is an error message and writes nothing.
+A plan with an error finding (a post's refusal among them: `no_post_support`) writes only the
+sidecar (`"ok": false`, with the findings), removes any G-code and GLB an earlier run left at those
+paths, and exits 1. A malformed job is an error message and writes nothing; so is a job file at the
+sidecar's own path (`<stem>.cam.json`), which the plan would overwrite.

@@ -6,6 +6,7 @@ name with its phase: `operations[0].op: "parallel" is phase 2, not built yet; bu
 
 | `op` | plain word |
 | --- | --- |
+| `adaptive_2d` | Adaptive clearing (2D, designed with the 3D one) |
 | `adaptive_3d` | 3D adaptive roughing |
 | `pocket_3d` | Z-level roughing |
 | `parallel` | Parallel |

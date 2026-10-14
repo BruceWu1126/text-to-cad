@@ -15,12 +15,12 @@ from tests.python.support.cam_fixtures import heavy_at_import, stub_operations, 
 
 from cadgen._internal.cam.operations import OPERATION_NAMES, REGISTRY, built, get_operation
 
-# The design's 55 operations by phase, in its order.
+# The design's 55 operations by phase, in its order. adaptive_2d moved to phase 2, to be designed with adaptive_3d.
 PHASES = {
-    1: ("facing", "contour_2d", "pocket_2d", "adaptive_2d", "slot", "bore", "circular", "thread_mill", "chamfer_2d",
+    1: ("facing", "contour_2d", "pocket_2d", "slot", "bore", "circular", "thread_mill", "chamfer_2d",
         "engrave", "trace", "drill", "spot_drill", "peck", "chip_break", "tap", "rigid_tap", "ream", "boring_cycle",
         "counterbore", "back_bore"),
-    2: ("adaptive_3d", "pocket_3d", "parallel", "contour_3d", "scallop", "pencil", "spiral", "radial", "morph",
+    2: ("adaptive_2d", "adaptive_3d", "pocket_3d", "parallel", "contour_3d", "scallop", "pencil", "spiral", "radial", "morph",
         "steep_shallow", "ramp", "horizontal", "rest"),
     3: ("lathe_face", "lathe_rough", "lathe_finish", "lathe_groove", "lathe_part", "lathe_thread", "lathe_bore",
         "lathe_drill", "laser_cut", "laser_engrave", "plasma_cut", "waterjet_cut", "wire_contour", "wire_open", "sinker"),
@@ -62,6 +62,7 @@ class Registry(unittest.TestCase):
     def test_every_operation_is_registered_in_order_with_its_phase(self):
         self.assertEqual(OPERATION_NAMES, sum(PHASES.values(), ()))
         self.assertEqual(len(OPERATION_NAMES), 55)
+        self.assertEqual(len(PHASES[1]), 20)
         for phase, names in PHASES.items():
             self.assertEqual({REGISTRY[name].phase for name in names}, {phase})
         self.assertEqual((REGISTRY["pocket_2d"].module, REGISTRY["pocket_2d"].cls),
@@ -76,6 +77,7 @@ class Registry(unittest.TestCase):
         self.assertIn(f"operation: \"adaptive_3d\" is phase 2, not built yet; built today: {', '.join(built())}",
                       value_error(self, get_operation, "adaptive_3d"))
         self.assertIn("\"lathe_face\" is phase 3, not built yet", value_error(self, get_operation, "lathe_face"))
+        self.assertIn("\"adaptive_2d\" is phase 2, not built yet", value_error(self, get_operation, "adaptive_2d"))
 
     def test_an_operation_is_built_once_its_family_module_defines_its_class(self):
         self.assertLessEqual({"facing", "contour_2d", "pocket_2d"}, set(built()))
@@ -139,14 +141,21 @@ class SkillDocs(unittest.TestCase):
                 self.assertEqual(word, REGISTRY[name].word)
                 self.assertEqual(status, "runs today" if name in today else "phase 1, not built yet")
 
-    def test_every_plan_error_kind_is_in_the_findings_tables(self):
-        from cadgen._internal.cam.operations.base import PLAN_ERROR_KINDS
+    def test_every_check_is_in_both_findings_tables_with_its_severity_and_every_note_is_named(self):
+        from cadgen._internal.cam.checks import CHECK_KINDS, ERROR_KINDS, INFO_KINDS
 
         for path, heading in ((self.SKILL / "SKILL.md", "## Read the findings"),
-                              (self.SKILL / "references" / "findings.md", "### Raised today")):
-            codes = {re.fullmatch(r"`([a-z_]+)`", cells[0]).group(1) for cells in self._rows(path, heading)}
+                              (self.SKILL / "references" / "findings.md", "## The codes")):
+            severity = {re.fullmatch(r"`([a-z_]+)`", cells[0]).group(1): cells[1] for cells in self._rows(path, heading)}
             with self.subTest(path=path.name):
-                self.assertLessEqual(set(PLAN_ERROR_KINDS) | {"rpm_clamped", "feed_clamped"}, codes)
+                self.assertEqual(list(severity), list(CHECK_KINDS))
+                self.assertEqual(severity, {kind: "error" if kind in ERROR_KINDS else "warning" for kind in CHECK_KINDS})
+        notes = [re.fullmatch(r"`([a-z_]+)`", cells[0]).group(1)
+                 for cells in self._rows(self.SKILL / "references" / "findings.md", "## Notes")]
+        self.assertEqual(notes, list(INFO_KINDS))
+        said = (self.SKILL / "SKILL.md").read_text(encoding="utf-8").split("## Read the findings", 1)[1]
+        for kind in INFO_KINDS:
+            self.assertIn(f"`{kind}`", said)
 
     def test_every_link_resolves_and_every_reference_is_linked(self):
         def anchors(path: Path) -> set[str]:

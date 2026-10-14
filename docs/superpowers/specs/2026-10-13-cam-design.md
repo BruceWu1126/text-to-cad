@@ -1,6 +1,8 @@
 # CAM in cadgen: design
 
-Status: draft for review (2026-10-13). Branch `amy/cam`, stacked on `amy/fea-assemblies` (draft PR #595, itself on #588).
+Status: approved 2026-10-13; phase 1 built on branch `amy/cam` (2026-10-14), stacked on `amy/fea-assemblies` (draft
+PR #595, itself on #588). Where the build changed the design, the section says so in a paragraph marked **As built
+for phase 1**; the code is the reference for those.
 This is a working design document; it is not package documentation and does not ship in the wheel.
 
 ## Goal
@@ -86,6 +88,8 @@ Closed vocabulary (README law 9): an unknown key or value is a `ValueError` nami
     "post": "grbl",                 // required: never guessed (see Posts)
     "travel_mm": [800, 600, 120],
     "max_rpm": 24000, "max_feed_mm_min": 5000,
+    "rapid_mm_min": 5000,           // the rapid rate the cycle time is worked out at
+    "spindle_spinup_s": 3,          // G4 after every M3; default the post's (3 s on grbl, else 0)
     "units": "mm"
   },
   "material": "aluminum-6061",      // or {"name", "surface_m_min", "chipload_mm": {...}, "hardness_hb"}
@@ -103,7 +107,7 @@ Closed vocabulary (README law 9): an unknown key or value is a `ValueError` nami
   ],
   "operations": [
     {"op": "facing", "setup": "top", "tool": "T1", "stepdown_mm": 0.5},
-    {"op": "adaptive_2d", "setup": "top", "tool": "T1", "features": ["#o1.f12"], "stock_to_leave_mm": 0.2},
+    {"op": "pocket_2d", "setup": "top", "tool": "T1", "features": ["#o1.f12"], "stock_to_leave_mm": 0.2},
     {"op": "contour_2d", "setup": "top", "tool": "T1", "features": ["#o1.f3"], "side": "outside", "tabs": {"count": 4}},
     {"op": "drill", "setup": "top", "tool": "T2", "features": ["#o1.f20", "#o1.f21"], "cycle": "peck", "peck_mm": 2}
   ],
@@ -120,6 +124,27 @@ height it lifts to between passes; retract is above zero and at or under clearan
 either. A custom material states `surface_m_min` (the job is all metric; the material table is in m/min too).
 `acrylic` is in the table. A post not built yet is refused like an operation not built yet.
 
+**As built for phase 1.**
+
+- `machine.rapid_mm_min` is the rate rapids are timed at; a job that does not state it is timed at 5000 mm/min and
+  the result's `warnings` say the cycle time assumed it. `machine.spindle_spinup_s` is the wait after every `M3`
+  (`G4`), defaulting to the post's own (3 s on grbl, which does not wait for the spindle; 0 on the others).
+- `machine.axes` 4 or 5 is accepted on a mill or router, and phase 1 plans it as a 3-axis machine: every toolpath
+  along its setup's tool direction, no rotary moves (phase 4 adds them).
+- Box stock's `margin_mm` is exactly four numbers, `[x, y, z_top, z_bottom]`, each 0 or more (a single number is
+  refused, so the bottom margin, which a through cut needs, is always stated). A cylinder's is `[radial, axial]` or
+  one number for both; a sheet's `[x, y]` or one number.
+- Fixture sizes and their defaults: a vise has `jaw_height_mm` (40), `jaw_width_mm` (150, along X about the stock's
+  centre), `grip_mm` and `parallels_mm` (0), where grip is `jaw_height_mm - parallels_mm`, so any two give the third
+  and three must agree; a plate has `thickness_mm` (12) and reaches 25 mm past the stock all round; a chuck
+  `diameter_mm` (the stock's plus 20 a side), `jaw_length_mm` (30), `grip_mm` (10); a collet holds the bottom 15 mm.
+  Every size the job does not state is listed in the sidecar's `setups[].fixture.assumed` and in an
+  `assumed_fixture` note.
+- A tool the job lists and no operation runs is tolerated, whatever its type (one cadgen has no tool shape for yet
+  among them): it is not drawn or checked, and an `unused_tool` note says so.
+- A job file at the sidecar's own path (`<stem>.cam.json`, which the plan would overwrite) is refused before
+  anything is planned.
+
 Feeds and speeds are computed (below) unless an operation states `rpm`, `feed_mm_min`, `plunge_mm_min`.
 Every operation takes `features` (selectors from `cam features`) or, where it makes sense, `region`
 (a sketch/selection boundary) or `all: true`.
@@ -129,20 +154,25 @@ Every operation takes `features` (selectors from `cam features`) or, where it ma
 Each operation is a registry entry with `parse`, `plan` (toolpath), `checks` and `human_lines`, like an FEA
 analysis. Names are what the job writes in `"op"`.
 
-**Phase 1: 2.5D milling and drilling (21).**
+**Phase 1: 2.5D milling and drilling (20).**
 `facing`, `contour_2d` (inside/outside/on, tabs, lead-in/out, multiple depths, finishing passes), `pocket_2d`
-(offset or zigzag), `adaptive_2d` (constant engagement, trochoidal in slots), `slot`, `bore` (helical),
+(offset or zigzag), `slot`, `bore` (helical),
 `circular` (round pocket/boss), `thread_mill`, `chamfer_2d` (chamfer mill or V-bit), `engrave` (V-carve), `trace`
 (follow a curve), `drill` (G81), `spot_drill` (G82), `peck` (G83), `chip_break` (G73), `tap` (G84),
 `rigid_tap` (G84 with sync), `ream` (G85), `boring_cycle` (G86/G76), `counterbore`, `back_bore` (G87).
 Canned cycles are posted as cycles when the post supports them and expanded to moves when it does not.
 
-**Phase 2: 3D milling and stock simulation (13).**
-`adaptive_3d` (roughing), `pocket_3d` (z-level roughing), `parallel` (raster), `contour_3d` (waterline),
+**Phase 2: 3D milling, adaptive clearing and stock simulation (14).**
+`adaptive_2d` (constant engagement, trochoidal in slots), `adaptive_3d` (roughing), `pocket_3d` (z-level roughing), `parallel` (raster), `contour_3d` (waterline),
 `scallop`, `pencil`, `spiral`, `radial`, `morph` (between two curves), `steep_shallow`, `ramp`, `horizontal`
 (flats only), `rest` (cleans what the stock simulation says a larger tool left).
 Surface operations use a drop-cutter over the tessellated part (numpy, vectorised over a grid), with the
 tessellation tolerance tied to the operation's tolerance.
+
+**As built for phase 1.** `adaptive_2d` moved here from phase 1: constant engagement needs to know what material is
+left, which is the stock simulation's, and the 2D and 3D forms are one design. Phase 1 ships the other 20; the
+registry refuses `adaptive_2d` as "phase 2, not built yet", and the work so far is kept on branch
+`amy/cam-adaptive-wip`.
 
 **Phase 3: turning, cutting, EDM (15).**
 Turning: `lathe_face`, `lathe_rough`, `lathe_finish`, `lathe_groove`, `lathe_part` (parting), `lathe_thread`
@@ -200,6 +230,14 @@ Phase 1: `grbl`, `linuxcnc`, `fanuc`, `haas`, `mach3`. Phase 3: `fanuc_lathe`, `
 Every `.nc` file opens with a comment block: part, job, setup, WCS, tools, and the line "Prove this program on
 the machine: single block, feed override low, in air first."
 
+**As built for phase 1.** The header is, in order: `Part:`, `Job:` (the job file's name, or `inline`), `Setup:` with
+its tool axis, `WCS: G54 at <origin>`, `Post:` with the controller, the units and how `P` is read in a dwell, the
+post's own notes (grbl's laser mode off), the spindle spin-up wait when there is one, which way an oriented boring
+bar shifts (and so where its tip must point), one line per tool (its size, type, flutes, comment, each speed it runs
+at, its fastest feed and fastest plunge), then the prove-out line. A post that cannot run what the job needs (a tap
+on grbl, a rigid tap on Mach3, an oriented bar where the spindle cannot orient, arcs or helices without them)
+raises `PostRefusal`, which the run turns into a `no_post_support` error finding: no G-code, the sidecar holds why.
+
 ## Findings
 
 Same shape as FEA's (`check`, `severity`, `type`, `summary`, `description`, `items`), errors first, written in
@@ -216,6 +254,23 @@ of a sentence.
   (simulated stock left above stock-to-leave), `rpm_clamped`, `feed_clamped`, `full_slot` (100% engagement
   outside adaptive), `thin_wall`, `long_stickout` (L/D over 4), `uncut_feature` (a feature no operation touches).
 - **info**: cycle time, tool changes, removed volume, the post used.
+
+**As built for phase 1.**
+
+- An operation that is well formed but cannot be planned raises `PlanError` of one of six kinds, which becomes that
+  error finding: `empty_operation`, `too_deep`, `unreachable`, `tool_too_large` (the tool does not fit the
+  feature, or is not the hole's size), `tool_too_small` (a helical bore that would leave a core) and `gouge` (a
+  region running into the part). The job checks raise `gouge`, `holder_collision`, `fixture_collision`, `too_deep`,
+  `over_travel` and `empty_operation` over the whole planned job; the post raises `no_post_support` (above).
+- `rest_material` is raised in phase 1 by the operations that know what they leave (a drill's full diameter short of
+  a flat-bottomed hole's floor, a V-carve's flat bottom where the clearing tool does not fit), before any stock
+  simulation; `corner_left` comes from the pocket's corner radius against the tool.
+- Two more warnings: `through_stock_bottom` (a cut below the stock's bottom, unless it is a `fixture_collision`)
+  and `assumes_prepared_hole` (a tap or internal thread mill on a hole no earlier operation makes). `thin_wall` is a
+  kernel distance between a cut hole's or pocket's walls and the part's outside, under 1 mm.
+- Info findings exist, after the warnings: `assumed_fixture`, `unused_tool`, `cycle_time`, `tool_changes` and
+  `post`; removed volume waits for the stock simulation. The result's `checks` lists the 20 error and warning kinds
+  (`checks.CHECK_KINDS`), each with its verdict.
 
 ## Outputs
 
@@ -308,7 +363,8 @@ Short, one per contract, cheapest level (AGENTS.md):
   turned shaft, a sheet profile), `plan()`, `read_glb`, `glb_extras`, and a tiny G-code reader that back-plots
   a `.nc` into moves.
 - `test_cam_protocol.py`: registry order, every operation module stdlib-only at import, job errors name their
-  field, unbuilt operations refuse, `SkillDocs` (every built operation has a "Runs today" row).
+  field, unbuilt operations refuse, `SkillDocs` (every built operation has a "Runs today" row; every code of
+  `checks.CHECK_KINDS` is in both findings tables, SKILL.md's and `references/findings.md`'s, with its severity).
 - One file per family (`test_cam_milling_2d.py`, `test_cam_drilling.py`, ...). The core assertion for every
   operation: **the posted G-code, back-plotted, is the toolpath** (same moves within tolerance), and the
   simulated stock matches the part within stock-to-leave with no gouge.
@@ -321,10 +377,10 @@ Short, one per contract, cheapest level (AGENTS.md):
 
 ## Phases
 
-1. **Core and 2.5D**: job, features, stock, setups, tools, feeds, toolpath format, posts (5), the 21 phase-1
+1. **Core and 2.5D**: job, features, stock, setups, tools, feeds, toolpath format, posts (5), the 20 phase-1
    operations, heightfield-free checks (gouge by distance to part, reach, depth, travel), outputs, viewer
    (detection, chunk, fat-line paths, Job panel, playbar with tool), skill, registries. Shippable alone.
-2. **3D milling and stock simulation**: drop-cutter, 13 operations, heightfield sim, per-operation stock
+2. **3D milling and stock simulation**: drop-cutter, 14 operations (adaptive clearing 2D and 3D among them), heightfield sim, per-operation stock
    snapshots in the GLB and the viewer, rest machining, `rest_material` and `corner_left` from the sim.
 3. **Turning, cutting, EDM**: 15 operations, 2D sims, 7 posts, lathe/sheet setups in the viewer.
 4. **Multi-axis**: tool axis in `Move`, tri-dexel sim, 6 operations, TCP posts, machine kinematics for collision.

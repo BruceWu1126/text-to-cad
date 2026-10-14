@@ -44,7 +44,6 @@ REGISTRY: dict[str, Entry] = {entry.name: entry for entry in (
     _entry("facing", 1, "milling_2d", "Face"),
     _entry("contour_2d", 1, "milling_2d", "Profile"),
     _entry("pocket_2d", 1, "milling_2d", "Pocket"),
-    _entry("adaptive_2d", 1, "milling_2d", "Adaptive clearing"),
     _entry("slot", 1, "holes_2d", "Slot"),
     _entry("bore", 1, "holes_2d", "Helical bore"),
     _entry("circular", 1, "holes_2d", "Round pocket or boss"),
@@ -63,7 +62,8 @@ REGISTRY: dict[str, Entry] = {entry.name: entry for entry in (
     _entry("boring_cycle", 1, "drilling", "Boring bar"),
     _entry("counterbore", 1, "drilling", "Counterbore"),
     _entry("back_bore", 1, "drilling", "Back bore"),
-    # Phase 2: 3D milling over the stock simulation.
+    # Phase 2: 3D milling over the stock simulation, and adaptive clearing (its 2D and 3D forms designed together).
+    _entry("adaptive_2d", 2, "milling_2d", "Adaptive clearing"),
     _entry("adaptive_3d", 2, "milling_3d", "3D adaptive roughing"),
     _entry("pocket_3d", 2, "milling_3d", "Z-level roughing"),
     _entry("parallel", 2, "milling_3d", "Parallel"),

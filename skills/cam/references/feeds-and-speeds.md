@@ -26,7 +26,7 @@ For a milling cutter of diameter `D` mm with `z` flutes:
   ones). Under the smallest it shrinks in proportion to the diameter; over the largest it holds the
   largest's.
 - **A thread mill** mills at half the chip load: its whole thread form is in the cut.
-- **Chip thinning** (for adaptive clearing, not built yet): at a radial engagement `e` under half
+- **Chip thinning** (for adaptive clearing, phase 2): at a radial engagement `e` under half
   the diameter the chip load is raised by `1 / (2 sqrt(e (1 - e)))`, at most 3 times.
 
 Hole makers move along their axis, so their feed is per revolution and their plunge is their feed:
@@ -43,12 +43,14 @@ A tap feeds exactly `rpm x pitch`: anything else strips the thread or breaks the
 
 ## The machine's limits
 
-- A spindle speed over `machine.max_rpm` runs at `max_rpm`, with an `rpm_clamped` warning. The feed
-  follows the slower spindle (the chip load is kept, the cut takes longer), unless the operation
-  stated its feed, which is then kept (each tooth takes a bigger chip: the warning says to check it).
+- A spindle speed over `machine.max_rpm` runs at `max_rpm`, with an `rpm_clamped` warning: `T1 is
+  capped at the machine's 18,000 rpm; the tool and material call for 21,221 rpm, so the cut runs
+  slower at the same chip load`. The feed follows the slower spindle, unless the operation stated
+  its feed, which is then kept (each tooth takes a bigger chip: the warning gives the feed that keeps
+  the planned chip).
 - A feed or plunge over `machine.max_feed_mm_min` runs at the limit, with a `feed_clamped` warning:
-  each tooth takes a thinner chip, which rubs and wears the tool; a smaller or fewer-fluted tool may
-  suit that machine better.
+  each tooth takes a thinner chip, which rubs and wears the tool. A lower `rpm` on the operation, or
+  a tool with fewer flutes, keeps the planned chip at that feed.
 - A tap whose `rpm x pitch` is over the feed limit slows its spindle until the two agree, with a
   `feed_clamped` warning.
 

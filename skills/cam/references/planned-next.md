@@ -7,15 +7,12 @@ operation in for it.
 
 ## Phase 1: 2.5D milling and drilling
 
-Built today but one: `adaptive_2d` (constant-engagement roughing, trochoidal in narrow places) is
-refused as phase 1, not built yet. Rough with `pocket_2d` meanwhile ([milling-2d.md](milling-2d.md)).
+All 20 built today, with the checks over the whole planned job ([findings.md](findings.md)).
 
-Also coming with phase 1: the checks over the whole planned job (holder, fixture and travel
-collisions, too-long stickout, full-width cuts, features no operation cuts;
-[findings.md](findings.md#with-the-job-checks-not-in-this-cadgen-yet)).
+## Phase 2: 3D milling, adaptive clearing and stock simulation
 
-## Phase 2: 3D milling and stock simulation
-
+`adaptive_2d` (constant-engagement roughing, trochoidal in narrow places: moved here from phase 1, to
+be designed with `adaptive_3d`; rough with `pocket_2d` meanwhile, [milling-2d.md](milling-2d.md)),
 `adaptive_3d`, `pocket_3d`, `parallel`, `contour_3d`, `scallop`, `pencil`, `spiral`, `radial`,
 `morph`, `steep_shallow`, `ramp`, `horizontal`, `rest`: [milling-3d.md](milling-3d.md). With them the
 stock simulation, so a plan sees what earlier operations left, and the Viewer shows the stock after

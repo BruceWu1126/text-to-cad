@@ -44,7 +44,6 @@ Match what the part needs to an operation first. The `op` key of each entry in t
 | A flat, clean top: the stock skimmed down to the part's top (or a region of it, or a depth) | `facing` | Face | **Runs today** | [milling-2d.md](references/milling-2d.md#facing) |
 | A cut round an outline: the outside (cut free, with tabs), or a pocket's or hole's wall, to size | `contour_2d` | Profile | **Runs today** | [milling-2d.md](references/milling-2d.md#contour_2d) |
 | A pocket cleared to its floor, islands left standing | `pocket_2d` | Pocket | **Runs today** | [milling-2d.md](references/milling-2d.md#pocket_2d) |
-| A pocket or the outside roughed fast at a light, steady engagement | `adaptive_2d` | Adaptive clearing | phase 1, not built yet | [milling-2d.md](references/milling-2d.md#adaptive_2d-not-built-yet) |
 | A slot, open at one end or both, or a straight slot drawn as a region | `slot` | Slot | **Runs today** | [milling-2d.md](references/milling-2d.md#slot) |
 | A hole too large for a drill, to size with an end mill going round and down (helical) | `bore` | Helical bore | **Runs today** | [milling-2d.md](references/milling-2d.md#bore) |
 | A round pocket much larger than the tool, or a round boss | `circular` | Round pocket or boss | **Runs today** | [milling-2d.md](references/milling-2d.md#circular) |
@@ -62,6 +61,7 @@ Match what the part needs to an operation first. The `op` key of each entry in t
 | A precise hole finished with a boring bar (G86, or G76 fine bore) | `boring_cycle` | Boring bar | **Runs today** | [drilling.md](references/drilling.md#boring_cycle) |
 | A counterbore cut from the side the tool comes from | `counterbore` | Counterbore | **Runs today** | [drilling.md](references/drilling.md#counterbore) |
 | A counterbore on the far side, reached through the hole (G87) | `back_bore` | Back bore | **Runs today** | [drilling.md](references/drilling.md#back_bore) |
+| A pocket or the outside roughed fast at a light, steady engagement | `adaptive_2d` | Adaptive clearing | phase 2, not built yet (designed with `adaptive_3d`) | [milling-2d.md](references/milling-2d.md#adaptive_2d-phase-2) |
 | A 3D surface: a mould, a sculpted or curved face, a blend | `adaptive_3d`, `pocket_3d`, `parallel`, `contour_3d`, `scallop`, `pencil`, `spiral`, `radial`, `morph`, `steep_shallow`, `ramp`, `horizontal`, `rest` | 3D milling | phase 2, not built yet | [milling-3d.md](references/milling-3d.md) |
 | A turned part on a lathe | `lathe_face`, `lathe_rough`, `lathe_finish`, `lathe_groove`, `lathe_part`, `lathe_thread`, `lathe_bore`, `lathe_drill` | Turning | phase 3, not built yet | [turning.md](references/turning.md) |
 | A flat part cut from sheet by laser, plasma or waterjet | `laser_cut`, `laser_engrave`, `plasma_cut`, `waterjet_cut` | Sheet cutting | phase 3, not built yet | [cutting.md](references/cutting.md) |
@@ -141,8 +141,9 @@ degrees. Restate the user's numbers in those units before you write them down. A
    `--json` gives every size key. A document with several parts refuses with the occurrences it
    holds; pass one with `--occurrence #o2`. Use the selector of the feature, or any face of it.
 
-2. **Write the job** as `part.cam.json` beside the part (schema in
-   [job-file.md](references/job-file.md)). Ask the user for what you cannot know: the controller
+2. **Write the job** as `part.job.json` beside the part (schema in
+   [job-file.md](references/job-file.md)). Not `part.cam.json`: that is the sidecar the plan writes,
+   and a job there is refused before it is overwritten. Ask the user for what you cannot know: the controller
    (it decides the post), the machine's top spindle speed and feed, the material, how the stock is
    held, and the tools they have. Never guess a post.
 
@@ -150,11 +151,11 @@ degrees. Restate the user's numbers in those units before you write them down. A
    {
      "machine": {"kind": "mill", "post": "grbl", "max_rpm": 24000, "max_feed_mm_min": 3000, "rapid_mm_min": 5000},
      "material": "aluminum-6061",
-     "stock": {"type": "box", "margin_mm": [2, 2, 1, 1]},
-     "setups": [{"id": "top", "direction": "+Z", "origin": "stock_top_center", "fixture": {"type": "plate"}}],
+     "stock": {"type": "box", "margin_mm": [2, 2, 1, 3]},
+     "setups": [{"id": "top", "direction": "+Z", "origin": "stock_top_center", "fixture": {"type": "plate", "thickness_mm": 12}}],
      "tools": [
-       {"id": "T1", "type": "flat_endmill", "diameter_mm": 6, "flutes": 3, "flute_length_mm": 20, "stickout_mm": 30},
-       {"id": "T2", "type": "drill", "diameter_mm": 6, "flute_length_mm": 30, "stickout_mm": 40}
+       {"id": "T1", "type": "flat_endmill", "diameter_mm": 6, "flutes": 3, "flute_length_mm": 20, "stickout_mm": 24},
+       {"id": "T2", "type": "drill", "diameter_mm": 6, "flute_length_mm": 20, "stickout_mm": 24}
      ],
      "operations": [
        {"op": "facing", "tool": "T1"},
@@ -173,16 +174,21 @@ degrees. Restate the user's numbers in those units before you write them down. A
 3. **Plan.**
 
    ```bash
-   cadgen cam plan part.step --job part.cam.json
+   cadgen cam plan part.step --job part.job.json
    ```
 
    ```
-   planned #o1 of plate.step for grbl: 4 operations, cycle time 3 min 38 s, 1 tool changes
-     1. facing (top, T1): 1 min 16 s, cut 2972.2 mm, rapid 21 mm
+   planned #o1 of plate.step for grbl: 4 operations, cycle time 2 min 07 s, 1 tool change
+     1. facing (top, T1): 1 min 10 s, cut 2972.2 mm, rapid 21 mm
      2. pocket_2d (top, T1): 15 s, cut 574.175 mm, rapid 112.685 mm
-     3. contour_2d (top, T1): 2 min 04 s, cut 1563.96 mm, rapid 133.155 mm
+     3. contour_2d (top, T1): 39 s, cut 1563.96 mm, rapid 133.155 mm
      4. drill (top, T2): 2 s, cut 31.605 mm, rapid 117.605 mm
    wrote G-code: plate.nc, GLB: plate.cam.glb, sidecar: plate.cam.json
+   warning: #o1.f7 (hole, 5 mm, 6 mm deep) is reached from setup top but no operation cuts it
+   info: Setup top's plate is modelled with sizes the job does not state: border_mm 25
+   info: Cycle time 2 min 07 s: the moves at their feeds and the rapids
+   info: 1 tool change: T1 then T2
+   info: G-code for Grbl 1.1 (grbl post)
    ```
 
    This writes `part.nc` (one program per setup: `part.<setup>.nc` when the job has several),
@@ -190,27 +196,27 @@ degrees. Restate the user's numbers in those units before you write them down. A
    and pass `--post` to write the same job for another controller without editing it:
 
    ```bash
-   cadgen cam plan part.step CAM/part.haas.cam.glb --job part.cam.json --post haas
+   cadgen cam plan part.step CAM/part.haas.cam.glb --job part.job.json --post haas
    ```
 
    `--json` prints the result as one JSON line; progress goes to stderr, and `--verbose` adds every
    step and the timings there.
 
-4. **Read the findings.** Every plan prints them after the summary, one line each, `error:` or
-   `warning:`, errors first (`findings` in `--json` and the sidecar). A plan with an error writes no
-   G-code and no GLB, only the sidecar with the findings, and exits 1:
+4. **Read the findings.** Every plan prints them after the summary, one line each, `error:`,
+   `warning:` or `info:`, errors first (`findings` in `--json` and the sidecar). A plan with an
+   error writes no G-code and no GLB, only the sidecar with the findings, and exits 1:
 
    ```
    not planned: plate.step: no G-code written; sidecar: plate.cam.json
-   error: operations[2] (contour_2d): the tool cannot come down at (-50, -33) to z -8.5: the fixture stands in the way
+   error: operations[3] (drill): T2's cutter runs 1.803 mm into the plate near X-35 Y15 Z-13.803 (setup top)
    ```
 
-   Fix the job and plan again. Here the vise's jaws close on the stock's front and back, 2 mm from
-   the part, and the 6 mm tool cutting round the outline reaches past the stock into them: hold the
-   stock on a plate, or leave more stock in Y than the tool's diameter (`"margin_mm": [2, 10, 1, 1]`)
-   so the jaws grip clear of the cut. See [Read the
-   findings](#read-the-findings). A post that cannot run an operation safely (a tap on grbl) is
-   refused by name before anything is written: change the post or the operation.
+   Fix the job and plan again. Here the stock stands only 1 mm under the part (`"margin_mm": [2, 2,
+   1, 1]`), and the drill's point goes 2.8 mm past the through hole's bottom, into the plate under
+   the stock: leave more stock under the part (`[2, 2, 1, 3]`) or put a sacrificial plate under it.
+   A post that cannot run an operation safely (a tap on grbl, which has no tapping cycle) is a
+   `no_post_support` error the same way: change the post or the operation. See [Read the
+   findings](#read-the-findings).
 
 5. **Look at it in the Viewer.** Open the `.cam.glb` (with `$cad`'s Show the model step) and look
    with the user: the stock, the fixture, the toolpaths over the part, rapids above the stock,
@@ -247,31 +253,35 @@ degrees. Restate the user's numbers in those units before you write them down. A
 
 Every plan lists findings, errors first. An **error** means the job was not planned: no G-code, no
 GLB. A **warning** is planned, but worth a word to the user: weigh it as a machinist would, act on it
-or say why not. Each finding's `summary` names the operation (`operations[2] (contour_2d)`) and what
-it found; its `description`, when there is one, says what to do.
+or say why not. An **info** note says what the plan assumed (fixture sizes it did not know) or comes
+to (cycle time, tool changes, the post): repeat the assumptions when you hand over. Each finding's
+`summary` names the operation (`operations[2] (contour_2d)`, counted from 0) and what it found; its
+`description` says why and what to do.
 
-<!-- The "Raised" column marks the job checks (from the planning checks, not in this cadgen yet).
-     Reconcile it with cadgen._internal.cam.checks.CHECK_KINDS when the job checks land. -->
+| Finding | Severity | What it means | What to do |
+| --- | --- | --- | --- |
+| `gouge` | error | The tool would cut into the part past the operation's tolerance (swept along every move, rapids too). | Usually a region drawn into the part or a depth past the feature: redraw it inside the material, or cut the feature by its selector. |
+| `holder_collision` | error | The shank above the flutes, or the holder, hits the part or comes down into the stock. | A longer stickout, a slimmer holder, or a shallower cut; check the real tool. |
+| `fixture_collision` | error | The tool runs into the fixture: a profile into a vise jaw, a through drill into the plate under the stock. | Move the cut, or hold the stock differently: taller parallels, more stock under or round the part, a sacrificial plate. |
+| `unreachable` | error | The tool cannot get there: not reached from the setup's direction, the fixture in the way of the tool coming down, no room to ramp in. | Add a setup from the direction that reaches it, grip the stock lower or on a plate, or use the operation the summary names. |
+| `tool_too_large` | error | The tool does not fit the feature, or is not the hole's size within `diameter_tol_mm`. | A smaller tool, or the tool of the hole's size. |
+| `tool_too_small` | error | A helical bore would leave a core standing in the middle of the hole. | `circular` for a hole over twice the tool's diameter. |
+| `too_deep` | error | The cut would go into the part (a floor under the feature's), or deeper than the tool's flutes, so the shank would rub. | The feature's own depth (leave `depth_mm` out), a shallower cut, or a longer tool. |
+| `over_travel` | error | A setup's moves span more than the machine's `travel_mm` on an axis. | Split the work into setups, or use a bigger machine. |
+| `no_post_support` | error | The post cannot write what the job needs: a tap on grbl, a rigid tap on Mach3, an oriented boring bar where the spindle cannot orient. | Change the post (`--post`) or the operation (thread mill instead of tapping). |
+| `empty_operation` | error | The operation cuts nothing: the feature's floor is not below the material, a region with no depth, `all: true` with no hole that suits the tool. | Check the feature, the depth and the facing before it; drop the operation if there is nothing to do. |
+| `corner_left` | warning | A pocket's inside corner is tighter than the tool's radius: material stays in the corner. | A smaller tool for the corners, or tell the user the radius they get. |
+| `rest_material` | warning | Material is left where the tool did not reach: a drill's full diameter short of a flat-bottomed hole's floor, a V-carve's flat bottom too narrow for the clearing tool. | Finish it with another tool, or tell the user what is left. |
+| `rpm_clamped` | warning | The spindle is capped at the machine's top speed, under what the tool and material call for; the feed follows, so the chip load is kept and the cut runs slower. | Usually fine: say so. A stated feed is kept, so lower it in step (the description gives the number). |
+| `feed_clamped` | warning | The feed is capped at the machine's limit, so each tooth takes a thinner chip (a tap's spindle slows with it instead). | A thin chip rubs: set a lower `rpm` on the operation, or use a tool with fewer flutes. |
+| `full_slot` | warning | The tool cuts at its full width for over five diameters (a pocket's links from ring to ring). | A smaller stepdown or a lower feed is gentler; say it for a small tool or a hard material. |
+| `thin_wall` | warning | A hole or pocket leaves less than 1 mm of wall to the part's outside: it bends and chatters. | Light finishing passes, support, or check the part needs it that thin. |
+| `long_stickout` | warning | A tool stands out more than 4 times its diameter: expect it to deflect and chatter. | Shorten the stickout, or take lighter cuts. |
+| `uncut_feature` | warning | A hole, pocket or slot a setup reaches that no operation cuts. | Add the operation, or confirm with the user it stays as it is. |
+| `through_stock_bottom` | warning | A cut goes below the stock's bottom (a through drill's point). | Say what must be under it: a spoilboard, a sacrificial plate, a gap between parallels. |
+| `assumes_prepared_hole` | warning | A tap or thread mill works a hole no earlier operation makes. | Drill it first in the job, or confirm it is made before the job runs. |
 
-| Finding | Severity | Raised | What it means | What to do |
-| --- | --- | --- | --- | --- |
-| `empty_operation` | error | today | The operation has nothing to cut: the feature's floor is not below the material, a region with no depth, `all: true` with no hole that suits the tool. | Check the feature, the depth and the facing before it; drop the operation if there is nothing to do. |
-| `too_deep` | error | today | The cut would go into the part: a floor under the feature's, a facing below the part's top, a spot or a pilot past a blind hole's bottom. | Use the feature's own depth (leave `depth_mm` out) or a shallower one. |
-| `unreachable` | error | today | The tool cannot get there: the feature is not reached from the setup's direction, the fixture stands in the way, there is no room to ramp in. | Add a setup from the direction that reaches it, grip the stock lower or on a plate, or pick another operation (the summary says which). |
-| `tool_too_large` | error | today | The tool does not fit the feature, or is not the hole's size within `diameter_tol_mm`. | Pick a smaller tool, or the tool of the hole's size. |
-| `tool_too_small` | error | today | A helical bore would leave a core standing in the middle of the hole. | Use `circular` for a hole over twice the tool's diameter. |
-| `gouge` | error | today (a slot or round pocket drawn as a region running into the part); checks too | The path would cut into the part. | Redraw the region inside the material, or cut the feature by its selector. |
-| `rpm_clamped` | warning | today | The spindle runs at the machine's top speed, under what the material and tool call for. | Usually fine: the feed follows the slower spindle. Say so; a larger tool may suit the machine better. |
-| `feed_clamped` | warning | today | The feed is held to the machine's limit (a tap's spindle slows with it). | Each tooth takes a thinner chip and may rub: consider a smaller or fewer-fluted tool. |
-| `rest_material` | warning | today | Material is left where the tool did not reach: a drill's full diameter short of a flat-bottomed hole's floor, a V-carve's flat bottom too narrow for the clearing tool. | Finish it with another tool, or tell the user what is left. |
-| `holder_collision` | error | not in this cadgen yet | The holder or shank hits the stock, the part or the fixture. | A longer stickout or a slimmer holder; check the real tool. |
-| `fixture_collision` | error | not in this cadgen yet | A path runs into the fixture. | Move the cut or the fixture. |
-| `over_travel` | error | not in this cadgen yet | A move is outside the machine's travel. | Re-place the work zero or the part. |
-| `no_post_support` | error | not in this cadgen yet (today a post refuses with an error before anything is written) | The post cannot write what the job needs. | Change the post or the operation. |
-| `corner_left` | warning | not in this cadgen yet (today a pocket's stats list it) | An inside corner is tighter than the tool's radius: material stays in the corner. | A smaller tool for the corners, or tell the user the radius they get. |
-| `full_slot` | warning | not in this cadgen yet | The tool cuts its full width outside adaptive clearing. | Slow the feed or use a smaller stepover. |
-| `long_stickout` | warning | not in this cadgen yet | The tool sticks out more than 4 times its diameter: it will chatter and deflect. | Shorten the stickout, or slow down and take lighter cuts. |
-| `uncut_feature` | warning | not in this cadgen yet | A feature no operation cuts. | Add the operation, or confirm with the user it is left as it is. |
-
-[findings.md](references/findings.md) has each finding in full, the shape a finding takes, and the
-warnings about the run itself (an assumed rapid rate) that are not findings.
+The info notes are `assumed_fixture`, `unused_tool`, `cycle_time`, `tool_changes` and `post`.
+[findings.md](references/findings.md) has each finding in full, the shape a finding takes, what the
+checks see and do not (phase 1 does not simulate the stock), and the warnings about the run itself
+(an assumed rapid rate) that are not findings.

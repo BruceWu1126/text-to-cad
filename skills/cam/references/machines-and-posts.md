@@ -33,12 +33,13 @@ what the program assumes.
 
 ```
 (Part: plate.step)
-(Job: job.cam.json)
+(Job: plate.job.json)
 (Setup: top, tool axis +Z)
 (WCS: G54 at stock_top_center)
 (Post: grbl, for Grbl 1.1, units mm, dwell P in seconds)
 (Laser mode must be off: setting 32 = 0)
 (Spindle spin-up: G4 P 3 s after every M3)
+(T1: D6 mm flat_endmill 3 flutes: 21221 rpm, feed 2546.5 mm/min, plunge 764 mm/min)
 (T2: D6 mm drill: 14854 rpm, feed 1782.5 mm/min)
 (Prove this program on the machine: single block, feed override low, in air first.)
 ```
@@ -147,12 +148,16 @@ for `tap`.
 
 ## Refusals
 
-A post refuses what its controller cannot run safely, before anything is written, naming the post
-and the operation, and the run exits 1:
+A post refuses what its controller cannot run safely as a `no_post_support` error finding, naming
+the post and the operation: no G-code and no GLB are written, the sidecar holds the finding, and the
+run exits 1 ([findings.md](findings.md)):
 
 ```
-grbl post: operations[1] (tap) has a tap cycle, and Grbl 1.1 has no tapping cycle. Expanded into plain moves, the feed would not follow the spindle and the tap would break; use a post whose controller taps, or thread mill the hole
+error: The grbl post cannot write this job: operations[1] (tap) has a tap cycle, and Grbl 1.1 has no tapping cycle
 ```
+
+Its description goes on: "Expanded into plain moves, the feed would not follow the spindle and the
+tap would break; use a post whose controller taps, or thread mill the hole. No G-code was written".
 
 | The job has | Refused by |
 | --- | --- |

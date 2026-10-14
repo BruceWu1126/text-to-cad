@@ -72,14 +72,16 @@ Clears a `pocket` (its islands left standing) or a `region` down to its floor. T
 | `finish_floor_mm` | leave this on the floor for a last level of its own (its outer ring finishes the walls too) | 0 |
 | `ramp_angle_deg` | the steepest entry: a helix inside the pocket, a ramp where none fits | 3 |
 
-Inside corners tighter than the tool's radius keep the tool's radius: the stats' `corner_left` lists
-each, and the operation's `lines` in the sidecar say `#o1.f19: R3 inside corners left at R4 by this
-tool`. Tell the user, or add a smaller tool for the corners.
+Inside corners tighter than the tool's radius keep the tool's radius: a `corner_left` warning says so
+for each pocket, the stats' `corner_left` lists each, and the operation's `lines` in the sidecar say
+`#o1.f19: R3 inside corners left at R4 by this tool`. Tell the user, or add a smaller tool for the
+corners.
 
-## `adaptive_2d` (not built yet)
+## `adaptive_2d` (phase 2)
 
-Constant-engagement roughing (a light, steady cut, trochoidal in narrow places) is planned for phase 1
-and refused today: `"adaptive_2d" is phase 1, not built yet`. Rough with `pocket_2d` (a smaller
+Constant-engagement roughing (a light, steady cut, trochoidal in narrow places) moved to phase 2,
+where it is designed together with `adaptive_3d` over the stock simulation, and is refused today:
+`"adaptive_2d" is phase 2, not built yet`. Rough with `pocket_2d` (a smaller
 `stepover`, and `finish_mm` for a finishing ring) meanwhile.
 
 ## `slot`
