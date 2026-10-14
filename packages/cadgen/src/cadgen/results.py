@@ -605,7 +605,7 @@ class CamFeature:
     #: The viewer's selector a job names it by (``#o1.f17``): the face that identifies it (a hole's wall, a
     #: pocket's floor).
     ref: str
-    #: ``face``, ``hole``, ``pocket``, ``slot``, ``boss``, ``profile`` or ``turned``.
+    #: ``face``, ``hole``, ``pocket``, ``slot`` or ``profile`` (``features.KINDS``).
     kind: str
     #: Every face the feature is made of, ``ref`` first.
     refs: tuple[str, ...] = ()

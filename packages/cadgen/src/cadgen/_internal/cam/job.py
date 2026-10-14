@@ -12,7 +12,7 @@ A job is JSON (a path, an inline JSON string, or a dict from a library caller) o
       "tools": [{"id": "T1", "type": "flat_endmill", "diameter_mm": 6, "flutes": 3, "flute_length_mm": 18,
                  "stickout_mm": 30, "holder": {"diameter_mm": 32, "length_mm": 40}, "material": "carbide"}],
       "operations": [{"op": "pocket_2d", "setup": "top", "tool": "T1", "features": ["#o1.f12"]}],
-      "view": {"show": {"rapids": true, "stock": "final"}}
+      "view": {"show": {"rapids": true, "stock": "initial"}}
     }
 
 Every key and every enum is a closed vocabulary (README law 9): an unknown one is a ValueError naming its path
@@ -161,7 +161,9 @@ COOLANTS = ("off", "flood", "mist", "air")
 VIEW_KEYS = ("show",)
 #: What the viewer draws: booleans, and which stock (``none`` hides it).
 SHOW_KEYS = ("rapids", "stock", "fixtures", "tool")
-SHOW_STOCK = ("initial", "final", "none")
+SHOW_STOCK = ("initial", "none")
+#: Known and refused with its phase (README law 9): the stock as the operations leave it needs the stock simulation.
+SHOW_STOCK_LATER = {"final": 2}
 
 
 @dataclass(frozen=True)
@@ -711,12 +713,16 @@ def _target(entry: dict, operation, where: str) -> dict:
 def _view(raw: Any) -> dict | None:
     if raw is None:
         return None
-    view = obj(raw, where="view", example='{"show": {"rapids": true, "stock": "final"}}')
+    view = obj(raw, where="view", example='{"show": {"rapids": true, "stock": "initial"}}')
     known(view, VIEW_KEYS, where="view", takes="a view takes show")
-    show = obj(view.get("show", {}), where="view.show", example='{"rapids": true, "stock": "final"}')
+    show = obj(view.get("show", {}), where="view.show", example='{"rapids": true, "stock": "initial"}')
     known(show, SHOW_KEYS, where="view.show", takes=f"it takes {', '.join(SHOW_KEYS)}")
     checked = {key: flag(show[key], where=f"view.show.{key}") for key in ("rapids", "fixtures", "tool") if key in show}
     if "stock" in show:
+        if isinstance(show["stock"], str) and show["stock"] in SHOW_STOCK_LATER:
+            raise ValueError(f"view.show.stock: \"{show['stock']}\" (the stock as the operations leave it) is phase "
+                             f"{SHOW_STOCK_LATER[show['stock']]}, not built yet: phase 1 does not simulate the stock; "
+                             f"built today: {words(SHOW_STOCK)}")
         checked["stock"] = choice(show["stock"], SHOW_STOCK, where="view.show.stock")
     return {"show": {key: checked[key] for key in SHOW_KEYS if key in checked}}
 

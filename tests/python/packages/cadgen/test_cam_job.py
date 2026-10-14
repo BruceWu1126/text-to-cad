@@ -34,7 +34,7 @@ JOB = {
         {"op": "pocket_2d", "setup": "top", "tool": "T1", "features": ["#o1.f12"], "stock_to_leave_mm": 0.2},
         {"op": "drill", "tool": "T2", "features": ["#o1.f20", "#o1.f21"], "depth_mm": 8},
     ],
-    "view": {"show": {"rapids": True, "stock": "final"}},
+    "view": {"show": {"rapids": True, "stock": "initial"}},
 }
 
 
@@ -80,7 +80,11 @@ class ValidJob(unittest.TestCase):
         self.assertEqual((pocket.clearance_mm, pocket.retract_mm), (15.0, 3.0))   # the setup's, then the default
         self.assertEqual((pocket.features, pocket.stock_to_leave_mm), (("#o1.f12",), 0.2))
         self.assertEqual((drill.setup, drill.params), ("top", {"depth_mm": 8.0}))  # the one setup, unnamed
-        self.assertEqual(job.view, {"show": {"rapids": True, "stock": "final"}})
+        self.assertEqual(job.view, {"show": {"rapids": True, "stock": "initial"}})
+        final = copy.deepcopy(JOB)
+        final["view"] = {"show": {"stock": "final"}}
+        self.assertIn('view.show.stock: "final" (the stock as the operations leave it) is phase 2, not built yet',
+                      value_error(self, parse_job, final))
         self.assertEqual(job.source, JOB)
 
     def test_the_callers_dict_is_copied_never_changed_or_shared(self):

@@ -16,7 +16,7 @@ key a job shares; each operation's own keys are on its reference page (the table
   "tools": [{"id": "T1", "type": "flat_endmill", "diameter_mm": 6, "flutes": 3, "flute_length_mm": 18,
              "stickout_mm": 30, "holder": {"diameter_mm": 32, "length_mm": 40}, "material": "carbide"}],
   "operations": [{"op": "pocket_2d", "setup": "top", "tool": "T1", "features": ["#o1.f12"]}],
-  "view": {"show": {"rapids": true, "stock": "final"}}
+  "view": {"show": {"rapids": true, "stock": "initial"}}
 }
 ```
 
@@ -214,7 +214,8 @@ turning, cutting, EDM and multi-axis ([planned-next.md](planned-next.md)).
 ## `view`
 
 Optional: what the Viewer draws at first. `{"show": {...}}` with `rapids`, `fixtures` and `tool`
-(`true` or `false`) and `stock` (`initial`, `final` or `none`).
+(`true` or `false`) and `stock` (`initial` or `none`). `final`, the stock as the operations leave
+it, needs the stock simulation and is refused as phase 2.
 
 ## What comes out
 

@@ -53,6 +53,17 @@ class Surface(unittest.TestCase):
         self.assertEqual(parser.parse_args(["part.step", "--direction", "-Z"]).direction, "-Z")
         self.assertEqual(parser.parse_args(["part.step", "--direction", "-X", "--json"]).json_output, True)
 
+    def test_the_public_docs_name_the_feature_kinds_cadgen_recognises(self):
+        import cadgen.cam
+        import cadgen.results
+        from cadgen._internal.cam.features import KINDS
+
+        source = Path(cadgen.results.__file__).read_text(encoding="utf-8")
+        line = next(text for text in source.splitlines() if "``face``, ``hole``" in text)
+        self.assertEqual(tuple(re.findall(r"``(\w+)``", line)), KINDS)
+        for stale in ("boss", "turned"):
+            self.assertNotIn(stale, cadgen.cam.features.__doc__.splitlines()[0])
+
     def test_the_public_namespace_imports_no_kernel_geometry_or_numerics(self):
         self.assertEqual(heavy_at_import("cadgen.cam", "cadgen.cli.cam_plan", "cadgen.cli.cam_features"), "")
 

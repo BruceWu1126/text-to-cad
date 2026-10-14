@@ -35,7 +35,7 @@ def features(
     direction: str | None = None,
     verbose: bool = False,
 ) -> CamFeaturesResult:
-    """List what a part offers a machinist: faces, holes, pockets, slots, bosses and turned diameters.
+    """List what a part offers a machinist: flat faces, holes, pockets, slots and outlines (profiles).
 
     target: the STEP/STP document holding the part.
     occurrence: which part occurrence to list (``#o1``) when the document is an
