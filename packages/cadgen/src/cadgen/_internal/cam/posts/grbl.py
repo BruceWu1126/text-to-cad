@@ -25,7 +25,7 @@ What grbl has and has not, and what this post does about it:
 
 from __future__ import annotations
 
-from cadgen._internal.cam.posts.base import PostBase
+from cadgen._internal.cam.posts.base import PostBase, PostRefusal
 
 
 class GrblPost(PostBase):
@@ -48,6 +48,6 @@ class GrblPost(PostBase):
         super().check_line(text)
         code = "".join(text.split("(")[0].split())
         if len(code) > 79:
-            raise ValueError(f"{self.name} post: the block {text!r} is longer than grbl's 79-character line buffer")
+            raise PostRefusal(f"{self.name} post: the block {text!r} is longer than grbl's 79-character line buffer")
         if not text.isascii():
-            raise ValueError(f"{self.name} post: the line {text!r} is not plain ASCII")
+            raise PostRefusal(f"{self.name} post: the line {text!r} is not plain ASCII")

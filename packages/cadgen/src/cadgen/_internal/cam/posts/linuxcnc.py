@@ -19,7 +19,7 @@
 
 from __future__ import annotations
 
-from cadgen._internal.cam.posts.base import PostBase, Route
+from cadgen._internal.cam.posts.base import PostBase, PostRefusal, Route
 
 
 class LinuxcncPost(PostBase):
@@ -45,7 +45,7 @@ class LinuxcncPost(PostBase):
     def route(self, move, where):
         if move.cycle.kind == "rigid_tap":
             if move.cycle.dwell_s:
-                raise ValueError(f"{self.name} post: {where} has a rigid_tap cycle with a dwell, and LinuxCNC's "
+                raise PostRefusal(f"{self.name} post: {where} has a rigid_tap cycle with a dwell, and LinuxCNC's "
                                  "G33.1 takes none; leave the dwell out")
             return Route("special")
         return super().route(move, where)

@@ -4,8 +4,8 @@ A post is a dialect: a class stating its controller's capabilities and the few b
 (the program's wrapper, its safe start, how it goes home, how it changes a tool, how it dwells). :class:`PostBase`
 writes everything else the same way for all of them:
 
-- the header comment block (part, job, setup, WCS, units, dwell units, tools with rpm and feed, and the prove-out
-  line), then units (G21 / G20), the safe start (G90, G17, G94, ...) and the WCS (G54);
+- the header comment block (part, job, setup, WCS, units, dwell units, tools with rpm, feed and plunge feed, and the
+  prove-out line), then units (G21 / G20), the safe start (G90, G17, G94, ...) and the WCS (G54);
 - per toolpath: a tool change when the tool changes, the spindle (``S`` as a whole number, ``M3``), the coolant;
 - per move: ``G0`` / ``G1``, ``G2`` / ``G3`` with ``I`` / ``J`` from the start (helical when Z changes), ``G4`` for a
   dwell, and canned cycles as cycles where the controller has them, else as the moves :func:`expand_cycle` gives;
@@ -25,7 +25,8 @@ an oriented bar says in its header which way the bar shifts and so which way its
 A post refuses (ValueError naming the post and the operation) what its controller cannot run safely, never writing a
 plausible program instead (README law 10): a tap on a controller with no tapping (an expanded tap, with the spindle
 not synchronised to the feed, breaks the tap), an oriented boring cycle on one that cannot orient its spindle, a
-helix on one without helical arcs, toolpaths that do not join.
+helix on one without helical arcs, a line longer than it takes. Those are :class:`PostRefusal`, which the run turns
+into a ``no_post_support`` finding; any other ValueError (toolpaths that do not join) is a fault in the plan.
 
 Stdlib only.
 """
@@ -39,7 +40,7 @@ from typing import ClassVar, Sequence
 
 from cadgen._internal.cam.toolpath import Move, Toolpath, cycle_return, expand_cycle, walk
 
-__all__ = ["CYCLE_CODES", "MM_PER_INCH", "PROVE_LINE", "PostBase", "Route", "fmt", "safe_comment"]
+__all__ = ["CYCLE_CODES", "MM_PER_INCH", "PROVE_LINE", "PostBase", "PostRefusal", "Route", "fmt", "safe_comment"]
 
 MM_PER_INCH = 25.4
 PROVE_LINE = "Prove this program on the machine: single block, feed override low, in air first."
@@ -100,6 +101,11 @@ def _direction(shift: tuple[float, float]) -> str:
         if math.hypot(shift[0] - axis[0], shift[1] - axis[1]) < 1e-9:
             return name
     return f"X{fmt(shift[0], 4)} Y{fmt(shift[1], 4)}"
+
+
+class PostRefusal(ValueError):
+    """What the controller cannot run (a tap with no tapping cycle, arcs on a controller with none): the job is fine,
+    this post is not the one for it. The run reports it as a ``no_post_support`` finding and writes no G-code."""
 
 
 @dataclass(frozen=True)
@@ -178,18 +184,18 @@ class PostBase:
         if cycle.kind in _TAPS:
             if cycle.kind not in self.cycles:
                 what = "spindle-synchronised (rigid) tapping" if cycle.kind == "rigid_tap" else "tapping cycle"
-                raise ValueError(
+                raise PostRefusal(
                     f"{self.name} post: {where} has a {cycle.kind} cycle, and {self.controller} has no {what}. "
                     "Expanded into plain moves, the feed would not follow the spindle and the tap would break; "
                     "use a post whose controller taps, or thread mill the hole")
             if not native:
-                raise ValueError(f"{self.name} post: {where} has a {cycle.kind} cycle with a dwell, and "
+                raise PostRefusal(f"{self.name} post: {where} has a {cycle.kind} cycle with a dwell, and "
                                  f"{self.controller}'s tapping cycle takes none; leave the dwell out")
             return Route("native")
         if native:
             return Route("native")
         if cycle.kind in _ORIENTED and not self.orient:
-            raise ValueError(
+            raise PostRefusal(
                 f"{self.name} post: {where} has a {cycle.kind} cycle, and {self.controller} can neither run it as a "
                 "canned cycle nor stop and orient its spindle (M19), so the boring bar would drag across the wall "
                 "when it shifts; bore with a plain bore cycle or use another post")
@@ -237,7 +243,7 @@ class PostBase:
     def check_line(self, text: str) -> None:
         """ValueError when a line is one the controller cannot take."""
         if self.max_line_length is not None and len(text) > self.max_line_length:
-            raise ValueError(f"{self.name} post: the line {text!r} is longer than {self.controller}'s "
+            raise PostRefusal(f"{self.name} post: the line {text!r} is longer than {self.controller}'s "
                              f"{self.max_line_length} characters")
 
     # --- the program ---------------------------------------------------------------------------------------
@@ -298,13 +304,13 @@ class PostBase:
             operation = job.operations[toolpath.op]
             where = f"operations[{toolpath.op}] ({operation.op})"
             if toolpath.rpm is None:
-                raise ValueError(f"{self.name} post: {where} has no spindle speed, and a mill's tool must turn")
+                raise PostRefusal(f"{self.name} post: {where} has no spindle speed, and a mill's tool must turn")
             for start, move in walk(toolpath.moves, toolpath.start):
                 if move.kind in ("arc_cw", "arc_ccw"):
                     if not self.arcs:
-                        raise ValueError(f"{self.name} post: {where} has arcs, and {self.controller} has none")
+                        raise PostRefusal(f"{self.name} post: {where} has arcs, and {self.controller} has none")
                     if abs(move.xyz[2] - start[2]) > _EPS and not self.helical:
-                        raise ValueError(f"{self.name} post: {where} has a helix, and {self.controller} has no "
+                        raise PostRefusal(f"{self.name} post: {where} has a helix, and {self.controller} has no "
                                          "helical arcs")
                 elif move.kind == "cycle":
                     routes[id(move)] = self.route(move, where)
@@ -335,21 +341,28 @@ class PostBase:
         for direction in shifts:
             prog.comment(f"Boring bar: the bar shifts {direction} off the wall, so orient it with its tip pointing "
                          f"opposite, {_opposite(direction)}, at the spindle orient position")
-        tools: dict[str, list[str]] = {}
+        # One line per tool: its speed (each, when operations run it at several), its fastest feed and its fastest
+        # plunge (a straight cut down the axis) over every toolpath it runs.
+        tools: dict[str, dict] = {}
         for toolpath in toolpaths:
-            feeds = [move.feed for move in toolpath.moves if move.feed is not None]
-            rate = f"{int(round(toolpath.rpm))} rpm"
-            if feeds:
-                rate += f", feed {prog.feed_text(max(feeds))} {unit}/min"
-            entry = tools.setdefault(toolpath.tool, [])
-            if rate not in entry:
-                entry.append(rate)
-        for tool_id, rates in tools.items():
+            entry = tools.setdefault(toolpath.tool, {"rpm": [], "feed": [], "plunge": []})
+            rpm = int(round(toolpath.rpm))
+            if rpm not in entry["rpm"]:
+                entry["rpm"].append(rpm)
+            for move in toolpath.moves:
+                if move.feed is not None:
+                    entry["plunge" if move.kind == "plunge" else "feed"].append(move.feed)
+        for tool_id, entry in tools.items():
             tool = job.tool(tool_id)
             size = f"D{prog.coord(tool.diameter_mm)} {unit} " if tool.diameter_mm is not None else ""
             flutes = f" {tool.flutes} flutes" if tool.flutes else ""
             note = f" {tool.comment}" if tool.comment else ""
-            prog.comment(f"{tool.id}: {size}{tool.type}{flutes}{note}: {'; '.join(rates)}")
+            rate = " and ".join(str(rpm) for rpm in entry["rpm"]) + " rpm"
+            if entry["feed"]:
+                rate += f", feed {prog.feed_text(max(entry['feed']))} {unit}/min"
+            if entry["plunge"]:
+                rate += f", plunge {prog.feed_text(max(entry['plunge']))} {unit}/min"
+            prog.comment(f"{tool.id}: {size}{tool.type}{flutes}{note}: {rate}")
         prog.comment(PROVE_LINE)
 
     def _retract(self, prog) -> None:
@@ -520,7 +533,7 @@ class _Program:
     def spindle(self, rpm: float) -> None:
         whole = int(round(rpm))
         if whole <= 0:
-            raise ValueError(f"{self.post.name} post: a spindle speed of {rpm:g} rpm rounds to {whole}")
+            raise PostRefusal(f"{self.post.name} post: a spindle speed of {rpm:g} rpm rounds to {whole}")
         self.speed = whole
         self.ensure_spindle()
 
