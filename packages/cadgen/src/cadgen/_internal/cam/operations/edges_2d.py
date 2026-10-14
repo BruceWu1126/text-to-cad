@@ -694,12 +694,14 @@ class EngraveOperation(OperationBase):
         left = flat.difference(g2.offset(centres, r, ctx.tol)).area
         found = []
         if left > 0.01:
+            what = ref if ref.startswith("#") else f"the {ref}"     # a feature's selector, or "the region"
             found.append(finding(
                 "warning", "rest_material",
-                f"{ctx.label}: {tool.id} leaves {left:.3g} mm2 of the flat bottom of {ref} where it does not fit",
+                f"{ctx.label}: {tool.id} does not fit everywhere on the flat bottom of {what}, and leaves "
+                f"{left:.3g} square mm of it uncut",
                 "the V-bit's pass round the flat cuts the walls, but in corners tighter than the flat tool the floor "
                 "keeps a little material; a smaller clear_tool takes it",
-                [{"text": f"{ctx.label} {ref}", "ref": ref, "tool": tool.id}]))
+                [{"text": f"{ctx.label} {ref}", "tool": tool.id, **({"ref": ref} if ref.startswith("#") else {})}]))
         return (clear, emitter), found
 
     def human_lines(self, stats: dict) -> list[str]:
