@@ -25,9 +25,11 @@ POCKET, LEFT, RIGHT = "#o1.f19", "#o1.f16", "#o1.f17"
 JOB = {
     "machine": {"kind": "mill", "post": "linuxcnc"},
     "material": "aluminum-6061",
-    "stock": {"type": "box", "margin_mm": [2, 2, 1, 1]},
+    # 3 mm under the part, so the through drill's point (to z -13.8) stays in the stock, clear of the plate under it.
+    "stock": {"type": "box", "margin_mm": [2, 2, 1, 3]},
     "setups": [{"id": "top", "fixture": {"type": "plate"}}],
-    "tools": [{"id": "T1", "type": "flat_endmill", "diameter_mm": 6, "flutes": 3, "flute_length_mm": 20},
+    "tools": [{"id": "T1", "type": "flat_endmill", "diameter_mm": 6, "flutes": 3, "flute_length_mm": 20,
+               "stickout_mm": 24},
               {"id": "T2", "type": "drill", "diameter_mm": 6},
               {"id": "T3", "type": "flat_endmill", "diameter_mm": 25, "flutes": 3, "flute_length_mm": 20}],
     "operations": [
@@ -130,7 +132,7 @@ class Plan(unittest.TestCase):
         self.assertEqual(code, 1)
         answer = json.loads(text)
         self.assertFalse(answer["ok"])
-        self.assertEqual([(f["severity"], f["type"]) for f in answer["findings"]], [("error", "tool_too_large")])
+        self.assertEqual([f["type"] for f in answer["findings"] if f["severity"] == "error"], ["tool_too_large"])
         self.assertEqual(sorted(p.name for p in out.parent.iterdir()), ["plate.cam.json"])
         self.assertFalse(json.loads((out.parent / "plate.cam.json").read_text(encoding="utf-8"))["ok"])
 

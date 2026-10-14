@@ -14,7 +14,10 @@ document.
 Planning
     Each operation gets a :class:`~cadgen._internal.cam.operations.context.PlanContext`, with one geometry cache per
     setup. It starts where the last toolpath of the same setup left the tool when that toolpath has the same tool
-    (the post joins them with no tool change), else at its own clearance height. An operation that raises
+    (the post joins them with no tool change), else at its own clearance height. A toolpath an operation runs before
+    its own with another tool (an engraving's clear_tool) starts at its clearance height; when that tool is the one
+    the last toolpath of the setup ran, it is joined to where that one ended (:func:`_join`: up to the clearance
+    height, across, down), since the post runs them with no tool change between. An operation that raises
     ``PlanError`` becomes that error finding and the job is not planned; every operation is still tried, so one run
     lists every refusal. Anything else an operation raises propagates: a ValueError names the job's field, any other
     error is a bug.
@@ -26,11 +29,15 @@ Time
     running order, so ``_T`` in the GLB is the job's clock.
 
 Checks
-    :data:`PlannedOp` is what the job's checks read. When ``cadgen._internal.cam.checks`` exists (phase 1 task 12), the
-    run calls ``checks.check_job(job, planned_ops, part=part, stock=stock, setups=frames, features=features)`` once,
-    after every operation is planned, and adds the findings it returns. An operation that raised ``PlanError`` is not
-    among ``planned_ops``. When the module also has ``CHECK_KINDS`` (the finding types it can raise), the result's
-    ``checks`` lists each with its verdict: the worst severity among its findings, else ``"pass"``.
+    :data:`PlannedOp` is what the job's checks read. The run calls ``checks.check_job(job, planned_ops, part=part,
+    stock=stock, setups=frames, features=features)`` once, after every operation is planned; it returns every finding
+    of the planned operations (their own, the feeds' clamps merged per tool) and of the checks. An operation that
+    raised ``PlanError`` is not among ``planned_ops``; its finding is the run's. The result's ``checks`` lists each of
+    ``checks.CHECK_KINDS`` with its verdict: the worst severity among its findings, else ``"pass"``.
+
+Posting
+    A job with no error is posted. A post that refuses it (``PostRefusal``: a tap on grbl, which has no tapping
+    cycle) is a ``no_post_support`` error finding, not an exception: the job is not fit for that post.
 
 A job with an error finding is ``ok=False``: no G-code and no GLB are written (a stale one at those paths is
 removed, README law 10), and the sidecar still is, with the findings, so a person reads why.
@@ -39,7 +46,6 @@ removed, README law 10), and the sidecar still is, with the findings, so a perso
 from __future__ import annotations
 
 import dataclasses
-import importlib
 import json
 import os
 import re
@@ -220,6 +226,9 @@ def plan_job(target: Path, out: Path | None, *, job=None, occurrence: str | None
         except PlanError as exc:
             findings.append(exc.finding())
             continue
+        if planned.before and previous is not None:
+            planned = dataclasses.replace(planned, before=(_join(previous, planned.before[0], ctx),
+                                                           *planned.before[1:]))
         timed, began = [], []
         for toolpath in planned.toolpaths:
             began.append(t)
@@ -229,33 +238,34 @@ def plan_job(target: Path, out: Path | None, *, job=None, occurrence: str | None
         starts[index] = tuple(began)
         planned = dataclasses.replace(planned, before=tuple(timed[:-1]), toolpath=timed[-1])
         planned_ops.append(PlannedOp(index, operation, ctx, planned))
-        findings.extend(planned.findings)
         if planned.toolpath.moves or planned.before:
             last[operation.setup] = planned.toolpath
     timings["plan_s"] = time.perf_counter() - clock
 
-    check_kinds: tuple[str, ...] = ()
-    try:
-        checks = importlib.import_module("cadgen._internal.cam.checks")
-    except ModuleNotFoundError as exc:
-        if exc.name != "cadgen._internal.cam.checks":
-            raise
-    else:
-        findings.extend(checks.check_job(parsed, tuple(planned_ops), part=part, stock=stock, setups=frames,
-                                         features=features))
-        check_kinds = tuple(getattr(checks, "CHECK_KINDS", ()))
-    findings = by_severity(findings)
-    verdicts = [{"type": kind, "status": next((f["severity"] for f in findings if f["type"] == kind), "pass")}
-                for kind in check_kinds]
-    ok = not any(finding["severity"] == "error" for finding in findings)
+    from cadgen._internal.cam import checks
+    from cadgen._internal.cam.posts.base import PostRefusal
+
+    clock = time.perf_counter()
+    log("checking the plan")
+    findings.extend(checks.check_job(parsed, tuple(planned_ops), part=part, stock=stock, setups=frames,
+                                     features=features))
+    timings["check_s"] = time.perf_counter() - clock
 
     toolpaths = [toolpath for planned_op in planned_ops for toolpath in planned_op.planned.toolpaths]
     programs: dict[str, str] = {}
-    if ok:
+    if not any(finding["severity"] == "error" for finding in findings):
         clock = time.perf_counter()
-        programs = poster.programs(parsed, parsed.setups, toolpaths, part=document.name,
-                                   job_name=_job_name(job))
+        try:
+            programs = poster.programs(parsed, parsed.setups, toolpaths, part=document.name,
+                                       job_name=_job_name(job))
+        except PostRefusal as exc:
+            findings.append(_refused(poster, exc))
+            programs = {}
         timings["post_s"] = time.perf_counter() - clock
+    findings = by_severity(findings)
+    verdicts = [{"type": kind, "status": next((f["severity"] for f in findings if f["type"] == kind), "pass")}
+                for kind in checks.CHECK_KINDS]
+    ok = not any(finding["severity"] == "error" for finding in findings)
     nc_names = _nc_names(stem, programs)
 
     operations = [_operation_entry(planned_op, starts[planned_op.index]) for planned_op in planned_ops]
@@ -323,6 +333,36 @@ def plan_job(target: Path, out: Path | None, *, job=None, occurrence: str | None
         sidecar=sidecar_path, summary=summary, operations=tuple(operations), timings=timings,
         warnings=tuple(warnings), findings=tuple(findings),
     )
+
+
+def _join(previous, toolpath, ctx):
+    """``toolpath`` (run before an operation's own, with ``previous``'s tool, in the same setup) started where
+    ``previous`` left the tool: straight up to the clearance height, across, and down to where it started."""
+    from cadgen._internal.cam.toolpath import Move
+
+    if previous.tool != toolpath.tool or previous.end == toolpath.start:
+        return toolpath
+    here, there = previous.end, toolpath.start
+    top = max(here[2], there[2], ctx.heights.clearance)
+    links = [(here[0], here[1], top), (there[0], there[1], top), there]
+    moves, last = [], here
+    for point in links:
+        if tuple(point) != tuple(last):
+            moves.append(Move("rapid", point, None, toolpath.op))
+            last = point
+    return dataclasses.replace(toolpath, start=here, moves=(*moves, *toolpath.moves))
+
+
+def _refused(poster, exc: Exception) -> dict:
+    """A post's refusal as the ``no_post_support`` error finding."""
+    from cadgen._internal.cam.operations.base import finding
+
+    text = str(exc).removeprefix(f"{poster.name} post: ")
+    first, _, rest = text.partition(". ")
+    description = (f"{rest.rstrip('.')}. No G-code was written" if rest else
+                   "No G-code was written; use a post whose controller can run it, or change the operation")
+    return finding("error", "no_post_support", f"The {poster.name} post cannot write this job: {first.rstrip('.')}",
+                   description, [{"text": text, "post": poster.name}])
 
 
 # --- what the result says ------------------------------------------------------------------------------------
@@ -439,10 +479,12 @@ def _tool_entries(job: "Job", planned_ops: list[PlannedOp]) -> list[dict]:
             })
     out = []
     for tool in job.tools:
-        shape = profile(tool)
         entry = {key: value for key, value in _json_value(tool).items() if value is not None and value != {}}
-        entry.update({"length_mm": _round(shape.length_mm, 6), "stickout_mm": _round(shape.stickout_mm, 6),
-                      "uses": uses[tool.id], "node": f"tool:{tool.id}" if uses[tool.id] else None})
+        if uses[tool.id]:
+            # Only a tool that runs is drawn: a job may list one whose type has no shape yet and use it nowhere.
+            shape = profile(tool)
+            entry.update({"length_mm": _round(shape.length_mm, 6), "stickout_mm": _round(shape.stickout_mm, 6)})
+        entry.update({"uses": uses[tool.id], "node": f"tool:{tool.id}" if uses[tool.id] else None})
         out.append(entry)
     return out
 
