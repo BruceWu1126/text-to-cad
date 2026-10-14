@@ -246,8 +246,9 @@ class AdaptiveParams:
 def round_corners(area, radius: float, tol: float):
     """The region the tool's centre may go with its convex corners rounded to at least ``radius``: the pieces an
     opening (shrink, then grow back) cuts off, where they are corners (they fit in a circle of twice ``radius``), are
-    left off; a narrow passage it cuts off is kept. A tool whose centre turns a corner tighter than that wraps the
-    corner's wall and takes a cut far wider than any cap (see the module's docstring)."""
+    left off; a narrow passage it cuts off, or a whole piece too small for it, is kept. A tool whose centre turns a
+    corner tighter than that wraps the corner's wall and takes a cut far wider than any cap (see the module's
+    docstring)."""
     import shapely
     from shapely.ops import unary_union
 
@@ -255,8 +256,42 @@ def round_corners(area, radius: float, tol: float):
 
     opened = g2.offset(g2.offset(area, -radius, tol), radius, tol)
     rest = [piece for piece in g2.polygons(area.difference(opened))
-            if shapely.minimum_bounding_radius(piece) > 2 * radius]
+            if shapely.minimum_bounding_radius(piece) > 2 * radius or opened.is_empty or piece.distance(opened) > tol]
     return g2.offset(unary_union([opened, *rest]).intersection(area), 0.0, tol)
+
+
+def _air(level: "_Level", material, moves, here) -> tuple[float, float]:
+    """``(mm that cut nothing, mm)`` of the moves at the level's depth: the moves replayed in order on a fresh grid of
+    the level's material (moves down through the level cut what they pass, unmeasured)."""
+    from cadgen._internal.cam.operations import geometry2d as g2
+    from cadgen._internal.cam.toolpath import arc_sweep
+
+    m = CutMap(level.map_bounds, level.map.radius, 2 * level.cell)
+    m.fill(material.intersection(g2.offset(level.area, level.map.radius, level.ctx.tol)))
+    z, air, total = level.z, 0.0, 0.0
+    for move in moves:
+        if here is None:
+            here = move.xyz
+            continue
+        if move.kind in ("arc_cw", "arc_ccw"):
+            cx, cy = move.center
+            radius = math.hypot(here[0] - cx, here[1] - cy)
+            a0, sweep = math.atan2(here[1] - cy, here[0] - cx), arc_sweep(here, move)
+            count = max(2, math.ceil(abs(sweep) * radius / level.step))
+            points = [(cx + radius * math.cos(a0 + sweep * k / count), cy + radius * math.sin(a0 + sweep * k / count),
+                       here[2] + (move.xyz[2] - here[2]) * k / count) for k in range(1, count + 1)]
+        else:
+            count = max(1, math.ceil(math.dist(here, move.xyz) / level.step))
+            points = [tuple(here[n] + (move.xyz[n] - here[n]) * k / count for n in range(3)) for k in range(1, count + 1)]
+        for point in points:
+            if min(here[2], point[2]) < level.above - 1e-9:
+                _, cells = m.sweep(here, point)
+                if abs(here[2] - z) < 1e-9 and abs(point[2] - z) < 1e-9:
+                    length = math.dist(here[:2], point[:2])
+                    total += length
+                    air += 0.0 if cells else length
+            here = point
+    return air, total
 
 
 class _Level:
@@ -276,7 +311,8 @@ class _Level:
         self.cell = CELL_FRACTION * 2 * r
         self.step = STEP_FRACTION * 2 * r
         self.turn = self.step / (TURN_RADIUS_FRACTION * 2 * r)
-        self.map = CutMap(g2.offset(centre_area, r, ctx.tol).bounds, r, self.cell)
+        self.map_bounds = g2.offset(centre_area, r, ctx.tol).bounds
+        self.map = CutMap(self.map_bounds, r, self.cell)
         # The material this level removes: the stock the tool's circle can reach.
         self.map.fill(material.intersection(g2.offset(centre_area, r, ctx.tol)))
         # The cells a tool circle can cut whole: the last cell along the walls is only ever cut in part, so it is no
@@ -287,6 +323,7 @@ class _Level:
         # What the walks must cut; the rest (a band along the walls, the corners) is the wall rings'.
         self.reach = self.map.inside(g2.offset(inner, r, ctx.tol)) if not inner.is_empty else self.map.inside(None)
         self.max_w = 0.0
+        self.max_at = ((0.0, 0.0), (0.0, 0.0))   # where it was read
         self._area = self._length = 0.0
         self.restarts = 0
         self.lifts = 0
@@ -312,7 +349,8 @@ class _Level:
         self._area += width * length
         self._length += length
         if self._length >= self.step / 2:
-            self.max_w = max(self.max_w, self._area / self._length)
+            if self._area / self._length > self.max_w:
+                self.max_w, self.max_at = self._area / self._length, (tuple(a[:2]), tuple(b[:2]))
             self._area = self._length = 0.0
 
 
@@ -382,6 +420,7 @@ class Adaptive2dOperation(OperationBase):
                        "chip_thinning": round(chip_thinning(cap), 6), "feed_mm_min": round(feeds.feed_mm_min, 6)}
         worst = 0.0
         restarts = lifts = 0
+        cut_air = [0.0, 0.0]   # mm of path at depth that cut nothing, mm of path at depth
         for ref, side, centre_at, bottom, feature in self._targets(params, ctx):
             if bottom is None:
                 floor = floor_from(ctx, params.depth_mm, params.z_mm, None, deepest=None, what="")
@@ -403,18 +442,26 @@ class Adaptive2dOperation(OperationBase):
                 if area.is_empty:
                     raise PlanError("tool_too_large", f"{ctx.where}: the {diameter:g} mm tool does not fit in {ref} at "
                                     f"z {z:g}")
-                level = _Level(ctx, area, g2.stock_outline(ctx, z), z, above, target_w)
+                material = g2.stock_outline(ctx, z)
+                level = _Level(ctx, area, material, z, above, target_w)
+                begin, at = len(emitter.moves), emitter.here
                 self._clear(emitter, level, ref)
+                air_mm, path_mm = _air(level, material, emitter.moves[begin:], at)
+                cut_air[0] += air_mm
+                cut_air[1] += path_mm
                 worst = max(worst, min(level.max_w, diameter))
                 restarts += level.restarts
                 lifts += level.lifts
                 # The model errs high by up to a cell along each edge; no cut is wider than the tool.
                 if min(level.max_w, diameter) > cap * diameter + 2 * level.cell:
+                    (ax, ay), (bx, by) = level.max_at
                     raise PlanError(
                         "tool_too_large",
-                        f"{ctx.where}: {ref} at z {z:g} cannot be cleared at {cap:g} of the diameter: a passage is too "
-                        f"narrow for the {diameter:g} mm tool to turn in (it would cut {level.max_w / diameter:.2f})",
-                        "use a smaller tool, a higher max_engagement, or pocket_2d")
+                        f"{ctx.where}: {ref} at z {z:g} cannot be cleared at {cap:g} of the diameter: the passage at "
+                        f"({(ax + bx) / 2:.1f}, {(ay + by) / 2:.1f}) is too narrow for the {diameter:g} mm tool to "
+                        f"clear it under the cap (it would cut {level.max_w / diameter:.2f} of the diameter there)",
+                        "use pocket_2d there, or a smaller tool, or a higher max_engagement",
+                        items=[{"text": f"{ref} at ({(ax + bx) / 2:.1f}, {(ay + by) / 2:.1f}, {z:g})", "ref": ref}])
                 above = z
             stats["targets"].append({"ref": ref, "side": side, "floor_z": round(floor, 6),
                                      "stepdown_mm": round(stepdown, 6), "levels": [round(z, 6) for z in levels]})
@@ -422,7 +469,8 @@ class Adaptive2dOperation(OperationBase):
             if drawn is not None and drawn + ctx.tol < r + stl + corner:
                 stats["corner_left"].append({"ref": ref, "corner_radius_mm": drawn,
                                              "tool_leaves_radius_mm": round(r + stl + corner, 6)})
-        stats.update({"engagement_measured": round(worst / diameter, 4),
+        stats.update({"air_fraction": round(cut_air[0] / cut_air[1], 3) if cut_air[1] > 0 else 0.0,
+                      "engagement_measured": round(worst / diameter, 4),
                       "engagement_angle_deg": round(engagement_angle_deg(worst, diameter), 2),
                       "restarts": restarts, "lifts": lifts})
         return Planned(emitter.toolpath(), stats, feed_findings(ctx))

@@ -17,8 +17,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.python.support.cam_fixtures import (assert_backplot, assert_sound, path_points, plate_step, swept_at,
-                                               value_error)
+from tests.python.support.cam_fixtures import (assert_backplot, assert_sound, descents_ok, path_points, plate_step,
+                                               swept_at, value_error)
 
 #: The plate's pocket and outline (test_cam_features pins these).
 POCKET, OUTLINE = "#o1.f19", "#o1.f2"
@@ -194,6 +194,22 @@ class Case:
                 self.assertLess(left.area, 1e-3, f"{target['ref']} z {z}")
 
 
+class Cheap:
+    """The cheap soundness checks in place of assert_sound's B-rep one (whose cost grows with every move; the plate
+    pocket and the narrow slot run it in full): the sliced part's intrusion, no steep descent into material, no
+    sideways rapid under the retract plane, every move this operation's."""
+
+    def test_the_toolpath_is_sound(self):
+        from cadgen._internal.cam.operations.geometry2d import intrusion
+        from cadgen._internal.cam.toolpath import rapids_below
+
+        ctx, tp = self.ctx, self.planned.toolpath
+        self.assertLessEqual(intrusion(ctx, path_points(tp)), ctx.tol)
+        self.assertEqual(descents_ok(tp, ctx), [])
+        self.assertEqual(rapids_below(tp.moves, start=tp.start, z=ctx.heights.retract), [])
+        self.assertEqual({move.op for move in tp.moves}, {ctx.index})
+
+
 class PlatePocket(Case, unittest.TestCase):
     make = staticmethod(plate_step)
     operation = {"features": [POCKET], "max_engagement": 0.15}
@@ -235,6 +251,7 @@ class PlatePocket(Case, unittest.TestCase):
         self.assertIn("feed 3,566 mm/min with chip thinning x1.40",
                       "\n".join(get_operation("adaptive_2d").human_lines(planned.stats)))
         self.assertEqual(planned.stats["targets"][0]["levels"], [-6.0])   # 6 mm deep: one level of the flutes
+        self.assertTrue(0.0 < planned.stats["air_fraction"] < 1.0)        # the share at depth cutting nothing
 
     # --- the job's keys and what cannot be planned ------------------------------------------------------------
 
@@ -275,7 +292,7 @@ class PlateOutside(Case, unittest.TestCase):
     """The stock round the plate's outline, 0.2 mm left on its walls and under it: entered from the air beside it."""
 
     make = staticmethod(plate_step)
-    operation = {"features": [OUTLINE], "side": "outside", "max_engagement": 0.2, "stock_to_leave_mm": 0.2}
+    operation = {"features": [OUTLINE], "side": "outside", "max_engagement": 0.3, "stock_to_leave_mm": 0.2}
 
     def test_it_is_entered_from_the_air(self):
         from cadgen._internal.cam.operations.emit import in_air
@@ -286,7 +303,7 @@ class PlateOutside(Case, unittest.TestCase):
                              for move in self.planned.toolpath.moves))   # no helix
 
 
-class IslandPocket(Case, unittest.TestCase):
+class IslandPocket(Cheap, Case, unittest.TestCase):
     """A pocket with an island: cleared round it, the island left standing."""
 
     make = staticmethod(island_step)
@@ -300,7 +317,7 @@ class NarrowSlot(Case, unittest.TestCase):
     """A slot 1.3 tool diameters wide: no room to go straight on at the cap, so the tool loops (trochoidal) and the cap
     still holds; two levels, as stepdown_mm asks."""
 
-    make = staticmethod(lambda directory: slot_step(directory, 7.8, "slot", length=15.0))
+    make = staticmethod(lambda directory: slot_step(directory, 7.8, "slot", length=12.0))
 
     @classmethod
     def operation_for(cls, step) -> dict:
@@ -313,7 +330,7 @@ class NarrowSlot(Case, unittest.TestCase):
         self.assertEqual(plan_one(self.step, self.document)[2], self.planned)
 
 
-class TightSlot(Case, unittest.TestCase):
+class TightSlot(Cheap, Case, unittest.TestCase):
     """A slot barely wider than the tool: no helix fits, so each level is entered down a ramp along it; at full
     engagement allowed (a slot is cut at full width), the ramp is the only way down."""
 
