@@ -65,6 +65,7 @@ MIRRORS: dict[str, tuple[str, str]] = {
     "sdf validate": ("cadgen.sdf", "validate"),
     "srdf validate": ("cadgen.srdf", "validate"),
     "pcb validate": ("cadgen.pcb", "validate"),
+    "pcb review": ("cadgen.pcb", "review"),
     "pcb gerber": ("cadgen.pcb", "gerber"),
     "pcb bom": ("cadgen.pcb", "bom"),
     "pcb pos": ("cadgen.pcb", "pos"),

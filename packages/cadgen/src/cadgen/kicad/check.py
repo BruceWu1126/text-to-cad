@@ -81,12 +81,16 @@ _OUTLINE_ITEMS = ("gr_line", "gr_arc", "gr_circle", "gr_rect", "gr_poly", "gr_cu
 
 
 def is_blocking(finding: Finding) -> bool:
-    """An error stops a build; an unrouted connection only makes the board a draft; the review only advises."""
-    return finding.severity == "error" and finding.check not in ("unconnected", "review")
+    """An error stops a build; an unrouted connection only makes the board a draft."""
+    return finding.severity == "error" and finding.check != "unconnected"
 
 
-def _reviewed(tree: list, project: Path, currents: Mapping[str, float] | None = None) -> list[Finding]:
-    """The review's findings on a board (``cadgen.kicad.review``), in the script's coordinates."""
+def reviewed(tree: list, project: Path, currents: Mapping[str, float] | None = None) -> list[Finding]:
+    """The review's findings on a board (``cadgen.kicad.review``), in the script's coordinates.
+
+    Never part of a build or of ``check_project``: the review is advice an agent asks for
+    (``cadgen pcb review``, the pcb-dfm skill), not a check KiCad runs.
+    """
     from cadgen.kicad.board_index import read_index
     from cadgen.kicad.review import net_currents, review
 
@@ -205,10 +209,6 @@ def build_board(
             )
         findings = erc_findings(stage / "erc.json") + board_findings
         filled = _merge_fills(pcb_tree, (stage / f"{name}.kicad_pcb").read_text())
-        try:
-            findings += _reviewed(filled, stage / f"{name}.kicad_pro", board.net_currents)
-        except ValueError:
-            pass  # a board cadgen's index cannot read loses the review, not its build
     return BoardBuild(findings=tuple(findings), name=name, pro=texts.pro, sch=texts.sch, pcb=sexpr.dumps(filled), dru=texts.dru)
 
 
@@ -260,8 +260,4 @@ def check_project(path: Path, *, install: KicadInstall | None = None) -> Project
                     items=(),
                 ))
             findings.extend(board_findings)
-            try:
-                findings.extend(_reviewed(tree, stage / f"{stem}.kicad_pro"))
-            except ValueError:
-                pass  # a board cadgen's index cannot read (one KiCad's GUI wrote) loses the review, not its ERC and DRC
     return ProjectCheck(findings=tuple(findings))

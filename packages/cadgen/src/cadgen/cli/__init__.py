@@ -59,6 +59,7 @@ _COMMANDS: dict[str, tuple[str, str]] = {
     # Boards. A board is made by running its script (python <board>.py); these
     # doors check one KiCad project or write one manufacturing file of a saved board.
     "pcb validate": ("cadgen.cli.pcb_validate", "check a KiCad project with KiCad's ERC and DRC"),
+    "pcb review": ("cadgen.cli.pcb_review", "advise on a KiCad board: decoupling, track current, sourcing"),
     "pcb snapshot": ("cadgen.cli.pcb_snapshot", "render a KiCad board or schematic to an image"),
     "pcb gerber": ("cadgen.cli.pcb_gerber", "write the Gerber and drill zip of a KiCad board"),
     "pcb bom": ("cadgen.cli.pcb_bom", "write the bill of materials of a KiCad board"),

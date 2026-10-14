@@ -444,7 +444,6 @@ def _plot_layers(install, staged: Path, marked: list, stack: list[tuple[str, str
 def _board_payload(inputs: _Inputs, install) -> dict:
     from cadgen.kicad.board_index import read_index
     from cadgen.kicad.cli import run_kicad_cli, stage_files
-    from cadgen.kicad.review import net_currents, review
 
     path = inputs.document
     tree = _board_tree(inputs)
@@ -452,7 +451,6 @@ def _board_payload(inputs: _Inputs, install) -> dict:
     with tempfile.TemporaryDirectory(prefix="cadgen-kicad-plot-") as folder:
         staged = stage_files(inputs.files, Path(folder))
         index = read_index(tree, project=staged.with_suffix(".kicad_pro"))
-        reviewed = review(index, net_currents(staged.with_suffix(".kicad_pro")))
         # One DRC: what is still unconnected (the ratsnest), and every finding the viewer lists.
         run_kicad_cli(install, ["pcb", "drc", "--format", "json", "-o", "drc.json", staged.name], cwd=staged.parent)
         report = _drc_report(staged.parent / "drc.json")
@@ -462,7 +460,7 @@ def _board_payload(inputs: _Inputs, install) -> dict:
         mark = _marker_point(index)
         layers, page, offset = _plot_layers(install, staged, _marked(tree, unconnected, mark), stack, mark)
     width, height = _svg_size(page)
-    sheet = replace(index, findings=_findings(report, index) + reviewed).mapped(lambda x, y: (x - offset[0], y - offset[1]))
+    sheet = replace(index, findings=_findings(report, index)).mapped(lambda x, y: (x - offset[0], y - offset[1]))
     return {
         "kind": "board",
         "sheets": [{"name": path.stem, "width": width, "height": height, "background": BOARD_BACKGROUND, "layers": layers}],

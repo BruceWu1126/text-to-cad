@@ -2,7 +2,8 @@
 
 ``@pcb`` DECLARES a printed circuit board model (``@pcb(gerber=True, bom=True,
 pos=True)`` with its manufacturing files); ``pcb.Board`` is what its function
-builds and returns; ``pcb.validate(...)`` checks any KiCad project, and
+builds and returns; ``pcb.validate(...)`` checks any KiCad project with KiCad's
+ERC and DRC, ``pcb.review(...)`` advises on what those do not check, and
 ``pcb.gerber``/``pcb.bom``/``pcb.pos`` write a saved board's manufacturing files.
 They are the same object -- this module is callable (see
 :mod:`cadgen._internal.format_namespace`) -- so ``from cadgen import pcb``
@@ -66,6 +67,7 @@ __all__ = [
     "pos",
     "read_board",
     "read_schematic",
+    "review",
     "snapshot",
     "validate",
 ]
@@ -78,6 +80,18 @@ _SUFFIXES = (".kicad_pcb", ".kicad_sch", ".kicad_pro")
 
 #: ``cadgen pcb snapshot``'s verb: a board or schematic drawn as KiCad plots it, as the viewer draws it.
 snapshot = plot_snapshot_verb("pcb")
+
+
+def _issue(finding):
+    """A KiCad or review finding as the public issue type: its sentence, then where each item is."""
+    from cadgen.results import ValidationIssue
+
+    located = [item.text + (f" at ({item.at[0]:g}, {item.at[1]:g})" if item.at is not None else "") for item in finding.items]
+    return ValidationIssue(
+        severity=finding.severity,
+        message=(finding.summary or finding.description) + (": " + "; ".join(located) if located else ""),
+        code=f"{finding.check}.{finding.type}",
+    )
 
 
 def validate(path: Path, *, strict: bool = False, verbose: bool = False) -> ValidationResult:
@@ -96,7 +110,6 @@ def validate(path: Path, *, strict: bool = False, verbose: bool = False) -> Vali
     import sys
 
     from cadgen._internal.validation_door import display_path, failed, resolved_target
-    from cadgen.results import ValidationIssue
 
     target = resolved_target(path, label="pcb")
     if verbose:
@@ -112,25 +125,53 @@ def validate(path: Path, *, strict: bool = False, verbose: bool = False) -> Vali
         report = check_project(target)
     except KicadMissingError as error:
         return failed(target, str(error), code="kicad_missing")
-    issues = []
-    for finding in sorted(report.findings, key=lambda finding: (finding.severity != "error", finding.check, finding.type)):
-        located = [item.text + (f" at ({item.at[0]:g}, {item.at[1]:g})" if item.at is not None else "") for item in finding.items]
-        issues.append(
-            ValidationIssue(
-                severity=finding.severity,
-                message=(finding.summary or finding.description) + (": " + "; ".join(located) if located else ""),
-                code=f"{finding.check}.{finding.type}",
-            )
-        )
-    errors = sum(1 for finding in report.findings if finding.severity == "error" and finding.check != "review")
+    order = sorted(report.findings, key=lambda finding: (finding.severity != "error", finding.check, finding.type))
+    issues = [_issue(finding) for finding in order]
+    errors = sum(1 for finding in report.findings if finding.severity == "error")
     warnings = sum(1 for finding in report.findings if finding.severity == "warning")
-    advice = sum(1 for finding in report.findings if finding.severity == "warning" and finding.check == "review")
-    blocking = bool(errors or (strict and warnings > advice))  # the review advises; strict never fails on it
+    blocking = bool(errors or (strict and warnings))
     return ValidationResult(
         ok=not blocking,
         path=target,
         issues=tuple(issues),
         summary="" if blocking else f"OK {display_path(target)}: ERC and DRC clean ({warnings} warning(s))",
+    )
+
+
+def review(board: Path, *, verbose: bool = False) -> ValidationResult:
+    """Review the KiCad board BOARD for what KiCad's ERC and DRC do not check: advice, never a gate.
+
+    An IC's power input with no decoupling capacitor to ground, or the nearest
+    one too far from it; a net's tracks too thin for the current its script
+    gives it (``board.net("VBUS", current=2.0)``); parts the BOM lists with no
+    LCSC or MPN to order them by; one part number on two footprints. Each
+    finding names its parts by board reference. The result is always ok: the
+    pcb-dfm skill weighs each finding, and ``cadgen pcb validate`` is the gate.
+
+    board: the .kicad_pcb to review (its .kicad_pro beside it carries net currents).
+    verbose: narrate the target on stderr.
+    """
+    import sys
+
+    from cadgen._internal.validation_door import display_path, failed, resolved_target
+
+    target = resolved_target(board, label="pcb")
+    if verbose:
+        print(f"[pcb] reviewing {target}", file=sys.stderr)
+    if target.suffix.lower() != ".kicad_pcb":
+        return failed(target, "target must be a KiCad board (.kicad_pcb)")
+    if not target.is_file():
+        return failed(target, "file not found")
+    from cadgen.kicad import sexpr
+    from cadgen.kicad.check import reviewed
+
+    try:
+        findings = reviewed(sexpr.parse(target.read_text(encoding="utf-8")), target.with_suffix(".kicad_pro"))
+    except ValueError as error:
+        return failed(target, f"cadgen cannot read this board for review: {error}")
+    issues = tuple(_issue(finding) for finding in findings)
+    return ValidationResult(
+        ok=True, path=target, issues=issues, summary=f"Reviewed {display_path(target)}: {len(issues)} finding(s)"
     )
 
 

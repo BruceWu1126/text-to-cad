@@ -177,32 +177,31 @@ class ReviewTest(unittest.TestCase):
         self.assertEqual([item.ref for item in found.items], ["#R1", "#R2", "#R4"])
         self.assertEqual(review(board(resistor("R1", {"LCSC": "C21190"}), resistor("R2", {"LCSC": "C21190"}))), ())
 
-    def test_the_review_never_blocks_a_build(self):
-        from cadgen.kicad.check import is_blocking
-        from cadgen.kicad.phrasing import Finding
-
-        for severity in ("warning", "error"):
-            self.assertFalse(is_blocking(Finding(check="review", severity=severity, type="decoupling_far", description="", items=())))
-        self.assertTrue(is_blocking(Finding(check="drc", severity="error", type="clearance", description="", items=())))
-
-    def test_validate_passes_a_board_whose_only_findings_are_the_review(self):
+    def test_pcb_review_is_advice_never_a_gate(self):
         from unittest import mock
 
         from cadgen import pcb
-        from cadgen.kicad.check import ProjectCheck
-        from cadgen.kicad.phrasing import Finding
+        from cadgen.kicad.phrasing import Finding, FindingItem
 
         for severity in ("warning", "error"):
-            found = Finding(check="review", severity=severity, type="decoupling_far", description="far", items=(), summary="C1 is far")
-            with tempfile.TemporaryDirectory() as folder, mock.patch("cadgen.kicad.check.check_project", return_value=ProjectCheck(findings=(found,))):
+            found = Finding(check="review", severity=severity, type="decoupling_far", description="far",
+                            items=(FindingItem(text="C1", at=(1.0, 2.5)),), summary="C1 is far")
+            with tempfile.TemporaryDirectory() as folder, mock.patch("cadgen.kicad.check.reviewed", return_value=[found]):
                 board = Path(folder) / "b.kicad_pcb"
-                board.write_text("", encoding="utf-8")
-                for strict in (False, True):
-                    result = pcb.validate(board, strict=strict)
-                    self.assertTrue(result.ok, (severity, strict, result.issues))
-                    self.assertEqual([(issue.code, issue.severity, issue.message) for issue in result.issues],
-                                     [("review.decoupling_far", severity, "C1 is far")])
+                board.write_text("(kicad_pcb)", encoding="utf-8")
+                result = pcb.review(board)
+                self.assertTrue(result.ok, (severity, result.issues))
+                self.assertEqual([(issue.code, issue.severity, issue.message) for issue in result.issues],
+                                 [("review.decoupling_far", severity, "C1 is far: C1 at (1, 2.5)")])
 
+    def test_pcb_review_takes_only_a_board(self):
+        from cadgen import pcb
+
+        with tempfile.TemporaryDirectory() as folder:
+            schematic = Path(folder) / "b.kicad_sch"
+            schematic.write_text("(kicad_sch)", encoding="utf-8")
+            self.assertFalse(pcb.review(schematic).ok)
+            self.assertFalse(pcb.review(Path(folder) / "missing.kicad_pcb").ok)
 
 if __name__ == "__main__":
     unittest.main()

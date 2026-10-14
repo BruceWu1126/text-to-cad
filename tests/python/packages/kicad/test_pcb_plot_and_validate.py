@@ -153,8 +153,8 @@ class PcbPlotAndValidateTest(unittest.TestCase):
         pads = {(pad["part"], pad["number"]): pad["at"] for pad in draft["board"]["pads"]}
         self.assertEqual([item["at"] for item in unrouted["items"]], [pads["R1", "2"], pads["D1", "2"]])
 
-    def test_the_review_rides_every_plot_and_validate_without_blocking(self) -> None:
-        """A regulator's input capacitor 10 mm past its pad (see ``REGULATOR``) is advised on, never blocked."""
+    def test_the_review_is_asked_for_never_part_of_plot_or_validate(self) -> None:
+        """A regulator's input capacitor 10 mm past its pad (see ``REGULATOR``): pcb.review advises, the build stays KiCad's."""
         from cadgen import pcb
         from cadgen.kicad.plot import build_plot
 
@@ -165,19 +165,16 @@ class PcbPlotAndValidateTest(unittest.TestCase):
         built = subprocess.run([sys.executable, "regulator.py"], cwd=project, env=env, capture_output=True, text=True, timeout=600)
         self.assertEqual(built.returncode, 0, built.stderr)
         payload = build_plot(project / "regulator.kicad_pcb")
-        review = [finding for finding in payload["board"]["findings"] if finding["check"] == "review"]
-        self.assertEqual([finding["type"] for finding in review], ["decoupling_far", "part_unsourced"])
-        self.assertEqual(review[1]["summary"], "U1 has no LCSC or MPN to order it by")  # C1's LCSC reached the board
-        self.assertIn("aim for under 3 mm", review[0]["summary"])
-        self.assertTrue(all(item["ref"] for item in review[0]["items"]))
-        checked = pcb.validate(project / "regulator.kicad_pcb")
-        [advice] = [issue for issue in checked.issues if issue.code == "review.decoupling_far"]
-        self.assertEqual(advice.severity, "warning")
-        self.assertTrue(advice.message.startswith(review[0]["summary"]))  # the agent reads the viewer's sentence
-        strict = pcb.validate(project / "regulator.kicad_pcb", strict=True)
-        self.assertFalse([issue for issue in strict.issues if issue.severity == "error" and issue.code.startswith("review.")])
-        self.assertEqual(strict.ok, checked.ok)  # the review's warning does not turn strict into a failure
+        self.assertFalse([finding for finding in payload["board"]["findings"] if finding["check"] == "review"])
         self.assertTrue(all(finding.get("summary") for finding in payload["board"]["findings"]))
+        checked = pcb.validate(project / "regulator.kicad_pcb")
+        self.assertFalse([issue for issue in checked.issues if issue.code.startswith("review.")])
+        reviewed = pcb.review(project / "regulator.kicad_pcb")
+        self.assertTrue(reviewed.ok)  # advice, never a gate
+        self.assertEqual([issue.code for issue in reviewed.issues], ["review.decoupling_far", "review.part_unsourced"])
+        self.assertTrue(all(issue.severity == "warning" for issue in reviewed.issues))
+        self.assertIn("aim for under 3 mm", reviewed.issues[0].message)
+        self.assertTrue(reviewed.issues[1].message.startswith("U1 has no LCSC or MPN to order it by"))  # C1's LCSC reached the board
 
     def test_read_board_sees_the_copper_kicad_poured(self) -> None:
         from cadgen import pcb
