@@ -1,33 +1,35 @@
-import { Axis3d, Box, Circle, Eraser, Minus, PaintBucket, MoveUpRight, Pencil, Redo2, Square, Trash2, Type, Undo2 } from 'lucide-react';
-import { useState } from 'react';
+import { Axis3d, Box, ChevronDown, Circle, Eraser, Minus, MoveUpRight, Pencil, Square, Type } from 'lucide-react';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger
+} from '@text-to-cad/ui/primitives/dropdown-menu';
 import { ToolbarButton } from '@text-to-cad/ui/primitives/toolbar-button';
+import { cn } from '@text-to-cad/ui/utils';
+import { FLOATING_SURFACE_CLASS } from '../lib/floatingSurface.js';
 
 /**
- * Draw's controls: its tools, the colour, weight and line style of what is drawn next (and of the
- * ink Select has picked), where it is drawn (on the model or in space), undo, redo and clear — all
- * the drawing session's (`session.js`).
+ * Draw's controls: its tools — the pen, the shapes behind one button, text and the eraser — and
+ * the colour, weight and line style of what is drawn next, and where it is drawn (on the model or
+ * in space), all the drawing session's (`session.js`). The same colour, weight and line style
+ * pickers (`InkStylePickers`) restyle the ink Select has picked, on its selection's bar.
  */
 
 /**
  * The drawing editor's tools a host offers. Its lock, image, frame, embed and laser tools are left out.
- * @typedef {'freedraw' | 'line' | 'arrow' | 'rectangle' | 'ellipse' | 'text' | 'fill' | 'eraser'} DrawingTool
+ * @typedef {'freedraw' | 'line' | 'arrow' | 'rectangle' | 'ellipse' | 'text' | 'eraser'} DrawingTool
  */
-// What puts ink down, the pen first: it is what Draw opens on, and the icon of the Draw tool itself.
-/** @type {readonly { id: DrawingTool, label: string, Icon: typeof Pencil }[]} */
-const INK_TOOLS = [
-  { id: 'freedraw', label: 'Pen', Icon: Pencil },
+/** @typedef {{ id: DrawingTool, label: string, Icon: typeof Pencil }} DrawingToolEntry */
+/** @type {readonly DrawingToolEntry[]} */
+export const DRAWING_SHAPE_TOOLS = [
   { id: 'line', label: 'Line', Icon: Minus },
   { id: 'arrow', label: 'Arrow', Icon: MoveUpRight },
   { id: 'rectangle', label: 'Rectangle', Icon: Square },
   { id: 'ellipse', label: 'Ellipse', Icon: Circle },
-  { id: 'text', label: 'Text', Icon: Type },
-  { id: 'fill', label: 'Fill area', Icon: PaintBucket },
-  { id: 'eraser', label: 'Eraser', Icon: Eraser },
 ];
-/** @type {readonly { id: DrawingTool, label: string, Icon: typeof Pencil }[]} */
-export const DRAWING_TOOLBAR_TOOLS = INK_TOOLS;
-/** @type {readonly DrawingTool[]} */
-export const DRAWING_TOOLS = DRAWING_TOOLBAR_TOOLS.map(tool => tool.id);
+const PEN = { id: 'freedraw', label: 'Pen', Icon: Pencil };
+const TEXT = { id: 'text', label: 'Text', Icon: Type };
+const ERASER = { id: 'eraser', label: 'Eraser', Icon: Eraser };
+/** @type {readonly DrawingTool[]} Every tool, the pen first: what Draw opens on, and the icon of the Draw tool itself. */
+export const DRAWING_TOOLS = [PEN, ...DRAWING_SHAPE_TOOLS, TEXT, ERASER].map(tool => tool.id);
 
 // Saturated enough to stand out from a shaded model in either theme; black and
 // white for the cases a neon cannot cover (a white page, a dark render).
@@ -82,92 +84,102 @@ const strokeGlyph = width => {
   const size = width === 1 ? 3 : width === 2 ? 5 : 7;
   return <span aria-hidden="true" className="block rounded-full bg-current" style={{ width: `${size}px`, height: `${size}px` }} />;
 };
-
-// Two rows of seven by default, the width of the block fixed by that count; a
-// container narrower than it wraps the same buttons into more rows.
-const SURFACE = 'pointer-events-auto flex w-[calc(7*1.5rem+6*0.125rem+0.5rem+2px)] max-w-full flex-wrap gap-0.5 rounded-md border border-border bg-background p-1 text-foreground shadow-sm';
 const swatch = color => ({ backgroundColor: color, boxShadow: 'inset 0 0 0 1px color-mix(in oklab, currentColor 35%, transparent)' });
+const icon = Icon => <Icon className="size-3" strokeWidth={2} aria-hidden="true" />;
+// A shape button's chevron: narrow, at the button's height, lit by its own hover and while open.
+const CHEVRON_CLASS = 'grid h-6 w-3 shrink-0 place-items-center rounded-sm text-muted-foreground outline-none transition hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 disabled:pointer-events-none disabled:opacity-50 aria-expanded:bg-accent aria-expanded:text-foreground';
+const ROW = 'flex min-w-0 flex-wrap items-center gap-0.5';
 
 /**
- * `layout="panel"`: the controls of a panel as wide as its column — the tools, wrapping to the
- * width they are given, then a rule, then the settings on a row of their own: colour, stroke width,
- * line style, placement, undo, redo and clear. Both rows share one column grid, so their buttons line up.
- * @param {{ drawing: import('./session.js').DrawingSession, className?: string, layout?: 'toolbar' | 'panel' }} props
+ * One of a mark's styles as a dropdown: its button shows the value with a small chevron, and opens
+ * an ordinary menu of the choices, each its glyph and its name; one chosen closes it.
  */
-export function DrawingToolbar({ drawing, className = '', layout = 'toolbar' }) {
-  // Which of the pickers is open under the buttons, if any: the colours, the weights, the line styles or the placements.
-  const [choosing, setChoosing] = useState(/** @type {'' | 'color' | 'width' | 'style' | 'placement'} */ (''));
-  const choosingColor = choosing === 'color';
+function StyleMenu({ label, options, value, glyph, onChange, disabled }) {
+  return <DropdownMenu modal={false}>
+    <DropdownMenuTrigger asChild>
+      <ToolbarButton tooltip={false} label={label} disabled={disabled} className="w-auto gap-0.5 px-1">
+        {glyph(value)}<ChevronDown className="size-2 shrink-0 opacity-70" strokeWidth={3} aria-hidden="true" />
+      </ToolbarButton>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="start" sideOffset={4} collisionPadding={8} aria-label={label}
+      className={cn(FLOATING_SURFACE_CLASS, 'w-40 data-[state=closed]:animate-none!')}>
+      <DropdownMenuRadioGroup value={String(value)} onValueChange={next => onChange(options.find(option => String(option.value) === next).value)}>
+        {options.map(option => <DropdownMenuRadioItem key={option.value} value={String(option.value)} aria-label={option.label}>
+          <span className="grid size-3.5 place-items-center">{glyph(option.value)}</span>{option.label}
+        </DropdownMenuRadioItem>)}
+      </DropdownMenuRadioGroup>
+    </DropdownMenuContent>
+  </DropdownMenu>;
+}
+const colorGlyph = color => <span className="size-3 rounded-full" style={swatch(color)} aria-hidden="true" />;
+
+/**
+ * The colour, weight and line style dropdowns (`StyleMenu`) — what is drawn next in Draw's panel,
+ * the ink picked on its selection's bar. Each is left out where it has nothing to set (`width`/`dash`
+ * null: no stroke picked); `placement` only where Draw puts ink down. `children` follow them on
+ * their row.
+ *
+ * @param {{ color: string, width?: number | null, dash?: DrawingStrokeStyle | null, placement?: DrawingPlacement | null,
+ *   onColor(value: string): void, onWidth?(value: number): void, onDash?(value: DrawingStrokeStyle): void,
+ *   onPlacement?(value: DrawingPlacement): void, disabled?: boolean, label: string, className?: string,
+ *   children?: import('react').ReactNode }} props
+ */
+export function InkStylePickers({ color, width = null, dash = null, placement = null, onColor, onWidth, onDash, onPlacement,
+  disabled = false, label, className = ROW, children = null }) {
+  return <div role="group" aria-label={label} className={className}>
+    <StyleMenu label="Color" options={DRAWING_COLORS} value={color.toLowerCase()} glyph={colorGlyph} onChange={onColor} disabled={disabled} />
+    {width == null ? null : <StyleMenu label="Stroke width" options={DRAWING_STROKE_WIDTHS} value={width} glyph={strokeGlyph}
+      onChange={value => onWidth?.(value)} disabled={disabled} />}
+    {dash == null ? null : <StyleMenu label="Line style" options={DRAWING_STROKE_STYLES} value={dash} glyph={styleGlyph}
+      onChange={value => onDash?.(value)} disabled={disabled} />}
+    {placement == null ? null : <StyleMenu label="Placement" options={DRAWING_PLACEMENTS} value={placement} glyph={placementGlyph}
+      onChange={value => onPlacement?.(value)} disabled={disabled} />}
+    {children}
+  </div>;
+}
+
+/**
+ * Draw's panel: the tools on one row — the pen, the shapes (the last one used on the button, every
+ * one in its chevron's menu, as a design tool's toolbar groups them), text and the eraser — then a
+ * rule, then what is drawn next: its colour, weight, line style and placement.
+ * @param {{ drawing: import('./session.js').DrawingSession, className?: string }} props
+ */
+export function DrawingToolbar({ drawing, className = '' }) {
   const disabled = !drawing.ready;
-  // No tooltips: over a canvas they cover the ink being pointed at. Every button keeps its accessible name.
   const toolButton = ({ id, label, Icon }) => <ToolbarButton key={id} tooltip={false} label={label} disabled={disabled}
     active={!disabled && drawing.tool === id} aria-pressed={!disabled && drawing.tool === id} onClick={() => drawing.selectTool(id)}>
-    <Icon className="size-3" strokeWidth={2} aria-hidden="true" />
+    {icon(Icon)}
   </ToolbarButton>;
-  const panel = layout === 'panel';
-  const settings = <>
-    <ToolbarButton tooltip={false} label="Color" disabled={disabled} active={choosingColor} aria-expanded={choosingColor} onClick={() => setChoosing(open => open === 'color' ? '' : 'color')}>
-      <span className="size-3 rounded-full" style={swatch(drawing.color)} aria-hidden="true" />
-    </ToolbarButton>
-    <ToolbarButton tooltip={false} label="Stroke width" disabled={disabled} active={choosing === 'width'} aria-expanded={choosing === 'width'} onClick={() => setChoosing(open => open === 'width' ? '' : 'width')}>
-      {strokeGlyph(drawing.strokeWidth ?? 2)}
-    </ToolbarButton>
-    <ToolbarButton tooltip={false} label="Line style" disabled={disabled} active={choosing === 'style'} aria-expanded={choosing === 'style'} onClick={() => setChoosing(open => open === 'style' ? '' : 'style')}>
-      {styleGlyph(drawing.strokeStyle ?? 'solid')}
-    </ToolbarButton>
-    <ToolbarButton tooltip={false} label="Placement" disabled={disabled} active={choosing === 'placement'} aria-expanded={choosing === 'placement'} onClick={() => setChoosing(open => open === 'placement' ? '' : 'placement')}>
-      {placementGlyph(drawing.placement ?? 'surface')}
-    </ToolbarButton>
-    <ToolbarButton tooltip={false} label="Undo" disabled={disabled || !drawing.canUndo} onClick={() => drawing.undo()}><Undo2 className="size-3" strokeWidth={2} aria-hidden="true" /></ToolbarButton>
-    <ToolbarButton tooltip={false} label="Redo" disabled={disabled || !drawing.canRedo} onClick={() => drawing.redo()}><Redo2 className="size-3" strokeWidth={2} aria-hidden="true" /></ToolbarButton>
-    <ToolbarButton tooltip={false} label="Clear drawing" disabled={disabled || !drawing.hasContent} onClick={() => drawing.clear()}><Trash2 className="size-3" strokeWidth={2} aria-hidden="true" /></ToolbarButton>
-  </>;
-  const palette = choosingColor && !disabled ? <div role="radiogroup" aria-label="Drawing color"
-    className={panel ? "mt-1 flex flex-wrap gap-0.5" : SURFACE}>
-    {DRAWING_COLORS.map(({ value, label }) => <ToolbarButton key={value} tooltip={false} label={label} role="radio"
-      aria-checked={drawing.color.toLowerCase() === value} active={drawing.color.toLowerCase() === value}
-      onClick={() => { drawing.selectColor(value); setChoosing(''); }}>
-      <span className="size-3.5 rounded-full" style={swatch(value)} aria-hidden="true" />
-    </ToolbarButton>)}
-  </div> : choosing === 'width' && !disabled ? <div role="radiogroup" aria-label="Stroke width"
-    className={panel ? "mt-1 flex flex-wrap gap-0.5" : SURFACE}>
-    {DRAWING_STROKE_WIDTHS.map(({ value, label }) => <ToolbarButton key={value} tooltip={false} label={label} role="radio"
-      aria-checked={(drawing.strokeWidth ?? 2) === value} active={(drawing.strokeWidth ?? 2) === value}
-      onClick={() => { drawing.selectStrokeWidth?.(value); setChoosing(''); }}>
-      {strokeGlyph(value)}
-    </ToolbarButton>)}
-  </div> : choosing === 'style' && !disabled ? <div role="radiogroup" aria-label="Line style"
-    className={panel ? "mt-1 flex flex-wrap gap-0.5" : SURFACE}>
-    {DRAWING_STROKE_STYLES.map(({ value, label }) => <ToolbarButton key={value} tooltip={false} label={label} role="radio"
-      aria-checked={(drawing.strokeStyle ?? 'solid') === value} active={(drawing.strokeStyle ?? 'solid') === value}
-      onClick={() => { drawing.selectStrokeStyle?.(value); setChoosing(''); }}>
-      {styleGlyph(value)}
-    </ToolbarButton>)}
-  </div> : choosing === 'placement' && !disabled ? <div role="radiogroup" aria-label="Placement"
-    className={panel ? "mt-1 flex flex-wrap gap-0.5" : SURFACE}>
-    {DRAWING_PLACEMENTS.map(({ value, label }) => <ToolbarButton key={value} tooltip={false} label={label} role="radio"
-      aria-checked={(drawing.placement ?? 'surface') === value} active={(drawing.placement ?? 'surface') === value}
-      onClick={() => { drawing.selectPlacement?.(value); setChoosing(''); }}>
-      {placementGlyph(value)}
-    </ToolbarButton>)}
-  </div> : null;
-  if (panel) {
-    // A grid of 24px columns spread across the width, so however wide the panel is the buttons
-    // wrap into even columns, the same columns in both rows.
-    const grid = "grid min-w-0 grid-cols-[repeat(auto-fill,1.5rem)] justify-between gap-0.5";
-    return <div className={`text-to-cad-drawing-toolbar ${className}`} data-drawing-controls="">
-      <div role="group" aria-label="Drawing tools" className={grid}>{DRAWING_TOOLBAR_TOOLS.map(toolButton)}</div>
-      {/* The rule runs the panel's full width, through its inset. */}
-      <div role="separator" aria-orientation="horizontal" className="-mx-1 my-1 h-px bg-border" data-drawing-rule="" />
-      <div role="group" aria-label="Drawing settings" className={grid}>{settings}</div>
-      {palette}
-    </div>;
-  }
-  return <div className={`text-to-cad-drawing-toolbar flex max-w-full flex-col items-end gap-1 ${className}`}>
-    <div role="group" aria-label="Drawing tools" className={SURFACE}>
-      {DRAWING_TOOLBAR_TOOLS.map(toolButton)}
-      {settings}
+  const shape = DRAWING_SHAPE_TOOLS.find(tool => tool.id === drawing.shape) ?? DRAWING_SHAPE_TOOLS[0];
+  return <div className={`text-to-cad-drawing-toolbar ${className}`} data-drawing-controls="">
+    <div role="group" aria-label="Drawing tools" className={ROW}>
+      {toolButton(PEN)}
+      <span className="flex items-center" data-drawing-shapes="">
+        {toolButton(shape)}
+        <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild>
+            <button type="button" aria-label="Shapes" disabled={disabled} className={CHEVRON_CLASS}>
+              <ChevronDown className="size-2 shrink-0" strokeWidth={3} aria-hidden="true" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" sideOffset={4} collisionPadding={8} aria-label="Shapes"
+            className={cn(FLOATING_SURFACE_CLASS, 'w-36 data-[state=closed]:animate-none!')}>
+            <DropdownMenuRadioGroup value={DRAWING_SHAPE_TOOLS.some(tool => tool.id === drawing.tool) ? drawing.tool : ''}
+              onValueChange={id => drawing.selectTool(/** @type {DrawingTool} */ (id))}>
+              {DRAWING_SHAPE_TOOLS.map(({ id, label, Icon }) => <DropdownMenuRadioItem key={id} value={id} data-drawing-shape={id}>
+                {icon(Icon)}{label}
+              </DropdownMenuRadioItem>)}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </span>
+      {toolButton(TEXT)}
+      {toolButton(ERASER)}
     </div>
-    {palette}
+    {/* The rule runs the panel's full width, through its inset. */}
+    <div role="separator" aria-orientation="horizontal" className="-mx-1 my-1 h-px bg-border" data-drawing-rule="" />
+    <InkStylePickers label="Drawing settings" disabled={disabled} color={drawing.color} width={drawing.strokeWidth ?? 2}
+      dash={drawing.strokeStyle ?? 'solid'} placement={drawing.placement ?? 'surface'} onColor={drawing.selectColor}
+      onWidth={drawing.selectStrokeWidth} onDash={drawing.selectStrokeStyle} onPlacement={drawing.selectPlacement} />
   </div>;
 }

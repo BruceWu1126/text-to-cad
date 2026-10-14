@@ -228,6 +228,22 @@ it("under Select a press on the drawing picks its mark before anything under it;
   viewport.inkAt = null;
 });
 
+it('⌘Z and ⇧⌘Z walk the file view\'s one history from anywhere in the viewer; a text field keeps its own', () => {
+  const { canvas } = mount(testHost(), undefined, 'panel-one.harness', { current: document.body });
+  act(() => viewport.props.drawing.add([ink('a')]));
+  act(() => viewport.props.drawing.add([ink('b')]));
+  const ids = () => viewport.props.drawing.ink.map((item: any) => item.id);
+  fireEvent.keyDown(canvas, { key: 'z', metaKey: true });
+  expect(ids()).toEqual(['a']);
+  const field = document.createElement('input');
+  document.body.append(field);
+  fireEvent.keyDown(field, { key: 'z', metaKey: true });
+  expect(ids()).toEqual(['a']);
+  field.remove();
+  fireEvent.keyDown(canvas, { key: 'z', metaKey: true, shiftKey: true });
+  expect(ids()).toEqual(['a', 'b']);
+});
+
 it('under Select the pointer resting on a mark lights it, and the part under it hears nothing', () => {
   viewport.inkAt = (x: number) => (x < 100 ? 'a' : null);
   const { canvas } = mount(testHost(), undefined, 'panel-one.harness');

@@ -9,6 +9,7 @@ import {
 } from "./measureRulerState.js";
 
 const NO_MEASUREMENTS = Object.freeze([]);
+const sameMeasurements = (a, b) => a.length === b.length && a.every((item, index) => item.id === b[index].id);
 
 /**
  * The Measure tool's session in a STEP: what its snapping filter is, the measurement being
@@ -21,12 +22,15 @@ const NO_MEASUREMENTS = Object.freeze([]);
  * put it until that row is gone; only a change to the LIST moves it, so a draft's hover ticks
  * never fight a row click. Under Select, measurements are hovered and picked as anything is
  * (`hovered`/`hover`, `selected`/`select`), haloed in the view, and Delete deletes them
- * (`removeSelected`).
+ * (`removeSelected`). Each measurement taken or deleted, and a clear, is a step in the file view's
+ * one history (`history`), which Undo and Redo walk whatever tool took the step; a new file's
+ * measurements start a history of their own.
  *
- * @param {{ fileKey: string, revision: string, picking: boolean }} options  `picking`: the tool
- *   is in hand and can pick now.
+ * @param {{ fileKey: string, revision: string, picking: boolean,
+ *   history?: import("../../kit/shell/useViewerHistory.js").ViewerHistory | null }} options
+ *   `picking`: the tool is in hand and can pick now.
  */
-export function useStepMeasure({ fileKey, revision, picking }) {
+export function useStepMeasure({ fileKey, revision, picking, history = null }) {
   const [filter, setFilter] = useState("all");
   useEffect(() => setFilter("all"), [fileKey]);
   const [state, setState] = useState(null);
@@ -41,7 +45,27 @@ export function useStepMeasure({ fileKey, revision, picking }) {
   const cancelDraft = useCallback(() => setState((current) => cancelMeasureRulerDraft(current)), []);
   const clear = useCallback(() => { setState(null); setActiveId(""); }, []);
   const measurements = state?.measurements || NO_MEASUREMENTS;
+  // The list as it was last seen, to record each change to it as a step; a change Undo or Redo
+  // made, or a new file's, is not one.
+  const historyRef = useRef(history);
+  historyRef.current = history;
+  const seen = useRef(measurements);
+  const unrecorded = useRef(false);
+  const restore = useCallback((list) => {
+    if (sameMeasurements(seen.current, list)) return;
+    unrecorded.current = true;
+    setState((current) => ({ ...(current || {}), measurements: list }));
+  }, []);
   useEffect(() => {
+    const before = seen.current;
+    seen.current = measurements;
+    if (sameMeasurements(before, measurements)) return;
+    if (unrecorded.current) { unrecorded.current = false; return; }
+    historyRef.current?.record({ source: "measure", undo: () => restore(before), redo: () => restore(measurements) });
+  }, [measurements, restore]);
+  useEffect(() => {
+    if (seen.current.length) unrecorded.current = true;
+    historyRef.current?.forget("measure");
     setState((current) => measureRulerStateForChange(current, { entryChanged: true }));
   }, [fileKey, revision]);
   useEffect(() => {

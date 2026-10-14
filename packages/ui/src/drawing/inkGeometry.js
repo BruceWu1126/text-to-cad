@@ -175,6 +175,24 @@ function inside(point, polygon) {
   return hit;
 }
 
+/**
+ * A point inside a closed outline on the screen, where a fill of it is seeded: its centroid, or, for
+ * an outline that does not hold its centroid (a crescent), the middle of the first span inside it
+ * along the centroid's row. Null for an outline with nothing inside.
+ */
+export function interiorPoint(polygon) {
+  if (polygon.length < 3) return null;
+  const centre = { x: polygon.reduce((sum, p) => sum + p.x, 0) / polygon.length, y: polygon.reduce((sum, p) => sum + p.y, 0) / polygon.length };
+  if (inside(centre, polygon)) return centre;
+  const crossings = [];
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    const a = polygon[i], b = polygon[j];
+    if ((a.y > centre.y) !== (b.y > centre.y)) crossings.push(a.x + ((centre.y - a.y) * (b.x - a.x)) / (b.y - a.y));
+  }
+  crossings.sort((a, b) => a - b);
+  return crossings.length >= 2 ? { x: (crossings[0] + crossings[1]) / 2, y: centre.y } : null;
+}
+
 /** How far a point is from a piece of ink on the screen: 0 inside an area or a text mark. */
 export function inkDistance(point, ink) {
   if (ink.kind !== "stroke" && ink.points.length >= 3 && inside(point, ink.points)) return 0;

@@ -1,7 +1,7 @@
 import { VIEWPORT_INSET_PX, VIEWPORT_STACK_BOTTOM, VIEWPORT_TOP_BAR_PX } from "./viewportLayout.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, Copy, Maximize2, X } from "lucide-react";
+import { Check, Copy, Maximize2, Redo2, Undo2, X } from "lucide-react";
 import { Button } from "@text-to-cad/ui/primitives/button";
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { cn } from "@text-to-cad/ui/utils";
@@ -26,6 +26,7 @@ import QuickEdit from "../tools/quick-edit/QuickEdit.jsx";
 import { ViewportTopRight } from "./ViewportTopRight.jsx";
 import ShellViewport from "./ShellViewport.jsx";
 import ViewportContextMenu from "./ViewportContextMenu.jsx";
+import InkSelectionBar from "../tools/draw/InkSelectionBar.jsx";
 
 // The drawing's Copy, in its panel's heading: the view as it is on screen, the drawing's ink in it
 // (from any angle: it is in the model), to the clipboard as a picture; a tick for a moment once it is.
@@ -50,8 +51,8 @@ const INSET = `${VIEWPORT_INSET_PX}px`;
 const TOOLBAR_POSITION = Object.freeze({ top: INSET, left: INSET, bottom: VIEWPORT_STACK_BOTTOM, maxWidth: "calc(100% - 3.5rem)" });
 
 /** One of the view's controls: an icon button, the navbar's, with its name on hover, below it. */
-function NavbarControl({ label, disabled = false, onClick, children }) {
-  return <TooltipHint content={label}>
+function NavbarControl({ label, hint = label, disabled = false, onClick, children }) {
+  return <TooltipHint content={hint}>
     <Button type="button" variant="ghost" size="icon-xs" aria-label={label} disabled={disabled} onClick={onClick} className={NAVBAR_CONTROL_CLASS}>
       {children}
     </Button>
@@ -241,7 +242,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
     {drawingShown ? <ToolPanel id="drawing" title="Drawing" label="Drawing controls" collapsible={false} lead={frame.drawToolActive}
       actions={frame.drawing.hasDrawing ? <CopyDrawingButton capture={frame.captureView} disabled={viewerLoading || !scene} /> : null}
       closeLabel="Clear drawing" onClose={frame.drawing.hasDrawing ? frame.drawing.clear : null}>
-      {frame.drawToolActive ? <DrawingToolbar drawing={frame.drawing} layout="panel" className="p-1" /> : null}
+      {frame.drawToolActive ? <DrawingToolbar drawing={frame.drawing} className="p-1" /> : null}
     </ToolPanel> : null}
     {frame.animateToolActive ? <AnimationPanel runtime={playbackRuntime} autoplay={shell.autoplay}
       onAutoplayChange={shell.setAutoplay} onClose={frame.animateToolFixed ? null : shell.selectDefaultTool}
@@ -283,6 +284,9 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
   // The renderer's overlay and the shell's own layers share one viewport context.
   const overlay = viewport => <>
     {previewing || !contextMenuItems ? null : <ViewportContextMenu viewport={viewport} items={contextMenuItems} onOpenChange={onContextMenuOpenChange} />}
+    {/* The ink Select has picked, its bar: restyle, fill, delete. */}
+    {frame.selecting && frame.drawing.selected.length ? <InkSelectionBar drawing={frame.drawing} runtimeRef={viewport.runtimeRef}
+      viewerReadyTick={viewport.viewerReadyTick} onDelete={frame.deletePicked} disabled={viewerLoading || !scene} /> : null}
     {typeof viewportOverlay === "function" ? viewportOverlay(viewport) : viewportOverlay}
   </>;
   const body = (
@@ -378,6 +382,11 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
                   loads or after it failed to, not in a host that shows the view small, and not in
                   Preview, which has the page to itself. */}
               {view.navbarSlot && shell.previewable && !toolsHidden && !previewing ? createPortal(<>
+                {/* The file view's one history, once there is a step in it: Undo and Redo, whatever tool took it. */}
+                {frame.history.canUndo || frame.history.canRedo ? <>
+                  <NavbarControl label="Undo" hint={`Undo ${frame.undoShortcut}`} disabled={!frame.history.canUndo || shell.idle} onClick={() => frame.history.undo()}><Undo2 className="size-3.5" aria-hidden="true" /></NavbarControl>
+                  <NavbarControl label="Redo" hint={`Redo ${frame.redoShortcut}`} disabled={!frame.history.canRedo || shell.idle} onClick={() => frame.history.redo()}><Redo2 className="size-3.5" aria-hidden="true" /></NavbarControl>
+                </> : null}
                 <DisplayPopover open={displayOpen} onOpenChange={setDisplayOpen} disabled={shell.idle} boundary={frame.hostElement}>{frame.display}</DisplayPopover>
                 <NavbarControl label="Preview" disabled={shell.idle} onClick={enterPreview}><Maximize2 className="size-3.5" aria-hidden="true" /></NavbarControl>
               </>, view.navbarSlot) : null}

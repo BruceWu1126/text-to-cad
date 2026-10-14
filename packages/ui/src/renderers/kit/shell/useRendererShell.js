@@ -5,6 +5,7 @@ import { VIEWER_SCENE_SCALE } from "@text-to-cad/core/lib/viewer/sceneScale.js";
 import { ViewerElementContext, useViewerHost, usePromptDestination } from "../../../host/context.js";
 import { hasOpenPopup } from "../../../lib/popups.js";
 import { useDrawingSession } from "../../../drawing/session.js";
+import { useViewerHistory } from "./useViewerHistory.js";
 import { promptView, promptViews } from "../../../drawing/views.js";
 import { sceneBackdropEdgeColor } from "../look/chromeBackdrop.js";
 import { useChromeBackdropColor } from "../look/useChromeBackdropColor.js";
@@ -180,12 +181,15 @@ const NO_CHOICE = Object.freeze({});
  *   the document I asked for" before this hook runs — a live preview deciding whether its own result has
  *   landed (`presentationIsPending` with `shellPresentationKey(modelKey, revisionKey)`). Omitted: the shell holds it.
  * @param {string} [options.sceneScaleMode]
+ * @param {import("./useViewerHistory.js").ViewerHistory} [options.history]  The file view's one undo
+ *   history, when the renderer's own tools take steps in it too (a measurement) and so make it before
+ *   this hook runs. Omitted: the shell keeps it, and the drawing's steps are its only ones.
  */
 export function useRendererShell({
   view, services, resource, modelKey, revisionKey = "", features, toolModes = null, tool = null, previewable = false, preview = null, scene, load,
   viewSettings = null, viewerRef: providedViewerRef = null,
   animation = null, live = EMPTY, promptReferences = null, promptContext = createViewPromptContext,
-  escape = EMPTY, rendererState = null, viewState = null, sketchUnits = "mm", deleteSelection = null,
+  escape = EMPTY, rendererState = null, viewState = null, sketchUnits = "mm", deleteSelection = null, history: givenHistory = null,
   onCameraSettled = null, preserveInteractionPixelRatio = false, runtimeLifecycle = null,
   onRuntimeAlert = null, presentationReport = null,
   sceneScaleMode = VIEWER_SCENE_SCALE.CAD
@@ -436,7 +440,13 @@ export function useRendererShell({
   const selectTool = useCallback((mode) => setToolMode(current => (toolModes ? toolModes.next(current, mode) : mode)), [toolModes, setToolMode]);
   // A tool panel's X: back to the file's default tool (Select, where there is one), from any tool.
   const selectDefaultTool = useCallback(() => setToolMode(toolModes ? toolModes.defaultMode : ""), [toolModes, setToolMode]);
-  const drawing = useDrawingSession(drawToolActive, CAD_DRAWING_DEFAULTS);
+  // The file view's one undo history (`useViewerHistory.js`): the renderer's, when its own tools
+  // take steps too (a measurement), else the shell's.
+  const ownHistory = useViewerHistory();
+  const history = givenHistory ?? ownHistory;
+  const historyRef = useRef(history);
+  historyRef.current = history;
+  const drawing = useDrawingSession(drawToolActive, CAD_DRAWING_DEFAULTS, history);
 
 
   // ---- prompt snapshots, clipboard ------------------------------------------
@@ -533,16 +543,20 @@ export function useRendererShell({
   // selection can lose (`deleteSelection`: a measurement), and Escape lets go of it first.
   const deleteSelectionRef = useRef(deleteSelection);
   deleteSelectionRef.current = deleteSelection;
+  // Everything Select has picked that can go: the drawing's ink and the renderer's own; true if any went.
+  const deletePicked = useCallback(() => {
+    const session = drawingRef.current;
+    const ink = session.selected.length > 0;
+    if (ink) session.remove(session.selected);
+    return Boolean(deleteSelectionRef.current?.()) || ink;
+  }, []);
   useViewerShortcuts({
     viewerElement,
     onCopy: () => copyActionRef.current?.() || false,
-    onDelete: () => {
-      if (previewing || drawToolActive) return false;
-      const session = drawingRef.current;
-      const ink = session.selected.length > 0;
-      if (ink) session.remove(session.selected);
-      return Boolean(deleteSelectionRef.current?.()) || ink;
-    },
+    onDelete: () => !previewing && !drawToolActive && deletePicked(),
+    // ⌘Z and ⇧⌘Z walk the one history, whatever tool is in hand; never in preview.
+    onUndo: () => !previewing && historyRef.current.undo(),
+    onRedo: () => !previewing && historyRef.current.redo(),
     escapeActive: Boolean(escape.active || previewing || drawing.selected.length),
     onEscape(event) {
       // A popup opened in THIS viewer (a menu, a Select, a colour picker, Display) owns Escape before
@@ -683,12 +697,14 @@ export function useRendererShell({
       previewOrbitSpeed, setPreviewOrbitSpeed, toolStack, changeToolStack, viewerLoading, loading, presentationState,
       handlePresentationChange, viewerAlert, setRuntimeAlert,
       copyActionRef, copyDrawing, copyShortcut: host.environment.platform === "darwin" ? "⌘C" : "Ctrl+C",
+      undoShortcut: host.environment.platform === "darwin" ? "⌘Z" : "Ctrl+Z",
+      redoShortcut: host.environment.platform === "darwin" ? "⇧⌘Z" : "Ctrl+Y",
       // Quick Edit's: the file it is about, how a copied prompt spells its paths, its sketch, and
       // the renderer's own Escape, which an empty Quick Edit passes on.
       resource, captureView, escape: escapeView, currentView, quickEditPrompt,
       // Select is the tool in hand (the default one), where a press on ink picks it before a part.
       selecting: !previewing && Boolean(toolModes) && toolMode === toolModes.defaultMode,
-      drawToolActive, drawing, animation, animateToolActive, animateToolFixed, animationKept, display
+      drawToolActive, drawing, history, deletePicked, animation, animateToolActive, animateToolFixed, animationKept, display
     }
   };
 }

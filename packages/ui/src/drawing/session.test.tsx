@@ -1,19 +1,21 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
 import { useDrawingSession } from './session.js';
+import { useViewerHistory } from '../renderers/kit/shell/useViewerHistory.js';
 
 afterEach(cleanup);
 const CAD = { tool: 'freedraw', color: '#ff2d55' };
 const stroke = (id: string, extra = {}) => ({ id, kind: 'stroke', part: null, points: new Float32Array(6), color: '#ff2d55', width: 2, dash: 'solid', ...extra });
 const view = (x: number) => ({ camera: { position: [x, -100, 0], target: [0, 0, 0], up: [0, 0, 1], orthographicHalfHeight: 50 }, width: 1600, height: 1200 });
 
-it('holds the ink, each add, erase or move one step to undo and redo; clear is one more, discard leaves nothing to undo', () => {
+it('holds the ink, each add, erase or restyle one step to undo and redo; clear is one more, discard leaves nothing to undo', () => {
   const session = renderHook(() => useDrawingSession(true, CAD));
   const current = () => session.result.current;
   expect(current()).toMatchObject({ ready: true, tool: 'freedraw', color: '#ff2d55', strokeWidth: 2, strokeStyle: 'solid', placement: 'surface', hasContent: false });
   act(() => current().add([stroke('a'), stroke('b')]));
   act(() => current().remove(['a']));
-  act(() => current().replace([stroke('b', { color: '#00e5ff' })]));
+  act(() => current().select(['b']));
+  act(() => current().restyle({ color: '#00e5ff' }));
   expect(current().ink.map(item => [item.id, item.color])).toEqual([['b', '#00e5ff']]);
   act(() => current().undo());
   act(() => current().undo());
@@ -28,19 +30,56 @@ it('holds the ink, each add, erase or move one step to undo and redo; clear is o
   expect(current()).toMatchObject({ hasContent: false, canUndo: false, canRedo: false });
 });
 
-it('a colour, weight or line style chosen with ink selected restyles it as one step; placement only changes what is drawn next', () => {
+it("Draw's colour, weight, line style and placement are what is drawn next; the selection's restyle is one step, the pen's weight its own", () => {
   const session = renderHook(() => useDrawingSession(true, CAD));
   const current = () => session.result.current;
-  act(() => current().add([stroke('a'), stroke('b')]));
-  act(() => current().select(['a']));
-  act(() => { current().selectColor('#39ff14'); });
-  act(() => { current().selectStrokeWidth(4); });
-  act(() => { current().selectStrokeStyle('dashed'); });
-  act(() => { current().selectPlacement('space'); });
-  expect(current().ink.map(item => [item.id, item.color, item.width, item.dash])).toEqual([['a', '#39ff14', 4, 'dashed'], ['b', '#ff2d55', 2, 'solid']]);
-  expect(current()).toMatchObject({ color: '#39ff14', strokeWidth: 4, strokeStyle: 'dashed', placement: 'space' });
+  act(() => current().add([stroke('a'), stroke('b'), stroke('p', { widths: [1, 1] })]));
+  act(() => current().select(['a', 'p']));
+  act(() => { current().selectColor('#39ff14'); current().selectStrokeWidth(4); current().selectStrokeStyle('dashed'); current().selectPlacement('space'); });
+  expect(current()).toMatchObject({ color: '#39ff14', strokeWidth: 4, strokeStyle: 'dashed', placement: 'space', canUndo: true });
+  expect(current().ink.map(item => item.color)).toEqual(['#ff2d55', '#ff2d55', '#ff2d55']);
+  act(() => current().restyle({ color: '#ffffff', width: 4, dash: 'dotted' }));
+  expect(current().ink.map(item => [item.id, item.color, item.width, item.dash])).toEqual([
+    ['a', '#ffffff', 4, 'dotted'], ['b', '#ff2d55', 2, 'solid'], ['p', '#ffffff', 6, 'solid']]);
   act(() => current().undo());
-  expect(current().ink[0].dash).toBe('solid');
+  expect(current().ink.map(item => item.color)).toEqual(['#ff2d55', '#ff2d55', '#ff2d55']);
+});
+
+it("a fill joins its shape's group in its colour, one step; an undo takes the pick of ink it removes", () => {
+  const session = renderHook(() => useDrawingSession(true, CAD));
+  const current = () => session.result.current;
+  act(() => current().add([stroke('r', { closed: true, color: '#00e5ff' })]));
+  act(() => current().fill('r', [{ id: 'f', kind: 'area', part: null, points: new Float32Array(9), color: '#ff2d55' } as any]));
+  const [shape, fill] = current().ink;
+  expect(fill).toMatchObject({ id: 'f', color: '#00e5ff', group: shape.group });
+  expect(shape.group).toBeTruthy();
+  act(() => current().select(['r', 'f']));
+  act(() => current().undo());
+  expect(current().ink.map(item => item.id)).toEqual(['r']);
+  expect(current().selected).toEqual(['r']);
+});
+
+it("shares the file view's history: Undo walks the steps of every tool in the order they were taken", () => {
+  const shared = renderHook(() => {
+    const history = useViewerHistory();
+    return { history, session: useDrawingSession(true, CAD, history) };
+  });
+  const current = () => shared.result.current;
+  const other: string[] = [];
+  act(() => current().session.add([stroke('a')]));
+  act(() => current().history.record({ source: 'measure', undo: () => other.push('undo'), redo: () => other.push('redo') }));
+  act(() => current().session.add([stroke('b')]));
+  act(() => { current().history.undo(); });
+  act(() => { current().history.undo(); });
+  expect([current().session.ink.map(item => item.id), other]).toEqual([['a'], ['undo']]);
+  act(() => { current().history.redo(); });
+  expect(other).toEqual(['undo', 'redo']);
+  // A drawing discarded takes only its own steps out.
+  act(() => current().session.discard());
+  expect(current().history).toMatchObject({ canUndo: true, canRedo: false });
+  act(() => { current().history.undo(); });
+  expect(other).toEqual(['undo', 'redo', 'undo']);
+  expect(current().history.canUndo).toBe(false);
 });
 
 it('names the view ink goes down in: one drawn in before that is the same, or a new one; discard forgets them', () => {

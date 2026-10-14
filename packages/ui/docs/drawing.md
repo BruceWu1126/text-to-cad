@@ -8,12 +8,14 @@ were drawn from every angle. The STEP renderer is the one that offers Draw
 ## Pieces
 
 - `drawing/session.js` — `useDrawingSession`: the drawing's ink, what the tools
-  put down next (tool, color, stroke width, line style, placement), the
-  selection and an undo history (200 steps). Each add, erase, move or restyle is
-  one step. Placement is not a style: choosing it changes only what is drawn
-  next, never ink already down, selected or not.
-  `clear()` is an undoable step; `discard()` drops the ink and its history, for
-  a model that changed under it. The session also keeps the views ink was drawn
+  put down next (tool, the shape last taken up, color, stroke width, line style,
+  placement) and the selection. Each add, erase, restyle of the selection
+  (`restyle`) or fill of a closed shape (`fill`, joining its group) is one step
+  in the file view's history (`renderers/kit/shell/useViewerHistory.js`, 200
+  steps, shared with the renderer's own tools; without one the session keeps its
+  own). Choosing what is drawn next never touches ink already down.
+  `clear()` is a step; `discard()` drops the ink and takes its steps out of the
+  history, for a model that changed under it. The session also keeps the views ink was drawn
   in (`views`, "view 1", "view 2"…): `noteView(view)` names the one a mark goes
   down in — a view drawn in before that is the same (`drawing/views.js`'s
   `sameView`: less than 2° of turn, 5% of zoom or pan, nothing else changed),
@@ -24,18 +26,23 @@ were drawn from every angle. The STEP renderer is the one that offers Draw
   `animation: {clip, time}`), the parts hidden and isolated, and the picture's
   size. Never how it looks.
 - `drawing/toolbar.jsx` — `DrawingToolbar`, the shared controls built from the
-  floating-toolbar button primitive. Pen, Line, Arrow, Rectangle, Ellipse, Text,
-  Fill area and Eraser, then Color, Stroke width, Line style, Placement (On model, the default, or In
-  space), Undo, Redo and Clear drawing. The swatches are neon, so ink stands out
-  from a shaded model.
+  floating-toolbar button primitive: Pen, the shapes (Line, Arrow, Rectangle,
+  Ellipse behind one button and its chevron's menu), Text and Eraser, then the
+  Color, Stroke width, Line style and Placement (On model, the default, or In
+  space) dropdowns (`InkStylePickers`, which the selection's bar shares). The
+  swatches are neon, so ink stands out from a shaded model.
+- `renderers/kit/tools/draw/InkSelectionBar.jsx` — the bar over the ink Select
+  picked: its colour, weight and line style, Fill for a closed shape (seeded
+  inside its outline as it falls on the screen, `inkGeometry.js`'s
+  `interiorPoint` and `fillMarkAt`, and projected where the shape lies) and
+  Delete.
 - `drawing/inkGeometry.js` — each tool's mark in screen space:
   - The pen is smoothed as it is drawn, and each point's width comes from its
     pressure (a stylus's own, or simulated from speed with a mouse), using
     `perfect-freehand`.
   - Rectangles get rounded corners.
-  - A fill finds the area around the press with
-    `@text-to-cad/core/lib/drawing/fillRegion.js`. The outline does not need to
-    be closed.
+  - A fill finds the area inside a shape with
+    `@text-to-cad/core/lib/drawing/fillRegion.js`.
 - `renderers/kit/tools/draw/InkOverlay.jsx` — the surface over the viewport
   while Draw is up. It turns every gesture into marks, previews a mark on its
   own canvas as it is made, and puts it into the model when the gesture ends.

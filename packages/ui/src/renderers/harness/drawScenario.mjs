@@ -74,8 +74,8 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   const surface = pane.locator('[data-cad-drawing-overlay]');
   await surface.waitFor();
   assert.equal(await tool('Pen').getAttribute('aria-pressed'), 'true', 'Draw opens on the pen');
-  assert.deepEqual(await names(tools), ['Pen', 'Line', 'Arrow', 'Rectangle', 'Ellipse', 'Text', 'Fill area', 'Eraser']);
-  assert.deepEqual(await names(settings), ['Color', 'Stroke width', 'Line style', 'Placement', 'Undo', 'Redo', 'Clear drawing']);
+  assert.deepEqual(await names(tools), ['Pen', 'Rectangle', 'Shapes', 'Text', 'Eraser']);
+  assert.deepEqual(await names(settings), ['Color', 'Stroke width', 'Line style', 'Placement']);
   const copy = panel.getByRole('button', { name: 'Copy drawing', exact: true });
   assert.equal(await copy.count(), 0, 'nothing to copy before there is ink');
   // Across the middle of the view, clear of the tool stack at its left and Quick Edit at its right.
@@ -106,19 +106,20 @@ export async function runDrawScenario({ page, pane, errors, update }) {
     seen => seen.red > 50 && Math.hypot(seen.x - stroke.x, seen.y - stroke.y) > 20);
   assert.ok(await moved(before) > 1e-3, 'a right drag orbited the camera');
 
-  // Undo takes the stroke away, Redo brings it back where the view now has it.
-  await setting('Undo').click();
+  // Undo (the viewer's, whatever the tool) takes the stroke away, Redo brings it back where the view
+  // now has it.
+  await page.keyboard.press('ControlOrMeta+KeyZ');
   await until('Undo removes the stroke', seen => seen.red < NONE);
-  await setting('Redo').click();
+  await page.keyboard.press('ControlOrMeta+Shift+KeyZ');
   await until('Redo brings it back', seen => seen.red > 50 && Math.hypot(seen.x - orbited.x, seen.y - orbited.y) < 10);
 
   // Another colour for what is drawn next: a green rectangle beside the red stroke. Clear takes it all.
   await setting('Color').click();
-  await panel.getByRole('radio', { name: 'Neon green', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: 'Neon green', exact: true }).click();
   await tool('Rectangle').click();
   await drag(at(-60, -120), at(60, -40));
   await until('a green rectangle beside the red', seen => seen.green > 100 && seen.red > 50);
-  await setting('Clear drawing').click();
+  await panel.getByRole('button', { name: 'Clear drawing', exact: true }).click();
   await until('Clear drawing removes all ink', seen => seen.red < NONE && seen.green < NONE);
   await copy.waitFor({ state: 'detached' });
 
@@ -140,6 +141,19 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   await page.mouse.click(...at(-10, 25));
   await page.keyboard.press('Delete');
   await until('Delete deletes the stroke and keeps the rectangle', seen => seen.green > 100 && seen.green < drawn.green - 50);
+
+  // The rectangle picked, its bar: Fill fills it in its colour, Delete deletes it, fill and all.
+  await page.mouse.click(...at(0, -120));
+  const bar = pane.getByRole('toolbar', { name: 'Selected drawing' });
+  await bar.waitFor();
+  await bar.getByRole('button', { name: 'Fill', exact: true }).click();
+  assert.equal(await bar.getByRole('button', { name: 'Fill', exact: true }).getAttribute('aria-pressed'), 'true', 'Fill is lit once filled');
+  await until('the rectangle is still drawn, filled', seen => seen.green > 100);
+  await bar.getByRole('button', { name: 'Delete', exact: true }).click();
+  await until('Delete on the bar deletes the rectangle and its fill', seen => seen.green < NONE);
+  await bar.waitFor({ state: 'detached' });
+  await page.keyboard.press('ControlOrMeta+KeyZ');
+  await until('Undo brings them back', seen => seen.green > 100);
 
   // An update of the model discards ink drawn over the revision before it, and the panel with it.
   if (update) {

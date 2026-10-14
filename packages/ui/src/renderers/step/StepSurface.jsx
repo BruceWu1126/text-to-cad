@@ -18,6 +18,7 @@ import { toNumber } from "@text-to-cad/core/lib/viewer/modelRuntime.js";
 import { normalizePartIdList } from "@text-to-cad/core/lib/viewer/partVisualState.js";
 import RendererShell from "../kit/shell/RendererShell.jsx";
 import { usePreviewState, useRendererShell } from "../kit/shell/useRendererShell.js";
+import { useViewerHistory } from "../kit/shell/useViewerHistory.js";
 import StepSceneLayers, { releaseStepRuntime } from "./scene/StepSceneLayers.jsx";
 import { displayRecordExplodedViewTranslation } from "./scene/useStepExplode.js";
 import { createStepScene, stepSceneView } from "./scene/stepScene.js";
@@ -1338,7 +1339,9 @@ function StepSurfaceBody({ view, data }) {
     Boolean(selectedMeshData) &&
     !stepInteractionBlocked &&
     !viewerLoading;
-  const measure = useStepMeasure({ fileKey: selectedKey, revision: selectedEntry?.hash, picking: measureModeActive });
+  // The file view's one undo history: the measurements' steps and the drawing's, in the order taken.
+  const history = useViewerHistory();
+  const measure = useStepMeasure({ fileKey: selectedKey, revision: selectedEntry?.hash, picking: measureModeActive, history });
   const measureMeasurements = measure.measurements;
 
   const filteredViewerReferences = useMemo(() => filterSelectionReferences(viewerPickableReferences, selectionFilter),
@@ -1508,6 +1511,7 @@ function StepSurfaceBody({ view, data }) {
     rendererState: session.rendererState,
     // Delete takes the measurements Select picked, beside the drawing's ink the shell deletes.
     deleteSelection: measure.removeSelected,
+    history,
     preserveInteractionPixelRatio: viewPolicy.wireframeMode || viewPolicy.edgesVisible,
     runtimeLifecycle: stepRuntimeLifecycle,
     onRuntimeAlert: handleViewerAlertChange,

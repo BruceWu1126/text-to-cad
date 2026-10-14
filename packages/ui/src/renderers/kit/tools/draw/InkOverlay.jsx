@@ -1,7 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { fillMarkAt, inkAt, penMark, shapeMarks, textMark, withGroups } from "../../../../drawing/inkGeometry.js";
+import { inkAt, penMark, shapeMarks, textMark, withGroups } from "../../../../drawing/inkGeometry.js";
 import { DEFAULT_OVERLAY_DRAWING_COLOR } from "../../../../drawing/toolbar.jsx";
-import { useViewerHost } from "../../../../host/context.js";
 import { capturePointer } from "../../../../lib/pointerCapture.js";
 import { inkOnScreen, projectInk } from "./ink3d.js";
 
@@ -62,20 +61,19 @@ function paintOutline(context, ink, { color }) {
 /**
  * Draw's surface over the viewport: every tool's gesture, its ink previewed as it is made (on a
  * canvas of its own, in screen space) and put into the model as it ends (`ink3d.js`): the pen, the
- * line, the arrow, the rectangle and the ellipse drawn; text written in place; a fill pressed inside
- * ink; the eraser dragged over ink. Each mark lies on the model or in space, as the session's
+ * line, the arrow, the rectangle and the ellipse drawn; text written in place; the eraser dragged
+ * over ink. Each mark lies on the model or in space, as the session's
  * placement was when it was put down. All of it works on the whole drawing, whatever view each piece
  * was drawn from. Picking ink is the viewer's Select's, not Draw's (`RendererShell.jsx`); ink Select
- * picked is restyled by the session's colour, weight and line style, and Delete deletes it here too.
+ * picked is restyled on its selection's bar, and Delete deletes it here too.
  * The camera is the person's between strokes: the wheel zooms, a right or middle drag orbits (the
- * press goes on to the view as its own), and while Space is held the pointer is the view's. ⌘Z / ⇧⌘Z undo and redo while the surface has the keyboard. Each mark names
+ * press goes on to the view as its own), and while Space is held the pointer is the view's. ⌘Z / ⇧⌘Z are the viewer's (its one history). Each mark names
  * the view it was put down in (`viewOf`, the session's `noteView`): a prompt carries every view its
  * ink was drawn in.
  *
  * @param {{ drawing: import("../../../../drawing/session.js").DrawingSession, runtimeRef: { current: any } }} props
  */
 export default function InkOverlay({ drawing, runtimeRef, viewOf = null }) {
-  const { platform } = useViewerHost().environment;
   const root = useRef(null);
   const canvas = useRef(null);
   const gesture = useRef(null);
@@ -159,7 +157,7 @@ export default function InkOverlay({ drawing, runtimeRef, viewOf = null }) {
   useLayoutEffect(() => { paint(); }, [paint, drawing.ink]);
 
   // The text being written closes: kept (put down) or dropped (Escape). Closed by a key or a press on
-  // the surface, the keyboard goes back to the surface, for ⌘Z; closed by focus going elsewhere, it
+  // the surface, the keyboard goes back to the surface, for Space and ⌘Z; closed by focus going elsewhere, it
   // stays there.
   const closeText = (keep, { refocus = true } = {}) => {
     const current = textRef.current;
@@ -202,9 +200,6 @@ export default function InkOverlay({ drawing, runtimeRef, viewOf = null }) {
     else if (session.tool === "eraser") {
       const screen = onScreen();
       gesture.current = { kind: "erase", screen, path: [at], hits: new Set(inkAt(at, screen, ERASER_RADIUS).map(ink => ink.id)) };
-    } else if (session.tool === "fill") {
-      const mark = fillMarkAt(at, onScreen(), session.color);
-      if (mark) put([mark]);
     } else if (session.tool === "text") {
       setText({ at, value: "", color: session.color, fontPx: FONT_PX[session.strokeWidth] ?? 20 });
     }
@@ -237,9 +232,7 @@ export default function InkOverlay({ drawing, runtimeRef, viewOf = null }) {
   const onMouseDown = event => { if (event.target === event.currentTarget) event.preventDefault(); };
   const onKeyDown = event => {
     const session = drawingRef.current;
-    const mod = platform === "darwin" ? event.metaKey : event.ctrlKey;
-    if (mod && event.key.toLowerCase() === "z") { event.preventDefault(); (event.shiftKey ? session.redo : session.undo)(); }
-    else if ((event.key === "Delete" || event.key === "Backspace") && session.selected.length) { event.preventDefault(); session.remove(session.selected); }
+    if ((event.key === "Delete" || event.key === "Backspace") && session.selected.length) { event.preventDefault(); session.remove(session.selected); }
     else if (event.key === "Escape" && session.selected.length) { event.preventDefault(); session.select([]); }
     else if (event.key === " " && !event.repeat && !gesture.current) { event.preventDefault(); setPassing(true); }
   };

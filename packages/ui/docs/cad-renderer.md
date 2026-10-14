@@ -1383,10 +1383,9 @@ The tools are:
 
 - Pen, smoothed as it is drawn, its width following pressure (a stylus's own,
   or simulated from speed with a mouse).
-- Line, Arrow, Rectangle (rounded corners) and Ellipse.
+- The shapes, behind one button that shows the last one taken up, every one in
+  its chevron's menu: Line, Arrow, Rectangle (rounded corners) and Ellipse.
 - Text, written in place.
-- Fill area: a press inside ink fills the area around it, from an outline that
-  need not be closed.
 - Eraser.
 
 Draw has no Select or Move view of its own. Picking ink is the viewer's Select's: under
@@ -1395,8 +1394,16 @@ any part or reference under it, haloed in the selection's blue; Shift adds or ta
 away, a press on anything else lets go of it, Escape lets go and Delete deletes it.
 Before the press, the pointer resting on a mark lights it as a part is lit, a fainter
 halo, and the part under it is not lit (`RendererShell.jsx`'s `hoverSelectable`).
-Color, stroke width and line style set what is drawn next, and restyle the ink
-Select has picked. Draw opens on the pen in neon red.
+Draw's Color, Stroke width, Line style and Placement dropdowns set what is drawn
+next, never ink already down. Draw opens on the pen in neon red.
+
+The ink Select has picked has a bar of its own (`kit/tools/draw/InkSelectionBar.jsx`):
+the tool strip's surface, a size smaller, just above the ink (below it where there is
+no room above) and following it as the camera and its parts move. Its Color, Stroke
+width (strokes picked) and Line style (shapes picked) dropdowns restyle the pick, one
+step each; **Fill** (a closed shape picked) fills its interior in its colour, the fill
+joining the shape's group so it is picked, restyled and deleted with it, and again
+takes it away; **Delete** deletes everything Select has picked, a measurement too.
 
 Draw's ink is not an overlay picture. Each mark is projected into the model in
 3D as it is put down (`kit/tools/draw/ink3d.js`), so it stays where it was drawn
@@ -1426,13 +1433,22 @@ is ink, the heading carries:
 - **Copy**: the view as it is on screen, ink included, written to the clipboard
   as a PNG (`host.clipboard.writeImage`). ⌘C or Ctrl+C does the same while Draw
   is up.
-- **X**: clears the drawing, as one undoable step.
+- **X**: clears the drawing, as one step to undo.
 
 With Draw put down the ink stays in the model, and the panel stays, heading
 alone, while there is ink. The next Draw adds to it. A drawing is session-only
 and never written to tab or file state. A new STEP revision discards it with
-`drawing.discard()`, history and all, so Undo cannot bring old ink back over the
-new model; Draw stays the tool. A Quick Edit note carries the drawing as files: the
+`drawing.discard()`, its steps out of the history, so Undo cannot bring old ink
+back over the new model; Draw stays the tool.
+
+**Undo and Redo** are the file view's, one history across its tools
+(`kit/shell/useViewerHistory.js`): each piece of ink put down, erased, restyled or
+filled, a clear, and each measurement taken or deleted is a step; the camera and a
+selection never are. ⌘Z and ⇧⌘Z (Ctrl+Z and Ctrl+Y) walk it from anywhere in the
+viewer but a text field, and once there is a step the navbar's right end carries
+Undo and Redo, before Display. A renderer whose own tools take steps makes the
+history and hands it to the shell (`useRendererShell`'s `history`), as the STEP
+renderer does for its measurements; a new file's measurements take theirs out. A Quick Edit note carries the drawing as files: the
 sketch, the views it was drawn in as a snapshot job, and a picture of each
 ([drawing](drawing.md#lifetime-and-capture)).
 
