@@ -8,7 +8,7 @@ ordinals; each edge's visibility class, continuity, dihedral angle, flags,
 adjacent faces, exact length, centroid, tight box, curve type, analytic
 parameters and, for a circle, its sweep. Face and edge ordinals are the
 ``TopExp.MapShapes_s`` order the selector system has always used, so refs
-(``#o1.2.f5``) keep their meaning, and the component's mesh (``occt_mesh``) is
+(``#o1.2.f5``) keep their meaning, and the component's mesh (``tessellate``) is
 grouped by the same ordinals.
 
 ``extract_topology_facts`` returns them in memory as a plain structure -- the
@@ -18,9 +18,9 @@ carries, the table reads. Nothing stores them, except an eager-only
 component's, which its tree pins as an object
 (``topology_facts.topology_facts_bytes``, ``component_package``).
 
-Nothing here tessellates: meshes are cadgen's, made by OCCT from the exact
-BREP, so the facts carry no tessellation input -- no trim curves, control nets
-or basis curves.
+Nothing here tessellates: meshes are cadgen's, made by its tessellator from the
+exact BREP itself, so the facts carry no tessellation input -- no trim curves,
+control nets or basis curves.
 """
 
 from __future__ import annotations

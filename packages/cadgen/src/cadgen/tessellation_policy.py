@@ -1,6 +1,6 @@
 """What cadgen meshes a STEP model's components at for display: the one tessellation policy.
 
-Every display mesh is cadgen's (OCCT on the exact BREP, ``cadgen.store.meshes``),
+Every display mesh is cadgen's (its tessellator on the exact BREP, ``cadgen.store.meshes``),
 and so is the choice of tolerances it is made at:
 
 - **The display tolerance** (:data:`DISPLAY_TESSELLATION`): the one pair every
@@ -31,21 +31,20 @@ __all__ = [
 ]
 
 # The one pair every display mesh is made at: a part 1,000 px across strays half a
-# pixel from its exact surface, and a round edge turns at most 0.35 rad (20 degrees)
-# between facets -- OCCT draws a full circle with 36 facets at it, 10 degrees each.
+# pixel from its exact surface, and a round face turns at most 0.35 rad (20 degrees)
+# from one vertex's normal to its neighbour's.
 DISPLAY_TESSELLATION: dict[str, float] = {"chordTolerance": 5e-4, "angleTolerance": 0.35}
 
 # The finest tolerances anything may ask to have meshed: past any display or print
 # need (a sphere 2,000 px across strays a third of a pixel at either), and the
-# finest at which one face still meshes in seconds. OCCT's mesher spends more per
-# triangle the more triangles one face has, and a face curved all the way round
-# both ways -- a torus, a sphere, a closed freeform loft -- has the most. Measured
-# on such faces (OCCT 7.9, one core): at 0.05 rad a torus is 127k triangles in
-# 3.5 s of CPU and a sphere 32k in 0.3 s; at a chord of 5e-5 a closed loft is 86k
-# triangles in 3 s, a sphere 58k and a torus 62k in under 1 s. Finer, the cost
-# runs away: a torus at 0.03 rad is 351k triangles in 45 s, a sphere at 0.01 rad
-# had not finished after 4 minutes, and at 0.005 rad a model of four primitives
-# meshed for over 47 minutes.
+# finest at which a face curved all the way round both ways -- a torus, a sphere, a
+# closed freeform loft, the faces with the most triangles -- still meshes in about a
+# second. Measured on such faces (cadgen's tessellator, one core): at 0.05 rad a
+# torus is 95k triangles in 1.0 s of CPU, a sphere 31k in 0.2 s and a closed loft
+# 29k in 0.4 s; at a chord of 5e-5 a torus is 135k triangles in 1.5 s, a sphere 92k
+# in 0.6 s and a loft 50k in 0.8 s. Finer, the triangles grow as the inverse square
+# of the tolerance: at 0.005 rad a model of four primitives is 12.9 million
+# triangles in 80 s, a mesh no viewer needs.
 TESSELLATION_FLOORS: dict[str, float] = {"chordTolerance": 5e-5, "angleTolerance": 0.05}
 # The coarsest: past a twentieth of the bounding diagonal, or a quarter turn
 # between neighbouring facets (a circle as a square), a mesh no longer follows the

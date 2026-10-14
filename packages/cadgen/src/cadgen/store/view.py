@@ -207,7 +207,7 @@ def materialize_parts(descriptor: dict, cids: list[str] | None = None, *,
 _FAILED_COMPONENT = re.compile(r"component ([0-9a-f]{16}): ")
 # What a pooled job's failure wraps its last line in (``daemon/artifacts.py``, ``daemon/client.py``).
 _JOB_FAILURE_PREFIXES = ("artifact request failed: ", "artifact worker failed or returned no result: ",
-                         "cadgen._internal.occt_mesh.MeshProductionError: ", "MeshProductionError: ")
+                         "cadgen._internal.tessellate.MeshProductionError: ", "MeshProductionError: ")
 
 
 def _without_failed_parts(descriptor: dict, wanted: list[str], missing: list[str], error: Exception, *,
@@ -243,7 +243,7 @@ def _failed_parts(descriptor: dict, cids: list[str], error: Exception) -> dict[s
 
     if not isinstance(error, ArtifactJobError) and type(error).__name__ != "MeshProductionError":
         return {}
-    from cadgen._internal.occt_mesh import MeshProductionError
+    from cadgen._internal.tessellate import MeshProductionError
 
     stored = stored_parts(descriptor, cids)
     failed = [cid for cid in cids if cid not in stored]
@@ -268,7 +268,7 @@ def failed_parts_error(failed: dict[str, str], placed: dict[str, list[tuple[str,
     without them: each of ``failed`` (``{cid: reason}``) named by the occurrences that place
     it (``placed``, ``{cid: [(ref, name)]}``), ``#o1.3 ball could not be meshed (...)``, the
     parts joined by "; " in the order ``placed`` places them."""
-    from cadgen._internal.occt_mesh import MeshProductionError
+    from cadgen._internal.tessellate import MeshProductionError
     from cadgen.store.meshes import failed_part
 
     ordered = [*(cid for cid in placed if cid in failed), *(cid for cid in failed if cid not in placed)]

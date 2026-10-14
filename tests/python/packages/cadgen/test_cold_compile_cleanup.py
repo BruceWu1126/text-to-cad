@@ -150,7 +150,7 @@ class ColdCompileCleanupTest(unittest.TestCase):
                         self.assertEqual(document.read_bytes(), original_bytes)
 
     def test_a_cold_compile_derives_each_part_once_and_a_warm_one_nothing(self):
-        from cadgen._internal import occt_mesh, topology_extract, step_scene_package
+        from cadgen._internal import tessellate, topology_extract, step_scene_package
         document = self.document(nested=True)
         with mock.patch("cadgen.store.view.view_dir_for", side_effect=AssertionError("display view in native compile")):
             first = self.compile(document)
@@ -158,7 +158,7 @@ class ColdCompileCleanupTest(unittest.TestCase):
             self.assertEqual(len(derived), 2, "the compile derived each part's display data before it reported done")
             with mock.patch.object(step_scene_package, "_load_step_scene_text", side_effect=AssertionError("warm compile reparsed STEP")), \
                  mock.patch.object(topology_extract, "extract_topology_facts", side_effect=AssertionError("display work in warm compile")), \
-                 mock.patch.object(occt_mesh, "mesh_component", side_effect=AssertionError("display work in warm compile")):
+                 mock.patch.object(tessellate, "mesh_component", side_effect=AssertionError("display work in warm compile")):
                 second = self.compile(document)
         self.assertEqual(second["tree"], first["tree"])
         self.assertTrue(second["skipped"])

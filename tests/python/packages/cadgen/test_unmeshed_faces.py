@@ -1,12 +1,11 @@
 """A face no mesher covers leaves its part drawn without it, and every door says so.
 
 A tiny assembly -- a 20 x 10 x 5 plate and a radius-5 pin -- whose pin's side is made a
-face no mesher covers: OCCT refuses it and cadgen's own tessellation cannot cover it
-either, as the f14d wings' slivers once could not. That one face once failed the whole
-document: the list, the view and the STL all ended in a traceback. Now the pin is meshed
-without it, the plate whole, and each door does its work and names the face it left out:
-the list counts the pin without it, the view draws the rest, and the STL is written open
-where the face was.
+face the tessellator cannot cover: its geometry raises inside OCCT, as a vendor STEP's
+broken face can. That one face once failed the whole document: the list, the view and
+the STL all ended in a traceback. Now the pin is meshed without it, the plate whole, and
+each door does its work and names the face it left out: the list counts the pin without
+it, the view draws the rest, and the STL is written open where the face was.
 
 The compile meshes every part before it reports done; here it runs in this process
 (``step.compile``), so the refusal reaches it, and every door after it only reads.
@@ -41,22 +40,13 @@ def write_assembly(path) -> None:
 
 
 def refusing_the_pins_side(real):
-    """``occt_mesh._mesh`` with every mesher's work on a cylinder's side undone: the face
-    neither OCCT nor the fallback covers."""
-    def mesh(topods, face_map, required, kinds, deflection, angle):
-        from OCP.BRepAdaptor import BRepAdaptor_Surface
-        from OCP.BRepTools import BRepTools
-        from OCP.GeomAbs import GeomAbs_Cylinder
-        from OCP.TopoDS import TopoDS
-
-        faces = real(topods, face_map, required, kinds, deflection, angle)
-        for ordinal in range(1, face_map.Extent() + 1):
-            face = TopoDS.Face_s(face_map.FindKey(ordinal))
-            if BRepAdaptor_Surface(face).GetType() == GeomAbs_Cylinder:
-                BRepTools.Clean_s(face)
-                faces.pop(ordinal, None)
-        return faces
-    return mesh
+    """``tessellate._tessellate_face_raw`` with a cylinder's side raising, as a face whose
+    geometry OCCT cannot evaluate does."""
+    def tessellate_face(face, *args):
+        if face.surface.kind == "cylinder":
+            raise RuntimeError("Standard_Failure: the surface cannot be evaluated")
+        return real(face, *args)
+    return tessellate_face
 
 
 class UnmeshedFaceTests(unittest.TestCase):
@@ -68,10 +58,10 @@ class UnmeshedFaceTests(unittest.TestCase):
         write_assembly(document)
         import cadgen.step as step_door
         import cadgen.stl as stl_door
-        from cadgen._internal import occt_mesh
+        from cadgen._internal import tessellate
 
         with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}), \
-                mock.patch.object(occt_mesh, "_mesh", refusing_the_pins_side(occt_mesh._mesh)):
+                mock.patch.object(tessellate, "_tessellate_face_raw", refusing_the_pins_side(tessellate._tessellate_face_raw)):
             step_door.compile(document)
         # Each door only reads what the compile stored: none starts a derivation job.
         with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}), \

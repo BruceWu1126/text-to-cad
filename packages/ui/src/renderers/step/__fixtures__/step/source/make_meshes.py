@@ -7,7 +7,7 @@ cadgen derives from the component and the view's producer
 (``cadgen.store.parts``), which this script writes into ``assembly.json`` with the
 view's id. The two
 parts are rebuilt here from ``hinge_block.py``'s shapes and meshed by cadgen's own
-producer (``cadgen._internal.occt_mesh``); a part whose edges a newer build orders
+producer (``cadgen._internal.tessellate``); a part whose edges a newer build orders
 differently is written in the committed selector table's ordinals
 (``components/<cid>.selectors.json``), matched by each edge's centre and length, so
 every id the tests use holds.
@@ -74,7 +74,7 @@ def _view(view: dict) -> dict:
 
 
 def main() -> None:
-    from cadgen._internal import occt_mesh
+    from cadgen._internal import tessellate
     from cadgen._internal.component_package import decode_display_shape, prepare_geometry_component
     from cadgen._internal.selector_table import build_selector_table
     from cadgen._internal.topology_extract import extract_topology_facts
@@ -98,8 +98,8 @@ def main() -> None:
         edges = _match(committed["edges"], fresh["edges"], "length")
         classes = {row["ord"]: row["class"] for row in committed["edges"]}
         topods = decode_display_shape(prepared["entry"], prepared["payload"]).wrapped
-        body = occt_mesh.mesh_component(topods, build_selector_table(topods, fresh), {},
-                                        part=component["part"], chord=chord, angle=angle)
+        body = tessellate.mesh_component(topods, build_selector_table(topods, fresh), {},
+                                         part=component["part"], chord=chord, angle=angle)
         meshed = decode_payload(body)
         polylines = [(int(ordinal), meshed.edge_points[start:start + count])
                      for ordinal, start, count, _class in meshed.edges.tolist()]

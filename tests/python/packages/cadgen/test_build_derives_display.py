@@ -54,9 +54,9 @@ PEG_FAILED = "#o1.2 peg could not be meshed (MeshProductionError: ValueError: bo
 def failing(*face_counts: int):
     """OCCT's mesher, raising instead for a part whose selector table has one of
     ``face_counts`` faces: the peg, a cylinder, has 3, and the block 6."""
-    from cadgen._internal import occt_mesh
+    from cadgen._internal import tessellate
 
-    real = occt_mesh.mesh_component
+    real = tessellate.mesh_component
 
     def mesher(topods, table, face_colors, **options):
         if len(table["faces"]) in face_counts:
@@ -83,11 +83,11 @@ class BuildDerivesDisplayData(unittest.TestCase):
     def build(self, mesher=None) -> tuple[str, int]:
         """Run the model in this process: its outcome word, and how many meshes OCCT made
         (by ``mesher`` when given). What it printed is ``self.output``."""
-        from cadgen._internal import occt_mesh
+        from cadgen._internal import tessellate
         from cadgen.cli._run_model import run_model_argv
 
         output = io.StringIO()
-        with mock.patch.object(occt_mesh, "mesh_component", wraps=mesher or occt_mesh.mesh_component) as meshed, \
+        with mock.patch.object(tessellate, "mesh_component", wraps=mesher or tessellate.mesh_component) as meshed, \
                 contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
             code = run_model_argv([str(self.script)])
         self.output = output.getvalue()
@@ -159,10 +159,10 @@ class BuildDerivesDisplayData(unittest.TestCase):
         ``mesher``: the exit code, stdout's lines, stderr's warnings and failure, and how many
         display jobs it asked for."""
         from cadgen import cli
-        from cadgen._internal import occt_mesh
+        from cadgen._internal import tessellate
 
         out, err = io.StringIO(), io.StringIO()
-        with inline_artifacts() as jobs, mock.patch.object(occt_mesh, "mesh_component", wraps=mesher), \
+        with inline_artifacts() as jobs, mock.patch.object(tessellate, "mesh_component", wraps=mesher), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = cli.main(["step", "snapshot", str(self.document), *argv])
         said = [line for line in err.getvalue().splitlines()
@@ -174,11 +174,11 @@ class BuildDerivesDisplayData(unittest.TestCase):
         """Every process meshes alike (the export's job runs here, under the same mesher): the
         STL cannot be written, so the build fails -- naming the file and the occurrence, never
         a component id and a worker's traceback -- and leaves no file."""
-        from cadgen._internal import occt_mesh
+        from cadgen._internal import tessellate
         from cadgen.cli._run_model import run_model_argv
 
         output = io.StringIO()
-        with inline_artifacts(), mock.patch.object(occt_mesh, "mesh_component", wraps=failing(3)), \
+        with inline_artifacts(), mock.patch.object(tessellate, "mesh_component", wraps=failing(3)), \
                 contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
             code = run_model_argv([str(self.script)])
         self.assertEqual(code, 1, output.getvalue())

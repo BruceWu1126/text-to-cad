@@ -92,7 +92,7 @@ its own glTF scene, with its authored materials, at rest.
 
 ## Mesh tolerance
 
-Mesh exports are OCCT's mesh of each component's exact surfaces. Faces that
+Mesh exports are cadgen's mesh of each component's exact surfaces. Faces that
 meet share their boundary vertices, and identical inputs produce identical bytes.
 An export that names no tolerance is written at the display tolerance, from the
 very meshes the CAD Viewer and snapshots draw.

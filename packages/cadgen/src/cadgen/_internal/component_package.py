@@ -797,7 +797,7 @@ def decode_geometry_component(entry: dict[str, Any], payload: bytes, *, native: 
 
 
 def decode_display_shape(entry: dict[str, Any], payload: bytes, *, native: bool = False) -> Any:
-    """A private shape to mesh for display (``cadgen._internal.occt_mesh``).
+    """A shape to mesh for display (``cadgen._internal.tessellate``).
 
     A native component is :func:`decode_geometry_component`. An eager-only
     component's bytes failed the exact round-trip fence, so they never stand in

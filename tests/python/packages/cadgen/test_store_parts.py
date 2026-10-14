@@ -59,12 +59,12 @@ class PartStoreTest(unittest.TestCase):
     def test_a_part_that_fails_to_mesh_is_named_once_the_rest_are_stored(self) -> None:
         from build123d import Box, Compound, Cylinder, Pos
 
-        from cadgen._internal import occt_mesh
+        from cadgen._internal import tessellate
 
         tree, geometry, _ = build_tree_from_compound(
             Compound(children=[Box(4, 4, 4), Pos(10, 0, 0) * Cylinder(2, 4)]), root_name="pair")
         keys = [parts.part_key(entry, self.producer) for entry in geometry["components"].values()]
-        real, failed = occt_mesh.mesh_component, []
+        real, failed = tessellate.mesh_component, []
 
         def mesher(topods, table, face_colors, *, part, **options):
             # Whatever fails, not only OCCT's own refusal: the first part meshed fails every
@@ -79,18 +79,18 @@ class PartStoreTest(unittest.TestCase):
 
         # A view's job names the component, after storing the other.
         named = r"^component [0-9a-f]{16}: ValueError: invalid tessellation JSON length$"
-        with mock.patch.object(occt_mesh, "mesh_component", side_effect=mesher), \
-                self.assertRaisesRegex(occt_mesh.MeshProductionError, named):
+        with mock.patch.object(tessellate, "mesh_component", side_effect=mesher), \
+                self.assertRaisesRegex(tessellate.MeshProductionError, named):
             parts.derive(tree)
         others = {key: key != failed[0] for key in keys}
         self.assertEqual(stored(), others, "the other part was stored before the failure was reported")
         # A build's derivation returns the one failure and fails nothing (what the build then
         # prints: test_build_derives_display).
-        with mock.patch.object(occt_mesh, "mesh_component", side_effect=mesher):
+        with mock.patch.object(tessellate, "mesh_component", side_effect=mesher):
             [_failure] = parts.ensure_display(tree)
         self.assertEqual(stored(), others)
         # An interrupt is not a part's failure.
-        with mock.patch.object(occt_mesh, "mesh_component", side_effect=KeyboardInterrupt), \
+        with mock.patch.object(tessellate, "mesh_component", side_effect=KeyboardInterrupt), \
                 self.assertRaises(KeyboardInterrupt):
             parts.ensure_display(tree)
 

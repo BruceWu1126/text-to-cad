@@ -1,8 +1,8 @@
 """A part's display mesh: the GLB body cadgen stores for it, and its codec.
 
 The kernel-free half of the store's mesh format: glTF 2.0 binary (GLB), its
-validation and its encoder. cadgen is the only producer -- OCCT's mesher, run on
-a component's exact BREP (``cadgen/_internal/occt_mesh.py``) -- and every
+validation and its encoder. cadgen is the only producer -- its tessellator, run
+on a component's exact BREP (``cadgen/_internal/tessellate.py``) -- and every
 consumer only reads: the CAD Viewer, snapshots and mesh exports draw the same
 stored triangles. A part's record (``cadgen.store.parts``) names the body and
 what a reader sizes it by; this module only writes and reads the bytes.
@@ -26,12 +26,12 @@ views every array in place:
   the canonical JSON for those values: a reader rebuilds it and requires it, so
   nothing but the tables grows with the component.
 
-A face the mesh can resolve that no mesher could cover -- OCCT refused it and
-its own tessellation (``cadgen/_internal/face_fallback.py``) did not cover its
-area -- leaves the component meshed without it: its face range is empty, and
-``extras.cadgen.unmeshedFaces`` names it among the ordinals of every such face
-(present only when there is one), so each reader says what it does not draw or
-write; the part's record counts them (``unmeshedFaceCount``, likewise).
+A face the mesh can resolve that the tessellator could not cover -- its geometry
+raising inside OCCT, its trim unreadable -- leaves the component meshed without
+it: its face range is empty, and ``extras.cadgen.unmeshedFaces`` names it among
+the ordinals of every such face (present only when there is one), so each reader
+says what it does not draw or write; the part's record counts them
+(``unmeshedFaceCount``, likewise).
 """
 
 from __future__ import annotations

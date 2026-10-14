@@ -2,7 +2,7 @@
 
 The writer half of the one mesh path (``mesh_export.run_mesh_exporter`` is the
 engine around it). Its input is what the store already holds: one GLB body per
-component (``cadgen.store.meshes``), OCCT's mesh of the component's exact BREP --
+component (``cadgen.store.meshes``), cadgen's mesh of the component's exact BREP --
 the triangles the CAD Viewer and snapshots draw -- and the flattened descriptor
 whose occurrences place each component in the document. Nothing here meshes,
 reads the store or imports the kernel.
@@ -404,7 +404,7 @@ def build_primitives(
 def _covering(positions: np.ndarray, triangles: np.ndarray) -> np.ndarray:
     """Which of ``triangles`` (t, 3) cover something: no two of its corners are one point.
 
-    OCCT's mesh has such triangles at a sphere's pole and a cone's apex. They cover
+    A mesh can have such triangles at a sphere's pole and a cone's apex. They cover
     nothing and still carry their edges, which a slicer or a watertightness check welding
     by position counts four times. ``==`` holds -0.0 and 0.0 one point."""
     a, b, c = (positions[triangles[:, corner]] for corner in range(3))

@@ -112,13 +112,13 @@ class GeometryInputs(unittest.TestCase):
             self.assertFalse((self.root/'store/index/part').exists())
 
     def test_display_data_loss_never_blocks_geometry_and_repairs_exactly(self):
-        from cadgen._internal import occt_mesh, topology_extract
+        from cadgen._internal import tessellate, topology_extract
         digest,tree=publish_document(self.scene(nested=True))
         expected=parts.derive(digest)
         for result in part_objects(expected): object_path(result).unlink()
         shutil.rmtree(self.root/'store/index/part')
         with mock.patch.object(topology_extract,'extract_topology_facts',side_effect=AssertionError('extraction forbidden')), \
-             mock.patch.object(occt_mesh,'mesh_component',side_effect=AssertionError('mesh forbidden')):
+             mock.patch.object(tessellate,'mesh_component',side_effect=AssertionError('mesh forbidden')):
             self.assertGreater(materialize(digest).volume,0)
         self.assertEqual(parts.derive(digest),expected)
         first=part_objects(expected)[0]

@@ -139,7 +139,7 @@ class PartRequests(unittest.TestCase):
         self.assertFalse(self.manager._jobs)
 
     def test_a_failed_completion_racing_first_lookup_reports_ready_what_it_stored(self):
-        from cadgen._internal import occt_mesh
+        from cadgen._internal import tessellate
 
         tree, _ = _row_tree()
         view = descriptor_for_view(tree, producer=self.producer)
@@ -147,11 +147,11 @@ class PartRequests(unittest.TestCase):
         cids = list(keys)
         request = {"tree": tree, "viewId": view["viewId"], "producer": self.producer,
                    "components": [{"cid": cid, "part": keys[cid]} for cid in cids]}
-        real, failing = occt_mesh.mesh_component, keys[cids[-1]]
+        real, failing = tessellate.mesh_component, keys[cids[-1]]
 
         def mesher(topods, table, face_colors, *, part, **options):
             if part == failing:
-                raise occt_mesh.MeshProductionError("OCCT did not mesh 1 face(s) of the component: f3")
+                raise tessellate.MeshProductionError("OCCT did not mesh 1 face(s) of the component: f3")
             return real(topods, table, face_colors, part=part, **options)
 
         future = SubscriberFuture()
@@ -160,9 +160,9 @@ class PartRequests(unittest.TestCase):
             # The job ends after this poll's first lookup: it stores the first two
             # parts, then raises the last one's failure.
             try:
-                with mock.patch.object(occt_mesh, "mesh_component", side_effect=mesher):
+                with mock.patch.object(tessellate, "mesh_component", side_effect=mesher):
                     parts.derive(tree, operation["cids"], producer=self.producer)
-            except occt_mesh.MeshProductionError as error:
+            except tessellate.MeshProductionError as error:
                 future.set_exception(error)
             return future
 

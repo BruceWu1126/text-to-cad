@@ -88,9 +88,10 @@ no part carries fails the build, naming the clip and the time.
 
 ## Meshes come from cadgen in 0.8
 
-cadgen 0.8 meshes every component itself, with OCCT, at one display tolerance,
-and every client draws those meshes: the CAD Viewer, snapshots and the CAD app no
-longer tessellate, and nothing cadgen runs needs Node.
+cadgen 0.8 meshes every component itself, with the tessellator the CAD Viewer
+used to run, at one display tolerance, and every client draws those meshes: the
+CAD Viewer, snapshots and the CAD app no longer tessellate, and nothing cadgen
+runs needs Node.
 
 - `@step` takes no mesh tolerance: delete `mesh_tolerance=` and
   `mesh_angular_tolerance=` from it (`@step got an unexpected keyword argument`).

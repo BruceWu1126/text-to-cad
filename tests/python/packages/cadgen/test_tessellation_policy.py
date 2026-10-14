@@ -46,7 +46,7 @@ def _export(*, chord=None, angle=None, stored_meshes=None):
 class TessellationPolicyTests(unittest.TestCase):
     def test_each_part_is_meshed_for_display_at_the_display_tolerance(self) -> None:
         from build123d import Solid
-        from cadgen._internal import occt_mesh
+        from cadgen._internal import tessellate
         from cadgen.store import parts
         from cadgen.store.build import build_tree_from_compound
 
@@ -56,7 +56,7 @@ class TessellationPolicyTests(unittest.TestCase):
         with generated_cad_directory(prefix="display-tolerance-") as root, \
                 mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(Path(root) / "store"), "CADGEN_DAEMON": "0"}):
             tree, _, _ = build_tree_from_compound(Solid.make_box(1, 2, 3), root_name="box")
-            with mock.patch.object(occt_mesh, "mesh_component", wraps=occt_mesh.mesh_component) as meshed:
+            with mock.patch.object(tessellate, "mesh_component", wraps=tessellate.mesh_component) as meshed:
                 parts.derive(tree)
         [call] = meshed.call_args_list
         self.assertEqual((call.kwargs["chord"], call.kwargs["angle"]), (display["chordTolerance"], display["angleTolerance"]))

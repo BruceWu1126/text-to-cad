@@ -428,37 +428,38 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   `components/<cid>.selectors.json`. So a ref the page shows resolves in
   `inspect` to the entity it names, and nothing in a browser mints one.
 
-  Meshes are derived the same way, and by cadgen alone. The mesher
-  (`_internal/occt_mesh.py`) runs OCCT's `BRepMesh_IncrementalMesh` on the exact
-  BREP at the display tolerance (`tessellation_policy.DISPLAY_TESSELLATION`: the
-  chord tolerance a fraction of the component's bounding diagonal, the angle in
-  radians; each pass is checked for a face left empty, holed (where OCCT reports a
-  failure or the mesh has an open edge), or off its exact surface (each cylinder,
-  cone, sphere and torus, which OCCT does not measure, and each freeform face a
-  screen of its triangles picks), and a part with such a face is meshed again,
-  whole and finer, unless its first pass took seconds; a face no pass gets right is
-  tessellated over its own parameters by `_internal/face_fallback.py` where that
-  does no harm; a needle folded over its neighbour is unfolded), reading what the
-  triangles do not say from the part's selector table (each face's area, each
-  edge's class) and the
-  component's face colours. A body (`store/meshes.py`) is glTF 2.0 binary in
-  the component's own units: ONE triangle primitive (positions, normals, u16
+  Meshes are derived the same way, and by cadgen alone. The tessellator
+  (`_internal/tessellate.py`) is the one the CAD Viewer ran in the browser before
+  meshes moved into the store, in Python: each face triangulated in its own
+  parameters (its trim sampled from its exact pcurves, a grid sized by the
+  surface's curvature, each cell the trim crosses clipped and earcut, then
+  refined wherever a chord, a centre or a facet strays), each model edge's exact
+  curve sampled once and every adjacent face conformed to that one polyline, so
+  the part is watertight across its faces, at the display tolerance
+  (`tessellation_policy.DISPLAY_TESSELLATION`: the chord tolerance a fraction of
+  the component's extent, the angle in radians). It evaluates the BREP itself --
+  each analytic surface by its formula, every other one, each pcurve and each edge
+  curve through OCCT -- and reads what the triangles do not say from the part's
+  selector table (each face's area, each edge's class) and the component's face
+  colours. A body (`store/meshes.py`) is glTF 2.0 binary in the component's own
+  units: ONE triangle primitive (positions, normals, u16
   indices up to 65,535 vertices, else u32), a face table whose rows give each
   face's ordinal, contiguous index range and colour, an edge table giving each
   edge's ordinal, class and run of polyline points, and the points; the JSON
   chunk is the canonical JSON for the body's part key, bounds and colour
   palette, which every reader rebuilds and requires before it views the arrays
   in place. Any glTF viewer draws it (its one node turns Z-up millimetres into
-  Y-up metres); the tables are `extras`. A face no mesher covers -- OCCT refused
-  it and the fallback's triangles missed its area by more than a quarter --
-  never fails the component: it is meshed without that face, whose range is
+  Y-up metres); the tables are `extras`. A face the tessellator cannot cover --
+  its geometry raising inside OCCT, its trim unreadable -- never fails the
+  component: it is meshed without that face, whose range is
   empty, and the body names it (`unmeshedFaces`, only in a body that has one;
   the part's entry counts them, `unmeshedFaceCount`). Every reader says so: a
   view or a list warns which faces of which part it does not draw or count, the
   CAD Viewer names the parts it draws without them, and a mesh export warns that
   its file has a hole there and is not watertight. A face smaller than the mesh
-  resolves (area under the deflection squared) may have no triangles and is not
-  named. Any other failure -- OCCT raising, a body its encoding refuses -- is the
+  resolves (area under the deflection squared, or a trim narrower than the
+  tolerance it is sampled to) may have no triangles and is not named. Any other
+  failure -- OCCT raising outside a face, a body its encoding refuses -- is the
   component's `MeshProductionError`. A mesh export at the display tolerance
   writes the stored display meshes; one at any other tolerance meshes each part
   in the exporting process from the very inputs its display mesh was made from

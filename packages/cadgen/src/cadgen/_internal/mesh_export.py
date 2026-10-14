@@ -3,7 +3,7 @@
 Every mesh serialization (STL/3MF/GLB) — a `@stl`/`@glb`/`@threemf`
 declaration produced by a model-script run, or an ad-hoc `cadgen stl|3mf|glb
 build` — funnels through :func:`run_mesh_exporter`, so the front doors cannot
-drift: the document's tree, OCCT's mesh of each component's exact BREP at each
+drift: the document's tree, cadgen's mesh of each component's exact BREP at each
 distinct tolerance pair, and every format serialized from those same meshes
 (``cadgen._internal.mesh_formats``; a clip's keys go in as glTF animation by
 ``cadgen._internal.glb_animation``, a bending tube as a skin by
@@ -35,8 +35,8 @@ from cadgen._internal.mesh_animation import AnimationSnapshot
 # Each format's final-byte revision: what the ledger compares beside the document
 # and the tolerances, so a change to one format's bytes makes its ledgered exports
 # misses without touching geometry or the store's meshes. Not the glTF container
-# version and not a tessellation-cache salt. GLB 4, STL 1 and 3MF 1: OCCT's stored
-# meshes and this package's writers replaced the JavaScript tessellator and
+# version and not a tessellation-cache salt. GLB 4, STL 1 and 3MF 1: the store's
+# meshes and this package's writers replaced the browser's tessellator and
 # serializers, so no file either wrote is reported current. GLB 5 and 3MF 2: an
 # uncoloured occurrence no longer takes a sibling's colour, and a GLB no longer
 # carries triangles that cover nothing.
@@ -164,7 +164,7 @@ def _export(source: MeshSource, jobs: "list[MeshExportJob]", pairs: list, *, nam
         threemf_bytes,
         total_triangles,
     )
-    from cadgen._internal.occt_mesh import MeshProductionError
+    from cadgen._internal.tessellate import MeshProductionError
     from cadgen.store import meshes
 
     try:

@@ -39,7 +39,9 @@ from cadgen.store.objects import is_object_hash, object_path, put_object, read_v
 # and edge lines: every part has a new key, and its table new bytes.
 # 3: the mesher measures each cylinder, cone, sphere and torus against its surface and
 # meshes a part again where one strays: a part whose round OCCT gridded off it has a new mesh.
-PART_VERSION = 3
+# 4: cadgen tessellates every part itself, as the CAD Viewer's tessellator drew it before
+# meshes moved to the store (``_internal/tessellate.py``): every part has a new mesh.
+PART_VERSION = 4
 INDEX_KIND = "part"
 MAX_INDEX_BYTES = 16 * 1024
 _KEY = re.compile(rf"[0-9a-f]{{64}}-v{PART_VERSION}")
@@ -314,7 +316,7 @@ def _meshing():
     """Whatever fails inside, as the ``MeshProductionError`` that names it (its type
     and message): one component's failure, which its caller reports once the rest
     of the request is stored. An interrupt is not one."""
-    from cadgen._internal.occt_mesh import MeshProductionError
+    from cadgen._internal.tessellate import MeshProductionError
 
     try:
         yield
@@ -323,8 +325,7 @@ def _meshing():
 
 
 def _decoded(entry: dict) -> tuple[Any, dict]:
-    """A private decode of the component (meshing stores its triangulation on the shape)
-    and its face colours by ordinal."""
+    """A decode of the component and its face colours by ordinal."""
     from cadgen._internal.component_package import decode_display_shape, effective_face_colors
 
     shape = decode_display_shape(entry, read_verified_object(entry["brep"]), native=True)
@@ -352,14 +353,13 @@ def _derive(entry: dict, key: str, keep_going: Callable[[], bool] | None = None)
         return prior
     if keep_going is not None and not keep_going():
         return None
-    from cadgen._internal.occt_mesh import mesh_component
     from cadgen._internal.selector_table import build_selector_table, selector_table_bytes
+    from cadgen._internal.tessellate import mesh_component
     from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
     with _meshing():
         topods, colors = _decoded(entry)
         table = build_selector_table(topods, _topology(entry, topods))
-        # The extraction and the table read the shape; the mesher, last, triangulates it.
         glb = mesh_component(topods, table, colors, part=key, chord=DISPLAY_TESSELLATION["chordTolerance"],
                              angle=DISPLAY_TESSELLATION["angleTolerance"])
         return _write(key, glb, selector_table_bytes(table))
@@ -371,8 +371,8 @@ def mesh_at(entry: dict, key: str, chord: float, angle: float) -> bytes:
     (``_internal/mesh_export.py``), whose file is the output. ``entry`` is the component's
     tree entry. The mesher reads what the display mesh's read -- the part's stored
     selector table and the component's face colours -- so nothing is extracted."""
-    from cadgen._internal.occt_mesh import MeshProductionError, mesh_component
     from cadgen._internal.selector_table import read_selector_table
+    from cadgen._internal.tessellate import MeshProductionError, mesh_component
 
     payload = read(key, "selectors")
     if payload is None:
@@ -404,7 +404,7 @@ def derive(tree_hash: str, cids: list[str] | None = None, *, producer: dict | No
     others: they are stored, then ``MeshProductionError`` names each failure (the
     component, and the error's type and message).
     """
-    from cadgen._internal.occt_mesh import MeshProductionError
+    from cadgen._internal.tessellate import MeshProductionError
 
     descriptor, producer = _captured(tree_hash, producer)
     components = descriptor["components"]

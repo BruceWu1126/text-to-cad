@@ -89,7 +89,7 @@ class LoadedStepScene:
 class AdaptiveMeshResolution:
     """What the scene's topology says about how to RENDER it.
 
-    Not tessellation settings: cadgen's OCCT mesher (``occt_mesh``) takes its
+    Not tessellation settings: cadgen's tessellator (``tessellate``) takes its
     own relative tolerances. This is the classification — ``profile`` plus the
     ``hints`` it was computed from — which
     ``_edge_visibility_classes_for_resolution`` turns into the edge classes a

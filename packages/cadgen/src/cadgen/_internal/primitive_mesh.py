@@ -4,8 +4,8 @@ A URDF or SDF visual may be a shape rather than a mesh file. cadgen meshes it, a
 meshes every other display mesh, at the display tolerance
 (``cadgen.tessellation_policy.DISPLAY_TESSELLATION``): a round shape takes as many
 segments as the chord criterion (relative to the shape's bounding diagonal, as a STEP
-component's is) and the angle criterion between them allow, which is what OCCT's
-mesher decides for the same solid. A box is twelve triangles whatever the tolerance.
+component's is) and the angle criterion between them allow, as cadgen's tessellator
+does for the same solid's edges. A box is twelve triangles whatever the tolerance.
 
 Each mesh is one glTF binary: positions and normals in glTF's Y-up metres, one triangle
 primitive, no material (the robot's visual paints it: the description's colour, else the

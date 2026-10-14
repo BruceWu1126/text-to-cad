@@ -1,7 +1,7 @@
 """Regenerate the part fixtures in this directory.
 
 Each fixture is one component's part as cadgen stores it: ``<name>.glb`` (cadgen's
-OCCT mesh of it at the display tolerance), naming a fixed test part key
+mesh of it at the display tolerance), naming a fixed test part key
 (``sha256("cadgen-test-fixture:<name>")`` at this cadgen's part version, recorded in
 ``fixtures.json``), and ``<name>.selectors.json``, the component's selector table
 (``cadgen._internal.selector_table``): what the page joins to the mesh, and the
@@ -68,7 +68,7 @@ def slot():
 
 
 def main() -> None:
-    from cadgen._internal import occt_mesh
+    from cadgen._internal import tessellate
     from cadgen._internal.component_package import decode_display_shape, effective_face_colors, prepare_geometry_component
     from cadgen._internal.selector_table import build_selector_table, selector_table_bytes
     from cadgen._internal.topology_extract import extract_topology_facts
@@ -86,7 +86,7 @@ def main() -> None:
         table = build_selector_table(topods, extract_topology_facts(topods))
         (HERE / f"{name}.selectors.json").write_bytes(selector_table_bytes(table) + b"\n")
         part = versioned_key(hashlib.sha256(f"cadgen-test-fixture:{name}".encode()).hexdigest(), PART_VERSION)
-        body = occt_mesh.mesh_component(topods, table, colors, part=part, chord=chord, angle=angle)
+        body = tessellate.mesh_component(topods, table, colors, part=part, chord=chord, angle=angle)
         (HERE / f"{name}.glb").write_bytes(body)
         manifest[name] = {"part": part}
     (HERE / "fixtures.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
