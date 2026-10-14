@@ -429,8 +429,6 @@ src/cadgen/
                          #   the CAD apps and the build daemon, on by default
                          #   once a command has said so, never after a no (its
                          #   answer: settings.json's `telemetry` section)
-  features.py            # the CAD views' features a person can turn off
-                         #   (Quick edit: settings.json's `features` section)
   updates.py             # the daily version check: whether a newer release is
                          #   out, for a copy nothing else keeps up to date
                          #   (_internal/channel.py)
@@ -492,10 +490,13 @@ uses the same host and custom-header POST gates as other mutation routes, limits
 images to 20 MiB, and delegates native delivery to `viewer/clipboard.py`. It never
 reads the clipboard. Unsupported desktop clipboard environments return an error.
 
-It exposes `POST /__cad/sketches?name=` for a picture a copied prompt names by path:
-the view with a person's sketch drawn over it. It takes a PNG of at most 20 MiB under
-the same gates and saves it in the system's temporary directory as
-`cadgen-sketches/<name-stem>-<sha256[:12]>.png` (the same picture saved twice is one
-file, and saving it again makes it the newest), keeps only the newest 64
-(`viewer/sketches.py`), and answers `{"ok": true, "path": "<absolute path>"}`. It is
-scratch, not state.
+It exposes `/__cad/prompt-files` for the files a copied Quick Edit prompt names by
+path: the views a person looked at as a snapshot job file (`cadgen snapshot --job`
+renders it as it stands), their sketch as a sketch file ([`SNAPSHOTS.md`](SNAPSHOTS.md),
+"Sketches"), and those views rendered to PNGs by snapshot's own code. `POST` accepts
+the request at once (`202 {id, retryMs}`) and renders off the request, one prompt at
+a time, in a headless browser it keeps open between prompts; `GET ?id=` answers 202
+until the files are written, then where they are. The files are scratch in the
+system's temporary directory, one directory per viewer process, and outlive it;
+`GET /__cad/prompt-files/<name>` serves them, every route carrying the custom header
+(`viewer/prompt_files.py` holds the contract).

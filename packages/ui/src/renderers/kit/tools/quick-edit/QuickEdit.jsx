@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Check, Copy, ListPlus, X } from "lucide-react";
 import { Button } from "@text-to-cad/ui/primitives/button";
+import { ScrollArea } from "@text-to-cad/ui/primitives/scroll-area";
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { cn } from "@text-to-cad/ui/utils";
 import { promptReferenceIds } from "@text-to-cad/core/prompt";
@@ -9,7 +10,9 @@ import { FLOATING_SURFACE_CLASS } from "../../../../lib/floatingSurface.js";
 import { capturePointer } from "../../../../lib/pointerCapture.js";
 import ResizeGrip from "../ResizeGrip.jsx";
 import { TOOL_PANEL_BUTTON_CLASS } from "../ToolPanel.jsx";
-import { copiedQuickEdit, createQuickEditContext, quickEditSelection, sketchName } from "./quickEditPrompt.js";
+import { copiedQuickEdit, createQuickEditContext, pastedLines, quickEditSelection } from "./quickEditPrompt.js";
+import { insertAtCaret, noteText, pasteNodes } from "./noteEditor.js";
+import ReferenceChips from "./ReferenceChips.jsx";
 
 const EMPTY = Object.freeze([]);
 // A press of the person's in this view leads the selection it made; an agent's selection (the live
@@ -37,13 +40,22 @@ export function quickEditReferenceIds(selection) {
  * queued or sent. It takes the keyboard for the person — each pick of theirs, or a sketch's first
  * stroke once the pen lifts — never for an agent's selection.
  *
- * Its header names what goes with the note — the selected references (`references`, the selection
- * in the prompt grammar; their ids on hover) and the view with its sketch while Draw has ink
- * (`sketch`). The file always goes and is not named. The buttons, bottom-right, are the ones this
+ * Under its header, what goes with the note is chips: first "Drawing" while Draw has ink (`sketch`:
+ * a click copies the drawing as a sketch file's JSON, its X wipes the ink), then the selected references,
+ * as the renderer describes them (`chips`,
+ * `ReferenceChips.jsx`: a few, then "+N more"; each a card of what it is, its picks lit while the
+ * pointer is on it, its X dropping them). A renderer that describes none has its references
+ * counted in the header instead, their ids on hover (`references`, the selection in the prompt
+ * grammar, is what goes either way). The note is plain text, and a reference pasted into it (a
+ * line that is one and nothing else, as Copy References writes it, into this file or any other) is
+ * a chip in it, where it was pasted: one piece a Backspace takes whole, which the note carries as
+ * that reference's text, in its place (`noteEditor.js`). The file always goes and is not named. The buttons, bottom-right, are the ones this
  * host can carry out, the rightmost primary and pressed by Enter (Shift+Enter is a new line): Copy
  * Prompt always — the note as text to paste into an agent's prompt box, its references by their
- * files' absolute paths and its sketch saved as a file it names
- * (`host.attachments`); Queue where the destination is a composer (the host's context for the next
+ * files' absolute paths, and the files the host makes for it (`prompt`, `host.promptFiles`) by
+ * theirs: a picture of each view it carries — the one on screen as it goes, and each the drawing
+ * was drawn in — those views as a snapshot job file, and the drawing as a sketch file. Every way
+ * it goes carries the same; Queue where the destination is a composer (the host's context for the next
  * message); Send where the host can post a message now (`promptContext.send`). Queue and Send
  * clear and close the box once the note has gone; Copy Prompt keeps it all (nothing has gone yet),
  * its button showing a tick for a moment. A failure keeps the note and says why. Its corner resizes it for
@@ -52,16 +64,22 @@ export function quickEditReferenceIds(selection) {
  *
  * @param {{ resource: import("@text-to-cad/core/prompt").ResourceRef,
  *   references?: readonly import("@text-to-cad/core/prompt").PromptReference[],
- *   sketch?: { ink: boolean, capture(): Promise<Blob> } | null,
+ *   chips?: readonly import("./ReferenceChips.jsx").ReferenceChip[] | null,
+ *   sketch?: { ink: boolean, clear?: () => void } | null,
+ *   prompt?: { views(): { label: string }[], files(views: { label: string }[]): Promise<object> | null,
+ *     read(path: string): Promise<Blob>, sketch(): object | null } | null,
+ *   nameReference?: ((reference: import("@text-to-cad/core/prompt").PromptReference) => string | import("../../inspector/pickGlyph.jsx").CompactName) | null,
  *   onCopy?: () => boolean, onEscape?: () => unknown, onClear?: () => void, disabled?: boolean,
  *   hidden?: boolean, className?: string, style?: import("react").CSSProperties }} props
+ *   `nameReference`: what the renderer calls a reference into the file on screen, for its chip in
+ *   the note ("cam"); "" where it has no name for it, which then reads as its file and ids.
  *   `onCopy`: the viewer's own copy (⌘C / Ctrl+C: the selection's references, or the drawing),
  *   which the key still reaches from the box while none of the note is selected. `onEscape`: the
  *   viewer's own Escape (clearing the selection), which an empty box passes on as it closes; a box
  *   with a note keeps it, and Escape only hands the keyboard back to the view. `hidden`: out of
  *   sight with all it holds (the view is loading).
  */
-export default function QuickEdit({ resource, references = EMPTY, sketch = null, onCopy, onEscape, onClear, disabled = false,
+export default function QuickEdit({ resource, references = EMPTY, chips = null, sketch = null, prompt = null, nameReference = null, onCopy, onEscape, onClear, disabled = false,
   hidden = false, className, style }) {
   const host = useViewerHost();
   const destination = usePromptDestination();
@@ -69,6 +87,7 @@ export default function QuickEdit({ resource, references = EMPTY, sketch = null,
   const [pending, setPending] = useState("");
   const [error, setError] = useState("");
   const field = useRef(null);
+  const noteBox = useRef(null);
   const box = useRef(null);
   const root = useRef(null);
   const selection = useMemo(() => quickEditSelection(references), [references]);
@@ -138,7 +157,7 @@ export default function QuickEdit({ resource, references = EMPTY, sketch = null,
   const ready = written && !pending && !disabled;
 
   // The note, and everything it would carry: the box goes with them.
-  const clearAll = () => { setText(""); setError(""); onClear?.(); };
+  const clearAll = () => { setText(""); field.current?.replaceChildren(); setError(""); onClear?.(); };
   // A copied prompt has gone nowhere yet: the box keeps it, and its button says it was copied.
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef(0);
@@ -148,23 +167,20 @@ export default function QuickEdit({ resource, references = EMPTY, sketch = null,
     setCopied(true);
     copiedTimer.current = setTimeout(() => setCopied(false), 1600);
   };
-  // Everything happens inside the press: the host binds its destination (and the clipboard its
-  // write) before the picture has finished encoding.
+  // Everything happens inside the press: the views are read as they are, and the host binds its
+  // destination (and the clipboard its write) before their files are made.
   const run = action => {
     if (!ready) return;
     setError("");
     let outcome;
     try {
-      const picture = sketching ? sketch.capture() : null;
-      void picture?.catch(() => {});
-      const context = createQuickEditContext({ resource, references: selection, text, sketch: picture });
+      const views = prompt?.views() ?? [];
+      const files = views.length ? prompt.files(views) : null;
+      void files?.catch(() => {});
+      const context = createQuickEditContext({ resource, references: selection, text, views, files, read: prompt?.read, sketch: sketching });
       if (action === "send") outcome = host.promptContext.send(context);
       else if (action === "queue") outcome = host.promptContext.deliver(context);
-      else {
-        const saved = picture && host.attachments ? picture.then(png => host.attachments.save(png, sketchName(resource))) : Promise.resolve(null);
-        outcome = host.clipboard.writeText(saved.then(sketchPath => copiedQuickEdit(context, { sketchPath })))
-          .then(() => ({ status: "copied" }));
-      }
+      else outcome = host.clipboard.writeText(copiedQuickEdit(context)).then(() => ({ status: "copied" }));
     } catch (caught) { outcome = Promise.reject(caught); }
     setPending(action);
     Promise.resolve(outcome).then(result => {
@@ -183,14 +199,32 @@ export default function QuickEdit({ resource, references = EMPTY, sketch = null,
   ].filter(Boolean);
   const primary = actions.at(-1).id;
 
+  // What is written, read back from the field: its text, each chip its reference. An emptied field
+  // is emptied of what an editor leaves behind (a stray line break), so its placeholder shows.
+  const readNote = note => {
+    const value = noteText(note);
+    if (!value.trim() && note.childNodes.length && !note.querySelector("[data-quick-edit-note-ref]")) note.replaceChildren();
+    setText(value);
+    setError("");
+  };
+  // A paste is the note's to place: plain text, and each line that is a reference a chip, at the caret.
+  const onPaste = event => {
+    event.preventDefault();
+    const note = event.currentTarget;
+    insertAtCaret(note, pasteNodes(pastedLines(event.clipboardData?.getData("text/plain")), note.ownerDocument, nameReference));
+    readNote(note);
+  };
+
   const onKeyDown = event => {
     const target = event.currentTarget;
     const copyKey = event.key.toLowerCase() === "c" && (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey;
-    if (copyKey && target.selectionStart === target.selectionEnd) {
+    if (copyKey && (target.ownerDocument.getSelection?.()?.isCollapsed ?? true)) {
       if (onCopy?.()) event.preventDefault();
-    } else if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+    } else if (event.key === "Enter" && !event.nativeEvent.isComposing) {
       event.preventDefault();
-      run(primary);
+      // Shift+Enter is a new line, as plain text has it.
+      if (event.shiftKey) { insertAtCaret(target, [target.ownerDocument.createTextNode("\n")]); readNote(target); }
+      else run(primary);
     } else if (event.key === "Escape") {
       // Back to the model: the viewer's own keys work again. An empty box goes, and the key is the
       // viewer's too; a note is kept, box and all.
@@ -205,8 +239,8 @@ export default function QuickEdit({ resource, references = EMPTY, sketch = null,
   // leftward and its note downward. The size is written to the two elements, once a frame, and kept
   // nowhere else: nothing renders under the pointer, and a box that closes takes its size with it.
   const startResize = event => {
-    const section = box.current, note = field.current;
-    if (event.button !== 0 || !section || !note) return;
+    const section = box.current, note = noteBox.current, text = field.current;
+    if (event.button !== 0 || !section || !note || !text) return;
     event.preventDefault();
     const handle = event.currentTarget;
     const start = { x: event.clientX, y: event.clientY, width: section.offsetWidth, height: note.offsetHeight };
@@ -217,6 +251,8 @@ export default function QuickEdit({ resource, references = EMPTY, sketch = null,
       section.style.width = `${next.width}px`;
       note.style.height = `${next.height}px`;
       note.style.maxHeight = "none";
+      // The field fills the region it scrolls in, so a press anywhere in it writes.
+      text.style.minHeight = `${Math.max(0, next.height - 2)}px`;
     };
     const move = moved => {
       next = {
@@ -237,7 +273,14 @@ export default function QuickEdit({ resource, references = EMPTY, sketch = null,
     handle.addEventListener("pointercancel", end);
   };
 
-  const referenceCount = referenceIds.length;
+  // Chips name the references; with none described, the header counts them. The sketch is a chip of
+  // its own, first: "Drawing", copied by a click as its sketch file's JSON, wiped by its X.
+  const referenceCount = chips ? 0 : referenceIds.length;
+  const sketchOf = prompt?.sketch, wipe = sketch?.clear;
+  const drawingChip = useMemo(() => (sketching ? {
+    key: "sketch", label: "Drawing", ...(sketchOf ? { copy: () => JSON.stringify(sketchOf(), null, 2) } : {}), ...(wipe ? { onRemove: wipe } : {})
+  } : null), [sketching, sketchOf, wipe]);
+  const shownChips = useMemo(() => [drawingChip, ...(chips || EMPTY)].filter(Boolean), [drawingChip, chips]);
   return <div ref={root} className={cn("pointer-events-none flex-col items-end", hidden ? "hidden" : "flex", className)} style={style} data-quick-edit="">
     {open ? <section ref={box} aria-label="Quick Edit" data-quick-edit-box=""
       // A narrow viewer (a phone) gets it across its whole width, over the tool stack rather than beside it.
@@ -254,17 +297,22 @@ export default function QuickEdit({ resource, references = EMPTY, sketch = null,
               {referenceCount} {referenceCount === 1 ? "ref" : "refs"}
             </span>
           </TooltipHint> : null}
-          {referenceCount && sketching ? <span aria-hidden="true">·</span> : null}
-          {sketching ? <span data-quick-edit-chip="sketch">drawing</span> : null}
         </p>
         <button type="button" aria-label="Close Quick Edit" className={TOOL_PANEL_BUTTON_CLASS} onClick={clearAll}>
           <X className="size-3" aria-hidden="true" />
         </button>
       </div>
-      {/* It grows with what is written, up to 10rem, until a drag of the corner gives it a height. */}
-      <textarea ref={field} value={text} rows={2} placeholder="Describe your changes" aria-label="Describe your changes"
-        className="max-h-40 min-h-14 w-full resize-none rounded-md border border-input bg-background/80 px-2 py-1.5 text-xs leading-5 text-foreground outline-none transition-[border-color,box-shadow] [field-sizing:content] placeholder:text-muted-foreground focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
-        onChange={event => { setText(event.target.value); setError(""); }} onKeyDown={onKeyDown} />
+      {shownChips.length ? <ReferenceChips chips={shownChips} className="-mt-0.5" /> : null}
+      {/* Plain text with references inline. It grows with what is written, up to 10rem, until a drag of
+          the corner gives it a height, and scrolls in the chrome's own ScrollArea past that; its
+          placeholder shows while it is empty. */}
+      <ScrollArea ref={noteBox} data-quick-edit-note-box=""
+        className="max-h-40 min-h-14 w-full rounded-md border border-input bg-background/80 transition-[border-color,box-shadow] focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 dark:focus-within:border-blue-400 dark:focus-within:ring-blue-400/20">
+        <div ref={field} role="textbox" aria-multiline="true" aria-label="Describe your changes" tabIndex={0}
+          contentEditable="plaintext-only" suppressContentEditableWarning data-placeholder="Describe your changes" data-quick-edit-note=""
+          className="min-h-[3.375rem] w-full whitespace-pre-wrap break-words px-2 py-1.5 text-xs leading-5 text-foreground outline-none empty:before:pointer-events-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)]"
+          onInput={event => readNote(event.currentTarget)} onKeyDown={onKeyDown} onPaste={onPaste} />
+      </ScrollArea>
       {error ? <p role="alert" className="text-tiny text-destructive">{error}</p> : null}
       {/* Buttons of the ordinary shape, all solid: the primary in its colour, the others secondary.
           Copy Prompt alone (a host that takes no message) says so in words, its icon first. */}

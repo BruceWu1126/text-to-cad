@@ -6,7 +6,7 @@ own router -- one :class:`~cadgen.viewer.http_app.CadApp`, made on the first
 request, for every view of this server -- and returns the status, headers and
 body bytes. There is one backend, not two: the router, its checks and its limits
 are the ones the web app uses, the model library, the home's Open, Reveal, the
-person's analytics answer and features, and the update check included. The app
+person's analytics answer and the update check included. The app
 keeps the server's own library and analytics, so a model a view opens is
 counted once, by this process.
 
@@ -145,6 +145,8 @@ class ViewerTunnel:
                 # The server's recorder: a person's answer on a card here is the CAD app's.
                 app.analytics, app.consent_by = self._analytics, "app"
                 app.drawings.hold_seconds, app.drawings.retry_ms = DRAWING_HOLD_SECONDS, DRAWING_RETRY_MS
+                # A prompt's render is asked after as a drawing's is: a call a moment apart.
+                app.prompt_files.retry_ms = DRAWING_RETRY_MS
                 self._app = app
             return self._app
 

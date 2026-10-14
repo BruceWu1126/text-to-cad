@@ -5,7 +5,7 @@ import { FileViewer } from '../file-viewer/FileViewer.js';
 import { ViewerLoadingOverlay } from '../file-viewer/presentation.js';
 import { EmptyState } from '../file-viewer/navigation/index.js';
 import { Button } from '../primitives/button.jsx';
-import type { AppSetting, ViewerFeatures, ViewerHistory } from '../file-viewer/types.js';
+import type { AppSetting, ViewerHistory } from '../file-viewer/types.js';
 import type { ViewerHost } from '../host/types.js';
 import type { LiveRegistry } from '../host/liveRegistry.js';
 import { ModelLibrary, type LibraryModel, type ModelLibrarySource } from '../library/ModelLibrary.js';
@@ -48,10 +48,8 @@ export interface CadViewerProps<Model extends LibraryModel = LibraryModel> {
   onThumbnail?(png: Blob, file: string): Promise<unknown>;
   /** The host's controls in the Display panel (the web's appearance). */
   displayActions?: ReactNode;
-  /** The host's on/off settings, in the app menu the navbar's logo opens over every file (analytics, Quick edit). */
+  /** The host's on/off settings, in the app menu the navbar's logo opens over every file (analytics). */
   appSettings?: readonly AppSetting[];
-  /** The features the person has left on (in the app menu): Quick edit is offered only while it is on. */
-  features?: ViewerFeatures;
   /** The host's notice: a file's viewport, top-right, once the file is on screen; never the home. */
   notice?: ReactNode;
   /**
@@ -85,7 +83,7 @@ const reportError = (error: Error) => console.error(error);
  * navigates: showing a file, or the home, is the host's `onShow`.
  */
 export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, host, tabStore, live, file, onShow, onShown,
-  library, onThumbnail, displayActions, appSettings, features, notice, update, fullSize, history, onError = reportError }: CadViewerProps<Model>) {
+  library, onThumbnail, displayActions, appSettings, notice, update, fullSize, history, onError = reportError }: CadViewerProps<Model>) {
   const preferences = tabStore.settings;
   // One viewer renderer per file family, sharing one client and the tab's preferences; each
   // lazy-loads only its own code.
@@ -177,7 +175,7 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   }), [library, layout, changeLayout, path, picture, host.links, update, fullSize, onError, goHome]);
   return <>
     <FileViewer file={path || null} host={viewerHost} renderers={renderers} state={state} onStateChange={onStateChange}
-      displayActions={displayActions} appSettings={appSettings} update={update} fullSize={fullSize} history={history} features={features} notice={notice} onError={onError} presentation={presentation} />
+      displayActions={displayActions} appSettings={appSettings} update={update} fullSize={fullSize} history={history} notice={notice} onError={onError} presentation={presentation} />
     {drawing && !path ? <OffscreenPicture key={drawing.source.file} source={drawing.source} host={host} preferences={preferences} onDone={drawn} /> : null}
   </>;
 }

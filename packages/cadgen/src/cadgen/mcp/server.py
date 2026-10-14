@@ -11,7 +11,7 @@ open, a view makes ONE call each second, ``cad_sync``: it says what it shows (it
 model, its selection, whether a person just touched it) and what it watches (its
 model's catalog entry, a STEP's build feed), and gets back the agent's requests
 and what changed. Everything else -- its model, the library and the home's Open,
-Reveal, the person's analytics answer and features, the update check -- it reaches
+Reveal, the person's analytics answer, the update check -- it reaches
 through ``cad_http``, the viewer's own HTTP routes. No call is held open
 (``views.py``). Agents name models by absolute path only.
 

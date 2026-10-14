@@ -1,97 +1,130 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { sameView } from './views.js';
 
 /**
- * What a drawing toolbar needs of a mounted editor; `DrawingController` satisfies it.
- * @typedef {object} DrawingToolbarTarget
- * @property {(tool: import('./toolbar.jsx').DrawingTool) => void} setTool
- * @property {(color: string) => void} setColor
- * @property {(width: number) => void} setStrokeWidth
- * @property {(style: import('./toolbar.jsx').DrawingStrokeStyle) => void} setStrokeStyle
- * @property {() => void} undo
- * @property {() => void} redo
- * @property {() => void} clear
- */
-/**
+ * The drawing: one sketch, its ink in the model (`renderers/kit/tools/draw/ink3d.js`'s items), what
+ * Draw's tools put down next (`tool`, `color`, `strokeWidth`, `strokeStyle`, `placement`) and its history. It
+ * outlives Draw being put down — the ink stays in the model, and the next time Draw is taken up it
+ * draws on it — and goes when the person clears it or the model it was drawn on changes (`discard`).
+ *
  * @typedef {object} DrawingSession
- * @property {boolean} ready
- * @property {string} tool
+ * @property {boolean} ready  Always: the toolbar's tools are the session's own.
+ * @property {import('./toolbar.jsx').DrawingTool} tool
  * @property {string} color
  * @property {number} strokeWidth
  * @property {import('./toolbar.jsx').DrawingStrokeStyle} strokeStyle
+ * @property {import('./toolbar.jsx').DrawingPlacement} placement  Where what is drawn next lies: on
+ *   the model, or in space on a plane facing the view.
+ * @property {readonly import('../renderers/kit/tools/draw/ink3d.js').InkItem[]} ink
+ * @property {readonly string[]} selected  The ink Select has picked: what a colour, a weight, a line
+ *   style, Delete or a drag acts on.
  * @property {boolean} canUndo
  * @property {boolean} canRedo
- * @property {boolean} hasContent
+ * @property {boolean} hasContent  There is ink.
+ * @property {boolean} hasDrawing  The same: there is a drawing.
  * @property {(tool: import('./toolbar.jsx').DrawingTool) => void} selectTool
- * @property {(color: string) => void} selectColor
- * @property {(width: number) => void} selectStrokeWidth
- * @property {(style: import('./toolbar.jsx').DrawingStrokeStyle) => void} selectStrokeStyle
+ * @property {(color: string) => void} selectColor  What is drawn next, and the ink selected.
+ * @property {(width: number) => void} selectStrokeWidth  What is drawn next, and the strokes selected.
+ * @property {(style: import('./toolbar.jsx').DrawingStrokeStyle) => void} selectStrokeStyle  What is drawn next, and the strokes selected.
+ * @property {(placement: import('./toolbar.jsx').DrawingPlacement) => void} selectPlacement  What is drawn next only: ink already down stays where it lies.
+ * @property {(items: readonly import('../renderers/kit/tools/draw/ink3d.js').InkItem[]) => void} add  Ink put down: one step.
+ * @property {(ids: readonly string[]) => void} remove  Ink erased or deleted: one step.
+ * @property {(items: readonly import('../renderers/kit/tools/draw/ink3d.js').InkItem[]) => void} replace  Ink changed in place (moved, recoloured): one step.
+ * @property {(ids: readonly string[]) => void} select
  * @property {() => void} undo
  * @property {() => void} redo
- * @property {() => void} clear
- * @property {number} sketch  Which sketch this is: a host mounts one editor per value (its React `key`).
- * @property {() => void} discard  Ends the sketch in hand, its ink and its history, and keeps the session:
- *   the host mounts a new, empty editor, on the tool, colour and weight in hand. Unlike `clear`, which
- *   is a step the editor can undo, nothing of a discarded sketch can be brought back.
- * @property {(target: DrawingToolbarTarget | null) => void} onReady
- * @property {(tool: string) => void} onToolChange
- * @property {(color: string) => void} onColorChange
- * @property {(hasContent: boolean) => void} onContentChange
- * @property {(history: { canUndo: boolean, canRedo: boolean }) => void} onHistoryChange
+ * @property {() => void} clear  Every piece of ink, as one step to undo.
+ * @property {() => void} forget  The same as `clear`.
+ * @property {() => void} discard  Every piece of ink and the history with it: nothing to undo.
+ * @property {readonly import('./views.js').LabelledView[]} views  The views ink was drawn in, in order
+ *   ("view 1", "view 2"…): a mark names its own (`view`).
+ * @property {(view: import('./views.js').PromptView | null) => string | undefined} noteView  The label of
+ *   the view ink is being put down in: the one drawn in before that is the same (`sameView`), or a new one.
  */
 
+const DEFAULTS = Object.freeze({ tool: 'freedraw', color: '#ff2d55', strokeWidth: 2, strokeStyle: 'solid', placement: 'surface' });
+const LIMIT = 200;
+
 /**
- * One drawing session: a toolbar's view of the mounted editor and its only way
- * to drive it. The sketch itself lives in the editor; an inactive session (the
- * CAD Draw tool deselected) forgets the sketch, its history and the editor, as the
- * unmounted editor did, and goes back to its first tool — but not the colour and
- * weight in hand, which the next session opens with. `discard` forgets them the same way while the session
- * stays up (the CAD model updated under the ink): the host's next editor is empty.
- *
- * @param {boolean} [active]
- * @param {{ tool?: string, color?: string, strokeWidth?: number, strokeStyle?: import('./toolbar.jsx').DrawingStrokeStyle }} [initial]
+ * @param {boolean} [active]  Draw is the tool. Put down, it goes back to its first tool (the pen) and
+ *   selects nothing; the ink, the colour, the weight, the line style and the placement stay.
+ * @param {{ tool?: string, color?: string, strokeWidth?: number, strokeStyle?: import('./toolbar.jsx').DrawingStrokeStyle,
+ *   placement?: import('./toolbar.jsx').DrawingPlacement }} [initial]
  * @returns {DrawingSession}
  */
 export function useDrawingSession(active = true, initial = {}) {
-  const idle = useMemo(() => ({ ready: false, tool: initial.tool ?? 'selection', color: initial.color ?? '#1e1e1e', strokeWidth: initial.strokeWidth ?? 2,
-    strokeStyle: initial.strokeStyle ?? 'solid', hasContent: false, canUndo: false, canRedo: false }),
-  [initial.tool, initial.color, initial.strokeWidth, initial.strokeStyle]);
-  const target = useRef(/** @type {DrawingToolbarTarget | null} */ (null));
-  const [state, setState] = useState(idle);
-  // A sketch is one mounted editor, and its history is that editor's: a new sketch is a new editor.
-  const [sketch, setSketch] = useState(0);
-  const discard = useCallback(() => setSketch(current => current + 1), []);
-  // Put down, the session forgets its sketch and goes back to its first tool (the pencil, for the
-  // CAD Draw tool); the colour and weight in hand stay for the next session.
+  const start = useMemo(() => ({ ...DEFAULTS, ...Object.fromEntries(Object.entries(initial).filter(([, value]) => value != null)) }),
+    [initial.tool, initial.color, initial.strokeWidth, initial.strokeStyle, initial.placement]);
+  const [tool, setTool] = useState(start.tool);
+  const [color, setColor] = useState(start.color);
+  const [strokeWidth, setStrokeWidth] = useState(start.strokeWidth);
+  const [strokeStyle, setStrokeStyle] = useState(start.strokeStyle);
+  const [placement, setPlacement] = useState(start.placement);
+  // The ink, and the inks it was before and after each step: undo and redo move between them.
+  const [history, setHistory] = useState(() => ({ past: [], ink: [], future: [] }));
+  const [selected, setSelected] = useState(/** @type {string[]} */ ([]));
+  // The views ink was drawn in. Not a step to undo: a label a mark names stays, whatever is undone.
+  const viewsRef = useRef(/** @type {import('./views.js').LabelledView[]} */ ([]));
+  const [views, setViews] = useState(viewsRef.current);
+  const noteView = useCallback(view => {
+    if (!view) return undefined;
+    const known = viewsRef.current.findLast(drawn => sameView(drawn, view));
+    if (known) return known.label;
+    const label = `view ${viewsRef.current.length + 1}`;
+    viewsRef.current = [...viewsRef.current, { ...view, label }];
+    setViews(viewsRef.current);
+    return label;
+  }, []);
   useEffect(() => {
     if (active) return;
-    target.current = null;
-    setState(current => ({ ...idle, color: current.color, strokeWidth: current.strokeWidth, strokeStyle: current.strokeStyle }));
-  }, [active, idle]);
-  const onReady = useCallback((/** @type {DrawingToolbarTarget | null} */ next) => {
-    target.current = next;
-    setState(current => next ? { ...current, ready: true }
-      : { ...idle, tool: current.tool, color: current.color, strokeWidth: current.strokeWidth, strokeStyle: current.strokeStyle });
-  }, [idle]);
-  const report = useCallback((/** @type {'tool' | 'color' | 'hasContent'} */ key, /** @type {string | boolean} */ value) =>
-    setState(current => current[key] === value ? current : { ...current, [key]: value }), []);
-  const onToolChange = useCallback((/** @type {string} */ tool) => report('tool', tool), [report]);
-  const onColorChange = useCallback((/** @type {string} */ color) => report('color', color), [report]);
-  const onContentChange = useCallback((/** @type {boolean} */ hasContent) => report('hasContent', hasContent), [report]);
-  const onHistoryChange = useCallback((/** @type {{ canUndo: boolean, canRedo: boolean }} */ history) =>
-    setState(current => current.canUndo === history.canUndo && current.canRedo === history.canRedo
-      ? current : { ...current, ...history }), []);
-  const actions = useMemo(() => ({
-    selectTool: (/** @type {import('./toolbar.jsx').DrawingTool} */ tool) => target.current?.setTool(tool),
-    selectColor: (/** @type {string} */ color) => target.current?.setColor(color),
-    // The editor reports tool and colour changes; the weight and the line style are only ever set from here.
-    selectStrokeWidth: (/** @type {number} */ width) => { target.current?.setStrokeWidth(width); setState(current => current.strokeWidth === width ? current : { ...current, strokeWidth: width }); },
-    selectStrokeStyle: (/** @type {import('./toolbar.jsx').DrawingStrokeStyle} */ style) => {
-      target.current?.setStrokeStyle(style);
-      setState(current => current.strokeStyle === style ? current : { ...current, strokeStyle: style });
-    },
-    undo: () => target.current?.undo(),
-    redo: () => target.current?.redo(),
-    clear: () => target.current?.clear(),
+    setTool(start.tool);
+    setSelected([]);
+  }, [active, start.tool]);
+  const step = useCallback(change => setHistory(current => {
+    const ink = change(current.ink);
+    return ink === current.ink ? current : { past: [...current.past, current.ink].slice(-LIMIT), ink, future: [] };
   }), []);
-  return { ...state, ...actions, sketch, discard, onReady, onToolChange, onColorChange, onContentChange, onHistoryChange };
+  const add = useCallback(items => { if (items.length) step(ink => [...ink, ...items]); }, [step]);
+  const remove = useCallback(ids => {
+    const gone = new Set(ids);
+    if (!gone.size) return;
+    step(ink => (ink.some(item => gone.has(item.id)) ? ink.filter(item => !gone.has(item.id)) : ink));
+    setSelected(current => current.filter(id => !gone.has(id)));
+  }, [step]);
+  const replace = useCallback(items => {
+    const next = new Map(items.map(item => [item.id, item]));
+    if (next.size) step(ink => ink.map(item => next.get(item.id) ?? item));
+  }, [step]);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const widthRef = useRef(strokeWidth);
+  widthRef.current = strokeWidth;
+  // A style chosen with ink selected restyles it, as one step.
+  const restyle = useCallback(change => {
+    const ids = new Set(selectedRef.current);
+    if (ids.size) step(ink => ink.map(item => (ids.has(item.id) ? change(item) : item)));
+  }, [step]);
+  const actions = useMemo(() => ({
+    selectTool: next => { setTool(next); if (next !== 'selection') setSelected([]); },
+    selectColor: next => { setColor(next); restyle(item => ({ ...item, color: next })); },
+    selectStrokeWidth: next => {
+      const from = widthRef.current;
+      setStrokeWidth(next);
+      restyle(item => (item.kind === 'stroke' && item.width ? { ...item, width: (item.width / from) * next } : item));
+    },
+    selectStrokeStyle: next => { setStrokeStyle(next); restyle(item => (item.kind === 'stroke' && !item.widths ? { ...item, dash: next } : item)); },
+    // Not a style: ink already down, selected or not, stays where it lies.
+    selectPlacement: next => setPlacement(next),
+    select: ids => setSelected([...ids]),
+    undo: () => setHistory(current => (current.past.length
+      ? { past: current.past.slice(0, -1), ink: current.past[current.past.length - 1], future: [current.ink, ...current.future] } : current)),
+    redo: () => setHistory(current => (current.future.length
+      ? { past: [...current.past, current.ink], ink: current.future[0], future: current.future.slice(1) } : current)),
+    clear: () => { step(ink => (ink.length ? [] : ink)); setSelected([]); },
+    discard: () => { setHistory({ past: [], ink: [], future: [] }); setSelected([]); viewsRef.current = []; setViews([]); },
+  }), [restyle, step]);
+  const hasContent = history.ink.length > 0;
+  return { ready: true, tool, color, strokeWidth, strokeStyle, placement, ink: history.ink, selected, views,
+    canUndo: history.past.length > 0, canRedo: history.future.length > 0, hasContent, hasDrawing: hasContent,
+    add, remove, replace, noteView, forget: actions.clear, ...actions };
 }

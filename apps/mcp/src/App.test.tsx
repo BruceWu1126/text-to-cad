@@ -43,11 +43,8 @@ function host(initial: HostContext, hostCapabilities: Record<string, unknown> = 
     onHostContext(listener: (next: HostContext) => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     change(next: HostContext) { context = { ...context, ...next }; for (const listener of [...listeners]) listener(context); },
   };
-  let kept = { quickEdit: true };
   const answers: Record<string, Answer> = {
     '/__cad/analytics': body => ({ sharing: Boolean(body?.share), policy: POLICY }),
-    // The person's features as the server keeps them.
-    '/__cad/features': body => (kept = { ...kept, ...body }),
     '/__cad/version': () => ({ notice: null }),
     '/__cad/recents': () => ({ recents: [] }),
     '/__cad/reveal': () => null,
@@ -244,8 +241,8 @@ it('a Quick Edit queues into a tab host\'s composer always, into an inline host\
   const reach = (presentation: 'tabs' | 'inline', capabilities: Record<string, unknown>) => {
     const { bridge, server } = host({ displayMode: presentation === 'tabs' ? 'fullscreen' : 'inline' }, capabilities);
     render(<App bridge={bridge as any} server={server as any} presentation={presentation} launch={model} />);
-    const { promptContext, attachments } = viewer.props!.host;
-    const reached = [promptContext.getSnapshot().kind, typeof promptContext.send === 'function' ? 'send' : '', Boolean(attachments)];
+    const { promptContext, promptFiles } = viewer.props!.host;
+    const reached = [promptContext.getSnapshot().kind, typeof promptContext.send === 'function' ? 'send' : '', Boolean(promptFiles)];
     cleanup();
     return reached;
   };
@@ -273,8 +270,7 @@ it('nothing asks about usage stats: the app menu shows the answer, and its toggl
   expect(queryByRole('dialog')).toBeNull();
   expect(viewer.props!.notice).toBeFalsy();
   expect(server.asked('/__cad/analytics')).toEqual([null]);
-  expect(viewer.props!.appSettings).toEqual([expect.objectContaining({ id: 'analytics', checked: false }),
-    expect.objectContaining({ id: 'quickEdit', checked: true })]);
+  expect(viewer.props!.appSettings).toEqual([expect.objectContaining({ id: 'analytics', checked: false })]);
   await act(async () => viewer.props!.appSettings![0].onCheckedChange(true));
   expect(server.asked('/__cad/analytics').at(-1)).toEqual({ share: true });
   expect(viewer.props!.appSettings![0].checked).toBe(true);
@@ -305,27 +301,6 @@ it('an answer is never undone by a read sent just before it, and a choice the en
   render(<App bridge={fixed.bridge as any} server={fixed.server as any} launch={home} />);
   await act(async () => {});
   expect(viewer.props!.appSettings![0]).toEqual(expect.objectContaining({ disabled: true, label: 'Share anonymous usage data (set by your environment)' }));
-});
-
-it("the app menu's features: Quick edit is read from the server, turned off there for every view, and handed to the viewer", async () => {
-  const { bridge, server } = host({ displayMode: 'fullscreen' });
-  render(<App bridge={bridge as any} server={server as any} launch={home} />);
-  await act(async () => {});
-  expect(server.asked('/__cad/features')).toEqual([null]);
-  expect(viewer.props!.features).toEqual({ quickEdit: true });
-  // Settings: Analytics, then Features.
-  expect(viewer.props!.appSettings!.map(setting => [setting.label, setting.checked]))
-    .toEqual([['Share anonymous usage data', false], ['Quick edit', true]]);
-  await act(async () => viewer.props!.appSettings!.find(setting => setting.id === 'quickEdit')!.onCheckedChange(false));
-  expect(server.asked('/__cad/features').at(-1)).toEqual({ quickEdit: false });
-  expect(viewer.props!.features).toEqual({ quickEdit: false });
-  cleanup();
-  // Another view of the person's opens with it off: the server kept it.
-  const again = host({ displayMode: 'fullscreen' });
-  again.server.answers['/__cad/features'] = () => ({ quickEdit: false });
-  render(<App bridge={again.bridge as any} server={again.server as any} launch={home} />);
-  await act(async () => {});
-  expect(viewer.props!.features).toEqual({ quickEdit: false });
 });
 
 it('a newer release is the blue update button: its card sends the prompt to the chat where the host takes messages, copies it elsewhere, the full instructions a link away', async () => {

@@ -169,14 +169,7 @@ selection, panel and tool behavior is shared. Public declarations, styles and wo
 package. See `docs/shell.md` for the host boundary and `docs/storage.md` for
 browser persistence. CAD control guidance lives with the UI package.
 
-`vite.config.mjs` adds the shared `@text-to-cad/ui/drawing-assets` plugin so the
-Excalidraw editor in `@text-to-cad/ui/drawing` never fetches a font from a CDN:
-`drawing-assets.js` and `excalidraw/` are served in dev and emitted into
-`dist/`. The 12 MB Xiaolai CJK family is excluded from this build to keep the
-wheel small; CJK text falls back to a system font. See
-[drawing](../../packages/ui/docs/drawing.md#offline-assets-and-upgrades).
-
-It also names the build, for the version the app menu shows (`__TEXT_TO_CAD_BUILD__`,
+`vite.config.mjs` names the build, for the version the app menu shows (`__TEXT_TO_CAD_BUILD__`,
 from `@text-to-cad/ui/build-id`): none for the release's own build, whose
 environment names its version in `TEXT_TO_CAD_RELEASE` (the release workflow's bundle
 step), so it shows `v0.7.15`; for any other build, `vite dev` included, the commit of
@@ -238,8 +231,7 @@ pan, zoom, snapshot and Quick Edit, without a 3D toolbar or tool stack.
 
 The explorer is a popover under the file's name: the file's folder, one folder at a
 time, with "Filter files..." to find a file anywhere under it. Below 720px of
-FileViewer width a robot's Links starts closed (Select, pressed, opens it); a STEP's
-Features shows as on a desktop. Preview is the shared shell's button beside Display: it takes the whole page,
+FileViewer width a robot's Links and a STEP's Features show as on a desktop. Preview is the shared shell's button beside Display: it takes the whole page,
 hiding the navbar, toolbar, tool stack and
 Quick Edit, orbits by default, plays routines (on entry only with Autoplay on)
 and keeps its own controls where the navbar's sat — Orbit, Display, Exit preview — with
@@ -287,9 +279,11 @@ exposes no general write operations.
 The prompt destination is the clipboard, so Quick Edit offers Copy Prompt alone. Its
 text goes through the clipboard port's `writeText`, which takes pending text: a
 `ClipboardItem` holding the promise, so the write starts inside the gesture, or the
-text itself once it arrives where the browser takes no pending item. A sketch is
-saved through the host's `attachments` (`createHttpAttachmentStore`, over
-`POST /__cad/sketches`) and named in the text by its absolute path.
+text itself once it arrives where the browser takes no pending item. Its files — a
+picture of each view it carries, the views as a snapshot job and the drawing as a
+sketch — are made by the server through the host's `promptFiles`
+(`createHttpPromptFiles`, over `/__cad/prompt-files`) and named in the text by their
+absolute paths.
 
 ### The home
 
@@ -324,12 +318,6 @@ builds wrote (`@text-to-cad/core/source-maps`). The wheel
 leaves the maps out and a release uploads them to PostHog, and the page
 carries each chunk's id by file name (`__cadChunkIds`), and a frame names its chunk by it. The server holds all of it as counts in memory
 -- a file once a day, by its format, never its name -- and sends them every few minutes.
-
-The app menu's **Quick edit** (on until the person turns it off) is read and changed
-the same way: the client's `features`, through `/__cad/features` (`cadgen/features.py`).
-The server keeps the choice in the person's settings, beside the analytics answer, so it is
-one choice with the CAD app's and holds whatever port this Viewer is served on, which the
-page's own storage would not.
 
 ### File storage and host actions
 

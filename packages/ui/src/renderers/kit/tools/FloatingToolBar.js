@@ -4,8 +4,10 @@ import { FLOATING_CHROME_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
 
 /**
  * One tool of the strip. The strip draws it; whoever hands it over decides what
- * it is, when it exists and what pressing it does. A press is the tool's only action: a tool
- * has no menu on the strip — what it can be set to is its panel in the tool stack.
+ * it is, when it exists and what pressing it does. A tool with modes (Select's, Measure's) has a
+ * small chevron right after its button that opens them (`menu`, a `ToolModeMenu` with its
+ * "chevron" trigger), as a design tool's toolbar has it; what else it can be set to is its panel
+ * in the tool stack.
  *
  * @typedef {object} ViewportTool
  * @property {string} id
@@ -15,23 +17,24 @@ import { FLOATING_CHROME_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
  * @property {boolean} [disabled]
  * @property {() => void} onSelect  Every press of the button.
  * @property {string} [description]  `aria-description`.
- * @property {{ id: string, label: string }} [panel]  The panel of the tool's own that a person can
- *   close (a closable tree, by its `id` and its name): while it is closed the frame marks the tool
- *   (`panelClosed`), and a press on the tool while it is up opens the panel again (`RendererShell.jsx`).
- * @property {boolean} [panelClosed]  The tool's panel is closed: a small mark in the button's
- *   bottom-right corner, the flyout corner that says the tool has more to show.
+ * @property {import("react").ReactNode} [menu]  Its modes: the chevron after its button, and the menu it opens.
  */
 
-// A plain function, not a component: the strip's own output is the buttons.
+// The strip's tiles: 28px, their icons 16px (a design tool's toolbar proportion, its icon a little
+// over half its tile), whatever size the icon was handed at.
+const STRIP_BUTTON_CLASS = "size-7 [&>svg]:size-4!";
+
+// A plain function, not a component: the strip's own output is the buttons. A tool with a menu is
+// its button as every tool's, then the menu's small chevron, a button of its own with its own
+// hover, as a design tool's toolbar has it (`ToolModeMenu.jsx`'s "chevron" trigger).
 function toolButton(tool) {
   const active = tool.active === true;
-  return <ToolbarButton className="relative" tooltipSide="top" label={tool.label} active={active} disabled={tool.disabled}
-    aria-pressed={active} aria-description={tool.description} onClick={() => tool.onSelect()}>
+  const button = <ToolbarButton tooltipSide="top" label={tool.label} active={active} disabled={tool.disabled}
+    className={STRIP_BUTTON_CLASS} aria-pressed={active} aria-description={tool.description} onClick={() => tool.onSelect()}>
     {tool.icon}
-    {tool.panelClosed ? <span data-tool-panel-closed="" aria-hidden="true" className="pointer-events-none absolute bottom-0 right-0 flex size-2 items-center justify-center">
-      <svg viewBox="0 0 5 5" className="size-1" fill="currentColor"><path d="M5 0v5H0Z" /></svg>
-    </span> : null}
   </ToolbarButton>;
+  if (!tool.menu) return button;
+  return <span className="inline-flex items-center" data-tool-split="">{button}{tool.menu}</span>;
 }
 
 /**
@@ -44,7 +47,7 @@ export default function FloatingToolBar({ tools = [] }) {
   // No tools, no strip: an empty bar is never drawn.
   if (!tools.length) return null;
   return (<div className="relative z-20 flex max-w-full shrink-0 flex-col items-end gap-1" data-cad-toolbar="tools">
-      <div role="group" aria-label="Interaction tools" className={`pointer-events-auto inline-flex min-h-8 max-w-full flex-wrap items-center gap-0.5 rounded-md p-1 ${FLOATING_CHROME_SURFACE_CLASS}`}>
+      <div role="group" aria-label="Interaction tools" className={`pointer-events-auto inline-flex min-h-9 max-w-full flex-wrap items-center gap-0.5 rounded-md p-1 ${FLOATING_CHROME_SURFACE_CLASS}`}>
         {tools.map(tool => <Fragment key={tool.id}>{toolButton(tool)}</Fragment>)}
       </div>
   </div>);

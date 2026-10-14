@@ -53,7 +53,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); while (restores.length) rest
 
 /** The tab's settings as a host hands them over, counting every write. */
 function tabSettings(initial: object = {}) {
-  let settings: any = { toolStack: { panels: {}, collapsed: {}, closed: {} }, ...initial };
+  let settings: any = { toolStack: { panels: {}, collapsed: {} }, ...initial };
   const listeners = new Set<() => void>();
   const store = { writes: 0, getSnapshot: () => settings, subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     update(patch: object) { store.writes += 1; settings = { ...settings, ...patch }; listeners.forEach(listener => listener()); } };
@@ -68,8 +68,8 @@ function navbarSlot() {
   return slot;
 }
 afterEach(() => document.querySelectorAll('[data-test-navbar]').forEach(slot => slot.remove()));
-function frame({ name = 'panel.harness', preferences = tabSettings(), state = undefined as unknown, mobile = false, onStateChange = (_: unknown) => {}, onFullscreenChange = vi.fn(), appearance = { colorScheme: 'light' } as object, notice = null as React.ReactNode, features = undefined as object | undefined } = {}) {
-  const props = { source: { id: 'one' }, file: { path: `/models/${name}`, name, kind: 'file' }, document: null, notice, features,
+function frame({ name = 'panel.harness', preferences = tabSettings(), state = undefined as unknown, mobile = false, onStateChange = (_: unknown) => {}, onFullscreenChange = vi.fn(), appearance = { colorScheme: 'light' } as object, notice = null as React.ReactNode } = {}) {
+  const props = { source: { id: 'one' }, file: { path: `/models/${name}`, name, kind: 'file' }, document: null, notice,
     navbarSlot: navbarSlot(), onFullscreenChange, onReady() {}, onOpenFile() {}, appearance, state, onStateChange, reload() {}, data: { services: { preferences } } };
   const element = () => <ViewerHostContext.Provider value={testHost()}><ViewerMobileContext.Provider value={mobile}>
     <HarnessRenderer {...(props as any)} /></ViewerMobileContext.Provider></ViewerHostContext.Provider>;
@@ -98,7 +98,7 @@ it('the chrome is inset from the viewer, every panel opens one width, a resizabl
   expect([width('Harness tree'), width('Harness reference')]).toEqual([TOOL_PANEL_WIDTH, TOOL_PANEL_WIDTH]);
   // Each as tall as its content needs, up to all the room under the strip.
   expect([panel('Harness tree')!.style.maxHeight, panel('Harness reference')!.style.maxHeight]).toEqual([`${STACK_HEIGHT}px`, `${STACK_HEIGHT}px`]);
-  expect(layout(preferences)).toEqual({ panels: {}, collapsed: {}, closed: {} });
+  expect(layout(preferences)).toEqual({ panels: {}, collapsed: {} });
   // Two kinds of panel: the tree and the Reference are each the person's to size, by one grip in
   // their bottom-right corner (Quick Edit's, drawn inside the panel); a kept effect is fixed, at the
   // one width, with none.
@@ -151,7 +151,7 @@ it("each resizable panel is sized by its corner alone, apart from every other: w
   expect([width('Harness reference'), panel('Harness reference')!.style.maxHeight]).toEqual([TOOL_PANEL_WIDTH + 40, `${STACK_HEIGHT - 60}px`]);
 
   // Position, by its corner too: its width and height in one write, the others as they were.
-  preferences.update({ toolStack: { panels: {}, collapsed: {}, closed: {} } });
+  preferences.update({ toolStack: { panels: {}, collapsed: {} } });
   fireEvent.click(tool('Pose'));
   expect(handles('Harness position')).toEqual(['Resize harness position']);
   const writes = preferences.writes;
@@ -160,50 +160,24 @@ it("each resizable panel is sized by its corner alone, apart from every other: w
   expect(layout(preferences).panels).toEqual({ position: { width: TOOL_PANEL_WIDTH + 60, height: STACK_HEIGHT - 50 } });
   expect([width('Harness tree'), panel('Harness tree')!.style.maxHeight]).toEqual([TOOL_PANEL_WIDTH, `${STACK_HEIGHT}px`]);
   // Reset puts every size back.
-  act(() => preferences.update({ toolStack: { panels: {}, collapsed: {}, closed: {} } }));
+  act(() => preferences.update({ toolStack: { panels: {}, collapsed: {} } }));
   expect([width('Harness tree'), width('Harness reference'), width('Harness position'), panel('Harness tree')!.style.maxHeight])
     .toEqual([TOOL_PANEL_WIDTH, TOOL_PANEL_WIDTH, TOOL_PANEL_WIDTH, `${STACK_HEIGHT}px`]);
 });
 
-it("the tree's X closes it, kept mounted, and marks Select; Select pressed while it is the tool opens it again, and from another tool only takes Select up; closed is kept across a remount", () => {
-  const { preferences, remount } = frame();
-  const tree = panel('Harness tree')!;
-  const mark = () => tool('Select').querySelector('[data-tool-panel-closed]');
-  // An X at the filter row's end, and no chevron: the tree does not fold.
-  expect(within(tree).queryByRole('button', { name: /^(?:Collapse|Expand) harness tree$/ })).toBeNull();
-  expect(tool('Select').getAttribute('aria-pressed')).toBe('true');
-  expect(mark()).toBeNull();
-  fireEvent.click(within(tree).getByRole('button', { name: 'Close harness tree' }));
-  expect(shown()).toEqual(['Harness reference']);
-  expect([tree.hidden, tree.hasAttribute('data-closed')]).toEqual([true, true]);
-  expect(within(tree).getByText('Row 1')).toBeTruthy();
-  expect([preferences.writes, layout(preferences).closed]).toEqual([1, { tree: true }]);
-  // Select carries the corner mark, and says what it marks; no other tool does.
-  expect(mark()).not.toBeNull();
-  expect(tool('Select').getAttribute('aria-description')).toBe('Harness tree closed');
-  expect([tool('Draw'), tool('Keep'), tool('Pose')].map(button => button.querySelector('[data-tool-panel-closed]'))).toEqual([null, null, null]);
-  // From another tool, Select is only taken up: the tree stays closed, the mark with it.
-  fireEvent.click(tool('Draw'));
-  expect(tool('Draw').getAttribute('aria-pressed')).toBe('true');
-  fireEvent.click(tool('Select'));
-  expect([tool('Select').getAttribute('aria-pressed'), tool('Draw').getAttribute('aria-pressed')]).toEqual(['true', 'false']);
-  expect(shown()).toEqual(['Harness reference']);
-  expect(mark()).not.toBeNull();
-  // Closed is the person's, across a remount.
-  remount();
-  expect(shown()).toEqual(['Harness reference']);
-  expect(mark()).not.toBeNull();
-  // Pressed while it is the tool, Select opens the tree as it was, and the mark goes: opening is
-  // the person's choice too, kept as made.
-  fireEvent.click(tool('Select'));
-  expect(shown()).toEqual(['Harness tree', 'Harness reference']);
-  expect([mark(), tool('Select').getAttribute('aria-description')]).toEqual([null, null]);
-  expect(layout(preferences).closed).toEqual({ tree: false });
-  expect(tool('Select').getAttribute('aria-pressed')).toBe('true');
-  // Pressed again with the tree open, it changes nothing.
-  const writes = preferences.writes;
-  fireEvent.click(tool('Select'));
-  expect([shown(), preferences.writes]).toEqual([['Harness tree', 'Harness reference'], writes]);
+it("the tree is on screen while Select is the tool, on a desktop and a phone: no X, no fold, and an older record's closed tree is nobody's", () => {
+  for (const mobile of [false, true]) {
+    const { preferences } = frame({ mobile, preferences: tabSettings({ toolStack: { panels: {}, collapsed: {}, closed: { tree: true } } }) });
+    const tree = panel('Harness tree')!;
+    expect(shown()).toEqual(['Harness tree', 'Harness reference']);
+    expect(within(tree).queryAllByRole('button')).toEqual([]);
+    expect(tree.style.maxHeight).toBe(`${STACK_HEIGHT}px`);
+    expect(tool('Select').getAttribute('aria-pressed')).toBe('true');
+    // Select pressed while it is the tool changes nothing.
+    fireEvent.click(tool('Select'));
+    expect([shown(), preferences.writes]).toEqual([['Harness tree', 'Harness reference'], 0]);
+    cleanup();
+  }
 });
 
 it('a heading panel folds to its heading by its chevron, its content kept mounted and its grip gone; which panels are folded is kept across a remount', () => {
@@ -225,20 +199,6 @@ it('a heading panel folds to its heading by its chevron, its content kept mounte
   fireEvent.click(within(panel('Harness reference')!).getByRole('button', { name: 'Expand harness reference' }));
   expect(layout(preferences).collapsed).toEqual({});
   expect(handles('Harness reference')).toEqual(['Resize harness reference']);
-});
-
-it("on a phone the tree starts closed, with Select marked and nothing stored; opened, its cap is the whole column", () => {
-  const { preferences } = frame({ mobile: true });
-  expect(shown()).toEqual(['Harness reference']);
-  expect(tool('Select').querySelector('[data-tool-panel-closed]')).not.toBeNull();
-  expect(layout(preferences)).toEqual({ panels: {}, collapsed: {}, closed: {} });
-  fireEvent.click(tool('Select'));
-  expect(shown()).toEqual(['Harness tree', 'Harness reference']);
-  expect(tool('Select').querySelector('[data-tool-panel-closed]')).toBeNull();
-  expect(panel('Harness tree')!.style.maxHeight).toBe(`${STACK_HEIGHT}px`);
-  expect(layout(preferences).closed).toEqual({ tree: false });
-  fireEvent.click(within(panel('Harness tree')!).getByRole('button', { name: 'Close harness tree' }));
-  expect([shown(), layout(preferences).closed]).toEqual([['Harness reference'], { tree: true }]);
 });
 
 const displayPopover = () => document.querySelector<HTMLElement>('[data-display-popover]');
@@ -365,24 +325,6 @@ it("the host's notice waits for the model, then takes the top-right with Quick E
   frame({ notice, appearance: { colorScheme: 'light', compact: true } });
   expect(corner()).toEqual(['notice']);
   expect(clearsStrip()).toBe(false);
-});
-
-it("Quick edit turned off in Settings takes Quick Edit away: nothing a pick or a sketch could open, and the host's notice alone at the top-right", () => {
-  const notice = <div role="dialog" aria-label="A notice" />;
-  const corner = () => [...document.querySelector('[data-viewport-top-right]')?.children ?? []]
-    .map(child => child.hasAttribute('data-viewport-notice') ? 'notice' : child.hasAttribute('data-quick-edit') ? 'Quick Edit' : child.tagName);
-  // On, as it starts and as a host that says nothing leaves it: Quick Edit waits under the notice.
-  frame({ notice, features: { quickEdit: true } });
-  expect(corner()).toEqual(['notice', 'Quick Edit']);
-  cleanup();
-  // Off: no Quick Edit at all, whatever is picked or drawn; the tools are as they were.
-  frame({ notice, features: { quickEdit: false } });
-  expect(corner()).toEqual(['notice']);
-  expect(document.querySelector('[data-quick-edit]')).toBeNull();
-  expect(strip()).toEqual(['Select', 'Draw', 'Keep', 'Pose']);
-  cleanup();
-  frame({ features: { quickEdit: false } });
-  expect(document.querySelector('[data-viewport-top-right]')).toBeNull();
 });
 
 it('a host showing the view small gets the model alone: no tools, no view actions, no Quick Edit, no cube', () => {

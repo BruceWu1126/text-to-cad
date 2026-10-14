@@ -6,7 +6,7 @@ import { createPromptContext, referencePart, textPart } from "@text-to-cad/core/
 import RendererShell from "../kit/shell/RendererShell.jsx";
 import { SHELL_TOOL, useRendererShell } from "../kit/shell/useRendererShell.js";
 import { createToolModes } from "../kit/tools/toolModes.js";
-import ToolPanel, { ToolPanelClose } from "../kit/tools/ToolPanel.jsx";
+import ToolPanel from "../kit/tools/ToolPanel.jsx";
 
 // TEST SCAFFOLDING. This renderer is never registered in a product: it exists so
 // the shell's own tools can be driven in a real browser under a frame that is
@@ -181,7 +181,7 @@ function HarnessSurface({ view, data }) {
   ]), [picked]);
 
   // `panel*.harness` stands in for a file whose tool stack is full: a tree far taller than any
-  // viewer, which Select's press brings back once its X has closed it; the Reference for a
+  // viewer; the Reference for a
   // selection, sized on its own; a retained effect — "Keep" keeps a small panel under them,
   // highlighted, whatever tool is up — and "Pose", a tool whose panel is the person's to size
   // like the tree.
@@ -190,8 +190,7 @@ function HarnessSurface({ view, data }) {
   // `panel-short.harness` turns the heights round: a tree of two rows and a Reference of many.
   const short = view.file.name.startsWith("panel-short");
   const [treeRows, referenceRows] = short ? [2, 40] : [120, 8];
-  const selectTool = shell.tools.own({ id: SELECT_TOOL, label: "Select", icon: <span aria-hidden="true">S</span>,
-    panel: { id: "tree", label: "Harness tree" } });
+  const selectTool = shell.tools.own({ id: SELECT_TOOL, label: "Select", icon: <span aria-hidden="true">S</span> });
   const keepTool = { id: "keep", label: "Keep", icon: <span aria-hidden="true">K</span>, active: kept, disabled: shell.idle,
     onSelect: () => setKept(value => !value) };
   const poseTool = { id: "pose", label: "Pose", icon: <span aria-hidden="true">P</span>, active: posing, disabled: shell.idle,
@@ -200,8 +199,8 @@ function HarnessSurface({ view, data }) {
     <li key={index} className="flex h-6 items-center">{name} {index + 1}</li>)}</ul>;
   const toolPanels = <>
     {withPanel ? <>
-      <ToolPanel id="tree" label="Harness tree" fit="tree" resizable closable collapsible={false}
-        header={<p className="flex h-9 items-center border-b px-2"><span className="flex-1">Filter</span><ToolPanelClose /></p>}>{rows(treeRows, "Row")}</ToolPanel>
+      <ToolPanel id="tree" label="Harness tree" fit="tree" resizable collapsible={false}
+        header={<p className="flex h-9 items-center border-b px-2"><span className="flex-1">Filter</span></p>}>{rows(treeRows, "Row")}</ToolPanel>
       <ToolPanel id="reference" title="Reference" label="Harness reference" fit="details" resizable onClose={() => {}}>{rows(referenceRows, "Fact")}</ToolPanel>
       {posing ? <ToolPanel id="position" title="Position" label="Harness position" fit="details" resizable collapsible={false} onClose={() => setPosing(false)}>{rows(30, "Joint")}</ToolPanel> : null}
     </> : null}

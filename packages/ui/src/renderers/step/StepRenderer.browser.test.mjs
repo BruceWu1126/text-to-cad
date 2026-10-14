@@ -3,7 +3,6 @@ import { after, afterEach, before, test } from 'node:test';
 import { PNG } from 'pngjs';
 import { parseCadRefToken } from '@text-to-cad/core/lib/cadRefs.js';
 import { loadStepFixture, serveStepHarness } from '../harness/stepScenario.mjs';
-import { TOOL_PANEL_WIDTH } from '../../../dist/renderers/kit/tools/toolStackLayout.js';
 
 // The STEP renderer end to end in a real browser, over the committed two-part
 // fixture (`__fixtures__/step`): a coloured base with a bore, a coloured arm, one
@@ -225,12 +224,9 @@ async function open(options = {}) {
     // The tool stack's panels on screen, top to bottom, by their accessible names.
     stack: () => pane.locator('[data-cad-tool-stack] [data-tool-panel]').evaluateAll(panels => panels
       .filter(panel => panel.getClientRects().length > 0).map(panel => panel.getAttribute('aria-label'))),
-    // Select's modes are a menu at the end of the Features filter row (`SelectionModes.jsx`); the
-    // strip opens no menu.
+    // Select's modes are the chevron right after its button on the strip (`SelectionModes.jsx`).
     chooseSelectMode: async name => {
-      // The mode menu steps aside while the filter box has focus.
-      await page.evaluate(() => document.activeElement instanceof HTMLInputElement && document.activeElement.blur());
-      await pane.locator('[data-cad-tool-stack]').getByRole('button', { name: /^Select mode: / }).click();
+      await pane.locator('[data-cad-toolbar]').getByRole('button', { name: /^Select mode: / }).click();
       await page.locator('[role=menu][aria-label="Select mode"]').getByRole('menuitemradio', { name, exact: true }).click();
       await page.locator('[role=menu]').waitFor({ state: 'detached' });
     },
@@ -240,6 +236,18 @@ async function open(options = {}) {
       await pane.getByRole('button', { name: `Select ${name}`, exact: true }).click({ button: 'right' });
       await page.getByRole('menuitem', { name: item, exact: true }).click();
       await page.getByRole('menu').waitFor({ state: 'detached' });
+    },
+    // What is picked is Quick Edit's to show: a chip each (`ReferenceChips.jsx`), by its words.
+    quickEdit: () => pane.getByRole('region', { name: 'Quick Edit', exact: true }),
+    chips: () => pane.locator('[data-quick-edit-refs] [data-quick-edit-ref] > button:first-child')
+      .evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
+    chip: label => pane.locator('[data-quick-edit-refs]').getByRole('button', { name: label, exact: true }),
+    // A chip's card: the pointer rests on the chip, and the card of what it is opens beside it.
+    chipCard: async label => {
+      await pane.locator('[data-quick-edit-refs]').getByRole('button', { name: label, exact: true }).hover();
+      const card = page.locator('[data-quick-edit-ref-card]').filter({ has: page.getByText(label, { exact: true }) });
+      await card.waitFor();
+      return card;
     },
     // Display's settings: a dropdown, portaled out of the viewer.
     displayPanel: () => page.locator('[data-display-popover]'),
@@ -257,22 +265,24 @@ async function open(options = {}) {
 }
 
 
-test('a STEP opens in Select with the tools its sidecar earns, its Features in the tool stack with the Select modes, Display and Preview in the navbar, and paints both authored colours', async () => {
+test('a STEP opens in Select with the tools its sidecar earns, its Features in the tool stack and the Select modes on the strip, Display and Preview in the navbar, and paints both authored colours', async () => {
   const view = await open();
   const { page, pane, errors } = view;
-  assert.deepEqual(await view.tools(), ['Select:true', 'Position:false', 'Animation:false', 'Draw:false', 'Measure:false', 'Explode:false', 'Clip:false'],
+  // Select's modes and Measure's snapping are each a chevron of their own right after the tool's
+  // button, never pressed as a tool is.
+  assert.deepEqual(await view.tools(), ['Select:true', 'Select mode: All:null', 'Position:false', 'Animation:false', 'Draw:false', 'Measure:false',
+    'Measure snapping: All:null', 'Explode:false', 'Clip:false'],
     'Position because the sidecar bound, Animation because it has a routine. Display is a dropdown from the navbar, not a tool');
   assert.deepEqual(await pane.locator('[data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
     ['Display', 'Preview'], 'the view\'s controls at the navbar\'s right end: Display, then Preview');
-  assert.equal(await pane.getByRole('region', { name: 'Features', exact: true }).getByRole('button', { name: 'Select mode: All', exact: true }).count(), 1,
-    'Select\'s modes end the Features filter row');
+  assert.equal(await pane.getByRole('region', { name: 'Features', exact: true }).getByRole('button', { name: /^Select mode: / }).count(), 0,
+    'Select\'s modes are the strip\'s, not the Features filter row\'s');
   assert.equal(await view.displayPanel().count(), 0, 'Display is never where a file opens');
   assert.equal(await pane.locator('[data-view-controls]').getByRole('button', { name: 'Preview', exact: true }).count(), 1,
     'a STEP is 3D: Preview sits in its navbar');
   // Select is the tool, so the stack shows its Features — an assembly's tree starts open — with no
   // tabs, and nothing of Position's.
   assert.deepEqual(await view.stack(), ['Features']);
-  assert.equal(await view.tool('Select').locator('[data-tool-panel-closed]').count(), 0, 'Select unmarked: its tree is open');
   assert.equal(await pane.getByRole('tab').count(), 0, 'no tabs anywhere');
   assert.equal(await pane.getByRole('combobox', { name: 'Pose', exact: true }).isVisible(), false);
   const [stack, toolbar] = await Promise.all([pane.getByRole('region', { name: 'Features', exact: true }).boundingBox(),
@@ -300,8 +310,7 @@ test('a STEP opens in Select with the tools its sidecar earns, its Features in t
   const openedRows = await view.rows();
   await view.tool('Select').click();
   assert.deepEqual([await view.stack(), await view.rows()], [['Features'], openedRows]);
-  assert.equal(await view.tool('Select').locator('[data-tool-panel-closed]').count(), 0, 'Select is never marked');
-  assert.deepEqual(await page.evaluate(() => window.cadHarness.preferences.getSnapshot().toolStack), { panels: {}, collapsed: {}, closed: {} },
+  assert.deepEqual(await page.evaluate(() => window.cadHarness.preferences.getSnapshot().toolStack), { panels: {}, collapsed: {} },
     'nothing is stored until a person sizes a panel');
   // One grip, Quick Edit's, in the bottom-right corner and inside the panel's border: it alone sizes the panel.
   assert.deepEqual(await featuresPanel.getByRole('separator').evaluateAll(handles => handles.map(handle => handle.getAttribute('aria-label'))), ['Resize features']);
@@ -349,7 +358,7 @@ test('a pick names its face or edge by the id cadgen minted in the selector tabl
   assert.deepEqual(await selected(), [`${base.id}.${rim.localId}`], 'the rim edge is the table\'s row');
   // Group edges: the pick grows to the edges of the table's chain, which for a box edge is itself
   // alone (its ends each meet two edges at a right angle), however close the neighbours lie.
-  await pane.locator('[data-cad-tool-stack]').getByRole('button', { name: /^Select mode: / }).click();
+  await pane.locator('[data-cad-toolbar]').getByRole('button', { name: /^Select mode: / }).click();
   await page.locator('[role=menu][aria-label="Select mode"]').getByRole('menuitemcheckbox', { name: 'Group edges', exact: true }).click();
   // A checkbox item keeps its menu open for the next one; Escape puts it away.
   await page.keyboard.press('Escape');
@@ -361,10 +370,9 @@ test('a pick names its face or edge by the id cadgen minted in the selector tabl
   assert.deepEqual(errors, []);
 });
 
-test('Select picks parts and faces, a selection lives only under Select, and the Reference panel measures what is picked', async () => {
+test('Select picks parts and faces, a selection lives only under Select, and Quick Edit\'s chips name and measure what is picked', async () => {
   const view = await open();
   const { page, pane, at, errors } = view;
-  const reference = pane.getByRole('region', { name: 'Reference details', exact: true });
 
   // Hover lights the part under the pointer, and lets go when it leaves.
   const still = await restingFrame(view);
@@ -387,9 +395,13 @@ test('Select picks parts and faces, a selection lives only under Select, and the
     await page.waitForTimeout(100);
   }
   assert.equal(await oneFace(), true, 'a press picks one face of the expanded part');
-  // The pick opened Quick Edit with the pick attached, and the keyboard is in its box.
-  const quickEdit = pane.getByRole('region', { name: 'Quick Edit', exact: true });
-  await quickEdit.locator('[data-quick-edit-chip="references"]').waitFor();
+  // The pick opened Quick Edit with the pick attached, as a chip naming the face by its part and
+  // its kind, and the keyboard is in its box.
+  const quickEdit = view.quickEdit();
+  await quickEdit.locator('[data-quick-edit-ref]').waitFor();
+  const pickedFace = (await view.state()).selectedReferenceIds[0].split('|').at(-1);
+  assert.deepEqual(await view.chips(), [`base · face ${pickedFace.replace(/^.*\.f/, '')}`]);
+  assert.equal(await quickEdit.locator('[data-quick-edit-chip="references"]').count(), 0, 'chips name the references: nothing counts them');
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Describe your changes');
   await page.mouse.click(...at([10, 6, 5]));
   await page.waitForFunction(() => { const ids = window.cadHarness.a.controller.readState().selectedReferenceIds;
@@ -398,79 +410,53 @@ test('Select picks parts and faces, a selection lives only under Select, and the
   await view.partMenu('base', 'Collapse');
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedReferenceIds.length === 0);
 
-  // No Reference until something is picked: it comes with the selection.
+  // Nothing joins Features in the stack, with a selection or without: what is picked is Quick
+  // Edit's, a chip each.
   assert.deepEqual(await view.stack(), ['Features']);
   await page.mouse.click(...at([6, 6, 5]));
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedPartIds.length === 1);
   assert.deepEqual((await view.state()).selectedPartIds, ['o1.1']);
-  // Headed by the part's name, over its key measurements and its Copy: no id, type, position or
-  // material rows (what a copy carries is the Copy's).
-  const partText = (await reference.innerText()).replace(/\s+/g, ' ');
-  assert.match(partText, /^base Size 20 × 20 × 10 mm (?:Volume [\d,.]+ mm³ )?Copy/);
-  assert.doesNotMatch(partText, /\bType\b|\bID\b|o1\.1|Center|Material|Color/);
-  assert.equal(await reference.locator('[data-reference-count]').count(), 0, 'one reference has no i/N');
-  // Compact rows in the panel's one face: every value is the UI font at the panel's size, never
-  // monospace. The Reference opens at every panel's width, capped at the stack as the tree is, and
-  // is sized on its own by its corner grip — so a long value (a size) wraps to a second line rather
-  // than widening it, and what runs past the cap scrolls inside it.
-  assert.equal(Math.round((await reference.boundingBox()).width), TOOL_PANEL_WIDTH);
-  const referenceStack = await pane.locator('[data-cad-tool-stack]').evaluate(node => node.clientHeight);
-  assert.equal(await reference.evaluate(node => node.style.maxHeight), `${referenceStack}px`);
-  assert.deepEqual(await reference.getByRole('separator').evaluateAll(handles => handles.map(handle => handle.getAttribute('aria-label'))), ['Resize reference details']);
-  const faces = await reference.locator('[data-tool-panel-body] *').evaluateAll(nodes => [...new Set(nodes
+  assert.deepEqual(await view.stack(), ['Features'], 'no Reference panel comes with the selection');
+  assert.deepEqual(await view.chips(), ['base'], 'the part\'s chip, by its name');
+  // Its card, once the pointer rests on the chip: the part's name, its id, then its key
+  // measurements — no type, position or material rows.
+  const partCard = await view.chipCard('base');
+  const partText = (await partCard.innerText()).replace(/\s+/g, ' ').trim();
+  assert.match(partText, /^base ID o1\.1 Size 20 × 20 × 10 mm(?: Volume [\d,.]+ mm³)?$/);
+  assert.doesNotMatch(partText, /\bType\b|Center|Material|Color/);
+  // Compact rows in the card's one face: every value is the UI font at 11px, never monospace, and
+  // the name, the id and the key measurements fit it: nothing to scroll to.
+  const faces = await partCard.locator('*').evaluateAll(nodes => [...new Set(nodes
     .filter(node => !node.childElementCount && node.textContent.trim())
     .map(node => `${getComputedStyle(node).fontFamily} | ${getComputedStyle(node).fontSize}`))]);
   assert.equal(faces.length, 1, `one face and size: ${faces.join(' / ')}`);
   assert.doesNotMatch(faces[0], /mono/i);
   assert.match(faces[0], /\| 11px$/);
-  const rowHeights = await reference.locator('[data-info-row]').evaluateAll(rows => rows.map(row => row.getBoundingClientRect().height));
-  assert.ok(rowHeights.length >= 1 && rowHeights.every(height => height <= 19 * 2), `compact rows, a line or two each: ${rowHeights}`);
-  assert.equal(await reference.locator('[data-tool-panel-body]').evaluate(node => node.scrollHeight <= node.clientHeight), true,
-    'the name, the key measurements and the Copy fit the cap it opens with: nothing to scroll to');
-  // The Reference is the next panel of the stack, under Features, both at the one width until a person sizes either.
-  assert.deepEqual(await view.stack(), ['Features', 'Reference details']);
-  const [features, pinned] = await Promise.all([pane.getByRole('region', { name: 'Features', exact: true }).boundingBox(), reference.boundingBox()]);
-  assert.ok(pinned.y >= features.y + features.height && pinned.y - (features.y + features.height) <= 10, `directly under Features: ${pinned.y} vs ${features.y + features.height}`);
-  assert.equal(pinned.width, features.width, 'the one width');
-  // The Features filter row is a heading's height, dense, as the Reference's heading is.
+  const rowHeights = await partCard.locator('[data-info-row]').evaluateAll(rows => rows.map(row => row.getBoundingClientRect().height));
+  assert.ok(rowHeights.length >= 2 && rowHeights.every(height => height <= 19 * 2), `compact rows, a line or two each: ${rowHeights}`);
+  assert.equal(await partCard.locator('[data-slot=scroll-area-viewport]').evaluate(node => node.scrollHeight <= node.clientHeight), true,
+    'the card has nothing to scroll to');
+  // The Features filter row is dense: its box at the panels' 11px.
   const featuresPanel = pane.getByRole('region', { name: 'Features', exact: true });
-  const [filterRow, referenceHeading] = await Promise.all([featuresPanel.locator('[data-slot=tree-filter]').boundingBox(),
-    reference.locator('[data-tool-panel-heading]').boundingBox()]);
-  assert.equal(Math.round(filterRow.height), Math.round(referenceHeading.height), 'the filter row is a heading\'s height');
+  const filterRowHeight = Math.round((await featuresPanel.locator('[data-slot=tree-filter]').boundingBox()).height);
   assert.equal(await pane.getByRole('textbox', { name: 'Filter model', exact: true }).evaluate(node => getComputedStyle(node).fontSize), '11px');
   assert.equal(await pane.getByRole('button', { name: 'Select base', exact: true }).getAttribute('aria-pressed'), 'true', 'the tree row follows the viewport');
   await page.keyboard.down('Shift');
   await page.mouse.click(...at([15, 0, 4]));
   await page.keyboard.up('Shift');
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedPartIds.length === 2);
-  // Two references: the heading is a picker, the browsed one's name and its place, and no count line.
-  const picker = reference.getByRole('combobox', { name: 'Inspect selected reference' });
-  assert.match((await picker.innerText()).replace(/\s+/g, ' '), /^arm 2\/2$/);
-  // Its text is flush with the rows' labels.
-  const [nameBox, labelBox] = await Promise.all([picker.locator('[data-reference-label] > span').first().boundingBox(),
-    reference.getByText('Size', { exact: true }).boundingBox()]);
-  assert.ok(Math.abs(nameBox.x - labelBox.x) <= 1, `the picker's text aligns with the row labels: ${nameBox.x} vs ${labelBox.x}`);
-  // Hovering it is quiet in either theme — no fill — and moves nothing in the heading.
-  for (const dark of [false, true]) {
-    await page.evaluate(on => document.documentElement.classList.toggle('dark', on), dark);
-    await page.mouse.move(view.box.x + view.box.width - 40, view.box.y + 40);
-    const [still, stillName] = await Promise.all([picker.boundingBox(), picker.locator('[data-reference-label]').boundingBox()]);
-    await picker.hover();
-    await page.waitForTimeout(150);
-    assert.equal(await picker.evaluate(node => getComputedStyle(node).backgroundColor), 'rgba(0, 0, 0, 0)', `no hover fill (${dark ? 'dark' : 'light'})`);
-    assert.deepEqual([await picker.boundingBox(), await picker.locator('[data-reference-label]').boundingBox()], [still, stillName], 'hovering moves nothing');
-  }
-  await page.evaluate(() => document.documentElement.classList.remove('dark'));
-  assert.doesNotMatch(await reference.innerText(), /Selection ·|references|Total/);
-  // Quick Edit counts both references, and the person's pick put the keyboard in its note; Escape in
-  // its empty box clears the selection, as it would from the model, and the box goes with it.
-  await quickEdit.waitFor();
-  assert.equal(await quickEdit.locator('[data-quick-edit-chip="references"]').innerText(), '2 refs');
+  // Two parts: a chip each, in the order they were picked, and nothing that counts them.
+  assert.deepEqual(await view.chips(), ['base', 'arm']);
+  assert.match((await (await view.chipCard('arm')).innerText()).replace(/\s+/g, ' ').trim(), /^arm ID o1\.2 Size /);
+  // The person's pick put the keyboard in Quick Edit's note; Escape in its empty box clears the
+  // selection, as it would from the model, and the box goes with it.
+  const quickEditBox = view.quickEdit();
+  assert.equal(await quickEditBox.locator('[data-quick-edit-chip="references"]').count(), 0);
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Describe your changes');
   assert.equal(await pane.locator('[data-viewport-bottom-actions]').count(), 0, 'nothing sits at the bottom of the view');
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedPartIds.length === 0);
-  await quickEdit.waitFor({ state: 'detached' });
+  await quickEditBox.waitFor({ state: 'detached' });
 
   // A selection exists only under Select, and so do its panels: another tool takes both away,
   // and Select brings the tree back as it was.
@@ -478,15 +464,20 @@ test('Select picks parts and faces, a selection lives only under Select, and the
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedPartIds.length === 1);
   await view.tool('Measure').click();
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedPartIds.length === 0);
-  assert.deepEqual(await view.stack(), ['Measure controls'], 'Measure shows its own panel: no Features and no Reference');
+  assert.deepEqual(await view.stack(), ['Measure controls'], 'Measure shows its own panel: no Features');
+  await quickEditBox.waitFor({ state: 'detached' });
+  // The Features filter row is a heading's height, as Measure's heading is.
+  const measureHeading = await pane.getByRole('region', { name: 'Measure controls', exact: true }).locator('[data-tool-panel-heading]').boundingBox();
+  assert.equal(filterRowHeight, Math.round(measureHeading.height), 'the filter row is a heading\'s height');
   await view.tool('Select').click();
   assert.deepEqual(await view.stack(), ['Features']);
   await pane.getByRole('button', { name: 'Select arm', exact: true }).click();
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedPartIds.length === 1);
   assert.deepEqual((await view.state()).selectedPartIds, ['o1.2']);
-  // The Reference's X clears the selection, and the panel goes with it.
-  await reference.getByRole('button', { name: 'Clear selection', exact: true }).click();
+  // The chip's X drops its pick, and Quick Edit, with nothing left to carry, goes with it.
+  await view.quickEdit().getByRole('button', { name: 'Remove arm', exact: true }).click();
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedPartIds.length === 0);
+  await quickEditBox.waitFor({ state: 'detached' });
   assert.deepEqual(await view.stack(), ['Features']);
 
   // What the host can drive: selectors in, selection out, and a clear.
@@ -516,7 +507,6 @@ test('Select picks parts and faces, a selection lives only under Select, and the
 test('under Faces or Edges, one press on a part whose faces are not loaded loads that part alone and picks what is under the pointer, and an update keeps the mode', async () => {
   const view = await open();
   const { page, pane, at, errors } = view;
-  const reference = pane.getByRole('region', { name: 'Reference details', exact: true });
   const mode = name => view.chooseSelectMode(name);
   const selected = () => page.evaluate(() => window.cadHarness.a.controller.readState().selectedReferenceIds);
   // The tree loads a part's faces as its row comes on screen. With a filter that matches
@@ -541,10 +531,13 @@ test('under Faces or Edges, one press on a part whose faces are not loaded loads
   assert.deepEqual(await page.evaluate(() => window.__sawLoading.slice(0, 1)), [0], 'the Features panel said it was loading, before anything was picked');
   assert.equal(await pane.getByRole('region', { name: 'Features', exact: true }).getByText('Loading…').count(), 0, 'and stops once the face is picked');
   assert.equal(await pane.locator('[data-cad-toolbar] [role=status]').count(), 0, 'nothing under the strip says so');
-  // Named by its part as the tree names it and its kind, never by its raw id, which is no row either.
-  const faceText = (await reference.innerText()).replace(/\s+/g, ' ');
-  assert.match(faceText, new RegExp(`^base · face ${face.replace(/^.*\.f/, '')} Area [\\d,.]+ mm² Copy`), 'the Reference names the face under the pointer, over its area');
-  assert.doesNotMatch(faceText, new RegExp(`\\bType\\b|\\bID\\b|${face.replace(/\./g, '\\.')}|Center|Normal|Material`));
+  // Its chip names it by its part as the tree names it and its kind, never by its raw id, which its
+  // card shows as its ID, over its area.
+  const faceName = `base · face ${face.replace(/^.*\.f/, '')}`;
+  assert.deepEqual(await view.chips(), [faceName], 'the chip names the face under the pointer');
+  const faceText = (await (await view.chipCard(faceName)).innerText()).replace(/\s+/g, ' ').trim();
+  assert.match(faceText, new RegExp(`^${faceName} ID ${face.replace(/\./g, '\\.')} Area [\\d,.]+ mm²$`), 'its card: its ID, then its area');
+  assert.doesNotMatch(faceText, /\bType\b|Center|Normal|Material/);
   assert.deepEqual((await view.state()).selectedPartIds, [], 'the mode never falls back to the part');
   // Edges likewise, on the arm, whose topology is still not loaded (the panel says so again):
   // its top edge over the +x face.
@@ -554,9 +547,11 @@ test('under Faces or Edges, one press on a part whose faces are not loaded loads
   await page.waitForFunction(() => /^topology\|o1\.2\|edge\|o1\.2\.e\d+$/.test(window.cadHarness.a.controller.readState().selectedReferenceIds.join()));
   assert.ok(await page.evaluate(() => window.__sawLoading.length) > sawBefore, 'only the pressed part had loaded');
   const edge = (await selected())[0].split('|').at(-1);
-  const edgeText = (await reference.innerText()).replace(/\s+/g, ' ');
-  assert.match(edgeText, new RegExp(`^arm · edge ${edge.replace(/^.*\.e/, '')} Length [\\d,.]+ mm Copy`), 'its length, the one measurement a straight edge has');
-  assert.doesNotMatch(edgeText, new RegExp(`\\bType\\b|\\bID\\b|${edge.replace(/\./g, '\\.')}`));
+  const edgeName = `arm · edge ${edge.replace(/^.*\.e/, '')}`;
+  assert.deepEqual(await view.chips(), [edgeName]);
+  const edgeText = (await (await view.chipCard(edgeName)).innerText()).replace(/\s+/g, ' ').trim();
+  assert.match(edgeText, new RegExp(`^${edgeName} ID ${edge.replace(/\./g, '\\.')} Length [\\d,.]+ mm$`), 'its length, the one measurement a straight edge has');
+  assert.doesNotMatch(edgeText, /\bType\b/);
   // An update of the model keeps the mode, and drops what was picked in the revision before it.
   await view.update();
   assert.equal(await view.tool('Select').locator('[data-select-mode]').getAttribute('data-select-mode'), 'edges');
@@ -677,7 +672,7 @@ test('hiding a part takes it off the screen, and the viewport menus offer what t
   }
   // The tree is Select's: under another tool it is off screen, and Select brings it back to act
   // from — Isolate, which has no selection of its own to make.
-  assert.deepEqual(await view.tools(), ['Select:false', 'Position:false', 'Animation:false', 'Draw:true', 'Measure:false', 'Explode:false', 'Clip:false']);
+  assert.deepEqual(await view.tools(), ['Select:false', 'Select mode: All:null', 'Position:false', 'Animation:false', 'Draw:true', 'Measure:false', 'Measure snapping: All:null', 'Explode:false', 'Clip:false']);
   assert.equal(await pane.getByRole('button', { name: 'Select arm', exact: true }).isVisible(), false);
   await view.tool('Select').click();
   // A menu goes when the camera moves, and the last pan is still coasting: it opens at rest.
@@ -685,7 +680,7 @@ test('hiding a part takes it off the screen, and the viewport menus offer what t
   await page.getByRole('menuitem', { name: 'Isolate', exact: true }).click();
   await page.getByRole('menu').waitFor({ state: 'detached' });
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().isolatedPartIds.join() === 'o1.2');
-  assert.deepEqual(await view.tools(), ['Select:true', 'Position:false', 'Animation:false', 'Draw:false', 'Measure:false', 'Explode:false', 'Clip:false']);
+  assert.deepEqual(await view.tools(), ['Select:true', 'Select mode: All:null', 'Position:false', 'Animation:false', 'Draw:false', 'Measure:false', 'Measure snapping: All:null', 'Explode:false', 'Clip:false']);
   await page.keyboard.press('Escape');
   assert.deepEqual(errors, []);
 });
@@ -773,10 +768,10 @@ test('Position drives the mate and repaints, a named pose jumps, the Position kn
   const { page, pane, errors } = view;
   // The grid is only the Grid preset's by default; this compares its lines, so it is turned on.
   await view.display({ grid: { enabled: true } });
-  // A file with movable joints has Position straight after Select on the strip, and one with
-  // routines Animation after it.
-  assert.deepEqual((await pane.getByRole('group', { name: 'Interaction tools' }).locator('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')))).slice(0, 4),
-    ['Select', 'Position', 'Animation', 'Draw']);
+  // A file with movable joints has Position straight after Select (and Select's mode chevron) on
+  // the strip, and one with routines Animation after it.
+  assert.deepEqual((await pane.getByRole('group', { name: 'Interaction tools' }).locator('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')))).slice(0, 5),
+    ['Select', 'Select mode: All', 'Position', 'Animation', 'Draw']);
   // Position shows its panel in the tool stack, in place of Select's, and enables the joint handles.
   await view.tool('Position').click();
   const panel = pane.getByRole('region', { name: 'Position controls', exact: true });
@@ -1493,8 +1488,8 @@ test('a click selects at once, and a double-click ends where it did when a click
   await page.waitForFunction(() => window.__selectedByProbe !== null);
   assert.equal(await page.evaluate(() => window.__selectedByProbe), true, 'the arm is selected before any double-click window could close');
   assert.deepEqual(await selection(), { parts: ['o1.2'], refs: [], isolated: [] });
-  // The Reference panel's Copy, at its foot: the selection's reference.
-  await view.pane.getByRole('region', { name: 'Reference details', exact: true }).getByRole('button', { name: 'Copy References', exact: true }).click();
+  // A click on its chip in Quick Edit copies the pick's reference.
+  await view.chip('arm').click();
   await page.waitForFunction(() => window.__clipboardWrites.length === 1);
   assert.equal(await page.evaluate(() => window.__clipboardWrites[0]), '/models/hinge_block.step#o1.2');
   await page.evaluate(() => { window.__clipboardWrites = []; });
@@ -1576,7 +1571,9 @@ test('a click selects at once, and a double-click ends where it did when a click
   await settle(page);
   assert.deepEqual((await selection()).refs, both, 'an empty-space double-click keeps the selection its first click found');
   assert.equal(await copies(), 4, 'and copies nothing');
-  await view.pane.getByRole('region', { name: 'Reference details', exact: true }).getByRole('button', { name: 'Copy References', exact: true }).click();
+  // ⌘C / Ctrl+C copies the whole selection, both parts' faces, from Quick Edit's empty note as from the view.
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Describe your changes');
+  await page.keyboard.press('ControlOrMeta+c');
   await page.waitForFunction(() => window.__clipboardWrites.length === 5);
   const copiedSelection = parseCadRefToken(await page.evaluate(() => window.__clipboardWrites[4]));
   assert.equal(copiedSelection.cadPath, '/models/hinge_block.step');

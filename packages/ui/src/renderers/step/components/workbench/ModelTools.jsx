@@ -20,8 +20,8 @@ function ClipIcon(props) {
 
 /**
  * Explode, Clip and Measure: tools whose effects a person keeps, each with a panel in the tool
- * stack that outlives the tool being in hand. Measure's is up while it is the tool — its snapping
- * a menu in its heading (`measure.actions`), its results, if any, the body — and stays while it
+ * stack that outlives the tool being in hand. Measure's is up while it is the tool — its results,
+ * if any, the body (its snapping is the chevron after its button on the strip) — and stays while it
  * has results (`measure.shown`). A press on one in hand does nothing; on a kept one it takes it
  * up again, as it is. A panel's X — removing the effect — is there while the effect is set
  * (`measure.removable`: there are results), in hand or kept; in hand, the tool stays up.

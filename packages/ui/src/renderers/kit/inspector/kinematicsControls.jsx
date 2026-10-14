@@ -40,7 +40,7 @@ export function PositionToolIcon() {
 
 /**
  * Position kept: while the pose is not the default and Position is not the tool, a small panel in
- * the tool stack, as a kept Explode or Clip is — headed "Position" with an X that puts the pose back
+ * the tool stack, as any kept effect is — headed "Position" with an X that puts the pose back
  * to the default, and, where the file has named poses, its Pose dropdown (`poseRow`: Default, the
  * poses, Custom while the joints are set by hand) to switch between them without taking the tool
  * up. With no named pose, what the pose is (`summary`, Custom) sits in the heading instead. A press

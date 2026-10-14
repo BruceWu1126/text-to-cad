@@ -13,7 +13,10 @@ const viewport = vi.hoisted(() => ({ props: null as any }));
 vi.mock('../../../../dist/renderers/kit/shell/ShellViewport.js', () => ({
   default: forwardRef(function StandInViewport(props: any, ref) {
     viewport.props = props;
-    useImperativeHandle(ref, () => ({ captureScreenshotBlob: async () => new Blob(['pixels'], { type: 'image/png' }) }));
+    useImperativeHandle(ref, () => ({
+      captureScreenshotBlob: async () => new Blob(['pixels'], { type: 'image/png' }),
+      promptCamera: () => ({ camera: { position: [0, -100, 0], target: [0, 0, 0], up: [0, 0, 1], orthographicHalfHeight: 40 }, width: 800, height: 600 }),
+    }));
     const hostRef = useRef<HTMLDivElement | null>(null);
     const runtimeRef = useRef<any>(null);
     const context = { hostRef, runtimeRef, mountRef: hostRef, viewerReadyTick: 1, commitScene: () => true };
@@ -135,32 +138,44 @@ it('Quick Edit is there once something is picked, with what the host can do, is 
   expect(container.querySelector('[data-preview-chrome]')!.hasAttribute('inert')).toBe(true);
 });
 
-it('a sketch opens Quick Edit, which sends the file, the note and the view with its ink through the port', async () => {
+// A stroke as Draw puts one into the model.
+const ink = (id: string) => ({ id, kind: 'stroke', part: null, placement: 'surface', points: new Float32Array([0, 0, 0, 1, 0, 0]), color: '#ff2d55', width: 2, dash: 'solid', touches: [] });
+
+it("a sketch opens Quick Edit, which sends the note with the files made of its view and its drawing, and goes with them", async () => {
   const destination = { kind: 'composer', available: true } as const;
   const send = vi.fn(async (_context: unknown) => ({ status: 'sent' as const, partIds: [] }));
-  const host = testHost({ promptContext: { getSnapshot: () => destination, subscribe: () => () => {}, deliver: async () => ({ status: 'added', partIds: [] }), send } as any });
+  const promptFiles = {
+    create: vi.fn(async (request: any) => ({ job: '/tmp/p/one-1.job.json', sketch: '/tmp/p/one-1.sketch.json',
+      images: request.views.map((entry: any) => ({ label: entry.label, path: `/tmp/p/one-1-${entry.label}.png` })) })),
+    read: vi.fn(async () => new Blob(['png'], { type: 'image/png' })),
+  };
+  const host = testHost({ promptContext: { getSnapshot: () => destination, subscribe: () => () => {}, deliver: async () => ({ status: 'added', partIds: [] }), send } as any, promptFiles });
   mount(host);
   fireEvent.click(screen.getByRole('button', { name: 'Draw' }));
-  // The surface clears its ink as the viewport's does, saying so once it is gone.
-  const clearInk = vi.fn(() => viewport.props.drawing.onContentChange(false, 0));
-  act(() => viewport.props.drawing.onReady({ clear: clearInk }));
-  act(() => viewport.props.drawing.onContentChange(true, 1));
+  act(() => viewport.props.drawing.add([ink('a')]));
   const box = screen.getByRole('region', { name: 'Quick Edit' });
-  expect(box.querySelector('[data-quick-edit-chip="sketch"]')).not.toBeNull();
+  expect(box.querySelector('[data-quick-edit-ref="sketch"]')).not.toBeNull();
   const note = within(box).getByRole('textbox', { name: 'Describe your changes' });
   expect(document.activeElement).toBe(note);
-  fireEvent.change(note, { target: { value: 'Add a boss here.' } });
+  note.textContent = 'Add a boss here.';
+  fireEvent.input(note);
   fireEvent.keyDown(note, { key: 'Enter' });
   await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+  // The view on screen, as a snapshot job says it, and the drawing as a sketch file.
+  const [request] = promptFiles.create.mock.calls[0] as any[];
+  expect(request).toMatchObject({ name: 'one.harness', input: '/models/one.harness', sketch: { units: 'mm', marks: [{ id: 'a', kind: 'stroke' }] } });
+  expect(request.views).toEqual([{ label: 'current', camera: { position: [0, -100, 0], target: [0, 0, 0], up: [0, 0, 1], orthographicHalfHeight: 40 }, width: 1600, height: 1200 }]);
   const context = send.mock.calls[0][0] as any;
-  expect(context.parts.map((part: any) => part.kind)).toEqual(['text', 'reference', 'attachment']);
+  expect(context.parts.map((part: any) => [part.kind, part.label ?? part.id])).toEqual([['text', 'text'], ['reference', 'file'],
+    ['attachment', 'Current view'], ['attachment', 'Views (cadgen snapshot --job)'], ['attachment', 'Sketch']]);
+  expect(await context.parts[2].path).toBe('/tmp/p/one-1-current.png');
   expect((await context.parts[2].content).type).toBe('image/png');
-  // Sent, the note goes with its sketch.
+  // Sent, the note goes with its drawing.
   await waitFor(() => expect(screen.queryByRole('region', { name: 'Quick Edit' })).toBeNull());
-  expect(clearInk).toHaveBeenCalledTimes(1);
+  expect(viewport.props.drawing.hasDrawing).toBe(false);
 });
 
-it('a clipboard destination has no snapshot in the navbar, and Draw copies its ink from the foot of its controls', async () => {
+it('a clipboard destination has no snapshot in the navbar, and the Drawing panel copies the view with its ink once there is some', async () => {
   const destination = { kind: 'clipboard', available: true } as const;
   const writeImage = vi.fn(async () => {}), deliver = vi.fn();
   const { navigation } = mount(testHost({
@@ -170,10 +185,9 @@ it('a clipboard destination has no snapshot in the navbar, and Draw copies its i
   expect(navigation.mock.calls.flatMap(([actions]) => actions)).toEqual([]);
   fireEvent.click(screen.getByRole('button', { name: 'Draw' }));
   const controls = () => screen.getByRole('region', { name: 'Drawing controls' });
-  // Always there, and live before there is ink.
-  expect((within(controls()).getByRole('button', { name: 'Copy Drawing' }) as HTMLButtonElement).disabled).toBe(false);
-  act(() => viewport.props.drawing.onContentChange(true, 1));
-  fireEvent.click(within(controls()).getByRole('button', { name: 'Copy Drawing' }));
+  expect(within(controls()).queryByRole('button', { name: 'Copy drawing' })).toBeNull();
+  act(() => viewport.props.drawing.add([ink('a')]));
+  fireEvent.click(within(controls()).getByRole('button', { name: 'Copy drawing' }));
   await waitFor(() => expect(writeImage).toHaveBeenCalledTimes(1));
   // A clipboard destination's Quick Edit copies its prompt, and nothing else.
   expect(within(screen.getByRole('region', { name: 'Quick Edit' })).queryByRole('button', { name: 'Queue' })).toBeNull();

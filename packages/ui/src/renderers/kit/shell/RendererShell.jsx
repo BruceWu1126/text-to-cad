@@ -1,7 +1,7 @@
 import { VIEWPORT_INSET_PX, VIEWPORT_STACK_BOTTOM, VIEWPORT_TOP_BAR_PX } from "./viewportLayout.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Maximize2, X } from "lucide-react";
+import { Check, Copy, Maximize2, X } from "lucide-react";
 import { Button } from "@text-to-cad/ui/primitives/button";
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import PreviewChrome from "../tools/PreviewChrome.jsx";
@@ -12,18 +12,32 @@ import ViewerLoadingOverlay from "../status/ViewerLoadingOverlay.js";
 import { VIEWER_RENDER_PROFILE, renderProfileKeepsPixelRatio, sceneForRenderProfile } from "../viewport/renderProfile.js";
 import { NAVBAR_CONTROL_CLASS } from "../../../lib/navbarRow.js";
 import DisplayPopover from "./DisplayPopover.jsx";
+import ToolPanel, { TOOL_PANEL_BUTTON_CLASS } from "../tools/ToolPanel.jsx";
 import { DrawingToolbar } from "../../../drawing/toolbar.jsx";
-import ToolPanel, { ToolPanelFooterButton } from "../tools/ToolPanel.jsx";
+import { useCopyFlash } from "../inspector/copyFlash.js";
 import PlaybackMenu, { OrbitMenu, RoutineMenu } from "../tools/PlaybackMenu.jsx";
 import FloatingToolBar from "../tools/FloatingToolBar.js";
 import ToolStack from "../tools/ToolStack.jsx";
-import { toolPanelClosed } from "../tools/toolStackLayout.js";
 import AnimationPanel from "../tools/playbar/AnimationPanel.jsx";
 import { ViewportAnimationBar, animationControlsHaveContent } from "../tools/playbar/ViewportAnimationBar.js";
 import QuickEdit from "../tools/quick-edit/QuickEdit.jsx";
 import { ViewportTopRight } from "./ViewportTopRight.jsx";
 import ShellViewport from "./ShellViewport.jsx";
 import ViewportContextMenu from "./ViewportContextMenu.jsx";
+
+// The drawing's Copy, in its panel's heading: the view as it is on screen, the drawing's ink in it
+// (from any angle: it is in the model), to the clipboard as a picture; a tick for a moment once it is.
+function CopyDrawingButton({ capture, disabled }) {
+  const flash = useCopyFlash();
+  if (!flash.canCopy) return null;
+  const Icon = flash.copied ? Check : Copy;
+  return <TooltipHint content={flash.copied ? "Copied" : "Copy drawing"}>
+    <button type="button" aria-label="Copy drawing" disabled={disabled} data-copied={flash.copied ? "" : undefined}
+      className={TOOL_PANEL_BUTTON_CLASS} onClick={() => void flash.copyImage(capture())}>
+      <Icon className="size-3" aria-hidden="true" />
+    </button>
+  </TooltipHint>;
+}
 
 // The strip and the panels under it share one column, inset from the viewer's top and left
 // edges and stopping above the cube in the bottom-left corner: the column is exactly the height
@@ -56,6 +70,8 @@ function NavbarControl({ label, disabled = false, onClick, children }) {
  *   tools: import("../tools/FloatingToolBar.js").ViewportTool[],
  *   toolPanels?: import("react").ReactNode,
  *   references?: readonly import("@text-to-cad/core/prompt").PromptReference[],
+ *   referenceChips?: readonly import("../tools/quick-edit/ReferenceChips.jsx").ReferenceChip[] | null,
+ *   nameReference?: ((reference: import("@text-to-cad/core/prompt").PromptReference) => string | import("../inspector/pickGlyph.jsx").CompactName) | null,
  *   copySelection?: (() => unknown) | null,
  *   contextMenuItems?: ((press: { clientX: number, clientY: number, shiftKey: boolean }) => object[] | null) | null,
  *   onContextMenuOpenChange?: ((open: boolean) => void) | null,
@@ -65,18 +81,21 @@ function NavbarControl({ label, disabled = false, onClick, children }) {
  *     mountRef: object, viewerReadyTick: number, commitScene: () => boolean }) => import("react").ReactNode) }} props
  *   `tools`: left to right, from `shell.tools`; an EMPTY list draws no strip at all, which is what
  *   a file whose viewport only orbits, pans and zooms hands over. A tool the
- *   file cannot offer is left out, never handed over disabled. A tool that names a `closable`
- *   panel of its own (`panel: { id, label }`: Select's tree, where it can be closed) is marked
- *   while that panel is closed, and a press on it while it is up opens the panel again.
+ *   file cannot offer is left out, never handed over disabled.
  *   `toolPanels`: the tool stack's panels, top to bottom — each a `ToolPanel`
  *   (`kit/tools/ToolPanel.jsx`), shown or `hidden` by the renderer as its tools say: what
  *   the tool in hand shows (Select's tree and Reference, Position's joints), then the
  *   effects a person keeps. The stack is one column the viewer's height, gone in preview. The
  *   shell's own tools' panels lead it: Draw's, and the Animation tool's.
+ *   `referenceChips`: the renderer's description of that selection, as Quick Edit shows it (its
+ *   chips, `kit/tools/quick-edit/ReferenceChips.jsx`): a chip each for one or several picks of a kind
+ *   on one part, its card, its hover and its removal. Without them Quick Edit counts the references.
+ *   `nameReference`: what the renderer calls a reference into its file, for a reference pasted
+ *   into Quick Edit's note ("cam"); "" for one it cannot name.
  *   `references`: what is selected, in the prompt grammar — the references a Quick Edit attaches
  *   (`kit/tools/quick-edit/QuickEdit.jsx`), counted in its header; the file itself always goes. A
  *   renderer that hands none has no Quick Edit: only a view whose picks and sketches a note can
- *   carry offers one, and only while the person has left it on (the host's `view.features`). The box sizes itself, for as long as it is open: a drag of its corner renders nothing
+ *   carry offers one. The box sizes itself, for as long as it is open: a drag of its corner renders nothing
  *   here. `onClearReferences`: the renderer's clear of that selection, as a press on the
  *   background makes it; Quick Edit's X calls it, and clears Draw's ink too.
  *   `copySelection`: the viewer's copy key (⌘C / Ctrl+C) while the renderer's own tool is up and
@@ -99,7 +118,7 @@ function NavbarControl({ label, disabled = false, onClick, children }) {
  *   it. The frame focuses itself on such a press whatever the renderer does; this is for a renderer
  *   that also has something to put down when the person reaches for the model.
  */
-export default function RendererShell({ shell, tools, toolPanels = null, references = null, onClearReferences = null, copySelection = null, contextMenuItems = null,
+export default function RendererShell({ shell, tools, toolPanels = null, references = null, referenceChips = null, nameReference = null, onClearReferences = null, copySelection = null, contextMenuItems = null,
   onContextMenuOpenChange = null, viewportOverlay = null,
   frameProvider = null, onCanvasPointerDown = null }) {
   const frame = shell.frame;
@@ -164,28 +183,20 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
     if (wasHeld.current && !routineHeld) releaseRef.current?.();
     wasHeld.current = routineHeld;
   }, [routineHeld]);
-  // Every tool's panel but Select's has an X that puts the tool down, back to Select (the default
-  // tool, which cannot be put down). A closable tree has an X of its own that closes the tree
-  // alone: the tool it belongs to then carries the strip's corner mark, and a press on that tool
-  // while it is up opens the tree again; from another tool, a press only takes it up, the tree
-  // still closed. Until the person has closed or opened it, the tree starts open, and closed on a
-  // phone.
-  const stripTools = tools.map(tool => {
-    if (!tool.panel || !toolPanelClosed(frame.toolStack, tool.panel.id, { mobile })) return tool;
-    const reopen = () => frame.changeToolStack(current => ({ closed: { ...current.closed, [tool.panel.id]: false } }));
-    return { ...tool, panelClosed: true, description: tool.description || `${tool.panel.label} closed`,
-      onSelect: () => { if (tool.active) reopen(); tool.onSelect(); } };
-  });
   // The shell's own tools' panels lead the stack while their tool is up: Draw's tools, color and
   // history, or the Animation tool's routine, transport and settings, whose X puts it down, back to
   // the default tool -- no X where Animation is the file's one tool, never put down. The
   // renderer's follow.
-  // Draw's controls, and Copy Drawing (the view with its ink, or without any yet) always at their foot.
+  // The drawing: one sketch, its ink in the model from every angle. Headed "Drawing", with its Copy
+  // (a picture of the view, ink and all) and, while there is ink, the X that clears it: Draw's
+  // controls under it while Draw is the tool, and the heading alone, kept, while it is not and there
+  // is ink — as Measure's panel is kept with its results.
+  const drawingShown = frame.drawToolActive || frame.drawing.hasDrawing;
   const shellPanels = <>
-    {frame.drawToolActive ? <ToolPanel id="drawing" label="Drawing controls" collapsible={false}
-      footer={<ToolPanelFooterButton label="Copy Drawing" shortLabel="Copy" shortcut={mobile ? "" : frame.copyShortcut}
-        disabled={viewerLoading || !scene} onClick={frame.copyDrawing} />}>
-      <DrawingToolbar drawing={frame.drawing} layout="panel" className="p-1" />
+    {drawingShown ? <ToolPanel id="drawing" title="Drawing" label="Drawing controls" collapsible={false} lead={frame.drawToolActive}
+      actions={frame.drawing.hasDrawing ? <CopyDrawingButton capture={frame.captureView} disabled={viewerLoading || !scene} /> : null}
+      closeLabel="Clear drawing" onClose={frame.drawing.hasDrawing ? frame.drawing.clear : null}>
+      {frame.drawToolActive ? <DrawingToolbar drawing={frame.drawing} layout="panel" className="p-1" /> : null}
     </ToolPanel> : null}
     {frame.animateToolActive ? <AnimationPanel runtime={playbackRuntime} autoplay={shell.autoplay}
       onAutoplayChange={shell.setAutoplay} onClose={frame.animateToolFixed ? null : shell.selectDefaultTool}
@@ -207,22 +218,22 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
   // A host showing the view small (inline in a conversation: `appearance.compact`) gets the model
   // alone, not the tools, Quick Edit, the view actions or the cube; shown full size, all return.
   const compact = Boolean(view.appearance?.compact);
-  // Quick Edit is the person's to turn off (in the app menu): off, it is not there at all — no
-  // box, so nothing a pick or a sketch opens and no keyboard it takes.
-  const quickEdit = view.features?.quickEdit !== false;
   const toolsHidden = chromeHidden || compact;
   const copyAction = () => {
     if (previewing) return false;
-    if (frame.drawToolActive && frame.drawing.hasContent) { frame.copyDrawing(); return true; }
+    if (frame.drawToolActive) { frame.copyDrawing(); return true; }
     if (copySelection) { copySelection(); return true; }
     return false;
   };
   frame.copyActionRef.current = copyAction;
-  // Quick Edit's sketch: while Draw is up, and the view with its ink once there is some.
   // Quick Edit's X: nothing picked and nothing drawn, as the person would clear each.
-  const clearQuickEdit = () => { onClearReferences?.(); if (frame.drawing.hasContent) frame.drawing.clear(); };
-  const sketch = useMemo(() => frame.drawToolActive ? { ink: frame.drawing.hasContent, capture: frame.captureView } : null,
-    [frame.drawToolActive, frame.drawing.hasContent, frame.captureView]);
+  const clearQuickEdit = () => { onClearReferences?.(); if (frame.drawing.hasDrawing) frame.drawing.forget(); };
+  const forgetDrawing = frame.drawing.forget;
+  // Quick Edit's sketch: while Draw is up or there is ink. The drawing goes with a note whenever
+  // there is one (its views and sketch file, `frame.quickEditPrompt`); its Drawing chip's X wipes it.
+  const sketch = useMemo(() => frame.drawToolActive || frame.drawing.hasDrawing
+    ? { ink: frame.drawing.hasDrawing, clear: forgetDrawing } : null,
+  [frame.drawToolActive, frame.drawing.hasDrawing, forgetDrawing]);
   // The renderer's overlay and the shell's own layers share one viewport context.
   const overlay = viewport => <>
     {previewing || !contextMenuItems ? null : <ViewportContextMenu viewport={viewport} items={contextMenuItems} onOpenChange={onContextMenuOpenChange} />}
@@ -282,6 +293,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
                     loadingPresentation={frame.loading}
                     drawingEnabled={frame.drawToolActive}
                     drawing={frame.drawing}
+                    drawingView={frame.currentView}
                     onPerspectiveChange={frame.handlePerspectiveChange}
                     onPresentationChange={frame.handlePresentationChange}
                     onViewerAlertChange={frame.setRuntimeAlert}
@@ -322,15 +334,15 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
               {/* The file explorer floats over this corner, above the tools, which stay drawn under it. */}
               {toolsHidden ? null : <div className="group/tool-stack pointer-events-none absolute z-20 flex flex-col items-start gap-2" style={TOOLBAR_POSITION}
                 data-mobile={mobile ? "" : undefined} data-cad-tool-groups="">
-                <FloatingToolBar tools={stripTools} />
-                <ToolStack hidden={previewing} mobile={mobile} layout={frame.toolStack} onLayoutChange={frame.changeToolStack}>{shellPanels}{toolPanels}</ToolStack>
+                <FloatingToolBar tools={tools} />
+                <ToolStack hidden={previewing} layout={frame.toolStack} onLayoutChange={frame.changeToolStack}>{shellPanels}{toolPanels}</ToolStack>
               </div>}
               {/* The top-right: the host's notice once a model is on screen (`view.notice`), and Quick Edit
                   under it -- hidden, not unmounted, while the view loads: a note being written outlives a
                   reload of the model. */}
               <ViewportTopRight notice={chromeHidden ? null : view.notice} belowStrip={!toolsHidden}>
-                {compact || !references || !quickEdit ? null : <QuickEdit key={frame.modelKey} className="self-stretch" hidden={chromeHidden}
-                  resource={frame.resource} references={references} sketch={sketch}
+                {compact || !references ? null : <QuickEdit key={frame.modelKey} className="self-stretch" hidden={chromeHidden}
+                  resource={frame.resource} references={references} chips={referenceChips} nameReference={nameReference} sketch={sketch} prompt={frame.quickEditPrompt}
                   onCopy={copyAction} onEscape={frame.escape} onClear={clearQuickEdit} disabled={viewerLoading || !scene} />}
               </ViewportTopRight>
 

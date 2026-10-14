@@ -41,8 +41,8 @@ import { CONTACT_SHADOW_HEIGHT_INTERVAL_MS, stageFitCurrent, stageFitInputs } fr
 import { createStudioEnvironmentCache } from "../look/studioEnvironmentCache.js";
 import { isKitScene } from "../scene.js";
 import LoadingIndicator from "../status/LoadingIndicator.js";
-import DrawingOverlay from "../tools/draw/DrawingOverlay.jsx";
-import { useDrawingViewLock } from "../tools/draw/useDrawingViewLock.js";
+import InkOverlay from "../tools/draw/InkOverlay.jsx";
+import { mountInk } from "../tools/draw/ink3d.js";
 import { createViewerRenderStateResolver } from "../view-settings/renderState.js";
 import { shareSettingsValue } from "../view-settings/shareSettingsValue.js";
 import { createViewUpdateGate } from "../view-settings/viewUpdateGate.js";
@@ -99,6 +99,8 @@ const ShellViewport = forwardRef(function ShellViewport({
   loadingPresentation = null,
   drawingEnabled = false,
   drawing = null,
+  // The view on screen as a prompt carries it (`drawing/views.js`), for each mark Draw puts down.
+  drawingView = null,
   onPerspectiveChange = null,
   onPresentationChange = null,
   onViewerAlertChange = null,
@@ -350,9 +352,19 @@ const ShellViewport = forwardRef(function ShellViewport({
 
   const hasViewportContent = Boolean(scene);
   const drawingOverlayActive = drawingEnabled && !previewMode && hasViewportContent;
-  const { drawingControllerRef, handleDrawingContent, handleDrawingReady, followDrawingViewport } = useDrawingViewLock({
-    active: drawingOverlayActive, sketch: drawing?.sketch ?? 0, drawing, runtimeRef, mountRef, viewerReadyTick
-  });
+  // The drawing's ink in the model (`tools/draw/ink3d.js`), from every angle, Draw up or not: each
+  // change to it draws it again.
+  const ink = drawing?.ink;
+  // The drawing's ink in the scene, mounted once it has some and kept for the runtime: each change
+  // draws only the marks it adds.
+  const inkMount = useRef(null);
+  useEffect(() => () => { inkMount.current?.dispose(); inkMount.current = null; }, [viewerReadyTick]);
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime?.scene || !runtime?.THREE) return;
+    if (!inkMount.current && ink?.length) inkMount.current = mountInk(runtime);
+    inkMount.current?.update(ink || []);
+  }, [ink, viewerReadyTick]);
 
   useImperativeHandle(ref, () => ({
     async prepareViewSettings(nextScene, signal) {
@@ -369,11 +381,12 @@ const ShellViewport = forwardRef(function ShellViewport({
     },
     presentViewSettings() { return runtimeRef.current?.viewUpdateGate?.present(); },
     // The viewport produces pixels. Its host owns clipboard and prompt delivery.
+    // The view as it is on screen, the drawing's ink in it (it is in the model).
     async captureScreenshotBlob() {
       await viewUpdateBindingRef.current?.whenReady();
       const runtime = runtimeRef.current;
       if (!runtime?.renderer || !runtime?.scene || !runtime?.camera) throw new Error("The viewer is not ready");
-      return await buildCompositeScreenshotBlob(runtime, drawingControllerRef.current?.inkCanvas() || null, {
+      return await buildCompositeScreenshotBlob(runtime, {
         backgroundColor: resolveElementBackgroundColor(runtime.renderer.domElement)
       });
     },
@@ -396,6 +409,21 @@ const ShellViewport = forwardRef(function ShellViewport({
       return readScopedPerspectiveSnapshot(runtimeRef.current, {
         modelKey, sceneScaleMode: normalizedSceneScaleMode, coordinateSystem: STORED_CAMERA_COORDINATES
       });
+    },
+    // The camera as a snapshot job says it, and the viewport's size: a prompt's view
+    // (`drawing/views.js`). A snapshot is always orthographic, so a perspective view becomes the
+    // orthographic one framing what it frames at the orbit point.
+    promptCamera() {
+      const runtime = runtimeRef.current;
+      const camera = runtime?.camera, target = runtime?.controls?.target, element = runtime?.renderer?.domElement;
+      if (!camera || !target || !(element?.clientWidth > 0) || !(element?.clientHeight > 0)) return null;
+      const halfHeight = camera.isOrthographicCamera
+        ? Math.abs(camera.top - camera.bottom) / 2 / (camera.zoom || 1)
+        : camera.position.distanceTo(target) * Math.tan(runtime.THREE.MathUtils.degToRad(camera.getEffectiveFOV()) / 2);
+      return {
+        camera: { position: camera.position.toArray(), target: target.toArray(), up: camera.up.toArray(), orthographicHalfHeight: halfHeight },
+        width: element.clientWidth, height: element.clientHeight
+      };
     },
     setPerspective(nextPerspective, options = {}) {
       // A camera somebody hands the viewport (the live `setCamera`) replaces the open-time fit,
@@ -773,14 +801,14 @@ const ShellViewport = forwardRef(function ShellViewport({
     runtime.controls.autoRotate = orbitActive;
     runtime.controls.autoRotateSpeed = PREVIEW_AUTO_ROTATE_SPEED * previewOrbitSpeed;
     if (previewMode) runtime.controls.enabled = true;
-    if (!drawingOverlayActive) runtime.controls.enableDamping = true;
+    runtime.controls.enableDamping = true;
     runtime.controls.dampingFactor = DEFAULT_DAMPING_FACTOR;
     if (orbitActive) {
       cancelCameraTransition(runtime, { scheduleIdle: false });
       runtime.beginInteraction?.();
     } else runtime.scheduleIdleQuality();
     runtime.requestRender();
-  }, [previewMode, orbitPreview, previewOrbitSpeed, drawingOverlayActive, viewerReadyTick]);
+  }, [previewMode, orbitPreview, previewOrbitSpeed, viewerReadyTick]);
 
   // Everything that follows where the scene IS, and nothing that frames it: lighting and
   // shadow reach and the floor's height. The ground's SIZE comes from the rest
@@ -1023,14 +1051,13 @@ const ShellViewport = forwardRef(function ShellViewport({
           />
         </div>
       ) : null}
-      {drawingOverlayActive ? <DrawingOverlay drawing={drawing} onReady={handleDrawingReady} onContentChange={handleDrawingContent} onViewportChange={followDrawingViewport} /> : null}
+      {drawingOverlayActive ? <InkOverlay drawing={drawing} runtimeRef={runtimeRef} viewOf={drawingView} /> : null}
       {overlay}
       {/* The cube is the tools view's: preview has no cube to draw or keep in step with the orbit,
           a model still loading has none to orient, and a compact view (`viewCube`) has no room. */}
       {viewCube && !previewMode && !isLoading && <div className="pointer-events-none absolute inset-0">
       <ViewPlaneControl
         showViewPlane
-        disabled={drawingOverlayActive}
         isLoading={isLoading}
         meshData={scene}
         // Close into the bottom-left corner, under its actions: the cube's box is larger than the

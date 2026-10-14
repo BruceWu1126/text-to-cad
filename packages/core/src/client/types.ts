@@ -196,8 +196,6 @@ export interface CadWorkspaceService {
   reveal(path: string): Promise<void>;
   /** Whether the person's usage stats are sent; with `share`, their answer (the app menu's toggle). */
   consent(share?: boolean): Promise<CadConsent>;
-  /** The features the person can turn off, as they left them; with `change`, their change of some. */
-  features(change?: Record<string, boolean>): Promise<Record<string, boolean>>;
   /** Whether a newer text-to-cad is out: the update button's notice, or null. */
   version(): Promise<{ notice: CadUpdateNotice | null }>;
   /**

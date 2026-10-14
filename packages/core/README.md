@@ -15,12 +15,6 @@ Browser entry points never import Node-only code.
 `@text-to-cad/core/client` communicates with `cadgen.viewer` over HTTP; this
 protocol relationship never imports Python or discovers an interpreter.
 
-`@text-to-cad/core/drawing` validates bounded Excalidraw v2 scene snapshots for the
-desktop's temporary sketch tabs. It imports no editor, React, filesystem or
-storage service. Document limits and shared editor/host ownership are described
-in [the drawing contract](../ui/docs/drawing.md); the mechanism is
-[`src/drawing/index.js`](src/drawing/index.js).
-
 ## The laws that live here
 
 - **Viewer three-input law**: a client renders from the file, what cadgen
@@ -182,8 +176,8 @@ inert; subscriptions start catalog polling, which the host's `shouldPoll` gates
 (the web's pauses while its page is hidden). The client also carries what every
 CAD view asks of its server, so each host reaches it the same way: the model
 library (`recents`, `changeRecents`, `thumbnail`, `keepThumbnail`), Open
-(`pick`), Reveal (`reveal`), the person's analytics answer and features
-(`consent`, `features`), the update check (`version`) and what the page did for
+(`pick`), Reveal (`reveal`), the person's analytics answer (`consent`), the
+update check (`version`) and what the page did for
 telemetry (`reportActivity`: a touch, a Quick Edit that went, or a crash); every
 change is a POST with the viewer's guard header. A host reports its page's crashes
 with `createCrashReporter(send, { fileOf })`, which makes each with `crashOf` (a
@@ -224,9 +218,12 @@ transport](docs/workspace-resources.md) for worker transfer, nested dependencies
 cache generations and the standalone static-HTTP default. No client reads model
 source or starts a source build.
 
-`createHttpAttachmentStore({ origin, fetch })` is the viewer server's store for a
-picture a prompt names by path: `save(png, name)` posts it to `POST /__cad/sketches`
-and answers the saved file's absolute path.
+`createHttpPromptFiles({ origin, fetch })` is the viewer server's maker of a Quick
+Edit's files: `create(request)` posts its views and sketch to `POST /__cad/prompt-files`,
+asks again until the server has rendered them, and answers where the views job, the
+sketch and each view's picture are; `read(path)` fetches one. The sketch format, and
+the code that draws a sketch in a scene for the viewer and for a snapshot alike, is
+`common/sketch.js`.
 
 Inspect and Render each resolve their fixed scene base. Legacy host theme input
 cannot replace either base.

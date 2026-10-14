@@ -1,3 +1,4 @@
+import { normalizeSketch } from "./sketch.js";
 import { normalizeViewSettings, resolveViewSettings } from "./viewSettings.js";
 
 export function validateSnapshotRenderJob(job = {}) {
@@ -8,6 +9,8 @@ export function validateSnapshotRenderJob(job = {}) {
     throw new Error("Unsupported snapshot field: render; use display.mode 'render'");
   }
   normalizeViewSettings(Object.hasOwn(job, "display") ? job.display : {});
+  // The ink drawn over the model (`sketch.js`): refused before anything loads, by what is wrong.
+  if (job.sketch != null) normalizeSketch(job.sketch);
   for (const camera of [job.camera, ...(Array.isArray(job.outputs) ? job.outputs.map(output => output.camera) : [])]) {
     if (camera && typeof camera === "object") {
       const moved = ["projection", "focalLength"].filter(key => Object.hasOwn(camera, key));

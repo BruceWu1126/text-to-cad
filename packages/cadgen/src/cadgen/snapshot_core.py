@@ -88,6 +88,10 @@ SUPPORTED_JOB_KEYS = frozenset(
         # {fps, seconds, start, quality, loop}, encoded to the .mp4/.gif the
         # output names. Meaningless without `animation` (cadgen.snapshot_video).
         "video",
+        # Ink drawn over the model: a sketch JSON file's path, or the sketch object
+        # (SNAPSHOTS.md, "Sketches"). The file is read here and the object handed to
+        # the page, which draws each mark on its part with the viewer's own code.
+        "sketch",
         "scale",
         "debug",
         "timeoutSeconds",
@@ -1624,6 +1628,27 @@ async def with_snapshot_timeout(awaitable: Any, timeout_seconds: object, label: 
         return await asyncio.wait_for(awaitable, timeout=timeout)
     except asyncio.TimeoutError as exc:
         raise SnapshotError(f"{label} timed out after {timeout_seconds}s") from exc
+_SKETCH_REFUSAL = re.compile(r"\bError: (sketch: [^\n]*)")
+
+
+async def _refusing_sketch(job: Mapping[str, object], evaluation: Any) -> object:
+    """``evaluation``'s answer, with the page's refusal of the job's sketch as a SnapshotError.
+
+    The page checks every mark (``normalizeSketch``) and throws ``sketch: marks[2].color
+    ...``, which reaches here inside the driver's stack trace. It is the request's fault,
+    not a crash: answered as one sentence, naming the file the sketch was read from.
+    """
+    try:
+        return await evaluation
+    except Exception as error:  # noqa: BLE001 - re-raised unless it is the sketch's refusal
+        match = _SKETCH_REFUSAL.search(str(error)) if job.get("sketch") is not None else None
+        if match is None:
+            raise
+        resolved = job.get("resolved") if is_plain_object(job.get("resolved")) else {}
+        source = str(resolved.get("sketchSource") or "")
+        raise SnapshotError(f"{source}: {match.group(1)}" if source else match.group(1)) from None
+
+
 class BatchSnapshotRenderer:
     def __init__(self, runtime_dir: Path) -> None:
         # The driver is told where render.html/snapshot-render.js are rather than locating
@@ -1773,7 +1798,7 @@ class BatchSnapshotRenderer:
         await self.page.set_viewport_size({"width": width, "height": height})
         timeout_seconds = job.get("timeoutSeconds") or DEFAULT_TIMEOUT_SECONDS
         result = await with_snapshot_timeout(
-            self.page.evaluate("(renderJob) => window.__snapshotRender(renderJob)", dict(job)),
+            _refusing_sketch(job, self.page.evaluate("(renderJob) => window.__snapshotRender(renderJob)", dict(job))),
             timeout_seconds,
         )
         if not is_plain_object(result) or not result.get("ok"):
@@ -1836,7 +1861,7 @@ class BatchSnapshotRenderer:
         report.detail(f"{job.get('input') or ''} (preparing)")
         say(f"video: preparing {job.get('input') or ''}")
         prepared = await with_snapshot_timeout(
-            self.page.evaluate("(renderJob) => window.__snapshotRenderSequence(renderJob)", dict(job)),
+            _refusing_sketch(job, self.page.evaluate("(renderJob) => window.__snapshotRenderSequence(renderJob)", dict(job))),
             timeout_seconds,
             "video preparation",
         )
@@ -2080,6 +2105,12 @@ async def render_resolved_job_packet(
     progress: object | None = None,
     narrate: object | None = None,
 ) -> dict[str, object]:
+    """Render every job of a resolved packet in one browser session.
+
+    The session is ``renderer`` when the caller keeps one open across packets, and
+    then it is the caller's to close; otherwise one is started here and closed
+    when the packet is done.
+    """
     snapshot_renderer = renderer or BatchSnapshotRenderer(runtime_dir)
     # The CLI already cleared these once the request was prepared; repeating it
     # costs an unlink of an absent file and makes the invariant hold for a caller
@@ -2122,7 +2153,8 @@ async def render_resolved_job_packet(
                 result = {**result, "debug": debug_info}
             results.append(result if packet["single"] else {"input": job.get("input"), **result})
     finally:
-        await snapshot_renderer.close()
+        if renderer is None:
+            await snapshot_renderer.close()
     if packet["single"]:
         return results[0]
     return {

@@ -92,16 +92,16 @@ it('draws Back and Forward between the logo and the file\'s name where the host 
 it('opens the app menu from the logo: Back to files where the host has a home, the person\'s settings and the host\'s links; its ⋯ offers what the host can do with the file', async () => {
   const user = userEvent.setup();
   const home = vi.fn();
-  const quickEdit = vi.fn();
+  const share = vi.fn();
   const perform = { 'copy-path': vi.fn(), reveal: vi.fn() };
   const links = viewerLinks({ version: '0.7.4', github: 'https://github.com/earthtojake/text-to-cad', discord: 'https://discord.gg/x' });
   open({ host: { ...host, links, environment: { colorScheme: 'light', platform: 'win32' }, navigation: { openFile() {}, home }, fileActions: { platform: 'win32', perform } },
-    appSettings: [{ id: 'quick-edit', label: 'Quick edit', checked: true, onCheckedChange: quickEdit }] } as any);
+    appSettings: [{ id: 'analytics', label: 'Share anonymous usage data', checked: true, onCheckedChange: share }] } as any);
   await screen.findByText('shown');
   expect(labels()).toEqual(['Menu', 'File actions']);
   await user.click(screen.getByRole('button', { name: 'Menu' }));
   const menu = document.querySelector('[data-app-menu]')!;
-  expect([...menu.querySelectorAll('[role^="menuitem"]')].map(item => item.textContent)).toEqual(['Back to files', 'Quick edit', 'Send feedback', 'GitHub', 'Discord']);
+  expect([...menu.querySelectorAll('[role^="menuitem"]')].map(item => item.textContent)).toEqual(['Back to files', 'Share anonymous usage data', 'Send feedback', 'GitHub', 'Discord']);
   expect(menu.querySelector('[data-menu-footer]')?.textContent).toContain('v0.7.4');
   // Send feedback: a new issue on the project's tracker, begun "Feedback: ", for the person to
   // finish, naming the version and the platform; no label: the project has none for feedback.
@@ -110,8 +110,8 @@ it('opens the app menu from the logo: Back to files where the host has a home, t
     .toEqual(['https://github.com/earthtojake/text-to-cad/issues/new', 'Feedback: ', null]);
   expect(feedback.searchParams.get('body')).toMatch(/- CAD: 0\.7\.4\n- Platform: win32$/);
   // A setting turns without closing the menu; Back to files goes home.
-  await user.click(screen.getByRole('menuitemcheckbox', { name: 'Quick edit' }));
-  expect([quickEdit.mock.calls, Boolean(document.querySelector('[data-app-menu]'))]).toEqual([[[false]], true]);
+  await user.click(screen.getByRole('menuitemcheckbox', { name: 'Share anonymous usage data' }));
+  expect([share.mock.calls, Boolean(document.querySelector('[data-app-menu]'))]).toEqual([[[false]], true]);
   await user.click(screen.getByRole('menuitem', { name: 'Back to files' }));
   expect(home).toHaveBeenCalledOnce();
   await user.click(screen.getByRole('button', { name: 'File actions' }));

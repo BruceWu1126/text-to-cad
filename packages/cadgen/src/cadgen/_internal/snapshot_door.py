@@ -90,6 +90,7 @@ def _run(
     time: float | None = None,
     video: object = None,
     joint_values: object = None,
+    sketch: object = None,
     focus: tuple[str, ...] = (),
     hide: tuple[str, ...] = (),
     width: int | None,
@@ -146,6 +147,8 @@ def _run(
         options.video, options.video_specified = video, True
     if joint_values is not None:
         options.joint_values, options.joint_values_specified = joint_values, True
+    if sketch is not None:
+        options.sketch, options.sketch_specified = sketch, True
     options.focus = _refs(focus, "focus")
     options.hide = _refs(hide, "hide")
     options.focus_specified, options.hide_specified = bool(options.focus), bool(options.hide)
@@ -187,6 +190,7 @@ def step_snapshot_verb(door: str):
         animation: str | dict | None = None,
         time: float | None = None,
         video: str | dict | None = None,
+        sketch: str | dict | None = None,
         focus: tuple[str, ...] = (),
         hide: tuple[str, ...] = (),
         width: int | None = None,
@@ -209,8 +213,9 @@ def step_snapshot_verb(door: str):
         out: destination path, written EXACTLY there — .png (--video writes
             .mp4/.gif) — or a directory for a generated timestamped name.
         job: a render-job JSON file — one job, an array of them, or
-            {"jobs": [...]}. When given it wins: target/out are ignored, and
-            the other flags override every job in it.
+            {"jobs": [...]}. Its outputs are where the files go, so out is
+            ignored; a target replaces every job's input (the same views over
+            another model), and the other flags override every job in it.
         mode: view (default) or list.
         camera: a preset (front, back, left, right, top, bottom, iso), an
             "azimuth:elevation" pair, or camera JSON;
@@ -232,6 +237,10 @@ def step_snapshot_verb(door: str):
             .gif OUT names — {"fps": 30, "seconds": <what is left of the clip>,
             "start": 0, "quality": "review", "loop": true} JSON or a path to it;
             requires animation, excludes time, and needs ffmpeg on PATH.
+        sketch: ink drawn over the model -- a sketch JSON file (the CAD Viewer
+            writes one with a Quick Edit prompt) or the sketch JSON itself. Each
+            mark is drawn on its part wherever the view puts it; with --job it
+            draws over every job.
         focus: occurrence ref rendered at full opacity (repeatable); the rest
             of the assembly is ghosted in place.
         hide: occurrence ref left out (repeatable).
@@ -250,7 +259,7 @@ def step_snapshot_verb(door: str):
             kinds,
             target=target, out=out, job=job, mode=mode,
             camera=camera, display=display, kinematics=kinematics,
-            animation=animation, time=time, video=video,
+            animation=animation, time=time, video=video, sketch=sketch,
             focus=focus, hide=hide, width=width, height=height,
             size_profile=size_profile, view_labels=view_labels, debug=debug,
         )
@@ -373,8 +382,9 @@ def drawing_snapshot_verb(door: str):
         out: destination .png path, written EXACTLY there, or a directory
             for a generated timestamped name.
         job: a render-job JSON file — one job, an array of them, or
-            {"jobs": [...]}. When given it wins: target/out are ignored, and
-            the other flags override every job in it.
+            {"jobs": [...]}. Its outputs are where the files go, so out is
+            ignored; a target replaces every job's input (the same views over
+            another model), and the other flags override every job in it.
         appearance: light (default) or dark — the background the drawing is
             painted on, and therefore the colour of its default pen.
         width: output width in pixels (1..8192), overriding the size profile;
@@ -434,6 +444,7 @@ def mesh_snapshot_verb(door: str):
         mode: str = "view",
         camera: str | dict | None = None,
         display: str | dict | None = None,
+        sketch: str | dict | None = None,
         width: int | None = None,
         height: int | None = None,
         size_profile: str = "",
@@ -451,8 +462,9 @@ def mesh_snapshot_verb(door: str):
         out: destination .png path, written EXACTLY there, or a directory
             for a generated timestamped name.
         job: a render-job JSON file — one job, an array of them, or
-            {"jobs": [...]}. When given it wins: target/out are ignored, and
-            the other flags override every job in it.
+            {"jobs": [...]}. Its outputs are where the files go, so out is
+            ignored; a target replaces every job's input (the same views over
+            another model), and the other flags override every job in it.
         mode: view (default) or list.
         camera: a preset (front, back, left, right, top, bottom, iso), an
             "azimuth:elevation" pair, or camera JSON;
@@ -463,6 +475,10 @@ def mesh_snapshot_verb(door: str):
             light. Projection belongs in display.camera. edges, clip, exploded,
             the xray, hidden-line and wireframe modes and the hidden/off surface
             styles describe a STEP model and are refused here.
+        sketch: ink drawn over the model -- a sketch JSON file (the CAD Viewer
+            writes one with a Quick Edit prompt) or the sketch JSON itself. Each
+            mark is drawn on its part wherever the view puts it; with --job it
+            draws over every job.
         width: output width in pixels (1..8192), overriding the size profile;
             with --job it sizes every output in the packet.
         height: output height in pixels (1..8192), overriding the size profile.
@@ -477,7 +493,7 @@ def mesh_snapshot_verb(door: str):
         return _run(
             kinds,
             target=target, out=out, job=job, mode=mode,
-            camera=camera, display=display, width=width, height=height,
+            camera=camera, display=display, sketch=sketch, width=width, height=height,
             size_profile=size_profile, view_labels=view_labels, debug=debug,
         )
 
@@ -500,6 +516,7 @@ def robot_snapshot_verb(door: str):
         joint_values: str | dict | None = None,
         camera: str | dict | None = None,
         display: str | dict | None = None,
+        sketch: str | dict | None = None,
         width: int | None = None,
         height: int | None = None,
         size_profile: str = "",
@@ -517,8 +534,9 @@ def robot_snapshot_verb(door: str):
         out: destination .png path, written EXACTLY there, or a directory
             for a generated timestamped name.
         job: a render-job JSON file — one job, an array of them, or
-            {"jobs": [...]}. When given it wins: target/out are ignored, and
-            the other flags override every job in it.
+            {"jobs": [...]}. Its outputs are where the files go, so out is
+            ignored; a target replaces every job's input (the same views over
+            another model), and the other flags override every job in it.
         mode: view (default) or list.
         joint_values: {joint: degrees} JSON posing the robot; joints not
             named stay where the viewer opens it (each at its default, then
@@ -532,6 +550,10 @@ def robot_snapshot_verb(door: str):
             light. Projection belongs in display.camera. edges, clip, exploded,
             the xray, hidden-line and wireframe modes and the hidden/off surface
             styles describe a STEP model and are refused here.
+        sketch: ink drawn over the model -- a sketch JSON file (the CAD Viewer
+            writes one with a Quick Edit prompt) or the sketch JSON itself. Each
+            mark is drawn on its part wherever the view puts it; with --job it
+            draws over every job.
         width: output width in pixels (1..8192), overriding the size profile;
             with --job it sizes every output in the packet.
         height: output height in pixels (1..8192), overriding the size profile.
@@ -546,7 +568,7 @@ def robot_snapshot_verb(door: str):
         return _run(
             kinds,
             target=target, out=out, job=job, mode=mode,
-            joint_values=joint_values, camera=camera, display=display,
+            joint_values=joint_values, camera=camera, display=display, sketch=sketch,
             width=width, height=height, size_profile=size_profile,
             view_labels=view_labels, debug=debug,
         )
@@ -574,6 +596,7 @@ def polymorphic_snapshot_verb():
         time: float | None = None,
         video: str | dict | None = None,
         joint_values: str | dict | None = None,
+        sketch: str | dict | None = None,
         focus: tuple[str, ...] = (),
         hide: tuple[str, ...] = (),
         width: int | None = None,
@@ -592,8 +615,10 @@ def polymorphic_snapshot_verb():
             name. A refused request leaves an existing OUT untouched; an
             accepted one clears it first.
         job: a render-job JSON file — one job, an array of them, or
-            {"jobs": [...]}; jobs may mix formats. When given it wins, and the
-            other flags override every job in it.
+            {"jobs": [...]}; jobs may mix formats. Its outputs are where the
+            files go, so out is ignored; a target replaces every job's input
+            (the same views over another model), and the other flags override
+            every job in it.
         mode: view (default) or list (not DXF: a drawing has no parts to
             list).
         camera: a preset (front, back, left, right, top, bottom, iso), an
@@ -618,6 +643,10 @@ def polymorphic_snapshot_verb():
             animation, excludes time, and needs ffmpeg on PATH.
         joint_values: {joint: degrees} JSON posing a robot (URDF/SRDF/SDF
             only); available in every display mode.
+        sketch: ink drawn over the model -- a sketch JSON file (the CAD Viewer
+            writes one with a Quick Edit prompt) or the sketch JSON itself. Each
+            mark is drawn on its part wherever the view puts it; with --job it
+            draws over every job. Not a DXF: a drawing is flat.
         focus: occurrence ref rendered at full opacity (STEP only,
             repeatable); the rest of the assembly is ghosted in place.
         hide: occurrence ref left out (STEP only, repeatable).
@@ -637,7 +666,7 @@ def polymorphic_snapshot_verb():
             target=target, out=out, job=job, mode=mode,
             camera=camera, display=display, kinematics=kinematics,
             animation=animation, time=time, video=video,
-            joint_values=joint_values, focus=focus, hide=hide,
+            joint_values=joint_values, sketch=sketch, focus=focus, hide=hide,
             width=width, height=height, size_profile=size_profile,
             view_labels=view_labels, debug=debug,
         )

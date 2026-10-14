@@ -269,11 +269,8 @@ function harnessBundle() {
   bundled ??= (async () => {
     const temporary = await mkdtemp(join(tmpdir(), 'text-to-cad-step-browser-'));
     try {
-      await build({ entryPoints: [fileURLToPath(new URL('./index.tsx', import.meta.url))], outfile: join(temporary, 'harness.js'), bundle: true, format: 'esm', platform: 'browser', conditions: ['production'], jsx: 'automatic', loader: { '.webp': 'dataurl', '.avif': 'dataurl', '.woff2': 'dataurl', '.svg': 'dataurl' } });
-      // Two stylesheets: the package's compiled one, and the one esbuild extracts
-      // from what the bundle imports (the drawing editor's). Without the second the
-      // editor has no layout and sizes its canvas from an unconstrained container.
-      return { bundle: await readFile(join(temporary, 'harness.js')), bundledCss: await readFile(join(temporary, 'harness.css')).catch(() => '') };
+      await build({ entryPoints: [fileURLToPath(new URL('./index.tsx', import.meta.url))], outfile: join(temporary, 'harness.js'), bundle: true, format: 'esm', platform: 'browser', conditions: ['production'], jsx: 'automatic', loader: { '.webp': 'dataurl', '.avif': 'dataurl', '.svg': 'dataurl' } });
+      return { bundle: await readFile(join(temporary, 'harness.js')) };
     } finally {
       await rm(temporary, { recursive: true, force: true });
     }
@@ -321,7 +318,7 @@ export async function serveStepHarness(t, { onRequest, progressive = false, sing
     await browser?.close();
     if (server) await new Promise(resolve => server.close(resolve));
   });
-  const { bundle, bundledCss } = await harnessBundle();
+  const { bundle } = await harnessBundle();
   const css = await readFile(new URL('../../../dist/styles.css', import.meta.url));
   const requests = [];
   // What the server is answering right now, and who waits for it to answer nothing (`idle`).
@@ -347,7 +344,6 @@ export async function serveStepHarness(t, { onRequest, progressive = false, sing
     onRequest?.(url, request);
     if (url.pathname === '/harness.js') { response.setHeader('Content-Type', 'text/javascript'); response.end(bundle); return; }
     if (url.pathname === '/styles.css') { response.setHeader('Content-Type', 'text/css'); response.end(css); return; }
-    if (url.pathname === '/harness.css') { response.setHeader('Content-Type', 'text/css'); response.end(bundledCss); return; }
     if (url.pathname.endsWith('/__cad/catalog')) { json(response, { entries: [failing ? unbuiltEntry(listed) : listed] }); return; }
     if (url.pathname.endsWith('/__cad/server')) { json(response, { backend: 'cadgen' }); return; }
     if (url.pathname.endsWith('/__cad/artifact')) {
@@ -402,9 +398,8 @@ export async function serveStepHarness(t, { onRequest, progressive = false, sing
     // A mesh the store does not hold: a clean 404, never the HTML shell, which a
     // reader would fail to parse.
     if (url.pathname.includes('/__tess_cache/')) { notFound(response); return; }
-    if (/\.(woff2|ttf)$/.test(url.pathname)) { notFound(response); return; }
     response.setHeader('Content-Type', 'text/html');
-    response.end('<!doctype html><html><head><title>Host title</title><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/harness.css"><style>body { margin: 0 } #root > div { width: 100vw !important; height: 100vh !important }</style></head><body><div id="root"></div><script type="module" src="/harness.js"></script></body></html>');
+    response.end('<!doctype html><html><head><title>Host title</title><link rel="stylesheet" href="/styles.css"><style>body { margin: 0 } #root > div { width: 100vw !important; height: 100vh !important }</style></head><body><div id="root"></div><script type="module" src="/harness.js"></script></body></html>');
   });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   browser = await chromium.launch({ headless: true, args: (process.platform === 'darwin' && process.env.CAD_TEST_SWIFTSHADER !== '1')

@@ -126,7 +126,51 @@ OUT's extension decides the encoding, and no job key does: a view writes
 
 A job comes from `--job FILE` or from `TARGET OUT` and the flags; there is no
 stdin form. With `--job`, each flag given overrides that setting in every job of
-the packet, and `--width`/`--height` size every output.
+the packet, and `--width`/`--height` size every output. A TARGET given with
+`--job` replaces every job's `input`: the same views over another model (a
+revision, a sibling). OUT is ignored with `--job`; the jobs' outputs say where
+the files go.
+
+## Sketches
+
+A job's `sketch` (the `--sketch` flag sets it on every job) is ink drawn over
+the model: a sketch JSON file's path, resolved as a job's `input` is, or the
+sketch object itself. The CAD Viewer's Draw tool writes one with a Quick Edit
+prompt, beside a job file that renders the views the person looked at with it
+(`cadgen.viewer.prompt_files`). Snapshot reads the file and hands the object to
+the page, which draws it with the viewer's own code: what an agent renders is
+what the person drew. A drawing (DXF) and `--mode list` take no sketch.
+
+```json
+{ "units": "mm",
+  "parts": { "o1.6.2.7": { "placement": [16 numbers, a 4x4 matrix in column order] } },
+  "marks": [ { "id": "1", "kind": "stroke", "part": "o1.6.2.7", "placement": "surface",
+               "view": "view 1", "points": [x, y, z, ...], "color": "#ff2d55", "opacity": 1,
+               "width": 2, "widths": [...], "dash": "solid", "closed": false, "group": "g1",
+               "touches": [{ "part": "o1.6.2.7" }] } ] }
+```
+
+- `marks[]`: `id` unique; `kind` is `stroke` (a line, `width` screen pixels at
+  any zoom, `widths` the pen's share of it per point, `dash` solid, dashed or
+  dotted, `closed`), `area` (a fill: its outline's `outline` points, then the
+  points inside it, which `triangles` index three at a time) or `text` (`text`
+  at `fontPx` on screen, `points` its label's four corners). `color` is
+  `#rrggbb`; `opacity` 0..1.
+- `part` is the occurrence id the mark is fixed to, and its `points` (x, y, z
+  triples) are in that part's own frame: the mark follows the part wherever the
+  job puts it (exploded, posed), hides when it is hidden and is cut by the clip.
+  A part the model no longer has falls back to `parts[id].placement`, where it
+  was when the sketch was made. `part: null` is in model coordinates. A mesh or
+  robot scene has no occurrence ids, so its marks take those fallbacks.
+- `placement` (drawn on the model, or in space), `view` (the label of the view
+  it was drawn in), `group` and `touches` (the parts under it as it was drawn)
+  describe the mark and draw nothing.
+- A stroke is as heavy against the image's height as it was against a viewer
+  900 pixels tall.
+
+Every field is checked before the model loads, and a refusal names the sketch
+file and the mark (`ink.sketch.json: sketch: marks[2].color must be a #rrggbb
+colour`). An unknown field is refused, never read as a default.
 
 ## Listing a STEP model's parts
 

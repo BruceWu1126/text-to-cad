@@ -26,7 +26,7 @@ tool opens or closes the explorer.
 | --- | --- |
 | Where the tab record lives (`TabRecordStorage`: the web's sessionStorage, the CAD app's memory) | The record: its settings (the tool stack's layout, the appearance, the home's layout) and the view of the file on screen (its camera, Display settings, preview's Orbit and playbar settings, and renderer slices), what is written when, and what is never stored (`@text-to-cad/ui/tab-store`, `kit/shell/fileView.js`) |
 | `navigation.home`, `links` (its version, GitHub, Discord, where a new issue opens, how a link opens), `appSettings` (the person's own settings) and `displayActions` (an appearance control) | The navbar's order and look, the app menu (one menu in the viewer and on the home) and what a new issue says |
-| `host.files`, `fileActions`, `navigation`, `clipboard`, `promptContext`, `attachments` | When a copy, capture or open happens and what it carries |
+| `host.files`, `fileActions`, `navigation`, `clipboard`, `promptContext`, `promptFiles` | When a copy, capture or open happens and what it carries |
 | `host.environment`: color scheme, keyboard `platform`, `reducedMotion` | How the chrome honours them |
 | `onError`, for errors the viewer hands up | Preview, tooltips, keyboard scope, the tool stack, the camera |
 
@@ -138,7 +138,7 @@ none.
   routine's settings end it at its right (see [preview](#camera-animation-and-preview)).
   Outside preview the transport is the Animation tool's panel, in the stack.
 - **Model update status** sits at top-centre of the viewport, vertically centred
-  in the same 34px row as the top-left toolbar in every host.
+  in the same 38px row as the top-left toolbar in every host.
   It is renderer chrome: the navbar carries no status.
   On mobile it is a tappable progress icon whose popover names what is loading.
 
@@ -172,7 +172,7 @@ again, as it was.
 
 | Tool | Pressing it | Leaving it |
 | --- | --- | --- |
-| Select | The default tool of STEP and robots; shows Features (an assembly's; a robot's Links) and, with a selection, the Reference panel; its modes are a menu at the end of Features' filter row (a part file's Select card's heading). A press while it is up opens Links again where a person closed it | The selection is dropped; its panels leave the stack |
+| Select | The default tool of STEP and robots; shows Features (an assembly's; a robot's Links) and, with a selection, the Reference panel; its modes are a menu at the end of Features' filter row (a part file's Select card's heading) | The selection is dropped; its panels leave the stack |
 | Draw | Draws on the view, with the pencil; its tools, color, weight, line style and history are the Drawing panel | The sketch is gone, and the pencil is the drawing tool again |
 | Measure | Arms picking and shows the Measure panel: its snapping modes, then its results; kept, a press takes it up again, results and all | Unfinished picks are cancelled; completed measurements and their panel stay, kept |
 | Explode / Clip | Opens a neutral panel; an edit applies the effect; kept, a press takes it up again as it is | A neutral panel goes; an applied effect and its panel stay, kept |
@@ -189,9 +189,7 @@ applied, a pose off its default — with the tool in hand or kept: it removes th
 lightly as the effect is set (a 150ms fade and grow; none under reduced motion). Unset,
 there is no X: another tool puts them down. Animation's X puts it down and returns to
 Select, the default tool, which cannot itself be put down. Draw's panel is a toolbar with no
-heading and no X. A robot's Links has an X too, which closes the tree alone and leaves Select
-the tool; a press on Select while it is up opens it again (see
-[Closing the tree](#the-tool-stack)). A STEP's Features has none. SDF folds instead.
+heading and no X. A STEP's Features and a robot's Links have none. SDF folds instead.
 
 **No tool has a menu on the strip.** A press on a tool is its only action:
 it takes the tool up, and does nothing while it is up. Whatever a tool can be
@@ -246,14 +244,17 @@ first, the pen leading, then Select and move and Pan at the end — then a rule
 across the panel, then a row of Color, Stroke width (Thin, Medium, Bold — a shape's
 1, 2 or 4px, the pen drawn to look the same weight, its glyph a dot 3, 5 or 7px across), Line
 style (Solid, Dashed, Dotted — a shape's line; the pen's freehand ink is always
-solid; its glyph a diagonal line, drawn in the style), Undo, Redo and Clear; both
+solid; its glyph a diagonal line, drawn in the style), Placement (On model, the
+default, its glyph lucide's Box; In space, on a plane facing the view through the
+orbit point, its glyph Axis3d — what is drawn next only, never a restyle of ink
+already down), Undo, Redo and Clear; both
 are grids of 24px columns spread across the panel's width, their columns lined up,
 with no menu and no inset beyond the panel's own. The strip's Draw button is always
 the pencil, whatever drawing tool is in hand. Leaving Draw forgets the sketch and
-puts the pencil back in hand, but not the colour, weight and line style, which the
+puts the pencil back in hand, but not the colour, weight, line style and placement, which the
 next time opens with. An update of the model forgets the sketch too, its history
 with it (Undo has nothing to bring back), and leaves Draw the tool, on the tool,
-colour, weight and line style in hand. Undo and Redo are disabled when their
+colour, weight, line style and placement in hand. Undo and Redo are disabled when their
 history is empty. The select tool uses lucide's SquareMousePointer. The pencil and
 the shapes share one default stroke width. The Drawing panel always ends in a
 full-row **Copy Drawing** (**Copy** where the panel is too narrow for its name), which
@@ -387,34 +388,22 @@ stack.
   proportion to its height, down to 96px or its content; a small panel (Explode, Clip,
   Drawing, Animation) keeps its height. If what cannot give way still does not fit, the
   column itself scrolls — a panel is never cut.
-- **The STEP tree is always there.** A STEP's Features has no X and does not fold:
-  under Select an assembly shows it, on a phone too. A part file has no tree, its one row
+- **The tree is always there.** A STEP's Features and a robot's Links have no X and
+  do not fold: under Select an assembly's Features and a robot's Links show, on a phone
+  too, `hidden` (kept mounted with their expansion, filter, selection and scroll) only
+  while another tool is up. A STEP part file has no tree, its one row
   being all there would be, but a fixed **Select** card in its place: headed "Select" with
   the mode menu, and one hint row, what to pick — "Select a face or edge", or under Faces
   "Select a face" and under Edges "Select an edge" — no filter. While something is
   picked the Reference takes its place, the mode menu in its heading before its X.
-- **Closing Links.** A robot's Links does not fold: the X at its filter row's end
-  ("Close links") closes it, `hidden` and kept mounted with its expansion, filter,
-  selection and scroll, and Select stays the tool — a selection still shows its
-  Reference, a panel of its own. While Links is closed, Select's button carries the
-  flyout corner: a small filled triangle in its bottom-right corner, out of the
-  accessibility tree, with the button described as "Links closed". A press on
-  Select while it is the tool opens Links again as it was, and the mark goes; from
-  another tool a press only takes Select up, Links still closed. Until a person
-  closes or opens it, Links starts open, and closed on a phone — the mark showing
-  whenever it starts closed. Once the person has closed or opened it, that choice
-  holds in every file of the tab. A renderer opts in with `closable` on the tree's
-  panel (`ToolPanelClose` is its X) and `panel: { id, label }` on the tool it
-  belongs to; the frame draws the mark, routes the press and starts the panel
-  (`RendererShell.jsx`).
 - **Folding.** Only Select's SDF panel and a robot's Reference fold: every other panel
   has an X or nothing. A folding panel folds to its first row and unfolds again,
   by a chevron at that row's trailing end: up while open (fold), down while
   folded (open), with `aria-expanded` and the panel's name ("Collapse sdf").
   Folded content stays mounted.
 - **First rows.** Features and Links have no heading: the filter is their top
-  row ("Filter…"), stays put while the tree scrolls, and carries Links' X at its
-  end, and Features' Loading… and Show all — each steps aside while the box has
+  row ("Filter…"), stays put while the tree scrolls, and carries Features' Loading…
+  and Show all — each steps aside while the box has
   focus, so the whole row is the box. Every other panel
   has a heading row, and every heading reads alike: the Display section
   headings' text (11px, regular, `TOOL_PANEL_HEADING_TEXT_CLASS`), 28px tall,
@@ -432,16 +421,15 @@ stack.
   **Copy**. The button shows the copy shortcut in the
   platform's form (a phone shows none); after a copy it says **Copied** for a
   moment, a tick where the shortcut was.
-- **The layout is the person's.** The sizes, the folded panels and the closed
-  Links are one of the tab's settings, across its files (`CadPreferences.toolStack`:
-  `{ panels: { [panel id]: { width?, height? } }, collapsed: { [panel id]: boolean }, closed: { [panel id]: boolean } }`,
-  kept beside the appearance). `panels` holds only what a person set, by
+- **The layout is the person's.** The sizes and the folded panels are one of
+  the tab's settings, across its files (`CadPreferences.toolStack`:
+  `{ panels: { [panel id]: { width?, height? } }, collapsed: { [panel id]: boolean } }`,
+  kept beside the appearance; any other key a stored record carries is dropped).
+  `panels` holds only what a person set, by
   resizable panel — the tree, the Reference and Position each under its own
   id; `collapsed` only what differs from a panel's start (the SDF panel starts
-  folded); `closed` the person's own choice, once they have closed (`true`) or
-  opened (`false`) Links, which then holds in every file over how it starts (a
-  phone closed). A new tab (a cleared record) puts every panel back at the one
-  width and its default cap, and Links as it starts. Every size is written back once, when the pointer
+  folded). A new tab (a cleared record) puts every panel back at the one
+  width and its default cap. Every size is written back once, when the pointer
   lets go (or per key), never per pointer move.
 - **Surfaces.** Two, defined once (`lib/floatingSurface.js`), with one border: the
   toolbar and the stack's panels, which stay up beside the model, share
@@ -483,9 +471,8 @@ Model, link and explorer filters share `TreeFilterInput`; the explorer's rows ar
 
 **Mobile** is below 720px of FileViewer width — the one viewer breakpoint
 (`useViewerMobile`); chrome never uses window breakpoints. The tool stack is
-the same stack, but a robot's Links starts closed, Select marked, so the model
-has the screen until the person presses Select; a STEP's Features shows as it does
-on a desktop. The
+the same stack: a STEP's Features and a robot's Links show as they do on a
+desktop. The
 explorer is the same popover, never wider than the window less 1rem. The navbar is the
 same row; the shortcut hint is hidden.
 Touch works for every tool: one finger orbits, two pan and
@@ -574,8 +561,7 @@ what the host supplies:
   (`navigation.home`): it shows the home in this view. The home's own menu has none.
 - The host's own on/off settings (`appSettings`), a checkbox item each, in the order they
   come, checked at the right; a press turns one without closing the menu. **Share
-  usage stats** and **Quick edit** — on until the person turns it off
-  ([Quick Edit](#quick-edit)) — in both apps.
+  usage stats**, in both apps.
 - **Send feedback**, where the host has a tracker (`links.issues`): a link to a new issue
   titled "Feedback: " for the person to finish, naming the version and the platform, with
   no label (what is said may be a bug, a request or a question). Then **GitHub** and
@@ -663,10 +649,7 @@ floating surface. It is there only while it has something to carry or a note to 
 nothing stands in for it otherwise, not even a button. It is a STEP file's alone,
 since only a STEP has picks and sketches to carry; a compact host gets none, and
 preview puts it away with the tools. While the view loads it is out of sight, its note
-and its state kept. A person can turn it off in the [app menu](#settings) (**Quick
-edit**, on until they do; `view.features.quickEdit`): it is then not there at all, in any
-of their views — no box, so nothing a pick or a sketch opens and no keyboard it takes —
-until they turn it on again.
+and its state kept. It is essential, so no setting turns it off.
 
 The box opens 15rem wide, its note growing with what is written up to 10rem. Its
 bottom-left corner — the grip every resizable box over the viewport has
@@ -704,19 +687,26 @@ takes no message, as the web), it is a button in words, "Copy Prompt" with its i
 first. While there is no note they are disabled, dimmed but still drawn:
 
 - **Copy Prompt** (copy icon), always. It copies the note as text: its references
-  spelled as copied references are, and a sketch by the path it was saved at, since
-  text cannot carry a picture.
+  spelled as copied references are, and its files by the paths they were saved at,
+  since text carries no file.
 - **Queue** (list-plus icon), where the destination is a composer: the note goes
   into the context of the person's next message.
 - **Send** (up arrow), where the host can post a message: the note goes now, as the
   person's message.
 
+Every way the note goes carries the same files, made at the press: a picture of each
+view it carries — the view on screen as it goes, and each its drawing was drawn in,
+one drawn view the same as the one on screen standing for it — rendered as a snapshot
+renders (solid, light, orthographic, the ink in its own colours) whatever the view
+showed; those views as a snapshot job file; and the drawing as a sketch file.
+
 Queue and Send clear the note and what it carries, and so close the box, once the
 note has gone. Copy Prompt keeps it all, since nothing has gone yet: its button
 shows a tick for a moment. A failure keeps the note and says why in the box. The message is
 one format, sent, queued or copied: what the person wrote; then `File: <path>`; then
-`References:` and one reference per line; then `Sketch: <path>` when the picture
-travels as a file (a picture sent beside the text is not named).
+`References:` and one reference per line; then each file that travels as a file by its
+label and path — `Current view:`, `View 1:`, `Views (cadgen snapshot --job):`,
+`Sketch:` (a picture sent beside the text is not named).
 
 ## Camera, animation and preview
 

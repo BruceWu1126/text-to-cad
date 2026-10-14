@@ -1,168 +1,96 @@
-# Drawing editor
+# Drawing
 
-`@text-to-cad/ui/drawing` exports `DrawingEditor` and its `DrawingController`, plus
-`exportDrawingScenePng(serialized)` for an unfocused retained scene capture.
-It wraps Excalidraw 0.18.1 (MIT), supports React 19, and is imported lazily by
-the desktop Drawing tab. Web and docs do not import it. Excalidraw was chosen
-for its permissive license, freehand/shapes/text/image tools, in-memory scene snapshots,
-and canvas export; it does not need a production license key or hosted service.
+Draw is the CAD viewer's own ink, with no drawing SDK behind it. A view has one
+drawing: its marks are projected into the model in 3D, so they stay where they
+were drawn from every angle. The STEP renderer is the one that offers Draw
+([Draw](cad-renderer.md#draw)).
 
-## Ownership
+## Pieces
 
-The shared editor owns drawing interaction, selection, undo/redo, zoom and
-rendering. It receives the retained scene, sketch name and callbacks. Both its canvas
-and controls always use the light appearance; standalone canvases are white.
-It does not discover a platform or session.
-The host owns tab lifetime, in-memory scene retention, font asset delivery and
-prompt routing. Do not add Electron imports, app stores, autosave or provider
-calls to this component. The browser editing gestures inside Excalidraw are
-local; collaboration, external libraries, AI features, built-in file saving
-and theme switching are not offered by this wrapper.
+- `drawing/session.js` — `useDrawingSession`: the drawing's ink, what the tools
+  put down next (tool, color, stroke width, line style, placement), the
+  selection and an undo history (200 steps). Each add, erase, move or restyle is
+  one step. Placement is not a style: choosing it changes only what is drawn
+  next, never ink already down, selected or not.
+  `clear()` is an undoable step; `discard()` drops the ink and its history, for
+  a model that changed under it. The session also keeps the views ink was drawn
+  in (`views`, "view 1", "view 2"…): `noteView(view)` names the one a mark goes
+  down in — a view drawn in before that is the same (`drawing/views.js`'s
+  `sameView`: less than 2° of turn, 5% of zoom or pan, nothing else changed),
+  or a new one.
+- `drawing/views.js` — a view as a prompt carries it, in a snapshot job's own
+  words: the camera (always orthographic), Clip and Explode when on, the pose,
+  the parts hidden and isolated, and the picture's size. Never how it looks.
+- `drawing/toolbar.jsx` — `DrawingToolbar`, the shared controls built from the
+  floating-toolbar button primitive. Pen, Line, Arrow, Rectangle, Ellipse, Text,
+  Fill area and Eraser come first, then Select and move drawings and Move view;
+  then Color, Stroke width, Line style, Placement (On model, the default, or In
+  space), Undo, Redo and Clear drawing. The swatches are neon, so ink stands out
+  from a shaded model.
+- `drawing/inkGeometry.js` — each tool's mark in screen space:
+  - The pen is smoothed as it is drawn, and each point's width comes from its
+    pressure (a stylus's own, or simulated from speed with a mouse), using
+    `perfect-freehand`.
+  - Rectangles get rounded corners.
+  - A fill finds the area around the press with
+    `@text-to-cad/core/lib/drawing/fillRegion.js`. The outline does not need to
+    be closed.
+- `renderers/kit/tools/draw/InkOverlay.jsx` — the surface over the viewport
+  while Draw is up. It turns every gesture into marks, previews a mark on its
+  own canvas as it is made, and puts it into the model when the gesture ends.
+  Text is written where the surface is pressed: Enter, or a press elsewhere,
+  puts it down as a text mark; Shift+Enter makes a new line; Escape drops it. The
+  surface stops the press's mousedown, which would otherwise take the keyboard
+  back from the text it just opened.
+  Select picks ink (Shift adds to the pick), drags it, and Delete removes it.
+  Each mark names the view it was put down (or moved) in.
+  The camera stays the person's between strokes: the wheel zooms, and Move view
+  hands the pointer to the view.
+- `renderers/kit/tools/draw/ink3d.js` — projects a mark into the model.
+  - What lies under the marks comes from one render of the parts' depth and
+    ids over the marks' bounds, read back. No ray is cast per point: on a large
+    assembly that took most of a second per stroke.
+  - Every point stays on the ray through where it was drawn, so from that view
+    the ink is exactly what was drawn. Only its depth comes from the model.
+  - A stroke lies over the nearest of what is within a few pixels of its line,
+    so nothing it was drawn over cuts through it. Where it leaves the model it
+    carries on in the air from the model's depth there.
+  - A fill lies on the surface when all of it is over the model, else whole on a
+    sheet in front of what it covers. A text mark stands in front of what it covers.
+  - A mark belongs to the part most of it lies on, in that part's frame, so
+    Explode and Position carry it, Clip cuts it, and hiding the part hides it.
+    Marks drawn as one thing (`group`: an arrow's line and its head) belong to
+    the part most of them all lies on, so they never come apart. `touches` lists
+    the parts it was drawn over, most first.
+  - A mark drawn **in space** ignores the model: every point lies on the plane
+    facing the view just in front of the model's bounds, so nothing of the model
+    hides it from where it was drawn. It belongs to no part (`part: null`,
+    `placement: "space"`), its points are model coordinates, and it stays put
+    through Explode, Position and hiding parts. Clip still cuts it. Moved with
+    Select, it lands on that plane as the view is then. When every mark is in
+    space, the parts are not rendered for depth at all.
+  - The projected ink is plain data (`InkItem`): a sketch mark
+    (`@text-to-cad/core/common/sketch.js`) with its part's placement as it was
+    drawn, kept across scene rebuilds. `mountInk` draws it in a viewer runtime and
+    `update` draws only the marks a change adds; the objects and how they follow
+    their parts are core's, the ones a snapshot draws a sketch with. The preview
+    holds a finished mark until the scene has drawn it. `inkSketch` writes the
+    drawing as a sketch file.
 
-The editor offers no saving, loading, export, library or Help routes. Save/open
-shortcuts and SDK actions are disabled, including the command palette that
-otherwise includes hardcoded export and library actions. Dropped scene/library
-files and pasted scene files are rejected. Dropped raster images are inserted
-directly as images so even PNG metadata cannot replace the current sketch.
-Ordinary copied elements and raster image insertion remain available; pasted
-elements pass bounded scene validation.
+## Lifetime and capture
 
-Every SDK control is hidden. The canvases, the in-place text editor, the context
-menu remain; SDK toast notifications are hidden, and `DrawingToolbar` (`drawing/toolbar.jsx`) is the
-one control surface: Select and move drawings, Pan view, Pen, Line, Arrow,
-Rectangle, Ellipse, Text, Fill area, and Eraser, followed by Color, Undo, Redo
-and Clear drawing, in the floating-toolbar button primitive. It imports nothing of the SDK.
-The standalone editor renders it top-centre and always light (its tokens are
-re-declared inside the editor, and the color strip is in the toolbar's flow
-rather than a portalled popover, so a dark application cannot restyle it). A
-host that places the toolbar itself passes `toolbar={false}` and drives the same
-component from `useDrawingSession` (`drawing/session.js`), as the CAD viewport
-does. In CAD, Draw's controls are its **Drawing** panel in the tool stack while
-Draw is up (`layout="panel"`): one wrapping row, the tools then Color, Undo, Redo
-and Clear drawing, with no separator and no headings. Picking a tool changes the
-Draw button's icon. Pressing Draw again puts it down; leaving Draw ends the
-session. The Drawing panel's **Copy**,
-which copies the view with its ink to the host's clipboard as a PNG (the same view
-is Quick Edit's sketch), appears only
-while the sketch contains visible elements; clearing or undoing the last element
-hides it again. These styles depend on Excalidraw's pinned DOM; verify both hosts when
-upgrading.
+The drawing is session-only: it is never written to tab or file state. It
+outlives Draw being put down, because the ink stays in the model and the next
+Draw adds to it. It goes when the person clears it, or when the model it was
+drawn on changes.
 
-Tools are locked in the SDK's sense: a shape is followed by another of the same
-tool instead of a return to selection. Color sets what is drawn next
-(`currentItemStrokeColor`) and never recolors existing elements, selected or
-not; the swatches are neon so ink stands out from a shaded model. Fill area is
-this editor's tool, not the SDK's (`drawing/fill.ts`): a press renders the ink
-without earlier fills, finds the area around the point with
-`@text-to-cad/core/lib/drawing/fillRegion.js` — as drawn, then with nearby stroke
-ends joined, then guessed from what the ink does enclose, ignoring rays that
-leave through a gap — and appends a closed, strokeless, 35%-opacity line element
-(inserting below existing elements would cost a second, invisible undo step). A fill is an ordinary element: it moves, erases and undoes. The
-SDK's lock, image, frame, embed, diamond and laser tools are not offered and
-their shortcut keys are blocked.
-Drawing names belong to the host, which updates the editor name and prompt
-attachment title without recreating the scene or persisting it.
+The **Drawing** panel's Copy writes the view as it is on screen, ink included,
+to the clipboard as a PNG.
 
-```tsx
-import { DrawingEditor } from '@text-to-cad/ui/drawing';
-
-<DrawingEditor initialScene={sceneJson}
-  onReady={controller => { drawing.current = controller; }}
-  onContentChange={setHasContent} />;
-```
-
-`onReady(null)` releases the mounted controller. A host can snapshot with
-`serialize()` on unmount and reuse that JSON on the next mount. Do not
-serialize on every pointer event: the desktop retains a lazy reader while
-mounted and serializes only for final unmount. Scene and
-viewport survive remounts; Excalidraw's undo history belongs to the mounted
-editor. Closing a tab releases its reader before unmount, so late cleanup
-cannot recreate the closed drawing.
-
-`exportPng()` snapshots elements/files before its first asynchronous step,
-then encodes a PNG capped at 2048 pixels on the longest side, with 24 pixels
-of content padding. Background export defaults on for a standalone canvas;
-exports use authored colors.
-An empty scene fails instead of delivering an empty attachment. The host
-passes the pending PNG directly to `PromptContextPort.deliver` during the
-gesture; this binds the destination before encoding finishes. Never await
-encoding and then look up whichever chat happens to be active.
-
-## In-memory scenes
-
-`@text-to-cad/core/drawing` is the pure document boundary. `parseDrawingScene`
-accepts Excalidraw v2 JSON, bounds it to 20 MiB and 10,000 elements, validates
-coordinates, and retains only portable app state. Supported content is
-freehand ink, lines, arrows, rectangles, ellipses, diamonds, text, frames and
-embedded PNG/JPEG/GIF/WebP images. External images, live web embeds, navigation
-links and host-specific custom data are rejected or discarded. The SDK
-performs its own element restoration after this validation. This is a visual
-sketch format, not CAD topology or an inspect/selector reference format.
-
-Desktop keeps scenes and tab metadata only in renderer memory, separate from
-SQLite's `explorer_tabs`. Tab/project switches retain them; tab close, project
-removal, window reload and app exit discard them. Prompt attachments are copies
-and follow
-the existing draft/transcript lifetime after being added; closing the drawing
-does not delete an already attached image.
-
-## Viewport annotations
-
-The editor is independent of explorer tabs and prompt destinations. Its
-`mode="overlay"` uses a transparent drawing surface, red default ink and
-transparent PNG export; `exportPng({ background: false })` also works explicitly.
-The STEP renderer's Draw tool is this component ([Draw](cad-renderer.md#draw));
-no other file family offers it.
-
-`toolbar={false}` leaves the toolbar to the host, and `initialTool` chooses the
-tool a new editor opens on. The controller drives the editor: `setTool` (one of
-`DRAWING_TOOLS`), `setColor`, `undo`/`redo` (the SDK exposes no history API, so
-these press its own shortcut on the editor), an undoable `clear`, and
-`inkCanvas()`. `onToolChange` and `onColorChange` report the SDK's state whoever
-changed it. The overlay stays hidden until the SDK has the given scene, because
-its default page is white.
-
-`onViewportChange({ scrollX, scrollY, zoom })` reports pan and zoom made inside
-the editor; a scene point `s` is drawn at `(s + scroll) * zoom` CSS pixels from
-the editor's top-left. A host that moves its own background with the ink (the
-CAD camera) follows this mapping. The host still owns the background capture,
-the camera lock and the composition of ink, image and references into one prompt
-bundle. `exportPng` is content-cropped, not viewport-aligned: compose
-`inkCanvas()` instead, which is the committed ink exactly as displayed,
-viewport-sized, without selection handles, at the editor's own pixel ratio.
-
-## Offline assets and upgrades
-
-The Vite plugin `@text-to-cad/ui/drawing-assets` (`scripts/drawing-assets.mjs`,
-notices in `licenses/excalidraw/`) serves the editor fonts in development and
-emits them into a host's build. Every host that loads this entry point adds it
-to its Vite config: desktop's renderer and the web Viewer both do. A script
-sets the asset directory before the editor imports. The SDK's CDN fallback is
-also redirected locally by a version-guarded build adaptation, applied during
-Vite dependency optimization (esbuild on Vite 7, Rolldown on Vite 8) as well
-as production transforms, so a missing font is a local miss and a system font,
-never a network request. No font binaries are committed.
-
-The full set, which desktop ships, is 233 WOFF2 files and unmodified OFL
-Liberation Sans 2.1.5 TTF from pinned `@betteroffice/fonts`, plus font and
-editor notices: 246 files, 12.9 MiB. The SDK's older GPL Liberation font is
-excluded. `drawingAssetsPlugin({ exclude })` takes RegExps tested against each
-emitted file name; a match is neither served nor emitted. The web Viewer ships
-inside a Python wheel and passes `[/\/fonts\/Xiaolai\//]`, dropping the 209-file
-CJK family: 37 files, 0.8 MiB. Review the guarded font URI and fallback
-adaptations, notices, and offline Electron test when upgrading.
-
-Validation lives in core's `drawing.test.js`, desktop's drawing document/tab,
-prompt, tools and asset unit tests (`tests/unit/main/drawing-assets.test.ts`
-covers this plugin), and `tests/e2e/drawing.spec.ts`. The latter
-draws real ink, checks PNG decoding and disabled persistence routes, and
-reloads the app profile while blocking external requests.
-
-While Draw is active the view cube stays visible but takes no drag or snap until
-Draw ends: drawing must not change the camera through it. Display stays usable
-because it is a tool of its own; choosing it leaves Draw.
-
-New freehand strokes use `2 / 4.25` stroke width to compensate for Excalidraw’s
-freehand brush scaling; line, arrow, rectangle, and ellipse use width `2`.
-Toolbar and keyboard tool changes apply the same defaults without rewriting
-existing strokes.
+A Quick Edit carries the drawing as files the viewer server makes at the press
+(`host.promptFiles`): the drawing as a sketch file, the views it was drawn in (with
+the view on screen as it goes) as a snapshot job file, and a picture of each view
+rendered by the snapshot's own code, ink included. `cadgen snapshot --job <file>`
+renders the same pictures again, over the model or an edit of it. Quick Edit's
+Drawing chip copies the sketch file's JSON. Queue and Send clear the drawing with
+the note; Copy Prompt keeps it.

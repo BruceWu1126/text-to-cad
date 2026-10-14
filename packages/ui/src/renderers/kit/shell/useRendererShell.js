@@ -5,10 +5,12 @@ import { VIEWER_SCENE_SCALE } from "@text-to-cad/core/lib/viewer/sceneScale.js";
 import { ViewerElementContext, useViewerHost, usePromptDestination } from "../../../host/context.js";
 import { hasOpenPopup } from "../../../lib/popups.js";
 import { useDrawingSession } from "../../../drawing/session.js";
+import { promptView, promptViews } from "../../../drawing/views.js";
 import { sceneBackdropEdgeColor } from "../look/chromeBackdrop.js";
 import { useChromeBackdropColor } from "../look/useChromeBackdropColor.js";
 import { prefetchRenderStudio } from "../look/renderStudioChunk.js";
-import { CAD_DRAWING_DEFAULTS } from "../tools/draw/DrawingOverlay.jsx";
+import { CAD_DRAWING_DEFAULTS } from "../tools/draw/InkOverlay.jsx";
+import { inkSketch } from "../tools/draw/ink3d.js";
 import { normalizeToolStack } from "../tools/toolStackLayout.js";
 import { normalizePlayback } from "../tools/playbar/playbackPreferences.js";
 import { animationControlsHaveContent } from "../tools/playbar/ViewportAnimationBar.js";
@@ -175,7 +177,7 @@ export function useRendererShell({
   view, services, resource, modelKey, revisionKey = "", features, toolModes = null, tool = null, previewable = false, preview = null, scene, load,
   viewSettings = null, viewerRef: providedViewerRef = null,
   animation = null, live = EMPTY, promptReferences = null, promptContext = createViewPromptContext,
-  escape = EMPTY, rendererState = null,
+  escape = EMPTY, rendererState = null, viewState = null, sketchUnits = "mm",
   onCameraSettled = null, preserveInteractionPixelRatio = false, runtimeLifecycle = null,
   onRuntimeAlert = null, presentationReport = null,
   sceneScaleMode = VIEWER_SCENE_SCALE.CAD
@@ -456,15 +458,47 @@ export function useRendererShell({
     } catch (error) { reportActionError(error); }
   }, [modelKey, promptAvailable, viewerLoading, deliverPrompt, resource, composer, host.clipboard, reportActionError]);
   const copyActionRef = useRef(null);
-  // Draw's Copy: the view with its ink, to the clipboard; true once it is there.
+  // Draw's Copy: the view with its ink, or the view alone before there is any, to the clipboard;
+  // true once it is there.
   const copyDrawing = useCallback(async () => {
-    if (!drawing.hasContent || !viewerRef.current?.captureScreenshotBlob) return false;
+    if (!viewerRef.current?.captureScreenshotBlob) return false;
     try {
       await host.clipboard.writeImage(viewerRef.current.captureScreenshotBlob());
       return true;
     } catch (error) { reportActionError(error); return false; }
-  }, [drawing.hasContent, host.clipboard, reportActionError]);
-  // The view as it is on screen, ink included: Quick Edit's sketch.
+  }, [host.clipboard, reportActionError]);
+  // ---- a prompt's views and files ---------------------------------------------
+  // The view on screen as a prompt carries it: the camera and what places or hides the parts — the
+  // renderer's pose and visibility (`viewState`) — never how it looks (`drawing/views.js`).
+  const viewStateRef = useRef(viewState);
+  viewStateRef.current = viewState;
+  const currentView = useCallback(() => promptView(viewerRef.current?.promptCamera?.() ?? null, {
+    display: viewSettingsStore.getSnapshot().display, state: viewStateRef.current?.() ?? null
+  }), [viewSettingsStore]);
+  const drawingRef = useRef(drawing);
+  drawingRef.current = drawing;
+  // The drawing as a sketch file says it; none without ink.
+  const sketchNow = useCallback(() => (drawingRef.current.ink.length ? inkSketch(drawingRef.current.ink, sketchUnits) : null), [sketchUnits]);
+  const resourceRef = useRef(resource);
+  resourceRef.current = resource;
+  // The file a prompt's views render: the one shown, by its absolute path.
+  const promptFile = useCallback(() => {
+    const shown = liveResourceRef.current?.() || resourceRef.current;
+    return shown?.kind === "workspace-file" ? shown.path : null;
+  }, []);
+  // What a Quick Edit carries besides its words: the views (the one on screen as it goes, and each
+  // the drawing was drawn in), and their files, made by the host at the press.
+  const quickEditPrompt = useMemo(() => ({
+    views: () => (host.promptFiles && promptFile() ? promptViews(currentView(), drawingRef.current.views, drawingRef.current.ink) : []),
+    files: views => {
+      const input = promptFile();
+      if (!host.promptFiles || !input || !views.length) return null;
+      return host.promptFiles.create({ name: input.split("/").pop(), input, views, sketch: sketchNow() });
+    },
+    read: path => host.promptFiles.read(path),
+    sketch: sketchNow,
+  }), [host.promptFiles, currentView, sketchNow, promptFile]);
+  // The view as it is on screen, the drawing's ink in it: the drawing's Copy.
   const captureView = useCallback(() => {
     if (!viewerRef.current?.captureScreenshotBlob) return Promise.reject(new Error("The viewer is not ready"));
     return viewerRef.current.captureScreenshotBlob();
@@ -626,7 +660,7 @@ export function useRendererShell({
       copyActionRef, copyDrawing, copyShortcut: host.environment.platform === "darwin" ? "⌘C" : "Ctrl+C",
       // Quick Edit's: the file it is about, how a copied prompt spells its paths, its sketch, and
       // the renderer's own Escape, which an empty Quick Edit passes on.
-      resource, captureView, escape: escapeView,
+      resource, captureView, escape: escapeView, currentView, quickEditPrompt,
       drawToolActive, drawing, animation, animateToolActive, animateToolFixed, display
     }
   };

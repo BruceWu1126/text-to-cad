@@ -1,19 +1,17 @@
 import { createContext, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ScrollArea } from "@text-to-cad/ui/primitives/scroll-area";
-import { normalizeToolStack, toolPanelClosed, toolPanelDefaultHeight } from "./toolStackLayout.js";
+import { normalizeToolStack, toolPanelDefaultHeight } from "./toolStackLayout.js";
 
 /**
- * What a panel of the stack reads of it (`ToolPanel.jsx`): the viewer's width, its size, folded
- * and closed state as the person left them, how to write any of them back, and the room it has.
+ * What a panel of the stack reads of it (`ToolPanel.jsx`): the viewer's width, its size and
+ * folded state as the person left them, how to write either back, and the room it has.
  * `null` outside a stack: a panel drawn alone opens at its defaults and keeps its state to itself.
  * @type {import("react").Context<null | {
- *   mobile: boolean,
  *   viewerWidth: number,
  *   size(key: string): { width?: number, height?: number } | null,
  *   defaultHeight(): number | null,
  *   collapsed(id: string, fallback: boolean): boolean,
- *   closed(id: string): boolean,
- *   settle(id: string, change: { width?: number, height?: number, collapsed?: boolean, fallback?: boolean, closed?: boolean }): void,
+ *   settle(id: string, change: { width?: number, height?: number, collapsed?: boolean, fallback?: boolean }): void,
  *   room(): number,
  * }>}
  */
@@ -24,16 +22,15 @@ export const ToolStackContext = createContext(null);
  * panel (`ToolPanel.jsx`) takes its content's height — up to its cap, for a panel that has one —
  * until the column runs out. The panels hang left-aligned under the strip, each at its own width:
  * `TOOL_PANEL_WIDTH` (`toolStackLayout.js`), unless the person has widened the panel
- * (`resizable`). The layout (`layout`: the sizes the person set, by panel; the folded panels; the
- * closed ones) is theirs, and is written back (`onLayoutChange`, a patch or a function of the
- * layout as it stands) once a gesture lets go, never per pointer move. Where the person has not
- * chosen, a closable panel starts closed on a phone and open elsewhere.
+ * (`resizable`). The layout (`layout`: the sizes the person set, by panel, and the folded panels)
+ * is theirs, and is written back (`onLayoutChange`, a patch or a function of the layout as it
+ * stands) once a gesture lets go, never per pointer move.
  *
- * @param {{ layout: { panels: object, collapsed: object, closed?: object },
- *   onLayoutChange(patch: object | ((layout: object) => object)): void, mobile?: boolean, hidden?: boolean,
+ * @param {{ layout: { panels: object, collapsed: object },
+ *   onLayoutChange(patch: object | ((layout: object) => object)): void, hidden?: boolean,
  *   children?: import("react").ReactNode }} props
  */
-export default function ToolStack({ layout: stored, onLayoutChange, mobile = false, hidden = false, children }) {
+export default function ToolStack({ layout: stored, onLayoutChange, hidden = false, children }) {
   const layout = useMemo(() => normalizeToolStack(stored), [stored]);
   const column = useRef(null);
   // The column's own height — the viewer's less the strip above it and the insets: a resizable
@@ -54,9 +51,9 @@ export default function ToolStack({ layout: stored, onLayoutChange, mobile = fal
     if (viewer) observer.observe(viewer);
     return () => observer.disconnect();
   }, []);
-  // What one gesture on a panel leaves — a width, a cap, its folded or closed state, or several at
-  // once (a corner drag) — in one write. A panel folded as it starts is not written down: the
-  // record holds only what differs. Closing or opening is the person's choice, kept as made.
+  // What one gesture on a panel leaves — a width, a cap, its folded state, or several at once (a
+  // corner drag) — in one write. A panel folded as it starts is not written down: the record
+  // holds only what differs.
   const settle = useCallback((id, change) => onLayoutChange(current => {
     const patch = {};
     if (change.width !== undefined || change.height !== undefined) {
@@ -70,19 +67,16 @@ export default function ToolStack({ layout: stored, onLayoutChange, mobile = fal
       if (change.collapsed === Boolean(change.fallback)) delete next[id]; else next[id] = change.collapsed;
       patch.collapsed = next;
     }
-    if (change.closed !== undefined) patch.closed = { ...current.closed, [id]: change.closed };
     return patch;
   }), [onLayoutChange]);
   const panels = useMemo(() => ({
-    mobile,
     viewerWidth: measured.viewer,
     size: key => layout.panels[key] ?? null,
     defaultHeight: () => toolPanelDefaultHeight(measured.stack),
     collapsed: (id, fallback) => layout.collapsed[id] ?? fallback,
-    closed: id => toolPanelClosed(layout, id, { mobile }),
     settle,
     room: () => column.current?.clientHeight || 0,
-  }), [mobile, measured, layout, settle]);
+  }), [measured, layout, settle]);
   return <div ref={column} hidden={hidden} data-cad-tool-stack="" className="min-h-0 max-w-full flex-1">
     {/* The panels give way first (`ToolPanel.jsx`), in a column exactly the stack's height; if
         what cannot give way still does not fit, the column scrolls rather than being cut. While

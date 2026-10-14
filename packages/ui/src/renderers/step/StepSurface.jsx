@@ -28,7 +28,7 @@ import {
 import { viewportMenuEntries } from "./components/workbench/AssemblyContextMenuItems.js";
 import { ALL_VIEW_FEATURES } from "@text-to-cad/core/common/viewSettings.js";
 import { useModelTools } from "./components/workbench/ModelTools.jsx";
-import { useStepPanels } from "./components/workbench/StepPanels.js";
+import { useStepPanels, useStepSelectionChips } from "./components/workbench/StepPanels.js";
 import { stepMotionSources, useStepMotion } from "./workbench/useStepMotion.js";
 import { animationControlsHaveContent } from "../kit/tools/playbar/ViewportAnimationBar.js";
 import { useCadAssets } from "./components/workbench/hooks/useCadAssets.js";
@@ -118,6 +118,7 @@ import { createCadPromptContext } from "./file-view/promptContext.js";
 import { modelMenuDescriptor, partMenuDescriptor, topologyMenuDescriptor } from "./file-view/stepMenus.js";
 import { nodeCopyText, selectionCopyPayload } from "./file-view/stepCopy.js";
 import { referenceLabel, referencesFromCopyText, resolveSelectorSelection } from "./file-view/hostReference.js";
+import { stepPartNameFromFile } from "@text-to-cad/core/lib/step/productName.js";
 // The selection filters that pick faces or edges, never the part.
 const TOPOLOGY_FILTERS = new Set(["faces", "edges"]);
 const EMPTY_MATERIAL_OVERRIDES = Object.freeze({});
@@ -1480,6 +1481,9 @@ function StepSurfaceBody({ view, data }) {
     },
     promptReferences: () => promptReferencesRef.current(),
     promptContext: createCadPromptContext,
+    // A prompt's view: the pose Position holds, the parts hidden, and those isolated (a snapshot
+    // ghosts the rest, as isolation dims it).
+    viewState: () => ({ kinematics: stepModuleParameterValues, hide: hiddenPartIds, focus: isolatedAssemblyNodeIds }),
     escape: { active: escapeActive, handle: () => escapeRef.current() },
     rendererState: session.rendererState,
     preserveInteractionPixelRatio: viewPolicy.wireframeMode || viewPolicy.edgesVisible,
@@ -1612,8 +1616,6 @@ function StepSurfaceBody({ view, data }) {
     () => copyTextLines(copySelectionPayload.lines, fileRefPrefix),
     [copySelectionPayload.lines, fileRefPrefix]
   );
-  // The Reference panel's foot: Copy References, Copy where the button is narrow.
-  const copyButtonLabel = "Copy References";
   const copySelectedReferences = useCallback(async () => {
     const text = canonicalCopySelectionLines.join("\n");
     if (!text || stepInteractionBlocked) return false;
@@ -1709,6 +1711,28 @@ function StepSurfaceBody({ view, data }) {
       const label = referenceLabel(reference.selector, displayStepTreeRoot || stepTreeRoot);
       return { ...reference, ...(label ? { label } : {}) };
     }), [selectedEntry, displayStepTreeRoot, stepTreeRoot]);
+  // A reference into this file as the view names it, for its chip in Quick Edit's note: a part or
+  // subassembly by its tree name ("cam"), a face, an edge or a solid compactly, by its part, its
+  // kind's glyph and its number ("cam ◧3"), several of one kind on one part counted ("cam ◧×4").
+  // "" for one into another file, or one it has no name for.
+  const nameReference = useCallback(reference => {
+    if (reference?.resource?.path !== promptResource.path || reference.target?.kind !== "cad-selector") return "";
+    const root = displayStepTreeRoot || stepTreeRoot;
+    const KINDS = { f: "face", e: "edge", v: "vertex", s: "solid" };
+    const named = reference.target.selectors.map(selector => {
+      const own = referenceLabel(selector, root);
+      if (own) return { own };
+      const match = String(selector).match(/^(.+)\.([fevs])(\d+)$/);
+      // A part file's one part has no node of its own in the tree: it goes by the file's name.
+      const part = match ? referenceLabel(match[1], root) || (isAssemblyView ? "" : stepPartNameFromFile(promptResource.path)) : "";
+      return part ? { part, kind: KINDS[match[2]], number: match[3] } : null;
+    });
+    if (!named.length || named.some(entry => !entry)) return "";
+    if (named.length === 1) return named[0].own || { name: named[0].part, kind: named[0].kind, number: named[0].number };
+    const [first] = named;
+    return first.part && named.every(entry => entry.part === first.part && entry.kind === first.kind)
+      ? { name: first.part, kind: first.kind, count: named.length } : named.map(entry => entry.own || `${entry.part} · ${entry.kind} ${entry.number}`).join(", ");
+  }, [promptResource.path, displayStepTreeRoot, stepTreeRoot, isAssemblyView]);
   // What is selected, in the prompt grammar: the references a Quick Edit attaches.
   const promptSelection = useMemo(() => referencesForHost(canonicalCopySelectionLines.join("\n")).map(reference => ({
     resource: { ...promptResource },
@@ -3137,15 +3161,19 @@ function StepSurfaceBody({ view, data }) {
       shown: tabToolMode === TAB_TOOL_MODE.MEASURE || measureMeasurements.length > 0,
       removable: measureMeasurements.length > 0,
       onRemove: removeMeasurements,
-      // Its snapping, a mode menu in the panel's heading while Measure is the tool; kept, the
-      // heading has its X alone.
-      actions: tabToolMode !== TAB_TOOL_MODE.MEASURE ? null : <MeasureModeMenu mode={measure.filter} disabled={measureToolDisabled} onModeChange={value => {
-        measure.setFilter(value); measure.cancelDraft();
-        handleSelectTabToolMode(TAB_TOOL_MODE.MEASURE);
-      }} />,
       controls: <MeasurePanel measurements={measureMeasurements} activeId={measure.activeId}
         onActivate={measure.setActiveId} onDelete={measure.onDelete} />
     } });
+  // Select's mode and options, and Measure's snapping: each a chevron after its tool's button on
+  // the strip, whose menu takes the tool up as it sets the mode. One element until what it shows changes.
+  const selectModeMenu = useMemo(() => <SelectModeMenu mode={selectionFilter} assembly={isAssemblyView} disabled={selectDisabled}
+    onModeChange={value => { changeSelectMode(value); handleSelectTabToolMode(TAB_TOOL_MODE.REFERENCES); }}
+    connected={connectedSelection} onConnectedChange={(id, checked) => setConnectedSelection(current => ({ ...current, [id]: checked }))} />,
+  [selectionFilter, isAssemblyView, selectDisabled, connectedSelection, changeSelectMode, handleSelectTabToolMode]);
+  const measureModeMenu = <MeasureModeMenu mode={measure.filter} disabled={measureToolDisabled} onModeChange={value => {
+    measure.setFilter(value); measure.cancelDraft();
+    handleSelectTabToolMode(TAB_TOOL_MODE.MEASURE);
+  }} />;
   const tools = [
     shell.tools.own({
       id: TAB_TOOL_MODE.REFERENCES,
@@ -3153,7 +3181,7 @@ function StepSurfaceBody({ view, data }) {
       // The button shows the mode in hand; nothing under the strip names it.
       icon: <SelectModeIcon mode={selectionFilter} className="size-3.5" aria-hidden="true" />,
       active: !topologySelectionDeferred && selectionToolActive, disabled: selectDisabled,
-      // Its modes and options are a menu in the Features filter row, or a part file's Select card (`selectModeMenu`).
+      menu: selectModeMenu,
       onSelect: () => handleSelectTabToolMode(TAB_TOOL_MODE.REFERENCES),
     }),
     // Position comes straight after Select; only files with movable joints offer it.
@@ -3172,31 +3200,43 @@ function StepSurfaceBody({ view, data }) {
       icon: <MeasureModeIcon mode={measure.filter} className="size-3.5" aria-hidden="true" />,
       active: tabToolMode === TAB_TOOL_MODE.MEASURE, disabled: measureToolDisabled,
       // A press takes it up — again, results and all, where they are kept — and does nothing while
-      // it is the tool; its snapping is a menu in its panel's heading while it is.
+      // it is the tool; its snapping is the chevron after it.
+      menu: measureModeMenu,
       onSelect: () => { if (tabToolMode !== TAB_TOOL_MODE.MEASURE) handleSelectTabToolMode(TAB_TOOL_MODE.MEASURE); } }),
     ...modelEffects.tools,
   ].filter(Boolean);
 
   // ---- copying the selection ----------------------------------------------------------------
-  // The Reference panel's Copy References and the copy key, under Select, while the selection's
-  // references can be read; Quick Edit attaches them only then, too.
+  // The copy key, under Select, while the selection's references can be read; Quick Edit attaches
+  // them only then, too.
   const selectionActionVisible = selectionToolActive && selectionCount > 0 && !stepUpdateInProgress && !referenceSelectionPending
     && !referenceSelectionUnavailable && !topologySelectionDeferred;
   const copySelection = selectionActionVisible ? copySelectedReferences : null;
-  const selectionCopy = useMemo(() => copySelection ? { label: copyButtonLabel, shortcut: shell.frame.copyShortcut, onCopy: copySelection } : null,
-    [copySelection, copyButtonLabel, shell.frame.copyShortcut]);
-
-  // Select's mode and options: a menu in the Features filter row, or in a part file's Select card
-  // (and the Reference that takes its place). One element until the mode or its options change.
-  const selectModeMenu = useMemo(() => <SelectModeMenu mode={selectionFilter} assembly={isAssemblyView} disabled={selectDisabled}
-    onModeChange={value => { changeSelectMode(value); handleSelectTabToolMode(TAB_TOOL_MODE.REFERENCES); }}
-    connected={connectedSelection} onConnectedChange={(id, checked) => setConnectedSelection(current => ({ ...current, [id]: checked }))} />,
-  [selectionFilter, isAssemblyView, selectDisabled, connectedSelection, changeSelectMode, handleSelectTabToolMode]);
+  // What is selected, as Quick Edit's chips: a chip's X drops its picks, and resting on it lights
+  // them — a face or edge by its reference, a part, a subassembly or a run on one part by its node.
+  const removeFromSelection = useCallback(ids => {
+    const gone = new Set(ids);
+    setSelectedReferenceIds(current => current.filter(id => !gone.has(id)));
+    setSelectedPartIds(current => current.filter(id => !gone.has(id)));
+  }, [setSelectedReferenceIds, setSelectedPartIds]);
+  // What a chip copies: its picks' references, as Copy References writes the whole selection.
+  const chipCopyText = useCallback(ids => {
+    const referenceIds = ids.filter(id => selectedReferenceIds.includes(id));
+    const partIds = ids.filter(id => selectedPartIds.includes(id));
+    return copyTextLines(selectionCopyPayload(copyContext, { referenceIds, partIds }).lines, fileRefPrefix).join("\n");
+  }, [copyContext, fileRefPrefix, selectedReferenceIds, selectedPartIds]);
+  const hoverChip = useCallback(target => {
+    setHoveredModelReferenceId(target?.referenceId || "");
+    setHoveredListPartId(target?.nodeId || "");
+  }, [setHoveredModelReferenceId, setHoveredListPartId]);
+  const referenceChips = useStepSelectionChips({ stepTreeRoot: displayStepTreeRoot, selectedMeshData: selectedDisplayMeshData,
+    geometryInspection: { parts: !viewerLoading && !stepUpdateInProgress ? selectedMeshData?.parts || EMPTY_LIST : EMPTY_LIST },
+    references: selectionActionVisible ? selectedReferenceItems : EMPTY_LIST, onRemove: removeFromSelection, onHover: hoverChip,
+    copyText: chipCopyText });
 
   // ---- the tool stack ---------------------------------------------------------------------------
   // Under the strip: Select's Features and Reference, Position's joints, then the kept effects.
   const stepPanels = useStepPanels({
-    selectModeMenu,
     selectActive: selectionToolActive && !previewing,
     positionActive: poseToolActive,
     selectMode: selectionFilter,
@@ -3204,7 +3244,6 @@ function StepSurfaceBody({ view, data }) {
     // reaches it; the Features panel says so until the press can be picked.
     loadingGeometry: Boolean(pendingTopologyPick),
     positionRuntime: motion.positionControls,
-    selectedMeshData: selectedDisplayMeshData,
     geometryInspection: { revision: artifactRevision,
       references: !viewerLoading && !stepUpdateInProgress ? isAssemblyView ? assemblyStepTreeTopologyReferences : selectedSelectorRuntime?.references || EMPTY_LIST : EMPTY_LIST,
       parts: !viewerLoading && !stepUpdateInProgress ? selectedMeshData?.parts || EMPTY_LIST : EMPTY_LIST,
@@ -3221,7 +3260,6 @@ function StepSurfaceBody({ view, data }) {
     hiddenPartIds,
     focusedNodeIds: focusedAssemblyNodeIds,
     onSelectTreeNode: selectStepTreeNode,
-    selectionCopy,
     onFocusTreeNode: focusStepTreeNode,
     onUnfocusTreeNode: handleExitSingleIsolate,
     onExitAllIsolate: handleExitIsolate,
@@ -3237,7 +3275,8 @@ function StepSurfaceBody({ view, data }) {
   });
 
   return <RendererShell shell={shell} tools={tools} toolPanels={<>{stepPanels}{modelEffects.panels}</>}
-    references={selectionActionVisible ? promptSelection : EMPTY_LIST} onClearReferences={clearAssemblySelection} copySelection={copySelection}
+    references={selectionActionVisible ? promptSelection : EMPTY_LIST} referenceChips={referenceChips} nameReference={nameReference}
+    onClearReferences={clearAssemblySelection} copySelection={copySelection}
     contextMenuItems={selectionToolActive
       ? press => viewportContextMenuItems(press, pickAtRef.current?.(press.clientX, press.clientY) || "") : null}
     onContextMenuOpenChange={handleViewportContextMenuOpenChange}

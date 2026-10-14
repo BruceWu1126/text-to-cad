@@ -13,8 +13,8 @@ const NONE = Object.freeze([]);
 
 /**
  * The app's menu, from the navbar's logo over every file: what is the person's rather than a
- * file's. First, where the host has a home, Back to files (`onHome`). Then the host's on/off settings (`appSettings`: Quick
- * edit, sharing anonymous usage data), checked at the right, which a press turns without closing
+ * file's. First, where the host has a home, Back to files (`onHome`). Then the host's on/off settings (`appSettings`:
+ * sharing anonymous usage data), checked at the right, which a press turns without closing
  * the menu; then Send feedback (a new issue on the host's tracker, naming the version and the
  * `platform`), GitHub and Discord; and last, in gray, the version this host runs (a link to its
  * release notes) and who made it, on one line. The menu is 15rem wide and never wider: a long

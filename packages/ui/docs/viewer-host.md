@@ -7,7 +7,7 @@ persistent storage or page navigation. DOM, canvas, workers and layout remain
 shared. Missing optional methods mean an operation is unsupported.
 
 The host contains `files`, optional native `fileActions`, `clipboard`,
-`promptContext`, the optional `attachments`, `navigation` (the optional `openFile(path)` and
+`promptContext`, the optional `promptFiles`, `navigation` (the optional `openFile(path)` and
 `home()`), the optional `links` (the app menu's), the optional `usage`
 (`used(feature)`: what the person used, for the host's telemetry to count, never what
 they made; absent, nothing is counted) and `environment`. `environment` carries the resolved `colorScheme`,
@@ -41,11 +41,11 @@ are for reading and maintaining the contracts.
 
 | Contract | Definition | Public entry point |
 | --- | --- | --- |
-| `ViewerHost`, `ClipboardPort`, `AttachmentStore` (where a copied prompt's picture is saved), `usage` | [Host types](../src/host/types.ts) | `@text-to-cad/ui/host` |
+| `ViewerHost`, `ClipboardPort`, `PromptFiles` (a Quick Edit's views, sketch and pictures, made as files), `usage` | [Host types](../src/host/types.ts) | `@text-to-cad/ui/host` |
 | `FileSource` (`stat`, and `list` and `search` where the host has them), `FileActions`, `FileViewerState` | [File viewer types](../src/file-viewer/types.ts) | `@text-to-cad/ui/file-viewer` |
 | `PromptContextPort` (`deliver`, `send`), bundles, references, delivery receipts and `formatPromptMessage` (the one message a Quick Edit is) | [Prompt types](../../core/src/prompt/types.ts) | `@text-to-cad/core/prompt` |
 | `CadWorkspaceService` (the catalog of the files on screen, `folder`, `search`), `createCadClient` (`{ origin, fetch, … }`), `isMissingFileError`, `CadResourceProvider`, worker tickets | [CAD service types](../../core/src/client/types.ts) | `@text-to-cad/core/client` |
-| `createHttpAttachmentStore` (the viewer server's `AttachmentStore`: it saves a PNG through `POST /__cad/sketches`) | [Attachment store](../../core/src/client/attachments.js) | `@text-to-cad/core/client` |
+| `createHttpPromptFiles` (the viewer server's `PromptFiles`: `POST /__cad/prompt-files`, then asked again until rendered) | [Prompt files](../../core/src/client/promptFiles.js) | `@text-to-cad/core/client` |
 | `StepRendererOptions`, `CadLiveBinding` | [STEP registration](../src/renderers/step/index.ts) | `@text-to-cad/ui/renderers/step` |
 | `TabStore`, `TabRecordStorage`, `createTabStore`, `useTabViewerState` (the tab's one store: its settings, the view of the file on screen, and `FileViewer`'s state from both) | [Tab store](../src/tab-store/tabStore.ts), [the record](../src/tab-store/tabRecord.ts) | `@text-to-cad/ui/tab-store` |
 | `CadPreferenceSource`, `createCadPreferences` (the tab's settings as renderers read them) | [Viewer preferences](../src/renderers/workspace/preferences.ts) | `@text-to-cad/ui/renderers/workspace` |
@@ -195,8 +195,10 @@ The portable types and validators live at `@text-to-cad/core/prompt`. One versio
 bundle contains ordered text, reference and attachment parts with unique IDs.
 An attachment has a MIME type, name and Blob or Promise of Blob. Its optional
 `about` array names reference-part IDs, so a screenshot and several selections
-can travel together, and its optional `label` ("Sketch") says what it is for a
-message that names it by path. Producers freeze resource and selection identity before
+can travel together, its optional `label` ("Sketch") says what it is for a
+message that names it by path, and its optional `path` (a path, or the promise of
+one) is where it is already saved: `resolveAttachmentPaths(context)` waits for
+them all. Producers freeze resource and selection identity before
 asynchronous capture. Blob URLs are delivery leases, never portable identity.
 
 A reference contains a workspace-file identity (the file's absolute path,
@@ -209,8 +211,9 @@ references do not promise to survive edits. Shared serialization handles quoting
 
 `formatPromptMessage(context, { attachmentPath })` is the one
 message a Quick Edit is, whether sent, queued or copied: what the person wrote;
-then `File: <path>`; then `References:` and one reference per line; then
-`Sketch: <path>` (the attachment's label) when the picture travels as a file,
+then `File: <path>`; then `References:` and one reference per line; then each
+file that travels as a file by its label and path (`Current view: <png>`,
+`View 1: <png>`, `Views (cadgen snapshot --job): <job.json>`, `Sketch: <sketch.json>`),
 where `attachmentPath` says where it was saved. A picture sent beside the text
 as an image block is not named.
 
@@ -236,13 +239,20 @@ Hosts must resolve/validate accepted attachments and consume failed encoders;
 they do not transfer Promise or Blob values across native IPC.
 
 Quick Edit is the shared, host-neutral note to the agent
-([the design system](settings-ui.md#quick-edit)), there while the person has it on
-(`features.quickEdit`, above), and its buttons are what the host can carry out. **Copy Prompt** is always there: the message goes through
+([the design system](settings-ui.md#quick-edit)), and its buttons are what the host can carry out.
+Every way it goes carries the same: its words, its references, and the files
+`host.promptFiles` makes for it at the press — a picture of each view it carries
+(the view on screen as it goes, and each its drawing was drawn in; one drawn view
+the same as the one on screen stands for it), those views as a snapshot job file
+(`cadgen snapshot --job <file>` renders them again, over the model or an edit of
+it), and the drawing as a sketch file ([drawing](drawing.md)). The server renders
+the pictures with the snapshot's own code and its own look — solid, light,
+orthographic — whatever the viewer showed (`createHttpPromptFiles` asks until
+they are made). **Copy Prompt** is always there: the message goes through
 `ClipboardPort.writeText`, which takes a `Promise<string>` so the write starts
-inside the gesture while a sketch is still being saved; its references name their
-files by absolute path, as copied references do (below), and a sketch is saved through
-`host.attachments` and named by path, since text cannot carry a picture (without
-`attachments`, a copied prompt names none). **Queue** is there where the
+inside the gesture while the files are still being made; its references name their
+files by absolute path, as copied references do (below), and every file is named by
+its path, since text carries no file (without `promptFiles`, a prompt carries none). **Queue** is there where the
 destination is a composer (`destination.kind === "composer"`): `deliver`, the
 context for the person's next message. **Send** is there where the prompt port
 has `send`. The context is built at the press, from what is live then; a changed
@@ -250,12 +260,14 @@ document or revision never retargets it. A Quick Edit that reached its destinati
 (copied, queued or sent: no `failed` or `cancelled` receipt) tells the host once,
 `usage.used('quickEdit')`, for its count; a host that throws there changes nothing.
 
-`ViewerHost.attachments` is an `AttachmentStore`: `save(image, name)` answers the
-saved file's absolute path. `createHttpAttachmentStore({ origin, fetch })` from
-`@text-to-cad/core/client` is the viewer server's: it posts the PNG to
-`POST /__cad/sketches?name=<name>`, which keeps it as scratch in the system's
-temporary directory. Both apps pass one; the MCP app's reaches the server through
-its tunnel.
+`ViewerHost.promptFiles` is a `PromptFiles`: `create({ name, input, views, sketch })`
+answers where the job, the sketch and each view's picture were made, and `read(path)`
+fetches one. `createHttpPromptFiles({ origin, fetch })` from `@text-to-cad/core/client`
+is the viewer server's: it posts the request to `POST /__cad/prompt-files`, which
+answers at once and renders off the request, then asks `GET /__cad/prompt-files?id=<id>`
+until they are made, and reads a file at `GET /__cad/prompt-files/<name>`. The files
+are scratch in the system's temporary directory. Both apps pass one; the MCP app's
+reaches the server through its tunnel.
 
 ## App-specific interfaces
 
@@ -377,9 +389,8 @@ tests remain required for resource changes.
 Viewer shortcuts consume only events from their own viewer, or from the page
 background after a pointer press in it, so another viewer or the composer never
 receives Escape, copy or orbit keys on its behalf
-([settings-ui.md](settings-ui.md#keyboard)). The standalone
-`DrawingEditor` takes the host's keyboard `platform` as a prop for its undo and
-redo keys.
+([settings-ui.md](settings-ui.md#keyboard)). Draw's surface reads the host's
+keyboard `platform` (`environment.platform`) for its undo and redo keys.
 
 ## Host chrome slots
 
@@ -432,18 +443,9 @@ menu follows. `displayActions`
 passes host-owned appearance controls into the Display section beside Projection
 via `RendererViewProps`. `appSettings` (`{ id, section, label, checked, disabled?, onCheckedChange }[]`,
 a `CadViewer` prop) are the host's own on/off settings: checkbox items of the app menu, in the
-order they come (Share anonymous usage data, Quick edit, in both apps), the same in the
+order they come (Share anonymous usage data, in both apps), the same in the
 logo's menu and the home's; nothing of them reaches a renderer, and Display holds none. The
-host owns what each one does and where it is kept. `@text-to-cad/ui/features` is the
-feature switches, which both apps share: `useFeatures(features)` turns the host's call — `features()`
-reads them, `features(change)` changes some and answers them all — into the features the person
-left on (`ViewerFeatures`: `quickEdit`, each on until they turn it off) and their `appSettings` rows.
-The host hands the first to `CadViewer` as `features` (on to FileViewer and
-`RendererViewProps.features`: the shell offers no Quick Edit while it is off) and the second
-with its `appSettings`, and keeps the choice where it keeps the analytics answer: the web
-Viewer and the CAD app alike through the client's `features` (`/__cad/features`), in the
-person's settings (`cadgen/features.py`), so it holds in every view, tab and app, across
-reloads — a page's own storage would not, the web Viewer's origin changing with its port.
+host owns what each one does and where it is kept.
 `@text-to-cad/ui/consent` is the usage stats toggle both apps share:
 `useAnalyticsConsent(consent)`, which turns the host's consent call into its `appSettings` row
 (Share anonymous usage data). Nothing asks: cadgen's telemetry is on by default once a `cadgen` command

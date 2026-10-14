@@ -693,6 +693,45 @@ test("a snapshot's Clip cuts and caps the model where the viewer's does, measure
   }
 });
 
+test("a snapshot draws the job's sketch on its parts as the scene places them, cut by its clip, as heavy as on the viewer", async () => {
+  // A mark on the right part follows it where the exploded view moved it; a mark on a part the
+  // scene lacks sits where that part was when the sketch was made; a mark on no part stays put.
+  const moved = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 5, 0, 0, 1];
+  const sketch = { units: "mm", parts: { gone: { placement: moved } }, marks: [
+    { id: "1", kind: "stroke", part: "right", points: [2, 0, 0, 3, 1, 0], color: "#ff2d55", width: 3 },
+    { id: "2", kind: "stroke", part: "gone", points: [0, 0, 0, 1, 1, 0], color: "#007aff", width: 3 },
+    { id: "3", kind: "area", part: null, points: [0, 0, 1, 1, 0, 1, 1, 1, 1], triangles: [0, 1, 2], color: "#00aa44" }
+  ] };
+  const job = { mode: "view", kind: "step", sketch, display: { mode: "solid", exploded: { enabled: true, amount: 1 }, clip: { axis: "x" } },
+    outputs: [{ path: "a.png", width: 64, height: 450, camera: "iso" }, { path: "b.png", width: 64, height: 450, camera: "top" }] };
+  const meshData = twoPartMeshData();
+  const context = renderJobContext(meshData, job);
+  const model = buildModel(THREE, { kind: "step", meshData }, modelOptionsForRenderJob(context, job));
+  const scene = new THREE.Scene();
+  scene.add(model.root);
+  const viewport = { ...stubViewport(model, scene), context };
+  viewport.renderer.domElement = { ...viewport.renderer.domElement, height: 450 };
+  try {
+    await captureModel(viewport, { job });
+    const layer = scene.getObjectByName("sketch");
+    assert.ok(layer, "the sketch is in the scene");
+    const [onRight, onGone, onNothing] = layer.children;
+    const right = model.root.getObjectsByProperty("isMesh", true).find(object => object.userData.partId === "right" && !object.isInstancedMesh);
+    assert.ok(right.matrixWorld.elements[12] !== 0 || right.matrixWorld.elements[13] !== 0, "the exploded view moved the part");
+    assert.deepEqual(onRight.matrixWorld.elements, right.matrixWorld.elements);
+    assert.deepEqual(onGone.matrixWorld.elements, moved);
+    assert.deepEqual(onNothing.matrixWorld.elements, new THREE.Matrix4().elements);
+    assert.equal(viewport.clipRuntime.activeClipPlanes.length, 1);
+    for (const mark of layer.children) assert.deepEqual(mark.material.clippingPlanes, viewport.clipRuntime.activeClipPlanes, "cut as the model is");
+    // A 450-pixel output is half the viewer's reference height: its ink is drawn half as wide.
+    assert.equal(onRight.material.linewidth, 1.5);
+    assert.equal(layer.children.length, 3, "one layer serves every output of a height");
+  } finally {
+    viewport.sketchLayer?.layer.dispose();
+    model.dispose();
+  }
+});
+
 test("capture diagnostics separate readiness, pose, tight framing, draw submission and PNG readback", async (t) => {
   let clock = 0;
   t.mock.method(performance, "now", () => clock);

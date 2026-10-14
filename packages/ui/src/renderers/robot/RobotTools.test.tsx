@@ -208,48 +208,35 @@ it('robot Links and Position are each their tool\'s panel, and no pick or tool o
   robot.open('Select');
   robot.tapUpperArm();
   await waitFor(() => expect(robot.pressedRows()).toHaveLength(1));
-  // The pose left off its default is kept, one line under the Reference.
-  expect(robot.stack()).toEqual(['Links', 'Reference details', 'Position kept']);
+  // The pick is Quick Edit's chip, not a panel; the pose left off its default is kept, one line under Links.
+  expect(robot.pane.querySelectorAll('[data-quick-edit-ref]')).toHaveLength(1);
+  expect(robot.stack()).toEqual(['Links', 'Position kept']);
   robot.open('Position');
   expect(robot.stack()).toEqual(['Position controls']);
   robot.client.dispose();
 });
 
-it("robot Links closes by its X and Select brings it back: marked while it is closed, a press while Select is the tool opens it, and from another tool a press only takes Select up", async () => {
+it('robot Links is on screen whenever Select is the tool, with no X to close it: a press on Select changes nothing', async () => {
   const robot = await openRobot();
-  const mark = () => robot.tool('Select').querySelector('[data-tool-panel-closed]');
-  expect([robot.stack(), mark()]).toEqual([['Links'], null]);
-  fireEvent.click(within(robot.pane).getByRole('button', { name: 'Close links' }));
-  expect(robot.stack()).toEqual([]);
-  expect(mark()).not.toBeNull();
-  expect(robot.tool('Select').getAttribute('aria-description')).toBe('Links closed');
-  // A pick still shows its Reference: a panel of its own, apart from the closed tree.
-  robot.tapUpperArm();
-  await waitFor(() => expect(robot.stack()).toEqual(['Reference details']));
-  // From Position, Select is only taken up: the tree stays closed.
+  const links = () => robot.pane.querySelector<HTMLElement>('[data-tool-panel][aria-label="Links"]')!;
+  expect(robot.stack()).toEqual(['Links']);
+  expect(within(links()).queryByRole('button', { name: /^Close/ })).toBeNull();
+  robot.open('Select');
+  expect([robot.stack(), robot.toolNames()]).toEqual([['Links'], ['Select:true', 'Position:false']]);
+  // Back from Position, Links is there again, as it was.
   robot.open('Position');
   robot.open('Select');
-  expect(robot.toolNames()).toEqual(['Select:true', 'Position:false']);
-  expect(robot.stack()).toEqual([]);
-  expect(mark()).not.toBeNull();
-  // Pressed while it is the tool, it opens Links again, as it was.
-  robot.open('Select');
   expect(robot.stack()).toEqual(['Links']);
-  expect(mark()).toBeNull();
   expect(robot.pane.querySelector('[aria-label="Robot links"] li')).not.toBeNull();
   robot.client.dispose();
 });
 
-it('on a phone robot Links starts closed, Select marked, until Select is pressed', async () => {
+it('on a phone robot Links is on screen from the open, as on a desktop', async () => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
     { x: 0, y: 0, left: 0, top: 0, right: 390, bottom: 844, width: 390, height: 844, toJSON: noop } as DOMRect);
   const robot = await openRobot();
   expect(robot.pane.querySelector('[data-viewer-layout]')!.getAttribute('data-viewer-layout')).toBe('mobile');
-  expect(robot.stack()).toEqual([]);
-  expect(robot.tool('Select').querySelector('[data-tool-panel-closed]')).not.toBeNull();
-  robot.open('Select');
   expect(robot.stack()).toEqual(['Links']);
-  expect(robot.tool('Select').querySelector('[data-tool-panel-closed]')).toBeNull();
   robot.client.dispose();
 });
 

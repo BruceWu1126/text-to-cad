@@ -155,7 +155,7 @@ const MemoModelingSearchRow = memo(ModelingSearchRow);
  * Edges a part's topology is asked for as its row comes on screen, never for a whole large
  * assembly at once.
  */
-function ModelingTree({ active, disabled, mode='all', modeMenu=null, loading=false, selectedPartIds=EMPTY, selectedReferences=EMPTY, onLoadTopology, onClearSelection, stepRoot, activeTreeNodeScrollKey, partControls=NO_CONTROLS, hoverStore=null }) {
+function ModelingTree({ active, disabled, mode='all', loading=false, selectedPartIds=EMPTY, selectedReferences=EMPTY, onLoadTopology, onClearSelection, stepRoot, activeTreeNodeScrollKey, partControls=NO_CONTROLS, hoverStore=null }) {
   const [localExpanded,setLocalExpanded]=useState(()=>new Set());
   const tree=useMemo(()=>presentModelingAssembly(stepRoot),[stepRoot]);
   const implicitRoots=useMemo(()=>implicitModelingRoots(tree),[tree]);
@@ -342,8 +342,6 @@ function ModelingTree({ active, disabled, mode='all', modeMenu=null, loading=fal
       trailing={<>
         {loading && <span role="status" className="shrink-0 text-micro text-muted-foreground">Loading…</span>}
         {partControls.hiddenPartIds?.length > 0 && <Button disabled={disabled} type="button" variant="ghost" size="sm" className="h-6 shrink-0 px-1.5 text-tiny text-muted-foreground" onClick={partControls.showAllHiddenParts}>Show all</Button>}
-        {/* Select's mode menu (`SelectionModes.jsx`), at the row's end. */}
-        {modeMenu}
       </>}/>}>
     <div ref={treeRef} className="flex flex-col text-tiny" aria-label="Modeling tree">
       <div ref={listRef} className="px-1 py-1" aria-label="Model tree area"

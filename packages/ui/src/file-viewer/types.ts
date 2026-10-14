@@ -82,19 +82,9 @@ export interface ViewerHistory {
   back(): void;
   forward(): void;
 }
-/**
- * The viewer's features a person can turn off in the app menu, as the host keeps
- * them: each is on unless the host says it is off.
- */
-export interface ViewerFeatures {
-  /** Quick Edit: the note to the agent at the viewport's top-right, and every way it opens. */
-  quickEdit?: boolean;
-}
 export interface RendererViewProps {
   /** The host's notice: the viewport's top-right once the file is on screen, Quick Edit under it. */
   notice?: ReactNode;
-  /** The features the person has left on (in the app menu): what is off is not offered at all. */
-  features?: ViewerFeatures;
   /** Optional host-owned controls inside the Display panel (the web's appearance). */
   displayActions?: ReactNode;
   onNavigationActionsChange?: (actions: readonly FileNavigationAction[]) => void;
@@ -170,8 +160,6 @@ export interface FileViewerProps {
   fullSize?: ReactNode;
   /** The view's own history, where the host keeps one: Back and Forward, between the navbar's logo and the file's name. */
   history?: ViewerHistory;
-  /** The features the person has left on (in the app menu), for every renderer (`RendererViewProps.features`). */
-  features?: ViewerFeatures;
   /** The host's notice, shown at the viewport's top-right once the file is on screen (`RendererViewProps.notice`). */
   notice?: ReactNode;
   onError?: (error: Error) => void;

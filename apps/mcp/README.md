@@ -126,10 +126,7 @@ reference host `basic-host` does.
   id of the unedited chunk the CAD Viewer may ship. It is on by default once
   a `cadgen` command has said so, once, and nothing asks. The app menu's **Share usage
   stats** (`appSettings`, through `/__cad/analytics`) changes the answer, one answer for
-  this app and the browser viewer. Its **Quick edit** (on until
-  the person turns it off) is read and changed the same way, through `/__cad/features`, and kept
-  beside the analytics answer (`cadgen/features.py`): one choice for the sidebar, every
-  thread's tab, every inline card and the browser viewer. The channel is reported with the
+  this app and the browser viewer. The channel is reported with the
   counts; it decides nothing there. The agent's `cad_telemetry` reports the
   setting and turns it off, never on.
 - **Told how it is presented, before it greets the host.** A host that mounts
@@ -187,11 +184,10 @@ reference host `basic-host` does.
   did. The server produces such a body once: each later part names it
   (`if-range: <etag>`) and is cut from the body the first part kept, never by
   running the route again.
-- **One file.** The build inlines scripts, styles, workers (as blobs) and the
-  drawing editor's fonts (as data URIs) into `dist/index.html`, and fails if
-  anything would be left outside it: the host serves one resource and nothing
-  beside it. Its scripts are still split where the app imports lazily (each
-  renderer, the drawing editor and its libraries): each chunk is a gzip'd string
+- **One file.** The build inlines scripts, styles and workers (as blobs) into
+  `dist/index.html`, and fails if anything would be left outside it: the host
+  serves one resource and nothing beside it. Its scripts are still split where
+  the app imports lazily (each renderer): each chunk is a gzip'd string
   that becomes a blob module only when something imports it, so a view parses
   what it shows rather than all of the app (`vite.config.mjs`).
 - **Nothing waits unseen.** While the home's list is read, placeholder cards (or
@@ -236,7 +232,7 @@ reference host `basic-host` does.
 
 `ModelView.tsx` is the page: the shared `CadViewer` (`@text-to-cad/ui/cad-viewer`,
 the one the web Viewer shows) showing the launch's model, with this host's ports — its
-tunnel (which also carries a copied prompt's sketch to the server: `attachments`), the
+tunnel (which also carries a Quick Edit's views and sketch to the server, which makes their files: `promptFiles`), the
 explorer's folders and search over it (`createCadFileSource`), its chat, its file menu
 (copy path, Reveal), the app menu's links (its Send feedback and
 an alert's Report Issue open a new issue), followed through `ui/open-link`,

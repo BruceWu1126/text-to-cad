@@ -12,12 +12,19 @@ export interface ClipboardPort {
   writeImage(image: Blob | Promise<Blob>): Promise<void>;
 }
 /**
- * Where a picture a prompt names by path is kept: a copied Quick Edit is text, so its sketch is
- * saved as a file on this machine and the text names it. `save` answers the file's absolute path.
- * `createHttpAttachmentStore` (`@text-to-cad/core/client`) is the viewer server's.
+ * A Quick Edit's files, made on this machine for its prompt to carry and name: the views it carries
+ * as a snapshot job file (`cadgen snapshot --job` renders them), its sketch as a sketch file, and
+ * each view's picture, rendered with the snapshot's own code. `create` answers where they are once
+ * they are made; `read` fetches one. `createHttpPromptFiles` (`@text-to-cad/core/client`) is the
+ * viewer server's.
  */
-export interface AttachmentStore {
-  save(image: Blob, name: string): Promise<string>;
+export interface PromptFiles {
+  create(request: {
+    name: string; input: string;
+    views: Array<Record<string, unknown> & { label: string }>;
+    sketch: Record<string, unknown> | null;
+  }): Promise<{ job: string; sketch: string | null; images: Array<{ label: string; path: string }> }>;
+  read(path: string): Promise<Blob>;
 }
 /**
  * What the app menu links to — the running version (its release notes), the source and the
@@ -53,8 +60,8 @@ export interface ViewerHost {
   fileActions?: FileActions;
   clipboard: ClipboardPort;
   promptContext: PromptContextPort;
-  /** Saves a copied prompt's picture where the prompt can name it. Absent: a copied prompt names none. */
-  attachments?: AttachmentStore;
+  /** Makes a Quick Edit's views, sketch and pictures as files. Absent: a prompt carries none of them. */
+  promptFiles?: PromptFiles;
   /**
    * Show a file, by its absolute path, in this view: a pick in the explorer, a renderer's link.
    * `home` shows the host's home in this view: its recent models, what it shows with no file. A

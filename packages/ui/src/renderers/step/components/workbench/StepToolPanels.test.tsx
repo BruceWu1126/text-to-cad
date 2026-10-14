@@ -3,7 +3,6 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ModelingTreeView from '../../../../../dist/renderers/step/components/workbench/ModelingTree.js';
-import { SelectModeMenu } from '../../../../../dist/renderers/step/components/workbench/SelectionModes.js';
 import { useStepPanels } from '../../../../../dist/renderers/step/components/workbench/StepPanels.js';
 import { useModelTools } from '../../../../../dist/renderers/step/components/workbench/ModelTools.js';
 import { buildPositionSection } from '../../../../../dist/renderers/step/components/workbench/MotionControlsSection.js';
@@ -14,7 +13,7 @@ import ToolStack from '../../../../../dist/renderers/kit/tools/ToolStack.js';
 import { TOOL_PANEL_WIDTH } from '../../../../../dist/renderers/kit/tools/toolStackLayout.js';
 import { ViewerMobileContext } from '../../../../../dist/file-viewer/responsive.js';
 
-// The STEP renderer's panels in the tool stack — Select's Features and Reference, the kept effects
+// The STEP renderer's panels in the tool stack — Select's Features (or a part file's Select card), the kept effects
 // (Explode, Clip), Position — each where it is decided, under the stack that holds them. The
 // viewport that picks and draws is the browser suite's (`StepRenderer.browser.test.mjs`).
 
@@ -58,7 +57,6 @@ function Features({ mode = 'all', initialLayout = undefined as any, mobile = fal
   // The shell hands the stack the viewer's layout, as it hands every panel (`RendererShell.jsx`).
   return <ViewerMobileContext.Provider value={mobile}><ToolStack layout={layout} onLayoutChange={change} mobile={mobile}>
     <ModelingTreeView stepRoot={stepRoot} active mode={mode} onLoadTopology={() => {}}
-      modeMenu={<SelectModeMenu mode={mode} assembly onModeChange={() => {}} connected={{ edgeChain: false, tangentFaces: false }} onConnectedChange={() => {}} />}
       partControls={{ isAssemblyView: true, expandedTreeNodeIds: expanded,
         onToggleTreeNode: (id: string) => setExpanded(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]) }} />
   </ToolStack></ViewerMobileContext.Provider>;
@@ -83,14 +81,14 @@ it("each Select mode holds the tree: Parts, Faces and Edges every assembly open,
   expect(locks()).toEqual([]);
 });
 
-it("Features is its filter, Select's modes and its tree: no X, nothing to fold, and no stored choice closes it, on a desktop or a phone", async () => {
+it("Features is its filter and its tree — Select's modes are the strip's — with no X, nothing to fold, and no stored choice closes it, on a desktop or a phone", async () => {
   const user = userEvent.setup();
   render(<Features initialLayout={{ panels: {}, collapsed: {}, closed: { tree: true } }} />);
   expect(shown()).toEqual(['Features']);
   const search = screen.getByRole('textbox', { name: 'Filter model' }) as HTMLInputElement;
   expect(search.getAttribute('placeholder')).toBe('Filter…');
-  // The mode menu ends its filter row, with no X beside it, and no fold.
-  expect([...features().querySelectorAll('[data-slot=tree-filter] button')].map(button => button.getAttribute('aria-label'))).toEqual(['Select mode: All']);
+  // Its filter row is the filter alone, with no X beside it, and no fold.
+  expect([...features().querySelectorAll('[data-slot=tree-filter] button')].map(button => button.getAttribute('aria-label'))).toEqual([]);
   expect(within(features()).queryByRole('button', { name: /^(?:Close|Collapse|Expand) features$/ })).toBeNull();
   await user.click(search);
   await user.keyboard('ba');
@@ -109,44 +107,29 @@ it("Features opens as tall as its rows need, up to the whole column, on desktop 
   expect(features().style.maxHeight).toBe(`${STACK_HEIGHT}px`);
 });
 
-// What Select shows (`StepPanels.js`): an assembly's tree and, with a selection, the Reference
-// under it; a part file has no tree, its one row being all there would be, but its Select card,
-// which the Reference takes the place of while something is picked.
+// What Select shows (`StepPanels.js`): an assembly's tree; a part file has no tree, its one row
+// being all there would be, and nothing else — its modes are the strip's. What is picked is
+// Quick Edit's, as chips (`StepReferenceSection.test.tsx`): no panel of the stack shows it.
 const face = { id: 'o1.1.1.f2', normalizedSelector: 'o1.1.1.f2', selectorType: 'face', occurrenceId: 'o1.1.1', pickData: { surfaceType: 'plane', area: 20 } };
-function SelectPanels({ assembly = false, references = [] as any[], onClearSelection = () => {} }) {
+function SelectPanels({ assembly = false, references = [] as any[] }) {
   const partRoot = { id: '__step_model__', nodeType: 'part', name: 'hinge.step', leafPartIds: ['__model__'], children: [] };
   return useStepPanels({ selectActive: true, selectedEntry: { file: '/models/hinge.step' }, isAssemblyView: assembly,
-    stepTreeRoot: assembly ? stepRoot : partRoot, selectedReferences: references, onClearSelection,
-    selectModeMenu: <SelectModeMenu mode="all" assembly={assembly} onModeChange={() => {}} connected={{ edgeChain: false, tangentFaces: false }} onConnectedChange={() => {}} />,
-    selectionCopy: references.length ? { label: 'Copy', shortcut: '⌘C', onCopy: async () => true } : null });
+    stepTreeRoot: assembly ? stepRoot : partRoot, selectedReferences: references });
 }
 function Panels(props: any) {
   const [layout, change] = useLayout();
   return <ToolStack layout={layout} onLayoutChange={change}><SelectPanels {...props} /></ToolStack>;
 }
 
-it("a part file shows its Select card under Select (its modes and what to pick, no filter) and the Reference in its place for what is picked; an assembly its tree, then the Reference, capped at the column, its Copy at its foot and its X clearing the selection", () => {
+it("a part file shows no panel under Select, picked or not; an assembly its tree", () => {
   const view = render(<Panels />);
-  expect(shown()).toEqual(['Select']);
-  const card = within(screen.getByRole('region', { name: 'Select' }));
-  expect(card.getByRole('heading').textContent).toBe('Select');
-  expect(card.getByRole('button', { name: 'Select mode: All' })).toBeTruthy();
-  expect(card.queryByRole('textbox')).toBeNull();
-  expect(screen.getByRole('region', { name: 'Select' }).querySelector('[data-select-hint]')!.textContent).toBe('Select a face or edge');
+  expect(shown()).toEqual([]);
+  // A pick changes nothing here.
   view.rerender(<Panels references={[face]} />);
-  // The Reference takes the card's place, its modes with it.
-  expect(shown()).toEqual(['Reference details']);
-  expect(within(screen.getByRole('region', { name: 'Reference details' })).getByRole('button', { name: 'Select mode: All' })).toBeTruthy();
+  expect(shown()).toEqual([]);
   view.unmount();
-  const onClearSelection = vi.fn();
-  render(<Panels assembly references={[face]} onClearSelection={onClearSelection} />);
-  expect(shown()).toEqual(['Features', 'Reference details']);
-  const reference = within(screen.getByRole('region', { name: 'Reference details' }));
-  expect(reference.getByRole('heading').textContent).toBe('base · face 2');
-  expect(reference.getByRole('button', { name: 'Copy' }).getAttribute('aria-keyshortcuts')).toBe('Meta+C');
-  expect(screen.getByRole('region', { name: 'Reference details' }).style.maxHeight).toBe(`${STACK_HEIGHT}px`);
-  fireEvent.click(reference.getByRole('button', { name: 'Clear selection' }));
-  expect(onClearSelection).toHaveBeenCalledOnce();
+  render(<Panels assembly references={[face]} />);
+  expect(shown()).toEqual(['Features']);
 });
 
 // ---- the kept effects: Explode and Clip ---------------------------------------------------------
@@ -302,11 +285,11 @@ it('a short viewer: the tree gives way first, then the details panels, a kept ef
   fireEvent.keyDown(slider('Explode amount'), { key: 'PageUp' });
   fireEvent.click(tool('Clip'));
   fireEvent.keyDown(slider('Clip amount'), { key: 'PageUp' });
-  expect(shown()).toEqual(['Features', 'Reference details', 'Measure controls', 'Explode controls', 'Clip controls']);
+  expect(shown()).toEqual(['Features', 'Measure controls', 'Explode controls', 'Clip controls']);
   // How each gives way (`ToolPanel.jsx`'s fit): the tree first, then the details, the kept effects never.
   expect(Object.fromEntries([...document.querySelectorAll<HTMLElement>('[data-cad-tool-stack] section[data-tool-panel]')]
     .map(panel => [panel.getAttribute('aria-label'), panel.getAttribute('data-tool-panel')]))).toEqual({
-    Features: 'tree', 'Reference details': 'details', 'Measure controls': 'details', 'Explode controls': 'fixed', 'Clip controls': 'fixed' });
+    Features: 'tree', 'Measure controls': 'details', 'Explode controls': 'fixed', 'Clip controls': 'fixed' });
   // The panels' column is exactly the stack's height, inside the stack's own scroll region.
   const column = features().parentElement!;
   expect(column.style.maxHeight).toBe(`${STACK_HEIGHT}px`);

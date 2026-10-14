@@ -135,6 +135,26 @@ to the whole job (give a view its own job in a `jobs` array to select per view):
 ```
 
 With `--job FILE`, other flags override every job in it; there is no stdin form.
+A TARGET given with `--job` replaces every job's `input`, so one job file renders
+the same views over another model; OUT is ignored, and the jobs' outputs name
+the files:
+
+```bash
+cadgen snapshot STEP/bracket_v2.step --job views.job.json
+```
+
+### Sketches and Quick Edit views
+
+`--sketch FILE` (a job's `sketch`: a path or the object) draws a person's ink
+over the model as they drew it in the CAD Viewer: each mark sits on its part,
+follows it when the view explodes or poses the model, and is cut by a clip.
+A DXF and `--mode list` take none.
+
+A Quick Edit prompt names the views the person looked at as a job file, the PNGs
+it rendered, and their sketch file when they drew. `cadgen snapshot --job <job
+file>` renders those views again: after an edit, run it to see the change from
+where the person looked, with their sketch still on it. Add a TARGET to aim the
+same views at another document.
 
 ## Cross-sections
 

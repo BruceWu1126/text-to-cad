@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, expect, it, vi } from 'vitest';
 import LinksSection from '../../../dist/renderers/robot/LinksSection.js';
 import { useLinkSelection } from '../../../dist/renderers/robot/useLinkSelection.js';
+import { useRobotReferences } from '../../../dist/renderers/robot/robotReferences.js';
 
 Object.assign(globalThis, { React });
 afterEach(cleanup);
@@ -51,7 +52,9 @@ const components = [
   { id: 'wrist_link:v1/object/1', name: 'cap', link: 'wrist_link', color: '', triangleCount: 300, vertexCount: 150, sizeMillimetres: [40, 40, 2] },
 ];
 
-// What the scene graph was last asked to draw: the viewport half of a selection.
+// What the scene graph was last asked to draw: the viewport half of a selection. What is selected
+// reads back as Quick Edit's chips (`robotReferences.jsx`); the harness lays each chip's card out
+// flat under "Reference details", with its X, as its popover would show it.
 let highlight: Record<string, unknown> = {};
 const scene = { hasComponent: (id: string) => components.some(component => component.id === id), setHighlight(next: Record<string, unknown>) { highlight = next; } };
 const drawn = () => JSON.stringify([highlight.selectedLinks || [], highlight.selectedComponents || []]);
@@ -64,8 +67,18 @@ function Harness({ spy = {} as Record<string, (...args: any[]) => void>, payload
     selectLink: (name: string, options?: any) => { spy.selectLink?.(name); selection.selectLink(name, options); },
     hoverLink: (name: string) => { spy.hoverLink?.(name); selection.hoverLink(name); },
   };
-  return <LinksSection robot={payload} components={components} parts={parts} selection={observed} onOpenFile={onOpenFile} hiddenPartIds={hiddenPartIds} onVisibilityChange={onVisibilityChange}/>;
+  const { references, chips } = useRobotReferences({ robot: payload, components, selection: observed, resource: { kind: 'workspace-file', path: '/work/arm.urdf' }, onOpenFile });
+  return <>
+    <LinksSection robot={payload} components={components} parts={parts} selection={observed} hiddenPartIds={hiddenPartIds} onVisibilityChange={onVisibilityChange}/>
+    {chips.length ? <section aria-label="Reference details" data-references={JSON.stringify(references.map((reference: any) => reference.target.selectors))}>
+      {chips.map((chip: any) => <div key={chip.key} aria-label={`Chip ${chip.label}`} data-copy={chip.copy}>
+        {chip.card}<button type="button" onClick={chip.onRemove}>Remove {chip.label}</button>
+      </div>)}
+    </section> : null}
+  </>;
 }
+const chipLabels = () => within(screen.getByRole('region', { name: 'Reference details' })).getAllByRole('generic', { name: /^Chip / })
+  .map(chip => chip.getAttribute('aria-label'));
 const rows = () => within(screen.getByRole('list', { name: 'Robot links' })).getAllByRole('button', { name: /^Select / }).map(row => row.getAttribute('aria-label'));
 const filter = () => screen.getByRole('textbox', { name: 'Filter links' });
 
@@ -81,7 +94,8 @@ it('draws the kinematic tree collapsed below the first real choice, with each li
   expect(shoulder.getAttribute('title')).toBeNull();
   expect(screen.getByRole('button', { name: 'Select base_link' }).textContent).toBe('base_linkfootprint_to_base · fixed');
   // The one root is pinned: a row you can select, with nothing to collapse and no indent
-  // level of its own, so its child starts at the tree's left edge. Rows carry no icons.
+  // level of its own, so its child starts at the tree's left edge. Links carry no icons (a mesh
+  // object's row carries the part box, below).
   expect(screen.queryByRole('button', { name: /^(Collapse|Expand) base_link$/ })).toBeNull();
   const indent = (name: string) => (screen.getByRole('button', { name: `Select ${name}` }).closest('div') as HTMLElement).style.paddingLeft;
   expect([indent('base_link'), indent('shoulder_link'), indent('camera_link')]).toEqual(['0px', '0px', '0px']);
@@ -127,9 +141,10 @@ it('selects a link in the scene graph and reads the payload back', () => {
   expect(parentJoint).toContain('Z0.25');
   // The SRDF's planning group the link is in.
   expect(details.getByLabelText('Link details').textContent).toContain('manipulator');
-  expect(details.queryByRole('button', { name: /copy/i })).toBeNull();
+  // Its chip copies its reference into the description: the file, and the link by name.
+  expect(details.getByLabelText('Chip shoulder_link').getAttribute('data-copy')).toBe('/work/arm.urdf#shoulder_link');
 
-  fireEvent.click(details.getByRole('button', { name: 'Clear selection' }));
+  fireEvent.click(details.getByRole('button', { name: 'Remove shoulder_link' }));
   expect(screen.queryByRole('region', { name: 'Reference details' })).toBeNull();
   expect(screen.getByRole('button', { name: 'Select shoulder_link' }).getAttribute('aria-pressed')).toBe('false');
 });
@@ -220,12 +235,14 @@ it('reveals a selected hit with its ancestors expanded when the filter is cleare
   expect(scrollIntoView).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole('button', { name: 'Expand wrist_link' }));
 
-  // A named object keeps its own selection and facts.
+  // A named object keeps its own selection and facts, and its row the part box.
+  expect(screen.getByRole('button', { name: 'Select flange' }).closest('div')!.querySelector('svg.lucide-box')).not.toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Select flange' }));
   expect(drawn()).toBe('[[],["wrist_link:v1/object/0"]]');
   const reference = within(screen.getByRole('region', { name: 'Reference details' }));
-  // The heading names it; the rows say the rest, never the name again.
-  expect(reference.getByRole('heading').textContent).toBe('flange');
+  // The chip names it; the card's rows say the rest, never the name again. It is a reference to its link.
+  expect(chipLabels()).toEqual(['Chip flange']);
+  expect(reference.getByLabelText('Chip flange').getAttribute('data-copy')).toBe('/work/arm.urdf#wrist_link');
   const component = reference.getByLabelText('Component details').textContent!;
   for (const fact of ['wrist_link', '#336699', '1,200', '40.0 × 40.0 × 8.00 mm']) expect(component).toContain(fact);
   expect(component).not.toContain('flange');
@@ -255,7 +272,7 @@ it('a viewport pick of a surface selects its link; a named object selects itself
   expect(screen.queryByRole('region', { name: 'Reference details' })).toBeNull();
 });
 
-it('a row that draws something has the Hide/Reveal eye: a link hides its own visuals, a partly hidden link the rest, and several visuals head the Reference as Components', () => {
+it('a row that draws something has the Hide/Reveal eye: a link hides its own visuals, a partly hidden link the rest, and several visuals are a chip each', () => {
   const onVisibilityChange = vi.fn();
   const { rerender } = render(<Harness onVisibilityChange={onVisibilityChange} hiddenPartIds={[]}/>);
   // A link with no geometry of its own (shoulder_link) has no eye; base_link draws one visual.
@@ -278,11 +295,12 @@ it('a row that draws something has the Hide/Reveal eye: a link hides its own vis
   fireEvent.click(within(screen.getByRole('list', { name: 'Link search results' })).getByRole('button', { name: 'Reveal flange' }));
   expect(onVisibilityChange).toHaveBeenLastCalledWith(['wrist_link:v1/object/0'], true);
   fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }));
-  // Two visuals selected: the Reference is headed by what they are.
+  // Two visuals selected: a chip each, and one reference, to the link they share.
   fireEvent.click(screen.getByRole('button', { name: 'Expand wrist_link' }));
   fireEvent.click(screen.getByRole('button', { name: 'Select flange' }));
   fireEvent.click(screen.getByRole('button', { name: 'Select cap' }), { shiftKey: true });
-  expect(within(screen.getByRole('region', { name: 'Reference details' })).getByRole('heading').textContent).toBe('Components');
+  expect(chipLabels()).toEqual(['Chip flange', 'Chip cap']);
+  expect(screen.getByRole('region', { name: 'Reference details' }).getAttribute('data-references')).toBe('[["wrist_link"]]');
   // Without a handler there is no eye at all.
   rerender(<Harness/>);
   expect(screen.queryByRole('button', { name: /^(Hide|Reveal) / })).toBeNull();
@@ -295,12 +313,9 @@ it('a modified click adds a link to the selection, as it adds an object, and a p
   expect(drawn()).toBe('[["base_link","shoulder_link"],[]]');
   expect(screen.getAllByRole('button', { pressed: true }).map(row => row.getAttribute('aria-label')))
     .toEqual(['Select base_link', 'Select shoulder_link']);
-  const reference = within(screen.getByRole('region', { name: 'Reference details' }));
-  // Several links head the panel as what they are, and list themselves once: no count line.
-  expect(reference.getByRole('heading').textContent).toBe('Links');
-  const summary = reference.getByLabelText('Link details');
-  expect(summary.textContent).toContain('base_link, shoulder_link');
-  expect(summary.textContent).not.toMatch(/\d links|Selection ·/);
+  // Several links are a chip each, and a reference each.
+  expect(chipLabels()).toEqual(['Chip base_link', 'Chip shoulder_link']);
+  expect(screen.getByRole('region', { name: 'Reference details' }).getAttribute('data-references')).toBe('[["base_link"],["shoulder_link"]]');
   fireEvent.click(screen.getByRole('button', { name: 'Select base_link' }), { metaKey: true });
   expect(drawn()).toBe('[["shoulder_link"],[]]');
   fireEvent.click(screen.getByRole('button', { name: 'Select base_link' }));

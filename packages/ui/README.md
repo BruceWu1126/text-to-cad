@@ -78,7 +78,7 @@ these peers are not bundled into UI.
 ```text
 src/
   host/              explicit host ports, prompt actions and React binding
-  drawing/           reusable Excalidraw editor; desktop scratch drawing host
+  drawing/           Draw's session, toolbar and ink geometry (its 3D ink is renderers/kit/tools/draw)
   cad-viewer/        CadViewer (FileViewer + the five CAD renderers + the home), and a CAD client as a FileSource
   file-viewer/       FileViewer, typed source/renderer contracts, the document lifecycle hook
     navigation/     the navbar, the app menu and its links, the folder explorer, the file menu
@@ -134,7 +134,7 @@ const renderers = [createStepRenderer({ client, preferences }), createDxfRendere
 
 Public entry points include `/host`, `/file-viewer`, `/tab-store`, `/navigation`, `/renderers/step`,
 `/renderers/dxf`, `/renderers/glb`, `/renderers/mesh`, `/renderers/robot`, `/renderers/workspace`, `/file-viewer/presentation`, `/file-viewer/empty`,
-`/cad-viewer`, `/catalog`, `/links`, `/library`, `/consent` (the app menu's Share anonymous usage data row and its state), `/features` (the app menu's feature rows: `useFeatures`), `/drawing`, `/loading-icon`, `/utils`, `/primitives/*`,
+`/cad-viewer`, `/catalog`, `/links`, `/library`, `/consent` (the app menu's Share anonymous usage data row and its state), `/drawing`, `/loading-icon`, `/utils`, `/primitives/*`,
 `/tokens.css`, and `/styles.css`. `/catalog` (a CAD client as a `FileSource`, the file menu's
 Copy path and Reveal, and the one spelling of an absolute path: `normalizePath`, `baseName`,
 `joinPath`) and `/links` (the navbar's link defaults) are pure modules, with no React, for a
@@ -155,12 +155,8 @@ const host = { files: createCadFileSource(client), clipboard, promptContext, env
 Declarations are owned here; apps need no ambient shims or aliases into this
 source tree.
 
-`/drawing` is a separate lazy entry point for the Excalidraw editor, for temporary
-sketches, with no platform discovery or persistent storage. Desktop owns its temporary Drawing tabs,
-in-memory scene retention and prompt delivery; the viewer's Draw tool mounts the
-same editor as an overlay in both apps.
-Read [drawing](docs/drawing.md) before extending this editor or reusing it for
-viewer annotations.
+The viewer's Draw tool is native ink projected into the model, with no drawing
+SDK and no persistent storage. Read [drawing](docs/drawing.md) before extending it.
 
 The required host contract, typed prompt bundles, delivery receipts and host
 chrome slots are documented in [viewer host](docs/viewer-host.md). Clipboard
@@ -254,9 +250,8 @@ Reference takes the place of while something is picked — or a robot's Links, a
 selection, the Reference. Position shows Position; Display and Draw show their own panels; kept
 effects (Explode, Clip, Measure's results) follow. A panel whose tool is not up stays
 mounted, hidden, so a tree keeps its scroll and expansion; only what is on screen does
-background work. Features has no X: an assembly shows it whenever Select is up, on a phone
-too. Links' X closes it alone (Select stays the tool, marked) until a press on Select brings
-it back; it starts closed on a phone, until a person chooses. The tree, the Reference and
+background work. A tree has no X: an assembly's Features and a robot's Links show whenever
+Select is up, on a phone too. The tree, the Reference and
 Position each open as tall as their content needs, up to the whole stack, and are each sized
 by their own bottom-right grip, Quick Edit's. SDF metadata is a Select panel
 too. Links is the description's link tree, with the Model tree's rows, filter

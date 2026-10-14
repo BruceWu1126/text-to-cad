@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { Maximize } from 'lucide-react';
 import { useAnalyticsConsent } from '@text-to-cad/ui/consent';
-import { useFeatures } from '@text-to-cad/ui/features';
 import { UpdateButton, useUpdateNotice } from '@text-to-cad/ui/update';
 import { viewerLinks } from '@text-to-cad/ui/links';
 import { Button } from '@text-to-cad/ui/primitives/button';
@@ -191,11 +190,7 @@ export default function App({ bridge, server, launch: initial, presentation = 't
 
   // The usage stats cadgen sends (its telemetry), the same as the browser viewer's: nothing asks here (a
   // cadgen command says it once), and the app menu's switch changes it.
-  const { appSettings: analyticsSettings } = useAnalyticsConsent(client.consent);
-  // The app menu's features (Quick edit), on until the person turns one off: kept by the server beside
-  // the analytics answer, one choice for the sidebar, every thread's tab and the browser viewer.
-  const { features, appSettings: featureSettings } = useFeatures(client.features);
-  const appSettings = useMemo(() => [...analyticsSettings ?? [], ...featureSettings ?? []], [analyticsSettings, featureSettings]);
+  const { appSettings } = useAnalyticsConsent(client.consent);
   // A newer text-to-cad (`cadgen/updates.py`): the blue update button, first in the navbar and a row of
   // its own on the home while this install is behind, from the launch's notice at once. Its prompt goes
   // to the chat where the host takes messages, so the agent updates CAD; elsewhere it is copied.
@@ -215,7 +210,7 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   return <Frame bridge={bridge} context={context} insets={insets} inline={inline} bottomCenter={bottomCenter}
     overlay={lost ? <Banner message={LOST[presentation]} /> : null}>
     <ModelView launch={launch} sequence={showing.sequence} alone={alone} bridge={bridge} client={client} tunnel={tunnel}
-      tabStore={tabStore} live={live} links={links} appSettings={appSettings} features={features}
+      tabStore={tabStore} live={live} links={links} appSettings={appSettings}
       update={updateNotice ? <UpdateButton notice={updateNotice} send={sendPrompt} copy={prompt => frameClipboard.writeText(prompt)}
         onLink={openLink} /> : null}
       fullSize={inline && context.availableDisplayModes?.includes('fullscreen') !== false ? <FullSizeButton bridge={bridge} /> : null}

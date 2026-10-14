@@ -210,9 +210,10 @@ asked for through the surface request, never tessellated in the page.
 | `POST /__cad/clipboard` | A PNG onto this machine's clipboard: the web page's picture copy, which asks the browser for no permission. |
 | `GET`/`POST /__cad/analytics` | Whether the person's usage stats are sent, and why; `{share}` is their answer (the app menu's toggle). Nothing asks. |
 | `POST /__cad/analytics/activity` | What the page did, for telemetry: `{touched: true}`, a person touched it; `{quickEdit: true}`, a Quick Edit went; `{crash}`, the page crashed (core's `crashOf`: its type and frames, checked again by the server, never a message). |
-| `GET`/`POST /__cad/features` | The features a person can turn off, and their change of some. |
 | `GET /__cad/version` | Whether a newer text-to-cad is out: the update button's `notice`, or null. |
-| `POST /__cad/sketches?name=...` | Save a PNG a copied prompt names by path (a Quick Edit's sketch) as scratch in the system's temporary directory; answers its absolute path. |
+| `POST /__cad/prompt-files` | `{name, input, views: [{label, camera, display?, kinematics?, jointValues?, selection?, width?, height?}], sketch}`: write a Quick Edit prompt's files (its views as a snapshot job file, its sketch) and render the views off the request; answers `202 {id, retryMs}` at once, or a 400. Carries `x-cadgen-viewer`, as both GETs below do. |
+| `GET /__cad/prompt-files?id=...` | That render: `202 {id, retryMs}` while it runs, then `200 {job, sketch, images: [{label, path}]}` (absolute paths), a 500 when it failed, a 404 for an id this process no longer keeps. |
+| `GET /__cad/prompt-files/<name>` | One of those files (a PNG or JSON), from the prompt-files directory only. |
 | `POST /__cad/shutdown` | Exit: a newer launch replacing this viewer, or `cadgen viewer stop`. Answers 202, then stops and frees the port. |
 | `POST /__cad/surfaces` | Read components' part records from the store; the parts it lacks, one build-pool job derives. |
 | `POST /__tess_cache/probe` | The parts' records, for part keys. |

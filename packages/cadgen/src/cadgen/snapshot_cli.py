@@ -29,6 +29,7 @@ leaves no file at all.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import functools
 import json
@@ -71,6 +72,7 @@ from cadgen.cli_progress import cli_progress_line
 from cadgen.results import SnapshotResult
 from cadgen.snapshot_core import (
     SELECTION_KEYS,
+    BatchSnapshotRenderer,
     SUPPORTED_JOB_KEYS,
     SnapshotError,
     asset_url_for_path,
@@ -141,6 +143,8 @@ class SnapshotOptions:
     video_specified: bool = False
     joint_values: object = None
     joint_values_specified: bool = False
+    sketch: object = None
+    sketch_specified: bool = False
     focus: list[str] | None = None
     focus_specified: bool = False
     hide: list[str] | None = None
@@ -278,11 +282,44 @@ def option_display_modes(options: SnapshotOptions) -> frozenset[str] | None:
     return display_modes_for_kind(input_kind(Path(options.input))) if options.input else None
 
 
+def load_sketch_option(value: object, *, cwd: Path) -> tuple[dict[str, object], str]:
+    """``sketch`` in job form: the sketch object, and the file it was read from ("" inline).
+
+    A job's ``sketch`` and the ``--sketch`` flag are the same value: a sketch
+    JSON file's path (resolved against the working folder, as a job's input is),
+    the sketch JSON as text, or -- from a library call or a job -- the object.
+    Only its outer shape is checked here; every field is checked by the page
+    that draws it (``normalizeSketch``), whose refusal names the file.
+    """
+    if is_plain_object(value):
+        return dict(value), ""
+    text = value.strip() if isinstance(value, str) else ""
+    if not text:
+        raise SnapshotError("sketch is the path of a sketch JSON file, or the sketch object itself")
+    source = ""
+    if text.startswith("{"):
+        parsed = load_json_text(text, "sketch")
+    else:
+        path = (cwd / Path(text).expanduser()).resolve()
+        if not path.is_file():
+            raise _missing(f"sketch file does not exist: {text}")
+        try:
+            parsed = load_json_text(path.read_text(encoding="utf-8"), str(path))
+        except (OSError, UnicodeDecodeError) as exc:
+            raise SnapshotError(f"Cannot read sketch file {text}: {exc}") from exc
+        source = str(path)
+    if not is_plain_object(parsed):
+        raise SnapshotError(f"{source or 'sketch'}: a sketch is a JSON object with units, parts and marks")
+    return parsed, source
+
+
 def apply_option_overrides_to_job(job: object, options: SnapshotOptions, *, cwd: Path) -> object:
     if not is_plain_object(job):
         return job
     if not any(
         [
+            bool(options.input),
+            options.sketch_specified,
             options.mode_specified,
             options.view_labels,
             options.debug,
@@ -300,6 +337,11 @@ def apply_option_overrides_to_job(job: object, options: SnapshotOptions, *, cwd:
     ):
         return job
     next_job = copy.deepcopy(job)
+    # TARGET with --job: the same views over another model. OUT stays the jobs' own.
+    if options.input:
+        next_job["input"] = options.input
+    if options.sketch_specified:
+        next_job["sketch"] = options.sketch
     if options.mode_specified:
         next_job["mode"] = normalize_render_mode(options.mode)
     if options.debug:
@@ -416,6 +458,8 @@ def load_job_from_options(options: SnapshotOptions, *, cwd: Path | None = None) 
         job["video"] = parse_video_option(options.video, cwd=resolved_cwd)
     if options.joint_values_specified:
         job["jointValues"] = parse_joint_values_option(options.joint_values)
+    if options.sketch_specified:
+        job["sketch"] = options.sketch
     if options.debug:
         job["debug"] = True
     merge_focus_hide_options(job, options)
@@ -760,6 +804,8 @@ class PreparedRenderJob:
     resolved_cwd: Path
     #: What the kind's check learned that its resolver needs (an SRDF's paired URDF).
     context: dict[str, object]
+    #: The file the job's sketch was read from ("" for none, or an inline one).
+    sketch_source: str = ""
 
 
 def prepare_render_job(
@@ -850,6 +896,11 @@ def prepare_render_job(
         raise SnapshotError("selection.focus and selection.hide cannot be used in the same snapshot job")
 
     context = KIND_CHECKS[kind](job, kind=kind, input_path=input_path, mode=mode) or {}
+    sketch_source = ""
+    if job.get("sketch") is not None:
+        if mode != "view":
+            raise SnapshotError("a sketch is ink drawn over a view; list mode draws nothing to draw it on")
+        job["sketch"], sketch_source = load_sketch_option(job["sketch"], cwd=resolved_cwd)
     normalized = normalize_common_job(
         job,
         mode=mode,
@@ -866,12 +917,13 @@ def prepare_render_job(
         reference_root=reference_root_for_input(input_path, resolved_cwd),
         resolved_cwd=resolved_cwd,
         context=dict(context),
+        sketch_source=sketch_source,
     )
 
 
 def resolve_prepared_render_job(prepared: PreparedRenderJob) -> dict[str, object]:
     """Build what an accepted job's render needs and attach it as ``resolved``."""
-    return KIND_RESOLVERS[prepared.kind](
+    resolved_job = KIND_RESOLVERS[prepared.kind](
         prepared.job,
         kind=prepared.kind,
         input_path=prepared.input_path,
@@ -880,6 +932,10 @@ def resolve_prepared_render_job(prepared: PreparedRenderJob) -> dict[str, object
         resolved_cwd=prepared.resolved_cwd,
         **prepared.context,
     )
+    if prepared.sketch_source:
+        # So the page's refusal of a mark can name the file it is in (snapshot_core._render_job).
+        resolved_job["resolved"] = {**resolved_job["resolved"], "sketchSource": prepared.sketch_source}
+    return resolved_job
 
 
 def resolve_render_job(
@@ -1258,6 +1314,11 @@ def check_drawing_render_job(
             f"({reasons}). A drawing's output takes: "
             f"{', '.join(sorted(DRAWING_OUTPUT_SETTINGS_KEYS))}."
         )
+    if job.get("sketch") is not None:
+        raise SnapshotError(
+            f"a sketch is ink drawn on a model's parts in 3D; {DRAWING_IS}, so {label} has no "
+            "parts or space to draw it in."
+        )
     # The refusals every non-STEP input shares (selection, poses, clips, videos,
     # tessellation). Mode is already decided above, with a sentence about
     # drawings rather than about mesh inputs.
@@ -1519,12 +1580,19 @@ async def run_snapshot_async(
     kinds: Sequence[str],
     runtime_dir: Path | None = None,
     cwd: Path | None = None,
+    renderer: BatchSnapshotRenderer | None = None,
+    report: bool = True,
 ) -> SnapshotResult:
     """Render whatever ``options`` describes and report what was written.
 
     THE snapshot implementation: the CLI parses argv into ``options`` and prints
     what comes back, and the public ``<format>.snapshot()`` verbs build the same
     options object. Nothing here prints, so the two cannot report differently.
+
+    ``renderer`` is a browser session the caller keeps open across runs (the CAD
+    Viewer's prompt renders, ``cadgen.viewer.prompt_files``): this run uses it and
+    leaves it open. ``report=False`` paints no progress and narrates nothing, for
+    a caller that is not a terminal command.
     """
     enabled = enabled_kinds(kinds)
     with _failing_as("bad_request"):
@@ -1548,9 +1616,12 @@ async def run_snapshot_async(
     with _failing_as("input_error"):
         packet = resolve_prepared_job_packet(single, prepared)
     logger = CliLogger("snapshot", verbose=False)
-    with _failing_as("render_error"), cli_progress_line(
-        snapshot_progress_label(packet), logger=logger, fallback="Rendering..."
-    ) as sink:
+    painter = (
+        cli_progress_line(snapshot_progress_label(packet), logger=logger, fallback="Rendering...")
+        if report
+        else contextlib.nullcontext(None)
+    )
+    with _failing_as("render_error"), painter as sink:
         progress = ProgressReporter(
             sinks=[sink] if sink is not None else (),
             phases=SNAPSHOT.phases,
@@ -1560,8 +1631,9 @@ async def run_snapshot_async(
         result = await render_snapshot(
             packet,
             runtime_dir=browser_runtime_dir(runtime_dir),
+            renderer=renderer,
             progress=progress,
-            narrate=snapshot_narrator(logger),
+            narrate=snapshot_narrator(logger) if report else None,
         )
         progress.finish()
     return result

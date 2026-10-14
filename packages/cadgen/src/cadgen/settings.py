@@ -5,10 +5,9 @@ directory forgets them.
 
 The file is one JSON object with a section per feature, each owned by the module that uses it
 (``telemetry``: whether usage stats and crash reports are sent, and the install's random id,
-``cadgen/analytics.py``; ``features``: the CAD views' features a person turned off,
-``cadgen/features.py``). A change reads,
-changes and writes its own section under one lock (``update_section``), so two apps changing
-settings at once never undo each other, whichever sections they touch.
+``cadgen/analytics.py``). A change reads, changes and writes its own section under one lock
+(``update_section``), so two apps changing settings at once never undo each other, whichever
+sections they touch, and a section no module owns any more is read by nothing and kept as it is.
 """
 
 from __future__ import annotations

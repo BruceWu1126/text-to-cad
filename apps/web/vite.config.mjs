@@ -7,7 +7,6 @@ import react from "@vitejs/plugin-react";
 import { buildId } from "@text-to-cad/ui/build-id";
 import { stampDebugId } from "@text-to-cad/core/chunk-ids";
 import { packageSourceMaps } from "@text-to-cad/core/source-maps";
-import { drawingAssetsPlugin } from "@text-to-cad/ui/drawing-assets";
 
 import { resolveDirectoryRoot as resolveViewerDirectoryRoot } from "./scripts/directoryRoot.mjs";
 import { resolveServerFsAllow } from "./scripts/serverFsAllow.mjs";
@@ -228,12 +227,6 @@ export default defineConfig(async ({ command }) => ({
   // the release's own, this checkout's commit for any other (@text-to-cad/ui/build-id).
   define: { __TEXT_TO_CAD_BUILD__: JSON.stringify(buildId({ version: viewerVersion(), cwd: viewerAppRoot })) },
   plugins: [
-    // Excalidraw's fonts, served in dev and emitted into dist/excalidraw, with
-    // the SDK's CDN fallback pointed back at this origin: the Viewer ships in a
-    // wheel and never fetches a font from the network. The 12 MB Xiaolai CJK
-    // family is left out of the wheel on purpose; a CJK glyph is then a local
-    // miss and a system font, not a request.
-    drawingAssetsPlugin({ exclude: [/\/fonts\/Xiaolai\//] }),
     react(),
     serverLifetimePlugin(),
     packageSourceMaps(["@text-to-cad/core", "@text-to-cad/ui"]),

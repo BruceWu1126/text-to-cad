@@ -367,8 +367,11 @@ function servingInParts(bytes: Uint8Array, {
 describe('a Quick Edit in the chat', () => {
   const file = referencePart({ resource: { kind: 'workspace-file', path: '/project/parts/a.step' }, target: { kind: 'whole-resource' } }, 'file');
   const face = referencePart({ resource: { kind: 'workspace-file', path: '/project/parts/a.step' }, target: { kind: 'cad-selector', selectors: ['o1.f2'] } }, 'face');
-  const sketch = () => ({ id: 'sketch', kind: 'attachment' as const, name: 'a-sketch.png', label: 'Sketch', mimeType: 'image/png', about: ['file'],
-    content: new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' }) });
+  const sketch = () => ({ id: 'sketch', kind: 'attachment' as const, name: 'a-current.png', label: 'Current view', mimeType: 'image/png', about: ['file'],
+    content: new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' }), path: Promise.resolve('/tmp/p/a-1-current.png') });
+  // The views job: a file, never an image, always named by where it was made.
+  const views = () => ({ id: 'views', kind: 'attachment' as const, name: 'a.job.json', label: 'Views', mimeType: 'application/json', about: ['file'],
+    content: new Blob(['{}'], { type: 'application/json' }), path: Promise.resolve('/tmp/p/a-1.job.json') });
   const edit = (...parts: any[]) => createPromptContext([{ id: 'text', kind: 'text', text: 'Round it.' }, file, ...parts]);
 
   it('reaches what the host declared: a tab host queues whatever it declares, and a picture rides in a message only where it takes images', () => {
@@ -390,7 +393,7 @@ describe('a Quick Edit in the chat', () => {
     const [text, image] = updates[0].params.content;
     expect(updates[0].method).toBe('ui/update-model-context');
     expect(text).toEqual({ type: 'text', text: 'Round it.\n\nFile: /project/parts/a.step\nReferences:\n/project/parts/a.step#o1.f2', _meta: { 'openai/title': 'Quick edit · a.step' } });
-    expect([image.type, image.mimeType, image._meta['openai/title']]).toEqual(['image', 'image/png', 'Sketch · a.step']);
+    expect([image.type, image.mimeType, image._meta['openai/title']]).toEqual(['image', 'image/png', 'Current view · a.step']);
     await port.deliver(edit());
     expect(updates[1].params.content).toHaveLength(3);
     // The host cleared the context (the message went out): the next one starts afresh.
@@ -409,7 +412,7 @@ describe('a Quick Edit in the chat', () => {
     expect((result as { message: string }).message).toMatch(/Copy Prompt/);
   });
 
-  it('sends a message into the chat, its sketch as an image, or saved and named where the host refuses the image', async () => {
+  it('sends a message into the chat, its picture as an image or named by where it was made where the host refuses the image, and its views job by path', async () => {
     const sent: any[] = [];
     let refuse = false;
     const bridge = {
@@ -420,19 +423,17 @@ describe('a Quick Edit in the chat', () => {
         return {};
       },
     } as any;
-    const saved: string[] = [];
-    const attachments = { save: async (_png: Blob, name: string) => { saved.push(name); return `/tmp/cadgen-sketches/${name}`; } };
-    const port = createChatPromptContext(bridge, { reach: { queue: false, send: true, sendImages: true }, attachments });
+    const port = createChatPromptContext(bridge, { reach: { queue: false, send: true, sendImages: true } });
     expect(port.getSnapshot().kind).toBe('unavailable');
-    expect((await port.send!(edit(sketch()))).status).toBe('sent');
+    expect((await port.send!(edit(sketch(), views()))).status).toBe('sent');
     expect(sent[0].method).toBe('ui/message');
     expect(sent[0].params.role).toBe('user');
     expect(sent[0].params.content.map((block: any) => block.type)).toEqual(['text', 'image']);
-    expect(sent[0].params.content[0].text).toBe('Round it.\n\nFile: /project/parts/a.step');
+    expect(sent[0].params.content[0].text).toBe('Round it.\n\nFile: /project/parts/a.step\nViews: /tmp/p/a-1.job.json');
     refuse = true;
-    expect((await port.send!(edit(sketch()))).status).toBe('sent');
-    expect(sent.at(-1).params.content).toEqual([{ type: 'text', text: 'Round it.\n\nFile: /project/parts/a.step\nSketch: /tmp/cadgen-sketches/a-sketch.png' }]);
-    expect(saved).toEqual(['a-sketch.png']);
+    expect((await port.send!(edit(sketch(), views()))).status).toBe('sent');
+    expect(sent.at(-1).params.content).toEqual([{ type: 'text',
+      text: 'Round it.\n\nFile: /project/parts/a.step\nCurrent view: /tmp/p/a-1-current.png\nViews: /tmp/p/a-1.job.json' }]);
   });
 });
 

@@ -21,6 +21,7 @@ function keptPoseLabel(pose) {
 import { PointerPick } from "../kit/tools/select/usePointerPick.js";
 import { useDeclinedSelectReference, useWorkspaceDocument, workspaceLoadAlert } from "../workspace/useWorkspaceDocument.js";
 import PositionControls, { PoseGroupStateRow } from "./PositionControls.jsx";
+import { useRobotReferences } from "./robotReferences.jsx";
 import LinksSection from "./LinksSection.jsx";
 import SdfSection from "./SdfSection.jsx";
 import { prepareRobotJointHandles, robotJointHandles } from "./jointHandles.js";
@@ -31,11 +32,8 @@ import { useRobotVisibility } from "./useRobotVisibility.js";
 import { useRobotDocument } from "./useRobotDocument.js";
 
 const NO_HANDLES = Object.freeze([]);
+const NO_REFERENCES = Object.freeze([]);
 const SELECT_ICON = <MousePointer2 className="size-3" strokeWidth={2} aria-hidden="true" />;
-// Select's own panel, which a person can close (`LinksSection.jsx`'s tree). A robot is never a
-// single part: like an assembly's, its tree starts open, except on a phone.
-const LINKS_PANEL = Object.freeze({ id: "tree", label: "Links" });
-
 function RobotSurface({ view, data }) {
   const document = useWorkspaceDocument({ view, data });
   const loaded = useRobotDocument({ entry: document.entry, client: document.client, resources: document.client.resources });
@@ -138,7 +136,9 @@ function RobotSurface({ view, data }) {
     features: EDGELESS_VIEW_FEATURES, toolModes: ROBOT_TOOL_MODES, previewable: true, preview, scene,
     sceneScaleMode: VIEWER_SCENE_SCALE.URDF,
     load: { busy: (loaded.busy && !scene) || (Boolean(robot) && !scene), updating: loaded.busy && Boolean(scene), progress: loaded.progress, alert: loadAlert },
-    live, escape, rendererState
+    live, escape, rendererState,
+    // A prompt's view: the robot's pose and the parts hidden. A robot is drawn in metres.
+    viewState: () => ({ jointValues: pose?.getSnapshot().values, hide: hiddenPartIds }), sketchUnits: "m"
   });
   shellRef.current = shell;
   useDeclinedSelectReference(document);
@@ -228,8 +228,7 @@ function RobotSurface({ view, data }) {
   // Position is offered where a control can be driven; until the robot has loaded that is not
   // known, and it is shown, idle, meanwhile.
   const tools = [
-    // Links closes by its X; a press on Select while it is the tool opens it again.
-    shell.tools.own({ id: ROBOT_TOOL.SELECT, label: "Select", icon: SELECT_ICON, panel: LINKS_PANEL }),
+    shell.tools.own({ id: ROBOT_TOOL.SELECT, label: "Select", icon: SELECT_ICON }),
     !robot || posable ? shell.tools.own({ id: ROBOT_TOOL.POSE, label: "Position", icon: <PositionToolIcon />,
       // Lit while it is the tool alone: a pose it set is kept in the stack.
       // Its panel is in the tool stack for as long as it is the tool.
@@ -239,7 +238,7 @@ function RobotSurface({ view, data }) {
   const linksShown = !shell.previewing && toolMode === ROBOT_TOOL.SELECT;
   const toolPanels = <>
     <LinksSection key={modelKey} active={linksShown} robot={robot?.robot || null} components={robot?.components}
-      parts={robot?.parts} hiddenPartIds={hiddenPartIds} onVisibilityChange={changeVisibility} selection={treeSelection} onOpenFile={view.onOpenFile} />
+      parts={robot?.parts} hiddenPartIds={hiddenPartIds} onVisibilityChange={changeVisibility} selection={treeSelection} />
     {kind === "sdf" ? <ToolPanel id="sdf" title="SDF" label="SDF" fit="details" defaultCollapsed hidden={!linksShown}>
       <SdfSection info={robot?.robot?.sdf || null} />
     </ToolPanel> : null}
@@ -254,7 +253,20 @@ function RobotSurface({ view, data }) {
       poseRow={pose.groupStates.length ? <PoseGroupStateRow pose={pose} /> : null} /> : null}
   </>;
 
+  // What is selected, for Quick Edit: each link (an object by its link) as a reference into the
+  // description, and as a chip whose card says what the description says of it.
+  const { references, chips: referenceChips } = useRobotReferences({ robot: robot?.robot || null, components: robot?.components,
+    selection, resource: shell.frame.resource, onOpenFile: view.onOpenFile });
+
+  // A link pasted into Quick Edit's note, by its name, where it is one of this file's.
+  const resourcePath = shell.frame.resource?.path;
+  const nameLink = useCallback(reference => (reference?.resource?.path === resourcePath && reference.target?.kind === "cad-selector"
+    ? reference.target.selectors.join(", ") : ""), [resourcePath]);
+
   return <RendererShell shell={shell} tools={tools} toolPanels={toolPanels}
+    references={selectActive ? references : NO_REFERENCES} referenceChips={selectActive ? referenceChips : NO_REFERENCES}
+    nameReference={nameLink}
+    onClearReferences={clearSelection}
     viewportOverlay={viewport => <>
       {poseActive ? <JointHandleOverlay handlesRef={handlesRef} layoutSeamRef={handleLayoutRef} {...viewport} /> : null}
       <PointerPick viewport={viewport} scene={scene} enabled={selectActive} onPick={handlePick} onHover={selection.hoverHit} />

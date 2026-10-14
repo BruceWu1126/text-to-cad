@@ -1,15 +1,12 @@
 // The tool stack's layout, a viewing preference of the person's rather than of a file: the tab
-// keeps it (`settings.toolStack` of the tab record) and it holds across files. Three things, and
-// nothing else:
+// keeps it (`settings.toolStack` of the tab record) and it holds across files. Two things, and
+// nothing else (any other key a stored record carries is dropped):
 //
 //   panels     for each panel a person can size (`ToolPanel.jsx`'s `resizable`: the tree, the
 //              Reference and Position), the width and the height cap they dragged it to, by panel
 //              id — only what they set; a panel opens at its defaults otherwise (`TOOL_PANEL_WIDTH`,
 //              and `toolPanelDefaultHeight`: the stack's height);
-//   collapsed  which panels are folded to their first row, by panel id;
-//   closed     whether a panel a person can close (`closable`: a tree) is closed, by
-//              panel id — their own choice, once they have closed or opened it, which then holds
-//              in every file of the tab over how the panel starts (`toolPanelClosed`).
+//   collapsed  which panels are folded to their first row, by panel id.
 //
 // Importing this module has no environmental effects.
 
@@ -28,7 +25,7 @@ const MAX_STORED_PX = 4000;
 const PANEL_ID = /^[a-z][a-z0-9-]{0,31}$/;
 const MAX_PANELS = 32;
 
-export const DEFAULT_TOOL_STACK = Object.freeze({ panels: Object.freeze({}), collapsed: Object.freeze({}), closed: Object.freeze({}) });
+export const DEFAULT_TOOL_STACK = Object.freeze({ panels: Object.freeze({}), collapsed: Object.freeze({}) });
 
 const finite = value => typeof value === "number" && Number.isFinite(value);
 const bounded = (value, floor) => finite(value) && value > 0 ? Math.round(Math.min(MAX_STORED_PX, Math.max(floor, value))) : undefined;
@@ -41,10 +38,10 @@ const flags = value => {
 
 /**
  * The layout the stack is drawn with, from anything a store handed back: the sizes of the panels a
- * person has set (`{ width?, height? }` by id, each bounded; a panel with neither is absent), the
- * panels whose folded state differs from nothing at all (`true` folded, `false` unfolded against a
- * panel that starts folded), and the closable panels a person has closed (`true`) or opened (`false`).
- * @returns {{ panels: Record<string, { width?: number, height?: number }>, collapsed: Record<string, boolean>, closed: Record<string, boolean> }}
+ * person has set (`{ width?, height? }` by id, each bounded; a panel with neither is absent),
+ * and the panels whose folded state differs from nothing at all (`true` folded, `false` unfolded
+ * against a panel that starts folded).
+ * @returns {{ panels: Record<string, { width?: number, height?: number }>, collapsed: Record<string, boolean> }}
  */
 export function normalizeToolStack(value) {
   const panels = {};
@@ -53,21 +50,7 @@ export function normalizeToolStack(value) {
     const width = bounded(size.width, TOOL_PANEL_WIDTH), height = bounded(size.height, TOOL_PANEL_MIN_HEIGHT);
     if (width !== undefined || height !== undefined) panels[id] = { ...(width !== undefined ? { width } : {}), ...(height !== undefined ? { height } : {}) };
   }
-  return { panels, collapsed: flags(value?.collapsed), closed: flags(value?.closed) };
-}
-
-/**
- * Whether a panel a person can close (a tree: its X puts it away, and a press on the tool it
- * belongs to while that tool is up brings it back) is closed: as the person left it — their choice,
- * once made, holds in every file of the tab — and otherwise as it starts: closed on a phone, so the
- * model has the screen, and open elsewhere.
- * @param {{ closed?: Record<string, boolean> } | null | undefined} layout
- * @param {string} id
- * @param {{ mobile?: boolean }} [start]
- */
-export function toolPanelClosed(layout, id, { mobile = false } = {}) {
-  const stored = layout?.closed?.[id];
-  return typeof stored === "boolean" ? stored : mobile;
+  return { panels, collapsed: flags(value?.collapsed) };
 }
 
 /** A resizable panel's width in a viewer `viewerWidth` wide: never under `TOOL_PANEL_WIDTH`, never over half the viewer. */

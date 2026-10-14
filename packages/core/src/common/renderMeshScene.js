@@ -74,6 +74,7 @@ import {
 } from "./photographicStudio.js";
 import { PHOTOGRAPHIC_STUDIO_MATERIAL_SETTINGS } from "./photographicStudioRig.js";
 import { validateSnapshotRenderJob } from "./snapshotJobValidation.js";
+import { createSketchLayer, normalizeSketch, SKETCH_REFERENCE_HEIGHT_PX } from "./sketch.js";
 
 const DEFAULT_RENDER_SCALE = 1;
 const RENDER_SCENE_SCALE_SETTINGS = Object.freeze({
@@ -682,6 +683,8 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
     dispose() {
       if (disposed) return;
       disposed = true;
+      viewport.sketchLayer?.layer.dispose();
+      viewport.sketchLayer = null;
       if (viewport.clipRuntime) disposeSectionCaps(viewport.clipRuntime);
       model.dispose?.();
       scene.remove?.(model.root);
@@ -803,6 +806,36 @@ function syncViewportTopologyDisplayEdges(viewport) {
       displayRecords: model.displayRecords
     }
   );
+}
+
+function boundsRadius(bounds) {
+  const min = bounds?.min, max = bounds?.max;
+  if (!Array.isArray(min) || !Array.isArray(max)) return 1;
+  const radius = Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2;
+  return Number.isFinite(radius) && radius > 0 ? radius : 1;
+}
+
+// The job's sketch (`job.sketch`, the ink a person drew in the viewer's Draw tool), drawn over this
+// output with the viewer's own code (`sketch.js`): each mark on its part as the scene now has it,
+// cut by the same clip planes. Its ink is as heavy against this output's height as it was against a
+// viewer `SKETCH_REFERENCE_HEIGHT_PX` tall, so one layer serves every output of that height and is
+// rebuilt only for an output of another.
+function syncViewportSketch(viewport, job, { height }) {
+  if (job.sketch == null) return;
+  const lineScale = (height / SKETCH_REFERENCE_HEIGHT_PX) * (viewport.renderer.getPixelRatio?.() || 1);
+  if (viewport.sketchLayer?.lineScale !== lineScale) {
+    viewport.sketchLayer?.layer.dispose();
+    const { model } = viewport;
+    const layer = createSketchLayer(
+      { THREE, Line2, LineGeometry, LineMaterial },
+      normalizeSketch(job.sketch),
+      { radius: model.runtime?.modelRadius || boundsRadius(model.restBounds || model.bounds || viewport.context?.bounds), lineScale }
+    );
+    viewport.scene.add(layer.group);
+    viewport.sketchLayer = { layer, lineScale };
+  }
+  if (viewport.renderer) viewport.renderer.localClippingEnabled = true;
+  viewport.sketchLayer.layer.place(viewport.model.root, viewport.clipRuntime?.activeClipPlanes || []);
 }
 
 export async function captureModel(viewport, captureOptions = {}) {
@@ -941,6 +974,7 @@ export async function captureModel(viewport, captureOptions = {}) {
       fitDepth();
       if (outputTimings) outputTimings.prepareStudioMs = Math.round(performance.now() - stageStarted);
     }
+    syncViewportSketch(viewport, job, { height });
     stageStarted = performance.now();
     viewport.renderer.render(viewport.scene, renderCamera);
     if (outputTimings) outputTimings.drawSubmitMs = Math.round(performance.now() - stageStarted);

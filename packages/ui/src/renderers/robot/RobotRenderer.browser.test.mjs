@@ -36,7 +36,7 @@ let server, browser, temporary;
 let revision = 1;
 before(async () => {
   temporary = await mkdtemp(join(tmpdir(), 'text-to-cad-robot-browser-'));
-  await build({ entryPoints: [fileURLToPath(new URL('../harness/index.tsx', import.meta.url))], outfile: join(temporary, 'harness.js'), bundle: true, format: 'esm', platform: 'browser', conditions: ['production'], jsx: 'automatic', loader: { '.webp': 'dataurl', '.avif': 'dataurl', '.woff2': 'dataurl', '.svg': 'dataurl' } });
+  await build({ entryPoints: [fileURLToPath(new URL('../harness/index.tsx', import.meta.url))], outfile: join(temporary, 'harness.js'), bundle: true, format: 'esm', platform: 'browser', conditions: ['production'], jsx: 'automatic', loader: { '.webp': 'dataurl', '.avif': 'dataurl', '.svg': 'dataurl' } });
   const bundle = await readFile(join(temporary, 'harness.js'));
   const css = await readFile(new URL('../../../dist/styles.css', import.meta.url));
   server = createServer((request, response) => {
@@ -59,7 +59,7 @@ before(async () => {
       // A link mesh file beside the descriptions, or a primitive cadgen meshed, by the URL the payload names.
       const asset = [url.pathname.slice(1), name].find(candidate => /^(meshes|primitives)\/[^/]+\.glb$/.test(candidate) && existsSync(new URL(candidate, FIXTURES)));
       if (asset) { response.setHeader('Content-Type', 'model/gltf-binary'); response.end(readFileSync(new URL(asset, FIXTURES))); }
-      else if (/\.(woff2|ttf|stl|glb)$/.test(url.pathname)) { response.statusCode = 404; response.end(); }
+      else if (/\.(stl|glb)$/.test(url.pathname)) { response.statusCode = 404; response.end(); }
       else { response.setHeader('Content-Type', 'text/html'); response.end(`<!doctype html><html><head><title>Host</title><link rel="stylesheet" href="/styles.css">${HARNESS_SIZE}</head><body><div id="root"></div><script type="module" src="/harness.js"></script></body></html>`); }
     }
   });
@@ -134,6 +134,16 @@ async function open(t, file, { panel = true } = {}) {
     stack: () => pane.locator('[data-cad-tool-stack] [data-tool-panel]').evaluateAll(panels => panels
       .filter(panel => panel.getClientRects().length > 0).map(panel => panel.getAttribute('aria-label'))),
     linksPanel: () => pane.locator('[data-tool-panel][aria-label="Links"]'),
+    // What is selected is Quick Edit's to show: a chip each, by its name (`robotReferences.jsx`).
+    chips: () => pane.locator('[data-quick-edit-refs] [data-quick-edit-ref] > button:first-child')
+      .evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
+    // A chip's card, what the description says of it: the pointer rests on the chip, and it opens beside it.
+    async chipCard(label) {
+      await pane.locator('[data-quick-edit-refs]').getByRole('button', { name: label, exact: true }).hover();
+      const card = page.locator('[data-quick-edit-ref-card]').filter({ has: page.getByText(label, { exact: true }) });
+      await card.waitFor();
+      return card;
+    },
     position: () => pane.locator('[data-tool-panel][aria-label="Position controls"]'),
     // The Position panel's X, there while the pose is off its default: the one render a pose step
     // may cause beyond the host's record, as the pose leaves or reaches the default.
@@ -411,32 +421,23 @@ test('Select picks a visual at once; a selection lives only under Select; Links 
   await pane.getByRole('button', { name: 'Select upper_arm', exact: true }).click();
   assert.deepEqual(await robot.toolNames(), ['Select:true', 'Position:false']);
   await robot.pressed(['Select upper_arm']);
-  const reference = pane.getByRole('region', { name: 'Reference details', exact: true });
-  await reference.getByText('shoulder', { exact: true }).first().waitFor();
-  assert.match(await reference.innerText(), /arm/, 'the SRDF planning group of the link');
-  // The Reference is the next panel of the stack, under Links, headed by the link's name.
-  assert.deepEqual(await robot.stack(), ['Links', 'Reference details']);
-  assert.equal(await reference.getByRole('heading').innerText(), 'upper_arm');
-  const [links, pinned] = await Promise.all([robot.linksPanel().boundingBox(), reference.boundingBox()]);
-  assert.ok(pinned.y >= links.y + links.height, 'under Links');
-  assert.equal(pinned.width, links.width, 'the one width, until a person sizes either');
-  // A link's facts are in the panel's one face and size, never monospace, in compact rows.
-  const faces = await reference.locator('[data-tool-panel-body] *').evaluateAll(nodes => [...new Set(nodes
+  // What is selected is Quick Edit's: a chip for the link, by its name, and Links stays the stack's
+  // one panel. The chip's card, on a rest of the pointer, is what the description says of the link.
+  assert.deepEqual(await robot.chips(), ['upper_arm']);
+  assert.deepEqual(await robot.stack(), ['Links'], 'no Reference panel under Links');
+  const card = await robot.chipCard('upper_arm');
+  await card.getByText('shoulder', { exact: true }).first().waitFor();
+  assert.match(await card.innerText(), /arm/, 'the SRDF planning group of the link');
+  assert.match(await card.innerText(), /^upper_arm\s+ID\s+upper_arm\s/, 'headed by the link\'s name, its id the name too');
+  // A link's facts are in the card's one face and size, never monospace, in compact rows.
+  const faces = await card.locator('[data-info-row] *').evaluateAll(nodes => [...new Set(nodes
     .filter(node => !node.childElementCount && node.textContent.trim())
     .map(node => `${getComputedStyle(node).fontFamily} | ${getComputedStyle(node).fontSize}`))]);
   assert.equal(faces.length, 1, `one face and size: ${faces.join(' / ')}`);
   assert.doesNotMatch(faces[0], /mono/i);
-  assert.ok((await reference.locator('[data-info-row]').first().boundingBox()).height <= 19, 'a compact row');
-  // Links closes by the X at its filter row's end, and the Reference moves up into its place;
-  // Select, pressed while it is the tool, opens Links again with its selection.
-  const linksPanel = robot.linksPanel();
-  await linksPanel.locator('[data-slot=tree-filter]').getByRole('button', { name: 'Close links', exact: true }).click();
-  await linksPanel.waitFor({ state: 'hidden' });
-  assert.deepEqual(await robot.stack(), ['Reference details']);
-  assert.ok((await reference.boundingBox()).y < pinned.y, 'the Reference moves up into its place');
-  await robot.tool('Select').click();
-  await linksPanel.waitFor();
-  await robot.pressed(['Select upper_arm'], 'the tree kept its selection while closed');
+  assert.ok((await card.locator('[data-info-row]').first().boundingBox()).height <= 19, 'a compact row');
+  // Links has no X: its filter row is the filter alone, and it stays while Select is the tool.
+  assert.equal(await robot.linksPanel().locator('[data-slot=tree-filter]').getByRole('button', { name: 'Close links', exact: true }).count(), 0);
   // Leaving Select drops the selection, in the tree and the viewport alike.
   await robot.tool('Position').click();
   await robot.waitPressed(0);
@@ -468,12 +469,12 @@ test('Select picks a visual at once; a selection lives only under Select; Links 
   await page.mouse.down(); await page.mouse.up();
   await robot.settle();
   // A pick selects the visual under the pointer, named by its URDF `name` (cadgen's label for it),
-  // and opens its link so the visual's row is on screen under it; the Reference is headed by that name.
+  // and opens its link so the visual's row is on screen under it; its chip is that name.
   assert.deepEqual(await robot.pressedRows(), ['Select upper_arm_shell'], 'selected by the next frame');
   assert.deepEqual(await page.evaluate(() => (({ selectedLinks, selectedPartIds }) => [selectedLinks, selectedPartIds])(window.cadHarness.a.controller.readState())),
     [[], ['upper_arm:v1']]);
   assert.equal(await pane.getByRole('button', { name: 'Collapse upper_arm', exact: true }).getAttribute('aria-expanded'), 'true', 'its link opens');
-  assert.equal(await reference.getByRole('heading').innerText(), 'upper_arm_shell');
+  assert.deepEqual(await robot.chips(), ['upper_arm_shell']);
   // The shared camera bar provides zoom framing for robots too.
   assert.equal(await pane.getByRole('button', { name: 'Zoom controls', exact: true }).count(), 0);
   assert.equal(await pane.getByLabel('Zoom level percent', { exact: true }).count(), 0);
@@ -490,11 +491,11 @@ test('Select picks a visual at once; a selection lives only under Select; Links 
   await page.waitForFunction(() => document.querySelectorAll('[data-testid="one"] [aria-label="Robot tree area"] button[aria-pressed="true"]').length === 2);
   await robot.pressed(['Select box', 'Select upper_arm_shell']);
   assert.deepEqual((await page.evaluate(() => window.cadHarness.a.controller.readState())).selectedPartIds.sort(), ['carriage:v1', 'upper_arm:v1']);
-  assert.equal(await reference.getByRole('heading').innerText(), 'Components');
+  assert.deepEqual((await robot.chips()).sort(), ['box', 'upper_arm_shell'], 'a chip each');
   // A link is still selected by its row, with what the description says about it.
   await pane.getByRole('button', { name: 'Select carriage', exact: true }).click();
   await robot.pressed(['Select carriage']);
-  assert.match(await reference.innerText(), /tool/, 'the end effector mounted on the link');
+  assert.match(await (await robot.chipCard('carriage')).innerText(), /tool/, 'the end effector mounted on the link');
   await page.keyboard.down('Shift'); await pane.getByRole('button', { name: 'Select upper_arm', exact: true }).click(); await page.keyboard.up('Shift');
   await robot.pressed(['Select carriage', 'Select upper_arm']);
   assert.deepEqual((await page.evaluate(() => window.cadHarness.a.controller.readState())).selectedLinks.sort(), ['carriage', 'upper_arm']);
@@ -516,18 +517,19 @@ test('Select picks a visual at once; a selection lives only under Select; Links 
   // What names something else can be followed: a parent link selects it, a mesh path opens it,
   // by the absolute path cadgen resolved for it beside the description.
   await pane.getByRole('button', { name: 'Select head', exact: true }).click();
-  await reference.getByRole('button', { name: 'meshes/head.glb' }).click();
+  const headCard = await robot.chipCard('head');
+  await headCard.getByRole('button', { name: 'meshes/head.glb' }).click();
   assert.deepEqual(await page.evaluate(() => window.cadHarness.opened), ['/models/meshes/head.glb']);
-  await reference.getByRole('button', { name: 'base', exact: true }).first().click();
+  await headCard.getByRole('button', { name: 'base', exact: true }).first().click();
   await robot.pressed(['Select base']);
   // The filter finds a link by the joint that carries it.
   await pane.getByRole('textbox', { name: 'Filter links', exact: true }).fill('nod');
   await pane.getByRole('list', { name: 'Link search results' }).getByRole('button', { name: 'Select head', exact: true }).waitFor();
   await pane.getByRole('textbox', { name: 'Filter links', exact: true }).fill('');
 
-  // Host commands: a robot has no references to select, and says so; clearSelection clears the link selection.
+  // Host commands: a robot has no faces or edges for a command to select, and says so; clearSelection clears the link selection.
   const declined = await page.evaluate(() => window.cadHarness.a.controller.select(['#f1']).then(() => '', error => error.message));
-  assert.match(declined, /no CAD references to select/);
+  assert.match(declined, /no faces or edges for a command to select/);
   await page.evaluate(() => window.cadHarness.a.controller.clearSelection());
   await robot.pressed([]);
   assert.deepEqual(robot.errors, []);
@@ -653,7 +655,7 @@ test('preview draws the robot as it opens, and leaving it finds the tools view a
   assert.deepEqual(robot.errors, []);
 });
 
-test('a four-bar linkage closes on screen: the crank cadgen derives follows the rocker through its curve, has no knob or slider of its own, and the Reference names its driver', async (t) => {
+test('a four-bar linkage closes on screen: the crank cadgen derives follows the rocker through its curve, has no knob or slider of its own, and the card of its chip names its driver', async (t) => {
   const robot = await open(t, 'linkage.urdf');
   const { page, pane } = robot;
   const linkage = JSON.parse(PAYLOADS['linkage.urdf']);
@@ -678,12 +680,12 @@ test('a four-bar linkage closes on screen: the crank cadgen derives follows the 
     await closes(`the rocker at ${driverDeg} degrees`);
   }
   assert.equal((await robot.stats()).lastPoseWrites, 2, 'a step writes the rocker and the crank it drives');
-  // The Reference for the crank names its four-bar driver, not a mimic formula.
+  // The crank's chip, in Quick Edit: its card names its four-bar driver, not a mimic formula.
   await robot.tool('Select').click();
   await pane.getByRole('button', { name: 'Select crank', exact: true }).click();
-  const reference = pane.getByRole('region', { name: 'Reference details', exact: true });
-  await reference.getByText('Four-bar driver', { exact: true }).waitFor();
-  const said = await reference.innerText();
+  const card = await robot.chipCard('crank');
+  await card.getByText('Four-bar driver', { exact: true }).waitFor();
+  const said = await card.innerText();
   assert.match(said, /output_joint/);
   assert.doesNotMatch(said, /Mimic/);
   assert.deepEqual(robot.errors, []);

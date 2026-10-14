@@ -1,4 +1,4 @@
-import { buildCadRefToken, parseCadRefSelector } from '../lib/cadRefs.js';
+import { buildCadRefToken, parseCadRefSelector, parseCadRefToken } from '../lib/cadRefs.js';
 
 let operationSequence = 0;
 const operationNamespace = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
@@ -51,6 +51,7 @@ export function validatePromptContext(context) {
       requireValue(part.content && (typeof part.content.arrayBuffer === 'function' || typeof part.content.then === 'function'), 'attachment must provide binary content');
       requireValue(part.about === undefined || (Array.isArray(part.about) && part.about.every(id => typeof id === 'string')), 'attachment relationships must name reference parts');
       requireValue(part.label === undefined || typeof part.label === 'string', 'attachment label must be text');
+      requireValue(part.path === undefined || typeof part.path === 'string' || typeof part.path?.then === 'function', 'attachment path must be a path or the promise of one');
     }
   }
   for (const part of context.parts) if (part.kind === 'attachment') {
@@ -90,6 +91,18 @@ export function promptReferenceIds(reference) {
   return reference.label ? [reference.label] : [];
 }
 
+/**
+ * A line that is one reference and nothing else — a file's absolute path and the ids in it, as a
+ * copied reference is written (`/models/base.step#o1.f2`) — as that reference; null for any other.
+ */
+export function parsePromptReference(text) {
+  const line = String(text || '').trim();
+  const parsed = line ? parseCadRefToken(line) : null;
+  if (!parsed || parsed.token.trim() !== line || !parsed.selectors.length) return null;
+  try { return validatePromptReference({ resource: { kind: 'workspace-file', path: parsed.cadPath }, target: { kind: 'cad-selector', selectors: parsed.selectors } }); }
+  catch { return null; }
+}
+
 /** Keep machine identity structured; these strings are the portable human/prompt representation. */
 export function formatPromptReference(reference) {
   validatePromptReference(reference);
@@ -107,6 +120,19 @@ export function formatPromptReference(reference) {
 export function formatPromptContextText(context) {
   validatePromptContext(context);
   return context.parts.flatMap(part => part.kind === 'text' ? [part.text] : part.kind === 'reference' ? [formatPromptReference(part.reference)] : []).join('\n');
+}
+
+/**
+ * Where each attachment that is already saved is (`part.path`: a path, or the promise of one), by
+ * part id: what a message names when it carries the attachment as a file.
+ * @returns {Promise<Map<string, string>>}
+ */
+export async function resolveAttachmentPaths(context) {
+  const saved = new Map();
+  for (const part of context.parts) {
+    if (part.kind === 'attachment' && part.path !== undefined) saved.set(part.id, String(await part.path));
+  }
+  return saved;
 }
 
 /**

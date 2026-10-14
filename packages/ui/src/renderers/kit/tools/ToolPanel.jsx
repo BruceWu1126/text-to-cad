@@ -1,5 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronUp, X } from "lucide-react";
+import { useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { cn } from "@text-to-cad/ui/utils";
 import { ScrollArea } from "@text-to-cad/ui/primitives/scroll-area";
 import { FLOATING_CHROME_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
@@ -35,36 +35,6 @@ export const TOOL_PANEL_HEADING_TEXT_CLASS = "text-tiny font-normal leading-4 te
 /** A panel header's small icon button: the chevron, the X, and a tool's mode menu (`ToolModeMenu.jsx`). */
 export const TOOL_PANEL_BUTTON_CLASS = "flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45";
 
-// What the panel's content reads of it: how to close it from its own first row (`ToolPanelClose`), and its name.
-const ToolPanelContext = createContext(null);
-
-/**
- * A panel's full-row action at its foot, under everything it holds: Copy References under the
- * Reference and Copy Drawing under the drawing controls. Where the button is too narrow for its
- * name and the shortcut (under 9rem), it says `shortLabel` ("Copy") instead; its accessible name
- * stays the whole label. `shortcut` is the key that does the same from the viewer (⌘C). A press
- * whose `onClick` answers true says "Copied", with a tick where the shortcut was, for a moment.
- * @param {{ label: string, shortLabel?: string, shortcut?: string, disabled?: boolean, onClick(): unknown }} props
- */
-export function ToolPanelFooterButton({ label, shortLabel = label, shortcut = "", disabled = false, onClick }) {
-  const keys = shortcut ? shortcut.replace("⌘", "Meta+").replace("Ctrl+", "Control+") : undefined;
-  const [done, setDone] = useState(false);
-  useEffect(() => {
-    if (!done) return undefined;
-    const timer = setTimeout(() => setDone(false), 1200);
-    return () => clearTimeout(timer);
-  }, [done]);
-  return <button type="button" aria-label={label} aria-keyshortcuts={keys} disabled={disabled} data-tool-panel-footer-button=""
-    className="@container flex h-7 w-full shrink-0 items-center justify-center gap-2 rounded-b-md border-t border-border text-tiny text-foreground hover:bg-accent/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45 disabled:opacity-50"
-    onClick={async () => { if (await onClick()) setDone(true); }}>
-    {done ? <span>Copied</span> : <>
-      <span className="@max-[9rem]:hidden">{label}</span>
-      <span className="hidden @max-[9rem]:inline">{shortLabel}</span>
-    </>}
-    {done ? <Check className="size-3" aria-hidden="true" /> : shortcut ? <kbd aria-hidden="true" className="font-sans text-micro text-muted-foreground">{shortcut}</kbd> : null}
-  </button>;
-}
-
 function CollapseButton({ panel, className }) {
   return <button type="button" aria-label={`${panel.collapsed ? "Expand" : "Collapse"} ${panel.label.toLowerCase()}`} aria-expanded={!panel.collapsed}
     data-tool-panel-collapse="" className={cn(TOOL_PANEL_BUTTON_CLASS, className)} onClick={panel.toggle}>
@@ -76,20 +46,6 @@ function CollapseButton({ panel, className }) {
 // An X comes in lightly as it appears (a kept effect set, a pose moved off its default): a short
 // fade and grow, none under reduced motion.
 const REVEAL_CLASS = "animate-in fade-in-0 zoom-in-75 duration-150 motion-reduce:animate-none";
-
-/**
- * The X that closes the panel it is drawn in, for a closable panel whose first row is its
- * content's own: a tree's filter row. Drawn at that row's trailing end, inside a `closable`
- * `ToolPanel`; nothing outside one. The panel goes, kept as it is, until the tool it belongs to
- * brings it back (`RendererShell.jsx`: a press on that tool while it is up).
- */
-export function ToolPanelClose({ className }) {
-  const panel = useContext(ToolPanelContext);
-  return panel?.close ? <button type="button" aria-label={`Close ${panel.label.toLowerCase()}`} data-tool-panel-close=""
-    className={cn(TOOL_PANEL_BUTTON_CLASS, className)} onClick={panel.close}>
-    <X className="size-3" aria-hidden="true" />
-  </button> : null;
-}
 
 /**
  * One panel of the tool stack under the strip: a kept effect's controls, or what the tool in
@@ -107,32 +63,28 @@ export function ToolPanelClose({ className }) {
  *
  * A panel folds to its first row and unfolds again, by a chevron at that row's trailing end
  * (down to open, up to fold); folded content stays mounted and keeps working. `collapsible={false}`
- * for a panel with nothing to fold away (a row of buttons, or one with an X instead). A panel's
- * first row is, in order: its heading (`title`, with a `summary`, the chevron and an X when it has
- * something to remove); its `header` (a tree's filter, which carries a `ToolPanelClose`); or its
- * content's own first row. A folding panel without a heading or a header shows its `name`
- * beside the chevron, and has no grip while folded: there is no height to set. Which panels are
- * folded is the person's (`ToolStack.jsx`), by `id`, across files.
+ * for a panel with nothing to fold away (a tree, a row of buttons, or one with an X instead). A
+ * panel's first row is, in order: its heading (`title`, with a `summary`, the chevron and an X when
+ * it has something to remove); its `header` (a tree's filter); or its content's own first row. A
+ * folding panel without a heading or a header shows its `name` beside the chevron, and has no grip
+ * while folded: there is no height to set. Which panels are folded is the person's
+ * (`ToolStack.jsx`), by `id`, across files.
  *
- * `closable`: the tree's. Its X (`ToolPanelClose`) puts the panel away — `hidden`, kept mounted —
- * and the tool it belongs to brings it back; whether it is closed is the person's too, by `id`,
- * starting closed on a phone and wherever the tool it belongs to says the file starts it closed
- * (a single part's: `toolPanelClosed`). `hidden` keeps a panel mounted while its tool is
- * not up, so a tree keeps its expansion, filter and scroll across a trip to another tool. `header`
- * never scrolls; the body under it does, for a panel that gives way; `footer` (a
- * `ToolPanelFooterButton`) is under the body and never scrolls either. `lead`: the panel of the
- * tool in hand, drawn at the top of the stack above every kept panel, wherever it sits among them.
+ * `hidden` keeps a panel mounted while its tool is not up, so a tree keeps its expansion, filter
+ * and scroll across a trip to another tool. `header` never scrolls; the body under it does, for a
+ * panel that gives way. `lead`: the panel of the tool in hand, drawn at the top of the stack above every kept
+ * panel, wherever it sits among them.
  *
  * @param {{ id: string, title?: import("react").ReactNode, name?: string, label: string, summary?: import("react").ReactNode,
  *   actions?: import("react").ReactNode,
- *   header?: import("react").ReactNode, footer?: import("react").ReactNode, collapsible?: boolean, closable?: boolean, onClose?: (() => void) | null, closeLabel?: string,
+ *   header?: import("react").ReactNode, collapsible?: boolean, onClose?: (() => void) | null, closeLabel?: string,
  *   fit?: "fixed" | "tree" | "details", resizable?: boolean, hidden?: boolean, defaultCollapsed?: boolean,
  *   lead?: boolean, children?: import("react").ReactNode }} props
  *   `label` names the panel for assistive technology ("Clip controls"), with a heading or
  *   without; the chevron, the X and the grip take their names from it, unless the X says
  *   what it does itself (`closeLabel`, "Clear selection").
  */
-export default function ToolPanel({ id, title = null, name = "", label, summary = null, actions = null, header = null, footer = null, collapsible = true, closable = false, onClose = null, closeLabel = "",
+export default function ToolPanel({ id, title = null, name = "", label, summary = null, actions = null, header = null, collapsible = true, onClose = null, closeLabel = "",
   fit = "fixed", resizable = false, hidden = false, defaultCollapsed = false, lead = false, children }) {
   const stack = useContext(ToolStackContext);
   const kept = Boolean(stack && id);
@@ -142,14 +94,7 @@ export default function ToolPanel({ id, title = null, name = "", label, summary 
   const toggle = useCallback(() => {
     if (kept) stack.settle(id, { collapsed: !collapsed, fallback: defaultCollapsed }); else setOwnCollapsed(value => !value);
   }, [kept, stack, id, collapsed, defaultCollapsed]);
-  // Closed: the person's as well, kept by the stack; a panel drawn alone keeps its own.
-  const [ownClosed, setOwnClosed] = useState(false);
-  const closed = closable && (kept ? stack.closed(id) : ownClosed);
-  const close = useCallback(() => { if (kept) stack.settle(id, { closed: true }); else setOwnClosed(true); }, [kept, stack, id]);
-  const panel = useMemo(() => collapsible || closable ? {
-    label, ...(collapsible ? { collapsed, toggle } : {}), ...(closable ? { close } : {})
-  } : null, [collapsible, closable, collapsed, toggle, label, close]);
-  const folding = collapsible ? panel : null;
+  const folding = useMemo(() => collapsible ? { label, collapsed, toggle } : null, [collapsible, collapsed, toggle, label]);
 
   // The size: dragged (`draft`), then as the person left it, then the defaults — every panel's
   // width, and the stack's cap for this id.
@@ -212,7 +157,7 @@ export default function ToolPanel({ id, title = null, name = "", label, summary 
   };
 
   // The floor it gives way to: its content's own height when that is less (`FLOOR`).
-  const floored = fit !== "fixed" && !collapsed && !hidden && !closed;
+  const floored = fit !== "fixed" && !collapsed && !hidden;
   const [natural, setNatural] = useState(null);
   useLayoutEffect(() => {
     if (!floored || !section.current || !body.current || !content.current) return undefined;
@@ -242,21 +187,18 @@ export default function ToolPanel({ id, title = null, name = "", label, summary 
     </div> : null;
 
   const dragging = draft !== null;
-  return <section ref={section} aria-label={label} hidden={hidden || closed} data-tool-panel={fit} data-tool-panel-id={id || undefined}
-    data-collapsed={collapsed ? "" : undefined} data-closed={closed ? "" : undefined} data-resizable={sized ? "" : undefined} data-tool-panel-lead={lead ? "" : undefined}
+  return <section ref={section} aria-label={label} hidden={hidden} data-tool-panel={fit} data-tool-panel-id={id || undefined}
+    data-collapsed={collapsed ? "" : undefined} data-resizable={sized ? "" : undefined} data-tool-panel-lead={lead ? "" : undefined}
     className={cn("pointer-events-auto relative flex max-w-full flex-col rounded-md text-tiny", FLOATING_CHROME_SURFACE_CLASS, collapsed ? "shrink-0" : FIT[fit])}
     style={{ width, maxHeight: collapsed || cap === null ? undefined : `${cap}px`, minHeight, order: lead ? -1 : undefined }}>
-    <ToolPanelContext.Provider value={panel}>
-      {heading}
-      {header}
-      {/* A panel that gives way scrolls in the chrome's one scroll region; a fixed one never scrolls. */}
-      {fit === "fixed" ? <div ref={body} hidden={collapsed} data-tool-panel-body="" className="min-w-0 overflow-x-clip rounded-b-md">
-        <div ref={content} className="flow-root">{children}</div>
-      </div> : <ScrollArea hidden={collapsed} className="min-w-0 flex-1 rounded-b-md" viewportRef={body} viewportProps={{ "data-tool-panel-body": "" }}>
-        <div ref={content} className="flow-root">{children}</div>
-      </ScrollArea>}
-      {footer && !collapsed ? footer : null}
-    </ToolPanelContext.Provider>
+    {heading}
+    {header}
+    {/* A panel that gives way scrolls in the chrome's one scroll region; a fixed one never scrolls. */}
+    {fit === "fixed" ? <div ref={body} hidden={collapsed} data-tool-panel-body="" className="min-w-0 overflow-x-clip rounded-b-md">
+      <div ref={content} className="flow-root">{children}</div>
+    </div> : <ScrollArea hidden={collapsed} className="min-w-0 flex-1 rounded-b-md" viewportRef={body} viewportProps={{ "data-tool-panel-body": "" }}>
+      <div ref={content} className="flow-root">{children}</div>
+    </ScrollArea>}
     {/* The person's to size, from its bottom-right corner alone: Quick Edit's grip, inside the
         panel's border, moving both its width and its cap. A folded panel has none: there is no
         height to set. */}

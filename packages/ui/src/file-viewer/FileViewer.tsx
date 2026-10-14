@@ -22,7 +22,7 @@ class RenderBoundary extends Component<{ children: ReactNode; onError?: (error: 
  * The complete file view: one file, by its absolute path, under the one navbar. Its only knowledge
  * of formats comes from registrations. With no file it shows the host's home.
  */
-export function FileViewer({ file, host, renderers, state, onStateChange, displayActions, appSettings, update, fullSize, history, features, notice, onError, presentation }: FileViewerProps) {
+export function FileViewer({ file, host, renderers, state, onStateChange, displayActions, appSettings, update, fullSize, history, notice, onError, presentation }: FileViewerProps) {
   const source = host.files;
   const onOpenFile = host.navigation.openFile;
   const appearance = host.environment;
@@ -71,11 +71,11 @@ export function FileViewer({ file, host, renderers, state, onStateChange, displa
   const rendererBody = useMemo(() => {
     if (!shown) return null;
     const Renderer = shown.prepared.Component;
-    return <RenderBoundary key={key} onError={onError}><Renderer displayActions={displayActions} notice={notice} features={features} key={key} file={shown.file} source={source}
+    return <RenderBoundary key={key} onError={onError}><Renderer displayActions={displayActions} notice={notice} key={key} file={shown.file} source={source}
       navbarSlot={navbarSlot} onFullscreenChange={onFullscreenChange} onReady={onReady} onNavigationActionsChange={onNavigationActionsChange}
       onOpenFile={onOpenFile} appearance={appearance}
       state={rendererState} onStateChange={setRendererState} reload={reload} /></RenderBoundary>;
-  }, [shown, key, onError, displayActions, notice, features, source, navbarSlot, onFullscreenChange, onReady,
+  }, [shown, key, onError, displayActions, notice, source, navbarSlot, onFullscreenChange, onReady,
     onNavigationActionsChange, onOpenFile, appearance, rendererState, setRendererState, reload]);
 
   let body: ReactNode;

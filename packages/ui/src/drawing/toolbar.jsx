@@ -1,11 +1,11 @@
-import { Circle, Eraser, Hand, Minus, PaintBucket, SquareMousePointer, MoveUpRight, Pencil, Redo2, Square, Trash2, Type, Undo2 } from 'lucide-react';
+import { Axis3d, Box, Circle, Eraser, Hand, Minus, PaintBucket, SquareMousePointer, MoveUpRight, Pencil, Redo2, Square, Trash2, Type, Undo2 } from 'lucide-react';
 import { useState } from 'react';
 import { ToolbarButton } from '@text-to-cad/ui/primitives/toolbar-button';
 
 /**
- * The shared drawing controls: a CAD tool dropdown, and the
- * standalone drawing editor's own controls. It imports nothing of the drawing
- * SDK, so a host can show it without loading the editor.
+ * Draw's controls: its tools, the colour, weight and line style of what is drawn next (and of the
+ * ink Select has picked), where it is drawn (on the model or in space), undo, redo and clear — all
+ * the drawing session's (`session.js`).
  */
 
 /**
@@ -21,7 +21,6 @@ const INK_TOOLS = [
   { id: 'rectangle', label: 'Rectangle', Icon: Square },
   { id: 'ellipse', label: 'Ellipse', Icon: Circle },
   { id: 'text', label: 'Text', Icon: Type },
-  // Not an SDK tool: `fill.ts` adds it.
   { id: 'fill', label: 'Fill area', Icon: PaintBucket },
   { id: 'eraser', label: 'Eraser', Icon: Eraser },
 ];
@@ -29,7 +28,7 @@ const INK_TOOLS = [
 /** @type {readonly { id: DrawingTool, label: string, Icon: typeof Hand }[]} */
 const HANDLING_TOOLS = [
   { id: 'selection', label: 'Select and move drawings', Icon: SquareMousePointer },
-  { id: 'hand', label: 'Pan view', Icon: Hand },
+  { id: 'hand', label: 'Move view', Icon: Hand },
 ];
 /** @type {readonly { id: DrawingTool, label: string, Icon: typeof Hand }[]} */
 export const DRAWING_TOOLBAR_TOOLS = [...INK_TOOLS, ...HANDLING_TOOLS];
@@ -52,7 +51,7 @@ export const DRAWING_COLORS = [
 ];
 export const DEFAULT_OVERLAY_DRAWING_COLOR = DRAWING_COLORS[0].value;
 
-// A shape's stroke in px; the pen draws at the same weight (`drawing/index.tsx`).
+// A shape's stroke in px; the pen draws a little heavier at the same weight (`inkGeometry.js`).
 /** @type {readonly { value: number, label: string }[]} */
 export const DRAWING_STROKE_WIDTHS = [
   { value: 1, label: 'Thin' },
@@ -67,6 +66,18 @@ export const DRAWING_STROKE_STYLES = [
   { value: 'dashed', label: 'Dashed' },
   { value: 'dotted', label: 'Dotted' },
 ];
+/** @typedef {'surface' | 'space'} DrawingPlacement */
+// Where ink lies: on the model under it (carried with its part), or in space, on a plane facing the
+// view through the orbit point, on no part. Only what is drawn next: ink already down stays put.
+/** @type {readonly { value: DrawingPlacement, label: string, Icon: typeof Hand }[]} */
+export const DRAWING_PLACEMENTS = [
+  { value: 'surface', label: 'On model', Icon: Box },
+  { value: 'space', label: 'In space', Icon: Axis3d },
+];
+const placementGlyph = placement => {
+  const { Icon } = DRAWING_PLACEMENTS.find(option => option.value === placement) ?? DRAWING_PLACEMENTS[0];
+  return <Icon className="size-3" strokeWidth={2} aria-hidden="true" />;
+};
 // The style as a 2px line across a button, on the diagonal, dashed or dotted as it draws.
 const STYLE_DASHES = Object.freeze({ solid: undefined, dashed: '4 2.5', dotted: '0.01 3.5' });
 const styleGlyph = style => <svg aria-hidden="true" viewBox="0 0 12 12" className="size-3" fill="none" stroke="currentColor"
@@ -86,12 +97,12 @@ const swatch = color => ({ backgroundColor: color, boxShadow: 'inset 0 0 0 1px c
 /**
  * `layout="panel"`: the controls of a panel as wide as its column — the tools, wrapping to the
  * width they are given, then a rule, then the settings on a row of their own: colour, stroke width,
- * line style, undo, redo and clear. Both rows share one column grid, so their buttons line up.
+ * line style, placement, undo, redo and clear. Both rows share one column grid, so their buttons line up.
  * @param {{ drawing: import('./session.js').DrawingSession, className?: string, layout?: 'toolbar' | 'panel' }} props
  */
 export function DrawingToolbar({ drawing, className = '', layout = 'toolbar' }) {
-  // Which of the pickers is open under the buttons, if any: the colours, the weights or the line styles.
-  const [choosing, setChoosing] = useState(/** @type {'' | 'color' | 'width' | 'style'} */ (''));
+  // Which of the pickers is open under the buttons, if any: the colours, the weights, the line styles or the placements.
+  const [choosing, setChoosing] = useState(/** @type {'' | 'color' | 'width' | 'style' | 'placement'} */ (''));
   const choosingColor = choosing === 'color';
   const disabled = !drawing.ready;
   // No tooltips: over a canvas they cover the ink being pointed at. Every button keeps its accessible name.
@@ -109,6 +120,9 @@ export function DrawingToolbar({ drawing, className = '', layout = 'toolbar' }) 
     </ToolbarButton>
     <ToolbarButton tooltip={false} label="Line style" disabled={disabled} active={choosing === 'style'} aria-expanded={choosing === 'style'} onClick={() => setChoosing(open => open === 'style' ? '' : 'style')}>
       {styleGlyph(drawing.strokeStyle ?? 'solid')}
+    </ToolbarButton>
+    <ToolbarButton tooltip={false} label="Placement" disabled={disabled} active={choosing === 'placement'} aria-expanded={choosing === 'placement'} onClick={() => setChoosing(open => open === 'placement' ? '' : 'placement')}>
+      {placementGlyph(drawing.placement ?? 'surface')}
     </ToolbarButton>
     <ToolbarButton tooltip={false} label="Undo" disabled={disabled || !drawing.canUndo} onClick={() => drawing.undo()}><Undo2 className="size-3" strokeWidth={2} aria-hidden="true" /></ToolbarButton>
     <ToolbarButton tooltip={false} label="Redo" disabled={disabled || !drawing.canRedo} onClick={() => drawing.redo()}><Redo2 className="size-3" strokeWidth={2} aria-hidden="true" /></ToolbarButton>
@@ -134,6 +148,13 @@ export function DrawingToolbar({ drawing, className = '', layout = 'toolbar' }) 
       aria-checked={(drawing.strokeStyle ?? 'solid') === value} active={(drawing.strokeStyle ?? 'solid') === value}
       onClick={() => { drawing.selectStrokeStyle?.(value); setChoosing(''); }}>
       {styleGlyph(value)}
+    </ToolbarButton>)}
+  </div> : choosing === 'placement' && !disabled ? <div role="radiogroup" aria-label="Placement"
+    className={panel ? "mt-1 flex flex-wrap gap-0.5" : SURFACE}>
+    {DRAWING_PLACEMENTS.map(({ value, label }) => <ToolbarButton key={value} tooltip={false} label={label} role="radio"
+      aria-checked={(drawing.placement ?? 'surface') === value} active={(drawing.placement ?? 'surface') === value}
+      onClick={() => { drawing.selectPlacement?.(value); setChoosing(''); }}>
+      {placementGlyph(value)}
     </ToolbarButton>)}
   </div> : null;
   if (panel) {

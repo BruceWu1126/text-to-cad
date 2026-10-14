@@ -276,7 +276,7 @@ class BrowserDiagnostics(unittest.IsolatedAsyncioTestCase):
         renderer = mock.Mock(render=mock.AsyncMock(side_effect=results), close=mock.AsyncMock())
         packet = {"single": single, "jobs": jobs}
         rendered = await render_resolved_job_packet(packet, runtime_dir=Path("."), renderer=renderer)
-        renderer.close.assert_awaited_once()
+        renderer.close.assert_not_awaited()  # a session handed in is the caller's to close
         return result_payload(snapshot_result(rendered, packet=packet))
 
     async def test_browser_stages_survive_single_job_typed_json_with_resolution_and_input(self):

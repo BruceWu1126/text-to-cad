@@ -1,59 +1,64 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, expect, it } from 'vitest';
 import { useDrawingSession } from './session.js';
 
 afterEach(cleanup);
-const editor = () => ({ setTool: vi.fn(), setColor: vi.fn(), undo: vi.fn(), redo: vi.fn(), clear: vi.fn() });
 const CAD = { tool: 'freedraw', color: '#ff2d55' };
+const stroke = (id: string, extra = {}) => ({ id, kind: 'stroke', part: null, points: new Float32Array(6), color: '#ff2d55', width: 2, dash: 'solid', ...extra });
+const view = (x: number) => ({ camera: { position: [x, -100, 0], target: [0, 0, 0], up: [0, 0, 1], orthographicHalfHeight: 50 }, width: 1600, height: 1200 });
 
-it('is the toolbar\'s view of the mounted editor and its only way to drive it', () => {
-  const session = renderHook(({ active }) => useDrawingSession(active, CAD), { initialProps: { active: true } });
-  expect(session.result.current).toMatchObject({ ready: false, tool: 'freedraw', color: '#ff2d55', hasContent: false });
-  // Nothing is mounted yet: the toolbar's buttons are inert, not errors.
-  act(() => { session.result.current.selectTool('arrow'); session.result.current.undo(); });
-
-  const controller = editor();
-  act(() => session.result.current.onReady(controller));
-  expect(session.result.current.ready).toBe(true);
-  act(() => { session.result.current.onToolChange('rectangle'); session.result.current.onColorChange('#39ff14'); session.result.current.onContentChange(true); });
-  expect(session.result.current).toMatchObject({ tool: 'rectangle', color: '#39ff14', hasContent: true });
-
-  act(() => { session.result.current.selectTool('arrow'); session.result.current.selectColor('#00e5ff'); session.result.current.undo(); session.result.current.redo(); session.result.current.clear(); });
-  expect(controller.setTool).toHaveBeenCalledWith('arrow');
-  expect(controller.setColor).toHaveBeenCalledWith('#00e5ff');
-  expect([controller.undo, controller.redo, controller.clear].map(action => action.mock.calls.length)).toEqual([1, 1, 1]);
-  // The editor, not the request, says which tool and color are active.
-  expect(session.result.current).toMatchObject({ tool: 'rectangle', color: '#39ff14' });
-});
-
-it('keeps nothing of a sketch once Draw is left and goes back to its first tool, but keeps its colour, stroke width and line style for the next', () => {
-  const session = renderHook(({ active }) => useDrawingSession(active, CAD), { initialProps: { active: true } });
-  const controller = { ...editor(), setStrokeWidth: vi.fn(), setStrokeStyle: vi.fn() };
-  expect(session.result.current.strokeWidth).toBe(2);
-  act(() => { session.result.current.onReady(controller); session.result.current.onToolChange('text'); session.result.current.onColorChange('#ffffff');
-    session.result.current.selectStrokeWidth(4); session.result.current.selectStrokeStyle('dashed'); session.result.current.onContentChange(true); });
-  expect(controller.setStrokeWidth).toHaveBeenCalledWith(4);
-  expect(controller.setStrokeStyle).toHaveBeenCalledWith('dashed');
-  expect(session.result.current.strokeWidth).toBe(4);
-  session.rerender({ active: false });
-  expect(session.result.current).toMatchObject({ ready: false, tool: 'freedraw', color: '#ffffff', strokeWidth: 4, strokeStyle: 'dashed',
-    hasContent: false, canUndo: false, canRedo: false });
-  act(() => session.result.current.clear());
-  expect(controller.clear).not.toHaveBeenCalled();
-  // The editor releasing its controller on unmount while the session stays up (a model update)
-  // keeps the tool in hand too.
-  session.rerender({ active: true });
-  act(() => { session.result.current.onReady(controller); session.result.current.onToolChange('text'); });
-  act(() => session.result.current.onReady(null));
-  expect(session.result.current).toMatchObject({ ready: false, tool: 'text', color: '#ffffff', strokeWidth: 4, strokeStyle: 'dashed' });
-});
-
-it('does not re-render the viewer for reports that change nothing', () => {
+it('holds the ink, each add, erase or move one step to undo and redo; clear is one more, discard leaves nothing to undo', () => {
   const session = renderHook(() => useDrawingSession(true, CAD));
-  act(() => session.result.current.onReady(editor()));
-  const before = session.result.current;
-  act(() => { session.result.current.onToolChange('freedraw'); session.result.current.onColorChange('#ff2d55'); session.result.current.onContentChange(false); });
-  expect(session.result.current.tool).toBe(before.tool);
-  expect(session.result.current.selectTool).toBe(before.selectTool);
-  expect(session.result.current.onReady).toBe(before.onReady);
+  const current = () => session.result.current;
+  expect(current()).toMatchObject({ ready: true, tool: 'freedraw', color: '#ff2d55', strokeWidth: 2, strokeStyle: 'solid', placement: 'surface', hasContent: false });
+  act(() => current().add([stroke('a'), stroke('b')]));
+  act(() => current().remove(['a']));
+  act(() => current().replace([stroke('b', { color: '#00e5ff' })]));
+  expect(current().ink.map(item => [item.id, item.color])).toEqual([['b', '#00e5ff']]);
+  act(() => current().undo());
+  act(() => current().undo());
+  expect(current().ink.map(item => item.id)).toEqual(['a', 'b']);
+  act(() => current().redo());
+  expect(current().ink.map(item => item.id)).toEqual(['b']);
+  act(() => current().clear());
+  expect(current()).toMatchObject({ hasContent: false, canUndo: true });
+  act(() => current().undo());
+  expect(current().hasDrawing).toBe(true);
+  act(() => current().discard());
+  expect(current()).toMatchObject({ hasContent: false, canUndo: false, canRedo: false });
+});
+
+it('a colour, weight or line style chosen with ink selected restyles it as one step; placement only changes what is drawn next', () => {
+  const session = renderHook(() => useDrawingSession(true, CAD));
+  const current = () => session.result.current;
+  act(() => current().add([stroke('a'), stroke('b')]));
+  act(() => current().select(['a']));
+  act(() => { current().selectColor('#39ff14'); });
+  act(() => { current().selectStrokeWidth(4); });
+  act(() => { current().selectStrokeStyle('dashed'); });
+  act(() => { current().selectPlacement('space'); });
+  expect(current().ink.map(item => [item.id, item.color, item.width, item.dash])).toEqual([['a', '#39ff14', 4, 'dashed'], ['b', '#ff2d55', 2, 'solid']]);
+  expect(current()).toMatchObject({ color: '#39ff14', strokeWidth: 4, strokeStyle: 'dashed', placement: 'space' });
+  act(() => current().undo());
+  expect(current().ink[0].dash).toBe('solid');
+});
+
+it('names the view ink goes down in: one drawn in before that is the same, or a new one; discard forgets them', () => {
+  const session = renderHook(() => useDrawingSession(true, CAD));
+  const current = () => session.result.current;
+  let labels: (string | undefined)[] = [];
+  act(() => { labels = [current().noteView(view(0)), current().noteView(view(1)), current().noteView(view(100)), current().noteView(null)]; });
+  expect(labels).toEqual(['view 1', 'view 1', 'view 2', undefined]);
+  expect(current().views.map(entry => entry.label)).toEqual(['view 1', 'view 2']);
+  act(() => current().discard());
+  expect(current().views).toEqual([]);
+});
+
+it('put down, Draw goes back to the pen and selects nothing, and keeps the ink, the colour, the weight, the line style and the placement', () => {
+  const session = renderHook(({ active }) => useDrawingSession(active, CAD), { initialProps: { active: true } });
+  const current = () => session.result.current;
+  act(() => { current().add([stroke('a')]); current().selectTool('selection'); current().select(['a']); });
+  act(() => { current().selectColor('#ffffff'); current().selectStrokeWidth(4); current().selectStrokeStyle('dotted'); current().selectPlacement('space'); });
+  session.rerender({ active: false });
+  expect(current()).toMatchObject({ tool: 'freedraw', selected: [], color: '#ffffff', strokeWidth: 4, strokeStyle: 'dotted', placement: 'space', hasDrawing: true });
 });
