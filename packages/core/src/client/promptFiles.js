@@ -5,13 +5,16 @@ import { cadApiUrl } from './client.js';
  * file, its sketch as a sketch file, and each view's picture, rendered by the server with the
  * snapshot's own code. `create(request)` asks for them and answers where they are once rendered —
  * the server answers at once and renders off the request, so this asks again until they are there.
- * `read(path)` fetches one of them. It speaks to the server over `fetch` at `origin` as the CAD
+ * `read(path)` fetches one of them. `save({ name, kind, data })` writes a Quick Edit chip's copy as a
+ * file at once — a drawing's sketch (`kind` "sketch") or one measurement ("measurement") — and
+ * answers its path, which the chip copies. It speaks to the server over `fetch` at `origin` as the CAD
  * client does, whatever carries that fetch.
  *
  * @typedef {{ name: string, input: string, views: object[], sketch: object | null }} PromptFilesRequest
  * @typedef {{ job: string, sketch: string | null, images: { label: string, path: string }[] }} PromptFiles
  * @param {{ origin?: string, fetch?: typeof globalThis.fetch, wait?: (ms: number) => Promise<void> }} [options]
- * @returns {{ create(request: PromptFilesRequest): Promise<PromptFiles>, read(path: string): Promise<Blob> }}
+ * @returns {{ create(request: PromptFilesRequest): Promise<PromptFiles>, read(path: string): Promise<Blob>,
+ *   save(request: { name: string, kind: 'sketch' | 'measurement', data: object }): Promise<string> }}
  */
 export function createHttpPromptFiles({ origin = '', fetch: fetchImpl = globalThis.fetch, wait = ms => new Promise(done => setTimeout(done, ms)) } = {}) {
   const headers = { 'x-cadgen-viewer': '1' };
@@ -31,6 +34,12 @@ export function createHttpPromptFiles({ origin = '', fetch: fetchImpl = globalTh
         body = await answer(await fetchImpl(cadApiUrl('/__cad/prompt-files', { origin, params: { id: body.id } }), { headers }));
       }
       return { job: body.job, sketch: body.sketch ?? null, images: body.images.map(image => ({ label: String(image.label), path: String(image.path) })) };
+    },
+    async save(request) {
+      const body = await answer(await fetchImpl(cadApiUrl('/__cad/prompt-files/save', { origin }), {
+        method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(request),
+      }));
+      return String(body.path);
     },
     async read(path) {
       const name = String(path).split(/[\\/]/).pop();

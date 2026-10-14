@@ -7,9 +7,10 @@ import { compactSuffix, hasPickGlyph, pickGlyphNode } from "../../inspector/pick
 // whole) and read back as the reference it stands for (`/models/base.step#o1.f2`), in its place.
 
 // A chip's own size and look (`ReferenceChips.jsx`): 20px tall, its background, its glyph first,
-// then its words. In the note's 24px line it sits 2px clear above and below: centred, whatever
-// the fonts' baselines (a transform moves it without moving the line).
-const CHIP_CLASS = "mx-px inline-flex h-5 translate-y-0.5 select-none items-center gap-1 whitespace-nowrap rounded-sm bg-accent/70 px-1.5 align-top text-tiny leading-5 text-foreground";
+// then its words. It is the note's 20px line, top to bottom, so it sits in the text's rows without
+// spacing them out. Selected (`markSelectedPills`), it is highlighted as selected text is.
+const CHIP_CLASS = "mx-px inline-flex h-5 cursor-default select-none items-center gap-1 whitespace-nowrap rounded-sm bg-accent/70 px-1.5 align-top text-tiny leading-5 text-foreground data-[selected]:bg-selection data-[selected]:text-selection-foreground data-[selected]:ring-1 data-[selected]:ring-primary";
+const PILL = "[data-quick-edit-note-ref]";
 const GLYPH_CLASS = "size-2.5 shrink-0";
 
 /**
@@ -80,6 +81,34 @@ export function noteText(root) {
   return text.replace(/ /g, " ");
 }
 
+/**
+ * A pill a click lands on, selected as a word is (the selection around it, so a Backspace, a Delete
+ * or a key typed replaces it): the note's own, else null and the click is the editor's.
+ */
+export function selectPillAt(root, target) {
+  const pill = target?.closest?.(PILL);
+  if (!pill || !root?.contains(pill)) return null;
+  const document = root.ownerDocument;
+  const range = document.createRange();
+  range.selectNode(pill);
+  const selection = document.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  markSelectedPills(root);
+  return pill;
+}
+
+/** Each pill the selection takes in marked `data-selected`, the rest unmarked: a pill shows no selection of its own. */
+export function markSelectedPills(root) {
+  if (!root) return;
+  const selection = root.ownerDocument.getSelection?.();
+  const range = selection?.rangeCount && !selection.isCollapsed ? selection.getRangeAt(0) : null;
+  for (const pill of root.querySelectorAll(PILL)) {
+    if (range?.intersectsNode(pill)) pill.dataset.selected = "";
+    else delete pill.dataset.selected;
+  }
+}
+
 /** Nodes put in at the caret (or at the end, where the caret is not in the note), the caret after them. */
 export function insertAtCaret(root, nodes) {
   const document = root.ownerDocument;
@@ -114,7 +143,9 @@ export function pasteNodes(lines, document = globalThis.document, nameReference 
   lines.forEach((line, index) => {
     if (index) nodes.push(document.createTextNode("\n"));
     if (typeof line === "string") { if (line) nodes.push(document.createTextNode(line)); return; }
-    const pill = line.measurement ? noteMeasurement(line.measurement, document)
+    const pill = line.chip ? notePill(document, { token: line.token, kind: line.chip.glyph ?? line.chip.compact?.kind,
+      color: line.chip.glyphColor, text: line.chip.text ?? line.chip.label })
+      : line.measurement ? noteMeasurement(line.measurement, document)
       : line.drawing ? noteDrawing(line.drawing, document)
         : noteChip(line, document, nameReference?.(line) || "");
     nodes.push(pill, document.createTextNode(" "));

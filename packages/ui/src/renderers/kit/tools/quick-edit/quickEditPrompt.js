@@ -18,17 +18,20 @@ const lazy = start => {
  * write one — is that reference (into any file); a line that is a measurement as its chip copies it
  * (a snapshot job's `measurements` entry) is `{ measurement }`; a paste that is the drawing as its
  * chip copies it (its sketch JSON, whole) is `[{ drawing }]`; every other line stays text. A
- * reference within a sentence is the sentence's.
+ * reference within a sentence is the sentence's. A line that is what one of the box's chips copied
+ * (`copied`: what it copied, to the chip — a drawing's or a measurement's file path) is
+ * `{ chip, token }`.
  *
  * @param {string} pasted
  * @returns {Array<string | import("@text-to-cad/core/prompt").PromptReference | { measurement: object } | { drawing: object }>}
  */
-export function pastedLines(pasted) {
+export function pastedLines(pasted, copied = null) {
   const text = String(pasted || "");
   // The drawing, as its chip copies it: its sketch file's JSON, over several lines.
   const whole = parsedJson(text);
   if (whole && !Array.isArray(whole) && Array.isArray(whole.marks) && whole.parts && typeof whole.parts === "object") return [{ drawing: whole }];
-  return text.split(/\r?\n/).map(line => parsePromptReference(line) ?? pastedMeasurement(line) ?? line);
+  return text.split(/\r?\n/).map(line => (copied?.has(line.trim()) ? { chip: copied.get(line.trim()), token: line.trim() } : null)
+    ?? parsePromptReference(line) ?? pastedMeasurement(line) ?? line);
 }
 
 const parsedJson = text => {

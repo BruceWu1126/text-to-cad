@@ -22,10 +22,12 @@ export function useCopyFlash() {
     timer.current = setTimeout(() => setCopied(false), COPIED_MS);
     return true;
   }, []);
-  const copy = useCallback(text => {
-    const value = String(text || "").trim();
-    return clipboard && value ? flash(() => clipboard.writeText(value)) : Promise.resolve(false);
-  }, [clipboard, flash]);
+  // `text` may be a promise of it: a chip that writes its file first, then copies the file's path.
+  const copy = useCallback(text => (clipboard ? flash(async () => {
+    const value = String((await text) || "").trim();
+    if (!value) throw new Error("nothing to copy");
+    await clipboard.writeText(value);
+  }) : Promise.resolve(false)), [clipboard, flash]);
   const copyImage = useCallback(png => (clipboard ? flash(() => clipboard.writeImage(png)) : Promise.resolve(false)), [clipboard, flash]);
   return { canCopy: Boolean(clipboard), copied, copy, copyImage };
 }

@@ -604,6 +604,17 @@ class CadApp:
                         return
                     status, body = self.prompt_files.start(request.body())
                     response.send_json(status, body)
+                elif pathname == "/__cad/prompt-files/save":
+                    # A Quick Edit chip's copy as a file, written at once (``prompt_files.py``).
+                    from .prompt_files import MAX_BODY_BYTES
+                    if int(request.headers.get("content-length") or 0) > MAX_BODY_BYTES:
+                        response.send_empty(413, [("connection", "close")])
+                        return
+                    try:
+                        status, body = self.prompt_files.save(request.body())
+                    except ValueError as error:
+                        status, body = 400, {"ok": False, "error": str(error)}
+                    response.send_json(status, body)
                 elif pathname == "/__cad/surfaces":
                     if int(request.headers.get("content-length") or 0) > 128 * 1024:
                         response.send_empty(413, [("connection", "close")])

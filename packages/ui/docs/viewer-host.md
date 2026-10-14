@@ -261,11 +261,14 @@ document or revision never retargets it. A Quick Edit that reached its destinati
 `usage.used('quickEdit')`, for its count; a host that throws there changes nothing.
 
 `ViewerHost.promptFiles` is a `PromptFiles`: `create({ name, input, views, sketch })`
-answers where the job, the sketch and each view's picture were made, and `read(path)`
-fetches one. `createHttpPromptFiles({ origin, fetch })` from `@text-to-cad/core/client`
+answers where the job, the sketch and each view's picture were made, `read(path)`
+fetches one, and the optional `save({ name, kind, data })` writes a Quick Edit chip's
+copy as a file at once and answers its path, which the chip copies (`kind` "sketch", the
+drawing; "measurement", one measurement). `createHttpPromptFiles({ origin, fetch })` from `@text-to-cad/core/client`
 is the viewer server's: it posts the request to `POST /__cad/prompt-files`, which
 answers at once and renders off the request, then asks `GET /__cad/prompt-files?id=<id>`
-until they are made, and reads a file at `GET /__cad/prompt-files/<name>`. The files
+until they are made, reads a file at `GET /__cad/prompt-files/<name>`, and saves at
+`POST /__cad/prompt-files/save`. The files
 are scratch in the system's temporary directory. Both apps pass one; the MCP app's
 reaches the server through its tunnel.
 

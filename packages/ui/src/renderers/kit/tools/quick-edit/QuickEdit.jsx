@@ -11,7 +11,7 @@ import { capturePointer } from "../../../../lib/pointerCapture.js";
 import ResizeGrip from "../ResizeGrip.jsx";
 import { TOOL_PANEL_BUTTON_CLASS } from "../ToolPanel.jsx";
 import { copiedQuickEdit, createQuickEditContext, pastedLines, quickEditSelection } from "./quickEditPrompt.js";
-import { insertAtCaret, noteText, pasteNodes } from "./noteEditor.js";
+import { insertAtCaret, markSelectedPills, noteText, pasteNodes, selectPillAt } from "./noteEditor.js";
 import ReferenceChips from "./ReferenceChips.jsx";
 
 const EMPTY = Object.freeze([]);
@@ -156,6 +156,14 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
     return undefined;
   }, [referenceKey, sketching, measured, takeKeyboard]);
 
+  // A pill the selection takes in is highlighted as its text is: it shows no selection of its own.
+  useEffect(() => {
+    if (!open) return undefined;
+    const mark = () => markSelectedPills(field.current);
+    document.addEventListener("selectionchange", mark);
+    return () => document.removeEventListener("selectionchange", mark);
+  }, [open]);
+
   const canQueue = destination.kind === "composer" && destination.available;
   const canSend = typeof host.promptContext.send === "function";
   const ready = written && !pending && !disabled;
@@ -215,8 +223,18 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
   const onPaste = event => {
     event.preventDefault();
     const note = event.currentTarget;
-    insertAtCaret(note, pasteNodes(pastedLines(event.clipboardData?.getData("text/plain")), note.ownerDocument, nameReference));
+    insertAtCaret(note, pasteNodes(pastedLines(event.clipboardData?.getData("text/plain"), copiedChips.current), note.ownerDocument, nameReference));
     readNote(note);
+  };
+
+  // A click on a pill selects it whole, as a double-click does a word: a Backspace takes it.
+  const onNoteMouseDown = event => {
+    if (event.button !== 0 || event.shiftKey) return;
+    const note = event.currentTarget;
+    if (!event.target?.closest?.("[data-quick-edit-note-ref]")) return;
+    event.preventDefault();
+    note.focus({ preventScroll: true });
+    selectPillAt(note, event.target);
   };
 
   const onKeyDown = event => {
@@ -278,23 +296,31 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
   };
 
   // Chips name the references; with none described, the header counts them. The sketch is a chip of
-  // its own, first: "Drawing", copied by a click as its sketch file's JSON, wiped by its X.
+  // its own, first: "Drawing", copied by a click as its sketch file's path (its JSON where the host keeps
+  // no prompt files), wiped by its X.
   const referenceCount = chips ? 0 : referenceIds.length;
-  const sketchOf = prompt?.sketch, wipe = sketch?.clear;
+  const sketchOf = prompt?.sketch, wipe = sketch?.clear, saveFile = prompt?.save;
   const drawingChip = useMemo(() => (sketching ? {
-    key: "sketch", label: "Drawing", glyph: "pencil", ...(sketchOf ? { copy: () => JSON.stringify(sketchOf(), null, 2) } : {}), ...(wipe ? { onRemove: wipe } : {})
-  } : null), [sketching, sketchOf, wipe]);
+    key: "sketch", label: "Drawing", glyph: "pencil",
+    ...(sketchOf ? { copy: () => (saveFile ? saveFile("sketch", sketchOf()) : JSON.stringify(sketchOf(), null, 2)) } : {}), ...(wipe ? { onRemove: wipe } : {})
+  } : null), [sketching, sketchOf, wipe, saveFile]);
   // A chip for each measurement too, in its colour (`measurements`: the renderer's). They stand in the
   // order they came — picked, drawn or measured — whatever their kind: each keeps the place it first
   // took, and one that goes and comes back takes a new one at the end.
   const order = useRef(new Map());
+  const copiedChips = useRef(new Map());
   const shownChips = useMemo(() => {
     const all = [drawingChip, ...(measurements?.chips || EMPTY), ...(chips || EMPTY)].filter(Boolean);
     const seen = order.current;
     const keys = new Set(all.map(chip => chip.key));
     for (const key of [...seen.keys()]) if (!keys.has(key)) seen.delete(key);
     for (const chip of all) if (!seen.has(chip.key)) seen.set(chip.key, seen.size ? Math.max(...seen.values()) + 1 : 0);
-    return all.sort((a, b) => seen.get(a.key) - seen.get(b.key));
+    // What each copies is kept as it goes, so a paste of it into the note is its pill (`pastedLines`).
+    return all.sort((a, b) => seen.get(a.key) - seen.get(b.key)).map(chip => (typeof chip.copy === "function" ? { ...chip, copy: async () => {
+      const value = await chip.copy();
+      if (value) copiedChips.current.set(String(value).trim(), chip);
+      return value;
+    } } : chip));
   }, [drawingChip, measurements?.chips, chips]);
   return <div ref={root} className={cn("pointer-events-none flex-col items-end", hidden ? "hidden" : "flex", className)} style={style} data-quick-edit="">
     {open ? <section ref={box} aria-label="Quick Edit" data-quick-edit-box=""
@@ -325,8 +351,8 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
         className="max-h-40 min-h-14 w-full rounded-md border border-input bg-background/80 transition-[border-color,box-shadow] focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 dark:focus-within:border-blue-400 dark:focus-within:ring-blue-400/20">
         <div ref={field} role="textbox" aria-multiline="true" aria-label="Describe your changes" tabIndex={0}
           contentEditable="plaintext-only" suppressContentEditableWarning data-placeholder="Describe your changes" data-quick-edit-note=""
-          className="min-h-[3.75rem] w-full whitespace-pre-wrap break-words px-2 py-1.5 text-xs leading-6 text-foreground outline-none empty:before:pointer-events-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)]"
-          onInput={event => readNote(event.currentTarget)} onKeyDown={onKeyDown} onPaste={onPaste} />
+          className="min-h-[3.375rem] w-full whitespace-pre-wrap break-words px-2 py-1.5 text-xs leading-5 text-foreground outline-none empty:before:pointer-events-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)]"
+          onInput={event => readNote(event.currentTarget)} onKeyDown={onKeyDown} onPaste={onPaste} onMouseDown={onNoteMouseDown} />
       </ScrollArea>
       {error ? <p role="alert" className="text-tiny text-destructive">{error}</p> : null}
       {/* Buttons of the ordinary shape, all solid: the primary in its colour, the others secondary.

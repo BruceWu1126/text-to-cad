@@ -22,8 +22,9 @@ import { PickGlyph, compactSuffix, hasPickGlyph } from "../../inspector/pickGlyp
  *   id; or what it makes at the click (Quick Edit's Drawing: the sketch file's JSON).
  * @property {import("react").ReactNode} [card]  What it is, for its card: its key measurements.
  * @property {import("react").ReactNode} [icon]  Before its words: a measurement's ruler in its colour, the drawing's pen.
- * @property {string} [glyph]  Else, the pick glyph of what it names (`pickGlyph.jsx`: "solid" for a part, "face", "edge",
- *   "vertex"); a compact name's own kind where it has none.
+ * @property {string} [glyph]  Else, the glyph of what it names (`pickGlyph.jsx`: "solid" for a part, "face", "edge",
+ *   "vertex", "ruler" for a measurement, "pencil" for the drawing); a compact name's own kind where it has none.
+ * @property {string} [glyphColor]  The glyph's colour, where it has its own (a measurement's); else muted.
  * @property {string} [text]  The words beside an icon, where they are shorter than its accessible `label`.
  * @property {() => void} [onRemove]  Drops these picks from the selection.
  * @property {(on: boolean) => void} [onHover]  Lights these picks in the view while the pointer is on the chip.
@@ -70,7 +71,8 @@ function useHoverOpen(card) {
 function ChipText({ chip }) {
   const { compact } = chip;
   const glyph = chip.glyph ?? compact?.kind;
-  const icon = chip.icon ?? (hasPickGlyph(glyph) ? <PickGlyph kind={glyph} className="size-2.5 shrink-0 text-muted-foreground" /> : null);
+  const icon = chip.icon ?? (hasPickGlyph(glyph)
+    ? <PickGlyph kind={glyph} color={chip.glyphColor} className={cn("size-2.5 shrink-0", !chip.glyphColor && "text-muted-foreground")} /> : null);
   const named = compact && hasPickGlyph(compact.kind);
   return <span className="inline-flex min-w-0 max-w-full items-center gap-1 align-top" data-chip-compact={named ? "" : undefined}>
     {icon}

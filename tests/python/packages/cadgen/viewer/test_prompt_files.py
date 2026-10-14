@@ -152,6 +152,23 @@ class PromptFilesRouteTest(unittest.TestCase):
         self.assertEqual(self.rendered, [])
         self.assertEqual(sorted(path.name for path in self.files.iterdir()) if self.files.exists() else [], [])
 
+    def test_a_chips_copy_is_saved_as_the_file_snapshot_reads_and_answered_with_its_path(self) -> None:
+        mark = {"start": [0, 0, 0], "end": [10, 0, 0], "label": "10.00 mm", "color": "#d59090"}
+        status, body, _ = self.call("POST", "/__cad/prompt-files/save", {"name": "part.stl", "kind": "sketch", "data": SKETCH})
+        self.assertEqual((status, json.loads(body)), (200, {"ok": True, "path": str(self.files / "part-1.sketch.json")}))
+        self.assertEqual(json.loads((self.files / "part-1.sketch.json").read_text(encoding="utf-8")), SKETCH)
+        _, body, _ = self.call("POST", "/__cad/prompt-files/save", {"name": "part.stl", "kind": "measurement", "data": mark})
+        self.assertEqual(json.loads(Path(json.loads(body)["path"]).read_text(encoding="utf-8")), [mark])
+        for request, said in (
+            ({"name": "part.stl", "kind": "image", "data": {}}, "sketch or measurement"),
+            ({"name": "part.stl", "kind": "sketch", "data": {"marks": {}}}, "marks (a list)"),
+            ({"name": "part.stl", "kind": "measurement", "data": {**mark, "start": [0, 0]}}, "start"),
+        ):
+            status, body, _ = self.call("POST", "/__cad/prompt-files/save", request)
+            self.assertEqual((status, json.loads(body)["ok"]), (400, False), request)
+            self.assertIn(said, json.loads(body)["error"])
+        self.assertEqual(self.rendered, [])
+
     def test_a_failed_render_is_a_500_and_an_unknown_id_a_404(self) -> None:
         self.failure = SnapshotError("the page could not draw it")
         self.release.set()

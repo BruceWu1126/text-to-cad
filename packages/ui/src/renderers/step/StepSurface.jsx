@@ -14,7 +14,6 @@ import { hasAuthoredMaterials } from "@text-to-cad/core/common/inspectEnvironmen
 import { displayRecordsBounds, mergeBoundsList } from "@text-to-cad/core/lib/viewer/autoZoom.js";
 import { VIEWER_PICK_MODE } from "@text-to-cad/core/lib/viewer/constants.js";
 import { dimensionLayoutHit, measureLabelText, measureSeriesColor, measurementMark, screenSpaceDimensionLayout } from "@text-to-cad/core/lib/viewer/measureDimension.js";
-import { PickGlyph } from "../kit/inspector/pickGlyph.jsx";
 import { toNumber } from "@text-to-cad/core/lib/viewer/modelRuntime.js";
 import { normalizePartIdList } from "@text-to-cad/core/lib/viewer/partVisualState.js";
 import RendererShell from "../kit/shell/RendererShell.jsx";
@@ -1467,13 +1466,17 @@ function StepSurfaceBody({ view, data }) {
   // views are drawn with (`measureDimension.js`'s `measurementMark`, as the viewer draws them).
   const measurementChips = useMemo(() => measureMeasurements.map((item, index) => {
     const reading = measureLabelText(item.measurement);
-    // A click copies it as snapshot takes it: a job's `measurements` entry, `--measurements` JSON.
+    // A click copies it as snapshot takes it: the path of a file holding it (`--measurements` reads
+    // it), where the host saves prompt files, else the job's `measurements` entry itself.
+    const mark = measurementMark(item);
     return { key: `measure-${item.id}`, label: `Measurement ${index + 1}: ${reading}`, text: reading,
-      copy: () => JSON.stringify(measurementMark(item)),
-      icon: <PickGlyph kind="ruler" className="size-2.5 shrink-0" color={measureSeriesColor(item.colorIndex)} />,
+      copy: () => (host.promptFiles?.save
+        ? host.promptFiles.save({ name: promptResource.path.split("/").pop(), kind: "measurement", data: mark })
+        : JSON.stringify(mark)),
+      glyph: "ruler", glyphColor: measureSeriesColor(item.colorIndex),
       card: <MeasurementCard item={item} />,
       onRemove: () => measure.onDelete(item.id), onHover: on => measure.hover(on ? item.id : "") };
-  }), [measureMeasurements, measure.onDelete, measure.hover]);
+  }), [measureMeasurements, measure.onDelete, measure.hover, host.promptFiles, promptResource.path]);
   const quickEditMeasurements = useMemo(() => (measureMeasurements.length ? {
     chips: measurementChips, clear: measure.clear,
     marks: () => measureMeasurements.map(measurementMark).filter(Boolean),

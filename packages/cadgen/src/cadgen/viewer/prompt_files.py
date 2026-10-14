@@ -26,6 +26,9 @@ the person's, and the header keeps another site's page from reading them):
   "label", "color"}]}`` (Measure's results, drawn over every view) -> ``202 {"ok": true, "id", "retryMs"}``
   at once, the request accepted (its shape, the sketch's outer shape and the job
   as snapshot prepares it); ``400 {"ok": false, "error"}`` when it is not.
+* ``POST /__cad/prompt-files/save``, body ``{"name", "kind": "sketch" | "measurement",
+  "data"}`` -> ``200 {"ok": true, "path"}``: a Quick Edit chip's copy as a file, written at
+  once (``PromptFiles.save``); ``400`` when it is not one.
 * ``GET /__cad/prompt-files?id=<id>`` -> ``202 {"ok": true, "id", "retryMs"}``
   while it renders; ``200 {"ok": true, "job", "sketch": <path> | null,
   "images": [{"label", "path"}]}`` (the views' order) when it is done; ``500
@@ -211,6 +214,44 @@ class PromptFiles:
             self._session.close()
 
     # --- POST ----------------------------------------------------------------
+
+    def save(self, body: bytes) -> tuple[int, dict]:
+        """A Quick Edit chip's copy as a file, written at once: ``200 {"ok": true, "path"}``, or ``400``.
+
+        ``{"name", "kind": "sketch", "data": <a sketch>}`` writes ``<name>-<n>.sketch.json``
+        (``cadgen snapshot --sketch`` reads it); ``{"name", "kind": "measurement", "data":
+        {start, end, label, color}}`` writes ``<name>-<n>.measurement.json``, the list of that one
+        (``--measurements`` reads it). Nothing renders.
+        """
+        try:
+            request = json.loads(body or b"null")
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError(f"a chip's file is requested as JSON: {error}") from None
+        if type(request) is not dict or not set(request) <= {"name", "kind", "data"}:
+            raise ValueError("a chip's file is requested as {name, kind, data}")
+        kind, data = request.get("kind"), request.get("data")
+        if kind == "sketch":
+            if type(data) is not dict or not set(data) <= _SKETCH_KEYS or type(data.get("marks")) is not list:
+                raise ValueError("a sketch is an object of units, parts and marks (a list)")
+            content, suffix = data, "sketch"
+        elif kind == "measurement":
+            from cadgen.snapshot_cli import normalize_measurements
+            from cadgen.snapshot_core import SnapshotError
+
+            try:
+                content = normalize_measurements([data])
+            except SnapshotError as error:
+                raise ValueError(str(error)) from None
+            suffix = "measurement"
+        else:
+            raise ValueError("kind is sketch or measurement")
+        name = request.get("name")
+        directory = self.directory
+        with self._lock:
+            self._count += 1
+            path = directory / f"{_stem(name if type(name) is str and name else kind)}-{self._count}.{suffix}.json"
+        path.write_text(json.dumps(content, indent=2), encoding="utf-8")
+        return 200, {"ok": True, "path": str(path)}
 
     def start(self, body: bytes) -> tuple[int, dict]:
         """Accept a prompt's request and start its render: ``202`` with its id, or ``400``."""

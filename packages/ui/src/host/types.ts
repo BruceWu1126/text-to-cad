@@ -25,6 +25,8 @@ export interface PromptFiles {
     sketch: Record<string, unknown> | null;
   }): Promise<{ job: string; sketch: string | null; images: Array<{ label: string; path: string }> }>;
   read(path: string): Promise<Blob>;
+  /** A Quick Edit chip's copy as a file, written at once: its path (a drawing's sketch, one measurement). */
+  save?(request: { name: string; kind: 'sketch' | 'measurement'; data: Record<string, unknown> }): Promise<string>;
 }
 /**
  * What the app menu links to — the running version (its release notes), the source and the

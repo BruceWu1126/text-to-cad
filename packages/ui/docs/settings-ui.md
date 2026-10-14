@@ -684,9 +684,14 @@ is picked, sketched or measured, and closes when that goes. Every chip leads wit
 icon — the drawing's pen, a measurement's ruler in its colour, a reference's pick glyph
 (a part's cube, a face, an edge, a vertex) — then its words, and they stand in the order
 they came, whatever their kind. A chip's copy pasted into the note is a pill there,
-drawn as the chip is. Its chips are the drawing, each measurement (the ruler in its colour and its reading; a click copies it
-as a snapshot job's `measurements` entry, what `cadgen snapshot --measurements` takes; the
-views the note carries draw every one, and its job file lists them), then the selection. A written note keeps it open whatever
+drawn as the chip is, 20px like the note's lines so it sits in its rows without spacing
+them out. A click on a pill selects it whole, highlighted in the selection's colour, so
+Backspace, Delete or typing replaces it as it would selected text. Its chips are the
+drawing (a click copies the path of a file of its sketch, what `cadgen snapshot --sketch`
+takes), each measurement (the ruler in its colour and its reading; a click copies the path
+of a file holding it as a snapshot job's `measurements` entry, what `cadgen snapshot
+--measurements` takes; the views the note carries draw every one, and its job file lists
+them), then the selection. A host that keeps no prompt files copies the JSON itself. A written note keeps it open whatever
 is picked, even with nothing picked or sketched, until the X. The X clears everything:
 the note, the selection (as a press on the model's background does), the sketch and the
 measurements, so the box goes. A note that has gone (Copy Prompt, Queue, Send) clears the same way.

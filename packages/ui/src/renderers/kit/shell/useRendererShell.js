@@ -524,6 +524,10 @@ export function useRendererShell({
     },
     read: path => host.promptFiles.read(path),
     sketch: sketchNow,
+    // A chip's copy as a file (the drawing's sketch, one measurement), its path what the chip copies;
+    // null where the host keeps no prompt files, and the chip copies the JSON itself.
+    save: host.promptFiles?.save ? (kind, data) => host.promptFiles.save({
+      name: (promptFile() || "").split("/").pop() || kind, kind, data }) : null,
   }), [host.promptFiles, currentView, sketchNow, promptFile]);
   // The view as it is on screen, the drawing's ink in it: the drawing's Copy.
   const captureView = useCallback(() => {

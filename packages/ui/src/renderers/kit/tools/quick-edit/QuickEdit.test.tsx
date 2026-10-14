@@ -151,9 +151,40 @@ it('copies the note with its references by their files\' absolute paths, and the
   expect(prompt.files).toHaveBeenCalledWith(views);
   // Copied as text, no file's bytes were read.
   expect(prompt.read).not.toHaveBeenCalled();
-  // The Drawing chip copies the drawing as its sketch file.
+  // The Drawing chip copies the drawing as its sketch file's JSON, where the host keeps no files.
   fireEvent.click(within(box()!).getByRole('button', { name: 'Drawing' }));
   await waitFor(() => expect(copied).toBe(JSON.stringify(prompt.sketch(), null, 2)));
+});
+
+it('the Drawing chip copies the path of a file it saves, and that path pasted in the note is its pill', async () => {
+  let copied = '';
+  const host = testHost({ clipboard: { writeText: async text => { copied = text; }, readText: async () => '', writeImage: async () => {} } });
+  const prompt = { views: () => [], files: vi.fn(), read: vi.fn(), sketch: () => ({ units: 'mm', parts: {}, marks: [] }),
+    save: vi.fn(async () => '/tmp/p/bracket-1.sketch.json') };
+  mount(host, { sketch: { ink: true }, prompt });
+  fireEvent.click(within(box()!).getByRole('button', { name: 'Drawing' }));
+  await waitFor(() => expect(copied).toBe('/tmp/p/bracket-1.sketch.json'));
+  expect(prompt.save).toHaveBeenCalledWith('sketch', prompt.sketch());
+  fireEvent.paste(field(), { clipboardData: { getData: () => '/tmp/p/bracket-1.sketch.json' } });
+  const pill = field().querySelector('[data-quick-edit-note-ref]')!;
+  expect([pill.querySelector('svg')?.getAttribute('data-pick-glyph'), pill.textContent]).toEqual(['pencil', 'Drawing']);
+  // It goes as the path it stands for.
+  expect((pill as HTMLElement).dataset.quickEditNoteRef).toBe('/tmp/p/bracket-1.sketch.json');
+});
+
+it('a click on a pill in the note selects it whole, highlighted as selected text, so a Backspace takes it', () => {
+  mount(testHost(), { references: [face] });
+  write('Round ');
+  fireEvent.paste(field(), { clipboardData: { getData: () => '/models/parts/hinge.step#o1.e4' } });
+  const pill = field().querySelector('[data-quick-edit-note-ref]') as HTMLElement;
+  fireEvent.mouseDown(pill.firstChild!, { button: 0 });
+  const range = document.getSelection()!.getRangeAt(0);
+  expect([range.startContainer, range.startOffset, range.endOffset]).toEqual([field(), 1, 2]);
+  expect(pill.dataset.selected).toBe('');
+  // The selection moving off it unmarks it.
+  document.getSelection()!.collapse(field(), 0);
+  document.dispatchEvent(new Event('selectionchange'));
+  expect(pill.dataset.selected).toBeUndefined();
 });
 
 it('a pasted reference is a chip in the note, where it was pasted, and goes as the reference it stands for; the rest of a paste is text', async () => {
