@@ -925,6 +925,15 @@ def trace_model(target: str | Path) -> dict:
         return {"ok": False, "error": str(exc), "unsupported": True}
     except NameError as exc:
         return {"ok": False, "error": f"{exc} (not modeled by the recorder yet)", "unsupported": True}
+    except Exception as exc:  # the model used the stand-in in a way it doesn't model
+        where = ""
+        tb = exc.__traceback__
+        while tb is not None:
+            if tb.tb_frame.f_code.co_filename != __file__:
+                where = f" at {Path(tb.tb_frame.f_code.co_filename).name}:{tb.tb_lineno}"
+            tb = tb.tb_next
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}{where} (not modeled by the recorder yet)",
+                "unsupported": True}
     finally:
         _STACK.clear()
         for name, module in saved.items():
