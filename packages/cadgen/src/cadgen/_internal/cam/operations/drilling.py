@@ -24,6 +24,9 @@ the hole's opening, shallower than the hole's own):
   far short of the floor the full diameter ends (when that is more than the operation's tolerance: less is the
   model's rounding).
 - through: through the hole's length, plus the tool's point length, plus ``breakthrough_mm`` (1 mm).
+- tap in a blind hole: :data:`TAP_CHIP_ROOM_PITCHES` (3) pitches above the drilled floor, room for the chips and
+  the tap's lead; a stated ``depth_mm`` leaving fewer than :data:`TAP_BOTTOMS_PITCHES` (2) is a ``tap_bottoms``
+  warning. Through holes as any tool's.
 - spot drill: to the depth at which its cone is ``spot_diameter_mm`` across (default: the hole's countersink if it
   has one, else the hole's diameter), or ``depth_mm`` below the hole's opening.
 - counterbore: its cutting face (the pilot's length above the tip) to the counterbore's floor.
@@ -72,7 +75,7 @@ if TYPE_CHECKING:
 __all__ = [
     "BackBoreOperation", "BoringCycleOperation", "ChipBreakOperation", "CounterboreOperation", "DEFAULT_BREAKTHROUGH_MM",
     "DEFAULT_DWELL_S", "DrillOperation", "HoleParams", "PeckOperation", "ReamOperation", "RigidTapOperation",
-    "SpotDrillOperation", "TapOperation", "tour",
+    "SpotDrillOperation", "TAP_BOTTOMS_PITCHES", "TAP_CHIP_ROOM_PITCHES", "TapOperation", "tour",
 ]
 
 #: How far a through hole's tool goes past the hole's far end, beyond its point, mm.
@@ -86,6 +89,10 @@ CHIP_BREAK_X_D = 0.5
 #: bar, counterbore or back bore, and a tap (against its major diameter or its tap drill).
 DIAMETER_TOL_MM = 0.05
 TAP_DIAMETER_TOL_MM = 0.15
+#: A tap in a blind hole stops this many pitches above the drilled floor when the job states no depth (chip room,
+#: and room for the tap's lead); a stated depth leaving fewer than TAP_BOTTOMS_PITCHES is a ``tap_bottoms`` warning.
+TAP_CHIP_ROOM_PITCHES = 3.0
+TAP_BOTTOMS_PITCHES = 2.0
 #: The least room a back-bore bar's head keeps from the hole's wall as it passes through, mm.
 BACK_BORE_PASS_MM = 0.1
 
@@ -429,6 +436,45 @@ class TapOperation(_HoleOperation):
     cycle_kind = "tap"
     keys = _HoleOperation.keys | {"dwell_s"}
     tol_default = TAP_DIAMETER_TOL_MM
+
+    def tip_z(self, params, ctx, ref, found):
+        """A through hole as any tool's. A blind hole keeps chip room under the tap: by default the tap stops
+        :data:`TAP_CHIP_ROOM_PITCHES` pitches above the drilled floor (the chips and the tap's lead need it); a
+        stated ``depth_mm`` that leaves less than :data:`TAP_BOTTOMS_PITCHES` is a ``tap_bottoms`` warning."""
+        size = found.feature.size
+        if size.get("through"):
+            return super().tip_z(params, ctx, ref, found)
+        pitch = float(ctx.tool.size["pitch_mm"])
+        top, floor = found.top[2], found.bottom[2]
+        if params.depth_mm is None:
+            room = TAP_CHIP_ROOM_PITCHES * pitch
+            tip = floor + room
+            if tip >= top - _EPS:
+                raise PlanError("too_deep", f"{ctx.where}: {ref} is {plain(top - floor)} mm deep, no deeper than the "
+                                f"{plain(room)} mm of chip room a blind tapped hole keeps under the tap "
+                                f"({plain(TAP_CHIP_ROOM_PITCHES)} pitches); drill it deeper or state depth_mm")
+            return tip, {"through": False, "full_diameter_z": round(tip, 6), "chip_room_mm": round(room, 6)}, []
+        tip, stats, found_ = super().tip_z(params, ctx, ref, found)
+        left = tip - floor
+        stats["chip_room_mm"] = round(left, 6)
+        if left < TAP_BOTTOMS_PITCHES * pitch - _EPS:
+            found_ = [*found_, finding(
+                "warning", "tap_bottoms",
+                f"{ctx.label}: {ctx.tool.id} taps {ref} to {plain(left)} mm over its drilled floor, less than "
+                f"{plain(TAP_BOTTOMS_PITCHES)} pitches ({plain(TAP_BOTTOMS_PITCHES * pitch)} mm)",
+                "the chips a tap cuts fall ahead of it and its lead is not full thread: with no room under it the tap "
+                f"packs the chips into the floor and breaks; tap {plain(TAP_CHIP_ROOM_PITCHES * pitch)} mm short of "
+                "the floor (leave depth_mm out), or drill the hole deeper",
+                [{"text": f"{ctx.label} {ref}", "ref": ref}])]
+        return tip, stats, found_
+
+    def human_lines(self, stats: dict) -> list[str]:
+        lines = super().human_lines(stats)
+        rooms = sorted({hole["chip_room_mm"] for hole in stats["holes"] if "chip_room_mm" in hole})
+        if rooms:
+            lines.append(f"blind holes tapped {' and '.join(plain(room) for room in rooms)} mm short of their drilled "
+                         "floor, for chip room")
+        return lines
 
     def _tool_words(self, ctx):
         return f"{an(format(ctx.tool.diameter_mm, 'g'))} x {ctx.tool.size['pitch_mm']:g} mm tap"

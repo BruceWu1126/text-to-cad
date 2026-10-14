@@ -282,6 +282,7 @@ what to do.
 | `uncut_feature` | warning | A hole, pocket or slot a setup reaches that no operation cuts. | Add the operation, or confirm with the user it stays as it is. |
 | `through_stock_bottom` | warning | A cut goes below the stock's bottom (a through drill's point). | Say what must be under it: a spoilboard, a sacrificial plate, a gap between parallels. |
 | `assumes_prepared_hole` | warning | A tap or thread mill works a hole no earlier operation makes. | Drill it first in the job, or confirm it is made before the job runs. |
+| `tap_bottoms` | warning | A tap in a blind hole stated to go within 2 pitches of the drilled floor: the chips pack in and the tap breaks. | Leave `depth_mm` out (3 pitches of chip room), or drill deeper. |
 | `unmodelled_earlier_cut` | warning | A setup is placed on the raw blank though an earlier setup faced the stock in a way cadgen cannot carry over (a region, a bar, a blank from a STEP). | Check by hand where the stock sits and where its top is, or face the whole stock in the earlier setup. |
 
 The info notes are `assumed_fixture`, `unused_tool`, `cycle_time`, `tool_changes` and `post`.

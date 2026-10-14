@@ -51,6 +51,8 @@ Warnings
       there must allow it. Not said when the same cut is a ``fixture_collision``.
     - ``assumes_prepared_hole``: a tap or an internal thread mill on a hole no earlier operation drills, bores or
       mills.
+    - ``tap_bottoms``: a tap in a blind hole stated to go within two pitches of the drilled floor, passed on from
+      the operation.
     - ``unmodelled_earlier_cut``: a setup placed on the raw blank though an earlier setup faced it in a way phase 1
       cannot carry over (``setups.setup_frames``: a region, a bar, a blank from a STEP, a setup along a face).
 
@@ -84,7 +86,7 @@ ERROR_KINDS = ("gouge", "holder_collision", "fixture_collision", "unreachable", 
                "too_deep", "over_travel", "no_post_support", "empty_operation")
 WARNING_KINDS = ("corner_left", "rest_material", "rpm_clamped", "feed_clamped", "full_slot", "thin_wall",
                  "long_stickout", "uncut_feature", "through_stock_bottom", "assumes_prepared_hole",
-                 "unmodelled_earlier_cut")
+                 "tap_bottoms", "unmodelled_earlier_cut")
 #: Notes: what the job assumed or comes to, not checks.
 INFO_KINDS = ("assumed_fixture", "unused_tool", "cycle_time", "tool_changes", "post")
 #: The checks the result lists, each with its verdict.

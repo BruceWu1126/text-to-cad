@@ -150,9 +150,11 @@ class Drilling(unittest.TestCase):
         for index, breakthrough in ((0, 1.0), (2, 1.0), (3, 2.0)):
             for cycle in self.cycles(index):
                 self.assertAlmostEqual(cycle.z, BOTTOM - point - breakthrough, places=5)
-        for index in (5, 7, 8):          # flat-ended tools: no point; the tap goes to the blind hole's floor
+        for index in (7, 8):             # flat-ended tools: no point
             self.assertEqual(sorted(cycle.z for cycle in self.cycles(index)),
                              [BOTTOM - 1.0, BOTTOM - 1.0, BLIND_FLOOR][:len(self.cycles(index))])
+        # The tap breaks through the through holes, and stops 3 pitches (3 mm) over the blind hole's floor.
+        self.assertEqual(sorted(cycle.z for cycle in self.cycles(5)), [BOTTOM - 1.0, BOTTOM - 1.0, BLIND_FLOOR + 3.0])
         self.assertEqual({cycle.peck_mm for cycle in self.cycles(2)}, {6.0})
         self.assertEqual({cycle.peck_mm for cycle in self.cycles(3)}, {3.0})
         self.assertEqual({cycle.dwell_s for cycle in self.cycles(4)}, {0.2})
@@ -219,6 +221,40 @@ class Drilling(unittest.TestCase):
         self.assertEqual(plan_error({"op": "counterbore", "tool": "T7", "features": [LEFT]}, cbore)[0], "unreachable")
         self.assertIn("needs shift_mm", value_error(self, parse_job, {**JOB, "operations": [
             {"op": "boring_cycle", "tool": "T6", "all": True, "cycle": "fine_bore"}]}))
+
+
+class TapInABlindHole(unittest.TestCase):
+    """The plate's 5 mm blind hole, 6 mm deep, tapped M6 x 1."""
+
+    @classmethod
+    def setUpClass(cls):
+        tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(tmp.cleanup)
+        cls.step = plate_step(Path(tmp.name))
+
+    def tapped(self, **keys):
+        job = {**JOB, "operations": [{"op": "tap", "tool": "T4", "features": [BLIND], **keys}]}
+        [(ctx, planned)] = plan_all(self.step, job, {})[1]
+        return planned
+
+    def test_it_stops_three_pitches_over_the_floor_and_says_so(self):
+        planned = self.tapped()
+        [hole] = planned.stats["holes"]
+        self.assertEqual((hole["z"], hole["chip_room_mm"]), (BLIND_FLOOR + 3.0, 3.0))
+        self.assertEqual(planned.findings, ())
+        from cadgen._internal.cam.operations import get_operation
+
+        self.assertIn("blind holes tapped 3 mm short of their drilled floor, for chip room",
+                      get_operation("tap").human_lines(planned.stats))
+
+    def test_a_stated_depth_that_leaves_no_chip_room_is_a_warning(self):
+        planned = self.tapped(depth_mm=5)
+        self.assertEqual(planned.stats["holes"][0]["z"], BLIND_FLOOR + 1.0)
+        [found] = planned.findings
+        self.assertEqual(found["type"], "tap_bottoms")
+        self.assertEqual(found["summary"], f"operations[0] (tap): T4 taps {BLIND} to 1 mm over its drilled floor, "
+                                           "less than 2 pitches (2 mm)")
+        self.assertEqual(self.tapped(depth_mm=4).findings, ())
 
 
 class PointedBlindHole(unittest.TestCase):

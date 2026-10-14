@@ -33,7 +33,14 @@ full-diameter depth below the hole's opening, no deeper than the hole's own.
 
 - **Blind hole:** the full diameter reaches the hole's floor, so the tip goes the tool's point length
   under it, but never past the hole's own deepest point: a flat-bottomed hole stops the tip there, and
-  a `rest_material` warning says how far short of the floor the full diameter ends.
+  a `rest_material` warning says how far short of the floor the full diameter ends (when that is
+  more than the operation's tolerance, 0.01 mm: less is the model's rounding).
+- **Tap in a blind hole:** the tap stops 3 pitches above the drilled floor (3 mm for M6 x 1), room for
+  the chips it pushes ahead of it and for its lead, which is not full thread. The sidecar's
+  `holes[].chip_room_mm` and the plan's line (`blind holes tapped 3 mm short of their drilled floor,
+  for chip room`) say so. A stated `depth_mm` that leaves less than 2 pitches is a `tap_bottoms`
+  warning: the tap would pack the chips into the floor and break. Drill a blind hole for a tap
+  deeper than the thread you need.
 - **Through hole:** the hole's length, plus the tool's point length, plus `breakthrough_mm` (1 mm). Make
   sure that much stands clear under the part (a spoilboard, parallels, a plate with a hole).
 
@@ -84,6 +91,23 @@ LinuxCNC's `G33.1`), for a machine with rigid tapping. Tool: `tap`, whose `pitch
 The hole must be drilled first, at the tap drill size, by an earlier operation. grbl refuses both
 (it has no tapping: written as moves, the feed would not follow the spindle and the tap would break);
 Mach3 refuses `rigid_tap`. Thread mill the hole instead on those ([milling-2d.md](milling-2d.md#thread_mill)).
+
+Before you write a tap, ask the user:
+
+- **Floating or rigid?** `tap` (G84 with a floating, tension-compression holder that lets the tap
+  find its own pitch) or `rigid_tap` (the controller synchronises the feed to the spindle: G84 with
+  `M29` on a Fanuc, `G33.1` on LinuxCNC). Ask whether the spindle has an encoder and rigid tapping
+  is enabled, and whether they have a tension-compression holder. A rigid tap in a solid holder on
+  a machine that does not synchronise breaks the tap; when unsure, `tap` with a floating holder.
+- **Which tap?** A spiral point (gun) tap pushes the chips ahead of it: it is for through holes. A
+  spiral flute tap pulls them up out of the hole: it is for blind holes. A spiral point tap in a
+  blind hole packs the chips into the floor. Say so if the tap the user names does not suit the
+  hole.
+- **Coolant:** tapping wants cutting fluid or oil, in aluminium too (`coolant: flood` or `mist`, or
+  tapping fluid by hand: say which).
+- **Speed for the prove-out:** the worked-out speed is a production one for an HSS tap; for the
+  first part consider a lower `rpm` on the operation (the feed follows as `rpm x pitch`), and say
+  that the feed override does not slow a synchronised tap on many controllers.
 
 ## `ream`
 
