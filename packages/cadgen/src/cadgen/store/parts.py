@@ -41,7 +41,9 @@ from cadgen.store.objects import is_object_hash, object_path, put_object, read_v
 # meshes a part again where one strays: a part whose round OCCT gridded off it has a new mesh.
 # 4: cadgen tessellates every part itself, as the CAD Viewer's tessellator drew it before
 # meshes moved to the store (``_internal/tessellate.py``): every part has a new mesh.
-PART_VERSION = 4
+# 5: the tessellator runs as cadgen's native library, evaluating its B-splines and conics
+# itself: a part's mesh may differ from its version-4 mesh in its last bits.
+PART_VERSION = 5
 INDEX_KIND = "part"
 MAX_INDEX_BYTES = 16 * 1024
 _KEY = re.compile(rf"[0-9a-f]{{64}}-v{PART_VERSION}")

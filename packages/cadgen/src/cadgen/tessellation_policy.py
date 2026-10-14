@@ -38,13 +38,13 @@ DISPLAY_TESSELLATION: dict[str, float] = {"chordTolerance": 5e-4, "angleToleranc
 # The finest tolerances anything may ask to have meshed: past any display or print
 # need (a sphere 2,000 px across strays a third of a pixel at either), and the
 # finest at which a face curved all the way round both ways -- a torus, a sphere, a
-# closed freeform loft, the faces with the most triangles -- still meshes in about a
-# second. Measured on such faces (cadgen's tessellator, one core): at 0.05 rad a
-# torus is 95k triangles in 1.0 s of CPU, a sphere 31k in 0.2 s and a closed loft
-# 29k in 0.4 s; at a chord of 5e-5 a torus is 135k triangles in 1.5 s, a sphere 92k
-# in 0.6 s and a loft 50k in 0.8 s. Finer, the triangles grow as the inverse square
-# of the tolerance: at 0.005 rad a model of four primitives is 12.9 million
-# triangles in 80 s, a mesh no viewer needs.
+# closed freeform loft, the faces with the most triangles -- still meshes in well under
+# a second. Measured on such faces (cadgen's tessellator, one core, the body encoded):
+# at 0.05 rad a torus is 95k triangles in 0.09 s of CPU, a sphere 31k in 0.02 s and a
+# closed loft through four circles 40k in 0.11 s; at a chord of 5e-5 a torus is 135k
+# triangles in 0.13 s, a sphere 92k in 0.09 s and the loft 102k in 0.37 s. Finer, the
+# triangles grow as the inverse square of the tolerance: at 0.005 rad a model of four
+# primitives is 12.9 million triangles, a mesh no viewer needs.
 TESSELLATION_FLOORS: dict[str, float] = {"chordTolerance": 5e-5, "angleTolerance": 0.05}
 # The coarsest: past a twentieth of the bounding diagonal, or a quarter turn
 # between neighbouring facets (a circle as a square), a mesh no longer follows the

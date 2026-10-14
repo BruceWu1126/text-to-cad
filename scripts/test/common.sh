@@ -21,10 +21,10 @@ TEST_PATHS=()
 SELECTED_TEST_FILES=0
 
 # The packaged runtime (packages/cadgen/src/cadgen/_runtime) is BUILT, never committed,
-# so a fresh checkout has none of it -- the snapshot suites drive the browser bundle and
-# every build loads the file tracer.
+# so a fresh checkout has none of it -- the snapshot suites drive the browser bundle,
+# every build loads the file tracer and every mesh is the tessellator's.
 # Building it is idempotent and fast once the pinned toolchains are in place, but it is
-# not free, so this only runs when an output is missing (or the tracer's source is newer).
+# not free, so this only runs when an output is missing (or a native source is newer).
 #
 # The stages are asked for by name rather than going through bundle.sh: the tests read
 # exactly these, and the viewer stage is a vite build of apps/web that needs that app's
@@ -44,13 +44,22 @@ ensure_packaged_runtime() {
       break
     fi
   done
-  # Every build loads the file tracer, so every suite that builds needs the one this
-  # interpreter loads, rebuilt when its source is newer.
-  local tracer
+  # Every build loads the file tracer and every mesh is the tessellator's, so every suite
+  # that builds needs the two this interpreter loads, rebuilt when a source is newer.
+  local tracer tessellator source stale=0
   tracer="$runtime/native/$(PYTHONPATH="$REPO_ROOT/packages/cadgen/src" "$PYTHON_BIN" -c \
     "from cadgen._internal.filetrace import _library_name; print(_library_name())")"
-  if [ ! -f "$tracer" ] || [ "$REPO_ROOT/packages/cadgen/native/filetrace.c" -nt "$tracer" ]; then
-    section "Building cadgen's file tracer"
+  tessellator="$(dirname "$tracer")/tessellate-${tracer##*/filetrace-}"
+  if [ ! -f "$tracer" ] || [ "$REPO_ROOT/packages/cadgen/native/filetrace.c" -nt "$tracer" ] \
+    || [ ! -f "$tessellator" ]; then
+    stale=1
+  else
+    for source in "$REPO_ROOT"/packages/cadgen/native/tessellate/*.c; do
+      if [ "$source" -nt "$tessellator" ]; then stale=1; fi
+    done
+  fi
+  if [ "$stale" -eq 1 ]; then
+    section "Building cadgen's file tracer and tessellator"
     "$REPO_ROOT/scripts/bundle/cadgen-runtime.sh" --native-host
   fi
 }

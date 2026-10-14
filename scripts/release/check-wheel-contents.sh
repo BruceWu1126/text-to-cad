@@ -4,8 +4,8 @@ set -euo pipefail
 # Assert the cadgen wheel actually contains its runtime assets.
 #
 # cadgen ships JavaScript it executes (the snapshot browser bundle, the CAD Viewer's
-# built client), the native file tracer every build loads, and non-Python data its
-# server reads (collation.json).
+# built client), the native file tracer every build loads and the native tessellator
+# every mesh is made by, and non-Python data its server reads (collation.json).
 # Those arrive through `[tool.setuptools.package-data]`, which is exactly the kind of
 # declaration that fails QUIETLY: a glob that does not match nested files produces a
 # wheel that imports fine, passes every Python test, and then cannot render a snapshot
@@ -85,6 +85,13 @@ REQUIRED=(
   "cadgen/_runtime/native/filetrace-linux-x86_64.so"
   "cadgen/_runtime/native/filetrace-linux-aarch64.so"
   "cadgen/_runtime/native/filetrace-windows-x86_64.dll"
+  # The tessellator every display mesh is made by, one per platform: a wheel missing one
+  # meshes no part on that platform.
+  "cadgen/_runtime/native/tessellate-macos-aarch64.dylib"
+  "cadgen/_runtime/native/tessellate-macos-x86_64.dylib"
+  "cadgen/_runtime/native/tessellate-linux-x86_64.so"
+  "cadgen/_runtime/native/tessellate-linux-aarch64.so"
+  "cadgen/_runtime/native/tessellate-windows-x86_64.dll"
 )
 
 echo "Building cadgen wheel for content check..."

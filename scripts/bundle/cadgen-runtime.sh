@@ -3,19 +3,20 @@ set -euo pipefail
 
 # Build cadgen's non-Python runtime INTO THE PACKAGE (packages/cadgen/src/cadgen/_runtime).
 #
-# cadgen executes four things it does not write in Python: a headless browser bundle
+# cadgen executes five things it does not write in Python: a headless browser bundle
 # (the snapshot CLI drives it in a page), the CAD Viewer's built client (`cadgen
 # viewer` serves it), the one-file CAD app an agent host renders (`cadgen mcp` serves
-# it), and the native file tracer every build loads to see what it reads. cadgen
-# resolves them inside the distribution, so there is one copy and one builder of that
-# copy: this script. scripts/bundle/bundle.sh is the entry point that calls it (after
-# stamping derived version metadata); call this directly only when debugging one stage.
+# it), the native file tracer every build loads to see what it reads, and the native
+# tessellator every part's display mesh is made by. cadgen resolves them inside the
+# distribution, so there is one copy and one builder of that copy: this script.
+# scripts/bundle/bundle.sh is the entry point that calls it (after stamping derived
+# version metadata); call this directly only when debugging one stage.
 #
 # Stages (default: all of them):
 #   --browser   snapshot browser bundle   -> _runtime/browser
 #   --viewer    CAD Viewer client (vite)  -> _runtime/viewer
 #   --mcp       CAD app page (vite)       -> _runtime/mcp
-#   --native    file tracer, every OS     -> _runtime/native
+#   --native    file tracer and tessellator, every OS -> _runtime/native
 #               (--native-host: this machine's only, which is all a test run loads)
 #
 # NOTHING here is committed. The whole _runtime tree is gitignored and built on demand:
@@ -42,7 +43,7 @@ RUNTIME_DIR="$REPO_ROOT/packages/cadgen/src/cadgen/_runtime"
 BROWSER_DIR="$RUNTIME_DIR/browser"
 VIEWER_DIR="$RUNTIME_DIR/viewer"
 NATIVE_DIR="$RUNTIME_DIR/native"
-NATIVE_SOURCE="$REPO_ROOT/packages/cadgen/native/filetrace.c"
+NATIVE_SOURCE_DIR="$REPO_ROOT/packages/cadgen/native"
 VIEWER_APP_DIR="$REPO_ROOT/apps/web"
 MCP_DIR="$RUNTIME_DIR/mcp"
 MCP_APP_DIR="$REPO_ROOT/apps/mcp"
@@ -54,18 +55,40 @@ SNAPSHOT_BUILD_DEPS_DIR="${CADGEN_SNAPSHOT_BUILD_DEPS_DIR:-$REPO_ROOT/tmp/cadgen
 # emits one file and silently drops another, is the failure this catches before a wheel
 # carries the hole to a user.
 BROWSER_OUTPUTS=(snapshot-render.js render.html THIRD_PARTY_LICENSES.txt)
-# One tracer per platform cadgen's CAD kernel ships for, all in the one wheel: the
-# zig target, then the file cadgen._internal.filetrace loads on that platform. glibc
-# 2.17 is the manylinux2014 floor the kernel's own wheels build against.
+# Each native library on every platform cadgen's CAD kernel ships for, all in the one
+# wheel: the zig target, then the platform's part of the file name -- the tracer
+# cadgen._internal.filetrace loads there is filetrace-<it>, the tessellator
+# cadgen._internal.tessellate loads, tessellate-<it>. glibc 2.17 is the manylinux2014
+# floor the kernel's own wheels build against.
 NATIVE_TARGETS=(
-  "aarch64-macos.11.0 filetrace-macos-aarch64.dylib"
-  "x86_64-macos.10.15 filetrace-macos-x86_64.dylib"
-  "x86_64-linux-gnu.2.17 filetrace-linux-x86_64.so"
-  "aarch64-linux-gnu.2.17 filetrace-linux-aarch64.so"
-  "x86_64-windows-gnu filetrace-windows-x86_64.dll"
+  "aarch64-macos.11.0 macos-aarch64.dylib"
+  "x86_64-macos.10.15 macos-x86_64.dylib"
+  "x86_64-linux-gnu.2.17 linux-x86_64.so"
+  "aarch64-linux-gnu.2.17 linux-aarch64.so"
+  "x86_64-windows-gnu windows-x86_64.dll"
 )
+# Each library and its one source file (the tessellator's a unity build of the files
+# beside it). The tessellator's arithmetic must not be contracted into fused
+# multiply-adds, which round differently: a mesh would differ by platform.
+NATIVE_LIBRARIES=(filetrace tessellate)
+native_source() {
+  case "$1" in
+    filetrace) echo "$NATIVE_SOURCE_DIR/filetrace.c" ;;
+    tessellate) echo "$NATIVE_SOURCE_DIR/tessellate/tessellate.c" ;;
+  esac
+}
+native_flags() {
+  local library="$1" zig_target="$2"
+  case "$library:$zig_target" in
+    filetrace:*-linux-*) echo "-fPIC -ldl -lpthread" ;;
+    tessellate:*-linux-*) echo "-ffp-contract=off -fPIC -lm" ;;
+    tessellate:*) echo "-ffp-contract=off" ;;
+  esac
+}
 NATIVE_OUTPUTS=()
-for target in "${NATIVE_TARGETS[@]}"; do NATIVE_OUTPUTS+=("${target#* }"); done
+for target in "${NATIVE_TARGETS[@]}"; do
+  for library in "${NATIVE_LIBRARIES[@]}"; do NATIVE_OUTPUTS+=("$library-${target#* }"); done
+done
 
 MODE="write"
 CLEAN=0
@@ -89,8 +112,8 @@ Stages (default: all):
   --browser   snapshot browser bundle   -> _runtime/browser
   --viewer    CAD Viewer client (vite)  -> _runtime/viewer
   --mcp       CAD app page (vite)       -> _runtime/mcp
-  --native    file tracer, every OS     -> _runtime/native
-  --native-host  the file tracer for this machine only
+  --native    file tracer and tessellator, every OS -> _runtime/native
+  --native-host  both for this machine only
 
 Options:
   --check          Build, then assert every required output exists. Skips the
@@ -226,14 +249,14 @@ build_mcp_app() {
   cp "$MCP_APP_DIR/dist/index.html" "$target/index.html"
 }
 
-# --- the native file tracer ------------------------------------------------------------
-# One C file, cross-compiled for every platform by zig (the `ziglang` wheel in
-# requirements-dev.txt), so any machine builds the whole set. Each target compiles into
-# its own scratch folder (the Windows link also writes an import library nothing ships),
-# and the folder is replaced only once all of them built: a build running meanwhile in
-# this checkout never finds it empty.
-build_native_tracer() {
-  local target="$1" python spec zig_target name scratch
+# --- the native libraries ---------------------------------------------------------------
+# The file tracer and the tessellator, each one C file cross-compiled for every platform
+# by zig (the `ziglang` wheel in requirements-dev.txt), so any machine builds the whole
+# set. Each target compiles into its own scratch folder (the Windows link also writes an
+# import library nothing ships), and the folder is replaced only once all of them built:
+# a build running meanwhile in this checkout never finds it empty.
+build_native_libraries() {
+  local target="$1" python spec zig_target name scratch library
   python="${PYTHON_BIN:-}"
   if [ -z "$python" ]; then
     if [ -x "$REPO_ROOT/.venv/bin/python" ]; then
@@ -245,21 +268,21 @@ build_native_tracer() {
     fi
   fi
   if ! "$python" -c "import ziglang" >/dev/null 2>&1; then
-    echo "Building the file tracer needs zig: $python -m pip install -r requirements-dev.txt" >&2
+    echo "Building the native libraries needs zig: $python -m pip install -r requirements-dev.txt" >&2
     exit 1
   fi
   local targets=("${NATIVE_TARGETS[@]}")
   if [ "$NATIVE_HOST_ONLY" -eq 1 ]; then
-    # The library this interpreter loads, named by cadgen itself.
+    # The platform this interpreter loads libraries for, named by cadgen itself.
     local host
     host="$(PYTHONPATH="$REPO_ROOT/packages/cadgen/src" "$python" -c \
       "from cadgen._internal.filetrace import _library_name; print(_library_name())")"
     targets=()
     for spec in "${NATIVE_TARGETS[@]}"; do
-      [ "${spec#* }" = "$host" ] && targets+=("$spec")
+      [ "filetrace-${spec#* }" = "$host" ] && targets+=("$spec")
     done
     if [ "${#targets[@]}" -eq 0 ]; then
-      echo "No file tracer target builds $host" >&2
+      echo "No native target builds $host" >&2
       exit 1
     fi
   fi
@@ -268,22 +291,24 @@ build_native_tracer() {
   trap 'rm -rf "$scratch"' EXIT
   for spec in "${targets[@]}"; do
     zig_target="${spec% *}"
-    local flags=(-shared -O2 -s -fvisibility=hidden -Wall -Wextra -Werror)
-    case "$zig_target" in
-      *-linux-*) flags+=(-fPIC -ldl -lpthread) ;;
-    esac
     mkdir -p "$scratch/$zig_target"
-    "$python" -m ziglang cc -target "$zig_target" "${flags[@]}" \
-      -o "$scratch/$zig_target/${spec#* }" "$NATIVE_SOURCE"
+    for library in "${NATIVE_LIBRARIES[@]}"; do
+      # shellcheck disable=SC2207 # the flags are words
+      local flags=(-shared -O2 -s -fvisibility=hidden -Wall -Wextra -Werror $(native_flags "$library" "$zig_target"))
+      "$python" -m ziglang cc -target "$zig_target" "${flags[@]}" \
+        -o "$scratch/$zig_target/$library-${spec#* }" "$(native_source "$library")"
+    done
   done
   # Renamed into place, never written over: a process that has the old library
   # loaded keeps its file, and macOS kills one whose signed pages change under it.
   mkdir -p "$target"
   for spec in "${targets[@]}"; do
-    name="${spec#* }"
-    cp "$scratch/${spec% *}/$name" "$target/.$name.tmp"
-    mv -f "$target/.$name.tmp" "$target/$name"
-    NATIVE_BUILT+=("$name")
+    for library in "${NATIVE_LIBRARIES[@]}"; do
+      name="$library-${spec#* }"
+      cp "$scratch/${spec% *}/$name" "$target/.$name.tmp"
+      mv -f "$target/.$name.tmp" "$target/$name"
+      NATIVE_BUILT+=("$name")
+    done
   done
   for name in "$target"/*; do
     case " ${NATIVE_OUTPUTS[*]} " in
@@ -371,7 +396,7 @@ build_all() {
     echo "Bundled ${root#"$REPO_ROOT"/}/mcp"
   fi
   if [ "$STAGE_NATIVE" -eq 1 ]; then
-    build_native_tracer "$root/native"
+    build_native_libraries "$root/native"
     echo "Built ${root#"$REPO_ROOT"/}/native"
   fi
 }

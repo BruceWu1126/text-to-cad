@@ -4,8 +4,9 @@ cadgen executes two kinds of JavaScript it does not write in Python: a headless 
 bundle (the snapshot CLI drives it in a page) and the CAD Viewer's built client
 (``cadgen viewer`` serves it). Both ship inside the distribution under ``cadgen/_runtime``,
 and both can be pointed elsewhere for development. The native file tracer every build
-loads ships there too (``_runtime/native``, one library per platform, found by
-cadgen._internal.filetrace) and has no override. Nothing cadgen runs needs Node.
+loads and the native tessellator every mesh is made by ship there too (``_runtime/native``,
+one library each per platform, found by cadgen._internal.filetrace and
+cadgen._internal.tessellate) and have no override. Nothing cadgen runs needs Node.
 
 **Every resolver here is CALL-TIME.** Nothing at import time touches the filesystem:
 ``pip install cadgen`` must succeed on a machine with no browser, and the CAD Viewer's

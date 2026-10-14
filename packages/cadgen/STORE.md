@@ -428,21 +428,24 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   `components/<cid>.selectors.json`. So a ref the page shows resolves in
   `inspect` to the entity it names, and nothing in a browser mints one.
 
-  Meshes are derived the same way, and by cadgen alone. The tessellator
-  (`_internal/tessellate.py`) is the one the CAD Viewer ran in the browser before
-  meshes moved into the store, in Python: each face triangulated in its own
-  parameters (its trim sampled from its exact pcurves, a grid sized by the
-  surface's curvature, each cell the trim crosses clipped and earcut, then
+  Meshes are derived the same way, and by cadgen alone. The tessellator is the
+  one the CAD Viewer ran in the browser before meshes moved into the store, as
+  cadgen's native library (`native/tessellate/`, one build per platform in
+  `_runtime/native`, driven by `_internal/tessellate.py`): each face triangulated
+  in its own parameters (its trim sampled from its exact pcurves, a grid sized by
+  the surface's curvature, each cell the trim crosses clipped and earcut, then
   refined wherever a chord, a centre or a facet strays), each model edge's exact
   curve sampled once and every adjacent face conformed to that one polyline, so
   the part is watertight across its faces, at the display tolerance
   (`tessellation_policy.DISPLAY_TESSELLATION`: the chord tolerance a fraction of
   the component's extent, the angle in radians). It evaluates the BREP itself --
-  each analytic surface by its formula, every other one, each pcurve and each edge
-  curve through OCCT -- and reads what the triangles do not say from the part's
-  selector table (each face's area, each edge's class) and the component's face
-  colours. A body (`store/meshes.py`) is glTF 2.0 binary in the component's own
-  units: ONE triangle primitive (positions, normals, u16
+  each analytic surface by its formula, each B-spline surface, pcurve and edge
+  curve by its poles and knots, each conic, and each surface of extrusion or
+  revolution of those; any other surface through OCCT -- and reads what the
+  triangles do not say from the part's selector table (each face's area, each
+  edge's class) and the component's face colours. A body (`store/meshes.py`) is
+  glTF 2.0 binary in the component's own units: ONE triangle primitive
+  (positions, normals, u16
   indices up to 65,535 vertices, else u32), a face table whose rows give each
   face's ordinal, contiguous index range and colour, an edge table giving each
   edge's ordinal, class and run of polyline points, and the points; the JSON

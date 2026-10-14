@@ -40,13 +40,13 @@ def write_assembly(path) -> None:
 
 
 def refusing_the_pins_side(real):
-    """``tessellate._tessellate_face_raw`` with a cylinder's side raising, as a face whose
-    geometry OCCT cannot evaluate does."""
-    def tessellate_face(face, *args):
-        if face.surface.kind == "cylinder":
+    """``tessellate._frame`` raising for a cylinder, as OCCT does reading a face whose geometry it
+    cannot evaluate: the face is read with no trim, so it is meshed as nothing and named."""
+    def frame(geometry):
+        if type(geometry).__name__ == "gp_Cylinder":
             raise RuntimeError("Standard_Failure: the surface cannot be evaluated")
-        return real(face, *args)
-    return tessellate_face
+        return real(geometry)
+    return frame
 
 
 class UnmeshedFaceTests(unittest.TestCase):
@@ -61,7 +61,7 @@ class UnmeshedFaceTests(unittest.TestCase):
         from cadgen._internal import tessellate
 
         with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}), \
-                mock.patch.object(tessellate, "_tessellate_face_raw", refusing_the_pins_side(tessellate._tessellate_face_raw)):
+                mock.patch.object(tessellate, "_frame", refusing_the_pins_side(tessellate._frame)):
             step_door.compile(document)
         # Each door only reads what the compile stored: none starts a derivation job.
         with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}), \

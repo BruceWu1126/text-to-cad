@@ -106,13 +106,14 @@ dev install's server and skills at it (see [Test In Agent Apps](#test-in-agent-a
 
 `packages/cadgen/src/cadgen/_runtime/` is BUILT, not committed — the whole
 directory is gitignored, and the wheel is the only place those files ship. A
-fresh clone therefore has no snapshot browser bundle, no Viewer client and no
-file tracer -- so it builds no model -- until
-`scripts/bundle/bundle.sh` runs, and cadgen says so by name the first time it
-reaches for one. `scripts/test/test-python.sh` and `scripts/test/test-global.sh`
-build the stages they read if they are missing (the tracer for this machine
-only), so this step is about having the whole thing, including the Viewer client
-and every platform's tracer the wheel carries.
+fresh clone therefore has no snapshot browser bundle, no Viewer client, no
+file tracer -- so it builds no model -- and no tessellator -- so it meshes no
+part -- until `scripts/bundle/bundle.sh` runs, and cadgen says so by name the
+first time it reaches for one. `scripts/test/test-python.sh` and
+`scripts/test/test-global.sh` build the stages they read if they are missing or
+older than their sources (the native libraries for this machine only), so this
+step is about having the whole thing, including the Viewer client and every
+platform's native libraries the wheel carries.
 
 For CAD Viewer development:
 
@@ -314,9 +315,10 @@ optional review screenshots produced by `--out`. Capture timing stays in the
 job log, so a stalled screenshot still leaves useful state diagnostics.
 
 **The packaged runtime is built per job**, not built once and passed between
-them: `ensure_packaged_runtime` takes ~13 s plus the host's file tracer (seconds
-with zig's cache warm; setup-deps caches it per zig version), and an artifact would
-serialise every test job behind a bundle job for longer than that.
+them: `ensure_packaged_runtime` takes ~13 s plus the host's file tracer and
+tessellator (seconds with zig's cache warm; setup-deps caches it per zig
+version), and an artifact would serialise every test job behind a bundle job for
+longer than that.
 
 **Flakes are fixed by mechanism or deleted — never skipped, retried, or tuned.**
 Classify first: a real bug, a retired behaviour, or a platform problem. Then fix
@@ -518,9 +520,9 @@ scripts/bundle/bundle.sh --check
 ```
 
 `--clean` removes old runtime outputs before building. `--check` builds and
-asserts the required browser and file-tracer outputs; wheel validation checks the
-complete packaged viewer too. Per-stage `cadgen-runtime.sh` flags are for debugging;
-normal iteration goes through `bundle.sh`.
+asserts the required browser and native-library outputs; wheel validation checks
+the complete packaged viewer too. Per-stage `cadgen-runtime.sh` flags are for
+debugging; normal iteration goes through `bundle.sh`.
 
 ## Branch Layout
 
@@ -585,10 +587,11 @@ wrong.
 
 `main` is source. Everything cadgen executes that is not Python — the snapshot
 browser bundle under `cadgen/_runtime/browser`, the CAD Viewer client under
-`_runtime/viewer`, and the file tracer every build loads under
-`_runtime/native` (one C file,
-`packages/cadgen/native/filetrace.c`, cross-compiled by zig for every platform
-into the one wheel; `ziglang` comes with `requirements-dev.txt`) — is
+`_runtime/viewer`, and the file tracer every build loads and the tessellator every
+mesh is made by under `_runtime/native` (one C file each,
+`packages/cadgen/native/filetrace.c` and the unity build
+`packages/cadgen/native/tessellate/tessellate.c`, cross-compiled by zig for every
+platform into the one wheel; `ziglang` comes with `requirements-dev.txt`) — is
 gitignored and produced by `scripts/bundle/bundle.sh`. Nothing built is ever
 committed: a rebundle used to add a megabyte of history per commit, and a
 committed bundle can drift from the source that claims to produce it.
@@ -700,7 +703,7 @@ green: that is the release. `Publish Release`, on the merge commit:
    `v<VERSION>-dev.<commit>` (`@text-to-cad/ui/build-id`) — `check-builds.sh`,
    the wheel-contents check, `python -m build`, and an `unzip -l` assertion that
    the wheel about to ship really holds `_runtime/browser`, `_runtime/viewer`
-   and every `_runtime/native` tracer. The pages' source maps, which the bundle
+   and every `_runtime/native` tracer and tessellator. The pages' source maps, which the bundle
    builds and the wheel leaves out, are gathered too
    (`scripts/release/sourcemaps.py`): every chunk a crash on the CAD Viewer or
    the CAD app can name, by the debug id its build stamped on it, with its map

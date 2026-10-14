@@ -5,8 +5,8 @@ documents into derived state, and derived state into pixels and meshes. One
 PyPI package carrying the Python engine under `src/cadgen/` and what it executes
 that is not Python under `src/cadgen/_runtime/`: the shared JavaScript runtime and
 the CAD Viewer's client, bundled in at build time (the JS *source* lives in its own
-packages and never ships as source), and the native file tracer, one library per
-platform.
+packages and never ships as source), and two native libraries, each one build per
+platform: the file tracer and the tessellator (their C sources are `native/`).
 
 **PURPOSE** — the engine and its command surface: model execution, the
 store, document assembly, kinematics, exports, validation, inspection,
@@ -450,6 +450,8 @@ src/cadgen/
                          #   builds and how that goes, counted)
   _internal/             # the engine: generation pipeline, tree builder,
                          #   filetrace (every file a build opens),
+                         #   tessellate (every display mesh, read off the
+                         #   BREP for the native tessellator),
                          #   kinematics_resolve (mate axes to numbers),
                          #   animation_bake
                          #   (clips to keyframes), mesh_export (the mesh
@@ -474,9 +476,11 @@ src/cadgen/
                          #   a host that renders no MCP Apps (browser)
   _runtime/              # BUILT JS (browser snapshot renderer, the viewer
                          #   client, the MCP app page) and the native file
-                         #   tracer, one library per platform — produced when
-                         #   the wheel is packaged, never committed, never
-                         #   edited
+                         #   tracer and tessellator, one library each per
+                         #   platform — produced when the wheel is packaged,
+                         #   never committed, never edited
+native/                  # the native libraries' C sources: filetrace.c, and
+                         #   tessellate/ (one unity build, tessellate.c)
 ```
 
 Verbs by format: `step` compile · build · snapshot;

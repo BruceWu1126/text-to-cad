@@ -1,16 +1,20 @@
 """cadgen's tessellator draws a part as the CAD Viewer's tessellator drew it: closed, true to its BREP.
 
-Every display mesh is ``cadgen._internal.tessellate``'s, the browser tessellator of cadgen 0.7.21 in
-Python. A solid comes out closed (each edge of the welded mesh used by two triangles), wound
-outward, with its volume and each face's area those of the exact BREP; three.js's earcut is the
-one it triangulates with, triangle for triangle; and the faults it fixes in what it was ported
-from stay fixed: a freeform pole, a tip whose row is one point, a straight run of trim through a
-corner, a row of slots in line, a hole crossing a grid cell's side, and a face narrower than its
-tolerance named as a hole.
+Every display mesh is ``cadgen._internal.tessellate``'s, the browser tessellator of cadgen 0.7.21 as
+cadgen's native library. A solid comes out closed (each edge of the welded mesh used by two
+triangles), wound outward, with its volume and each face's area those of the exact BREP; the
+B-splines, conics and swept surfaces the library evaluates itself mesh as they do evaluated by OCCT;
+three.js's earcut is the one it triangulates with, triangle for triangle; and the faults it fixes in
+what it was ported from stay fixed: a freeform pole, a tip whose row is one point, a straight run of
+trim through a corner, a trim point or corner the grid moved off its trim, a row of slots in line, a
+hole crossing a grid cell's side, and a face narrower than its tolerance named as a hole. A face's
+grid and its pinning are driven directly, through the library's probe of them, with its trim given.
 """
 
 from __future__ import annotations
 
+import collections
+import ctypes
 import math
 import unittest
 
@@ -52,19 +56,32 @@ RULINGS = [
 ]
 
 
-def _mesh(shape):
-    """The shape's display mesh as the store holds it, decoded."""
+# A part key the meshes name: any will do, at this cadgen's part version.
+_PART = "0" * 64 + "-v5"
+
+
+def _mesh(shape, *, host_all: bool = False):
+    """The shape's display mesh as the store holds it, decoded. ``host_all`` has OCCT evaluate every
+    curve and surface the library would evaluate itself."""
     from cadgen._internal.selector_table import build_selector_table
-    from cadgen._internal.tessellate import mesh_component
+    from cadgen._internal.tessellate import _mesh_component
     from cadgen._internal.topology_extract import extract_topology_facts
     from cadgen.store.meshes import decode_payload
     from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
     topods = getattr(shape, "wrapped", shape)
     table = build_selector_table(topods, extract_topology_facts(topods))
-    body = mesh_component(topods, table, {}, part="0" * 64 + "-v4", chord=DISPLAY_TESSELLATION["chordTolerance"],
-                          angle=DISPLAY_TESSELLATION["angleTolerance"])
+    body = _mesh_component(topods, table, {}, part=_PART, chord=DISPLAY_TESSELLATION["chordTolerance"],
+                           angle=DISPLAY_TESSELLATION["angleTolerance"], host_all=host_all)
     return decode_payload(body)
+
+
+def _triangles(mesh, quantum: float) -> collections.Counter:
+    """The mesh's triangles, each by its corners' positions (to ``quantum``) and normals."""
+    corners = np.concatenate([np.round(np.asarray(mesh.positions, np.float64) / quantum),
+                              np.round(np.asarray(mesh.normals, np.float64) * 1e6)], axis=1).astype(np.int64)
+    return collections.Counter(tuple(map(tuple, triangle))
+                               for triangle in corners[np.asarray(mesh.indices, np.int64).reshape(-1, 3)].tolist())
 
 
 def _odd_edges(positions: np.ndarray, triangles: np.ndarray) -> int:
@@ -78,30 +95,67 @@ def _odd_edges(positions: np.ndarray, triangles: np.ndarray) -> int:
     return int((counts % 2).sum())
 
 
-def _plane_face(u0: float, u1: float, v0: float, v1: float):
-    """A planar face record in its own parameters, for driving the grid triangulation directly."""
-    from cadgen._internal import tessellate
+def _probe_face(surface: str, box, loop, lines=(), *, chord_limit=math.inf, angle_limit=math.inf):
+    """One face's grid and its vertices pinned to its component's edges, by the library's probe of
+    them (``cadgen_tessellate_pinned``), its trim given rather than sampled: (each vertex's (u, v),
+    the edges it is pinned to, the triangles). ``surface`` is "plane", the XY plane in its own
+    parameters, or "flat", the same plane as a surface the library has no formula for, which it
+    snaps a vertex on as it does on a curved one. ``loop`` is its points (u, v, edge, fractions):
+    the segment from each to the next runs along that model edge (0 for none) at those fractions
+    (f0, f1) of its polyline, or None where it runs along no shared edge; ``lines`` each edge's
+    straight 3D curve (start, end), by ordinal, sampled to 1e-3."""
+    from cadgen._internal import tessellate as T
 
-    class Plane:
-        kind = "plane"
+    model = T._Model(1, max([len(lines)] + [point[2] for point in loop]))
+    kind = T._ANALYTIC["plane"] if surface == "plane" else T._S_HOST
+    model.face_i[0] = [1, 0, kind, -1, 0, 0, 0, 0]
+    model.face_d[0] = [*box, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]
+    model.surfaces[0] = (lambda u, v: (u, v, 0.0), lambda u, v, _box: (0.0, 0.0, 1.0))
+    for ordinal, line in enumerate(lines, 1):
+        if line is not None:
+            start, end = line
+            model.edge_i[ordinal - 1] = [T._C_LINE, 0, -1, 0, 0, 0, 0, 0, 0]
+            model.edge_d[ordinal - 1] = [0.0, 1.0, *start, *[0.0] * 6, *(b - a for a, b in zip(start, end)), 0.0,
+                                         0.0]
+    failure: list = []
+    request, keep = T._request(model, chord=1e-3, angle=math.inf, failure=failure)
+    probe = T._library().cadgen_tessellate_pinned
+    double, int32 = ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int32)
+    probe.restype = ctypes.c_int32
+    probe.argtypes = [ctypes.POINTER(T._Input), ctypes.c_int32, double, int32, ctypes.c_int32, int32, double,
+                      ctypes.c_double, ctypes.c_double, double, int32, int32, ctypes.c_int64,
+                      ctypes.POINTER(ctypes.c_int64)]
+    points = np.array([point[:2] for point in loop], np.float64)
+    ords = np.array([point[2] for point in loop], np.int32)
+    fractions = np.array([point[3] or (math.nan, math.nan) for point in loop], np.float64)
+    sizes = np.array([len(loop)], np.int32)
+    capacity = 100_000
+    uv, pinned, triangles = np.zeros((capacity, 2)), np.zeros((capacity, 2), np.int32), np.zeros((capacity, 3), np.int32)
+    counts = (ctypes.c_int64 * 2)()
+    status = probe(ctypes.byref(request), 0, points.ctypes.data_as(double), sizes.ctypes.data_as(int32), 1,
+                   ords.ctypes.data_as(int32), fractions.ctypes.data_as(double), chord_limit, angle_limit,
+                   uv.ctypes.data_as(double), pinned.ctypes.data_as(int32), triangles.ctypes.data_as(int32),
+                   capacity, counts)
+    del keep
+    assert status == 0 and not failure, (status, failure)
+    return uv[:counts[0]], pinned[:counts[0]], triangles[:counts[1]]
 
-        def value(self, u: float, v: float) -> list[float]:
-            return [u, v, 0.0]
 
-        def normal(self, u: float, v: float, _box) -> list[float]:
-            return [0.0, 0.0, 1.0]
+def _earcut(contour, holes) -> list[list[int]]:
+    """The library's earcut (``cadgen_tessellate_earcut``) of a contour and its holes."""
+    from cadgen._internal import tessellate as T
 
-    face = tessellate._Face()
-    face.ord, face.reversed, face.surface, face.uv, face.loops = 1, False, Plane(), [u0, u1, v0, v1], []
-    return face
-
-
-def _ring(points):
-    from cadgen._internal import tessellate
-
-    ring = tessellate._Ring([list(point) for point in points])
-    ring.ords, ring.metas = [0] * len(points), [None] * len(points)
-    return ring
+    earcut = T._library().cadgen_tessellate_earcut
+    double, int32 = ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int32)
+    earcut.restype = ctypes.c_int32
+    earcut.argtypes = [double, ctypes.c_int32, int32, ctypes.c_int32, int32, ctypes.c_int32]
+    points = np.array([*contour, *[point for hole in holes for point in hole]], np.float64)
+    starts = np.array(np.cumsum([len(contour)] + [len(hole) for hole in holes])[:-1], np.int32)
+    out = np.zeros(3 * len(points) * 3, np.int32)
+    made = earcut(points.ctypes.data_as(double), len(points), starts.ctypes.data_as(int32), len(holes),
+                  out.ctypes.data_as(int32), len(out))
+    assert made >= 0
+    return out[:made].reshape(-1, 3).tolist()
 
 
 class SolidsTests(unittest.TestCase):
@@ -167,6 +221,49 @@ class SolidsTests(unittest.TestCase):
                         "each pole's normal is the axis")
         analytic = len(np.asarray(_mesh(Sphere(radius)).indices)) // 3
         self.assertLess(len(triangles), 2 * analytic, "refined as the sphere it is, not on and on at its poles")
+
+    def test_the_library_evaluates_its_curves_and_surfaces_as_occt_does(self) -> None:
+        # The library evaluates B-spline surfaces, trims and edges by their poles and knots, conics
+        # by their formulas, and surfaces of extrusion and revolution by the curve they sweep. With
+        # OCCT evaluating them all instead, each part meshes the same, triangle for triangle, point
+        # and normal -- but for the odd diagonal that the last bits of a point turn.
+        from build123d import Axis, Box, BuildLine, BuildPart, BuildSketch, Circle, Cylinder, Ellipse, Locations, \
+            Mode, Plane, Polyline, Solid, Spline, extrude, fillet, loft, make_face, revolve
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_NurbsConvert
+
+        with BuildPart() as vase:  # a loft through circles: a B-spline surface of degree 14 round them
+            for z, radius in ((0, 10), (8, 14), (16, 8), (24, 11)):
+                with BuildSketch(Plane.XY.offset(z)):
+                    Circle(radius)
+            loft()
+        with BuildPart() as cam:  # a spline and an elliptical hole, extruded
+            with BuildSketch():
+                with BuildLine():
+                    Spline((0, 0), (10, 4), (20, -2), (30, 3))
+                    Polyline((30, 3), (30, -12), (0, -12), (0, 0))
+                make_face()
+                with Locations((15, -5)):
+                    Ellipse(6, 3, mode=Mode.SUBTRACT)
+            extrude(amount=6)
+        with BuildPart() as bell:  # a spline, revolved
+            with BuildSketch(Plane.XZ):
+                with BuildLine():
+                    Spline((0, 0), (8, 2), (6, 10), (9, 18))
+                    Polyline((9, 18), (0, 18), (0, 0))
+                make_face()
+            revolve(axis=Axis.Z)
+        # A filleted plate round a hole, its every surface, trim and edge made a B-spline: its hole
+        # and rounds rational ones.
+        plate = fillet((Box(40, 30, 12) - Cylinder(5, 20)).edges().group_by()[-1], 2)
+        nurbs = Solid(BRepBuilderAPI_NurbsConvert(plate.wrapped, True).Shape())
+        for name, shape in {"vase": vase.part, "cam": cam.part, "bell": bell.part, "plate": nurbs}.items():
+            with self.subTest(name):
+                own, occt = _mesh(shape), _mesh(shape, host_all=True)
+                triangles = np.asarray(own.indices, np.int64).reshape(-1, 3)
+                self.assertEqual(0, _odd_edges(own.positions, triangles), "the mesh is closed")
+                quantum = 1e-9 * float(np.ptp(np.asarray(own.positions), axis=0).max())
+                ours, theirs = _triangles(own, quantum), _triangles(occt, quantum)
+                self.assertLessEqual(sum(((ours - theirs) + (theirs - ours)).values()), 0.01 * len(triangles))
 
     def test_a_tip_whose_row_is_one_point_meets_its_neighbour_along_their_edge(self) -> None:
         # Two faces of an F-14D's tail, ruled B-splines whose rows close to one point at each end,
@@ -262,23 +359,19 @@ class SolidsTests(unittest.TestCase):
 
 class TriangulationTests(unittest.TestCase):
     def test_earcut_triangulates_as_three_does(self) -> None:
-        from cadgen._internal.earcut import triangulate_shape
-
-        self.assertEqual(THREE_HOLE, triangulate_shape([[0, 0], [10, 0], [10, 10], [0, 10]], [HEXAGON]))
-        self.assertEqual(THREE_NOTCHED, triangulate_shape([list(point) for point in NOTCHED], []))
+        self.assertEqual(THREE_HOLE, _earcut([[0, 0], [10, 0], [10, 10], [0, 10]], [HEXAGON]))
+        self.assertEqual(THREE_NOTCHED, _earcut(NOTCHED, []))
 
     def test_a_corner_on_a_straight_run_of_trim_leaves_no_t_junction(self) -> None:
         # Earcut joins the notch's corner to the run it stands on with two triangles of no area
         # (the last two of THREE_NOTCHED). Dropped, they left the run's middle points on one
         # edge of the triangle above them, and the neighbouring face's points along it a crack.
-        from cadgen._internal.tessellate import _grid_triangulate
-
-        grid = _grid_triangulate(_plane_face(0, 3, 170, 210), [_ring(NOTCHED)], math.inf)
-        corners = [grid.vertex_ids[(u, v)] for u, v in NOTCHED]
+        uv, _pinned, triangles = _probe_face("plane", (0, 3, 170, 210), [(u, v, 0, None) for u, v in NOTCHED])
+        vertex = {(u, v): i for i, (u, v) in enumerate(uv.tolist())}
+        corners = [vertex[(u, v)] for u, v in NOTCHED]
         outline = {frozenset((corners[i], corners[(i + 1) % len(corners)])) for i in range(len(corners))}
         uses: dict[frozenset, int] = {}
-        for t in range(0, len(grid.triangles), 3):
-            a, b, c = grid.triangles[t:t + 3]
+        for a, b, c in triangles.tolist():
             for edge in (frozenset((a, b)), frozenset((b, c)), frozenset((c, a))):
                 uses[edge] = uses.get(edge, 0) + 1
         self.assertEqual(outline, {edge for edge, count in uses.items() if count == 1}, "the boundary is the trim")
@@ -288,85 +381,28 @@ class TriangulationTests(unittest.TestCase):
         # each grid line crossing it made a vertex the grid moved onto its bottom line (one source
         # ULP), past the tolerance pinning held vertices to their trim by, so they were never
         # pinned to the edge and the face beside it met them with a crack.
-        from cadgen._internal import tessellate
-
-        class Flat:
-            kind = "other"
-
-            def value(self, u: float, v: float) -> list[float]:
-                return [u, v, 0.0]
-
-        face = tessellate._Face()
-        face.ord, face.reversed, face.surface, face.uv, face.loops, face.poles = 1, False, Flat(), [0, 8, -21, -2], [], []
         rise = -21.0 + 2.3e-6
-        ring = _ring([[0.0, -21.0], [1.0, rise], [8.0, rise], [8.0, -2.0], [0.0, -2.0]])
-        ring.ords = [1, 1, 2, 3, 4]
-        ring.metas = [tessellate._Meta(1, 0.0, 0.125), tessellate._Meta(1, 0.125, 1.0), None, None, None]
-        line = tessellate._Curve()
-        line.kind, line.range, line.n, line.value = "line", (0.0, 1.0), None, lambda t: [8.0 * t, -21.0, 0.0]
-        shared = {1: tessellate._sample_shared_edge(line, 1e-3)}
-
-        grid = tessellate._grid_triangulate(face, [ring], math.inf, 1.0)
-        us = np.array([u for u, _v in grid.uv_verts])
-        vs = np.array([v for _u, v in grid.uv_verts])
-        boundary: dict = {}
-        tessellate._pin_boundary(grid, us, vs, [face.surface.value(u, v) for u, v in grid.uv_verts], boundary, shared)
-        crossings = [i for i, (u, v) in enumerate(grid.uv_verts) if 1 < u < 8 and v < -20.99]
+        loop = [(0.0, -21.0, 1, (0.0, 0.125)), (1.0, rise, 1, (0.125, 1.0)), (8.0, rise, 2, None),
+                (8.0, -2.0, 3, None), (0.0, -2.0, 4, None)]
+        uv, pinned, _triangles = _probe_face("flat", (0, 8, -21, -2), loop, [((0.0, -21.0, 0.0), (8.0, -21.0, 0.0))],
+                                             angle_limit=1.0)
+        crossings = [i for i, (u, v) in enumerate(uv.tolist()) if 1 < u < 8 and v < -20.99]
         self.assertEqual(6, len(crossings), "grid lines u = 2 to 7 cross the trim")
-        self.assertEqual([], [grid.uv_verts[i] for i in crossings if 1 not in [ord_ for ord_, _f in boundary.get(i, [])]])
+        self.assertEqual([], [uv[i].tolist() for i in crossings if 1 not in pinned[i]])
 
     def test_a_corner_moved_across_a_cell_border_is_pinned_to_both_its_edges(self) -> None:
         # A hand's palm whose trim turns a corner a hair left of a grid line: the grid moved the
         # corner onto the line, into the cell to its right, where only one of its two edges runs,
         # and pinning, held to that cell, labelled it with the one edge. The mesh edge along the
         # other was never split to its neighbour face's points.
-        from cadgen._internal import tessellate
-
-        class Flat:
-            kind = "other"
-
-            def value(self, u: float, v: float) -> list[float]:
-                return [u, v, 0.0]
-
-        face = tessellate._Face()
-        face.ord, face.reversed, face.surface, face.uv, face.loops, face.poles = 1, False, Flat(), [0, 8, 0, 4], [], []
-        corner = [4.0 - 1e-9, 2.0]
-        ring = _ring([[1.0, 2.0], [1.0, 0.5], [7.0, 0.5], [7.0, 3.0], corner])
-        ring.ords = [3, 4, 5, 1, 2]
-        ring.metas = [None, None, None, tessellate._Meta(1, 0.0, 1.0), tessellate._Meta(2, 0.0, 1.0)]
-        shared = {}
-        for ordinal, (start, end) in ((1, ([7.0, 3.0], corner)), (2, (corner, [1.0, 2.0]))):
-            line = tessellate._Curve()
-            line.kind, line.range, line.n = "line", (0.0, 1.0), None
-            line.value = lambda t, a=start, b=end: [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]), 0.0]
-            shared[ordinal] = tessellate._sample_shared_edge(line, 1e-3)
-
-        grid = tessellate._grid_triangulate(face, [ring], math.inf, 1.0)
-        us = np.array([u for u, _v in grid.uv_verts])
-        vs = np.array([v for _u, v in grid.uv_verts])
-        boundary: dict = {}
-        tessellate._pin_boundary(grid, us, vs, [face.surface.value(u, v) for u, v in grid.uv_verts], boundary, shared)
-        [at] = [i for i, (u, v) in enumerate(grid.uv_verts) if abs(u - 4.0) < 1e-6 and abs(v - 2.0) < 1e-6]
-        self.assertEqual(4.0, grid.uv_verts[at][0], "the grid moved the corner onto its line")
-        self.assertEqual({1, 2}, {ord_ for ord_, _f in boundary.get(at, [])})
-
-    def test_a_cell_a_hole_crosses_is_cut_where_the_face_is(self) -> None:
-        # A cell of a plate whose round hole crosses its side, and one whose hole covers its
-        # corner: what the cut covers is the cell less the hole, to the last digit.
-        from cadgen._internal.earcut import triangulate_shape
-        from cadgen._internal.tessellate import _cell_regions, _clip_polygon_to_cell, _covered, _polygon_area
-
-        square = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]
-        for cx, cy, r in ((0.5, 0.5, 1.0), (1.5, 1.0, 0.8), (1.0, 0.5, 0.69)):
-            hole = [[cx + r * math.cos(-2 * math.pi * i / 48), cy + r * math.sin(-2 * math.pi * i / 48)] for i in range(48)]
-            regions = _cell_regions([_ring(square), _ring(hole)], 0.5, 1.5, 0.0, 1.0)
-            covered = sum(_covered(outline + [point for inner in holes for point in inner],
-                                   triangulate_shape([list(point) for point in outline],
-                                                     [[list(point) for point in inner] for inner in holes]))
-                          for outline, holes in regions)
-            exact = abs(_polygon_area(_clip_polygon_to_cell(square, 0.5, 1.5, 0.0, 1.0))) - abs(
-                _polygon_area(_clip_polygon_to_cell(hole, 0.5, 1.5, 0.0, 1.0)))
-            self.assertAlmostEqual(exact, covered, places=12)
+        corner = (4.0 - 1e-9, 2.0)
+        loop = [(1.0, 2.0, 3, None), (1.0, 0.5, 4, None), (7.0, 0.5, 5, None), (7.0, 3.0, 1, (0.0, 1.0)),
+                (*corner, 2, (0.0, 1.0))]
+        lines = [((7.0, 3.0, 0.0), (*corner, 0.0)), ((*corner, 0.0), (1.0, 2.0, 0.0))]
+        uv, pinned, _triangles = _probe_face("flat", (0, 8, 0, 4), loop, lines, angle_limit=1.0)
+        [at] = [i for i, (u, v) in enumerate(uv.tolist()) if abs(u - 4.0) < 1e-6 and abs(v - 2.0) < 1e-6]
+        self.assertEqual(4.0, uv[at][0], "the grid moved the corner onto its line")
+        self.assertEqual({1, 2}, set(pinned[at].tolist()))
 
 
 class UnmeshedFaceTests(unittest.TestCase):
@@ -389,7 +425,7 @@ class UnmeshedFaceTests(unittest.TestCase):
         box, cylinder = Box(1, 2, 3).wrapped, Cylinder(1, 2).wrapped
         table = build_selector_table(cylinder, extract_topology_facts(cylinder))
         with self.assertRaisesRegex(MeshProductionError, "selector table"):
-            mesh_component(box, table, {}, part="0" * 64 + "-v4", chord=5e-4, angle=0.35)
+            mesh_component(box, table, {}, part=_PART, chord=5e-4, angle=0.35)
 
 
 if __name__ == "__main__":
