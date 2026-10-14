@@ -178,6 +178,27 @@ it('a pasted reference is a chip in the note, where it was pasted, and goes as t
   expect([note(), field().childNodes.length]).toEqual(['', 0]);
 });
 
+it('every chip\'s copy pasted is its pill, as its chip shows it: a measurement, the drawing, a named part', async () => {
+  let copied: Promise<string> | string = '';
+  const host = testHost({ clipboard: { writeText: async text => { copied = text; }, readText: async () => '', writeImage: async () => {} } });
+  const nameReference = () => ({ name: 'base', kind: 'solid' });
+  mount(host, { references: [face], nameReference });
+  const paste = (text: string) => fireEvent.paste(field(), { clipboardData: { getData: () => text } });
+  const pills = () => [...field().querySelectorAll('[data-quick-edit-note-ref]')]
+    .map(pill => [pill.querySelector('svg')?.getAttribute('data-pick-glyph'), pill.textContent]);
+  const mark = { start: [0, 0, 0], end: [10, 0, 0], label: '10.00 mm', color: '#d59090' };
+  const sketch = { units: 'mm', parts: {}, marks: [{ id: 'a', kind: 'stroke' }] };
+  paste(JSON.stringify(mark));
+  paste(JSON.stringify(sketch, null, 2));
+  paste('/models/parts/bracket.step#o1.2');
+  expect(pills()).toEqual([['ruler', '10.00 mm'], ['pencil', 'Drawing'], ['solid', 'base']]);
+  // Each goes as what was copied: the measurement and the drawing as their JSON.
+  fireEvent.click(within(box()!).getByRole('button', { name: 'Copy Prompt' }));
+  const text = await waitFor(() => copied);
+  expect(text).toContain(JSON.stringify(mark));
+  expect(text).toContain(JSON.stringify(sketch));
+});
+
 it('keeps the note and says why when it did not go, and counts no use', async () => {
   const deliver = vi.fn(async () => ({ status: 'failed' as const, message: 'The chat is busy.' }));
   const clear = vi.fn();

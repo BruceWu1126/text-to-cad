@@ -16,6 +16,8 @@ import DisplayPopover from "./DisplayPopover.jsx";
 import { withGroups } from "../../../drawing/inkGeometry.js";
 import PlaybackMenu, { OrbitMenu, RoutineMenu } from "../tools/PlaybackMenu.jsx";
 import FloatingToolBar from "../tools/FloatingToolBar.js";
+import ToolPanel from "../tools/ToolPanel.jsx";
+import { DrawingToolbar } from "../../../drawing/toolbar.jsx";
 import ToolStack from "../tools/ToolStack.jsx";
 import { KeptAnimationPanel } from "../tools/playbar/AnimationPanel.jsx";
 import { ViewportAnimationBar, animationControlsHaveContent } from "../tools/playbar/ViewportAnimationBar.js";
@@ -215,9 +217,13 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
   }, [routineHeld]);
   // The shell's own panels lead the stack: a routine's frame kept with the Animation tool down is
   // one line, its X back to rest. The renderer's follow.
-  // The drawing has no panel: it is Quick Edit's Drawing chip (its X clears it, a click copies it),
-  // and what the next mark looks like is the Draw tools' menus' (`InkStyleSubmenus`).
+  // Draw's panel leads the stack while it is the tool: its tools, its Undo and Redo, and what the next
+  // mark looks like (`drawing/toolbar.jsx`). The drawing itself has no panel: it is Quick Edit's chip
+  // (its X clears it, a click copies it).
   const shellPanels = <>
+    {frame.drawToolActive ? <ToolPanel id="drawing" title="Drawing" label="Drawing controls" collapsible={false} lead>
+      <DrawingToolbar drawing={frame.drawing} history={frame.history} />
+    </ToolPanel> : null}
     {frame.animationKept ? <KeptAnimationPanel runtime={animation} /> : null}
   </>;
 

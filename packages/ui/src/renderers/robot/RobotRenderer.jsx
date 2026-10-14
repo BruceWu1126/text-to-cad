@@ -258,10 +258,11 @@ function RobotSurface({ view, data }) {
   const { references, chips: referenceChips } = useRobotReferences({ robot: robot?.robot || null, components: robot?.components,
     selection, resource: shell.frame.resource, onOpenFile: view.onOpenFile });
 
-  // A link pasted into Quick Edit's note, by its name, where it is one of this file's.
+  // A link pasted into Quick Edit's note, by its name and the solid's glyph (as its chip shows it),
+  // where it is one of this file's.
   const resourcePath = shell.frame.resource?.path;
   const nameLink = useCallback(reference => (reference?.resource?.path === resourcePath && reference.target?.kind === "cad-selector"
-    ? reference.target.selectors.join(", ") : ""), [resourcePath]);
+    ? { name: reference.target.selectors.join(", "), kind: "solid" } : ""), [resourcePath]);
 
   return <RendererShell shell={shell} tools={tools} toolPanels={toolPanels}
     references={shell.previewing ? NO_REFERENCES : references} referenceChips={shell.previewing ? NO_REFERENCES : referenceChips}

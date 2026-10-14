@@ -1,7 +1,7 @@
 import { buildEdgeChainGraph } from "./workbench/edgeChainSelection.js";
 "use client";
 
-import { MeasureModeIcon, MeasureModeMenu, SelectModeIcon, SelectModeMenu } from "./components/workbench/SelectionModes.jsx";
+import { MeasureIcon, SelectModeIcon, SelectModeMenu } from "./components/workbench/SelectionModes.jsx";
 import { NO_CONNECTED_SELECTION, connectedSelectionApplies } from "./workbench/selectionFilter.js";
 import { PositionToolIcon, positionValuesAreDefault } from "../kit/inspector/kinematicsControls.jsx";
 import { filterSelectionReferences, toggleReferenceGroupSelection, connectedReferenceIds } from "./workbench/selectionFilter.js";
@@ -14,12 +14,11 @@ import { hasAuthoredMaterials } from "@text-to-cad/core/common/inspectEnvironmen
 import { displayRecordsBounds, mergeBoundsList } from "@text-to-cad/core/lib/viewer/autoZoom.js";
 import { VIEWER_PICK_MODE } from "@text-to-cad/core/lib/viewer/constants.js";
 import { dimensionLayoutHit, measureLabelText, measureSeriesColor, measurementMark, screenSpaceDimensionLayout } from "@text-to-cad/core/lib/viewer/measureDimension.js";
-import { Ruler } from "lucide-react";
+import { PickGlyph } from "../kit/inspector/pickGlyph.jsx";
 import { toNumber } from "@text-to-cad/core/lib/viewer/modelRuntime.js";
 import { normalizePartIdList } from "@text-to-cad/core/lib/viewer/partVisualState.js";
 import RendererShell from "../kit/shell/RendererShell.jsx";
 import { usePreviewState, useRendererShell } from "../kit/shell/useRendererShell.js";
-import { useViewerHistory } from "../kit/shell/useViewerHistory.js";
 import StepSceneLayers, { releaseStepRuntime } from "./scene/StepSceneLayers.jsx";
 import { displayRecordExplodedViewTranslation } from "./scene/useStepExplode.js";
 import { createStepScene, stepSceneView } from "./scene/stepScene.js";
@@ -79,7 +78,6 @@ import {
   isLargeStepGlbEntry
 } from "@text-to-cad/core/lib/render/meshCost.js";
 import { createAnimationClock, AnimationClockProvider } from "./workbench/animationClockStore.js";
-import { measureFilterSnaps } from "./workbench/measureRulerState.js";
 import { useStepMeasure } from "./workbench/useStepMeasure.js";
 import { fileKey } from "./workbench/entryPaths.js";
 import { stepJointHandles, stepPosableHandles } from "./workbench/jointHandles.js";
@@ -1341,22 +1339,17 @@ function StepSurfaceBody({ view, data }) {
     Boolean(selectedMeshData) &&
     !stepInteractionBlocked &&
     !viewerLoading;
-  // The file view's one undo history: the measurements' steps and the drawing's, in the order taken.
-  const history = useViewerHistory();
-  const measure = useStepMeasure({ fileKey: selectedKey, revision: selectedEntry?.hash, picking: measureModeActive, history });
+  const measure = useStepMeasure({ fileKey: selectedKey, revision: selectedEntry?.hash, picking: measureModeActive });
   const measureMeasurements = measure.measurements;
 
   const filteredViewerReferences = useMemo(() => filterSelectionReferences(viewerPickableReferences, selectionFilter),
     [viewerPickableReferences, selectionFilter]);
   const filteredViewerFaces = useMemo(() => filteredViewerReferences.filter(isFaceReference), [filteredViewerReferences, isFaceReference]);
   const filteredViewerEdges = useMemo(() => filteredViewerReferences.filter(isEdgeReference), [filteredViewerReferences, isEdgeReference]);
-  // What the tool in hand may pick: Measure snaps to what its own filter says, Select to what
-  // the selection filter allows.
-  const measureSnaps = measureFilterSnaps(measure.filter);
-  const viewerPickableFacesForTool = measureModeActive
-    ? (measureSnaps.faces ? viewerPickableFaces : EMPTY_LIST) : filteredViewerFaces;
-  const viewerPickableEdgesForTool = measureModeActive
-    ? (measureSnaps.edges ? viewerPickableEdges : EMPTY_LIST) : filteredViewerEdges;
+  // What the tool in hand may pick: Measure snaps to no edge or face (points on the model), Select
+  // to what the selection filter allows.
+  const viewerPickableFacesForTool = measureModeActive ? EMPTY_LIST : filteredViewerFaces;
+  const viewerPickableEdgesForTool = measureModeActive ? EMPTY_LIST : filteredViewerEdges;
   const measureToolDisabled = viewerLoading || !selectedMeshData;
   const topologySelectionActive =
     (isAssemblyView && requestedStepTreeTopologyNodeIds.length > 0) ||
@@ -1477,7 +1470,7 @@ function StepSurfaceBody({ view, data }) {
     // A click copies it as snapshot takes it: a job's `measurements` entry, `--measurements` JSON.
     return { key: `measure-${item.id}`, label: `Measurement ${index + 1}: ${reading}`, text: reading,
       copy: () => JSON.stringify(measurementMark(item)),
-      icon: <Ruler className="size-2.5 shrink-0" style={{ color: measureSeriesColor(item.colorIndex) }} strokeWidth={2} aria-hidden="true" />,
+      icon: <PickGlyph kind="ruler" className="size-2.5 shrink-0" color={measureSeriesColor(item.colorIndex)} />,
       card: <MeasurementCard item={item} />,
       onRemove: () => measure.onDelete(item.id), onHover: on => measure.hover(on ? item.id : "") };
   }), [measureMeasurements, measure.onDelete, measure.hover]);
@@ -1529,7 +1522,7 @@ function StepSurfaceBody({ view, data }) {
     rendererState: session.rendererState,
     // Delete takes the measurements Select picked, beside the drawing's ink the shell deletes.
     deleteSelection: measure.removeSelected,
-    history, measurements: quickEditMeasurements,
+    measurements: quickEditMeasurements,
     preserveInteractionPixelRatio: viewPolicy.wireframeMode || viewPolicy.edgesVisible,
     runtimeLifecycle: stepRuntimeLifecycle,
     onRuntimeAlert: handleViewerAlertChange,
@@ -1785,9 +1778,10 @@ function StepSurfaceBody({ view, data }) {
       const label = referenceLabel(reference.selector, displayStepTreeRoot || stepTreeRoot);
       return { ...reference, ...(label ? { label } : {}) };
     }), [selectedEntry, displayStepTreeRoot, stepTreeRoot]);
-  // A reference into this file as the view names it, for its chip in Quick Edit's note: a part or
-  // subassembly by its tree name ("cam"), a face, an edge or a solid compactly, by its part, its
-  // kind's glyph and its number ("cam ◧3"), several of one kind on one part counted ("cam ◧×4").
+  // A reference into this file as the view names it, for its pill in Quick Edit's note, its kind's
+  // glyph first: a part or subassembly by its tree name (the solid's, "cam"), a face, an edge or a
+  // solid compactly, by its part and its number ("◧ cam 3"), several of one kind on one part counted
+  // ("◧ cam ×4").
   // "" for one into another file, or one it has no name for.
   const nameReference = useCallback(reference => {
     if (reference?.resource?.path !== promptResource.path || reference.target?.kind !== "cad-selector") return "";
@@ -1795,14 +1789,14 @@ function StepSurfaceBody({ view, data }) {
     const KINDS = { f: "face", e: "edge", v: "vertex", s: "solid" };
     const named = reference.target.selectors.map(selector => {
       const own = referenceLabel(selector, root);
-      if (own) return { own };
       const match = String(selector).match(/^(.+)\.([fevs])(\d+)$/);
+      if (own) return { own, kind: match ? KINDS[match[2]] : "solid" };
       // A part file's one part has no node of its own in the tree: it goes by the file's name.
       const part = match ? referenceLabel(match[1], root) || (isAssemblyView ? "" : stepPartNameFromFile(promptResource.path)) : "";
       return part ? { part, kind: KINDS[match[2]], number: match[3] } : null;
     });
     if (!named.length || named.some(entry => !entry)) return "";
-    if (named.length === 1) return named[0].own || { name: named[0].part, kind: named[0].kind, number: named[0].number };
+    if (named.length === 1) return named[0].own ? { name: named[0].own, kind: named[0].kind } : { name: named[0].part, kind: named[0].kind, number: named[0].number };
     const [first] = named;
     return first.part && named.every(entry => entry.part === first.part && entry.kind === first.kind)
       ? { name: first.part, kind: first.kind, count: named.length } : named.map(entry => entry.own || `${entry.part} · ${entry.kind} ${entry.number}`).join(", ");
@@ -3228,16 +3222,12 @@ function StepSurfaceBody({ view, data }) {
   const modelEffects = useModelTools({ modelKey: selectedEntry?.file, view: desiredScene.view,
     features: viewFeatures, store: viewSettingsStore, mesh: selectedDisplayMeshData,
     disabled: toolIdle, selectedTool: tabToolMode, onSelect: handleSelectTabToolMode });
-  // Select's mode and options, and Measure's snapping: each a chevron after its tool's button on
-  // the strip, whose menu takes the tool up as it sets the mode. One element until what it shows changes.
+  // Select's mode and options: a chevron after its button on the strip, whose menu takes the tool up
+  // as it sets the mode. One element until what it shows changes.
   const selectModeMenu = useMemo(() => <SelectModeMenu mode={selectionFilter} assembly={isAssemblyView} disabled={selectDisabled}
     onModeChange={value => { changeSelectMode(value); handleSelectTabToolMode(TAB_TOOL_MODE.REFERENCES); }}
     connected={connectedSelection} onConnectedChange={(id, checked) => setConnectedSelection(current => ({ ...current, [id]: checked }))} />,
   [selectionFilter, isAssemblyView, selectDisabled, connectedSelection, changeSelectMode, handleSelectTabToolMode]);
-  const measureModeMenu = <MeasureModeMenu mode={measure.filter} disabled={measureToolDisabled} onModeChange={value => {
-    measure.setFilter(value); measure.cancelDraft();
-    handleSelectTabToolMode(TAB_TOOL_MODE.MEASURE);
-  }} />;
   const tools = [
     shell.tools.own({
       id: TAB_TOOL_MODE.REFERENCES,
@@ -3248,14 +3238,12 @@ function StepSurfaceBody({ view, data }) {
       menu: selectModeMenu,
       onSelect: () => handleSelectTabToolMode(TAB_TOOL_MODE.REFERENCES),
     }),
-    ...shell.tools.draw.map(tool => ({ ...tool, disabled: toolIdle })),
+    { ...shell.tools.draw, disabled: toolIdle },
     shell.tools.own({ id: TAB_TOOL_MODE.MEASURE, label: "Measure",
-      // Like Select's, the button shows the snapping mode in hand.
-      icon: <MeasureModeIcon mode={measure.filter} className="size-3.5" aria-hidden="true" />,
+      icon: <MeasureIcon className="size-3.5" aria-hidden="true" />,
       active: tabToolMode === TAB_TOOL_MODE.MEASURE, disabled: measureToolDisabled,
       // A press takes it up — again, results and all, where they are kept — and does nothing while
-      // it is the tool; its snapping is the chevron after it.
-      menu: measureModeMenu,
+      // it is the tool.
       onSelect: () => { if (tabToolMode !== TAB_TOOL_MODE.MEASURE) handleSelectTabToolMode(TAB_TOOL_MODE.MEASURE); } }),
     ...modelEffects.tools,
     // The model's own tools, after the viewer's: Position, only where the file has movable joints
@@ -3268,7 +3256,6 @@ function StepSurfaceBody({ view, data }) {
       onSelect: () => { if (!poseToolActive) handleSelectTabToolMode(TAB_TOOL_MODE.POSE); } }) : null,
     // and Animation, only where it has routines (its panel is the shell's).
     shell.tools.animate ? { ...shell.tools.animate, disabled: toolIdle } : null,
-    ...shell.tools.history,
   ].filter(Boolean);
 
   // ---- copying the selection ----------------------------------------------------------------

@@ -3,7 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import FloatingToolBar from '../../../../../dist/renderers/kit/tools/FloatingToolBar.js';
-import { MeasureModeIcon, MeasureModeMenu, SelectModeIcon, SelectModeMenu } from '../../../../../dist/renderers/step/components/workbench/SelectionModes.js';
+import { MeasureIcon, SelectModeIcon, SelectModeMenu } from '../../../../../dist/renderers/step/components/workbench/SelectionModes.js';
 
 beforeEach(() => vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -50,30 +50,16 @@ it('Select\'s mode is one button showing the mode in hand; its menu lists the mo
   expect(menu().querySelector('[role=separator]')).toBeNull();
 });
 
-it('Measure\'s snapping is one button showing the mode in hand; its menu is four plain rows, each its glyph at full size', async () => {
-  const user = userEvent.setup();
-  const changed = vi.fn();
-  render(<MeasureModeMenu mode="edges" onModeChange={changed} />);
-  // The strip's narrow chevron beside Measure.
-  expect(screen.getByRole('button', { name: 'Measure snapping: Edges' }).classList.contains('w-3')).toBe(true);
-  await user.click(screen.getByRole('button', { name: 'Measure snapping: Edges' }));
-  expect(screen.getAllByRole('menuitemradio').map(item => item.textContent)).toEqual(['All', 'Points', 'Edges', 'Faces']);
-  expect(glyphs(menu())).toEqual(['measure', 'points', 'edges', 'faces']);
-  expect(menu().querySelector('[data-slot=dropdown-menu-label], [role=separator]')).toBeNull();
-  await user.click(screen.getByRole('menuitemradio', { name: 'Points' }));
-  expect(changed).toHaveBeenCalledWith('points');
-});
-
 it('the strip shows each tool\'s mode as its glyph badged with the mode, and opens no menu', async () => {
   const user = userEvent.setup();
   const select = vi.fn();
   render(<FloatingToolBar tools={[
     { id: 'select', label: 'Select', active: true, icon: <SelectModeIcon mode="parts" aria-hidden="true" />, onSelect: select },
-    { id: 'measure', label: 'Measure', active: false, icon: <MeasureModeIcon mode="edges" aria-hidden="true" />, onSelect: () => {} }]} />);
+    { id: 'measure', label: 'Measure', active: false, icon: <MeasureIcon aria-hidden="true" />, onSelect: () => {} }]} />);
   const button = screen.getByRole('button', { name: 'Select', exact: true });
   expect(button.querySelector('[data-select-mode]')?.getAttribute('data-select-mode')).toBe('parts');
-  expect(screen.getByRole('button', { name: 'Measure', exact: true }).querySelector('[data-measure-mode]')?.getAttribute('data-measure-mode')).toBe('edges');
-  expect(badges(document.body)).toEqual(['select:parts', 'measure:edges']);
+  // Measure has no modes: its ruler alone.
+  expect(badges(document.body)).toEqual(['select:parts', 'measure:']);
   await user.click(button);
   expect(select).toHaveBeenCalledOnce();
   expect(screen.queryByRole('menu')).toBeNull();

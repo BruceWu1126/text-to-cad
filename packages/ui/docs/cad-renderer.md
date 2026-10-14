@@ -910,8 +910,8 @@ selected entities, without attaching a source filename or source line.
 ## Selection and inspection tools
 
 STEP's Select tool filters by All, Parts, Faces or Edges and, under **Connected
-selection**, Group edges or Group faces (`workbench/selectionFilter.js`); Measure's
-snapping filters are Any geometry, Points, Edges and Faces. Explicit
+selection**, Group edges or Group faces (`workbench/selectionFilter.js`); Measure has
+no filter: it measures between points on the model. Explicit
 filters never fall back to a different entity type. In an assembly, face and edge filters
 (the connected ones too) load topology per leaf part, on demand: a press on a part whose
 faces are not pickable yet requests that part's topology through the same per-node path a
@@ -942,9 +942,9 @@ Escape clears the
 selection after any open menu has been dismissed. Input fields
 keep their own Escape behaviour.
 
-Measure starts as an exclusive picking tool with no panel: its snapping menu (All, Points,
-Edges, Faces: `MeasureModeMenu` in `SelectionModes.jsx`, over `ToolModeMenu`) is its chevron
-on the strip, and its button shows the mode in hand. Completed rulers are Quick Edit's chips
+Measure starts as an exclusive picking tool with no panel and no menu: it measures between
+points on the model, snapping to no edge or face (its faces and edges are not pickable while it
+is up). Completed rulers are Quick Edit's chips
 (`StepSurface.jsx`'s `measurementChips`, their card `MeasurementCard.jsx`), handed to the shell
 as `useRendererShell`'s `measurements` with their marks (`measureDimension.js`'s
 `measurementMark`): the note's prompt files draw them over every view
@@ -1005,8 +1005,7 @@ heading and the Reference's that takes its place (`StepSurface` hands it to `use
 as `selectModeMenu`), holds four exclusive modes — All, Parts (assemblies only), Faces, Edges
 (`workbench/selectionFilter.js`'s `SELECT_MODES`), each row its mode's glyph at full
 size — whose composite the strip's button shows (`SelectModeIcon`: the pointer badged with
-the mode's glyph; Measure's `MeasureModeIcon` is the ruler badged with its snapping mode,
-`MEASURE_SNAP_MODES`) — then, below a rule, the independent checkboxes Group edges and Group faces
+the mode's glyph; Measure's `MeasureIcon` is the ruler alone) — then, below a rule, the independent checkboxes Group edges and Group faces
 (`CONNECTED_SELECTION`, applying under All and their own mode; only those that apply
 under the mode in hand are shown, and a hidden one keeps its choice). `StepSurface`
 keeps the mode (`selectionFilter`) and the options (`connectedSelection`), and a mode
@@ -1385,17 +1384,20 @@ behind it. It is a STEP tool and appears on no other format: a GLB, an STL, a
 SHELL's — `kit/tools/draw`, `shell.tools.draw` — and STEP is the renderer that
 puts it on its strip; `renderers/shell-harness` also mounts it, for tests.)
 
-Draw is two tools of the strip, each showing the one of its family last taken up and
-the rest in its chevron's menu (`shell.tools.draw`):
+Draw is one tool of the strip (`shell.tools.draw`, the pencil); while it is up its
+panel leads the stack (`drawing/toolbar.jsx`'s `DrawingToolbar`, drawn by
+`RendererShell.jsx`), its tools on one row:
 
-- **Pencil**: the pen, smoothed as it is drawn, its width following pressure (a
-  stylus's own, or simulated from speed with a mouse); the eraser.
-- **Shapes**: Line (the default), Arrow, Rectangle (rounded corners), Ellipse, and
-  Text, written in place.
+- Pen, smoothed as it is drawn, its width following pressure (a stylus's own, or
+  simulated from speed with a mouse).
+- The shapes, behind one button showing the last one taken up, the rest in its
+  chevron's menu: Line (the default), Arrow, Rectangle (rounded corners), Ellipse,
+  and Text, written in place.
+- Eraser.
+- Undo and Redo, the drawing's history, at the row's end.
 
-Each menu ends, after a rule, in what the next mark looks like: Color, Stroke width,
-Line style (the Shapes' only) and Placement submenus (`drawing/toolbar.jsx`'s
-`InkStyleSubmenus`), one setting for both tools.
+Under a rule, what the next mark looks like: the Color, Stroke width, Line style and
+Placement dropdowns.
 
 Draw has no Select or Move view of its own. Picking ink is the viewer's Select's: under
 Select a press on a mark picks it (and the marks drawn with it, an arrow's head) before
@@ -1446,14 +1448,10 @@ and never written to tab or file state. A new STEP revision discards it with
 `drawing.discard()`, its steps out of the history, so Undo cannot bring old ink
 back over the new model; Draw stays the tool.
 
-**Undo and Redo** are the file view's, one history across its tools
-(`kit/shell/useViewerHistory.js`): each piece of ink put down, erased, restyled or
-filled, a clear, and each measurement taken or deleted is a step; the camera and a
-selection never are. ⌘Z and ⇧⌘Z (Ctrl+Z and Ctrl+Y) walk it from anywhere in the
-viewer but a text field, and Undo and Redo end the strip (`shell.tools.history`),
-always there, each disabled while there is nothing for it. A renderer whose own tools take steps makes the
-history and hands it to the shell (`useRendererShell`'s `history`), as the STEP
-renderer does for its measurements; a new file's measurements take theirs out. A Quick Edit note carries the drawing as files: the
+**Undo and Redo** are the drawing's (`kit/shell/useViewerHistory.js`, the shell's):
+each piece of ink put down, erased, restyled or filled, and a clear, is a step.
+Draw's panel has them, each disabled while there is nothing for it, and ⌘Z and ⇧⌘Z
+(Ctrl+Z and Ctrl+Y) walk them from anywhere in the viewer but a text field. A Quick Edit note carries the drawing as files: the
 sketch, the views it was drawn in as a snapshot job, and a picture of each
 ([drawing](drawing.md#lifetime-and-capture)).
 

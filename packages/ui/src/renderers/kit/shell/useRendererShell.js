@@ -1,12 +1,10 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Pause, Play, Redo2, Undo2 } from "lucide-react";
+import { Pause, Pencil, Play } from "lucide-react";
 import { clonePerspectiveSnapshot } from "@text-to-cad/core/lib/perspective.js";
 import { VIEWER_SCENE_SCALE } from "@text-to-cad/core/lib/viewer/sceneScale.js";
 import { ViewerElementContext, useViewerHost, usePromptDestination } from "../../../host/context.js";
 import { hasOpenPopup } from "../../../lib/popups.js";
 import { useDrawingSession } from "../../../drawing/session.js";
-import { DRAWING_PENCIL_TOOLS, DRAWING_SHAPE_TOOLS, InkStyleSubmenus } from "../../../drawing/toolbar.jsx";
-import ToolModeMenu from "../tools/ToolModeMenu.jsx";
 import { AnimationToolMenu } from "../tools/playbar/AnimationPanel.jsx";
 import { useViewerHistory } from "./useViewerHistory.js";
 import { promptView, promptViews } from "../../../drawing/views.js";
@@ -187,15 +185,12 @@ const NO_CHOICE = Object.freeze({});
  * @param {{ chips: object[], marks(): object[], clear(): void } | null} [options.measurements]  The
  *   renderer's measurements, as Quick Edit shows them (`chips`) and its prompt files draw them over
  *   each view (`marks`, `measureDimension.js`'s `MeasurementMark`s); `clear` when the note goes.
- * @param {import("./useViewerHistory.js").ViewerHistory} [options.history]  The file view's one undo
- *   history, when the renderer's own tools take steps in it too (a measurement) and so make it before
- *   this hook runs. Omitted: the shell keeps it, and the drawing's steps are its only ones.
  */
 export function useRendererShell({
   view, services, resource, modelKey, revisionKey = "", features, toolModes = null, tool = null, previewable = false, preview = null, scene, load,
   viewSettings = null, viewerRef: providedViewerRef = null,
   animation = null, live = EMPTY, promptReferences = null, promptContext = createViewPromptContext,
-  escape = EMPTY, rendererState = null, viewState = null, sketchUnits = "mm", deleteSelection = null, history: givenHistory = null,
+  escape = EMPTY, rendererState = null, viewState = null, sketchUnits = "mm", deleteSelection = null,
   measurements = null,
   onCameraSettled = null, preserveInteractionPixelRatio = false, runtimeLifecycle = null,
   onRuntimeAlert = null, presentationReport = null,
@@ -447,10 +442,8 @@ export function useRendererShell({
   const selectTool = useCallback((mode) => setToolMode(current => (toolModes ? toolModes.next(current, mode) : mode)), [toolModes, setToolMode]);
   // A tool panel's X: back to the file's default tool (Select, where there is one), from any tool.
   const selectDefaultTool = useCallback(() => setToolMode(toolModes ? toolModes.defaultMode : ""), [toolModes, setToolMode]);
-  // The file view's one undo history (`useViewerHistory.js`): the renderer's, when its own tools
-  // take steps too (a measurement), else the shell's.
-  const ownHistory = useViewerHistory();
-  const history = givenHistory ?? ownHistory;
+  // The drawing's undo history (`useViewerHistory.js`): Draw's panel's Undo and Redo, and ⌘Z.
+  const history = useViewerHistory();
   const historyRef = useRef(history);
   historyRef.current = history;
   const drawing = useDrawingSession(drawToolActive, CAD_DRAWING_DEFAULTS, history);
@@ -565,7 +558,7 @@ export function useRendererShell({
     viewerElement,
     onCopy: () => copyActionRef.current?.() || false,
     onDelete: () => !previewing && !drawToolActive && deletePicked(),
-    // ⌘Z and ⇧⌘Z walk the one history, whatever tool is in hand; never in preview.
+    // ⌘Z and ⇧⌘Z walk the drawing's history, whatever tool is in hand; never in preview.
     onUndo: () => !previewing && historyRef.current.undo(),
     onRedo: () => !previewing && historyRef.current.redo(),
     escapeActive: Boolean(escape.active || previewing || drawing.selected.length),
@@ -666,33 +659,11 @@ export function useRendererShell({
   const tools = {
     /** A tool of the renderer's own: `{ id, label, icon }` plus anything the strip reads. */
     own: stripTool,
-    // Draw's two families, Pencil (the pen, the eraser) and Shapes (the ellipse, rectangle, line,
-    // arrow and text), each a tool of the strip showing the one of it last taken up, the others in
-    // its chevron's menu, and after them what the next mark looks like, as submenus: colour, weight,
-    // line style (Shapes only) and placement.
-    draw: [["pencil", "Pencil", "Pencil tool", DRAWING_PENCIL_TOOLS, drawing.pencil],
-      ["shapes", "Shapes", "Shape", DRAWING_SHAPE_TOOLS, drawing.shape]].map(([id, label, menuLabel, family, last]) => {
-      const current = family.find(entry => entry.id === last) ?? family[0];
-      const take = next => { drawing.selectTool(next); selectTool(SHELL_TOOL.DRAW); };
-      return stripTool({ id: `draw-${id}`, label, icon: <current.Icon className="size-3" strokeWidth={2} aria-hidden="true" />,
-        active: drawToolActive && family.some(entry => entry.id === drawing.tool),
-        onSelect: () => take(current.id),
-        menu: <ToolModeMenu label={menuLabel} trigger="chevron" disabled={idle} value={current.id} onChange={take}
-          modes={family.map(({ id: mode, label: name, Icon }) => ({ id: mode, label: name,
-            icon: <Icon className="size-3.5" strokeWidth={2} aria-hidden="true" /> }))}>
-          <InkStyleSubmenus drawing={drawing} lineStyle={id === "shapes"} />
-        </ToolModeMenu> });
-    }),
-    // The file view's one history (`useViewerHistory.js`), last on the strip, always there and
-    // disabled while there is nothing for it.
-    history: [
-      { id: "undo", label: "Undo", description: host.environment.platform === "darwin" ? "⌘Z" : "Ctrl+Z", separated: true,
-        icon: <Undo2 className="size-3" strokeWidth={2} aria-hidden="true" />, active: false,
-        disabled: idle || previewing || !history.canUndo, onSelect: () => history.undo() },
-      { id: "redo", label: "Redo", description: host.environment.platform === "darwin" ? "⇧⌘Z" : "Ctrl+Y",
-        icon: <Redo2 className="size-3" strokeWidth={2} aria-hidden="true" />, active: false,
-        disabled: idle || previewing || !history.canRedo, onSelect: () => history.redo() },
-    ],
+    // Draw: its tools, its history and what the next mark looks like are its panel in the tool stack
+    // while it is up (`RendererShell.jsx`, `drawing/toolbar.jsx`); the button is the pencil, whatever
+    // drawing tool is in hand. A second press does nothing.
+    draw: stripTool({ id: SHELL_TOOL.DRAW, label: "Draw", icon: <Pencil className="size-3" strokeWidth={2} aria-hidden="true" />,
+      onSelect: () => selectTool(SHELL_TOOL.DRAW) }),
     // The file's routines, played without leaving the tools view. Null for a file with none. Its
     // button plays and pauses — Play, or Pause while the routine plays — taking the tool up (from a
     // kept frame, where it was); its playbar is the viewport's, at the bottom centre while the tool

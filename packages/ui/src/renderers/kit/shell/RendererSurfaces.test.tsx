@@ -155,7 +155,7 @@ it("a sketch opens Quick Edit, which sends the note with the files made of its v
   };
   const host = testHost({ promptContext: { getSnapshot: () => destination, subscribe: () => () => {}, deliver: async () => ({ status: 'added', partIds: [] }), send } as any, promptFiles });
   mount(host);
-  fireEvent.click(screen.getByRole('button', { name: 'Pencil' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Draw' }));
   act(() => viewport.props.drawing.add([ink('a')]));
   const box = screen.getByRole('region', { name: 'Quick Edit' });
   expect(box.querySelector('[data-quick-edit-ref="sketch"]')).not.toBeNull();
@@ -179,7 +179,7 @@ it("a sketch opens Quick Edit, which sends the note with the files made of its v
   expect(viewport.props.drawing.hasDrawing).toBe(false);
 });
 
-it('a clipboard destination has no snapshot in the navbar; the drawing is no panel but Quick Edit\'s chip, its pen first', async () => {
+it('a clipboard destination has no snapshot in the navbar; the drawing is Quick Edit\'s chip, its pen first', async () => {
   const destination = { kind: 'clipboard', available: true } as const;
   const writeImage = vi.fn(async () => {}), deliver = vi.fn();
   const { navigation } = mount(testHost({
@@ -187,11 +187,10 @@ it('a clipboard destination has no snapshot in the navbar; the drawing is no pan
     clipboard: { writeText: async () => {}, readText: async () => '', writeImage },
   }));
   expect(navigation.mock.calls.flatMap(([actions]) => actions)).toEqual([]);
-  fireEvent.click(screen.getByRole('button', { name: 'Pencil' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Draw' }));
   act(() => viewport.props.drawing.add([ink('a')]));
-  expect(screen.queryByRole('region', { name: 'Drawing controls' })).toBeNull();
   const chip = screen.getByRole('region', { name: 'Quick Edit' }).querySelector('[data-quick-edit-ref="sketch"]')!;
-  expect(chip.querySelector('svg.lucide-pencil')).not.toBeNull();
+  expect(chip.querySelector('svg[data-pick-glyph="pencil"]')).not.toBeNull();
   // A clipboard destination's Quick Edit copies its prompt, and nothing else.
   expect(within(screen.getByRole('region', { name: 'Quick Edit' })).queryByRole('button', { name: 'Queue' })).toBeNull();
   expect(deliver).not.toHaveBeenCalled();
@@ -227,37 +226,30 @@ it("under Select a press on the drawing picks its mark before anything under it;
   viewport.inkAt = null;
 });
 
-it("Draw is two tools on the strip, Pencil and Shapes, each showing its last; Undo and Redo end the strip, disabled with nothing to do", async () => {
+it("Draw is one tool on the strip; its panel has its tools, the shapes behind one button, then Undo and Redo, disabled with nothing to do", async () => {
   mount(testHost(), undefined, 'panel-one.harness');
-  const strip = () => within(screen.getByRole('group', { name: 'Interaction tools' }));
-  const pressed = (name: string) => strip().getByRole('button', { name }).getAttribute('aria-pressed');
-  expect([strip().getByRole('button', { name: 'Undo' }), strip().getByRole('button', { name: 'Redo' })].map(button => button.hasAttribute('disabled')))
-    .toEqual([true, true]);
-  // Shapes opens on the line; its menu has the rest, text last, then what the next mark looks like.
-  fireEvent.click(strip().getByRole('button', { name: 'Shapes' }));
-  expect([viewport.props.drawing.tool, pressed('Shapes'), pressed('Pencil')]).toEqual(['line', 'true', 'false']);
-  fireEvent.pointerDown(strip().getByRole('button', { name: 'Shape: Line' }), { button: 0, ctrlKey: false });
-  await screen.findByRole('menuitemradio', { name: 'Text' });
-  const menu = screen.getByRole('menu');
+  const strip = within(screen.getByRole('group', { name: 'Interaction tools' }));
+  fireEvent.click(strip.getByRole('button', { name: 'Draw' }));
+  const panel = () => within(screen.getByRole('region', { name: 'Drawing controls' }));
+  const tools = () => within(panel().getByRole('group', { name: 'Drawing tools' }));
+  expect(tools().getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Pen', 'Line', 'Shapes', 'Eraser', 'Undo', 'Redo']);
+  const disabled = () => ['Undo', 'Redo'].map(name => tools().getByRole('button', { name }).hasAttribute('disabled'));
+  expect(disabled()).toEqual([true, true]);
+  fireEvent.pointerDown(tools().getByRole('button', { name: 'Shapes' }), { button: 0, ctrlKey: false });
+  const menu = await screen.findByRole('menu', { name: 'Shapes' });
   expect(within(menu).getAllByRole('menuitemradio').map(item => item.textContent)).toEqual(['Line', 'Arrow', 'Rectangle', 'Ellipse', 'Text']);
-  expect(within(menu).getAllByRole('menuitem').map(item => item.getAttribute('aria-label')))
-    .toEqual(['Color: Neon red', 'Stroke width: Medium', 'Line style: Solid', 'Placement: On model']);
   fireEvent.click(within(menu).getByRole('menuitemradio', { name: 'Text' }));
   expect(viewport.props.drawing.tool).toBe('text');
-  // The pencil, and back to Shapes: still the text.
-  fireEvent.click(strip().getByRole('button', { name: 'Pencil' }));
-  expect([viewport.props.drawing.tool, pressed('Pencil'), pressed('Shapes')]).toEqual(['freedraw', 'true', 'false']);
-  fireEvent.click(strip().getByRole('button', { name: 'Shapes' }));
-  expect(viewport.props.drawing.tool).toBe('text');
+  // The shapes button shows the last one taken up.
+  expect(tools().getByRole('button', { name: 'Text' }).getAttribute('aria-pressed')).toBe('true');
   // A step to take back enables Undo, and taking it back enables Redo.
   act(() => viewport.props.drawing.add([ink('a')]));
-  fireEvent.click(strip().getByRole('button', { name: 'Undo' }));
+  fireEvent.click(tools().getByRole('button', { name: 'Undo' }));
   expect(viewport.props.drawing.ink).toEqual([]);
-  expect([strip().getByRole('button', { name: 'Undo' }), strip().getByRole('button', { name: 'Redo' })].map(button => button.hasAttribute('disabled')))
-    .toEqual([true, false]);
+  expect(disabled()).toEqual([true, false]);
 });
 
-it('⌘Z and ⇧⌘Z walk the file view\'s one history from anywhere in the viewer; a text field keeps its own', () => {
+it('⌘Z and ⇧⌘Z walk the drawing\'s history from anywhere in the viewer; a text field keeps its own', () => {
   const { canvas } = mount(testHost(), undefined, 'panel-one.harness', { current: document.body });
   act(() => viewport.props.drawing.add([ink('a')]));
   act(() => viewport.props.drawing.add([ink('b')]));

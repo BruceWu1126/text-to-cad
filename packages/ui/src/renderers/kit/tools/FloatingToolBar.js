@@ -18,7 +18,6 @@ import { FLOATING_CHROME_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
  * @property {() => void} onSelect  Every press of the button.
  * @property {string} [description]  `aria-description`.
  * @property {import("react").ReactNode} [menu]  Its modes: the chevron after its button, and the menu it opens.
- * @property {boolean} [separated]  A rule before it: the start of a group of its own (Undo and Redo).
  */
 
 // The strip's tiles: 24px, their icons 14px (a little over half the tile), whatever size the icon
@@ -49,10 +48,7 @@ export default function FloatingToolBar({ tools = [] }) {
   if (!tools.length) return null;
   return (<div className="relative z-20 flex max-w-full shrink-0 flex-col items-end gap-1" data-cad-toolbar="tools">
       <div role="group" aria-label="Interaction tools" className={`pointer-events-auto inline-flex min-h-8 max-w-full flex-wrap items-center gap-1 rounded-md p-1 ${FLOATING_CHROME_SURFACE_CLASS}`}>
-        {tools.map(tool => <Fragment key={tool.id}>
-          {tool.separated ? <span role="separator" aria-orientation="vertical" className="mx-0.5 h-4 w-px bg-border" /> : null}
-          {toolButton(tool)}
-        </Fragment>)}
+        {tools.map(tool => <Fragment key={tool.id}>{toolButton(tool)}</Fragment>)}
       </div>
   </div>);
 }

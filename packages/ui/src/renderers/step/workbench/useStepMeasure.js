@@ -4,68 +4,40 @@ import {
   applyMeasureRulerHover,
   applyMeasureRulerPick,
   cancelMeasureRulerDraft,
-  measureFilterAccepts,
   measureRulerStateForChange
 } from "./measureRulerState.js";
 
 const NO_MEASUREMENTS = Object.freeze([]);
-const sameMeasurements = (a, b) => a.length === b.length && a.every((item, index) => item.id === b[index].id);
 
 /**
- * The Measure tool's session in a STEP: what its snapping filter is, the measurement being
- * drawn and the ones taken, and which row is highlighted. The viewport feeds it picks and
- * hovers; the panel reads the measurements; the toolbar reads and sets the filter.
+ * The Measure tool's session in a STEP: the measurement being drawn and the ones taken (between
+ * points on the model: it snaps to no edge or face), and which is highlighted. The viewport feeds
+ * it picks and hovers; Quick Edit's chips read the measurements.
  *
  * Measurements outlive the tool (they are cleared on purpose, or with the file's geometry);
- * a draft does not — putting the tool down drops it. The filter goes back to "all" for a new
- * file. The highlighted row follows a new measurement, and otherwise stays where the person
+ * a draft does not — putting the tool down drops it. The highlighted row follows a new measurement, and otherwise stays where the person
  * put it until that row is gone; only a change to the LIST moves it, so a draft's hover ticks
  * never fight a row click. Under Select, measurements are hovered and picked as anything is
  * (`hovered`/`hover`, `selected`/`select`), haloed in the view, and Delete deletes them
- * (`removeSelected`). Each measurement taken or deleted, and a clear, is a step in the file view's
- * one history (`history`), which Undo and Redo walk whatever tool took the step; a new file's
- * measurements start a history of their own.
+ * (`removeSelected`).
  *
- * @param {{ fileKey: string, revision: string, picking: boolean,
- *   history?: import("../../kit/shell/useViewerHistory.js").ViewerHistory | null }} options
- *   `picking`: the tool is in hand and can pick now.
+ * @param {{ fileKey: string, revision: string, picking: boolean }} options  `picking`: the tool
+ *   is in hand and can pick now.
  */
-export function useStepMeasure({ fileKey, revision, picking, history = null }) {
-  const [filter, setFilter] = useState("all");
-  useEffect(() => setFilter("all"), [fileKey]);
+export function useStepMeasure({ fileKey, revision, picking }) {
   const [state, setState] = useState(null);
   const [activeId, setActiveId] = useState("");
   const onPick = useCallback((pick) => {
-    if (measureFilterAccepts(filter, pick?.snapKind)) setState((current) => applyMeasureRulerPick(current, pick));
-  }, [filter]);
+    setState((current) => applyMeasureRulerPick(current, pick));
+  }, []);
   const onHoverPoint = useCallback((hover) => {
-    setState((current) => applyMeasureRulerHover(current, measureFilterAccepts(filter, hover?.snapKind) ? hover : null));
-  }, [filter]);
+    setState((current) => applyMeasureRulerHover(current, hover));
+  }, []);
   const onDelete = useCallback((id) => setState((current) => applyMeasureRulerDelete(current, id)), []);
   const cancelDraft = useCallback(() => setState((current) => cancelMeasureRulerDraft(current)), []);
   const clear = useCallback(() => { setState(null); setActiveId(""); }, []);
   const measurements = state?.measurements || NO_MEASUREMENTS;
-  // The list as it was last seen, to record each change to it as a step; a change Undo or Redo
-  // made, or a new file's, is not one.
-  const historyRef = useRef(history);
-  historyRef.current = history;
-  const seen = useRef(measurements);
-  const unrecorded = useRef(false);
-  const restore = useCallback((list) => {
-    if (sameMeasurements(seen.current, list)) return;
-    unrecorded.current = true;
-    setState((current) => ({ ...(current || {}), measurements: list }));
-  }, []);
   useEffect(() => {
-    const before = seen.current;
-    seen.current = measurements;
-    if (sameMeasurements(before, measurements)) return;
-    if (unrecorded.current) { unrecorded.current = false; return; }
-    historyRef.current?.record({ source: "measure", undo: () => restore(before), redo: () => restore(measurements) });
-  }, [measurements, restore]);
-  useEffect(() => {
-    if (seen.current.length) unrecorded.current = true;
-    historyRef.current?.forget("measure");
     setState((current) => measureRulerStateForChange(current, { entryChanged: true }));
   }, [fileKey, revision]);
   useEffect(() => {
@@ -99,6 +71,6 @@ export function useStepMeasure({ fileKey, revision, picking, history = null }) {
   useEffect(() => {
     setHovered((current) => (current && !measurements.some((item) => item.id === current) ? "" : current));
   }, [measurements]);
-  return { filter, setFilter, state, measurements, activeId, setActiveId, drafting: Boolean(state?.draft?.anchor),
+  return { state, measurements, activeId, setActiveId, drafting: Boolean(state?.draft?.anchor),
     onPick, onHoverPoint, onDelete, cancelDraft, clear, selected, select: setSelected, removeSelected, hovered, hover: setHovered };
 }

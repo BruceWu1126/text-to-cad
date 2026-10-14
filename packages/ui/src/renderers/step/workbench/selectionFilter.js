@@ -32,13 +32,6 @@ export function connectedSelectionApplies(id, mode) {
  * (`components/workbench/SelectionModes.jsx`): All snaps to points, edges and faces; Points
  * to points alone (point-to-point distance); Edges and Faces to that topology only.
  */
-export const MEASURE_SNAP_MODES = [
-  { id: 'all', label: 'All' },
-  { id: 'points', label: 'Points' },
-  { id: 'edges', label: 'Edges' },
-  { id: 'faces', label: 'Faces' },
-];
-
 /** What a viewport press can pick under a Select mode (or Measure's snapping). */
 export function filterSelectionReferences(references, mode) {
   if (mode === 'parts') return [];

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Check, Copy, ListPlus, Pencil, X } from "lucide-react";
+import { ArrowUp, Check, Copy, ListPlus, X } from "lucide-react";
 import { Button } from "@text-to-cad/ui/primitives/button";
 import { ScrollArea } from "@text-to-cad/ui/primitives/scroll-area";
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
@@ -282,11 +282,20 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
   const referenceCount = chips ? 0 : referenceIds.length;
   const sketchOf = prompt?.sketch, wipe = sketch?.clear;
   const drawingChip = useMemo(() => (sketching ? {
-    key: "sketch", label: "Drawing", icon: <Pencil className="size-2.5 shrink-0 text-muted-foreground" strokeWidth={2} aria-hidden="true" />, ...(sketchOf ? { copy: () => JSON.stringify(sketchOf(), null, 2) } : {}), ...(wipe ? { onRemove: wipe } : {})
+    key: "sketch", label: "Drawing", glyph: "pencil", ...(sketchOf ? { copy: () => JSON.stringify(sketchOf(), null, 2) } : {}), ...(wipe ? { onRemove: wipe } : {})
   } : null), [sketching, sketchOf, wipe]);
-  // Then a chip for each measurement, in its colour (`measurements`: the renderer's), then the references.
-  const shownChips = useMemo(() => [drawingChip, ...(measurements?.chips || EMPTY), ...(chips || EMPTY)].filter(Boolean),
-    [drawingChip, measurements?.chips, chips]);
+  // A chip for each measurement too, in its colour (`measurements`: the renderer's). They stand in the
+  // order they came — picked, drawn or measured — whatever their kind: each keeps the place it first
+  // took, and one that goes and comes back takes a new one at the end.
+  const order = useRef(new Map());
+  const shownChips = useMemo(() => {
+    const all = [drawingChip, ...(measurements?.chips || EMPTY), ...(chips || EMPTY)].filter(Boolean);
+    const seen = order.current;
+    const keys = new Set(all.map(chip => chip.key));
+    for (const key of [...seen.keys()]) if (!keys.has(key)) seen.delete(key);
+    for (const chip of all) if (!seen.has(chip.key)) seen.set(chip.key, seen.size ? Math.max(...seen.values()) + 1 : 0);
+    return all.sort((a, b) => seen.get(a.key) - seen.get(b.key));
+  }, [drawingChip, measurements?.chips, chips]);
   return <div ref={root} className={cn("pointer-events-none flex-col items-end", hidden ? "hidden" : "flex", className)} style={style} data-quick-edit="">
     {open ? <section ref={box} aria-label="Quick Edit" data-quick-edit-box=""
       // A narrow viewer (a phone) gets it across its whole width, over the tool stack rather than beside it.

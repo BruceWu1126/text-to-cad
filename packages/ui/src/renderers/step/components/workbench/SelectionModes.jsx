@@ -1,5 +1,5 @@
 import { useId } from 'react';
-import { CONNECTED_SELECTION, MEASURE_SNAP_MODES, SELECT_MODES, connectedSelectionApplies } from '../../workbench/selectionFilter.js';
+import { CONNECTED_SELECTION, SELECT_MODES, connectedSelectionApplies } from '../../workbench/selectionFilter.js';
 import { DropdownMenuCheckboxItem } from '@text-to-cad/ui/primitives/dropdown-menu';
 import ToolModeMenu from "../../../kit/tools/ToolModeMenu.jsx";
 
@@ -59,25 +59,13 @@ export function SelectModeIcon({ mode, ...props }) {
   return <ToolModeIcon tool="select" mode={value} data-select-mode={value} {...props} />;
 }
 
-/** The Measure tool's button icon for its snapping `mode`: the ruler, badged with the mode (`data-measure-mode`). */
-export function MeasureModeIcon({ mode, ...props }) {
-  const value = known(MEASURE_SNAP_MODES, mode);
-  return <ToolModeIcon tool="measure" mode={value} data-measure-mode={value} {...props} />;
+/** The Measure tool's button icon: the ruler (it measures between points, with no snapping mode). */
+export function MeasureIcon(props) {
+  return <ToolModeIcon tool="measure" mode="all" {...props} />;
 }
 
 const modeItems = (tool, modes) => modes.map(item => ({ id: item.id, label: item.label,
   icon: <ModeGlyph tool={tool} mode={item.id} className="size-3.5" aria-hidden="true" /> }));
-
-/**
- * Measure's snapping: the chevron after Measure's button on the strip, whose dropdown lists the
- * four modes, each its glyph at full size (All the ruler); the button's own icon shows the mode in hand.
- *
- * @param {{ mode: string, onModeChange(mode: string): void, disabled?: boolean }} props
- */
-export function MeasureModeMenu({ mode, onModeChange, disabled = false }) {
-  return <ToolModeMenu label="Measure snapping" modes={modeItems('measure', MEASURE_SNAP_MODES)} value={known(MEASURE_SNAP_MODES, mode)}
-    onChange={onModeChange} disabled={disabled} trigger="chevron" />;
-}
 
 /**
  * Select's mode: the chevron after Select's button on the strip (its icon shows the mode in

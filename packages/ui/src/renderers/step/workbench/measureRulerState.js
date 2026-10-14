@@ -159,12 +159,3 @@ export function cancelMeasureRulerDraft(state) {
   };
 }
 
-/** Whether Measure's snapping filter lets a pick (or a hover) of this snap kind through. */
-export function measureFilterAccepts(filter, snapKind) {
-  return (filter !== "edges" || snapKind === "edge") && (filter !== "faces" || snapKind === "face");
-}
-
-/** What Measure's snapping filter offers to snap to: the faces, the edges, both, or neither (free points). */
-export function measureFilterSnaps(filter) {
-  return { faces: filter === "all" || filter === "faces", edges: filter === "all" || filter === "edges" };
-}

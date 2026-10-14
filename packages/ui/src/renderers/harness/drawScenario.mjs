@@ -34,15 +34,17 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   const panel = pane.locator('[data-quick-edit-ref="sketch"]');
   const strip = pane.getByRole('group', { name: 'Interaction tools' });
   const tool = name => strip.getByRole('button', { name, exact: true });
-  // A setting of what is drawn next, from a submenu of the Pencil's menu.
-  const choose = async (submenu, name) => {
-    await strip.getByRole('button', { name: /^Pencil tool: / }).click();
-    await page.getByRole('menuitem', { name: new RegExp(`^${submenu}: `) }).click();
+  // Draw's panel: its tools, its history and what is drawn next.
+  const controls = pane.locator('[data-tool-panel][aria-label="Drawing controls"]');
+  const drawTool = name => controls.getByRole('group', { name: 'Drawing tools' }).getByRole('button', { name, exact: true });
+  // A setting of what is drawn next, from its dropdown in Draw's panel.
+  const choose = async (setting, name) => {
+    await controls.getByRole('group', { name: 'Drawing settings' }).getByRole('button', { name: setting, exact: true }).click();
     await page.getByRole('menuitemradio', { name, exact: true }).click();
   };
-  // A shape from the Shapes' menu, which takes Draw up on it.
+  // A shape from the shapes' menu.
   const shape = async name => {
-    await strip.getByRole('button', { name: /^Shape: / }).click();
+    await drawTool('Shapes').click();
     await page.getByRole('menuitemradio', { name, exact: true }).click();
   };
   const names = group => group.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')));
@@ -74,16 +76,19 @@ export async function runDrawScenario({ page, pane, errors, update }) {
     await page.mouse.move(...from); await page.mouse.down(); await page.mouse.move(...to, { steps: 10 }); await page.mouse.up();
   };
 
-  const draw = tool('Pencil');
+  const draw = tool('Draw');
   await viewport.waitFor();
   await page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
   await until('no ink before Draw', seen => seen.red < NONE && seen.green < NONE);
 
-  // The Pencil opens on the pen, with no panel: what is drawn next is its menu's.
+  // Draw opens on the pen, its panel leading the stack: its tools, then what is drawn next.
   await draw.click();
   const surface = pane.locator('[data-cad-drawing-overlay]');
   await surface.waitFor();
-  assert.equal(await draw.getAttribute('aria-pressed'), 'true', 'the Pencil is the tool');
+  assert.equal(await draw.getAttribute('aria-pressed'), 'true', 'Draw is the tool');
+  assert.equal(await drawTool('Pen').getAttribute('aria-pressed'), 'true', 'Draw opens on the pen');
+  assert.deepEqual(await names(controls.getByRole('group', { name: 'Drawing tools' })), ['Pen', 'Line', 'Shapes', 'Eraser', 'Undo', 'Redo']);
+  assert.deepEqual(await names(controls.getByRole('group', { name: 'Drawing settings' })), ['Color', 'Stroke width', 'Line style', 'Placement']);
   assert.equal(await panel.count(), 0, 'no Drawing chip before there is ink');
   const copy = panel;
   // Across the middle of the view, clear of the tool stack at its left and Quick Edit at its right.
@@ -114,11 +119,11 @@ export async function runDrawScenario({ page, pane, errors, update }) {
     seen => seen.red > 50 && Math.hypot(seen.x - stroke.x, seen.y - stroke.y) > 20);
   assert.ok(await moved(before) > 1e-3, 'a right drag orbited the camera');
 
-  // Undo (the viewer's, whatever the tool) takes the stroke away, Redo brings it back where the view
+  // Draw's Undo takes the stroke away, its Redo brings it back where the view
   // now has it.
-  await page.keyboard.press('ControlOrMeta+KeyZ');
+  await drawTool('Undo').click();
   await until('Undo removes the stroke', seen => seen.red < NONE);
-  await page.keyboard.press('ControlOrMeta+Shift+KeyZ');
+  await drawTool('Redo').click();
   await until('Redo brings it back', seen => seen.red > 50 && Math.hypot(seen.x - orbited.x, seen.y - orbited.y) < 10);
 
   // Another colour for what is drawn next: a green rectangle beside the red stroke. Clear takes it all.
@@ -132,7 +137,7 @@ export async function runDrawScenario({ page, pane, errors, update }) {
 
   // Left with ink drawn, Draw's surface and tools go; the ink stays in the model, and its chip in
   // Quick Edit.
-  await draw.click();
+  await drawTool('Pen').click();
   await drag(at(-80, 10), at(60, 40));
   await shape('Rectangle');
   await drag(at(-60, -120), at(60, -40));

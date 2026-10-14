@@ -1,4 +1,5 @@
 import { createPromptContext, formatPromptMessage, formatPromptReference, parsePromptReference, referencePart, resolveAttachmentPaths, textPart } from "@text-to-cad/core/prompt";
+import { normalizeMeasurementMarks } from "@text-to-cad/core/lib/viewer/measureDimension.js";
 
 const stem = path => String(path || "").split("/").pop().replace(/\.[^.]+$/, "") || "view";
 const stemOf = resource => stem(resource.kind === "url" ? new URL(resource.url).pathname : resource.path);
@@ -14,15 +15,33 @@ const lazy = start => {
 /**
  * A paste into the note, line by line: each line that is a reference and nothing else — a file's
  * absolute path and the ids in it, `/models/base.step#o1.f2`, as Copy References and a chip's click
- * write one — is that reference (into any file); every other line stays text. A reference within a
- * sentence is the sentence's.
+ * write one — is that reference (into any file); a line that is a measurement as its chip copies it
+ * (a snapshot job's `measurements` entry) is `{ measurement }`; a paste that is the drawing as its
+ * chip copies it (its sketch JSON, whole) is `[{ drawing }]`; every other line stays text. A
+ * reference within a sentence is the sentence's.
  *
  * @param {string} pasted
- * @returns {Array<string | import("@text-to-cad/core/prompt").PromptReference>}
+ * @returns {Array<string | import("@text-to-cad/core/prompt").PromptReference | { measurement: object } | { drawing: object }>}
  */
 export function pastedLines(pasted) {
-  return String(pasted || "").split(/\r?\n/).map(line => parsePromptReference(line) ?? line);
+  const text = String(pasted || "");
+  // The drawing, as its chip copies it: its sketch file's JSON, over several lines.
+  const whole = parsedJson(text);
+  if (whole && !Array.isArray(whole) && Array.isArray(whole.marks) && whole.parts && typeof whole.parts === "object") return [{ drawing: whole }];
+  return text.split(/\r?\n/).map(line => parsePromptReference(line) ?? pastedMeasurement(line) ?? line);
 }
+
+const parsedJson = text => {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{")) return null;
+  try { return JSON.parse(trimmed); } catch { return null; }
+};
+// A measurement, as its chip copies it: a snapshot job's `measurements` entry.
+const pastedMeasurement = line => {
+  const value = parsedJson(line);
+  if (!value) return null;
+  try { return { measurement: normalizeMeasurementMarks([value])[0] }; } catch { return null; }
+};
 
 /** A reference as one line of text, the way Copy References writes it: what tells two apart. */
 export const referenceToken = reference => formatPromptReference(reference);
