@@ -15,13 +15,19 @@ Where the browser's tessellator went wrong, this one does not:
   have no cross product, the pole's own limiting normal, where the browser's was noise or nothing
   and refinement split on toward it;
 - a freeform face's pole is one point, its model vertex: each row OCCT evaluates there is a hair
-  off it, which left the pole a fan of slivers on no surface (``_snap_poles``);
+  off it, which left the pole a fan of slivers on no surface (``_snap_poles``); and where OCCT
+  evaluates the row exactly to that point, the triangles reaching it are kept until the faces are
+  made to meet (``_weld_by_position``): dropped first, they left a T-junction along the edge into
+  the pole;
 - earcut's zero-area triangles over a straight run of trim are flipped away before what is left of
   them is dropped (``_flip_slivers``): dropped first, they left a T-junction on the run; and a
   triangle whose edge runs along a line of constant u or v past a vertex on it is split there
   (``_split_iso_junctions``): trims in double precision put their corners exactly in line;
 - a cell whose triangles do not cover what the loops leave of it -- a hole crossing its side -- is
   cut again from its loops as a whole (``_cell_regions``);
+- a vertex the grid moved onto a grid line or a neighbour, by up to one source ULP, is still pinned
+  to the trim it was made on (``_pin_boundary``): the browser held vertices to a trim more tightly
+  than that, so one moved past it was never pinned, and the face beside it met it with a crack;
 - a face whose geometry raises is left out and named, and the rest of the part is meshed; a face
   narrower than the tolerance its trim is sampled to draws as nothing and is not named.
 
@@ -1051,7 +1057,7 @@ def _deduplicated(points: list[list[float]]) -> list[list[float]]:
 
 class _Grid:
     __slots__ = ("uv_verts", "triangles", "vertex_ids", "segments", "segments_by_cell", "min_u", "min_v", "du", "dv",
-                 "steps_u", "steps_v")
+                 "steps_u", "steps_v", "snap")
 
     def cell_of(self, u: float, v: float) -> tuple[int, int]:
         return (min(self.steps_u - 1, max(0, math.floor((u - self.min_u) / self.du))),
@@ -1118,6 +1124,9 @@ def _grid_triangulate(face: _Face, loops: list[_Ring], chord_limit: float, angle
     epsilon_v = max(abs(min_v), abs(max_v), max_v - min_v, 1e-12) * 2 ** -23
     nearby: dict[tuple[int, int], list[int]] = {}
     curved = face.surface.kind != "plane"
+    # How far a vertex can sit from the trim point it was made for: it takes the grid line's or its
+    # neighbour's coordinates up to one source ULP on each axis.
+    grid.snap = math.hypot(epsilon_u, epsilon_v) if curved else 0.0
     floor = math.floor
 
     def vertex_id(u: float, v: float) -> int:
@@ -1458,10 +1467,14 @@ def _pin_boundary(grid: _Grid, us: np.ndarray, vs: np.ndarray, xyz: list, bounda
     """Every vertex on a trim segment of a shared edge labelled with the edge and its fraction
     there (``boundary``) and put at that fraction's point (``xyz``), the pinning label first. Each
     vertex is held against the segments of its grid cell, all at once; the few that lie on one
-    are then chosen among one by one, as the browser chose."""
+    are then chosen among one by one, as the browser chose. A vertex lies on a segment within the
+    browser's tolerance or as far as the grid moved it onto a grid line or a neighbour, whichever
+    is wider: in double precision the move could pass the tolerance, and the vertex, unpinned,
+    left its neighbour face's points along the edge unmatched."""
     eps = max(float(np.max(np.abs(us))), float(np.max(np.abs(vs))), 1) * 1e-7
     eps_sq = eps * eps
     corner_eps_sq = eps_sq * 16
+    on_eps_sq = max(eps_sq, grid.snap * grid.snap)
     segments = grid.segments
     cells = sorted(grid.segments_by_cell)
     if not cells or not len(us):
@@ -1493,7 +1506,7 @@ def _pin_boundary(grid: _Grid, us: np.ndarray, vs: np.ndarray, xyz: list, bounda
     t = np.maximum(0.0, np.minimum(1.0, t))
     qx, qy = x0 + t * dx, y0 + t * dy
     dist_sq = (px - qx) * (px - qx) + (py - qy) * (py - qy)
-    on_segment = dist_sq < eps_sq
+    on_segment = dist_sq < on_eps_sq
     # Adjacent pcurves can disagree about a shared corner by more than the eps: the corner caught
     # by its ends.
     d0 = (px - x0) * (px - x0) + (py - y0) * (py - y0)
@@ -1914,9 +1927,9 @@ def _seam_image_predicate(face: _Face, uv_verts):
     return predicate
 
 
-def _compact_collapsed_triangles(triangles: list[int], xyz, remap: dict[int, int]) -> list[int]:
+def _compact_collapsed_triangles(triangles: list[int], xyz, remap: dict[int, int], apart=()) -> list[int]:
     """The weld's remap applied, each triangle two of whose corners are one point dropped: the
-    same index, or the same exact position (a seam's two images)."""
+    same index, or the same exact position (a seam's two images), unless both are ``apart``."""
     if not triangles:
         return triangles
     corners = np.asarray(triangles, dtype=np.int64).reshape(-1, 3)
@@ -1926,8 +1939,14 @@ def _compact_collapsed_triangles(triangles: list[int], xyz, remap: dict[int, int
         corners = lookup[corners]
     points = np.asarray(xyz, dtype=np.float64)
     a, b, c = (points[corners[:, k]] for k in range(3))
+    same_ab, same_bc, same_ca = (a == b).all(axis=1), (b == c).all(axis=1), (c == a).all(axis=1)
+    if len(apart):
+        held = np.zeros(len(points), bool)
+        held[np.fromiter(apart, np.int64, len(apart))] = True
+        ha, hb, hc = (held[corners[:, k]] for k in range(3))
+        same_ab, same_bc, same_ca = same_ab & ~(ha & hb), same_bc & ~(hb & hc), same_ca & ~(hc & ha)
     collapsed = ((corners[:, 0] == corners[:, 1]) | (corners[:, 1] == corners[:, 2]) | (corners[:, 2] == corners[:, 0])
-                 | (a == b).all(axis=1) | (b == c).all(axis=1) | (c == a).all(axis=1))
+                 | same_ab | same_bc | same_ca)
     return corners[~collapsed].reshape(-1).tolist()
 
 
@@ -1955,8 +1974,13 @@ def _fold_welded_labels(boundary: dict[int, list[list]], remap: dict[int, int]) 
         boundary.pop(vertex, None)
 
 
-def _weld_by_position(face: _Face, raw: _Raw) -> None:
-    """A face's boundary vertices at one exact position are one vertex, a seam's two images apart."""
+def _weld_by_position(face: _Face, raw: _Raw, tolerance: float) -> None:
+    """A face's boundary vertices at one exact position are one vertex, a seam's two images apart.
+    A triangle two of whose corners are vertices on a pole is kept, though they are one point: it
+    carries the face's boundary in its parameters to conformity, which splits it to the model
+    edge's points there, and what is left of it goes with the float32 collapse. Dropped first, it
+    left the triangle beyond it spanning the edge unsplit, a T-junction where the pole's row came out
+    of OCCT exactly one point."""
     is_seam_image = _seam_image_predicate(face, raw.uv_verts)
     by_position: dict[tuple[float, float, float], list[int]] = {}
     remap: dict[int, int] = {}
@@ -1973,7 +1997,8 @@ def _weld_by_position(face: _Face, raw: _Raw) -> None:
         else:
             bucket.append(vertex)
     # A seam-spanning triangle collapses on position alone: dropped even where nothing welded.
-    raw.triangles = _compact_collapsed_triangles(raw.triangles, raw.xyz, remap)
+    on_poles = _on_poles(face, raw, tolerance) if face.poles else {}
+    raw.triangles = _compact_collapsed_triangles(raw.triangles, raw.xyz, remap, on_poles.keys())
     _fold_welded_labels(raw.boundary, remap)
 
 
@@ -2138,7 +2163,7 @@ def _conform_boundaries(raw_faces: list[tuple[_Face, _Raw]], shared_edges: dict,
             if shared is not None:
                 raw.xyz[vertex] = _edge_point_at(shared, f)
         # Snapping can land two boundary vertices on one point: welded, collapsed triangles dropped.
-        _weld_by_position(face, raw)
+        _weld_by_position(face, raw, merge_tolerance)
 
     for face, raw in raw_faces:
         uv_verts, xyz, nrm, boundary = raw.uv_verts, raw.xyz, raw.nrm, raw.boundary
@@ -2273,7 +2298,7 @@ def _conform_boundaries(raw_faces: list[tuple[_Face, _Raw]], shared_edges: dict,
         raw.triangles = out
         # Splitting can mint a vertex where a boundary vertex already is (one model point reached
         # through another edge): a second weld by exact position.
-        _weld_by_position(face, raw)
+        _weld_by_position(face, raw, merge_tolerance)
 
 
 def _finalize_face_mesh(face: _Face, raw: _Raw) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -2404,19 +2429,28 @@ def _weld_corners(shared_edges: dict[int, _Shared], weld_tolerance: float):
     return canonical_corner
 
 
+def _on_poles(face: _Face, raw: _Raw, tolerance: float) -> dict[int, list[float]]:
+    """The face's vertices on one of its poles, each with the pole's point. A vertex is on a pole
+    where its parameters lie on the pole's stretch of them and its point within ``tolerance`` of
+    the pole's."""
+    found: dict[int, list[float]] = {}
+    epsilons = [max(abs(face.uv[d * 2]), abs(face.uv[d * 2 + 1]), face.uv[d * 2 + 1] - face.uv[d * 2], 1e-12)
+                * 2 ** -23 for d in range(2)]
+    for axis, at, lo, hi, point in face.poles:
+        for index, uv in enumerate(raw.uv_verts):
+            if (abs(uv[axis] - at) <= epsilons[axis] and lo - epsilons[1 - axis] <= uv[1 - axis] <= hi + epsilons[1 - axis]
+                    and _distance(raw.xyz[index], point) <= tolerance):
+                found[index] = point
+    return found
+
+
 def _snap_poles(face: _Face, raw: _Raw, tolerance: float) -> None:
     """Every vertex on a pole put at the pole's one point. OCCT evaluates a collapsed row of a
     freeform surface with its own rounding at each parameter, and a hair off zero is a distinct
     float: each pole would be a cluster of vertices, and the triangles between them slivers on
-    no surface. A vertex is on the pole where its parameters lie on the pole's stretch of them and
-    its point within ``tolerance`` of the pole's."""
-    for axis, at, lo, hi, point in face.poles:
-        epsilons = [max(abs(face.uv[d * 2]), abs(face.uv[d * 2 + 1]), face.uv[d * 2 + 1] - face.uv[d * 2], 1e-12)
-                    * 2 ** -23 for d in range(2)]
-        for index, uv in enumerate(raw.uv_verts):
-            if (abs(uv[axis] - at) <= epsilons[axis] and lo - epsilons[1 - axis] <= uv[1 - axis] <= hi + epsilons[1 - axis]
-                    and _distance(raw.xyz[index], point) <= tolerance):
-                raw.xyz[index] = point
+    no surface."""
+    for index, point in _on_poles(face, raw, tolerance).items():
+        raw.xyz[index] = point
 
 
 # --- The component's body ------------------------------------------------------------------

@@ -3,9 +3,10 @@
 Every display mesh is ``cadgen._internal.tessellate``'s, the browser tessellator of cadgen 0.7.21 in
 Python. A solid comes out closed (each edge of the welded mesh used by two triangles), wound
 outward, with its volume and each face's area those of the exact BREP; three.js's earcut is the
-one it triangulates with, triangle for triangle; and the three faults it fixes in what it was
-ported from stay fixed: a straight run of trim through a corner, a hole crossing a grid cell's
-side, and a face narrower than its tolerance named as a hole.
+one it triangulates with, triangle for triangle; and the faults it fixes in what it was ported
+from stay fixed: a freeform pole, a tip whose row is one point, a straight run of trim through a
+corner, a row of slots in line, a hole crossing a grid cell's side, and a face narrower than its
+tolerance named as a hole.
 """
 
 from __future__ import annotations
@@ -34,6 +35,21 @@ NOTCHED = [[1.614573175190183, 205.20562748477136], [1.7074157383752555, 205.205
            [1.614573175190183, 202.20562748477136]]
 THREE_NOTCHED = [[1, 0, 14], [12, 11, 10], [8, 7, 6], [6, 5, 4], [2, 1, 14], [12, 10, 9], [9, 8, 6], [6, 4, 3],
                  [3, 2, 14], [12, 9, 6], [6, 3, 14], [13, 12, 6], [6, 14, 13]]
+# An F-14D tail's tip: three rulings' curves between one tip and one end (their poles between the
+# two), of which each pair of neighbours spans a face.
+TIP = (10197.13014247, -6822.580175597, 188.88269353019)
+END = (10718.79328787, -6822.580175597, 162.36234147519)
+RULINGS = [
+    [(10242.58769661, -6887.709318404, 141.43950596893), (10381.30838298, -6797.190512061, 177.72103638234),
+     (10363.24001077, -6933.381924877, 109.39172175973), (10539.37240266, -6798.507714813, 169.98554112507),
+     (10544.50776362, -6871.679130125, 136.80404909617), (10654.02536321, -6845.015407374, 147.8514997435)],
+    [(10242.68511232, -6872.008417081, 132.26548425969), (10381.27040685, -6803.311283572, 181.29739735446),
+     (10363.40574044, -6906.670574828, 93.784305332551), (10539.33639671, -6804.310943829, 173.37636232041),
+     (10544.58120248, -6859.84268016, 129.88802263952), (10654.0589203, -6839.606870656, 144.69129688358)],
+    [(10242.75338225, -6853.434926026, 125.83623558883), (10381.2437928, -6810.551893048, 183.80374786842),
+     (10363.5218855, -6875.072196431, 82.846467544563), (10539.31116338, -6811.175914192, 175.75268465245),
+     (10544.63266918, -6845.840668872, 125.04120024116), (10654.08243744, -6833.20880431, 142.47659425032)],
+]
 
 
 def _mesh(shape):
@@ -152,6 +168,60 @@ class SolidsTests(unittest.TestCase):
         analytic = len(np.asarray(_mesh(Sphere(radius)).indices)) // 3
         self.assertLess(len(triangles), 2 * analytic, "refined as the sphere it is, not on and on at its poles")
 
+    def test_a_tip_whose_row_is_one_point_meets_its_neighbour_along_their_edge(self) -> None:
+        # Two faces of an F-14D's tail, ruled B-splines whose rows close to one point at each end,
+        # sharing the ruling between them. OCCT evaluates a face's tip row to exactly that point,
+        # so the triangles that carried the face's boundary into the tip were one line in space and
+        # were dropped before the faces were made to meet: the triangle beyond spanned the shared
+        # edge from the tip without the point its neighbour put on it, a gap 0.2 mm wide.
+        from OCP.BRepAdaptor import BRepAdaptor_Curve
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_Sewing
+        from OCP.Geom import Geom_BSplineSurface
+        from OCP.TColgp import TColgp_Array2OfPnt
+        from OCP.TColStd import TColStd_Array1OfInteger, TColStd_Array1OfReal
+        from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
+        from OCP.TopExp import TopExp
+        from OCP.TopoDS import TopoDS
+        from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape
+        from OCP.gp import gp_Pnt
+
+        sewing = BRepBuilderAPI_Sewing(1e-6)
+        for column, (u0, u1) in enumerate(((3.0, 4.0), (4.0, 5.0))):
+            poles = TColgp_Array2OfPnt(1, 2, 1, 8)
+            for side in range(2):
+                for row, point in enumerate([TIP, *RULINGS[column + side], END]):
+                    poles.SetValue(side + 1, row + 1, gp_Pnt(*point))
+            knots = []
+            for values, multiplicity in (((u0, u1), 2), ((0.0, 1.0), 8)):
+                array, mults = TColStd_Array1OfReal(1, 2), TColStd_Array1OfInteger(1, 2)
+                for k, value in enumerate(values, 1):
+                    array.SetValue(k, value)
+                    mults.SetValue(k, multiplicity)
+                knots += [array, mults]
+            surface = Geom_BSplineSurface(poles, knots[0], knots[2], knots[1], knots[3], 1, 7)
+            sewing.Add(BRepBuilderAPI_MakeFace(surface, 1e-7).Face())
+        sewing.Perform()
+        shape = sewing.SewedShape()
+        owners = TopTools_IndexedDataMapOfShapeListOfShape()
+        TopExp.MapShapesAndAncestors_s(shape, TopAbs_EDGE, TopAbs_FACE, owners)
+        [shared] = [owners.FindKey(i) for i in range(1, owners.Extent() + 1) if owners.FindFromIndex(i).Size() == 2]
+        curve = BRepAdaptor_Curve(TopoDS.Edge_s(shared))
+        line = np.array([[p.X(), p.Y(), p.Z()] for p in (curve.Value(t) for t in
+                         np.linspace(curve.FirstParameter(), curve.LastParameter(), 4001))])
+
+        mesh = _mesh(shape)
+        positions = np.asarray(mesh.positions, np.float32)
+        _, label = np.unique(positions.view(np.dtype((np.void, 12))).ravel(), return_inverse=True)
+        welded = label.ravel()[np.asarray(mesh.indices, np.int64).reshape(-1, 3)]
+        points = np.zeros((int(label.max()) + 1, 3))
+        points[label.ravel()] = positions
+        edges = np.sort(np.concatenate([welded[:, [0, 1]], welded[:, [1, 2]], welded[:, [2, 0]]]), axis=1)
+        pairs, counts = np.unique(edges, axis=0, return_counts=True)
+        ends = points[pairs[counts % 2 == 1]]
+        deflection = 5e-4 * float(np.linalg.norm(positions.max(axis=0) - positions.min(axis=0)))
+        on_shared = np.linalg.norm(ends[:, :, None, :] - line[None, None], axis=3).min(axis=2) <= deflection
+        self.assertEqual(0, int(on_shared.all(axis=1).sum()), "no edge along the shared ruling is left open")
+
     def test_a_row_of_slots_whose_ends_line_up_leaves_the_wall_closed(self) -> None:
         # A watch case's ring of slots: every slot's top corners lie exactly on one line of the
         # wall's parameters, and earcut ran diagonals along that line straight past them, so the
@@ -212,6 +282,38 @@ class TriangulationTests(unittest.TestCase):
             for edge in (frozenset((a, b)), frozenset((b, c)), frozenset((c, a))):
                 uses[edge] = uses.get(edge, 0) + 1
         self.assertEqual(outline, {edge for edge, count in uses.items() if count == 1}, "the boundary is the trim")
+
+    def test_a_trim_point_moved_onto_a_grid_line_is_still_pinned_to_its_edge(self) -> None:
+        # A radial engine's cylinder whose trim runs 2.3 nm above its parameters' lowest point:
+        # each grid line crossing it made a vertex the grid moved onto its bottom line (one source
+        # ULP), past the tolerance pinning held vertices to their trim by, so they were never
+        # pinned to the edge and the face beside it met them with a crack.
+        from cadgen._internal import tessellate
+
+        class Flat:
+            kind = "other"
+
+            def value(self, u: float, v: float) -> list[float]:
+                return [u, v, 0.0]
+
+        face = tessellate._Face()
+        face.ord, face.reversed, face.surface, face.uv, face.loops, face.poles = 1, False, Flat(), [0, 8, -21, -2], [], []
+        rise = -21.0 + 2.3e-6
+        ring = _ring([[0.0, -21.0], [1.0, rise], [8.0, rise], [8.0, -2.0], [0.0, -2.0]])
+        ring.ords = [1, 1, 2, 3, 4]
+        ring.metas = [tessellate._Meta(1, 0.0, 0.125), tessellate._Meta(1, 0.125, 1.0), None, None, None]
+        line = tessellate._Curve()
+        line.kind, line.range, line.n, line.value = "line", (0.0, 1.0), None, lambda t: [8.0 * t, -21.0, 0.0]
+        shared = {1: tessellate._sample_shared_edge(line, 1e-3)}
+
+        grid = tessellate._grid_triangulate(face, [ring], math.inf, 1.0)
+        us = np.array([u for u, _v in grid.uv_verts])
+        vs = np.array([v for _u, v in grid.uv_verts])
+        boundary: dict = {}
+        tessellate._pin_boundary(grid, us, vs, [face.surface.value(u, v) for u, v in grid.uv_verts], boundary, shared)
+        crossings = [i for i, (u, v) in enumerate(grid.uv_verts) if 1 < u < 8 and v < -20.99]
+        self.assertEqual(6, len(crossings), "grid lines u = 2 to 7 cross the trim")
+        self.assertEqual([], [grid.uv_verts[i] for i in crossings if 1 not in [ord_ for ord_, _f in boundary.get(i, [])]])
 
     def test_a_cell_a_hole_crosses_is_cut_where_the_face_is(self) -> None:
         # A cell of a plate whose round hole crosses its side, and one whose hole covers its
