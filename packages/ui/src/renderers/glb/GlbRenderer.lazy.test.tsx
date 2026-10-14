@@ -3,9 +3,10 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { BufferAttribute, BufferGeometry, Group, Mesh } from 'three';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-// The FEA result viewer is a chunk of its own (`feaView.jsx`): a plain GLB never fetches it, and a result loads
-// it before it is drawn, then shows Study. Only what loads the file and the WebGL viewport are replaced.
-const loaded = vi.hoisted(() => ({ scene: null as any, requested: 0 }));
+// The FEA result viewer is a chunk of its own (`feaView.jsx`), and so is the CAM result viewer (`camView.jsx`): a plain
+// GLB fetches neither, an FEA result loads only FEA's before it is drawn, then shows Study, and a CAM result only CAM's,
+// then shows Job. Only what loads the file and the WebGL viewport are replaced.
+const loaded = vi.hoisted(() => ({ scene: null as any, requested: 0, cam: 0 }));
 vi.mock('../../../dist/renderers/kit/shell/ShellViewport.js', () => ({
   default: forwardRef(function StandInViewport(props: any, ref) {
     useImperativeHandle(ref, () => ({ requestRender() {} }));
@@ -18,9 +19,11 @@ vi.mock('../../../dist/renderers/glb/useGlbScene.js', () => ({
   useGlbScene: () => ({ scene: loaded.scene, revision: 'one', busy: false, error: null, progress: null })
 }));
 vi.mock('../../../dist/renderers/glb/feaView.js', async (importOriginal) => { loaded.requested += 1; return importOriginal(); });
+vi.mock('../../../dist/renderers/glb/camView.js', async (importOriginal) => { loaded.cam += 1; return importOriginal(); });
 import GlbRenderer from '../../../dist/renderers/glb/GlbRenderer.js';
 import { ViewerHostContext } from '../../../dist/host/context.js';
 import { testHost } from '../../../dist/host/testing/host.js';
+import { camScene } from './__tests__/camFile.js';
 
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
@@ -28,15 +31,15 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-function mount(extras: Record<string, unknown> | null) {
+function mount(extras: Record<string, unknown> | null, scene: Group | null = null) {
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), 3));
   geometry.setAttribute('color', new BufferAttribute(new Uint8Array(12), 4, true));
   geometry.setAttribute('_von_mises', new BufferAttribute(new Float32Array([0, 50, 100]), 1));
   const mesh = new Mesh(geometry);
   if (extras) Object.assign(mesh.userData, extras);
-  const root = new Group();
-  root.add(mesh);
+  const root = scene || new Group();
+  if (!scene) root.add(mesh);
   const bounds = { min: [0, 0, 0], max: [1, 1, 0] };
   loaded.scene = { document: { scene: root }, object3D: root, bounds, restBounds: bounds, revision: 'one' };
   const settings = { toolStack: { panels: {}, collapsed: {} } };
@@ -49,10 +52,12 @@ function mount(extras: Record<string, unknown> | null) {
   return render(<ViewerHostContext.Provider value={testHost()}><GlbRenderer {...(props as any)} /></ViewerHostContext.Provider>);
 }
 
-it('a plain GLB never requests the FEA viewer', async () => {
+it('a plain GLB never requests the FEA viewer or the CAM viewer', async () => {
   const { container } = mount(null);
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
   expect(loaded.requested).toBe(0);
+  expect(loaded.cam).toBe(0);
+  expect(screen.queryByRole('region', { name: 'Job' })).toBeNull();
   expect(screen.queryByRole('region', { name: 'Study' })).toBeNull();
   expect(container.querySelector('[data-fea-field]')).toBeNull();
 });
@@ -64,4 +69,14 @@ it('an FEA result loads the FEA viewer, then shows Study', async () => {
   expect(screen.queryByRole('region', { name: 'Study' })).toBeNull();
   expect(await screen.findByRole('region', { name: 'Study' }, { timeout: 30000 })).toBeTruthy();
   expect(loaded.requested).toBe(1);
+  expect(loaded.cam).toBe(0);
+});
+
+it('a CAM result loads only the CAM viewer, then shows Job', async () => {
+  const fea = loaded.requested;
+  mount(null, await camScene());
+  expect(screen.queryByRole('region', { name: 'Job' })).toBeNull();
+  expect(await screen.findByRole('region', { name: 'Job' }, { timeout: 30000 })).toBeTruthy();
+  expect(loaded.cam).toBe(1);
+  expect(loaded.requested).toBe(fea);
 });

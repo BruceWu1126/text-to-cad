@@ -133,7 +133,8 @@ none.
   line 1.75rem up (a host whose control floats over the view's bottom moves it
   with `--cad-viewport-bottom-center`), and nothing else does but an FEA result's colour bar
   (see [An FEA result](#an-fea-result)), which steps up above the playbar when the result also
-  has routines; a static file has nothing else at the bottom. The routines lead it at its left end, as a playlist, and the
+  has routines, and a CAM result's readout (see [A CAM result](#a-cam-result)), which steps up the
+  same way; a static file has nothing else at the bottom. The routines lead it at its left end, as a playlist, and the
   routine's settings end it at its right (see [preview](#camera-animation-and-preview)).
 - **Model update status** sits at top-centre of the viewport, vertically centred
   in the same 34px row as the top-left toolbar in every host.
@@ -148,6 +149,7 @@ none.
 | URDF / SRDF / SDF | Select, Position (posable joints only) |
 | GLB / STL / 3MF | none |
 | An FEA result (a GLB `cadgen fea solve` wrote) | Select, Clip |
+| A CAM result (a GLB `cadgen cam plan` wrote) | Select |
 | DXF | none: a 2D canvas |
 
 There is no separator or activity dot. There is no Animate tool: routines play in
@@ -292,7 +294,7 @@ on the strip.
 
 Under the toolbar, in one column: the shell's tool's panel (**Drawing**) while
 Draw is up; Select's **Features** (STEP; a
-robot's **Links**; an FEA result's **Study**, under an assembly's **Parts**) and, whenever something is selected, its **Reference** (then
+robot's **Links**; an FEA result's **Study**, under an assembly's **Parts**; a CAM result's **Job**) and, whenever something is selected, its **Reference** (then
 a `.sdf`'s **SDF**); Position's **Position**; then the panels
 of the effects a person keeps (**Measurements**, **Explode**, **Clip**). A panel
 whose tool is not up is `hidden`, not unmounted: a tree keeps its expansion,
@@ -350,7 +352,7 @@ stack.
   keeps its height. If what cannot give way still does not fit, the column
   itself scrolls — a panel is never cut. On mobile the tree starts closed and,
   opened, may take the whole column, giving way as other panels join it.
-- **Closing the tree.** Select's tree (Features, Links, Study, and an FEA assembly's Parts) does not fold: the X at
+- **Closing the tree.** Select's tree (Features, Links, Study, Job, and an FEA assembly's Parts) does not fold: the X at
   its filter row's end ("Close features") closes it, `hidden` and kept mounted
   with its expansion, filter, selection and scroll, and Select stays the tool —
   a selection still shows its Reference, a panel of its own. While the tree is
@@ -1079,6 +1081,85 @@ exactly as it always was.
   load, the threshold, the preset and the markers' gate, and once chosen the mode, the frame and
   the sigma level; a result with no series writes the slice it always did), written against the
   result's fields, scale and view, so a re-solved result opens at its own defaults.
+
+## A CAM result
+
+A GLB that `cadgen cam plan` wrote is a job: the part, the stock, each setup's fixture, each tool
+that cuts and each operation's toolpath, in the part's frame, with the job on the part mesh's extras
+(the contract is cadgen's, `_internal/cam/outputs.py`; `glb/camResult.js` reads it). It follows the
+FEA result's pattern throughout: what is chosen is Job's, where the job is is on the view, and Display
+is the view's alone. It has no mode of its own.
+
+The CAM viewer is a chunk of its own (`glb/camView.jsx`: Job, the readout, `camResult.js` and
+`camPaths.js`), which `GlbRenderer` loads with one `import()` only once the loaded scene carries a
+mesh `cadgen cam plan` wrote (`generator` "cadgen cam" and an `operations` list in its extras). A
+plain GLB and an FEA result never fetch it; a job waits as the file loading until the chunk is in
+(loaded once, for every job after it), so it is framed once, as it is drawn.
+
+- **Select and its Job.** A job's strip is Select alone, and Select's panel is **Job**
+  (`glb/CamJobPanel.jsx`), a tree of the stack as Study is: closable (`panel: { id: "tree", label:
+  "Job" }`), starting open (closed on a phone), headed with its name and its X, at the one width,
+  its content's height (`fitContent`), giving way as a tree does. Top to bottom:
+  - **The summary**, a muted block: the cycle time ("3 min 38 s") by a clock, then what it takes
+    ("4 operations · 1 tool change · linuxcnc", each part kept whole on its line), and where cadgen
+    assumed the rapids' speed (the machine states none) a muted note that says so.
+  - **Findings**, a heading that folds by its chevron with the count beside it ("1 to fix, 3
+    suggestions"), open where there is something to fix and shut otherwise, over the findings card a
+    board's are listed in (`kit/status/findings.jsx`, `FindingsList`, its type stepped down to the
+    panel's): what must be fixed first under "Fix before cutting", the rest under "Suggestions", each
+    its sentence in full. A note (`info`: the cycle time, the post) is the summary's to say and is
+    not listed. Choosing one isolates the operation it names (cadgen's
+    "operations[2] (contour_2d)") and hands the faces it names to Quick Edit by the part the job was
+    planned on. The viewer raises no alert card for them, as for an FEA result's.
+  - **Setups**, **Tools** and **Operations**, each a heading that folds by its chevron, in the
+    Links tree's dense rows. A setup: its id, the way the tool points and what holds the stock
+    ("top +Z · vise"). A tool that cuts (one the job lists but never uses is left out): its id, its
+    size and type ("T1 6 mm flat endmill"), and under it the speed and feed cadgen computed ("21,221
+    rpm · 2,547 mm/min", the feed on a line of its own where both do not fit), each whole in its
+    hint. An operation: its place and word ("3 Profile"), then its time ("2 min 04 s"); its hint
+    says its tool, its cut and rapid lengths and cadgen's lines about it. A press isolates it (its
+    path alone on the model, the row highlighted); a press on another isolates that one, and a second
+    press or Escape shows them all again. Its eye floats over the row's right end as an assembly
+    row's does: on hover, and kept while its path is hidden ("Hide 1 Face", "Show 1 Face").
+  - **Time**, at the panel's foot, which never scrolls (as Study's What you see): the job as a motion
+    (`fea/motion.js`'s contract, `camMotion` in `glb/camResult.js`). A **Preset** row (Default, then
+    "Start of 2 Pocket" for each operation's start, Custom once the row moves), then **Time**, a
+    scrubber over the job's clock, its label and value field on one line (the job time as a clock,
+    "1:40", "38.2 s" under a minute, so the label keeps its room) and the slider the row's width
+    under them, with a **play** button beside the value that plays the job in place, once, the row following it (a second press pauses; dragging the row, a preset, another
+    tool or preview stops it where it is). It opens at the job's end: the whole job drawn, the last
+    tool where it finishes.
+- **Toolpaths.** The file draws each path as a glTF `LINES` primitive, one pixel wide in one blue; the
+  viewer hides those and draws each again from the same buffers as screen-space lines
+  (`createScreenSpaceLineSegments`, core's `renderEdges.js`; `glb/camPaths.js`), one line object per
+  kind of move, in the theme's tokens read off the viewer's element: a feed (and an arc, which is
+  one) `--foreground-info`, 2 px; a plunge (and a canned cycle's moves) `--foreground-warning`; a
+  lead-in or out `--foreground-success`; a rapid `--muted-foreground`, thinner, fainter and dashed.
+  Each is drawn up to the time shown, by `_T`: the segments begun by then, the one under way cut
+  where the tool is. Leaving the file puts the file's own lines back.
+- **The tool** stands on the path at the time shown: the tool of the operation under way (the last
+  one begun by then), its tip on its path there (along the segment under way by its share of that
+  segment's time; at a dwell or a tool change where the last one ended), turned as its setup holds
+  it (`extras.setups[i].quaternion`; the tool's mesh is in its own frame, tip at the origin, axis
+  along +Y). Every other tool is put away. Leaving the file puts each node back as the file placed it.
+- **The playbar** plays the job as the routine "Job" (`useGlbAnimation`'s own clip), in preview alone:
+  at a round pace faster than real time (1, 2 or 5 × 10ⁿ, about twenty seconds for the whole job,
+  `playbackPace`), the tool moving along the path and the path drawn up to it. Letting go puts it back
+  at the Time row's moment. With reduced motion (the host's `reducedMotion` or the system's) nothing
+  sweeps: the job plays one operation a second, each drawn whole at once with its tool at its end, and
+  so does the Time row's play button.
+- **The readout** floats at bottom-centre on the playbar's line (`glb/CamReadout.jsx`,
+  `FLOATING_CHROME_SURFACE_CLASS`, no pointer events): the operation under way ("3 Profile") and the
+  job's time over its whole ("1 min 40 s / 3 min 38 s"), and while the playbar plays it faster than
+  real time, by how much ("10× speed"). It steps up one playbar's height while the playbar is under
+  the model (in preview), as the FEA colour bar does. The camera frames the model right of Job and
+  above the readout, as an FEA result's frames it right of Study and above its colour bar.
+- **Display** has four gates of the job's own, after Surfaces (`displaySections`): **Rapids**, **Stock**
+  (the see-through block it is cut from), **Fixtures** and **Tool**, each on unless the job's
+  `view.show` turns it off.
+- **The choices are the file's view**: one renderer slice (`cam`: the Time row's moment and preset,
+  the operations hidden, the one isolated, and the four gates once set), written against the job's
+  operations and cycle time, so a re-planned job opens at its own defaults.
 
 ## Position and references
 

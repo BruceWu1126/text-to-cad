@@ -371,7 +371,8 @@ STEP renderer does not match `.glb`.
   surface colour in Inspect.
 - **Display**: `EDGELESS_VIEW_FEATURES` (Solid and Render; no Edges, Clip or Explode); an FEA
   result's adds the Clip section, which `glb/feaClip.js` draws as one plane on its mesh.
-- **Tools**: none, except an FEA result's Select and Clip (see `settings-ui.md`, An FEA result).
+- **Tools**: none, except an FEA result's Select and Clip (see `settings-ui.md`, An FEA result) and a
+  CAM result's Select (see `settings-ui.md`, A CAM result).
   Any other GLB hands the shell no tools of its own (`tools={[]}`), so there is no tool
   strip: it picks nothing, so there is no Select, no filter menu, no copy-references
   action and no viewport context menu.
@@ -382,7 +383,8 @@ STEP renderer does not match `.glb`.
   leaving preview calls the runtime's `onRelease`, which stops it and puts the model
   back at rest, keeping the clip, speed and loop.
 - **Panels**: none, except an FEA result's Study (Select's panel) and the Reference for a
-  face picked on it (see `settings-ui.md`, An FEA result); any other GLB opens with no panel open. Preview is the shell's, as for
+  face picked on it (see `settings-ui.md`, An FEA result), and a CAM result's Job (see
+  `settings-ui.md`, A CAM result); any other GLB opens with no panel open. Preview is the shell's, as for
   every 3D file, with the Animation settings when the file has clips.
 - **Host commands**: the base live commands; `select` and `clearSelection` are
   declined with a sentence, and a `selectReference` host request is consumed and

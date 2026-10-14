@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { MousePointer2 } from "lucide-react";
 import { clamp, finiteOr } from "@text-to-cad/core/common/numbers.js";
@@ -10,7 +10,7 @@ import { useRendererShell } from "../kit/shell/useRendererShell.js";
 import ToolPanel from "../kit/tools/ToolPanel.jsx";
 import { useViewSettings } from "../kit/view-settings/useViewSettings.js";
 import { useDeclinedSelectReference, useWorkspaceDocument, workspaceLoadAlert } from "../workspace/useWorkspaceDocument.js";
-import { useViewerHost } from "../../host/context.js";
+import { ViewerElementContext, useViewerHost } from "../../host/context.js";
 import { PointerPick } from "../kit/tools/select/usePointerPick.js";
 import { FileSheetStatusText } from "../kit/inspector/FileSheet.js";
 import { DEFAULT_POSE_VALUE, NO_PRESET_VALUE, positionValuesAreDefault } from "../kit/inspector/kinematicsControls.jsx";
@@ -67,12 +67,208 @@ function useFeaView(root) {
   return { kit: wanted && kit ? kit : null, pending: wanted && kit === null };
 }
 
+/** Whether a loaded scene carries a CAM result: a mesh `cadgen cam plan` wrote, with its operations (`camResult.js` reads it). */
+function carriesCamResult(root) {
+  let found = false;
+  root?.traverse?.((object) => {
+    if (!found && object?.isMesh && object.geometry && object.userData?.generator === "cadgen cam" && Array.isArray(object.userData.operations)) found = true;
+  });
+  return found;
+}
+
+// The CAM result viewer (`camView.jsx`), once a job has loaded it, for every job after it.
+let camView = null;
+/** Loads the CAM result viewer: its own chunk, which a plain GLB and an FEA result never fetch. */
+export const loadCamView = () => import("./camView.jsx").then((module) => { camView = module; return module; });
+
+/** The CAM result viewer for a scene that carries a job (`kit`), as `useFeaView` is for a result: `pending` while it loads. */
+function useCamView(root) {
+  const wanted = useMemo(() => carriesCamResult(root), [root]);
+  const [kit, setKit] = useState(camView);
+  useEffect(() => {
+    if (!wanted || kit) return undefined;
+    let live = true;
+    loadCamView().then((module) => { if (live) setKit(module); }, () => { if (live) setKit(false); });
+    return () => { live = false; };
+  }, [wanted, kit]);
+  return { kit: wanted && kit ? kit : null, pending: wanted && kit === null };
+}
+
+const NO_CAM_CHOICE = Object.freeze({ time: null, preset: null, hidden: null, isolated: null, rapids: null, stock: null, fixtures: null, tool: null });
+// Display's gates for a job, after Surfaces, in this order: what each draws, and the key it is kept under.
+const CAM_GATES = Object.freeze([
+  Object.freeze({ key: "rapids", title: "Rapids", text: "The moves at rapid between cuts, dashed." }),
+  Object.freeze({ key: "stock", title: "Stock", text: "The block the part is cut from, see-through." }),
+  Object.freeze({ key: "fixtures", title: "Fixtures", text: "What holds the stock in each setup." }),
+  Object.freeze({ key: "tool", title: "Tool", text: "The tool, where the job has it at the time shown." }),
+]);
+
+/**
+ * A CAM result's state (`cadgen cam plan`; the viewer is `camView.jsx`, `cv`): its job read once, the person's choices
+ * as one renderer slice of the file's view (`cam`: the Time row's moment and preset, the operations hidden or isolated,
+ * Display's four gates), the drawn paths and tool following them, and the playbar's own clip, which plays the job.
+ * Everything here is inert for a scene that is not a job.
+ */
+function useCamJob({ cv, scene, view, reducedMotion, shellRef, requestRenderRef, viewerElement }) {
+  const cam = useMemo(() => (cv ? cv.camResultOf(scene?.document?.scene) : null), [cv, scene]);
+  const signature = cam ? `cam:${cam.operations.map((operation) => operation.op).join(",")}:${cam.duration}` : "";
+  const [stored] = useState(() => view.state);
+  const restored = useMemo(() => (cam ? { ...NO_CAM_CHOICE, ...readFileView(stored, { cam: signature }).renderer.cam } : NO_CAM_CHOICE), [cam, stored, signature]);
+  const [edited, setEdited] = useState({ signature: "", ...NO_CAM_CHOICE });
+  const choice = edited.signature === signature ? { ...restored, ...edited } : restored;
+  const choiceRef = useRef(choice);
+  choiceRef.current = choice;
+  const choose = useCallback((patch) => {
+    setEdited({ ...choiceRef.current, ...patch, signature });
+    shellRef.current?.scheduleStateSave();
+  }, [signature, shellRef]);
+  const rendererState = useMemo(() => (cam ? { signatures: { cam: signature }, read: () => ({ cam: Object.fromEntries(Object.keys(NO_CAM_CHOICE).map((key) => [key, choiceRef.current[key] ?? null])) }) } : null),
+    [cam, signature]);
+
+  // Display's gates, each on unless the job's view turns it off, and what the person set since.
+  const gates = useMemo(() => {
+    const show = cam?.show || {};
+    const opening = { rapids: show.rapids !== false, stock: show.stock !== false && show.stock !== "none", fixtures: show.fixtures !== false, tool: show.tool !== false };
+    return Object.fromEntries(CAM_GATES.map(({ key }) => [key, typeof choice[key] === "boolean" ? choice[key] : opening[key]]));
+  }, [cam, choice]);
+  const operationCount = cam?.operations.length || 0;
+  const hidden = useMemo(() => new Set((Array.isArray(choice.hidden) ? choice.hidden : EMPTY).filter((index) => Number.isInteger(index) && index < operationCount)), [choice.hidden, operationCount]);
+  const isolated = Number.isInteger(choice.isolated) && cam?.nodes.paths.has(choice.isolated) ? choice.isolated : null;
+
+  // The Time row: the job as a motion (`fea/motion.js`'s contract), opening at its end with the whole job drawn.
+  const motion = useMemo(() => (cam ? cv.camMotion(cam) : null), [cam, cv]);
+  const control = useMemo(() => (motion ? { ...cv.motionControl(motion), ariaLabel: "Job time" } : null), [motion, cv]);
+  const presets = useMemo(() => (motion ? cv.motionPresets(motion, {}) : EMPTY), [motion, cv]);
+  const timeValue = cam ? clamp(Number.isFinite(choice.time) ? choice.time : cam.duration, 0, cam.duration) : 0;
+  const activePreset = presets.some((preset) => preset.value === choice.preset) ? choice.preset
+    : Math.abs(timeValue - (cam?.duration ?? 0)) < 1e-9 ? DEFAULT_POSE_VALUE : NO_PRESET_VALUE;
+  // While the Time row's play button plays the job in place, the moment it has reached.
+  const [inPlace, setInPlace] = useState(null);
+  const inPlaceRef = useRef(null);
+  inPlaceRef.current = inPlace;
+  const shownTime = inPlace ? inPlace.at : timeValue;
+  const playback = useMemo(() => (cam ? cv.jobPlayback(cam, reducedMotion) : null), [cam, cv, reducedMotion]);
+
+  // The drawn paths and the tool, built once per job; the routine playing, as the job time it has reached.
+  const pathsRef = useRef(null);
+  const toolRef = useRef(null);
+  const readoutRef = useRef(null);
+  const routineRef = useRef(null);
+  const paintRef = useRef(null);
+  paintRef.current = () => {
+    const paths = pathsRef.current;
+    if (!cam || !paths) return;
+    const at = routineRef.current !== null ? routineRef.current : shownTime;
+    paths.setTime(at);
+    toolRef.current.place(at, gates);
+    const placed = toolRef.current.placed;
+    const pace = routineRef.current !== null && playback?.pace > 1 ? `${playback.pace.toLocaleString("en-US")}× speed` : "";
+    readoutRef.current?.({ ...cv.readoutWords(cam, at, placed?.operation || null), pace });
+    requestRenderRef.current?.();
+  };
+  useEffect(() => {
+    if (!cam) return undefined;
+    const paths = cv.createCamPaths(cam);
+    const tool = cv.createCamTool(cam);
+    pathsRef.current = paths;
+    toolRef.current = tool;
+    return () => {
+      pathsRef.current = null;
+      toolRef.current = null;
+      paths.dispose();
+      tool.dispose();
+      requestRenderRef.current?.();
+    };
+  }, [cam, cv, requestRenderRef]);
+  const colorScheme = view.appearance?.colorScheme === "dark" ? "dark" : "light";
+  useEffect(() => {
+    if (!pathsRef.current) return;
+    pathsRef.current.style({ colours: cv.pathColours(viewerElement?.current || null, colorScheme), rapids: gates.rapids, hidden, isolated });
+    paintRef.current();
+  }, [cam, cv, colorScheme, gates, hidden, isolated, viewerElement]);
+  useEffect(() => { paintRef.current(); }, [cam, shownTime]);
+
+  // The playbar's own clip: the job played on the tool, the paths drawn up to it; letting go puts it back at the Time row's moment.
+  const ownClips = useMemo(() => {
+    if (!cam || !playback?.duration) return EMPTY;
+    return [{
+      id: "cam:job", label: "Job", duration: playback.duration,
+      play: {
+        apply(elapsedSec) { routineRef.current = playback.jobTimeAt(elapsedSec); paintRef.current?.(); },
+        release() { routineRef.current = null; paintRef.current?.(); },
+      },
+    }];
+  }, [cam, playback]);
+
+  // The Time row's play button: the job in place, the row following it, once through, as the playbar plays it.
+  const playing = Boolean(inPlace);
+  useEffect(() => {
+    if (!playing || !playback) return undefined;
+    let previous = null;
+    let elapsed = playback.steps ? Math.max(playback.steps.findIndex((end) => end > inPlaceRef.current.from + 1e-9), 0) * cv.STEP_SECONDS
+      : inPlaceRef.current.from / playback.pace;
+    let frameId = 0;
+    const tick = (now) => {
+      if (!inPlaceRef.current) return;
+      elapsed += previous === null ? 0 : Math.max(now - previous, 0) / 1000;
+      previous = now;
+      if (elapsed >= playback.duration) { setInPlace(null); choose({ time: cam.duration, preset: null }); return; }
+      setInPlace({ at: playback.jobTimeAt(elapsed), from: inPlaceRef.current.from });
+      frameId = window.requestAnimationFrame(tick);
+    };
+    frameId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [playing, playback, cam, cv, choose]);
+  const stopInPlace = useCallback(() => {
+    const current = inPlaceRef.current;
+    if (!current) return;
+    setInPlace(null);
+    choose({ time: current.at, preset: null });
+  }, [choose]);
+  const time = cam ? {
+    control, value: shownTime, presets, preset: activePreset, playing,
+    onToggle: () => {
+      if (inPlaceRef.current) { stopInPlace(); return; }
+      const from = timeValue < cam.duration - 1e-6 * Math.max(cam.duration, 1) ? timeValue : 0;
+      setInPlace({ at: from, from });
+    },
+    onChange: (value) => { if (inPlaceRef.current) setInPlace(null); choose({ time: clamp(Number(value), 0, cam.duration), preset: null }); },
+    onPreset: (value) => {
+      if (inPlaceRef.current) setInPlace(null);
+      const preset = presets.find((entry) => entry.value === value);
+      if (preset) choose({ time: preset.values.motion, preset: value });
+    },
+    onReset: () => { if (inPlaceRef.current) setInPlace(null); choose({ time: null, preset: null }); },
+  } : null;
+
+  // What the readout says at the Time row's moment; the playbar writes over it as it plays.
+  const readout = useMemo(() => (cam ? cv.readoutWords(cam, shownTime, cv.operationAt(cam, shownTime)) : null), [cam, cv, shownTime]);
+  const displaySections = cam ? CAM_GATES.map(({ key, title, text }) => ({
+    id: `cam-${key}`, title, enabled: gates[key], onEnabledChange: (on) => choose({ [key]: on }), content: <FileSheetStatusText>{text}</FileSheetStatusText>,
+  })) : null;
+  return {
+    cam, rendererState, displaySections, ownClips, gates, hidden, isolated, time, readoutRef, stopInPlace, playing,
+    toggleOperation: (index) => {
+      const next = new Set(hidden);
+      if (!next.delete(index)) next.add(index);
+      choose({ hidden: [...next].sort((a, b) => a - b) });
+    },
+    isolateOperation: (index) => choose({ isolated: isolated === index ? null : index }),
+    isolate: (index) => choose({ isolated: index }),
+    clearIsolation: () => choose({ isolated: null }),
+    readout,
+  };
+}
+
 function GlbSurface({ view, data }) {
   const host = useViewerHost();
+  const viewerElement = useContext(ViewerElementContext);
   const document = useWorkspaceDocument({ view, data });
   const loaded = useGlbScene({ entry: document.entry, resources: document.client.resources });
   // A result waits for its viewer as the file loading, so it is framed once, as the viewer draws it.
-  const { kit: fv, pending } = useFeaView(loaded.scene?.document?.scene);
+  const { kit: fv, pending: feaPending } = useFeaView(loaded.scene?.document?.scene);
+  const { kit: cv, pending: camPending } = useCamView(loaded.scene?.document?.scene);
+  const pending = feaPending || camPending;
   const scene = pending ? null : loaded.scene;
   const loadAlert = useMemo(() => workspaceLoadAlert({
     catalogError: document.catalogError, error: loaded.error, modelKey: document.modelKey, hasScene: Boolean(scene)
@@ -194,6 +390,28 @@ function GlbSurface({ view, data }) {
   // A result that moves as a whole (`fea/motion.js`; a drop's fall, `fea/fall.js`, drawn by `feaFall.js`): the Time
   // row's value poses it, and Preview's playbar plays the same timeline (with reduced motion, only its `play` span).
   const reducedMotion = host.environment?.reducedMotion === true || prefersReducedMotion();
+  // A CAM result (`cadgen cam plan`): its job, its choices and its own clip, which plays the job (`useCamJob`).
+  const shellRef = useRef(null);
+  const job = useCamJob({ cv, scene, view, reducedMotion, shellRef, requestRenderRef, viewerElement });
+  const cam = job.cam;
+  // A job's finding chosen in the findings card: what it is about goes to Quick Edit by the part it was planned on.
+  const [camFinding, setCamFinding] = useState(null);
+  const chosenFinding = cam && camFinding?.cam === cam ? camFinding.finding : null;
+  const camChosenSomething = Boolean(chosenFinding) || job.isolated !== null;
+  // Choosing a finding isolates the operation it is about, where it names one, and hands its faces to Quick Edit.
+  const chooseCamFinding = (finding) => {
+    setCamFinding({ cam, finding });
+    const operation = cv.findingOperation(finding);
+    if (operation !== null) job.isolate(operation);
+  };
+  const clearCamChoice = () => { setCamFinding(null); if (job.isolated !== null) job.clearIsolation(); };
+  const camReferences = useMemo(() => {
+    if (!cam) return null;
+    const part = cv.camSourcePath(view.file.path, cam.document);
+    const selectors = (chosenFinding?.items || EMPTY).map((item) => item.ref).filter(Boolean).map((ref) => String(ref).replace(/^#/, ""));
+    return part && selectors.length ? [{ resource: { kind: "workspace-file", path: part }, target: { kind: "cad-selector", selectors },
+      summary: chosenFinding.summary || chosenFinding.description }] : [];
+  }, [cam, cv, view.file.path, chosenFinding]);
   const motion = useMemo(() => (fea ? fv.feaMotion(fea) : null), [fea]);
   const fall = useMemo(() => {
     const frame = motion?.kind === "fall" ? fv.fallFrame(THREE, fea) : null;
@@ -231,8 +449,7 @@ function GlbSurface({ view, data }) {
       },
     }];
   }, [fea, motion, reducedMotion]);
-  const animation = useGlbAnimation(scene?.document || null, () => requestRenderRef.current?.(), ownClips);
-  const shellRef = useRef(null);
+  const animation = useGlbAnimation(scene?.document || null, () => requestRenderRef.current?.(), cam ? job.ownClips : ownClips);
   const choose = useCallback((patch) => {
     setEdited({ ...choiceRef.current, ...patch, signature });
     shellRef.current?.scheduleStateSave();
@@ -253,12 +470,14 @@ function GlbSurface({ view, data }) {
     view, services: document.services, resource: document.resource, modelKey: document.modelKey, revisionKey: loaded.revision,
     features: fea ? FEA_VIEW_FEATURES : EDGELESS_VIEW_FEATURES, toolModes: GLB_TOOL_MODES, previewable: true, scene, viewSettings: displaySettings,
     load: { busy: (loaded.busy || pending) && !scene, updating: loaded.busy && Boolean(scene), progress: loaded.progress, alert: loadAlert },
-    animation, live: LIVE, rendererState, displaySections: markerShow ? [{
+    animation, live: LIVE, rendererState: cam ? job.rendererState : rendererState, displaySections: cam ? job.displaySections : markerShow ? [{
       id: "fea-markers", title: analysis.displayTitle, enabled: markersOn, onEnabledChange: (on) => choose({ markers: on }),
       content: <FileSheetStatusText>{fv.markerGateText(markers?.kinds?.length ? markers.kinds : analysis.markers.filter((kind) => kind !== "body_load"))}</FileSheetStatusText>,
     }] : null,
-    // Escape lets go of what is chosen, which a result with no source to edit has no Quick Edit to clear.
-    escape: { active: chosenSomething, handle: () => { if (!chosenSomething) return false; clearChoice(); return true; } }
+    // Escape lets go of what is chosen, which a result with no source to edit has no Quick Edit to clear; a job's
+    // isolated operation and chosen finding the same way.
+    escape: cam ? { active: camChosenSomething, handle: () => { if (!camChosenSomething) return false; clearCamChoice(); return true; } }
+      : { active: chosenSomething, handle: () => { if (!chosenSomething) return false; clearChoice(); return true; } }
   });
   shellRef.current = shell;
   requestRenderRef.current = shell.requestRender;
@@ -539,8 +758,11 @@ function GlbSurface({ view, data }) {
       .filter((label) => !clipRef.current || clipRef.current.keeps(label.face || label.at, fea.mesh)) : EMPTY), [markers, markersOn, markerShow, fieldLoad, fea]);
 
   // Select is an FEA result's one tool, with Study (and an assembly's Parts) its panels; a GLB that is not a result has none.
-  const selectActive = Boolean(fea) && !shell.previewing && shell.toolMode === GLB_TOOL.SELECT;
-  const tools = fea ? [shell.tools.own({ id: GLB_TOOL.SELECT, label: "Select", icon: SELECT_ICON, panel: parts.length ? fv.ASSEMBLY_PANELS : fv.STUDY_PANEL }),
+  const selectActive = Boolean(fea || cam) && !shell.previewing && shell.toolMode === GLB_TOOL.SELECT;
+  // A job's Time row stops where it is when the tool or preview changes, as a motion's does.
+  const stopCamInPlace = job.stopInPlace;
+  useEffect(() => { stopCamInPlace(); }, [cam, shell.toolMode, shell.previewing]); // eslint-disable-line react-hooks/exhaustive-deps
+  const tools = cam ? [shell.tools.own({ id: GLB_TOOL.SELECT, label: "Select", icon: SELECT_ICON, panel: cv.JOB_PANEL })] : fea ? [shell.tools.own({ id: GLB_TOOL.SELECT, label: "Select", icon: SELECT_ICON, panel: parts.length ? fv.ASSEMBLY_PANELS : fv.STUDY_PANEL }),
     // A press opens its panel neutral (an edit cuts); a press while it is up, as its X, removes the cut.
     shell.tools.own({ id: GLB_TOOL.CLIP, label: "Clip", icon: fv.CLIP_ICON, active: clipShown,
       onSelect: () => {
@@ -610,7 +832,12 @@ function GlbSurface({ view, data }) {
     },
     onReset: () => choose({ ...NO_VALUES, preset: null }),
   };
-  const toolPanels = fea ? <>
+  // A job's Select panel, Job: the summary, the findings card, its setups, tools and operations, and its Time row.
+  const camPanel = useMemo(() => (cam ? { summary: cv.camSummary(cam), setups: cam.setups.map(cv.setupRow),
+    tools: cam.tools.filter((tool) => tool.node).map(cv.toolRow), operations: cam.operations.map(cv.operationRow) } : null), [cam, cv]);
+  const toolPanels = cam ? <cv.CamJobPanel active={selectActive} summary={camPanel.summary} findings={cam.findings} setups={camPanel.setups} tools={camPanel.tools}
+    operations={camPanel.operations} hidden={job.hidden} isolated={job.isolated} onToggle={job.toggleOperation} onIsolate={job.isolateOperation}
+    onChooseFinding={chooseCamFinding} time={job.time} /> : fea ? <>
     <fv.FeaStudyPanel active={selectActive} parts={parts} openPart={fv.weakestPartIndex(fea)} setup={sections.setup} details={sections.details}
       sections={order} verdict={verdict} chosen={faces.id} onChoose={chooseFaces}
       result={resultControls}
@@ -623,7 +850,10 @@ function GlbSurface({ view, data }) {
     </div> : null}
   </> : null;
 
-  const overlay = fea ? (viewport) => <>
+  const overlay = cam ? (viewport) => <>
+    <cv.CamFraming runtimeRef={viewport.runtimeRef} hostRef={viewport.hostRef} />
+    <cv.CamReadout readoutRef={job.readoutRef} words={job.readout} raised={Boolean(animation) && shell.previewing} />
+  </> : fea ? (viewport) => <>
     <fv.FeaFraming runtimeRef={viewport.runtimeRef} hostRef={viewport.hostRef} sync={viewport.syncSceneBounds} syncRef={syncBoundsRef} />
     {fall || motion?.poseAt || tracers ? <fv.FeaFallClock clockRef={clockRef} /> : null}
     <PointerPick viewport={viewport} scene={pickScene} enabled={selectActive} onPick={pick} />
@@ -631,8 +861,8 @@ function GlbSurface({ view, data }) {
     {markers ? <fv.FeaLoadLabels runtimeRef={viewport.runtimeRef} hostRef={viewport.hostRef} mesh={fea.mesh} labels={loadLabels}
       colours={{ ink: colours.load, halo: colours.halo }} /> : null}
   </> : null;
-  return <RendererShell shell={shell} tools={tools} toolPanels={toolPanels} viewportOverlay={overlay} references={references}
-    onClearReferences={clearChoice} copySelection={copySelection} />;
+  return <RendererShell shell={shell} tools={tools} toolPanels={toolPanels} viewportOverlay={overlay} references={cam ? camReferences : references}
+    onClearReferences={cam ? () => setCamFinding(null) : clearChoice} copySelection={copySelection} />;
 }
 
 export default function GlbRenderer(props) {
