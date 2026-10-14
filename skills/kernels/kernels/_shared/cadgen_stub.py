@@ -40,6 +40,26 @@ class Model:
     outs: dict  # format -> resolved Path
 
 
+def srgb_to_linear(channel: float) -> float:
+    return channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+
+
+def linear_to_srgb(channel: float) -> float:
+    return channel * 12.92 if channel <= 0.0031308 else 1.055 * channel ** (1 / 2.4) - 0.055
+
+
+def srgb(value: str, alpha: float = 1.0) -> tuple[float, float, float, float]:
+    """cadgen.srgb: the linear RGBA channels for an sRGB hex. Palette modules
+    call it at import and do arithmetic on the result, so it has to be real."""
+    text = value.strip().lstrip("#")
+    if len(text) == 3:
+        text = "".join(ch * 2 for ch in text)
+    if len(text) != 6:
+        raise ValueError(f"expected a #rgb or #rrggbb colour, got {value!r}")
+    red, green, blue = (int(text[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+    return srgb_to_linear(red), srgb_to_linear(green), srgb_to_linear(blue), float(alpha)
+
+
 def _mark(fmt):
     def factory(func=None, *, out=None, **_ignored):
         def apply(fn):
@@ -70,7 +90,7 @@ def install(build123d_module) -> None:
     cadgen.build123d = build123d_module
     for name, fmt in DECORATORS.items():
         setattr(cadgen, name, _mark(fmt))
-    cadgen.srgb = lambda *values, **_: values
+    cadgen.srgb, cadgen.srgb_to_linear, cadgen.linear_to_srgb = srgb, srgb_to_linear, linear_to_srgb
 
     def missing(name):
         if name.startswith("__"):

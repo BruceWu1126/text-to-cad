@@ -144,6 +144,20 @@ class ModelTests(unittest.TestCase):
         self.assertFalse(program["ok"])
         self.assertIn("looping over part.edges()", program["error"])
 
+    def test_palette_colours_are_cadgens_numbers(self):
+        # palette modules do arithmetic on srgb() at import; a stand-in that returned the hex broke every radial part
+        self.script.write_text("from cadgen import build123d as bd, step, srgb\n\n"
+                               "BLACK = tuple(round(float(c), 5) for c in srgb('#0f1012'))\n\n"
+                               "@step\ndef block():\n    return bd.Box(1, 2, 3)\n", encoding="utf-8")
+        self.assertTrue(trace_model(str(self.script))["ok"])
+        self.assertEqual(cadgen_stub.srgb("#fff", 0.5), (1.0, 1.0, 1.0, 0.5))
+        self.assertAlmostEqual(cadgen_stub.srgb("#0f1012")[0], ((15 / 255 + 0.055) / 1.055) ** 2.4)
+
+    def test_a_model_that_fails_to_load_is_reported_not_a_traceback(self):
+        self.script.write_text("from cadgen import build123d as bd, step\nraise ValueError('bad palette')\n", encoding="utf-8")
+        with self.assertRaisesRegex(KernelError, r"parts.py didn't load: ValueError: bad palette at parts.py:2"):
+            run(manifest.by_id("implicit"), str(self.script), cwd=self.tmp)
+
     @unittest.skipUnless(shutil.which("node"), "the implicit kernel runs on Node.js")
     def test_run_writes_beside_the_models_output(self):
         report = run(manifest.by_id("implicit"), f"{self.script}::pill", cwd=self.tmp)

@@ -47,6 +47,12 @@ def describe(target: str) -> cadgen_stub.Model:
         return cadgen_stub.load(script, function)
     except cadgen_stub.Unsupported as exc:
         raise KernelError(str(exc)) from None
+    except Exception as exc:  # the script's own module-level code failed under the stand-in
+        where, tb = "", exc.__traceback__
+        while tb is not None:
+            where = f" at {Path(tb.tb_frame.f_code.co_filename).name}:{tb.tb_lineno}"
+            tb = tb.tb_next
+        raise KernelError(f"{Path(script).name} didn't load: {type(exc).__name__}: {exc}{where}") from None
     finally:
         for name, module in saved.items():
             if module is not None:
