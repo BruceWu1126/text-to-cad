@@ -20,7 +20,7 @@ it('Select\'s mode is one button showing the mode in hand; its menu lists the mo
     connected={{ edgeChain: true, tangentFaces: true }} onConnectedChange={connectedChange} />);
   const button = screen.getByRole('button', { name: 'Select mode: Faces' });
   // The button is the strip's narrow chevron beside the tool, as a design tool's toolbar has it; the tool shows the mode.
-  expect([glyphs(button), !!button.querySelector('svg.lucide-chevron-down'), button.classList.contains('w-3.5')]).toEqual([[], true, true]);
+  expect([glyphs(button), !!button.querySelector('svg.lucide-chevron-down'), button.classList.contains('w-3')]).toEqual([[], true, true]);
   await user.click(button);
   expect(menu().getAttribute('aria-label')).toBe('Select mode');
   expect(screen.getAllByRole('menuitemradio').map(item => [item.textContent, item.getAttribute('aria-checked')]))
@@ -55,7 +55,7 @@ it('Measure\'s snapping is one button showing the mode in hand; its menu is four
   const changed = vi.fn();
   render(<MeasureModeMenu mode="edges" onModeChange={changed} />);
   // The strip's narrow chevron beside Measure.
-  expect(screen.getByRole('button', { name: 'Measure snapping: Edges' }).classList.contains('w-3.5')).toBe(true);
+  expect(screen.getByRole('button', { name: 'Measure snapping: Edges' }).classList.contains('w-3')).toBe(true);
   await user.click(screen.getByRole('button', { name: 'Measure snapping: Edges' }));
   expect(screen.getAllByRole('menuitemradio').map(item => item.textContent)).toEqual(['All', 'Points', 'Edges', 'Faces']);
   expect(glyphs(menu())).toEqual(['measure', 'points', 'edges', 'faces']);

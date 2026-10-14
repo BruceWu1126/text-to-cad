@@ -146,7 +146,7 @@ none.
 
 | File | Toolbar, left to right |
 | --- | --- |
-| STEP | Select, Position (movable joints only), Animation (routines only), Pencil, Shapes, Measure, Explode (two or more parts), Clip, then Undo and Redo |
+| STEP | Select, Pencil, Shapes, Measure, Explode (two or more parts), Clip, then the model's own: Position (movable joints only) and Animation (routines only); then Undo and Redo |
 | URDF / SRDF / SDF | Select, Position (posable joints only) |
 | GLB / STL / 3MF | none |
 | DXF | none: a 2D canvas |
@@ -173,7 +173,7 @@ again, as it was.
 | Tool | Pressing it | Leaving it |
 | --- | --- | --- |
 | Select | The default tool of STEP and robots; picks parts and references, the drawing's marks and measurements (Shift adds; Delete deletes marks and measurements); shows Features (an assembly's; a robot's Links); its modes are the chevron beside it on the strip; what is picked is Quick Edit's chips | Its panel leaves the stack; the selection stays, lit and in Quick Edit, under any tool |
-| Pencil, Shapes | Draw: the Pencil's pen or eraser, or a Shape (Ellipse, Rectangle, Line, Arrow, Text), each the last of its family on its button and the rest in its chevron's menu; color, weight, line style and placement are the Drawing panel | The ink stays in the model, its panel a heading while there is ink |
+| Pencil, Shapes | Draw: the Pencil's pen or eraser, or a Shape (Line, Arrow, Rectangle, Ellipse, Text), each the last of its family on its button and the rest in its chevron's menu, which ends in color, weight, line style and placement submenus | The ink stays in the model, the Drawing heading with it |
 | Measure | Arms picking and shows the Measure panel: its snapping modes, then its results; kept, a press takes it up again, results and all | Unfinished picks are cancelled; completed measurements and their panel stay, kept |
 | Explode / Clip | Opens a neutral panel; an edit applies the effect (Explode's, as a motion: see below); kept, a press takes it up again as it is | A neutral panel goes; an applied effect and its panel stay, kept |
 | Position | Shows joint handles and the Position panel | Handles and panel hide; joint values stay, and a pose that is not the default is kept: one line in the stack |
@@ -251,27 +251,28 @@ parts, `LARGE_TREE_ROWS`) a part's row coming on screen asks for nothing: the
 pointer resting on the part in the viewport (150ms) or pressing it asks.
 
 **Draw.** Draw is two tools of the strip, as a design tool's toolbar has them: **Pencil**
-(the pen, the eraser) and **Shapes** (Ellipse, the first and the default; Rectangle,
-Line, Arrow, and Text, a mark put down in place), each showing the one of its family
-last taken up, the rest in its chevron's menu. Draw has no Select or Pan of its own
-(Select picks ink, a right drag or Space orbits). Its **Drawing** panel leads the stack
-while either is up: a row of dropdowns for what is drawn next, each its value's glyph and a small chevron opening an ordinary menu of glyphs and
-names: Color, Stroke width (Thin, Medium, Bold — a shape's 1, 2 or 4px, the pen drawn
+(the pen, the eraser) and **Shapes** (Line, the first and the default; Arrow,
+Rectangle, Ellipse, and Text, a mark put down in place), each showing the one of its
+family last taken up, the rest in its chevron's menu. Draw has no Select or Pan of its
+own (Select picks ink, a right drag or Space orbits), and no panel of controls: what is
+drawn next is the end of each tool's menu, after a rule, as a drawing app's tool flyout
+has it — submenus, each its name, the value in hand at the right against the chevron,
+and a radio list of glyphs and names: Color, Stroke width (Thin, Medium, Bold — a shape's 1, 2 or 4px, the pen drawn
 to look the same weight, its glyph a dot 3, 5 or 7px across), Line style (Solid,
 Dashed, Dotted — a shape's line; the pen's freehand ink is always solid; its glyph a
 diagonal line, drawn in the style) and Placement (On model, the default, its glyph
 lucide's Box; In space, on a plane facing the view through the orbit point, its glyph
-Axis3d). None of them restyles ink already down: the ink Select picks has its own bar,
-a small floating toolbar on the tool strip's surface just above it — Color, Stroke
-width and Line style dropdowns as Draw's, Fill for a closed shape, a rule, Delete.
+Axis3d); Line style is the Shapes' menu's only. One setting for both tools, and never a
+restyle of ink already down: the ink Select picks has its own bar, a small floating
+toolbar on the tool strip's surface just above it — Color, Stroke width and Line style
+dropdowns, Fill for a closed shape, a rule, Delete.
 **Undo** and **Redo** end the strip after a rule, always there: the file view's one
 history, whatever tool took the step, each disabled while there is nothing for it. An update of the model forgets the sketch too, its history
 with it (Undo has nothing to bring back), and leaves Draw the tool, on the tool,
 colour, weight, line style and placement in hand. The select tool uses lucide's SquareMousePointer. The pencil and
-the shapes share one default stroke width. The Drawing panel always ends in a
-full-row **Copy Drawing** (**Copy** where the panel is too narrow for its name), which
-writes the view with its ink — or without any yet — to the clipboard as a PNG and then says **Copied**, a tick where the shortcut was; the copy shortcut
-does the same. A sketch begun opens
+the shapes share one default stroke width. While there is ink, a **Drawing** heading
+leads the stack, its **Copy** writing the view with its ink to the clipboard as a PNG
+(a tick once it has; the copy shortcut does the same) and its X clearing it. A sketch begun opens
 [Quick Edit](#quick-edit), whose header says **drawing** while the ink is there. Draw disables the cube without hiding it.
 
 **Animation** plays a file's routines without leaving the tools view; only a

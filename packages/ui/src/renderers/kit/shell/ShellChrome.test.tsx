@@ -223,7 +223,7 @@ it('while the model loads the viewer shows none of its own chrome, and all of it
   expect(barButtons()).toEqual(['Display', 'Preview']);
   // With nothing to work on yet, the strip is idle together, and so are Display and Preview.
   stage('unready');
-  expect(strip()).toEqual(['Select', 'Pencil', 'Pencil tool: Pen', 'Shapes', 'Shape: Ellipse', 'Keep', 'Pose', 'Undo', 'Redo']);
+  expect(strip()).toEqual(['Select', 'Pencil', 'Pencil tool: Pen', 'Shapes', 'Shape: Line', 'Keep', 'Pose', 'Undo', 'Redo']);
   const idle = (name: string) => (['Display', 'Preview'].includes(name) ? screen.getByRole('button', { name }) : tool(name)).hasAttribute('disabled');
   expect(['Select', 'Pencil', 'Shapes', 'Undo', 'Display', 'Preview'].map(idle)).toEqual([true, true, true, true, true, true]);
   stage('idle');
@@ -250,7 +250,7 @@ it("Display and Preview are a 3D view's, as its renderer declares: a view that d
   ask();
   expect([viewportProps.current.previewMode, onFullscreenChange.mock.calls]).toEqual([false, []]);
   expect(document.querySelector('[data-preview-chrome]')!.hasAttribute('inert')).toBe(false);
-  expect(strip()).toEqual(['Pencil', 'Pencil tool: Pen', 'Shapes', 'Shape: Ellipse', 'Undo', 'Redo']);
+  expect(strip()).toEqual(['Pencil', 'Pencil tool: Pen', 'Shapes', 'Shape: Line', 'Undo', 'Redo']);
 });
 
 it('a load the model did not survive leaves only the card saying so, and a failed update it survives keeps the chrome', () => {
@@ -342,7 +342,7 @@ it("Display is the dropdown at the navbar's right end, before Preview, the persp
   const { remount } = frame();
   // The view's controls in the navbar, Display then Preview; nothing of Display on the strip.
   expect(barButtons()).toEqual(['Display', 'Preview']);
-  expect(strip()).toEqual(['Select', 'Pencil', 'Pencil tool: Pen', 'Shapes', 'Shape: Ellipse', 'Keep', 'Pose', 'Undo', 'Redo']);
+  expect(strip()).toEqual(['Select', 'Pencil', 'Pencil tool: Pen', 'Shapes', 'Shape: Line', 'Keep', 'Pose', 'Undo', 'Redo']);
   const display = screen.getByRole('button', { name: 'Display' });
   // Its icon is the perspective box, the drawing the Projection menu shows for Perspective.
   const box = render(<PerspectiveProjectionIcon />).container.querySelector('svg')!;
@@ -350,10 +350,9 @@ it("Display is the dropdown at the navbar's right end, before Preview, the persp
   await user.click(tool('Keep'));
   await user.click(tool('Pencil'));
   expect(tool('Pencil').getAttribute('aria-pressed')).toBe('true');
-  // Draw's panel leads the stack, and has nothing to fold.
+  // Draw adds no panel of its own (what the next mark looks like is its menus'): the stack is as it was.
   const stack = shown();
-  expect(stack).toEqual(['Drawing controls', 'Harness tree', 'Harness reference', 'Kept controls']);
-  expect(within(panel('Drawing controls')!).queryByRole('button', { name: /^(?:Collapse|Expand) / })).toBeNull();
+  expect(stack).toEqual(['Harness tree', 'Harness reference', 'Kept controls']);
   await user.click(display);
   expect(displayPopover()!.getAttribute('aria-label')).toBe('Display settings');
   expect(display.getAttribute('aria-pressed')).toBe('true');

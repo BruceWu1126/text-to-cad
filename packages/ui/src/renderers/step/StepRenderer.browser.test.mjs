@@ -270,8 +270,8 @@ test('a STEP opens in Select with the tools its sidecar earns, its Features in t
   const { page, pane, errors } = view;
   // Select's modes and Measure's snapping are each a chevron of their own right after the tool's
   // button, never pressed as a tool is.
-  assert.deepEqual(await view.tools(), ['Select:true', 'Select mode: All:null', 'Position:false', 'Animation:false', 'Draw:false', 'Measure:false',
-    'Measure snapping: All:null', 'Explode:false', 'Clip:false'],
+  assert.deepEqual(await view.tools(), ['Select:true', 'Select mode: All:null', 'Pencil:false', 'Pencil tool: Pen:null', 'Shapes:false', 'Shape: Line:null', 'Measure:false',
+    'Measure snapping: All:null', 'Explode:false', 'Clip:false', 'Position:false', 'Animation:false', 'Undo:false', 'Redo:false'],
     'Position because the sidecar bound, Animation because it has a routine. Display is a dropdown from the navbar, not a tool');
   assert.deepEqual(await pane.locator('[data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
     ['Display', 'Preview'], 'the view\'s controls at the navbar\'s right end: Display, then Preview');
@@ -672,7 +672,7 @@ test('hiding a part takes it off the screen, and the viewport menus offer what t
   }
   // The tree is Select's: under another tool it is off screen, and Select brings it back to act
   // from — Isolate, which has no selection of its own to make.
-  assert.deepEqual(await view.tools(), ['Select:false', 'Select mode: All:null', 'Position:false', 'Animation:false', 'Draw:true', 'Measure:false', 'Measure snapping: All:null', 'Explode:false', 'Clip:false']);
+  assert.deepEqual(await view.tools(), ['Select:false', 'Select mode: All:null', 'Pencil:true', 'Pencil tool: Pen:null', 'Shapes:false', 'Shape: Line:null', 'Measure:false', 'Measure snapping: All:null', 'Explode:false', 'Clip:false', 'Position:false', 'Animation:false', 'Undo:false', 'Redo:false']);
   assert.equal(await pane.getByRole('button', { name: 'Select arm', exact: true }).isVisible(), false);
   await view.tool('Select').click();
   // A menu goes when the camera moves, and the last pan is still coasting: it opens at rest.
@@ -680,7 +680,7 @@ test('hiding a part takes it off the screen, and the viewport menus offer what t
   await page.getByRole('menuitem', { name: 'Isolate', exact: true }).click();
   await page.getByRole('menu').waitFor({ state: 'detached' });
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().isolatedPartIds.join() === 'o1.2');
-  assert.deepEqual(await view.tools(), ['Select:true', 'Select mode: All:null', 'Position:false', 'Animation:false', 'Draw:false', 'Measure:false', 'Measure snapping: All:null', 'Explode:false', 'Clip:false']);
+  assert.deepEqual(await view.tools(), ['Select:true', 'Select mode: All:null', 'Pencil:false', 'Pencil tool: Pen:null', 'Shapes:false', 'Shape: Line:null', 'Measure:false', 'Measure snapping: All:null', 'Explode:false', 'Clip:false', 'Position:false', 'Animation:false', 'Undo:false', 'Redo:false']);
   await page.keyboard.press('Escape');
   assert.deepEqual(errors, []);
 });
@@ -768,10 +768,10 @@ test('Position drives the mate and repaints, a named pose jumps, the Position kn
   const { page, pane, errors } = view;
   // The grid is only the Grid preset's by default; this compares its lines, so it is turned on.
   await view.display({ grid: { enabled: true } });
-  // A file with movable joints has Position straight after Select (and Select's mode chevron) on
-  // the strip, and one with routines Animation after it.
-  assert.deepEqual((await pane.getByRole('group', { name: 'Interaction tools' }).locator('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')))).slice(0, 5),
-    ['Select', 'Select mode: All', 'Position', 'Animation', 'Pencil']);
+  // The model's own tools end the strip, before Undo and Redo: Position where the file has movable
+  // joints, then Animation where it has routines.
+  assert.deepEqual((await pane.getByRole('group', { name: 'Interaction tools' }).locator('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')))).slice(-4),
+    ['Position', 'Animation', 'Undo', 'Redo']);
   // Position shows its panel in the tool stack, in place of Select's, and enables the joint handles.
   await view.tool('Position').click();
   const panel = pane.getByRole('region', { name: 'Position controls', exact: true });

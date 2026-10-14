@@ -189,7 +189,8 @@ it('a clipboard destination has no snapshot in the navbar, and the Drawing panel
   expect(navigation.mock.calls.flatMap(([actions]) => actions)).toEqual([]);
   fireEvent.click(screen.getByRole('button', { name: 'Pencil' }));
   const controls = () => screen.getByRole('region', { name: 'Drawing controls' });
-  expect(within(controls()).queryByRole('button', { name: 'Copy drawing' })).toBeNull();
+  // No ink, no Drawing panel: nothing to copy or clear.
+  expect(screen.queryByRole('region', { name: 'Drawing controls' })).toBeNull();
   act(() => viewport.props.drawing.add([ink('a')]));
   fireEvent.click(within(controls()).getByRole('button', { name: 'Copy drawing' }));
   await waitFor(() => expect(writeImage).toHaveBeenCalledTimes(1));
@@ -234,13 +235,15 @@ it("Draw is two tools on the strip, Pencil and Shapes, each showing its last; Un
   const pressed = (name: string) => strip().getByRole('button', { name }).getAttribute('aria-pressed');
   expect([strip().getByRole('button', { name: 'Undo' }), strip().getByRole('button', { name: 'Redo' })].map(button => button.hasAttribute('disabled')))
     .toEqual([true, true]);
-  // Shapes opens on the ellipse; its menu has the rest, text last.
+  // Shapes opens on the line; its menu has the rest, text last, then what the next mark looks like.
   fireEvent.click(strip().getByRole('button', { name: 'Shapes' }));
-  expect([viewport.props.drawing.tool, pressed('Shapes'), pressed('Pencil')]).toEqual(['ellipse', 'true', 'false']);
-  fireEvent.pointerDown(strip().getByRole('button', { name: 'Shape: Ellipse' }), { button: 0, ctrlKey: false });
+  expect([viewport.props.drawing.tool, pressed('Shapes'), pressed('Pencil')]).toEqual(['line', 'true', 'false']);
+  fireEvent.pointerDown(strip().getByRole('button', { name: 'Shape: Line' }), { button: 0, ctrlKey: false });
   await screen.findByRole('menuitemradio', { name: 'Text' });
   const menu = screen.getByRole('menu');
-  expect(within(menu).getAllByRole('menuitemradio').map(item => item.textContent)).toEqual(['Ellipse', 'Rectangle', 'Line', 'Arrow', 'Text']);
+  expect(within(menu).getAllByRole('menuitemradio').map(item => item.textContent)).toEqual(['Line', 'Arrow', 'Rectangle', 'Ellipse', 'Text']);
+  expect(within(menu).getAllByRole('menuitem').map(item => item.getAttribute('aria-label')))
+    .toEqual(['Color: Neon red', 'Stroke width: Medium', 'Line style: Solid', 'Placement: On model']);
   fireEvent.click(within(menu).getByRole('menuitemradio', { name: 'Text' }));
   expect(viewport.props.drawing.tool).toBe('text');
   // The pencil, and back to Shapes: still the text.

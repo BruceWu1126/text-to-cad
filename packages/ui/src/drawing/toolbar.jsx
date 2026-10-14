@@ -1,6 +1,7 @@
-import { Axis3d, Box, ChevronDown, Circle, Eraser, Minus, MoveUpRight, Pencil, Square, Type } from 'lucide-react';
+import { Axis3d, Box, ChevronDown, Circle, Eraser, MoveUpRight, Pencil, Slash, Square, Type } from 'lucide-react';
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger
+  DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSub, DropdownMenuSubContent,
+  DropdownMenuSubTrigger, DropdownMenuTrigger
 } from '@text-to-cad/ui/primitives/dropdown-menu';
 import { ToolbarButton } from '@text-to-cad/ui/primitives/toolbar-button';
 import { cn } from '@text-to-cad/ui/utils';
@@ -9,9 +10,9 @@ import { FLOATING_SURFACE_CLASS } from '../lib/floatingSurface.js';
 /**
  * Draw's tools, two families the strip shows as two tools (`DRAWING_PENCIL_TOOLS`,
  * `DRAWING_SHAPE_TOOLS`), and the colour, weight and line style of what is drawn next and where it
- * is drawn (on the model or in space), all the drawing session's (`session.js`). The same colour,
- * weight and line style dropdowns (`InkStylePickers`) restyle the ink Select has picked, on its
- * selection's bar.
+ * is drawn (on the model or in space), all the drawing session's (`session.js`): submenus of each
+ * tool's menu (`InkStyleSubmenus`). The colour, weight and line style dropdowns (`InkStylePickers`)
+ * restyle the ink Select has picked, on its selection's bar.
  */
 
 /**
@@ -25,13 +26,13 @@ export const DRAWING_PENCIL_TOOLS = [
   { id: 'freedraw', label: 'Pen', Icon: Pencil },
   { id: 'eraser', label: 'Eraser', Icon: Eraser },
 ];
-// The Shapes' family: the ellipse first, what it opens on; text with them, a mark put down in place.
+// The Shapes' family: the line first, what it opens on; text with them, a mark put down in place.
 /** @type {readonly DrawingToolEntry[]} */
 export const DRAWING_SHAPE_TOOLS = [
-  { id: 'ellipse', label: 'Ellipse', Icon: Circle },
-  { id: 'rectangle', label: 'Rectangle', Icon: Square },
-  { id: 'line', label: 'Line', Icon: Minus },
+  { id: 'line', label: 'Line', Icon: Slash },
   { id: 'arrow', label: 'Arrow', Icon: MoveUpRight },
+  { id: 'rectangle', label: 'Rectangle', Icon: Square },
+  { id: 'ellipse', label: 'Ellipse', Icon: Circle },
   { id: 'text', label: 'Text', Icon: Type },
 ];
 /** @type {readonly DrawingTool[]} */
@@ -117,8 +118,7 @@ function StyleMenu({ label, options, value, glyph, onChange, disabled }) {
 const colorGlyph = color => <span className="size-3 rounded-full" style={swatch(color)} aria-hidden="true" />;
 
 /**
- * The colour, weight and line style dropdowns (`StyleMenu`) — what is drawn next in Draw's panel,
- * the ink picked on its selection's bar. Each is left out where it has nothing to set (`width`/`dash`
+ * The colour, weight and line style dropdowns (`StyleMenu`) — the ink picked, on its selection's bar. Each is left out where it has nothing to set (`width`/`dash`
  * null: no stroke picked); `placement` only where Draw puts ink down. `children` follow them on
  * their row.
  *
@@ -142,15 +142,34 @@ export function InkStylePickers({ color, width = null, dash = null, placement = 
 }
 
 /**
- * Draw's panel: what is drawn next — its colour, weight, line style and placement. Its tools are
- * the strip's, Pencil and Shapes (`useRendererShell.js`).
- * @param {{ drawing: import('./session.js').DrawingSession, className?: string }} props
+ * What the next mark looks like, as submenus of a Draw tool's menu (its chevron on the strip), after
+ * its tools, as a drawing app's tool flyout has them: Color, Stroke width, Line style (shapes'
+ * only: the pen's freehand ink is always solid) and Placement, each its name, the value in hand at
+ * the right against the chevron, and a radio list of glyphs and names. One choice is a setting of
+ * the session's for every tool, never a restyle of ink already down.
+ * @param {{ drawing: import('./session.js').DrawingSession, lineStyle?: boolean }} props
  */
-export function DrawingToolbar({ drawing, className = '' }) {
-  const disabled = !drawing.ready;
-  return <div className={`text-to-cad-drawing-toolbar ${className}`} data-drawing-controls="">
-    <InkStylePickers label="Drawing settings" disabled={disabled} color={drawing.color} width={drawing.strokeWidth ?? 2}
-      dash={drawing.strokeStyle ?? 'solid'} placement={drawing.placement ?? 'surface'} onColor={drawing.selectColor}
-      onWidth={drawing.selectStrokeWidth} onDash={drawing.selectStrokeStyle} onPlacement={drawing.selectPlacement} />
-  </div>;
+export function InkStyleSubmenus({ drawing, lineStyle = false }) {
+  const submenu = (label, options, value, glyph, onChange) => {
+    const current = options.find(option => option.value === value) ?? options[0];
+    return <DropdownMenuSub key={label}>
+      <DropdownMenuSubTrigger aria-label={`${label}: ${current.label}`} className="[&>svg:last-child]:ml-0 [&>svg:last-child]:size-3">
+        {label}<span className="ml-auto grid size-3.5 place-items-center text-muted-foreground">{glyph(current.value)}</span>
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent aria-label={label} className={cn(FLOATING_SURFACE_CLASS, 'w-40 data-[state=closed]:animate-none!')}>
+        <DropdownMenuRadioGroup value={String(current.value)}
+          onValueChange={next => onChange(options.find(option => String(option.value) === next).value)}>
+          {options.map(option => <DropdownMenuRadioItem key={option.value} value={String(option.value)} aria-label={option.label}>
+            <span className="grid size-3.5 place-items-center">{glyph(option.value)}</span>{option.label}
+          </DropdownMenuRadioItem>)}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>;
+  };
+  return <>
+    {submenu('Color', DRAWING_COLORS, drawing.color.toLowerCase(), colorGlyph, drawing.selectColor)}
+    {submenu('Stroke width', DRAWING_STROKE_WIDTHS, drawing.strokeWidth ?? 2, strokeGlyph, drawing.selectStrokeWidth)}
+    {lineStyle ? submenu('Line style', DRAWING_STROKE_STYLES, drawing.strokeStyle ?? 'solid', styleGlyph, drawing.selectStrokeStyle) : null}
+    {submenu('Placement', DRAWING_PLACEMENTS, drawing.placement ?? 'surface', placementGlyph, drawing.selectPlacement)}
+  </>;
 }

@@ -26,11 +26,12 @@ were drawn from every angle. The STEP renderer is the one that offers Draw
   `animation: {clip, time}`), the parts hidden and isolated, and the picture's
   size. Never how it looks.
 - `drawing/toolbar.jsx` — the two families of tools the strip shows as Pencil
-  and Shapes (`DRAWING_PENCIL_TOOLS`: pen, eraser; `DRAWING_SHAPE_TOOLS`: ellipse,
-  rectangle, line, arrow, text), and `DrawingToolbar`, the Drawing panel: the
-  Color, Stroke width, Line style and Placement (On model, the default, or In
-  space) dropdowns (`InkStylePickers`, which the selection's bar shares). The
-  swatches are neon, so ink stands out from a shaded model.
+  and Shapes (`DRAWING_PENCIL_TOOLS`: pen, eraser; `DRAWING_SHAPE_TOOLS`: line,
+  arrow, rectangle, ellipse, text); `InkStyleSubmenus`, what is drawn next as
+  submenus at the end of each tool's menu: Color, Stroke width, Line style (the
+  shapes') and Placement (On model, the default, or In space); and
+  `InkStylePickers`, the selection bar's Color, Stroke width and Line style
+  dropdowns. The swatches are neon, so ink stands out from a shaded model.
 - `renderers/kit/tools/draw/InkSelectionBar.jsx` — the bar over the ink Select
   picked: its colour, weight and line style, Fill for a closed shape (seeded
   inside its outline as it falls on the screen, `inkGeometry.js`'s

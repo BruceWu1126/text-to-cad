@@ -5,7 +5,7 @@ import { VIEWER_SCENE_SCALE } from "@text-to-cad/core/lib/viewer/sceneScale.js";
 import { ViewerElementContext, useViewerHost, usePromptDestination } from "../../../host/context.js";
 import { hasOpenPopup } from "../../../lib/popups.js";
 import { useDrawingSession } from "../../../drawing/session.js";
-import { DRAWING_PENCIL_TOOLS, DRAWING_SHAPE_TOOLS } from "../../../drawing/toolbar.jsx";
+import { DRAWING_PENCIL_TOOLS, DRAWING_SHAPE_TOOLS, InkStyleSubmenus } from "../../../drawing/toolbar.jsx";
 import ToolModeMenu from "../tools/ToolModeMenu.jsx";
 import { useViewerHistory } from "./useViewerHistory.js";
 import { promptView, promptViews } from "../../../drawing/views.js";
@@ -659,8 +659,8 @@ export function useRendererShell({
     own: stripTool,
     // Draw's two families, Pencil (the pen, the eraser) and Shapes (the ellipse, rectangle, line,
     // arrow and text), each a tool of the strip showing the one of it last taken up, the others in
-    // its chevron's menu. Either takes Draw up, whose colour, weight, line style and placement are a
-    // panel in the tool stack (`RendererShell.jsx`).
+    // its chevron's menu, and after them what the next mark looks like, as submenus: colour, weight,
+    // line style (Shapes only) and placement.
     draw: [["pencil", "Pencil", "Pencil tool", DRAWING_PENCIL_TOOLS, drawing.pencil],
       ["shapes", "Shapes", "Shape", DRAWING_SHAPE_TOOLS, drawing.shape]].map(([id, label, menuLabel, family, last]) => {
       const current = family.find(entry => entry.id === last) ?? family[0];
@@ -670,7 +670,9 @@ export function useRendererShell({
         onSelect: () => take(current.id),
         menu: <ToolModeMenu label={menuLabel} trigger="chevron" disabled={idle} value={current.id} onChange={take}
           modes={family.map(({ id: mode, label: name, Icon }) => ({ id: mode, label: name,
-            icon: <Icon className="size-3.5" strokeWidth={2} aria-hidden="true" /> }))} /> });
+            icon: <Icon className="size-3.5" strokeWidth={2} aria-hidden="true" /> }))}>
+          <InkStyleSubmenus drawing={drawing} lineStyle={id === "shapes"} />
+        </ToolModeMenu> });
     }),
     // The file view's one history (`useViewerHistory.js`), last on the strip, always there and
     // disabled while there is nothing for it.

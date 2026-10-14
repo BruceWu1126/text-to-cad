@@ -14,7 +14,6 @@ import { VIEWER_RENDER_PROFILE, renderProfileKeepsPixelRatio, sceneForRenderProf
 import { NAVBAR_CONTROL_CLASS } from "../../../lib/navbarRow.js";
 import DisplayPopover from "./DisplayPopover.jsx";
 import ToolPanel, { TOOL_PANEL_BUTTON_CLASS } from "../tools/ToolPanel.jsx";
-import { DrawingToolbar } from "../../../drawing/toolbar.jsx";
 import { withGroups } from "../../../drawing/inkGeometry.js";
 import { useCopyFlash } from "../inspector/copyFlash.js";
 import PlaybackMenu, { OrbitMenu, RoutineMenu } from "../tools/PlaybackMenu.jsx";
@@ -229,21 +228,18 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
     if (wasHeld.current && !routineHeld) putDownRef.current?.();
     wasHeld.current = routineHeld;
   }, [routineHeld]);
-  // The shell's own tools' panels lead the stack while their tool is up: Draw's tools, color and
-  // history, or the Animation tool's routine, transport and settings, whose X puts it down, back to
+  // The shell's own tools' panels lead the stack while their tool is up: the Animation tool's
+  // routine, transport and settings, whose X puts it down, back to
   // the default tool -- no X where Animation is the file's one tool, never put down. A routine's
   // frame kept with the tool down is one line, its X back to rest. The renderer's follow.
-  // The drawing: one sketch, its ink in the model from every angle. Headed "Drawing", with its Copy
-  // (a picture of the view, ink and all) and, while there is ink, the X that clears it: Draw's
-  // controls under it while Draw is the tool, and the heading alone, kept, while it is not and there
-  // is ink — as Measure's panel is kept with its results.
-  const drawingShown = frame.drawToolActive || frame.drawing.hasDrawing;
+  // The drawing: one sketch, its ink in the model from every angle. While there is ink, a heading
+  // alone, "Drawing", with its Copy (a picture of the view, ink and all) and the X that clears it —
+  // as Measure's panel is kept with its results. What the next mark looks like is the Draw tools'
+  // menus' (`drawing/toolbar.jsx`'s `InkStyleSubmenus`), never a panel.
   const shellPanels = <>
-    {drawingShown ? <ToolPanel id="drawing" title="Drawing" label="Drawing controls" collapsible={false} lead={frame.drawToolActive}
-      actions={frame.drawing.hasDrawing ? <CopyDrawingButton capture={frame.captureView} disabled={viewerLoading || !scene} /> : null}
-      closeLabel="Clear drawing" onClose={frame.drawing.hasDrawing ? frame.drawing.clear : null}>
-      {frame.drawToolActive ? <DrawingToolbar drawing={frame.drawing} className="p-1" /> : null}
-    </ToolPanel> : null}
+    {frame.drawing.hasDrawing ? <ToolPanel id="drawing" title="Drawing" label="Drawing controls" collapsible={false} lead={frame.drawToolActive}
+      actions={<CopyDrawingButton capture={frame.captureView} disabled={viewerLoading || !scene} />}
+      closeLabel="Clear drawing" onClose={frame.drawing.clear} /> : null}
     {frame.animateToolActive ? <AnimationPanel runtime={playbackRuntime} autoplay={shell.autoplay}
       onAutoplayChange={shell.setAutoplay} onClose={frame.animateToolFixed ? null : shell.selectDefaultTool}
       disabled={viewerLoading || !scene} /> : null}

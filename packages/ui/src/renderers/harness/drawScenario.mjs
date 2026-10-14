@@ -32,9 +32,13 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   const viewport = pane.locator('[aria-busy] > div > canvas').first();
   const panel = pane.locator('[data-tool-panel][aria-label="Drawing controls"]');
   const strip = pane.getByRole('group', { name: 'Interaction tools' });
-  const settings = panel.getByRole('group', { name: 'Drawing settings' });
   const tool = name => strip.getByRole('button', { name, exact: true });
-  const setting = name => settings.getByRole('button', { name, exact: true });
+  // A setting of what is drawn next, from a submenu of the Pencil's menu.
+  const choose = async (submenu, name) => {
+    await strip.getByRole('button', { name: /^Pencil tool: / }).click();
+    await page.getByRole('menuitem', { name: new RegExp(`^${submenu}: `) }).click();
+    await page.getByRole('menuitemradio', { name, exact: true }).click();
+  };
   // A shape from the Shapes' menu, which takes Draw up on it.
   const shape = async name => {
     await strip.getByRole('button', { name: /^Shape: / }).click();
@@ -74,12 +78,12 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   await page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
   await until('no ink before Draw', seen => seen.red < NONE && seen.green < NONE);
 
-  // The Pencil opens on the pen; Draw's panel holds what is drawn next.
+  // The Pencil opens on the pen, with no panel of its own: what is drawn next is its menu's.
   await draw.click();
   const surface = pane.locator('[data-cad-drawing-overlay]');
   await surface.waitFor();
   assert.equal(await draw.getAttribute('aria-pressed'), 'true', 'the Pencil is the tool');
-  assert.deepEqual(await names(settings), ['Color', 'Stroke width', 'Line style', 'Placement']);
+  assert.equal(await panel.count(), 0, 'no Drawing panel before there is ink');
   const copy = panel.getByRole('button', { name: 'Copy drawing', exact: true });
   assert.equal(await copy.count(), 0, 'nothing to copy before there is ink');
   // Across the middle of the view, clear of the tool stack at its left and Quick Edit at its right.
@@ -118,8 +122,7 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   await until('Redo brings it back', seen => seen.red > 50 && Math.hypot(seen.x - orbited.x, seen.y - orbited.y) < 10);
 
   // Another colour for what is drawn next: a green rectangle beside the red stroke. Clear takes it all.
-  await setting('Color').click();
-  await page.getByRole('menuitemradio', { name: 'Neon green', exact: true }).click();
+  await choose('Color', 'Neon green');
   await shape('Rectangle');
   await drag(at(-60, -120), at(60, -40));
   await until('a green rectangle beside the red', seen => seen.green > 100 && seen.red > 50);

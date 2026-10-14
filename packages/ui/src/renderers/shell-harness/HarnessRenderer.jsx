@@ -212,7 +212,7 @@ function HarnessSurface({ view, data }) {
     contextMenuItems={contextMenuItems} onContextMenuOpenChange={setMenuUp}
     frameProvider={frame => <HarnessFrameContext.Provider value={`frame:${stage}`}>{frame}</HarnessFrameContext.Provider>}
     onCanvasPointerDown={() => setPutDown(`put down @${stage}`)}
-    viewportOverlay={viewport => <div className="pointer-events-none absolute left-2 top-2 z-30 text-xs" data-harness-overlay>
+    viewportOverlay={viewport => <div className="pointer-events-none absolute bottom-2 right-2 z-30 text-xs" data-harness-overlay>
       <span data-harness-camera-settles>{settleLabel}</span>
       <span data-harness-menu-note>{picked}</span>
       <span data-harness-menu-open>{menuUp ? "up" : ""}</span>

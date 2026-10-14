@@ -3223,16 +3223,6 @@ function StepSurfaceBody({ view, data }) {
       menu: selectModeMenu,
       onSelect: () => handleSelectTabToolMode(TAB_TOOL_MODE.REFERENCES),
     }),
-    // Position comes straight after Select; only files with movable joints offer it.
-    poseAvailable ? shell.tools.own({ id: TAB_TOOL_MODE.POSE, label: "Position",
-      icon: <PositionToolIcon />,
-      // Lit while it is the tool alone: a pose it set is kept in the stack (the kept Position panel).
-      active: poseToolActive,
-      disabled: toolIdle,
-      // Its panel is in the tool stack for as long as it is the tool.
-      onSelect: () => { if (!poseToolActive) handleSelectTabToolMode(TAB_TOOL_MODE.POSE); } }) : null,
-    // Animation follows Position; only files with routines offer it. Its panel is the shell's.
-    shell.tools.animate ? { ...shell.tools.animate, disabled: toolIdle } : null,
     ...shell.tools.draw.map(tool => ({ ...tool, disabled: toolIdle })),
     shell.tools.own({ id: TAB_TOOL_MODE.MEASURE, label: "Measure",
       // Like Select's, the button shows the snapping mode in hand.
@@ -3243,6 +3233,16 @@ function StepSurfaceBody({ view, data }) {
       menu: measureModeMenu,
       onSelect: () => { if (tabToolMode !== TAB_TOOL_MODE.MEASURE) handleSelectTabToolMode(TAB_TOOL_MODE.MEASURE); } }),
     ...modelEffects.tools,
+    // The model's own tools, after the viewer's: Position, only where the file has movable joints
+    poseAvailable ? shell.tools.own({ id: TAB_TOOL_MODE.POSE, label: "Position",
+      icon: <PositionToolIcon />,
+      // Lit while it is the tool alone: a pose it set is kept in the stack (the kept Position panel).
+      active: poseToolActive,
+      disabled: toolIdle,
+      // Its panel is in the tool stack for as long as it is the tool.
+      onSelect: () => { if (!poseToolActive) handleSelectTabToolMode(TAB_TOOL_MODE.POSE); } }) : null,
+    // and Animation, only where it has routines (its panel is the shell's).
+    shell.tools.animate ? { ...shell.tools.animate, disabled: toolIdle } : null,
     ...shell.tools.history,
   ].filter(Boolean);
 
