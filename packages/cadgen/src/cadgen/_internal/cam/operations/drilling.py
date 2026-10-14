@@ -62,7 +62,7 @@ from typing import TYPE_CHECKING
 
 from cadgen._internal.cam.operations.base import OperationBase, ParseContext, PlanError, finding
 from cadgen._internal.cam.operations.common import mm
-from cadgen._internal.cam.values import choice, known, number
+from cadgen._internal.cam.values import an, choice, known, number
 
 if TYPE_CHECKING:
     from cadgen._internal.cam.features import SetupFeature
@@ -185,12 +185,12 @@ class _HoleOperation(OperationBase):
         suited = [(ref, found) for ref, found in reached if self.unsuited(params, ctx, found) is None]
         if not suited:
             sizes = ", ".join(f"{ref} {found.feature.size['diameter_mm']:g} mm" for ref, found in reached) or "none"
-            raise PlanError("empty_operation", f"{ctx.where}.all: no hole setup {ctx.setup.setup.id} reaches suits "
-                            f"{ctx.tool.id} ({self._tool_words(ctx)}); holes reached: {sizes}")
+            raise PlanError("empty_operation", f"{ctx.where}.all: none of the holes setup {ctx.setup.setup.id} reaches "
+                            f"suits {ctx.tool.id} ({self._tool_words(ctx)}); holes reached: {sizes}")
         return suited
 
     def _tool_words(self, ctx: "PlanContext") -> str:
-        return f"a {ctx.tool.diameter_mm:g} mm {ctx.tool.type.replace('_', ' ')}"
+        return f"{an(format(ctx.tool.diameter_mm, 'g'))} mm {ctx.tool.type.replace('_', ' ')}"
 
     def unsuited(self, params: HoleParams, ctx: "PlanContext", found: "SetupFeature") -> tuple[str, str] | None:
         """Why the tool does not suit the hole, ``(kind, sentence)`` (the kind a PlanError takes:
@@ -198,7 +198,7 @@ class _HoleOperation(OperationBase):
         hole = found.feature.size["diameter_mm"]
         tool = float(ctx.tool.diameter_mm)
         if abs(tool - hole) > params.diameter_tol_mm + 1e-9:
-            return TOOL_TOO_LARGE, (f"is a {hole:g} mm hole, and {ctx.tool.id} is {self._tool_words(ctx)}: more than "
+            return TOOL_TOO_LARGE, (f"is {an(format(hole, 'g'))} mm hole, and {ctx.tool.id} is {self._tool_words(ctx)}: more than "
                     f"diameter_tol_mm ({params.diameter_tol_mm:g} mm) {'over' if tool > hole else 'under'} it")
         return None
 
@@ -251,10 +251,10 @@ class _HoleOperation(OperationBase):
         if params.kind == "back_bore":
             if tip <= r + _EPS:
                 raise PlanError("empty_operation", f"{ctx.where}: {ref} has nothing to cut: the back bore's top "
-                                f"z {tip:g} is not over its R plane z {r:g}")
+                                f"at z {tip:g} is not above the R plane it cuts up from, at z {r:g}")
         elif tip >= r - _EPS:
-            raise PlanError("empty_operation", f"{ctx.where}: {ref} has nothing to cut: its depth z {tip:g} is not "
-                            f"under the R plane z {r:g}")
+            raise PlanError("empty_operation", f"{ctx.where}: {ref} has nothing to cut: its bottom at z {tip:g} is not "
+                            f"below the R plane the cycle feeds down from, at z {r:g}")
         kind = params.kind
         dwell = params.dwell_s
         if kind == "drill" and dwell:
@@ -381,7 +381,7 @@ class SpotDrillOperation(_HoleOperation):
                              "depth_mm (below the opening), not both")
         spot = mm(raw, "spot_diameter_mm", ctx.where)
         if spot is not None and spot > float(ctx.tool.diameter_mm) + 1e-9:
-            raise ValueError(f"{ctx.where}.spot_diameter_mm: a {spot:g} mm spot is wider than {ctx.tool.id}'s "
+            raise ValueError(f"{ctx.where}.spot_diameter_mm: {an(format(spot, 'g'))} mm spot is wider than {ctx.tool.id}'s "
                              f"{ctx.tool.diameter_mm:g} mm")
         return HoleParams("spot", depth_mm=mm(raw, "depth_mm", ctx.where),
                           dwell_s=mm(raw, "dwell_s", ctx.where, DEFAULT_DWELL_S, zero=True), spot_diameter_mm=spot)
@@ -397,7 +397,7 @@ class SpotDrillOperation(_HoleOperation):
     def unsuited(self, params: HoleParams, ctx: "PlanContext", found: "SetupFeature") -> tuple[str, str] | None:
         spot = self._spot(params, found)
         if spot is not None and spot > float(ctx.tool.diameter_mm) + 1e-9:
-            return TOOL_TOO_LARGE, (f"wants a {spot:g} mm spot, wider than {ctx.tool.id}'s {ctx.tool.diameter_mm:g} mm; give "
+            return TOOL_TOO_LARGE, (f"wants {an(format(spot, 'g'))} mm spot, wider than {ctx.tool.id}'s {ctx.tool.diameter_mm:g} mm; give "
                     "spot_diameter_mm or depth_mm")
         return None
 
@@ -411,7 +411,7 @@ class SpotDrillOperation(_HoleOperation):
             depth = spot / 2 / math.tan(math.radians(angle) / 2)
         deepest = found.bottom[2] - float(found.feature.size.get("point_mm", 0.0))
         if not found.feature.size.get("through") and top - depth < deepest - _EPS:
-            raise PlanError("too_deep", f"{ctx.where}: a {depth:g} mm deep spot goes past the bottom of {ref}")
+            raise PlanError("too_deep", f"{ctx.where}: {an(format(depth, 'g'))} mm deep spot goes past the bottom of {ref}")
         stats = {"spot_depth_mm": round(depth, 6)}
         if spot is not None:
             stats["spot_diameter_mm"] = round(spot, 6)
@@ -426,14 +426,14 @@ class TapOperation(_HoleOperation):
     tol_default = TAP_DIAMETER_TOL_MM
 
     def _tool_words(self, ctx):
-        return f"a {ctx.tool.diameter_mm:g} x {ctx.tool.size['pitch_mm']:g} mm tap"
+        return f"{an(format(ctx.tool.diameter_mm, 'g'))} x {ctx.tool.size['pitch_mm']:g} mm tap"
 
     def unsuited(self, params, ctx, found):
         hole = found.feature.size["diameter_mm"]
         major = float(ctx.tool.diameter_mm)
         drill = major - float(ctx.tool.size["pitch_mm"])
         if min(abs(hole - major), abs(hole - drill)) > params.diameter_tol_mm + 1e-9:
-            return TOOL_TOO_LARGE, (f"is a {hole:g} mm hole, and {ctx.tool.id} is {self._tool_words(ctx)}: the hole is neither its "
+            return TOOL_TOO_LARGE, (f"is {an(format(hole, 'g'))} mm hole, and {ctx.tool.id} is {self._tool_words(ctx)}: the hole is neither its "
                     f"major diameter nor its {drill:g} mm tap drill within diameter_tol_mm "
                     f"({params.diameter_tol_mm:g} mm)")
         return None
@@ -513,12 +513,12 @@ class CounterboreOperation(_HoleOperation):
         bore = float(found.feature.size["counterbore"]["diameter_mm"])
         tool = float(ctx.tool.diameter_mm)
         if abs(tool - bore) > params.diameter_tol_mm + 1e-9:
-            return TOOL_TOO_LARGE, (f"has a {bore:g} mm counterbore, and {ctx.tool.id} is {self._tool_words(ctx)}: more than "
+            return TOOL_TOO_LARGE, (f"has {an(format(bore, 'g'))} mm counterbore, and {ctx.tool.id} is {self._tool_words(ctx)}: more than "
                     f"diameter_tol_mm ({params.diameter_tol_mm:g} mm) {'over' if tool > bore else 'under'} it")
         pilot = ctx.tool.size.get("pilot_diameter_mm")
         hole = float(found.feature.size["diameter_mm"])
         if self.side == "near" and pilot is not None and float(pilot) > hole + 1e-9:
-            return TOOL_TOO_LARGE, f"is a {hole:g} mm hole, too small for {ctx.tool.id}'s {float(pilot):g} mm pilot"
+            return TOOL_TOO_LARGE, f"is {an(format(hole, 'g'))} mm hole, too small for {ctx.tool.id}'s {float(pilot):g} mm pilot"
         return None
 
     def tip_z(self, params, ctx, ref, found):
@@ -560,7 +560,7 @@ class BackBoreOperation(CounterboreOperation):
         hole, tool = float(found.feature.size["diameter_mm"]), float(ctx.tool.diameter_mm)
         least = (tool - hole) / 2 + BACK_BORE_PASS_MM
         if params.shift_mm < least - 1e-9 or params.shift_mm >= hole / 2:
-            return TOOL_TOO_LARGE, (f"is a {hole:g} mm hole: {ctx.tool.id}'s {tool:g} mm head passes through it shifted at least "
+            return TOOL_TOO_LARGE, (f"is {an(format(hole, 'g'))} mm hole: {ctx.tool.id}'s {tool:g} mm head passes through it shifted at least "
                     f"{least:g} mm and under {hole / 2:g} mm off centre, not shift_mm {params.shift_mm:g}")
         return None
 

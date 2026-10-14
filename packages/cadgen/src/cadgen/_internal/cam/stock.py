@@ -25,6 +25,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from cadgen._internal.cam.values import an
+
 __all__ = ["Bounds", "StockSolid", "bounds_of", "make_stock", "occ_shape"]
 
 #: ``((x_min, y_min, z_min), (x_max, y_max, z_max))``, mm.
@@ -189,7 +191,7 @@ def make_stock(stock, part: Any) -> StockSolid:
         mx, my = stock.margin_mm or (0.0, 0.0)
         thickness = stock.thickness_mm if stock.thickness_mm is not None else pz1 - pz0
         if thickness < pz1 - pz0 - _CONTAIN_MM:
-            raise ValueError(f"stock.thickness_mm: a {thickness:g} mm sheet is thinner than the part's "
+            raise ValueError(f"stock.thickness_mm: {an(format(thickness, 'g'))} mm sheet is thinner than the part's "
                              f"{pz1 - pz0:g} mm")
         low = (_clean(px0 - mx), _clean(py0 - my), _clean(pz0))
         high = (_clean(px1 + mx), _clean(py1 + my), _clean(pz0 + thickness))
@@ -224,7 +226,7 @@ def _cylinder_stock(stock, part: Any, part_bounds: Bounds) -> StockSolid:
     if stock.diameter_mm is not None:
         radius = stock.diameter_mm / 2
         if radius < need - _CONTAIN_MM:
-            raise ValueError(f"stock.diameter_mm: a {stock.diameter_mm:g} mm bar does not hold the part, which needs "
+            raise ValueError(f"stock.diameter_mm: {an(format(stock.diameter_mm, 'g'))} mm bar does not hold the part, which needs "
                              f"{2 * need:.3f} mm about its centre line along {axis}")
     else:
         radius = need + radial

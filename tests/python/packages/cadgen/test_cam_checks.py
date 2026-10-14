@@ -155,15 +155,15 @@ class MachineAndFixture(Words, unittest.TestCase):
     def test_one_clamp_per_tool_lists_its_operations(self):
         rpm = of(self.result, "rpm_clamped")
         self.assertEqual([f["items"][0]["tool"] for f in rpm], ["T1", "T2"])
-        self.assertEqual(rpm[0]["summary"], "T1 runs at the machine's top speed of 10,000 rpm, under the 21,221 rpm "
-                                            "the material and tool call for, in 3 operations: operations[0] (facing), "
-                                            "operations[1] (pocket_2d), operations[2] (contour_2d)")
+        self.assertEqual(rpm[0]["summary"], "operations[0] (facing), operations[1] (pocket_2d) and operations[2] "
+                                            "(contour_2d): T1 is capped at the machine's 10,000 rpm; the tool and "
+                                            "material call for 21,221 rpm, so the cut runs slower at the same chip load")
         self.assertEqual([i["operation"] for i in rpm[0]["items"]], [0, 1, 2])
         self.assertEqual(len(of(self.result, "feed_clamped")), 2)
 
     def test_long_stickout(self):
         [found] = of(self.result, "long_stickout")
-        self.assertEqual(found["summary"], "T1 sticks out 26 mm, 4.3 times its 6 mm diameter: it will bend and chatter")
+        self.assertEqual(found["summary"], "T1 sticks out 26 mm, 4.3 times its 6 mm diameter: expect it to deflect and chatter")
         self.assertIn("The stickout is assumed", found["description"])
 
 
@@ -270,7 +270,7 @@ class CuttingFaults(Words, unittest.TestCase):
     def test_full_slot(self):
         [found] = of(self.result, "full_slot")
         self.assertRegex(found["summary"], r"^operations\[1\] \(pocket_2d\): T8 cuts [\d.]+ mm at its full width, "
-                                           r"every flute in the cut at once$")
+                                           r"as in a slot$")
 
     def test_too_deep_and_the_holder_in_the_stock(self):
         [deep] = of(self.result, "too_deep")
@@ -279,7 +279,7 @@ class CuttingFaults(Words, unittest.TestCase):
         [holder] = of(self.result, "holder_collision")
         self.assertRegex(holder["summary"], r"^operations\[2\] \(pocket_2d\): T7's holder comes down into the stock near "
                                             r"X\S+ Y\S+ Z\S+ \(setup top\), below the top of the material at Z0$")
-        self.assertIn("Phase 1 does not simulate the stock", holder["description"])
+        self.assertIn("cadgen does not simulate the stock yet", holder["description"])
 
     def test_uncut_features_name_the_setups_that_reach_them(self):
         summaries = [f["summary"] for f in of(self.result, "uncut_feature")]

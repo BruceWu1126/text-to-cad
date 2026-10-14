@@ -56,7 +56,7 @@ class StockTests(unittest.TestCase):
         self.assertEqual((bar.diameter_mm, bar.bounds[0][:2]), (25, (-7.5, -7.5)))
         across_x = make_stock(Stock("cylinder", (0.0, 0.0), axis="X"), plate())
         self.assertAlmostEqual(across_x.diameter_mm, 2 * math.hypot(30, 5), places=5)
-        with self.assertRaisesRegex(ValueError, "stock.diameter_mm: a 18 mm bar does not hold the part"):
+        with self.assertRaisesRegex(ValueError, "stock.diameter_mm: an 18 mm bar does not hold the part"):
             make_stock(Stock("cylinder", (0.0, 0.0), diameter_mm=18), shaft)
         with self.assertRaisesRegex(ValueError, "a 60 mm bar does not hold the part, which needs 60.828 mm about its "
                                                 "centre line along X"):

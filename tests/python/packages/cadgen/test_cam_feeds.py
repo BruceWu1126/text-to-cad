@@ -57,8 +57,14 @@ class FeedsTest(unittest.TestCase):
         self.assertAlmostEqual(feeds.feed_mm_min, 12000 * 3 * feeds.chipload_mm)
         (found,) = feeds.findings
         self.assertEqual((found["severity"], found["type"]), ("warning", "rpm_clamped"))
-        self.assertIn("12,000 rpm", found["summary"])
+        self.assertEqual(found["summary"], "operations[0]: T1 is capped at the machine's 12,000 rpm; the tool and material "
+                                           "call for 21,221 rpm, so the cut runs slower at the same chip load")
         self.assertNotIn("\u2014", found["summary"] + found["description"])
+        # A feed over the machine's limit says what it was and what that does to the chip.
+        (fed,) = feeds_for(ENDMILL, AL, Machine("mill", 3, "grbl", max_feed_mm_min=1000)).findings
+        self.assertEqual(fed["summary"], "T1 is capped at the machine's 1,000 mm/min; the tool and material call for a "
+                                         "2,547 mm/min feed, so the cut runs slower with a thinner chip")
+        self.assertIn("set a lower rpm on the operation", fed["description"])
 
     def test_an_override_wins_and_is_still_clamped(self):
         feeds = feeds_for(ENDMILL, AL, MILL, rpm=40000, feed_mm_min=15000)

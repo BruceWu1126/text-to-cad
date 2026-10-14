@@ -10,7 +10,7 @@ import json
 import math
 from typing import Any
 
-__all__ = ["choice", "flag", "json_text", "known", "number", "obj", "selectors", "whole", "words"]
+__all__ = ["an", "choice", "flag", "json_text", "known", "number", "obj", "selectors", "whole", "words"]
 
 
 def json_text(value: Any) -> str:
@@ -19,6 +19,14 @@ def json_text(value: Any) -> str:
         return json.dumps(value, ensure_ascii=False)
     except (TypeError, ValueError):
         return repr(value)
+
+
+def an(number: str) -> str:
+    """A number as a sentence says it after "a": ``a 6``, but ``an 8``, ``an 11``, ``an 18,000`` (said "an eight",
+    "an eleven", "an eighteen thousand")."""
+    digits = str(number).split(".")[0].replace(",", "")
+    vowel = digits.startswith("8") or (digits[:2] in ("11", "18") and len(digits) % 3 == 2)
+    return f"{'an' if vowel else 'a'} {number}"
 
 
 def words(options) -> str:

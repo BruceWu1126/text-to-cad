@@ -206,7 +206,7 @@ class Holes(unittest.TestCase):
         from cadgen._internal.cam.operations.base import PlanError
 
         self.assertEqual(self.refused("block", 0, tool="T3"),
-                         ("tool_too_large", "operations[0]: the 10 mm tool is wider than #o1.f4, a 8 mm slot"))
+                         ("tool_too_large", "operations[0]: the 10 mm tool is wider than #o1.f4, an 8 mm slot"))
         kind, message = self.refused("round", 1, tool="T5")
         self.assertEqual(kind, "tool_too_large")
         self.assertIn("the 25 mm tool does not fit in #o1.f7 (20 mm)", message)

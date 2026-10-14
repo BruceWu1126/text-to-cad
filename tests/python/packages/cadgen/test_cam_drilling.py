@@ -213,7 +213,7 @@ class Drilling(unittest.TestCase):
         tap8 = [{"id": "T9", "type": "tap", "diameter_mm": 8, "pitch_mm": 1.25}]
         kind, text = plan_error({"op": "tap", "tool": "T9", "all": True}, tap8)
         self.assertEqual(kind, "empty_operation")
-        self.assertIn("no hole setup top reaches suits T9", text)
+        self.assertIn("none of the holes setup top reaches suits T9 (an 8 x 1.25 mm tap)", text)
         self.assertEqual(plan_error({"op": "drill", "tool": "T2", "features": [BLIND], "depth_mm": 8})[0], "too_deep")
         cbore = [{"id": "T7", "type": "counterbore", "diameter_mm": 9}]
         self.assertEqual(plan_error({"op": "counterbore", "tool": "T7", "features": [LEFT]}, cbore)[0], "unreachable")

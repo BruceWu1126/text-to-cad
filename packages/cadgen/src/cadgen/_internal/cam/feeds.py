@@ -55,6 +55,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from cadgen._internal.cam.operations.base import finding
+from cadgen._internal.cam.values import an
 
 if TYPE_CHECKING:
     from cadgen._internal.cam.job import Machine, Material, Operation, Tool
@@ -163,7 +164,7 @@ def feeds_for(tool: "Tool", material: "Material", machine: "Machine", *, where: 
     hss = HSS_FACTOR if tool.material == "hss" and tool.type != "tap" else 1.0   # a tap's factor is its own speed
     surface *= _SPEED_FACTOR.get(tool.type, 1.0) * hss
     base_chip = chipload_at(bands, diameter)
-    label = f"{where}, " if where else ""
+    label = f"{where}: " if where else ""
     # ``where`` is how a sentence names the operation; the job's checks put the operation's index on each item.
     item = [{"text": f"{where} {tool.id}".strip(), "tool": tool.id, **({"where": where} if where else {})}]
     found: list[dict] = []
@@ -190,15 +191,24 @@ def feeds_for(tool: "Tool", material: "Material", machine: "Machine", *, where: 
     spindle = want_rpm
     if machine.max_rpm is not None and spindle > machine.max_rpm:
         spindle = float(math.floor(machine.max_rpm))
-        source = "the operation asks for" if rpm is not None else "the material and tool call for"
+        source = "the operation asks for" if rpm is not None else "the tool and material call for"
+        if tool.type == "tap":
+            then, why = ("so the tap turns slower and its feed (rpm x pitch) slows with it",
+                         "a tap's feed is exactly rpm x pitch, so the two still agree and the thread is cut right")
+        elif feed_mm_min is None:
+            then, why = ("so the cut runs slower at the same chip load",
+                         "the feed is worked out from the slower spindle, so each tooth still takes the chip planned "
+                         "and only the cycle time grows; a larger tool, which needs fewer rpm, may suit this machine "
+                         "better")
+        else:
+            then, why = ("and the operation's stated feed is kept, so each tooth takes a bigger chip than planned",
+                         "lower feed_mm_min in step with the spindle (to "
+                         f"{_mm(feed_mm_min * spindle / want_rpm)} mm/min for the planned chip), or check the tool "
+                         "takes the heavier cut")
         found.append(finding(
             "warning", "rpm_clamped",
-            f"{label}{tool.id} runs at the machine's top speed of {_mm(spindle)} rpm, under the {_mm(want_rpm)} rpm "
-            f"{source}",
-            "the feed follows the slower spindle, so the chip load per tooth is kept; the cut takes longer"
-            if feed_mm_min is None or tool.type == "tap" else
-            "the operation's feed is kept, so each tooth takes a bigger chip than planned; check the feed",
-            item))
+            f"{label}{tool.id} is capped at the machine's {_mm(spindle)} rpm; {source} {_mm(want_rpm)} rpm, {then}",
+            why, item))
 
     if tool.type == "tap":
         feed = spindle * per_rev
@@ -208,8 +218,8 @@ def feeds_for(tool: "Tool", material: "Material", machine: "Machine", *, where: 
                 # The stated feed was rpm x pitch at the speed asked for; the spindle was clamped, so it follows.
                 found.append(finding(
                     "warning", "feed_clamped",
-                    f"{label}{tool.id} taps at {feed:g} mm/min, not the {feed_mm_min:g} mm/min the operation asks "
-                    f"for: the spindle runs at {_mm(spindle)} rpm, not {_mm(want_rpm)}",
+                    f"{label}{tool.id} taps at {feed:,g} mm/min instead of the {feed_mm_min:,g} mm/min the operation "
+                    f"states, because its spindle is capped at {_mm(spindle)} rpm (not {_mm(want_rpm)})",
                     "a tap's feed is exactly rpm x pitch, so the feed slows with the spindle and the two still agree",
                     item))
             else:
@@ -220,8 +230,8 @@ def feeds_for(tool: "Tool", material: "Material", machine: "Machine", *, where: 
             slower = float(math.floor(machine.max_feed_mm_min / per_rev))
             found.append(finding(
                 "warning", "feed_clamped",
-                f"{label}{tool.id} taps at {_mm(slower)} rpm, not {_mm(spindle)} rpm: rpm x pitch must stay under the "
-                f"machine's {_mm(machine.max_feed_mm_min)} mm/min feed limit",
+                f"{label}{tool.id} is slowed to {_mm(slower)} rpm (from {_mm(spindle)} rpm) so its feed, rpm x pitch, "
+                f"stays within the machine's {_mm(machine.max_feed_mm_min)} mm/min",
                 "a tap's feed is exactly rpm x pitch, so the spindle slows with the feed and the two still agree",
                 item))
             spindle, feed = slower, slower * per_rev
@@ -238,14 +248,17 @@ def feeds_for(tool: "Tool", material: "Material", machine: "Machine", *, where: 
             plunge = PLUNGE_FRACTION * spindle * plunge_per_rev
         limit = machine.max_feed_mm_min
         if limit is not None and (feed > limit or plunge > limit):
-            over = [f"feed {_mm(feed)}" if feed > limit else "", f"plunge {_mm(plunge)}" if plunge > limit else ""]
+            over = [f"{an(_mm(feed))} mm/min feed" if feed > limit else "",
+                    f"{an(_mm(plunge))} mm/min plunge" if plunge > limit else ""]
+            source = ("the operation asks for" if feed_mm_min is not None or plunge_mm_min is not None else
+                      "the tool and material call for")
             found.append(finding(
                 "warning", "feed_clamped",
-                f"{label}{tool.id} feeds at the machine's limit of {_mm(limit)} mm/min, under the "
-                f"{' and '.join(word for word in over if word)} mm/min "
-                f"{'the operation asks for' if feed_mm_min is not None or plunge_mm_min is not None else 'worked out'}",
-                "each tooth takes a smaller chip than planned and the cut takes longer; a chip that is too thin rubs "
-                "and wears the tool, so a smaller or fewer-fluted tool may suit this machine better",
+                f"{label}{tool.id} is capped at the machine's {_mm(limit)} mm/min; {source} "
+                f"{' and '.join(word for word in over if word)}, so the cut runs slower with a thinner chip",
+                "each tooth takes a thinner chip than planned; a chip that is too thin rubs instead of cutting and "
+                "wears the tool, so set a lower rpm on the operation (or use a tool with fewer flutes) to keep the "
+                "planned chip at this feed",
                 item))
             feed, plunge = min(feed, limit), min(plunge, limit)
 

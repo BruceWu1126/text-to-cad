@@ -66,7 +66,7 @@ from typing import TYPE_CHECKING, Any
 
 from cadgen._internal.cam.operations.base import OperationBase, ParseContext, PlanError, finding
 from cadgen._internal.cam.operations.common import feed_findings, mm, region_polygon
-from cadgen._internal.cam.values import choice, known, number
+from cadgen._internal.cam.values import an, choice, known, number
 
 if TYPE_CHECKING:
     from cadgen._internal.cam.operations.context import PlanContext, Planned
@@ -139,7 +139,8 @@ def _descent(path: list, top: float, angle_deg: float) -> list:
         if walked >= need / 2:
             break
     if walked <= 1e-9:
-        raise PlanError("unreachable", "the curve has no length to ramp along into the material")
+        raise PlanError("unreachable", "the path is too short to ramp down along into the material, and the tool is not in "
+                        "air at its start to plunge")
     legs = max(2, math.ceil(need / walked - 1e-9))
     legs += legs % 2                       # an even number of legs ends where it started
     out, done, total = [(prefix[0][0], prefix[0][1], top)], 0.0, legs * walked
@@ -273,7 +274,7 @@ def _reach(width: float, half: float, height: float, tip_offset: float, tool, wh
     need = width / math.tan(half) + tip_offset
     if need > height + 1e-9:
         reach = max(height - tip_offset, 0.0) * math.tan(half)
-        raise PlanError("unreachable", f"{where}: a {width:g} mm chamfer with the tip {tip_offset:g} mm under it needs {need:g} mm "
+        raise PlanError("unreachable", f"{where}: {an(format(width, 'g'))} mm chamfer with the tip {tip_offset:g} mm under it needs {need:g} mm "
                          f"of cone, and {tool.id}'s cone is {height:g} mm tall ({tool.diameter_mm:g} mm across at "
                          f"{float(tool.size['tip_angle_deg']):g} degrees): it chamfers at most {reach:.3g} mm wide; "
                          "use a wider tool or a smaller width_mm or tip_offset_mm")
@@ -963,7 +964,8 @@ def _edge_points(ctx: "PlanContext", ordinal: int) -> list[tuple[float, float, f
     else:
         sampler = GCPnts_QuasiUniformDeflection(curve, deflection(ctx.tol), first, last)
         if not sampler.IsDone():
-            raise PlanError("unreachable", f"{ctx.part.ref}.e{ordinal}: the kernel could not sample the edge")
+            raise PlanError("unreachable", f"{ctx.part.ref}.e{ordinal}: the edge's curve could not be followed point by point; "
+                            "trace a region drawn along it instead")
         values = [sampler.Value(index) for index in range(1, sampler.NbPoints() + 1)]
     return [(p.X(), p.Y(), p.Z()) for p in values]
 
@@ -985,8 +987,8 @@ def _offset_curve(points: list, closed: bool, side: str, distance: float, tol: f
         moved = poly.buffer(-distance if inward else distance, quad_segs=segs, join_style="round")
         found = g2.polygons(moved)
         if len(found) != 1:
-            raise PlanError("tool_too_large", f"{where}: moved {distance:g} mm to the {side}, the loop "
-                             f"{'vanishes' if not found else 'splits in pieces'}")
+            raise PlanError("tool_too_large", f"{where}: offset {distance:g} mm {side} for the tool, the loop "
+                             f"{'closes up' if not found else 'splits in pieces'}: the tool is too large for it")
         ring = [tuple(c) for c in found[0].exterior.coords]
         if found[0].exterior.is_ccw != ccw_given:
             ring.reverse()
@@ -994,5 +996,6 @@ def _offset_curve(points: list, closed: bool, side: str, distance: float, tol: f
     moved = LineString(points).offset_curve(distance if side == "left" else -distance, quad_segs=segs,
                                             join_style="round")
     if moved.is_empty or moved.geom_type != "LineString":
-        raise PlanError("tool_too_large", f"{where}: moved {distance:g} mm to the {side}, the path falls apart")
+        raise PlanError("tool_too_large", f"{where}: offset {distance:g} mm to the {side} for the tool, the path "
+                         "folds over itself: the tool is too large for its bends")
     return [(round(x, 6), round(y, 6)) for x, y in moved.coords]

@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from cadgen._internal.cam.values import choice, flag, json_text, known, number, obj, selectors, whole, words
+from cadgen._internal.cam.values import an, choice, flag, json_text, known, number, obj, selectors, whole, words
 
 __all__ = [
     "AXIS_DIRECTIONS", "COMMON_KEYS", "COOLANTS", "DEFAULT_CLEARANCE_MM", "DEFAULT_RETRACT_MM", "FIXTURES", "Fixture",
@@ -469,7 +469,7 @@ def _chipload(raw: Any) -> float | tuple[tuple[float, float], ...]:
             raise ValueError(f"material.chipload_mm: {json_text(key)} is not a tool diameter in mm; "
                              'key each chip load by diameter, like {"3": 0.02, "6": 0.04}')
         if diameter in bands:
-            raise ValueError(f"material.chipload_mm: {json_text(key)} is a {diameter:g} mm tool diameter listed twice")
+            raise ValueError(f"material.chipload_mm: {json_text(key)} is {an(format(diameter, 'g'))} mm tool diameter listed twice")
         bands[diameter] = number(value, where=f"material.chipload_mm.{key}", positive=True)
     return tuple(sorted(bands.items()))
 

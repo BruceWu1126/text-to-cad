@@ -64,6 +64,7 @@ import math
 from typing import TYPE_CHECKING
 
 from cadgen._internal.cam.operations.base import PLAN_ERROR_KINDS, finding
+from cadgen._internal.cam.values import an
 
 if TYPE_CHECKING:
     from cadgen._internal.cam.job import Job
@@ -179,7 +180,7 @@ def _operation_findings(planned_ops) -> list[dict]:
                 continue
             first = item["items"][0] if item["items"] else {}
             where = first.get("where", "")
-            summary = item["summary"].removeprefix(f"{where}, ") if where else item["summary"]
+            summary = item["summary"].removeprefix(f"{where}: ") if where else item["summary"]
             key = (item["type"], first.get("tool"), summary, item["description"])
             if key not in merged:
                 merged[key] = {"finding": item, "summary": summary, "where": [], "items": []}
@@ -196,8 +197,9 @@ def _operation_findings(planned_ops) -> list[dict]:
             continue
         where = item["where"]
         summary = item["summary"]
-        if where:
-            summary += f", in {where[0]}" if len(where) == 1 else f", in {len(where)} operations: {', '.join(where)}"
+        if where:   # every operation it applies to, as an operation's own finding names it: "operations[0] (facing): "
+            names = where[0] if len(where) == 1 else f"{', '.join(where[:-1])} and {where[-1]}"
+            summary = f"{names}: {summary}"
         source = item["finding"]
         result.append(finding(source["severity"], source["type"], summary, source["description"], item["items"]))
     return result
@@ -358,9 +360,10 @@ def _holder_stock(planned_op: "PlannedOp", ctx: "PlanContext", segments) -> list
             f"{_label(planned_op)}: {ctx.tool.id}'s {what} comes down into the stock near {_xyz(where)} "
             f"(setup {ctx.setup.setup.id}), below the top of the material at Z{_n(top)}",
             f"the {what} ({_n(2 * piece.radius)} mm across, from {_n(piece.z0)} mm above the tip) would need "
-            f"{_n(top - (where[2] + piece.z0))} mm more room. Phase 1 does not simulate the stock: this compares against "
-            "the stock as it was before any operation, taken down only to the top of the material this operation "
-            "starts from, so an earlier operation may have cleared the way; a longer stickout clears it for sure",
+            f"{_n(top - (where[2] + piece.z0))} mm more room. cadgen does not simulate the stock yet: this compares "
+            "against the stock as it was before any operation, taken down only to the top of the material this "
+            "operation starts from, so an earlier operation may have cleared the way; a longer stickout clears it "
+            "for sure",
             [_item(planned_op, f"{ctx.tool.id} {what} against the stock", at=where, part=what)])]
     return []
 
@@ -370,9 +373,9 @@ def _body_word(profile) -> str:
 
 
 def _body_text(profile) -> str:
-    text = f"a {_n(profile.shank_diameter_mm)} mm shank up to {_n(profile.stickout_mm)} mm from the tip"
+    text = f"{an(_n(profile.shank_diameter_mm))} mm shank up to {_n(profile.stickout_mm)} mm from the tip"
     if profile.holder_diameter_mm is not None:
-        text += f", then a {_n(profile.holder_diameter_mm)} mm holder"
+        text += f", then {an(_n(profile.holder_diameter_mm))} mm holder"
     return text
 
 
@@ -529,9 +532,10 @@ def _full_slot(planned_op: "PlannedOp") -> list[dict]:
         return []
     return [finding(
         "warning", "full_slot",
-        f"{_label(planned_op)}: {ctx.tool.id} cuts {_n(length)} mm at its full width, every flute in the cut at once",
+        f"{_label(planned_op)}: {ctx.tool.id} cuts {_n(length)} mm at its full width, as in a slot",
         f"over {_n(FULL_SLOT_DIAMETERS)} tool diameters of full-width cutting (the links from one ring or row to the "
-        "next): it loads the tool hardest and packs the chips; a smaller stepdown or adaptive_2d clearing is gentler",
+        "next): a full-width cut loads the tool hardest and packs the chips in; a smaller stepdown, or a lower feed, "
+        "is gentler on the tool",
         [_item(planned_op, f"{ctx.tool.id} {_n(length)} mm at full width", length_mm=round(length, 3))])]
 
 
@@ -558,7 +562,7 @@ def _long_stickout(job: "Job", planned_ops) -> list[dict]:
         out.append(finding(
             "warning", "long_stickout",
             f"{tool.id} sticks out {_n(shape.stickout_mm)} mm, {ratio:.1f} times its {_n(shape.diameter_mm)} mm "
-            "diameter: it will bend and chatter",
+            "diameter: expect it to deflect and chatter",
             f"over {_n(LONG_STICKOUT_RATIO)} times the diameter a tool deflects enough to mark the walls and break "
             f"easily; hold it shorter, or take lighter cuts.{stated}",
             [_item(planned_op, f"{_label(planned_op)} {tool.id}", tool=tool.id) for planned_op in users[tool.id]]))
@@ -684,7 +688,7 @@ def _thin_walls(planned_ops, features: dict, touched: dict, part) -> list[dict]:
                     at = [round(c, 3) + 0.0 for c in (point.X(), point.Y(), point.Z())]
                     out.append(finding(
                         "warning", "thin_wall",
-                        f"{feature.ref} ({feature.kind}) leaves a {_n(gap)} mm wall to the part's outside "
+                        f"{feature.ref} ({feature.kind}) leaves {an(_n(gap))} mm wall to the part's outside "
                         f"({outline.ref}) at its thinnest",
                         f"a wall under {_n(THIN_WALL_MM)} mm bends away from the cutter and chatters; take light "
                         "finishing passes on it, support it, or check the part needs it that thin",

@@ -66,7 +66,7 @@ from cadgen._internal.cam.operations.common import (
     region_polygon,
     tool_diameter,
 )
-from cadgen._internal.cam.values import choice, flag, known, number
+from cadgen._internal.cam.values import an, choice, flag, known, number
 
 if TYPE_CHECKING:
     from cadgen._internal.cam.operations.context import PlanContext, Planned
@@ -166,7 +166,7 @@ def _hole_size(ctx: "PlanContext", found, *, tool_radius: float, room: float, wh
         raise PlanError("tool_too_large", f"{ctx.where}: the {2 * tool_radius:g} mm tool does not fit in {what}")
     if room < max(SNUG * tool_radius, 0.02):
         raise PlanError("tool_too_large", f"{ctx.where}: the {2 * tool_radius:g} mm tool is within {max(room, 0):.3g} mm of {what}'s "
-                         "size: there is no room to interpolate it; drill or ream it to size")
+                         "size: there is no room to move it round the hole; drill or ream it to size")
 
 
 # --- slot -----------------------------------------------------------------------------------------------------
@@ -292,7 +292,7 @@ class SlotOperation(OperationBase):
         stats: dict = {"slots": []}
         for slot in self._slots(params, ctx):
             if 2 * (r + stl) > slot.width + tol:
-                raise PlanError("tool_too_large", f"{ctx.where}: the {2 * r:g} mm tool is wider than {slot.ref}, a {slot.width:g} mm "
+                raise PlanError("tool_too_large", f"{ctx.where}: the {2 * r:g} mm tool is wider than {slot.ref}, {an(format(slot.width, 'g'))} mm "
                                  "slot" + (f" less {stl:g} mm stock to leave on each wall" if stl else ""))
             # Start at an open end where there is one: the tool plunges in air there.
             back, on = slot.ends
@@ -518,7 +518,7 @@ class CircularOperation(OperationBase):
         boss = ShapelyPoint(cx, cy).buffer(radius + tol, quad_segs=64)
         other = g2.shadow(ctx, target["floor"]).intersection(reach).difference(boss)
         if other.area > 1e-6:
-            raise PlanError("unreachable", f"{ctx.where}: other parts of the part stand within {first + r - radius:.4g} mm of "
+            raise PlanError("unreachable", f"{ctx.where}: the part itself stands within {first + r - radius:.4g} mm of "
                              f"{target['ref']} above z {target['floor']:g}; give clear_mm to clear less round it")
         step = params.stepover * 2 * r
         turns = math.ceil((first - last) / step - 1e-9) if first - last > 1e-6 else 0
@@ -603,8 +603,8 @@ class BoreOperation(OperationBase):
             elif pitch > steepest + 1e-9:
                 angle = math.degrees(math.atan(pitch / (2 * math.pi * room)))
                 raise PlanError("unreachable", f"{ctx.where}.pitch_mm: {pitch:g} mm per turn round {what} is a "
-                                f"{angle:.3g} degree helix at the tool's centre, steeper than ramp_angle_deg "
-                                f"{params.ramp_angle_deg:g} lets the tool go down into material; give pitch_mm "
+                                f"{angle:.3g} degree helix at the tool's centre, steeper than the {params.ramp_angle_deg:g} "
+                                f"degrees ramp_angle_deg lets the tool go down into material; give pitch_mm "
                                 f"{math.floor(steepest * 1e4) / 1e4:g} or less, or a larger ramp_angle_deg")
             cx, cy = round(found.top[0], 6), round(found.top[1], 6)
             sweep = 2 * math.pi * (top - floor) / pitch
@@ -646,7 +646,7 @@ class ThreadMillOperation(OperationBase):
         pitch = number(raw["pitch_mm"], where=f"{ctx.where}.pitch_mm", positive=True)
         own = float(ctx.tool.size["pitch_mm"])
         if abs(own - pitch) > 1e-9:
-            raise ValueError(f"{ctx.where}.pitch_mm: {ctx.tool.id} is a thread mill for a {own:g} mm pitch, not "
+            raise ValueError(f"{ctx.where}.pitch_mm: {ctx.tool.id} is a thread mill for {an(format(own, 'g'))} mm pitch, not "
                              f"{pitch:g} mm; name a thread mill ground for that pitch")
         depth = mm(raw, "thread_depth_mm", ctx.where, round(ISO_THREAD_DEPTH * pitch, 6))
         hand = choice(raw.get("hand", "right"), ("right", "left"), where=f"{ctx.where}.hand")
