@@ -408,6 +408,6 @@ export function useStepMotion({ entry, fileKey, resources, readStored, clipboard
     animationState, animationStateRef, animationRuntime, animationError, positionControls, animationControls,
     onParameterChange: commands.handleStepModuleParameterChange, onPlayToggle: commands.handleAnimationPlayToggle,
     releaseAnimation: commands.releaseAnimation, putDownAnimation: commands.putDownAnimation,
-    resetMotion: commands.resetMotion, restore
+    resetMotion: commands.resetMotion, resetPosition: commands.resetPosition, restore
   };
 }

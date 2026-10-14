@@ -1305,9 +1305,11 @@ settings plays there and is forgotten on the way out, the tools view's restored 
 routine (`restorePlayback`).
 Nothing under the pointer is pickable in preview, or under Animation.
 
-One motion at a time: Explode, the Position pose and a routine's frame replace each other, the
-one used last winning and the others going back to rest, with nothing set aside to come back
-(`settings-ui.md`, "Tools and lifecycle"). STEP's two are `useStepMotionControls.js`'s:
+One motion at a time: Explode, the Position pose and a routine's frame replace each other,
+taking up one of their tools putting the other two back at rest at once (`StepSurface.jsx`
+watches the tool in hand: Explode off, `resetPosition`, `releaseAnimation`), and using one
+doing the same, with nothing set aside to come back (`settings-ui.md`, "Tools and lifecycle").
+The uses of STEP's two are `useStepMotionControls.js`'s:
 `claimPosition` (a joint, a value, a named pose) rewinds the routine, and `claimAnimation`
 (play, scrub, restart — not choosing a routine, its Speed or its Loop) puts the pose back to
 its default; each tells the host (`host.onUse`), which takes Explode off. Explode is the view

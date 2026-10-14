@@ -10,8 +10,9 @@ import { useAnimationClockStore } from "./animationClockStore.js";
 // Single command boundary for STEP motion. Refs are published synchronously so
 // queued playback callbacks cannot resurrect the previous motion owner.
 //
-// One motion at a time: Explode, Position and a routine's frame replace each other, the one used
-// last winning and the others going back to rest — nothing is set aside to come back. Position and
+// One motion at a time: Explode, Position and a routine's frame replace each other, the others
+// going back to rest when one is used (and when its tool is taken up, which the host watches) —
+// nothing is set aside to come back. Position and
 // the routine are both here; Explode is the host's view settings, so `host.onUse(motion)` tells it
 // which of these two was used ("position" or "animation") and it takes Explode off.
 // `host.previewing()` says, at the moment of the call, whether preview is up: preview's routine is

@@ -425,8 +425,9 @@ function StepSurfaceBody({ view, data }) {
   const selectedMeshSettledShort = selectedMeshMatches && meshStateSettledShort(meshState);
 
   // ---- motion: the kinematics module and Position, the routines and playback -------------------
-  // One motion at a time: Explode, Position and a routine's frame replace each other, the one used
-  // last winning, the others back to rest (Explode off, the default pose, the routine rewound).
+  // One motion at a time: Explode, Position and a routine's frame replace each other. Taking one of
+  // their tools up puts the other two back at rest at once (Explode off, the default pose, the
+  // routine rewound), and each one used does too; a tool put down keeps its own.
   // Position and the routine are the motion hook's; Explode is the view settings', so the hook says
   // which of its two was used and Explode goes off here, and Explode used puts both at rest (below).
   const explodeAppliedRef = useRef(false);
@@ -1545,6 +1546,23 @@ function StepSurfaceBody({ view, data }) {
     explodeSeen.current = { file: selectedKey, applied: explodeApplied };
     if (explodeApplied && !seen.applied && seen.file === selectedKey && !previewing) resetMotion();
   }, [explodeApplied, selectedKey, previewing, resetMotion]);
+  // A motion tool taken up — Explode, Position or Animation — puts the other two back at rest at
+  // once, whatever they held: the model is only ever one motion's.
+  const motionToolSeen = useRef(tabToolMode);
+  const motionResets = useRef(null);
+  motionResets.current = {
+    explode: () => { if (explodeAppliedRef.current) viewSettingsStore.patch({ exploded: { enabled: false, amount: 0 } }); },
+    position: motion.resetPosition, animation: motion.releaseAnimation,
+  };
+  useEffect(() => {
+    const was = motionToolSeen.current;
+    motionToolSeen.current = tabToolMode;
+    if (was === tabToolMode || previewing) return;
+    const reset = motionResets.current;
+    if (tabToolMode === TAB_TOOL_MODE.EXPLODE) { reset.position(); reset.animation(); }
+    else if (tabToolMode === TAB_TOOL_MODE.POSE) { reset.explode(); reset.animation(); }
+    else if (tabToolMode === TAB_TOOL_MODE.ANIMATE) { reset.explode(); reset.position(); }
+  }, [tabToolMode, previewing]);
   const selectedWholeTopologyReferencePartIds = useMemo(() => (
     uniqueStringList(
       selectedReferenceIds.flatMap((referenceId) => renderPartIdsForWholeTopologyReference(referenceId))

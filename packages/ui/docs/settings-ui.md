@@ -182,13 +182,13 @@ again, as it was.
 
 **One motion at a time.** Every tool's state stands beside every other's — the selection,
 measurements, the drawing, Clip — except three that move the parts: **Explode**, the
-**Position** pose and a routine's **frame**. They replace each other: the one used last wins
-and the others go back to rest, with nothing set aside to come back. Using Explode is moving
-its amount off zero (not taking up its tool or opening its panel): the pose goes back to its
-default and the routine to rest. Using Position is a joint dragged, a value set or a named pose
-chosen: Explode goes off and the routine to rest. Using a routine is playing or scrubbing it
-(not taking up the tool, or choosing a routine, its Speed or its Loop): the pose goes back to its
-default and Explode off. So only the motion in effect has a kept panel in the stack. Preview's
+**Position** pose and a routine's **frame**. They replace each other: taking up one of their
+tools puts the other two back at rest at once — Explode off, the pose at its default, the
+routine rewound — with nothing set aside to come back, and using one does the same (Explode's
+amount moved off zero; a joint dragged, a value set or a named pose chosen; a routine played or
+scrubbed). Put down, a motion tool keeps its own: an explosion, a pose or a paused frame stays
+under any other tool but the other two motion tools. So only the motion in effect has a kept
+panel in the stack. Preview's
 routine is its own and moves nothing of the tools view's.
 
 A tree is Select's panel, so it is used under Select; a tree row's menu action

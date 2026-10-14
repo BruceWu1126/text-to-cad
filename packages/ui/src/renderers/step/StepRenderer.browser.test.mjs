@@ -1157,7 +1157,7 @@ test("the Animation tool's button plays and pauses the routine in the tools view
   assert.deepEqual(errors, []);
 });
 
-test('one motion at a time: Explode, Position and the routine\'s frame replace each other, the last one used winning and the others back to rest', async () => {
+test('one motion at a time: Explode, Position and the routine\'s frame replace each other, taking up one of their tools putting the others back at rest at once', async () => {
   const view = await open();
   const { page, pane, errors } = view;
   const stack = async () => (await view.stack()).sort();
@@ -1175,16 +1175,20 @@ test('one motion at a time: Explode, Position and the routine\'s frame replace e
     await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.exploded.enabled === true);
     await view.tool('Select').click();
   };
-  // A pose, kept.
+  // A pose, kept: Select, another tool, leaves it.
   await pose(60);
   assert.deepEqual(await stack(), ['Features', 'Position kept']);
-  // Explode taken up is not Explode used: the pose stays until its amount moves, then goes.
+  // Explode taken up puts it back at its default at once, before its amount moves.
   await view.tool('Explode').click();
-  assert.ok((await stack()).includes('Position kept'), 'taking up Explode leaves the pose');
+  await pane.getByRole('region', { name: 'Position kept', exact: true }).waitFor({ state: 'detached' });
   await view.tool('Select').click();
   await explode();
-  await pane.getByRole('region', { name: 'Position kept', exact: true }).waitFor({ state: 'detached' });
   assert.deepEqual(await stack(), ['Explode controls', 'Features']);
+  // Position taken up takes Explode off at once, and leaves the pose as it is (its default).
+  await view.tool('Position').click();
+  await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.exploded.enabled === false);
+  await view.tool('Select').click();
+  await explode();
   // Animation's button plays the routine, which takes the explosion off.
   await view.tool('Animation').click();
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.exploded.enabled === false);
@@ -1192,7 +1196,11 @@ test('one motion at a time: Explode, Position and the routine\'s frame replace e
   await view.tool('Select').click();
   await pane.getByRole('region', { name: 'Animation kept', exact: true }).waitFor();
   assert.deepEqual(await stack(), ['Animation kept', 'Features']);
-  // Position used puts the routine at rest; Explode used puts the pose back to its default.
+  // Explode taken up puts the kept frame back at rest at once.
+  await view.tool('Explode').click();
+  await pane.getByRole('region', { name: 'Animation kept', exact: true }).waitFor({ state: 'detached' });
+  await view.tool('Select').click();
+  // Position used keeps a pose; Explode used puts it back to its default.
   await pose(30);
   assert.deepEqual(await stack(), ['Features', 'Position kept']);
   await explode();
