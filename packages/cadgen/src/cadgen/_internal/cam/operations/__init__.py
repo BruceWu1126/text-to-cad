@@ -44,7 +44,7 @@ REGISTRY: dict[str, Entry] = {entry.name: entry for entry in (
     _entry("facing", 1, "milling_2d", "Face"),
     _entry("contour_2d", 1, "milling_2d", "Profile"),
     _entry("pocket_2d", 1, "milling_2d", "Pocket"),
-    _entry("adaptive_2d", 1, "milling_2d", "Adaptive clearing"),
+    _entry("adaptive_2d", 1, "adaptive", "Adaptive clearing"),
     _entry("slot", 1, "holes_2d", "Slot"),
     _entry("bore", 1, "holes_2d", "Helical bore"),
     _entry("circular", 1, "holes_2d", "Round pocket or boss"),
