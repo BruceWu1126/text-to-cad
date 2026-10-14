@@ -172,8 +172,8 @@ again, as it was.
 
 | Tool | Pressing it | Leaving it |
 | --- | --- | --- |
-| Select | The default tool of STEP and robots; shows Features (an assembly's; a robot's Links) and, with a selection, the Reference panel; its modes are a menu at the end of Features' filter row (a part file's Select card's heading) | The selection is dropped; its panels leave the stack |
-| Draw | Draws on the view, with the pencil; its tools, color, weight, line style and history are the Drawing panel | The sketch is gone, and the pencil is the drawing tool again |
+| Select | The default tool of STEP and robots; picks; shows Features (an assembly's; a robot's Links); its modes are the chevron beside it on the strip; what is picked is Quick Edit's chips | Its panel leaves the stack; the selection stays, lit and in Quick Edit, under any tool |
+| Draw | Draws on the view, with the pen; its tools, color, weight, line style, placement and history are the Drawing panel | The ink stays in the model, its panel a heading while there is ink; the pen is the drawing tool again |
 | Measure | Arms picking and shows the Measure panel: its snapping modes, then its results; kept, a press takes it up again, results and all | Unfinished picks are cancelled; completed measurements and their panel stay, kept |
 | Explode / Clip | Opens a neutral panel; an edit applies the effect; kept, a press takes it up again as it is | A neutral panel goes; an applied effect and its panel stay, kept |
 | Position | Shows joint handles and the Position panel | Handles and panel hide; joint values stay, and a pose that is not the default is kept: one line in the stack |

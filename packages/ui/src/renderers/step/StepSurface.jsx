@@ -2131,13 +2131,9 @@ function StepSurfaceBody({ view, data }) {
     clearAssemblySelectionForFocus();
   }, [clearAssemblySelectionForFocus]);
 
-  // A selection exists only while Select is the tool. Leaving Select drops it, in
-  // the viewport and the Model tree alike; choosing something in the tree under
-  // another tool comes back to Select first (`ensureSelectTool`), so this effect
-  // never sees that selection under the tool it was leaving.
-  useEffect(() => {
-    if (tabToolMode !== TAB_TOOL_MODE.REFERENCES) clearAssemblySelectionForFocus();
-  }, [tabToolMode, clearAssemblySelectionForFocus]);
+  // A selection outlives Select: it is what Quick Edit's chips name and what the view lights, under
+  // any tool, until it is cleared. Picking is Select's alone — a pick under another tool takes up
+  // Select first (`ensureSelectTool`).
 
   const clearSelectionForHiddenLeafIds = useCallback((leafIds, nodeId = "") => {
     const hiddenLeafIds = new Set(
@@ -3209,7 +3205,7 @@ function StepSurfaceBody({ view, data }) {
   // ---- copying the selection ----------------------------------------------------------------
   // The copy key, under Select, while the selection's references can be read; Quick Edit attaches
   // them only then, too.
-  const selectionActionVisible = selectionToolActive && selectionCount > 0 && !stepUpdateInProgress && !referenceSelectionPending
+  const selectionActionVisible = selectionCount > 0 && !stepUpdateInProgress && !referenceSelectionPending
     && !referenceSelectionUnavailable && !topologySelectionDeferred;
   const copySelection = selectionActionVisible ? copySelectedReferences : null;
   // What is selected, as Quick Edit's chips: a chip's X drops its picks, and resting on it lights

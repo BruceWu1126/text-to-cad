@@ -512,8 +512,8 @@ the loader asks which format it was. The STEP renderer matches none of them.
 - **Select**: a selection is any number of links or any number of visuals (or the named
   objects of a visual's mesh), never both (`robot/useLinkSelection.js`; Shift in the
   viewport, Shift, Ctrl or Cmd on a row add), and the Reference panel names several by
-  what they are ("Links", "Components") and lists them. It exists only while Select is the tool: a pick under
-  another tool returns to Select first, and leaving Select clears it. A pick opens
+  what they are ("Links", "Components") and lists them. It outlives Select, as a STEP's does: a pick under
+  another tool returns to Select first, and leaving Select keeps it. A pick opens
   nothing: its Reference joins the stack under Links. Escape clears the selection. Hover and selection are drawn by the scene (`setHighlight`), with
   the highlight ink a STEP part wears; hover is not React state. A robot has no
   viewport menu and so no framing items; opening the file again fits it afresh.
@@ -1161,10 +1161,12 @@ Tool order, tool panels, persistent panels and cleanup policies are defined in
 [the shared design system](settings-ui.md#tools-and-lifecycle). Keep renderer
 implementations aligned with that contract instead of defining another layout here.
 
-A selection exists only while Select is the tool. Leaving Select for any other
-tool drops the selection, in the viewport and the Model tree alike; choosing a
-row in the Model tree (or a host `selectReference`) under another tool returns
-to Select first. No other tool ever sees a selection, so none needs a rule for one.
+A selection outlives Select: under any other tool the view still lights it and
+Quick Edit still carries it as chips, until it is cleared (its chips' X, Quick
+Edit's X, Escape, or a new pick). Picking is Select's alone: choosing a row in the
+Model tree (or a host `selectReference`) under another tool returns to Select
+first. Every tool works alongside a selection, as it does alongside a pose, Explode,
+Clip and the drawing.
 
 ### Position
 
@@ -1498,9 +1500,8 @@ as the meshes of its group, and a viewport pick selects the visual component
 links, or of components, can be selected, never both (Shift in the viewport,
 Shift/Ctrl/Cmd on a row add); the Reference then names them by what they are
 (`Links`, `Components`) and lists them. A link with no geometry selects its row
-and details only. As for STEP, a robot selection exists only while Select is the
-tool: a pick under another tool returns to Select, leaving Select clears it, and
-Escape clears it. A click acts at once, as a STEP's does; a
+and details only. As for STEP, a robot selection outlives Select: a pick under
+another tool returns to Select, leaving Select keeps it, and Escape clears it. A click acts at once, as a STEP's does; a
 robot has no double-click at all.
 
 Each link or component row has the Hide/Reveal eye of an assembly row

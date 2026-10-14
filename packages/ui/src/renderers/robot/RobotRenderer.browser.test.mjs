@@ -387,7 +387,7 @@ test('a robot can enter Position with sidebar controls: knobs drag joints, the c
   assert.deepEqual(robot.errors, []);
 });
 
-test('Select picks a visual at once; a selection lives only under Select; Links shows what the description says and follows what it names', async (t) => {
+test('Select picks a visual at once; a selection outlives Select; Links shows what the description says and follows what it names', async (t) => {
   const robot = await open(t, 'arm.srdf');
   const { page, pane } = robot;
   await robot.openPosition();
@@ -438,10 +438,11 @@ test('Select picks a visual at once; a selection lives only under Select; Links 
   assert.ok((await card.locator('[data-info-row]').first().boundingBox()).height <= 19, 'a compact row');
   // Links has no X: its filter row is the filter alone, and it stays while Select is the tool.
   assert.equal(await robot.linksPanel().locator('[data-slot=tree-filter]').getByRole('button', { name: 'Close links', exact: true }).count(), 0);
-  // Leaving Select drops the selection, in the tree and the viewport alike.
+  // Leaving Select keeps the selection: Quick Edit still carries it, and Position shows its own
+  // panel in place of Links.
   await robot.tool('Position').click();
-  await robot.waitPressed(0);
-  assert.equal(await robot.linksPanel().isVisible(), false, 'and Position shows its own panel instead');
+  assert.equal(await robot.linksPanel().isVisible(), false, 'Position shows its own panel instead');
+  assert.deepEqual(await robot.chips(), ['upper_arm'], 'the selection stays under Position');
   // Display is a dropdown over the viewer, never a panel in the stack: Position's panel stays, and
   // Position stays the tool; a second press puts it away.
   await robot.displayButton().click();
@@ -454,6 +455,9 @@ test('Select picks a visual at once; a selection lives only under Select; Links 
   // A viewport pick under Select: the link is selected on the very next frame (no wait for
   // a double-click that robots do not have), and its row is pressed in the Links panel.
   await robot.tool('Select').click();
+  // The kept selection goes by its chip's X, so nothing is lit before the hover.
+  await pane.getByRole('button', { name: 'Remove upper_arm', exact: true }).click();
+  await pane.locator('[data-quick-edit-box]').waitFor({ state: 'detached' });
   // (The viewport's own pixels: a page screenshot would also see the toolbar's hover state.)
   const still = (await robot.capture()).data;
   await page.mouse.move(...onScreen(spots.shoulder).map(value => value - 3));

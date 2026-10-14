@@ -199,9 +199,9 @@ function RobotSurface({ view, data }) {
   const { toolMode, selectTool } = shell;
   // A robot restores into Pose before it has loaded; only a LOADED one can say it has nothing to pose.
   useEffect(() => { if (robot && !posable && toolMode === ROBOT_TOOL.POSE) selectTool(ROBOT_TOOL.SELECT); }, [robot, posable, toolMode, selectTool]);
-  // A selection exists only while Select is the tool: leaving it drops the selection.
+  // A selection outlives Select: Quick Edit names it and the view lights it under any tool, until it
+  // is cleared. Picking is Select's alone.
   const clearSelection = selection.clear;
-  useEffect(() => { if (toolMode !== ROBOT_TOOL.SELECT) clearSelection(); }, [toolMode, clearSelection]);
   const poseActive = !shell.previewing && posable && Boolean(scene) && toolMode === ROBOT_TOOL.POSE;
   const selectActive = !shell.previewing && Boolean(scene) && toolMode === ROBOT_TOOL.SELECT;
 
@@ -264,7 +264,7 @@ function RobotSurface({ view, data }) {
     ? reference.target.selectors.join(", ") : ""), [resourcePath]);
 
   return <RendererShell shell={shell} tools={tools} toolPanels={toolPanels}
-    references={selectActive ? references : NO_REFERENCES} referenceChips={selectActive ? referenceChips : NO_REFERENCES}
+    references={shell.previewing ? NO_REFERENCES : references} referenceChips={shell.previewing ? NO_REFERENCES : referenceChips}
     nameReference={nameLink}
     onClearReferences={clearSelection}
     viewportOverlay={viewport => <>

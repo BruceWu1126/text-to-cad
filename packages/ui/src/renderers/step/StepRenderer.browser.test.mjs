@@ -370,7 +370,7 @@ test('a pick names its face or edge by the id cadgen minted in the selector tabl
   assert.deepEqual(errors, []);
 });
 
-test('Select picks parts and faces, a selection lives only under Select, and Quick Edit\'s chips name and measure what is picked', async () => {
+test('Select picks parts and faces, a selection outlives Select, and Quick Edit\'s chips name and measure what is picked', async () => {
   const view = await open();
   const { page, pane, at, errors } = view;
 
@@ -458,14 +458,14 @@ test('Select picks parts and faces, a selection lives only under Select, and Qui
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedPartIds.length === 0);
   await quickEditBox.waitFor({ state: 'detached' });
 
-  // A selection exists only under Select, and so do its panels: another tool takes both away,
-  // and Select brings the tree back as it was.
+  // A selection outlives Select: another tool shows its own panel in place of Select's, and the
+  // selection stays, its chip in Quick Edit; Select brings the tree back as it was.
   await page.mouse.click(...at([6, 6, 5]));
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedPartIds.length === 1);
   await view.tool('Measure').click();
-  await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedPartIds.length === 0);
   assert.deepEqual(await view.stack(), ['Measure controls'], 'Measure shows its own panel: no Features');
-  await quickEditBox.waitFor({ state: 'detached' });
+  assert.deepEqual((await view.state()).selectedPartIds, ['o1.1'], 'the selection stays under Measure');
+  assert.deepEqual(await view.chips(), ['base'], 'and Quick Edit still carries it');
   // The Features filter row is a heading's height, as Measure's heading is.
   const measureHeading = await pane.getByRole('region', { name: 'Measure controls', exact: true }).locator('[data-tool-panel-heading]').boundingBox();
   assert.equal(filterRowHeight, Math.round(measureHeading.height), 'the filter row is a heading\'s height');
