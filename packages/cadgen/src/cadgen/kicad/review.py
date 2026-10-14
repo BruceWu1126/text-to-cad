@@ -3,7 +3,7 @@
 Each check is a warning (advice, never a gate): an IC's power input (not a connector's,
 jumper's, test point's or hole's, nor an unfitted part's) with no decoupling capacitor to ground, the nearest one too far from it, and a net's tracks too thin for the
 current its script gives it (``board.net("VBUS", current=2.0)``, kept in the ``.kicad_pro``
-because KiCad keeps no current per net). Then the BOM's two, Backplane's sourcing rules: the
+because KiCad keeps no current per net). Then the BOM's two sourcing rules: the
 parts to buy (in the BOM, fitted, not a hole or test point) with no LCSC or MPN field to order
 them by, as one finding, and one part number on parts with different footprints. Each finding names what it is about in board
 references, so the viewer selects it and an agent resolves it.
