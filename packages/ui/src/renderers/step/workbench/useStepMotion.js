@@ -51,11 +51,15 @@ export function stepMotionSources(entry) {
  * first paint. A routine is never restored: every open starts at rest, and the speed and
  * loop it plays with are the shell's (the Animation tool's, the file's; preview's, its own).
  *
+ * One motion at a time: Position and a routine's frame replace each other here, and `host` hears
+ * which was used so it can take Explode off (`useStepMotionControls`).
+ *
  * @param {{ entry: object, fileKey: string, resources: object,
  *   readStored: () => { pose: object | null }, clipboard: object,
- *   reportError: (message: string) => void }} options
+ *   reportError: (message: string) => void,
+ *   host?: { previewing(): boolean, onUse(motion: "position" | "animation"): void } }} options
  */
-export function useStepMotion({ entry, fileKey, resources, readStored, clipboard, reportError }) {
+export function useStepMotion({ entry, fileKey, resources, readStored, clipboard, reportError, host = null }) {
   const animationClock = useAnimationClockStore();
   const { resetAnimationClock, setAnimationClock } = animationClock;
   const readStoredRef = useRef(readStored);
@@ -221,8 +225,8 @@ export function useStepMotion({ entry, fileKey, resources, readStored, clipboard
       resetAnimationClock();
     };
     // The same file's routines read again, because a rebuild changed or removed them: the model
-    // goes to rest as it does when a routine is put down, Position's values back, and the routine
-    // chosen keeps its place, with its speed and loop, for the new ones to restore against.
+    // goes to rest, a kept frame with it, and the routine chosen keeps its place, with its speed
+    // and loop, for the new ones to restore against.
     const reloading = animationLoadState.file === fileKey && animationLoadState.status === "ready";
     if (reloading) releaseAnimationRef.current?.();
 
@@ -312,7 +316,7 @@ export function useStepMotion({ entry, fileKey, resources, readStored, clipboard
   const commands = useStepMotionControls({
     selectedStepModuleDefinition: definition, selectedAnimationClips: clips, selectedActiveAnimationClip: activeClip,
     animationState, animationStateRef, setAnimationState, stepModuleParameterValuesRef,
-    setStepModuleParameterValues, setAppliedStepPoseName, motionRevisionRef
+    setStepModuleParameterValues, setAppliedStepPoseName, motionRevisionRef, host
   });
   releaseAnimationRef.current = commands.releaseAnimation;
 
@@ -388,6 +392,7 @@ export function useStepMotion({ entry, fileKey, resources, readStored, clipboard
     onSpeedChange: commands.handleAnimationSpeedChange,
     onLoopToggle: commands.handleAnimationLoopToggle,
     onRelease: commands.releaseAnimation,
+    onPutDown: commands.putDownAnimation,
     savePlayback: commands.savePlayback,
     resetPlayback: commands.resetPlayback,
     restorePlayback: commands.restorePlayback,
@@ -402,6 +407,7 @@ export function useStepMotion({ entry, fileKey, resources, readStored, clipboard
     definition, loading, parameterValues: stepModuleParameterValues,
     animationState, animationStateRef, animationRuntime, animationError, positionControls, animationControls,
     onParameterChange: commands.handleStepModuleParameterChange, onPlayToggle: commands.handleAnimationPlayToggle,
-    releaseAnimation: commands.releaseAnimation, restore
+    releaseAnimation: commands.releaseAnimation, putDownAnimation: commands.putDownAnimation,
+    resetMotion: commands.resetMotion, restore
   };
 }

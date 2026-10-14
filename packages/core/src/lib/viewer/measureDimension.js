@@ -228,6 +228,23 @@ export function screenDimensionLayout(segments, camera, rect) {
   };
 }
 
+const segmentDistance = (point, start, end) => {
+  const dx = end.x - start.x, dy = end.y - start.y;
+  const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / ((dx * dx + dy * dy) || 1)));
+  return Math.hypot(point.x - (start.x + dx * t), point.y - (start.y + dy * t));
+};
+
+/**
+ * Whether a point (the layout's pixels) is on a drawn dimension: within `tolerance` of its
+ * dimension line or a witness line, or over its label.
+ */
+export function dimensionLayoutHit(layout, point, tolerance = 6) {
+  if (!layout || !point) return false;
+  const lines = [layout.dimensionLine, ...layout.witnesses];
+  if (lines.some(([start, end]) => segmentDistance(point, start, end) <= tolerance)) return true;
+  return Math.abs(point.x - layout.label.x) <= 36 && Math.abs(point.y - layout.label.y) <= 12;
+}
+
 function strokeSegment(context, start, end) {
   context.beginPath();
   context.moveTo(start.x, start.y);

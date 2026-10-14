@@ -27,6 +27,15 @@ test("a view is the viewer's camera at the prompt's size, with what places or hi
   assert.equal(promptView(null), null);
 });
 
+test("a routine's kept frame is the view's animation, a snapshot job's {clip, time}", () => {
+  const made = promptView({ camera: camera(), width: 800, height: 600 }, { state: { animation: { clip: 'swing', time: 1.5 } } });
+  assert.deepEqual(made.animation, { clip: 'swing', time: 1.5 });
+  assert.equal(promptView({ camera: camera(), width: 800, height: 600 }, { state: { animation: null } }).animation, undefined);
+  assert.ok(sameView(view({ animation: { clip: 'swing', time: 1.5 } }), view({ animation: { clip: 'swing', time: 1.5 } })));
+  assert.ok(!sameView(view(), view({ animation: { clip: 'swing', time: 1.5 } })));
+  assert.ok(!sameView(view({ animation: { clip: 'swing', time: 1 } }), view({ animation: { clip: 'swing', time: 1.5 } })));
+});
+
 test('a camera nudged less than 2°, zoomed or panned less than 5% is the same view; more, or any other change, is another', () => {
   assert.ok(sameView(view(), view({ camera: turned(1.5) })));
   assert.ok(!sameView(view(), view({ camera: turned(3) })));

@@ -17,16 +17,17 @@ import { FILE_SHEET_PRECISION_SLIDER_CLASSES } from "../../inspector/FileSheet.j
 //
 // runtime: { clips: [{ id, label, duration }], activeClipId, playing, elapsedSec,
 //   speed, loopEnabled, clock, onClipSelect, onPlayToggle, onScrub, onSpeedChange,
-//   onLoopToggle, onRelease, savePlayback, resetPlayback, restorePlayback }. `clock` is the owner's
-//   live AnimationClock (`animationClock.js`); `onRelease` stops, rewinds and puts the model back at
-//   rest. Preview's routine is its own: entering preview saves the tools view's routine as it
+//   onLoopToggle, onRelease, onPutDown?, savePlayback, resetPlayback, restorePlayback }. `clock` is the
+//   owner's live AnimationClock (`animationClock.js`); `onRelease` stops, rewinds and puts the model back
+//   at rest; `onPutDown` pauses it where it is as the Animation tool is put down, keeping a frame past
+//   the routine's start (`enabled`, paused, `elapsedSec` > 0) and putting one at its start back at rest. Preview's routine is its own: entering preview saves the tools view's routine as it
 //   stands (`savePlayback()`: which routine, its time, whether it plays, its speed and loop) and
 //   puts it down at the routine's own speed and loop (`resetPlayback()`), and leaving releases
 //   preview's and hands the saved one back (`restorePlayback(saved)`).
 
 export const PLAYBACK_SPEEDS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3];
 
-function formatSeconds(value) {
+export function formatSeconds(value) {
   const numericValue = Math.max(Number(value) || 0, 0);
   return `${numericValue.toFixed(numericValue >= 10 ? 1 : 2)}s`;
 }

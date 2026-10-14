@@ -16,8 +16,8 @@ import { sameView } from './views.js';
  * @property {import('./toolbar.jsx').DrawingPlacement} placement  Where what is drawn next lies: on
  *   the model, or in space on a plane facing the view.
  * @property {readonly import('../renderers/kit/tools/draw/ink3d.js').InkItem[]} ink
- * @property {readonly string[]} selected  The ink Select has picked: what a colour, a weight, a line
- *   style, Delete or a drag acts on.
+ * @property {readonly string[]} selected  The ink the viewer's Select has picked: what a colour, a weight, a line
+ *   style and Delete act on. Draw's tools never pick ink.
  * @property {boolean} canUndo
  * @property {boolean} canRedo
  * @property {boolean} hasContent  There is ink.
@@ -46,8 +46,8 @@ const DEFAULTS = Object.freeze({ tool: 'freedraw', color: '#ff2d55', strokeWidth
 const LIMIT = 200;
 
 /**
- * @param {boolean} [active]  Draw is the tool. Put down, it goes back to its first tool (the pen) and
- *   selects nothing; the ink, the colour, the weight, the line style and the placement stay.
+ * @param {boolean} [active]  Draw is the tool. Put down, it goes back to its first tool (the pen);
+ *   the ink, its selection, the colour, the weight, the line style and the placement stay.
  * @param {{ tool?: string, color?: string, strokeWidth?: number, strokeStyle?: import('./toolbar.jsx').DrawingStrokeStyle,
  *   placement?: import('./toolbar.jsx').DrawingPlacement }} [initial]
  * @returns {DrawingSession}
@@ -76,9 +76,7 @@ export function useDrawingSession(active = true, initial = {}) {
     return label;
   }, []);
   useEffect(() => {
-    if (active) return;
-    setTool(start.tool);
-    setSelected([]);
+    if (!active) setTool(start.tool);
   }, [active, start.tool]);
   const step = useCallback(change => setHistory(current => {
     const ink = change(current.ink);
@@ -105,7 +103,7 @@ export function useDrawingSession(active = true, initial = {}) {
     if (ids.size) step(ink => ink.map(item => (ids.has(item.id) ? change(item) : item)));
   }, [step]);
   const actions = useMemo(() => ({
-    selectTool: next => { setTool(next); if (next !== 'selection') setSelected([]); },
+    selectTool: next => setTool(next),
     selectColor: next => { setColor(next); restyle(item => ({ ...item, color: next })); },
     selectStrokeWidth: next => {
       const from = widthRef.current;

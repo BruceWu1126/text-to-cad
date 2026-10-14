@@ -9,12 +9,13 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 // on, a runtime whose renderer's canvas is the scene's), and records the props the shell wired, so
 // the camera reports reach the renderer through exactly the callbacks the real viewport calls.
 // The viewport's own half of those reports (a resize, a preview camera) is ShellViewport.test.tsx.
-const viewport = vi.hoisted(() => ({ props: null as any }));
+const viewport = vi.hoisted(() => ({ props: null as any, inkAt: null as null | ((x: number, y: number) => string | null) }));
 vi.mock('../../../../dist/renderers/kit/shell/ShellViewport.js', () => ({
   default: forwardRef(function StandInViewport(props: any, ref) {
     viewport.props = props;
     useImperativeHandle(ref, () => ({
       captureScreenshotBlob: async () => new Blob(['pixels'], { type: 'image/png' }),
+      inkAt: (x: number, y: number) => viewport.inkAt?.(x, y) ?? null,
       promptCamera: () => ({ camera: { position: [0, -100, 0], target: [0, 0, 0], up: [0, 0, 1], orthographicHalfHeight: 40 }, width: 800, height: 600 }),
     }));
     const hostRef = useRef<HTMLDivElement | null>(null);
@@ -27,7 +28,7 @@ vi.mock('../../../../dist/renderers/kit/shell/ShellViewport.js', () => ({
   })
 }));
 import HarnessRenderer from '../../../../dist/renderers/shell-harness/HarnessRenderer.js';
-import { ViewerHostContext } from '../../../../dist/host/context.js';
+import { ViewerElementContext, ViewerHostContext } from '../../../../dist/host/context.js';
 import { testHost } from '../../../../dist/host/testing/host.js';
 import { createAnimationClock } from '../../../../dist/renderers/kit/tools/playbar/animationClock.js';
 
@@ -45,17 +46,20 @@ function navbarSlot() {
   return slot;
 }
 
-function mount(host = testHost(), state?: unknown) {
+function mount(host = testHost(), state?: unknown, name = 'one.harness', element: { current: HTMLElement | null } | null = null) {
   const save = vi.fn();
   const navigation = vi.fn();
   let settings: any = { toolStack: { panels: {}, collapsed: {} } };
   const listeners = new Set<() => void>();
   const preferences = { getSnapshot: () => settings, subscribe: (listener: () => void) => { listeners.add(listener); return () => listeners.delete(listener); },
     update: (patch: any) => { settings = { ...settings, ...patch }; listeners.forEach(listener => listener()); } };
-  const props = { source: { id: 'one' }, file: { path: '/models/one.harness', name: 'one.harness', kind: 'file' }, document: null,
+  const props = { source: { id: 'one' }, file: { path: `/models/${name}`, name, kind: 'file' }, document: null,
     navbarSlot: navbarSlot(), onReady() {}, onOpenFile() {}, appearance: { colorScheme: 'light' },
     state, onStateChange: save, onNavigationActionsChange: navigation, reload() {}, data: { services: { preferences } } };
-  const view = render(<ViewerHostContext.Provider value={host}><HarnessRenderer {...(props as any)} /></ViewerHostContext.Provider>);
+  // `element`: the viewer the keyboard reaches (its Escape and Delete), as a file viewer provides.
+  const view = render(<ViewerHostContext.Provider value={host}><ViewerElementContext.Provider value={element as any}>
+    <HarnessRenderer {...(props as any)} />
+  </ViewerElementContext.Provider></ViewerHostContext.Provider>);
   const canvas = view.container.querySelector('[data-stand-in-viewport] > canvas') as HTMLCanvasElement;
   const overlay = (name: string) => view.container.querySelector(`[data-harness-${name}]`)!.textContent;
   return { ...view, canvas, overlay, save, navigation };
@@ -192,6 +196,61 @@ it('a clipboard destination has no snapshot in the navbar, and the Drawing panel
   // A clipboard destination's Quick Edit copies its prompt, and nothing else.
   expect(within(screen.getByRole('region', { name: 'Quick Edit' })).queryByRole('button', { name: 'Queue' })).toBeNull();
   expect(deliver).not.toHaveBeenCalled();
+});
+
+it("under Select a press on the drawing picks its mark before anything under it; Shift adds, Escape lets go, Delete deletes", () => {
+  // A file with Select (`panel*`): ink 'a' lies at x < 100 on the canvas, ink 'b' at x >= 100 and y < 50.
+  viewport.inkAt = (x: number, y: number) => (x < 100 ? 'a' : y < 50 ? 'b' : null);
+  const { canvas } = mount(testHost(), undefined, 'panel-one.harness', { current: document.body });
+  act(() => viewport.props.drawing.add([ink('a'), ink('b'), ink('c')]));
+  const press = (x: number, y: number, shiftKey = false) => fireEvent.pointerDown(canvas, { button: 0, clientX: x, clientY: y, shiftKey, pointerId: 1 });
+  const selected = () => viewport.props.drawing.selected;
+  press(10, 10);
+  expect(selected()).toEqual(['a']);
+  press(150, 10, true);
+  expect(selected()).toEqual(['a', 'b']);
+  press(150, 10, true);
+  expect(selected()).toEqual(['a']);
+  // A press on no ink lets go of it, unless Shift keeps it.
+  press(150, 150, true);
+  expect(selected()).toEqual(['a']);
+  press(150, 150);
+  expect(selected()).toEqual([]);
+  press(10, 10);
+  fireEvent.keyDown(canvas, { key: 'Escape' });
+  expect(selected()).toEqual([]);
+  // With nothing picked Delete deletes nothing; with 'a' picked, 'a' alone.
+  fireEvent.keyDown(canvas, { key: 'Delete' });
+  expect(viewport.props.drawing.ink.map((item: any) => item.id)).toEqual(['a', 'b', 'c']);
+  press(10, 10);
+  fireEvent.keyDown(canvas, { key: 'Delete' });
+  expect(viewport.props.drawing.ink.map((item: any) => item.id)).toEqual(['b', 'c']);
+  viewport.inkAt = null;
+});
+
+it('under Select the pointer resting on a mark lights it, and the part under it hears nothing', () => {
+  viewport.inkAt = (x: number) => (x < 100 ? 'a' : null);
+  const { canvas } = mount(testHost(), undefined, 'panel-one.harness');
+  act(() => viewport.props.drawing.add([ink('a'), ink('b')]));
+  const heard = vi.fn();
+  canvas.addEventListener('pointermove', heard);
+  const move = (x: number, buttons = 0) => fireEvent.pointerMove(canvas, { clientX: x, clientY: 10, buttons, pointerId: 1 });
+  move(10);
+  expect(viewport.props.hoveredInk).toEqual(['a']);
+  expect(heard).not.toHaveBeenCalled();
+  const frame = canvas.closest('[data-slot="cad-file-view"]')!;
+  expect(frame.classList.contains('cursor-pointer')).toBe(true);
+  // Off the ink the part hears the pointer again; a drag lights nothing.
+  move(150);
+  expect(viewport.props.hoveredInk).toBeNull();
+  expect(heard).toHaveBeenCalledTimes(1);
+  expect(frame.classList.contains('cursor-pointer')).toBe(false);
+  move(10, 1);
+  expect(viewport.props.hoveredInk).toBeNull();
+  move(10);
+  fireEvent.pointerLeave(canvas.closest('[data-slot="cad-file-view"]')!);
+  expect(viewport.props.hoveredInk).toBeNull();
+  viewport.inkAt = null;
 });
 
 it('a host with no prompt workflow gets no snapshot, and Quick Edit copies a prompt: left out, not disabled', () => {

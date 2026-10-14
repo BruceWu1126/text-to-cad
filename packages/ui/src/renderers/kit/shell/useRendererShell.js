@@ -30,11 +30,16 @@ import { useWhenSettled } from "./useWhenSettled.js";
  * Preview mode's one state: the viewer with its tools put away, orbiting the model and
  * playing its routines. The shell holds it unless the renderer passes it in
  * (`useRendererShell`'s `preview`).
- * @returns {{ previewing: boolean, set: (previewing: boolean) => void }}
+ * `now()` is the state as last set, before React renders it: what a command preview's own crossing
+ * calls (its routine played on the way in) asks of it.
+ * @returns {{ previewing: boolean, set: (previewing: boolean) => void, now: () => boolean }}
  */
 export function usePreviewState() {
-  const [previewing, set] = useState(false);
-  return useMemo(() => ({ previewing, set }), [previewing]);
+  const [previewing, setPreviewing] = useState(false);
+  const latest = useRef(false);
+  const set = useCallback(next => { latest.current = Boolean(next); setPreviewing(Boolean(next)); }, []);
+  const now = useCallback(() => latest.current, []);
+  return useMemo(() => ({ previewing, set, now }), [previewing, set, now]);
 }
 
 /**
@@ -128,8 +133,11 @@ const NO_CHOICE = Object.freeze({});
  * @param {object | null} [options.animation]  A playbar runtime (with its own `clock`), when the file has
  *   routines. They play in preview — the shell puts them on the playbar under the model (its Routines, the
  *   transport, its Playback settings) — and, where the renderer puts `tools.animate` on its strip, under the
- *   Animation tool, whose panel is the shell's. Once neither holds the routine, the runtime's `onRelease` puts
- *   the model back at rest. Each mode's routine is its own: entering preview saves the tools view's
+ *   Animation tool, whose panel is the shell's. Once neither holds the routine, the runtime's `onPutDown`
+ *   pauses it where it is: a frame past its start is KEPT, the model staying there under every other tool,
+ *   and shows as a kept Animation panel in the stack, whose X (`onRelease`) puts the model back at rest; a
+ *   routine at its start goes back to rest (a runtime with no `onPutDown` always does, by `onRelease`).
+ *   Each mode's routine is its own: entering preview saves the tools view's
  *   (`savePlayback`) and starts at rest, and leaving hands it back (`restorePlayback`).
  * @param {{ commands?: Record<string, (...args: any[]) => void>, declined?: Record<string, string>,
  *   state?: () => object, resource?: () => object }} [options.live]  Live commands this renderer adds (by name) or
@@ -177,7 +185,7 @@ export function useRendererShell({
   view, services, resource, modelKey, revisionKey = "", features, toolModes = null, tool = null, previewable = false, preview = null, scene, load,
   viewSettings = null, viewerRef: providedViewerRef = null,
   animation = null, live = EMPTY, promptReferences = null, promptContext = createViewPromptContext,
-  escape = EMPTY, rendererState = null, viewState = null, sketchUnits = "mm",
+  escape = EMPTY, rendererState = null, viewState = null, sketchUnits = "mm", deleteSelection = null,
   onCameraSettled = null, preserveInteractionPixelRatio = false, runtimeLifecycle = null,
   onRuntimeAlert = null, presentationReport = null,
   sceneScaleMode = VIEWER_SCENE_SCALE.CAD
@@ -411,6 +419,11 @@ export function useRendererShell({
   // The Animation tool is a file's with routines; while it is up its panel plays them.
   const routines = animationControlsHaveContent(animation);
   const animateToolActive = !previewing && routines && toolMode === SHELL_TOOL.ANIMATE;
+  // A routine's frame kept in the tools view: the tool put down with the routine paused past its
+  // start (`onPutDown`). A kept effect like a pose: its panel stays in the stack, and taking the tool
+  // up again finds it as it was.
+  const animationKept = !previewing && routines && !animateToolActive && animation.enabled !== false
+    && animation.playing !== true && Number(animation.elapsedSec) > 0;
   // A file whose one tool is Animation has it up from the open, so the open is when it is taken up:
   // the routine plays then when the file's Autoplay is on, as taking the tool up plays it.
   const animateToolFixed = toolModes?.defaultMode === SHELL_TOOL.ANIMATE;
@@ -516,10 +529,21 @@ export function useRendererShell({
   const escapeRef = useRef(escape.handle);
   escapeRef.current = escape.handle;
   const escapeView = useCallback(() => escapeRef.current?.() || false, []);
+  // What Select has picked of the drawing: Delete deletes it with whatever the renderer's own
+  // selection can lose (`deleteSelection`: a measurement), and Escape lets go of it first.
+  const deleteSelectionRef = useRef(deleteSelection);
+  deleteSelectionRef.current = deleteSelection;
   useViewerShortcuts({
     viewerElement,
     onCopy: () => copyActionRef.current?.() || false,
-    escapeActive: Boolean(escape.active || previewing),
+    onDelete: () => {
+      if (previewing || drawToolActive) return false;
+      const session = drawingRef.current;
+      const ink = session.selected.length > 0;
+      if (ink) session.remove(session.selected);
+      return Boolean(deleteSelectionRef.current?.()) || ink;
+    },
+    escapeActive: Boolean(escape.active || previewing || drawing.selected.length),
     onEscape(event) {
       // A popup opened in THIS viewer (a menu, a Select, a colour picker, Display) owns Escape before
       // preview; another viewer's popup is not this one's business.
@@ -527,6 +551,7 @@ export function useRendererShell({
       if (previewing) { setPreviewing(false); return; }
       // Draw's surface spends its own Escape (its editor deselects, or drops the stroke in hand).
       if (drawToolActive && event.target instanceof Element && event.target.closest("[data-cad-drawing-overlay]")) return;
+      if (drawingRef.current.selected.length) { drawingRef.current.select([]); return; }
       escapeRef.current?.();
     }
   });
@@ -622,14 +647,14 @@ export function useRendererShell({
       onSelect: () => selectTool(SHELL_TOOL.DRAW) }),
     // The file's routines, played without leaving the tools view: the playbar and its settings are
     // a panel in the tool stack while it is up (`RendererShell.jsx`). Null for a file with none.
-    // Taking it up starts the routine when Autoplay is on, as entering preview does; a second press
-    // does nothing, and the panel's X puts it down.
+    // Taking it up starts the routine when Autoplay is on, as entering preview does — unless a frame
+    // is kept, which it takes up as it was; a second press does nothing, and the panel's X puts it down.
     animate: routines ? stripTool({ id: SHELL_TOOL.ANIMATE, label: "Animation",
       icon: <Clapperboard className="size-3" strokeWidth={2} aria-hidden="true" />,
       onSelect: () => {
         const takingUp = toolMode !== SHELL_TOOL.ANIMATE;
         selectTool(SHELL_TOOL.ANIMATE);
-        if (takingUp && autoplay && !animation.playing) animation.onPlayToggle();
+        if (takingUp && autoplay && !animationKept && !animation.playing) animation.onPlayToggle();
       } }) : null,
   };
 
@@ -661,7 +686,9 @@ export function useRendererShell({
       // Quick Edit's: the file it is about, how a copied prompt spells its paths, its sketch, and
       // the renderer's own Escape, which an empty Quick Edit passes on.
       resource, captureView, escape: escapeView, currentView, quickEditPrompt,
-      drawToolActive, drawing, animation, animateToolActive, animateToolFixed, display
+      // Select is the tool in hand (the default one), where a press on ink picks it before a part.
+      selecting: !previewing && Boolean(toolModes) && toolMode === toolModes.defaultMode,
+      drawToolActive, drawing, animation, animateToolActive, animateToolFixed, animationKept, display
     }
   };
 }

@@ -5,6 +5,7 @@ import { PerspectiveCamera } from "three";
 
 import {
   MEASURE_SERIES_COLORS,
+  dimensionLayoutHit,
   drawMeasureDimension,
   drawMeasureSnapChip,
   drawMeasureSnapMarker,
@@ -88,6 +89,17 @@ test("screenSpaceDimensionLayout projects endpoints and builds stable screen-spa
   assert.deepEqual(layout.rings[0], { x: 400, y: 300 });
   assert.ok(layout.rings[1].x > 400);
   assert.equal(layout.rings[1].y, 300);
+});
+
+test("a press is on a drawn dimension near its dimension line, a witness line or over its label, and nowhere else", () => {
+  const layout = screenSpaceDimensionLayout({ point: [0, 0, 0] }, { point: [1, 0, 0] }, null, makePerspectiveCamera(), makeRect());
+  const [start, end] = layout.dimensionLine;
+  const middle = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+  assert.equal(dimensionLayoutHit(layout, { x: middle.x, y: middle.y + 4 }), true);
+  assert.equal(dimensionLayoutHit(layout, layout.label), true);
+  assert.equal(dimensionLayoutHit(layout, layout.witnesses[0][1]), true);
+  assert.equal(dimensionLayoutHit(layout, { x: middle.x, y: middle.y + 60 }), false);
+  assert.equal(dimensionLayoutHit(null, middle), false);
 });
 
 test("screenSpaceDimensionLayout returns null for invalid or unprojectable points", () => {

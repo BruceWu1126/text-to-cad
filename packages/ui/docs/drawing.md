@@ -19,12 +19,13 @@ were drawn from every angle. The STEP renderer is the one that offers Draw
   `sameView`: less than 2° of turn, 5% of zoom or pan, nothing else changed),
   or a new one.
 - `drawing/views.js` — a view as a prompt carries it, in a snapshot job's own
-  words: the camera (always orthographic), Clip and Explode when on, the pose,
-  the parts hidden and isolated, and the picture's size. Never how it looks.
+  words: the camera (always orthographic), Clip when on, the one motion on
+  screen (Explode, the pose off its default, or a routine's kept frame as
+  `animation: {clip, time}`), the parts hidden and isolated, and the picture's
+  size. Never how it looks.
 - `drawing/toolbar.jsx` — `DrawingToolbar`, the shared controls built from the
   floating-toolbar button primitive. Pen, Line, Arrow, Rectangle, Ellipse, Text,
-  Fill area and Eraser come first, then Select and move drawings and Move view;
-  then Color, Stroke width, Line style, Placement (On model, the default, or In
+  Fill area and Eraser, then Color, Stroke width, Line style, Placement (On model, the default, or In
   space), Undo, Redo and Clear drawing. The swatches are neon, so ink stands out
   from a shaded model.
 - `drawing/inkGeometry.js` — each tool's mark in screen space:
@@ -42,10 +43,15 @@ were drawn from every angle. The STEP renderer is the one that offers Draw
   puts it down as a text mark; Shift+Enter makes a new line; Escape drops it. The
   surface stops the press's mousedown, which would otherwise take the keyboard
   back from the text it just opened.
-  Select picks ink (Shift adds to the pick), drags it, and Delete removes it.
-  Each mark names the view it was put down (or moved) in.
-  The camera stays the person's between strokes: the wheel zooms, and Move view
-  hands the pointer to the view.
+  Each mark names the view it was put down in. Draw has no Select of its own:
+  the viewer's Select picks ink (`RendererShell.jsx`, through the viewport's
+  `inkAt`), Shift adding to the pick, and Delete and Escape act on it (here too).
+  The camera stays the person's between strokes: the wheel zooms, a right or
+  middle drag orbits, and while Space is held the pointer is the view's.
+- `mountInk(runtime).update(items, selected, hovered)` haloes the ink Select
+  picked, a wider line in the selection's blue behind it, and, fainter, the ink
+  its pointer rests on (the shell's `hoveredInk`, the marks drawn with it too). Ink draws after the model and its
+  highlights (`SKETCH_RENDER_ORDER`), so a lit part never paints over it.
 - `renderers/kit/tools/draw/ink3d.js` — projects a mark into the model.
   - What lies under the marks comes from one render of the parts' depth and
     ids over the marks' bounds, read back. No ray is cast per point: on a large

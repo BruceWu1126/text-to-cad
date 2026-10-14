@@ -1165,8 +1165,8 @@ A selection outlives Select: under any other tool the view still lights it and
 Quick Edit still carries it as chips, until it is cleared (its chips' X, Quick
 Edit's X, Escape, or a new pick). Picking is Select's alone: choosing a row in the
 Model tree (or a host `selectReference`) under another tool returns to Select
-first. Every tool works alongside a selection, as it does alongside a pose, Explode,
-Clip and the drawing.
+first. Every tool works alongside a selection, as it does alongside a pose, Explode, a kept routine frame,
+Clip and the drawing (the three motions among them replace each other: one motion at a time).
 
 ### Position
 
@@ -1300,18 +1300,35 @@ settings plays there and is forgotten on the way out, the tools view's restored 
 routine (`restorePlayback`).
 Nothing under the pointer is pickable in preview, or under Animation.
 
-A routine owns the model's pose only in preview or under Animation. Once neither holds
-it — leaving preview with Animation down, or putting Animation down outside preview —
-the clip is released: the shell calls the runtime's `onRelease` (a GLB's), and STEP's surface
-`releaseAnimation` — stopped, rewound, the pose handed back to the Position controls,
-so selection, topology and the Position controls never meet an animated model. Of the
-playback only the transport preferences survive leaving — the routine, Speed and
-Loop, kept by a Position edit too (`activatePositionControls` in
-`useStepMotionControls.js`) for as long as the file is mounted: the next preview plays that
-routine from the start. Preview's routine is its own: `setPreviewing` (`useRendererShell`)
+One motion at a time: Explode, the Position pose and a routine's frame replace each other, the
+one used last winning and the others going back to rest, with nothing set aside to come back
+(`settings-ui.md`, "Tools and lifecycle"). STEP's two are `useStepMotionControls.js`'s:
+`claimPosition` (a joint, a value, a named pose) rewinds the routine, and `claimAnimation`
+(play, scrub, restart — not choosing a routine, its Speed or its Loop) puts the pose back to
+its default; each tells the host (`host.onUse`), which takes Explode off. Explode is the view
+settings', so `StepSurface.jsx` watches its amount leave zero on the file in hand and calls
+`resetMotion`. `host.previewing()` reads preview's state as last SET (`usePreviewState`'s
+`now`), not as rendered, because preview's crossing calls the runtime before React renders it:
+preview's routine claims nothing.
+
+Once neither preview nor Animation holds the routine — leaving preview with Animation down,
+or putting Animation down outside preview — the shell calls the runtime's `onPutDown` (or,
+for a runtime without one, `onRelease`): STEP's `putDownAnimation` pauses the routine where it
+is and KEEPS a frame past its start (`enabled`, paused, `elapsedSec` > 0), and puts one at its
+start back at rest. A kept frame is a kept effect: the shell draws `KeptAnimationPanel` in the
+stack (`frame.animationKept`), whose X is `onRelease` (stopped, rewound, at rest), and a press
+on the tool takes it up as it was (Autoplay does not restart it). Under every other tool the
+model stays at that frame and picking is live: the pose pass leaves `animateMode` and rebuilds
+the pick state from the transformed selector runtime, as it does for a pose, so picks, hover,
+highlights and Measure land on the parts where they are drawn, and Draw's ink follows the part
+transforms. Joint handles are placed from the Position values, so Position taken up over a kept
+frame shows them at the default pose until a joint is used (which rewinds the frame). A
+prompt's view records the frame (`animation: {clip, time}`, `drawing/views.js`). Of the
+playback the transport preferences survive every rewind — the routine, Speed and Loop — for as
+long as the file is mounted. Preview's routine is its own: `setPreviewing` (`useRendererShell`)
 saves the tools view's (`savePlayback`: the routine, its time, whether it plays) and releases
 it on the way in, and on the way out releases preview's and hands the saved one back
-(`restorePlayback`), so the Animation tool finds its routine where it was. An update of the model that leaves its routines as they were (the
+(`restorePlayback`), so the Animation tool, or a kept frame, is found where it was. An update of the model that leaves its routines as they were (the
 same `animationHash`) neither stops nor rewinds one that is playing: `useStepMotion` loads
 the routines' keyframes per `animationKey`, never per catalog entry, and only a changed routine
 is loaded again, at rest (a routine that bends a tube is keyed by its `tubeSkinsUrl` too,
@@ -1322,7 +1339,7 @@ again after the tab left it starts at the defaults. A routine that failed to
 load has no playbar to say so in; the viewport's card says
 `Animation unavailable`, and can be dismissed.
 
-Because preview and Animation pick nothing and end at rest pose, pick-only state stands
+Because preview and Animation pick nothing, pick-only state stands
 still while they last (`animateMode`, in `step/scene/useStepPose.js`): the transformed selector
 runtime is not rebuilt per posed frame (as React state it would rebuild pick
 groups, their BVH, the picking listeners and the highlight overlays every
@@ -1371,9 +1388,13 @@ The tools are:
 - Fill area: a press inside ink fills the area around it, from an outline that
   need not be closed.
 - Eraser.
-- Select and move drawings.
-- Move view.
 
+Draw has no Select or Move view of its own. Picking ink is the viewer's Select's: under
+Select a press on a mark picks it (and the marks drawn with it, an arrow's head) before
+any part or reference under it, haloed in the selection's blue; Shift adds or takes
+away, a press on anything else lets go of it, Escape lets go and Delete deletes it.
+Before the press, the pointer resting on a mark lights it as a part is lit, a fainter
+halo, and the part under it is not lit (`RendererShell.jsx`'s `hoverSelectable`).
 Color, stroke width and line style set what is drawn next, and restyle the ink
 Select has picked. Draw opens on the pen in neon red.
 
@@ -1385,8 +1406,18 @@ from every angle:
   Explode and Position carry it, Clip cuts it, and hiding the part hides it.
 - A mark over empty space lies on a sheet facing the view it was drawn from.
 
-The camera stays the person's between strokes: the wheel zooms, and Move view
-hands the pointer to the view.
+The camera stays the person's between strokes: the wheel zooms, a right or middle
+drag orbits (the press goes on to the view), and while Space is held the pointer is
+the view's.
+
+Select picks a measurement the same way (`StepSurface.jsx`'s `selectPress`, through
+the shell's `onSelectPress`): a press on its dimension line, a witness line or its
+label picks it before ink and parts, haloed in the selection blue, and Delete deletes
+it (`useStepMeasure`'s `removeSelected`, the shell's `deleteSelection`). One press
+picks one kind: a measurement, a mark of the drawing or a part lets go of the others
+unless Shift keeps them. The pointer resting on a measurement lights it first, a
+fainter halo (`selectHover`, through the shell's `onSelectHover`; `useStepMeasure`'s
+`hovered`), and the part under it is not lit.
 
 A file view has one drawing (`drawing/session.js`). Its **Drawing** panel leads
 the stack while Draw is up, with Draw's controls under its heading. While there

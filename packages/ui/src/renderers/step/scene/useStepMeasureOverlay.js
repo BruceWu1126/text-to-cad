@@ -20,10 +20,15 @@ import { projectWorldPointToClient } from "@text-to-cad/core/lib/viewer/measureR
 
 import { measureRulerDraftMeasurement } from "../workbench/measureRulerState.js";
 
+// What Select has picked, as the drawing's ink and the parts are: the one selection blue.
+const MEASURE_SELECTED_COLOR = "#2979ff";
+
 export function useStepMeasureOverlay({
   measureCanvasRef,
   measureState,
   activeMeasurementId = "",
+  selectedMeasurementIds = [],
+  hoveredMeasurementId = "",
   measureHoverRef = null,
   measureModeActive = false,
   runtimeRef,
@@ -35,6 +40,10 @@ export function useStepMeasureOverlay({
   measureStateRef.current = measureState;
   const activeIdRef = useRef(activeMeasurementId);
   activeIdRef.current = activeMeasurementId;
+  const selectedIdsRef = useRef(selectedMeasurementIds);
+  selectedIdsRef.current = selectedMeasurementIds;
+  const hoveredIdRef = useRef(hoveredMeasurementId);
+  hoveredIdRef.current = hoveredMeasurementId;
 
   // Nothing to draw means no loop at all. An unconditional rAF would clear an
   // empty canvas every frame, for the whole session, on every model, whether or
@@ -95,6 +104,13 @@ export function useStepMeasureOverlay({
             continue;
           }
           const active = item.id === activeId;
+          // Picked by Select: a halo in the selection's blue behind the dimension; under the pointer,
+          // a fainter one, as a part is lit before it is picked.
+          const picked = selectedIdsRef.current.includes(item.id);
+          if (picked || hoveredIdRef.current === item.id) {
+            drawMeasureDimension(context, layout, { color: MEASURE_SELECTED_COLOR, alpha: picked ? 0.5 : 0.25, lineWidth: 8, witnessWidth: 5,
+              tickWidth: 6, ringRadius: 6, ringStrokeWidth: 4, bounds });
+          }
           drawMeasureDimension(context, layout, {
             color: measureSeriesColor(item?.colorIndex),
             alpha: active ? 1 : MEASURE_DIMENSION_FADED_ALPHA,

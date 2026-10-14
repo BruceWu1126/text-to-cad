@@ -165,19 +165,30 @@ the whole strip is disabled while loading. Unavailable and idle are different
 states.
 
 One tool owns pointer input, and it alone is lit on the strip. A kept effect (an
-Explode, Clip or Measure panel, a Position pose) shows as its panel in the stack, not
-on the strip. **A press on the tool in hand does nothing**: a tool is put down by
+Explode, Clip or Measure panel, a Position pose, a routine's frame) shows as its panel in the
+stack, not on the strip. **A press on the tool in hand does nothing**: a tool is put down by
 taking up another (Select, most often). A press on a kept effect's tool takes it up
 again, as it was.
 
 | Tool | Pressing it | Leaving it |
 | --- | --- | --- |
-| Select | The default tool of STEP and robots; picks; shows Features (an assembly's; a robot's Links); its modes are the chevron beside it on the strip; what is picked is Quick Edit's chips | Its panel leaves the stack; the selection stays, lit and in Quick Edit, under any tool |
+| Select | The default tool of STEP and robots; picks parts and references, the drawing's marks and measurements (Shift adds; Delete deletes marks and measurements); shows Features (an assembly's; a robot's Links); its modes are the chevron beside it on the strip; what is picked is Quick Edit's chips | Its panel leaves the stack; the selection stays, lit and in Quick Edit, under any tool |
 | Draw | Draws on the view, with the pen; its tools, color, weight, line style, placement and history are the Drawing panel | The ink stays in the model, its panel a heading while there is ink; the pen is the drawing tool again |
 | Measure | Arms picking and shows the Measure panel: its snapping modes, then its results; kept, a press takes it up again, results and all | Unfinished picks are cancelled; completed measurements and their panel stay, kept |
-| Explode / Clip | Opens a neutral panel; an edit applies the effect; kept, a press takes it up again as it is | A neutral panel goes; an applied effect and its panel stay, kept |
+| Explode / Clip | Opens a neutral panel; an edit applies the effect (Explode's, as a motion: see below); kept, a press takes it up again as it is | A neutral panel goes; an applied effect and its panel stay, kept |
 | Position | Shows joint handles and the Position panel | Handles and panel hide; joint values stay, and a pose that is not the default is kept: one line in the stack |
-| Animation | Shows the Animation panel: its settings in the heading, the routine and the transport; starts the routine when Autoplay is on; its X puts it down | The routine stops and rewinds, and the model is back at rest; the Routine, Speed and Loop stay |
+| Animation | Shows the Animation panel: its settings in the heading, the routine and the transport; starts the routine when Autoplay is on, unless a frame is kept, which it takes up as it was; its X puts it down | The routine pauses where it is: a frame past its start is kept, one line in the stack, and one at its start is at rest; the Routine, Speed and Loop stay |
+
+**One motion at a time.** Every tool's state stands beside every other's — the selection,
+measurements, the drawing, Clip — except three that move the parts: **Explode**, the
+**Position** pose and a routine's **frame**. They replace each other: the one used last wins
+and the others go back to rest, with nothing set aside to come back. Using Explode is moving
+its amount off zero (not taking up its tool or opening its panel): the pose goes back to its
+default and the routine to rest. Using Position is a joint dragged, a value set or a named pose
+chosen: Explode goes off and the routine to rest. Using a routine is playing or scrubbing it
+(not taking up the tool, or choosing a routine, its Speed or its Loop): the pose goes back to its
+default and Explode off. So only the motion in effect has a kept panel in the stack. Preview's
+routine is its own and moves nothing of the tools view's.
 
 A tree is Select's panel, so it is used under Select; a tree row's menu action
 returns to Select before it acts.
@@ -185,7 +196,8 @@ returns to Select before it acts.
 **An X is there while an effect is set.** Measure's, Explode's, Clip's and Position's
 panels have an X whenever their effect is set — results taken, an amount or a cut
 applied, a pose off its default — with the tool in hand or kept: it removes the effect
-(clears the results, resets the pose), leaving the tool in hand as it is. It comes in
+(clears the results, resets the pose), leaving the tool in hand as it is. A kept routine's
+frame has one too, which puts the model back at rest. It comes in
 lightly as the effect is set (a 150ms fade and grow; none under reduced motion). Unset,
 there is no X: another tool puts them down. Animation's X puts it down and returns to
 Select, the default tool, which cannot itself be put down. Draw's panel is a toolbar with no
@@ -240,7 +252,8 @@ pointer resting on the part in the viewport (150ms) or pressing it asks.
 
 **Draw.** Its **Drawing** panel leads the stack while Draw is up, with no heading
 and no X: choosing another tool puts it down. It holds the tools — the ones that draw
-first, the pen leading, then Select and move and Pan at the end — then a rule
+first, the pen leading; no Select or Pan of its own (Select picks ink, a right drag or Space
+orbits) — then a rule
 across the panel, then a row of Color, Stroke width (Thin, Medium, Bold — a shape's
 1, 2 or 4px, the pen drawn to look the same weight, its glyph a dot 3, 5 or 7px across), Line
 style (Solid, Dashed, Dotted — a shape's line; the pen's freehand ink is always
@@ -275,14 +288,17 @@ panel (the routine's name is the row, so it has no label beside it; its name and
 hint are "Routine"); then the transport: play/pause, its glyph on the title's
 8px line and lit by colour alone on hover (no box hangs past the dropdown's
 edge), then the scrubber, which ends where the dropdown does. Taking it up leaves the model at rest
-unless Autoplay is on, which starts the routine, as entering preview does. While
-it is up the routine owns the pose and nothing on the model is picked or
-hovered; the kept effects stay as they are. Preview leaves the tool's routine
+unless Autoplay is on, which starts the routine, as entering preview does — a kept frame
+is taken up as it was, paused. While it is up nothing on the model is picked or
+hovered; the kept effects stay as they are until the routine is played or scrubbed, which
+puts the pose back to its default and Explode off ([one motion at a time](#tools-and-lifecycle)). Preview leaves the tool's routine
 as it is and plays its own (see [preview](#camera-animation-and-preview)): leaving
 preview with Animation up finds the routine where it was, playing or paused at its
 time. Putting it down
-stops the routine and puts the model back at rest, with the Position values it
-set aside; the Routine, Speed and Loop stay for the next time. An update of the
+pauses the routine where it is: a frame past its start is **kept** — the model stays there under
+every other tool, which work on it as it stands (picks, hover, Measure and Draw's ink follow the
+parts where they are drawn) — and one at its start is at rest. The Routine, Speed and Loop stay
+for the next time. An update of the
 model that changes its routines keeps Animation up and its Routine chosen (while
 the model still has it), at rest; one that leaves no routine puts it down.
 
@@ -315,6 +331,12 @@ Position takes the tool up again, its full panel and joint handles with it. The 
 panel itself has its X — "Reset position", the default pose back — while the pose is off
 its default. Another tool puts it down.
 
+**Animation kept.** A routine's frame kept with the tool down shows as one line in the stack
+(`KeptAnimationPanel`): headed "Animation" with the time it paused at, and an X ("Reset
+animation") that puts the model back at rest, and the panel goes. A press on Animation takes it
+up again as it was. A prompt's view records the frame (`animation: {clip, time}`, the snapshot
+job's).
+
 **Explode and Clip** have no enabled checkbox, and are drawn alike: the
 amount in the heading beside the title, one row for a body — Explode's a
 slider, Clip's its axis (a compact X / Y / Z dropdown) and then its slider. Explode opens at 0%,
@@ -338,7 +360,7 @@ Draw is up, **Animation** while Animation is); Select's **Features** (STEP; a
 robot's **Links**) and, whenever something is selected, its **Reference** (then
 a `.sdf`'s **SDF**); Position's **Position**; then the panels
 of the effects a person keeps (**Measurements**, **Explode**, **Clip**, a kept
-**Position**). The panel of the tool in hand always leads, above every kept one
+**Position**, a kept **Animation** frame). The panel of the tool in hand always leads, above every kept one
 (`ToolPanel`'s `lead`): with Measure kept and Explode in hand, Explode is on top. A panel
 whose tool is not up is `hidden`, not unmounted: a tree keeps its expansion,
 filter and scroll across a trip to another tool. Preview hides the whole
@@ -596,10 +618,11 @@ named poses are unchanged, the named pose chosen included; an update that change
 starts the pose at the new defaults, never fitting the old values onto other joints.
 Reset restores the authored
 values (an SRDF's home included), stops motion and hands control back to
-Position. A routine playing, in preview or under Animation, sets the Position
-values aside and gives them back once it is put down; preview never shows them at all
-(it draws the model at rest, see [preview](#camera-animation-and-preview)). A Position edit, Reset included, stops and rewinds a
-routine but keeps its Routine, Speed and Loop for the next play. Kinematics, named poses and
+Position. A routine played or scrubbed in the tools view puts the pose back to its default
+for good ([one motion at a time](#tools-and-lifecycle)); preview's routine leaves it as it is,
+and preview never shows it at all (it draws the model at rest, see
+[preview](#camera-animation-and-preview)). A Position edit, Reset included, stops and rewinds a
+routine, a kept frame too, but keeps its Routine, Speed and Loop for the next play. Kinematics, named poses and
 animation are separate capabilities; the absence of one never leaves empty
 controls for another.
 
@@ -755,8 +778,8 @@ Routines play in preview and under the [Animation tool](#tools-and-lifecycle).
 Preview's routine is its own: it opens at rest on the tools view's Routine, whatever the
 Animation tool was doing, and starts when Autoplay is on (off by default). Leaving
 preview stops its routine — a routine chosen there, its time, whether it played — and
-hands the tools view's back as preview found it: at rest, or under Animation where it
-was, paused at its time or playing on from it (`savePlayback` and `restorePlayback`
+hands the tools view's back as preview found it: at rest, a kept frame, or under Animation
+where it was, paused at its time or playing on from it (`savePlayback` and `restorePlayback`
 on the playbar runtime, `kit/tools/playbar/ViewportAnimationBar.js`). An update of the model that leaves its routines as they were
 neither stops nor rewinds one that is playing; a changed routine starts at rest.
 Orbit's settings and Autoplay are the file's own and are remembered between leaving

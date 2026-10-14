@@ -37,6 +37,10 @@ const PLACEMENTS = new Set(["surface", "space"]);
 const COLOR = /^#[0-9a-f]{6}$/i;
 // A capture's ink is as heavy against its height as it was on a viewer this tall.
 export const SKETCH_REFERENCE_HEIGHT_PX = 900;
+// Ink is drawn after the model and everything that marks it (a highlighted or ghosted part draws at
+// 23–30): it writes no depth, so a part drawn after it would paint over it. Its own depth test still
+// hides it behind the model.
+export const SKETCH_RENDER_ORDER = 40;
 
 const fail = message => { throw new Error(`sketch: ${message}`); };
 const numbers = (value, label) => {
@@ -209,7 +213,7 @@ export function sketchMarkObject(context, mark, { radius, lineScale }) {
   let object;
   if (mark.kind === "stroke") {
     object = createScreenSpaceLineStrip(context, positions, { color: mark.color, opacity: mark.opacity ?? 1,
-      lineWidth: Math.max(1, mark.width * lineScale), renderOrder: 4, depthTest: true, depthWrite: false });
+      lineWidth: Math.max(1, mark.width * lineScale), renderOrder: SKETCH_RENDER_ORDER, depthTest: true, depthWrite: false });
     if (object && mark.widths?.length === positions.length / 3) {
       const segments = mark.widths.length - 1;
       object.geometry.setAttribute("instanceWidthStart", new THREE.InstancedBufferAttribute(new Float32Array(Array.from(mark.widths).slice(0, segments)), 1));
@@ -245,7 +249,7 @@ export function sketchMarkObject(context, mark, { radius, lineScale }) {
       }
       object = new THREE.Mesh(geometry, material);
     }
-    object.renderOrder = 4;
+    object.renderOrder = SKETCH_RENDER_ORDER;
   }
   if (object) {
     // Its world matrix is its part's, set by `placeSketchObject`: never recomputed from its parent.

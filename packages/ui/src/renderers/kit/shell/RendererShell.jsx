@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { Check, Copy, Maximize2, X } from "lucide-react";
 import { Button } from "@text-to-cad/ui/primitives/button";
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
+import { cn } from "@text-to-cad/ui/utils";
 import PreviewChrome from "../tools/PreviewChrome.jsx";
 import { useViewerMobile } from "../../../file-viewer/responsive.js";
 import ViewerAlertCard, { alertDismissible, useAlertDismissal } from "../status/ViewerAlertCard.jsx";
@@ -14,11 +15,12 @@ import { NAVBAR_CONTROL_CLASS } from "../../../lib/navbarRow.js";
 import DisplayPopover from "./DisplayPopover.jsx";
 import ToolPanel, { TOOL_PANEL_BUTTON_CLASS } from "../tools/ToolPanel.jsx";
 import { DrawingToolbar } from "../../../drawing/toolbar.jsx";
+import { withGroups } from "../../../drawing/inkGeometry.js";
 import { useCopyFlash } from "../inspector/copyFlash.js";
 import PlaybackMenu, { OrbitMenu, RoutineMenu } from "../tools/PlaybackMenu.jsx";
 import FloatingToolBar from "../tools/FloatingToolBar.js";
 import ToolStack from "../tools/ToolStack.jsx";
-import AnimationPanel from "../tools/playbar/AnimationPanel.jsx";
+import AnimationPanel, { KeptAnimationPanel } from "../tools/playbar/AnimationPanel.jsx";
 import { ViewportAnimationBar, animationControlsHaveContent } from "../tools/playbar/ViewportAnimationBar.js";
 import QuickEdit from "../tools/quick-edit/QuickEdit.jsx";
 import { ViewportTopRight } from "./ViewportTopRight.jsx";
@@ -117,10 +119,15 @@ function NavbarControl({ label, disabled = false, onClick, children }) {
  *   `onCanvasPointerDown`: a press that landed on the canvas, before anything in the viewport sees
  *   it. The frame focuses itself on such a press whatever the renderer does; this is for a renderer
  *   that also has something to put down when the person reaches for the model.
+ *   `onSelectPress`: under Select, a press on the canvas, before the drawing's ink and any part:
+ *   the renderer's own pickable overlays (a measurement). True when it picked something, and the
+ *   press goes no further; false to let it on.
+ *   `onSelectHover`: under Select, the pointer resting on the canvas (null: it left, or Select went
+ *   down): the renderer lights its own overlay under it, and returns true when there is one.
  */
 export default function RendererShell({ shell, tools, toolPanels = null, references = null, referenceChips = null, nameReference = null, onClearReferences = null, copySelection = null, contextMenuItems = null,
   onContextMenuOpenChange = null, viewportOverlay = null,
-  frameProvider = null, onCanvasPointerDown = null }) {
+  frameProvider = null, onCanvasPointerDown = null, onSelectPress = null, onSelectHover = null }) {
   const frame = shell.frame;
   const mobile = useViewerMobile();
   const { view, resolvedScene, viewerLoading, scene } = frame;
@@ -154,6 +161,43 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
   // the same place in preview's corner — not a tool: opening it leaves the tool in hand as it is.
   // Entering or leaving preview puts it away, as another file does.
   const [displayOpen, setDisplayOpen] = useState(false);
+  // Under Select, what the pointer rests on is lit as a part is: the drawing's mark (and the marks
+  // drawn with it) or the renderer's overlay, and the part under it is not.
+  const [hoveredInk, setHoveredInk] = useState(null);
+  const overSelectable = useRef(false);
+  // The pointer cursor over them, as a renderer shows over a part.
+  const [pointing, setPointing] = useState(false);
+  const selectHover = useRef(onSelectHover);
+  selectHover.current = onSelectHover;
+  const leaveSelectHover = () => {
+    overSelectable.current = false;
+    setPointing(false);
+    selectHover.current?.(null);
+    setHoveredInk(current => (current ? null : current));
+  };
+  useEffect(() => { if (!frame.selecting) leaveSelectHover(); }, [frame.selecting]);
+  const hoverSelectable = event => {
+    if (!frame.selecting || event.buttons !== 0 || !(event.target instanceof Element) || !event.target.closest("canvas")) {
+      if (overSelectable.current || hoveredInk) leaveSelectHover();
+      return;
+    }
+    const session = frame.drawing;
+    const overlay = Boolean(selectHover.current?.(event));
+    const id = !overlay && session.ink.length ? frame.viewerRef.current?.inkAt?.(event.clientX, event.clientY) : null;
+    const ids = id ? withGroups([id], session.ink) : null;
+    setHoveredInk(current => (ids && current && current.join() === ids.join()) || (!ids && !current) ? current : ids);
+    const over = overlay || Boolean(id);
+    if (over && !overSelectable.current) {
+      // The part lit under the pointer lets go, as when the pointer leaves the model.
+      for (let node = event.target; node && node !== event.currentTarget; node = node.parentElement) {
+        node.dispatchEvent(new PointerEvent("pointerleave", { bubbles: false, pointerId: event.pointerId, pointerType: event.pointerType }));
+      }
+    }
+    overSelectable.current = over;
+    setPointing(over);
+    // Over a mark or a measurement the part under it hears nothing of the pointer.
+    if (over) event.stopPropagation();
+  };
   useEffect(() => { setPreviewing(false); setDisplayOpen(false); }, [frame.modelKey, setPreviewing]);
   useEffect(() => { setDisplayOpen(false); }, [previewing]);
   // One viewport, two render profiles over the same Display settings (`renderProfile.js`): the
@@ -172,21 +216,22 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
     onFullscreenChange?.(true);
     return () => onFullscreenChange?.(false);
   }, [previewing, onFullscreenChange]);
-  // Once neither preview nor the Animation tool holds the routine, the model goes back to rest (its
-  // Routine, Speed and Loop stay for the next time). Leaving preview with the tool up is not that:
-  // the tool's routine comes back as preview found it.
-  const releaseRef = useRef(null);
-  releaseRef.current = animation?.onRelease || null;
+  // Once neither preview nor the Animation tool holds the routine, it is put down: paused where it
+  // is, a frame past its start kept (the kept Animation panel below), one at its start back at rest
+  // (its Routine, Speed and Loop stay for the next time). Leaving preview with the tool up is not
+  // that: the tool's routine comes back as preview found it.
+  const putDownRef = useRef(null);
+  putDownRef.current = animation?.onPutDown || animation?.onRelease || null;
   const routineHeld = previewing || frame.animateToolActive;
   const wasHeld = useRef(routineHeld);
   useEffect(() => {
-    if (wasHeld.current && !routineHeld) releaseRef.current?.();
+    if (wasHeld.current && !routineHeld) putDownRef.current?.();
     wasHeld.current = routineHeld;
   }, [routineHeld]);
   // The shell's own tools' panels lead the stack while their tool is up: Draw's tools, color and
   // history, or the Animation tool's routine, transport and settings, whose X puts it down, back to
-  // the default tool -- no X where Animation is the file's one tool, never put down. The
-  // renderer's follow.
+  // the default tool -- no X where Animation is the file's one tool, never put down. A routine's
+  // frame kept with the tool down is one line, its X back to rest. The renderer's follow.
   // The drawing: one sketch, its ink in the model from every angle. Headed "Drawing", with its Copy
   // (a picture of the view, ink and all) and, while there is ink, the X that clears it: Draw's
   // controls under it while Draw is the tool, and the heading alone, kept, while it is not and there
@@ -201,6 +246,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
     {frame.animateToolActive ? <AnimationPanel runtime={playbackRuntime} autoplay={shell.autoplay}
       onAutoplayChange={shell.setAutoplay} onClose={frame.animateToolFixed ? null : shell.selectDefaultTool}
       disabled={viewerLoading || !scene} /> : null}
+    {frame.animationKept ? <KeptAnimationPanel runtime={animation} /> : null}
   </>;
 
   const hasContent = Boolean(scene) && !viewerLoading;
@@ -241,7 +287,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
   </>;
   const body = (
     <div
-      className="relative flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground"
+      className={cn("relative flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground", pointing && "cursor-pointer")}
       data-slot="cad-file-view"
       data-cad-surface
       tabIndex={-1}
@@ -249,7 +295,29 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
         if (!(event.target instanceof Element) || !event.target.closest("canvas")) return;
         onCanvasPointerDown?.(event);
         event.currentTarget.focus({ preventScroll: true });
+        // Under Select a press picks, front to back: the renderer's own overlays (a measurement),
+        // then the drawing's mark (and the marks drawn with it), then a part. Shift adds or takes
+        // away; a press that picks one kind lets go of the others, unless Shift keeps them.
+        if (!frame.selecting || event.button !== 0) return;
+        const session = frame.drawing;
+        if (onSelectPress?.(event)) {
+          event.stopPropagation();
+          event.preventDefault();
+          if (!event.shiftKey && session.selected.length) session.select([]);
+          return;
+        }
+        const id = session.ink.length ? frame.viewerRef.current?.inkAt?.(event.clientX, event.clientY) : null;
+        if (!id) { if (!event.shiftKey && session.selected.length) session.select([]); return; }
+        event.stopPropagation();
+        event.preventDefault();
+        const picked = event.shiftKey
+          ? (session.selected.includes(id) ? session.selected.filter(other => other !== id) : [...session.selected, id])
+          : [id];
+        if (!event.shiftKey) onClearReferences?.();
+        session.select(withGroups(picked, session.ink));
       }}
+      onPointerMoveCapture={hoverSelectable}
+      onPointerLeave={() => { if (overSelectable.current || hoveredInk) leaveSelectHover(); }}
       ref={frame.hostRef}
     >
       <div className="relative flex h-full min-w-0 flex-col overflow-hidden bg-transparent">
@@ -293,6 +361,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, referen
                     loadingPresentation={frame.loading}
                     drawingEnabled={frame.drawToolActive}
                     drawing={frame.drawing}
+                    hoveredInk={hoveredInk}
                     drawingView={frame.currentView}
                     onPerspectiveChange={frame.handlePerspectiveChange}
                     onPresentationChange={frame.handlePresentationChange}

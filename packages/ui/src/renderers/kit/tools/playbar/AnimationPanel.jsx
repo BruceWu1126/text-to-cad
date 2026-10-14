@@ -4,7 +4,7 @@ import { FileSheetSelectRow } from "../../inspector/FileSheet.js";
 import { SpeedSubmenu } from "../PlaybackMenu.jsx";
 import { ToolSettingsMenu } from "../ToolModeMenu.jsx";
 import ToolPanel from "../ToolPanel.jsx";
-import { AnimationTimeControl, PLAYBACK_SPEEDS } from "./ViewportAnimationBar.js";
+import { AnimationTimeControl, PLAYBACK_SPEEDS, formatSeconds } from "./ViewportAnimationBar.js";
 
 /**
  * The Animation tool's panel: a file's routines, played in the tools view. Headed as Measure's is:
@@ -52,4 +52,16 @@ export default function AnimationPanel({ runtime, autoplay, onAutoplayChange, on
       </div>
     </div>
   </ToolPanel>;
+}
+
+/**
+ * A routine's frame kept while the Animation tool is not up: one line in the stack, as a kept pose
+ * is, headed "Animation" with the time it paused at, and an X ("Reset animation") that puts the
+ * model back at rest. A press on the Animation tool takes it up again as it was.
+ *
+ * @param {{ runtime: object }} props  `runtime` is the playbar runtime, paused past its start.
+ */
+export function KeptAnimationPanel({ runtime }) {
+  return <ToolPanel id="animation-kept" title="Animation" summary={formatSeconds(runtime.elapsedSec)} label="Animation kept"
+    collapsible={false} closeLabel="Reset animation" onClose={() => runtime.onRelease()} />;
 }

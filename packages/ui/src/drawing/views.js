@@ -1,14 +1,15 @@
 /**
  * The views a prompt carries: how the viewer stood when the person sent it, and how it stood when
  * each part of their drawing was drawn. A view is said in a snapshot job's own words (`camera`,
- * `display.clip` and `display.exploded`, `kinematics` or `jointValues`, `selection.hide` and
- * `selection.focus`, and the picture's `width` and `height`), so the prompt's views file is a job
+ * `display.clip` and `display.exploded`, `kinematics` or `jointValues`, `animation`, `selection.hide`
+ * and `selection.focus`, and the picture's `width` and `height`), so the prompt's views file is a job
  * `cadgen snapshot --job` renders as it was, and how the view looked is the snapshot's own.
  *
  * @typedef {{
  *   camera: { position: number[], target: number[], up: number[], orthographicHalfHeight: number },
  *   display?: { clip?: object, exploded?: object }, kinematics?: Record<string, unknown>,
- *   jointValues?: Record<string, number>, selection?: { hide?: string[], focus?: string[] },
+ *   jointValues?: Record<string, number>, animation?: { clip: string, time: number },
+ *   selection?: { hide?: string[], focus?: string[] },
  *   width: number, height: number
  * }} PromptView
  * @typedef {PromptView & { label: string }} LabelledView
@@ -20,13 +21,14 @@ const filled = value => Boolean(value) && typeof value === "object" && Object.ke
 
 /**
  * The view on screen as a prompt carries it: the viewport's camera and shape (`ShellViewport`'s
- * `promptCamera`), and of the viewer's state what places the parts or hides them — Clip and
- * Explode when they are on, the pose, the parts hidden and isolated — never how it looks: a
- * snapshot's look is its own.
+ * `promptCamera`), and of the viewer's state what places the parts or hides them — Clip when it is
+ * on, the one motion on screen (Explode, the pose, or a routine's kept frame: `{clip, time}`), the
+ * parts hidden and isolated — never how it looks: a snapshot's look is its own.
  *
  * @param {{ camera: PromptView["camera"], width: number, height: number } | null} viewport
  * @param {{ display?: { clip?: { enabled?: boolean }, exploded?: { enabled?: boolean } },
- *   state?: { kinematics?: object, jointValues?: object, hide?: readonly string[], focus?: readonly string[] } | null }} [viewer]
+ *   state?: { kinematics?: object, jointValues?: object, animation?: { clip: string, time: number } | null,
+ *     hide?: readonly string[], focus?: readonly string[] } | null }} [viewer]
  * @returns {PromptView | null}
  */
 export function promptView(viewport, { display = {}, state = null } = {}) {
@@ -39,6 +41,7 @@ export function promptView(viewport, { display = {}, state = null } = {}) {
   if (filled(placed)) view.display = placed;
   if (filled(state?.kinematics)) view.kinematics = state.kinematics;
   if (filled(state?.jointValues)) view.jointValues = state.jointValues;
+  if (state?.animation?.clip) view.animation = { clip: state.animation.clip, time: Number(state.animation.time) || 0 };
   // A snapshot takes one or the other: the parts isolated (it ghosts the rest) when there are any,
   // else the parts hidden.
   const selection = {};
@@ -67,7 +70,7 @@ const key = value => JSON.stringify(value ?? null);
  */
 export function sameView(a, b) {
   if (!a || !b) return false;
-  for (const field of ["display", "kinematics", "jointValues", "selection"]) if (key(a[field]) !== key(b[field])) return false;
+  for (const field of ["display", "kinematics", "jointValues", "animation", "selection"]) if (key(a[field]) !== key(b[field])) return false;
   const [da, db] = [direction(a.camera), direction(b.camera)];
   const cos = Math.min(1, Math.max(-1, da.reduce((sum, value, index) => sum + value * db[index], 0)));
   if (Math.acos(cos) * 180 / Math.PI >= SAME_TURN_DEGREES) return false;

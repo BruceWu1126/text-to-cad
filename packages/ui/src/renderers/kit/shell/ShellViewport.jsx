@@ -42,7 +42,8 @@ import { createStudioEnvironmentCache } from "../look/studioEnvironmentCache.js"
 import { isKitScene } from "../scene.js";
 import LoadingIndicator from "../status/LoadingIndicator.js";
 import InkOverlay from "../tools/draw/InkOverlay.jsx";
-import { mountInk } from "../tools/draw/ink3d.js";
+import { inkAt } from "../../../drawing/inkGeometry.js";
+import { inkOnScreen, mountInk } from "../tools/draw/ink3d.js";
 import { createViewerRenderStateResolver } from "../view-settings/renderState.js";
 import { shareSettingsValue } from "../view-settings/shareSettingsValue.js";
 import { createViewUpdateGate } from "../view-settings/viewUpdateGate.js";
@@ -99,6 +100,8 @@ const ShellViewport = forwardRef(function ShellViewport({
   loadingPresentation = null,
   drawingEnabled = false,
   drawing = null,
+  // The ink Select's pointer rests on (ids, the marks drawn with it), haloed fainter than a pick.
+  hoveredInk = null,
   // The view on screen as a prompt carries it (`drawing/views.js`), for each mark Draw puts down.
   drawingView = null,
   onPerspectiveChange = null,
@@ -355,6 +358,8 @@ const ShellViewport = forwardRef(function ShellViewport({
   // The drawing's ink in the model (`tools/draw/ink3d.js`), from every angle, Draw up or not: each
   // change to it draws it again.
   const ink = drawing?.ink;
+  const drawingRef = useRef(drawing);
+  drawingRef.current = drawing;
   // The drawing's ink in the scene, mounted once it has some and kept for the runtime: each change
   // draws only the marks it adds.
   const inkMount = useRef(null);
@@ -363,8 +368,8 @@ const ShellViewport = forwardRef(function ShellViewport({
     const runtime = runtimeRef.current;
     if (!runtime?.scene || !runtime?.THREE) return;
     if (!inkMount.current && ink?.length) inkMount.current = mountInk(runtime);
-    inkMount.current?.update(ink || []);
-  }, [ink, viewerReadyTick]);
+    inkMount.current?.update(ink || [], drawing?.selected || [], hoveredInk || []);
+  }, [ink, drawing?.selected, hoveredInk, viewerReadyTick]);
 
   useImperativeHandle(ref, () => ({
     async prepareViewSettings(nextScene, signal) {
@@ -409,6 +414,16 @@ const ShellViewport = forwardRef(function ShellViewport({
       return readScopedPerspectiveSnapshot(runtimeRef.current, {
         modelKey, sceneScaleMode: normalizedSceneScaleMode, coordinateSystem: STORED_CAMERA_COORDINATES
       });
+    },
+    // The drawing's mark under a point of the page (client pixels), by its id: what Select picks
+    // before a part. Null over no ink.
+    inkAt(clientX, clientY) {
+      const runtime = runtimeRef.current, element = runtime?.renderer?.domElement;
+      const marks = drawingRef.current?.ink;
+      if (!runtime || !element || !marks?.length) return null;
+      const rect = element.getBoundingClientRect();
+      const screen = inkOnScreen(runtime, marks, { width: rect.width, height: rect.height });
+      return inkAt({ x: clientX - rect.left, y: clientY - rect.top }, screen)[0]?.id ?? null;
     },
     // The camera as a snapshot job says it, and the viewport's size: a prompt's view
     // (`drawing/views.js`). A snapshot is always orthographic, so a perspective view becomes the

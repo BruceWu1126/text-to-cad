@@ -6,7 +6,7 @@ import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 
 import { normalizeSketch } from '@text-to-cad/core/common/sketch.js';
-import { inkSketch, mountInk, moveInk, projectInk } from './ink3d.js';
+import { inkSketch, mountInk, projectInk } from './ink3d.js';
 
 /** Draw's ink in 3D: drawn over one view, projected onto the parts under it, carried with them. */
 
@@ -53,7 +53,7 @@ test('a stroke lies on the part under it, in its frame, two pixels off the face;
   assert.deepEqual([...inAir.points.slice(0, 3)].map(value => Math.round(value * 1000) / 1000), [-45, 45, -28]);
 });
 
-test('a stroke drawn in space lies on the plane just in front of the model, on no part, whatever is under it, and stays in space moved; one on the model beside it still lands on the model', () => {
+test('a stroke drawn in space lies on the plane just in front of the model, on no part, whatever is under it; one on the model beside it still lands on the model', () => {
   const { runtime, slab } = rig();
   const [inSpace, onModel] = projectInk(runtime, [{ ...stroke('space', [[42, 55], [45, 55]]), placement: 'space' },
     { ...stroke('surface', [[42, 58], [45, 58]]), placement: 'surface' }], size);
@@ -66,10 +66,6 @@ test('a stroke drawn in space lies on the plane just in front of the model, on n
   assert.equal(onModel.part, 'slab');
   assert.equal(onModel.placement, 'surface');
   assert.ok(worldOf(onModel, slab).every(point => Math.abs(point.z - 2) < 1e-6));
-  // Moved: each keeps its placement — the space stroke on the plane, the other on the slab.
-  const [movedSpace, movedSurface] = moveInk(runtime, [inSpace, onModel], { x: 2, y: 0 }, size);
-  assert.deepEqual([movedSpace.part, movedSpace.placement, movedSurface.part, movedSurface.placement], [null, 'space', 'slab', 'surface']);
-  assert.deepEqual(plane(movedSpace)[0], [-6, -5, 12]);
   // Marks all in space look at no part: nothing under them is read.
   slab.raycast = () => { throw new Error('the parts were read for ink in space'); };
   assert.equal(projectInk(runtime, [{ ...stroke('alone', [[42, 55], [45, 55]]), placement: 'space' }], size)[0].part, null);
@@ -121,7 +117,18 @@ test('drawn, ink takes its part\'s place each frame — exploded or posed — hi
   assert.equal(lines[0], line, 'the mark already drawn keeps its object');
   ink.update([second]);
   assert.deepEqual(ink.group.children.filter(child => child.isLine2), [lines[1]]);
-  ink.update([first, second]);
+  // What Select picked is haloed behind its ink, and lets go with it.
+  ink.update([first, second], [second.id]);
+  const halos = () => ink.group.children.filter(child => child.isLine2 && child.renderOrder < lines[1].renderOrder);
+  assert.equal(halos().length, 1);
+  // What the pointer rests on, fainter; picking it brightens the halo.
+  ink.update([first, second], [second.id], [first.id]);
+  const opacities = () => halos().map(halo => halo.material.opacity).sort();
+  assert.deepEqual(opacities(), [0.25, 0.5]);
+  ink.update([first, second], [first.id, second.id], [first.id]);
+  assert.deepEqual(opacities(), [0.5, 0.5]);
+  ink.update([first, second], []);
+  assert.equal(halos().length, 0);
   const drawn = ink.group.children.find(child => child.isLine2 && child !== lines[1]);
   // The part moves (an explode, a pose): the ink goes with it.
   slab.position.set(30, 0, -1);

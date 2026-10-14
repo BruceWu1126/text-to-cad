@@ -104,12 +104,12 @@ it('a rebuild keeps the named pose chosen while the joints and named poses are t
   expect(chosen()).toEqual(['', { swing: 0 }]);
 });
 
-it('an update that leaves the routine as it was neither stops nor rewinds it, and keeps the pose it set aside; a changed routine is loaded again, at rest', async () => {
+it('an update that leaves the routine as it was neither stops nor rewinds it; a changed routine is loaded again, at rest', async () => {
   const { result, rerender } = mount(saved(1, { routine: 'swing-1' }));
   await loaded(result, 1);
   await waitFor(() => expect(result.current.animationControls.clips).toHaveLength(1));
   act(() => result.current.onParameterChange('swing', 30));
-  // Play takes the pose: Position's values are set aside, and the routine plays from rest.
+  // Play uses the routine: one motion at a time, so the pose goes back to its default.
   act(() => result.current.onPlayToggle());
   expect([result.current.animationState.playing, result.current.parameterValues]).toEqual([true, { swing: 0 }]);
 
@@ -118,9 +118,9 @@ it('an update that leaves the routine as it was neither stops nor rewinds it, an
   expect(loads.count).toBe(1);
   expect(result.current.animationState).toMatchObject({ activeClipId: 'swing', enabled: true, playing: true });
   expect(result.current.animationControls.clips).toHaveLength(1);
-  // Leaving preview hands the pose back as Position left it, across the update.
+  // Back at rest the pose is the default: nothing was set aside to come back.
   act(() => result.current.releaseAnimation());
-  expect(result.current.parameterValues).toEqual({ swing: 30 });
+  expect(result.current.parameterValues).toEqual({ swing: 0 });
 
   // A routine the save changed is loaded again, and is at rest.
   act(() => result.current.onPlayToggle());
@@ -130,7 +130,7 @@ it('an update that leaves the routine as it was neither stops nor rewinds it, an
   expect(result.current.animationState.playing).toBe(false);
 });
 
-it('a changed routine is read again behind the routines in hand: the model goes to rest, Position gets its values back, and the routine chosen stays chosen', async () => {
+it('a changed routine is read again behind the routines in hand: the model goes to rest, at the default pose, and the routine chosen stays chosen', async () => {
   const flutter = { ...SWING_CLIP, id: 'flutter', label: 'Flutter' };
   const { result, rerender, listed } = mount(saved(1, { routine: 'pair-1', clips: [SWING_CLIP, flutter] }));
   await loaded(result, 1);
@@ -147,5 +147,5 @@ it('a changed routine is read again behind the routines in hand: the model goes 
   // The routines never went while the new ones loaded, so the Animation tool stays up over them.
   expect(listed).not.toContain(0);
   expect(result.current.animationState).toMatchObject({ activeClipId: 'flutter', enabled: false, playing: false, elapsedSec: 0 });
-  expect(result.current.parameterValues).toEqual({ swing: 30 });
+  expect(result.current.parameterValues).toEqual({ swing: 0 });
 });

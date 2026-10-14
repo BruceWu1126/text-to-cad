@@ -54,11 +54,11 @@ it('names the view ink goes down in: one drawn in before that is the same, or a 
   expect(current().views).toEqual([]);
 });
 
-it('put down, Draw goes back to the pen and selects nothing, and keeps the ink, the colour, the weight, the line style and the placement', () => {
+it("put down, Draw goes back to the pen and keeps the ink, Select's pick of it, the colour, the weight, the line style and the placement", () => {
   const session = renderHook(({ active }) => useDrawingSession(active, CAD), { initialProps: { active: true } });
   const current = () => session.result.current;
-  act(() => { current().add([stroke('a')]); current().selectTool('selection'); current().select(['a']); });
+  act(() => { current().add([stroke('a')]); current().selectTool('eraser'); current().select(['a']); });
   act(() => { current().selectColor('#ffffff'); current().selectStrokeWidth(4); current().selectStrokeStyle('dotted'); current().selectPlacement('space'); });
   session.rerender({ active: false });
-  expect(current()).toMatchObject({ tool: 'freedraw', selected: [], color: '#ffffff', strokeWidth: 4, strokeStyle: 'dotted', placement: 'space', hasDrawing: true });
+  expect(current()).toMatchObject({ tool: 'freedraw', selected: ['a'], color: '#ffffff', strokeWidth: 4, strokeStyle: 'dotted', placement: 'space', hasDrawing: true });
 });

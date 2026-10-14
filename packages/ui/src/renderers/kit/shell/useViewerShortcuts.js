@@ -7,25 +7,30 @@ import { isEditableTarget } from "../viewport/dom.js";
  * landed on the page background after the last pointer press was inside it.
  * A composer, another pane and any editable target keep their own Escape.
  *
+ * Delete (or Backspace) reaches `onDelete` the same way, for what Select has picked; it is the
+ * key's only while `onDelete` says it deleted something.
+ *
  * @param {{ viewerElement: { current: HTMLElement | null } | null, escapeActive: boolean,
- *   onEscape: (event: KeyboardEvent) => void, onCopy?: () => boolean }} options
+ *   onEscape: (event: KeyboardEvent) => void, onCopy?: () => boolean, onDelete?: () => boolean }} options
  *   `escapeActive`: there is something for Escape to do (so idle viewers hold no listener).
  */
 export function useViewerShortcuts({
-  viewerElement, escapeActive, onEscape, onCopy
+  viewerElement, escapeActive, onEscape, onCopy, onDelete
 }) {
   const pointerInside = useRef(false);
   const copy = useRef(onCopy);
   copy.current = onCopy;
   const escape = useRef(onEscape);
   escape.current = onEscape;
+  const remove = useRef(onDelete);
+  remove.current = onDelete;
   useEffect(() => {
     const onPointerDown = event => { pointerInside.current = Boolean(viewerElement?.current?.contains(event.target)); };
     window.addEventListener("pointerdown", onPointerDown, true);
     return () => window.removeEventListener("pointerdown", onPointerDown, true);
   }, [viewerElement]);
   useEffect(() => {
-    if (!(escapeActive || onCopy)) return undefined;
+    if (!(escapeActive || onCopy || onDelete)) return undefined;
     const handleKeyDown = (event) => {
       const element = viewerElement?.current;
       if (!element) return;
@@ -39,8 +44,10 @@ export function useViewerShortcuts({
         if (copy.current?.()) { event.preventDefault(); event.stopPropagation(); }
       }
       if (event.key === "Escape" && !event.defaultPrevented && !isEditableTarget(event.target)) escape.current?.(event);
+      if ((event.key === "Delete" || event.key === "Backspace") && !event.defaultPrevented && !isEditableTarget(event.target)
+        && remove.current?.()) { event.preventDefault(); event.stopPropagation(); }
     };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [viewerElement, escapeActive, Boolean(onCopy)]);
+  }, [viewerElement, escapeActive, Boolean(onCopy), Boolean(onDelete)]);
 }

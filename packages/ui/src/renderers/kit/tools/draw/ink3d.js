@@ -1,5 +1,6 @@
+import { createScreenSpaceLineStrip } from "@text-to-cad/core/common/renderEdges.js";
 import {
-  disposeSketchObject, placeSketchObject, sketchDocument, sketchMarkObject, sketchObjectShown as shown, sketchPartObjects
+  SKETCH_RENDER_ORDER, disposeSketchObject, placeSketchObject, sketchDocument, sketchMarkObject, sketchObjectShown as shown, sketchPartObjects
 } from "@text-to-cad/core/common/sketch.js";
 import { markPoints } from "../../../../drawing/inkGeometry.js";
 import { requestSceneFrame } from "../../viewport/sceneFrames.js";
@@ -412,36 +413,39 @@ export function inkOnScreen(runtime, items, { width, height }) {
   });
 }
 
-/**
- * Items moved on the screen by `delta` pixels, each projected again from where it lands — onto the
- * surface under it there, or a sheet; one drawn in space onto the plane through the orbit point now —
- * keeping its id, its placement and how it looks.
- */
-export function moveInk(runtime, items, delta, size) {
-  const screen = new Map(inkOnScreen(runtime, items, size).map(ink => [ink.id, ink.points]));
-  const marks = items.flatMap(item => {
-    const points = screen.get(item.id);
-    if (!points) return [];
-    const moved = points.map(point => ({ x: point.x + delta.x, y: point.y + delta.y }));
-    const kept = { placement: item.placement ?? "surface", ...(item.view ? { view: item.view } : {}), ...(item.group ? { group: item.group } : {}) };
-    if (item.kind === "stroke") return [{ kind: "stroke", id: item.id, points: moved, closed: false, color: item.color, width: item.width,
-      opacity: item.opacity, dash: item.dash, ...kept, ...(item.widths ? { widths: item.widths } : {}) }];
-    if (item.kind === "area") return [{ kind: "area", id: item.id, outline: moved, color: item.color, opacity: item.opacity, ...kept }];
-    return [{ kind: "text", id: item.id, corners: moved, text: item.text, color: item.color, fontPx: item.fontPx, ...kept }];
-  });
-  // A closed stroke's points come back to its start: keep it closed, without the repeated end.
-  return projectInk(runtime, marks, size).map(item => ({ ...item, closed: items.find(source => source.id === item.id)?.closed ?? item.closed }));
+// What Select has picked is haloed: a wider line in the selection's blue behind the ink, along a
+// stroke, round a fill's outline or a text mark's box; what the pointer rests on, a fainter one.
+const SELECTION_COLOR = "#2979ff";
+const HALO_PX = 6;
+const PICKED_OPACITY = 0.5;
+const HOVERED_OPACITY = 0.25;
+function haloObject(runtime, item, lineScale, opacity) {
+  const outline = item.kind === "stroke" ? item.points
+    : item.points.subarray(0, 3 * (item.kind === "area" ? item.outline ?? item.points.length / 3 : 4));
+  const closed = item.kind !== "stroke" || item.closed;
+  const points = closed && item.kind !== "stroke" ? Float32Array.from([...outline, ...outline.subarray(0, 3)]) : outline;
+  const width = item.kind === "stroke" ? item.width * Math.max(1, ...(item.widths || [1])) : 2;
+  const halo = createScreenSpaceLineStrip(runtime, points, { color: SELECTION_COLOR, opacity,
+    lineWidth: (width + HALO_PX) * lineScale, renderOrder: SKETCH_RENDER_ORDER - 1, depthTest: true, depthWrite: false });
+  if (halo) {
+    halo.matrixAutoUpdate = false;
+    halo.matrixWorldAutoUpdate = false;
+    halo.frustumCulled = false;
+    halo.userData.haloOpacity = opacity;
+  }
+  return halo;
 }
 
 /**
- * Draws projected ink in a viewer runtime until `dispose()`: `update(items)` draws a drawing's ink as
- * it is now, making objects only for items it has not drawn yet and dropping those it no longer has
- * (an item is never changed in place: a changed one is a new item). Every frame, before anything is
+ * Draws projected ink in a viewer runtime until `dispose()`: `update(items, selected)` draws a
+ * drawing's ink as it is now, making objects only for items it has not drawn yet and dropping those
+ * it no longer has (an item is never changed in place: a changed one is a new item), and halos the
+ * ink Select has picked (`selected`, ids) and, fainter, what the pointer rests on (`hovered`). Every frame, before anything is
  * drawn, each mark takes its part's place (its frame as the scene has it then: spread apart, posed),
  * hides with it, and takes the clip planes the model has. A part rebuilt under it is found again by id.
  *
  * @param {object} runtime
- * @returns {{ group: import("three").Group, update(items: InkItem[]): void, dispose(): void }}
+ * @returns {{ group: import("three").Group, update(items: InkItem[], selected?: readonly string[], hovered?: readonly string[]): void, dispose(): void }}
  */
 export function mountInk(runtime) {
   const { THREE, scene } = runtime;
@@ -454,13 +458,14 @@ export function mountInk(runtime) {
   // A stroke's width is in CSS pixels; the line's in device pixels.
   const lineScale = Number(runtime.renderer?.getPixelRatio?.()) || 1;
   let entries = new Map();
+  let halos = new Map();
   let parts = partObjects(runtime);
   const attached = object => { for (let node = object; node; node = node.parent) if (node === scene) return true; return false; };
   const follow = () => {
     // A scene rebuilt under the ink has new part objects: find them again.
     if ([...parts.values()].some(object => !attached(object))) parts = partObjects(runtime);
     const planes = Array.isArray(runtime.activeClipPlanes) ? runtime.activeClipPlanes : [];
-    for (const [item, object] of entries) {
+    for (const [item, object] of [...entries, ...halos]) {
       // A part the scene has lost (it is rebuilding) hides its ink until it is back.
       placeSketchObject(object, item, parts, { planes, visible: item.part == null || parts.has(String(item.part)) });
     }
@@ -485,7 +490,7 @@ export function mountInk(runtime) {
   const release = disposeSketchObject;
   return {
     group,
-    update(items) {
+    update(items, selected = [], hovered = []) {
       const next = new Map();
       for (const item of items) {
         let object = entries.get(item);
@@ -498,6 +503,21 @@ export function mountInk(runtime) {
       }
       for (const [item, object] of entries) if (!next.has(item)) release(object);
       entries = next;
+      const picked = new Set(selected);
+      const lit = new Set(hovered);
+      const nextHalos = new Map();
+      for (const item of items) {
+        const opacity = picked.has(item.id) ? PICKED_OPACITY : lit.has(item.id) ? HOVERED_OPACITY : 0;
+        if (!opacity) continue;
+        let halo = halos.get(item);
+        if (halo && halo.userData.haloOpacity !== opacity) { release(halo); halos.delete(item); halo = null; }
+        halo ??= haloObject(runtime, item, lineScale, opacity);
+        if (!halo) continue;
+        if (!halo.parent) group.add(halo);
+        nextHalos.set(item, halo);
+      }
+      for (const [item, halo] of halos) if (!nextHalos.has(item)) release(halo);
+      halos = nextHalos;
       follow();
       redraw();
     },
@@ -506,8 +526,9 @@ export function mountInk(runtime) {
       group.removeFromParent();
       sentinel.geometry.dispose();
       sentinel.material.dispose();
-      for (const object of entries.values()) release(object);
+      for (const object of [...entries.values(), ...halos.values()]) release(object);
       entries = new Map();
+      halos = new Map();
       redraw();
     },
   };

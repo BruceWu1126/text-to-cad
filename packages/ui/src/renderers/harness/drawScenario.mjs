@@ -74,8 +74,7 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   const surface = pane.locator('[data-cad-drawing-overlay]');
   await surface.waitFor();
   assert.equal(await tool('Pen').getAttribute('aria-pressed'), 'true', 'Draw opens on the pen');
-  assert.deepEqual(await names(tools), ['Pen', 'Line', 'Arrow', 'Rectangle', 'Ellipse', 'Text', 'Fill area', 'Eraser',
-    'Select and move drawings', 'Move view']);
+  assert.deepEqual(await names(tools), ['Pen', 'Line', 'Arrow', 'Rectangle', 'Ellipse', 'Text', 'Fill area', 'Eraser']);
   assert.deepEqual(await names(settings), ['Color', 'Stroke width', 'Line style', 'Placement', 'Undo', 'Redo', 'Clear drawing']);
   const copy = panel.getByRole('button', { name: 'Copy drawing', exact: true });
   assert.equal(await copy.count(), 0, 'nothing to copy before there is ink');
@@ -90,9 +89,12 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   await copy.waitFor();
   assert.ok(await moved(before) < 1e-6, 'drawing never moves the camera');
 
-  // Orbited, the view keeps the ink where it was drawn on the model: still red, somewhere else.
-  await tool('Move view').click();
-  await drag(at(150, 150), at(250, 190));
+  // Orbited — a right drag over the drawing is the view's — the view keeps the ink where it was
+  // drawn on the model: still red, somewhere else.
+  await page.mouse.move(...at(150, 150));
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(...at(250, 190), { steps: 8 });
+  await page.mouse.up({ button: 'right' });
   // The orbit eases out: the camera is at rest once two readings 100 ms apart agree.
   await page.waitForFunction(() => {
     const now = window.cadHarness.a.controller.readState().camera.position.join();
@@ -102,7 +104,7 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   }, null, { polling: 100 });
   const orbited = await until('the ink orbits with the model',
     seen => seen.red > 50 && Math.hypot(seen.x - stroke.x, seen.y - stroke.y) > 20);
-  assert.ok(await moved(before) > 1e-3, 'Move view orbited the camera');
+  assert.ok(await moved(before) > 1e-3, 'a right drag orbited the camera');
 
   // Undo takes the stroke away, Redo brings it back where the view now has it.
   await setting('Undo').click();
@@ -124,12 +126,20 @@ export async function runDrawScenario({ page, pane, errors, update }) {
   // Drawing panel's heading.
   await tool('Pen').click();
   await drag(at(-80, 10), at(60, 40));
-  await until('the green stroke is in the model', seen => seen.green > 100);
+  await tool('Rectangle').click();
+  await drag(at(-60, -120), at(60, -40));
+  const drawn = await until('the green stroke and rectangle are in the model', seen => seen.green > 200);
   await pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button', { name: 'Select', exact: true }).click();
   await surface.waitFor({ state: 'detached' });
   assert.equal(await tools.count(), 0, 'its tools went with it');
   assert.equal(await panel.isVisible(), true, 'the Drawing heading stays with the ink');
   await until('the ink stays after Draw', seen => seen.green > 100);
+
+  // Select picks a mark of the drawing as it picks a part, and Delete deletes what it picked: the
+  // stroke, not the rectangle beside it.
+  await page.mouse.click(...at(-10, 25));
+  await page.keyboard.press('Delete');
+  await until('Delete deletes the stroke and keeps the rectangle', seen => seen.green > 100 && seen.green < drawn.green - 50);
 
   // An update of the model discards ink drawn over the revision before it, and the panel with it.
   if (update) {

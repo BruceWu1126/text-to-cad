@@ -49,7 +49,7 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
   const {
     meshData, modelKey, isLoading, renderMode, previewMode, pickMode, hiddenPartIds, selectedPartIds,
     hoveredPartId, selectorRuntime, stepParameterRuntime, stepAnimationRuntime, animateMode,
-    jointHandles, measureState, activeMeasurementId, measureModeActive,
+    jointHandles, measureState, activeMeasurementId, selectedMeasurementIds = [], hoveredMeasurementId = "", measureModeActive,
     onViewerAlertChange,
     onHoverReferenceChange, onActivateReference, onDoubleActivateReference, deferActivation, onMeasurePick, onMeasureHoverPoint
   } = props;
@@ -233,7 +233,7 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
   }, [measureState]);
 
   useStepMeasureOverlay({
-    measureCanvasRef, measureState, activeMeasurementId, measureHoverRef, measureModeActive,
+    measureCanvasRef, measureState, activeMeasurementId, selectedMeasurementIds, hoveredMeasurementId, measureHoverRef, measureModeActive,
     runtimeRef, mountRef, previewMode, viewerReadyTick
   });
 

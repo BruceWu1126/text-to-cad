@@ -2,7 +2,7 @@ import React from 'react';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import AnimationPanel from '../../../../../dist/renderers/kit/tools/playbar/AnimationPanel.js';
+import AnimationPanel, { KeptAnimationPanel } from '../../../../../dist/renderers/kit/tools/playbar/AnimationPanel.js';
 import { createAnimationClock } from '../../../../../dist/renderers/kit/tools/playbar/animationClock.js';
 
 const restores: (() => void)[] = [];
@@ -74,4 +74,15 @@ it('holds Speed, Loop and Autoplay in its heading\'s settings, as preview\'s Pla
   screen.getByRole('menuitemradio', { name: '2×' }).focus();
   await user.keyboard('{Enter}');
   expect(runtime.onSpeedChange).toHaveBeenLastCalledWith(2);
+});
+
+it('a frame kept with the tool down is one line: Animation, the time it paused at, and an X back to rest', async () => {
+  const user = userEvent.setup();
+  const runtime = routines([TURN], { elapsedSec: 2.5, onRelease: vi.fn() });
+  render(<KeptAnimationPanel runtime={runtime} />);
+  const panel = screen.getByRole('region', { name: 'Animation kept' });
+  expect(panel.textContent).toContain('2.50s');
+  expect(within(panel).queryByRole('slider')).toBeNull();
+  await user.click(within(panel).getByRole('button', { name: 'Reset animation' }));
+  expect(runtime.onRelease).toHaveBeenCalledOnce();
 });

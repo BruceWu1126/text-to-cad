@@ -1,4 +1,4 @@
-import { Axis3d, Box, Circle, Eraser, Hand, Minus, PaintBucket, SquareMousePointer, MoveUpRight, Pencil, Redo2, Square, Trash2, Type, Undo2 } from 'lucide-react';
+import { Axis3d, Box, Circle, Eraser, Minus, PaintBucket, MoveUpRight, Pencil, Redo2, Square, Trash2, Type, Undo2 } from 'lucide-react';
 import { useState } from 'react';
 import { ToolbarButton } from '@text-to-cad/ui/primitives/toolbar-button';
 
@@ -10,10 +10,10 @@ import { ToolbarButton } from '@text-to-cad/ui/primitives/toolbar-button';
 
 /**
  * The drawing editor's tools a host offers. Its lock, image, frame, embed and laser tools are left out.
- * @typedef {'selection' | 'hand' | 'freedraw' | 'line' | 'arrow' | 'rectangle' | 'ellipse' | 'text' | 'fill' | 'eraser'} DrawingTool
+ * @typedef {'freedraw' | 'line' | 'arrow' | 'rectangle' | 'ellipse' | 'text' | 'fill' | 'eraser'} DrawingTool
  */
 // What puts ink down, the pen first: it is what Draw opens on, and the icon of the Draw tool itself.
-/** @type {readonly { id: DrawingTool, label: string, Icon: typeof Hand }[]} */
+/** @type {readonly { id: DrawingTool, label: string, Icon: typeof Pencil }[]} */
 const INK_TOOLS = [
   { id: 'freedraw', label: 'Pen', Icon: Pencil },
   { id: 'line', label: 'Line', Icon: Minus },
@@ -24,14 +24,8 @@ const INK_TOOLS = [
   { id: 'fill', label: 'Fill area', Icon: PaintBucket },
   { id: 'eraser', label: 'Eraser', Icon: Eraser },
 ];
-// Selecting and panning come after the ink tools: the tools that draw lead.
-/** @type {readonly { id: DrawingTool, label: string, Icon: typeof Hand }[]} */
-const HANDLING_TOOLS = [
-  { id: 'selection', label: 'Select and move drawings', Icon: SquareMousePointer },
-  { id: 'hand', label: 'Move view', Icon: Hand },
-];
-/** @type {readonly { id: DrawingTool, label: string, Icon: typeof Hand }[]} */
-export const DRAWING_TOOLBAR_TOOLS = [...INK_TOOLS, ...HANDLING_TOOLS];
+/** @type {readonly { id: DrawingTool, label: string, Icon: typeof Pencil }[]} */
+export const DRAWING_TOOLBAR_TOOLS = INK_TOOLS;
 /** @type {readonly DrawingTool[]} */
 export const DRAWING_TOOLS = DRAWING_TOOLBAR_TOOLS.map(tool => tool.id);
 
@@ -69,7 +63,7 @@ export const DRAWING_STROKE_STYLES = [
 /** @typedef {'surface' | 'space'} DrawingPlacement */
 // Where ink lies: on the model under it (carried with its part), or in space, on a plane facing the
 // view through the orbit point, on no part. Only what is drawn next: ink already down stays put.
-/** @type {readonly { value: DrawingPlacement, label: string, Icon: typeof Hand }[]} */
+/** @type {readonly { value: DrawingPlacement, label: string, Icon: typeof Pencil }[]} */
 export const DRAWING_PLACEMENTS = [
   { value: 'surface', label: 'On model', Icon: Box },
   { value: 'space', label: 'In space', Icon: Axis3d },

@@ -1064,11 +1064,15 @@ test('preview and the tools view are two states: preview draws the model as auth
   assert.deepEqual(errors, []);
 });
 
-test('the Animation tool plays the routine in the tools view, preview leaves its routine as it was, and putting the tool down puts the model back at rest', async () => {
+test('the Animation tool plays the routine in the tools view, preview leaves its routine as it was, and putting the tool down keeps the frame it paused at, which the other tools work on', async () => {
   const view = await open();
   const { page, pane, errors } = view;
   const arm = () => page.evaluate(() => window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix);
   const restArm = (await translations(page))['o1.2'];
+  const restMatrix = await arm();
+  const away = () => page.mouse.move(view.box.x + view.box.width - 20, view.box.y + 100);
+  await away();
+  const restBox = partBoxes(await restingFrame(view)).arm;
   // Its panel leads the stack, headed as Measure's is: Animation, its settings and its X, over the
   // transport, with no Routine row for the one routine.
   await view.tool('Animation').click();
@@ -1119,14 +1123,54 @@ test('the Animation tool plays the routine in the tools view, preview leaves its
   const playing = (await arm())[1];
   await page.waitForFunction(previous => window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix[1] !== previous, playing);
 
-  // A second press does nothing; Select puts it down: the routine stops and the model is at rest.
+  // A second press does nothing; Select puts it down: the routine pauses where it is and its frame
+  // is KEPT, one line in the stack, the model staying there.
   await view.tool('Animation').click();
   assert.deepEqual(await view.stack(), ['Animation controls'], 'a press on the tool in hand does nothing');
   await view.tool('Select').click();
-  assert.deepEqual(await view.stack(), ['Features']);
-  await page.waitForFunction(rest => JSON.stringify(Array.from(window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix.slice(12, 15))) === JSON.stringify(rest), restArm)
+  const kept = pane.getByRole('region', { name: 'Animation kept', exact: true });
+  await kept.waitFor();
+  assert.deepEqual((await view.stack()).sort(), ['Animation kept', 'Features']);
+  const frozen = await arm();
+  assert.notDeepEqual(frozen, restMatrix, 'the frame kept is not the rest pose');
+  await page.waitForTimeout(300);
+  assert.deepEqual(await arm(), frozen, 'paused: nothing plays on');
+  // Select works on the model as it stands: a press where the arm is DRAWN, away from where it
+  // rests, picks it.
+  await away();
+  const shot = await restingFrame(view);
+  const spot = (() => {
+    const box = partBoxes(shot).arm;
+    for (let y = box.y0; y <= box.y1; y += 1) for (let x = box.x0; x <= box.x1; x += 1) {
+      const offset = (y * shot.width + x) * 4;
+      const [red, green, blue] = [shot.data[offset], shot.data[offset + 1], shot.data[offset + 2]];
+      const inRest = x >= restBox.x0 - 4 && x <= restBox.x1 + 4 && y >= restBox.y0 - 4 && y <= restBox.y1 + 4;
+      if (!inRest && red > blue + 25 && red > green + 10) return [x, y];
+    }
+    return null;
+  })();
+  assert.ok(spot, `the arm is drawn away from where it rests: ${JSON.stringify({ rest: restBox, now: partBoxes(shot).arm })}`);
+  await page.mouse.click(view.box.x + spot[0], view.box.y + spot[1]);
+  await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedPartIds.join() === 'o1.2');
+  assert.deepEqual(await arm(), frozen, 'and picking leaves the frame where it is');
+  // The kept panel's X puts the model back at rest, and the panel goes.
+  await kept.getByRole('button', { name: 'Reset animation', exact: true }).click();
+  await kept.waitFor({ state: 'detached' });
+  await page.waitForFunction(rest => JSON.stringify(Array.from(window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix)) === JSON.stringify(rest), restMatrix)
     .catch(() => {});
-  assert.deepEqual((await translations(page))['o1.2'], restArm);
+  assert.deepEqual(await arm(), restMatrix);
+  // A press on the tool takes a kept frame up again as it was: paused, where it was.
+  await view.tool('Animation').click();
+  // Scrubbed a little way in (a looping routine's end is its start).
+  for (let step = 0; step < 5; step += 1) await panel.getByRole('slider', { name: 'Animation time' }).press('PageUp');
+  await page.waitForFunction(rest => JSON.stringify(Array.from(window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix)) !== JSON.stringify(rest), restMatrix);
+  const scrubbed = await arm();
+  await view.tool('Select').click();
+  await kept.waitFor();
+  await view.tool('Animation').click();
+  await panel.getByRole('button', { name: 'Play animation' }).waitFor();
+  assert.deepEqual(await arm(), scrubbed);
+  await panel.getByRole('slider', { name: 'Animation time' }).press('Home');
 
   // Autoplay, ticked in its settings, starts the routine whenever the tool is taken up.
   await view.tool('Animation').click();
@@ -1139,6 +1183,56 @@ test('the Animation tool plays the routine in the tools view, preview leaves its
   assert.deepEqual(await view.stack(), ['Features']);
   await view.tool('Animation').click();
   await panel.getByRole('button', { name: 'Pause animation' }).waitFor();
+  assert.deepEqual(errors, []);
+});
+
+test('one motion at a time: Explode, Position and the routine\'s frame replace each other, the last one used winning and the others back to rest', async () => {
+  const view = await open();
+  const { page, pane, errors } = view;
+  const stack = async () => (await view.stack()).sort();
+  const exploded = () => page.evaluate(() => window.cadHarness.a.controller.readState().display.exploded.enabled === true);
+  const pose = async value => {
+    await view.tool('Position').click();
+    const slider = page.getByLabel('hinge slider value', { exact: true });
+    await slider.fill(String(value));
+    await slider.press('Enter');
+    await view.tool('Select').click();
+  };
+  const explode = async () => {
+    await view.tool('Explode').click();
+    await pane.getByRole('slider', { name: 'Explode amount' }).press('End');
+    await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.exploded.enabled === true);
+    await view.tool('Select').click();
+  };
+  // A pose, kept.
+  await pose(60);
+  assert.deepEqual(await stack(), ['Features', 'Position kept']);
+  // Explode taken up is not Explode used: the pose stays until its amount moves, then goes.
+  await view.tool('Explode').click();
+  assert.ok((await stack()).includes('Position kept'), 'taking up Explode leaves the pose');
+  await view.tool('Select').click();
+  await explode();
+  await pane.getByRole('region', { name: 'Position kept', exact: true }).waitFor({ state: 'detached' });
+  assert.deepEqual(await stack(), ['Explode controls', 'Features']);
+  // Taking up Animation leaves the explosion; playing the routine takes it off.
+  await view.tool('Animation').click();
+  const panel = pane.getByRole('region', { name: 'Animation controls', exact: true });
+  assert.equal(await exploded(), true, 'taking up Animation leaves Explode');
+  await panel.getByRole('button', { name: 'Play animation' }).click();
+  await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.exploded.enabled === false);
+  await page.waitForFunction(() => window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix[1] > 0.2);
+  await view.tool('Select').click();
+  await pane.getByRole('region', { name: 'Animation kept', exact: true }).waitFor();
+  assert.deepEqual(await stack(), ['Animation kept', 'Features']);
+  // Position used puts the routine at rest; Explode used puts the pose back to its default.
+  await pose(30);
+  assert.deepEqual(await stack(), ['Features', 'Position kept']);
+  await explode();
+  assert.deepEqual(await stack(), ['Explode controls', 'Features']);
+  // And Position used takes Explode off.
+  await pose(20);
+  assert.equal(await exploded(), false);
+  assert.deepEqual(await stack(), ['Features', 'Position kept']);
   assert.deepEqual(errors, []);
 });
 
@@ -1640,7 +1734,7 @@ test('a click selects at once, and a double-click ends where it did when a click
 // ---- the tab ---------------------------------------------------------------------------------
 // A page whose tab record is in its own sessionStorage (`?store=session`): a reload of the page is
 // a reload of the tab, and a new page is a new tab.
-test('a reload of the tab brings back the view — camera, Display, Clip, Explode, hidden and isolated parts, the tree and the pose — and starts afresh: Select, no selection, no measurement', async () => {
+test('a reload of the tab brings back the view — camera, Display, Clip, Explode or the pose, hidden and isolated parts, the tree — and starts afresh: Select, no selection, no measurement', async () => {
   const view = await open({ store: 'session' });
   const { page, pane, at, errors } = view;
   const rest = await translations(page);
@@ -1705,8 +1799,19 @@ test('a reload of the tab brings back the view — camera, Display, Clip, Explod
   assert.deepEqual((await view.tools()).filter(tool => tool.endsWith(':true')), ['Select:true'], 'and the tool is the default');
   await view.tool('Measure').click();
   assert.equal((await pane.getByRole('region', { name: 'Measure controls', exact: true }).locator('[data-measure-hint]').innerText()).trim(), 'Pick two points to measure');
+  // Explode replaced the pose (one motion at a time): it came back at its default. A pose set now
+  // takes Explode off, and comes back on the next reload.
+  await view.tool('Position').click();
+  await input.waitFor({ state: 'attached' });
+  assert.equal(await input.inputValue(), '0.00°', 'Explode put the pose back to its default');
+  await input.fill('60'); await input.press('Enter');
+  await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.exploded.enabled === false);
+  // Once the tab's record holds it.
+  await page.waitForFunction(() => /"hinge":60\b/.test(sessionStorage.getItem('text-to-cad:tab:harness') || ''));
+  await view.reload();
   await view.tool('Position').click();
   await input.waitFor({ state: 'attached' });
   assert.equal(await input.inputValue(), '60.0°', 'the pose comes back');
+  assert.equal((await view.state()).display.exploded.enabled, false);
   assert.deepEqual(errors, []);
 });
