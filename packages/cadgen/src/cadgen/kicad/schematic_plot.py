@@ -32,20 +32,37 @@ def payload_index(root: Path, install, plotted: Sequence[str]) -> dict:
     return index.aligned(names).as_json()
 
 
-_SYMBOL = re.compile(r"^Symbol (\S+)")
+_SYMBOL = re.compile(r"^Symbol (\S+)(?: Pin (\S+))?")
+# KiCad 10.0.6's ERC JSON says "mm" but writes page millimetres divided by 100; later releases
+# write millimetres. An item's position is read at whichever scale lands on what it names.
+_SCALES = (100.0, 1.0)
 
 
-def _erc_ref(index: dict, sheet: int | None, at: list[float] | None, text: str) -> str | None:
-    """A board reference to what an ERC item names: the pin at its point, else the label's net, else its symbol."""
-    if sheet is not None and at is not None:
-        for pin in index.get("pins", []):
-            if pin.get("sheet") == sheet and math.dist(pin.get("at") or (math.inf, math.inf), at) < 0.01:
-                return selector_or_none("pad", ref=pin["part"], pad=pin["number"])
-        for label in index.get("labels", []):
-            if label.get("sheet") == sheet and label.get("net") and math.dist(label.get("at") or (math.inf, math.inf), at) < 0.01:
-                return selector_or_none("net", net=label["net"])
+def _near(entries: list, sheet: int, at: list[float]) -> dict | None:
+    return next((entry for entry in entries if entry.get("sheet") == sheet
+                 and math.dist(entry.get("at") or (math.inf, math.inf), at) < 0.01), None)
+
+
+def _erc_item(index: dict, sheet: int | None, position, text: str) -> tuple[str | None, list[float] | None]:
+    """A board reference to what an ERC item names, and where it is on its sheet: the pin or the
+    label's net at its point, else the pin or symbol KiCad's words name."""
+    pins, labels = index.get("pins", []), [label for label in index.get("labels", []) if label.get("net")]
+    if sheet is not None and isinstance(position, dict):
+        x, y = float(position.get("x", 0.0)), float(position.get("y", 0.0))
+        for scale in _SCALES:
+            at = [round(x * scale, 4), round(y * scale, 4)]
+            if pin := _near(pins, sheet, at):
+                return selector_or_none("pad", ref=pin["part"], pad=pin["number"]), at
+            if label := _near(labels, sheet, at):
+                return selector_or_none("net", net=label["net"]), at
     match = _SYMBOL.match(text)
-    return selector_or_none("part", ref=match[1]) if match else None
+    if match and match[2]:
+        pin = next((pin for pin in pins if pin["part"] == match[1] and pin["number"] == match[2]
+                    and (sheet is None or pin.get("sheet") == sheet)), None)
+        return selector_or_none("pad", ref=match[1], pad=match[2]), (pin.get("at") if pin else None)
+    at = [round(float(position.get("x", 0.0)) * _SCALES[0], 4), round(float(position.get("y", 0.0)) * _SCALES[0], 4)] \
+        if isinstance(position, dict) and sheet is not None else None
+    return (selector_or_none("part", ref=match[1]) if match else None), at
 
 
 def erc_payload(report: Path, index: dict) -> list[dict]:
@@ -60,11 +77,8 @@ def erc_payload(report: Path, index: dict) -> list[dict]:
             items = []
             for item in violation.get("items", []) or []:
                 text = str(item.get("description", ""))
-                position = item.get("pos")
-                # KiCad's ERC JSON says "mm" but writes page millimetres divided by 100 (verified on KiCad 10).
-                at = [round(float(position.get("x", 0.0)) * 100, 4), round(float(position.get("y", 0.0)) * 100, 4)] \
-                    if isinstance(position, dict) and number is not None else None
-                items.append({"text": text, "ref": _erc_ref(index, number, at, text), "at": at, "sheet": number})
+                ref, at = _erc_item(index, number, item.get("pos"), text)
+                items.append({"text": text, "ref": ref, "at": at, "sheet": number})
             kind, description = str(violation.get("type", "")), str(violation.get("description", ""))
             entry = {
                 "check": "erc", "severity": str(violation.get("severity", "error")), "type": kind, "description": description,
