@@ -42,7 +42,9 @@ Warnings
       (``stats["full_slot_mm"]``: a pocket's links from ring to ring) outside adaptive clearing.
     - ``thin_wall``: a hole or pocket an operation cuts stands less than :data:`THIN_WALL_MM` from the part's outside
       walls (a kernel distance between their faces).
-    - ``long_stickout``: a tool out of its holder more than :data:`LONG_STICKOUT_RATIO` times its diameter.
+    - ``long_stickout``: a cutter that cuts with its side (an end mill, a boring bar; not a drill, spot drill, tap,
+      reamer or counterbore: :data:`STICKOUT_EXEMPT`) out of its holder more than :data:`LONG_STICKOUT_RATIO` times
+      its diameter.
     - ``uncut_feature``: a hole, pocket or slot one of the job's setups reaches that no operation cuts (a spot drill
       or a chamfer does not make it).
     - ``through_stock_bottom``: a cut below the stock's bottom (a through drill's point): whatever is under the stock
@@ -75,8 +77,8 @@ if TYPE_CHECKING:
     from cadgen._internal.cam.run import PlannedOp
 
 __all__ = ["CHECK_KINDS", "ERROR_KINDS", "FULL_SLOT_DIAMETERS", "INFO_KINDS", "INTENDED_CUTS", "LONG_STICKOUT_RATIO",
-           "THIN_WALL_MM", "UNSWEPT", "WARNING_KINDS", "brep_intrusion", "check_job", "intended_part", "swept_runs",
-           "toolpath_context"]
+           "STICKOUT_EXEMPT", "THIN_WALL_MM", "UNSWEPT", "WARNING_KINDS", "brep_intrusion", "check_job",
+           "intended_part", "swept_runs", "toolpath_context"]
 
 ERROR_KINDS = ("gouge", "holder_collision", "fixture_collision", "unreachable", "tool_too_large", "tool_too_small",
                "too_deep", "over_travel", "no_post_support", "empty_operation")
@@ -93,6 +95,9 @@ assert set(PLAN_ERROR_KINDS) <= set(ERROR_KINDS)
 LONG_STICKOUT_RATIO = 4.0
 #: Full-width cutting longer than this many tool diameters in one operation is worth a warning.
 FULL_SLOT_DIAMETERS = 5.0
+#: Tools that cut along their axis and are routinely held out more than :data:`LONG_STICKOUT_RATIO` diameters (a
+#: jobber drill is 10 or more): ``long_stickout`` is for cutters that cut with their side.
+STICKOUT_EXEMPT = ("drill", "spot_drill", "tap", "reamer", "counterbore")
 #: A wall thinner than this, mm, between a hole or pocket and the part's outside.
 THIN_WALL_MM = 1.0
 #: How far the tool envelope is shrunk before it is measured against the part, so touching is not entering, mm.
@@ -555,7 +560,7 @@ def _long_stickout(job: "Job", planned_ops) -> list[dict]:
                     users[toolpath.tool].append(planned_op)
     out = []
     for tool in job.tools:
-        if tool.id not in users or not tool.diameter_mm:
+        if tool.id not in users or not tool.diameter_mm or tool.type in STICKOUT_EXEMPT:
             continue                # an unused tool (perhaps of a type with no shape yet) is not looked at
         shape = profile(tool)
         ratio = shape.stickout_mm / shape.diameter_mm
@@ -567,8 +572,10 @@ def _long_stickout(job: "Job", planned_ops) -> list[dict]:
             "warning", "long_stickout",
             f"{tool.id} sticks out {_n(shape.stickout_mm)} mm, {ratio:.1f} times its {_n(shape.diameter_mm)} mm "
             "diameter: expect it to deflect and chatter",
-            f"over {_n(LONG_STICKOUT_RATIO)} times the diameter a tool deflects enough to mark the walls and break "
-            f"easily; hold it shorter, or take lighter cuts.{stated}",
+            f"a cutter that cuts with its side, out over {_n(LONG_STICKOUT_RATIO)} times its diameter, bends away "
+            "from the cut: it leaves the walls out of size and marked, and breaks easily. Hold it shorter in the "
+            "holder (as long as the deepest cut and the holder's clearance need), or take lighter cuts: a smaller "
+            f"stepover and stepdown, a lower feed.{stated}",
             [_item(planned_op, f"{_label(planned_op)} {tool.id}", tool=tool.id) for planned_op in users[tool.id]]))
     return out
 

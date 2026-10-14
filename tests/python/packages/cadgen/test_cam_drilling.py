@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 
 from tests.python.support.cam_fixtures import (
-    assert_backplot, assert_sound, plate_step, slotted_block_step, value_error,
+    assert_backplot, assert_sound, drilled_block_step, plate_step, slotted_block_step, value_error,
 )
 
 #: The plate's holes as `cadgen cam features` names them: the 5 mm blind hole at (35, -15), the 6 mm through holes
@@ -219,6 +219,32 @@ class Drilling(unittest.TestCase):
         self.assertEqual(plan_error({"op": "counterbore", "tool": "T7", "features": [LEFT]}, cbore)[0], "unreachable")
         self.assertIn("needs shift_mm", value_error(self, parse_job, {**JOB, "operations": [
             {"op": "boring_cycle", "tool": "T6", "all": True, "cycle": "fine_bore"}]}))
+
+
+class PointedBlindHole(unittest.TestCase):
+    """The drilled block's 6.8 mm blind hole, modelled with a 118 degree point."""
+
+    @classmethod
+    def setUpClass(cls):
+        tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(tmp.cleanup)
+        cls.step = drilled_block_step(Path(tmp.name))
+
+    def findings(self, angle: float):
+        job = {**JOB, "tools": [{"id": "T1", "type": "drill", "diameter_mm": 6.8, "tip_angle_deg": angle}],
+               "operations": [{"op": "drill", "tool": "T1", "all": True}]}
+        [(ctx, planned)] = plan_all(self.step, job, {})[1]
+        return planned.findings
+
+    def test_a_point_a_rounding_longer_than_the_holes_leaves_nothing_to_say(self):
+        # 117.999 degrees: the drill's point is about 0.00004 mm longer than the hole's, the model's rounding.
+        self.assertEqual(self.findings(117.999), ())
+
+    def test_a_point_really_longer_says_how_much_in_plain_numbers(self):
+        [found] = self.findings(110)
+        self.assertEqual(found["type"], "rest_material")
+        self.assertRegex(found["summary"], r"stops 0\.\d+ mm short of #o1\.f\d+'s floor$")
+        self.assertNotRegex(found["summary"] + found["description"], r"\de[-+]?\d")
 
 
 if __name__ == "__main__":

@@ -36,8 +36,10 @@ Checks
     ``checks.CHECK_KINDS`` with its verdict: the worst severity among its findings, else ``"pass"``.
 
 Posting
-    A job with no error is posted. A post that refuses it (``PostRefusal``: a tap on grbl, which has no tapping
-    cycle) is a ``no_post_support`` error finding, not an exception: the job is not fit for that post.
+    Every toolpath is put to the post's checks first, even when the plan has other errors, so one run lists every
+    refusal; a job with no error is then posted. A post that refuses it (``PostRefusal``: a tap on grbl, which has
+    no tapping cycle) is a ``no_post_support`` error finding, not an exception: the job is not fit for that post.
+    A plan with an error drops the notes about the program it would have written (cycle time, tool changes, post).
 
 A job with an error finding is ``ok=False``: no G-code and no GLB are written (a stale one at those paths is
 removed, README law 10), and the sidecar still is, with the findings, so a person reads why.
@@ -264,15 +266,21 @@ def plan_job(target: Path, out: Path | None, *, job=None, occurrence: str | None
 
     toolpaths = [toolpath for planned_op in planned_ops for toolpath in planned_op.planned.toolpaths]
     programs: dict[str, str] = {}
+    clock = time.perf_counter()
+    # What the post refuses, toolpath by toolpath, even when the plan has other errors: one run lists them all.
+    refusals = _refusals(poster, parsed, toolpaths)
+    findings.extend(_refused(poster, exc) for exc in refusals)
     if not any(finding["severity"] == "error" for finding in findings):
-        clock = time.perf_counter()
         try:
             programs = poster.programs(parsed, parsed.setups, toolpaths, part=document.name,
                                        job_name=_job_name(job))
         except PostRefusal as exc:
             findings.append(_refused(poster, exc))
             programs = {}
-        timings["post_s"] = time.perf_counter() - clock
+    timings["post_s"] = time.perf_counter() - clock
+    if any(finding["severity"] == "error" for finding in findings):
+        # A refused plan has no program: what it would come to (cycle time, tool changes, the post) says nothing.
+        findings = [finding for finding in findings if finding["type"] not in _PROGRAM_NOTES]
     findings = by_severity(findings)
     verdicts = [{"type": kind, "status": next((f["severity"] for f in findings if f["type"] == kind), "pass")}
                 for kind in checks.CHECK_KINDS]
@@ -362,6 +370,23 @@ def _join(previous, toolpath, ctx):
             moves.append(Move("rapid", point, None, toolpath.op))
             last = point
     return dataclasses.replace(toolpath, start=here, moves=(*moves, *toolpath.moves))
+
+
+#: The notes about the program a plan writes: dropped from a plan with an error, which writes none.
+_PROGRAM_NOTES = ("cycle_time", "tool_changes", "post")
+
+
+def _refusals(poster, job, toolpaths) -> list[Exception]:
+    """Every ``PostRefusal`` the post raises on the toolpaths, each toolpath on its own, the same sentence once."""
+    from cadgen._internal.cam.posts.base import PostRefusal
+
+    found: dict[str, Exception] = {}
+    for toolpath in toolpaths:
+        try:
+            poster._check(job, (toolpath,))
+        except PostRefusal as exc:
+            found.setdefault(str(exc), exc)
+    return list(found.values())
 
 
 def _refused(poster, exc: Exception) -> dict:

@@ -19,8 +19,9 @@ Each finding is one JSON object, in the CLI's `--json` and the sidecar's `findin
 }
 ```
 
-`severity` is `error`, `warning` or `info`; `type` is the code below; `summary` names the operation by
-its place in the job (`operations[3] (drill)`, counted from 0) and says what is wrong, with any
+`severity` is `error`, `warning` or `info`; `type` is the code below; `summary` names what it is about
+(a finding about one operation names it by its place in the job, `operations[3] (drill)`, counted
+from 0; one about a tool, a setup or the whole job names that) and says what is wrong, with any
 position in the setup's work coordinates (what the G-code says); `description` says why and what to
 do. `items` points at what it is about: an item that names an operation carries its index
 (`operation`), one that names a feature its selector (`ref`), and one with a place that point in the
@@ -29,7 +30,9 @@ part's frame, mm (`at`). The CLI prints each finding as one line: `error: <summa
 
 - **error**: the job is not planned. No G-code and no GLB are written (an older one at those paths
   is removed), only the sidecar with `"ok": false` and the findings, and the command exits 1. Every
-  operation is still tried, so one run lists every refusal: fix them all, then plan again.
+  operation is still tried, and every toolpath is put to the post, so one run lists every refusal
+  (the operations', the checks' and the post's): fix them all, then plan again. A plan with an
+  error has no `cycle_time`, `tool_changes` or `post` note: there is no program to describe.
 - **warning**: planned, with something to weigh. Act on it or tell the user why not, in their words.
 - **info**: a note on what the plan assumed or comes to ([Notes](#notes)). Nothing to fix; say the
   assumptions when you hand the program over.
@@ -71,7 +74,7 @@ run; **the feeds** hold the speeds to the machine's limits.
 | `feed_clamped` | warning | the feeds | The feed or plunge is capped at `machine.max_feed_mm_min`, so each tooth takes a thinner chip than planned. A tap slows its spindle instead, so its feed stays `rpm x pitch`. | A chip too thin rubs and wears the tool: set a lower `rpm` on the operation, or use a tool with fewer flutes, to keep the planned chip at this feed. |
 | `full_slot` | warning | the checks | The tool cuts at its full width for more than five of its diameters in one operation (a pocket's links from one ring or row to the next). A full-width cut loads the tool hardest and packs the chips in. | A smaller stepdown, or a lower feed, is gentler on the tool. Say it when the tool is small or the material hard. |
 | `thin_wall` | warning | the checks | A hole or pocket an operation cuts leaves less than 1 mm of wall to the part's outside. A thin wall bends away from the cutter and chatters. | Light finishing passes on it, support it, or check the part needs it that thin. |
-| `long_stickout` | warning | the checks | A tool stands out of its holder more than 4 times its diameter: expect it to deflect and chatter. The description says when the stickout was assumed (flute length plus one diameter). | Hold it shorter, or take lighter cuts. State the real `stickout_mm`. |
+| `long_stickout` | warning | the checks | A cutter that cuts with its side (an end mill, a boring bar) stands out of its holder more than 4 times its diameter: it bends away from the cut, leaves the walls out of size and breaks easily. Drills, spot drills, taps, reamers and counterbores cut along their axis and are routinely held out further, so they are not flagged. The description says when the stickout was assumed (flute length plus one diameter). | Hold it shorter (as long as the deepest cut and the holder's clearance need), or take lighter cuts: a smaller stepover and stepdown, a lower feed. State the real `stickout_mm`. |
 | `uncut_feature` | warning | the checks | A hole, pocket or slot one of the job's setups reaches, that no operation cuts (a spot drill or a chamfer does not count as cutting it). | Add the operation, or confirm with the user it stays as it is. |
 | `through_stock_bottom` | warning | the checks | A cut goes below the stock's bottom (a through drill's point): whatever is under the stock there must allow it. Not said when the same cut is a `fixture_collision`. | A spoilboard or sacrificial plate, or a gap between parallels, under that place; tell the user. |
 | `assumes_prepared_hole` | warning | the checks | A tap or an internal thread mill works a hole no earlier operation of the job drills, bores or mills, so the job assumes the hole is already there at its size. | Add the drilling first, or confirm with the user the hole is made before the job runs. |

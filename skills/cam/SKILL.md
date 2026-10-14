@@ -254,9 +254,11 @@ degrees. Restate the user's numbers in those units before you write them down. A
 Every plan lists findings, errors first. An **error** means the job was not planned: no G-code, no
 GLB. A **warning** is planned, but worth a word to the user: weigh it as a machinist would, act on it
 or say why not. An **info** note says what the plan assumed (fixture sizes it did not know) or comes
-to (cycle time, tool changes, the post): repeat the assumptions when you hand over. Each finding's
-`summary` names the operation (`operations[2] (contour_2d)`, counted from 0) and what it found; its
-`description` says why and what to do.
+to (cycle time, tool changes, the post): repeat the assumptions when you hand over. A finding about
+one operation names it in its `summary` (`operations[2] (contour_2d)`, counted from 0); one about a
+tool, a setup or the job names that instead (`T1 sticks out ...`, `Setup top spans ...`). Every item
+that concerns an operation carries its index (`items[].operation`). The `description` says why and
+what to do.
 
 | Finding | Severity | What it means | What to do |
 | --- | --- | --- | --- |
@@ -276,7 +278,7 @@ to (cycle time, tool changes, the post): repeat the assumptions when you hand ov
 | `feed_clamped` | warning | The feed is capped at the machine's limit, so each tooth takes a thinner chip (a tap's spindle slows with it instead). | A thin chip rubs: set a lower `rpm` on the operation, or use a tool with fewer flutes. |
 | `full_slot` | warning | The tool cuts at its full width for over five diameters (a pocket's links from ring to ring). | A smaller stepdown or a lower feed is gentler; say it for a small tool or a hard material. |
 | `thin_wall` | warning | A hole or pocket leaves less than 1 mm of wall to the part's outside: it bends and chatters. | Light finishing passes, support, or check the part needs it that thin. |
-| `long_stickout` | warning | A tool stands out more than 4 times its diameter: expect it to deflect and chatter. | Shorten the stickout, or take lighter cuts. |
+| `long_stickout` | warning | An end mill or boring bar stands out more than 4 times its diameter: expect it to deflect and chatter (hole makers are not flagged). | Shorten the stickout, or take lighter cuts: a smaller stepover and stepdown. |
 | `uncut_feature` | warning | A hole, pocket or slot a setup reaches that no operation cuts. | Add the operation, or confirm with the user it stays as it is. |
 | `through_stock_bottom` | warning | A cut goes below the stock's bottom (a through drill's point). | Say what must be under it: a spoilboard, a sacrificial plate, a gap between parallels. |
 | `assumes_prepared_hole` | warning | A tap or thread mill works a hole no earlier operation makes. | Drill it first in the job, or confirm it is made before the job runs. |

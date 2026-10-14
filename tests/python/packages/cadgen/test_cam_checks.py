@@ -165,6 +165,13 @@ class MachineAndFixture(Words, unittest.TestCase):
         [found] = of(self.result, "long_stickout")
         self.assertEqual(found["summary"], "T1 sticks out 26 mm, 4.3 times its 6 mm diameter: expect it to deflect and chatter")
         self.assertIn("The stickout is assumed", found["description"])
+        self.assertIn("a smaller stepover and stepdown", found["description"])
+
+    def test_a_refused_plan_says_nothing_of_the_program_it_did_not_write(self):
+        kinds = {f["type"] for f in self.result.findings}
+        self.assertTrue({"fixture_collision", "over_travel"} <= kinds)
+        self.assertEqual(kinds & {"cycle_time", "tool_changes", "post"}, set())
+        self.assertIn("assumed_fixture", kinds)
 
 
 class NoFixture(unittest.TestCase):
@@ -239,6 +246,44 @@ class EarlierSetupsFacing(Words, unittest.TestCase):
         sidecar = json.loads(r.sidecar.read_text(encoding="utf-8"))
         self.assertEqual(sidecar["setups"][1]["stock_bounds_mm"][0][2], -11)
         self.assert_plain(r.findings)
+
+
+class LongTools(unittest.TestCase):
+    def test_hole_makers_are_held_long_and_say_nothing(self):
+        job = copy.deepcopy(JOB)
+        job["tools"] = [{"id": "T1", "type": "flat_endmill", "diameter_mm": 6, "flutes": 3, "flute_length_mm": 20,
+                         "stickout_mm": 30},
+                        {"id": "T2", "type": "drill", "diameter_mm": 6, "flute_length_mm": 40, "stickout_mm": 50}]
+        result = plan("long", job)
+        self.assertEqual([f["items"][0]["tool"] for f in of(result, "long_stickout")], ["T1"])
+
+
+class EveryRefusalInOneRun(Words, unittest.TestCase):
+    def test_the_post_lists_what_it_refuses_beside_the_plans_own_errors(self):
+        # grbl taps nothing and cannot orient a boring bar; the drill also runs into the plate under the stock.
+        job = copy.deepcopy(JOB)
+        job["machine"]["post"] = "grbl"
+        job["stock"]["margin_mm"] = [2, 2, 1, 1]
+        job["tools"] += [{"id": "T5", "type": "tap", "diameter_mm": 7, "pitch_mm": 1},
+                         {"id": "T6", "type": "boring_bar", "diameter_mm": 6}]
+        job["operations"] = [{"op": "drill", "tool": "T2", "features": [LEFT]},
+                             {"op": "tap", "tool": "T5", "features": [RIGHT]},
+                             {"op": "boring_cycle", "tool": "T6", "features": [LEFT], "cycle": "fine_bore",
+                              "shift_mm": 0.2, "shift_xy": [1, 0]}]
+        result = plan("refusals", job)
+        self.assertFalse(result.ok)
+        self.assertEqual([f["items"][0]["operation"] for f in of(result, "no_post_support")], [1, 2])
+        self.assertEqual(len(of(result, "fixture_collision")), 1)
+        self.assertEqual(of(result, "cycle_time") + of(result, "post"), [])
+        self.assert_plain(result.findings)
+
+    def test_a_finding_never_says_a_number_in_scientific_notation(self):
+        from cadgen._internal.cam.operations.base import finding
+
+        found = finding("warning", "rest_material", "stops 2.6105e-05 mm short of #o1.f1e5's floor",
+                        "1.5E+07 mm/min, -3e-4 mm")
+        self.assertEqual((found["summary"], found["description"]),
+                         ("stops 0 mm short of #o1.f1e5's floor", "15000000 mm/min, 0 mm"))
 
 
 class GrblDrillAndTap(Words, unittest.TestCase):

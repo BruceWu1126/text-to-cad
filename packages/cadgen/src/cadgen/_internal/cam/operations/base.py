@@ -81,9 +81,12 @@ class OperationBase:
 
 
 def finding(severity: str, kind: str, summary: str, description: str, items=()) -> dict:
-    """One entry of a plan's findings, in the KiCad findings' shape."""
-    return {"check": "cam", "severity": severity, "type": kind, "summary": summary, "description": description,
-            "items": list(items)}
+    """One entry of a plan's findings, in the KiCad findings' shape. Its sentences never hold a number in
+    scientific notation (``values.plain_text``)."""
+    from cadgen._internal.cam.values import plain_text
+
+    return {"check": "cam", "severity": severity, "type": kind, "summary": plain_text(summary),
+            "description": plain_text(description), "items": list(items)}
 
 
 def naming_operation(found: dict, index: int, label: str) -> dict:

@@ -21,7 +21,8 @@ the hole's opening, shallower than the hole's own):
 - blind: the full diameter reaches the hole's floor, so the tip goes the tool's point length (``tip_length_mm``: 0
   for a tap, reamer or boring bar) under it, but never past the hole's own deepest point: a flat-bottomed hole (no
   point) or one whose point is shorter than the tool's stops the tip there, and a ``rest_material`` warning says how
-  far short of the floor the full diameter ends.
+  far short of the floor the full diameter ends (when that is more than the operation's tolerance: less is the
+  model's rounding).
 - through: through the hole's length, plus the tool's point length, plus ``breakthrough_mm`` (1 mm).
 - spot drill: to the depth at which its cone is ``spot_diameter_mm`` across (default: the hole's countersink if it
   has one, else the hole's diameter), or ``depth_mm`` below the hole's opening.
@@ -62,7 +63,7 @@ from typing import TYPE_CHECKING
 
 from cadgen._internal.cam.operations.base import OperationBase, ParseContext, PlanError, finding
 from cadgen._internal.cam.operations.common import mm
-from cadgen._internal.cam.values import an, choice, known, number
+from cadgen._internal.cam.values import an, choice, known, number, plain
 
 if TYPE_CHECKING:
     from cadgen._internal.cam.features import SetupFeature
@@ -232,13 +233,17 @@ class _HoleOperation(OperationBase):
             if tip < deepest - _EPS:
                 short = deepest - tip
                 tip = deepest
-                what = "flat floor" if "point_mm" not in size else f"{size['point_mm']:g} mm point"
-                found.append(finding(
-                    "warning", "rest_material",
-                    f"{ctx.label}: {ctx.tool.id}'s full diameter stops {short:g} mm short of {ref}'s floor",
-                    f"the hole has a {what} and the tool's point is {point:g} mm long, so the tip stops at the hole's "
-                    "deepest point and the corner of the floor is left; finish it with a flat tool if it matters",
-                    [{"text": f"{ctx.label} {ref}", "ref": ref}]))
+                # Less than the tolerance short is the model's rounding (a 118 degree point drawn at 118.0001), not
+                # material left.
+                if short > ctx.tol:
+                    what = "flat floor" if "point_mm" not in size else f"{plain(size['point_mm'])} mm point"
+                    found.append(finding(
+                        "warning", "rest_material",
+                        f"{ctx.label}: {ctx.tool.id}'s full diameter stops {plain(short)} mm short of {ref}'s floor",
+                        f"the hole has a {what} and the tool's point is {plain(point)} mm long, so the tip stops at "
+                        "the hole's deepest point and the corner of the floor is left; finish it with a flat tool if "
+                        "it matters",
+                        [{"text": f"{ctx.label} {ref}", "ref": ref}]))
         return tip, {"through": False, "full_diameter_z": round(tip + point, 6)}, found
 
     # --- the cycle -----------------------------------------------------------------------------------------
