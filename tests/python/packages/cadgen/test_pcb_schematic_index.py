@@ -274,8 +274,9 @@ class HierarchyTest(unittest.TestCase):
 
 
 class ErcPayloadTest(unittest.TestCase):
-    """KiCad's ERC report, each item pointed at the pin or net it names. KiCad's ERC JSON writes a
-    position as page millimetres divided by 100 (verified on KiCad 10), as these inputs do."""
+    """KiCad's ERC report, each item pointed at the pin or net it names. KiCad 10.0.6's ERC JSON
+    writes a position as page millimetres divided by 100, as most of these inputs do; later
+    releases write millimetres."""
 
     INDEX = {
         "sheets": [{"name": "t", "path": "/", "file": "t.kicad_sch", "title": ""}],
@@ -299,6 +300,16 @@ class ErcPayloadTest(unittest.TestCase):
         self.assertEqual(found["items"][0]["sheet"], 0)
         self.assertEqual(found["summary"], "U2 pin 7 (VDD) is a power input that nothing powers")
         self.assertEqual(found["title"], "Input Power pin not driven by any Output Power pins")
+
+    def test_a_position_in_millimetres_names_the_pin_too(self):
+        (found,) = erc_payload(self.report([{"severity": "error", "type": "power_pin_not_driven", "description": "d",
+            "items": [{"description": "Symbol U2 Pin 7 [VDD, Power input, Line]", "pos": {"x": 50.8, "y": 25.4}}]}]), self.INDEX)
+        self.assertEqual((found["items"][0]["ref"], found["items"][0]["at"]), ("#U2.7", [50.8, 25.4]))
+
+    def test_a_pin_named_in_words_is_the_pin_wherever_its_position_lands(self):
+        (found,) = erc_payload(self.report([{"severity": "error", "type": "pin_not_connected", "description": "d",
+            "items": [{"description": "Symbol U2 Pin 7 [VDD, Power input, Line]", "pos": {"x": 3.0, "y": 4.0}}]}]), self.INDEX)
+        self.assertEqual((found["items"][0]["ref"], found["items"][0]["at"]), ("#U2.7", [50.8, 25.4]))
 
     def test_a_label_finding_names_its_net(self):
         (found,) = erc_payload(self.report([{"severity": "warning", "type": "label_dangling", "description": "Label not connected",
