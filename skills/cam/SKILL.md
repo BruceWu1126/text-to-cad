@@ -137,7 +137,7 @@ degrees. Restate the user's numbers in those units before you write them down. A
    Each line is one feature: its selector, its kind (`face`, `hole`, `pocket`, `slot`, `profile`),
    its size, and the tool directions that reach it (`from +Z`). A feature with no `from` is not
    reached from any axis by a straight tool: an undercut. `--direction +Z` lists only what one
-   direction reaches (write `--direction=-Z` for a minus direction, so it is not read as a flag);
+   direction reaches (`--direction -Z` for the underside);
    `--json` gives every size key. A document with several parts refuses with the occurrences it
    holds; pass one with `--occurrence #o2`. Use the selector of the feature, or any face of it.
 

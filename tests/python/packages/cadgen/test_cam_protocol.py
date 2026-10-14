@@ -46,6 +46,13 @@ class Surface(unittest.TestCase):
             cli.main(["cam", "features", "--help"])
         self.assertIn("--direction", out.getvalue())
 
+    def test_a_minus_direction_is_read_as_the_directions_value(self):
+        from cadgen._internal.cli_from_function import generated_parser
+
+        parser = generated_parser(("cadgen.cam", "features"), prog="cadgen cam features")
+        self.assertEqual(parser.parse_args(["part.step", "--direction", "-Z"]).direction, "-Z")
+        self.assertEqual(parser.parse_args(["part.step", "--direction", "-X", "--json"]).json_output, True)
+
     def test_the_public_namespace_imports_no_kernel_geometry_or_numerics(self):
         self.assertEqual(heavy_at_import("cadgen.cam", "cadgen.cli.cam_plan", "cadgen.cli.cam_features"), "")
 

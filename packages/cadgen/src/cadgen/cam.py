@@ -40,9 +40,9 @@ def features(
     target: the STEP/STP document holding the part.
     occurrence: which part occurrence to list (``#o1``) when the document is an
         assembly. Omitted, the document must hold one part.
-    direction: list only what can be reached from this tool direction (``+Z``,
-        ``-X``, ...). Omitted, each feature lists every axis direction that
-        reaches it.
+    direction: list only what can be reached from this tool direction
+        (``+Z``, ``-Z``, ``-X``, ...). Omitted, each feature lists every axis
+        direction that reaches it.
     verbose: show progress on stderr.
     """
     from cadgen._internal.cam.run import list_features
