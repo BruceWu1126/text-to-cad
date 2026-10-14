@@ -1,0 +1,115 @@
+/*
+ * text-to-cad's look on T3 Code's color roles: the CAD viewer's neutral surfaces
+ * (charcoal in dark), with blue only for brand emphasis and primary actions.
+ * Values are text-to-cad's docs palette (apps/docs/src/app/globals.css), which
+ * matches the viewer.
+ *
+ * Every rule is scoped to T3's default look, so a theme the user picks
+ * (data-theme-id) keeps its own colors. `html:not(...)` outranks T3's `:root`
+ * and `[data-app-sidebar]` tokens wherever the stylesheets land in the page.
+ */
+
+:is(html:not([data-theme-id]), html[data-theme-id=""]) {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: #2c7197;
+  --primary-foreground: #f5fbff;
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: #2c7197;
+  --info: #249ddd;
+  --info-foreground: #2c7197;
+  --update: #2c7197;
+  --update-foreground: #2c7197;
+}
+
+:is(html.dark:not([data-theme-id]), html.dark[data-theme-id=""]) {
+  --background: oklch(0.28 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.31 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.31 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --surface-raised: oklch(0.31 0 0);
+  --primary: #30779d;
+  --primary-foreground: #f5fbff;
+  --secondary: oklch(0.34 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.34 0 0);
+  --muted-foreground: oklch(0.75 0 0);
+  --accent: oklch(0.38 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: #94d9fa;
+  --info: #62b7ec;
+  --info-foreground: #62b7ec;
+  --update: #62b7ec;
+  --update-foreground: #62b7ec;
+}
+
+:is(html:not([data-theme-id]), html[data-theme-id=""]) [data-app-sidebar] {
+  --background: oklch(0.985 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-muted-foreground: oklch(0.556 0 0);
+  --sidebar-control-surface: oklch(0.97 0 0);
+  --sidebar-row-hover: oklch(0.97 0 0);
+  --sidebar-row-active: oklch(1 0 0);
+  --sidebar-row-selected: oklch(1 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-stage-fade: var(--sidebar);
+}
+
+:is(html.dark:not([data-theme-id]), html.dark[data-theme-id=""]) [data-app-sidebar] {
+  --background: oklch(0.25 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.25 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --accent: oklch(0.34 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.31 0 0);
+  --muted-foreground: oklch(0.75 0 0);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --sidebar: oklch(0.25 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-muted-foreground: oklch(0.75 0 0);
+  --sidebar-control-surface: oklch(0.31 0 0);
+  --sidebar-row-hover: oklch(0.31 0 0);
+  --sidebar-row-active: oklch(0.34 0 0);
+  --sidebar-row-selected: oklch(0.31 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-stage-fade: var(--sidebar);
+}
+
+/* The mark is a square icon, not a cap-height wordmark: give it room beside the name. */
+[data-app-sidebar] img[data-brand-mark] {
+  height: 1.125rem;
+  align-self: center;
+}
+
+/* The splash plays text-to-cad's build animation (splash.svg), which reads at a larger size. */
+#boot-shell-logo {
+  width: 112px;
+  height: 112px;
+}

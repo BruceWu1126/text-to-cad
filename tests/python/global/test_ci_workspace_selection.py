@@ -74,6 +74,7 @@ class EveryTestRunsInCI(unittest.TestCase):
             r"^tests/python/skills/[^/]+/(.*/)?test_[^/]*\.py$",         # test-python.sh skills
             r"^tests/python/global/test_[^/]*\.py$",                     # test-global.sh
             r"^tests/browser/viewer-e2e\.mjs$",                          # test-viewer-browser.sh
+            r"^apps/studio/",  # T3 Code's own suite: `vp test` in Studio's pnpm workspace, not a job here
         ]
         test_like = re.compile(r"(\.test\.|\.spec\.|(^|/)test_[^/]*\.py$|(^|/)e2e-[^/]*\.m?[jt]s$|^tests/browser/)")
         tests = [path for path in TRACKED if not path.startswith("models/") and test_like.search(path)]

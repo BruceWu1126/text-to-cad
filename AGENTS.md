@@ -94,7 +94,7 @@ path, the rehearsal, and local/manual fallbacks.
 - `models/`: sample and durable CAD/robot-description fixtures.
 - `apps/web/`: the CAD Viewer's React client (its backend is `cadgen.viewer`).
 - `apps/mcp/`: the CAD app agent hosts render: tabs in Codex, cards in Claude Desktop (its server is `cadgen mcp`).
-- `apps/studio/`: a git submodule pinning text-to-cad Studio, [T3 Code](https://github.com/pingdotgg/t3code) made into a hardware app ([amywork777/t3code](https://github.com/amywork777/t3code/tree/amy/hardware), branch `amy/hardware`). It runs this checkout as a bundled plugin, so the agent designs with the skills and the CAD app opens beside the thread. Core app changes go to that branch (its `STUDIO.md`); CAD stays here as the plugin. `git submodule update --init apps/studio` fetches it; plain clones and plugin installs leave it empty.
+- `apps/studio/`: text-to-cad Studio, [T3 Code](https://github.com/pingdotgg/t3code) made into a hardware app ([amywork777/t3code](https://github.com/amywork777/t3code/tree/amy/hardware), branch `amy/hardware`). It runs this checkout as a bundled plugin, so the agent designs with the skills and the CAD app opens beside the thread. It is a copy of that branch (all but T3's `.repos/` references): change Studio on the fork and copy it in again (its `STUDIO.md`), never here. CAD stays here as the plugin. Its own pnpm toolchain builds and tests it; no job here does, and the plugin ZIP and install branches leave it out.
 - `packages/core`: `@text-to-cad/core`, shared CAD/runtime/client code without React.
 - `packages/ui`: `@text-to-cad/ui`, the shared FileViewer, renderers, controls and styles.
 - `packages/cadgen`: the published distribution — STEP/GLB/topology generation,
