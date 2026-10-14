@@ -154,12 +154,13 @@ class SetupTests(unittest.TestCase):
         self.assertEqual((back.min[1], back.max[2]), (33, -10))
         self.assertEqual((floor.name, floor.min, floor.max), ("vise floor", (-75, -53, -40), (75, 53, -30)))
         self.assertEqual((front_parallel.min, front_parallel.max), ((-52, -33, -30), (52, -27, -15)))
-        self.assertEqual(fixture.assumed, ("parallels_mm", "jaw_width_mm", "jaw_thickness_mm", "parallel_width_mm",
+        # The parallels are worked out from the jaws and the grip: not assumed.
+        self.assertEqual(fixture.assumed, ("jaw_width_mm", "jaw_thickness_mm", "parallel_width_mm",
                                            "floor_thickness_mm"))
         self.assertEqual(fixture.notes, ())
         derived = placed(Setup("top", fixture=Fixture("vise", {"jaw_height_mm": 20, "parallels_mm": 10}))).fixture
         self.assertEqual((derived.sizes["grip_mm"], derived.volumes[0].max[2]), (10, -5))
-        self.assertIn("grip_mm", derived.assumed)
+        self.assertNotIn("grip_mm", derived.assumed)
 
     def test_default_vise_jaws_stand_proud_of_a_short_stock_with_the_floor_under_it(self):
         fixture = placed(Setup("top", fixture=Fixture("vise", {}))).fixture
@@ -168,7 +169,9 @@ class SetupTests(unittest.TestCase):
                          (-15, 25, -15))
         self.assertEqual((fixture.sizes["jaws_above_stock_mm"], fixture.notes),
                          (25, ("the vise jaws stand 25 mm above the stock top",)))
-        self.assertEqual(fixture.assumed[:3], ("jaw_height_mm", "parallels_mm", "grip_mm"))
+        # The defaults it took; the grip is their difference, and with no parallels their width is not used.
+        self.assertEqual(fixture.assumed, ("jaw_height_mm", "parallels_mm", "jaw_width_mm", "jaw_thickness_mm",
+                                           "floor_thickness_mm"))
 
     def test_a_vise_whose_grip_parallels_and_jaws_disagree_is_refused(self):
         message = value_error(self, placed, Setup("top", fixture=Fixture(
@@ -185,11 +188,42 @@ class SetupTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "fixture.grip_mm: the jaws hold 20 mm of stock that is 15 mm long"):
             placed(Setup("top", fixture=Fixture("chuck", {"grip_mm": 20})))
         collet = placed(Setup("top", fixture=Fixture("collet", {})), Stock("box", (0.0, 0.0, 0.0, 0.0))).fixture
-        self.assertEqual(collet.assumed, ("diameter_mm", "length_mm", "grip_mm", "rim_mm"))
+        self.assertEqual(collet.assumed, ("diameter_mm", "length_mm", "grip_mm"))
         self.assertEqual((collet.sizes["grip_mm"], collet.volumes[0].z_max), (10, 0))
         self.assertEqual(collet.notes, ("the collet holds all 10 mm of the stock: its default grip of 15 mm is more "
-                                        "than the stock is long",))
+                                        "than the stock is long",
+                                        "the collet is assumed 126.619 mm across: the stock's 116.619 mm plus 5 mm each side"))
         self.assertEqual(placed(Setup("top")).fixture.volumes, ())
+
+    def test_every_size_a_fixture_model_uses_can_be_stated(self):
+        from cadgen._internal.cam.job import parse_job
+        from tests.python.support.cam_fixtures import stubbed
+
+        vise = placed(Setup("top", fixture=Fixture("vise", {
+            "jaw_height_mm": 20, "grip_mm": 5, "jaw_width_mm": 100, "jaw_thickness_mm": 12, "parallel_width_mm": 4,
+            "floor_thickness_mm": 8}))).fixture
+        front, back, floor, front_parallel, _ = vise.volumes
+        self.assertEqual((front.min, front.max), ((-50, -45, -30), (50, -33, -10)))
+        self.assertEqual((floor.min[2], front_parallel.max[1]), (-38, -29))
+        self.assertEqual(vise.assumed, ())
+        plate = placed(Setup("top", fixture=Fixture("plate", {"thickness_mm": 10, "border_mm": 0}))).fixture
+        self.assertEqual((plate.volumes[0].min, plate.assumed), ((-52, -33, -25), ()))
+        collet = placed(Setup("top", fixture=Fixture("collet", {"diameter_mm": 130, "length_mm": 30, "grip_mm": 8})))
+        self.assertEqual((collet.fixture.volumes[0].z_min, collet.fixture.volumes[0].z_max, collet.fixture.assumed),
+                         (-37, -7, ()))
+        # Read from a job: parallels may be 0, every size is checked.
+        job = {"machine": {"kind": "mill", "post": "grbl"}, "material": "aluminum-6061", "stock": {"type": "box"},
+               "tools": [{"id": "T1", "type": "flat_endmill", "diameter_mm": 6}],
+               "operations": [{"op": "facing", "tool": "T1"}]}
+        with stubbed():
+            parsed = parse_job({**job, "setups": [{"id": "top", "fixture": {
+                "type": "vise", "jaw_height_mm": 20, "parallels_mm": 0, "jaw_thickness_mm": 15}}]})
+            self.assertEqual(parsed.setups[0].fixture.size, {"jaw_height_mm": 20, "parallels_mm": 0,
+                                                             "jaw_thickness_mm": 15})
+            self.assertIn("setups[0].fixture.jaw_thickness_mm: must be > 0, got 0", value_error(
+                self, parse_job, {**job, "setups": [{"id": "top", "fixture": {"type": "vise", "jaw_thickness_mm": 0}}]}))
+            self.assertIn("setups[0].fixture.parallels_mm: must be 0 or more, got -1", value_error(
+                self, parse_job, {**job, "setups": [{"id": "top", "fixture": {"type": "vise", "parallels_mm": -1}}]}))
 
     def test_transforms_round_trip(self):
         import numpy as np

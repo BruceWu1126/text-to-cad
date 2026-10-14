@@ -39,16 +39,19 @@ The fixture
       number), for a finding to word. The floor (a slab :data:`VISE_FLOOR_MM` thick, as wide as the jaws and
       reaching across both) and any parallels are in the envelope too, so a cut through the stock sees what is
       under it.
-    - plate: a plate ``thickness_mm`` thick under the stock, wider than it by :data:`PLATE_BORDER_MM` all round.
+    - plate: a plate ``thickness_mm`` thick under the stock, wider than it by ``border_mm`` (:data:`PLATE_BORDER_MM`)
+      all round.
     - chuck: a cylinder about the setup's Z axis through the stock's centre, ``diameter_mm`` across, its jaw face
       ``grip_mm`` above the stock's bottom and ``jaw_length_mm`` long below it.
-    - collet: a cylinder ``diameter_mm`` across holding :data:`COLLET_GRIP_MM` of the stock's bottom,
-      :data:`COLLET_LENGTH_MM` long.
+    - collet: a cylinder ``diameter_mm`` across holding ``grip_mm`` (:data:`COLLET_GRIP_MM`) of the stock's bottom,
+      ``length_mm`` (:data:`COLLET_LENGTH_MM`) long.
     - sheet, none: nothing to collide with.
 
-    ``assumed`` lists, by key, every size the fixture used that the job did not state (the ones a job cannot state,
-    such as a vise's ``jaw_thickness_mm`` or a plate's ``border_mm``, always). ``notes`` says in plain words what
-    the model adjusted or what stands out (a default grip cut to a short stock, jaws proud of the stock).
+    ``assumed`` lists, by key, every default the fixture took for a size the job did not state; never a size worked
+    out from stated ones (a vise's grip from its jaws and parallels) or one the model does not use (a parallel's
+    width with no parallels). Every size the model uses can be stated. ``notes`` says in plain words what the model
+    adjusted or what stands out (a default grip cut to a short stock, jaws proud of the stock, a chuck's diameter
+    taken from the stock's).
 
 Reach
     :func:`reachable` says whether a 3-axis setup's tool can come at a surface from the direction it needs.
@@ -64,6 +67,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
 
 from cadgen._internal.cam.stock import Bounds, StockSolid, bounds_of, occ_shape
+from cadgen._internal.cam.values import plain
 
 __all__ = [
     "COLLET_GRIP_MM", "Cylinder", "EarlierCut", "Envelope", "FixtureEnvelope", "Frame", "PLATE_BORDER_MM", "SetupFrame",
@@ -282,9 +286,9 @@ def fixture_envelope(fixture, stock_bounds: Bounds, *, where: str = "fixture") -
         return _vise(stated, stock_bounds, where)
     if kind == "plate":
         thickness = stated.get("thickness_mm", PLATE_THICKNESS_MM)
-        border = PLATE_BORDER_MM
+        border = stated.get("border_mm", PLATE_BORDER_MM)
         box = BoxVolume("plate", _vec((x0 - border, y0 - border, z0 - thickness)), _vec((x1 + border, y1 + border, z0)))
-        assumed = (*(() if "thickness_mm" in stated else ("thickness_mm",)), "border_mm")
+        assumed = tuple(key for key in ("thickness_mm", "border_mm") if key not in stated)
         return FixtureEnvelope(kind, (box,), {"thickness_mm": thickness, "border_mm": border}, assumed)
     center = ((x0 + x1) / 2, (y0 + y1) / 2)
     stock_radius = math.hypot(x1 - x0, y1 - y0) / 2
@@ -308,11 +312,13 @@ def fixture_envelope(fixture, stock_bounds: Bounds, *, where: str = "fixture") -
                              f"{default_grip:g} mm is more than the stock is long")
         top = z0 + grip
         volume = Cylinder(kind, _vec(center)[:2], _clean(diameter / 2), _clean(top - length), _clean(top))
-        assumed = [key for key in ("diameter_mm", length_key, "grip_mm") if key not in stated]
+        # The diameter, when assumed, is the stock's plus a rim each side: the diameter is what was assumed.
+        assumed = tuple(key for key in ("diameter_mm", length_key, "grip_mm") if key not in stated)
         if "diameter_mm" not in stated:
-            assumed.append("rim_mm")
-        sizes = {"diameter_mm": diameter, length_key: length, "grip_mm": grip, "rim_mm": rim}
-        return FixtureEnvelope(kind, (volume,), sizes, tuple(assumed), tuple(notes))
+            notes.append(f"the {kind} is assumed {plain(diameter)} mm across: the stock's {plain(2 * stock_radius)} mm "
+                         f"plus {plain(rim)} mm each side")
+        sizes = {"diameter_mm": diameter, length_key: length, "grip_mm": grip}
+        return FixtureEnvelope(kind, (volume,), sizes, assumed, tuple(notes))
     raise ValueError(f"{where}.type: {kind!r} is not a fixture cadgen knows")
 
 
@@ -348,9 +354,15 @@ def _vise(stated: dict, stock_bounds: Bounds, where: str) -> FixtureEnvelope:
     sizes = {"jaw_height_mm": jaw_height, "parallels_mm": parallels, "grip_mm": grip}
     for key in ("jaw_width_mm", "jaw_thickness_mm", "parallel_width_mm", "floor_thickness_mm"):
         sizes[key] = stated.get(key, VISE_DEFAULTS[key])
-    assumed = tuple(key for key in ("jaw_height_mm", "parallels_mm", "grip_mm") if key not in given) + tuple(
-        key for key in ("jaw_width_mm", "jaw_thickness_mm", "parallel_width_mm", "floor_thickness_mm")
-        if key not in stated)
+    # Assumed: a default the model took, never a size worked out from two stated ones (grip from jaws and
+    # parallels), nor one it does not use (a parallel's width with no parallels).
+    if "grip_mm" in given:
+        taken = ("jaw_height_mm",) if given == {"grip_mm"} else ()
+    else:
+        taken = tuple(key for key in ("jaw_height_mm", "parallels_mm") if key not in given)
+    others = ("jaw_width_mm", "jaw_thickness_mm", *(("parallel_width_mm",) if parallels > 0 else ()),
+              "floor_thickness_mm")
+    assumed = taken + tuple(key for key in others if key not in stated)
     floor = z0 - parallels
     top = floor + jaw_height
     cx = (x0 + x1) / 2

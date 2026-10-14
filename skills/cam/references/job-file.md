@@ -133,15 +133,18 @@ Tell the user where the zero is and how to set it on the machine: the program's 
 
 | `type` | Sizes (mm) | What is modelled |
 | --- | --- | --- |
-| `vise` | `jaw_height_mm` (40), `jaw_width_mm` (150), `grip_mm`, `parallels_mm` (0) | Two jaws closing on the stock's front and back (along the setup's Y), `jaw_width_mm` wide about its centre, standing on a floor; the stock on parallels `parallels_mm` tall. `grip_mm` is how far the jaws reach up the stock: `jaw_height_mm - parallels_mm`, so any two give the third, and three must agree within 0.01 mm. A grip of 0 or less holds nothing and is refused. |
-| `plate` | `thickness_mm` (12) | A plate under the stock, 25 mm wider than it all round (a fixture plate, a spoilboard, a vacuum table). |
+| `vise` | `jaw_height_mm` (40), `jaw_width_mm` (150), `grip_mm`, `parallels_mm` (0, and 0 is allowed: the stock on the vise's floor), `jaw_thickness_mm` (20), `parallel_width_mm` (6), `floor_thickness_mm` (10) | Two jaws `jaw_thickness_mm` thick closing on the stock's front and back (along the setup's Y), `jaw_width_mm` wide about its centre, standing on a floor `floor_thickness_mm` thick; the stock on two parallels `parallels_mm` tall and `parallel_width_mm` wide. `grip_mm` is how far the jaws reach up the stock: `jaw_height_mm - parallels_mm`, so any two give the third, and three must agree within 0.01 mm. A grip of 0 or less holds nothing and is refused. |
+| `plate` | `thickness_mm` (12), `border_mm` (25, 0 allowed) | A plate under the stock, `border_mm` wider than it all round (a fixture plate, a spoilboard, a vacuum table). |
 | `chuck` | `diameter_mm` (the stock's plus 20 each side), `jaw_length_mm` (30), `grip_mm` (10) | A cylinder about the setup's Z axis through the stock's centre, its jaw face `grip_mm` above the stock's bottom and `jaw_length_mm` long below it. |
-| `collet` | `diameter_mm` (the stock's plus 5 each side) | A cylinder holding the bottom 15 mm of the stock, 40 mm long. |
+| `collet` | `diameter_mm` (the stock's plus 5 each side), `length_mm` (40), `grip_mm` (15, or the stock's length when shorter) | A cylinder holding the bottom `grip_mm` of the stock, `length_mm` long. |
 | `sheet` | none | A sheet held flat: nothing to collide with. |
 | `none` | none | Nothing modelled. |
 
-A size the job does not state takes the default in brackets, and the sidecar lists it under
-`setups[].fixture.assumed`; say which sizes were assumed when you report. A lathe holds work in a
+Every size the model uses can be stated; each is a number over 0 (`parallels_mm` and `border_mm` may
+be 0). A size the job does not state takes the default in brackets, and the sidecar lists it under
+`setups[].fixture.assumed` (and an `assumed_fixture` note); a size worked out from stated ones (the
+parallels from `jaw_height_mm` and `grip_mm`) is not assumed and is not listed. Say which sizes were
+assumed when you report, and ask for the real ones when a collision check leans on them. A lathe holds work in a
 `chuck`, `collet` or `none`; a laser, plasma or waterjet in a `sheet` or `none`.
 
 ## `tools`

@@ -93,13 +93,16 @@ DEFAULT_RETRACT_MM = 3.0
 #: how far the jaws reach up the stock from its bottom; ``parallels_mm`` the height of the parallels the stock sits
 #: on in a vise, whose grip is its ``jaw_height_mm`` less them (``setups`` holds the model).
 FIXTURES: dict[str, tuple[str, ...]] = {
-    "vise": ("jaw_height_mm", "jaw_width_mm", "grip_mm", "parallels_mm"),
-    "plate": ("thickness_mm",),
+    "vise": ("jaw_height_mm", "jaw_width_mm", "grip_mm", "parallels_mm", "jaw_thickness_mm", "parallel_width_mm",
+             "floor_thickness_mm"),
+    "plate": ("thickness_mm", "border_mm"),
     "chuck": ("diameter_mm", "jaw_length_mm", "grip_mm"),
-    "collet": ("diameter_mm",),
+    "collet": ("diameter_mm", "length_mm", "grip_mm"),
     "sheet": (),
     "none": (),
 }
+#: Fixture sizes that may be 0: a vise's stock may sit on its floor (no parallels), a plate may end at the stock.
+FIXTURE_ZERO_OK = ("parallels_mm", "border_mm")
 #: The fixtures a machine kind holds work in, where it is narrower than every fixture.
 FIXTURES_FOR_KIND: dict[str, tuple[str, ...]] = {
     "lathe": ("chuck", "collet", "none"), "laser": ("sheet", "none"), "plasma": ("sheet", "none"),
@@ -519,7 +522,9 @@ def _fixture(raw: Any, kind: str, where: str) -> Fixture:
     keys = FIXTURES[fixture_type]
     known(fixture, ("type", *keys), where=where,
           takes=f"a {fixture_type} takes type" + (f", {', '.join(keys)}" if keys else " only"))
-    return Fixture(fixture_type, _sizes(fixture, keys, where=where))
+    sizes = {key: number(fixture[key], where=f"{where}.{key}", positive=key not in FIXTURE_ZERO_OK, minimum=0)
+             for key in keys if key in fixture}
+    return Fixture(fixture_type, sizes)
 
 
 def _setups(document: dict, kind: str) -> tuple[Setup, ...]:
