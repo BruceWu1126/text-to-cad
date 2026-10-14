@@ -151,7 +151,7 @@ class PartRequests(unittest.TestCase):
 
         def mesher(topods, table, face_colors, *, part, **options):
             if part == failing:
-                raise tessellate.MeshProductionError("OCCT did not mesh 1 face(s) of the component: f3")
+                raise tessellate.MeshProductionError("OCCT failed on the component: Standard_Failure")
             return real(topods, table, face_colors, part=part, **options)
 
         future = SubscriberFuture()
@@ -171,7 +171,7 @@ class PartRequests(unittest.TestCase):
         self.assertEqual({cid: row["state"] for cid, row in rows.items()},
                          {**dict.fromkeys(cids[:-1], "ready"), cids[-1]: "failed"},
                          "what the failed job stored is ready; only what it left missing failed")
-        self.assertIn(f"component {cids[-1]}: MeshProductionError: OCCT did not mesh", rows[cids[-1]]["error"])
+        self.assertIn(f"component {cids[-1]}: MeshProductionError: OCCT failed on the component", rows[cids[-1]]["error"])
         for cid in cids[:-1]:
             self.assertEqual(rows[cid]["record"], parts.probe(keys[cid]))
         self.assertIsNone(parts.probe(failing))

@@ -31,7 +31,7 @@ names one. Each component of a view names its **part** (`part` in `assembly.json
 and the part's record names the display mesh the page reads to draw it
 (`partRow`, `@text-to-cad/core/lib/parts/tessellationCache.js`).
 
-Every mesh the viewer draws is cadgen's (OCCT's mesh of the exact BREP, stored
+Every mesh the viewer draws is cadgen's (its tessellation of the exact BREP, stored
 by cadgen, derived by the build that made the model before it reported done); the
 browser never tessellates. The parts' records are probed a chunk
 of components at a time and their meshes read a batch at a time

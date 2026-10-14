@@ -118,7 +118,7 @@ test("a failed component fails alone, with its own error, and the request goes o
   globalThis.fetch = async () => {
     polls += 1;
     return json({ viewId: VIEW, job: "job-3", components: {
-      bad: { part: P3, state: "failed", error: "component bad: OCCT did not mesh 1 face(s)", code: "mesh" },
+      bad: { part: P3, state: "failed", error: "component bad: OCCT failed on the component", code: "mesh" },
       part: readyRow(P, O),
       other: polls === 1 ? { part: P2, state: "pending", job: "job-3" } : readyRow(P2, O2),
     } });
@@ -135,7 +135,7 @@ test("a failed component fails alone, with its own error, and the request goes o
   const [[cid, error]] = failures;
   assert.equal(cid, "bad");
   assert.ok(error instanceof PartResolutionError);
-  assert.deepEqual([error.cid, error.code, error.message], ["bad", "mesh", "component bad: OCCT did not mesh 1 face(s)"]);
+  assert.deepEqual([error.cid, error.code, error.message], ["bad", "mesh", "component bad: OCCT failed on the component"]);
   assert.deepEqual([...result.keys()], ["part", "other"]);
   // Without `onFailed` the first failure is the request's, once the response's ready rows are heard.
   polls = 1;

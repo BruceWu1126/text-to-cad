@@ -176,14 +176,14 @@ test("edit worker failures are distinct from invalid-model failures", () => {
 });
 
 test("parts cadgen could not mesh are a warning over the rest of the model, naming them", () => {
-  const error = "component 07f3b327472c9bec: OCCT did not mesh 1 face(s) of the component: f224";
+  const error = "component 07f3b327472c9bec: OCCT failed on the component: Standard_Failure";
   const alert = buildViewerMeshAlert(step, true, error, null, { partial: true, failedParts: ["accessory:case"] });
   assert.equal(alert.severity, "warning");
   assert.equal(alert.blocking, false);
   assert.equal(alert.title, "A part couldn’t be shown");
   assert.match(alert.message, /“accessory:case” couldn’t be meshed, so it’s missing from the view\. Everything else is shown\./);
   assert.match(alert.details, /Parts: accessory:case/);
-  assert.match(alert.details, /OCCT did not mesh 1 face/);
+  assert.match(alert.details, /OCCT failed on the component/);
   const many = buildViewerMeshAlert(step, true, error, null, { partial: true, failedParts: ["a", "b", "c", "d", "e"] });
   assert.equal(many.title, "5 parts couldn’t be shown");
   assert.match(many.message, /^“a”, “b”, “c” and 2 more couldn’t be meshed, so they’re missing/);

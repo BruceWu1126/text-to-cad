@@ -207,7 +207,7 @@ test("a component that failed in its request fails alone; the ready ones beside 
   const ready = cid => ({ part: parts[cid], state: "ready", record });
   const client = createCadClient({ fetch: async () => new Response(JSON.stringify({ viewId: view.viewId, components: {
     c0: ready("c0"),
-    bad: { part: parts.bad, state: "failed", error: "component bad: OCCT did not mesh 2 face(s)", code: "mesh" },
+    bad: { part: parts.bad, state: "failed", error: "component bad: OCCT failed on the component", code: "mesh" },
     c2: ready("c2"),
   } }), { headers: { "content-type": "application/json" } }) });
   const order = ["bad", "c0", "c2"];
@@ -218,7 +218,7 @@ test("a component that failed in its request fails alone; the ready ones beside 
   assert.equal(tickets.stats().requests, 1);
   assert.equal(bad.status, "rejected");
   assert.ok(bad.reason instanceof PartResolutionError);
-  assert.deepEqual([bad.reason.cid, bad.reason.code, bad.reason.message], ["bad", "mesh", "component bad: OCCT did not mesh 2 face(s)"]);
+  assert.deepEqual([bad.reason.cid, bad.reason.code, bad.reason.message], ["bad", "mesh", "component bad: OCCT failed on the component"]);
   assert.deepEqual([c0.status, c0.value?.part, c0.value?.glb.object, c2.status, c2.value?.part],
     ["fulfilled", parts.c0, hex("e"), "fulfilled", parts.c2]);
   client.dispose();

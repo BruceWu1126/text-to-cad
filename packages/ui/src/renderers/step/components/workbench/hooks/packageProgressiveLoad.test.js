@@ -601,7 +601,7 @@ test("a failed lane fences sibling publishes, wakes queued admission, and preser
 test("a component's own failure leaves it out: the rest load, and the final publish names it", async () => {
   const descriptor = makeDescriptor({ componentCount: 4, occurrenceCount: 4 });
   const { loadComponent } = makeLoader(descriptor);
-  const own = (cid) => Object.assign(new Error(`component ${cid}: OCCT did not mesh 2 face(s)`), { cid });
+  const own = (cid) => Object.assign(new Error(`component ${cid}: OCCT failed on the component`), { cid });
   const componentFailed = (error, cid) => error.cid === cid;
   const publishes = [];
   const settled = [];
@@ -614,7 +614,7 @@ test("a component's own failure leaves it out: the rest load, and the final publ
   const result = await loader.run();
   assert.deepEqual([result.loaded, result.total], [3, 4]);
   assert.deepEqual(result.failures.map(({ cid, error }) => [cid, error.message]),
-    [["c2", "component c2: OCCT did not mesh 2 face(s)"]]);
+    [["c2", "component c2: OCCT failed on the component"]]);
   const finals = publishes.filter((publish) => publish.final);
   assert.equal(finals.length, 1);
   assert.deepEqual(Object.keys(finals[0].componentMeshDataByCid).sort(), ["c0", "c1", "c3"]);
@@ -635,7 +635,7 @@ test("a component's own failure leaves it out: the rest load, and the final publ
     partRow: async (cid) => { throw own(cid); },
     onPublish: () => assert.fail("nothing is published"),
   });
-  await assert.rejects(lone.run(), /component c0: OCCT did not mesh 2 face\(s\)/);
+  await assert.rejects(lone.run(), /component c0: OCCT failed on the component/);
 });
 
 test("cancellation fences a queued admission before an active slot releases", async () => {

@@ -52,7 +52,7 @@ PEG_FAILED = "#o1.2 peg could not be meshed (MeshProductionError: ValueError: bo
 
 
 def failing(*face_counts: int):
-    """OCCT's mesher, raising instead for a part whose selector table has one of
+    """cadgen's mesher, raising instead for a part whose selector table has one of
     ``face_counts`` faces: the peg, a cylinder, has 3, and the block 6."""
     from cadgen._internal import tessellate
 

@@ -170,8 +170,8 @@ document indexes, output records and cache-root resolution.
 
 The part routes likewise delegate reads and TESB batch framing to
 `cadgen.store.tess_cache`. `index/part/<key>` is a part's record: it names the
-two objects cadgen made for it, its display mesh (OCCT's mesh of the
-component's exact BREP) and its selector table; a client never writes one. The
+two objects cadgen made for it, its display mesh (cadgen's tessellation of
+the component's exact BREP) and its selector table; a client never writes one. The
 shared JavaScript reader lives in `@text-to-cad/core/lib/parts/tessellationCache.js`.
 Part names are validated before access: a request names an entry of the store,
 never a path. The build that made a model derived each part's display data
