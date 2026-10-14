@@ -22,12 +22,14 @@ straddling two steps (where the walk turned towards the material) reads up to ab
 
 The walk follows the material's edge round: out from the entry as a spiral, along the walls, and in loops of its own
 where a passage is too narrow to go straight on at that engagement (trochoidal milling emerges from the steering; it
-is not drawn). Where it has cut nothing for a diameter and then meets material again, the stretch is replaced by a
-straight move across the cut when that is allowed; far from any material it strides along the walls. It ends when it
-has gone round the region and a circle more, or turned two and a half turns, without cutting. The next walk starts
-at the standing material nearest the tool: straight there at depth when that move stays under the engagement, else
-beside it where the tool's circle is already cut, fed to at depth through the cut when the straight move allows,
-else over the top and straight down onto the cut (never into stock). When nothing the walks are meant to reach
+is not drawn). Where it has cut nothing for a diameter and then meets material again, the stretch is pulled tight
+into straight moves across the cut where they are allowed; far from any material it strides along the walls. It ends
+when it has gone round the region and a circle more, or turned two and a half turns, without cutting. The next walk
+starts at the standing material nearest the tool: straight there at depth when that move stays under the engagement,
+else beside it where the tool's circle is already cut, fed to at depth through the cut when the straight move allows,
+else over the top and straight down onto the cut (never into stock). Where a walk started beside some material cuts
+nothing, the next try there enters it from above (a helix, or a ramp); where that cuts nothing either, it is left to
+the wall rings, and a ring that would then cut over the cap refuses the plan. When nothing the walks are meant to reach
 stands, one ring round each wall at the exact offset takes the last of the wall stock. Every move's engagement is
 measured as it is cut, and a level whose measured engagement would exceed the cap is refused, never posted.
 
@@ -54,10 +56,9 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from cadgen._internal.cam.operations import base as _base
-from cadgen._internal.cam.operations.base import OperationBase, ParseContext
-from cadgen._internal.cam.operations.milling_2d import (_END_MILLS, _angle, _floor_from, _floor_keys, _fraction, _mm,
-                                                        _region_polygon)
+from cadgen._internal.cam.operations.base import OperationBase, ParseContext, PlanError
+from cadgen._internal.cam.operations.common import (feed_findings, floor_from, floor_keys, fraction, mm, ramp_angle,
+                                                    region_polygon)
 from cadgen._internal.cam.values import choice, known
 
 if TYPE_CHECKING:
@@ -80,14 +81,8 @@ WALL_BAND_FRACTION = 0.4
 #: How far beyond the stock the tool may go round a profile, besides its radius, mm.
 AIR_MARGIN_MM = 0.5
 
-PlanError = getattr(_base, "PlanError", None)
-if PlanError is None:  # until operations/base.py carries it (the shared layer's fix adds it there)
-    class PlanError(ValueError):
-        """A well-formed operation that cannot be planned on this part; ``kind`` is the finding it becomes."""
-
-        def __init__(self, kind: str, summary: str, description: str = "", items=()):
-            super().__init__(summary)
-            self.kind, self.summary, self.description, self.items = kind, summary, description, tuple(items)
+#: The cutters it clears with.
+END_MILLS = ("flat_endmill", "bull_endmill")
 
 
 def engagement_angle_deg(width_mm: float, diameter_mm: float) -> float:
@@ -295,6 +290,8 @@ class _Level:
         self._area = self._length = 0.0
         self.restarts = 0
         self.lifts = 0
+        #: Cells a walk started beside came to nothing from: the next try there enters from above.
+        self.failed: list[tuple[int, int]] = []
 
     def allowed(self, x: float, y: float) -> bool:
         import shapely
@@ -322,16 +319,16 @@ class _Level:
 class Adaptive2dOperation(OperationBase):
     name, phase, word = "adaptive_2d", 1, "Adaptive clearing"
     keys = frozenset({"max_engagement", "stepdown_mm", "side", "ramp_angle_deg", "depth_mm", "z_mm"})
-    tool_types = _END_MILLS
+    tool_types = END_MILLS
     targets = ("features", "region")
     kinds = ("pocket", "profile")
 
     def parse(self, raw: dict, ctx: ParseContext) -> AdaptiveParams:
         known(raw, self.keys, where=ctx.where, takes=f"adaptive_2d takes {', '.join(sorted(self.keys))}")
         side = choice(raw["side"], ("inside", "outside"), where=f"{ctx.where}.side") if "side" in raw else None
-        depth, z = _floor_keys(raw, ctx)
-        return AdaptiveParams(_fraction(raw, "max_engagement", ctx, DEFAULT_MAX_ENGAGEMENT),
-                              _mm(raw, "stepdown_mm", ctx), side, _angle(raw, ctx), depth, z)
+        depth, z = floor_keys(raw, ctx.where)
+        return AdaptiveParams(fraction(raw, "max_engagement", ctx.where, DEFAULT_MAX_ENGAGEMENT),
+                              mm(raw, "stepdown_mm", ctx.where), side, ramp_angle(raw, ctx.where), depth, z)
 
     # The targets: (ref, side, centre_area(z), bottom z or None, feature or None).
     def _targets(self, params: AdaptiveParams, ctx: "PlanContext") -> list[tuple]:
@@ -345,7 +342,7 @@ class Adaptive2dOperation(OperationBase):
             if params.side == "outside":
                 raise ValueError(f"{ctx.where}.side: a region is cleared from the inside; side outside clears the "
                                  "stock round a profile")
-            poly = _region_polygon(ctx)
+            poly = region_polygon(ctx)
             return [("region", "inside", lambda z, p=poly: g2.offset(p.difference(g2.shadow(ctx, z)), -(r + stl), tol),
                      None, None)]
         found = []
@@ -387,12 +384,10 @@ class Adaptive2dOperation(OperationBase):
         restarts = lifts = 0
         for ref, side, centre_at, bottom, feature in self._targets(params, ctx):
             if bottom is None:
-                floor = _floor_from(ctx, params.depth_mm, params.z_mm, None, deepest=None, what="")
+                floor = floor_from(ctx, params.depth_mm, params.z_mm, None, deepest=None, what="")
             else:
-                floor = _floor_from(ctx, params.depth_mm, params.z_mm, bottom + stl, deepest=None, what="")
-                if floor < bottom - 1e-6:
-                    raise PlanError("too_deep", f"{ctx.where}: cutting to z {floor:g} goes {bottom - floor:g} mm under "
-                                    f"the floor of {ref} at z {bottom:g}, into the part")
+                floor = floor_from(ctx, params.depth_mm, params.z_mm, bottom + stl, deepest=bottom,
+                                   what=f"the floor of {ref}")
             depth = ctx.top_z - floor
             if depth <= 1e-9:
                 raise PlanError("empty_operation",
@@ -410,10 +405,11 @@ class Adaptive2dOperation(OperationBase):
                                     f"z {z:g}")
                 level = _Level(ctx, area, g2.stock_outline(ctx, z), z, above, target_w)
                 self._clear(emitter, level, ref)
-                worst = max(worst, level.max_w)
+                worst = max(worst, min(level.max_w, diameter))
                 restarts += level.restarts
                 lifts += level.lifts
-                if level.max_w > cap * diameter + 1e-9:
+                # The model errs high by up to a cell along each edge; no cut is wider than the tool.
+                if min(level.max_w, diameter) > cap * diameter + 2 * level.cell:
                     raise PlanError(
                         "tool_too_large",
                         f"{ctx.where}: {ref} at z {z:g} cannot be cleared at {cap:g} of the diameter: a passage is too "
@@ -429,7 +425,7 @@ class Adaptive2dOperation(OperationBase):
         stats.update({"engagement_measured": round(worst / diameter, 4),
                       "engagement_angle_deg": round(engagement_angle_deg(worst, diameter), 2),
                       "restarts": restarts, "lifts": lifts})
-        return Planned(emitter.toolpath(), stats, tuple(feeds.findings))
+        return Planned(emitter.toolpath(), stats, feed_findings(ctx))
 
     # --- one level -------------------------------------------------------------------------------------------
 
@@ -443,8 +439,10 @@ class Adaptive2dOperation(OperationBase):
                 found = self._start(level, piece, emitter.here)
                 if found is None:
                     break
-                if found == "enter":
-                    start, heading = self._enter(emitter, level, piece, ref)
+                target_cell = None
+                if found[0] == "enter":
+                    target_cell = found[1]
+                    start, heading = self._enter(emitter, level, piece, ref, near=found[2])
                 else:
                     start, heading, target_cell, direct = found
                     if direct:
@@ -454,10 +452,15 @@ class Adaptive2dOperation(OperationBase):
                     level.restarts += 1
                 cut, walked = self._walk(emitter, level, piece, start, heading)
                 steps += walked
-                if found != "enter" and cut < 4:
-                    # Nothing came off from here: leave that bit to the wall rings rather than come back for it.
-                    row, col = target_cell
-                    level.reach[max(row - 2, 0):row + 3, max(col - 2, 0):col + 3] = False
+                if target_cell is not None and cut < 4:
+                    if found[0] != "enter":
+                        # Nothing came off from beside it: next time enter it from above.
+                        level.failed.append(target_cell)
+                    else:
+                        # Nor from above: leave that bit to the wall rings rather than come back for it.
+                        row, col = target_cell
+                        n = int(level.map.radius / (2 * level.cell))
+                        level.reach[max(row - n, 0):row + n + 1, max(col - n, 0):col + n + 1] = False
                 if steps > budget:
                     raise PlanError("unreachable", f"{level.ctx.where}: {ref} at z {level.z:g}: adaptive clearing "
                                     "did not finish; the region is too tangled for this tool")
@@ -476,15 +479,16 @@ class Adaptive2dOperation(OperationBase):
         left = m.solid & level.reach
         if not left.any():
             return None
-        open_ = ~m.solid
+        if not (level.live & ~m.solid).any():
+            return "enter", None, None     # nothing of the level cut yet
+        # Its edge: next to a cell cut, or one the walks leave alone (the walls' band, a bit given up on).
+        open_ = ~left
         near_cut = np.zeros_like(left)
         near_cut[1:, :] |= open_[:-1, :]
         near_cut[:-1, :] |= open_[1:, :]
         near_cut[:, 1:] |= open_[:, :-1]
         near_cut[:, :-1] |= open_[:, 1:]
         rows, cols = np.nonzero(left & near_cut)
-        if rows.size == 0:
-            return "enter"
         if here is None:
             point = piece.representative_point()
             here = (point.x, point.y, level.z)
@@ -494,8 +498,13 @@ class Adaptive2dOperation(OperationBase):
         reach = r + 2 * m.cell
         tiny = 0.25 * level.target_w * level.step
         at_depth = abs(here[2] - level.z) < 1e-9 and level.allowed(here[0], here[1])
+        span = int(r / (2 * m.cell))
         for rank, k in enumerate(order[:256]):
             mx, my = m.point(int(rows[k]), int(cols[k]))
+            cell = (int(rows[k]), int(cols[k]))
+            if any(abs(cell[0] - a) <= span and abs(cell[1] - b) <= span for a, b in level.failed):
+                level.failed = [f for f in level.failed if abs(cell[0] - f[0]) > span or abs(cell[1] - f[1]) > span]
+                return "enter", cell, (mx, my)
             if at_depth and rank < 8:
                 near = nearest_points(piece, Point(mx, my))[0]
                 tx, ty = round(near.x, 6), round(near.y, 6)
@@ -510,15 +519,20 @@ class Adaptive2dOperation(OperationBase):
                 qx, qy = round(mx + reach * math.cos(angle), 6), round(my + reach * math.sin(angle), 6)
                 if not level.allowed(qx, qy) or m.standing((qx, qy)) > tiny:
                     continue
-                d = math.dist((qx, qy), here[:2])
-                if best is None or d < best[0] - 1e-12:
-                    best = (d, (qx, qy, level.z), math.atan2(my - qy, mx - qx) + math.pi / 2)
+                heading = math.atan2(my - qy, mx - qx) + math.pi / 2
+                # Rather where the walk has room to go on along the material than straight into a wall.
+                ahead = (qx + 2 * r * math.cos(heading), qy + 2 * r * math.sin(heading))
+                rank = (0 if level.segment_allowed((qx, qy), ahead) else 1, math.dist((qx, qy), here[:2]))
+                if best is None or rank < best[0]:
+                    best = (rank, (qx, qy, level.z), heading)
             if best is not None:
                 return best[1], best[2], (int(rows[k]), int(cols[k])), None
         if not (m.solid & level.reach & ~near_cut).any() and rows.size < 64:
             level.reach[rows, cols] = False   # slivers no tool circle can be put beside: the wall rings' to take
             return self._start(level, piece, here)
-        return "enter"
+        # Nowhere beside it is cut clear: enter afresh at the nearest of it.
+        k = int(order[0])
+        return "enter", (int(rows[k]), int(cols[k])), m.point(int(rows[k]), int(cols[k]))
 
     @staticmethod
     def _path(level: _Level, a, b):
@@ -534,9 +548,29 @@ class Adaptive2dOperation(OperationBase):
                 return None
         return points
 
-    def _enter(self, emitter, level: _Level, piece, ref: str):
-        """Enter a piece nothing of which is cut at this level: a helix at its widest point, then a full circle at the
-        level; a ramp along its longest straight where no helix fits. Returns where the walk starts and its heading."""
+    def _pull(self, level: _Level, run: list) -> list:
+        """A stretch of the walk that cut nothing (``run``, its points), pulled tight: from each point, the furthest
+        point of it a straight move reaches inside the region under the engagement (:meth:`_path`), in steps."""
+        out = [run[0]]
+        i = 0
+        while i < len(run) - 1:
+            lo, hi = i + 1, len(run) - 1
+            if self._path(level, run[i], run[hi]) is not None:
+                lo = hi
+            while hi - lo > 1:
+                middle = (lo + hi) // 2
+                if self._path(level, run[i], run[middle]) is not None:
+                    lo = middle
+                else:
+                    hi = middle
+            out += self._path(level, run[i], run[lo])[1:] if lo > i + 1 else [run[lo]]
+            i = lo
+        return out
+
+    def _enter(self, emitter, level: _Level, piece, ref: str, near=None):
+        """Enter the material from above: a helix at the piece's widest point (within two diameters of ``near``, a
+        point of standing material no walk can reach from the cut, when given), then a full circle at the level; a
+        ramp along its longest straight where no helix fits. Returns where the walk starts and its heading."""
         from shapely.geometry import LineString, Point
         from shapely.ops import polylabel
 
@@ -546,7 +580,13 @@ class Adaptive2dOperation(OperationBase):
         ctx, m, z = level.ctx, level.map, level.z
         r, tol = ctx.radius, ctx.tol
         angle = ctx.params.ramp_angle_deg
-        centre = polylabel(piece, tolerance=tol)
+        where = piece
+        if near is not None:
+            from cadgen._internal.cam.operations import geometry2d as g2
+
+            local = g2.polygons(piece.intersection(Point(near).buffer(4 * r)))
+            where = local[0] if local else piece
+        centre = polylabel(where, tolerance=tol)
         cx, cy = round(centre.x, 6), round(centre.y, 6)
         clearance = piece.boundary.distance(Point(cx, cy))
         radius = min(HELIX_FRACTION * r, clearance - tol)
@@ -606,7 +646,7 @@ class Adaptive2dOperation(OperationBase):
             return
         # Over the start the level is already cut (its tool circle stands clear), so nothing stands over it down to
         # the level: the tool comes straight down onto it, a plunge only where it is in air.
-        if in_air(level.ctx, start[:2]):
+        if in_air(level.ctx, start):
             emitter.go([start], rapid_to=level.above, entry=PLUNGE)
         else:
             emitter.go([start], rapid_to=level.z, entry=PLUNGE)
@@ -671,16 +711,15 @@ class Adaptive2dOperation(OperationBase):
                 break
             q = at(chosen)
             if air > shortcut and near and m.gain(p, q) > 0:
-                # Back to the material after a stretch that cut nothing: cross the cut straight when allowed.
+                # Back to the material after a stretch that cut nothing: cross the cut in straight moves instead.
                 last = points[kept - 1] if kept else (start[0], start[1], level.z)
-                across = self._path(level, last, (p[0], p[1], level.z))
-                if across is not None and math.dist(last[:2], p) < air - 1e-9:
-                    for a, b in zip(across, across[1:]):
-                        width, count = m.sweep(a, b)
-                        level.record(width, a, b)
-                        total += count
-                    points[kept:] = across[1:]
-                    kept = len(points)   # what was swept stays in the path; the air run goes on counting
+                across = self._pull(level, [last] + points[kept:])
+                for a, b in zip(across, across[1:]):
+                    width, count = m.sweep(a, b)
+                    level.record(width, a, b)
+                    total += count
+                points[kept:] = across[1:]
+                kept = len(points)   # what was swept stays in the path; the air run goes on counting
             width, count = m.sweep(p, q)
             level.record(width, p, q)
             points.append((q[0], q[1], level.z))
