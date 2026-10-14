@@ -240,6 +240,13 @@ export function nodeBounds(node) {
       return null;
     case "revolve":
       return revolveWorldBox(node);
+    case "loft":
+    case "sweep": {
+      const v = node.mesh.vertices;
+      let box = null;
+      for (let i = 0; i + 2 < v.length; i += 3) box = mergeBox(box, { min: [v[i], v[i + 1], v[i + 2]], max: [v[i], v[i + 1], v[i + 2]] });
+      return box;
+    }
     default: {
       const local = leafLocalBox(node);
       if (!local) return null;
@@ -341,13 +348,29 @@ function applyCornerModifier(prism, kind, size) {
 //    member would also round corners that disappear inside the union.
 //  - {all: true} fillets on boxes and prisms become an `edgeRadius` that the
 //    implicit kernel rounds exactly and the mesh kernel reports.
-// Anything else stays sharp, and the caller gets a warning per modifier.
+// Anything else uses the node's resolved tools when the recorder found them
+// (scripts/kernel_tools/resolve.py), and otherwise stays sharp with a warning.
 export function lowerEdgeModifiers(root) {
   const warnings = [];
   const lower = (node) => {
     if (node.type !== "fillet" && node.type !== "chamfer") {
       return mapChildren(node, lower);
     }
+    if (!node.tools) return lowerOne(node);
+    // The kernel's own shapes first (exact rounded corners and boxes); where
+    // they would draw an edge sharp, the tools resolved from the real build:
+    // the material a fillet or chamfer removes from convex edges and adds to
+    // concave ones.
+    const before = warnings.length;
+    const own = lowerOne(node);
+    if (warnings.length === before) return own;
+    warnings.length = before;
+    let out = lower(node.child);
+    if (node.tools.cut) out = { type: "subtract", base: out, tool: lower(node.tools.cut) };
+    if (node.tools.fill) out = { type: "union", children: [out, lower(node.tools.fill)] };
+    return out;
+  };
+  const lowerOne = (node) => {
     const child = lower(node.child);
     const { select, size } = node;
     const label = `${node.type} ${size} mm`;

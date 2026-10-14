@@ -32,12 +32,19 @@ import sys
 import tempfile
 import traceback
 
-# Marching-cubes cells across the part's longest side: SDM's fidelity knob
-# (0.2 mm on a 25 mm part). Flat regions are then decimated to within a
-# fraction of a voxel, which keeps viewer meshes in the tens of thousands of
-# triangles instead of hundreds.
+# Voxel size, SDM's fidelity knob: as fine as a sample budget allows (so a
+# small or flat part gets voxels thin walls survive: a 0.2 mm wall lost 1.3%
+# of its volume at a fixed 128 cells across), and never coarser than 128 cells
+# across the part's longest side. Flat regions are then decimated, keeping viewer
+# meshes in the tens of thousands of triangles instead of hundreds. A fixed
+# reduction: SDM's deviation-bounded search re-measured the surface after
+# every step and took 10 of the 12 s of a build, while dropping 80% of the
+# triangles leaves the deviation from the exact part unchanged (measured on
+# the kernel benchmark's motor mount: 0.0134 mm mean either way).
 CELLS_ACROSS = 128
-SIMPLIFY_ERROR_VOXELS = 0.1
+MAX_CELLS_ACROSS = 400
+SAMPLE_BUDGET = 2_000_000
+DECIMATE_REDUCTION = 0.8
 
 
 class Unsupported(Exception):
@@ -257,8 +264,6 @@ class Translator:
         return _place_matrix(solid, n["matrix"])
 
     def _revolve(self, n):
-        if abs(abs(n.get("angle", 360)) - 360) > 1e-9:
-            raise Unsupported(f"a {n['angle']} degree revolve (SDM revolves all the way round)")
         m = n["matrix"]
         origin = n["axis"]["origin"]
         axis = _unit(n["axis"]["direction"])
@@ -280,9 +285,39 @@ class Translator:
 
         solid = {"type": "2d_to_3d", "method": "revolution",
                  "child": _profile_2d(n["profile"], to_profile)}
+        angle = n.get("angle", 360)
+        if abs(abs(angle) - 360) > 1e-9:
+            # SDM revolves all the way round: keep the wedge from the radial
+            # direction, counter-clockwise about the axis (clockwise if negative).
+            reach = 4 * max(1.0, *(abs(v) for v in _profile_box(n["profile"], to_profile)))
+            sweep = math.radians(abs(angle))
+            steps = max(2, math.ceil(sweep / (math.pi / 32)))
+            sign = 1 if angle > 0 else -1
+            wedge = [[0.0, 0.0]] + [[reach * math.cos(sign * sweep * i / steps), reach * math.sin(sign * sweep * i / steps)]
+                                    for i in range(steps + 1)]
+            if sign < 0:
+                wedge.reverse()
+            cut = {"type": "2d_to_3d", "method": "extrusion", "child": _prim("polygon_2d", vertices=wedge),
+                   "params": {"h": reach}}
+            solid = _op("intersect", [solid, cut])
         # Revolution is about local Z: local X = radial, Z = axis.
         frame = [[radial[i], _cross(axis, radial)[i], axis[i]] for i in range(3)]
         return _place(solid, frame, tuple(origin))
+
+    def _loft(self, n):
+        # SDM lofts matching polygon outlines along local Z at the stations;
+        # the recorder already interpolated a smooth loft's in-between rings.
+        children = [_prim("polygon_2d", vertices=[list(p) for p in ring]) for ring in n["rings"]]
+        solid = {"type": "loft", "children": children, "params": {"z": list(n["stations"]), "interp": "shape"}}
+        return _place_matrix(solid, n["matrix"])
+
+    def _sweep(self, n):
+        params = {"path": [list(p) for p in n["path"]], "path_kind": "polyline", "frame": "rmf",
+                  "normal0": list(n["frames"][0][0])}
+        if n.get("closed"):
+            params["closed"] = True
+        return {"type": "sweep", "child": _prim("polygon_2d", vertices=[list(p) for p in n["section"]]),
+                "params": params}
 
     def _union(self, n):
         return _op("union", [self.node(c) for c in n["children"]])
@@ -299,10 +334,23 @@ class Translator:
             b = [s / 2 for s in child["size"]]
             r = min(n["size"], *b)
             return _place_matrix(_prim("round_box", b=b, r=r), child["matrix"])
-        return self._sharp(n, "fillet")
+        return self._tools(n, "fillet")
 
     def _chamfer(self, n):
-        return self._sharp(n, "chamfer")
+        return self._tools(n, "chamfer")
+
+    def _tools(self, n, what):
+        """The material the fillet/chamfer removes from convex edges and adds
+        to concave ones, as resolved from the real build (resolve.py)."""
+        tools = n.get("tools")
+        if not tools:
+            return self._sharp(n, what)
+        solid = self.node(n["child"])
+        if tools.get("cut"):
+            solid = _op("subtract", [solid, self.node(tools["cut"])])
+        if tools.get("fill"):
+            solid = _op("union", [solid, self.node(tools["fill"])])
+        return solid
 
     def _sharp(self, n, what):
         self.warnings.append(f"{n['size']} mm {what} drawn sharp: SDM has no edge {what}s")
@@ -373,6 +421,10 @@ def bounds(n):
         return ([o[i] - far for i in range(3)], [o[i] + far for i in range(3)])
     if kind == "hole":
         return None
+    if kind in ("loft", "sweep"):
+        v = n["mesh"]["vertices"]
+        pts = [v[i:i + 3] for i in range(0, len(v), 3)]
+        return ([min(p[i] for p in pts) for i in range(3)], [max(p[i] for p in pts) for i in range(3)])
     if kind in ("union", "intersect"):
         return _merge([bounds(c) for c in n["children"]])
     if kind == "subtract":
@@ -413,10 +465,12 @@ def run(program_path, stl_path):
     from software_defined_matter.grid_sampling import material_bbox
 
     box = material_bbox(part.materials[0], part)
-    longest = float(max(box.size))
-    voxel = longest / CELLS_ACROSS
+    size = [float(v) for v in box.size]
+    longest = max(size)
+    voxel = min(longest / CELLS_ACROSS,
+                max(longest / MAX_CELLS_ACROSS, (size[0] * size[1] * size[2] / SAMPLE_BUDGET) ** (1 / 3)))
     with tempfile.TemporaryDirectory() as tmp:
-        decimate = DecimateConfig(simplify_error_mm=voxel * SIMPLIFY_ERROR_VOXELS)
+        decimate = DecimateConfig(target_reduction=DECIMATE_REDUCTION)
         (written,) = export_part(part, tmp, voxel_size=voxel, stamp=False, decimate=decimate)
         mesh = trimesh.load(written, force="mesh")
         os.makedirs(os.path.dirname(stl_path) or ".", exist_ok=True)

@@ -66,14 +66,21 @@ fails with that note.
 
 - **The recorded program.** Kernels that can't run build123d get the model
   recorded as a CSG tree ([references/program.md](references/program.md)). The
-  recorder covers the common builder and algebra subset; a model using
-  anything else fails with the name of what's missing, never a guess.
-- **Edges.** Fillets and chamfers on edges parallel to an axis become rounded
-  or cut sketch corners in `implicit`, `manifold` and `three`. SDM has no edge
-  fillets, so it draws them sharp. Every approximation is listed in the run's
+  recorder covers the common builder and algebra subset, plus `Text`,
+  `offset` (shells), `loft` and `sweep`; a model using anything else fails
+  with the name of what's missing, never a guess.
+- **Read from the real build.** What the program text can't say (which edges
+  `group_by(...)[-1]` picks, a font's glyphs, a sweep's path) is read by
+  running the model once in build123d. The kernel still builds every solid:
+  a fillet or chamfer becomes a prism or revolve of the material it removes
+  or adds, a loft or sweep a closed mesh through its sections.
+- **Edges.** Fillets and chamfers on straight and circular edges are exact in
+  every kernel; edges of other shapes (splines) are drawn sharp. Where
+  filleted edges meet at a corner, the corner is the meeting of the two
+  roundings, not a blended ball. Every approximation is listed in the run's
   notes: report them with the result.
 - **Comparing.** Compare kernels by volume and bounds within a tolerance,
-  never by file bytes. `check` prints each kernel's volume error on eight
+  never by file bytes. `check` prints each kernel's volume error on twelve
   fixture parts against OpenCASCADE's.
 
 ## Add or try a kernel

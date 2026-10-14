@@ -5,9 +5,10 @@
 //
 // Every curve is faceted, but each circle's polygon is sized to the circle's
 // area (and revolves get the same radial correction), so volumes match the
-// exact part closely. Fillets show where the shared lowering can express them
-// (profile corners), and a box filleted on every edge is the exact hull of
-// eight spheres.
+// exact part closely. Fillets and chamfers come from the shared lowering
+// (profile corners, the edge tools the recorder resolved), a box filleted on
+// every edge is the exact hull of eight spheres, and lofts and sweeps are the
+// recorder's closed meshes.
 import Module from "manifold-3d";
 import { prepareProgram, prismRange, revolveFrame, transformPoint, dot, sub } from "../_shared/program.mjs";
 import { buildKernelMeshData } from "../_shared/meshData.mjs";
@@ -19,7 +20,7 @@ const MAX_SEGMENTS = 720;
 
 const wasm = await Module();
 wasm.setup();
-const { Manifold, CrossSection } = wasm;
+const { Manifold, CrossSection, Mesh } = wasm;
 
 function segmentsFor(radius) {
   if (radius <= SAG) return MIN_SEGMENTS;
@@ -160,6 +161,13 @@ class ManifoldBuilder {
         const { origin: o, dir: d, radial: r } = frame;
         const y = [d[1] * r[2] - d[2] * r[1], d[2] * r[0] - d[0] * r[2], d[0] * r[1] - d[1] * r[0]];
         return solid.transform([r[0], r[1], r[2], 0, y[0], y[1], y[2], 0, d[0], d[1], d[2], 0, o[0], o[1], o[2], 1]);
+      }
+      case "loft":
+      case "sweep": {
+        // the closed mesh the recorder built through the sections or along the path
+        const mesh = new Mesh({ numProp: 3, vertProperties: new Float32Array(node.mesh.vertices), triVerts: new Uint32Array(node.mesh.triangles) });
+        mesh.merge();
+        return new Manifold(mesh);
       }
       default:
         throw new Error(`Manifold kernel cannot build ${node.type}`);

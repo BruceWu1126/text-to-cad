@@ -10,6 +10,7 @@ not with a recorded number nobody can re-derive.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import struct
 import sys
@@ -18,6 +19,7 @@ import textwrap
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tests.python.support.paths import add_repo_path, repo_path
 
@@ -53,6 +55,15 @@ MODEL = textwrap.dedent('''
     if __name__ == "__main__":
         pill()
 ''')
+
+
+def setUpModule():
+    # recording caches what it reads from real builds under CAD_KERNELS_HOME
+    cache = tempfile.mkdtemp()
+    patcher = mock.patch.dict(os.environ, {"CAD_KERNELS_HOME": cache})
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
+    unittest.addModuleCleanup(shutil.rmtree, cache)
 
 
 def _stl_volume(path: Path) -> float:
@@ -164,6 +175,49 @@ class ModelTests(unittest.TestCase):
             run(kernel, f"{self.script}::pill", cwd=self.tmp)
         self.assertLess(time.monotonic() - started, 30, "the runner's children were stopped too")
         self.assertFalse((self.tmp / "STEP" / ".kernels" / "sleeper" / "pill.stl").exists())
+
+
+def _mesh_volume(mesh) -> float:
+    v, t = mesh["vertices"], mesh["triangles"]
+    total = 0.0
+    for i in range(0, len(t), 3):
+        a, b, c = (v[3 * t[i + k]:3 * t[i + k] + 3] for k in range(3))
+        total += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0])
+                  + a[2] * (b[0] * c[1] - b[1] * c[0]))
+    return total / 6
+
+
+class ResolveTests(unittest.TestCase):
+    """What the recorder reads from the real build: edges, shells, lofts, sweeps."""
+
+    def program(self, name):
+        program = trace_model(str(FIXTURES / f"{name}.py"))
+        self.assertTrue(program["ok"], program.get("error"))
+        self.assertEqual(program["notes"], [])
+        return program["root"]
+
+    def test_edges_picked_by_position_become_tools(self):
+        fillet = self.program("rim")
+        chamfer = fillet["child"]
+        self.assertEqual((fillet["type"], chamfer["type"]), ("fillet", "chamfer"))
+        # the plate's top edges are convex (material cut), the boss's foot concave (material added)
+        self.assertEqual([c["type"] for c in fillet["tools"]["cut"]["children"]], ["prism"] * 4)
+        self.assertEqual(fillet["tools"]["fill"]["type"], "revolve")
+        self.assertEqual((chamfer["tools"]["cut"]["type"], chamfer["tools"]["fill"]), ("revolve", None))
+
+    def test_a_shell_cuts_a_cavity_through_its_opening(self):
+        root = self.program("cup")
+        self.assertEqual(root["type"], "subtract")
+        cavity = root["tool"]
+        self.assertEqual(cavity["size"], [27.0, 17.0, 15.0])
+        self.assertAlmostEqual(cavity["matrix"][11], 1.5)  # floor 1.5 mm thick, top open
+
+    def test_lofts_and_sweeps_carry_closed_meshes(self):
+        for name, kind in (("transition", "loft"), ("elbow", "sweep")):
+            with self.subTest(name):
+                root = self.program(name)
+                self.assertEqual(root["type"], kind)
+                self.assertAlmostEqual(_mesh_volume(root["mesh"]) / REFERENCE[name]["volume"], 1, delta=5e-4)
 
 
 class FixtureTests(unittest.TestCase):

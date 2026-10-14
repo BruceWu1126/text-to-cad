@@ -112,6 +112,7 @@ def run(kernel: Kernel, target: str, *, cwd: Path | None = None, env: dict | Non
     out.parent.mkdir(parents=True, exist_ok=True)
     out.unlink(missing_ok=True)
     program_path = out.with_suffix(".program.json")
+    program = {}
     try:
         if kernel.input == "program":
             program = record.trace_model(f"{model.script}::{model.function}")
@@ -158,5 +159,7 @@ def run(kernel: Kernel, target: str, *, cwd: Path | None = None, env: dict | Non
         program_path.unlink(missing_ok=True)
     report.pop("trace", None)
     report.pop("ok", None)
+    if kernel.input == "program" and program.get("notes"):
+        report["warnings"] = [*program["notes"], *report.get("warnings", [])]
     return {"ok": True, "kernel": kernel.id, "model": f"{_arg(model.script, cwd)}::{model.function}",
             "output": _arg(out, cwd), **report}

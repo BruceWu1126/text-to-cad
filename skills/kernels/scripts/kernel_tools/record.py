@@ -5,10 +5,12 @@ need the model's geometry. This module stands in for build123d: the model
 program runs against these recording classes and the result is a JSON tree of
 primitives, booleans and edge modifiers that each kernel evaluates its own way.
 
-Only the common builder subset is recorded (BuildPart/BuildSketch,
-Locations, Box/Cylinder/Sphere/Cone/Hole, Rectangle/RectangleRounded/Circle,
-extrude, revolve, fillet, chamfer, Pos/Rot, and the +/-/& algebra). Anything
-else raises Unsupported, which the CLI reports instead of guessing.
+Only the common builder subset is recorded (BuildPart/BuildSketch/BuildLine,
+Locations, Box/Cylinder/Sphere/Cone/Hole, Rectangle/RectangleRounded/Circle/
+Text, extrude, revolve, loft, sweep, offset, fillet, chamfer, Pos/Rot, and the
++/-/& algebra). Anything else raises Unsupported, which the CLI reports
+instead of guessing. What the program text can't tell (selected edges,
+glyphs, paths, openings) is read from a real build by resolve.py.
 
 Program schema (lengths in mm, matrices row-major 4x4, Z up):
   leaf   {"type": "box", "size": [l, w, h], "matrix": [...]}
@@ -23,7 +25,11 @@ Program schema (lengths in mm, matrices row-major 4x4, Z up):
          {"type": "subtract", "base": node, "tool": node}
          {"type": "intersect", "children": [...]}
   edges  {"type": "fillet" | "chamfer", "child": node, "size",
-          "select": {"all": true} | {"parallel": "X|Y|Z"} | {"custom": str}}
+          "select": {"all": true} | {"parallel": "X|Y|Z"} | {"custom": str},
+          "tools": {"cut": node | null, "fill": node | null}}
+  read   {"type": "loft", "matrix", "stations", "rings", "mesh"}
+         {"type": "sweep", "section", "path", "frames", "closed", "mesh"}
+         (see references/program.md; offset becomes plain nodes)
 Box, cylinder, cone and sphere are centered on their matrix origin. Holes
 are build123d's: a cylinder centered on the location reaching depth along
 both +Z and -Z (null = through the whole part). Prisms extrude the profile
@@ -662,14 +668,116 @@ def revolve(profiles=None, axis=Axis.Z, revolution_arc=360.0, clean=True, mode=M
     return Shape(node)
 
 
+_OPS = {"edges": 0, "text": 0, "offset": 0, "loft": 0, "sweep": 0}
+
+
 def _edge_op(kind, objects, size):
     if not isinstance(objects, Selection):
         raise Unsupported(f"{kind} needs part.edges() selections")
     owner = objects.owner
+    # "op" numbers fillet/chamfer calls in order, matching the real build
+    # resolve.py reads the selected edges from.
+    node = {"type": kind, "child": owner.node, "size": float(size), "select": objects.select, "op": _OPS["edges"]}
+    _OPS["edges"] += 1
     if isinstance(owner, BuildPart):
-        owner.node = {"type": kind, "child": owner.node, "size": float(size), "select": objects.select}
+        owner.node = node
         return owner.part
-    return Shape({"type": kind, "child": owner.node, "size": float(size), "select": objects.select})
+    return Shape(node)
+
+
+def _next_op(kind):
+    index = _OPS[kind]
+    _OPS[kind] += 1
+    return index
+
+
+class Kind(enum.Enum):
+    ARC = "arc"
+    INTERSECTION = "intersection"
+    TANGENT = "tangent"
+
+
+class Transition(enum.Enum):
+    TRANSFORMED = "transformed"
+    ROUND = "round"
+    RIGHT = "right"
+
+
+def Text(txt, font_size, font="Arial", font_path=None, font_style=None, align=None,  # noqa: N802
+         mode=Mode.ADD, rotation=0, **_ignored):
+    # The glyphs come from the real build (resolve.py); their outline already
+    # carries the text's own alignment and rotation.
+    _sketch_entity({"type": "text_ref", "op": _next_op("text"),
+                    "args": repr((txt, font_size, font, font_path, font_style, align, rotation))}, mode, 0, (0.0, 0.0))
+
+
+_CURVES: list = []  # every curve made, in order: part of the resolve cache key
+
+
+class _Curve:
+    """A BuildLine curve: the sweep path is read from the real build."""
+
+    def __init__(self, *args, **kwargs):
+        _CURVES.append(repr((type(self).__name__, args, sorted(kwargs.items()))))
+
+    def wires(self):
+        return [self]
+
+    def edges(self):
+        return [self]
+
+    @property
+    def line(self):
+        return self
+
+
+class BuildLine(_Curve):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+CURVES = {name: type(name, (_Curve,), {}) for name in (
+    "Line", "Polyline", "CenterArc", "ThreePointArc", "RadiusArc", "SagittaArc", "TangentArc", "JernArc",
+    "Spline", "Bezier", "Helix", "EllipticalCenterArc", "PolarLine", "FilletPolyline", "IntersectingLine",
+    "DoubleTangentArc", "ArcArcTangentLine", "ArcArcTangentArc", "PointArcTangentLine", "PointArcTangentArc",
+)}
+
+
+def offset(objects=None, amount=0, openings=None, kind=None, side=None, closed=True, min_edge_length=None,
+           mode=Mode.REPLACE):
+    part = _innermost(BuildPart)
+    if isinstance(objects, Shape):
+        return Shape({"type": "offset", "child": objects.node, "amount": float(amount), "op": _next_op("offset"),
+                      "args": repr((getattr(openings, "select", openings), kind))})
+    if part is None or part.node is None:
+        raise Unsupported("offset outside BuildPart")
+    if mode is not Mode.REPLACE:
+        raise Unsupported(f"offset mode {mode.name}")
+    part.node = {"type": "offset", "child": part.node, "amount": float(amount), "op": _next_op("offset"),
+                 "args": repr((getattr(openings, "select", openings), kind))}
+    return part.part
+
+
+def loft(sections=None, ruled=False, clean=True, mode=Mode.ADD):
+    if sections is not None:
+        raise Unsupported("loft with explicit sections")
+    part, _ = _consume_pending("loft")
+    node = {"type": "loft", "op": _next_op("loft"), "args": repr(ruled)}
+    part.add(node, mode)
+    return Shape(node)
+
+
+def sweep(sections=None, path=None, multisection=False, is_frenet=False, transition=None, normal=None,
+          binormal=None, clean=True, mode=Mode.ADD):
+    if sections is not None:
+        raise Unsupported("sweep with explicit sections")
+    part, _ = _consume_pending("sweep")
+    node = {"type": "sweep", "op": _next_op("sweep"), "args": repr((is_frenet, transition, normal, binormal))}
+    part.add(node, mode)
+    return Shape(node)
 
 
 def fillet(objects, radius):
@@ -689,6 +797,8 @@ EXPORTS = {
     "Part": Part, "Plane": Plane, "PolarLocations": PolarLocations, "Pos": Pos, "Rectangle": Rectangle,
     "RectangleRounded": RectangleRounded, "Rot": Rot, "Solid": Solid, "SortBy": SortBy, "Sphere": Sphere,
     "Vector": Vector, "chamfer": chamfer, "extrude": extrude, "fillet": fillet, "revolve": revolve,
+    "Text": Text, "Kind": Kind, "Transition": Transition, "BuildLine": BuildLine, "offset": offset,
+    "loft": loft, "sweep": sweep, **CURVES,
 }
 
 
@@ -706,6 +816,80 @@ def _recording_module():
     return module
 
 
+def _resolve(target, root):
+    """Fill in what only the real build knows (resolve.py): edge tools for
+    fillets and chamfers, glyph outlines, shells, lofts and sweeps."""
+    from .resolve import cached_shadow_run, offset_tree
+
+    found = cached_shadow_run(target, root, _CURVES)
+    notes = []
+    if "error" in found:
+        notes.append(f"the model didn't build in build123d to resolve it ({found['error']})")
+
+    def entry(kind, index, label):
+        items = found.get(kind, [])
+        if index >= len(items):
+            return None
+        item = items[index]
+        if "error" in item:
+            notes.append(f"{label}: {item['error']}")
+            return None
+        return item
+
+    def expand(entities):
+        out = []
+        for e in entities:
+            if e.get("type") != "text_ref":
+                out.append(e)
+                continue
+            glyphs = entry("text", e["op"], "Text")
+            if glyphs is None:
+                raise Unsupported("Text whose glyphs couldn't be read from build123d")
+            for g in glyphs["entities"]:
+                hole = g["hole"]
+                mode = e["mode"] if not hole else ("add" if e["mode"] == "subtract" else "subtract")
+                out.append({"type": "polygon", "points": g["points"], "center": e["center"],
+                            "rotation": e["rotation"], "mode": mode})
+        return out
+
+    def visit(node):
+        node = dict(node)
+        for key in ("child", "base", "tool"):
+            if key in node:
+                node[key] = visit(node[key])
+        if "children" in node:
+            node["children"] = [visit(c) for c in node["children"]]
+        if "profile" in node:
+            node["profile"] = {"entities": expand(node["profile"]["entities"])}
+        kind = node.get("type")
+        if kind in ("fillet", "chamfer"):
+            item = entry("edges", node["op"], f"{kind} {node['size']:g} mm")
+            if item is not None:
+                node["tools"] = {"cut": item["cut"], "fill": item["fill"]}
+                for why in item["skipped"]:
+                    notes.append(f"{kind} {node['size']:g} mm on {why} is shown sharp")
+        elif kind == "offset":
+            item = entry("offset", node["op"], "offset")
+            if item is None:
+                raise Unsupported("offset that couldn't be read from build123d")
+            tree, offset_notes = offset_tree(node["child"], item["amount"],
+                                             [(tuple(n), off) for n, off in item["openings"]],
+                                             item["rounded"])
+            notes.extend(f"offset {item['amount']:g} mm: {n}" for n in offset_notes)
+            return tree
+        elif kind in ("loft", "sweep"):
+            item = entry(kind, node["op"], kind)
+            if item is None:
+                raise Unsupported(f"{kind} that couldn't be read from build123d")
+            return dict(item, type=kind)
+        return node
+
+    try:
+        return visit(root), notes
+    except ValueError as exc:
+        raise Unsupported(str(exc)) from None
+
+
 def trace_model(target: str | Path) -> dict:
     """Run a model (``model.py`` or ``model.py::function``) against the
     recorder and return its program."""
@@ -716,11 +900,18 @@ def trace_model(target: str | Path) -> dict:
     install(_recording_module())
     _STACK.clear()
     try:
+        for key in _OPS:
+            _OPS[key] = 0
+        _CURVES.clear()
         model = load(script, function)
         result = shape_of(model.call())
         if isinstance(result, (BuildPart, BuildSketch)):
             result = result.part
-        return {"ok": True, "model": model.function, "root": _node_of(result)}
+        root = _node_of(result)
+        notes = []
+        if any(_OPS.values()):
+            root, notes = _resolve(target, root)
+        return {"ok": True, "model": model.function, "root": root, "notes": notes}
     except (Unsupported, ModelUnsupported) as exc:
         return {"ok": False, "error": str(exc), "unsupported": True}
     except NameError as exc:
