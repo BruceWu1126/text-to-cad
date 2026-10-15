@@ -772,6 +772,14 @@ def _generate_part_outputs(
             for output_path in outputs:
                 note_output(output_path, model_path)
         write_record(model_path, record)
+        provenance = getattr(scene, "provenance", None) if generated else None
+        if provenance is not None:
+            from cadgen.store.provenance import write_provenance
+
+            # The build's account of its code, beside the record and after it
+            # (STORE.md §3): code side, read by `store where` and by nothing on
+            # a render path.
+            write_provenance(model_path, provenance, tree=tree_hash, step_hash=str(record.get("stepHash") or ""))
         if staged_step is not None:
             executors.emit_event(executors.model_event(
                 model_path, "building", phase="STEP saved",

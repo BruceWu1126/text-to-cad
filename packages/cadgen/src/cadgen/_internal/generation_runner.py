@@ -548,10 +548,14 @@ def _run_script_generator_body(
     # Order-stable shape de-duplication (see determinism.py): a re-executed model
     # script should produce the SAME geometry it produced last time, and component
     # identity is its bytes. This has to be in force before the generator's first
-    # kernel call, not merely before the tree write.
-    from cadgen._internal import determinism
+    # kernel call, not merely before the tree write. Beside it, the kernel memo
+    # (README law 18): every kernel construction the model's code calls is seen
+    # once at the topology layer, memoized across runs in this process's memory,
+    # and recorded as a feature for the provenance entry (STORE.md §3).
+    from cadgen._internal import determinism, kernel_memo
 
     determinism.install()
+    kernel_memo.install()
     generated_scene: LoadedStepScene | None = None
     # Deterministic closure capture: start from a clean first-party module space, so
     # every first-party file the generator loads and runs executes inside the window
@@ -565,6 +569,9 @@ def _run_script_generator_body(
         filetrace.capture() as trace,
         _first_party_from_source(),
         ExecutionHashes() as executed_hashes,
+        # The model run the memo and the trace see: the script's top level and
+        # the body, every kernel construction called from its own code.
+        kernel_memo.run(spec.script_path) as kernel_run,
     ):
         with logger.timed(f"load generator {spec.source_ref}"):
             module = _load_generator_module(spec.script_path)
@@ -646,6 +653,12 @@ def _run_script_generator_body(
         payload = _normalize_step_payload(raw_payload, script_path=spec.script_path)
         if spec.step_path is None:
             raise RuntimeError(f"{spec.source_ref} has no configured STEP output")
+        # The build's account of its code (STORE.md §3): which feature made each
+        # component of the result and each face and edge of it, by fingerprint
+        # and token. Computed from the live result before the tree is built;
+        # the publish writes it beside the record, after it.
+        with logger.timed(f"provenance {spec.source_ref}"):
+            provenance = kernel_run.provenance(payload["shape"])
         # Kinematics (validated at decoration) rides the scene into the sidecar.
         declared = _resolve_declared_kinematics(getattr(generator, "__cadgen_model__", None))
         generated_scene = _write_shape_step_payload(
@@ -655,6 +668,7 @@ def _run_script_generator_body(
             logger=logger,
             defer_reference_scene=_defer_reference_scene,
         )
+        generated_scene.provenance = provenance
         if declared.block:
             generated_scene.kinematics = declared.block
         generated_scene.materials = declared.materials
