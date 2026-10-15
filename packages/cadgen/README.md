@@ -10,10 +10,10 @@ platform.
 
 **PURPOSE** — the engine and its command surface: model execution, the
 store, document assembly, kinematics, exports, validation, inspection,
-snapshots, circuit boards (a `@pcb` model written as a KiCad project and
-checked, plotted and exported by KiCad's own `kicad-cli`), wiring harnesses (a
-`@harness` model written as a WireViz document, checked against the boards it
-joins, drawn and listed by WireViz's own `wireviz`), the warm daemon and
+snapshots, circuit boards (a `@pcb` script that fills a board through KiCad's
+own API, kicad-python vendored as `cadgen.kipy`: KiCad's headless server builds,
+fills and saves the board, KiCad's `kicad-cli pcb drc` checks it, and KiCad's
+export jobs write what a fab needs), the warm daemon and
 its build pool, the CAD Viewer
 (`cadgen viewer`: a local HTTP server over the built client, on port 3245 or the
 port `--port` names, serving every CAD file by its absolute path), and CAD beside an agent's chat (`cadgen mcp`: an MCP App server that
@@ -21,11 +21,12 @@ an agent host starts, over the viewer's own routes: tabs in Codex, viewer cards
 in the chat for every other MCP Apps host).
 
 **MAY DEPEND ON** — the Python ecosystem it declares (OCP/build123d lazily,
-never at namespace-import time) and the bundled runtime. Boards need KiCad 10
-installed: cadgen runs its `kicad-cli` and reads its libraries, never imports
-it, and everything else works without it. A harness's drawing and bill of
-materials need WireViz and Graphviz installed, run the same way (WireViz is
-GPL-3.0 and never imported); writing and checking a harness needs neither.
+never at namespace-import time) and the bundled runtime. Boards need the KiCad
+10.99 nightly (the KiCad 11 API) installed: a build starts its `kicad-cli
+api-server` and stops it, the DRC door runs its `kicad-cli pcb drc`, nothing of
+KiCad's is imported, and everything else works without it; importing
+`cadgen.pcb` or `cadgen.kipy` touches no KiCad. kicad-python's own dependencies
+(`protobuf`, `pynng`) are cadgen's, and the viewer reads a board from its file.
 Never app code, never JavaScript source at runtime.
 
 **DEPENDED ON BY** — every skill (as a pinned installed distribution). The
@@ -41,7 +42,7 @@ document and this one disagree, the mechanism document is right.
 | Document | What it is for | Go there when |
 |---|---|---|
 | [`STORE.md`](STORE.md) | The store's contract: layout, the two-sides law, tree/record shapes, the gate, invariants, link-vs-component, concurrency, GC, the daemon, lazy children, editing previews, debugging. Sectioned, with a table of contents | changing anything that writes to or reads from `~/.cache/cadgen`, or any build, door or reader that depends on it |
-| [`SNAPSHOTS.md`](SNAPSHOTS.md) | Snapshots: display presets, what a mesh, robot, drawing, KiCad or harness snapshot draws (the CAD Viewer's own scene for it), requests and OUT, sizes, and `--debug --json` — every measured browser stage, what each one covers, and which durations must not be added together | changing what a snapshot draws or accepts, or reading snapshot timings |
+| [`SNAPSHOTS.md`](SNAPSHOTS.md) | Snapshots: display presets, what a mesh, robot, drawing or KiCad board snapshot draws (the CAD Viewer's own scene for it), requests and OUT, sizes, and `--debug --json` — every measured browser stage, what each one covers, and which durations must not be added together | changing what a snapshot draws or accepts, or reading snapshot timings |
 
 ## The design laws
 
@@ -50,7 +51,7 @@ when it works. Each carries a pressure-test to apply before writing code.
 
 ### 1. Generated files are totally independent of their source code
 
-A generated file (STEP, DXF, STL, GLB, 3MF, a KiCad project, a WireViz harness)
+A generated file (STEP, DXF, STL, GLB, 3MF, a KiCad board)
 and its sidecar (`<name>.step.json`) stand alone, forever.
 
 *Pressure-test*: a generated file must be fully readable — viewer,
@@ -394,29 +395,32 @@ waits on a request beyond the two waits above.
 ```
 src/cadgen/
   <format>.py            # public namespaces: step, stl, threemf, glb, dxf,
-                         #   urdf, srdf, sdf, pcb, harness — each binds
-                         #   its verbs
-  authoring.py           # @step/@dxf/@stl/@glb/@threemf/@pcb/@harness and
-                         #   their manufacturing exports (a board's gerber=,
-                         #   bom=, pos=; a harness's bom=); a call builds at top
+                         #   urdf, srdf, sdf — each binds its verbs
+  pcb.py                 # @pcb, a board script's decorator, and the pcb
+                         #   verbs (drc, snapshot). A call starts KiCad's
+                         #   headless API server (kicad-cli api-server, the
+                         #   10.99 nightly) with an empty settings directory,
+                         #   creates the document, loads the footprint
+                         #   libraries the project's fp-lib-table declares,
+                         #   hands the board (kipy's Board) to the function,
+                         #   refills zones, counts unconnected pads, saves and
+                         #   stops the server. Nothing of KiCad's is imported
+                         #   or re-implemented; no store, daemon or tracer
+  kipy/                  # kicad-python, vendored verbatim at a pinned commit
+                         #   with its generated protocol modules, its imports
+                         #   rewritten to cadgen.kipy; VENDOR.json names the
+                         #   pins and the upstream LICENSE ships beside it
+  authoring.py           # @step/@dxf/@stl/@glb/@threemf; a call builds at top
                          #   level and composes (a lazy child) inside a body;
                          #   a model's outputs are what they declare — a mesh
-                         #   decorator alone is a model that writes no STEP,
-                         #   and a board with a 3D export is a geometry model
-  kicad/                 # boards: the s-expression reader/writer, KiCad's
-                         #   libraries, the board model (design), the KiCad
-                         #   10 project writers, every kicad-cli run (check,
-                         #   plot, solid, fab), a @pcb model's build
-                         #   (build), simulation (spice, ngspice,
-                         #   sim), autorouting (specctra, route: the
-                         #   Freerouting program, GPL-3.0, never shipped) and
-                         #   board and schematic references read back (refs,
-                         #   board_index: pcb.read_board; schematic_index:
-                         #   pcb.read_schematic, KiCad's netlist naming nets)
-  wireviz/               # harnesses: the harness model and its checks
-                         #   (design), colour codes, the WireViz YAML
-                         #   writer (document), a @harness model's build
-                         #   (build), and every wireviz run (plot, bom)
+                         #   decorator alone is a model that writes no STEP
+  kicad/                 # KiCad beside the API: where kicad-cli is (install),
+                         #   kicad-cli pcb drc on a saved board (cli), the
+                         #   s-expression reader (sexpr), board references and
+                         #   any board read back from its file (refs,
+                         #   board_index: read_board), and the viewer's
+                         #   picture of a board from the file (plot, geometry,
+                         #   naming) — no KiCad process in any of them
   kinematics.py          # typed mates vocabulary (revolute/slider/
                          #   cylindrical/fastened, couple, normalize)
   step_scene.py          # read_step and read_scene
@@ -472,8 +476,7 @@ src/cadgen/
 
 Verbs by format: `step` compile · build · snapshot;
 `stl`/`3mf`/`glb` build · snapshot; `dxf` snapshot; `urdf`/`sdf`
-validate · snapshot; `srdf` validate; `pcb` validate · snapshot · gerber
-· bom · pos; `harness` snapshot · bom.
+validate · snapshot; `srdf` validate; `pcb` drc · snapshot.
 `cadgen snapshot` routes any suffix.
 `cadgen store|daemon|doctor` are status commands, `cadgen viewer
 [stop]` the CAD Viewer's launcher, and `cadgen mcp`

@@ -1,6 +1,6 @@
 ---
 name: pcb
-description: Design printed circuit boards in Python and get a checked KiCad 10 project. Use for PCBs, circuit boards, schematics, KiCad files (.kicad_pcb, .kicad_sch, .kicad_pro, .kicad_dru), parts and footprints, placement, routing by hand or autorouting with Freerouting, ground pours, design rule and electrical rule checks (DRC, ERC), Gerbers, BOMs, pick-and-place files, JLCPCB orders, a board's 3D STEP/GLB for an enclosure, and SPICE simulation of a board's circuits. Open and visually review existing KiCad boards and schematics in CAD Viewer.
+description: Design printed circuit boards as Python scripts on KiCad's own API and get a KiCad board file. Use for PCBs and circuit boards, .kicad_pcb files, footprints and footprint libraries (fp-lib-table), placement, hand routing, vias and copper pours, design rules and DRC, Gerbers, drill, pick-and-place and KiCad's other exports, and for opening a board in CAD Viewer. Needs the KiCad 10.99 nightly (the KiCad 11 API).
 license: MIT
 ---
 
@@ -19,66 +19,103 @@ one installation, and its warm build daemon, with the CAD app's server:
 - `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.21 python`
 
 The first run downloads that installation and the first snapshot its headless
-browser; later runs reuse both.
+browser; later runs reuse both. `cadgen doctor <skill-dir>` reports the installation in
+use and checks that it is the one this skill pins; use it for installation errors.
 
-`cadgen doctor <skill-dir>` reports the installation in use and checks that it is
-the one this skill pins; use it for installation errors.
+A board is built by KiCad itself, through its API server (`kicad-cli api-server`), which
+only the **KiCad 10.99 nightly** has (KiCad 11 when it is released). KiCad 10.0 is refused
+at start: it has no `api-server`. Install the nightly; it is never bundled:
 
-Boards are checked and drawn by KiCad 10 itself, through its command line, `kicad-cli`.
-Install KiCad 10 (it brings `kicad-cli`, its symbol and footprint libraries, its 3D models
-and the ngspice simulator):
+- Ubuntu: `sudo add-apt-repository ppa:kicad/kicad-dev-nightly && sudo apt install kicad-nightly kicad-nightly-footprints`
+  (symbols and 3D models are not needed).
+- macOS: the nightly installer from https://www.kicad.org/download/macos/ (KiCad.app carries `kicad-cli`).
+- Windows: the nightly installer from https://www.kicad.org/download/windows/
+  (`C:\Program Files\KiCad\<version>\bin\kicad-cli.exe`).
 
-- macOS: `brew install --cask kicad` (or the disk image from https://www.kicad.org/download/macos/).
-- Windows: the installer from https://www.kicad.org/download/windows/.
-- Ubuntu: `sudo add-apt-repository ppa:kicad/kicad-10.0-releases && sudo apt install kicad`.
-
-cadgen finds `kicad-cli` on `PATH` or in the usual install folders; `CADGEN_KICAD_CLI`
-names one explicitly.
-Autorouting runs Freerouting, a separate program ([routing](references/routing.md) says how to install it).
+cadgen finds `kicad-cli-nightly` or `kicad-cli` on `PATH`, then in those install folders;
+`CADGEN_KICAD_CLI` names one explicitly. Each build starts its own server with an empty
+settings directory and stops it when done: no KiCad window, no daemon, nothing resident.
 
 ## The contract
 
-**A `@pcb` function takes no parameters and returns a `pcb.Board`. cadgen writes the KiCad
-project and KiCad checks it.** The script is the source; the KiCad files are outputs, as a
-STEP is for a part: never edit them by hand, edit the script and run it.
+**A board is a Python script. The decorated function receives an empty KiCad board
+(`cadgen.kipy.board.Board`, kicad-python's board) and fills it with raw kicad-python calls;
+cadgen opens the document, loads the footprint libraries, refills the zones, counts what is
+unconnected, saves, and prints one line.** The script is the source; `blinky.kicad_pcb` is
+an output, as a STEP is for a part: never edit it by hand, edit the script and run it.
 
 ```python
-from cadgen import build123d as bd
+"""An LED and its resistor on a 2-pin header: the smallest complete board."""
 from cadgen import pcb
+from cadgen.kipy.board_types import BoardLayer, BoardPolygon, Net, Track, Via, Zone
+from cadgen.kipy.geometry import Angle, PolygonWithHoles, PolyLineNode, Vector2
+from cadgen.kipy.util.units import from_mm
 
-WIDTH, HEIGHT = 40.0, 30.0
+WIDTH, HEIGHT = 40.0, 30.0           # the outline, centred on KiCad's origin
+PARTS = {                             # ref: footprint, (x, y) mm, rotation, pad -> net
+    "J1": ("Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical", (-15, 0), 0, {"1": "VBUS", "2": "GND"}),
+    "R1": ("Resistor_SMD:R_0603_1608Metric", (0, 5), -90, {"1": "VBUS", "2": "LED"}),
+    "D1": ("LED_SMD:LED_0603_1608Metric", (8, -5), 0, {"1": "GND", "2": "LED"}),
+}
+
+
+def rectangle(w, h, inset=0.0):
+    poly = PolygonWithHoles()
+    for x, y in ((-w / 2 + inset, -h / 2 + inset), (w / 2 - inset, -h / 2 + inset),
+                 (w / 2 - inset, h / 2 - inset), (-w / 2 + inset, h / 2 - inset)):
+        poly.outline.append(PolyLineNode.from_xy(from_mm(x), from_mm(y)))
+    poly.outline.closed = True
+    return poly
+
+
+def track(net, width, *points, layer=BoardLayer.BL_F_Cu):
+    """Straight segments through `points` (Vector2 or (x, y) mm), one Track each."""
+    nodes = [p if isinstance(p, Vector2) else Vector2.from_xy_mm(*p) for p in points]
+    for a, b in zip(nodes, nodes[1:]):
+        t = Track()
+        t.start, t.end, t.width, t.layer, t.net = a, b, from_mm(width), layer, Net(name=net)
+        yield t
 
 
 @pcb
-def blinky():
-    with bd.BuildSketch() as outline:
-        bd.RectangleRounded(WIDTH, HEIGHT, 2)
-    board = pcb.Board(outline=outline.sketch)        # 2 layers, JLCPCB's limits by default
+def blinky(board):
+    # Place: every footprint comes from a library the project table (fp-lib-table) declares.
+    pads, placed = {}, []
+    for ref, (footprint, at, rotation, nets) in PARTS.items():
+        fp = board.place_footprint_from_library(footprint, Vector2.from_xy_mm(*at), Angle.from_degrees(rotation))
+        fp.reference_field.text.value = ref
+        for pad in fp.definition.pads:
+            pad.net = Net(name=nets[pad.number])
+            pads[f"{ref}.{pad.number}"] = pad.position         # absolute, in nm: route from these
+        placed.append(fp)
+    board.update_items(placed)
 
-    vbus = board.net("VBUS", power_flag=True)          # powered from the connector
-    gnd = board.net("GND", power_flag=True)
-    led = board.net()                                  # unnamed: KiCad-style name from its first pin
+    # Outline and copper, created in one call.
+    edge = BoardPolygon()
+    edge.polygons.append(rectangle(WIDTH, HEIGHT))
+    edge.layer = BoardLayer.BL_Edge_Cuts
+    edge.attributes.stroke.width = from_mm(0.1)
 
-    j1 = board.part("Connector_Generic:Conn_01x02",
-                    footprint="Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical")
-    r1 = board.part("Device:R", footprint="Resistor_SMD:R_0603_1608Metric", value="1k",
-                    properties={"LCSC": "C21190"})
-    d1 = board.part("Device:LED", footprint="LED_SMD:LED_0603_1608Metric", value="red")
+    via = Via()
+    via.position, via.net = Vector2.from_xy_mm(7.2125, -8), Net(name="GND")
+    via.diameter, via.drill_diameter = from_mm(0.6), from_mm(0.3)
 
-    board.connect(vbus, j1[1], r1[1])
-    board.connect(led, r1[2], d1["A"])
-    board.connect(gnd, j1[2], d1["K"])
+    pour = Zone()                                                # a copper zone by default
+    pour.outline, pour.layers, pour.net, pour.name = rectangle(WIDTH, HEIGHT, inset=0.5), [BoardLayer.BL_B_Cu], Net(name="GND"), "GND"
 
-    board.place(j1, at=(-15, 0))
-    board.place(r1, at=(0, 5), rotation=90)
-    board.place(d1, at=(8, -5))
+    board.create_items([
+        edge,
+        *track("VBUS", 0.3, pads["J1.1"], (0, 0), pads["R1.1"]),
+        *track("LED", 0.25, pads["R1.2"], (0, 8), (12, 8), (12, -5), pads["D1.2"]),
+        *track("GND", 0.25, pads["D1.1"], via.position),
+        via,
+        pour,
+    ])
 
-    board.track(vbus, [j1[1], (0, 0), r1[1]])          # a point may be a pin: the track ends on its pad
-    board.track(led, [r1[2], (0, 8), (12, 8), (12, -5), d1["A"]])
-    board.track(gnd, [d1["K"], (7.2125, -8)])
-    board.via(gnd, at=(7.2125, -8))
-    board.zone(gnd, layers=["B.Cu"])                    # ground pour on the bottom
-    return board
+    rules = board.get_design_rules().rules                       # the board's DRC limits
+    rules.constraints.min_clearance = from_mm(0.15)
+    rules.constraints.min_track_width = from_mm(0.15)
+    board.set_design_rules(rules)
 
 
 if __name__ == "__main__":
@@ -86,160 +123,94 @@ if __name__ == "__main__":
 ```
 
 ```bash
-python blinky.py      # built blinky.kicad_pcb
+python blinky.py      # blinky.kicad_pcb: 3 parts, 7 tracks, 1 via, 1 zone, 0 unconnected, 3.6 s
 ```
 
-The run writes `blinky.kicad_pro`, `blinky.kicad_sch`, `blinky.kicad_pcb` and
-`blinky.kicad_dru` (the board's custom design rules, empty without `board.rule`) beside the
-script (`@pcb(out="../PCB/blinky.kicad_pcb")` moves them; the four always share a stem and a
-folder). The schematic is generated from the netlist: every connected pin gets a short
-stub and a global label with its net's name, unused pins marked no-connect get KiCad's X,
-and nets with `power_flag=True` get a `PWR_FLAG`. It is correct by construction; you never
-draw it.
+The run writes `blinky.kicad_pcb`, `blinky.kicad_pro` and `blinky.kicad_prl` beside the
+script (`@pcb(path="boards/blinky.kicad_pcb")` moves them, relative to the script), and
+`blinky.kicad_dru` when the script sets custom rules. Every run rebuilds the board from
+nothing: KiCad assigns the ids, so nothing is remembered between runs and nothing needs
+deleting. The call, in order:
 
-Before a byte is written, KiCad fills the zones and runs its ERC (on the schematic) and its
-DRC with the schematic-to-board parity check (on the board), on a staged copy:
+1. finds `kicad-cli` and starts its API server with an empty settings directory, so only the
+   project's library table is read;
+2. creates the empty document at the output path and loads the footprint libraries
+   `fp-lib-table` declares (a row that fails to load is reported by nickname and status);
+3. calls your function with the board;
+4. `refill_zones()`, then counts pads a copper path does not join to the rest of their net;
+5. `save()`, closes the document, stops the server;
+6. prints `blinky.kicad_pcb: 3 parts, 7 tracks, 1 via, 1 zone, 0 unconnected, 3.6 s`.
 
-- **Any error fails the build and writes nothing** — clearance, a short, a floating pin
-  (`pin_not_connected`), a power input nothing drives (`power_pin_not_driven`: mark the net
-  `power_flag=True` when a connector or battery feeds it), a courtyard overlap. Each finding
-  names the items and their positions in the script's coordinates.
-- **Unrouted connections make a draft**: the board is written and the run says so,
-  `built blinky.kicad_pcb (draft: 3 unrouted connections)`, listing each missing connection.
-  The viewer draws a draft's ratsnest. A draft is a stage, not a result: route it.
-- Warnings (silkscreen over copper, a dangling track end) are printed and do not block.
+An exception in your function stops the server and propagates: nothing is saved.
+`footprint 'Lib:Name' not found` is KiCad's message for a footprint no loaded library has;
+the fix is a row in `fp-lib-table` ([parts](references/parts.md)). `0 unconnected` is
+connectivity, not DRC: run `cadgen pcb drc` for KiCad's rules ([below](#checking-a-board)).
 
-An unchanged script is a no-op (`current blinky.kicad_pcb`); `--force` rebuilds;
-`cadgen store why blinky.py` says why a board is stale. The library files a board read are
-its inputs: a KiCad update that changes a part's footprint makes the board stale.
+**Everything on the board is raw kicad-python** (`cadgen.kipy`, vendored). Lengths are
+integers in nanometres (`from_mm(0.25)`, `to_mm(n)`), positions `Vector2.from_xy_mm(x, y)`,
+angles `Angle.from_degrees(r)`, layers `BoardLayer.BL_F_Cu`, `BL_B_Cu`, `BL_In1_Cu`,
+`BL_Edge_Cuts`, `BL_F_SilkS`... Coordinates are KiCad's: millimetres, **y down**, from the
+page origin; a footprint placed at (0, 5) with rotation -90 is what KiCad shows there. Nets
+exist by being named: `Net(name="VBUS")` on a pad, a track or a zone is the net. A placed
+footprint returns with its pads at absolute positions, so route from `pad.position`, never
+from numbers copied by hand. The full reference, with design rules, custom rules
+(`.kicad_dru`), net classes, text, keepouts and exports, is [the board API](references/board-api.md).
 
-## The board API
+## Libraries
 
-The words are KiCad's: libraries by `Library:Name`, layers `F.Cu`/`B.Cu`/`In1.Cu`/
-`Edge.Cuts`, rule names as KiCad's Board Setup has them. Shapes are build123d 2D geometry,
-as `@dxf` takes. Lengths are millimetres; **y is up** and the outline's coordinates are the
-board's: (0, 0) is wherever you draw it, and KiCad's drill/place origin is put there.
-Rotation is degrees counter-clockwise seen from the top. The full reference is
-[the board API](references/board-api.md); the core:
+Beside the script, `fp-lib-table` (KiCad's project library table) names every footprint
+library the board uses, stock or its own:
 
-| Call | What it does |
-| --- | --- |
-| `pcb.Board(outline=, layers=2, thickness=1.6, fab=pcb.JLCPCB, rules=None, libraries=[folder], title=)` | A board: outline (holes in the face are cutouts), copper layer count, the fab whose limits it is checked against (`pcb.PCBWAY`, `pcb.OSHPARK`, `pcb.AISLER`, ...) or your own `rules=`, project-local libraries searched before KiCad's |
-| `board.part(symbol, footprint=, value=, ref=, properties={}, dnp=False)` | A part: KiCad symbol and footprint (the symbol's own default footprint when it has one); `ref` defaults to the next free `R1`, `U3`...; `properties` are BOM fields (`LCSC`, `MPN`, `Manufacturer`) |
-| `part[1]`, `part["VIN"]` | A pin by number, or by name when unique (an ambiguous name is refused, listing the numbers) |
-| `board.net(name=None, netclass=, power_flag=False)` | A net; one name is one net |
-| `board.connect(net, *pins)` / `board.no_connect(*pins)` / `part.unconnected()` | The netlist. Every pin must be connected or marked no-connect, or ERC fails the build |
-| `board.place(part, at=(x, y), rotation=0, side="top")` | Placement, a separate step so subcircuits stay reusable |
-| `board.track(net, points, width=, layer="F.Cu")`, `board.arc(net, start=, mid=, end=)`, `board.via(net, at=)` | Copper. Widths and via sizes default to the net's class |
-| `board.zone(net, layers=["B.Cu"], shape=None, clearance=, priority=0, pads="thermal")` | A pour, KiCad-filled; the whole board when `shape` is omitted |
-| `board.keepout(shape=, tracks=True, vias=True, pours=True, pads=False, footprints=False)` | An area copper may not enter |
-| `board.netclass(name, track_width=, clearance=, via_diameter=, via_drill=)` | A net class; nets join it with `board.net(name, netclass=...)` |
-| `board.hole(at=, diameter=)`, `board.text(text, at=, layer="F.SilkS", size=1.0)` | Unplated holes, board text |
-| `board.rule('''(rule "J1 pads" (constraint hole_clearance (min 0.15mm)) (condition "A.memberOfFootprint('J1')"))''')` | A KiCad custom design rule, for what the board-wide rules cannot scope; one KiCad cannot read fails the build |
-| `board.raw("(gr_text ...)")` | Any board item KiCad's format has, in KiCad's coordinates (y down, page origin) |
-| `board.autoroute(skip=(), layers=None, passes=100)` | Route everything not drawn, with Freerouting, when the board is built; the same board always routes the same way ([routing](references/routing.md)) |
-| `pin.position`, `part.at`, `net.pins` | Where things are: a pad's centre in board coordinates, for routing helpers |
-
-Find real names before you write them; never guess a footprint:
-
-```python
-from cadgen import pcb
-
-pcb.find_symbols("ldo 3.3")        # [("Regulator_Linear:AMS1117-3.3", "1A Low Dropout regulator..."), ...]
-pcb.find_footprints("sot-223")     # ["Package_TO_SOT_SMD:SOT-223", ...]
+```text
+(fp_lib_table
+  (version 7)
+  (lib (name "Resistor_SMD") (type "KiCad") (uri "${KICAD10_FOOTPRINT_DIR}/Resistor_SMD.pretty") (options "") (descr ""))
+  (lib (name "LED_SMD") (type "KiCad") (uri "${KICAD10_FOOTPRINT_DIR}/LED_SMD.pretty") (options "") (descr ""))
+  (lib (name "Connector_PinHeader_2.54mm") (type "KiCad") (uri "${KICAD10_FOOTPRINT_DIR}/Connector_PinHeader_2.54mm.pretty") (options "") (descr ""))
+  (lib (name "my") (type "KiCad") (uri "${KIPRJMOD}/my.pretty") (options "") (descr "this board's own footprints"))
+)
 ```
 
-A wrong name fails with the closest real ones (`did you mean Resistor_SMD, ...`). A symbol's
-pins must have pads on its footprint (checked when the part is made). For a part KiCad's
-libraries lack, keep a project library (`parts.kicad_sym`, `parts.pretty/`) and pass its
-folder as `libraries=`; parts on step.parts or LCSC usually come with KiCad files
-([parts](references/parts.md)).
-
-Write subcircuits as plain functions of a circuit, so the board and a simulation testbench
-share them:
-
-```python
-def led_driver(c, supply, gnd, colour="red"):
-    r = c.part("Device:R", footprint="Resistor_SMD:R_0603_1608Metric", value="1k")
-    d = c.part("Device:LED", footprint="LED_SMD:LED_0603_1608Metric", value=colour)
-    node = c.net()
-    c.connect(supply, r[1]); c.connect(node, r[2], d["A"]); c.connect(gnd, d["K"])
-    return r, d
-```
+`${KICAD10_FOOTPRINT_DIR}` is KiCad's stock footprint folder (the variable's name is the
+nightly's today; KiCad renames it per major release); `${KIPRJMOD}` is the script's folder,
+so `my.pretty/` holds the board's own `.kicad_mod` files. Only the rows listed are loaded
+(each costs ~0.3 s and ~60 MB), so list what the board uses. Finding names, browsing a
+library and reading a footprint's pads: [parts](references/parts.md).
 
 ## Workflow
 
+A real board takes hours of iteration, not one run. Work in small steps and look after each.
+
 1. Turn the request into a brief: what the board does, its connectors and power, the
-   outline and mounting holes (from the enclosure when there is one), layer count, fab.
-2. Choose parts with `find_symbols`/`find_footprints`; prefer parts the fab stocks (LCSC
-   numbers in `properties` for JLCPCB assembly).
-3. Write the netlist, then place one functional group at a time (a connector and what
-   serves it, a regulator and its capacitors, an IC with its decoupling and pull-ups):
-   connectors at the edges, decoupling capacitors at their pins, nothing in a courtyard of
-   another ([layout](references/layout.md)). Build and snapshot after each group. ERC
-   findings come back before any routing.
-4. Route by hand: fan out of fine-pitch parts first, then power (sized for each net's
-   `current=`), data pairs and signals, octolinear, related signals as buses of parallel
-   tracks; ground as pours. `board.autoroute()` may finish what is left on a simple board,
-   never USB or other data pairs ([routing](references/routing.md)). Run until the board is
-   no longer a draft and has no DRC errors.
-5. Check behaviour where it matters with a simulation ([simulation](references/simulation.md)).
-6. Add the outputs the job needs (below), look at the board and its snapshot, hand off.
+   outline and mounting holes (from the enclosure when there is one), layer count, the fab
+   and its limits (they become the design rules).
+2. Choose footprints and write `fp-lib-table`. Read each footprint's pads before placing it
+   ([parts](references/parts.md)): pad numbers are what the nets go on.
+3. Place one functional group at a time and route it before placing the next: a connector
+   and what serves it, a regulator and its capacitors, an IC with its decoupling. Connectors
+   at the edges, decoupling at the pins, fanouts planned for every fine-pitch part before any
+   long track ([layout](references/layout.md)).
+4. Route by hand, never by autorouter: octolinear (0/45/90 degrees), buses as parallel
+   tracks that turn together, widths and pour sizes from the current each net carries,
+   ground as a pour ([routing](references/routing.md)).
+5. Iterate: build, snapshot or show the board, `cadgen pcb drc`, fix, again. Write small
+   check scripts for what you keep verifying (pad-to-pad distances, a net's narrowest track,
+   every ground pad reaching the pour) and run them each round ([inspection](references/inspection.md)).
+6. Set the design rules to the fab's limits, export what the fab needs
+   ([manufacturing](references/manufacturing.md)), show the board, hand off.
 
-## Outputs beyond the KiCad project
-
-The manufacturing files are arguments of `@pcb` (`True` writes the file beside the board, a
-path moves it); the 3D exports are the part decorators, stacked either side of `@pcb`. Each
-is written on every build from the board KiCad just checked, and each has a door for any
-saved board:
-
-| Declaration | Writes | Door |
-| --- | --- | --- |
-| `@pcb(gerber=True)` | `blinky.gerbers.zip`: every copper, mask, paste and silkscreen layer, the outline, Excellon drills: what every fab makes boards from | `cadgen pcb gerber BOARD [OUT]` |
-| `@pcb(bom=True)` | `blinky.bom.csv`: the parts to buy and place, one row per distinct part | `cadgen pcb bom BOARD [OUT]` |
-| `@pcb(pos=True)` | `blinky.pos.csv`: pick-and-place, each part's position (mm from the script's origin), rotation and side | `cadgen pcb pos BOARD [OUT]` |
-| `@step`, `@glb`, `@stl`, `@threemf` | the populated board in 3D (KiCad's own model of it) | `cadgen step build`/`glb build` of the STEP |
-
-`gerber=` and `pos=` refuse a draft: a board that declares either fails its build, naming
-what is left to route. `bom=` is allowed early, for pricing and ordering parts. All are
-byte-for-byte the same for the same board. See [manufacturing](references/manufacturing.md)
-for ordering.
-
-**A board with a 3D export is a part.** Its geometry is the populated board, in the script's
-own coordinates (the outline as drawn, z = 0 on the board's bottom face), each part labelled
-by its reference. An enclosure composes it like any child, so the board's outline, holes
-and connectors line up with the case they were drawn against:
-
-```python
-@step
-@pcb
-def controller():
-    ...                                 # the board, as above
-
-@step
-def case():
-    ...
-    return bd.Compound(children=[shell, bd.Pos(0, 0, FLOOR) * controller()])
-```
-
-Called inside a `@harness`, any board returns its `pcb.Board` (the netlist and placement);
-inside any other model's body, a board WITHOUT a 3D export does too, which is how a test
-reads it. The enclosure itself is
-`$cad`'s work; the cables between boards are `$harness`'s, checked against these netlists.
-
-## Checking an existing project
+## Checking a board
 
 ```bash
-cadgen pcb validate path/to/board.kicad_pcb            # ERC + DRC with parity, never writes into the project
-cadgen pcb validate path/to/board.kicad_pcb --json     # {"ok", "path", "issues": [...], "summary"}
-cadgen pcb snapshot path/to/board.kicad_pcb tmp/board.png
-cadgen pcb snapshot path/to/board.kicad_sch tmp/schematic.png
+cadgen pcb drc blinky.kicad_pcb              # KiCad's DRC on the saved board
+cadgen pcb snapshot blinky.kicad_pcb tmp/blinky.png
 ```
 
-`validate` takes any KiCad 10 project, one drawn in KiCad included; positions are
-millimetres from the board's drill/place origin, y up. A snapshot is the CAD Viewer's
-picture: KiCad's own plot of the board (all layers, back to front, ratsnest on a draft) or
-of every schematic sheet.
+`cadgen pcb drc` runs KiCad's design rule check (`kicad-cli pcb drc`, the same install) on
+the saved file and prints every violation and unconnected item as text; it exits 1 when any
+error-severity violation or unconnected item remains. It is a separate step, never part of
+a build, so a build with mistakes still writes a board you can look at. The snapshot is the
+CAD Viewer's picture, drawn from the file; it needs no KiCad.
 
 ## Show the model
 
@@ -262,30 +233,26 @@ validation don't replace this.
   or reuses it. Read `url` from its one JSON line (never guess the port), and for each
   file return `url?file=<its URL-encoded absolute path>`. If it fails to launch, say so.
 
-The viewer draws `.kicad_pcb` and `.kicad_sch` files read-only, as KiCad plots them: drag to
-pan, wheel or pinch to zoom, double-click to fit. Show the board and its schematic; a board
-with a 3D export also has its `.step`/`.glb` to show.
-
-What the user points at in the viewer reaches you as a board reference
-(`/work/PCB/blinky.kicad_pcb#R1`, `#J1.2`, `#net:VBUS`, `#net:VBUS@x0y0`, `#@x3.5y3.5`).
-`pcb.read_board(path).resolve(ref)` answers it in the script's coordinates, and a part's
-`.script` is the line that made it: edit that line ([inspection](references/inspection.md)).
+The viewer draws a `.kicad_pcb` read-only from the file, every layer, with its board tools
+(select, the tree, measure, display, copy a reference): drag to pan, wheel or pinch to zoom,
+double-click to fit. What the user points at reaches you as a board reference
+(`/work/boards/blinky.kicad_pcb#R1`, `#R1.2`, `#net:VBUS`, `#net:VBUS@x40.1y21.6`,
+`#@x40.1y21.6`); `read_board(path).resolve(ref)` answers it
+([inspection](references/inspection.md)).
 
 ## Handoff
 
-Report the files written, the build's last line (built or draft, and what is unrouted), the
-checks that ran (KiCad's ERC and DRC run on every build; simulations you ran; $pcb-dfm if
-it was asked for), and assumptions (ratings, footprints chosen, rules). Show the
-board and schematic ([Show the model](#show-the-model)).
+Report the files written, the build's line (parts, tracks, vias, zones, unconnected), the
+`cadgen pcb drc` result, the checks you scripted, and your assumptions (footprints chosen,
+pad-to-pin mapping, currents, the fab's limits in the rules). Show the board
+([Show the model](#show-the-model)). Before ordering, $pcb-dfm reviews the board for
+fabrication, assembly and sourcing.
 
 ## References
 
-- [The board API](references/board-api.md): every call, argument and error.
-- [Layout](references/layout.md): placement and routing rules that make boards that work.
-- [Routing](references/routing.md): hand routing and Freerouting.
-- [Simulation](references/simulation.md): SPICE testbenches over the board's own subcircuits.
-- [Manufacturing](references/manufacturing.md): Gerbers, BOM, placement and ordering.
-- [Parts](references/parts.md): symbols, footprints, project libraries and the fields a BOM orders by.
-- [Inspection](references/inspection.md): board and schematic references from the viewer, `pcb.read_board`, `pcb.read_schematic`, and the script line behind each part.
-
-Before ordering, $pcb-dfm reviews the board for fabrication, assembly and sourcing.
+- [The board API](references/board-api.md): kicad-python for boards: units, layers, geometry, items, nets, rules, net classes, exports, library browsing.
+- [Parts](references/parts.md): `fp-lib-table`, stock libraries, the board's own `.pretty`, reading a footprint's pads.
+- [Layout](references/layout.md): placement that makes boards that work.
+- [Routing](references/routing.md): hand routing, widths for current, vias, pours.
+- [Manufacturing](references/manufacturing.md): design rules from the fab's limits, `cadgen pcb drc`, the export jobs, ordering.
+- [Inspection](references/inspection.md): the viewer, snapshots, board references, `read_board`, check scripts.

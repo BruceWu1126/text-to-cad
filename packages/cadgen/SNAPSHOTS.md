@@ -63,8 +63,8 @@ snapshot's own.
 ## Drawings
 
 A `.dxf` is not rendered in a scene at all, so `cadgen dxf snapshot` is the
-narrowest door, a shape only the plot doors (`cadgen pcb snapshot` and `cadgen
-harness snapshot`) share. It draws the whole drawing, fitted to the image and
+narrowest door, a shape only the other plot door, `cadgen pcb snapshot`,
+shares. It draws the whole drawing, fitted to the image and
 head on, in the pens the file declares — the same picture the CAD Viewer's DXF
 pane shows, from the same server-side payload, through the same drawing code.
 What the viewer cannot show, the CLI does not render.
@@ -91,49 +91,33 @@ any `display` key but `appearance`, `mode` other than `view`, `section`,
 or `output.tightFrame` is refused by name with what a drawing is — in the same
 words, because the flag and the job key are one request arriving two ways.
 
-## KiCad boards and schematics
+## KiCad boards
 
-A `.kicad_pcb` or `.kicad_sch` is drawn as KiCad plots it — `kicad-cli` makes the
-SVG, so the picture is KiCad's own, in KiCad's colours — and like a drawing it is
-flat: `cadgen pcb snapshot` takes the drawing's narrow shape. A board is one
-picture, every layer stacked back to front on KiCad's board background, with each
-unrouted connection drawn as a straight ratsnest line and reported as a warning
-beside the image. A schematic is its sheets one under another, root first, each
-on KiCad's paper colour. The whole plot is fitted to the image with the viewer's
-gutter, on the appearance's background: the same payload the CAD Viewer's plot
-pane shows (`GET /__cad/plot`), drawn by the same code. It needs KiCad installed;
-without it the snapshot fails with how to install it.
+A `.kicad_pcb` is drawn from the file by cadgen's own reader, no KiCad process
+anywhere: footprints with their pads as the padstacks shape them, tracks and vias,
+the pours as KiCad filled them when the board was saved (every build refills
+before saving), holes and the outline, silkscreen and fabrication graphics, and
+text in a permissive stroke font (the same positions as KiCad's, different
+glyphs). Like a drawing it is flat: `cadgen pcb snapshot` takes the drawing's
+narrow shape. A board is one picture, every layer stacked back to front, with a
+straight ratsnest line for each connection copper does not make. The whole plot
+is fitted to the image with the viewer's gutter, on the appearance's background:
+the same payload the CAD Viewer's board pane shows (`GET /__cad/plot`), drawn by
+the same code. The picture is cadgen's reading of the file, not KiCad's plotter's:
+KiCad's own SVG and PNG of a board are its export jobs, one API call away in the
+board's script. There is no schematic view: a board script has no schematic.
 
 ```bash
 cadgen pcb snapshot board.kicad_pcb review.png
-cadgen pcb snapshot board.kicad_sch schematic.png --appearance dark --width 2400 --height 1600
+cadgen pcb snapshot board.kicad_pcb review.png --appearance dark --width 2400 --height 1600
 ```
 
 It takes what the drawing door takes: `TARGET`, `OUT`, `--job`, `--appearance`
-(the surround the sheets sit on; they keep KiCad's own colours),
-`--width`/`--height`, `--size-profile`, `--debug` and `--json`, plus
-`output.renderScale` and `output.transparent` in a job. A job (or `cadgen
-snapshot` routing a board or a schematic) that asks for a camera, a display key
-but `appearance`, a mode but `view`, a section, a scale, a view label or an
-output setting that frames a camera is refused by name with what a plot is.
-
-## Wiring harnesses
-
-A `.harness.yml` (a WireViz document) is drawn as WireViz draws it — `wireviz`, with
-Graphviz, makes the SVG — and is a plot like a board: `cadgen harness snapshot`
-takes the same shape, and refuses the same requests in a harness's words. The
-diagram (every connector with its pins and labels, every cable with its wires'
-colours, the runs between them) is one sheet on WireViz's page colour, fitted to
-the image on the appearance's background: the payload the CAD Viewer's plot pane
-shows, drawn by the same code. It takes any WireViz document, a hand-written one
-included; a document WireViz refuses fails with WireViz's reason, and a machine
-without WireViz or Graphviz is told how to install them. A plain `.yml` is not a
-harness: only the two suffixes together are.
-
-```bash
-cadgen harness snapshot cable.harness.yml review.png
-cadgen snapshot cable.harness.yml review.png --display '{"appearance": "dark"}'
-```
+(the surround the board sits on), `--width`/`--height`, `--size-profile`,
+`--debug` and `--json`, plus `output.renderScale` and `output.transparent` in a
+job. A job (or `cadgen snapshot` routing a board) that asks for a camera, a
+display key but `appearance`, a mode but `view`, a section, a scale, a view label
+or an output setting that frames a camera is refused by name with what a plot is.
 
 ## Requests and OUT
 

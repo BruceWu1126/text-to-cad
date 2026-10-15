@@ -1,97 +1,111 @@
-# Inspection: what the user points at
+# Inspection: the viewer, snapshots, board references and check scripts
 
-The CAD Viewer shows a `.kicad_pcb` as KiCad plots it, and lets a person point at what is on
-it: a part, a pad, a net, a stretch of copper, a spot on the board. What they point at reaches
-you as a **board reference** in their prompt, and resolves back to the board and to the line of
-your script that made it. The viewer never edits; you do, in the script.
+A board is looked at three ways, all from the saved `.kicad_pcb` and none needing KiCad:
+the CAD Viewer shows it to the person and lets them point at things; a snapshot gives you
+the same picture as a file; and scripts read it back, inside the build through kicad-python
+or afterwards through `read_board`. The viewer never edits; you do, in the script.
+
+## The viewer and snapshots
+
+Show every board you build or change ([Show the model](../SKILL.md#show-the-model)). The
+viewer draws the file read-only: every copper layer with its tracks, vias, pads and the
+pours as KiCad filled them; silkscreen, fabrication and courtyard graphics; the outline and
+holes; text; a ratsnest line for each connection copper does not make. Its board tools are
+select, the item tree, a reference you can copy, measure, draw, display (layers on and off),
+and Quick Edit. Drag to pan, wheel or pinch to zoom, double-click to fit.
+
+```bash
+cadgen pcb snapshot boards/blinky.kicad_pcb tmp/blinky.png
+cadgen pcb snapshot boards/blinky.kicad_pcb tmp/blinky-dark.png --appearance dark --width 2400 --height 1600
+```
+
+A snapshot is the viewer's picture of the whole board, fitted to the image: the file for
+your own review after each build. It takes `TARGET`, `OUT`, `--appearance` (`light` or
+`dark`), `--width`/`--height`; a scene request (a camera, a display mode) is refused by name,
+because a board is a drawing. It needs no KiCad.
 
 ## Board references
 
-A reference is a token, `<file>#<selector>`, exactly as a STEP reference is: the file is the
-file's absolute path (JSON-quoted when it holds a space, `#`, a quote or a backslash), and
-several selectors share one `#`, comma-joined: `/work/PCB/servo.kicad_pcb#U3,C14.2`.
-`resolve()` reads the file as a path (`~` expanded, links followed, a relative one read from the
-working directory) and refuses a reference that names another document.
+What the person points at reaches you as a **board reference**, a token
+`<file>#<selector>` exactly like a STEP reference: the file is the board's absolute path
+(JSON-quoted when it holds a space, `#`, a quote or a backslash), and several selectors share
+one `#`, comma-joined: `/work/boards/servo.kicad_pcb#U3,C14.2`.
 
 | Selector | Names |
 | --- | --- |
-| `#U3`, `#J2-J4`, `#_U1` | a part, by its reference designator (a letter or `_`, then letters, digits, `_`, `+` or `-`) |
-| `#U3.9`, `#J4.A4`, `#U2.EP` | a pad of a part, numbered as KiCad numbers it |
-| `#net:VIN`, `#net:TX/RX`, `#net:"/Power Stage/VLOC"` | a net, by the name KiCad shows; quoted when it holds whitespace (a hierarchical sheet's name puts one in its nets), a quote, a comma, `@` or `#` |
+| `#U3`, `#J2-J4`, `#_U1` | a part, by its reference designator |
+| `#U3.9`, `#J4.A4`, `#U2.EP` | a pad of a part, numbered as the footprint numbers it |
+| `#net:VIN`, `#net:TX/RX`, `#net:"a b"` | a net, by name; quoted when it holds whitespace, a quote, a comma, `@` or `#` |
 | `#net:VIN@x57.6y21.6` | that net's copper (a track, via, pour or pad) at a point |
 | `#@x3.5y3.5` | a point on the board |
 
-Points are millimetres in the script's frame: y up, from the board's drill/place origin, which
-is where cadgen puts the script's own origin. They are the numbers `board.place`,
-`pin.position` and the build's DRC findings use, written with at most three decimals
-(`x-3y0.5`).
+Points are millimetres in the board's own frame, the one the script's `Vector2.from_xy_mm`
+takes, written with at most three decimals (`x-3y0.5`). Paste a reference the viewer gave
+you as it is: `resolve()` reads it in the frame it was written in.
 
 ## Resolving one
 
 ```python
-from cadgen import pcb
+from cadgen.kicad.board_index import read_board
 
-board = pcb.read_board("PCB/servo.kicad_pcb")      # any KiCad 10 board; runs nothing
-part = board.resolve("PCB/servo.kicad_pcb#U3")      # a Part
-part.script                                         # "servo.py:183": the board.part(...) line
-part.at, part.rotation, part.side, part.value, part.footprint, part.fields
-pad = board.resolve("#J4.A4")                       # a Pad: .net, .at, .name, .type, .side, .polygon
-net = board.resolve("#net:VIN")                     # a Net: .netclass, .pads, .tracks, .vias, .zones
-copper = board.resolve("#net:VIN@x57.6y21.6")       # Copper: .items, that net's copper there
-point = board.resolve("#@x3.5y3.5")                 # a Point: .on_board, .parts, .pads, .copper, .holes
-board.resolve_all("PCB/servo.kicad_pcb#U3,C14.2")   # a token of several, each resolved
+board = read_board("boards/blinky.kicad_pcb")       # the saved file; runs nothing
+part = board.resolve("boards/blinky.kicad_pcb#R1")  # a Part: .at, .rotation, .side, .value, .footprint, .fields, .pads
+pad = board.resolve("#R1.2")                        # a Pad: .net, .at, .number, .type, .side, .polygon
+net = board.resolve("#net:VBUS")                    # a Net: .netclass, .pads, .tracks, .vias, .zones
+copper = board.resolve("#net:GND@x7.2y8")           # Copper: .items, that net's copper there, nearest first
+point = board.resolve("#@x0y0")                     # a Point: .on_board, .parts, .pads, .copper, .holes
+board.resolve_all("boards/blinky.kicad_pcb#R1,D1.2")   # a token of several, each resolved
 board.at(12, 8)                                     # what is at a point
+board.parts, board.nets, board.tracks, board.vias, board.zones, board.holes, board.outline
 ```
 
-A file before the `#` must name the board you read; a reference to another file is refused,
-as are a part, pad or net the board does not have (the message lists what it does have) and
-copper nowhere near the point (it names the nearest). A number several pads share (a USB
-connector's four `SH` shield pads, a regulator's tab and pin both `2`) names them all: it
-resolves to the first, whose repr says how many share it, and `part.pads_numbered("SH")` lists
-every one; the person's point, when they gave one, says which. A reference names the board as it was
-when the person picked: if you have rebuilt since, resolve against the new board and check it
-still names what they meant.
+A file before the `#` must name the board you read; a part, pad or net the board does not
+have is refused with what it does have, and copper nowhere near the point names the nearest.
+A number several pads share (a connector's shield pads, a regulator's tab and pin both `2`)
+resolves to the first, whose repr says how many share it; `part.pads_numbered("SH")` lists
+them all. A reference names the board as it was when the person picked: if you have rebuilt
+since, resolve against the new board and check it still names what they meant.
 
-## The script line
+## Check scripts
 
-A board cadgen builds remembers, for every `board.part(...)` and `board.hole(...)`, the first
-line outside cadgen that called it, and writes it into the KiCad files as a hidden field,
-`Script` = `<path>:<line>`, on the part's symbol and its footprint. The path is relative to
-the model script's folder (`lib/power.py:41` for a part a helper in `lib/` made). `part.script`
-reads it back. A board drawn in KiCad has none: find the part in its project instead.
+A real board is checked hundreds of times, so write the checks once and run them every
+iteration. Two places to read from, both fine:
+
+- **Inside the function**, raw kicad-python on the live board, before it is saved:
+  `board.get_tracks()`, `board.get_items_by_net(Net(name="VBUS"))`,
+  `board.get_connected_items([pad])`, `board.get_pad_shapes_as_polygons(pads)`,
+  `zone.filled_polygons` after `board.refill_zones()`. Assert, or print a table; an
+  exception stops the build and saves nothing, which is what a failed check should do.
+- **After the build**, `read_board` on the saved file: no server, fast, and the same
+  objects the viewer's references resolve to. Keep these as `check_*.py` scripts beside the
+  board and run them with `python` after each build.
+
+```python
+from cadgen.kicad.board_index import read_board
+
+board = read_board("boards/blinky.kicad_pcb")
+for net in board.nets:
+    if net.name in ("VBUS", "GND") and net.tracks:
+        narrowest = min(track.width for track in net.tracks)
+        assert narrowest >= 0.3, f"{net.name}: narrowest track {narrowest} mm"
+gnd = board.resolve("#net:GND")
+for pad in gnd.pads:                                 # every SMD ground pad has a via within 1.5 mm
+    if pad.side == "top":
+        near = min(((pad.at[0] - via.at[0]) ** 2 + (pad.at[1] - via.at[1]) ** 2) ** 0.5 for via in gnd.vias)
+        assert near <= 1.5, f"{pad.part}.{pad.number}: nearest GND via {near:.2f} mm away"
+```
+
+Useful checks: the narrowest track per power net against its current; every surface-mount
+ground pad near a ground via; a decoupling capacitor's pad within 3 mm of the IC pin it
+serves; no part's outline over another's; every pad in a net reachable (`get_connected_items`
+from the first pad); the pour's filled area per layer. The viewer's references are the same
+data: a check that fails can print `#U1.3`-style selectors the person can click.
 
 ## The loop
 
-1. The person picks in the viewer (Select, then copy) and writes what they want: "move
-   `PCB/servo.kicad_pcb#C14` next to `#U3.9`", "this VIN track `#net:VIN@x57.6y21.6` is too
-   thin".
-2. Resolve each reference with `pcb.read_board(...)` (a schematic's with
-   `pcb.read_schematic(...)`).
-3. Edit the line `part.script` names, or the copper call near the resolved points.
-4. Run the script. The viewer shows the new board; KiCad's checks run on every build and
-   report in the build's output, each finding with references to the pads and parts in it.
-   The viewer only draws the board: a review before ordering is $pcb-dfm's.
-
-## Schematics
-
-A `.kicad_sch` speaks the same selectors for its symbols, pins and nets: `#U3` a part,
-`#U3.9` pin 9 of U3, `#net:VIN` a net. Copper and points are a board's alone; a schematic
-refuses them.
-
-```python
-schematic = pcb.read_schematic("PCB/servo.kicad_sch")   # the root sheet; runs KiCad's netlist once
-part = schematic.resolve("PCB/servo.kicad_sch#U3")       # a Part: .script, .value, .lib, .footprint, .fields
-part.units                                               # each unit drawn: .unit, .sheet, .at, .rotation, .mirror
-pin = schematic.resolve("#U3.9")                         # a Pin: .net, .name, .type, .unit, .sheet
-net = schematic.resolve("#net:/Power/EN")                # a Net: .netclass, .nodes ("U3.9", ...), .pins, .parts, .labels
-schematic.sheets[pin.sheet].path                         # "/Power/": the sheet it is drawn on
-```
-
-Net names are KiCad's own. A cadgen schematic labels every net with the script's name
-(`VIN`, `TX/RX`); in one drawn in KiCad, a global label or power symbol names its net as
-written, a local or hierarchical label with its sheet's path (`/Power/EN`), and a net no
-label names is called after a pin on it (`Net-(D1-A)`); a pin left open is alone on a net of
-its own, `unconnected-(…)`. A sheet used twice in a hierarchy is two sheets, each with its
-own references. A part's `script` is the same line its footprint names on the board.
-Positions are the sheet's millimetres (y down, from the page's corner), for finding things
-on the sheet; the script never uses them.
+1. The person picks in the viewer and writes what they want: "move `#C14` next to
+   `#U3.9`", "this track `#net:VIN@x57.6y21.6` is too thin".
+2. Resolve each reference with `read_board`; find the line of the script that placed the
+   part or drew the copper (the pad dict and the route list name them).
+3. Edit the script; run it; run the checks and `cadgen pcb drc`.
+4. The viewer shows the new board. A review before ordering is $pcb-dfm's.

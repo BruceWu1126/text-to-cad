@@ -1,159 +1,97 @@
-# Routing: by hand, and Freerouting for what is left
+# Routing: by hand, in small groups
 
-A board is finished when nothing is unrouted and KiCad's DRC has no error. Get there in
-this order: place, plan fanouts, draw the connections by hand, pour ground, let the router
-finish what is left on a simple board, read the result, look at the board.
+There is no autorouter. Every track is a `Track` the script draws, and that is the point:
+an autorouted board of this size is slower to fix than a hand-routed one is to draw, and a
+hand-routed board can be read. A board is finished when the build says `0 unconnected` and
+`cadgen pcb drc` reports no error.
 
-Hand routing is the default. In a side-by-side test of agents laying out the same boards,
-on a 15-net board the router left a USB data line 5x longer than its pads' distance and
-diagonal tracks across the middle; hand-routed boards ran the servo ports' DATA, power and
-ground as straight parallel spines and took no longer. On a 10-net board both were equally
-clean and the router was 7x faster.
+## The order
 
-## Hand-routing rules
+1. Place one functional group ([layout](layout.md)) and route it before placing the next.
+   A connector and what it feeds; a regulator and its capacitors; an IC with its decoupling
+   and pull-ups.
+2. Fan out every fine-pitch part first: a short stub out of each pad in the direction its net
+   leaves, a via where it changes layer, before any long track exists to block it.
+3. Power and ground: the widest tracks, the pours and their vias.
+4. Data pairs and clocks: short, side by side, few vias.
+5. Everything else, as buses where signals travel together.
+6. Build, snapshot, DRC, check scripts; fix; repeat. A real board is hours of this.
 
-- Octolinear: every segment at 0, 45 or 90 degrees; a point list makes the corners.
-- Fan out first: out of each fine-pitch part (QFN, SOT-23-5, USB-C), a short stub from every
-  pin toward where its net goes, before routing anything long.
-- Buses: related signals run together as parallel, equally spaced tracks that turn together;
-  a row of identical connectors gets one straight spine per net through the same pin of each.
-- No detours: a signal track close to the straight-line distance between its pads. If it is
-  not, move a part or change layer with a via. Data pairs (USB D+/D-) side by side and short.
-- Width from current: each power track sized for its net's `current=` (the review checks it).
-- Ground: pours on both layers, a via from each SMD ground pad into the other side.
-- Check the work: snapshot after each group; `cadgen pcb review` lists thin power tracks
-  and far decoupling capacitors.
+## Rules
 
-## Place first
+- **Octolinear**: every segment at 0, 45 or 90 degrees. A route is a point list; each pair of
+  points is one `Track`, so write a `track(net, width, *points)` helper (the skill's example
+  has one) and choose corner points so that every diagonal segment has |dx| == |dy|: from
+  (0, 0) to (5, 3), the corner is (2, 0), so the second segment runs 3 across and 3 down
+  at 45 degrees; a corner at (1, 0) would leave a segment at an arbitrary angle.
+- **Start and end on pads**: the first and last point of a route are `pad.position` values
+  read from the placed footprint, never typed numbers. A track that ends 0.1 mm from a pad
+  is unconnected.
+- **Fan out first**: out of a QFN, SOT-23-5, USB-C or any pad row at 0.65 mm pitch or
+  finer, a stub from each pad at the pad's width toward where its net goes, straight out of
+  the row, before routing anything long. Wide power tracks reach such a pad through a stub at
+  the pad's width for the first millimetre, then widen.
+- **Buses**: related signals (a data bus, the pins of a row of identical connectors) run
+  together as parallel, equally spaced tracks that turn together; a row of identical
+  connectors gets one straight spine per net through the same pin of each. Generate them in a
+  loop over an offset, not one by one.
+- **No detours**: a signal track close to the straight-line distance between its pads. If
+  it is not, move a part or change layer with a via; do not wind around.
+- **Width from current**: every power track sized for the current its net carries. Outer
+  layers, 1 oz copper, 10 °C rise (IPC-2221, approximate): 0.5 A → 0.15 mm, 1 A → 0.3 mm,
+  2 A → 0.75 mm, 3 A → 1.25 mm, 5 A → 2.5 mm; inner layers need about twice the width.
+  Compute it for the real current and temperature, and let a pour carry what a track cannot.
+- **Vias**: one per layer change, at or above the fab's minimum (0.6 mm diameter, 0.3 mm
+  drill is a safe standard size); several in parallel for power and thermal paths; none under
+  a part you cannot inspect unless the fab tents them.
+- **Data pairs** (USB, CAN, LVDS): equal lengths, side by side at a constant gap, no vias if
+  possible, a solid ground pour under them; a `CRCT_DIFF_PAIR_GAP` or `CRCT_SKEW` custom
+  rule makes the DRC hold the pair.
+- **Layers**: on a 2-layer board, keep the bottom pour as whole as possible: route on top,
+  cross on the bottom only for short jumps, and never run a long track across the pour.
 
-The router never moves a part, and a board that routes badly almost always needs a better
-placement, not more passes ([layout](layout.md)):
+## Pours
 
-- Connectors on the edges, mating side outward; the parts of one subcircuit together.
-- Decoupling capacitors at their IC's power pins, on the same side.
-- The power path in a line: input, protection, regulator, its capacitors, the loads.
-- Room between parts for tracks: a few millimetres between rows of fine-pitch pads.
-- Pins that connect facing each other (rotate a part rather than route around it).
+Ground is a zone, filled by KiCad after your routes exist, around them.
 
-## Draw what must run one way
+- **2 layers**: a ground pour on the bottom (`layers=[BoardLayer.BL_B_Cu]`), and every
+  surface-mount ground pad reaches it through a via beside the pad: a short track from the
+  pad to the via, as the skill's example does for D1. Through-hole ground pins reach the pour
+  directly. A pour on top as well is fine for shielding, but it is the vias that make ground
+  work.
+- **Thermal relief or solid**: KiCad connects pads to a pour with thermal spokes by default
+  (`ZoneConnectionStyle.ZCS_THERMAL`), good for hand soldering, weak for current. For a
+  power pour, or a connector's ground pads that one spoke cannot serve, set
+  `zone.connection.zone_connection = ZCS_FULL` on the zone, or scope it to the footprint
+  with a `CRCT_ZONE_CONNECTION` custom rule ([board API](board-api.md#custom-rules)).
+- **Islands**: a pour cut into pieces by routes leaves islands KiCad removes (its default)
+  or, if kept, copper connected to nothing. After `refill_zones()`, the build's
+  `unconnected` count tells you when a pad's only path was through a piece that is gone.
+- **Priority**: where pours overlap (a power island inside the ground pour), the higher
+  `priority` wins and the other keeps its clearance from it.
+- **4 layers**: planes on the inner layers (`BL_In1_Cu` ground, `BL_In2_Cu` power), routes
+  on the outer two, a via beside every pad of a plane's net. A plane joins its net only where
+  a via or through-hole pad of that net passes through it.
 
-The router keeps every track and via the script draws, routes around them, and continues
-from their ends. Draw by hand:
+## Check as you go
 
-- high-current paths, wider in a net class: `board.netclass("Power", track_width=0.5, clearance=0.2)`;
-- anything whose shape matters: a switching regulator's loop, a crystal's short traces,
-  differential pairs (USB, CAN: side by side, equal length). The router knows neither
-  length matching nor pairs.
-
-A net class sets the width of every connection the router makes on its nets, the thin ones
-too: a 1 mm power class cannot reach the same net's pad on a 0.65 mm-pitch transistor or a
-0603 enable resistor between fine-pitch pins, and those connections stay unrouted. For a
-power net with small pads on it, draw its current path wide by hand (`width=`) and leave the
-net in the default class; the router finishes its thin branches. End a hand-drawn branch on a
-vertex of the track it leaves (a point of both polylines) or on a pad, never mid-segment.
-
-## Pour ground
-
-Ground is a zone (`board.zone`), filled by KiCad after routing, around the routes.
-
-- **2 layers**: pour ground on both sides, `board.zone(gnd, layers=["F.Cu", "B.Cu"])`, and
-  let the router route ground like any net: every ground pad gets a track and the pours join
-  them. Leaving ground to the pours alone (`skip=[gnd]`) needs more: routes crowd the ground
-  pads until the pour reaches some through one thermal spoke (DRC `starved_thermal`: use
-  `pads="solid"`), and a pour that routes cut in two is an island the draft lists as
-  unrouted until a via or track joins it.
-- **Starved thermals after routing**: through-hole header pins at 2.54 mm leave the router's
-  tracks no room for two spokes. With every SMD part on top, only through-hole pads reach the
-  bottom pour, so connect it solid there (`board.zone(gnd, layers=["B.Cu"], pads="solid")`)
-  and keep the top's thermals for reflow. A ground pad in a fine-pitch row (a USB-C
-  receptacle's) is reached by one spoke, and a short track to the shell tab is not always
-  enough: connect that connector's ground pads to the pour solid with a rule:
-
-  ```python
-  board.rule("""(rule "J4 solid to pour" (constraint zone_connection solid)
-      (condition "A.memberOfFootprint('J4') && A.NetName == 'GND'"))""")
-  ```
-- **USB-C power pads**: the VBUS pads are 0.6 mm wide, in a row of 0.3 mm pads at 0.5 mm
-  pitch, so a power track must leave them at the pad's width for the first millimetre or
-  two, then widen. The review reports that stub as thinner than the net's current needs;
-  it is the connector's limit.
-- **4 layers** (signal, ground, power, signal): planes on the inner layers, and keep the
-  router's tracks off them so they stay whole:
-  `board.zone(gnd, layers=["In1.Cu"])`, `board.zone(v33, layers=["In2.Cu"])`,
-  `board.autoroute(layers=["F.Cu", "B.Cu"])`. A plane joins its net only where one of the
-  net's vias or through-hole pads passes through it: route the plane's net too (its vias
-  join the plane), or skip it and put a via beside each of its pads by hand.
-
-## Autoroute what is left
-
-For a simple board, or the non-critical connections left after the hand routing. Never
-for USB or other data pairs: draw those first, and the router keeps them.
-
-```python
-board.netclass("Power", track_width=0.5, clearance=0.2)
-vin = board.net("VIN", power_flag=True, netclass="Power")
-...                                            # parts, connections, placement
-board.track(vin, [j1[1], (-10, 0), u1["VI"]])  # drawn: kept as drawn
-board.zone(gnd, layers=["F.Cu", "B.Cu"])       # ground pours; the router routes ground too
-board.autoroute()                              # everything not drawn, when the board is built
-return board
-```
-
-`board.autoroute(skip=(), layers=None, passes=100, timeout=600)`, called once:
-
-- `skip`: nets (or net names) the router leaves alone. Their pads stay obstacles.
-- `layers`: the copper layers tracks may run on (all of them by default). Vias still pass
-  through every layer.
-- `passes`: the most routing passes Freerouting may make. It stops sooner when everything
-  is routed or when it stops improving. The same board and passes always route the same way.
-- `timeout`: seconds. A run that takes longer fails the build; a half-routed board is never
-  written because a machine was slow.
-
-The router follows each net's class (track width, clearance, via size), the board's
-minimum clearance, the copper-to-edge and hole clearances, the outline and its holes,
-keepouts (`board.keepout`), and copper text or graphics. It does not know custom rules
-(`board.rule`); KiCad's DRC checks them on the routed board.
-
-Tracks keep their class width all the way to the pad, so a wide net into a fine-pitch pad
-(0.5 mm power into a 0.45 mm TSSOP pad) can stay unrouted. Draw a stub out of the pad at
-the pad's width, clear of the pad row, and the router continues from its end:
-
-```python
-x, y = u2["VDD"].position
-board.track(v33, [u2["VDD"], (x + 2.5, y)], width=0.3)   # out of the right-hand pad row
-```
+Write the checks you keep repeating as small scripts and run them every iteration
+([inspection](inspection.md)): the narrowest track on each power net against its current;
+every ground pad within a millimetre of a ground via; no track segment longer than the
+distance between its pads by more than a factor you choose; the pour's filled area per net.
+Raw kicad-python reads inside the function (`board.get_tracks()`, `get_items_by_net`,
+`get_connected_items`, `zone.filled_polygons`) and `read_board` on the saved file outside it
+are both fine; the check is the point, not where it runs.
 
 ## Reading the result
 
-- `built board.kicad_pcb`: everything routed, no DRC error.
-- `built board.kicad_pcb (draft: N unrouted connections)` and the list: what the router
-  could not finish (or a skipped net's pads its pour did not reach). In order: move or
-  rotate the parts involved to open a path; give a crowded net a narrower class; draw that
-  connection by hand; allow another layer; only then raise `passes`.
-- A failed build lists KiCad's errors, each with its items and their positions in the
-  script's coordinates. After autorouting, an error means a rule the router did not know
-  (a custom rule, a hand-drawn item breaking a rule): fix it, or draw that part by hand.
-- `Freerouting did not finish routing in 600 s`: the board is too hard as placed. Spread
-  the parts, route the densest nets by hand, or lower `passes`.
-- Then look: `cadgen pcb snapshot board.kicad_pcb tmp/board.png`. Long detours, tracks
-  cutting a ground pour in two, a via under a part are not errors, but fix them by placement
-  or by drawing that net.
-
-## Installing Freerouting
-
-cadgen runs Freerouting 2.4 or newer as a separate program (GPL-3.0, never bundled).
-Releases: https://github.com/freerouting/freerouting/releases
-
-- **macOS (Apple Silicon)**: open `freerouting-<version>-macos-arm64.dmg` and drag
-  `freerouting.app` into Applications. It carries its own Java.
-- **Windows**: run `freerouting-<version>-windows-x64.msi`. It carries its own Java.
-- **Linux**: unzip `freerouting-<version>-linux-x64.zip` (it carries its own Java) and
-  `export CADGEN_FREEROUTING=/path/to/freerouting-<version>-linux-x64/bin/freerouting`.
-- **Any system, the jar**: download `freerouting-<version>.jar`, install Java 25 or newer
-  (macOS `brew install openjdk`; Ubuntu `sudo apt install openjdk-25-jre-headless`;
-  anywhere https://adoptium.net) and `export CADGEN_FREEROUTING=/path/to/freerouting-<version>.jar`.
-
-cadgen looks at `CADGEN_FREEROUTING` (a jar, a launcher or `freerouting.app`), then
-`freerouting` on `PATH`, then where the installers put it. For a jar it finds Java at
-`CADGEN_JAVA`, `JAVA_HOME`, on `PATH` or in Homebrew's `openjdk`. A build without them, or
-with a Java too old, fails and says which one to install.
+- `0 unconnected` and a clean `cadgen pcb drc`: routed.
+- `N unconnected`: pads a copper path does not reach. Usual causes, in order: a track ending
+  near a pad rather than on it; a via on the wrong net; a pour island removed under a pad
+  whose only connection it was; a layer mismatch (track on `BL_F_Cu`, pad on the bottom).
+- DRC errors name KiCad's rule and the items: clearance between two nets (move one);
+  track width or via size below the rules (widen, or the rule is wrong for the fab);
+  copper too close to the edge; courtyards overlapping. Silkscreen findings are warnings, but
+  a clipped polarity mark is a real defect.
+- Then look at the picture. Long detours, a pour cut in two, a via under a part are not
+  errors; fix them anyway.

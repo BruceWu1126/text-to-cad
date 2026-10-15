@@ -1,57 +1,66 @@
-# Layout: placing and routing a board that works
+# Layout: placing a board that works
 
-KiCad's DRC proves a board can be made; it does not prove the board works. These rules
-cover what the checks cannot see. Look at every board you place (snapshot it, or show it).
+KiCad's DRC proves a board can be made; it does not prove the board works, and it knows
+nothing about a part being on the wrong side of the board. These rules cover what the checks
+cannot see. Place in small functional groups, route each before the next, and look at the
+board after every group (snapshot it, or show it).
 
 ## Before placing
 
-- Fix the outline and the mounting holes first, from the enclosure when there is one (call
-  the case's part model, or share its constants), so the board fits before anything is on it.
-- Decide the stack: 2 layers for most robot boards; 4 (signal, ground, power, signal) for
-  fast digital, RF, or dense microcontroller boards.
-- Group the netlist into subcircuits (power input, regulator, MCU, each driver, each
-  connector) and keep each group together on the board.
+- Fix the outline and the mounting holes first, from the enclosure when there is one, so
+  the board fits before anything is on it. Draw the outline centred on KiCad's origin (0, 0)
+  unless the enclosure's drawing gives you a better frame, and set the drill/place origin on
+  a corner of the outline for the exports.
+- Decide the stack: 2 layers for most small boards; 4 (signal, ground, power, signal) for
+  fast digital, RF or dense microcontroller boards.
+- Group the parts into subcircuits (power input, regulator, MCU, each driver, each
+  connector), decide where each group goes, and write the script as one function per group
+  that places and routes it. The groups are reusable; the board is their composition.
+- Keep every pad's position in a dict as you place (`pads["U1.3"] = pad.position`): every
+  track starts and ends at one of these, never at a number copied by hand.
 
 ## Placement
 
-- Connectors on the board's edges, mating side outward, with keepouts for the housings and
-  cables that plug in. Mounting holes clear of copper (`board.hole` is unplated).
-- Power path in a line: input connector → protection → regulator → its output caps → loads.
-- Decoupling capacitors as close to their IC's power pin as the courtyards allow, on the
-  same side, the small value nearest the pin.
-- Crystals within a few millimetres of their MCU pins, nothing routed under them.
-- Switching regulators: input cap, switch node and inductor in a tight loop; keep the switch
-  node small and away from sensitive traces.
-- Hot parts (regulators, motor drivers) near the edge or over a copper pour with vias to
-  the other side.
-- Leave space: courtyards may not overlap (a DRC error), and room for tracks between parts.
-- Rotations of 0/90/180/270 unless the layout needs otherwise.
-- Parts on the bottom only when the top is full or the design needs it; assembly costs more.
+- Connectors on the board's edges, mating side outward, with keepout zones for the housings
+  and the cables that plug in. Mounting holes clear of copper.
+- Power path in a line: input connector → protection → regulator → its output capacitors →
+  loads. Nothing crosses it.
+- Decoupling capacitors as close to their IC's power pin as the courtyards allow, on the same
+  side, the smallest value nearest the pin, with a short path to the ground pour.
+- Crystals within a few millimetres of their MCU pins, nothing routed under them, ground
+  around them.
+- Switching regulators: input capacitor, switch node and inductor in a tight loop; keep the
+  switch node small and away from sensitive traces.
+- Hot parts (regulators, motor drivers) near the edge or over a copper area with vias to the
+  other side.
+- Leave room: courtyards may not overlap (a DRC error), and tracks need space between parts:
+  a few millimetres between rows of fine-pitch pads.
+- Pins that connect should face each other: rotate a part rather than route around it.
+  Rotations of 0, 90, 180, 270 unless the layout needs otherwise.
+- Parts on the bottom (`layer=BoardLayer.BL_B_Cu`) only when the top is full or the design
+  needs it; two-sided assembly costs more.
 
-## Routing
+## Plan the fanout before routing
 
-- Ground: a pour on one layer (2-layer: usually `B.Cu`), the ground pins connected through
-  vias next to their pads. Keep that pour unbroken under signals; a long track cutting the
-  pour forces return currents around it.
-- Power: wider tracks in a net class (`board.netclass("Power", track_width=0.5, ...)`):
-  roughly 0.5 mm per amp on outer 1 oz copper for a modest temperature rise; calculate for
-  real currents.
-- Signals: default width, short and direct, 45-degree corners (a point list does this).
-- Differential pairs (USB, CAN): equal lengths, side by side, no vias if possible.
-- Vias: one per layer change, at least the rules' size; several for power and thermal paths.
-- Route by hand, fanouts first; the router only for what is left ([routing](routing.md)).
+A fine-pitch part (QFN, BGA, TSSOP, a USB-C receptacle) decides the routing around it. Before
+any long track:
+
+- For each pin, decide which direction its net leaves and on which layer; a short stub from
+  the pad in that direction, then a via if it changes layer. Alternate stub directions on
+  dense rows so vias do not collide.
+- BGA: inner pads escape between outer ones, one via per pad in the dog-bone pattern, or
+  through-hole vias in the channel between pad rows; count the channels against the nets
+  that must cross them before placing the part.
+- Power and ground pins of the part go to the pour or plane through the nearest via; keep
+  the decoupling capacitor between the pin and that via.
+- Only then place the neighbours, where the fanouts point.
 
 ## Reading the results
 
-- Every DRC/ERC finding gives the items and their positions in the script's coordinates:
-  go to that point in the script.
-- A build checks only what KiCad checks. `cadgen pcb review board.kicad_pcb` adds what a
-  reviewer would: an IC power input (not a connector's, jumper's, test point's or hole's,
-  nor an unfitted part's) with no capacitor to ground, or whose nearest one is more than
-  3 mm away, pad centre to pad centre, and a net whose narrowest track is thinner than its
-  `current=` needs (IPC-2221, 1 oz outer copper, 10 °C rise). It is advice, never a gate;
-  $pcb-dfm says how to weigh it. Give power nets a `current=` ([board API](board-api.md))
-  so the track check has something to read.
-- A draft's ratsnest (the grey lines in the viewer) is what is left to route.
-- After a clean build, snapshot the board (`cadgen pcb snapshot board.kicad_pcb tmp/b.png`)
-  and look at it: crowding, a cap far from its pin, a connector facing inward are not errors.
+- `cadgen pcb drc` findings give KiCad's rule, the items and their positions: go to that
+  point in the script (the pad dict says whose pad it is).
+- `N unconnected` in the build line: pads a copper path does not join to their net. Find
+  which with a check script ([inspection](inspection.md)) and route them.
+- After a clean DRC, look at the board (`cadgen pcb snapshot board.kicad_pcb tmp/board.png`,
+  or show it): crowding, a capacitor far from its pin, a connector facing inward, a track
+  cutting a pour in two are not errors. Fix them by placement before you route more.

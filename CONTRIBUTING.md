@@ -257,8 +257,7 @@ diff content: a comment in a module selects what the module's code would.
 | --- | --- | --- |
 | Version Check | every change | canonical version, derived metadata, cadgen pins, the shipping contract's tree rules; on a pull request, what merging it releases (see [Shipping a release](#shipping-a-release)) |
 | cadgen (Linux/Windows) | `packages/cadgen`, `scripts/bundle`, a cadgen test, prose a cadgen test reads | the cadgen package suite, CAD Viewer backend included; for a change confined to the Viewer's backend or the CAD app's server (`cadgen/viewer`, `cadgen/mcp` and the commands that start them), only the tests that name them or read all of cadgen; for a test file, that file |
-| KiCad boards | `packages/cadgen` and `scripts/bundle` (a change confined to the Viewer's backend or the CAD app's server only where one of its tests names them), `tests/python/packages/kicad`, `test-kicad.sh` | `scripts/test/test-kicad.sh`: boards built end to end through KiCad 10 (from its Ubuntu PPA): fills, ERC/DRC, plots, Gerbers, 3D, simulation, and autorouting through a pinned Freerouting jar (SHA-256 checked) on Java 25. Not a required check |
-| WireViz harnesses | the same, with `tests/python/packages/harness` and `test-harness.sh` | `scripts/test/test-harness.sh`: harnesses through a real WireViz (pip) and Graphviz (apt): their drawings and bills of materials. Not a required check |
+| KiCad boards | `cadgen/pcb.py`, `cadgen/kicad/**`, `cadgen/kipy/**`, `tests/python/packages/kicad`, `test-kicad.sh` | `scripts/test/test-kicad.sh`: the smoke suite through a real KiCad. The job installs the nightly PPA (`kicad-nightly`, `kicad-nightly-footprints`: KiCad 10.99, the KiCad 11 API, the one KiCad with a headless `api-server`), builds a test-written `@pcb` script through it and runs `cadgen pcb drc` clean. Linux only: what can break is cadgen's use of the API, the same on every platform. Not a required check |
 | core-js | `packages/core` (and with it everything), `test-js.sh` and the dependency checks, `apps/docs/src` (the dependency check walks it), the viewer-memory helpers | `@text-to-cad/core`'s units, the dependency and kit-boundary checks, the benchmark helper units |
 | web | `packages/ui`, `apps/web` and the files its Markdown links to, `packages/cadgen` and `scripts/bundle`, `tests/browser`, the viewer scripts | the UI's units and browser specs (ui changes only), the client's units, then the bundle, the launch smoke test and the format/camera gates through the real backend (anything the served client or the backend reads) |
 | mcp | `apps/mcp`, `packages/ui`, `test-js.sh` | the CAD app's host-adapter units (jsdom) and its one-file build |
@@ -302,14 +301,12 @@ prints every thread's stack and fails by name.
 
 Tests that need KiCad live in `tests/python/packages/kicad/`, apart from the
 cadgen suite, because that suite runs where KiCad is not installed (its Windows
-job among them); everything else about boards (the SDK, the writers, the
-decorators) is tested there without KiCad, against a tiny project-local library
-(`tests/python/support/kicad_library.py`).
-
-Tests that need WireViz live in `tests/python/packages/harness/` for the same
-reason; the harness SDK, its checks, its document writer and a full `python
-cable.py` build are tested in the cadgen suite without it (WireViz only draws
-and lists a document a build has already written).
+job among them). Everything else about boards is tested there without KiCad: the
+decorator's sequence against a fake client (`tests/python/packages/cadgen/test_pcb_*.py`),
+`kicad-cli` discovery with a fake `PATH`, the board reader and the viewer's plot
+against test-owned board fixtures, and the vendored kicad-python tree's integrity
+(`tests/python/global/test_kipy_vendor.py`). See [Boards](#boards-kicad-and-the-vendored-kicad-python)
+for the install.
 
 The CAD Viewer's backend and the CAD app's server are leaves of cadgen:
 outside them and the commands that start them, nothing in cadgen imports either
@@ -433,6 +430,42 @@ imports remain inside its directory.
   `snapshot-render.js` to every commit that touched the renderer.
 - `VERSION` at the repo root is canonical; release tooling stamps every
   duplicate. Never hand-edit versions under `packages/`.
+
+### Boards: KiCad and the vendored kicad-python
+
+A `@pcb` script is built by KiCad itself: `cadgen.pcb` starts `kicad-cli api-server`
+(headless, an empty settings directory, one server per build) and drives it with
+kicad-python. Only the **KiCad 10.99 nightly** (the KiCad 11 API) has that server;
+KiCad 10.0 is refused at start. Building a board, running `cadgen pcb drc` and the
+`kicad` test suite therefore need the nightly installed; everything else in the
+repo, every required check included, runs without KiCad.
+
+- Ubuntu: `sudo add-apt-repository ppa:kicad/kicad-dev-nightly && sudo apt install
+  kicad-nightly kicad-nightly-footprints`. The package puts `kicad-cli-nightly` on
+  `PATH`, a wrapper that sources `/usr/share/kicad-nightly/kicad-nightly.env` before
+  `/usr/lib/kicad-nightly/bin/kicad-cli`; cadgen looks for that name first.
+  Symbols and 3D models are not needed.
+- macOS and Windows: the nightly installers from kicad.org. cadgen finds `kicad-cli`
+  in KiCad.app and under `Program Files\KiCad\<version>`; `CADGEN_KICAD_CLI` names
+  one anywhere.
+- `scripts/test/test-kicad.sh` runs `tests/python/packages/kicad/` (the smoke: a
+  test-written script built through `@pcb`, then `cadgen pcb drc` clean) and fails,
+  rather than skips, without a usable KiCad. CI runs it as the `kicad` job, selected
+  for changes under `cadgen/pcb.py`, `cadgen/kicad/`, `cadgen/kipy/`, the suite and
+  its runner; the job installs the PPA itself.
+
+`packages/cadgen/src/cadgen/kipy/` is kicad-python, vendored because no PyPI release
+targets the KiCad 11 API and PyPI forbids git dependencies: the upstream tree at a
+pinned commit, its protocol modules generated from the KiCad commit that commit pins,
+and its absolute `kipy.` imports rewritten to `cadgen.kipy.`. Never edit it by hand.
+`scripts/vendor/kipy.py` regenerates the tree from the pins in `cadgen/kipy/VENDOR.json`
+(the kicad-python commit, the KiCad commit whose protos it uses, and the generator
+toolchain, every version exact) and `scripts/vendor/kipy.py --check` proves the
+committed tree is what the pins make; its header says how to move them. The pins and
+the nightly build the `kicad` job installs move together. The upstream MIT license
+ships beside the tree, and kicad-python's runtime dependencies (`protobuf`, `pynng`)
+are cadgen's. When kicad-python publishes a release for KiCad 11, depend on it and
+delete the tree.
 
 ## Viewer Development In This Repo
 

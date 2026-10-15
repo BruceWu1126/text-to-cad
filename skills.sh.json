@@ -19,8 +19,8 @@
     },
     {
       "title": "Electronics",
-      "description": "Design, check and manufacture circuit boards and the harnesses that wire them.",
-      "skills": ["pcb", "pcb-dfm", "harness"]
+      "description": "Design, check and manufacture circuit boards.",
+      "skills": ["pcb", "pcb-dfm"]
     },
     {
       "title": "Robotics",

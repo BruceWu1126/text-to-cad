@@ -1,165 +1,320 @@
-# The board API
+# The board API: kicad-python for boards
 
-Everything a `@pcb` function uses, from `from cadgen import pcb`. Unknown keyword
-arguments are errors; every error says what to do instead.
-
-## Coordinates
-
-- Millimetres. **y up**, x right, as build123d draws. The board's (0, 0) is wherever its
-  outline puts it; the KiCad files carry that point as their drill/place origin, so KiCad's
-  placement file and STEP export come back in the same coordinates.
-- `rotation` is degrees counter-clockwise, seen from the top. `side="bottom"` mirrors the
-  part top-to-bottom in its own frame (KiCad's flip): a pad on the footprint's x axis stays
-  on it, one above it ends up below it. `rotation` is still counter-clockwise seen from the
-  top.
-- Positions you read back (`pin.position`, `part.at`) are in the same frame, rounded to
-  KiCad's nanometre.
-
-## Board
+`board` is `cadgen.kipy.board.Board`: kicad-python, the client of KiCad's own API, vendored
+in cadgen as `cadgen.kipy`. Everything in this file is that library; cadgen adds nothing on
+top of it, so kicad-python's own documentation (https://docs.kicad.org/kicad-python-main/)
+is the full reference and this file is the part a board script uses. A script needs some of:
 
 ```python
-pcb.Board(
-    outline=face_or_sketch,     # required; build123d 2D geometry in the XY plane, holes = cutouts
-    layers=2,                   # copper layers: an even number 2..32 (F.Cu, In1.Cu.., B.Cu)
-    thickness=1.6,              # mm
-    fab=pcb.JLCPCB,             # where it is made: its limits are the board's design rules
-    rules=None,                 # a pcb.Rules instead: pcb.PCBWAY.rules.replace(min_track_width=0.15)
-    libraries=[],               # project folders holding <Lib>.kicad_sym / <Lib>.pretty, searched first
-    title=None,                 # the title block; defaults to the model's name
-)
+from cadgen import pcb
+from cadgen.kipy.board_types import ArcTrack, BoardLayer, BoardPolygon, BoardSegment, BoardText, Net, Track, Via, Zone
+from cadgen.kipy.geometry import Angle, PolygonWithHoles, PolyLineNode, Vector2
+from cadgen.kipy.util.units import from_mm, to_mm
+from cadgen.kipy.board_rules import CustomRule, CustomRuleConstraint
+from cadgen.kipy.board_jobs import PlotSettings, PositionExportSettings
+from cadgen.kipy.project_types import NetClass, NetClassAssignment, NetClassAssignments
 ```
 
-Lines, arcs and circles of the outline become `Edge.Cuts` exactly; other curves are sampled.
-Off-plane geometry is refused.
+Enumerations live in the generated protocol modules under `cadgen.kipy.proto`:
+`board.board_types_pb2` (`ZoneType`, `ZoneConnectionStyle`, `PadType`, `ViaType`),
+`board.board_rules_pb2` (`CustomRuleConstraintType`), `board.board_commands_pb2`
+(`BoardOriginType`), `board.board_jobs_pb2` (`StatsOutputFormat`, `DrillFormat`,
+`Board3DFormat`), `common.types.base_types_pb2` (`MinOptMax`, `DocumentType`),
+`common.types.library_types_pb2` (`LibraryType`, `LibraryLoadStatus`) and
+`common.types.project_settings_pb2` (the `NetClass` message a net class is made from).
 
-`pcb.Rules` fields (KiCad's names): `min_clearance`, `min_track_width`,
-`min_via_diameter`, `min_via_annular_width`, `min_through_hole_diameter`,
-`min_hole_to_hole`, `min_hole_clearance`, `min_copper_edge_clearance`,
-`min_silk_clearance`, `min_text_height`, `min_text_thickness`, and the Default net class's
-`track_width`, `clearance`, `via_diameter`, `via_drill`.
+## Units and frame
 
-`fab=` is one of `pcb.JLCPCB` (the default), `pcb.PCBWAY`, `pcb.OSHPARK`, `pcb.AISLER`,
-`pcb.EUROCIRCUITS`, `pcb.SEEED_FUSION`, `pcb.NEXTPCB` (all in `pcb.FABS`): each holds that fab's
-standard-service limits (the price tier with no surcharge), for two copper layers
-(`fab.rules`) and for four or more (`fab.multilayer`); the board takes the set for its
-`layers=`. A board checked against them is one that fab makes at its base price. For a fab
-not listed, pass `rules=pcb.Rules(...)` with the numbers from its capability page. Each
-preset's default net class (0.25 mm tracks, 0.2 mm clearance, a 0.6/0.3 mm via, or the
-larger via a fab needs) is well inside its limits; the minimums only matter where you ask
-for less. [Manufacturing](manufacturing.md) has each fab's numbers and how to order.
+- Every length is an **integer in nanometres**: `from_mm(0.25)` → `250000`, `to_mm(n)` back,
+  `from_mils`/`to_mils` for imperial footprints.
+- Positions are `Vector2.from_xy_mm(x, y)` (`.x`, `.y` in nm); angles `Angle.from_degrees(r)`
+  (`.degrees`). `PolyLineNode.from_xy(x, y)` takes **nanometres**, so wrap its arguments in
+  `from_mm`.
+- The frame is KiCad's: millimetres, **y down**, origin at the page's corner. Place the board
+  wherever is convenient (centred on (0, 0) is simplest); rotations are KiCad's, in degrees.
+  The drill/place origin that exports and KiCad's editor can measure from is set with
+  `board.set_origin(BoardOriginType.BOT_DRILL, Vector2.from_xy_mm(-20, -15))` and read with
+  `board.get_origin(BoardOriginType.BOT_DRILL)`.
+- `Box2` is a bounding box (`.pos`, `.size`): `board.get_item_bounding_box(item)`.
 
-## Parts and pins
+## Layers
+
+`BoardLayer` names every layer: copper `BL_F_Cu`, `BL_In1_Cu` … `BL_In30_Cu`, `BL_B_Cu`;
+`BL_F_SilkS`/`BL_B_SilkS`, `BL_F_Mask`/`BL_B_Mask`, `BL_F_Paste`/`BL_B_Paste`,
+`BL_F_Fab`/`BL_B_Fab`, `BL_F_CrtYd`/`BL_B_CrtYd`, `BL_Edge_Cuts`, `BL_Margin`,
+`BL_Dwgs_User`, `BL_Cmts_User`, `BL_User_1` … `BoardLayer.Name(layer)` prints one. A new
+board has two copper layers (`board.get_copper_layer_count()`, `board.get_enabled_layers()`);
+`board.set_enabled_layers(...)` changes the set for a four-layer board.
+
+## Geometry
+
+| Class | Use |
+| --- | --- |
+| `Vector2` | a point or a size; `.length()`, `.rotate(angle, center)` |
+| `Angle` | `from_degrees`, `.degrees`, `normalize()` |
+| `PolyLineNode` | one vertex, `from_xy(x_nm, y_nm)` (or `from_point(Vector2)`); `.has_arc` for arc vertices |
+| `PolyLine` | `.nodes`, `.closed`, `append(node)` |
+| `PolygonWithHoles` | `.outline` (a `PolyLine`), `.holes`, `add_hole(polyline)`, `move(delta)`, `rotate(delta, center)`, `bounding_box()` |
+
+A closed rectangle, the shape every outline and pour starts from:
 
 ```python
-part = board.part(
-    "Device:R",                         # the symbol, Library:Name
-    footprint="Resistor_SMD:R_0603_1608Metric",  # default: the symbol's own Footprint field
-    value="10k",                        # default: the symbol's Value
-    ref=None,                           # default: prefix + next free number (R1, U2, J3)
-    properties={"LCSC": "C25804", "MPN": "0603WAF1002T5E"},
-    dnp=False,                          # on the board, not assembled
-)
-part[1]; part["2"]; part["VIN"]         # pins by number, or by a unique name
-part.pins(); part.unconnected()          # all pins; pins on no net and not no-connect
-pin.number, pin.name, pin.electrical_type, pin.net, pin.position, pin.pads, pin.stack
+def rectangle(w, h, cx=0.0, cy=0.0):
+    poly = PolygonWithHoles()
+    for x, y in ((cx - w / 2, cy - h / 2), (cx + w / 2, cy - h / 2), (cx + w / 2, cy + h / 2), (cx - w / 2, cy + h / 2)):
+        poly.outline.append(PolyLineNode.from_xy(from_mm(x), from_mm(y)))
+    poly.outline.closed = True
+    return poly
 ```
 
-- A symbol pin needs a footprint pad with the same number; the part is refused otherwise.
-- Pins a symbol draws at one point (a connector's repeated GND pins, a Pi header's two 3V3
-  pins) are `pin.stack`: one connection in the schematic, so connecting or no-connecting one
-  does the whole stack, and two nets on one stack are refused.
-- Multi-unit symbols (an LM358's A, B and power units) are one part: pins of every unit
-  are on it, and the schematic draws each unit.
-- A power symbol (`power:GND`) is a net, not a part: use `board.net("GND")`.
-- `pcb.find_symbols("ldo 3.3")` and `pcb.find_footprints("sot-223")` search KiCad's
-  libraries and the project's.
+## The document
+
+| Call | What it does |
+| --- | --- |
+| `board.create_items([items])` | adds items (tracks, vias, zones, shapes, text); returns them with their ids |
+| `board.update_items([items])` | writes back items you changed after they were created or placed (a footprint's reference and pad nets) |
+| `board.remove_items([items])` | deletes items |
+| `board.get_footprints()`, `get_pads()`, `get_tracks()`, `get_vias()`, `get_zones()`, `get_shapes()`, `get_text()`, `get_nets()` | reads everything of a kind back |
+| `board.get_items_by_net(Net(name="VBUS"))` | pads, tracks, vias and zones on a net |
+| `board.get_connected_items([pad])` | everything copper joins to the given items: connectivity without DRC |
+| `board.get_pad_shapes_as_polygons([pads])` | a pad's copper outline per layer, for geometry checks |
+| `board.refill_zones()` | fills every zone (the decorator calls it before saving) |
+| `board.save()` | writes `.kicad_pcb`, `.kicad_pro`, `.kicad_prl` (the decorator calls it last) |
+| `board.get_as_string()` | the board's s-expression text as it would be saved |
+
+Items are plain objects until `create_items` sends them; a change to an item after that
+needs `update_items`. The decorator catches nothing: an `ApiError` (KiCad refused something,
+its message says what) propagates and nothing is saved.
+
+## Footprints and pads
+
+```python
+fp = board.place_footprint_from_library("Resistor_SMD:R_0603_1608Metric",
+                                        Vector2.from_xy_mm(0, 5), Angle.from_degrees(-90))   # layer=BoardLayer.BL_B_Cu flips it to the bottom
+fp.reference_field.text.value = "R1"                 # KiCad returns it as REF**
+fp.value_field.text.value = "1k"                     # value_field, datasheet_field, description_field
+fp.attributes.do_not_populate = True                 # also exclude_from_bill_of_materials, exclude_from_position_files
+for pad in fp.definition.pads:                       # pads as placed: pad.number, pad.position (absolute, nm), pad.pad_type
+    pad.net = Net(name={"1": "VBUS", "2": "LED"}[pad.number])
+board.update_items([fp])                             # the reference and the nets reach the board here
+```
+
+`place_footprint_from_library` takes the id as `Nickname:Name`; the nickname must be a row of
+the project's `fp-lib-table`, or KiCad answers `footprint 'Nickname:Name' not found`
+([parts](parts.md)). The returned `FootprintInstance` has `.position`, `.orientation`,
+`.layer`, `.definition` (the `Footprint`: `.pads`, `.shapes`, `.texts`, `.models`) and its
+fields. Read a pad's number before you decide its net: numbers follow the footprint, not
+the datasheet's pin names.
 
 ## Nets
 
-```python
-net = board.net("VBUS", netclass="Power", power_flag=True, current=2.0)
-anonymous = board.net()                  # named like KiCad: Net-(R1-Pad2)
-board.connect(net, j1[1], u1["VIN"], c1[1])
-board.no_connect(u1["NC"], *u1.unconnected())
-```
+A net is its name. `Net(name="VBUS")` on a pad, a track, a via or a zone puts the item on
+that net; the first item makes the net exist. `board.get_nets()` lists them (the empty name is
+"no net"). There is no netlist to keep in step: connectivity is what copper joins, and
+`get_connected_items` reads it. The decorator counts, per net, the pads a copper path from
+the first pad does not reach, and reports that as `unconnected`.
 
-- A pin joins one net; connecting it to a second is refused.
-- `power_flag=True`: the net is powered from off the board (a connector, a battery, a test
-  pad). KiCad's ERC otherwise reports its power inputs as undriven.
-- `current=2.0`: the net's current in amperes, positive, one value per net. KiCad keeps no
-  current per net, so it is kept in the `.kicad_pro` under `"cadgen": {"net_currents": ...}`
-  for `cadgen pcb review` ($pcb-dfm), which warns where the net's narrowest track is thinner
-  than IPC-2221 asks (1 oz outer copper, 10 °C rise). It sets no width: size the track or net class yourself.
-- Every pin must be connected or marked no-connect: KiCad's ERC fails a floating pin.
-
-## Placement
+## Tracks, arcs, vias
 
 ```python
-board.place(part, at=(x, y), rotation=0, side="top")
+t = Track()
+t.start, t.end = Vector2.from_xy_mm(0, 0), Vector2.from_xy_mm(5, 0)
+t.width, t.layer, t.net = from_mm(0.25), BoardLayer.BL_F_Cu, Net(name="LED")
+
+arc = ArcTrack()                                     # start, mid, end on the arc; width, layer, net
+v = Via()
+v.position, v.net = Vector2.from_xy_mm(7.2125, -8), Net(name="GND")
+v.diameter, v.drill_diameter = from_mm(0.6), from_mm(0.3)
+board.create_items([t, arc, v])
 ```
 
-Every part must be placed before the board is written.
+A track is one straight segment: a route with corners is several, end to start (the
+`track()` helper in the skill does this). Tracks and vias carry their own width and size;
+nothing fills them in from a net class.
 
-## Copper
+## Zones: pours and keepouts
 
 ```python
-board.track(net, [(x, y), pin, (x, y)], width=None, layer="F.Cu")   # segments; a pin = its pad centre
-board.arc(net, start=(x, y), mid=(x, y), end=(x, y), width=None, layer="F.Cu")
-board.via(net, at=(x, y), diameter=None, drill=None)                 # through vias
-board.zone(net, layers=["B.Cu"], shape=None, clearance=None, min_thickness=None,
-           priority=0, thermal_gap=None, thermal_width=None, pads="thermal")  # pads: thermal|solid|none
-board.keepout(shape=face, layers=None, tracks=True, vias=True, pads=False, pours=True, footprints=False)
-board.netclass("Power", track_width=0.5, clearance=0.2, via_diameter=0.8, via_drill=0.4)
-board.autoroute(skip=(), layers=None, passes=100, timeout=600)      # Freerouting, at build: routing.md
+pour = Zone()                                        # a copper zone by default (ZoneType.ZT_COPPER)
+pour.outline = rectangle(39, 29)
+pour.layers = [BoardLayer.BL_B_Cu]                   # several layers: one zone on each
+pour.net, pour.name = Net(name="GND"), "GND"
+pour.priority = 1                                    # higher wins where pours overlap
+pour.clearance = from_mm(0.3)                        # this pour's own clearance
+pour.connection.zone_connection = ZoneConnectionStyle.ZCS_FULL   # solid to pads; ZCS_THERMAL is KiCad's default
+pour.connection.thermal_spokes.width = from_mm(0.5)
+
+keepout = Zone()
+keepout.type = ZoneType.ZT_RULE_AREA
+keepout.outline, keepout.layers, keepout.name = rectangle(4, 4, 12, -8), [BoardLayer.BL_F_Cu, BoardLayer.BL_B_Cu], "under the antenna"
+keepout.rule_area_settings.keepout_copper = True     # also keepout_tracks, keepout_vias, keepout_pads, keepout_footprints
+board.create_items([pour, keepout])
 ```
 
-Width and via size default to the net's class (the Default class is `rules=`). KiCad fills
-zones when the board is written. A zone `shape` may not have holes (cover them with a
-keepout). Blind and buried vias are not typed: write them with `board.raw`.
+A new `Zone` carries KiCad's defaults (0.25 mm minimum width, islands removed). After
+`refill_zones()`, `zone.filled_polygons` is `{layer: [PolygonWithHoles]}`: the copper as
+filled, for checks.
 
-## Other items
+## Outline, graphics, text
 
 ```python
-board.hole(at=(x, y), diameter=3.2)      # unplated mounting hole
-board.text("REV A", at=(x, y), layer="F.SilkS", size=1.0, thickness=None, rotation=0)
-board.raw('(gr_text "X" (at 100 100) (layer "F.SilkS") (effects (font (size 1 1))))')
+edge = BoardPolygon()                                # the outline: a closed polygon on Edge.Cuts
+edge.polygons.append(rectangle(40, 30))
+edge.layer = BoardLayer.BL_Edge_Cuts
+edge.attributes.stroke.width = from_mm(0.1)
+
+line = BoardSegment()                                # silkscreen line; BoardCircle, BoardArc, BoardRectangle, BoardBezier likewise
+line.start, line.end = Vector2.from_xy_mm(-5, 3), Vector2.from_xy_mm(5, 3)
+line.layer, line.attributes.stroke.width = BoardLayer.BL_F_SilkS, from_mm(0.15)
+
+label = BoardText()
+label.value, label.position, label.layer = "blinky v1", Vector2.from_xy_mm(0, -4), BoardLayer.BL_F_SilkS
+label.attributes.size = Vector2.from_xy_mm(1, 1)     # 1 mm high; attributes.stroke_width, bold, mirrored, angle...
+label.attributes.stroke_width = from_mm(0.15)
+board.create_items([edge, line, label])
 ```
 
-`board.raw` takes any one item of KiCad's board format, in KiCad's own coordinates (y down,
-page origin, which is NOT the script's origin); KiCad checks it when the board is written.
+A cutout is a hole in the outline polygon (`polygon.add_hole(...)`) or a second closed shape
+on `BL_Edge_Cuts`. A mounting hole is a footprint from KiCad's `MountingHole` library, so
+it carries its pad, clearance and courtyard.
 
-## Custom design rules
-
-`pcb.Rules` apply to the whole board. For a constraint on one part, net, net class or area,
-write a rule in KiCad's own custom-rule language (KiCad's Board Setup > Custom Rules):
+## Design rules
 
 ```python
-# A USB-C receptacle's GND pads sit 0.19 mm from its locating pegs, as the maker drew them.
-board.rule('''(rule "J1 land pattern"
-    (constraint hole_clearance (min 0.15mm))
-    (condition "A.memberOfFootprint('J1') && B.memberOfFootprint('J1')"))''')
-board.rule('''(rule "HV clearance" (constraint clearance (min 1.5mm)) (condition "A.NetClass == 'HV'"))''')
+rules = board.get_design_rules().rules               # BoardDesignRules
+c = rules.constraints                                # MinimumConstraints, every value in nm
+c.min_clearance = from_mm(0.15)
+c.min_track_width = from_mm(0.15)
+c.min_via_size, c.min_through_drill = from_mm(0.5), from_mm(0.3)
+c.min_via_annular_width = from_mm(0.13)
+c.copper_edge_clearance = from_mm(0.3)
+c.hole_clearance, c.hole_to_hole_min = from_mm(0.25), from_mm(0.5)
+c.silk_clearance = from_mm(0.15)
+c.min_silk_text_height, c.min_silk_text_thickness = from_mm(1.0), from_mm(0.15)
+board.set_design_rules(rules)                        # persists into the .kicad_pro; what cadgen pcb drc checks against
 ```
 
-The rules are written to the project's `.kicad_dru`, so KiCad's own editor applies them
-too. KiCad ignores a rules file it cannot parse, every rule in it, without saying so;
-cadgen checks that KiCad read the file and fails the build when it did not. Relax a rule
-only where a part's maker specifies the geometry and the fab can make it, never to make a
-layout mistake pass.
+`rules` also carries `predefined_sizes` (the editor's track and via presets),
+`solder_mask_paste` (mask expansion, minimum web) and `severities`. Set the numbers to the
+fab's limits ([manufacturing](manufacturing.md)).
 
-## Errors you will meet
+## Custom rules
 
-| Message | Fix |
-| --- | --- |
-| `symbol library 'Device' has no 'Resistor'; did you mean ...` | Use a real name; search with `pcb.find_symbols` |
-| `... has pin(s) 3 that footprint ... has no pad for` | The footprint is not the one this symbol's numbering was drawn for |
-| `R4 is not placed` | `board.place(r4, at=...)` |
-| ERC `pin_not_connected` | Connect it or `board.no_connect(pin)` |
-| ERC `power_pin_not_driven` | `power_flag=True` on a net fed from off the board or through a passive part (a fuse, a diode), or connect the output that drives it |
-| DRC `clearance` / `shorting_items` | Move the track or part; the finding gives both items and their positions |
-| DRC `courtyards_overlap` | Parts too close: move one |
-| DRC `copper_edge_clearance` | Copper too near the outline: move it in |
-| DRC `hole_clearance` between one connector's own pads and pegs | The maker's land pattern is tighter than the board rules: a `board.rule` scoped to that part |
-| DRC `starved_thermal` | A pad reaches the pour through too few spokes: a track into the pour, or `pads="solid"` |
-| `KiCad could not read the board's custom rules` | A `board.rule` has a mistake KiCad rejects (an unknown property or function); fix its syntax |
-| `(draft: N unrouted connections)` | Route the listed connections, or `board.autoroute()` |
+KiCad's rule language, for what the board-wide numbers cannot scope: one footprint's pads,
+one net, one layer.
+
+```python
+rule = CustomRule()
+rule.name, rule.condition = "VBUS width", "A.NetName == 'VBUS'"
+width = CustomRuleConstraint.from_type(CustomRuleConstraintType.CRCT_TRACK_WIDTH)
+width.numeric = MinOptMax(min=from_mm(0.5))          # .min/.opt/.max in nm
+rule.constraints = [width]
+
+solid = CustomRule()
+solid.name, solid.condition = "J1 solid to pour", "A.memberOfFootprint('J1') && A.NetName == 'GND'"
+connection = CustomRuleConstraint.from_type(CustomRuleConstraintType.CRCT_ZONE_CONNECTION)
+connection.zone_connection = ZoneConnectionStyle.ZCS_FULL
+solid.constraints = [connection]
+
+response = board.set_custom_design_rules([rule, solid])   # replaces the set; writes <board>.kicad_dru
+assert not response.error_text, response.error_text
+```
+
+Constraint types are KiCad's (`CRCT_CLEARANCE`, `CRCT_HOLE_CLEARANCE`, `CRCT_EDGE_CLEARANCE`,
+`CRCT_TRACK_WIDTH`, `CRCT_ANNULAR_WIDTH`, `CRCT_VIA_DIAMETER`, `CRCT_ZONE_CONNECTION`,
+`CRCT_THERMAL_SPOKE_WIDTH`, `CRCT_LENGTH`, `CRCT_SKEW`, `CRCT_DIFF_PAIR_GAP`, `CRCT_DISALLOW`
+(`.disallow.types`), `CRCT_ASSERTION` (`.assertion_expression`), ...); a rule may also name
+`single_layer` or `severity`. Conditions are KiCad's expressions (`A.memberOfFootprint('U1')`,
+`A.NetClass == 'Power'`, `A.Type == 'Via'`); a condition KiCad cannot parse comes back in
+`response.error_text`, and the DRC reports it too.
+
+## Net classes
+
+Net classes live in the project (`.kicad_pro`): a DRC input (clearance and minimum width per
+class) and the editor's defaults. They set nothing on a track the script draws, so give every
+`Track` and `Via` its size; use a class to make the DRC hold a whole net to it.
+
+```python
+from cadgen.kipy.proto.common.types.project_settings_pb2 import NetClass as NetClassProto
+
+project = board.get_project()
+power = NetClass(NetClassProto(name="Power"))
+power.track_width, power.clearance = from_mm(0.5), from_mm(0.2)
+project.set_net_classes([power])                     # merged into the project's classes (Default stays)
+
+vbus = NetClassAssignment()
+vbus.net, vbus.netclasses = "VBUS", ["Power"]
+project.set_net_class_assignments(NetClassAssignments([vbus]))
+
+board.get_netclass_for_nets([Net(name="VBUS")])      # {"VBUS": the effective class}
+board.get_nets("Power")                              # the nets in a class
+```
+
+`NetClassPatternAssignment` (`.pattern`, `.netclass`) assigns by wildcard (`"V*"`). On
+today's kicad-python, `via_diameter`/`via_drill` cannot be set on a class made this way (the
+setter fails on an empty via stack): size vias directly, or hold them with a
+`CRCT_VIA_DIAMETER` custom rule.
+
+## Exports
+
+Every export is one of KiCad's own jobs, run by the server on the **saved** board file: a
+job on a board that was never saved fails with `Failed to load board`. So, at the end of your
+function, refill and save first (the decorator refills and saves again afterwards, cheaply),
+then export:
+
+```python
+board.refill_zones()
+board.save()
+out = "/work/boards/fab"                             # directories for the multi-file jobs
+result = board.export_gerbers(out, create_gerber_job_file=True)   # every layer, Gerber X2, Protel extensions
+assert result.succeeded, result.message
+board.export_drill(out)                              # Excellon, PTH and NPTH combined: <name>.drl
+settings = PositionExportSettings()
+settings.use_drill_place_file_origin, settings.exclude_dnp = True, True
+board.export_position("/work/boards/fab/blinky.pos.csv", settings)    # <name>.pos-top.csv and -bottom.csv (single_file=True for one)
+board.export_stats("/work/boards/fab/blinky.stats.json", format=StatsOutputFormat.SOF_JSON)
+
+plot = PlotSettings()                                # the picture jobs need the layers named
+plot.layers = [BoardLayer.BL_F_Cu, BoardLayer.BL_B_Cu, BoardLayer.BL_F_SilkS, BoardLayer.BL_Edge_Cuts]
+board.export_svg("/work/boards/fab/blinky.svg", plot, fit_page_to_board=True)
+board.export_png("/work/boards/fab/blinky.png", plot, dpi=300)
+```
+
+Each job returns a `JobResult` (`.succeeded`, `.output_paths`, `.message`): read `.succeeded`,
+a failed job raises nothing. The other jobs are `export_pdf`, `export_dxf`, `export_ps`,
+`export_3d` (`Export3DSettings`: `Board3DFormat.B3D_STEP`, `B3D_GLB`, ...), `export_render`,
+`export_gencad`, `export_ipc2581`, `export_ipc_d356`, `export_odb`. What a fab needs and how
+to hand it over: [manufacturing](manufacturing.md).
+
+## Browsing libraries
+
+Outside the decorator, the same server answers what a library holds and what a footprint
+looks like. A document must be open for the project's `fp-lib-table` to be read, so name a
+board path in the folder that holds the table; nothing is written unless `save()` is called.
+
+```python
+import os, tempfile
+from cadgen.kipy import KiCad
+from cadgen.kipy.proto.common.types.base_types_pb2 import DocumentType
+from cadgen.kipy.proto.common.types.library_types_pb2 import LibraryLoadStatus, LibraryType
+from cadgen.kipy.util.units import to_mm
+from cadgen.kicad.install import find_kicad_cli      # the kicad-cli a build uses
+
+os.environ["KICAD_CONFIG_HOME"] = tempfile.mkdtemp() # an empty settings directory: no user library table
+with KiCad(headless=True, kicad_cli_path=str(find_kicad_cli()), timeout_ms=120000) as kicad:
+    doc = kicad.create_document("/work/boards/blinky.kicad_pcb", DocumentType.DOCTYPE_PCB)
+    kicad.load_all_libraries([LibraryType.LT_FOOTPRINT])
+    for status in kicad.wait_for_libraries([LibraryType.LT_FOOTPRINT], interval_ms=100, timeout_s=300):
+        print(status.nickname, LibraryLoadStatus.Name(status.status), status.error_message)
+    for lib_id in kicad.get_library_footprints(["Resistor_SMD"]):          # every footprint of a library
+        print(f"{lib_id.library}:{lib_id.name}")
+    footprint = kicad.get_library_footprint("Resistor_SMD:R_0603_1608Metric")
+    for pad in footprint.pads:                                              # positions relative to the footprint's origin
+        print(pad.number, to_mm(pad.position.x), to_mm(pad.position.y), pad.pad_type)
+    kicad.close_document(doc)
+```
+
+A name no loaded library has raises `ApiError: none of the requested items were found`.
+`kicad.get_version()` is the server's KiCad version. Starting a server costs about half a
+second; loading a library about a third of a second each, so keep these scripts to the
+libraries the board uses.

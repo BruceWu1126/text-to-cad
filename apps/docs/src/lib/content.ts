@@ -156,19 +156,13 @@ export const skillGroups = [
     name: "PCB",
     path: "skills/pcb",
     summary:
-      "Designs circuit boards in Python as KiCad projects that KiCad checks on every build: schematic, routed board, Gerbers, BOM, 3D for the enclosure.",
+      "Designs circuit boards as Python scripts on KiCad's own API: footprints, placement, hand routing, pours and design rules, built by the KiCad nightly into a board KiCad's DRC checks and exports to Gerbers.",
   },
   {
     name: "PCB DFM",
     path: "skills/pcb-dfm",
     summary:
-      "Reviews a KiCad board before ordering: KiCad's checks, decoupling, track current, sourcing and the fab's limits.",
-  },
-  {
-    name: "Harness",
-    path: "skills/harness",
-    summary:
-      "Designs wiring harnesses in Python as WireViz documents checked against the boards they plug into: pinouts, wire colours, gauges, lengths, BOM.",
+      "Reviews a KiCad board before ordering: KiCad's DRC, decoupling, track width for current, sourcing and the fab's limits.",
   },
   {
     name: "URDF",

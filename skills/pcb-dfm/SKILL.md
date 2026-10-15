@@ -9,59 +9,52 @@ license: MIT
 Provenance: maintained in [earthtojake/text-to-cad](https://github.com/earthtojake/text-to-cad).
 Use the installed local skill files as the runtime source of truth.
 
-Produce a manufacturability review of one KiCad board (`.kicad_pcb` with its
-`.kicad_sch` and `.kicad_pro` beside it), for the fab and assembler it will be
-ordered from. This is a guided review, not a fab's own engineering check. Report
-what was not checked explicitly.
+Produce a manufacturability review of one KiCad board (`.kicad_pcb`, with its
+`.kicad_pro` beside it and its `.kicad_dru` when it has custom rules), for the
+fab and assembler it will be ordered from. This is a guided review, not a fab's
+own engineering check. Report what was not checked explicitly.
 
 The board may come from a `@pcb` script ($pcb) or be drawn in KiCad. Either way
 the KiCad files are what is reviewed; for a `@pcb` board, fixes go into its
-script, never into the KiCad files.
-
-## Setup
-
-Run cadgen through [uv](https://docs.astral.sh/uv/), the same installation $pcb uses:
-
-- `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.21 cadgen`
-- `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.21 python`, for `pcb.read_board`
-
-KiCad 10 must be installed (`kicad-cli` on `PATH`, or named by `CADGEN_KICAD_CLI`);
-$pcb's Setup says how.
+script, never into the KiCad files. This skill runs nothing of its own: its
+evidence is KiCad's DRC and the board read back, both $pcb's tools, plus the
+checklists here.
 
 ## Evidence, in this order
 
-1. **KiCad's own checks.** `cadgen pcb validate board.kicad_pcb` runs KiCad's ERC
-   and DRC (zones refilled, schematic parity) on a copy of the project. Every
-   error blocks ordering. Read every warning too: KiCad's silkscreen, mask and
-   courtyard rules are warnings, and they are what a fab's CAM engineer flags.
-2. **cadgen's review.** `cadgen pcb review board.kicad_pcb` measures what KiCad
-   does not: IC power inputs with no decoupling capacitor or a far one, tracks
-   too thin for a net's `current=`, parts the BOM cannot order, one part number
-   on two footprints. It never fails; each finding is advice you weigh.
+1. **KiCad's DRC.** With $pcb: `cadgen pcb drc board.kicad_pcb` runs KiCad's
+   design rule check on the saved board and prints every violation of the
+   board's rules and custom rules and every unconnected item; it exits 1 on any
+   error. Every error blocks ordering. Read every warning too: KiCad's
+   silkscreen, mask and courtyard rules are warnings, and they are what a fab's
+   CAM engineer flags.
+2. **Measurements.** What KiCad does not check: decoupling distance, track
+   width against current, sourcing. Measure them from the board read back with
+   $pcb's `read_board` (positions, widths, nets, pads: its inspection reference
+   says how) and from the script's part list.
    [references/electrical.md](references/electrical.md) and
-   [references/assembly.md](references/assembly.md) say how to read each one.
-3. **The checklist.** What neither command measures: the fab's limits beyond
-   the board's own rules, panel and edge details, polarity marks, placement
-   rotations. Use the references below, a snapshot
-   (`cadgen pcb snapshot board.kicad_pcb tmp/board.png`) and
-   `pcb.read_board(path)` for positions.
+   [references/assembly.md](references/assembly.md) say what to measure and how
+   to read each result.
+3. **The checklist.** What no command measures: the fab's limits beyond the
+   board's own rules, panel and edge details, polarity marks, placement
+   rotations. Use the references below and a picture of the board, from
+   $pcb's snapshot: `cadgen pcb snapshot board.kicad_pcb tmp/board.png`.
 
-Both commands take `--json` for the full findings document. Each finding names
-its parts by board reference (`U2`, `C8`, `#net:VBUS`); `pcb.read_board(path).resolve(ref)`
-answers where one is and, for a `@pcb` board, the script line that made it.
+Each finding names its parts by board reference (`U2`, `C8`, `#net:VBUS`);
+with $pcb's `python`, `read_board(path).resolve(ref)` answers where one is.
 
 | Area | Reference | Measured by |
 | --- | --- | --- |
 | Fabrication | [references/fabrication.md](references/fabrication.md) | KiCad's DRC against the board's rules; the rest by inspection |
-| Electrical | [references/electrical.md](references/electrical.md) | `cadgen pcb review` (decoupling, track current) |
-| Assembly and sourcing | [references/assembly.md](references/assembly.md) | `cadgen pcb review` (part numbers); BOM and placement by inspection |
+| Electrical | [references/electrical.md](references/electrical.md) | the board read back: decoupling distances, narrowest track per net |
+| Assembly and sourcing | [references/assembly.md](references/assembly.md) | the part list and placement file, by inspection |
 
 ## Rule selection
 
 1. Use the selected fab's own capability page for the board's layer count,
-   copper weight and finish. A `@pcb` board was checked against `fab=`
-   (JLCPCB unless it says otherwise); a board drawn in KiCad was checked against
-   its own Board Setup, which may not be any fab's.
+   copper weight and finish. A `@pcb` board's rules are whatever its script set
+   (`set_design_rules`); a board drawn in KiCad was checked against its own
+   Board Setup. Neither is necessarily any fab's: compare them to the page.
 2. Where the user names no fab, review against JLCPCB's standard service and
    say so.
 3. Record the source, its date and the conditions (layers, copper, finish) with
@@ -84,7 +77,7 @@ Return a concise Markdown report in chat or the user's requested file:
 
 | Item | Evidence | Rule | Result | Fix |
 | --- | --- | --- | --- | --- |
-| `U2` pad 3 to `C8` | `pcb review`: 3.67 mm centre to centre | decoupling within 3 mm (cadgen's review) | review | move `C8` beside pin 3 |
+| `U2` pad 3 to `C8` | measured 3.67 mm centre to centre from the board read back | decoupling within 3 mm (this review's guide) | review | move `C8` beside pin 3 |
 
 **pass** for a measured item within a cited limit; **fail** for a measured
 violation or a KiCad error; **review** for a risk a person decides; **unverified**
@@ -96,9 +89,10 @@ extended parts, a cheaper finish) apart from manufacturing constraints.
 A review request alone does not ask for edits or an order. When the user asks
 for fixes:
 
-- A `@pcb` board: edit its script with $pcb, rebuild, and rerun both commands.
+- A `@pcb` board: edit its script with $pcb, rebuild, and rerun the DRC and the
+  measurements.
 - A board drawn in KiCad: say what to change where (board references and positions);
-  the person edits it in KiCad. Then rerun both commands.
+  the person edits it in KiCad. Then rerun the DRC and the measurements.
 
 Recheck neighbours of every fix: a moved capacitor can open a clearance or
 silkscreen finding elsewhere. Never order on the user's behalf.
