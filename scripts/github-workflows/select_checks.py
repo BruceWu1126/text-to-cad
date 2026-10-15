@@ -302,6 +302,8 @@ RULES: tuple[Rule, ...] = (
     Rule(("scripts/test/test-docs.sh", "scripts/brand/**"), select(flags=["docs"])),
     Rule(("scripts/test/test-viewer-launch.sh", "scripts/test/test-viewer-browser.sh"), select(flags=["web_viewer"])),
     Rule(("scripts/test/test-installed.sh",), select(flags=["packaging"])),
+    # The vendoring script writes cadgen/kipy; what it can break is the tree's integrity test.
+    Rule(("scripts/vendor/**",), policy("test_kipy_vendor.py")),
     # The suite that needs KiCad installed, and its runner: its own job.
     Rule((f"{TOOL_SUITES['kicad']}/**", "scripts/test/test-kicad.sh"), select(flags=["kicad"])),
     Rule(("scripts/test/test.sh",), NOTHING),  # chains the runners for a local run; CI calls them itself
