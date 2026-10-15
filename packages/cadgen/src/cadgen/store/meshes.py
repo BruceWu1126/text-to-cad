@@ -1,8 +1,8 @@
 """A part's display mesh: the GLB body cadgen stores for it, and its codec.
 
 The kernel-free half of the store's mesh format: glTF 2.0 binary (GLB), its
-validation and its encoder. cadgen is the only producer -- its tessellator, run
-on a component's exact BREP (``cadgen/_internal/tessellate.py``) -- and every
+validation and its encoder. cadgen is the only producer -- OCCT's mesher, run on
+a component's exact BREP (``cadgen/_internal/tessellate.py``) -- and every
 consumer only reads: the CAD Viewer, snapshots and mesh exports draw the same
 stored triangles. A part's record (``cadgen.store.parts``) names the body and
 what a reader sizes it by; this module only writes and reads the bytes.
@@ -26,16 +26,12 @@ views every array in place:
   the canonical JSON for those values: a reader rebuilds it and requires it, so
   nothing but the tables grows with the component.
 
-A face the mesh can resolve that no mesher could bring right -- its geometry
-raising inside OCCT, its trim unreadable, a mesh of it that stayed open or short
-of its area -- leaves the component meshed without it: its face range is empty,
-and ``extras.cadgen.unmeshedFaces`` names it among the ordinals of every such
-face (present only when there is one), so each reader says what it does not draw
-or write; the part's record counts them (``unmeshedFaceCount``, likewise). A face
-that is drawn though its triangles still lie off its exact surface past the
-verification bound, after every repair, is named in ``unverifiedFaces`` the same
-way (``unverifiedFaceCount`` in the record): every reader says it is drawn off its
-surface.
+A face the mesh can resolve that no mesher could cover -- OCCT refused it and
+its own tessellation (``cadgen/_internal/face_fallback.py``) did not cover its
+area -- leaves the component meshed without it: its face range is empty, and
+``extras.cadgen.unmeshedFaces`` names it among the ordinals of every such face
+(present only when there is one), so each reader says what it does not draw or
+write; the part's record counts them (``unmeshedFaceCount``, likewise).
 """
 
 from __future__ import annotations
@@ -74,14 +70,11 @@ _ARRAY_BUFFER, _ELEMENT_ARRAY_BUFFER = 34962, 34963
 _TABLE_COLUMNS = 4
 # A part key (``cadgen.store.parts.part_key``): what a body says it is.
 _PART = re.compile(r"[0-9a-f]{64}-v[0-9]+")
-# ``extras.cadgen``'s values, in the order the writer spells them -- ``unmeshedFaces`` and
-# ``unverifiedFaces`` after them, each only in a body that has one; the class names and the
-# table references follow them.
+# ``extras.cadgen``'s values, in the order the writer spells them -- ``unmeshedFaces``
+# last, and only in a body that has one; the class names and the table references follow
+# them.
 _CAD_VALUES = ("part", "bounds", "faceColors")
 _UNMESHED = "unmeshedFaces"
-_UNVERIFIED = "unverifiedFaces"
-_NAMED = (_UNMESHED, _UNVERIFIED)
-_COUNTS = {_UNMESHED: "unmeshedFaceCount", _UNVERIFIED: "unverifiedFaceCount"}
 
 
 def _integer(value: Any) -> bool:
@@ -200,14 +193,8 @@ class MeshPayload:
 
     @property
     def unmeshed_faces(self) -> list[int]:
-        """The faces no mesher could bring right, which the body does not draw."""
+        """The faces no mesher could cover, which the body does not draw."""
         return list(self.cad.get(_UNMESHED, []))
-
-    @property
-    def unverified_faces(self) -> list[int]:
-        """The faces the body draws though their triangles lie off their exact surface past the
-        verification bound."""
-        return list(self.cad.get(_UNVERIFIED, []))
 
 
 def _validate_cad(cad: Any) -> None:
@@ -225,24 +212,18 @@ def _validate_cad(cad: Any) -> None:
     palette = cad.get("faceColors")
     if type(palette) is not list or not all(map(_color, palette)):
         raise ValueError("invalid tessellation face colours")
-    for name in _NAMED:
-        if name not in cad:
-            continue
-        named = cad[name]
-        if (type(named) is not list or not named or not all(_integer(ordinal) and ordinal > 0 for ordinal in named)
-                or any(later <= earlier for earlier, later in zip(named, named[1:]))):
-            raise ValueError(f"invalid tessellation {name}")
-    if _UNMESHED in cad and _UNVERIFIED in cad and set(cad[_UNMESHED]) & set(cad[_UNVERIFIED]):
-        raise ValueError("a tessellation face is both unmeshed and unverified")
+    if _UNMESHED in cad:
+        unmeshed = cad[_UNMESHED]
+        if (type(unmeshed) is not list or not unmeshed or not all(_integer(ordinal) and ordinal > 0 for ordinal in unmeshed)
+                or any(later <= earlier for earlier, later in zip(unmeshed, unmeshed[1:]))):
+            raise ValueError("invalid tessellation unmeshed faces")
 
 
 def _cad_values(cad: dict) -> dict:
-    """``extras.cadgen``'s values, ``unmeshedFaces`` and ``unverifiedFaces`` among them where the
-    body has them."""
+    """``extras.cadgen``'s values, ``unmeshedFaces`` among them where the body has it."""
     values = {name: cad[name] for name in _CAD_VALUES}
-    for name in _NAMED:
-        if name in cad:
-            values[name] = cad[name]
+    if _UNMESHED in cad:
+        values[_UNMESHED] = cad[_UNMESHED]
     return values
 
 
@@ -309,13 +290,12 @@ def _payload_json(payload: bytes) -> tuple[dict, dict, dict, int, int]:
 
 def body_facts(payload: bytes) -> dict:
     """What a part's record says of a body (``cadgen.store.parts``), read off its framing and
-    JSON chunk: ``{part, byteLength, decodedBytes, <counts>, unmeshedFaceCount?,
-    unverifiedFaceCount?}``. ValueError for anything that is not a body."""
+    JSON chunk: ``{part, byteLength, decodedBytes, <counts>, unmeshedFaceCount?}``.
+    ValueError for anything that is not a body."""
     _, cad, counts, _, _ = _payload_json(payload)
     facts = {"part": cad["part"], "byteLength": len(payload), "decodedBytes": decoded_bytes(counts), **counts}
-    for name in _NAMED:
-        if name in cad:
-            facts[_COUNTS[name]] = len(cad[name])
+    if _UNMESHED in cad:
+        facts["unmeshedFaceCount"] = len(cad[_UNMESHED])
     return facts
 
 
@@ -365,12 +345,10 @@ def decode_payload(payload: bytes) -> MeshPayload:
             raise ValueError(f"incomplete tessellation {name} table")
     if len(faces) and int(faces[:, 3].max()) > len(cad["faceColors"]):
         raise ValueError("a tessellation face colour is not in its palette")
-    if _UNMESHED in cad or _UNVERIFIED in cad:
-        drawn = {int(ordinal): bool(count) for ordinal, _start, count, _ref in faces.tolist()}
-        if any(drawn.get(ordinal, True) for ordinal in cad.get(_UNMESHED, [])):
+    if _UNMESHED in cad:
+        empty = {int(ordinal) for ordinal, _start, count, _ref in faces.tolist() if not count}
+        if not set(cad[_UNMESHED]) <= empty:
             raise ValueError("a tessellation's unmeshed face is not an empty face of its table")
-        if not all(drawn.get(ordinal, False) for ordinal in cad.get(_UNVERIFIED, [])):
-            raise ValueError("a tessellation's unverified face is not a drawn face of its table")
     if len(edges) and (int(edges[:, 2].min()) < 2 or int(edges[:, 3].max()) >= len(EDGE_CLASSES)):
         raise ValueError("invalid tessellation edge polyline or class")
     return MeshPayload(cad, counts, positions, normals, flat, faces, edges, points)
@@ -384,8 +362,7 @@ def _array(value: Any, dtype: str, columns: int) -> np.ndarray:
 
 
 def encode_payload(*, part: str, positions, normals, indices, face_ranges: list[dict],
-                   edges: list[tuple[int, str, Any]], bounds: dict, unmeshed_faces: Any = (),
-                   unverified_faces: Any = ()) -> bytes:
+                   edges: list[tuple[int, str, Any]], bounds: dict, unmeshed_faces: Any = ()) -> bytes:
     """One part's GLB body.
 
     ``part`` is the part's key (``cadgen.store.parts.part_key``); ``positions`` and
@@ -395,8 +372,7 @@ def encode_payload(*, part: str, positions, normals, indices, face_ranges: list[
     indexStart, indexCount, color}`` in ordinal order, covering the indices; ``edges``
     are ``(ord, class, polyline)`` in ordinal order, each polyline float32 xyz of at
     least two points; ``unmeshed_faces`` are the ordinals of the empty faces no mesher
-    could bring right, ``unverified_faces`` those of the drawn faces still off their
-    surface. The result is validated before it is returned.
+    could cover. The result is validated before it is returned.
     """
     import numpy as np
 
@@ -433,8 +409,6 @@ def encode_payload(*, part: str, positions, normals, indices, face_ranges: list[
     }
     if unmeshed_faces:
         cad[_UNMESHED] = sorted(int(ordinal) for ordinal in unmeshed_faces)
-    if unverified_faces:
-        cad[_UNVERIFIED] = sorted(int(ordinal) for ordinal in unverified_faces)
     counts = {"vertexCount": len(positions), "indexCount": len(flat), "faceCount": len(faces),
               "edgeCount": len(table), "edgePointCount": len(points)}
     gltf = canonical_gltf(cad, counts)
@@ -459,11 +433,6 @@ def unmeshed_faces(payload: bytes) -> list[int]:
     return list(_payload_json(payload)[1].get(_UNMESHED, []))
 
 
-def unverified_faces(payload: bytes) -> list[int]:
-    """The faces a valid body draws off their surface (``unverifiedFaces``), read off its JSON chunk."""
-    return list(_payload_json(payload)[1].get(_UNVERIFIED, []))
-
-
 def placements(rows: Any) -> dict[str, list[tuple[str, str]]]:
     """Which occurrences of ``rows`` (a tree's ``occurrences``, or a selector's rows: each with
     ``component``, ``id`` and ``name``) place each component: ``{cid: [(ref, name)]}``."""
@@ -481,29 +450,14 @@ def placed_parts(placed: list[tuple[str, str]]) -> str:
     return where + (f" and {len(placed) - 3} more" if len(placed) > 3 else "")
 
 
-def _named_faces(faces: list[str]) -> tuple[str, str, str]:
-    """``faces`` as a reader names them (their tokens, ``cadgen.store.parts.unmeshed_face_names``)."""
-    named = ", ".join(str(face) for face in faces[:8]) + (", ..." if len(faces) > 8 else "")
-    noun, them = ("face", "it") if len(faces) == 1 else ("faces", "them")
-    return named, noun, them
-
-
 def unmeshed_warning(placed: list[tuple[str, str]], faces: list[str], consequence: str) -> str:
     """What a reader says of a component whose mesh leaves ``faces`` undrawn: the
-    occurrences that place it (``[(ref, name)]``), the faces, and ``consequence``, whose
-    ``{them}`` names the faces as one or several."""
-    named, noun, them = _named_faces(faces)
+    occurrences that place it (``[(ref, name)]``), the faces as a reader names them (their
+    tokens, ``cadgen.store.parts.unmeshed_face_names``), and ``consequence``, whose ``{them}``
+    names the faces as one or several."""
+    named = ", ".join(str(face) for face in faces[:8]) + (", ..." if len(faces) > 8 else "")
+    noun, them = ("face", "it") if len(faces) == 1 else ("faces", "them")
     return f"{placed_parts(placed)}: {len(faces)} {noun} ({named}) could not be meshed, so {consequence.format(them=them)}"
-
-
-def unverified_warning(placed: list[tuple[str, str]], faces: list[str]) -> str:
-    """What a reader says of a component whose mesh draws ``faces`` off their exact surface: the
-    occurrences that place it (``[(ref, name)]``) and the faces, which every reader draws, writes
-    and counts as they are."""
-    named, noun, them = _named_faces(faces)
-    its = "its" if len(faces) == 1 else "their"
-    return (f"{placed_parts(placed)}: {len(faces)} {noun} ({named}) could not be brought within tolerance of "
-            f"{its} exact surface, so {them} {'is' if them == 'it' else 'are'} drawn off it")
 
 
 def failed_part(placed: list[tuple[str, str]], reason: str, *, component: str = "") -> str:

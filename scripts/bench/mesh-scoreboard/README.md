@@ -2,9 +2,9 @@
 
 How well cadgen meshes, measured: every solid of a STEP corpus, scored on the
 properties a display mesh must have (`packages/cadgen/README.md`, law 1) and on
-cost. A pull request that changes how a part is meshed -- the mesher, the
-verifier and its repairs under `packages/cadgen/native/tessellate/` and
-`cadgen/_internal/tessellate.py`, or `cadgen/tessellation_policy.py` -- opens
+cost. A pull request that changes how a part is meshed -- the mesher and its
+checks and repairs (`cadgen/_internal/tessellate.py`, `cadgen/_internal/face_fallback.py`),
+or `cadgen/tessellation_policy.py` -- opens
 with this table for `main` and the branch (`CONTRIBUTING.md`, "Performance
 changes"). It is a manual benchmark: its output goes under `tmp/` and is never
 committed, and it does not run in CI. The CI contract test

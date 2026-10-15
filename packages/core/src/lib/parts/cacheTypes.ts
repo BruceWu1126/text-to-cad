@@ -14,8 +14,6 @@ export interface TessellatedComponent {
   bounds: { min: number[]; max: number[] };
   /** The faces no mesher could cover: their ranges are empty and the mesh does not draw them. */
   unmeshedFaces: readonly number[];
-  /** The faces drawn though they could not be brought within tolerance of their exact surface. */
-  unverifiedFaces: readonly number[];
 }
 export interface TessellationCacheEntry {
   component: TessellatedComponent;
@@ -39,8 +37,6 @@ export interface PartRow {
     edgePointCount: number;
     /** How many faces the mesh leaves undrawn, no mesher having covered them; absent when none. */
     unmeshedFaceCount?: number;
-    /** How many faces the mesh draws off their exact surface; absent when none. */
-    unverifiedFaceCount?: number;
   };
   selectors: { object: string; byteLength: number; faceCount: number; edgeCount: number; vertexCount: number };
 }

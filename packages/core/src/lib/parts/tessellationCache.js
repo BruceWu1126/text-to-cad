@@ -44,15 +44,10 @@ const NODE_SCALE = Object.freeze([0.001, 0.001, 0.001]);
 // `extras.cadgen`'s values, in the order cadgen writes them; the class names and the
 // table references follow them.
 const CAD_VALUES = Object.freeze(["part", "bounds", "faceColors"]);
-// The faces the body names (cadgen/store/meshes.py): the ones no mesher could cover, which it
-// leaves undrawn (`unmeshedFaces`), and the ones drawn though off their exact surface
-// (`unverifiedFaces`) -- each a value only a body with one has, and a count only its record has.
+// The faces no mesher could cover, which the body leaves undrawn: a value only a body with one
+// has (cadgen/store/meshes.py `unmeshedFaces`), and a count only its record has.
 const UNMESHED = "unmeshedFaces";
-const UNVERIFIED = "unverifiedFaces";
-const NAMED = Object.freeze([UNMESHED, UNVERIFIED]);
 const UNMESHED_COUNT = "unmeshedFaceCount";
-const UNVERIFIED_COUNT = "unverifiedFaceCount";
-const NAMED_COUNTS = Object.freeze({ [UNMESHED]: UNMESHED_COUNT, [UNVERIFIED]: UNVERIFIED_COUNT });
 const COUNT_FIELDS = Object.freeze(["vertexCount", "indexCount", "faceCount", "edgeCount", "edgePointCount"]);
 const SHA256_RE = /^[0-9a-f]{64}$/;
 // A part's key (cadgen/store/parts.py `part_key`): a digest and the version of its derivation.
@@ -195,16 +190,12 @@ function validCad(cad) {
   if (!isObject(bounds) || Object.keys(bounds).length !== 2
     || !finiteTuple(bounds.min, 3) || !finiteTuple(bounds.max, 3)
     || bounds.min.some((value, index) => value > bounds.max[index])) return false;
-  for (const name of NAMED) {
-    if (!Object.hasOwn(cad, name)) continue;
-    const named = cad[name];
-    if (!Array.isArray(named) || !named.length
-      || named.some((ord, index) => !Number.isSafeInteger(ord) || ord < 1 || (index && ord <= named[index - 1]))) {
+  if (Object.hasOwn(cad, UNMESHED)) {
+    const unmeshed = cad[UNMESHED];
+    if (!Array.isArray(unmeshed) || !unmeshed.length
+      || unmeshed.some((ord, index) => !Number.isSafeInteger(ord) || ord < 1 || (index && ord <= unmeshed[index - 1]))) {
       return false;
     }
-  }
-  if (NAMED.every((name) => Object.hasOwn(cad, name)) && cad[UNMESHED].some((ord) => cad[UNVERIFIED].includes(ord))) {
-    return false; // a face is left undrawn or drawn off its surface, not both
   }
   return Array.isArray(cad.faceColors) && cad.faceColors.every((color) => finiteTuple(color, 4));
 }
@@ -274,7 +265,7 @@ function decodeBody(bytes, part) {
     || (counts.edgeCount === 0) !== (counts.edgePointCount === 0)) return null;
   const values = {};
   for (const name of CAD_VALUES) values[name] = cad[name];
-  for (const name of NAMED) if (Object.hasOwn(cad, name)) values[name] = cad[name];
+  if (Object.hasOwn(cad, UNMESHED)) values[UNMESHED] = cad[UNMESHED];
   const canonical = canonicalMeshGltf(values, counts);
   if (!sameJson(gltf, canonical) || binLength !== (canonical.buffers?.[0].byteLength ?? 0)) return null;
 
@@ -300,31 +291,20 @@ function decodeBody(bytes, part) {
     faceColors: cad.faceColors,
     bounds: cad.bounds,
     unmeshedFaces: Object.freeze([...(cad[UNMESHED] || [])]),
-    unverifiedFaces: Object.freeze([...(cad[UNVERIFIED] || [])]),
   };
   const palette = cad.faceColors.length;
   if (!validTable(component.faceTable, indexCount, (count, color) => count % 3 === 0 && color <= palette)
     || !validTable(component.edgeTable, counts.edgePointCount,
       (count, edgeClass) => count >= 2 && edgeClass < MESH_EDGE_CLASSES.length)) return null;
-  if (component.unmeshedFaces.length || component.unverifiedFaces.length) {
-    // Each named face is a face of the table: an undrawn one empty, one drawn off its surface drawn.
-    const drawn = new Map();
+  if (component.unmeshedFaces.length) {
+    // Each one is a face of the table, and an empty one.
+    const empty = new Set();
     for (let row = 0; row < component.faceTable.length; row += MESH_TABLE_COLUMNS) {
-      drawn.set(component.faceTable[row], component.faceTable[row + 2] > 0);
+      if (!component.faceTable[row + 2]) empty.add(component.faceTable[row]);
     }
-    if (!component.unmeshedFaces.every((ord) => drawn.get(ord) === false)
-      || !component.unverifiedFaces.every((ord) => drawn.get(ord) === true)) return null;
+    if (!component.unmeshedFaces.every((ord) => empty.has(ord))) return null;
   }
   return { component, part: cad.part, counts };
-}
-
-// The counts a body's record carries for the faces it names: one per non-empty list.
-function namedCounts(component) {
-  const counts = {};
-  for (const name of NAMED) {
-    if (component[name].length) counts[NAMED_COUNTS[name]] = component[name].length;
-  }
-  return counts;
 }
 
 // A record's facts about one of its objects, exactly `fields` (and `optional`, when present).
@@ -346,9 +326,8 @@ function objectFacts(value, fields, optional = []) {
 
 /**
  * A part's row: its key and its record (cadgen/store/parts.py), checked and frozen —
- * `{part, glb: {object, byteLength, decodedBytes, <counts>, unmeshedFaceCount?,
- * unverifiedFaceCount?}, selectors: {object, byteLength, faceCount, edgeCount, vertexCount}}`.
- * Null for anything else.
+ * `{part, glb: {object, byteLength, decodedBytes, <counts>, unmeshedFaceCount?}, selectors:
+ * {object, byteLength, faceCount, edgeCount, vertexCount}}`. Null for anything else.
  */
 export function partRow(part, record) {
   try {
@@ -356,17 +335,11 @@ export function partRow(part, record) {
     const keys = Object.keys(record).filter((key) => key !== "part");
     if (keys.length !== 2 || !keys.includes("glb") || !keys.includes("selectors")
       || (record.part !== undefined && record.part !== part)) return null;
-    const glb = objectFacts(record.glb, GLB_FIELDS, Object.values(NAMED_COUNTS));
+    const glb = objectFacts(record.glb, GLB_FIELDS, [UNMESHED_COUNT]);
     const selectors = objectFacts(record.selectors, SELECTOR_FIELDS);
     if (!glb || !selectors || glb.byteLength < 20 || glb.byteLength % 4 !== 0 || selectors.byteLength < 1
       || glb.decodedBytes !== tessellationDecodedBytes(glb)) return null;
-    let named = 0;
-    for (const count of Object.values(NAMED_COUNTS)) {
-      if (!Object.hasOwn(glb, count)) continue;
-      if (glb[count] < 1 || glb[count] > glb.faceCount) return null;
-      named += glb[count];
-    }
-    if (named > glb.faceCount) return null;
+    if (Object.hasOwn(glb, UNMESHED_COUNT) && (glb[UNMESHED_COUNT] < 1 || glb[UNMESHED_COUNT] > glb.faceCount)) return null;
     return Object.freeze({ part, glb: Object.freeze(glb), selectors: Object.freeze(selectors) });
   } catch {
     return null;
@@ -382,7 +355,7 @@ export function partMeshMatches(bytes, row) {
     const body = decodeBody(bytes, row?.part);
     if (!body) return false;
     const facts = { byteLength: bytes.byteLength, decodedBytes: tessellationDecodedBytes(body.counts), ...body.counts,
-      ...namedCounts(body.component) };
+      ...(body.component.unmeshedFaces.length ? { [UNMESHED_COUNT]: body.component.unmeshedFaces.length } : {}) };
     const { object: _object, ...expected } = row.glb;
     return sameJson(facts, expected);
   } catch {
@@ -394,9 +367,8 @@ export function partMeshMatches(bytes, row) {
  * One stored mesh, decoded: `component` holds its sections viewed in place -- `positions` and
  * `normals` (f32 xyz), `indices` (u16 or u32), `faceTable` and `edgeTable` (u32 rows of
  * MESH_TABLE_COLUMNS), `edgePoints` (f32 xyz) -- with its face colour palette and bounds, and
- * `unmeshedFaces`, the faces no mesher could cover, which it does not draw, and `unverifiedFaces`,
- * the faces it draws though they could not be brought within tolerance of their exact surface.
- * `meshFaceRanges` and `meshEdgePolylines` read the tables as objects. Null for anything that is not a valid body of
+ * `unmeshedFaces`: the faces no mesher could cover, which it does not draw. `meshFaceRanges` and
+ * `meshEdgePolylines` read the tables as objects. Null for anything that is not a valid body of
  * `part` (any part when it is not given): a corrupt entry is a miss, never an error.
  */
 export function decodeComponentTessellation(bytes, { part } = {}) {

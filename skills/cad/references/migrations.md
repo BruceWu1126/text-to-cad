@@ -109,10 +109,9 @@ changes.
 ## Meshes come from cadgen in 0.8
 
 cadgen 0.8 meshes every component itself -- OCCT's triangulation at one display
-tolerance, every face of it verified against the exact geometry and repaired by
-cadgen's native mesh library -- and every client draws those meshes: the CAD
-Viewer, snapshots and the CAD app no longer tessellate, and nothing cadgen runs
-needs Node.
+tolerance, each face checked against its exact surface and meshed again where it
+strays -- and every client draws those meshes: the CAD Viewer, snapshots and the
+CAD app no longer tessellate, and nothing cadgen runs needs Node.
 
 - `@step` takes no mesh tolerance: delete `mesh_tolerance=` and
   `mesh_angular_tolerance=` from it (`@step got an unexpected keyword argument`).

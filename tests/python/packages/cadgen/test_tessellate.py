@@ -1,490 +1,764 @@
-"""cadgen's mesh library on its own: the tessellator it meshes a face with where OCCT does not, and
-the evaluation every verification stands on.
+"""cadgen's mesher on what an ordinary part is not, and the STL cut from it.
 
-Every display mesh is ``cadgen._internal.tessellate``'s: OCCT's triangulation, verified and repaired
-by cadgen's native library, which also meshes the faces OCCT refuses or the cost guard keeps from it.
-Here that tessellator is made to mesh whole solids (every face guarded) and held to the contract: a
-solid comes out closed (each edge of the welded mesh used by two triangles), wound outward, with its
-volume and each face's area those of the exact BREP; the faults it fixes in what it was ported from
-stay fixed: a freeform pole, a tip whose row is one point, a straight run of trim through a corner, a
-trim point or corner the grid moved off its trim, a row of slots in line, a hole crossing a grid
-cell's side, and a face narrower than its tolerance drawn as nothing. The B-splines, conics and
-swept surfaces the library evaluates itself evaluate as OCCT evaluates them, point and normal; a
-face's grid and its pinning are driven directly, through the library's probe of them, with its trim
-given; and three.js's earcut is the one it triangulates with, triangle for triangle.
+A component of one vertex, a failure inside OCCT, a face OCCT's pass leaves
+empty -- meshed again whole, refused and tessellated over its own parameters, or
+left empty when it is smaller than the mesh resolves --, the singular points of a
+cone or a sphere, a free edge or vertex beside a solid, a mirrored placement inside
+a component: each once broke a mesh, the export cut from it or the view drawing it.
+Shapes are built here; meshing needs no store, except where a whole tree is meshed.
+OCCT refuses a face for what a real model's booleans leave in it, and a shape small
+enough to build here leaves nothing it refuses, so a test that needs a refusal makes
+OCCT refuse.
 """
 
 from __future__ import annotations
 
-import ctypes
-import math
+import collections
+import os
 import unittest
+from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
 from tests.python.support.paths import add_repo_path
 
 add_repo_path("packages/cadgen/src")
+# The module, not its test class: imported, the class would run here as well.
+from tests.python.packages.cadgen import test_mesh_export_manifold as exported  # noqa: E402
+from tests.python.support.tmp_root import generated_cad_directory  # noqa: E402
 
-# Three.js's ShapeUtils.triangulateShape on each contour (three 0.186.1): a square with a hexagonal
-# hole, and the L of a cylinder face whose notch puts a corner on a straight run of its trim.
-HEXAGON = [[5 + 2 * math.cos(-i * math.pi / 3), 5 + 2 * math.sin(-i * math.pi / 3)] for i in range(6)]
-THREE_HOLE = [[0, 7, 8], [6, 7, 0], [3, 0, 8], [5, 6, 0], [2, 3, 8], [5, 0, 1], [2, 8, 9], [4, 5, 1], [1, 2, 9],
-              [9, 4, 1]]
-NOTCHED = [[1.614573175190183, 205.20562748477136], [1.7074157383752555, 205.20562748477136],
-           [1.8002583015603282, 205.20562748477136], [1.8931008647454006, 205.20562748477136],
-           [1.9859434279307142, 205.20562748477136], [1.9859434279307142, 202.20562748477136],
-           [1.9682306659351254, 202.20562748477138], [1.9682306659351223, 176.70562748477136],
-           [1.9004099376670602, 176.70562748477136], [1.8325892093989973, 176.70562748477136],
-           [1.7647684811309343, 176.70562748477136], [1.6969477528628756, 176.70562748477136],
-           [1.6969477528628785, 202.20562748477136], [1.6351668196084361, 202.20562748477136],
-           [1.614573175190183, 202.20562748477136]]
-THREE_NOTCHED = [[1, 0, 14], [12, 11, 10], [8, 7, 6], [6, 5, 4], [2, 1, 14], [12, 10, 9], [9, 8, 6], [6, 4, 3],
-                 [3, 2, 14], [12, 9, 6], [6, 3, 14], [13, 12, 6], [6, 14, 13]]
-# An F-14D tail's tip: three rulings' curves between one tip and one end (their poles between the
-# two), of which each pair of neighbours spans a face.
-TIP = (10197.13014247, -6822.580175597, 188.88269353019)
-END = (10718.79328787, -6822.580175597, 162.36234147519)
-RULINGS = [
-    [(10242.58769661, -6887.709318404, 141.43950596893), (10381.30838298, -6797.190512061, 177.72103638234),
-     (10363.24001077, -6933.381924877, 109.39172175973), (10539.37240266, -6798.507714813, 169.98554112507),
-     (10544.50776362, -6871.679130125, 136.80404909617), (10654.02536321, -6845.015407374, 147.8514997435)],
-    [(10242.68511232, -6872.008417081, 132.26548425969), (10381.27040685, -6803.311283572, 181.29739735446),
-     (10363.40574044, -6906.670574828, 93.784305332551), (10539.33639671, -6804.310943829, 173.37636232041),
-     (10544.58120248, -6859.84268016, 129.88802263952), (10654.0589203, -6839.606870656, 144.69129688358)],
-    [(10242.75338225, -6853.434926026, 125.83623558883), (10381.2437928, -6810.551893048, 183.80374786842),
-     (10363.5218855, -6875.072196431, 82.846467544563), (10539.31116338, -6811.175914192, 175.75268465245),
-     (10544.63266918, -6845.840668872, 125.04120024116), (10654.08243744, -6833.20880431, 142.47659425032)],
-]
+CHORD, ANGLE = 1.5e-3, 0.35
+PART = "1" * 64 + "-v1"
+IDENTITY = [1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0]
 
 
-def _part() -> str:
-    """A part key the meshes name: any will do, at this cadgen's part version."""
-    from cadgen.store.parts import PART_VERSION
-
-    return "0" * 64 + f"-v{PART_VERSION}"
-
-
-def _mesh(shape, *, library: bool = True, report: dict | None = None):
-    """The shape's display mesh as the store holds it, decoded -- every face meshed by the library's
-    own tessellator when ``library`` (the fallback, made the primary for the test), else as the store
-    meshes it."""
-    from cadgen._internal.selector_table import build_selector_table
-    from cadgen._internal.tessellate import _mesh_component
+def _facts(topods) -> dict:
     from cadgen._internal.topology_extract import extract_topology_facts
-    from cadgen.store.meshes import decode_payload
-    from cadgen.tessellation_policy import DISPLAY_TESSELLATION
+
+    return extract_topology_facts(topods)
+
+
+def _mesh(shape, *, chord=CHORD, angle=ANGLE, table=None):
+    """``shape`` meshed as the store meshes a component, from its selector table (``table``
+    when given): its GLB body, decoded."""
+    from cadgen._internal.mesh_formats import decode_tessellation
+    from cadgen._internal.tessellate import mesh_component
+    from cadgen._internal.selector_table import build_selector_table
 
     topods = getattr(shape, "wrapped", shape)
-    table = build_selector_table(topods, extract_topology_facts(topods))
-    body = _mesh_component(topods, table, {}, part=_part(), chord=DISPLAY_TESSELLATION["chordTolerance"],
-                           angle=DISPLAY_TESSELLATION["angleTolerance"], report=report,
-                           guard=(lambda _ordinal: True) if library else None)
-    return decode_payload(body)
+    table = build_selector_table(topods, _facts(topods)) if table is None else table
+    body = mesh_component(topods, table, {}, part=PART, chord=chord, angle=angle)
+    return body, decode_tessellation(body)
 
 
-def _odd_edges(positions: np.ndarray, triangles: np.ndarray) -> int:
-    """Edges of the mesh welded where its float32 vertices are one point that an odd number of
-    triangles use: a crack, a T-junction or a hole."""
-    _, label = np.unique(np.ascontiguousarray(positions, np.float32).view(np.dtype((np.void, 12))).ravel(),
-                         return_inverse=True)
-    welded = label.ravel()[triangles]
-    edges = np.sort(np.concatenate([welded[:, [0, 1]], welded[:, [1, 2]], welded[:, [2, 0]]]), axis=1)
-    _keys, counts = np.unique(edges[:, 0] * (int(label.max()) + 1) + edges[:, 1], return_counts=True)
-    return int((counts % 2).sum())
+def _compound(*shapes):
+    from OCP.BRep import BRep_Builder
+    from OCP.TopoDS import TopoDS_Compound
+
+    compound, builder = TopoDS_Compound(), BRep_Builder()
+    builder.MakeCompound(compound)
+    for shape in shapes:
+        builder.Add(compound, getattr(shape, "wrapped", shape))
+    return compound
 
 
-def _probe_face(surface: str, box, loop, lines=(), *, chord_limit=math.inf, angle_limit=math.inf):
-    """One face's grid and its vertices pinned to its component's edges, by the library's probe of
-    them (``cadgen_tessellate_pinned``), its trim given rather than sampled: (each vertex's (u, v),
-    the edges it is pinned to, the triangles). ``surface`` is "plane", the XY plane in its own
-    parameters, or "flat", the same plane as a surface the library has no formula for, which it
-    snaps a vertex on as it does on a curved one. ``loop`` is its points (u, v, edge, fractions):
-    the segment from each to the next runs along that model edge (0 for none) at those fractions
-    (f0, f1) of its polyline, or None where it runs along no shared edge; ``lines`` each edge's
-    straight 3D curve (start, end), by ordinal, sampled to 1e-3."""
-    from cadgen._internal import tessellate as T
-
-    model = T._Model(1, max([len(lines)] + [point[2] for point in loop]))
-    kind = T._ANALYTIC["plane"] if surface == "plane" else T._S_HOST
-    model.face_i[0] = [1, 0, kind, -1, 0, 0, 0, 0]
-    model.face_d[0] = [*box, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    model.surfaces[0] = (lambda u, v: (u, v, 0.0), lambda u, v, _box: (0.0, 0.0, 1.0))
-    for ordinal, line in enumerate(lines, 1):
-        if line is not None:
-            start, end = line
-            model.edge_i[ordinal - 1] = [T._C_LINE, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0]
-            model.edge_d[ordinal - 1] = [0.0, 1.0, *start, *[0.0] * 6, *(b - a for a, b in zip(start, end)), 0.0,
-                                         0.0]
-    failure: list = []
-    request, keep = T._request(model, chord=1e-3, angle=math.inf, deflection=1e-3, failure=failure)
-    probe = T._library().cadgen_tessellate_pinned
-    double, int32 = ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int32)
-    probe.restype = ctypes.c_int32
-    probe.argtypes = [ctypes.POINTER(T._Input), ctypes.c_int32, double, int32, ctypes.c_int32, int32, double,
-                      ctypes.c_double, ctypes.c_double, double, int32, int32, ctypes.c_int64,
-                      ctypes.POINTER(ctypes.c_int64)]
-    points = np.array([point[:2] for point in loop], np.float64)
-    ords = np.array([point[2] for point in loop], np.int32)
-    fractions = np.array([point[3] or (math.nan, math.nan) for point in loop], np.float64)
-    sizes = np.array([len(loop)], np.int32)
-    capacity = 100_000
-    uv, pinned, triangles = np.zeros((capacity, 2)), np.zeros((capacity, 2), np.int32), np.zeros((capacity, 3), np.int32)
-    counts = (ctypes.c_int64 * 2)()
-    status = probe(ctypes.byref(request), 0, points.ctypes.data_as(double), sizes.ctypes.data_as(int32), 1,
-                   ords.ctypes.data_as(int32), fractions.ctypes.data_as(double), chord_limit, angle_limit,
-                   uv.ctypes.data_as(double), pinned.ctypes.data_as(int32), triangles.ctypes.data_as(int32),
-                   capacity, counts)
-    del keep
-    assert status == 0 and not failure, (status, failure)
-    return uv[:counts[0]], pinned[:counts[0]], triangles[:counts[1]]
+def _corners(tessellation) -> np.ndarray:
+    return tessellation.positions[tessellation.indices].reshape(-1, 3, 3).astype(np.float64)
 
 
-def _evaluate(model, what: int, index: int, params: np.ndarray) -> np.ndarray:
-    """The library's own evaluation (``cadgen_tessellate_probe``) of a face's surface point or normal,
-    or an edge's point, at each row of ``params`` (u, v) or (t, 0): one point per row."""
-    from cadgen._internal import tessellate as T
-
-    failure: list = []
-    request, keep = T._request(model, chord=5e-4, angle=0.35, deflection=1e-3, failure=failure)
-    probe = T._library().cadgen_tessellate_probe
-    double = ctypes.POINTER(ctypes.c_double)
-    probe.restype = ctypes.c_int32
-    probe.argtypes = [ctypes.POINTER(T._Input), ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, double, double]
-    params = np.ascontiguousarray(params, np.float64)
-    out = np.zeros((len(params), 3), np.float64)
-    status = probe(ctypes.byref(request), what, index, len(params), params.ctypes.data_as(double),
-                   out.ctypes.data_as(double))
-    del keep
-    assert status == 0 and not failure, (status, failure)
-    return out
+def _collapsed(corners: np.ndarray) -> np.ndarray:
+    """Triangles two of whose corners are one point."""
+    a, b, c = corners[:, 0], corners[:, 1], corners[:, 2]
+    return (a == b).all(axis=1) | (b == c).all(axis=1) | (c == a).all(axis=1)
 
 
-def _earcut(contour, holes) -> list[list[int]]:
-    """The library's earcut (``cadgen_tessellate_earcut``) of a contour and its holes."""
-    from cadgen._internal import tessellate as T
-
-    earcut = T._library().cadgen_tessellate_earcut
-    double, int32 = ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int32)
-    earcut.restype = ctypes.c_int32
-    earcut.argtypes = [double, ctypes.c_int32, int32, ctypes.c_int32, int32, ctypes.c_int32]
-    points = np.array([*contour, *[point for hole in holes for point in hole]], np.float64)
-    starts = np.array(np.cumsum([len(contour)] + [len(hole) for hole in holes])[:-1], np.int32)
-    out = np.zeros(3 * len(points) * 3, np.int32)
-    made = earcut(points.ctypes.data_as(double), len(points), starts.ctypes.data_as(int32), len(holes),
-                  out.ctypes.data_as(int32), len(out))
-    assert made >= 0
-    return out[:made].reshape(-1, 3).tolist()
+def _open_edges(tessellation) -> int:
+    """Edges one triangle uses once the mesh is welded by exact position, as a slicer welds it."""
+    edges: collections.Counter = collections.Counter()
+    corners = _corners(tessellation)
+    for triangle in corners[~_collapsed(corners)]:
+        points = [tuple(point) for point in triangle]
+        for a, b in ((points[0], points[1]), (points[1], points[2]), (points[2], points[0])):
+            edges[(a, b) if a < b else (b, a)] += 1
+    return sum(1 for used in edges.values() if used == 1)
 
 
-def _freeform_solids() -> dict:
-    """Solids whose surfaces, trims and edges the library evaluates itself: a loft (a B-spline
-    surface of degree 14), a spline and an elliptical hole extruded, a spline revolved, and a
-    filleted plate round a hole with every surface, trim and edge made a B-spline (its hole and
-    rounds rational ones)."""
-    from build123d import Axis, Box, BuildLine, BuildPart, BuildSketch, Circle, Cylinder, Ellipse, Locations, Mode, \
-        Plane, Polyline, Solid, Spline, extrude, fillet, loft, make_face, revolve
-    from OCP.BRepBuilderAPI import BRepBuilderAPI_NurbsConvert
+class DegenerateComponents(unittest.TestCase):
+    def test_a_component_of_one_vertex_meshes_to_nothing(self):
+        from build123d import Vertex
 
-    with BuildPart() as vase:
-        for z, radius in ((0, 10), (8, 14), (16, 8), (24, 11)):
-            with BuildSketch(Plane.XY.offset(z)):
-                Circle(radius)
-        loft()
-    with BuildPart() as cam:
-        with BuildSketch():
-            with BuildLine():
-                Spline((0, 0), (10, 4), (20, -2), (30, 3))
-                Polyline((30, 3), (30, -12), (0, -12), (0, 0))
-            make_face()
-            with Locations((15, -5)):
-                Ellipse(6, 3, mode=Mode.SUBTRACT)
-        extrude(amount=6)
-    with BuildPart() as bell:
-        with BuildSketch(Plane.XZ):
-            with BuildLine():
-                Spline((0, 0), (8, 2), (6, 10), (9, 18))
-                Polyline((9, 18), (0, 18), (0, 0))
-            make_face()
-        revolve(axis=Axis.Z)
-    plate = fillet((Box(40, 30, 12) - Cylinder(5, 20)).edges().group_by()[-1], 2)
-    nurbs = Solid(BRepBuilderAPI_NurbsConvert(plate.wrapped, True).Shape())
-    return {"vase": vase.part, "cam": cam.part, "bell": bell.part, "plate": nurbs}
+        _body, mesh = _mesh(_compound(Vertex(10, 0, 0)))
+        self.assertEqual((len(mesh.positions), len(mesh.indices), mesh.face_ranges), (0, 0, []))
+
+    def test_a_failure_inside_occt_is_the_components_mesh_error(self):
+        from build123d import Box
+        from OCP import BRepMesh
+        from OCP.Standard import Standard_ConstructionError
+
+        from cadgen._internal.tessellate import MeshProductionError
+
+        # Not a Standard_Failure in every OCP wheel: OCCT's own all the same.
+        failing = mock.patch.object(BRepMesh, "BRepMesh_IncrementalMesh",
+                                    side_effect=Standard_ConstructionError("no mesh"))
+        with failing, self.assertRaisesRegex(MeshProductionError, r"Standard_ConstructionError: no mesh"):
+            _mesh(Box(4, 4, 4))
+        # A failure that is not OCCT's is not dressed up as one.
+        with mock.patch.object(BRepMesh, "BRepMesh_IncrementalMesh", side_effect=KeyError("bug")), \
+                self.assertRaises(KeyError):
+            _mesh(Box(4, 4, 4))
+
+    def test_a_tree_with_a_lone_vertex_meshes_every_component(self):
+        from build123d import Box, Compound, Cylinder, Pos, Vertex
+
+        from cadgen.store import parts
+        from cadgen.store.build import build_tree_from_compound
+
+        with generated_cad_directory(prefix="occt-mesh-vertex-") as temporary, \
+                mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(Path(temporary) / "cache")}):
+            tree, geometry, _ = build_tree_from_compound(
+                Compound(children=[Box(4, 4, 4), Vertex(10, 0, 0), Pos(20, 0, 0) * Cylinder(2, 4)]), root_name="trio")
+            producer = parts.producer_identity()
+            parts.derive(tree, producer=producer)
+            stored = [parts.probe(parts.part_key(entry, producer)) is not None
+                      for entry in geometry["components"].values()]
+        self.assertEqual(stored, [True, True, True])
 
 
-class SolidsTests(unittest.TestCase):
-    def test_a_solid_is_closed_wound_outward_and_true_to_its_brep(self) -> None:
-        from build123d import Box, BuildPart, BuildSketch, Cylinder, Location, Mode, Plane, Polygon, Sphere, Torus, \
-            extrude, fillet
-        from OCP.BRepGProp import BRepGProp
-        from OCP.GProp import GProp_GProps
-        from OCP.TopAbs import TopAbs_FACE
-        from OCP.TopExp import TopExp
-        from OCP.TopTools import TopTools_IndexedMapOfShape
+class AtTheFloors(unittest.TestCase):
+    def test_a_face_curved_all_the_way_round_meshes_at_the_finest_tolerances_accepted(self):
+        # Below the floors one such face meshed for minutes (cadgen.tessellation_policy);
+        # at them, it is a mesh, closed, and finer than the standard rung's.
+        from build123d import Sphere
 
-        with BuildPart() as gear:  # sixteen teeth round a bore, the shape of a sun gear
-            with BuildSketch(Plane.XY):
-                Polygon(*[(r * math.cos(math.pi * k / 16), r * math.sin(math.pi * k / 16))
-                          for k, r in enumerate([20, 24] * 16)])
-            extrude(amount=8)
-            Cylinder(6, 20, mode=Mode.SUBTRACT)
-        plate = Box(40, 30, 12) - Cylinder(5, 20)
-        mixed = fillet(plate.edges().group_by()[-1], 2) + Sphere(6).moved(Location((12, 0, 6)))
-        shapes = {"gear": gear.part, "mixed": mixed, "torus": Torus(12, 4), "sphere": Sphere(7), **_freeform_solids()}
-        for name, shape in shapes.items():
-            with self.subTest(name):
-                report: dict = {}
-                mesh = _mesh(shape, report=report)
-                self.assertEqual({"library"}, {facts["madeBy"] for facts in report["faces"].values()},
-                                 "every face the library's own")
-                positions = np.asarray(mesh.positions, np.float64)
-                triangles = np.asarray(mesh.indices, np.int64).reshape(-1, 3)
-                self.assertEqual([], list(mesh.unmeshed_faces))
-                self.assertEqual([], list(mesh.unverified_faces), "every face on its surface")
-                self.assertEqual(0, _odd_edges(mesh.positions, triangles), "the mesh is closed")
-                a, b, c = (positions[triangles[:, k]] for k in range(3))
-                volume = float(np.einsum("ij,ij->i", a, np.cross(b, c)).sum() / 6)
-                self.assertAlmostEqual(1.0, volume / shape.volume, delta=5e-3, msg="wound outward, its volume")
-                facets = np.cross(b - a, c - a)
-                normals = np.asarray(mesh.normals, np.float64)[triangles].sum(axis=1)
-                self.assertGreater(float(np.mean(np.einsum("ij,ij->i", facets, normals) > 0)), 0.99,
-                                   "the normals face the way the triangles wind")
-                faces = TopTools_IndexedMapOfShape()
-                TopExp.MapShapes_s(shape.wrapped, TopAbs_FACE, faces)
-                for ordinal, start, count, _colour in mesh.faces.tolist():
-                    props = GProp_GProps()
-                    BRepGProp.SurfaceProperties_s(faces.FindKey(ordinal), props)
-                    t = triangles[start // 3:(start + count) // 3]
-                    area = float(np.linalg.norm(np.cross(positions[t[:, 1]] - positions[t[:, 0]],
-                                                         positions[t[:, 2]] - positions[t[:, 0]]), axis=1).sum() / 2)
-                    self.assertAlmostEqual(1.0, area / props.Mass(), delta=1e-2, msg=f"face {ordinal}'s area")
+        from cadgen.tessellation_policy import TESSELLATION_FLOORS
 
-    def test_a_freeform_pole_is_one_point_with_the_poles_own_normal(self) -> None:
-        # A sphere as a B-spline surface, its poles collapsed rows on the axis, as an aircraft's
-        # skin closes at its nose: OCCT evaluates each row with its own rounding, a hair off zero,
-        # and its derivatives there have no cross product. The pole once came out as a fan of
-        # slivers on no surface, and its normals as nothing, which refinement split on and on.
-        from build123d import Solid, Sphere
-        from OCP.BRepBuilderAPI import BRepBuilderAPI_NurbsConvert
+        _body, standard = _mesh(Sphere(5))
+        _body, finest = _mesh(Sphere(5), chord=TESSELLATION_FLOORS["chordTolerance"],
+                              angle=TESSELLATION_FLOORS["angleTolerance"])
+        self.assertGreater(len(finest.indices), 10 * len(standard.indices))
+        self.assertEqual(0, _open_edges(finest))
 
-        radius = 30.0
-        mesh = _mesh(Solid(BRepBuilderAPI_NurbsConvert(Sphere(radius).wrapped, True).Shape()))
-        positions = np.asarray(mesh.positions, np.float64)
-        normals = np.asarray(mesh.normals, np.float64)
-        triangles = np.asarray(mesh.indices, np.int64).reshape(-1, 3)
-        self.assertEqual(0, _odd_edges(mesh.positions, triangles))
-        poles = np.abs(np.abs(positions[:, 2]) - radius) < 1e-9
-        self.assertTrue(poles.any())
-        self.assertTrue(np.allclose(normals[poles], np.sign(positions[poles, 2])[:, None] * [0, 0, 1], atol=1e-3),
-                        "each pole's normal is the axis")
-        analytic = len(np.asarray(_mesh(Sphere(radius)).indices)) // 3
-        self.assertLess(len(triangles), 2 * analytic, "refined as the sphere it is, not on and on at its poles")
 
-    def test_the_library_evaluates_its_surfaces_and_curves_as_occt_does(self) -> None:
-        # Verification stands on the library's own evaluation of every surface and edge OCCT
-        # meshed: each B-spline by its poles and knots, each conic by its formula, each surface of
-        # extrusion or revolution by the curve it sweeps. Point for point and normal for normal,
-        # over a grid of each face's parameters and along each edge, it is OCCT's.
-        from cadgen._internal import tessellate as T
+class OnTheSurface(unittest.TestCase):
+    def test_a_thin_round_swept_along_an_arc_stays_within_its_deflection(self):
+        """The motorbike's front fender: a band of rounded section revolved through 120 degrees,
+        its 4 mm corners swept along a 230 mm arc. OCCT measures its triangles against the surface
+        only on freeform faces unless told to on every face, and at this band's display deflection
+        its grid on a toroidal corner skipped the corner's inner rows: triangles spanning the whole
+        corner sat 1.2 mm off it, five times the deflection, and every view drew a saw-toothed edge."""
+        import math
+
+        from build123d import Axis, Plane, Pos, RectangleRounded, revolve
         from OCP.BRep import BRep_Tool
-        from OCP.BRepAdaptor import BRepAdaptor_Curve
-        from OCP.GeomLProp import GeomLProp_SLProps
-        from OCP.TopoDS import TopoDS
-
-        for name, shape in _freeform_solids().items():
-            with self.subTest(name):
-                face_map, edge_map = T._maps(shape.wrapped)
-                model = T._model(shape.wrapped, face_map, edge_map)
-                extent = shape.bounding_box().diagonal
-                for index in range(face_map.Extent()):
-                    u0, u1, v0, v1 = model.face_d[index, 0:4]
-                    us, vs = np.meshgrid(np.linspace(u0, u1, 7), np.linspace(v0, v1, 7))
-                    params = np.column_stack([us.ravel(), vs.ravel()])
-                    surface = BRep_Tool.Surface_s(TopoDS.Face_s(face_map.FindKey(index + 1)))
-                    expected = np.array([surface.Value(u, v).Coord() for u, v in params.tolist()])
-                    points = _evaluate(model, T._ASK_SURFACE, index, params)
-                    self.assertLess(float(np.abs(points - expected).max()), extent * 1e-9, f"face {index + 1}'s points")
-                    normals = _evaluate(model, T._ASK_NORMAL, index, params)
-                    for (u, v), normal in zip(params.tolist(), normals):
-                        props = GeomLProp_SLProps(surface, u, v, 1, 1e-9)
-                        if not props.IsNormalDefined():
-                            continue
-                        theirs = np.array(props.Normal().Coord())
-                        self.assertGreater(abs(float(normal @ theirs)), 1 - 1e-7, f"face {index + 1}'s normal at {u}, {v}")
-                for index in range(edge_map.Extent()):
-                    if not model.edge_i[index][0]:
-                        continue
-                    curve = BRepAdaptor_Curve(TopoDS.Edge_s(edge_map.FindKey(index + 1)))
-                    first, last = model.edge_d[index, 0:2]
-                    params = np.column_stack([np.linspace(first, last, 9), np.zeros(9)])
-                    points = _evaluate(model, T._ASK_CURVE, index, params)
-                    # A B-spline's parameters are the library's conversion's; the ends and the
-                    # points along it are the curve's own where the conversion keeps them (lines,
-                    # conics, B-splines), which is every kind here.
-                    expected = np.array([curve.Value(float(t)).Coord() for t in params[:, 0]])
-                    self.assertLess(float(np.abs(points - expected).max()), extent * 1e-9, f"edge {index + 1}")
-
-    def test_a_tip_whose_row_is_one_point_meets_its_neighbour_along_their_edge(self) -> None:
-        # Two faces of an F-14D's tail, ruled B-splines whose rows close to one point at each end,
-        # sharing the ruling between them. OCCT evaluates a face's tip row to exactly that point,
-        # so the triangles that carried the face's boundary into the tip were one line in space and
-        # were dropped before the faces were made to meet: the triangle beyond spanned the shared
-        # edge from the tip without the point its neighbour put on it, a gap 0.2 mm wide.
-        from OCP.BRepAdaptor import BRepAdaptor_Curve
-        from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_Sewing
-        from OCP.Geom import Geom_BSplineSurface
-        from OCP.TColgp import TColgp_Array2OfPnt
-        from OCP.TColStd import TColStd_Array1OfInteger, TColStd_Array1OfReal
-        from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
-        from OCP.TopExp import TopExp
-        from OCP.TopoDS import TopoDS
-        from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape
+        from OCP.BRepAdaptor import BRepAdaptor_Surface
+        from OCP.GeomAbs import GeomAbs_Plane
         from OCP.gp import gp_Pnt
+        from OCP.TopAbs import TopAbs_FACE
+        from OCP.TopExp import TopExp_Explorer
+        from OCP.TopLoc import TopLoc_Location
+        from OCP.TopoDS import TopoDS
 
-        sewing = BRepBuilderAPI_Sewing(1e-6)
-        for column, (u0, u1) in enumerate(((3.0, 4.0), (4.0, 5.0))):
-            poles = TColgp_Array2OfPnt(1, 2, 1, 8)
-            for side in range(2):
-                for row, point in enumerate([TIP, *RULINGS[column + side], END]):
-                    poles.SetValue(side + 1, row + 1, gp_Pnt(*point))
-            knots = []
-            for values, multiplicity in (((u0, u1), 2), ((0.0, 1.0), 8)):
-                array, mults = TColStd_Array1OfReal(1, 2), TColStd_Array1OfInteger(1, 2)
-                for k, value in enumerate(values, 1):
-                    array.SetValue(k, value)
-                    mults.SetValue(k, multiplicity)
-                knots += [array, mults]
-            surface = Geom_BSplineSurface(poles, knots[0], knots[2], knots[1], knots[3], 1, 7)
-            sewing.Add(BRepBuilderAPI_MakeFace(surface, 1e-7).Face())
-        sewing.Perform()
-        shape = sewing.SewedShape()
-        owners = TopTools_IndexedDataMapOfShapeListOfShape()
-        TopExp.MapShapesAndAncestors_s(shape, TopAbs_EDGE, TopAbs_FACE, owners)
-        [shared] = [owners.FindKey(i) for i in range(1, owners.Extent() + 1) if owners.FindFromIndex(i).Size() == 2]
-        curve = BRepAdaptor_Curve(TopoDS.Edge_s(shared))
-        line = np.array([[p.X(), p.Y(), p.Z()] for p in (curve.Value(t) for t in
-                         np.linspace(curve.FirstParameter(), curve.LastParameter(), 4001))])
+        from cadgen._internal.tessellate import _bounding_diagonal
+        from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
-        mesh = _mesh(shape)
-        positions = np.asarray(mesh.positions, np.float32)
-        _, label = np.unique(positions.view(np.dtype((np.void, 12))).ravel(), return_inverse=True)
-        welded = label.ravel()[np.asarray(mesh.indices, np.int64).reshape(-1, 3)]
-        points = np.zeros((int(label.max()) + 1, 3))
-        points[label.ravel()] = positions
-        edges = np.sort(np.concatenate([welded[:, [0, 1]], welded[:, [1, 2]], welded[:, [2, 0]]]), axis=1)
-        pairs, counts = np.unique(edges, axis=0, return_counts=True)
-        ends = points[pairs[counts % 2 == 1]]
-        deflection = 5e-4 * float(np.linalg.norm(positions.max(axis=0) - positions.min(axis=0)))
-        on_shared = np.linalg.norm(ends[:, :, None, :] - line[None, None], axis=3).min(axis=2) <= deflection
-        self.assertEqual(0, int(on_shared.all(axis=1).sum()), "no edge along the shared ruling is left open")
+        start = math.radians(30)
+        axle = (595.0, 0.0, 205.0)
+        plane = Plane(origin=axle, x_dir=(math.cos(start), 0, math.sin(start)), z_dir=(-math.sin(start), 0, math.cos(start)))
+        band = revolve((Pos(228, 0, 0) * RectangleRounded(12, 92, 4)).moved(plane.location),
+                       Axis(axle, (0, -1, 0)), revolution_arc=120)
+        chord, angle = DISPLAY_TESSELLATION["chordTolerance"], DISPLAY_TESSELLATION["angleTolerance"]
+        _mesh(band, chord=chord, angle=angle)  # meshing leaves its triangulation on the shape
+        deflection = chord * _bounding_diagonal(band.wrapped)
+        # Each triangle's centre against the surface at its centre's parameters: a triangle across
+        # a corner it should have stepped round sits that corner's sag off it.
+        worst = 0.0
+        explorer = TopExp_Explorer(band.wrapped, TopAbs_FACE)
+        while explorer.More():
+            face = TopoDS.Face_s(explorer.Current())
+            explorer.Next()
+            surface = BRepAdaptor_Surface(face, False)
+            if surface.GetType() == GeomAbs_Plane:
+                continue
+            triangulation = BRep_Tool.Triangulation_s(face, TopLoc_Location())
+            for index in range(1, triangulation.NbTriangles() + 1):
+                nodes = triangulation.Triangle(index).Get()
+                u = sum(triangulation.UVNode(node).X() for node in nodes) / 3
+                v = sum(triangulation.UVNode(node).Y() for node in nodes) / 3
+                a, b, c = (triangulation.Node(node).XYZ() for node in nodes)
+                worst = max(worst, surface.Value(u, v).Distance(gp_Pnt((a + b + c).Divided(3))))
+        self.assertLess(worst, 2 * deflection, f"{worst:.3f} mm off the surface at a {deflection:.3f} mm deflection")
 
-    def test_a_row_of_slots_whose_ends_line_up_leaves_the_wall_closed(self) -> None:
-        # A watch case's ring of slots: every slot's top corners lie exactly on one line of the
-        # wall's parameters, and earcut ran diagonals along that line straight past them, so the
-        # triangles above met the ones below at other points and the wall opened along the line.
-        from build123d import Axis, Box, Compound, Cylinder, Location
+    def test_a_part_far_from_its_origin_is_not_meshed_again_for_its_rounding(self):
+        """Faces are measured on the single-precision positions the mesh is read in. A 10 mm
+        part built a kilometre from its origin rounds them by up to 0.06 mm, several times its
+        deflection, which no finer pass changes: held to its deflection alone, every round of
+        it counted as off its surface, and it was meshed four times and its rounds tessellated
+        over their parameters, cracked where they met their neighbours."""
+        from build123d import Box, Cylinder, fillet
+        from OCP import BRepMesh
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+        from OCP.gp import gp_Trsf, gp_Vec
+        from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
-        ring = Cylinder(19.3, 2.2) - Cylinder(18.5, 3)
-        slots = [Box(3, 0.16, 1.1).moved(Location((19, 0, 0))).rotate(Axis.Z, 6 * k) for k in range(60)]
-        mesh = _mesh(ring - Compound(slots))
-        self.assertEqual(0, _odd_edges(mesh.positions, np.asarray(mesh.indices, np.int64).reshape(-1, 3)))
+        shift = gp_Trsf()
+        shift.SetTranslation(gp_Vec(1e6, 0, 0))
+        far = BRepBuilderAPI_Transform((fillet(Box(10, 10, 10).edges(), radius=2) - Cylinder(2, 20)).wrapped,
+                                       shift, True).Shape()
+        with mock.patch.object(BRepMesh, "BRepMesh_IncrementalMesh", wraps=BRepMesh.BRepMesh_IncrementalMesh) as mesher:
+            _mesh(far, chord=DISPLAY_TESSELLATION["chordTolerance"], angle=DISPLAY_TESSELLATION["angleTolerance"])
+        self.assertEqual(mesher.call_count, 1)
 
-    def test_a_hole_crossing_the_side_of_a_grid_cell_is_cut_out_of_it(self) -> None:
-        # The windows through a sphere cross many cells of its grid; clipped loop by loop, each
-        # cell's piece of a window touches the cell's outline, and earcut covered part of the
-        # window and left part of the sphere bare: a face 1.1% off its area.
-        from build123d import Box, Sphere
+    def test_a_tessellation_that_would_open_the_part_is_undone(self):
+        """A round no finer pass meshes on its surface goes to the tessellator, whose points
+        along a shared edge split its neighbours' triangles to meet them. Where that fails the
+        faces part, and the round keeps OCCT's triangles: off its surface, but closed. Here no
+        neighbour is split at all."""
+        from build123d import Axis, Pos, RectangleRounded, revolve
+        from cadgen._internal import face_fallback
+        from cadgen.tessellation_policy import DISPLAY_TESSELLATION
+
+        band = revolve(Pos(230, 0, 0) * RectangleRounded(8, 24, 1), Axis.Y, revolution_arc=360)
+        with mock.patch.object(face_fallback, "_conform_neighbours", return_value=lambda: None) as conform:
+            _body, mesh = _mesh(band, chord=DISPLAY_TESSELLATION["chordTolerance"] / 10,
+                                angle=DISPLAY_TESSELLATION["angleTolerance"])
+        self.assertTrue(conform.called, "a round went to the tessellator")
+        self.assertEqual(_open_edges(mesh), 0)
+
+
+class FreeformSurfaces(unittest.TestCase):
+    """OCCT holds a freeform face's triangles to the deflection as it meshes it, but on some
+    B-splines -- an F1 floor panel, the hand's palm, a Juno forearm -- it left them up to 48
+    times off, where main's tessellator held them. A cylinder's side as a B-spline, meshed ten
+    times coarser than it is measured, stands in for such a face."""
+
+    def setUp(self):
+        from build123d import Cylinder
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_NurbsConvert
+        from cadgen._internal import tessellate
+        from cadgen._internal.selector_table import build_selector_table
+
+        self.topods = BRepBuilderAPI_NurbsConvert(Cylinder(10, 20).wrapped, True).Shape()
+        self.face_map, _edges = tessellate._maps(self.topods)
+        table = build_selector_table(self.topods, _facts(self.topods))
+        self.kinds = dict(tessellate._rows(table, "faces", "surfaceType"))
+        # Every face is a B-spline now; the side is the largest, and the one that is curved.
+        self.side = max(tessellate._rows(table, "faces", "area"), key=lambda row: row[1])[0]
+        self.assertEqual(self.kinds[self.side], "bsplinesurface")
+
+    def faulty(self, meshed_at, freeform=True):
+        from OCP.BRepMesh import BRepMesh_IncrementalMesh
+        from OCP.BRepTools import BRepTools
+        from cadgen._internal import tessellate
+
+        BRepTools.Clean_s(self.topods)
+        BRepMesh_IncrementalMesh(self.topods, meshed_at, False, 0.8, True)
+        faces = tessellate._read_faces(self.topods, self.face_map)
+        return tessellate._faulty(faces, self.face_map, list(faces), self.kinds, 0.05, False, freeform)
+
+    def test_a_freeform_face_meshed_coarser_than_it_is_held_to_is_off_its_surface(self):
+        self.assertIn(self.side, self.faulty(meshed_at=0.5))
+
+    def test_a_freeform_face_meshed_at_its_deflection_is_not(self):
+        self.assertEqual(self.faulty(meshed_at=0.05), [])
+
+    def test_a_component_whose_first_pass_is_slow_goes_unmeasured(self):
+        self.assertEqual(self.faulty(meshed_at=0.5, freeform=False), [])
+        from cadgen._internal import tessellate
+
+        with mock.patch.object(tessellate, "_RETRY_SECONDS", -1.0), \
+                mock.patch.object(tessellate, "_freeform_distance", wraps=tessellate._freeform_distance) as measured:
+            _mesh(self.topods)
+        self.assertFalse(measured.called)
+        with mock.patch.object(tessellate, "_freeform_distance", wraps=tessellate._freeform_distance) as measured:
+            _mesh(self.topods)
+        self.assertTrue(measured.called)
+
+
+class ExportAtSingularPoints(unittest.TestCase):
+    def test_an_export_of_poles_and_apexes_is_manifold_and_watertight_in_every_format(self):
+        import trimesh
+        from build123d import Box, Cone, Pos, Sphere, fillet
+
+        from cadgen._internal.mesh_formats import build_primitives, glb_bytes, stl_bytes, threemf_bytes
+
+        parts = {
+            "fully filleted box": fillet(Box(20, 20, 20).edges(), 3),
+            "sphere beside a cone": _compound(Sphere(6), Pos(20, 0, 0) * Cone(5, 0, 10)),
+        }
+        descriptor = {"components": {"c": {}}, "occurrences": [{"id": "o1", "component": "c", "transform": IDENTITY}]}
+        with generated_cad_directory(prefix="occt-mesh-export-") as temporary:
+            for label, shape in parts.items():
+                _body, mesh = _mesh(shape)
+                # The case is still the case: OCCT's mesh, as stored, has them.
+                self.assertTrue(_collapsed(_corners(mesh)).any(), "the stored mesh has collapsed triangles")
+                primitives = build_primitives(descriptor, {"c": mesh})
+                for fmt, write in (("stl", stl_bytes), ("glb", glb_bytes), ("3mf", threemf_bytes)):
+                    with self.subTest(label, format=fmt):
+                        path = Path(temporary) / f"{label}.{fmt}"
+                        path.write_bytes(write(primitives))
+                        if fmt == "stl":
+                            exported.MeshExportManifoldTest.assertManifold(self, path, label)
+                        # Read as the file says, then welded by exact position, as a slicer welds.
+                        read = trimesh.load(path, force="mesh", process=False)
+                        corners = np.asarray(read.vertices)[np.asarray(read.faces)]
+                        self.assertFalse(_collapsed(corners).any(), f"{fmt} carries triangles that cover nothing")
+                        read.merge_vertices(merge_tex=True, merge_norm=True)
+                        self.assertTrue(read.is_watertight)
+
+
+def _range_area(mesh, ordinal: int) -> float:
+    row = next(row for row in mesh.face_ranges if row["ord"] == ordinal)
+    corners = mesh.positions[mesh.indices[row["indexStart"]:row["indexStart"] + row["indexCount"]]]
+    a, b, c = (corners.reshape(-1, 3, 3).astype(np.float64)[:, k] for k in range(3))
+    return float(0.5 * np.linalg.norm(np.cross(b - a, c - a), axis=1).sum())
+
+
+class EmptyFace(unittest.TestCase):
+    """OCCT's pass leaves the bore of a plate empty: the bore is meshed all the same,
+    unless it is smaller than the mesh resolves."""
+
+    def setUp(self):
+        from build123d import Box, Cylinder
+        from OCP.TopAbs import TopAbs_FACE
+        from OCP.TopExp import TopExp
+        from OCP.TopTools import TopTools_IndexedMapOfShape
+
+        self.topods = (Box(20, 20, 10) - Cylinder(4, 10)).wrapped
+        self.bore = next(row["ord"] for row in _facts(self.topods)["faces"] if row["surfaceType"] == "cylinder")
+        self.faces = TopTools_IndexedMapOfShape()
+        TopExp.MapShapes_s(self.topods, TopAbs_FACE, self.faces)
+
+    def mesh(self, refuses, table=None):
+        """Mesh the plate while OCCT leaves its bore empty after each call ``refuses``
+        names (the shape it was asked to mesh, and the call's number)."""
+        from OCP import BRepMesh
+        from OCP.BRepTools import BRepTools
+
+        real, self.meshed = BRepMesh.BRepMesh_IncrementalMesh, []
+
+        def mesher(shape, *args):
+            result = real(shape, *args)
+            self.meshed.append(shape)
+            if refuses(shape, len(self.meshed)):
+                BRepTools.Clean_s(self.faces.FindKey(self.bore))
+            return result
+
+        with mock.patch.object(BRepMesh, "BRepMesh_IncrementalMesh", side_effect=mesher):
+            self.body, mesh = _mesh(self.topods, table=table)
+        return mesh
+
+    def assertBoreMeshed(self, mesh):
+        """The bore's range holds triangles, and they lie on the bore: radius 4 about z."""
+        bore = next(row for row in mesh.face_ranges if row["ord"] == self.bore)
+        self.assertGreater(bore["indexCount"], 0)
+        corners = mesh.positions[mesh.indices[bore["indexStart"]:bore["indexStart"] + bore["indexCount"]]]
+        np.testing.assert_allclose(np.hypot(corners[:, 0], corners[:, 1]), 4.0, atol=0.05)
+
+    def test_a_face_the_pass_leaves_empty_is_meshed_with_its_whole_component_and_no_crack(self):
+        mesh = self.mesh(lambda shape, call: call == 1)
+        self.assertGreater(len(self.meshed), 1, "the component was meshed again")
+        self.assertTrue(all(shape.IsSame(self.topods) for shape in self.meshed), "always the whole component")
+        self.assertBoreMeshed(mesh)
+        self.assertEqual(_open_edges(mesh), 0, "the bore meets its neighbours along every edge")
+
+    def test_a_face_no_whole_pass_meshes_is_tessellated_over_its_parameters_and_meets_its_neighbours(self):
+        # OCCT refuses the bore whenever it meshes the component, as it refused radial's
+        # accessory case, the hand's fingertip pad and the RoArm's screw tips.
+        mesh = self.mesh(lambda shape, call: shape.IsSame(self.topods))
+        self.assertTrue(all(shape.IsSame(self.topods) for shape in self.meshed), "OCCT never meshed it alone")
+        self.assertBoreMeshed(mesh)
+        self.assertAlmostEqual(_range_area(mesh, self.bore), 2 * np.pi * 4 * 10, delta=2 * np.pi * 4 * 10 * 0.02,
+                               msg="the bore's own area, a 4 mm radius 10 deep")
+        self.assertEqual(_open_edges(mesh), 0, "the bore shares every vertex with the faces around it")
+
+    def test_a_tessellation_that_misses_the_faces_area_is_not_kept_and_splits_no_neighbour(self):
+        from cadgen._internal import face_fallback
+        from cadgen.store.meshes import decode_payload
+
+        real = face_fallback.tessellate_face
+
+        def overcounted(topods, face, deflection, angle, keep):
+            return real(topods, face, deflection, angle, lambda covered: keep(covered * 2))
+
+        with mock.patch.object(face_fallback, "tessellate_face", return_value=None):
+            untessellated = self.mesh(lambda shape, call: shape.IsSame(self.topods))
+        with mock.patch.object(face_fallback, "tessellate_face", side_effect=overcounted):
+            mesh = self.mesh(lambda shape, call: shape.IsSame(self.topods))
+        bore = next(row for row in mesh.face_ranges if row["ord"] == self.bore)
+        self.assertEqual(bore["indexCount"], 0, "the bore is left out")
+        self.assertEqual(decode_payload(self.body).unmeshed_faces, [self.bore], "and named")
+        # Its neighbours were split to meet the triangles before they were refused, and kept
+        # the splits: a vendor motor's two refused faces left 88 open edges around them.
+        self.assertEqual([row["indexCount"] for row in mesh.face_ranges],
+                         [row["indexCount"] for row in untessellated.face_ranges], "no neighbour was split")
+
+    def test_the_tessellator_meets_the_pass_that_left_the_least_wrong(self):
+        # A finer pass can close what the component's own deflection leaves: an actuator kept 32
+        # open edges at a quarter of its deflection and 443 when it was meshed at its own again.
+        from OCP import BRepMesh
+        from cadgen._internal import tessellate
+
+        real_mesher, real_faulty, deflections, calls = BRepMesh.BRepMesh_IncrementalMesh, tessellate._faulty, [], []
+
+        def mesher(shape, deflection, *args):
+            deflections.append(deflection)
+            return real_mesher(shape, deflection, *args)
+
+        def faulty(faces, face_map, required, *args):
+            calls.append(None)
+            real_faulty(faces, face_map, required, *args)
+            # Two faces wrong at its own deflection and at a quarter, one at half.
+            return [self.bore, 1][:1 if len(calls) == 2 else 2] if len(calls) <= 3 else []
+
+        with mock.patch.object(BRepMesh, "BRepMesh_IncrementalMesh", side_effect=mesher), \
+                mock.patch.object(tessellate, "_faulty", side_effect=faulty):
+            _mesh(self.topods)
+        self.assertEqual([round(d / deflections[0], 3) for d in deflections], [1.0, 0.5, 0.25, 0.5])
+
+    def test_a_tessellation_that_would_fold_a_neighbour_out_is_refused_and_splits_none(self):
+        # A point the tessellator lays on its boundary must be a point of the edge it shares:
+        # one that is not, split into a neighbour, folded a vendor button's B-spline 399
+        # deflections out. Here every point is taken to lie far from the edge.
+        from cadgen._internal import face_fallback
+        from cadgen.store.meshes import decode_payload
+
+        with mock.patch.object(face_fallback, "tessellate_face", return_value=None):
+            untessellated = self.mesh(lambda shape, call: shape.IsSame(self.topods))
+        with mock.patch.object(face_fallback, "_off_segment", return_value=float("inf")):
+            mesh = self.mesh(lambda shape, call: shape.IsSame(self.topods))
+        self.assertEqual(decode_payload(self.body).unmeshed_faces, [self.bore], "the bore is left out and named")
+        self.assertEqual([row["indexCount"] for row in mesh.face_ranges],
+                         [row["indexCount"] for row in untessellated.face_ranges], "no neighbour was split")
+
+    def test_a_tessellation_off_its_surface_is_undone(self):
+        # The tessellator's triangles are measured as OCCT's are: a vendor nut's tessellated
+        # face lay 25 deflections off. Here the bore is taken to lie off its surface however it
+        # is meshed, so it goes to the tessellator, whose triangles are then undone.
+        from cadgen._internal import face_fallback, tessellate
+
+        real = tessellate._surface_distance
+
+        def bore_off(surface, positions, triangles):
+            from OCP.GeomAbs import GeomAbs_Cylinder
+
+            return 1e9 if surface.GetType() == GeomAbs_Cylinder else real(surface, positions, triangles)
+
+        with mock.patch.object(face_fallback, "tessellate_face", return_value=None):
+            occt_only = self.mesh(lambda shape, call: False)
+        with mock.patch.object(tessellate, "_surface_distance", side_effect=bore_off), \
+                mock.patch.object(face_fallback, "tessellate_face", wraps=face_fallback.tessellate_face) as tessellator:
+            mesh = self.mesh(lambda shape, call: False)
+        self.assertTrue(tessellator.called, "the bore went to the tessellator")
+        self.assertEqual([row["indexCount"] for row in mesh.face_ranges],
+                         [row["indexCount"] for row in occt_only.face_ranges], "and kept OCCT's triangles")
+        self.assertEqual(_open_edges(mesh), 0)
+
+    def test_triangles_a_stored_brep_carries_are_not_kept(self):
+        # A BREP can come with triangles some earlier tool made, which OCCT keeps where they are
+        # fine enough for it, whatever they are: every component is meshed from none.
+        from build123d import Sphere
+        from OCP.BRepMesh import BRepMesh_IncrementalMesh
+
+        fresh = _mesh(Sphere(5))[1].indices.size
+        carried = Sphere(5)
+        BRepMesh_IncrementalMesh(carried.wrapped, 0.001, False, 0.05, True)
+        self.assertEqual(_mesh(carried)[1].indices.size, fresh)
+
+    def test_a_component_whose_first_pass_is_slow_is_not_meshed_again_whole(self):
+        # An F1 floor's B-spline took ten seconds to mesh once; with a faulty face, meshing it
+        # again whole at half and a quarter of its deflection cost it four times over.
+        from cadgen._internal import tessellate
+
+        with mock.patch.object(tessellate, "_RETRY_SECONDS", -1.0):
+            mesh = self.mesh(lambda shape, call: call == 1)
+        self.assertEqual(len(self.meshed), 1, "one pass: the bore went straight to the tessellator")
+        self.assertBoreMeshed(mesh)
+        self.assertEqual(_open_edges(mesh), 0, "the bore meets its neighbours along every edge")
+
+    def test_a_face_the_pass_leaves_a_gap_in_is_meshed_again(self):
+        # OCCT leaves part of a face uncovered now and then -- a sixth of the radial engine's
+        # cylinder head around a B-spline's pole -- and a gap inside a face drew as a hole. Here
+        # the plate's largest face loses a triangle on the first pass.
+        from OCP import BRepMesh
+        from OCP.BRep import BRep_Tool
+        from OCP.Poly import Poly_Triangle
+        from OCP.TopLoc import TopLoc_Location
+        from OCP.TopoDS import TopoDS
+
+        real, meshed = BRepMesh.BRepMesh_IncrementalMesh, []
+
+        def mesher(shape, *args):
+            result = real(shape, *args)
+            meshed.append(shape)
+            if len(meshed) > 1:
+                return result
+            largest = max((BRep_Tool.Triangulation_s(TopoDS.Face_s(self.faces.FindKey(o)), TopLoc_Location())
+                           for o in range(1, self.faces.Extent() + 1)), key=lambda t: t.NbTriangles())
+            kept = [largest.Triangle(k).Get() for k in range(2, largest.NbTriangles() + 1)]
+            largest.ResizeTriangles(len(kept), True)
+            for k, corners in enumerate(kept, 1):
+                largest.SetTriangle(k, Poly_Triangle(*corners))
+            return result
+
+        # OCCT reports nothing: it left the W16's, the hand's and the rear suspension's gaps
+        # without a word, so a pass whose mesh has an open edge is looked at.
+        with mock.patch.object(BRepMesh, "BRepMesh_IncrementalMesh", side_effect=mesher):
+            _body, mesh = _mesh(self.topods)
+        self.assertGreater(len(meshed), 1, "the component was meshed again")
+        self.assertEqual(_open_edges(mesh), 0, "and no face has a gap")
+
+    def test_a_face_under_what_the_mesh_resolves_may_be_left_empty_and_unnamed(self):
+        # The bore made a sliver: its area in the selector table is under the square of
+        # the component's deflection. No mesher covers it, and nothing has to say so.
+        from cadgen._internal import face_fallback
+        from cadgen._internal.tessellate import _bounding_diagonal
+        from cadgen._internal.selector_table import build_selector_table
+        from cadgen.store.meshes import decode_payload
+
+        deflection = CHORD * _bounding_diagonal(self.topods)
+        table = build_selector_table(self.topods, _facts(self.topods))
+        columns = table["tables"]["faceColumns"]
+        for row in table["faces"]:
+            if row[columns.index("ordinal")] == self.bore:
+                row[columns.index("area")] = deflection * deflection / 4
+        with mock.patch.object(face_fallback, "tessellate_face", return_value=None):
+            mesh = self.mesh(lambda shape, call: True, table=table)
+        bore = next(row for row in mesh.face_ranges if row["ord"] == self.bore)
+        self.assertEqual((bore["indexCount"], decode_payload(self.body).unmeshed_faces), (0, []))
+
+
+def _with_a_stray_degenerated_edge(topods):
+    """``topods`` with a zero-length (degenerated) edge put into its first face's boundary at
+    a corner, where the face is not pinched -- what the booleans left where a slot cuts the
+    fillet of radial's accessory case -- and that face."""
+    from OCP.BRep import BRep_Builder
+    from OCP.BRepAdaptor import BRepAdaptor_Curve2d
+    from OCP.BRepTools import BRepTools_ReShape
+    from OCP.Geom2d import Geom2d_Line
+    from OCP.gp import gp_Dir2d
+    from OCP.TopAbs import TopAbs_FACE, TopAbs_FORWARD, TopAbs_REVERSED
+    from OCP.TopExp import TopExp, TopExp_Explorer
+    from OCP.TopoDS import TopoDS, TopoDS_Edge, TopoDS_Iterator, TopoDS_Wire
+
+    face = TopoDS.Face_s(TopExp_Explorer(topods, TopAbs_FACE).Current())
+    edges, iterator = [], TopoDS_Iterator(TopoDS_Iterator(face).Value())
+    while iterator.More():
+        edges.append(TopoDS.Edge_s(iterator.Value()))
+        iterator.Next()
+    curve = BRepAdaptor_Curve2d(edges[0], face)
+    corner = curve.Value(curve.FirstParameter() if edges[0].Orientation() == TopAbs_FORWARD else curve.LastParameter())
+    vertex = TopExp.FirstVertex_s(edges[0], True)
+    builder, stray, wire = BRep_Builder(), TopoDS_Edge(), TopoDS_Wire()
+    builder.MakeEdge(stray)
+    builder.UpdateEdge(stray, Geom2d_Line(corner, gp_Dir2d(1, 0)), face, 1e-7)
+    builder.Range(stray, face, 0.0, 0.0)
+    builder.Degenerated(stray, True)
+    builder.Add(stray, vertex.Oriented(TopAbs_FORWARD))
+    builder.Add(stray, vertex.Oriented(TopAbs_REVERSED))
+    builder.MakeWire(wire)
+    for edge in [stray, *edges]:
+        builder.Add(wire, edge)
+    strayed = TopoDS.Face_s(face.EmptyCopied())
+    builder.Add(strayed, wire)
+    reshape = BRepTools_ReShape()
+    reshape.Replace(face, strayed)
+    return reshape.Apply(topods), strayed
+
+
+class RefusedFace(unittest.TestCase):
+    """A face OCCT is made to refuse, whole or alone, is drawn over its own parameters: a
+    zero-length edge where the face is not pinched (radial's accessory case), a sphere's
+    poles, a cone's tip (the RoArm's screws) -- on its surface, closed, and joined to its
+    neighbours."""
+
+    def mesh(self, topods, face):
+        from OCP import BRepMesh
+        from OCP.BRep import BRep_Builder
+
+        real = BRepMesh.BRepMesh_IncrementalMesh
+
+        def mesher(shape, *args):
+            result = real(shape, *args)
+            if shape.IsSame(topods) or shape.IsSame(face):
+                BRep_Builder().UpdateFace(face, None)
+            return result
+
+        with mock.patch.object(BRepMesh, "BRepMesh_IncrementalMesh", side_effect=mesher):
+            return _mesh(topods)[1]
+
+    def assertDrawn(self, topods, face, area, what):
+        from OCP.TopAbs import TopAbs_FACE
+        from OCP.TopExp import TopExp
+        from OCP.TopTools import TopTools_IndexedMapOfShape
+
+        faces = TopTools_IndexedMapOfShape()
+        TopExp.MapShapes_s(topods, TopAbs_FACE, faces)
+        mesh = self.mesh(topods, face)
+        self.assertAlmostEqual(_range_area(mesh, faces.FindIndex(face)), area, delta=area * 0.02, msg=what)
+        self.assertEqual(_open_edges(mesh), 0, "the face shares every vertex with the faces around it")
+
+    def test_a_face_with_a_stray_zero_length_edge(self):
+        from build123d import Box
+
+        topods, face = _with_a_stray_degenerated_edge(Box(20, 20, 10).wrapped)
+        self.assertDrawn(topods, face, 200.0, "a 20 x 10 side")
+
+    def test_a_sphere_closed_at_its_poles(self):
+        from build123d import Sphere
+        from OCP.TopAbs import TopAbs_FACE
+        from OCP.TopExp import TopExp_Explorer
+        from OCP.TopoDS import TopoDS
+
+        topods = Sphere(10).wrapped
+        self.assertDrawn(topods, TopoDS.Face_s(TopExp_Explorer(topods, TopAbs_FACE).Current()),
+                         4 * np.pi * 10 ** 2, "a 10 mm sphere")
+
+    def test_a_cone_to_its_tip(self):
+        from build123d import Cone
+        from OCP.BRepAdaptor import BRepAdaptor_Surface
+        from OCP.GeomAbs import GeomAbs_Cone
+        from OCP.TopAbs import TopAbs_FACE
+        from OCP.TopExp import TopExp_Explorer
+        from OCP.TopoDS import TopoDS
+
+        topods = Cone(4, 0, 6).wrapped
+        explorer = TopExp_Explorer(topods, TopAbs_FACE)
+        while BRepAdaptor_Surface(TopoDS.Face_s(explorer.Current())).GetType() != GeomAbs_Cone:
+            explorer.Next()
+        self.assertDrawn(topods, TopoDS.Face_s(explorer.Current()), np.pi * 4 * np.hypot(4, 6), "a 4 mm cone 6 tall")
+
+
+class NarrowFace(unittest.TestCase):
+    """A face narrower than the deflection: one of the f14d wing's slivers, 686 mm long and
+    1.2 mm wide on average, between a straight side and a curve its neighbour meshes as one
+    chord -- a chord that passes beyond the straight side, so the boundary crosses itself.
+    OCCT refuses it; drawn over its parameters, it covers its own area and meets its
+    neighbours, where it once covered twice its area and failed the component."""
+
+    # The sliver's outline on its plane (mm): its straight side's corners, and points
+    # along its curved side, which a spline through them follows.
+    SIDE = [(5.681, 0.216), (147.532, 5.619), (365.14, 18.003), (690.28, 43.929)]
+    CURVE = [(690.28, 43.929), (604.868, 36.196), (519.411, 28.977), (433.91, 22.306), (348.366, 16.212),
+             (262.78, 10.734), (177.155, 5.915), (91.492, 1.806), (5.797, -1.534)]
+
+    def test_a_sliver_beside_a_coarse_chord_covers_its_own_area_and_meets_its_neighbours(self):
+        from build123d import Box, Line, Polyline, Pos, Spline, Wire, extrude, make_face
+        from OCP import BRepMesh
+        from OCP.BRep import BRep_Builder
         from OCP.BRepGProp import BRepGProp
         from OCP.GProp import GProp_GProps
         from OCP.TopAbs import TopAbs_FACE
         from OCP.TopExp import TopExp
         from OCP.TopTools import TopTools_IndexedMapOfShape
+        from OCP.TopoDS import TopoDS, TopoDS_Compound
 
-        shape = Sphere(10) - Box(12, 30, 9)
-        mesh = _mesh(shape)
-        positions = np.asarray(mesh.positions, np.float64)
-        triangles = np.asarray(mesh.indices, np.int64).reshape(-1, 3)
-        self.assertEqual(0, _odd_edges(mesh.positions, triangles))
+        outline = Wire([*Polyline(*self.SIDE).edges(), Spline(*self.CURVE), Line(self.CURVE[-1], self.SIDE[0])])
+        plate = extrude(make_face(outline), 2)
+        # A plate in a component as large as the wing, so the deflection is ten times its width.
+        topods = _compound(plate, Pos(8000, 0, 0) * Box(10, 10, 10))
         faces = TopTools_IndexedMapOfShape()
-        TopExp.MapShapes_s(shape.wrapped, TopAbs_FACE, faces)
-        for ordinal, start, count, _colour in mesh.faces.tolist():
-            props = GProp_GProps()
-            BRepGProp.SurfaceProperties_s(faces.FindKey(ordinal), props)
-            t = triangles[start // 3:(start + count) // 3]
-            area = float(np.linalg.norm(np.cross(positions[t[:, 1]] - positions[t[:, 0]],
-                                                 positions[t[:, 2]] - positions[t[:, 0]]), axis=1).sum() / 2)
-            self.assertAlmostEqual(1.0, area / props.Mass(), delta=5e-3, msg=f"face {ordinal}'s area")
+        TopExp.MapShapes_s(topods, TopAbs_FACE, faces)
+        slivers = [faces.FindIndex(face.wrapped) for face in plate.faces() if abs(face.normal_at().Z) > 0.99]
+        self.assertEqual(len(slivers), 2)
+        # OCCT meshes everything but the slivers -- which it refuses at this deflection and,
+        # finer, draws with a twentieth of their area.
+        others, builder = TopoDS_Compound(), BRep_Builder()
+        builder.MakeCompound(others)
+        for ordinal in range(1, faces.Extent() + 1):
+            if ordinal not in slivers:
+                builder.Add(others, faces.FindKey(ordinal))
+        real = BRepMesh.BRepMesh_IncrementalMesh
+        with mock.patch.object(BRepMesh, "BRepMesh_IncrementalMesh", side_effect=lambda _shape, *args: real(others, *args)):
+            mesh = _mesh(topods)[1]
+        for ordinal in slivers:
+            exact = GProp_GProps()
+            BRepGProp.SurfaceProperties_s(TopoDS.Face_s(faces.FindKey(ordinal)), exact)
+            self.assertAlmostEqual(_range_area(mesh, ordinal), exact.Mass(), delta=exact.Mass() * 0.02,
+                                   msg=f"f{ordinal} covers its own area")
+        self.assertFalse(np.isnan(mesh.positions).any() or np.isnan(mesh.normals).any())
+        self.assertEqual(_open_edges(mesh), 0, "the slivers share every vertex with the faces around them")
 
 
-class TriangulationTests(unittest.TestCase):
-    def test_earcut_triangulates_as_three_does(self) -> None:
-        self.assertEqual(THREE_HOLE, _earcut([[0, 0], [10, 0], [10, 10], [0, 10]], [HEXAGON]))
-        self.assertEqual(THREE_NOTCHED, _earcut(NOTCHED, []))
+class Normals(unittest.TestCase):
+    def test_no_normal_points_into_the_solid_at_a_cones_apex(self):
+        from build123d import Cone
 
-    def test_a_corner_on_a_straight_run_of_trim_leaves_no_t_junction(self) -> None:
-        # Earcut joins the notch's corner to the run it stands on with two triangles of no area
-        # (the last two of THREE_NOTCHED). Dropped, they left the run's middle points on one
-        # edge of the triangle above them, and the neighbouring face's points along it a crack.
-        uv, _pinned, triangles = _probe_face("plane", (0, 3, 170, 210), [(u, v, 0, None) for u, v in NOTCHED])
-        vertex = {(u, v): i for i, (u, v) in enumerate(uv.tolist())}
-        corners = [vertex[(u, v)] for u, v in NOTCHED]
-        outline = {frozenset((corners[i], corners[(i + 1) % len(corners)])) for i in range(len(corners))}
-        uses: dict[frozenset, int] = {}
-        for a, b, c in triangles.tolist():
-            for edge in (frozenset((a, b)), frozenset((b, c)), frozenset((c, a))):
-                uses[edge] = uses.get(edge, 0) + 1
-        self.assertEqual(outline, {edge for edge, count in uses.items() if count == 1}, "the boundary is the trim")
+        for label, cone in (("apex up", Cone(5, 0, 10)), ("apex down", Cone(0, 5, 10))):
+            with self.subTest(label):
+                _body, mesh = _mesh(cone)
+                corners = _corners(mesh)
+                facets = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
+                lengths = np.linalg.norm(facets, axis=1)
+                covering = lengths > 0
+                facets = facets[covering] / lengths[covering, None]
+                normals = mesh.normals[mesh.indices.reshape(-1, 3)[covering]].astype(np.float64)
+                self.assertGreater(float(np.einsum("tj,tkj->tk", facets, normals).min()), 0.0)
 
-    def test_a_trim_point_moved_onto_a_grid_line_is_still_pinned_to_its_edge(self) -> None:
-        # A radial engine's cylinder whose trim runs 2.3 nm above its parameters' lowest point:
-        # each grid line crossing it made a vertex the grid moved onto its bottom line (one source
-        # ULP), past the tolerance pinning held vertices to their trim by, so they were never
-        # pinned to the edge and the face beside it met them with a crack.
-        rise = -21.0 + 2.3e-6
-        loop = [(0.0, -21.0, 1, (0.0, 0.125)), (1.0, rise, 1, (0.125, 1.0)), (8.0, rise, 2, None),
-                (8.0, -2.0, 3, None), (0.0, -2.0, 4, None)]
-        uv, pinned, _triangles = _probe_face("flat", (0, 8, -21, -2), loop, [((0.0, -21.0, 0.0), (8.0, -21.0, 0.0))],
-                                             angle_limit=1.0)
-        crossings = [i for i, (u, v) in enumerate(uv.tolist()) if 1 < u < 8 and v < -20.99]
-        self.assertEqual(6, len(crossings), "grid lines u = 2 to 7 cross the trim")
-        self.assertEqual([], [uv[i].tolist() for i in crossings if 1 not in pinned[i]])
+    def test_a_needle_folded_over_its_neighbour_is_unfolded_and_keeps_its_edges_running_both_ways(self):
+        # OCCT's Delaunay leaves the odd needle across a B-spline folded over its neighbour -- a
+        # bracelet link's five, half a deflection wide -- which a two-sided material drew dark.
+        # The edge the two share is flipped: wound the other way instead, the needle's edges
+        # would run the way its neighbours' run, and a mesh export's orientation checks fail.
+        from cadgen._internal.tessellate import _unfold_needles
 
-    def test_a_corner_moved_across_a_cell_border_is_pinned_to_both_its_edges(self) -> None:
-        # A hand's palm whose trim turns a corner a hair left of a grid line: the grid moved the
-        # corner onto the line, into the cell to its right, where only one of its two edges runs,
-        # and pinning, held to that cell, labelled it with the one edge. The mesh edge along the
-        # other was never split to its neighbour face's points.
-        corner = (4.0 - 1e-9, 2.0)
-        loop = [(1.0, 2.0, 3, None), (1.0, 0.5, 4, None), (7.0, 0.5, 5, None), (7.0, 3.0, 1, (0.0, 1.0)),
-                (*corner, 2, (0.0, 1.0))]
-        lines = [((7.0, 3.0, 0.0), (*corner, 0.0)), ((*corner, 0.0), (1.0, 2.0, 0.0))]
-        uv, pinned, _triangles = _probe_face("flat", (0, 8, 0, 4), loop, lines, angle_limit=1.0)
-        [at] = [i for i, (u, v) in enumerate(uv.tolist()) if abs(u - 4.0) < 1e-6 and abs(v - 2.0) < 1e-6]
-        self.assertEqual(4.0, uv[at][0], "the grid moved the corner onto its line")
-        self.assertEqual({1, 2}, set(pinned[at].tolist()))
+        a, b, c, d = 0, 1, 2, 3
+        positions = np.array([[0, 0, 0], [4, 0, 0], [2, -0.5, 0], [2, -2, 0]], np.float32)
+        normals = np.tile(np.array([0, 0, 1], np.float32), (4, 1))
+        triangles = np.array([[a, b, c], [b, a, d]], np.uint32)  # c lies inside the other: folded
+        _unfold_needles(positions, normals, triangles)
+        self.assertEqual(sorted(map(tuple, triangles.tolist())), [(a, d, c), (d, b, c)])
+
+    def test_every_part_is_unfolded(self):
+        from build123d import Box
+        from cadgen._internal import tessellate
+
+        with mock.patch.object(tessellate, "_unfold_needles", wraps=tessellate._unfold_needles) as unfold:
+            _body, mesh = _mesh(Box(4, 4, 4))
+        self.assertEqual(unfold.call_count, 1)
+        self.assertEqual(unfold.call_args.args[2].size, mesh.indices.size, "the whole part's triangles")
+
+    def test_the_writers_reading_and_the_face_by_face_one_are_the_same_bytes(self):
+        from build123d import Cone, Sphere
+
+        from cadgen._internal import tessellate
+
+        for label, shape in (("cone", lambda: Cone(5, 0, 10)), ("sphere", lambda: Sphere(6))):
+            with self.subTest(label):
+                written, _ = _mesh(shape())
+                with mock.patch.object(tessellate, "_faces_from_gltf", return_value=None):
+                    read, _ = _mesh(shape())
+                self.assertEqual(written, read)
 
 
-class UnmeshedFaceTests(unittest.TestCase):
-    def test_a_face_narrower_than_its_tolerance_is_drawn_as_nothing_and_not_named(self) -> None:
-        # A lens 1 um across between an arc and its chord, 10 mm long: its trim samples to its
-        # two corners at the tolerance, which no mesh resolves, so it is no hole to warn about.
-        from build123d import Face, Line, ThreePointArc, Wire
+class LooseGeometry(unittest.TestCase):
+    def test_a_free_edge_or_vertex_beside_a_solid_keeps_the_writers_path(self):
+        from build123d import Box, Edge, Vertex
 
-        lens = Face(Wire([Line((0, 0), (10, 0)), ThreePointArc((10, 0), (5, 0.001), (0, 0))]))
-        mesh = _mesh(lens)
-        self.assertEqual(0, len(mesh.indices))
-        self.assertEqual([], list(mesh.unmeshed_faces))
+        from cadgen._internal import tessellate
 
-    def test_a_component_whose_table_is_another_shapes_is_refused(self) -> None:
-        from build123d import Box, Cylinder
-        from cadgen._internal.selector_table import build_selector_table
-        from cadgen._internal.tessellate import MeshProductionError, mesh_component
-        from cadgen._internal.topology_extract import extract_topology_facts
+        for label, loose in (("edge", Edge.make_line((10, 0, 0), (20, 0, 0))), ("vertex", Vertex(10, 0, 0))):
+            with self.subTest(label), mock.patch.object(
+                    tessellate, "_faces_one_by_one", wraps=tessellate._faces_one_by_one) as one_by_one:
+                _body, mesh = _mesh(_compound(Box(5, 5, 5), loose))
+                one_by_one.assert_not_called()
+                self.assertEqual(len(mesh.indices) // 3, 12)
 
-        box, cylinder = Box(1, 2, 3).wrapped, Cylinder(1, 2).wrapped
-        table = build_selector_table(cylinder, extract_topology_facts(cylinder))
-        with self.assertRaisesRegex(MeshProductionError, "selector table"):
-            mesh_component(box, table, {}, part=_part(), chord=5e-4, angle=0.35)
+    def test_a_mirrored_placement_read_face_by_face_still_faces_outward(self):
+        from build123d import Box
+        from OCP.TopLoc import TopLoc_Location
+        from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf
+
+        from cadgen._internal import tessellate
+
+        mirror = gp_Trsf()
+        mirror.SetMirror(gp_Ax2(gp_Pnt(50, 0, 0), gp_Dir(1, 0, 0)))
+        mirrored = Box(10, 10, 10).wrapped.Moved(TopLoc_Location(mirror), False)
+        with mock.patch.object(tessellate, "_faces_from_gltf", return_value=None):
+            _body, mesh = _mesh(_compound(mirrored))
+        corners = _corners(mesh)
+        volume = np.einsum("ij,ij->i", corners[:, 0], np.cross(corners[:, 1], corners[:, 2])).sum() / 6
+        self.assertAlmostEqual(float(volume), 1000.0, places=3)
 
 
 if __name__ == "__main__":

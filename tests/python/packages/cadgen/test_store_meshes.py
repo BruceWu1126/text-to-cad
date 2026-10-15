@@ -216,35 +216,6 @@ class MeshCodecContract(unittest.TestCase):
         with self.assertRaises(ValueError):
             encode([2], second=3)
 
-    def test_a_body_that_draws_a_face_off_its_surface_names_it_for_every_reader(self):
-        from tests.python.support.tessellation import js_reader
-
-        payload = self.encode(unverified_faces=[1])
-        decoded = meshes.decode_payload(payload)
-        self.assertEqual((decoded.unverified_faces, decoded.unmeshed_faces), ([1], []))
-        self.assertEqual(meshes.unverified_faces(payload), [1])
-        # The record counts it, and the client reads the same count off the body.
-        self.assertEqual(meshes.body_facts(payload)["unverifiedFaceCount"], 1)
-        self.assertEqual(js_reader([payload])[0][0]["unverifiedFaceCount"], 1)
-        whole = self.encode()
-        self.assertNotIn("unverifiedFaces", _json(whole)["extras"]["cadgen"])
-        self.assertNotIn("unverifiedFaceCount", meshes.body_facts(whole))
-        # A body may leave one face undrawn and draw another off its surface, never one face as
-        # both; a named face is one of the table's drawn faces, named once, in order.
-        two = [{"ord": 1, "indexStart": 0, "indexCount": 3}, {"ord": 2, "indexStart": 3, "indexCount": 0}]
-        both = self.encode(face_ranges=two, unmeshed_faces=[2], unverified_faces=[1])
-        self.assertEqual((meshes.unmeshed_faces(both), meshes.unverified_faces(both)), ([2], [1]))
-        self.assertEqual(js_reader([both])[0][0]["unmeshedFaceCount"], 1)
-        for label, value in (("a face left undrawn", [2]), ("an empty list", []), ("out of order", [1, 1]),
-                             ("not a face", [3])):
-            gltf = _json(both)
-            gltf["extras"]["cadgen"]["unverifiedFaces"] = value
-            with self.subTest(label=label), self.assertRaises(ValueError):
-                meshes.decode_payload(_with_json(both, gltf))
-            self.assertEqual(js_reader([_with_json(both, gltf)]), [[None, None]], label)
-        with self.assertRaises(ValueError):
-            self.encode(face_ranges=two, unverified_faces=[2])
-
     def test_the_writer_refuses_a_body_no_reader_would_take(self):
         self.encode()
         for label, changes in (

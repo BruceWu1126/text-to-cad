@@ -4,24 +4,20 @@ README law 1 and STORE.md §3: a part's display mesh is closed (each edge of the
 an even number of triangles), covers every face of its BREP that the tolerance can resolve and
 nothing outside it (each face's area is the exact face's, no face is left silently empty), lies on
 its exact surfaces within the display tolerance (its vertices and the interior of its triangles
-alike), is wound outward with its normals the surfaces' own, and has no folded or degenerate
-triangle. A solid of every surface kind cadgen meets -- planes and cylinders round a hole, fillets,
+alike), is wound outward with its normals the surfaces' own, and has no folded triangle and no
+degenerate one but the collapsed triangles that close a pole or an apex. A solid of every
+surface kind cadgen meets -- planes and cylinders round a hole, fillets,
 a sphere and a torus closing on themselves, a cone to its apex, a loft of degree 14, a spline and
 an ellipse extruded, a spline revolved, a plate made of rational B-splines, and windows cut through
 a sphere -- is built here and held to each clause through the store's own mesher, at the one
-display tolerance. The plate is meshed twice more with every curved face the library's own: once
-dropped from what OCCT meshed, as a face it refused, once kept from OCCT as the cost guard keeps a
-face; either way the library meshes it over the polylines its planar neighbours fixed, and the
-solid is held to every clause as before. The scoreboard (the repository's manual benchmark)
-measures the same clauses over a corpus of real models; this test says they hold at all.
+display tolerance. The scoreboard (the repository's manual benchmark) measures the same clauses
+over a corpus of real models; this test says they hold at all.
 """
 
 from __future__ import annotations
 
-import contextlib
 import math
 import unittest
-from unittest import mock
 
 import numpy as np
 
@@ -31,6 +27,9 @@ add_repo_path("packages/cadgen/src")
 
 SAMPLE = 24  # the longest triangles of each face whose interiors are projected onto the surface
 AREA_TOLERANCE = 1e-2
+# A round body meshed at the display angle tolerance (0.35 rad between a vertex's normal and its
+# neighbour's) loses up to half a per cent of its volume to its facets.
+VOLUME_TOLERANCE = 1e-2
 TRIANGLE_BUDGET = 4.0  # against OCCT's BRepMesh at the same tolerances
 # A triangle is folded when its facet points against the normal it is drawn with by more than the
 # rounding of a sliver seen edge-on: the cosine between them below this.
@@ -86,32 +85,10 @@ def _shapes() -> dict:
     }
 
 
-def _curved_faces(topods) -> set[int]:
-    """The ordinals of the solid's faces on a curved surface."""
-    from OCP.BRepAdaptor import BRepAdaptor_Surface
-    from OCP.GeomAbs import GeomAbs_SurfaceType as T
-    from OCP.TopoDS import TopoDS
-
-    faces = _face_map(topods)
-    return {ordinal for ordinal in range(1, faces.Extent() + 1)
-            if BRepAdaptor_Surface(TopoDS.Face_s(faces.FindKey(ordinal)), False).GetType() != T.GeomAbs_Plane}
-
-
-def _refusing(real, ordinals: set[int]):
-    """``tessellate._occt_mesh`` with ``ordinals`` dropped from what OCCT meshed, as faces it refused."""
-    def occt_mesh(topods, face_map, skip, deflection, angle):
-        return {index: block for index, block in real(topods, face_map, skip, deflection, angle).items()
-                if index + 1 not in ordinals}
-    return occt_mesh
-
-
-def _mesh(topods, *, library: set[int] = frozenset(), refused: bool = False):
-    """The solid's display mesh as the store derives it, decoded, with its deflection in millimetres
-    and what the library found and did per face (``tessellate._mesh_component``'s report).
-    ``library`` names faces the library meshes instead of OCCT: kept from OCCT as the cost guard
-    keeps a face, or, with ``refused``, dropped from what OCCT meshed as faces it refused."""
-    from cadgen._internal import tessellate
+def _mesh(topods):
+    """The solid's display mesh as the store derives it, decoded, with its deflection in millimetres."""
     from cadgen._internal.selector_table import build_selector_table
+    from cadgen._internal.tessellate import mesh_component
     from cadgen._internal.topology_extract import extract_topology_facts
     from cadgen.store.meshes import decode_payload
     from cadgen.store.parts import PART_VERSION
@@ -120,18 +97,12 @@ def _mesh(topods, *, library: set[int] = frozenset(), refused: bool = False):
     from OCP.Bnd import Bnd_Box
 
     table = build_selector_table(topods, extract_topology_facts(topods))
-    report: dict = {}
-    guard = (lambda ordinal: ordinal in library) if library and not refused else None
-    refusal = (mock.patch.object(tessellate, "_occt_mesh", _refusing(tessellate._occt_mesh, library))
-               if refused else contextlib.nullcontext())
-    with refusal:
-        body = tessellate._mesh_component(topods, table, {}, part="0" * 64 + f"-v{PART_VERSION}",
-                                          chord=DISPLAY_TESSELLATION["chordTolerance"],
-                                          angle=DISPLAY_TESSELLATION["angleTolerance"], report=report, guard=guard)
+    body = mesh_component(topods, table, {}, part="0" * 64 + f"-v{PART_VERSION}",
+                          chord=DISPLAY_TESSELLATION["chordTolerance"], angle=DISPLAY_TESSELLATION["angleTolerance"])
     box = Bnd_Box()
     BRepBndLib.Add_s(topods, box, False)
     x0, y0, z0, x1, y1, z1 = box.Get()
-    return decode_payload(body), DISPLAY_TESSELLATION["chordTolerance"] * math.dist((x0, y0, z0), (x1, y1, z1)), report
+    return decode_payload(body), DISPLAY_TESSELLATION["chordTolerance"] * math.dist((x0, y0, z0), (x1, y1, z1))
 
 
 def _odd_edges(positions, triangles) -> int:
@@ -232,9 +203,9 @@ def _occt_triangles(topods, deflection: float, angle: float) -> int:
 class _Case:
     """One solid, meshed once for every clause."""
 
-    def __init__(self, shape, **how) -> None:
+    def __init__(self, shape) -> None:
         self.shape = shape
-        self.mesh, self.deflection, self.report = _mesh(shape.wrapped, **how)
+        self.mesh, self.deflection = _mesh(shape.wrapped)
         self.positions = np.asarray(self.mesh.positions, np.float64)
         self.triangles = np.asarray(self.mesh.indices, np.int64).reshape(-1, 3)
         self.faces = _face_map(shape.wrapped)
@@ -248,23 +219,7 @@ class _Case:
 class MeshContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        shapes = _shapes()
-        cls.cases = {name: _Case(shape) for name, shape in shapes.items()}
-        curved = _curved_faces(shapes["plate"].wrapped)
-        cls.cases["plate, curved faces refused"] = _Case(shapes["plate"], library=curved, refused=True)
-        cls.cases["plate, curved faces guarded"] = _Case(shapes["plate"], library=curved)
-
-    def test_a_face_occt_refused_or_the_guard_kept_from_it_is_the_librarys_and_the_solid_whole(self) -> None:
-        # The clauses above hold on these cases like any other; this is who meshed what.
-        curved = _curved_faces(self.cases["plate"].shape.wrapped)
-        self.assertGreaterEqual(len(curved), 5, "the bore, the rounds and the sphere")
-        for name, listed in (("plate, curved faces refused", "refused"), ("plate, curved faces guarded", "guarded")):
-            with self.subTest(name):
-                report = self.cases[name].report
-                self.assertEqual(set(report[listed]), curved)
-                self.assertEqual({ordinal for ordinal, facts in report["faces"].items() if facts["madeBy"] == "library"},
-                                 curved, "the library made every face OCCT did not, and no other")
-                self.assertEqual(([], []), (report["unmeshed"], report["unverified"]))
+        cls.cases = {name: _Case(shape) for name, shape in _shapes().items()}
 
     def test_every_solid_is_closed(self) -> None:
         for name, case in self.cases.items():
@@ -309,13 +264,13 @@ class MeshContractTests(unittest.TestCase):
             with self.subTest(name):
                 a, b, c = (case.positions[case.triangles[:, k]] for k in range(3))
                 facets = np.cross(b - a, c - a)
-                self.assertTrue(bool((np.linalg.norm(facets, axis=1) > 0).all()), f"{name}: a degenerate triangle")
+                # A triangle of no area is a collapsed one -- two corners at one point, where OCCT
+                # closes a pole or an apex -- never a sliver of three distinct points.
+                flat = np.linalg.norm(facets, axis=1) == 0
+                collapsed = (a == b).all(axis=1) | (b == c).all(axis=1) | (c == a).all(axis=1)
+                self.assertTrue(bool((~flat | collapsed).all()), f"{name}: a degenerate triangle")
                 volume = float(np.einsum("ij,ij->i", a, np.cross(b, c)).sum() / 6)
-                # A mesh within d of its surface everywhere encloses a volume within area x d of
-                # the solid's (an inscribed mesh falls short by up to that); a face wound inward
-                # would be off by twice its own volume share.
-                self.assertAlmostEqual(1.0, volume / case.shape.volume,
-                                       delta=case.shape.area * case.deflection / case.shape.volume,
+                self.assertAlmostEqual(1.0, volume / case.shape.volume, delta=VOLUME_TOLERANCE,
                                        msg=f"{name}: wound outward, its volume the solid's")
                 normals = np.asarray(case.mesh.normals, np.float64)[case.triangles].sum(axis=1)
                 cosine = np.einsum("ij,ij->i", facets, normals) / (np.linalg.norm(facets, axis=1)

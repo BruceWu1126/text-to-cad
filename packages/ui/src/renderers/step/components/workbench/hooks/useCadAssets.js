@@ -162,9 +162,9 @@ function failedPartNames(descriptor, failures) {
   return names;
 }
 
-// The parts whose component mesh names faces -- `unmeshedFaces`, the faces no mesher could cover,
-// drawn without; `unverifiedFaces`, the faces drawn though off their exact surface -- by the names
-// the tree gives them: the model is whole but for those faces, and the viewport says so.
+// The parts whose component mesh names faces no mesher could cover (`unmeshedFaces`), drawn
+// without them, by the names the tree gives them: the model is whole but for those faces, and the
+// viewport says so.
 function namedPartNames(descriptor, componentMeshDataByCid, named) {
   const short = new Set(Object.entries(componentMeshDataByCid || {})
     .filter(([, meshData]) => meshData?.[named]?.length).map(([cid]) => cid));
@@ -659,7 +659,6 @@ export function useCadAssets({
             }
             if (final) {
               nextState.assemblyUnmeshedParts = namedPartNames(packageDescriptor, componentMeshDataByCid, "unmeshedFaces");
-              nextState.assemblyUnverifiedParts = namedPartNames(packageDescriptor, componentMeshDataByCid, "unverifiedFaces");
             }
             const ctx = packageRef.current;
             if (ctx && ctx.requestId === requestId) {

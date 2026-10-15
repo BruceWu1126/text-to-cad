@@ -2,8 +2,8 @@
 //
 // Produces the structure buildMeshDataFromGlbBuffer produced from a component
 // GLB, so everything downstream — package composition, themes, selection
-// ranges — is untouched by the artifact swap. Geometry is cadgen's mesh of
-// the exact surfaces, in CAD units, handed on INDEXED: the mesh's shared
+// ranges — is untouched by the artifact swap. Geometry is cadgen's OCCT mesh
+// of the exact surfaces, in CAD units, handed on INDEXED: the mesh's shared
 // vertices, normals and index buffer are the render buffers, never expanded
 // per corner. CAD edges ride beside the triangles as indexed line segments
 // built from the same mesh's edge table and points.
@@ -144,9 +144,8 @@ export function buildComponentMeshData(component) {
     parts: [part],
     has_source_colors: false,
     sourceColor: "",
-    // The faces no mesher could cover, which this mesh does not draw, and the faces it draws off
-    // their exact surface: the viewer names the parts drawn without the one and with the other.
+    // The faces no mesher could cover, which this mesh does not draw: the viewer names the
+    // parts drawn without them.
     unmeshedFaces: [...(component.unmeshedFaces || [])],
-    unverifiedFaces: [...(component.unverifiedFaces || [])],
   };
 }

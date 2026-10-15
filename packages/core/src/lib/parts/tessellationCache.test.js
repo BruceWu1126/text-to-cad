@@ -383,41 +383,6 @@ test("a body that leaves a face no mesher covered names it, and its record count
   }
 });
 
-test("a body that draws a face off its surface names it, and its record counts it", () => {
-  const offSurface = encodeMeshFixture({ ...componentFixture(), unverifiedFaces: [7] }, { part: P });
-  const decoded = decodeComponentTessellation(offSurface);
-  assert.ok(decoded);
-  assert.deepEqual([...decoded.component.unverifiedFaces], [7]);
-  assert.deepEqual([...solidComponent().unverifiedFaces], [], "a body on its surface names none");
-  // The render data carries them, for the viewer to name the part drawn off its surface.
-  assert.deepEqual(buildComponentMeshData(decoded.component).unverifiedFaces, [7]);
-  const row = partRowFor(offSurface);
-  assert.equal(row.glb.unverifiedFaceCount, 1);
-  assert.deepEqual(partRow(P, row), row);
-  assert.ok(partMeshMatches(offSurface, row));
-  const { unverifiedFaceCount: _count, ...uncounted } = row.glb;
-  assert.equal(partMeshMatches(offSurface, { ...row, glb: uncounted }), false, "a record that does not count them is another mesh's");
-  for (const count of [0, 2, 1.5]) {
-    assert.equal(partRow(P, { ...row, glb: { ...row.glb, unverifiedFaceCount: count } }), null, `count ${count}`);
-  }
-  // A body may name a face left undrawn and another drawn off its surface, never one as both; a
-  // named face is one of the table's drawn faces, named once, in order.
-  const both = encodeMeshFixture({
-    ...componentFixture(),
-    faceRanges: [{ ord: 7, indexStart: 0, indexCount: 3 }, { ord: 8, indexStart: 3, indexCount: 0 }],
-    unmeshedFaces: [8], unverifiedFaces: [7],
-  }, { part: P });
-  assert.ok(decodeComponentTessellation(both));
-  assert.deepEqual(partRowFor(both).glb, { ...partRowFor(both).glb, unmeshedFaceCount: 1, unverifiedFaceCount: 1 });
-  for (const [label, value] of Object.entries({
-    "a face left undrawn": [8], "an empty list": [], "out of order": [7, 7], "not a face": [9],
-  })) {
-    assert.equal(decodeComponentTessellation(rewriteJson(both, (gltf) => {
-      gltf.extras.cadgen.unverifiedFaces = value;
-    })), null, label);
-  }
-});
-
 test("batch container preserves aligned zero-copy hits, misses and odd payloads", () => {
   const entry = encodedEntry();
   const odd = new Uint8Array([1, 2, 3]);

@@ -123,24 +123,21 @@ def mesh_warnings(
     rows: Sequence[Mapping[str, Any]],
     consequence: str,
 ) -> list[str]:
-    """A warning per component whose stored display mesh names faces
-    (``cadgen.store.meshes``): one for the faces no mesher could cover, left undrawn,
-    with the occurrences of ``rows`` that place the component and ``consequence``; one
-    for the faces drawn though off their exact surface. A probe per component when it
+    """A warning per component whose stored display mesh leaves faces undrawn
+    (``cadgen.store.meshes``): the faces no mesher could cover, with the occurrences of
+    ``rows`` that place the component and ``consequence``. A probe per component when it
     names none."""
-    from cadgen.store.meshes import placements, unmeshed_warning, unverified_warning
-    from cadgen.store.parts import stored_named_faces, unmeshed_face_names
+    from cadgen.store.meshes import placements, unmeshed_warning
+    from cadgen.store.parts import stored_unmeshed_faces, unmeshed_face_names
 
     components = descriptor.get("components") if isinstance(descriptor.get("components"), Mapping) else {}
     failed = failed_parts(descriptor)
     warnings = []
     for cid, occurrences in placements(rows).items():
         key = str((components.get(cid) or {}).get("part") or "")
-        unmeshed, unverified = stored_named_faces(key) if key and cid not in failed else ([], [])
+        unmeshed = stored_unmeshed_faces(key) if key and cid not in failed else []
         if unmeshed:
             warnings.append(unmeshed_warning(occurrences, unmeshed_face_names(key, unmeshed), consequence))
-        if unverified:
-            warnings.append(unverified_warning(occurrences, unmeshed_face_names(key, unverified)))
     return warnings
 
 

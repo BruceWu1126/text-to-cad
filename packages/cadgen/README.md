@@ -5,8 +5,8 @@ documents into derived state, and derived state into pixels and meshes. One
 PyPI package carrying the Python engine under `src/cadgen/` and what it executes
 that is not Python under `src/cadgen/_runtime/`: the shared JavaScript runtime and
 the CAD Viewer's client, bundled in at build time (the JS *source* lives in its own
-packages and never ships as source), and two native libraries, each one build per
-platform: the file tracer and the mesh library (their C sources are `native/`).
+packages and never ships as source), and one native library, one build per
+platform: the file tracer (its C source is `native/`).
 
 **PURPOSE** — the engine and its command surface: model execution, the
 store, document assembly, kinematics, exports, validation, inspection,
@@ -72,7 +72,7 @@ this one:
 |---|---|---|
 | Build status and preview: the viewer's feed says whether a build of a file is running or failed and, as soon as the build has its result, names the **preview revision** -- the result tree and the parts it draws with, artifact-side objects -- which the viewer draws labelled as a preview until the saved file replaces it in place; a part's identity is its geometry (law 20), so the saved file's parts are the preview's and nothing is fetched twice | saved-artifact read-back; no reader reaches source, closure or a model record; a preview never stands in for a saved file, and a parent never pins one | [`STORE.md`](STORE.md) §9b |
 | Composition: what a decorated call returns, what a parent may consume before a child's save, and when an exact `Compound(children=[...])` keeps its children's pins | the link/component decision, declared-output completion, `isinstance(root, Compound)` | [`STORE.md`](STORE.md) §6, §9a |
-| Display data: canonical trees pin encoded BREP and effective intrinsic face colors; a build job derives each part's display data — ONE record naming two objects, cadgen's mesh at the one display tolerance and the selector table, both made from the component's topology facts, extracted in memory under an attested producer — in its own process before it reports done (a parent waits for its children, whose jobs derived theirs); views only read, and a part missing from the store is derived by one build-pool job; cadgen is the only mesher — every client draws the store's meshes and holds no tolerance. A mesh is OCCT's triangulation **verified**: cadgen's native library checks every face of it against the exact geometry (closed, covering its trim, on its surface, no folded triangle) and repairs what fails locally, always, with no clock deciding what is checked; a face it cannot mesh at all is left out of the body and named, one it cannot bring within twice the tolerance of its surface is drawn and named, and nothing is drawn silently wrong | geometry stays separate from display data — the record is written before the build derives, so a part that fails to derive is a warning and never makes the geometry rebuild; `read_step` never waits for a part; a mesh that passed verification is a mesh, whichever algorithm made it | [`STORE.md`](STORE.md) §3 |
+| Display data: canonical trees pin encoded BREP and effective intrinsic face colors; a build job derives each part's display data — ONE record naming two objects, OCCT's mesh at the one display tolerance and the selector table, both made from the component's topology facts, extracted in memory under an attested producer — in its own process before it reports done (a parent waits for its children, whose jobs derived theirs); views only read, and a part missing from the store is derived by one build-pool job; cadgen is the only mesher — every client draws the store's meshes and holds no tolerance | geometry stays separate from display data — the record is written before the build derives, so a part that fails to derive is a warning and never makes the geometry rebuild; `read_step` never waits for a part | [`STORE.md`](STORE.md) §3 |
 | Tree composition: an all-link parent's saved-document tree composed from its children's document trees instead of parsed from the STEP it just wrote | `index/document` holds the cold compile of the written bytes, the same tree either way; every ineligible case parses | [`STORE.md`](STORE.md) §3 |
 | STEP splicing: the same parent's STEP written from its children's saved STEP files instead of exported through OCCT | the cold compile of the spliced file is the exported file's; every ineligible case exports | [`STORE.md`](STORE.md) §3 |
 
@@ -538,9 +538,9 @@ src/cadgen/
                          #   lineage provenance is made of),
                          #   filetrace (every file a build opens),
                          #   tessellate (every display mesh: OCCT's
-                         #   triangulation, each face verified against the
-                         #   exact BREP and repaired by the native mesh
-                         #   library),
+                         #   triangulation of the exact BREP, each face checked
+                         #   against its surface and meshed again where it
+                         #   strays),
                          #   geometry_fingerprint (a component's fingerprint
                          #   and its elements' tokens, from its geometry),
                          #   tree_tokens (an occurrence's token, from its
@@ -572,11 +572,9 @@ src/cadgen/
                          #   a host that renders no MCP Apps (browser)
   _runtime/              # BUILT JS (browser snapshot renderer, the viewer
                          #   client, the MCP app page) and the native file
-                         #   tracer and mesh library, one library each per
-                         #   platform — produced when the wheel is packaged,
-                         #   never committed, never edited
-native/                  # the native libraries' C sources: filetrace.c, and
-                         #   tessellate/ (one unity build, tessellate.c)
+                         #   tracer, one library per platform — produced when
+                         #   the wheel is packaged, never committed, never edited
+native/                  # the native library's C source: filetrace.c
 ```
 
 Verbs by format: `step` compile · build · snapshot;

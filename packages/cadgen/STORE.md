@@ -481,8 +481,7 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   (`store/parts.py`), naming TWO objects -- its display mesh and its selector
   table -- with what a reader sizes each by without opening it: each object's
   byte length, the mesh's decoded-bytes estimate and counts (and
-  `unmeshedFaceCount` when a face could not be meshed, `unverifiedFaceCount`
-  when one is drawn off its surface), the table's counts. One
+  `unmeshedFaceCount` when a face could not be meshed), the table's counts. One
   probe answers whether a part's display data is stored: the entry is valid and
   both objects are present at their sizes. Derivation (`parts._derive`) decodes
   the component's BREP once, extracts its **topology facts** in memory
@@ -524,41 +523,19 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   `components/<cid>.selectors.json`. So a ref the page shows resolves in
   `inspect` to the entity it names, and nothing in a browser mints one.
 
-  Meshes are derived the same way, and by cadgen alone, in two steps that are
-  one law: OCCT triangulates, and cadgen's native library proves every face of
-  the result or repairs it. OCCT's `BRepMesh` meshes the component at the
-  display tolerance (`tessellation_policy.DISPLAY_TESSELLATION`: the chord
-  tolerance a fraction of the component's extent, the angle in radians),
-  discretizing each model edge once and triangulating each face in its own
-  parameters by a constrained Delaunay of that trim, so the body is closed
-  across its faces by construction. The library (`native/tessellate/`, one
-  build per platform in `_runtime/native`, driven by `_internal/tessellate.py`)
-  then **verifies** every face against the exact geometry it evaluates itself
-  -- each analytic surface by its formula, each B-spline surface, pcurve and
-  edge curve by its poles and knots, each conic, and each surface of extrusion
-  or revolution of those; any other surface through OCCT: the face's triangles
-  meet its neighbours' along every shared edge, they cover the face's trim and
-  nothing outside it, each vertex and the interior of each triangle lie on the
-  surface within the chord tolerance, and no triangle is a folded needle. A
-  face that fails is **repaired** in place -- refined where a chord, a centre
-  or a facet strays, split where folded, closed against the neighbour's
-  polyline where open, and meshed by the library alone, over the polylines its
-  neighbours already fixed, where OCCT refused it or left it wrong -- and
-  verified again. The bounds are the policy's (`tessellation_policy.VERIFICATION`):
-  a sample past one deflection off the surface has its triangle repaired, and a
-  face any sample of which is still past two after the repair's rounds is left
-  as it is and named (below). A face whose cost OCCT would not survive -- a
-  rational B-spline surface closed in one direction as a single span (poles no
-  more than the degree plus one) and running, in the other, at least
-  `GUARD_SPANS` (32) spans of degree `GUARD_SPAN_DEGREE` (8) or more: the swept
-  tube whose section's parameter runs many times faster on one side than the
-  other (`tessellation_policy.cost_guard`, a judgement of the geometry, never
-  of a clock) -- is the library's from the start. Every face of every part is
-  verified, whatever its size and however long OCCT took; no clock decides what
-  is checked, and a mesh no face of which was verified is never stored. The
-  library reads what the triangles do not say from the part's selector table
-  (each face's area, each edge's class) and the component's face colours. A
-  body (`store/meshes.py`) is
+  Meshes are derived the same way, and by cadgen alone. The mesher
+  (`_internal/tessellate.py`) runs OCCT's `BRepMesh_IncrementalMesh` on the exact
+  BREP at the display tolerance (`tessellation_policy.DISPLAY_TESSELLATION`: the
+  chord tolerance a fraction of the component's bounding diagonal, the angle in
+  radians; each pass is checked for a face left empty, holed (where OCCT reports a
+  failure or the mesh has an open edge), or off its exact surface (each cylinder,
+  cone, sphere and torus, which OCCT does not measure, and each freeform face a
+  screen of its triangles picks), and a part with such a face is meshed again,
+  whole and finer, unless its first pass took seconds; a face no pass gets right is
+  tessellated over its own parameters by `_internal/face_fallback.py` where that
+  does no harm; a needle folded over its neighbour is unfolded), reading what the
+  triangles do not say from the part's selector table (each face's area, each
+  edge's class) and the component's face colours. A body (`store/meshes.py`) is
   glTF 2.0 binary in the component's own units: ONE triangle primitive
   (positions, normals, u16
   indices up to 65,535 vertices, else u32), a face table whose rows give each
@@ -567,23 +544,16 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   chunk is the canonical JSON for the body's part key, bounds and colour
   palette, which every reader rebuilds and requires before it views the arrays
   in place. Any glTF viewer draws it (its one node turns Z-up millimetres into
-  Y-up metres); the tables are `extras`. A face neither step can bring right --
-  its geometry raising inside OCCT, its trim unreadable, a mesh still open,
-  folded or short of its trim after the library's own -- never fails the
-  component: it is meshed without that face, whose range is empty, and the
-  body names it (`unmeshedFaces`, only in a body that has one; the part's
-  entry counts them, `unmeshedFaceCount`). A face whose triangles meet their
-  neighbours, cover the trim and face the surface but still stray from it past
-  twice the tolerance after the repair's rounds is drawn as it is and named
-  too (`unverifiedFaces`; `unverifiedFaceCount` in the entry): never drawn
-  silently wrong. Every reader says so: a view or a list warns which faces of
-  which part it does not draw or count and which it draws off their surface,
-  the CAD Viewer names the parts it draws without them and the parts it draws
-  off their surface, and a mesh export warns that its file has a hole there
-  and is not watertight, or that a face of it lies off its surface. A face
-  smaller than the mesh resolves (area under the deflection squared, or a trim
-  narrower than the tolerance it is sampled to) may have no triangles and is
-  not named. Any other failure -- OCCT raising outside a face, a body its
+  Y-up metres); the tables are `extras`. A face no mesher covers -- OCCT refused
+  it and the fallback's triangles missed its area by more than a quarter --
+  never fails the component: it is meshed without that face, whose range is
+  empty, and the body names it (`unmeshedFaces`, only in a body that has one;
+  the part's entry counts them, `unmeshedFaceCount`). Every reader says so: a
+  view or a list warns which faces of which part it does not draw or count, the
+  CAD Viewer names the parts it draws without them, and a mesh export warns that
+  its file has a hole there and is not watertight. A face smaller than the mesh
+  resolves (area under the deflection squared) may have no triangles and is not
+  named. Any other failure -- OCCT raising, a body its
   encoding refuses -- is the component's `MeshProductionError`. A mesh export
   at the display tolerance
   writes the stored display meshes; one at any other tolerance meshes each part

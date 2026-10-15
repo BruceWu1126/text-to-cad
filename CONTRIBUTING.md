@@ -107,8 +107,7 @@ dev install's server and skills at it (see [Test In Agent Apps](#test-in-agent-a
 `packages/cadgen/src/cadgen/_runtime/` is BUILT, not committed — the whole
 directory is gitignored, and the wheel is the only place those files ship. A
 fresh clone therefore has no snapshot browser bundle, no Viewer client, no
-file tracer -- so it builds no model -- and no mesh library -- so it verifies, and
-therefore meshes, no part -- until `scripts/bundle/bundle.sh` runs, and cadgen says so by name the
+file tracer -- so it builds no model -- until `scripts/bundle/bundle.sh` runs, and cadgen says so by name the
 first time it reaches for one. `scripts/test/test-python.sh` and
 `scripts/test/test-global.sh` build the stages they read if they are missing or
 older than their sources (the native libraries for this machine only), so this
@@ -374,8 +373,8 @@ the first run made, which is what the removed one lacked; its pressure test is
 `tests/python/packages/cadgen/test_kernel_memo.py`, and a change to it runs
 that first.
 
-A change to how a part is meshed -- the mesher, the verifier and its repairs
-(`packages/cadgen/native/tessellate/`, `cadgen/_internal/tessellate.py`), or the
+A change to how a part is meshed -- the mesher and its checks and repairs
+(`cadgen/_internal/tessellate.py`, `cadgen/_internal/face_fallback.py`), or the
 policy that drives them (`cadgen/tessellation_policy.py`) -- opens its PR with
 the mesh scoreboard (`scripts/bench/mesh-scoreboard/`) run over the sample
 corpus on `main` and on the branch: solids with open edges, cracks wider than
@@ -604,10 +603,8 @@ wrong.
 
 `main` is source. Everything cadgen executes that is not Python — the snapshot
 browser bundle under `cadgen/_runtime/browser`, the CAD Viewer client under
-`_runtime/viewer`, and the file tracer every build loads and the mesh library every
-mesh is verified and repaired by under `_runtime/native` (one C file each,
-`packages/cadgen/native/filetrace.c` and the unity build
-`packages/cadgen/native/tessellate/tessellate.c`, cross-compiled by zig for every
+`_runtime/viewer`, and the file tracer every build loads under `_runtime/native`
+(one C file, `packages/cadgen/native/filetrace.c`, cross-compiled by zig for every
 platform into the one wheel; `ziglang` comes with `requirements-dev.txt`) — is
 gitignored and produced by `scripts/bundle/bundle.sh`. Nothing built is ever
 committed: a rebundle used to add a megabyte of history per commit, and a
