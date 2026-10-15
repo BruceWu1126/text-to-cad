@@ -521,6 +521,10 @@ src/cadgen/
                          #   triangulation, each face verified against the
                          #   exact BREP and repaired by the native mesh
                          #   library),
+                         #   geometry_fingerprint (a component's fingerprint
+                         #   and its elements' tokens, from its geometry),
+                         #   tree_tokens (an occurrence's token, from its
+                         #   place in the tree),
                          #   kinematics_resolve (mate axes to numbers),
                          #   animation_bake
                          #   (clips to keyframes), mesh_export (the mesh

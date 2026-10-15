@@ -13,10 +13,13 @@ A STEP model with no surfaces (empty, or only curves and points) has nothing a
 view can draw: the snapshot still writes its image and warns that the model has
 no surfaces. A view or list that warns faces `could not be meshed` draws that part
 without them (and a list counts it without them); they are usually slivers a
-boolean left, and the warning names the part's ref and the faces (`#o1.2`, `f7`).
+boolean left, and the warning names the part's ref and the faces
+(`#o:4b1f9e2a7c03`, `f:9d2e8c1b5a70`). One that warns faces `could not be brought
+within tolerance of their exact surface` draws them as the mesher left them,
+past the display tolerance, and names them the same way.
 A part that `could not be meshed` at all, as the build warned, is left out: the
 view draws the rest of the model and the list lists the rest, each warning with the
-part's ref and the reason (`#o1.2 peg could not be meshed (...)`). The image or list
+part's ref and the reason (`#o:4b1f9e2a7c03 peg could not be meshed (...)`). The image or list
 is then not the whole model. A view or list of nothing else (every part it focuses
 on, or every one it does not hide) fails, naming them. Without `--json`, warnings
 print on stderr.
@@ -135,7 +138,7 @@ to the whole job (give a view its own job in a `jobs` array to select per view):
 {
   "input": "STEP/assembly.step",
   "mode": "view",
-  "selection": { "hide": ["#o1.3", "#o1.4"] },
+  "selection": { "hide": ["#o:e8a03d5b61f4", "#o:19c7f2d4a8b5"] },
   "outputs": [{ "path": "tmp/render/without_covers.png", "camera": "iso" }]
 }
 ```

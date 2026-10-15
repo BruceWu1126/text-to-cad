@@ -53,7 +53,7 @@ in [the drawing contract](../ui/docs/drawing.md); the mechanism is
 - **Demand boundary**: a render-only load builds no selector topology, and no
   raycast accelerator until a ray reaches a component's bounds.
   Selectors are cadgen's per-component table joined to the mesh by ordinal:
-  the page composes `occurrenceId.localId` and mints no fact of its own.
+  the page composes `<occurrence token>/<element token>` and mints no fact of its own.
   Mechanism: [docs/resource-ownership.md](docs/resource-ownership.md) §2.
 - **Reuse never changes what is exact**: recomposition, instanced draws,
   frustum culling and material pass keys may all reuse previous work, but

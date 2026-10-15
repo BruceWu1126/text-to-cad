@@ -27,8 +27,8 @@ for face in housing.entities("face"):
 - `scene.roots` and `occurrence.children` are tuples; `scene.leaves()` yields the
   geometry occurrences, repeated copies included. A leaf can hold several solids.
 - `scene.resolve(ref)` returns a selection with `ref`, `kind`, `occurrence_ref`,
-  `shape()` and `entities(kind)`, for kinds `"shape"`, `"face"`, `"edge"` and
-  `"vertex"`. Shape entities (`sN`) are solids, or shells when there are none.
+  `shape()` and `entities(kind)`, for kinds `"face"`, `"edge"` and `"vertex"`;
+  each entity carries its own ref, the occurrence's token and the element's.
 - `shape()` is caller-owned exact geometry in document world coordinates; a group
   gives an unfused compound. Keep it when making several queries.
 - `prototype_id` names geometry shared within this scene, so a body-local check
@@ -41,21 +41,26 @@ for face in housing.entities("face"):
 ### Reference syntax
 
 ```text
-#o1.2          occurrence or subassembly
-#o1.2.f7       canonical face 7 on that leaf occurrence
-#housing.e3   canonical edge 3 on the occurrence labelled housing
-#f7           face 7, only when the scene has exactly one leaf
-part.step#o1  a file-prefixed ref matching the opened STEP
+#o:4b1f9e2a7c03                 an occurrence or subassembly, by its token
+#o:4b1f9e2a7c03/f:9d2e8c1b5a70  a face of that leaf occurrence, by the face's token
+#housing/e:12ab34cd56ef         an edge of the occurrence labelled housing
+#f:9d2e8c1b5a70                 a face, only when the scene has exactly one leaf
+part.step#o:4b1f9e2a7c03        a file-prefixed ref matching the opened STEP
 ```
 
-One reference per `resolve()` call. A group has no face ordinals of its own:
-`scene.resolve("#group").entities("face")` enumerates its leaves' faces. Face and
-edge ids agree with the viewer; vertex ids enumerate native STEP vertices.
+A token is `o:`, `f:`, `e:` or `v:` and twelve lower-case hexadecimal characters.
+An occurrence's is minted from its place in the tree (its parent's token, its
+name, its placement), an element's from its geometry within its body (a face's
+surface class, tight box and normal; an edge's curve class, end points and
+length; a vertex's point), so the same face has the same token in every build
+that leaves it alone, and the viewer, the build's warnings and `resolve()` all
+name it alike. One reference per `resolve()` call. A group has no faces of its
+own: `scene.resolve("#group").entities("face")` enumerates its leaves' faces.
 
-Labels use letters, digits, `_` and `:`, and cannot start with a digit or look
-like numeric ref syntax; other names stay reachable by numeric id. Duplicate
-labels get numbered aliases in occurrence order (`#wheel_1`, `#wheel_2`), and the
-bare duplicate label raises, listing them.
+Labels use letters, digits, `_` and `:`, and cannot start with a digit; other
+names stay reachable by occurrence token. Duplicate labels get numbered aliases
+in occurrence order (`#wheel_1`, `#wheel_2`), and the bare duplicate label
+raises, listing them.
 
 A copied reference's file prefix is the file's absolute path (quoted when it holds
 a space or `#`) and must name the opened document; a relative prefix may match
@@ -88,7 +93,7 @@ volume = overlap_volume(solid_a, solid_b)
 contact and containment all give 0, so it does not measure penetration.
 `overlap_volume` is the exact intersection volume (mm³) of two finite, positively
 oriented solids, 0 for mere contact; pair bodies with
-`[s for e in scene.resolve("#group").entities("shape") for s in e.shape().solids()]`.
+`scene.resolve("#group").shape().solids()`.
 Kernel failures raise.
 
 Two solids at `overlap_volume` 0 at most touch. A pair meant to overlap (a

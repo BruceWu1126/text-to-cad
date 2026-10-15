@@ -69,7 +69,7 @@ if __name__ == "__main__":
   group `Compound`, which carries every part beneath it. Targets may nest: the
   deepest mate naming a part moves it, and the enclosing group carries only what
   no deeper mate claimed.
-- **`axis`** is a selector ref (`axis="#forearm.f2"`: a cylindrical face or
+- **`axis`** is a selector ref (`axis="#forearm/f:9d2e8c1b5a70"`: a cylindrical face or
   circular edge gives its axis, a planar face its centre and normal) or literals
   (`origin=(x, y, z), direction=(x, y, z)`), resolved once at build into numbers.
 - **Zero is the artifact as written**: every DOF's rest value is 0, the placement
@@ -97,7 +97,7 @@ Clips need a model script: a thin wrapper that reads the foreign STEP.
 cadgen step build vendor/hinge.step STEP/hinge.step \
   --kinematics '{"mates": [{"name": "swing", "kind": "revolute",
                             "parent": "#body", "child": "#lever",
-                            "axis": "#lever.f2", "limits": [0, 90]}],
+                            "axis": "#lever/f:9d2e8c1b5a70", "limits": [0, 90]}],
                  "poses": {"open": {"swing": 45}}}'
 ```
 
@@ -155,7 +155,7 @@ and nothing runs a clip after the build.
   so no state between calls, no clock, no randomness.
 - `m.get(*targets)` returns one handle on every occurrence its targets name. A
   target is `"#name"` (the part or group with that name; a group moves
-  everything beneath it) or an occurrence id such as `"#o1.2"` (that occurrence's
+  everything beneath it) or an occurrence token such as `"#o:4b1f9e2a7c03"` (that occurrence's
   subtree). Targets resolve as `read_scene` resolves them, against the written
   document's tree: a name several occurrences share fails, listing numbered
   aliases (`#bolt_1`, `#bolt_2`), and `m.labels()` lists the names.

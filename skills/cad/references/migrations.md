@@ -63,7 +63,7 @@ import cadgen
 def demo(t, m):
     angle = 60 * (1 - math.cos(2 * math.pi * t / 8))
     m.get("#forearm").rotate((0, 0, 1), angle, (0, 0, 0))
-    m.get("#o1.3", "#o1.4").opacity(0.5)
+    m.get("#o:e8a03d5b61f4", "#o:19c7f2d4a8b5").opacity(0.5)
 
 
 ANIMATION = {"demo": cadgen.clip(demo, duration=8, loop=False, label="Demo")}
@@ -74,7 +74,8 @@ ANIMATION = {"demo": cadgen.clip(demo, duration=8, loop=False, label="Demo")}
   becomes `deform_tube(rest=..., path=..., twist_deg=...,
   max_segment_length=..., braid=...)`; the paths keep their shape.
 - Every target starts with `#`: a bare label becomes `"#label"`, an occurrence
-  id is `"#o1.3"`, and a comma list becomes one argument per target. A label
+  is named by its token (`"#o:e8a03d5b61f4"`, below), and a comma list becomes
+  one argument per target. A label
   several parts share moved them all; now it fails, listing numbered aliases
   (`#wheel_1`, `#wheel_2`) to pass instead.
 - A group's name moves every part beneath it, and the module's helpers and
@@ -83,8 +84,27 @@ ANIMATION = {"demo": cadgen.clip(demo, duration=8, loop=False, label="Demo")}
   rebuild: wrap it in a model script that reads it with `read_step`, and
   declare the clips there.
 
-Rebuilding the model (`python <model>.py`) writes a schema-10 sidecar; a target
+Rebuilding the model (`python <model>.py`) writes a current sidecar; a target
 no part carries fails the build, naming the clip and the time.
+
+## Refs name geometry in 0.8
+
+A ref was positional: `#o1.2.f7` named the second occurrence under the first and
+its seventh face, numbers one saved revision gave them and the next could give to
+other geometry. A ref now names what it points at: an occurrence by a **token**
+minted from its place in the tree (`#o:4b1f9e2a7c03`) and an element by one
+minted from its own geometry (`#o:4b1f9e2a7c03/f:9d2e8c1b5a70`; a label may stand
+for the occurrence, `#housing/f:9d2e8c1b5a70`). The old spellings resolve to
+nothing, as any unknown string does: `resolve()` raises, a mate's `parent`,
+`child` or `axis` fails the build, and a clip's `m.get("#o1.3")` fails the bake.
+Take the new ones where they are shown -- the CAD Viewer's copy button, the
+`ref` of each row `cadgen step snapshot --mode list` prints, each entity's `ref`
+from `read_scene(...).resolve(...).entities(...)` -- and prefer labels, which
+need no renaming. The sidecar is schema 11: its mate ends, material
+assignments and animation tracks name occurrences by token. A schema-10
+sidecar is refused and is rebuilt by rerunning the model, which binds them
+anew; a built document's refs stay what they are until the geometry they name
+changes.
 
 ## Meshes come from cadgen in 0.8
 

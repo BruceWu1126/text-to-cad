@@ -153,7 +153,7 @@ the build-pool job that derives it fails -- is left out, as the CAD Viewer leave
 out: the view's component says why (`failure`, `cadgen.store.view`), the page draws
 every other part, and the list lists them. Each adds a warning naming the part's
 occurrences and why, in the words the build warned with
-(`#o1.2 peg could not be meshed (MeshProductionError: ...), so the view does not draw it`;
+(`#o:4b1f9e2a7c03 peg could not be meshed (MeshProductionError: ...), so the view does not draw it`;
 `cadgen.snapshot_parts.failed_part_warnings`), and the snapshot exits 0, as for any
 warning. Where every part a view or a list shows -- each one `--focus` names, else each
 one `--hide` leaves -- is such a part, there is nothing to show: it fails, naming them,

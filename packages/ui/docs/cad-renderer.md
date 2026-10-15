@@ -1100,7 +1100,7 @@ selection, including a pending topology pick.
 The filter is a second view of the tree, never a filter over its expansion.
 Typing replaces the rows with a flat, ranked list (first 200; a search-only status line counts
 every match) drawn from an index of what the presented tree already holds: every
-assembly and part by name or occurrence reference (`#o1.2`). Typing expands nothing
+assembly and part by name or occurrence token (`#o:4b1f9e2a7c03`). Typing expands nothing
 and requests no topology, so the picking frontier is the same before, during and
 after a search. The query matches a name as a subsequence (`navigation/fuzzy.js`: `m3scr` finds `M3 Screw`); several words may
 also name owners (`bridge screw`), provided one of them is in the name. A hit is

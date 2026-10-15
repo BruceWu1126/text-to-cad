@@ -119,17 +119,19 @@ Omitting OUT writes a sibling file with the format's extension. See
 
 ## Prompt references and inspection
 
-A reference such as `/work/robot/STEP/assembly.step#o1.2.f7` identifies geometry
-in a particular saved document. Its file part is the document's absolute path as
-the CAD viewer copied it, with the file's real name and extension (in quotes when it
-holds a space or `#`). Open that path with `read_scene`, and pass the whole reference
-to `resolve()`:
+A reference such as `/work/robot/STEP/assembly.step#o:4b1f9e2a7c03/f:9d2e8c1b5a70`
+identifies geometry in a particular saved document: an occurrence by its token
+(`o:` and twelve hexadecimal characters) and, after a slash, one of its faces,
+edges or vertices by the element's token (`f:`, `e:`, `v:`). Its file part is the
+document's absolute path as the CAD viewer copied it, with the file's real name
+and extension (in quotes when it holds a space or `#`). Open that path with
+`read_scene`, and pass the whole reference to `resolve()`:
 
 ```python
 from cadgen import read_scene
 
 scene = read_scene("/work/robot/STEP/assembly.step")
-selection = scene.resolve("/work/robot/STEP/assembly.step#o1.2.f7")
+selection = scene.resolve("/work/robot/STEP/assembly.step#o:4b1f9e2a7c03/f:9d2e8c1b5a70")
 face = selection.shape()  # owned native geometry, in document world coordinates
 print(selection.ref, face.area)
 ```
@@ -139,9 +141,14 @@ A note from the viewer's Quick Edit reads: what the person wants, then
 when they sketched on the view, `Sketch: <path>`: a PNG of the view with their
 markup (or the image itself, attached).
 
-A bare `#o1.2.f7` belongs to the document the conversation is about. Numeric refs
-belong to one saved revision, and a rebuild can renumber them. There is no inspect
-CLI: checks are Python scripts, and the
+A bare `#o:4b1f9e2a7c03/f:9d2e8c1b5a70` belongs to the document the conversation
+is about. A token names geometry, never a position: an occurrence's comes from
+its place in the tree (its parent, its name, its placement) and an element's from
+the element's own geometry within its body, so a ref keeps resolving to the same
+face through a rebuild that leaves that face alone, a sibling inserted beside it
+and the STEP round trip, and stops resolving when the geometry it named is gone.
+A part label stands in for an occurrence token (`#housing/f:9d2e8c1b5a70`). There
+is no inspect CLI: checks are Python scripts, and the
 [inspection reference](references/inspection-and-validation.md) covers label
 aliases, enumeration and measurement.
 

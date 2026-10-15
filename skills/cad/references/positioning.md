@@ -96,8 +96,8 @@ For example, for two planar mating faces (with their refs already identified):
 from cadgen import read_scene
 
 scene = read_scene("STEP/assembly.step")
-moving = scene.resolve("#moving.f1").shape()
-fixed = scene.resolve("#fixed.f2").shape()
+moving = scene.resolve("#moving/f:9d2e8c1b5a70").shape()
+fixed = scene.resolve("#fixed/f:12ab34cd56ef").shape()
 n = fixed.normal_at().normalized()
 m = moving.normal_at().normalized()
 signed_gap_mm = (moving.center() - fixed.center()).dot(n)

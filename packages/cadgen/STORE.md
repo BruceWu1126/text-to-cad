@@ -269,19 +269,46 @@ never moves a cid.
 A component has a second identity, for one question only -- which display data
 draws it -- and that identity is its geometry, not its bytes (README law 20).
 Its **fingerprint** (`_internal/geometry_fingerprint.py`) is `sha256` of the
-string `GEOMETRY_FINGERPRINT_SCHEME`, the shape's kind, its counts of solids,
-faces, edges and vertices, its vertex points rounded relative to its extent and
-sorted, and its faces' signatures sorted (each a face's surface type, its loose
-box rounded the same way, its edge count and its orientation), so the order
-OCCT lists anything in never enters it. Written to STEP and read back, a body
-has different bytes -- a different cid, a different `brep` object, the same
-tree read back as a separate tree -- and the same fingerprint. The tree names
-each component's fingerprint beside its cid (§3), the part key hashes the
-fingerprint and not the content hash (§3), and the preview revision (§9b) and
-the saved document therefore name the same parts: one body, one mesh, derived
-once. Rounding makes a fingerprint tolerant where a byte hash is exact, which
-is why nothing but display data stands on it: the gate, the publish rule, the
-sweeper and every object address stay with bytes.
+string `GEOMETRY_FINGERPRINT_SCHEME`, the rounding quantum, the kinds of the
+shape's bodies (solids, or shells, or the bare shape), its counts of faces,
+edges and vertices, its vertex points rounded and sorted, and its faces'
+signatures sorted (each a face's surface class -- the kernel's type with the
+pairs the STEP translation exchanges folded together, a Bezier with a
+B-spline, a torus with a surface of revolution -- its tight box rounded the
+same way, and its normal at its parametric middle rounded to quarters, an
+orientation signal that tells the coincident faces of two solids apart), so
+the order OCCT lists anything in never enters it. The quantum is the power of
+two at or below `RELATIVE_QUANTUM` (2^-12) times the diagonal of the body's
+tight box: a power of two so the quantum itself is exact, half the display
+chord tolerance so bodies that agree to it are drawn alike anyway. Written to
+STEP and read back, a body has different bytes -- a different cid, a different
+`brep` object, the same tree read back as a separate tree -- and the same
+fingerprint. The tree names each component's fingerprint beside its cid (§3),
+the part key hashes the fingerprint and not the content hash (§3), and the
+preview revision (§9b) and the saved document therefore name the same parts:
+one body, one mesh, derived once. Rounding makes a fingerprint tolerant where
+a byte hash is exact, which is why nothing but display data stands on it: the
+gate, the publish rule, the sweeper and every object address stay with bytes.
+
+How tolerant, measured over the sample corpus (199 model records, 17,923
+leaves, 5,079 pairs of a body a build held and the same body read back from the
+STEP it wrote, 10 pairs undecodable): 98.68 % of the pairs keep their
+fingerprint through the round trip, 99.20 % once the 59 pairs whose geometry
+the STEP translation itself changed are set aside; 99.92 % of faces keep their
+token (99.956 % settled the same way), 98.49 % of edges, 99.996 % of vertices;
+no two distinct elements of one body share a token beyond the quantum (four
+pairs within it, told apart by rank, by design). That is short of the 99.5 %
+of fingerprints and 99.99 % of faces aimed at, and what is lost is the STEP
+translation's own work, which no signature names across: an edge it splits
+differently reads back as edges that are not the one written, and a body whose
+coordinates straddle a rounding boundary rounds to another grid point. A
+coarser quantum straddles about as often -- the straddles are the
+translation's, not the grid's -- and merges near-coincident elements, whose
+tie-break ranks then drift between builds; an edge signature without its end
+points (class, midpoint and length) still changes when the edge is split. So
+the quantum and the signatures stay as they are, and a straddle costs what the
+law allows a geometric name (README law 20): one extra mesh derivation, or one
+renamed ref, never a wrong answer.
 
 - Bump `GEOMETRY_FINGERPRINT_SCHEME` when the same shape must be named
   differently -- a change to what the fingerprint reads or how it rounds -- and
@@ -309,7 +336,7 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
 ```json
 {
   "kind": "geometry-tree",
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "label": "link_arm",
   "entryKind": "assembly",
   "units": "mm",
@@ -473,9 +500,12 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   ref's facts are minted. From the exact BREP and the topology facts, per face,
   edge and vertex, the **element token** a ref ends in (`f:`, `e:`, `v:` and
   twelve hexadecimal characters: a hash, under `GEOMETRY_FINGERPRINT_SCHEME`,
-  of the element's geometry within its body -- a face's surface type, rounded
-  centroid, area and orientation; an edge's curve type, rounded end points and
-  midpoint; a vertex's rounded point -- so the element keeps its token through
+  of the element's geometry within its body -- a face's surface class, its
+  tight box rounded and its normal at its parametric middle rounded to
+  quarters; an edge's curve class, its rounded end points as a sorted pair and
+  its rounded length; a vertex's rounded point; two elements of one body with
+  equal signatures ranked by their exact values, each after the first hashing
+  its rank as well -- so the element keeps its token through
   the STEP round trip and whatever order OCCT lists it in, and the table of
   the body the build held resolves a token against the body read back from the
   document), the exact metrics and parameters the facts carry, the plane
@@ -715,20 +745,25 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   geometry while retaining their own finishes. Appearance-sensitive exports
   include the normalized appearance digest in their variant, including absence.
 
-  Model records use payload schema 8 (reach slices, import-time slices, absent,
-  roots and listing entries). Earlier records are misses: the next source run
-  rebuilds outputs whose input hashes may have been captured after a mid-build
-  edit, as well as outputs predating distinct occurrence colours.
+  Model records use payload schema 9: the tree a record names is geometry
+  schema 4, whose ids are tokens, and its correspondence maps and appearance
+  assignments are keyed by them; schema 8 (reach slices, import-time slices,
+  absent, roots and listing entries) keyed them by position. Earlier records
+  are misses: the next source run rebuilds outputs whose input hashes may have
+  been captured after a mid-build edit, as well as outputs predating distinct
+  occurrence colours.
   This is one source rebuild; existing geometry objects and parts remain reusable.
   A record with no `closure.own` leaves nothing out of its listings, which is
   how it hashed them, so it needs no new schema.
-  Document mappings use payload schema 8 (the tree an entry names is geometry
-  schema 3, and the hint is `producer`; schema 7 named schema-2 trees): saved
-  bytes stay authoritative and are reparsed without guessing
-  colours that the document does not contain. There are no directory or document-byte-key salts. Trees
-  use only geometry schema 3; there is no optional old-tree decoder. Schema 3
-  admits resolved named intrinsic appearance on authored trees and pins an
-  eager-only component's topology facts as `topology`. Document indexes may carry an
+  Document mappings use payload schema 9 (the tree an entry names is geometry
+  schema 4, and the hint is `producer`; schema 8 named schema-3 trees, 7
+  schema-2 trees): saved bytes stay authoritative and are reparsed without
+  guessing colours that the document does not contain. There are no directory
+  or document-byte-key salts. Trees use only geometry schema 4; there is no
+  optional old-tree decoder. Schema 4 names every occurrence, link and node by
+  its `o:` token and every native component by its fingerprint beside its cid;
+  3 admitted resolved named intrinsic appearance on authored trees and pinned an
+  eager-only component's topology facts as `topology`, which 4 keeps. Document indexes may carry an
   optional exact loaded `producer` hint outside the tree. A same-tree
   rewrite preserves a valid hint and external mesh ledger; a tree replacement
   drops both unless an attested producer is supplied. A reader selects tree and
@@ -738,9 +773,11 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
 
 - Consumers that speak the older flat shape (the viewer client, the mesh
   exports) read a **flattened** tree: `cadgen.store.trees.flatten` expands
-  links recursively (ids rebased — a child's `o1.2` under link `o1.3` becomes
-  `o1.3.2`; a part child's single occurrence takes the link's name),
-  composes transforms, and merges components. `cadgen.store.view` lays that
+  links recursively (tokens re-rooted: a child's nodes take the tokens the saved
+  document's own hierarchy mints for them under the link's token, which is the
+  token its node has once flattened -- a part child's one leaf by its name and
+  composed placement, an assembly child's group by its name,
+  `_internal/tree_tokens.py`), composes transforms, and merges components. `cadgen.store.view` lays that
   out as a temporary directory or serves it virtually; nothing of the sort is
   ever written INTO the store.
 
@@ -756,7 +793,7 @@ A real one (`link_robot`: a base, two placements of `link_arm`, one of
 ```json
 {
   "kind": "record",
-  "schemaVersion": 8,
+  "schemaVersion": 9,
   "model": "/abs/models/assemblies/src/link_robot/link_robot.py::link_robot",
   "script": "/abs/models/assemblies/src/link_robot/link_robot.py",
   "function": "link_robot",
