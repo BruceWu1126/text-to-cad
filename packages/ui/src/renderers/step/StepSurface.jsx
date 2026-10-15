@@ -696,6 +696,7 @@ function StepSurfaceBody({ view, data }) {
         partial: selectedMeshPartial,
         failedParts: selectedMeshMatches ? meshState?.assemblyFailedParts || [] : [],
         unmeshedParts: selectedMeshMatches ? meshState?.assemblyUnmeshedParts || [] : [],
+        unverifiedParts: selectedMeshMatches ? meshState?.assemblyUnverifiedParts || [] : [],
       }
     );
     return meshAlert || viewerRuntimeAlert;
@@ -706,6 +707,7 @@ function StepSurfaceBody({ view, data }) {
     meshState?.assemblyBackgroundError,
     meshState?.assemblyFailedParts,
     meshState?.assemblyUnmeshedParts,
+    meshState?.assemblyUnverifiedParts,
     selectedAssemblyHydrationFailed,
     selectedEntry,
     selectedArtifact,

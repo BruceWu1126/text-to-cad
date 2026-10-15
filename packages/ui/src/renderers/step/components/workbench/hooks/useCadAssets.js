@@ -145,7 +145,7 @@ function completedPackageMeshState(entry, meshData) {
     file: entry.file, kind: entry.kind, meshHash: entryMeshAssetSignature(entry), meshData,
     assemblyStructureReady: true, assemblyInteractionReady: true,
     assemblyBackgroundError: "", assemblyBackgroundErrorMeshHash: "", assemblyFailedParts: [],
-    assemblyUnmeshedParts: [],
+    assemblyUnmeshedParts: [], assemblyUnverifiedParts: [],
   };
 }
 
@@ -162,11 +162,12 @@ function failedPartNames(descriptor, failures) {
   return names;
 }
 
-// The parts drawn without faces no mesher could cover (a component mesh's `unmeshedFaces`), by
-// the names the tree gives them: the model is whole but for those faces, and the viewport says so.
-function unmeshedPartNames(descriptor, componentMeshDataByCid) {
+// The parts whose component mesh names faces -- `unmeshedFaces`, the faces no mesher could cover,
+// drawn without; `unverifiedFaces`, the faces drawn though off their exact surface -- by the names
+// the tree gives them: the model is whole but for those faces, and the viewport says so.
+function namedPartNames(descriptor, componentMeshDataByCid, named) {
   const short = new Set(Object.entries(componentMeshDataByCid || {})
-    .filter(([, meshData]) => meshData?.unmeshedFaces?.length).map(([cid]) => cid));
+    .filter(([, meshData]) => meshData?.[named]?.length).map(([cid]) => cid));
   const names = [];
   for (const occurrence of short.size ? descriptor?.occurrences || [] : []) {
     if (!short.has(String(occurrence?.component || ""))) continue;
@@ -633,7 +634,10 @@ export function useCadAssets({
               // Named, the rest of the model drawn: the viewport warns rather than fails.
               nextState.assemblyFailedParts = failedPartNames(packageDescriptor, failures);
             }
-            if (final) nextState.assemblyUnmeshedParts = unmeshedPartNames(packageDescriptor, componentMeshDataByCid);
+            if (final) {
+              nextState.assemblyUnmeshedParts = namedPartNames(packageDescriptor, componentMeshDataByCid, "unmeshedFaces");
+              nextState.assemblyUnverifiedParts = namedPartNames(packageDescriptor, componentMeshDataByCid, "unverifiedFaces");
+            }
             const ctx = packageRef.current;
             if (ctx && ctx.requestId === requestId) {
               ctx.componentMeshDataByCid = componentMeshDataByCid;

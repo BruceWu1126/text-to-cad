@@ -276,7 +276,32 @@ it('names the parts drawn without a face cadgen could not mesh', async () => {
     expect([opened.result.current.error, opened.result.current.status]).toEqual(['', 'ready']);
     expect(state.meshData.parts).toHaveLength(317);
     expect([state.assemblyInteractionReady, state.assemblyBackgroundError, state.assemblyFailedParts]).toEqual([true, '', []]);
-    expect(state.assemblyUnmeshedParts).toEqual(['c250']);
+    expect([state.assemblyUnmeshedParts, state.assemblyUnverifiedParts]).toEqual([['c250'], []]);
+    opened.unmount();
+  } finally { owner.dispose(); }
+});
+
+// A face the verifier could not bring onto its exact surface is drawn as it is and named: the
+// model is whole, with no failure, and the parts drawn off their surface are named for the warning.
+it('names the parts drawn with a face cadgen could not bring onto its surface', async () => {
+  const { client, model, encoded } = warmLargeStep();
+  const cold = partOf('c250');
+  const read = row => encoded.get(row.part)?.bytes.slice() || null;
+  const owner = createTessellationCache({ provider: {
+    probeMany: async parts => parts.map(part => (part === cold ? null : encoded.get(part)?.row || null)),
+    getProbed: async row => read(row), getManyProbed: async rows => rows.map(read) } });
+  const meshing = { ...client, resolveParts: vi.fn(async (_descriptor, requested) => new Map(
+    requested.map(({ cid, part }) => {
+      encoded.set(part, storedPart(part, { ...TRIANGLE, unverifiedFaces: [1] }));
+      return [cid, encoded.get(part).row];
+    }))) };
+  try {
+    const opened = renderHook(() => assets(model, meshing, owner.createSession()));
+    await act(() => opened.result.current.loadMeshForEntry(model));
+    const state = opened.result.current.meshState;
+    expect([opened.result.current.error, opened.result.current.status]).toEqual(['', 'ready']);
+    expect([state.assemblyInteractionReady, state.assemblyBackgroundError, state.assemblyFailedParts]).toEqual([true, '', []]);
+    expect([state.assemblyUnmeshedParts, state.assemblyUnverifiedParts]).toEqual([[], ['c250']]);
     opened.unmount();
   } finally { owner.dispose(); }
 });

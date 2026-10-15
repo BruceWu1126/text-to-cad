@@ -1,11 +1,15 @@
-"""A face no mesher covers leaves its part drawn without it, and every door says so.
+"""A face no mesher covers leaves its part drawn without it, and a face the verifier cannot bring
+onto its surface is drawn as it is; every door says so either way.
 
 A tiny assembly -- a 20 x 10 x 5 plate and a radius-5 pin -- whose pin's side is made a
 face the tessellator cannot cover: its geometry raises inside OCCT, as a vendor STEP's
 broken face can. That one face once failed the whole document: the list, the view and
 the STL all ended in a traceback. Now the pin is meshed without it, the plate whole, and
 each door does its work and names the face it left out: the list counts the pin without
-it, the view draws the rest, and the STL is written open where the face was.
+it, the view draws the rest, and the STL is written open where the face was. The same
+assembly meshed under a verification bound no curved face can meet draws the pin's side
+as OCCT left it and names it as drawn off its surface: the list, the view and the STL
+carry it whole, with the warning.
 
 The compile meshes every part before it reports done; here it runs in this process
 (``step.compile``), so the refusal reaches it, and every door after it only reads.
@@ -26,6 +30,8 @@ add_repo_path("packages/cadgen/src")
 SIZE = (320, 240)
 # The pin by its occurrence token, the face by its element token: the refs a person pastes.
 WARNED = r"^#o:[0-9a-f]{12} pin: 1 face \(f:[0-9a-f]{12}\) could not be meshed, so "
+OFF_SURFACE = (r"^#o:[0-9a-f]{12} pin: 1 face \(f:[0-9a-f]{12}\) could not be brought within tolerance of "
+               r"its exact surface, so it is drawn off it$")
 
 
 def write_assembly(path) -> None:
@@ -105,6 +111,63 @@ class UnmeshedFaceTests(unittest.TestCase):
         self.assertFalse(mesh.is_watertight)
         [warning] = self.export.warnings
         self.assertRegex(warning, WARNED + r"asm\.stl has a hole in place of it: it is not watertight$")
+
+
+class UnverifiedFaceTests(unittest.TestCase):
+    """The pin's side, a cylinder, cannot be brought within a millionth of a deflection of its
+    surface by any repair: it is drawn as OCCT meshed it, and named at every door."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._roots = ClassCadRoots(prefix="unverified-face-")
+        cls.workspace = cls._roots.cad_root
+        cls.document = cls.workspace / "asm.step"
+        write_assembly(cls.document)
+        import cadgen.step as step_door
+        import cadgen.stl as stl_door
+        from cadgen import tessellation_policy
+
+        with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}), \
+                mock.patch.dict(tessellation_policy.VERIFICATION, {"verifiedAt": 1e-6}):
+            step_door.compile(cls.document)
+        with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}), \
+                mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=AssertionError("a door derived")):
+            cls.listing = step_door.snapshot(cls.document, mode="list")
+            cls.export = stl_door.build(cls.document, cls.workspace / "asm.stl")
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._roots.cleanup()
+
+    def test_the_list_counts_the_pin_whole_and_says_its_side_is_off_its_surface(self) -> None:
+        self.assertTrue(self.listing.ok)
+        rows = {row["name"]: row for row in self.listing.parts}
+        self.assertEqual((12, 24), (rows["plate"]["triangleCount"], rows["plate"]["vertexCount"]), "the plate is whole")
+        self.assertGreater(rows["pin"]["triangleCount"], 2 * 32, "the pin's caps and its side")
+        [warning] = self.listing.warnings
+        self.assertRegex(warning, OFF_SURFACE)
+
+    def test_the_view_draws_the_pin_whole_and_says_so(self) -> None:
+        import cadgen.step as step_door
+
+        with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}), \
+                mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=AssertionError("a door derived")):
+            view = step_door.snapshot(self.document, self.workspace / "asm.png", width=SIZE[0], height=SIZE[1])
+        self.assertTrue(view.ok)
+        image = read_png((self.workspace / "asm.png").read_bytes())
+        self.assertEqual(SIZE, (image.width, image.height))
+        [warning] = view.warnings
+        self.assertRegex(warning, OFF_SURFACE)
+
+    def test_the_stl_is_written_watertight_and_says_so(self) -> None:
+        import trimesh
+
+        self.assertTrue(self.export.ok)
+        [written] = self.export.files
+        mesh = trimesh.load(written.path)
+        self.assertTrue(mesh.is_watertight, "the pin's side is in the file, as drawn")
+        [warning] = self.export.warnings
+        self.assertRegex(warning, OFF_SURFACE)
 
 
 if __name__ == "__main__":

@@ -46,6 +46,20 @@ def _unmeshed_part(fixture: dict) -> tuple[str, bytes, bytes]:
     return key, glb, base64.b64decode(fixture["selectors"])
 
 
+def _unverified_part(fixture: dict) -> tuple[str, bytes, bytes]:
+    """Another part, whose mesh draws its one face off its exact surface: its record counts it."""
+    from cadgen.store.meshes import encode_payload
+
+    floats = lambda *values: struct.pack(f"<{len(values)}f", *values)  # noqa: E731
+    key = "4" * 64 + fixture["key"][64:]
+    glb = encode_payload(
+        part=key, positions=floats(0, 0, 0, 2, 0, 0, 0, 3, 0), normals=floats(0, 0, 1, 0, 0, 1, 0, 0, 1),
+        indices=struct.pack("<3I", 0, 1, 2), face_ranges=[{"ord": 1, "indexStart": 0, "indexCount": 3}],
+        edges=[], bounds={"min": [0, 0, 0], "max": [2, 3, 0]}, unverified_faces=[1],
+    )
+    return key, glb, base64.b64decode(fixture["selectors"])
+
+
 class PartStoreContractSyncTest(unittest.TestCase):
     def test_json_bound_matches_between_python_and_js(self) -> None:
         # A body's JSON chunk grows with its face colour palette, so its bound is
@@ -69,11 +83,14 @@ class PartStoreContractSyncTest(unittest.TestCase):
 
         fixture = part_fixture()
         key, glb, table = _unmeshed_part(fixture)
+        off_key, off_glb, off_table = _unverified_part(fixture)
         with tempfile.TemporaryDirectory() as store, mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": store}):
             stored = {fixture["key"]: (store_part(fixture), fixture["glb"]),
-                      key: (parts._write(key, glb, table), base64.b64encode(glb).decode("ascii"))}
+                      key: (parts._write(key, glb, table), base64.b64encode(glb).decode("ascii")),
+                      off_key: (parts._write(off_key, off_glb, off_table), base64.b64encode(off_glb).decode("ascii"))}
             self.assertEqual({part: parts.probe(part) for part in stored}, {part: row[0] for part, row in stored.items()})
         self.assertEqual(stored[key][0]["glb"]["unmeshedFaceCount"], 1)
+        self.assertEqual(stored[off_key][0]["glb"]["unverifiedFaceCount"], 1)
         script = f'''
 import fs from "node:fs";
 import {{ partMeshMatches, partRow }} from {json.dumps(TESSELLATION_CACHE_JS.as_uri())};

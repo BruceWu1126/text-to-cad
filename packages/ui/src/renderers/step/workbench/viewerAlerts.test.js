@@ -207,6 +207,24 @@ test("parts drawn without faces cadgen could not mesh are a warning over the who
   assert.equal(buildViewerMeshAlert(step, true, "", null, { partial: true, unmeshedParts: ["wing"] }), null);
 });
 
+test("parts drawn with faces off their exact surface are a warning over the whole model, naming them", () => {
+  const alert = buildViewerMeshAlert(step, true, "", null, { unverifiedParts: ["wing"] });
+  assert.equal(alert.severity, "warning");
+  assert.equal(alert.blocking, false);
+  assert.equal(alert.title, "A part is drawn off its surface");
+  assert.equal(alert.message, "“wing” has faces that couldn’t be brought onto their exact surface, so they’re drawn slightly off it. Everything else is shown.");
+  assert.match(alert.details, /Parts: wing/);
+  const many = buildViewerMeshAlert(step, true, "", null, { unverifiedParts: ["a", "b", "c", "d"] });
+  assert.equal(many.title, "4 parts are drawn off their surfaces");
+  assert.match(many.message, /^“a”, “b”, “c” and 1 more have faces that couldn’t be brought onto their exact surface/);
+  // Both kinds at once: one warning, the missing faces first, each list named in the details.
+  const both = buildViewerMeshAlert(step, true, "", null, { unmeshedParts: ["wing"], unverifiedParts: ["tail"] });
+  assert.equal(both.title, "A part is missing faces");
+  assert.equal(both.message, "“wing” has faces that couldn’t be meshed, so they’re missing from the view. “tail” has faces that couldn’t be brought onto their exact surface, so they’re drawn slightly off it. Everything else is shown.");
+  assert.match(both.details, /Parts missing faces: wing\nParts drawn off their surface: tail/);
+  assert.equal(buildViewerMeshAlert(step, true, "", null, { partial: true, unverifiedParts: ["wing"] }), null);
+});
+
 test("progressive geometry is valid while loading but cannot mask a failed first load", () => {
   assert.equal(buildViewerMeshAlert(step, true, "", null, { partial: true }), null);
   const failed = buildViewerMeshAlert(step, true, "Decode failed", null, { partial: true });

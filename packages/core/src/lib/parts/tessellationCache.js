@@ -274,7 +274,7 @@ function decodeBody(bytes, part) {
     || (counts.edgeCount === 0) !== (counts.edgePointCount === 0)) return null;
   const values = {};
   for (const name of CAD_VALUES) values[name] = cad[name];
-  if (Object.hasOwn(cad, UNMESHED)) values[UNMESHED] = cad[UNMESHED];
+  for (const name of NAMED) if (Object.hasOwn(cad, name)) values[name] = cad[name];
   const canonical = canonicalMeshGltf(values, counts);
   if (!sameJson(gltf, canonical) || binLength !== (canonical.buffers?.[0].byteLength ?? 0)) return null;
 

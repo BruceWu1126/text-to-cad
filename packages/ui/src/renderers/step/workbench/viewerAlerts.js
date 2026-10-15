@@ -2,7 +2,8 @@ import { entryHasMesh } from "@text-to-cad/core/lib/entryAssets.js";
 import { fileKey } from "./entryPaths.js";
 import { failureAlert, isViewerServiceFailure, noGeometryAlert } from "../../kit/status/loadAlerts.js";
 
-export function buildViewerMeshAlert(entry, hasMeshData, loadError, artifact = null, { partial = false, failedParts = [], unmeshedParts = [] } = {}) {
+export function buildViewerMeshAlert(entry, hasMeshData, loadError, artifact = null,
+  { partial = false, failedParts = [], unmeshedParts = [], unverifiedParts = [] } = {}) {
   const fileRef = fileKey(entry);
   if (!fileRef) {
     return null;
@@ -48,8 +49,8 @@ export function buildViewerMeshAlert(entry, hasMeshData, loadError, artifact = n
     };
   }
 
-  if (!partial && unmeshedParts.length) {
-    return unmeshedPartsAlert(fileRef, unmeshedParts);
+  if (!partial && (unmeshedParts.length || unverifiedParts.length)) {
+    return namedPartsAlert(fileRef, unmeshedParts, unverifiedParts);
   }
 
   return null;
@@ -109,19 +110,34 @@ export function buildViewerEditAlert(editingState, hasGeometry = false) {
   };
 }
 
-// Parts drawn without faces cadgen could not mesh: the model is whole but for those faces, so a
-// warning that names the parts, which the person can put away.
-function unmeshedPartsAlert(fileRef, parts) {
+function namedList(parts) {
   const quoted = parts.slice(0, 3).map(name => `“${name}”`);
-  const named = parts.length > 3 ? `${quoted.join(", ")} and ${parts.length - 3} more` : quoted.join(", ");
-  const summary = parts.length === 1 ? "A part is missing faces" : `${parts.length} parts are missing faces`;
+  return parts.length > 3 ? `${quoted.join(", ")} and ${parts.length - 3} more` : quoted.join(", ");
+}
+
+// Parts drawn without faces cadgen could not mesh, and parts drawn with faces it could not bring
+// onto their exact surface: the model is whole but for those faces, so one warning that names the
+// parts, which the person can put away -- the missing faces first where there are both.
+function namedPartsAlert(fileRef, unmeshedParts, unverifiedParts) {
+  const missing = unmeshedParts.length
+    ? `${namedList(unmeshedParts)} ${unmeshedParts.length === 1 ? "has" : "have"} faces that couldn’t be meshed, so they’re missing from the view.`
+    : "";
+  const off = unverifiedParts.length
+    ? `${namedList(unverifiedParts)} ${unverifiedParts.length === 1 ? "has" : "have"} faces that couldn’t be brought onto their exact surface, so they’re drawn slightly off it.`
+    : "";
+  const summary = unmeshedParts.length
+    ? (unmeshedParts.length === 1 ? "A part is missing faces" : `${unmeshedParts.length} parts are missing faces`)
+    : (unverifiedParts.length === 1 ? "A part is drawn off its surface" : `${unverifiedParts.length} parts are drawn off their surfaces`);
+  const details = unmeshedParts.length && unverifiedParts.length
+    ? `Parts missing faces: ${unmeshedParts.join(", ")}\nParts drawn off their surface: ${unverifiedParts.join(", ")}`
+    : `Parts: ${[...unmeshedParts, ...unverifiedParts].join(", ")}`;
   return {
     severity: "warning",
     blocking: false,
     summary,
     title: summary,
-    message: `${named} ${parts.length === 1 ? "has" : "have"} faces that couldn’t be meshed, so they’re missing from the view. Everything else is shown.`,
-    details: `File: ${fileRef}\nParts: ${parts.join(", ")}`,
+    message: `${[missing, off].filter(Boolean).join(" ")} Everything else is shown.`,
+    details: `File: ${fileRef}\n${details}`,
   };
 }
 
