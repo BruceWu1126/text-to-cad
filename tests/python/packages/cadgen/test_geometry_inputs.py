@@ -14,6 +14,7 @@ from unittest import mock
 
 from tests.python.support.paths import add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
+from tests.python.support.tree_ids import tokenized
 add_repo_path("packages/cadgen/src")
 
 from cadgen._internal import component_package as cp
@@ -246,6 +247,7 @@ class GeometryInputs(unittest.TestCase):
         tree={'kind':TREE_KIND,'schemaVersion':TREE_SCHEMA,'units':'mm','label':'colors',
               'entryKind':'assembly','components':components,'occurrences':occurrences,'links':[],
               'assembly':{'root':{'id':'o1','name':'colors','nodeType':'assembly','children':children}}}
+        tree=tokenized(tree)[0]
         digest=put_object(cp.canonical_json_bytes(tree))
         actual=materialize(digest)
         expected=self.emitted(actual,'colors-a.step')
@@ -509,9 +511,15 @@ class GeometryInputs(unittest.TestCase):
                 tree = copy.deepcopy(source)
                 variant = copy.deepcopy(entry)
                 if mode == "absent-face":
+                    # A colour on a face the body does not have, with a token beside it as
+                    # the entry's shape demands: the kernel-free checks pass, the kernel's do not.
                     variant["faceColors"] = {999: (1., 0., 0., 1.)}
+                    variant["faceTokens"] = {999: "f:" + "0" * 12}
                     error = ValueError
                 else:
+                    # An eager-only component has no geometric identity: its pinned facts stand in.
+                    variant.pop("fingerprint", None)
+                    variant.pop("faceTokens", None)
                     variant.update(kind="eager-only", topology=surface)
                     error = cp.NativeUnavailable
                 payload = read_verified_object(entry["brep"])
@@ -526,6 +534,7 @@ class GeometryInputs(unittest.TestCase):
                 tree["assembly"] = {"root": {"id": "o1", "name": "root", "nodeType": "assembly", "children": [
                     {"id": f"o1.{i}", "name": f"part{i}", "nodeType": "part", "children": []} for i in (1, 2)]}}
                 tree["entryKind"] = "assembly"
+                tree = tokenized(tree)[0]
                 flat, objects = capture_tree(put_object(cp.canonical_json_bytes(tree)))
                 # Force native first so a later variant exercises the shared-BREP copy branch.
                 flat["components"] = {cid: flat["components"][cid], other: flat["components"][other]}

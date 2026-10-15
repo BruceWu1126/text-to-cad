@@ -154,7 +154,7 @@ def _run(
 def _refs(value: object, name: str) -> list[str] | None:
     """``focus``/``hide`` as a list of refs: a sequence of strings, never one string.
 
-    ``focus="#o1.2"`` is the natural slip from the CLI's repeatable flag, and a
+    ``focus="#housing"`` is the natural slip from the CLI's repeatable flag, and a
     string IS a sequence — of characters, each of which used to be looked up as
     a ref of its own.
     """

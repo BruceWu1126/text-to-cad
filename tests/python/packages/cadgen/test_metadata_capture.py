@@ -14,6 +14,7 @@ from unittest import mock
 
 from tests.python.support.paths import add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
+from tests.python.support.tree_ids import tokenized
 
 add_repo_path("packages/cadgen/src")
 from cadgen.store import parts, trees
@@ -52,13 +53,13 @@ class MetadataCapture(unittest.TestCase):
                     for x in (1, 2)]
         links = [{"id": f"o{i}", "tree": tree, "name": f"part {i}",
                   "transform": list(trees.IDENTITY_16)} for i, tree in enumerate(children, 1)]
-        self.tree = trees.put_tree({
+        self.tree = trees.put_tree(tokenized({
             "units": "mm", "entryKind": "assembly", "components": {}, "occurrences": [],
             "links": links, "assembly": {"root": {
                 "id": "root", "nodeType": "assembly", "children": [
                     {"id": link["id"], "nodeType": "link", "children": []} for link in links],
             }},
-        })
+        })[0])
         self.geometry, self.payloads = trees.capture_tree(self.tree)
         self.producer = parts.producer_identity()
         self.view = runtime_view(self.tree, self.producer)
@@ -411,13 +412,13 @@ class VerifiedIdentityAcrossClaims(unittest.TestCase):
                          for x in (1, 2)]
         links = [{"id": f"o{i}", "tree": tree, "name": f"part {i}",
                   "transform": list(trees.IDENTITY_16)} for i, tree in enumerate(self.children, 1)]
-        self.tree = trees.put_tree({
+        self.tree = trees.put_tree(tokenized({
             "units": "mm", "entryKind": "assembly", "components": {}, "occurrences": [],
             "links": links, "assembly": {"root": {
                 "id": "root", "nodeType": "assembly", "children": [
                     {"id": link["id"], "nodeType": "link", "children": []} for link in links],
             }},
-        })
+        })[0])
         self.closure = {self.tree: self.tree}
         for child in self.children:
             self.closure.update({child: child, **{entry["brep"]: child for entry in trees.get_tree(child)["components"].values()}})

@@ -2011,13 +2011,14 @@ def _unmeshed_view_warnings(job: Mapping[str, object]) -> list[str]:
     if (str(resolved.get("kind") or "").lower() not in ("step", "stp") or not is_plain_object(package)
             or not is_plain_object(package.get("descriptor"))):
         return []
-    from cadgen.assembly_lookup import assembly_occurrence_rows
+    from cadgen.assembly_lookup import assembly_group_members, assembly_occurrence_rows
     from cadgen.snapshot_parts import failed_part_warnings, filter_occurrences, unmeshed_warnings
 
     selection = job.get("selection") if is_plain_object(job.get("selection")) else {}
     descriptor = package["descriptor"]
     try:
-        rows = filter_occurrences(assembly_occurrence_rows(descriptor, None), {"hide": selection.get("hide")})
+        rows = filter_occurrences(assembly_occurrence_rows(descriptor, None), {"hide": selection.get("hide")},
+                                  groups=assembly_group_members(descriptor))
     except ValueError:
         return []
     return [*failed_part_warnings(descriptor, rows, "the view does not draw {them}"),

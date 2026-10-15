@@ -17,6 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests.python.support.paths import add_repo_path
+from tests.python.support.tree_ids import tokenized
 from tests.python.support.tmp_root import generated_cad_directory
 
 add_repo_path("packages/cadgen/src")
@@ -186,10 +187,10 @@ class ReusedObjectsSurvive(StoreSweepCase):
         for kind in ("model", "document"):
             for key, _ in list(iter_entries(kind)):
                 remove_entry(kind, key)  # the child moved on: nothing reaches its old tree
-        parent = put_tree({"label": "parent", "units": "mm", "entryKind": "assembly", "components": {},
-                           "occurrences": [], "links": [{"id": "o1.1", "name": "child", "tree": child, "transform": IDENTITY_16}],
-                           "assembly": {"root": {"id": "o1", "nodeType": "assembly",
-                                                 "children": [{"id": "o1.1", "nodeType": "link", "children": []}]}}})
+        parent = put_tree(tokenized({"label": "parent", "units": "mm", "entryKind": "assembly", "components": {},
+                                     "occurrences": [], "links": [{"id": "o1.1", "name": "child", "tree": child, "transform": IDENTITY_16}],
+                                     "assembly": {"root": {"id": "o1", "nodeType": "assembly",
+                                                           "children": [{"id": "o1.1", "nodeType": "link", "children": []}]}}})[0])
         for digest in (parent, child, brep):
             self.old(object_path(digest))
         brep_bytes = read_verified_object(brep)

@@ -5,6 +5,7 @@ import shutil
 import types
 import unittest
 from pathlib import Path
+from tests.python.support.tree_ids import tokenized
 from unittest import mock
 
 from cadgen._internal import generation as cad_generation
@@ -58,6 +59,7 @@ class CadGenerationTests(unittest.TestCase):
             "assembly": {"root": {"id": "o1", "name": label, "nodeType": "part", "children": []}},
             "stats": {"occurrenceCount": 1, "linkCount": 0},
         }
+        tree = tokenized(tree)[0]
         return put_tree(tree), tree
 
     def _generated_result(self, spec, scene=None):

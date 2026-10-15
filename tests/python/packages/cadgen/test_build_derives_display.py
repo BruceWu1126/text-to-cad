@@ -26,6 +26,9 @@ from tests.python.support.tmp_root import generated_cad_directory
 
 add_repo_path("packages/cadgen/src")
 
+from cadgen._internal.tree_tokens import child_token, root_token  # noqa: E402
+from cadgen.store.trees import IDENTITY_16  # noqa: E402
+
 MODEL = """
 from cadgen import step, stl
 from cadgen import build123d as bd
@@ -46,9 +49,15 @@ if __name__ == "__main__":
 """
 
 NO_JOB = AssertionError("a view started a derivation job")
+# The occurrences' tokens, minted from the tree the model returns: the root `pair`, and
+# under it `block` at the origin and `peg` at x = 20 (a Cylinder is centred). The saved
+# document mints the same, so the build, a snapshot and a list name them alike.
+_ROOT = root_token("pair")
+BLOCK_ID = child_token(_ROOT, "block", IDENTITY_16)
+PEG_ID = child_token(_ROOT, "peg", [1, 0, 0, 20, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
 # How every reader names the peg once its mesher has failed (``failing``): a build's warning,
 # a snapshot's and a list's, an export's failure.
-PEG_FAILED = "#o1.2 peg could not be meshed (MeshProductionError: ValueError: boom)"
+PEG_FAILED = f"#{PEG_ID} peg could not be meshed (MeshProductionError: ValueError: boom)"
 
 
 def failing(*face_counts: int):
@@ -215,15 +224,15 @@ class BuildDerivesDisplayData(unittest.TestCase):
 
         code, out, said, _ = self.snapshot(failing(3), "--mode", "list")
         self.assertEqual(code, 0, said)
-        self.assertEqual([(row["ref"], row["name"]) for row in json.loads(out[0])], [("#o1.1", "block")])
+        self.assertEqual([(row["ref"], row["name"]) for row in json.loads(out[0])], [(f"#{BLOCK_ID}", "block")])
         self.assertEqual(said, [f"warning: {PEG_FAILED}, so the list leaves it out"])
 
-        code, _, said, _ = self.snapshot(failing(3), "--mode", "list", "--focus", "#o1.2")
+        code, _, said, _ = self.snapshot(failing(3), "--mode", "list", "--focus", f"#{PEG_ID}")
         self.assertEqual((code, said), (1, [f"[cadgen step snapshot] FAILED: MeshProductionError: {PEG_FAILED}"]))
         shutil.rmtree(self.store / "index/part")
         code, _, said, _ = self.snapshot(failing(3, 6), "--mode", "list")
         self.assertEqual((code, said), (1, [
-            "[cadgen step snapshot] FAILED: MeshProductionError: #o1.1 block could not be meshed "
+            f"[cadgen step snapshot] FAILED: MeshProductionError: #{BLOCK_ID} block could not be meshed "
             f"(MeshProductionError: ValueError: boom); {PEG_FAILED}"]))
 
 

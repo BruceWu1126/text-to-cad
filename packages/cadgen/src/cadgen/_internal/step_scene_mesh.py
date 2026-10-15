@@ -30,7 +30,9 @@ def _iter_leaf_occurrences(nodes: list[OccurrenceNode]) -> list[OccurrenceNode]:
 
 
 def occurrence_selector_id(node: OccurrenceNode) -> str:
-    return _selector_id(node.path)
+    """How a scene node is named in a message: its occurrence token where the
+    scene carries one, else the reader's positional path (never a ref)."""
+    return node.id or _selector_id(node.path)
 
 
 def scene_leaf_occurrences(scene: LoadedStepScene) -> list[OccurrenceNode]:
@@ -96,7 +98,9 @@ def scene_to_build123d_compound(scene: LoadedStepScene, *, label: str | None = N
     import build123d
 
     def node_label(node: OccurrenceNode) -> str:
-        return str(node.name or node.source_name or occurrence_selector_id(node)).strip()
+        # An unnamed node stays unnamed: the tree build gives it the default
+        # name ("part"/"group"), never a positional id masquerading as one.
+        return str(node.name or node.source_name or "").strip()
 
     def node_color(node: OccurrenceNode) -> tuple[float, ...] | None:
         if node.color is not None:
@@ -139,9 +143,9 @@ def scene_to_build123d_compound(scene: LoadedStepScene, *, label: str | None = N
         # A single-root STEP is returned as that root, never wrapped: build123d's
         # own import_step does the same ("Remove empty Compound wrapper if single
         # free object"). Wrapping would add an assembly level that is not in the
-        # file, pushing every occurrence path one segment deeper (o1.1 -> o1.1.1)
-        # so selector refs differ depending on whether the STEP was opened
-        # directly or returned from a generator's @step entry.
+        # file, pushing every occurrence one level deeper, so the tree (and the
+        # tokens its nodes take from it) would differ depending on whether the
+        # STEP was opened directly or returned from a generator's @step entry.
         single = roots[0]
         if label:
             single.label = label

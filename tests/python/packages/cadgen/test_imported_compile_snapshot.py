@@ -10,6 +10,7 @@ from unittest import mock
 
 from tests.python.support.paths import add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
+from tests.python.support.tree_ids import tokenized
 
 add_repo_path("packages/cadgen/src")
 
@@ -97,7 +98,7 @@ class ImportedCompileSnapshot(unittest.TestCase):
         child = self.compile(document)["tree"]
         child_tree = trees.get_tree(child)
         child_brep = next(iter(child_tree["components"].values()))["brep"]
-        parent = trees.put_tree({
+        parent = trees.put_tree(tokenized({
             "units": "mm", "entryKind": "assembly", "components": {}, "occurrences": [],
             "edgeRendering": child_tree["edgeRendering"],
             "links": [{"id": "o1.1", "name": "linked", "tree": child,
@@ -105,7 +106,7 @@ class ImportedCompileSnapshot(unittest.TestCase):
             "assembly": {"root": {"id": "o1", "nodeType": "assembly", "children": [
                 {"id": "o1.1", "nodeType": "link", "children": []}],
             }},
-        })
+        })[0])
         selected = (hashlib.sha256(document.read_bytes()).hexdigest(), parent)
         with mock.patch.object(catalog, "result_snapshot_for", return_value=selected):
             initial = artifact._current_artifact_for_spec(self.spec(document))

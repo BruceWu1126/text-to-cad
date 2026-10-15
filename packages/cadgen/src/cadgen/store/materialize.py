@@ -56,10 +56,19 @@ class _ComponentIdentity:
     brep: str
     codec: str
     face_colors: tuple[tuple[int, tuple[float, float, float, float]], ...]
+    # The component's geometric identity as its tree carries it (README law 20): the
+    # entry a reuse hands the packager is the published entry, fingerprint included.
+    fingerprint: str = ""
+    face_tokens: tuple[tuple[int, str], ...] = ()
 
     def entry(self) -> dict[str, Any]:
-        return {"kind": "native", "codec": self.codec, "brep": self.brep,
-                "faceColors": dict(self.face_colors), "contentHash": self.content_hash}
+        entry = {"kind": "native", "codec": self.codec, "brep": self.brep,
+                 "faceColors": dict(self.face_colors), "contentHash": self.content_hash}
+        if self.fingerprint:
+            entry["fingerprint"] = self.fingerprint
+        if self.face_tokens:
+            entry["faceTokens"] = dict(self.face_tokens)
+        return entry
 
 
 class _Partner:
@@ -654,9 +663,12 @@ def materialize_descriptor(
         content_hash = str((components.get(cid) or {}).get("contentHash") or "")
         brep = str((components.get(cid) or {}).get("brep") or "")
         if content_hash and cid == content_hash[:16] and brep and (components[cid].get("kind") == "native"):
+            face_tokens = components[cid].get("faceTokens") or {}
             child.__dict__["__cadgen_component_identity__"] = _ComponentIdentity(
                 cid=cid, content_hash=content_hash, brep=brep,
                 codec=components[cid]["codec"], face_colors=tuple(sorted(face_colors.items())),
+                fingerprint=str(components[cid].get("fingerprint") or ""),
+                face_tokens=tuple(sorted((int(ordinal), str(token)) for ordinal, token in face_tokens.items())),
             )
         else:
             child.__dict__.pop("__cadgen_component_identity__", None)

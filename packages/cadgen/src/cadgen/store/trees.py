@@ -5,20 +5,26 @@ A tree holds the geometry a model made itself (``components``, placed by its
 child are two links to one tree. Nothing of a child is copied::
 
     {
-      "kind": "geometry-tree", "schemaVersion": 3,
+      "kind": "geometry-tree", "schemaVersion": 4,
       "label": "robot", "entryKind": "assembly",
-      "components": {"<cid>": {"kind": "native", "codec": "bintools-v4", "brep": "<object>", "faceColors": {}, "contentHash": "…"}},
-      "occurrences": [{"id": "o1.1", "name": "housing", "component": "<cid>", "transform": [16 floats]}],
-      "links":       [{"id": "o1.2", "name": "arm", "tree": "<object>", "transform": [16 floats]}],
-      "assembly": {"root": {"id": "o1", "name": "robot", "nodeType": "assembly", "children": [...]}},
+      "components": {"<cid>": {"kind": "native", "codec": "bintools-v4", "brep": "<object>", "faceColors": {}, "contentHash": "…", "fingerprint": "…"}},
+      "occurrences": [{"id": "o:4b1f9e2a7c03", "name": "housing", "component": "<cid>", "transform": [16 floats]}],
+      "links":       [{"id": "o:e8a03d5b61f4", "name": "arm", "tree": "<object>", "transform": [16 floats]}],
+      "assembly": {"root": {"id": "o:0f3a6c8e2d17", "name": "robot", "nodeType": "assembly", "children": [...]}},
       "bbox": {...}, "stats": {...}
     }
 
+Every occurrence, link and node is named by its **token** (``o:`` and twelve
+hexadecimal characters, ``cadgen._internal.tree_tokens``): a hash of its
+parent's token, its name and -- a leaf's -- its placement rounded, so a token
+is a function of the tree it is in and of nothing positional (README law 20).
 Occurrence and link transforms are WORLD placements within this tree. In the
 structure under ``assembly.root`` a link appears as a node with
 ``nodeType: "link"`` and its ``id``; ``flatten`` expands it into the child's
-structure, re-rooting the child's ids under the link's id and composing the
-child's world transforms with the link's placement.
+structure, re-rooting the child's nodes under the link's token -- each minted
+again from the link's token, its name and its composed world placement, as the
+saved document's own hierarchy names it -- and composing the child's world
+transforms with the link's placement.
 
 ``flatten(tree_hash)`` returns the ASSEMBLY.JSON SHAPE (``kind:
 "assembly-package"``, a flat component map, flat world-placed occurrences, a
@@ -58,8 +64,9 @@ TREE_KIND = "geometry-tree"
 # A format change bumps it (STORE.md §2, §8): a tree of another version is never
 # read, and a sweeper that finds a newer one stands down. 3: an eager-only
 # component pins its topology facts as ``topology``, a field an older sweeper
-# does not mark.
-TREE_SCHEMA = 3
+# does not mark. 4: every occurrence, link and node id is an ``o:`` token and
+# every native component carries its ``fingerprint`` (README law 20).
+TREE_SCHEMA = 4
 FLAT_KIND = "assembly-package"
 
 # Metadata readers need an independently owned flattened descriptor but not the
@@ -239,15 +246,6 @@ def compose_transforms(parent: object, child: object) -> list[float]:
 # --- flatten ------------------------------------------------------------------
 
 
-def _rebase_id(link_id: str, child_id: str) -> str:
-    """``o1.2`` + child ``o1.3.1`` -> ``o1.2.3.1``: the child's root IS the link."""
-    child_id = str(child_id or "o1")
-    if child_id in ("o1", "o"):
-        return link_id
-    suffix = child_id[len("o1") :] if child_id.startswith("o1") else "." + child_id.lstrip("o")
-    return f"{link_id}{suffix}"
-
-
 def tree_kind(tree: dict[str, Any] | None) -> str:
     """``"assembly"`` or ``"part"``, read off the TREE and nowhere else.
 
@@ -295,12 +293,24 @@ def flatten_tree(
     The build flattens its own result before it is published, to assemble the
     STEP it then re-reads (``cadgen.store.build``); the links inside it resolve
     against the store as usual. ``tree_hash`` is recorded on the descriptor when
-    known and memoizes the result."""
+    known and memoizes the result.
+
+    A child's nodes are re-rooted under the link's token: expanded with
+    provisional ids, then every id of the flattened tree is minted again from
+    its structure, names and composed placements (``tree_tokens.assign_tokens``),
+    which gives the parent's own nodes the tokens they already had and the
+    child's the tokens the saved document gives them."""
+    from cadgen._internal.tree_tokens import assign_tokens, retoken
+
     memo = memo if memo is not None else {}
 
     components: dict[str, Any] = {cid: dict(entry) for cid, entry in (tree.get("components") or {}).items()}
     occurrences: list[dict[str, Any]] = [dict(occ) for occ in tree.get("occurrences") or []]
     links = {str(link.get("id")): link for link in (tree.get("links") or []) if isinstance(link, dict)}
+
+    def provisional(link_id: str, child_id: str) -> str:
+        """A unique id for a child's node under a link, until the flattened tree is tokened."""
+        return f"{link_id}|{child_id}"
     # A published model tree carries its complete resolved intrinsic appearance.
     # An unpublished draft does not, so flattening it composes child libraries
     # and rebases their assignments before the parent declaration is resolved.
@@ -323,6 +333,9 @@ def flatten_tree(
             })
     appearance_materials = dict((own_appearance or {}).get("materials") or {})
     appearance_assignments = dict((own_appearance or {}).get("assignments") or {})
+    # A child's assignments, under provisional ids until the flattened tree is tokened; the
+    # tree's own are keyed by the flattened tokens already.
+    inherited_assignments: dict[str, str] = {}
 
     def inherit_appearance(child: dict[str, Any], link_id: str) -> None:
         if appearance_authoritative:
@@ -342,8 +355,13 @@ def flatten_tree(
                     suffix += 1
             appearance_materials.setdefault(inherited_id, dict(definition))
             remapped[material_id] = inherited_id
+        child_root = (child.get("assembly") or {}).get("root")
+        child_root_id = str(child_root.get("id") or "") if isinstance(child_root, dict) else ""
         for occurrence_id, material_id in child_appearance["assignments"].items():
-            appearance_assignments[_rebase_id(link_id, occurrence_id)] = remapped[material_id]
+            # The child's root IS the link (a part child's one occurrence takes the link's
+            # id, as ``expand`` places it); every other node gets a provisional id.
+            key = link_id if occurrence_id == child_root_id else provisional(link_id, occurrence_id)
+            inherited_assignments[key] = remapped[material_id]
 
     def expand(node: dict[str, Any]) -> dict[str, Any] | None:
         node_type = str(node.get("nodeType") or "")
@@ -364,10 +382,14 @@ def flatten_tree(
             link_name = str(link.get("name") or node.get("name") or node_id)
             link_color = link.get("color")
             child_is_part = str(child.get("entryKind") or "") == "part"
+            child_root = (child.get("assembly") or {}).get("root")
+            child_root_id = str(child_root.get("id") or "") if isinstance(child_root, dict) else ""
             for occ in child.get("occurrences") or []:
                 placed = dict(occ)
-                occ_id = str(occ.get("id") or "o1")
-                placed["id"] = _rebase_id(node_id, occ_id)
+                occ_id = str(occ.get("id") or "")
+                # The child's root IS the link: a part child's one occurrence takes the
+                # link's id and name (the label the parent gave the placement).
+                placed["id"] = node_id if occ_id == child_root_id else provisional(node_id, occ_id)
                 placed["transform"] = compose_transforms(placement, occ.get("transform"))
                 component = (child.get("components") or {}).get(str(occ.get("component") or "")) or {}
                 # A root color on a materialized Compound is inherited only by
@@ -378,15 +400,13 @@ def flatten_tree(
                     child_is_part or (occ.get("color") is None and component.get("color") is None)
                 ):
                     placed["color"] = link_color
-                if occ_id == "o1":
-                    # A part child is ONE occurrence, its root: it takes the
-                    # link's name (the label the parent gave the placement).
+                if occ_id == child_root_id:
                     placed["name"] = link_name
                 occurrences.append(placed)
 
             def rebase(sub: dict[str, Any]) -> dict[str, Any]:
                 out = dict(sub)
-                out["id"] = _rebase_id(node_id, str(sub.get("id") or "o1"))
+                out["id"] = provisional(node_id, str(sub.get("id") or ""))
                 if sub.get("children"):
                     out["children"] = [rebase(c) for c in sub["children"]]
                     out["leafPartIds"] = [leaf for c in out["children"] for leaf in c.get("leafPartIds", [c["id"]])]
@@ -394,12 +414,13 @@ def flatten_tree(
                     out["leafPartIds"] = [out["id"]]
                 return out
 
-            child_root = (child.get("assembly") or {}).get("root")
             if isinstance(child_root, dict):
                 rebased = rebase(child_root)
                 rebased["name"] = str(link.get("name") or node.get("name") or rebased.get("name") or node_id)
                 rebased["nodeType"] = "subassembly" if rebased.get("children") else "part"
                 rebased["id"] = node_id
+                if not rebased.get("children"):
+                    rebased["leafPartIds"] = [node_id]
                 return rebased
             # A part child: one leaf occurrence, rebased to the link id.
             return {"id": node_id, "name": str(link.get("name") or node.get("name") or node_id), "nodeType": "part", "leafPartIds": [node_id], "children": []}
@@ -423,6 +444,18 @@ def flatten_tree(
     descriptor["components"] = components
     root = (tree.get("assembly") or {}).get("root")
     expanded_root = expand(root) if isinstance(root, dict) else None
+    if expanded_root is not None and links:
+        # Re-root: every id of the flattened tree, minted from the flattened structure.
+        mapping = assign_tokens(expanded_root, occurrences, [], label=tree.get("label"))
+        retokened = retoken(
+            {"occurrences": occurrences, "links": [], "assembly": {"root": expanded_root},
+             "appearance": {"materials": {}, "assignments": inherited_assignments}},
+            mapping,
+        )
+        occurrences, expanded_root = retokened["occurrences"], retokened["assembly"]["root"]
+        inherited_assignments = retokened["appearance"]["assignments"]
+    for occurrence_id, material_id in inherited_assignments.items():
+        appearance_assignments.setdefault(occurrence_id, material_id)
     descriptor["occurrences"] = occurrences
     appearance = normalize_appearance({
         "materials": appearance_materials,
@@ -465,15 +498,19 @@ def _validate_structure(tree: Any, *, native: bool = False) -> None:
         raise ValueError("invalid geometry tree metadata")
     if type(tree.get("components")) is not dict or type(tree.get("occurrences")) is not list or type(tree.get("links")) is not list:
         raise ValueError("invalid geometry tree tables")
+    from cadgen._internal.tree_tokens import is_occurrence_token
     from cadgen.store.objects import is_object_hash
     for link in tree["links"]:
         if type(link) is not dict or not is_object_hash(link.get("tree")):
             raise ValueError("invalid linked tree identity")
+    for entry in tree["components"].values():
+        if type(entry) is not dict or (entry.get("kind") == "native" and not entry.get("fingerprint")):
+            raise ValueError("geometry component lacks its fingerprint")
     ids = set()
     occurrence_ids = {row.get("id") for row in tree["occurrences"] if type(row) is dict and type(row.get("id")) is str}
     for row in [*tree["occurrences"], *tree["links"]]:
-        if type(row) is not dict or type(row.get("id")) is not str or not row["id"] or row["id"] in ids:
-            raise ValueError("invalid or duplicate occurrence/link ID")
+        if type(row) is not dict or not is_occurrence_token(row.get("id")) or row["id"] in ids:
+            raise ValueError("invalid or duplicate occurrence/link token")
         ids.add(row["id"])
         transform = row.get("transform")
         if type(transform) is not list or len(transform) != 16 or any(
@@ -493,7 +530,7 @@ def _validate_structure(tree: Any, *, native: bool = False) -> None:
     represented = set()
     while pending:
         node = pending.pop()
-        if type(node) is not dict or type(node.get("id")) is not str or not node["id"] or node["id"] in seen or node.get("nodeType") not in {"part", "assembly", "subassembly", "link"}:
+        if type(node) is not dict or not is_occurrence_token(node.get("id")) or node["id"] in seen or node.get("nodeType") not in {"part", "assembly", "subassembly", "link"}:
             raise ValueError("invalid assembly structure")
         seen.add(node.get("id"))
         children = node.get("children")

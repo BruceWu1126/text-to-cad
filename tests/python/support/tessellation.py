@@ -25,16 +25,16 @@ def _selector_table() -> bytes:
         VERTEX_COLUMNS, selector_table_bytes,
     )
 
-    def row(columns, ordinal=None):
-        return [ordinal if name == "ordinal" else None for name in columns]
+    def row(columns, ordinal=None, token=None):
+        return [ordinal if name == "ordinal" else token if name == "token" else None for name in columns]
 
     return selector_table_bytes({
         "schemaVersion": SELECTOR_TABLE_SCHEMA_VERSION,
         "tables": {"occurrenceColumns": OCCURRENCE_COLUMNS, "shapeColumns": SHAPE_COLUMNS,
                    "faceColumns": FACE_COLUMNS, "edgeColumns": EDGE_COLUMNS, "vertexColumns": VERTEX_COLUMNS},
         "occurrences": [row(OCCURRENCE_COLUMNS)], "shapes": [row(SHAPE_COLUMNS, 1)],
-        "faces": [row(FACE_COLUMNS, 1)], "edges": [row(EDGE_COLUMNS, 1)],
-        "vertices": [row(VERTEX_COLUMNS, 1), row(VERTEX_COLUMNS, 2)],
+        "faces": [row(FACE_COLUMNS, 1, "f:" + "a" * 12)], "edges": [row(EDGE_COLUMNS, 1, "e:" + "b" * 12)],
+        "vertices": [row(VERTEX_COLUMNS, 1, "v:" + "c" * 12), row(VERTEX_COLUMNS, 2, "v:" + "d" * 12)],
         "stats": {"shapeCount": 1, "faceCount": 1, "edgeCount": 1, "vertexCount": 2},
         "relations": {"faceEdgeRows": [0], "edgeFaceRows": [0], "edgeVertexRows": [0, 1], "vertexEdgeRows": [0, 0]},
     })

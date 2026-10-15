@@ -24,7 +24,8 @@ from tests.python.support.png import read_png
 add_repo_path("packages/cadgen/src")
 
 SIZE = (320, 240)
-WARNED = r"^#o1\.2 pin: 1 face \(f\d+\) could not be meshed, so "
+# The pin by its occurrence token, the face by its element token: the refs a person pastes.
+WARNED = r"^#o:[0-9a-f]{12} pin: 1 face \(f:[0-9a-f]{12}\) could not be meshed, so "
 
 
 def write_assembly(path) -> None:
@@ -77,10 +78,10 @@ class UnmeshedFaceTests(unittest.TestCase):
 
     def test_the_list_counts_the_pin_without_its_side_and_says_so(self) -> None:
         self.assertTrue(self.listing.ok)
-        rows = {row["ref"]: row for row in self.listing.parts}
-        self.assertEqual((12, 24), (rows["#o1.1"]["triangleCount"], rows["#o1.1"]["vertexCount"]), "the plate is whole")
+        rows = {row["name"]: row for row in self.listing.parts}
+        self.assertEqual((12, 24), (rows["plate"]["triangleCount"], rows["plate"]["vertexCount"]), "the plate is whole")
         # The pin's two caps, and nothing of its side.
-        self.assertGreater(rows["#o1.2"]["triangleCount"], 0)
+        self.assertGreater(rows["pin"]["triangleCount"], 0)
         [warning] = self.listing.warnings
         self.assertRegex(warning, WARNED + "its triangle count leaves it out$")
 

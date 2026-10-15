@@ -267,9 +267,11 @@ class ColdCompileCleanupTest(unittest.TestCase):
         document = self.document(nested=True)
         source_bytes = document.read_bytes()
         digest = hashlib.sha256(source_bytes).hexdigest()
+        # A sidecar names a document occurrence by its token, read off the compiled tree.
+        leaf = flatten(self.compile(document)["tree"])["occurrences"][0]["id"]
         payload = {"appearance": {
                        "materials": {"finish": {"name": "Finish", "roughness": .27, "metalness": .6}},
-                       "assignments": {"o1.1.1": "finish"},
+                       "assignments": {leaf: "finish"},
                    },
                    "kinematics": {"poses": {"rest": {}}}}
         write_source_sidecar(document, payload, document_hash=digest)
@@ -287,7 +289,7 @@ class ColdCompileCleanupTest(unittest.TestCase):
             self.assertEqual(declarations["kinematics"], payload["kinematics"])
             canonical = flatten(result["tree"])
             overlaid = apply_appearance(canonical, declarations["appearance"])
-            occurrence = next(occ for occ in overlaid["occurrences"] if occ["id"] == "o1.1.1")
+            occurrence = next(occ for occ in overlaid["occurrences"] if occ["id"] == leaf)
             self.assertEqual(
                 occurrence["material"],
                 {**SOURCE_MATERIAL_DEFAULTS, "roughness": .27, "metalness": .6},

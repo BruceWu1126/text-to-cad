@@ -1,3 +1,17 @@
+"""The ref grammar: one language, shared with the client (``@text-to-cad/core/lib/cadRefs.js``).
+
+A ref names geometry, never a position (README law 20): an occurrence by its
+token (``o:`` and twelve hexadecimal characters, minted from its place in the
+tree: ``_internal/tree_tokens.py``), an element by the occurrence's token, a
+slash and the element's token (``f:``, ``e:``, ``v:`` and twelve hexadecimal
+characters, minted from the element's geometry within its body:
+``_internal/geometry_fingerprint.py``) -- ``#o:4b1f9e2a7c03/f:9d2e8c1b5a70``. A
+part label stands in for an occurrence token (``#base``, ``#base/f:9d2e8c1b5a70``);
+a bare element token (``#f:9d2e8c1b5a70``) resolves in a document with one leaf.
+Mates (``m1``) are not part of the structured grammar. Both parsers assert the
+cases of ``cadRefs.parity.json``.
+"""
+
 from __future__ import annotations
 
 import json
@@ -10,47 +24,77 @@ from dataclasses import dataclass
 # to the root of the viewer the ref was copied from, or its absolute path, and it exists so a ref
 # stays meaningful when it is pasted into a prompt that spans several files. It lives LEFT of the
 # '#' on purpose: the selector grammar owns everything to the right, so a prefix can never collide
-# with a label, its ':' qualifiers, or an entity's '.'.
+# with a label, its ':' qualifiers, or the '/' between an occurrence and its element.
 # JSON-quoted paths mirror the JS parser, including literal filename delimiters.
 QUOTED_PATH_PATTERN = r'"(?:[^"\\\r\n]|\\.)*"'
 QUOTED_PREFIX_RE = re.compile(rf"^({QUOTED_PATH_PATTERN})#")
-OCCURRENCE_SELECTOR_RE = re.compile(r"^o((?:\d+)(?:\.\d+)*)$")
-OCCURRENCE_ENTITY_SELECTOR_RE = re.compile(r"^o((?:\d+)(?:\.\d+)*)\.([sfev])(\d+)$")
-ENTITY_SELECTOR_RE = re.compile(r"^([sfev])(\d+)$")
+OCCURRENCE_TOKEN_PATTERN = r"o:[0-9a-f]{12}"
+ELEMENT_TOKEN_PATTERN = r"[fev]:[0-9a-f]{12}"
+OCCURRENCE_SELECTOR_RE = re.compile(rf"^({OCCURRENCE_TOKEN_PATTERN})$")
+OCCURRENCE_ELEMENT_SELECTOR_RE = re.compile(rf"^({OCCURRENCE_TOKEN_PATTERN})/({ELEMENT_TOKEN_PATTERN})$")
+ELEMENT_SELECTOR_RE = re.compile(rf"^({ELEMENT_TOKEN_PATTERN})$")
 
-# A build123d part label used in place of an occurrence id. Deliberately narrow: it must not
-# start with a digit, and it excludes "." because that is the entity separator. Real labels in
-# the repo are alphanumerics plus "_" and ":" (mounting_eye:lower, piston_rod:chrome), so this
-# covers them while leaving the numeric grammar's territory untouched. Widening later is
-# backwards compatible; narrowing would not be.
+# A build123d part label used in place of an occurrence token. Deliberately narrow: it must not
+# start with a digit, and it excludes "/" because that separates an occurrence from its element.
+# Real labels in the repo are alphanumerics plus "_" and ":" (mounting_eye:lower,
+# piston_rod:chrome), so this covers them. A token matches it too, which is why the token forms
+# are tried first.
 LABEL_PATTERN = r"[A-Za-z_][A-Za-z0-9_:]*"
 LABEL_SELECTOR_RE = re.compile(rf"^({LABEL_PATTERN})$")
-LABEL_ENTITY_SELECTOR_RE = re.compile(rf"^({LABEL_PATTERN})\.([sfev])(\d+)$")
+LABEL_ELEMENT_SELECTOR_RE = re.compile(rf"^({LABEL_PATTERN})/({ELEMENT_TOKEN_PATTERN})$")
 # Mates are not part of the structured grammar -- consumers handle them -- and "m1" would
 # otherwise be swallowed by LABEL_SELECTOR_RE.
 MATE_SELECTOR_RE = re.compile(r"^m\d+$", re.IGNORECASE)
+
+_TYPE_FOR_KIND = {"f": "face", "e": "edge", "v": "vertex"}
+_KIND_FOR_TYPE = {"face": "f", "edge": "e", "vertex": "v"}
 
 
 @dataclass(frozen=True)
 class ParsedSelector:
     selector_type: str
     occurrence_id: str
-    ordinal: int | None
+    # The element's token (``f:…``, ``e:…``, ``v:…``) for a face, edge or vertex selector; "".
+    token: str
     canonical: str
-    # Set when the occurrence was named by label rather than by numeric id. Resolution against
-    # a loaded artifact turns this into an occurrence_id; the parser cannot, because it has no
+    # Set when the occurrence was named by label rather than by token. Resolution against a
+    # loaded artifact turns this into an occurrence_id; the parser cannot, because it has no
     # index to look in.
     label: str = ""
 
 
-def _selector_type_for_kind(kind: str) -> str:
-    if kind == "s":
-        return "shape"
-    if kind == "f":
-        return "face"
-    if kind == "e":
-        return "edge"
-    return "vertex"
+def element_kind(token: str) -> str:
+    """``"face"``, ``"edge"`` or ``"vertex"`` for an element token."""
+    return _TYPE_FOR_KIND[token[0]]
+
+
+def element_ref(occurrence_id: str, token: str) -> str:
+    """The one composition rule: ``<occurrence token>/<element token>``."""
+    return f"{occurrence_id}/{token}"
+
+
+def split_element_ref(selector: object) -> tuple[str, str] | None:
+    """``(owner, token)`` of an element ref -- ``o:…/f:…``, or ``label/f:…`` -- with any
+    leading ``#`` dropped; None for anything else. Mirrors ``splitElementRef`` in the JS
+    grammar: the one place a ref is taken apart, as :func:`element_ref` is the one place it
+    is put together."""
+    text = str(selector or "").strip()
+    text = text[1:] if text.startswith("#") else text
+    slash = text.find("/")
+    if slash <= 0:
+        return None
+    owner, token = text[:slash], text[slash + 1:]
+    return (owner, token) if ELEMENT_SELECTOR_RE.match(token) else None
+
+
+def is_native_selector(value: object) -> bool:
+    """Whether ``value`` is a ref in the token grammar itself (an occurrence token, an
+    occurrence/element pair, a bare element token or a mate), as opposed to a label or
+    an opaque string. Mirrors ``isNativeCadSelector`` in the JS grammar."""
+    parsed = parse_selector(str(value or ""))
+    if parsed is None or parsed.label:
+        return False
+    return parsed.selector_type != "opaque" or MATE_SELECTOR_RE.match(parsed.canonical) is not None
 
 
 def _path_segments(path: str) -> list[str]:
@@ -114,15 +158,15 @@ def split_cad_ref(text: str) -> tuple[str, str]:
 def ensure_ref_file_matches(file_prefix: str, document_path: str, *, source_label: str = "ref") -> None:
     """Reject a ref whose file prefix names a file this command is not looking at.
 
-    Copied refs may carry a file prefix (``STEP/plate.step#o1.2``) so they stay meaningful in a
-    prompt spanning several files: the file's path relative to the viewer's root, or its absolute
-    path. It has to name ``document_path``, the file the command was given, as a path does
-    (:func:`ref_prefix_names`). A CLI only ever inspects that file, so a prefix naming a DIFFERENT
-    file has to be an error: silently ignoring it would inspect the wrong file and report a
-    confident answer about geometry the user never asked about.
+    Copied refs may carry a file prefix (``STEP/plate.step#o:4b1f9e2a7c03``) so they stay
+    meaningful in a prompt spanning several files: the file's path relative to the viewer's root,
+    or its absolute path. It has to name ``document_path``, the file the command was given, as a
+    path does (:func:`ref_prefix_names`). A CLI only ever inspects that file, so a prefix naming a
+    DIFFERENT file has to be an error: silently ignoring it would inspect the wrong file and report
+    a confident answer about geometry the user never asked about.
 
     CLIs do not resolve prefixes to paths -- the agent does that, then passes the file and the
-    ref separately. See ``skills/cad/references/inspection-and-validation.md``.
+    ref separately.
     """
     prefix = str(file_prefix or "").strip()
     document = str(document_path or "").strip()
@@ -136,70 +180,63 @@ def ensure_ref_file_matches(file_prefix: str, document_path: str, *, source_labe
 
 def parse_selector(raw_selector: str) -> ParsedSelector | None:
     # Only a LEADING "#" is the token marker. str.replace() takes the first "#"
-    # anywhere, splicing "o1#f2" into the label "o1f2"; the JS parser strips /^#/
-    # and leaves the rest opaque, and the two are one language.
+    # anywhere; the JS parser strips /^#/ and leaves the rest opaque, and the two are one language.
     selector = str(raw_selector or "").strip()
     if selector.startswith("#"):
         selector = selector[1:]
     if not selector:
         return None
 
-    occurrence_entity_match = OCCURRENCE_ENTITY_SELECTOR_RE.match(selector)
-    if occurrence_entity_match:
-        occurrence_id = f"o{occurrence_entity_match.group(1)}"
-        kind = str(occurrence_entity_match.group(2))
-        ordinal = int(occurrence_entity_match.group(3))
+    occurrence_element = OCCURRENCE_ELEMENT_SELECTOR_RE.match(selector)
+    if occurrence_element:
+        occurrence_id, token = occurrence_element.group(1), occurrence_element.group(2)
         return ParsedSelector(
-            selector_type=_selector_type_for_kind(kind),
+            selector_type=element_kind(token),
             occurrence_id=occurrence_id,
-            ordinal=ordinal,
-            canonical=f"{occurrence_id}.{kind}{ordinal}",
+            token=token,
+            canonical=element_ref(occurrence_id, token),
         )
 
     occurrence_match = OCCURRENCE_SELECTOR_RE.match(selector)
     if occurrence_match:
-        occurrence_id = f"o{occurrence_match.group(1)}"
         return ParsedSelector(
             selector_type="occurrence",
-            occurrence_id=occurrence_id,
-            ordinal=None,
-            canonical=occurrence_id,
+            occurrence_id=occurrence_match.group(1),
+            token="",
+            canonical=occurrence_match.group(1),
         )
 
-    entity_match = ENTITY_SELECTOR_RE.match(selector)
-    if entity_match:
-        kind = str(entity_match.group(1))
-        ordinal = int(entity_match.group(2))
+    element_match = ELEMENT_SELECTOR_RE.match(selector)
+    if element_match:
+        token = element_match.group(1)
         return ParsedSelector(
-            selector_type=_selector_type_for_kind(kind),
+            selector_type=element_kind(token),
             occurrence_id="",
-            ordinal=ordinal,
-            canonical=f"{kind}{ordinal}",
+            token=token,
+            canonical=token,
         )
 
-    # Label forms are tried only after every numeric form has had its chance, so an existing
-    # ref can never change meaning. Mates are excluded explicitly: they look like labels.
+    # Label forms are tried only after every token form has had its chance, so a token can never
+    # be read as a label. Mates are excluded explicitly: they look like labels.
     if not MATE_SELECTOR_RE.match(selector):
-        label_entity_match = LABEL_ENTITY_SELECTOR_RE.match(selector)
-        if label_entity_match:
-            label = str(label_entity_match.group(1))
-            kind = str(label_entity_match.group(2))
-            ordinal = int(label_entity_match.group(3))
+        label_element = LABEL_ELEMENT_SELECTOR_RE.match(selector)
+        if label_element:
+            label, token = label_element.group(1), label_element.group(2)
             return ParsedSelector(
-                selector_type=_selector_type_for_kind(kind),
+                selector_type=element_kind(token),
                 occurrence_id="",
-                ordinal=ordinal,
-                canonical=f"{label}.{kind}{ordinal}",
+                token=token,
+                canonical=element_ref(label, token),
                 label=label,
             )
 
         label_match = LABEL_SELECTOR_RE.match(selector)
         if label_match:
-            label = str(label_match.group(1))
+            label = label_match.group(1)
             return ParsedSelector(
                 selector_type="label",
                 occurrence_id="",
-                ordinal=None,
+                token="",
                 canonical=label,
                 label=label,
             )
@@ -207,6 +244,6 @@ def parse_selector(raw_selector: str) -> ParsedSelector | None:
     return ParsedSelector(
         selector_type="opaque",
         occurrence_id="",
-        ordinal=None,
+        token="",
         canonical=selector,
     )

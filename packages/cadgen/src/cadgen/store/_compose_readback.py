@@ -38,8 +38,6 @@ import math
 import struct
 from typing import Any, Callable, Mapping
 
-from cadgen.store.trees import _rebase_id
-
 STEP_REAL_RANGE = (0.1, 1000.0)
 STEP_REAL_RANGE_WIDTH = 15
 
@@ -116,11 +114,18 @@ def compose_document_tree(
     ``walk`` is the parent's packaged result, ``descriptor`` the flattened
     authored tree the STEP was assembled from, ``child_documents`` maps each
     pinned child tree hash to that child's document tree hash.
+
+    The composed tree is built with the descriptor's ids, walked in parallel
+    with the authored structure (a child's document tree mirrors its flattened
+    tree, node for node), and then every id is minted again from the document's
+    own names and written placements (``tree_tokens.assign_tokens``): exactly
+    what a parse of the written bytes would mint.
     """
     from cadgen._internal.glb_topology import (
         STEP_EDGE_DEFAULT_RENDER_VISIBILITY_CLASSES, step_edge_capabilities,
     )
     from cadgen._internal.step_scene_loader import _normalize_label_name
+    from cadgen._internal.tree_tokens import assign_tokens, retoken
     from cadgen.store.trees import TREE_KIND, TREE_SCHEMA, _validate_structure, flatten, get_tree, tree_kind
 
     if walk.occurrences or walk.components or not walk.links:
@@ -134,6 +139,9 @@ def compose_document_tree(
         if type(occurrence) is not dict or type(occurrence.get("id")) is not str:
             raise Ineligible("malformed descriptor occurrence")
         written[occurrence["id"]] = occurrence.get("transform")
+    descriptor_root = (descriptor.get("assembly") or {}).get("root")
+    if not isinstance(descriptor_root, dict):
+        raise Ineligible("the descriptor has no assembly root")
 
     components: dict[str, dict[str, Any]] = {}
     occurrences: list[dict[str, Any]] = []
@@ -174,8 +182,12 @@ def compose_document_tree(
         documents[tree_hash] = document
         return document
 
-    def link_subtree(link: Mapping[str, Any]) -> dict[str, Any]:
-        link_id = str(link["id"])
+    def children_of(node: Mapping[str, Any]) -> list[dict[str, Any]]:
+        return [child for child in node.get("children") or [] if isinstance(child, dict)]
+
+    def link_subtree(link: Mapping[str, Any], placed: Mapping[str, Any]) -> dict[str, Any]:
+        """The link's subtree, from the child's document tree walked beside
+        ``placed``, the descriptor's expanded node for the link."""
         if link.get("color") is not None:
             raise Ineligible(f"link {link.get('name')!r} carries a colour")
         if not pure_translation(link.get("transform")):
@@ -188,12 +200,14 @@ def compose_document_tree(
         for cid, entry in document["components"].items():
             components.setdefault(cid, copy.deepcopy(entry))
 
-        def convert(node: Mapping[str, Any]) -> dict[str, Any]:
-            node_id = _rebase_id(link_id, str(node["id"]))
+        def convert(node: Mapping[str, Any], mirror: Mapping[str, Any]) -> dict[str, Any]:
+            node_id = str(mirror["id"])
             node_name = _named(node)
-            children = node.get("children") or []
+            children, mirrored = children_of(node), children_of(mirror)
+            if len(children) != len(mirrored):
+                raise Ineligible(f"child {link.get('name')!r} reads back a hierarchy its result does not have")
             if children:
-                converted = [convert(child) for child in children]
+                converted = [convert(child, twin) for child, twin in zip(children, mirrored)]
                 return {"id": node_id, "name": node_name, "nodeType": "subassembly",
                         "leafPartIds": [leaf for child in converted for leaf in child["leafPartIds"]],
                         "children": converted}
@@ -214,19 +228,21 @@ def compose_document_tree(
             return {"id": node_id, "name": node_name, "nodeType": "part",
                     "leafPartIds": [node_id], "children": []}
 
-        subtree = convert(document["assembly"]["root"])
+        subtree = convert(document["assembly"]["root"], placed)
         subtree["name"] = name
         subtree["nodeType"] = "subassembly"
         return subtree
 
-    def convert_authored(node: Mapping[str, Any], *, root: bool = False) -> dict[str, Any]:
+    def convert_authored(node: Mapping[str, Any], placed: Mapping[str, Any], *, root: bool = False) -> dict[str, Any]:
         node_id = str(node.get("id") or "")
+        if str(placed.get("id") or "") != node_id:
+            raise Ineligible(f"the descriptor does not mirror authored node {node_id}")
         node_type = node.get("nodeType")
         if node_type == "link":
             link = links_by_id.get(node_id)
             if link is None:
                 raise Ineligible(f"authored link {node_id} has no link row")
-            return link_subtree(link)
+            return link_subtree(link, placed)
         if node_type != ("assembly" if root else "subassembly"):
             raise Ineligible(f"authored node {node_id} is not a group of links")
         if root:
@@ -235,16 +251,23 @@ def compose_document_tree(
             name = _normalize_label_name(node.get("name"))
             if name is None:
                 raise Ineligible(f"group {node.get('name')!r} has no name that survives the STEP round trip")
-        children = [convert_authored(child) for child in node.get("children") or []]
-        if not children:
+        children, mirrored = children_of(node), children_of(placed)
+        if len(children) != len(mirrored):
+            raise Ineligible(f"the descriptor does not mirror authored group {node_id}")
+        converted = [convert_authored(child, twin) for child, twin in zip(children, mirrored)]
+        if not converted:
             raise Ineligible(f"authored group {node_id} places nothing")
         return {"id": node_id, "name": name, "nodeType": node_type,
-                "leafPartIds": [leaf for child in children for leaf in child["leafPartIds"]],
-                "children": children}
+                "leafPartIds": [leaf for child in converted for leaf in child["leafPartIds"]],
+                "children": converted}
 
-    root = convert_authored(walk.root, root=True)
+    root = convert_authored(walk.root, descriptor_root, root=True)
     if not occurrences:
         raise Ineligible("the composed document places nothing")
+    # Named as the document names them, from its own names and written placements.
+    mapping = assign_tokens(root, occurrences, [], label=root_label)
+    tokened = retoken({"occurrences": occurrences, "links": [], "assembly": {"root": root}}, mapping)
+    occurrences, root = tokened["occurrences"], tokened["assembly"]["root"]
     tree: dict[str, Any] = {
         "capabilities": step_edge_capabilities(),
         "edgeRendering": {"visibilityClasses": list(STEP_EDGE_DEFAULT_RENDER_VISIBILITY_CLASSES)},

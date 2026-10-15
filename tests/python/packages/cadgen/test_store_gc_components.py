@@ -5,6 +5,7 @@ from pathlib import Path
 import unittest
 from unittest import mock
 from tests.python.support.paths import add_repo_path
+from tests.python.support.tree_ids import tokenized
 from tests.python.support.tmp_root import generated_cad_directory
 add_repo_path("packages/cadgen/src")
 
@@ -64,9 +65,9 @@ class ComponentGcReachability(unittest.TestCase):
         from cadgen.store.records import document_key, note_document_tree, note_document_mesh
         from cadgen.store.trees import put_tree, tree_complete, IDENTITY_16
         child = self.seed()
-        parent = put_tree({"label":"parent","units":"mm","entryKind":"assembly","components":{},"occurrences":[],
+        parent = put_tree(tokenized({"label":"parent","units":"mm","entryKind":"assembly","components":{},"occurrences":[],
             "links":[{"id":"o1.1","name":"child","tree":child,"transform":IDENTITY_16}],
-            "assembly":{"root":{"id":"o1","nodeType":"assembly","children":[{"id":"o1.1","nodeType":"link","children":[]}]}}})
+            "assembly":{"root":{"id":"o1","nodeType":"assembly","children":[{"id":"o1.1","nodeType":"link","children":[]}]}}})[0])
         for kind in ("document", "model", "part"):
             for key, _ in list(iter_entries(kind)): remove_entry(kind, key)
         external = put_object(b"external exported mesh")

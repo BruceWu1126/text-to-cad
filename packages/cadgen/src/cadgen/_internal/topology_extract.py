@@ -7,8 +7,8 @@ oriented normal, its analytic parameters and its loops as ordered edge
 ordinals; each edge's visibility class, continuity, dihedral angle, flags,
 adjacent faces, exact length, centroid, tight box, curve type, analytic
 parameters and, for a circle, its sweep. Face and edge ordinals are the
-``TopExp.MapShapes_s`` order the selector system has always used, so refs
-(``#o1.2.f5``) keep their meaning, and the component's mesh (``tessellate``) is
+``TopExp.MapShapes_s`` order the selector table joins a ref's element token to
+(``geometry_fingerprint``), and the component's mesh (``tessellate``) is
 grouped by the same ordinals.
 
 ``extract_topology_facts`` returns them in memory as a plain structure -- the

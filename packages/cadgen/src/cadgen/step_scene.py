@@ -1,8 +1,9 @@
 """Saved STEP readers and exact, revision-scoped scene selection.
 
 ``read_step`` returns native build123d geometry. ``read_scene`` retains the
-occurrence hierarchy and canonical selector IDs; geometry is acquired only
-when requested. Neither reader discovers or executes source scripts.
+occurrence hierarchy and the document's refs (occurrence tokens, element
+tokens: README law 20); geometry is acquired only when requested. Neither reader
+discovers or executes source scripts.
 """
 from __future__ import annotations
 
@@ -16,7 +17,8 @@ if TYPE_CHECKING:
 
 __all__ = ["read_step", "read_scene", "StepScene", "Occurrence", "Selection"]
 
-EntityKind = Literal["shape", "face", "edge", "vertex"]
+EntityKind = Literal["face", "edge", "vertex"]
+_PLURAL = {"face": "faces", "edge": "edges", "vertex": "vertices"}
 
 
 def _resolve_input(step_path: Path | str, *, reader: str) -> Path:
@@ -59,15 +61,16 @@ class Selection:
 
     _scene: StepScene = field(repr=False)
     occurrence_ref: str
-    kind: Literal["occurrence", "shape", "face", "edge", "vertex"]
+    kind: Literal["occurrence", "face", "edge", "vertex"]
     _ordinal: int | None = None
 
     @property
     def ref(self) -> str:
+        """The ref that names this selection: ``#<occurrence token>``, or
+        ``#<occurrence token>/<element token>`` for a face, edge or vertex."""
         if self.kind == "occurrence":
             return self.occurrence_ref
-        prefix = {"shape": "s", "face": "f", "edge": "e", "vertex": "v"}[self.kind]
-        return f"{self.occurrence_ref}.{prefix}{self._ordinal}"
+        return f"{self.occurrence_ref}/{self._scene._token(self)}"
 
     def shape(self) -> Shape:
         """Native geometry in world coordinates, privately owned by the caller.
@@ -86,12 +89,12 @@ class Selection:
         return result
 
     def entities(self, kind: EntityKind) -> Iterator[Selection]:
-        """Enumerate canonical entities inside this selection.
+        """Enumerate the faces, edges or vertices inside this selection.
 
-        IDs stay occurrence-scoped, including coincident repeated parts.
-        Asking a face for edges retains the leaf's edge ordinals.
+        Each carries its own ref: the occurrence's token and the element's.
+        Asking a face for edges gives the leaf's edges that bound it.
         """
-        if kind not in {"shape", "face", "edge", "vertex"}:
+        if kind not in _PLURAL:
             raise ValueError(f"unknown entity kind: {kind!r}")
         yield from self._scene._entities(self, kind)
 
@@ -115,33 +118,45 @@ class Occurrence(Selection):
 
 
 def _node_ref(node) -> str:
-    return "#o" + ".".join(str(n) for n in node.path)
+    return "#" + str(node.id)
 
 
 class StepScene:
     """A saved document revision with immutable occurrence and selector views.
 
-    References are canonical for these document bytes, not persistent feature
-    names across edits. The scene does not apply kinematics/animation poses.
+    References name the document's geometry: an occurrence by the token of its
+    place in the document's tree, an element by the token of its geometry
+    within its body, so a ref survives a rebuild that keeps the geometry and a
+    STEP round trip of it. The scene does not apply kinematics/animation poses.
     """
 
     def __init__(self, scene: LoadedStepScene):
         from cadgen.label_refs import build_label_aliases
 
         self._loaded = scene
+        if any(node.id is None for node in self._walk(scene.roots)):
+            from cadgen._internal.step_scene_package import scene_tokens
+
+            scene_tokens(scene)
         self._occurrences: dict[str, Occurrence] = {}
         self._maps: dict[tuple[Any, str], Any] = {}
+        self._identities: dict[Any, dict] = {}
         self._prototype_ids = {key: f"p{i}" for i, key in enumerate(scene.prototype_shapes, 1)}
-        stack = list(reversed(scene.roots))
-        while stack:
-            node = stack.pop()
+        for node in self._walk(scene.roots):
             ref = _node_ref(node)
             self._occurrences[ref] = Occurrence(self, ref, "occurrence", _node=node)
-            stack.extend(reversed(node.children))
         self._leaves = tuple(o for o in self._occurrences.values() if o._node.prototype_key is not None)
         self._aliases = build_label_aliases(
             {"id": o.ref[1:], "name": o.label} for o in self._occurrences.values()
         )
+
+    @staticmethod
+    def _walk(roots) -> Iterator[Any]:
+        stack = list(reversed(roots))
+        while stack:
+            node = stack.pop()
+            yield node
+            stack.extend(reversed(node.children))
 
     @property
     def document_hash(self) -> str:
@@ -156,14 +171,15 @@ class StepScene:
         return iter(self._leaves)
 
     def resolve(self, ref: str) -> Selection:
-        """Resolve one numeric ref, exact label alias, or file-prefixed ref.
+        """Resolve one ref: an occurrence token, an element ref, an exact label alias,
+        or a file-prefixed ref.
 
         A file prefix -- the path under the viewer's root, or an absolute path --
         must name this scene's document as a path does (links resolved, a relative
         one read from the working directory, else matched against the end of the
         document's path).
-        Ambiguous labels raise with numbered candidates. A bare entity ID
-        (e.g. #f1) requires exactly one leaf. No fuzzy matching or first match.
+        Ambiguous labels raise with numbered candidates. A bare element token
+        (``#f:…``) requires exactly one leaf. No fuzzy matching or first match.
         """
         from cadgen.cad_ref_syntax import parse_selector, ref_prefix_names, split_cad_ref
         from cadgen.label_refs import resolve_label_selectors
@@ -173,14 +189,14 @@ class StepScene:
             raise ValueError(f"reference names {prefix!r}, but this scene is {str(self._loaded.step_path)!r}")
         parsed = parse_selector(text)
         if parsed is None or parsed.selector_type == "opaque":
-            raise ValueError(f"invalid reference: {ref!r}; pass one occurrence or entity ref")
+            raise ValueError(f"invalid reference: {ref!r}; pass one occurrence or element ref")
         if parsed.label:
             text = resolve_label_selectors([text], self._aliases)[0]
             parsed = parse_selector(text)
         oid = "#" + parsed.occurrence_id if parsed.occurrence_id else ""
         if not oid:
             if len(self._leaves) != 1:
-                raise ValueError(f"{ref!r} needs an occurrence prefix in an assembly")
+                raise ValueError(f"{ref!r} needs an occurrence token in an assembly")
             oid = self._leaves[0].ref
         occurrence = self._occurrences.get(oid)
         if occurrence is None:
@@ -188,30 +204,40 @@ class StepScene:
         if parsed.selector_type == "occurrence":
             return occurrence
         kind = parsed.selector_type
-        ordinal = parsed.ordinal
         if occurrence._node.prototype_key is None:
             raise ValueError(f"{oid} is a group; enumerate its entities or specify a leaf occurrence")
-        entities = self._table(occurrence, kind)
-        size = len(entities) if kind == "shape" else entities.Extent()
-        if ordinal is None or not 1 <= ordinal <= size:
-            raise ValueError(f"unknown {kind} reference: {ref!r} (available: 1..{size})")
-        return Selection(self, oid, kind, ordinal)
+        tokens = self._identity(occurrence)[_PLURAL[kind]]
+        if parsed.token not in tokens:
+            raise ValueError(f"unknown {kind} reference: {ref!r} ({len(tokens)} {_PLURAL[kind]} in {oid})")
+        return Selection(self, oid, kind, tokens.index(parsed.token) + 1)
+
+    def _identity(self, occurrence) -> dict:
+        """The geometric identity of the occurrence's prototype (``geometry_fingerprint``):
+        its element tokens by ordinal, computed once per prototype."""
+        key = occurrence._node.prototype_key
+        if key not in self._identities:
+            from cadgen._internal.geometry_fingerprint import geometry_identity
+
+            self._identities[key] = geometry_identity(self._loaded.prototype_shapes[key])
+        return self._identities[key]
+
+    def _token(self, selection: Selection) -> str:
+        occurrence = self._occurrences[selection.occurrence_ref]
+        return self._identity(occurrence)[_PLURAL[selection.kind]][selection._ordinal - 1]
 
     def _table(self, occurrence, kind):
-        from cadgen._internal.entity_ordinals import entity_map, shape_entities
+        from cadgen._internal.entity_ordinals import entity_map
 
         key = (occurrence._node.prototype_key, kind)
         if key not in self._maps:
-            prototype = self._loaded.prototype_shapes[key[0]]
-            self._maps[key] = shape_entities(prototype) if kind == "shape" else entity_map(prototype, kind)
+            self._maps[key] = entity_map(self._loaded.prototype_shapes[key[0]], kind)
         return self._maps[key]
 
     def _local(self, selection):
         occurrence = self._occurrences[selection.occurrence_ref]
         if selection.kind == "occurrence":
             return self._loaded.prototype_shapes[occurrence._node.prototype_key]
-        table = self._table(occurrence, selection.kind)
-        return table[selection._ordinal - 1] if selection.kind == "shape" else table.FindKey(selection._ordinal)
+        return self._table(occurrence, selection.kind).FindKey(selection._ordinal)
 
     def _placed(self, selection):
         occurrence = self._occurrences[selection.occurrence_ref]
@@ -238,19 +264,12 @@ class StepScene:
             return
         table = self._table(occurrence, kind)
         if selection.kind == "occurrence":
-            size = len(table) if kind == "shape" else table.Extent()
-            ordinals = range(1, size + 1)
+            ordinals = range(1, table.Extent() + 1)
         elif selection.kind == kind:
             ordinals = [selection._ordinal]
         else:
-            local = self._local(selection)
-            if kind == "shape":
-                # Usually a face/edge cannot contain a solid/shell. A leaf
-                # containing only that face/edge also gives it a fallback s1.
-                ordinals = [i for i, entity in enumerate(table, 1) if entity.IsSame(local)]
-            else:
-                subset = entity_map(local, kind)
-                ordinals = [table.FindIndex(subset.FindKey(i)) for i in range(1, subset.Extent() + 1)]
+            subset = entity_map(self._local(selection), kind)
+            ordinals = [table.FindIndex(subset.FindKey(i)) for i in range(1, subset.Extent() + 1)]
         for ordinal in ordinals:
             yield Selection(self, occurrence.ref, kind, ordinal)
 

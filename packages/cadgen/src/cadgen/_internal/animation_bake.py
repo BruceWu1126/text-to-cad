@@ -303,14 +303,11 @@ def _braid(value: object) -> dict[str, Any] | None:
 # --- What a clip targets ---------------------------------------------------------
 
 
-def _natural(occurrence_id: str) -> tuple:
-    return tuple(int(part) if part.isdigit() else part for part in occurrence_id.lstrip("o").split("."))
-
-
 class AnimationTargets:
-    """The names and ids a clip's ``m.get`` resolves, each to document leaves.
+    """The names and tokens a clip's ``m.get`` resolves, each to document leaves.
     A name means one part or group, as everywhere a ``#name`` is read
-    (:class:`cadgen.label_refs.TreeNames`)."""
+    (:class:`cadgen.label_refs.TreeNames`). ``leaf_order`` is the document's leaf order,
+    what the baked tracks are sorted by (a token carries no order of its own)."""
 
     def __init__(self, by_id: Mapping[str, Sequence[str]], by_name: Mapping[str, Sequence[str]]):
         from cadgen.label_refs import TreeNames
@@ -318,6 +315,11 @@ class AnimationTargets:
         self._by_id = {key: tuple(value) for key, value in by_id.items()}
         self._names = TreeNames(by_name)
         self._resolved: dict[str, tuple[str, ...]] = {}
+        order: dict[str, int] = {}
+        for leaves in self._by_id.values():
+            for leaf in leaves:
+                order.setdefault(leaf, len(order))
+        self.leaf_order = order
 
     def labels(self) -> list[str]:
         return self._names.names()
@@ -328,7 +330,7 @@ class AnimationTargets:
         if cached is not None:
             return cached
         if not isinstance(target, str) or not target.startswith("#") or not target[1:].strip():
-            raise AnimationError(f"animation target {target!r} must be a #name or an #o1.2 occurrence id")
+            raise AnimationError(f"animation target {target!r} must be a #name or an #o:… occurrence token")
         selector = target[1:].strip()
         if selector in self._by_id:
             leaves = self._by_id[selector]
@@ -442,7 +444,7 @@ class Model:
 
     def get(self, *targets: str) -> Handle:
         if not targets:
-            raise AnimationError("m.get needs at least one #name or #occurrence id")
+            raise AnimationError("m.get needs at least one #name or #occurrence token")
         if len(targets) == 1:
             return Handle(self._frame, self._targets.resolve(targets[0]))
         leaves = dict.fromkeys(leaf for target in targets for leaf in self._targets.resolve(target))
@@ -856,6 +858,8 @@ def bake_clip(
     center = tuple((lo + hi) / 2.0 for lo, hi in zip(bounds[0], bounds[1]))
     rounded_times = [_round(t, _TIME_DIGITS) for t in times]
     tracks: list[dict[str, Any]] = []
+    # Leaves in the document's order: a token carries no order of its own.
+    order = _leaf_order(targets.leaf_order)
 
     def channel(name: str, rest: Any) -> dict[tuple, list[str]]:
         """Leaves grouped by their whole sequence on this channel: parts that move
@@ -884,10 +888,10 @@ def bake_clip(
     for sequence, leaves in channel("transform", _IDENTITY).items():
         if all(value == sequence[0] for value in sequence) and _is_identity(sequence[0]):
             continue  # touched, never moved
-        where = f"animation clip {clip_id!r} part {sorted(leaves, key=_natural)[0]}"
+        where = f"animation clip {clip_id!r} part {sorted(leaves, key=order)[0]}"
         track_corners, track_center = measured(leaves)
         keep, pivot, values = _transform_keys(times, list(sequence), track_corners, track_center, diagonal, tolerance, where)
-        track = _track(leaves, rounded_times, keep, "transform", values)
+        track = _track(leaves, rounded_times, keep, "transform", values, order)
         track["pivot"] = list(pivot)
         tracks.append(track)
 
@@ -903,12 +907,12 @@ def bake_clip(
         keep = _keep(len(values), opacity_error, OPACITY_TOLERANCE, _runs(values, lambda v: v is None) + _holds(values))
         tracks.append(_track(leaves, rounded_times, keep, "opacity", [
             None if values[k] is None else _round(values[k], _OPACITY_DIGITS) for k in keep
-        ]))
+        ], order))
 
     for sequence, leaves in channel("visible", None).items():
         values = list(sequence)
         keep = [0] + [k for k in range(1, len(values)) if values[k] != values[k - 1]]
-        tracks.append(_track(leaves, rounded_times, keep, "visible", [values[k] for k in keep]))
+        tracks.append(_track(leaves, rounded_times, keep, "visible", [values[k] for k in keep], order))
 
     tube_sequences: dict[tuple, list[str]] = {}
     tube_specs: dict[tuple, list[dict[str, Any] | None]] = {}
@@ -947,16 +951,16 @@ def bake_clip(
         rest = next(s for s in specs if s)
         rest_path = _rounded_tube({"path": rest["rest"], "twistDeg": 0.0})["path"]
         written = [_tube_key(key, rest_path) for key in keys]
-        where = f"animation clip {clip_id!r} part {sorted(leaves, key=_natural)[0]}"
+        where = f"animation clip {clip_id!r} part {sorted(leaves, key=order)[0]}"
         keep = _refine_tube_keys(keep, written, times, rest_path, rest["maxSegmentLength"], tolerance, where)
-        track = _track(leaves, rounded_times, keep, "tube", [written[k] for k in keep])
+        track = _track(leaves, rounded_times, keep, "tube", [written[k] for k in keep], order)
         track["rest"] = rest_path
         track["maxSegmentLength"] = rest["maxSegmentLength"]
         if rest["braid"] is not None:
             track["braid"] = rest["braid"]
         tracks.append(track)
 
-    tracks.sort(key=lambda track: (CHANNELS.index(_channel_of(track)), _natural(track["targets"][0])))
+    tracks.sort(key=lambda track: (CHANNELS.index(_channel_of(track)), order(track["targets"][0])))
     return {
         "id": clip_id,
         "label": clip.label or clip_id,
@@ -1014,11 +1018,16 @@ def _refine_tube_keys(keep: list[int], written: list[Any], times: list[float], r
     return sorted(kept)
 
 
-def _track(leaves: list[str], times: list[float], keep: list[int], channel: str, values: list[Any]) -> dict[str, Any]:
+def _leaf_order(order: Mapping[str, int]):
+    """A sort key over leaf tokens: the document's leaf order, then the token itself."""
+    return lambda leaf: (order.get(leaf, len(order)), leaf)
+
+
+def _track(leaves: list[str], times: list[float], keep: list[int], channel: str, values: list[Any], order) -> dict[str, Any]:
     # A track whose every key is the same value is that value, held: one key.
     if len(values) > 1 and all(value == values[0] for value in values[1:]):
         keep, values = keep[:1], values[:1]
-    return {"targets": sorted(leaves, key=_natural), "times": [times[k] for k in keep], channel: values}
+    return {"targets": sorted(leaves, key=order), "times": [times[k] for k in keep], channel: values}
 
 
 def _channel_of(track: Mapping[str, Any]) -> str:

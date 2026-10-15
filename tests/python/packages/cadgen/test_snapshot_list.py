@@ -16,6 +16,7 @@ from unittest import mock
 
 from tests.python.support.cad_test_roots import ClassCadRoots
 from tests.python.support.paths import add_repo_path
+from tests.python.support.tree_ids import leaf_id, node_id, tokenized
 
 add_repo_path("packages/cadgen/src")
 
@@ -51,7 +52,7 @@ class SnapshotListTests(unittest.TestCase):
         cls.step = step_door
         with mock.patch.object(snapshot_core.BatchSnapshotRenderer, "start", browser_refused):
             cls.listing = step_door.snapshot(cls.workspace / "asm.step", mode="list")
-            cls.focused = step_door.snapshot(cls.workspace / "asm.step", mode="list", focus=("#o1.2",))
+            cls.focused = step_door.snapshot(cls.workspace / "asm.step", mode="list", focus=("#pin",))
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -60,16 +61,19 @@ class SnapshotListTests(unittest.TestCase):
     def test_each_part_is_listed_with_its_exact_box_and_its_mesh_counts(self) -> None:
         self.assertTrue(self.listing.ok)
         self.assertEqual((), self.listing.files)
-        rows = {row["ref"]: row for row in self.listing.parts}
-        self.assertEqual(["#o1.1", "#o1.2"], list(rows))
-        self.assertEqual({"ref", "name", "triangleCount", "vertexCount", "bounds"}, set(rows["#o1.1"]))
-        self.assertEqual(("plate", "pin"), (rows["#o1.1"]["name"], rows["#o1.2"]["name"]))
-        self.assertEqual({"min": [0, 0, 0], "max": [20, 10, 5]}, rows["#o1.1"]["bounds"])
+        from cadgen._internal.tree_tokens import is_occurrence_token
+
+        rows = {row["name"]: row for row in self.listing.parts}
+        self.assertEqual(["plate", "pin"], list(rows))
+        self.assertEqual({"ref", "name", "triangleCount", "vertexCount", "bounds"}, set(rows["plate"]))
+        # Each ref is the occurrence's token, the ref every selector takes.
+        self.assertTrue(all(row["ref"].startswith("#") and is_occurrence_token(row["ref"][1:]) for row in rows.values()))
+        self.assertEqual({"min": [0, 0, 0], "max": [20, 10, 5]}, rows["plate"]["bounds"])
         # The pin's exact box, from its BREP, placed at x = 30: not a tessellation's.
-        self.assertEqual({"min": [25, -5, 0], "max": [35, 5, 20]}, rows["#o1.2"]["bounds"])
+        self.assertEqual({"min": [25, -5, 0], "max": [35, 5, 20]}, rows["pin"]["bounds"])
         # A box is two triangles a face, each face its own four vertices.
-        self.assertEqual((12, 24), (rows["#o1.1"]["triangleCount"], rows["#o1.1"]["vertexCount"]))
-        self.assertGreater(rows["#o1.2"]["triangleCount"], 12)
+        self.assertEqual((12, 24), (rows["plate"]["triangleCount"], rows["plate"]["vertexCount"]))
+        self.assertGreater(rows["pin"]["triangleCount"], 12)
 
     def test_a_listed_ref_is_one_every_selector_resolves(self) -> None:
         from cadgen._internal.doors import document_snapshot
@@ -84,7 +88,7 @@ class SnapshotListTests(unittest.TestCase):
                          [(row["ref"], row["name"]) for row in self.listing.parts])
 
     def test_focus_lists_only_what_it_keeps(self) -> None:
-        self.assertEqual(["#o1.2"], [row["ref"] for row in self.focused.parts])
+        self.assertEqual(["pin"], [row["name"] for row in self.focused.parts])
 
     def test_listing_a_stored_model_loads_no_kernel(self) -> None:
         # The rows are read from the tree and its parts' records: a process that lists
@@ -152,20 +156,34 @@ class NoSurfacesTests(unittest.TestCase):
 
 
 class FilterOccurrencesTests(unittest.TestCase):
-    ROWS = [{"id": "o1.1", "name": "plate"}, {"id": "o1.2.1", "name": "pin"}, {"id": "o1.2.2", "name": "nut"}]
+    # A plate beside a `hardware` group of a pin and a nut; the rows are the leaves, the
+    # groups come from the tree (``assembly_group_members``), and every id is a token.
+    DESCRIPTOR, _ = tokenized({
+        "occurrences": [{"id": "o1.1", "name": "plate"}, {"id": "o1.2.1", "name": "pin"}, {"id": "o1.2.2", "name": "nut"}],
+        "assembly": {"root": {"id": "o1", "name": "asm", "children": [
+            {"id": "o1.1", "name": "plate", "children": []},
+            {"id": "o1.2", "name": "hardware", "children": [
+                {"id": "o1.2.1", "name": "pin", "children": []},
+                {"id": "o1.2.2", "name": "nut", "children": []},
+            ]},
+        ]}},
+    })
+    ROWS = DESCRIPTOR["occurrences"]
 
     def keep(self, **selection):
+        from cadgen.assembly_lookup import assembly_group_members
         from cadgen.snapshot_parts import filter_occurrences
 
-        return [row["id"] for row in filter_occurrences(self.ROWS, selection)]
+        groups = assembly_group_members(self.DESCRIPTOR)
+        return [row["name"] for row in filter_occurrences(self.ROWS, selection, groups=groups)]
 
     def test_a_ref_matches_its_id_its_group_or_its_name(self) -> None:
-        self.assertEqual(["o1.1", "o1.2.1", "o1.2.2"], self.keep())
-        self.assertEqual(["o1.2.1", "o1.2.2"], self.keep(focus=["#o1.2"]))
-        self.assertEqual(["o1.2.2"], self.keep(focus=["nut"]))
-        self.assertEqual(["o1.1", "o1.2.2"], self.keep(hide="#o1.2.1"))
+        self.assertEqual(["plate", "pin", "nut"], self.keep())
+        self.assertEqual(["pin", "nut"], self.keep(focus=[f"#{node_id(self.DESCRIPTOR, 'hardware')}"]))
+        self.assertEqual(["nut"], self.keep(focus=["nut"]))
+        self.assertEqual(["plate", "nut"], self.keep(hide=f"#{leaf_id(self.DESCRIPTOR, 'pin')}"))
         with self.assertRaisesRegex(ValueError, "No renderable parts remain"):
-            self.keep(focus=["#o9"])
+            self.keep(focus=["#o:" + "9" * 12])
 
 
 if __name__ == "__main__":

@@ -49,45 +49,39 @@ class SelectorParityTest(unittest.TestCase):
                 self.assertIsNotNone(parsed)
                 self.assertEqual(case["selectorType"], parsed.selector_type)
                 self.assertEqual(case["occurrenceId"], parsed.occurrence_id)
-                self.assertEqual(case["ordinal"], parsed.ordinal)
+                self.assertEqual(case["token"], parsed.token)
                 self.assertEqual(case["canonical"], parsed.canonical)
                 self.assertEqual(case.get("label", ""), parsed.label)
 
 
-class BackwardsCompatibilityTest(unittest.TestCase):
-    """Adding label forms must not move a single existing ref.
+O1, O2 = "o:4b1f9e2a7c03", "o:0a9e8d7c6b5f"
+F, E, V = "f:9d2e8c1b5a70", "e:12ab34cd56ef", "v:fedcba987654"
 
-    This is the guarantee that matters most: every numeric selector anyone has already pasted
-    into an issue, a sidecar, or a script keeps parsing to exactly what it parsed to before.
-    """
 
-    NUMERIC_FORMS = (
-        "o1",
-        "o1.2",
-        "o1.2.3.4.5.6",
-        "o12.f19",
-        "o1.2.s3",
-        "o1.2.e3",
-        "o1.2.v3",
-        "f45",
-        "s2",
-        "e9",
-        "v4",
-        "#o2.f1",
-        "m1",
-        "m17",
-    )
+class TokenPrecedenceTest(unittest.TestCase):
+    """A token form is tried before the label form, so a token is never read as a label, and
+    the retired positional grammar (``o1.2.f7``, ``f7``) is no ref at all."""
 
-    def test_numeric_selectors_never_take_the_label_branch(self) -> None:
-        for selector in self.NUMERIC_FORMS:
+    TOKEN_FORMS = (O1, f"{O1}/{F}", f"{O1}/{E}", f"{O1}/{V}", F, E, V, f"#{O2}/{F}", "m1", "m17")
+
+    def test_token_selectors_never_take_the_label_branch(self) -> None:
+        for selector in self.TOKEN_FORMS:
             with self.subTest(selector=selector):
                 parsed = parse_selector(selector)
                 self.assertIsNotNone(parsed)
-                self.assertEqual(
-                    "",
-                    parsed.label,
-                    f"{selector} must not be read as a label",
-                )
+                self.assertEqual("", parsed.label, f"{selector} must not be read as a label")
+
+    def test_the_retired_grammar_is_no_ref(self) -> None:
+        from cadgen.cad_ref_syntax import element_kind, element_ref, is_native_selector
+
+        for selector in ("o1", "o1.2", "o1.2.f7", "o12.f19", "s2", f"{O1}/s:9d2e8c1b5a70", f"{O1}.{F}"):
+            with self.subTest(selector=selector):
+                self.assertNotEqual("occurrence", parse_selector(selector).selector_type)
+                self.assertNotIn(parse_selector(selector).selector_type, {"face", "edge", "vertex"})
+                self.assertFalse(is_native_selector(selector))
+        self.assertEqual("label", parse_selector("f45").selector_type, "a bare ordinal is a label spelling")
+        self.assertEqual(f"{O1}/{F}", element_ref(O1, F))
+        self.assertEqual(("face", "edge", "vertex"), (element_kind(F), element_kind(E), element_kind(V)))
 
     def test_mates_stay_opaque(self) -> None:
         # "m1" matches the label pattern; it must still be opaque so mate handling in the
@@ -96,15 +90,17 @@ class BackwardsCompatibilityTest(unittest.TestCase):
             with self.subTest(selector=selector):
                 self.assertEqual("opaque", parse_selector(selector).selector_type)
 
-    def test_entity_and_occurrence_forms_win_over_the_label_form(self) -> None:
-        self.assertEqual("face", parse_selector("f45").selector_type)
-        self.assertEqual("occurrence", parse_selector("o1.2").selector_type)
-        self.assertEqual("shape", parse_selector("s7").selector_type)
+    def test_element_and_occurrence_forms_win_over_the_label_form(self) -> None:
+        self.assertEqual("face", parse_selector(F).selector_type)
+        self.assertEqual("occurrence", parse_selector(O1).selector_type)
+        self.assertEqual("vertex", parse_selector(f"{O2}/{V}").selector_type)
+        self.assertEqual("edge", parse_selector(f"bracket/{E}").selector_type)
+        self.assertEqual("bracket", parse_selector(f"bracket/{E}").label)
 
 
 class TokenBackwardsCompatibilityTest(unittest.TestCase):
     def test_bare_tokens_carry_no_file_prefix(self) -> None:
-        for text in ("#o1", "#o1.2.f3", "#f45", "#m1", "#", "#o1.2,f3"):
+        for text in (f"#{O1}", f"#{O1}/{F}", f"#{F}", "#m1", "#", f"#{O1},{F}"):
             with self.subTest(text=text):
                 self.assertEqual(("", text[1:]), split_cad_ref(text), f"{text} must carry no file prefix")
 
@@ -186,11 +182,11 @@ class RefFileGuardTest(unittest.TestCase):
             'models/café #1 "screw".STEP',
         ):
             with self.subTest(path=path):
-                token = json.dumps(path, ensure_ascii=False) + "#o1.f2,o1.f3"
-                self.assertEqual((path, "o1.f2,o1.f3"), split_cad_ref(token))
-        self.assertEqual(("STEP/part.step", "o1.f2"), split_cad_ref("STEP/part.step#o1.f2"))
-        self.assertEqual(("", "o1.f2"), split_cad_ref("#o1.f2"))
-        self.assertEqual(("", "o1.f2"), split_cad_ref("o1.f2"))
+                token = json.dumps(path, ensure_ascii=False) + f"#{O1}/{F},{E}"
+                self.assertEqual((path, f"{O1}/{F},{E}"), split_cad_ref(token))
+        self.assertEqual(("STEP/part.step", f"{O1}/{F}"), split_cad_ref(f"STEP/part.step#{O1}/{F}"))
+        self.assertEqual(("", f"{O1}/{F}"), split_cad_ref(f"#{O1}/{F}"))
+        self.assertEqual(("", f"{O1}/{F}"), split_cad_ref(f"{O1}/{F}"))
 
     def test_path_has_suffix_is_segment_aligned(self) -> None:
         self.assertTrue(path_has_suffix("a/b/plate.stl", "plate.stl"))

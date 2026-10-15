@@ -568,7 +568,7 @@ def normalize_selection_selector(
     text = str(raw_value or "").strip()
     if not text:
         return []
-    # A copied ref may carry a file prefix (`STEP/plate.step#o1.2`). Accept it when it names the
+    # A copied ref may carry a file prefix (`STEP/plate.step#o:3f2a9c1d7e5b`). Accept it when it names the
     # document being rendered, refuse it when it names another -- rendering a different file's
     # ref against this model would focus the wrong geometry and look like it worked.
     if "#" in text:
@@ -586,8 +586,8 @@ def normalize_selection_selector(
     if parsed is None:
         return []
     if parsed.label:
-        # Labels become numeric here, before any validation or job building, so everything
-        # downstream -- including the JS render runtime -- only ever sees occurrence ids.
+        # Labels become tokens here, before any validation or job building, so everything
+        # downstream -- including the JS render runtime -- only ever sees occurrence tokens.
         from cadgen.label_refs import LabelResolutionError, resolve_label_selectors
 
         alias_map = getattr(selector_index, "label_aliases", None) if selector_index else None
@@ -779,7 +779,7 @@ def prepare_render_job(
         misplaced = [key for key in unknown_keys if key in SELECTION_KEYS]
         hint = (
             f" ({', '.join(misplaced)} nest under the selection object: "
-            f'"selection": {{"{misplaced[0]}": ["#o1.2"]}})'
+            f'"selection": {{"{misplaced[0]}": ["#housing"]}})'
             if misplaced
             else ""
         )
@@ -1046,9 +1046,10 @@ def resolve_step_render_job(
         raise SnapshotError(
             "STEP/STP render input changed while its topology was being resolved; retry the snapshot"
         )
-    from cadgen.assembly_lookup import assembly_occurrence_rows
+    from cadgen.assembly_lookup import assembly_group_members, assembly_occurrence_rows
     from cadgen.snapshot_parts import fail_if_nothing_left, failed_parts, filter_occurrences
 
+    groups = assembly_group_members(descriptor)
     if job["mode"] == "list":
         # The parts are cadgen's facts: the rows every ref resolves against, the
         # store's exact boxes and its stored meshes' counts (cadgen.snapshot_parts).
@@ -1056,7 +1057,7 @@ def resolve_step_render_job(
         from cadgen.snapshot_parts import failed_part_warnings, list_rows, unmeshed_warnings
 
         try:
-            listed = filter_occurrences(assembly_occurrence_rows(descriptor, None), normalized_selection)
+            listed = filter_occurrences(assembly_occurrence_rows(descriptor, None), normalized_selection, groups=groups)
         except ValueError as error:
             raise SnapshotError(str(error)) from None
         # A part no mesh could be made of is not listed, and the list says so; a list of
@@ -1083,7 +1084,7 @@ def resolve_step_render_job(
         # has drawn (snapshot_core). A view of nothing else -- of the parts it focuses on, or
         # of every part it does not hide -- fails, naming them, as a list of them does.
         try:
-            shown = filter_occurrences(assembly_occurrence_rows(descriptor, None), normalized_selection)
+            shown = filter_occurrences(assembly_occurrence_rows(descriptor, None), normalized_selection, groups=groups)
         except ValueError:
             shown = []  # a selection that keeps nothing is the page's to refuse, as it always was
         fail_if_nothing_left(descriptor, shown)

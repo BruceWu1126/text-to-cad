@@ -45,7 +45,7 @@ def _occurrence_index(descriptor: Mapping[str, Any]):
     return attach_label_aliases(merge_assembly_occurrences(index, descriptor, None))
 
 
-_ENTITY_TYPES = frozenset({"shape", "face", "edge", "vertex"})
+_ENTITY_TYPES = frozenset({"face", "edge", "vertex"})
 
 
 def _with_named_entities(index, descriptor: Mapping[str, Any], refs: list[str], *, tree_hash: str,
@@ -136,10 +136,14 @@ def _instance_tree_ids(descriptor: Mapping[str, Any]) -> tuple[dict[str, str], T
     are free", and ``_subtree_ids`` already carries a group's whole subtree. So
     group nodes have to be resolvable, and ``assembly.json["assembly"]["root"]``
     is where they live. A name resolves as every ``#name`` does
-    (:class:`cadgen.label_refs.TreeNames`).
+    (:class:`cadgen.label_refs.TreeNames`); the nodes are taken in tree order
+    (root first, siblings as listed), which is the order a shared name's
+    numbered aliases follow everywhere.
     """
     from cadgen.label_refs import TreeNames
 
+    rows = {str(item.get("id") or ""): str(item.get("name") or "").strip()
+            for item in descriptor.get("occurrences") or [] if isinstance(item, Mapping)}
     by_id: dict[str, str] = {}
     by_name: dict[str, list[str]] = {}
     root = (descriptor.get("assembly") or {}).get("root") if isinstance(descriptor.get("assembly"), Mapping) else None
@@ -154,7 +158,12 @@ def _instance_tree_ids(descriptor: Mapping[str, Any]) -> tuple[dict[str, str], T
             name = str(node.get("name") or "").strip()
             if name:
                 by_name.setdefault(name, []).append(node_id)
-        stack.extend(node.get("children") or [])
+            # A single part's one node is the root, named for the document, and the
+            # part, named by its row: both names mean it (source_sidecar._descriptor_nodes).
+            row_name = rows.get(node_id, "")
+            if row_name and row_name != name:
+                by_name.setdefault(row_name, []).append(node_id)
+        stack.extend(reversed(list(node.get("children") or [])))
     return by_id, TreeNames(by_name)
 
 
@@ -176,7 +185,7 @@ def _occurrence_id_for_ref(
     raise _fail(
         f"{source_ref} mate {mate!r}: {what} {ref!r} does not name an occurrence — "
         "label the part or subassembly in the model (cadgen.label_shape, or a "
-        "Compound label) or use its occurrence id; `read_scene(path).leaves()` "
+        "Compound label) or use its occurrence token; `read_scene(path).leaves()` "
         "lists the leaf occurrences"
     )
 
@@ -257,10 +266,10 @@ def resolve_kinematics_block(
                 occurrence_ids[ref] = _occurrence_id_for_ref(
                     ref, what=what, mate=name, source_ref=source_ref, tree=tree
                 )
-            # The resolved instance-tree id rides the sidecar beside the
+            # The resolved instance-tree token rides the sidecar beside the
             # authored label, for the same reason axes ride it as numbers: the
-            # viewer does arithmetic and id-prefix subtree matching, never
-            # topology or label resolution of its own.
+            # viewer does arithmetic and reads the tree for a node's leaves,
+            # never topology or label resolution of its own.
             mate[f"{key}Id"] = occurrence_ids[ref]
         axis = mate.get("axis") or {}
         if mate.get("kind") == "fastened":

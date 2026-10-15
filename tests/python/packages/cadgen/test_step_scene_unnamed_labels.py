@@ -66,7 +66,8 @@ class XcafLabelEntryTests(unittest.TestCase):
 
     cadgen reads that as no name, in one place (``_normalize_label_name``), so every reader of
     the document -- its tree and view, ``read_scene``, the rows ``--mode list`` prints -- names
-    the part by what the STEP does call it, else by its occurrence id, never by the address.
+    the part by what the STEP does call it, else by what an unnamed node is called (a part
+    ``part``, a root ``model``), never by the address.
     """
 
     def test_an_entry_is_no_name_and_a_name_holding_one_is_a_name(self) -> None:
@@ -106,14 +107,18 @@ class XcafLabelEntryTests(unittest.TestCase):
 
         view = view_dir_for(tree, document_hash=document)
         descriptor = json.loads((view / "assembly.json").read_text(encoding="utf-8"))
+        from cadgen._internal.tree_tokens import is_occurrence_token
+
         root = descriptor["assembly"]["root"]
-        self.assertEqual([("o1", "o1"), ("o1.1", "l_bracket")],
+        (leaf,) = root["children"]
+        self.assertTrue(is_occurrence_token(root["id"]) and is_occurrence_token(leaf["id"]))
+        self.assertEqual([(root["id"], "model"), (leaf["id"], "l_bracket")],
                          [(node["id"], node["name"]) for node in (root, *root["children"])])
-        self.assertEqual([("o1.1", "l_bracket")], [(row["id"], row["name"]) for row in descriptor["occurrences"]])
-        self.assertEqual([("o1.1", "l_bracket")],
+        self.assertEqual([(leaf["id"], "l_bracket")], [(row["id"], row["name"]) for row in descriptor["occurrences"]])
+        self.assertEqual([(leaf["id"], "l_bracket")],
                          [(row["id"], row["name"]) for row in assembly_occurrence_rows(descriptor, None)])
         scene = read_scene(path)
-        self.assertEqual("o1", scene.roots[0].label)
+        self.assertEqual("model", scene.roots[0].label)
         self.assertEqual(["l_bracket"], [leaf.label for leaf in scene.leaves()])
 
     def test_an_unnamed_occurrence_never_shows_a_siblings_label(self) -> None:
@@ -123,7 +128,7 @@ class XcafLabelEntryTests(unittest.TestCase):
         roots = IsolatedCadRoots(self, prefix="xcaf-borrowed-name-")
         # Four occurrences of one shared product, which the writer names after the last
         # occurrence's label: `motor`. Two labels read as no name -- an XCAF entry and a
-        # shape kind -- and those occurrences show their ids, not `motor`.
+        # shape kind -- and those occurrences read as unnamed parts, not `motor`.
         box = Box(4, 4, 4)
         children = []
         for index, label in enumerate(["=>[0:1:1:3]", "bracket", "SOLID", "motor"]):
@@ -136,9 +141,10 @@ class XcafLabelEntryTests(unittest.TestCase):
         self.assertIn("PRODUCT('motor'", path.read_text(encoding="utf-8"))
 
         scene = read_scene(path)
-        self.assertEqual([("#o1.1", "o1.1"), ("#o1.2", "bracket"), ("#o1.3", "o1.3"), ("#o1.4", "motor")],
-                         [(leaf.ref, leaf.label) for leaf in scene.leaves()])
-        self.assertEqual("#o1.4", scene.resolve("#motor").ref)
+        leaves = list(scene.leaves())
+        self.assertEqual(["part", "bracket", "part", "motor"], [leaf.label for leaf in leaves])
+        self.assertEqual(4, len({leaf.ref for leaf in leaves}), "each occurrence its own token")
+        self.assertEqual(leaves[3].ref, scene.resolve("#motor").ref)
 
 
 if __name__ == "__main__":

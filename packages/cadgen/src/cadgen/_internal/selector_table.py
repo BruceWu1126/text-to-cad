@@ -1,20 +1,25 @@
 """The selector table of one component: every fact a ref is resolved by, minted once.
 
-A ref someone copies (``#o1.2.f7``), the facts a tool reports for it and the
-sets the viewer's connected selection grows it to (an edge's chain, a face's
-tangent group) all come from this one table. It is derived from the exact
-BREP and the component's topology facts, extracted in memory
-(``topology_extract``) -- the facts hold the exact metrics, surface and curve
-types, parameters, loops and edge classes; the BREP adds what they do not
-carry: the vertices, which edge ends where, and the tangent directions the
-chains follow -- and stored as one of a part's two objects, beside its display
-mesh (``cadgen.store.parts``), whose mesher reads its faces' areas and edges'
-classes. The page joins its rows to the mesh's face and edge tables by ordinal
-and composes ``occurrenceId + "." + localId``; it mints nothing. The CLI reads
-the same table (``cadgen.assembly_lookup``).
+A ref someone copies (``#o:4b1f9e2a7c03/f:9d2e8c1b5a70``), the facts a tool
+reports for it and the sets the viewer's connected selection grows it to (an
+edge's chain, a face's tangent group) all come from this one table. It is
+derived from the exact BREP and the component's topology facts, extracted in
+memory (``topology_extract``) -- the facts hold the exact metrics, surface and
+curve types, parameters, loops and edge classes; the BREP adds what they do not
+carry: the vertices, which edge ends where, the tangent directions the chains
+follow, and each element's **token** (``geometry_fingerprint``: ``f:``, ``e:``,
+``v:`` and twelve hexadecimal characters, hashed from the element's geometry
+within its body, README law 20) -- and stored as one of a part's two objects,
+beside its display mesh (``cadgen.store.parts``), whose mesher reads its faces'
+areas and edges' classes. The page joins its rows to the mesh's face and edge
+tables by ordinal and composes ``occurrence token + "/" + element token``; it
+mints nothing. The CLI reads the same table (``cadgen.assembly_lookup``).
 
 Ordinals are the ``TopExp.MapShapes_s`` order the facts and the mesh share, so
-a face row, its triangles and its ref name one face.
+a face row, its triangles and its token name one face; an ordinal is the join
+to the mesh and never leaves the table (a ref carries none). A token minted
+from the body a build held resolves against the table of that body read back
+from the document: the two bodies' tokens are the same.
 """
 
 from __future__ import annotations
@@ -35,34 +40,37 @@ from cadgen._internal.glb_topology import (
 # The table's wire schema, read by the page (selectorTable.js) and the CLI: a
 # column added, removed or given a new meaning bumps it. The part version
 # (cadgen.store.parts.PART_VERSION) is bumped with it, and for any change in
-# what the same columns hold.
-SELECTOR_TABLE_SCHEMA_VERSION = 1
-OCCURRENCE_ID = "o1"
+# what the same columns hold. 2: every face, edge and vertex row carries its
+# geometric token, and no row carries an occurrence id, a local id or a shape id
+# (the table is one unplaced component's; the occurrence placing it is the
+# tree's to name).
+SELECTOR_TABLE_SCHEMA_VERSION = 2
 _IDENTITY = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 
+# The one row of a component's table: the whole component, at the identity.
 OCCURRENCE_COLUMNS = [
-    "id", "path", "name", "sourceName", "parentId", "transform", "bbox",
+    "transform", "bbox",
     "shapeStart", "shapeCount", "faceStart", "faceCount", "edgeStart", "edgeCount",
     "vertexStart", "vertexCount",
 ]
+# A solid (or shell, or the bare shape) of the component: ``shape`` on an element row
+# is its ordinal here. Shapes carry no token; the occurrence names a body.
 SHAPE_COLUMNS = [
-    "id", "localId", "occurrenceId", "ordinal", "kind", "name", "sourceName", "bbox",
-    "center", "area", "volume", "faceStart", "faceCount", "edgeStart", "edgeCount",
+    "ordinal", "kind", "bbox", "center", "area", "volume", "faceStart", "faceCount", "edgeStart", "edgeCount",
 ]
 FACE_COLUMNS = [
-    "id", "localId", "occurrenceId", "shapeId", "ordinal", "surfaceType", "area",
+    "token", "ordinal", "shape", "surfaceType", "area",
     "center", "normal", "bbox", "edgeStart", "edgeCount", "relevance", "flags",
     "params", "tangentGroup",
 ]
 EDGE_COLUMNS = [
-    "id", "localId", "occurrenceId", "shapeId", "ordinal", "curveType", "length",
+    "token", "ordinal", "shape", "curveType", "length",
     "center", "bbox", "faceStart", "faceCount", "vertexStart", "vertexCount",
     "relevance", "flags", "params", "adjacentFaceCount", "continuity",
     "dihedralDeg", "visibilityClass", "chain",
 ]
 VERTEX_COLUMNS = [
-    "id", "localId", "occurrenceId", "shapeId", "ordinal", "center", "bbox",
-    "edgeStart", "edgeCount",
+    "token", "ordinal", "shape", "center", "bbox", "edgeStart", "edgeCount",
 ]
 # A face with no area is a ref nothing can pick or measure; the bit is the
 # edge table's, so one vocabulary reads both.
@@ -279,16 +287,23 @@ def capabilities() -> dict[str, Any]:
     }
 
 
-def build_selector_table(shape, facts: Mapping[str, Any]) -> dict[str, Any]:
+def build_selector_table(shape, facts: Mapping[str, Any], identity: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """The table of one unlocated component: ``shape`` (a ``TopoDS_Shape``) and its
     topology facts (``topology_extract.extract_topology_facts``, or the object an
-    eager-only component's tree pins)."""
+    eager-only component's tree pins). ``identity`` is the shape's
+    ``geometry_fingerprint.geometry_identity`` when the caller holds it; else it
+    is computed here, from the same shape."""
+    from cadgen._internal.geometry_fingerprint import geometry_identity
+
     faces = list(facts["faces"])
     edges = list(facts["edges"])
     shapes_meta = list(facts["shapes"])
     face_row = {int(face["ord"]): row for row, face in enumerate(faces)}
     edge_row = {int(edge["ord"]): row for row, edge in enumerate(edges)}
     positions, shape_by_vertex, ends, tangents = _vertex_facts(shape, edges)
+    tokens = identity if identity is not None else geometry_identity(shape)
+    if len(tokens["faces"]) != len(faces) or len(tokens["edges"]) != len(edges) or len(tokens["vertices"]) != len(positions):
+        raise ValueError("the geometric identity does not describe this shape: its element counts differ")
     vertex_ordinals = sorted(positions)
     vertex_row = {ordinal: row for row, ordinal in enumerate(vertex_ordinals)}
     chains = _edge_chains(edges, ends, tangents)
@@ -361,8 +376,7 @@ def build_selector_table(shape, facts: Mapping[str, Any]) -> dict[str, Any]:
         ordinal = int(shape_meta.get("ord") or 1)
         box = shape_box.get(ordinal) or _zero_box()
         shape_rows.append([
-            f"{OCCURRENCE_ID}.s{ordinal}", f"s{ordinal}", OCCURRENCE_ID, ordinal,
-            str(shape_meta.get("kind") or "shape"), None, None, box,
+            ordinal, str(shape_meta.get("kind") or "shape"), box,
             [(box["min"][i] + box["max"][i]) / 2 for i in range(3)],
             shape_area.get(ordinal, 0.0), shape_meta.get("volume"),
             0, counts["face"].get(ordinal, 0), 0, counts["edge"].get(ordinal, 0),
@@ -376,8 +390,7 @@ def build_selector_table(shape, facts: Mapping[str, Any]) -> dict[str, Any]:
         surface_type = str(face.get("surfaceType") or "")
         start, count = face_edges[ordinal]
         face_rows.append([
-            f"{OCCURRENCE_ID}.f{ordinal}", f"f{ordinal}", OCCURRENCE_ID,
-            f"{OCCURRENCE_ID}.s{int(face.get('shape') or 1)}", ordinal, surface_type, area,
+            tokens["faces"][ordinal - 1], ordinal, int(face.get("shape") or 1), surface_type, area,
             face.get("center") or [0.0, 0.0, 0.0], face.get("normal"),
             _box(face.get("bbox")) or _zero_box(), start, count,
             _relevance(area, total_area, surface_type in _ANALYTIC_SURFACES, size_floor) if referenceable else 0,
@@ -402,8 +415,7 @@ def build_selector_table(shape, facts: Mapping[str, Any]) -> dict[str, Any]:
             # A circular edge's params carry its sweep, so no reader derives it.
             params = {**(params or {}), "sweepRadians": float(edge["sweepRadians"])}
         edge_rows.append([
-            f"{OCCURRENCE_ID}.e{ordinal}", f"e{ordinal}", OCCURRENCE_ID,
-            f"{OCCURRENCE_ID}.s{int(edge.get('shape') or 1)}", ordinal, curve_type, length,
+            tokens["edges"][ordinal - 1], ordinal, int(edge.get("shape") or 1), curve_type, length,
             edge.get("center") or [0.0, 0.0, 0.0], _box(edge.get("bbox")) or _zero_box(),
             face_start, face_count, vertex_start, vertex_count,
             _relevance(length, total_length, curve_type in _ANALYTIC_CURVES, length_floor) if referenceable else 0,
@@ -417,8 +429,7 @@ def build_selector_table(shape, facts: Mapping[str, Any]) -> dict[str, Any]:
         point = positions[ordinal]
         start, count = vertex_edges[ordinal]
         vertex_rows.append([
-            f"{OCCURRENCE_ID}.v{ordinal}", f"v{ordinal}", OCCURRENCE_ID,
-            f"{OCCURRENCE_ID}.s{shape_by_vertex.get(ordinal, 1)}", ordinal, list(point),
+            tokens["vertices"][ordinal - 1], ordinal, shape_by_vertex.get(ordinal, 1), list(point),
             {"min": list(point), "max": list(point)}, start, count,
         ])
 
@@ -448,7 +459,7 @@ def build_selector_table(shape, facts: Mapping[str, Any]) -> dict[str, Any]:
             "vertexColumns": VERTEX_COLUMNS,
         },
         "occurrences": [[
-            OCCURRENCE_ID, "1", None, None, None, list(_IDENTITY), overall,
+            list(_IDENTITY), overall,
             0, len(shape_rows), 0, len(face_rows), 0, len(edge_rows), 0, len(vertex_rows),
         ]],
         "shapes": shape_rows,
@@ -492,10 +503,14 @@ def read_selector_table(payload: bytes) -> dict[str, Any]:
             type(row) is not list or len(row) != len(declared) for row in rows
         ):
             raise ValueError(f"selector table {name} rows do not match their columns")
-    ordinal = {"shapes": 3, "faces": 4, "edges": 4, "vertices": 4}
-    for name, column in ordinal.items():
-        if name != "shapes" and [row[column] for row in table[name]] != list(range(1, len(table[name]) + 1)):
+    from cadgen._internal.geometry_fingerprint import is_element_token
+
+    for name, prefix in (("faces", "f:"), ("edges", "e:"), ("vertices", "v:")):
+        if [row[1] for row in table[name]] != list(range(1, len(table[name]) + 1)):
             raise ValueError(f"selector table {name} ordinals are not contiguous")
+        tokens = [row[0] for row in table[name]]
+        if any(not is_element_token(token) or not token.startswith(prefix) for token in tokens) or len(set(tokens)) != len(tokens):
+            raise ValueError(f"selector table {name} tokens are not distinct {prefix} tokens")
     stats = table.get("stats")
     if type(stats) is not dict or any(
         stats.get(f"{kind}Count") != len(table[name]) for kind, name in

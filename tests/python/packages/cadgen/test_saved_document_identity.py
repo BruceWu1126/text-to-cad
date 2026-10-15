@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests.python.support.tmp_root import generated_cad_directory
+from tests.python.support.tree_ids import tokenized
 
 
 IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
@@ -355,7 +356,7 @@ class SavedDocumentIdentityTest(unittest.TestCase):
         from cadgen._internal.kinematics_resolve import remap_document_kinematics
         from cadgen.store.trees import put_tree
 
-        tree_hash = put_tree(
+        body, token = tokenized(
             {
                 "label": "document",
                 "entryKind": "assembly",
@@ -402,23 +403,24 @@ class SavedDocumentIdentityTest(unittest.TestCase):
                 },
             }
         )
+        tree_hash = put_tree(body)
         block = {
             "mates": [{"name": "join", "parentId": "authored_pair", "childId": "authored_wrapper"}]
         }
         occurrence_map = {
-            "authored_pair": ["o1.1.1", "o1.1.2"],
-            "authored_wrapper": ["o1.2.1.1"],
-            "crossing": ["o1.1.1", "o1.2.1.1"],
+            "authored_pair": [token["o1.1.1"], token["o1.1.2"]],
+            "authored_wrapper": [token["o1.2.1.1"]],
+            "crossing": [token["o1.1.1"], token["o1.2.1.1"]],
         }
         node_map = {
-            "authored_pair": "o1.1",
-            "authored_wrapper": "o1.2",
-            "crossing": "o1",
+            "authored_pair": token["o1.1"],
+            "authored_wrapper": token["o1.2"],
+            "crossing": token["o1"],
         }
 
         remapped = remap_document_kinematics(block, occurrence_map, node_map, tree_hash)
-        self.assertEqual("o1.1", remapped["mates"][0]["parentId"])
-        self.assertEqual("o1.2", remapped["mates"][0]["childId"])
+        self.assertEqual(token["o1.1"], remapped["mates"][0]["parentId"])
+        self.assertEqual(token["o1.2"], remapped["mates"][0]["childId"])
         self.assertEqual("authored_pair", block["mates"][0]["parentId"])
 
         missing = {"mates": [{"name": "missing", "parentId": "absent", "childId": "authored_wrapper"}]}
