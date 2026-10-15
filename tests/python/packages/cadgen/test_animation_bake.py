@@ -24,6 +24,7 @@ from pathlib import Path
 
 from tests.python.support.cad_test_roots import IsolatedCadRoots
 from tests.python.support.paths import add_repo_path
+from tests.python.support.tree_ids import node_id, tokenized
 
 add_repo_path("packages/cadgen/src")
 
@@ -48,7 +49,8 @@ from cadgen.animation import Clip, normalize_clips  # noqa: E402
 
 # A rig as a written document names it: a base, an arm GROUP of a link and a bolt,
 # and a second bolt of the same name beside them.
-DESCRIPTOR = {
+# Its ids are the tokens the tree mints, so the test reads them off the tree by name.
+DESCRIPTOR, _ = tokenized({
     "occurrences": [{"id": "o1.1"}, {"id": "o1.2.1"}, {"id": "o1.2.2"}, {"id": "o1.3"}],
     "assembly": {"root": {"id": "o1", "name": "rig", "children": [
         {"id": "o1.1", "name": "base", "children": []},
@@ -58,7 +60,9 @@ DESCRIPTOR = {
         ]},
         {"id": "o1.3", "name": "bolt", "children": []},
     ]}},
-}
+})
+RIG, BASE, ARM, LINK = (node_id(DESCRIPTOR, name) for name in ("rig", "base", "arm", "link"))
+ARM_BOLT, BOLT = (str(row["id"]) for row in DESCRIPTOR["occurrences"][2:])
 TARGETS = animation_targets(DESCRIPTOR)
 BOUNDS = ((0.0, 0.0, 0.0), (20.0, 10.0, 5.0))
 CORNERS = [(x, y, z) for x in (0.0, 20.0) for y in (0.0, 10.0) for z in (0.0, 5.0)]
@@ -217,7 +221,7 @@ class BakingTransforms(unittest.TestCase):
             m.get("#link").rotate((0, 0, 1), 90 * t, (10, 0, 0))
 
         (track,) = _bake("spin", spin, duration=4)["tracks"]
-        self.assertEqual(["o1.2.1"], track["targets"])
+        self.assertEqual([LINK], track["targets"])
         # The point whose path accelerates least is on the axis.
         self.assertAlmostEqual(10.0, track["pivot"][0], places=3)
         self.assertAlmostEqual(0.0, track["pivot"][1], places=3)
@@ -245,17 +249,17 @@ class BakingTransforms(unittest.TestCase):
     def test_identical_motion_shares_a_track_and_untouched_parts_have_none(self) -> None:
         def carry(t, m):
             m.get("#link").translate((5 * t, 0, 0))
-            m.get("#o1.3").translate((5 * t, 0, 0))  # the other bolt, the same move by another name
+            m.get(f"#{BOLT}").translate((5 * t, 0, 0))  # the other bolt, the same move by its token
             m.get("#base").translate((0, 0, 3))
-            m.get("#o1.2.2").rotate((0, 0, 1), 0)  # touched, never moved
+            m.get(f"#{ARM_BOLT}").rotate((0, 0, 1), 0)  # touched, never moved
 
         tracks = {tuple(track["targets"]): track for track in _bake("carry", carry, duration=2, fps=10)["tracks"]}
-        # o1.2.2, the arm's bolt, never left its rest pose: no track names it.
-        self.assertEqual({("o1.1",), ("o1.2.1", "o1.3")}, set(tracks))
+        # The arm's bolt never left its rest pose: no track names it.
+        self.assertEqual({(BASE,), (LINK, BOLT)}, set(tracks))
         # A slide at constant speed is exact between its ends.
-        self.assertEqual([0.0, 2.0], tracks[("o1.2.1", "o1.3")]["times"])
+        self.assertEqual([0.0, 2.0], tracks[(LINK, BOLT)]["times"])
         # A constant offset is one key: d = (0, 0, 3), no turn, nothing moving.
-        held = tracks[("o1.1",)]
+        held = tracks[(BASE,)]
         self.assertEqual([0.0], held["times"])
         self.assertEqual([[0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 1.0, *[0.0] * 7]], held["transform"])
 
@@ -268,10 +272,13 @@ class BakingTransforms(unittest.TestCase):
 
         from cadgen._internal import animation_bake
 
-        leaves = [f"o1.{index}" for index in range(1, 51)]
-        targets = animation_targets({"occurrences": [{"id": leaf} for leaf in leaves],
-                                     "assembly": {"root": {"id": "o1", "name": "rig", "children": [
-                                         {"id": leaf, "name": f"p{leaf}", "children": []} for leaf in leaves]}}})
+        provisional = [f"o1.{index}" for index in range(1, 51)]
+        descriptor, _ = tokenized({"occurrences": [{"id": leaf} for leaf in provisional],
+                                   "assembly": {"root": {"id": "o1", "name": "rig", "children": [
+                                       {"id": leaf, "name": f"p{index}", "children": []}
+                                       for index, leaf in enumerate(provisional, 1)]}}})
+        leaves = [str(row["id"]) for row in descriptor["occurrences"]]
+        targets = animation_targets(descriptor)
 
         def rise(t, m):
             for leaf in leaves[:-2]:
@@ -304,10 +311,10 @@ class BakingTransforms(unittest.TestCase):
         # is equal to the last bits, and is one track.
         def swing(t, m):
             m.get("#link").rotate((0, 0, 1), 30 * t, (10, 0, 0))
-            m.get("#o1.3").rotate((0, 0, 1), 15 * t, (10, 0, 0)).rotate((0, 0, 1), 15 * t, (10, 0, 0))
+            m.get(f"#{BOLT}").rotate((0, 0, 1), 15 * t, (10, 0, 0)).rotate((0, 0, 1), 15 * t, (10, 0, 0))
 
         (track,) = _bake("swing", swing, duration=2, fps=10)["tracks"]
-        self.assertEqual(["o1.2.1", "o1.3"], track["targets"])
+        self.assertEqual([LINK, BOLT], track["targets"])
 
     def test_a_turn_left_by_rounding_never_throws_the_pivot_off_the_model(self) -> None:
         # A solver that leaves 1e-13 degrees of turn on a part it slides 400 mm: there is
@@ -342,7 +349,7 @@ class BakingTransforms(unittest.TestCase):
         # are half a millimetre out, not the whole model's ten and more.
         class Boxes:
             def get(self, leaf):
-                return ((9.5, -0.5, 0.0), (10.5, 0.5, 1.0)) if leaf == "o1.2.1" else None
+                return ((9.5, -0.5, 0.0), (10.5, 0.5, 1.0)) if leaf == LINK else None
 
         def ease(t, m):
             m.get("#link").rotate((0, 0, 1), 45 * (1 - math.cos(math.pi * t)), (10, 0, 0))
@@ -385,7 +392,7 @@ class BakingTransforms(unittest.TestCase):
         with self.assertRaises(AnimationError) as caught:
             _bake("whirl", whirl, duration=1, fps=10)
         self.assertEqual(
-            "animation clip 'whirl' part o1.1 turns 100 degrees between the samples at 0 s and 0.1 s: "
+            f"animation clip 'whirl' part {BASE} turns 100 degrees between the samples at 0 s and 0.1 s: "
             "raise the clip's fps",
             str(caught.exception),
         )
@@ -398,11 +405,11 @@ class BakingStyles(unittest.TestCase):
                 m.get("#link").opacity(1 - t)  # fades out, then the material's own again
             m.get("#base").visible(t < 1)  # shown, then hidden
             if t >= 1:
-                m.get("#o1.3").visible(False)  # at rest, then hidden
+                m.get(f"#{BOLT}").visible(False)  # at rest, then hidden
 
         tracks = _bake("fade", fade, duration=2, fps=10)["tracks"]
         (opacity,) = [track for track in tracks if "opacity" in track]
-        self.assertEqual(["o1.2.1"], opacity["targets"])
+        self.assertEqual([LINK], opacity["targets"])
         # A ramp needs its ends, not its samples, and the keys rebuild every sample.
         self.assertLessEqual(len(opacity["times"]), 4)
         for index in range(21):
@@ -416,8 +423,8 @@ class BakingStyles(unittest.TestCase):
         # Held: a key where the value changes, and nowhere else.
         self.assertEqual(
             [
-                {"targets": ["o1.1"], "times": [0.0, 1.0], "visible": [True, False]},
-                {"targets": ["o1.3"], "times": [0.0, 1.0], "visible": [None, False]},
+                {"targets": [BASE], "times": [0.0, 1.0], "visible": [True, False]},
+                {"targets": [BOLT], "times": [0.0, 1.0], "visible": [None, False]},
             ],
             [track for track in tracks if "visible" in track],
         )
@@ -436,7 +443,7 @@ class BakingStyles(unittest.TestCase):
             )
 
         (track,) = _bake("bend", bend, duration=1, fps=10)["tracks"]
-        self.assertEqual((["o1.2.1"], _line(0), 0.5, braid),
+        self.assertEqual(([LINK], _line(0), 0.5, braid),
                          (track["targets"], track["rest"], track["maxSegmentLength"], track["braid"]))
         self.assertEqual(([0.0, 1.0], {"path": _line(0), "twistDeg": 0.0}, {"path": _line(4), "twistDeg": 90.0}),
                          ([track["times"][0], track["times"][-1]], track["tube"][0], track["tube"][-1]))
@@ -468,7 +475,7 @@ class BakingStyles(unittest.TestCase):
         with self.assertRaises(AnimationError) as caught:
             _bake("creep", creep, duration=1, fps=10)
         self.assertEqual(
-            "animation clip 'creep' part o1.2.1: a tube's rest path, max_segment_length and braid "
+            f"animation clip 'creep' part {LINK}: a tube's rest path, max_segment_length and braid "
             "must stay the same through a clip; only its path and twist move",
             str(caught.exception),
         )
@@ -529,39 +536,39 @@ class BakingStyles(unittest.TestCase):
         with self.assertRaises(AnimationError) as caught:
             _bake("kink", kink, duration=1, fps=10)
         self.assertRegex(str(caught.exception),
-                         r"^animation clip 'kink' part o1\.2\.1 at t=[0-9.]+ s: tube deformation: path is not "
+                         rf"^animation clip 'kink' part {re.escape(LINK)} at t=[0-9.]+ s: tube deformation: path is not "
                          r"tangent-continuous before segment 1$")
         # The same broken path held still for the whole clip has no changing interval to
         # be compiled in, and fails all the same.
         with self.assertRaises(AnimationError) as caught:
             _bake("held", lambda t, m: kink(1.0, m), duration=1, fps=10)
         self.assertRegex(str(caught.exception),
-                         r"^animation clip 'held' part o1\.2\.1 at t=0 s: tube deformation: path is not "
+                         rf"^animation clip 'held' part {re.escape(LINK)} at t=0 s: tube deformation: path is not "
                          r"tangent-continuous before segment 1$")
 
 
 class ResolvingTargets(unittest.TestCase):
     def test_a_name_an_id_and_a_group_each_resolve_to_leaves(self) -> None:
-        self.assertEqual(("o1.2.1", "o1.2.2"), TARGETS.resolve("#arm"))  # a group: its leaves
-        self.assertEqual(("o1.2.2",), TARGETS.resolve("#bolt_1"))  # a shared name's numbered alias
-        self.assertEqual(("o1.2.1", "o1.2.2"), TARGETS.resolve("#o1.2"))  # an id and what is beneath it
-        self.assertEqual(("o1.3",), TARGETS.resolve("#o1.3"))
+        self.assertEqual((LINK, ARM_BOLT), TARGETS.resolve("#arm"))  # a group: its leaves
+        self.assertEqual((ARM_BOLT,), TARGETS.resolve("#bolt_1"))  # a shared name's numbered alias
+        self.assertEqual((LINK, ARM_BOLT), TARGETS.resolve(f"#{ARM}"))  # a token and what is beneath it
+        self.assertEqual((BOLT,), TARGETS.resolve(f"#{BOLT}"))
         self.assertEqual(["arm", "base", "bolt_1", "bolt_2", "link", "rig"], TARGETS.labels())
 
         def wave(t, m):
-            m.get("#arm", "#bolt_2", "#o1.2.1").translate((0, t, 0))
+            m.get("#arm", "#bolt_2", f"#{LINK}").translate((0, t, 0))
 
         (track,) = _bake("wave", wave, duration=1, fps=10)["tracks"]
-        self.assertEqual(["o1.2.1", "o1.2.2", "o1.3"], track["targets"])
+        self.assertEqual([LINK, ARM_BOLT, BOLT], track["targets"])
 
     def test_a_target_that_names_nothing_fails_with_the_names_there_are(self) -> None:
         cases = {
             lambda t, m: m.get("#wheel"): f"animation target '#wheel' names no part or group; names: {NAMES}",
             # A name two parts share is refused as read_scene refuses it, never both moved.
             lambda t, m: m.get("#bolt"): "animation target '#bolt': label 'bolt' matches 2 occurrences; "
-                                         "use one of: #bolt_1 (o1.2.2), #bolt_2 (o1.3)",
-            lambda t, m: m.get("link"): "animation target 'link' must be a #name or an #o1.2 occurrence id",
-            lambda t, m: m.get(): "m.get needs at least one #name or #occurrence id",
+                                         f"use one of: #bolt_1 ({ARM_BOLT}), #bolt_2 ({BOLT})",
+            lambda t, m: m.get("link"): "animation target 'link' must be a #name or an #o:… occurrence token",
+            lambda t, m: m.get(): "m.get needs at least one #name or #occurrence token",
             lambda t, m: 1 / 0: "ZeroDivisionError: division by zero",
         }
         for update, message in cases.items():

@@ -140,11 +140,11 @@ class ResultShape(unittest.TestCase):
         listing = {
             "ok": True,
             "mode": "list",
-            "parts": [{"ref": "#o1.1", "name": "plate", "triangleCount": 12}],
+            "parts": [{"ref": "#o:3f2a9c1d7e5b", "name": "plate", "triangleCount": 12}],
         }
         result = snapshot_result(listing)
         self.assertEqual(result.files, ())
-        self.assertEqual(result.parts[0]["ref"], "#o1.1")
+        self.assertEqual(result.parts[0]["ref"], "#o:3f2a9c1d7e5b")
 
     def test_debug_without_json_prints_one_line_per_input_after_the_saved_paths(self) -> None:
         # `--debug` alone used to compute the diagnostics and print nothing.
@@ -233,8 +233,8 @@ class JsonShape(unittest.TestCase):
     def test_list_mode_prints_the_inventory_and_nothing_else(self) -> None:
         # A list's warnings were once dropped from its human form: its stdout is the
         # inventory alone, so they are said on stderr.
-        listing = {"ok": True, "mode": "list", "parts": [{"ref": "#o1.1", "name": "plate"}],
-                   "warnings": ["#o1.2 pin could not be meshed (boom), so the list leaves it out"]}
+        listing = {"ok": True, "mode": "list", "parts": [{"ref": "#o:3f2a9c1d7e5b", "name": "plate"}],
+                   "warnings": ["#o:0a9e8d7c6b5f pin could not be meshed (boom), so the list leaves it out"]}
         stdout, stderr = io.StringIO(), io.StringIO()
         code = emit(
             lambda: snapshot_result(listing),
@@ -245,10 +245,10 @@ class JsonShape(unittest.TestCase):
         )
         self.assertEqual(code, 0)
         self.assertEqual(
-            json.loads(stdout.getvalue()), [{"ref": "#o1.1", "name": "plate"}]
+            json.loads(stdout.getvalue()), [{"ref": "#o:3f2a9c1d7e5b", "name": "plate"}]
         )
         self.assertEqual(stderr.getvalue().splitlines(),
-                         ["warning: #o1.2 pin could not be meshed (boom), so the list leaves it out"])
+                         ["warning: #o:0a9e8d7c6b5f pin could not be meshed (boom), so the list leaves it out"])
 
     def test_a_failure_is_the_schema_error_line(self) -> None:
         stdout = io.StringIO()

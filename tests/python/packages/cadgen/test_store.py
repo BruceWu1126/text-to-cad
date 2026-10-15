@@ -17,6 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests.python.support.tmp_root import generated_cad_directory
+from tests.python.support.tree_ids import tokenized
 
 REPO = Path(__file__).resolve().parents[4]
 PYTHON = sys.executable
@@ -76,7 +77,7 @@ class StoreCase(unittest.TestCase):
         entry = prepared["entry"]
         digest = put_object(prepared["payload"])
         cid = entry["contentHash"][:16]
-        return put_tree(
+        return put_tree(tokenized(
             {
                 "label": label,
                 "entryKind": "part",
@@ -87,7 +88,7 @@ class StoreCase(unittest.TestCase):
                 "assembly": {"root": {"id": "o1", "name": label, "nodeType": "part", "leafPartIds": ["o1"], "children": []}},
                 "stats": {"occurrenceCount": 1, "linkCount": 0},
             }
-        )
+        )[0])
 
     def record(self, script: Path, *, tree: str, children=(), output: Path | None = None) -> dict:
         from cadgen.store.closure import current_closure_hash
@@ -514,7 +515,7 @@ class TreeFlattening(StoreCase):
         from cadgen.store.trees import flatten, put_tree
 
         pin = self.tree_for("pin")
-        arm = put_tree(
+        arm = put_tree(tokenized(
             {
                 "label": "arm",
                 "entryKind": "assembly",
@@ -531,8 +532,8 @@ class TreeFlattening(StoreCase):
                 ]}},
                 "stats": {"occurrenceCount": 0, "linkCount": 2},
             }
-        )
-        robot = put_tree(
+        )[0])
+        robot = put_tree(tokenized(
             {
                 "label": "robot",
                 "entryKind": "assembly",
@@ -545,14 +546,18 @@ class TreeFlattening(StoreCase):
                 ]}},
                 "stats": {"occurrenceCount": 0, "linkCount": 1},
             }
-        )
+        )[0])
         flat = flatten(robot)
-        by_id = {o["id"]: o for o in flat["occurrences"]}
-        self.assertEqual(sorted(by_id), ["o1.1.1", "o1.1.2"])
-        self.assertEqual(by_id["o1.1.1"]["name"], "pin_left")
-        self.assertEqual(by_id["o1.1.2"]["name"], "pin_right")
-        self.assertEqual(by_id["o1.1.1"]["transform"][3::4][:3], [-15, 10, 7])
-        self.assertEqual(by_id["o1.1.2"]["transform"][3::4][:3], [15, 10, 7])
+        from cadgen._internal.tree_tokens import is_occurrence_token
+
+        # The expanded leaves carry the links' names and composed placements, under
+        # tokens of their own minted from them (two distinct ones).
+        by_name = {o["name"]: o for o in flat["occurrences"]}
+        self.assertEqual(sorted(by_name), ["pin_left", "pin_right"])
+        self.assertTrue(all(is_occurrence_token(o["id"]) for o in by_name.values()))
+        self.assertNotEqual(by_name["pin_left"]["id"], by_name["pin_right"]["id"])
+        self.assertEqual(by_name["pin_left"]["transform"][3::4][:3], [-15, 10, 7])
+        self.assertEqual(by_name["pin_right"]["transform"][3::4][:3], [15, 10, 7])
         self.assertEqual(len(flat["components"]), 1, "one shared component, stored once")
         self.assertEqual(flat["assembly"]["root"]["children"][0]["nodeType"], "subassembly")
 
@@ -719,7 +724,7 @@ class TreeKind(StoreCase):
         child = self.tree_for("pin")
         child_entry = next(iter(get_tree(self.tree_for("arm", b"different"))["components"].values()))
         cid = child_entry["contentHash"][:16]
-        parent = put_tree(
+        parent = put_tree(tokenized(
             {
                 "label": "arm",
                 "entryKind": "part",  # the static inference's answer; the tree overrules it
@@ -733,7 +738,7 @@ class TreeKind(StoreCase):
                 ]}},
                 "stats": {"occurrenceCount": 1, "linkCount": 1},
             }
-        )
+        )[0])
         self.assertEqual("assembly", tree_kind(get_tree(parent)))
         self.assertEqual("assembly", tree_kind_for(parent))
         self.assertEqual("assembly", flatten(parent)["entryKind"])
@@ -758,7 +763,7 @@ class GcReachability(StoreCase):
         from cadgen.store.trees import put_tree
 
         pin = self.tree_for("pin")
-        arm = put_tree(
+        arm = put_tree(tokenized(
             {
                 "label": "arm", "entryKind": "assembly", "units": "mm", "components": {}, "occurrences": [],
                 "links": [{"id": "o1.1", "name": "pin", "tree": pin, "transform": IDENTITY}],
@@ -766,7 +771,7 @@ class GcReachability(StoreCase):
                     {"id": "o1.1", "nodeType": "link", "children": []}]}},
                 "stats": {"occurrenceCount": 0, "linkCount": 1},
             }
-        )
+        )[0])
         self.record(self.model("arm"), tree=arm)
         old_orphan = put_object(b"orphan-old")
         fresh_orphan = put_object(b"orphan-fresh")

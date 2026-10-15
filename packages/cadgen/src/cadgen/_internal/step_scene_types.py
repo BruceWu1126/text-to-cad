@@ -102,6 +102,9 @@ class AdaptiveMeshResolution:
 
 @dataclass
 class OccurrenceNode:
+    # ``path`` is the node's position in the parsed product hierarchy (the reader's own
+    # bookkeeping, never a name); ``id`` is its token in the document tree
+    # (``cadgen._internal.tree_tokens``) where the scene came from one, else None.
     path: tuple[int, ...]
     name: str | None
     source_name: str | None
@@ -112,6 +115,7 @@ class OccurrenceNode:
     location: object | None = None
     children: list["OccurrenceNode"] = field(default_factory=list)
     row_index: int = -1
+    id: str | None = None
 
 
 @lru_cache(maxsize=512)

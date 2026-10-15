@@ -157,7 +157,7 @@ class RefusedRequestsLeaveOutUntouched(_Workspace):
              mock.patch.object(snapshot_cli, "ensure_step_artifact", side_effect=AssertionError("built")):
             single, prepared = snapshot_cli.prepare_render_job_packet(
                 {"input": str(step), "display": {"clip": {"axis": "y"}},
-                 "selection": {"hide": ["#o1.2"]}, "outputs": [{"path": str(self.root / "cut.png")}]},
+                 "selection": {"hide": ["#o:3f2a9c1d7e5b"]}, "outputs": [{"path": str(self.root / "cut.png")}]},
                 cwd=self.root,
             )
         self.assertTrue(single)
@@ -456,9 +456,9 @@ class OneNamePerSettingTests(_Workspace):
         with self.assertRaisesRegex(
             SnapshotError, r"selection has unknown key\(s\): refs; supported keys: focus, hide$"
         ):
-            self.resolve({"input": "part.step", "selection": {"refs": ["#o1.2"]}, "outputs": [{"path": "o.png"}]})
+            self.resolve({"input": "part.step", "selection": {"refs": ["#pin"]}, "outputs": [{"path": "o.png"}]})
         with self.assertRaisesRegex(SnapshotError, "selection must be a"):
-            self.resolve({"input": "part.step", "selection": ["#o1.2"], "outputs": [{"path": "o.png"}]})
+            self.resolve({"input": "part.step", "selection": ["#pin"], "outputs": [{"path": "o.png"}]})
 
     def test_each_view_has_one_camera_preset(self) -> None:
         for preset in snapshot_core.CAMERA_PRESETS:
@@ -526,11 +526,11 @@ class PythonVerbTests(_Workspace):
     def test_a_bare_string_is_not_a_sequence_of_refs(self) -> None:
         for name in ("focus", "hide"):
             with self.subTest(option=name), self.assertRaisesRegex(
-                ValueError, rf"{name} takes a sequence of occurrence refs, not one string: pass {name}=\('#o1\.2',\)"
+                ValueError, rf"{name} takes a sequence of occurrence refs, not one string: pass {name}=\('#pin',\)"
             ):
-                self.options_for(**{name: "#o1.2"})
-        self.assertEqual(["#o1.2", "#o1.3"], self.options_for(focus=["#o1.2", "#o1.3"]).focus)
-        self.assertEqual(["#o1.2"], self.options_for(hide=("#o1.2",)).hide)
+                self.options_for(**{name: "#pin"})
+        self.assertEqual(["#pin", "#o:3f2a9c1d7e5b"], self.options_for(focus=["#pin", "#o:3f2a9c1d7e5b"]).focus)
+        self.assertEqual(["#pin"], self.options_for(hide=("#pin",)).hide)
 
 
 class StepDebugReportsWhatWasResolved(unittest.TestCase):

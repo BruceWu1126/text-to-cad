@@ -15,7 +15,7 @@ become KEYFRAMES in the model's sidecar; the viewer, snapshots and GLB exports
 interpolate them, and no animation code ships with a model.
 
 ``m.get(*targets)`` takes ``#name`` (the part or group of that name) or
-``#o1.2`` (an occurrence id), each with everything beneath it, and returns a
+``#o:3f2a9c1d7e5b`` (an occurrence token), each with everything beneath it, and returns a
 handle on their union. A name several nodes share raises, listing numbered
 aliases (``#bolt_1``, ``#bolt_2``) that each name one, and so does a target
 that names nothing. ``m.labels()`` lists the names. A handle's methods chain:

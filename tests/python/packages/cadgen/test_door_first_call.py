@@ -91,10 +91,21 @@ print(json.dumps({
     "leaves": len(leaves),
     "leaf_refs": [o.ref for o in leaves],
     "faces": sum(len(list(o.entities("face"))) for o in leaves),
+    "first_face": next(leaves[0].entities("face")).ref,
+    "first_edge": next(leaves[0].entities("edge")).ref,
     "refs": [scene.resolve(ref).ref for ref in sys.argv[2:]],
 }))
 """
         return _run("-c", code, path, *refs, cwd=self.root, cache=self.cache)
+
+    def _pin_refs(self) -> tuple[str, str, str]:
+        """The pin's leaf token and one face's and one edge's element tokens, read off
+        ``pin.step``: the refs a person pastes, each ``#<occurrence>/<element>``."""
+        result = self._read("src/pin.step")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        payload = json.loads(result.stdout.strip())
+        (leaf,) = payload["leaf_refs"]
+        return leaf[1:], payload["first_face"].split("/")[1], payload["first_edge"].split("/")[1]
 
     def test_the_first_read_of_new_document_bytes_compiles_and_answers(self) -> None:
         original = (self.root / "src" / "pin.step").read_text(encoding="utf-8")
@@ -102,12 +113,16 @@ print(json.dumps({
         replaced = original.replace("HEADER;", "HEADER;\n/* fresh document bytes */", 1)
         self.assertNotEqual(original, replaced)
         copy.write_text(replaced, encoding="utf-8")
-        result = self._read("src/pin_copy.step", "#f1")
+        # The copy holds the same geometry under the same names, so a face ref read off
+        # the original names the same face of the copy, bare: the copy has one leaf.
+        leaf, face, _edge = self._pin_refs()
+        result = self._read("src/pin_copy.step", f"#{face}")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         payload = json.loads(result.stdout.strip())
         self.assertEqual(payload["leaves"], 1)
         self.assertEqual(payload["faces"], 3)
-        self.assertEqual(payload["refs"], [payload["leaf_refs"][0] + ".f1"])
+        self.assertEqual(payload["leaf_refs"], [f"#{leaf}"])
+        self.assertEqual(payload["refs"], [f"#{leaf}/{face}"])
         import hashlib
         self.assertEqual(payload["hash"], hashlib.sha256(copy.read_bytes()).hexdigest())
 
@@ -140,13 +155,15 @@ print(json.dumps({
         # The document path is relative, resolved from the working directory; a prefix is the
         # path under the viewer's root there, or the absolute path (JSON-quoted when it needs it).
         absolute = str(self.root / "src" / "pin.step")
+        leaf, face, edge = self._pin_refs()
         result = self._read(
-            "src/pin.step", "#f1", "src/pin.step#e1", "pin.step#o1", f"{absolute}#f1", f"{json.dumps(absolute)}#e1"
+            "src/pin.step", f"#{face}", f"src/pin.step#{edge}", f"pin.step#{leaf}", f"{absolute}#{face}",
+            f"{json.dumps(absolute)}#{edge}",
         )
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         payload = json.loads(result.stdout)
-        leaf = payload["leaf_refs"][0]
-        self.assertEqual(payload["refs"], [leaf + ".f1", leaf + ".e1", "#o1", leaf + ".f1", leaf + ".e1"])
+        self.assertEqual(payload["leaf_refs"], [f"#{leaf}"])
+        self.assertEqual(payload["refs"], [f"#{leaf}/{face}", f"#{leaf}/{edge}", f"#{leaf}", f"#{leaf}/{face}", f"#{leaf}/{edge}"])
 
     def test_kernel_diagnostics_do_not_corrupt_script_stdout(self) -> None:
         bad = self.root / "src" / "bad.step"

@@ -55,7 +55,9 @@ SOURCE_SIDECAR_SUFFIX = ".json"
 # canonical leaf occurrences) and animation (keyframes baked from the model's
 # Python clips, cadgen._internal.animation_bake), bound to the saved STEP's bytes
 # by documentHash. A sidecar declaring any other schema is refused, never read.
-SOURCE_SIDECAR_SCHEMA_VERSION = 10
+# 11: appearance assignments, kinematics mate ends (``parentId``/``childId``) and animation
+# tracks name occurrences by their tokens (``o:…``, README law 20), never by a position.
+SOURCE_SIDECAR_SCHEMA_VERSION = 11
 
 # What a sidecar may CONTAIN: declarations plus the exact-document binding.
 # Anything source-derived-as-provenance (paths, closure hashes, timestamps)
@@ -221,7 +223,13 @@ def bends_a_tube(block: object) -> bool:
 
 
 def _descriptor_nodes(descriptor: Mapping[str, Any]) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
-    leaves = {str(item.get("id") or "") for item in descriptor.get("occurrences") or []}
+    """Every node's leaf members and every name's nodes, in tree order.
+
+    A node is named by its tree node; a leaf also by its occurrence row, which differs
+    only for a single-part document, whose one node is the root (named for the document)
+    and the part (named by its author's label): both names resolve to it."""
+    rows = {str(item.get("id") or ""): str(item.get("name") or "").strip()
+            for item in descriptor.get("occurrences") or [] if isinstance(item, Mapping)}
     by_id: dict[str, list[str]] = {}
     by_name: dict[str, list[str]] = {}
 
@@ -229,14 +237,19 @@ def _descriptor_nodes(descriptor: Mapping[str, Any]) -> tuple[dict[str, list[str
         if not isinstance(node, Mapping):
             return []
         node_id = str(node.get("id") or "").strip()
-        members = [node_id] if node_id in leaves else []
+        # Names are taken in tree order (a node before its children), the order a
+        # shared name's numbered aliases follow in every API that reads a #name.
+        name = str(node.get("name") or "").strip()
+        if node_id and name:
+            by_name.setdefault(name, []).append(node_id)
+        row_name = rows.get(node_id, "")
+        if node_id and row_name and row_name != name:
+            by_name.setdefault(row_name, []).append(node_id)
+        members = [node_id] if node_id in rows else []
         for child in node.get("children") or []:
             members.extend(visit(child))
         if node_id:
             by_id[node_id] = members
-            name = str(node.get("name") or "").strip()
-            if name:
-                by_name.setdefault(name, []).append(node_id)
         return members
 
     assembly = descriptor.get("assembly")

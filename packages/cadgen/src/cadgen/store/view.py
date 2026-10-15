@@ -162,7 +162,7 @@ def materialize_parts(descriptor: dict, cids: list[str] | None = None, *,
     is the one the records belong to.
 
     A part that job could not derive fails the request, named by the occurrences that place
-    it (``#o1.3 ball could not be meshed (...)``) -- unless the view is ``drawable``: then it
+    it (``#o:3f2a9c1d7e5b ball could not be meshed (...)``) -- unless the view is ``drawable``: then it
     is left out, as the CAD Viewer leaves it out, its component carrying why (``failure``,
     the reason in those parentheses) and the records holding the rest. A drawable view
     none of whose parts is left fails as any other: there is nothing to draw."""
@@ -266,7 +266,7 @@ def _failed_parts(descriptor: dict, cids: list[str], error: Exception) -> dict[s
 def failed_parts_error(failed: dict[str, str], placed: dict[str, list[tuple[str, str]]]) -> Exception:
     """The ``MeshProductionError`` of parts no mesh could be made of, where nothing goes on
     without them: each of ``failed`` (``{cid: reason}``) named by the occurrences that place
-    it (``placed``, ``{cid: [(ref, name)]}``), ``#o1.3 ball could not be meshed (...)``, the
+    it (``placed``, ``{cid: [(ref, name)]}``), ``#o:3f2a9c1d7e5b ball could not be meshed (...)``, the
     parts joined by "; " in the order ``placed`` places them."""
     from cadgen._internal.tessellate import MeshProductionError
     from cadgen.store.meshes import failed_part

@@ -1,8 +1,8 @@
 """A STEP snapshot's parts, as Python knows them: ``--mode list``, and what focus/hide keep.
 
 ``cadgen step snapshot --mode list`` answers here, from the tree and the store,
-and never starts a browser. One row per placed occurrence (``#o1.2``), in the
-descriptor's order:
+and never starts a browser. One row per placed occurrence (``#o:4b1f9e2a7c03``),
+in the descriptor's order:
 
 - ``ref`` and ``name`` are the occurrence's id and name exactly as
   :func:`cadgen.assembly_lookup.assembly_occurrence_rows` gives them -- the rows
@@ -18,12 +18,12 @@ A part whose mesh leaves out a face no mesher could cover is listed, drawn and
 counted without it, and :func:`unmeshed_warnings` names the faces in the result's
 warnings, for a list and a view alike. A part no mesh could be made of at all is
 left out of both, as the CAD Viewer leaves it out, and :func:`failed_part_warnings`
-names it in the words a build uses (``#o1.2 peg could not be meshed (...)``); only
-a list or a view that would show nothing else fails (:func:`fail_if_nothing_left`).
+names it in the words a build uses (``#o:4b1f9e2a7c03 peg could not be meshed (...)``);
+only a list or a view that would show nothing else fails (:func:`fail_if_nothing_left`).
 
 ``focus``/``hide`` select the same way the page's scene does for a view: an
-occurrence matches a ref that IS its id, an ancestor group's id (``o1.2``
-covers ``o1.2.3``), or its name.
+occurrence matches a ref that IS its token, an ancestor group's token (the
+tree says which leaves a group holds: ``groups``), or its name.
 """
 
 from __future__ import annotations
@@ -50,15 +50,20 @@ def _selector_values(value: object) -> list[str]:
     return out
 
 
-def _matches(row: Mapping[str, Any], selector: str) -> bool:
+def _matches(row: Mapping[str, Any], selector: str, groups: Mapping[str, Sequence[str]]) -> bool:
     occurrence_id = str(row.get("id") or "")
-    if occurrence_id == selector or occurrence_id.startswith(f"{selector}."):
+    if occurrence_id == selector or occurrence_id in (groups.get(selector) or ()):
         return True
     return str(row.get("name") or "") == selector
 
 
-def filter_occurrences(rows: Sequence[Mapping[str, Any]], selection: Mapping[str, Any] | None) -> list:
-    """The rows ``selection``'s focus keeps and its hide does not remove.
+def filter_occurrences(
+    rows: Sequence[Mapping[str, Any]], selection: Mapping[str, Any] | None,
+    *, groups: Mapping[str, Sequence[str]] | None = None,
+) -> list:
+    """The rows ``selection``'s focus keeps and its hide does not remove. ``groups`` maps
+    each tree node's token to the leaves beneath it (``assembly_lookup.assembly_group_members``),
+    so a group ref keeps or removes its subtree.
 
     Raises ``ValueError`` when nothing is left: an empty picture is never the
     answer to a selection.
@@ -68,10 +73,11 @@ def filter_occurrences(rows: Sequence[Mapping[str, Any]], selection: Mapping[str
     hide = _selector_values(selection.get("hide"))
     if not focus and not hide:
         return list(rows)
+    groups = groups or {}
     kept = [
         row for row in rows
-        if (not focus or any(_matches(row, selector) for selector in focus))
-        and not any(_matches(row, selector) for selector in hide)
+        if (not focus or any(_matches(row, selector, groups) for selector in focus))
+        and not any(_matches(row, selector, groups) for selector in hide)
     ]
     if not kept:
         raise ValueError("No renderable parts remain after applying focus/hide filters")
@@ -121,7 +127,7 @@ def unmeshed_warnings(
     occurrences of ``rows`` that place it, and ``consequence``. A probe per component
     when none is missing."""
     from cadgen.store.meshes import placements, unmeshed_warning
-    from cadgen.store.parts import stored_unmeshed_faces
+    from cadgen.store.parts import stored_unmeshed_faces, unmeshed_face_names
 
     components = descriptor.get("components") if isinstance(descriptor.get("components"), Mapping) else {}
     failed = failed_parts(descriptor)
@@ -130,7 +136,7 @@ def unmeshed_warnings(
         key = str((components.get(cid) or {}).get("part") or "")
         faces = stored_unmeshed_faces(key) if key and cid not in failed else []
         if faces:
-            warnings.append(unmeshed_warning(occurrences, faces, consequence))
+            warnings.append(unmeshed_warning(occurrences, unmeshed_face_names(key, faces), consequence))
     return warnings
 
 
@@ -149,7 +155,7 @@ def failed_part_warnings(
 ) -> list[str]:
     """A warning per component of ``rows`` the view left out (:func:`failed_parts`), in the
     words a build says it in -- the occurrences of ``rows`` that place it and why
-    (``#o1.2 peg could not be meshed (...)``) -- and ``consequence``."""
+    (``#o:3f2a9c1d7e5b peg could not be meshed (...)``) -- and ``consequence``."""
     from cadgen.store.meshes import failed_part_warning, placements
 
     failed = failed_parts(descriptor)
@@ -181,10 +187,11 @@ def list_rows(
     selection: Mapping[str, Any] | None,
 ) -> list[dict[str, Any]]:
     """The ``--mode list`` rows for a STEP tree (see the module docstring)."""
-    from cadgen.assembly_lookup import assembly_occurrence_rows
+    from cadgen.assembly_lookup import assembly_group_members, assembly_occurrence_rows
 
     failed = failed_parts(descriptor)
-    rows = [row for row in filter_occurrences(assembly_occurrence_rows(descriptor, package_dir), selection)
+    rows = [row for row in filter_occurrences(assembly_occurrence_rows(descriptor, package_dir), selection,
+                                              groups=assembly_group_members(descriptor))
             if str(row.get("component") or "") not in failed]
     records = _records(descriptor, sorted({str(row["component"]) for row in rows if row.get("component")}))
     listed = []

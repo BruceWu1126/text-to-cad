@@ -1,13 +1,14 @@
 """An assembly's refs must resolve in the namespace the tools actually hand out.
 
-`snapshot --mode list` and the CAD Viewer enumerate instance-tree
-occurrences -- `#o1.12 shoulder_yaw_yoke` -- while `inspect refs` and `snapshot --focus/--hide`
-resolved against the whole-assembly topology sidecar, which is extracted from the COMPOSED
-compound and therefore describes any assembly as ONE occurrence. Every ref a user could pick was
-rejected by every tool that could measure it.
+`snapshot --mode list` and the CAD Viewer enumerate instance-tree occurrences --
+`#o:4b1f9e2a7c03 shoulder_yaw_yoke` -- while `inspect refs` and `snapshot --focus/--hide`
+once resolved against a whole-assembly topology sidecar extracted from the COMPOSED compound,
+which described any assembly as ONE occurrence. Every ref a user could pick was rejected by
+every tool that could measure it.
 
 These cover the merge itself (real package, real descriptor) and the transform arithmetic, which
-is the part with a wrong answer that looks plausible.
+is the part with a wrong answer that looks plausible. Every id is a token: an occurrence's from
+the tree, an element's from its component's geometry, a ref `<occurrence>/<element>`.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from unittest import mock
 
 from tests.python.support.paths import add_repo_path
 from tests.python.support.store_fixtures import build_view
+from tests.python.support.tree_ids import leaf_id, leaf_ids, node_id
 
 add_repo_path("packages/cadgen/src")
 
@@ -28,6 +30,8 @@ from build123d import Box, Compound, Pos, Rot  # noqa: E402
 
 from cadgen import assembly_lookup, lookup  # noqa: E402
 from cadgen._internal import component_package  # noqa: E402
+from cadgen._internal.tree_tokens import is_occurrence_token  # noqa: E402
+from cadgen.cad_ref_syntax import element_ref, split_element_ref  # noqa: E402
 
 
 def _demo_compound() -> Compound:
@@ -83,54 +87,54 @@ class _FakeArtifact:
         self.artifact_path = artifact_path
 
 
+def _empty_index() -> lookup.SelectorIndex:
+    """The index a document starts from: no rows of its own. Every occurrence and element
+    row comes from the tree and its components, composed by ``assembly_lookup``."""
+    return lookup.build_selector_index({"tables": {"occurrenceColumns": ["id", "name", "bbox"]}, "occurrences": []})
+
+
 class _AssemblyDisplayFixture:
     def setUp(self) -> None:
         super().setUp()
         self.root = _fixture_root
         self.package_dir = _fixture_package_dir
         self.descriptor = copy.deepcopy(_fixture_descriptor)
+        self.leaves = set(leaf_ids(self.descriptor))
 
-    def _flat_index(self) -> lookup.SelectorIndex:
-        """A stand-in for the composed-compound sidecar: one occurrence, as the real one has."""
-        manifest = {
-            "stats": {"occurrenceCount": 1, "shapeCount": 3},
-            "tables": {"occurrenceColumns": ["id", "name", "bbox"]},
-            "occurrences": [["o1", "demo.step", None]],
-        }
-        return lookup.build_selector_index(manifest)
+    def _placed(self, rows) -> list:
+        """The rows an occurrence of the fixture places."""
+        return [row for row in rows if row.get("occurrenceId") in self.leaves]
 
 
 class AssemblyOccurrenceRefsTest(_AssemblyDisplayFixture, unittest.TestCase):
 
     def test_every_ref_the_lister_hands_out_resolves(self) -> None:
         """The bug as reported: ids present in assembly.json, absent from the resolver."""
-        index = assembly_lookup.merge_assembly_occurrences(
-            self._flat_index(), self.descriptor, self.package_dir
-        )
+        index = assembly_lookup.merge_assembly_occurrences(_empty_index(), self.descriptor, self.package_dir)
         ids = [str(row["id"]) for row in self.descriptor["occurrences"]]
         self.assertTrue(ids, "fixture assembly declares no occurrences")
+        self.assertTrue(all(is_occurrence_token(occurrence_id) for occurrence_id in ids), ids)
         for occurrence_id in ids:
             with self.subTest(occurrence=occurrence_id):
                 found = lookup.lookup_selector(f"#{occurrence_id}", index)
                 self.assertIsNotNone(found, f"{occurrence_id} did not resolve")
                 self.assertEqual("occurrence", found[0])
 
-    def test_the_flat_namespace_still_resolves(self) -> None:
-        """The merge is ADDITIVE. `#o1` and bare-ordinal refs are what every existing caller
-        and test uses; fixing instance refs must not cost them."""
-        flat = self._flat_index()
-        merged = assembly_lookup.merge_assembly_occurrences(
-            flat, self.descriptor, self.package_dir
-        )
-        self.assertIsNotNone(lookup.lookup_selector("#o1", merged))
-        self.assertEqual(flat.single_occurrence_id, merged.single_occurrence_id)
+    def test_an_assembly_has_no_single_occurrence(self) -> None:
+        """A bare element token (`#f:…`) names an element of a document's ONE leaf; an
+        assembly has none, so the bare form resolves to nothing rather than to a guess."""
+        merged = assembly_lookup.merge_assembly_occurrences(_empty_index(), self.descriptor, self.package_dir)
+        self.assertEqual("", merged.single_occurrence_id)
+        entities = assembly_lookup.merge_assembly_entities(merged, self.descriptor, self.package_dir)
+        _occurrence, token = split_element_ref(str(entities.faces[0]["id"]))
+        self.assertIsNone(lookup.lookup_selector(f"#{token}", entities))
 
     def test_a_part_artifact_is_composed_like_any_tree(self) -> None:
         """A tree's selector tables live in its components, a part's single component
         included: skipping parts left them with the empty base index, so no face or
         edge resolved on a part and its facts counted zero faces. Only a missing
         artifact returns the index untouched."""
-        flat = self._flat_index()
+        flat = _empty_index()
         part = _FakeArtifact(kind="part", artifact_path=self.package_dir)
         composed = assembly_lookup.index_with_assembly_occurrences(flat, part)
         self.assertIsNot(flat, composed)
@@ -138,7 +142,7 @@ class AssemblyOccurrenceRefsTest(_AssemblyDisplayFixture, unittest.TestCase):
         self.assertIs(flat, assembly_lookup.index_with_assembly_occurrences(flat, None))
 
     def test_a_missing_package_directory_is_not_an_error(self) -> None:
-        flat = self._flat_index()
+        flat = _empty_index()
         absent = _FakeArtifact(kind="assembly", artifact_path=self.root / "nope")
         self.assertIs(flat, assembly_lookup.index_with_assembly_occurrences(flat, absent))
 
@@ -157,35 +161,44 @@ class AssemblyOccurrenceRefsTest(_AssemblyDisplayFixture, unittest.TestCase):
 
 
 class AssemblyEntityRefsTest(_AssemblyDisplayFixture, unittest.TestCase):
-    """Phase 2: the refs users actually pick. `#o1.12.f19` is face 19 of that occurrence's
-    component, which is the translation they were doing by hand -- and which the flat
-    whole-assembly namespace cannot express, since its numbering does not agree with the
-    component's ("the assembly's f18 is the wall's face; the part's f18 is a cylinder")."""
+    """Phase 2: the refs users actually pick. `#o:…/f:…` is the face of that occurrence's
+    component whose geometry the token names -- the same token in the part's own table, in
+    every occurrence of the part, and in the document read back from the STEP."""
 
     def _merged(self) -> lookup.SelectorIndex:
-        return assembly_lookup.merge_assembly_entities(
-            self._flat_index(), self.descriptor, self.package_dir
-        )
+        return assembly_lookup.merge_assembly_entities(_empty_index(), self.descriptor, self.package_dir)
+
+    def _first_face(self, merged: lookup.SelectorIndex, occurrence_id: str) -> dict:
+        (row,) = [row for row in merged.faces if row["occurrenceId"] == occurrence_id and int(row["ordinal"]) == 1]
+        return row
 
     def test_entity_refs_inside_an_occurrence_resolve(self) -> None:
         merged = self._merged()
         occurrence_id = str(self.descriptor["occurrences"][0]["id"])
-        found = lookup.lookup_selector(f"#{occurrence_id}.f1", merged)
-        self.assertIsNotNone(found, f"{occurrence_id}.f1 did not resolve")
+        ref = element_ref(occurrence_id, str(self._first_face(merged, occurrence_id)["token"]))
+        found = lookup.lookup_selector(f"#{ref}", merged)
+        self.assertIsNotNone(found, f"{ref} did not resolve")
         self.assertEqual("face", found[0])
+        self.assertEqual(ref, found[1]["id"])
 
-    def test_a_face_keeps_its_component_ordinal(self) -> None:
-        """The assembly ref carries the number the PART's own namespace uses, so a translated
-        ref stays checkable by hand against the part file."""
+    def test_a_face_keeps_its_component_token_and_ordinal(self) -> None:
+        """The assembly ref carries the token the PART's own table uses, so a ref picked on
+        one occurrence names the same face of every occurrence of that part; the ordinal is
+        kept beside it as the mesh join."""
         merged = self._merged()
-        occurrence_id = str(self.descriptor["occurrences"][0]["id"])
-        kind, row = lookup.lookup_selector(f"#{occurrence_id}.f1", merged)
-        self.assertEqual(1, int(row["ordinal"]))
-        self.assertEqual(occurrence_id, str(row["occurrenceId"]))
+        twins = [leaf_id(self.descriptor, name) for name in ("box_a_1", "box_a_2")]
+        rows = {str(row["id"]): row for row in self.descriptor["occurrences"]}
+        self.assertEqual(rows[twins[0]]["component"], rows[twins[1]]["component"],
+                         "the fixture's two identical boxes share one component")
+        first, second = (self._first_face(merged, occurrence_id) for occurrence_id in twins)
+        self.assertEqual(first["token"], second["token"])
+        self.assertEqual((1, 1), (int(first["ordinal"]), int(second["ordinal"])))
+        self.assertNotEqual(first["id"], second["id"], "each occurrence's ref names its own placement")
+        self.assertEqual((twins[0], first["token"]), split_element_ref(str(first["id"])))
 
     def test_geometry_is_placed_and_rigid_invariants_survive(self) -> None:
         merged = self._merged()
-        rows = [row for row in merged.faces if str(row.get("occurrenceId", "")).count(".") >= 1]
+        rows = self._placed(merged.faces)
         self.assertTrue(rows, "no placed faces were merged")
         # The two identical boxes differ ONLY by placement, so component-local centres would be
         # identical. Distinct centres prove the occurrence transform was applied.
@@ -198,74 +211,56 @@ class AssemblyEntityRefsTest(_AssemblyDisplayFixture, unittest.TestCase):
         """The silent failure: putting a direction through the full matrix makes it absorb the
         occurrence's offset, so it stops being a unit vector and points somewhere false."""
         merged = self._merged()
-        placed = [row for row in merged.faces if row.get("normal") and row.get("occurrenceId")]
+        placed = [row for row in self._placed(merged.faces) if row.get("normal")]
         self.assertTrue(placed)
         for row in placed:
             length = sum(component * component for component in row["normal"]) ** 0.5
             self.assertAlmostEqual(1.0, length, places=6, msg=f"{row['id']} normal is not unit")
 
-    def test_the_flat_entity_namespace_still_resolves(self) -> None:
-        """Additive, again: a bare `#f1` still canonicalizes through single_occurrence_id into
-        the composed-compound namespace, which is what every part-shaped caller relies on."""
-        flat = self._flat_index()
-        merged = self._merged()
-        self.assertEqual(flat.single_occurrence_id, merged.single_occurrence_id)
-
 
 class MergedRowsAreInternallyConsistentTest(_AssemblyDisplayFixture, unittest.TestCase):
     """Every id a merged row carries must point somewhere true.
 
-    A component's rows index that component's own tables. Copied across unchanged they all still
-    RESOLVE -- against the wrong thing, which is worse than not resolving at all, because the
-    caller gets a confident answer. `#o1.12.f19` used to report `shapeId s1`, and `s1` in the
-    merged index is a solid 40 mm away from the face claiming it.
+    A component's rows index that component's own tables. Copied across unchanged they would
+    still RESOLVE -- against the wrong thing, which is worse than not resolving at all, because
+    the caller gets a confident answer. A face's ref names the occurrence that places it, and
+    the face lies inside that occurrence's own box.
     """
 
     def _merged(self) -> lookup.SelectorIndex:
-        occurrences = assembly_lookup.merge_assembly_occurrences(
-            self._flat_index(), self.descriptor, self.package_dir
-        )
-        return assembly_lookup.merge_assembly_entities(
-            occurrences, self.descriptor, self.package_dir
-        )
+        occurrences = assembly_lookup.merge_assembly_occurrences(_empty_index(), self.descriptor, self.package_dir)
+        return assembly_lookup.merge_assembly_entities(occurrences, self.descriptor, self.package_dir)
 
-    def test_a_face_names_a_shape_that_exists_and_contains_it(self) -> None:
+    def test_a_face_names_the_occurrence_that_contains_it(self) -> None:
         merged = self._merged()
         checked = 0
-        for face in merged.faces:
-            occurrence_id = str(face.get("occurrenceId") or "")
-            if not occurrence_id or occurrence_id == "o1":
-                continue
-            shape_id = str(face.get("shapeId") or "")
-            self.assertTrue(
-                shape_id.startswith(f"{occurrence_id}."),
-                f"{face['id']} names {shape_id}, which belongs to another occurrence",
-            )
-            shape = merged.shape_by_id.get(shape_id)
-            self.assertIsNotNone(shape, f"{face['id']} names a shape that does not resolve")
+        for face in self._placed(merged.faces):
+            occurrence_id, token = split_element_ref(str(face["id"]))
+            self.assertEqual(occurrence_id, face["occurrenceId"])
+            self.assertEqual(token, face["token"])
+            occurrence = merged.occurrence_by_id[occurrence_id]
             # Geometric consistency, not just naming: a face has to lie inside its own solid.
             for axis in range(3):
                 self.assertGreaterEqual(
-                    face["bbox"]["min"][axis], shape["bbox"]["min"][axis] - 1e-6,
-                    f"{face['id']} sits outside {shape_id}",
+                    face["bbox"]["min"][axis], occurrence["bbox"]["min"][axis] - 1e-6,
+                    f"{face['id']} sits outside {occurrence_id}",
                 )
                 self.assertLessEqual(
-                    face["bbox"]["max"][axis], shape["bbox"]["max"][axis] + 1e-6,
-                    f"{face['id']} sits outside {shape_id}",
+                    face["bbox"]["max"][axis], occurrence["bbox"]["max"][axis] + 1e-6,
+                    f"{face['id']} sits outside {occurrence_id}",
                 )
             checked += 1
         self.assertGreater(checked, 0, "no placed faces were checked")
 
-    def test_every_placed_shape_ref_resolves(self) -> None:
+    def test_a_shape_carries_no_ref_of_its_own(self) -> None:
+        """The occurrence names a body: its solids are listed, placed, for the facts a solid
+        gives, under no id a selector could spell."""
         merged = self._merged()
-        checked = 0
-        for shape in merged.shapes:
-            occurrence_id = str(shape.get("occurrenceId") or "")
-            if not occurrence_id or occurrence_id == "o1":
-                continue
-            self.assertEqual("shape", lookup.lookup_selector(f"#{shape['id']}", merged)[0])
-            checked += 1
-        self.assertGreater(checked, 0, "no placed shapes were checked")
+        shapes = self._placed(merged.shapes)
+        self.assertTrue(shapes, "no placed shapes were merged")
+        for shape in shapes:
+            self.assertNotIn("id", shape)
+            self.assertIsNone(lookup.lookup_selector(f"#{shape['shapeId']}", merged))
 
 
 class DormantPathsTest(unittest.TestCase):
@@ -275,60 +270,61 @@ class DormantPathsTest(unittest.TestCase):
     against numbers chosen here rather than read off a kernel's ordinals.
     """
 
-    def _fake_component(self):
-        manifest = {
+    F1, E1, V1, V2 = "f:" + "1" * 12, "e:" + "2" * 12, "v:" + "3" * 12, "v:" + "4" * 12
+
+    def _fake_table(self):
+        """A component's own selector table (schema 2): element rows lead with their token
+        and ordinal, and carry no id of their own."""
+        return {
             "tables": {
                 "occurrenceColumns": ["id", "name", "bbox"],
-                "shapeColumns": ["id", "localId", "occurrenceId", "ordinal", "bbox"],
-                "faceColumns": ["id", "localId", "occurrenceId", "shapeId", "ordinal", "center", "edgeStart", "edgeCount"],
-                "edgeColumns": ["id", "localId", "occurrenceId", "shapeId", "ordinal", "center", "vertexStart", "vertexCount"],
-                "vertexColumns": ["id", "localId", "occurrenceId", "ordinal", "center", "edgeStart", "edgeCount"],
+                "shapeColumns": ["ordinal", "bbox"],
+                "faceColumns": ["token", "ordinal", "shape", "center", "edgeStart", "edgeCount"],
+                "edgeColumns": ["token", "ordinal", "shape", "center", "vertexStart", "vertexCount"],
+                "vertexColumns": ["token", "ordinal", "center", "edgeStart", "edgeCount"],
             },
-            "occurrences": [["o1", "part", None]],
-            "shapes": [["o1.s1", "s1", "o1", 1, None]],
-            "faces": [["o1.f1", "f1", "o1", "o1.s1", 1, [0.0, 0.0, 0.0], 0, 1]],
-            "edges": [["o1.e1", "e1", "o1", "o1.s1", 1, [0.0, 0.0, 0.0], 0, 2]],
+            "occurrences": [["o:" + "0" * 12, "part", None]],
+            "shapes": [[1, None]],
+            "faces": [[self.F1, 1, 1, [0.0, 0.0, 0.0], 0, 1]],
+            "edges": [[self.E1, 1, 1, [0.0, 0.0, 0.0], 0, 2]],
             "vertices": [
-                ["o1.v1", "v1", "o1", 1, [0.0, 0.0, 0.0], 0, 1],
-                ["o1.v2", "v2", "o1", 2, [1.0, 0.0, 0.0], 1, 1],
+                [self.V1, 1, [0.0, 0.0, 0.0], 0, 1],
+                [self.V2, 2, [1.0, 0.0, 0.0], 1, 1],
             ],
         }
-        return lookup.build_selector_index(manifest)
 
     def test_every_occurrence_gets_its_own_placed_vertices(self) -> None:
-        component = self._fake_component()
+        a, b = "o:" + "a" * 12, "o:" + "b" * 12
         descriptor = {
             "occurrences": [
-                {"id": "o1.1", "name": "a", "component": "c", "transform": None},
-                {"id": "o1.2", "name": "b", "component": "c",
+                {"id": a, "name": "a", "component": "c", "transform": None},
+                {"id": b, "name": "b", "component": "c",
                  "transform": [1, 0, 0, 100, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]},
             ]
         }
-        flat = lookup.build_selector_index(
-            {"tables": {"occurrenceColumns": ["id"]}, "occurrences": [["o1"]]}
-        )
-        with mock.patch.object(assembly_lookup, "_component_index", return_value=component):
-            merged = assembly_lookup.merge_assembly_entities(flat, descriptor, Path("."))
+        with mock.patch.object(assembly_lookup, "_read_component_table", return_value=self._fake_table()):
+            merged = assembly_lookup.merge_assembly_entities(_empty_index(), descriptor, Path("."))
 
-        for occurrence_id in ("o1.1", "o1.2"):
-            for local_id in ("v1", "v2"):
-                found = lookup.lookup_selector(f"#{occurrence_id}.{local_id}", merged)
+        for occurrence_id in (a, b):
+            for token in (self.V1, self.V2):
+                found = lookup.lookup_selector(f"#{element_ref(occurrence_id, token)}", merged)
                 self.assertEqual("vertex", found[0])
                 self.assertEqual(occurrence_id, found[1]["occurrenceId"])
+                self.assertEqual(token, found[1]["token"])
         # ...and the second occurrence is genuinely 100 mm away, not a shared row.
-        self.assertEqual(100.0, merged.vertex_by_id["o1.2.v1"]["center"][0])
-        self.assertEqual(0.0, merged.vertex_by_id["o1.1.v1"]["center"][0])
+        self.assertEqual(100.0, merged.vertex_by_id[element_ref(b, self.V1)]["center"][0])
+        self.assertEqual(0.0, merged.vertex_by_id[element_ref(a, self.V1)]["center"][0])
 
     def test_geometry_that_cannot_be_placed_is_dropped_not_left_local(self) -> None:
         """A field kept unplaced would be a component-local number in an otherwise world-space
         row, shared by every occurrence of that component."""
         placed = assembly_lookup._place_entity_row(
             assembly_lookup._matrix([1, 0, 0, 5, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
-            {"id": "x", "center": "not-a-point", "normal": None, "bbox": {"min": [0, 0, 0]}},
+            {"token": "x", "center": "not-a-point", "normal": None, "bbox": {"min": [0, 0, 0]}},
         )
         for field in ("center", "normal", "bbox"):
             self.assertNotIn(field, placed, f"{field} survived unplaced")
-        self.assertEqual("x", placed["id"], "non-geometry fields are untouched")
+        self.assertEqual("x", placed["token"], "non-geometry fields are untouched")
 
 
 class PlacementAgainstAnalyticGeometryTest(_AssemblyDisplayFixture, unittest.TestCase):
@@ -387,14 +383,10 @@ class PlacementAgainstAnalyticGeometryTest(_AssemblyDisplayFixture, unittest.Tes
     def test_face_centres_land_on_the_box_faces_they_belong_to(self) -> None:
         """A box's six faces sit at its face midpoints. Those are known numbers, so a placed
         face centre can be checked without asking the placement code where it should be."""
-        merged = assembly_lookup.merge_assembly_entities(
-            self._flat_index(), self.descriptor, self.package_dir
-        )
+        merged = assembly_lookup.merge_assembly_entities(_empty_index(), self.descriptor, self.package_dir)
         by_occurrence: dict[str, list] = {}
-        for row in merged.faces:
-            occurrence_id = str(row.get("occurrenceId") or "")
-            if occurrence_id and occurrence_id != "o1":
-                by_occurrence.setdefault(occurrence_id, []).append(row)
+        for row in self._placed(merged.faces):
+            by_occurrence.setdefault(str(row["occurrenceId"]), []).append(row)
         names = {str(row["id"]): str(row.get("name")) for row in self.descriptor["occurrences"]}
 
         checked = 0
@@ -491,7 +483,7 @@ class TransformArithmeticTest(unittest.TestCase):
 def _nested_compound() -> Compound:
     """A branch with two parts under it, beside a loose part.
 
-    Flat fixtures cannot exercise a group at all: `o1.1`, `o1.2` are leaves there. This
+    Flat fixtures cannot exercise a group at all: every node there is a leaf. This
     one has a real interior node, which is what the viewer copies, what a kinematics mate
     names, and what `inspect` now accepts.
     """
@@ -520,13 +512,14 @@ class AssemblyGroupNodesTest(unittest.TestCase):
         super().setUp()
         self.package_dir = _group_package_dir
         self.descriptor = copy.deepcopy(_group_descriptor)
+        self.branch = node_id(self.descriptor, "bar_pair")
 
     def test_interior_nodes_are_reported_with_their_labels(self) -> None:
         nodes = assembly_lookup.assembly_group_nodes(self.descriptor)
         names = {node_id: entry["name"] for node_id, entry in nodes.items()}
-        self.assertIn("o1.1", names, f"the branch is missing from {sorted(nodes)}")
-        self.assertEqual("bar_pair", names["o1.1"])
-        self.assertEqual(2, nodes["o1.1"]["childCount"])
+        self.assertIn(self.branch, names, f"the branch is missing from {sorted(nodes)}")
+        self.assertEqual("bar_pair", names[self.branch])
+        self.assertEqual(2, nodes[self.branch]["childCount"])
         # Leaves are NOT interior nodes: their rows are in the occurrences table.
         leaf_ids = {str(row["id"]) for row in self.descriptor["occurrences"]}
         self.assertFalse(leaf_ids & set(nodes), "a leaf was reported as a group")
@@ -544,16 +537,14 @@ class AssemblyGroupNodesTest(unittest.TestCase):
             "a subassembly node now records a transform; teach frame to report it",
         )
 
-    def test_the_merged_index_carries_the_group_nodes(self) -> None:
-        manifest = {
-            "stats": {"occurrenceCount": 1, "shapeCount": 3},
-            "tables": {"occurrenceColumns": ["id", "name", "bbox"]},
-            "occurrences": [["o1", "nested.step", None]],
-        }
-        merged = assembly_lookup.merge_assembly_occurrences(
-            lookup.build_selector_index(manifest), self.descriptor, self.package_dir
+    def test_the_merged_index_carries_the_group_nodes_and_their_members(self) -> None:
+        merged = assembly_lookup.merge_assembly_occurrences(_empty_index(), self.descriptor, self.package_dir)
+        self.assertEqual("bar_pair", merged.group_nodes[self.branch]["name"])
+        # A group ref covers the leaves beneath it, by token.
+        self.assertEqual(
+            [leaf_id(self.descriptor, "bar_left"), leaf_id(self.descriptor, "bar_right")],
+            merged.members[self.branch],
         )
-        self.assertEqual("bar_pair", merged.group_nodes["o1.1"]["name"])
 
 
 if __name__ == "__main__":

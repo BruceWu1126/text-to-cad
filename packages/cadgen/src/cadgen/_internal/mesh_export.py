@@ -234,12 +234,15 @@ def _unmeshed_warnings(descriptor: dict, unmeshed: dict, written: str) -> list[s
     """What a file written from meshes that leave faces out says of each such component:
     its occurrences, the faces, and that the file is open where they are."""
     from cadgen.store.meshes import unmeshed_warning
+    from cadgen.store.parts import unmeshed_face_names
 
     occurrences = [occurrence for occurrence in descriptor.get("occurrences") or [] if isinstance(occurrence, dict)]
+    components = descriptor.get("components") if isinstance(descriptor.get("components"), dict) else {}
     name = written.replace("{", "{{").replace("}", "}}")
     return [unmeshed_warning([(str(occurrence.get("id")), str(occurrence.get("name") or ""))
                               for occurrence in occurrences if occurrence.get("component") == cid],
-                             faces, name + " has a hole in place of {them}: it is not watertight")
+                             unmeshed_face_names(str((components.get(cid) or {}).get("part") or ""), faces),
+                             name + " has a hole in place of {them}: it is not watertight")
             for cid, faces in unmeshed.items()]
 
 

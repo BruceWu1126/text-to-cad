@@ -84,7 +84,7 @@ class NativeDocumentDoors(unittest.TestCase):
         shutil.rmtree(self.store / "index/part")
         with self.native_only():
             scene = read_scene(self.document)
-            self.assertAlmostEqual(scene.resolve("#s1").shape().volume, 24)
+            self.assertAlmostEqual(scene.roots[0].shape().volume, 24)
             self.assertEqual(len(list(scene.roots[0].entities("face"))), 6)
 
     def test_compile_native_inspections_and_reemit_skip_display_and_unrelated_source(self):

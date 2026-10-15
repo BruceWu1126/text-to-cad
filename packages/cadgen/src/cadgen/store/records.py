@@ -68,7 +68,10 @@ RECORD_KIND = "record"
 # or lack the import-time, absent-file and search-root entries a closure now
 # carries. Their next source run rebuilds; saved-document mappings and objects
 # stay valid.
-RECORD_SCHEMA_VERSION = 8
+# Schema 9: the tree a record names is geometry schema 4 (store.trees.TREE_SCHEMA), whose ids
+# are tokens, and its correspondence maps (documentOccurrenceMap, documentNodeMap) and
+# appearance assignments are keyed by them (README law 20).
+RECORD_SCHEMA_VERSION = 9
 # A format change bumps it and lands on new keys (document_key).
 # Schema 6: an XCAF label entry (`=>[0:1:1:2]`) reads as no name, and an
 # occurrence without one of its own never shows a shared product's name that is
@@ -81,7 +84,8 @@ RECORD_SCHEMA_VERSION = 8
 # Schema 8: the tree an entry names is geometry schema 3 (store.trees.TREE_SCHEMA),
 # and the hint is ``producer``. A schema-7 entry names a schema-2 tree this cadgen
 # cannot read: on its own key it would be taken for a hit that no view can open.
-DOCUMENT_SCHEMA_VERSION = 8
+# Schema 9: the tree an entry names is geometry schema 4, its ids tokens.
+DOCUMENT_SCHEMA_VERSION = 9
 
 
 def record_key(model: Path | str) -> str:

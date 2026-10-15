@@ -17,6 +17,7 @@ from unittest import mock
 from urllib.parse import parse_qs, urlparse
 
 from tests.python.support.paths import add_repo_path, repo_path
+from tests.python.support.tree_ids import leaf_id, node_id, root_id, tokenized
 
 
 _MODULE_CACHE = None
@@ -165,19 +166,36 @@ def job_from_argv(argv, entry=None):
     )
 
 
-def _selector_artifact(*occurrence_ids: str) -> SimpleNamespace:
+def _tree(*leaf_paths: str) -> dict:
+    """A tokenised descriptor whose leaves sit at ``leaf_paths`` (``o1.4.10``: the
+    root's fourth child's tenth), interior nodes implied, in the order given. Every node is
+    named after its path (``o1_4``), so a test can find its token by name."""
+    root = {"id": "o1", "name": "o1", "children": []}
+    nodes = {"o1": root}
+    occurrences = []
+    for path in leaf_paths:
+        parts = path.split(".")
+        for depth in range(2, len(parts) + 1):
+            prefix = ".".join(parts[:depth])
+            if prefix not in nodes:
+                node = {"id": prefix, "name": prefix.replace(".", "_"), "children": []}
+                nodes[".".join(parts[:depth - 1])]["children"].append(node)
+                nodes[prefix] = node
+        occurrences.append({"id": path, "name": path.replace(".", "_"), "component": "c", "transform": None})
+    return tokenized({"occurrences": occurrences, "assembly": {"root": root}})[0]
+
+
+def _selector_artifact(descriptor: dict) -> SimpleNamespace:
+    """A resolved STEP artifact over ``descriptor`` (``_tree``): its view directory holds
+    the assembly.json the selector index is composed from, as a real one does. It carries
+    no ``manifest`` of its own: these tests are about the refs, not the document's tree."""
+    view = Path(_MODULE_CACHE.name) / "views" / hashlib.sha256(json.dumps(descriptor, sort_keys=True).encode()).hexdigest()[:16]
+    view.mkdir(parents=True, exist_ok=True)
+    (view / "assembly.json").write_text(json.dumps({"kind": "assembly-package", "entryKind": "assembly", **descriptor}), encoding="utf-8")
     return SimpleNamespace(
-        selector_bundle=SimpleNamespace(
-            manifest={
-                "tables": {
-                    "occurrenceColumns": ["id"],
-                    "shapeColumns": ["id", "occurrenceId"],
-                },
-                "occurrences": [[occurrence_id] for occurrence_id in occurrence_ids],
-                "shapes": [],
-            },
-            buffers={},
-        )
+        kind="assembly",
+        artifact_path=view,
+        selector_bundle=SimpleNamespace(manifest=descriptor, buffers={}),
     )
 
 
@@ -270,8 +288,8 @@ class SnapshotCliTests(unittest.TestCase):
             step.snapshot(
                 Path("models/assembly.step"),
                 Path("tmp/assembly.png"),
-                focus=("#o1.2",),
-                hide=("#o1.3.1",),
+                focus=("#pin",),
+                hide=("#nut",),
             )
 
     def test_display_shortcut_accepts_cad_display_modes(self) -> None:
@@ -478,16 +496,16 @@ class SnapshotCliTests(unittest.TestCase):
                 "models/assembly.step",
                 "tmp/assembly.png",
                 "--focus",
-                "#o1.2",
+                "#pin",
                 "--focus",
-                "#o1.3",
+                "#o:3f2a9c1d7e5b",
             ]
         )
 
         self.assertEqual(
             job["selection"],
             {
-                "focus": ["#o1.2", "#o1.3"],
+                "focus": ["#pin", "#o:3f2a9c1d7e5b"],
             },
         )
 
@@ -1114,12 +1132,12 @@ class SnapshotCliTests(unittest.TestCase):
         # names the nesting instead of leaving the author to guess it.
         with self.assertRaisesRegex(
             SnapshotError,
-            r'unknown render job key\(s\): hide.*hide nest under the selection object: "selection": \{"hide": \["#o1.2"\]\}',
+            r'unknown render job key\(s\): hide.*hide nest under the selection object: "selection": \{"hide": \["#housing"\]\}',
         ):
             resolve_render_job_packet(
                 {
                     "input": "models/part.step",
-                    "hide": ["#o1.5"],
+                    "hide": ["#nut"],
                     "outputs": [{"path": "tmp/iso.png", "camera": "iso"}],
                 }
             )
@@ -1148,7 +1166,7 @@ class SnapshotCliTests(unittest.TestCase):
                             {
                                 "path": "tmp/iso.png",
                                 "camera": "iso",
-                                "selection": {"hide": ["#o1.5"]},
+                                "selection": {"hide": ["#nut"]},
                             }
                         ],
                     },
@@ -1180,7 +1198,7 @@ class SnapshotCliTests(unittest.TestCase):
                 resolve_render_job_packet(
                     {
                         "input": "models/widget.glb",
-                        "selection": {"focus": ["#o1.2"]},
+                        "selection": {"focus": ["#nut"]},
                         "outputs": [{"path": "tmp/iso.png", "camera": "iso"}],
                     },
                     cwd=root,
@@ -1642,7 +1660,7 @@ class SnapshotCliTests(unittest.TestCase):
             root = self._mesh_job_env(temporary_directory, "arm.urdf", b"<robot name='arm'/>\n")
             base = {"input": "models/arm.urdf", "outputs": [{"path": "tmp/iso.png"}]}
             with self.assertRaisesRegex(SnapshotError, "selection focus/hide require STEP topology"):
-                resolve_render_job_packet({**base, "selection": {"focus": ["#o1"]}}, cwd=root)
+                resolve_render_job_packet({**base, "selection": {"focus": ["#frame"]}}, cwd=root)
             # A robot IS parametric, just not by STEP sidecar — the error says which key to use.
             with self.assertRaisesRegex(SnapshotError, "pose a URDF robot with jointValues"):
                 resolve_render_job_packet({**base, "kinematics": {"width": 5}}, cwd=root)
@@ -1675,10 +1693,11 @@ class SnapshotCliTests(unittest.TestCase):
             step_path.write_text("ISO-10303-21;\nEND-ISO-10303-21;\n", encoding="utf-8")
             write_package(step_path, entry_kind="assembly")
             calls = []
+            tree = _tree("o1.2")
 
             def fake_ensure(target, **kwargs):
                 calls.append((target, kwargs))
-                return _selector_artifact("o1", "o1.2")
+                return _selector_artifact(tree)
 
             original_ensure = snapshot_main.ensure_step_artifact
             try:
@@ -1686,7 +1705,7 @@ class SnapshotCliTests(unittest.TestCase):
                 resolve_render_job_packet(
                     {
                         "input": "models/assembly.step",
-                        "selection": {"focus": ["#o1.2"]},
+                        "selection": {"focus": [f"#{leaf_id(tree, 'o1_2')}"]},
                         "outputs": [{"path": "tmp/iso.png", "camera": "iso"}],
                     },
                     cwd=root,
@@ -1707,19 +1726,17 @@ class SnapshotCliTests(unittest.TestCase):
             (models / "assembly.step").write_text("ISO-10303-21;\nEND-ISO-10303-21;\n", encoding="utf-8")
             write_package(models / "assembly.step", entry_kind="assembly")
 
+            tree = _tree("o1.2", "o1.3")
             original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: _selector_artifact(
-                    "o1",
-                    "o1.2",
-                    "o1.2.1",
-                    "o1.3",
-                )
+                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: _selector_artifact(tree)
+                # Refs come as tokens or labels, with or without the leading hash; the job
+                # carries the tokens.
                 packet = resolve_render_job_packet(
                     {
                         "input": "models/assembly.step",
                         "selection": {
-                            "focus": ["#o1.2", "#o1.3"],
+                            "focus": [f"#{leaf_id(tree, 'o1_2')}", "o1_3"],
                         },
                         "outputs": [{"path": "tmp/iso.png", "camera": "iso"}],
                     },
@@ -1729,7 +1746,7 @@ class SnapshotCliTests(unittest.TestCase):
                 snapshot_main.ensure_step_artifact = original_ensure
 
         selection = packet["jobs"][0]["selection"]
-        self.assertEqual(selection["focus"], ["o1.2", "o1.3"])
+        self.assertEqual(selection["focus"], [leaf_id(tree, "o1_2"), leaf_id(tree, "o1_3")])
 
     def test_render_job_normalizes_hide_selector_refs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -1739,18 +1756,14 @@ class SnapshotCliTests(unittest.TestCase):
             (models / "assembly.step").write_text("ISO-10303-21;\nEND-ISO-10303-21;\n", encoding="utf-8")
             write_package(models / "assembly.step", entry_kind="assembly")
 
+            tree = _tree("o1.2.1", "o1.3")
             original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: _selector_artifact(
-                    "o1",
-                    "o1.2",
-                    "o1.2.1",
-                    "o1.3",
-                )
+                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: _selector_artifact(tree)
                 packet = resolve_render_job_packet(
                     {
                         "input": "models/assembly.step",
-                        "selection": {"hide": ["#o1.2.1"]},
+                        "selection": {"hide": [f"#{leaf_id(tree, 'o1_2_1')}"]},
                         "outputs": [{"path": "tmp/iso.png", "camera": "iso"}],
                     },
                     cwd=root,
@@ -1759,14 +1772,17 @@ class SnapshotCliTests(unittest.TestCase):
                 snapshot_main.ensure_step_artifact = original_ensure
 
         selection = packet["jobs"][0]["selection"]
-        self.assertEqual(selection["hide"], ["o1.2.1"])
+        self.assertEqual(selection["hide"], [leaf_id(tree, "o1_2_1")])
+
+    # A root of two groups: `o1_1` of two parts, `o1_4` of three.
+    GROUPED = _tree("o1.1.1", "o1.1.2", "o1.4.1", "o1.4.2", "o1.4.10")
 
     def _group_selection(self, selection: dict) -> dict:
-        """Resolve `selection` against a LEAF-ONLY occurrence index.
+        """Resolve `selection` against the GROUPED tree's index, whose rows are its leaves.
 
         That is what a real assembly package produces: only the instance tree's leaves own
         geometry, so only leaves become selector-index rows (cadgen.assembly_lookup). The
-        subassembly nodes `o1` and `o1.4` are carried by the ids alone.
+        subassembly nodes are carried by the tree, each ref a token.
         """
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory).resolve()
@@ -1777,13 +1793,7 @@ class SnapshotCliTests(unittest.TestCase):
 
             original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: _selector_artifact(
-                    "o1.1.1",
-                    "o1.1.2",
-                    "o1.4.1",
-                    "o1.4.2",
-                    "o1.4.10",
-                )
+                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: _selector_artifact(self.GROUPED)
                 packet = resolve_render_job_packet(
                     {
                         "input": "models/assembly.step",
@@ -1796,38 +1806,41 @@ class SnapshotCliTests(unittest.TestCase):
                 snapshot_main.ensure_step_artifact = original_ensure
         return packet["jobs"][0]["selection"]
 
+    def _ids(self, *names: str) -> list[str]:
+        return [node_id(self.GROUPED, name) for name in names]
+
     def test_focus_expands_a_group_ref_to_its_subtree(self) -> None:
         """A subassembly ref covers every rendered part under it.
 
-        `#o1.4` names an instance-tree NODE, which kinematics mates address and pose
-        without complaint; it carried no selector-index row of its own and so was refused
-        as "unknown", by an error that claimed to support subassemblies. Ordered by
-        numeric path, so o1.4.10 follows o1.4.2 rather than o1.4.1.
+        The group's token names an instance-tree NODE, which kinematics mates address and
+        pose without complaint; it carried no selector-index row of its own and so was
+        refused as "unknown", by an error that claimed to support subassemblies. The leaves
+        come in tree order, the tenth child after the second.
         """
-        selection = self._group_selection({"focus": ["#o1.4"]})
-        self.assertEqual(selection["focus"], ["o1.4.1", "o1.4.2", "o1.4.10"])
+        selection = self._group_selection({"focus": [f"#{node_id(self.GROUPED, 'o1_4')}"]})
+        self.assertEqual(selection["focus"], self._ids("o1_4_1", "o1_4_2", "o1_4_10"))
 
     def test_hide_expands_a_group_ref_the_same_way(self) -> None:
-        selection = self._group_selection({"hide": ["#o1.4"]})
-        self.assertEqual(selection["hide"], ["o1.4.1", "o1.4.2", "o1.4.10"])
+        selection = self._group_selection({"hide": [f"#{node_id(self.GROUPED, 'o1_4')}"]})
+        self.assertEqual(selection["hide"], self._ids("o1_4_1", "o1_4_2", "o1_4_10"))
 
     def test_the_root_group_covers_the_whole_model(self) -> None:
-        selection = self._group_selection({"focus": ["#o1"]})
-        self.assertEqual(
-            selection["focus"], ["o1.1.1", "o1.1.2", "o1.4.1", "o1.4.2", "o1.4.10"]
-        )
+        selection = self._group_selection({"focus": [f"#{root_id(self.GROUPED)}"]})
+        self.assertEqual(selection["focus"], self._ids("o1_1_1", "o1_1_2", "o1_4_1", "o1_4_2", "o1_4_10"))
 
     def test_a_group_and_one_of_its_parts_do_not_duplicate(self) -> None:
-        selection = self._group_selection({"focus": ["#o1.4", "#o1.4.2"]})
-        self.assertEqual(selection["focus"], ["o1.4.1", "o1.4.2", "o1.4.10"])
+        selection = self._group_selection({"focus": [f"#{node_id(self.GROUPED, 'o1_4')}", "#o1_4_2"]})
+        self.assertEqual(selection["focus"], self._ids("o1_4_1", "o1_4_2", "o1_4_10"))
 
     def test_an_unknown_group_ref_names_what_does_exist(self) -> None:
         """Expansion must not turn every typo into a silent no-op: a ref with nothing
-        under it still fails, and the error walks up to the deepest node that IS there."""
-        with self.assertRaisesRegex(SnapshotError, r"o1\.9.*o1 does exist, and holds: o1\.1, o1\.4"):
-            self._group_selection({"focus": ["#o1.9"]})
-        with self.assertRaisesRegex(SnapshotError, r"o1\.4\.99.*o1\.4 does exist, and holds: "):
-            self._group_selection({"focus": ["#o1.4.99"]})
+        under it still fails, and the error names the root's children, the parts and
+        subassemblies a person would pick next (a token carries no position to walk up)."""
+        group, leaf = self._ids("o1_1", "o1_4")
+        with self.assertRaisesRegex(SnapshotError, rf"o:999999999999; the document holds: #{group} o1_1, #{leaf} o1_4"):
+            self._group_selection({"focus": ["#o:" + "9" * 12]})
+        with self.assertRaisesRegex(SnapshotError, "unknown part label 'o1_9'"):
+            self._group_selection({"focus": ["#o1_9"]})
 
     def test_render_job_rejects_face_focus_refs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -1836,14 +1849,15 @@ class SnapshotCliTests(unittest.TestCase):
             models.mkdir()
             (models / "assembly.step").write_text("ISO-10303-21;\nEND-ISO-10303-21;\n", encoding="utf-8")
 
+            tree = _tree("o1.2")
             original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: _selector_artifact("o1", "o1.2")
+                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: _selector_artifact(tree)
                 with self.assertRaisesRegex(SnapshotError, "part/subassembly occurrence refs"):
                     resolve_render_job_packet(
                         {
                             "input": "models/assembly.step",
-                            "selection": {"focus": ["#o1.2.f1"]},
+                            "selection": {"focus": [f"#{leaf_id(tree, 'o1_2')}/f:9d2e8c1b5a70"]},
                             "outputs": [{"path": "tmp/iso.png", "camera": "iso"}],
                         },
                         cwd=root,
@@ -1858,20 +1872,17 @@ class SnapshotCliTests(unittest.TestCase):
             models.mkdir()
             (models / "assembly.step").write_text("ISO-10303-21;\nEND-ISO-10303-21;\n", encoding="utf-8")
 
+            tree = _tree("o1.2", "o1.3")
             original_ensure = snapshot_main.ensure_step_artifact
             try:
-                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: _selector_artifact(
-                    "o1",
-                    "o1.2",
-                    "o1.3",
-                )
+                snapshot_main.ensure_step_artifact = lambda *args, **kwargs: _selector_artifact(tree)
                 with self.assertRaisesRegex(SnapshotError, "selection.focus and selection.hide cannot be used"):
                     resolve_render_job_packet(
                         {
                             "input": "models/assembly.step",
                             "selection": {
-                                "focus": ["#o1.2"],
-                                "hide": ["#o1.3"],
+                                "focus": ["#o1_2"],
+                                "hide": ["#o1_3"],
                             },
                             "outputs": [{"path": "tmp/iso.png", "camera": "iso"}],
                         },
@@ -2248,6 +2259,13 @@ class StepPoseParameterTests(unittest.TestCase):
         finally:
             snapshot_main.ensure_step_artifact = original
 
+    def _leaf(self, name: str) -> str:
+        """The token of the one occurrence `write_package` seeded for the document."""
+        from cadgen.catalog import result_tree_for
+        from cadgen.store.trees import flatten
+
+        return str(flatten(result_tree_for(self.models / name))["occurrences"][0]["id"])
+
     def test_pose_values_and_pose_names_both_reach_the_job(self) -> None:
         """`--kinematics` takes either spelling, told apart by SHAPE.
 
@@ -2269,7 +2287,7 @@ class StepPoseParameterTests(unittest.TestCase):
         # The page plays cadgen's articulation at the vector cadgen validated: every control,
         # the named ones at their values. Nothing of the sidecar reaches the page.
         self.assertEqual([control["id"] for control in resolved["articulation"]["controls"]], ["stroke"])
-        self.assertEqual(resolved["articulation"]["carries"], {"stroke": ["o1.1"]})
+        self.assertEqual(resolved["articulation"]["carries"], {"stroke": [self._leaf("part.step")]})
         self.assertEqual(resolved["controls"], {"stroke": 1.0})
         for absent in ("sourceSidecar", "stepParameterUrl", "stepParameterPath"):
             self.assertNotIn(absent, resolved)
@@ -2292,7 +2310,7 @@ class StepPoseParameterTests(unittest.TestCase):
             "materials": {
                 "finish": {"name": "Machined finish", "roughness": 0.2, "metalness": 0.7, "opacity": 0.5},
             },
-            "assignments": {"o1.1": "finish"},
+            "assignments": {self._leaf("part.step"): "finish"},
         }
         write_source_sidecar(step_path, {"appearance": appearance})
 

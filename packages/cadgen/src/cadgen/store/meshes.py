@@ -445,17 +445,18 @@ def placements(rows: Any) -> dict[str, list[tuple[str, str]]]:
 
 def placed_parts(placed: list[tuple[str, str]]) -> str:
     """The occurrences that place a component (``[(ref, name)]``) as a reader names them:
-    ``#o1.2 pin, #o1.3 pin and 4 more``."""
+    ``#o:4b1f9e2a7c03 pin, #o:19c7f2d4a8b5 pin and 4 more``."""
     where = ", ".join(f"#{ref} {name}" if name and name != ref else f"#{ref}" for ref, name in placed[:3])
     return where + (f" and {len(placed) - 3} more" if len(placed) > 3 else "")
 
 
-def unmeshed_warning(placed: list[tuple[str, str]], faces: list[int], consequence: str) -> str:
+def unmeshed_warning(placed: list[tuple[str, str]], faces: list[str], consequence: str) -> str:
     """What a reader says of a component whose mesh leaves ``faces`` undrawn: the
-    occurrences that place it (``[(ref, name)]``), the faces, and ``consequence``, whose
-    ``{them}`` names the faces as one or several."""
+    occurrences that place it (``[(ref, name)]``), the faces as a reader names them
+    (their tokens, ``cadgen.store.parts.unmeshed_face_names``), and ``consequence``,
+    whose ``{them}`` names the faces as one or several."""
     where = placed_parts(placed)
-    named = ", ".join(f"f{ordinal}" for ordinal in faces[:8]) + (", ..." if len(faces) > 8 else "")
+    named = ", ".join(str(face) for face in faces[:8]) + (", ..." if len(faces) > 8 else "")
     noun, them = ("face", "it") if len(faces) == 1 else ("faces", "them")
     return f"{where}: {len(faces)} {noun} ({named}) could not be meshed, so {consequence.format(them=them)}"
 

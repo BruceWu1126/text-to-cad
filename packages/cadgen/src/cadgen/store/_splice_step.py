@@ -231,8 +231,9 @@ class _Child:
         return b"".join(parts)
 
     def leaf_points(self) -> dict[str, tuple[int, tuple[bytes, bytes, bytes]]]:
-        """Each leaf's id below this child's root (o1.2.1 ...) mapped to the CARTESIAN_POINT of
-        its placement and that point's three coordinate texts.
+        """Each leaf's position below this child's root ((1, 2, 1): the root's second child's
+        first) mapped to the CARTESIAN_POINT of its placement and that point's three coordinate
+        texts. A position, never a name: it joins the file's products to a tree's nodes.
 
         Each NAUO is the fifth record of the writer's fixed instance block: CDSR, relationship
         with transformation, IDT, placement PDS, NAUO. Every reference in it is checked rather
@@ -399,7 +400,18 @@ def splice_step(
 
     # A translated link moves its leaves: each leaf's point becomes the text the writer prints
     # for the parent's leaf translation, once the emulation reproduces the child's own text.
+    # A leaf is found in both trees by its position: the child's own flattened tree and the
+    # parent's expanded node for the link mirror each other, node for node.
+    from cadgen._internal.tree_tokens import positional_paths
+
     world = {row["id"]: row["transform"] for row in descriptor.get("occurrences") or []}
+    link_nodes: dict[str, Mapping[str, Any]] = {}
+    pending = [descriptor.get("assembly", {}).get("root") or {}]
+    while pending:
+        node = pending.pop()
+        if str(node.get("id") or "") in {str(link["id"]) for link in links}:
+            link_nodes[str(node["id"])] = node
+        pending.extend(child for child in node.get("children") or [] if isinstance(child, dict))
     edits: dict[str, dict[int, bytes]] = {}
     for link in links:
         child_tree, link_id = str(link["tree"]), str(link["id"])
@@ -410,10 +422,16 @@ def splice_step(
             edit[7] = b"#7 = PRODUCT(" + _quote(name) + b"," + _quote(name) + b",'',(#8));\n"
         if _translation(link["transform"]) == (0.0, 0.0, 0.0):
             continue
-        own_world = {row["id"]: row["transform"] for row in flatten(child_tree).get("occurrences") or []}
+        child_flat = flatten(child_tree) or {}
+        own_world = {row["id"]: row["transform"] for row in child_flat.get("occurrences") or []}
+        child_by_path = {path: node_id for node_id, path in positional_paths(child_flat["assembly"]["root"]).items()}
+        if link_id not in link_nodes:
+            raise Ineligible(f"the descriptor does not place link {name!r}")
+        parent_by_path = {path: node_id for node_id, path in positional_paths(link_nodes[link_id]).items()}
         for leaf, (point, texts) in loaded[child_tree].leaf_points().items():
-            child_transform = own_world.get(leaf)
-            parent_transform = world.get(link_id if leaf == "o1" else f"{link_id}{leaf[2:]}")
+            path = tuple(int(segment) for segment in leaf[1:].split("."))
+            child_transform = own_world.get(child_by_path.get(path, ""))
+            parent_transform = world.get(parent_by_path.get(path, ""))
             if child_transform is None or parent_transform is None:
                 raise Ineligible(f"leaf {leaf} of {name!r} is not in both descriptors")
             if tuple(_occt_real(child_transform[index]) for index in (3, 7, 11)) != texts:

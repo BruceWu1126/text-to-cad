@@ -118,7 +118,7 @@ class CompactStdoutTests(unittest.TestCase):
     def test_a_realistic_part_entry_stays_small(self):
         # The shape above, priced. 600 of these is the payload an agent pays for.
         entry = {
-            "ref": "#o1.1.1",
+            "ref": "#o:3f2a9c1d7e5b",
             "name": "terrain_regolith_slab",
             "triangleCount": 172,
             "vertexCount": 516,

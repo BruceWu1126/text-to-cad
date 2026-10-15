@@ -1361,8 +1361,8 @@ def _document_root_name(shape: object, step_path: Path) -> str:
     """What a saved document's root is called: the label its author gave it (a
     re-emit's source document named its own root, so OUT keeps IN's name).
 
-    Names are what an author wrote. Unlabelled, an assembly's root is its
-    occurrence id, as every unlabelled group is: a name taken from the file
+    Names are what an author wrote. Unlabelled, an assembly's root is ``model``,
+    as a document with no root name reads back: a name taken from the file
     would sit among its parts' labels and answer for one of them. An
     unlabelled single part takes its file's name, which nothing else in its
     document can share. A label the STEP round trip does not keep (a blank, a
@@ -1373,7 +1373,7 @@ def _document_root_name(shape: object, step_path: Path) -> str:
     authored = _normalize_label_name(getattr(shape, "label", None))
     if authored:
         return authored
-    return "o1" if compound_has_children(shape) else step_path.stem
+    return "model" if compound_has_children(shape) else step_path.stem
 
 
 def _stale_after_build(spec: EntrySpec) -> str | None:

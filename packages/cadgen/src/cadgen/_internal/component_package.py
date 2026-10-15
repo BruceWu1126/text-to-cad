@@ -693,6 +693,23 @@ def _encode_brep(shape: Any) -> dict[str, Any]:
     raise CodecFidelityError("; ".join(failures))
 
 
+def geometric_identity_fields(shape: Any, colors: Mapping[int, Any]) -> dict[str, Any]:
+    """The entry fields that name a native component by its geometry (README law
+    20): its ``fingerprint`` and, for each face with an intrinsic colour, that
+    face's token (``faceTokens``, by ordinal) -- what its part is keyed by
+    (``cadgen.store.parts``). Computed from the unlocated shape itself, so the
+    body a build holds and the body read back from its STEP get the same."""
+    from OCP.TopLoc import TopLoc_Location
+
+    from cadgen._internal.geometry_fingerprint import geometry_identity
+
+    identity = geometry_identity(getattr(shape, "wrapped", shape).Located(TopLoc_Location()))
+    fields: dict[str, Any] = {"fingerprint": identity["fingerprint"]}
+    if colors:
+        fields["faceTokens"] = {int(ordinal): identity["faces"][int(ordinal) - 1] for ordinal in colors}
+    return fields
+
+
 def prepare_geometry_component(shape: Any, *, face_colors: object = None) -> dict[str, Any]:
     """Capture a component's owned bytes, effective recipe and private native input.
 
@@ -701,7 +718,9 @@ def prepare_geometry_component(shape: Any, *, face_colors: object = None) -> dic
     parameter-loss cases. Alternate codecs require full original-native bytes
     and their own byte fixed point. Failure pins the live shape's topology
     facts explicitly (``topology``, the bytes an eager-only component's tree
-    pins), never a falsely readable native entry.
+    pins), never a falsely readable native entry. A native entry carries its
+    geometric identity (:func:`geometric_identity_fields`); an eager-only one
+    has none, its pinned facts standing in for it.
     """
     try:
         encoded = _encode_brep(shape)
@@ -728,6 +747,8 @@ def prepare_geometry_component(shape: Any, *, face_colors: object = None) -> dic
         topology = topology_facts_bytes(
             extract_topology_facts(getattr(shape, "wrapped", shape).Located(TopLoc_Location())))
         entry["topology"] = hashlib.sha256(topology).hexdigest()
+    else:
+        entry.update(geometric_identity_fields(private, colors))
     entry["contentHash"] = geometry_component_hash(
         entry["codec"], payload, colors, kind=kind, topology=entry.get("topology"),
     )
@@ -766,8 +787,18 @@ def prepare_published_component(shape: Any, *, face_colors: object = None) -> di
         entry = {"kind": "native", "codec": "bintools-v4", "brep": digest,
                  "faceColors": colors, "contentHash": content}
         indexed = read_entry("component", _component_id(content)) or {}
-        published = {key: value for key, value in indexed.items() if key not in ("schemaVersion", "color")}
-        if published and canonical_json_bytes(published) == canonical_json_bytes(entry):
+        published = {key: value for key, value in indexed.items()
+                     if key not in ("schemaVersion", "color", "fingerprint", "faceTokens")}
+        # The published entry's geometric identity was computed from these same bytes by the
+        # build that published them, and is taken with them.
+        if published and canonical_json_bytes(published) == canonical_json_bytes(entry) and "fingerprint" in indexed:
+            entry["fingerprint"] = indexed["fingerprint"]
+            if indexed.get("faceTokens"):
+                entry["faceTokens"] = {int(ordinal): token for ordinal, token in indexed["faceTokens"].items()}
+            try:
+                validate_geometry_component(entry, payload)
+            except ValueError:
+                return prepare_geometry_component(shape, face_colors=face_colors)
             prototype = _build123d_shape_from_topods(wrapped)
             prototype.cad_face_ordinal_colors = dict(colors)
             return {"entry": entry, "payload": payload, "shape": prototype, "topology": None}
@@ -823,6 +854,8 @@ def validate_geometry_component(entry: Any, payload: bytes, *, cid: str | None =
     allowed = {"kind", "codec", "brep", "faceColors", "contentHash", "color"}
     if entry["kind"] == "eager-only":
         allowed.add("topology")
+    else:
+        allowed |= {"fingerprint", "faceTokens"}
     if set(entry) - allowed:
         raise ValueError("unknown geometry component field")
     if not isinstance(payload, bytes) or not payload.startswith(_BREP_HEADERS[entry["codec"]]):
@@ -832,6 +865,22 @@ def validate_geometry_component(entry: Any, payload: bytes, *, cid: str | None =
     colors = _normalized_face_colors(entry.get("faceColors"))
     if canonical_json_bytes(colors) != canonical_json_bytes(entry.get("faceColors")):
         raise ValueError("noncanonical intrinsic appearance recipe")
+    if entry["kind"] == "native":
+        # The geometric identity's shape is checked here; its value is the kernel's to
+        # compute, and a reader never recomputes it (README law 20).
+        from cadgen._internal.geometry_fingerprint import is_element_token
+
+        fingerprint = entry.get("fingerprint")
+        if not isinstance(fingerprint, str) or len(fingerprint) != 64 or any(c not in "0123456789abcdef" for c in fingerprint):
+            raise ValueError("native geometry component lacks its fingerprint")
+        tokens = entry.get("faceTokens")
+        if (tokens is None) != (not colors):
+            raise ValueError("face tokens must name exactly the faces with an intrinsic colour")
+        if tokens is not None:
+            if type(tokens) is not dict or {str(key) for key in tokens} != {str(key) for key in colors}:
+                raise ValueError("face tokens must name exactly the faces with an intrinsic colour")
+            if any(not is_element_token(token) or not token.startswith("f:") for token in tokens.values()):
+                raise ValueError("invalid face token")
     full = geometry_component_hash(entry["codec"], payload, colors, kind=entry["kind"],
                                    topology=entry.get("topology"))
     if entry.get("contentHash") != full or (cid is not None and cid != full[:16]):

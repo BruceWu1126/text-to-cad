@@ -159,8 +159,8 @@ def positioning_facts_for_row(
     facts: dict[str, object] = {
         "selectorType": selector_type,
     }
-    if index is not None and row.get("id"):
-        facts["selector"] = lookup.display_selector(str(row["id"]), index)
+    if row.get("id"):
+        facts["selector"] = str(row["id"])
     if isinstance(bbox, dict):
         facts["bbox"] = bbox
         bbox_fact_payload = bbox_facts(bbox)
@@ -179,25 +179,19 @@ def positioning_facts_for_row(
             facts.update(frame)
         return facts
 
-    if selector_type == "shape":
-        facts["kind"] = str(row.get("kind") or "shape")
-        if index is not None and row.get("occurrenceId"):
-            facts["occurrenceId"] = lookup.display_selector(str(row["occurrenceId"]), index)
-        return facts
-
     if selector_type == "vertex":
         facts["kind"] = "point"
         if center is not None:
             facts["point"] = list(center)
-        if index is not None and row.get("occurrenceId"):
-            facts["occurrenceId"] = lookup.display_selector(str(row["occurrenceId"]), index)
+        if row.get("occurrenceId"):
+            facts["occurrenceId"] = str(row["occurrenceId"])
         return facts
 
     params = row.get("params") if isinstance(row.get("params"), dict) else {}
-    if index is not None and row.get("occurrenceId"):
-        facts["occurrenceId"] = lookup.display_selector(str(row["occurrenceId"]), index)
-    if index is not None and row.get("shapeId"):
-        facts["shapeId"] = lookup.display_selector(str(row["shapeId"]), index)
+    if row.get("occurrenceId"):
+        facts["occurrenceId"] = str(row["occurrenceId"])
+    if row.get("shapeId"):
+        facts["shapeId"] = str(row["shapeId"])
 
     if selector_type == "face":
         surface_type = str(row.get("surfaceType") or "").lower()

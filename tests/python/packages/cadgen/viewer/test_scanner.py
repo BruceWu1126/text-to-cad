@@ -72,6 +72,13 @@ class ScannerTestCase(unittest.TestCase):
         """Seed ``root/<rel>``'s result in the store; returns the tree hash."""
         return seed_result(Path(self.path(rel)), descriptor)
 
+    @staticmethod
+    def leaf(tree: str, index: int = 0) -> str:
+        """The token of the seeded tree's ``index``-th occurrence: what a sidecar names it by."""
+        from cadgen.store.trees import flatten
+
+        return str(flatten(tree)["occurrences"][index]["id"])
+
     def sidecar(self, rel: str, payload: dict) -> str:
         document = Path(self.path(rel))
         body = dict(payload)
@@ -159,17 +166,17 @@ class StoreResults(ScannerTestCase):
 
     def test_sidecar_change_invalidates_the_step_entry(self):
         self.write("finish.step", "same bytes\n")
-        self.package("finish.step", {
+        leaf = self.leaf(self.package("finish.step", {
             "kind": "assembly-package",
             "components": {"cid": {}},
             "occurrences": [{"id": "o1.1", "name": "part", "component": "cid", "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]}],
-        })
-        self.sidecar("finish.step", {"appearance": {"materials": {"finish": {"name": "Finish", "roughness": 0.2}}, "assignments": {"o1.1": "finish"}}})
+        }))
+        self.sidecar("finish.step", {"appearance": {"materials": {"finish": {"name": "Finish", "roughness": 0.2}}, "assignments": {leaf: "finish"}}})
         first = self.entry("finish.step")
-        self.sidecar("finish.step", {"appearance": {"materials": {"finish": {"name": "Finish", "roughness": 0.9}}, "assignments": {"o1.1": "finish"}}})
+        self.sidecar("finish.step", {"appearance": {"materials": {"finish": {"name": "Finish", "roughness": 0.9}}, "assignments": {leaf: "finish"}}})
         second = self.entry("finish.step")
         self.assertNotEqual(first["appearanceHash"], second["appearanceHash"])
-        self.assertEqual(second["display"]["o1.1"]["material"]["roughness"], 0.9)
+        self.assertEqual(second["display"][leaf]["material"]["roughness"], 0.9)
 
     def test_same_bytes_share_one_tree_and_each_document_has_its_own_record(self):
         self.write("a.step", "same bytes\n")
@@ -253,10 +260,15 @@ class StepKind(ScannerTestCase):
         self.assertEqual(self.entry("k.step")["kind"], "part")
 
 
-HINGE = {"mates": [{"name": "hinge", "kind": "revolute", "parent": "#base", "child": "#arm",
-                    "parentId": "o1.1", "childId": "o1.2",
-                    "axis": {"origin": [10, 0, 0], "dir": [0, 0, 1]}, "limits": {"value": [0, 90]}}],
-         "poses": {"open": {"hinge": 90}}}
+def hinge(parent_id: str = "o:" + "a" * 12, child_id: str = "o:" + "b" * 12) -> dict:
+    """A resolved kinematics block: one revolute mate between the base and the arm, whose
+    ids are the tree's occurrence tokens (token-shaped stand-ins when no tree is seeded)."""
+    return {"mates": [{"name": "hinge", "kind": "revolute", "parent": "#base", "child": "#arm",
+                       "parentId": parent_id, "childId": child_id,
+                       "axis": {"origin": [10, 0, 0], "dir": [0, 0, 1]}, "limits": {"value": [0, 90]}}],
+            "poses": {"open": {"hinge": 90}}}
+
+
 HINGE_PACKAGE = {
     "kind": "assembly-package", "components": {"c0": {}},
     "occurrences": [{"id": "o1.1", "name": "base", "component": "c0", "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]},
@@ -269,18 +281,19 @@ class DescriptorGate(ScannerTestCase):
 
     def test_a_valid_package_publishes_the_articulation_and_its_url(self):
         self.write("g.step", "x\n")
-        self.sidecar("g.step", {"kinematics": HINGE})
-        self.package("g.step", HINGE_PACKAGE)
+        tree = self.package("g.step", HINGE_PACKAGE)
+        base, arm = self.leaf(tree, 0), self.leaf(tree, 1)
+        self.sidecar("g.step", {"kinematics": hinge(base, arm)})
         entry = self.entry("g.step")
         self.assertEqual(asset_query(entry["poseUrl"])["file"], self.path("g.step.json"))
         # What the page plays: cadgen's articulation of the mates, inline, over the tree's occurrences.
         self.assertEqual([control["id"] for control in entry["articulation"]["controls"]], ["hinge"])
-        self.assertEqual(entry["articulation"]["carries"], {"hinge": ["o1.2"]})
+        self.assertEqual(entry["articulation"]["carries"], {"hinge": [arm]})
         self.assertEqual(entry["articulation"]["poses"], {"open": {"hinge": 90.0}})
 
     def test_no_package_suppresses_both(self):
         self.write("g.step", "x\n")
-        self.sidecar("g.step", {"kinematics": HINGE})
+        self.sidecar("g.step", {"kinematics": hinge()})
         entry = self.entry("g.step")
         self.assertNotIn("poseUrl", entry)
         self.assertNotIn("articulation", entry)
@@ -313,19 +326,19 @@ class SidecarSections(ScannerTestCase):
 
     def test_appearance_has_a_scene_identity_without_changing_the_tree_identity(self):
         self.write("finish.step", "x\n")
-        self.sidecar("finish.step", {
-            "appearance": {"materials": {"finish": {"name": "Finish", "roughness": 0.25}}, "assignments": {"o1.1": "finish"}}
-        })
-        self.package("finish.step", {
+        leaf = self.leaf(self.package("finish.step", {
             "kind": "assembly-package",
             "components": {"cid": {}},
             "occurrences": [{"id": "o1.1", "name": "part", "component": "cid", "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]}],
+        }))
+        self.sidecar("finish.step", {
+            "appearance": {"materials": {"finish": {"name": "Finish", "roughness": 0.25}}, "assignments": {leaf: "finish"}}
         })
         entry = self.entry("finish.step")
         self.assertEqual(len(entry["appearanceHash"]), 64)
         # What the appearance resolves to for the page to draw, per assigned occurrence: the
         # material with every channel, and the opacity cadgen folded.
-        self.assertEqual(entry["display"], {"o1.1": {
+        self.assertEqual(entry["display"], {leaf: {
             "materialId": "finish", "materialName": "Finish", "opacity": 1.0,
             "material": {"roughness": 0.25, "metalness": 0.03, "clearcoat": 0.0, "clearcoatRoughness": 0.26, "opacity": 1.0},
         }})
@@ -336,14 +349,14 @@ class SidecarSections(ScannerTestCase):
         from cadgen._internal.source_sidecar import appearance_digest
 
         self.write("race.step", "x\n")
-        first = {"materials": {"finish": {"name": "Finish", "roughness": 0.2}}, "assignments": {"o1.1": "finish"}}
-        second = {"materials": {"finish": {"name": "Finish", "roughness": 0.9}}, "assignments": {"o1.1": "finish"}}
-        self.sidecar("race.step", {"appearance": first})
-        self.package("race.step", {
+        leaf = self.leaf(self.package("race.step", {
             "kind": "assembly-package",
             "components": {"cid": {}},
             "occurrences": [{"id": "o1.1", "name": "part", "component": "cid", "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]}],
-        })
+        }))
+        first = {"materials": {"finish": {"name": "Finish", "roughness": 0.2}}, "assignments": {leaf: "finish"}}
+        second = {"materials": {"finish": {"name": "Finish", "roughness": 0.9}}, "assignments": {leaf: "finish"}}
+        self.sidecar("race.step", {"appearance": first})
         original_asset_for_path = scanner.asset_for_path
 
         def mutate_after_version_read(file_path):
@@ -354,7 +367,7 @@ class SidecarSections(ScannerTestCase):
         with mock.patch.object(scanner, "asset_for_path", mutate_after_version_read):
             entry = self.entry("race.step")
 
-        self.assertEqual(entry["display"]["o1.1"]["material"]["roughness"], 0.2)
+        self.assertEqual(entry["display"][leaf]["material"]["roughness"], 0.2)
         self.assertEqual(entry["appearanceHash"], appearance_digest(first))
         self.assertNotEqual(entry["appearanceHash"], appearance_digest(second))
 
@@ -413,7 +426,7 @@ class SidecarSections(ScannerTestCase):
 
     def test_the_sidecar_suffix_is_appended_to_the_whole_name(self):
         self.write("u.STP", "x\n")
-        self.sidecar("u.STP", {"kinematics": HINGE})
+        self.sidecar("u.STP", {"kinematics": hinge()})
         self.package("u.STP", HINGE_PACKAGE)
         self.assertEqual(asset_query(self.entry("u.STP")["poseUrl"])["file"], self.path("u.STP.json"))
 

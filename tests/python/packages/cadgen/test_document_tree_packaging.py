@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests.python.support.tmp_root import generated_cad_directory
+from tests.python.support.tree_ids import node_id, node_ids, root_id
 
 
 class DocumentTreePackagingTest(unittest.TestCase):
@@ -71,10 +72,10 @@ class DocumentTreePackagingTest(unittest.TestCase):
         )
         self.assertEqual(tree["occurrences"][0]["name"], "authored-part-name")
         self.assertEqual(tree["appearance"]["materials"]["finish"], finish)
-        self.assertEqual(tree["appearance"]["assignments"], {"o1": "finish"})
+        self.assertEqual(tree["appearance"]["assignments"], {root_id(tree): "finish"})
         canonical = self.assert_warm_and_cold_repackage(output, stats["documentTree"])
         self.assertNotEqual(result, stats["documentTree"])
-        self.assertEqual(set(stats["documentOccurrenceMap"]["o1"]),
+        self.assertEqual(set(stats["documentOccurrenceMap"][root_id(tree)]),
                          {occurrence["id"] for occurrence in canonical["occurrences"]})
         self.assertEqual(
             stats["documentAppearance"],
@@ -102,11 +103,12 @@ class DocumentTreePackagingTest(unittest.TestCase):
         group = Compound(children=[first, second], label="pair").moved(Location((20, 5, 0), (0, 0, 30)))
         shape = Compound(children=[group], label="assembly-root")
         output = self.root / "nested.step"
-        _, _, stats, _ = build_tree_through_step(shape, output, root_name="assembly-root")
+        _, tree, stats, _ = build_tree_through_step(shape, output, root_name="assembly-root")
         canonical = self.assert_warm_and_cold_repackage(output, stats["documentTree"])
         self.assertEqual([occurrence["name"] for occurrence in canonical["occurrences"]], ["red", "green"])
-        self.assertEqual(stats["documentOccurrenceMap"]["o1"], stats["documentOccurrenceMap"]["o1.1"])
-        self.assertEqual(len(stats["documentOccurrenceMap"]["o1.1"]), 2)
+        pair = node_id(tree, "pair")
+        self.assertEqual(stats["documentOccurrenceMap"][root_id(tree)], stats["documentOccurrenceMap"][pair])
+        self.assertEqual(len(stats["documentOccurrenceMap"][pair]), 2)
         self.assertEqual(stats["documentAppearance"], {})
 
     def test_non_ascii_product_names_survive_strict_step_correspondence(self):
@@ -256,9 +258,9 @@ class DocumentTreePackagingTest(unittest.TestCase):
         inner = Compound(children=[self.box("leaf")], label="inner")
         outer = Compound(children=[inner], label="outer")
         shape = Compound(children=[outer], label="root")
-        _, _, stats, _ = build_tree_through_step(shape, self.root / "one-child.step", root_name="root")
-        authored_ids = ["o1", "o1.1", "o1.1.1", "o1.1.1.1"]
-        leaves = stats["documentOccurrenceMap"]["o1"]
+        _, tree, stats, _ = build_tree_through_step(shape, self.root / "one-child.step", root_name="root")
+        authored_ids = node_ids(tree, "root", "outer", "inner", "leaf")
+        leaves = stats["documentOccurrenceMap"][authored_ids[0]]
         self.assertEqual(len(leaves), 1)
         self.assertTrue(all(stats["documentOccurrenceMap"][node_id] == leaves for node_id in authored_ids))
         node_map = stats["documentNodeMap"]
@@ -291,8 +293,13 @@ class DocumentTreePackagingTest(unittest.TestCase):
             prototype_shapes={1: self.box().wrapped},
         )
         digest, tree, _ = build_document_tree(scene)
+        from cadgen._internal.tree_tokens import is_occurrence_token
+
         self.assertEqual(tree["label"], "model")
-        self.assertEqual([occ["id"] for occ in tree["occurrences"]], ["o1.1", "o1.2"])
+        self.assertEqual([occ["name"] for occ in tree["occurrences"]], ["first", "second"])
+        ids = [occ["id"] for occ in tree["occurrences"]]
+        self.assertTrue(all(is_occurrence_token(occurrence_id) for occurrence_id in ids), ids)
+        self.assertEqual(len(set(ids)), 2)
         note_document_tree("1" * 64, digest)
         warm = scene_from_render_package(self.root / "renamed.step", step_hash="1" * 64)
         warm_digest, warm_tree, _ = build_document_tree(warm)

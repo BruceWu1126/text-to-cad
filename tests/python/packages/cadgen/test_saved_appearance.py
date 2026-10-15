@@ -169,7 +169,7 @@ class SavedAppearanceTest(unittest.TestCase):
                 {"materials": {"m": {"name": "M", "opacity": 0.5}}, "assignments": {"group": "m"}},
             )
 
-    def test_schema_ten_sidecars_bind_appearance_to_actual_step_bytes(self) -> None:
+    def test_schema_eleven_sidecars_bind_appearance_to_actual_step_bytes(self) -> None:
         first = self.root / "first.step"
         second = self.root / "renamed.step"
         step_bytes = b"ISO-10303-21;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n"
@@ -183,7 +183,7 @@ class SavedAppearanceTest(unittest.TestCase):
         expected_hash = hashlib.sha256(step_bytes).hexdigest()
 
         self.assertEqual(SOURCE_SIDECAR_SCHEMA_VERSION, first_sidecar["schemaVersion"])
-        self.assertEqual(10, first_sidecar["schemaVersion"])
+        self.assertEqual(11, first_sidecar["schemaVersion"])
         self.assertEqual(expected_hash, first_sidecar["documentHash"])
         self.assertEqual(expected_hash, second_sidecar["documentHash"])
         self.assertEqual(ROUGH, first_sidecar["appearance"])

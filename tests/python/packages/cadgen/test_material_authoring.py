@@ -188,7 +188,7 @@ def model():
             def declaration(roughness: float) -> dict:
                 return {
                     "definitions": {"steel": {"name": "Ground steel", "roughness": roughness}},
-                    "assignments": [{"targets": ["#o1"], "material": "steel"}],
+                    "assignments": [{"targets": ["#child"], "material": "steel"}],
                 }
 
             child_a, tree_a, stats_a = build_tree_from_compound(

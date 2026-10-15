@@ -77,7 +77,7 @@ class ReferenceAssemblies(unittest.TestCase):
             root_name="curved",
             materials={
                 "definitions": {"finish": {"name": "Finish", "roughness": 0.3}},
-                "assignments": [{"targets": ["#o1"], "material": "finish"}],
+                "assignments": [{"targets": ["#curved"], "material": "finish"}],
             },
         )[0]
         return self._curved_tree
@@ -403,7 +403,8 @@ class ReferenceAssemblies(unittest.TestCase):
             (self.root / f"{name}.py").write_text(
                 "from cadgen import step, build123d as bd\n"
                 "@step(materials={'definitions': {'finish': {'name': 'Finish', 'roughness': .3}}, "
-                "'assignments': [{'targets': ['#o1'], 'material': 'finish'}]})\n"
+                # An unlabelled single part is named after its file.
+                f"'assignments': [{{'targets': ['#{name}'], 'material': 'finish'}}]}})\n"
                 f"def {name}():\n    return {geometry}\n",
                 encoding="utf-8",
             )

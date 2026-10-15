@@ -149,10 +149,14 @@ class StepReemitTests(unittest.TestCase):
         provenance = read_source_provenance(self.out) or {}
         self.assertEqual("step", provenance.get("sourceKind"))
 
+        from cadgen import read_scene
+
         (mate,) = sidecar["kinematics"]["mates"]
-        # Refs resolved against the geometry we just wrote, not just echoed.
-        self.assertEqual("o1.1", mate["parentId"])
-        self.assertEqual("o1.2", mate["childId"])
+        # Refs resolved against the geometry we just wrote, not just echoed: the ids are
+        # the written document's occurrence tokens.
+        written = read_scene(self.out)
+        self.assertEqual(written.resolve("#base").ref, f"#{mate['parentId']}")
+        self.assertEqual(written.resolve("#arm").ref, f"#{mate['childId']}")
         self.assertEqual({"value": [0.0, 90.0]}, mate["limits"])
         # This build declares kinematics only.
         self.assertNotIn("animation", sidecar)

@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from cadgen.cad_ref_syntax import OCCURRENCE_SELECTOR_RE
+from cadgen._internal.tree_tokens import is_occurrence_token
 from cadgen.coordination import PHASE_COMPONENTS, PHASE_FINALIZE, PHASE_PACKAGE
 from cadgen.coordination import resolve as resolve_progress
 from cadgen.store.index import write_entry
@@ -127,6 +127,34 @@ class _Walk:
             "assembly": {"root": self.root},
         }
 
+    def tokenize(self, *, root_name: str) -> dict[str, str]:
+        """Name every node by its token (``tree_tokens``), replacing the provisional
+        positional ids the walk assigned, and return the mapping provisional -> token.
+
+        A link to a part child is tokened as the one leaf it is once flattened:
+        the link's name at the child's root occurrence composed with the link's
+        placement -- what ``trees.flatten`` and the saved document name it by."""
+        from cadgen._internal.tree_tokens import assign_tokens, retoken
+        from cadgen.store.trees import compose_transforms, get_tree
+
+        link_leaf: dict[str, Any] = {}
+        for link in self.links:
+            child = get_tree(str(link["tree"]))
+            if child is None:
+                raise FileNotFoundError(f"linked tree object missing: {link['tree']}")
+            root = child["assembly"]["root"]
+            if not root.get("children"):
+                placed = next((row for row in child["occurrences"] if row["id"] == root["id"]), None)
+                if placed is not None:
+                    link_leaf[str(link["id"])] = compose_transforms(link["transform"], placed["transform"])
+        mapping = assign_tokens(self.root, self.occurrences, self.links, label=root_name, link_leaf=link_leaf)
+        tree = retoken({"occurrences": self.occurrences, "links": self.links, "assembly": {"root": self.root}}, mapping)
+        self.occurrences[:] = tree["occurrences"]
+        self.links[:] = tree["links"]
+        self.root = tree["assembly"]["root"]
+        self.native_locations = {mapping[key]: value for key, value in self.native_locations.items()}
+        return mapping
+
 
 def build_tree_from_compound(
     compound: Any,
@@ -169,11 +197,14 @@ def _document_walk(
 
     A product holding a native compound remains that product, rather than
     acquiring another grouping from a reconstructed Python wrapper. Canonical
-    IDs follow product order; the maps relate the parser's paths to their
-    canonical node and descendant leaf IDs, including synthetic wrapping when
-    a STEP has several free roots. A prototype whose exact encoded bytes are
-    already published under the same native entry is not decoded again
-    (``prepare_published_component``); a forced build derives every one.
+    ids are tokens minted from the document's own names and placements
+    (``_Walk.tokenize``); the maps relate the parser's positional paths to their
+    canonical node and descendant leaf tokens, including synthetic wrapping when
+    a STEP has several free roots. A product the STEP gives no name is ``part``
+    (a leaf), ``group`` (a product with children) or ``model`` (the root). A
+    prototype whose exact encoded bytes are already published under the same
+    native entry is not decoded again (``prepare_published_component``); a forced
+    build derives every one.
     """
     from build123d import Compound
 
@@ -191,8 +222,8 @@ def _document_walk(
     node_map: dict[str, str] = {}
     located_shapes: list[Any] = []
 
-    def node_name(node: Any, occurrence_id: str) -> str:
-        return str(node.name or node.source_name or occurrence_id)
+    def node_name(node: Any, default: str) -> str:
+        return str(node.name or node.source_name or default)
 
     def collect(node: Any, occurrence_id: str) -> dict[str, Any]:
         parsed_id = _selector_id(node.path)
@@ -200,7 +231,7 @@ def _document_walk(
             raise RuntimeError(f"STEP has duplicate product path {parsed_id}")
         occurrence_map[parsed_id] = []
         node_map[parsed_id] = occurrence_id
-        name = node_name(node, occurrence_id)
+        name = node_name(node, "group" if node.children else "part")
         if node.children:
             children = [collect(child, f"{occurrence_id}.{index}")
                         for index, child in enumerate(node.children, start=1)]
@@ -263,12 +294,16 @@ def _document_walk(
         walk.root = collect(roots[0], "o1")
         if walk.root["children"]:
             walk.root["nodeType"] = "assembly"
+            walk.root["name"] = node_name(roots[0], "model")
     else:
         children = [collect(node, f"o1.{index}") for index, node in enumerate(roots, start=1)]
         walk.root = {"id": "o1", "name": "model", "nodeType": "assembly", "children": children,
                      "leafPartIds": [leaf for child in children for leaf in child["leafPartIds"]]}
     if not walk.occurrences:
         raise RuntimeError("STEP has no leaf geometry")
+    tokens = walk.tokenize(root_name=walk.root["name"])
+    occurrence_map = {parsed: [tokens[leaf] for leaf in leaves] for parsed, leaves in occurrence_map.items()}
+    node_map = {parsed: tokens[node_id] for parsed, node_id in node_map.items()}
     return walk, Compound(children=located_shapes), occurrence_map, node_map
 
 
@@ -310,11 +345,13 @@ def build_document_tree(
 
 def _own_name(label: object, default: str) -> str:
     """A node's name in the tree being walked: its label, unless that is an
-    occurrence id. A document names an unlabelled group by its id, so a group
-    read back from one (``read_step``, a materialized tree) carries an id from
-    that document, which names nothing at its place here."""
+    occurrence token. A label that is a token came from a tree, not an author
+    (a node read back from a document or a materialized tree carries one), and
+    a token names nothing at its place here. ``default`` is what an unlabelled
+    node is called: ``part`` for a leaf, ``group`` for a group -- never anything
+    positional, since a name enters the node's token."""
     text = str(label or "")
-    return default if not text or OCCURRENCE_SELECTOR_RE.match(text) else text
+    return default if not text or is_occurrence_token(text) else text
 
 
 def _walk_compound(compound: Any, *, root_name: str, progress: Any) -> _Walk:
@@ -338,14 +375,18 @@ def _walk_compound(compound: Any, *, root_name: str, progress: Any) -> _Walk:
     if references is not None:
         progress.phase(PHASE_PACKAGE)
         walk.links = references
+        # The root is the model: it goes by the tree's label here as in the general walk
+        # below, so a result built from references and one built from its materialized
+        # children are one tree.
         walk.root = {
-            "id": "o1", "name": str(getattr(compound, "label", "") or "o1"),
+            "id": "o1", "name": root_name,
             "nodeType": "assembly", "leafPartIds": [row["id"] for row in references],
             "children": [{"id": row["id"], "name": row["name"], "nodeType": "link",
                           "tree": row["tree"], "children": []} for row in references],
         }
         for row in references:
             progress.advance(detail=row["name"])
+        walk.tokenize(root_name=root_name)
         return walk
     occurrences = walk.occurrences
     links = walk.links
@@ -398,7 +439,7 @@ def _walk_compound(compound: Any, *, root_name: str, progress: Any) -> _Walk:
             except Exception:  # noqa: BLE001
                 pass
         components.setdefault(cid, entry_meta)
-        name = _own_name(getattr(node, "label", "") if name is None else name, f"part_{occ_id}")
+        name = _own_name(getattr(node, "label", "") if name is None else name, "part")
         occurrence: dict[str, Any] = {
             "id": occ_id,
             "name": name,
@@ -419,7 +460,11 @@ def _walk_compound(compound: Any, *, root_name: str, progress: Any) -> _Walk:
         return {"id": occ_id, "name": name, "nodeType": "part", "leafPartIds": [occ_id], "children": []}
 
     def _add_link(node: Any, world_loc: Any, occ_id: str, tree_hash: str) -> dict[str, Any]:
-        name = _own_name(getattr(node, "label", ""), occ_id)
+        # An unlabelled placement of a child goes by the child's own name.
+        from cadgen.store.trees import get_tree
+
+        child = get_tree(tree_hash)
+        name = _own_name(getattr(node, "label", ""), str((child or {}).get("label") or "part"))
         # The link places the child's TREE FRAME. The node's location is
         # ``placement * root`` when the child's own root occurrence is placed
         # (a part returned as ``Pos(...) * body``), and the tree re-applies that
@@ -449,7 +494,7 @@ def _walk_compound(compound: Any, *, root_name: str, progress: Any) -> _Walk:
         ]
         return {
             "id": path,
-            "name": _own_name(node["name"], path),
+            "name": _own_name(node["name"], "group"),
             "nodeType": "subassembly",
             "leafPartIds": [leaf for cn in child_nodes for leaf in cn.get("leafPartIds", [cn["id"]])],
             "children": child_nodes,
@@ -474,7 +519,7 @@ def _walk_compound(compound: Any, *, root_name: str, progress: Any) -> _Walk:
         nested_tree = getattr(node, "_occurrence_tree", None)
         if nested_tree is not None:
             spliced = _consume_spliced(dict(nested_tree, leaf=False), world_loc, path)
-            spliced["name"] = _own_name(getattr(node, "label", ""), "") or _own_name(nested_tree.get("name"), path)
+            spliced["name"] = _own_name(getattr(node, "label", ""), "") or _own_name(nested_tree.get("name"), "group")
             return spliced
         child_shapes = materialized_children(node, baseline)
         if not child_shapes:
@@ -492,7 +537,7 @@ def _walk_compound(compound: Any, *, root_name: str, progress: Any) -> _Walk:
         ]
         return {
             "id": path,
-            "name": _own_name(getattr(node, "label", ""), path),
+            "name": _own_name(getattr(node, "label", ""), "group"),
             "nodeType": "subassembly",
             "leafPartIds": [leaf for cn in child_nodes for leaf in cn.get("leafPartIds", [cn["id"]])],
             "children": child_nodes,
@@ -534,7 +579,10 @@ def _walk_compound(compound: Any, *, root_name: str, progress: Any) -> _Walk:
         root["nodeType"] = "assembly" if root.get("children") else "part"
     if not occurrences and not links:
         raise RuntimeError(f"model {root_name!r} has no geometry")
+    # The root is the model: it goes by the tree's label, whatever the compound was called.
+    root["name"] = root_name
     walk.root = root
+    walk.tokenize(root_name=root_name)
     return walk
 
 
@@ -699,8 +747,9 @@ def _bbox_from_links(descriptor: dict[str, Any], links: list[dict[str, Any]]) ->
 
     visit(root)
     occurrences = descriptor.get("occurrences") or []
-    owned = {str(node["id"]): [row for row in occurrences
-                               if row["id"] == node["id"] or str(row["id"]).startswith(f"{node['id']}.")]
+    # The leaves under each link's node, as the flattened tree holds them.
+    by_row = {str(row["id"]): row for row in occurrences}
+    owned = {str(node["id"]): [by_row[leaf] for leaf in node.get("leafPartIds") or [node["id"]] if leaf in by_row]
              for node in nodes}
     if len(owned) != len(by_id) or sum(map(len, owned.values())) != len(occurrences):
         return None
@@ -1047,8 +1096,9 @@ def build_tree_through_step(
     3. Re-read the STEP with the scene loader, reusing only a complete verified
        canonical document of the exact emitted bytes unless forced. Map every
        own occurrence to its
-       node by id (``o1.2.3`` is the XCAF path, because the document's product
-       tree mirrors the flattened grouping). Validate own occurrence placement
+       node by position (the XCAF path, because the document's product
+       tree mirrors the flattened grouping; ``tree_tokens.positional_paths``).
+       Validate own occurrence placement
        and face-color survival without modifying the published source tree.
     4. Verify complete authored-to-written correspondence. A privately retained
        canonical readback keeps its exact selected component/tree identities;
@@ -1236,17 +1286,22 @@ def build_tree_through_step(
             scene = load_step_scene(step_path)
 
     def canonical_document(readback: Any, scene: Any) -> tuple:
+        from cadgen._internal.tree_tokens import positional_paths
+
         nodes: dict[str, Any] = {}
         stack = list(scene.roots)
         while stack:
             node = stack.pop()
             nodes[_selector_id(node.path)] = node
             stack.extend(node.children)
+        # The writer places products in the flattened tree's order, so an occurrence's
+        # product is at its position in that tree.
+        positions = positional_paths(descriptor["assembly"]["root"])
 
         with timed("tree: re-read components"):
             for occurrence in walk.occurrences:
                 occ_id = str(occurrence["id"])
-                node = nodes.get(occ_id)
+                node = nodes.get(_selector_id(positions.get(occ_id, ())))
                 if node is None:
                     raise RuntimeError(
                         f"{step_path.name}: occurrence {occ_id} ({occurrence.get('name')}) has no "

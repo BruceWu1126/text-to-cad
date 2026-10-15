@@ -85,13 +85,6 @@ def _transform_tuple(raw: object) -> tuple[float, ...]:
     return _IDENTITY_TRANSFORM
 
 
-def _path_from_occurrence_id(occurrence_id: str) -> tuple[int, ...]:
-    try:
-        return tuple(int(part) for part in occurrence_id.lstrip("o").split("."))
-    except ValueError:
-        return (1,)
-
-
 @dataclass(frozen=True)
 class _DocumentReadback:
     """Call-owned native readback and, when available, its exact object closure.
@@ -106,21 +99,28 @@ class _DocumentReadback:
     objects: tuple[tuple[str, bytes], ...] = ()
 
     def canonical_maps(self) -> tuple[dict[str, list[str]], dict[str, str]]:
+        """The document tree's nodes by the parser's positional path (what the correspondence
+        joins a written product to, ``store.build._document_correspondence``): each path's
+        canonical leaf tokens and its own token, as ``_document_walk`` maps a parse."""
+        from cadgen._internal.step_scene_loader import _selector_id
+
         if self.tree_hash is None:
             raise ValueError("raw STEP readback has no captured canonical tree")
         tree = json.loads(dict(self.objects)[self.tree_hash])
         leaves: dict[str, list[str]] = {}
         nodes: dict[str, str] = {}
 
-        def visit(node: dict[str, Any]) -> list[str]:
+        def visit(node: dict[str, Any], path: tuple[int, ...]) -> list[str]:
             node_id = node["id"]
-            descendants = ([leaf for child in node["children"] for leaf in visit(child)]
+            descendants = ([leaf for index, child in enumerate(node["children"], start=1)
+                            for leaf in visit(child, (*path, index))]
                            if node["children"] else [node_id])
-            leaves[node_id] = descendants
-            nodes[node_id] = node_id
+            parsed = _selector_id(path)
+            leaves[parsed] = descendants
+            nodes[parsed] = node_id
             return descendants
 
-        visit(tree["assembly"]["root"])
+        visit(tree["assembly"]["root"], (1,))
         return leaves, nodes
 
     def restore(self) -> str:
@@ -249,7 +249,7 @@ def _readback_from_document_tree(step_path: Path, *, step_hash: str, tree_hash: 
     if len(occurrence_by_id) != len(occurrences):
         return None
 
-    def leaf_node(occ: dict[str, Any]) -> OccurrenceNode | None:
+    def leaf_node(occ: dict[str, Any], path: tuple[int, ...]) -> OccurrenceNode | None:
         key = key_by_cid.get(str(occ.get("component")))
         if key is None:
             return None
@@ -257,7 +257,7 @@ def _readback_from_document_tree(step_path: Path, *, step_hash: str, tree_hash: 
         name = str(occ.get("name") or "") or None
         color = occ.get("color")
         node = OccurrenceNode(
-            path=_path_from_occurrence_id(str(occ.get("id") or "o1")),
+            path=path,
             name=name,
             source_name=name,
             transform=transform,
@@ -265,6 +265,7 @@ def _readback_from_document_tree(step_path: Path, *, step_hash: str, tree_hash: 
             local_transform=transform,
             color=tuple(float(c) for c in color) if isinstance(color, list) and len(color) == 4 else None,
             location=_location_from_transform_matrix(transform),
+            id=str(occ.get("id") or "") or None,
         )
         if name and prototype_names.get(key) is None:
             prototype_names[key] = name
@@ -273,18 +274,20 @@ def _readback_from_document_tree(step_path: Path, *, step_hash: str, tree_hash: 
     assembly = descriptor.get("assembly")
     roots: list[OccurrenceNode]
     if isinstance(assembly, dict) and isinstance(assembly.get("root"), dict):
-        def build(tree_node: dict[str, Any]) -> OccurrenceNode | None:
+        # A scene names its nodes by position (the STEP reader's paths); the tree's
+        # tokens are the document's names for them, and the two are joined by position.
+        def build(tree_node: dict[str, Any], path: tuple[int, ...]) -> OccurrenceNode | None:
             children_meta = tree_node.get("children") or []
-            node_id = str(tree_node.get("id") or "o1")
+            node_id = str(tree_node.get("id") or "")
             if not children_meta:
                 occ = occurrence_by_id.get(node_id)
-                return leaf_node(occ) if occ is not None else None
-            children = [build(c) for c in children_meta]
+                return leaf_node(occ, path) if occ is not None else None
+            children = [build(c, (*path, index)) for index, c in enumerate(children_meta, start=1)]
             if not children or any(child is None for child in children):
                 return None
             name = str(tree_node.get("name") or "") or None
             return OccurrenceNode(
-                path=_path_from_occurrence_id(node_id),
+                path=path,
                 name=name,
                 source_name=name,
                 transform=_IDENTITY_TRANSFORM,
@@ -293,15 +296,17 @@ def _readback_from_document_tree(step_path: Path, *, step_hash: str, tree_hash: 
                 color=None,
                 location=None,
                 children=children,
+                id=node_id or None,
             )
 
-        root = build(assembly["root"])
+        root = build(assembly["root"], (1,))
         if root is None:
             return None
         roots = [root]
     else:
         # Part-kind package: one occurrence holding the whole geometry.
-        roots = [node for node in (leaf_node(occ) for occ in occurrences if isinstance(occ, dict)) if node]
+        roots = [node for node in (leaf_node(occ, (index,)) for index, occ in enumerate(occurrences, start=1)
+                                   if isinstance(occ, dict)) if node]
         if not roots:
             return None
 
@@ -316,6 +321,49 @@ def _readback_from_document_tree(step_path: Path, *, step_hash: str, tree_hash: 
         source_kind="step",
     )
     return _DocumentReadback(scene, tree_hash, tuple(captured.items()))
+
+
+def scene_tokens(scene: LoadedStepScene) -> None:
+    """Name every node of a parsed scene by the token the document tree built from it
+    would give it (``cadgen.store.build._document_walk``'s structure and names:
+    ``part``, ``group`` and ``model`` for products the STEP gives no name, several free
+    roots under a synthetic ``model`` root), on each node's ``id``. A scene from a document
+    tree already carries them."""
+    from cadgen._internal.tree_tokens import assign_tokens
+
+    occurrences: list[dict] = []
+    counter = [0]
+
+    def provisional() -> str:
+        counter[0] += 1
+        return f"p{counter[0]}"
+
+    def collect(node: OccurrenceNode) -> dict:
+        node_id = provisional()
+        if node.children:
+            return {"id": node_id, "node": node, "name": str(node.name or node.source_name or "group"),
+                    "children": [collect(child) for child in node.children]}
+        occurrences.append({"id": node_id, "transform": list(node.transform)})
+        return {"id": node_id, "node": node, "name": str(node.name or node.source_name or "part"), "children": []}
+
+    roots = list(scene.roots)
+    if not roots:
+        return
+    if len(roots) == 1:
+        root = collect(roots[0])
+        if roots[0].children:
+            root["name"] = str(roots[0].name or roots[0].source_name or "model")
+    else:
+        root = {"id": provisional(), "node": None, "name": "model", "children": [collect(node) for node in roots]}
+    mapping = assign_tokens(root, occurrences, [], label=root["name"])
+
+    def apply(entry: dict) -> None:
+        if entry["node"] is not None:
+            entry["node"].id = mapping[entry["id"]]
+        for child in entry["children"]:
+            apply(child)
+
+    apply(root)
 
 
 def load_step_scene_exact(step_path: Path) -> LoadedStepScene:

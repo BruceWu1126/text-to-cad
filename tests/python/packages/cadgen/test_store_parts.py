@@ -144,21 +144,48 @@ class PartStoreTest(unittest.TestCase):
         parts.derive(self.tree)
         view_dir = export_view(self.tree, self.root / "view")
         descriptor = json.loads((view_dir / "assembly.json").read_text(encoding="utf-8"))
-        flat = lookup.build_selector_index({"tables": {"occurrenceColumns": ["id"]}, "occurrences": [["o1"]]})
+        occurrence = descriptor["occurrences"][0]["id"]
+        flat = lookup.build_selector_index({"tables": {"occurrenceColumns": ["id"]}, "occurrences": [[occurrence]]})
         merged = assembly_lookup.merge_assembly_entities(
             assembly_lookup.merge_assembly_occurrences(flat, descriptor, view_dir), descriptor, view_dir)
-        occurrence = descriptor["occurrences"][0]["id"]
         table = json.loads(parts.read(self.key, "selectors"))
         columns = table["tables"]["faceColumns"]
         for row in table["faces"]:
             face = dict(zip(columns, row))
-            found = lookup.lookup_selector(f"{occurrence}.{face['localId']}", merged)
-            self.assertIsNotNone(found, f"{occurrence}.{face['localId']} resolves")
+            ref = f"{occurrence}/{face['token']}"
+            found = lookup.lookup_selector(ref, merged)
+            self.assertIsNotNone(found, f"{ref} resolves")
             self.assertEqual(found[0], "face")
             self.assertEqual(found[1]["ordinal"], face["ordinal"])
             self.assertEqual(found[1]["tangentGroup"], face["tangentGroup"])
-        vertex = lookup.lookup_selector(f"{occurrence}.v1", merged)
+            # The one leaf qualifies a bare element token.
+            self.assertEqual(lookup.lookup_selector(face["token"], merged), found)
+        vertex_token = dict(zip(table["tables"]["vertexColumns"], table["vertices"][0]))["token"]
+        vertex = lookup.lookup_selector(f"{occurrence}/{vertex_token}", merged)
         self.assertEqual(vertex[0], "vertex")
+        self.assertIsNone(lookup.lookup_selector(f"{occurrence}.f1", merged), "the ordinal spelling is no ref")
+
+    def test_a_body_and_its_step_read_back_are_one_part(self) -> None:
+        """A part is keyed by its geometry (STORE.md §2): the body a build holds and the same
+        body read back from the STEP it wrote -- other bytes, faces in another order -- share
+        the fingerprint, the part key and each face's token."""
+        from build123d import Solid, export_step, import_step
+
+        from cadgen._internal.geometry_fingerprint import geometry_identity
+
+        step = self.root / "box.step"
+        export_step(Solid.make_box(1, 2, 3), str(step))
+        read_back = import_step(str(step))
+        tree, _, _ = build_tree_from_compound(read_back, root_name="box")
+        descriptor, _ = capture_tree(tree, retain_payloads=False)
+        cid, entry = next(iter(descriptor["components"].items()))
+        self.assertNotEqual(cid, self.cid, "the read-back is another component (other bytes)")
+        self.assertEqual(entry["fingerprint"], self.entry["fingerprint"])
+        self.assertEqual(parts.part_key(entry, self.producer), self.key, "one part")
+        before, after = parts.derive(self.tree)[self.cid], parts.derive(tree)[cid]
+        self.assertEqual(before, after, "one record: the read-back derives nothing")
+        self.assertEqual(sorted(geometry_identity(read_back.wrapped)["faces"]),
+                         sorted(geometry_identity(Solid.make_box(1, 2, 3).wrapped)["faces"]))
 
 
 class PartRecordTest(unittest.TestCase):

@@ -11,8 +11,8 @@ error:
   ``assembly_lookup._POINT_PARAM_KEYS`` knew the spelling `origin` (plane, cylinder, cone,
   line) and not `center` (circle, ellipse, sphere, torus), so exactly the analytic types that
   spell their point `center` were left behind.
-* issue 5 -- `#camera_assembly` did not resolve although `#o1.8` named the same subassembly
-  and resolved its leaves, and a kinematics mate fastened to that very label. The label index
+* issue 5 -- `#camera_assembly` did not resolve although the subassembly's own token named
+  it and resolved its leaves, and a kinematics mate fastened to that very label. The label index
   was built from the occurrence rows, which are LEAVES; the group names sit in
   ``SelectorIndex.group_nodes``, which nothing fed to it.
 
@@ -36,10 +36,10 @@ from build123d import Box, Compound, Cylinder, Pos, Rot  # noqa: E402
 from cadgen import analysis, assembly_lookup, lookup  # noqa: E402
 from cadgen._internal import component_package  # noqa: E402
 from tests.python.support.store_fixtures import build_view  # noqa: E402
+from tests.python.support.tree_ids import leaf_id, node_id  # noqa: E402
 
 
 GROUP_LABEL = "camera_assembly"
-GROUP_ID = "o1.1"
 
 
 def _demo_compound() -> Compound:
@@ -93,14 +93,11 @@ class PlacedPackageTestCase(unittest.TestCase):
         if not isinstance(descriptor, dict):
             raise RuntimeError("fixture package has no descriptor")
         cls.descriptor = descriptor
+        # The group's token is read off the tree the build minted it in.
+        cls.group_id = node_id(descriptor, GROUP_LABEL)
+        cls.leaves = {str(row["id"]) for row in descriptor["occurrences"]}
         cls.index = assembly_lookup.index_with_assembly_occurrences(
-            lookup.build_selector_index(
-                {
-                    "stats": {"occurrenceCount": 1},
-                    "tables": {"occurrenceColumns": ["id", "name", "bbox"]},
-                    "occurrences": [["o1", "demo.step", None]],
-                }
-            ),
+            lookup.build_selector_index({"tables": {"occurrenceColumns": ["id", "name", "bbox"]}, "occurrences": []}),
             _FakeArtifact(kind="assembly", artifact_path=cls.package_dir),
         )
 
@@ -115,7 +112,7 @@ class PlacedPackageTestCase(unittest.TestCase):
 
     def _circle_edge(self) -> dict:
         for row in self.index.edges:
-            if str(row.get("curveType")) == "circle" and str(row.get("occurrenceId", "")).count("."):
+            if str(row.get("curveType")) == "circle" and row.get("occurrenceId") in self.leaves:
                 return row
         self.fail("fixture produced no placed circular edge")
 
@@ -181,21 +178,21 @@ class AnalyticParamsAreWorldPlacedTest(PlacedPackageTestCase):
 class GroupLabelsResolveTest(PlacedPackageTestCase):
     def test_the_group_carries_a_label_alias(self) -> None:
         self.assertEqual(
-            GROUP_ID, self.index.label_aliases["aliases"].get(GROUP_LABEL),
+            self.group_id, self.index.label_aliases["aliases"].get(GROUP_LABEL),
             "a subassembly's authored label is not in the refs label index",
         )
 
     def test_a_group_label_canonicalizes_to_the_group_id(self) -> None:
-        self.assertEqual(GROUP_ID, lookup.canonicalize_selector(f"#{GROUP_LABEL}", self.index))
+        self.assertEqual(self.group_id, lookup.canonicalize_selector(f"#{GROUP_LABEL}", self.index))
 
 
 
     def test_leaf_labels_still_resolve_to_their_own_occurrence(self) -> None:
         """Additive. Adding interior nodes must not renumber or displace the leaves."""
         aliases = self.index.label_aliases["aliases"]
-        self.assertEqual("o1.1.1", aliases.get("camera_pin"))
-        self.assertEqual("o1.1.2", aliases.get("camera_plate"))
-        self.assertEqual("o1.2", aliases.get("base_block"))
+        for label in ("camera_pin", "camera_plate", "base_block"):
+            self.assertEqual(leaf_id(self.descriptor, label), aliases.get(label), label)
+        self.assertNotIn(self.group_id, {aliases[label] for label in ("camera_pin", "camera_plate", "base_block")})
 
 
 
@@ -207,10 +204,12 @@ class GroupLabelAmbiguityTest(unittest.TestCase):
     def test_a_group_and_a_leaf_sharing_a_name_become_numbered_aliases(self) -> None:
         from cadgen.label_refs import LabelResolutionError, build_label_aliases, resolve_label_selectors
 
+        group, leaf = "o:" + "3" * 12, "o:" + "4" * 12
+        # Rows come in tree order, the group before the leaf beneath it.
         built = build_label_aliases(
-            [{"id": "o1.3.1", "name": "gripper"}, {"id": "o1.3", "name": "gripper"}]
+            [{"id": group, "name": "gripper"}, {"id": leaf, "name": "gripper"}]
         )
-        self.assertEqual({"gripper_1": "o1.3", "gripper_2": "o1.3.1"}, built["aliases"])
+        self.assertEqual({"gripper_1": group, "gripper_2": leaf}, built["aliases"])
         with self.assertRaises(LabelResolutionError):
             resolve_label_selectors(["gripper"], built)
 

@@ -300,7 +300,8 @@ def links(owner: Any) -> list[dict] | None:
         if tree not in verified:
             child.tree_hash()
             verified.add(tree)
-        row = {"id": f"o1.{index}", "name": child.label or f"o1.{index}",
+        # A provisional, positional id: the walk names the link by its token (``_Walk.tokenize``).
+        row = {"id": f"o1.{index}", "name": child.label or "part",
                "tree": tree, "transform": list(raw["_reference_transforms"][index - 1])}
         color = _occurrence_color(child)
         if color is not None:

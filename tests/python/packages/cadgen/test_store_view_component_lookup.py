@@ -7,6 +7,7 @@ from pathlib import Path
 import unittest
 from unittest import mock
 from tests.python.support.paths import add_repo_path
+from tests.python.support.tree_ids import tokenized
 from tests.python.support.tmp_root import generated_cad_directory
 from tests.python.support.store_fixtures import seed_result, FIXTURE_PRODUCER
 add_repo_path("packages/cadgen/src")
@@ -28,9 +29,9 @@ class ComponentLookup(unittest.TestCase):
         from cadgen.store.trees import put_tree, IDENTITY_16
         links = [{"id": f"o1.{i}", "name": "child", "tree": child, "transform": IDENTITY_16}
                  for i, child in enumerate(children, 1)]
-        return put_tree({"label":"parent","units":"mm","entryKind":"assembly","components":{},"occurrences":[],"links":links,
+        return put_tree(tokenized({"label":"parent","units":"mm","entryKind":"assembly","components":{},"occurrences":[],"links":links,
             "assembly":{"root":{"id":"o1","nodeType":"assembly","children":[
-                {"id":link["id"],"nodeType":"link","children":[]} for link in links]}}})
+                {"id":link["id"],"nodeType":"link","children":[]} for link in links]}}})[0])
 
     def test_root_lookup_does_not_resolve_a_view_or_read_source_indexes(self):
         from cadgen.store import records, view
