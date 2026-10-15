@@ -95,7 +95,7 @@ describe('a view\'s one call each second', () => {
       const sync = createViewSync(server, { id: 'v1', surface: 'tab', model: () => '/p/a.step' }, {
         show: next => shown.push(next.model),
         capture: async () => { const png = captures.shift(); if (!png) throw new Error('nothing to capture'); return png; },
-        state: () => ({ model: '/p/a.step', selection: ['/p/a.step#o1.f2'] }),
+        state: () => ({ model: '/p/a.step', selection: ['/p/a.step#o:3f2a9c1d7e5b/f:9d2e8c1b5a70'] }),
       });
       sync.run(stop.signal);
       await vi.advanceTimersByTimeAsync(0);
@@ -106,7 +106,7 @@ describe('a view\'s one call each second', () => {
       expect(requests).toHaveLength(4);
       // What the view shows goes up once, and again only when it changes.
       expect(requests.map(request => Boolean(request.state))).toEqual([true, false, false, false]);
-      expect(requests[0]).toMatchObject({ view: 'v1', surface: 'tab', model: '/p/a.step', state: { selection: ['/p/a.step#o1.f2'] } });
+      expect(requests[0]).toMatchObject({ view: 'v1', surface: 'tab', model: '/p/a.step', state: { selection: ['/p/a.step#o:3f2a9c1d7e5b/f:9d2e8c1b5a70'] } });
       expect(shown).toEqual(['/p/b.step']);
       expect(replied).toEqual(expect.arrayContaining([
         { requestId: 'c1', png: encodeBase64(new Uint8Array([1, 2, 3])) },
@@ -366,7 +366,7 @@ function servingInParts(bytes: Uint8Array, {
 
 describe('a Quick Edit in the chat', () => {
   const file = referencePart({ resource: { kind: 'workspace-file', path: '/project/parts/a.step' }, target: { kind: 'whole-resource' } }, 'file');
-  const face = referencePart({ resource: { kind: 'workspace-file', path: '/project/parts/a.step' }, target: { kind: 'cad-selector', selectors: ['o1.f2'] } }, 'face');
+  const face = referencePart({ resource: { kind: 'workspace-file', path: '/project/parts/a.step' }, target: { kind: 'cad-selector', selectors: ['o:3f2a9c1d7e5b/f:9d2e8c1b5a70'] } }, 'face');
   const sketch = () => ({ id: 'sketch', kind: 'attachment' as const, name: 'a-sketch.png', label: 'Sketch', mimeType: 'image/png', about: ['file'],
     content: new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' }) });
   const edit = (...parts: any[]) => createPromptContext([{ id: 'text', kind: 'text', text: 'Round it.' }, file, ...parts]);
@@ -389,7 +389,7 @@ describe('a Quick Edit in the chat', () => {
     expect((await port.deliver(edit(face, sketch()))).status).toBe('added');
     const [text, image] = updates[0].params.content;
     expect(updates[0].method).toBe('ui/update-model-context');
-    expect(text).toEqual({ type: 'text', text: 'Round it.\n\nFile: /project/parts/a.step\nReferences:\n/project/parts/a.step#o1.f2', _meta: { 'openai/title': 'Quick edit · a.step' } });
+    expect(text).toEqual({ type: 'text', text: 'Round it.\n\nFile: /project/parts/a.step\nReferences:\n/project/parts/a.step#o:3f2a9c1d7e5b/f:9d2e8c1b5a70', _meta: { 'openai/title': 'Quick edit · a.step' } });
     expect([image.type, image.mimeType, image._meta['openai/title']]).toEqual(['image', 'image/png', 'Sketch · a.step']);
     await port.deliver(edit());
     expect(updates[1].params.content).toHaveLength(3);
