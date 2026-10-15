@@ -202,7 +202,8 @@ class PcbDecorator(unittest.TestCase):
         self.assertEqual(2, len(seen))
         for kwargs, config_home in seen:
             self.assertEqual(str(Path("/tmp/settings")), config_home)
-            self.assertEqual((True, str(kwargs["kicad_cli_path"]).startswith("/opt/")), (kwargs["headless"], True))
+            # The path is passed as a string, spelled as this platform spells it.
+            self.assertEqual((True, Path("/opt")), (kwargs["headless"], Path(kwargs["kicad_cli_path"]).parent))
 
     def test_a_path_is_relative_to_the_script_and_names_a_board(self) -> None:
         result, _ = self._build(self.script.other)

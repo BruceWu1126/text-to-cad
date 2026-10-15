@@ -105,6 +105,7 @@ NOTHING = select()
 HEAVY_POLICY = {
     "test_cache_root_sync.py",              # cadgen's cache paths against core's tessellation cache
     "test_cli_stream_contract.py",          # cadgen CLIs, run
+    "test_kipy_vendor.py",                  # the vendored kicad-python, imported (protobuf, pynng)
     "test_node_builder_bundles.py",         # the emitted Node builders (scripts/bundle)
     "test_sidecar_and_package_layering.py",  # cadgen's import layering, imported
     "test_snapshot_viewer_theme_parity.py",  # cadgen's snapshot against core's view settings
