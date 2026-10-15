@@ -272,6 +272,38 @@ test("same-file complete revision replacement publishes atomically and accounts 
   assert.equal(shouldRetainCompleteSameFileMesh({ ...current, assemblyInteractionReady: false }, { file: "gear.step", kind: "assembly" }, "new"), false);
 });
 
+test("a load that publishes whole still draws what it has while a lane waits outside it", async () => {
+  const descriptor = makeDescriptor({ componentCount: 4, occurrenceCount: 4 });
+  const { loadComponent } = makeLoader(descriptor);
+  const named = deferred();
+  const publishes = [];
+  let waited = null;
+  const loader = createProgressivePackageLoader({
+    descriptor,
+    loadComponent,
+    concurrency: 1,
+    publishIntermediate: false,
+    partRow: async (cid) => {
+      if (cid === "c3") {
+        // A preview's part its build is still deriving: what has loaded is drawn, then the lane waits.
+        waited = loader.publishPending();
+        await named.promise;
+      }
+      return smallRow(cid);
+    },
+    onPublish: ({ loaded, final, meshData }) => publishes.push({ loaded, final, parts: meshData.parts.length })
+  });
+  const run = loader.run();
+  while (waited === null) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(waited, true);
+  assert.deepEqual(publishes, [{ loaded: 3, final: false, parts: 3 }]);
+  assert.equal(loader.publishPending(), false, "nothing new to draw while it waits");
+  named.resolve();
+  await run;
+  assert.deepEqual(publishes, [{ loaded: 3, final: false, parts: 3 }, { loaded: 4, final: true, parts: 4 }]);
+  assert.equal(loader.publishPending(), false, "nothing after the final publish");
+});
+
 test("once a model is on screen, its file's next revision is an update: a part's or an assembly's, built or still building", () => {
   const current = { file: "plate.step", meshHash: "old", meshData: { parts: [{}] } };
   // What the viewer keeps showing while the new revision loads, whatever the entry's kind.

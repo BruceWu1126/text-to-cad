@@ -35,7 +35,7 @@ import {
 import { createPartTicketBatches, createTessellationBodyBatches } from "./packageBatchReads.js";
 import {
   matchingDisplayedPackageContext,
-  retainedComponentMeshesForRevision
+  retainedComponentsForRevision
 } from "./packageComponentReuse.js";
 import { ASSET_STATUS, REFERENCE_STATUS } from "../../../workbench/constants.js";
 import {
@@ -177,6 +177,9 @@ function namedPartNames(descriptor, componentMeshDataByCid, named) {
   return names;
 }
 
+// `previewGate` holds (`.current`) the parts gate of the build feed's preview revision on screen
+// (`usePreviewRevision`): a preview entry's load waits on it for the parts the build is still
+// deriving, and draws what is named meanwhile; null, or another tree's, for every other load.
 export function useCadAssets({
   initialEntry = null,
   client,
@@ -184,6 +187,7 @@ export function useCadAssets({
   entryHasMesh,
   entryHasReferences,
   buildNormalizedReferenceState,
+  previewGate = null,
 }) {
   const resources = client?.resources;
   if (!resources) throw new TypeError("CAD rendering requires CAD resources");
@@ -320,6 +324,9 @@ export function useCadAssets({
     }
 
     const viewReplacement = entry?.runtimeViewReplacement === true;
+    // A preview revision's load (STORE.md 9b): its parts are the saved file's, by key, and the ones
+    // its build has not derived yet are waited for, never asked of cadgen.
+    const gate = entry?.preview === true && previewGate?.current?.tree === String(entry?.hash || "") ? previewGate.current : null;
     const targetMeshHash = getAssemblyMeshHash(entry);
     const completed = viewReplacement ? null : restoreCompletedPackage(entry);
     syncAssetCacheMemory(componentMemoryAccounting(previousDisplayed?.componentMeshDataByCid).buffers);
@@ -363,7 +370,11 @@ export function useCadAssets({
     // until the atomic commit.
     packageRef.current = null;
     referenceCompositionRef.current = null;
-    const stageWholeReplacement = atomicSameFileReplacement || viewReplacement;
+    // A same-file replacement publishes whole, never a batch at a time. The old model stays until
+    // the new one is whole -- unless the new one's parts are still coming: a preview whose build
+    // is deriving them is drawn as they are named (`loader.publishPending`, below).
+    const sameFileReplacement = atomicSameFileReplacement || viewReplacement;
+    const stageWholeReplacement = sameFileReplacement && !(gate && !gate.complete);
     const keepRenderedAssemblyVisible = entry?.kind === "assembly" && (
       atomicSameFileReplacement || (viewReplacement && meshStateRef.current?.file === entry.file)
     );
@@ -416,20 +427,20 @@ export function useCadAssets({
         // Each component's part row: the record its mesh was drawn from, by a stored part's probe
         // or the request that derived it. It never rewrites the canonical descriptor.
         const componentIdentityByCid = new Map();
-        const retainedComponentMeshByCid = retainedComponentMeshesForRevision({
+        // A same-file revision keeps every component whose part is already drawn, by the part's
+        // key: its mesh and the row it was drawn from, whatever id the new tree gives it.
+        const retainedByCid = retainedComponentsForRevision({
           previous: previousCompletePackage,
           descriptor: packageDescriptor,
           meshUrl,
         });
-        for (const cid of Object.keys(retainedComponentMeshByCid)) {
-          componentIdentityByCid.set(cid, previousCompletePackage.componentIdentityByCid[cid]);
-        }
+        for (const [cid, { row }] of Object.entries(retainedByCid)) componentIdentityByCid.set(cid, row);
         // One request for many components where a lane made one each (`packageBatchReads.js`):
         // their initial tiers, probed a chunk at a time; the warm ones' bodies, read a batch at a
         // time; the cold ones' parts, resolved up to a request's bound at a time. Each
         // follows the order the lanes load in. A same-file revision's retained components read nothing.
         const readOrder = orderComponentsForProgressiveLoad(packageDescriptor)
-          .filter(([cid]) => !retainedComponentMeshByCid[cid]);
+          .filter(([cid]) => !retainedByCid[cid]);
         const readCids = readOrder.map(([cid]) => cid);
         // A warm load's isolates start once its first probe shows warm bodies, while the first batch
         // is on the wire: a batch hands its bodies over at once, and they would all start only then.
@@ -500,7 +511,7 @@ export function useCadAssets({
           // leaf may run alone only if reserveLoad below can charge its full
           // worker estimate to the shared Viewer memory envelope.
           allowOversizedSingle: true,
-          retainedComponent: (cid) => retainedComponentMeshByCid[cid] || null,
+          retainedComponent: (cid) => retainedByCid[cid]?.meshData || null,
           retryCacheProbeMiss: isTessellationCacheProbeMissError,
           // A component cadgen could not derive or mesh (its own failed row) is left out: the rest
           // of the model is drawn, and the final publish reports it as the load's background error.
@@ -534,13 +545,25 @@ export function useCadAssets({
             // asks afresh, alone, as every ask once did.
             const afresh = rejectedCacheObjects.size > 0;
             if (afresh) bodyBatches.discard(cid);
-            const cached = skipCacheProbes ? null : afresh
-              ? await probeInitialDisplay({ tessellationCache,
-                part: component.part,
-                signal: controller.signal,
-                rejectedCacheObjects,
-              })
+            // A preview's part its build has not derived yet: the feed names it when it has, and
+            // nothing asks cadgen for it meanwhile -- what is named is drawn while the lane waits.
+            // Once the build has named all it can, an unnamed part is a saved file's missing part.
+            let waited = false;
+            if (gate && !gate.has(cid) && !gate.complete) {
+              loader.publishPending();
+              await gate.whenNamed(cid, controller.signal);
+              waited = true;
+            }
+            const probeAlone = () => probeInitialDisplay({ tessellationCache,
+              part: component.part,
+              signal: controller.signal,
+              rejectedCacheObjects,
+            });
+            let cached = skipCacheProbes ? null : afresh || waited
+              ? await probeAlone()
               : (await initialPlans.plan(cid)) ?? null;
+            // A preview's part named after its chunk was probed: the store holds it now.
+            if (!cached && !skipCacheProbes && !afresh && !waited && gate?.has(cid)) cached = await probeAlone();
             if (cached) {
               prewarmForBatches();
               componentIdentityByCid.set(cid, cached.cacheProbe);
@@ -591,7 +614,7 @@ export function useCadAssets({
           // Revision replacement is a transaction: loaded component arrays
           // are accounted beside the current complete scene, but only the
           // final composition is published.
-          publishIntermediate: !stageWholeReplacement,
+          publishIntermediate: !sameFileReplacement,
           onRetainedChange: ({ loaded, failed = 0, total, retainedBytes }) => {
             if (requestId !== requestIdRef.current || controller.signal.aborted) return;
             if (stageWholeReplacement) {

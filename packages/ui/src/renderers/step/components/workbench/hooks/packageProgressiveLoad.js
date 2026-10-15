@@ -635,9 +635,20 @@ export function createProgressivePackageLoader({
     return { loaded, total, publishes, failures: [...failures] };
   }
 
+  // Draws what has loaded while a lane waits on something outside the load (a preview's part the
+  // build is still deriving, `useCadAssets`): one publish of the components pending, once nothing
+  // is in flight to join them -- so a load that publishes whole still shows what it has while it
+  // waits. Nothing while a decode is in flight, after the final publish, or with nothing pending.
+  function publishPending() {
+    if (!active() || publishedFinal || inFlight > 0 || pendingComponents === 0) return false;
+    publish(false);
+    return true;
+  }
+
   return {
     run,
     total,
+    publishPending,
     // Diagnostics: how many loaded components this loader still references,
     // and the most decodes it ever had in flight at once.
     retainedComponentCount: () => Object.keys(loadedByCid).length,
