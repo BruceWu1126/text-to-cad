@@ -23,7 +23,6 @@ export function referenceMeasurements(ref) {
   if(length !== null) rows.push([arc ? 'Arc length' : circular && sweep !== null ? 'Circumference' : 'Length',length,'mm']);
   if(arc) rows.push(['Sweep angle',sweep*180/Math.PI,'°']);
   if(area !== null) rows.push(['Area',area,'mm²']);
-  if(type==='shape' && valueOf(ref,'volume') !== null) rows.push(['Volume',valueOf(ref,'volume'),'mm³']);
   if(type==='face' && kind==='torus') {
     if(positive(params.majorRadius)) rows.push(['Major radius',Number(params.majorRadius),'mm']);
     if(positive(params.minorRadius)) rows.push(['Tube radius',Number(params.minorRadius),'mm']);

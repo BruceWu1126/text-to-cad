@@ -20,12 +20,8 @@ function partIdMatchesAny(partId, partIds = []) {
   if (!normalizedPartId) {
     return false;
   }
-  for (const candidate of partIds) {
-    if (normalizedPartId === candidate || normalizedPartId.startsWith(`${candidate}.`)) {
-      return true;
-    }
-  }
-  return false;
+  // Leaf ids on both sides: a token carries no hierarchy to match a prefix of.
+  return partIds.includes(normalizedPartId);
 }
 
 function uniqueDisplayRecordsByPartId(displayRecords = []) {

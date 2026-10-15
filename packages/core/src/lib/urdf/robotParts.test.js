@@ -71,8 +71,8 @@ test("objects named by their own occurrence id are still named", () => {
 });
 
 test("objects a loader named for want of a name are not components: their visual is", () => {
-  // `glb:0` / `3mf:1` are the readers' fallbacks; `o1.2` is a CAD occurrence id.
-  for (const name of ["glb:0", "3mf:1", "o1.2", "o3"]) {
+  // `glb:0` / `3mf:1` are the readers' fallbacks; `o:3f2a9c1d7e5b` is a CAD occurrence token.
+  for (const name of ["glb:0", "3mf:1", "o:3f2a9c1d7e5b", "mesh_0"]) {
     const visual = visualWithObjects("base:v1", "base", [{ name, id: name }, { name, id: name }]);
     const meshData = { parts: [visual] };
     const split = buildRobotComponentGeometry(meshData);

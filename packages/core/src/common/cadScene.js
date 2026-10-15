@@ -901,15 +901,11 @@ function partIdMatchesSet(partId, set) {
   if (!normalizedPartId) {
     return false;
   }
+  // The set holds leaf part ids (a subassembly is expanded to its leaves from the tree
+  // before it reaches here): a token carries no hierarchy to match a prefix of.
   for (const candidate of set) {
     const normalizedCandidate = normalizePartSelector(candidate);
-    if (
-      normalizedCandidate &&
-      (
-        normalizedPartId === normalizedCandidate ||
-        normalizedPartId.startsWith(`${normalizedCandidate}.`)
-      )
-    ) {
+    if (normalizedCandidate && normalizedPartId === normalizedCandidate) {
       return true;
     }
   }
@@ -1329,16 +1325,15 @@ export function normalizedSelectorValues(value) {
   return selectorEntries(value).flatMap(selectorValuesFromEntry);
 }
 
-function valueMatchesSelector(value, selector, { descendants = false } = {}) {
+function valueMatchesSelector(value, selector) {
   const normalizedValue = String(value || "").trim();
   const normalizedSelector = String(selector || "").trim();
-  if (!normalizedValue || !normalizedSelector) {
-    return false;
-  }
-  return normalizedValue === normalizedSelector ||
-    (descendants && normalizedValue.startsWith(`${normalizedSelector}.`));
+  return Boolean(normalizedValue && normalizedSelector && normalizedValue === normalizedSelector);
 }
 
+// A focus or hide selector names a LEAF occurrence by its token (cadgen expands a
+// subassembly to its leaves and resolves a label before the job reaches a page), or a
+// part by its name.
 function partMatchesSelector(part, selector) {
   const normalized = String(selector || "").trim();
   if (!normalized) {
@@ -1347,7 +1342,7 @@ function partMatchesSelector(part, selector) {
   if ([
     part?.id,
     part?.occurrenceId
-  ].some((value) => valueMatchesSelector(value, normalized, { descendants: true }))) {
+  ].some((value) => valueMatchesSelector(value, normalized))) {
     return true;
   }
   return [

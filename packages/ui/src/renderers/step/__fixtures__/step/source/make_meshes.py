@@ -5,14 +5,15 @@ The harness serves these as cadgen's part store would: one GLB body per part,
 at the display tolerance (``cadgen.tessellation_policy``), named by the part key
 cadgen derives from the component and the view's producer
 (``cadgen.store.parts``), which this script writes into ``assembly.json`` with the
-view's id. The two
-parts are rebuilt here from ``hinge_block.py``'s shapes and meshed by cadgen's own
-producer (``cadgen._internal.tessellate``); a part whose edges a newer build orders
-differently is written in the committed selector table's ordinals
-(``components/<cid>.selectors.json``), matched by each edge's centre and length, so
-every id the tests use holds.
+view's id. The two parts are rebuilt here from ``hinge_block.py``'s shapes and
+meshed by cadgen's own producer (``cadgen._internal.tessellate``); a part whose
+faces or edges a newer build orders differently is written in the committed
+selector table's ordinals (``components/<cid>.selectors.json``), each element
+matched by its token -- the name its geometry gives it, the same in every build
+-- so the committed table and the mesh stay joined by ordinal.
 
-Run from the repository root with the repo's Python:
+Run from the repository root with the repo's Python whenever the mesh format, the
+mesher or the part key moves (``make_view.py`` rebuilds the whole fixture):
 
     .venv/bin/python packages/ui/src/renderers/step/__fixtures__/step/source/make_meshes.py
 """
@@ -33,32 +34,25 @@ def shapes():
     return {"base": bd.Box(20, 20, 10) - bd.Cylinder(3, 20), "arm": bd.Box(10, 8, 8)}
 
 
-def committed_rows(cid: str) -> dict[str, list[dict]]:
-    """The committed selector table's face and edge rows, each as its ordinal, centre,
-    size and (an edge's) class: the ordinals every id the tests use is written in."""
+def committed_tokens(cid: str) -> dict[str, dict[str, int]]:
+    """The committed selector table's face and edge ordinals by token, and each edge's class."""
     table = json.loads((FIXTURE / "components" / f"{cid}.selectors.json").read_text(encoding="utf-8"))
 
     def rows(name: str, columns: str) -> list[dict]:
         return [dict(zip(table["tables"][columns], row)) for row in table[name]]
 
     return {
-        "faces": [{"ord": row["ordinal"], "center": row["center"], "area": row["area"]}
-                  for row in rows("faces", "faceColumns")],
-        "edges": [{"ord": row["ordinal"], "center": row["center"], "length": row["length"], "class": row["visibilityClass"]}
-                  for row in rows("edges", "edgeColumns")],
+        "faces": {row["token"]: row["ordinal"] for row in rows("faces", "faceColumns")},
+        "edges": {row["token"]: row["ordinal"] for row in rows("edges", "edgeColumns")},
+        "classes": {row["ordinal"]: row["visibilityClass"] for row in rows("edges", "edgeColumns")},
     }
 
 
-def _match(rows, fresh, key):
-    """Each fresh row's ordinal -> the committed row it is, by centre and size."""
-    mapping = {}
-    for row in fresh:
-        best = min(rows, key=lambda other: np.abs(np.subtract(other["center"], row["center"])).max()
-                   + abs(other[key] - row[key]))
-        mapping[row["ord"]] = best["ord"]
-    if sorted(mapping.values()) != [row["ord"] for row in rows]:
-        raise SystemExit("the rebuilt part's topology is not the committed one")
-    return mapping
+def _match(committed: dict[str, int], fresh_tokens: list[str]) -> dict[int, int]:
+    """Each fresh ordinal -> the committed ordinal of the element with the same token."""
+    if sorted(fresh_tokens) != sorted(committed):
+        raise SystemExit("the rebuilt part's geometry is not the committed one")
+    return {ordinal: committed[token] for ordinal, token in enumerate(fresh_tokens, 1)}
 
 
 def _view(view: dict) -> dict:
@@ -76,6 +70,7 @@ def _view(view: dict) -> dict:
 def main() -> None:
     from cadgen._internal import tessellate
     from cadgen._internal.component_package import decode_display_shape, prepare_geometry_component
+    from cadgen._internal.geometry_fingerprint import geometry_identity
     from cadgen._internal.selector_table import build_selector_table
     from cadgen._internal.topology_extract import extract_topology_facts
     from cadgen.store.meshes import decode_payload, encode_payload
@@ -88,16 +83,15 @@ def main() -> None:
     names = {occurrence["component"]: occurrence["name"] for occurrence in view["occurrences"]}
     built = shapes()
     for cid, component in view["components"].items():
-        committed = committed_rows(cid)
+        committed = committed_tokens(cid)
         prepared = prepare_geometry_component(built[names[cid]])
-        live = decode_display_shape(prepared["entry"], prepared["payload"])
-        fresh = extract_topology_facts(live.wrapped)
-        faces = _match(committed["faces"], fresh["faces"], "area")
+        topods = decode_display_shape(prepared["entry"], prepared["payload"]).wrapped
+        fresh = extract_topology_facts(topods)
+        identity = geometry_identity(topods)
+        faces = _match(committed["faces"], identity["faces"])
         if any(fresh_ord != ordinal for fresh_ord, ordinal in faces.items()):
             raise SystemExit(f"{cid}: face order changed; this generator only re-maps edges")
-        edges = _match(committed["edges"], fresh["edges"], "length")
-        classes = {row["ord"]: row["class"] for row in committed["edges"]}
-        topods = decode_display_shape(prepared["entry"], prepared["payload"]).wrapped
+        edges = _match(committed["edges"], identity["edges"])
         body = tessellate.mesh_component(topods, build_selector_table(topods, fresh), {},
                                          part=component["part"], chord=chord, angle=angle)
         meshed = decode_payload(body)
@@ -107,7 +101,7 @@ def main() -> None:
         body = encode_payload(
             part=component["part"], positions=meshed.positions, normals=meshed.normals,
             indices=meshed.indices.astype(np.uint32), face_ranges=meshed.face_ranges(),
-            edges=[(ordinal, classes[ordinal], polyline) for ordinal, polyline in remapped],
+            edges=[(ordinal, committed["classes"][ordinal], polyline) for ordinal, polyline in remapped],
             bounds=meshed.cad["bounds"],
         )
         (FIXTURE / "components" / f"{cid}.glb").write_bytes(body)

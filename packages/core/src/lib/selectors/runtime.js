@@ -1,4 +1,4 @@
-import { buildCadRefToken } from "../cadRefs.js";
+import { buildCadRefToken, elementRef } from "../cadRefs.js";
 import { mergeBoundsList } from "../viewer/autoZoom.js";
 
 function isObject(value) {
@@ -36,23 +36,15 @@ function typedBufferView(manifest, buffers, manifestSectionKey, viewKey) {
   return new Uint32Array(0);
 }
 
-function selectorPrefix(singleOccurrenceId, selector) {
-  if (!singleOccurrenceId || !selector.startsWith(`${singleOccurrenceId}.`)) {
-    return selector;
-  }
-  const suffix = selector.slice(singleOccurrenceId.length + 1);
-  return suffix.startsWith("s") || suffix.startsWith("f") || suffix.startsWith("e") ? suffix : selector;
-}
-
 function selectorTypeLabel(selectorType) {
   if (selectorType === "occurrence") {
     return "Occurrence";
   }
-  if (selectorType === "shape") {
-    return "Shape";
-  }
   if (selectorType === "face") {
     return "Face";
+  }
+  if (selectorType === "vertex") {
+    return "Vertex";
   }
   return "Edge";
 }
@@ -218,135 +210,45 @@ function referenceIdForRow(displaySelector, selectorType, partId) {
 
 function referenceSummary(selectorType, row) {
   if (selectorType === "occurrence") {
-    return String(row.name || row.sourceName || row.id || "").trim();
-  }
-  if (selectorType === "shape") {
-    const name = row.name || row.sourceName;
-    const detail = `${row.kind || "shape"}${row.volume ? ` volume=${row.volume}` : row.area ? ` area=${row.area}` : ""}`;
-    return name ? `${name} ${detail}` : detail;
+    return String(row.name || row.sourceName || row.occurrenceId || "").trim();
   }
   if (selectorType === "face") {
     return `${row.surfaceType || "face"} area=${row.area ?? 0}`;
   }
+  if (selectorType === "vertex") {
+    return "vertex";
+  }
   return `${row.curveType || "edge"} length=${row.length ?? 0}`;
 }
 
-function sourceOccurrenceMatchesFilter(sourceOccurrenceId, filterOccurrenceId) {
-  const sourceId = String(sourceOccurrenceId || "").trim();
-  const filterId = String(filterOccurrenceId || "").trim();
-  return !filterId || sourceId === filterId || sourceId.startsWith(`${filterId}.`);
-}
-
-function remapSourceOccurrenceId(sourceOccurrenceId, remapOccurrencePrefix) {
-  const sourceId = String(sourceOccurrenceId || "").trim();
-  if (!sourceId || !remapOccurrencePrefix || typeof remapOccurrencePrefix !== "object") {
+// A ref is the one composition rule cadgen applies (cadRefs.js, cadgen assembly_lookup):
+// the occurrence that places this part, then the row's own element token --
+// `o:4b1f9e2a7c03/f:9d2e8c1b5a70`. The table carries the token (cadgen minted it from the
+// element's geometry); the page carries the occurrence. A part placed by no occurrence (a
+// bundle built with no `occurrenceId`) composes the bare token, which a document with one
+// leaf resolves. A row without a token has no selector here.
+function selectorForRow(selectorType, row, occurrenceId) {
+  if (!row) {
     return "";
   }
-  if (!sourceOccurrenceMatchesFilter(sourceId, remapOccurrencePrefix.sourceOccurrenceId)) {
-    return "";
-  }
-  const sourceRootId = String(remapOccurrencePrefix.sourceRootOccurrenceId || "").trim();
-  const targetRootId = String(remapOccurrencePrefix.targetRootOccurrenceId || "").trim();
-  if (!sourceRootId || !targetRootId) {
-    return "";
-  }
-  if (sourceId === sourceRootId) {
-    return targetRootId;
-  }
-  const sourceRootPrefix = `${sourceRootId}.`;
-  if (sourceId.startsWith(sourceRootPrefix)) {
-    return `${targetRootId}.${sourceId.slice(sourceRootPrefix.length)}`;
-  }
-  return "";
-}
-
-// A row placed at an occurrence of the assembly is `occurrenceId + "." + localId`: the one
-// composition rule, the same one cadgen applies (assembly_lookup), over the local id cadgen
-// minted for the row. A row without one has no selector here.
-function selectorForRow(selectorType, row, rowIndex, singleOccurrenceId, remapOccurrenceId = "", remapOccurrencePrefix = null) {
-  if (!row || !Number.isFinite(Number(rowIndex))) {
-    return "";
-  }
-  const localId = String(row?.localId || "").trim();
-  if (remapOccurrencePrefix && typeof remapOccurrencePrefix === "object") {
-    const sourceOccurrenceId = selectorType === "occurrence"
-      ? String(row?.id || "").trim()
-      : String(row?.occurrenceId || "").trim();
-    const occurrenceId = remapSourceOccurrenceId(sourceOccurrenceId, remapOccurrencePrefix);
-    if (!occurrenceId) {
-      return "";
-    }
-    if (selectorType === "occurrence") {
-      return occurrenceId;
-    }
-    return localId ? `${occurrenceId}.${localId}` : "";
-  }
-  const occurrenceId = String(remapOccurrenceId || "").trim();
-  if (occurrenceId) {
-    if (selectorType === "occurrence") {
-      return occurrenceId;
-    }
-    return localId ? `${occurrenceId}.${localId}` : "";
-  }
-  return selectorPrefix(singleOccurrenceId, String(row?.id || "").trim());
-}
-
-function selectorWithRemappedOccurrence(selector, singleOccurrenceId, remapOccurrenceId = "", remapOccurrencePrefix = null) {
-  const normalizedSelector = String(selector || "").trim();
-  if (!normalizedSelector) {
-    return "";
-  }
-  const match = normalizedSelector.match(/^(.*)\.([sfe]\d+)$/i);
-  if (!match) {
-    return selectorPrefix(singleOccurrenceId, normalizedSelector);
-  }
-  const occurrenceId = String(match[1] || "").trim();
-  const selectorToken = String(match[2] || "").trim();
-  if (!occurrenceId || !selectorToken) {
-    return selectorPrefix(singleOccurrenceId, normalizedSelector);
-  }
-  if (remapOccurrencePrefix && typeof remapOccurrencePrefix === "object") {
-    const remappedOccurrenceId = remapSourceOccurrenceId(occurrenceId, remapOccurrencePrefix);
-    return remappedOccurrenceId ? `${remappedOccurrenceId}.${selectorToken}` : "";
-  }
-  const targetOccurrenceId = String(remapOccurrenceId || "").trim();
-  if (targetOccurrenceId) {
-    return `${targetOccurrenceId}.${selectorToken}`;
-  }
-  return selectorPrefix(singleOccurrenceId, normalizedSelector);
-}
-
-function occurrenceIdForReference(selectorType, row, singleOccurrenceId, remapOccurrenceId = "", remapOccurrencePrefix = null) {
   if (selectorType === "occurrence") {
+    return occurrenceId;
+  }
+  const token = String(row?.token || "").trim();
+  if (!token) {
     return "";
   }
-  const occurrenceId = String(row?.occurrenceId || "").trim();
-  if (!occurrenceId) {
-    return "";
-  }
-  if (remapOccurrencePrefix && typeof remapOccurrencePrefix === "object") {
-    return remapSourceOccurrenceId(occurrenceId, remapOccurrencePrefix);
-  }
-  return String(remapOccurrenceId || "").trim() || selectorPrefix(singleOccurrenceId, occurrenceId);
+  return occurrenceId ? elementRef(occurrenceId, token) : token;
 }
 
-function buildAdjacencySelectors(row, relationRows, targetRows, singleOccurrenceId, idKey, startKey, countKey, targetSelectorType, remapOccurrenceId, remapOccurrencePrefix) {
+function buildAdjacencySelectors(row, relationRows, targetRows, startKey, countKey, targetSelectorType, occurrenceId) {
   const start = Number(row?.[startKey] || 0);
   const count = Number(row?.[countKey] || 0);
   const selectors = [];
   const end = Math.min(relationRows?.length || 0, start + count);
   for (let index = start; index < end; index += 1) {
-    const rowIndex = relationRows[index];
-    const targetRowIndex = Number(rowIndex);
-    const targetRow = targetRows[targetRowIndex];
-    const selector = selectorForRow(
-      targetSelectorType,
-      targetRow,
-      targetRowIndex,
-      singleOccurrenceId,
-      remapOccurrenceId,
-      remapOccurrencePrefix
-    ) || String(targetRow?.[idKey] || "").trim();
+    const targetRow = targetRows[Number(relationRows[index])];
+    const selector = selectorForRow(targetSelectorType, targetRow, occurrenceId);
     if (selector) {
       selectors.push(selector);
     }
@@ -358,37 +260,23 @@ function buildReference({
   selectorType,
   row,
   rowIndex,
-  singleOccurrenceId,
+  occurrenceId,
   copyCadPath,
   partId,
   selectorTransform,
   relationRows,
   targetRows,
-  targetKey,
   startKey,
   countKey,
-  remapOccurrenceId = "",
-  remapOccurrencePrefix = null,
   targetSelectorType = "",
 }) {
-  const normalizedSelector = selectorForRow(selectorType, row, rowIndex, singleOccurrenceId, remapOccurrenceId, remapOccurrencePrefix);
+  const normalizedSelector = selectorForRow(selectorType, row, occurrenceId);
   const displaySelector = normalizedSelector;
   const id = referenceIdForRow(displaySelector, selectorType, partId);
   const summary = referenceSummary(selectorType, row);
   const copyText = buildCadRefToken({ cadPath: copyCadPath, selector: displaySelector });
   const adjacentSelectors = relationRows && targetRows
-    ? buildAdjacencySelectors(
-      row,
-      relationRows,
-      targetRows,
-      singleOccurrenceId,
-      targetKey,
-      startKey,
-      countKey,
-      targetSelectorType,
-      remapOccurrenceId,
-      remapOccurrencePrefix
-    )
+    ? buildAdjacencySelectors(row, relationRows, targetRows, startKey, countKey, targetSelectorType, occurrenceId)
     : [];
   return {
     id,
@@ -400,13 +288,14 @@ function buildReference({
     shortSummary: summary,
     copyText,
     partId,
-    occurrenceId: occurrenceIdForReference(selectorType, row, singleOccurrenceId, remapOccurrenceId, remapOccurrencePrefix),
-    shapeId: selectorWithRemappedOccurrence(row.shapeId, singleOccurrenceId, remapOccurrenceId, remapOccurrencePrefix),
+    // The occurrence that places the element; an occurrence reference IS the occurrence.
+    occurrenceId: selectorType === "occurrence" ? "" : occurrenceId,
     rowIndex,
     pickData: {
       selectorType,
       rowIndex,
-      localId: String(row.localId || "") || null,
+      token: String(row.token || "") || null,
+      ordinal: Number.isInteger(row.ordinal) ? row.ordinal : null,
       name: row.name || null,
       sourceName: row.sourceName || null,
       kind: row.kind || null,
@@ -436,19 +325,16 @@ function buildReference({
   };
 }
 
-function buildLeafOccurrenceIds(shapes) {
-  return [...new Set(
-    shapes
-      .map((row) => String(row.occurrenceId || "").trim())
-      .filter(Boolean)
-  )].sort();
-}
-
-function transformRows(rows, transform) {
+// Every row stamped with the occurrence the page knows this part by, then placed. A table's
+// rows are the PART's (one occurrence row, its shapes, faces and edges, no id of their own); the
+// occurrence is what the viewer keys them by everywhere -- transforms, hidden and focused sets,
+// edge filters -- so it rides on each row.
+function placeRows(rows, transform, occurrenceId) {
+  const stamped = occurrenceId ? rows.map((row) => ({ ...row, occurrenceId })) : rows;
   if (!Array.isArray(transform) || transform.length < 16) {
-    return rows;
+    return stamped;
   }
-  return rows.map((row) => ({
+  return stamped.map((row) => ({
     ...row,
     transform: Array.isArray(row.transform) ? row.transform : transform,
     bbox: row.bbox ? transformBBox(transform, row.bbox) : row.bbox,
@@ -487,31 +373,31 @@ function applySequentialRelationStarts(rows, relationSpecs) {
 }
 
 // The tables and references of one bundle placed by one occurrence: what a runtime and a
-// composition part share. `selectorBuffers` holds the placed proxy positions only when
-// `placeProxy` asks (a composition part copies them straight into its composition).
+// composition part share. `occurrenceId` is the token of the occurrence that places the part
+// (the viewer's, from assembly.json), and the one every ref here begins with. `selectorBuffers`
+// holds the placed proxy positions only when `placeProxy` asks (a composition part copies them
+// straight into its composition).
 function buildSelectorTables(bundle, {
   copyCadPath = "",
   partId = "",
   transform = null,
-  remapOccurrenceId = "",
-  remapOccurrencePrefix = null,
+  occurrenceId = "",
 } = {}, { placeProxy = true } = {}) {
   const manifest = bundle?.manifest || {};
   const buffers = bundle?.buffers || {};
+  const placedBy = String(occurrenceId || "").trim();
   const faceRelations = relationArray(manifest, buffers, "faceEdgeRows", "faceEdgeRowsView");
   const edgeRelations = relationArray(manifest, buffers, "edgeFaceRows", "edgeFaceRowsView");
-  const occurrences = transformRows(toRows(manifest, "occurrences", "occurrenceColumns"), transform);
-  const shapes = transformRows(toRows(manifest, "shapes", "shapeColumns"), transform);
+  const occurrences = placeRows(toRows(manifest, "occurrences", "occurrenceColumns"), transform, placedBy);
+  const shapes = placeRows(toRows(manifest, "shapes", "shapeColumns"), transform, placedBy);
   const faces = applySequentialRelationStarts(
-    transformRows(toRows(manifest, "faces", "faceColumns"), transform),
+    placeRows(toRows(manifest, "faces", "faceColumns"), transform, placedBy),
     [["edgeStart", "edgeCount"]]
   );
   const edges = applySequentialRelationStarts(
-    transformRows(toRows(manifest, "edges", "edgeColumns"), transform),
+    placeRows(toRows(manifest, "edges", "edgeColumns"), transform, placedBy),
     [["faceStart", "faceCount"]]
   );
-  const leafOccurrenceIds = buildLeafOccurrenceIds(shapes);
-  const singleOccurrenceId = leafOccurrenceIds.length === 1 ? leafOccurrenceIds[0] : "";
   const selectorBuffers = {
     facePositions: placeProxy ? transformPositions(buffers.facePositions, transform) : buffers.facePositions,
     faceIndices: buffers.faceIndices || new Uint32Array(0),
@@ -530,72 +416,50 @@ function buildSelectorTables(bundle, {
     selectorType: "occurrence",
     row,
     rowIndex,
-    singleOccurrenceId,
+    occurrenceId: placedBy,
     copyCadPath,
     partId,
     selectorTransform: transform,
-    remapOccurrenceId,
-    remapOccurrencePrefix,
-  })));
-  references.push(...shapes.map((row, rowIndex) => buildReference({
-    selectorType: "shape",
-    row,
-    rowIndex,
-    singleOccurrenceId,
-    copyCadPath,
-    partId,
-    selectorTransform: transform,
-    remapOccurrenceId,
-    remapOccurrencePrefix,
   })));
   references.push(...faces.map((row, rowIndex) => buildReference({
     selectorType: "face",
     row,
     rowIndex,
-    singleOccurrenceId,
+    occurrenceId: placedBy,
     copyCadPath,
     partId,
     selectorTransform: transform,
     relationRows: faceRelations,
     targetRows: edges,
-    targetKey: "id",
     startKey: "edgeStart",
     countKey: "edgeCount",
-    remapOccurrenceId,
-    remapOccurrencePrefix,
     targetSelectorType: "edge",
   })));
   references.push(...edges.map((row, rowIndex) => buildReference({
     selectorType: "edge",
     row,
     rowIndex,
-    singleOccurrenceId,
+    occurrenceId: placedBy,
     copyCadPath,
     partId,
     selectorTransform: transform,
     relationRows: edgeRelations,
     targetRows: faces,
-    targetKey: "id",
     startKey: "faceStart",
     countKey: "faceCount",
-    remapOccurrenceId,
-    remapOccurrencePrefix,
     targetSelectorType: "face",
   })));
+  // A shape (a solid of the part) is a row -- it groups faces and carries a volume -- but
+  // never a reference: a ref names an occurrence, a face, an edge or a vertex.
   const visibleReferences = references.filter((reference) => String(reference?.normalizedSelector || "").trim());
-  const occurrenceIdByRowIndex = new Map(
-    occurrences.map((row, rowIndex) => [
-      rowIndex,
-      selectorForRow("occurrence", row, rowIndex, singleOccurrenceId, remapOccurrenceId, remapOccurrencePrefix) || String(row?.id || "").trim()
-    ])
-  );
+  const occurrenceIdByRowIndex = new Map(occurrences.map((row, rowIndex) => [rowIndex, placedBy]));
   return {
     manifest,
     occurrences,
     shapes,
     faces,
     edges,
-    singleOccurrenceId,
+    singleOccurrenceId: placedBy,
     selectorBuffers,
     visibleReferences,
     occurrenceIdByRowIndex,
@@ -678,43 +542,33 @@ function normalizedTransformEntries(value) {
     .filter(([key, transform]) => key && transform && transform.every(Number.isFinite));
 }
 
+const MODEL_TRANSFORM_KEYS = new Set(["__model__", "*", "__all__"]);
+
+// The transform a caller gave for this occurrence, else the model's. A token carries no
+// hierarchy, so a caller that means a subassembly names each of its leaves (the tree says
+// which); nothing here matches a prefix.
 function transformForOccurrenceId(transformEntries, occurrenceId) {
   const normalizedOccurrenceId = String(occurrenceId || "").trim();
-  const modelTransform = transformEntries.find(([key]) => key === "__model__" || key === "*" || key === "__all__")?.[1] || null;
-  let best = null;
-  for (const [partId, transform] of transformEntries) {
-    if (partId === "__model__" || partId === "*" || partId === "__all__") {
-      continue;
-    }
-    if (
-      normalizedOccurrenceId &&
-      (
-        normalizedOccurrenceId === partId ||
-        normalizedOccurrenceId.startsWith(`${partId}.`)
-      ) &&
-      (!best || partId.length > best[0].length)
-    ) {
-      best = [partId, transform];
+  let modelTransform = null;
+  for (const [key, transform] of transformEntries) {
+    if (MODEL_TRANSFORM_KEYS.has(key)) {
+      modelTransform = modelTransform || transform;
+    } else if (normalizedOccurrenceId && key === normalizedOccurrenceId) {
+      return transform;
     }
   }
-  return best?.[1] || modelTransform;
+  return modelTransform;
 }
 
-function rowOccurrenceId(row, selectorType) {
-  return selectorType === "occurrence"
-    ? String(row?.id || "").trim()
-    : String(row?.occurrenceId || row?.partId || "").trim();
+function rowOccurrenceId(row) {
+  return String(row?.occurrenceId || row?.partId || "").trim();
 }
 
 /** Per selector type, rowIndex -> the occurrence id the VIEWER knows that row by.
  *
- * A row's own `occurrenceId` is the id from the component GLB it was decoded from, and
- * `composeSelectorRuntimes` concatenates component tables verbatim -- so in an assembly every
- * component's rows say `o1`, the local id, while its references were remapped to `o1.1`,
- * `o1.2`, ... Matching a caller's per-part transform against the ROW id therefore matched
- * nothing (or, worse, the wrong part), and the transform silently applied to no geometry:
- * hovered edges stayed at rest while faces -- rebuilt from the live display meshes -- moved.
- * References are what the viewer keys parts by everywhere else, so they decide here too.
+ * Every row is stamped with it when its runtime is built (`placeRows`), and the references
+ * carry it too; a composition concatenates both verbatim, so either answers. The references
+ * are read first: they are what the viewer keys parts by everywhere else.
  */
 function occurrenceIdByRowIndexPerType(selectorRuntime) {
   const byType = new Map();
@@ -735,18 +589,17 @@ function occurrenceIdByRowIndexPerType(selectorRuntime) {
     }
   }
   // Occurrence references carry no occurrenceId of their own (they ARE the occurrence), so
-  // that table's remapped ids come from the runtime's own index.
+  // that table's ids come from the runtime's own index.
   if (selectorRuntime?.occurrenceIdByRowIndex instanceof Map) {
     byType.set("occurrence", selectorRuntime.occurrenceIdByRowIndex);
   }
   return byType;
 }
 
-function transformRowsByOccurrence(rows, selectorType, transformEntries, occurrenceIdByRowIndex = null) {
+function transformRowsByOccurrence(rows, transformEntries, occurrenceIdByRowIndex = null) {
   const transforms = [];
   const nextRows = (Array.isArray(rows) ? rows : []).map((row, rowIndex) => {
-    const occurrenceId = String(occurrenceIdByRowIndex?.get(rowIndex) || "").trim()
-      || rowOccurrenceId(row, selectorType);
+    const occurrenceId = String(occurrenceIdByRowIndex?.get(rowIndex) || "").trim() || rowOccurrenceId(row);
     const transform = transformForOccurrenceId(transformEntries, occurrenceId);
     transforms.push(transform);
     return transform ? transformRow(row, transform) : row;
@@ -808,13 +661,12 @@ export function buildTransformedSelectorRuntime(selectorRuntime, transformByPart
   }
 
   const occurrenceIdByType = occurrenceIdByRowIndexPerType(selectorRuntime);
-  const occurrencesResult = transformRowsByOccurrence(selectorRuntime.occurrences, "occurrence", transformEntries, occurrenceIdByType.get("occurrence"));
-  const shapesResult = transformRowsByOccurrence(selectorRuntime.shapes, "shape", transformEntries, occurrenceIdByType.get("shape"));
-  const facesResult = transformRowsByOccurrence(selectorRuntime.faces, "face", transformEntries, occurrenceIdByType.get("face"));
-  const edgesResult = transformRowsByOccurrence(selectorRuntime.edges, "edge", transformEntries, occurrenceIdByType.get("edge"));
+  const occurrencesResult = transformRowsByOccurrence(selectorRuntime.occurrences, transformEntries, occurrenceIdByType.get("occurrence"));
+  const shapesResult = transformRowsByOccurrence(selectorRuntime.shapes, transformEntries, null);
+  const facesResult = transformRowsByOccurrence(selectorRuntime.faces, transformEntries, occurrenceIdByType.get("face"));
+  const edgesResult = transformRowsByOccurrence(selectorRuntime.edges, transformEntries, occurrenceIdByType.get("edge"));
   const referenceTransforms = {
     occurrence: occurrencesResult.transforms,
-    shape: shapesResult.transforms,
     face: facesResult.transforms,
     edge: edgesResult.transforms,
     vertex: [],
@@ -855,7 +707,7 @@ export function buildTransformedSelectorRuntime(selectorRuntime, transformByPart
 
   return {
     ...selectorRuntime,
-    bbox: selectorRuntime.bbox ? transformBBox(transformEntries.find(([key]) => key === "__model__" || key === "*" || key === "__all__")?.[1], selectorRuntime.bbox) : selectorRuntime.bbox,
+    bbox: selectorRuntime.bbox ? transformBBox(transformEntries.find(([key]) => MODEL_TRANSFORM_KEYS.has(key))?.[1], selectorRuntime.bbox) : selectorRuntime.bbox,
     occurrences: occurrencesResult.rows,
     shapes: shapesResult.rows,
     faces: facesResult.rows,
@@ -887,8 +739,7 @@ function placeReference(reference, offsets) {
   const type = reference?.selectorType;
   const offset = type === "face" ? offsets.face
     : type === "edge" ? offsets.edge
-      : type === "occurrence" ? offsets.occurrence
-        : type === "shape" ? offsets.shape : 0;
+      : type === "occurrence" ? offsets.occurrence : 0;
   const rowIndex = Number(reference?.rowIndex);
   let next = Number.isFinite(rowIndex) ? { ...reference, rowIndex: rowIndex + offset } : { ...reference };
   const pickData = reference?.pickData;
@@ -903,7 +754,7 @@ function placeReference(reference, offsets) {
 }
 
 // Merge per-component selector runtimes (each already world-placed via its occurrence transform
-// and namespaced via remapOccurrenceId) into one assembly runtime. A component-GLB package has no
+// and namespaced by its occurrenceId) into one assembly runtime. A component-GLB package has no
 // whole-assembly selector topology, so this composes the leaf runtimes: it concatenates the
 // occurrence/shape/face/edge tables and references — offsetting every rowIndex so each component
 // occupies a disjoint range — rebuilds the lookup maps the viewer reads, and concatenates the face

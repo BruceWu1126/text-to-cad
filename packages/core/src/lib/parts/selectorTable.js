@@ -3,21 +3,24 @@
 // cadgen mints every selector fact once, from the exact BREP, into a table it
 // stores in the part's record beside its display mesh (cadgen/_internal/selector_table.py,
 // cadgen/store/parts.py) and serves by part (`/__tess_cache/<part>.selectors.json`):
-// the local ids refs end in, exact metrics and parameters, plane
-// normals, referenceable flags and relevance, face-edge and edge-vertex
-// adjacency, each edge's chain and each face's tangent group. The page joins
-// those rows to the mesh it draws -- by ORDINAL, which the table and the mesh's
-// face and edge tables share -- so a face's triangle range and an
-// edge's segment range are its range on screen, and composes a ref as
-// `occurrenceId + "." + localId` (selectors/runtime.js). Nothing here decides
-// a fact: a row the table lacks is a row the page does not have.
+// each element's token (`f:`, `e:`, `v:` + 12 hex, a hash of its rounded geometry,
+// cadgen/_internal/geometry_fingerprint.py) that a ref ends in, exact metrics and
+// parameters, plane normals, referenceable flags and relevance, face-edge and
+// edge-vertex adjacency, each edge's chain and each face's tangent group. The page
+// joins those rows to the mesh it draws -- by ORDINAL, which the table and the
+// mesh's face and edge tables share -- so a face's triangle range and an edge's
+// segment range are its range on screen, and composes a ref as
+// `occurrenceId + "/" + token` (selectors/runtime.js). Nothing here decides a
+// fact: a row the table lacks is a row the page does not have.
 
 import { meshEdgePolylines, meshFaceRanges } from "./tessellationCache.js";
 
 // The table's wire schema (cadgen/_internal/selector_table.py
 // SELECTOR_TABLE_SCHEMA_VERSION): a table of another is refused, never read
 // halfway. tests/python/global/test_artifact_version_policy.py holds both equal.
-export const SELECTOR_TABLE_SCHEMA_VERSION = 1;
+// 2: element rows lead with their token, and carry no id, localId, occurrenceId
+// or shapeId column (an occurrence's rows are the part's, placed by the page).
+export const SELECTOR_TABLE_SCHEMA_VERSION = 2;
 
 const TABLES = Object.freeze({
   occurrences: "occurrenceColumns", shapes: "shapeColumns", faces: "faceColumns",

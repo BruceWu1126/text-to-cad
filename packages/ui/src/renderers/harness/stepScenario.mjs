@@ -24,8 +24,10 @@ const read = (name) => readFile(new URL(name, FIXTURE));
 
 /**
  * Everything the fixture is, loaded once: the view, the sidecar and cadgen's articulation of its
- * kinematics, and each part by its key: its stored display mesh (`components/<cid>.glb`), decoded
- * so the harness's store can serve it for any part, and its selector table.
+ * kinematics, each part by its key: its stored display mesh (`components/<cid>.glb`), decoded
+ * so the harness's store can serve it for any part, and its selector table; and `ids`, the
+ * occurrence tokens the tree mints for its root, its base and its arm, read off the view so no
+ * test writes an id down (a token names a place in the tree, not a position).
  */
 export async function loadStepFixture() {
   const { decodeComponentTessellation } = await import('@text-to-cad/core/lib/parts/tessellationCache.js');
@@ -40,8 +42,16 @@ export async function loadStepFixture() {
     partData.set(component.part, { cid, mesh,
       selectors: { bytes: table, object: createHash('sha256').update(table).digest('hex') } });
   }
-  return { assembly, view, sidecar, articulation, partData, file: 'hinge_block.step' };
+  const occurrence = name => view.occurrences.find(entry => entry.name === name).id;
+  const ids = { root: view.assembly.root.id, base: occurrence('base'), arm: occurrence('arm') };
+  return { assembly, view, sidecar, articulation, partData, ids, file: 'hinge_block.step' };
 }
+
+/**
+ * A token-shaped id for a staged occurrence the fixture's tree never minted: `o:` and twelve
+ * hex digits, as every occurrence id is, distinct from the fixture's own.
+ */
+const stagedId = index => `o:f${index.toString(16).padStart(11, '0')}`;
 
 const leaf = (id, name) => ({ children: [], id, leafPartIds: [id], name, nodeType: 'part' });
 // Where the base goes in the descriptor, and so which batch it lands in: after the
@@ -94,7 +104,7 @@ export function stageProgressiveFixture(fixture) {
     const part = `${arm.part.slice(0, 62)}${suffix}${arm.part.slice(64)}`;
     components[cid] = { ...arm, contentHash: `${cid}${arm.contentHash.slice(16)}`, part, brep: `components/${cid}.brep` };
     partData.set(part, { ...armData, cid });
-    const id = `o1.${index + 2}`;
+    const id = stagedId(index);
     // Every arm at the origin: the box the first batch spans is one arm's, whichever
     // eight of them get there first.
     occurrences.push({ ...armOccurrence, id, name: `arm_${index + 1}`, component: cid, transform: baseOccurrence.transform });
@@ -104,8 +114,8 @@ export function stageProgressiveFixture(fixture) {
   for (let index = 0; index < ARM_COUNT; index += 1) {
     if (index === BASE_AT) {
       components[baseOccurrence.component] = base;
-      occurrences.push({ ...baseOccurrence, id: 'o1.1' });
-      children.push(leaf('o1.1', 'base'));
+      occurrences.push({ ...baseOccurrence });
+      children.push(leaf(baseOccurrence.id, 'base'));
       parts.push(base.part);
     }
     addArm(index);
@@ -131,22 +141,22 @@ export function stageProgressiveFixture(fixture) {
 
 /**
  * The base alone, staged as the SINGLE-PART STEP cadgen writes: one component, one occurrence,
- * `entryKind: "part"`, the part under a root product the STEP gives no name (so the view names
- * the root by its id) and named as its own product names it, `base`. It carries no sidecar:
- * kinematics need two parts.
+ * `entryKind: "part"`, the part under a root product the STEP gives no name (so the view calls
+ * the root `model`, as every unnamed root) and named as its own product names it, `base`. It
+ * carries no sidecar: kinematics need two parts.
  */
 export function stageSinglePartFixture(fixture) {
   const original = fixture.view;
   const base = original.occurrences.find(occurrence => occurrence.name === 'base');
   const view = {
     ...original,
-    entryKind: 'part', label: 'o1',
+    entryKind: 'part', label: 'model',
     components: { [base.component]: original.components[base.component] },
-    occurrences: [{ ...base, id: 'o1.1' }],
+    occurrences: [{ ...base }],
     bbox: { min: [-10, -10, -5], max: [10, 10, 5] },
     stats: { ...original.stats, occurrenceCount: 1, shapeCount: 1 },
-    assembly: { root: { id: 'o1', name: 'o1', nodeType: 'assembly', leafPartIds: ['o1.1'],
-      children: [{ ...leaf('o1.1', 'base') }] } }
+    assembly: { root: { id: original.assembly.root.id, name: 'model', nodeType: 'assembly', leafPartIds: [base.id],
+      children: [{ ...leaf(base.id, 'base') }] } }
   };
   const partData = new Map([...fixture.partData].filter(([part]) => part === original.components[base.component].part));
   return { ...fixture, view, partData, sidecar: null, articulation: null, file: 'hinge_base.step', assembly: Buffer.from(JSON.stringify(view)) };

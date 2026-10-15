@@ -56,8 +56,7 @@ export function buildNormalizedReferenceState(entry, referencePayload = null, {
   copyCadPath,
   partId = "",
   transform = null,
-  remapOccurrenceId = "",
-  remapOccurrencePrefix = null,
+  occurrenceId = "",
   selectorRuntime: prebuiltSelectorRuntime = null,
   loadedTopologyKey = "",
   loadedTopologyIds = null
@@ -71,8 +70,7 @@ export function buildNormalizedReferenceState(entry, referencePayload = null, {
     copyCadPath: copyCadPath || fileRefPrefixForEntry(entry),
     partId,
     transform,
-    remapOccurrenceId,
-    remapOccurrencePrefix
+    occurrenceId
   });
   const references = normalizeReferenceList(selectorRuntime.references);
   return {

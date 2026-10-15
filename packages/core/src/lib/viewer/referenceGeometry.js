@@ -179,32 +179,22 @@ export function buildFaceFillGeometryFromDisplayMeshes(runtime, THREE, reference
   return geometry;
 }
 
-/** The display record a reference belongs to, by longest matching part id.
- *
- * Same matching rule the selector transforms use: a record's ``partId`` either IS the
- * reference's occurrence id or is one of its ancestors (``o1`` owns ``o1.3``), and the most
- * specific owner wins. Returns null for a reference nothing on screen claims. */
+/** The display record a reference belongs to: the record whose ``partId`` is the
+ * reference's occurrence (the same rule the selector transforms use; a record draws one
+ * leaf occurrence, and a token names no ancestors). Returns null for a reference nothing on
+ * screen claims. */
 export function displayRecordForReference(runtime, reference) {
   const occurrenceId = String(reference?.occurrenceId || reference?.pickData?.occurrenceId || "").trim();
   if (!occurrenceId || !Array.isArray(runtime?.displayRecords)) {
     return null;
   }
-  let best = null;
-  let bestLength = -1;
   for (const record of runtime.displayRecords) {
     const partId = String(record?.partId || "").trim();
-    if (!partId || partId === "__model__") {
-      continue;
-    }
-    if (occurrenceId !== partId && !occurrenceId.startsWith(`${partId}.`)) {
-      continue;
-    }
-    if (partId.length > bestLength) {
-      best = record;
-      bestLength = partId.length;
+    if (partId && partId !== "__model__" && partId === occurrenceId) {
+      return record;
     }
   }
-  return best;
+  return null;
 }
 
 /** The exploded-view offset applied to a reference's part, or null when it has none.

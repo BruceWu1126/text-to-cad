@@ -1,84 +1,113 @@
 {
-  "comment": "Shared contract for the CAD selector grammar. The Python parser (cadgen.cad_ref_syntax) and the JS parser (@text-to-cad/core/lib/cadRefs.js) are separate implementations of the same language; this fixture is the only thing that keeps them honest. Every case must hold in BOTH. Cases tagged phase 1 cover label selectors.",
+  "comment": "Shared contract for the CAD selector grammar. The Python parser (cadgen.cad_ref_syntax) and the JS parser (@text-to-cad/core/lib/cadRefs.js) are separate implementations of the same language; this fixture is the only thing that keeps them honest. Every case must hold in BOTH. A ref names geometry: an occurrence token (`o:` + 12 hex), an element token (`f:`/`e:`/`v:` + 12 hex) under an occurrence token or a part label, joined by `/`. Cases tagged phase 1 cover label selectors.",
   "selectorCases": [
     {
       "phase": 0,
-      "why": "occurrence + entity, the canonical copy-button form",
-      "selector": "o1.12.f19",
+      "why": "occurrence + element, the canonical copy-button form",
+      "selector": "o:4b1f9e2a7c03/f:9d2e8c1b5a70",
       "selectorType": "face",
-      "occurrenceId": "o1.12",
-      "ordinal": 19,
-      "canonical": "o1.12.f19"
+      "occurrenceId": "o:4b1f9e2a7c03",
+      "token": "f:9d2e8c1b5a70",
+      "canonical": "o:4b1f9e2a7c03/f:9d2e8c1b5a70"
     },
     {
       "phase": 0,
-      "why": "deep nesting stays a single occurrence path",
-      "selector": "o1.2.3.4.5.6.e7",
+      "why": "an edge under an occurrence",
+      "selector": "o:0a9e8d7c6b5f/e:12ab34cd56ef",
       "selectorType": "edge",
-      "occurrenceId": "o1.2.3.4.5.6",
-      "ordinal": 7,
-      "canonical": "o1.2.3.4.5.6.e7"
+      "occurrenceId": "o:0a9e8d7c6b5f",
+      "token": "e:12ab34cd56ef",
+      "canonical": "o:0a9e8d7c6b5f/e:12ab34cd56ef"
     },
     {
       "phase": 0,
-      "why": "bare occurrence",
-      "selector": "o1.3",
+      "why": "a vertex under an occurrence",
+      "selector": "o:0a9e8d7c6b5f/v:fedcba987654",
+      "selectorType": "vertex",
+      "occurrenceId": "o:0a9e8d7c6b5f",
+      "token": "v:fedcba987654",
+      "canonical": "o:0a9e8d7c6b5f/v:fedcba987654"
+    },
+    {
+      "phase": 0,
+      "why": "bare occurrence token",
+      "selector": "o:4b1f9e2a7c03",
       "selectorType": "occurrence",
-      "occurrenceId": "o1.3",
-      "ordinal": null,
-      "canonical": "o1.3"
+      "occurrenceId": "o:4b1f9e2a7c03",
+      "token": "",
+      "canonical": "o:4b1f9e2a7c03"
     },
     {
       "phase": 0,
-      "why": "single-segment occurrence",
-      "selector": "o1",
-      "selectorType": "occurrence",
-      "occurrenceId": "o1",
-      "ordinal": null,
-      "canonical": "o1"
-    },
-    {
-      "phase": 0,
-      "why": "bare entity with no occurrence context",
-      "selector": "f45",
+      "why": "bare element token with no occurrence context (a document with one leaf)",
+      "selector": "f:9d2e8c1b5a70",
       "selectorType": "face",
       "occurrenceId": "",
-      "ordinal": 45,
-      "canonical": "f45"
+      "token": "f:9d2e8c1b5a70",
+      "canonical": "f:9d2e8c1b5a70"
     },
     {
       "phase": 0,
-      "why": "every entity kind maps to its type name",
-      "selector": "s2",
-      "selectorType": "shape",
-      "occurrenceId": "",
-      "ordinal": 2,
-      "canonical": "s2"
-    },
-    {
-      "phase": 0,
-      "selector": "e9",
+      "selector": "e:12ab34cd56ef",
       "selectorType": "edge",
       "occurrenceId": "",
-      "ordinal": 9,
-      "canonical": "e9"
+      "token": "e:12ab34cd56ef",
+      "canonical": "e:12ab34cd56ef"
     },
     {
       "phase": 0,
-      "selector": "v4",
+      "selector": "v:fedcba987654",
       "selectorType": "vertex",
       "occurrenceId": "",
-      "ordinal": 4,
-      "canonical": "v4"
+      "token": "v:fedcba987654",
+      "canonical": "v:fedcba987654"
     },
     {
       "phase": 0,
       "why": "leading # is stripped",
-      "selector": "#o2.f1",
+      "selector": "#o:4b1f9e2a7c03/f:9d2e8c1b5a70",
       "selectorType": "face",
-      "occurrenceId": "o2",
-      "ordinal": 1,
-      "canonical": "o2.f1"
+      "occurrenceId": "o:4b1f9e2a7c03",
+      "token": "f:9d2e8c1b5a70",
+      "canonical": "o:4b1f9e2a7c03/f:9d2e8c1b5a70"
+    },
+    {
+      "phase": 0,
+      "why": "a token is lower-case hex of exactly twelve characters; upper case is not one (it reads as a label spelling, which nothing resolves)",
+      "selector": "o:4B1F9E2A7C03",
+      "selectorType": "label",
+      "occurrenceId": "",
+      "token": "",
+      "label": "o:4B1F9E2A7C03",
+      "canonical": "o:4B1F9E2A7C03"
+    },
+    {
+      "phase": 0,
+      "why": "a shape is not an element a ref can name",
+      "selector": "o:4b1f9e2a7c03/s:9d2e8c1b5a70",
+      "selectorType": "opaque",
+      "occurrenceId": "",
+      "token": "",
+      "canonical": "o:4b1f9e2a7c03/s:9d2e8c1b5a70"
+    },
+    {
+      "phase": 0,
+      "why": "the retired positional grammar is no ref: o1.2.f7 is opaque, not an occurrence and a face",
+      "selector": "o1.2.f7",
+      "selectorType": "opaque",
+      "occurrenceId": "",
+      "token": "",
+      "canonical": "o1.2.f7"
+    },
+    {
+      "phase": 0,
+      "why": "the retired bare ordinal is a label, not an element",
+      "selector": "f7",
+      "selectorType": "label",
+      "occurrenceId": "",
+      "token": "",
+      "label": "f7",
+      "canonical": "f7"
     },
     {
       "phase": 0,
@@ -86,7 +115,7 @@
       "selector": "m1",
       "selectorType": "opaque",
       "occurrenceId": "",
-      "ordinal": null,
+      "token": "",
       "canonical": "m1"
     },
     {
@@ -95,7 +124,7 @@
       "selector": "not a selector!",
       "selectorType": "opaque",
       "occurrenceId": "",
-      "ordinal": null,
+      "token": "",
       "canonical": "not a selector!"
     },
     {
@@ -104,29 +133,29 @@
       "selector": "eye_shank",
       "selectorType": "label",
       "occurrenceId": "",
-      "ordinal": null,
+      "token": "",
       "label": "eye_shank",
       "canonical": "eye_shank"
     },
     {
       "phase": 1,
-      "why": "label + entity, the headline feature",
-      "selector": "servo_end_plate.f45",
+      "why": "label + element, the headline feature",
+      "selector": "servo_end_plate/f:9d2e8c1b5a70",
       "selectorType": "face",
       "occurrenceId": "",
-      "ordinal": 45,
+      "token": "f:9d2e8c1b5a70",
       "label": "servo_end_plate",
-      "canonical": "servo_end_plate.f45"
+      "canonical": "servo_end_plate/f:9d2e8c1b5a70"
     },
     {
       "phase": 1,
       "why": "colons appear inside real labels (mounting_eye:lower, piston_rod:chrome)",
-      "selector": "piston_rod:chrome.e3",
+      "selector": "piston_rod:chrome/e:12ab34cd56ef",
       "selectorType": "edge",
       "occurrenceId": "",
-      "ordinal": 3,
+      "token": "e:12ab34cd56ef",
       "label": "piston_rod:chrome",
-      "canonical": "piston_rod:chrome.e3"
+      "canonical": "piston_rod:chrome/e:12ab34cd56ef"
     },
     {
       "phase": 1,
@@ -134,7 +163,7 @@
       "selector": "cast_rim:5spoke_2",
       "selectorType": "label",
       "occurrenceId": "",
-      "ordinal": null,
+      "token": "",
       "label": "cast_rim:5spoke_2",
       "canonical": "cast_rim:5spoke_2"
     },
@@ -144,7 +173,7 @@
       "selector": "5spoke",
       "selectorType": "opaque",
       "occurrenceId": "",
-      "ordinal": null,
+      "token": "",
       "canonical": "5spoke"
     },
     {
@@ -153,37 +182,37 @@
       "selector": "outer_ring",
       "selectorType": "label",
       "occurrenceId": "",
-      "ordinal": null,
+      "token": "",
       "label": "outer_ring",
       "canonical": "outer_ring"
     },
     {
       "phase": 1,
-      "why": "REGRESSION GUARD: an entity-looking label prefix must not be stolen either",
-      "selector": "frame_rail",
+      "why": "REGRESSION GUARD: a label shaped like a token prefix is a label (o: alone is nothing)",
+      "selector": "o:",
       "selectorType": "label",
       "occurrenceId": "",
-      "ordinal": null,
-      "label": "frame_rail",
-      "canonical": "frame_rail"
+      "token": "",
+      "label": "o:",
+      "canonical": "o:"
     },
     {
       "phase": 0,
       "why": "only a LEADING '#' is the token marker; a later one is not a separator",
-      "selector": "o1#f2",
+      "selector": "o:4b1f9e2a7c03#f:9d2e8c1b5a70",
       "selectorType": "opaque",
       "occurrenceId": "",
-      "ordinal": null,
-      "canonical": "o1#f2"
+      "token": "",
+      "canonical": "o:4b1f9e2a7c03#f:9d2e8c1b5a70"
     },
     {
       "phase": 0,
       "why": "a trailing '#' is part of the selector text, not something to drop",
-      "selector": "o1#",
+      "selector": "o:4b1f9e2a7c03#",
       "selectorType": "opaque",
       "occurrenceId": "",
-      "ordinal": null,
-      "canonical": "o1#"
+      "token": "",
+      "canonical": "o:4b1f9e2a7c03#"
     },
     {
       "phase": 1,
@@ -191,78 +220,78 @@
       "selector": "eye#shank",
       "selectorType": "opaque",
       "occurrenceId": "",
-      "ordinal": null,
+      "token": "",
       "canonical": "eye#shank"
     }
   ],
   "inheritanceCases": [
     {
       "phase": 0,
-      "why": "a bare entity after an occurrence inherits that occurrence",
-      "input": "o1.2,f3,f4",
+      "why": "a bare element after an occurrence inherits that occurrence",
+      "input": "o:4b1f9e2a7c03,f:9d2e8c1b5a70,e:12ab34cd56ef",
       "expected": [
-        "o1.2",
-        "o1.2.f3",
-        "o1.2.f4"
+        "o:4b1f9e2a7c03",
+        "o:4b1f9e2a7c03/f:9d2e8c1b5a70",
+        "o:4b1f9e2a7c03/e:12ab34cd56ef"
       ]
     },
     {
       "phase": 0,
-      "why": "an occurrence-entity selector also seeds inheritance",
-      "input": "o1.2.f3,f4",
+      "why": "an occurrence/element selector also seeds inheritance",
+      "input": "o:4b1f9e2a7c03/f:9d2e8c1b5a70,e:12ab34cd56ef",
       "expected": [
-        "o1.2.f3",
-        "o1.2.f4"
+        "o:4b1f9e2a7c03/f:9d2e8c1b5a70",
+        "o:4b1f9e2a7c03/e:12ab34cd56ef"
       ]
     },
     {
       "phase": 0,
-      "why": "with no occurrence context bare entities stay bare",
-      "input": "f3,f4",
+      "why": "with no occurrence context bare elements stay bare",
+      "input": "f:9d2e8c1b5a70,e:12ab34cd56ef",
       "expected": [
-        "f3",
-        "f4"
+        "f:9d2e8c1b5a70",
+        "e:12ab34cd56ef"
       ]
     },
     {
       "phase": 1,
       "why": "a label seeds inheritance the same way an occurrence does",
-      "input": "eye_shank,f3,f4",
+      "input": "eye_shank,f:9d2e8c1b5a70,e:12ab34cd56ef",
       "expected": [
         "eye_shank",
-        "eye_shank.f3",
-        "eye_shank.f4"
+        "eye_shank/f:9d2e8c1b5a70",
+        "eye_shank/e:12ab34cd56ef"
       ]
     },
     {
       "phase": 1,
-      "why": "label+entity seeds inheritance from its label",
-      "input": "servo_end_plate.f45,f46",
+      "why": "label/element seeds inheritance from its label",
+      "input": "servo_end_plate/f:9d2e8c1b5a70,f:fedcba987654",
       "expected": [
-        "servo_end_plate.f45",
-        "servo_end_plate.f46"
+        "servo_end_plate/f:9d2e8c1b5a70",
+        "servo_end_plate/f:fedcba987654"
       ]
     },
     {
       "phase": 1,
       "why": "a later occurrence overrides an inherited label",
-      "input": "eye_shank,f3,o2.1,f4",
+      "input": "eye_shank,f:9d2e8c1b5a70,o:0a9e8d7c6b5f,f:fedcba987654",
       "expected": [
         "eye_shank",
-        "eye_shank.f3",
-        "o2.1",
-        "o2.1.f4"
+        "eye_shank/f:9d2e8c1b5a70",
+        "o:0a9e8d7c6b5f",
+        "o:0a9e8d7c6b5f/f:fedcba987654"
       ]
     }
   ],
   "tokenCases": [
     {
       "phase": 2,
-      "why": "bare selector token \u2014 the form every existing ref uses",
-      "text": "#o1.2.f3",
+      "why": "bare selector token — the form every ref uses",
+      "text": "#o:4b1f9e2a7c03/f:9d2e8c1b5a70",
       "cadPath": "",
       "selectors": [
-        "o1.2.f3"
+        "o:4b1f9e2a7c03/f:9d2e8c1b5a70"
       ]
     },
     {
@@ -275,30 +304,30 @@
     {
       "phase": 2,
       "why": "file prefix, the viewer's copy format: the file's path, extension included",
-      "text": "mounting_plate.stl#o1.2.f3",
+      "text": "mounting_plate.stl#o:4b1f9e2a7c03/f:9d2e8c1b5a70",
       "cadPath": "mounting_plate.stl",
       "selectors": [
-        "o1.2.f3"
+        "o:4b1f9e2a7c03/f:9d2e8c1b5a70"
       ]
     },
     {
       "phase": 2,
       "why": "directory-qualified prefix: the file's path under the viewer's root",
-      "text": "starship/super_heavy.step#o1.3",
+      "text": "starship/super_heavy.step#o:4b1f9e2a7c03",
       "cadPath": "starship/super_heavy.step",
       "selectors": [
-        "o1.3"
+        "o:4b1f9e2a7c03"
       ]
     },
     {
       "phase": 2,
       "why": "prefix + comma list; inheritance still applies inside the token",
-      "text": "plate.step#o1.2,f3,f4",
+      "text": "plate.step#o:4b1f9e2a7c03,f:9d2e8c1b5a70,e:12ab34cd56ef",
       "cadPath": "plate.step",
       "selectors": [
-        "o1.2",
-        "o1.2.f3",
-        "o1.2.f4"
+        "o:4b1f9e2a7c03",
+        "o:4b1f9e2a7c03/f:9d2e8c1b5a70",
+        "o:4b1f9e2a7c03/e:12ab34cd56ef"
       ]
     },
     {
@@ -310,20 +339,20 @@
     },
     {
       "phase": 2,
-      "why": "a label selector behind a prefix \u2014 the two features compose",
-      "text": "shock.step#eye_shank.f45",
+      "why": "a label selector behind a prefix — the two features compose",
+      "text": "shock.step#eye_shank/f:9d2e8c1b5a70",
       "cadPath": "shock.step",
       "selectors": [
-        "eye_shank.f45"
+        "eye_shank/f:9d2e8c1b5a70"
       ]
     },
     {
       "phase": 2,
       "why": "an absolute prefix, as a viewer with no project root copies it; the parser keeps every prefix RAW",
-      "text": "/work/models/STEP/c.step#o1",
+      "text": "/work/models/STEP/c.step#o:4b1f9e2a7c03",
       "cadPath": "/work/models/STEP/c.step",
       "selectors": [
-        "o1"
+        "o:4b1f9e2a7c03"
       ]
     },
     {
@@ -336,33 +365,33 @@
     {
       "phase": 2,
       "why": "leading whitespace is tolerated, as before",
-      "text": "   #f1",
+      "text": "   #f:9d2e8c1b5a70",
       "cadPath": "",
       "selectors": [
-        "f1"
+        "f:9d2e8c1b5a70"
       ]
     },
     {
       "why": "Imported filenames preserve whitespace and delimiters",
-      "text": "\"models/Hex Drive Screw (2).STEP\"#o1.f2,f3 note",
+      "text": "\"models/Hex Drive Screw (2).STEP\"#o:4b1f9e2a7c03/f:9d2e8c1b5a70,e:12ab34cd56ef note",
       "cadPath": "models/Hex Drive Screw (2).STEP",
       "selectors": [
-        "o1.f2",
-        "o1.f3"
+        "o:4b1f9e2a7c03/f:9d2e8c1b5a70",
+        "o:4b1f9e2a7c03/e:12ab34cd56ef"
       ]
     },
     {
       "why": "Imported filenames preserve whitespace and delimiters",
-      "text": "\"models/café #1 \\\"screw\\\".STEP\"#o1.f2,f3 note",
+      "text": "\"models/café #1 \\\"screw\\\".STEP\"#o:4b1f9e2a7c03/f:9d2e8c1b5a70,e:12ab34cd56ef note",
       "cadPath": "models/café #1 \"screw\".STEP",
       "selectors": [
-        "o1.f2",
-        "o1.f3"
+        "o:4b1f9e2a7c03/f:9d2e8c1b5a70",
+        "o:4b1f9e2a7c03/e:12ab34cd56ef"
       ]
     },
     {
       "why": "Malformed quoted filenames are not partial references",
-      "text": "\"broken name.step#o1",
+      "text": "\"broken name.step#o:4b1f9e2a7c03",
       "cadPath": "",
       "selectors": null
     }

@@ -79,6 +79,14 @@ function sampleMeshData() {
   };
 }
 
+// Three leaves of an assembly whose tree puts the pin and the clip under one subassembly: each
+// an occurrence token (`o:` + 12 hex), which carries no hierarchy of its own.
+const NESTED_LEAVES = Object.freeze({
+  pin: "o:3f2a9c1d7e5b",
+  clip: "o:a1b2c3d4e5f6",
+  plate: "o:0f1e2d3c4b5a"
+});
+
 function nestedAssemblyMeshData() {
   return {
     vertices: new Float32Array([
@@ -110,8 +118,8 @@ function nestedAssemblyMeshData() {
     },
     parts: [
       {
-        id: "o1.2.1",
-        occurrenceId: "o1.2.1",
+        id: NESTED_LEAVES.pin,
+        occurrenceId: NESTED_LEAVES.pin,
         vertexOffset: 0,
         vertexCount: 3,
         triangleOffset: 0,
@@ -119,8 +127,8 @@ function nestedAssemblyMeshData() {
         bounds: { min: [0, 0, 0], max: [1, 1, 0] }
       },
       {
-        id: "o1.2.2",
-        occurrenceId: "o1.2.2",
+        id: NESTED_LEAVES.clip,
+        occurrenceId: NESTED_LEAVES.clip,
         vertexOffset: 3,
         vertexCount: 3,
         triangleOffset: 1,
@@ -128,8 +136,8 @@ function nestedAssemblyMeshData() {
         bounds: { min: [2, 0, 0], max: [3, 1, 0] }
       },
       {
-        id: "o1.3",
-        occurrenceId: "o1.3",
+        id: NESTED_LEAVES.plate,
+        occurrenceId: NESTED_LEAVES.plate,
         vertexOffset: 6,
         vertexCount: 3,
         triangleOffset: 2,
@@ -451,16 +459,20 @@ test("buildModel keeps source-mesh color buffers immutable across material refre
   scene.dispose();
 });
 
-test("buildModel selection can focus and hide subassembly occurrence descendants", () => {
+test("buildModel selection focuses and hides the leaves a subassembly expands to", () => {
+  // A focus or hide selector names leaf occurrences by token: cadgen expands a subassembly to
+  // its leaves (and resolves a label) before a job reaches the page, so the page matches each
+  // selector against a part exactly and never reads hierarchy out of an id.
+  const subassembly = [NESTED_LEAVES.pin, NESTED_LEAVES.clip];
   const focused = buildModel(THREE, nestedAssemblyMeshData(), {
     theme: cloneThemePresetSettings("workbench-light"),
     renderPartsIndividually: true,
     selection: {
-      focus: ["#o1.2"]
+      focus: subassembly.map((id) => `#${id}`)
     }
   });
 
-  assert.deepEqual(focused.displayRecords.map((record) => record.partId), ["o1.2.1", "o1.2.2"]);
+  assert.deepEqual(focused.displayRecords.map((record) => record.partId), subassembly);
   assert.deepEqual(focused.bounds, {
     min: [0, 0, 0],
     max: [3, 1, 0]
@@ -471,11 +483,11 @@ test("buildModel selection can focus and hide subassembly occurrence descendants
     theme: cloneThemePresetSettings("workbench-light"),
     renderPartsIndividually: true,
     selection: {
-      hide: ["o1.2"]
+      hide: subassembly
     }
   });
 
-  assert.deepEqual(hidden.displayRecords.map((record) => record.partId), ["o1.3"]);
+  assert.deepEqual(hidden.displayRecords.map((record) => record.partId), [NESTED_LEAVES.plate]);
   assert.deepEqual(hidden.bounds, {
     min: [10, 0, 0],
     max: [11, 1, 0]
