@@ -13,7 +13,7 @@ twice and the pin once) built through the real pipeline:
    artifact, and the rebuild re-creates the records without a new object;
 4. copied document bytes reuse the same canonical tree without a producer
    record, a text STEP parse, or a compile;
-5. the document renders identically with NO source and with BROKEN source —
+5. the document renders the same with NO source and with BROKEN source —
    README law 1, over the sidecar-driven surfaces (pose, clip frame, label
    focus, animated GLB) that properties 2 and 3 do not reach.
 """
@@ -31,7 +31,18 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import numpy as np
+
+from tests.python.support.mesh_geometry import (
+    glb_accessor,
+    glb_document,
+    glb_mesh_triangles,
+    glb_without_mesh_data,
+    mesh_deviation,
+    tolerance_of,
+)
 from tests.python.support.paths import add_repo_path
+from tests.python.support.png import largest_block_difference, read_png
 from tests.python.support.tmp_root import temporary_directory
 
 add_repo_path("packages/cadgen/src")
@@ -380,6 +391,43 @@ class TwoSidesLaw(unittest.TestCase):
         self.assertEqual(3, len(stills), "the three sidecar-driven stills are the same image")
         return produced
 
+    def _assert_same_still(self, expected: bytes, actual: bytes, name: str) -> None:
+        """The two stills show one scene: averaged over 4 x 4 pixel blocks they agree to
+        within 2 of 255 on every block and channel. Beside its source the document draws
+        the parts its build derived from the bodies it held; alone, the parts derived from
+        those bodies read back from the file -- one part each (README law 20) whose
+        triangles are cut another way, which moves a pixel or two along an edge (measured:
+        four pixels of 43,200, a block mean by 0.1). A pose not taken, a frame not played or
+        a focus not framed moves whole blocks by eighty and more."""
+        difference = largest_block_difference(read_png(expected), read_png(actual))
+        self.assertLessEqual(difference, 2.0, f"{name} shows another scene without its source "
+                             f"(a block of pixels differs by {difference:.1f} of 255)")
+
+    def _assert_same_animated_scene(self, expected: bytes, actual: bytes) -> None:
+        """The two animated GLBs are one scene: the same nodes, placements, materials and
+        animation (the sidecar's keyframes, byte for byte), and each mesh the same geometry
+        within the display tolerance. The meshes' bytes may differ: beside its source the
+        document draws the parts its build derived from the bodies it held; alone, the parts
+        derived from those bodies read back from the file -- one part each (README law 20),
+        meshed from other bytes (law 5: compared by geometry, never by file hash)."""
+        from cadgen.tessellation_policy import DISPLAY_TESSELLATION
+
+        (expected_document, expected_binary), (document, binary) = glb_document(expected), glb_document(actual)
+        self.assertEqual(glb_without_mesh_data(expected_document), glb_without_mesh_data(document),
+                         "the animated GLB's scene differs without its source")
+        for index, animation in enumerate(expected_document.get("animations", [])):
+            for sampler, actual_sampler in zip(animation["samplers"], document["animations"][index]["samplers"]):
+                for role in ("input", "output"):
+                    self.assertTrue(np.array_equal(glb_accessor(expected_document, expected_binary, sampler[role]),
+                                                   glb_accessor(document, binary, actual_sampler[role])),
+                                    "the baked animation's keyframes differ without their source")
+        expected_meshes, meshes = glb_mesh_triangles(expected_document, expected_binary), glb_mesh_triangles(document, binary)
+        self.assertEqual(sorted(expected_meshes), sorted(meshes))
+        for name, triangles in expected_meshes.items():
+            self.assertLessEqual(mesh_deviation(triangles, meshes[name]),
+                                 tolerance_of(DISPLAY_TESSELLATION["chordTolerance"], triangles, meshes[name]),
+                                 f"mesh {name} describes other geometry without its source")
+
     @unittest.skipUnless(shutil.which("node"), "the render runtimes need node")
     def test_property_5_a_document_renders_with_no_source_and_with_broken_source(self) -> None:
         """Law 1: deleting every ``.py`` must not change what renders.
@@ -389,8 +437,11 @@ class TwoSidesLaw(unittest.TestCase):
         a file that does not parse and the only companion module is the retired
         ``.step.js`` a renderer must ignore. Every sidecar-driven surface — a
         declared pose, a clip frame, a label focus, and a baked animated GLB —
-        has to come back byte-for-byte what the same commands produced beside
-        the source.
+        has to come back what the same commands produced beside the source: the
+        stills the same picture, the GLB the same scene with each mesh the same
+        geometry (beside its source the document draws the parts its build
+        derived from the bodies it held, alone the parts derived from the file's
+        read-back of them: one part each, README law 20, other mesh bytes).
         """
         reference = self._render_and_export("robot.step", cwd=self.root, cache=None)
 
@@ -407,7 +458,10 @@ class TwoSidesLaw(unittest.TestCase):
         isolated = self._render_and_export("robot.step", cwd=elsewhere, cache=isolated_cache)
 
         for name, expected in reference.items():
-            self.assertEqual(expected, isolated[name], f"{name} differs without its source")
+            if name == "clip.glb":
+                self._assert_same_animated_scene(expected, isolated[name])
+            else:
+                self._assert_same_still(expected, isolated[name], name)
 
         # Nothing ran or recorded Python: a compile keys its record on the
         # DOCUMENT, so every record in the isolated store is step-sourced.

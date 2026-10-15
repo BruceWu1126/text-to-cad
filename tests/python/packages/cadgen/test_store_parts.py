@@ -187,6 +187,46 @@ class PartStoreTest(unittest.TestCase):
         self.assertEqual(sorted(geometry_identity(read_back.wrapped)["faces"]),
                          sorted(geometry_identity(Solid.make_box(1, 2, 3).wrapped)["faces"]))
 
+    def test_an_export_at_a_tolerance_meshes_the_bytes_it_decodes(self) -> None:
+        """The part of a body and of its read-back is one, so its stored table lists the
+        elements of whichever derived it; an export at another tolerance builds the table
+        for the bytes it decodes, and its mesh is the same whichever body derived the part
+        (README law 5). A sphere: its seam is drawn and its two pole edges are not, and the
+        read-back lists the three in another order, so a table of the wrong decode would
+        draw a pole and hide the seam."""
+        from build123d import Solid, export_step, import_step
+
+        from cadgen._internal.topology_extract import extract_topology_facts
+        from cadgen.store.meshes import EDGE_CLASSES, decode_payload
+
+        def edge_classes(entry: dict) -> list[str]:
+            return [edge["class"] for edge in extract_topology_facts(parts._decoded(entry)[0])["edges"]]
+
+        body = Solid.make_sphere(3)
+        step = self.root / "sphere.step"
+        export_step(body, str(step))
+        read_back = import_step(str(step))
+        held, _, _ = build_tree_from_compound(body, root_name="sphere")
+        read, _, _ = build_tree_from_compound(read_back, root_name="sphere")
+        held_entry = next(iter(capture_tree(held, retain_payloads=False)[0]["components"].values()))
+        read_entry = next(iter(capture_tree(read, retain_payloads=False)[0]["components"].values()))
+        key = parts.part_key(held_entry, self.producer)
+        self.assertEqual(parts.part_key(read_entry, self.producer), key, "one part")
+        self.assertEqual(sorted(edge_classes(held_entry)), sorted(edge_classes(read_entry)))
+        self.assertNotEqual(edge_classes(held_entry), edge_classes(read_entry),
+                            "the read-back lists its edges in another order: the fixture tells a table of "
+                            "the wrong decode apart")
+
+        parts.derive(held)
+        from_held_table = parts.mesh_at(read_entry, key, 2e-3, 0.5)
+        with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store-alone")}):
+            build_tree_from_compound(read_back, root_name="sphere")
+            parts.derive(read)
+            alone = parts.mesh_at(read_entry, key, 2e-3, 0.5)
+        self.assertEqual(from_held_table, alone, "the read-back meshes differently once the body derived its part")
+        self.assertEqual([EDGE_CLASSES[int(row[3])] for row in decode_payload(alone).edges], ["seam"],
+                         "the seam is drawn as the seam and the poles are not drawn")
+
 
 class PartRecordTest(unittest.TestCase):
     """A record a reader cannot trust is no record: to every reader the store lacks the part."""

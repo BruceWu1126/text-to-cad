@@ -9,6 +9,12 @@ derives the meshes it draws. They share a key, so whichever arrives first
 decides what every later export of that document reads -- and the bytes must
 not care which one that was.
 
+One boundary is geometry's, not bytes': the build's own export meshes the body
+the build held, and a door's from an empty store meshes that body read back from
+the file -- one part (law 20), other bytes, their faces in another order -- so
+across it the two meshes are compared within the tolerance they were made at
+(law 5: by geometry, never by file hash).
+
 The fixture is a box, a CYLINDER and a second box: an analytic curved face is
 what carries a seam, and a box-only model would pass either way.
 """
@@ -23,6 +29,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
+from tests.python.support.mesh_geometry import binary_stl_triangles, mesh_deviation, tolerance_of
 from tests.python.support.paths import add_repo_path
 
 add_repo_path("packages/cadgen/src")
@@ -152,10 +159,13 @@ class MeshExportEngineDeterminismTest(unittest.TestCase):
                     "mesh a document exports depends on which path reached the store "
                     "first (law 5)",
                 )
-        self.assertEqual(
-            built, (cold_dir / "out.stl").read_bytes(),
-            "the build's own STL, derived in its process, differs from a door's, derived "
-            "in build-pool jobs from an empty store (law 5)",
+        from cadgen.tessellation_policy import DISPLAY_TESSELLATION
+
+        own, door = binary_stl_triangles(built), binary_stl_triangles((cold_dir / "out.stl").read_bytes())
+        self.assertLessEqual(
+            mesh_deviation(own, door), tolerance_of(DISPLAY_TESSELLATION["chordTolerance"], own, door),
+            "the build's own STL, meshed in its process from the body it held, describes other "
+            "geometry than a door's, meshed in build-pool jobs from the body read back from the file (law 5)",
         )
 
 

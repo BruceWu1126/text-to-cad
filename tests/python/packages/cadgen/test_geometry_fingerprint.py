@@ -120,15 +120,19 @@ class FingerprintTest(unittest.TestCase):
         from OCP.TopoDS import TopoDS_Edge
 
         from cadgen._internal.geometry_fingerprint import _edge_facts
+        from cadgen._internal.topology_extract import component_metrics
+
+        def facts(edge):
+            return _edge_facts(edge, component_metrics(edge)["edges"][0])
 
         circle = Geom_Circle(gp_Ax2(gp_Pnt(1, 2, 3), gp_Dir(0, 0, 1)), 5.0)
         bare = TopoDS_Edge()
         BRep_Builder().MakeEdge(bare, circle, 1e-7)
         with_vertices = BRepBuilderAPI_MakeEdge(circle).Edge()
-        for bare_end, vertex_end in zip(_edge_facts(bare)["ends"], _edge_facts(with_vertices)["ends"]):
+        for bare_end, vertex_end in zip(facts(bare)["ends"], facts(with_vertices)["ends"]):
             for a, b in zip(bare_end, vertex_end):
                 self.assertAlmostEqual(a, b, places=9)
-        self.assertAlmostEqual(_edge_facts(bare)["length"], 2 * math.pi * 5.0, places=6)
+        self.assertAlmostEqual(facts(bare)["length"], 2 * math.pi * 5.0, places=6)
 
     def test_the_quantum_is_a_power_of_two_relative_to_the_extent(self) -> None:
         for extent in (0.001, 1.0, 37.5, 1e4):

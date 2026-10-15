@@ -741,7 +741,7 @@ def _encode_brep(shape: Any) -> dict[str, Any]:
     raise CodecFidelityError("; ".join(failures))
 
 
-def geometric_identity_fields(shape: Any, colors: Mapping[int, Any]) -> dict[str, Any]:
+def geometric_identity_fields(shape: Any, colors: Mapping[int, Any], *, brep: str | None = None) -> dict[str, Any]:
     """The entry fields that name a native component by its geometry (README law
     20): its ``fingerprint`` and, for each face with an intrinsic colour, that
     face's token (``faceTokens``, by ordinal) -- what its part is keyed by
@@ -751,7 +751,7 @@ def geometric_identity_fields(shape: Any, colors: Mapping[int, Any]) -> dict[str
 
     from cadgen._internal.geometry_fingerprint import geometry_identity
 
-    identity = geometry_identity(getattr(shape, "wrapped", shape).Located(TopLoc_Location()))
+    identity = geometry_identity(getattr(shape, "wrapped", shape).Located(TopLoc_Location()), brep=brep)
     fields: dict[str, Any] = {"fingerprint": identity["fingerprint"]}
     if colors:
         fields["faceTokens"] = {int(ordinal): identity["faces"][int(ordinal) - 1] for ordinal in colors}
@@ -796,7 +796,7 @@ def prepare_geometry_component(shape: Any, *, face_colors: object = None) -> dic
             extract_topology_facts(getattr(shape, "wrapped", shape).Located(TopLoc_Location())))
         entry["topology"] = hashlib.sha256(topology).hexdigest()
     else:
-        entry.update(geometric_identity_fields(private, colors))
+        entry.update(geometric_identity_fields(private, colors, brep=entry["brep"]))
     entry["contentHash"] = geometry_component_hash(
         entry["codec"], payload, colors, kind=kind, topology=entry.get("topology"),
     )

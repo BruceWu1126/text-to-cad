@@ -587,10 +587,13 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   encoding refuses -- is the component's `MeshProductionError`. A mesh export
   at the display tolerance
   writes the stored display meshes; one at any other tolerance meshes each part
-  in the exporting process from the very inputs its display mesh was made from
-  -- the BREP, the stored selector table and the face colours (`parts.mesh_at`),
-  so nothing is extracted -- and stores nothing (the file is the output;
-  `_internal/mesh_export.py`). Tolerances outside the tessellation policy's
+  in the exporting process the way its display mesh was made -- from the BREP,
+  its face colours and a selector table built for that BREP (`parts.mesh_at`;
+  the stored table may be another decode's of the same part, the body a build
+  held where the export decodes the file's read-back, listing the elements in
+  its own order) -- and stores nothing (the file is the output;
+  `_internal/mesh_export.py`). A mesh of one BREP at one tolerance is the same
+  bytes whichever body derived the part (README law 5). Tolerances outside the tessellation policy's
   bounds (`tessellation_policy.tolerance_refusal`) are refused, never meshed. No
   client writes a part: every reader probes and reads, and the routes refuse a
   POST to an object (405).

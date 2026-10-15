@@ -21,8 +21,11 @@ table's counts. One probe answers whether a part's display data is stored.
 Derivation extracts the component's topology facts in memory (an eager-only component's
 are the object its tree pins), builds the selector table from them, meshes the component
 from the table and its face colours, writes the two objects and then the record, so a
-record always names complete objects. Nothing stores the facts. A mesh export at another
-tolerance meshes from the stored table the same way and stores nothing (``mesh_at``).
+record always names complete objects. Nothing stores the facts. The table's ordinals are
+the derived decode's: the part of a body and its read-back is one, its stored table lists
+the elements of whichever derived it. A mesh export at another tolerance therefore builds
+the table for the bytes it decodes, the same way, and stores nothing (``mesh_at``): its
+mesh is the decode's and the tolerance's, whichever body derived the part (README law 5).
 """
 from __future__ import annotations
 
@@ -403,7 +406,19 @@ def _topology(entry: dict, topods: Any) -> dict:
         return read_topology_facts(read_verified_object(entry["topology"]))
     from cadgen._internal.topology_extract import extract_topology_facts
 
-    return extract_topology_facts(topods)
+    return extract_topology_facts(topods, brep=entry["brep"])
+
+
+def _table(entry: dict, topods: Any) -> dict:
+    """The component's selector table, built for this decode: its facts and its geometric
+    identity, whose element tokens are minted from the decode (for a native component the
+    tokens the build's entry names: one geometry, one scheme) and whose ordinals are the
+    decode's own. The faces and edges are measured once per component per process, for
+    the facts and the identity together (``topology_extract.component_metrics``)."""
+    from cadgen._internal.geometry_fingerprint import geometry_identity
+    from cadgen._internal.selector_table import build_selector_table
+
+    return build_selector_table(topods, _topology(entry, topods), geometry_identity(topods, brep=entry["brep"]))
 
 
 def _derive(entry: dict, key: str, keep_going: Callable[[], bool] | None = None) -> dict | None:
@@ -414,15 +429,13 @@ def _derive(entry: dict, key: str, keep_going: Callable[[], bool] | None = None)
         return prior
     if keep_going is not None and not keep_going():
         return None
-    from cadgen._internal.selector_table import build_selector_table, selector_table_bytes
+    from cadgen._internal.selector_table import selector_table_bytes
     from cadgen._internal.tessellate import mesh_component
     from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
     with _meshing():
         topods, colors = _decoded(entry)
-        # The table's element tokens are minted from this decode of the component: for a native
-        # component they are the tokens the build's entry names (one geometry, one scheme).
-        table = build_selector_table(topods, _topology(entry, topods))
+        table = _table(entry, topods)
         glb = mesh_component(topods, table, colors, part=key, chord=DISPLAY_TESSELLATION["chordTolerance"],
                              angle=DISPLAY_TESSELLATION["angleTolerance"])
         return _write(key, glb, selector_table_bytes(table))
@@ -432,17 +445,17 @@ def mesh_at(entry: dict, key: str, chord: float, angle: float) -> bytes:
     """The GLB body of the part ``key`` names, at ``chord``/``angle``, meshed in this process
     and stored nowhere: a mesh export at a tolerance other than the display one
     (``_internal/mesh_export.py``), whose file is the output. ``entry`` is the component's
-    tree entry. The mesher reads what the display mesh's read -- the part's stored
-    selector table and the component's face colours -- so nothing is extracted."""
-    from cadgen._internal.selector_table import read_selector_table
-    from cadgen._internal.tessellate import MeshProductionError, mesh_component
+    tree entry. The mesher reads what the display mesh's read -- a selector table and the
+    component's face colours -- with the table built here for the bytes it decodes, as a
+    derivation builds it: the stored table may be another decode's of the same part (the
+    body a build held, where this is its read-back: law 20), listing the elements in
+    another order, and a mesh of these bytes at this tolerance is the same whichever body
+    derived the part (law 5)."""
+    from cadgen._internal.tessellate import mesh_component
 
-    payload = read(key, "selectors")
-    if payload is None:
-        raise MeshProductionError(f"part {key} has no stored selector table")
     with _meshing():
         topods, colors = _decoded(entry)
-        return mesh_component(topods, read_selector_table(payload), colors, part=key, chord=chord, angle=angle)
+        return mesh_component(topods, _table(entry, topods), colors, part=key, chord=chord, angle=angle)
 
 
 def _captured(tree_hash: str, producer: dict | None) -> tuple[dict, dict]:
