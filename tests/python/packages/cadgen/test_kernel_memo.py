@@ -15,7 +15,9 @@ in process, no store.
 from __future__ import annotations
 
 import os
+import re
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from tests.python.support.paths import add_repo_path
@@ -377,9 +379,9 @@ class TraceTest(KernelMemoCase):
 
         _, _, run = _run(model)
         ids = [feature.id for feature in run.trace.features]
-        here = __file__
+        here = Path(__file__).as_posix()  # the trace names a file the same on every OS
         box_line = ids[0]
-        self.assertRegex(box_line, rf"^fe:Solid\.make_box@{here}:\d+#1$")
+        self.assertRegex(box_line, rf"^fe:Solid\.make_box@{re.escape(here)}:\d+#1$")
         self.assertTrue(all(feature.file == here for feature in run.trace.features))
         self.assertEqual(run.trace.features[0].function, "model")
         # A line that ran twice numbers its runs; the same operation elsewhere starts at 1.

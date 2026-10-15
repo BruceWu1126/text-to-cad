@@ -150,6 +150,12 @@ class ProvenanceCase(unittest.TestCase):
         return json.loads(why.stdout.strip())["record"]
 
 
+def _posix(model: str) -> str:
+    """A store model reference (``<path>::<function>``, the path native) with its path as POSIX."""
+    path, _, function = model.rpartition("::")
+    return f"{Path(path).as_posix()}::{function}"
+
+
 class TheEntry(ProvenanceCase):
     def test_a_build_writes_one_beside_its_record_for_its_tree_and_its_document(self) -> None:
         from cadgen._internal.step_hash import step_file_hash
@@ -161,7 +167,7 @@ class TheEntry(ProvenanceCase):
         for name, entry in by_model.items():
             record = self._record(f"src/{name}.py")
             self.assertEqual(("provenance", 1), (entry["kind"], entry["schemaVersion"]))
-            self.assertTrue(entry["model"].endswith(f"src/{name}.py::{name}"))
+            self.assertTrue(_posix(entry["model"]).endswith(f"src/{name}.py::{name}"))
             self.assertEqual(record["tree"], entry["tree"])
             self.assertEqual(record["stepHash"], entry["stepHash"])
             self.assertEqual(step_file_hash(self.root / "STEP" / f"{name}.step"), entry["stepHash"])
@@ -201,7 +207,7 @@ class StoreWhere(ProvenanceCase):
         answers = [self._where(ref) for ref in bar["cylinders"]]
         self.assertEqual(5, len(answers))
         self.assertTrue(all(code == 0 and answer["known"] and answer["kind"] == "face" for code, answer in answers))
-        self.assertTrue(all(answer["model"].endswith("src/arm.py::arm") for _code, answer in answers))
+        self.assertTrue(all(_posix(answer["model"]).endswith("src/arm.py::arm") for _code, answer in answers))
         lineages = {
             (answer["made"]["file"], answer["made"]["function"], answer["made"]["op"],
              answer["modified"]["op"] if answer["modified"] else None)
@@ -243,7 +249,7 @@ class StoreWhere(ProvenanceCase):
         left = self.refs["pin_left"]
         code, answer = self._where(left["cylinders"][0])
         self.assertEqual(0, code, answer)
-        self.assertTrue(answer["model"].endswith("src/pin.py::pin"), answer["model"])
+        self.assertTrue(_posix(answer["model"]).endswith("src/pin.py::pin"), answer["model"])
         self.assertEqual(("pin.py", "pin", "Solid.make_cylinder"),
                          (answer["made"]["file"], answer["made"]["function"], answer["made"]["op"]))
         self.assertIsNone(answer["modified"])
