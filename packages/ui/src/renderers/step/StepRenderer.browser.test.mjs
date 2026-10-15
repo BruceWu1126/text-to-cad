@@ -1421,6 +1421,85 @@ test('a warm package opens with a probe per chunk and its bodies in batches, and
   assert.deepEqual(errors, []);
 });
 
+// The build feed's preview revision (cadgen's STORE.md 9b): drawn in the saved file's place the
+// moment the feed names it, labelled; its annotations bind Position and the routine; its save
+// replaces it in place, reading no part again and resetting nothing. Its own harness: the file is
+// listed at first without its sidecar, so the Position the preview's annotations bring is theirs.
+test('a build\'s preview revision is drawn in the saved file\'s place, labelled; its annotations bind Position; its save replaces it with nothing read again and nothing reset', async (t) => {
+  const staged = [];
+  const bare = await serveStepHarness({ after: cleanup => staged.push(cleanup) }, { bare: true });
+  t.after(async () => { for (const cleanup of staged.reverse()) await cleanup(); });
+  const { page, pane, errors } = await bare.open();
+  await pane.locator('[aria-busy="false"] > div > canvas').first().waitFor();
+  await page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
+  await pane.getByRole('region', { name: 'Features', exact: true }).waitFor();
+  const state = () => page.evaluate(() => window.cadHarness.a.controller.readState());
+  const strip = name => pane.locator('[data-cad-toolbar]').getByRole('button', { name, exact: true });
+  const label = pane.locator('[data-view-preview-label]');
+  const sent = pattern => bare.requests.filter(request => pattern.test(request)).length;
+  const partReads = /\/__tess_cache\/|\/__cad\/parts/;
+  const saved = (await state()).revision;
+  assert.equal(await strip('Position').count(), 0, 'the file as saved declares no mates: nothing to pose');
+  // A pick on the saved file; the preview is another tree, and takes it with it, as a save does.
+  await pane.getByRole('button', { name: 'Select base', exact: true }).click();
+  await page.waitForFunction(id => window.cadHarness.a.controller.readState().selectedPartIds.join() === id, ids.base);
+
+  // The build begins: the model on screen is updating, and still the saved file.
+  bare.announce({ state: 'building', phase: 'generate' });
+  await pane.locator('[data-view-update-status]').waitFor();
+  assert.equal(await label.count(), 0);
+  // Its result exists: the feed names the preview -- its tree, every component's part (the saved
+  // file's, by key) -- and the viewport draws it in the file's place, labelled, the wait over.
+  const readsBefore = sent(partReads);
+  const preview = bare.preview();
+  bare.announce({ state: 'building', phase: 'finalize', preview: preview.named() });
+  await label.waitFor();
+  assert.equal((await label.innerText()).trim(), 'Preview');
+  await pane.locator('[data-view-update-status]').waitFor({ state: 'detached' });
+  await page.waitForFunction(() => window.cadHarness.a.controller.readState().loading === false);
+  assert.equal(sent(partReads), readsBefore, 'the preview\'s parts are the saved file\'s: none read again');
+  assert.equal(sent(new RegExp(`/__cad/store\\?file=%2F${preview.tree}%2Fassembly\\.json&producer=`)), 1, 'its view, read once at its tree with the producer');
+  const shown = await state();
+  assert.deepEqual([shown.preview, shown.revision, shown.selectedPartIds], [true, saved, []], 'labelled a preview, of the saved file\'s revision, the pick on another tree gone');
+  const boxes = partBoxes(await frame(pane));
+  assert.ok(boxes.base?.count > 500 && boxes.arm?.count > 300, `both parts drawn: ${JSON.stringify(boxes)}`);
+  // The annotations named: the Position tool binds to the preview's mates, and a pose is set on it.
+  bare.announce({ state: 'building', phase: 'finalize', preview: preview.named({ annotations: preview.annotations }) });
+  await strip('Position').waitFor();
+  await strip('Animation').waitFor();
+  await strip('Position').click();
+  const slider = page.getByLabel('hinge slider value', { exact: true });
+  await slider.fill('60');
+  await slider.press('Enter');
+  await page.waitForFunction(id => Math.abs(window.__cadDisplayRecords().find(record => record.partId === id).matrix[13]) > 1, ids.arm);
+  const armAt = () => page.evaluate(id => window.__cadDisplayRecords().find(record => record.partId === id).matrix.slice(12, 15), ids.arm);
+  const posed = await armAt();
+  // Back under Select (a selection lives only there), a pick on the preview resolves against it, by token.
+  await strip('Select').click();
+  await pane.getByRole('button', { name: 'Select base', exact: true }).click();
+  await page.waitForFunction(id => window.cadHarness.a.controller.readState().selectedPartIds.join() === id, ids.base);
+
+  // The save lands: the catalog names the saved revision -- the same part keys, the same tokens, the
+  // same mates and routine -- and it replaces the preview in place: the label goes, no part is read
+  // again, and neither the pick nor the pose moves.
+  const readsBeforeSave = sent(partReads);
+  const revision = bare.revise();
+  bare.announce({ state: 'done', preview: preview.named({ annotations: preview.annotations }) });
+  await page.waitForFunction(wanted => {
+    const state = window.cadHarness.a.controller?.readState();
+    return state?.revision === wanted && state.loading === false && state.preview === false;
+  }, revision);
+  await label.waitFor({ state: 'detached' });
+  assert.equal(sent(partReads), readsBeforeSave, 'the saved file\'s parts are the preview\'s: none read again');
+  const settled = await state();
+  assert.deepEqual([settled.selectedPartIds, settled.preview], [[ids.base], false], 'the pick survives its own save');
+  assert.deepEqual(await armAt(), posed, 'the arm stays where it was posed');
+  await strip('Position').click();
+  await slider.waitFor();
+  assert.match(await slider.inputValue(), /^60(\.0+)?°$/, 'the pose survives its own save');
+  assert.deepEqual(errors, []);
+});
+
 test('mobile touch: a tap selects, and a two-finger pinch zooms without selecting', async () => {
   const view = await open({ hasTouch: true, timeout: 10000 });
   const { page, pane, errors } = view;

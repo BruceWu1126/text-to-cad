@@ -175,6 +175,31 @@ export function reviseFixture(fixture, revision) {
 }
 
 /**
+ * A build's preview revision of the fixture, as its feed names it before the STEP is written (cadgen's
+ * STORE.md 9b): the model's result tree -- another tree, whose components are the result's own bodies
+ * under ids of their own, each named by the same part key as the saved file's (a part is named by its
+ * geometry) and placed by the same occurrence tokens -- read at its tree with the producer, and naming
+ * no document. `preview` numbers it. `parts` is the feed's map, `{cid: part key}`, and `annotations`
+ * the object the build resolves the model's declarations into against the tree: the fixture's
+ * articulation and routine, as the saved file's row will carry them.
+ */
+export function stagePreviewFixture(fixture, preview) {
+  const digest = text => createHash('sha256').update(`preview:${text}:${preview}`).digest('hex');
+  const renamed = new Map(Object.keys(fixture.view.components).map(cid => [cid, digest(cid).slice(0, 16)]));
+  const components = Object.fromEntries(Object.entries(fixture.view.components).map(([cid, component]) => {
+    const id = renamed.get(cid);
+    return [id, { ...component, contentHash: `${id}${digest(component.contentHash).slice(16)}`, brep: `components/${id}.brep` }];
+  }));
+  const occurrences = fixture.view.occurrences.map(occurrence => ({ ...occurrence, component: renamed.get(occurrence.component) }));
+  const { documentHash: _saved, ...result } = fixture.view;
+  const view = { ...result, tree: digest(fixture.view.tree), viewId: digest(fixture.view.viewId), components, occurrences };
+  const annotations = { kind: 'preview-annotations', schemaVersion: 1, tree: view.tree,
+    articulation: fixture.articulation, appearance: null, display: null, animation: fixture.sidecar?.animation ?? null };
+  return { ...fixture, view, assembly: Buffer.from(JSON.stringify(view)),
+    parts: Object.fromEntries(Object.entries(components).map(([cid, component]) => [cid, component.part])), annotations };
+}
+
+/**
  * cadgen's part store as the harness serves it: every component of `fixture` has its part -- its
  * display mesh, encoded as the store keeps it for whatever part names it (a staged component shares
  * its shape's mesh), and its selector table -- under the record that names both. `warm` holds every
@@ -232,13 +257,15 @@ async function meshStore(fixture, { warm = false } = {}) {
  * name in.
  */
 export function stepCatalogEntry({ view, sidecar, articulation, assembly, file }) {
+  // The kind is the tree's answer (`entryKind`), as the scanner relays it: a sidecar changes nothing of it.
+  const kind = view.entryKind === 'assembly' ? 'assembly' : 'part';
   if (!sidecar) {
-    return { file: `/models/${file}`, kind: 'part', url: `/__cad/store?file=${view.tree}&documentHash=${view.documentHash}`,
+    return { file: `/models/${file}`, kind, url: `/__cad/store?file=${view.tree}&documentHash=${view.documentHash}`,
       hash: view.tree, documentHash: view.documentHash, bytes: assembly.length };
   }
   return {
     file: `/models/${file}`,
-    kind: 'assembly',
+    kind,
     url: `/__cad/store?file=${view.tree}&documentHash=${view.documentHash}`,
     hash: view.tree,
     documentHash: view.documentHash,
@@ -296,7 +323,7 @@ function harnessBundle() {
  *
  * @param {{ after: (cleanup: () => unknown) => void }} lifetime — a test context, or
  *   any object with its `after`, so one server and one browser can span a whole file.
- * @param {{ progressive?: boolean, singlePart?: boolean, warmCache?: boolean }} [options]
+ * @param {{ progressive?: boolean, singlePart?: boolean, warmCache?: boolean, bare?: boolean }} [options]
  *   `progressive` serves the twenty-five-component staging (`stageProgressiveFixture`) and
  *   HOLDS each batch after the first until
  *   `release(gate)` is called, so the package's three publishes are a test's to place
@@ -304,17 +331,25 @@ function harnessBundle() {
  *   declares. `singlePart` serves the base alone as a cadgen single-part STEP
  *   (`stageSinglePartFixture`), its part named `base` in `hinge_base.step`. `warmCache` serves a mesh
  *   store that already holds every component's display mesh (`meshStore`); without it the
- *   store is cold, and a component's mesh is made when its part request asks for it.
+ *   store is cold, and a component's mesh is made when its part request asks for it. `bare` lists
+ *   the file at first without its sidecar -- no mates, no routine -- as a model whose declarations
+ *   its next build is the first to resolve; a revision (`revise`) is listed with them.
  */
-export async function serveStepHarness(t, { progressive = false, singlePart = false, warmCache = false } = {}) {
+export async function serveStepHarness(t, { progressive = false, singlePart = false, warmCache = false, bare = false } = {}) {
   const loaded = await loadStepFixture();
   const fixture = progressive ? stageProgressiveFixture(loaded) : singlePart ? stageSinglePartFixture(loaded) : loaded;
   const meshes = await meshStore(fixture, { warm: warmCache });
-  const entry = stepCatalogEntry(fixture);
+  const entry = stepCatalogEntry(bare ? { ...fixture, sidecar: null, articulation: null } : fixture);
   // The file as the catalog lists it now (`revise`), and every revision a page may still ask
   // for, by its tree.
   let current = fixture, listed = entry, revisions = 0;
   const views = new Map([[fixture.view.tree, fixture]]);
+  // The file's build feed (`GET /__cad/preview`), as a test announces it (`announce`): the newest
+  // build's status and the preview revision it names, answered at once with a cursor that moves
+  // with each announcement, which paces the client's feed. Until a test announces, no build is
+  // listed. The annotations objects a preview names, by hash (`GET /__cad/store?annotations=`).
+  let feed = { state: 'disconnected', revision: null }, feedSerial = 0, previews = 0;
+  const annotationObjects = new Map();
   // Each gate is a latch a test can close again (`hold`), so one server can serve the same
   // package progressively more than once — an open, and then a REOPEN in a fresh page. A
   // component behind a closed gate is one cadgen is still meshing (`stageProgressiveFixture`).
@@ -358,6 +393,10 @@ export async function serveStepHarness(t, { progressive = false, singlePart = fa
     if (url.pathname === '/styles.css') { response.setHeader('Content-Type', 'text/css'); response.end(css); return; }
     if (url.pathname === '/harness.css') { response.setHeader('Content-Type', 'text/css'); response.end(bundledCss); return; }
     if (url.pathname.endsWith('/__cad/catalog')) { json(response, { entries: [failing ? unbuiltEntry(listed) : listed] }); return; }
+    if (url.pathname.endsWith('/__cad/preview')) {
+      json(response, { output: `/models/${fixture.file}`, file: `/models/${fixture.file}`, ...feed, feedCursor: `harness:${feedSerial}` });
+      return;
+    }
     if (url.pathname.endsWith('/__cad/server')) { json(response, { backend: 'cadgen' }); return; }
     if (url.pathname.endsWith('/__cad/artifact')) {
       json(response, failing ? { state: 'failed', reason: 'build_failed', error: 'failed to read STEP file: the CAD kernel could not parse it' }
@@ -384,6 +423,11 @@ export async function serveStepHarness(t, { progressive = false, singlePart = fa
       return;
     }
     if (url.pathname.endsWith('/__cad/store')) {
+      const annotations = url.searchParams.get('annotations');
+      if (annotations) {
+        if (annotationObjects.has(annotations)) json(response, annotationObjects.get(annotations)); else notFound(response);
+        return;
+      }
       const file = url.searchParams.get('file') || '';
       if (file.endsWith('/assembly.json')) {
         const shown = views.get(file.split('/')[0]) || fixture;
@@ -496,6 +540,26 @@ export async function serveStepHarness(t, { progressive = false, singlePart = fa
     }, timeout);
     idlers.push(done);
   });
+  /**
+   * A build of the file, as its feed reports it from now on: `status` is the feed's answer but its
+   * cursor (`state`, `phase`, `error`, `superseded`, `preview`; one build, revision 1, unless named).
+   */
+  const announce = status => { feed = { epoch: 'harness', revision: 1, ...status }; feedSerial += 1; };
+  /**
+   * A build's preview revision of the file as it is listed now (`stagePreviewFixture`): its view is
+   * served at its tree, its annotations object stored under its hash. Answers what the feed names
+   * of it -- `tree`, `parts`, `annotations` (the hash) -- and `named(extra)`, the feed's `preview`
+   * field for it, every part named and the annotations not, unless `extra` says otherwise.
+   */
+  const preview = () => {
+    previews += 1;
+    const staged = stagePreviewFixture(current, previews);
+    views.set(staged.view.tree, staged);
+    const annotations = createHash('sha256').update(JSON.stringify(staged.annotations)).digest('hex');
+    annotationObjects.set(annotations, staged.annotations);
+    const named = (extra = {}) => ({ tree: staged.view.tree, producer: staged.view.producer, parts: staged.parts, complete: true, annotations: null, ...extra });
+    return { tree: staged.view.tree, parts: staged.parts, annotations, named };
+  };
   return { open, closePages, requests, idle, fixture, release: gate => { closed.delete(gate); }, hold,
-    declare: on => { declaring = on !== false; } };
+    declare: on => { declaring = on !== false; }, announce, preview, revise };
 }
