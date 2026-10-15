@@ -30,7 +30,6 @@ are returned as private publication data, never inserted into that tree.
 
 from __future__ import annotations
 
-import math
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
