@@ -455,6 +455,9 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
         except Exception:  # noqa: BLE001
             _STATS["errors"] += 1
             return _plain(state, op, frame, kind, shapes, function, args, kwargs, capture=False)
+        # The inputs as given, before the call: an in-place operation (clean)
+        # leaves its input wrapping the result's TShape.
+        given = [_wrapped(shape).TShape() for shape in shapes]
         function_result = function(*args, **kwargs)
         result = args[0] if kind == "constructor" else function_result
         _STATS["misses"] += 1
@@ -477,8 +480,7 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
         if snapshot is None:
             _register(result, None, feature.index, state, None)
             return function_result
-        entry = _Entry(key=(key_id, n), inputs=[_wrapped(shape).TShape() for shape in shapes],
-                       snapshot=snapshot, effects=effects,
+        entry = _Entry(key=(key_id, n), inputs=given, snapshot=snapshot, effects=effects,
                        in_place=kind != "constructor" and bool(args) and result is args[0])
         entry.made = _register(result, entry.key, feature.index, state, entry)
         with _LOCK:

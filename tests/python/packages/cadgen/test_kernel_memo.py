@@ -182,6 +182,28 @@ class HitTest(KernelMemoCase):
         self.assertTrue(profile2.wrapped.IsPartner(profile.wrapped))
         self.assertEqual(_bytes(boss2.wrapped), _bytes(boss.wrapped))
 
+    def test_an_in_place_clean_that_rebuilds_its_shape_hits(self) -> None:
+        """``clean()`` leaves its input wrapping a new TShape: the entry must
+        remember the input as it was given, or every hot run misses it and
+        everything downstream of it."""
+        from build123d import Edge, Face, Location, Solid, Vector, Wire
+
+        def model():
+            points = [Vector(0, 0, 0), Vector(5, 0, 0), Vector(10, 0, 0), Vector(10, 5, 0), Vector(0, 5, 0)]
+            profile = Face(Wire([Edge.make_line(points[i], points[(i + 1) % 5]) for i in range(5)]))
+            prism = Solid.extrude(profile, Vector(0, 0, 4))
+            extruded = prism.wrapped.TShape()
+            prism.clean()  # merges the two side faces on one plane: a new TShape, in place
+            return prism.cut(Solid.make_cylinder(1, 30).moved(Location((5, 2.5, -5)))), extruded
+
+        (bored, extruded), cold, _ = _run(model)
+        self.assertEqual(len(bored.faces()), 7, "six faces of the cleaned prism and the bore")
+        (bored2, extruded2), hot, _ = _run(model)
+        self.assertEqual(extruded2, extruded, "the extrusion hit")
+        self.assertIs(bored2, bored)
+        self.assertEqual((hot["misses"], hot["unkeyable"]), (0, 0))
+        self.assertEqual(hot["hits"], cold["misses"])
+
     def test_split_results_are_sequences_of_the_same_objects(self) -> None:
         from build123d import Keep, Plane, Solid
 

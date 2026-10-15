@@ -835,6 +835,9 @@ def _generate_part_outputs(
             # Beside the record and after it: code side, read by `store where`
             # and by nothing on a render path.
             write_provenance(model_path, provenance, tree=tree_hash, step_hash=str(record.get("stepHash") or ""))
+        if kernel_run is not None:
+            # The run's trace was this job's: nothing after it reads the run.
+            scene.kernel_run = None
         if staged_step is not None:
             executors.emit_event(executors.model_event(
                 model_path, "building", phase="STEP saved",
