@@ -356,22 +356,37 @@ materials, or animation; no
 The gate decides whether a model runs at all (`STORE.md` §4), and the store
 derives everything render-side from the bytes the run wrote (law 2). Inside a
 run, every modeling operation executes once per distinct input, and never
-twice: the **kernel memo** (`_internal/kernel_memo.py`) remembers, in the warm
-worker's memory for the life of the process, the live result of every kernel
-construction -- primitives, copies and moves, booleans, sweeps and lofts,
-faces, cleaning, validity -- under a key made of the operation, its parameters
-and the keys of the shapes it was given, so a second run of the same code
-hands back **the same live objects** the first run made, down to the point
-where an input changed, and executes everything from there. A hit is the
-previous run's object itself: nothing is reconstructed from bytes, no copy
-stands in for what an operation returned, and what build123d's `==` and
-`is_same` answer is what they would answer in a run that happened to make
-those objects -- pointer identity is preserved along every chain of hits and
-every miss makes its downstream miss, which is why the memo is correct where
-the operation cache cadgen once kept (`index/op`, retired, `STORE.md` §8) was
-not: that one replayed bytes into fresh shapes, and model code that held an
-edge across an operation found nothing. The memo never reaches the store and
-never outlives the worker: a cold run computes everything. The hooks that
+twice: the **kernel memo** (`_internal/kernel_memo.py`) is one interception
+layer at build123d's topology layer, installed in the warm worker beside
+`determinism.py`, that sees every kernel construction the model's code calls
+-- primitives, booleans, fillets and chamfers, extrusions, sweeps and lofts,
+the faces, wires, shells and solids the constructors make, copies and moves,
+cleaning, validity, file imports -- and remembers, in the worker's memory for
+the life of the process, the live result of each under a key made of the
+operation, its parameters by value and the keys of the shapes it was given (a
+result by the operation that made it, a face or an edge by the shape it was
+taken from and its index there, a file by its bytes), so a second run of the
+same code hands back **the same live objects** the first run made, restored
+to the state the operation returned them in, down to the point where an input
+changed, and executes everything from there. A hit is the previous run's
+object itself: nothing is reconstructed from bytes, no copy stands in for what
+an operation returned, and what build123d's `==` and `is_same` answer is what
+they would answer in a run that happened to make those objects -- pointer
+identity is preserved along every chain of hits, a hit needs the very input
+objects the first run was given (a shape no operation of this process made
+runs its call uncached), and every miss makes its downstream miss, which is
+why the memo is correct where the operation cache cadgen once kept
+(`index/op`, retired, `STORE.md` §8) was not: that one replayed bytes into
+fresh shapes, and model code that held an edge across an operation found
+nothing. What the kernel does to an operation's inputs (a tolerance it
+raises, a representation it adds) is captured as the operation ran, replayed
+on a hit and undone when a later run no longer runs the operation, so a cold
+run and a hot run write the same bytes; an input changed in a way no replay
+expresses makes its maker forget it. The memo never reaches the store and
+never outlives the worker: a cold run computes everything, and
+`CADGEN_KERNEL_MEMO=0` runs every call plain. The same layer records each
+call from the model's own code as a **feature** (`_internal/kernel_trace.py`),
+which is what provenance is made of (law 20, `STORE.md` §3). The hooks that
 remain change no result: `determinism.py` fixes the iteration order of
 build123d's de-duplications (an order-keeping set, and a `Vertex` hash by
 point that leaves equality alone), lazy children defer a child's geometry
@@ -380,8 +395,9 @@ run opens (`STORE.md` §5). An expensive part may still be its own model; it
 no longer has to be.
 *Pressure-test*: call a model's function under plain Python, then inside a
 cadgen build with the memo cold, then again with it hot; the geometry each
-returns, and the answer to every `==` and `is_same` along the way, are the
-same all three times.
+returns, the bytes of every component it writes, and the answer to every `==`
+and `is_same` along the way, are the same all three times, and the hot run
+counts a hit for every miss of the cold one.
 
 ### 19. Nothing waits on the network
 
@@ -441,7 +457,7 @@ question with another's name.
   `index/provenance` (`STORE.md` §3), on the store's code side with
   `index/model` and `index/output`, reached from a saved document only through
   those by the two commands that may ask about code, `cadgen store why` and
-  `cadgen inspect --where`. No object, part, document entry, sidecar or written
+  `cadgen store where`. No object, part, document entry, sidecar or written
   file carries a feature id, a frame or a line (law 1); the viewer never sees
   one; and provenance never names an object or a part: deleting the code side
   loses no geometry and renames nothing.
@@ -459,7 +475,7 @@ document's: all equal, with the two bodies' bytes different. Then insert a new
 sibling before an occurrence, rename nothing, and rebuild: every token the
 untouched occurrences and their faces had is unchanged. Then `rm -rf
 index/model index/output index/provenance`: every view and every ref still
-resolves; only `--where` says it no longer knows.
+resolves; only `store where` says it no longer knows.
 
 ## The shape of the package
 
@@ -506,7 +522,8 @@ src/cadgen/
                          #   out, for a copy nothing else keeps up to date
                          #   (_internal/channel.py)
   store/                 # the store (STORE.md): objects, index, records, trees,
-                         #   closure, gate, materialize, publish, lazy, gc, view
+                         #   closure, gate, materialize, publish, lazy, gc, view,
+                         #   provenance (the build's account of its code, §3)
   cli/                   # generated command shells, one per <format> <verb>
   cli_tree.py            # the build tree on stderr / JSONL events, and each
                          #   built model's time line (model code vs cadgen)
@@ -516,6 +533,9 @@ src/cadgen/
                          #   worker, client, transport, telemetry (what it
                          #   builds and how that goes, counted)
   _internal/             # the engine: generation pipeline, tree builder,
+                         #   kernel_memo (law 18: the memo at the kernel
+                         #   boundary), kernel_trace (its features, and the
+                         #   lineage provenance is made of),
                          #   filetrace (every file a build opens),
                          #   tessellate (every display mesh: OCCT's
                          #   triangulation, each face verified against the

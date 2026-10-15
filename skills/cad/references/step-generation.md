@@ -314,7 +314,10 @@ sources, imported constants, child results, cached objects or declared outputs
 changed; it also accepts a generated STEP. Exit status is 0 for current, 1 for
 stale; `--json` returns the verdict as data. A cadgen fix does not invalidate
 results cached before it: `--force` rebuilds a model whose cached result still
-reflects the old behaviour.
+reflects the old behaviour. Its sibling for the code itself is
+`cadgen store where <file.step> <ref>`: which line's operation made a part, a
+face or an edge of the saved document
+([which code made it](inspection-and-validation.md#which-code-made-it)).
 
 ## Imported STEP/STP files
 

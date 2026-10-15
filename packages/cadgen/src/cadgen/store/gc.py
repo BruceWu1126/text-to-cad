@@ -18,7 +18,8 @@ three kinds of thing:
   derived entry.
 - **Evicted entries**, only under a cap: derived entries (``DERIVED_KINDS``),
   least recently written first, until the store fits ``LOW_WATERMARK`` of the
-  cap. A record, a document entry or an output entry is never evicted.
+  cap. A record, a document entry, an output entry or a provenance entry is
+  never evicted.
 - **Unreachable objects**: not in the closure of a current record's or
   document entry's tree (or a week-young one's at a key this cadgen does not
   own), not named by a surviving derived entry, and not written or claimed
@@ -94,6 +95,9 @@ _NAMED_FIELDS = {
     # A robot entry names its payload and the primitive meshes the payload draws.
     "robot": ("object", "meshes"),
     "bounds": (),
+    # A provenance entry names no object: its ``tree`` is the record's, which the
+    # record protects (README law 20: provenance never names geometry).
+    "provenance": (),
 }
 _STOP_EVERY = 256
 
@@ -257,24 +261,28 @@ def _defer_if_recent(newer: dict[str, float], since: float) -> None:
 
 
 def _schema_versions() -> dict[str, int]:
+    from cadgen.store.provenance import PROVENANCE_SCHEMA_VERSION
     from cadgen.store.records import DOCUMENT_SCHEMA_VERSION, RECORD_SCHEMA_VERSION
 
-    return {"model": RECORD_SCHEMA_VERSION, "document": DOCUMENT_SCHEMA_VERSION}
+    return {"model": RECORD_SCHEMA_VERSION, "document": DOCUMENT_SCHEMA_VERSION,
+            "provenance": PROVENANCE_SCHEMA_VERSION}
 
 
 def owned_key(kind: str, key: str) -> bool:
-    """Whether this cadgen reads and writes the record or document entry at
-    ``key``: one keyed by its own schema version (``index.versioned_key``).
-    Any other key is another cadgen's, which nothing here reads."""
+    """Whether this cadgen reads and writes the record, document entry or
+    provenance entry at ``key``: one keyed by its own schema version
+    (``index.versioned_key``). Any other key is another cadgen's, which
+    nothing here reads."""
     return key_version(key) == _schema_versions()[kind]
 
 
 def _unowned(found: Scan, retire_before: float) -> list[_Entry]:
-    """The records and document entries at keys this cadgen does not own, last
-    written by ``retire_before``: a pass retires them. Told by name and mtime;
-    the objects their trees reach are left to the sweep."""
+    """The records, document entries and provenance entries at keys this
+    cadgen does not own, last written by ``retire_before``: a pass retires
+    them. Told by name and mtime; the objects their trees reach are left to
+    the sweep."""
     return [_Entry(kind, key, size, mtime, (), obsolete=True)
-            for kind in ("model", "document")
+            for kind in ("model", "document", "provenance")
             for key, (size, mtime) in found.entries[kind].items()
             if mtime <= retire_before and not owned_key(kind, key)]
 

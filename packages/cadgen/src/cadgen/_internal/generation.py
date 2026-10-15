@@ -597,6 +597,16 @@ def _generate_part_outputs(
                     publish_preview(tree_hash, tree)
         stats["tree"] = tree_hash
         document_tree_hash = str(stats.get("documentTree") or tree_hash)
+        # The build's account of its code (STORE.md §3): which feature made each
+        # component of the document and each face and edge of it, by fingerprint
+        # and token. Computed now that the components are prepared, from the
+        # live shapes they were prepared from and the identities that measured;
+        # written beside the record, after it.
+        kernel_run = getattr(scene, "kernel_run", None) if writes_step else None
+        provenance = None
+        if kernel_run is not None:
+            with logger.timed("tree: provenance"):
+                provenance = kernel_run.provenance(stats["ownComponents"])
 
         model_path = _model_for_spec(spec)
         outputs: dict[str, object] = {}
@@ -819,6 +829,15 @@ def _generate_part_outputs(
             for output_path in outputs:
                 note_output(output_path, model_path)
         write_record(model_path, record)
+        if provenance is not None:
+            from cadgen.store.provenance import write_provenance
+
+            # Beside the record and after it: code side, read by `store where`
+            # and by nothing on a render path.
+            write_provenance(model_path, provenance, tree=tree_hash, step_hash=str(record.get("stepHash") or ""))
+        if kernel_run is not None:
+            # The run's trace was this job's: nothing after it reads the run.
+            scene.kernel_run = None
         if staged_step is not None:
             executors.emit_event(executors.model_event(
                 model_path, "building", phase="STEP saved",

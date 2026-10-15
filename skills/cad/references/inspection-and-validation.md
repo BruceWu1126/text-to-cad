@@ -66,6 +66,35 @@ A copied reference's file prefix is the file's absolute path (quoted when it hol
 a space or `#`) and must name the opened document; a relative prefix may match
 the end of the document's path.
 
+### Which code made it
+
+`cadgen store where <file.step> <ref>` answers, for a STEP a model of this
+cadgen wrote, which operation at which line of the model's code made what the
+ref names -- a part's body, a face or an edge -- and, for a face or an edge,
+which operation last modified it (a cut that trimmed a box's face, a fillet
+that shortened an edge), each as `file:line in function (operation)` with the
+operations it was given. The ref is one the viewer copies or `resolve()` takes
+(`#o:…`, `#o:…/f:…`, `#label/e:…`); a vertex has no answer. It reads the
+build's own account of the run, written with the model's record, so it speaks
+for the file's current bytes only: after an edit, run the model, then ask.
+`--json` returns the answer as data; the exit status is 0 when it knows and 1
+when it does not (no build of this cadgen, other bytes, a body read from a file
+or built outside build123d's constructions), with the reason.
+
+```text
+$ cadgen store where STEP/bracket.step "#bracket/f:e517fb4f3b5b"
+document  /work/STEP/bracket.step
+ref       #o:624d1aa32b5a/f:e517fb4f3b5b
+model     /work/src/bracket.py::bracket
+face      made by bracket.py:6 in bore (Solid.make_cylinder)   fe:Solid.make_cylinder@bracket.py:6#1
+          last modified by bracket.py:6 in bore (cut)   fe:cut@bracket.py:6#1
+```
+
+The bore wall is the cylinder's face, trimmed by the cut that bored it; the
+feature ids (`fe:<operation>@<file>:<line>#<n>`, `n` counting that line's runs
+in the build) name the same calls across the parts of one assembly, and a face
+of a placed child model is answered from that child's own build.
+
 ## Measurements
 
 ```python

@@ -1,0 +1,1345 @@
+"""The kernel memo: one interception layer at build123d's topology layer, and
+what it remembers (README law 18; STORE.md §3, Provenance).
+
+Installed in the warm worker beside ``determinism.install()``
+(``generation_runner``), idempotently, the layer patches every kernel
+construction build123d's topology modules offer -- primitives, booleans,
+fillets and chamfers, sweeps and lofts, faces and wires, copies and moves,
+``clean``, ``is_valid``, ``split``, ``project_faces``, the constructors that
+build a face from wires, a wire from edges, a shell from faces, a solid from a
+shell and a compound from shapes, and the file importers -- so that every
+call made from a model's own code inside a run (``run()``) is seen once, at
+the boundary. Builder-mode wrappers are not patched: their inner topology
+calls are the ones seen. Each call seen is a **feature** for provenance
+(``kernel_trace``), whatever the memo does with it.
+
+**Keys.** A call is keyed by its operation, its canonical parameters and the
+keys of the shapes it was given. A shape's key is where it came from: the
+memo key of the operation that made its ``TShape`` (the registry, pointer to
+key), or, for a sub-shape, its ancestor's key with its kind and its index in
+the ancestor's ``TopExp`` map; with the shape's own location and orientation,
+the attributes an operation may copy from it (label, colour, material, face
+colours, ``for_construction``) and the keys of its children; and with the
+effects (below) every operation so far has had on it. The n-th call with one
+key in a run is its own entry, so two identical constructions in one run are
+two objects, as in plain Python. A shape no operation of this process made --
+a child model's materialized result, an imported file, a shape built outside
+the patched surface -- has no key, and a call given one runs uncached: a hit
+would hand back a result sharing the FIRST run's copy of that shape, not the
+one the model holds, and ``is_same`` across that boundary would answer
+differently from a run that computed it.
+
+**Hits.** A hit requires the key and, for every shape input, the very
+``TShape`` the entry was computed with, and returns the SAME Python objects
+the first run made, restored to a snapshot taken when the operation returned:
+``label``, ``_color``, ``topo_parent``, ``joints``, anytree parent and
+children, every other object field, and ``wrapped``'s TShape, location and
+orientation (a later ``move()`` mutates the location in place). Nothing is
+reconstructed and nothing is copied: pointer identity holds along every chain
+of hits, and every miss makes its downstream miss, since a fresh result is a
+new TShape. A constructor cannot return another object, so its hit hands the
+first run's ``TopoDS`` to the kernel helper the constructor calls, and the
+object the model just made wraps that same TShape.
+
+**Effects.** The kernel modifies its INPUTS: a boolean raises a tool vertex's
+tolerance, an extrusion clears its profile's ``Free`` flag and appends curve
+representations to the profile's edges, and those bytes reach the components a
+model emits. A miss serializes each input before and after the operation; a
+change is captured as a sparse delta per sub-shape (tolerance, flags, the
+representations appended), proven exact by undoing and redoing it on the live
+shape, and noted in a ledger by sub-shape. A hit replays the delta, so a hot
+run leaves every input as a cold run would; a hit of a shape's maker undoes,
+through the ledger, every delta applied to any sub-shape of it since it
+returned, so an operation edited out of the model leaves no trace. A change
+the delta cannot express -- a representation rewritten in place -- is not
+replayed: the input's maker forgets its entry, the input is rebuilt by the next
+run, and the operation runs on it again, as it always could. A call that runs
+uncached still captures what it does to a memoized input, and a memoized shape
+embedded in a foreign one that the call changed is forgotten the same way.
+
+The memo lives in this process's memory for the life of the process,
+LRU-bounded by entries; it never reaches the store and a cold run computes
+everything. ``CADGEN_KERNEL_MEMO=0`` disables the memo and keeps the trace:
+every call still runs, is still a feature, and provenance is still written.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import enum
+import functools
+import hashlib
+import inspect
+import itertools
+import numbers
+import os
+import struct
+import threading
+from collections import OrderedDict
+from pathlib import Path
+from typing import Any, Iterator, Mapping
+
+from cadgen._internal.kernel_trace import Trace
+
+__all__ = ["CAPACITY", "clear", "enabled", "install", "run", "stats", "uninstall"]
+
+# Entries of live results: a model's intermediate geometry for a few models at
+# once, so an edit loop over a large model keeps every unchanged step.
+CAPACITY = 32768
+_SUB_MAPS = 1024
+_KEYS = 8 * CAPACITY
+
+_LOCK = threading.RLock()
+_LOCAL = threading.local()
+_MEMO: "OrderedDict[tuple[int, int], _Entry]" = OrderedDict()
+_REGISTRY: dict[Any, "_Made"] = {}
+_LEDGER: dict[Any, list["_Row"]] = {}
+_KEY_IDS: "OrderedDict[tuple, int]" = OrderedDict()
+_KEY_IDS_NEXT = itertools.count(1)
+_MAPS: "OrderedDict[tuple[int, int], tuple[Any, Any]]" = OrderedDict()
+_STATS = {"hits": 0, "misses": 0, "unkeyable": 0, "unreplayable": 0, "errors": 0}
+_RUN_IDS = itertools.count(1)
+_EFFECT_IDS = itertools.count(1)
+# Every row applied takes the next stamp: a maker's reset undoes the rows applied
+# after it returned (its ``born`` stamp) by runs before this one.
+_SEQUENCE = itertools.count(1)
+_installed = False
+
+
+class _Unkeyable(Exception):
+    """This call cannot be keyed or its result cannot be kept: it runs plain."""
+
+
+def enabled() -> bool:
+    return os.environ.get("CADGEN_KERNEL_MEMO", "1").strip() != "0"
+
+
+# --- what is patched ----------------------------------------------------------------------
+#
+# (class, attribute, op label), enumerated from build123d 0.11.1's topology modules.
+# A classmethod's label is prefixed with the class it is called on; ``_bool_op``'s
+# label is the boolean it runs (cut, fuse, common, section, split); a constructor's
+# is its class.
+
+_INSTANCE_TARGETS = (
+    ("Shape", "_bool_op", "bool_op"),
+    ("Shape", "clean", "clean"),
+    ("Shape", "located", "located"),
+    ("Shape", "moved", "moved"),
+    ("Shape", "mirror", "mirror"),
+    ("Shape", "rotate", "rotate"),
+    ("Shape", "scale", "scale"),
+    ("Shape", "translate", "translate"),
+    ("Shape", "transform_shape", "transform_shape"),
+    ("Shape", "transform_geometry", "transform_geometry"),
+    ("Shape", "transformed", "transformed"),
+    ("Shape", "project_faces", "project_faces"),
+    ("Shape", "split", "split"),
+    ("Shape", "__copy__", "copy"),
+    ("Shape", "__deepcopy__", "deepcopy"),
+    ("Mixin3D", "chamfer", "chamfer"),
+    ("Mixin3D", "fillet", "fillet"),
+    ("Mixin3D", "hollow", "hollow"),
+    ("Mixin3D", "offset_3d", "offset_3d"),
+    ("Mixin3D", "dprism", "dprism"),
+    ("Mixin3D", "max_fillet", "max_fillet"),
+    ("Solid", "draft", "draft"),
+    ("Mixin2D", "offset", "offset"),
+    ("Mixin2D", "split_by_perimeter", "split_by_perimeter"),
+    ("Face", "chamfer_2d", "chamfer_2d"),
+    ("Face", "fillet_2d", "fillet_2d"),
+    ("Face", "make_holes", "make_holes"),
+    ("Face", "project_to_shape", "project_to_shape"),
+    ("Face", "to_arcs", "to_arcs"),
+    ("Face", "without_holes", "without_holes"),
+    ("Mixin1D", "offset_2d", "offset_2d"),
+    ("Mixin1D", "perpendicular_line", "perpendicular_line"),
+    ("Mixin1D", "project", "project"),
+    ("Wire", "chamfer_2d", "chamfer_2d"),
+    ("Wire", "fillet_2d", "fillet_2d"),
+    ("Wire", "fix_degenerate_edges", "fix_degenerate_edges"),
+    ("Wire", "project_to_shape", "project_to_shape"),
+    ("Wire", "stitch", "stitch"),
+    ("Wire", "trim", "trim"),
+    ("Edge", "trim", "trim"),
+    ("Edge", "trim_to_length", "trim_to_length"),
+    ("Edge", "project_to_shape", "project_to_shape"),
+    ("Edge", "reversed", "reversed"),
+    ("Edge", "close", "close"),
+)
+_PROPERTY_TARGETS = (("Shape", "is_valid", "is_valid"),)
+_CLASSMETHOD_TARGETS = tuple(
+    (cls, name, name)
+    for cls, names in (
+        ("Solid", ("extrude", "extrude_linear_with_rotation", "extrude_taper", "extrude_until",
+                   "from_bounding_box", "make_box", "make_cone", "make_cylinder", "make_loft",
+                   "make_sphere", "make_torus", "make_wedge", "revolve", "sweep", "sweep_multi", "thicken")),
+        ("Face", ("extrude", "make_bezier_surface", "make_gordon_surface", "make_plane", "make_rect",
+                  "make_surface", "make_surface_from_array_of_points", "make_surface_from_curves",
+                  "make_surface_patch", "revolve", "sweep")),
+        ("Shell", ("extrude", "make_loft", "revolve", "sweep")),
+        ("Wire", ("combine", "extrude", "make_circle", "make_convex_hull", "make_ellipse", "make_polygon", "make_rect")),
+        ("Edge", ("extrude", "make_bezier", "make_circle", "make_ellipse", "make_helix", "make_hyperbola",
+                  "make_line", "make_mid_way", "make_parabola", "make_spline", "make_bspline",
+                  "make_spline_approx", "make_tangent_arc", "make_three_point_arc")),
+        ("Compound", ("extrude", "make_text", "make_triad")),
+    )
+    for name in names
+)
+# A constructor and the kernel helper it calls for the shape it builds: on a
+# hit the helper hands back the first run's TopoDS instead of building one.
+# ``Compound`` builds its container on every attachment of children, so its hit
+# lets the constructor run and then takes the first run's container.
+_CONSTRUCTOR_TARGETS = (("Face", "face"), ("Wire", "wire"), ("Shell", "shell"), ("Solid", "solid"), ("Compound", None))
+_HELPER_TARGETS = (
+    ("two_d", "_make_topods_face_from_wires", "face"),
+    ("two_d", "_sew_topods_faces", "shell"),
+)
+_HELPER_CLASSMETHODS = (("Wire", "_make_wire", "wire"), ("Solid", "_make_solid", "solid"))
+_IMPORTER_TARGETS = ("import_step", "import_brep")
+_BOOLEANS = {"BRepAlgoAPI_Cut": "cut", "BRepAlgoAPI_Fuse": "fuse", "BRepAlgoAPI_Common": "common",
+             "BRepAlgoAPI_Section": "section", "BRepAlgoAPI_Splitter": "split"}
+
+
+def install() -> bool:
+    """Patch the topology layer, once per process. Returns installed-now. A
+    target build123d no longer has is an error: the table is this version's."""
+    global _installed
+    with _LOCK:
+        if _installed:
+            return False
+        import build123d
+        from build123d import importers, topology
+        from build123d.topology import two_d
+
+        for cls_name, attr, label in _INSTANCE_TARGETS:
+            _patch(getattr(topology, cls_name), attr, label, "instance")
+        for cls_name, attr, label in _PROPERTY_TARGETS:
+            _patch(getattr(topology, cls_name), attr, label, "property")
+        for cls_name, attr, label in _CLASSMETHOD_TARGETS:
+            _patch(getattr(topology, cls_name), attr, label, "classmethod")
+        for cls_name, _slot in _CONSTRUCTOR_TARGETS:
+            _patch(getattr(topology, cls_name), "__init__", cls_name, "constructor")
+        for module_name, attr, slot in _HELPER_TARGETS:
+            module = {"two_d": two_d}[module_name]
+            function = getattr(module, attr)
+            if not getattr(function, "__kernel_memo__", False):
+                setattr(module, attr, _helper(slot, function))
+        for cls_name, attr, slot in _HELPER_CLASSMETHODS:
+            cls = getattr(topology, cls_name)
+            static = inspect.getattr_static(cls, attr)
+            if not getattr(static.__func__, "__kernel_memo__", False):
+                setattr(cls, attr, classmethod(_helper(slot, static.__func__)))
+        for name in _IMPORTER_TARGETS:
+            original = getattr(importers, name)
+            if getattr(original, "__kernel_memo__", False):
+                continue
+            wrapped = _wrap(name, original, "function")
+            setattr(importers, name, wrapped)
+            if getattr(build123d, name, None) is original:
+                setattr(build123d, name, wrapped)
+        _installed = True
+        return True
+
+
+def uninstall() -> bool:
+    """Restore every attribute ``install`` replaced. Returns uninstalled-now;
+    the memo's entries stay (``clear`` drops them)."""
+    global _installed
+    with _LOCK:
+        if not _installed:
+            return False
+        import build123d
+        from build123d import importers, topology
+        from build123d.topology import two_d
+
+        targets = (_INSTANCE_TARGETS + _PROPERTY_TARGETS + _CLASSMETHOD_TARGETS
+                   + tuple((cls_name, "__init__", cls_name) for cls_name, _slot in _CONSTRUCTOR_TARGETS)
+                   + tuple((cls_name, attr, slot) for cls_name, attr, slot in _HELPER_CLASSMETHODS))
+        for cls_name, attr, _label in targets:
+            cls = getattr(topology, cls_name)
+            static = inspect.getattr_static(cls, attr)
+            if isinstance(static, classmethod):
+                if getattr(static.__func__, "__kernel_memo__", False):
+                    setattr(cls, attr, classmethod(static.__func__.__wrapped__))
+            elif isinstance(static, property):
+                if getattr(static.fget, "__kernel_memo__", False):
+                    setattr(cls, attr, property(static.fget.__wrapped__, static.fset, static.fdel))
+            elif getattr(static, "__kernel_memo__", False):
+                setattr(cls, attr, static.__wrapped__)
+        for module_name, attr, _slot in _HELPER_TARGETS:
+            module = {"two_d": two_d}[module_name]
+            function = getattr(module, attr)
+            if getattr(function, "__kernel_memo__", False):
+                setattr(module, attr, function.__wrapped__)
+        for name in _IMPORTER_TARGETS:
+            wrapped = getattr(importers, name)
+            if getattr(wrapped, "__kernel_memo__", False):
+                setattr(importers, name, wrapped.__wrapped__)
+                if getattr(build123d, name, None) is wrapped:
+                    setattr(build123d, name, wrapped.__wrapped__)
+        _installed = False
+        return True
+
+
+def _patch(cls: type, attr: str, label: str, kind: str) -> None:
+    static = inspect.getattr_static(cls, attr)
+    if kind == "classmethod":
+        if not isinstance(static, classmethod):
+            raise TypeError(f"{cls.__name__}.{attr} is not a classmethod")
+        function = static.__func__
+        if not getattr(function, "__kernel_memo__", False):
+            setattr(cls, attr, classmethod(_wrap(label, function, kind)))
+    elif kind == "property":
+        if not isinstance(static, property):
+            raise TypeError(f"{cls.__name__}.{attr} is not a property")
+        if not getattr(static.fget, "__kernel_memo__", False):
+            setattr(cls, attr, property(_wrap(label, static.fget, kind), static.fset, static.fdel))
+    else:
+        if not inspect.isfunction(static):
+            raise TypeError(f"{cls.__name__}.{attr} is not a plain method")
+        if not getattr(static, "__kernel_memo__", False):
+            setattr(cls, attr, _wrap(label, static, kind))
+
+
+def _wrap(label: str, function: Any, kind: str) -> Any:
+    @functools.wraps(function)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        state = getattr(_LOCAL, "run", None)
+        if state is None or state.depth:
+            return function(*args, **kwargs)
+        return _call(state, label, kind, function, args, kwargs)
+
+    wrapper.__kernel_memo__ = True
+    return wrapper
+
+
+def _helper(slot: str, function: Any) -> Any:
+    """A constructor's kernel helper: hands back the TopoDS a constructor hit
+    adopted, once, and otherwise builds as it always did."""
+    @functools.wraps(function)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        adopt = getattr(_LOCAL, "adopt", None)
+        if adopt is not None and adopt[0] == slot:
+            _LOCAL.adopt = None
+            return adopt[1]
+        return function(*args, **kwargs)
+
+    wrapper.__kernel_memo__ = True
+    return wrapper
+
+
+# --- the run ------------------------------------------------------------------------------
+
+
+class _Run:
+    """One model run: its trace, its per-key call counts, the results that are
+    not memoizable (registered for the run only) and the nesting depth."""
+
+    def __init__(self, script_path: Path | None) -> None:
+        self.id = next(_RUN_IDS)
+        self.trace = Trace(Path(script_path).resolve().parent if script_path is not None else None)
+        self.counts: dict[int, int] = {}
+        self.depth = 0
+        self.transient: dict[Any, _Made] = {}
+
+    def count(self, key_id: int) -> int:
+        n = self.counts.get(key_id, 0) + 1
+        self.counts[key_id] = n
+        return n
+
+    def made_by(self, tshape: Any) -> int | None:
+        """The feature of this run that made ``tshape``, or None."""
+        made = _made_of(tshape, self)
+        if made is None:
+            return None
+        root = made.root()
+        return root.feature if root.run == self.id else None
+
+    def feature_of(self, shape: Any) -> int | None:
+        """The feature that made ``shape``: the one that returned the object, else
+        the maker of its TShape, else that of the shape it was extracted from."""
+        index = self.trace.feature_of(shape)
+        if index is not None:
+            return index
+        if _pending(shape):
+            return None
+        wrapped = _wrapped(shape)
+        if wrapped is not None:
+            index = self.made_by(wrapped.TShape())
+            if index is not None:
+                return index
+        parent = shape.__dict__.get("topo_parent") if hasattr(shape, "__dict__") else None
+        return self.feature_of(parent) if parent is not None and parent is not shape else None
+
+    def provenance(self, components: Mapping[str, tuple[Any, Mapping[str, Any] | None]]) -> dict[str, Any]:
+        """The provenance payload for the result tree built from this run's
+        shapes (``kernel_trace.Trace.provenance``)."""
+        return self.trace.provenance(components, self.made_by)
+
+
+@contextlib.contextmanager
+def run(script_path: Path | None = None) -> Iterator[_Run]:
+    """A model run on this thread: inside it every patched call from the
+    model's code is a feature, and a hit when the memo has one. ``script_path``
+    is the model's script, whose folder feature paths are relative to."""
+    install()
+    state = _Run(script_path)
+    previous = getattr(_LOCAL, "run", None)
+    _LOCAL.run = state
+    try:
+        yield state
+    finally:
+        _LOCAL.run = previous
+
+
+def stats() -> dict[str, int]:
+    with _LOCK:
+        return dict(_STATS, entries=len(_MEMO), registry=len(_REGISTRY))
+
+
+def clear() -> None:
+    """Forget every entry, so the next run computes everything."""
+    with _LOCK:
+        _MEMO.clear()
+        _REGISTRY.clear()
+        _LEDGER.clear()
+        _KEY_IDS.clear()
+        _MAPS.clear()
+
+
+# --- the call -----------------------------------------------------------------------------
+
+
+def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs: dict) -> Any:
+    if kind == "constructor" and not _constructs(label, args, kwargs):
+        return function(*args, **kwargs)
+    frame = state.trace.frame()
+    if frame is None:
+        return function(*args, **kwargs)
+    state.depth += 1
+    try:
+        op = _op_name(label, kind, args, kwargs)
+        shapes = _shape_args(_key_args(label, kind, args), kwargs)
+        if any(_pending(shape) for shape in shapes):
+            return _plain(state, op, frame, kind, shapes, function, args, kwargs, capture=False)
+        # The memo is an optimization and never the reason a build fails: a key,
+        # a capture or a snapshot that cannot be taken makes the call run plain,
+        # counted under errors, and the call is still a feature.
+        key_id = None
+        if enabled():
+            try:
+                key_id = _intern(_build_key(label, kind, args, kwargs, state))
+            except _Unkeyable:
+                _STATS["unkeyable"] += 1
+            except Exception:  # noqa: BLE001
+                _STATS["errors"] += 1
+        if key_id is None:
+            return _plain(state, op, frame, kind, shapes, function, args, kwargs, capture=enabled())
+        inputs = [(shape, state.feature_of(shape)) for shape in shapes]
+        n = state.count(key_id)
+        with _LOCK:
+            entry = _MEMO.get((key_id, n))
+            if entry is not None and entry.matches(shapes):
+                _MEMO.move_to_end((key_id, n))
+            else:
+                entry = None
+        if entry is not None:
+            result = _hit(state, entry, kind, function, args, kwargs, shapes)
+            feature = state.trace.record(op, frame, inputs, _result_shapes(result))
+            entry.refresh(feature.index, state.id)
+            _STATS["hits"] += 1
+            return None if kind == "constructor" else result
+        try:
+            captured = _capture(shapes)
+        except Exception:  # noqa: BLE001
+            _STATS["errors"] += 1
+            return _plain(state, op, frame, kind, shapes, function, args, kwargs, capture=False)
+        # The inputs as given, before the call: an in-place operation (clean)
+        # leaves its input wrapping the result's TShape.
+        given = [_wrapped(shape).TShape() for shape in shapes]
+        function_result = function(*args, **kwargs)
+        result = args[0] if kind == "constructor" else function_result
+        _STATS["misses"] += 1
+        feature = state.trace.record(op, frame, inputs, _result_shapes(result))
+        snapshot = None
+        try:
+            effects, sound = _effects(captured, state)
+            if sound:
+                if kind == "constructor":
+                    snapshot = _Adopt(_wrapped(result), dict(_CONSTRUCTOR_TARGETS)[label])
+                else:
+                    snapshot = _snapshot(result)
+        except _Unkeyable:
+            snapshot = None
+        except Exception:  # noqa: BLE001
+            _STATS["errors"] += 1
+            snapshot = None
+            for item in captured:
+                _taint(_made_of(item.handle.TShape(), state), state)
+        if snapshot is None:
+            _register(result, None, feature.index, state, None)
+            return function_result
+        entry = _Entry(key=(key_id, n), inputs=given, snapshot=snapshot, effects=effects,
+                       in_place=kind != "constructor" and bool(args) and result is args[0])
+        entry.made = _register(result, entry.key, feature.index, state, entry)
+        with _LOCK:
+            _MEMO[entry.key] = entry
+            _MEMO.move_to_end(entry.key)
+            while len(_MEMO) > CAPACITY:
+                _old_key, old = _MEMO.popitem(last=False)
+                _drop(old)
+        return function_result
+    finally:
+        state.depth -= 1
+
+
+def _plain(state: _Run, op: str, frame: tuple, kind: str, shapes: list, function: Any, args: tuple,
+           kwargs: dict, *, capture: bool) -> Any:
+    """Run the call as plain build123d. It is still a feature, its results are
+    this run's (so a later feature can name them as inputs), and what it does
+    to a memoized shape is still accounted for."""
+    inputs = [(shape, state.feature_of(shape)) for shape in shapes]
+    try:
+        captured = _capture(shapes, embedded=True) if capture else []
+    except Exception:  # noqa: BLE001
+        _STATS["errors"] += 1
+        captured = []
+    function_result = function(*args, **kwargs)
+    result = args[0] if kind == "constructor" else function_result
+    feature = state.trace.record(op, frame, inputs, _result_shapes(result))
+    if captured:
+        try:
+            _effects(captured, state)
+        except Exception:  # noqa: BLE001
+            _STATS["errors"] += 1
+    _register(result, None, feature.index, state, None)
+    return function_result
+
+
+def _hit(state: _Run, entry: "_Entry", kind: str, function: Any, args: tuple, kwargs: dict, shapes: list) -> Any:
+    if kind == "constructor":
+        from build123d.topology.shape_core import downcast
+
+        adopted = entry.snapshot.restore()
+        _LOCAL.adopt = (entry.snapshot.slot, adopted)
+        try:
+            function(*args, **kwargs)
+        finally:
+            _LOCAL.adopt = None
+        result = args[0]
+        result.__dict__["_wrapped"] = downcast(adopted.Located(adopted.Location()))
+    elif entry.in_place and shapes[0] is not entry.snapshot.obj:
+        from build123d.topology.shape_core import downcast
+
+        result = shapes[0]
+        wrapped = entry.snapshot.wrapped
+        result.__dict__["_wrapped"] = downcast(wrapped.Located(wrapped.Location()))
+    else:
+        result = entry.snapshot.restore()
+    for made in entry.made:
+        made.reset(state.id)
+    for index, effect in entry.effects:
+        effect.apply(state.id)
+        made = _made_of(_wrapped(shapes[index]).TShape(), state)
+        if made is not None:
+            made.effects.append(effect)
+    for made in entry.made:
+        made.born = next(_SEQUENCE)
+    return result
+
+
+def _constructs(label: str, args: tuple, kwargs: dict) -> bool:
+    """Whether a constructor call builds a shape, rather than wrapping a
+    ``TopoDS`` the kernel already holds or making an empty one."""
+    from OCP.TopoDS import TopoDS_Shape
+
+    given = [value for value in args[1:]] + [value for name, value in kwargs.items()
+                                              if name in ("obj", "outer_wire", "edges", "edge", "wire", "curve", "children")]
+    if not given:
+        return False
+    first = given[0]
+    if first is None or isinstance(first, TopoDS_Shape):
+        return label == "Compound" and bool(kwargs.get("children"))
+    return True
+
+
+def _op_name(label: str, kind: str, args: tuple, kwargs: dict) -> str:
+    if label == "bool_op":
+        operation = args[3] if len(args) > 3 else kwargs.get("operation")
+        name = type(operation).__name__
+        return _BOOLEANS.get(name, name.removeprefix("BRepAlgoAPI_").lower())
+    if kind == "classmethod":
+        return f"{args[0].__name__}.{label}"
+    return label
+
+
+def _key_args(label: str, kind: str, args: tuple) -> tuple:
+    if label == "deepcopy":
+        return args[:1]  # the memo dict is not a parameter
+    return args[1:] if kind in ("classmethod", "constructor") else args
+
+
+def _pending(shape: Any) -> bool:
+    """A child model's promise not yet forced: keying it would force it early."""
+    from cadgen.store.lazy import LazyCompound
+
+    return isinstance(shape, LazyCompound) and not shape._forced
+
+
+def _wrapped(shape: Any) -> Any:
+    """The shape's ``TopoDS_Shape`` from its own state, or None: an empty
+    shape, or a child model's promise or a reference assembly, whose property
+    would force what the body only placed (``store.lazy``, ``store._references``)."""
+    state = getattr(shape, "__dict__", None)
+    return None if state is None else state.get("_wrapped")
+
+
+# --- keys -----------------------------------------------------------------------------------
+
+
+def _intern(key: tuple) -> int:
+    """A small id for a key tuple, so nested keys stay small. Ids are never
+    reused: an entry whose key id left the table can only miss, never collide."""
+    with _LOCK:
+        found = _KEY_IDS.get(key)
+        if found is None:
+            found = _KEY_IDS[key] = next(_KEY_IDS_NEXT)
+            while len(_KEY_IDS) > _KEYS:
+                _KEY_IDS.popitem(last=False)
+        else:
+            _KEY_IDS.move_to_end(key)
+        return found
+
+
+def _build_key(label: str, kind: str, args: tuple, kwargs: dict, state: _Run) -> tuple:
+    if label in _IMPORTER_TARGETS:
+        source = args[0] if args else kwargs.get("file_name", kwargs.get("filename"))
+        rest = args[1:]
+        kw = {name: value for name, value in kwargs.items() if name not in ("file_name", "filename")}
+        parts: tuple = (_file_key(source), *(_normalize(value, state) for value in rest))
+    else:
+        parts = tuple(_normalize(value, state) for value in _key_args(label, kind, args))
+        if kind == "classmethod":
+            parts = (("cls", args[0].__module__, args[0].__qualname__), *parts)
+        elif kind == "constructor":
+            parts = (("cls", type(args[0]).__module__, type(args[0]).__qualname__), *parts)
+        kw = kwargs
+    return (label, parts, tuple(sorted((name, _normalize(value, state)) for name, value in kw.items())))
+
+
+def _file_key(source: Any) -> tuple:
+    """An imported file is its bytes."""
+    if isinstance(source, (bytes, bytearray)):
+        return ("bytes", hashlib.sha256(bytes(source)).hexdigest())
+    try:
+        return ("file", hashlib.sha256(Path(os.fspath(source)).read_bytes()).hexdigest())
+    except (TypeError, OSError) as exc:
+        raise _Unkeyable(str(exc)) from exc
+
+
+def _normalize(value: Any, state: _Run) -> Any:
+    """One parameter as a hashable, deterministic key part."""
+    if value is None or isinstance(value, (bool, str, bytes)):
+        return value
+    if isinstance(value, numbers.Real):
+        # By value, as Python compares them: a radius of 3 and one of 3.0 are
+        # one parameter, and the kernel takes a double either way.
+        return ("n", struct.pack("<d", float(value)))
+    if isinstance(value, enum.Enum):
+        return ("enum", type(value).__name__, value.name)
+    if isinstance(value, Path):
+        return ("path", str(value))
+    if isinstance(value, (list, tuple)):
+        return ("seq", tuple(_normalize(item, state) for item in value))
+    if isinstance(value, dict):
+        return ("map", tuple(sorted((str(key), _normalize(item, state)) for key, item in value.items())))
+    from build123d.topology import Shape
+
+    if isinstance(value, Shape):
+        return ("shape", _shape_key(value, state))
+    type_name = type(value).__name__
+    if type_name.startswith("BRepAlgoAPI"):
+        return ("occ_op", type_name)
+    module = type(value).__module__ or ""
+    if module.startswith("build123d"):
+        if type_name == "Axis":
+            return ("Axis", _normalize(tuple(value.position), state), _normalize(tuple(value.direction), state))
+        if type_name == "Plane":
+            return ("Plane", _normalize(tuple(value.origin), state), _normalize(tuple(value.x_dir), state),
+                    _normalize(tuple(value.z_dir), state))
+        if type_name == "Matrix":
+            transform = value.wrapped
+            return ("Matrix", tuple(("n", struct.pack("<d", transform.Value(row, column)))
+                                    for row in (1, 2, 3) for column in (1, 2, 3, 4)))
+        if type_name == "BoundBox":
+            return ("BoundBox", _normalize(tuple(value.min), state), _normalize(tuple(value.max), state))
+        # Vector, Location, Rotation, Color: their components, in order.
+        if hasattr(value, "__iter__"):
+            return (type_name, _normalize(tuple(value), state))
+    raise _Unkeyable(f"unkeyable argument type: {module}.{type_name}")
+
+
+def _shape_args(args: tuple, kwargs: dict) -> list:
+    """The shapes a call was given, in call order, lists and tuples opened."""
+    from build123d.topology import Shape
+
+    found: list = []
+
+    def walk(value: Any) -> None:
+        if isinstance(value, Shape):
+            found.append(value)
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                walk(item)
+
+    for value in args:
+        walk(value)
+    for _name, value in sorted(kwargs.items()):
+        walk(value)
+    return found
+
+
+def _location_key(wrapped: Any) -> bytes:
+    transform = wrapped.Location().Transformation()
+    return b"".join(struct.pack("<d", transform.Value(row, column)) for row in (1, 2, 3) for column in (1, 2, 3, 4))
+
+
+def _shape_key(shape: Any, state: _Run) -> int:
+    """The interned key of a shape input: its placed geometry, its attributes,
+    its children."""
+    placed = _placed_key(shape, state)
+    state_dict = shape.__dict__
+    if state_dict.get("joints"):
+        raise _Unkeyable("a shape with joints")
+    if "_occurrence_tree" in state_dict:
+        raise _Unkeyable("a shape carrying a spliced occurrence tree")
+    label = state_dict.get("label")
+    if not isinstance(label, str):
+        raise _Unkeyable("a label that is not a string")
+    color = state_dict.get("_color")
+    color_key = None if color is None else _normalize(tuple(color), state)
+    material = state_dict.get("_cadgen_material")
+    face_colors = state_dict.get("cad_face_ordinal_colors") or {}
+    attrs = (
+        "attrs", label, color_key, bool(state_dict.get("for_construction")), state_dict.get("material"),
+        _normalize(material, state) if material is not None else None,
+        state_dict.get("_cadgen_material_id"),
+        tuple(sorted((int(ordinal), _normalize(tuple(rgba), state)) for ordinal, rgba in face_colors.items())),
+    )
+    children = tuple(_shape_key(child, state) for child in state_dict.get("_NodeMixin__children") or ())
+    return _intern((placed, attrs, children))
+
+
+def _placed_key(shape: Any, state: _Run) -> tuple:
+    """Where a shape's geometry came from, with its location and orientation."""
+    if _pending(shape):
+        raise _Unkeyable("a pending child model")
+    wrapped = _wrapped(shape)
+    if wrapped is None:
+        raise _Unkeyable("an empty shape")
+    tshape = wrapped.TShape()
+    made = _made_of(tshape, state)
+    if made is None:
+        made = _register_sub(shape, wrapped, tshape, state)
+    return ("shape", made.base(shape, state), _location_key(wrapped), int(wrapped.Orientation()))
+
+
+def _made_of(tshape: Any, state: _Run | None) -> "_Made | None":
+    found = _REGISTRY.get(tshape)
+    if found is None and state is not None:
+        found = state.transient.get(tshape)
+    return found
+
+
+def _register_sub(shape: Any, wrapped: Any, tshape: Any, state: _Run) -> "_Made":
+    """Key a sub-shape by its ancestor: ``topo_parent``, the shape it was
+    extracted from, and its index in that shape's map of its kind."""
+    from build123d.topology import Shape
+
+    parent = shape.__dict__.get("topo_parent")
+    if not isinstance(parent, Shape) or parent is shape or _pending(parent):
+        raise _Unkeyable("a shape no operation of this process made")
+    parent_wrapped = _wrapped(parent)
+    if parent_wrapped is None:
+        raise _Unkeyable("a sub-shape of an empty shape")
+    parent_made = _made_of(parent_wrapped.TShape(), state)
+    if parent_made is None:
+        parent_made = _register_sub(parent, parent_wrapped, parent_wrapped.TShape(), state)
+    kind = int(wrapped.ShapeType())
+    index = _sub_map(parent_wrapped, kind).FindIndex(wrapped)
+    if index == 0:
+        raise _Unkeyable("not a sub-shape of its topo_parent")
+    made = _Made(tshape, key=None, feature=None, run=state.id, entry=None, parent=parent_made, kind=kind, index=index)
+    parent_made.subs.append(made)
+    with _LOCK:
+        if parent_made.persistent():
+            _REGISTRY[tshape] = made
+        else:
+            state.transient[tshape] = made
+    return made
+
+
+def _sub_map(parent_wrapped: Any, kind: int) -> Any:
+    """``TopExp.MapShapes`` of a located shape for one kind, kept for the shapes
+    a model keeps extracting from."""
+    from OCP.TopAbs import TopAbs_ShapeEnum
+    from OCP.TopExp import TopExp
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+
+    key = (hash(parent_wrapped), kind)
+    with _LOCK:
+        found = _MAPS.get(key)
+        if found is not None and found[0].IsSame(parent_wrapped):
+            _MAPS.move_to_end(key)
+            return found[1]
+    mapped = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(parent_wrapped, TopAbs_ShapeEnum(kind), mapped)
+    with _LOCK:
+        _MAPS[key] = (parent_wrapped.Located(parent_wrapped.Location()), mapped)
+        while len(_MAPS) > _SUB_MAPS:
+            _MAPS.popitem(last=False)
+    return mapped
+
+
+# --- the registry ---------------------------------------------------------------------------
+
+
+class _Made:
+    """What the memo knows about one ``TShape``: the entry that made it (or the
+    sub-shape relation that names it), the feature of the current run that made
+    it, the effects operations have had on it since, and the sub-shapes of it
+    that have entries of their own."""
+
+    __slots__ = ("tshape", "key", "feature", "run", "entry", "parent", "kind", "index", "effects", "subs", "born")
+
+    def __init__(self, tshape: Any, *, key: tuple[int, int] | None, feature: int | None, run: int,
+                 entry: "_Entry | None", parent: "_Made | None" = None, kind: int | None = None,
+                 index: int | None = None) -> None:
+        self.tshape = tshape
+        self.key = key
+        self.feature = feature
+        self.run = run
+        self.entry = entry
+        self.parent = parent
+        self.kind = kind
+        self.index = index
+        self.effects: list[_Effect] = []
+        self.subs: list[_Made] = []
+        self.born = next(_SEQUENCE)
+
+    def root(self) -> "_Made":
+        made = self
+        while made.parent is not None:
+            made = made.parent
+        return made
+
+    def persistent(self) -> bool:
+        return self.root().key is not None
+
+    def base(self, shape: Any, state: _Run) -> tuple:
+        """The key of this TShape as an input: the entry that made it, or the
+        sub-shape relation, and the effects applied to it so far."""
+        applied = tuple(effect.id for effect in self.effects)
+        if self.parent is None:
+            if self.key is None:
+                raise _Unkeyable("a shape no memoized operation made")
+            return ("made", self.key[0], self.key[1], applied)
+        parent = shape.__dict__.get("topo_parent")
+        if parent is None:
+            raise _Unkeyable("a sub-shape that lost its topo_parent")
+        return ("sub", _placed_key(parent, state), self.kind, self.index, applied)
+
+    def handle(self) -> Any:
+        return _handle_of(self.tshape)
+
+    def reset(self, run_id: int) -> None:
+        """Back to the state the operation returned: every row noted in the
+        ledger on any sub-shape of this TShape by an earlier run, after this
+        TShape was made, undone, latest first. Rows this run applied are its
+        own operations' and stay."""
+        from OCP.TopExp import TopExp
+        from OCP.TopTools import TopTools_IndexedMapOfShape
+
+        mapped = TopTools_IndexedMapOfShape()
+        TopExp.MapShapes_s(self.handle(), mapped)
+        for ordinal in range(1, mapped.Extent() + 1):
+            tshape = mapped.FindKey(ordinal).TShape()
+            rows = _LEDGER.get(tshape)
+            if not rows:
+                continue
+            kept = [row for row in rows if row.run == run_id or row.seq <= self.born]
+            for row in reversed(rows):
+                if row.run != run_id and row.seq > self.born:
+                    row.set(row.before)
+            if kept:
+                _LEDGER[tshape] = kept
+            else:
+                del _LEDGER[tshape]
+        pending: list[_Made] = [self]
+        while pending:
+            made = pending.pop()
+            made.effects.clear()
+            made.run = run_id
+            pending.extend(made.subs)
+
+
+def _handle_of(tshape: Any) -> Any:
+    from OCP.TopoDS import TopoDS_Shape
+
+    shape = TopoDS_Shape()
+    shape.TShape(tshape)
+    return shape
+
+
+def _register(result: Any, key: tuple[int, int] | None, feature: int, state: _Run, entry: "_Entry | None") -> list[_Made]:
+    """Register every shape of a result under the entry that made it. A TShape
+    already registered (a move shares its input's) keeps its first maker."""
+    created: list[_Made] = []
+    for shape in _result_shapes(result):
+        if _pending(shape):
+            continue  # a child's promise is placed, not read: reading it would force it
+        wrapped = _wrapped(shape)
+        if wrapped is None:
+            continue
+        tshape = wrapped.TShape()
+        if _made_of(tshape, state) is not None:
+            continue
+        made = _Made(tshape, key=key, feature=feature, run=state.id, entry=entry)
+        with _LOCK:
+            if key is None:
+                state.transient[tshape] = made
+            else:
+                _REGISTRY[tshape] = made
+                created.append(made)
+    return created
+
+
+def _drop(entry: "_Entry") -> None:
+    """Forget an entry's registrations and the ledger rows its effects, and the
+    effects on its results, hold (the entry itself is already out of the memo)."""
+    for _index, effect in entry.effects:
+        effect.forget()
+    pending = list(entry.made)
+    while pending:
+        made = pending.pop()
+        _REGISTRY.pop(made.tshape, None)
+        for effect in made.effects:
+            effect.forget()
+        pending.extend(made.subs)
+    entry.made = []
+
+
+def _taint(made: _Made | None, state: _Run) -> None:
+    """An input changed in a way no hit can replay: its maker forgets it, so
+    the next run rebuilds it and runs this operation on the fresh shape."""
+    if made is None:
+        return
+    root = made.root()
+    with _LOCK:
+        if root.entry is not None:
+            _MEMO.pop(root.entry.key, None)
+            _drop(root.entry)
+        else:
+            pending = [root]
+            while pending:
+                item = pending.pop()
+                state.transient.pop(item.tshape, None)
+                _REGISTRY.pop(item.tshape, None)
+                pending.extend(item.subs)
+
+
+def _result_shapes(result: Any) -> list:
+    """Every shape object a result holds: itself, the members of a list or
+    tuple, and anytree children, read off the node state."""
+    from build123d.topology import Shape
+
+    found: list = []
+    pending = [result]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, Shape):
+            found.append(value)
+            pending.extend(reversed(value.__dict__.get("_NodeMixin__children") or ()))
+        elif isinstance(value, (list, tuple)):
+            pending.extend(reversed(value))
+    return found
+
+
+# --- snapshots ----------------------------------------------------------------------------
+
+
+class _Entry:
+    __slots__ = ("key", "inputs", "snapshot", "effects", "made", "in_place")
+
+    def __init__(self, *, key: tuple[int, int], inputs: list, snapshot: Any, effects: list,
+                 in_place: bool = False) -> None:
+        self.key = key
+        self.inputs = inputs
+        self.snapshot = snapshot
+        self.effects = effects
+        self.made: list[_Made] = []
+        # The operation changed ``self`` and returned it (``clean``): a hit asked
+        # by another object wrapping the same TShape changes THAT object, as the
+        # operation would, and returns it.
+        self.in_place = in_place
+
+    def matches(self, shapes: list) -> bool:
+        if len(shapes) != len(self.inputs):
+            return False
+        for shape, tshape in zip(shapes, self.inputs):
+            wrapped = _wrapped(shape)
+            if wrapped is None or wrapped.TShape() != tshape:
+                return False
+        return True
+
+    def refresh(self, feature: int, run_id: int) -> None:
+        for made in self.made:
+            made.feature = feature
+            made.run = run_id
+
+
+class _ShapeState:
+    """One live result object as the operation returned it."""
+
+    __slots__ = ("obj", "attrs", "wrapped", "children")
+
+    def __init__(self, obj: Any) -> None:
+        from build123d.topology import Shape
+
+        attrs = dict(obj.__dict__)
+        wrapped = attrs.pop("_wrapped", None)
+        if wrapped is None:
+            raise _Unkeyable("an empty result")
+        self.obj = obj
+        self.wrapped = wrapped.Located(wrapped.Location())
+        children = attrs.get("_NodeMixin__children")
+        self.children = None
+        if children is not None:
+            if not all(isinstance(child, Shape) for child in children):
+                raise _Unkeyable("a child that is not a shape")
+            self.children = [_ShapeState(child) for child in children]
+            attrs["_NodeMixin__children"] = None
+        if isinstance(attrs.get("joints"), dict):
+            attrs["joints"] = dict(attrs["joints"])
+        self.attrs = attrs
+
+    def restore(self) -> Any:
+        from build123d.topology.shape_core import downcast
+
+        attrs = dict(self.attrs)
+        if isinstance(attrs.get("joints"), dict):
+            attrs["joints"] = dict(attrs["joints"])
+        if self.children is not None:
+            attrs["_NodeMixin__children"] = [state.obj for state in self.children]
+        obj = self.obj
+        obj.__dict__.clear()
+        obj.__dict__["_wrapped"] = downcast(self.wrapped.Located(self.wrapped.Location()))
+        obj.__dict__.update(attrs)
+        if self.children is not None:
+            for state in self.children:
+                state.restore()
+        return obj
+
+
+class _Sequence:
+    __slots__ = ("container", "items")
+
+    def __init__(self, container: type, items: list) -> None:
+        self.container = container
+        self.items = items
+
+    def restore(self) -> Any:
+        return self.container(item.restore() for item in self.items)
+
+
+class _Literal:
+    __slots__ = ("value",)
+
+    def __init__(self, value: Any) -> None:
+        self.value = value
+
+    def restore(self) -> Any:
+        return self.value
+
+
+class _Adopt:
+    """A constructor's result: the TopoDS it built, for the next construction
+    of the same thing to wrap."""
+
+    __slots__ = ("wrapped", "slot")
+
+    def __init__(self, wrapped: Any, slot: str | None) -> None:
+        if wrapped is None:
+            raise _Unkeyable("an empty construction")
+        self.wrapped = wrapped.Located(wrapped.Location())
+        self.slot = slot
+
+    def restore(self) -> Any:
+        return self.wrapped.Located(self.wrapped.Location())
+
+
+def _snapshot(value: Any) -> Any:
+    from build123d.topology import Shape
+
+    if isinstance(value, Shape):
+        return _ShapeState(value)
+    if isinstance(value, (list, tuple)):
+        return _Sequence(type(value), [_snapshot(item) for item in value])
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return _Literal(value)
+    raise _Unkeyable(f"a result that cannot be kept: {type(value).__name__}")
+
+
+# --- effects on inputs ----------------------------------------------------------------------
+
+
+class _Captured:
+    __slots__ = ("index", "handle", "mapped", "rows", "data", "embedded")
+
+    def __init__(self, index: int, handle: Any, embedded: list[_Made]) -> None:
+        self.index = index
+        self.handle = handle
+        self.mapped, self.rows = _lean(handle)
+        self.data = _bytes(handle)
+        self.embedded = embedded
+
+
+def _capture(shapes: list, *, embedded: bool = False) -> list[_Captured]:
+    """The inputs whose bytes the operation may change: one per TShape, in call
+    order, less any that is a sub-shape of another input (its ancestor's delta
+    covers it). With ``embedded`` (an uncached call), an input no entry made is
+    captured only for the memoized shapes it embeds, which a change taints."""
+    from cadgen.store.materialize import TREE_TAG
+
+    state = getattr(_LOCAL, "run", None)
+    distinct: list[_Captured] = []
+    seen: set = set()
+    for index, shape in enumerate(shapes):
+        wrapped = _wrapped(shape)
+        if wrapped is None:
+            continue
+        tshape = wrapped.TShape()
+        if tshape in seen:
+            continue
+        seen.add(tshape)
+        roots: list[_Made] = []
+        if embedded and _made_of(tshape, state) is None:
+            if TREE_TAG in shape.__dict__ or "__cadgen_component_identity__" in shape.__dict__:
+                continue
+            roots = _embedded(wrapped, state)
+            if not roots:
+                continue
+        distinct.append(_Captured(index, wrapped.Located(wrapped.Location()), roots))
+    return [item for item in distinct
+            if not any(other is not item and other.mapped.Contains(item.handle) for other in distinct)]
+
+
+def _embedded(wrapped: Any, state: _Run | None) -> list[_Made]:
+    """The memoized shapes a foreign shape holds as sub-shapes."""
+    from OCP.TopExp import TopExp
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+
+    mapped = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(wrapped, mapped)
+    found: list[_Made] = []
+    for ordinal in range(1, mapped.Extent() + 1):
+        made = _made_of(mapped.FindKey(ordinal).TShape(), state)
+        if made is not None and made.root() not in found:
+            found.append(made.root())
+    return found
+
+
+def _effects(captured: list[_Captured], state: _Run) -> tuple[list[tuple[int, "_Effect"]], bool]:
+    """What the operation did to its inputs, as replayable deltas noted in the
+    ledger; ``sound`` is False when a change could not be captured (the input,
+    or what it embeds, was tainted)."""
+    effects: list[tuple[int, _Effect]] = []
+    sound = True
+    rowed: set = set()
+    for item in captured:
+        if _bytes(item.handle) == item.data:
+            continue
+        if item.embedded:
+            for made in item.embedded:
+                _taint(made, state)
+            sound = False
+            continue
+        mapped, rows = _lean(item.handle)
+        effect = _delta(item, mapped, rows, rowed)
+        made = _made_of(item.handle.TShape(), state)
+        if effect is None or not effect.verify(item.handle, item.data, state.id):
+            _STATS["unreplayable"] += 1
+            sound = False
+            _taint(made, state)
+            continue
+        effects.append((item.index, effect))
+        if made is not None:
+            made.effects.append(effect)
+    return effects, sound
+
+
+def _lean(handle: Any) -> tuple[Any, list[tuple]]:
+    """Every sub-shape's cheap state, by ordinal in the shape's full map: kind,
+    tolerance, the seven flags, how many representations it holds, and an
+    edge's parametric flags."""
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
+    from OCP.TopExp import TopExp
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+
+    mapped = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(handle, mapped)
+    rows = []
+    for ordinal in range(1, mapped.Extent() + 1):
+        shape = mapped.FindKey(ordinal)
+        kind = shape.ShapeType()
+        tshape = shape.TShape()
+        flags = (shape.Free(), shape.Modified(), shape.Checked(), shape.Orientable(), shape.Closed(),
+                 shape.Infinite(), shape.Convex())
+        if kind == TopAbs_EDGE:
+            rows.append((int(kind), tshape.Tolerance(), flags, tshape.Curves().Extent(),
+                         (tshape.SameParameter(), tshape.SameRange(), tshape.Degenerated())))
+        elif kind == TopAbs_VERTEX:
+            rows.append((int(kind), tshape.Tolerance(), flags, tshape.Points().Extent(), None))
+        elif kind == TopAbs_FACE:
+            rows.append((int(kind), tshape.Tolerance(), flags, None, None))
+        else:
+            rows.append((int(kind), None, flags, None, None))
+    return mapped, rows
+
+
+def _bytes(handle: Any) -> bytes:
+    from cadgen._internal.component_package import _shape_brep_bytes
+
+    return _shape_brep_bytes(handle)
+
+
+def _representations(shape: Any) -> Any:
+    from OCP.TopAbs import TopAbs_EDGE
+
+    tshape = shape.TShape()
+    return tshape.ChangeCurves() if shape.ShapeType() == TopAbs_EDGE else tshape.ChangePoints()
+
+
+def _delta(item: _Captured, mapped: Any, rows: list[tuple], rowed: set) -> "_Effect | None":
+    """The sparse change between the input's state before and after, or None
+    when it is not an append of representations and a change of scalars. A
+    sub-shape two inputs share is rowed once."""
+    if len(rows) != len(item.rows):
+        return None
+    changed: list[_Row] = []
+    for ordinal, (before, after) in enumerate(zip(item.rows, rows), 1):
+        if before == after:
+            continue
+        if before[0] != after[0]:
+            return None
+        shape = mapped.FindKey(ordinal)
+        tshape = shape.TShape()
+        if tshape in rowed:
+            continue
+        appended: tuple = ()
+        if before[3] is not None:
+            if after[3] < before[3]:
+                return None
+            if after[3] > before[3]:
+                appended = tuple(list(_representations(shape))[before[3]:])
+        changed.append(_Row(tshape, before, after, appended))
+        rowed.add(tshape)
+    return _Effect(changed) if changed else None
+
+
+class _Row:
+    """One sub-shape's state before and after an operation, settable either way."""
+
+    __slots__ = ("tshape", "before", "after", "appended", "seq", "run")
+
+    def __init__(self, tshape: Any, before: tuple, after: tuple, appended: tuple) -> None:
+        self.tshape = tshape
+        self.before = before
+        self.after = after
+        self.appended = appended
+        self.seq = 0
+        self.run = 0
+
+    def set(self, state: tuple) -> None:
+        shape = _handle_of(self.tshape)
+        tshape = self.tshape
+        if state[1] is not None:
+            tshape.Tolerance(state[1])
+        free, modified, checked, orientable, closed, infinite, convex = state[2]
+        shape.Free(free)
+        shape.Modified(modified)
+        shape.Checked(checked)
+        shape.Orientable(orientable)
+        shape.Closed(closed)
+        shape.Infinite(infinite)
+        shape.Convex(convex)
+        if state[4] is not None:
+            same_parameter, same_range, degenerated = state[4]
+            tshape.SameParameter(same_parameter)
+            tshape.SameRange(same_range)
+            tshape.Degenerated(degenerated)
+        if state[3] is None or self.before[3] == self.after[3]:
+            return
+        representations = _representations(shape)
+        if state is self.after:
+            for representation in self.appended:
+                representations.Append(representation)
+        else:
+            kept = list(representations)[:self.before[3]]
+            representations.Clear()
+            for representation in kept:
+                representations.Append(representation)
+
+
+class _Effect:
+    """One operation's change to one input, as sparse rows, replayable and undoable."""
+
+    __slots__ = ("rows", "id")
+
+    def __init__(self, rows: list[_Row]) -> None:
+        self.rows = rows
+        self.id = next(_EFFECT_IDS)
+
+    def apply(self, run_id: int) -> None:
+        for row in self.rows:
+            row.set(row.after)
+            row.seq = next(_SEQUENCE)
+            row.run = run_id
+            _LEDGER.setdefault(row.tshape, []).append(row)
+
+    def undo(self) -> None:
+        for row in reversed(self.rows):
+            row.set(row.before)
+            rows = _LEDGER.get(row.tshape)
+            if rows and rows[-1] is row:
+                rows.pop()
+                if not rows:
+                    del _LEDGER[row.tshape]
+
+    def forget(self) -> None:
+        """Out of the ledger without touching the shapes: the memo no longer
+        holds what these rows were applied to."""
+        for row in self.rows:
+            rows = _LEDGER.get(row.tshape)
+            if rows is None:
+                continue
+            kept = [other for other in rows if other is not row]
+            if kept:
+                _LEDGER[row.tshape] = kept
+            else:
+                del _LEDGER[row.tshape]
+
+    def verify(self, handle: Any, before: bytes, run_id: int) -> bool:
+        """Prove the delta exact on the live shape: undone, its bytes are the
+        ones captured before the operation; redone, the ones after. Leaves the
+        delta applied and in the ledger."""
+        after = _bytes(handle)
+        try:
+            self.undo()
+            undone = _bytes(handle) == before
+            self.apply(run_id)
+            return undone and _bytes(handle) == after
+        except Exception:  # noqa: BLE001 - a delta that cannot be set is not replayable
+            _STATS["errors"] += 1
+            return False

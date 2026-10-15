@@ -50,7 +50,7 @@ One word per concept; the code uses these words and no others.
 | **fingerprint** | a component's geometric identity: `sha256`, under `GEOMETRY_FINGERPRINT_SCHEME`, of the shape's kind, its vertex points rounded relative to its extent and its faces' signatures, all order-free (§2) -- the same for the body a build holds and that body read back from the STEP it wrote |
 | **token** | half of a ref, opaque: an occurrence's `o:` (hashed from its parent's token, its name and its rounded placement; an ordinal only tells identical siblings apart) or an element's `f:`/`e:`/`v:` (hashed from the element's geometry within its body, a selector-table column); never an ordinal or a position (§3) |
 | **preview revision** | what a build announces the moment its result exists (§9b): its result tree, the part key of every component in it and its annotations (the articulation, finishes and keyframes the sidecar will carry, resolved against that tree), artifact-side objects a viewer draws labelled as a preview until the saved file replaces them in place |
-| **provenance** | a build's account of which operation at which source frame made each component and element of its result: a code-side entry per model, `index/provenance` (§3), read by `inspect --where` and by nothing on a render path |
+| **provenance** | a build's account of which operation at which source frame made each component and element of its result: a code-side entry per model, `index/provenance` (§3), read by `store where` and by nothing on a render path |
 | **obsolete** | a part entry an older version of cadgen's derivation wrote, or a record or document entry at a key this cadgen does not own (another schema version's): no reader of this cadgen asks for it again, and the sweeper retires it once it is a week old (§2, §8) |
 | **worker / spare / extra**, **job** | daemon vocabulary (the daemon's own documentation) |
 
@@ -217,13 +217,13 @@ test:
 3. **Records are deletable.** `rm -rf index/model index/output
    index/provenance` loses no artifact: every reader still works from objects;
    a rebuild re-creates the records without rebuilding a tree whose objects
-   exist, and only `inspect --where` knew anything that is gone.
+   exist, and only `store where` knew anything that is gone.
 
 `index/document` is written whenever a tree is published for a document — by
 a model's build for its `.step`, by a compile job for the file it compiled.
-`index/output` is written beside it for `store why` and `inspect --where`,
-which follow it to the record and the provenance entry (§3); nothing in the
-viewer or on a render path reads any of the three.
+`index/output` is written beside it for `store why` and `store where`, which
+follow it to the record and the provenance entry (§3); nothing in the viewer
+or on a render path reads any of the three.
 
 There are exactly two ways a file is named, and that is the only distinction
 the store makes:
@@ -1080,28 +1080,43 @@ ref)>-v<schema>` (`store/provenance.py`), one entry per model beside its
 record, on the code side (§2), written by the build after the record for the
 result tree the record names, and never read by a reader, a view or the
 viewer. It holds the **features** the body ran -- every kernel construction
-cadgen saw at its boundary (`_internal/kernel_trace.py`): the operation, the
-source frame in the model's own code that called it (file, line, the enclosing
-function, and an ordinal for a line that ran more than once), and the features
-it consumed -- and, for each component of the result, the feature that made it
+cadgen saw at its boundary (`_internal/kernel_trace.py`, the trace the kernel
+memo keeps, README law 18): the operation, the source frame in the model's own
+code that called it (file, line, the enclosing function, and an ordinal for a
+line that ran more than once), and the features that made the shapes it was
+given -- and, for each component of the result, the feature that made its body
 and, per face and edge token (§3), the feature that made that element and the
-one that last modified it, followed through the kernel's own history of each
-operation (what it generated, what it modified) as the body ran. Components
-and elements are named by their fingerprints and tokens, never by an ordinal,
-so an entry written for the body the build held answers for the body a
-document read back. The entry carries the hashes of the tree and the document
-it describes (`tree`, `stepHash`); a document whose bytes have moved past them
-is behind its entry, and `inspect --where` says so rather than guessing.
+one that last modified it. Lineage is found from what each feature was given
+and returned, with no history object from the kernel: an element of a result
+whose TShape an input holds, or that an input holds with the same surface and
+extent, is unchanged there and inherits its lineage; one an input held on the
+same surface with another extent was modified by the feature; any other was
+made by it; and the walk stops at a shape no feature made (a child's geometry,
+an imported file), whose elements are of unknown origin. Components and
+elements are named by their fingerprints and tokens, never by an ordinal, so
+an entry written for the body the build held answers for the body a document
+read back; the pass runs once the tree has prepared its components and reads
+the identities that preparation measured, so nothing is measured twice. The
+entry carries the hashes of the tree and the document it describes (`tree`,
+`stepHash`); a document whose bytes have moved past them is behind its entry,
+and `store where` says so rather than guessing.
 
-`cadgen inspect <file> --ref <ref> --where` is the one reader: path →
-`index/output` → the model → its provenance entry, the document's hash checked
-against `stepHash` -- a code-side walk, like `store why`'s, that no door, view
-or render path takes (§2, property 2). It answers with the frame that made the
-element and the frames that shaped it, in order. Without an entry, or with one
-for other bytes, it says it does not know, and the ref still resolves to its
-geometry: provenance is never how a ref is found. The entry's key is versioned
-like the record's, and a record a cadgen does not own (§2) has an entry it
-does not own: both are obsolete together.
+`cadgen store where <document> <ref>` is the one reader: path →
+`index/output` → the model → its record and its provenance entry, the
+document's hash checked against `stepHash`, the ref resolved in the document
+tree the record names (a label as `read_scene` resolves it) to its occurrence
+and its component's fingerprint, looked up in the model's entry or in a pinned
+child's (through the record's pins, while the child's record and entry still
+describe the pinned tree) -- a code-side walk, like `store why`'s, that no
+door, view or render path takes (§2, property 2). It answers with the feature
+that made what the ref names, as `file:line in function (operation)` with the
+features it was given, and for a face or an edge the one that last modified
+it. Without an entry, or with one for other bytes, or for a vertex, it says it
+does not know, and the ref still resolves to its geometry: provenance is never
+how a ref is found. The entry's key is versioned like the record's, and a
+record a cadgen does not own (§2) has an entry it does not own: both are
+obsolete together; `store forget` drops the entry with the record, and
+nothing evicts it (§8).
 
 ## 4. The gate
 
@@ -2222,6 +2237,13 @@ supersession does not cancel their exports.
   <file>`, `child stale: <child.py>`, `child result moved: <child.py>`,
   `tree or components missing`, `never written: <path>`, `output missing:
   <path>`, `output changed: <path>`.
+- Which code made a part, a face or an edge of a generated STEP:
+  `cadgen store where <file.step> <ref>`, the ref as the viewer copies it or
+  `read_scene` resolves it (`#o:…`, `#o:…/f:…`, `#label/e:…`), from the
+  model's provenance entry (§3): `made by src/bracket.py:12 in bracket (cut)`
+  with the features it was given, and the one that last modified it. Exit 1
+  and `unknown` with the reason when there is no entry, the entry is for other
+  bytes, or no feature made the body; `--json` for the answer as data.
 - Resolve a tree: `cadgen.store.trees.get_tree(hash)`; flattened with
   `capture_tree(hash)` for an owned verified flattened view and byte closure.
   Metadata-only consumers use `capture_tree(hash, retain_payloads=False)` to
@@ -2316,7 +2338,7 @@ supersession does not cancel their exports.
   law 20).
 - Carry provenance -- a feature, a frame, a line -- in an object, a part, a
   document entry, a sidecar or a written file, or read `index/provenance` from
-  anything but `inspect --where` and `store why` (§3).
+  anything but `store where` and `store why` (§3).
 - Show a preview as the saved file, bind a sidecar to one, or map saved bytes
   to a preview tree (§9b).
 - Store a mesh no face of which was verified, or let a clock decide which faces

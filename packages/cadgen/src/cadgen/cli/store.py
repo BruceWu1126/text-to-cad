@@ -2,13 +2,18 @@
 
     cadgen store info              what is in the store, by kind, and its size against the cap
     cadgen store why <model.py>    why the gate says stale (or current), clause by clause
+    cadgen store where <doc> <ref> which operation at which source line made a face, an edge or a part
     cadgen store forget <target>…  drop one model's record or one document's tree entry
     cadgen store gc [--dry-run]    retire old index kinds, mark and sweep unreachable objects
     cadgen store gc --max-size [SIZE]   evict least recently written entries to the cap, then sweep
 
 ``why`` is the debugging surface STORE.md describes: it prints the record, then
 each gate clause's verdict with its evidence, then the tree's links and
-components. Stdlib + the store modules only; it never imports the CAD kernel.
+components. ``where`` is its sibling for provenance (README law 20): the one
+reader of ``index/provenance``, walking path → output entry → model → record and
+provenance entry, with the document's bytes checked against the entry's. Both
+are code-side status commands, outside the format/verb mirror of law 6. Stdlib +
+the store modules only; neither imports the CAD kernel.
 """
 
 from __future__ import annotations
@@ -93,6 +98,7 @@ def _cmd_info(as_json: bool) -> int:
         "model": "records",
         "document": "document entries (bytes -> tree)",
         "output": "output entries (path -> model)",
+        "provenance": "provenance entries (which operation at which line made each part, face and edge)",
         "component": "component entries",
         "bounds": "bounding boxes and leaf layouts",
         "part": "part entries (a part's display mesh and selector table)",
@@ -206,6 +212,27 @@ def _why_one(model: str, as_json: bool) -> int:
     return 0 if not verdict.stale else 1
 
 
+def _cmd_where(document: str, ref: str, as_json: bool) -> int:
+    """0 when the store knows which feature made what the ref names, 1 when it
+    does not (no entry, other bytes, a body no feature made), 2 for a ref that
+    cannot be read or names another file."""
+    import dataclasses
+
+    from cadgen.store.provenance import describe, where
+
+    try:
+        answer = where(document, ref)
+    except ValueError as error:
+        print(f"cadgen store where: {error}", file=sys.stderr)
+        return 2
+    if as_json:
+        print(json.dumps(dataclasses.asdict(answer), separators=(",", ":")))
+    else:
+        for line in describe(answer):
+            print(line)
+    return 0 if answer.known else 1
+
+
 def _cmd_gc(dry_run: bool, grace_hours: float, max_size: str | None, as_json: bool) -> int:
     from cadgen.store.gc import collect, configured_cap, parse_size
 
@@ -282,6 +309,22 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     why = sub.add_parser("why", help="why the gate says a model is stale (or current)")
     why.add_argument("model", help="a model script, script.py::function for one model of a file holding several, or a generated .step (the store remembers which model wrote it)")
     why.add_argument("--json", action="store_true")
+    where = sub.add_parser(
+        "where",
+        help="which operation at which source line made a part, a face or an edge of a generated STEP",
+        description=(
+            "The build's account of its code (provenance): for a part, the feature that made its body; for a "
+            "face or an edge, the feature that made it and the one that last modified it, each as "
+            "file:line in function (operation), with the features it was given. A feature is one kernel "
+            "construction the model's code called. The ref is one the CAD viewer copies or read_scene "
+            "resolves: #o:<token>, #o:<token>/f:<token>, #label/e:<token>. Answered from the model's "
+            "provenance entry, written with its record; for other bytes, or without an entry, it says it "
+            "does not know."
+        ),
+    )
+    where.add_argument("document", help="a STEP file a model of this cadgen wrote")
+    where.add_argument("ref", help="an occurrence, face or edge ref in that document")
+    where.add_argument("--json", action="store_true")
     forget = sub.add_parser(
         "forget",
         help="drop one model's record, or one document's tree entry, so the next run or open redoes it",
@@ -304,8 +347,8 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
             "not a record's or a document's tree, not named by a part, component, bounds, drawing, skin or robot "
             "entry, and not written or claimed within the grace window. --max-size first evicts those derived "
             "entries, least recently written first, until the store fits 80% of the cap (the newest keep a "
-            "fifth of the cap when records and documents leave less room); records, document entries and "
-            "output entries are never evicted. The daemon does the same when idle. A store a newer cadgen "
+            "fifth of the cap when records and documents leave less room); records, document entries, "
+            "output entries and provenance entries are never evicted. The daemon does the same when idle. A store a newer cadgen "
             "wrote to in the last 30 days is left to that cadgen, and nothing is removed."
         ),
     )
@@ -325,6 +368,8 @@ def main(argv: Sequence[str] | None = None, prog: str | None = None) -> int:
         return _cmd_info(bool(args.json))
     if args.command == "why":
         return _cmd_why(args.model, bool(args.json))
+    if args.command == "where":
+        return _cmd_where(args.document, args.ref, bool(args.json))
     if args.command == "forget":
         return _cmd_forget(list(args.targets), bool(args.dry_run), bool(args.json))
     if args.command == "gc":

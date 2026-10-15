@@ -706,6 +706,12 @@ def _publish_tree(
         "components_built": len(built),
         "components_reused": len(reused),
         "unannotatedTree": unannotated_hash,
+        # Per own component this walk prepared: the live shape it was prepared
+        # from and the geometric identity that preparation measured (None for
+        # eager-only bytes), what the build's provenance pass (kernel_trace)
+        # reads so nothing is measured twice. In-process only.
+        "ownComponents": {cid: (walk.shapes[cid], walk.prepared[cid].get("identity"))
+                          for cid in walk.prepared if cid in walk.shapes},
     }
     return tree_hash, tree, stats
 

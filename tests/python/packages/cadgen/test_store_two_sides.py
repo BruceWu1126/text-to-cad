@@ -1,7 +1,7 @@
 """The two sides of the store — a law (packages/cadgen/STORE.md §2).
 
-``objects/`` and ``index/document`` are the ARTIFACT side; ``index/model`` and
-``index/output`` are the CODE side. Three properties, one test each, over a
+``objects/`` and ``index/document`` are the ARTIFACT side; ``index/model``,
+``index/output`` and ``index/provenance`` are the CODE side. Three properties, one test each, over a
 real link trio (a pin, an arm placing the pin twice, a robot placing the arm
 twice and the pin once) built through the real pipeline:
 
@@ -9,8 +9,9 @@ twice and the pin once) built through the real pipeline:
 2. no reader consults a record — the doors, the viewer (catalog, render
    path AND status), and the mesh ledger find a tree through ``index/document``
    alone; the viewer has no exception;
-3. records are deletable — ``rm -rf index/model index/output`` loses no
-   artifact, and the rebuild re-creates the records without a new object;
+3. records are deletable — ``rm -rf index/model index/output index/provenance``
+   loses no artifact, only ``store where`` says it no longer knows, and the
+   rebuild re-creates the records and the entries without a new object;
 4. copied document bytes reuse the same canonical tree without a producer
    record, a text STEP parse, or a compile;
 5. the document renders the same with NO source and with BROKEN source —
@@ -125,14 +126,14 @@ SCRIPTS = {"pin.py": PIN, "arm.py": ARM, "robot.py": ROBOT}
 
 @contextlib.contextmanager
 def forbid_record_reads():
-    """Fail the moment anything reads ``index/model`` or ``index/output``."""
+    """Fail the moment anything reads ``index/model``, ``index/output`` or ``index/provenance``."""
     import cadgen.store.index as index
     import cadgen.store.records as records
 
     real = index.read_entry
 
     def guarded(kind: str, key: str):
-        if kind in ("model", "output"):
+        if kind in ("model", "output", "provenance"):
             raise AssertionError(f"a reader consulted index/{kind} (STORE.md §2, the law)")
         return real(kind, key)
 
@@ -274,14 +275,23 @@ class TwoSidesLaw(unittest.TestCase):
 
     def test_property_3_records_are_deletable(self) -> None:
         from cadgen._internal import doors
-        from cadgen.store.records import read_record
+        from cadgen.store.provenance import read_provenance, where
         from cadgen.viewer import scanner, store_paths
+        from cadgen.store.records import read_record
 
         expected = self._document_trees()
         trees = set(self._trees())
+        for name in SCRIPTS:
+            self.assertIsNotNone(read_provenance(self.root / name), f"{name} has no provenance entry")
+        base = where(self.robot_step, "#base")
+        self.assertTrue(base.known, base.reason)
+        self.assertEqual(base.made["file"], "robot.py")
         shutil.rmtree(self.cache / "index" / "model")
         shutil.rmtree(self.cache / "index" / "output", ignore_errors=True)
+        shutil.rmtree(self.cache / "index" / "provenance")
         try:
+            # Only the one code-side question has lost its answer.
+            self.assertFalse(where(self.robot_step, "#base").known)
             with mock.patch("cadgen.daemon.executors.submit_compile", side_effect=AssertionError("a compile was submitted for a document whose tree exists")):
                 for name, tree in expected.items():
                     document = self.root / f"{name}.step"
@@ -305,8 +315,10 @@ class TwoSidesLaw(unittest.TestCase):
             self._build_all()
         for name in SCRIPTS:
             self.assertIsNotNone(read_record(self.root / name), f"{name} has no record after the rebuild")
+            self.assertIsNotNone(read_provenance(self.root / name), f"{name} has no provenance entry after the rebuild")
         self.assertEqual(expected, self._document_trees(), "the rebuild changed a tree hash")
         self.assertEqual(objects, self._objects(), "the rebuild wrote new objects")
+        self.assertTrue(where(self.robot_step, "#base").known)
 
     def test_property_4_copied_document_reuses_the_byte_addressed_tree(self) -> None:
         import hashlib

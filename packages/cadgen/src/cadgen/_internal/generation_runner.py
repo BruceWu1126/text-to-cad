@@ -548,10 +548,14 @@ def _run_script_generator_body(
     # Order-stable shape de-duplication (see determinism.py): a re-executed model
     # script should produce the SAME geometry it produced last time, and component
     # identity is its bytes. This has to be in force before the generator's first
-    # kernel call, not merely before the tree write.
-    from cadgen._internal import determinism
+    # kernel call, not merely before the tree write. Beside it, the kernel memo
+    # (README law 18): every kernel construction the model's code calls is seen
+    # once at the topology layer, memoized across runs in this process's memory,
+    # and recorded as a feature for the provenance entry (STORE.md §3).
+    from cadgen._internal import determinism, kernel_memo
 
     determinism.install()
+    kernel_memo.install()
     generated_scene: LoadedStepScene | None = None
     # Deterministic closure capture: start from a clean first-party module space, so
     # every first-party file the generator loads and runs executes inside the window
@@ -565,6 +569,9 @@ def _run_script_generator_body(
         filetrace.capture() as trace,
         _first_party_from_source(),
         ExecutionHashes() as executed_hashes,
+        # The model run the memo and the trace see: the script's top level and
+        # the body, every kernel construction called from its own code.
+        kernel_memo.run(spec.script_path) as kernel_run,
     ):
         with logger.timed(f"load generator {spec.source_ref}"):
             module = _load_generator_module(spec.script_path)
@@ -655,6 +662,9 @@ def _run_script_generator_body(
             logger=logger,
             defer_reference_scene=_defer_reference_scene,
         )
+        # The run's trace rides the scene to the tree build, which computes the
+        # provenance of the components it prepares (STORE.md §3).
+        generated_scene.kernel_run = kernel_run
         if declared.block:
             generated_scene.kinematics = declared.block
         generated_scene.materials = declared.materials

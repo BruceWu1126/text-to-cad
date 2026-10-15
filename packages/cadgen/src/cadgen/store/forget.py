@@ -5,9 +5,11 @@ The store has three resets. ``--force`` on a run rebuilds one model.
 drop the index entries for one model or one document so the next run, open or
 door call does its work again, and touch nothing else.
 
-- A **model script** argument drops its record (``index/model/<sha(script::fn)>-v<schema>``).
-  The next run rebuilds it; its children are untouched, and its parents see a
-  moved pin only after that rebuild — exactly as after any edit.
+- A **model script** argument drops its record (``index/model/<sha(script::fn)>-v<schema>``)
+  and the provenance entry written beside it (``index/provenance``, the build's
+  account of its own code). The next run rebuilds both; its children are
+  untouched, and its parents see a moved pin only after that rebuild — exactly
+  as after any edit.
 - A **document** argument (a ``.step``/``.dxf``/mesh path) drops the
   ``index/document/<sha256(bytes)>-v<schema>`` entry, so the next open or door call
   compiles the file from its bytes again; when a record lists that path as an
@@ -25,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from cadgen.store.index import model_ref, path_key, read_entry, remove_entry, split_model_ref
+from cadgen.store.provenance import remove_provenance
 from cadgen.store.records import document_key, read_record, records_for_script, remove_record
 
 
@@ -58,6 +61,7 @@ def forget(target: str | Path, *, dry_run: bool = False) -> dict[str, Any]:
         forgot.append({"kind": "record", "model": str(record.get("model") or model), "tree": record.get("tree")})
         if not dry_run:
             remove_record(str(record.get("model") or model))
+            remove_provenance(str(record.get("model") or model))
 
     if resolved.suffix.lower() == ".py":
         if function is not None:
