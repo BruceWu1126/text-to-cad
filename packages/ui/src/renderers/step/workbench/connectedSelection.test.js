@@ -20,8 +20,11 @@ const FIXTURES = path.join(path.dirname(createRequire(import.meta.url).resolve('
 function slotRuntime() {
   const table = parseSelectorTable(fs.readFileSync(path.join(FIXTURES, 'slot.selectors.json'), 'utf8'));
   const { component } = decodeComponentTessellation(new Uint8Array(fs.readFileSync(path.join(FIXTURES, 'slot.glb'))));
-  return buildSelectorRuntime(joinSelectorTable(table, component), { partId: 'o1.1', remapOccurrenceId: 'o1.1', copyCadPath: 'slot.step' });
+  return buildSelectorRuntime(joinSelectorTable(table, component), { partId: SLOT, occurrenceId: SLOT, copyCadPath: 'slot.step' });
 }
+
+// The occurrence the slot is placed by: a token, which every ref of the part begins with.
+const SLOT = 'o:3f2a9c1d7e5b';
 
 test('a pick of one edge of the slot\'s cap grows to the whole loop: two lines and two arcs', () => {
   const runtime = slotRuntime();
@@ -36,7 +39,7 @@ test('a pick of one edge of the slot\'s cap grows to the whole loop: two lines a
   assert.equal(grown.length, 4);
   assert.deepEqual(grown.map(reference => reference.pickData.curveType).sort(), ['circle', 'circle', 'line', 'line']);
   assert.ok(grown.every(reference => reference.pickData.bbox.min[2] === 5 && reference.pickData.bbox.max[2] === 5), 'the loop lies in the cap');
-  assert.ok(grown.every(reference => /^o1\.1\.e\d+$/.test(reference.displaySelector)), 'each ref is cadgen\'s local id under the occurrence');
+  assert.ok(grown.every(reference => new RegExp(`^${SLOT}/e:[0-9a-f]{12}$`).test(reference.displaySelector)), 'each ref is cadgen\'s edge token under the occurrence');
   // A vertical edge meets the loop at a right angle: it is a chain of its own.
   const vertical = edges.find(reference => reference.pickData.curveType === 'line' && reference.pickData.bbox.max[2] - reference.pickData.bbox.min[2] > 4);
   assert.deepEqual(connectedReferenceIds(buildEdgeChainGraph(references), vertical.id), [vertical.id]);
