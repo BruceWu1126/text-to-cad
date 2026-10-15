@@ -92,7 +92,8 @@ class Feature:
     inputs: list[int | None]
     # The input shapes as passed and the results as returned: handle copies,
     # so a later in-place move of the object does not move what the operation
-    # saw. The lineage tables are computed from these on demand.
+    # saw; None for an empty shape or a child model's promise not yet forced.
+    # The lineage tables are computed from these on demand.
     handles: list[Any] = field(default_factory=list, repr=False)
     results: list[Any] = field(default_factory=list, repr=False)
     _tables: dict[tuple[int, str], dict[int, tuple]] = field(default_factory=dict, repr=False)
@@ -235,7 +236,7 @@ class Trace:
         return index
 
     def _passed_through(self, index: int, tshape: Any) -> bool:
-        return any(handle.TShape() == tshape for handle in self.features[index].handles)
+        return any(handle is not None and handle.TShape() == tshape for handle in self.features[index].handles)
 
     def _owners(self, made_by: Callable[[Any], int | None], body: Any) -> list[tuple[Any, int]]:
         """The shapes of a component some feature made, with that feature: the
@@ -274,7 +275,9 @@ class Trace:
         if positions is None:
             positions = {}
             for position in range(len(feature.results) - 1, -1, -1):
-                positions.update(dict.fromkeys(self._ordinals(feature.results[position], kind), position))
+                handle = feature.results[position]
+                if handle is not None:
+                    positions.update(dict.fromkeys(self._ordinals(handle, kind), position))
             feature._positions[kind] = positions
         return positions.get(element.TShape())
 
@@ -334,7 +337,7 @@ class Trace:
         # First by identity: the kernel keeps the faces and edges an operation
         # leaves alone (and a placement keeps them all), so an element whose
         # TShape an input holds passed through unchanged, whatever its frame.
-        inputs = [(j, self._ordinals(handle, topabs)) for j, handle in enumerate(feature.handles)]
+        inputs = [(j, self._ordinals(handle, topabs)) for j, handle in enumerate(feature.handles) if handle is not None]
         for ordinal, tshape in enumerate(tshapes, 1):
             for j, ordinals in inputs:
                 k = ordinals.get(tshape)
@@ -347,6 +350,8 @@ class Trace:
             same: dict[tuple, tuple[int, int]] = {}
             surface: dict[tuple, tuple[int, int]] = {}
             for j, handle in enumerate(feature.handles):
+                if handle is None:
+                    continue
                 signatures = self._signatures(handle, kind)
                 for k, tshape in enumerate(self._mapped(handle, topabs)[2], 1):
                     if tshape in kept:
@@ -428,8 +433,12 @@ def _classify(filename: str) -> str:
 
 
 def _handle(shape: Any) -> Any:
-    wrapped = shape.wrapped
-    return wrapped.Located(wrapped.Location())
+    """A handle copy of the shape's ``TopoDS`` from its own state, or None: an
+    empty shape, or a child model's promise or a reference assembly, whose
+    property would force what the body only placed."""
+    state = getattr(shape, "__dict__", None)
+    wrapped = None if state is None else state.get("_wrapped")
+    return None if wrapped is None else wrapped.Located(wrapped.Location())
 
 
 def _local(handle: Any) -> Any:
@@ -447,7 +456,7 @@ def _placement(handle: Any) -> tuple[int, ...]:
 def _position_of(feature: Feature, handle: Any) -> int | None:
     tshape = handle.TShape()
     for position, result in enumerate(feature.results):
-        if result.TShape() == tshape:
+        if result is not None and result.TShape() == tshape:
             return position
     return None
 

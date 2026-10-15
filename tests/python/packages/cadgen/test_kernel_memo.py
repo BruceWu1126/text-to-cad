@@ -457,6 +457,42 @@ class TraceTest(KernelMemoCase):
         [cid] = components
         self.assertEqual(run.provenance({cid: (components[cid][0], None)})["components"], {})
 
+    def test_a_child_model_promise_is_placed_not_read(self) -> None:
+        """A body places a child's promise (``Pos * child()``, then
+        ``Compound(children=...)``) without reading it, and so must the memo:
+        the feature that placed it has no handle for it and the run registers
+        nothing for it. Reading it would force the child inside the parent's
+        body, which the reference-scene path must never see
+        (test_reference_assemblies builds the real thing). The same goes for
+        any shape whose geometry is a property that forces, like a reference
+        assembly: the memo reads a shape's own state and nothing else."""
+        from build123d import Compound
+
+        from cadgen.store.lazy import LazyCompound
+
+        promise = LazyCompound.__new__(LazyCompound)
+        promise.__dict__.update({"_lazy_shape": None, "_lazy_forcing": False})
+        Compound.__init__(promise, None, label="child")
+        self.assertFalse(promise._forced)
+
+        class Assembly(Compound):
+            @property
+            def _wrapped(self):
+                raise AssertionError("the memo forced the assembly")
+
+            @_wrapped.setter
+            def _wrapped(self, shape):
+                self.__dict__["_promised"] = shape
+
+        assembly = Assembly(None, label="assembly")
+        with kernel_memo.run(None) as run:
+            for shape in (promise, assembly):
+                feature = run.trace.record("Compound", ("parent.py", 1, "parent"), [(shape, None)], [shape])
+                self.assertEqual((feature.handles, feature.results), ([None], [None]))
+                self.assertEqual(kernel_memo._register(shape, None, feature.index, run, None), [])
+            self.assertEqual(run.transient, {})
+        self.assertFalse(promise._forced, "the memo read the promise")
+
     def test_provenance_is_the_same_cold_and_hot(self) -> None:
         import json
 

@@ -588,9 +588,11 @@ def _pending(shape: Any) -> bool:
 
 
 def _wrapped(shape: Any) -> Any:
-    """The shape's ``TopoDS_Shape``, or None for an empty shape; a forced
-    promise answers through its property, a pending one is never asked."""
-    return getattr(shape, "_wrapped", None)
+    """The shape's ``TopoDS_Shape`` from its own state, or None: an empty
+    shape, or a child model's promise or a reference assembly, whose property
+    would force what the body only placed (``store.lazy``, ``store._references``)."""
+    state = getattr(shape, "__dict__", None)
+    return None if state is None else state.get("_wrapped")
 
 
 # --- keys -----------------------------------------------------------------------------------
@@ -895,6 +897,8 @@ def _register(result: Any, key: tuple[int, int] | None, feature: int, state: _Ru
     already registered (a move shares its input's) keeps its first maker."""
     created: list[_Made] = []
     for shape in _result_shapes(result):
+        if _pending(shape):
+            continue  # a child's promise is placed, not read: reading it would force it
         wrapped = _wrapped(shape)
         if wrapped is None:
             continue
