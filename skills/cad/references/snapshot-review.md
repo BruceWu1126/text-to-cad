@@ -99,7 +99,7 @@ transparent and 1 for opaque.
 | `camera` | `projection`: `orthographic` or `perspective`; `focalLength`: 20–200 mm |
 | `surfaces` | `style`: `shaded`, `flat`, `hidden`, `off`; `colorMode`: `original`, `single`, `by-part`; hex `color`; 1–50 hex `colors`; `opacity`: 0–1 |
 | `edges` | `visibility`: `visible` or `all`; hex `color` |
-| `lighting` | `quality`: `preview` or `final`; `exposure`: -5–5; `rotation`: -180–180 degrees; `size`: 0.25–3; `fill`: 0–1 |
+| `lighting` | `quality`: `preview` or `final`; `exposure`: -5–5; `rotation`: -180–180 degrees; `size`: 0.25–3; `fill`: 0–1; `globalIllumination`: boolean, the interactive viewer's progressive radiosity (a snapshot accepts it and keeps the studio's direct key light) |
 | `background` | hex `color`; `opacity`: 0–1, including partial PNG alpha |
 | `floor` | `placement`: `lowest` or `origin`; `finish`: `matte` or `glossy`; hex `color`; `opacity`: 0–1 |
 | `grid`, `axes` | hex `color`; `opacity`: 0–1 |

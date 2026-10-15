@@ -19,7 +19,7 @@ boundaries, never preset names:
 
 | Preparation | Live update |
 | --- | --- |
-| Lighting enable, quality, softbox size/fill | Exposure, rotation |
+| Lighting enable, quality, softbox size/fill, global illumination | Exposure, rotation |
 | Surface style/color source, crossing opaque/transparent | Surface color, opacity within one transparency class |
 | Edge enable/visibility | Edge color |
 | Floor enable | Floor color, opacity, placement |

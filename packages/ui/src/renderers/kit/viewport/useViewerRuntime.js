@@ -511,6 +511,9 @@ export function useViewerRuntime({
           emitPerspectiveChange(runtimeRef.current);
         }
         fitCameraDepthRange(runtimeRef.current);
+        // A look that refines over frames (the studio's progressive lighting) takes its step
+        // before the frame is drawn, and keeps the loop open while it has more to do.
+        const refining = runtimeRef.current?.refineFrame?.() === true;
         if (!runtimeRef.current?.viewUpdateGate?.held) {
           renderer.shadowMap.needsUpdate = interactionState.shadowsDirty === true;
           interactionState.shadowsDirty = false;
@@ -540,6 +543,7 @@ export function useViewerRuntime({
           cameraTransitionActive ||
           keyboardOrbitMoved ||
           needsMoreFrames ||
+          refining ||
           // Hold the loop open for the whole gesture so a mesh scene keeps
           // repainting at interaction quality. A render type whose frame costs
           // tens of milliseconds opts out: it would
@@ -889,6 +893,9 @@ export function useViewerRuntime({
         environmentResourceIdentity: "",
         environmentReady: !renderMode,
         photographicStudio: null,
+        // Installed by a look that refines over frames (the studio's progressive lighting):
+        // called once per frame before the draw; true while it wants another frame.
+        refineFrame: null,
         shadowMapSize: 2048,
         gridConfig: null,
         gridHelper: null,

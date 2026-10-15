@@ -267,7 +267,10 @@ const ShellViewport = forwardRef(function ShellViewport({
       // While a routine plays or a pose is dragged, the floor shadow's heights are measured at
       // most this often (its cast shadow still follows every frame), and once more at rest, in
       // a frame of their own that keeps the shadow maps.
-      contactShadow: { heightInterval: CONTACT_SHADOW_HEIGHT_INTERVAL_MS, requestFrame: () => runtime.requestFrame?.() }
+      contactShadow: { heightInterval: CONTACT_SHADOW_HEIGHT_INTERVAL_MS, requestFrame: () => runtime.requestFrame?.() },
+      // Global illumination bakes the meshes under the model group, and this viewport steps
+      // the bake every frame (`runtime.refineFrame`).
+      globalIllumination: { root: runtime.modelGroup }
     });
     runtime.photographicGroundZ = Number.isFinite(Number(studioState?.ground?.position?.z))
       ? Number(studioState.ground.position.z) : null;
@@ -458,9 +461,14 @@ const ShellViewport = forwardRef(function ShellViewport({
     const stage = () => {
       const active = runtimeRef.current;
       const ground = active?.photographicStudio?.ground || null;
+      // And the studio's progressive lighting, when it bakes: how far along it is.
+      const radiosity = active?.photographicStudio?.radiosity || null;
       return active ? { gridRadius: active.gridRadius ?? null, bounds: active.modelBounds || null,
         floorZ: active.modelFloorZBelowModel ?? null, studioGroundZ: active.photographicGroundZ ?? null,
-        studioGround: ground ? { size: ground.scale.x, center: [ground.position.x, ground.position.y] } : null } : null;
+        studioGround: ground ? { size: ground.scale.x, center: [ground.position.x, ground.position.y] } : null,
+        globalIllumination: radiosity ? { active: radiosity.active, samples: radiosity.samples, converged: radiosity.converged,
+          info: radiosity.info, keyLightVisible: active.photographicStudio.keyLight.visible,
+          environmentIntensity: active.scene.environmentIntensity } : null } : null;
     };
     Object.assign(window, { __cadCamera: read, __cadStage: stage });
     return () => {

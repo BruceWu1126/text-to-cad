@@ -260,3 +260,13 @@ test("Render's floor stands at the model's lowest point until Model origin is ch
     assert.deepEqual([viewer.groundPlacement, snapshot.groundPlacement], [placement, placement]);
   }
 });
+
+test("lighting.globalIllumination is a boolean the Render view carries", () => {
+  assert.equal(resolveViewSettings({ mode: "render" }).lighting.globalIllumination, false);
+  assert.equal(resolveViewSettings({ mode: "render", lighting: { globalIllumination: true } }).lighting.globalIllumination, true);
+  assert.deepEqual(normalizeViewSettings({ lighting: { globalIllumination: true } }).lighting, { globalIllumination: true });
+  assert.throws(() => normalizeViewSettings({ lighting: { globalIllumination: "yes" } }), /display\.lighting\.globalIllumination must be a boolean/);
+  assert.equal(viewSettingsAreCustom({ mode: "render", lighting: { globalIllumination: true } }), true);
+  // It rides into the Render recipe with the rest of the lighting group.
+  assert.equal(resolveViewSceneSettings({ display: { mode: "render", lighting: { globalIllumination: true } } }).render.configuration.lighting.globalIllumination, true);
+});

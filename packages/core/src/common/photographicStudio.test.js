@@ -530,3 +530,52 @@ test("background and floor updates retain the neutral owner's current reflection
     assert.equal(value.scene.environmentIntensity, 0.5);
   } finally { disposePhotographicStudio(value); }
 });
+
+test("global illumination replaces the key spotlight only with a stepping host and float render targets", () => {
+  const studioRuntime = runtime();
+  const root = new THREE.Group();
+  root.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshPhysicalMaterial()));
+  const base = configuration();
+  const globalIllumination = { ...base, lighting: { ...base.lighting, globalIllumination: true } };
+
+  // No host (a snapshot): the recipe's flag is accepted and the spotlight stays.
+  let state = applyPhotographicStudio(THREE, studioRuntime, globalIllumination);
+  assert.equal(state.keyLight.visible, true);
+  assert.equal(state.radiosity, null);
+  assert.equal(studioRuntime.refineFrame ?? null, null);
+
+  // A host, but a renderer without float render targets: still the spotlight.
+  state = applyPhotographicStudio(THREE, studioRuntime, globalIllumination, { globalIllumination: { root } });
+  assert.equal(state.keyLight.visible, true);
+  assert.equal(state.radiosity, null);
+
+  // Float render targets: the bake takes over, hides the spotlight and installs the frame step.
+  studioRuntime.renderer.capabilities = { isWebGL2: true };
+  studioRuntime.renderer.extensions = { has: () => true };
+  state = applyPhotographicStudio(THREE, studioRuntime, globalIllumination, { globalIllumination: { root } });
+  assert.ok(state.radiosity);
+  assert.equal(state.keyLight.visible, false);
+  assert.equal(state.keyLight.castShadow, false);
+  assert.equal(typeof studioRuntime.refineFrame, "function");
+  assert.equal(state.group.children.includes(state.radiosity.group), true);
+  // The floor it catches shadows on stands where the studio ground does.
+  assert.equal(state.radiosity._floorParams.level, state.ground.position.z);
+
+  // A software renderer bakes nothing either.
+  studioRuntime.softwareRendering = true;
+  state = applyPhotographicStudio(THREE, studioRuntime, globalIllumination, { globalIllumination: { root } });
+  assert.equal(state.radiosity, null);
+  assert.equal(state.keyLight.visible, true);
+  studioRuntime.softwareRendering = false;
+
+  // Turning it off restores the spotlight and removes the step; disposal releases the rest.
+  state = applyPhotographicStudio(THREE, studioRuntime, globalIllumination, { globalIllumination: { root } });
+  assert.ok(state.radiosity);
+  state = applyPhotographicStudio(THREE, studioRuntime, base, { globalIllumination: { root } });
+  assert.equal(state.radiosity, null);
+  assert.equal(state.keyLight.visible, true);
+  assert.equal(studioRuntime.refineFrame, null);
+  applyPhotographicStudio(THREE, studioRuntime, globalIllumination, { globalIllumination: { root } });
+  disposePhotographicStudio(studioRuntime);
+  assert.equal(studioRuntime.refineFrame, null);
+});

@@ -51,7 +51,7 @@ Every preset has the same independent groups:
   camera: { projection: "perspective", focalLength: 50 },
   surfaces: { style: "shaded", colorMode: "original", opacity: 1 },
   edges: { enabled: false, visibility: "visible", color: "#253443" },
-  lighting: { quality: "final", exposure: 0, rotation: 0, size: 1, fill: 0.25 },
+  lighting: { quality: "final", exposure: 0, rotation: 0, size: 1, fill: 0.25, globalIllumination: false },
   background: { color: "#ffffff", opacity: 1 },
   floor: { placement: "lowest", color: "#e7e7e5", opacity: 0.6 },
   grid: { enabled: false, color: "#cbd5e1", opacity: 0.16 },
@@ -156,6 +156,19 @@ every source keeps a soft fill. Environment radiance and direct illumination
 share a calibrated zero-EV lighting budget. Khronos PBR Neutral tone mapping is
 fixed; `toneMappingExposure` is `2 ** exposure`. Light and dark differ only in
 default backdrop color.
+
+`lighting.globalIllumination` replaces the key spotlight and the shadows it
+casts with a progressive radiosity bake (`lib/viewer/radiosityStage.js`): the
+model is lit from the studio environment alone, with soft shadows, contact
+occlusion and the floor's baked shadow accumulated into a lightmap that refines
+over a few seconds (Thomsen & Nielsen stochastic depth buffering, one global
+direction set per frame). The hidden spotlight hands its energy to
+`scene.environmentIntensity`, so an up-facing surface receives what it would
+have added and the exposure holds. The bake needs a host that steps it every
+frame — the viewer's viewport passes `globalIllumination: { root }` and calls
+`runtime.refineFrame()` before each draw — and WebGL2 float render targets; a
+snapshot passes no host and a software renderer bakes nothing, so both keep the
+spotlight.
 
 `applyPhotographicStudio(THREE, runtime, configuration, options)` owns the
 synchronous light, ground and renderer state and updates those objects in place.

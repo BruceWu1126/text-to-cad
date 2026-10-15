@@ -466,7 +466,7 @@ Escape closes the innermost popup first, the dropdown only on a later press.
 | Surfaces | Style and part-color mode; color or palette and opacity below |
 | Edges | Visibility and color, where the format has topology |
 | Grid / Axes | Two color/opacity controls, left and right in title order, no visible labels |
-| Lighting | Quality, exposure, rotation, softbox size and fill |
+| Lighting | Quality, exposure, rotation, softbox size, fill and global illumination |
 | Background | Color and opacity |
 | Floor | Color/opacity; position and finish side by side |
 

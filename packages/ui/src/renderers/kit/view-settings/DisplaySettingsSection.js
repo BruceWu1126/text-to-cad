@@ -6,7 +6,7 @@ import { MAX_THEME_FILL_COLORS } from "@text-to-cad/core/lib/themeSettings.js";
 import { Button } from "@text-to-cad/ui/primitives/button";
 import { DISPLAY_MODE_OPTIONS } from "./DisplayModeOptions.js";
 import {
-  FileSheetColorPicker, FileSheetColorProperty,
+  FileSheetCheckboxRow, FileSheetColorPicker, FileSheetColorProperty,
   FileSheetControlRow, FileSheetSelectRow, FileSheetSettingsSection,
   FileSheetFieldGrid, FileSheetNumberProperty, parseFileSheetNumberInput
 } from "../inspector/FileSheet.js";
@@ -177,6 +177,10 @@ export function DisplaySettingsSection({
           <NumberProperty label="Softbox size" Icon={Expand} value={view.lighting.size} min={0.25} max={3} unit="×" onChange={size => setGroup("lighting", { size })} />
           <NumberProperty label="Fill ratio" Icon={SunDim} value={view.lighting.fill * 100} min={0} max={100} unit="%" digits={0} onChange={value => setGroup("lighting", { fill: value / 100 })} />
         </FileSheetFieldGrid>
+        {/* Progressive radiosity in place of the key spotlight: the environment alone lights the
+            model, with baked soft shadows and contact occlusion that refine over a few seconds. */}
+        <FileSheetCheckboxRow label="Global illumination" checked={view.lighting.globalIllumination === true}
+          onCheckedChange={globalIllumination => setGroup("lighting", { globalIllumination })} />
       </>),
       section("background", "Background", color("background", "Background color")),
       section("floor", "Floor", <>

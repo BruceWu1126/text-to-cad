@@ -5,7 +5,7 @@ import { DEFAULT_STEP_CLIP_SETTINGS, normalizeStepClipSettings } from "../lib/vi
 /** @typedef {{enabled: boolean, projection: "orthographic" | "perspective", focalLength: number}} ViewCamera */
 /** @typedef {{enabled: boolean, style: "shaded" | "flat" | "hidden" | "off", colorMode: "original" | "single" | "by-part", color: string, colors: string[], opacity: number}} ViewSurfaces */
 /** @typedef {{enabled: boolean, visibility: "visible" | "all", color: string}} ViewEdges */
-/** @typedef {{enabled: boolean, quality: "preview" | "final", exposure: number, rotation: number, size: number, fill: number}} ViewLighting */
+/** @typedef {{enabled: boolean, quality: "preview" | "final", exposure: number, rotation: number, size: number, fill: number, globalIllumination: boolean}} ViewLighting */
 /** @typedef {{enabled: boolean, color: string, opacity: number}} ViewPaint */
 /** @typedef {ViewPaint & {placement: "origin" | "lowest", finish: "matte" | "glossy"}} ViewFloor */
 /** @typedef {{enabled?: boolean, axis?: "x" | "y" | "z", offset?: number, offsets?: {x?: number, y?: number, z?: number}, invert?: boolean}} ViewClip */
@@ -57,7 +57,10 @@ export const VIEW_SETTINGS_KEYS = Object.freeze(["mode", "appearance", "camera",
 export const VIEW_CAMERA_KEYS = Object.freeze(["enabled", "projection", "focalLength"]);
 export const VIEW_SURFACES_KEYS = Object.freeze(["enabled", "style", "colorMode", "color", "colors", "opacity"]);
 export const VIEW_EDGES_KEYS = Object.freeze(["enabled", "visibility", "color"]);
-export const VIEW_LIGHTING_KEYS = Object.freeze(["enabled", "quality", "exposure", "rotation", "size", "fill"]);
+// `globalIllumination` is the interactive viewer's: a progressive radiosity bake lights the
+// model from the studio environment alone (`photographicStudio.js`). A snapshot accepts
+// the key and keeps the studio's direct key light.
+export const VIEW_LIGHTING_KEYS = Object.freeze(["enabled", "quality", "exposure", "rotation", "size", "fill", "globalIllumination"]);
 export const VIEW_BACKGROUND_KEYS = Object.freeze(["enabled", "color", "opacity"]);
 export const VIEW_FLOOR_KEYS = Object.freeze(["enabled", "placement", "color", "opacity", "finish"]);
 export const VIEW_GRID_KEYS = Object.freeze(["enabled", "color", "opacity", "density"]);
@@ -102,7 +105,7 @@ function normalizeGroup(value, name) {
   const result = {};
   for (const [key, entry] of Object.entries(value)) {
     const field = `${prefix}.${key}`;
-    if (key === "enabled") {
+    if (key === "enabled" || key === "globalIllumination") {
       if (typeof entry !== "boolean") throw new Error(`${field} must be a boolean`);
       result[key] = entry;
     } else if (key === "color") result[key] = color(entry, field);
@@ -159,7 +162,7 @@ function defaults(appearance, lightingQuality) {
     camera: { enabled: true, projection: "orthographic", focalLength: 50 },
     surfaces: { enabled: true, style: "shaded", colorMode: "original", color: DEFAULT_PART_COLOR_SETTINGS.color, colors: [...DEFAULT_PART_COLOR_SETTINGS.colors], opacity: 1 },
     edges: { enabled: true, visibility: "visible", color: "#253443" },
-    lighting: { enabled: false, quality: lightingQuality, exposure: 0, rotation: 0, size: 1, fill: 0.25 },
+    lighting: { enabled: false, quality: lightingQuality, exposure: 0, rotation: 0, size: 1, fill: 0.25, globalIllumination: false },
     background: { enabled: false, color: dark ? "#121315" : "#ffffff", opacity: 1 },
     floor: { enabled: false, placement: "origin", color: dark ? "#121315" : "#e7e7e5", opacity: 0.6, finish: "matte" },
     // No preset but Grid draws the grid or the axes; turned on by hand they are the quiet ones.
