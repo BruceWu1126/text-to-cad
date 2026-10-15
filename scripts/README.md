@@ -197,10 +197,13 @@ models' profiles, `export-logos.mjs` exports every other logo file from them.
 Run by hand when the brand changes; ordinary builds use the committed files. See
 [the brand recipe](brand/README.md).
 
-`bench/` — manual edit, warm-build and viewer performance commands. See
-[benchmark usage](bench/cadgen-performance/README.md). Reports and profiler
-captures are local output under `tmp/`, never committed here. The drivers are
-manual; their `*.test.mjs` helper units run in `test-js.sh`.
+`bench/` — manual edit, warm-build and viewer performance commands
+([benchmark usage](bench/cadgen-performance/README.md)), and the mesh
+scoreboard ([`bench/mesh-scoreboard/`](bench/mesh-scoreboard/README.md)): every
+solid of a STEP corpus scored on the properties a display mesh must have and on
+cost, the table a mesher change opens its pull request with. Reports and
+profiler captures are local output under `tmp/`, never committed here. The
+drivers are manual; their `*.test.mjs` helper units run in `test-js.sh`.
 
 ## CI
 
