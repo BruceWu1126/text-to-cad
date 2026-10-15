@@ -578,6 +578,17 @@ static void classify_open_edges(run *r, arenas M, const face *faces, raw_face **
           PUSH(M.T, cracked[k], ord);
         }
       } else {
+        if (getenv("CADGEN_TESS_DEBUG")) {
+          const labels *lp = bmap_get(&raws[k]->boundary, o->p), *lq = bmap_get(&raws[k]->boundary, o->q);
+          fprintf(stderr, "DEBUG hole face %d: v%d (%.9g,%.9g,%.9g) uv (%.6g,%.6g) labels", faces[k].ord, o->p,
+                  raws[k]->xyz.v[3 * o->p], raws[k]->xyz.v[3 * o->p + 1], raws[k]->xyz.v[3 * o->p + 2],
+                  raws[k]->uv.v[2 * o->p], raws[k]->uv.v[2 * o->p + 1]);
+          for (i64 q = 0; lp && q < lp->n; q++) fprintf(stderr, " e%d/%.4g", lp->v[q].ord, lp->v[q].f);
+          fprintf(stderr, " -- v%d (%.9g,%.9g,%.9g) uv (%.6g,%.6g) labels", o->q, raws[k]->xyz.v[3 * o->q],
+                  raws[k]->xyz.v[3 * o->q + 1], raws[k]->xyz.v[3 * o->q + 2], raws[k]->uv.v[2 * o->q], raws[k]->uv.v[2 * o->q + 1]);
+          for (i64 q = 0; lq && q < lq->n; q++) fprintf(stderr, " e%d/%.4g", lq->v[q].ord, lq->v[q].f);
+          fprintf(stderr, "\n");
+        }
         PUSH(M.T, *holes, *o);
         hole_count[k]++;
       }

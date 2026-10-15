@@ -144,8 +144,9 @@ export function buildComponentMeshData(component) {
     parts: [part],
     has_source_colors: false,
     sourceColor: "",
-    // The faces no mesher could cover, which this mesh does not draw: the viewer names the
-    // parts drawn without them.
+    // The faces no mesher could cover, which this mesh does not draw, and the faces it draws off
+    // their exact surface: the viewer names the parts drawn without the one and with the other.
     unmeshedFaces: [...(component.unmeshedFaces || [])],
+    unverifiedFaces: [...(component.unverifiedFaces || [])],
   };
 }

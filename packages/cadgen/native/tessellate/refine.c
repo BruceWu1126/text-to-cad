@@ -543,28 +543,7 @@ static int tessellate_face_raw(run *r, arenas M, const host *h, const face *f, c
   /* Boundary vertices pinned onto their shared edges before refinement reads them, so a stretch
    * along a fixed edge is known and never split: the face across it holds exactly those knots. */
   pin_boundary(r, M.A, M.T, h, g, &uv, &xyz, &out->boundary, edges, edge_count);
-  if (remap) {
-    /* The pole's one vertex lies on every edge that met the pole: it takes the labels of the
-     * vertices folded into it. */
-    for (i64 i = 0; i < count; i++) {
-      if (remap[i] == i) continue;
-      const labels *from = bmap_get(&out->boundary, i);
-      if (!from) continue;
-      labels moved = *from;
-      if (!bmap_get(&out->boundary, remap[i])) {
-        labels none = {NULL, 0, 0};
-        bmap_set(M.A, &out->boundary, remap[i], none);
-      }
-      labels *into = bmap_get(&out->boundary, remap[i]);
-      for (i64 q = 0; q < moved.n; q++) {
-        int present = 0;
-        for (i64 j = 0; j < into->n && !present; j++)
-          if (into->v[j].ord == moved.v[q].ord && into->v[j].f == moved.v[q].f) present = 1;
-        if (!present) PUSH(M.A, *into, moved.v[q]);
-      }
-      bmap_pop(&out->boundary, i);
-    }
-  }
+  i64 grid_count = count;
   double angle_cos = cos(angle);
   /* Each edge's verdict, made once, and the surface's point at its middle that it read: the
    * point a split of the edge makes, and for an edge it fails, which this round splits, the
@@ -662,6 +641,28 @@ static int tessellate_face_raw(run *r, arenas M, const host *h, const face *f, c
   }
   /* Every boundary vertex pinned onto its shared edge polyline, the ones refinement made too. */
   pin_boundary(r, M.A, M.T, h, g, &uv, &xyz, &out->boundary, edges, edge_count);
+  if (remap) {
+    /* The pole's one vertex lies on every edge that met the pole: it takes the labels of the
+     * vertices folded into it, which no triangle has any more. */
+    for (i64 i = 0; i < grid_count; i++) {
+      if (remap[i] == i) continue;
+      const labels *from = bmap_get(&out->boundary, i);
+      if (!from) continue;
+      labels moved = *from;
+      if (!bmap_get(&out->boundary, remap[i])) {
+        labels none = {NULL, 0, 0};
+        bmap_set(M.A, &out->boundary, remap[i], none);
+      }
+      labels *into = bmap_get(&out->boundary, remap[i]);
+      for (i64 q = 0; q < moved.n; q++) {
+        int present = 0;
+        for (i64 j = 0; j < into->n && !present; j++)
+          if (into->v[j].ord == moved.v[q].ord && into->v[j].f == moved.v[q].f) present = 1;
+        if (!present) PUSH(M.A, *into, moved.v[q]);
+      }
+      bmap_pop(&out->boundary, i);
+    }
+  }
   out->source = SOURCE_LIBRARY;
   out->uv = uv;
   out->xyz = xyz;

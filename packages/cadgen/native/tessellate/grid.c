@@ -484,10 +484,12 @@ static i64 grid_steps_for_direction(run *r, const host *h, const face *f, const 
   double u0 = box[0], u1 = box[1], v0 = box[2], v1 = box[3];
   double span = direction == 0 ? u1 - u0 : v1 - v0;
   if (span <= 0) return 1;
-  const int probes = 4;
+  /* Enough probe intervals that the curvature of one stretch of the surface (a bell's lip, a
+   * spline's bend) is met by one of them rather than averaged over a quarter of the span. */
+  const int probes = 16, lines = 8;
   double worst = 0.0;
-  for (int line = 0; line <= probes; line++) {
-    double across = direction == 0 ? v0 + ((v1 - v0) * line) / probes : u0 + ((u1 - u0) * line) / probes;
+  for (int line = 0; line <= lines; line++) {
+    double across = direction == 0 ? v0 + ((v1 - v0) * line) / lines : u0 + ((u1 - u0) * line) / lines;
     for (int i = 0; i < probes; i++) {
       double t0 = (direction == 0 ? u0 : v0) + (span * i) / probes;
       double t1 = t0 + span / probes;

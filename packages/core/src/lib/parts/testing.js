@@ -24,7 +24,7 @@ export function testPartKey(seed = "a") {
 /**
  * A synthetic stored-mesh body for `component`, laid out as cadgen writes one: either
  * `{positions, normals, indices, faceRanges: [{ord, color?, indexStart, indexCount}],
- * edges: [{ord, visibilityClass?, polyline}], bounds, unmeshedFaces?}` or a decoded component
+ * edges: [{ord, visibilityClass?, polyline}], bounds, unmeshedFaces?, unverifiedFaces?}` or a decoded component
  * (`decodeComponentTessellation(...).component`), whose tables it reads back. It names `part`.
  */
 export function encodeMeshFixture(component, { part }) {
@@ -57,6 +57,7 @@ export function encodeMeshFixture(component, { part }) {
     faceColors: [...palette.values()].map((entry) => entry.color),
   };
   if (component.unmeshedFaces?.length) cad.unmeshedFaces = [...component.unmeshedFaces];
+  if (component.unverifiedFaces?.length) cad.unverifiedFaces = [...component.unverifiedFaces];
   const counts = {
     vertexCount,
     indexCount: component.indices.length,
@@ -103,8 +104,8 @@ export function encodeMeshFixture(component, { part }) {
 
 /**
  * What a part's record says of its display mesh `bytes`, but the object's address (which a test
- * hashes): `{byteLength, decodedBytes, <counts>, unmeshedFaceCount?}`, as cadgen's
- * `meshes.body_facts` reads it.
+ * hashes): `{byteLength, decodedBytes, <counts>, unmeshedFaceCount?, unverifiedFaceCount?}`, as
+ * cadgen's `meshes.body_facts` reads it.
  */
 export function partMeshFacts(bytes) {
   const decoded = decodeComponentTessellation(bytes);
@@ -120,6 +121,7 @@ export function partMeshFacts(bytes) {
   return {
     byteLength: bytes.byteLength, decodedBytes: tessellationDecodedBytes(counts), ...counts,
     ...(component.unmeshedFaces.length ? { unmeshedFaceCount: component.unmeshedFaces.length } : {}),
+    ...(component.unverifiedFaces.length ? { unverifiedFaceCount: component.unverifiedFaces.length } : {}),
   };
 }
 
