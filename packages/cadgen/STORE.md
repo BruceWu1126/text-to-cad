@@ -49,7 +49,7 @@ One word per concept; the code uses these words and no others.
 | **part** | a component's display data under one producer: ONE index entry naming its display mesh and its selector table (§3), keyed by the component's fingerprint, never its bytes |
 | **fingerprint** | a component's geometric identity: `sha256`, under `GEOMETRY_FINGERPRINT_SCHEME`, of the shape's kind, its vertex points rounded relative to its extent and its faces' signatures, all order-free (§2) -- the same for the body a build holds and that body read back from the STEP it wrote |
 | **token** | half of a ref, opaque: an occurrence's `o:` (hashed from its parent's token, its name and its rounded placement; an ordinal only tells identical siblings apart) or an element's `f:`/`e:`/`v:` (hashed from the element's geometry within its body, a selector-table column); never an ordinal or a position (§3) |
-| **preview revision** | what a build announces the moment its result exists (§9b): its result tree and the part key of every component in it, artifact-side objects a viewer draws labelled as a preview until the saved file replaces them in place |
+| **preview revision** | what a build announces the moment its result exists (§9b): its result tree, the part key of every component in it and its annotations (the articulation, finishes and keyframes the sidecar will carry, resolved against that tree), artifact-side objects a viewer draws labelled as a preview until the saved file replaces them in place |
 | **provenance** | a build's account of which operation at which source frame made each component and element of its result: a code-side entry per model, `index/provenance` (§3), read by `inspect --where` and by nothing on a render path |
 | **obsolete** | a part entry an older version of cadgen's derivation wrote, or a record or document entry at a key this cadgen does not own (another schema version's): no reader of this cadgen asks for it again, and the sweeper retires it once it is a week old (§2, §8) |
 | **worker / spare / extra**, **job** | daemon vocabulary (the daemon's own documentation) |
@@ -2082,9 +2082,19 @@ any tree and any part, and it draws them at once, labelled as a preview of the
 build in progress -- the picture is on screen before the STEP is written, read
 back and published -- then replaces them in place with the saved file when the
 catalog names it, keeping every component whose part the two share, which is
-all of them when the fingerprints agree (§2). A preview is never shown as the
-file: nothing binds the file's sidecar to it, it is not the catalog's entry,
-and a save that fails leaves the preview labelled as what it is, under the
+all of them when the fingerprints agree (§2). What the sidecar will carry
+travels with the preview too, as its **annotations**: the build resolves the
+model's declarations against the result tree as soon as the parts are derived
+-- the mates into the articulation a page plays, `materials=` into finishes on
+leaf tokens, the clips into keyframes -- and publishes them as one
+artifact-side object the preview names, so Position, finishes and routines work
+on a preview as on the saved file, by the same tokens; the save confirms them
+(same tokens, same data, nothing on screen moves) and binds the file's own
+sidecar for every durable reader. A declaration that fails to resolve is the
+build's failure, as now, and the preview stays up without it, under the
+failure. A preview is never shown as the file: nothing binds the file's sidecar
+to it, it is not the catalog's entry, no snapshot, export or `read_scene` reads
+it, and a save that fails leaves the preview labelled as what it is, under the
 failure. An answer carries no geometry of its own; the server does no kernel
 work and exposes no source/closure/model record. A finished build whose output
 is no longer the file on disk -- the bytes it saved replaced or, if it saved

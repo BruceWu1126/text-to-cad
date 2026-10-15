@@ -171,11 +171,18 @@ the part key of each of its components, cadgen's `STORE.md` §9b -- and the view
 draws it in place of the previous model, labelled as a preview of the build in
 progress. Its parts are the saved file's own (a part is named by its geometry, §1),
 so when the build writes the file the saved revision replaces the preview in place
-with nothing fetched twice, and the label goes. A preview is never presented as the
-file: no sidecar binds to it, and selection, measurements and reference copying
-resolve against it as against any revision, by token. Before the preview exists the
-model on screen says it is updating, and a failed build leaves what is on screen --
-the labelled preview, or the previous model -- under its alert.
+with nothing fetched twice, and the label goes. The sidecar-driven features work on
+a preview as on a saved file: the feed names the preview's annotations -- the
+articulation, finishes and keyframes the build resolved against the preview's tree,
+the data the sidecar will carry, keyed by the same tokens -- a moment after its
+geometry, and Position, materials and routines bind to them exactly as they bind to
+a saved file's; until they arrive the pose follows [Position's rule](cad-renderer.md#position)
+for a replacement, and when the save lands nothing on screen moves. A preview is
+never presented as the file: no sidecar binds to it, snapshots and exports read the
+saved file alone, and selection, measurements and reference copying resolve against
+it as against any revision, by token. Before the preview exists the model on screen
+says it is updating, and a failed build leaves what is on screen -- the labelled
+preview, or the previous model -- under its alert.
 
 **What the viewport shows.** The navbar carries no status. Opening and
 updating are the viewport's loading overlay (`ViewerLoadingOverlay`). A failure is
