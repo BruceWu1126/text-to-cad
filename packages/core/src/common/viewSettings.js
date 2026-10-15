@@ -57,9 +57,9 @@ export const VIEW_SETTINGS_KEYS = Object.freeze(["mode", "appearance", "camera",
 export const VIEW_CAMERA_KEYS = Object.freeze(["enabled", "projection", "focalLength"]);
 export const VIEW_SURFACES_KEYS = Object.freeze(["enabled", "style", "colorMode", "color", "colors", "opacity"]);
 export const VIEW_EDGES_KEYS = Object.freeze(["enabled", "visibility", "color"]);
-// `globalIllumination` is the interactive viewer's: a progressive radiosity bake lights the
-// model from the studio environment alone (`photographicStudio.js`). A snapshot accepts
-// the key and keeps the studio's direct key light.
+// `globalIllumination` (on by default) is the interactive viewer's: a progressive radiosity
+// bake lights the model from the studio environment alone (`photographicStudio.js`). A
+// snapshot accepts the key and keeps the studio's direct key light.
 export const VIEW_LIGHTING_KEYS = Object.freeze(["enabled", "quality", "exposure", "rotation", "size", "fill", "globalIllumination"]);
 export const VIEW_BACKGROUND_KEYS = Object.freeze(["enabled", "color", "opacity"]);
 export const VIEW_FLOOR_KEYS = Object.freeze(["enabled", "placement", "color", "opacity", "finish"]);
@@ -162,7 +162,7 @@ function defaults(appearance, lightingQuality) {
     camera: { enabled: true, projection: "orthographic", focalLength: 50 },
     surfaces: { enabled: true, style: "shaded", colorMode: "original", color: DEFAULT_PART_COLOR_SETTINGS.color, colors: [...DEFAULT_PART_COLOR_SETTINGS.colors], opacity: 1 },
     edges: { enabled: true, visibility: "visible", color: "#253443" },
-    lighting: { enabled: false, quality: lightingQuality, exposure: 0, rotation: 0, size: 1, fill: 0.25, globalIllumination: false },
+    lighting: { enabled: false, quality: lightingQuality, exposure: 0, rotation: 0, size: 1, fill: 0.25, globalIllumination: true },
     background: { enabled: false, color: dark ? "#121315" : "#ffffff", opacity: 1 },
     floor: { enabled: false, placement: "origin", color: dark ? "#121315" : "#e7e7e5", opacity: 0.6, finish: "matte" },
     // No preset but Grid draws the grid or the axes; turned on by hand they are the quiet ones.

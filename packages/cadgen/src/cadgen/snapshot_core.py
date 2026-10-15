@@ -183,7 +183,7 @@ PART_COLOR_MODES = frozenset({"original", "single", "by-part"})
 DISPLAY_CAMERA_KEYS = frozenset({"enabled", "projection", "focalLength"})
 DISPLAY_SURFACE_KEYS = frozenset({"enabled", "style", "colorMode", "color", "colors", "opacity"})
 DISPLAY_EDGE_KEYS = frozenset({"enabled", "visibility", "color"})
-# globalIllumination is the interactive viewer's progressive radiosity; a snapshot accepts
+# globalIllumination (the viewer's default) is its progressive radiosity; a snapshot accepts
 # it and renders the studio's direct key light (packages/core/src/common/viewSettings.js).
 DISPLAY_LIGHTING_KEYS = frozenset({"enabled", "quality", "exposure", "rotation", "size", "fill", "globalIllumination"})
 DISPLAY_BACKGROUND_KEYS = frozenset({"enabled", "color", "opacity"})

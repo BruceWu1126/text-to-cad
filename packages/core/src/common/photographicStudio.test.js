@@ -535,7 +535,7 @@ test("global illumination replaces the key spotlight only with a stepping host a
   const studioRuntime = runtime();
   const root = new THREE.Group();
   root.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshPhysicalMaterial()));
-  const base = configuration();
+  const base = { ...configuration(), lighting: { ...configuration().lighting, globalIllumination: false } };
   const globalIllumination = { ...base, lighting: { ...base.lighting, globalIllumination: true } };
 
   // No host (a snapshot): the recipe's flag is accepted and the spotlight stays.

@@ -51,7 +51,7 @@ Every preset has the same independent groups:
   camera: { projection: "perspective", focalLength: 50 },
   surfaces: { style: "shaded", colorMode: "original", opacity: 1 },
   edges: { enabled: false, visibility: "visible", color: "#253443" },
-  lighting: { quality: "final", exposure: 0, rotation: 0, size: 1, fill: 0.25, globalIllumination: false },
+  lighting: { quality: "final", exposure: 0, rotation: 0, size: 1, fill: 0.25, globalIllumination: true },
   background: { color: "#ffffff", opacity: 1 },
   floor: { placement: "lowest", color: "#e7e7e5", opacity: 0.6 },
   grid: { enabled: false, color: "#cbd5e1", opacity: 0.16 },
@@ -157,8 +157,8 @@ share a calibrated zero-EV lighting budget. Khronos PBR Neutral tone mapping is
 fixed; `toneMappingExposure` is `2 ** exposure`. Light and dark differ only in
 default backdrop color.
 
-`lighting.globalIllumination` replaces the key spotlight and the shadows it
-casts with a progressive radiosity bake (`lib/viewer/radiosityStage.js`): the
+`lighting.globalIllumination` (on by default) replaces the key spotlight and the
+shadows it casts with a progressive radiosity bake (`lib/viewer/radiosityStage.js`): the
 model is lit from the studio environment alone, with soft shadows, contact
 occlusion and the floor's baked shadow accumulated into a lightmap that refines
 over a few seconds (Thomsen & Nielsen stochastic depth buffering, one global
