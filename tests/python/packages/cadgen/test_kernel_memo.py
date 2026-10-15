@@ -22,7 +22,7 @@ from tests.python.support.paths import add_repo_path
 
 add_repo_path("packages/cadgen/src")
 
-from cadgen._internal import kernel_memo  # noqa: E402
+from cadgen._internal import kernel_memo, kernel_trace  # noqa: E402
 from cadgen._internal.component_package import _shape_brep_bytes as _bytes  # noqa: E402
 
 COUNTS = ("hits", "misses", "unkeyable", "unreplayable", "errors")
@@ -492,6 +492,32 @@ class TraceTest(KernelMemoCase):
                 self.assertEqual(kernel_memo._register(shape, None, feature.index, run, None), [])
             self.assertEqual(run.transient, {})
         self.assertFalse(promise._forced, "the memo read the promise")
+
+    def test_an_element_the_kernel_leaves_unbounded_is_signed_in_a_window(self) -> None:
+        """A hyperbola's natural bounds are the kernel's infinity, the finite
+        float 2e100, where its Cosh overflows: the signature samples a fixed
+        window instead, the same for every trim of the curve or surface."""
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeFace
+        from OCP.Geom import Geom_Hyperbola, Geom_SurfaceOfLinearExtrusion
+        from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+
+        def hyperbola(major: float):
+            return Geom_Hyperbola(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), major, 1.0)
+
+        self.assertEqual(hyperbola(2.0).LastParameter(), 2e100)
+        short = kernel_trace.edge_signature(BRepBuilderAPI_MakeEdge(hyperbola(2.0), -1.0, 1.0).Edge())
+        long = kernel_trace.edge_signature(BRepBuilderAPI_MakeEdge(hyperbola(2.0), -2.0, 0.5).Edge())
+        other = kernel_trace.edge_signature(BRepBuilderAPI_MakeEdge(hyperbola(3.0), -1.0, 1.0).Edge())
+        self.assertEqual(short[0], long[0])
+        self.assertNotEqual(short[1], long[1])
+        self.assertNotEqual(short[0], other[0])
+
+        surface = Geom_SurfaceOfLinearExtrusion(hyperbola(2.0), gp_Dir(0, 0, 1))
+        self.assertEqual(surface.Bounds(), (-2e100, 2e100, -2e100, 2e100))
+        low = kernel_trace.face_signature(BRepBuilderAPI_MakeFace(surface, -1.0, 1.0, 0.0, 2.0, 1e-6).Face())
+        high = kernel_trace.face_signature(BRepBuilderAPI_MakeFace(surface, -0.5, 0.5, 5.0, 9.0, 1e-6).Face())
+        self.assertEqual(low[0], high[0])
+        self.assertNotEqual(low[1], high[1])
 
     def test_provenance_is_the_same_cold_and_hot(self) -> None:
         import json

@@ -49,6 +49,7 @@ from OCP.BRep import BRep_Tool
 from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCP.BRepTools import BRepTools
 from OCP.GeomAbs import GeomAbs_CurveType, GeomAbs_SurfaceType
+from OCP.Precision import Precision
 from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
 from OCP.TopExp import TopExp
 from OCP.TopLoc import TopLoc_Location
@@ -66,6 +67,7 @@ __all__ = ["Feature", "Trace", "edge_signature", "face_signature"]
 POSITION_QUANTUM = 1e-6
 DIRECTION_QUANTUM = 1e-9
 _SAMPLES = 3
+_WINDOW = (-1.0, 1.0)
 _HERE = Path(__file__).resolve().parent
 # A kernel call reached through cadgen's own machinery before any model frame
 # (a child's materialization, the store's own constructions) is cadgen's, not
@@ -506,8 +508,15 @@ def _samples(evaluate: Callable[..., Any], bounds: tuple[float, ...], count: int
     return tuple(_point(evaluate(u, v)) for u in steps(bounds[0], bounds[1]) for v in steps(bounds[2], bounds[3]))
 
 
-def _finite(first: float, last: float, fallback: tuple[float, float]) -> tuple[float, float]:
-    return (first if math.isfinite(first) else fallback[0], last if math.isfinite(last) else fallback[1])
+def _bounded(first: float, last: float) -> tuple[float, float]:
+    """A parameter's natural bounds, or a fixed window about zero where the
+    kernel leaves it unbounded: its infinity is the finite float 2e100, where a
+    hyperbola overflows and every offset surface samples alike. The window
+    names the curve or surface the same whatever trim an edge or face takes
+    from it."""
+    if any(not math.isfinite(bound) or Precision.IsInfinite_s(bound) for bound in (first, last)):
+        return _WINDOW
+    return first, last
 
 
 def face_signature(face: Any) -> tuple[tuple, tuple]:
@@ -541,8 +550,7 @@ def face_signature(face: Any) -> tuple[tuple, tuple]:
     else:
         geom = BRep_Tool.Surface_s(topods_face)
         u0, u1, v0, v1 = geom.Bounds()
-        umin, umax, vmin, vmax = BRepTools.UVBounds_s(topods_face)
-        bounds = (*_finite(u0, u1, (umin, umax)), *_finite(v0, v1, (vmin, vmax)))
+        bounds = (*_bounded(u0, u1), *_bounded(v0, v1))
         surface = (str(kind).rsplit("_", 1)[-1].lower(), _samples(geom.Value, bounds))
     vertices = _map(face, TopAbs_VERTEX)
     points = sorted(_point(BRep_Tool.Pnt_s(TopoDS.Vertex_s(vertices.FindKey(i)))) for i in range(1, vertices.Extent() + 1))
@@ -577,7 +585,6 @@ def edge_signature(edge: Any) -> tuple[tuple, tuple]:
                  _q(ellipse.MajorRadius()), _q(ellipse.MinorRadius()))
     else:
         geom = BRep_Tool.Curve_s(topods_edge, 0.0, 0.0)
-        bounds = _finite(geom.FirstParameter(), geom.LastParameter(),
-                         (adaptor.FirstParameter(), adaptor.LastParameter()))
+        bounds = _bounded(geom.FirstParameter(), geom.LastParameter())
         curve = (str(kind).rsplit("_", 1)[-1].lower(), _samples(geom.Value, bounds, 5))
     return curve, extent
