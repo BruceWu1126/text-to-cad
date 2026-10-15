@@ -76,15 +76,11 @@ where those files ship, so these scripts are what produces them.
   missing file.
 - `test-docs.sh` — `npm --prefix apps/docs run check`, then the animated brand
   marks' tests. Called by `test.yml`.
-- `test-kicad.sh` — `tests/python/packages/kicad`, the board suites that need
-  KiCad 10's `kicad-cli` (and its ngspice library, for simulation) and Freerouting
-  (for autorouting): boards built end to end, plotted, exported, checked,
-  simulated and routed, in an isolated store. A missing tool fails the run rather
-  than skipping it. Called by `test.yml` (the `kicad` job).
-- `test-harness.sh` — `tests/python/packages/harness`, the wiring-harness suites
-  that need WireViz's `wireviz` and Graphviz's `dot`: documents drawn and listed
-  through a real WireViz. A missing tool fails the run rather than skipping it.
-  Called by `test.yml` (the `harness` job).
+- `test-kicad.sh` — `tests/python/packages/kicad`, the board suite that needs
+  KiCad's `kicad-cli` from the 10.99 nightly (the KiCad 11 API): boards built end
+  to end through its headless API server and checked with its DRC. A missing or
+  older KiCad fails the run rather than skipping it. Called by `test.yml` (the
+  `kicad` job).
 - `test-api.sh` — `npm --prefix apps/api test`: the version feed's and the
   telemetry receiver's tests, which need no install. Called by `test.yml` and
   `deploy-api.yml`.

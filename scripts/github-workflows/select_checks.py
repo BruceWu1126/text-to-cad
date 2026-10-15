@@ -29,7 +29,6 @@ Outputs (GITHUB_OUTPUT), one flag per job and the test paths the narrowed jobs t
     docs
     packaging
     kicad                         KiCad boards
-    harness                       WireViz harnesses
     full
     record                        the artifact name recording what this run tests
 
@@ -59,8 +58,8 @@ ROOT = Path(__file__).resolve().parents[2]
 CADGEN_SUITE = "tests/python/packages/cadgen"
 POLICY_SUITE = "tests/python/global"
 SKILL_SUITES = "tests/python/skills"
-# The suites that need KiCad or WireViz, each its own job (`kicad`, `harness`).
-TOOL_SUITES = {"kicad": "tests/python/packages/kicad", "harness": "tests/python/packages/harness"}
+# The suite that needs KiCad (the nightly's headless API server), its own job (`kicad`).
+TOOL_SUITES = {"kicad": "tests/python/packages/kicad"}
 FLAGS = ("core_js", "web_ui", "web_client", "web_viewer", "mcp", "api", "docs", "packaging", *TOOL_SUITES)
 
 
@@ -122,9 +121,9 @@ CADGEN_SKILL_SUITES = (f"{SKILL_SUITES}/cad", f"{SKILL_SUITES}/dxf")
 
 # Whatever runs cadgen: its suites on both platforms, the skill suites that drive it, the
 # policy tests that load it, the viewer gates that serve and build through it, the wheel, and
-# the boards and harnesses built end to end through KiCad and WireViz.
+# the boards built end to end through KiCad.
 CADGEN_CONSUMERS = select(
-    flags=["web_viewer", "packaging", "kicad", "harness"], cadgen=[CADGEN_SUITE], skills=CADGEN_SKILL_SUITES,
+    flags=["web_viewer", "packaging", "kicad"], cadgen=[CADGEN_SUITE], skills=CADGEN_SKILL_SUITES,
     policy=[f"{POLICY_SUITE}/{name}" for name in sorted(HEAVY_POLICY)],
 )
 
@@ -189,7 +188,7 @@ def _cadgen_tests_naming(names: str, directories: tuple[str, ...]) -> list[str]:
 
 
 def _tool_jobs_naming(names: str) -> list[str]:
-    """The KiCad and WireViz jobs a change to a leaf can reach: those with a test that names it, as
+    """The KiCad job a change to a leaf can reach: when a test of its suite names the leaf, as
     `_cadgen_tests_naming` finds the cadgen tests."""
     pattern = _naming(names)
     return [flag for flag, suite in TOOL_SUITES.items()
@@ -303,9 +302,8 @@ RULES: tuple[Rule, ...] = (
     Rule(("scripts/test/test-docs.sh", "scripts/brand/**"), select(flags=["docs"])),
     Rule(("scripts/test/test-viewer-launch.sh", "scripts/test/test-viewer-browser.sh"), select(flags=["web_viewer"])),
     Rule(("scripts/test/test-installed.sh",), select(flags=["packaging"])),
-    # The suites that need KiCad or WireViz installed, and their runners: their own jobs.
+    # The suite that needs KiCad installed, and its runner: its own job.
     Rule((f"{TOOL_SUITES['kicad']}/**", "scripts/test/test-kicad.sh"), select(flags=["kicad"])),
-    Rule((f"{TOOL_SUITES['harness']}/**", "scripts/test/test-harness.sh"), select(flags=["harness"])),
     Rule(("scripts/test/test.sh",), NOTHING),  # chains the runners for a local run; CI calls them itself
     Rule(("scripts/bench/viewer-memory/**",), select(flags=["core_js"])),
 
