@@ -185,15 +185,31 @@ static void split_marked(arena *A, arena *T, const vi *tri, const u64 *marked, i
   fresh->cap = flags.cap;
 }
 
+/* What `mark_pole_twins` asks of a face's refinement: an edge along a fixed model edge is never
+ * split. */
+typedef struct {
+  const bmap *boundary;
+  const shared *edges;
+  i32 edge_count;
+} fixed_edges;
+
+static int off_fixed_edge(void *ctx, i32 p, i32 q) {
+  const fixed_edges *c = (const fixed_edges *)ctx;
+  return !on_fixed_edge(c->boundary, c->edges, c->edge_count, p, q);
+}
+
 /* The key of the edge a triangle with no edge past the tolerance marks -- its longest uv edge not
  * along a fixed model edge, where its centre strays from the surface or its facet tilts off the
  * surface's normal -- or 0 for none. */
-static int triangle_mark(run *r, const host *h, const surface *s, i32 a, i32 b, i32 c, const double *uv,
+static int triangle_mark(run *r, const host *h, const face *f, i32 a, i32 b, i32 c, const double *uv,
                          const double *xyz, const double *nrm, double chord_limit, double angle_cos,
                          const bmap *boundary, const shared *edges, i32 edge_count, u64 *key) {
-  double ua = uv[2 * a], va = uv[2 * a + 1], ub = uv[2 * b], vb = uv[2 * b + 1], uc = uv[2 * c], vc = uv[2 * c + 1];
+  const surface *s = &f->s;
+  i32 corners[3] = {a, b, c};
+  double abc[6];
+  sample_params(f, uv, corners, 3, abc, NULL);
   double sc[3];
-  surface_value(r, h, s, (ua + ub + uc) / 3, (va + vb + vc) / 3, sc);
+  surface_value(r, h, s, (abc[0] + abc[2] + abc[4]) / 3, (abc[1] + abc[3] + abc[5]) / 3, sc);
   const double *pa = xyz + 3 * a, *pb = xyz + 3 * b, *pc = xyz + 3 * c;
   double fx = (pa[0] + pb[0] + pc[0]) / 3, fy = (pa[1] + pb[1] + pc[1]) / 3, fz = (pa[2] + pb[2] + pc[2]) / 3;
   double e1x = pb[0] - pa[0], e1y = pb[1] - pa[1], e1z = pb[2] - pa[2];
@@ -204,13 +220,13 @@ static int triangle_mark(run *r, const host *h, const surface *s, i32 a, i32 b, 
   int misaligned = facet > 1e-30 && fabs((f0 * n[0] + f1 * n[1] + f2 * n[2]) / facet) < angle_cos;
   double dx = sc[0] - fx, dy = sc[1] - fy, dz = sc[2] - fz;
   if (!misaligned && sqrt(dx * dx + dy * dy + dz * dz) <= chord_limit) return 0;
-  i32 corners[3] = {a, b, c};
   i32 lp = a, lq = b;
   double longest = -1.0;
   for (int k = 0; k < 3; k++) {
     i32 p = corners[k], q = corners[(k + 1) % 3];
     if (on_fixed_edge(boundary, edges, edge_count, p, q)) continue;
-    double du = uv[2 * p] - uv[2 * q], dv = uv[2 * p + 1] - uv[2 * q + 1];
+    int j = (k + 1) % 3;
+    double du = abc[2 * k] - abc[2 * j], dv = abc[2 * k + 1] - abc[2 * j + 1];
     double sq = du * du + dv * dv;
     if (sq > longest) {
       longest = sq;
@@ -512,20 +528,27 @@ static int tessellate_face_raw(run *r, arenas M, const host *h, const face *f, c
   }
   vi tri = g->tri;
   i32 *remap = NULL;
-  if (singular_grid) {
+  if (f->singular) {
+    /* A pole is one point of the surface and one vertex of the face: every grid vertex on a pole
+     * folds into the first on that pole (named by its axis and place), and a triangle two of whose
+     * corners folded together, which spanned the pole's parameters, goes. The fans round the one
+     * vertex are then sampled and split on the meridians they span (`sample_params`), and an edge
+     * from a ring vertex to the pole is one edge, shared by its two fans. */
     remap = (i32 *)arena_alloc(M.T, sizeof(i32) * (size_t)count);
-    vd pole_keys = {NULL, 0, 0};
-    vi pole_index = {NULL, 0, 0};
+    vi pole_axes = {NULL, 0, 0}, pole_index = {NULL, 0, 0};
+    vd pole_ats = {NULL, 0, 0};
     for (i64 i = 0; i < count; i++) {
       remap[i] = (i32)i;
-      double v = uv.v[2 * i + 1];
-      if (!singular_u(r, s, v)) continue;
+      double at;
+      int axis = pole_axis_at(f, uv.v[2 * i], uv.v[2 * i + 1], &at);
+      if (axis < 0) continue;
       i64 found = -1;
-      for (i64 k = 0; k < pole_keys.n; k++)
-        if (pole_keys.v[k] == v) found = k;
+      for (i64 k = 0; k < pole_axes.n; k++)
+        if (pole_axes.v[k] == axis && pole_ats.v[k] == at) found = k;
       if (found >= 0) remap[i] = pole_index.v[found];
       else {
-        PUSH(M.T, pole_keys, v);
+        PUSH(M.T, pole_axes, axis);
+        PUSH(M.T, pole_ats, at);
         PUSH(M.T, pole_index, (i32)i);
       }
     }
@@ -577,7 +600,11 @@ static int tessellate_face_raw(run *r, arenas M, const host *h, const face *f, c
         i64 at = *slot;
         if (made) {
           verdict v;
-          surface_value(r, h, s, (uv.v[2 * p] + uv.v[2 * q]) / 2, (uv.v[2 * p + 1] + uv.v[2 * q + 1]) / 2, v.mid);
+          i32 ends[2] = {p, q};
+          double pq[4];
+          sample_params(f, uv.v, ends, 2, pq, NULL);
+          double mu = (pq[0] + pq[2]) / 2, mv = (pq[1] + pq[3]) / 2;
+          surface_value(r, h, s, mu, mv, v.mid);
           const double *xp = xyz.v + 3 * p, *xq = xyz.v + 3 * q;
           double dx = v.mid[0] - (xp[0] + xq[0]) / 2, dy = v.mid[1] - (xp[1] + xq[1]) / 2,
                  dz = v.mid[2] - (xp[2] + xq[2]) / 2;
@@ -585,9 +612,7 @@ static int tessellate_face_raw(run *r, arenas M, const host *h, const face *f, c
           v.bad = (sqrt(dx * dx + dy * dy + dz * dz) > chord_limit ||
                    np_[0] * nq[0] + np_[1] * nq[1] + np_[2] * nq[2] < angle_cos) &&
                   !on_fixed_edge(&out->boundary, edges, edge_count, p, q);
-          if (v.bad)
-            surface_normal(r, h, s, (uv.v[2 * p] + uv.v[2 * q]) / 2, (uv.v[2 * p + 1] + uv.v[2 * q + 1]) / 2, f->uv,
-                           v.nrm);
+          if (v.bad) surface_normal(r, h, s, mu, mv, f->uv, v.nrm);
           PUSH(M.F, verdicts, v);
         }
         if (verdicts.v[at].bad) {
@@ -597,11 +622,13 @@ static int tessellate_face_raw(run *r, arenas M, const host *h, const face *f, c
       }
       if (!any_edge) {
         u64 key;
-        if (triangle_mark(r, h, s, corners[0], corners[1], corners[2], uv.v, xyz.v, nrm.v, chord_limit, angle_cos,
+        if (triangle_mark(r, h, f, corners[0], corners[1], corners[2], uv.v, xyz.v, nrm.v, chord_limit, angle_cos,
                           &out->boundary, edges, edge_count, &key))
           PUSH(M.T, marks, key);
       }
     }
+    fixed_edges fixed = {&out->boundary, edges, edge_count};
+    mark_pole_twins(M.T, f, uv.v, &tri, &marks, off_fixed_edge, &fixed);
     if (!marks.n) {
       arena_reset(M.T, mark);
       break;
@@ -623,8 +650,10 @@ static int tessellate_face_raw(run *r, arenas M, const host *h, const face *f, c
     RESERVE(M.A, xyz, xyz.n + 3 * midpoints.n);
     RESERVE(M.A, nrm, nrm.n + 3 * midpoints.n);
     for (i64 k = 0; k < midpoints.n; k++) {
-      i64 p = (i64)(midpoints.v[k] >> 32), q = (i64)(midpoints.v[k] & 0xFFFFFFFFu);
-      double mu = (uv.v[2 * p] + uv.v[2 * q]) / 2, mv = (uv.v[2 * p + 1] + uv.v[2 * q + 1]) / 2;
+      i32 ends[2] = {(i32)(midpoints.v[k] >> 32), (i32)(midpoints.v[k] & 0xFFFFFFFFu)};
+      double pq[4];
+      sample_params(f, uv.v, ends, 2, pq, NULL);
+      double mu = (pq[0] + pq[2]) / 2, mv = (pq[1] + pq[3]) / 2;
       double made[3], turned[3];
       /* The point the edge's verdict read there: (p + q) / 2 is (q + p) / 2, to the bit. */
       i64 at = emap_get(&judged, midpoints.v[k], -1);

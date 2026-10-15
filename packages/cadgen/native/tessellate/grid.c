@@ -510,8 +510,10 @@ static i64 grid_steps_for_direction(run *r, const host *h, const face *f, const 
       worst = py_max(worst, sqrt(dx * dx + dy * dy + dz * dz));
     }
   }
-  if (worst <= chord_limit) return 1;
-  /* Chord error grows as the square of a step: the steps each probe interval needs. */
+  if (!(worst > 0.0)) return 1;
+  /* Chord error grows as the square of a step: the steps each probe interval needs, and the span's
+   * from them -- a probe interval within the tolerance still takes its share of the span, since
+   * one step over all sixteen would stray by their chord error two hundred and fifty-six times. */
   double per_interval = sqrt(worst / chord_limit);
   return imin(256, imax(1, py_ceil(r, probes * per_interval)));
 }

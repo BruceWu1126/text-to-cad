@@ -16,11 +16,13 @@
  *   its centroid; a boundary edge is never split and no vertex on one ever moves, so the faces
  *   stay met across their shared edges. The rounds are capped, as is the growth of the face; what
  *   is still beyond the tolerance after them is reported, and the host names the face.
- * - NO FOLDED TRIANGLE (`unfold`): a triangle whose facet points against the normal it is drawn
- *   with -- cheaply, its corners' normals; exactly, the surface's normal at its centroid -- is
- *   unfolded by flipping an edge it shares with a neighbour, where the flip leaves both halves
- *   facing their normals and their parameters' winding whole (the Delaunay needle OCCT folds
- *   across a B-spline). A boundary edge is never flipped.
+ * - NO FOLDED TRIANGLE (`unfold`): a triangle whose facet does not face the normal it is drawn
+ *   with -- cheaply, its corners' normals; exactly, the surface's normal at its centroid --
+ *   because it points against it, or stands across it (a sliver whose corners lie on one meridian
+ *   at a pole, as OCCT's Delaunay of the column beside a pole draws one), is unfolded by flipping
+ *   an edge it shares with a neighbour, where the flip leaves both halves facing their normals and
+ *   their parameters' winding whole (the Delaunay needle OCCT folds across a B-spline). A
+ *   boundary edge is never flipped.
  * - CLOSED (`check_closure`, `fill_holes`): over the whole component, its faces welded where
  *   their float32 positions are one point (what the body stores), every mesh edge is used by an
  *   even number of triangles. An odd one on a model edge is a BREP's own free edge (excepted), a
@@ -46,7 +48,12 @@
  * floor for small faces: what cannot be brought right within it is named, not pursued. */
 #define REPAIR_GROWTH 6
 #define REPAIR_GROWTH_FLOOR 20000
-#define FOLDED_COSINE (-1e-3)
+/* A triangle faces the surface when the cosine between its facet and the surface's normal at its
+ * centroid is above this. At or below it the facet points against the normal (folded) or stands
+ * at a right angle to it: a sliver whose corners lie on one meridian at a pole, or along one trim,
+ * has a facet exactly across the normal, whichever way rounding turns it. A skinny triangle that
+ * lies on the surface, however ill-conditioned, keeps a cosine well above the band. */
+#define FACING_COSINE 1e-3
 
 /* What verification found and did for one face. */
 typedef struct {
@@ -112,22 +119,24 @@ static double surface_distance(run *r, const host *h, const surface *s, const do
   }
 }
 
-/* The farthest the triangle (a, b, c) lies from the surface over its samples, and whether that is
- * past `limit`. */
-static double triangle_strays(run *r, const host *h, const surface *s, const double *box, const raw_face *raw, i32 a,
-                              i32 b, i32 c, double limit) {
-  const double *ua = raw->uv.v + 2 * a, *ub = raw->uv.v + 2 * b, *uc = raw->uv.v + 2 * c;
+/* The farthest the triangle (a, b, c) lies from the surface over its samples, each at the
+ * parameters `sample_params` gives it (a fan at a pole is sampled on the meridians it spans). */
+static double triangle_strays(run *r, const host *h, const face *f, const raw_face *raw, i32 a, i32 b, i32 c,
+                              double limit) {
   const double *pa = raw->xyz.v + 3 * a, *pb = raw->xyz.v + 3 * b, *pc = raw->xyz.v + 3 * c;
   /* A triangle two of whose corners are one point (the parameters of a pole, kept for the face's
    * boundary) is never drawn, and is not measured. */
   if (same_point(pa, pb) || same_point(pb, pc) || same_point(pc, pa)) return 0.0;
+  i32 corners[3] = {a, b, c};
+  double abc[6];
+  sample_params(f, raw->uv.v, corners, 3, abc, NULL);
   double worst = 0.0;
   for (int k = 0; k < SURFACE_SAMPLES; k++) {
     const double *w = SAMPLE_WEIGHTS[k];
-    double u = w[0] * ua[0] + w[1] * ub[0] + w[2] * uc[0], v = w[0] * ua[1] + w[1] * ub[1] + w[2] * uc[1];
+    double u = w[0] * abc[0] + w[1] * abc[2] + w[2] * abc[4], v = w[0] * abc[1] + w[1] * abc[3] + w[2] * abc[5];
     double p[3] = {w[0] * pa[0] + w[1] * pb[0] + w[2] * pc[0], w[0] * pa[1] + w[1] * pb[1] + w[2] * pc[1],
                    w[0] * pa[2] + w[1] * pb[2] + w[2] * pc[2]};
-    double distance = surface_distance(r, h, s, box, u, v, p, limit);
+    double distance = surface_distance(r, h, &f->s, f->uv, u, v, p, limit);
     if (distance > worst) worst = distance;
   }
   return worst;
@@ -144,8 +153,8 @@ static double facet_cosine(const double *pa, const double *pb, const double *pc,
   return (f[0] * normal[0] + f[1] * normal[1] + f[2] * normal[2]) / (facet * length);
 }
 
-/* Whether the triangle is folded: its facet against the surface's normal at its centroid (the
- * corners' normals first, which agree with it everywhere but at a singularity). */
+/* Whether the triangle is folded or standing: its facet not facing the surface's normal at its
+ * centroid (the corners' normals first, which agree with it everywhere but at a singularity). */
 static int is_folded(run *r, const host *h, const face *f, const raw_face *raw, i32 a, i32 b, i32 c) {
   const double *pa = raw->xyz.v + 3 * a, *pb = raw->xyz.v + 3 * b, *pc = raw->xyz.v + 3 * c;
   const double *na = raw->nrm.v + 3 * a, *nb = raw->nrm.v + 3 * b, *nc = raw->nrm.v + 3 * c;
@@ -154,14 +163,12 @@ static int is_folded(run *r, const host *h, const face *f, const raw_face *raw, 
   if (cheap == 2.0) return 0; /* no area: not folded, dropped later */
   if (cheap > 0.2) return 0;
   double n[3];
-  const double *ua = raw->uv.v + 2 * a, *ub = raw->uv.v + 2 * b, *uc = raw->uv.v + 2 * c;
-  surface_normal(r, h, &f->s, (ua[0] + ub[0] + uc[0]) / 3, (ua[1] + ub[1] + uc[1]) / 3, f->uv, n);
-  if (!(n[0] * n[0] + n[1] * n[1] + n[2] * n[2] > 0.5)) return cheap < FOLDED_COSINE;
-  int folded = facet_cosine(pa, pb, pc, n) < FOLDED_COSINE;
-  if (folded && getenv("CADGEN_TESS_DEBUG"))
-    fprintf(stderr, "DEBUG fold face %d: cheap %.3f exact %.3f uv (%.5g,%.5g) (%.5g,%.5g) (%.5g,%.5g) n (%.3f,%.3f,%.3f) na (%.3f,%.3f,%.3f)\n",
-            f->ord, cheap, facet_cosine(pa, pb, pc, n), ua[0], ua[1], ub[0], ub[1], uc[0], uc[1], n[0], n[1], n[2], na[0], na[1], na[2]);
-  return folded;
+  i32 corners[3] = {a, b, c};
+  double abc[6];
+  sample_params(f, raw->uv.v, corners, 3, abc, NULL);
+  surface_normal(r, h, &f->s, (abc[0] + abc[2] + abc[4]) / 3, (abc[1] + abc[3] + abc[5]) / 3, f->uv, n);
+  if (!(n[0] * n[0] + n[1] * n[1] + n[2] * n[2] > 0.5)) return cheap <= FACING_COSINE;
+  return facet_cosine(pa, pb, pc, n) <= FACING_COSINE;
 }
 
 /* Each mesh edge of the face and how many of its triangles use it. */
@@ -180,6 +187,9 @@ static void add_vertex(arena *A, run *r, const host *h, const face *f, raw_face 
   PUSH3(A, raw->nrm, n[0], n[1], n[2]);
   PUSH(A, raw->minted, 0);
 }
+
+/* An interior mesh edge, two triangles' (`edge_uses`), may be split; a boundary edge never. */
+static int interior_edge(void *ctx, i32 p, i32 q) { return emap_get((const emap *)ctx, edge_key(p, q), 0) == 2; }
 
 /* Every triangle of the face measured, the ones that stray refined in place (the file's header),
  * round after round; `rep` gets the worst distance left and what the repair did. `repair_at` is
@@ -213,16 +223,8 @@ static void repair_surface(run *r, arenas M, const host *h, const face *f, raw_f
     for (i64 t = 0; t < raw->tri.n / 3; t++) {
       if (!fresh.v[t]) continue;
       i32 corners[3] = {raw->tri.v[3 * t], raw->tri.v[3 * t + 1], raw->tri.v[3 * t + 2]};
-      double distance = triangle_strays(r, h, s, f->uv, raw, corners[0], corners[1], corners[2], repair_at);
+      double distance = triangle_strays(r, h, f, raw, corners[0], corners[1], corners[2], repair_at);
       if (distance > worst) worst = distance;
-      if (getenv("CADGEN_TESS_DEBUG") && distance > 2 * repair_at) {
-        fprintf(stderr, "DEBUG face %d tri %lld strays %g (repair_at %g) may_refine %d round %d\n", f->ord, (long long)t,
-                distance, repair_at, may_refine, round);
-        for (int k = 0; k < 3; k++)
-          fprintf(stderr, "   v%d uv (%.9g, %.9g) xyz (%.9g, %.9g, %.9g) boundary %d\n", corners[k],
-                  raw->uv.v[2 * corners[k]], raw->uv.v[2 * corners[k] + 1], raw->xyz.v[3 * corners[k]],
-                  raw->xyz.v[3 * corners[k] + 1], raw->xyz.v[3 * corners[k] + 2], bmap_has(&raw->boundary, corners[k]));
-      }
       if (!(distance > repair_at) || !may_refine || round == REPAIR_ROUNDS) continue;
       /* The interior edges whose own midpoint strays are split; failing one, the longest interior
        * edge; failing any, the triangle is cut about its centroid. */
@@ -236,10 +238,12 @@ static void repair_surface(run *r, arenas M, const host *h, const face *f, raw_f
         int made;
         i64 *slot = emap_ref(&judged, key, 0, &made);
         if (made) {
-          const double *up = raw->uv.v + 2 * p, *uq = raw->uv.v + 2 * q;
+          i32 ends[2] = {p, q};
+          double pq[4];
+          sample_params(f, raw->uv.v, ends, 2, pq, NULL);
           const double *xp = raw->xyz.v + 3 * p, *xq = raw->xyz.v + 3 * q;
           double mid[3] = {(xp[0] + xq[0]) / 2, (xp[1] + xq[1]) / 2, (xp[2] + xq[2]) / 2};
-          *slot = surface_distance(r, h, s, f->uv, (up[0] + uq[0]) / 2, (up[1] + uq[1]) / 2, mid, repair_at) > repair_at;
+          *slot = surface_distance(r, h, s, f->uv, (pq[0] + pq[2]) / 2, (pq[1] + pq[3]) / 2, mid, repair_at) > repair_at;
         }
         if (*slot) {
           PUSH(M.T, marks, key);
@@ -257,6 +261,7 @@ static void repair_surface(run *r, arenas M, const host *h, const face *f, raw_f
       else PUSH(M.T, centroids, t);
     }
     if (worst > rep->worst) rep->worst = worst;
+    mark_pole_twins(M.T, f, raw->uv.v, &raw->tri, &marks, interior_edge, &uses);
     if ((!marks.n && !centroids.n) || raw->tri.n / 3 >= budget) {
       arena_reset(M.T, mark);
       break;
@@ -266,9 +271,11 @@ static void repair_surface(run *r, arenas M, const host *h, const face *f, raw_f
     for (i64 k = 0; k < centroids.n; k++) {
       i64 t = centroids.v[k];
       i32 a = raw->tri.v[3 * t], b = raw->tri.v[3 * t + 1], c = raw->tri.v[3 * t + 2];
-      const double *ua = raw->uv.v + 2 * a, *ub = raw->uv.v + 2 * b, *uc = raw->uv.v + 2 * c;
+      i32 corners[3] = {a, b, c};
+      double abc[6];
+      sample_params(f, raw->uv.v, corners, 3, abc, NULL);
       i32 m = (i32)(raw->uv.n / 2);
-      add_vertex(M.A, r, h, f, raw, (ua[0] + ub[0] + uc[0]) / 3, (ua[1] + ub[1] + uc[1]) / 3);
+      add_vertex(M.A, r, h, f, raw, (abc[0] + abc[2] + abc[4]) / 3, (abc[1] + abc[3] + abc[5]) / 3);
       raw->tri.v[3 * t + 2] = m;
       PUSH3(M.A, raw->tri, b, c, m);
       PUSH3(M.A, raw->tri, c, a, m);
@@ -292,9 +299,10 @@ static void repair_surface(run *r, arenas M, const host *h, const face *f, raw_f
       vu midpoints = {NULL, 0, 0};
       split_marked(M.A, M.T, &raw->tri, marks.v, unique, raw->uv.n / 2, &split_tri, &split_fresh, &midpoints);
       for (i64 k = 0; k < midpoints.n; k++) {
-        i64 p = (i64)(midpoints.v[k] >> 32), q = (i64)(midpoints.v[k] & 0xFFFFFFFFu);
-        add_vertex(M.A, r, h, f, raw, (raw->uv.v[2 * p] + raw->uv.v[2 * q]) / 2,
-                   (raw->uv.v[2 * p + 1] + raw->uv.v[2 * q + 1]) / 2);
+        i32 ends[2] = {(i32)(midpoints.v[k] >> 32), (i32)(midpoints.v[k] & 0xFFFFFFFFu)};
+        double pq[4];
+        sample_params(f, raw->uv.v, ends, 2, pq, NULL);
+        add_vertex(M.A, r, h, f, raw, (pq[0] + pq[2]) / 2, (pq[1] + pq[3]) / 2);
         rep->splits++;
       }
       vb next = {NULL, 0, 0};
@@ -323,13 +331,20 @@ static void repair_surface(run *r, arenas M, const host *h, const face *f, raw_f
   }
 }
 
+/* Twice the signed area of the triangle (a, b, c) in the face's parameters, each corner where it
+ * is sampled (a fan's pole corner on the meridians the fan spans). */
+static double sampled_winding(const face *f, const double *uv, i32 a, i32 b, i32 c) {
+  i32 corners[3] = {a, b, c};
+  double abc[6];
+  sample_params(f, uv, corners, 3, abc, NULL);
+  return (abc[2] - abc[0]) * (abc[5] - abc[1]) - (abc[4] - abc[0]) * (abc[3] - abc[1]);
+}
+
 /* Each folded triangle of the face unfolded by flipping an interior edge it shares, where both
  * halves then face their normals and keep the face's winding in its parameters. A pass reads the
  * triangles' neighbours once and leaves a triangle a flip touched for the next pass. */
 static void unfold(run *r, arenas M, const host *h, const face *f, raw_face *raw, face_report *rep) {
-  const double *U = raw->uv.v;
-#define ORIENT2(a, b, c) \
-  ((U[2 * (b)] - U[2 * (a)]) * (U[2 * (c) + 1] - U[2 * (a) + 1]) - (U[2 * (c)] - U[2 * (a)]) * (U[2 * (b) + 1] - U[2 * (a) + 1]))
+#define ORIENT2(a, b, c) sampled_winding(f, raw->uv.v, (a), (b), (c))
   for (int pass = 0; pass < 4; pass++) {
     arena_mark mark = arena_save(M.T);
     i64 count = raw->tri.n / 3;
@@ -641,18 +656,52 @@ static double exact_area(run *r, const host *h, const face *f, const pcurve *pcu
  * their footprint in the face's parameters: each triangle's signed parameter area at the Jacobian
  * of its centroid, exact where the Jacobian is linear over the triangle and second-order close
  * elsewhere (a triangle at the chord tolerance is small against the surface's features). A
- * triangle wound against the face in its parameters covers nothing twice: it counts negative. */
+ * triangle wound against the face in its parameters covers nothing twice: it counts negative. A
+ * triangle with one corner on a pole is the surface between the pole and its other two corners:
+ * its footprint is the whole parameter region between the pole's line and the chord between
+ * them, since the pole corner is every point of that line (so a fan round a collapsed pole and
+ * OCCT's fans between the nodes it spreads along the pole both cover the strip once); one with
+ * two corners on a pole covers nothing its neighbours do not. */
 static double mesh_area(run *r, const host *h, const face *f, const raw_face *raw, double *covered) {
   double area = 0.0, over = 0.0;
   for (i64 t = 0; t < raw->tri.n; t += 3) {
-    i32 a = raw->tri.v[t], b = raw->tri.v[t + 1], c = raw->tri.v[t + 2];
+    i32 corners[3] = {raw->tri.v[t], raw->tri.v[t + 1], raw->tri.v[t + 2]};
+    i32 a = corners[0], b = corners[1], c = corners[2];
     const double *pa = raw->xyz.v + 3 * a, *pb = raw->xyz.v + 3 * b, *pc = raw->xyz.v + 3 * c;
     double e1[3] = {pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]}, e2[3] = {pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]};
     area += cross_norm(e1, e2) / 2;
     const double *ua = raw->uv.v + 2 * a, *ub = raw->uv.v + 2 * b, *uc = raw->uv.v + 2 * c;
     double twice = (ub[0] - ua[0]) * (uc[1] - ua[1]) - (uc[0] - ua[0]) * (ub[1] - ua[1]);
+    double abc[6];
+    int axes[3];
+    sample_params(f, raw->uv.v, corners, 3, abc, axes);
+    double at_u = (abc[0] + abc[2] + abc[4]) / 3, at_v = (abc[1] + abc[3] + abc[5]) / 3;
+    if (f->singular) {
+      int on_pole = 0, which = -1;
+      for (int k = 0; k < 3; k++)
+        if (axes[k] >= 0) {
+          on_pole++;
+          which = k;
+        }
+      if (on_pole >= 2) continue;
+      if (on_pole == 1) {
+        /* The corners in their cyclic order from the pole: the sign is the winding's. */
+        const double *pole = raw->uv.v + 2 * corners[which], *c1 = raw->uv.v + 2 * corners[(which + 1) % 3],
+                     *c2 = raw->uv.v + 2 * corners[(which + 2) % 3];
+        int e = axes[which], d = 1 - e; /* e: the pole's own axis; d: along the pole */
+        double at = pole[e];
+        twice = d == 0 ? (c1[0] - c2[0]) * ((c1[1] - at) + (c2[1] - at)) : ((c1[0] - at) + (c2[0] - at)) * (c2[1] - c1[1]);
+        /* The footprint's centre: along the pole the chord's middle, across it halfway between
+         * the pole's line and the chord. */
+        double centre[2];
+        centre[d] = (c1[d] + c2[d]) / 2;
+        centre[e] = (at + (c1[e] + c2[e]) / 2) / 2;
+        at_u = centre[0];
+        at_v = centre[1];
+      }
+    }
     if (twice == 0.0) continue;
-    over += twice / 2 * surface_jacobian(r, h, &f->s, (ua[0] + ub[0] + uc[0]) / 3, (ua[1] + ub[1] + uc[1]) / 3, f->uv);
+    over += twice / 2 * surface_jacobian(r, h, &f->s, at_u, at_v, f->uv);
   }
   *covered = over;
   return area;
@@ -676,10 +725,6 @@ static int area_check(run *r, const host *h, const face *f, const pcurve *pcurve
     }
   rep->area_slack = py_max(0.01 * rep->area_exact, perimeter * deflection);
   rep->area_ok = fabs(rep->area_covered - rep->area_exact) <= rep->area_slack;
-  if (getenv("CADGEN_TESS_DEBUG"))
-    fprintf(stderr, "DEBUG area face %d: flat %.9g covered %.9g exact %.9g (%+.4f%%) slack %.3g perimeter %.6g ok %d\n", f->ord,
-            rep->area, rep->area_covered, rep->area_exact, 100.0 * (rep->area_covered - rep->area_exact) / rep->area_exact,
-            rep->area_slack, perimeter, rep->area_ok);
   return rep->area_ok;
 }
 

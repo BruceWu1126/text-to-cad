@@ -45,15 +45,165 @@ typedef struct {
   surface s;
   double uv[4];
   double period_u, period_v; /* the surface's periods, 0 where it has none */
-  /* TODO (next agent): int singular_side[4], whether the box's side u0, u1, v0, v1 is one point
-   * of the surface (singular_u at v0/v1; a B-spline's degenerate column at u0/u1), set in
-   * mesh_rest after read_geometry, for spread_pole_corners -- see the WIP commit message. */
+  int singular_side[4];      /* whether the box's side u0, u1, v0, v1 is one point of the surface */
+  int singular;              /* a pole or a singular side: `pole_axis_at` has something to find */
   i32 loop_count;
   const i32 *loop_start;  /* each loop's first pcurve, into the run's pcurves */
   const i32 *loop_size;
   i32 pole_count;
   face_pole *poles;
 } face;
+
+/* --- poles ------------------------------------------------------------------------------------
+ *
+ * A pole is a side of the face's parameter box, or a stretch of one (a degenerate edge), that is
+ * ONE point of the surface: a sphere's pole, a cone's apex, a B-spline's row or column of one
+ * pole, a surface of revolution where its basis meets the axis. A vertex on a pole has one
+ * meaningful parameter, the pole's own; its coordinate ALONG the pole says nothing of where on the
+ * surface it is, since every value of it is the pole's point. So a fan triangle (pole, a, b) is
+ * sampled, split and measured on the meridians it spans -- the pole corner taking the mean of the
+ * other corners' coordinate along the pole -- and never on the meridian the pole vertex happens
+ * to carry, which is where OCCT's fans refined onto the wrong meridian and the library's
+ * collapsed poles read as off their surface. */
+
+/* How far a parameter may sit from the box's bound along an axis and be on it. */
+static inline double bound_eps(const face *f, int axis) {
+  double lo = f->uv[2 * axis], hi = f->uv[2 * axis + 1];
+  return py_max(py_max(py_max(fabs(lo), fabs(hi)), hi - lo), 1e-12) * ldexp(1.0, -23);
+}
+
+/* The axis along which a vertex at (u, v) sits on a pole of the face -- 1 for a row at some v, 0
+ * for a column at some u: the axis of its one meaningful coordinate, whose value the pole's is
+ * (`at`) -- or -1 for none. A pole is one of the face's degenerate edges (`poles`, along the
+ * stretch each spans) or a singular side of its box. */
+static int pole_axis_at(const face *f, double u, double v, double *at) {
+  double uv[2] = {u, v};
+  for (i32 k = 0; k < f->pole_count; k++) {
+    const face_pole *p = &f->poles[k];
+    int axis = p->axis, other = 1 - axis;
+    if (fabs(uv[axis] - p->at) <= bound_eps(f, axis) && p->lo - bound_eps(f, other) <= uv[other] &&
+        uv[other] <= p->hi + bound_eps(f, other)) {
+      *at = p->at;
+      return axis;
+    }
+  }
+  for (int side = 0; side < 4; side++) {
+    if (!f->singular_side[side]) continue;
+    int axis = side / 2;
+    if (fabs(uv[axis] - f->uv[side]) <= bound_eps(f, axis)) {
+      *at = f->uv[side];
+      return axis;
+    }
+  }
+  return -1;
+}
+
+/* The parameters an edge's (`n` 2) or a triangle's (`n` 3) corners are sampled at, (u, v) each:
+ * their own, except that a corner on a pole is the pole's exactly along its own axis (so the
+ * edges from a vertex to a pole's several vertices, one chord of the surface, are sampled and
+ * split at one point) and takes, along the pole, the mean of the other corners that are on no
+ * pole along that axis. `axes` (optional) gets each corner's `pole_axis_at`. */
+static void sample_params(const face *f, const double *uv, const i32 *corners, int n, double *out, int *axes) {
+  int on[3];
+  double at[3];
+  for (int k = 0; k < n; k++) {
+    out[2 * k] = uv[2 * corners[k]];
+    out[2 * k + 1] = uv[2 * corners[k] + 1];
+    on[k] = f->singular ? pole_axis_at(f, out[2 * k], out[2 * k + 1], &at[k]) : -1;
+    if (axes) axes[k] = on[k];
+  }
+  if (!f->singular) return;
+  for (int k = 0; k < n; k++) {
+    if (on[k] < 0) continue;
+    out[2 * k + on[k]] = at[k];
+    int d = 1 - on[k];
+    double sum = 0.0;
+    int count = 0;
+    for (int j = 0; j < n; j++) {
+      if (j == k || on[j] == on[k]) continue;
+      sum += uv[2 * corners[j] + d];
+      count++;
+    }
+    if (count) out[2 * k + d] = sum / count;
+  }
+}
+
+/* Whether the refinement that marks edges may split the mesh edge (p, q). */
+typedef int (*splittable_fn)(void *ctx, i32 p, i32 q);
+
+typedef struct {
+  i32 vertex, axis;
+  u64 key;
+} pole_twin;
+
+static int less_pole_twin(const void *a, const void *b, void *ctx) {
+  (void)ctx;
+  const pole_twin *x = (const pole_twin *)a, *y = (const pole_twin *)b;
+  if (x->vertex != y->vertex) return x->vertex < y->vertex;
+  return x->axis < y->axis;
+}
+
+/* The twins of every marked pole edge marked with it, or unmarked with it. The edges from one
+ * vertex to a pole's several vertices (OCCT's fans, and a grid's, keep vertices along a pole and
+ * tie each ring vertex to two of them) are ONE chord of the surface, drawn once per triangle:
+ * split in one triangle and whole in the next, a sliver would stand between them on the meridian,
+ * perpendicular to the surface. So they are split together, at the one point `sample_params`
+ * gives them, and none of them where `splittable` refuses one (an edge a neighbour fixed). The
+ * keys of `marks` need not be sorted or unique; what is added or removed keeps that. */
+static void mark_pole_twins(arena *T, const face *f, const double *uv, const vi *tri, vu *marks,
+                            splittable_fn splittable, void *ctx) {
+  if (!f->singular || !marks->n) return;
+  VEC(pole_twin) twins = {NULL, 0, 0};
+  for (i64 t = 0; t < tri->n; t += 3) {
+    i32 corners[3] = {tri->v[t], tri->v[t + 1], tri->v[t + 2]};
+    int on[3];
+    double at;
+    for (int k = 0; k < 3; k++) on[k] = pole_axis_at(f, uv[2 * corners[k]], uv[2 * corners[k] + 1], &at);
+    for (int k = 0; k < 3; k++)
+      for (int j = 0; j < 3; j++) {
+        if (j == k || on[k] < 0 || on[j] >= 0) continue;
+        pole_twin made = {corners[j], on[k], edge_key(corners[k], corners[j])};
+        PUSH(T, twins, made);
+      }
+  }
+  if (!twins.n) return;
+  merge_sort(T, twins.v, twins.n, sizeof(pole_twin), less_pole_twin, NULL);
+  emap marked, removed;
+  emap_init(&marked, T, marks->n);
+  emap_init(&removed, T, 16);
+  for (i64 k = 0; k < marks->n; k++) emap_put(&marked, marks->v[k], 1);
+  i64 dropped = 0;
+  for (i64 start = 0; start < twins.n;) {
+    i64 end = start;
+    while (end < twins.n && twins.v[end].vertex == twins.v[start].vertex && twins.v[end].axis == twins.v[start].axis) end++;
+    int any_marked = 0, any_refused = 0;
+    for (i64 k = start; k < end; k++) {
+      u64 key = twins.v[k].key;
+      if (emap_get(&marked, key, 0)) any_marked = 1;
+      if (splittable && !splittable(ctx, (i32)(key >> 32), (i32)(key & 0xFFFFFFFFu))) any_refused = 1;
+    }
+    if (any_marked) {
+      for (i64 k = start; k < end; k++) {
+        u64 key = twins.v[k].key;
+        if (any_refused) {
+          if (emap_get(&marked, key, 0) && !emap_get(&removed, key, 0)) {
+            emap_put(&removed, key, 1);
+            dropped++;
+          }
+        } else if (!emap_get(&marked, key, 0)) {
+          emap_put(&marked, key, 1);
+          PUSH(T, *marks, key);
+        }
+      }
+    }
+    start = end;
+  }
+  if (!dropped) return;
+  i64 kept = 0;
+  for (i64 k = 0; k < marks->n; k++)
+    if (!emap_get(&removed, marks->v[k], 0)) marks->v[kept++] = marks->v[k];
+  marks->n = kept;
+}
 
 /* One model edge's polyline: the one its faces conform to, and the display edge. */
 typedef struct {

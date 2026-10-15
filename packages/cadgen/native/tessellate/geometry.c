@@ -468,6 +468,30 @@ static int singular_u(run *r, const surface *s, double v) {
   return 0;
 }
 
+/* Whether a B-spline surface's column of poles at u-index i is one point. */
+static int degenerate_column(const bspline_surface *s, i32 i) {
+  const double *first = s->poles + (size_t)i * s->count_v * 3;
+  double scale = fabs(first[0]) + fabs(first[1]) + fabs(first[2]);
+  for (i32 j = 1; j < s->count_v; j++) {
+    const double *p = s->poles + ((size_t)i * s->count_v + j) * 3;
+    if (fabs(p[0] - first[0]) + fabs(p[1] - first[1]) + fabs(p[2] - first[2]) > scale * 1e-12) return 0;
+  }
+  return 1;
+}
+
+/* Whether the surface's v-line at u is one point: a B-spline's boundary column of one pole. No
+ * other surface the library evaluates collapses along v -- a sphere, a cone and a surface of
+ * revolution collapse along u (`singular_u`), an extrusion never. */
+static int singular_v(run *r, const surface *s, double u) {
+  (void)r;
+  if (s->kind != S_BSPLINE) return 0;
+  const bspline_surface *b = s->bs;
+  double eps = (fabs(b->first_u) + fabs(b->last_u) + (b->last_u - b->first_u)) * 1e-12;
+  if (fabs(u - b->first_u) <= eps) return degenerate_column(b, 0);
+  if (fabs(u - b->last_u) <= eps) return degenerate_column(b, b->count_u - 1);
+  return 0;
+}
+
 static void pcurve_value(run *r, const host *h, const pcurve *p, double t, double *out) {
   if (p->host) ask(r, h, ASK_PCURVE, p->index, t, 0.0, out);
   else bspline_curve_value(&p->bs, t, out);

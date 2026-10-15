@@ -371,6 +371,12 @@ static void read_geometry(run *r, arenas M, const tess_input *in, geometry *out)
       f->poles[p].hi = pd[3];
       memcpy(f->poles[p].point, pd + 4, sizeof(double) * 3);
     }
+    f->singular_side[0] = singular_v(r, s, f->uv[0]);
+    f->singular_side[1] = singular_v(r, s, f->uv[1]);
+    f->singular_side[2] = singular_u(r, s, f->uv[2]);
+    f->singular_side[3] = singular_u(r, s, f->uv[3]);
+    f->singular = f->pole_count > 0 || f->singular_side[0] || f->singular_side[1] || f->singular_side[2] ||
+                  f->singular_side[3];
   }
 
   out->faces = faces;
@@ -381,9 +387,10 @@ static void read_geometry(run *r, arenas M, const tess_input *in, geometry *out)
 /* On a periodic surface OCCT's triangles can straddle the period: a seam node at u = P beside
  * nodes at u ~ 0, a sliver on the surface that is a period wide in its parameters, whose
  * parametric samples, midpoints, winding and hole loops would all be read a period away. Each
- * corner is brought within half a period of the triangle's first, and the triangle then into the
- * face's parameter box, on a duplicate of its vertex (the same point, normal and labels) where
- * that changes the vertex's parameters. */
+ * corner is brought within half a period of the triangle's first corner whose coordinate means
+ * anything there (a corner on a pole along that axis is left where it is, and never the
+ * reference), and the triangle then into the face's parameter box, on a duplicate of its vertex
+ * (the same point, normal and labels) where that changes the vertex's parameters. */
 static void unwrap_periods(arenas M, const face *f, raw_face *raw) {
   double period[2] = {f->period_u > 0.0 ? f->period_u : 0.0, f->period_v > 0.0 ? f->period_v : 0.0};
   if (period[0] == 0.0 && period[1] == 0.0) return;
@@ -398,7 +405,9 @@ static void unwrap_periods(arenas M, const face *f, raw_face *raw) {
      * the face's parameter cover there, not a sliver, and stays as OCCT drew it. */
     const double *p0 = raw->xyz.v + 3 * corners[0], *p1 = raw->xyz.v + 3 * corners[1], *p2 = raw->xyz.v + 3 * corners[2];
     if (same_point(p0, p1) || same_point(p1, p2) || same_point(p2, p0)) continue;
-    double uv[3][2];
+    double uv[3][2], sampled[6];
+    int axes[3];
+    sample_params(f, raw->uv.v, corners, 3, sampled, axes);
     for (int c = 0; c < 3; c++) {
       uv[c][0] = raw->uv.v[2 * corners[c]];
       uv[c][1] = raw->uv.v[2 * corners[c] + 1];
@@ -407,20 +416,32 @@ static void unwrap_periods(arenas M, const face *f, raw_face *raw) {
     int wrapped = 0;
     for (int d = 0; d < 2; d++) {
       if (period[d] == 0.0) continue;
-      for (int c = 1; c < 3; c++) {
-        double turns = (uv[c][d] - uv[0][d]) / period[d];
+      int reference = -1, meaningful = 0;
+      for (int c = 0; c < 3; c++) {
+        if (axes[c] == 1 - d) continue; /* on a pole along this axis: its coordinate says nothing */
+        if (reference < 0) reference = c;
+        meaningful++;
+      }
+      if (meaningful < 2) continue;
+      int turned = 0;
+      for (int c = 0; c < 3; c++) {
+        if (c == reference || axes[c] == 1 - d) continue;
+        double turns = (uv[c][d] - uv[reference][d]) / period[d];
         if (!(fabs(turns) < 1e6)) continue;
         shift[c][d] = lround(turns);
-        if (shift[c][d]) wrapped = 1;
+        if (shift[c][d]) turned = 1;
       }
-      if (!wrapped) continue;
+      if (!turned) continue;
+      wrapped = 1;
       /* The unwrapped triangle into the face's box, where its centroid left it. */
       double centroid = 0.0;
-      for (int c = 0; c < 3; c++) centroid += (uv[c][d] - shift[c][d] * period[d]) / 3;
+      for (int c = 0; c < 3; c++)
+        if (axes[c] != 1 - d) centroid += (uv[c][d] - shift[c][d] * period[d]) / meaningful;
       double middle = (f->uv[2 * d] + f->uv[2 * d + 1]) / 2;
       if (isfinite(middle) && fabs(middle - centroid) > period[d] / 2) {
         long whole = lround((centroid - middle) / period[d]);
-        for (int c = 0; c < 3; c++) shift[c][d] += whole;
+        for (int c = 0; c < 3; c++)
+          if (axes[c] != 1 - d) shift[c][d] += whole;
       }
     }
     if (!wrapped) continue;
@@ -578,41 +599,11 @@ static void classify_open_edges(run *r, arenas M, const face *faces, raw_face **
           PUSH(M.T, cracked[k], ord);
         }
       } else {
-        if (getenv("CADGEN_TESS_DEBUG")) {
-          const labels *lp = bmap_get(&raws[k]->boundary, o->p), *lq = bmap_get(&raws[k]->boundary, o->q);
-          fprintf(stderr, "DEBUG hole face %d: v%d (%.9g,%.9g,%.9g) uv (%.6g,%.6g) labels", faces[k].ord, o->p,
-                  raws[k]->xyz.v[3 * o->p], raws[k]->xyz.v[3 * o->p + 1], raws[k]->xyz.v[3 * o->p + 2],
-                  raws[k]->uv.v[2 * o->p], raws[k]->uv.v[2 * o->p + 1]);
-          for (i64 q = 0; lp && q < lp->n; q++) fprintf(stderr, " e%d/%.4g", lp->v[q].ord, lp->v[q].f);
-          fprintf(stderr, " -- v%d (%.9g,%.9g,%.9g) uv (%.6g,%.6g) labels", o->q, raws[k]->xyz.v[3 * o->q],
-                  raws[k]->xyz.v[3 * o->q + 1], raws[k]->xyz.v[3 * o->q + 2], raws[k]->uv.v[2 * o->q], raws[k]->uv.v[2 * o->q + 1]);
-          for (i64 q = 0; lq && q < lq->n; q++) fprintf(stderr, " e%d/%.4g", lq->v[q].ord, lq->v[q].f);
-          fprintf(stderr, "\n");
-        }
         PUSH(M.T, *holes, *o);
         hole_count[k]++;
       }
     }
   }
-}
-
-/* TEMPORARY: a face's raw mesh on stderr, when CADGEN_TESS_DUMP names its ordinal. */
-static void debug_dump(const char *stage, const face *f, const raw_face *raw) {
-  const char *want = getenv("CADGEN_TESS_DUMP");
-  if (!want || atoi(want) != f->ord) return;
-  fprintf(stderr, "DUMP %s face %d source %d: %lld vertices %lld triangles; box u [%.9g, %.9g] v [%.9g, %.9g]\n", stage, f->ord,
-          raw->source, (long long)(raw->uv.n / 2), (long long)(raw->tri.n / 3), f->uv[0], f->uv[1], f->uv[2], f->uv[3]);
-  for (i64 i = 0; i < raw->uv.n / 2; i++) {
-    const labels *l = bmap_get(&raw->boundary, i);
-    fprintf(stderr, "DUMP v%lld uv (%.9g, %.9g) xyz (%.9g, %.9g, %.9g) nrm (%.6g, %.6g, %.6g)", (long long)i, raw->uv.v[2 * i],
-            raw->uv.v[2 * i + 1], raw->xyz.v[3 * i], raw->xyz.v[3 * i + 1], raw->xyz.v[3 * i + 2], raw->nrm.v[3 * i],
-            raw->nrm.v[3 * i + 1], raw->nrm.v[3 * i + 2]);
-    if (l)
-      for (i64 q = 0; q < l->n; q++) fprintf(stderr, " [e%d f%.6g]", l->v[q].ord, l->v[q].f);
-    fprintf(stderr, "\n");
-  }
-  for (i64 t = 0; t < raw->tri.n / 3; t++)
-    fprintf(stderr, "DUMP t%lld %d %d %d\n", (long long)t, raw->tri.v[3 * t], raw->tri.v[3 * t + 1], raw->tri.v[3 * t + 2]);
 }
 
 static void mesh_rest(run *r, arenas M, const host *hp, const tess_input *in, tess_result *res, face *faces,
@@ -716,8 +707,6 @@ static void mesh_rest(run *r, arenas M, const host *hp, const tess_input *in, te
    * evaluations that put them there differ in their last bits. */
   for (i32 k = 0; k < F; k++)
     if (raws[k] && faces[k].pole_count) snap_poles(M.T, &faces[k], raws[k], weld_tolerance);
-  for (i32 k = 0; k < F; k++)
-    if (raws[k]) debug_dump("loaded", &faces[k], raws[k]);
 
   /* On its surface, no folded triangle: each face measured, OCCT's refined where they stray. */
   for (i32 k = 0; k < F; k++) {
@@ -746,8 +735,6 @@ static void mesh_rest(run *r, arenas M, const host *hp, const tess_input *in, te
    * one more chance, the library's tessellation over the same polylines, and is left out after. */
   for (int attempt = 0; attempt < 2; attempt++) {
     conform_boundaries(r, M, &h, faces, raws, F, edges, E, weld_tolerance);
-    for (i32 k = 0; k < F; k++)
-      if (raws[k]) debug_dump("conformed", &faces[k], raws[k]);
     arena_mark temp_mark = arena_save(M.T);
     vopen holes = {NULL, 0, 0};
     i64 *hole_start = (i64 *)arena_zalloc(M.T, sizeof(i64) * (size_t)(F + 1));
@@ -812,7 +799,6 @@ static void mesh_rest(run *r, arenas M, const host *hp, const tess_input *in, te
           face_report fresh = {0};
           reports[k] = fresh;
           if (faces[k].pole_count) snap_poles(M.T, &faces[k], raw, weld_tolerance);
-          debug_dump("fallback", &faces[k], raw);
           arena_mark fm = arena_save(M.F), tm = arena_save(M.T);
           repair_surface(r, M, &h, &faces[k], raws[k], repair_at, 0, &reports[k]);
           unfold(r, M, &h, &faces[k], raws[k], &reports[k]);

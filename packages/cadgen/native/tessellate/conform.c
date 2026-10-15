@@ -526,10 +526,11 @@ static i32 vertex_at(fan *F, i32 ord, double fr, i32 a, i32 b, double w) {
   if (found >= 0) return (i32)found;
   raw_face *raw = F->raw;
   const surface *s = &F->f->s;
-  double au = raw->uv.v[2 * a], av = raw->uv.v[2 * a + 1], bu = raw->uv.v[2 * b], bv = raw->uv.v[2 * b + 1];
-  double uv[2];
-  uv[0] = singular_u(F->r, s, av) ? bu : singular_u(F->r, s, bv) ? au : au + w * (bu - au);
-  uv[1] = av + w * (bv - av);
+  /* Between a's and b's parameters, a corner on a pole taken on b's meridian (`sample_params`). */
+  i32 ends[2] = {a, b};
+  double ab[4];
+  sample_params(F->f, raw->uv.v, ends, 2, ab, NULL);
+  double uv[2] = {ab[0] + w * (ab[2] - ab[0]), ab[1] + w * (ab[3] - ab[1])};
   found = raw->uv.n / 2;
   PUSH2(F->A, raw->uv, uv[0], uv[1]);
   double xyz[3], n[3];
@@ -573,6 +574,11 @@ static void emit(fan *F, i32 a, i32 b, i32 c, int depth) {
   PUSH3(F->A, F->out, a, b, c);
 }
 
+static int off_boundary(void *ctx, i32 p, i32 q) {
+  const bmap *boundary = (const bmap *)ctx;
+  return !(bmap_has(boundary, p) && bmap_has(boundary, q));
+}
+
 /* One more refinement over the fans conformity made, never splitting a boundary edge (its vertices
  * are conformity's). */
 static void refine_post_conform(run *r, arena *A, arena *T, const host *h, const face *f, raw_face *raw, double chord) {
@@ -602,7 +608,10 @@ static void refine_post_conform(run *r, arena *A, arena *T, const host *h, const
       for (int k = 0; k < 3; k++) {
         i32 p = corners[k], q = corners[(k + 1) % 3];
         if (bmap_has(&raw->boundary, p) && bmap_has(&raw->boundary, q)) continue;
-        double mu = (raw->uv.v[2 * p] + raw->uv.v[2 * q]) / 2, mv = (raw->uv.v[2 * p + 1] + raw->uv.v[2 * q + 1]) / 2;
+        i32 ends[2] = {p, q};
+        double pq[4];
+        sample_params(f, raw->uv.v, ends, 2, pq, NULL);
+        double mu = (pq[0] + pq[2]) / 2, mv = (pq[1] + pq[3]) / 2;
         double sm[3];
         surface_value(r, h, s, mu, mv, sm);
         if (!isfinite(sm[0])) continue;
@@ -616,6 +625,7 @@ static void refine_post_conform(run *r, arena *A, arena *T, const host *h, const
         }
       }
     }
+    mark_pole_twins(T, f, raw->uv.v, &raw->tri, &marked, off_boundary, &raw->boundary);
     if (!marked.n) break;
     sort_u64(T, marked.v, marked.n);
     vi split_tri;
@@ -625,8 +635,10 @@ static void refine_post_conform(run *r, arena *A, arena *T, const host *h, const
     raw->tri = split_tri;
     fresh = split_fresh;
     for (i64 k = 0; k < midpoints.n; k++) {
-      i64 p = (i64)(midpoints.v[k] >> 32), q = (i64)(midpoints.v[k] & 0xFFFFFFFFu);
-      double mu = (raw->uv.v[2 * p] + raw->uv.v[2 * q]) / 2, mv = (raw->uv.v[2 * p + 1] + raw->uv.v[2 * q + 1]) / 2;
+      i32 ends[2] = {(i32)(midpoints.v[k] >> 32), (i32)(midpoints.v[k] & 0xFFFFFFFFu)};
+      double pq[4];
+      sample_params(f, raw->uv.v, ends, 2, pq, NULL);
+      double mu = (pq[0] + pq[2]) / 2, mv = (pq[1] + pq[3]) / 2;
       double made[3], turned[3];
       surface_value(r, h, s, mu, mv, made);
       surface_normal(r, h, s, mu, mv, f->uv, turned);
