@@ -45,6 +45,9 @@ typedef struct {
   surface s;
   double uv[4];
   double period_u, period_v; /* the surface's periods, 0 where it has none */
+  /* TODO (next agent): int singular_side[4], whether the box's side u0, u1, v0, v1 is one point
+   * of the surface (singular_u at v0/v1; a B-spline's degenerate column at u0/u1), set in
+   * mesh_rest after read_geometry, for spread_pole_corners -- see the WIP commit message. */
   i32 loop_count;
   const i32 *loop_start;  /* each loop's first pcurve, into the run's pcurves */
   const i32 *loop_size;
