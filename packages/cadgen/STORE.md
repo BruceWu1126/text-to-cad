@@ -535,7 +535,11 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   tessellated over its own parameters by `_internal/face_fallback.py` where that
   does no harm; a needle folded over its neighbour is unfolded), reading what the
   triangles do not say from the part's selector table (each face's area, each
-  edge's class) and the component's face colours. A body (`store/meshes.py`) is
+  edge's class) and the component's face colours. Measured over the sample
+  corpus (9,448 solids in 198 STEP files): 18 solids whose mesh has an open edge
+  (7 distinct parts, repeated through the assemblies that place them), 3 cracks
+  wider than a deflection (one part), no face left silently empty and no mesher
+  error, in 40.2 million triangles. A body (`store/meshes.py`) is
   glTF 2.0 binary in the component's own units: ONE triangle primitive
   (positions, normals, u16
   indices up to 65,535 vertices, else u32), a face table whose rows give each
