@@ -11,6 +11,14 @@
  *   visibility, so shadows are area-light shadows whose penumbrae widen with
  *   occluder distance (contact hardening for free), and the ground receives
  *   ambient occlusion and colour bleeding from the model.
+ * - Up to `RADIOSITY_MAX_DIRECT_LIGHTS` direct lights (the scene's key, fill
+ *   and rim) get their own visibility: each bounce also rasterizes one
+ *   jittered direction inside every light's cone (`angle`: the softbox's
+ *   apparent radius) and a second gather accumulates, per texel and light,
+ *   the fraction of the cone that reaches it. The display patch scales each
+ *   direct light by that fraction, so the lights keep their highlights and
+ *   their direction but are shadowed softly, with contact hardening, and
+ *   never reach the inside of a part they cannot see.
  * - Each bounce rasterizes N global directions at once with an ArrayCamera
  *   into tiles of one "illumination map" (RGB = the surface's current outgoing
  *   radiance, A = its distance along the tile direction) using a random
@@ -31,6 +39,9 @@
  *         (so rgb/a is the per-texel visibility used for specular occlusion,
  *         for occluding the ambient/hemisphere lights and for the user's
  *         shadow-strength control)
+ * Direct-light map texel layout (linear, float, same atlas):
+ *   r, g, b = visibility (0..1) of direct light 0, 1, 2
+ *   a       = 1 for a baked texel (0 marks an empty gutter for the dilation)
  *
  * The display side is a shader patch for MeshPhysicalMaterial that replaces
  * the IBL diffuse irradiance with the lightmap, occludes the ambient and
@@ -60,6 +71,12 @@ const MAX_ILLUMINATION_SIDE = 4096;
 
 /** Direction counts the solver accepts per bounce (square ArrayCamera layouts). */
 export const RADIOSITY_DIRECTION_OPTIONS = Object.freeze([1, 4, 9, 16]);
+
+/** Direct lights the bake can shadow (one visibility channel each). */
+export const RADIOSITY_MAX_DIRECT_LIGHTS = 3;
+
+/** Smallest and largest cone radius (radians) a direct light can have. */
+export const RADIOSITY_LIGHT_ANGLE_RANGE = Object.freeze([0.002, 0.5]);
 
 export const RADIOSITY_QUALITY = Object.freeze({
   // Directions per bounce only change how fast the estimate converges; the
@@ -222,9 +239,13 @@ const GATHER_VERTEX = /* glsl */ `
   }
 `;
 
-function gatherFragment(directions, radius) {
+/**
+ * Uniforms, varyings and the per-direction surface lookup shared by the
+ * environment gather and the direct-light gather (each is its own program,
+ * so the names can be the same).
+ */
+function gatherCommon(directions, radius) {
   return /* glsl */ `
-  precision highp float;
   #define N_DIRS ${directions}
   #define RADIUS ${radius}
   uniform vec3 uDir[N_DIRS];
@@ -233,7 +254,6 @@ function gatherFragment(directions, radius) {
   uniform vec3 uOrigin[N_DIRS];
   uniform vec2 uHalf[N_DIRS];
   uniform vec2 uTileOffset[N_DIRS];
-  uniform float uDirWeight[N_DIRS];
   uniform vec2 uTileScale;
   uniform vec2 uIllumTexel;
   uniform sampler2D uIllum;
@@ -241,14 +261,10 @@ function gatherFragment(directions, radius) {
   uniform float uInvSampleCount;
   uniform float uSelfBias;
   uniform vec3 uUp;
-  uniform float uFloorEnabled;
-  uniform vec3 uFloorAlbedo;
-  uniform vec2 uFloorRefUv;
   varying vec3 vWorldPos;
   varying vec3 vWorldNormal;
   varying vec2 vUv1;
   ${GLSL_COMMON}
-  ${GLSL_ENV}
 
   // Nearest in-hemisphere surface seen from p along direction k, or the
   // environment (unit intensity) when the ray escapes. Sets \`found\`.
@@ -284,6 +300,18 @@ function gatherFragment(directions, radius) {
     if ( best < 1e19 ) { found = true; return bestRGB; }
     return lenv;
   }
+  `;
+}
+
+function gatherFragment(directions, radius) {
+  return /* glsl */ `
+  precision highp float;
+  ${gatherCommon(directions, radius)}
+  uniform float uDirWeight[N_DIRS];
+  uniform float uFloorEnabled;
+  uniform vec3 uFloorAlbedo;
+  uniform vec2 uFloorRefUv;
+  ${GLSL_ENV}
 
   void main() {
     vec3 p = vWorldPos;
@@ -313,6 +341,43 @@ function gatherFragment(directions, radius) {
     vec4 prev = tcvSane( texture2D( uPrev, vUv1 ) );
     estimate = tcvSane( estimate );
     // The first sample overwrites (a 0·prev term would keep garbage alive).
+    gl_FragColor = uInvSampleCount >= 1.0 ? estimate : mix( prev, estimate, uInvSampleCount );
+  }
+  `;
+}
+
+// --- Direct-light gather pass ------------------------------------------------
+
+/**
+ * Per texel, whether this bounce's jittered direction of each direct light
+ * reaches it: 1 when nothing lies along the ray and the light is above the
+ * texel's horizon, 0 otherwise. The cumulative mean over bounces is the
+ * fraction of the light's cone the texel sees, a soft shadow that hardens
+ * toward contact.
+ */
+function lightGatherFragment(lights, radius) {
+  return /* glsl */ `
+  precision highp float;
+  ${gatherCommon(lights, radius)}
+
+  void main() {
+    vec3 p = vWorldPos;
+    float nLen = length( vWorldNormal );
+    vec3 n = nLen > 1e-8 ? vWorldNormal / nLen : uUp;
+    vec3 vis = vec3( 0.0 );
+    for ( int k = 0; k < N_DIRS; k ++ ) {
+      float v = 0.0;
+      if ( dot( n, uDir[k] ) > 0.0 ) {
+        bool found;
+        gatherDirection( p, n, k, vec3( 1.0 ), found );
+        v = found ? 0.0 : 1.0;
+      }
+      if ( k == 0 ) vis.x = v;
+      else if ( k == 1 ) vis.y = v;
+      else vis.z = v;
+    }
+    vec4 estimate = vec4( vis, 1.0 );
+    vec4 prev = tcvSane( texture2D( uPrev, vUv1 ) );
     gl_FragColor = uInvSampleCount >= 1.0 ? estimate : mix( prev, estimate, uInvSampleCount );
   }
   `;
@@ -372,6 +437,13 @@ const ENV_TABLE_FRAGMENT = /* glsl */ `
 /**
  * Discrete 2D distribution over an equirectangular luminance table, for
  * drawing world directions proportional to environment radiance.
+ *
+ * Every cell is sampled uniformly over its solid angle (uniform in cosθ, not
+ * in θ) and its pdf is its probability over that exact solid angle, so the
+ * density the weights assume is the density the samples have. Sampling
+ * uniformly in θ instead crowds samples toward the poles within a cell —
+ * the top row, where a studio's overhead softbox sits, by a factor that
+ * diverges — and the lightmap then overshoots there.
  */
 export class EnvImportanceTable {
   constructor(lum, w, h) {
@@ -382,12 +454,15 @@ export class EnvImportanceTable {
     const weights = new Float32Array(w * h);
     const rowCdf = new Float32Array(h);
     const condCdf = new Float32Array(w * h);
+    // Solid angle of each row's cells: (cosθ_i − cosθ_i+1) dφ.
+    const rowSolidAngle = new Float32Array(h);
     let total = 0;
     for (let i = 0; i < h; i++) {
-      const sinT = Math.sin((i + 0.5) * this._dTheta);
+      const solidAngle = (Math.cos(i * this._dTheta) - Math.cos((i + 1) * this._dTheta)) * this._dPhi;
+      rowSolidAngle[i] = solidAngle;
       let rowSum = 0;
       for (let j = 0; j < w; j++) {
-        const wt = (Math.max(lum[i * w + j], 0) + 1e-4) * sinT;
+        const wt = (Math.max(lum[i * w + j], 0) + 1e-4) * solidAngle;
         weights[i * w + j] = wt;
         rowSum += wt;
         condCdf[i * w + j] = rowSum;
@@ -398,6 +473,7 @@ export class EnvImportanceTable {
     }
     for (let i = 0; i < h; i++) rowCdf[i] /= total;
     this._weights = weights;
+    this._rowSolidAngle = rowSolidAngle;
     this._total = total;
     this._rowCdf = rowCdf;
     this._condCdf = condCdf;
@@ -418,10 +494,13 @@ export class EnvImportanceTable {
     const c0 = j > 0 ? this._condCdf[base + j - 1] : 0;
     const c1 = this._condCdf[base + j];
     const zeta = c1 > c0 ? Math.min(0.999999, (u2 - c0) / (c1 - c0)) : 0.5;
-    const theta = (i + xi) * this._dTheta;
+    // Uniform over the cell's solid angle: linear in cosθ.
+    const cos0 = Math.cos(i * this._dTheta);
+    const cos1 = Math.cos((i + 1) * this._dTheta);
+    const cosT = cos0 + (cos1 - cos0) * xi;
+    const sinT = Math.sqrt(Math.max(0, 1 - cosT * cosT));
     const phi = (j + zeta) * this._dPhi;
-    const sinT = Math.sin(theta);
-    out.set(sinT * Math.cos(phi), sinT * Math.sin(phi), Math.cos(theta));
+    out.set(sinT * Math.cos(phi), sinT * Math.sin(phi), cosT);
     return this._pdfCell(i, j);
   }
 
@@ -436,28 +515,23 @@ export class EnvImportanceTable {
   }
 
   _pdfCell(i, j) {
-    const sinT = Math.sin((i + 0.5) * this._dTheta);
-    return (
-      this._weights[i * this._w + j] /
-      this._total /
-      (Math.max(sinT, 1e-4) * this._dTheta * this._dPhi)
-    );
+    return this._weights[i * this._w + j] / this._total / this._rowSolidAngle[i];
   }
 }
 
 /**
  * Luminance irradiance an unoccluded, up-facing (+Z) surface receives from an
- * equirectangular luminance table (polar axis +Z, row = theta): ∫ L cosθ dω.
+ * equirectangular luminance table (polar axis +Z, row = theta): ∫ L cosθ dω,
+ * each cell weighted by its exact solid angle.
  */
 export function integrateUpIrradiance(lum, w, h) {
   const dTheta = Math.PI / h;
   const dPhi = (2 * Math.PI) / w;
   let sum = 0;
   for (let i = 0; i < h; i++) {
-    const theta = (i + 0.5) * dTheta;
-    const cosT = Math.cos(theta);
+    const cosT = Math.cos((i + 0.5) * dTheta);
     if (cosT <= 0) break;
-    const weight = cosT * Math.sin(theta) * dTheta * dPhi;
+    const weight = cosT * (Math.cos(i * dTheta) - Math.cos((i + 1) * dTheta)) * dPhi;
     for (let j = 0; j < w; j++) sum += Math.max(lum[i * w + j], 0) * weight;
   }
   return sum;
@@ -500,9 +574,72 @@ export function createRadiosityDisplayUniforms() {
      * lightmap fades in (it carries their occluded, bounced version). 0 when an
      * environment map lights the bake: the lights are only occluded.
      */
-    uRadReplaceAmbient: { value: 0 }
+    uRadReplaceAmbient: { value: 0 },
+    /** Direct-light visibility map (null without direct lights). */
+    uRadLightMap: { value: null },
+    /** World directions toward the baked direct lights, in the map's channel order. */
+    uRadLightDir: { value: [new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 1)] },
+    /** How many of them are baked. */
+    uRadLightCount: { value: 0 }
   };
 }
+
+/**
+ * Declarations the patch prepends after `<common>`: the uniforms, the
+ * visibility globals and the lookup that matches a shader light (view-space
+ * direction toward it) to its baked channel.
+ */
+const COMMON_PATCH = /* glsl */ `
+#include <common>
+uniform float uRadWeight;
+uniform float uRadShadow;
+uniform float uRadIntensity;
+uniform float uRadReplaceAmbient;
+uniform sampler2D uRadLightMap;
+uniform vec3 uRadLightDir[ ${RADIOSITY_MAX_DIRECT_LIGHTS} ];
+uniform int uRadLightCount;
+float tcvRadVisibility = 1.0;
+vec3 tcvRadDirectVis = vec3( 1.0 );
+float tcvRadDirectVisibility( vec3 toLight ) {
+  float best = 0.5;
+  float vis = 1.0;
+  for ( int k = 0; k < ${RADIOSITY_MAX_DIRECT_LIGHTS}; k ++ ) {
+    if ( k >= uRadLightCount ) break;
+    vec3 ld = normalize( ( viewMatrix * vec4( uRadLightDir[ k ], 0.0 ) ).xyz );
+    float c = dot( ld, toLight );
+    if ( c > best ) {
+      best = c;
+      vis = k == 0 ? tcvRadDirectVis.x : ( k == 1 ? tcvRadDirectVis.y : tcvRadDirectVis.z );
+    }
+  }
+  return vis;
+}
+`;
+
+/**
+ * three's direct-light loop with every directional and spot light scaled by
+ * its baked visibility, read from the direct-light map at the lightmap UV
+ * first (the loop runs before `lights_fragment_maps`).
+ */
+const LIGHTS_BEGIN_PATCH = /* glsl */ `
+#if defined( USE_LIGHTMAP )
+  if ( uRadLightCount > 0 ) {
+    vec4 tcvRadDirectSample = texture2D( uRadLightMap, vLightMapUv );
+    if ( tcvRadDirectSample.a > 0.5 ) {
+      tcvRadDirectVis = mix( vec3( 1.0 ), 1.0 - uRadShadow * ( 1.0 - clamp( tcvRadDirectSample.rgb, 0.0, 1.0 ) ), uRadWeight );
+    }
+  }
+#endif
+${THREE.ShaderChunk.lights_fragment_begin
+  .replace(
+    "getDirectionalLightInfo( directionalLight, directLight );",
+    "getDirectionalLightInfo( directionalLight, directLight );\n\t\tdirectLight.color *= tcvRadDirectVisibility( directLight.direction );"
+  )
+  .replace(
+    "getSpotLightInfo( spotLight, geometryPosition, directLight );",
+    "getSpotLightInfo( spotLight, geometryPosition, directLight );\n\t\tdirectLight.color *= tcvRadDirectVisibility( directLight.direction );"
+  )}
+`;
 
 const LIGHTS_MAPS_PATCH = /* glsl */ `
 #if defined( RE_IndirectDiffuse )
@@ -516,8 +653,10 @@ const LIGHTS_MAPS_PATCH = /* glsl */ `
       float lmLum = dot( lm.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
       // Lift the shadows toward the unoccluded level by (1 - shadow strength).
       vec3 lifted = lm.rgb + vec3( max( lm.a - lmLum, 0.0 ) * ( 1.0 - uRadShadow ) );
+      // Scaled like the environment it was baked from; a sky made from the
+      // scene's lights was baked at their intensity already.
       #ifdef USE_ENVMAP
-        vec3 lmIrradiance = PI * lifted * envMapIntensity;
+        vec3 lmIrradiance = PI * lifted * mix( envMapIntensity, uRadIntensity, uRadReplaceAmbient );
       #else
         vec3 lmIrradiance = PI * lifted * uRadIntensity;
       #endif
@@ -563,7 +702,8 @@ const AOMAP_PATCH = /* glsl */ `
 /**
  * Patch a MeshPhysicalMaterial so its diffuse IBL comes from the radiosity
  * lightmap (attribute `uv1`), its ambient/hemisphere light and specular IBL
- * are occluded by the lightmap visibility. Chains any existing
+ * are occluded by the lightmap visibility, and its directional and spot
+ * lights are scaled by their baked visibility. Chains any existing
  * `onBeforeCompile` (the CAD surface-edge shader) and keys the program
  * explicitly. Idempotent.
  */
@@ -584,11 +724,12 @@ export function applyRadiosityPatch(material, lightmap, uniforms) {
       shader.uniforms.uRadShadow = uniforms.uRadShadow;
       shader.uniforms.uRadIntensity = uniforms.uRadIntensity;
       shader.uniforms.uRadReplaceAmbient = uniforms.uRadReplaceAmbient;
+      shader.uniforms.uRadLightMap = uniforms.uRadLightMap;
+      shader.uniforms.uRadLightDir = uniforms.uRadLightDir;
+      shader.uniforms.uRadLightCount = uniforms.uRadLightCount;
       shader.fragmentShader = shader.fragmentShader
-        .replace(
-          "#include <common>",
-          "#include <common>\nuniform float uRadWeight;\nuniform float uRadShadow;\nuniform float uRadIntensity;\nuniform float uRadReplaceAmbient;\nfloat tcvRadVisibility = 1.0;"
-        )
+        .replace("#include <common>", COMMON_PATCH)
+        .replace("#include <lights_fragment_begin>", LIGHTS_BEGIN_PATCH)
         .replace("#include <lights_fragment_maps>", LIGHTS_MAPS_PATCH)
         .replace("#include <aomap_fragment>", AOMAP_PATCH);
     };
@@ -668,6 +809,27 @@ function fibonacciSphere(k, n) {
   const r = Math.sqrt(Math.max(0, 1 - y * y));
   const phi = k * golden;
   return new THREE.Vector3(Math.cos(phi) * r, y, Math.sin(phi) * r);
+}
+
+/**
+ * Direction drawn uniformly (by solid angle) inside the cone of half-angle
+ * `angle` around `axis`, for the 2D sample (u1, u2).
+ */
+export function coneDirection(out, axis, angle, u1, u2) {
+  const cosA = Math.cos(angle);
+  const cosT = 1 - u1 * (1 - cosA);
+  const sinT = Math.sqrt(Math.max(0, 1 - cosT * cosT));
+  const phi = 2 * Math.PI * u2;
+  // Orthonormal frame around the axis.
+  const ax = Math.abs(axis.x) < 0.9 ? _v.set(1, 0, 0) : _v.set(0, 1, 0);
+  const t1 = _corner.crossVectors(ax, axis).normalize();
+  const t2 = _v.crossVectors(axis, t1);
+  return out
+    .copy(axis)
+    .multiplyScalar(cosT)
+    .addScaledVector(t1, sinT * Math.cos(phi))
+    .addScaledVector(t2, sinT * Math.sin(phi))
+    .normalize();
 }
 
 /**
@@ -759,6 +921,25 @@ export class RadiosityLightmap {
     /** Luminance irradiance of an unoccluded up-facing texel at unit environment intensity. */
     this.environmentUpIrradiance = 0;
     this._gatherCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    // Direct lights: one jittered tile each per bounce, gathered into their
+    // own visibility map (allocated by `_setupLights` when lights are set).
+    this._lights = [];
+    this._lightGatherScene = new THREE.Scene();
+    this._lightGatherProxies = [];
+    this._lightGatherMaterial = null;
+    this._lightIllumination = null;
+    this._lightMap1 = null;
+    this._lightMap2 = null;
+    this._lightCameras = [];
+    this._lightArrayCamera = null;
+    this._lightDirData = [];
+    this._lightBasisU = [];
+    this._lightBasisV = [];
+    this._lightOrigins = [];
+    this._lightHalves = [];
+    this._lightTileOffsets = [];
+    this._lightTilesX = 1;
+    this._lightTilesY = 1;
 
     const mapOpts = {
       type: THREE.FloatType,
@@ -839,6 +1020,13 @@ export class RadiosityLightmap {
     this._dilatePlane.frustumCulled = false;
     this._dilatePlane.renderOrder = -1;
     this._gatherScene.add(this._dilatePlane);
+    // The direct-light map dilates the same way (its alpha marks baked texels).
+    this._lightDilateMaterial = this._dilateMaterial.clone();
+    this._lightDilateMaterial.uniforms.uPrev = { value: null };
+    this._lightDilatePlane = new THREE.Mesh(this._dilatePlane.geometry, this._lightDilateMaterial);
+    this._lightDilatePlane.frustumCulled = false;
+    this._lightDilatePlane.renderOrder = -1;
+    this._lightGatherScene.add(this._lightDilatePlane);
   }
 
   // -------------------------------------------------------------------------
@@ -848,6 +1036,43 @@ export class RadiosityLightmap {
   /** The lightmap holding the latest solution. */
   get texture() {
     return (this._buffer1Active ? this._map1 : this._map2).texture;
+  }
+
+  /** The direct-light visibility map (null without direct lights). */
+  get lightTexture() {
+    if (!this._lights.length || !this._lightMap1) return null;
+    return (this._buffer1Active ? this._lightMap1 : this._lightMap2).texture;
+  }
+
+  /** The direct lights being shadowed: `{ direction, angle }` each (world, toward the light). */
+  get directLights() {
+    return this._lights;
+  }
+
+  /**
+   * Replace the direct lights the bake shadows (at most
+   * `RADIOSITY_MAX_DIRECT_LIGHTS`): `{ direction, angle }` each, `direction`
+   * the world direction toward the light and `angle` the cone's half-angle
+   * in radians (its softness). Restarts the accumulation when they change.
+   */
+  setDirectLights(lights = []) {
+    const [minAngle, maxAngle] = RADIOSITY_LIGHT_ANGLE_RANGE;
+    const next = [];
+    for (const light of Array.isArray(lights) ? lights : []) {
+      if (next.length >= RADIOSITY_MAX_DIRECT_LIGHTS) break;
+      if (!light?.direction?.isVector3 || light.direction.lengthSq() < 1e-12) continue;
+      next.push({
+        direction: light.direction.clone().normalize(),
+        angle: Math.min(Math.max(Number(light.angle) || minAngle, minAngle), maxAngle)
+      });
+    }
+    const same = next.length === this._lights.length && next.every((light, k) =>
+      light.direction.distanceToSquared(this._lights[k].direction) < 1e-10 && light.angle === this._lights[k].angle);
+    if (same) return;
+    const countChanged = next.length !== this._lights.length;
+    this._lights = next;
+    if (countChanged) this._setupLights(next.length);
+    this.reset();
   }
 
   /** Bounces accumulated since the last reset. */
@@ -1028,6 +1253,24 @@ export class RadiosityLightmap {
       renderer.setRenderTarget(writeRT);
       renderer.render(this._gatherScene, this._gatherCamera);
 
+      // --- Direct lights: one jittered tile each, gathered into their map ---
+      if (this._lights.length && this._lightIllumination) {
+        this._updateLightDirections();
+        renderer.setRenderTarget(this._lightIllumination);
+        renderer.setClearColor(0x000000, 0);
+        renderer.clear(true, true, false);
+        renderer.render(this._scene, this._lightArrayCamera);
+        const lightRead = this._buffer1Active ? this._lightMap1 : this._lightMap2;
+        const lightWrite = this._buffer1Active ? this._lightMap2 : this._lightMap1;
+        const lu = this._lightGatherMaterial.uniforms;
+        lu.uIllum.value = this._lightIllumination.texture;
+        lu.uPrev.value = lightRead.texture;
+        lu.uInvSampleCount.value = 1 / this._frame;
+        this._lightDilateMaterial.uniforms.uPrev.value = lightRead.texture;
+        renderer.setRenderTarget(lightWrite);
+        renderer.render(this._lightGatherScene, this._gatherCamera);
+      }
+
       this._buffer1Active = !this._buffer1Active;
       // Fade the lightmap in with the accumulated directions (smoothstep), so
       // the noisy early estimate never pops in and the solution is fully
@@ -1055,7 +1298,9 @@ export class RadiosityLightmap {
     this._illumMaterial.dispose();
     this._gatherMaterial.dispose();
     this._dilateMaterial.dispose();
+    this._lightDilateMaterial.dispose();
     this._dilatePlane.geometry.dispose();
+    this._disposeLights();
   }
 
   // -------------------------------------------------------------------------
@@ -1150,11 +1395,106 @@ export class RadiosityLightmap {
   _clearLightmaps() {
     const renderer = this._renderer;
     renderer.setClearColor(0x000000, 0);
-    for (const rt of [this._map1, this._map2]) {
+    for (const rt of [this._map1, this._map2, this._lightMap1, this._lightMap2]) {
+      if (!rt) continue;
       renderer.setRenderTarget(rt);
       renderer.clear(true, false, false);
     }
     this._needsClear = false;
+  }
+
+  /**
+   * (Re)allocate the direct-light tiles, cameras, visibility maps and gather
+   * program for `count` lights; `count` 0 releases them.
+   */
+  _setupLights(count) {
+    this._disposeLights();
+    if (count <= 0) return;
+    const tile = this.tileResolution;
+    this._lightTilesX = Math.ceil(Math.sqrt(count));
+    this._lightTilesY = Math.ceil(count / this._lightTilesX);
+    this._lightIllumination = new THREE.WebGLRenderTarget(this._lightTilesX * tile, this._lightTilesY * tile, {
+      type: THREE.FloatType,
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+      generateMipmaps: false,
+      depthBuffer: true,
+      stencilBuffer: false
+    });
+    const mapOpts = {
+      type: THREE.FloatType,
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      generateMipmaps: false,
+      depthBuffer: false,
+      stencilBuffer: false
+    };
+    this._lightMap1 = new THREE.WebGLRenderTarget(this.resolution, this.resolution, mapOpts);
+    this._lightMap2 = new THREE.WebGLRenderTarget(this.resolution, this.resolution, mapOpts);
+    this._lightMap1.texture.name = "radiosityDirectLight1";
+    this._lightMap2.texture.name = "radiosityDirectLight2";
+    this._lightMap1.texture.channel = 1;
+    this._lightMap2.texture.channel = 1;
+    for (let k = 0; k < count; k++) {
+      this._lightDirData.push(new THREE.Vector3(0, 0, 1));
+      this._lightBasisU.push(new THREE.Vector3(1, 0, 0));
+      this._lightBasisV.push(new THREE.Vector3(0, 1, 0));
+      this._lightOrigins.push(new THREE.Vector3());
+      this._lightHalves.push(new THREE.Vector2(1, 1));
+      const tx = k % this._lightTilesX;
+      const ty = Math.floor(k / this._lightTilesX);
+      this._lightTileOffsets.push(new THREE.Vector2(tx / this._lightTilesX, ty / this._lightTilesY));
+      const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+      cam.viewport = new THREE.Vector4(tx * tile, ty * tile, tile, tile);
+      this._lightCameras.push(cam);
+    }
+    this._lightArrayCamera = new THREE.ArrayCamera(this._lightCameras);
+    this._lightGatherMaterial = new THREE.ShaderMaterial({
+      vertexShader: GATHER_VERTEX,
+      fragmentShader: lightGatherFragment(count, this.preset.gatherRadius),
+      uniforms: {
+        uDir: { value: this._lightDirData },
+        uBasisU: { value: this._lightBasisU },
+        uBasisV: { value: this._lightBasisV },
+        uOrigin: { value: this._lightOrigins },
+        uHalf: { value: this._lightHalves },
+        uTileOffset: { value: this._lightTileOffsets },
+        uTileScale: { value: new THREE.Vector2(1 / this._lightTilesX, 1 / this._lightTilesY) },
+        uIllumTexel: { value: new THREE.Vector2(1 / (this._lightTilesX * tile), 1 / (this._lightTilesY * tile)) },
+        uIllum: { value: null },
+        uPrev: { value: null },
+        uInvSampleCount: { value: 1 },
+        uSelfBias: { value: this._gatherMaterial.uniforms.uSelfBias.value },
+        uUp: { value: this._up.clone() }
+      },
+      side: THREE.DoubleSide,
+      depthTest: false,
+      depthWrite: false,
+      blending: THREE.NoBlending
+    });
+    this._lightGatherMaterial.name = "radiosityDirectLightGather";
+    for (const m of this._lightGatherProxies) m.material = this._lightGatherMaterial;
+    this._needsClear = true;
+  }
+
+  _disposeLights() {
+    this._lightIllumination?.dispose();
+    this._lightMap1?.dispose();
+    this._lightMap2?.dispose();
+    this._lightGatherMaterial?.dispose();
+    this._lightIllumination = null;
+    this._lightMap1 = null;
+    this._lightMap2 = null;
+    this._lightGatherMaterial = null;
+    this._lightArrayCamera = null;
+    this._lightCameras = [];
+    this._lightDirData = [];
+    this._lightBasisU = [];
+    this._lightBasisV = [];
+    this._lightOrigins = [];
+    this._lightHalves = [];
+    this._lightTileOffsets = [];
+    for (const m of this._lightGatherProxies) m.material = this._gatherMaterial;
   }
 
   _createGatherMaterial() {
@@ -1240,6 +1580,15 @@ export class RadiosityLightmap {
     gather.userData.proxy = proxy;
     this._gatherScene.add(gather);
     this._gatherProxies.push(gather);
+
+    const lightGather = new THREE.Mesh(source.geometry, this._lightGatherMaterial || this._gatherMaterial);
+    lightGather.frustumCulled = false;
+    lightGather.matrixAutoUpdate = false;
+    lightGather.matrixWorldAutoUpdate = false;
+    lightGather.matrixWorld = mesh.matrixWorld;
+    lightGather.userData.proxy = proxy;
+    this._lightGatherScene.add(lightGather);
+    this._lightGatherProxies.push(lightGather);
     return proxy;
   }
 
@@ -1247,8 +1596,10 @@ export class RadiosityLightmap {
     for (const p of this._proxies) this._scene.remove(p.mesh);
     if (this._floorProxy) this._scene.remove(this._floorProxy.mesh);
     for (const g of this._gatherProxies) this._gatherScene.remove(g);
+    for (const g of this._lightGatherProxies) this._lightGatherScene.remove(g);
     this._proxies = [];
     this._gatherProxies = [];
+    this._lightGatherProxies = [];
     this._floorProxy = null;
   }
 
@@ -1267,6 +1618,9 @@ export class RadiosityLightmap {
       this._gatherMaterial.uniforms.uFloorAlbedo.value.copy(this._floorProxy.albedo);
     }
     for (const g of this._gatherProxies) {
+      g.visible = g.userData.proxy.mesh.visible;
+    }
+    for (const g of this._lightGatherProxies) {
       g.visible = g.userData.proxy.mesh.visible;
     }
   }
@@ -1301,8 +1655,9 @@ export class RadiosityLightmap {
 
   /** Self-intersection bias in world units ≈ N illumination texels. */
   _applySelfBias() {
-    this._gatherMaterial.uniforms.uSelfBias.value =
-      (this._lateral / this.tileResolution) * this._selfBiasTexels;
+    const bias = (this._lateral / this.tileResolution) * this._selfBiasTexels;
+    this._gatherMaterial.uniforms.uSelfBias.value = bias;
+    if (this._lightGatherMaterial) this._lightGatherMaterial.uniforms.uSelfBias.value = bias;
   }
 
   /**
@@ -1312,8 +1667,6 @@ export class RadiosityLightmap {
    */
   _updateDirections() {
     stratifiedRotation(_quat, this._frame);
-    const margin = this._maxExtent * MARGIN;
-    const b = this._bounds;
     const N = this._directions;
     const table = this._importance ? this._envTable : null;
     const nUniform = this._uniformCount();
@@ -1339,68 +1692,95 @@ export class RadiosityLightmap {
       } else {
         this._dirWeights[k] = 4 / N;
       }
-      const cam = this._subCameras[k];
-      cam.up.set(0, 1, 0);
-      if (Math.abs(d.y) > 0.99) cam.up.set(0, 0, 1);
-      cam.position.copy(this._boundsCenter).addScaledVector(d, -1);
-      cam.lookAt(this._boundsCenter);
-      cam.updateMatrixWorld();
-      const bu = this._basisU[k].setFromMatrixColumn(cam.matrixWorld, 0);
-      const bv = this._basisV[k].setFromMatrixColumn(cam.matrixWorld, 1);
-      // Project the bounds corners onto the camera basis.
-      let minU = Infinity;
-      let maxU = -Infinity;
-      let minV = Infinity;
-      let maxV = -Infinity;
-      let minD = Infinity;
-      let maxD = -Infinity;
-      for (let i = 0; i < 8; i++) {
-        _corner
-          .set(
-            i & 1 ? b.max.x : b.min.x,
-            i & 2 ? b.max.y : b.min.y,
-            i & 4 ? b.max.z : b.min.z
-          )
-          .sub(this._boundsCenter);
-        const pu = _corner.dot(bu);
-        const pv = _corner.dot(bv);
-        const pd = _corner.dot(d);
-        if (pu < minU) minU = pu;
-        if (pu > maxU) maxU = pu;
-        if (pv < minV) minV = pv;
-        if (pv > maxV) maxV = pv;
-        if (pd < minD) minD = pd;
-        if (pd > maxD) maxD = pd;
-      }
-      const halfU = (maxU - minU) / 2 + margin;
-      const halfV = (maxV - minV) / 2 + margin;
-      const near = minD - margin;
-      // Reach well past the far side so the ground under the model is covered.
-      const far = maxD + margin + this._maxExtent * 1.5;
-      this._halves[k].set(halfU, halfV);
-      // Origin: tile centre on the near plane.
-      const cu = (minU + maxU) / 2;
-      const cv = (minV + maxV) / 2;
-      cam.position
-        .copy(this._boundsCenter)
-        .addScaledVector(bu, cu)
-        .addScaledVector(bv, cv)
-        .addScaledVector(d, near);
-      this._origins[k].copy(cam.position);
-      cam.lookAt(_v.copy(cam.position).add(d));
-      cam.left = -halfU;
-      cam.right = halfU;
-      cam.top = halfV;
-      cam.bottom = -halfV;
-      cam.near = 0;
-      cam.far = far - near;
-      cam.updateProjectionMatrix();
-      cam.updateMatrixWorld();
-      // lookAt may have rolled the basis; re-read it from the final matrix.
-      bu.setFromMatrixColumn(cam.matrixWorld, 0);
-      bv.setFromMatrixColumn(cam.matrixWorld, 1);
+      this._fitTileCamera(this._subCameras[k], d, this._basisU[k], this._basisV[k], this._origins[k], this._halves[k]);
     }
     this._arrayCamera.updateMatrixWorld();
+  }
+
+  /**
+   * One jittered direction per direct light for this bounce (a
+   * low-discrepancy point in the light's cone), and its tile camera.
+   */
+  _updateLightDirections() {
+    const count = this._lights.length;
+    for (let k = 0; k < count; k++) {
+      const light = this._lights[k];
+      const n = this._frame * count + k;
+      const u1 = (0.5 + 0.7548776662466927 * n) % 1;
+      const u2 = (0.5 + 0.5698402909980532 * n) % 1;
+      const d = coneDirection(this._lightDirData[k], light.direction, light.angle, u1, u2);
+      this._fitTileCamera(this._lightCameras[k], d, this._lightBasisU[k], this._lightBasisV[k], this._lightOrigins[k], this._lightHalves[k]);
+    }
+    this._lightArrayCamera.updateMatrixWorld();
+  }
+
+  /**
+   * Fit an orthographic tile camera looking along `d` tightly around the
+   * scene bounds, writing its basis, near-plane origin and half extents for
+   * the gather.
+   */
+  _fitTileCamera(cam, d, basisU, basisV, origin, half) {
+    const margin = this._maxExtent * MARGIN;
+    const b = this._bounds;
+    cam.up.set(0, 1, 0);
+    if (Math.abs(d.y) > 0.99) cam.up.set(0, 0, 1);
+    cam.position.copy(this._boundsCenter).addScaledVector(d, -1);
+    cam.lookAt(this._boundsCenter);
+    cam.updateMatrixWorld();
+    const bu = basisU.setFromMatrixColumn(cam.matrixWorld, 0);
+    const bv = basisV.setFromMatrixColumn(cam.matrixWorld, 1);
+    // Project the bounds corners onto the camera basis.
+    let minU = Infinity;
+    let maxU = -Infinity;
+    let minV = Infinity;
+    let maxV = -Infinity;
+    let minD = Infinity;
+    let maxD = -Infinity;
+    for (let i = 0; i < 8; i++) {
+      _corner
+        .set(
+          i & 1 ? b.max.x : b.min.x,
+          i & 2 ? b.max.y : b.min.y,
+          i & 4 ? b.max.z : b.min.z
+        )
+        .sub(this._boundsCenter);
+      const pu = _corner.dot(bu);
+      const pv = _corner.dot(bv);
+      const pd = _corner.dot(d);
+      if (pu < minU) minU = pu;
+      if (pu > maxU) maxU = pu;
+      if (pv < minV) minV = pv;
+      if (pv > maxV) maxV = pv;
+      if (pd < minD) minD = pd;
+      if (pd > maxD) maxD = pd;
+    }
+    const halfU = (maxU - minU) / 2 + margin;
+    const halfV = (maxV - minV) / 2 + margin;
+    const near = minD - margin;
+    // Reach well past the far side so the ground under the model is covered.
+    const far = maxD + margin + this._maxExtent * 1.5;
+    half.set(halfU, halfV);
+    // Origin: tile centre on the near plane.
+    const cu = (minU + maxU) / 2;
+    const cv = (minV + maxV) / 2;
+    cam.position
+      .copy(this._boundsCenter)
+      .addScaledVector(bu, cu)
+      .addScaledVector(bv, cv)
+      .addScaledVector(d, near);
+    origin.copy(cam.position);
+    cam.lookAt(_v.copy(cam.position).add(d));
+    cam.left = -halfU;
+    cam.right = halfU;
+    cam.top = halfV;
+    cam.bottom = -halfV;
+    cam.near = 0;
+    cam.far = far - near;
+    cam.updateProjectionMatrix();
+    cam.updateMatrixWorld();
+    // lookAt may have rolled the basis; re-read it from the final matrix.
+    bu.setFromMatrixColumn(cam.matrixWorld, 0);
+    bv.setFromMatrixColumn(cam.matrixWorld, 1);
   }
 }
 

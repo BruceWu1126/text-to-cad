@@ -59,7 +59,7 @@ Projection remains editable in every preset, including orthographic Render.
 | Camera | Projection in Mode; standard 50mm perspective lens | No UI gate |
 | Surfaces | Shaded/flat/hidden/off, original/single/by-part colors, opacity | Always expanded; Off is an explicit surface style |
 | Edges | Visible/all, color | No CAD edges |
-| Lighting | Quality, exposure, rotation, softbox size, fill, global illumination | Neutral CAD lighting/reflections |
+| Lighting | Quality, exposure, rotation, softbox size, fill, global illumination | Neutral CAD lighting/reflections, with the same baked global illumination over them where the GPU can bake |
 | Background | Color and opacity | Natural light/dark workbench background |
 | Floor | Lowest point/model origin, Matte/Glossy finish, color and opacity | No floor |
 | Grid | Color and opacity | No grid |

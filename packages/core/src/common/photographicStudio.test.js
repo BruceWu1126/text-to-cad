@@ -531,35 +531,51 @@ test("background and floor updates retain the neutral owner's current reflection
   } finally { disposePhotographicStudio(value); }
 });
 
-test("global illumination replaces the key spotlight only with a stepping host and float render targets", () => {
+test("global illumination shadows the key spotlight by its bake only with a stepping host and float render targets", () => {
   const studioRuntime = runtime();
   const root = new THREE.Group();
   root.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshPhysicalMaterial()));
   const base = { ...configuration(), lighting: { ...configuration().lighting, globalIllumination: false } };
   const globalIllumination = { ...base, lighting: { ...base.lighting, globalIllumination: true } };
 
-  // No host (a snapshot): the recipe's flag is accepted and the spotlight stays.
+  // No host (a snapshot): the recipe's flag is accepted and the spotlight keeps its shadow map.
   let state = applyPhotographicStudio(THREE, studioRuntime, globalIllumination);
   assert.equal(state.keyLight.visible, true);
+  assert.equal(state.keyLight.castShadow, true);
   assert.equal(state.radiosity, null);
   assert.equal(studioRuntime.refineFrame ?? null, null);
 
-  // A host, but a renderer without float render targets: still the spotlight.
+  // A host, but a renderer without float render targets: still the shadow map.
   state = applyPhotographicStudio(THREE, studioRuntime, globalIllumination, { globalIllumination: { root } });
-  assert.equal(state.keyLight.visible, true);
+  assert.equal(state.keyLight.castShadow, true);
   assert.equal(state.radiosity, null);
 
-  // Float render targets: the bake takes over, hides the spotlight and installs the frame step.
+  // Float render targets: the bake takes over the spotlight's shadow (the light stays, its
+  // shadow map is not drawn), lights from the environment at its own intensity and installs
+  // the frame step.
   studioRuntime.renderer.capabilities = { isWebGL2: true };
   studioRuntime.renderer.extensions = { has: () => true };
   state = applyPhotographicStudio(THREE, studioRuntime, globalIllumination, { globalIllumination: { root } });
   assert.ok(state.radiosity);
-  assert.equal(state.keyLight.visible, false);
+  assert.equal(state.keyLight.visible, true);
   assert.equal(state.keyLight.castShadow, false);
+  assert.equal(studioRuntime.scene.environmentIntensity, 1);
   assert.equal(typeof studioRuntime.refineFrame, "function");
   assert.equal(state.group.children.includes(state.radiosity.group), true);
   // The floor it catches shadows on stands where the studio ground does.
   assert.equal(state.radiosity._floorParams.level, state.ground.position.z);
+  // The spotlight is the bake's one direct light: its direction, its softbox's cone and its illuminance.
+  assert.equal(state.radiosity.directLights.length, 1);
+  const [key] = state.radiosity.directLights;
+  assert.ok(key.direction.distanceTo(new THREE.Vector3(...PHOTOGRAPHIC_STUDIO_KEY_DIRECTION).normalize()) < 1e-9);
+  assert.ok(Math.abs(key.angle - 0.11) < 1e-9);
+  assert.equal(key.irradiance, 2.4);
+  // Rotating the lighting turns the baked key with the spotlight; a bigger softbox widens its cone.
+  state = applyPhotographicStudio(THREE, studioRuntime, { ...globalIllumination, lighting: { ...globalIllumination.lighting, rotation: 90, size: 2 } },
+    { globalIllumination: { root } });
+  const [turned] = state.radiosity.directLights;
+  assert.ok(turned.direction.distanceTo(state.keyLight.position.clone().sub(state.target.position).normalize()) < 1e-9);
+  assert.ok(Math.abs(turned.angle - 0.16) < 1e-9);
 
   // A software renderer bakes nothing either.
   studioRuntime.softwareRendering = true;
@@ -568,12 +584,13 @@ test("global illumination replaces the key spotlight only with a stepping host a
   assert.equal(state.keyLight.visible, true);
   studioRuntime.softwareRendering = false;
 
-  // Turning it off restores the spotlight and removes the step; disposal releases the rest.
+  // Turning it off restores the shadow map and removes the step; disposal releases the rest.
   state = applyPhotographicStudio(THREE, studioRuntime, globalIllumination, { globalIllumination: { root } });
   assert.ok(state.radiosity);
   state = applyPhotographicStudio(THREE, studioRuntime, base, { globalIllumination: { root } });
   assert.equal(state.radiosity, null);
   assert.equal(state.keyLight.visible, true);
+  assert.equal(state.keyLight.castShadow, true);
   assert.equal(studioRuntime.refineFrame, null);
   applyPhotographicStudio(THREE, studioRuntime, globalIllumination, { globalIllumination: { root } });
   disposePhotographicStudio(studioRuntime);

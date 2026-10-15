@@ -12,6 +12,11 @@
  * - Patch the PBR materials so they read the lightmap
  *   (`applyRadiosityPatch`) and keep their `lightMap` pointing at the
  *   solver's current ping-pong texture.
+ * - Light the bake either from an environment map (`setEnvironment`) or from
+ *   a sky synthesized from the scene's hemisphere and ambient lights
+ *   (`setSkyFromLights`), and shadow the scene's direct lights
+ *   (`setDirectLights`): the display keeps those lights, scaled per texel by
+ *   their baked visibility, and the floor darkens by their share.
  * - Detect changes that invalidate the bake every frame: visibility,
  *   transforms and occluder-ness reset the accumulation; added/removed meshes
  *   or swapped geometries trigger a rebuild. Colour changes are picked up
@@ -29,11 +34,17 @@ import {
   createRadiosityDisplayUniforms,
   normalizeRadiosityDirections,
   normalizeRadiosityQuality,
+  RADIOSITY_LIGHT_ANGLE_RANGE,
+  RADIOSITY_MAX_DIRECT_LIGHTS,
   RadiosityLightmap,
   radiositySupported,
   removeRadiosityPatch
 } from "./radiosityLightmap.js";
 import { RadiosityFloor } from "./radiosityFloor.js";
+
+/** Equirectangular size of the sky synthesized from the scene's lights. */
+const SKY_WIDTH = 128;
+const SKY_HEIGHT = 64;
 
 /** Fraction of the atlas side reserved for the floor's chart. */
 const FLOOR_ATLAS_FRACTION = 0.5;
@@ -45,6 +56,108 @@ const PADDING = 2;
 const ENVIRONMENT_BLUR = 0.25;
 
 const UP = new THREE.Vector3(0, 0, 1);
+
+function luminance(color) {
+  return 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
+}
+
+/**
+ * Radiance of an equirectangular float texture (three's convention: +Y at the
+ * top row, +X at the centre column) along a world direction, nearest texel.
+ */
+function equirectRadiance(image, dir, out) {
+  const { width, height, data } = image;
+  const u = Math.atan2(dir.z, dir.x) / (2 * Math.PI) + 0.5;
+  const v = Math.asin(Math.min(Math.max(dir.y, -1), 1)) / Math.PI + 0.5;
+  const x = Math.min(width - 1, Math.max(0, Math.floor(u * width)));
+  const y = Math.min(height - 1, Math.max(0, Math.floor(v * height)));
+  const offset = (y * width + x) * 4;
+  return out.setRGB(data[offset], data[offset + 1], data[offset + 2]);
+}
+
+/**
+ * The radiance field (linear RGB per world direction) whose diffuse
+ * irradiance equals what three's hemisphere and ambient lights give a surface
+ * of any orientation: a hemisphere light's irradiance is
+ * `mix(ground, sky, 0.5 + 0.5 n·up) × intensity`, which the linear-in-`d·up`
+ * sky `(a + b d·up) / π` reproduces exactly for `a = (sky + ground) / 2` and
+ * `b = 3 (sky − ground) / 4`; an ambient light is a uniform `colour ×
+ * intensity / π`; an equirectangular environment adds its own radiance
+ * times its intensity. Negative radiance (a very dark ground under a bright
+ * sky) is clamped, so such a floor reads a touch lighter than the light.
+ *
+ * @param {object} lights
+ * @param {{ skyColor: THREE.Color, groundColor: THREE.Color, intensity: number }} [lights.hemisphere]
+ * @param {{ color: THREE.Color, intensity: number }} [lights.ambient]
+ * @param {{ texture: THREE.Texture, intensity: number }} [lights.environment]
+ * @param {THREE.Vector3} [up]
+ * @returns {(dir: THREE.Vector3, out: THREE.Color) => THREE.Color}
+ */
+export function skyRadianceFromLights({ hemisphere = null, ambient = null, environment = null } = {}, up = UP) {
+  const a = new THREE.Color(0, 0, 0);
+  const b = new THREE.Color(0, 0, 0);
+  if (hemisphere && hemisphere.intensity > 0) {
+    const sky = new THREE.Color(hemisphere.skyColor).multiplyScalar(hemisphere.intensity);
+    const ground = new THREE.Color(hemisphere.groundColor).multiplyScalar(hemisphere.intensity);
+    a.setRGB((sky.r + ground.r) / 2, (sky.g + ground.g) / 2, (sky.b + ground.b) / 2);
+    b.setRGB((sky.r - ground.r) * 0.75, (sky.g - ground.g) * 0.75, (sky.b - ground.b) * 0.75);
+  }
+  if (ambient && ambient.intensity > 0) {
+    a.add(new THREE.Color(ambient.color).multiplyScalar(ambient.intensity));
+  }
+  const envImage = environment?.texture?.image;
+  const envData = envImage?.data instanceof Float32Array && envImage.width > 0 && envImage.height > 0 ? envImage : null;
+  const envIntensity = envData ? Math.max(Number(environment.intensity) || 0, 0) : 0;
+  const envColor = new THREE.Color();
+  return (dir, out) => {
+    const t = dir.dot(up);
+    out.setRGB(
+      Math.max(a.r + b.r * t, 0) / Math.PI,
+      Math.max(a.g + b.g * t, 0) / Math.PI,
+      Math.max(a.b + b.b * t, 0) / Math.PI
+    );
+    if (envIntensity > 0) out.add(equirectRadiance(envData, dir, envColor).multiplyScalar(envIntensity));
+    return out;
+  };
+}
+
+/** Bake a radiance field into an equirectangular float texture (three's convention). */
+function createSkyTexture(radiance, width = SKY_WIDTH, height = SKY_HEIGHT) {
+  const data = new Float32Array(width * height * 4);
+  const dir = new THREE.Vector3();
+  const color = new THREE.Color();
+  for (let y = 0; y < height; y++) {
+    const v = (y + 0.5) / height;
+    const polar = (v - 0.5) * Math.PI;
+    const ring = Math.cos(polar);
+    for (let x = 0; x < width; x++) {
+      const u = (x + 0.5) / width;
+      const azimuth = (u - 0.5) * 2 * Math.PI;
+      dir.set(ring * Math.cos(azimuth), Math.sin(polar), ring * Math.sin(azimuth));
+      radiance(dir, color);
+      const offset = (y * width + x) * 4;
+      data[offset] = color.r;
+      data[offset + 1] = color.g;
+      data[offset + 2] = color.b;
+      data[offset + 3] = 1;
+    }
+  }
+  const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat, THREE.FloatType);
+  texture.name = "radiositySky";
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  texture.colorSpace = THREE.LinearSRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function skyKey({ hemisphere = null, ambient = null, environment = null } = {}) {
+  const colorKey = (color) => (color ? new THREE.Color(color).getHex() : -1);
+  return [
+    hemisphere ? `${colorKey(hemisphere.skyColor)}/${colorKey(hemisphere.groundColor)}/${hemisphere.intensity}` : "",
+    ambient ? `${colorKey(ambient.color)}/${ambient.intensity}` : "",
+    environment?.texture ? `${environment.texture.uuid}/${environment.texture.version}/${environment.intensity}` : ""
+  ].join("|");
+}
 
 function worldVisible(obj) {
   let o = obj;
@@ -139,6 +252,8 @@ export const DEFAULT_RADIOSITY_STAGE_SETTINGS = Object.freeze({
   directions: 16,
   maxSamples: 4000,
   shadow: 1,
+  // The ground's shadow strength; null follows `shadow`.
+  floorShadow: null,
   // Direct environment light only by default; the Bounce control adds
   // indirect light from the model and floor.
   bounce: 0,
@@ -157,6 +272,7 @@ export function normalizeRadiosityStageSettings(settings = {}) {
     directions: normalizeRadiosityDirections(source.directions, DEFAULT_RADIOSITY_STAGE_SETTINGS.directions),
     maxSamples: Math.floor(number(source.maxSamples, DEFAULT_RADIOSITY_STAGE_SETTINGS.maxSamples, 0, 100000)),
     shadow: number(source.shadow, DEFAULT_RADIOSITY_STAGE_SETTINGS.shadow, 0, 1),
+    floorShadow: source.floorShadow == null ? null : number(source.floorShadow, DEFAULT_RADIOSITY_STAGE_SETTINGS.shadow, 0, 1),
     bounce: number(source.bounce, DEFAULT_RADIOSITY_STAGE_SETTINGS.bounce, 0, 2),
     envSampling: source.envSampling === "uniform" ? "uniform" : "importance",
     selfBias: number(source.selfBias, DEFAULT_RADIOSITY_STAGE_SETTINGS.selfBias, 0, 8)
@@ -191,6 +307,10 @@ export class RadiosityStage {
     this._info = null;
     this._disposed = false;
     this._environment = { texture: null, rotation: new THREE.Euler(), intensity: 1 };
+    /** Direct lights: `{ direction, angle, irradiance }` (world, toward the light). */
+    this._lights = [];
+    this._sky = null;
+    this._pmremGenerator = null;
     this._createSolver();
   }
 
@@ -239,7 +359,7 @@ export class RadiosityStage {
     const previous = this._settings;
     this._settings = next;
     this._displayUniforms.uRadShadow.value = next.shadow;
-    this._floor.setShadowIntensity(next.shadow);
+    this._floor.setShadowIntensity(next.floorShadow ?? next.shadow);
     if (next.quality !== previous.quality || next.directions !== previous.directions) {
       this._createSolver();
       return;
@@ -320,7 +440,86 @@ export class RadiosityStage {
     env.intensity = nextIntensity;
     this._displayUniforms.uRadIntensity.value = env.intensity;
     this._displayUniforms.uRadReplaceAmbient.value = 0;
+    this._releaseSky();
     this._solver.setEnvironment(env.texture, env.rotation, ENVIRONMENT_BLUR);
+  }
+
+  /**
+   * Light the bake from a sky synthesized from the scene's hemisphere and
+   * ambient lights (and an equirectangular environment, when the scene has
+   * one), see `skyRadianceFromLights`. The display materials then hand those
+   * lights over to the lightmap as it fades in: it carries their occluded
+   * version. `null` for every light bakes against darkness (the direct
+   * lights alone).
+   *
+   * @param {Parameters<typeof skyRadianceFromLights>[0]} lights
+   */
+  setSkyFromLights(lights = {}) {
+    const key = skyKey(lights);
+    if (this._sky?.key === key) return;
+    this._releaseSky();
+    const equirect = createSkyTexture(skyRadianceFromLights(lights, UP));
+    let target = null;
+    try {
+      if (!this._pmremGenerator) this._pmremGenerator = new THREE.PMREMGenerator(this._renderer);
+      target = this._pmremGenerator.fromEquirectangular(equirect);
+    } catch (error) {
+      // Without the sky the bake sees darkness: the direct lights alone are shadowed.
+      console.warn("radiosity: sky from lights failed; baking direct lights only", error);
+      target = null;
+    } finally {
+      equirect.dispose();
+    }
+    this._sky = { key, target };
+    const env = this._environment;
+    env.texture = target?.texture || null;
+    env.rotation.set(0, 0, 0);
+    env.intensity = 1;
+    this._displayUniforms.uRadIntensity.value = 1;
+    this._displayUniforms.uRadReplaceAmbient.value = 1;
+    // Already smooth: no pre-blur.
+    this._solver.setEnvironment(env.texture, env.rotation, 0);
+  }
+
+  /** Whether the bake is lit by a sky made from the scene's lights. */
+  get skyFromLights() {
+    return this._sky !== null;
+  }
+
+  /**
+   * The direct lights the bake shadows (at most `RADIOSITY_MAX_DIRECT_LIGHTS`),
+   * `{ direction, angle, irradiance }` each: `direction` the world direction
+   * toward the light, `angle` its cone half-angle in radians (softness) and
+   * `irradiance` (luminance, three's units) what a surface facing it receives,
+   * which sets its share of the floor's shadow. The display materials keep
+   * these lights and scale them per texel by the baked visibility.
+   */
+  setDirectLights(lights = []) {
+    const [minAngle, maxAngle] = RADIOSITY_LIGHT_ANGLE_RANGE;
+    const next = [];
+    for (const light of Array.isArray(lights) ? lights : []) {
+      if (next.length >= RADIOSITY_MAX_DIRECT_LIGHTS) break;
+      if (!light?.direction?.isVector3 || light.direction.lengthSq() < 1e-12) continue;
+      next.push({
+        direction: light.direction.clone().normalize(),
+        angle: Math.min(Math.max(Number(light.angle) || minAngle, minAngle), maxAngle),
+        irradiance: Math.max(Number(light.irradiance) || 0, 0)
+      });
+    }
+    const same = next.length === this._lights.length && next.every((light, k) =>
+      light.direction.distanceToSquared(this._lights[k].direction) < 1e-10
+      && light.angle === this._lights[k].angle && light.irradiance === this._lights[k].irradiance);
+    if (same) return;
+    this._lights = next;
+    this._solver.setDirectLights(next);
+    const u = this._displayUniforms;
+    u.uRadLightCount.value = next.length;
+    next.forEach((light, k) => u.uRadLightDir.value[k].copy(light.direction));
+  }
+
+  /** The direct lights being shadowed. */
+  get directLights() {
+    return this._lights;
   }
 
   /** PMREM texture lighting the bake. */
@@ -389,6 +588,17 @@ export class RadiosityStage {
     this._solver?.dispose();
     this._solver = null;
     this._floor.dispose();
+    this._releaseSky();
+    this._pmremGenerator?.dispose();
+    this._pmremGenerator = null;
+  }
+
+  _releaseSky() {
+    if (!this._sky) return;
+    const { target } = this._sky;
+    this._sky = null;
+    if (target && this._environment.texture === target.texture) this._environment.texture = null;
+    target?.dispose();
   }
 
   // -------------------------------------------------------------------------
@@ -404,7 +614,8 @@ export class RadiosityStage {
       envSampling: s.envSampling,
       displayUniforms: this._displayUniforms
     });
-    this._solver.setEnvironment(this._environment.texture, this._environment.rotation, ENVIRONMENT_BLUR);
+    this._solver.setEnvironment(this._environment.texture, this._environment.rotation, this._sky ? 0 : ENVIRONMENT_BLUR);
+    this._solver.setDirectLights(this._lights);
     previous?.dispose();
     this._needsBuild = true;
   }
@@ -524,7 +735,7 @@ export class RadiosityStage {
     if (floorParams && floorChart) {
       this._floor.configure(floorParams.center, floorParams.level, floorParams.extent);
       this._floor.setAlbedo(floorParams.albedo);
-      this._floor.setShadowIntensity(this._settings.shadow);
+      this._floor.setShadowIntensity(this._settings.floorShadow ?? this._settings.shadow);
       this._floor.setAtlasRect(floorChart.x, floorChart.y, floorChart.pw, floorChart.ph, resolution);
       floorObject = {
         mesh: this._floor.mesh,
@@ -573,6 +784,19 @@ export class RadiosityStage {
       if (material.lightMap !== texture) material.lightMap = texture;
     }
     this._floor.setLightmap(texture, weight);
+    const lightTexture = this._solver.lightTexture;
+    this._displayUniforms.uRadLightMap.value = lightTexture;
+    this._floor.setDirectLightmap(lightTexture, lightTexture ? this._floorLightShares() : null);
+  }
+
+  /**
+   * Each direct light's share of the light an unoccluded, up-facing patch of
+   * ground receives, against the environment's.
+   */
+  _floorLightShares() {
+    const ups = this._lights.map((light) => light.irradiance * Math.max(light.direction.dot(UP), 0));
+    const total = this.environmentUpIrradiance * this._environment.intensity + ups.reduce((sum, value) => sum + value, 0);
+    return total > 1e-9 ? ups.map((value) => value / total) : ups.map(() => 0);
   }
 
   _restoreGeometries() {

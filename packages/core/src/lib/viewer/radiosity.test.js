@@ -9,19 +9,27 @@ import * as THREE from "three";
 
 import {
   applyRadiosityPatch,
+  coneDirection,
+  createRadiosityDisplayUniforms,
   hasRadiosityPatch,
+  integrateUpIrradiance,
   RADIOSITY_DIRECTION_OPTIONS,
+  RADIOSITY_MAX_DIRECT_LIGHTS,
   RADIOSITY_QUALITY,
   removeRadiosityPatch
 } from "./radiosityLightmap.js";
 import { RadiosityFloor } from "./radiosityFloor.js";
 import {
   DEFAULT_RADIOSITY_STAGE_SETTINGS,
-  normalizeRadiosityStageSettings
+  normalizeRadiosityStageSettings,
+  skyRadianceFromLights
 } from "./radiosityStage.js";
 
 function uniforms() {
-  return { uRadWeight: { value: 1 }, uRadShadow: { value: 0.5 }, uRadIntensity: { value: 1 }, uRadReplaceAmbient: { value: 0 } };
+  const shared = createRadiosityDisplayUniforms();
+  shared.uRadWeight.value = 1;
+  shared.uRadShadow.value = 0.5;
+  return shared;
 }
 
 function shaderStub() {
@@ -29,7 +37,7 @@ function shaderStub() {
     uniforms: {},
     vertexShader: "#include <common>\n",
     fragmentShader:
-      "#include <common>\n#include <lights_fragment_maps>\n#include <aomap_fragment>\n"
+      "#include <common>\n#include <lights_fragment_begin>\n#include <lights_fragment_maps>\n#include <aomap_fragment>\n"
   };
 }
 
@@ -55,10 +63,21 @@ test("applyRadiosityPatch attaches the lightmap and chains the edge shader hook"
   assert.ok(shader.uniforms.uRadWeight);
   assert.ok(shader.uniforms.uRadShadow);
   assert.ok(shader.uniforms.uRadIntensity);
+  assert.ok(shader.uniforms.uRadLightMap);
+  assert.ok(shader.uniforms.uRadLightDir);
+  assert.ok(shader.uniforms.uRadLightCount);
   assert.ok(!shader.fragmentShader.includes("#include <lights_fragment_maps>"));
   assert.ok(shader.fragmentShader.includes("tcvRadVisibility"));
   assert.ok(shader.fragmentShader.includes("irradiance *= mix( tcvRadVisibility, 1.0 - uRadWeight, uRadReplaceAmbient )"));
   assert.ok(shader.fragmentShader.includes("#include <aomap_fragment>"));
+  // The direct-light loop is three's own, with every directional and spot light scaled by
+  // its baked visibility, read before the loop runs.
+  assert.ok(!shader.fragmentShader.includes("#include <lights_fragment_begin>"));
+  assert.ok(shader.fragmentShader.includes("texture2D( uRadLightMap, vLightMapUv )"));
+  assert.ok(shader.fragmentShader.includes("getDirectionalLightInfo( directionalLight, directLight );\n\t\tdirectLight.color *= tcvRadDirectVisibility( directLight.direction );"));
+  assert.ok(shader.fragmentShader.includes("getSpotLightInfo( spotLight, geometryPosition, directLight );\n\t\tdirectLight.color *= tcvRadDirectVisibility( directLight.direction );"));
+  assert.ok(shader.fragmentShader.includes("RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );"));
+  assert.equal(RADIOSITY_MAX_DIRECT_LIGHTS, 3);
 });
 
 test("applyRadiosityPatch is idempotent and only recompiles on first attach", () => {
@@ -135,6 +154,77 @@ test("RadiosityFloor.setAtlasRect maps the inner square into the atlas, repeatab
   assert.equal(floor.mesh, null);
 });
 
+test("RadiosityFloor takes the direct lights' shadows by their share of its light", () => {
+  const floor = new RadiosityFloor();
+  const texture = new THREE.Texture();
+  floor.setDirectLightmap(texture, [0.5, 0.25, 0]);
+  const u = floor._material.uniforms;
+  assert.equal(u.uDirectMap.value, texture);
+  assert.deepEqual(u.uDirectShare.value.toArray(), [0.5, 0.25, 0]);
+  // Shares beyond the whole are scaled back to it.
+  floor.setDirectLightmap(texture, [1, 1, 0]);
+  assert.deepEqual(u.uDirectShare.value.toArray(), [0.5, 0.5, 0]);
+  // Without a map the floor is the environment's alone.
+  floor.setDirectLightmap(null, [0.5, 0.5, 0]);
+  assert.equal(u.uDirectMap.value, null);
+  assert.deepEqual(u.uDirectShare.value.toArray(), [0, 0, 0]);
+});
+
+test("coneDirection stays inside the cone and covers it", () => {
+  const axis = new THREE.Vector3(-0.35, -1, 1.5).normalize();
+  const angle = 0.11;
+  const out = new THREE.Vector3();
+  let minCos = 1;
+  let sumX = 0;
+  for (let i = 0; i < 400; i++) {
+    const u1 = (0.5 + 0.7548776662466927 * i) % 1;
+    const u2 = (0.5 + 0.5698402909980532 * i) % 1;
+    coneDirection(out, axis, angle, u1, u2);
+    assert.ok(Math.abs(out.length() - 1) < 1e-9);
+    const c = out.dot(axis);
+    assert.ok(c >= Math.cos(angle) - 1e-9);
+    minCos = Math.min(minCos, c);
+    sumX += out.x;
+  }
+  // The whole cone is used (some samples at its rim) and it is centred on the axis.
+  assert.ok(minCos < Math.cos(angle * 0.9));
+  assert.ok(Math.abs(sumX / 400 - axis.x) < 0.01);
+  // A zero angle is the axis itself.
+  coneDirection(out, axis, 0, 0.3, 0.7);
+  assert.ok(out.distanceTo(axis) < 1e-9);
+});
+
+test("skyRadianceFromLights reproduces the hemisphere and ambient lights' irradiance", () => {
+  const radiance = skyRadianceFromLights({
+    hemisphere: { skyColor: new THREE.Color(1, 1, 1), groundColor: new THREE.Color(0.5, 0.5, 0.5), intensity: 1.2 },
+    ambient: { color: new THREE.Color(1, 1, 1), intensity: 0.4 }
+  });
+  // Tabulate the sky over directions (polar axis +Z, row = theta) and integrate.
+  const w = 256;
+  const h = 128;
+  const lum = new Float32Array(w * h);
+  const dir = new THREE.Vector3();
+  const color = new THREE.Color();
+  const table = (flip) => {
+    for (let i = 0; i < h; i++) {
+      const theta = (i + 0.5) * (Math.PI / h);
+      for (let j = 0; j < w; j++) {
+        const phi = (j + 0.5) * ((2 * Math.PI) / w);
+        dir.set(Math.sin(theta) * Math.cos(phi), Math.sin(theta) * Math.sin(phi), (flip ? -1 : 1) * Math.cos(theta));
+        radiance(dir, color);
+        lum[i * w + j] = color.r;
+      }
+    }
+    return integrateUpIrradiance(lum, w, h);
+  };
+  // three: an up-facing surface receives sky × intensity + ambient; a down-facing one ground × intensity + ambient.
+  assert.ok(Math.abs(table(false) - (1 * 1.2 + 0.4)) < 0.01);
+  assert.ok(Math.abs(table(true) - (0.5 * 1.2 + 0.4)) < 0.01);
+  // Nothing: darkness.
+  const dark = skyRadianceFromLights({});
+  assert.deepEqual(dark(new THREE.Vector3(0, 0, 1), color).toArray(), [0, 0, 0]);
+});
+
 test("RadiosityFloor albedo follows the stage floor colour", () => {
   const floor = new RadiosityFloor();
   floor.setAlbedo(new THREE.Color(0.1, 0.2, 0.3));
@@ -168,8 +258,37 @@ test("normalizeRadiosityStageSettings clamps and falls back", () => {
   assert.equal(normalized.directions, 16);
   assert.equal(normalized.maxSamples, 0);
   assert.equal(normalized.shadow, 1);
+  assert.equal(normalized.floorShadow, null);
   assert.equal(normalized.bounce, 0);
   assert.equal(normalized.envSampling, "uniform");
+  assert.equal(normalizeRadiosityStageSettings({ floorShadow: 2 }).floorShadow, 1);
+});
+
+test("EnvImportanceTable samples with the density its pdf claims, even at a bright pole", async () => {
+  const { EnvImportanceTable } = await import("./radiosityLightmap.js");
+  const w = 32;
+  const h = 16;
+  // Dark sky with a bright overhead softbox: the whole top row and its neighbour.
+  const lum = new Float32Array(w * h).fill(0.05);
+  for (let j = 0; j < w; j++) { lum[j] = 20; lum[w + j] = 10; }
+  const table = new EnvImportanceTable(lum, w, h);
+  // Monte-Carlo estimates of ∫ 1 dω = 4π and ∫ max(d·z, 0) dω = π through 1/pdf
+  // weights: unbiased only if the samples are drawn with the pdf the table reports.
+  const dir = new THREE.Vector3();
+  let sphere = 0;
+  let up = 0;
+  const n = 20000;
+  for (let k = 0; k < n; k++) {
+    const u1 = (0.5 + 0.7548776662466927 * k) % 1;
+    const u2 = (0.5 + 0.5698402909980532 * k) % 1;
+    const pdf = table.sample(u1, u2, dir);
+    assert.ok(Math.abs(dir.length() - 1) < 1e-6);
+    assert.ok(Math.abs(table.pdf(dir) - pdf) < 1e-6 * pdf, "pdf(dir) agrees with the sampled cell");
+    sphere += 1 / pdf;
+    up += Math.max(dir.z, 0) / pdf;
+  }
+  assert.ok(Math.abs(sphere / n / (4 * Math.PI) - 1) < 0.02, `sphere ${sphere / n}`);
+  assert.ok(Math.abs(up / n / Math.PI - 1) < 0.02, `up ${up / n}`);
 });
 
 test("integrateUpIrradiance of a uniform unit sky is π", async () => {

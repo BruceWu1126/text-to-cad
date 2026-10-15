@@ -157,18 +157,29 @@ share a calibrated zero-EV lighting budget. Khronos PBR Neutral tone mapping is
 fixed; `toneMappingExposure` is `2 ** exposure`. Light and dark differ only in
 default backdrop color.
 
-`lighting.globalIllumination` (on by default) replaces the key spotlight and the
-shadows it casts with a progressive radiosity bake (`lib/viewer/radiosityStage.js`): the
-model is lit from the studio environment alone, with soft shadows, contact
-occlusion and the floor's baked shadow accumulated into a lightmap that refines
-over a few seconds (Thomsen & Nielsen stochastic depth buffering, one global
-direction set per frame). The hidden spotlight hands its energy to
-`scene.environmentIntensity`, so an up-facing surface receives what it would
-have added and the exposure holds. The bake needs a host that steps it every
-frame — the viewer's viewport passes `globalIllumination: { root }` and calls
-`runtime.refineFrame()` before each draw — and WebGL2 float render targets; a
+`lighting.globalIllumination` (on by default) adds a progressive radiosity bake
+(`lib/viewer/radiosityStage.js`) to the studio: the environment's diffuse light reaches
+the model with soft shadows and contact occlusion accumulated into a lightmap that
+refines over a few seconds (Thomsen & Nielsen stochastic depth buffering, one global
+direction set per frame), the floor catches the baked shadow, and the key spotlight is
+shadowed the same way — it stays, with its highlights and its pool on the floor, but
+each surface receives it by the fraction of its softbox (a cone that widens with
+Size) it can see, so the shadow softens with distance from the caster and the light
+never reaches the inside of a part. The spotlight's shadow map and the floor's
+contact-shadow layer are not drawn while the bake runs. The bake needs a host that
+steps it every frame — the viewer's viewport passes `globalIllumination: { root }` and
+calls `runtime.refineFrame()` before each draw — and WebGL2 float render targets; a
 snapshot passes no host and a software renderer bakes nothing, so both keep the
-spotlight.
+spotlight's shadow map.
+
+Inspect lighting bakes too (`common/inspectGlobalIllumination.js`, applied by the
+viewer's viewport whenever the studio is not lighting the model): the hemisphere and
+ambient lights hand over to a lightmap baked against a sky made from them
+(`skyRadianceFromLights`, which reproduces their irradiance for every orientation
+and adds the reflection fill when the scene has one), and the key, fill and rim keep
+their direction and highlights but are shadowed by baked visibility, so an interior
+is not lit from a side the light cannot reach. The key's shadow map is skipped while
+it runs; the stage floor catches the baked shadow at a lighter strength.
 
 `applyPhotographicStudio(THREE, runtime, configuration, options)` owns the
 synchronous light, ground and renderer state and updates those objects in place.

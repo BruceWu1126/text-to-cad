@@ -1,6 +1,9 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { createInspectEnvironmentResource, INSPECT_ENVIRONMENT_ID } from "@text-to-cad/core/common/inspectEnvironment.js";
+import {
+  applyInspectGlobalIllumination, disposeInspectGlobalIllumination, INSPECT_GLOBAL_ILLUMINATION_CONES
+} from "@text-to-cad/core/common/inspectGlobalIllumination.js";
 import { resolveCadGridSettings } from "@text-to-cad/core/common/cadInk.js";
 import { resolveSceneSurfaceLook, scenePhotographicLighting } from "@text-to-cad/core/common/sceneSettings.js";
 import {
@@ -279,6 +282,35 @@ const ShellViewport = forwardRef(function ShellViewport({
     applyActivePhotographicStudio(runtimeRef.current);
   }, [applyActivePhotographicStudio, renderConfiguration, viewerReadyTick]);
 
+  // The rig's global illumination: the bake over the theme's lights whenever the studio is
+  // not lighting the model. Its shadow catcher stands on the studio's ground when there is
+  // one (a floor with the rig's lighting), else on the stage floor, else nowhere.
+  const applyActiveRigGlobalIllumination = useCallback((runtime) => {
+    if (!runtime?.THREE || !runtime.scene) return;
+    const bounds = runtime.modelBounds;
+    const ground = runtime.photographicStudio?.ground || null;
+    const floorZ = ground ? Number(ground.position.z)
+      : runtime.floorMode === THEME_FLOOR_MODES.STAGE && Number.isFinite(Number(runtime.gridFloorZ)) ? Number(runtime.gridFloorZ)
+        : null;
+    const floor = floorZ != null && Array.isArray(bounds?.min) && Array.isArray(bounds?.max) ? {
+      center: [0, 1, 2].map(axis => (bounds.min[axis] + bounds.max[axis]) / 2),
+      level: floorZ,
+      extent: Math.max(...[0, 1, 2].map(axis => bounds.max[axis] - bounds.min[axis]), 1e-6)
+    } : null;
+    applyInspectGlobalIllumination(runtime.THREE, runtime, {
+      root: runtime.modelGroup,
+      lights: {
+        hemisphere: runtime.hemisphereLight, ambient: runtime.ambientLight,
+        directional: [
+          { light: runtime.keyLight, angle: INSPECT_GLOBAL_ILLUMINATION_CONES.key },
+          { light: runtime.fillLight, angle: INSPECT_GLOBAL_ILLUMINATION_CONES.fill },
+          { light: runtime.rimLight, angle: INSPECT_GLOBAL_ILLUMINATION_CONES.fill }
+        ]
+      },
+      floor
+    });
+  }, []);
+
   const updateActiveGridHelper = useCallback((runtime, activeViewerTheme, radius, floorZ = 0,
     scaleMode = VIEWER_SCENE_SCALE.CAD, floorMode = THEME_FLOOR_MODES.STAGE) => updateGridHelper(
     runtime, activeViewerTheme, radius, floorZ, scaleMode, floorMode, guideFloorSettings
@@ -461,14 +493,18 @@ const ShellViewport = forwardRef(function ShellViewport({
     const stage = () => {
       const active = runtimeRef.current;
       const ground = active?.photographicStudio?.ground || null;
-      // And the studio's progressive lighting, when it bakes: how far along it is.
-      const radiosity = active?.photographicStudio?.radiosity || null;
+      // And the progressive lighting, when it bakes (the studio's or the rig's): how far along it is.
+      const studioRadiosity = active?.photographicStudio?.radiosity || null;
+      const radiosity = studioRadiosity || active?.inspectRadiosity?.stage || null;
+      const keyLight = studioRadiosity ? active.photographicStudio.keyLight : active?.keyLight;
       return active ? { gridRadius: active.gridRadius ?? null, bounds: active.modelBounds || null,
         floorZ: active.modelFloorZBelowModel ?? null, studioGroundZ: active.photographicGroundZ ?? null,
         studioGround: ground ? { size: ground.scale.x, center: [ground.position.x, ground.position.y] } : null,
-        globalIllumination: radiosity ? { active: radiosity.active, samples: radiosity.samples, converged: radiosity.converged,
-          info: radiosity.info, keyLightVisible: active.photographicStudio.keyLight.visible,
-          environmentIntensity: active.scene.environmentIntensity } : null } : null;
+        globalIllumination: radiosity ? { lighting: studioRadiosity ? "studio" : "rig", active: radiosity.active,
+          samples: radiosity.samples, converged: radiosity.converged, info: radiosity.info,
+          directLights: radiosity.directLights.length, skyFromLights: radiosity.skyFromLights,
+          keyLightVisible: keyLight?.visible ?? null, keyCastsShadow: keyLight?.castShadow ?? null,
+          environmentIntensity: active.scene.environmentIntensity, stage: radiosity } : null } : null;
     };
     Object.assign(window, { __cadCamera: read, __cadStage: stage });
     return () => {
@@ -518,7 +554,7 @@ const ShellViewport = forwardRef(function ShellViewport({
     applySceneBackground, onViewportResize: handleViewportResize, applyInitialPerspective,
     updateGridHelper: updateActiveGridHelper, disposeScene: releaseScene,
     onSceneDisposed: handleSceneReleased,
-    disposeStudio: (runtime) => studioScene()?.disposePhotographicStudio(runtime),
+    disposeStudio: (runtime) => { disposeInspectGlobalIllumination(runtime); studioScene()?.disposePhotographicStudio(runtime); },
     disposeSceneObject, disposeTexture, syncViewPlaneOrientation, DEFAULT_LIGHTING,
     DEFAULT_DAMPING_FACTOR, DEFAULT_ZOOM_SPEED, COARSE_POINTER_ZOOM_SPEED, INTERACTION_PIXEL_RATIO_CAP,
     IDLE_PIXEL_RATIO_CAP: Number(quality?.idlePixelRatioCap) > 0 ? Number(quality.idlePixelRatioCap) : IDLE_PIXEL_RATIO_CAP,
@@ -625,6 +661,7 @@ const ShellViewport = forwardRef(function ShellViewport({
     const runtime = runtimeRef.current;
     if (!runtime) return;
     if (photographicLighting) {
+      disposeInspectGlobalIllumination(runtime);
       for (const light of ["hemisphereLight", "ambientLight", "keyLight", "fillLight", "rimLight", "spotLight", "pointLight"]) {
         runtime[light].visible = false;
       }
@@ -677,10 +714,12 @@ const ShellViewport = forwardRef(function ShellViewport({
       updateStageEffects(runtime, viewerTheme, normalizedThemeSettings, runtime.gridRadius ?? defaultGridRadius, floorZ, resolvedFloorMode, normalizedSceneScaleMode);
     } else clearGroup(runtime.stageGroup);
     if (renderMode) applyActivePhotographicStudio(runtime);
+    applyActiveRigGlobalIllumination(runtime);
     runtime.requestRender();
   }, [
     defaultGridRadius, photographicLighting, appearance, normalizedThemeSettings, normalizedSceneScaleMode, resolvedFloorMode,
-    renderMode, floorFollowsModel, viewerReadyTick, viewerTheme, updateActiveGridHelper, applyActivePhotographicStudio
+    renderMode, floorFollowsModel, viewerReadyTick, viewerTheme, updateActiveGridHelper, applyActivePhotographicStudio,
+    applyActiveRigGlobalIllumination
   ]);
 
   // The reflection environment: Inspect's small fill for authored materials, or the studio's.
@@ -713,6 +752,8 @@ const ShellViewport = forwardRef(function ShellViewport({
       }
       if (renderMode) applyActivePhotographicStudio(runtime);
       else applySceneBackground(runtime, viewerTheme, normalizedThemeSettings.background);
+      // The bake's sky includes the reflection fill, so it follows it.
+      if (!photographicLighting) applyActiveRigGlobalIllumination(runtime);
       viewerAlertChangeRef.current?.(null);
       runtime.requestRender();
       return;
@@ -758,7 +799,7 @@ const ShellViewport = forwardRef(function ShellViewport({
       console.error("Failed to apply environment resource", environmentError);
     }
   }, [
-    applyActivePhotographicStudio, renderConfiguration, renderEnvironmentMapSize, photographicLighting,
+    applyActivePhotographicStudio, applyActiveRigGlobalIllumination, renderConfiguration, renderEnvironmentMapSize, photographicLighting,
     scene?.keepsAuthoredFinish, renderMode, studioSceneTick, viewerReadyTick, viewerTheme, normalizedThemeSettings.background
   ]);
 
@@ -811,9 +852,10 @@ const ShellViewport = forwardRef(function ShellViewport({
       updateSpotLightTarget(runtime);
       updateStageEffects(runtime, viewerTheme, normalizedThemeSettings, groundRadius, runtime.gridFloorZ ?? 0, resolvedFloorMode, normalizedSceneScaleMode);
     }
+    if (!photographicLighting) applyActiveRigGlobalIllumination(runtime);
     return radius;
-  }, [applyActivePhotographicStudio, floorFollowsModel, normalizedSceneScaleMode, normalizedThemeSettings, renderMode,
-    resolvedFloorMode, updateActiveGridHelper, viewerTheme]);
+  }, [applyActivePhotographicStudio, applyActiveRigGlobalIllumination, floorFollowsModel, normalizedSceneScaleMode, normalizedThemeSettings,
+    photographicLighting, renderMode, resolvedFloorMode, updateActiveGridHelper, viewerTheme]);
   const fitStageToSceneRef = useRef(fitStageToScene);
   fitStageToSceneRef.current = fitStageToScene;
 

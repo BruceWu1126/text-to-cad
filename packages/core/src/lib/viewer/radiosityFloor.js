@@ -8,8 +8,9 @@
  * lightmap says the ground is occluded: it multiplies whatever is drawn
  * beneath it (the stage floor or the backdrop) by the baked visibility,
  * tinted by the environment colour, so the model gets soft contact shadows
- * and ambient occlusion on the ground. It also feeds the solver as the
- * bounce surface under the model (`albedo()`).
+ * and ambient occlusion on the ground. The direct lights' baked shadows join
+ * in by their share of the ground's light (`setDirectLightmap`). It also
+ * feeds the solver as the bounce surface under the model (`albedo()`).
  */
 
 import * as THREE from "three";
@@ -33,6 +34,10 @@ const FLOOR_VERTEX = /* glsl */ `
 const FLOOR_FRAGMENT = /* glsl */ `
   precision highp float;
   uniform sampler2D uLightmap;
+  uniform sampler2D uDirectMap;
+  // Each direct light's share of the unoccluded ground's light; the rest is
+  // the environment's.
+  uniform vec3 uDirectShare;
   uniform float uWeight;
   uniform float uShadow;
   uniform float uFogStart;
@@ -45,7 +50,11 @@ const FLOOR_FRAGMENT = /* glsl */ `
     vec4 lm = texture2D( uLightmap, vUv1 );
     float valid = lm.a > 1e-6 ? uWeight : 0.0;
     float lum = dot( lm.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
-    float vis = valid > 0.0 ? clamp( lum / lm.a, 0.0, 1.0 ) : 1.0;
+    float envShare = 1.0 - ( uDirectShare.x + uDirectShare.y + uDirectShare.z );
+    float envVis = valid > 0.0 ? clamp( lum / lm.a, 0.0, 1.0 ) : 1.0;
+    vec4 dv = texture2D( uDirectMap, vUv1 );
+    float directVis = dv.a > 0.5 ? dot( uDirectShare, clamp( dv.rgb, 0.0, 1.0 ) ) : 1.0 - envShare;
+    float vis = clamp( envShare * envVis + directVis, 0.0, 1.0 );
     float shadowVis = 1.0 - uShadow * ( 1.0 - vis );
     // Shadow catcher: multiply the background by the (tinted) visibility and
     // emit the shadow as alpha so a transparent backdrop darkens too.
@@ -79,6 +88,8 @@ export class RadiosityFloor {
       fragmentShader: FLOOR_FRAGMENT,
       uniforms: {
         uLightmap: { value: null },
+        uDirectMap: { value: null },
+        uDirectShare: { value: new THREE.Vector3() },
         uWeight: { value: 0 },
         uShadow: { value: 0.5 },
         uFogStart: { value: 1 },
@@ -221,6 +232,24 @@ export class RadiosityFloor {
   setLightmap(texture, weight) {
     this._material.uniforms.uLightmap.value = texture;
     this._material.uniforms.uWeight.value = weight;
+  }
+
+  /**
+   * The direct-light visibility map and each light's share (0..1, summing to
+   * at most 1) of the light an unoccluded patch of ground receives.
+   */
+  setDirectLightmap(texture, shares) {
+    const u = this._material.uniforms;
+    u.uDirectMap.value = texture || null;
+    const share = u.uDirectShare.value;
+    if (!texture || !shares) {
+      share.set(0, 0, 0);
+      return;
+    }
+    const clampShare = (value) => Math.min(Math.max(Number(value) || 0, 0), 1);
+    share.set(clampShare(shares[0]), clampShare(shares[1]), clampShare(shares[2]));
+    const total = share.x + share.y + share.z;
+    if (total > 1) share.divideScalar(total);
   }
 
   /** 0..1 strength of the ground shadow/AO. */
