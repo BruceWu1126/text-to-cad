@@ -4,8 +4,8 @@ import { PLOT_TOOL } from "../tools.js";
 const EMPTY = Object.freeze([]);
 
 /**
- * What is selected and hovered on a board or a schematic (`useLinkSelection.js` is a robot's): any
- * number of board references (`#U3`, `#U3.9`, `#net:VIN`, on a board `#net:VIN@x..y..` and points).
+ * What is selected and hovered on a board (`useLinkSelection.js` is a robot's): any number of board
+ * references (`#U3`, `#U3.9`, `#net:VIN`, `#net:VIN@x..y..` and points).
  * Read-only: nothing here changes the design.
  *
  * The selection is React state, because the tree and the Reference draw it; the hover is not,

@@ -19,8 +19,8 @@ modules around it (see the end of [Shell](#shell)). Applications use the registr
 `src/renderers/kit` is the format-blind half of the viewer: small modules a
 renderer composes, none of which asks what it is showing. There is one renderer
 per file family, each a vertical slice over the kit: `src/renderers/dxf`
-([DXF renderer](#dxf-renderer)), `src/renderers/plot` (KiCad boards and schematics, wiring
-harnesses, [Plot renderer](#plot-renderer)), `src/renderers/glb` ([GLB renderer](#glb-renderer)),
+([DXF renderer](#dxf-renderer)), `src/renderers/plot` (KiCad boards,
+[Plot renderer](#plot-renderer)), `src/renderers/glb` ([GLB renderer](#glb-renderer)),
 `src/renderers/mesh` (STL and 3MF, [Mesh renderer](#mesh-renderer)),
 `src/renderers/robot` (URDF, SRDF and SDF, [Robot renderer](#robot-renderer)) and
 `src/renderers/step` (STEP and STP, [STEP renderer](#step-and-source-separation)). The kit imports itself, shared UI
@@ -356,120 +356,110 @@ the viewer was inventing from the file; a drawing is not that.
 
 ## Plot renderer
 
-`createPlotRenderer` (`@text-to-cad/ui/renderers/plot`, id `plot`) shows a document as the
-picture its own tool draws of it: a KiCad board (`.kicad_pcb`) or schematic (`.kicad_sch`)
-as KiCad plots it, and a wiring harness (`<name>.harness.yml`; a plain `.yml` is no CAD
-file) as WireViz draws it. It is not on the 3D shell: no three.js, no viewport, no preview; its frame
-is the plane shell (`kit/shell/usePlaneShell.js`), as a DXF's is. A
-harness is a straight render, as a DXF is: no panel, no Display settings, no tools. A board whose
-payload carries its index (`board`) has the tools a person points with — Select, Draw and
-Measure, its tree, Reference, Quick Edit and its Display settings
-([the design system](settings-ui.md#a-kicad-board)) — and a schematic whose payload carries its
-own (`schematic`) has Select with the same tree, Reference and Quick Edit
-([its section](settings-ui.md#a-kicad-schematic)), all drawn from the kit's shared pieces
-(`kit/shell/ToolColumn.jsx`, `kit/tools/*`, Quick Edit) over the canvas. A board's 3D is the
-STEP or GLB its model exports, which are files of their own.
+`createPlotRenderer` (`@text-to-cad/ui/renderers/plot`, id `plot`) shows a KiCad board
+(`.kicad_pcb`) as the picture drawn from its file: every layer, back to front, in KiCad's default
+colours. It is not on the 3D shell: no three.js, no viewport, no preview; its frame is the plane
+shell (`kit/shell/usePlaneShell.js`), as a DXF's is. A board whose payload carries its index
+(`board`) has the tools a person points with — Select, Draw and Measure, its tree, Reference,
+Quick Edit and its Display settings ([the design system](settings-ui.md#a-kicad-board)) — all
+drawn from the kit's shared pieces (`kit/shell/ToolColumn.jsx`, `kit/tools/*`, Quick Edit) over the
+canvas; a payload without one is the picture alone, with its Display. A board's 3D is the STEP or
+GLB its model exports, which are files of their own.
 
 - **Structure**, as a robot's is: `PlotRenderer.jsx` composes. `usePlotDocument` is the payload,
-  the ONE kind (`"board"`, `"schematic"` or `"harness"`: the payload's, the suffix's until it
-  arrives), its words, its index and the load's alert; `plot/tools.js` the modes
-  (`PLOT_TOOL_MODES`: Select by default, Measure and Draw toggling) and Escape (`escapePlot`). A
-  document with an index has the board hooks: `useBoardSelection` (the selection, the check in
-  focus, Select's mode, and the hover, from the canvas or a tree row, kept in a ref that repaints;
-  leaving Select drops the selection, and selecting from another tool takes Select up but over
-  Draw), `useBoardMeasure` (picks, the draft, the measurements; a new revision clears them),
+  the kind (`"board"`: the payload's, the suffix's until it arrives), its words, its index and the
+  load's alert; `plot/tools.js` the modes (`PLOT_TOOL_MODES`: Select by default, Measure and Draw
+  toggling) and Escape (`escapePlot`). A board with an index has the board hooks: `useBoardSelection`
+  (the selection, Select's mode, and the hover, from the canvas or a tree row, kept in a ref that
+  repaints; leaving Select drops the selection, and selecting from another tool takes Select up but
+  over Draw), `useBoardMeasure` (picks, the draft, the measurements; a new revision clears them),
   `useBoardIsolation` (what a tree row's eye isolated), `useBoardPicking` (the pointer, picks and
   snaps, made from the plot view's handle, and the overlay: it hands both to the view as its layer,
-  `usePlotView`'s `setLayer`), `useBoardHandover` (Quick Edit's references, the copy text, the
-  live `select` / `clearSelection` and the host's `selectReference`) and `useCrossProbe`. A press
-  on Measure while it is up also clears its results; that rule is the board's, in the composer.
+  `usePlotView`'s `setLayer`) and `useBoardHandover` (Quick Edit's references, the copy text, the
+  live `select` / `clearSelection` and the host's `selectReference`). A press on Measure while it is
+  up also clears its results; that rule is the board's, in the composer.
 - **The tree** (`board/BoardPanels.jsx`): a row under the pointer, or in keyboard focus, lights
   what it names on the canvas, as a robot's Links rows do; a part's and a net's row wear the kit's
   eye (`kit/inspector/TreeRowEye.jsx`, `kind="isolate"`), which isolates it: everything else steps
-  back under the same dim a net or a check in focus uses, and what is isolated is lit. Rows are
-  memoised and draw again only for what changed (selection, isolation, opening). The Reference's
-  rows that name other things (a pad's or a pin's net and part, a net's parts, a check's items:
-  `boardFacts.js`'s `links`) are buttons that select them, as a robot's Reference selects links.
-
-- **A board's or a schematic's index** (`@text-to-cad/core/lib/board2d`):
-  `createBoardIndex(payload.board)` and `createSchematicIndex(payload.schematic, layout.sheets)`
-  pick what is under a page point by Select's mode (on a board, by the side looked at too; past
-  copper on no net to what lies under it), resolve a reference back to what it names, and on a
-  board find what Measure snaps to. The viewer picks on every pointer move, so what is near a
-  point is found through a grid of the page (`board2d/spatialGrid.js`), never a scan of the
-  board: tens of thousands of pads and tracks answer in microseconds.
-  `drawBoardOverlay` draws the hover, the selection, a measurement and a check's markers over
-  the plot, in the frame's own paint, so a capture shows them: shapes in page space under the
-  canvas's transform (the bottom view's mirror in it), each item from a path kept with it, what
-  is off screen left out — a net of thousands of pads is a few milliseconds a frame.
-- **Host commands**: on a board or a schematic, `select` takes board references (`#U3`,
-  `#U3.9`, `#net:VIN`; points only on a board; several comma-joined, split outside quotes) and
-  refuses one the document lacks; `clearSelection` clears; `readState().selection` is the
-  selection in the prompt grammar; a host's `selectReference` selects. While the document loads a
-  host is told to wait, as for any model; one read without its index declines them in words, as a
-  harness always does.
-
-- **The picture is KiCad's.** `client.plotPayload(file)` is one `GET /__cad/plot`
-  (`apps/web/docs/backend.md`): `kicad-cli` plots the document to SVG on the server — a
-  board as one sheet, its layers back to front on KiCad's board background and any
-  unrouted connection as a ratsnest line; a schematic as one sheet per page, root first.
-  A harness is one sheet, WireViz's Graphviz diagram on WireViz's page colour. Sheets are
-  millimetres, y down, each on its own `background`. **This renderer never parses KiCad's
-  or WireViz's files**, and its colours are the tool's own.
-- **Layout and drawing are core's** (`@text-to-cad/core/lib/plot2d`), so the snapshot
-  bundle draws the same picture: `layoutPlot` stacks the sheets top to bottom, each
-  centred on the widest, 4% of the widest apart; `drawPlot` fills each visible sheet's
-  rectangle with its background and then draws images placed in page space;
-  `loadSheetImages` decodes each SVG once, as an image. The view maths is drawing2d's: the
-  page is its model space with y negated (`layout.modelBounds`), so fit, pan and zoom are
-  the DXF pane's, through the same kit (`kit/plane/`).
-- **Crisp, and cheap to pan** (`plot/plotRasters.js`). The browser rasterises an SVG at
-  the scale it lands at, too slowly to do every frame: a large board's plot is tens of
-  megabytes and a second to draw. So the pane draws the SVGs into a PATCH — the view and a
-  margin, at its exact device scale, on the pane's pixel grid — and paints every frame from
-  patches: a pan moves one by whole device pixels; a zoom scales what it has until the view
-  has rested 120 ms, then the view is drawn again at its own scale. The first frame is drawn
-  at once. Three patches are kept, the least recently shown first out. The pane's
+  back under the same dim a net in focus uses, and what is isolated is lit. Rows are memoised and
+  draw again only for what changed (selection, isolation, opening). The Reference's rows that name
+  other things (a pad's net and part, a net's parts: `boardFacts.js`'s `links`) are buttons that
+  select them, as a robot's Reference selects links.
+- **The board's index** (`@text-to-cad/core/lib/board2d`): `createBoardIndex(payload.board)` picks
+  what is under a page point by Select's mode (by the side looked at too; past copper on no net to
+  what lies under it), resolves a reference back to what it names, and finds what Measure snaps
+  to. The viewer picks on every pointer move, so what is near a point is found through a grid of
+  the page (`board2d/spatialGrid.js`), never a scan of the board: tens of thousands of pads and
+  tracks answer in microseconds. Every position and reference it answers is in KiCad's own
+  frame (millimetres, y down, from the page origin; `payload.board.origin` says where that origin
+  lies on the sheet), so a copied point pastes straight into a script's `Vector2.from_xy_mm`.
+  `drawBoardOverlay` draws the hover, the selection and a measurement over the plot, in the
+  frame's own paint, so a capture shows them: shapes in page space under the canvas's transform
+  (the bottom view's mirror in it), each item from a path kept with it, what is off screen left
+  out — a net of thousands of pads is a few milliseconds a frame.
+- **Host commands**: `select` takes board references (`#U3`, `#U3.9`, `#net:VIN`, points; several
+  comma-joined, split outside quotes) and refuses one the board lacks; `clearSelection` clears;
+  `readState().selection` is the selection in the prompt grammar; a host's `selectReference`
+  selects. While the board loads a host is told to wait, as for any model; one read without its
+  index declines them in words.
+- **The picture is drawn from the file.** `client.plotPayload(file)` is one `GET /__cad/plot`:
+  cadgen reads the `.kicad_pcb` on the server and answers geometry per layer — the contract is
+  core's [plot payload](../../core/docs/plot-payload.md) (schema 3): one sheet in millimetres, y
+  down, on KiCad's board background; pads from their padstacks, tracks, vias, the pours' saved
+  fills, silkscreen, fabrication and courtyard graphics, mask and paste derived from the pads, the
+  outline, the holes, text as the strokes of a permissive font, and a ratsnest line for each
+  connection the copper does not make (cadgen's own connectivity, no DRC). No KiCad process runs.
+  **This renderer never parses KiCad's files**; its colours are KiCad's default theme
+  (`plot2d/theme.js`).
+- **Layout and drawing are core's** (`@text-to-cad/core/lib/plot2d`), so the snapshot bundle
+  draws the same picture: `layoutPlot` validates the payload and lays the sheet out (each item
+  with its page box); `drawPlot` fills the sheet's rectangle with its background and draws the
+  layers a view chooses — the board as it is made (every layer but the courtyards, mask and paste),
+  or the layers named, poured or not, from the top or mirrored from below — each item from a
+  `Path2D` made once, what is off the canvas left out, clipped to the sheet; `drawPlotImages`
+  places the pane's rasters. The view maths is drawing2d's: the page is its model space with y
+  negated (`layout.modelBounds`), so fit, pan and zoom are the DXF pane's, through the same kit
+  (`kit/plane/`).
+- **Crisp, and cheap to pan** (`plot/plotRasters.js`). A large board is tens of thousands of
+  items, too many to draw every frame of a pan. So the pane draws the board into a PATCH — the
+  view and a margin, at its exact device scale, on the pane's pixel grid, with `drawPlot` — and
+  paints every frame from patches: a pan moves one by whole device pixels; a zoom scales what it
+  has until the view has rested 120 ms, then the view is drawn again at its own scale. The first
+  frame is drawn at once. Three patches are kept, the least recently shown first out. The pane's
   `data-plot-settled` says whether the frame on screen is final, and a capture draws first.
 - **Kind is words.** The payload's `kind` names the document — "Reading board", "Updating
-  schematic…", "Harness: cable.harness.yml", alert titles and the declined-command sentences,
-  which name the tool (`plot/plotWords.js`) — and changes nothing that is drawn. Until the
-  payload arrives the file's suffix says.
+  board…", "Board: blinky.kicad_pcb", alert titles and the declined-command sentences
+  (`plot/plotWords.js`) — and changes nothing that is drawn. Until the payload arrives the file's
+  suffix says.
 - **The surround** is the theme's `--background`, read at draw time; a theme flip repaints
-  it and nothing else, since every sheet keeps its own background.
+  it and nothing else, since the sheet keeps its own background.
 - **Host commands, state, navbar** are the DXF pane's: `resetCamera` fits, `capture` is the
-  canvas as a PNG, `thumbnail` draws the SVGs fitted on a canvas of its own, `readState`
+  canvas as a PNG, `thumbnail` draws the board fitted on a canvas of its own, `readState`
   reports `camera: null` and an empty `display`; `setCamera`, `setDisplaySettings` and
-  `setRenderMode` are declined in words (a board drawn layer by layer says its Display settings
-  are the person's, in the view); `select` and `clearSelection` are answered on a board or a
-  schematic with its index and declined otherwise; the view is the file view's camera once
-  moved, and its slices: a board's Display (`board`) and, on a board or a schematic, what is
-  isolated (`isolated`: `{ selectors }`, in board references, so it survives a rebuild — what the
-  new revision no longer has is dropped). In the navbar, the plot has its alert
-  card's icon while the card is put away and, for a board drawn layer by layer, its Display menu,
-  portaled into `view.navbarSlot` (`data-view-controls`) after that icon, where a 3D view's
-  sits; no Preview.
-- **Failures.** A non-200 is the ordinary actionable card with the SERVER's sentence — a
-  machine without KiCad (or WireViz and Graphviz) is told how to install it, an unreadable
-  document why; a payload from a cadgen that disagrees about `schemaVersion` gets the version
-  alert.
-- **`cadgen pcb snapshot`** and **`cadgen harness snapshot`** (and `cadgen snapshot` for the
-  same suffixes) draw the same payload with the same `drawPlot`, fitted to the image
-  (`common/headlessPlotRender.js`).
-- **Fixtures and tests**: `plot/__fixtures__` holds hand-made payloads in KiCad's and
-  WireViz's shape.
-  `PlotRenderer.browser.test.mjs` asserts on pixels — the fit, the board's background, a
-  track's thickness and its sharp edge at 400%, a press on a pad's pixels selecting that pad and
-  lighting them (and its mirrored place from the bottom), a schematic's stacked sheets, the
-  theme's surround, a harness's Graphviz sheet, an untainted capture, a library card's picture,
-  the view kept on reopening, the missing-KiCad card; `PlotRenderer.test.tsx` the states, the
-  board's and schematic's tools and live commands, the declined commands (a harness's in
-  WireViz's name) and the StrictMode remount; `board/useBoardTools.test.tsx` the board hooks
-  composed as the renderer composes them (Escape, Measure, a check across revisions, a tree row's
-  hover, isolation and its survival across a rebuild); `board/BoardPanels.test.tsx` the tree's
-  hover and eyes and the Reference's links; `plotRasters.test.js` the patches; core's
-  `board2d` tests a pick and a snap against a scan of the whole board.
-
+  `setRenderMode` are declined in words (a board says its Display settings are the person's, in
+  the view); `select` and `clearSelection` are answered on a board with its index and declined
+  otherwise; the view is the file view's camera once moved, and its slices: the board's Display
+  (`board`) and what is isolated (`isolated`: `{ selectors }`, in board references, so it survives
+  a rebuild — what the new revision no longer has is dropped). In the navbar, the plot has its
+  alert card's icon while the card is put away and its Display menu, portaled into
+  `view.navbarSlot` (`data-view-controls`) after that icon, where a 3D view's sits; no Preview.
+- **Failures.** A non-200 is the ordinary actionable card with the SERVER's sentence — a file
+  that is not a readable board says why; a payload from a cadgen that disagrees about
+  `schemaVersion` gets the version alert.
+- **`cadgen pcb snapshot`** (and `cadgen snapshot` for the same suffix) draws the same payload
+  with the same `drawPlot`, fitted to the image (`common/headlessPlotRender.js`).
+- **Fixtures and tests**: `plot/__fixtures__/board.plot.json` is the Python suite's test board as
+  cadgen draws it (its README says how to regenerate it; the Python suite asserts they agree).
+  `PlotRenderer.browser.test.mjs` asserts on pixels — the fit, the board's background, a track's
+  thickness and its sharp edge at 400%, a press on a pad's pixels selecting that pad and lighting
+  them (and its mirrored place from the bottom), the theme's surround, a capture, a library card's
+  picture, the view kept on reopening, the unreadable-board card; `PlotRenderer.test.tsx` the
+  states, the board's tools and live commands, the declined commands and the StrictMode remount;
+  `board/useBoardTools.test.tsx` the board hooks composed as the renderer composes them (Escape,
+  Measure, a tree row's hover, isolation and its survival across a rebuild);
+  `board/BoardPanels.test.tsx` the tree's hover and eyes and the Reference's links;
+  `plotRasters.test.js` the patches; core's `plot2d/plot.test.js` the layout, the view and the
+  drawing, with a recording context.
 ## GLB renderer
 
 `createGlbRenderer` (`@text-to-cad/ui/renderers/glb`, id `glb`) shows a `.glb` as
@@ -724,7 +714,7 @@ A reload shows the same file, and restores it:
 | `camera` | The renderer's own: a scene's pose, lens and projection (a perspective snapshot, scoped to the model on read), restored in place of the open-time fit — null, or not a camera, fits; a drawing's plane transform. |
 | `display` | The Display settings, Clip and Explode included. |
 | `playback` | Preview's settings, Orbit's and the playbar's, every one of them (`kit/tools/playbar/playbackPreferences.js`): `orbit` on or off (on by default) and `orbitSpeed` (1), `autoplay` (off), and `speed` and `loop` once chosen — unset, the routine's authored values apply. Kept between leaving and re-entering preview, and across a reload of the tab; entering preview orbits only if the file's orbit is on. |
-| `renderer` | The renderer's slices, each `{ signature, value }`, restored only while the signature the renderer declares for the file on screen still matches. STEP (`workbench/stepViewSlices.js`): `tree` (expanded nodes, hidden parts, isolated assemblies) and `largeFile` against the geometry, `pose` against the sidecar. Robot: `pose` (joint values) and `visibility` (hidden component ids) against the description's revision. GLB, mesh: none. DXF: nothing beyond its camera. Plot: `board` (a board's Display) and `isolated` (the parts and nets isolated on a board or a schematic, kept across rebuilds by their references). |
+| `renderer` | The renderer's slices, each `{ signature, value }`, restored only while the signature the renderer declares for the file on screen still matches. STEP (`workbench/stepViewSlices.js`): `tree` (expanded nodes, hidden parts, isolated assemblies) and `largeFile` against the geometry, `pose` against the sidecar. Robot: `pose` (joint values) and `visibility` (hidden component ids) against the description's revision. GLB, mesh: none. DXF: nothing beyond its camera. Plot: `board` (the board's Display) and `isolated` (the parts and nets isolated on it, kept across rebuilds by their references). |
 
 | Not kept | Every open starts it afresh |
 | --- | --- |
@@ -1438,7 +1428,7 @@ Draw is the shared [drawing editor](drawing.md) (Excalidraw) laid transparently
 over the viewport. It is a STEP tool, and a KiCad board's (over its flat picture, which
 follows the editor's pan and zoom, and is put back under the ink when the pane changes size:
 `kit/plane/usePlaneDrawing.js` over `kit/tools/draw/planeViewLock.js`); a GLB, an STL, a 3MF, a
-DXF, a KiCad schematic, a wiring harness and a robot description do not offer it. (The tool itself is
+DXF and a robot description do not offer it. (The tool itself is
 the SHELL's — `kit/tools/draw`, `shell.tools.draw` — and STEP is the renderer that
 puts it on its strip; `renderers/shell-harness` also mounts it, for tests.) The
 chunk loads on the first use of the tool, and the

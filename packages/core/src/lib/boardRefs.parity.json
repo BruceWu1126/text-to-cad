@@ -1,5 +1,5 @@
 {
-  "about": "The board-reference language (.kicad_pcb, .kicad_sch), asserted by packages/core/src/lib/boardRefs.js and cadgen/kicad/refs.py alike. A part is its reference designator (a letter or '_', then letters, digits, '_', '+' or '-': what KiCad boards and board.part(ref=...) use), a pad or pin follows a dot, a net is net:<name> (JSON-quoted when the name holds whitespace, a quote, a comma, '@' or '#'), and a point is @x<x>y<y> in the script's millimetres (y up): comma-free, because a token joins several selectors with commas, as STEP tokens do (split outside quotes); whitespace inside a quoted name is the name's, anywhere else it ends the token. Canonical points drop trailing zeros and a negative zero.",
+  "about": "The board-reference language (.kicad_pcb), asserted by packages/core/src/lib/boardRefs.js and cadgen/kicad/refs.py alike. A part is its reference designator (a letter or '_', then letters, digits, '_', '+' or '-': what KiCad boards and board.part(ref=...) use), a pad follows a dot, a net is net:<name> (JSON-quoted when the name holds whitespace, a quote, a comma, '@' or '#'), and a point is @x<x>y<y> in KiCad's millimetres (y down, from the page origin): comma-free, because a token joins several selectors with commas, as STEP tokens do (split outside quotes); whitespace inside a quoted name is the name's, anywhere else it ends the token. Canonical points drop trailing zeros and a negative zero.",
   "selectorCases": [
     {
       "selector": "#U3",
@@ -270,8 +270,8 @@
       ]
     },
     {
-      "token": "PCB/board.kicad_sch#U3.9",
-      "path": "PCB/board.kicad_sch",
+      "token": "PCB/board.kicad_pcb#U3.9",
+      "path": "PCB/board.kicad_pcb",
       "selectors": [
         "#U3.9"
       ]
@@ -288,8 +288,8 @@
       "why": "several selectors, comma-joined, split outside quotes, in the order written"
     },
     {
-      "token": "board.kicad_sch#net:\"/Power Stage/VLOC\",U3",
-      "path": "board.kicad_sch",
+      "token": "board.kicad_pcb#net:\"/Power Stage/VLOC\",U3",
+      "path": "board.kicad_pcb",
       "selectors": [
         "#net:\"/Power Stage/VLOC\"",
         "#U3"

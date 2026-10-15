@@ -1,6 +1,6 @@
 /**
- * A board's or a schematic's Select tree: its parts, by kind, each with its pads (a schematic's
- * pins), and its nets, each with the pads or pins on it. Nodes are what the kit's tree search
+ * A board's Select tree: its parts, by kind, each with its pads, and its nets, each with the pads
+ * on it. Nodes are what the kit's tree search
  * reads (`id`, `label`, `children`, `selectionId` — the reference a pasted `#U3.9` finds — and
  * `searchAliases`), plus the selector the row selects (`selector`) and a muted `detail`.
  */
@@ -43,11 +43,9 @@ function padNode(pad, { underNet = false } = {}) {
 }
 
 /**
- * @param {ReturnType<typeof import("@text-to-cad/core/lib/board2d/boardIndex.js").createBoardIndex>
- *   | ReturnType<typeof import("@text-to-cad/core/lib/board2d/schematicIndex.js").createSchematicIndex>} index
+ * @param {ReturnType<typeof import("@text-to-cad/core/lib/board2d/boardIndex.js").createBoardIndex>} index
  */
 export function buildBoardTree(index) {
-  const noun = index.document === "schematic" ? "pin" : "pad";
   const byKind = new Map();
   for (const part of [...index.parts.values()].sort((a, b) => naturalCompare(a.ref, b.ref))) {
     const kind = partKind(part.ref);
@@ -57,7 +55,7 @@ export function buildBoardTree(index) {
     const pads = [...part.pads].filter((pad) => !seen.has(pad.number) && seen.add(pad.number)).sort((a, b) => naturalCompare(a.number, b.number));
     byKind.get(kind).push({
       id: `part:${part.ref}`, kind: "part", selector: `#${part.ref}`, label: part.ref, detail: part.value,
-      selectionId: part.ref, searchAliases: [part.value, part.footprint.split(":").pop(), part.lib?.split(":").pop(), part.fields.MPN].filter(Boolean),
+      selectionId: part.ref, searchAliases: [part.value, part.footprint.split(":").pop(), part.fields.MPN].filter(Boolean),
       children: pads.map((pad) => padNode(index.pads.get(`${pad.ref}.${pad.number}`) || pad)),
     });
   }
@@ -65,13 +63,13 @@ export function buildBoardTree(index) {
     id: `kind:${kind}`, kind: "group", label: kind, detail: String(byKind.get(kind).length), children: byKind.get(kind),
   }));
   const nets = [...index.nets.values()]
-    .filter((net) => net.pads.length || net.tracks?.length || net.wires?.length)
+    .filter((net) => net.pads.length || net.tracks.length)
     // KiCad's names for a pin on nothing are not nets anyone routes: they stay out of the list.
     .filter((net) => !net.name.startsWith("unconnected-("))
     .sort((a, b) => naturalCompare(a.name, b.name))
     .map((net) => ({
       id: `net:${net.name}`, kind: "net", selector: formatBoardRefSelector({ kind: "net", net: net.name }), label: net.name,
-      detail: `${net.pads.length} ${noun}${net.pads.length === 1 ? "" : "s"}`, selectionId: `net:${net.name}`, searchAliases: [],
+      detail: `${net.pads.length} pad${net.pads.length === 1 ? "" : "s"}`, selectionId: `net:${net.name}`, searchAliases: [],
       children: net.pads.map((pad) => ({ pad, key: `${pad.ref}.${pad.number}` })).sort((a, b) => naturalCompare(a.key, b.key)).map(({ pad }) => padNode(pad, { underNet: true })),
     }));
   const roots = [
@@ -91,7 +89,7 @@ export function buildBoardTree(index) {
   return { roots, nodesById, parents };
 }
 
-/** The tree rows a selector stands for (a pad or pin shows under its part and under its net). */
+/** The tree rows a selector stands for (a pad shows under its part and under its net). */
 export function boardTreeNodeIds(selector) {
   const parsed = parseBoardRefSelector(selector);
   if (!parsed) return [];

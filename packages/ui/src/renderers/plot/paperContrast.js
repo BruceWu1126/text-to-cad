@@ -1,7 +1,7 @@
 /**
- * A plot keeps its tool's colours whatever the theme. Where its paper is the other way round from
- * the theme (a schematic's light sheet in the dark, a board's dark one in the light), the tool panels
- * over it stand nearly opaque (`lib/floatingSurface.js` reads `--cad-chrome-alpha`).
+ * A plot keeps KiCad's colours whatever the theme. Where its sheet is the other way round from the
+ * theme (a board's dark sheet in the light), the tool panels over it stand nearly opaque
+ * (`lib/floatingSurface.js` reads `--cad-chrome-alpha`).
  */
 
 const CONTRASTING_CHROME_ALPHA = "90%";
@@ -16,7 +16,7 @@ export function lightColour(hex) {
 
 /**
  * The style the view's chrome takes over these sheets in this theme: the panels' alpha raised where
- * any sheet's paper is the other way round from the theme, nothing otherwise.
+ * any sheet's background is the other way round from the theme, nothing otherwise.
  *
  * @param {readonly { background?: string }[]|null|undefined} sheets
  * @param {boolean} dark  The theme is dark.

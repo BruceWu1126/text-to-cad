@@ -1,4 +1,4 @@
-"""``cadgen pcb snapshot`` — draw a KiCad board or schematic as KiCad plots it, as the CAD Viewer draws it.
+"""``cadgen pcb snapshot`` — draw a KiCad board from its file, as the CAD Viewer draws it.
 
 A GENERATED CLI over :func:`cadgen.pcb.snapshot`. There is no parser here on
 purpose: everything the command accepts is derived from the verb function's

@@ -1,25 +1,35 @@
 # Plot renderer fixtures
 
-`GET /__cad/plot` payloads (schema version 2) in KiCad's and WireViz's shape — SVGs in
-millimetres, y down, each sheet with the background its tool draws it on — so the tests
-need neither KiCad, WireViz nor a board:
+`board.plot.json` is a `GET /__cad/plot` payload (schema version 3, `@text-to-cad/core`'s
+`docs/plot-payload.md`): the test board of the Python suite
+(`tests/python/support/kicad_board.py`, in the format KiCad 11's headless API saves) as
+`cadgen.kicad.plot.build_plot` writes it, so the tests need neither KiCad nor a board. One
+40 x 30 mm sheet on `#001023`, its layers back to front, and its `board` index:
 
-- `board.plot.json`: KiCad 10's own plot of a small draft board, as
-  `cadgen.kicad.plot.build_plot` writes it: one 40 x 30 mm sheet (39.98 x 30.00, KiCad's
-  page rounds to the mil) on `#001023`, its layers back to front — `B.Fab`, `B.SilkS`,
-  `B.Cu` (a GND pour in the bottom left, so the layer has an `unpoured` picture), `F.Cu`
-  (a 1 mm VBUS track across the middle, y = 15, x 5..35, from J1 pin 1 to R1 pin 1, and a
-  GND track from D1 to J1 pin 2), `F.SilkS`, `F.Fab`, `Edge.Cuts`, `ratsnest` (the one
-  unrouted connection, D1 pin 2 to R1 pin 2) and `drills` — and its `board` index:
-  J1, R1 and D1, their pads, the tracks, the pour, the nets and that one `unconnected`
-  finding with its pads' references. Nothing sits on the middle of the track or in the
-  sheet's corners, which the browser test reads.
-- `schematic.plot.json`: two sheets on `#F5F4EF`, A4 (297 x 210) then A5
-  (210 x 148), each with a dark red frame 10 mm in and a green wire across its middle.
-- `harness.plot.json`: a WireViz-shaped sheet (Graphviz's SVG: a size in points, the
-  graph translated to y-up) of 216 x 108 pt — 76.2 x 38.1 mm — on `#ffffff`, a connector
-  box at its left and a 6 pt red wire across its middle.
+- `J1`, a 1x02 pin header at (5, 15): through-hole pads `1` (VBUS, at (5, 15)) and `2` (GND,
+  at (5, 17.54)), on both coppers, with their holes on `drills`;
+- `R1`, an 0603 at (35, 15): pads `1` (VBUS, at 34.175) and `2` (LED, at 35.825);
+- `D1`, an 0603 LED at (20, 24) turned a quarter turn: pads `1` (GND, at (20, 24.825)) and
+  `2` (LED, at (20, 23.175));
+- a 1 mm VBUS track across the middle, y = 15, x 5..34.175: KiCad's red, with nothing else
+  on the column x = 30 that the browser test reads;
+- a GND track from D1.1 to a via at (18, 27), and a GND pour on `B.Cu` over the bottom left
+  (its fill (1.5, 16.5) to (19.5, 28.5));
+- the LED net unrouted: one `ratsnest` line from D1.2 to R1.2 (`unrouted: 1`);
+- the text `blinky` on the top silkscreen at (20, 5), and each part's reference and value.
 
-`PlotRenderer.browser.test.mjs` and `PlotRenderer.test.tsx` serve them as the route
-would. Edit the schematic and the harness by hand; plot the board again with
-`build_plot` when the payload's shape changes.
+`PlotRenderer.browser.test.mjs` and `PlotRenderer.test.tsx` serve it as the route would.
+Regenerate it when the payload's shape or the board changes (the Python suite asserts they
+agree):
+
+```sh
+./.venv/bin/python -c "
+import json, pathlib, sys, tempfile
+sys.path.insert(0, 'packages/cadgen/src'); sys.path.insert(0, '.')
+from tests.python.support.kicad_board import write_board
+from cadgen.kicad.plot import build_plot
+with tempfile.TemporaryDirectory() as folder:
+    plot = build_plot(write_board(pathlib.Path(folder)))
+pathlib.Path('packages/ui/src/renderers/plot/__fixtures__/board.plot.json').write_text(json.dumps(plot, indent=1) + '\n')
+"
+```

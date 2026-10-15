@@ -1,44 +1,44 @@
-"""Any KiCad 10 board, read as what a person can point at, and board references answered.
+"""Any KiCad board, read as what a person can point at, and board references answered.
 
 :func:`read_index` reads a ``.kicad_pcb`` -- one cadgen wrote or one drawn in
 KiCad -- into its parts (footprints, with their fields and outlines), pads,
 tracks, vias, pours, unplated holes, ``Edge.Cuts`` outline and nets, from the
 file alone: no KiCad runs. :func:`read_board` (``pcb.read_board``) answers
 board references (:mod:`cadgen.kicad.refs`) against that index:
-``board.resolve("#U3.9")`` is pad 9 of U3, where it is, its net, and through
-its part the script line that made it.
+``board.resolve("#U3.9")`` is pad 9 of U3, where it is, its net, and its part.
 
 Frames
 ------
-A board file is in KiCad's frame: millimetres, y down, on its page. The index
-is read in that frame once and :meth:`BoardIndex.mapped` moves it into either
-of two others:
+A board file is in KiCad's frame: millimetres, y down, on its page -- the frame
+a ``@pcb`` script writes in (``Vector2.from_xy_mm``), and the frame every
+reference and every answer of :func:`read_board` is in, so a point the viewer
+copies pastes straight into a kipy call. :meth:`BoardIndex.mapped` moves the
+index into the plot's SHEET frame (:mod:`cadgen.kicad.plot`): KiCad's frame moved
+so the board's top-left corner is (0, 0); ``origin`` is where KiCad's (0, 0)
+lands. Angles are degrees counter-clockwise as seen from the top, in every frame.
 
-- SCRIPT: millimetres, y up, origin at the board's drill/place origin (where
-  cadgen puts the script's own origin; a board without one: KiCad's page
-  origin, y up). What a script, a reference, ``pin.position`` and a build's
-  DRC findings use, and all :func:`read_board` answers.
-- SHEET: millimetres, y down, origin at the corner of the page KiCad plots the
-  board on: a translation of KiCad's, which :mod:`cadgen.kicad.plot` measures.
-
-Angles mean the same in every frame: degrees counter-clockwise as seen from
-the top.
-
-What is read, as KiCad stores it: a footprint's pads and graphics are in its
-own frame (a pad's position relative to the footprint, before its rotation;
-its angle absolute), a bottom-side footprint's already flipped; a pad's shape
+What is read, as KiCad stores it: a footprint is placed by its ``(at x y angle)``
+or, in KiCad 11's files, its ``(transform (translate ..) (rotate ..) (scale ..))``;
+its pads and graphics are in its own frame (a pad's position relative to the
+footprint, before its rotation; its angle absolute), a bottom-side footprint's
+already flipped; a pad's shape
 is a polygon (rect, roundrect, oval, circle, trapezoid, chamfered rect; a
 custom pad's is the hull of its primitives); arcs and circles are sampled; a
 part's outline is its courtyard (else the box around its pads and fabrication
 drawing); the outline's segments are joined where their ends meet within
 KiCad's own chaining epsilon. Net names are unescaped as KiCad displays them
 (``TX/RX``, never ``TX{slash}RX``); a net's class comes from the project file
-beside the board. Older boards KiCad 10 opens read too: numbered nets, ``fp_text``
+beside the board. Older boards KiCad opens read too: numbered nets, ``fp_text``
 references, and a KiCad 5 board's modules and its arcs drawn by centre and angle.
+
+The readers of the file's items (``graphic``, ``pad_shape``, ``FootprintFrame``,
+``item_layers``, ``net_of``...) are shared with the plot, which walks the same
+tree for everything it draws.
 """
 
 from __future__ import annotations
 
+import difflib
 import math
 import re
 from collections import deque
@@ -46,15 +46,19 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
 
+from cadgen.cad_ref_syntax import ref_prefix_names
 from cadgen.kicad import sexpr
-from cadgen.kicad.geometry import XY, arc_points, area, bezier_points, board_origin, box, format_xy, hull, inside, script_frame
+from cadgen.kicad.geometry import (
+    XY, arc_points, area, bezier_points, box, format_xy, hull, inside, polygon_distance, polyline_distance, rotate,
+)
 from cadgen.kicad.naming import natural, netclass_of, project_netclasses, unescape_net_name
-from cadgen.kicad.refs import BoardSelector, ReferenceView, format_board_selector, selector_or_none
+from cadgen.kicad.refs import BoardSelector, format_board_selector, parse_board_selector, parse_board_token, selector_or_none
 
 __all__ = [
     "BoardIndex",
     "BoardView",
     "Copper",
+    "FootprintFrame",
     "Hole",
     "Net",
     "Pad",
@@ -63,7 +67,18 @@ __all__ = [
     "Track",
     "Via",
     "Zone",
+    "copper_layers",
+    "expand_copper",
+    "footprint_property",
+    "graphic",
+    "item_layers",
+    "layer_of",
+    "net_of",
+    "net_table",
+    "pad_shape",
+    "points_of",
     "read_board",
+    "read_board_index",
     "read_index",
 ]
 
@@ -123,19 +138,13 @@ class Part:
     side: str  # "top" or "bottom"
     at: XY
     rotation: float  # degrees counter-clockwise, seen from the top
-    fields: Mapping[str, str]  # every field but Reference and Value with something in it, Script included
+    fields: Mapping[str, str]  # every field but Reference and Value with something in it
     dnp: bool
     outline: tuple[XY, ...]  # the courtyard, else the box around its pads and fabrication drawing
     pads: tuple[Pad, ...] = ()
     in_bom: bool = True  # False when the footprint is excluded from the BOM (or on the board only)
 
     kind = "part"
-
-    @property
-    def script(self) -> str | None:
-        """The script line that made the part, ``"board.py:183"`` (relative to the model script's
-        folder), from its ``Script`` field; ``None`` for a part no cadgen script made."""
-        return self.fields.get("Script")
 
     @property
     def selector(self) -> str | None:
@@ -157,10 +166,9 @@ class Part:
         raise ValueError(f"{self.ref} has no pad {number}; its pads are {numbers}")
 
     def __repr__(self) -> str:
-        made = f", script={self.script!r}" if self.script else ""
         return (
             f"Part({self.ref}, value={self.value!r}, footprint={self.footprint!r}, at={format_xy(self.at)}, "
-            f"rotation={self.rotation:g}, {self.side}{made})"
+            f"rotation={self.rotation:g}, {self.side})"
         )
 
 
@@ -294,7 +302,7 @@ class Point:
 
 @dataclass(frozen=True)
 class BoardIndex:
-    """A board in one frame. ``origin`` is the script's origin in that frame."""
+    """A board in one frame. ``origin`` is where KiCad's page origin (0, 0) lies in that frame."""
 
     parts: tuple[Part, ...]
     tracks: tuple[Track, ...]
@@ -359,7 +367,7 @@ class BoardIndex:
                 {
                     "ref": part.ref, "value": part.value, "footprint": part.footprint, "side": part.side,
                     "at": xy(part.at), "rotation": num(part.rotation), "fields": dict(part.fields),
-                    "script": part.script, "dnp": part.dnp, "outline": path(part.outline),
+                    "dnp": part.dnp, "outline": path(part.outline),
                 }
                 for part in self.parts
             ],
@@ -389,40 +397,8 @@ class BoardIndex:
 # --- geometry ------------------------------------------------------------------------
 
 
-def _rotate(x: float, y: float, degrees: float) -> XY:
-    """KiCad's rotation of a point in its y-down frame: counter-clockwise on screen."""
-    if not degrees:
-        return x, y
-    angle = math.radians(degrees)
-    cos, sin = math.cos(angle), math.sin(angle)
-    return x * cos + y * sin, -x * sin + y * cos
-
-
 def _circle(center: XY, radius: float, segments: int = _CIRCLE_SEGMENTS) -> list[XY]:
     return [(center[0] + radius * math.cos(2 * math.pi * k / segments), center[1] + radius * math.sin(2 * math.pi * k / segments)) for k in range(segments)]
-
-
-def _segment_distance(point: XY, a: XY, b: XY) -> float:
-    (px, py), (ax, ay), (bx, by) = point, a, b
-    dx, dy = bx - ax, by - ay
-    length = dx * dx + dy * dy
-    t = 0.0 if length == 0 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length))
-    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
-
-
-def _polyline_distance(point: XY, points: Sequence[XY]) -> float:
-    if len(points) == 1:
-        return math.hypot(point[0] - points[0][0], point[1] - points[0][1])
-    return min(_segment_distance(point, a, b) for a, b in zip(points, points[1:]))
-
-
-def _polygon_distance(point: XY, polygon: Sequence[XY]) -> float:
-    """0 inside ``polygon``, else the distance to its edge."""
-    if len(polygon) >= 3 and inside(point, polygon):
-        return 0.0
-    if not polygon:
-        return math.inf
-    return _polyline_distance(point, [*polygon, polygon[0]])
 
 
 def _close(a: XY, b: XY, within: float = _JOIN) -> bool:
@@ -496,7 +472,7 @@ def _closed(line: Sequence[XY]) -> bool:
 # --- reading graphics ------------------------------------------------------------------
 
 
-def _pts(node: list | None) -> list[XY]:
+def points_of(node: list | None) -> list[XY]:
     """A ``(pts ...)`` list: its points, an ``(arc ...)`` in it sampled."""
     out: list[XY] = []
     for child in (node or [])[1:]:
@@ -516,15 +492,15 @@ def _legacy_arc(center: XY, start: XY, angle: float) -> tuple[XY, XY, XY]:
     and end: KiCad 5 turned its start point about the centre by ``-angle``."""
 
     def turned(degrees: float) -> XY:
-        x, y = _rotate(start[0] - center[0], start[1] - center[1], degrees)
+        x, y = rotate(start[0] - center[0], start[1] - center[1], degrees)
         return center[0] + x, center[1] + y
 
     return start, turned(-angle / 2), turned(-angle)
 
 
-def _graphic(node: list) -> tuple[list[XY], bool] | None:
+def graphic(node: list) -> tuple[list[XY], bool] | None:
     """A graphic item (``gr_*``, ``fp_*`` or a custom pad's primitive) as points, and whether
-    they close on themselves."""
+    they close on themselves (a rectangle, a circle, a polygon; a line, an arc or a curve do not)."""
     head = sexpr.head(node) or ""
     kind = head.split("_", 1)[-1]
     if kind == "line":
@@ -546,15 +522,16 @@ def _graphic(node: list) -> tuple[list[XY], bool] | None:
             return None
         return [start, (end[0], start[1]), end, (start[0], end[1])], True
     if kind == "poly":
-        points = _pts(sexpr.find(node, "pts"))
+        points = points_of(sexpr.find(node, "pts"))
         return (points, True) if points else None
     if kind == "curve":
-        points = _pts(sexpr.find(node, "pts"))
+        points = points_of(sexpr.find(node, "pts"))
         return (bezier_points(points), False) if points else None
     return None
 
 
-def _layer_of(node: list) -> str | None:
+def layer_of(node: list) -> str | None:
+    """An item's ``(layer NAME)``, or ``None``."""
     layer = sexpr.value(node, "layer")
     return str(layer) if layer is not None else None
 
@@ -612,7 +589,7 @@ def _oval(width: float, height: float) -> list[XY]:
     return out
 
 
-def _pad_shape(pad: list) -> list[XY]:
+def pad_shape(pad: list) -> list[XY]:
     """The pad's copper outline in its own frame, centred on its shape (not yet offset or turned)."""
     shape = str(pad[3]) if len(pad) > 3 and isinstance(pad[3], str) else "rect"
     size = sexpr.pair(sexpr.find(pad, "size"), (0.0, 0.0))
@@ -638,7 +615,7 @@ def _pad_shape(pad: list) -> list[XY]:
         for primitive in (sexpr.find(pad, "primitives") or [])[1:]:
             if not isinstance(primitive, list):
                 continue
-            drawn = _graphic(primitive)
+            drawn = graphic(primitive)
             if drawn is None:
                 continue
             reach = sexpr.number(sexpr.value(primitive, "width"), 0.0) / 2
@@ -668,7 +645,7 @@ def _copper_side(layers: Sequence[str]) -> str | None:
 # --- the board ---------------------------------------------------------------------------
 
 
-def _net_names(tree: list) -> dict[int, str]:
+def net_table(tree: list) -> dict[int, str]:
     """An older board's net table, ``(net 3 "GND")``: its numbers' names."""
     table = {}
     for node in sexpr.find_all(tree, "net"):
@@ -677,7 +654,9 @@ def _net_names(tree: list) -> dict[int, str]:
     return table
 
 
-def _net(node: list, table: Mapping[int, str]) -> str | None:
+def net_of(node: list, table: Mapping[int, str]) -> str | None:
+    """The net an item is on, as KiCad shows its name: ``(net "GND")``, or an older board's
+    ``(net 3)`` looked up in ``table`` (:func:`net_table`); ``None`` for none."""
     found = sexpr.find(node, "net")
     name = None
     if found is not None and len(found) >= 2:
@@ -693,21 +672,24 @@ def _net(node: list, table: Mapping[int, str]) -> str | None:
     return name or None
 
 
-def _layers(node: list) -> list[str]:
+def item_layers(node: list) -> list[str]:
+    """An item's layers: its ``(layers ...)`` (a pad's, a via's, a zone's), else its one ``(layer ..)``."""
     layers = sexpr.find(node, "layers")
     if layers is not None:
         return [str(layer) for layer in layers[1:]]
-    layer = _layer_of(node)
+    layer = layer_of(node)
     return [layer] if layer else []
 
 
-def _copper_layers(tree: list) -> list[str]:
+def copper_layers(tree: list) -> list[str]:
+    """The board's copper layers as its layer table declares them, front first."""
     table = sexpr.find(tree, "layers")
     names = [str(entry[1]) for entry in (table or [])[1:] if isinstance(entry, list) and len(entry) >= 2 and str(entry[1]).endswith(".Cu")]
     return names or ["F.Cu", "B.Cu"]
 
 
-def _expand(layers: Sequence[str], copper: Sequence[str]) -> list[str]:
+def expand_copper(layers: Sequence[str], copper: Sequence[str]) -> list[str]:
+    """The copper layers among ``layers``, ``*.Cu`` and ``F&B.Cu`` spelled out over ``copper``."""
     out: list[str] = []
     for layer in layers:
         if layer in ("*.Cu", "F&B.Cu"):
@@ -717,20 +699,34 @@ def _expand(layers: Sequence[str], copper: Sequence[str]) -> list[str]:
     return list(dict.fromkeys(out))
 
 
-class _Footprint:
-    """One footprint's frame: its children's points as they land on the board (KiCad's frame)."""
+class FootprintFrame:
+    """One footprint's frame: its children's points as they land on the board (KiCad's frame).
+
+    A footprint is placed by ``(at x y angle)`` or, since KiCad 11, by ``(transform (translate x y)
+    (rotate angle) (scale sx sy))``; the angle is degrees counter-clockwise on screen either way, and
+    a scale (1 1 on every board KiCad writes today) multiplies a child's point before the turn.
+    """
 
     def __init__(self, node: list):
-        at = sexpr.find(node, "at")
-        self.x, self.y = sexpr.pair(at, (0.0, 0.0))
-        self.angle = sexpr.number(at[3]) if at is not None and len(at) > 3 else 0.0
+        transform = sexpr.find(node, "transform")
+        if transform is not None:
+            self.x, self.y = sexpr.pair(sexpr.find(transform, "translate"), (0.0, 0.0))
+            self.angle = sexpr.number(sexpr.value(transform, "rotate"), 0.0)
+            self.scale = sexpr.pair(sexpr.find(transform, "scale"), (1.0, 1.0))
+        else:
+            at = sexpr.find(node, "at")
+            self.x, self.y = sexpr.pair(at, (0.0, 0.0))
+            self.angle = sexpr.number(at[3]) if at is not None and len(at) > 3 else 0.0
+            self.scale = (1.0, 1.0)
 
     def place(self, point: XY) -> XY:
-        dx, dy = _rotate(point[0], point[1], self.angle)
+        dx, dy = rotate(point[0] * self.scale[0], point[1] * self.scale[1], self.angle)
         return self.x + dx, self.y + dy
 
 
-def _property(node: list, name: str) -> str | None:
+def footprint_property(node: list, name: str) -> str | None:
+    """A footprint's field ``name`` (``Reference``, ``Value``, ``MPN``...), an older board's
+    ``fp_text reference`` included; ``None`` when it has none."""
     for item in sexpr.find_all(node, "property"):
         if len(item) >= 3 and item[1] == name:
             return str(item[2])
@@ -740,7 +736,7 @@ def _property(node: list, name: str) -> str | None:
     return None
 
 
-def _read_pad(node: list, frame: _Footprint, ref: str, table, copper: Sequence[str]) -> tuple[Pad | None, Hole | None]:
+def _read_pad(node: list, frame: FootprintFrame, ref: str, table, copper: Sequence[str]) -> tuple[Pad | None, Hole | None]:
     kind = str(node[2]) if len(node) > 2 else ""
     at = sexpr.find(node, "at")
     local = sexpr.pair(at, (0.0, 0.0))
@@ -751,13 +747,13 @@ def _read_pad(node: list, frame: _Footprint, ref: str, table, copper: Sequence[s
     if kind == "np_thru_hole":
         size = drill_sizes[0] if drill_sizes else sexpr.pair(sexpr.find(node, "size"), (0.0, 0.0))[0]
         return None, Hole(at=center, diameter=float(size), part=ref)
-    side = _copper_side(_layers(node))
+    side = _copper_side(item_layers(node))
     if side is None:
         return None, None  # paste or mask only: no copper to point at
     offset = sexpr.pair(sexpr.find(drill, "offset"), (0.0, 0.0)) if drill is not None else (0.0, 0.0)
     polygon = []
-    for x, y in _pad_shape(node):
-        dx, dy = _rotate(x + offset[0], y + offset[1], angle)
+    for x, y in pad_shape(node):
+        dx, dy = rotate(x + offset[0], y + offset[1], angle)
         polygon.append((center[0] + dx, center[1] + dy))
     name = sexpr.value(node, "pinfunction")
     kind_of_pin = sexpr.value(node, "pintype")
@@ -765,7 +761,7 @@ def _read_pad(node: list, frame: _Footprint, ref: str, table, copper: Sequence[s
         part=ref,
         number=str(node[1]) if len(node) > 1 else "",
         name=str(name) if name is not None else None,
-        net=_net(node, table),
+        net=net_of(node, table),
         type=str(kind_of_pin) if kind_of_pin is not None else None,
         side=side,
         at=center,
@@ -775,10 +771,10 @@ def _read_pad(node: list, frame: _Footprint, ref: str, table, copper: Sequence[s
 
 
 def _read_footprint(node: list, table, copper: Sequence[str]) -> tuple[Part, list[Hole], list[Zone], list[list[XY]]]:
-    frame = _Footprint(node)
-    bottom = _layer_of(node) == "B.Cu"
-    ref = _property(node, "Reference") or ""
-    value = _property(node, "Value") or ""
+    frame = FootprintFrame(node)
+    bottom = layer_of(node) == "B.Cu"
+    ref = footprint_property(node, "Reference") or ""
+    value = footprint_property(node, "Value") or ""
     fields: dict[str, str] = {}
     for item in sexpr.find_all(node, "property"):
         if len(item) >= 3 and item[1] not in ("Reference", "Value") and str(item[2]):
@@ -808,11 +804,11 @@ def _read_footprint(node: list, table, copper: Sequence[str]) -> tuple[Part, lis
             continue
         if not head.startswith("fp_") or head.split("_", 1)[1] not in _GRAPHICS:
             continue
-        drawn = _graphic(child)
+        drawn = graphic(child)
         if drawn is None:
             continue
         points = [frame.place(point) for point in drawn[0]]
-        layer = _layer_of(child)
+        layer = layer_of(child)
         if layer in courtyard:
             courtyard[layer].append((points, drawn[1]))
         elif layer in ("F.Fab", "B.Fab"):
@@ -827,14 +823,13 @@ def _read_footprint(node: list, table, copper: Sequence[str]) -> tuple[Part, lis
             reach = hole.diameter / 2
             drawn += [(hole.at[0] - reach, hole.at[1] - reach), (hole.at[0] + reach, hole.at[1] + reach)]
         outline = box(drawn)
-    at = sexpr.find(node, "at")
     part = Part(
         ref=ref,
         value=value,
         footprint=str(node[1]) if len(node) > 1 and isinstance(node[1], str) else "",
         side="bottom" if bottom else "top",
         at=(frame.x, frame.y),
-        rotation=(sexpr.number(at[3]) % 360.0) if at is not None and len(at) > 3 else 0.0,
+        rotation=frame.angle % 360.0,
         fields=fields,
         dnp=dnp,
         outline=tuple(outline),
@@ -866,15 +861,15 @@ def _outline(items: list[tuple[list[XY], bool]]) -> list[XY]:
 def _read_zone(node: list, table, copper: Sequence[str]) -> list[Zone]:
     if sexpr.find(node, "keepout") is not None:
         return []  # a rule area, not copper
-    layers = _expand(_layers(node), copper)
+    layers = expand_copper(item_layers(node), copper)
     if not layers:
         return []
-    outline = tuple(_pts(sexpr.find(sexpr.find(node, "polygon") or [], "pts")))
+    outline = tuple(points_of(sexpr.find(sexpr.find(node, "polygon") or [], "pts")))
     fills: dict[str, list[tuple[XY, ...]]] = {}
     for filled in sexpr.find_all(node, "filled_polygon"):
-        layer = _layer_of(filled) or layers[0]
-        fills.setdefault(layer, []).append(tuple(_pts(sexpr.find(filled, "pts"))))
-    net = _net(node, table)
+        layer = layer_of(filled) or layers[0]
+        fills.setdefault(layer, []).append(tuple(points_of(sexpr.find(filled, "pts"))))
+    net = net_of(node, table)
     return [Zone(net=net, layer=layer, outline=outline, fills=tuple(fills.get(layer, ()))) for layer in layers]
 
 
@@ -893,8 +888,8 @@ def read_index(text: str | list, *, project: Path | None = None) -> BoardIndex:
             raise ValueError(f"not a readable KiCad board ({error})") from None
     if sexpr.head(tree) != "kicad_pcb":
         raise ValueError("not a KiCad board: a .kicad_pcb starts with (kicad_pcb ...)")
-    table = _net_names(tree)
-    copper = _copper_layers(tree)
+    table = net_table(tree)
+    copper = copper_layers(tree)
     parts: list[Part] = []
     holes: list[Hole] = []
     zones: list[Zone] = []
@@ -916,21 +911,21 @@ def read_index(text: str | list, *, project: Path | None = None) -> BoardIndex:
                 points = arc_points(*(sexpr.pair(sexpr.find(node, key)) for key in ("start", "mid", "end")))
             if None in points:
                 continue
-            net = _net(node, table)
-            tracks.append(Track(net=net, layer=_layer_of(node) or "", width=sexpr.number(sexpr.value(node, "width")), points=tuple(points), arc=head == "arc"))
+            net = net_of(node, table)
+            tracks.append(Track(net=net, layer=layer_of(node) or "", width=sexpr.number(sexpr.value(node, "width")), points=tuple(points), arc=head == "arc"))
         elif head == "via":
             at = sexpr.pair(sexpr.find(node, "at"))
             if at is None:
                 continue
-            net = _net(node, table)
+            net = net_of(node, table)
             vias.append(Via(
                 net=net, at=at, diameter=sexpr.number(sexpr.value(node, "size")), drill=sexpr.number(sexpr.value(node, "drill")),
-                layers=tuple(_layers(node)) or ("F.Cu", "B.Cu"),
+                layers=tuple(item_layers(node)) or ("F.Cu", "B.Cu"),
             ))
         elif head == "zone":
             zones.extend(_read_zone(node, table, copper))
-        elif head and head.startswith("gr_") and head[3:] in _GRAPHICS and _layer_of(node) == "Edge.Cuts":
-            drawn = _graphic(node)
+        elif head and head.startswith("gr_") and head[3:] in _GRAPHICS and layer_of(node) == "Edge.Cuts":
+            drawn = graphic(node)
             if drawn is not None:
                 edges.append(drawn[0] + [drawn[0][0]] if drawn[1] else drawn[0])
     names = {pad.net for part in parts for pad in part.pads} | {track.net for track in tracks} | {via.net for via in vias} | {zone.net for zone in zones}
@@ -945,29 +940,28 @@ def read_index(text: str | list, *, project: Path | None = None) -> BoardIndex:
         holes=tuple(holes),
         outline=tuple(tuple(line) for line in _chain(edges)),
         nets=nets,
-        origin=board_origin(tree),
+        origin=(0.0, 0.0),
     )
 
 
 # --- answering references -------------------------------------------------------------
 
 
-class BoardView(ReferenceView):
-    """A board read for references, in the script's frame (millimetres, y up).
+_FORMS = (
+    "a board's are a part #U3, a pad #U3.9, a net #net:VIN, copper #net:VIN@x40.1y21.6 or a point "
+    "#@x40.1y21.6 (millimetres in KiCad's frame, y down)"
+)
+
+
+class BoardView:
+    """A board read for references, in KiCad's frame (millimetres, y down).
 
     ``parts`` and ``nets`` are everything on it; :meth:`resolve` answers a board
-    reference (with or without its file): ``#U3`` is a :class:`Part` (its ``script`` is the
-    line that made it), ``#U3.9`` a :class:`Pad`, ``#net:VIN`` a :class:`Net` with everything
+    reference (with or without its file): ``#U3`` is a :class:`Part`, ``#U3.9`` a
+    :class:`Pad`, ``#net:VIN`` a :class:`Net` with everything
     on it, ``#net:VIN@x40.1y21.6`` that net's :class:`Copper` at the point (within
     ``COPPER_TOLERANCE``), ``#@x40.1y21.6`` a :class:`Point` and what is there (:meth:`at`).
     """
-
-    _DOCUMENT = "board"
-    _FORMS = (
-        "a board's are a part #U3, a pad #U3.9, a net #net:VIN, copper #net:VIN@x40.1y21.6 or a point "
-        "#@x40.1y21.6 (millimetres from the board's origin, y up)"
-    )
-    _NAMEABLE = "a part, pad, net, copper or point"
 
     def __init__(self, path: Path, index: BoardIndex):
         self.path = Path(path)
@@ -995,10 +989,64 @@ class BoardView(ReferenceView):
     def __repr__(self) -> str:
         return f"BoardView({self.path.name}: {len(self.parts)} parts, {len(self.nets)} nets)"
 
-    def _pad(self, part: Part, number: str) -> Pad:
-        return part.pad(number)
+    @property
+    def pads(self) -> tuple[Pad, ...]:
+        """Every pad of every part."""
+        return self._index.pads
 
-    def _place(self, selector: BoardSelector) -> Copper | Point:
+    def part(self, ref: str) -> Part:
+        """The part ``ref`` (``"U3"``)."""
+        found = self._parts.get(str(ref))
+        if found is None:
+            close = sorted(difflib.get_close_matches(str(ref), list(self._parts), n=3), key=natural)
+            if close:
+                hint = f"; did you mean {', '.join(close)}?"
+            else:
+                refs = sorted(self._parts, key=natural)
+                hint = f"; its parts are {', '.join(refs[:40])}" + (f" and {len(refs) - 40} more" if len(refs) > 40 else "")
+            raise ValueError(f"{self.path.name} has no part {ref}{hint}")
+        return found
+
+    def net(self, name: str) -> Net:
+        """The net ``name``, as KiCad shows it (``"TX/RX"``)."""
+        found = self._nets.get(str(name))
+        if found is None:
+            close = sorted(difflib.get_close_matches(str(name), list(self._nets), n=3), key=natural)
+            hint = f"; did you mean {', '.join(close)}?" if close else ""
+            raise ValueError(f"{self.path.name} has no net {name!r}{hint}")
+        return found
+
+    def resolve(self, ref: str):
+        """What the reference ``ref`` names: a :class:`Part`, :class:`Pad`, :class:`Net`,
+        :class:`Copper` or :class:`Point`. A file before the ``#`` must name this board."""
+        answers = self.resolve_all(ref)
+        if len(answers) != 1:
+            raise ValueError(f"{ref!r} names {len(answers)} things; resolve_all() answers each, in the order written")
+        return answers[0]
+
+    def resolve_all(self, ref: str) -> list:
+        """Every selector of a reference token (``board.kicad_pcb#U3,C14.2``), each resolved."""
+        token = parse_board_token(ref)
+        if token is None:
+            selector = parse_board_selector(ref)
+            if selector is None:
+                raise ValueError(f"not a board reference: {ref!r}; {_FORMS}")
+            path, selectors = "", (selector,)
+        else:
+            path, selectors = token.path, token.selectors
+        if path and not ref_prefix_names(path, str(self.path)):
+            raise ValueError(f"reference names {path!r}, but this board is {str(self.path)!r}")
+        if not selectors:
+            raise ValueError(f"{ref!r} names the whole board; name a part, pad, net, copper or point in it")
+        return [self._answer(selector) for selector in selectors]
+
+    def _answer(self, selector: BoardSelector):
+        if selector.kind == "part":
+            return self.part(selector.ref)
+        if selector.kind == "pad":
+            return self.part(selector.ref).pad(selector.pad)
+        if selector.kind == "net":
+            return self.net(selector.net)
         if selector.kind == "copper":
             return self.copper(selector.net, *selector.at)
         return self.at(*selector.at)
@@ -1029,7 +1077,7 @@ class BoardView(ReferenceView):
         point = (float(x), float(y))
         closed = [line for line in self.outline if _closed(line)]
         crossings = sum(inside(point, line[:-1]) for line in closed)
-        pads = tuple(pad for part in self.parts for pad in part.pads if _polygon_distance(point, pad.polygon) == 0)
+        pads = tuple(pad for part in self.parts for pad in part.pads if polygon_distance(point, pad.polygon) == 0)
         copper = tuple(item for item in (*self.tracks, *self.vias, *self.zones) if _reach(item, point) == 0)
         holes = tuple(hole for hole in self.holes if math.hypot(point[0] - hole.at[0], point[1] - hole.at[1]) <= hole.diameter / 2)
         parts = tuple(part for part in self.parts if len(part.outline) >= 3 and inside(point, part.outline))
@@ -1039,29 +1087,29 @@ class BoardView(ReferenceView):
 def _reach(item, point: XY) -> float:
     """How far ``point`` is from the copper of ``item``: 0 on it."""
     if isinstance(item, Pad):
-        return _polygon_distance(point, item.polygon)
+        return polygon_distance(point, item.polygon)
     if isinstance(item, Track):
-        return max(0.0, _polyline_distance(point, item.points) - item.width / 2)
+        return max(0.0, polyline_distance(point, item.points) - item.width / 2)
     if isinstance(item, Via):
         return max(0.0, math.hypot(point[0] - item.at[0], point[1] - item.at[1]) - item.diameter / 2)
     if isinstance(item, Zone):
-        return min((_polygon_distance(point, fill) for fill in item.fills), default=math.inf)
+        return min((polygon_distance(point, fill) for fill in item.fills), default=math.inf)
     return math.inf
 
 
 def read_board(path: Path | str) -> BoardView:
-    """The KiCad board at ``path`` (a ``.kicad_pcb``; any KiCad 10 board) for board references.
+    """The KiCad board at ``path`` (a ``.kicad_pcb``; any board KiCad opens) for board references.
 
-    Everything is in the board script's frame: millimetres, y up, from the board's
-    drill/place origin, which is where cadgen puts the script's own origin. Reads the
-    file and the ``.kicad_pro`` beside it (for net classes); runs nothing.
+    Everything is in KiCad's frame: millimetres, y down, the frame a script's
+    ``Vector2.from_xy_mm`` takes. Reads the file and the ``.kicad_pro`` beside it (for net
+    classes); runs nothing.
     """
     board = Path(path).expanduser()
-    return BoardView(board.resolve(), read_script_index(board))
+    return BoardView(board.resolve(), read_board_index(board))
 
 
-def read_script_index(path: Path | str) -> BoardIndex:
-    """The index of the KiCad board at ``path`` in the board script's frame (:func:`read_board`'s)."""
+def read_board_index(path: Path | str) -> BoardIndex:
+    """The index of the KiCad board at ``path``, in KiCad's frame (:func:`read_board`'s)."""
     board = Path(path).expanduser()
     if board.suffix.lower() != ".kicad_pcb":
         raise ValueError(f"{board.name} is not a KiCad board (.kicad_pcb)")
@@ -1072,7 +1120,6 @@ def read_script_index(path: Path | str) -> BoardIndex:
     except UnicodeDecodeError:
         raise ValueError(f"{board.name} is not a readable KiCad board: it is not UTF-8 text") from None
     try:
-        index = read_index(text, project=board.with_suffix(".kicad_pro"))
+        return read_index(text, project=board.with_suffix(".kicad_pro"))
     except ValueError as error:
         raise ValueError(f"{board.name} is {error}") from None
-    return index.mapped(script_frame(index.origin))

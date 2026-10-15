@@ -1,6 +1,6 @@
 /**
- * The plane geometry a board's and a schematic's index point with (`boardIndex.js`,
- * `schematicIndex.js`): points, polygons and segments in page millimetres. Pure.
+ * The plane geometry a board's index points with (`boardIndex.js`): points, polygons and
+ * segments in page millimetres. Pure.
  */
 
 /** `value` as a point `[x, y]` of numbers, or null when it is not one. */

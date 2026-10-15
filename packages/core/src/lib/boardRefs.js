@@ -1,12 +1,12 @@
-// The board-reference language of KiCad documents (.kicad_pcb, .kicad_sch): what a person picks on a
-// board or schematic and hands to the agent, which `cadgen.pcb.read_board(path).resolve(ref)` reads.
+// The board-reference language of KiCad boards (.kicad_pcb): what a person picks on a board and
+// hands to the agent, which `cadgen.pcb.read_board(path).resolve(ref)` reads.
 // Mirrors cadgen/kicad/refs.py; both assert boardRefs.parity.json.
 //
-//   #U3                 a part: a footprint or a symbol, by reference designator (letters, digits, _ + -)
-//   #U3.9               its pad (or pin) 9, numbered as KiCad numbers it: 9, A4, EP
+//   #U3                 a part: a footprint, by reference designator (letters, digits, _ + -)
+//   #U3.9               its pad 9, numbered as KiCad numbers it: 9, A4, EP
 //   #net:VIN            a net by name, JSON-quoted when it holds whitespace, a quote, a comma, '@' or '#'
 //   #net:VIN@x40.1y21.6 a board's copper of that net at a point
-//   #@x40.1y21.6        a point on a board, in the script's millimetres (y up)
+//   #@x40.1y21.6        a point on a board, in KiCad's millimetres (y down, from the page origin)
 //
 // A token is `<file>#<selectors>`, as a STEP token is: several selectors are comma-joined after one
 // '#', split outside quotes, so a point is comma-free.
@@ -18,12 +18,9 @@ const PART_RE = new RegExp(`^(${REF_SOURCE})$`);
 const PAD_RE = new RegExp(`^(${REF_SOURCE})\\.(${PAD_SOURCE})$`);
 const POINT_RE = new RegExp(`^x(${NUMBER_SOURCE})y(${NUMBER_SOURCE})$`);
 const BARE_NET_RE = /^[^\s"@#,]+$/;
-const BOARD_SUFFIXES = [".kicad_pcb", ".kicad_sch"];
-
-/** Whether a path names a KiCad document, whose selectors are board references. */
+/** Whether a path names a KiCad board, whose selectors are board references. */
 export function isBoardRefPath(path) {
-  const lower = String(path || "").toLowerCase();
-  return BOARD_SUFFIXES.some((suffix) => lower.endsWith(suffix));
+  return String(path || "").toLowerCase().endsWith(".kicad_pcb");
 }
 
 /** A coordinate as a reference spells it: at most three decimals, no trailing zeros, no negative zero. */

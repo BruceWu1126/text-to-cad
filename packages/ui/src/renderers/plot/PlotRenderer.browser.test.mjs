@@ -10,14 +10,11 @@ import { chromium } from 'playwright';
 import { PNG } from 'pngjs';
 import { fitPlotTransform, layoutPlot, pageToScreen } from '@text-to-cad/core/lib/plot2d/plot.js';
 
-// The plots under test are COMMITTED payloads (see `__fixtures__/README.md`: KiCad's own plot of a
-// small board, hand-made sheets for the schematic and the harness), served as `GET /__cad/plot`
-// serves them: no KiCad, no board.
+// The plot under test is the COMMITTED payload (see `__fixtures__/README.md`: the test board as
+// cadgen draws it from its file), served as `GET /__cad/plot` serves it: no KiCad, no board.
 const BOARD = JSON.parse(await readFile(new URL('./__fixtures__/board.plot.json', import.meta.url), 'utf8'));
-const SCHEMATIC = JSON.parse(await readFile(new URL('./__fixtures__/schematic.plot.json', import.meta.url), 'utf8'));
-const HARNESS = JSON.parse(await readFile(new URL('./__fixtures__/harness.plot.json', import.meta.url), 'utf8'));
-const PLOTS = { 'blinky.kicad_pcb': BOARD, 'blinky.kicad_sch': SCHEMATIC, 'cable.harness.yml': HARNESS };
-const NO_KICAD = "KiCad's command line, kicad-cli, was not found: install KiCad 10 from https://www.kicad.org/download/.";
+const PLOTS = { 'blinky.kicad_pcb': BOARD };
+const UNREADABLE = 'broken.kicad_pcb is not a KiCad board: a .kicad_pcb starts with (kicad_pcb ...)';
 
 // The harness renders its pane at a fixed CSS size; the spec draws it smaller.
 const HARNESS_SIZE = '<style>#root > div { width: var(--harness-width, 800px) !important; height: var(--harness-height, 500px) !important; }</style>';
@@ -28,8 +25,7 @@ before(async () => {
   await build({ entryPoints: [fileURLToPath(new URL('../harness/index.tsx', import.meta.url))], outfile: join(temporary, 'harness.js'), bundle: true, format: 'esm', platform: 'browser', conditions: ['production'], jsx: 'automatic', loader: { '.webp': 'dataurl', '.avif': 'dataurl', '.woff2': 'dataurl', '.svg': 'dataurl' } });
   const bundle = await readFile(join(temporary, 'harness.js'));
   const css = await readFile(new URL('../../../dist/styles.css', import.meta.url));
-  const files = ['blinky.kicad_pcb', 'blinky.kicad_sch', 'cable.harness.yml', 'broken.kicad_pcb'];
-  const kindOf = file => (file.endsWith('.harness.yml') ? 'harness' : file.split('.').pop());
+  const files = ['blinky.kicad_pcb', 'broken.kicad_pcb'];
   server = createServer((request, response) => {
     const url = new URL(request.url, 'http://test');
     const root = url.pathname.split('/')[1];
@@ -39,12 +35,12 @@ before(async () => {
       // Asked for by the file's absolute path, which names the fixture last.
       const plot = PLOTS[String(url.searchParams.get('file')).split('/').pop()];
       response.setHeader('Content-Type', 'application/json');
-      if (!plot) { response.statusCode = 400; response.end(JSON.stringify({ error: NO_KICAD })); return; }
+      if (!plot) { response.statusCode = 400; response.end(JSON.stringify({ error: UNREADABLE })); return; }
       response.end(JSON.stringify(plot));
     } else if (url.pathname.endsWith('/__cad/catalog')) {
       response.setHeader('Content-Type', 'application/json');
       response.end(JSON.stringify({ entries: files.map(file => (
-        { kind: kindOf(file), file: `/models/${file}`, url: `/${file}`, hash: `${root}-${file}`, bytes: 4096 })) }));
+        { kind: 'kicad_pcb', file: `/models/${file}`, url: `/${file}`, hash: `${root}-${file}`, bytes: 4096 })) }));
     } else if (url.pathname.endsWith('/__cad/server')) {
       response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ backend: 'cadgen' }));
     } else { response.setHeader('Content-Type', 'text/html'); response.end(`<!doctype html><html><head><link rel="stylesheet" href="/styles.css">${HARNESS_SIZE}</head><body><div id="root"></div><script type="module" src="/harness.js"></script></body></html>`); }
@@ -136,9 +132,10 @@ test('a board opens fitted on its own background, its tracks drawn, and stays sh
   // The sheet is on KiCad's board background, the surround is the theme's.
   assert.ok(near(pixel(fitted, box.minX + 4, box.minY + 4), hex(BOARD.sheets[0].background)), `board background: ${pixel(fitted, box.minX + 4, box.minY + 4)}`);
   assert.ok(near(box.surround, [255, 255, 255]), `light surround: ${box.surround}`);
-  // The 1 mm track across the middle (y = 15 of 30) is KiCad's red, as thick as 1 mm is here.
+  // The 1 mm track across the middle (y = 15 of 30) is KiCad's red, as thick as 1 mm is here. The
+  // column x = 30 crosses nothing but the track.
   const scale = box.width / 40;
-  const column = Math.round(box.minX + 20 * scale);
+  const column = Math.round(box.minX + 30 * scale);
   const middle = box.minY + 15 * scale;
   assert.ok(red(pixel(fitted, column, middle)), `the track: ${pixel(fitted, column, middle)}`);
   const atFit = run(fitted, column, box.minY, box.maxY, red);
@@ -172,9 +169,9 @@ test('a press on a pad’s pixels selects that pad and lights them; from the bot
   const at = ([x, y], mirrored = false) => pageToScreen(transform, mirrored ? sheet.width - x : x, y);
   const selected = () => page.evaluate(() => window.cadHarness.a.controller.readState().selection.flatMap(reference => reference.target.selectors));
   const highlight = [141, 197, 255];
-  // R1 pad 2 (sheet 36.65, 15): KiCad's copper, until a press on it selects it and lights it.
-  const [x, y] = at([36.65, 15]);
-  assert.ok(!near(pixel(fitted, x, y), highlight, 40), `KiCad's copper first: ${pixel(fitted, x, y)}`);
+  // R1 pad 2 (sheet 35.825, 15): the pad as drawn, until a press on it selects it and lights it.
+  const [x, y] = at([35.825, 15]);
+  assert.ok(!near(pixel(fitted, x, y), highlight, 40), `the pad as drawn first: ${pixel(fitted, x, y)}`);
   await page.mouse.click(canvas.x + x, canvas.y + y);
   await page.mouse.move(canvas.x + 2, canvas.y + 2);
   await page.waitForFunction(() => window.cadHarness.a.controller?.readState().selection.length === 1);
@@ -198,25 +195,6 @@ test('a press on a pad’s pixels selects that pad and lights them; from the bot
   assert.deepEqual(errors, []);
 });
 
-test('a schematic’s sheets stand one under another, root first, each on KiCad’s paper', async (t) => {
-  const { pane, errors } = await open(t, 'blinky.kicad_sch');
-  const image = await frame(pane);
-  const box = sheetBox(image);
-  const paper = hex(SCHEMATIC.sheets[0].background);
-  const [first, second] = SCHEMATIC.sheets;
-  const gap = first.width * 0.04;
-  const scale = box.height / (first.height + gap + second.height);
-  assert.ok(Math.abs(box.width - first.width * scale) <= 2, 'the widest sheet sets the width');
-  const centreX = (box.minX + box.maxX) / 2;
-  // Root sheet, then the gap (the surround), then the second, smaller sheet centred under it.
-  assert.ok(near(pixel(image, centreX, box.minY + 20 * scale), paper), 'the root sheet is on paper');
-  assert.ok(near(pixel(image, centreX, box.minY + (first.height + gap / 2) * scale), box.surround), 'the gap is the surround');
-  const secondTop = box.minY + (first.height + gap) * scale;
-  assert.ok(near(pixel(image, centreX, secondTop + 20 * scale), paper), 'the second sheet is on paper');
-  const secondLeft = centreX - (second.width / 2) * scale;
-  assert.ok(near(pixel(image, secondLeft - 4, secondTop + 20 * scale), box.surround), 'and narrower, centred under the first');
-  assert.deepEqual(errors, []);
-});
 
 test('the theme is the surround only: the board keeps its own background', async (t) => {
   const { page, pane, errors } = await open(t, 'blinky.kicad_pcb');
@@ -231,26 +209,8 @@ test('the theme is the surround only: the board keeps its own background', async
   assert.deepEqual(errors, []);
 });
 
-test('a wiring harness is WireViz’s diagram, sized in points, on its white page', async (t) => {
-  const { page, pane, errors } = await open(t, 'cable.harness.yml');
-  const light = await frame(pane);
-  // On a dark surround the white page shows whole: fitted to Graphviz's 216 x 108 pt, centred.
-  await page.evaluate(() => document.documentElement.classList.add('dark'));
-  const image = await frame(pane, light);
-  const box = sheetBox(image);
-  assert.ok(Math.abs(box.width / box.height - 2) < 0.03, `the diagram's own aspect: ${box.width}x${box.height}`);
-  assert.ok(Math.abs(box.width - (image.width - 32)) <= 2, `fitted to the gutter: ${box.width} in ${image.width}`);
-  assert.ok(near(pixel(image, box.minX + box.width / 2, box.minY + box.height * 0.15), hex(HARNESS.sheets[0].background)), 'on WireViz’s page colour');
-  // The wire runs across the middle (y = 54 of 108 pt, x = 24..192 of 216): Graphviz's y-up
-  // transform lands it where WireViz drew it.
-  const wire = pixel(image, box.minX + box.width / 2, box.minY + box.height / 2);
-  assert.ok(red(wire), `the wire: ${wire}`);
-  assert.ok(!red(pixel(image, box.minX + box.width * 0.05, box.minY + box.height / 2)), 'and starts where the diagram starts it');
-  assert.equal(await canvasOf(pane).getAttribute('aria-label'), 'Harness: cable.harness.yml');
-  assert.deepEqual(errors, []);
-});
 
-test('a capture is the view as a PNG: the SVG drawn on the canvas does not taint it', async (t) => {
+test('a capture is the view as a PNG', async (t) => {
   const { page, pane, errors } = await open(t, 'blinky.kicad_pcb');
   await frame(pane);
   await page.evaluate(() => window.cadHarness.capture());
@@ -301,14 +261,14 @@ test('the view a person chose is the file view’s camera, and comes back when t
   assert.deepEqual(errors, []);
 });
 
-test('a machine without KiCad shows the server’s own sentence, and not a spinner forever', async (t) => {
+test('a file that is no board shows the server’s own sentence, and not a spinner forever', async (t) => {
   const { pane, errors } = await open(t, 'broken.kicad_pcb');
   const alert = pane.getByRole('alert');
   await alert.waitFor();
   const text = await alert.innerText();
   assert.match(text, /The viewer couldn’t complete the request/);
   assert.match(text, /HTTP 400/);
-  assert.match(text, /install KiCad 10/);
+  assert.match(text, /is not a KiCad board/);
   assert.equal(await pane.locator('[data-viewer-loading]').count(), 0);
   assert.deepEqual(errors, []);
 });

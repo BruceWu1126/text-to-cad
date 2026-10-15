@@ -1,7 +1,4 @@
-"""Names as KiCad gives them: the order it sorts them in, a net's shown name and class.
-
-Shared by the documents cadgen writes and the readers of any KiCad board or schematic.
-"""
+"""Names as KiCad gives them: the order it sorts them in, a net's shown name and class."""
 
 from __future__ import annotations
 
@@ -11,11 +8,7 @@ import re
 from pathlib import Path
 from typing import Mapping, Sequence
 
-__all__ = ["GENERATOR", "GENERATOR_VERSION", "natural", "netclass_of", "project_netclasses", "unescape_net_name"]
-
-#: What a document cadgen writes says made it, and the KiCad version it is written for.
-GENERATOR = "cadgen"
-GENERATOR_VERSION = "10.0"
+__all__ = ["natural", "netclass_of", "project_netclasses", "unescape_net_name"]
 
 _ESCAPES = {
     "slash": "/", "backslash": "\\", "lt": "<", "gt": ">", "colon": ":", "dblquote": '"', "quote": "'",

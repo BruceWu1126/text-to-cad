@@ -9,18 +9,21 @@ import { PATCH_LIMIT, SETTLE_MS, createPlotRasters } from "./plotRasters.js";
 // turns by hand: the first frame is drawn at once, a pan is a whole-pixel move of what was
 // drawn, a zoom is redrawn at its own scale once the view rests, and the cache stays bounded.
 
-const PAYLOAD = { schemaVersion: 2, kind: "schematic", unrouted: null, sheets: [
-  { name: "root", svg: "<svg/>", width: 297, height: 210, background: "#F5F4EF" },
-  { name: "power", svg: "<svg/>", width: 297, height: 210, background: "#F5F4EF" }
+// A 40 x 30 mm board of one track: enough geometry to draw, and to tell a patch's drawing from a frame's.
+const PAYLOAD = { schemaVersion: 3, kind: "board", unrouted: 0, sheets: [
+  { name: "blinky", width: 40, height: 30, background: "#001023", layers: [
+    { id: "F.Cu", kind: "copper", side: "front", items: [{ t: "path", pts: [[5, 15], [35, 15]], w: 1, net: "VIN" }] }
+  ] }
 ] };
-const SVGS = ["root-svg", "power-svg"];
 
 function canvas(width, height) {
-  const element = { width, height, draws: [] };
+  const element = { width, height, draws: [], strokes: 0 };
   element.getContext = () => ({
     canvas: element,
-    save() {}, restore() {}, setTransform() {},
+    save() {}, restore() {}, setTransform() {}, beginPath() {}, rect() {}, clip() {}, moveTo() {}, lineTo() {},
     fillRect() {},
+    stroke() { element.strokes += 1; },
+    fill() {},
     drawImage(image, x, y, w, h) { element.draws.push({ image, x, y, w, h }); }
   });
   return element;
@@ -33,7 +36,7 @@ function harness() {
   let next = 0;
   let changes = 0;
   const rasters = createPlotRasters({
-    layout, images: SVGS,
+    layout,
     onChange: () => { changes += 1; },
     createCanvas: (width, height) => { const element = canvas(width, height); made.push(element); return element; },
     schedule: (callback, delay) => { next += 1; timers.set(next, { callback, delay }); return next; },
@@ -54,13 +57,14 @@ function harness() {
   return { layout, rasters, made, screen, paint, rest, get changes() { return changes; } };
 }
 
-test("the first frame is drawn at once, from the sheets' own SVGs, at the pane's device scale", () => {
+test("the first frame is drawn at once, from the board's geometry, at the pane's device scale", () => {
   const { layout, made, screen, paint } = harness();
   const fitted = fitPlotTransform(layout, 800, 600);
   assert.equal(paint(fitted), true, "the first frame is final");
   assert.equal(made.length, 1);
-  // The patch is the SVGs drawn into it, both sheets, nothing else.
-  assert.deepEqual(made[0].draws.map((draw) => draw.image), SVGS);
+  // The patch is the board drawn into it (the track stroked), no image placed on it.
+  assert.equal(made[0].strokes, 1);
+  assert.deepEqual(made[0].draws, []);
   // And the pane shows that patch, at exactly its own size in device pixels.
   assert.equal(screen.draws.length, 1);
   const [{ image, w, h }] = screen.draws;

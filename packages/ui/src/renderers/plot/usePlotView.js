@@ -12,20 +12,19 @@
  */
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { clearSurface } from "@text-to-cad/core/lib/drawing2d/index.js";
-import { drawPlot, fitPlotTransform, sheetImages } from "@text-to-cad/core/lib/plot2d/index.js";
+import { drawPlot, fitPlotTransform } from "@text-to-cad/core/lib/plot2d/index.js";
 import { usePlaneView } from "../kit/plane/usePlaneView.js";
 import { readThemeColors } from "../kit/plane/themeColors.js";
 import { createPlotRasters } from "./plotRasters.js";
 
 /**
  * @param {object} options
- * @param {{ layout: object, images: readonly CanvasImageSource[] }|null} options.plot  A laid-out plot
- *   with its sheets decoded, or null while it loads.
+ * @param {{ layout: object }|null} options.plot  A laid-out plot, or null while it loads.
  * @param {{ scale: number, offsetX: number, offsetY: number }|null} options.restored
  *   The view this file was left at, when it was left anywhere but the fit.
  * @param {"light"|"dark"} options.colorScheme
  * @param {(transform: object|null) => void} options.onViewMoved  The view to remember, or null for the fit.
- * @param {string} options.noun  What the plot is called ("board", "schematic").
+ * @param {string} options.noun  What the plot is called ("board").
  * @param {{ layers: string[]|null, poured: boolean, side: "top"|"bottom" }|null} [options.drawView]  A
  *   board's Display, as `drawPlot`'s `view`; a new one draws the plot afresh.
  */
@@ -62,7 +61,7 @@ export function usePlotView({ plot, restored = null, colorScheme = "light", onVi
   // One raster cache per plot: a new revision starts afresh, and the old one's canvases go with it.
   useEffect(() => {
     if (!plot) return undefined;
-    const rasters = createPlotRasters({ layout: plot.layout, images: plot.images, onChange: requestPaint, view: drawViewRef.current });
+    const rasters = createPlotRasters({ layout: plot.layout, onChange: requestPaint, view: drawViewRef.current });
     rastersRef.current = rasters;
     requestPaint();
     return () => {
@@ -85,8 +84,8 @@ export function usePlotView({ plot, restored = null, colorScheme = "light", onVi
   }, [settle, view.capture]);
 
   /**
-   * The plot on its own, for a library card: fitted whole to `width` × `height`, each sheet's SVG
-   * drawn as a snapshot draws it, on the theme's background — the pane's view is left as it is.
+   * The plot on its own, for a library card: fitted whole to `width` × `height`, the board drawn as
+   * a snapshot draws it, on the theme's background — the pane's view is left as it is.
    */
   const thumbnail = useCallback(({ width, height }) => new Promise((resolve, reject) => {
     const current = plotRef.current;
@@ -98,10 +97,7 @@ export function usePlotView({ plot, restored = null, colorScheme = "light", onVi
     if (!context) { reject(new Error(`The browser cannot draw the ${noun}’s picture.`)); return; }
     clearSurface(context, { width: canvas.width, height: canvas.height,
       background: readThemeColors(containerRef.current, schemeRef.current).background });
-    drawPlot(context, current.layout, {
-      transform: fitPlotTransform(current.layout, canvas.width, canvas.height),
-      images: sheetImages(current.layout, current.images)
-    });
+    drawPlot(context, current.layout, { transform: fitPlotTransform(current.layout, canvas.width, canvas.height) });
     canvas.toBlob((blob) => {
       if (blob) resolve(blob);
       else reject(new Error(`The browser could not encode this ${noun} as a PNG.`));

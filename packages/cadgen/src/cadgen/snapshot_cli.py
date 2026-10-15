@@ -57,7 +57,6 @@ from cadgen._internal.snapshot_door import (
     drawing_scene_refusal,
 )
 from cadgen.store.view import view_dir_for
-from cadgen.file_types import format_of
 from cadgen.step_targets import ResolvedStepTarget, StepTopologyArtifact, StepTopologyArtifactError
 
 from cadgen.cli_logging import CliLogger
@@ -435,14 +434,19 @@ def load_job_from_options(options: SnapshotOptions, *, cwd: Path | None = None) 
 
 
 def input_kind(file_path: Path) -> str:
-    """The kind of snapshot input ``file_path`` is, by its format as the viewer's catalog
-    reads it (``cable.harness.yml`` is a ``harness``); ``""`` for none."""
-    kind = format_of(file_path)
-    if kind == "py":
+    """The kind of snapshot input ``file_path`` is, by its suffix; ``""`` for none."""
+    suffix = file_path.suffix.lower()
+    if suffix == ".py":
         # DOCUMENTS-ONLY: a model script is a program. The kind survives only so
         # the resolver can refuse it by naming the run.
         return "python"
-    return kind if kind in KIND_LABELS else ""
+    return _KIND_BY_SUFFIX.get(suffix, "")
+
+
+_KIND_BY_SUFFIX = {
+    ".step": "step", ".stp": "stp", ".dxf": "dxf", ".glb": "glb", ".stl": "stl", ".3mf": "3mf",
+    ".kicad_pcb": "kicad_pcb", ".urdf": "urdf", ".srdf": "srdf", ".sdf": "sdf",
+}
 
 
 def resolve_input_path(raw_input: object, *, cwd: Path) -> Path:
@@ -1297,12 +1301,12 @@ def resolve_step_render_job(
 # `cadgen.drawing_payload` the CAD Viewer's DXF pane paints, with the same
 # core code (@text-to-cad/core/lib/drawing2d), so the CLI cannot show a picture
 # the viewer cannot. Everything below is what that costs the option surface.
-# A PLOT is drawn too -- a KiCad board or schematic, as KiCad plots it, by the
-# viewer's plot pane code (@text-to-cad/core/lib/plot2d) -- and costs the same.
+# A PLOT is drawn too -- a KiCad board, from its file, by the viewer's plot pane
+# code (@text-to-cad/core/lib/plot2d) -- and costs the same.
 #
 # `appearance` is the whole of a drawing's display: it picks the background,
 # and therefore the colour of an entity with no pen of its own (ACI 7). A plot's
-# sheets keep KiCad's colours; its appearance is the surround they sit on.
+# sheet keeps KiCad's colours; its appearance is the surround it sits on.
 DRAWING_DISPLAY_KEYS = frozenset({"appearance"})
 # Output settings that still mean something for a picture with no scene.
 DRAWING_OUTPUT_SETTINGS_KEYS = frozenset({"sizeProfile", "renderScale", "transparent"})
@@ -1477,9 +1481,9 @@ def check_plot_render_job(
     """What a plot cannot be asked for: what a drawing cannot, in a plot's words.
 
     `cadgen pcb snapshot` takes none of it (its signature is a drawing's), and
-    this is the path a job packet and `cadgen snapshot` route a board or a
-    schematic through, so a request for a camera or a render mode is refused
-    by name rather than drawn as if it had not been made.
+    this is the path a job packet and `cadgen snapshot` route a board through,
+    so a request for a camera or a render mode is refused by name rather than
+    drawn as if it had not been made.
     """
     check_flat_render_job(job, input_path=input_path, mode=mode, words=plot_words(kind))
 
@@ -1565,13 +1569,13 @@ def resolve_plot_render_job(
     input_path: Path,
     **_kind_context: object,
 ) -> dict[str, object]:
-    """Resolve a plot (a KiCad board or schematic, a wiring harness): its payload, on a path the page can fetch.
+    """Resolve a plot (a KiCad board): its payload, on a path the page can fetch.
 
     The page draws the SAME payload the Viewer's `GET /__cad/plot` answers with
-    (:func:`cadgen.kicad.plot.plot_payload_bytes`, :func:`cadgen.wireviz.plot.plot_payload_bytes`):
-    the document's tool plots it once, the store caches it by the document's
-    bytes, and the page draws its sheets with the viewer's own code. The job the
-    page sees is a `plot` job; which file it came from is `inputKind`.
+    (:func:`cadgen.plot.plot_payload_bytes`): the board is read from its file
+    once, the store caches the payload by the file's bytes, and the page draws
+    its layers with the viewer's own code. The job the page sees is a `plot`
+    job; which file it came from is `inputKind`.
     """
     payload_path = plot_payload_file(input_path)
     serve_root = payload_path.parent
@@ -1591,9 +1595,8 @@ def plot_payload_file(source: Path) -> Path:
     """The document's plot payload, written where the render can fetch it.
 
     Beside the drawings' payloads (one directory per process, removed at exit),
-    named by the payload's own content hash. A machine without the document's
-    tool, or a document it cannot plot, is refused with the plotter's own
-    sentence -- which names the file, and for a missing tool, how to install it.
+    named by the payload's own content hash. A document that is not a readable
+    board is refused with the plotter's own sentence, which names the file.
     """
     from hashlib import sha256
 
@@ -1615,14 +1618,13 @@ def plot_payload_file(source: Path) -> Path:
 
 
 def _plot_payload_bytes(source: Path) -> bytes:
-    """A plot's payload, from the tool that draws it (``cadgen.plot``, as the Viewer's
-    `GET /__cad/plot` draws it); the tool's refusals as snapshot errors."""
-    from cadgen.kicad.cli import KicadRunError
+    """A plot's payload (``cadgen.plot``, as the Viewer's `GET /__cad/plot` draws it); its
+    refusals as snapshot errors."""
     from cadgen.plot import PlotError, plot_payload_bytes
 
     try:
         return plot_payload_bytes(source)
-    except (PlotError, KicadRunError) as error:
+    except PlotError as error:
         raise SnapshotError(str(error)) from None
 
 
@@ -1642,8 +1644,6 @@ _KINDS: dict[str, tuple[Callable[..., object], Callable[..., dict[str, object]]]
     "3mf": _MESH_KIND,
     "dxf": (check_drawing_render_job, resolve_drawing_render_job),
     "kicad_pcb": _PLOT_KIND,
-    "kicad_sch": _PLOT_KIND,
-    "harness": _PLOT_KIND,
     "urdf": _ROBOT_KIND,
     "srdf": _ROBOT_KIND,
     "sdf": _ROBOT_KIND,
@@ -1661,12 +1661,12 @@ KIND_LABELS: dict[str, str] = {
     "step": ".step", "stp": ".stp",
     "glb": ".glb", "stl": ".stl", "3mf": ".3mf",
     "dxf": ".dxf",
-    "kicad_pcb": ".kicad_pcb", "kicad_sch": ".kicad_sch", "harness": ".harness.yml",
+    "kicad_pcb": ".kicad_pcb",
     "urdf": ".urdf", "srdf": ".srdf", "sdf": ".sdf",
 }
 
 _KIND_HELP_ORDER = (
-    "step", "stp", "3mf", "glb", "stl", "dxf", "kicad_pcb", "kicad_sch", "harness", "urdf", "srdf", "sdf",
+    "step", "stp", "3mf", "glb", "stl", "dxf", "kicad_pcb", "urdf", "srdf", "sdf",
 )
 
 

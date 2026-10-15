@@ -25,39 +25,22 @@ test("entrySourceFormat maps manifest kinds to stable render formats", () => {
   assert.equal(entrySourceFormat({ kind: "srdf" }), RENDER_FORMAT.SRDF);
   assert.equal(entrySourceFormat({ kind: "sdf" }), RENDER_FORMAT.SDF);
   assert.equal(entrySourceFormat({ kind: "kicad_pcb" }), RENDER_FORMAT.KICAD_PCB);
-  assert.equal(entrySourceFormat({ kind: "kicad_sch" }), RENDER_FORMAT.KICAD_SCH);
-  assert.equal(entrySourceFormat({ kind: "harness" }), RENDER_FORMAT.HARNESS);
 });
 
-test("a KiCad board and schematic are plots: CAD files with their own asset, not meshes", () => {
-  for (const [path, format] of [["boards/blinky.kicad_pcb", RENDER_FORMAT.KICAD_PCB], ["blinky.KICAD_SCH", RENDER_FORMAT.KICAD_SCH]]) {
-    assert.equal(renderFormatFromPath(path), format, path);
-    assert.equal(isCadFile(path), true, path);
-    assert.equal(isPlotRenderFormat(format), true, format);
-    assert.equal(isMeshRenderFormat(format), false, format);
-    assert.equal(normalizeRenderFormat(format), format);
-    assert.equal(meshAssetKeyForEntry({ kind: format }), format);
-  }
-  // A project file is not one: only the board and the schematic are drawn.
-  assert.equal(renderFormatFromPath("blinky.kicad_pro"), "");
-  assert.equal(isPlotRenderFormat(RENDER_FORMAT.DXF), false);
-});
-
-test("a wiring harness is its two suffixes together; a plain .yml is no CAD file", () => {
-  for (const path of ["harness/cable.harness.yml", "CABLE.HARNESS.YML", "https://example.test/w/cable.harness.yml?download=1#top"]) {
-    assert.equal(renderFormatFromPath(path), RENDER_FORMAT.HARNESS, path);
+test("a KiCad board is a plot: a CAD file with its own asset, not a mesh", () => {
+  for (const path of ["boards/blinky.kicad_pcb", "BLINKY.KICAD_PCB", "https://example.test/w/blinky.kicad_pcb?download=1#top"]) {
+    assert.equal(renderFormatFromPath(path), RENDER_FORMAT.KICAD_PCB, path);
     assert.equal(isCadFile(path), true, path);
   }
-  assert.equal(fileExtensionFromPath("w/cable.harness.yml?v=2"), ".harness.yml");
-  assert.equal(isPlotRenderFormat(RENDER_FORMAT.HARNESS), true);
-  assert.equal(normalizeRenderFormat(RENDER_FORMAT.HARNESS), RENDER_FORMAT.HARNESS);
-  assert.equal(meshAssetKeyForEntry({ kind: "harness" }), RENDER_FORMAT.HARNESS);
-  // Only the pair is a harness: a plain YAML file, a hidden one with no name before the pair,
-  // and a name that merely contains it are not.
-  for (const path of ["config.yml", "w/.harness.yml", "cable.harness.yml.bak", "cable.harness"]) {
+  assert.equal(isPlotRenderFormat(RENDER_FORMAT.KICAD_PCB), true);
+  assert.equal(isMeshRenderFormat(RENDER_FORMAT.KICAD_PCB), false);
+  assert.equal(normalizeRenderFormat(RENDER_FORMAT.KICAD_PCB), RENDER_FORMAT.KICAD_PCB);
+  assert.equal(meshAssetKeyForEntry({ kind: "kicad_pcb" }), RENDER_FORMAT.KICAD_PCB);
+  // The project and the schematic beside a board are not drawn: only the board is.
+  for (const path of ["blinky.kicad_pro", "blinky.kicad_sch", "config.yml"]) {
     assert.equal(renderFormatFromPath(path), "", path);
   }
-  assert.equal(fileExtensionFromPath("config.yml"), ".yml");
+  assert.equal(isPlotRenderFormat(RENDER_FORMAT.DXF), false);
 });
 
 test("the mesh format predicate stays narrow", () => {

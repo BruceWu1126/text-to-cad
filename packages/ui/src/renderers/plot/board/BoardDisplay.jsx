@@ -9,7 +9,7 @@ import { FileSheetCheckboxRow, FileSheetSelectRow, FileSheetSettingsSection } fr
  * reading the routing turns it off. Modes are presets, as a 3D view's are (`render-mode.md`): each
  * says which layers are drawn and whether pours are filled, and a setting changed away from its
  * mode reads as Custom, the mode kept as what Reset returns to. The side is not a preset's, as a
- * 3D view's camera is not. KiCad still draws every layer; a mode only chooses among them.
+ * 3D view's camera is not. The payload carries every layer; a mode only chooses among them.
  * Placement draws no copper: the parts, their pads and courtyards, and every connection as an
  * airwire (`boardAirwires`), routed or not — the board as it is laid out, before it is wired. A
  * net its pours join shows its airwires only when selected.
@@ -34,12 +34,13 @@ export const BOARD_MODE_OPTIONS = Object.freeze([
   Object.freeze({ value: "assembly", label: "Assembly", title: "Silkscreen, fab outlines and courtyards: what is placed where", Icon: AssemblyModeIcon }),
   Object.freeze({ value: "placement", label: "Placement", title: "Parts, pads and courtyards with their connections as airwires, before routing", Icon: PlacementModeIcon }),
 ]);
-// What each mode draws, by layer kind (the outline always), and its pours. `airwires`: the overlay
-// draws the pads, their holes and every connection as a straight line, over a plot without copper
-// or drills (KiCad's drill layer holds the vias' holes too, and a via is routing).
+// What each mode draws, by layer kind (the outline always), and its pours. Board is the board as
+// it is made: every layer but the courtyards (`plot2d`'s default view). `airwires`: the overlay
+// draws the pads, their holes and every connection as a straight line, over a plot without copper,
+// vias or drills (the drill layer holds the vias' holes too, and a via is routing).
 const MODES = Object.freeze({
-  board: { kinds: ["copper", "silk", "fab", "drill", "outline", "ratsnest"], poured: true, airwires: false },
-  copper: { kinds: ["copper", "drill", "outline", "ratsnest"], poured: true, airwires: false },
+  board: { kinds: ["copper", "mask", "paste", "silk", "fab", "adhesive", "user", "margin", "via", "drill", "outline", "ratsnest"], poured: true, airwires: false },
+  copper: { kinds: ["copper", "via", "drill", "outline", "ratsnest"], poured: true, airwires: false },
   assembly: { kinds: ["silk", "fab", "courtyard", "drill", "outline", "ratsnest"], poured: true, airwires: false },
   placement: { kinds: ["fab", "courtyard", "outline"], poured: true, airwires: true },
 });

@@ -1,25 +1,16 @@
 /**
- * What the plot pane calls the document on screen. Every kind (`"board"`, `"schematic"`,
- * `"harness"`) is laid out, drawn and navigated the same way, and each is named in its own words
- * here. What a kind OFFERS is not words: a board or a schematic with its index has the tools a
- * person points with, a board its Display and Draw and Measure too, and a harness is the picture
- * alone (`PlotRenderer.jsx`). Until the payload says what it is, the file's name does.
+ * What the plot pane calls the document on screen. A board is laid out, drawn and navigated one
+ * way, and named in its own words here; a payload of a kind this build does not know is spoken
+ * of as a plot. Until the payload says what it is, the file's name does.
  */
 
-/** Each kind's noun, and the tool whose picture of it the pane shows. */
-const KINDS = Object.freeze({
-  board: Object.freeze({ noun: "board", tool: "KiCad" }),
-  schematic: Object.freeze({ noun: "schematic", tool: "KiCad" }),
-  harness: Object.freeze({ noun: "harness", tool: "WireViz" })
-});
-const UNKNOWN = Object.freeze({ noun: "plot", tool: "its own tool" });
-
-/** The kind a file's name implies, before its payload has said. */
-const KIND_BY_NAME = [[/\.kicad_pcb$/i, "board"], [/\.kicad_sch$/i, "schematic"], [/[^/\\]\.harness\.yml$/i, "harness"]];
+/** Each kind's noun, and whose colours the pane draws it in. */
+const KINDS = Object.freeze({ board: Object.freeze({ noun: "board", tool: "KiCad" }) });
+const UNKNOWN = Object.freeze({ noun: "plot", tool: "KiCad" });
 
 /** @param {string} path */
 export function plotKindForPath(path) {
-  return KIND_BY_NAME.find(([pattern]) => pattern.test(String(path || "")))?.[1] || "";
+  return /\.kicad_pcb$/i.test(String(path || "")) ? "board" : "";
 }
 
 const capital = (text) => text.charAt(0).toUpperCase() + text.slice(1);
@@ -52,10 +43,8 @@ function wordsFor({ noun, tool }) {
     remains: `The existing ${noun} remains visible.`,
     /** Host commands a flat picture cannot answer, each with the sentence its caller reads. */
     declined: Object.freeze({
-      select: `${a} is shown as the picture ${tool} draws of it, without CAD references: it has no parts, faces `
-        + "or edges to select. Selection needs a model with topology, such as a STEP file.",
-      clearSelection: `${a} is shown as the picture ${tool} draws of it, without CAD references, so it never `
-        + "has a selection to clear."
+      select: `${a} is shown as a flat picture without its index: it has no parts, pads or nets to select.`,
+      clearSelection: `${a} is shown as a flat picture without its index, so it never has a selection to clear.`
     }),
     noCamera: `${a} is a flat picture shown head on: it has no camera to pose. Zoom and pan it in the view, `
       + `or call resetCamera to fit the whole ${noun} again.`,

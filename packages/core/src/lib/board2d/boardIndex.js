@@ -6,9 +6,9 @@
  * Geometry arrives in SHEET coordinates (millimetres, y down, the plot sheet's corner) — every
  * point of it, a part's and a pad's place included — and is kept in PAGE coordinates (the sheet's
  * place in the laid-out plot added: `layoutPlot`), the frame the view's transform maps to the
- * screen. What a person or an agent reads is in SCRIPT coordinates (`toScript`): millimetres, y
- * up, from the board's drill/place origin (`index.origin`, in sheet coordinates), the frame
- * `board.place` and the build's checks speak.
+ * screen. What a person or an agent reads is in KiCad's own coordinates (`toScript`): millimetres,
+ * y down, from KiCad's page origin (`index.origin`: where that origin lies, in sheet coordinates),
+ * the frame a script's `Vector2.from_xy_mm` takes, so a copied point pastes straight into one.
  *
  * Pure: no canvas, no DOM. The viewer picks with it on every pointer move, so what is near a point
  * is found through a grid of the board (`spatialGrid.js`): a board of tens of thousands of pads
@@ -59,8 +59,8 @@ export function createBoardIndex(board, sheet = {}) {
   };
   const pageList = (values) => (Array.isArray(values) ? values.map(page).filter(Boolean) : []);
   const origin = point(board?.origin) || [0, 0];
-  const toScript = ([x, y]) => [x - sheetX - origin[0], origin[1] + sheetY - y];
-  const toPage = ([x, y]) => [x + origin[0] + sheetX, origin[1] + sheetY - y];
+  const toScript = ([x, y]) => [x - sheetX - origin[0], y - sheetY - origin[1]];
+  const toPage = ([x, y]) => [x + origin[0] + sheetX, y + origin[1] + sheetY];
 
   const nets = new Map();
   const netNamed = (name) => {
@@ -86,7 +86,7 @@ export function createBoardIndex(board, sheet = {}) {
     parts.set(ref, {
       kind: "part", ref, value: String(entry.value ?? ""), footprint: String(entry.footprint ?? ""),
       side: entry.side === "bottom" ? "bottom" : "top", at: page(entry.at) || [sheetX, sheetY], rotation: Number(entry.rotation) || 0,
-      fields: entry.fields && typeof entry.fields === "object" ? { ...entry.fields } : {}, script: entry.script ? String(entry.script) : "",
+      fields: entry.fields && typeof entry.fields === "object" ? { ...entry.fields } : {},
       dnp: Boolean(entry.dnp), outline, area: outline.length > 2 ? polygonArea(outline) : Infinity, box: outline.length > 2 ? boxOf(outline) : null, pads: []
     });
   }

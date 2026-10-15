@@ -43,7 +43,6 @@ DOOR_COMMANDS = {
     "glb": "cadgen.cli.glb_snapshot",
     "dxf": "cadgen.cli.dxf_snapshot",
     "pcb": "cadgen.cli.pcb_snapshot",
-    "harness": "cadgen.cli.harness_snapshot",
     "urdf": "cadgen.cli.urdf_snapshot",
     "sdf": "cadgen.cli.sdf_snapshot",
 }
@@ -51,9 +50,9 @@ DOOR_COMMANDS = {
 # Every door that stages a SCENE. A drawing is drawn flat, so `cadgen dxf
 # snapshot` has no display settings at all — `--appearance` alone decides its
 # background, and therefore the colour of its default pen. A plot is as flat:
-# `cadgen pcb snapshot` (KiCad) and `cadgen harness snapshot` (WireViz) take the
-# same narrow shape.
-FLAT_DOORS = ("dxf", "pcb", "harness")
+# `cadgen pcb snapshot` (a KiCad board, drawn from its file) takes the same
+# narrow shape.
+FLAT_DOORS = ("dxf", "pcb")
 SCENE_DOORS = tuple(door for door in DOOR_COMMANDS if door not in FLAT_DOORS)
 
 
@@ -72,8 +71,7 @@ DOOR_KINDS = {
     "3mf": ("3mf",),
     "glb": ("glb",),
     "dxf": ("dxf",),
-    "pcb": ("kicad_pcb", "kicad_sch"),
-    "harness": ("harness",),
+    "pcb": ("kicad_pcb",),
     "urdf": ("urdf",),
     "srdf": ("srdf",),
     "sdf": ("sdf",),
@@ -91,18 +89,16 @@ class InputKindTests(unittest.TestCase):
             with self.subTest(sample=sample):
                 self.assertEqual("python", input_kind(Path(sample)))
 
-    def test_a_harness_is_its_two_suffixes_together(self):
-        # As the viewer's catalog reads it: `cable.harness.yml` is a wiring harness, a
-        # plain `.yml` is no input at all, and the pair alone is a hidden `.yml`.
-        self.assertEqual("harness", input_kind(Path("w/Cable.Harness.YML")))
-        for sample in ("config.yml", ".harness.yml", "cable.harness.yml.bak"):
+    def test_a_board_is_a_kind_and_the_files_beside_it_are_none(self):
+        # Only the board is drawn: its project and schematic are no input at all.
+        self.assertEqual("kicad_pcb", input_kind(Path("boards/Blinky.KICAD_PCB")))
+        for sample in ("blinky.kicad_pro", "blinky.kicad_sch", "config.yml"):
             with self.subTest(sample=sample):
                 self.assertEqual("", input_kind(Path(sample)))
 
     def test_every_kind_it_names_has_a_resolver_or_is_a_generator(self):
         for sample in ("a.step", "a.stp", "a.glb", "a.stl", "a.3mf",
-                       "a.urdf", "a.srdf", "a.sdf", "a.dxf", "a.kicad_pcb", "a.kicad_sch",
-                       "a.harness.yml"):
+                       "a.urdf", "a.srdf", "a.sdf", "a.dxf", "a.kicad_pcb"):
             kind = input_kind(Path(sample))
             self.assertTrue(kind, f"{sample} resolved to no kind")
             self.assertIn(kind, set(KIND_RESOLVERS) | {"python", "dxf"}, sample)
@@ -126,8 +122,7 @@ class EnabledKindsTests(unittest.TestCase):
 
     def test_a_door_gets_only_what_it_declares(self):
         self.assertEqual({"dxf"}, set(enabled_kinds(DOOR_KINDS["dxf"])))
-        self.assertEqual({"kicad_pcb", "kicad_sch"}, set(enabled_kinds(DOOR_KINDS["pcb"])))
-        self.assertEqual({"harness"}, set(enabled_kinds(DOOR_KINDS["harness"])))
+        self.assertEqual({"kicad_pcb"}, set(enabled_kinds(DOOR_KINDS["pcb"])))
         self.assertEqual({"urdf"}, set(enabled_kinds(DOOR_KINDS["urdf"])))
         self.assertEqual({"stl"}, set(enabled_kinds(DOOR_KINDS["stl"])))
 
@@ -163,10 +158,7 @@ class KindGateTests(_Gate):
             ("pcb", "panel.dxf"),
             ("pcb", "part.step"),
             ("step", "board.kicad_pcb"),
-            ("harness", "board.kicad_pcb"),
-            ("pcb", "cable.harness.yml"),
-            ("dxf", "cable.harness.yml"),
-            ("harness", "config.yml"),
+            ("pcb", "board.kicad_sch"),
             ("urdf", "panel.dxf"),
             ("sdf", "part.step"),
             ("stl", "part.step"),
@@ -280,13 +272,9 @@ class GeneratedHelpTests(unittest.TestCase):
                 for absent in ("--display", "--camera", "--mode", "--view-labels", "--render", "--theme"):
                     self.assertNotIn(absent, text, f"{absent} describes a scene a flat picture does not have")
         pcb_help = door_help("pcb")
-        for present in (".kicad_pcb", ".kicad_sch"):
-            self.assertIn(present, pcb_help)
-        self.assertNotIn(".dxf", pcb_help)
-        harness_help = door_help("harness")
-        self.assertIn(".harness.yml", harness_help)
-        for absent in (".kicad_pcb", ".dxf"):
-            self.assertNotIn(absent, harness_help)
+        self.assertIn(".kicad_pcb", pcb_help)
+        for absent in (".kicad_sch", ".dxf", "KiCad installed"):
+            self.assertNotIn(absent, pcb_help)
 
     def test_every_door_takes_its_target_and_output_positionally(self):
         # One grammar across the schema: `cadgen <fmt> build TARGET [OUT]` and
@@ -307,7 +295,7 @@ class GeneratedHelpTests(unittest.TestCase):
         for door in ("urdf", "sdf"):
             with self.subTest(door=door):
                 self.assertIn("--joint-values", door_help(door))
-        for door in ("step", "stl", "3mf", "glb", "dxf", "pcb", "harness"):
+        for door in ("step", "stl", "3mf", "glb", "dxf", "pcb"):
             with self.subTest(door=door):
                 self.assertNotIn("--joint-values", door_help(door))
 

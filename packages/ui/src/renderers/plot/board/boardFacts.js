@@ -2,10 +2,10 @@ import { formatBoardRefSelector } from "@text-to-cad/core/lib/boardRefs.js";
 
 /**
  * What the Reference panel says about one board reference: its heading (what it is, as a person
- * names it — never the raw id, which is the ID row) and its rows, label and value, in script
- * millimetres. Pure data; the Reference panel (`BoardPanels.jsx`) draws it.
+ * names it — never the raw id, which is the ID row) and its rows, label and value, in KiCad's
+ * millimetres (y down). Pure data; the Reference panel (`BoardPanels.jsx`) draws it.
  *
- * A row that names other things on the document carries them as a third element, `links`: each
+ * A row that names other things on the board carries them as a third element, `links`: each
  * `{ text, selector }` the panel draws as a button that selects it (a pad's net, a net's parts),
  * as a robot's Reference selects the links it names; a `text` without a selector reads as words.
  */
@@ -32,7 +32,7 @@ const partSelector = (ref) => formatBoardRefSelector({ kind: "part", ref });
 const netSelector = (net) => formatBoardRefSelector({ kind: "net", net });
 /** A row whose value is one thing on the document, which its button selects. */
 const linked = (label, text, selector) => [label, text, [{ text, selector }]];
-/** A pad's or a pin's net row: the net selects, "None" is words. */
+/** A pad's net row: the net selects, "None" is words. */
 const netRow = (net) => (net ? linked("Net", net, netSelector(net)) : ["Net", "None"]);
 /** A part's row, named by its reference and value. */
 const partRow = (part) => linked("Part", [part.ref, part.value].filter(Boolean).join(" · "), partSelector(part.ref));
@@ -67,8 +67,6 @@ export function boardReferenceFacts(resolved, index) {
         ["Position", position(index.toScript(part.at))],
         ["Rotation", `${Number(part.rotation).toLocaleString(undefined, { maximumFractionDigits: 2 })}°`],
         ["Pads", String(pins)],
-        // The line that made it leads what the library says of it: it is where an edit goes.
-        ...(part.script ? [["Script", part.script]] : []),
         ...fields,
         ...(part.dnp ? [["DNP", "Not assembled"]] : []),
         id,
@@ -120,69 +118,4 @@ export function boardReferenceFacts(resolved, index) {
   }
   if (resolved.kind === "point") return { heading: "Point", rows: [["Position", position(resolved.at)], id] };
   return null;
-}
-
-/**
- * What the Reference panel says about one schematic reference. A schematic has no positions worth
- * reading (where a symbol stands is KiCad's layout, not the design), so it says what a thing is
- * and what it connects to: a symbol's library entry, footprint and sheet; a pin's net; a net's pins.
- */
-export function schematicReferenceFacts(resolved, index) {
-  if (!resolved) return null;
-  const id = ["ID", resolved.selector];
-  const several = (index?.sheets?.filter((sheet) => sheet.placed).length || 0) > 1;
-  if (resolved.kind === "part") {
-    const part = resolved.part;
-    const fields = FIELD_ROWS.filter((key) => part.fields[key]).map((key) => [key, String(part.fields[key])]);
-    const pins = new Set(part.pads.map((pad) => pad.number)).size;
-    const sheets = [...new Set(part.units.map((unit) => unit.sheetName).filter(Boolean))];
-    return {
-      heading: [part.ref, part.value].filter(Boolean).join(" · "),
-      rows: [
-        ["Symbol", part.lib || "None"],
-        ["Footprint", part.footprint.split(":").pop() || "None"],
-        ...(part.units.length > 1 ? [["Units", String(part.units.length)]] : []),
-        ...(several && sheets.length ? [["Sheet", sheets.join(", ")]] : []),
-        ["Pins", String(pins)],
-        ...(part.script ? [["Script", part.script]] : []),
-        ...fields,
-        ...(part.dnp ? [["DNP", "Not assembled"]] : []),
-        id,
-      ],
-    };
-  }
-  if (resolved.kind === "pad") {
-    const pin = resolved.pad;
-    return {
-      heading: `${pin.ref} · pin ${pin.number}${name(pin) ? ` ${name(pin)}` : ""}`,
-      rows: [
-        netRow(pin.net),
-        ...(name(pin) ? [["Name", name(pin)]] : []),
-        ...(pin.type ? [["Type", pin.type.replaceAll("_", " ")]] : []),
-        partRow(pin.part),
-        id,
-      ],
-    };
-  }
-  if (resolved.kind === "net") {
-    const net = resolved.net;
-    const refs = [...new Set(net.pads.map((pad) => pad.ref))];
-    const labels = [...new Set(net.labels.filter((label) => label.type !== "power").map((label) => label.text))];
-    return {
-      heading: `net ${net.name}`,
-      rows: [
-        ...(net.class ? [["Class", net.class]] : []),
-        ["Pins", plural(net.pads.length, "pin")],
-        partsRow(refs),
-        ...(labels.length ? [["Labels", labels.join(", ")]] : []),
-        id,
-      ],
-    };
-  }
-  return null;
-}
-
-/** The Reference's facts for whichever document `index` is. */
-export function referenceFacts(resolved, index) {
-  return index?.document === "schematic" ? schematicReferenceFacts(resolved, index) : boardReferenceFacts(resolved, index);
 }

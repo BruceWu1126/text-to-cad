@@ -67,8 +67,8 @@ def resolve_drawing_path(
 ) -> str | None:
     """The absolute document this ref names, or ``None`` for a 404.
 
-    Raises ``ValueError`` for a ref this route will not take. The KiCad route
-    (``kicad.py``) uses the same rule with its own suffixes.
+    Raises ``ValueError`` for a ref this route will not take. The plot route
+    (``plots.py``) uses the same rule with its own suffixes.
     """
     wanted = " or ".join(suffixes)
     if not file_ref:

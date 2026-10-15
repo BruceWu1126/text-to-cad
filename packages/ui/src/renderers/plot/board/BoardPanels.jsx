@@ -14,12 +14,12 @@ import TreeRowEye, { treeRowEyeLayout } from "../../kit/inspector/TreeRowEye.jsx
 import { useTreeSearch } from "../../kit/inspector/modelTreeSearch.js";
 import { BoardMeasureModeMenu, BoardSelectModeMenu } from "./boardModes.jsx";
 import { boardTreeAncestors, boardTreeNodeIds, buildBoardTree } from "./boardTree.js";
-import { referenceFacts } from "./boardFacts.js";
+import { boardReferenceFacts } from "./boardFacts.js";
 
 const EMPTY = Object.freeze([]);
 const NO_IDS = Object.freeze(new Set());
 // What the panels call the document they list.
-const nounOf = (documentKind) => (documentKind === "schematic" ? "Schematic" : "Board");
+const NOUN = "Board";
 // A part or a net can be isolated; a pad is seen with its part, a group is many things.
 const isolable = (node) => node.kind === "part" || node.kind === "net";
 
@@ -94,14 +94,13 @@ function BoardSearchRow({ match, highlighted, isolatedIds, cursor, actions }) {
 }
 
 /**
- * Select's panel on a board or a schematic: its parts by kind, each with its pads or pins, and its
- * nets, each with the pads or pins on it. The filter is the top row, with Select's mode menu and the
- * X. A row under the pointer lights what it names on the canvas (`hover`); a part's or a net's eye
+ * Select's panel on a board: its parts by kind, each with its pads, and its nets, each with the
+ * pads on it. The filter is the top row, with Select's mode menu and the X. A row under the pointer lights what it names on the canvas (`hover`); a part's or a net's eye
  * isolates it (`isolated`, `onIsolate`). It renders again only for what it shows — the document, the
  * selection, what is isolated, the mode — not for every render of the view under it.
  */
 export const BoardTreePanel = memo(function BoardTreePanel({ index, selection, isolated = EMPTY, selectMode, onSelectMode, select, hover, onIsolate, clear, active }) {
-  const noun = nounOf(index.document);
+  const noun = NOUN;
   const tree = useMemo(() => buildBoardTree(index), [index]);
   const [expanded, setExpanded] = useState(() => new Set(["group:parts"]));
   const toggle = useCallback((node) => setExpanded((current) => {
@@ -143,7 +142,7 @@ export const BoardTreePanel = memo(function BoardTreePanel({ index, selection, i
 
   return <ToolPanel id="tree" label={noun} fit="tree" resizable closable collapsible={false} hidden={!active}
     header={<TreeFilterInput dense label={`Filter ${noun.toLowerCase()}`} placeholder="Filter…" yieldWhileTyping value={query} onChange={changeQuery} onKeyDown={onKeyDown}
-      trailing={<><BoardSelectModeMenu mode={selectMode} onModeChange={onSelectMode} document={index.document} /><ToolPanelClose /></>} />}>
+      trailing={<><BoardSelectModeMenu mode={selectMode} onModeChange={onSelectMode} /><ToolPanelClose /></>} />}>
     <div className="flex flex-col text-tiny" aria-label={`${noun} parts and nets`}>
       <div ref={listRef} className="px-1 py-1" onClick={(event) => { if (!event.target.closest("li,button,input")) clear(); }}>
         {searching ? <p role="status" className="px-2 py-1 text-micro text-muted-foreground">
@@ -189,13 +188,13 @@ function FactValue({ value, links, onSelect }) {
 }
 
 /**
- * The Reference: what is selected, read back (on a board, in script millimetres). Its heading names
+ * The Reference: what is selected, read back in KiCad's millimetres. Its heading names
  * it (a picker over several), its X clears the selection, and its foot copies the references (⌘C).
  * What a row names on the document — a pad's net and part, a net's parts — selects
  * it (`onSelect`), as a robot's Reference selects the links it names.
  */
 export function BoardReferencePanel({ index, resolved, active, onClear, onSelect, onCopy, copyShortcut = "" }) {
-  const items = useMemo(() => resolved.map((item) => ({ selector: item.selector, ...referenceFacts(item, index) })), [resolved, index]);
+  const items = useMemo(() => resolved.map((item) => ({ selector: item.selector, ...boardReferenceFacts(item, index) })), [resolved, index]);
   const [browsed, setBrowsed] = useState(0);
   useEffect(() => { setBrowsed(Math.max(0, items.length - 1)); }, [items.length]);
   if (!items.length) return null;

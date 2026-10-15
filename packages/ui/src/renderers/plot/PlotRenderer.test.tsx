@@ -1,5 +1,5 @@
 import { StrictMode, useState } from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createCadClient } from '@text-to-cad/core/client';
 import { FileViewer } from '../../../dist/file-viewer/index.js';
@@ -8,70 +8,31 @@ import { pageToScreen } from '@text-to-cad/core/lib/plot2d/plot.js';
 // Loaded with the file, not inside the first test: the registration imports it lazily.
 import '../../../dist/renderers/plot/PlotRenderer.js';
 import BOARD from './__fixtures__/board.plot.json';
-import SCHEMATIC from './__fixtures__/schematic.plot.json';
-import HARNESS from './__fixtures__/harness.plot.json';
 
 // The plot tab's states and its answers to the host, mounted the way a host mounts it: the
 // FileViewer over the real registration and a real CAD client, whose backend is a fetch that
-// answers with a committed `/__cad/plot` payload. The pixels are the browser suite's; what is
-// decided here is what the tab shows when, and what a host is told.
+// answers with the committed `/__cad/plot` payload (`__fixtures__/README.md`: J1 at (5, 15), R1 at
+// (35, 15), D1 at (20, 24), in KiCad's millimetres, which are the sheet's here). The pixels are the
+// browser suite's; what is decided here is what the tab shows when, and what a host is told.
 
-// Every frame the pane paints is a `drawPlot` with the view's transform: the picture itself is
-// not jsdom's to draw. A frame of the pane carries a pixel ratio; a raster of the SVGs does not.
+// Every frame the pane paints places its rasters with `drawPlotImages` under the view's transform;
+// the rasters themselves are `drawPlot`, which jsdom cannot draw and the pixels are not its to check.
 const frames = vi.hoisted(() => [] as Array<{ scale: number; offsetX: number; offsetY: number }>);
 vi.mock('@text-to-cad/core/lib/plot2d/index.js', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  return { ...actual, drawPlot: (_ctx: unknown, _layout: unknown, { transform, pixelRatio }: { transform: any; pixelRatio?: number }) => {
-    if (pixelRatio !== undefined) frames.push({ ...transform });
-  } };
+  return {
+    ...actual,
+    drawPlot: () => {},
+    drawPlotImages: (_ctx: unknown, _layout: unknown, { transform }: { transform: any }) => { frames.push({ ...transform }); }
+  };
 });
 
 const noop = () => {};
 const copied: string[] = [];
 // A clipboard that refuses, as a browser does without the page's focus.
 let refuseCopy: Error | null = null;
-// A 40 x 30 mm board's index, in sheet millimetres (y down), its script origin at sheet (5, 25).
-const square = (cx: number, cy: number, w: number, h: number) => [[cx - w / 2, cy - h / 2], [cx + w / 2, cy - h / 2], [cx + w / 2, cy + h / 2], [cx - w / 2, cy + h / 2]];
-const INDEX = {
-  origin: [5, 25],
-  nets: [{ name: 'VIN', class: 'Default' }, { name: 'GND', class: 'Default' }],
-  parts: [
-    { ref: 'R1', value: '10k', footprint: 'Resistor_SMD:R_0603_1608Metric', side: 'top', at: [15, 20], rotation: 0, fields: { MPN: 'RC0603' }, script: 'blinky.py:12', outline: square(15, 20, 3, 1.4) },
-    { ref: 'J1', value: 'Conn', footprint: 'Connector:PinHeader_1x02', side: 'top', at: [30, 10], rotation: 90, fields: {}, outline: square(30, 10, 3, 6) },
-  ],
-  pads: [
-    { part: 'R1', number: '1', name: '~', net: 'VIN', type: 'passive', side: 'top', at: [14.175, 20], polygon: square(14.175, 20, 0.8, 0.95) },
-    { part: 'R1', number: '2', name: '~', net: 'GND', type: 'passive', side: 'top', at: [15.825, 20], polygon: square(15.825, 20, 0.8, 0.95) },
-    { part: 'J1', number: '1', name: '', net: 'VIN', type: 'passive', side: 'both', at: [30, 8.73], polygon: square(30, 8.73, 1.7, 1.7) },
-    { part: 'J1', number: '2', name: '', net: 'GND', type: 'passive', side: 'both', at: [30, 11.27], polygon: square(30, 11.27, 1.7, 1.7) },
-  ],
-  tracks: [{ net: 'VIN', layer: 'F.Cu', width: 0.5, points: [[14.175, 20], [14.175, 8.73], [30, 8.73]] }],
-  vias: [], zones: [], holes: [], outline: [[[0, 0], [40, 0], [40, 30], [0, 30], [0, 0]]],
-};
-// A two-sheet schematic's index, in each sheet's millimetres: R1 and U1's first unit on the root,
-// U1's second unit (and its common pin 4) on "power".
-const SCHEMATIC_INDEX = {
-  sheets: [{ name: 'blinky', path: '/', file: 'blinky.kicad_sch', title: 'Blinky' }, { name: 'power', path: '/power/', file: 'power.kicad_sch', title: '' }],
-  parts: [
-    { ref: 'R1', value: '10k', lib: 'Device:R', footprint: 'Resistor_SMD:R_0603_1608Metric', fields: { MPN: 'RC0603' }, script: 'blinky.py:12', dnp: false,
-      units: [{ unit: 1, sheet: 0, at: [50, 50], rotation: 0, mirror: null, outline: square(50, 50, 2, 5) }] },
-    { ref: 'U1', value: 'LM358', lib: 'Amplifier_Operational:LM358', footprint: 'Package_SO:SOIC-8_3.9x4.9mm_P1.27mm', fields: {}, script: 'blinky.py:20', dnp: false,
-      units: [{ unit: 1, sheet: 0, at: [80, 50], rotation: 0, mirror: null, outline: square(80, 50, 10, 10) },
-        { unit: 3, sheet: 1, at: [30, 30], rotation: 0, mirror: null, outline: square(30, 30, 6, 6) }] },
-  ],
-  pins: [
-    { part: 'R1', number: '1', name: '~', type: 'passive', unit: 1, sheet: 0, net: 'VIN', at: [50, 46.19], end: [50, 47.5], hidden: false },
-    { part: 'R1', number: '2', name: '~', type: 'passive', unit: 1, sheet: 0, net: 'GND', at: [50, 53.81], end: [50, 52.5], hidden: false },
-    { part: 'U1', number: '3', name: '+', type: 'input', unit: 1, sheet: 0, net: 'VIN', at: [72.38, 50], end: [75, 50], hidden: false },
-    { part: 'U1', number: '8', name: 'V+', type: 'power_in', unit: 3, sheet: 1, net: 'VIN', at: [30, 24.92], end: [30, 27], hidden: false },
-  ],
-  wires: [{ net: 'VIN', sheet: 0, points: [[50, 46.19], [50, 43.18], [72.38, 43.18], [72.38, 50]] }],
-  labels: [{ net: 'VIN', sheet: 1, text: 'VIN', kind: 'global', at: [30, 20], outline: [[30, 19.3], [36, 19.3], [36, 20.7], [30, 20.7]] }],
-  junctions: [], noConnects: [],
-  nets: [{ name: 'GND', class: 'Default' }, { name: 'VIN', class: 'Power' }],
-};
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-const INSTALL = "KiCad's command line, kicad-cli, was not found: install KiCad 10 from https://www.kicad.org/download/.";
+const UNREADABLE = 'broken.kicad_pcb is not a KiCad board: a .kicad_pcb starts with (kicad_pcb ...)';
 let readPlot: (file: string) => Response | Promise<Response> = () => json(BOARD);
 const DESTINATION = { kind: 'clipboard', available: true };
 const context2d = new Proxy({}, { get: (_target, key) => (key === 'canvas' ? undefined : noop), set: () => true });
@@ -80,14 +41,11 @@ beforeEach(() => {
   frames.length = 0;
   copied.length = 0;
   refuseCopy = null;
-  readPlot = (file) => (file.endsWith('.kicad_sch') ? json(SCHEMATIC) : file.endsWith('.harness.yml') ? json(HARNESS) : json(BOARD));
+  readPlot = () => json(BOARD);
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => setTimeout(() => callback(performance.now()), 0));
   vi.stubGlobal('cancelAnimationFrame', (handle: number) => clearTimeout(handle));
   vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener: noop, removeEventListener: noop, addListener: noop, removeListener: noop }));
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
-  // jsdom decodes no images and makes no object URLs: a sheet's SVG decodes at once.
-  vi.stubGlobal('Image', class { decoding = ''; src = ''; decode() { return Promise.resolve(); } });
-  Object.assign(URL, { createObjectURL: () => 'blob:sheet', revokeObjectURL: noop });
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
     { x: 0, y: 0, left: 0, top: 0, right: 1200, bottom: 700, width: 1200, height: 700, toJSON: noop } as DOMRect);
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context2d as unknown as CanvasRenderingContext2D);
@@ -97,15 +55,12 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-/** One pane: a host, a workspace with one KiCad file (`name`, under `/models`), a live binding, and the tab. */
-async function open(name: string, { strict = false, crossProbe = undefined as unknown } = {}) {
+/** One pane: a host, a workspace with one board (`name`, under `/models`), a live binding, and the tab. */
+async function open(name: string, { strict = false } = {}) {
   const file = `/models/${name}`;
   const fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input));
-    if (url.pathname.endsWith('/__cad/catalog')) {
-      const kind = name.endsWith('.harness.yml') ? 'harness' : name.split('.').pop();
-      return json({ entries: [{ kind, file, url: `/${name}`, hash: 'one', bytes: 4096 }] });
-    }
+    if (url.pathname.endsWith('/__cad/catalog')) return json({ entries: [{ kind: 'kicad_pcb', file, url: `/${name}`, hash: 'one', bytes: 4096 }] });
     if (url.pathname.endsWith('/__cad/server')) return json({ backend: 'cadgen' });
     if (url.pathname.endsWith('/__cad/plot')) return readPlot(url.searchParams.get('file') || '');
     return new Response('', { status: 404 });
@@ -121,7 +76,6 @@ async function open(name: string, { strict = false, crossProbe = undefined as un
     environment: { colorScheme: 'light' },
     clipboard: { writeText: async (text: string | Promise<string>) => { if (refuseCopy) throw refuseCopy; copied.push(await text); }, readText: async () => '', writeImage: async () => {} },
     promptContext: { getSnapshot: () => DESTINATION, subscribe: () => noop, deliver: async () => ({ status: 'copied', partIds: [] }) },
-    ...(crossProbe ? { crossProbe } : {})
   };
   function Pane() {
     const [state, setState] = useState<any>({ renderers: {} });
@@ -140,13 +94,15 @@ const opened = async (pane: HTMLElement) => {
   await waitFor(() => expect(frames.length).toBeGreaterThan(0));
 };
 
-it('a plot with no index (a harness) opens as a picture and nothing else: no panel, no tools, no preview, no Quick Edit', async () => {
-  const { pane, dispose } = await open('cable.harness.yml');
+it('a plot without its index opens as the picture alone: no tools, no panel, no Quick Edit', async () => {
+  const { board: _index, ...picture } = BOARD;
+  readPlot = () => json(picture);
+  const { pane, dispose } = await open('blinky.kicad_pcb');
   await opened(pane);
-  expect(pane.querySelector('canvas')?.getAttribute('aria-label')).toBe('Harness: cable.harness.yml');
+  expect(pane.querySelector('canvas')?.getAttribute('aria-label')).toBe('Board: blinky.kicad_pcb');
   const inPane = within(pane);
   expect(inPane.queryByRole('group', { name: 'Interaction tools' })).toBeNull();
-  for (const name of ['Orbit', 'Draw', 'Select', 'Measure', 'Preview', 'Display', 'Zoom in', 'Reset Zoom', 'Take snapshot']) {
+  for (const name of ['Orbit', 'Draw', 'Select', 'Measure', 'Preview', 'Zoom in', 'Reset Zoom', 'Take snapshot']) {
     expect(inPane.queryByRole('button', { name }), name).toBeNull();
   }
   expect(pane.querySelector('[data-quick-edit]')).toBeNull();
@@ -160,13 +116,13 @@ it('paints after a StrictMode remount, as the development app mounts it', async 
   dispose();
 });
 
-it('a machine without KiCad gets the standard card, carrying the server’s install hint', async () => {
-  readPlot = () => json({ error: INSTALL }, 400);
-  const { pane, dispose } = await open('blinky.kicad_pcb');
+it('a file that is no board gets the standard card, carrying the server’s own sentence', async () => {
+  readPlot = () => json({ error: UNREADABLE }, 400);
+  const { pane, dispose } = await open('broken.kicad_pcb');
   const alert = await within(pane).findByRole('alert');
   expect(alert.textContent).toContain('The viewer couldn’t complete the request');
   expect(alert.textContent).toContain('HTTP 400');
-  expect(alert.textContent).toContain('install KiCad 10');
+  expect(alert.textContent).toContain('is not a KiCad board');
   expect(pane.querySelector('[data-viewer-loading]')).toBeNull();
   expect(frames).toHaveLength(0);
   dispose();
@@ -180,42 +136,28 @@ it('a board has no Display while it loads or once it failed to, as a 3D view has
   await waitFor(() => expect(answer).not.toBeNull());
   expect(pane.querySelector('[data-viewer-navbar] [data-view-controls]')).not.toBeNull();
   expect(within(pane).queryByRole('button', { name: 'Display' })).toBeNull();
-  await act(async () => { answer!(json({ error: INSTALL }, 400)); });
+  await act(async () => { answer!(json({ error: UNREADABLE }, 400)); });
   await within(pane).findByRole('alert');
   expect(within(pane).queryByRole('button', { name: 'Display' })).toBeNull();
   dispose();
 });
 
 it('host commands a plot cannot answer are declined in its own words; it fits and captures', async () => {
-  const schematic = await open('blinky.kicad_sch');
-  await opened(schematic.pane);
-  expect(schematic.pane.querySelector('canvas')?.getAttribute('aria-label')).toBe('Schematic: blinky.kicad_sch');
-  const controller = await waitFor(() => { expect(schematic.controller).not.toBeNull(); return schematic.controller; });
-  await expect(controller.select({ selectors: ['o1.f1'] })).rejects.toThrow(/A schematic is shown as the picture KiCad draws of it/);
-  await expect(controller.clearSelection()).rejects.toThrow(/never has a selection to clear/);
+  const view = await open('blinky.kicad_pcb');
+  await opened(view.pane);
+  const controller = await waitFor(() => { expect(view.controller).not.toBeNull(); return view.controller; });
   await expect(controller.setCamera({ position: [0, 0, 1], target: [0, 0, 0], up: [0, 1, 0] })).rejects.toThrow(/no camera to pose/);
-  await expect(controller.setDisplaySettings({ edges: { enabled: false } })).rejects.toThrow(/no Display settings: it is drawn in KiCad’s own colours/);
+  await expect(controller.setDisplaySettings({ edges: { enabled: false } })).rejects.toThrow(/Display settings .* are set in the view’s Display menu/);
   expect(controller.readState()).toMatchObject({ active: true, loading: false, camera: null, selection: [] });
   const fitted = frames.at(-1)!;
   await act(async () => { await controller.resetCamera(); });
   expect(frames.at(-1)).toEqual(fitted);
   const blob = await controller.capture();
   expect(blob.type).toBe('image/png');
-  schematic.dispose();
-});
-
-it('a wiring harness opens in the same pane, and is called a harness drawn by WireViz', async () => {
-  const harness = await open('cable.harness.yml');
-  await opened(harness.pane);
-  expect(harness.pane.querySelector('canvas')?.getAttribute('aria-label')).toBe('Harness: cable.harness.yml');
-  const controller = await waitFor(() => { expect(harness.controller).not.toBeNull(); return harness.controller; });
-  await expect(controller.select({ selectors: ['o1.f1'] })).rejects.toThrow(/A harness is shown as the picture WireViz draws of it/);
-  await expect(controller.setRenderMode(true)).rejects.toThrow(/drawn in WireViz’s own colours/);
-  harness.dispose();
+  view.dispose();
 });
 
 it('a board with its index has Select and Measure, its parts and nets, and hands references to Quick Edit', async () => {
-  readPlot = (file) => (file.endsWith('.kicad_pcb') ? json({ ...BOARD, board: INDEX }) : json(SCHEMATIC));
   const { pane, dispose } = await open('blinky.kicad_pcb');
   await opened(pane);
   const inPane = within(pane);
@@ -226,16 +168,15 @@ it('a board with its index has Select and Measure, its parts and nets, and hands
   // A board drawn layer by layer has its Display where a 3D view's is, the view's controls at the navbar's right end; no Preview.
   expect([...pane.querySelectorAll('[data-viewer-navbar] [data-view-controls] button')].map((button) => button.getAttribute('aria-label'))).toEqual(['Display']);
   expect(navbarControls(pane).at(-1)).toBe('Display');
-  // The tree: parts by kind, then nets; what KiCad reported is the alert card's.
+  // The tree: parts by kind, then nets.
   expect(inPane.getByRole('button', { name: 'Parts' })).not.toBeNull();
   expect(inPane.getByRole('button', { name: 'Nets' })).not.toBeNull();
-  expect(inPane.queryByRole('button', { name: 'Checks' })).toBeNull();
   await act(async () => { inPane.getByRole('button', { name: 'Expand Resistors' }).click(); });
   await act(async () => { inPane.getByRole('button', { name: 'Select R1' }).click(); });
   const reference = pane.querySelector('[data-board-reference]')!;
   expect(reference.textContent).toContain('R_0603_1608Metric');
-  expect(reference.textContent).toContain('x 10, y 5');
-  expect(reference.textContent).toContain('blinky.py:12');
+  // Read back in KiCad's own millimetres, y down.
+  expect(reference.textContent).toContain('x 35, y 15');
   expect(reference.textContent).toContain('#R1');
   expect(pane.querySelector('[data-quick-edit]')?.textContent).toContain('1 ref');
   await act(async () => { inPane.getByRole('button', { name: 'Copy' }).click(); });
@@ -244,7 +185,6 @@ it('a board with its index has Select and Measure, its parts and nets, and hands
 });
 
 it('a copy the clipboard refuses says it was a copy that failed, and why', async () => {
-  readPlot = (file) => (file.endsWith('.kicad_pcb') ? json({ ...BOARD, board: INDEX }) : json(SCHEMATIC));
   const { pane, dispose } = await open('blinky.kicad_pcb');
   await opened(pane);
   const inPane = within(pane);
@@ -265,7 +205,7 @@ it('a board still loading tells a host selecting on it to wait, not that it has 
   const view = await open('blinky.kicad_pcb');
   const controller = await waitFor(() => { expect(view.controller).not.toBeNull(); return view.controller; });
   await expect(controller.select({ selectors: ['#R1'] })).rejects.toThrow(/Wait for the displayed model revision to finish loading/);
-  await act(async () => { release(json({ ...BOARD, board: INDEX })); });
+  await act(async () => { release(json(BOARD)); });
   await opened(view.pane);
   const state = await view.controller.select({ selectors: ['#R1'] });
   expect(state.selection[0].target.selectors).toEqual(['#R1']);
@@ -273,13 +213,12 @@ it('a board still loading tells a host selecting on it to wait, not that it has 
 });
 
 it('the live controller selects board references, reads them back, and refuses what the board lacks', async () => {
-  readPlot = (file) => (file.endsWith('.kicad_pcb') ? json({ ...BOARD, board: INDEX }) : json(SCHEMATIC));
   const view = await open('blinky.kicad_pcb');
   const { pane, dispose } = view;
   await opened(pane);
   const controller = await waitFor(() => { expect(view.controller).not.toBeNull(); return view.controller; });
-  const state = await controller.select({ selectors: ['#J1.2', '#net:VIN'] });
-  expect(state.selection).toEqual([expect.objectContaining({ target: { kind: 'cad-selector', selectors: ['#J1.2', '#net:VIN'] } })]);
+  const state = await controller.select({ selectors: ['#J1.2', '#net:VBUS'] });
+  expect(state.selection).toEqual([expect.objectContaining({ target: { kind: 'cad-selector', selectors: ['#J1.2', '#net:VBUS'] } })]);
   expect(pane.querySelector('[data-quick-edit]')?.textContent).toContain('2 refs');
   await expect(controller.select({ selectors: ['#U9'] })).rejects.toThrow(/Not on this board: #U9/);
   const cleared = await controller.clearSelection();
@@ -287,130 +226,32 @@ it('the live controller selects board references, reads them back, and refuses w
   dispose();
 });
 
-/** A cross-probe channel as a host's: what this view tells (`told`), and a way to tell it as another view would. */
-function probeChannel() {
-  const listeners = new Set<(message: any) => void>();
-  const told: any[] = [];
-  return {
-    port: { publish: (message: any) => { told.push(message); }, subscribe: (listener: (message: any) => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; } },
-    told,
-    tell: (message: any) => act(() => { for (const listener of listeners) listener(message); }),
-  };
-}
-
-it('cross-probing: a board selects what its schematic tells it, and tells what it selects', async () => {
-  readPlot = (file) => (file.endsWith('.kicad_pcb') ? json({ ...BOARD, board: INDEX }) : json(SCHEMATIC));
-  const channel = probeChannel();
-  const view = await open('blinky.kicad_pcb', { crossProbe: channel.port });
-  await opened(view.pane);
-  const controller = await waitFor(() => { expect(view.controller).not.toBeNull(); return view.controller; });
-  const selected = () => controller.readState().selection[0]?.target.selectors ?? [];
-  expect(channel.told).toEqual([], 'opening tells nothing');
-
-  // The schematic selects R1 and U1: the board has R1, and is not told it back.
-  await channel.tell({ project: '/models/blinky', from: 'schematic', selectors: ['#R1', '#U1'] });
-  await waitFor(() => expect(selected()).toEqual(['#R1']));
-  expect(channel.told).toEqual([]);
-  // Another project's selection, and one naming nothing on this board, leave it as it is.
-  await channel.tell({ project: '/models/other', from: 'schematic', selectors: ['#J1'] });
-  await channel.tell({ project: '/models/blinky', from: 'schematic', selectors: ['#U1'] });
-  expect(selected()).toEqual(['#R1']);
-
-  // What the board selects (a person, or the agent), it tells, as its project's.
-  await controller.select({ selectors: ['#J1.2'] });
-  await waitFor(() => expect(channel.told.at(-1)).toMatchObject({ project: '/models/blinky', selectors: ['#J1.2'] }));
-  expect(channel.told.at(-1).from).not.toBe('schematic');
-  // The schematic clearing clears it, and that is not told back either.
-  const count = channel.told.length;
-  await channel.tell({ project: '/models/blinky', from: 'schematic', selectors: [] });
-  await waitFor(() => expect(selected()).toEqual([]));
-  expect(channel.told).toHaveLength(count);
-  view.dispose();
-});
-
-it('a schematic with its index has Select alone, its symbols and nets, and hands references to Quick Edit', async () => {
-  readPlot = (file) => (file.endsWith('.kicad_sch') ? json({ ...SCHEMATIC, schematic: SCHEMATIC_INDEX }) : json(BOARD));
-  const { pane, dispose } = await open('blinky.kicad_sch');
-  await opened(pane);
-  const inPane = within(pane);
-  const tools = await inPane.findByRole('group', { name: 'Interaction tools' });
-  // A distance or a sketch on a schematic's layout means nothing to the design: no Measure, no Draw.
-  expect(within(tools).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['Select']);
-  expect(inPane.queryByRole('button', { name: 'Display' })).toBeNull();
-  expect(navbarControls(pane)).toEqual([]);
-  expect(inPane.getByRole('list', { name: 'Schematic' })).not.toBeNull();
-  expect(inPane.queryByRole('button', { name: 'Checks' })).toBeNull();
-  await act(async () => { inPane.getByRole('button', { name: 'Expand ICs' }).click(); });
-  await act(async () => { inPane.getByRole('button', { name: 'Select U1' }).click(); });
-  const reference = pane.querySelector('[data-board-reference]')!;
-  expect(reference.textContent).toContain('Amplifier_Operational:LM358');
-  expect(reference.textContent).toContain('SOIC-8_3.9x4.9mm_P1.27mm');
-  expect(reference.textContent).toContain('blinky, power');
-  expect(reference.textContent).toContain('blinky.py:20');
-  expect(reference.textContent).not.toContain('Position');
-  await act(async () => { inPane.getByRole('button', { name: 'Expand U1' }).click(); });
-  await act(async () => { inPane.getByRole('button', { name: 'Select 8' }).click(); });
-  expect(inPane.getByText('U1 · pin 8 V+')).not.toBeNull();
-  expect(pane.querySelector('[data-board-reference]')!.textContent).toContain('power in');
-  await act(async () => { inPane.getByRole('button', { name: 'Copy' }).click(); });
-  await waitFor(() => expect(copied).toEqual(['/models/blinky.kicad_sch#U1.8']));
-  dispose();
-});
-
-it('the live controller selects schematic references and refuses a board’s points', async () => {
-  readPlot = (file) => (file.endsWith('.kicad_sch') ? json({ ...SCHEMATIC, schematic: SCHEMATIC_INDEX }) : json(BOARD));
-  const view = await open('blinky.kicad_sch');
-  const { pane, dispose } = view;
-  await opened(pane);
-  const controller = await waitFor(() => { expect(view.controller).not.toBeNull(); return view.controller; });
-  const state = await controller.select('#R1.1,#net:VIN');
-  expect(state.selection).toEqual([expect.objectContaining({ target: { kind: 'cad-selector', selectors: ['#R1.1', '#net:VIN'] } })]);
-  expect(pane.querySelector('[data-quick-edit]')?.textContent).toContain('2 refs');
-  await expect(controller.select({ selectors: ['#@x1y2'] })).rejects.toThrow(/Not on this schematic: #@x1y2.*points are a board/);
-  dispose();
-});
-
 // A press on the picture, where page point `at` is on screen in the last frame painted.
-const press = async (pane: HTMLElement, at: [number, number], { double = false } = {}) => {
+const press = async (pane: HTMLElement, at: [number, number], { double = false, shift = false } = {}) => {
   const canvas = pane.querySelector('canvas')!;
   const [clientX, clientY] = pageToScreen(frames.at(-1), at[0], at[1]);
   await act(async () => {
-    canvas.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX, clientY, button: 0 }));
-    canvas.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX, clientY, button: 0 }));
+    canvas.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX, clientY, button: 0, shiftKey: shift }));
+    canvas.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX, clientY, button: 0, shiftKey: shift }));
     if (double) canvas.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX, clientY }));
   });
 };
 
 it('a press on a pad selects it, a shift-press adds its neighbour, and a double-click copies one', async () => {
-  readPlot = (file) => (file.endsWith('.kicad_pcb') ? json({ ...BOARD, board: INDEX }) : json(SCHEMATIC));
   const view = await open('blinky.kicad_pcb');
   const { pane, dispose } = view;
   await opened(pane);
   const controller = await waitFor(() => { expect(view.controller).not.toBeNull(); return view.controller; });
-  await press(pane, [14.175, 20]);
+  await press(pane, [34.175, 15]);
   expect(controller.readState().selection[0].target.selectors).toEqual(['#R1.1']);
-  const canvas = pane.querySelector('canvas')!;
-  const [x, y] = pageToScreen(frames.at(-1), 15.825, 20);
-  await act(async () => {
-    canvas.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, button: 0, shiftKey: true }));
-    canvas.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: x, clientY: y, button: 0, shiftKey: true }));
-  });
+  await press(pane, [35.825, 15], { shift: true });
   expect(controller.readState().selection[0].target.selectors).toEqual(['#R1.1', '#R1.2']);
-  await press(pane, [30, 8.73], { double: true });
-  await waitFor(() => expect(copied).toEqual(['/models/blinky.kicad_pcb#J1.1']));
-  // Bare board clears.
+  await press(pane, [5, 17.54], { double: true });
+  await waitFor(() => expect(copied).toEqual(['/models/blinky.kicad_pcb#J1.2']));
+  // A press on the track takes its net's copper there, in KiCad's frame; bare board clears.
+  await press(pane, [30, 15]);
+  expect(controller.readState().selection[0].target.selectors).toEqual(['#net:VBUS@x30y15']);
   await press(pane, [36, 26]);
   expect(controller.readState().selection).toEqual([]);
-  dispose();
-});
-
-it('a press on a schematic wire selects its net', async () => {
-  readPlot = (file) => (file.endsWith('.kicad_sch') ? json({ ...SCHEMATIC, schematic: SCHEMATIC_INDEX }) : json(BOARD));
-  const view = await open('blinky.kicad_sch');
-  const { pane, dispose } = view;
-  await opened(pane);
-  const controller = await waitFor(() => { expect(view.controller).not.toBeNull(); return view.controller; });
-  await press(pane, [60, 43.18]);
-  expect(controller.readState().selection[0].target.selectors).toEqual(['#net:VIN']);
   dispose();
 });

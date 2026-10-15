@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo } from "react";
-import { BOARD_OVERLAY_COLORS, SCHEMATIC_OVERLAY_COLORS, drawBoardOverlay } from "@text-to-cad/core/lib/board2d/boardOverlay.js";
+import { BOARD_OVERLAY_COLORS, drawBoardOverlay } from "@text-to-cad/core/lib/board2d/boardOverlay.js";
 import { screenToPage } from "@text-to-cad/core/lib/plot2d/index.js";
 import { PLOT_TOOL } from "../tools.js";
 
@@ -9,10 +9,10 @@ const SNAP_PX = 10;
 const MEASURE_KINDS = Object.freeze({ all: null, pads: ["pads"], copper: ["copper"], outline: ["outline"] });
 
 /**
- * The pointer on a board's or a schematic's plot, and what it draws over it: the layer the plot's
- * view takes (`usePlotView`'s `setLayer`), made from the view's handle. A press picks by Select's
- * mode (by the side looked at too, on a board) or snaps Measure's point; a double-click on something
- * selects it and copies its reference, as on a STEP face (on bare board, the view fits).
+ * The pointer on a board's plot, and what it draws over it: the layer the plot's view takes
+ * (`usePlotView`'s `setLayer`), made from the view's handle. A press picks by Select's mode (by
+ * the side looked at too) or snaps Measure's point; a double-click on something selects it and
+ * copies its reference, as on a STEP face (on bare board, the view fits).
  *
  * The overlay is drawn in the plot's own frame: what is isolated first, everything else stepped back
  * (`useBoardIsolation.js`), then the hover, the selection (a net in focus steps the rest
@@ -22,7 +22,7 @@ const MEASURE_KINDS = Object.freeze({ all: null, pads: ["pads"], copper: ["coppe
  * @param {{ transformRef: { current: object | null }, canvasRef: { current: HTMLCanvasElement | null },
  *   requestPaint: () => void, setLayer: (layer: object | null) => void }} options.view  The plot's view.
  * @param {object | null} options.index
- * @param {{ x: number, y: number, width: number } | null} options.sheet  The plot's first sheet: a board's.
+ * @param {{ x: number, y: number, width: number } | null} options.sheet  The plot's sheet.
  * @param {string} options.toolMode
  * @param {ReturnType<typeof import("./useBoardSelection.js").useBoardSelection>} options.selection
  * @param {ReturnType<typeof import("./useBoardMeasure.js").useBoardMeasure>} options.measure
@@ -33,8 +33,8 @@ const MEASURE_KINDS = Object.freeze({ all: null, pads: ["pads"], copper: ["coppe
  */
 export function useBoardPicking({ view, index, sheet, toolMode, selection, measure, isolated, side = "top", placement = false, onCopy }) {
   const { transformRef, canvasRef, requestPaint, setLayer } = view;
-  // Only a board is seen from below: mirrored about its sheet's middle.
-  const mirrorX = index?.document === "board" && side === "bottom" && sheet ? sheet.x + sheet.width / 2 : null;
+  // Seen from below, the board is mirrored about its sheet's middle.
+  const mirrorX = side === "bottom" && sheet ? sheet.x + sheet.width / 2 : null;
 
   // ---- what the canvas draws over the plot -------------------------------------
   // A new overlay is a new layer, which the view paints; the hover and Measure's draft are read
@@ -45,8 +45,7 @@ export function useBoardPicking({ view, index, sheet, toolMode, selection, measu
     if (!index || !frame.transform) return;
     const base = { transform: frame.transform, pixelRatio: frame.pixelRatio, width: frame.width, height: frame.height, mirrorX };
     if (isolated.length) {
-      const colors = index.document === "schematic" ? SCHEMATIC_OVERLAY_COLORS : BOARD_OVERLAY_COLORS;
-      drawBoardOverlay(ctx, index, { ...base, dim: true, selection: isolated, colors: { ...colors, selection: colors.hover } });
+      drawBoardOverlay(ctx, index, { ...base, dim: true, selection: isolated, colors: { ...BOARD_OVERLAY_COLORS, selection: BOARD_OVERLAY_COLORS.hover } });
     }
     drawBoardOverlay(ctx, index, {
       ...base, hover: hoverRef.current, selection: resolved, dim: dim && !isolated.length,

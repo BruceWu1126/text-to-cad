@@ -1,37 +1,37 @@
-"""Board references: how a person and an agent name what is on a KiCad board or schematic.
+"""Board references: how a person and an agent name what is on a KiCad board.
 
 A reference is a token, ``<file>#<selector>[,<selector>...]``, exactly as a STEP
 reference is (:mod:`cadgen.cad_ref_syntax`: the file half optional, JSON-quoted
 when its path needs it). The selector language is chosen by the file's suffix:
-``.kicad_pcb`` and ``.kicad_sch`` speak this one.
+``.kicad_pcb`` speaks this one.
 
 ======================  ===================================================
 ``#U3``                 a part, by its reference designator
-``#U3.9``               pad (on a board) or pin (on a schematic) 9 of U3,
-                        numbered as KiCad numbers it: ``9``, ``A4``, ``EP``
+``#U3.9``               pad 9 of U3, numbered as KiCad numbers it: ``9``,
+                        ``A4``, ``EP``
 ``#net:VIN``            a net, by the name KiCad shows (``TX/RX``, never
                         ``TX{slash}RX``)
 ``#net:VIN@x40.1y21.6`` that net's copper (a track, a via, a pour, a pad) at a
-                        point: boards only
-``#@x40.1y21.6``        a point on the board: boards only
+                        point
+``#@x40.1y21.6``        a point on the board
 ======================  ===================================================
 
-Points are millimetres in the board SCRIPT's frame: y up, origin at the board's
-drill/place origin (where cadgen puts the script's own origin), the frame
-``board.place``, ``pin.position`` and a build's DRC findings use. They carry no
-comma, because a token joins several selectors with commas, as STEP tokens do;
+Points are millimetres in KiCad's frame, y down, as the board file holds them and
+as a script's ``Vector2.from_xy_mm`` takes them: a point the viewer copies pastes
+straight into a kipy call. They carry no comma, because a token joins several
+selectors with commas, as STEP tokens do;
 a net name holding a comma, whitespace, a quote, ``@`` or ``#`` is JSON-quoted
 (``#net:"a,b"``). The canonical form writes a point to three decimals at most,
 without trailing zeros or a negative zero, and quotes a net name only when it
 must.
 
 The JavaScript half of this language is ``boardRefs.js`` in the viewer's core
-package; both are held to one fixture of cases.
+package; both are held to one fixture of cases. :class:`cadgen.kicad.board_index.BoardView`
+answers a reference against a board.
 """
 
 from __future__ import annotations
 
-import difflib
 import json
 import math
 import re
@@ -39,13 +39,11 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import PurePath
 
-from cadgen.cad_ref_syntax import QUOTED_PREFIX_RE, ref_prefix_names, split_cad_ref
-from cadgen.kicad.naming import natural
+from cadgen.cad_ref_syntax import QUOTED_PREFIX_RE, split_cad_ref
 
 __all__ = [
     "BoardSelector",
     "BoardToken",
-    "ReferenceView",
     "SELECTOR_KINDS",
     "board_ref_document",
     "format_board_selector",
@@ -105,14 +103,9 @@ class BoardToken:
 
 
 def board_ref_document(path) -> str | None:
-    """``"board"`` for a ``.kicad_pcb``, ``"schematic"`` for a ``.kicad_sch``, else ``None``:
-    whether references into ``path`` are board references."""
-    suffix = PurePath(str(path or "")).suffix.lower()
-    if suffix == ".kicad_pcb":
-        return "board"
-    if suffix == ".kicad_sch":
-        return "schematic"
-    return None
+    """``"board"`` for a ``.kicad_pcb``, else ``None``: whether references into ``path`` are
+    board references."""
+    return "board" if PurePath(str(path or "")).suffix.lower() == ".kicad_pcb" else None
 
 
 def _strip(text: str) -> str:
@@ -276,9 +269,8 @@ def parse_board_token(text: str) -> BoardToken | None:
     none) and its selectors in the order written; ``None`` when it is not one.
 
     The file half is split off as a STEP token's is (:func:`cadgen.cad_ref_syntax.split_cad_ref`).
-    Its selectors hold whitespace only inside a quoted net name (a hierarchical sheet's
-    ``#net:"/Power Stage/VLOC"``), as its file half does inside quotes, and every one of them must
-    parse.
+    Its selectors hold whitespace only inside a quoted net name (``#net:"/Power Stage/VLOC"``), as
+    its file half does inside quotes, and every one of them must parse.
     """
     stripped = _strip(text)
     if "#" not in stripped:
@@ -297,79 +289,3 @@ def parse_board_token(text: str) -> BoardToken | None:
     if any(selector is None for selector in selectors):
         return None
     return BoardToken(path, tuple(selectors))
-
-
-class ReferenceView:
-    """What a board's view and a schematic's share: parts and nets by name, and references answered.
-
-    A subclass sets ``path``, ``_parts`` (by reference designator) and ``_nets`` (by name), says
-    what its document is in the class attributes below, and answers a pad selector
-    (:meth:`_pad`) and a point (:meth:`_place`).
-    """
-
-    _DOCUMENT = ""  # "board" or "schematic"
-    _FORMS = ""  # the references it answers, for a reference that is none of them
-    _NAMEABLE = ""  # what a selector names in it
-
-    def part(self, ref: str):
-        """The part ``ref`` (``"U3"``)."""
-        found = self._parts.get(str(ref))
-        if found is None:
-            close = sorted(difflib.get_close_matches(str(ref), list(self._parts), n=3), key=natural)
-            if close:
-                hint = f"; did you mean {', '.join(close)}?"
-            else:
-                refs = sorted(self._parts, key=natural)
-                hint = f"; its parts are {', '.join(refs[:40])}" + (f" and {len(refs) - 40} more" if len(refs) > 40 else "")
-            raise ValueError(f"{self.path.name} has no part {ref}{hint}")
-        return found
-
-    def net(self, name: str):
-        """The net ``name``, as KiCad shows it (``"TX/RX"``; a sheet's local net ``"/Power/EN"``)."""
-        found = self._nets.get(str(name))
-        if found is None:
-            close = sorted(difflib.get_close_matches(str(name), list(self._nets), n=3), key=natural)
-            hint = f"; did you mean {', '.join(close)}?" if close else ""
-            raise ValueError(f"{self.path.name} has no net {name!r}{hint}")
-        return found
-
-    def resolve(self, ref: str):
-        """What the reference ``ref`` names (the class says what each selector answers). A file
-        before the ``#`` must name this document."""
-        answers = self.resolve_all(ref)
-        if len(answers) != 1:
-            raise ValueError(
-                f"{ref!r} names {len(answers)} things; resolve_all() answers each, in the order written"
-            )
-        return answers[0]
-
-    def resolve_all(self, ref: str) -> list:
-        """Every selector of a reference token (``board.kicad_pcb#U3,C14.2``), each resolved."""
-        token = parse_board_token(ref)
-        if token is None:
-            selector = parse_board_selector(ref)
-            if selector is None:
-                raise ValueError(f"not a {self._DOCUMENT} reference: {ref!r}; {self._FORMS}")
-            path, selectors = "", (selector,)
-        else:
-            path, selectors = token.path, token.selectors
-        if path and not ref_prefix_names(path, str(self.path)):
-            raise ValueError(f"reference names {path!r}, but this {self._DOCUMENT} is {str(self.path)!r}")
-        if not selectors:
-            raise ValueError(f"{ref!r} names the whole {self._DOCUMENT}; name {self._NAMEABLE} in it")
-        return [self._answer(selector) for selector in selectors]
-
-    def _answer(self, selector: BoardSelector):
-        if selector.kind == "part":
-            return self.part(selector.ref)
-        if selector.kind == "pad":
-            return self._pad(self.part(selector.ref), selector.pad)
-        if selector.kind == "net":
-            return self.net(selector.net)
-        return self._place(selector)
-
-    def _pad(self, part, number: str):
-        raise NotImplementedError
-
-    def _place(self, selector: BoardSelector):
-        raise NotImplementedError

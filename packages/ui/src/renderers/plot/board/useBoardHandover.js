@@ -2,12 +2,11 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { buildBoardRefToken, parseBoardRefSelector, splitBoardRefSelectors } from "@text-to-cad/core/lib/boardRefs.js";
 
 /**
- * What a board or a schematic hands over, in board references (`#U3`, `#U3.9`, `#net:VIN`) that the
- * agent resolves with `cadgen.pcb.read_board` / `read_schematic`: the selection as Quick Edit's
- * references, as the copy key's text, and as the
- * live controller's `select` and `clearSelection`; and the host's own request to select a reference.
- * A harness has none of it: the host's select is declined in its words, and its request consumed.
- * Selection only: nothing here edits a design.
+ * What a board hands over, in board references (`#U3`, `#U3.9`, `#net:VIN`) that the agent
+ * resolves with `cadgen.pcb.read_board`: the selection as Quick Edit's references, as the copy
+ * key's text, and as the live controller's `select` and `clearSelection`; and the host's own
+ * request to select a reference. A plot read without its index declines the host's select in its
+ * words, and consumes its request. Selection only: nothing here edits a design.
  *
  * @param {object} options
  * @param {{ resource: object, commands: object, acknowledgeCommand?: (kind: string, key: unknown) => void }} options.workspace
@@ -17,7 +16,7 @@ import { buildBoardRefToken, parseBoardRefSelector, splitBoardRefSelectors } fro
  */
 export function useBoardHandover({ workspace, document, selection, path }) {
   const { kind, index, words } = document;
-  const kicad = kind === "board" || kind === "schematic";
+  const board = kind === "board";
   const { selection: selectors, select, clear } = selection;
 
   // What is selected, in the prompt grammar: the references a Quick Edit attaches. Null: no index, no Quick Edit.
@@ -28,10 +27,10 @@ export function useBoardHandover({ workspace, document, selection, path }) {
   /** The selection (or `named`) as one token naming the file. */
   const copyText = useCallback((named = selectors) => (named.length ? buildBoardRefToken({ path, selectors: named }) : ""), [selectors, path]);
 
-  // A KiCad document answers select and clearSelection from the start: while it loads, the binding
-  // says to wait; once on screen, by its index — or, read without one, in words.
+  // A board answers select and clearSelection from the start: while it loads, the binding says to
+  // wait; once on screen, by its index — or, read without one, in words.
   const live = useMemo(() => {
-    if (!kicad) return { declined: words.declined };
+    if (!board) return { declined: words.declined };
     const { select: _select, clearSelection: _clear, ...declined } = words.declined;
     return {
       declined,
@@ -42,9 +41,7 @@ export function useBoardHandover({ workspace, document, selection, path }) {
           const list = raw.flatMap((selector) => splitBoardRefSelectors(selector));
           const unknown = list.filter((selector) => !parseBoardRefSelector(selector) || !index.resolve(selector));
           if (unknown.length) {
-            throw new Error(index.document === "board"
-              ? `Not on this board: ${unknown.join(", ")}. Select board references such as #U3, #U3.9, #net:VIN or #@x10y5.`
-              : `Not on this schematic: ${unknown.join(", ")}. Select references such as #U3, #U3.9 or #net:VIN (points are a board's).`);
+            throw new Error(`Not on this board: ${unknown.join(", ")}. Select board references such as #U3, #U3.9, #net:VIN or #@x10y5.`);
           }
           select(list);
         },
@@ -54,7 +51,7 @@ export function useBoardHandover({ workspace, document, selection, path }) {
         },
       },
     };
-  }, [kicad, words, index, select, clear]);
+  }, [board, words, index, select, clear]);
 
   // A host asking to select a reference: a document selects it once its index is in; anything else
   // answers rather than dropping it.

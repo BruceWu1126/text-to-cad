@@ -1,47 +1,50 @@
-"""Points and polygons the KiCad readers and writers share, and a board's script frame.
+"""Points and polygons the KiCad readers share.
 
 A point is ``(x, y)`` in millimetres, in whatever frame the caller works in;
-nothing here changes frames but :func:`script_frame`.
+nothing here changes frames. Distances are between
+copper as KiCad's connectivity sees it: a pad is its polygon, a track a segment
+of a width, a via a disc, a pour its filled polygons, and two pieces touch when
+the distance between them is zero.
 """
 
 from __future__ import annotations
 
 import math
-from typing import Callable, Iterable, Sequence
-
-from cadgen.kicad import sexpr
+from typing import Iterable, Sequence
 
 __all__ = [
-    "ISO_PAGES",
     "XY",
     "arc_points",
     "area",
     "bezier_points",
-    "board_origin",
     "box",
     "format_xy",
     "hull",
     "inside",
-    "nm",
-    "script_frame",
+    "polygon_distance",
+    "polygons_overlap",
+    "polyline_distance",
+    "rotate",
+    "segment_distance",
+    "segments_distance",
 ]
 
 XY = tuple[float, float]
 
-#: The landscape ISO sheets KiCad offers, smallest first: (name, width, height) in millimetres.
-ISO_PAGES = (("A4", 297.0, 210.0), ("A3", 420.0, 297.0), ("A2", 594.0, 420.0), ("A1", 841.0, 594.0), ("A0", 1189.0, 841.0))
-
 _ARC_STEP = math.radians(10)
-
-
-def nm(value: float) -> float:
-    """A length rounded to KiCad's resolution, one nanometre (never ``-0.0``)."""
-    rounded = round(float(value), 6)
-    return 0.0 if rounded == 0 else rounded
 
 
 def format_xy(point: XY) -> str:
     return f"({point[0]:g}, {point[1]:g})"
+
+
+def rotate(x: float, y: float, degrees: float) -> XY:
+    """KiCad's rotation of a point in its y-down frame: counter-clockwise on screen."""
+    if not degrees:
+        return x, y
+    angle = math.radians(degrees)
+    cos, sin = math.cos(angle), math.sin(angle)
+    return x * cos + y * sin, -x * sin + y * cos
 
 
 def arc_points(start: XY, mid: XY, end: XY) -> list[XY]:
@@ -128,21 +131,68 @@ def box(points: Iterable[XY]) -> list[XY]:
     return [(min(xs), min(ys)), (max(xs), min(ys)), (max(xs), max(ys)), (min(xs), max(ys))]
 
 
-def board_origin(tree: list) -> XY:
-    """A board's drill/place origin in KiCad's frame: where cadgen puts the script's (0, 0)."""
-    setup = sexpr.find(tree, "setup")
-    origin = sexpr.find(setup, "aux_axis_origin") if setup is not None else None
-    if origin is None or len(origin) < 3:
-        return 0.0, 0.0
-    return float(origin[1]), float(origin[2])
+# --- distances -----------------------------------------------------------------------
 
 
-def script_frame(origin: XY, digits: int = 6) -> Callable[[float, float], XY]:
-    """KiCad's frame to the board script's: from the drill/place ``origin``, y up, rounded to
-    ``digits`` decimals (6 is KiCad's nanometre)."""
+def segment_distance(point: XY, a: XY, b: XY) -> float:
+    """How far ``point`` is from the segment ``a``-``b``."""
+    (px, py), (ax, ay), (bx, by) = point, a, b
+    dx, dy = bx - ax, by - ay
+    length = dx * dx + dy * dy
+    t = 0.0 if length == 0 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length))
+    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
 
-    def move(x: float, y: float) -> XY:
-        dx, dy = round(x - origin[0], digits), round(origin[1] - y, digits)
-        return 0.0 if dx == 0 else dx, 0.0 if dy == 0 else dy
 
-    return move
+def polyline_distance(point: XY, points: Sequence[XY]) -> float:
+    """How far ``point`` is from the open polyline ``points``."""
+    if len(points) == 1:
+        return math.hypot(point[0] - points[0][0], point[1] - points[0][1])
+    return min(segment_distance(point, a, b) for a, b in zip(points, points[1:]))
+
+
+def polygon_distance(point: XY, polygon: Sequence[XY]) -> float:
+    """0 inside ``polygon``, else the distance to its edge."""
+    if len(polygon) >= 3 and inside(point, polygon):
+        return 0.0
+    if not polygon:
+        return math.inf
+    return polyline_distance(point, [*polygon, polygon[0]])
+
+
+def _orientation(a: XY, b: XY, c: XY) -> float:
+    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+
+def _segments_cross(a: XY, b: XY, c: XY, d: XY) -> bool:
+    """Whether the segments ``a``-``b`` and ``c``-``d`` meet (a shared point counts)."""
+    o1, o2 = _orientation(a, b, c), _orientation(a, b, d)
+    o3, o4 = _orientation(c, d, a), _orientation(c, d, b)
+    if (o1 > 0) != (o2 > 0) and (o3 > 0) != (o4 > 0) and o1 != 0 and o2 != 0 and o3 != 0 and o4 != 0:
+        return True
+    # Collinear or touching: an end of one lies on the other.
+    return any(
+        _orientation(p, q, r) == 0 and min(p[0], q[0]) <= r[0] <= max(p[0], q[0]) and min(p[1], q[1]) <= r[1] <= max(p[1], q[1])
+        for p, q, r in ((a, b, c), (a, b, d), (c, d, a), (c, d, b))
+    )
+
+
+def segments_distance(a: XY, b: XY, c: XY, d: XY) -> float:
+    """How far the segment ``a``-``b`` is from the segment ``c``-``d``: 0 when they meet."""
+    if _segments_cross(a, b, c, d):
+        return 0.0
+    return min(segment_distance(a, c, d), segment_distance(b, c, d), segment_distance(c, a, b), segment_distance(d, a, b))
+
+
+def polygons_overlap(first: Sequence[XY], second: Sequence[XY]) -> bool:
+    """Whether two polygons share any area or touch: a point of one inside the other, or two
+    edges that meet."""
+    if len(first) < 3 or len(second) < 3:
+        return False
+    if inside(first[0], second) or inside(second[0], first):
+        return True
+    edges = list(zip(second, [*second[1:], second[0]]))
+    for a, b in zip(first, [*first[1:], first[0]]):
+        for c, d in edges:
+            if _segments_cross(a, b, c, d):
+                return True
+    return False

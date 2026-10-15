@@ -5,8 +5,9 @@
  * ratsnest, so a net of n pins is n - 1 lines and moving a part shows at once which way its
  * connections pull.
  *
- * The plot's own ratsnest (`kind: "ratsnest"`) is KiCad's DRC: only what is still unrouted. This
- * is all of it, from the board's index (`createBoardIndex`), in page millimetres.
+ * The plot's own ratsnest (`kind: "ratsnest"`) is cadgen's connectivity over the copper: only
+ * what is still unrouted. This is all of it, from the board's index (`createBoardIndex`), in page
+ * millimetres.
  */
 
 const AIRWIRES = new WeakMap();

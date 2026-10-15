@@ -1,9 +1,6 @@
 import { SHELL_TOOL, createToolModes } from "../kit/tools/toolModes.js";
 
-/**
- * A board's tools are Select, Draw and Measure; a schematic's, Select alone; a harness has none
- * (`PlotRenderer.jsx`). Draw is the shell's (`kit/shell/usePlaneShell.js`).
- */
+/** A board's tools are Select, Draw and Measure (`PlotRenderer.jsx`). Draw is the shell's (`kit/shell/usePlaneShell.js`). */
 export const PLOT_TOOL = Object.freeze({ SELECT: "select", MEASURE: "measure", DRAW: SHELL_TOOL.DRAW });
 
 // A plot opens in Select: the tool in hand is never saved. Measure and Draw toggle: a second press
@@ -16,7 +13,7 @@ export const PLOT_TOOL_MODES = createToolModes({
 
 /**
  * Escape on a plot, innermost first, as on a STEP: an unfinished measurement, then Measure (its
- * results stay), then the selection and the check in focus. Answers whether it spent the key.
+ * results stay), then the selection. Answers whether it spent the key.
  */
 export function escapePlot({ toolMode, selectTool, selection, measure }) {
   if (measure.start) { measure.cancel(); return true; }

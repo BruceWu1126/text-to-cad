@@ -1,15 +1,14 @@
 import { useMemo } from "react";
 import { createBoardIndex } from "@text-to-cad/core/lib/board2d/boardIndex.js";
-import { createSchematicIndex } from "@text-to-cad/core/lib/board2d/schematicIndex.js";
 import { plotLoadAlert, usePlotPayload } from "./usePlotPayload.js";
 import { plotKindForPath, plotWords } from "./plotWords.js";
 
 /**
- * The document on screen (`useRobotDocument.js` is a robot's): the plot (`usePlotPayload`), what kind
- * of document it is, said once — `"board"`, `"schematic"` or `"harness"`, from the payload, and
- * from the file's name until it has arrived — the sentences that kind is spoken of in, its index
- * (a board's or a schematic's parts, pads and nets, when the payload carries one: with it, the
- * document has the tools a person points with), and the load's alert.
+ * The document on screen (`useRobotDocument.js` is a robot's): the plot (`usePlotPayload`), what
+ * kind of document it is, said once — `"board"`, from the payload, and from the file's name until
+ * it has arrived — the sentences that kind is spoken of in, its index (the board's parts, pads and
+ * nets, when the payload carries one: with it, the board has the tools a person points with), and
+ * the load's alert.
  *
  * @param {{ workspace: ReturnType<typeof import("../workspace/useWorkspaceDocument.js").useWorkspaceDocument>, path: string }} options
  */
@@ -19,15 +18,9 @@ export function usePlotDocument({ workspace, path }) {
   const { plot } = payload;
   const kind = plot?.layout.kind || plotKindForPath(path);
   const words = plotWords(kind);
-  const sheets = plot?.layout.sheets ?? null;
-  const sheet = sheets?.[0] ?? null;
+  const sheet = plot?.layout.sheets[0] ?? null;
   const board = plot?.board ?? plot?.layout.board ?? null;
-  const schematic = board ? null : plot?.schematic ?? null;
-  const index = useMemo(() => {
-    if (board && sheet) return createBoardIndex(board, { x: sheet.x, y: sheet.y });
-    if (schematic && sheets) return createSchematicIndex(schematic, sheets);
-    return null;
-  }, [board, schematic, sheet, sheets]);
+  const index = useMemo(() => (board && sheet ? createBoardIndex(board, { x: sheet.x, y: sheet.y }) : null), [board, sheet]);
   // A board drawn layer by layer can be seen from either side, with any of its layers: its Display.
   const layered = kind === "board" && Array.isArray(sheet?.layers) && sheet.layers.length > 0;
 

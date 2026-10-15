@@ -842,9 +842,9 @@ class CadApp:
         response.send_json(status, body)
 
     def _handle_plot(self, request, response, query):
-        """A document drawn by its own tool, as SVG sheets (``plots.py`` owns both rules).
+        """A KiCad board drawn from its file, as geometry per layer (``plots.py`` owns both rules).
 
-        Like the drawing route it does real work -- ``kicad-cli`` plots, about a
+        Like the drawing route it does real work -- the board is read and laid out, about a
         second on a cold board -- so it is counted, and its payload goes out as the
         store's JSON bytes unchanged.
         """

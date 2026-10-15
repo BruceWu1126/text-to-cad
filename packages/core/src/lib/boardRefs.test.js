@@ -58,7 +58,7 @@ test("a host's list of selectors splits outside quotes", () => {
 
 test("only KiCad documents speak this language", () => {
   assert.ok(isBoardRefPath("PCB/board.kicad_pcb"));
-  assert.ok(isBoardRefPath("x.KICAD_SCH"));
+  assert.ok(isBoardRefPath("x.KICAD_PCB"));
   assert.ok(!isBoardRefPath("part.step"));
   assert.throws(() => buildBoardRefToken({ path: "b.kicad_pcb", selectors: ["o1.f2.e3"] }), /not a board reference/);
 });

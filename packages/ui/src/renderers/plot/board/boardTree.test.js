@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createBoardIndex } from "@text-to-cad/core/lib/board2d/boardIndex.js";
-import { createSchematicIndex } from "@text-to-cad/core/lib/board2d/schematicIndex.js";
 import { boardTreeAncestors, boardTreeNodeIds, buildBoardTree, partKind } from "./boardTree.js";
-import { boardReferenceFacts, referenceFacts } from "./boardFacts.js";
+import { boardReferenceFacts } from "./boardFacts.js";
 
 const square = (cx, cy, w, h) => [[cx - w / 2, cy - h / 2], [cx + w / 2, cy - h / 2], [cx + w / 2, cy + h / 2], [cx - w / 2, cy + h / 2]];
 const BOARD = {
-  origin: [0, 30],
+  origin: [0, 0],
   nets: [{ name: "VIN", class: "Power" }, { name: "GND", class: "Default" }, { name: "unconnected-(U1-NC-Pad4)", class: "Default" }],
   parts: [
     { ref: "C10", value: "1u", footprint: "Capacitor_SMD:C_0603", side: "top", at: [5, 25], rotation: 90, fields: { LCSC: "C15849" }, script: "hat.py:40", outline: square(5, 25, 1, 2) },
@@ -54,14 +53,13 @@ test("a reference finds its rows, and a row its owners", () => {
   assert.deepEqual(boardTreeAncestors(tree, "pad:U1.2"), ["group:parts", "kind:ICs", "part:U1"]);
 });
 
-test("the Reference reads a part, a pad, a net, copper and a point in script millimetres", () => {
+test("the Reference reads a part, a pad, a net, copper and a point in KiCad's millimetres", () => {
   const row = (facts, label) => facts.rows.find(([name]) => name === label)?.[1];
   const part = boardReferenceFacts(index.resolve("#C10"), index);
   assert.equal(part.heading, "C10 · 1u");
-  assert.equal(row(part, "Position"), "x 5, y 5");
+  assert.equal(row(part, "Position"), "x 5, y 25");
   assert.equal(row(part, "Rotation"), "90°");
   assert.equal(row(part, "LCSC"), "C15849");
-  assert.equal(row(part, "Script"), "hat.py:40");
   assert.equal(row(boardReferenceFacts(index.resolve("#C2"), index), "DNP"), "Not assembled");
   const pad = boardReferenceFacts(index.resolve("#U1.2"), index);
   assert.equal(pad.heading, "U1 · pad 2 VO");
@@ -69,39 +67,8 @@ test("the Reference reads a part, a pad, a net, copper and a point in script mil
   const net = boardReferenceFacts(index.resolve("#net:VIN"), index);
   assert.equal(row(net, "Parts"), "C10, C2, U1");
   assert.equal(row(net, "Tracks"), "1 · 17.8 mm");
-  const copper = boardReferenceFacts(index.resolve("#net:VIN@x10y4.2"), index);
+  const copper = boardReferenceFacts(index.resolve("#net:VIN@x10y25.8"), index);
   assert.equal(copper.heading, "VIN · track");
   assert.equal(row(copper, "Width"), "1 mm");
   assert.equal(boardReferenceFacts(index.resolve("#@x1y2"), index).rows[0][1], "x 1, y 2");
-});
-
-test("a schematic's tree and Reference speak of pins, and of no positions", () => {
-  const schematic = createSchematicIndex({
-    sheets: [{ name: "amp", path: "/", file: "amp.kicad_sch" }, { name: "power", path: "/power/", file: "power.kicad_sch" }],
-    parts: [{ ref: "U1", value: "LM358", lib: "Amplifier_Operational:LM358", footprint: "Package_SO:SOIC-8", fields: { LCSC: "C7950" }, script: "amp.py:9",
-      units: [{ unit: 1, sheet: 0, at: [80, 50], outline: square(80, 50, 10, 10) }, { unit: 3, sheet: 1, at: [30, 30], outline: square(30, 30, 6, 6) }] }],
-    pins: [
-      { part: "U1", number: "3", name: "+", type: "input", unit: 1, sheet: 0, net: "VIN", at: [72.38, 50], end: [75, 50] },
-      { part: "U1", number: "8", name: "V+", type: "power_in", unit: 3, sheet: 1, net: "VIN", at: [30, 24.92], end: [30, 27] },
-    ],
-    wires: [{ net: "VIN", sheet: 0, points: [[60, 50], [72.38, 50]] }],
-    labels: [{ net: "VIN", sheet: 0, text: "VIN", kind: "global", at: [60, 50], outline: square(57, 50, 6, 1.4) }],
-    nets: [{ name: "VIN", class: "Power" }],
-  }, [{ name: "amp", x: 0, y: 0 }, { name: "power", x: 0, y: 230 }]);
-  const tree = buildBoardTree(schematic);
-  assert.deepEqual(tree.roots.map((node) => `${node.label} ${node.detail}`), ["Parts 1", "Nets 1"]);
-  assert.equal(tree.roots[1].children[0].detail, "2 pins");
-  assert.ok(tree.roots[0].children[0].children[0].searchAliases.includes("LM358"));
-  const row = (facts, label) => facts.rows.find(([name]) => name === label)?.[1];
-  const part = referenceFacts(schematic.resolve("#U1"), schematic);
-  assert.equal(row(part, "Symbol"), "Amplifier_Operational:LM358");
-  assert.equal(row(part, "Units"), "2");
-  assert.equal(row(part, "Sheet"), "amp, power");
-  assert.equal(row(part, "Position"), undefined);
-  const pin = referenceFacts(schematic.resolve("#U1.8"), schematic);
-  assert.equal(pin.heading, "U1 · pin 8 V+");
-  assert.equal(row(pin, "Type"), "power in");
-  const net = referenceFacts(schematic.resolve("#net:VIN"), schematic);
-  assert.equal(row(net, "Pins"), "2 pins");
-  assert.equal(row(net, "Labels"), "VIN");
 });

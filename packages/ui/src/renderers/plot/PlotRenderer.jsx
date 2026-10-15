@@ -1,6 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
 import { useViewerMobile } from "../../file-viewer/responsive.js";
-import { useViewerHost } from "../../host/context.js";
 import PlaneShell from "../kit/shell/PlaneShell.jsx";
 import { readFileView } from "../kit/shell/fileView.js";
 import { usePlaneFileView, usePlaneShell } from "../kit/shell/usePlaneShell.js";
@@ -13,41 +12,39 @@ import { readBoardIsolation, useBoardIsolation } from "./board/useBoardIsolation
 import { useBoardMeasure } from "./board/useBoardMeasure.js";
 import { useBoardPicking } from "./board/useBoardPicking.js";
 import { useBoardSelection } from "./board/useBoardSelection.js";
-import { useCrossProbe } from "./board/useCrossProbe.js";
 import { chromeStyle } from "./paperContrast.js";
 import { PLOT_TOOL, PLOT_TOOL_MODES, escapePlot } from "./tools.js";
 import { usePlotDocument } from "./usePlotDocument.js";
 import { usePlotView } from "./usePlotView.js";
 
 /**
- * A KiCad board or schematic, or a wiring harness, as the picture its own tool draws of it, on a
- * canvas (the payload comes from the BACKEND, `GET /__cad/plot`; nothing here parses KiCad's files).
- * Its frame is the flat views' shell (`kit/shell/usePlaneShell.js`). A board or a schematic whose
- * payload carries its index has the tools a person points with, speaking board references (`#U3`,
- * `#U3.9`, `#net:VIN`): Select (its tree and Reference), Quick Edit and the copy key, and on a board
- * Draw and Measure too, and its Display. A harness is the picture alone. Nothing here edits a design.
+ * A KiCad board as the picture drawn from its file, on a canvas (the payload comes from the BACKEND,
+ * `GET /__cad/plot`; nothing here parses KiCad's files). Its frame is the flat views' shell
+ * (`kit/shell/usePlaneShell.js`). A board whose payload carries its index has the tools a person
+ * points with, speaking board references (`#U3`, `#U3.9`, `#net:VIN`): Select (its tree and
+ * Reference), Draw, Measure, Quick Edit and the copy key, and its Display. A payload without an
+ * index is the picture alone. Nothing here edits a design.
  */
 
-// The file's slices: a board's Display and what is isolated, kept across rebuilds (a new shape gets a new signature).
+// The file's slices: the board's Display and what is isolated, kept across rebuilds (a new shape gets a new signature).
 const SLICES = Object.freeze({ board: "1", isolated: "1" });
-const SELECT_PANEL = Object.freeze({ board: { id: "tree", label: "Board" }, schematic: { id: "tree", label: "Schematic" } });
+const SELECT_PANEL = Object.freeze({ id: "tree", label: "Board" });
 
 function PlotSurface({ view, data }) {
-  const host = useViewerHost();
   const mobile = useViewerMobile();
   const workspace = useWorkspaceDocument({ view, data });
   const document = usePlotDocument({ workspace, path: view.file.path });
-  const { kind, index, words, layered } = document;
+  const { index, words, layered } = document;
 
-  // ---- the file's view: the plot's transform, a board's Display, what is isolated ----
+  // ---- the file's view: the plot's transform, the board's Display, what is isolated ----
   const [stored] = useState(() => readFileView(view.state, SLICES).renderer);
   const [display, setDisplay] = useState(() => readBoardDisplay(stored.board));
   const [restoredIsolation] = useState(() => readBoardIsolation(stored.isolated));
   const isolation = useBoardIsolation({ index, restored: restoredIsolation });
-  const rendererState = useMemo(() => (kind === "board" || kind === "schematic" ? {
-    signatures: kind === "board" ? SLICES : { isolated: SLICES.isolated },
-    read: () => ({ ...(kind === "board" ? { board: display } : {}), isolated: { selectors: isolation.isolated } })
-  } : null), [kind, display, isolation.isolated]);
+  const rendererState = useMemo(() => ({
+    signatures: SLICES,
+    read: () => ({ board: display, isolated: { selectors: isolation.isolated } })
+  }), [display, isolation.isolated]);
   const fileView = usePlaneFileView({ view, rendererState });
   const shownDisplay = layered ? display : null;
   const drawView = useMemo(() => (shownDisplay ? boardDrawView(shownDisplay, document.sheet) : null), [shownDisplay, document.sheet]);
@@ -77,22 +74,19 @@ function PlotSurface({ view, data }) {
   const { copyText } = shell;
   const { copyText: referenceText } = handover;
   const copyReferences = useCallback((selectors) => copyText(referenceText(selectors)), [copyText, referenceText]);
-  const picking = useBoardPicking({ view: plotView, index, sheet: document.sheet, toolMode, selection, measure, isolated: isolation.resolved,
+  useBoardPicking({ view: plotView, index, sheet: document.sheet, toolMode, selection, measure, isolated: isolation.resolved,
     side: shownDisplay?.side, placement: boardDisplayAirwires(shownDisplay), onCopy: copyReferences });
-  // A board and its schematic open in two views select together, through the host (selection only).
-  useCrossProbe({ port: host.crossProbe, path: view.file.path, index, selection, toolMode, view: plotView,
-    layout: document.plot?.layout ?? null, mirrored: picking.mirrored });
   const { select } = selection;
 
-  // ---- tools and panels: a board's Select, Draw and Measure; a schematic's Select ----
-  const onBoard = index?.document === "board";
+  // ---- tools and panels: Select, Draw and Measure ----
   const tools = index ? [
-    shell.tools.own({ id: PLOT_TOOL.SELECT, label: "Select", panel: SELECT_PANEL[index.document],
-      icon: <BoardSelectIcon mode={selection.selectMode} document={index.document} className="size-3.5" aria-hidden="true" /> }),
-    ...(onBoard ? [shell.tools.draw, shell.tools.own({ id: PLOT_TOOL.MEASURE, label: "Measure",
+    shell.tools.own({ id: PLOT_TOOL.SELECT, label: "Select", panel: SELECT_PANEL,
+      icon: <BoardSelectIcon mode={selection.selectMode} className="size-3.5" aria-hidden="true" /> }),
+    shell.tools.draw,
+    shell.tools.own({ id: PLOT_TOOL.MEASURE, label: "Measure",
       icon: <BoardMeasureIcon mode={measure.mode} className="size-3.5" aria-hidden="true" />,
       // A press while Measure is up clears it as it puts it down.
-      onSelect: () => { if (toolMode === PLOT_TOOL.MEASURE) measure.clear(); selectTool(PLOT_TOOL.MEASURE); } })] : []),
+      onSelect: () => { if (toolMode === PLOT_TOOL.MEASURE) measure.clear(); selectTool(PLOT_TOOL.MEASURE); } }),
   ] : [];
   const selecting = toolMode === PLOT_TOOL.SELECT;
   const copyShortcut = mobile ? "" : shell.frame.copyShortcut;

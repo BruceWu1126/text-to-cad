@@ -1,7 +1,7 @@
 """The Python and JS board-reference grammars are two implementations of one language.
 
 `cadgen.kicad.refs` and `@text-to-cad/core/lib/boardRefs.js` parse the references a person
-copies from a KiCad board or schematic in the viewer and an agent resolves against the board.
+copies from a KiCad board in the viewer and an agent resolves against the board.
 Both suites read `packages/core/src/lib/boardRefs.parity.json`, as the STEP grammars share
 `cadRefs.parity.json`, so a form one side learns and the other forgets fails here rather than
 in a pasted reference.
@@ -124,7 +124,7 @@ class BoardSelectorEdgesTest(unittest.TestCase):
                 self.assertIsNone(parse_board_token(text))
         self.assertEqual("a b", parse_board_selector('#net:"a b"').net)
         # A quoted name keeps its whitespace in a token too, as the viewer copies it.
-        self.assertEqual(("PCB/b.kicad_sch", ['#net:"/Power Stage/VLOC"']), self._split('PCB/b.kicad_sch#net:"/Power Stage/VLOC"'))
+        self.assertEqual(("PCB/b.kicad_pcb", ['#net:"/Power Stage/VLOC"']), self._split('PCB/b.kicad_pcb#net:"/Power Stage/VLOC"'))
 
     def _split(self, text: str):
         token = parse_board_token(text)
@@ -132,7 +132,7 @@ class BoardSelectorEdgesTest(unittest.TestCase):
 
     def test_the_suffix_chooses_the_language(self) -> None:
         self.assertEqual("board", board_ref_document("PCB/x.kicad_pcb"))
-        self.assertEqual("schematic", board_ref_document("x.KICAD_SCH"))
+        self.assertIsNone(board_ref_document("x.KICAD_SCH"))
         self.assertIsNone(board_ref_document("x.step"))
 
 

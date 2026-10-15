@@ -21,19 +21,6 @@ export const BOARD_MODE_GLYPHS = Object.freeze({
 export const BOARD_SELECT_MODES = Object.freeze([
   { id: "all", label: "All" }, { id: "parts", label: "Parts" }, { id: "pads", label: "Pads" }, { id: "nets", label: "Nets" },
 ]);
-// A schematic's: a symbol with its legs for Parts, a pin (its line and the dot a wire meets) for
-// Pins, two wires meeting at a junction for Nets.
-export const SCHEMATIC_MODE_GLYPHS = Object.freeze({
-  parts: BOARD_MODE_GLYPHS.parts,
-  pads: (weight) => <g strokeWidth={2 * weight}><path d="M3.5 12H15" /><circle cx="18" cy="12" r="2.75" fill="currentColor" /></g>,
-  nets: (weight) => <g strokeWidth={2 * weight}><path d="M3 17h9V5M12 17h9" /><circle cx="12" cy="17" r="2.25" fill="currentColor" /></g>,
-});
-/** Select's modes on a schematic. All picks the most specific thing: a pin, a wire or label, a symbol. */
-export const SCHEMATIC_SELECT_MODES = Object.freeze([
-  { id: "all", label: "All" }, { id: "parts", label: "Parts" }, { id: "pads", label: "Pins" }, { id: "nets", label: "Nets" },
-]);
-const selectModes = (document) => (document === "schematic"
-  ? { glyphs: SCHEMATIC_MODE_GLYPHS, modes: SCHEMATIC_SELECT_MODES } : { glyphs: BOARD_MODE_GLYPHS, modes: BOARD_SELECT_MODES });
 /** What Measure snaps to on a board. */
 export const BOARD_MEASURE_MODES = Object.freeze([
   { id: "all", label: "All" }, { id: "pads", label: "Pads" }, { id: "copper", label: "Vias and tracks" }, { id: "outline", label: "Edges and holes" },
@@ -42,10 +29,9 @@ export const BOARD_MEASURE_MODES = Object.freeze([
 const known = (modes, mode) => (modes.some((item) => item.id === mode) ? mode : "all");
 
 /** Select's strip icon: the pointer, badged with the mode in hand. */
-export function BoardSelectIcon({ mode, document = "board", ...props }) {
-  const { glyphs, modes } = selectModes(document);
-  const value = known(modes, mode);
-  return <ToolModeIcon tool="select" glyphs={glyphs} mode={value} data-select-mode={value} {...props} />;
+export function BoardSelectIcon({ mode, ...props }) {
+  const value = known(BOARD_SELECT_MODES, mode);
+  return <ToolModeIcon tool="select" glyphs={BOARD_MODE_GLYPHS} mode={value} data-select-mode={value} {...props} />;
 }
 
 /** Measure's strip icon: the ruler, badged with what it snaps to. */
@@ -56,10 +42,9 @@ export function BoardMeasureIcon({ mode, ...props }) {
 const MEASURE_GLYPHS = Object.freeze({ pads: BOARD_MODE_GLYPHS.pads, copper: BOARD_MODE_GLYPHS.copper, outline: BOARD_MODE_GLYPHS.outline });
 
 /** Select's mode menu, in the tree's filter row. */
-export function BoardSelectModeMenu({ mode, onModeChange, document = "board", disabled = false }) {
-  const { glyphs, modes } = selectModes(document);
-  return <ToolModeMenu label="Select mode" modes={modeMenuItems("select", glyphs, modes)}
-    value={known(modes, mode)} onChange={onModeChange} disabled={disabled} />;
+export function BoardSelectModeMenu({ mode, onModeChange, disabled = false }) {
+  return <ToolModeMenu label="Select mode" modes={modeMenuItems("select", BOARD_MODE_GLYPHS, BOARD_SELECT_MODES)}
+    value={known(BOARD_SELECT_MODES, mode)} onChange={onModeChange} disabled={disabled} />;
 }
 
 /** Measure's snapping menu, in the Measure panel's heading. */

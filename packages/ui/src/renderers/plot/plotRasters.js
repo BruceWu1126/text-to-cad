@@ -1,16 +1,15 @@
 /**
  * The rasters a plot pane paints from: what keeps a zoom crisp and a pan cheap.
  *
- * A sheet's SVG is drawn by the browser, which rasterises the vector at whatever scale it lands
- * at — crisp at any zoom, and far too slow to do every frame: a large board's plot is tens of
- * megabytes of SVG and a second to rasterise. So the pane draws the SVGs into a PATCH — a canvas
- * covering what the pane shows plus a margin, at exactly the scale it is shown at, made with
- * core's `drawPlot` and the sheets' own images (`sheetImages`), the frame a snapshot draws — and
- * every frame is the sheets' backgrounds and the patches over them, placed in page space
- * (`drawPlot` again). A pan moves a patch by whole device pixels: a blit, never a resample. A
- * zoom scales the patches it has until the view has been still for `SETTLE_MS`; then the view is
- * drawn again at its new scale. A pan past the margin is the same: what is not covered shows the
- * sheet's background until the view rests, then it is drawn.
+ * A board's geometry is drawn by the canvas at whatever scale it lands at — crisp at any zoom,
+ * and too slow to do every frame of a pan on a large board: tens of thousands of pads, tracks and
+ * pour vertices. So the pane draws the board into a PATCH — a canvas covering what the pane shows
+ * plus a margin, at exactly the scale it is shown at, made with core's `drawPlot`, the frame a
+ * snapshot draws — and every frame is the sheet's background and the patches over it, placed in
+ * page space (`drawPlotImages`). A pan moves a patch by whole device pixels: a blit, never a
+ * resample. A zoom scales the patches it has until the view has been still for `SETTLE_MS`; then
+ * the view is drawn again at its new scale. A pan past the margin is the same: what is not covered
+ * shows the sheet's background until the view rests, then it is drawn.
  *
  * A few patches are kept (`PATCH_LIMIT`, and `PATCH_BUDGET_PIXELS` between them), least recently
  * drawn first out: zooming back out to a view drawn before is instant, and a zoom or a pan has
@@ -19,7 +18,7 @@
  * Nothing here is React: the pane's view hook owns one of these per plot, paints through it and
  * disposes of it with the plot.
  */
-import { drawPlot, rectsOverlap, sheetImages, visiblePageRect } from "@text-to-cad/core/lib/plot2d/index.js";
+import { drawPlot, drawPlotImages, rectsOverlap, visiblePageRect } from "@text-to-cad/core/lib/plot2d/index.js";
 
 /** What a patch covers beyond the pane, on each side, as a share of the pane. */
 const PATCH_MARGIN = 0.15;
@@ -46,14 +45,13 @@ function defaultCanvas(width, height) {
 
 /**
  * @param {{ layout: import("@text-to-cad/core/lib/plot2d/plot.js").PlotLayout,
- *   images: readonly CanvasImageSource[], onChange: () => void, view?: object|null,
+ *   onChange: () => void, view?: object|null,
  *   createCanvas?: (width: number, height: number) => HTMLCanvasElement,
  *   schedule?: typeof setTimeout, cancel?: typeof clearTimeout }} options
  *   `onChange`: a better picture is ready; paint again.
  */
-export function createPlotRasters({ layout, images, onChange, view = null, createCanvas = defaultCanvas,
+export function createPlotRasters({ layout, onChange, view = null, createCanvas = defaultCanvas,
   schedule = (callback, delay) => setTimeout(callback, delay), cancel = (handle) => clearTimeout(handle) }) {
-  const svgs = sheetImages(layout, images);
   /** @type {{ canvas: HTMLCanvasElement, scale: number, rect: number[], used: number }[]} */
   let patches = [];
   let wanted = null;
@@ -97,7 +95,7 @@ export function createPlotRasters({ layout, images, onChange, view = null, creat
     if (!context) throw new Error("This browser gave no 2D canvas context, so the plot cannot be drawn.");
     // The board's Display (`view`: its side, its layers, its pours) is drawn into the patch; a frame
     // only places patches, so it never applies it twice.
-    drawPlot(context, layout, { transform: { scale, offsetX: originX - left, offsetY: originY - top }, images: svgs, ...(view ? { view } : {}) });
+    drawPlot(context, layout, { transform: { scale, offsetX: originX - left, offsetY: originY - top }, view });
     patches.push({
       canvas, scale, used: (clock += 1),
       rect: [(left - originX) / scale, (top - originY) / scale, (right - originX) / scale, (bottom - originY) / scale]
@@ -152,11 +150,11 @@ export function createPlotRasters({ layout, images, onChange, view = null, creat
     paint(ctx, frame) {
       if (disposed) return true;
       const box = shown(frame);
-      // Nothing to show yet: draw it now, so the first frame is the plot and not its backgrounds.
+      // Nothing to show yet: draw it now, so the first frame is the plot and not its background.
       if (box && patches.length === 0) rasterize(frame);
       // The browser's default (bilinear) smoothing: a patch is resampled only while the view
       // moves, and "high" quality costs several times as much per frame on a software canvas.
-      drawPlot(ctx, layout, { transform: frame.transform, pixelRatio: frame.pixelRatio, images: placed(frame) });
+      drawPlotImages(ctx, layout, { transform: frame.transform, pixelRatio: frame.pixelRatio, images: placed(frame) });
       const visible = box ? visiblePageRect(frame.transform, frame.width, frame.height) : null;
       for (const patch of patches) {
         if (visible && rectsOverlap(patch.rect, visible)) patch.used = (clock += 1);

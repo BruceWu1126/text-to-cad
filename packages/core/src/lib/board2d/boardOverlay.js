@@ -1,11 +1,10 @@
 /**
- * What a person is pointing at, drawn over a board's or a schematic's plot: the hovered item, the
- * selection and the measurement in hand. The plot stays KiCad's picture;
- * this draws on top of it, in the same pass, so a capture of the view shows what was selected.
+ * What a person is pointing at, drawn over a board's plot: the hovered item, the selection and
+ * the measurement in hand. The plot stays the board's picture; this draws on top of it, in the
+ * same pass, so a capture of the view shows what was selected.
  *
- * `resolved` items come from an index's `resolve()` or `pick()` (`createBoardIndex`,
- * `createSchematicIndex`); geometry is in page millimetres. Pure canvas 2D: the viewer and a
- * headless capture draw the same thing.
+ * `resolved` items come from the index's `resolve()` or `pick()` (`createBoardIndex`); geometry
+ * is in page millimetres. Pure canvas 2D: the viewer and a headless capture draw the same thing.
  *
  * A net can be thousands of pads and tracks, and the viewer draws this on every hover change and
  * every frame of a pan, so shapes are drawn in PAGE space — the canvas's transform maps them,
@@ -29,14 +28,6 @@ export const BOARD_OVERLAY_COLORS = Object.freeze({
   hover: "rgba(141, 197, 255, 0.55)",
   dim: "rgba(0, 8, 20, 0.6)",
   measure: "#ffd166",
-});
-/** On a schematic's paper the highlight is a deeper blue, and the rest is washed out, not darkened. */
-export const SCHEMATIC_OVERLAY_COLORS = Object.freeze({
-  selection: "#1f6feb",
-  hover: "rgba(31, 111, 235, 0.5)",
-  fill: "rgba(31, 111, 235, 0.08)",
-  dim: "rgba(245, 244, 239, 0.72)",
-  measure: "#d97706",
 });
 const PART_FILL = "rgba(141, 197, 255, 0.10)";
 const PART_PAD_FILL = "rgba(141, 197, 255, 0.35)";
@@ -184,41 +175,6 @@ function crosshair(ctx, view, [x, y], color, size = 7) {
   ctx.stroke();
 }
 
-// A schematic pin: its line from the body out to where a wire meets it, and a dot there.
-const PIN_LINES = new WeakMap();
-function pins(ctx, view, list, color, width) {
-  const shown = list.filter((pin) => !pin.hidden && view.shows(pin.box, (width + 0.75) * view.px));
-  if (!shown.length) return;
-  const lines = shown.map((pin) => {
-    let line = PIN_LINES.get(pin);
-    if (!line) { line = { points: [pin.end, pin.at], box: pin.box }; PIN_LINES.set(pin, line); }
-    return line;
-  });
-  strokes(ctx, view, lines, color, () => width * view.px);
-  dots(ctx, view, shown, color, () => (width + 0.75) * view.px);
-}
-
-/**
- * One resolved schematic reference (or hit), highlighted in `color`, in page space (`pageSpace`).
- * `shapesOf(pin)`: every drawing of that pin (`index.shapesOf`).
- */
-export function drawSchematicResolved(ctx, view, resolved, { color, fill, weight = 1, shapesOf = null }) {
-  if (!resolved) return;
-  const drawings = shapesOf || ((pad) => pad.part.pads.filter((shape) => shape.number === pad.number));
-  if (resolved.kind === "part") {
-    polygons(ctx, view, resolved.part.units.map((unit) => ({ polygon: unit.outline, box: unit.box })), { color, width: 2 * weight, fill });
-    pins(ctx, view, resolved.part.pads, color, 1.5 * weight);
-  } else if (resolved.kind === "pad") {
-    pins(ctx, view, drawings(resolved.pad), color, 2.5 * weight);
-  } else if (resolved.kind === "net") {
-    const net = resolved.net;
-    strokes(ctx, view, net.wires, color, () => 2.5 * weight * view.px);
-    polygons(ctx, view, net.labels.map((label) => ({ polygon: label.outline, box: label.box })), { color, width: 1.5 * weight, fill });
-    dots(ctx, view, net.junctions, color, () => 3.5 * weight * view.px);
-    pins(ctx, view, net.pads.flatMap(drawings), color, 2 * weight);
-  }
-}
-
 /**
  * One resolved board reference (or hit), highlighted in `color`. Its shapes are drawn in page
  * space (`pageSpace`); a point's crosshair keeps its size on screen, so it is handed back in
@@ -255,7 +211,7 @@ export function drawResolved(ctx, view, resolved, { color, toPage, weight = 1, s
  * `pixelRatio` here. `dim`: the rest of the board steps back (a net in focus).
  *
  * @param {CanvasRenderingContext2D} ctx
- * @param {ReturnType<typeof import("./boardIndex.js").createBoardIndex> | ReturnType<typeof import("./schematicIndex.js").createSchematicIndex>} index
+ * @param {ReturnType<typeof import("./boardIndex.js").createBoardIndex>} index
  * @param {{ transform: object, pixelRatio?: number, width: number, height: number, hover?: object|null,
  *   selection?: object[], dim?: boolean, measure?: { points: number[][], draft?: number[]|null }|null,
  *   mirrorX?: number|null, colors?: typeof BOARD_OVERLAY_COLORS, placement?: boolean }} frame
@@ -265,16 +221,12 @@ export function drawResolved(ctx, view, resolved, { color, toPage, weight = 1, s
 export function drawBoardOverlay(ctx, index, { transform, pixelRatio = 1, width, height, hover = null, selection = [], dim = false,
   measure = null, mirrorX = null, colors = null, placement = false }) {
   if (!ctx || !index || !transform || !(transform.scale > 0)) return;
-  const schematic = index.document === "schematic";
-  colors = colors || (schematic ? SCHEMATIC_OVERLAY_COLORS : BOARD_OVERLAY_COLORS);
+  colors = colors || BOARD_OVERLAY_COLORS;
   const view = createView(transform, { width, height, mirrorX });
   const shapesOf = index.shapesOf || null;
   const crosshairs = [];
-  const highlight = schematic
-    ? (resolved, options) => drawSchematicResolved(ctx, view, resolved, { ...options, fill: colors.fill, shapesOf })
-    : (resolved, options) => drawResolved(ctx, view, resolved, { ...options, toPage: index.toPage, shapesOf, crosshairs });
+  const highlight = (resolved, options) => drawResolved(ctx, view, resolved, { ...options, toPage: index.toPage, shapesOf, crosshairs });
   ctx.save();
-  placement = placement && !schematic;
   if (placement) {
     pageSpace(ctx, view, pixelRatio);
     placementLayer(ctx, view, index);

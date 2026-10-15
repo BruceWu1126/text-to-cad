@@ -1,511 +1,606 @@
-"""A KiCad board or schematic as the picture the CAD Viewer and ``cadgen pcb snapshot`` draw.
+"""A KiCad board as the picture the CAD Viewer and ``cadgen pcb snapshot`` draw: geometry per layer.
 
-KiCad draws it: ``kicad-cli`` plots the document to SVG, and the payload carries
-those SVGs as KiCad wrote them, but for two things: the timestamped ``<title>``
-KiCad stamps on each is dropped, and a board's drill holes are moved to a layer
-of their own (below). Nothing here re-implements KiCad's plotter -- not zones,
-not stroke-font text, not pad shapes -- so what the viewer shows is what KiCad
-shows.
+The payload (``cadgen.plot.PLOT_SCHEMA_VERSION`` 3; its contract is the core
+package's ``docs/plot-payload.md``) is built from the ``.kicad_pcb`` alone: no
+KiCad runs. The file is KiCad's own, and everything the picture needs is in it,
+the pours' fills included, because every build refills its zones before saving.
 
-A board is one sheet of LAYERS, back to front: bottom fabrication and
-silkscreen, bottom copper, inner copper deepest first, top copper, top
-silkscreen and fabrication, the outline, and on a board with unrouted
-connections its ratsnest -- the DRC's unconnected pairs drawn as lines on a
-scratch layer of the staged copy (``Dwgs.User``, cleared first), so KiCad plots
-them in its own coordinates and a draft never looks finished. One
-``kicad-cli pcb export svg --mode-multi`` run plots them all, each to its own
-SVG on the same page; a second plots the copper again with every zone's fill
-removed (a layer's ``unpoured`` picture), when the board has fills. KiCad
-draws the drill holes on every layer it plots alone, where a plot of the whole
-stack draws them once, last: each layer's holes are cut from it and the
-copper's are the sheet's last layer, ``drills``. Drawn in order, the layers
-are KiCad's picture of the whole board.
+The board is one SHEET: millimetres, y down, KiCad's frame moved so the
+board's outline sits with its top-left corner at (0, 0) -- its ``width`` and
+``height`` are the outline's. The sheet is a stack of LAYERS, back to front as
+seen from the top (bottom courtyard, fabrication, silkscreen, paste and mask,
+bottom copper, the inner coppers deepest first, top copper, mask, paste,
+silkscreen, fabrication and courtyard, the user layers, the outline), then three
+layers of what goes through the board: ``vias``, the ``ratsnest`` and ``drills``.
+Each layer is a list of ITEMS, each a polygon, a stroked path, a circle or a
+text's strokes, in sheet millimetres:
 
-The sheet is KiCad's ``--fit-page-to-board`` page (millimetres, y down). Where
-the board lands on it is measured, not assumed: the staged copy carries a
-calibration circle of a radius nothing else has, on a layer the payload does
-not show, at a known point, and its place in that layer's SVG is the offset
-(a board whose outline's corner is at KiCad's (116, 77) lands at the sheet's
-origin). The payload's ``board`` is the board's index
-(:mod:`cadgen.kicad.board_index`) on that sheet, with ``origin``, the script's
-origin there. Its one DRC run finds what is still unrouted: the ratsnest the
-plot draws and the payload's ``unrouted`` count.
+- a pad is its padstack's outline (rect, roundrect, oval, trapezoid, chamfered,
+  custom) on every copper layer it is on, carrying its pad reference (``#R1.2``)
+  and net; its hole, a via's and an unplated hole are circles (or a slot's
+  polygon) on ``drills``;
+- a track or arc is a path of its width; a via a filled circle on ``vias``;
+- a pour's fill is the polygon KiCad saved, marked ``pour`` so a view can hide
+  it, and its drawn outline a hairline;
+- footprint and board graphics (lines, rectangles, circles, arcs, polygons,
+  curves) are paths and polygons of their stroke width, a footprint's carrying
+  its part reference (``#R1``);
+- text is its strokes in a permissive font (:mod:`cadgen.kicad.stroke_font`) at
+  KiCad's position, size, angle, justification and mirroring;
+- solder mask openings and paste are derived from the pads: a pad's outline
+  grown by its mask margin, a pad's outline shrunk or grown by its paste margin
+  (a plotter's exact offsets they are not);
+- the ratsnest is cadgen's connectivity over the copper
+  (:mod:`cadgen.kicad.connectivity`): one line per connection still to make,
+  no DRC.
 
-A schematic is one picture per sheet in KiCad's page order, the root first,
-and its ``schematic``: the schematic's index
-(:mod:`cadgen.kicad.schematic_index`) on those sheets -- parts, pins, wires,
-labels and nets in each sheet's millimetres, the frame of its SVG, with
-KiCad's own net names from one netlist export.
-
-Everything runs on a staged copy (``kicad-cli`` writes beside what it reads)
-of the files a plot reads, each read once: a board with the project and rules
-beside it, a schematic with every sheet under its root (wherever it lies) and
-the project and symbol table beside the root. The payload is derived data:
-cached in the store's ``drawing`` index, keyed by those files' names and bytes
-(the same bytes KiCad plots), this module's scheme and the KiCad version.
+``board`` beside the sheet is the board's index (:mod:`cadgen.kicad.board_index`)
+in sheet millimetres, which the viewer's tools point with (its ``origin`` is where
+KiCad's (0, 0) lies on the sheet, so a reference reads back in KiCad's own frame);
+``unrouted`` counts the ratsnest's lines. The payload is a function of the file's bytes: the same board
+gives the same bytes, and the store caches it by them.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import os
+import math
 import re
-import tempfile
-import unicodedata
-from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterable, Sequence
 
 from cadgen.kicad import sexpr
+from cadgen.kicad.board_index import (
+    FootprintFrame, copper_layers, expand_copper, footprint_property, graphic, item_layers, layer_of, net_of, net_table,
+    pad_shape, points_of, read_index,
+)
+from cadgen.kicad.connectivity import Copper, ratsnest
+from cadgen.kicad.geometry import XY, box, rotate
 from cadgen.kicad.sexpr import Sym
+from cadgen.kicad.stroke_font import text_strokes
 from cadgen.plot import PLOT_SCHEMA_VERSION, PlotError
 
-__all__ = [
-    "BOARD_BACKGROUND",
-    "SCHEMATIC_BACKGROUND",
-    "build_plot",
-    "plot_payload_bytes",
-]
+__all__ = ["BOARD_BACKGROUND", "build_plot", "payload_bytes", "plot_payload_bytes"]
 
-# The derivation's own revision, in the cache key beside the schema version: a fix that changes
-# what a payload holds, not its shape, bumps it so the store never serves the old payloads.
-_REVISION = 7
-#: KiCad's default colour theme behind a board, and behind a schematic sheet.
+# The derivation's own revision, in the cache key beside the schema version: a change to what a
+# payload holds, not its shape, bumps it so the store never serves the old payloads.
+_REVISION = 1
+#: KiCad's default colour theme behind a board.
 BOARD_BACKGROUND = "#001023"
-SCHEMATIC_BACKGROUND = "#F5F4EF"
-_RATSNEST_LAYER = "Dwgs.User"
-_RATSNEST_WIDTH = 0.1
-# The calibration mark: a circle of a radius KiCad's 4-decimal SVG prints as 0.4321, on a user
-# layer the payload never shows (added to a board that does not have it).
-_CALIBRATION_LAYER = (23, "Eco2.User")
-_CALIBRATION_RADIUS = 0.4321
-_SUFFIXES = (".kicad_pcb", ".kicad_sch")
-# A drill hole as KiCad's SVG plotter draws one: white (plated) or black (unplated) circles and
-# slots, filled or stroked, never anything else in its default theme.
-_DRILL_STYLE = re.compile(
-    r'^<g style="(?:fill:#(?:FFFFFF|000000); fill-opacity:1\.0000; stroke:none;'
-    r"|fill:none; stroke:#(?:FFFFFF|000000); stroke-width:[0-9.]+; stroke-opacity:1; stroke-linecap:round; stroke-linejoin:round;)\">$"
-)
-_CIRCLE = re.compile(r'<circle\s+cx="([-\d.]+)"\s+cy="([-\d.]+)"\s+r="([-\d.]+)"')
+_DIGITS = 4
+_GRAPHICS = ("line", "rect", "poly", "circle", "arc", "curve")
+_COPPER = re.compile(r"^(F|B|In\d+)\.Cu$")
+# KiCad's default text stroke, as a share of the text's height, for text that names none.
+_TEXT_STROKE = 0.15
+# A board with no outline is framed on everything it draws, with this much air around it.
+_BARE_MARGIN = 1.0
+# A pour's drawn outline, and an unplated hole's own layer.
+_HAIRLINE = 0.0
 
 
-def _strip_stamps(svg: str) -> str:
-    # KiCad stamps the plot time into <title>; the picture must be a function of the document.
-    svg = re.sub(r"<title>.*?</title>", "", svg, count=1, flags=re.DOTALL)
-    return re.sub(r"<desc>Image generated by [^<]*</desc>", "", svg, count=1)
-
-
-def _svg_size(svg: str) -> tuple[float, float]:
-    match = re.search(r'viewBox="\s*([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s*"', svg)
-    if match is None:
-        raise PlotError("KiCad's plot has no viewBox")
-    return round(float(match.group(3)), 4), round(float(match.group(4)), 4)
-
-
-def _copper_order(board: list) -> list[str]:
-    """The board's copper layers, back to front."""
-    layers = sexpr.find(board, "layers")
-    copper: list[str] = []
-    for entry in (layers[1:] if layers is not None else []):
-        if isinstance(entry, list) and len(entry) >= 3 and str(entry[1]).endswith(".Cu"):
-            copper.append(str(entry[1]))
-    inner = sorted(
-        (name for name in copper if name.startswith("In")),
-        key=lambda name: int(re.sub(r"\D", "", name) or 0),
-        reverse=True,
-    )
-    order = []
-    if "B.Cu" in copper:
-        order.append("B.Cu")
-    order.extend(inner)
-    if "F.Cu" in copper:
-        order.append("F.Cu")
-    return order or ["B.Cu", "F.Cu"]
-
-
-def _clear_layer(node: list, layer: str) -> list:
-    """``node`` without any item drawn on ``layer``: graphics, text, dimensions, images, a
-    footprint's own (a footprint's fields included)."""
-    kept: list = [node[0]]
-    for child in node[1:]:
-        if isinstance(child, list) and child and child[0] in ("footprint", "module"):
-            child = _clear_layer(child, layer)
-        elif isinstance(child, list) and child and sexpr.value(child, "layer") == layer:
-            continue
-        kept.append(child)
-    return kept
-
-
-def _unpoured(node: list) -> tuple[list, bool]:
-    """``node`` with every zone's fill removed (footprints' zones included), and whether it had any."""
-    kept: list = [node[0]]
-    removed = False
-    for child in node[1:]:
-        if isinstance(child, list) and child and child[0] in ("zone", "footprint"):
-            child, gone = _unpoured(child)
-            removed = removed or gone
-        elif isinstance(child, list) and child and child[0] in ("filled_polygon", "fill_segments"):
-            removed = True
-            continue
-        kept.append(child)
-    return kept, removed
+# --- the stack ----------------------------------------------------------------------------
 
 
 def _side(layer: str) -> str:
     return "front" if layer.startswith("F.") else "back" if layer.startswith("B.") else "both"
 
 
-def _board_layers(tree: list) -> list[tuple[str, str, str]]:
-    """The layers a board's sheet stacks, back to front: (KiCad layer, kind, side)."""
-    declared = {str(entry[1]) for entry in (sexpr.find(tree, "layers") or [])[1:] if isinstance(entry, list) and len(entry) >= 2}
-    stack = [("B.CrtYd", "courtyard"), ("B.Fab", "fab"), ("B.SilkS", "silk")]
-    stack += [(layer, "copper") for layer in _copper_order(tree)]
-    stack += [("F.SilkS", "silk"), ("F.Fab", "fab"), ("F.CrtYd", "courtyard"), ("Edge.Cuts", "outline")]
-    return [(layer, kind, _side(layer)) for layer, kind in stack if layer in declared or kind == "copper"]
+def _kind(layer: str) -> str:
+    if _COPPER.match(layer):
+        return "copper"
+    suffix = layer.split(".", 1)[-1] if "." in layer else layer
+    return {
+        "SilkS": "silk", "Fab": "fab", "CrtYd": "courtyard", "Mask": "mask", "Paste": "paste", "Adhes": "adhesive",
+        "Edge.Cuts": "outline", "Margin": "margin",
+    }.get(layer if layer in ("Edge.Cuts", "Margin") else suffix, "user")
 
 
-def _name_layers(tree: list, names: dict[str, str]) -> None:
-    """Give each layer in ``names`` that user name in ``tree``'s layer table (a plot names each
-    layer's file after it), declaring the scratch and calibration layers when the board has not.
-    The table is replaced, not changed: ``tree`` may share it with the board as read."""
-    position = next((index for index, node in enumerate(tree) if sexpr.head(node) == "layers"), None)
-    if position is None:
-        raise PlotError("the board declares no layers")
-    table: list = [tree[position][0]]
-    seen = set()
-    for entry in tree[position][1:]:
-        if isinstance(entry, list) and len(entry) >= 3 and str(entry[1]) in names:
-            entry = [*entry[:3], names[str(entry[1])]]
-            seen.add(str(entry[1]))
-        table.append(entry)
-    for number, layer in ((17, _RATSNEST_LAYER), _CALIBRATION_LAYER):
-        if layer in names and layer not in seen:
-            table.append([number, layer, Sym("user"), names[layer]])
-    tree[position] = table
+def _inner_number(layer: str) -> int:
+    return int(re.sub(r"\D", "", layer) or 0)
 
 
-def _drill_groups(svg: str) -> tuple[str, list[str]]:
-    """``svg`` without the drill holes KiCad draws last on a layer plotted alone, and those holes."""
-    end = svg.rindex("</svg>")
-    head, tail = svg[:end], svg[end:]
-    groups: list[str] = []
-    while True:
-        close = head.rfind("</g>")
-        opening = head.rfind("<g", 0, close) if close >= 0 else -1
-        if opening < 0:
-            break
-        tag_end = head.index(">", opening) + 1
-        if "<g" in head[tag_end:close] or not _DRILL_STYLE.match(re.sub(r"\s+", " ", head[opening:tag_end])):
-            break
-        groups.insert(0, head[opening:close + len("</g>")])
-        head = head[:opening].rstrip() + "\n"
-    return head + tail, groups
+def _stack(declared: Sequence[str], copper: Sequence[str]) -> list[str]:
+    """Every drawable layer of the board, back to front as seen from the top."""
+    inner = sorted((name for name in copper if name.startswith("In")), key=_inner_number, reverse=True)
+    stack = ["B.CrtYd", "B.Fab", "B.SilkS", "B.Paste", "B.Adhes", "B.Mask"]
+    stack += (["B.Cu"] if "B.Cu" in copper else []) + inner + (["F.Cu"] if "F.Cu" in copper else [])
+    stack += ["F.Mask", "F.Adhes", "F.Paste", "F.SilkS", "F.Fab", "F.CrtYd"]
+    users = [name for name in declared if name in ("Dwgs.User", "Cmts.User", "Eco1.User", "Eco2.User") or name.startswith("User.")]
+    stack += users + ["Margin", "Edge.Cuts"]
+    return [layer for layer in stack if layer in declared or _COPPER.match(layer)]
 
 
-def _drill_layer(svg: str, groups: list[str]) -> str:
-    """An SVG on ``svg``'s page holding only ``groups``."""
-    opened = svg.index(">", svg.index("<svg")) + 1
-    return svg[:opened] + "\n" + "\n".join(groups) + "\n</svg>\n"
+# --- items ---------------------------------------------------------------------------------
 
 
-def _calibration(svg: str, at: tuple[float, float]) -> tuple[float, float]:
-    """Where KiCad's point ``at`` lands on the sheet: the offset that maps one to the other."""
-    marks = {
-        (float(x), float(y))
-        for x, y, radius in _CIRCLE.findall(svg)
-        if abs(float(radius) - _CALIBRATION_RADIUS) < 5e-5
-    }
-    if len(marks) != 1:
-        raise PlotError(f"KiCad's plot carries {len(marks)} calibration marks, not one; the board cannot be placed on its sheet")
-    (x, y), = marks
-    return round(at[0] - x, 4), round(at[1] - y, 4)
+def _num(value: float) -> float:
+    rounded = round(float(value), _DIGITS)
+    return 0.0 if rounded == 0 else rounded
 
 
-# Checks about where a footprint came from: the plot's DRC runs on a staged copy without the
-# person's library tables, so KiCad would report every footprint of a board drawn in KiCad as
-# missing from its library -- a finding about the plot's sandbox, not about the board.
-_LIBRARY_CHECKS = frozenset({"lib_footprint_issues", "lib_footprint_mismatch"})
+def _xy(point: XY) -> list[float]:
+    return [_num(point[0]), _num(point[1])]
 
 
-def _drc_report(report: Path) -> list[tuple]:
-    """A DRC report's findings, each once, in KiCad's order: (check, severity, type,
-    description, ((text, uuid, (x, y) | None), ...)) in KiCad's frame. Library checks are left
-    out (:data:`_LIBRARY_CHECKS`)."""
-    data = json.loads(Path(report).read_text(encoding="utf-8"))
-    found: list[tuple] = []
-    for key, check in (("violations", "drc"), ("unconnected_items", "unconnected"), ("schematic_parity", "parity")):
-        for violation in data.get(key, []) or []:
-            if str(violation.get("type", "")) in _LIBRARY_CHECKS:
-                continue
-            items = []
-            for item in violation.get("items", []) or []:
-                position = item.get("pos")
-                at = (float(position.get("x", 0.0)), float(position.get("y", 0.0))) if isinstance(position, dict) else None
-                items.append((str(item.get("description", "")), str(item.get("uuid", "")), at))
-            found.append((
-                check,
-                str(violation.get("severity", "error")),
-                str(violation.get("type", "")),
-                str(violation.get("description", "")),
-                tuple(items),
-            ))
-    return list(dict.fromkeys(found))  # a through-hole pad's DRC fires once per copper layer
+def _dedupe(points: Iterable[XY]) -> list[XY]:
+    out: list[XY] = []
+    for point in points:
+        if not out or abs(point[0] - out[-1][0]) > 1e-9 or abs(point[1] - out[-1][1]) > 1e-9:
+            out.append(point)
+    return out
 
 
-def _marker_point(index) -> tuple[float, float]:
-    """A point inside what KiCad fits the page to: the middle of the outline, else of the parts."""
-    points = [point for line in index.outline for point in line] or [point for part in index.parts for point in part.outline]
-    if not points:
-        return 0.0, 0.0
-    xs, ys = [point[0] for point in points], [point[1] for point in points]
-    return round((min(xs) + max(xs)) / 2, 4), round((min(ys) + max(ys)) / 2, 4)
+class _Sheet:
+    """The payload being built: items filed by layer, the copper for the ratsnest, every point."""
+
+    def __init__(self) -> None:
+        self.layers: dict[str, list[dict]] = {}
+        self.copper: list[Copper] = []
+        self.points: list[XY] = []
+
+    def add(self, layer: str, item: dict, points: Iterable[XY] = ()) -> None:
+        self.layers.setdefault(layer, []).append(item)
+        self.points.extend(points)
+
+    def polygon(self, layer: str, points: Sequence[XY], *, width: float = 0.0, **flags) -> None:
+        pts = _dedupe(points)
+        if len(pts) < 3:
+            return
+        item = {"t": "poly", "pts": pts}
+        if width > 0:
+            item["w"] = width
+        item.update(flags)
+        self.add(layer, item, pts)
+
+    def path(self, layer: str, points: Sequence[XY], width: float, *, closed: bool = False, **flags) -> None:
+        pts = _dedupe(points)
+        if len(pts) < 2:
+            return
+        item = {"t": "path", "pts": pts, "w": max(0.0, width)}
+        if closed:
+            item["closed"] = True
+        item.update(flags)
+        self.add(layer, item, pts)
+
+    def circle(self, layer: str, at: XY, radius: float, *, width: float = 0.0, **flags) -> None:
+        if radius <= 0:
+            return
+        item = {"t": "circle", "at": at, "r": radius, "w": max(0.0, width)}
+        item.update(flags)
+        self.add(layer, item, [(at[0] - radius, at[1] - radius), (at[0] + radius, at[1] + radius)])
+
+    def text(self, layer: str, text: str, strokes: list[list[XY]], width: float, **flags) -> None:
+        strokes = [stroke for stroke in (_dedupe(points) for points in strokes) if len(stroke) >= 2]
+        if not strokes:
+            return
+        item = {"t": "text", "text": text, "w": width, "strokes": strokes}
+        item.update(flags)
+        self.add(layer, item, (point for stroke in strokes for point in stroke))
 
 
-def _export(install, stage: Path, board: str, layers: list[str], folder: str) -> None:
-    from cadgen.kicad.cli import run_kicad_cli
-
-    run_kicad_cli(
-        install,
-        [
-            "pcb", "export", "svg", "--mode-multi", "--fit-page-to-board", "--exclude-drawing-sheet",
-            "--layers", ",".join(layers), "-o", folder, board,
-        ],
-        cwd=stage,
-    )
+def _stroke_width(node: list) -> float:
+    stroke = sexpr.find(node, "stroke")
+    if stroke is not None:
+        return sexpr.number(sexpr.value(stroke, "width"), 0.0)
+    return sexpr.number(sexpr.value(node, "width"), 0.0)
 
 
-def _plotted(stage: Path, folder: str, token: str, layer: str) -> str:
-    """The SVG KiCad plotted of ``layer``, named after the user name the staged board gives it
-    (``token``) -- or, on a board too old to name its layers (KiCad 5), after the layer."""
-    svgs = list((stage / folder).glob("*.svg"))
-    found = [path for path in svgs if path.name.endswith(f"-{token}.svg")]
-    if not found:
-        found = [path for path in svgs if path.name.endswith(f"-{layer.replace('.', '_')}.svg")]
-    if len(found) != 1:
-        raise PlotError(f"KiCad's plot of the board is missing a layer ({layer})")
-    return _strip_stamps(found[0].read_text(encoding="utf-8"))
+def _filled(node: list) -> bool:
+    fill = sexpr.find(node, "fill")
+    if fill is None or len(fill) < 2:
+        return False
+    value = fill[1]
+    if isinstance(value, list):  # KiCad 6: (fill (type solid))
+        value = sexpr.value(fill, "type")
+    return str(value) in ("yes", "solid")
 
 
-@dataclass(frozen=True)
-class _Inputs:
-    """The files a plot is drawn from, each read once: the document, then every file KiCad reads
-    with it (absolute paths, and their bytes). The cache key is these files' and KiCad plots a
-    copy of these same bytes, so a key never names a picture of other ones."""
+def _hidden(node: list) -> bool:
+    return str(sexpr.value(node, "hide", "")) == "yes" or any(isinstance(atom, Sym) and atom == "hide" for atom in node[1:])
 
-    files: tuple[tuple[Path, bytes], ...]
 
-    @property
-    def document(self) -> Path:
-        return self.files[0][0]
+def _text_style(node: list) -> tuple[tuple[float, float], float, list[str]]:
+    """A text's ``(effects ...)``: its size (height, width), stroke thickness and justification."""
+    effects = sexpr.find(node, "effects")
+    font = sexpr.find(effects, "font") if effects is not None else None
+    size = sexpr.pair(sexpr.find(font, "size"), (1.0, 1.0)) if font is not None else (1.0, 1.0)
+    thickness = sexpr.number(sexpr.value(font, "thickness"), 0.0) if font is not None else 0.0
+    justify = [str(atom) for atom in (sexpr.find(effects, "justify") or [])[1:]] if effects is not None else []
+    return (abs(size[0]), abs(size[1])), thickness or abs(size[0]) * _TEXT_STROKE, justify
 
-    def key(self) -> str:
-        """The files' names (relative to the document's folder, the document's own first) and bytes."""
-        digest = hashlib.sha256()
-        for path, data in self.files:
-            try:
-                name = Path(os.path.relpath(path, self.document.parent)).as_posix()
-            except ValueError:  # another drive
-                name = str(path)
-            digest.update(name.encode("utf-8") + b"\0" + hashlib.sha256(data).digest())
-        return digest.hexdigest()
+
+def _slot(width: float, height: float) -> list[XY]:
+    """A slotted hole's outline, centred, before its turn: a stadium ``width`` by ``height``."""
+    radius = min(width, height) / 2
+    hw, hh = width / 2 - radius, height / 2 - radius
+    out: list[XY] = []
+    for cx, cy, start in ((hw, -hh, -math.pi / 2), (hw, hh, 0.0), (-hw, hh, math.pi / 2), (-hw, -hh, math.pi)):
+        for step in range(7):
+            angle = start + (math.pi / 2) * step / 6
+            out.append((cx + radius * math.cos(angle), cy + radius * math.sin(angle)))
+    return out
+
+
+def _scaled(polygon: Sequence[XY], centre: XY, factor: float) -> list[XY]:
+    return [(centre[0] + (x - centre[0]) * factor, centre[1] + (y - centre[1]) * factor) for x, y in polygon]
+
+
+class _Builder:
+    def __init__(self, tree: list):
+        self.tree = tree
+        self.table = net_table(tree)
+        self.copper = copper_layers(tree)
+        setup = sexpr.find(tree, "setup") or []
+        self.mask_margin = sexpr.number(sexpr.value(setup, "pad_to_mask_clearance"), 0.0)
+        self.paste_margin = sexpr.number(sexpr.value(setup, "pad_to_paste_clearance"), 0.0)
+        self.paste_ratio = sexpr.number(sexpr.value(setup, "pad_to_paste_clearance_ratio"), 0.0)
+        self.sheet = _Sheet()
+
+    # -- footprints --------------------------------------------------------------------
+
+    def footprint(self, node: list) -> None:
+        frame = FootprintFrame(node)
+        ref = footprint_property(node, "Reference") or ""
+        value = footprint_property(node, "Value") or ""
+        fields = {str(item[1]): str(item[2]) for item in sexpr.find_all(node, "property") if len(item) >= 3}
+        selector = f"#{ref}" if ref else None
+        margins = (
+            sexpr.value(node, "solder_mask_margin"),
+            sexpr.value(node, "solder_paste_margin"),
+            sexpr.value(node, "solder_paste_ratio"),
+        )
+        for child in node[2:]:
+            head = sexpr.head(child)
+            if head == "pad":
+                self.pad(child, frame, ref, margins)
+            elif head == "zone":
+                self.zone(child)
+            elif head == "property" or head == "fp_text":
+                self.footprint_text(child, frame, ref, value, fields)
+            elif head and head.startswith("fp_") and head[3:] in _GRAPHICS:
+                self.graphic(child, frame, selector)
+
+    def footprint_text(self, node: list, frame: FootprintFrame, ref: str, value: str, fields: dict[str, str]) -> None:
+        if _hidden(node):
+            return
+        head = sexpr.head(node)
+        if head == "property":
+            if len(node) < 3 or not isinstance(node[2], str):
+                return
+            text = node[2]
+        else:  # fp_text reference|value|user "text"
+            if len(node) < 3:
+                return
+            text = str(node[2])
+            which = str(node[1])
+            if which == "reference":
+                text = ref
+            elif which == "value":
+                text = value
+        text = re.sub(r"\$\{([^}]+)\}", lambda match: {"REFERENCE": ref, "VALUE": value}.get(match.group(1), fields.get(match.group(1), match.group(0))), text)
+        if not text.strip():
+            return
+        layer = layer_of(node)
+        at = sexpr.find(node, "at")
+        if layer is None or at is None:
+            return
+        position = frame.place(sexpr.pair(at, (0.0, 0.0)))
+        angle = sexpr.number(at[3]) if len(at) > 3 else 0.0
+        self.text(layer, text, position, angle, node, selector=f"#{ref}" if ref else None)
+
+    def text(self, layer: str, text: str, at: XY, angle: float, node: list, *, selector: str | None = None) -> None:
+        size, thickness, justify = _text_style(node)
+        strokes = text_strokes(text, size=size, at=at, angle=angle, justify=justify, mirror="mirror" in justify)
+        self.sheet.text(layer, text, strokes, thickness, **({"ref": selector} if selector else {}))
+
+    def graphic(self, node: list, frame: FootprintFrame | None, selector: str | None) -> None:
+        drawn = graphic(node)
+        layer = layer_of(node)
+        if drawn is None or layer is None:
+            return
+        points, closed = drawn
+        if frame is not None:
+            points = [frame.place(point) for point in points]
+        width = _stroke_width(node)
+        flags = {"ref": selector} if selector else {}
+        if closed and _filled(node):
+            self.sheet.polygon(layer, points, width=width, **flags)
+        else:
+            self.sheet.path(layer, points, width, closed=closed, **flags)
+
+    # -- pads --------------------------------------------------------------------------
+
+    def pad(self, node: list, frame: FootprintFrame, ref: str, margins: tuple) -> None:
+        kind = str(node[2]) if len(node) > 2 else ""
+        number = str(node[1]) if len(node) > 1 else ""
+        at = sexpr.find(node, "at")
+        centre = frame.place(sexpr.pair(at, (0.0, 0.0)))
+        angle = sexpr.number(at[3]) if at is not None and len(at) > 3 else 0.0
+        layers = item_layers(node)
+        drill = sexpr.find(node, "drill")
+        offset = sexpr.pair(sexpr.find(drill, "offset"), (0.0, 0.0)) if drill is not None else (0.0, 0.0)
+        shape = [(centre[0] + dx, centre[1] + dy) for dx, dy in (rotate(x + offset[0], y + offset[1], angle) for x, y in pad_shape(node))]
+        size = sexpr.pair(sexpr.find(node, "size"), (0.0, 0.0))
+        selector = f"#{ref}.{number}" if ref and number else None
+        flags = {}
+        if selector:
+            flags["ref"] = selector
+        net = net_of(node, self.table)
+        if net:
+            flags["net"] = net
+        hole = self.hole(drill, centre, angle, kind)
+        if kind == "np_thru_hole":
+            opening = hole if hole is not None else shape
+        else:
+            opening = shape
+            for layer in expand_copper(layers, self.copper):
+                self.sheet.polygon(layer, shape, **flags)
+            if net:
+                anchor = (centre[0] + rotate(*offset, angle)[0], centre[1] + rotate(*offset, angle)[1])
+                self.sheet.copper.append(Copper.polygon(net, expand_copper(layers, self.copper), shape, anchor=anchor, pad=True))
+        # Mask openings and paste, derived from the pad: KiCad's own margins, applied as one offset.
+        mask_margin = sexpr.number(sexpr.value(node, "solder_mask_margin"), sexpr.number(margins[0], self.mask_margin))
+        for layer in self._technical(layers, "Mask"):
+            self.sheet.polygon(layer, opening, width=max(0.0, 2 * mask_margin), **flags)
+        if kind != "np_thru_hole":
+            ratio = sexpr.number(sexpr.value(node, "solder_paste_margin_ratio"), sexpr.number(margins[2], self.paste_ratio))
+            paste_margin = sexpr.number(sexpr.value(node, "solder_paste_margin"), sexpr.number(margins[1], self.paste_margin))
+            paste_margin += ratio * min(abs(size[0]), abs(size[1]))
+            for layer in self._technical(layers, "Paste"):
+                if paste_margin < 0 and min(abs(size[0]), abs(size[1])) > 0:
+                    factor = max(0.0, 1 + 2 * paste_margin / min(abs(size[0]), abs(size[1])))
+                    self.sheet.polygon(layer, _scaled(shape, centre, factor), **flags)
+                else:
+                    self.sheet.polygon(layer, shape, width=2 * paste_margin, **flags)
+
+    def _technical(self, layers: Sequence[str], suffix: str) -> list[str]:
+        out = []
+        for layer in layers:
+            if layer == f"*.{suffix}":
+                out.extend([f"F.{suffix}", f"B.{suffix}"])
+            elif layer in (f"F.{suffix}", f"B.{suffix}"):
+                out.append(layer)
+        return list(dict.fromkeys(out))
+
+    def hole(self, drill: list | None, centre: XY, angle: float, kind: str) -> list[XY] | None:
+        """A pad's hole on the ``drills`` layer: a circle, or a slot's outline; answers the outline
+        of what was drilled (for the mask opening of an unplated hole)."""
+        if drill is None or kind not in ("thru_hole", "np_thru_hole"):
+            return None
+        sizes = [float(value) for value in drill[1:] if isinstance(value, (int, float))]
+        if not sizes:
+            return None
+        offset = sexpr.pair(sexpr.find(drill, "offset"), (0.0, 0.0))
+        dx, dy = rotate(offset[0], offset[1], angle)
+        at = (centre[0] + dx, centre[1] + dy)
+        flag = {"hole": "npth" if kind == "np_thru_hole" else "pad"}
+        if any(isinstance(value, Sym) and value == "oval" for value in drill[1:]) and len(sizes) >= 2 and abs(sizes[0] - sizes[1]) > 1e-9:
+            outline = [(at[0] + x, at[1] + y) for x, y in (rotate(px, py, angle) for px, py in _slot(sizes[0], sizes[1]))]
+            self.sheet.polygon("drills", outline, **flag)
+            return outline
+        radius = sizes[0] / 2
+        self.sheet.circle("drills", at, radius, **flag)
+        steps = 24
+        return [(at[0] + radius * math.cos(2 * math.pi * k / steps), at[1] + radius * math.sin(2 * math.pi * k / steps)) for k in range(steps)]
+
+    # -- copper ------------------------------------------------------------------------
+
+    def track(self, node: list) -> None:
+        head = sexpr.head(node)
+        layer = layer_of(node)
+        if layer is None:
+            return
+        if head == "segment":
+            points = [sexpr.pair(sexpr.find(node, "start")), sexpr.pair(sexpr.find(node, "end"))]
+        else:
+            ends = [sexpr.pair(sexpr.find(node, key)) for key in ("start", "mid", "end")]
+            if None in ends:
+                return
+            from cadgen.kicad.geometry import arc_points
+
+            points = arc_points(*ends)
+        if None in points:
+            return
+        width = sexpr.number(sexpr.value(node, "width"), 0.0)
+        net = net_of(node, self.table)
+        self.sheet.path(layer, points, width, **({"net": net} if net else {}))
+        if net:
+            for start, end in zip(points, points[1:]):
+                self.sheet.copper.append(Copper.segment(net, layer, start, end, width))
+
+    def via(self, node: list) -> None:
+        at = sexpr.pair(sexpr.find(node, "at"))
+        if at is None:
+            return
+        kind = "through"
+        for atom in node[1:]:
+            if isinstance(atom, Sym) and atom in ("blind", "micro"):
+                kind = str(atom)
+        size = sexpr.number(sexpr.value(node, "size"), 0.0)
+        drill = sexpr.number(sexpr.value(node, "drill"), 0.0)
+        net = net_of(node, self.table)
+        flags = {"via": kind}
+        if net:
+            flags["net"] = net
+        self.sheet.circle("vias", at, size / 2, **flags)
+        self.sheet.circle("drills", at, drill / 2, hole="via")
+        spanned = item_layers(node)
+        if kind == "through" or len(spanned) < 2:
+            layers = list(self.copper)
+        else:
+            order = [layer for layer in self.copper]
+            ends = sorted(order.index(layer) for layer in spanned if layer in order) or [0, len(order) - 1]
+            layers = order[ends[0]:ends[-1] + 1]
+        if net:
+            self.sheet.copper.append(Copper.disc(net, layers, at, size))
+
+    def zone(self, node: list) -> None:
+        if sexpr.find(node, "keepout") is not None:
+            return
+        layers = expand_copper(item_layers(node), self.copper)
+        if not layers:
+            return
+        net = net_of(node, self.table)
+        flags = {"net": net} if net else {}
+        outline = points_of(sexpr.find(sexpr.find(node, "polygon") or [], "pts"))
+        fills: dict[str, list[list[XY]]] = {}
+        for filled in sexpr.find_all(node, "filled_polygon"):
+            layer = layer_of(filled) or layers[0]
+            fills.setdefault(layer, []).append(points_of(sexpr.find(filled, "pts")))
+        for layer in layers:
+            for fill in fills.get(layer, []):
+                self.sheet.polygon(layer, fill, pour=True, **flags)
+                if net and len(fill) >= 3:
+                    self.sheet.copper.append(Copper.polygon(net, [layer], fill))
+            if outline:
+                self.sheet.path(layer, outline, _HAIRLINE, closed=True, **flags)
+
+    # -- the board -----------------------------------------------------------------------
+
+    def build(self) -> _Sheet:
+        for node in self.tree[1:]:
+            head = sexpr.head(node)
+            if head in ("footprint", "module"):
+                self.footprint(node)
+            elif head in ("segment", "arc"):
+                self.track(node)
+            elif head == "via":
+                self.via(node)
+            elif head == "zone":
+                self.zone(node)
+            elif head == "gr_text":
+                if len(node) > 1 and isinstance(node[1], str) and not _hidden(node):
+                    layer = layer_of(node)
+                    at = sexpr.find(node, "at")
+                    if layer and at is not None:
+                        self.text(layer, node[1], sexpr.pair(at, (0.0, 0.0)), sexpr.number(at[3]) if len(at) > 3 else 0.0, node)
+            elif head and head.startswith("gr_") and head[3:] in _GRAPHICS:
+                self.graphic(node, None, None)
+        return self.sheet
+
+
+# --- the payload ------------------------------------------------------------------------
 
 
 def _checked(path: Path) -> Path:
     path = Path(path).resolve()
-    if path.suffix.lower() not in _SUFFIXES:
-        raise PlotError(f"{path.name} is not a KiCad board (.kicad_pcb) or schematic (.kicad_sch)")
+    if path.suffix.lower() != ".kicad_pcb":
+        raise PlotError(f"{path.name} is not a KiCad board (.kicad_pcb)")
     if not path.is_file():
         raise PlotError(f"{path.name} does not exist")
     return path
 
 
-def _inputs(path: Path) -> _Inputs:
-    """What a plot of ``path`` reads: a board and the project and rules beside it (the DRC's
-    findings and the nets' classes read them); a schematic, every sheet under it wherever it
-    lies, and the project (which classes its nets) and symbol table beside it."""
-    from cadgen.kicad.schematic_index import hierarchy_files
-
+def _read(path: Path) -> tuple[bytes, bytes]:
+    """The board's bytes and its project's (empty for none): everything the payload reads."""
     try:
-        if path.suffix.lower() == ".kicad_pcb":
-            files = [(path, path.read_bytes())]
-            for sibling in (path.with_suffix(".kicad_pro"), path.with_suffix(".kicad_dru")):
-                if sibling.is_file():
-                    files.append((sibling, sibling.read_bytes()))
-        else:
-            files = hierarchy_files(path)
+        data = path.read_bytes()
+        project = path.with_suffix(".kicad_pro")
+        return data, project.read_bytes() if project.is_file() else b""
     except OSError as error:
         raise PlotError(f"{path.name} could not be read ({error.strerror or error}): check that it exists and this user can read it") from None
-    except ValueError as error:  # a sheet that is not UTF-8 text
-        raise PlotError(str(error)) from None
-    return _Inputs(tuple(files))
 
 
-def _decoded(path: Path, data: bytes) -> str:
+def _tree(path: Path, data: bytes) -> list:
     try:
-        return data.decode("utf-8")
+        text = data.decode("utf-8")
     except UnicodeDecodeError:
         raise PlotError(f"{path.name} is not a readable KiCad board: it is not UTF-8 text") from None
-
-
-def _board_tree(inputs: _Inputs) -> list:
-    path = inputs.document
     try:
-        tree = sexpr.parse(_decoded(path, inputs.files[0][1]))
+        tree = sexpr.parse(text)
     except sexpr.SexprError as error:
         raise PlotError(f"{path.name} is not a readable KiCad board ({error})") from None
     if sexpr.head(tree) != "kicad_pcb":
-        raise PlotError(f"{path.name} is not a KiCad board")
+        raise PlotError(f"{path.name} is not a KiCad board: a .kicad_pcb starts with (kicad_pcb ...)")
     return tree
 
 
-def _marked(tree: list, unconnected: list[tuple], mark: tuple[float, float]) -> list:
-    """``tree`` with the ratsnest drawn on its scratch layer (cleared first) and the calibration
-    circle at ``mark``: a new list, its children shared with ``tree`` and never changed."""
-    marked = _clear_layer(tree, _RATSNEST_LAYER) if unconnected else list(tree)
-    for number, finding in enumerate(unconnected):
-        points = [at for _text, _uuid, at in finding[4] if at is not None]
-        if len(points) < 2:
-            continue
-        (x1, y1), (x2, y2) = points[0], points[1]
-        marked.insert(len(marked) - 1, [
-            Sym("gr_line"), [Sym("start"), x1, y1], [Sym("end"), x2, y2],
-            [Sym("stroke"), [Sym("width"), _RATSNEST_WIDTH], [Sym("type"), Sym("solid")]],
-            [Sym("layer"), _RATSNEST_LAYER], [Sym("uuid"), f"00000000-0000-4000-8000-{number:012d}"],
-        ])
-    marked.insert(len(marked) - 1, [
-        Sym("gr_circle"), [Sym("center"), *mark], [Sym("end"), round(mark[0] + _CALIBRATION_RADIUS, 4), mark[1]],
-        [Sym("stroke"), [Sym("width"), 0.01], [Sym("type"), Sym("solid")]], [Sym("fill"), Sym("no")],
-        [Sym("layer"), _CALIBRATION_LAYER[1]], [Sym("uuid"), "00000000-0000-4000-8000-ca1b0a7e0000"],
-    ])
-    return marked
+def _generator(tree: list) -> str:
+    """What wrote the file, for words: ``pcbnew 10.99``."""
+    generator = sexpr.value(tree, "generator")
+    version = sexpr.value(tree, "generator_version")
+    return " ".join(str(part) for part in (generator, version) if part is not None)
 
 
-def _plot_layers(install, staged: Path, marked: list, stack: list[tuple[str, str, str]], mark: tuple[float, float]):
-    """KiCad's plot of each layer of ``stack`` (the ``marked`` board, staged at ``staged``), its
-    copper's drill holes as one last layer: ``(layers, a plotted page, the calibration offset)``."""
-    stage = staged.parent
-    plotted = [layer for layer, _kind, _side in stack] + [_CALIBRATION_LAYER[1]]
-    tokens = {layer: f"cadgenplot{number:02d}" for number, layer in enumerate(plotted)}
-    _name_layers(marked, tokens)
+def _frame(index, points: Sequence[XY]) -> tuple[float, float, float, float]:
+    """The sheet's box in KiCad's frame: the outline's, else everything drawn with air around it."""
+    outline = [point for line in index.outline for point in line]
+    if outline:
+        corners = box(outline)
+        return corners[0][0], corners[0][1], corners[2][0], corners[2][1]
+    if not points:
+        return 0.0, 0.0, 10.0, 10.0
+    corners = box(points)
+    return corners[0][0] - _BARE_MARGIN, corners[0][1] - _BARE_MARGIN, corners[2][0] + _BARE_MARGIN, corners[2][1] + _BARE_MARGIN
 
-    def svg(folder: str, layer: str) -> str:
-        return _plotted(stage, folder, tokens[layer], layer)
 
-    staged.write_text(sexpr.dumps(marked), encoding="utf-8")
-    _export(install, stage, staged.name, plotted, "poured")
-    offset = _calibration(svg("poured", _CALIBRATION_LAYER[1]), mark)
-    copper = [layer for layer, kind, _side in stack if kind == "copper"]
-    bare, filled = _unpoured(marked)
-    unpoured: dict[str, str] = {}
-    if filled:
-        staged.write_text(sexpr.dumps(bare), encoding="utf-8")
-        _export(install, stage, staged.name, copper + [_CALIBRATION_LAYER[1]], "unpoured")
-        if _calibration(svg("unpoured", _CALIBRATION_LAYER[1]), mark) != offset:
-            raise PlotError(f"KiCad placed {staged.name} differently on its two plots")
-        unpoured = {layer: _drill_groups(svg("unpoured", layer))[0] for layer in copper}
+def _shifted(item: dict, dx: float, dy: float) -> dict:
+    out = {}
+    for key, value in item.items():
+        if key == "pts":
+            out[key] = [_xy((x - dx, y - dy)) for x, y in value]
+        elif key == "at":
+            out[key] = _xy((value[0] - dx, value[1] - dy))
+        elif key == "strokes":
+            out[key] = [[_xy((x - dx, y - dy)) for x, y in stroke] for stroke in value]
+        elif key in ("w", "r"):
+            out[key] = _num(value)
+        else:
+            out[key] = value
+    return out
+
+
+def build_plot(path: Path | str) -> dict:
+    """The plot payload of the board at ``path``."""
+    path = _checked(Path(path))
+    data, _project = _read(path)
+    return _build(path, _tree(path, data))
+
+
+def _build(path: Path, tree: list) -> dict:
+    index = read_index(tree, project=path.with_suffix(".kicad_pro"))
+    sheet = _Builder(tree).build()
+    lines = ratsnest(sheet.copper)
+    for start, end in lines:
+        sheet.path("ratsnest", [start, end], _HAIRLINE)
+    left, top, right, bottom = _frame(index, sheet.points)
+    declared = [str(entry[1]) for entry in (sexpr.find(tree, "layers") or [])[1:] if isinstance(entry, list) and len(entry) >= 2]
+    stack = _stack(declared, copper_layers(tree)) + ["vias", "ratsnest", "drills"]
     layers = []
-    drills: dict[str, None] = {}
-    page = ""
-    for layer, kind, side in stack:
-        drawn, holes = _drill_groups(svg("poured", layer))
-        page = page or drawn
-        if kind == "copper":
-            drills.update(dict.fromkeys(holes))
-        entry = {"id": "ratsnest" if kind == "ratsnest" else layer, "kind": kind, "side": side, "svg": drawn}
-        if layer in unpoured and unpoured[layer] != drawn:
-            entry["unpoured"] = unpoured[layer]
-        layers.append(entry)
-    if drills:
-        layers.append({"id": "drills", "kind": "drill", "side": "both", "svg": _drill_layer(page, list(drills))})
-    return layers, page, offset
-
-
-def _board_payload(inputs: _Inputs, install) -> dict:
-    from cadgen.kicad.board_index import read_index
-    from cadgen.kicad.cli import run_kicad_cli, stage_files
-
-    path = inputs.document
-    tree = _board_tree(inputs)
-    stack = _board_layers(tree)
-    with tempfile.TemporaryDirectory(prefix="cadgen-kicad-plot-") as folder:
-        staged = stage_files(inputs.files, Path(folder))
-        index = read_index(tree, project=staged.with_suffix(".kicad_pro"))
-        # One DRC: what is still unconnected, the ratsnest.
-        run_kicad_cli(install, ["pcb", "drc", "--format", "json", "-o", "drc.json", staged.name], cwd=staged.parent)
-        report = _drc_report(staged.parent / "drc.json")
-        unconnected = [finding for finding in report if finding[0] == "unconnected"]
-        if unconnected:
-            stack.append((_RATSNEST_LAYER, "ratsnest", "both"))
-        mark = _marker_point(index)
-        layers, page, offset = _plot_layers(install, staged, _marked(tree, unconnected, mark), stack, mark)
-    width, height = _svg_size(page)
-    sheet = index.mapped(lambda x, y: (x - offset[0], y - offset[1]))
+    for layer in stack:
+        items = sheet.layers.get(layer, [])
+        if not items and not _COPPER.match(layer):
+            continue
+        kind = {"vias": "via", "ratsnest": "ratsnest", "drills": "drill"}.get(layer) or _kind(layer)
+        layers.append({"id": layer, "kind": kind, "side": _side(layer), "items": [_shifted(item, left, top) for item in items]})
+    moved = index.mapped(lambda x, y: (x - left, y - top))
     return {
+        "schemaVersion": PLOT_SCHEMA_VERSION,
         "kind": "board",
-        "sheets": [{"name": path.stem, "width": width, "height": height, "background": BOARD_BACKGROUND, "layers": layers}],
-        "board": sheet.as_json(),
-        "unrouted": len(unconnected),
+        "generator": _generator(tree),
+        "unrouted": len(lines),
+        "sheets": [{"name": path.stem, "width": _num(right - left), "height": _num(bottom - top), "background": BOARD_BACKGROUND, "layers": layers}],
+        "board": moved.as_json(_DIGITS),
     }
 
 
-def _schematic_payload(inputs: _Inputs, install) -> dict:
-    from cadgen.kicad.cli import run_kicad_cli, stage_files
-    from cadgen.kicad.schematic_plot import payload_index
-
-    path = inputs.document
-    if not inputs.files[0][1].lstrip().startswith(b"(kicad_sch"):
-        raise PlotError(f"{path.name} is not a KiCad schematic")
-    with tempfile.TemporaryDirectory(prefix="cadgen-kicad-plot-") as folder:
-        staged = stage_files(inputs.files, Path(folder))
-        run_kicad_cli(install, ["sch", "export", "svg", "-o", "plots", staged.name], cwd=staged.parent)
-        # A picture is named after its sheet, in the composed form the index names it: KiCad names
-        # its files as the platform does, which on macOS decomposes "Ü" into "U" and a diaeresis.
-        pictures = {}
-        stem = unicodedata.normalize("NFC", path.stem)
-        for plot in sorted((staged.parent / "plots").glob("*.svg")):
-            name = unicodedata.normalize("NFC", plot.stem)
-            name = name[len(stem) + 1 :] if name.startswith(stem + "-") else name
-            pictures[name or stem] = plot
-        if not pictures:
-            raise PlotError(f"KiCad drew no sheet of {path.name}")
-        try:
-            index = payload_index(staged, install, list(pictures))
-        except ValueError as error:
-            raise PlotError(str(error)) from None
-        sheets = []
-        for name in (sheet["name"] for sheet in index["sheets"]):  # the index's order: KiCad's pages
-            svg = _strip_stamps(pictures[name].read_text(encoding="utf-8"))
-            width, height = _svg_size(svg)
-            sheets.append({"name": name, "svg": svg, "width": width, "height": height, "background": SCHEMATIC_BACKGROUND})
-    return {"kind": "schematic", "sheets": sheets, "schematic": index, "unrouted": None}
-
-
-def _build(inputs: _Inputs, install) -> dict:
-    build = _board_payload if inputs.document.suffix.lower() == ".kicad_pcb" else _schematic_payload
-    return {"schemaVersion": PLOT_SCHEMA_VERSION, "kicadVersion": install.version, **build(inputs, install)}
-
-
-def build_plot(path: Path, *, install=None) -> dict:
-    """The plot payload of the board or schematic at ``path``."""
-    from cadgen.kicad.install import find_kicad
-
-    path = _checked(path)
-    install = install or find_kicad()
-    return _build(_inputs(path), install)
+def payload_bytes(payload: dict) -> bytes:
+    """A payload as the JSON bytes the viewer and the snapshot read: compact, one shape, one order."""
+    return json.dumps(payload, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")
 
 
 def plot_payload_bytes(path: Path) -> bytes:
     """The payload as JSON bytes, from the store when these bytes were plotted before."""
-    from cadgen.kicad.install import find_kicad
     from cadgen.store import drawings
 
-    path = _checked(path)
-    install = find_kicad()
-    inputs = _inputs(path)
-    key = drawings.drawing_input_key(inputs.key(), scheme=f"kicad-plot:{PLOT_SCHEMA_VERSION}.{_REVISION}:{install.version}")
+    path = _checked(Path(path))
+    data, project = _read(path)
+    digest = hashlib.sha256(data + b"\0" + project).hexdigest()
+    key = drawings.drawing_input_key(digest, scheme=f"kicad-plot:{PLOT_SCHEMA_VERSION}.{_REVISION}")
     cached = drawings.read(key)
     if cached is not None:
         return cached
-    data = json.dumps(_build(inputs, install), separators=(",", ":")).encode("utf-8")
-    drawings.write(key, data)
-    return data
+    encoded = payload_bytes(_build(path, _tree(path, data)))
+    drawings.write(key, encoded)
+    return encoded

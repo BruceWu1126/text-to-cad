@@ -149,8 +149,6 @@ none.
 | GLB / STL / 3MF | none |
 | DXF | none: a 2D canvas |
 | KiCad board | Select, Draw, Measure (see [A KiCad board](#a-kicad-board)) |
-| KiCad schematic | Select (see [A KiCad schematic](#a-kicad-schematic)) |
-| Wiring harness | none: a 2D canvas |
 
 There is no separator or activity dot. There is no Animate tool: routines play in
 [preview](#camera-animation-and-preview). Display is not a tool: every 3D view has
@@ -289,10 +287,11 @@ on the strip.
 
 A board's tools are a STEP's, read for a flat picture (`renderers/plot/board`): Select, Draw
 and Measure on the strip, the board tree and the Reference in the stack, Quick Edit at the
-top-right, the board's Display settings among the view's controls, and what KiCad and the
-review found in the alert card. None of them edits the
+top-right, and the board's Display settings among the view's controls. None of them edits the
 board: the agent does, in its script. They come with the board's index (`payload.board`); a
-plot without one is the picture alone.
+plot without one is the picture alone. The picture is the board drawn from its file, layer by
+layer in KiCad's default colours (core's [plot payload](../../core/docs/plot-payload.md)); no
+KiCad runs.
 
 - **Select**'s four modes are its mode menu in the tree's filter row, drawn as STEP's are:
   **All** (the pointer: the most specific thing under it — a pad, a via or a track, then a
@@ -310,29 +309,14 @@ plot without one is the picture alone.
   steps back, as it does for a net in focus, and what is isolated is lit; a second press lets the
   board back in. What is isolated is the file's, kept through a rebuild for whatever still names
   something on the board.
-- **Findings**, what KiCad reported and what the review found (`board/FindingsList.jsx`). The
-  errors (KiCad's DRC errors, the parity check's, unrouted connections) are the viewport's alert
-  card, the card and navbar icon a STEP's alerts use: titled by their count ("1 to fix"), under it
-  **Fix before ordering**, each its sentence in full, in KiCad's order. It opens over the board, as
-  a STEP's error does, and can be dismissed; its icon is red. The rest, the suggestions, are
-  Select's **Checks** panel under the tree, folded until a person opens it, with nothing in the
-  navbar: one row per kind of finding (KiCad reports a silkscreen clash once per pair), headed by
-  its sentence, or what every finding of its type is called when they differ, with its count and
-  the parts and nets it names. Choosing a finding, or a Checks row, selects what it names, rings
-  its places and puts the card away if it is up; its Reference is headed by its
-  sentence, its rows the sentence in full (where it says more than KiCad's message), then
-  KiCad's check, severity, message and items, then what it names (with a picker over them when
-  it names several), and Copy and Quick Edit carry
-  its sentence before its references. A rebuild that changes the errors is a new card, open again.
-  A board with nothing to fix has no card and no icon; a failure to load, or a failed action, has the card first.
 - **The Reference** is headed by the pick as a person names it (`C14 · 100n`,
-  `U3 · pad 9 VBUS`, `net VIN`, `VIN · track`) and reads it back in the script's millimetres
-  (y up, from the board's drill/place origin): a part's footprint, side, position, rotation,
-  pads, the script line that made it (`Script`), then its MPN, manufacturer, LCSC and
+  `U3 · pad 9 VBUS`, `net VIN`, `VIN · track`) and reads it back in KiCad's millimetres (y
+  down, from the page origin, the frame a script's `Vector2.from_xy_mm` takes): a part's
+  footprint, side, position, rotation, pads, then its MPN, manufacturer, LCSC and
   description fields; a pad's net, pin, type, side and position; a net's class, pads, parts,
   tracks and their length, vias and pours; copper's layer, width or drill. What a row names on the
   board is a link that selects it, as a robot's Reference selects the links it names: a pad's net
-  and part, a net's parts, copper's net, a finding's items. Its **Copy**
+  and part, a net's parts, copper's net. Its **Copy**
   (**Copy All**) writes the references with the file's prefix, as the copy key does; a copy the
   host refuses is the alert card "Couldn’t copy from the board".
 - **References** are board references, the language `cadgen.pcb.read_board(path).resolve(ref)`
@@ -350,10 +334,11 @@ plot without one is the picture alone.
   pane's size too; the sketch goes with a Quick Edit as the view with its ink. A host's or the
   agent's selection while it is up shows under the ink and leaves the sketch alone, and a
   capture never carries the hover.
-- **Display** (its button where a 3D view's is, at the navbar's right end, after the findings'
-  icon; a board has no Preview; one **Display** section): **Mode**,
+- **Display** (its button where a 3D view's is, at the navbar's right end, after the alert
+  card's icon; a board has no Preview; one **Display** section): **Mode**,
   presets as a 3D view's are ([render-mode.md](./render-mode.md)) — **Board** (every layer but
-  the courtyards), **Copper**, **Assembly** (silkscreen, fab and courtyards) and **Placement** —
+  the courtyards: copper, mask and paste, silkscreen, fabrication, vias and holes, the outline, the
+  ratsnest), **Copper**, **Assembly** (silkscreen, fab and courtyards) and **Placement** —
   then **View from** Top or Bottom (the board mirrored, its bottom layers drawn over its top) and,
   where the mode draws copper, **Copper pours** on or off — a pour hides the tracks under it. A
   pour changed from its mode's reads as **Custom**; choosing a mode reapplies it and keeps the
@@ -361,36 +346,8 @@ plot without one is the picture alone.
   and no drill layer (a via's hole is routing), the overlay drawing the pads, their holes and the
   board's, and every connection as an airwire, routed or not — each net's pins joined by their
   shortest tree (`board2d/airwires.js`). A net a pour joins shows its airwires only while
-  selected; a selected net's are highlighted. KiCad drew every layer; a mode only chooses among
-  them. Kept with the file's view; one stored before modes (`layers`) opens in its mode.
-
-## A KiCad schematic
-
-A schematic has Select alone, with the board's tree, Reference, Quick Edit and copy key, over its
-index (`payload.schematic`). Its references are the board's, so one names one connection in both:
-`#U3` a symbol (every unit of it), `#U3.9` pin 9 (numbered as its pad is), `#net:VIN` a net
-(`cadgen.pcb.read_schematic(path).resolve(ref)` reads them). Where a symbol stands on a sheet is
-KiCad's layout, not the design, so a schematic has no Measure, no Draw and no positions in its
-Reference, and having no layers it has no Display settings.
-
-- **Select**'s modes: **All** (a pin, then a label, a wire or a junction for its net, then a
-  symbol), **Parts** (a symbol, by its body or its pins), **Pins** and **Nets** (anything on a
-  net). Shift-click adds; a double-click copies.
-- **The tree** is the board's, in pins: **Parts** by kind, each with its pins; **Nets**, each with
-  the pins on it. A symbol's units on several sheets are one row. Its rows light what they name
-  on hover and isolate parts and nets with their eye, as the board's do.
-- **Findings** are the board's, from KiCad's ERC, which the schematic's plot runs: its errors the
-  alert card, its warnings Select's Checks.
-- **The Reference**: a symbol's library entry, footprint, units, sheets (on a schematic of
-  several), pins, MPN and LCSC fields and `Script`; a pin's net, name and type; a net's class,
-  pins, parts and labels; a pin's net and part, and a net's parts, select what they name.
-- **Cross-probing**: a board and its schematic (one path but for `.kicad_pcb` and `.kicad_sch`)
-  open in two views select together, through the host's `crossProbe` port (`viewer-host.md`):
-  what one selects — a person's press, a tree row, the agent's `select` — the other selects too,
-  and centres when it is off screen, at the zoom it has. What names nothing there (a board's point,
-  a power symbol) is left out, and a selection naming nothing there leaves it as it was; a view in
-  Measure keeps its measurement and is left alone. A selection only: nothing is edited, and
-  nothing is kept (`board/useCrossProbe.js`).
+  selected; a selected net's are highlighted. The payload carries every layer; a mode only
+  chooses among them. Kept with the file's view; one stored before modes (`layers`) opens in its mode.
 
 ## The tool stack
 
@@ -508,7 +465,7 @@ stack.
   toolbar and the stack's panels, which stay up beside the model, share
   `FLOATING_CHROME_SURFACE_CLASS` — the background at 45.5% and barely blurred
   (2px), so the model behind them is easy to make out (a picture that keeps its
-  own colours against the theme, a KiCad schematic's light paper in the dark,
+  own colours against the theme, a KiCad board's dark sheet in the light,
   raises it to 90% through `--cad-chrome-alpha`); every menu and popover over the
   viewport, the app menu and Display included, share `FLOATING_SURFACE_CLASS` (the
   background at 75%, blurred), so their text never competes with the model.
@@ -533,9 +490,9 @@ are; its filter row is a heading's 28px, the box 20px tall and close to the row'
 actions, shown on hover and kept while they are on, are **Isolate** then the **Hide/Reveal** eye; a part file has no
 Isolate. A Links row that draws something — a link with visuals, or one visual —
 has the eye alone, in its search hit too: a link's hides its own visuals, never its
-child links, and on a partly hidden link hides the rest. A KiCad board's or schematic's part and
+child links, and on a partly hidden link hides the rest. A KiCad board's part and
 net rows have the eye as **Isolate** (`TreeRowEye`'s `isolate`: lit and pressed while on, "Exit
-isolate"); a pad, a pin or a group has none. They float over the row's right end rather than taking width from it:
+isolate"); a pad or a group has none. They float over the row's right end rather than taking width from it:
 the name runs the row's full width and, while an action shows, fades out half a
 rem before them (a mask, `ROW_NAME_UNDER_ACTIONS`), so nothing is drawn behind the
 buttons and the row keeps its own colour.
@@ -863,7 +820,7 @@ pressed in while focus is on the page. Editable targets keep their own keys.
   then Draw's canvas spends its own Escape; then the renderer's (STEP: an
   unfinished measurement, then the Measure tool, then the selection, then
   isolation; a KiCad board: an unfinished measurement, then the Measure tool,
-  then the selection; robots and a KiCad schematic: the selection). The tool stack's
+  then the selection; robots: the selection). The tool stack's
   panels are never Escape's to close (a phone's sheet is dismissed like any sheet).
 - **A panel's grip** (its bottom-right corner) is a separator in the tab
   order: Left/Right nudge its width and Up/Down its cap by 16px, and Home and
@@ -906,9 +863,7 @@ model survives (a failed update, a warning beside the model) has an X, **Dismiss
 the card away for as long as that alert stands, and its icon, first of the navbar's
 right-hand controls after the update button, brings it back. The dismissal goes once the alert changes or clears, or
 another file opens; with the card back, so does the icon. Preview has no navbar, and so no
-icon. A KiCad board's or schematic's errors are this card and icon too, listed under its
-title; its suggestions are Select's Checks panel, not the card (see
-[A KiCad board](#a-kicad-board)).
+icon. A KiCad board that will not read has the card first (see [A KiCad board](#a-kicad-board)).
 
 ## Verification
 

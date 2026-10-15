@@ -5,7 +5,7 @@ const EMPTY = Object.freeze([]);
 let measurementSequence = 0;
 
 /**
- * Measure on a board: two picks make a measurement, read back in the script's millimetres. The
+ * Measure on a board: two picks make a measurement, read back in KiCad's millimetres. The
  * point under the pointer before the second pick (the draft) lives in a ref and repaints the canvas;
  * the first pick and the measurements are React state, for the panel.
  *

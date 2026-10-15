@@ -5,14 +5,14 @@ import { createBoardIndex } from "./boardIndex.js";
 import { nearestOnSegment, pointInPolygon } from "./geometry.js";
 import { drawBoardOverlay } from "./boardOverlay.js";
 
-// A 40 x 30 mm sheet whose script origin sits at sheet (5, 25): script (10, 5) is sheet (15, 20).
+// A 40 x 30 mm sheet cut from a page whose origin sits at sheet (5, 25): KiCad's (10, -5) is sheet (15, 20).
 const rect = (cx, cy, w, h) => [[cx - w / 2, cy - h / 2], [cx + w / 2, cy - h / 2], [cx + w / 2, cy + h / 2], [cx - w / 2, cy + h / 2]];
 const BOARD = {
   origin: [5, 25],
   nets: [{ name: "VIN", class: "Power" }, { name: "GND", class: "Default" }, { name: "OUT", class: "Default" }],
   parts: [
     { ref: "R1", value: "10k", footprint: "Resistor_SMD:R_0603_1608Metric", side: "top", at: [15, 20], rotation: 0,
-      fields: { MPN: "RC0603" }, script: "board.py:12", outline: rect(15, 20, 3, 1.4) },
+      fields: { MPN: "RC0603" }, outline: rect(15, 20, 3, 1.4) },
     { ref: "U1", value: "AMP", footprint: "Test:SOT4", side: "bottom", at: [30, 10], rotation: 90, fields: {}, outline: rect(30, 10, 4, 3) },
   ],
   pads: [
@@ -29,10 +29,10 @@ const BOARD = {
   outline: [[[0, 0], [40, 0], [40, 30], [0, 30], [0, 0]]],
 };
 
-test("the script frame is y up from the board's origin, wherever the sheet is laid out", () => {
+test("a reference's point is KiCad's frame, y down from the page origin, wherever the sheet is laid out", () => {
   const index = createBoardIndex(BOARD, { x: 2, y: 3 });
-  assert.deepEqual(index.toScript([17, 23]), [10, 5]);
-  assert.deepEqual(index.toPage([10, 5]), [17, 23]);
+  assert.deepEqual(index.toScript([17, 23]), [10, -5]);
+  assert.deepEqual(index.toPage([10, -5]), [17, 23]);
 });
 
 test("a press picks the most specific thing under it, filtered by the Select mode", () => {
@@ -41,7 +41,7 @@ test("a press picks the most specific thing under it, filtered by the Select mod
   assert.equal(index.pick([14.175, 20], { mode: "parts" }).selector, "#R1");
   assert.equal(index.pick([15.825, 20], { mode: "nets" }).selector, "#net:GND");
   // A track is its net at the nearest point of its centreline, to the hundredth of a millimetre.
-  assert.equal(index.pick([14.3, 16]).selector, "#net:VIN@x9.18y9");
+  assert.equal(index.pick([14.3, 16]).selector, "#net:VIN@x9.18y-9");
   assert.equal(index.pick([20.1, 15]).selector.startsWith("#net:GND@"), true);
   // Bare board inside a pour is nothing under All, and the pour's net under Nets.
   assert.equal(index.pick([2, 28]), null);
@@ -68,9 +68,9 @@ test("a reference resolves to what it names, or to nothing on a board that lacks
   assert.equal(index.resolve("#U1.3").pad.net, "GND");
   assert.equal(index.resolve("U1").part.side, "bottom");
   assert.deepEqual(index.resolve("#net:GND").net.pads.map((pad) => `${pad.ref}.${pad.number}`), ["R1.2", "U1.3"]);
-  const copper = index.resolve("#net:VIN@x9.18y9");
+  const copper = index.resolve("#net:VIN@x9.18y-9");
   assert.equal(copper.item.kind, "track");
-  assert.deepEqual(index.resolve("#@x1y2").page, [6, 23]);
+  assert.deepEqual(index.resolve("#@x1y2").page, [6, 27]);
   assert.equal(index.resolve("#C99"), null);
   assert.equal(index.resolve("#net:NOPE"), null);
   assert.equal(index.resolve("o1.f2"), null);

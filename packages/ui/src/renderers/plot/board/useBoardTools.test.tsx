@@ -62,9 +62,9 @@ it('Escape cancels an unfinished measurement, then puts Measure down with its re
   const view = mount();
   act(() => view.result.current.selectTool(PLOT_TOOL.MEASURE));
   tap(view, 30, 30); tap(view, 370, 270);
-  // Hole to hole: 34 mm across and 24 mm up the script's frame.
+  // Hole to hole: 34 mm across and 24 mm down, in KiCad's frame.
   expect(view.result.current.measure.measurements).toHaveLength(1);
-  expect(view.result.current.measure.measurements[0]).toMatchObject({ dx: 34, dy: -24 });
+  expect(view.result.current.measure.measurements[0]).toMatchObject({ dx: 34, dy: 24 });
   tap(view, 30, 30);
   expect(view.result.current.measure.start).not.toBeNull();
   act(() => { expect(view.result.current.escape()).toBe(true); });

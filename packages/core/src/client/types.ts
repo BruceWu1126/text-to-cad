@@ -92,17 +92,21 @@ export interface CadDrawingPayload {
   [key: string]: unknown;
 }
 /**
- * What `GET /__cad/plot` answers: a document drawn by its own tool (a KiCad board or schematic,
- * plotted by `kicad-cli`), one SVG per sheet. SVG user units are millimetres, y DOWN, the
- * viewBox `0 0 width height`; each sheet is drawn on its own `background`. `kind` names what
- * drew it, for wording only. See `apps/web/docs/backend.md`.
+ * What `GET /__cad/plot` answers: a KiCad board drawn from its file, as geometry per layer
+ * (`@text-to-cad/core` `docs/plot-payload.md`). One sheet in millimetres, y DOWN, its top-left
+ * corner the origin, drawn on its `background`; its `layers` back to front, each a list of
+ * items. `kind` names what it draws, for wording only.
  */
 export interface CadPlotPayload {
   schemaVersion: number;
   kind: string;
-  /** A board's unconnected pairs, already drawn in its SVG as a ratsnest; null for a schematic. */
+  /** What wrote the file (`"pcbnew 10.99"`), for wording only. */
+  generator?: string;
+  /** The board's connections still to make, each drawn as a ratsnest line. */
   unrouted: number | null;
-  sheets: { name: string; svg: string; width: number; height: number; background: string }[];
+  sheets: { name: string; width: number; height: number; background: string; layers: { id: string; kind: string; side: string; items: Record<string, unknown>[] }[] }[];
+  /** The board's index, in sheet millimetres: what the plot pane's tools point with. */
+  board?: Record<string, unknown>;
   [key: string]: unknown;
 }
 /** Byte tickets own their buffer exclusively: workers may detach it. URL tickets are approved by the provider. */

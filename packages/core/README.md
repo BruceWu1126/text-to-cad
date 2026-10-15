@@ -190,6 +190,7 @@ Where the mechanism is written:
 | Document | Covers |
 |---|---|
 | [docs/render-pipeline.md](docs/render-pipeline.md) | The staged pipeline (`loadSource` → `buildModel` → `renderModel` → `captureModel`), the unified display state, the two lighting recipes, the photographic rig, display modes, CAD edges and per-component geometry sharing |
+| [docs/plot-payload.md](docs/plot-payload.md) | The plot payload (schema 3): a KiCad board drawn from its file as geometry per layer, the layer stack, the items and their flags, the board index's frame; what `lib/plot2d` draws and `cadgen.kicad.plot` writes |
 | [docs/resource-ownership.md](docs/resource-ownership.md) | Ownership and disposal, the selector/BVH demand boundary, recomposition and instancing reuse, the tessellation worker pool, mesh-cache admission |
 | [docs/tube-deformation.md](docs/tube-deformation.md) | Deforming a swept body's original STEP tessellation through analytic centerlines |
 
