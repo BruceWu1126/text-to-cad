@@ -502,22 +502,44 @@ def all_stored(tree_hash: str, producer: dict) -> bool:
     return all(probe(_part_key(entry, key)) is not None for entry in descriptor["components"].values())
 
 
+def part_keys(tree_hash: str, *, producer: dict | None = None) -> tuple[dict[str, str], dict]:
+    """The part key of every component of ``tree_hash`` (links expanded) under ``producer``
+    (this runtime's when None), ``{cid: key}``, with the producer selected: what a build
+    announces for its preview revision (STORE.md §9b). No kernel import."""
+    descriptor, selected = _captured(tree_hash, producer)
+    key = producer_key(selected)
+    return {cid: _part_key(entry, key) for cid, entry in descriptor["components"].items()}, selected
+
+
+def stored_keys(keys: dict[str, str]) -> dict[str, str]:
+    """The entries of ``keys`` whose part the store holds: one probe each, no kernel."""
+    return {cid: key for cid, key in keys.items() if probe(key) is not None}
+
+
 def ensure_display(tree_hash: str, *, producer: dict | None = None,
-                   progress: Callable[[int, int], None] | None = None) -> list[str]:
+                   progress: Callable[[int, int], None] | None = None,
+                   cids: list[str] | None = None,
+                   on_derived: Callable[[str, str], None] | None = None) -> list[str]:
     """Derive in this process the display data of every part of ``tree_hash`` the store
     lacks, and return a line for each part that could not be derived, naming the
-    occurrences that place it and the error. A build does this before it reports done
-    (``_internal/generation.py``), so a view of what it built only reads.
+    occurrences that place it and the error. A build does this as soon as its result
+    exists (``_internal/generation.py``), so a view of what it built only reads.
 
     Which parts are missing is asked of the store alone (``probe``): a tree whose
     display data is all stored imports no kernel. ``producer`` is the one a view of the
-    tree selects (its document's), this runtime's when None. ``progress(done, total)``
-    hears how many of the missing parts are done, before each one and at the end."""
+    tree selects (its document's), this runtime's when None. ``cids`` restricts the work
+    to those components (a parent's own: a child's job derives the child's), every
+    component when None. ``progress(done, total)`` hears how many of the missing parts
+    are done, before each one and at the end; ``on_derived(cid, key)`` hears each part
+    the moment it is stored."""
     descriptor, producer = _captured(tree_hash, producer)
     components = descriptor["components"]
     key = producer_key(producer)
-    keys = {cid: _part_key(entry, key) for cid, entry in components.items()}
-    missing = [cid for cid in components if probe(keys[cid]) is None]
+    wanted = list(components) if cids is None else list(dict.fromkeys(cids))
+    if any(cid not in components for cid in wanted):
+        raise ValueError("display request names an unpinned component")
+    keys = {cid: _part_key(components[cid], key) for cid in wanted}
+    missing = [cid for cid in wanted if probe(keys[cid]) is None]
     if not missing:
         return []
     if producer != producer_identity():
@@ -530,6 +552,9 @@ def ensure_display(tree_hash: str, *, producer: dict | None = None,
             _derive(components[cid], keys[cid])
         except Exception as error:  # noqa: BLE001 - one part's failure is reported, the rest derive
             failures.append((cid, f"{type(error).__name__}: {error}"))
+            continue
+        if on_derived is not None:
+            on_derived(cid, keys[cid])
     if progress is not None:
         progress(len(missing), len(missing))
     if not failures:

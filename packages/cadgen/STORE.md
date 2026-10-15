@@ -2110,11 +2110,14 @@ late older events cannot replace it. It may retain the previous visible model
 while the newer request builds. A daemon restart expires request ordering; a
 disconnected preview is labelled as such. The ledger is short-lived and
 deletable, never the only durable copy of an authored change. A build's events
-carry what that status reads and no more: the "Saving STEP" preview names the
-output, the source result's tree and the part key of each of its components, a
-saved result the document's tree and digest, and the ledger keeps nothing else
-of either. Kinematics, appearance
-and animation travel in the sidecar alone.
+carry what that status reads and no more: a preview names the output, the
+result tree, the producer its parts are keyed under, the part key of each
+component the store holds -- the stored parts first, then one event per part
+the build derives -- and whether that is all of them; the preview's annotations
+name the one object they are (below); a saved result the document's tree and
+digest; and the ledger keeps nothing else of any of them. Kinematics,
+appearance and animation travel in the sidecar for every durable reader, and
+in the preview's annotations object for the viewer alone.
 
 Only model-run producers advance editing order. Compiling saved bytes and
 attaching a coalesced subscriber to an existing producer do not create a new

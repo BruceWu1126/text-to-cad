@@ -480,21 +480,67 @@ def _generate_part_outputs(
                 )
             return resolved
 
-        def publish_preview(result_hash: str, _tree: dict):
+        # What the preview resolved against the result tree; the sidecar carries the same.
+        resolved: dict[str, object] = {}
+
+        def publish_preview(result_hash: str, result_tree: dict):
+            """The preview revision (STORE.md §9b), the moment the result exists: its parts
+            derived here, its tree and parts announced, then its annotations as one object.
+            The role, output path and progress belong to this request, never in the
+            content-addressed tree or the saved document's index: a build's status names
+            objects, and its readers take neither geometry nor annotations from it."""
+            from cadgen._internal.preview_revision import annotations_object
+            from cadgen.store.parts import part_keys, stored_keys
+
             if spec.source == "generated":
                 executors.emit_source_result(_model_for_spec(spec), result_hash)
-            # The role, output path and progress belong to this request, never
-            # in the content-addressed tree or the saved document's index. A
-            # build's status names its output and result and nothing else: its
-            # readers take neither geometry nor annotations from it (STORE.md §9b).
-            if writes_step and executors.sink_installed():
-                executors.emit_event(executors.model_event(
-                    _model_for_spec(spec), "building", phase="Saving STEP",
-                    preview={"output": str(spec.step_path.expanduser().resolve()), "tree": result_hash},
-                ))
+            output = str(spec.step_path.expanduser().resolve())
+            announce = writes_step and executors.sink_installed()
+            keys, selected, stored = {}, None, {}
+
+            def preview_event(*, complete: bool, phase: str | None = None) -> None:
+                if announce:
+                    executors.emit_event(executors.model_event(
+                        _model_for_spec(spec), "building", phase=phase,
+                        preview={"output": output, "tree": result_hash, "producer": selected,
+                                 "parts": dict(stored), "complete": complete}))
+
+            if producer is not None:
+                # Stored parts first, so a viewer draws them before the rest are derived;
+                # then this build's own, one event each. A child's parts are its own job's.
+                keys, selected = part_keys(result_hash, producer=producer)
+                stored = stored_keys(keys)
+                preview_event(complete=len(stored) == len(keys))
+                own = [cid for cid in result_tree.get("components") or {} if cid not in stored]
+
+                def derived(cid: str, key: str) -> None:
+                    stored[cid] = key
+                    preview_event(complete=len(stored) == len(keys))
+
+                if own:
+                    _ensure_display(result_hash, producer=producer, progress=progress, logger=logger,
+                                    cids=own, on_derived=derived)
+            else:
+                # No display producer here: the parts are a view's to find, as for a saved file.
+                preview_event(complete=False)
             wait_children = getattr(scene, "wait_child_outputs", None)
             if wait_children is not None:
                 wait_children()
+            if producer is not None:
+                stored = stored_keys(keys)
+            preview_event(complete=bool(keys) and len(stored) == len(keys),
+                          phase="Saving STEP" if writes_step else None)
+            # The declarations, resolved against the result tree: for the sidecar below,
+            # and for the preview as the one annotations object a viewer binds to.
+            resolved["kinematics"] = tree_kinematics(result_hash)
+            if announce:
+                annotations = annotations_object(
+                    result_hash, kinematics=resolved["kinematics"],
+                    appearance=result_tree.get("appearance"), clips=getattr(scene, "animation", None))
+                if annotations is not None:
+                    executors.emit_event(executors.model_event(
+                        _model_for_spec(spec), "building",
+                        annotations={"output": output, "tree": result_hash, "object": annotations}))
         # Objects first: components + tree. Harmless if this build ends up not
         # publishing its record (publish rule below) — content-addressed and GC'd.
         writes_step = generated and bool(spec.step_output)
@@ -558,7 +604,8 @@ def _generate_part_outputs(
         if generated:
             kinematics_block = getattr(scene, "kinematics", None)
             if kinematics_block:
-                sidecar_payload["kinematics"] = tree_kinematics(tree_hash)
+                sidecar_payload["kinematics"] = (
+                    resolved["kinematics"] if "kinematics" in resolved else tree_kinematics(tree_hash))
                 if writes_step:
                     from cadgen._internal.kinematics_resolve import remap_document_kinematics
 
@@ -889,12 +936,15 @@ def _generate_step_outputs(
 
 
 def _ensure_display(tree: str, *, producer: dict | None = None, progress: object | None = None,
-                    logger: CliLogger | None = None) -> None:
+                    logger: CliLogger | None = None, cids: list[str] | None = None,
+                    on_derived: Callable[[str, str], None] | None = None) -> None:
     """Derive here the display data of every part of ``tree`` the store lacks -- its
-    display mesh and selector table (``store.parts.ensure_display``) -- before the
-    build reports done, so a view of what it built only reads. A part that
-    cannot be derived is a warning on the build, never its failure: a view, a snapshot
-    and a list leave that part out and name it. The parts of a child the build composed are normally there
+    display mesh and selector table (``store.parts.ensure_display``) -- as soon as the
+    build's result exists, so its preview and every view of what it built only read.
+    ``cids`` restricts that to the build's own components, ``on_derived`` hears each
+    part as it is stored (both ``ensure_display``'s). A part that cannot be derived is a
+    warning on the build, never its failure: a view, a snapshot and a list leave that
+    part out and name it. The parts of a child the build composed are normally there
     already: the child's own job derived them before it reported done."""
     if not tree:
         return
@@ -912,7 +962,7 @@ def _ensure_display(tree: str, *, producer: dict | None = None, progress: object
 
     try:
         with logger.timed("display data") if logger is not None else nullcontext():
-            failures = ensure_display(tree, producer=producer, progress=counted)
+            failures = ensure_display(tree, producer=producer, progress=counted, cids=cids, on_derived=on_derived)
         texts = [f"{failure}; views leave it out" for failure in failures]
     except Exception as error:  # noqa: BLE001 - the build's result stands; its display data waits for a view
         texts = [f"display data not derived ({type(error).__name__}: {error}); the first view derives it"]

@@ -525,6 +525,9 @@ src/cadgen/
                          #   and its elements' tokens, from its geometry),
                          #   tree_tokens (an occurrence's token, from its
                          #   place in the tree),
+                         #   preview_revision (a build's preview: its parts
+                         #   announced as they are stored, its annotations
+                         #   as one object, STORE.md §9b),
                          #   kinematics_resolve (mate axes to numbers),
                          #   animation_bake
                          #   (clips to keyframes), mesh_export (the mesh

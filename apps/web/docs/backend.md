@@ -129,6 +129,25 @@ file to hash it never holds up its deletion: the catalog opens models with delet
 sharing on Windows, and a model that vanishes mid-read gets an empty hash on that
 request and has no row on the next.
 
+The build feed, `GET /__cad/preview?file=<abs>&after=<cursor>`, is the newest
+build of the file as the daemon's ledger lists it (`cadgen.viewer.preview`):
+its `state`, `phase` and `detail`, its `error`, `superseded` once the file has
+moved past it, and `preview`, the **preview revision** the build announced the
+moment its result existed (cadgen's `STORE.md` §9b): the result `tree`'s hash,
+the `producer` its parts are keyed under, `parts` as `{cid: part key}` for every
+component whose part the store holds -- the stored parts first, then one more
+each time the build derives one -- `complete` once that is all of them, and
+`annotations`, the hash of the one object the build resolved its declarations
+into against that tree, or null until it has. All of it is names: the client
+reads the tree as it reads any (`GET /__cad/store?file=<tree>/assembly.json`
+with that `producer`), the parts by their keys, and the annotations with
+`GET /__cad/store?annotations=<object>`, which answers the object's JSON (its
+`articulation`, `appearance`, `display` and `animation`, exactly the fields a
+catalog row carries for a saved file, keyed by the tree's tokens) or 404 for
+anything that is not such an object. A `preview` whose `producer` is null names
+no parts: the client finds them as for a saved file. A superseded build's
+`preview` is null, as is a build's before its result exists.
+
 The explorer's two reads are `GET /__cad/folder?path=<abs>` (one folder's
 subfolders and CAD files, natural order) and `GET /__cad/search?path=<abs>&q=`
 (the CAD files under a folder whose path below it holds `q`, bounded by matches,

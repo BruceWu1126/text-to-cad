@@ -1,10 +1,14 @@
-"""What a build of a STEP file is doing, for the viewer's status: never geometry.
+"""What a build of a STEP file is doing, for the viewer's status: names, never geometry.
 
-The viewer always shows the saved file (STORE.md 9b). This read-only adapter matches the
-daemon's jobs to the file's output path and store and reports the newest: whether it is queued
-or running, how far it has got, whether it failed and why -- and, once it has finished, whether
-the file moved past it (``superseded``), when its failure is no longer the news. A daemon
-restart expires this channel; the catalog keeps serving the bytes on disk.
+The viewer shows the saved file, or the build's preview revision labelled as one until the
+file replaces it (STORE.md 9b). This read-only adapter matches the daemon's jobs to the
+file's output path and store and reports the newest: whether it is queued or running, how
+far it has got, whether it failed and why; the preview revision it announced -- the result
+tree's hash, the producer its parts are keyed under, the part key of each component the
+store holds and the hash of its annotations object, artifact-side objects the viewer reads
+as it reads any -- and, once it has finished, whether the file moved past it
+(``superseded``), when its failure and its preview are no longer the news. A daemon restart
+expires this channel; the catalog keeps serving the bytes on disk.
 """
 
 from __future__ import annotations
@@ -96,10 +100,35 @@ def preview_status(file_ref: str, *, jobs: list[dict] | None = None,
     }
     if _superseded(latest, target):
         # The file moved on after this build finished: built by another installation, or once
-        # its daemon has gone; a checkout; a STEP written by hand. Its failure is no longer the news.
+        # its daemon has gone; a checkout; a STEP written by hand. Its failure and its preview
+        # are no longer the news.
         result["superseded"] = True
         result["error"] = None
+        result["preview"] = None
+    else:
+        result["preview"] = _preview_revision(latest, target)
     return result
+
+
+def _preview_revision(job: dict, target: str) -> dict | None:
+    """The preview revision ``job`` announced for ``target``: the names of artifact-side
+    objects (the ledger keeps nothing else of it, ``daemon/jobs.py``), or None before the
+    build's result exists. The annotations are the preview's only when they were resolved
+    against its tree."""
+    preview = (job.get("previews") or {}).get(target)
+    if not isinstance(preview, dict) or not preview.get("tree"):
+        return None
+    annotations = (job.get("annotations") or {}).get(target)
+    named = (isinstance(annotations, dict) and annotations.get("object")
+             and annotations.get("tree") == preview["tree"])
+    producer = preview.get("producer")
+    return {
+        "tree": str(preview["tree"]),
+        "producer": dict(producer) if isinstance(producer, dict) else None,
+        "parts": {str(cid): str(key) for cid, key in (preview.get("parts") or {}).items()},
+        "complete": preview.get("complete") is True,
+        "annotations": str(annotations["object"]) if named else None,
+    }
 
 
 def _superseded(job: dict, target: str) -> bool:

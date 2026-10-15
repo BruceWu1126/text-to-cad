@@ -49,7 +49,7 @@ and assets, so the app does not scan another package's source.
   The root dependency checker prevents app-to-app and package-to-app imports.
   The backend is not here: its code, its tests and its laws live with cadgen.
 - **Document boundary**: everything renders from the artifact, what cadgen
-  resolved its optional schema-10 `.step.json` sidecar into (the catalog entry's
+  resolved its optional schema-11 `.step.json` sidecar into (the catalog entry's
   `articulation`, `animation` and per-occurrence `display`: data, never code; the
   page reads no sidecar) and immutable cache views. The viewer never reads model
   source and never triggers a source build. An already-running build publishes
