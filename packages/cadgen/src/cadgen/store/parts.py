@@ -11,7 +11,7 @@ its ``contentHash``, so the body a build holds and the same body read back from 
 it wrote (different bytes, one fingerprint) are one part. An eager-only component, whose
 bytes cannot stand for its shape, hashes its pinned topology facts in place of a
 fingerprint, its colours by ordinal. The version is bumped by any change to the
-extractor, the selector table, the mesher, the verifier, the GLB payload or the
+extractor, the selector table, the mesher, the GLB payload or the
 fingerprint scheme, or in how the digest is hashed.
 The record is ``{"glb": {...}, "selectors": {...}}``: each object's address and byte
 length and what a reader sizes it by without opening it -- the mesh's decoded-bytes

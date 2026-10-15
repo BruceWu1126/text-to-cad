@@ -145,7 +145,7 @@ function completedPackageMeshState(entry, meshData) {
     file: entry.file, kind: entry.kind, meshHash: entryMeshAssetSignature(entry), meshData,
     assemblyStructureReady: true, assemblyInteractionReady: true,
     assemblyBackgroundError: "", assemblyBackgroundErrorMeshHash: "", assemblyFailedParts: [],
-    assemblyUnmeshedParts: [], assemblyUnverifiedParts: [],
+    assemblyUnmeshedParts: [],
   };
 }
 

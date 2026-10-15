@@ -121,7 +121,4 @@ chord tolerance) never fails the export: the part is written without it, and the
 result's `warnings` name it, for example `#o:4b1f9e2a7c03 pin: 1 face
 (f:9d2e8c1b5a70) could not be meshed, so pin.stl has a hole in place of it: it is
 not watertight`. Repairing the face in the model, or a finer `--mesh-tolerance`,
-closes the hole. A face the verifier could not bring within twice the tolerance
-of its exact surface is written as the mesh draws it, and warned of the same way
-(`... could not be brought within tolerance of its exact surface, so it is drawn
-off it`).
+closes the hole.

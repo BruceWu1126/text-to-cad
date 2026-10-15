@@ -720,7 +720,6 @@ function StepSurfaceBody({ view, data }) {
     meshState?.assemblyBackgroundError,
     meshState?.assemblyFailedParts,
     meshState?.assemblyUnmeshedParts,
-    meshState?.assemblyUnverifiedParts,
     selectedAssemblyHydrationFailed,
     selectedEntry,
     selectedArtifact,
