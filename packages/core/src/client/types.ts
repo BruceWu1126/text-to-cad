@@ -146,7 +146,26 @@ export interface CadPartResponse {
   viewId: string; job?: string; replacementView?: CadRuntimeView;
   components: Record<string, {state: 'pending' | 'ready' | 'failed'; part: string; record?: Omit<PartRow, 'part'>; job?: string; error?: string; code?: string}>;
 }
-/** What a build of a STEP file is doing: status only. The viewer always shows the saved file. */
+/**
+ * A build's preview revision, as its feed names it the moment the result tree exists (cadgen's
+ * `STORE.md` §9b): names of artifact-side objects a client reads as it reads any, never geometry.
+ */
+export interface CadEditingPreviewRevision {
+  /** The result tree, read as any tree is: its view at `storeTreeUrl`. */
+  tree: string;
+  /** The producer its parts are keyed under; null when the build could not name them, and the view keys them as for a saved file. */
+  producer: CadProducer | null;
+  /** The components whose part the store holds, by cid: the stored parts first, then one more each time the build derives one. */
+  parts: Record<string, string>;
+  /** Whether every component's part is named; until then the missing ones are coming. */
+  complete: boolean;
+  /** The one object the build resolved its declarations into against `tree` (`previewAnnotations`), or null until it has. */
+  annotations: string | null;
+}
+/**
+ * What a build of a STEP file is doing, and the preview revision it announced: the viewer shows the
+ * saved file, or that preview labelled as one until the file replaces it in place.
+ */
 export interface CadEditingPreview {
   feedCursor?: string;
   feedLimited?: boolean;
@@ -159,8 +178,23 @@ export interface CadEditingPreview {
   error?: string;
   output?: string;
   file?: string;
-  /** The file changed after this build finished: its failure is no longer the news. */
+  /** The file changed after this build finished: its failure and its preview are no longer the news. */
   superseded?: boolean;
+  /** The preview revision: null before the build's result exists and for a superseded build. */
+  preview?: CadEditingPreviewRevision | null;
+}
+/**
+ * A preview revision's annotations object (`GET /__cad/store?annotations=`): exactly the fields a
+ * catalog row carries for a saved file, resolved against the preview's tree and keyed by its tokens.
+ */
+export interface CadPreviewAnnotations {
+  kind: 'preview-annotations';
+  schemaVersion: number;
+  tree: string;
+  articulation: Record<string, unknown> | null;
+  appearance: CadJson;
+  display: Record<string, Record<string, unknown>> | null;
+  animation: Record<string, unknown> | null;
 }
 export interface CadPreviewObserverOptions {
   schedule?: typeof globalThis.setTimeout;
@@ -223,6 +257,14 @@ export interface CadWorkspaceService {
       onFailed?: (cid: string, error: Error) => void;
     }): Promise<Map<string, PartRow>>;
   observeEditingPreview(file: string, onUpdate: (preview: CadEditingPreview) => void, onError: (error: unknown) => void, options?: CadPreviewObserverOptions): () => void;
+  /**
+   * Where a store tree's view is read, as a catalog row names a saved file's: `assembly.json` under
+   * it, resolved as a package asset, with the producer its parts are keyed under (a build feed's
+   * preview names both; with none, the view keys them as for a saved file).
+   */
+  storeTreeUrl(tree: string, options?: { producer?: CadProducer | null }): string;
+  /** A preview revision's annotations object, or null for one the store does not hold. */
+  previewAnnotations(object: string, options?: CadRequestOptions): Promise<CadPreviewAnnotations | null>;
   createRenderSession(options?: { file?: string }): CadRenderSession;
   dispose(): void;
 }

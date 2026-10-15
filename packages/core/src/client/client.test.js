@@ -247,6 +247,29 @@ test('part and preview requests are origin-bound, guarded and cancelled with the
   await assert.rejects(client.editingPreview('part.step'), { name: 'AbortError' });
 });
 
+test('a preview revision is read as a saved file is: its tree’s view under the origin, its annotations by object', async () => {
+  const calls = [];
+  const client = createCadClient({ origin: 'http://workspace.test', fetch: async (url, options) => {
+    calls.push({ url, options });
+    return new URL(url).searchParams.get('annotations') === 'gone'
+      ? { ok: false, status: 404, statusText: 'Not Found', json: async () => ({ error: 'Not found' }) }
+      : json({ kind: 'preview-annotations', schemaVersion: 1, tree: 'tree', articulation: null, appearance: null, display: null, animation: null });
+  } });
+  const keyed = new URL(client.storeTreeUrl('tree', { producer: { producerKey: 'kernel' } }));
+  assert.equal(keyed.origin, 'http://workspace.test');
+  assert.equal(keyed.pathname, '/__cad/store');
+  assert.equal(keyed.searchParams.get('file'), 'tree');
+  assert.deepEqual(JSON.parse(keyed.searchParams.get('producer')), { producerKey: 'kernel' });
+  assert.equal(new URL(client.storeTreeUrl('tree')).searchParams.has('producer'), false, 'no producer: the view keys the parts as for a saved file');
+  const annotations = await client.previewAnnotations('object');
+  assert.equal(annotations.kind, 'preview-annotations');
+  assert.equal(new URL(calls[0].url).pathname, '/__cad/store');
+  assert.equal(new URL(calls[0].url).searchParams.get('annotations'), 'object');
+  assert.equal(calls[0].options.method, 'GET');
+  assert.equal(await client.previewAnnotations('gone'), null, 'an object the store no longer holds is none, not a failure');
+  client.dispose();
+});
+
 test('a drawing is one plain GET, and a refusal arrives with the server’s own sentence', async () => {
   const calls = [];
   const client = createCadClient({ origin: 'http://one.test', pollIntervalMs: 0, fetch: async (url, options) => {

@@ -218,7 +218,12 @@ cannot overwrite a newer file revision. `folder(path)` lists one folder and
 `search(path, query)` finds the CAD files under it, for the explorer.
 
 `CadWorkspaceService` exposes typed part resolution, preview observation and
-a scoped `resources` provider. Its HTTP adapter owns the protocol; renderers
+a scoped `resources` provider. The build feed it observes names a build's
+**preview revision** the moment the result tree exists (`CadEditingPreview.preview`):
+the tree, whose view is read at `storeTreeUrl` exactly as a saved file's is, the
+part key of each component the store holds so far, and its annotations object,
+read with `previewAnnotations` — what the sidecar will carry, keyed by the tree's
+tokens. Nothing here aliases that tree to saved STEP bytes. Its HTTP adapter owns the protocol; renderers
 consume domain results and resource tickets. See [workspace services and resource
 transport](docs/workspace-resources.md) for worker transfer, nested dependencies,
 cache generations and the standalone static-HTTP default. No client reads model
