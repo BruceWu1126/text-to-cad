@@ -77,7 +77,7 @@ import struct
 import threading
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Mapping
 
 from cadgen._internal.kernel_trace import Trace
 
@@ -372,12 +372,10 @@ class _Run:
         parent = shape.__dict__.get("topo_parent") if hasattr(shape, "__dict__") else None
         return self.feature_of(parent) if parent is not None and parent is not shape else None
 
-    def provenance(self, shape: Any) -> dict[str, Any]:
-        """The provenance payload for the shape the body returned (``kernel_trace``)."""
-        return self.trace.provenance(shape, self.made_by)
-
-    def close(self) -> None:
-        self.transient.clear()
+    def provenance(self, components: Mapping[str, tuple[Any, Mapping[str, Any] | None]]) -> dict[str, Any]:
+        """The provenance payload for the result tree built from this run's
+        shapes (``kernel_trace.Trace.provenance``)."""
+        return self.trace.provenance(components, self.made_by)
 
 
 @contextlib.contextmanager
@@ -393,7 +391,6 @@ def run(script_path: Path | None = None) -> Iterator[_Run]:
         yield state
     finally:
         _LOCAL.run = previous
-        state.close()
 
 
 def stats() -> dict[str, int]:
@@ -426,12 +423,17 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
         shapes = _shape_args(_key_args(label, kind, args), kwargs)
         if any(_pending(shape) for shape in shapes):
             return _plain(state, op, frame, kind, shapes, function, args, kwargs, capture=False)
+        # The memo is an optimization and never the reason a build fails: a key,
+        # a capture or a snapshot that cannot be taken makes the call run plain,
+        # counted under errors, and the call is still a feature.
         key_id = None
         if enabled():
             try:
                 key_id = _intern(_build_key(label, kind, args, kwargs, state))
             except _Unkeyable:
                 _STATS["unkeyable"] += 1
+            except Exception:  # noqa: BLE001
+                _STATS["errors"] += 1
         if key_id is None:
             return _plain(state, op, frame, kind, shapes, function, args, kwargs, capture=enabled())
         inputs = [(shape, state.feature_of(shape)) for shape in shapes]
@@ -448,21 +450,30 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
             entry.refresh(feature.index, state.id)
             _STATS["hits"] += 1
             return None if kind == "constructor" else result
-        captured = _capture(shapes)
+        try:
+            captured = _capture(shapes)
+        except Exception:  # noqa: BLE001
+            _STATS["errors"] += 1
+            return _plain(state, op, frame, kind, shapes, function, args, kwargs, capture=False)
         function_result = function(*args, **kwargs)
         result = args[0] if kind == "constructor" else function_result
         _STATS["misses"] += 1
         feature = state.trace.record(op, frame, inputs, _result_shapes(result))
-        effects, sound = _effects(captured, state)
         snapshot = None
-        if sound:
-            try:
+        try:
+            effects, sound = _effects(captured, state)
+            if sound:
                 if kind == "constructor":
                     snapshot = _Adopt(_wrapped(result), dict(_CONSTRUCTOR_TARGETS)[label])
                 else:
                     snapshot = _snapshot(result)
-            except _Unkeyable:
-                snapshot = None
+        except _Unkeyable:
+            snapshot = None
+        except Exception:  # noqa: BLE001
+            _STATS["errors"] += 1
+            snapshot = None
+            for item in captured:
+                _taint(_made_of(item.handle.TShape(), state), state)
         if snapshot is None:
             _register(result, None, feature.index, state, None)
             return function_result
@@ -487,12 +498,19 @@ def _plain(state: _Run, op: str, frame: tuple, kind: str, shapes: list, function
     this run's (so a later feature can name them as inputs), and what it does
     to a memoized shape is still accounted for."""
     inputs = [(shape, state.feature_of(shape)) for shape in shapes]
-    captured = _capture(shapes, embedded=True) if capture else []
+    try:
+        captured = _capture(shapes, embedded=True) if capture else []
+    except Exception:  # noqa: BLE001
+        _STATS["errors"] += 1
+        captured = []
     function_result = function(*args, **kwargs)
     result = args[0] if kind == "constructor" else function_result
     feature = state.trace.record(op, frame, inputs, _result_shapes(result))
     if captured:
-        _effects(captured, state)
+        try:
+            _effects(captured, state)
+        except Exception:  # noqa: BLE001
+            _STATS["errors"] += 1
     _register(result, None, feature.index, state, None)
     return function_result
 
@@ -620,10 +638,10 @@ def _normalize(value: Any, state: _Run) -> Any:
     """One parameter as a hashable, deterministic key part."""
     if value is None or isinstance(value, (bool, str, bytes)):
         return value
-    if isinstance(value, numbers.Integral):
-        return ("i", int(value))
     if isinstance(value, numbers.Real):
-        return ("f", struct.pack("<d", float(value)))
+        # By value, as Python compares them: a radius of 3 and one of 3.0 are
+        # one parameter, and the kernel takes a double either way.
+        return ("n", struct.pack("<d", float(value)))
     if isinstance(value, enum.Enum):
         return ("enum", type(value).__name__, value.name)
     if isinstance(value, Path):
@@ -642,19 +660,19 @@ def _normalize(value: Any, state: _Run) -> Any:
     module = type(value).__module__ or ""
     if module.startswith("build123d"):
         if type_name == "Axis":
-            return ("Axis", _normalize(value.position.to_tuple(), state), _normalize(value.direction.to_tuple(), state))
+            return ("Axis", _normalize(tuple(value.position), state), _normalize(tuple(value.direction), state))
         if type_name == "Plane":
-            return ("Plane", _normalize(value.origin.to_tuple(), state), _normalize(value.x_dir.to_tuple(), state),
-                    _normalize(value.z_dir.to_tuple(), state))
+            return ("Plane", _normalize(tuple(value.origin), state), _normalize(tuple(value.x_dir), state),
+                    _normalize(tuple(value.z_dir), state))
         if type_name == "Matrix":
             transform = value.wrapped
-            return ("Matrix", tuple(("f", struct.pack("<d", transform.Value(row, column)))
+            return ("Matrix", tuple(("n", struct.pack("<d", transform.Value(row, column)))
                                     for row in (1, 2, 3) for column in (1, 2, 3, 4)))
         if type_name == "BoundBox":
-            return ("BoundBox", _normalize(value.min.to_tuple(), state), _normalize(value.max.to_tuple(), state))
-        to_tuple = getattr(value, "to_tuple", None)
-        if callable(to_tuple):
-            return (type_name, _normalize(to_tuple(), state))
+            return ("BoundBox", _normalize(tuple(value.min), state), _normalize(tuple(value.max), state))
+        # Vector, Location, Rotation, Color: their components, in order.
+        if hasattr(value, "__iter__"):
+            return (type_name, _normalize(tuple(value), state))
     raise _Unkeyable(f"unkeyable argument type: {module}.{type_name}")
 
 
@@ -696,7 +714,7 @@ def _shape_key(shape: Any, state: _Run) -> int:
     if not isinstance(label, str):
         raise _Unkeyable("a label that is not a string")
     color = state_dict.get("_color")
-    color_key = None if color is None else _normalize(tuple(color.to_tuple()), state)
+    color_key = None if color is None else _normalize(tuple(color), state)
     material = state_dict.get("_cadgen_material")
     face_colors = state_dict.get("cad_face_ordinal_colors") or {}
     attrs = (

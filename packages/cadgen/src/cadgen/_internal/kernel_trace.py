@@ -11,36 +11,49 @@ operation, and the features that made the shapes it was given. Its id is
 is cadgen's own and is not a feature; a call nested inside another feature's
 operation belongs to that feature.
 
-Lineage is by geometry, not by the kernel's history objects. After the body,
-each component of the result is named by its fingerprint and its faces and
-edges by their tokens (``geometry_fingerprint``), and every element is followed
-back through the features: at each feature, an element of the result that an
-input holds with the same surface (or curve) and the same extent is
-**unchanged** there and inherits its lineage from that input; one that an input
-holds on the same surface with another extent was **modified** by the feature;
+Lineage is by identity and geometry, not by the kernel's history objects.
+After the body, each component of the result is named by its fingerprint and
+its faces and edges by their tokens (``geometry_fingerprint``), and every
+element is followed back through the features: at each feature, an element of
+the result whose TShape an input holds (the kernel keeps what an operation
+leaves alone, and a placement keeps everything) or that an input holds with the
+same surface (or curve) and the same extent is **unchanged** there and inherits
+its lineage from that input; one that an input holds, and the result no longer
+does, on the same surface with another extent was **modified** by the feature;
 any other element was **made** by it. Surfaces, curves and extents are compared
 in the frame the operation saw them (the inputs as they were passed, the result
-as it was returned), rounded absolutely, so a placed copy of a body keeps its
-faces' lineage. The walk stops at a shape no feature made (a materialized child,
-an imported file, a shape built outside the patched surface): its elements are
-of unknown origin, and a feature that modified one is still named.
+as it was returned), rounded absolutely, and only for the elements an operation
+touched. The walk stops at a shape no feature made (a materialized child, an
+imported file, a shape built outside the patched surface): its elements are of
+unknown origin, and a feature that modified one is still named.
 
 The payload (``Trace.provenance``) is what the build writes beside its record
 (``cadgen.store.provenance``): the features in call order, and per component
 fingerprint the feature that made the body and, per face and edge token, the
 feature that made it and the one that last modified it, as indices into the
-feature list.
+feature list. It is computed once the tree has prepared its components, from
+the live shape each was prepared from and the identity that preparation
+measured, so no face or edge is measured twice.
 """
 
 from __future__ import annotations
 
 import math
-import os
 import sys
 import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
+
+from OCP.BRep import BRep_Tool
+from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
+from OCP.BRepTools import BRepTools
+from OCP.GeomAbs import GeomAbs_CurveType, GeomAbs_SurfaceType
+from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
+from OCP.TopExp import TopExp
+from OCP.TopLoc import TopLoc_Location
+from OCP.TopoDS import TopoDS
+from OCP.TopTools import TopTools_IndexedMapOfShape
 
 from cadgen._internal.source_hash import is_first_party_source_file
 
@@ -83,6 +96,9 @@ class Feature:
     handles: list[Any] = field(default_factory=list, repr=False)
     results: list[Any] = field(default_factory=list, repr=False)
     _tables: dict[tuple[int, str], dict[int, tuple]] = field(default_factory=dict, repr=False)
+    # Per element kind, each result element's TShape -> the position of the
+    # result holding it (the first, when a copy holds it too).
+    _positions: dict[Any, dict[Any, int]] = field(default_factory=dict, repr=False)
 
     @property
     def id(self) -> str:
@@ -106,8 +122,13 @@ class Trace:
         # id(shape) -> (weakref, feature index): the feature that returned each
         # live result object. A dead reference, or a recycled id, answers nothing.
         self._by_object: dict[int, tuple[weakref.ref, int]] = {}
-        self._signatures: dict[tuple, list] = {}
+        self._signatures_by_body: dict[tuple, dict[int, tuple]] = {}
         self._chains: dict[tuple[int, int, str, int], tuple[int | None, int | None]] = {}
+        # (TShape, element kind) -> the map of a body's elements of that kind in
+        # its own frame, each element's TShape -> its ordinal there, and the
+        # TShapes by ordinal. A body is mapped once, however many features hold
+        # it and elements ask.
+        self._maps: dict[tuple[Any, Any], tuple[Any, dict[Any, int], list[Any]]] = {}
 
     # --- recording ---------------------------------------------------------------------
 
@@ -172,57 +193,71 @@ class Trace:
 
     # --- the payload ---------------------------------------------------------------------
 
-    def provenance(self, shape: Any, made_by: Callable[[Any], int | None]) -> dict[str, Any]:
-        """The provenance payload for the shape a model returned. ``made_by``
-        answers, for a ``TopoDS_TShape``, the feature of this run that made it.
+    def provenance(self, components: Mapping[str, tuple[Any, Mapping[str, Any] | None]],
+                   made_by: Callable[[Any], int | None]) -> dict[str, Any]:
+        """The provenance payload for a result tree: ``components`` are, by cid,
+        the live shape each own component was prepared from and the
+        ``geometry_identity`` that preparation measured on it (None for one
+        prepared as eager-only bytes). ``made_by`` answers, for a
+        ``TopoDS_TShape``, the feature of this run that made it.
 
-        Components are the result's leaves as the tree builder walks them: a
-        node with no children, that is not a placed child model. Each is named
-        by its fingerprint and its faces and edges by their tokens, computed on
-        the unlocated body exactly as the tree names them."""
-        from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
-        from OCP.TopLoc import TopLoc_Location
-
-        from cadgen._internal.geometry_fingerprint import geometry_identity
-
-        components: dict[str, Any] = {}
-        for leaf in _leaves(shape):
-            unlocated = leaf.wrapped.Located(TopLoc_Location())
-            identity = geometry_identity(unlocated)
-            fingerprint = identity["fingerprint"]
-            if fingerprint in components:
+        A component is named by its fingerprint and its faces and edges by
+        their tokens, in the identity's ordinals, which are the unlocated
+        body's. One without an identity names nothing a document can be asked
+        about and is left out; of two components with one geometry, the first
+        in tree order speaks for both."""
+        payload: dict[str, Any] = {}
+        for leaf, identity in components.values():
+            if identity is None or identity["fingerprint"] in payload:
                 continue
-            faces, edges = _map(unlocated, TopAbs_FACE), _map(unlocated, TopAbs_EDGE)
-            component: dict[str, Any] = {"made": self._owner(made_by, unlocated, None)}
+            unlocated = leaf.wrapped.Located(TopLoc_Location())
+            faces, edges = self._elements(unlocated, TopAbs_FACE), self._elements(unlocated, TopAbs_EDGE)
+            owners = self._owners(made_by, unlocated)
+            component: dict[str, Any] = {"made": self._maker(made_by, unlocated)}
             component["faces"] = {
-                token: self._lineage(made_by, unlocated, faces.FindKey(ordinal), "face")
+                token: self._lineage(made_by, owners, faces.FindKey(ordinal), "face")
                 for ordinal, token in enumerate(identity["faces"], 1)
             }
             component["edges"] = {
-                token: self._lineage(made_by, unlocated, edges.FindKey(ordinal), "edge")
+                token: self._lineage(made_by, owners, edges.FindKey(ordinal), "edge")
                 for ordinal, token in enumerate(identity["edges"], 1)
             }
-            components[fingerprint] = component
-        return {"features": [feature.row() for feature in self.features], "components": components}
+            payload[identity["fingerprint"]] = component
+        return {"features": [feature.row() for feature in self.features], "components": payload}
 
-    def _owner(self, made_by: Callable[[Any], int | None], body: Any, element: Any) -> int | None:
-        """The feature that made the body holding ``element`` (the body itself
-        when it is one feature's result, else the solid or shell of it that is),
-        or None."""
+    def _maker(self, made_by: Callable[[Any], int | None], body: Any) -> int | None:
+        """The feature that made ``body``, or None: the one its TShape is
+        registered to, unless that feature was handed the TShape it returned
+        (a placement of a shape no feature made)."""
+        index = made_by(body.TShape())
+        if index is not None and self._passed_through(index, body.TShape()):
+            return None
+        return index
+
+    def _passed_through(self, index: int, tshape: Any) -> bool:
+        return any(handle.TShape() == tshape for handle in self.features[index].handles)
+
+    def _owners(self, made_by: Callable[[Any], int | None], body: Any) -> list[tuple[Any, int]]:
+        """The shapes of a component some feature made, with that feature: the
+        body itself when it is one feature's result, else each solid or shell
+        of it that is."""
+        index = made_by(body.TShape())
+        if index is not None:
+            return [(body, index)]
         from cadgen._internal.entity_ordinals import shape_entities
 
-        candidates = [body] if element is None else [body, *shape_entities(body)]
-        for candidate in candidates:
-            index = made_by(candidate.TShape())
-            if index is None:
-                continue
-            if element is None or candidate is body or _map(candidate, element.ShapeType()).Contains(element):
-                return index
-        return None
+        found = []
+        for entity in shape_entities(body):
+            index = made_by(entity.TShape())
+            if index is not None:
+                found.append((entity, index))
+        return found
 
-    def _lineage(self, made_by: Callable[[Any], int | None], body: Any, element: Any, kind: str) -> list[int | None]:
+    def _lineage(self, made_by: Callable[[Any], int | None], owners: list[tuple[Any, int]], element: Any,
+                 kind: str) -> list[int | None]:
         """``[made, modified]`` for one element of a component: feature indices or None."""
-        owner = self._owner(made_by, body, element)
+        owner = next((index for shape, index in owners
+                      if element.TShape() in self._ordinals(shape, element.ShapeType())), None)
         if owner is None:
             return [None, None]
         position = self._result_position(owner, element)
@@ -234,10 +269,14 @@ class Trace:
     def _result_position(self, index: int, element: Any) -> int | None:
         """Which result of feature ``index`` holds ``element``: a position in its results."""
         feature = self.features[index]
-        for position, handle in enumerate(feature.results):
-            if _map(_local(handle), element.ShapeType()).Contains(element):
-                return position
-        return None
+        kind = element.ShapeType()
+        positions = feature._positions.get(kind)
+        if positions is None:
+            positions = {}
+            for position in range(len(feature.results) - 1, -1, -1):
+                positions.update(dict.fromkeys(self._ordinals(feature.results[position], kind), position))
+            feature._positions[kind] = positions
+        return positions.get(element.TShape())
 
     def _chain(self, made_by: Callable[[Any], int | None], index: int, position: int, kind: str,
                element: Any) -> tuple[int | None, int | None]:
@@ -251,11 +290,13 @@ class Trace:
         while current is not None:
             index, position, element = current
             feature = self.features[index]
-            ordinal = _map(_local(feature.results[position]), element.ShapeType()).FindIndex(element)
+            ordinal = self._ordinals(feature.results[position], element.ShapeType()).get(element.TShape(), 0)
             node = (index, position, kind, ordinal)
             if node in self._chains:
                 answer = self._chains[node]
                 break
+            if node in path:
+                break  # the feature returned the TShape it was handed: no feature made this
             path.append(node)
             entry = self._table(feature, position, kind).get(ordinal)
             if entry is None or entry[0] == "made":
@@ -268,7 +309,7 @@ class Trace:
             if up is None or up_position is None:
                 answer = (None, None)
                 break
-            current = (up, up_position, _map(_local(input_handle), element.ShapeType()).FindKey(k))
+            current = (up, up_position, self._elements(input_handle, element.ShapeType()).FindKey(k))
         # Unwind: a node whose entry was "modified" is the last modification seen
         # from above, so it overrides what the chain below it answered.
         for node in reversed(path):
@@ -286,37 +327,83 @@ class Trace:
         table = feature._tables.get(key)
         if table is not None:
             return table
-        from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
-
         topabs = TopAbs_FACE if kind == "face" else TopAbs_EDGE
-        same: dict[tuple, tuple[int, int]] = {}
-        surface: dict[tuple, tuple[int, int]] = {}
-        for j, handle in enumerate(feature.handles):
-            for k, signature in enumerate(self._signatures_of(handle, topabs, kind), 1):
-                same.setdefault(signature, (j, k))
-                surface.setdefault(signature[0], (j, k))
-        table = {}
-        for ordinal, signature in enumerate(self._signatures_of(feature.results[position], topabs, kind), 1):
-            found = same.get(signature)
-            if found is not None:
-                table[ordinal] = ("from", found[0], found[1], False)
-                continue
-            found = surface.get(signature[0])
-            table[ordinal] = ("from", found[0], found[1], True) if found is not None else ("made",)
+        result = feature.results[position]
+        _elements, kept, tshapes = self._mapped(result, topabs)
+        table: dict[int, tuple] = {}
+        # First by identity: the kernel keeps the faces and edges an operation
+        # leaves alone (and a placement keeps them all), so an element whose
+        # TShape an input holds passed through unchanged, whatever its frame.
+        inputs = [(j, self._ordinals(handle, topabs)) for j, handle in enumerate(feature.handles)]
+        for ordinal, tshape in enumerate(tshapes, 1):
+            for j, ordinals in inputs:
+                k = ordinals.get(tshape)
+                if k is not None:
+                    table[ordinal] = ("from", j, k, False)
+                    break
+        if len(table) < len(tshapes):
+            # Then by geometry, among what the operation consumed: an input
+            # element the result no longer holds is where a new one came from.
+            same: dict[tuple, tuple[int, int]] = {}
+            surface: dict[tuple, tuple[int, int]] = {}
+            for j, handle in enumerate(feature.handles):
+                signatures = self._signatures(handle, kind)
+                for k, tshape in enumerate(self._mapped(handle, topabs)[2], 1):
+                    if tshape in kept:
+                        continue
+                    signature = self._signature(signatures, handle, topabs, kind, k)
+                    same.setdefault(signature, (j, k))
+                    surface.setdefault(signature[0], (j, k))
+            signatures = self._signatures(result, kind)
+            for ordinal in range(1, len(tshapes) + 1):
+                if ordinal in table:
+                    continue
+                signature = self._signature(signatures, result, topabs, kind, ordinal)
+                found = same.get(signature)
+                if found is not None:
+                    table[ordinal] = ("from", found[0], found[1], False)
+                    continue
+                found = surface.get(signature[0])
+                table[ordinal] = ("from", found[0], found[1], True) if found is not None else ("made",)
         feature._tables[key] = table
         return table
 
-    def _signatures_of(self, handle: Any, topabs: Any, kind: str) -> list[tuple]:
-        """The signatures of a shape's faces or edges in the frame it was seen in,
-        by local ordinal; computed once per (body, placement)."""
+    def _signatures(self, handle: Any, kind: str) -> dict[int, tuple]:
+        """The signatures of a shape's faces or edges in the frame it was seen
+        in, by ordinal, filled as they are asked for: one table per (body,
+        placement)."""
         key = (handle.TShape(), _placement(handle), kind)
-        found = self._signatures.get(key)
+        found = self._signatures_by_body.get(key)
         if found is None:
-            location = handle.Location()
-            elements = _map(_local(handle), topabs)
-            signature = face_signature if kind == "face" else edge_signature
-            found = [signature(elements.FindKey(i).Moved(location)) for i in range(1, elements.Extent() + 1)]
-            self._signatures[key] = found
+            found = self._signatures_by_body[key] = {}
+        return found
+
+    def _signature(self, signatures: dict[int, tuple], handle: Any, topabs: Any, kind: str, ordinal: int) -> tuple:
+        signature = signatures.get(ordinal)
+        if signature is None:
+            element = self._elements(handle, topabs).FindKey(ordinal).Moved(handle.Location())
+            signature = signatures[ordinal] = (face_signature if kind == "face" else edge_signature)(element)
+        return signature
+
+    def _elements(self, shape: Any, kind: Any) -> Any:
+        """``TopExp.MapShapes`` of ``shape``'s elements of ``kind``, in its own frame."""
+        return self._mapped(shape, kind)[0]
+
+    def _ordinals(self, shape: Any, kind: Any) -> dict[Any, int]:
+        """Each element's TShape -> its ordinal in :meth:`_elements`."""
+        return self._mapped(shape, kind)[1]
+
+    def _mapped(self, shape: Any, kind: Any) -> tuple[Any, dict[Any, int], list[Any]]:
+        key = (shape.TShape(), kind)
+        found = self._maps.get(key)
+        if found is None:
+            elements = _map(_local(shape), kind)
+            tshapes = [elements.FindKey(i).TShape() for i in range(1, elements.Extent() + 1)]
+            ordinals: dict[Any, int] = {}
+            for ordinal, tshape in enumerate(tshapes, 1):
+                # The first ordinal of a TShape placed twice in one body speaks for both.
+                ordinals.setdefault(tshape, ordinal)
+            found = self._maps[key] = (elements, ordinals, tshapes)
         return found
 
 
@@ -346,8 +433,6 @@ def _handle(shape: Any) -> Any:
 
 
 def _local(handle: Any) -> Any:
-    from OCP.TopLoc import TopLoc_Location
-
     return handle.Located(TopLoc_Location())
 
 
@@ -368,32 +453,8 @@ def _position_of(feature: Feature, handle: Any) -> int | None:
 
 
 def _map(shape: Any, kind: Any) -> Any:
-    from OCP.TopExp import TopExp
-    from OCP.TopTools import TopTools_IndexedMapOfShape
-
     found = TopTools_IndexedMapOfShape()
     TopExp.MapShapes_s(shape, kind, found)
-    return found
-
-
-def _leaves(shape: Any) -> list[Any]:
-    """The result's components in tree order: every node without children that
-    is not a placed child model, read off the node state without forcing a
-    promise (``store.lazy``) or reading a reference compound's geometry."""
-    from cadgen.store.materialize import TREE_TAG
-
-    found: list[Any] = []
-    pending = [shape]
-    while pending:
-        node = pending.pop()
-        state = getattr(node, "__dict__", {})
-        if TREE_TAG in state or any(key.startswith("_lazy_") for key in state):
-            continue
-        children = [child for child in (state.get("_NodeMixin__children") or ()) if hasattr(child, "__dict__")]
-        if children:
-            pending.extend(reversed(children))
-        elif state.get("_wrapped") is not None:
-            found.append(node)
     return found
 
 
@@ -445,13 +506,6 @@ def face_signature(face: Any) -> tuple[tuple, tuple]:
     on (its class and parameters, or sample points of a freeform surface) and
     where it lies on it (its vertex points, else its middle point, and its edge
     count), rounded absolutely."""
-    from OCP.BRep import BRep_Tool
-    from OCP.BRepAdaptor import BRepAdaptor_Surface
-    from OCP.BRepTools import BRepTools
-    from OCP.GeomAbs import GeomAbs_SurfaceType
-    from OCP.TopAbs import TopAbs_EDGE, TopAbs_VERTEX
-    from OCP.TopoDS import TopoDS
-
     topods_face = TopoDS.Face_s(face)
     adaptor = BRepAdaptor_Surface(topods_face, False)
     kind = adaptor.GetType()
@@ -494,12 +548,6 @@ def edge_signature(edge: Any) -> tuple[tuple, tuple]:
     """``(curve, extent)`` of an edge in world coordinates: the curve it lies on
     (its class and parameters, or sample points of a freeform curve) and its
     end points, rounded absolutely."""
-    from OCP.BRep import BRep_Tool
-    from OCP.BRepAdaptor import BRepAdaptor_Curve
-    from OCP.GeomAbs import GeomAbs_CurveType
-    from OCP.TopExp import TopExp
-    from OCP.TopoDS import TopoDS
-
     topods_edge = TopoDS.Edge_s(edge)
     first_point = _point(BRep_Tool.Pnt_s(TopExp.FirstVertex_s(topods_edge, True)))
     last_point = _point(BRep_Tool.Pnt_s(TopExp.LastVertex_s(topods_edge, True)))

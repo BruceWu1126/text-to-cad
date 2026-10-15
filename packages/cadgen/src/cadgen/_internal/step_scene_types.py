@@ -51,6 +51,10 @@ class LoadedStepScene:
     kinematics: dict[str, Any] | None = None
     materials: dict[str, Any] | None = None
     animation: dict[str, str] | None = None
+    # The model run that made a generated scene's shapes (kernel_memo.run): the
+    # tree build asks it for the provenance of the components it prepared, and
+    # the publish writes that beside the record (STORE.md §3).
+    kernel_run: Any | None = None
     source_hash: str | None = None
     source_closure_hash: str | None = None
     source_closure_files: tuple[str, ...] = ()

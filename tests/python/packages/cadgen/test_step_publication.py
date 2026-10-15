@@ -421,7 +421,7 @@ class StepPublicationTests(unittest.TestCase):
         read_entry = index.read_entry
 
         def artifact_read(kind, key):
-            self.assertNotIn(kind, ("model", "output"), "cold compile consulted a code record")
+            self.assertNotIn(kind, ("model", "output", "provenance"), "cold compile consulted a code record")
             return read_entry(kind, key)
 
         output = io.StringIO()

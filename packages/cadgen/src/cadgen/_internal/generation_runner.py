@@ -653,12 +653,6 @@ def _run_script_generator_body(
         payload = _normalize_step_payload(raw_payload, script_path=spec.script_path)
         if spec.step_path is None:
             raise RuntimeError(f"{spec.source_ref} has no configured STEP output")
-        # The build's account of its code (STORE.md §3): which feature made each
-        # component of the result and each face and edge of it, by fingerprint
-        # and token. Computed from the live result before the tree is built;
-        # the publish writes it beside the record, after it.
-        with logger.timed(f"provenance {spec.source_ref}"):
-            provenance = kernel_run.provenance(payload["shape"])
         # Kinematics (validated at decoration) rides the scene into the sidecar.
         declared = _resolve_declared_kinematics(getattr(generator, "__cadgen_model__", None))
         generated_scene = _write_shape_step_payload(
@@ -668,7 +662,9 @@ def _run_script_generator_body(
             logger=logger,
             defer_reference_scene=_defer_reference_scene,
         )
-        generated_scene.provenance = provenance
+        # The run's trace rides the scene to the tree build, which computes the
+        # provenance of the components it prepares (STORE.md §3).
+        generated_scene.kernel_run = kernel_run
         if declared.block:
             generated_scene.kinematics = declared.block
         generated_scene.materials = declared.materials

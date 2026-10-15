@@ -741,17 +741,13 @@ def _encode_brep(shape: Any) -> dict[str, Any]:
     raise CodecFidelityError("; ".join(failures))
 
 
-def geometric_identity_fields(shape: Any, colors: Mapping[int, Any], *, brep: str | None = None) -> dict[str, Any]:
+def geometric_identity_fields(identity: Mapping[str, Any], colors: Mapping[int, Any]) -> dict[str, Any]:
     """The entry fields that name a native component by its geometry (README law
-    20): its ``fingerprint`` and, for each face with an intrinsic colour, that
-    face's token (``faceTokens``, by ordinal) -- what its part is keyed by
-    (``cadgen.store.parts``). Computed from the unlocated shape itself, so the
-    body a build holds and the body read back from its STEP get the same."""
-    from OCP.TopLoc import TopLoc_Location
-
-    from cadgen._internal.geometry_fingerprint import geometry_identity
-
-    identity = geometry_identity(getattr(shape, "wrapped", shape).Located(TopLoc_Location()), brep=brep)
+    20), from its ``geometry_identity``: its ``fingerprint`` and, for each face
+    with an intrinsic colour, that face's token (``faceTokens``, by ordinal) --
+    what its part is keyed by (``cadgen.store.parts``). The identity is computed
+    from the unlocated shape itself, so the body a build holds and the body read
+    back from its STEP get the same."""
     fields: dict[str, Any] = {"fingerprint": identity["fingerprint"]}
     if colors:
         fields["faceTokens"] = {int(ordinal): identity["faces"][int(ordinal) - 1] for ordinal in colors}
@@ -767,8 +763,11 @@ def prepare_geometry_component(shape: Any, *, face_colors: object = None) -> dic
     and their own byte fixed point. Failure pins the live shape's topology
     facts explicitly (``topology``, the bytes an eager-only component's tree
     pins), never a falsely readable native entry. A native entry carries its
-    geometric identity (:func:`geometric_identity_fields`); an eager-only one
-    has none, its pinned facts standing in for it.
+    geometric identity (:func:`geometric_identity_fields`), and the whole
+    identity measured for it -- every face's and edge's token -- rides the
+    prepared component as ``identity`` for the build's provenance pass, so no
+    element is measured twice; an eager-only one has none, its pinned facts
+    standing in for it.
     """
     try:
         encoded = _encode_brep(shape)
@@ -786,9 +785,10 @@ def prepare_geometry_component(shape: Any, *, face_colors: object = None) -> dic
     entry = {"kind": kind, "codec": encoded["codec"],
              "brep": hashlib.sha256(payload).hexdigest(), "faceColors": colors}
     topology = None
-    if kind == "eager-only":
-        from OCP.TopLoc import TopLoc_Location
+    identity = None
+    from OCP.TopLoc import TopLoc_Location
 
+    if kind == "eager-only":
         from cadgen._internal.topology_extract import extract_topology_facts
         from cadgen._internal.topology_facts import topology_facts_bytes
 
@@ -796,13 +796,16 @@ def prepare_geometry_component(shape: Any, *, face_colors: object = None) -> dic
             extract_topology_facts(getattr(shape, "wrapped", shape).Located(TopLoc_Location())))
         entry["topology"] = hashlib.sha256(topology).hexdigest()
     else:
-        entry.update(geometric_identity_fields(private, colors, brep=entry["brep"]))
+        from cadgen._internal.geometry_fingerprint import geometry_identity
+
+        identity = geometry_identity(private.wrapped.Located(TopLoc_Location()), brep=entry["brep"])
+        entry.update(geometric_identity_fields(identity, colors))
     entry["contentHash"] = geometry_component_hash(
         entry["codec"], payload, colors, kind=kind, topology=entry.get("topology"),
     )
     if private is not None:
         private.cad_face_ordinal_colors = dict(colors)
-    return {"entry": entry, "payload": payload, "shape": private, "topology": topology}
+    return {"entry": entry, "payload": payload, "shape": private, "topology": topology, "identity": identity}
 
 
 def prepare_published_component(shape: Any, *, face_colors: object = None) -> dict[str, Any]:
