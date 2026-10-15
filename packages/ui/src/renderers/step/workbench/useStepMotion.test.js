@@ -12,7 +12,15 @@ test("a STEP's motion comes from its catalog entry: the articulation and the rou
   assert.equal(sources.moduleUrl, entry.poseUrl);
   assert.equal(sources.articulation, articulation);
   assert.equal(sources.sourceAnimation, animation);
-  assert.equal(sources.animationKey, "/models/arm/hinge.step:d1", "a routine is keyed by the document it was baked for");
+  // A routine is keyed by its keyframes, not by the document: a build's preview and the file it
+  // saves carry the same clips under different trees, and are one routine; a changed clip is another.
+  assert.match(sources.animationKey, /^\/models\/arm\/hinge\.step:[0-9a-f]{16}$/);
+  const saved = stepMotionSources({ ...entry, hash: "h2", documentHash: "d2", animation: JSON.parse(JSON.stringify(animation)) });
+  assert.equal(saved.animationKey, sources.animationKey, "the same keyframes under another tree are the same routine");
+  const changed = stepMotionSources({ ...entry, animation: { clips: [{ ...animation.clips[0], duration: 5 }] } });
+  assert.notEqual(changed.animationKey, sources.animationKey);
+  // A routine that bends a tube plays the document's skins, which its URL names: another document's are another key.
+  assert.notEqual(stepMotionSources({ ...entry, tubeSkinsUrl: "/__cad/skins?document=d1" }).animationKey, sources.animationKey);
   const still = stepMotionSources({ file: "/models/block.step", hash: "h2" });
   assert.deepEqual([still.sourceAnimation, still.animationKey, still.articulation], [null, "", null], "no routine, no key; nothing to pose");
 });

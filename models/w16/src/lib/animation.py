@@ -176,10 +176,10 @@ _BANKED_KINDS = {
 }
 _SYSTEM_OF_KIND = {kind: system for system, kinds in _BANKED_KINDS.items() for kind in kinds}
 
-# The crankcase casting is the block system's only cast part, so the block's
-# cast group (o1.1 is the block) is the casting alone. `#block` would name the
-# whole system, whose group shares the casting's name.
-_BLOCK_CASTING = f"#o1.1.{P.SYSTEM_MATERIALS['block'].index('cast') + 1}"
+# The crankcase casting shares its name with the block system that holds it,
+# so `#block` names two nodes and raises; the numbered aliases run in tree
+# order, the system's group first and the casting second.
+_BLOCK_CASTING = "#block_2"
 
 
 # The banked kinds built once per cylinder: their tags lead with the cylinder's

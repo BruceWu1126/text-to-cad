@@ -390,7 +390,7 @@ class StepPublicationTests(unittest.TestCase):
             executors.set_event_sink(events.append)
             self.assertEqual(self.build(10, force=True), 0, self.output)
             previews = [event["preview"]["tree"] for event in events if "preview" in event]
-            self.assertEqual(len(previews), 1)
+            self.assertEqual(len(set(previews)), 1, "one result tree, announced as its parts are derived")
             identities.append((self.step.read_bytes(), result_tree_for(self.step), previews[0]))
             for root_hash in (identities[-1][1], previews[0]):
                 for digest in tree_objects(root_hash):

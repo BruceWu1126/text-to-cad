@@ -317,6 +317,23 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
     editingPreview(file, { after = '', signal } = {}) {
       return request('/__cad/preview', { file, signal, params: { after }, operation: 'preview' });
     },
+    // Where a store tree's view is read, as a catalog row names a saved file's: `assembly.json`
+    // under it resolves as a package asset (`resolvePackageAssetUrl`). A build feed's preview names
+    // its tree and the producer its parts are keyed under; with none, the view keys them as for a
+    // saved file.
+    storeTreeUrl(tree, { producer = null } = {}) {
+      return cadApiUrl('/__cad/store', { origin, file: tree, params: producer ? { producer: JSON.stringify(producer) } : {} });
+    },
+    // A preview revision's annotations object: what the sidecar will carry, resolved against the
+    // preview's tree. Null for an object the store does not hold (expired with its build).
+    async previewAnnotations(object, { signal } = {}) {
+      try {
+        return await request('/__cad/store', { signal, params: { annotations: object }, timeoutMs: 10_000, operation: 'annotations' });
+      } catch (error) {
+        if (error?.failure?.status === 404) return null;
+        throw error;
+      }
+    },
     resolveParts(descriptor, requested, options) {
       return resolveParts(descriptor, requested, { ...options, client });
     },

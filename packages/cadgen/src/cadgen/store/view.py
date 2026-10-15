@@ -420,6 +420,16 @@ def _write_view(descriptor: dict, records: dict, root: Path) -> Path:
     return root
 
 
+def preview_annotations(object_hash: str) -> bytes | None:
+    """The annotations object a build feed names for its preview revision
+    (``_internal/preview_revision.py``), as JSON bytes; None when the store holds no such
+    object. A read of ``objects/`` alone."""
+    from cadgen._internal.preview_revision import read_annotations
+
+    payload = read_annotations(object_hash)
+    return None if payload is None else json.dumps(payload).encode("utf-8")
+
+
 def virtual_path(
     rel: str, *, producer: dict | None = None, document_hash: str | None = None,
 ) -> tuple[bytes | Path | None, str]:

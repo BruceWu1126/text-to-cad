@@ -36,7 +36,7 @@ from .cadgen_ops import CadgenOps
 from .content_types import content_type_for_path, content_type_for_static_asset, extension_of
 from .encoding import UriError, strict_decode_uri_component
 from .scanner import CAD_CATALOG_SCHEMA_VERSION, SOURCE_EXTENSIONS, catalog_entry, to_posix_path
-from .store_paths import virtual_store_asset
+from .store_paths import preview_annotations, virtual_store_asset
 from .tess_cache import (
     TESS_CACHE_BATCH_PATH, TESS_CACHE_METADATA_MAX_BYTES, TESS_CACHE_PROBE_PATH, TESS_CACHE_ROUTE_PREFIX,
     parse_tess_cache_admission, read_tess_cache_batch, read_tess_cache_entry, read_tess_cache_probe,
@@ -791,14 +791,23 @@ class CadApp:
     def _handle_store_asset(self, request, response, query):
         """A tree served as if it were a directory: ``<tree>/assembly.json`` is
         the flattened tree and ``<tree>/components/<cid>.brep`` streams a component's
-        BREP (``store.view.virtual_path``). Nothing here touches a path the client names:
-        the ``file`` param is parsed into (tree hash, component) and each is looked up
-        by HASH in the store, so ``file=/etc/hosts`` is simply not a tree.
+        BREP (``store.view.virtual_path``); ``annotations=<object>`` is a preview
+        revision's annotations object, the one a build feed names (``preview.py``).
+        Nothing here touches a path the client names: the ``file`` param is parsed into
+        (tree hash, component) and each is looked up by HASH in the store, so
+        ``file=/etc/hosts`` is simply not a tree.
 
         Everything that fails is 404, never 403. Leading slashes are STRIPPED
         because the client's resolvePackageAssetUrl emits
         ``file=/<tree>/assembly.json``.
         """
+        if query.get("annotations"):
+            payload = preview_annotations(str(query["annotations"]))
+            if payload is None:
+                response.send_json(404, {"error": "Not found"})
+            else:
+                response.send_bytes(200, payload, "application/json", RAW_FILE_HEADERS)
+            return
         rel = str(query.get("file") or "").replace("\\", "/").lstrip("/")
         producer = json.loads(query.get("producer")) if query.get("producer") else None
         payload, content_type = virtual_store_asset(

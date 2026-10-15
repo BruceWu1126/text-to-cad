@@ -110,6 +110,30 @@ class FingerprintTest(unittest.TestCase):
         self.assertEqual(len(set(first["faces"])), 12)
         self.assertEqual(len(set(first["vertices"])), len(first["vertices"]))
 
+    def test_an_edge_the_kernel_built_without_vertices_is_named_by_its_curve(self) -> None:
+        # A closed edge made straight from its curve has no vertices (a loft or sweep
+        # leaves such edges); its ends are read off the curve, not off a null vertex.
+        from OCP.BRep import BRep_Builder
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeEdge
+        from OCP.gp import gp_Ax2, gp_Circ, gp_Dir, gp_Pnt
+        from OCP.Geom import Geom_Circle
+        from OCP.TopoDS import TopoDS_Edge
+
+        from cadgen._internal.geometry_fingerprint import _edge_facts
+        from cadgen._internal.topology_extract import component_metrics
+
+        def facts(edge):
+            return _edge_facts(edge, component_metrics(edge)["edges"][0])
+
+        circle = Geom_Circle(gp_Ax2(gp_Pnt(1, 2, 3), gp_Dir(0, 0, 1)), 5.0)
+        bare = TopoDS_Edge()
+        BRep_Builder().MakeEdge(bare, circle, 1e-7)
+        with_vertices = BRepBuilderAPI_MakeEdge(circle).Edge()
+        for bare_end, vertex_end in zip(facts(bare)["ends"], facts(with_vertices)["ends"]):
+            for a, b in zip(bare_end, vertex_end):
+                self.assertAlmostEqual(a, b, places=9)
+        self.assertAlmostEqual(facts(bare)["length"], 2 * math.pi * 5.0, places=6)
+
     def test_the_quantum_is_a_power_of_two_relative_to_the_extent(self) -> None:
         for extent in (0.001, 1.0, 37.5, 1e4):
             quantum = quantum_for_extent(extent)

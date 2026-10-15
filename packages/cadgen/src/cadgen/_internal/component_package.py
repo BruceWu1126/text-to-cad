@@ -162,17 +162,65 @@ def _world_leaves(wrapped: Any) -> list[Any]:
 
 
 def component_leaf_layout(wrapped: Any) -> dict[str, Any]:
-    """How a prototype's leaves sit: ``{"leaves": n, "placed": bool}``.
-
-    ``placed`` is True when every leaf of the UNLOCATED prototype carries the
-    identity location, so placing the prototype places each leaf at exactly the
-    prototype's own placement and the leaf's measured box key is the
-    prototype's rotation. A pure function of the encoded bytes.
+    """How a prototype's leaves sit, ``{"leaves": n, "inner": [...]}``: how many leaves the
+    UNLOCATED prototype has, in the order their remembered boxes are numbered
+    (``placed_prototype_bounds``), and where each sits inside it -- the leaf's own location
+    as twelve numbers, the rotation's rows then the translation, the identity for a leaf at
+    the prototype's own placement (a product read back from a STEP), an offset for one a
+    builder wrapped (build123d's ``Box`` is a compound around a solid it centres). A pure
+    function of the encoded bytes.
     """
     from OCP.TopLoc import TopLoc_Location
 
-    leaves = _world_leaves(wrapped.Located(TopLoc_Location()))
-    return {"leaves": len(leaves), "placed": all(leaf.Location().IsIdentity() for leaf in leaves)}
+    inner = []
+    for leaf in _world_leaves(wrapped.Located(TopLoc_Location())):
+        transform = leaf.Location().Transformation()
+        inner.append([float(transform.Value(row, column)) for row in range(1, 4) for column in range(1, 5)])
+    return {"leaves": len(inner), "inner": inner}
+
+
+def placed_prototype_bounds(codec: str, brep: str, prototype: Any, location: Any) -> dict[str, list[float]] | None:
+    """The world box of ``prototype`` (a decoded component, unlocated) placed at ``location``
+    (a ``TopLoc_Location``, or build123d's ``Location`` over one): each leaf measured
+    untranslated under its own world rotation and shifted by its own world translation, as
+    ``_leaf_bounds`` measures a whole document, and remembered per leaf under
+    ``cadgen.store.bounds.PREPARED_OCCURRENCE_BOUNDS_ALGORITHM`` (the component's codec and
+    BREP object, the leaf's ordinal, the leaf's rotation), with the component's leaf layout
+    beside it. The source result and the canonical document measure through this one
+    function, so the same body at the same rotation is measured once wherever it is
+    translated to, and a composed reader (``_compose_readback.composed_bounds``: a document
+    composed from its children's, the animation bake's leaf boxes) finds the box the
+    publication measured. None when no leaf has bounds; a remembered value that is not a box
+    raises."""
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.gp import gp_Vec
+
+    from cadgen.store.bounds import PREPARED_OCCURRENCE_BOUNDS_ALGORITHM, cached_box, cached_leaf_layout
+
+    wrapped = getattr(prototype, "wrapped", prototype)
+    cached_leaf_layout(codec, brep, lambda: component_leaf_layout(wrapped))
+    boxes: list[list[float]] = []
+    for ordinal, leaf in enumerate(_world_leaves(wrapped.Located(getattr(location, "wrapped", location))), start=1):
+        transform = leaf.Location().Transformation()
+        translation = tuple(float(value) for value in transform.TranslationPart().Coord())
+        transform.SetTranslationPart(gp_Vec(0.0, 0.0, 0.0))
+        linear = struct.pack("<12d", *(float(transform.Value(row, column))
+                                        for row in range(1, 4) for column in range(1, 5)))
+        untranslated = leaf.Located(TopLoc_Location(transform))
+        box = cached_box(PREPARED_OCCURRENCE_BOUNDS_ALGORITHM, (codec, brep, ordinal, linear),
+                         lambda untranslated=untranslated: optimal_box(untranslated))
+        if box is None:
+            continue
+        if (type(box) not in (list, tuple) or len(box) != 6
+                or any(type(value) not in (float, int) or not math.isfinite(value) for value in box)):
+            raise ValueError("a remembered leaf box is not six finite numbers")
+        boxes.append([float(value) + translation[index % 3] for index, value in enumerate(box)])
+    if not boxes:
+        return None
+    return {
+        "min": [min(box[axis] for box in boxes) for axis in range(3)],
+        "max": [max(box[axis] for box in boxes) for axis in range(3, 6)],
+    }
 
 
 def _bbox_from_shape(shape: Any) -> dict[str, list[float]] | None:
@@ -693,7 +741,7 @@ def _encode_brep(shape: Any) -> dict[str, Any]:
     raise CodecFidelityError("; ".join(failures))
 
 
-def geometric_identity_fields(shape: Any, colors: Mapping[int, Any]) -> dict[str, Any]:
+def geometric_identity_fields(shape: Any, colors: Mapping[int, Any], *, brep: str | None = None) -> dict[str, Any]:
     """The entry fields that name a native component by its geometry (README law
     20): its ``fingerprint`` and, for each face with an intrinsic colour, that
     face's token (``faceTokens``, by ordinal) -- what its part is keyed by
@@ -703,7 +751,7 @@ def geometric_identity_fields(shape: Any, colors: Mapping[int, Any]) -> dict[str
 
     from cadgen._internal.geometry_fingerprint import geometry_identity
 
-    identity = geometry_identity(getattr(shape, "wrapped", shape).Located(TopLoc_Location()))
+    identity = geometry_identity(getattr(shape, "wrapped", shape).Located(TopLoc_Location()), brep=brep)
     fields: dict[str, Any] = {"fingerprint": identity["fingerprint"]}
     if colors:
         fields["faceTokens"] = {int(ordinal): identity["faces"][int(ordinal) - 1] for ordinal in colors}
@@ -748,7 +796,7 @@ def prepare_geometry_component(shape: Any, *, face_colors: object = None) -> dic
             extract_topology_facts(getattr(shape, "wrapped", shape).Located(TopLoc_Location())))
         entry["topology"] = hashlib.sha256(topology).hexdigest()
     else:
-        entry.update(geometric_identity_fields(private, colors))
+        entry.update(geometric_identity_fields(private, colors, brep=entry["brep"]))
     entry["contentHash"] = geometry_component_hash(
         entry["codec"], payload, colors, kind=kind, topology=entry.get("topology"),
     )

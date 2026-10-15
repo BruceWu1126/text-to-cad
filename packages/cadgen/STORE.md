@@ -131,10 +131,12 @@ distribution); the value is six numbers, inline. A box is a pure function of
 that key, so a hit can never differ from a measurement, and an unknown kernel
 build just measures. Beside the boxes, keyed the same way by a component's
 codec and BREP object, it holds that component's **leaf layout** — how many
-leaves the encoded shape has and whether every one sits at the prototype's
-own placement — which canonical publication records as it measures those
-leaves, and which tree composition (§3) reads to name the exact per-leaf box
-keys without decoding the shape. For an all-link result past the bounded
+leaves the encoded shape has and where each sits inside it — which a
+publication records as it measures those leaves, and which tree composition
+(§3) and the animation bake read to name the per-leaf box keys without
+decoding the shape (composition takes only a leaf at the prototype's own
+placement, whose box is the remembered one shifted exactly; the bake, which
+wants a centre and a reach, composes the rest). For an all-link result past the bounded
 capture it holds each link's bounds (§6): the merge of the leaf boxes the link
 places, keyed by the child tree it links and its exact placement. Keyed like
 the leaf layout, it holds each component's **topology** — its face and edge
@@ -585,10 +587,13 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   encoding refuses -- is the component's `MeshProductionError`. A mesh export
   at the display tolerance
   writes the stored display meshes; one at any other tolerance meshes each part
-  in the exporting process from the very inputs its display mesh was made from
-  -- the BREP, the stored selector table and the face colours (`parts.mesh_at`),
-  so nothing is extracted -- and stores nothing (the file is the output;
-  `_internal/mesh_export.py`). Tolerances outside the tessellation policy's
+  in the exporting process the way its display mesh was made -- from the BREP,
+  its face colours and a selector table built for that BREP (`parts.mesh_at`;
+  the stored table may be another decode's of the same part, the body a build
+  held where the export decodes the file's read-back, listing the elements in
+  its own order) -- and stores nothing (the file is the output;
+  `_internal/mesh_export.py`). A mesh of one BREP at one tolerance is the same
+  bytes whichever body derived the part (README law 5). Tolerances outside the tessellation policy's
   bounds (`tessellation_policy.tolerance_refusal`) are refused, never meshed. No
   client writes a part: every reader probes and reads, and the routes refuse a
   POST to an object (405).
@@ -650,8 +655,8 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   an assembly, whose components are all native and whose every node is named
   by a name the label round trip keeps;
   every leaf box the canonical bounds path would take is already in
-  `index/bounds` from the child's publication, under a leaf layout (§2)
-  whose leaves all sit at the prototype's placement; and the writer emulation
+  `index/bounds` from the child's publication, under a leaf layout (§2); and
+  the writer emulation
   reproduces every translation in each child's own document from that
   child's descriptor. Anything else — a rotated or coloured link, a part
   child, a parent with geometry of its own, a child rebuilt since the parent
@@ -1409,11 +1414,15 @@ Decided mechanically from the returned geometry and occurrence metadata.
   arrays are never mutated.
 - Canonical saved-document publication already owns each verified component's
   encoded BREP and each parsed occurrence's exact native placement. Its tight
-  bounds key uses that BREP identity, codec and rotation in `index/bounds`,
-  then shifts the six native bounds by translation. A miss measures
-  every native leaf with the same optimal extrema operation; it never transforms
-  a component AABB. Incomplete private inputs fall back to the ordinary composed
-  native document, after the same component validation and closure checks.
+  bounds key uses that BREP identity, codec, the leaf's ordinal and the
+  leaf's rotation in `index/bounds`, then shifts the six native bounds by
+  the leaf's translation. A source result's own occurrences are measured the
+  same way, through the one function
+  (`component_package.placed_prototype_bounds`), so the animation bake's leaf
+  boxes find for the result what they find for the saved file. A miss measures every native leaf
+  with the same optimal extrema operation; it never transforms a component
+  AABB. Incomplete private inputs fall back to the ordinary composed native
+  document, after the same component validation and closure checks.
 - A bounded descriptor composed entirely of pinned links may instead measure
   exact component bounds from verified canonical BREP objects. `index/bounds`
   stores only six finite numbers, keyed by BREP digest, all 16
@@ -2104,11 +2113,14 @@ late older events cannot replace it. It may retain the previous visible model
 while the newer request builds. A daemon restart expires request ordering; a
 disconnected preview is labelled as such. The ledger is short-lived and
 deletable, never the only durable copy of an authored change. A build's events
-carry what that status reads and no more: the "Saving STEP" preview names the
-output, the source result's tree and the part key of each of its components, a
-saved result the document's tree and digest, and the ledger keeps nothing else
-of either. Kinematics, appearance
-and animation travel in the sidecar alone.
+carry what that status reads and no more: a preview names the output, the
+result tree, the producer its parts are keyed under, the part key of each
+component the store holds -- the stored parts first, then one event per part
+the build derives -- and whether that is all of them; the preview's annotations
+name the one object they are (below); a saved result the document's tree and
+digest; and the ledger keeps nothing else of any of them. Kinematics,
+appearance and animation travel in the sidecar for every durable reader, and
+in the preview's annotations object for the viewer alone.
 
 Only model-run producers advance editing order. Compiling saved bytes and
 attaching a coalesced subscriber to an existing producer do not create a new

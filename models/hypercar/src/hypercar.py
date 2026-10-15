@@ -5,22 +5,22 @@ highlight lines cross every shutline without a kink and every panel gap is a
 real constant-width gap.
 
 Assembly tree is grouped BY SYSTEM — thirteen sibling models under ``src/``,
-composed here by CALLING them — which is also the occurrence order the
-``ANIMATION`` clips target:
+composed here by CALLING them. The ``ANIMATION`` clips address systems and
+parts by name: a system's is its model's, a part's the one its system minted.
 
-    o1.1  body              painted panels, pillars, aero skins
-    o1.2  glazing           DLO glass + lamp lenses
-    o1.3  lighting          lamp internals + light signature
-    o1.4  chassis           monocoque tub, subframes, crash structures
-    o1.5  suspension_front  wishbones, uprights, pushrods, rockers, coilovers
-    o1.6  suspension_rear   ditto, rear
-    o1.7  wheels            rims, tyres
-    o1.8  brakes            discs, calipers, hubs
-    o1.9  powertrain        engine, intake, exhaust, transaxle, driveshafts
-    o1.10 interior          seats, wheel, dash, console, pedals, door cards
-    o1.11 aero              splitter, diffuser, wing
-    o1.12 hinge             dihedral synchro-helix door mechanism
-    o1.13 details           mirrors, badges, filler, vents, fasteners
+    body              painted panels, pillars, aero skins
+    glazing           DLO glass + lamp lenses
+    lighting          lamp internals + light signature
+    chassis           monocoque tub, subframes, crash structures
+    suspension_front  wishbones, uprights, pushrods, rockers, coilovers
+    suspension_rear   ditto, rear
+    wheels            rims, tyres
+    brakes            discs, calipers, hubs
+    powertrain        engine, intake, exhaust, transaxle, driveshafts
+    interior          seats, wheel, dash, console, pedals, door cards
+    aero              splitter, diffuser, wing
+    hinge             dihedral synchro-helix door mechanism
+    details           mirrors, badges, filler, vents, fasteners
 """
 
 from __future__ import annotations
@@ -224,9 +224,68 @@ _WHEEL_TOUR = (0.68, 0.8, 0.84, 0.95)
 _BRAKE_TOUR = (0.7, 0.81, 0.84, 0.95)
 
 
-def _ids(parent: str, *children: int) -> tuple[str, ...]:
-    """Targets for children of the occurrence ``parent``, by child number."""
-    return tuple(f"#{parent}.{child}" for child in children)
+def _refs(*labels: str) -> tuple[str, ...]:
+    """Targets by part name: the names the system models give their parts."""
+    return tuple(f"#{label}" for label in labels)
+
+
+def _sided(kinds: tuple[str, ...], side: str) -> tuple[str, ...]:
+    return tuple(f"#{kind}:{side}" for kind in kinds)
+
+
+# Every group below is addressed by name. A name is the part's, minted by its
+# system model (body.py, lighting.py, ...): what the viewer and a copied ref
+# show, so the tables read against the model.
+_BODY_FLANK = ("front_fender", "door", "rocker_panel", "rear_fender")
+_HEADLAMP_KINDS = ("crown_crease", "hood_crease", "cheek_crease", "drl_trough", "drl_blade",
+                   "lamp_bezel", "lamp_cavity", "lamp_bar")
+_PROJECTOR_STATIONS = (2020, 2060, 2100, 2140)
+_PROJECTOR_PARTS = ("barrel", "cup", "lens", "ring")
+_TAIL_KINDS = ("tail_bezel", "tail_shroud", "tail_backplate", "tail_bar")
+_REAR_CORNER_SINGLES = ("lower_wishbone", "lower_balljoint_cap", "upper_wishbone", "upper_balljoint_cap",
+                        "upright", "hub_spigot", "pushrod", "rocker", "rocker_fork", "rocker_pin",
+                        "damper_body", "damper_shaft", "damper_adjuster", "damper_spring",
+                        "damper_reservoir", "damper_reservoir_cap", "toe_link", "arb_drop_link")
+_REAR_CORNER_PAIRS = ("lower_wishbone_pin", "upper_wishbone_pin", "pushrod_joint", "pushrod_collar",
+                      "rocker_nut", "damper_joint", "damper_perch", "toe_link_joint", "toe_link_collar",
+                      "arb_drop_joint", "arb_drop_collar")
+_REAR_CORNER_QUADS = ("lower_wishbone_nut", "upper_wishbone_nut")
+_MIRROR_KINDS = ("mirror_housing", "mirror_bezel", "mirror_glass", "mirror_stalk", "mirror_base")
+
+
+def _body_flank(side: str) -> tuple[str, ...]:
+    return (*_sided(_BODY_FLANK, side), f"#wheelhouse_liner:front_{side}", f"#wheelhouse_liner:rear_{side}",
+            f"#intake_duct:{side}")
+
+
+def _headlamps() -> tuple[str, ...]:
+    return (*(f"#{kind}:{side}" for side in ("left", "right") for kind in _HEADLAMP_KINDS),
+            *(f"#projector_{part}:{station}_{side}" for side in ("left", "right")
+              for station in _PROJECTOR_STATIONS for part in _PROJECTOR_PARTS))
+
+
+def _tail_lamps() -> tuple[str, ...]:
+    return (*_refs("tail_trough:centre", "tail_blade:centre"),
+            *(f"#{kind}:{side}" for side in ("left", "right") for kind in _TAIL_KINDS),
+            *(f"#tail_fin:{side}_{i}" for side in ("left", "right") for i in range(17)))
+
+
+def _rear_corner(side: str) -> tuple[str, ...]:
+    return (*_sided(_REAR_CORNER_SINGLES, side),
+            *(f"#{kind}:{side}{i}" for kind in _REAR_CORNER_PAIRS for i in (0, 1)),
+            *(f"#{kind}:{side}{i}{j}" for kind in _REAR_CORNER_QUADS for i in (0, 1) for j in (0, 1)))
+
+
+def _corner(kinds: tuple[str, ...], corner: str) -> tuple[str, ...]:
+    return tuple(f"#{kind}:{corner}" for kind in kinds)
+
+
+def _side_jewellery(side: str) -> tuple[str, ...]:
+    return (*_sided(_MIRROR_KINDS, side), f"#front_gill_frame:{side}", f"#front_gill_backing:{side}",
+            *(f"#front_gill_blade:{side}_{i}" for i in range(9)),
+            f"#rear_gill_frame:{side}", f"#rear_gill_backing:{side}",
+            *(f"#rear_gill_blade:{side}_{i}" for i in range(10)),
+            f"#extractor_plenum:{side}", *(f"#extractor_blade:{side}_{i}" for i in range(8)))
 
 
 def _unit_times(d, gain: float) -> tuple[float, float, float]:
@@ -248,56 +307,64 @@ def _lateral(centre, gain: float) -> tuple[float, float, float]:
 _GROUPS = (
     # body: the flanks swing out sideways, the upper skins lift, the ends draw
     # fore and aft, the floor drops away
-    (_ids("o1.1", 3, 4, 5, 6, 18, 20, 22), _radial((-82.5, 772.8, 567.1), 1500), _SKIN_TOUR),
-    (_ids("o1.1", 7, 8, 9, 10, 19, 21, 23), _radial((-82.5, -772.8, 567.1), 1500), _SKIN_TOUR),
-    (_ids("o1.1", 2, 11, 13, 14, 15, 17), _radial((-82.5, 0.0, 849.1), 1500), _SKIN_TOUR),
-    (_ids("o1.1", 1, 24, 25, 26), (1500, 0, 150), _SKIN_TOUR),
-    (_ids("o1.1", 16), (-1500, 0, 150), _SKIN_TOUR),
-    (_ids("o1.1", 12), (0, 0, -900), _SKIN_TOUR),
+    (_body_flank("left"), _radial((-82.5, 772.8, 567.1), 1500), _SKIN_TOUR),
+    (_body_flank("right"), _radial((-82.5, -772.8, 567.1), 1500), _SKIN_TOUR),
+    (_refs("hood", "cowl_deck", "tonneau", "engine_cover", "tail_deck", "pillar_structure"),
+     _radial((-82.5, 0.0, 849.1), 1500), _SKIN_TOUR),
+    (_refs("front_fascia", "front_duct:1", "front_duct:2", "front_duct:3"), (1500, 0, 150), _SKIN_TOUR),
+    (_refs("rear_fascia"), (-1500, 0, 150), _SKIN_TOUR),
+    (_refs("underbody"), (0, 0, -900), _SKIN_TOUR),
     # glazing: side glass follows its own door's flank, screens lift, lenses
     # leave with the lamps they cover
-    (_ids("o1.2", 2), _radial((-237.9, 513.6, 943.9), 2150), _GLASS_TOUR),
-    (_ids("o1.2", 3), _radial((-237.9, -513.6, 943.9), 2150), _GLASS_TOUR),
-    (_ids("o1.2", 1, 4), _radial((-230.0, 0.0, 947.9), 2150), _GLASS_TOUR),
-    (_ids("o1.2", 5, 6), (1750, 0, 300), _GLASS_TOUR),
-    (_ids("o1.2", 7), (-1750, 0, 300), _GLASS_TOUR),
+    (_refs("side_glass:left"), _radial((-237.9, 513.6, 943.9), 2150), _GLASS_TOUR),
+    (_refs("side_glass:right"), _radial((-237.9, -513.6, 943.9), 2150), _GLASS_TOUR),
+    (_refs("windscreen", "rear_screen"), _radial((-230.0, 0.0, 947.9), 2150), _GLASS_TOUR),
+    (_refs("headlight_lens:left", "headlight_lens:right"), (1750, 0, 300), _GLASS_TOUR),
+    (_refs("taillight_lens"), (-1750, 0, 300), _GLASS_TOUR),
     # lighting: head and tail units leave out of their own ends
-    (_ids("o1.3", *range(1, 49)), (1750, 0, 560), _TRIM_TOUR),
-    (_ids("o1.3", *range(49, 93)), (-1750, 0, 560), _TRIM_TOUR),
+    (_headlamps(), (1750, 0, 560), _TRIM_TOUR),
+    (_tail_lamps(), (-1750, 0, 560), _TRIM_TOUR),
     # chassis holds still -- no entry.
     # suspension: each corner straight out, the steering rack and ARBs along the
     # car so they stay legible between the corners
-    (_ids("o1.5", 1), _lateral((1242.1, 437.2, 448.9), 1150), _SUSPENSION_TOUR),
-    (_ids("o1.5", 2), _lateral((1242.1, -437.2, 448.9), 1150), _SUSPENSION_TOUR),
-    (_ids("o1.5", 3, 4), (900, 0, 700), _SUSPENSION_TOUR),
-    (_ids("o1.6", *range(1, 49)), _lateral((-1453.2, 546.9, 490.3), 1150), _SUSPENSION_TOUR),
-    (_ids("o1.6", *range(49, 97)), _lateral((-1453.2, -546.9, 490.0), 1150), _SUSPENSION_TOUR),
-    (_ids("o1.6", *range(97, 102)), (-900, 0, 700), _SUSPENSION_TOUR),
+    (_refs("front_left"), _lateral((1242.1, 437.2, 448.9), 1150), _SUSPENSION_TOUR),
+    (_refs("front_right"), _lateral((1242.1, -437.2, 448.9), 1150), _SUSPENSION_TOUR),
+    (_refs("steering", "anti_roll_bar"), (900, 0, 700), _SUSPENSION_TOUR),
+    (_rear_corner("left"), _lateral((-1453.2, 546.9, 490.3), 1150), _SUSPENSION_TOUR),
+    (_rear_corner("right"), _lateral((-1453.2, -546.9, 490.0), 1150), _SUSPENSION_TOUR),
+    (_refs("arb_bar:centre", "arb_mount:left", "arb_blade_collar:left", "arb_mount:right", "arb_blade_collar:right"),
+     (-900, 0, 700), _SUSPENSION_TOUR),
     # wheels and brakes: off their own hubs, one corner at a time in space
-    (_ids("o1.7", 1, 5), _lateral((1326.9, 855.3, 403.1), 2400), _WHEEL_TOUR),
-    (_ids("o1.7", 2, 6), _lateral((1326.9, -855.3, 403.1), 2400), _WHEEL_TOUR),
-    (_ids("o1.7", 3, 7), _lateral((-1351.6, 835.2, 424.4), 2400), _WHEEL_TOUR),
-    (_ids("o1.7", 4, 8), _lateral((-1351.6, -835.2, 424.4), 2400), _WHEEL_TOUR),
-    (_ids("o1.8", 1, 2), _lateral((1350.0, 852.7, 397.0), 1750), _BRAKE_TOUR),
-    (_ids("o1.8", 3, 4), _lateral((1347.7, -847.3, 388.1), 1750), _BRAKE_TOUR),
-    (_ids("o1.8", 5, 6), _lateral((-1350.0, 830.0, 407.2), 1750), _BRAKE_TOUR),
-    (_ids("o1.8", 7, 8), _lateral((-1350.0, -830.0, 417.4), 1750), _BRAKE_TOUR),
+    (_corner(("wheel", "arch_flare"), "front_left"), _lateral((1326.9, 855.3, 403.1), 2400), _WHEEL_TOUR),
+    (_corner(("wheel", "arch_flare"), "front_right"), _lateral((1326.9, -855.3, 403.1), 2400), _WHEEL_TOUR),
+    (_corner(("wheel", "arch_flare"), "rear_left"), _lateral((-1351.6, 835.2, 424.4), 2400), _WHEEL_TOUR),
+    (_corner(("wheel", "arch_flare"), "rear_right"), _lateral((-1351.6, -835.2, 424.4), 2400), _WHEEL_TOUR),
+    (_corner(("brake_rotor", "brake_caliper"), "front_left"), _lateral((1350.0, 852.7, 397.0), 1750), _BRAKE_TOUR),
+    (_corner(("brake_rotor", "brake_caliper"), "front_right"), _lateral((1347.7, -847.3, 388.1), 1750), _BRAKE_TOUR),
+    (_corner(("brake_rotor", "brake_caliper"), "rear_left"), _lateral((-1350.0, 830.0, 407.2), 1750), _BRAKE_TOUR),
+    (_corner(("brake_rotor", "brake_caliper"), "rear_right"), _lateral((-1350.0, -830.0, 417.4), 1750), _BRAKE_TOUR),
     # powertrain out of the back as one unit; it comes apart later, on its own
-    (("#o1.9",), (-2350, 0, 320), _POWERTRAIN_TOUR),
+    (_refs("powertrain"), (-2350, 0, 320), _POWERTRAIN_TOUR),
     # interior lifts straight out of the tub
-    (("#o1.10",), (140, 0, 1950), _INTERIOR_TOUR),
+    (_refs("interior"), (140, 0, 1950), _INTERIOR_TOUR),
     # aero: front furniture forward and down, floor and diffuser back and down,
     # wing back and up -- each leaves the way it was fitted
-    (_ids("o1.11", *range(1, 12)), (1900, 0, -200), _TRIM_TOUR),
-    (_ids("o1.11", *range(12, 19)), (-1400, 0, -800), _TRIM_TOUR),
-    (_ids("o1.11", *range(19, 25)), (-1200, 0, 900), _TRIM_TOUR),
+    (_refs("front_splitter", "turning_vane:left_fwd", "turning_vane:right_fwd", "turning_vane:left_aft",
+           "turning_vane:right_aft", "dive_plane:left_lower", "dive_plane:right_lower", "dive_plane:left_upper",
+           "dive_plane:right_upper", "canard_fence:left", "canard_fence:right"), (1900, 0, -200), _TRIM_TOUR),
+    (_refs("rear_diffuser", "diffuser_strake:c", "diffuser_strake:left_1", "diffuser_strake:right_1",
+           "diffuser_strake:left_2", "diffuser_strake:right_2", "rear_floor_tray"), (-1400, 0, -800), _TRIM_TOUR),
+    (_refs("rear_wing_element", "wing_gurney", "wing_endplate:left", "wing_endplate:right", "swan_neck:left",
+           "swan_neck:right"), (-1200, 0, 900), _TRIM_TOUR),
     # door mechanism: outboard with its own flank
-    (_ids("o1.12", 1), _lateral((798.5, 821.4, 529.0), 1400), _TRIM_TOUR),
-    (_ids("o1.12", 2), _lateral((798.5, -821.4, 529.0), 1400), _TRIM_TOUR),
+    (_refs("hinge:left"), _lateral((798.5, 821.4, 529.0), 1400), _TRIM_TOUR),
+    (_refs("hinge:right"), _lateral((798.5, -821.4, 529.0), 1400), _TRIM_TOUR),
     # details: side jewellery out with its flank, badges and filler straight up
-    (_ids("o1.13", *range(1, 38)), _radial((-64.7, 652.5, 691.5), 2500), _SKIN_TOUR),
-    (_ids("o1.13", *range(38, 75)), _radial((-64.7, -652.5, 691.5), 2500), _SKIN_TOUR),
-    (_ids("o1.13", *range(75, 85)), (0, 0, 1400), _SKIN_TOUR),
+    (_side_jewellery("left"), _radial((-64.7, 652.5, 691.5), 2500), _SKIN_TOUR),
+    (_side_jewellery("right"), _radial((-64.7, -652.5, 691.5), 2500), _SKIN_TOUR),
+    (_refs("badge_mark:nose", "badge_underscore:nose", "badge_pad:tail", "badge_mark:tail", "badge_underscore:tail",
+           "fuel_filler_flange:left", "fuel_filler_dish:left", "fuel_filler_latch:left", "fuel_filler_pip:left",
+           "quarter_turns"), (0, 0, 1400), _SKIN_TOUR),
 )
 
 # --- engine sub-explode ----------------------------------------------------
@@ -318,16 +385,16 @@ def _off_block(centre, gain: float) -> tuple[float, float, float]:
 
 
 _ENGINE_PARTS = (
-    (_ids("o1.9", 2), _off_block((-1343.7, 0.0, 626.6), 520)),  # head, front bank
-    (_ids("o1.9", 4), _off_block((-1656.3, 0.0, 626.6), 520)),  # head, rear bank
-    (_ids("o1.9", 3), _off_block((-1310.9, 0.0, 685.6), 980)),  # cam cover, front
-    (_ids("o1.9", 5), _off_block((-1689.1, 0.0, 685.6), 980)),  # cam cover, rear
-    (_ids("o1.9", 6), _off_block((-1500.0, 388.0, 468.0), 760)),
-    (_ids("o1.9", 8), _off_block((-1500.0, -388.0, 468.0), 760)),
-    (_ids("o1.9", 7, 9), _off_block((-1500.0, 0.0, 884.0), 760)),
-    (_ids("o1.9", 10), (0, 0, 1250)),  # intake plenum
-    (_ids("o1.9", 11), _off_block((-1800.2, 0.2, 526.1), 900)),  # exhaust
-    (_ids("o1.9", 12), (-1150, 0, 60)),  # transaxle
+    (_refs("cylinder_head:front"), _off_block((-1343.7, 0.0, 626.6), 520)),
+    (_refs("cylinder_head:rear"), _off_block((-1656.3, 0.0, 626.6), 520)),
+    (_refs("cam_cover:front"), _off_block((-1310.9, 0.0, 685.6), 980)),
+    (_refs("cam_cover:rear"), _off_block((-1689.1, 0.0, 685.6), 980)),
+    (_refs("gear_drive_cover:left"), _off_block((-1500.0, 388.0, 468.0), 760)),
+    (_refs("gear_drive_cover:right"), _off_block((-1500.0, -388.0, 468.0), 760)),
+    (_refs("cam_drive_boss:left", "cam_drive_boss:right"), _off_block((-1500.0, 0.0, 884.0), 760)),
+    (_refs("intake"), (0, 0, 1250)),  # the plenum
+    (_refs("exhaust"), _off_block((-1800.2, 0.2, 526.1), 900)),
+    (_refs("transaxle"), (-1150, 0, 60)),
 )
 
 # --- the moves -------------------------------------------------------------

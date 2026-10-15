@@ -2,7 +2,7 @@
 
 A sub-assembly of the engine: the parts `lib/exhaust.py` builds, as one model
 with its own STEP, its own record and its own worker. `w16.py` links it as
-occurrence `o1.11`; rebuild `w16.py` to pick up a change here.
+`#exhaust`; rebuild `w16.py` to pick up a change here.
 """
 
 from __future__ import annotations

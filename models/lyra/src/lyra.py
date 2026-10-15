@@ -73,7 +73,7 @@ def _xref_for(axis) -> tuple:
 def assemble() -> bd.Compound:
     """Labeled assembly baked in the chain's relaxed pose.
 
-    Occurrence order (#o1.N in the generated STEP) is palm first, then
+    Occurrence order in the generated STEP is palm first, then
     chain.all_joints() child order: index, middle, ring, pinky
     (proximal/middle/distal each), then thumb base/metacarpal/proximal/
     distal. The mates and the animation clips name links by label, so

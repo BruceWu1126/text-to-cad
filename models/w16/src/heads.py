@@ -2,7 +2,7 @@
 
 A sub-assembly of the engine: the parts `lib/heads.py` builds, as one model
 with its own STEP, its own record and its own worker. `w16.py` links it as
-occurrence `o1.4`; rebuild `w16.py` to pick up a change here.
+`#heads`; rebuild `w16.py` to pick up a change here.
 """
 
 from __future__ import annotations

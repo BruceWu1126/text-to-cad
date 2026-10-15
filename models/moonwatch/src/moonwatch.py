@@ -260,22 +260,34 @@ def _snap(fraction: float) -> float:
     return _smooth(fraction / _STEP_FRACTION)
 
 
-# Parts and groups are targeted by label. The movement-base parts the showcase
-# tiers fan but nothing else names are targeted by occurrence id: the base is
-# the movement's first child, and the movement the watch's fourth.
-_MOVEMENT_BASE = "#o1.4.1"
-
-
-def _base(first: int, last: int) -> list[str]:
-    """Movement-base children first..last, by occurrence id."""
-    return [f"{_MOVEMENT_BASE}.{index}" for index in range(first, last + 1)]
-
-
+# Parts and groups are targeted by label, the movement-base parts the
+# showcase tiers fan included (`movement_base.py` names every one).
 _BALANCE_GROUP = (
     "#balance_wheel", "#balance_staff", "#impulse_jewel",
     *(f"#timing_screw:{i}" for i in range(16)),
 )
 _PALLET_GROUP = ("#pallet_fork", "#pallet_stone:entry", "#pallet_stone:exit", "#pallet_arbor")
+_GOING_TRAIN = ("#center_wheel", "#center_pinion", "#third_wheel", "#third_pinion",
+                "#fourth_wheel", "#fourth_pinion", "#escape_pinion")
+_BARREL = ("#barrel_drum", "#barrel_lid", "#mainspring", "#barrel_arbor")
+_PALLET_BRIDGE = ("#pallet_bridge", "#pallet_bridge:stripe_shadow:0", "#pallet_bridge:stripe_shadow:1",
+                  "#pallet_bridge:anglage", "#bridge_jewel:pallet", "#chaton:pallet", "#screw:pallet_bridge")
+_TRAIN_BRIDGE = (
+    "#train_bridge", *(f"#train_bridge:stripe_shadow:{i}" for i in range(3)),
+    *(f"#train_bridge:anglage:{i}" for i in range(2)),
+    *(f"#{kind}:{wheel}" for wheel in ("center", "third", "fourth", "escape") for kind in ("bridge_jewel", "chaton")),
+    "#screw:train_bridge:foot", "#screw:train_bridge:fourth", "#screw:train_bridge:center",
+)
+_BARREL_BRIDGE = (
+    "#barrel_bridge", *(f"#barrel_bridge:stripe_shadow:{i}" for i in range(6)),
+    *(f"#barrel_bridge:anglage:{i}" for i in range(5)), "#bridge_jewel:barrel",
+    "#screw:barrel_bridge:left", "#screw:barrel_bridge:right", "#screw:barrel_bridge:top",
+)
+_WINDING = ("#ratchet_wheel", "#screw:ratchet", "#crown_wheel", "#crown_wheel_core", "#screw:crown_wheel",
+            "#click", "#screw:click", "#click_spring", "#screw:click_spring")
+_BALANCE_COCK = ("#hairspring", "#hairspring_stud", "#balance_cock", "#balance_cock:stripe_shadow:0",
+                 "#balance_cock:stripe_shadow:1", "#screw:balance_cock", "#stud_holder", "#screw:stud_holder",
+                 "#shock_bezel", "#shock_chaton", "#shock_cap_jewel", "#shock_lyre_spring")
 
 # Staged reveal translations: (target, direction, distance, start, end). The
 # bezel stack and crystal lift clear first, then the dial floats up so the
@@ -382,13 +394,13 @@ _SHOWCASE_SPREADS = (
 # pre-parent frame so the group flip + rise carries them.
 _MOVEMENT_TIERS = (
     (("#keyless_works",), 7.0),
-    ((*_base(14, 20), *_base(63, 67)), -5.0),   # going train + escapement
-    (_base(10, 13), -8.0),                      # barrel
-    (_base(68, 74), -11.5),                     # pallet bridge
-    ((*_base(34, 47), *_base(51, 53)), -15.5),  # train bridge
-    ((*_base(21, 33), *_base(48, 50)), -15.5),  # barrel bridge
-    (_base(54, 62), -19.0),                     # ratchet, crown wheel, click
-    (_base(75, 105), -24.0),                    # balance + cock + shock
+    ((*_GOING_TRAIN, "#escape_wheel", *_PALLET_GROUP), -5.0),  # going train + escapement
+    (_BARREL, -8.0),
+    (_PALLET_BRIDGE, -11.5),
+    (_TRAIN_BRIDGE, -15.5),
+    (_BARREL_BRIDGE, -15.5),
+    (_WINDING, -19.0),                                        # ratchet, crown wheel, click
+    ((*_BALANCE_GROUP, *_BALANCE_COCK), -24.0),               # balance + cock + shock
     (("#chronograph_works",), -30.0),
 )
 

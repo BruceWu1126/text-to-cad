@@ -339,7 +339,7 @@ def stored_meshes(source: MeshSource, pairs: list, appearance: object,
     At the display tolerance a body is the stored display mesh the viewer draws: the
     part the build that made the tree derived (and one build-pool job derives for a
     part the store lacks, ``store.view.materialize_parts``). At any other tolerance
-    the part is meshed here, from its BREP and stored selector table
+    the part is meshed here, from its BREP and a selector table built for that BREP
     (``store.parts.mesh_at``), and the body is stored nowhere: the export's file is
     the output."""
     from cadgen.store import parts

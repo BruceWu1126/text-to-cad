@@ -13,19 +13,19 @@ Assembly tree is grouped BY SYSTEM — ten sibling models under ``src/``,
 composed here by CALLING them — which is also how the animation moves
 things: act 1 of the teardown moves one system per stage.
 
-OCCURRENCE ORDER IS THE ``SYSTEMS`` LIST BELOW, and the clips take each
-system's occurrence id from its place there:
+THE ``SYSTEMS`` LIST BELOW IS THE OCCURRENCE ORDER, and the clips address
+each system by its name, which is its model's:
 
-    o1.1  airframe    the one-piece blended skin, cut and detailed
-    o1.2  cockpit     tub, panels, seats, HUD, canopy, windscreen
-    o1.3  wings       panels, slats, flaps, spoilers, tip lights
-    o1.4  inlets      ramps, splitters, bleed slots, ducts
-    o1.5  nozzles     C-D nozzles, petals, seals, actuator rings
-    o1.6  empennage   fins, rudders, stabilators, ventral fins
-    o1.7  aft         speed brakes, beavertail, tailhook, dump mast
-    o1.8  nose_gear   leg, wheels, launch bar, doors, bay
-    o1.9  main_gear   legs, wheels, brakes, doors, bays
-    o1.10 details     antennas, probes, lights, wicks, vents, panels
+    airframe    the one-piece blended skin, cut and detailed
+    cockpit     tub, panels, seats, HUD, canopy, windscreen
+    wings       panels, slats, flaps, spoilers, tip lights
+    inlets      ramps, splitters, bleed slots, ducts
+    nozzles     C-D nozzles, petals, seals, actuator rings
+    empennage   fins, rudders, stabilators, ventral fins
+    aft         speed brakes, beavertail, tailhook, dump mast
+    nose_gear   leg, wheels, launch bar, doors, bay
+    main_gear   legs, wheels, brakes, doors, bays
+    details     antennas, probes, lights, wicks, vents, panels
 
 Three systems the brief names -- glove, engines, markings -- have no model
 yet; add one as ``src/<name>.py``, insert it here, and give it a stage in the
@@ -62,11 +62,10 @@ from nose_gear import nose_gear
 from nozzles import nozzles
 from wings import wings
 
-# Order here IS the occurrence order (o1.1, o1.2, ...). Every entry is a
-# sibling model under src/; calling it inside the body builds it if stale (on
-# its own worker, in parallel with the rest) or loads it, and the aircraft
-# links its tree. Adding a system here renumbers everything after it; the
-# clips below take every occurrence id from this list, so they follow.
+# Order here IS the occurrence order. Every entry is a sibling model under
+# src/; calling it inside the body builds it if stale (on its own worker, in
+# parallel with the rest) or loads it, and the aircraft links its tree under
+# the model's name, which is what the clips below address it by.
 SYSTEMS = [
     airframe,
     cockpit,
@@ -145,8 +144,8 @@ _HOLD_S = 24.0
 
 
 def _system(model) -> str:
-    """A system's target: the occurrence its place in SYSTEMS gives it."""
-    return f"#o1.{SYSTEMS.index(model) + 1}"
+    """A system's target: the name the aircraft links its model under."""
+    return f"#{model.__name__}"
 
 
 def _smoothstep(u: float) -> float:

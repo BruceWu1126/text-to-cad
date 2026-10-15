@@ -426,8 +426,8 @@ def body_shell() -> bd.Compound:
 
 def deck_lid() -> bd.Compound:
     # Front-left deck plate: the cutaway lid the sidecar lifts to reveal the
-    # avionics/power/science bays. The dust patch rides on the lid so it must
-    # stay the LAST child (sidecar feature `lid_dust` -> #o1.5.9).
+    # avionics/power/science bays. The dust patch rides on the lid; the sidecar
+    # styles it by its name (`deck_lid_dust_patch`).
     parts = [
         oriented_box("deck_lid_plate", (575.0, 255.0, deck_z - 11.0),
                      920.0, 770.0, 22.0, color_name="ivory_panel", fillet_radius=5.0),
@@ -645,8 +645,8 @@ def rocker(s: float, side: str) -> bd.Compound:
     steer_mount = (x_front, s * y_wheel, STEER_TOP_Z)
     bogie_pt = (BOGIE_PIVOT[0], s * BOGIE_PIVOT[1], BOGIE_PIVOT[2])
     parts = [
-        # accent hub cap is intentionally the FIRST child (#o1.N.1) so the
-        # sidecar accent palette can restyle it by stable ref
+        # the accent hub cap's name is what the sidecar accent palette restyles
+        # it by
         cylinder_y(f"rocker_{side}_pivot_accent_cap", (pivot[0], s * (y_susp + 52.0), pivot[2]), 48.0, 14.0, "jpl_orange"),
         cylinder_y(f"rocker_{side}_pivot_hub", pivot, 70.0, 90.0, "satin_titanium"),
         cylinder_between(f"rocker_{side}_front_tube", pivot, front_elbow, 34.0, "satin_titanium"),

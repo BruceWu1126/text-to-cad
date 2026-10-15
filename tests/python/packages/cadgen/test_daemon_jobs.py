@@ -194,19 +194,26 @@ class Lifecycle(unittest.TestCase):
         self.assertEqual(job["state"], "done", "late forwarded events cannot reopen completed requests")
 
     def test_a_job_keeps_only_what_its_readers_read_of_a_result(self):
-        # The viewer's status reads a saved result's tree and digest; nothing reads
-        # a preview's annotations, so a payload carrying them keeps none.
+        # The viewer's status reads the names of a build's results: of a preview its tree,
+        # the producer its parts are keyed under, the stored part keys and whether they are
+        # all of them; of its annotations the one object; of a saved result its tree and
+        # digest. The content of any of them rides in none: a payload carrying it keeps none.
         job = self.ledger.start(tool="run", subject=self.model)
         output = str(Path(self.model).with_suffix(".step"))
         self.ledger.observe(self._event(self.model, "building", job=job["id"], sequence=1, preview={
-            "output": output, "tree": "source", "kinematics": {"mates": [1] * 1000}, "appearance": {},
-            "animation": "export const clips = {};", "producer": {"scheme": 19}}))
-        self.ledger.observe(self._event(self.model, "building", job=job["id"], sequence=2, saved={
+            "output": output, "tree": "source", "producer": {"scheme": 19}, "parts": {"c1": "k1"}, "complete": False,
+            "kinematics": {"mates": [1] * 1000}, "appearance": {}, "animation": "export const clips = {};"}))
+        self.ledger.observe(self._event(self.model, "building", job=job["id"], sequence=2, annotations={
+            "output": output, "tree": "source", "object": "ann", "articulation": {"joints": [1] * 1000}}))
+        self.ledger.observe(self._event(self.model, "building", job=job["id"], sequence=3, saved={
             "output": output, "tree": "document", "documentHash": "abc", "appearance": {"materials": {}}}))
         snapshot = self.ledger.snapshot()[0]
-        self.assertEqual(snapshot["previews"][output], {"output": output, "tree": "source", "sequence": 1})
+        self.assertEqual(snapshot["previews"][output], {"output": output, "tree": "source", "producer": {"scheme": 19},
+                                                        "parts": {"c1": "k1"}, "complete": False, "sequence": 1})
+        self.assertEqual(snapshot["annotations"][output],
+                         {"output": output, "tree": "source", "object": "ann", "sequence": 2})
         self.assertEqual(snapshot["savedResults"][output],
-                         {"output": output, "tree": "document", "documentHash": "abc", "sequence": 2})
+                         {"output": output, "tree": "document", "documentHash": "abc", "sequence": 3})
 
     def test_parent_announcements_cannot_claim_child_preview_and_epochs_are_unique(self):
         parent = self.ledger.start(tool="run", subject=self.model)

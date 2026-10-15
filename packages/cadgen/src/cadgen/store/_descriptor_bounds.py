@@ -216,7 +216,7 @@ class Snapshot:
     def bounds(self, *, shapes: dict[str, Any] | None = None) -> dict[str, list[float]]:
         from cadgen._internal import component_package as cp
         from cadgen.store.bounds import cached_box
-        from cadgen.store.materialize import _location_from_matrix, _placed_copy
+        from cadgen.store.materialize import _location_from_matrix
         payloads, breps = dict(self.objects), dict(self.component_breps)
         entries = self.descriptor()["components"]
         boxes = []
@@ -228,8 +228,13 @@ class Snapshot:
                     shapes[cid] if shapes is not None
                     else cp.decode_geometry_component(entries[cid], payloads[brep])
                 )
-                placed = _placed_copy(private, _location_from_matrix(list(transform)))
-                box = cp._bbox_from_shape(placed)
+                # Per leaf, under the key the canonical document and a composed reader
+                # share: the box the preview's bake reads is the saved file's.
+                try:
+                    box = cp.placed_prototype_bounds(
+                        str(entries[cid]["codec"]), brep, private, _location_from_matrix(list(transform)))
+                except Exception as error:  # noqa: BLE001 - the whole-document path measures instead
+                    raise Ineligible("native bounds unavailable") from error
                 if type(box) is not dict:
                     raise Ineligible("native bounds unavailable")
                 return _box_values([*box["min"], *box["max"]])

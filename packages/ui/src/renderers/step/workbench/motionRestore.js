@@ -1,9 +1,6 @@
 import { normalizeControlValues } from "@text-to-cad/core/common/articulation.js";
 import { restoreAnimationState } from "@text-to-cad/core/common/animationClock.js";
-
-const canonical = value => (Array.isArray(value) ? value.map(canonical)
-  : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])]))
-    : value);
+import { canonicalJson } from "./canonicalJson.js";
 
 // What a STEP's pose is made of: the controls its joints are driven by (each one's id, unit,
 // range and rest value) and its named poses, as one comparable string ("" for nothing to pose).
@@ -13,7 +10,7 @@ const canonical = value => (Array.isArray(value) ? value.map(canonical)
 // new version.
 export function stepPoseLogic(definition) {
   const articulation = definition?.articulation;
-  return articulation ? JSON.stringify(canonical([articulation.controls || [], articulation.poses || {}])) : "";
+  return articulation ? canonicalJson([articulation.controls || [], articulation.poses || {}]) : "";
 }
 
 // A model can be posed by Position or by a routine. The owner in hand wins: while a routine

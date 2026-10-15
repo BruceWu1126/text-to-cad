@@ -25,6 +25,8 @@ control nets or basis curves.
 
 from __future__ import annotations
 
+import threading
+from collections import OrderedDict
 from typing import Any
 
 from OCP.Bnd import Bnd_Box
@@ -115,6 +117,74 @@ def _bnd_box(topo) -> list[float] | None:
         return None
 
 
+# The exact metrics of a component's faces and edges -- the kernel's integrals and tight
+# boxes, most of what a table costs -- remembered per component in this process, so that
+# a build which fingerprints a component (``geometry_fingerprint``) and derives its part
+# (``store.parts``) in one worker measures each face and edge once. Keyed by the
+# component's BREP object, which both read the same decode of; memory only, bounded.
+# Each entry: the faces' metrics, the edges' integrals, and whether the edges' boxes --
+# which only the table reads -- have been measured and added to the edges' metrics.
+_METRICS_MEMO: OrderedDict[str, dict[str, Any]] = OrderedDict()
+_METRICS_MEMO_SIZE = 256
+_METRICS_LOCK = threading.Lock()
+
+
+def component_metrics(shape, *, brep: str | None = None, edge_boxes: bool = False) -> dict[str, list[dict[str, Any]]]:
+    """Each face's ``area``, ``center`` and tight ``bbox`` and each edge's ``length`` and
+    ``center`` -- and, with ``edge_boxes``, each edge's tight ``bbox`` -- of the unlocated
+    component ``shape``, in ``TopExp.MapShapes_s`` order; a key a measurement failed is
+    absent. The geometric identity reads the faces and the edges' integrals; the selector
+    table reads everything. ``brep``, the component's BREP object hash, keys the process
+    memo: the measurements an earlier caller took of the same component are returned, the
+    edges' boxes are added to them the first time a caller asks (so a component only ever
+    fingerprinted is never boxed edge by edge), and None measures without the memo."""
+    remembered = _remembered(brep)
+    if remembered is None:
+        face_map, edge_map = _element_maps(shape)
+        remembered = {
+            "faces": [_face_metrics(TopoDS.Face_s(face_map.FindKey(i))) for i in range(1, face_map.Extent() + 1)],
+            "edges": [_edge_integrals(TopoDS.Edge_s(edge_map.FindKey(i))) for i in range(1, edge_map.Extent() + 1)],
+            "edgeBoxes": False,
+        }
+        _remember(brep, remembered)
+    if edge_boxes and not remembered["edgeBoxes"]:
+        _, edge_map = _element_maps(shape)
+        for ordinal, metrics in enumerate(remembered["edges"], start=1):
+            box = _bnd_box(TopoDS.Edge_s(edge_map.FindKey(ordinal)))
+            if box is not None:
+                metrics["bbox"] = box
+        remembered["edgeBoxes"] = True
+    return {"faces": remembered["faces"], "edges": remembered["edges"]}
+
+
+def _remembered(brep: str | None) -> dict[str, Any] | None:
+    if brep is None:
+        return None
+    with _METRICS_LOCK:
+        remembered = _METRICS_MEMO.get(brep)
+        if remembered is not None:
+            _METRICS_MEMO.move_to_end(brep)
+        return remembered
+
+
+def _remember(brep: str | None, metrics: dict[str, Any]) -> None:
+    if brep is None:
+        return
+    with _METRICS_LOCK:
+        _METRICS_MEMO[brep] = metrics
+        _METRICS_MEMO.move_to_end(brep)
+        while len(_METRICS_MEMO) > _METRICS_MEMO_SIZE:
+            _METRICS_MEMO.popitem(last=False)
+
+
+def _element_maps(shape) -> tuple[TopTools_IndexedMapOfShape, TopTools_IndexedMapOfShape]:
+    face_map = TopTools_IndexedMapOfShape()
+    edge_map = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(shape, TopAbs_FACE, face_map)
+    TopExp.MapShapes_s(shape, TopAbs_EDGE, edge_map)
+    return face_map, edge_map
+
+
 def _face_metrics(face) -> dict[str, Any]:
     metrics: dict[str, Any] = {}
     try:
@@ -131,7 +201,7 @@ def _face_metrics(face) -> dict[str, Any]:
     return metrics
 
 
-def _edge_metrics(edge) -> dict[str, Any]:
+def _edge_integrals(edge) -> dict[str, Any]:
     metrics: dict[str, Any] = {}
     try:
         props = GProp_GProps()
@@ -141,9 +211,6 @@ def _edge_metrics(edge) -> dict[str, Any]:
         metrics["center"] = [center.X(), center.Y(), center.Z()]
     except Exception:
         pass
-    box = _bnd_box(edge)
-    if box is not None:
-        metrics["bbox"] = box
     return metrics
 
 
@@ -207,10 +274,12 @@ def _edge_classification(edge, faces: list) -> dict[str, Any]:
     return result
 
 
-def extract_topology_facts(shape) -> dict[str, Any]:
+def extract_topology_facts(shape, *, brep: str | None = None) -> dict[str, Any]:
     """The topology facts of one unlocated component shape (a ``TopoDS_Shape``):
     ``{"shapes": [...], "faces": [...], "edges": [...]}``, each a table in
-    ordinal order, holding exactly what the selector table reads.
+    ordinal order, holding exactly what the selector table reads. ``brep``, the
+    component's BREP object hash when the caller has it, lets the exact metrics be
+    the ones this process already measured (:func:`component_metrics`).
 
     Geometry only: the part-level colour and the intrinsic face colours ride the
     tree, so two occurrences of one part in different colours share one
@@ -218,6 +287,7 @@ def extract_topology_facts(shape) -> dict[str, Any]:
     # The identity the scene loader joins ordinals by.
     from cadgen._internal.step_scene_loader import _shape_hash
 
+    metrics = component_metrics(shape, brep=brep, edge_boxes=True)
     face_map = TopTools_IndexedMapOfShape()
     edge_map = TopTools_IndexedMapOfShape()
     TopExp.MapShapes_s(shape, TopAbs_FACE, face_map)
@@ -281,7 +351,7 @@ def extract_topology_facts(shape) -> dict[str, Any]:
             # _enum_name_geomabs spells them), with EXACT metrics from
             # GProps/BndLib -- reading, not meshing.
             "surfaceType": _enum_name_geomabs(kind),
-            **_face_metrics(face),
+            **metrics["faces"][ordinal - 1],
         }
         if kind == GeomAbs_SurfaceType.GeomAbs_Plane:
             # The plane's normal, oriented as the face is.
@@ -354,7 +424,7 @@ def extract_topology_facts(shape) -> dict[str, Any]:
             "adjacentFaceCount": len(unique_faces),
             "curveType": _enum_name_geomabs(curve_kind),
             "faceOrds": deduped_ords,
-            **_edge_metrics(edge),
+            **metrics["edges"][ordinal - 1],
         }
         params = _selector_curve_params(curve_adaptor)
         if params:

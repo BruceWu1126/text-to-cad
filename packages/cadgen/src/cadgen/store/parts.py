@@ -21,8 +21,11 @@ table's counts. One probe answers whether a part's display data is stored.
 Derivation extracts the component's topology facts in memory (an eager-only component's
 are the object its tree pins), builds the selector table from them, meshes the component
 from the table and its face colours, writes the two objects and then the record, so a
-record always names complete objects. Nothing stores the facts. A mesh export at another
-tolerance meshes from the stored table the same way and stores nothing (``mesh_at``).
+record always names complete objects. Nothing stores the facts. The table's ordinals are
+the derived decode's: the part of a body and its read-back is one, its stored table lists
+the elements of whichever derived it. A mesh export at another tolerance therefore builds
+the table for the bytes it decodes, the same way, and stores nothing (``mesh_at``): its
+mesh is the decode's and the tolerance's, whichever body derived the part (README law 5).
 """
 from __future__ import annotations
 
@@ -403,7 +406,19 @@ def _topology(entry: dict, topods: Any) -> dict:
         return read_topology_facts(read_verified_object(entry["topology"]))
     from cadgen._internal.topology_extract import extract_topology_facts
 
-    return extract_topology_facts(topods)
+    return extract_topology_facts(topods, brep=entry["brep"])
+
+
+def _table(entry: dict, topods: Any) -> dict:
+    """The component's selector table, built for this decode: its facts and its geometric
+    identity, whose element tokens are minted from the decode (for a native component the
+    tokens the build's entry names: one geometry, one scheme) and whose ordinals are the
+    decode's own. The faces and edges are measured once per component per process, for
+    the facts and the identity together (``topology_extract.component_metrics``)."""
+    from cadgen._internal.geometry_fingerprint import geometry_identity
+    from cadgen._internal.selector_table import build_selector_table
+
+    return build_selector_table(topods, _topology(entry, topods), geometry_identity(topods, brep=entry["brep"]))
 
 
 def _derive(entry: dict, key: str, keep_going: Callable[[], bool] | None = None) -> dict | None:
@@ -414,15 +429,13 @@ def _derive(entry: dict, key: str, keep_going: Callable[[], bool] | None = None)
         return prior
     if keep_going is not None and not keep_going():
         return None
-    from cadgen._internal.selector_table import build_selector_table, selector_table_bytes
+    from cadgen._internal.selector_table import selector_table_bytes
     from cadgen._internal.tessellate import mesh_component
     from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
     with _meshing():
         topods, colors = _decoded(entry)
-        # The table's element tokens are minted from this decode of the component: for a native
-        # component they are the tokens the build's entry names (one geometry, one scheme).
-        table = build_selector_table(topods, _topology(entry, topods))
+        table = _table(entry, topods)
         glb = mesh_component(topods, table, colors, part=key, chord=DISPLAY_TESSELLATION["chordTolerance"],
                              angle=DISPLAY_TESSELLATION["angleTolerance"])
         return _write(key, glb, selector_table_bytes(table))
@@ -432,17 +445,17 @@ def mesh_at(entry: dict, key: str, chord: float, angle: float) -> bytes:
     """The GLB body of the part ``key`` names, at ``chord``/``angle``, meshed in this process
     and stored nowhere: a mesh export at a tolerance other than the display one
     (``_internal/mesh_export.py``), whose file is the output. ``entry`` is the component's
-    tree entry. The mesher reads what the display mesh's read -- the part's stored
-    selector table and the component's face colours -- so nothing is extracted."""
-    from cadgen._internal.selector_table import read_selector_table
-    from cadgen._internal.tessellate import MeshProductionError, mesh_component
+    tree entry. The mesher reads what the display mesh's read -- a selector table and the
+    component's face colours -- with the table built here for the bytes it decodes, as a
+    derivation builds it: the stored table may be another decode's of the same part (the
+    body a build held, where this is its read-back: law 20), listing the elements in
+    another order, and a mesh of these bytes at this tolerance is the same whichever body
+    derived the part (law 5)."""
+    from cadgen._internal.tessellate import mesh_component
 
-    payload = read(key, "selectors")
-    if payload is None:
-        raise MeshProductionError(f"part {key} has no stored selector table")
     with _meshing():
         topods, colors = _decoded(entry)
-        return mesh_component(topods, read_selector_table(payload), colors, part=key, chord=chord, angle=angle)
+        return mesh_component(topods, _table(entry, topods), colors, part=key, chord=chord, angle=angle)
 
 
 def _captured(tree_hash: str, producer: dict | None) -> tuple[dict, dict]:
@@ -502,22 +515,44 @@ def all_stored(tree_hash: str, producer: dict) -> bool:
     return all(probe(_part_key(entry, key)) is not None for entry in descriptor["components"].values())
 
 
+def part_keys(tree_hash: str, *, producer: dict | None = None) -> tuple[dict[str, str], dict]:
+    """The part key of every component of ``tree_hash`` (links expanded) under ``producer``
+    (this runtime's when None), ``{cid: key}``, with the producer selected: what a build
+    announces for its preview revision (STORE.md §9b). No kernel import."""
+    descriptor, selected = _captured(tree_hash, producer)
+    key = producer_key(selected)
+    return {cid: _part_key(entry, key) for cid, entry in descriptor["components"].items()}, selected
+
+
+def stored_keys(keys: dict[str, str]) -> dict[str, str]:
+    """The entries of ``keys`` whose part the store holds: one probe each, no kernel."""
+    return {cid: key for cid, key in keys.items() if probe(key) is not None}
+
+
 def ensure_display(tree_hash: str, *, producer: dict | None = None,
-                   progress: Callable[[int, int], None] | None = None) -> list[str]:
+                   progress: Callable[[int, int], None] | None = None,
+                   cids: list[str] | None = None,
+                   on_derived: Callable[[str, str], None] | None = None) -> list[str]:
     """Derive in this process the display data of every part of ``tree_hash`` the store
     lacks, and return a line for each part that could not be derived, naming the
-    occurrences that place it and the error. A build does this before it reports done
-    (``_internal/generation.py``), so a view of what it built only reads.
+    occurrences that place it and the error. A build does this as soon as its result
+    exists (``_internal/generation.py``), so a view of what it built only reads.
 
     Which parts are missing is asked of the store alone (``probe``): a tree whose
     display data is all stored imports no kernel. ``producer`` is the one a view of the
-    tree selects (its document's), this runtime's when None. ``progress(done, total)``
-    hears how many of the missing parts are done, before each one and at the end."""
+    tree selects (its document's), this runtime's when None. ``cids`` restricts the work
+    to those components (a parent's own: a child's job derives the child's), every
+    component when None. ``progress(done, total)`` hears how many of the missing parts
+    are done, before each one and at the end; ``on_derived(cid, key)`` hears each part
+    the moment it is stored."""
     descriptor, producer = _captured(tree_hash, producer)
     components = descriptor["components"]
     key = producer_key(producer)
-    keys = {cid: _part_key(entry, key) for cid, entry in components.items()}
-    missing = [cid for cid in components if probe(keys[cid]) is None]
+    wanted = list(components) if cids is None else list(dict.fromkeys(cids))
+    if any(cid not in components for cid in wanted):
+        raise ValueError("display request names an unpinned component")
+    keys = {cid: _part_key(components[cid], key) for cid in wanted}
+    missing = [cid for cid in wanted if probe(keys[cid]) is None]
     if not missing:
         return []
     if producer != producer_identity():
@@ -530,6 +565,9 @@ def ensure_display(tree_hash: str, *, producer: dict | None = None,
             _derive(components[cid], keys[cid])
         except Exception as error:  # noqa: BLE001 - one part's failure is reported, the rest derive
             failures.append((cid, f"{type(error).__name__}: {error}"))
+            continue
+        if on_derived is not None:
+            on_derived(cid, keys[cid])
     if progress is not None:
         progress(len(missing), len(missing))
     if not failures:

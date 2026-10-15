@@ -226,10 +226,14 @@ class KinematicsBuildTests(unittest.TestCase):
         finally:
             executors.set_event_sink(None)
 
-        self.assertEqual(resolve_call.call_count, 1)
-        (preview,) = [event["preview"] for event in events if "preview" in event]
+        self.assertEqual(resolve_call.call_count, 1, "resolved once, for the preview and the sidecar alike")
+        previews = [event["preview"] for event in events if "preview" in event]
+        (annotations,) = [event["annotations"] for event in events if "annotations" in event]
         (saved,) = [event["saved"] for event in events if "saved" in event]
-        self.assertEqual(set(preview), {"output", "tree"})
+        # A status names objects: the preview its tree and parts, the annotations one object.
+        self.assertTrue(previews)
+        self.assertTrue(all(set(preview) == {"output", "tree", "producer", "parts", "complete"} for preview in previews))
+        self.assertEqual(set(annotations), {"output", "tree", "object"})
         self.assertEqual(set(saved), {"output", "tree", "documentHash"})
         self.assertEqual(self._sidecar(script)["kinematics"]["mates"][0]["parentId"],
                          leaf_id(self._descriptor(script), "base"))

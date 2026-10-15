@@ -116,33 +116,17 @@ def _enum(value: Any, prefix: str) -> str:
     return _TYPE_CLASSES.get(name, name)
 
 
-def _tight_box(shape: Any) -> tuple[float, ...] | None:
-    """A face's (or a body's) tight box, six numbers; None when it bounds nothing.
-    ``BRepBndLib::AddOptimal`` with no triangulation: meshing here would mutate
-    the shared TShape."""
-    from OCP.Bnd import Bnd_Box
-    from OCP.BRepBndLib import BRepBndLib
-
-    box = Bnd_Box()
-    try:
-        BRepBndLib.AddOptimal_s(shape, box, False, False)
-    except Exception:  # noqa: BLE001 - the loose box bounds what the tight one cannot
-        box = Bnd_Box()
-        BRepBndLib.Add_s(shape, box, False)
-    if box.IsVoid():
-        return None
-    return tuple(float(value) for value in box.Get())
-
-
-def _face_facts(face: Any) -> dict[str, Any]:
+def _face_facts(face: Any, metrics: dict[str, Any]) -> dict[str, Any]:
+    """The face's signature material: its surface class, its tight box and area as
+    ``topology_extract.component_metrics`` measured them (the one measurement the
+    selector table reads too), and its normal at its parametric middle."""
     from OCP.BRepAdaptor import BRepAdaptor_Surface
-    from OCP.BRepGProp import BRepGProp, BRepGProp_Face
+    from OCP.BRepGProp import BRepGProp_Face
     from OCP.BRepTools import BRepTools
-    from OCP.GProp import GProp_GProps
     from OCP.gp import gp_Pnt, gp_Vec
 
-    props = GProp_GProps()
-    BRepGProp.SurfaceProperties_s(face, props)
+    if "area" not in metrics:
+        raise ValueError("a face of the component has no measurable area")
     normal = [0, 0, 0]
     try:
         umin, umax, vmin, vmax = BRepTools.UVBounds_s(face)
@@ -153,36 +137,49 @@ def _face_facts(face: Any) -> dict[str, Any]:
             normal = [int(round(_NORMAL_STEPS * c / length)) for c in (vector.X(), vector.Y(), vector.Z())]
     except Exception:  # noqa: BLE001 - a face whose normal cannot be read is named without one
         normal = [0, 0, 0]
+    box = metrics.get("bbox")
     return {
         "type": _enum(BRepAdaptor_Surface(face, False).GetType(), "GeomAbs_"),
-        "box": _tight_box(face),
+        "box": tuple(float(value) for value in box) if box is not None else None,
         "normal": normal,
-        "area": float(props.Mass()),
+        "area": float(metrics["area"]),
     }
 
 
-def _edge_facts(edge: Any) -> dict[str, Any]:
+def _edge_facts(edge: Any, metrics: dict[str, Any]) -> dict[str, Any]:
+    """The edge's signature material: its curve class, its end points, and its centre
+    and length as ``topology_extract.component_metrics`` measured them."""
     from OCP.BRep import BRep_Tool
     from OCP.BRepAdaptor import BRepAdaptor_Curve
-    from OCP.BRepGProp import BRepGProp
-    from OCP.GProp import GProp_GProps
-    from OCP.TopExp import TopExp
 
     degenerate = BRep_Tool.Degenerated_s(edge)
-    first = BRep_Tool.Pnt_s(TopExp.FirstVertex_s(edge, True))
-    last = BRep_Tool.Pnt_s(TopExp.LastVertex_s(edge, True))
+    first, last = _edge_ends(edge)
     if degenerate:
-        centre, length = first, 0.0
+        centre, length = (first.X(), first.Y(), first.Z()), 0.0
     else:
-        props = GProp_GProps()
-        BRepGProp.LinearProperties_s(edge, props)
-        centre, length = props.CentreOfMass(), float(props.Mass())
+        if "length" not in metrics:
+            raise ValueError("an edge of the component has no measurable length")
+        centre, length = tuple(float(value) for value in metrics["center"]), float(metrics["length"])
     return {
         "type": "degenerate" if degenerate else _enum(BRepAdaptor_Curve(edge).GetType(), "GeomAbs_"),
         "ends": sorted([(first.X(), first.Y(), first.Z()), (last.X(), last.Y(), last.Z())]),
-        "centre": (centre.X(), centre.Y(), centre.Z()),
+        "centre": centre,
         "length": length,
     }
+
+
+def _edge_ends(edge: Any) -> tuple[Any, Any]:
+    """The edge's end points: its vertices', or, for an edge the kernel built without
+    vertices (a closed edge of a loft or sweep), the ends of its curve."""
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepAdaptor import BRepAdaptor_Curve
+    from OCP.TopExp import TopExp
+
+    first, last = TopExp.FirstVertex_s(edge, True), TopExp.LastVertex_s(edge, True)
+    if not first.IsNull() and not last.IsNull():
+        return BRep_Tool.Pnt_s(first), BRep_Tool.Pnt_s(last)
+    curve = BRepAdaptor_Curve(edge)
+    return curve.Value(curve.FirstParameter()), curve.Value(curve.LastParameter())
 
 
 def _point(point: tuple[float, ...], quantum: float) -> list[int]:
@@ -247,18 +244,26 @@ def _extent(face_boxes: list[tuple[float, ...] | None], points: list[tuple[float
     return math.sqrt(sum((high[axis] - low[axis]) ** 2 for axis in range(3)))
 
 
-def geometry_identity(shape: Any) -> dict[str, Any]:
+def geometry_identity(shape: Any, *, brep: str | None = None) -> dict[str, Any]:
     """The fingerprint and every element token of one unlocated component
     shape (a ``TopoDS_Shape``), computed together: ``{"fingerprint": str,
     "faces": [token per face ordinal], "edges": [...], "vertices": [...]}``,
     the lists in ``TopExp.MapShapes_s`` order so a caller joins them to the
-    topology facts and the mesh by ordinal."""
+    topology facts and the mesh by ordinal. ``brep``, the component's BREP object
+    hash when the caller has it, lets the faces' and edges' exact metrics be the
+    ones this process measures for its selector table
+    (``topology_extract.component_metrics``), once."""
     from OCP.BRep import BRep_Tool
     from OCP.TopoDS import TopoDS
 
+    from cadgen._internal.topology_extract import component_metrics
+
+    metrics = component_metrics(shape, brep=brep)
     faces, edges, vertices = _maps(shape)
-    face_facts = [_face_facts(TopoDS.Face_s(faces.FindKey(i))) for i in range(1, faces.Extent() + 1)]
-    edge_facts = [_edge_facts(TopoDS.Edge_s(edges.FindKey(i))) for i in range(1, edges.Extent() + 1)]
+    face_facts = [_face_facts(TopoDS.Face_s(faces.FindKey(i)), metrics["faces"][i - 1])
+                  for i in range(1, faces.Extent() + 1)]
+    edge_facts = [_edge_facts(TopoDS.Edge_s(edges.FindKey(i)), metrics["edges"][i - 1])
+                  for i in range(1, edges.Extent() + 1)]
     points = []
     for i in range(1, vertices.Extent() + 1):
         point = BRep_Tool.Pnt_s(TopoDS.Vertex_s(vertices.FindKey(i)))
