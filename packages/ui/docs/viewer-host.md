@@ -265,7 +265,9 @@ viewport is mounted. `readState()` returns a detached serializable snapshot of
 the actual resource/revision, current selections, camera, display and render
 mode. It reads the viewport camera directly, with its last camera snapshot as
 an unmount fallback. During a rebuild that retains a predecessor mesh, its
-displayed document revision remains in the snapshot until replacement. Apps
+displayed document revision remains in the snapshot until replacement, and while
+the picture is a build's preview revision the snapshot keeps the saved file's
+revision and says `preview: true` (a preview is never presented as the file). Apps
 own the binding registry and any IPC/tool transport;
 shared UI does not infer view state from a backend catalog or stored tab state.
 

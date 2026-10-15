@@ -166,23 +166,47 @@ requests for one file revision union rather than supersede: a batch in flight
 finishes, and one no longer wanted is simply not published.
 
 **The preview, then the save.** As soon as the build's body has returned and its
-parts are derived, the feed names the **preview revision** -- the result tree and
-the part key of each of its components, cadgen's `STORE.md` §9b -- and the viewport
-draws it in place of the previous model, labelled as a preview of the build in
-progress. Its parts are the saved file's own (a part is named by its geometry, §1),
-so when the build writes the file the saved revision replaces the preview in place
-with nothing fetched twice, and the label goes. The sidecar-driven features work on
-a preview as on a saved file: the feed names the preview's annotations -- the
-articulation, finishes and keyframes the build resolved against the preview's tree,
-the data the sidecar will carry, keyed by the same tokens -- a moment after its
-geometry, and Position, materials and routines bind to them exactly as they bind to
-a saved file's; until they arrive the pose follows [Position's rule](cad-renderer.md#position)
-for a replacement, and when the save lands nothing on screen moves. A preview is
-never presented as the file: no sidecar binds to it, snapshots and exports read the
+parts are derived, the feed names the **preview revision** -- the result tree, the
+part key of each of its components the store holds so far, and whether that is all
+of them, cadgen's `STORE.md` §9b -- and the viewport draws it in place of the previous
+model, labelled **Preview** where the update status sits (`ViewPreviewLabel`,
+`load.currentPreview`): the wait for that build is over, though its write is not. The
+preview is an entry read exactly as a saved file's catalog row is
+(`workbench/previewRevision.js`, `hooks/usePreviewRevision.js`): its tree's view at
+the client's `storeTreeUrl`, with the producer the feed named, and its parts by key --
+so every component whose part is already drawn keeps its mesh and its row, whatever
+its id in the new tree (`packageComponentReuse.js`), and a part the build has not
+derived yet is waited for, never asked of cadgen, with what is named drawn meanwhile
+(`createPreviewPartsGate`, the loader's `publishPending`). A build that could not name
+its parts (no producer) has its view key them as for a saved file. The sidecar-driven
+features work on a preview as on a saved file: the feed names the preview's
+annotations -- the articulation, finishes and keyframes the build resolved against
+the preview's tree, the data the sidecar will carry, keyed by the same tokens -- a
+moment after its geometry, read with `previewAnnotations` and bound only when
+resolved against the preview's tree. Position and the routines bind to them the moment
+they are read; the finishes once the preview's geometry is on screen whole, since a
+change of finishes reloads the composition. Until its own arrive, what the saved file
+on screen had stays in hand by the tokens the two share, [Position's rule](cad-renderer.md#position)
+for a replacement. A routine that bends a tube plays on a preview only as the one in
+hand, with the saved document's skins; changed, it waits for the save. When the build
+writes the file, the catalog names the saved revision -- a revision past the one the
+build began over, which the feed does not call superseded -- and it replaces the
+preview in place with nothing fetched twice (the parts are the preview's, by key; a
+routine is keyed by its keyframes, so a playing one is neither stopped nor rewound),
+the label goes, and nothing on screen moves: no selection, measurement, ink or pose
+is cleared by a preview replaced by its own save, since the tokens are the same, where
+any other change of tree clears what a revision clears today. A preview is never
+presented as the file: no sidecar binds to it, the prompt resource and the live state
+keep the saved file's revision (and say `preview`), snapshots and exports read the
 saved file alone, and selection, measurements and reference copying resolve against
 it as against any revision, by token. Before the preview exists the model on screen
-says it is updating, and a failed build leaves what is on screen -- the labelled
-preview, or the previous model -- under its alert.
+says it is updating. A failed build leaves what is on screen -- the labelled preview,
+or the previous model -- under its alert, whose card says the preview is what is
+shown; the preview goes when the file moves past the build (`superseded`), when the
+daemon no longer lists it, or when a newer build names its own, and a build first
+seen already done is the file on disk, never its preview. A save that lands while
+the preview's own geometry is still loading cancels that load as any revision's
+does, and probes the store for its parts again (their bodies are in hand).
 
 **What the viewport shows.** The navbar carries no status. Opening and
 updating are the viewport's loading overlay (`ViewerLoadingOverlay`). A failure is

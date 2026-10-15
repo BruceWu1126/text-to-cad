@@ -155,7 +155,7 @@ calls one hook; the shell owns the rest.
 | `fileView.js` | The file's view `{ version, camera, display, playback, renderer }`, read forgivingly and written exactly: the camera (restored in place of the open-time fit; null fits), the Display settings, preview's settings, Orbit's and the playbar's (`tools/playbar/playbackPreferences.js`), and the renderer's own slices, each `{ signature, value }` and restored only under the signature the renderer declares now (`readFileView(raw, signatures)`); the camera, the display and the playback are always kept. The host keys it `[file path, renderer id]` in the tab store, which keeps it for the file on screen alone. Not in it: the tool in hand, a selection, measurements, ink, preview, a routine's time — every open starts those afresh. |
 | `liveBinding.ts` | `attachLiveBinding`: the live command surface. Base commands (`readState`, `setCamera`, `resetCamera`, `setDisplaySettings`, `setRenderMode`, `capture`) mean the same for every renderer; a renderer ADDS commands by name and DECLINES the known host commands (`HOST_LIVE_COMMANDS`) that make no sense for it with the sentence the caller reads. Binding fails when a renderer does neither. |
 | `promptContext.js` | `createViewPromptContext` (a snapshot and what it depicts) and `promptDeliveryError`. A renderer with a reference vocabulary of its own passes `promptContext` instead, and may then return that vocabulary from `promptReferences`. |
-| `loadReport.js` | `shellLoadReport`: what the shell asks the status kit about one document load, as one pure function, and all it returns is the loading presentation over the viewport. A renderer whose document is a plain download passes `load` and nothing more. One whose document can be EDITED or PREVIEWED while it is open knows more than the shell can: `load.editPending` (queued work of the person's own, with nothing of it on screen), `load.currentPreview` (that work IS what is drawn, so the wait is over even though the write is not) and `load.finding` (the file is not even located yet). An alert is `load.alert`, which the frame draws as the alert card (`ViewerAlertCard`: every alert; one the model survives, a warning beside it included, can be dismissed). |
+| `loadReport.js` | `shellLoadReport`: what the shell asks the status kit about one document load, as one pure function, and all it returns is the loading presentation over the viewport. A renderer whose document is a plain download passes `load` and nothing more. One whose document can be EDITED or PREVIEWED while it is open knows more than the shell can: `load.editPending` (queued work of the person's own, with nothing of it on screen), `load.currentPreview` (that work's own preview revision IS what is drawn, so the wait is over even though the write is not, and the status row carries the **Preview** label, `ViewPreviewLabel`, for as long as it is) and `load.finding` (the file is not even located yet). An alert is `load.alert`, which the frame draws as the alert card (`ViewerAlertCard`: every alert; one the model survives, a warning beside it included, can be dismissed). |
 | `useViewerShortcuts.js` | Which mounted viewer an Escape or a ⌘C / Ctrl+C belongs to (focus inside it, or the page after a press inside it); the renderer says what Escape means, and a copy is the active tool's (Draw's drawing, else the selection's references, `copySelection`). The order is [the design system's](settings-ui.md#keyboard). |
 | `viewportLayout.js` | The corners' geometry: the cube's size and inset (bottom-left, 8px off the bottom so its axes stay inside the view), the tool stack's bottom (`VIEWPORT_STACK_BOTTOM`: an inset above the cube), and the bottom-centre line (`VIEWPORT_BOTTOM_CENTER`, which a host's floating composer moves with `--cad-viewport-bottom-center`). |
 | `ViewportContextMenu.jsx` | The viewport's menu on a secondary TAP (a secondary drag pans; primary and secondary together is the pan chord). The gesture, the anchor, the clamping and the dismissal are the shell's; the ITEMS are the renderer's (`contextMenuItems(press)`), asked at the moment of the press, and `onContextMenuOpenChange(open)` says while the menu is up. A renderer that passes no items has no viewport menu at all — every renderer but STEP. |
@@ -1171,7 +1171,10 @@ A rebuild keeps Position the tool, its new articulation in hand in the render it
 arrives in (`workbench/useStepMotion.js`), and keeps the values, and the named pose they were
 chosen as, when the new articulation's controls and named poses are the ones in hand
 (`stepPoseLogic`, `workbench/motionRestore.js`); when they changed, the pose starts at the
-new defaults — the old values are never fitted onto other joints. A robot's new revision
+new defaults — the old values are never fitted onto other joints. A build's preview revision
+([loading](loading.md#5-following-an-active-build)) is such a replacement twice over: until its
+own annotations arrive, the articulation in hand drives it by the tokens the two share, and its
+save, which carries the same articulation under the same tokens, keeps the pose. A robot's new revision
 follows the same rule over its driven joints and named poses (`poseLogic`,
 `robot/poseStore.js`). Position goes only when the articulation has nothing left to move. Reset
 explicitly restores STEP defaults or the robot opening pose (including SRDF `home`).
@@ -1306,7 +1309,8 @@ routine from the start. Preview's routine is its own: `setPreviewing` (`useRende
 saves the tools view's (`savePlayback`: the routine, its time, whether it plays) and releases
 it on the way in, and on the way out releases preview's and hands the saved one back
 (`restorePlayback`), so the Animation tool finds its routine where it was. An update of the model that leaves its routines as they were (the
-same `animationHash`) neither stops nor rewinds one that is playing: `useStepMotion` loads
+same keyframes: a routine is keyed by a digest of them, `workbench/canonicalJson.js`, so a build's
+preview and the file it saves are one routine) neither stops nor rewinds one that is playing: `useStepMotion` loads
 the routines' keyframes per `animationKey`, never per catalog entry, and only a changed routine
 is loaded again, at rest (a routine that bends a tube is keyed by its `tubeSkinsUrl` too,
 which names the document's bytes: the skins are bound to its meshes) — released, behind the routines in hand, which stay listed until the
@@ -1573,8 +1577,10 @@ The shared loading star and desktop wordmark/icon use blue branding.
 The Model tree keeps the STEP's assemblies and parts, contextual dimensions, selection
 filters and prompt-reference actions. It does not inspect model source.
 Schema-10 annotations embed appearance, animation and kinematics; the content
-hash must match the saved artifact before those annotations apply. Active build
-previews carry immutable geometry revisions and never initiate a source build.
+hash must match the saved artifact before those annotations apply. A build's preview
+revision carries immutable artifact-side geometry, labelled Preview, and never
+initiates a source build; the live state says `preview` while it is drawn, under the
+saved file's revision ([loading](loading.md#5-following-an-active-build)).
 A complete previous revision stays visible until its replacement is ready.
 
 Display's mode control selects Solid, Render, X-ray, Hidden line or

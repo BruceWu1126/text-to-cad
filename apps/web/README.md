@@ -262,7 +262,9 @@ Render and loading playbooks.
 Large assemblies load progressively, every part at cadgen's one display mesh,
 within memory budgets. Stored meshes render before selector tables are read. The
 viewport carries opening/update status, centred at its top (a progress icon on
-mobile); initial loading may also use the viewport overlay, and an error is a card over the viewport whose Details keep the complete
+mobile), and the Preview label there while a build's preview revision is on screen
+(the shared [loading](../../packages/ui/docs/loading.md#5-following-an-active-build)
+playbook); initial loading may also use the viewport overlay, and an error is a card over the viewport whose Details keep the complete
 compiler output, whose Retry reloads only that file and whose Report Issue opens a
 new issue titled "Issue: ", labelled `bug`, filled in from the card. A failed update the
 model survives can be dismissed, leaving the previous version to inspect.

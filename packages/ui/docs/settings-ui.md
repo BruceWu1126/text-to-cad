@@ -143,6 +143,9 @@ none.
   in the same 34px row as the top-left toolbar in every host.
   It is renderer chrome: the navbar carries no status.
   On mobile it is a tappable progress icon whose popover names what is loading.
+  The same row carries the **Preview** label while the model on screen is a
+  build's preview revision ([loading](loading.md#5-following-an-active-build)),
+  before the status when both apply, and on every host alike.
 
 ## Tools and lifecycle
 
