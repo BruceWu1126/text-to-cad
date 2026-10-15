@@ -915,6 +915,7 @@ export class RadiosityLightmap {
     this._envHeight = 0;
     this._disposed = false;
     this._lateral = 1;
+    this._albedoWeight = 0;
     this._needsClear = true;
     this._envTable = null;
     this._envTableRT = null;
@@ -1145,7 +1146,7 @@ export class RadiosityLightmap {
       this._proxies.push(this._makeProxy(source));
     }
     if (floor) {
-      this._floorProxy = this._makeProxy(floor);
+      this._floorProxy = this._makeProxy(floor, true);
     }
     const u = this._gatherMaterial.uniforms;
     u.uUp.value.copy(this._up);
@@ -1237,7 +1238,9 @@ export class RadiosityLightmap {
       iu.uFrameSeed.value = this._frame;
       // The very first bounce has no radiosity yet: surfaces are black apart
       // from emission, so the first sample is pure direct (environment) light.
-      iu.uAlbedoWeight.value = this._frame === 1 ? 0 : this._bounce;
+      // (Per object: the floor always reflects, see `_makeProxy`.)
+      this._albedoWeight = this._frame === 1 ? 0 : this._bounce;
+      iu.uAlbedoWeight.value = this._albedoWeight;
       renderer.autoClear = false;
       renderer.setRenderTarget(this._illumination);
       renderer.setClearColor(0x000000, 0);
@@ -1551,7 +1554,15 @@ export class RadiosityLightmap {
     return material;
   }
 
-  _makeProxy(source) {
+  /**
+   * `alwaysReflects` (the floor): the surface hands its received light on
+   * whatever the bounce strength — a ground that receives the whole sky is
+   * the main indirect light on the model's lower sides and under-sides, and
+   * a black one would read as a shadow creeping up every wall. Rays that
+   * leave the rasterized area toward the ground already get the lit floor's
+   * radiance; this keeps the ones that hit it consistent with them.
+   */
+  _makeProxy(source, alwaysReflects = false) {
     const mesh = new THREE.Mesh(source.geometry, this._illumMaterial);
     mesh.frustumCulled = false;
     mesh.matrixAutoUpdate = false;
@@ -1568,6 +1579,7 @@ export class RadiosityLightmap {
       const u = this._illumMaterial.uniforms;
       u.uAlbedo.value.copy(proxy.albedo);
       u.uEmissive.value.copy(proxy.emissive);
+      u.uAlbedoWeight.value = alwaysReflects && this._frame > 1 ? Math.max(this._albedoWeight, 1) : this._albedoWeight;
       this._illumMaterial.uniformsNeedUpdate = true;
     };
     this._scene.add(mesh);
