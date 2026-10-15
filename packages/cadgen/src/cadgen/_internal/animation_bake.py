@@ -1059,7 +1059,8 @@ class _LeafBoxes:
             occurrence, box = self._occurrences.get(leaf), None
             if occurrence is not None:
                 with contextlib.suppress(Ineligible):
-                    found = composed_bounds([occurrence], self._components)
+                    # A box, not THE box: a pivot wants the leaf's centre and reach.
+                    found = composed_bounds([occurrence], self._components, exact=False)
                     box = (found["min"], found["max"])
             self._boxes[leaf] = box
         return self._boxes[leaf]

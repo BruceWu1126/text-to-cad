@@ -187,6 +187,7 @@ def build_tree_from_compound(
     return _publish_tree(
         walk, bbox_shape=compound, root_name=root_name, force=force, progress=progress,
         extra=extra, appearance=appearance, base_appearance=inherited_appearance,
+        authored_occurrence_bounds=True,
     )
 
 
@@ -597,6 +598,7 @@ def _publish_tree(
     repair_objects: bool = False,
     descriptor_bounds: bool = False,
     prepared_occurrence_bounds: bool = False,
+    authored_occurrence_bounds: bool = False,
     bbox_override: dict[str, list[float]] | None = None,
     appearance: dict[str, Any] | None = None,
     base_appearance: dict[str, Any] | None = None,
@@ -606,8 +608,10 @@ def _publish_tree(
     """Publish verified geometry inputs before any disposable display work.
 
     ``link_bounds`` answers an all-link result's bounds from its links
-    (:func:`_bbox_from_links`); ``prepare_bbox_shape`` stands in for
-    ``bbox_shape`` when the document a miss measures is prepared on demand."""
+    (:func:`_bbox_from_links`); ``authored_occurrence_bounds`` measures a source
+    result per leaf under the canonical key (:func:`_bbox_from_authored_occurrences`);
+    ``prepare_bbox_shape`` stands in for ``bbox_shape`` when the document a miss
+    measures is prepared on demand."""
     from cadgen._internal.component_package import _bbox_from_shape, validate_geometry_component
 
     occurrences, links = walk.occurrences, walk.links
@@ -678,6 +682,8 @@ def _publish_tree(
         bbox = _bbox_from_prepared_occurrences(walk)
     if bbox is None and link_bounds is not None and not force:
         bbox = link_bounds()
+    if bbox is None and authored_occurrence_bounds:
+        bbox = _bbox_from_authored_occurrences(walk, root_name=root_name)
     if bbox is None:
         bbox = _bbox_from_shape(bbox_shape if prepare_bbox_shape is None else prepare_bbox_shape())
     if bbox is not None:
@@ -703,8 +709,6 @@ def _publish_tree(
     }
     return tree_hash, tree, stats
 
-
-_PREPARED_OCCURRENCE_BOUNDS_ALGORITHM = "component_bbox.canonical_native_rotation.algorithm1"
 
 #: What :func:`_bbox_from_links` remembers per link: ``_leaf_bounds`` over the
 #: leaves the link places, measured in the parent's document. Change the merge
@@ -778,74 +782,80 @@ def _bbox_from_links(descriptor: dict[str, Any], links: list[dict[str, Any]]) ->
             "max": [max(box[axis] for box in boxes) for axis in (3, 4, 5)]}
 
 
+def _bbox_from_authored_occurrences(walk: _Walk, *, root_name: str) -> dict[str, list[float]] | None:
+    """The source result's bounds, measured per leaf under the canonical key: its own
+    occurrences through ``placed_prototype_bounds`` (the prototype the walk holds, placed by
+    the transform the tree records, as the document is assembled), its links' from the boxes
+    their children's publications remembered (``composed_bounds``). The canonical document
+    measures its own bytes the same way, so the box a composed reader finds for the result
+    -- the animation bake's leaf boxes, a preview's -- is the one it finds for the saved
+    file. None where a link's box is not remembered or a prototype is not in hand: the
+    whole-document measure stands in."""
+    from cadgen._internal.component_package import placed_prototype_bounds
+    from cadgen.store._compose_readback import Ineligible, composed_bounds
+    from cadgen.store.materialize import _location_from_matrix
+    from cadgen.store.trees import flatten_tree
+
+    try:
+        flattened = flatten_tree(walk.draft_tree(root_name=root_name))
+        components = flattened["components"]
+        boxes: list[dict[str, list[float]]] = []
+        for occurrence in flattened["occurrences"]:
+            cid = str(occurrence["component"])
+            prepared = walk.prepared.get(cid)
+            prototype = prepared.get("shape") if prepared is not None else None
+            if prototype is not None:
+                entry = components[cid]
+                box = placed_prototype_bounds(str(entry["codec"]), str(entry["brep"]), prototype,
+                                              _location_from_matrix(list(occurrence["transform"])))
+            else:
+                found = composed_bounds([occurrence], components)
+                box = {"min": list(found["min"]), "max": list(found["max"])}
+            if box is not None:
+                boxes.append(box)
+        if not boxes:
+            return None
+        return {
+            "min": [min(box["min"][axis] for box in boxes) for axis in range(3)],
+            "max": [max(box["max"][axis] for box in boxes) for axis in range(3)],
+        }
+    except (Ineligible, OSError, ValueError, TypeError, KeyError, RuntimeError):
+        return None
+
+
 def _bbox_from_prepared_occurrences(walk: _Walk) -> dict[str, list[float]] | None:
     """Exact canonical bounds without serializing every placed occurrence.
 
     ``_document_walk`` already owns one privately decoded shape per canonical
-    component and the exact native location of each parsed STEP occurrence.
-    Use the component's verified BREP identity, native-leaf ordinal and exact
-    leaf rotation as the ``cadgen.store.bounds`` key, measure that leaf tightly on a miss, and
-    apply only its removed final translation. No transformed local AABB is used.
+    component and the exact native location of each parsed STEP occurrence:
+    each is measured per leaf through ``placed_prototype_bounds``, which
+    remembers every leaf's box under the key a composed reader looks up
+    (``cadgen.store.bounds.PREPARED_OCCURRENCE_BOUNDS_ALGORITHM``), and only
+    its removed final translation is applied. No transformed local AABB is used.
 
     Any incomplete private input falls back to the ordinary composed-shape
     path in ``_publish_tree``. Store component and draft-structure validation
     have already run before this helper is called.
     """
     try:
-        from OCP.TopLoc import TopLoc_Location
-        from OCP.gp import gp_Vec
+        from cadgen._internal.component_package import placed_prototype_bounds
 
-        from cadgen._internal.component_package import _world_leaves, component_leaf_layout, optimal_box
-        from cadgen.store.bounds import cached_box, cached_leaf_layout
-
-        boxes: list[list[float]] = []
-        layouts_recorded: set[str] = set()
+        boxes: list[dict[str, list[float]]] = []
         for occurrence in walk.occurrences:
-            occurrence_id = str(occurrence["id"])
             cid = str(occurrence["component"])
             entry = walk.components[cid]
-            prepared = walk.prepared[cid]
-            prototype = prepared.get("shape")
-            location = walk.native_locations[occurrence_id]
+            prototype = walk.prepared[cid].get("shape")
+            location = walk.native_locations[str(occurrence["id"])]
             if prototype is None or location is None:
                 return None
-            if cid not in layouts_recorded:
-                # The leaf layout lets a parent composed from this document
-                # (``_compose_readback``) name these same box keys without
-                # decoding the prototype again.
-                cached_leaf_layout(str(entry["codec"]), str(entry["brep"]),
-                                   lambda prototype=prototype: component_leaf_layout(prototype.wrapped))
-                layouts_recorded.add(cid)
-
-            placed = prototype.wrapped.Located(location)
-            for leaf_ordinal, leaf in enumerate(_world_leaves(placed), start=1):
-                transform = leaf.Location().Transformation()
-                translation = tuple(float(value) for value in transform.TranslationPart().Coord())
-                transform.SetTranslationPart(gp_Vec(0.0, 0.0, 0.0))
-                linear = tuple(float(transform.Value(row, column))
-                               for row in range(1, 4) for column in range(1, 5))
-                untranslated = leaf.Located(TopLoc_Location(transform))
-
-                box = cached_box(
-                    _PREPARED_OCCURRENCE_BOUNDS_ALGORITHM,
-                    (str(entry["codec"]), str(entry["brep"]), leaf_ordinal,
-                     struct.pack("<12d", *linear)),
-                    lambda untranslated=untranslated: optimal_box(untranslated),
-                )
-                if box is not None:
-                    if (type(box) not in (list, tuple) or len(box) != 6 or
-                            any(type(value) not in (float, int) or not math.isfinite(value)
-                                for value in box)):
-                        return None
-                    boxes.append([
-                        float(value) + translation[index % 3]
-                        for index, value in enumerate(box)
-                    ])
+            box = placed_prototype_bounds(str(entry["codec"]), str(entry["brep"]), prototype, location)
+            if box is not None:
+                boxes.append(box)
         if not boxes:
             return None
         return {
-            "min": [min(box[axis] for box in boxes) for axis in range(3)],
-            "max": [max(box[axis] for box in boxes) for axis in range(3, 6)],
+            "min": [min(box["min"][axis] for box in boxes) for axis in range(3)],
+            "max": [max(box["max"][axis] for box in boxes) for axis in range(3)],
         }
     except Exception:  # noqa: BLE001 - ordinary native bounds remain the exact fallback
         return None
@@ -1218,6 +1228,7 @@ def build_tree_through_step(
             walk, bbox_shape=document, root_name=root_name,
             force=force, progress=progress, extra=extra,
             descriptor_bounds=snapshot is None,
+            authored_occurrence_bounds=True,
             bbox_override=captured_bbox if snapshot is not None else None,
             appearance=appearance,
             base_appearance=inherited_appearance,

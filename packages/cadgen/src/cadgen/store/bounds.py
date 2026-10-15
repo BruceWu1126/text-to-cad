@@ -37,7 +37,15 @@ _RAM_ENTRIES = 1 << 16
 _ram: OrderedDict[str, Any] = OrderedDict()
 _lock = threading.Lock()
 
-LEAF_LAYOUT_ALGORITHM = "component_leaf_layout.algorithm1"
+LEAF_LAYOUT_ALGORITHM = "component_leaf_layout.algorithm2"
+#: The box of one leaf of a placed component, measured untranslated under the leaf's own
+#: rotation: keyed by the component's codec and BREP object, the leaf's ordinal and that
+#: rotation, so the same body at the same rotation is measured once wherever it is translated
+#: to, by the source result and the canonical document alike
+#: (``component_package.placed_prototype_bounds``), and a composed reader
+#: (``_compose_readback.composed_bounds``) finds what the publication measured from the
+#: occurrence's transform and the leaf layout alone.
+PREPARED_OCCURRENCE_BOUNDS_ALGORITHM = "component_bbox.canonical_native_rotation.algorithm1"
 #: Names ``step_scene_mesh.prototype_topology``: change what it counts or how
 #: it measures the loose box, and change this name with it.
 TOPOLOGY_ALGORITHM = "component_topology.faces_edges_curved_loose_box.algorithm1"
@@ -57,9 +65,16 @@ def _is_box(value: Any) -> bool:
 
 
 def _is_leaf_layout(value: Any) -> bool:
-    return (type(value) is dict and set(value) == {"leaves", "placed"}
-            and type(value["leaves"]) is int and value["leaves"] >= 1
-            and type(value["placed"]) is bool)
+    if type(value) is not dict or set(value) != {"leaves", "inner"}:
+        return False
+    leaves, inner = value["leaves"], value["inner"]
+    if type(leaves) is not int or leaves < 1 or type(inner) is not list or len(inner) != leaves:
+        return False
+    try:
+        return all(type(row) is list and len(row) == 12
+                   and all(type(v) in (float, int) and math.isfinite(v) for v in row) for row in inner)
+    except OverflowError:
+        return False
 
 
 def _is_topology(value: Any) -> bool:
@@ -144,8 +159,9 @@ def remembered_box(algorithm: str, parts: tuple) -> tuple[bool, Any]:
 
 
 def cached_leaf_layout(codec: str, brep: str, measure: Callable[[], Any]) -> Any:
-    """A component's leaf layout, ``{"leaves": n, "placed": bool}``, remembered
-    by the encoded BREP it describes (its codec and object hash)."""
+    """A component's leaf layout, ``{"leaves": n, "inner": [...]}`` (``component_package.
+    component_leaf_layout``), remembered by the encoded BREP it describes (its codec and
+    object hash)."""
     return _remember(LEAF_LAYOUT_ALGORITHM, (str(codec), str(brep)), measure, _is_leaf_layout)
 
 

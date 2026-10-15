@@ -131,10 +131,12 @@ distribution); the value is six numbers, inline. A box is a pure function of
 that key, so a hit can never differ from a measurement, and an unknown kernel
 build just measures. Beside the boxes, keyed the same way by a component's
 codec and BREP object, it holds that component's **leaf layout** — how many
-leaves the encoded shape has and whether every one sits at the prototype's
-own placement — which canonical publication records as it measures those
-leaves, and which tree composition (§3) reads to name the exact per-leaf box
-keys without decoding the shape. For an all-link result past the bounded
+leaves the encoded shape has and where each sits inside it — which a
+publication records as it measures those leaves, and which tree composition
+(§3) and the animation bake read to name the per-leaf box keys without
+decoding the shape (composition takes only a leaf at the prototype's own
+placement, whose box is the remembered one shifted exactly; the bake, which
+wants a centre and a reach, composes the rest). For an all-link result past the bounded
 capture it holds each link's bounds (§6): the merge of the leaf boxes the link
 places, keyed by the child tree it links and its exact placement. Keyed like
 the leaf layout, it holds each component's **topology** — its face and edge
@@ -650,8 +652,8 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   an assembly, whose components are all native and whose every node is named
   by a name the label round trip keeps;
   every leaf box the canonical bounds path would take is already in
-  `index/bounds` from the child's publication, under a leaf layout (§2)
-  whose leaves all sit at the prototype's placement; and the writer emulation
+  `index/bounds` from the child's publication, under a leaf layout (§2); and
+  the writer emulation
   reproduces every translation in each child's own document from that
   child's descriptor. Anything else — a rotated or coloured link, a part
   child, a parent with geometry of its own, a child rebuilt since the parent
@@ -1409,11 +1411,15 @@ Decided mechanically from the returned geometry and occurrence metadata.
   arrays are never mutated.
 - Canonical saved-document publication already owns each verified component's
   encoded BREP and each parsed occurrence's exact native placement. Its tight
-  bounds key uses that BREP identity, codec and rotation in `index/bounds`,
-  then shifts the six native bounds by translation. A miss measures
-  every native leaf with the same optimal extrema operation; it never transforms
-  a component AABB. Incomplete private inputs fall back to the ordinary composed
-  native document, after the same component validation and closure checks.
+  bounds key uses that BREP identity, codec, the leaf's ordinal and the
+  leaf's rotation in `index/bounds`, then shifts the six native bounds by
+  the leaf's translation. A source result's own occurrences are measured the
+  same way, through the one function
+  (`component_package.placed_prototype_bounds`), so the animation bake's leaf
+  boxes find for the result what they find for the saved file. A miss measures every native leaf
+  with the same optimal extrema operation; it never transforms a component
+  AABB. Incomplete private inputs fall back to the ordinary composed native
+  document, after the same component validation and closure checks.
 - A bounded descriptor composed entirely of pinned links may instead measure
   exact component bounds from verified canonical BREP objects. `index/bounds`
   stores only six finite numbers, keyed by BREP digest, all 16

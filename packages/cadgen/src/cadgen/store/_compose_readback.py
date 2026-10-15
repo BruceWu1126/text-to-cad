@@ -287,21 +287,45 @@ def compose_document_tree(
     return tree
 
 
-def composed_bounds(occurrences: list[dict[str, Any]], components: Mapping[str, Mapping[str, Any]]) -> dict[str, list[float]]:
+_IDENTITY_PLACEMENT = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+
+
+def _composed_placement(occurrence: list, inner: list) -> tuple[tuple, tuple]:
+    """The placement of a leaf sitting at ``inner`` inside a prototype placed at
+    ``occurrence`` (16 numbers): its rotation's rows and its translation, as the kernel
+    composes them (rotation times the inner translation, plus the occurrence's)."""
+    rows = [(occurrence[0], occurrence[1], occurrence[2]), (occurrence[4], occurrence[5], occurrence[6]),
+            (occurrence[8], occurrence[9], occurrence[10])]
+    columns = [(inner[0], inner[4], inner[8]), (inner[1], inner[5], inner[9]), (inner[2], inner[6], inner[10])]
+    rotation = tuple(row[0] * column[0] + row[1] * column[1] + row[2] * column[2]
+                     for row in rows for column in columns)
+    offset = (inner[3], inner[7], inner[11])
+    translation = tuple(occurrence[3 + 4 * axis] + (row[0] * offset[0] + row[1] * offset[1] + row[2] * offset[2])
+                        for axis, row in enumerate(rows))
+    return rotation, translation
+
+
+def composed_bounds(occurrences: list[dict[str, Any]], components: Mapping[str, Mapping[str, Any]], *,
+                    exact: bool = True) -> dict[str, list[float]]:
     """The box canonical publication measures for these occurrences, from the
     per-leaf boxes it already remembered in ``index/bounds``.
 
     Each leaf's key is its component's codec and BREP object, its ordinal and
-    the placement's rotation; a leaf layout whose leaves all sit at the
-    prototype's placement makes that rotation the occurrence's own. A layout
-    the index does not hold is measured from the component's bytes and
-    remembered. A box it does not hold is :class:`Ineligible`: measuring one
-    here would place the prototype from serialized numbers, which can differ
-    from the native placement by ulps.
+    the leaf's rotation; the leaf layout says where the leaf sits inside its
+    prototype, and a leaf at the prototype's own placement makes that rotation
+    the occurrence's own and its box the remembered one shifted by the
+    occurrence's translation, exactly as the publication measured it. A leaf the
+    prototype places inside itself composes its placement with the occurrence's
+    here, in Python arithmetic the kernel's can differ from by ulps, so under
+    ``exact`` -- a tree's bounds, which every path must measure alike -- it is
+    :class:`Ineligible`; a reader that wants a box, not THE box (the animation
+    bake's pivots) passes ``exact=False``. A layout the index does not hold is
+    measured from the component's bytes and remembered. A box it does not hold
+    is :class:`Ineligible`: measuring one here would place the prototype from
+    serialized numbers, which can differ from the native placement by ulps.
     """
     from cadgen._internal.component_package import component_leaf_layout, decode_geometry_component
-    from cadgen.store.bounds import cached_leaf_layout, remembered_box
-    from cadgen.store.build import _PREPARED_OCCURRENCE_BOUNDS_ALGORITHM
+    from cadgen.store.bounds import PREPARED_OCCURRENCE_BOUNDS_ALGORITHM, cached_leaf_layout, remembered_box
     from cadgen.store.objects import read_verified_object
 
     layouts: dict[str, dict[str, Any]] = {}
@@ -317,15 +341,20 @@ def composed_bounds(occurrences: list[dict[str, Any]], components: Mapping[str, 
             layout = cached_leaf_layout(codec, brep, lambda entry=entry: component_leaf_layout(
                 decode_geometry_component(entry, read_verified_object(entry["brep"])).wrapped))
             layouts[cid] = layout
-        if not layout["placed"]:
-            raise Ineligible(f"component {cid} places a leaf of its own")
         transform = occurrence["transform"]
-        linear = struct.pack("<12d", transform[0], transform[1], transform[2], 0.0,
-                             transform[4], transform[5], transform[6], 0.0,
-                             transform[8], transform[9], transform[10], 0.0)
-        translation = (transform[3], transform[7], transform[11])
-        for leaf_ordinal in range(1, layout["leaves"] + 1):
-            found, box = remembered_box(_PREPARED_OCCURRENCE_BOUNDS_ALGORITHM, (codec, brep, leaf_ordinal, linear))
+        for leaf_ordinal, inner in enumerate(layout["inner"], start=1):
+            if inner == _IDENTITY_PLACEMENT:
+                rotation = (transform[0], transform[1], transform[2], transform[4], transform[5], transform[6],
+                            transform[8], transform[9], transform[10])
+                translation = (transform[3], transform[7], transform[11])
+            elif exact:
+                raise Ineligible(f"component {cid} places a leaf of its own")
+            else:
+                rotation, translation = _composed_placement(transform, inner)
+            linear = struct.pack("<12d", rotation[0], rotation[1], rotation[2], 0.0,
+                                 rotation[3], rotation[4], rotation[5], 0.0,
+                                 rotation[6], rotation[7], rotation[8], 0.0)
+            found, box = remembered_box(PREPARED_OCCURRENCE_BOUNDS_ALGORITHM, (codec, brep, leaf_ordinal, linear))
             if not found:
                 raise Ineligible(f"leaf {leaf_ordinal} of component {cid} has no remembered box in this placement")
             if box is not None:
