@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { initialEditingPreview, reduceEditingPreview } from "../../../workbench/editingPreview.js";
 import { observeEditingPreview } from "../../../workbench/editingPreviewFeed.js";
 
-// The build feed's status for `file`. The view shows the saved file; when a build finishes, or the
-// file moves past one, the catalog is read at once, so the saved file replaces the one on screen
-// without waiting for the catalog's next poll.
+// The build feed's state for `file`: its status, and the preview revision it names, which
+// `usePreviewRevision` turns into the entry the view draws until the saved file replaces it. When a
+// build finishes, or the file moves past one, the catalog is read at once, so the saved file
+// replaces the one on screen without waiting for the catalog's next poll.
 export function useEditingPreview(file, { enabled, client } = {}) {
   const [snapshot, setSnapshot] = useState(() => ({ file: "", state: initialEditingPreview() }));
   useEffect(() => {
