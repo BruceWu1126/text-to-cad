@@ -169,8 +169,7 @@ def _edge_facts(edge: Any) -> dict[str, Any]:
     from OCP.TopExp import TopExp
 
     degenerate = BRep_Tool.Degenerated_s(edge)
-    first = BRep_Tool.Pnt_s(TopExp.FirstVertex_s(edge, True))
-    last = BRep_Tool.Pnt_s(TopExp.LastVertex_s(edge, True))
+    first, last = _edge_ends(edge)
     if degenerate:
         centre, length = first, 0.0
     else:
@@ -183,6 +182,20 @@ def _edge_facts(edge: Any) -> dict[str, Any]:
         "centre": (centre.X(), centre.Y(), centre.Z()),
         "length": length,
     }
+
+
+def _edge_ends(edge: Any) -> tuple[Any, Any]:
+    """The edge's end points: its vertices', or, for an edge the kernel built without
+    vertices (a closed edge of a loft or sweep), the ends of its curve."""
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepAdaptor import BRepAdaptor_Curve
+    from OCP.TopExp import TopExp
+
+    first, last = TopExp.FirstVertex_s(edge, True), TopExp.LastVertex_s(edge, True)
+    if not first.IsNull() and not last.IsNull():
+        return BRep_Tool.Pnt_s(first), BRep_Tool.Pnt_s(last)
+    curve = BRepAdaptor_Curve(edge)
+    return curve.Value(curve.FirstParameter()), curve.Value(curve.LastParameter())
 
 
 def _point(point: tuple[float, ...], quantum: float) -> list[int]:
