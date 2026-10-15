@@ -74,6 +74,12 @@ typedef struct {
   i32 n; /* poles */
   double first, last;
   bspline_curve bs;
+  /* Along a fixed edge (OCCT's polyline): the face's mesh vertices at its knots, in the edge's
+   * order, where OCCT meshed the face (`knot_nodes`), and each knot in this face's parameters,
+   * as the host evaluated the pcurve there (`knot_uv`); NULL where there is none. */
+  const i32 *knot_nodes;
+  const double *knot_uv;
+  i32 knot_count;
 } pcurve;
 
 /* --- B-splines --------------------------------------------------------------------------- */
@@ -425,10 +431,40 @@ static void surface_normal(run *r, const host *h, const surface *s, double u, do
   out[0] = out[1] = out[2] = 0.0;
 }
 
-/* Whether the surface's u-line at v is one point: a sphere's pole, a cone's apex. */
-static int singular_u(const surface *s, double v) {
+static void native_curve_d1(run *r, const curve *c, double t, double *out, double *tangent);
+
+/* Whether a B-spline surface's row of poles at v-index j is one point. */
+static int degenerate_row(const bspline_surface *s, i32 j) {
+  const double *first = s->poles + (size_t)j * 3;
+  double scale = fabs(first[0]) + fabs(first[1]) + fabs(first[2]);
+  for (i32 i = 1; i < s->count_u; i++) {
+    const double *p = s->poles + ((size_t)i * s->count_v + j) * 3;
+    if (fabs(p[0] - first[0]) + fabs(p[1] - first[1]) + fabs(p[2] - first[2]) > scale * 1e-12) return 0;
+  }
+  return 1;
+}
+
+/* Whether the surface's u-line at v is one point: a sphere's pole, a cone's apex, a B-spline's
+ * boundary row of one pole, a surface of revolution's basis on its axis. */
+static int singular_u(run *r, const surface *s, double v) {
   if (s->kind == S_SPHERE) return fabs(cos(v)) < 1e-12;
   if (s->kind == S_CONE) return fabs(s->radius + v * sin(s->semi_angle)) < (fabs(s->radius) + fabs(v)) * 1e-12;
+  if (s->kind == S_BSPLINE) {
+    const bspline_surface *b = s->bs;
+    double eps = (fabs(b->first_v) + fabs(b->last_v) + (b->last_v - b->first_v)) * 1e-12;
+    if (fabs(v - b->first_v) <= eps) return degenerate_row(b, 0);
+    if (fabs(v - b->last_v) <= eps) return degenerate_row(b, b->count_v - 1);
+    return 0;
+  }
+  if (s->kind == S_REVOLUTION) {
+    double p[3], arm[3];
+    native_curve_d1(r, &s->sw->basis, v, p, NULL);
+    for (int d = 0; d < 3; d++) arm[d] = p[d] - s->sw->origin[d];
+    const double *k = s->sw->direction;
+    double off[3] = {k[1] * arm[2] - k[2] * arm[1], k[2] * arm[0] - k[0] * arm[2], k[0] * arm[1] - k[1] * arm[0]};
+    double reach = fabs(arm[0]) + fabs(arm[1]) + fabs(arm[2]);
+    return fabs(off[0]) + fabs(off[1]) + fabs(off[2]) <= reach * 1e-12;
+  }
   return 0;
 }
 

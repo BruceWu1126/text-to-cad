@@ -1,10 +1,14 @@
 /*
  * Part of tessellate.c's unity build: trims and model edges, sampled.
  *
- * Each model edge's exact curve is sampled once (`sample_shared_edge`): the polyline every face
- * beside it conforms to, and the display edge. A face's trim loops are sampled from their
- * pcurves (`sample_loop`), a stretch along a shared edge taken from that edge's polyline by arc
- * fraction where the mapping holds, so the faces either side start from the same points.
+ * Each model edge has ONE polyline every face beside it conforms to, and it is the display edge:
+ * OCCT's discretization of the edge where OCCT meshed a face beside it (`fixed_shared_edge`: the
+ * polygon on triangulation the host read, taken as it is, a point between two of its knots lying
+ * on the chord between them), else the exact curve sampled here (`sample_shared_edge`). A face
+ * the library meshes samples its trim loops from their pcurves (`sample_loop`); a stretch along a
+ * fixed edge takes that edge's knots verbatim, in this face's parameters as the host evaluated
+ * them, and a stretch along a sampled edge is taken from the polyline by arc fraction where the
+ * mapping holds, so the faces either side start from the same points.
  */
 
 #define DEFAULT_CHORD 1.5e-3
@@ -40,6 +44,7 @@ typedef struct {
   i32 ord, reversed;
   surface s;
   double uv[4];
+  double period_u, period_v; /* the surface's periods, 0 where it has none */
   i32 loop_count;
   const i32 *loop_start;  /* each loop's first pcurve, into the run's pcurves */
   const i32 *loop_size;
@@ -47,10 +52,11 @@ typedef struct {
   face_pole *poles;
 } face;
 
-/* One model edge's exact curve sampled: the polyline its faces conform to. */
+/* One model edge's polyline: the one its faces conform to, and the display edge. */
 typedef struct {
   const curve *c;
   i32 present;
+  i32 fixed;     /* OCCT's discretization, taken as it is: a point between knots lies on their chord */
   vd params;
   vd points;     /* 3 per point */
   vd fractions;
@@ -62,7 +68,8 @@ typedef struct {
 
 /* THE position of arc fraction `fraction` on a shared edge: every face computes boundary
  * positions through this one function, so a point is the same floats on both sides of its edge.
- * Between polyline knots it evaluates the exact curve at an interpolated parameter. */
+ * Between polyline knots it evaluates the exact curve at an interpolated parameter -- or, on a
+ * fixed polyline, interpolates the chord, which is where the faces OCCT meshed along it are. */
 static void edge_point_at(run *r, const host *h, const shared *sh, double fraction, double *out) {
   const double *fractions = sh->fractions.v;
   i64 last = sh->fractions.n - 1;
@@ -90,8 +97,38 @@ static void edge_point_at(run *r, const host *h, const shared *sh, double fracti
     return;
   }
   double w = f1 > f0 ? (fraction - f0) / (f1 - f0) : 0;
+  if (sh->fixed) {
+    const double *a = sh->points.v + 3 * lo, *b = a + 3;
+    for (int d = 0; d < 3; d++) out[d] = a[d] + w * (b[d] - a[d]);
+    return;
+  }
   double t = sh->params.v[lo] + w * (sh->params.v[lo + 1] - sh->params.v[lo]);
   curve_value(r, h, sh->c, t, out);
+}
+
+/* The arc fraction of the point on a polyline nearest `point`, and how far the point is from it. */
+static double edge_fraction_of(const shared *sh, const double *point, double *distance) {
+  i64 n = sh->points.n / 3;
+  double best = INFINITY, fraction = 0.0;
+  for (i64 i = 0; i + 1 < n; i++) {
+    const double *a = sh->points.v + 3 * i, *b = a + 3;
+    double abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
+    double len2 = abx * abx + aby * aby + abz * abz;
+    double t = len2 > 0 ? ((point[0] - a[0]) * abx + (point[1] - a[1]) * aby + (point[2] - a[2]) * abz) / len2 : 0.0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    double q[3] = {a[0] + t * abx, a[1] + t * aby, a[2] + t * abz};
+    double d = dist3(q, point);
+    if (d < best) {
+      best = d;
+      fraction = sh->fractions.v[i] + t * (sh->fractions.v[i + 1] - sh->fractions.v[i]);
+    }
+  }
+  if (n == 1) {
+    best = dist3(sh->points.v, point);
+    fraction = 0.0;
+  }
+  if (distance) *distance = best;
+  return fraction;
 }
 
 /* The adaptive refinement both samplings make: intervals split at their middle where the 3D
@@ -387,7 +424,16 @@ static void sample_loop(run *r, arena *A, arena *S, const host *h, const face *f
                            ? &edges[pc->edge_ord - 1] : NULL;
     vd segment = {NULL, 0, 0}, fractions = {NULL, 0, 0}, own = {NULL, 0, 0};
     int mapped = 0, sampled = 0;
-    if (sh && sh->points.n / 3 >= 2) {
+    if (sh && sh->fixed && pc->knot_uv && pc->knot_count == sh->points.n / 3 && pc->knot_count >= 2) {
+      /* OCCT's knots, verbatim: the faces OCCT meshed along this edge have exactly these. */
+      RESERVE(S, segment, 2 * pc->knot_count);
+      RESERVE(S, fractions, pc->knot_count);
+      for (i32 i = 0; i < pc->knot_count; i++) {
+        PUSH2(S, segment, pc->knot_uv[2 * i], pc->knot_uv[2 * i + 1]);
+        PUSH(S, fractions, sh->fractions.v[i]);
+      }
+      mapped = 1;
+    } else if (sh && sh->points.n / 3 >= 2) {
       mapped = map_shared_edge(r, S, h, f, pc, tolerance, sh, &segment, &fractions, &own);
       sampled = 1;
     }
@@ -456,6 +502,41 @@ typedef struct {
 static void curve_point_at(run *r, void *ctx, double t, double *out) {
   curve_ctx *c = (curve_ctx *)ctx;
   curve_value(r, c->h, c->c, t, out);
+}
+
+/* One model edge's polyline as OCCT discretized it: `count` points (3 numbers each) at the edge
+ * parameters `params`, in the edge's own order. Its fractions are its cumulative chord length,
+ * every point is a boundary point, and it is closed where its ends are one point. */
+static void fixed_shared_edge(arena *A, const curve *c, const double *points, const double *params, i64 count,
+                              shared *out) {
+  memset(out, 0, sizeof *out);
+  out->c = c;
+  out->present = 1;
+  out->fixed = 1;
+  out->corner_start = out->corner_end = -1;
+  RESERVE(A, out->params, count);
+  RESERVE(A, out->points, 3 * count);
+  RESERVE(A, out->fractions, count);
+  RESERVE(A, out->boundary_subset, count);
+  for (i64 i = 0; i < count; i++) {
+    PUSH(A, out->params, params[i]);
+    PUSH3(A, out->points, points[3 * i], points[3 * i + 1], points[3 * i + 2]);
+    PUSH(A, out->boundary_subset, (i32)i);
+  }
+  PUSH(A, out->fractions, 0.0);
+  for (i64 i = 1; i < count; i++)
+    PUSH(A, out->fractions, out->fractions.v[i - 1] + dist3(out->points.v + 3 * i, out->points.v + 3 * (i - 1)));
+  double total = out->fractions.v[count - 1];
+  if (total > 0) {
+    for (i64 i = 0; i < count; i++) out->fractions.v[i] = out->fractions.v[i] / total;
+    out->fractions.v[count - 1] = 1;
+  }
+  out->length = total;
+  /* Closure as `sample_shared_edge` judges it: the ends together against the polyline's extent. */
+  double extent = 0.0;
+  for (i64 i = 1; i < count; i++) extent = py_max(extent, dist3(out->points.v, out->points.v + 3 * i));
+  out->closed = count > 2 && dist3(out->points.v, out->points.v + 3 * (count - 1)) <= extent * ldexp(1.0, -21);
+  if (out->closed) memcpy(out->points.v + 3 * (count - 1), out->points.v, sizeof(double) * 3);
 }
 
 /* One model edge's exact curve sampled, the polyline every face beside it conforms to, and the

@@ -1,98 +1,91 @@
-"""One component's display mesh, made as the CAD Viewer made it before meshes moved into the store.
+"""One component's display mesh: OCCT triangulates, and cadgen's native mesh library proves every
+face of the result against the exact geometry or repairs it.
 
-This is the tessellator cadgen 0.7.21 ran in the browser (its tessellation version 9), function for
-function: the same sampling, grid, earcut (mapbox/earcut 3.0.2, the copy three.js ships), sliver
-flips, refinement, edge pinning and cross-face conformity, at the same tolerances, so a part is
-drawn as it was drawn there. It runs as cadgen's native library, written in C (its sources are
-``native/tessellate`` in cadgen's source tree; ``_runtime/native`` holds one build per platform,
-loaded here with ctypes, which runs it with the GIL released); this module reads the component's
-geometry through OCCT into the flat tables the library takes, evaluates for it any surface it has
-no formula for, and packs what it returns. Its geometry comes from OCCT, not from a container of
-single-precision copies, and the library evaluates it itself: each analytic surface by its formula,
-each B-spline surface, trim and edge curve by its poles and knots (de Boor's algorithm, so a clamped
-end is its end pole exactly), each conic as OCCT writes it, a surface of extrusion or revolution by
-its basis curve, swept; and any other surface through OCCT's own evaluation, which it asks this
-module for. Each trim's pcurve and each edge's curve is read as the browser's were converted: a 2D
-B-spline per pcurve, lines, circles and ellipses as they are, other edge curves as B-splines.
+Two steps that are one law (``STORE.md`` §3). OCCT's ``BRepMesh_IncrementalMesh`` meshes the
+component at the display tolerance -- the chord tolerance as an absolute deflection against the
+component's bounding diagonal, the angle in radians -- from no triangulation, discretizing each
+model edge once and triangulating each face in its own parameters, so the body is closed across
+its faces by construction. The library (``native/tessellate`` in cadgen's source tree; one build
+per platform in ``_runtime/native``, loaded here with ctypes and run with the GIL released) then
+VERIFIES every face against the exact geometry it evaluates itself -- each analytic surface by its
+formula, each B-spline surface, pcurve and edge curve by its poles and knots (de Boor's algorithm,
+so a clamped end is its end pole exactly), each conic as OCCT writes it, a surface of extrusion or
+revolution by its basis curve, swept; any other surface through OCCT, which it asks this module
+for -- and REPAIRS what fails, locally: a triangle off its surface is refined in place about new
+vertices on the surface, a folded one unfolded by flipping an edge, a hole inside a face ear-cut
+in the face's parameters, two faces disagreeing along their edge made to meet, and a face OCCT
+refused, or no repair brought right, meshed by the library's own tessellator over the polylines
+its neighbours already fixed -- a grid in the face's parameters, cells clipped to the trim and
+ear-cut, refined to the surface -- kept only where it proves out. No clock decides what is checked.
 
-Where the browser's tessellator went wrong, this one does not:
-
-- a freeform face's normals are its surface's derivatives, not central differences, which averaged
-  the two sides of a closed profile's corner along its seam, and at a pole, where the derivatives
-  have no cross product, the pole's own limiting normal, where the browser's was noise or nothing
-  and refinement split on toward it;
-- a freeform face's pole is one point, its model vertex: each row evaluated there is a hair off
-  it, which left the pole a fan of slivers on no surface; and where a row evaluates exactly to that
-  point, the triangles reaching it are kept until the faces are made to meet: dropped first, they
-  left a T-junction along the edge into the pole;
-- earcut's zero-area triangles over a straight run of trim are flipped away before what is left of
-  them is dropped: dropped first, they left a T-junction on the run; and a triangle whose edge runs
-  along a line of constant u or v past a vertex on it is split there: trims in double precision put
-  their corners exactly in line;
-- a cell whose triangles do not cover what the loops leave of it -- a hole crossing its side -- is
-  cut again from its loops as a whole;
-- a vertex the grid moved onto a grid line or a neighbour, by up to one source ULP, is still pinned
-  to the trim it was made on, whichever cell the move took it into: the browser held a vertex to a
-  trim more tightly than that and looked for the trim in the vertex's own cell alone, so one moved
-  past either was never pinned, and the face beside it met it with a crack;
-- a face whose geometry raises is left out and named, and the rest of the part is meshed; a face
-  narrower than the tolerance its trim is sampled to draws as nothing and is not named.
-
-Faces triangulate in their parameters: trim loops are sampled adaptively from their pcurves, a grid
-sized by the surface's curvature covers the face, cells inside it are two triangles each and cells
-a trim crosses are clipped to it and earcut, then triangles refine by edge splitting wherever a
-chord's midpoint, a triangle's centre or its facet strays from the true surface. Each model edge's
-exact 3D curve is sampled once per component, and every adjacent face's boundary conforms to it:
-boundary vertices are pinned to that shared polyline by arc fraction, their positions come from one
-function, and a final pass fan-splits every boundary to the union of the fractions both sides hold,
-so the component is watertight across faces. The display edges are those same polylines.
-
-``mesh_component`` packs the result into the part's GLB body (``cadgen.store.meshes``): positions,
-normals and triangles face by face in ordinal order, each model edge's polyline with its class,
-and the faces that came out empty, which every reader names.
+This module's half is reading and packing. It reads the component's geometry through OCCT into the
+flat tables the library takes (``_model``), decides which faces OCCT does not get -- the swept
+tubes whose cost OCCT does not survive (``tessellation_policy.cost_guard``, a judgement of the
+surface alone) -- meshes the rest with OCCT and reads the triangulation back fast: every face's
+positions, normals, parameters and triangles through OCCT's own glTF writer (one primitive per
+face, no call per vertex) and every edge's polygon on triangulation (``_polygons``: the knots the
+faces either side share, which become the library's fixed edge polylines, and in a face OCCT did
+not mesh their place in that face's parameters). What the library returns is packed into the
+part's GLB body (``cadgen.store.meshes``): positions, normals and triangles face by face in
+ordinal order, each model edge's polyline with its class, the faces that came out empty, which
+every reader names (``unmeshedFaces``), and the faces drawn though still off their surface past
+the verification bound, named too (``unverifiedFaces``). A face narrower than the tolerance its
+trim is sampled to, or under the deflection squared in area, draws as nothing and is not named.
 """
 
 from __future__ import annotations
 
 import ctypes
+import json
 import math
 import platform
+import struct
 import sys
+import tempfile
 import threading
 from array import array
+from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
 
-_ABI = 1  # tessellate's TESS_ABI: the tables it reads and the result it returns
+_ABI = 2  # tessellate's TESS_ABI: the tables it reads and the result it returns
 
 # The tables' columns (api.c), and the kinds of surface and curve the library evaluates itself.
-_FACE_I, _FACE_D, _PCURVE_I, _PCURVE_D, _EDGE_I, _EDGE_D, _BSURF_I, _BSURF_D, _POLE_D = 8, 20, 8, 2, 9, 16, 10, 4, 7
-_SWEPT_I, _SWEPT_D = 2, 6
+_FACE_I, _FACE_D, _PCURVE_I, _PCURVE_D, _EDGE_I, _EDGE_D, _BSURF_I, _BSURF_D, _POLE_D = 8, 22, 12, 2, 11, 16, 10, 4, 7
+_SWEPT_I, _SWEPT_D, _MESH_I, _REPORT_N = 2, 6, 5, 10
 _ANALYTIC = {"plane": 1, "cylinder": 2, "cone": 3, "sphere": 4, "torus": 5}
 _S_BSPLINE, _S_HOST, _S_EXTRUSION, _S_REVOLUTION = 6, 7, 8, 9
 _C_LINE, _C_CIRCLE, _C_ELLIPSE, _C_BSPLINE, _C_HYPERBOLA, _C_PARABOLA = 1, 2, 3, 4, 5, 6
 _ASK_PCURVE, _ASK_CURVE, _ASK_SURFACE, _ASK_NORMAL = 0, 1, 2, 3
-_FACE_MESHED, _FACE_UNRESOLVED = 1, 2
+# Who meshes a face (mesh_i column 0), and what the library says of it after (face_state).
+_MESH_NONE, _MESH_OCCT, _MESH_GUARDED = 0, 1, 2
+_FACE_NONE, _FACE_MESHED, _FACE_UNRESOLVED, _FACE_UNMESHED, _FACE_UNVERIFIED = 0, 1, 2, 3, 4
+_MADE_BY = {0: "none", 1: "occt", 2: "library"}
+_REPORT_FIELDS = ("rounds", "splits", "flips", "folded", "holesFilled", "holeEdgesLeft", "openEdges", "freeEdges",
+                  "fallbacks", "areaOk")
 _MAX_DEGREE = 25
+# glTF's component types for indices.
+_INDEX_TYPES = {5121: np.uint8, 5123: np.uint16, 5125: np.uint32}
 
 _CALLBACK = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32, ctypes.c_double,
                              ctypes.c_double, ctypes.POINTER(ctypes.c_double))
+_I32P, _F64P = ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_double)
 
 
 class _Input(ctypes.Structure):
     _fields_ = [
         ("face_count", ctypes.c_int32), ("edge_count", ctypes.c_int32), ("pcurve_count", ctypes.c_int32),
         ("bsurface_count", ctypes.c_int32), ("swept_count", ctypes.c_int32), ("basis_count", ctypes.c_int32),
-        ("chord", ctypes.c_double), ("angle", ctypes.c_double),
-        ("face_i", ctypes.POINTER(ctypes.c_int32)), ("face_d", ctypes.POINTER(ctypes.c_double)),
-        ("loop_i", ctypes.POINTER(ctypes.c_int32)), ("pcurve_i", ctypes.POINTER(ctypes.c_int32)),
-        ("pcurve_d", ctypes.POINTER(ctypes.c_double)), ("edge_i", ctypes.POINTER(ctypes.c_int32)),
-        ("edge_d", ctypes.POINTER(ctypes.c_double)), ("swept_i", ctypes.POINTER(ctypes.c_int32)),
-        ("swept_d", ctypes.POINTER(ctypes.c_double)), ("basis_i", ctypes.POINTER(ctypes.c_int32)),
-        ("basis_d", ctypes.POINTER(ctypes.c_double)), ("bsurface_i", ctypes.POINTER(ctypes.c_int32)),
-        ("bsurface_d", ctypes.POINTER(ctypes.c_double)), ("pole_d", ctypes.POINTER(ctypes.c_double)),
-        ("reals", ctypes.POINTER(ctypes.c_double)), ("callback", _CALLBACK), ("user", ctypes.c_void_p),
+        ("chord", ctypes.c_double), ("angle", ctypes.c_double), ("deflection", ctypes.c_double),
+        ("repair_at", ctypes.c_double), ("verified_at", ctypes.c_double),
+        ("face_i", _I32P), ("face_d", _F64P),
+        ("mesh_i", _I32P), ("mesh_xyz", _F64P), ("mesh_nrm", _F64P), ("mesh_uv", _F64P), ("mesh_tri", _I32P),
+        ("loop_i", _I32P), ("pcurve_i", _I32P), ("pcurve_d", _F64P), ("knot_nodes", _I32P), ("knot_uv", _F64P),
+        ("edge_i", _I32P), ("edge_d", _F64P), ("edge_poly_xyz", _F64P), ("edge_poly_t", _F64P),
+        ("swept_i", _I32P), ("swept_d", _F64P), ("basis_i", _I32P), ("basis_d", _F64P),
+        ("bsurface_i", _I32P), ("bsurface_d", _F64P), ("pole_d", _F64P), ("reals", _F64P),
+        ("callback", _CALLBACK), ("user", ctypes.c_void_p),
     ]
 
 
@@ -100,12 +93,12 @@ class _Result(ctypes.Structure):
     _fields_ = [
         ("abi", ctypes.c_int32), ("error", ctypes.c_int32), ("message", ctypes.c_char * 160),
         ("scale", ctypes.c_double), ("face_count", ctypes.c_int32), ("edge_count", ctypes.c_int32),
-        ("face_state", ctypes.POINTER(ctypes.c_int32)), ("face_vertices", ctypes.POINTER(ctypes.c_int64)),
-        ("face_triangles", ctypes.POINTER(ctypes.c_int64)), ("positions", ctypes.POINTER(ctypes.c_float)),
-        ("normals", ctypes.POINTER(ctypes.c_float)), ("triangles", ctypes.POINTER(ctypes.c_uint32)),
+        ("face_state", _I32P), ("face_source", _I32P), ("face_worst", _F64P), ("face_report", ctypes.POINTER(ctypes.c_int64)),
+        ("face_vertices", ctypes.POINTER(ctypes.c_int64)), ("face_triangles", ctypes.POINTER(ctypes.c_int64)),
+        ("positions", ctypes.POINTER(ctypes.c_float)), ("normals", ctypes.POINTER(ctypes.c_float)),
+        ("triangles", ctypes.POINTER(ctypes.c_uint32)),
         ("vertex_total", ctypes.c_int64), ("triangle_total", ctypes.c_int64),
-        ("edge_points", ctypes.POINTER(ctypes.c_int64)), ("points", ctypes.POINTER(ctypes.c_double)),
-        ("point_total", ctypes.c_int64),
+        ("edge_points", ctypes.POINTER(ctypes.c_int64)), ("points", _F64P), ("point_total", ctypes.c_int64),
     ]
 
 
@@ -126,7 +119,7 @@ def _library_name() -> str:
 
 
 def _library() -> ctypes.CDLL:
-    """The tessellator for this platform, loaded once."""
+    """The mesh library for this platform, loaded once."""
     global _LIBRARY
     with _LOCK:
         if _LIBRARY is None:
@@ -134,8 +127,9 @@ def _library() -> ctypes.CDLL:
 
             path = runtime_root() / "native" / _library_name()
             if not path.is_file():
-                raise AssetMissing(f"cadgen's tessellator for this platform ({path.name}) is missing, and without it "
-                                   "no part can be meshed. " + runtime_build_hint(path, overridable=False))
+                raise AssetMissing(f"cadgen's mesh library for this platform ({path.name}) is missing, and without it "
+                                   "no part can be verified, and so none meshed. "
+                                   + runtime_build_hint(path, overridable=False))
             library = ctypes.CDLL(str(path))
             library.cadgen_tessellate_abi.restype = ctypes.c_int32
             library.cadgen_tessellate.argtypes = [ctypes.POINTER(_Input)]
@@ -143,7 +137,7 @@ def _library() -> ctypes.CDLL:
             library.cadgen_tessellate_free.argtypes = [ctypes.POINTER(_Result)]
             library.cadgen_tessellate_free.restype = None
             if library.cadgen_tessellate_abi() != _ABI:
-                raise RuntimeError(f"cadgen's tessellator ({path}) is not the one this cadgen was built with")
+                raise RuntimeError(f"cadgen's mesh library ({path}) is not the one this cadgen was built with")
             _LIBRARY = library
         return _LIBRARY
 
@@ -152,8 +146,9 @@ def _library() -> ctypes.CDLL:
 
 
 class _Model:
-    """The component's faces, loops, pcurves, edges and B-spline surfaces as flat tables, and the
-    host's evaluators for whatever the library evaluates through it."""
+    """The component's faces, loops, pcurves, edges and B-spline surfaces as flat tables, the
+    host's evaluators for whatever the library evaluates through it, and -- once OCCT has meshed
+    -- its triangulation and each edge's polygon on it."""
 
     def __init__(self, face_count: int, edge_count: int) -> None:
         self.face_i = np.zeros((face_count, _FACE_I), np.int32)
@@ -162,6 +157,8 @@ class _Model:
         self.loop_i: list[int] = []
         self.pcurve_i: list[list[int]] = []
         self.pcurve_d: list[float] = []
+        # Per pcurve: (face index, the edge as the wire walks it, its pcurve, first, last, degenerated).
+        self.pcurve_edges: list[tuple] = []
         self.edge_i = np.zeros((edge_count, _EDGE_I), np.int32)
         self.edge_d = np.zeros((edge_count, _EDGE_D), np.float64)
         self.bsurface_i: list[list[int]] = []
@@ -175,6 +172,19 @@ class _Model:
         self.pcurves: list[Callable | None] = []  # each pcurve's host evaluator, where it has one
         self.curves: list[Callable | None] = [None] * edge_count
         self.surfaces: dict[int, tuple[Callable, Callable]] = {}  # face index -> (value, normal)
+        self.guarded: set[int] = set()  # face indices the cost guard keeps from OCCT
+        self.unreadable: set[int] = set()  # face indices whose trim OCCT could not read
+        # OCCT's triangulation, read back (``_occt_mesh``): per face its block in the mesh arrays.
+        self.mesh_i = np.zeros((face_count, _MESH_I), np.int32)
+        self.mesh_xyz = np.zeros((0, 3), np.float64)
+        self.mesh_nrm = np.zeros((0, 3), np.float64)
+        self.mesh_uv = np.zeros((0, 2), np.float64)
+        self.mesh_tri = np.zeros((0, 3), np.int32)
+        # The polygons on triangulation (``_polygons``): each pcurve's knots as the face's mesh
+        # vertices and in the face's parameters, and each edge's fixed polyline.
+        self.knot_nodes: list[np.ndarray] = []
+        self.knot_uv: list[np.ndarray] = []
+        self.edge_poly: dict[int, tuple[np.ndarray, np.ndarray]] = {}  # edge index -> (points, params)
 
     def bspline(self, curve) -> tuple[int, int, int, int, int]:
         """A B-spline curve's degree, poles, rationality and where its knots and poles are. Its
@@ -306,9 +316,10 @@ def _host_surface(adaptor):
     return value, normal
 
 
-def _bspline_surface(model: _Model, face) -> int | None:
+def _bspline_surface(model: _Model, face) -> tuple[int | None, dict | None]:
     """The face's surface as a B-spline the library evaluates, where it is one or converts to one
-    exactly (a Bézier patch), its index in the table; None for any other."""
+    exactly (a Bézier patch): its index in the table and its signature for the cost guard
+    (``tessellation_policy.cost_guard``); (None, None) for any other."""
     from OCP.BRep import BRep_Tool
     from OCP.Geom import Geom_BezierSurface, Geom_BSplineSurface, Geom_RectangularTrimmedSurface
     from OCP.GeomConvert import GeomConvert
@@ -319,10 +330,14 @@ def _bspline_surface(model: _Model, face) -> int | None:
     if isinstance(surface, Geom_BezierSurface):
         surface = GeomConvert.SurfaceToBSplineSurface_s(surface)
     if not isinstance(surface, Geom_BSplineSurface):
-        return None
+        return None, None
     if surface.UDegree() > _MAX_DEGREE or surface.VDegree() > _MAX_DEGREE:
-        return None
+        return None, None
     periodic_u, periodic_v = surface.IsUPeriodic(), surface.IsVPeriodic()
+    signature = {"degree": (surface.UDegree(), surface.VDegree()), "poles": (surface.NbUPoles(), surface.NbVPoles()),
+                 "spans": (surface.NbUKnots() - 1, surface.NbVKnots() - 1),
+                 "rational": bool(surface.IsURational() or surface.IsVRational()),
+                 "periodic": (bool(periodic_u), bool(periodic_v))}
     if periodic_u or periodic_v:
         # The same surface over one period, its knots clamped; a parameter past the period wraps.
         surface = surface.Copy()
@@ -350,16 +365,19 @@ def _bspline_surface(model: _Model, face) -> int | None:
     model.bsurface_i.append([surface.UDegree(), surface.VDegree(), count_u, count_v, rational, int(periodic_u),
                              int(periodic_v), knots_u, knots_v, poles_at])
     model.bsurface_d.extend((u0, u1, v0, v1))
-    return len(model.bsurface_i) - 1
+    return len(model.bsurface_i) - 1, signature
 
 
-def _faces(model: _Model, face_map, edge_map, *, host_all: bool) -> None:
-    """Each face's surface, uv box, trim loops of pcurves and poles. A face whose surface or trim
-    cannot be read has no loops, so it comes out empty, and is named."""
+def _faces(model: _Model, face_map, edge_map) -> None:
+    """Each face's surface, uv box, trim loops of pcurves and poles, and whether the cost guard
+    keeps it from OCCT. A face whose surface or trim cannot be read has no loops, so it comes out
+    empty, and is named."""
+    from cadgen.tessellation_policy import cost_guard
     from OCP.BRep import BRep_Tool
     from OCP.BRepAdaptor import BRepAdaptor_Surface
     from OCP.BRepTools import BRepTools, BRepTools_WireExplorer
-    from OCP.Geom import Geom_ConicalSurface, Geom_CylindricalSurface, Geom_Plane, Geom_ToroidalSurface
+    from OCP.Geom import (Geom_ConicalSurface, Geom_CylindricalSurface, Geom_Plane, Geom_RectangularTrimmedSurface,
+                          Geom_ToroidalSurface)
     from OCP.Geom2d import Geom2d_BSplineCurve, Geom2d_Circle, Geom2d_Ellipse, Geom2d_Line, Geom2d_TrimmedCurve
     from OCP.Geom2dConvert import Geom2dConvert
     from OCP.GeomAbs import GeomAbs_SurfaceType as T
@@ -402,10 +420,12 @@ def _faces(model: _Model, face_map, edge_map, *, host_all: bool) -> None:
                 elif kind == "torus":
                     row_d[18], row_d[19] = geometry.MajorRadius(), geometry.MinorRadius()
             else:
-                bspline = None if host_all else _bspline_surface(model, face)
-                swept = None if host_all or bspline is not None else _swept_surface(model, face)
+                bspline, signature = _bspline_surface(model, face)
+                swept = None if bspline is not None else _swept_surface(model, face)
                 if bspline is not None:
                     row_i[2], row_i[3] = _S_BSPLINE, bspline
+                    if cost_guard(signature):
+                        model.guarded.add(index)
                 elif swept is not None:
                     row_i[2], row_i[3] = swept
                 else:
@@ -431,14 +451,16 @@ def _faces(model: _Model, face_map, edge_map, *, host_all: bool) -> None:
                     first, last = edge_range(edge, face)
                     edge_ord = find_index(edge)
                     reversed_ = int(edge.Orientation() == TopAbs_REVERSED)
+                    is_degenerated = degenerated(edge)
                     loop_size += 1
-                    if type(curve) is Geom2d_Line and not host_all and first < last and not degenerated(edge):
+                    model.pcurve_edges.append((index, edge, curve, first, last, is_degenerated))
+                    if type(curve) is Geom2d_Line and first < last and not is_degenerated:
                         # What Geom2dConvert makes of a line trimmed to the range: degree 1 between its
                         # points at the range's ends.
                         start, end = curve.Value(first).Coord(), curve.Value(last).Coord()
                         at = len(reals)
                         reals.extend((first, first, last, last, *start, *end))
-                        pcurve_i.append([edge_ord, reversed_, 0, 2, 1, 0, at, at + 4])
+                        pcurve_i.append([edge_ord, reversed_, 0, 2, 1, 0, at, at + 4, 0, 0, 0, 0])
                         pcurve_d.extend((first, last))
                         pcurves.append(None)
                         if box_u is not None:
@@ -450,13 +472,13 @@ def _faces(model: _Model, face_map, edge_map, *, host_all: bool) -> None:
                     if bspline.IsPeriodic():
                         bspline.SetNotPeriodic()
                     count = bspline.NbPoles()
-                    if host_all or bspline.Degree() > _MAX_DEGREE:
-                        pcurve_i.append([edge_ord, reversed_, 1, count, 0, 0, 0, 0])
+                    if bspline.Degree() > _MAX_DEGREE:
+                        pcurve_i.append([edge_ord, reversed_, 1, count, 0, 0, 0, 0, 0, 0, 0, 0])
                         pcurves.append(_pcurve_value(bspline))
                         box_u = None
                     else:
                         degree, count, rational, knots_at, poles_at = model.bspline(bspline)
-                        pcurve_i.append([edge_ord, reversed_, 0, count, degree, rational, knots_at, poles_at])
+                        pcurve_i.append([edge_ord, reversed_, 0, count, degree, rational, knots_at, poles_at, 0, 0, 0, 0])
                         pcurves.append(None)
                         if box_u is not None:
                             if type(curve) is Geom2d_BSplineCurve:
@@ -472,7 +494,7 @@ def _faces(model: _Model, face_map, edge_map, *, host_all: bool) -> None:
                             else:
                                 box_u = None
                     pcurve_d.extend((bspline.FirstParameter(), bspline.LastParameter()))
-                    if degenerated(edge):
+                    if is_degenerated:
                         # A pole: the edge's one point, along the stretch of parameters that is it
                         # (none where the edge is a point in this face's parameters too).
                         bspline.D0(bspline.FirstParameter(), point)
@@ -501,8 +523,19 @@ def _faces(model: _Model, face_map, edge_map, *, host_all: bool) -> None:
                 if not surface.IsVPeriodic():
                     v0, v1 = min(max(v0, sv0), sv1), min(max(v1, sv0), sv1)
             row_d[0:4] = (u0, u1, v0, v1)
+            # The surface's periods, which a face closed round one carries a seam of: OCCT's
+            # triangulation puts a seam corner at either side of it, and the library unwraps.
+            basis = surface
+            while isinstance(basis, Geom_RectangularTrimmedSurface):
+                basis = basis.BasisSurface()
+            if basis is not None:
+                row_d[20] = basis.UPeriod() if basis.IsUPeriodic() else 0.0
+                row_d[21] = basis.VPeriod() if basis.IsVPeriodic() else 0.0
         except Exception:  # noqa: BLE001 - a face OCCT cannot read is left empty
+            # Its pcurve rows so far stand (the table is flat) but no loop names them.
             loops = []
+            model.unreadable.add(index)
+            model.guarded.discard(index)
         for first, size in loops:
             model.loop_i.extend((first, size))
         row_i[5] = len(loops)
@@ -613,7 +646,7 @@ def _pcurve_value(curve):
     return value
 
 
-def _edges(model: _Model, edge_map, *, host_all: bool) -> None:
+def _edges(model: _Model, edge_map) -> None:
     """Each model edge's exact 3D curve: a line, circle or ellipse as it is, else its B-spline."""
     from OCP.BRep import BRep_Tool
     from OCP.BRepAdaptor import BRepAdaptor_Curve
@@ -633,8 +666,9 @@ def _edges(model: _Model, edge_map, *, host_all: bool) -> None:
             first, last = adaptor.FirstParameter(), adaptor.LastParameter()
             kind = kinds.get(adaptor.GetType())
             row_i, row_d = [0] * _EDGE_I, [0.0] * _EDGE_D
+            host = False
             if kind is not None:
-                evaluate, host = adaptor, host_all
+                evaluate = adaptor
                 row_d[0:2] = (first, last)
                 if kind == _C_LINE:
                     line = adaptor.Line()
@@ -646,7 +680,7 @@ def _edges(model: _Model, edge_map, *, host_all: bool) -> None:
                         row_d[14] = conic.Radius()
                     else:
                         row_d[14], row_d[15] = conic.MajorRadius(), conic.MinorRadius()
-                row_i[:3] = (kind, int(host), -1)
+                row_i[:3] = (kind, 0, -1)
             else:
                 located = BRep_Tool.Curve_s(edge, 0.0, 0.0)
                 if located is None:
@@ -656,7 +690,7 @@ def _edges(model: _Model, edge_map, *, host_all: bool) -> None:
                     bspline.SetNotPeriodic()
                 evaluate = bspline
                 row_d[0:2] = (bspline.FirstParameter(), bspline.LastParameter())
-                host = host_all or bspline.Degree() > _MAX_DEGREE
+                host = bspline.Degree() > _MAX_DEGREE
                 row_i[:3] = (_C_BSPLINE, int(host), bspline.NbPoles())
                 if not host:
                     degree, count, rational, knots_at, poles_at = model.bspline(bspline)
@@ -676,14 +710,319 @@ def _edges(model: _Model, edge_map, *, host_all: bool) -> None:
             model.edge_d[index] = 0.0
 
 
+# --- OCCT's triangulation, read back ----------------------------------------------------------
+
+
+def _diagonal(topods) -> float:
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+
+    box = Bnd_Box()
+    BRepBndLib.Add_s(topods, box, False)
+    if box.IsVoid():
+        return 0.0
+    x0, y0, z0, x1, y1, z1 = box.Get()
+    diagonal = math.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2 + (z1 - z0) ** 2)
+    return diagonal if math.isfinite(diagonal) else 0.0
+
+
+def _occt_mesh(topods, face_map, skip: set[int], deflection: float, angle: float) -> dict[int, tuple]:
+    """OCCT's mesh of every face of the component but ``skip``'s (face indices), made from no
+    triangulation at the absolute ``deflection`` and ``angle``, one thread: each meshed face's
+    (positions, normals, uv, triangles) by face index -- float32 positions in the component's frame
+    and outward normals as OCCT's glTF writer places them, parameters in double, triangles wound
+    outward. A face OCCT refused is not in the result."""
+    from OCP.BRep import BRep_Builder, BRep_Tool
+    from OCP.BRepLib import BRepLib_ToolTriangulatedShape
+    from OCP.BRepMesh import BRepMesh_IncrementalMesh
+    from OCP.BRepTools import BRepTools
+    from OCP.IMeshTools import IMeshTools_Parameters
+    from OCP.Precision import Precision
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.TopoDS import TopoDS, TopoDS_Compound
+
+    # A stored BREP can carry triangles some earlier tool made, which OCCT keeps where they are
+    # fine enough for it: every component is meshed from none.
+    BRepTools.Clean_s(topods)
+    if not face_map.Extent():
+        return {}
+    shape = topods
+    if skip:
+        # The faces OCCT gets, as one compound sharing the component's edges: each shared edge is
+        # discretized once, and the triangulation lands on the faces the component holds.
+        shape, builder = TopoDS_Compound(), BRep_Builder()
+        builder.MakeCompound(shape)
+        for index in range(face_map.Extent()):
+            if index not in skip:
+                builder.Add(shape, face_map.FindKey(index + 1))
+    parameters = IMeshTools_Parameters()
+    # OCCT refuses a deflection under its confusion tolerance, which a component of next to no
+    # extent would otherwise ask for.
+    parameters.Deflection = max(deflection, Precision.Confusion_s())
+    parameters.Angle = angle
+    parameters.InParallel = False
+    BRepMesh_IncrementalMesh(shape, parameters)
+    # Each triangulation gets OCCT's normals first, from the exact surface where it has one and
+    # from the triangles around a node where it does not (a cone's apex, a revolved profile's
+    # pole): left to the writer, such a node's normal is a fixed axis, often pointing into the
+    # solid.
+    triangulated = []
+    explorer = TopExp_Explorer(topods, TopAbs_FACE)
+    while explorer.More():
+        face = TopoDS.Face_s(explorer.Current())
+        location = TopLoc_Location()
+        triangulation = BRep_Tool.Triangulation_s(face, location)
+        if triangulation is not None and triangulation.NbTriangles() > 0:
+            if not triangulation.HasNormals():
+                BRepLib_ToolTriangulatedShape.ComputeNormals_s(face, triangulation)
+            triangulated.append((face_map.FindIndex(face) - 1, face, triangulation, location))
+        explorer.Next()
+    if not triangulated:
+        return {}
+    faces = _faces_from_gltf(topods, triangulated)
+    return _faces_one_by_one(triangulated) if faces is None else faces
+
+
+def _faces_from_gltf(topods, triangulated) -> dict[int, tuple] | None:
+    """Each face's (positions, normals, uv, triangles), written by OCCT's glTF writer: one TRIANGLES
+    primitive per triangulated face in the explorer's order, positions located, normals outward,
+    the parameters as texture coordinates (the writer flips v about 1), indices wound outward.
+    None when the writer's primitives cannot be matched to ``triangulated`` one for one; the caller
+    then reads the faces itself."""
+    from OCP.Message import Message_ProgressRange
+    from OCP.RWGltf import RWGltf_CafWriter
+    from OCP.RWMesh import RWMesh_CoordinateSystem
+    from OCP.TColStd import TColStd_IndexedDataMapOfStringString
+    from OCP.TCollection import TCollection_AsciiString, TCollection_ExtendedString
+    from OCP.TDocStd import TDocStd_Document
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+
+    document = TDocStd_Document(TCollection_ExtendedString("cadgen-mesh"))
+    XCAFDoc_DocumentTool.ShapeTool_s(document.Main()).AddShape(topods, False)
+    with tempfile.TemporaryDirectory(prefix="cadgen-mesh-") as folder:
+        path = Path(folder) / "component.glb"
+        writer = RWGltf_CafWriter(TCollection_AsciiString(str(path)), True)
+        writer.SetMergeFaces(False)
+        writer.SetForcedUVExport(True)
+        converter = writer.ChangeCoordinateSystemConverter()
+        converter.SetInputCoordinateSystem(RWMesh_CoordinateSystem.RWMesh_CoordinateSystem_Zup)
+        converter.SetOutputCoordinateSystem(RWMesh_CoordinateSystem.RWMesh_CoordinateSystem_Zup)
+        if not writer.Perform(document, TColStd_IndexedDataMapOfStringString(), Message_ProgressRange()):
+            return None
+        data = path.read_bytes()
+    json_length = struct.unpack_from("<I", data, 12)[0]
+    gltf = json.loads(data[20:20 + json_length])
+    binary = memoryview(data)[20 + json_length + 8:]
+
+    def view(accessor_index: int, dtype, width: int) -> np.ndarray:
+        accessor = gltf["accessors"][accessor_index]
+        buffer_view = gltf["bufferViews"][accessor["bufferView"]]
+        offset = buffer_view.get("byteOffset", 0) + accessor.get("byteOffset", 0)
+        return np.frombuffer(binary, dtype, accessor["count"] * width, offset).reshape(-1, width)
+
+    # The writer puts a component's free edges and vertices beside its faces, as LINES and POINTS
+    # primitives: the faces are its TRIANGLES (mode 4, the default).
+    primitives = [primitive for mesh in gltf.get("meshes", []) for primitive in mesh["primitives"]
+                  if primitive.get("mode", 4) == 4]
+    if len(primitives) != len(triangulated):
+        return None
+    # The writer places a located shape with a node transform; the component is unlocated, so
+    # every node must be the identity for the arrays to be its own.
+    for node in gltf.get("nodes", []):
+        if any(name in node for name in ("matrix", "translation", "rotation", "scale")):
+            matrix = node.get("matrix")
+            if matrix is None or not np.allclose(matrix, np.eye(4).ravel()):
+                return None
+    faces = {}
+    for (index, _face, triangulation, _location), primitive in zip(triangulated, primitives):
+        attributes = primitive["attributes"]
+        if "TEXCOORD_0" not in attributes or "NORMAL" not in attributes:
+            return None
+        positions = view(attributes["POSITION"], np.float32, 3).copy()
+        normals = view(attributes["NORMAL"], np.float32, 3).copy()
+        uv = view(attributes["TEXCOORD_0"], np.float32, 2).astype(np.float64)
+        uv[:, 1] = 1.0 - uv[:, 1]
+        index_accessor = gltf["accessors"][primitive["indices"]]
+        triangles = view(primitive["indices"], _INDEX_TYPES[index_accessor["componentType"]], 1).astype(np.int32).reshape(-1, 3)
+        if (len(positions) != triangulation.NbNodes() or len(triangles) != triangulation.NbTriangles()
+                or index in faces):
+            return None
+        faces[index] = (positions, normals, uv, triangles)
+    return faces
+
+
+def _faces_one_by_one(triangulated) -> dict[int, tuple]:
+    """The same arrays read face by face: placed positions, normals turned to the face's
+    orientation, the parameters, and triangles wound to it -- and turned once more by a mirroring
+    placement, which carries the normals itself, as the glTF writer does."""
+    from OCP.TopAbs import TopAbs_REVERSED
+
+    faces = {}
+    for index, face, triangulation, location in triangulated:
+        if index in faces:
+            continue
+        transform = location.Transformation()
+        count = triangulation.NbNodes()
+        positions = np.empty((count, 3), np.float32)
+        normals = np.empty((count, 3), np.float32)
+        uv = np.empty((count, 2), np.float64)
+        flip = -1.0 if face.Orientation() == TopAbs_REVERSED else 1.0
+        turn = (flip < 0) != (transform.VectorialPart().Determinant() < 0)
+        for node in range(1, count + 1):
+            point = triangulation.Node(node).Transformed(transform)
+            normal = triangulation.Normal(node).Transformed(transform)
+            positions[node - 1] = (point.X(), point.Y(), point.Z())
+            normals[node - 1] = (flip * normal.X(), flip * normal.Y(), flip * normal.Z())
+            parameters = triangulation.UVNode(node)
+            uv[node - 1] = (parameters.X(), parameters.Y())
+        triangles = np.empty((triangulation.NbTriangles(), 3), np.int32)
+        for k in range(1, triangulation.NbTriangles() + 1):
+            a, b, c = triangulation.Triangle(k).Get()
+            triangles[k - 1] = (a - 1, c - 1, b - 1) if turn else (a - 1, b - 1, c - 1)
+        faces[index] = (positions, normals, uv, triangles)
+    return faces
+
+
+def _take_meshes(model: _Model, meshed: dict[int, tuple]) -> None:
+    """OCCT's faces into the model's mesh arrays, each face's block named by ``mesh_i``: who meshes
+    the face (OCCT, or the library for a guarded or unreadable one) and where its arrays are."""
+    face_count = len(model.face_i)
+    xyz, nrm, uv, tri = [], [], [], []
+    vertex_at = triangle_at = 0
+    for index in range(face_count):
+        source = _MESH_GUARDED if index in model.guarded else _MESH_NONE if index in model.unreadable else _MESH_OCCT
+        block = meshed.get(index) if source == _MESH_OCCT else None
+        if block is None:
+            model.mesh_i[index] = (source, vertex_at, 0, triangle_at, 0)
+            continue
+        positions, normals, parameters, triangles = block
+        model.mesh_i[index] = (source, vertex_at, len(positions), triangle_at, len(triangles))
+        xyz.append(positions.astype(np.float64))
+        nrm.append(normals.astype(np.float64))
+        uv.append(parameters)
+        tri.append(triangles)
+        vertex_at += len(positions)
+        triangle_at += len(triangles)
+    if xyz:
+        model.mesh_xyz, model.mesh_nrm = np.concatenate(xyz), np.concatenate(nrm)
+        model.mesh_uv, model.mesh_tri = np.concatenate(uv), np.concatenate(tri)
+
+
+def _polygons(model: _Model, face_map, meshed: dict[int, tuple], deflection: float) -> None:
+    """Each edge's polygon on triangulation, read off the faces OCCT meshed: the edge's fixed
+    polyline (the first face's polygon, in the edge's own order), and per pcurve the knots as the
+    face's mesh vertices (a meshed face) and in the face's parameters -- a meshed face's at its
+    nodes, an unmeshed face's where its pcurve puts the edge's parameters, each checked against the
+    polyline's point and found by the surface's inverse where the pcurve does not put it there."""
+    from OCP.BRep import BRep_Tool
+    from OCP.gp import gp_Pnt, gp_Pnt2d
+    from OCP.ShapeAnalysis import ShapeAnalysis_Surface
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.TopoDS import TopoDS
+
+    triangulations: dict[int, tuple] = {}
+    for index in meshed:
+        location = TopLoc_Location()
+        face = TopoDS.Face_s(face_map.FindKey(index + 1))
+        triangulations[index] = (BRep_Tool.Triangulation_s(face, location), location)
+    polygons: dict[int, tuple[np.ndarray, np.ndarray]] = {}  # pcurve index -> (nodes, params)
+    def read(polygon):
+        nodes = np.fromiter(polygon.Nodes(), np.int32, polygon.NbNodes()) - 1
+        params = np.fromiter(polygon.Parameters().Array1(), np.float64, polygon.NbNodes())
+        if not (params[1:] >= params[:-1]).all():
+            order = np.argsort(params, kind="stable")
+            nodes, params = nodes[order], params[order]
+        return nodes, params
+
+    for p, (index, edge, curve, _first, _last, degenerated) in enumerate(model.pcurve_edges):
+        if degenerated or index not in triangulations:
+            continue
+        triangulation, location = triangulations[index]
+        polygon = BRep_Tool.PolygonOnTriangulation_s(edge, triangulation, location)
+        if polygon is None or not polygon.HasParameters() or polygon.NbNodes() < 2:
+            continue
+        nodes, params = read(polygon)
+        face = TopoDS.Face_s(face_map.FindKey(index + 1))
+        if BRep_Tool.IsClosed_s(edge, face):
+            # A seam edge has a polygon per side. Which BRep_Tool returns for which orientation
+            # of the edge does not follow the rule it applies to the pcurves, so the side is
+            # chosen by where this pcurve is: the polygon whose first node is on it.
+            other = BRep_Tool.PolygonOnTriangulation_s(TopoDS.Edge_s(edge.Reversed()), triangulation, location)
+            if other is not None and other.HasParameters() and other.NbNodes() >= 2:
+                other_nodes, other_params = read(other)
+                uv = meshed[index][2]
+                at = np.array(curve.Value(float(params[0])).Coord())
+                other_at = np.array(curve.Value(float(other_params[0])).Coord())
+                if (np.abs(uv[other_nodes[0]] - other_at).max() < np.abs(uv[nodes[0]] - at).max()):
+                    nodes, params = other_nodes, other_params
+        edge_index = model.pcurve_i[p][0] - 1
+        if edge_index >= 0 and edge_index not in model.edge_poly and model.edge_i[edge_index][0] != 0:
+            model.edge_poly[edge_index] = (meshed[index][0][nodes].astype(np.float64), params)
+        polygons[p] = (nodes, params)
+    # Each pcurve's knots: a meshed face's own polygon, else the edge's polyline in this face.
+    knot_nodes: list[np.ndarray] = []
+    knot_uv: list[np.ndarray] = []
+    inverses: dict[int, Any] = {}
+    for p, (index, edge, curve, first, last, degenerated) in enumerate(model.pcurve_edges):
+        nodes = uv = None
+        edge_index = model.pcurve_i[p][0] - 1
+        polyline = model.edge_poly.get(edge_index) if edge_index >= 0 else None
+        if p in polygons:
+            nodes, params = polygons[p]
+            uv = meshed[index][2][nodes]
+            if polyline is not None and len(params) != len(polyline[1]):
+                nodes = uv = None  # another face's polygon on this edge: labelled by position instead
+        elif polyline is not None and not degenerated and index not in model.unreadable:
+            points, params = polyline
+            uv = np.array([curve.Value(float(t)).Coord() for t in params], np.float64).reshape(-1, 2)
+            # Where the pcurve does not put the edge's parameter at the polyline's point (an edge
+            # not SameParameter), the surface's inverse does -- on the period the pcurve is on,
+            # not the one the inverse normalizes to.
+            face = TopoDS.Face_s(face_map.FindKey(index + 1))
+            surface = BRep_Tool.Surface_s(face)
+            periods = model.face_d[index, 20:22]
+            for k in range(len(params)):
+                at = surface.Value(float(uv[k, 0]), float(uv[k, 1]))
+                target = gp_Pnt(*points[k].tolist())
+                if at.Distance(target) > deflection:
+                    if index not in inverses:
+                        inverses[index] = ShapeAnalysis_Surface(surface)
+                    found = inverses[index].NextValueOfUV(gp_Pnt2d(float(uv[k, 0]), float(uv[k, 1])), target,
+                                                          deflection * 1e-3, deflection)
+                    if inverses[index].Gap() <= deflection:
+                        where = np.array([found.X(), found.Y()])
+                        for d in range(2):
+                            if periods[d] > 0:
+                                where[d] += round((uv[k, d] - where[d]) / periods[d]) * periods[d]
+                        uv[k] = where
+        row = model.pcurve_i[p]
+        if nodes is not None:
+            row[8], row[9] = sum(len(k) for k in knot_nodes), len(nodes)
+            knot_nodes.append(nodes.astype(np.int32))
+        if uv is not None:
+            row[10], row[11] = sum(len(k) for k in knot_uv), len(uv)
+            knot_uv.append(np.ascontiguousarray(uv, np.float64))
+    model.knot_nodes, model.knot_uv = knot_nodes, knot_uv
+    for edge_index, (points, params) in model.edge_poly.items():
+        model.edge_i[edge_index][9] = sum(len(model.edge_poly[k][1]) for k in model.edge_poly if k < edge_index)
+        model.edge_i[edge_index][10] = len(params)
+
+
 def _array(values, dtype, columns: int) -> np.ndarray:
+    if isinstance(values, np.ndarray):
+        array_ = values.astype(dtype, copy=False).reshape(-1, columns) if values.size else np.zeros((1, columns), dtype)
+        return np.ascontiguousarray(array_)
     return np.ascontiguousarray(np.asarray(values, dtype).reshape(-1, columns) if len(values) else np.zeros((1, columns), dtype))
 
 
-def _request(model: _Model, *, chord: float, angle: float, failure: list) -> tuple[_Input, Any]:
+def _request(model: _Model, *, chord: float, angle: float, deflection: float, failure: list) -> tuple[_Input, Any]:
     """The library's input for the model, and what must outlive the call: the tables it points
     into and the callback through which it asks the host to evaluate (each failure noted in
     ``failure``)."""
+    from cadgen.tessellation_policy import VERIFICATION
+
     face_uv = model.face_d[:, 0:4]
 
     def callback(_user, what: int, index: int, a: float, b: float, out) -> int:
@@ -701,35 +1040,48 @@ def _request(model: _Model, *, chord: float, angle: float, failure: list) -> tup
             failure.append(error)
             return 1
 
+    edge_poly = sorted(model.edge_poly.items())
     tables = {
         "face_i": _array(model.face_i, np.int32, _FACE_I), "face_d": _array(model.face_d, np.float64, _FACE_D),
+        "mesh_i": _array(model.mesh_i, np.int32, _MESH_I), "mesh_xyz": _array(model.mesh_xyz, np.float64, 3),
+        "mesh_nrm": _array(model.mesh_nrm, np.float64, 3), "mesh_uv": _array(model.mesh_uv, np.float64, 2),
+        "mesh_tri": _array(model.mesh_tri, np.int32, 3),
         "loop_i": _array(model.loop_i, np.int32, 2), "pcurve_i": _array(model.pcurve_i, np.int32, _PCURVE_I),
-        "pcurve_d": _array(model.pcurve_d, np.float64, _PCURVE_D), "edge_i": _array(model.edge_i, np.int32, _EDGE_I),
-        "edge_d": _array(model.edge_d, np.float64, _EDGE_D), "swept_i": _array(model.swept_i, np.int32, _SWEPT_I),
-        "swept_d": _array(model.swept_d, np.float64, _SWEPT_D), "basis_i": _array(model.basis_i, np.int32, _EDGE_I),
-        "basis_d": _array(model.basis_d, np.float64, _EDGE_D), "bsurface_i": _array(model.bsurface_i, np.int32, _BSURF_I),
-        "bsurface_d": _array(model.bsurface_d, np.float64, _BSURF_D), "pole_d": _array(model.pole_d, np.float64, _POLE_D),
-        "reals": _array(model.reals, np.float64, 1),
+        "pcurve_d": _array(model.pcurve_d, np.float64, _PCURVE_D),
+        "knot_nodes": _array(np.concatenate(model.knot_nodes) if model.knot_nodes else np.zeros(0, np.int32), np.int32, 1),
+        "knot_uv": _array(np.concatenate(model.knot_uv) if model.knot_uv else np.zeros((0, 2)), np.float64, 2),
+        "edge_i": _array(model.edge_i, np.int32, _EDGE_I), "edge_d": _array(model.edge_d, np.float64, _EDGE_D),
+        "edge_poly_xyz": _array(np.concatenate([points for _, (points, _) in edge_poly]) if edge_poly else np.zeros((0, 3)),
+                                np.float64, 3),
+        "edge_poly_t": _array(np.concatenate([params for _, (_, params) in edge_poly]) if edge_poly else np.zeros(0),
+                              np.float64, 1),
+        "swept_i": _array(model.swept_i, np.int32, _SWEPT_I), "swept_d": _array(model.swept_d, np.float64, _SWEPT_D),
+        "basis_i": _array(model.basis_i, np.int32, _EDGE_I), "basis_d": _array(model.basis_d, np.float64, _EDGE_D),
+        "bsurface_i": _array(model.bsurface_i, np.int32, _BSURF_I), "bsurface_d": _array(model.bsurface_d, np.float64, _BSURF_D),
+        "pole_d": _array(model.pole_d, np.float64, _POLE_D), "reals": _array(model.reals, np.float64, 1),
     }
     hook = _CALLBACK(callback)
     request = _Input(face_count=len(model.face_i), edge_count=len(model.edge_i), pcurve_count=len(model.pcurve_i),
                      bsurface_count=len(model.bsurface_i), swept_count=len(model.swept_i),
-                     basis_count=len(model.basis_i), chord=chord, angle=angle, callback=hook, user=None,
-                     **{name: array.ctypes.data_as(ctypes.POINTER(ctypes.c_int32 if array.dtype == np.int32
-                                                                  else ctypes.c_double))
-                        for name, array in tables.items()})
+                     basis_count=len(model.basis_i), chord=chord, angle=angle, deflection=deflection,
+                     repair_at=VERIFICATION["repairAt"], verified_at=VERIFICATION["verifiedAt"],
+                     callback=hook, user=None,
+                     **{name: array_.ctypes.data_as(_I32P if array_.dtype == np.int32 else _F64P)
+                        for name, array_ in tables.items()})
     return request, (tables, hook)
 
 
-def _run(model: _Model, *, chord: float, angle: float):
-    """The library's mesh of the model: (per-face (positions, normals, triangles) by ordinal, each
-    edge's polyline by ordinal, the component's scale, the faces too narrow to resolve)."""
+def _run(model: _Model, *, chord: float, angle: float, deflection: float) -> dict:
+    """The library's verdict and mesh of the model: ``meshes`` (per face by ordinal: positions,
+    normals, triangles), ``polylines`` (per edge by ordinal), ``scale``, ``states`` (per face by
+    ordinal: the library's FACE_* state), and ``report`` (per face by ordinal: who made it, the
+    worst sample off the surface in deflections, and what verification found and did)."""
     library = _library()
     failure: list[BaseException] = []
-    request, keep = _request(model, chord=chord, angle=angle, failure=failure)
+    request, keep = _request(model, chord=chord, angle=angle, deflection=deflection, failure=failure)
     pointer = library.cadgen_tessellate(ctypes.byref(request))
     if not pointer:
-        raise MemoryError("cadgen's tessellator could not allocate its result")
+        raise MemoryError("cadgen's mesh library could not allocate its result")
     try:
         result = pointer.contents
         if result.error:
@@ -738,18 +1090,21 @@ def _run(model: _Model, *, chord: float, angle: float):
                 raise MeshProductionError(f"{message}: {type(failure[0]).__name__}: {failure[0]}") from failure[0]
             raise MeshProductionError(message)
         faces, edges = result.face_count, result.edge_count
-        states = np.ctypeslib.as_array(result.face_state, (faces,)).copy() if faces else np.zeros(0, np.int32)
-        vertices = np.ctypeslib.as_array(result.face_vertices, (faces,)).copy() if faces else np.zeros(0, np.int64)
-        triangles = np.ctypeslib.as_array(result.face_triangles, (faces,)).copy() if faces else np.zeros(0, np.int64)
-        positions = (np.ctypeslib.as_array(result.positions, (result.vertex_total, 3)).copy() if result.vertex_total
-                     else np.zeros((0, 3), np.float32))
-        normals = (np.ctypeslib.as_array(result.normals, (result.vertex_total, 3)).copy() if result.vertex_total
-                   else np.zeros((0, 3), np.float32))
-        indices = (np.ctypeslib.as_array(result.triangles, (result.triangle_total, 3)).copy() if result.triangle_total
-                   else np.zeros((0, 3), np.uint32))
-        counts = np.ctypeslib.as_array(result.edge_points, (edges,)).copy() if edges else np.zeros(0, np.int64)
-        points = (np.ctypeslib.as_array(result.points, (result.point_total, 3)).copy() if result.point_total
-                  else np.zeros((0, 3), np.float64))
+
+        def copy(pointer_, shape, empty):
+            return np.ctypeslib.as_array(pointer_, shape).copy() if shape[0] else empty
+
+        states = copy(result.face_state, (faces,), np.zeros(0, np.int32))
+        sources = copy(result.face_source, (faces,), np.zeros(0, np.int32))
+        worst = copy(result.face_worst, (faces,), np.zeros(0, np.float64))
+        reports = copy(result.face_report, (faces, _REPORT_N), np.zeros((0, _REPORT_N), np.int64))
+        vertices = copy(result.face_vertices, (faces,), np.zeros(0, np.int64))
+        triangles = copy(result.face_triangles, (faces,), np.zeros(0, np.int64))
+        positions = copy(result.positions, (result.vertex_total, 3), np.zeros((0, 3), np.float32))
+        normals = copy(result.normals, (result.vertex_total, 3), np.zeros((0, 3), np.float32))
+        indices = copy(result.triangles, (result.triangle_total, 3), np.zeros((0, 3), np.uint32))
+        counts = copy(result.edge_points, (edges,), np.zeros(0, np.int64))
+        points = copy(result.points, (result.point_total, 3), np.zeros((0, 3), np.float64))
         scale = result.scale
     finally:
         library.cadgen_tessellate_free(pointer)
@@ -757,11 +1112,10 @@ def _run(model: _Model, *, chord: float, angle: float):
     meshes = {}
     vertex_at = triangle_at = 0
     for index in range(faces):
-        if states[index] != _FACE_MESHED:
-            continue
         v, t = int(vertices[index]), int(triangles[index])
-        meshes[index + 1] = (positions[vertex_at:vertex_at + v], normals[vertex_at:vertex_at + v],
-                             indices[triangle_at:triangle_at + t])
+        if t:
+            meshes[index + 1] = (positions[vertex_at:vertex_at + v], normals[vertex_at:vertex_at + v],
+                                 indices[triangle_at:triangle_at + t])
         vertex_at += v
         triangle_at += t
     polylines = {}
@@ -771,8 +1125,11 @@ def _run(model: _Model, *, chord: float, angle: float):
         if model.edge_i[index][0]:
             polylines[index + 1] = points[point_at:point_at + count]
         point_at += count
-    unresolved = {index + 1 for index in range(faces) if states[index] == _FACE_UNRESOLVED}
-    return meshes, polylines, scale, unresolved
+    report = {index + 1: {"madeBy": _MADE_BY.get(int(sources[index]), "none"), "worst": float(worst[index]),
+                          **dict(zip(_REPORT_FIELDS, reports[index].tolist()))}
+              for index in range(faces)}
+    return {"meshes": meshes, "polylines": polylines, "scale": scale,
+            "states": {index + 1: int(states[index]) for index in range(faces)}, "report": report}
 
 
 # --- The component's body ------------------------------------------------------------------
@@ -796,22 +1153,22 @@ def _rows(table: dict, kind: str, *names: str) -> list[tuple]:
     return sorted(tuple(row[index] for index in at) for row in table[kind])
 
 
-def _model(topods, face_map, edge_map, *, host_all: bool = False) -> _Model:
-    """The component's geometry as the library reads it. ``host_all`` evaluates every trim, edge
-    and non-analytic surface through OCCT instead of the library's own B-splines and conics."""
+def _model(topods, face_map, edge_map) -> _Model:
+    """The component's geometry as the library reads it."""
     model = _Model(face_map.Extent(), edge_map.Extent())
-    _faces(model, face_map, edge_map, host_all=host_all)
-    _edges(model, edge_map, host_all=host_all)
+    _faces(model, face_map, edge_map)
+    _edges(model, edge_map)
     return model
 
 
 def mesh_component(topods, table: dict, face_colors: dict, *, part: str, chord: float, angle: float) -> bytes:
     """Mesh one unlocated component and return its GLB body, which names ``part``.
 
-    ``table`` is the component's selector table (its faces' areas, its edges' classes) and
-    ``face_colors`` its intrinsic face colours, by the same ordinals; ``chord`` is relative to the
-    component's extent and ``angle`` in radians. A failure inside OCCT or the tessellator is the
-    component's ``MeshProductionError``.
+    ``topods`` is a private decode of the component's BREP: meshing stores OCCT's triangulation on
+    it. ``table`` is the component's selector table (its faces' exact areas, its edges' exact
+    lengths and classes) and ``face_colors`` its intrinsic face colours, by the same ordinals;
+    ``chord`` is relative to the component's extent and ``angle`` in radians. A failure inside
+    OCCT or the library is the component's ``MeshProductionError``.
     """
     try:
         return _mesh_component(topods, table, face_colors, part=part, chord=chord, angle=angle)
@@ -826,33 +1183,48 @@ def mesh_component(topods, table: dict, face_colors: dict, *, part: str, chord: 
 
 
 def _mesh_component(topods, table: dict, face_colors: dict, *, part: str, chord: float, angle: float,
-                    host_all: bool = False) -> bytes:
+                    report: dict | None = None, guard: Callable[[int], bool] | None = None) -> bytes:
+    """``mesh_component``'s work. ``report``, when given, receives what the library found and did
+    per face (``_run``'s ``report``), the faces it named and who meshed what; ``guard``, when given,
+    decides by face ordinal which faces the library meshes instead of OCCT, in place of the cost
+    guard (a test of the library's own tessellator on a whole solid)."""
     from cadgen.store.meshes import encode_payload
 
     face_map, edge_map = _maps(topods)
-    table_faces, table_edges = _rows(table, "faces", "area"), _rows(table, "edges", "visibilityClass")
+    table_faces = _rows(table, "faces", "area")
+    table_edges = _rows(table, "edges", "visibilityClass", "length")
     if len(table_faces) != face_map.Extent() or len(table_edges) != edge_map.Extent():
         raise MeshProductionError(
             f"the component's BREP has {face_map.Extent()} faces and {edge_map.Extent()} edges, "
             f"its selector table {len(table_faces)} and {len(table_edges)}"
         )
-    meshes, polylines, scale, unresolved = _run(_model(topods, face_map, edge_map, host_all=host_all),
-                                                 chord=chord, angle=angle)
-    # A face too small for the mesh to resolve -- its area under the square of the chord, inside
-    # the error every triangle may carry, or its trim narrower than the tolerance it is sampled
-    # to -- may come out empty without being named.
-    deflection = chord * scale
+    deflection = chord * _diagonal(topods)
+    model = _model(topods, face_map, edge_map)
+    if guard is not None:
+        model.guarded = {index for index in range(face_map.Extent()) if guard(index + 1)} - model.unreadable
+    meshed = _occt_mesh(topods, face_map, model.guarded | model.unreadable, deflection, angle)
+    _take_meshes(model, meshed)
+    _polygons(model, face_map, meshed, deflection)
+    outcome = _run(model, chord=chord, angle=angle, deflection=deflection)
+    meshes, polylines, states = outcome["meshes"], outcome["polylines"], outcome["states"]
+    # A face too small for the mesh to resolve -- its area under the square of the deflection,
+    # inside the error every triangle may carry, or its trim narrower than the tolerance it is
+    # sampled to -- may come out empty without being named; any other empty face is named.
     unmeshed = [ordinal for ordinal, area in table_faces
-                if ordinal not in unresolved and float(area or 0.0) >= deflection * deflection
-                and not len(meshes.get(ordinal, ((), (), ()))[2])]
+                if states[ordinal] != _FACE_UNRESOLVED and float(area or 0.0) >= deflection * deflection
+                and ordinal not in meshes]
+    unverified = [ordinal for ordinal in sorted(states) if states[ordinal] == _FACE_UNVERIFIED and ordinal in meshes]
+    if report is not None:
+        report.update(faces=outcome["report"], unmeshed=unmeshed, unverified=unverified, deflection=deflection,
+                      guarded=sorted(index + 1 for index in model.guarded),
+                      refused=sorted(index + 1 for index in range(face_map.Extent())
+                                     if model.mesh_i[index][0] == _MESH_OCCT and index not in meshed))
 
     position_parts, normal_parts, index_parts, face_ranges = [], [], [], []
     vertex_base = index_start = 0
     empty = (np.zeros((0, 3), np.float32), np.zeros((0, 3), np.float32), np.zeros((0, 3), np.uint32))
     for ordinal, _area in table_faces:
         positions, normals, triangles = meshes.get(ordinal, empty)
-        if not len(triangles):
-            positions, normals, triangles = empty
         position_parts.append(positions)
         normal_parts.append(normals)
         index_parts.append(triangles.reshape(-1) + np.uint32(vertex_base))
@@ -866,7 +1238,7 @@ def _mesh_component(topods, table: dict, face_colors: dict, *, part: str, chord:
     indices = np.concatenate(index_parts).astype("<u4") if index_parts else np.zeros(0, "<u4")
 
     edges_out = []
-    for ordinal, visibility in table_edges:
+    for ordinal, visibility, _length in table_edges:
         points = polylines.get(ordinal)
         if points is not None and len(points) >= 2:
             edges_out.append((ordinal, str(visibility or "none"), np.asarray(points, dtype=np.float64).astype("<f4")))
@@ -879,4 +1251,4 @@ def _mesh_component(topods, table: dict, face_colors: dict, *, part: str, chord:
         low = high = np.zeros(3, np.float32)
     bounds = {"min": [float(v) for v in low], "max": [float(v) for v in high]}
     return encode_payload(part=part, positions=positions, normals=normals, indices=indices, face_ranges=face_ranges,
-                          edges=edges_out, bounds=bounds, unmeshed_faces=unmeshed)
+                          edges=edges_out, bounds=bounds, unmeshed_faces=unmeshed, unverified_faces=unverified)

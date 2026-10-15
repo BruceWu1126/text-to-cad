@@ -71,17 +71,37 @@ static void bmap_clear(bmap *b) {
   b->entries.n = 0;
 }
 
-/* One face's mesh before the faces are made to meet. */
+/* Who made a face's triangles. */
+enum { SOURCE_LIBRARY = 0, SOURCE_OCCT = 1 };
+
+/* One face's mesh before the faces are made to meet: its vertices in the face's parameters, in
+ * space and their normals (the surface's own, whichever way the face is oriented), its triangles
+ * wound positively in the parameters, and the model edges its boundary vertices lie on. */
 typedef struct {
+  int source;
   vd uv, xyz, nrm;
   vi tri;
   bmap boundary;
-  ring *loops;
+  ring *loops;     /* a library face's sampled trim loops; an OCCT face has none */
   i64 loop_count;
   int singular_grid;
   vb minted; /* per vertex: made by conformity */
   i64 minted_count;
 } raw_face;
+
+/* Whether the mesh edge (p, q) runs along a fixed model edge (OCCT's polyline), which a face the
+ * library meshes never splits: the face OCCT meshed across it has exactly the polyline's knots. */
+static int on_fixed_edge(const bmap *boundary, const shared *edges, i32 edge_count, i32 p, i32 q) {
+  const labels *lp = bmap_get(boundary, p), *lq = bmap_get(boundary, q);
+  if (!lp || !lq) return 0;
+  for (i64 i = 0; i < lp->n; i++) {
+    i32 ord = lp->v[i].ord;
+    if (ord <= 0 || ord > edge_count || !edges[ord - 1].present || !edges[ord - 1].fixed) continue;
+    for (i64 j = 0; j < lq->n; j++)
+      if (lq->v[j].ord == ord) return 1;
+  }
+  return 0;
+}
 
 /* Each triangle split by its marked edges into four, three or two, in order; which of them are new;
  * and each new midpoint's edge, numbered from `first_index` in the order the triangles first reach
@@ -165,10 +185,12 @@ static void split_marked(arena *A, arena *T, const vi *tri, const u64 *marked, i
   fresh->cap = flags.cap;
 }
 
-/* The key of the edge a triangle with no edge past the tolerance marks -- its longest uv edge where
- * its centre strays from the surface or its facet tilts off the surface's normal -- or 0 for none. */
+/* The key of the edge a triangle with no edge past the tolerance marks -- its longest uv edge not
+ * along a fixed model edge, where its centre strays from the surface or its facet tilts off the
+ * surface's normal -- or 0 for none. */
 static int triangle_mark(run *r, const host *h, const surface *s, i32 a, i32 b, i32 c, const double *uv,
-                         const double *xyz, const double *nrm, double chord_limit, double angle_cos, u64 *key) {
+                         const double *xyz, const double *nrm, double chord_limit, double angle_cos,
+                         const bmap *boundary, const shared *edges, i32 edge_count, u64 *key) {
   double ua = uv[2 * a], va = uv[2 * a + 1], ub = uv[2 * b], vb = uv[2 * b + 1], uc = uv[2 * c], vc = uv[2 * c + 1];
   double sc[3];
   surface_value(r, h, s, (ua + ub + uc) / 3, (va + vb + vc) / 3, sc);
@@ -187,6 +209,7 @@ static int triangle_mark(run *r, const host *h, const surface *s, i32 a, i32 b, 
   double longest = -1.0;
   for (int k = 0; k < 3; k++) {
     i32 p = corners[k], q = corners[(k + 1) % 3];
+    if (on_fixed_edge(boundary, edges, edge_count, p, q)) continue;
     double du = uv[2 * p] - uv[2 * q], dv = uv[2 * p + 1] - uv[2 * q + 1];
     double sq = du * du + dv * dv;
     if (sq > longest) {
@@ -195,6 +218,7 @@ static int triangle_mark(run *r, const host *h, const surface *s, i32 a, i32 b, 
       lq = q;
     }
   }
+  if (longest < 0) return 0;
   *key = edge_key(lp, lq);
   return 1;
 }
@@ -462,7 +486,7 @@ static int tessellate_face_raw(run *r, arenas M, const host *h, const face *f, c
    * the chord and angle criteria at once and its pole row collapsed, with no refinement after. */
   double u0 = f->uv[0], u1 = f->uv[1], v0 = f->uv[2], v1 = f->uv[3];
   int singular_grid = 0;
-  if (loop_count == 1 && (singular_u(&f->s, v0) || singular_u(&f->s, v1))) {
+  if (loop_count == 1 && (singular_u(r, &f->s, v0) || singular_u(r, &f->s, v1))) {
     singular_grid = 1;
     for (i64 i = 0; i < loops[0].uv.n / 2 && singular_grid; i++) {
       double u = loops[0].uv.v[2 * i], v = loops[0].uv.v[2 * i + 1];
@@ -487,14 +511,15 @@ static int tessellate_face_raw(run *r, arenas M, const host *h, const face *f, c
     PUSH3(M.A, nrm, n[0], n[1], n[2]);
   }
   vi tri = g->tri;
+  i32 *remap = NULL;
   if (singular_grid) {
-    i32 *remap = (i32 *)arena_alloc(M.T, sizeof(i32) * (size_t)count);
+    remap = (i32 *)arena_alloc(M.T, sizeof(i32) * (size_t)count);
     vd pole_keys = {NULL, 0, 0};
     vi pole_index = {NULL, 0, 0};
     for (i64 i = 0; i < count; i++) {
       remap[i] = (i32)i;
       double v = uv.v[2 * i + 1];
-      if (!singular_u(s, v)) continue;
+      if (!singular_u(r, s, v)) continue;
       i64 found = -1;
       for (i64 k = 0; k < pole_keys.n; k++)
         if (pole_keys.v[k] == v) found = k;
@@ -514,6 +539,31 @@ static int tessellate_face_raw(run *r, arenas M, const host *h, const face *f, c
       PUSH3(M.A, regular, a, b, c);
     }
     tri = regular;
+  }
+  /* Boundary vertices pinned onto their shared edges before refinement reads them, so a stretch
+   * along a fixed edge is known and never split: the face across it holds exactly those knots. */
+  pin_boundary(r, M.A, M.T, h, g, &uv, &xyz, &out->boundary, edges, edge_count);
+  if (remap) {
+    /* The pole's one vertex lies on every edge that met the pole: it takes the labels of the
+     * vertices folded into it. */
+    for (i64 i = 0; i < count; i++) {
+      if (remap[i] == i) continue;
+      const labels *from = bmap_get(&out->boundary, i);
+      if (!from) continue;
+      labels moved = *from;
+      if (!bmap_get(&out->boundary, remap[i])) {
+        labels none = {NULL, 0, 0};
+        bmap_set(M.A, &out->boundary, remap[i], none);
+      }
+      labels *into = bmap_get(&out->boundary, remap[i]);
+      for (i64 q = 0; q < moved.n; q++) {
+        int present = 0;
+        for (i64 j = 0; j < into->n && !present; j++)
+          if (into->v[j].ord == moved.v[q].ord && into->v[j].f == moved.v[q].f) present = 1;
+        if (!present) PUSH(M.A, *into, moved.v[q]);
+      }
+      bmap_pop(&out->boundary, i);
+    }
   }
   double angle_cos = cos(angle);
   /* Each edge's verdict, made once, and the surface's point at its middle that it read: the
@@ -553,8 +603,9 @@ static int tessellate_face_raw(run *r, arenas M, const host *h, const face *f, c
           double dx = v.mid[0] - (xp[0] + xq[0]) / 2, dy = v.mid[1] - (xp[1] + xq[1]) / 2,
                  dz = v.mid[2] - (xp[2] + xq[2]) / 2;
           const double *np_ = nrm.v + 3 * p, *nq = nrm.v + 3 * q;
-          v.bad = sqrt(dx * dx + dy * dy + dz * dz) > chord_limit ||
-                  np_[0] * nq[0] + np_[1] * nq[1] + np_[2] * nq[2] < angle_cos;
+          v.bad = (sqrt(dx * dx + dy * dy + dz * dz) > chord_limit ||
+                   np_[0] * nq[0] + np_[1] * nq[1] + np_[2] * nq[2] < angle_cos) &&
+                  !on_fixed_edge(&out->boundary, edges, edge_count, p, q);
           if (v.bad)
             surface_normal(r, h, s, (uv.v[2 * p] + uv.v[2 * q]) / 2, (uv.v[2 * p + 1] + uv.v[2 * q + 1]) / 2, f->uv,
                            v.nrm);
@@ -567,7 +618,8 @@ static int tessellate_face_raw(run *r, arenas M, const host *h, const face *f, c
       }
       if (!any_edge) {
         u64 key;
-        if (triangle_mark(r, h, s, corners[0], corners[1], corners[2], uv.v, xyz.v, nrm.v, chord_limit, angle_cos, &key))
+        if (triangle_mark(r, h, s, corners[0], corners[1], corners[2], uv.v, xyz.v, nrm.v, chord_limit, angle_cos,
+                          &out->boundary, edges, edge_count, &key))
           PUSH(M.T, marks, key);
       }
     }
@@ -608,8 +660,9 @@ static int tessellate_face_raw(run *r, arenas M, const host *h, const face *f, c
     count = uv.n / 2;
     arena_reset(M.T, mark);
   }
-  /* Every boundary vertex pinned onto its shared edge polyline. */
+  /* Every boundary vertex pinned onto its shared edge polyline, the ones refinement made too. */
   pin_boundary(r, M.A, M.T, h, g, &uv, &xyz, &out->boundary, edges, edge_count);
+  out->source = SOURCE_LIBRARY;
   out->uv = uv;
   out->xyz = xyz;
   out->nrm = nrm;

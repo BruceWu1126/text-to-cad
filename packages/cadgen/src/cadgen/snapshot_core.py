@@ -2002,17 +2002,18 @@ async def _render_job(renderer: "BatchSnapshotRenderer", job: Mapping[str, objec
 
 
 def _unmeshed_view_warnings(job: Mapping[str, object]) -> list[str]:
-    """A STEP view's warnings for what it could not draw: each part no mesh could be made of,
-    which the page left out (``cadgen.snapshot_parts.failed_part_warnings``), then each part
-    it drew without a face no mesher could cover (``unmeshed_warnings``). Asked once the page
-    has drawn, when every mesh it drew is stored. A part the view hides is not one it drew."""
+    """A STEP view's warnings for what it could not draw right: each part no mesh could be made
+    of, which the page left out (``cadgen.snapshot_parts.failed_part_warnings``), then each part
+    it drew without a face no mesher could cover, or with a face drawn off its exact surface
+    (``mesh_warnings``). Asked once the page has drawn, when every mesh it drew is stored. A
+    part the view hides is not one it drew."""
     resolved = job.get("resolved") if is_plain_object(job.get("resolved")) else {}
     package = resolved.get("package")
     if (str(resolved.get("kind") or "").lower() not in ("step", "stp") or not is_plain_object(package)
             or not is_plain_object(package.get("descriptor"))):
         return []
     from cadgen.assembly_lookup import assembly_group_members, assembly_occurrence_rows
-    from cadgen.snapshot_parts import failed_part_warnings, filter_occurrences, unmeshed_warnings
+    from cadgen.snapshot_parts import failed_part_warnings, filter_occurrences, mesh_warnings
 
     selection = job.get("selection") if is_plain_object(job.get("selection")) else {}
     descriptor = package["descriptor"]
@@ -2022,7 +2023,7 @@ def _unmeshed_view_warnings(job: Mapping[str, object]) -> list[str]:
     except ValueError:
         return []
     return [*failed_part_warnings(descriptor, rows, "the view does not draw {them}"),
-            *unmeshed_warnings(descriptor, rows, "the view does not draw {them}")]
+            *mesh_warnings(descriptor, rows, "the view does not draw {them}")]
 
 
 async def render_resolved_job_packet(

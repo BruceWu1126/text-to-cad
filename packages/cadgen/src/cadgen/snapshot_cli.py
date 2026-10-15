@@ -1054,7 +1054,7 @@ def resolve_step_render_job(
         # The parts are cadgen's facts: the rows every ref resolves against, the
         # store's exact boxes and its stored meshes' counts (cadgen.snapshot_parts).
         # Nothing is drawn, so no browser starts.
-        from cadgen.snapshot_parts import failed_part_warnings, list_rows, unmeshed_warnings
+        from cadgen.snapshot_parts import failed_part_warnings, list_rows, mesh_warnings
 
         try:
             listed = filter_occurrences(assembly_occurrence_rows(descriptor, None), normalized_selection, groups=groups)
@@ -1068,7 +1068,7 @@ def resolve_step_render_job(
         except ValueError as error:
             raise SnapshotError(str(error)) from None
         warnings = [*failed_part_warnings(descriptor, listed, "the list leaves {them} out"),
-                    *unmeshed_warnings(descriptor, listed, "its triangle count leaves {them} out")]
+                    *mesh_warnings(descriptor, listed, "its triangle count leaves {them} out")]
         if warnings:
             resolved["warnings"] = warnings
         if debug_enabled:
