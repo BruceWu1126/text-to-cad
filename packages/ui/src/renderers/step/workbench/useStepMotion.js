@@ -8,16 +8,26 @@ import {
 import { loadSourceAnimation } from "@text-to-cad/core/common/animationRuntime.js";
 import { entryPoseUrl } from "@text-to-cad/core/lib/entryAssets.js";
 import { useAnimationClockStore } from "./animationClockStore.js";
+import { jsonDigest } from "./canonicalJson.js";
 import { fileKey as fileKeyOf } from "./entryPaths.js";
 import { restoreMotionAnimation, restoreMotionParameters, stepPoseLogic } from "./motionRestore.js";
 import { useStepMotionControls } from "./useStepMotionControls.js";
 
 function sourceAnimationForEntry(entry) { return entry?.animation || null; }
-// A routine that bends a tube plays cadgen's skins for the document's current bytes, which
+// The routines are named by their keyframes: one digest of the baked clips themselves, so a
+// build's preview and the file it saves, which carry the same keyframes, are one routine, and only
+// a changed clip is read again. Digested once per animation object, which an entry keeps across
+// renders. A routine that bends a tube plays cadgen's skins for the document's current bytes, which
 // its URL names: a rebuild that moves the tube loads them again, from rest.
+const animationDigests = new WeakMap();
+function animationDigest(animation) {
+  if (!animationDigests.has(animation)) animationDigests.set(animation, jsonDigest(animation));
+  return animationDigests.get(animation);
+}
 function sourceAnimationKeyForEntry(entry) {
-  return sourceAnimationForEntry(entry)
-    ? `${fileKeyOf(entry)}:${entry?.animationHash || entry?.documentHash || entry?.hash || "animation"}${entry?.tubeSkinsUrl ? `:${entry.tubeSkinsUrl}` : ""}`
+  const animation = sourceAnimationForEntry(entry);
+  return animation
+    ? `${fileKeyOf(entry)}:${animationDigest(animation)}${entry?.tubeSkinsUrl ? `:${entry.tubeSkinsUrl}` : ""}`
     : "";
 }
 
@@ -120,10 +130,11 @@ export function useStepMotion({ entry, fileKey, resources, readStored }) {
   // with no animation resolves to no clips and no Animation tool, and a broken
   // one reports its own error without disturbing Position.
   //
-  // It is keyed on the animation's own identity (`animationKey`: the file and the hash of the
+  // It is keyed on the animation's own identity (`animationKey`: the file and a digest of the
   // routines' keyframes), never on the entry: an update of the model that leaves its routines as
-  // they were neither stops nor rewinds one that is playing, and only a changed routine is
-  // loaded again, from rest. The keyframes are read when the key changes.
+  // they were -- a build's preview, and the save that confirms it -- neither stops nor rewinds one
+  // that is playing, and only a changed routine is loaded again, from rest. The keyframes are read
+  // when the key changes.
   const animationSourceRef = useRef({ sourceAnimation, entry, resources });
   animationSourceRef.current = { sourceAnimation, entry, resources };
   // Putting the routine down (`useStepMotionControls`), which a reload below does: bound once the

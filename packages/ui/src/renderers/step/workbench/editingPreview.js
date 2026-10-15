@@ -1,6 +1,7 @@
-// A tab's view of the build feed for its file: whether a build is running, how far it has got and
-// whether it failed. Never geometry: the view always shows the saved file, updated in place when
-// the build writes it (STORE.md 9b).
+// A tab's view of the build feed for its file: whether a build is running, how far it has got,
+// whether it failed, and the preview revision it announced (`preview`: the names of artifact-side
+// objects, never geometry -- STORE.md 9b). The view shows the saved file, or that preview labelled
+// as one until the file replaces it in place.
 export const BUILDING_STATES = Object.freeze(["submitted", "queued", "building"]);
 
 export function initialEditingPreview() {
@@ -13,7 +14,33 @@ export function initialEditingPreview() {
     detail: "",
     updatedAt: 0,
     error: "",
+    preview: null,
   };
+}
+
+// The preview revision an answer names, as the state keeps it; null for an answer naming none
+// (the build's result does not exist yet).
+function previewRevision(value) {
+  const tree = String(value?.tree || "").trim();
+  if (!tree) return null;
+  const producer = value.producer && typeof value.producer === "object" && !Array.isArray(value.producer) ? value.producer : null;
+  const parts = value.parts && typeof value.parts === "object" && !Array.isArray(value.parts) ? value.parts : {};
+  return {
+    tree,
+    producer,
+    parts: Object.fromEntries(Object.entries(parts).map(([cid, part]) => [String(cid), String(part)])),
+    complete: value.complete === true,
+    annotations: String(value.annotations || "").trim() || null,
+  };
+}
+
+/**
+ * The annotations object as it binds to `preview`: the object itself when the build resolved it
+ * against the preview's tree, else null -- a late read of another revision's object, or a tree the
+ * feed has moved on from, binds nothing.
+ */
+export function previewAnnotationsFor(preview, object) {
+  return preview?.tree && object && typeof object === "object" && object.tree === preview.tree ? object : null;
 }
 
 /** Whether a build of the file is queued or running. */
@@ -24,7 +51,11 @@ export function editingBuildActive(state) {
 export function reduceEditingPreview(current, next) {
   if (!next || typeof next !== "object") return current;
   if (!next.epoch) {
-    return { ...current, state: "disconnected", phase: "", detail: "", updatedAt: 0, error: next.error || "" };
+    // The server lists no build of the file (no daemon, or one restarted since): there is no
+    // preview. A poll that failed says nothing of the build, so the preview in hand stays.
+    const listed = next.state === "disconnected";
+    return { ...current, state: "disconnected", phase: "", detail: "", updatedAt: 0, error: next.error || "",
+      preview: listed ? null : current.preview };
   }
   const previous = current.epoch && current.epoch !== next.epoch ? initialEditingPreview() : current;
   const revision = Number(next.revision) || 0;
@@ -45,5 +76,7 @@ export function reduceEditingPreview(current, next) {
     error: superseded ? "" : next.error || "",
     output: next.output,
     file: next.file || next.output,
+    // Named from the moment the result exists; a build the file moved past has none to show.
+    preview: superseded ? null : previewRevision(next.preview),
   };
 }

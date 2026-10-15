@@ -34,15 +34,17 @@ const SWING_CLIP = { id: 'swing', label: 'Swing', duration: 4, loop: true, track
     [0, 0, 0, 0, 0, Math.SQRT1_2, Math.SQRT1_2, 0, 0, 0, 0, 0, Math.SQRT1_2 * Math.PI / 16, -Math.SQRT1_2 * Math.PI / 16]] }] };
 // One save of hinge.step as the catalog lists it: new STEP bytes, and the sidecar written again
 // beside them (a new version on its URL, bound to those bytes), resolved into the articulation of
-// its mates and named poses, and its routines (`routine` is their keyframes' hash, which the
-// catalog lists as `animationHash`). No mates: no articulation; no routine: no animation.
-function saved(revision: number, { mates = [swing], poses = OPEN, routine = '', clips = [SWING_CLIP] }:
-  { mates?: { id: string; min: number; max: number }[]; poses?: object; routine?: string; clips?: object[] } = {}) {
+// its mates and named poses, and its routines (`clips`, their baked keyframes, which is what a
+// routine is keyed by). No mates: no articulation; no `clips`: no animation.
+function saved(revision: number, { mates = [swing], poses = OPEN, clips = null }:
+  { mates?: { id: string; min: number; max: number }[]; poses?: object; clips?: object[] | null } = {}) {
   const documentHash = String(revision).repeat(64);
   return { file: 'hinge.step', kind: 'part', hash: `tree-${revision}`, documentHash,
     ...(mates.length ? { poseUrl: `/__cad/asset?file=hinge.step.json&v=${revision}`, articulation: articulationOf(mates, poses) } : {}),
-    ...(routine ? { animation: { clips }, animationHash: routine } : {}) };
+    ...(clips ? { animation: { clips } } : {}) };
 }
+// The same routine, re-baked over a longer duration: a changed routine.
+const LONGER_SWING = { ...SWING_CLIP, duration: 5 };
 
 /**
  * The hook over one entry, as StepSurface mounts it, over a stored view whose pose is `stored`; at
@@ -116,14 +118,14 @@ it('the first articulation takes the stored pose within its limits, also one tha
 });
 
 it('an update that leaves the routine as it was neither stops nor rewinds it, and keeps the pose it set aside; a changed routine is loaded again, at rest', async () => {
-  const { result, rerender } = mount(saved(1, { routine: 'swing-1' }));
+  const { result, rerender } = mount(saved(1, { clips: [SWING_CLIP] }));
   await waitFor(() => expect(result.current.animationControls.clips).toHaveLength(1));
   act(() => result.current.onParameterChange('swing', 30));
   // Play takes the pose: Position's values are set aside, and the routine plays from rest.
   act(() => result.current.onPlayToggle());
   expect([result.current.animationState.playing, result.current.parameterValues]).toEqual([true, { swing: 0 }]);
 
-  rerender({ entry: saved(2, { routine: 'swing-1' }) });
+  rerender({ entry: saved(2, { clips: [{ ...SWING_CLIP }] }) });
   inHand(result, 2);
   expect(loads.count).toBe(1);
   expect(result.current.animationState).toMatchObject({ activeClipId: 'swing', enabled: true, playing: true });
@@ -134,7 +136,7 @@ it('an update that leaves the routine as it was neither stops nor rewinds it, an
 
   // A routine the save changed is loaded again, and is at rest.
   act(() => result.current.onPlayToggle());
-  rerender({ entry: saved(3, { routine: 'swing-2' }) });
+  rerender({ entry: saved(3, { clips: [LONGER_SWING] }) });
   await waitFor(() => expect(loads.count).toBe(2));
   await waitFor(() => expect(result.current.animationControls.clips).toHaveLength(1));
   expect(result.current.animationState.playing).toBe(false);
@@ -142,7 +144,7 @@ it('an update that leaves the routine as it was neither stops nor rewinds it, an
 
 it('a changed routine is read again behind the routines in hand: the model goes to rest, Position gets its values back, and the routine chosen stays chosen', async () => {
   const flutter = { ...SWING_CLIP, id: 'flutter', label: 'Flutter' };
-  const { result, rerender, listed } = mount(saved(1, { routine: 'pair-1', clips: [SWING_CLIP, flutter] }));
+  const { result, rerender, listed } = mount(saved(1, { clips: [SWING_CLIP, flutter] }));
   await waitFor(() => expect(result.current.animationControls.clips).toHaveLength(2));
   act(() => result.current.onParameterChange('swing', 30));
   act(() => result.current.animationControls.onClipSelect('flutter'));
@@ -150,7 +152,7 @@ it('a changed routine is read again behind the routines in hand: the model goes 
   expect(result.current.animationState).toMatchObject({ activeClipId: 'flutter', playing: true });
 
   listed.length = 0;
-  rerender({ entry: saved(2, { routine: 'pair-2', clips: [SWING_CLIP, flutter] }) });
+  rerender({ entry: saved(2, { clips: [LONGER_SWING, flutter] }) });
   await waitFor(() => expect(loads.count).toBe(2));
   await waitFor(() => expect(result.current.animationControls.status).toBe('ready'));
   // The routines never went while the new ones loaded, so the Animation tool stays up over them.
