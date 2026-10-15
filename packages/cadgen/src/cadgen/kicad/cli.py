@@ -1,4 +1,4 @@
-"""Running ``kicad-cli``, and reading what it reports.
+"""Running ``kicad-cli``, for the one check KiCad's API does not offer: DRC.
 
 Every run is isolated twice over:
 
@@ -9,9 +9,7 @@ Every run is isolated twice over:
   owns, so a person's KiCad preferences (a colour theme, a library table) can
   change neither a check nor a picture, and a run never writes to them.
 
-Reports are KiCad's JSON (``erc.v1.json``, ``drc.v1.json``), read into
-:class:`Finding`s whose positions are already in the board script's
-coordinates.
+The report is KiCad's JSON (``drc.v1.json``), read into :class:`Finding`s.
 """
 
 from __future__ import annotations
@@ -23,13 +21,13 @@ import shutil
 import subprocess
 import tempfile
 import threading
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Sequence
 
 from cadgen.kicad.install import KicadInstall
-from cadgen.kicad.phrasing import Finding, FindingItem, summarize
 
-__all__ = ["KicadRunError", "erc_findings", "drc_findings", "run_kicad_cli", "stage_files"]
+__all__ = ["Finding", "FindingItem", "KicadRunError", "drc_findings", "run_kicad_cli", "stage_files"]
 
 _TIMEOUT_SECONDS = 600
 _NOISE = ("Fontconfig error",)
@@ -40,6 +38,30 @@ _config_home: Path | None = None
 
 class KicadRunError(RuntimeError):
     """``kicad-cli`` failed; the message carries what it said."""
+
+
+@dataclass(frozen=True)
+class FindingItem:
+    """One item a finding names, and where it is (millimetres, KiCad's frame)."""
+
+    text: str
+    at: tuple[float, float] | None
+
+
+@dataclass(frozen=True)
+class Finding:
+    """One DRC finding, as KiCad reports it."""
+
+    check: str  # "drc", "unconnected" or "parity"
+    severity: str  # "error", "warning", "exclusion"
+    type: str  # KiCad's rule name: "clearance", "track_dangling"...
+    description: str
+    items: tuple[FindingItem, ...]
+
+    def render(self) -> str:
+        where = next((item.at for item in self.items if item.at is not None), None)
+        place = f" @ ({where[0]:g}, {where[1]:g}) mm" if where else ""
+        return f"{self.severity} {self.type}: {self.description}{place}"
 
 
 def _private_config() -> Path:
@@ -54,12 +76,11 @@ def _private_config() -> Path:
 
 def stage_files(files: Sequence[tuple[Path, bytes]], folder: Path) -> Path:
     """Write ``files`` (absolute paths and their bytes, the document first) into ``folder`` as
-    they lie relative to one another; the staged document. A sheet on another drive than the
-    document is left out: KiCad reads a sheet named by an absolute path where it lies."""
+    they lie relative to one another; the staged document."""
     document = files[0][0]
     try:
         base = Path(os.path.commonpath([str(path.parent) for path, _data in files]))
-    except ValueError:  # a sheet on another drive
+    except ValueError:  # a file on another drive
         base = document.parent
     for path, data in files:
         if not path.is_relative_to(base):
@@ -101,61 +122,31 @@ def run_kicad_cli(install: KicadInstall, args: Sequence[str], *, cwd: Path, time
     return completed
 
 
-def _items(raw: list, to_script: Callable[[float, float], tuple[float, float]] | None) -> tuple:
+def _items(raw: list) -> tuple[FindingItem, ...]:
     items = []
     for item in raw or []:
         position = item.get("pos")
         point = None
-        if isinstance(position, dict) and to_script is not None:
-            point = to_script(float(position.get("x", 0.0)), float(position.get("y", 0.0)))
+        if isinstance(position, dict):
+            point = (float(position.get("x", 0.0)), float(position.get("y", 0.0)))
         items.append(FindingItem(text=str(item.get("description", "")), at=point))
     return tuple(items)
 
 
-def _unique(findings: list[Finding]) -> list[Finding]:
-    """Findings in KiCad's order, each once: a through-hole pad's DRC fires per copper layer."""
-    return list(dict.fromkeys(findings))
-
-
-def erc_findings(report: Path) -> list[Finding]:
-    """The violations in an ERC report (schematic positions are page positions, kept as is)."""
-    data = json.loads(Path(report).read_text())
-    found: list[Finding] = []
-    for sheet in data.get("sheets", []):
-        for violation in sheet.get("violations", []):
-            kind = str(violation.get("type", ""))
-            description = str(violation.get("description", ""))
-            items = _items(violation.get("items", []), None)
-            found.append(
-                Finding(
-                    check="erc",
-                    severity=str(violation.get("severity", "error")),
-                    type=kind,
-                    description=description,
-                    items=items,
-                    summary=summarize("erc", kind, description, [item.text for item in items]),
-                )
-            )
-    return _unique(found)
-
-
-def drc_findings(report: Path, *, to_script: Callable[[float, float], tuple[float, float]] | None) -> list[Finding]:
-    """Violations, unconnected items and parity issues in a DRC report."""
-    data = json.loads(Path(report).read_text())
+def drc_findings(report: Path) -> list[Finding]:
+    """Violations, unconnected items and parity issues in a DRC report, each once (a
+    through-hole pad's DRC fires per copper layer)."""
+    data = json.loads(Path(report).read_text(encoding="utf-8"))
     found: list[Finding] = []
     for key, check in (("violations", "drc"), ("unconnected_items", "unconnected"), ("schematic_parity", "parity")):
         for violation in data.get(key, []) or []:
-            kind = str(violation.get("type", ""))
-            description = str(violation.get("description", ""))
-            items = _items(violation.get("items", []), to_script)
             found.append(
                 Finding(
                     check=check,
                     severity=str(violation.get("severity", "error")),
-                    type=kind,
-                    description=description,
-                    items=items,
-                    summary=summarize(check, kind, description, [item.text for item in items]),
+                    type=str(violation.get("type", "")),
+                    description=str(violation.get("description", "")),
+                    items=_items(violation.get("items", [])),
                 )
             )
-    return _unique(found)
+    return list(dict.fromkeys(found))

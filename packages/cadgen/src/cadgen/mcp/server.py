@@ -91,7 +91,7 @@ _OPENED_WITHIN = 60.0
 _MOUNTING_KEPT = 64
 
 # What a viewer shows, as every surface below names it.
-_FORMATS = "STEP, STL, GLB, 3MF, DXF, URDF, SDF, KiCad boards and schematics, WireViz harnesses"
+_FORMATS = "STEP, STL, GLB, 3MF, DXF, URDF, SDF, KiCad boards"
 
 INSTRUCTIONS = (
     f"CAD shows local CAD models ({_FORMATS}) in a viewer tab beside the chat. "

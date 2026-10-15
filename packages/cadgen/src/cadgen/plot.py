@@ -1,42 +1,30 @@
-"""A document drawn by its own tool: the plot payload's contract, and which tool draws a file.
+"""A board drawn from its file: the plot payload's contract.
 
-KiCad draws a board or a schematic (:mod:`cadgen.kicad.plot`), WireViz a wiring
-harness (:mod:`cadgen.wireviz.plot`). Both answer the same payload --
-``{schemaVersion, kind, unrouted, sheets: [{name, svg, width, height, background}]}``
--- and refuse what they cannot draw with :class:`PlotError`. The CAD Viewer's
-``GET /__cad/plot`` and ``cadgen snapshot`` both draw through
-:func:`plot_payload_bytes`, which imports a tool's builder only when its kind is drawn.
+The CAD Viewer's ``GET /__cad/plot`` and ``cadgen pcb snapshot`` both draw a
+``.kicad_pcb`` through :func:`plot_payload_bytes`, which reads the file with
+:mod:`cadgen.kicad.board_index` and answers geometry per layer
+(:mod:`cadgen.kicad.plot`). No KiCad process runs: the file is KiCad's own
+format, and everything the picture needs is in it, the filled copper included.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from cadgen.file_types import format_of
-
 __all__ = ["PLOT_SCHEMA_VERSION", "PLOT_SUFFIXES", "PlotError", "plot_payload_bytes"]
 
-PLOT_SCHEMA_VERSION = 2
-#: Every document a plot draws: a KiCad board or schematic, a wiring harness.
-PLOT_SUFFIXES = (".kicad_pcb", ".kicad_sch", ".harness.yml")
+PLOT_SCHEMA_VERSION = 3
+#: Every document a plot draws.
+PLOT_SUFFIXES = (".kicad_pcb",)
 
 
 class PlotError(ValueError):
-    """A document its tool could not plot, with the reason. A ``ValueError``: the
+    """A document that could not be plotted, with the reason. A ``ValueError``: the
     viewer's GET funnel answers it as a 400 with this message."""
 
 
 def plot_payload_bytes(path: Path | str) -> bytes:
-    """The plot payload of the document at ``path`` as JSON bytes, drawn by its tool.
+    """The plot payload of the board at ``path`` as JSON bytes."""
+    from cadgen.kicad.plot import plot_payload_bytes as build
 
-    A machine without the tool is a :class:`PlotError` that says how to get it."""
-    if format_of(path) == "harness":
-        from cadgen.wireviz.install import WirevizMissingError as missing
-        from cadgen.wireviz.plot import plot_payload_bytes as build
-    else:
-        from cadgen.kicad.install import KicadMissingError as missing
-        from cadgen.kicad.plot import plot_payload_bytes as build
-    try:
-        return build(path)
-    except missing as error:
-        raise PlotError(str(error)) from None
+    return build(Path(path))

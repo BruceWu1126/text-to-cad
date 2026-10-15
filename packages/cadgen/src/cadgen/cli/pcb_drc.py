@@ -1,7 +1,10 @@
-"""``cadgen harness bom`` -- a GENERATED CLI over :func:`cadgen.harness.bom`.
+"""``cadgen pcb drc`` — run KiCad's design rule check on a saved board file.
 
-There is no parser here on purpose: everything the command accepts is derived
-from the verb function's signature by :mod:`cadgen._internal.cli_from_function`.
+A GENERATED CLI over :func:`cadgen.pcb.drc`: everything the command accepts
+is derived from the verb function's signature by
+:mod:`cadgen._internal.cli_from_function`, so a flag cannot drift from a
+parameter. DRC is the one check KiCad's API does not offer, so this door runs
+``kicad-cli`` on a staged copy of the board.
 """
 
 from __future__ import annotations
@@ -11,8 +14,8 @@ from collections.abc import Sequence
 
 from cadgen._internal.cli_from_function import generated_main, generated_parser
 
-DEFAULT_PROG = "cadgen harness bom"
-VERB = ("cadgen.harness", "bom")
+DEFAULT_PROG = "cadgen pcb drc"
+VERB = ("cadgen.pcb", "drc")
 
 
 def build_parser(prog: str = DEFAULT_PROG) -> argparse.ArgumentParser:
