@@ -2,7 +2,7 @@
 
 A sub-assembly of the engine: the parts `lib/oil_system.py` builds, as one model
 with its own STEP, its own record and its own worker. `w16.py` links it as
-occurrence `o1.9`; rebuild `w16.py` to pick up a change here.
+`#oil_system`; rebuild `w16.py` to pick up a change here.
 """
 
 from __future__ import annotations

@@ -11,26 +11,27 @@ file under `src/` (`front_wing.py`, `corner_fl.py`, ...), built from `lib/`
 and composed here by CALLING it.
 
 --------------------------------------------------------------------------
-OCCURRENCE ORDER IS FROZEN
+CHILDREN ARE ADDRESSED BY NAME
 --------------------------------------------------------------------------
-The `ANIMATION` clips address children as `#o1.N` in the order below. Do not
-reorder, insert or remove a child without updating their occurrence table
-(`_F`) in the same change.
+The `ANIMATION` clips address children by name (`#drs_flap`): each child's
+name is its model's, and the car links them in the order below, which
+carries nothing. Adding or removing a child means updating their table
+(`_CHILDREN`) in the same change.
 
-  #o1.1   front_wing        #o1.15  rear_wing
-  #o1.2   nose              #o1.16  drs_flap        <- rotates (DRS)
-  #o1.3   monocoque         #o1.17  drs_actuator    <- four-bar (DRS)
-  #o1.4   halo              #o1.18  beam_wing
-  #o1.5   cockpit           #o1.19  suspension_front
-  #o1.6   sidepod_left      #o1.20  suspension_rear
-  #o1.7   sidepod_right     #o1.21  corner_fl       <- rotates (steering)
-  #o1.8   engine_cover      #o1.22  corner_fr       <- rotates (steering)
-  #o1.9   airbox            #o1.23  track_rod_left  <- re-aimed (steering)
-  #o1.10  floor             #o1.24  track_rod_right <- re-aimed (steering)
-  #o1.11  diffuser          #o1.25  corner_rl
-  #o1.12  cooling           #o1.26  corner_rr
-  #o1.13  power_unit        #o1.27  steering_rack   <- translates (steering)
-  #o1.14  drivetrain        #o1.28  details
+  front_wing        rear_wing
+  nose              drs_flap        <- rotates (DRS)
+  monocoque         drs_actuator    <- four-bar (DRS)
+  halo              beam_wing
+  cockpit           suspension_front
+  sidepod_left      suspension_rear
+  sidepod_right     corner_fl       <- rotates (steering)
+  engine_cover      corner_fr       <- rotates (steering)
+  airbox            track_rod_left  <- re-aimed (steering)
+  floor             track_rod_right <- re-aimed (steering)
+  diffuser          corner_rl
+  cooling           corner_rr
+  power_unit        steering_rack   <- translates (steering)
+  drivetrain        details
 """
 
 from __future__ import annotations
@@ -304,41 +305,18 @@ def _reaim(handle, a0, b0, a1, b1):
 
 
 # ---------------------------------------------------------------------------
-# OCCURRENCES
-# Top-level occurrence order is frozen by assemble(); see the OCCURRENCE ORDER
-# block in this module's docstring. Do not renumber without updating both.
+# CHILDREN
+# Every child is addressed by its name, which is its model's: what assemble()
+# links it as. See the CHILDREN block in this module's docstring.
 # ---------------------------------------------------------------------------
 
-_F = {
-    "front_wing": "#o1.1",
-    "nose": "#o1.2",
-    "monocoque": "#o1.3",
-    "halo": "#o1.4",
-    "cockpit": "#o1.5",
-    "sidepod_left": "#o1.6",
-    "sidepod_right": "#o1.7",
-    "engine_cover": "#o1.8",
-    "airbox": "#o1.9",
-    "floor": "#o1.10",
-    "diffuser": "#o1.11",
-    "cooling": "#o1.12",
-    "power_unit": "#o1.13",
-    "drivetrain": "#o1.14",
-    "rear_wing": "#o1.15",
-    "drs_flap": "#o1.16",
-    "drs_actuator": "#o1.17",
-    "beam_wing": "#o1.18",
-    "suspension_front": "#o1.19",
-    "suspension_rear": "#o1.20",
-    "corner_fl": "#o1.21",
-    "corner_fr": "#o1.22",
-    "track_rod_left": "#o1.23",
-    "track_rod_right": "#o1.24",
-    "corner_rl": "#o1.25",
-    "corner_rr": "#o1.26",
-    "steering_rack": "#o1.27",
-    "details": "#o1.28",
-}
+_CHILDREN = (
+    "front_wing", "nose", "monocoque", "halo", "cockpit", "sidepod_left", "sidepod_right",
+    "engine_cover", "airbox", "floor", "diffuser", "cooling", "power_unit", "drivetrain",
+    "rear_wing", "drs_flap", "drs_actuator", "beam_wing", "suspension_front", "suspension_rear",
+    "corner_fl", "corner_fr", "track_rod_left", "track_rod_right", "corner_rl", "corner_rr",
+    "steering_rack", "details",
+)
 
 # ---------------------------------------------------------------------------
 # EXPLODE STAGING
@@ -413,11 +391,8 @@ _EXPLODE_GROUPS = _BODYWORK + _INTERNALS
 # ---------------------------------------------------------------------------
 # ENGINE SUB-EXPLODE
 #
-# Addressed BY NAME, not by occurrence id. Occurrence ids under a part model
-# are positional and shift the moment that model's child count changes, so a
-# ref pinned to `#o1.13.36` can silently start driving a different body — and a
-# ref that matches the WRONG part is indistinguishable from a correct one. A
-# name that matches nothing RAISES instead.
+# Addressed BY NAME, like every other target: a name that matches nothing
+# RAISES, and so does one that two parts share, listing both.
 #
 # The 100 leaves are collapsed into 12 SYSTEMS plus a static core. Exploding
 # 100 individual bodies is the "cloud of debris" failure: what a viewer can
@@ -520,8 +495,8 @@ def _frame(m, *, drs: float = 0.0, steer: float = 0.0, explode: float = 0.0, eng
 
     # ---- DRS ---------------------------------------------------------------
     flap_deg, crank_deg = _solve_drs(drs)
-    shift(m.get(_F["drs_flap"]).rotate(_Y_AXIS, flap_deg, spec.DRS_PIVOT), "drs_flap")
-    shift(m.get(_F["drs_actuator"]).rotate(_Y_AXIS, crank_deg, spec.DRS_CRANK_PIVOT), "drs_actuator")
+    shift(m.get("#drs_flap").rotate(_Y_AXIS, flap_deg, spec.DRS_PIVOT), "drs_flap")
+    shift(m.get("#drs_actuator").rotate(_Y_AXIS, crank_deg, spec.DRS_CRANK_PIVOT), "drs_actuator")
 
     # ---- steering ----------------------------------------------------------
     # Positive steers LEFT (the car's +Y side is the inside of the turn). The
@@ -532,17 +507,17 @@ def _frame(m, *, drs: float = 0.0, steer: float = 0.0, explode: float = 0.0, eng
     for side, corner, rod in ((1, "corner_fl", "track_rod_left"), (-1, "corner_fr", "track_rod_right")):
         origin, axis = _steer_axis(side)
         deg = _solve_steer_angle(side, rack_dy)
-        shift(m.get(_F[corner]).rotate(axis, deg, origin), corner)
+        shift(m.get(f"#{corner}").rotate(axis, deg, origin), corner)
         rack_end, arm = _on_side(spec.F_RACK_END, side), _on_side(spec.F_TRACKROD_OUT, side)
         moved_end = (rack_end[0], rack_end[1] + rack_dy, rack_end[2])
         moved_arm = _rotate_about_axis(arm, origin, axis, deg)
-        shift(_reaim(m.get(_F[rod]), rack_end, arm, moved_end, moved_arm), rod)
-    shift(m.get(_F["steering_rack"]).translate((0.0, rack_dy, 0.0)), "steering_rack")
+        shift(_reaim(m.get(f"#{rod}"), rack_end, arm, moved_end, moved_arm), rod)
+    shift(m.get("#steering_rack").translate((0.0, rack_dy, 0.0)), "steering_rack")
 
     # ---- everything else: explode offset only -------------------------------
-    for name, ref in _F.items():
+    for name in _CHILDREN:
         if name not in _DRIVEN:
-            shift(m.get(ref), name)
+            shift(m.get(f"#{name}"), name)
 
 
 # ---------------------------------------------------------------------------
