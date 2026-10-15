@@ -231,16 +231,16 @@ function movedRecord(partId, x) {
   return { partId, explodedViewMatrix: new THREE.Matrix4().makeTranslation(x, 0, 0) };
 }
 
-test("a reference resolves to the most specific display record that owns it", () => {
-  const parent = movedRecord("o1", 5);
-  const child = movedRecord("o1.3", 9);
-  const runtime = explodeRuntime([parent, child, movedRecord("o1.30", 99)]);
+test("a reference resolves to the display record of exactly its occurrence", () => {
+  // A reference's occurrence is a token; the record that owns it is the one with that id. No
+  // other record is "closer": an id carries no hierarchy to walk up, and none shares a prefix.
+  const base = movedRecord("o:3f2a9c1d7e5b", 5);
+  const arm = movedRecord("o:a1b2c3d4e5f6", 9);
+  const runtime = explodeRuntime([base, arm, movedRecord("o:a1b2c3d4e5f0", 99)]);
 
-  // o1.30 must NOT win on a string-prefix accident, and the deeper owner beats the shallower.
-  assert.equal(displayRecordForReference(runtime, { occurrenceId: "o1.3" }), child);
-  assert.equal(displayRecordForReference(runtime, { occurrenceId: "o1.3.1" }), child);
-  assert.equal(displayRecordForReference(runtime, { occurrenceId: "o1.4" }), parent);
-  assert.equal(displayRecordForReference(runtime, { occurrenceId: "o2.1" }), null);
+  assert.equal(displayRecordForReference(runtime, { occurrenceId: "o:a1b2c3d4e5f6" }), arm);
+  assert.equal(displayRecordForReference(runtime, { pickData: { occurrenceId: "o:3f2a9c1d7e5b" } }), base);
+  assert.equal(displayRecordForReference(runtime, { occurrenceId: "o:0f1e2d3c4b5a" }), null);
   assert.equal(displayRecordForReference(runtime, { occurrenceId: "" }), null);
 });
 

@@ -1106,7 +1106,6 @@ function StepSurfaceBody({ view, data }) {
   const isStepTopologyReference = useCallback((reference) => {
     const selectorType = String(reference?.selectorType || "").trim();
     return selectorType === "occurrence" ||
-      selectorType === "shape" ||
       selectorType === "face" ||
       selectorType === "edge" ||
       selectorType === "vertex";
@@ -1245,7 +1244,7 @@ function StepSurfaceBody({ view, data }) {
     }
     const reference = effectiveActiveReferenceMap.get(normalizedReferenceId);
     const selectorType = String(reference?.selectorType || "").trim();
-    if (selectorType !== "occurrence" && selectorType !== "shape") {
+    if (selectorType !== "occurrence") {
       return [];
     }
     const partId = referencePartId(reference);

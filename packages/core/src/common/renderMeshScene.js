@@ -32,7 +32,8 @@ import {
   applyExplodedViewProgress,
   clearExplodedViewRecords,
   computeExplodedViewLayout,
-  explodedViewBounds
+  explodedViewBounds,
+  occurrencePathsFromAssemblyRoot
 } from "../lib/viewer/explodedView.js";
 import {
   addFloor as addSharedFloor,
@@ -744,7 +745,9 @@ function applyViewportExplodedView(viewport, bounds, layoutBounds = bounds) {
     resetExplodedView();
     return bounds;
   }
-  const layout = computeExplodedViewLayout(model.displayRecords, layoutBounds);
+  // The tree is the only hierarchy a part has: a token names no ancestors.
+  const hierarchy = occurrencePathsFromAssemblyRoot(model.meshData?.assemblyRoot);
+  const layout = computeExplodedViewLayout(model.displayRecords, layoutBounds, { hierarchy });
   if (!layout.entries.length) {
     resetExplodedView();
     return bounds;

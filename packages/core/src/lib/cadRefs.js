@@ -1,32 +1,52 @@
-// `<file>#<selectors>`, file half optional. Mirrors CAD_TOKEN_RE in cadgen/cad_ref_syntax.py;
-// the tokenCases in cadRefs.parity.json are asserted by both languages. The prefix sits LEFT of
-// the '#' so it can never collide with the selector grammar on the right.
-// JSON-quote paths containing whitespace or delimiters: `"my part.step"#o1`.
+// The ref grammar: one language, shared with cadgen (cadgen/cad_ref_syntax.py). A ref names
+// geometry, never a position: an occurrence by its token (`o:` + 12 hex, minted from its place in
+// the tree), an element by `<occurrence token>/<element token>` (`f:`, `e:`, `v:` + 12 hex, minted
+// from the element's geometry within its body) -- `#o:4b1f9e2a7c03/f:9d2e8c1b5a70`. A part label
+// stands in for an occurrence token (`#base`, `#base/f:9d2e8c1b5a70`); a bare element token
+// resolves in a document with one leaf. The cases of cadRefs.parity.json are asserted by both
+// languages.
+//
+// `<file>#<selectors>`, file half optional. Mirrors QUOTED_PREFIX_RE in cadgen/cad_ref_syntax.py.
+// The prefix sits LEFT of the '#' so it can never collide with the selector grammar on the right.
+// JSON-quote paths containing whitespace or delimiters: `"my part.step"#o:4b1f9e2a7c03`.
 const CAD_TOKEN_RE = /^\s*("(?:[^"\\\r\n]|\\.)*"|[^#"\s]*)#([^\s]*)/;
-const OCCURRENCE_SELECTOR_RE = /^o((?:\d+)(?:\.\d+)*)$/;
-const OCCURRENCE_ENTITY_SELECTOR_RE = /^o((?:\d+)(?:\.\d+)*)\.([sfev])(\d+)$/;
-const ENTITY_SELECTOR_RE = /^([sfev])(\d+)$/;
+const OCCURRENCE_TOKEN_SOURCE = "o:[0-9a-f]{12}";
+const ELEMENT_TOKEN_SOURCE = "[fev]:[0-9a-f]{12}";
+const OCCURRENCE_SELECTOR_RE = new RegExp(`^(${OCCURRENCE_TOKEN_SOURCE})$`);
+const OCCURRENCE_ELEMENT_SELECTOR_RE = new RegExp(`^(${OCCURRENCE_TOKEN_SOURCE})/(${ELEMENT_TOKEN_SOURCE})$`);
+const ELEMENT_SELECTOR_RE = new RegExp(`^(${ELEMENT_TOKEN_SOURCE})$`);
 const MATE_SELECTOR_RE = /^m\d+$/i;
 
 // Mirrors LABEL_PATTERN in cadgen/cad_ref_syntax.py. Kept in step by cadRefs.parity.json,
 // which both this module's tests and the Python tests assert against.
 const LABEL_SOURCE = "[A-Za-z_][A-Za-z0-9_:]*";
 const LABEL_SELECTOR_RE = new RegExp(`^(${LABEL_SOURCE})$`);
-const LABEL_ENTITY_SELECTOR_RE = new RegExp(`^(${LABEL_SOURCE})\\.([sfev])(\\d+)$`);
+const LABEL_ELEMENT_SELECTOR_RE = new RegExp(`^(${LABEL_SOURCE})/(${ELEMENT_TOKEN_SOURCE})$`);
 
 // The union of every selector form the viewer treats as a real CAD selector rather than an
-// opaque string. It lives here, beside the grammar it mirrors, because it was previously
-// copy-pasted into two viewer modules that had no test keeping them in step.
-const NATIVE_CAD_SELECTOR_RE = /^(?:o\d+(?:\.\d+)*(?:\.[sfev]\d+)?|[sfev]\d+|m\d+)$/i;
+// opaque string: a token, a token pair, a bare element token, or a mate.
+const NATIVE_CAD_SELECTOR_RE = new RegExp(
+  `^(?:${OCCURRENCE_TOKEN_SOURCE}(?:/${ELEMENT_TOKEN_SOURCE})?|${ELEMENT_TOKEN_SOURCE}|m\\d+)$`,
+  "i"
+);
+const OCCURRENCE_TOKEN_RE = new RegExp(`^${OCCURRENCE_TOKEN_SOURCE}$`);
+const ELEMENT_TOKEN_RE = new RegExp(`^${ELEMENT_TOKEN_SOURCE}$`);
 
 export function isNativeCadSelector(candidate) {
   return NATIVE_CAD_SELECTOR_RE.test(String(candidate || "").trim());
 }
 
+/** Whether `value` is an occurrence token (`o:` + 12 hex). */
+export function isOccurrenceToken(value) {
+  return OCCURRENCE_TOKEN_RE.test(String(value || "").trim());
+}
+
+/** Whether `value` is an element token (`f:`, `e:` or `v:` + 12 hex). */
+export function isElementToken(value) {
+  return ELEMENT_TOKEN_RE.test(String(value || "").trim());
+}
+
 function selectorTypeForKind(kind) {
-  if (kind === "s") {
-    return "shape";
-  }
   if (kind === "f") {
     return "face";
   }
@@ -36,23 +56,39 @@ function selectorTypeForKind(kind) {
   return "vertex";
 }
 
+/** The one composition rule: `<occurrence token>/<element token>`. */
+export function elementRef(occurrenceId, token) {
+  return `${occurrenceId}/${token}`;
+}
+
+/** `{ owner, token }` of an element ref (`o:…/f:…`, `label/f:…`), or null for anything else. */
+export function splitElementRef(selector) {
+  const text = String(selector || "").trim().replace(/^#/, "");
+  const slash = text.indexOf("/");
+  if (slash <= 0) {
+    return null;
+  }
+  const owner = text.slice(0, slash);
+  const token = text.slice(slash + 1);
+  return isElementToken(token) ? { owner, token } : null;
+}
+
 function parseStructuredSelector(rawSelector, { inheritedOccurrenceId = "", inheritedLabel = "" } = {}) {
   const selector = String(rawSelector || "").trim().replace(/^#/, "");
   if (!selector) {
     return null;
   }
 
-  const occurrenceEntityMatch = selector.match(OCCURRENCE_ENTITY_SELECTOR_RE);
-  if (occurrenceEntityMatch) {
-    const occurrenceId = `o${occurrenceEntityMatch[1]}`;
-    const kind = occurrenceEntityMatch[2];
-    const ordinal = Number(occurrenceEntityMatch[3]);
+  const occurrenceElementMatch = selector.match(OCCURRENCE_ELEMENT_SELECTOR_RE);
+  if (occurrenceElementMatch) {
+    const occurrenceId = occurrenceElementMatch[1];
+    const token = occurrenceElementMatch[2];
     return {
-      selectorType: selectorTypeForKind(kind),
+      selectorType: selectorTypeForKind(token[0]),
       occurrenceId,
-      ordinal,
-      kind,
-      canonical: `${occurrenceId}.${kind}${ordinal}`
+      token,
+      kind: token[0],
+      canonical: elementRef(occurrenceId, token)
     };
   }
 
@@ -60,61 +96,60 @@ function parseStructuredSelector(rawSelector, { inheritedOccurrenceId = "", inhe
   if (occurrenceMatch) {
     return {
       selectorType: "occurrence",
-      occurrenceId: `o${occurrenceMatch[1]}`,
-      ordinal: null,
+      occurrenceId: occurrenceMatch[1],
+      token: "",
       kind: "",
-      canonical: `o${occurrenceMatch[1]}`
+      canonical: occurrenceMatch[1]
     };
   }
 
-  const entityMatch = selector.match(ENTITY_SELECTOR_RE);
-  if (entityMatch) {
-    const kind = entityMatch[1];
-    const ordinal = Number(entityMatch[2]);
+  const elementMatch = selector.match(ELEMENT_SELECTOR_RE);
+  if (elementMatch) {
+    const token = elementMatch[1];
+    const kind = token[0];
     if (inheritedOccurrenceId) {
       return {
         selectorType: selectorTypeForKind(kind),
         occurrenceId: inheritedOccurrenceId,
-        ordinal,
+        token,
         kind,
-        canonical: `${inheritedOccurrenceId}.${kind}${ordinal}`
+        canonical: elementRef(inheritedOccurrenceId, token)
       };
     }
-    // An inherited label carries forward exactly like an inherited occurrence id.
+    // An inherited label carries forward exactly like an inherited occurrence token.
     if (inheritedLabel) {
       return {
         selectorType: selectorTypeForKind(kind),
         occurrenceId: "",
-        ordinal,
+        token,
         kind,
         label: inheritedLabel,
-        canonical: `${inheritedLabel}.${kind}${ordinal}`
+        canonical: elementRef(inheritedLabel, token)
       };
     }
     return {
       selectorType: selectorTypeForKind(kind),
       occurrenceId: "",
-      ordinal,
+      token,
       kind,
-      canonical: `${kind}${ordinal}`
+      canonical: token
     };
   }
 
-  // Label forms are tried only after every numeric form, so an existing ref can never change
-  // meaning. Mates look like labels and are excluded explicitly.
+  // Label forms are tried only after every token form, so a token can never be read as a label.
+  // Mates look like labels and are excluded explicitly.
   if (!MATE_SELECTOR_RE.test(selector)) {
-    const labelEntityMatch = selector.match(LABEL_ENTITY_SELECTOR_RE);
-    if (labelEntityMatch) {
-      const label = labelEntityMatch[1];
-      const kind = labelEntityMatch[2];
-      const ordinal = Number(labelEntityMatch[3]);
+    const labelElementMatch = selector.match(LABEL_ELEMENT_SELECTOR_RE);
+    if (labelElementMatch) {
+      const label = labelElementMatch[1];
+      const token = labelElementMatch[2];
       return {
-        selectorType: selectorTypeForKind(kind),
+        selectorType: selectorTypeForKind(token[0]),
         occurrenceId: "",
-        ordinal,
-        kind,
+        token,
+        kind: token[0],
         label,
-        canonical: `${label}.${kind}${ordinal}`
+        canonical: elementRef(label, token)
       };
     }
 
@@ -124,7 +159,7 @@ function parseStructuredSelector(rawSelector, { inheritedOccurrenceId = "", inhe
       return {
         selectorType: "label",
         occurrenceId: "",
-        ordinal: null,
+        token: "",
         kind: "",
         label,
         canonical: label
@@ -135,7 +170,7 @@ function parseStructuredSelector(rawSelector, { inheritedOccurrenceId = "", inhe
   return {
     selectorType: "opaque",
     occurrenceId: "",
-    ordinal: null,
+    token: "",
     kind: "",
     canonical: selector
   };
@@ -159,7 +194,7 @@ export function normalizeCadRefSelectors(selectors) {
       continue;
     }
     normalizedSelectors.push(parsedSelector.canonical);
-    // Whichever naming scheme was used becomes the context for following bare entities,
+    // Whichever naming scheme was used becomes the context for following bare elements,
     // and clears the other one.
     if (parsedSelector.occurrenceId) {
       inheritedOccurrenceId = parsedSelector.occurrenceId;
@@ -179,7 +214,6 @@ export function sortCadRefSelectors(selectors) {
   const rank = {
     occurrence: 1,
     label: 1,
-    shape: 2,
     face: 3,
     edge: 4,
     vertex: 5,
@@ -188,8 +222,8 @@ export function sortCadRefSelectors(selectors) {
   return uniqueSelectors
     .map((selector, index) => ({ selector, index, parsed: parseStructuredSelector(selector) }))
     .sort((left, right) => {
-      const leftOccurrence = left.parsed?.occurrenceId || "";
-      const rightOccurrence = right.parsed?.occurrenceId || "";
+      const leftOccurrence = left.parsed?.occurrenceId || left.parsed?.label || "";
+      const rightOccurrence = right.parsed?.occurrenceId || right.parsed?.label || "";
       if (leftOccurrence !== rightOccurrence) {
         return leftOccurrence.localeCompare(rightOccurrence);
       }
@@ -197,11 +231,6 @@ export function sortCadRefSelectors(selectors) {
       const rightRank = rank[right.parsed?.selectorType] ?? 99;
       if (leftRank !== rightRank) {
         return leftRank - rightRank;
-      }
-      const leftOrdinal = Number(left.parsed?.ordinal || 0);
-      const rightOrdinal = Number(right.parsed?.ordinal || 0);
-      if (leftOrdinal !== rightOrdinal) {
-        return leftOrdinal - rightOrdinal;
       }
       if (left.selector !== right.selector) {
         return left.selector.localeCompare(right.selector);

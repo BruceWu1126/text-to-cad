@@ -15,8 +15,9 @@ import {
 } from "@text-to-cad/core/lib/selectors/runtime.js";
 
 // The options one occurrence's selector runtime is built with. Shared by the topology
-// composition and the incremental composer so both build picking runtimes IDENTICALLY — the options here (partId namespacing, transform placement,
-// remapOccurrenceId) are what keep picks aligned with the composed mesh's sourcePartRanges.
+// composition and the incremental composer so both build picking runtimes IDENTICALLY — the
+// options here (partId namespacing, transform placement, the occurrence token every ref of the
+// part begins with) are what keep picks aligned with the composed mesh's sourcePartRanges.
 function occurrenceRuntimeOptions(entry, occurrence, { singleComponentPart } = {}) {
   const occurrenceId = String(occurrence?.id || "").trim();
   return {
@@ -24,7 +25,7 @@ function occurrenceRuntimeOptions(entry, occurrence, { singleComponentPart } = {
     copyCadPath: String(entry?.fileRefPrefix || ""),
     partId: singleComponentPart ? "" : occurrenceId,
     transform: occurrence?.transform || null,
-    remapOccurrenceId: occurrenceId
+    occurrenceId
   };
 }
 
@@ -84,7 +85,7 @@ export function createPackageReferenceComposer({ retainCompositions = 4 } = {}) 
         const bundle = occurrenceBundle(occurrence, bundleByCid);
         if (!bundle) continue;
         const options = occurrenceRuntimeOptions(entry, occurrence, { singleComponentPart });
-        const key = [bundleId(bundle), options.copyCadPath, options.partId, options.remapOccurrenceId, transformKey(options.transform)].join("\u0000");
+        const key = [bundleId(bundle), options.copyCadPath, options.partId, options.occurrenceId, transformKey(options.transform)].join("\u0000");
         let cached = parts.get(key);
         if (!cached) {
           cached = { part: buildSelectorCompositionPart(bundle, options), used: compositions };

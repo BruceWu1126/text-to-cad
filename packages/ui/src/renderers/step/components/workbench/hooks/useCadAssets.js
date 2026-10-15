@@ -908,8 +908,9 @@ export function useCadAssets({
         // A single-component part renders as a topology tree (not an assembly structure), so its
         // topology must graft onto the synthetic part root via fallbackPartId — i.e. carry NO
         // partId (an occurrence-namespaced partId would orphan it). Multi-occurrence assemblies
-        // DO namespace by occurrence so each leaf part owns its faces/edges. Both keep
-        // remapOccurrenceId so picks align with the composed mesh's sourcePartRanges occurrence.
+        // DO namespace by occurrence so each leaf part owns its faces/edges. Both stamp every
+        // row with its placing occurrenceId, so picks align with the composed mesh's
+        // sourcePartRanges occurrence and a ref reads `<occurrence token>/<element token>`.
         const composer = referenceComposerRef.current.composer;
         const composeStart = perfStart();
         const composedRuntime = composePackageSelectorRuntime(entry, composedOccurrences, componentBundleByCid, {

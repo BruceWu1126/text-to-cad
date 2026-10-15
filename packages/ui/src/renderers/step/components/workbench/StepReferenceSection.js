@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { referenceMeasurements } from "../../workbench/referenceMeasurements.js";
 import { nodeVolume } from "../../workbench/partVolume.js";
+import { splitElementRef } from "@text-to-cad/core/lib/cadRefs.js";
 import { STEP_MODEL_ROOT_ID, stepTreeNodeLeafPartIds } from "@text-to-cad/core/lib/step/stepTree.js";
 import { stepPartNameFromFile } from "@text-to-cad/core/lib/step/productName.js";
 
@@ -84,23 +85,24 @@ function itemKey(item) {
 
 /**
  * A reference as a person reads it: its own label when it has one (a part's or subassembly's
- * name, a named face), otherwise where it is and what — "base · face 3" — from its part as the
- * tree names it (`partName`) and its selector's last token. A generated label that only
- * restates the selector ("Face o1.1.f3") is not a name. A single-part file's part with no name of
- * its own is the file's ("l_bracket · face 11"): the tree's root is that part, named after the
- * file. Never the raw id: that is what a copy carries, with the file it is in.
+ * name, a named face), otherwise where it is and what — "base · face f:9d2e8c1b5a70" — from its
+ * part as the tree names it (`partName`) and its element's token, the geometry's name that a
+ * copy carries too. A generated label that only restates the selector ("Face o:…/f:…") is not a
+ * name. A single-part file's part with no name of its own is the file's ("l_bracket · face
+ * f:…"): the tree's root is that part, named after the file. Never the raw occurrence token.
  */
 function referenceName(item, meshData, partName) {
   if (isPartNode(item)) return String(item.name || item.displayName || "").trim() || itemKey(item);
   const selector = String(item.displaySelector || item.normalizedSelector || item.id || "").split("|").pop();
-  const token = selector.split(".").filter(Boolean).pop() || "";
+  const split = splitElementRef(selector);
+  const token = split?.token || "";
   const text = value => String(value ?? "").trim();
   const own = [item.name, item.pickData?.name, item.label].map(text)
     .find(value => value && !(token && value.includes(token)) && !value.includes(selector));
   if (own) return own;
   const kind = (SELECTOR_TYPE_LABELS[item.selectorType] || "Reference").toLowerCase();
-  const number = token.match(/^[a-z]+(\d+)$/i)?.[1] || "";
-  const occurrence = item.occurrenceId || selector.slice(0, -token.length - 1);
+  const number = token;
+  const occurrence = item.occurrenceId || split?.owner || "";
   const parts = Array.isArray(meshData?.parts) ? meshData.parts : [];
   const part = parts.find(entry => [entry.occurrenceId, entry.id].includes(occurrence));
   // The part's own name, where it is one: an occurrence with none goes by its id, and that is

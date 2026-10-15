@@ -1,7 +1,7 @@
 // A face's tangent group is cadgen's to decide (the selector table's `tangentGroup`: faces joined
-// across the tangent-class edges of one solid, from the exact BREP's continuity). Faces of one
-// placed component with the same group id are one group; a group never crosses a part, an
-// occurrence or a solid.
+// across the tangent-class edges of one solid, from the exact BREP's continuity; the id is
+// unique within the component, across its solids). Faces of one placed component with the same
+// group id are one group; a group never crosses a part or an occurrence.
 export function buildTangentFaceGraph(references) {
   const faces = [...new Map(references.filter(ref => ref.selectorType === 'face').map(ref => [ref.id, ref])).values()];
   const graph = new Map(faces.map(face => [face.id, new Set()]));
@@ -9,7 +9,7 @@ export function buildTangentFaceGraph(references) {
   for (const face of faces) {
     const group = face.pickData?.tangentGroup;
     if (!Number.isInteger(group)) continue;
-    const key = JSON.stringify([face.partId || '', face.occurrenceId || '', face.shapeId || '', group]);
+    const key = JSON.stringify([face.partId || '', face.occurrenceId || '', group]);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(face);
   }

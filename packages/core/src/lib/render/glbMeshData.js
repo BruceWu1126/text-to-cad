@@ -4,6 +4,8 @@
 // where nothing else needs three at all. Three classes are all this file uses.
 import { AnimationMixer, LoadingManager, Box3, Group, LoopOnce, Matrix3, Matrix4, Vector3 } from "three";
 
+import { isOccurrenceToken } from "../cadRefs.js";
+
 const GLB_CAD_UNIT_SCALE = 1000;
 
 function createBoundsAccumulator() {
@@ -130,7 +132,7 @@ function cadOccurrenceIdForObject(object) {
     current = current.parent || null;
   }
   const objectName = String(object?.name || "").trim();
-  return /^o\d+(?:\.\d+)*$/.test(objectName) ? objectName : "";
+  return isOccurrenceToken(objectName) ? objectName : "";
 }
 
 function authoredGlbNameForObject(object) {

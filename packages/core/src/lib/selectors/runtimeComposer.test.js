@@ -21,9 +21,22 @@ function random(seed) {
   };
 }
 
-const EDGE_COLUMNS = ["id", "localId", "occurrenceId", "shapeId", "ordinal", "curveType", "length", "center", "bbox", "faceStart",
-  "faceCount", "relevance", "flags", "params", "segmentStart", "segmentCount", "adjacentFaceCount", "continuity",
-  "dihedralDeg", "visibilityClass", "chain"];
+// The selector table's columns (cadgen selector_table.py, schema 2) as `joinSelectorTable` extends
+// them with each face's triangle range and each edge's segment range. Element rows lead with
+// their token; `shape` is the owning solid's ordinal; no row names an occurrence.
+const OCCURRENCE_COLUMNS = ["transform", "bbox", "shapeStart", "shapeCount", "faceStart", "faceCount", "edgeStart", "edgeCount", "vertexStart", "vertexCount"];
+const SHAPE_COLUMNS = ["ordinal", "kind", "bbox", "center", "area", "volume", "faceStart", "faceCount", "edgeStart", "edgeCount"];
+const FACE_COLUMNS = ["token", "ordinal", "shape", "surfaceType", "area", "center", "normal", "bbox", "edgeStart", "edgeCount", "relevance",
+  "flags", "params", "tangentGroup", "triangleStart", "triangleCount"];
+const EDGE_COLUMNS = ["token", "ordinal", "shape", "curveType", "length", "center", "bbox", "faceStart", "faceCount", "vertexStart",
+  "vertexCount", "relevance", "flags", "params", "adjacentFaceCount", "continuity", "dihedralDeg", "visibilityClass", "chain",
+  "segmentStart", "segmentCount"];
+const FACE_EDGE_COUNT = FACE_COLUMNS.indexOf("edgeCount");
+const FACE_TRIANGLE_START = FACE_COLUMNS.indexOf("triangleStart");
+const EDGE_FACE_COUNT = EDGE_COLUMNS.indexOf("faceCount");
+
+// A token of the grammar's shape (`f:` + 12 hex) for the n-th element of a synthetic part.
+const token = (kind, n) => `${kind}:${n.toString(16).padStart(12, "0")}`;
 
 // `faces` faces over `shapes` solids; each face bounded by a loop of edges that share their
 // end vertices with the next edge BY VALUE (sometimes through a duplicated vertex index), plus a
@@ -41,7 +54,7 @@ function makeBundle(seed, { faces: faceCount = 4, shapes: shapeCount = 2, detail
   const faceEdgeRows = [];
   const faces = [];
   const shapes = [];
-  const pushEdge = (shapeId, points, { curveType = "line", params = {}, indices = null } = {}) => {
+  const pushEdge = (shape, points, { curveType = "line", params = {}, indices = null } = {}) => {
     const row = edges.length;
     const segmentStart = edgeIds.length;
     const vertexIndices = indices || points.map(vertex);
@@ -49,17 +62,17 @@ function makeBundle(seed, { faces: faceCount = 4, shapes: shapeCount = 2, detail
       edgeIndices.push(vertexIndices[i], vertexIndices[i + 1]);
       edgeIds.push(row);
     }
-    edges.push([`o1.e${row + 1}`, `e${row + 1}`, "o1", shapeId, row + 1, curveType, 1 + rand(), [0, 0, 0],
-      { min: [-1, -1, -1], max: [1, 1, 1] }, 0, 2, 0, 0, params, segmentStart, edgeIds.length - segmentStart, 2, "c0",
-      rand() * 180, rand() < 0.5 ? "feature" : "tangent", row + 1]);
+    edges.push([token("e", row + 1), row + 1, shape, curveType, 1 + rand(), [0, 0, 0],
+      { min: [-1, -1, -1], max: [1, 1, 1] }, 0, 2, 0, 0, 0, 0, params, 2, "c0",
+      rand() * 180, rand() < 0.5 ? "feature" : "tangent", row + 1, segmentStart, edgeIds.length - segmentStart]);
     return row;
   };
   for (let s = 0; s < shapeCount; s += 1) {
-    shapes.push([`o1.s${s + 1}`, `s${s + 1}`, "o1", s + 1, "solid", null, null, { min: [-100, -100, -100], max: [100, 100, 100] },
+    shapes.push([s + 1, "solid", { min: [-100, -100, -100], max: [100, 100, 100] },
       [coord(), coord(), coord()], 1000 * rand(), 100 * rand(), 0, 0, 0, 0]);
   }
   for (let f = 0; f < faceCount; f += 1) {
-    const shapeId = `o1.s${(f % shapeCount) + 1}`;
+    const shape = (f % shapeCount) + 1;
     // A loop of 3 edges: corners a -> b -> c -> a, each edge a polyline of `detail` segments.
     const corners = [[coord(), coord(), coord()], [coord(), coord(), coord()], [coord(), coord(), coord()]];
     const loop = [];
@@ -71,7 +84,7 @@ function makeBundle(seed, { faces: faceCount = 4, shapes: shapeCount = 2, detail
         const t = i / detail;
         points.push(from.map((value, axis) => value + (to[axis] - value) * t + (i && i < detail ? rand() * 0.01 : 0)));
       }
-      loop.push(pushEdge(shapeId, points));
+      loop.push(pushEdge(shape, points));
     }
     if (f % 3 === 0) {
       // A closed circle: its ends meet.
@@ -81,7 +94,7 @@ function makeBundle(seed, { faces: faceCount = 4, shapes: shapeCount = 2, detail
         return [center[0] + Math.cos(angle), center[1] + Math.sin(angle), center[2]];
       });
       const ringIndices = ring.map(vertex);
-      loop.push(pushEdge(shapeId, null, { curveType: "circle", params: { center, axis: [0, 0, 1], radius: 1 }, indices: [...ringIndices, ringIndices[0]] }));
+      loop.push(pushEdge(shape, null, { curveType: "circle", params: { center, axis: [0, 0, 1], radius: 1 }, indices: [...ringIndices, ringIndices[0]] }));
     }
     if (f % 3 === 1) {
       // An open arc (circle curve type): its end directions are the circle's tangents.
@@ -90,20 +103,20 @@ function makeBundle(seed, { faces: faceCount = 4, shapes: shapeCount = 2, detail
         const angle = (Math.PI * i) / (2 + detail);
         return [center[0] + 2 * Math.cos(angle), center[1], center[2] + 2 * Math.sin(angle)];
       });
-      loop.push(pushEdge(shapeId, arc, { curveType: "circle", params: { center, axis: [0, 1, 0], radius: 2 } }));
+      loop.push(pushEdge(shape, arc, { curveType: "circle", params: { center, axis: [0, 1, 0], radius: 2 } }));
       // A branched proxy (a vertex used three times).
       const hub = vertex([coord(), coord(), coord()]);
-      loop.push(pushEdge(shapeId, null, { indices: [hub, vertex([coord(), coord(), coord()]), hub, vertex([coord(), coord(), coord()]), hub] }));
+      loop.push(pushEdge(shape, null, { indices: [hub, vertex([coord(), coord(), coord()]), hub, vertex([coord(), coord(), coord()]), hub] }));
     }
     if (f % 3 === 2) {
       // A degenerate segment inside an otherwise open edge, and a duplicated end vertex index.
       const a = [coord(), coord(), coord()];
       const b = [coord(), coord(), coord()];
-      loop.push(pushEdge(shapeId, null, { indices: [vertex(a), vertex(a), vertex(b)] }));
+      loop.push(pushEdge(shape, null, { indices: [vertex(a), vertex(a), vertex(b)] }));
       // Vertices one coordinate apart are different vertices.
-      loop.push(pushEdge(shapeId, [b, [b[0], b[1], b[2] + 1.5], [b[0] + 0.5, b[1], b[2] + 1.5], a]));
+      loop.push(pushEdge(shape, [b, [b[0], b[1], b[2] + 1.5], [b[0] + 0.5, b[1], b[2] + 1.5], a]));
     }
-    faces.push([`o1.f${f + 1}`, `f${f + 1}`, "o1", shapeId, f + 1, f % 2 ? "plane" : "cylinder", 10 * rand(), [coord(), coord(), coord()],
+    faces.push([token("f", f + 1), f + 1, shape, f % 2 ? "plane" : "cylinder", 10 * rand(), [coord(), coord(), coord()],
       [0, 0, 1], { min: [-100, -100, -100], max: [100, 100, 100] }, 0, loop.length, 0, 0,
       f % 2 ? { origin: [coord(), coord(), coord()], normal: [0, 0, 1] } : { axis: [0, 1, 0], center: [coord(), coord(), coord()], radius: 3 },
       f + 1, 0, 0]);
@@ -113,10 +126,10 @@ function makeBundle(seed, { faces: faceCount = 4, shapes: shapeCount = 2, detail
   const edgeFaces = edges.map(() => []);
   let cursor = 0;
   faces.forEach((face, faceRow) => {
-    for (let i = 0; i < face[11]; i += 1) edgeFaces[faceEdgeRows[cursor + i]].push(faceRow, (faceRow + 1) % faces.length);
-    cursor += face[11];
+    for (let i = 0; i < face[FACE_EDGE_COUNT]; i += 1) edgeFaces[faceEdgeRows[cursor + i]].push(faceRow, (faceRow + 1) % faces.length);
+    cursor += face[FACE_EDGE_COUNT];
   });
-  edges.forEach((edge, row) => { edge[10] = edgeFaces[row].length; edgeFaceRows.push(...edgeFaces[row]); });
+  edges.forEach((edge, row) => { edge[EDGE_FACE_COUNT] = edgeFaces[row].length; edgeFaceRows.push(...edgeFaces[row]); });
 
   // The face proxy and its runs: `detail` triangles per face.
   const facePositions = [];
@@ -131,12 +144,12 @@ function makeBundle(seed, { faces: faceCount = 4, shapes: shapeCount = 2, detail
       faceIndices.push(base, base + 1, base + 2);
       faceIds.push(faceRow);
     }
-    face[16] = triangleStart;
-    face[17] = detail;
+    face[FACE_TRIANGLE_START] = triangleStart;
+    face[FACE_TRIANGLE_START + 1] = detail;
     faceRuns.push(0, 0, triangleStart, detail, faceRow);
   });
   const shapeFaces = shapes.map(() => 0);
-  faces.forEach((face) => { shapeFaces[Number(face[3].slice(4)) - 1] += 1; });
+  faces.forEach((face) => { shapeFaces[face[2] - 1] += 1; });
   return {
     manifest: {
       schemaVersion: 2,
@@ -145,12 +158,12 @@ function makeBundle(seed, { faces: faceCount = 4, shapes: shapeCount = 2, detail
       stepHash,
       bbox: { min: [-100, -100, -100], max: [100, 100, 100] },
       tables: {
-        occurrenceColumns: ["id", "path", "name", "sourceName", "parentId", "transform", "bbox", "shapeStart", "shapeCount", "faceStart", "faceCount", "edgeStart", "edgeCount"],
-        shapeColumns: ["id", "localId", "occurrenceId", "ordinal", "kind", "name", "sourceName", "bbox", "center", "area", "volume", "faceStart", "faceCount", "edgeStart", "edgeCount"],
-        faceColumns: ["id", "localId", "occurrenceId", "shapeId", "ordinal", "surfaceType", "area", "center", "normal", "bbox", "edgeStart", "edgeCount", "relevance", "flags", "params", "tangentGroup", "triangleStart", "triangleCount"],
+        occurrenceColumns: OCCURRENCE_COLUMNS,
+        shapeColumns: SHAPE_COLUMNS,
+        faceColumns: FACE_COLUMNS,
         edgeColumns: EDGE_COLUMNS,
       },
-      occurrences: [["o1", "1", null, null, null, null, { min: [-100, -100, -100], max: [100, 100, 100] }, 0, shapes.length, 0, faces.length, 0, edges.length]],
+      occurrences: [[null, { min: [-100, -100, -100], max: [100, 100, 100] }, 0, shapes.length, 0, faces.length, 0, edges.length, 0, 0]],
       shapes,
       faces,
       edges,
@@ -184,9 +197,10 @@ function placement(index) {
 
 // ---- the incremental composer against composing whole runtimes -----------------------------
 
+// The occurrence the page places the n-th part by: a token of the tree's shape (`o:` + 12 hex).
 function occurrenceOptions(index, { copyCadPath = "cars/hypercar.step", single = false } = {}) {
-  const id = `o1.${Math.floor(index / 3) + 1}.${(index % 3) + 1}`;
-  return { copyCadPath, partId: single ? "" : id, transform: placement(index), remapOccurrenceId: id };
+  const id = token("o", 0xa0 + index);
+  return { copyCadPath, partId: single ? "" : id, transform: placement(index), occurrenceId: id };
 }
 
 function composeFresh(items) {
