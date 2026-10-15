@@ -32,8 +32,8 @@ Use the corresponding robot-description skill for URDF, SRDF or SDF.
 Run cadgen through [uv](https://docs.astral.sh/uv/), so this skill's commands share
 one installation, and its warm build daemon, with the CAD app's server:
 
-- `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.21 cadgen`
-- `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.21 python`
+- `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen`
+- `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 python`
 
 `cadgen doctor <skill-dir>` reports the installation in use, whether it is the one
 this skill pins, and whether the CAD kernel loads. Each command's `--help` lists
