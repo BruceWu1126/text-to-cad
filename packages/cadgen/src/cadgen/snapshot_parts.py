@@ -15,8 +15,9 @@ descriptor's order:
   made from read it (``store.view.view_dir_for``).
 
 A part whose mesh leaves out a face no mesher could cover is listed, drawn and
-counted without it, and :func:`unmeshed_warnings` names the faces in the result's
-warnings, for a list and a view alike. A part no mesh could be made of at all is
+counted without it, and :func:`mesh_warnings` names the faces in the result's
+warnings, for a list and a view alike -- as it names the faces a mesh draws off
+their exact surface, which are drawn and counted as they are. A part no mesh could be made of at all is
 left out of both, as the CAD Viewer leaves it out, and :func:`failed_part_warnings`
 names it in the words a build uses (``#o1.2 peg could not be meshed (...)``); only
 a list or a view that would show nothing else fails (:func:`fail_if_nothing_left`).
@@ -33,7 +34,7 @@ from pathlib import Path
 from typing import Any
 
 __all__ = ["LIST_BOUNDS_DECIMALS", "fail_if_nothing_left", "failed_part_warnings", "failed_parts",
-           "filter_occurrences", "list_rows", "unmeshed_warnings"]
+           "filter_occurrences", "list_rows", "mesh_warnings"]
 
 # Three decimals of a millimetre is a nanometre: far below any tolerance a model
 # is built to, and a fifth of the payload full float64 noise would be.
@@ -111,26 +112,29 @@ def has_surfaces(descriptor: Mapping[str, Any]) -> bool:
     return any(cid not in records or records[cid]["selectors"]["faceCount"] > 0 for cid in placed)
 
 
-def unmeshed_warnings(
+def mesh_warnings(
     descriptor: Mapping[str, Any],
     rows: Sequence[Mapping[str, Any]],
     consequence: str,
 ) -> list[str]:
-    """A warning per component whose stored display mesh leaves a face no
-    mesher could cover undrawn (``cadgen.store.meshes``), naming the faces, the
-    occurrences of ``rows`` that place it, and ``consequence``. A probe per component
-    when none is missing."""
-    from cadgen.store.meshes import placements, unmeshed_warning
-    from cadgen.store.parts import stored_unmeshed_faces
+    """A warning per component whose stored display mesh names faces
+    (``cadgen.store.meshes``): one for the faces no mesher could cover, left undrawn,
+    with the occurrences of ``rows`` that place the component and ``consequence``; one
+    for the faces drawn though off their exact surface. A probe per component when it
+    names none."""
+    from cadgen.store.meshes import placements, unmeshed_warning, unverified_warning
+    from cadgen.store.parts import stored_named_faces
 
     components = descriptor.get("components") if isinstance(descriptor.get("components"), Mapping) else {}
     failed = failed_parts(descriptor)
     warnings = []
     for cid, occurrences in placements(rows).items():
         key = str((components.get(cid) or {}).get("part") or "")
-        faces = stored_unmeshed_faces(key) if key and cid not in failed else []
-        if faces:
-            warnings.append(unmeshed_warning(occurrences, faces, consequence))
+        unmeshed, unverified = stored_named_faces(key) if key and cid not in failed else ([], [])
+        if unmeshed:
+            warnings.append(unmeshed_warning(occurrences, unmeshed, consequence))
+        if unverified:
+            warnings.append(unverified_warning(occurrences, unverified))
     return warnings
 
 

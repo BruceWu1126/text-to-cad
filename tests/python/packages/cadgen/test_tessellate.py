@@ -1,19 +1,21 @@
-"""cadgen's tessellator draws a part as the CAD Viewer's tessellator drew it: closed, true to its BREP.
+"""cadgen's mesh library on its own: the tessellator it meshes a face with where OCCT does not, and
+the evaluation every verification stands on.
 
-Every display mesh is ``cadgen._internal.tessellate``'s, the browser tessellator of cadgen 0.7.21 as
-cadgen's native library. A solid comes out closed (each edge of the welded mesh used by two
-triangles), wound outward, with its volume and each face's area those of the exact BREP; the
-B-splines, conics and swept surfaces the library evaluates itself mesh as they do evaluated by OCCT;
-three.js's earcut is the one it triangulates with, triangle for triangle; and the faults it fixes in
-what it was ported from stay fixed: a freeform pole, a tip whose row is one point, a straight run of
-trim through a corner, a trim point or corner the grid moved off its trim, a row of slots in line, a
-hole crossing a grid cell's side, and a face narrower than its tolerance named as a hole. A face's
-grid and its pinning are driven directly, through the library's probe of them, with its trim given.
+Every display mesh is ``cadgen._internal.tessellate``'s: OCCT's triangulation, verified and repaired
+by cadgen's native library, which also meshes the faces OCCT refuses or the cost guard keeps from it.
+Here that tessellator is made to mesh whole solids (every face guarded) and held to the contract: a
+solid comes out closed (each edge of the welded mesh used by two triangles), wound outward, with its
+volume and each face's area those of the exact BREP; the faults it fixes in what it was ported from
+stay fixed: a freeform pole, a tip whose row is one point, a straight run of trim through a corner, a
+trim point or corner the grid moved off its trim, a row of slots in line, a hole crossing a grid
+cell's side, and a face narrower than its tolerance drawn as nothing. The B-splines, conics and
+swept surfaces the library evaluates itself evaluate as OCCT evaluates them, point and normal; a
+face's grid and its pinning are driven directly, through the library's probe of them, with its trim
+given; and three.js's earcut is the one it triangulates with, triangle for triangle.
 """
 
 from __future__ import annotations
 
-import collections
 import ctypes
 import math
 import unittest
@@ -56,13 +58,17 @@ RULINGS = [
 ]
 
 
-# A part key the meshes name: any will do, at this cadgen's part version.
-_PART = "0" * 64 + "-v5"
+def _part() -> str:
+    """A part key the meshes name: any will do, at this cadgen's part version."""
+    from cadgen.store.parts import PART_VERSION
+
+    return "0" * 64 + f"-v{PART_VERSION}"
 
 
-def _mesh(shape, *, host_all: bool = False):
-    """The shape's display mesh as the store holds it, decoded. ``host_all`` has OCCT evaluate every
-    curve and surface the library would evaluate itself."""
+def _mesh(shape, *, library: bool = True, report: dict | None = None):
+    """The shape's display mesh as the store holds it, decoded -- every face meshed by the library's
+    own tessellator when ``library`` (the fallback, made the primary for the test), else as the store
+    meshes it."""
     from cadgen._internal.selector_table import build_selector_table
     from cadgen._internal.tessellate import _mesh_component
     from cadgen._internal.topology_extract import extract_topology_facts
@@ -71,17 +77,10 @@ def _mesh(shape, *, host_all: bool = False):
 
     topods = getattr(shape, "wrapped", shape)
     table = build_selector_table(topods, extract_topology_facts(topods))
-    body = _mesh_component(topods, table, {}, part=_PART, chord=DISPLAY_TESSELLATION["chordTolerance"],
-                           angle=DISPLAY_TESSELLATION["angleTolerance"], host_all=host_all)
+    body = _mesh_component(topods, table, {}, part=_part(), chord=DISPLAY_TESSELLATION["chordTolerance"],
+                           angle=DISPLAY_TESSELLATION["angleTolerance"], report=report,
+                           guard=(lambda _ordinal: True) if library else None)
     return decode_payload(body)
-
-
-def _triangles(mesh, quantum: float) -> collections.Counter:
-    """The mesh's triangles, each by its corners' positions (to ``quantum``) and normals."""
-    corners = np.concatenate([np.round(np.asarray(mesh.positions, np.float64) / quantum),
-                              np.round(np.asarray(mesh.normals, np.float64) * 1e6)], axis=1).astype(np.int64)
-    return collections.Counter(tuple(map(tuple, triangle))
-                               for triangle in corners[np.asarray(mesh.indices, np.int64).reshape(-1, 3)].tolist())
 
 
 def _odd_edges(positions: np.ndarray, triangles: np.ndarray) -> int:
@@ -109,16 +108,16 @@ def _probe_face(surface: str, box, loop, lines=(), *, chord_limit=math.inf, angl
     model = T._Model(1, max([len(lines)] + [point[2] for point in loop]))
     kind = T._ANALYTIC["plane"] if surface == "plane" else T._S_HOST
     model.face_i[0] = [1, 0, kind, -1, 0, 0, 0, 0]
-    model.face_d[0] = [*box, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]
+    model.face_d[0] = [*box, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     model.surfaces[0] = (lambda u, v: (u, v, 0.0), lambda u, v, _box: (0.0, 0.0, 1.0))
     for ordinal, line in enumerate(lines, 1):
         if line is not None:
             start, end = line
-            model.edge_i[ordinal - 1] = [T._C_LINE, 0, -1, 0, 0, 0, 0, 0, 0]
+            model.edge_i[ordinal - 1] = [T._C_LINE, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0]
             model.edge_d[ordinal - 1] = [0.0, 1.0, *start, *[0.0] * 6, *(b - a for a, b in zip(start, end)), 0.0,
                                          0.0]
     failure: list = []
-    request, keep = T._request(model, chord=1e-3, angle=math.inf, failure=failure)
+    request, keep = T._request(model, chord=1e-3, angle=math.inf, deflection=1e-3, failure=failure)
     probe = T._library().cadgen_tessellate_pinned
     double, int32 = ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int32)
     probe.restype = ctypes.c_int32
@@ -141,6 +140,26 @@ def _probe_face(surface: str, box, loop, lines=(), *, chord_limit=math.inf, angl
     return uv[:counts[0]], pinned[:counts[0]], triangles[:counts[1]]
 
 
+def _evaluate(model, what: int, index: int, params: np.ndarray) -> np.ndarray:
+    """The library's own evaluation (``cadgen_tessellate_probe``) of a face's surface point or normal,
+    or an edge's point, at each row of ``params`` (u, v) or (t, 0): one point per row."""
+    from cadgen._internal import tessellate as T
+
+    failure: list = []
+    request, keep = T._request(model, chord=5e-4, angle=0.35, deflection=1e-3, failure=failure)
+    probe = T._library().cadgen_tessellate_probe
+    double = ctypes.POINTER(ctypes.c_double)
+    probe.restype = ctypes.c_int32
+    probe.argtypes = [ctypes.POINTER(T._Input), ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, double, double]
+    params = np.ascontiguousarray(params, np.float64)
+    out = np.zeros((len(params), 3), np.float64)
+    status = probe(ctypes.byref(request), what, index, len(params), params.ctypes.data_as(double),
+                   out.ctypes.data_as(double))
+    del keep
+    assert status == 0 and not failure, (status, failure)
+    return out
+
+
 def _earcut(contour, holes) -> list[list[int]]:
     """The library's earcut (``cadgen_tessellate_earcut``) of a contour and its holes."""
     from cadgen._internal import tessellate as T
@@ -156,6 +175,41 @@ def _earcut(contour, holes) -> list[list[int]]:
                   out.ctypes.data_as(int32), len(out))
     assert made >= 0
     return out[:made].reshape(-1, 3).tolist()
+
+
+def _freeform_solids() -> dict:
+    """Solids whose surfaces, trims and edges the library evaluates itself: a loft (a B-spline
+    surface of degree 14), a spline and an elliptical hole extruded, a spline revolved, and a
+    filleted plate round a hole with every surface, trim and edge made a B-spline (its hole and
+    rounds rational ones)."""
+    from build123d import Axis, Box, BuildLine, BuildPart, BuildSketch, Circle, Cylinder, Ellipse, Locations, Mode, \
+        Plane, Polyline, Solid, Spline, extrude, fillet, loft, make_face, revolve
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_NurbsConvert
+
+    with BuildPart() as vase:
+        for z, radius in ((0, 10), (8, 14), (16, 8), (24, 11)):
+            with BuildSketch(Plane.XY.offset(z)):
+                Circle(radius)
+        loft()
+    with BuildPart() as cam:
+        with BuildSketch():
+            with BuildLine():
+                Spline((0, 0), (10, 4), (20, -2), (30, 3))
+                Polyline((30, 3), (30, -12), (0, -12), (0, 0))
+            make_face()
+            with Locations((15, -5)):
+                Ellipse(6, 3, mode=Mode.SUBTRACT)
+        extrude(amount=6)
+    with BuildPart() as bell:
+        with BuildSketch(Plane.XZ):
+            with BuildLine():
+                Spline((0, 0), (8, 2), (6, 10), (9, 18))
+                Polyline((9, 18), (0, 18), (0, 0))
+            make_face()
+        revolve(axis=Axis.Z)
+    plate = fillet((Box(40, 30, 12) - Cylinder(5, 20)).edges().group_by()[-1], 2)
+    nurbs = Solid(BRepBuilderAPI_NurbsConvert(plate.wrapped, True).Shape())
+    return {"vase": vase.part, "cam": cam.part, "bell": bell.part, "plate": nurbs}
 
 
 class SolidsTests(unittest.TestCase):
@@ -176,13 +230,17 @@ class SolidsTests(unittest.TestCase):
             Cylinder(6, 20, mode=Mode.SUBTRACT)
         plate = Box(40, 30, 12) - Cylinder(5, 20)
         mixed = fillet(plate.edges().group_by()[-1], 2) + Sphere(6).moved(Location((12, 0, 6)))
-        shapes = {"gear": gear.part, "mixed": mixed, "torus": Torus(12, 4), "sphere": Sphere(7)}
+        shapes = {"gear": gear.part, "mixed": mixed, "torus": Torus(12, 4), "sphere": Sphere(7), **_freeform_solids()}
         for name, shape in shapes.items():
             with self.subTest(name):
-                mesh = _mesh(shape)
+                report: dict = {}
+                mesh = _mesh(shape, report=report)
+                self.assertEqual({"library"}, {facts["madeBy"] for facts in report["faces"].values()},
+                                 "every face the library's own")
                 positions = np.asarray(mesh.positions, np.float64)
                 triangles = np.asarray(mesh.indices, np.int64).reshape(-1, 3)
                 self.assertEqual([], list(mesh.unmeshed_faces))
+                self.assertEqual([], list(mesh.unverified_faces), "every face on its surface")
                 self.assertEqual(0, _odd_edges(mesh.positions, triangles), "the mesh is closed")
                 a, b, c = (positions[triangles[:, k]] for k in range(3))
                 volume = float(np.einsum("ij,ij->i", a, np.cross(b, c)).sum() / 6)
@@ -222,48 +280,49 @@ class SolidsTests(unittest.TestCase):
         analytic = len(np.asarray(_mesh(Sphere(radius)).indices)) // 3
         self.assertLess(len(triangles), 2 * analytic, "refined as the sphere it is, not on and on at its poles")
 
-    def test_the_library_evaluates_its_curves_and_surfaces_as_occt_does(self) -> None:
-        # The library evaluates B-spline surfaces, trims and edges by their poles and knots, conics
-        # by their formulas, and surfaces of extrusion and revolution by the curve they sweep. With
-        # OCCT evaluating them all instead, each part meshes the same, triangle for triangle, point
-        # and normal -- but for the odd diagonal that the last bits of a point turn.
-        from build123d import Axis, Box, BuildLine, BuildPart, BuildSketch, Circle, Cylinder, Ellipse, Locations, \
-            Mode, Plane, Polyline, Solid, Spline, extrude, fillet, loft, make_face, revolve
-        from OCP.BRepBuilderAPI import BRepBuilderAPI_NurbsConvert
+    def test_the_library_evaluates_its_surfaces_and_curves_as_occt_does(self) -> None:
+        # Verification stands on the library's own evaluation of every surface and edge OCCT
+        # meshed: each B-spline by its poles and knots, each conic by its formula, each surface of
+        # extrusion or revolution by the curve it sweeps. Point for point and normal for normal,
+        # over a grid of each face's parameters and along each edge, it is OCCT's.
+        from cadgen._internal import tessellate as T
+        from OCP.BRep import BRep_Tool
+        from OCP.BRepAdaptor import BRepAdaptor_Curve
+        from OCP.GeomLProp import GeomLProp_SLProps
+        from OCP.TopoDS import TopoDS
 
-        with BuildPart() as vase:  # a loft through circles: a B-spline surface of degree 14 round them
-            for z, radius in ((0, 10), (8, 14), (16, 8), (24, 11)):
-                with BuildSketch(Plane.XY.offset(z)):
-                    Circle(radius)
-            loft()
-        with BuildPart() as cam:  # a spline and an elliptical hole, extruded
-            with BuildSketch():
-                with BuildLine():
-                    Spline((0, 0), (10, 4), (20, -2), (30, 3))
-                    Polyline((30, 3), (30, -12), (0, -12), (0, 0))
-                make_face()
-                with Locations((15, -5)):
-                    Ellipse(6, 3, mode=Mode.SUBTRACT)
-            extrude(amount=6)
-        with BuildPart() as bell:  # a spline, revolved
-            with BuildSketch(Plane.XZ):
-                with BuildLine():
-                    Spline((0, 0), (8, 2), (6, 10), (9, 18))
-                    Polyline((9, 18), (0, 18), (0, 0))
-                make_face()
-            revolve(axis=Axis.Z)
-        # A filleted plate round a hole, its every surface, trim and edge made a B-spline: its hole
-        # and rounds rational ones.
-        plate = fillet((Box(40, 30, 12) - Cylinder(5, 20)).edges().group_by()[-1], 2)
-        nurbs = Solid(BRepBuilderAPI_NurbsConvert(plate.wrapped, True).Shape())
-        for name, shape in {"vase": vase.part, "cam": cam.part, "bell": bell.part, "plate": nurbs}.items():
+        for name, shape in _freeform_solids().items():
             with self.subTest(name):
-                own, occt = _mesh(shape), _mesh(shape, host_all=True)
-                triangles = np.asarray(own.indices, np.int64).reshape(-1, 3)
-                self.assertEqual(0, _odd_edges(own.positions, triangles), "the mesh is closed")
-                quantum = 1e-9 * float(np.ptp(np.asarray(own.positions), axis=0).max())
-                ours, theirs = _triangles(own, quantum), _triangles(occt, quantum)
-                self.assertLessEqual(sum(((ours - theirs) + (theirs - ours)).values()), 0.01 * len(triangles))
+                face_map, edge_map = T._maps(shape.wrapped)
+                model = T._model(shape.wrapped, face_map, edge_map)
+                extent = shape.bounding_box().diagonal
+                for index in range(face_map.Extent()):
+                    u0, u1, v0, v1 = model.face_d[index, 0:4]
+                    us, vs = np.meshgrid(np.linspace(u0, u1, 7), np.linspace(v0, v1, 7))
+                    params = np.column_stack([us.ravel(), vs.ravel()])
+                    surface = BRep_Tool.Surface_s(TopoDS.Face_s(face_map.FindKey(index + 1)))
+                    expected = np.array([surface.Value(u, v).Coord() for u, v in params.tolist()])
+                    points = _evaluate(model, T._ASK_SURFACE, index, params)
+                    self.assertLess(float(np.abs(points - expected).max()), extent * 1e-9, f"face {index + 1}'s points")
+                    normals = _evaluate(model, T._ASK_NORMAL, index, params)
+                    for (u, v), normal in zip(params.tolist(), normals):
+                        props = GeomLProp_SLProps(surface, u, v, 1, 1e-9)
+                        if not props.IsNormalDefined():
+                            continue
+                        theirs = np.array(props.Normal().Coord())
+                        self.assertGreater(abs(float(normal @ theirs)), 1 - 1e-7, f"face {index + 1}'s normal at {u}, {v}")
+                for index in range(edge_map.Extent()):
+                    if not model.edge_i[index][0]:
+                        continue
+                    curve = BRepAdaptor_Curve(TopoDS.Edge_s(edge_map.FindKey(index + 1)))
+                    first, last = model.edge_d[index, 0:2]
+                    params = np.column_stack([np.linspace(first, last, 9), np.zeros(9)])
+                    points = _evaluate(model, T._ASK_CURVE, index, params)
+                    # A B-spline's parameters are the library's conversion's; the ends and the
+                    # points along it are the curve's own where the conversion keeps them (lines,
+                    # conics, B-splines), which is every kind here.
+                    expected = np.array([curve.Value(float(t)).Coord() for t in params[:, 0]])
+                    self.assertLess(float(np.abs(points - expected).max()), extent * 1e-9, f"edge {index + 1}")
 
     def test_a_tip_whose_row_is_one_point_meets_its_neighbour_along_their_edge(self) -> None:
         # Two faces of an F-14D's tail, ruled B-splines whose rows close to one point at each end,
@@ -425,7 +484,7 @@ class UnmeshedFaceTests(unittest.TestCase):
         box, cylinder = Box(1, 2, 3).wrapped, Cylinder(1, 2).wrapped
         table = build_selector_table(cylinder, extract_topology_facts(cylinder))
         with self.assertRaisesRegex(MeshProductionError, "selector table"):
-            mesh_component(box, table, {}, part=_PART, chord=5e-4, angle=0.35)
+            mesh_component(box, table, {}, part=_part(), chord=5e-4, angle=0.35)
 
 
 if __name__ == "__main__":

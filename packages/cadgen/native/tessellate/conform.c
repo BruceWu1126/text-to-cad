@@ -3,10 +3,13 @@
  *
  * Every face's boundary mesh edges are fan-split to the UNION of the boundary fractions all faces
  * hold on each model edge: a vertex on one side of an edge is on the other side too, at the same
- * floats, so no T-junction is left. A planar face is triangulated again from its final exact trim
- * points instead. Then each face is welded where two boundary vertices came to one point, refined
- * once more over the fans conformity made, its poles put at their one point, and anything that is
- * one point in float32 dropped.
+ * floats, so no T-junction is left -- between two faces OCCT meshed (whose boundary vertices are
+ * its polygons' knots), between two the library meshed, and between one of each, where the
+ * library's face adds the points its grid put between the knots and the face OCCT meshed takes
+ * them. A planar face the library meshed is triangulated again from its final exact trim points
+ * instead. Then each face is welded where two boundary vertices came to one point, refined once
+ * more over the fans conformity made, its poles put at their one point, and anything that is one
+ * point in float32 dropped.
  */
 
 typedef struct {
@@ -239,11 +242,17 @@ static void crossing_segments(arena *T, const ring *loops, i64 loop_count, vmeta
 }
 
 /* Two vertices at one position that are the two images of a periodic face's seam, which must both
- * survive. */
+ * survive: their parameters a period apart (OCCT's seam nodes land a few ulps short of it, and a
+ * vertex the unwrap of a straddling triangle duplicated lands on it), or the face's whole span
+ * where the surface's period is unknown. */
 static int is_seam_image(const face *f, const vd *uv, i64 i, i64 j) {
-  double u_span = f->uv[1] - f->uv[0], v_span = f->uv[3] - f->uv[2], full_span = 1 - 1e-9;
-  return (u_span > 0 && fabs(uv->v[2 * i] - uv->v[2 * j]) >= u_span * full_span) ||
-         (v_span > 0 && fabs(uv->v[2 * i + 1] - uv->v[2 * j + 1]) >= v_span * full_span);
+  for (int d = 0; d < 2; d++) {
+    double delta = fabs(uv->v[2 * i + d] - uv->v[2 * j + d]);
+    double period = d ? f->period_v : f->period_u, span = f->uv[2 * d + 1] - f->uv[2 * d];
+    if (period > 0.0 && fabs(delta - period) <= period * 1e-6) return 1;
+    if (span > 0.0 && delta >= span * (1 - 1e-9)) return 1;
+  }
+  return 0;
 }
 
 /* The face's vertices on one of its poles, each with the pole's point, in the order each was first
@@ -519,7 +528,7 @@ static i32 vertex_at(fan *F, i32 ord, double fr, i32 a, i32 b, double w) {
   const surface *s = &F->f->s;
   double au = raw->uv.v[2 * a], av = raw->uv.v[2 * a + 1], bu = raw->uv.v[2 * b], bv = raw->uv.v[2 * b + 1];
   double uv[2];
-  uv[0] = singular_u(s, av) ? bu : singular_u(s, bv) ? au : au + w * (bu - au);
+  uv[0] = singular_u(F->r, s, av) ? bu : singular_u(F->r, s, bv) ? au : au + w * (bu - au);
   uv[1] = av + w * (bv - av);
   found = raw->uv.n / 2;
   PUSH2(F->A, raw->uv, uv[0], uv[1]);
@@ -683,10 +692,11 @@ static void conform_boundaries(run *r, arenas M, const host *h, const face *face
     if (sh && sh->closed && values->n > 1 && 1 - values->v[values->n - 1] <= eps) values->n--;
   }
 
-  /* A planar face's loops must not cross themselves: each crossing segment is split at its middle,
-   * on the exact curve, until none crosses, the new points joining the union first. */
+  /* A planar face the library meshed has loops that must not cross themselves: each crossing
+   * segment is split at its middle, on the exact curve, until none crosses, the new points joining
+   * the union first. */
   for (i64 k = 0; k < count; k++) {
-    if (!raws[k] || faces[k].s.kind != S_PLANE) continue;
+    if (!raws[k] || raws[k]->source != SOURCE_LIBRARY || faces[k].s.kind != S_PLANE) continue;
     for (int round = 0; round < MAX_REFINE_DEPTH; round++) {
       arena_mark mark = arena_save(M.T);
       planar p;
@@ -723,9 +733,9 @@ static void conform_boundaries(run *r, arenas M, const host *h, const face *face
     raw_face *raw = raws[k];
     if (!raw) continue;
     const face *f = &faces[k];
-    if (f->s.kind == S_PLANE) {
-      /* A new point on a curved trim can cross an old triangle's diagonal: the planar region is
-       * triangulated again from its final exact trim points. */
+    if (f->s.kind == S_PLANE && raw->source == SOURCE_LIBRARY) {
+      /* A new point on a curved trim can cross an old triangle's diagonal: the planar region the
+       * library meshed is triangulated again from its final exact trim points. */
       planar p;
       planar_loops(r, M.A, h, &c, f, raw, &p);
       arena_mark mark = arena_save(M.F);

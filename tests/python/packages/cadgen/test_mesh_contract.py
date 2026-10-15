@@ -26,7 +26,6 @@ add_repo_path("packages/cadgen/src")
 
 SAMPLE = 24  # the longest triangles of each face whose interiors are projected onto the surface
 AREA_TOLERANCE = 1e-2
-VOLUME_TOLERANCE = 5e-3
 TRIANGLE_BUDGET = 4.0  # against OCCT's BRepMesh at the same tolerances
 # A triangle is folded when its facet points against the normal it is drawn with by more than the
 # rounding of a sliver seen edge-on: the cosine between them below this.
@@ -263,7 +262,11 @@ class MeshContractTests(unittest.TestCase):
                 facets = np.cross(b - a, c - a)
                 self.assertTrue(bool((np.linalg.norm(facets, axis=1) > 0).all()), f"{name}: a degenerate triangle")
                 volume = float(np.einsum("ij,ij->i", a, np.cross(b, c)).sum() / 6)
-                self.assertAlmostEqual(1.0, volume / case.shape.volume, delta=VOLUME_TOLERANCE,
+                # A mesh within d of its surface everywhere encloses a volume within area x d of
+                # the solid's (an inscribed mesh falls short by up to that); a face wound inward
+                # would be off by twice its own volume share.
+                self.assertAlmostEqual(1.0, volume / case.shape.volume,
+                                       delta=case.shape.area * case.deflection / case.shape.volume,
                                        msg=f"{name}: wound outward, its volume the solid's")
                 normals = np.asarray(case.mesh.normals, np.float64)[case.triangles].sum(axis=1)
                 cosine = np.einsum("ij,ij->i", facets, normals) / (np.linalg.norm(facets, axis=1)

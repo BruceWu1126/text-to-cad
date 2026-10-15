@@ -43,7 +43,10 @@ from cadgen.store.objects import is_object_hash, object_path, put_object, read_v
 # meshes moved to the store (``_internal/tessellate.py``): every part has a new mesh.
 # 5: the tessellator runs as cadgen's native library, evaluating its B-splines and conics
 # itself: a part's mesh may differ from its version-4 mesh in its last bits.
-PART_VERSION = 5
+# 6: OCCT's BRepMesh triangulates and the native library verifies every face and repairs or
+# replaces what fails; a body may name the faces drawn off their surface (``unverifiedFaces``,
+# counted here as ``unverifiedFaceCount``): every part has a new mesh.
+PART_VERSION = 6
 INDEX_KIND = "part"
 MAX_INDEX_BYTES = 16 * 1024
 _KEY = re.compile(rf"[0-9a-f]{{64}}-v{PART_VERSION}")
@@ -53,6 +56,8 @@ ROLES = ("glb", "selectors")
 _GLB_FIELDS = {"object", "byteLength", "decodedBytes", "vertexCount", "indexCount", "faceCount", "edgeCount",
                "edgePointCount"}
 _UNMESHED_COUNT = "unmeshedFaceCount"
+_UNVERIFIED_COUNT = "unverifiedFaceCount"
+_NAMED_COUNTS = (_UNMESHED_COUNT, _UNVERIFIED_COUNT)
 _SELECTOR_FIELDS = {"object", "byteLength", "faceCount", "edgeCount", "vertexCount"}
 _PRODUCER_FIELDS = {"build123d", "ocp", "cadqueryOcp"}
 
@@ -211,10 +216,12 @@ def _valid_record(record: Any) -> bool:
         if type(record) is not dict or set(record) != set(ROLES):
             return False
         glb, table = record["glb"], record["selectors"]
-        if (type(glb) is not dict or set(glb) not in (_GLB_FIELDS, _GLB_FIELDS | {_UNMESHED_COUNT})
+        if (type(glb) is not dict or not _GLB_FIELDS <= set(glb) <= _GLB_FIELDS | set(_NAMED_COUNTS)
                 or not is_object_hash(glb["object"]) or not _counts(glb, set(glb))):
             return False
-        if _UNMESHED_COUNT in glb and not 0 < glb[_UNMESHED_COUNT] <= glb["faceCount"]:
+        if any(name in glb and not 0 < glb[name] <= glb["faceCount"] for name in _NAMED_COUNTS):
+            return False
+        if sum(glb.get(name, 0) for name in _NAMED_COUNTS) > glb["faceCount"]:
             return False
         if (glb["byteLength"] < 20 or glb["byteLength"] % 4 or glb["decodedBytes"] != decoded_bytes(glb)
                 or glb["edgePointCount"] < 2 * glb["edgeCount"]
@@ -280,16 +287,19 @@ def read(key: str, role: str, *, expected_object: str | None = None, max_bytes: 
         return None
 
 
-def stored_unmeshed_faces(key: str) -> list[int]:
-    """The faces the part's stored mesh leaves undrawn: none when the store lacks it or its
-    record counts none, so a reader asks every part it drew for the price of a probe."""
-    from cadgen.store.meshes import unmeshed_faces
+def stored_named_faces(key: str) -> tuple[list[int], list[int]]:
+    """The faces the part's stored mesh names: the ones it leaves undrawn (``unmeshedFaces``) and
+    the ones it draws off their surface (``unverifiedFaces``). Both empty when the store lacks the
+    part or its record counts none, so a reader asks every part it drew for the price of a probe."""
+    from cadgen.store.meshes import unmeshed_faces, unverified_faces
 
     record = probe(key)
-    if record is None or not record["glb"].get(_UNMESHED_COUNT):
-        return []
+    if record is None or not any(record["glb"].get(name) for name in _NAMED_COUNTS):
+        return [], []
     payload = read(key, "glb")
-    return unmeshed_faces(payload) if payload is not None else []
+    if payload is None:
+        return [], []
+    return unmeshed_faces(payload), unverified_faces(payload)
 
 
 def _write(key: str, glb: bytes, table: bytes) -> dict:

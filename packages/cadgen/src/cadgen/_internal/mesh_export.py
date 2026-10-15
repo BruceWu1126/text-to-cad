@@ -179,7 +179,8 @@ def _export(source: MeshSource, jobs: "list[MeshExportJob]", pairs: list, *, nam
     files: list[dict | None] = [None] * len(jobs)
     for pair in sorted(set(pairs)):
         tessellations = {cid: decode_tessellation(bodies[(cid, pair)]) for cid in used}
-        unmeshed = {cid: faces for cid in used if (faces := meshes.unmeshed_faces(bodies[(cid, pair)]))}
+        named = {cid: faces for cid in used
+                 if any(faces := (meshes.unmeshed_faces(bodies[(cid, pair)]), meshes.unverified_faces(bodies[(cid, pair)])))}
         # Every static job of one pair shares one primitive build. An ANIMATED job
         # builds its own: its nodes are per occurrence, and what its clip drops (an
         # occurrence hidden at start, one faded) changes which primitives exist.
@@ -225,22 +226,27 @@ def _export(source: MeshSource, jobs: "list[MeshExportJob]", pairs: list, *, nam
             write_bytes_atomic(job.out, payload)
             files[index] = {"path": str(job.out), "format": job.fmt, "triangleCount": triangles,
                             **({"animation": summary} if summary is not None else {}),
-                            **({"warnings": _unmeshed_warnings(descriptor, unmeshed, job.out.name)}
-                               if unmeshed else {})}
+                            **({"warnings": _mesh_warnings(descriptor, named, job.out.name)} if named else {})}
     return {"ok": True, "files": files}
 
 
-def _unmeshed_warnings(descriptor: dict, unmeshed: dict, written: str) -> list[str]:
-    """What a file written from meshes that leave faces out says of each such component:
-    its occurrences, the faces, and that the file is open where they are."""
-    from cadgen.store.meshes import unmeshed_warning
+def _mesh_warnings(descriptor: dict, named: dict, written: str) -> list[str]:
+    """What a file written from meshes that name faces says of each such component: its
+    occurrences and the faces -- the ones left out, where the file is open, and the ones written
+    off their exact surface, which the file has as the mesh drew them."""
+    from cadgen.store.meshes import unmeshed_warning, unverified_warning
 
     occurrences = [occurrence for occurrence in descriptor.get("occurrences") or [] if isinstance(occurrence, dict)]
     name = written.replace("{", "{{").replace("}", "}}")
-    return [unmeshed_warning([(str(occurrence.get("id")), str(occurrence.get("name") or ""))
-                              for occurrence in occurrences if occurrence.get("component") == cid],
-                             faces, name + " has a hole in place of {them}: it is not watertight")
-            for cid, faces in unmeshed.items()]
+    warnings = []
+    for cid, (unmeshed, unverified) in named.items():
+        placed = [(str(occurrence.get("id")), str(occurrence.get("name") or ""))
+                  for occurrence in occurrences if occurrence.get("component") == cid]
+        if unmeshed:
+            warnings.append(unmeshed_warning(placed, unmeshed, name + " has a hole in place of {them}: it is not watertight"))
+        if unverified:
+            warnings.append(unverified_warning(placed, unverified))
+    return warnings
 
 
 def _skinned_tubes(descriptor: dict, tessellations: dict, clip: Any) -> dict:
