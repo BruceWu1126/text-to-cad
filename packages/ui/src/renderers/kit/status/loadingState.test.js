@@ -19,6 +19,17 @@ test("a build of the file is an update of the model on screen until it ends", ()
   assert.equal(viewerLoadingState({ editPending: true, previousView: true }).updating, true);
   assert.equal(viewerLoadingState({ editPending: true, previousView: true }).opening, false);
   assert.equal(viewerLoadingState({}).busy, false);
+  assert.equal(viewerLoadingState({}).preview, false);
+});
+
+test("a build whose own preview is drawn is no longer a wait, and the view says it is a preview", () => {
+  const drawn = viewerLoadingState({ editPending: true, previousView: true, currentPreview: true });
+  assert.deepEqual([drawn.updating, drawn.busy, drawn.preview], [false, false, true]);
+  // Its own geometry still arriving is a wait of its own, said beside the label.
+  const arriving = viewerLoadingState({ busy: true, editPending: true, previousView: true, currentPreview: true });
+  assert.deepEqual([arriving.updating, arriving.preview], [true, true]);
+  // The label outlives the build: a failed one leaves its preview on screen under the alert.
+  assert.equal(viewerLoadingState({ previousView: true, currentPreview: true, error: { severity: "error", blocking: false } }).preview, true);
 });
 
 test("technical stages have a small vocabulary and uncounted waits never claim a fraction", () => {

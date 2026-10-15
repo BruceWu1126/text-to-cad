@@ -7,7 +7,7 @@ import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import PreviewChrome from "../tools/PreviewChrome.jsx";
 import { useViewerMobile } from "../../../file-viewer/responsive.js";
 import ViewerAlertCard, { alertDismissible, useAlertDismissal } from "../status/ViewerAlertCard.jsx";
-import { modelUpdateStatus, ViewUpdateStatus } from "../status/ViewUpdateStatus.jsx";
+import { modelUpdateStatus, ViewPreviewLabel, ViewUpdateStatus } from "../status/ViewUpdateStatus.jsx";
 import ViewerLoadingOverlay from "../status/ViewerLoadingOverlay.js";
 import { VIEWER_RENDER_PROFILE, renderProfileKeepsPixelRatio, sceneForRenderProfile } from "../viewport/renderProfile.js";
 import { NAVBAR_CONTROL_CLASS } from "../../../lib/navbarRow.js";
@@ -350,9 +350,11 @@ export default function RendererShell({ shell, tools, toolPanels = null, navbarC
 
               {/* One place says the view is catching up: a newer revision of the file loading behind the
                   model on screen, or a Display change being prepared — the latter's failure first, since
-                  it is the one with something to retry. */}
-              {failed ? null : <div className="pointer-events-none absolute left-1/2 z-30 flex max-w-[calc(100%-1rem)] -translate-x-1/2 items-center"
+                  it is the one with something to retry. The same place says the model on screen is a
+                  build's preview revision, for as long as it is (`load.currentPreview`). */}
+              {failed ? null : <div className="pointer-events-none absolute left-1/2 z-30 flex max-w-[calc(100%-1rem)] -translate-x-1/2 items-center gap-2"
                 style={{ top: VIEWPORT_INSET_PX, height: VIEWPORT_TOP_BAR_PX }} data-viewport-status="">
+                {frame.loading.preview ? <ViewPreviewLabel className="rounded-md bg-background/95 px-2 py-0.5 shadow-sm" /> : null}
                 <ViewUpdateStatus status={frame.loading.updating && !frame.viewUpdate.status.error
                   ? modelUpdateStatus(frame.loading.progress) : frame.viewUpdate.status} onRetry={frame.viewUpdate.retry}
                   className="rounded-md bg-background/95 px-1 py-0.5 shadow-sm" />

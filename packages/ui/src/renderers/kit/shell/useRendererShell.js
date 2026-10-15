@@ -121,7 +121,7 @@ const NO_CHOICE = Object.freeze({});
  *   `set` is given the mode `toolModes` decided. Omitted: the shell holds the state.
  * @param {import("../scene.js").KitScene | null} options.scene
  * @param {{ busy: boolean, updating?: boolean, progress?: object | null, alert?: object | null,
- *   editPending?: boolean, finding?: boolean }} options.load  The
+ *   editPending?: boolean, currentPreview?: boolean, finding?: boolean }} options.load  The
  *   renderer's document load. `busy`: nothing to show yet. `updating`: a newer revision is loading behind the scene on
  *   screen. The rest are for a renderer whose document is more than a download — see `loadReport.js`.
  * @param {object | null} [options.animation]  A playbar runtime (with its own `clock`), when the file has

@@ -158,6 +158,21 @@ test("a failed build over the model on screen keeps it and the diagnostic", () =
   assert.match(alert.details, /Revision: 8/);
 });
 
+test("a build that failed with its own preview on screen says the preview is what is shown", () => {
+  const failed = { state: "failed", error: "the save failed: disk full", file: "STEP/moonwatch.step", revision: 9 };
+  const alert = buildViewerEditAlert(failed, true, { previewShown: true });
+  assert.equal(alert.summary, "Build failed");
+  assert.equal(alert.title, "Couldn’t finish the build");
+  assert.match(alert.message, /viewing its preview, not a saved file/);
+  assert.equal(alert.blocking, false);
+  assert.equal(alert.reason, "the save failed: disk full");
+  const service = buildViewerEditAlert({ ...failed, error: "artifact request failed or lost its protocol; no cold retry" }, true, { previewShown: true });
+  assert.equal(service.kind, "service");
+  assert.match(service.message, /viewing its preview/);
+  // With nothing drawn there is no preview to speak of.
+  assert.equal(buildViewerEditAlert(failed, false, { previewShown: true }).summary, "Open failed");
+});
+
 test("edit worker failures are distinct from invalid-model failures", () => {
   const worker = buildViewerEditAlert({
     state: "failed",

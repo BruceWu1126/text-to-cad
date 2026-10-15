@@ -59,15 +59,17 @@ export function buildViewerMeshAlert(entry, hasMeshData, loadError, artifact = n
 /**
  * Turn a failed build of the file into the same actionable alert used by file loads. A quiet or
  * unreachable feed stays quiet, and so does a build the file has since moved past: neither means
- * the model or its saved file is invalid.
+ * the model or its saved file is invalid. `previewShown`: the failed build's own preview revision is
+ * what is on screen (it stays, labelled, under this alert), not the previous version of the file.
  */
-export function buildViewerEditAlert(editingState, hasGeometry = false) {
+export function buildViewerEditAlert(editingState, hasGeometry = false, { previewShown = false } = {}) {
   const state = String(editingState?.state || "").trim().toLowerCase();
   if (!editingState || state !== "failed" || editingState.superseded === true) {
     return null;
   }
 
   const usableModelVisible = Boolean(hasGeometry);
+  const shown = previewShown && usableModelVisible;
   const actualDetail = String(editingState.error || "").trim()
     || "The viewer returned no diagnostic for the failed update.";
   const details = [
@@ -91,20 +93,24 @@ export function buildViewerEditAlert(editingState, hasGeometry = false) {
       kind: "service",
       summary: "Viewer service failed",
       title: "Couldn’t prepare the model",
-      message: usableModelVisible
-        ? "The viewer couldn’t prepare the latest update. You’re still viewing the previous version."
-        : "The viewer’s processing service failed.",
+      message: shown
+        ? "The viewer couldn’t finish the latest build. You’re viewing its preview, not a saved file."
+        : usableModelVisible
+          ? "The viewer couldn’t prepare the latest update. You’re still viewing the previous version."
+          : "The viewer’s processing service failed.",
       recovery: "Try again. If this continues, check the viewer’s terminal output."
     };
   }
 
   return {
     ...common,
-    summary: usableModelVisible ? "Update failed" : "Open failed",
-    title: usableModelVisible ? "Couldn’t update the model" : "Couldn’t open the model",
-    message: usableModelVisible
-      ? "The latest update couldn’t be loaded. You’re still viewing the previous version."
-      : "The model could not be prepared for display.",
+    summary: shown ? "Build failed" : usableModelVisible ? "Update failed" : "Open failed",
+    title: shown ? "Couldn’t finish the build" : usableModelVisible ? "Couldn’t update the model" : "Couldn’t open the model",
+    message: shown
+      ? "The latest build failed before it saved the file. You’re viewing its preview, not a saved file."
+      : usableModelVisible
+        ? "The latest update couldn’t be loaded. You’re still viewing the previous version."
+        : "The model could not be prepared for display.",
     reason: actualDetail,
     recovery: "Check the diagnostic in Details, correct the model, then run it again."
   };

@@ -33,6 +33,7 @@ import { useStepMotion } from "./workbench/useStepMotion.js";
 import { animationControlsHaveContent } from "../kit/tools/playbar/ViewportAnimationBar.js";
 import { useCadAssets } from "./components/workbench/hooks/useCadAssets.js";
 import { useEditingPreview } from "./components/workbench/hooks/useEditingPreview.js";
+import { usePreviewRevision } from "./components/workbench/hooks/usePreviewRevision.js";
 import { useViewportLoadStatus } from "./components/workbench/hooks/useViewportLoadStatus.js";
 import { editingBuildActive } from "./workbench/editingPreview.js";
 import MeasurePanel from "./components/workbench/MeasurePanel.jsx";
@@ -285,6 +286,9 @@ function StepSurfaceBody({ view, data }) {
   const resolvedMaterialOverrides = resolvedScene.materialOverrides || EMPTY_MATERIAL_OVERRIDES;
   // The tool in hand is never saved: a STEP opens in Select.
   const [tabToolMode, setTabToolMode] = useState(CAD_TOOL_MODES.defaultMode);
+  // The parts gate of the preview revision on screen (`usePreviewRevision`, below): read by the mesh
+  // load of a preview entry, for the parts its build is still deriving.
+  const previewGateRef = useRef(null);
 
   const {
     meshState,
@@ -312,14 +316,18 @@ function StepSurfaceBody({ view, data }) {
     entryHasMesh,
     entryHasReferences,
     buildNormalizedReferenceState,
+    previewGate: previewGateRef,
   });
 
   const editingFile = liveEntry ? fileKey(liveEntry) : selectedKey;
   const editingAvailable = /\.st(?:ep|p)$/i.test(editingFile || "");
-  // The build feed: status only ("Updating model…", a failed build). The view shows the saved file.
+  // The build feed: its status ("Updating model…", a failed build) and the preview revision it names
+  // (STORE.md 9b), which the view draws in the saved file's place, labelled, until the file replaces it.
   const editingPreview = useEditingPreview(editingFile, { client,
     enabled: editingAvailable,
   });
+  const previewRevision = usePreviewRevision(editingPreview.state, { client, file: editingFile, inHand: liveEntry, meshState });
+  previewGateRef.current = previewRevision.gate;
   const editingHasView = entryHasMesh(liveEntry);
   // Unified render-artifact status for the selected entry: ready (render) | generating (loading) |
   // error (fatal). A missing/stale cache is not an issue — it just triggers a (re)build. Replaces
@@ -344,17 +352,20 @@ function StepSurfaceBody({ view, data }) {
   const referencePath = view.file.path;
   // While the artifact is missing/stale/building/broken, hide the (possibly stale) render assets so
   // the viewer shows a loading or error state and renders only the fresh artifact once ready.
+  // The preview revision the feed names stands in the catalog entry's place until the saved file
+  // replaces it; it is read as a saved file is and never presented as one (`previewRevisionEntry`).
   const selectedEntry = useMemo(
     () => {
-      const base = !liveEntry || selectedArtifact.status === "compiled" || entryHasMesh(liveEntry)
-        ? liveEntry
-        : entryWithoutRenderAssets(liveEntry);
+      const base = previewRevision.entry
+        || (!liveEntry || selectedArtifact.status === "compiled" || entryHasMesh(liveEntry)
+          ? liveEntry
+          : entryWithoutRenderAssets(liveEntry));
       if (!base) {
         return base;
       }
       return referencePath ? { ...base, fileRefPrefix: referencePath } : base;
     },
-    [liveEntry, selectedArtifact.status, referencePath]
+    [liveEntry, previewRevision.entry, selectedArtifact.status, referencePath]
   );
   // This renderer is only ever handed a STEP (its `matches`, index.ts), keyed per file, and an
   // entry is always present: so every capability a STEP has (parts, topology, Measure, a
@@ -375,6 +386,8 @@ function StepSurfaceBody({ view, data }) {
     !!selectedEntry &&
     meshState.file === fileKey(selectedEntry) &&
     meshState.meshHash === selectedMeshHash;
+  // What is drawn is the build's own preview revision: labelled so, and the wait for the build over.
+  const currentPreview = selectedEntry?.preview === true && selectedMeshMatches;
   // useCadAssets keeps the complete scene while a same-file STEP revision loads
   // (a part's or an assembly's). Keep that predecessor on screen until the new
   // one is published: an edit is an update, never the loading screen again.
@@ -666,7 +679,7 @@ function StepSurfaceBody({ view, data }) {
   const presentationRevisionKey = `${selectedMeshData ? meshState?.meshHash || selectedMeshHash : selectedMeshHash}:${selectedMeshPartial ? "partial" : "complete"}`;
 
   const viewerAlert = useMemo(() => {
-    const editFailure = buildViewerEditAlert(editingPreview.state, Boolean(selectedMeshData && !selectedMeshPartial));
+    const editFailure = buildViewerEditAlert(editingPreview.state, Boolean(selectedMeshData && !selectedMeshPartial), { previewShown: currentPreview });
     if (editFailure) return editFailure;
     if (catalogError && !selectedMeshData) return {
       severity: "error", kind: "status", title: "Couldn’t open the model",
@@ -702,6 +715,7 @@ function StepSurfaceBody({ view, data }) {
     return meshAlert || viewerRuntimeAlert;
   }, [
     editingPreview.state,
+    currentPreview,
     catalogError,
     error,
     meshState?.assemblyBackgroundError,
@@ -736,7 +750,8 @@ function StepSurfaceBody({ view, data }) {
   const zoomSelectionRef = useRef({ partIds: EMPTY_LIST, referenceIds: EMPTY_LIST, available: false });
   const selectedEntryBuildSnapshotRef = useRef({
     fileRef: "",
-    stepHash: ""
+    stepHash: "",
+    preview: false
   });
   // This is the displayed render revision, so same-file saves cannot inherit
   // a predecessor's benchmark milestones.
@@ -803,7 +818,8 @@ function StepSurfaceBody({ view, data }) {
     if (!fileRef) {
       selectedEntryBuildSnapshotRef.current = {
         fileRef: "",
-        stepHash: ""
+        stepHash: "",
+        preview: false
       };
       setStepUpdateInProgress(false);
       return;
@@ -812,12 +828,17 @@ function StepSurfaceBody({ view, data }) {
     const previous = selectedEntryBuildSnapshotRef.current;
     const sameEntry = previous.fileRef === fileRef;
     const stepChanged = sameEntry && !!previous.stepHash && !!stepHash && previous.stepHash !== stepHash;
+    // A preview replaced by its own save clears nothing: the tokens are the same (STORE.md 9b). Any
+    // other change of tree -- a preview taking the saved file's place included -- is a new revision.
+    const savedPreview = stepChanged && previous.preview && previewRevision.saved === stepHash;
 
-    if (stepChanged) {
+    if (stepChanged && !savedPreview) {
       resetSelectionForStepUpdate();
       // Ink drawn over the previous revision does not describe this one: the sketch goes, and its
       // history with it, so Undo cannot bring it back over the new model. Draw stays the tool.
       shellRef.current?.frame.drawing.discard();
+    }
+    if (stepChanged) {
       setStepUpdateInProgress(true);
     } else if (!sameEntry) {
       setStepUpdateInProgress(false);
@@ -827,9 +848,11 @@ function StepSurfaceBody({ view, data }) {
       fileRef,
       // A rewritten STEP is listed with no hash until it is built: the revision on screen stays the
       // last one, so the build that lands after the gap still reads as an update.
-      stepHash: stepHash || (sameEntry ? previous.stepHash : "")
+      stepHash: stepHash || (sameEntry ? previous.stepHash : ""),
+      preview: selectedEntry?.preview === true
     };
   }, [
+    previewRevision.saved,
     resetSelectionForStepUpdate,
     selectedEntry
   ]);
@@ -1363,9 +1386,11 @@ function StepSurfaceBody({ view, data }) {
       !effectiveSelectorRuntime
     )
   );
+  // A preview is never presented as the file: the resource stays the saved file's revision.
   const promptResource = useMemo(() => ({ ...documentResource,
-    revision: String(selectedEntry?.documentHash || selectedEntry?.hash || documentResource.revision || '')
-  }), [documentResource, selectedEntry?.documentHash, selectedEntry?.hash]);
+    revision: selectedEntry?.preview ? documentResource.revision
+      : String(selectedEntry?.documentHash || selectedEntry?.hash || documentResource.revision || '')
+  }), [documentResource, selectedEntry?.preview, selectedEntry?.documentHash, selectedEntry?.hash]);
   // Rebuilds keep the previous same-file mesh visible until its replacement is
   // ready. Observe that mesh's document revision while interaction is blocked.
   const displayedResourceRef = useRef(promptResource);
@@ -1457,6 +1482,7 @@ function StepSurfaceBody({ view, data }) {
       progress: selectedLoadProgress || (editingPreview.state.phase ? { phase: editingPreview.state.phase, detail: editingPreview.state.detail } : null),
       alert: viewerAlert || (!selectedMeshData && catalogError ? catalogError : null) || annotationAlert,
       editPending: editingBuildActive(editingPreview.state),
+      currentPreview,
       finding: !catalogHydrated
     },
     // The routines: preview's Playback settings and playbar, and the Animation tool.
@@ -2960,6 +2986,7 @@ function StepSurfaceBody({ view, data }) {
         ...(reference.label ? { label: reference.label } : {})
       })),
       loading: Boolean(viewerLoading || stepInteractionBlocked),
+      preview: currentPreview,
       selectedPartIds: [...viewerSelectedPartIds],
       selectedReferenceIds: [...selectedReferenceIdsRef.current],
       hiddenPartIds: [...hiddenPartIds], isolatedPartIds: [...isolatedAssemblyNodeIds],

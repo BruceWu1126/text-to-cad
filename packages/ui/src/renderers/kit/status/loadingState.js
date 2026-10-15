@@ -42,17 +42,20 @@ export function loadingProgress(progress, { finding = false, preparing = false }
   };
 }
 
+// `currentPreview`: what is drawn is the build's own preview revision (loading.md section 5), so the
+// wait for that build is over even though its write is not; the view says so in its place.
 export function viewerLoadingState({
-  busy = false, editPending = false, previousView = false,
+  busy = false, editPending = false, previousView = false, currentPreview = false,
   error = null, progress = null,
   finding = false, preparing = false,
 } = {}) {
   const failed = error && (typeof error === "string" || error.severity !== "warning" || error.blocking === true);
-  const active = !failed && (busy || editPending);
+  const active = !failed && (busy || (editPending && !currentPreview));
   return {
     opening: active && !previousView,
     updating: active && previousView,
     busy: active,
+    preview: currentPreview === true,
     progress: loadingProgress(progress, { finding, preparing }),
   };
 }
