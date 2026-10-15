@@ -40,11 +40,14 @@ function loadMesh() {
 }
 
 const ENTRY = { fileRefPrefix: "sun_gear.step", kind: "assembly", file: "sun_gear.step" };
-const OCCURRENCES = [{ id: "o1.1", component: "c0", transform: null }];
+// An occurrence token of the tree's shape (`o:` + 12 hex) for the n-th placed occurrence.
+const occurrenceToken = (index) => `o:${(0xa0 + index).toString(16).padStart(12, "0")}`;
+const GEAR = occurrenceToken(0);
+const OCCURRENCES = [{ id: GEAR, component: "c0", transform: null }];
 
 function partForMeshData(meshData) {
   return {
-    occurrenceId: "o1.1",
+    occurrenceId: GEAR,
     primitiveIndex: 0,
     triangleOffset: 0,
     triangleCount: Math.floor(meshData.indices.length / 3)
@@ -101,7 +104,7 @@ test("occurrence runtimes build identically through both entrypoints", () => {
   // The occurrence namespace is what keeps picks aligned with the composed
   // mesh's sourcePartRanges — pin it.
   const reference = runtimes[0].references?.[0];
-  assert.ok(String(reference?.id || "").includes("o1.1"), `reference ids carry the occurrence: ${reference?.id}`);
+  assert.ok(String(reference?.id || "").includes(GEAR), `reference ids carry the occurrence: ${reference?.id}`);
 });
 
 // ---- incremental composition: the same runtime as composing everything again ----------------
@@ -109,7 +112,7 @@ test("occurrence runtimes build identically through both entrypoints", () => {
 function placedOccurrence(index, component = "c0") {
   const angle = 0.5 * index;
   return {
-    id: `o1.${Math.floor(index / 4) + 1}.${(index % 4) + 1}`,
+    id: occurrenceToken(index),
     component,
     transform: [Math.cos(angle), -Math.sin(angle), 0, 40 * index, Math.sin(angle), Math.cos(angle), 0, -7 * index, 0, 0, 1, 3.5 * index, 0, 0, 0, 1]
   };
@@ -173,22 +176,24 @@ test("the package composer builds each occurrence once and releases what stops b
 test("Group edges and Group faces group the same references through the package composer", () => {
   // One square face bounded by four line edges, three of them one chain as cadgen decided it,
   // and one tangent edge between two faces of one tangent group: chains and groups both exist.
+  // The table's rows lead with their tokens (schema 2) and name no occurrence: the composer
+  // places them by each occurrence's token.
   const bundle = {
     manifest: {
       tables: {
-        occurrenceColumns: ["id"],
-        shapeColumns: ["id", "localId", "occurrenceId", "ordinal", "kind"],
-        faceColumns: ["id", "localId", "occurrenceId", "shapeId", "ordinal", "surfaceType", "edgeStart", "edgeCount", "tangentGroup"],
-        edgeColumns: ["id", "localId", "occurrenceId", "shapeId", "ordinal", "curveType", "faceStart", "faceCount", "segmentStart", "segmentCount", "visibilityClass", "chain"],
+        occurrenceColumns: ["bbox"],
+        shapeColumns: ["ordinal", "kind"],
+        faceColumns: ["token", "ordinal", "shape", "surfaceType", "edgeStart", "edgeCount", "tangentGroup"],
+        edgeColumns: ["token", "ordinal", "shape", "curveType", "faceStart", "faceCount", "segmentStart", "segmentCount", "visibilityClass", "chain"],
       },
-      occurrences: [["o1"]],
-      shapes: [["o1.s1", "s1", "o1", 1, "solid"]],
-      faces: [["o1.f1", "f1", "o1", "o1.s1", 1, "plane", 0, 4, 1], ["o1.f2", "f2", "o1", "o1.s1", 2, "cylinder", 0, 1, 1]],
+      occurrences: [[null]],
+      shapes: [[1, "solid"]],
+      faces: [["f:9d2e8c1b5a70", 1, 1, "plane", 0, 4, 1], ["f:0c7b6a594837", 2, 1, "cylinder", 0, 1, 1]],
       edges: [
-        ["o1.e1", "e1", "o1", "o1.s1", 1, "line", 0, 2, 0, 1, "tangent", 1],
-        ["o1.e2", "e2", "o1", "o1.s1", 2, "line", 0, 1, 1, 1, "feature", 2],
-        ["o1.e3", "e3", "o1", "o1.s1", 3, "line", 0, 1, 2, 2, "feature", 2],
-        ["o1.e4", "e4", "o1", "o1.s1", 4, "line", 0, 1, 4, 1, "feature", 2],
+        ["e:4b1f9e2a7c03", 1, 1, "line", 0, 2, 0, 1, "tangent", 1],
+        ["e:5e6d7c8b9a01", 2, 1, "line", 0, 1, 1, 1, "feature", 2],
+        ["e:6f7e8d9c0b12", 3, 1, "line", 0, 1, 2, 2, "feature", 2],
+        ["e:708f9e0d1c23", 4, 1, "line", 0, 1, 4, 1, "feature", 2],
       ],
       relations: { faceEdgeRows: [0, 1, 2, 3, 0], edgeFaceRows: [0, 1, 0, 0, 0] },
     },

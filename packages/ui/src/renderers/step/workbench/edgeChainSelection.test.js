@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildEdgeChainGraph } from './edgeChainSelection.js';
 import { connectedReferenceIds, filterSelectionReferences, toggleReferenceGroupSelection } from './selectionFilter.js';
-const edge = (id, chain, extra = {}) => ({ id, selectorType: 'edge', occurrenceId: 'o1', shapeId: 'o1.s1', ...extra,
+const edge = (id, chain, extra = {}) => ({ id, selectorType: 'edge', occurrenceId: 'o:3f2a9c1d7e5b', ...extra,
   pickData: { chain, ...extra.pickData } });
 const chain = (refs, seed = 'a') => new Set(connectedReferenceIds(buildEdgeChainGraph(refs), seed));
 
@@ -15,9 +15,10 @@ test('edges of one chain select together, whichever is picked; other chains stay
   assert.deepEqual(filterSelectionReferences([...refs, { id: 'face', selectorType: 'face' }], 'edges'), refs);
 });
 
-test('a chain id is local to one part, occurrence and solid; an edge without one stands alone', () => {
+test('a chain id is local to one part and occurrence; an edge without one stands alone', () => {
+  // cadgen numbers chains within the component, across its solids, so a solid is no boundary.
   const a = edge('a', 1);
-  for (const extra of [{ shapeId: 'o1.s2' }, { occurrenceId: 'o2' }, { partId: 'other' }, { pickData: { chain: null } }]) {
+  for (const extra of [{ occurrenceId: 'o:a1b2c3d4e5f6' }, { partId: 'other' }, { pickData: { chain: null } }]) {
     assert.deepEqual(chain([a, edge('b', 1, extra)]), new Set(['a']));
   }
   assert.deepEqual(chain([edge('a', null), edge('b', null)]), new Set(['a']));
