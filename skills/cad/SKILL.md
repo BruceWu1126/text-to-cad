@@ -17,6 +17,7 @@ Use the installed local skill files for the current interface.
 | **Organize a CAD project** | The project's existing layout. | [Project layout](references/project-layout.md), [starters](references/project-template.md) |
 | **Export STL, 3MF or GLB** | A mesh decorator on the model, or a format's `build` command on a saved STEP. | [Mesh exports](references/supported-exports.md) |
 | **Resolve a reference from a prompt** | `read_scene` on its document, then `scene.resolve(ref)` (below). | [Reference syntax](references/inspection-and-validation.md#reference-syntax) |
+| **Find the code that made a part, a face or an edge** | `cadgen store where <file.step> <ref>` on the generated STEP. | [Which code made it](references/inspection-and-validation.md#which-code-made-it) |
 | **Measure or check geometry** | A Python script using build123d and `cadgen.geometry`. | [Inspection](references/inspection-and-validation.md) |
 | **See a model, a pose or a clip** | `cadgen step snapshot`, or a mesh format's `snapshot`. | [Snapshots](references/snapshot-review.md) |
 | **Articulate or animate a model** | `kinematics=` or `animation=` on the model's decorator. | [Kinematics and animation](references/kinematics.md) |
@@ -191,6 +192,11 @@ print(bracket.volume, len(bracket.faces()))
   `cadgen store why <model>.py` explains an unexpected rebuild or no-op, and
   `--force` rebuilds one model. More in the
   [model contract](references/step-generation.md#progress-and-runtime-diagnostics).
+- `cadgen store where STEP/bracket.step "#bracket/f:9d2e8c1b5a70"` names the
+  line of the model's code whose operation made the face a ref names and the
+  one that last modified it, from the build's own account of the run
+  ([which code made it](references/inspection-and-validation.md#which-code-made-it)):
+  where to edit when a face is wrong.
 
 ### Show the model
 

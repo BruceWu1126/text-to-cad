@@ -368,9 +368,11 @@ or a performance mechanism first lists what it made faster. #478 removed the
 kernel-op memo for correctness and slowed re-runs (f1's `power_unit` forced
 rebuild went from 24 s to 102 s); that cost sat deep in a long PR body instead of
 being approved as a trade-off. The kernel memo that took its place
-(`packages/cadgen/README.md`, law 18) is keyed by provenance and answers a hit
-with the live object the first run made, which is what the removed one lacked;
-its pressure test is the test suite's, and a change to it runs that first.
+(`packages/cadgen/README.md`, law 18) is keyed by each operation's parameters
+and the keys of the shapes it was given, and answers a hit with the live object
+the first run made, which is what the removed one lacked; its pressure test is
+`tests/python/packages/cadgen/test_kernel_memo.py`, and a change to it runs
+that first.
 
 A change to how a part is meshed -- the mesher, the verifier and its repairs
 (`packages/cadgen/native/tessellate/`, `cadgen/_internal/tessellate.py`), or the
