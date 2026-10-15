@@ -179,19 +179,24 @@ def surface_check(face_map, positions, triangles, faces, deflection) -> tuple[in
         a, b, c = (positions[t[:, k]] for k in range(3))
         longest = np.maximum(np.maximum(np.linalg.norm(b - a, axis=1), np.linalg.norm(c - b, axis=1)),
                              np.linalg.norm(a - c, axis=1))
+        # One projector and one local-properties evaluator per face, initialised once over the
+        # surface: initialising per point is what made this pass cost hours over a corpus.
+        projector = GeomAPI_ProjectPointOnSurf()
+        projector.Init(surface, *surface.Bounds(), 1e-9)
+        props = GeomLProp_SLProps(surface, 1, 1e-9)
         face_worst = 0.0
         for k in np.argsort(-longest)[:SAMPLE].tolist():
             facet = np.cross(b[k] - a[k], c[k] - a[k])
             samples = ((a[k] + b[k] + c[k]) / 3, (a[k] + b[k]) / 2, (b[k] + c[k]) / 2, (c[k] + a[k]) / 2,
                        0.6 * a[k] + 0.25 * b[k] + 0.15 * c[k])
             for index, point in enumerate(samples):
-                projector = GeomAPI_ProjectPointOnSurf(gp_Pnt(*point.tolist()).Transformed(inverse), surface)
+                projector.Perform(gp_Pnt(*point.tolist()).Transformed(inverse))
                 if not projector.NbPoints():
                     continue
                 face_worst = max(face_worst, projector.LowerDistance())
                 if index == 0 and np.linalg.norm(facet) > 0:
                     u, v = projector.LowerDistanceParameters()
-                    props = GeomLProp_SLProps(surface, u, v, 1, 1e-9)
+                    props.SetParameters(u, v)
                     if props.IsNormalDefined():
                         normal = props.Normal().Transformed(transform)
                         n = np.array([normal.X(), normal.Y(), normal.Z()])
