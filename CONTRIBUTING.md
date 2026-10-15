@@ -107,8 +107,8 @@ dev install's server and skills at it (see [Test In Agent Apps](#test-in-agent-a
 `packages/cadgen/src/cadgen/_runtime/` is BUILT, not committed — the whole
 directory is gitignored, and the wheel is the only place those files ship. A
 fresh clone therefore has no snapshot browser bundle, no Viewer client, no
-file tracer -- so it builds no model -- and no tessellator -- so it meshes no
-part -- until `scripts/bundle/bundle.sh` runs, and cadgen says so by name the
+file tracer -- so it builds no model -- and no mesh library -- so it verifies, and
+therefore meshes, no part -- until `scripts/bundle/bundle.sh` runs, and cadgen says so by name the
 first time it reaches for one. `scripts/test/test-python.sh` and
 `scripts/test/test-global.sh` build the stages they read if they are missing or
 older than their sources (the native libraries for this machine only), so this
@@ -367,7 +367,22 @@ only with the repository owner's explicit approval. A change that removes a cach
 or a performance mechanism first lists what it made faster. #478 removed the
 kernel-op memo for correctness and slowed re-runs (f1's `power_unit` forced
 rebuild went from 24 s to 102 s); that cost sat deep in a long PR body instead of
-being approved as a trade-off.
+being approved as a trade-off. The kernel memo that took its place
+(`packages/cadgen/README.md`, law 18) is keyed by provenance and answers a hit
+with the live object the first run made, which is what the removed one lacked;
+its pressure test is the test suite's, and a change to it runs that first.
+
+A change to how a part is meshed -- the mesher, the verifier and its repairs
+(`packages/cadgen/native/tessellate/`, `cadgen/_internal/tessellate.py`), or the
+policy that drives them (`cadgen/tessellation_policy.py`) -- opens its PR with
+the mesh scoreboard (`scripts/bench/mesh-scoreboard/`) run over the sample
+corpus on `main` and on the branch: solids with open edges, cracks wider than
+the tolerance, silently empty faces, faces off their surface, folded needles,
+triangles and time. A regression in any column is named as one and merges
+only with the repository owner's explicit approval. The CI contract test
+(`tests/python/packages/cadgen/test_mesh_contract.py`) asserts the same
+properties on small fixtures and is not the scoreboard: it says the laws hold,
+the scoreboard says how well.
 
 ## Source Boundaries
 
@@ -587,8 +602,8 @@ wrong.
 
 `main` is source. Everything cadgen executes that is not Python — the snapshot
 browser bundle under `cadgen/_runtime/browser`, the CAD Viewer client under
-`_runtime/viewer`, and the file tracer every build loads and the tessellator every
-mesh is made by under `_runtime/native` (one C file each,
+`_runtime/viewer`, and the file tracer every build loads and the mesh library every
+mesh is verified and repaired by under `_runtime/native` (one C file each,
 `packages/cadgen/native/filetrace.c` and the unity build
 `packages/cadgen/native/tessellate/tessellate.c`, cross-compiled by zig for every
 platform into the one wheel; `ziglang` comes with `requirements-dev.txt`) — is

@@ -31,9 +31,14 @@ names one. Each component of a view names its **part** (`part` in `assembly.json
 and the part's record names the display mesh the page reads to draw it
 (`partRow`, `@text-to-cad/core/lib/parts/tessellationCache.js`).
 
-Every mesh the viewer draws is cadgen's (its tessellation of the exact BREP, stored
-by cadgen, derived by the build that made the model before it reported done); the
-browser never tessellates. The parts' records are probed a chunk
+Every mesh the viewer draws is cadgen's (OCCT's triangulation of the exact BREP,
+every face of it verified and where needed repaired by cadgen's native library,
+stored by cadgen, derived by the build that made the model before it reported
+done); the browser never tessellates. A part is named by its component's geometry
+(its fingerprint, cadgen's `STORE.md` §2), not its bytes, so a body read back from
+the STEP it was written to shares the mesh of the body that was written, and a
+build's preview revision (§5) shares its parts with the saved file that follows
+it. The parts' records are probed a chunk
 of components at a time and their meshes read a batch at a time
 (`createInitialDisplayPlans` in `renderers/step/render/initialDisplay.js`,
 `packageBatchReads.js`), the first of each the size of the first publish, so the
@@ -160,10 +165,17 @@ independently; a superseded request cannot cancel its replacement. Topology
 requests for one file revision union rather than supersede: a batch in flight
 finishes, and one no longer wanted is simply not published.
 
-**After a save.** The view shows the saved file. When a build writes it, the new
-revision replaces the one on screen in place, keeping every component whose identity
-it shares; while the build runs the model on screen says it is updating, and a failed
-build leaves it on screen under its alert.
+**The preview, then the save.** As soon as the build's body has returned and its
+parts are derived, the feed names the **preview revision** -- the result tree and
+the part key of each of its components, cadgen's `STORE.md` §9b -- and the viewport
+draws it in place of the previous model, labelled as a preview of the build in
+progress. Its parts are the saved file's own (a part is named by its geometry, §1),
+so when the build writes the file the saved revision replaces the preview in place
+with nothing fetched twice, and the label goes. A preview is never presented as the
+file: no sidecar binds to it, and selection, measurements and reference copying
+resolve against it as against any revision, by token. Before the preview exists the
+model on screen says it is updating, and a failed build leaves what is on screen --
+the labelled preview, or the previous model -- under its alert.
 
 **What the viewport shows.** The navbar carries no status. Opening and
 updating are the viewport's loading overlay (`ViewerLoadingOverlay`). A failure is

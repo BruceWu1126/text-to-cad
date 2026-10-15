@@ -6,7 +6,7 @@ PyPI package carrying the Python engine under `src/cadgen/` and what it executes
 that is not Python under `src/cadgen/_runtime/`: the shared JavaScript runtime and
 the CAD Viewer's client, bundled in at build time (the JS *source* lives in its own
 packages and never ships as source), and two native libraries, each one build per
-platform: the file tracer and the tessellator (their C sources are `native/`).
+platform: the file tracer and the mesh library (their C sources are `native/`).
 
 **PURPOSE** — the engine and its command surface: model execution, the
 store, document assembly, kinematics, exports, validation, inspection,
@@ -70,9 +70,9 @@ this one:
 
 | Mechanism | What it must not break | Specified in |
 |---|---|---|
-| Build status: the viewer's feed says whether a build of a file is running or failed, never what it previews; the viewer shows the saved file | saved-artifact read-back; no reader reaches source, closure or a model record | [`STORE.md`](STORE.md) §9b |
+| Build status and preview: the viewer's feed says whether a build of a file is running or failed and, as soon as the build has its result, names the **preview revision** -- the result tree and the parts it draws with, artifact-side objects -- which the viewer draws labelled as a preview until the saved file replaces it in place; a part's identity is its geometry (law 20), so the saved file's parts are the preview's and nothing is fetched twice | saved-artifact read-back; no reader reaches source, closure or a model record; a preview never stands in for a saved file, and a parent never pins one | [`STORE.md`](STORE.md) §9b |
 | Composition: what a decorated call returns, what a parent may consume before a child's save, and when an exact `Compound(children=[...])` keeps its children's pins | the link/component decision, declared-output completion, `isinstance(root, Compound)` | [`STORE.md`](STORE.md) §6, §9a |
-| Display data: canonical trees pin encoded BREP and effective intrinsic face colors; a build job derives each part's display data — ONE record naming two objects, cadgen's mesh at the one display tolerance and the selector table, both made from the component's topology facts, extracted in memory under an attested producer — in its own process before it reports done (a parent waits for its children, whose jobs derived theirs); views only read, and a part missing from the store is derived by one build-pool job; cadgen is the only mesher — every client draws the store's meshes and holds no tolerance | geometry stays separate from display data — the record is written before the build derives, so a part that fails to derive is a warning and never makes the geometry rebuild; `read_step` never waits for a part | [`STORE.md`](STORE.md) §3 |
+| Display data: canonical trees pin encoded BREP and effective intrinsic face colors; a build job derives each part's display data — ONE record naming two objects, cadgen's mesh at the one display tolerance and the selector table, both made from the component's topology facts, extracted in memory under an attested producer — in its own process before it reports done (a parent waits for its children, whose jobs derived theirs); views only read, and a part missing from the store is derived by one build-pool job; cadgen is the only mesher — every client draws the store's meshes and holds no tolerance. A mesh is OCCT's triangulation **verified**: cadgen's native library checks every face of it against the exact geometry (closed, covering its trim, on its surface, no folded triangle) and repairs what fails locally, always, with no clock deciding what is checked; a face it cannot bring right is named in the body, never drawn silently wrong | geometry stays separate from display data — the record is written before the build derives, so a part that fails to derive is a warning and never makes the geometry rebuild; `read_step` never waits for a part; a mesh that passed verification is a mesh, whichever algorithm made it | [`STORE.md`](STORE.md) §3 |
 | Tree composition: an all-link parent's saved-document tree composed from its children's document trees instead of parsed from the STEP it just wrote | `index/document` holds the cold compile of the written bytes, the same tree either way; every ineligible case parses | [`STORE.md`](STORE.md) §3 |
 | STEP splicing: the same parent's STEP written from its children's saved STEP files instead of exported through OCCT | the cold compile of the spliced file is the exported file's; every ineligible case exports | [`STORE.md`](STORE.md) §3 |
 
@@ -99,7 +99,7 @@ daemon, when idle, evicts derived entries (part, component, bounds, drawing,
 skin, robot) least recently written first and sweeps what nothing reaches, and retires on
 sight the index kinds an older cadgen left (`index/op`, and `index/surface`,
 `index/selector` and `index/mesh`). A record,
-a document entry or an output entry is never evicted. `cadgen store gc` does
+a document entry, an output entry or a provenance entry is never evicted. `cadgen store gc` does
 the same by hand (`STORE.md` §8). A cadgen never judges what it cannot read:
 a store a newer cadgen wrote to within 30 days is left to that cadgen, and a
 folder it does not know is never touched. A read never writes the store, and a write
@@ -152,7 +152,11 @@ rebuild whose writer input is unchanged keeps its saved STEP instead of writing
 the same bytes again ([`STORE.md`](STORE.md) §3, `writerInput`).
 Content addresses stay byte hashes; whether a model runs is decided by its
 sources (`STORE.md` §4), never by its outputs being reproducible. Compare two
-builds by geometry within a tolerance, never by file hash.
+builds by geometry within a tolerance, never by file hash. One identity is
+deliberately not a byte hash: a **part** -- a component's display data -- is
+keyed by its component's geometry **fingerprint** (law 20), so the body a
+build holds and the same body read back from the STEP it wrote, whose bytes
+the writer changed, are one part with one mesh.
 *Pressure-test*: build one model twice, each from an empty store. If the bytes
 differ, nothing fails, and the second build's outputs are as correct as the
 first's.
@@ -254,7 +258,9 @@ Kinematics and choreography are both pure data, fully independent: resolved
 mates, and keyframes the build samples from Python clips (11). Clients render
 from file + sidecar + the store's artifact side and never
 read source, a record, or trigger source builds (12). A build's status
-(STORE §9b) carries no geometry: clients render the saved file.
+(STORE §9b) carries no geometry of its own: it names a preview revision --
+artifact-side objects a client reads like any other -- and clients render
+the saved file, or that preview labelled as one until the file replaces it.
 Correctness never depends on a
 store hit (13). Composition: importing binds, calling links — a parent
 depends on a child by its RESULT (the pinned tree) and on what importing it
@@ -345,25 +351,37 @@ tree and writes the file it was asked for.
 materials, or animation; no
 `.step.json` may appear beside it.
 
-### 18. Caches sit around a model run, never inside it
+### 18. Caches sit around a model run; inside it, only the kernel memo
 
 The gate decides whether a model runs at all (`STORE.md` §4), and the store
 derives everything render-side from the bytes the run wrote (law 2). Inside a
-run, every modeling operation executes: cadgen never replays a stored result,
-never substitutes a copy for what an operation returned, and never changes
-what build123d's `==` and `is_same` answer. A script therefore behaves the
-same inside cadgen as under plain Python. The hooks that remain change no
-result: `determinism.py` fixes the iteration order of build123d's
-de-duplications (an order-keeping set, and a `Vertex` hash by point that
-leaves equality alone), lazy children defer a child's geometry until it is
-read (`STORE.md` §9a), and the file trace only watches what the run opens
-(`STORE.md` §5). An expensive or independently edited part gets its
-speed by being its own model, never from a cache inside one. What an older
-cadgen cached inside a run (`index/op`, the operation cache) is never read,
-and is retired with every object only it named (`STORE.md` §8).
-*Pressure-test*: call a model's function under plain Python and inside a
-cadgen build; the geometry it returns, and the answer to every `==` and
-`is_same` along the way, are the same.
+run, every modeling operation executes once per distinct input, and never
+twice: the **kernel memo** (`_internal/kernel_memo.py`) remembers, in the warm
+worker's memory for the life of the process, the live result of every kernel
+construction -- primitives, copies and moves, booleans, sweeps and lofts,
+faces, cleaning, validity -- under a key made of the operation, its parameters
+and the keys of the shapes it was given, so a second run of the same code
+hands back **the same live objects** the first run made, down to the point
+where an input changed, and executes everything from there. A hit is the
+previous run's object itself: nothing is reconstructed from bytes, no copy
+stands in for what an operation returned, and what build123d's `==` and
+`is_same` answer is what they would answer in a run that happened to make
+those objects -- pointer identity is preserved along every chain of hits and
+every miss makes its downstream miss, which is why the memo is correct where
+the operation cache cadgen once kept (`index/op`, retired, `STORE.md` §8) was
+not: that one replayed bytes into fresh shapes, and model code that held an
+edge across an operation found nothing. The memo never reaches the store and
+never outlives the worker: a cold run computes everything. The hooks that
+remain change no result: `determinism.py` fixes the iteration order of
+build123d's de-duplications (an order-keeping set, and a `Vertex` hash by
+point that leaves equality alone), lazy children defer a child's geometry
+until it is read (`STORE.md` §9a), and the file trace only watches what the
+run opens (`STORE.md` §5). An expensive part may still be its own model; it
+no longer has to be.
+*Pressure-test*: call a model's function under plain Python, then inside a
+cadgen build with the memo cold, then again with it hot; the geometry each
+returns, and the answer to every `==` and `is_same` along the way, are the
+same all three times.
 
 ### 19. Nothing waits on the network
 
@@ -393,6 +411,55 @@ launcher's: a launcher that checks a package index before it starts anything
 a closed port), and again with every request hanging, start a server, open a
 view, call each tool, and run a build and a snapshot: each works, and nothing
 waits on a request beyond the two waits above.
+
+### 20. Three identities, each for the one question it answers
+
+cadgen names a thing by what the question is about, and never answers one
+question with another's name.
+
+- **Bytes name objects.** A component, a tree and a document are their bytes
+  (`sha256`): the content address, the publish rule, the sweeper and the gate
+  all stand on equal bytes meaning the same thing and different bytes costing
+  a recomputation, never a wrong answer (laws 2 and 5). Nothing here changes.
+- **Geometry names parts and refs.** What the eye and the hand touch is named
+  by what it IS, not by which bytes happened to carry it or where it sat in a
+  list: a component's **fingerprint** (`_internal/geometry_fingerprint.py`,
+  a hash of the shape's rounded vertices and per-face signatures under
+  `GEOMETRY_FINGERPRINT_SCHEME`, `STORE.md` §2) keys its part, so one body is
+  one mesh whether the build holds it or a reader parsed it back out of the
+  STEP it wrote, and a preview's parts are the saved file's; a ref is a pair of
+  **tokens**, the occurrence's (`o:`, from its place in the tree: parent token,
+  name, rounded placement) and the element's (`f:`, `e:`, `v:`, from the
+  element's geometry inside its body), so a face keeps its name through a STEP
+  round trip, a reordering of its siblings, and a neighbour's edit, and a token
+  copied from the viewer resolves in `inspect` to the same face. A token holds
+  no ordinal and no position: an ordinal is the one body's accident, a position
+  the one tree's.
+- **Provenance names lineage, on the code side only.** Which operation at which
+  source line made a face is a build's knowledge about its code, and lives
+  where that knowledge belongs: in a per-model entry beside the record,
+  `index/provenance` (`STORE.md` §3), on the store's code side with
+  `index/model` and `index/output`, reached from a saved document only through
+  those by the two commands that may ask about code, `cadgen store why` and
+  `cadgen inspect --where`. No object, part, document entry, sidecar or written
+  file carries a feature id, a frame or a line (law 1); the viewer never sees
+  one; and provenance never names an object or a part: deleting the code side
+  loses no geometry and renames nothing.
+
+A geometric name tolerates what a byte name cannot and must not pretend to
+exactness: two bodies whose fingerprints agree are one part, which is what a
+mesh needs, and nothing that decides whether a model is current or whether
+bytes were written reads a fingerprint (laws 2, 5). The scheme string is the
+only version on a geometric name, bumped when the same shape must be named
+differently; a fix to what is derived from the name bumps that layer's version
+(`STORE.md` §2).
+*Pressure-test*: build a model, read back the STEP it wrote, and compare each
+component's fingerprint and every face token of its body with the saved
+document's: all equal, with the two bodies' bytes different. Then insert a new
+sibling before an occurrence, rename nothing, and rebuild: every token the
+untouched occurrences and their faces had is unchanged. Then `rm -rf
+index/model index/output index/provenance`: every view and every ref still
+resolves; only `--where` says it no longer knows.
 
 ## The shape of the package
 
@@ -450,8 +517,10 @@ src/cadgen/
                          #   builds and how that goes, counted)
   _internal/             # the engine: generation pipeline, tree builder,
                          #   filetrace (every file a build opens),
-                         #   tessellate (every display mesh, read off the
-                         #   BREP for the native tessellator),
+                         #   tessellate (every display mesh: OCCT's
+                         #   triangulation, each face verified against the
+                         #   exact BREP and repaired by the native mesh
+                         #   library),
                          #   kinematics_resolve (mate axes to numbers),
                          #   animation_bake
                          #   (clips to keyframes), mesh_export (the mesh
@@ -476,7 +545,7 @@ src/cadgen/
                          #   a host that renders no MCP Apps (browser)
   _runtime/              # BUILT JS (browser snapshot renderer, the viewer
                          #   client, the MCP app page) and the native file
-                         #   tracer and tessellator, one library each per
+                         #   tracer and mesh library, one library each per
                          #   platform — produced when the wheel is packaged,
                          #   never committed, never edited
 native/                  # the native libraries' C sources: filetrace.c, and
