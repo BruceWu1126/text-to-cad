@@ -100,6 +100,14 @@ where those files ship, so these scripts are what produces them.
   resolution, path narrowing, fail-closed unittest loading, the per-file
   parallel run). Sourced by the runners.
 
+`vendor/` — third-party code cadgen ships inside its own tree.
+
+- `kipy.py [--check]` — regenerates `packages/cadgen/src/cadgen/kipy` (kicad-python,
+  vendored because no PyPI release targets the KiCad 11 API) from the pins in its
+  `VENDOR.json`: the kicad-python commit, the KiCad commit whose protos it uses, and an
+  exact protoc/mypy-protobuf/protoletariat toolchain installed into a uv scratch
+  environment. `--check` regenerates into scratch and diffs it against the tree.
+
 `release/` — the version and the release identity.
 
 - `bump-version.sh major|minor|patch|X.Y.Z [--base REF] [--dry-run]` — makes a

@@ -1,39 +1,28 @@
-"""Running ``kicad-cli``, for the one check KiCad's API does not offer: DRC.
+"""Running ``kicad-cli`` for the one check KiCad's API does not offer: DRC.
 
-Every run is isolated twice over:
-
-- **its own folder.** ``kicad-cli`` writes beside the files it reads (a
-  ``.kicad_prl`` of local settings, a saved board), so cadgen only ever runs it
-  on copies staged in a temporary folder, never in a person's project;
-- **its own settings.** ``KICAD_CONFIG_HOME`` points at a folder this process
-  owns, so a person's KiCad preferences (a colour theme, a library table) can
-  change neither a check nor a picture, and a run never writes to them.
-
-The report is KiCad's JSON (``drc.v1.json``), read into :class:`Finding`s.
+``cadgen pcb drc`` runs ``kicad-cli pcb drc --format json --severity-all`` on a saved
+board, the same binary the build's API server is, and reads KiCad's report
+(``drc.v1.json``) into :class:`Finding`s. The board is checked where it lies:
+kicad-cli reads the project beside it (the ``.kicad_pro`` the build saved, with
+its design rules and severities) and the report goes to a temporary file, so
+nothing is copied aside. The run gets its own empty settings directory in
+``KICAD_CONFIG_HOME``, as the build's server does, so a person's KiCad
+preferences change nothing about a check.
 """
 
 from __future__ import annotations
 
-import atexit
 import json
 import os
-import shutil
 import subprocess
 import tempfile
-import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
-from cadgen.kicad.install import KicadInstall
-
-__all__ = ["Finding", "FindingItem", "KicadRunError", "drc_findings", "run_kicad_cli", "stage_files"]
+__all__ = ["Finding", "KicadRunError", "run_drc"]
 
 _TIMEOUT_SECONDS = 600
 _NOISE = ("Fontconfig error",)
-
-_config_lock = threading.Lock()
-_config_home: Path | None = None
 
 
 class KicadRunError(RuntimeError):
@@ -41,112 +30,65 @@ class KicadRunError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class FindingItem:
-    """One item a finding names, and where it is (millimetres, KiCad's frame)."""
-
-    text: str
-    at: tuple[float, float] | None
-
-
-@dataclass(frozen=True)
 class Finding:
     """One DRC finding, as KiCad reports it."""
 
-    check: str  # "drc", "unconnected" or "parity"
+    check: str  # "violation", "unconnected" or "parity"
     severity: str  # "error", "warning", "exclusion"
-    type: str  # KiCad's rule name: "clearance", "track_dangling"...
+    type: str  # KiCad's rule name: "clearance", "track_dangling", "unconnected_items"...
     description: str
-    items: tuple[FindingItem, ...]
+    #: What each item names, in KiCad's words ("Track [GND] on F.Cu, length 2.0 mm").
+    items: tuple[str, ...]
+    #: Where the first item is, in millimetres from the board's origin.
+    at: tuple[float, float] | None
 
     def render(self) -> str:
-        where = next((item.at for item in self.items if item.at is not None), None)
-        place = f" @ ({where[0]:g}, {where[1]:g}) mm" if where else ""
-        return f"{self.severity} {self.type}: {self.description}{place}"
-
-
-def _private_config() -> Path:
-    """This process's KiCad settings folder, made once and removed at exit."""
-    global _config_home
-    with _config_lock:
-        if _config_home is None or not _config_home.is_dir():
-            _config_home = Path(tempfile.mkdtemp(prefix="cadgen-kicad-config-"))
-            atexit.register(shutil.rmtree, _config_home, True)
-        return _config_home
-
-
-def stage_files(files: Sequence[tuple[Path, bytes]], folder: Path) -> Path:
-    """Write ``files`` (absolute paths and their bytes, the document first) into ``folder`` as
-    they lie relative to one another; the staged document."""
-    document = files[0][0]
-    try:
-        base = Path(os.path.commonpath([str(path.parent) for path, _data in files]))
-    except ValueError:  # a file on another drive
-        base = document.parent
-    for path, data in files:
-        if not path.is_relative_to(base):
-            continue
-        target = folder / path.relative_to(base)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(data)
-    return folder / document.relative_to(base)
+        where = f" @ ({self.at[0]:g}, {self.at[1]:g}) mm" if self.at else ""
+        named = f": {'; '.join(self.items)}" if self.items else ""
+        return f"{self.severity} {self.type}: {self.description}{named}{where}"
 
 
 def _quiet(text: str) -> str:
     return "\n".join(line for line in (text or "").splitlines() if line.strip() and not line.startswith(_NOISE))
 
 
-def run_kicad_cli(install: KicadInstall, args: Sequence[str], *, cwd: Path, timeout: float = _TIMEOUT_SECONDS) -> subprocess.CompletedProcess:
-    """Run ``kicad-cli args`` in ``cwd`` with cadgen's isolation. Raises on a failed run."""
-    env = dict(os.environ)
-    env.update(install.library_env())
-    env["KICAD_CONFIG_HOME"] = str(_private_config())
-    try:
-        completed = subprocess.run(
-            [str(install.cli), *args],
-            cwd=str(cwd),
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        raise KicadRunError(f"kicad-cli {' '.join(args[:3])} did not finish in {timeout:g} s") from None
-    except OSError as error:
-        raise KicadRunError(f"kicad-cli could not be started ({error})") from None
-    # kicad-cli exits 5 when a check found violations and was asked to say so;
-    # cadgen reads the report instead, so any other non-zero exit is a failure.
-    if completed.returncode not in (0, 5):
-        said = _quiet(completed.stderr) or _quiet(completed.stdout) or f"exit status {completed.returncode}"
-        raise KicadRunError(f"kicad-cli {' '.join(args[:3])} failed: {said}")
-    return completed
-
-
-def _items(raw: list) -> tuple[FindingItem, ...]:
-    items = []
-    for item in raw or []:
-        position = item.get("pos")
-        point = None
-        if isinstance(position, dict):
-            point = (float(position.get("x", 0.0)), float(position.get("y", 0.0)))
-        items.append(FindingItem(text=str(item.get("description", "")), at=point))
-    return tuple(items)
-
-
-def drc_findings(report: Path) -> list[Finding]:
-    """Violations, unconnected items and parity issues in a DRC report, each once (a
-    through-hole pad's DRC fires per copper layer)."""
-    data = json.loads(Path(report).read_text(encoding="utf-8"))
+def _findings(report: dict) -> list[Finding]:
+    """Violations, unconnected items and parity issues, each once (a through-hole
+    pad's violation fires per copper layer)."""
     found: list[Finding] = []
-    for key, check in (("violations", "drc"), ("unconnected_items", "unconnected"), ("schematic_parity", "parity")):
-        for violation in data.get(key, []) or []:
+    for key, check in (("violations", "violation"), ("unconnected_items", "unconnected"), ("schematic_parity", "parity")):
+        for entry in report.get(key) or []:
+            items = entry.get("items") or []
+            positions = [item.get("pos") for item in items if isinstance(item.get("pos"), dict)]
             found.append(
                 Finding(
                     check=check,
-                    severity=str(violation.get("severity", "error")),
-                    type=str(violation.get("type", "")),
-                    description=str(violation.get("description", "")),
-                    items=_items(violation.get("items", [])),
+                    severity=str(entry.get("severity", "error")),
+                    type=str(entry.get("type", "")),
+                    description=str(entry.get("description", "")),
+                    items=tuple(str(item.get("description", "")) for item in items),
+                    at=(float(positions[0].get("x", 0.0)), float(positions[0].get("y", 0.0))) if positions else None,
                 )
             )
     return list(dict.fromkeys(found))
+
+
+def run_drc(cli: Path, board: Path, *, timeout: float = _TIMEOUT_SECONDS) -> list[Finding]:
+    """KiCad's DRC of ``board``, every severity included. Raises :class:`KicadRunError`
+    when ``kicad-cli`` cannot run or refuses the board."""
+    with tempfile.TemporaryDirectory(prefix="cadgen-drc-") as scratch:
+        report = Path(scratch) / "drc.json"
+        env = dict(os.environ, KICAD_CONFIG_HOME=scratch)
+        command = [str(cli), "pcb", "drc", "--format", "json", "--severity-all", "-o", str(report), str(board)]
+        try:
+            completed = subprocess.run(command, env=env, capture_output=True, text=True, timeout=timeout, check=False)
+        except subprocess.TimeoutExpired:
+            raise KicadRunError(f"kicad-cli pcb drc did not finish in {timeout:g} s") from None
+        except OSError as error:
+            raise KicadRunError(f"kicad-cli could not be started ({error})") from None
+        # kicad-cli exits 5 for violations only when asked to (--exit-code-violations); the
+        # report is read instead, so any other non-zero exit is a failure of the run.
+        if completed.returncode not in (0, 5) or not report.is_file():
+            said = _quiet(completed.stderr) or _quiet(completed.stdout) or f"exit status {completed.returncode}"
+            raise KicadRunError(f"kicad-cli pcb drc failed on {board}: {said}")
+        return _findings(json.loads(report.read_text(encoding="utf-8")))

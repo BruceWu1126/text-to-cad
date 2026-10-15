@@ -1,257 +1,314 @@
-"""The public ``pcb`` namespace: the ``@pcb`` decorator, the board API, and its verbs.
+"""The public ``pcb`` namespace: the ``@pcb`` decorator and the board's verbs.
 
-``@pcb`` DECLARES a printed circuit board model (``@pcb(gerber=True, bom=True,
-pos=True)`` with its manufacturing files); ``pcb.Board`` is what its function
-builds and returns; ``pcb.validate(...)`` checks any KiCad project with KiCad's
-ERC and DRC, ``pcb.review(...)`` advises on what those do not check, and
-``pcb.gerber``/``pcb.bom``/``pcb.pos`` write a saved board's manufacturing files.
-They are the same object -- this module is callable (see
-:mod:`cadgen._internal.format_namespace`) -- so ``from cadgen import pcb``
-gives a model script all three.
+``@pcb`` DECLARES a printed circuit board: the decorated function fills an
+empty KiCad board, handed to it as :class:`cadgen.kipy.board.Board`, with raw
+kicad-python calls -- footprints from the libraries the project's
+``fp-lib-table`` declares, nets named on pads and tracks, zones, design rules,
+net classes, exports. Calling the decorated function BUILDS: it starts KiCad's
+own headless API server (``kicad-cli api-server``), creates the document, runs
+the function, refills the zones, counts what is unrouted, saves, stops the
+server and prints one line. ``pcb.drc(board)`` runs KiCad's design rule check
+on a saved board, the one check the API does not offer; ``pcb.snapshot`` draws
+one. They are the same object -- this module is callable -- so
+``from cadgen import pcb`` gives a board script all of them::
 
-A board is written as a KiCad project: ``<name>.kicad_pro``,
-``<name>.kicad_sch``, ``<name>.kicad_pcb`` and its custom design rules,
-``<name>.kicad_dru``. KiCad itself (its command line, ``kicad-cli``) fills the
-zones and runs the electrical and design rule checks inside every build; a
-build with errors writes nothing.
+    from cadgen import pcb
+    from cadgen.kipy.board_types import Net
+    from cadgen.kipy.geometry import Angle, Vector2
 
-``pcb.Testbench`` simulates a board's subcircuits with ngspice, the simulator
-KiCad ships: a circuit like a board, built by the same functions, whose runs
-are facts for a script to assert (``pcb.SimulationError`` when ngspice cannot
-solve it).
+    @pcb
+    def blinky(board):
+        r1 = board.place_footprint_from_library("Resistor_SMD:R_0603_1608Metric",
+                                                Vector2.from_xy_mm(0, 5), Angle.from_degrees(-90))
+        r1.reference_field.text.value = "R1"
+        for pad in r1.definition.pads:
+            pad.net = Net(name={"1": "VBUS", "2": "LED"}[pad.number])
+        board.update_items([r1])
 
-``pcb.read_board(path)`` reads any KiCad board back for the references a
-person copies from the viewer (``#U3``, ``#U3.9``, ``#net:VIN``,
-``#net:VIN@x40.1y21.6``, ``#@x40.1y21.6``): ``.resolve(ref)`` answers what one
-names, in the script's coordinates, and a part's ``script`` is the line that
-made it (:mod:`cadgen.kicad.board_index`). ``pcb.read_schematic(path)`` answers
-the same references on a schematic (``#U3``, ``#U3.9``, ``#net:VIN``), sheets
-within sheets included: a part with the units it draws on each sheet, a pin, a
-net by KiCad's own name, from one run of KiCad's netlist export
-(:mod:`cadgen.kicad.schematic_index`).
+    if __name__ == "__main__":
+        blinky()
 
-Import discipline: nothing here pulls in OCP or touches KiCad at module scope.
+``python blinky.py`` writes ``blinky.kicad_pcb`` beside the script (``@pcb(path=...)``
+names another, relative to the script), with KiCad's ``.kicad_pro`` and
+``.kicad_prl`` beside it: every file is KiCad's, written by KiCad. Beside the
+board sits ``fp-lib-table``, KiCad's project library table, naming the
+footprint libraries the board uses (``${KICAD10_FOOTPRINT_DIR}/Resistor_SMD.pretty``
+for a stock one, ``${KIPRJMOD}/my.pretty`` for the board's own); the build loads
+exactly those. The server runs with an empty settings directory of its own, so
+no user library table is loaded. Coordinates and units are KiCad's
+(:mod:`cadgen.kipy.util.units`). No schematic.
+
+The build is one server per call and nothing resident: no daemon, store or
+file tracer is involved, and importing this module never touches KiCad.
+:func:`connect` is the one seam between the build and KiCad.
 """
 
 from __future__ import annotations
 
+import functools
+import inspect
+import os
+import shutil
+import sys
+import tempfile
+import time
+from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
+from typing import Any, Callable
 
-from cadgen._internal.format_namespace import callable_namespace
 from cadgen._internal.snapshot_door import plot_snapshot_verb
-from cadgen.results import FabExportResult, ValidationResult
+from cadgen.results import ValidationIssue, ValidationResult
 
-__all__ = [
-    "AISLER",
-    "Board",
-    "DesignError",
-    "EUROCIRCUITS",
-    "FABS",
-    "Fab",
-    "JLCPCB",
-    "NEXTPCB",
-    "Net",
-    "NetClass",
-    "OSHPARK",
-    "PCBWAY",
-    "Part",
-    "Pin",
-    "Rules",
-    "SEEED_FUSION",
-    "SimulationError",
-    "Testbench",
-    "bom",
-    "find_footprints",
-    "find_symbols",
-    "gerber",
-    "pos",
-    "read_board",
-    "read_schematic",
-    "review",
-    "snapshot",
-    "validate",
-]
+__all__ = ["drc", "snapshot"]
 
-_DESIGN = {"Board", "DesignError", "Net", "NetClass", "Part", "Pin", "Rules"}
-_FABS = {"AISLER", "EUROCIRCUITS", "FABS", "Fab", "JLCPCB", "NEXTPCB", "OSHPARK", "PCBWAY", "SEEED_FUSION"}
-_SIMULATION = {"SimulationError", "Testbench"}
-
-_SUFFIXES = (".kicad_pcb", ".kicad_sch", ".kicad_pro")
-
-#: ``cadgen pcb snapshot``'s verb: a board or schematic drawn as KiCad plots it, as the viewer draws it.
+#: ``cadgen pcb snapshot``'s verb: a board drawn as the viewer draws it.
 snapshot = plot_snapshot_verb("pcb")
 
-
-def _issue(finding):
-    """A KiCad or review finding as the public issue type: its sentence, then where each item is."""
-    from cadgen.results import ValidationIssue
-
-    located = [item.text + (f" at ({item.at[0]:g}, {item.at[1]:g})" if item.at is not None else "") for item in finding.items]
-    return ValidationIssue(
-        severity=finding.severity,
-        message=(finding.summary or finding.description) + (": " + "; ".join(located) if located else ""),
-        code=f"{finding.check}.{finding.type}",
-    )
+# The client's per-request timeout. A library load can stall the server for a
+# moment and a save is one request; the build never waits on anything else.
+_TIMEOUT_MS = 120_000
+_LIBRARY_TIMEOUT_S = 300.0
 
 
-def validate(path: Path, *, strict: bool = False, verbose: bool = False) -> ValidationResult:
-    """Check one KiCad project with KiCad's own ERC and DRC.
+class BoardError(RuntimeError):
+    """What a build could not do with the board's companions: a library table row that did
+    not load, a footprint no declared library has. The message says what to add."""
 
-    The project's files are copied aside first, so checking never writes into
-    the project. The DRC refills zones and, when the project has a schematic,
-    compares it with the board. Unrouted connections are reported; they block
-    like any other error. Positions are millimetres from the board's
-    drill/place origin, y up.
 
-    path: the project's .kicad_pcb, .kicad_sch or .kicad_pro.
-    strict: treat warnings as blocking.
-    verbose: narrate the target on stderr.
+@dataclass(frozen=True)
+class BoardBuild:
+    """What one ``@pcb`` call wrote: the files and what is on the board."""
+
+    board: Path  #: the ``.kicad_pcb``
+    project: Path  #: its ``.kicad_pro`` beside it
+    parts: int
+    tracks: int
+    vias: int
+    zones: int
+    unconnected: int  #: pads not copper-connected to the first pad of their net
+    seconds: float
+
+    def report(self) -> str:
+        from cadgen._internal.doors import display_path
+
+        return (
+            f"{display_path(self.board)}: {_count(self.parts, 'part')}, {_count(self.tracks, 'track')}, "
+            f"{_count(self.vias, 'via')}, {_count(self.zones, 'zone')}, {self.unconnected} unconnected, "
+            f"{self.seconds:.1f} s"
+        )
+
+
+def _count(number: int, noun: str) -> str:
+    return f"{number} {noun}" if number == 1 else f"{number} {noun}s"
+
+
+def pcb(func: Callable[[Any], Any] | None = None, *, path: str | None = None):
+    """Declare a board. Usable bare (``@pcb``) or configured (``@pcb(path="boards/x.kicad_pcb")``).
+
+    The function takes the board (:class:`cadgen.kipy.board.Board`) and returns
+    nothing. The decorated function takes no arguments and builds the board when
+    called: ``<script dir>/<function name>.kicad_pcb``, or ``path`` relative to
+    the script's directory. KiCad reads the project library table,
+    ``fp-lib-table``, from the board's directory.
     """
-    import sys
+    if path is not None and not str(path).endswith(".kicad_pcb"):
+        raise ValueError(f"@pcb(path=...) names the board file, so it ends in .kicad_pcb: {path!r}")
 
-    from cadgen._internal.validation_door import display_path, failed, resolved_target
+    def apply(function: Callable[[Any], Any]) -> Callable[[], BoardBuild]:
+        script = Path(inspect.getsourcefile(function) or function.__code__.co_filename).resolve()
+        target = script.parent / (path if path is not None else f"{function.__name__}.kicad_pcb")
 
-    target = resolved_target(path, label="pcb")
-    if verbose:
-        print(f"[pcb] validating {target}", file=sys.stderr)
-    if target.suffix.lower() not in _SUFFIXES:
-        return failed(target, "target must be a KiCad project file (.kicad_pcb, .kicad_sch or .kicad_pro)")
-    if not target.is_file():
-        return failed(target, "file not found")
-    from cadgen.kicad.check import check_project
-    from cadgen.kicad.install import KicadMissingError
+        @functools.wraps(function)
+        def build(*args: Any, **kwargs: Any) -> BoardBuild:
+            if args or kwargs:
+                raise TypeError(f"{function.__name__}() takes no arguments: calling it builds {target.name}")
+            return _build(function, target)
+
+        build.board_path = target  # type: ignore[attr-defined]
+        return build
+
+    return apply(func) if func is not None else apply
+
+
+def connect(cli: Path, settings: Path):
+    """A ``cadgen.kipy.KiCad`` on a fresh headless server run by ``cli``, its settings in
+    ``settings``: ``KICAD_CONFIG_HOME`` is set around the start, which inherits this
+    process's environment, and restored. The one seam between a build and KiCad."""
+    from cadgen.kipy import KiCad
+
+    previous = os.environ.get("KICAD_CONFIG_HOME")
+    os.environ["KICAD_CONFIG_HOME"] = str(settings)
+    try:
+        return KiCad(headless=True, kicad_cli_path=str(cli), timeout_ms=_TIMEOUT_MS)
+    finally:
+        if previous is None:
+            del os.environ["KICAD_CONFIG_HOME"]
+        else:
+            os.environ["KICAD_CONFIG_HOME"] = previous
+
+
+def _start(cli: Path, settings: Path):
+    """The connected client, or why KiCad could not be started: a kicad-cli too old to have
+    ``api-server`` is the usual reason, and is named as such."""
+    from cadgen.kicad.install import check_version, kicad_version
+    from cadgen.kipy.errors import ConnectionError as KicadConnectionError
 
     try:
-        report = check_project(target)
-    except KicadMissingError as error:
-        return failed(target, str(error), code="kicad_missing")
-    order = sorted(report.findings, key=lambda finding: (finding.severity != "error", finding.check, finding.type))
-    issues = [_issue(finding) for finding in order]
-    errors = sum(1 for finding in report.findings if finding.severity == "error")
-    warnings = sum(1 for finding in report.findings if finding.severity == "warning")
-    blocking = bool(errors or (strict and warnings))
-    return ValidationResult(
-        ok=not blocking,
-        path=target,
-        issues=tuple(issues),
-        summary="" if blocking else f"OK {display_path(target)}: ERC and DRC clean ({warnings} warning(s))",
+        kicad = connect(cli, settings)
+    except (OSError, TimeoutError, KicadConnectionError) as error:
+        version = check_version(cli, kicad_version(cli))
+        raise RuntimeError(f"{cli} (KiCad {version}) could not start its API server: {error}") from None
+    try:
+        version = kicad.get_version()
+        check_version(cli, f"{version.major}.{version.minor}.{version.patch}")
+    except BaseException:
+        kicad.close()
+        raise
+    return kicad
+
+
+def _build(function: Callable[[Any], Any], target: Path) -> BoardBuild:
+    from cadgen.kicad.install import find_kicad_cli
+    from cadgen.kipy.board import Board
+    from cadgen.kipy.errors import ApiError
+    from cadgen.kipy.proto.common.types.base_types_pb2 import DocumentType
+    from cadgen.kipy.proto.common.types.library_types_pb2 import LibraryLoadStatus, LibraryType
+
+    started = time.perf_counter()
+    cli = find_kicad_cli()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    settings = Path(tempfile.mkdtemp(prefix="cadgen-kicad-"))
+    try:
+        kicad = _start(cli, settings)
+        try:
+            # An existing file is overwritten by the save: the document starts empty either way.
+            document = kicad.create_document(str(target), DocumentType.DOCTYPE_PCB)
+            try:
+                kicad.load_all_libraries([LibraryType.LT_FOOTPRINT])
+                rows = kicad.wait_for_libraries([LibraryType.LT_FOOTPRINT], interval_ms=50, timeout_s=_LIBRARY_TIMEOUT_S)
+                table = ", ".join(f"{row.nickname} ({LibraryLoadStatus.Name(row.status)})" for row in rows) or "no rows"
+                failed = [row for row in rows if row.status != LibraryLoadStatus.LLS_LOADED]
+                if failed:
+                    raise BoardError(
+                        f"{target.parent / 'fp-lib-table'}: "
+                        + "; ".join(f"{row.nickname}: {LibraryLoadStatus.Name(row.status)}" + (f", {row.error_message}" if row.error_message else "") for row in failed)
+                    )
+                # The board is built on the specifier create_document returned, not on
+                # kicad.get_board(): today's nightly reports the open document's project path
+                # without its trailing slash, and the project commands (net classes,
+                # assignments, text variables) then find no such project. The client is the
+                # one thing kipy keeps private here; this is the one place cadgen reaches it.
+                board = Board(kicad._client, document)  # noqa: SLF001
+                try:
+                    function(board)
+                except ApiError as error:
+                    if "not found" in str(error):
+                        raise BoardError(
+                            f"{error.raw_message or error}; the project library table {target.parent / 'fp-lib-table'} "
+                            f"loaded {table}: add the library the footprint is in"
+                        ) from error
+                    raise
+                board.refill_zones()
+                unconnected = _unconnected(board)
+                counts = (len(board.get_footprints()), len(board.get_tracks()), len(board.get_vias()), len(board.get_zones()))
+                board.save()
+            except BaseException:
+                # Nothing is saved. The document is closed unsaved so KiCad takes its own lock
+                # file with it; a server that cannot even do that is simply stopped.
+                try:
+                    kicad.close_document(document)
+                except Exception:  # noqa: BLE001 - the failure being raised is the one that matters
+                    pass
+                raise
+            kicad.close_document(document)
+        finally:
+            kicad.close()
+    finally:
+        shutil.rmtree(settings, ignore_errors=True)
+    result = BoardBuild(
+        board=target,
+        project=target.with_suffix(".kicad_pro"),
+        parts=counts[0],
+        tracks=counts[1],
+        vias=counts[2],
+        zones=counts[3],
+        unconnected=unconnected,
+        seconds=time.perf_counter() - started,
     )
+    print(result.report())
+    sys.stdout.flush()
+    return result
 
 
-def review(board: Path, *, verbose: bool = False) -> ValidationResult:
-    """Review the KiCad board BOARD for what KiCad's ERC and DRC do not check: advice, never a gate.
+def _unconnected(board) -> int:
+    """Pads with no copper path to the first pad of their net, over tracks, vias and the
+    filled zones; a net of one pad has nothing to connect."""
+    by_net: dict[str, list] = {}
+    for pad in board.get_pads():
+        if pad.net.name:
+            by_net.setdefault(pad.net.name, []).append(pad)
+    missing = 0
+    for pads in by_net.values():
+        if len(pads) < 2:
+            continue
+        reached = {item.id.value for item in board.get_connected_items([pads[0]])}
+        missing += sum(1 for pad in pads[1:] if pad.id.value not in reached)
+    return missing
 
-    An IC's power input with no decoupling capacitor to ground, or the nearest
-    one too far from it; a net's tracks too thin for the current its script
-    gives it (``board.net("VBUS", current=2.0)``); parts the BOM lists with no
-    LCSC or MPN to order them by; one part number on two footprints. Each
-    finding names its parts by board reference. The result is always ok: the
-    pcb-dfm skill weighs each finding, and ``cadgen pcb validate`` is the gate.
 
-    board: the .kicad_pcb to review (its .kicad_pro beside it carries net currents).
-    verbose: narrate the target on stderr.
+def drc(board: Path) -> ValidationResult:
+    """Check the KiCad board BOARD with KiCad's design rule check.
+
+    Runs ``kicad-cli pcb drc`` on the saved file with every severity reported
+    and lists each violation and unconnected item with where it is (millimetres
+    from the board's origin). The board fails when any error-severity violation
+    or any unconnected item exists; warnings are reported and do not fail it.
+
+    board: the .kicad_pcb to check (its .kicad_pro beside it carries the rules).
     """
-    import sys
-
     from cadgen._internal.validation_door import display_path, failed, resolved_target
+    from cadgen.kicad.cli import run_drc
+    from cadgen.kicad.install import KicadMissingError, check_version, find_kicad_cli, kicad_version
 
     target = resolved_target(board, label="pcb")
-    if verbose:
-        print(f"[pcb] reviewing {target}", file=sys.stderr)
     if target.suffix.lower() != ".kicad_pcb":
         return failed(target, "target must be a KiCad board (.kicad_pcb)")
     if not target.is_file():
         return failed(target, "file not found")
-    from cadgen.kicad.board_index import read_script_index
-    from cadgen.kicad.review import net_currents
-    from cadgen.kicad.review import review as review_index
-
     try:
-        index = read_script_index(target)
-    except ValueError as error:
-        return failed(target, f"cadgen cannot read this board for review: {error}")
-    findings = review_index(index, net_currents(target.with_suffix(".kicad_pro")))
-    issues = tuple(_issue(finding) for finding in findings)
+        cli = find_kicad_cli()
+        check_version(cli, kicad_version(cli))
+    except KicadMissingError as error:
+        return failed(target, str(error), code="kicad_missing")
+    findings = run_drc(cli, target)
+    order = sorted(findings, key=lambda finding: (finding.severity != "error", finding.check, finding.type))
+    issues = tuple(
+        ValidationIssue(
+            severity=finding.severity,
+            message=finding.description + (": " + "; ".join(finding.items) if finding.items else ""),
+            element=f"({finding.at[0]:g}, {finding.at[1]:g}) mm" if finding.at else None,
+            code=finding.type,
+        )
+        for finding in order
+    )
+    errors = sum(1 for finding in findings if finding.severity == "error")
+    unconnected = sum(1 for finding in findings if finding.check == "unconnected")
+    warnings = sum(1 for finding in findings if finding.severity == "warning")
     return ValidationResult(
-        ok=True, path=target, issues=issues, summary=f"Reviewed {display_path(target)}: {len(issues)} finding(s)"
+        ok=not (errors or unconnected),
+        path=target,
+        issues=issues,
+        summary="" if errors or unconnected else f"OK {display_path(target)}: DRC clean ({warnings} warning(s))",
     )
 
 
-def gerber(board: Path, out: Path | None = None, *, verbose: bool = False) -> FabExportResult:
-    """Write the Gerber and drill files of the KiCad board BOARD, in one zip: what a fab makes it from.
+class _Namespace(ModuleType):
+    """``cadgen.pcb`` is the decorator and the verb namespace in one object: Python gives a
+    package one attribute per submodule name, so the module itself is callable."""
 
-    Every copper, mask, paste and silkscreen layer and the outline, as Gerber X2,
-    and the Excellon drill files, plated and unplated apart: the files every PCB
-    fab takes. What @pcb(gerber=True) writes. Refused for a board with unrouted
-    connections or DRC errors.
-
-    board: the .kicad_pcb to export.
-    out: destination file. Omitted, writes the sibling <name>.gerbers.zip beside BOARD.
-    verbose: narrate the target on stderr.
-    """
-    from cadgen._internal.fab_door import board_export
-
-    return board_export("gerber", board, out, verbose=verbose)
+    def __call__(self, func: Callable[[Any], Any] | None = None, *, path: str | None = None):
+        return pcb(func, path=path)
 
 
-def bom(board: Path, out: Path | None = None, *, verbose: bool = False) -> FabExportResult:
-    """Write the bill of materials (CSV) of the KiCad board BOARD: what to buy, and what an assembler places.
-
-    One row per distinct part, read from the schematic beside the board; parts
-    marked do-not-populate are left out. What @pcb(bom=True) writes.
-
-    board: the .kicad_pcb to export (its .kicad_sch beside it).
-    out: destination file. Omitted, writes the sibling <name>.bom.csv beside BOARD.
-    verbose: narrate the target on stderr.
-    """
-    from cadgen._internal.fab_door import board_export
-
-    return board_export("bom", board, out, verbose=verbose)
-
-
-def pos(board: Path, out: Path | None = None, *, verbose: bool = False) -> FabExportResult:
-    """Write the pick-and-place file (CSV) of the KiCad board BOARD: where an assembler puts each part.
-
-    One row per placed part: its reference, position (millimetres from the
-    board's drill/place origin), rotation and side; do-not-populate parts are
-    left out. What @pcb(pos=True) writes. Refused for a board with unrouted
-    connections or DRC errors.
-
-    board: the .kicad_pcb to export.
-    out: destination file. Omitted, writes the sibling <name>.pos.csv beside BOARD.
-    verbose: narrate the target on stderr.
-    """
-    from cadgen._internal.fab_door import board_export
-
-    return board_export("pos", board, out, verbose=verbose)
-
-
-def __getattr__(name: str):
-    if name in _DESIGN:
-        from cadgen.kicad import design
-
-        return getattr(design, name)
-    if name in _FABS:
-        from cadgen.kicad import fabs
-
-        return getattr(fabs, name)
-    if name in _SIMULATION:
-        from cadgen.kicad import sim
-
-        return getattr(sim, name)
-    if name in {"find_symbols", "find_footprints"}:
-        from cadgen.kicad import library
-
-        return getattr(library, name)
-    if name in {"read_board", "BoardView"}:
-        from cadgen.kicad import board_index
-
-        return getattr(board_index, name)
-    if name in {"read_schematic", "SchematicView"}:
-        from cadgen.kicad import schematic_index
-
-        return getattr(schematic_index, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-callable_namespace(__name__, "pcb")
+sys.modules[__name__].__class__ = _Namespace

@@ -46,6 +46,7 @@ PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
     # An SRDF's geometry comes from the URDF beside it, so it has no snapshot
     # door of its own; `cadgen snapshot` still routes one by suffix.
     "cadgen.srdf": ("validate",),
+    "cadgen.pcb": ("drc", "snapshot"),
     "cadgen.sdf": ("snapshot", "validate"),
 }
 
@@ -64,12 +65,7 @@ MIRRORS: dict[str, tuple[str, str]] = {
     "glb build": ("cadgen.glb", "build"),
     "sdf validate": ("cadgen.sdf", "validate"),
     "srdf validate": ("cadgen.srdf", "validate"),
-    "pcb validate": ("cadgen.pcb", "validate"),
-    "pcb review": ("cadgen.pcb", "review"),
-    "pcb gerber": ("cadgen.pcb", "gerber"),
-    "pcb bom": ("cadgen.pcb", "bom"),
-    "pcb pos": ("cadgen.pcb", "pos"),
-    "harness bom": ("cadgen.harness", "bom"),
+    "pcb drc": ("cadgen.pcb", "drc"),
     # Snapshot was the schema's LAST adapter. Its rich options are typed
     # `str | dict | None` — one string CLI-side, a real dict library-side — so
     # there is nothing left to declare: the structural check below is the whole
@@ -81,7 +77,6 @@ MIRRORS: dict[str, tuple[str, str]] = {
     "glb snapshot": ("cadgen.glb", "snapshot"),
     "dxf snapshot": ("cadgen.dxf", "snapshot"),
     "pcb snapshot": ("cadgen.pcb", "snapshot"),
-    "harness snapshot": ("cadgen.harness", "snapshot"),
     "urdf snapshot": ("cadgen.urdf", "snapshot"),
     "sdf snapshot": ("cadgen.sdf", "snapshot"),
     # The polymorphic door's verb has no format namespace to live on: there is
