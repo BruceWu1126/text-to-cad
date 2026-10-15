@@ -37,7 +37,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); while (restores.length) rest
 // An assembly: a hinge of a base and an arm, and a pin beside it.
 const partNode = (id: string, name: string) => ({ id, nodeType: 'part', name, leafPartIds: [id], children: [] });
 const stepRoot = { id: 'document', nodeType: 'assembly', name: 'fixture', children: [
-  { id: 'o1.1', nodeType: 'assembly', name: 'hinge', children: [partNode('o1.1.1', 'base'), partNode('o1.1.2', 'arm')] }, partNode('o1.2', 'pin')] };
+  { id: 'o:0a1b2c3d4e5f', nodeType: 'assembly', name: 'hinge', children: [partNode('o:0b1c2d3e4f5a', 'base'), partNode('o:0c1d2e3f4a5b', 'arm')] }, partNode('o:0d1e2f3a4b5c', 'pin')] };
 
 const rows = () => [...document.querySelectorAll('[aria-label="Modeling tree"] button')].map(button => button.getAttribute('aria-label'))
   .filter(label => /^(?:Select|Expand|Collapse) /.test(label || ''));
@@ -109,7 +109,7 @@ it("Features opens as tall as its rows need, up to the whole column, on desktop 
 
 // What Select shows (`StepPanels.js`): an assembly's tree and, with a selection, the Reference
 // under it; a part file has no tree, its one row being all there would be, and the Reference alone.
-const face = { id: 'o1.1.1.f2', normalizedSelector: 'o1.1.1.f2', selectorType: 'face', occurrenceId: 'o1.1.1', pickData: { surfaceType: 'plane', area: 20 } };
+const face = { id: 'o:0b1c2d3e4f5a/f:bbbbbbbbbbb2', normalizedSelector: 'o:0b1c2d3e4f5a/f:bbbbbbbbbbb2', selectorType: 'face', occurrenceId: 'o:0b1c2d3e4f5a', pickData: { surfaceType: 'plane', area: 20 } };
 function SelectPanels({ assembly = false, references = [] as any[], onClearSelection = () => {} }) {
   const partRoot = { id: '__step_model__', nodeType: 'part', name: 'hinge.step', leafPartIds: ['__model__'], children: [] };
   return useStepPanels({ selectActive: true, selectedEntry: { file: '/models/hinge.step' }, isAssemblyView: assembly,
@@ -131,7 +131,7 @@ it("a part file shows no tree under Select, only the Reference for what is picke
   render(<Panels assembly references={[face]} onClearSelection={onClearSelection} />);
   expect(shown()).toEqual(['Features', 'Reference details']);
   const reference = within(screen.getByRole('region', { name: 'Reference details' }));
-  expect(reference.getByRole('heading').textContent).toBe('base · face 2');
+  expect(reference.getByRole('heading').textContent).toBe('base · face f:bbbbbbbbbbb2');
   expect(reference.getByRole('button', { name: 'Copy' }).getAttribute('aria-keyshortcuts')).toBe('Meta+C');
   expect(screen.getByRole('region', { name: 'Reference details' }).style.maxHeight).toBe(`${STACK_HEIGHT}px`);
   fireEvent.click(reference.getByRole('button', { name: 'Clear selection' }));

@@ -89,7 +89,8 @@ function itemKey(item) {
  * part as the tree names it (`partName`) and its element's token, the geometry's name that a
  * copy carries too. A generated label that only restates the selector ("Face o:…/f:…") is not a
  * name. A single-part file's part with no name of its own is the file's ("l_bracket · face
- * f:…"): the tree's root is that part, named after the file. Never the raw occurrence token.
+ * f:…"): the tree's root is that part, named after the file. The occurrence token names the
+ * part only when nothing else does; the element's raw selector never names anything.
  */
 function referenceName(item, meshData, partName) {
   if (isPartNode(item)) return String(item.name || item.displayName || "").trim() || itemKey(item);

@@ -71,10 +71,10 @@ test('a single-part STEP names a picked face after its part, by the name the vie
   await page.locator('[role=menu]').waitFor({ state: 'detached' });
   // Its faces load once Select is up: under All a press picks one.
   await page.mouse.click(...at([6, 6, 5]));
-  await page.waitForFunction(() => /\.f\d+$/.test(window.cadHarness.a.controller.readState().selectedReferenceIds.join()));
+  await page.waitForFunction(() => /\/f:[0-9a-f]{12}$/.test(window.cadHarness.a.controller.readState().selectedReferenceIds.join()));
   const face = (await view.state()).selectedReferenceIds[0].split('|').at(-1);
-  const ordinal = face.replace(/^.*\.f/, '');
-  assert.match((await reference.innerText()).replace(/\s+/g, ' '), new RegExp(`^base · face ${ordinal} Area `),
+  const token = face.replace(/^.*\//, '');
+  assert.match((await reference.innerText()).replace(/\s+/g, ' '), new RegExp(`^base · face ${token} Area `),
     'the heading is the part, by its own name rather than the file\'s, and the kind, over the face\'s area');
   // A second face: the picker's name and every one of its entries read the same way.
   await page.keyboard.down('Shift');
@@ -82,11 +82,11 @@ test('a single-part STEP names a picked face after its part, by the name the vie
   await page.keyboard.up('Shift');
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedReferenceIds.length === 2);
   const picker = reference.getByRole('combobox', { name: 'Inspect selected reference' });
-  assert.match((await picker.innerText()).replace(/\s+/g, ' '), /^base · face \d+ 2\/2$/);
+  assert.match((await picker.innerText()).replace(/\s+/g, ' '), /^base · face f:[0-9a-f]{12} 2\/2$/);
   await picker.click();
   const options = await page.getByRole('option').allInnerTexts();
   assert.equal(options.length, 2);
-  assert.ok(options.every(option => /^base · face \d+$/.test(option.trim())), `the picker's entries: ${options}`);
+  assert.ok(options.every(option => /^base · face f:[0-9a-f]{12}$/.test(option.trim())), `the picker's entries: ${options}`);
   await page.keyboard.press('Escape');
   assert.deepEqual(errors, []);
 });
