@@ -128,6 +128,29 @@ class FilesAsExportsTest(unittest.TestCase):
         self.assertEqual("current", self.build()[0])
         self.assertEqual(plain, self.step.read_bytes())
 
+    def test_a_plain_file_that_does_not_hold_its_result_is_kept_as_its_own(self) -> None:
+        """Written plain, a result is written to the same bytes again: a plain file that
+        does not hold its result shows its own content, and the next run keeps it rather
+        than write and verify it again -- the warning promises no rewrite."""
+        from cadgen._internal.step_verify import Mismatch
+
+        lost = [Mismatch(None, None, "faces off their place")]
+        with mock.patch("cadgen._internal.step_verify.verify_scene", return_value=lost):
+            said = self.build()[1]
+            self.assertIn("the model's next run writes it without names", said)
+            outcome, said = self.build()
+            self.assertEqual("current", outcome)
+            self.assertIn("does not hold the result it was written from, so it shows its own content: ", said)
+            self.assertNotIn("next run", said)
+            entry = self.entry()
+            self.assertTrue(entry["differ"] and entry["plain"])
+            plain = self.step.read_bytes()
+            with mock.patch("cadgen.store.exports.export_step") as export:
+                outcome, said = self.build()
+            self.assertEqual(("current", 0), (outcome, export.call_count))
+            self.assertEqual(plain, self.step.read_bytes())
+            self.assertNotIn("does not hold the result", said)
+
 
 class KeptRuleTest(unittest.TestCase):
     """A build keeps its STEP -- writes and verifies nothing -- only while its record's last
@@ -172,6 +195,19 @@ class KeptRuleTest(unittest.TestCase):
         self.assertEqual({"sha256": "", "writer": STEP_WRITER_SCHEME, "plain": True}, marked.output())
         # Another result is written with names again.
         self.assertFalse(self.plan(tree="c" * 64).plain)
+
+    def test_a_plain_file_that_did_not_hold_its_result_is_kept(self) -> None:
+        """The same result is written plain to the same bytes: nothing is gained by writing
+        and verifying them again."""
+        from cadgen.step_export import STEP_WRITER_SCHEME
+        from cadgen.store.records import note_document_tree
+
+        note_document_tree(self.DIGEST, "d" * 64, plain=True, differ=["the file: faces off their place"])
+        output = {"sha256": self.DIGEST, "writer": STEP_WRITER_SCHEME, "plain": True}
+        kept = self.plan(output=output)
+        self.assertEqual(output, kept.kept)
+        self.assertTrue(kept.plain)
+        self.assertIsNone(self.plan(output=output, force=True).kept)
 
 
 if __name__ == "__main__":

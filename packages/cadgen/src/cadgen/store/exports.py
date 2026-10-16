@@ -209,7 +209,7 @@ def verify_document(tree_hash: str, document: Path, sha256: str, *, producer: di
 
     own, _tree, _stats = build_document_tree(scene)
     note_document_tree(sha256, own, kind=str(entry.get("kind") or "step"), producer=entry.get("producer"),
-                       differ=differ)
+                       plain=producer is None, differ=differ)
     return answer
 
 
@@ -254,7 +254,7 @@ def confirm_document(document: Path, digest: str) -> bool:
         _WARNED.add(digest)
         from cadgen._internal.build_timing import note_warning
 
-        text = file_warning(Path(document), entry["differ"])
+        text = file_warning(Path(document), entry["differ"], plain=bool(entry.get("plain")))
         if not note_warning(text):
             print(f"[cadgen] warning: {text}", file=sys.stderr)
     return verified
@@ -263,9 +263,11 @@ def confirm_document(document: Path, digest: str) -> bool:
 _WARNED: set[str] = set()
 
 
-def file_warning(document: Path, differ: list[str]) -> str:
+def file_warning(document: Path, differ: list[str], *, plain: bool) -> str:
     """What a build or a door says of a file that does not hold the result it was written
-    from: that it shows its own content, what differs, and that the next run writes it
-    plain."""
+    from: that it shows its own content, what differs, and -- for a file written with
+    names -- that the next run writes it plain. A file written plain is kept as it is: the
+    same result is written plain to the same bytes."""
+    then = "" if plain else "; the model's next run writes it without names"
     return (f"{Path(document).name} does not hold the result it was written from, so it shows its own "
-            f"content; the model's next run writes it without names: {'; '.join(differ)}")
+            f"content{then}: {'; '.join(differ)}")

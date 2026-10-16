@@ -703,7 +703,8 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   puts off its place is measured again on both sides, the search cut finer,
   before it is called moved. A file that verifies is its tree: its entry is
   written again without `verified`. One that does not maps to its own content
-  as above, the differences listed (`differ`). A build with no daemon waits for its verify
+  as above, the differences listed (`differ`, and `plain` for a file written
+  plain). A build with no daemon waits for its verify
   and warns; a daemon's build returns once its files are written, and the
   verify finishes on the pool, so a mismatch reaches the next touch of the
   file -- a door, `store why`, the next run. A door given an entry still
@@ -717,7 +718,9 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   -- when its record's last build had the same tree, wrote the file with this
   writer (`step_export.STEP_WRITER_SCHEME`, on the output entry), the file on
   disk when the build started still has the bytes recorded, and those bytes
-  held the result (their entry lists no differences); `--force` always writes.
+  held the result (their entry lists no differences) or were written plain --
+  the same result is written plain to the same bytes, so a plain file that does
+  not hold it stays its own content; `--force` always writes.
   A kept file's entry is written again where the store lost it, and its
   sidecar only where its bytes changed: viewers version a sidecar by its
   stamp, and a new one reloads the model. The run says `kept STEP`. A rebuild
@@ -2325,7 +2328,7 @@ supersession does not cancel their exports.
   occurrences that differ (§3, *Exports*) -- and the document entry lists the
   differences (`differ`); a build with no daemon warns in the same words, a
   daemon's build at the next touch of the file. The model's next run writes
-  such a file plain.
+  such a file plain, and keeps a plain one.
 - `cadgen store info` sizes the store against its cap, names any retired
   kind still present and any `index/` folder it does not know, and says when
   a newer cadgen's writes keep passes off the store. `cadgen store gc

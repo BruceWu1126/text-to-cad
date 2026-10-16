@@ -185,7 +185,8 @@ def note_document_tree(
     before any parse of them (``store/exports.py``): pending, ``verified`` False --
     and ``plain`` for a file written without names -- until its verify answers.
     Confirmed, the entry is written again without them; a file that does not hold
-    its tree maps to its own content, listing what differs (``differ``)."""
+    its tree maps to its own content, listing what differs (``differ``), and stays
+    ``plain`` when it was written so."""
     digest = str(document_hash or "").strip()
     tree_hash = str(tree or "").strip()
     if not digest or not tree_hash:

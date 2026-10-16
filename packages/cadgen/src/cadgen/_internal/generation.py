@@ -175,9 +175,10 @@ def _export_plan(previous: Mapping[str, object], step_key: str, tree: str, *, fo
     """The kept rule: a build keeps its STEP, writing and verifying nothing, when its
     record's last build had this very tree, wrote the file with this writer, the file on
     disk when the build started still has the bytes it recorded, and those bytes held
-    the result -- unless forced. Otherwise it exports, plain where the same result's
-    last file did not hold it (its document entry lists what differs) or was itself
-    written plain."""
+    the result or were written plain (the same result is written plain to the same bytes
+    again) -- unless forced. Otherwise it exports, plain where the same result's last
+    file did not hold it (its document entry lists what differs) or was itself written
+    plain."""
     from cadgen.step_export import STEP_WRITER_SCHEME
     from cadgen.store.records import document_entry_for_hash
 
@@ -187,7 +188,8 @@ def _export_plan(previous: Mapping[str, object], step_key: str, tree: str, *, fo
     sha = str(prior.get("sha256") or "")
     entry = document_entry_for_hash(sha) if sha else None
     marked = bool(entry and entry.get("differ"))
-    if not force and same and sha and prior.get("writer") == STEP_WRITER_SCHEME and on_disk == sha and not marked:
+    if (not force and same and sha and prior.get("writer") == STEP_WRITER_SCHEME and on_disk == sha
+            and (not marked or prior.get("plain"))):
         return _ExportPlan(kept={key: prior[key] for key in ("sha256", "writer", "plain") if key in prior},
                            plain=bool(prior.get("plain")))
     return _ExportPlan(kept=None, plain=same and (marked or bool(prior.get("plain"))))
@@ -305,7 +307,7 @@ def _verify_saved(spec: EntrySpec, tree: str, step_path: Path, digest: str, *, p
     if answer.get("differ"):
         from cadgen.store.exports import file_warning
 
-        _note_warnings([file_warning(step_path, answer["differ"])])
+        _note_warnings([file_warning(step_path, answer["differ"], plain=producer is None)])
 
 
 def _edge_visibility_classes_match_manifest(
