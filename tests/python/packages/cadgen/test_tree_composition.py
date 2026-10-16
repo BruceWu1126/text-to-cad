@@ -216,8 +216,8 @@ class SplicedStepTest(Fixture):
             written.append((step_hash, (self.root / "repeat.step").read_bytes()))
         self.assertEqual(written[0], written[1])
 
-    def test_non_ascii_names_splice_and_read_back(self):
-        # A lowercase accented name failed every build: the writer's spelling read back
+    def test_non_ascii_names_splice_and_read_as_written(self):
+        # A lowercase accented name failed every build: the writer's spelling was read
         # otherwise. Spliced or exported, both spell it as a Part 21 directive.
         for grouped in (False, True):
             with self.subTest(grouped=grouped):

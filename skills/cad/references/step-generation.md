@@ -93,7 +93,7 @@ an imported STEP keeps any sidecar beside it.
 
 - **A CHILD (the default)**: the other part is a model in this project; import
   its function and call it. A child edit reaches the parent on the parent's next
-  rebuild. A generated child read back through its exported `.step` becomes an
+  rebuild. A generated child read through its exported `.step` becomes an
   input instead: nothing rebuilds it, and the parent copies it rather than
   linking it.
 - **An INPUT**: the other part is a document (a purchased part, or a generated

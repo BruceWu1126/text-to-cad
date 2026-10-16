@@ -51,12 +51,12 @@ class GeometricTokenTest(unittest.TestCase):
         self.assertTrue(GEOMETRIC_TOKEN_SCHEME.startswith("cadgen-geometric-token-v"))
 
     def test_the_same_geometry_in_other_bytes_has_the_same_tokens(self) -> None:
-        # Built twice, and built then read back from STEP: other bytes, another order.
+        # Built twice, and built then read from STEP: other bytes, another order.
         self.assertEqual(element_tokens(_topods(Box(10, 20, 30))), element_tokens(_topods(Box(10, 20, 30))))
         with tempfile.TemporaryDirectory() as directory:
             original = Box(10, 20, 30) - Pos(0, 0, 10) * Cylinder(3, 20)
-            read_back = _roundtrip(original, Path(directory))
-        before, after = element_tokens(_topods(original)), element_tokens(_topods(read_back))
+            read = _roundtrip(original, Path(directory))
+        before, after = element_tokens(_topods(original)), element_tokens(_topods(read))
         for name in ("faces", "edges", "vertices"):
             self.assertEqual(sorted(before[name]), sorted(after[name]), f"{name} tokens survive the round trip")
 

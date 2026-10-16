@@ -1072,7 +1072,7 @@ def bake_document_animation(clips: Mapping[str, Any], tree: str) -> dict[str, An
     return bake_animation(clips, animation_targets(descriptor), (bbox["min"], bbox["max"]), _LeafBoxes(descriptor))
 
 
-# --- The section, read back ------------------------------------------------------
+# --- The section, as read --------------------------------------------------------
 
 
 def _fail(message: str) -> ValueError:

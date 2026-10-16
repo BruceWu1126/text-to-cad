@@ -2,7 +2,7 @@
 
 `skills/cad/references/supported-exports.md` promises that faces which meet
 share their boundary vertices. This test pins what a USER gets — the bytes of a
-written STL, read back with nothing but `struct` — for the ordinary part the
+written STL, read with nothing but `struct` — for the ordinary part the
 issue reported: a rectangular plate with a single cylindrical through-hole.
 Issue #433 is the same part bent: the hole goes through a curved wall.
 

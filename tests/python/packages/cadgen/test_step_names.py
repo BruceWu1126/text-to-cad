@@ -5,7 +5,7 @@ Any reader of the file gets those names from the file alone, on the elements the
 written on; a cold parse walked as a compile walks it names every occurrence by the token
 the result names it by, and a document of one shape is that one product; and a file written
 without names is the file the writer wrote before names existed, which a named file whose
-plain twin already reads back as its result is too, byte for byte, but for its names.
+plain twin is already read as its result is too, byte for byte, but for its names.
 """
 
 from __future__ import annotations
@@ -130,9 +130,9 @@ class StepNamesRoundTripTest(unittest.TestCase):
                 source_faces = dict(zip(written.faces, _elements(source, "face")))
                 for name, face in zip(read.faces, _elements(prototype, "face")):
                     for read_bound, source_bound in zip(_box(face), _box(source_faces[name])):
-                        self.assertAlmostEqual(read_bound, source_bound, places=6, msg=f"{name} reads back elsewhere")
-                # Every edge the file has an entity for reads back named; a sphere's seam
-                # and poles have none, and are read back new and unnamed.
+                        self.assertAlmostEqual(read_bound, source_bound, places=6, msg=f"{name} is read elsewhere")
+                # Every edge the file has an entity for is read named; a sphere's seam
+                # and poles have none, and are read as new and unnamed.
                 source_edges = dict(zip(written.edges, _elements(source, "edge")))
                 carried = {name for name, edge in source_edges.items()
                            if not BRep_Tool.Degenerated_s(TopoDS.Edge_s(edge)) and label != "ball"}
@@ -141,7 +141,7 @@ class StepNamesRoundTripTest(unittest.TestCase):
                     if name is not None:
                         for read_bound, source_bound in zip(_box(edge), _box(source_edges[name])):
                             self.assertAlmostEqual(read_bound, source_bound, places=6,
-                                                   msg=f"{name} reads back elsewhere")
+                                                   msg=f"{name} is read elsewhere")
 
     def test_names_change_no_byte_of_the_file_but_the_names(self) -> None:
         from cadgen.step_export import export_build123d_step_file

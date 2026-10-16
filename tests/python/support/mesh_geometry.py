@@ -1,6 +1,6 @@
 """Comparing meshes by geometry within a tolerance (README law 5).
 
-The body a build holds and the same body read back from the STEP it wrote are one part
+The body a build holds and the same body as read from the STEP it wrote are one part
 (law 20) but other bytes, listing their faces and edges in another order, and the kernel
 meshes them to different bytes. A test that crosses that boundary -- a build's own export
 against a door's from an empty store, a document rendered beside its source against the

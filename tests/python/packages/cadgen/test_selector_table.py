@@ -114,7 +114,7 @@ class BoxTableTest(unittest.TestCase):
             self.assertGreater(face["relevance"], 0)
         self.assertEqual(table["bbox"], {"min": [-5.0, -10.0, -15.0], "max": [5.0, 10.0, 15.0]})
 
-    def test_the_bytes_read_back_and_a_foreign_payload_is_refused(self) -> None:
+    def test_the_bytes_read_as_written_and_a_foreign_payload_is_refused(self) -> None:
         payload = selector_table_bytes(self.table)
         self.assertEqual(read_selector_table(payload), json.loads(payload))
         damaged = json.loads(payload)

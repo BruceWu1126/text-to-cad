@@ -1,7 +1,7 @@
 """A part's display data: ONE index record per part, naming its two objects -- the display
 mesh (a GLB body, ``cadgen.store.meshes``) and the selector table
 (``cadgen._internal.selector_table``) -- derived from captured immutable geometry inputs,
-and read back.
+and read by every view of it.
 
 A part is a component under one producer, the kernel that derives it. Its key,
 ``index/part/<digest>-v<PART_VERSION>``, carries no tolerance: the digest hashes what

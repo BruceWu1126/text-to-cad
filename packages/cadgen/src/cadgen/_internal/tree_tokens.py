@@ -44,12 +44,12 @@ OCCURRENCE_TOKEN_RE = re.compile(r"^o:[0-9a-f]{12}$")
 # to a nanoradian's worth. A STEP file states a real to twelve decimals below a
 # thousand in magnitude and to thirteen significant digits from a thousand up
 # (``step_reals``), which near a rounding boundary can round otherwise than the
-# number written; a reader reads back exactly the number stated. So a translation
-# is rounded as the file states it, and a translation written and read back rounds
+# number written; a reader returns exactly the number stated. So a translation
+# is rounded as the file states it, and a translation written and read rounds
 # alike by construction. A rotation entry is not stated -- a reader rebuilds it from
-# two stated directions -- so one written and read back can round otherwise; a
-# writer that names its occurrences keeps every rotation it writes from reading
-# back as another token (``step_placements``).
+# two stated directions -- so one written and read can round otherwise; a writer
+# that names its occurrences keeps every rotation it writes from being read as
+# another token (``step_placements``).
 TRANSLATION_QUANTUM = 1e-6
 ROTATION_QUANTUM = 1e-9
 
@@ -67,7 +67,7 @@ def rounded_placement(transform: Any) -> list[int] | None:
     """The 12 placement numbers of a 16-float row-major transform, rounded to
     the quanta, as integers -- each translation as a STEP file states it;
     None for no placement (a group, a link)."""
-    from cadgen._internal.step_reals import written_real
+    from cadgen._internal.step_reals import stated_real
 
     if transform is None:
         return None
@@ -81,7 +81,7 @@ def rounded_placement(transform: Any) -> list[int] | None:
         for column in range(4):
             value = values[row * 4 + column]
             if column == 3:
-                out.append(int(round(written_real(value) / TRANSLATION_QUANTUM)))
+                out.append(int(round(stated_real(value) / TRANSLATION_QUANTUM)))
             else:
                 out.append(int(round(value / ROTATION_QUANTUM)))
     return out

@@ -1,5 +1,5 @@
 """A part's display data (STORE.md §2): ONE record per part, keyed by what made the component
-and the producer, naming its display mesh and selector table; derived once, read back bound
+and the producer, naming its display mesh and selector table; derived once, read bound
 to that record, and carried by a view for the CLI's readers; a part that fails to mesh is
 named once the rest are stored. A tiny box in a fresh store."""
 
@@ -204,14 +204,14 @@ class PartStoreTest(unittest.TestCase):
         step = self.root / "box.step"
         export_step(Solid.make_box(1, 2, 3), str(step))
         tree, _, _ = build_tree_from_compound(import_step(str(step)), root_name="box")
-        read_back = next(iter(capture_tree(tree, retain_payloads=False)[0]["components"].values()))
-        self.assertNotEqual(read_back["contentHash"], self.entry["contentHash"])
-        self.assertNotEqual(parts.part_key(read_back, self.producer), self.key, "other bytes, nothing made them: another part")
+        read = next(iter(capture_tree(tree, retain_payloads=False)[0]["components"].values()))
+        self.assertNotEqual(read["contentHash"], self.entry["contentHash"])
+        self.assertNotEqual(parts.part_key(read, self.producer), self.key, "other bytes, nothing made them: another part")
 
         def key(entry: dict, **fields) -> str:
             return parts.part_key({**entry, **fields}, self.producer)
 
-        made, remade = key(self.entry, construction="a" * 64), key(read_back, construction="a" * 64)
+        made, remade = key(self.entry, construction="a" * 64), key(read, construction="a" * 64)
         self.assertEqual(made, remade, "one construction is one part whatever its bytes")
         self.assertNotIn(made, (self.key, key(self.entry, construction="b" * 64)))
         self.assertNotEqual(key(self.entry, construction="a" * 64, lineage="c" * 64),

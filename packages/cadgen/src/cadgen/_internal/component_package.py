@@ -166,7 +166,7 @@ def component_leaf_layout(wrapped: Any) -> dict[str, Any]:
     UNLOCATED prototype has, in the order their remembered boxes are numbered
     (``placed_prototype_bounds``), and where each sits inside it -- the leaf's own location
     as twelve numbers, the rotation's rows then the translation, the identity for a leaf at
-    the prototype's own placement (a product read back from a STEP), an offset for one a
+    the prototype's own placement (a product a STEP file places), an offset for one a
     builder wrapped (build123d's ``Box`` is a compound around a solid it centres). A pure
     function of the encoded bytes.
     """

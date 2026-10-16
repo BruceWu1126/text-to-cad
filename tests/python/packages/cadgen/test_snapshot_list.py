@@ -1,7 +1,7 @@
 """`cadgen step snapshot --mode list`: cadgen's facts, through the real door.
 
 These run the verb on a tiny assembly built here -- a 20 x 10 x 5 plate at the origin and a
-radius-5 pin standing at x = 30 -- and read back what was answered:
+radius-5 pin standing at x = 30 -- and read what was answered:
 
 * `--mode list` is answered from the tree and the store, with no browser: the refs every
   selector resolves, the parts' exact boxes, and the stored meshes' counts;

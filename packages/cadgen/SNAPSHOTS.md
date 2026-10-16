@@ -231,7 +231,7 @@ with its `path` and these durations:
 | `frameCameraMs` | Camera selection/fitting, including visible-vertex tight framing when enabled, and the camera's depth range when there is no studio |
 | `prepareStudioMs` | Camera depth and photographic studio setup; absent without a studio |
 | `drawSubmitMs` | The renderer's synchronous draw call |
-| `encodeImageMs` | Image readback, optional view label and PNG/data-URL encoding |
+| `encodeImageMs` | Reading the image off the GPU, optional view label and PNG/data-URL encoding |
 
 WebGL submission may return before GPU work finishes. `encodeImageMs` can
 include waiting for that work; these fields are browser wall times, not GPU

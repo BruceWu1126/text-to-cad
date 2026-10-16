@@ -108,7 +108,7 @@ def run_model_argv(argv: Sequence[str], *, prog: str = "python <model>.py") -> i
         parser.error(f"model script does not exist: {items[0]}")
 
     # Where this process's build-tree events go. A transient worker (CADGEN_EVENTS=1)
-    # writes them as lines its parent reads back; a daemon worker already relays them
+    # writes them as lines its parent reads; a daemon worker already relays them
     # as frames; a root that reached here directly (`python -m cadgen.cli._run_model`)
     # renders the tree itself.
     from cadgen.cli_tree import build_tree

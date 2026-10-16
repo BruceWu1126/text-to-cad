@@ -43,10 +43,10 @@ class StepColorRoundTripTest(unittest.TestCase):
             loaded = list(scene.prototype_colors.values())
             self.assertEqual(1, len(loaded))
         package_channel = _occurrence_color(box)
-        for read_back, channel in zip(loaded[0][:3], package_channel[:3]):
+        for read, channel in zip(loaded[0][:3], package_channel[:3]):
             # Reader (linear) == package channel (linear): one model, one colour.
-            self.assertAlmostEqual(read_back, channel, places=3)
-            self.assertEqual(round(linear_to_srgb(read_back) * 255), 128)
+            self.assertAlmostEqual(read, channel, places=3)
+            self.assertEqual(round(linear_to_srgb(read) * 255), 128)
 
     def test_repeated_geometry_keeps_occurrence_colors_and_one_component_payload(self) -> None:
         import build123d as bd

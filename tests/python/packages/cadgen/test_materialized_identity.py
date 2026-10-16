@@ -206,8 +206,8 @@ class MaterializedIdentityTest(unittest.TestCase):
                 self.assertAlmostEqual(self.signed_volume(child), -25.0, places=9)
                 descriptor, again = self.parent(child, step=step, expected_export_volume=-25.0)
                 self.assertEqual(descriptor["links"], [])
-                # STEP can normalize solid orientation. Its canonical tree must
-                # match that read-back; the preview/export must retain our edit.
+                # STEP can normalize solid orientation: the saved file holds +25, while
+                # the result -- the preview, and what the export writes from -- keeps the edit.
                 self.assertAlmostEqual(self.signed_volume(again), -25.0, places=9)
                 if step:
                     self.assertAlmostEqual(self.saved_step_volume(), 25.0, places=9)

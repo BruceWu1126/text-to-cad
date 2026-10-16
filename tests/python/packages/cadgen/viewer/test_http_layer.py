@@ -71,7 +71,7 @@ class ServerFixture:
             conn.close()
 
     def raw(self, request_bytes, *, reads=1):
-        """Send raw bytes on one connection and read back ``reads`` responses."""
+        """Send raw bytes on one connection and read ``reads`` responses."""
         sock = socket.create_connection(("127.0.0.1", self.port), timeout=10)
         try:
             sock.sendall(request_bytes)

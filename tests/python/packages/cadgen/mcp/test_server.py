@@ -255,7 +255,7 @@ class TabServerTest(_Session):
         self.assertEqual((status, [entry["path"] for entry in recents["recents"]]), (200, [self.bracket]))
         counted.assert_called_once()
         self.assertEqual([entry["path"] for entry in self.launch("cad_home")["recents"]], [self.bracket])
-        # Its picture, kept and read back by name.
+        # Its picture, kept and read again by name.
         png = base64.b64encode(b"\x89PNG\r\n\x1a\n" + bytes(64)).decode("ascii")
         [entry] = self.http("POST", "/__cad/recents", {"action": "thumbnail", "path": self.bracket, "png": png})[1]["recents"]
         self.assertEqual(self.http("GET", f"/__cad/thumbnail?name={entry['thumbnail']}"), (200, base64.b64decode(png)))

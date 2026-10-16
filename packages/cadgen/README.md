@@ -537,7 +537,7 @@ src/cadgen/
                          #   above (a tcad:four_bar linkage closed here into
                          #   a curve), the visuals in rest space (a box,
                          #   cylinder, sphere or capsule meshed into the
-                         #   store), the facts a person reads back; refused
+                         #   store), the facts a person reads off it; refused
                          #   at the door in the validators' words, joint
                          #   values held to the articulation
   kinematics.py          # typed mates vocabulary (revolute/slider/

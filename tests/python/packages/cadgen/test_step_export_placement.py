@@ -90,7 +90,7 @@ class NamesOcctWouldMisreadTests(unittest.TestCase):
             self.assertIn(b"'post (6\\X\\27)'", data)
             self.assertIn(b"'it''s'", data)
 
-    def test_a_file_whose_names_read_back_keeps_occt_spelling(self):
+    def test_a_file_whose_names_are_read_as_written_keeps_occt_spelling(self):
         with tempfile.TemporaryDirectory(prefix="step-names-") as tmp:
             part = bd.Solid.make_box(2, 3, 4)
             part.label = "it's (big)"
@@ -108,7 +108,7 @@ class NonAsciiNamesTests(unittest.TestCase):
     character as a Part 21 directive instead (\\X2\\ in the basic plane, \\X4\\ beyond it), and
     every ASCII literal as OCCT does."""
 
-    # Lowercase accents failed every build; the rest read back already and must still.
+    # Lowercase accents failed every build; the rest were read as written already and must still.
     FAILED = ["Bügel_ä", "é", "ö", "ñandú", "ç", "à", "å", "ø"]
     PASSED = ["É_Ü", "ß", "ő", "ł", "Кирилл", "日本", "bolt_🔩", "Grüße's (6')"]
 

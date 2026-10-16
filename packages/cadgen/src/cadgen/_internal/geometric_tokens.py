@@ -29,8 +29,8 @@ What is read, and why:
 - An edge's signature is its curve class, its rounded end points as a sorted
   pair, and its rounded length. A vertex's is its rounded point.
 - A surface or curve class is the kernel's type with the pairs the STEP
-  translation exchanges folded together: a Bezier reads back as a B-spline, a
-  torus can read back as a surface of revolution.
+  translation exchanges folded together: a Bezier is read as a B-spline, a
+  torus can be read as a surface of revolution.
 - Two elements of one body with equal signatures (the coincident faces of two
   solids in a compound, two vertices at one point) are told apart
   deterministically: ordered by their exact values, each after the first

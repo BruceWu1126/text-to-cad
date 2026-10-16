@@ -10,7 +10,7 @@ decides what every later export of that document reads -- and the bytes must
 not care which one that was.
 
 One boundary is geometry's, not bytes': the build's own export meshes the body
-the build held, and a door's from an empty store meshes that body read back from
+the build held, and a door's from an empty store meshes that body as read from
 the file -- one part (law 20), other bytes, their faces in another order -- so
 across it the two meshes are compared within the tolerance they were made at
 (law 5: by geometry, never by file hash).
@@ -165,7 +165,7 @@ class MeshExportEngineDeterminismTest(unittest.TestCase):
         self.assertLessEqual(
             mesh_deviation(own, door), tolerance_of(DISPLAY_TESSELLATION["chordTolerance"], own, door),
             "the build's own STL, meshed in its process from the body it held, describes other "
-            "geometry than a door's, meshed in build-pool jobs from the body read back from the file (law 5)",
+            "geometry than a door's, meshed in build-pool jobs from the body as read from the file (law 5)",
         )
 
 

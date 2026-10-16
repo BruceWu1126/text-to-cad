@@ -1566,7 +1566,7 @@ def _document_root_name(shape: object, step_path: Path) -> str:
     re-emit's source document named its own root, so OUT keeps IN's name).
 
     Names are what an author wrote. Unlabelled, an assembly's root is ``model``,
-    as a document with no root name reads back: a name taken from the file
+    as a document with no root name is read: a name taken from the file
     would sit among its parts' labels and answer for one of them. An
     unlabelled single part takes its file's name, which nothing else in its
     document can share. A label the STEP round trip does not keep (a blank, a

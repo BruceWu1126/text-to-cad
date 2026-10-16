@@ -349,7 +349,7 @@ def _create_bin_xcaf_doc(to_export: Any, names: Callable[[Any], ComponentNames |
         return doc
 
     # A document that is one shape: its root is its one leaf. XCAF keeps a shape with a
-    # location as a reference, which the writer wraps in an assembly of one, read back as a
+    # location as a reference, which the writer wraps in an assembly of one, read as a
     # group the result does not have; named, a root placed at the identity (as a stored
     # result places it: ``materialize`` gives every leaf a location) is the bare shape.
     unlocated = shape_without_location(to_export)

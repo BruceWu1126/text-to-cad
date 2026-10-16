@@ -1,6 +1,6 @@
 """Occurrence tokens (``cadgen._internal.tree_tokens``): a node's token is a function of its
 place in its tree -- parent, name, rounded placement, rank among identical siblings --
-so a sibling inserted, a rebuild and the saved document's read-back keep it."""
+so a sibling inserted, a rebuild and a reader of the saved document keep it."""
 
 from __future__ import annotations
 
@@ -76,15 +76,15 @@ class TokenTest(unittest.TestCase):
 
     def test_a_translation_rounds_as_a_step_file_states_it(self) -> None:
         """A STEP file states a real to twelve decimals, or thirteen significant digits from
-        a thousand up, and a reader reads back exactly the number stated (``step_reals``): a
+        a thousand up, and a reader returns exactly the number stated (``step_reals``): a
         translation within a stated digit of a rounding boundary rounds as stated, so the
         token a reader mints from the file is the result's by construction."""
-        from cadgen._internal.step_reals import written_real
+        from cadgen._internal.step_reals import stated_real
 
         candidates = (1234.0 + (n + 0.5) * TRANSLATION_QUANTUM - 3e-10 for n in range(1000))
         stated = next(value for value in candidates
-                      if round(value / TRANSLATION_QUANTUM) != round(written_real(value) / TRANSLATION_QUANTUM))
-        self.assertEqual(rounded_placement(_moved(stated)), rounded_placement(_moved(written_real(stated))))
+                      if round(value / TRANSLATION_QUANTUM) != round(stated_real(value) / TRANSLATION_QUANTUM))
+        self.assertEqual(rounded_placement(_moved(stated)), rounded_placement(_moved(stated_real(stated))))
         self.assertEqual(rounded_placement(_moved(1.0 + TRANSLATION_QUANTUM / 10)), rounded_placement(_moved(1.0)))
 
     def test_tokens_are_assigned_from_the_tree_and_a_sibling_inserted_moves_none(self) -> None:
@@ -168,14 +168,14 @@ class BuiltTreeTokensTest(unittest.TestCase):
 
         from cadgen._internal import tree_tokens
         from cadgen._internal.component_package import canonical_json_bytes
-        from cadgen._internal.step_reals import written_real
+        from cadgen._internal.step_reals import stated_real
         from cadgen.store.build import build_tree_from_compound
         from cadgen.store.objects import put_object, read_verified_object
         from cadgen.store.trees import get_tree
 
         candidates = (1234.0 + (n + 0.5) * TRANSLATION_QUANTUM - 3e-10 for n in range(1000))
         stated = next(value for value in candidates
-                      if round(value / TRANSLATION_QUANTUM) != round(written_real(value) / TRANSLATION_QUANTUM))
+                      if round(value / TRANSLATION_QUANTUM) != round(stated_real(value) / TRANSLATION_QUANTUM))
         base, pin = Box(2, 2, 2), Pos(stated, 0, 0) * Box(1, 1, 1)
         base.label, pin.label = "base", "pin"
         tree_hash = build_tree_from_compound(Compound(children=[base, pin], label="fixture"), root_name="fixture")[0]
@@ -230,10 +230,10 @@ class BuiltTreeTokensTest(unittest.TestCase):
         built = flatten(build_tree_from_compound(model, root_name="fixture")[0])
         step = self.root / "fixture.step"
         export_step(model, str(step))
-        read_back = flatten(build_tree_from_compound(import_step(str(step)), root_name="fixture")[0])
+        read = flatten(build_tree_from_compound(import_step(str(step)), root_name="fixture")[0])
         self.assertEqual({row["name"]: row["id"] for row in built["occurrences"]},
-                         {row["name"]: row["id"] for row in read_back["occurrences"]})
-        self.assertEqual(built["assembly"]["root"]["id"], read_back["assembly"]["root"]["id"])
+                         {row["name"]: row["id"] for row in read["occurrences"]})
+        self.assertEqual(built["assembly"]["root"]["id"], read["assembly"]["root"]["id"])
 
 
 if __name__ == "__main__":

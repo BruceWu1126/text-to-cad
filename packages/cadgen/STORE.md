@@ -934,7 +934,7 @@ A real one (`link_robot`: a base, two placements of `link_arm`, one of
   written in the listed folder, and each folder there one was written into,
   recorded per listing, so every re-hash -- gate clause 2, `cadgen store why`,
   the publish rule, the annotation refresh -- leaves out the same names. They
-  are never its inputs, as a file it reads back is not: the listing is taken
+  are never its inputs, as a file it wrote itself is not: the listing is taken
   when the body returns, before a first build publishes them, and a rebuild
   lists the previous run's. So a model that lists its own folder is current
   after its first build. A sibling model's outputs stay in, since a body may

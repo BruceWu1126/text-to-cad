@@ -407,7 +407,7 @@ class TwoSidesLaw(unittest.TestCase):
         """The two stills show one scene: averaged over 4 x 4 pixel blocks they agree to
         within 2 of 255 on every block and channel. Beside its source the document draws
         the parts its build derived from the bodies it held; alone, the parts derived from
-        those bodies read back from the file -- one part each (README law 20) whose
+        those bodies as read from the file -- one part each (README law 20) whose
         triangles are cut another way, which moves a pixel or two along an edge (measured:
         four pixels of 43,200, a block mean by 0.1). A pose not taken, a frame not played or
         a focus not framed moves whole blocks by eighty and more."""
@@ -420,7 +420,7 @@ class TwoSidesLaw(unittest.TestCase):
         animation (the sidecar's keyframes, byte for byte), and each mesh the same geometry
         within the display tolerance. The meshes' bytes may differ: beside its source the
         document draws the parts its build derived from the bodies it held; alone, the parts
-        derived from those bodies read back from the file -- one part each (README law 20),
+        derived from those bodies as read from the file -- one part each (README law 20),
         meshed from other bytes (law 5: compared by geometry, never by file hash)."""
         from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
@@ -452,8 +452,8 @@ class TwoSidesLaw(unittest.TestCase):
         has to come back what the same commands produced beside the source: the
         stills the same picture, the GLB the same scene with each mesh the same
         geometry (beside its source the document draws the parts its build
-        derived from the bodies it held, alone the parts derived from the file's
-        read-back of them: one part each, README law 20, other mesh bytes).
+        derived from the bodies it held, alone the parts derived from those bodies
+        as the file holds them: one part each, README law 20, other mesh bytes).
         """
         reference = self._render_and_export("robot.step", cwd=self.root, cache=None)
 

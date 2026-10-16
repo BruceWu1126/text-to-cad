@@ -4,7 +4,7 @@ OCCT's writer prints a real within ``[0.1, 1000)`` in magnitude with twelve deci
 cuts the text at fifteen characters (sign included), and any other real with thirteen
 significant digits in exponent form; trailing zeros are dropped, and zero of either sign is
 written ``0.``. A reader returns the nearest double to that text. Printing what was read
-prints the same text again, so a number read back from a file reads back as itself.
+prints the same text again, so a number a reader takes from a file is stated as itself.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ def written_text(value: float) -> str:
     return mantissa.rstrip("0") + "E" + exponent
 
 
-def written_real(value: float) -> float:
+def stated_real(value: float) -> float:
     """The number a STEP reader returns for ``value`` after cadgen's writer printed it
     (:func:`written_text`): the nearest double to that text. ValueError for a real that is
     not finite."""
