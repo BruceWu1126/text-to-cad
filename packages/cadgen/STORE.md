@@ -291,7 +291,7 @@ that construction key, the component's lineage object, its intrinsic face
 colours and the producer (the kernel its display data is derived under). The
 body a build holds and the same body read back from the STEP it wrote --
 different bytes -- are therefore one part, the saved document's leaf taking the
-component it was written from (§3), and a build's preview names the saved
+component it was written from wherever the file verifies as it (§3), and a build's preview names the saved
 document's parts (§9b). A construction the memo cannot key (an argument it
 cannot hash) has no construction key, and neither has a shape no construction
 of the run made (a child's decoded result, a file read): such a component's
@@ -492,7 +492,8 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   while the build saves its STEP -- in transient mode a worker process of the
   build's own pool -- and the build waits for it before it publishes its saved
   file and record, then asks for any part of the saved document's tree the
-  result did not have (a body the STEP did not read back as it was written).
+  result did not have (a leaf the STEP did not verify as the body it was
+  written from: none, as a rule).
   Every other build job (`_internal/generation.py`: a no-op build that reuses
   its tree, a compile of an imported STEP, a re-emit) asks for the parts of
   the tree a view of its output reads -- the saved document's, a mesh-only
@@ -629,21 +630,39 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   path as a cold import, from the hierarchy, names, colors and geometry in the
   STEP bytes. Only this tree is entered in `index/document`.
 
-  **The saved document takes the source side's names.** Its identity is not
-  measured: the authored-to-written correspondence (below) pairs each of the
-  document's leaves with the authored leaf that was written there, and a leaf
-  whose bytes read back as the body it was written from takes that body's
-  component -- its BREP, construction key and lineage -- so the document names
-  its parts and elements as the result does. "Read back as" is a check of the
-  read-back, not an identity: the same face colours, the same number of faces,
-  and each face's tight box within half the display chord tolerance of the
-  written one's (`store.build._same_body`), remembered per pair of components
-  in `index/bounds` (§2), so a parent writing the same body again finds the
-  verdict its child's save reached. A leaf that fails it -- the STEP
-  translation changed the body -- keeps its parse, a component of its own
-  with no construction key, whose part the build has derived like any other
-  (above). A document compiled from its bytes alone, with no build to pair it
-  with, names its elements by their geometric tokens.
+  **What a file shows is the result where it verifies, and its own content
+  where it does not.** The saved document's identity is not measured: the
+  authored-to-written correspondence (below) pairs each of the document's
+  leaves with the authored leaf that was written there, and a leaf that
+  verifies as the body it was written from takes that body's component -- its
+  BREP, construction key and lineage, and the authored occurrence's colour
+  where the file put it on the faces instead -- so the document names its
+  parts and elements as the result does. Verifying is a check of the
+  read-back, not an identity: drawn in the same colours (the same face
+  colours, or every face in the colour of a placement that had none, which
+  is how a reader returns a placement's colour), and the same body face by
+  face and edge by edge -- as many of each, each tight box within the display
+  chord tolerance of its counterpart's, in order or as a set
+  (`store.build._same_body`) -- remembered per pair of components in
+  `index/bounds` (§2), so a parent writing the same body again finds the
+  verdict its child's save reached. OCCT's STEP translation is not lossless (a
+  trimmed body can read back as its complement, with as many faces and the
+  same overall box): a leaf that does not verify is the file's own content, a
+  component of its own with no construction key, its elements named by their
+  geometric tokens, whose part the build derives like any other (above), and
+  the build warns, naming each such leaf. A document compiled from its bytes
+  alone, with no build to pair it with, names its elements by their geometric
+  tokens.
+
+  **Names are in the store, not yet in the file.** The lineage names a saved
+  document's elements by are the store's: the build that wrote the file put
+  its document tree there, and every reader with that store finds it by the
+  file's hash. A store that never held that build -- another machine, an
+  emptied cache, a document tree lost to damage -- compiles the file as it
+  compiles any foreign file, and its elements go by their geometric tokens: a
+  ref by name resolves only where the store of the build that wrote the file
+  is (or once the model is built again), and says so elsewhere; a ref by token
+  resolves in either (the fallback matcher, §2).
 
   Raw-document compilation does not discover neighboring model sources. It
   passes the parsed scene directly to this canonical builder, whose fixed edge
@@ -2212,7 +2231,7 @@ part, and it draws them as they are named, labelled as a preview of the build
 in progress -- the picture is on screen before the STEP is written, read back
 and published -- then replaces them in place with the saved file when the
 catalog names it, keeping every component whose part the two share, which is
-all of them when every body read back as it was written (§3). What the sidecar
+all of them when every leaf verifies as the body it was written from (§3). What the sidecar
 will carry travels with the preview too, as its **annotations**: the build
 resolves the model's declarations against the result tree as soon as it exists
 -- the mates into the articulation a page plays, `materials=` into finishes on

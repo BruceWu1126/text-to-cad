@@ -473,7 +473,11 @@ question with another's name.
   ref in that form against a body named by lineage, remembered by content
   either way. A geometric name tolerates what a byte name cannot and must not
   pretend to exactness; nothing that decides whether a model is current or
-  whether bytes were written reads one (laws 2, 5).
+  whether bytes were written reads one (laws 2, 5). Names live in the store of
+  the build that wrote a file, not yet in the file: read with a store that
+  never held that build, a saved file is a file read like any other, named by
+  its geometry, so a ref by name resolves where that store is and a ref by
+  token everywhere (`STORE.md` §3).
 - **Provenance is the run's trace, on the code side only.** Which line of
   which file ran a feature is a build's knowledge about its code, and lives
   where that knowledge belongs: in a per-model entry beside the record,
@@ -491,8 +495,10 @@ release, and `GEOMETRIC_TOKEN_SCHEME` is the only version on a geometric
 token; a fix to what is derived from a name bumps that layer's version.
 *Pressure-test*: build a model and read back the STEP it wrote: each saved
 leaf's component is the one the build held -- the same construction key, the
-same lineage -- wherever the STEP reads it back as that body, so its part is
-the build's and every face name resolves alike in both. Then change a
+same lineage -- wherever the STEP verifies as that body, face by face, so its
+part is the build's and every face name resolves alike in both; a leaf the
+translation changed is the file's own, named by its geometry, and the build
+says so. Then change a
 dimension and rebuild: every face the change left in place keeps its name.
 Then insert a new sibling before an occurrence and rebuild: every token and
 name the untouched occurrences had is unchanged. Throughout, nothing outside

@@ -221,6 +221,13 @@ class StepScene:
             tokens = self._element_tokens(occurrence)[_PLURAL[kind]]
             if parsed.element in tokens:
                 return Selection(self, oid, kind, tokens.index(parsed.element) + 1)
+        elif (self._loaded.prototype_identity.get(occurrence._node.prototype_key) or (None, None))[1] is None:
+            # Names live in the store of the build that wrote the file, not in the file: read
+            # with another store, its elements are named by their geometry.
+            raise ValueError(
+                f"unknown {kind} reference: {ref!r}: the {_PLURAL[kind]} of {oid} are named by their geometry here, "
+                "since no build this store holds wrote these bytes; a name resolves with the store of the build "
+                "that wrote the file, or after building its model again")
         raise ValueError(f"unknown {kind} reference: {ref!r} ({len(names)} {_PLURAL[kind]} in {oid})")
 
     def _element_names(self, occurrence) -> dict:

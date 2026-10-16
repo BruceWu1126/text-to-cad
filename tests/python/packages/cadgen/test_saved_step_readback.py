@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -605,9 +606,11 @@ class SavedStepReadbackTest(unittest.TestCase):
             step_hash, tree_hash = sys.argv[2:4]
             saved_bytes = step.read_bytes()
             cases = []
-            # A damaged document is compiled again from its bytes: the build's tree, whose
-            # components are the ones it wrote the file from, gives way to the file's own,
-            # and a second damage, to its own objects, compiles that tree again, whole.
+            # A damaged document is compiled again from its bytes, and a second damage, to what
+            # that compile wrote, compiles it again, whole. The file carries no names yet -- the
+            # store of the build that wrote it does -- so what is compiled is the file's own tree,
+            # its parts named by their geometry, not the build's: a ref by name resolves again
+            # once the model is built (ReadBackVerificationTest, the names-in-store test).
             compiled, original = None, {}
             for kind in ("tree", "brep"):
                 current = tree_for_document_hash(step_hash)
@@ -678,6 +681,103 @@ class SavedStepReadbackTest(unittest.TestCase):
             "repaired": ["tree", "brep", "unreadable-brep"],
             "forced": True, "codeIndexReadsForbidden": True,
         })
+
+
+class ReadBackVerificationTest(unittest.TestCase):
+    """A saved leaf is its result only where the file verifies as it, face by face and
+    edge by edge within the display tolerance, and drawn in the same colours; a leaf
+    that does not is the file's own content, and the build warns, naming it."""
+
+    def setUp(self):
+        scratch = generated_cad_directory(prefix="readback-verify-")
+        self.addCleanup(scratch.cleanup)
+        self.root = Path(scratch.name)
+        environment = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store")})
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def build(self, shape, name):
+        from cadgen.store.build import build_tree_through_step
+        from cadgen.store.trees import get_tree
+
+        logger = mock.Mock()
+        logger.timed.side_effect = lambda _label: contextlib.nullcontext()
+        tree_hash, tree, stats, _step_hash = build_tree_through_step(
+            shape, self.root / f"{name}.step", root_name=name, logger=logger)
+        warnings = [str(call.args[0]) for call in logger.warning.call_args_list]
+        return tree, get_tree(stats["documentTree"]), stats, warnings
+
+    def test_a_body_the_file_trims_otherwise_is_the_files_own_and_the_build_warns(self):
+        """An ellipsoid cap fused with two side boxes: OCCT reads the cap back as its
+        complement, with as many faces and the body's box unchanged -- only the cap's
+        own box tells (PR #370's lossy translations)."""
+        from build123d import Box, Matrix, Pos, Rot, Sphere
+
+        sphere = Rot(90, 0, 0) * Rot(0, 0, -90) * Sphere(1)
+        ellipsoid = sphere.transform_geometry(Matrix([[2.7, 0, 0, 0], [0, 2.7, 0, 0], [0, 0, 1.4, 0], [0, 0, 0, 1]]))
+        cap = (Pos(0, 0, 5.4) * ellipsoid) - (Pos(0, 0, 4.15 - 10) * Box(30, 30, 20))
+        body = cap + Pos(-5, 0, 5) * Box(1, 6, 10) + Pos(5, 0, 5) * Box(1, 6, 10)
+        body.label = "capped"
+        tree, document, stats, warnings = self.build(body, "capped")
+        [written] = document["occurrences"]
+        self.assertNotIn(written["component"], tree["components"], "the leaf took a component the file is not")
+        self.assertNotIn("lineage", document["components"][written["component"]])
+        self.assertEqual([written["name"]], stats["documentDiffers"])
+        self.assertTrue(any("capped" in warning and "differ" in warning for warning in warnings), warnings)
+
+    def test_a_name_resolves_with_the_store_of_the_build_that_wrote_the_file(self):
+        """Names live in the store of the build that wrote a file, not yet in the file: a
+        token copied from a read with another store finds its face by geometry where the
+        names are, and a name read with another store, where faces go by their geometry,
+        says why it does not resolve."""
+        import re
+
+        from build123d import Solid
+
+        from cadgen import read_scene
+        from cadgen._internal import kernel_memo
+        from cadgen.store.build import build_tree_through_step
+        from cadgen.store.records import note_document_tree
+
+        def block():
+            return Solid.make_box(4, 3, 2).cut(Solid.make_cylinder(0.5, 9))
+
+        self.addCleanup(kernel_memo.clear)
+        with kernel_memo.run(Path(__file__)) as run:
+            body = block()
+        body.label = "block"
+        _tree_hash, _tree, stats, step_hash = build_tree_through_step(
+            body, self.root / "block.step", root_name="block", namer=run.identify)
+        note_document_tree(step_hash, stats["documentTree"])  # what a model's build records for its file
+        named = read_scene(self.root / "block.step")
+        [leaf] = named.leaves()
+        refs = [face.ref for face in leaf.entities("face")]
+        bore = next(ref for ref in refs if "/f:block.make_cylinder1." in ref)
+        self.assertEqual(named.resolve(bore).ref, bore)
+        with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "another-store"), "CADGEN_DAEMON": "0"}):
+            elsewhere = read_scene(self.root / "block.step")
+            [other] = elsewhere.leaves()
+            tokens = [face.ref for face in other.entities("face")]
+            with self.assertRaisesRegex(ValueError, "named by their geometry here"):
+                elsewhere.resolve(bore)
+        self.assertTrue(all(re.fullmatch(r"#o:[0-9a-f]{12}/f:[0-9a-f]{12}", token) for token in tokens), tokens)
+        self.assertEqual(sorted(named.resolve(token).ref for token in tokens), sorted(refs))
+
+    def test_a_placements_colour_read_back_on_its_faces_is_the_result(self):
+        """A coloured compound's colour comes back on each of its faces: drawn alike, the
+        leaf is the result's, coloured as the result's occurrence is."""
+        from build123d import Box, Compound, Pos
+
+        panel = Compound(obj=[Box(4, 4, 1), Pos(6, 0, 0) * Box(4, 4, 1)])
+        panel.label = "panel"
+        panel.color = (0.2, 0.3, 0.4, 1.0)
+        tree, document, stats, warnings = self.build(Compound(children=[panel, Pos(0, 9, 0) * Box(2, 2, 2)]), "panels")
+        source = {occurrence["name"]: occurrence for occurrence in tree["occurrences"]}
+        written = {occurrence["name"]: occurrence for occurrence in document["occurrences"]}
+        self.assertEqual(written["panel"]["component"], source["panel"]["component"])
+        self.assertEqual(written["panel"]["color"], source["panel"]["color"])
+        self.assertEqual([], stats["documentDiffers"])
+        self.assertFalse([warning for warning in warnings if "differ" in warning], warnings)
 
 
 class NativePlacementValidationTest(unittest.TestCase):

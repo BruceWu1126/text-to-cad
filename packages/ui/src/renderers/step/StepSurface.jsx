@@ -826,8 +826,10 @@ function StepSurfaceBody({ view, data }) {
     const previous = selectedEntryBuildSnapshotRef.current;
     const sameEntry = previous.fileRef === fileRef;
     const stepChanged = sameEntry && !!previous.stepHash && !!stepHash && previous.stepHash !== stepHash;
-    // A preview replaced by its own save clears nothing: its refs are the same (STORE.md 9b). Any
-    // other change of tree -- a preview taking the saved file's place included -- is a new revision.
+    // A preview replaced by its own save clears nothing: its refs are the same (STORE.md 9b), but on a
+    // part the file does not verify as the result's, which the saved file names by its geometry (the
+    // build warned of it, STORE.md 3), so a ref on such a part resolves no more. Any other change of
+    // tree -- a preview taking the saved file's place included -- is a new revision.
     const savedPreview = stepChanged && previous.preview && previewRevision.saved === stepHash;
 
     if (stepChanged && !savedPreview) {

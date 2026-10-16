@@ -34,6 +34,7 @@ returned as private publication data, never inserted into that tree.
 
 from __future__ import annotations
 
+import bisect
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -281,40 +282,43 @@ class _Authored:
     """What a written leaf can take from the source side: the component of the one
     authored occurrence it was written from, as the source result holds it --
     ``prepared`` where this build prepared it (its bytes, its decoded shape, its
-    lineage), else the store holds it (a child's)."""
+    lineage), else the store holds it (a child's) -- and that occurrence's colour."""
 
     cid: str
     entry: dict[str, Any]
     prepared: dict[str, Any] | None = None
-    _decoded: Any = field(default=None, repr=False)
+    color: list[float] | None = None
+    # The component's decode, one for every occurrence of it: ``[shape or None]``.
+    _decoded: list = field(default_factory=lambda: [None], repr=False)
 
     def shape(self) -> Any:
         """The component's unlocated ``TopoDS_Shape``: the one the build holds, else
         decoded from the store, once."""
         held = (self.prepared or {}).get("shape")
         if held is None:
-            if self._decoded is None:
+            if self._decoded[0] is None:
                 from cadgen._internal.component_package import decode_geometry_component
 
-                self._decoded = decode_geometry_component(
+                self._decoded[0] = decode_geometry_component(
                     self.entry, read_verified_object(self.entry["brep"]), native=True)
-            held = self._decoded
+            held = self._decoded[0]
         return getattr(held, "wrapped", held)
 
 
 def _reads_back_as(authored: _Authored, codec: str, brep: str, face_colors: Any, shape: Callable[[], Any], *,
                    force: bool = False) -> bool:
     """Whether a written leaf -- the component ``codec``/``brep`` its read-back gives it,
-    with ``face_colors`` by ordinal, ``shape()`` its unlocated shape -- is ``authored``:
-    the same face colours, and the same body within tolerance (:func:`_same_body`).
+    with ``face_colors`` by ordinal, ``shape()`` its unlocated shape -- verifies as
+    ``authored``: drawn in the same colours (:func:`_drawn_alike`), and the same body
+    face by face and edge by edge within the display tolerance (:func:`_same_body`).
     OCCT's STEP translation is not lossless (a trimmed body can read back as its
     complement, a placement's colour as colours of its faces), and a leaf that does not
-    read back as its authored component keeps what the file holds. The body's verdict
-    is a pure function of the two bodies' bytes, remembered by them
-    (``store.bounds.cached_agreement``); a forced build measures it again. An authored
-    component the store no longer holds proves nothing, and the leaf keeps the file's."""
+    verify is what the file holds. The body's verdict is a pure function of the two
+    bodies' bytes, remembered by them (``store.bounds.cached_agreement``); a forced build
+    measures it again. An authored component the store no longer holds proves nothing,
+    and the leaf is the file's."""
     entry = authored.entry
-    if not _same_colors(face_colors, entry["faceColors"]):
+    if not _drawn_alike(face_colors, entry["faceColors"], authored.color, shape):
         return False
     if (entry["codec"], entry["brep"]) == (codec, brep):
         return True
@@ -336,47 +340,119 @@ def _reads_back_as(authored: _Authored, codec: str, brep: str, face_colors: Any,
 def _same_colors(read: Any, written: Any) -> bool:
     """Whether face colours ``read`` back from a STEP are the ``written`` ones: the same
     faces, each colour to the single precision a STEP reader keeps of it."""
+    from cadgen._internal.component_package import _normalized_face_colors
+
+    read, written = _normalized_face_colors(read), _normalized_face_colors(written)
+    return read.keys() == written.keys() and all(_same_color(read[ordinal], written[ordinal]) for ordinal in read)
+
+
+def _same_color(a: Any, b: Any) -> bool:
     import math
+
+    return len(a) == len(b) and all(math.isclose(x, y, rel_tol=0.0, abs_tol=1e-6) for x, y in zip(a, b))
+
+
+def _drawn_alike(read: Any, written: Any, color: Any, shape: Callable[[], Any]) -> bool:
+    """Whether a leaf read back with face colours ``read`` draws as the authored one,
+    written with face colours ``written`` and placed in ``color``: the same face colours,
+    or -- a placement's colour comes back as the colour of each of its faces -- every
+    face of the read-back (``shape()``) in the colour of a placement that had none."""
+    if _same_colors(read, written):
+        return True
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp
+    from OCP.TopTools import TopTools_IndexedMapOfShape
 
     from cadgen._internal.component_package import _normalized_face_colors
 
     read, written = _normalized_face_colors(read), _normalized_face_colors(written)
-    return read.keys() == written.keys() and all(
-        math.isclose(a, b, rel_tol=0.0, abs_tol=1e-6) for ordinal in read for a, b in zip(read[ordinal], written[ordinal]))
+    if written or color is None or not read:
+        return False
+    faces = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(shape(), TopAbs_FACE, faces)
+    return len(read) == faces.Extent() and all(_same_color(rgba, color) for rgba in read.values())
 
 
 def _same_body(authored: Any, written: Any) -> bool:
-    """Whether the unlocated ``written`` body is ``authored`` within tolerance: the same
-    number of faces, and tight boxes that agree to half the display chord tolerance of
-    the larger one's diagonal, so the two draw alike."""
+    """Whether the unlocated ``written`` body is ``authored`` within the display tolerance,
+    face by face and edge by edge: as many of each, and each one's tight box within the
+    display chord tolerance of the larger body's diagonal of its counterpart's -- in
+    order, else as a whole set, since a reader need not list them in the order they
+    were written -- so the two draw alike. A face a translation trimmed to its
+    complement has another box though the body's is unchanged."""
     import math
 
-    from OCP.TopAbs import TopAbs_FACE
-    from OCP.TopExp import TopExp
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
     from OCP.TopLoc import TopLoc_Location
-    from OCP.TopTools import TopTools_IndexedMapOfShape
 
-    from cadgen._internal.component_package import optimal_box
     from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
-    def faces(shape: Any) -> int:
-        found = TopTools_IndexedMapOfShape()
-        TopExp.MapShapes_s(shape, TopAbs_FACE, found)
-        return found.Extent()
-
     bodies = [body.Located(TopLoc_Location()) for body in (authored, written)]
-    if faces(bodies[0]) != faces(bodies[1]):
+    elements = []
+    for kind in (TopAbs_FACE, TopAbs_EDGE):
+        boxes = [_element_boxes(body, kind) for body in bodies]
+        if len(boxes[0]) != len(boxes[1]):
+            return False
+        elements.append(boxes)
+    diagonals = []
+    for side in (0, 1):
+        found = [box for boxes in elements for box in boxes[side] if box is not None]
+        if found:
+            low = [min(box[axis] for box in found) for axis in range(3)]
+            high = [max(box[axis + 3] for box in found) for axis in range(3)]
+            diagonals.append(math.dist(low, high))
+    tolerance = DISPLAY_TESSELLATION["chordTolerance"] * max(diagonals, default=0.0)
+    return all(_same_boxes(*boxes, tolerance) for boxes in elements)
+
+
+def _element_boxes(shape: Any, kind: Any) -> list[tuple[float, ...] | None]:
+    """The tight box of each of ``shape``'s elements of ``kind``, in ``TopExp`` order;
+    None for one that bounds nothing (a degenerate edge)."""
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+    from OCP.TopExp import TopExp
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+
+    mapped = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(shape, kind, mapped)
+    boxes: list[tuple[float, ...] | None] = []
+    for ordinal in range(1, mapped.Extent() + 1):
+        box = Bnd_Box()
+        try:
+            BRepBndLib.AddOptimal_s(mapped.FindKey(ordinal), box, False, False)
+        except Exception:  # noqa: BLE001 - an element the kernel cannot bound is matched as one that bounds nothing
+            box = Bnd_Box()
+        boxes.append(None if box.IsVoid() else tuple(float(value) for value in box.Get()))
+    return boxes
+
+
+def _same_boxes(authored: list, written: list, tolerance: float) -> bool:
+    """Whether two lists of boxes are one another's within ``tolerance``, in order or as sets."""
+    def close(a: Any, b: Any) -> bool:
+        if a is None or b is None:
+            return a is None and b is None
+        return all(abs(x - y) <= tolerance for x, y in zip(a, b))
+
+    if all(close(a, b) for a, b in zip(authored, written)):
+        return True
+    if sum(box is None for box in authored) != sum(box is None for box in written):
         return False
-    boxes = [optimal_box(body) for body in bodies]
-    if boxes[0] is None or boxes[1] is None:
-        return boxes[0] is None and boxes[1] is None
-    tolerance = DISPLAY_TESSELLATION["chordTolerance"] / 2 * max(math.dist(box[:3], box[3:]) for box in boxes)
-    return all(abs(a - b) <= tolerance for a, b in zip(*boxes))
+    pending = sorted(box for box in written if box is not None)
+    taken = [False] * len(pending)
+    for box in sorted(box for box in authored if box is not None):
+        start = bisect.bisect_left(pending, (box[0] - tolerance,))
+        match = next((index for index in range(start, len(pending))
+                      if pending[index][0] > box[0] + tolerance or (not taken[index] and close(box, pending[index]))),
+                     None)
+        if match is None or taken[match] or not close(box, pending[match]):
+            return False
+        taken[match] = True
+    return True
 
 
 def _attach_components(
     walk: _Walk, scene: Any, *, progress: Any, force: bool = False,
-    authored: Mapping[str, _Authored] | None = None,
+    authored: Mapping[str, _Authored] | None = None, differs: list[str] | None = None,
 ) -> Callable[[], Any]:
     """Give each leaf of a document walk its component, and return how to place
     them as the document places them: the shape an unmeasured document's bounds are
@@ -385,9 +461,11 @@ def _attach_components(
 
     A leaf ``authored`` names -- by its token, as a build's read-back maps one
     written leaf to the one authored occurrence it was written from -- takes that
-    authored component, its bytes, construction key and lineage, when the leaf reads
-    back as it (:func:`_reads_back_as`): the saved document then draws and names it
-    as the build's preview did. Every other leaf takes its parsed prototype, named as
+    authored component, its bytes, construction key and lineage, and the authored
+    occurrence's colour where the file put it on the faces instead, when the leaf
+    verifies as it (:func:`_reads_back_as`): the saved document then draws and names
+    it as the build's preview did. One that does not verify is what the file holds,
+    and its name goes on ``differs``. Every other leaf takes its parsed prototype, named as
     the stored component a scene read from a tree says it was
     (``prototype_identity``), whose exact encoded bytes are not decoded again when
     they are already published under the same native entry
@@ -420,9 +498,14 @@ def _attach_components(
         raw_colors = scene.prototype_face_colors.get(key)
         face_colors = _normalized_face_colors(_face_colors_by_ordinal(prototype, raw_colors) if raw_colors else None)
         candidate = authored.get(str(occurrence["id"]))
-        if candidate is not None and _reads_back_as(candidate, "bintools-v4", digest, face_colors, lambda: prototype,
-                                                    force=force):
+        verified = candidate is not None and _reads_back_as(
+            candidate, "bintools-v4", digest, face_colors, lambda: prototype, force=force)
+        if candidate is not None and not verified and differs is not None:
+            differs.append(str(occurrence["name"]))
+        if verified:
             placed.append(lambda shape=candidate.shape, location=node.location: _located_shape(shape(), location))
+            if candidate.color is not None and "color" not in occurrence:
+                occurrence["color"] = list(candidate.color)
             cid = candidate.cid
             if cid not in walk.components:
                 meta = {name: value for name, value in candidate.entry.items() if name != "color"}
@@ -462,19 +545,21 @@ def _attach_components(
 def _publish_document_scene(
     scene: Any, *, force: bool, progress: Any, repair_objects: bool = False,
     correspond: Callable[[dict[str, list[str]], dict[str, str]], Mapping[str, _Authored]] | None = None,
+    differs: list[str] | None = None,
 ) -> tuple[str, dict[str, Any], dict[str, Any], dict[str, list[str]], dict[str, str]]:
     """Publish a parsed scene's canonical tree: its structure, and each leaf's
     component. A build's read-back passes ``correspond``, which joins the parse's
     structure (its leaves and nodes by the parser's paths) to the authored result
-    and answers each leaf's authored component (:func:`_attach_components`); a cold
-    compile passes none, and every leaf is the parse's own."""
+    and answers each leaf's authored component (:func:`_attach_components`, which names
+    on ``differs`` each leaf that does not verify as its own); a cold compile passes
+    none, and every leaf is the parse's own."""
     from cadgen._internal.glb_topology import (
         STEP_EDGE_DEFAULT_RENDER_VISIBILITY_CLASSES, step_edge_capabilities,
     )
 
     walk, occurrence_map, node_map = _document_walk(scene)
     authored = correspond(occurrence_map, node_map) if correspond is not None else None
-    placed = _attach_components(walk, scene, progress=progress, force=force, authored=authored)
+    placed = _attach_components(walk, scene, progress=progress, force=force, authored=authored, differs=differs)
     digest, tree, stats = _publish_tree(
         walk, bbox_shape=None, root_name=walk.root["name"], force=force, progress=progress,
         extra={"capabilities": step_edge_capabilities(),
@@ -1134,16 +1219,17 @@ def _authored_leaves(descriptor: dict[str, Any], occurrence_map: dict[str, list[
     eager-only one, whose bytes do not stand for its geometry, have none: their leaves
     keep what the parse reads."""
     components = descriptor.get("components") or {}
-    by_cid: dict[str, _Authored] = {}
+    decoded: dict[str, list] = {}
     found: dict[str, _Authored] = {}
     for occurrence in descriptor.get("occurrences") or []:
         leaves = occurrence_map.get(str(occurrence["id"])) or []
         cid = str(occurrence.get("component") or "")
         entry = components.get(cid)
         if len(leaves) == 1 and isinstance(entry, dict) and entry.get("kind") == "native":
-            if cid not in by_cid:
-                by_cid[cid] = _Authored(cid, entry, prepared.get(cid))
-            found[leaves[0]] = by_cid[cid]
+            color = occurrence.get("color")
+            found[leaves[0]] = _Authored(cid, entry, prepared.get(cid),
+                                         [float(value) for value in color] if color is not None else None,
+                                         decoded.setdefault(cid, [None]))
     return found
 
 
@@ -1151,12 +1237,13 @@ class _AnotherBuilds(RuntimeError):
     """A reused document tree holds another build's components for the same bytes."""
 
 
-def _check_reused_document(readback: Any, authored: Mapping[str, _Authored]) -> None:
+def _check_reused_document(readback: Any, authored: Mapping[str, _Authored], differs: list[str] | None = None) -> None:
     """Raise unless the reused document tree ``readback`` captured (an indexed or
     composed read-back) gives each leaf the component a parse of the same bytes would
     (:func:`_attach_components`): its authored component, or, for a leaf that does not
-    read back as that, what the file holds. A reused tree another build published --
-    the same bytes from components named otherwise -- is the parse's to replace."""
+    verify as that, what the file holds, its name going on ``differs``. A reused tree
+    another build published -- the same bytes from components named otherwise -- is the
+    parse's to replace."""
     tree, objects = readback.tree(), dict(readback.objects)
     for occurrence in tree["occurrences"]:
         candidate = authored.get(str(occurrence["id"]))
@@ -1172,6 +1259,8 @@ def _check_reused_document(readback: Any, authored: Mapping[str, _Authored]) -> 
 
         if _reads_back_as(candidate, str(entry["codec"]), str(entry["brep"]), entry["faceColors"], reused):
             raise _AnotherBuilds(f"leaf {occurrence['id']} ({occurrence.get('name')}) holds another build's component")
+        if differs is not None:
+            differs.append(str(occurrence.get("name")))
 
 
 def _reread_component(
@@ -1557,6 +1646,7 @@ def build_tree_through_step(
                         "written with per-face colours the STEP does not carry back"
                     )
         joined: dict[str, Any] = {}
+        differs: list[str] = []
 
         def correspond(leaves: dict[str, list[str]], nodes: dict[str, str]) -> dict[str, _Authored]:
             joined["maps"] = _document_correspondence(
@@ -1571,7 +1661,7 @@ def build_tree_through_step(
                 # decoded from it. Public mutable scenes never acquire authority
                 # to reuse a tree through an attribute, digest, or document index.
                 parsed_leaves, parsed_nodes = readback.canonical_maps()
-                _check_reused_document(readback, correspond(parsed_leaves, parsed_nodes))
+                _check_reused_document(readback, correspond(parsed_leaves, parsed_nodes), differs)
                 # Keep the snapshot until correspondence succeeds. Restore exact
                 # bytes if GC/damage raced the read, without re-encoding native
                 # shapes (a decode/encode need not be a byte fixed point).
@@ -1579,10 +1669,11 @@ def build_tree_through_step(
             else:
                 document_hash, _document_tree, _document_stats, parsed_leaves, parsed_nodes = _publish_document_scene(
                     scene, force=force or damaged_document, progress=progress, repair_objects=True,
-                    correspond=correspond,
+                    correspond=correspond, differs=differs,
                 )
             occurrence_map, appearance, node_map = joined["maps"]
-        return document_hash, parsed_leaves, parsed_nodes, occurrence_map, appearance, node_map, joined["authored"]
+        return (document_hash, parsed_leaves, parsed_nodes, occurrence_map, appearance, node_map, joined["authored"],
+                sorted(differs))
 
     if readback is not None and readback.tree_hash is not None:
         try:
@@ -1603,7 +1694,13 @@ def build_tree_through_step(
             published = canonical_document(None, scene)
     else:
         published = canonical_document(readback, scene)
-    document_hash, parsed_leaves, parsed_nodes, occurrence_map, appearance, node_map, authored = published
+    document_hash, parsed_leaves, parsed_nodes, occurrence_map, appearance, node_map, authored, differs = published
+    if differs and logger is not None:
+        # What a file shows is its content: a leaf that does not verify as the result it
+        # was written from is the file's, named by its geometry.
+        logger.warning(f"{step_path.name}: {len(differs)} part(s) read back from the file differently from what "
+                       f"the build made, so the saved file shows and names them as the file holds them: "
+                       f"{', '.join(differs)}")
     if readback is not None and readback.tree_hash is not None and _verify_readback_requested():
         with timed(f"tree: verify reused document against a parse of {step_path.name}"):
             _verify_reused_readback(
@@ -1612,6 +1709,7 @@ def build_tree_through_step(
             )
     stats["documentTree"] = document_hash
     stats["documentReadback"] = document_readback
+    stats["documentDiffers"] = differs
     stats["documentAppearance"] = appearance
     stats["documentOccurrenceMap"] = occurrence_map
     stats["documentNodeMap"] = node_map

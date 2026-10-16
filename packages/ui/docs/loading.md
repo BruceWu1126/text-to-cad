@@ -194,7 +194,9 @@ build began over, which the feed does not call superseded -- and it replaces the
 preview in place with nothing fetched twice (the parts are the preview's, by key; a
 routine is keyed by its keyframes, so a playing one is neither stopped nor rewound),
 the label goes, and nothing on screen moves: no selection, measurement, ink or pose
-is cleared by a preview replaced by its own save, since its refs are the same, where
+is cleared by a preview replaced by its own save, since its refs are the same -- but on a
+part the file does not verify as the result's, which the saved file names by its geometry
+and the build warns of (STORE.md §3) -- where
 any other change of tree clears what a revision clears today. A preview is never
 presented as the file: no sidecar binds to it, the prompt resource and the live state
 keep the saved file's revision (and say `preview`), snapshots and exports read the
