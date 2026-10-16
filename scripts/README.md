@@ -198,12 +198,17 @@ Run by hand when the brand changes; ordinary builds use the committed files. See
 [the brand recipe](brand/README.md).
 
 `bench/` — manual edit, warm-build and viewer performance commands
-([benchmark usage](bench/cadgen-performance/README.md)), and the mesh
+([benchmark usage](bench/cadgen-performance/README.md)), the mesh
 scoreboard ([`bench/mesh-scoreboard/`](bench/mesh-scoreboard/README.md)): every
 solid of a STEP corpus scored on the properties a display mesh must have and on
-cost, the table a mesher change opens its pull request with. Reports and
-profiler captures are local output under `tmp/`, never committed here. The
-drivers are manual; their `*.test.mjs` helper units run in `test-js.sh`.
+cost, the table a mesher change opens its pull request with; and the 0.8.0
+migration's measurements ([`bench/README.md`](bench/README.md)):
+`compare_commits.py` (cold builds and the moonwatch edit loop between two
+commits, interleaved, each in its own worktree) and `corpus_verify.py` (the
+sample corpus built one model at a time into a fresh store, then every
+exported STEP verified). Reports and profiler captures are local output under
+`tmp/`, never committed here. The drivers are manual; their `*.test.mjs` helper
+units run in `test-js.sh`.
 
 ## CI
 
