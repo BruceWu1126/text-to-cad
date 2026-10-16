@@ -147,7 +147,7 @@ it('a DXF has no panels of its own, no tools, no Display and no preview', async 
   expect(pane.querySelectorAll('[data-tool-panel]')).toHaveLength(0);
   const inPane = within(pane);
   expect(inPane.queryByRole('group', { name: 'Interaction tools' })).toBeNull();
-  for (const name of ['Orbit', 'Draw', 'Select', 'Measure', 'Position', 'Animate', 'Preview',
+  for (const name of ['Orbit', 'Draw', 'Select', 'Measure', 'Position', 'Animation', 'Preview',
     'Switch to 2D view', 'Switch to 3D view', 'Display', 'Display settings', 'Zoom in', 'Zoom out', 'Reset Zoom', 'Zoom to fit', 'Zoom controls']) {
     expect(inPane.queryByRole('button', { name }), name).toBeNull();
   }
@@ -184,7 +184,7 @@ it('host commands a flat drawing cannot answer are declined in words', async () 
   await expect(controller.clearSelection()).rejects.toThrow(/never has a selection to clear/);
   await expect(controller.setCamera({ position: [0, 0, 1], target: [0, 0, 0], up: [0, 1, 0] })).rejects.toThrow(/no camera to pose/);
   await expect(controller.setRenderMode(true)).rejects.toThrow(/no Display settings/);
-  await expect(controller.setDisplaySettings({ edges: { enabled: false } })).rejects.toThrow(/no Display settings/);
+  await expect(controller.setDisplaySettings({ modes: { solid: { edges: { enabled: false } } } })).rejects.toThrow(/no Display settings/);
 
   // What it CAN do: report itself, fit again, and hand over a PNG. No zoom command, no zoom readout.
   const state = controller.readState();

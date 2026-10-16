@@ -39,62 +39,46 @@ resolution, Playwright routing, and writing returned outputs to disk.
 
 `normalizeViewSettings(display)` is the strict public schema shared with the
 snapshot CLI. It preserves omitted groups and inherited appearance, defaulting
-only `mode` to `solid`. The presets, in order, are `solid`, `render`, `xray`,
+only `mode` to `solid`. The modes, in order, are `solid`, `render`, `xray`,
 `hidden-line`, and `wireframe`. Legacy public display fields are rejected.
 
-Every preset has the same independent groups:
+Each mode has its own sparse settings under `modes`; appearance, camera, clip and exploded
+are shared:
 
 ```js
 {
   mode: "render",
-  appearance: "light", // omit to inherit the viewer; CLI defaults to light
-  camera: { projection: "perspective", focalLength: 50 },
-  surfaces: { style: "shaded", colorMode: "original", opacity: 1 },
-  edges: { enabled: false, visibility: "visible", color: "#253443" },
-  lighting: { quality: "final", exposure: 0, rotation: 0, size: 1, fill: 0.25 },
-  background: { color: "#ffffff", opacity: 1 },
-  floor: { placement: "lowest", color: "#e7e7e5", opacity: 0.6 },
-  grid: { enabled: false, color: "#cbd5e1", opacity: 0.16 },
-  axes: { enabled: false, color: "#6b7280", opacity: 0.28 }
+  camera: { projection: "orthographic", focalLength: 50 },
+  modes: {
+    solid: { parts: { colorMode: "single", color: "#abcdef" }, grid: { enabled: true } },
+    render: { lighting: { exposure: 0.5 }, floor: { finish: "glossy" } },
+    xray: { opacity: 0.3 }
+  }
 }
 ```
 
-Omission inherits the selected preset. A present group merges its partial
-fields and enables the group unless `enabled: false` is explicit. Thus
-`{mode: "solid", floor: {color: "#ffffff"}}` adds a floor under neutral CAD
-lighting. Disabling lighting retains neutral CAD lights and the small authored
-material reflection hemisphere from `inspectEnvironment.js`; it does not make
-the model black. Disabling background restores the natural workbench canvas.
-Disabling floor, grid, axes or edges removes that effect. Disabling surfaces
-restores authored, lit surfaces at full view opacity; `surfaces.style: "off"`
-explicitly removes visible surfaces. Camera disable restores orthographic/50mm.
+Solid owns parts, flat shading, edges, grid and axes. Render owns parts, lighting,
+background and floor. X-ray owns parts, opacity, edge colour, grid and axes.
+Hidden line and Wireframe own edge colour, grid and axes. Fields outside a mode's
+list fail validation. The modes and their settings are explicit injected capability
+lists; unsupported saved values are ignored at resolve time without rewriting storage.
 
-`resolveViewSettings(display, {appearance, lightingQuality})` expands all groups. Solid defaults
-to shaded original colors, visible edges, neutral lighting, grid and axes.
-Render defaults to perspective, no edges, photographic lighting, opaque
-background and the translucent floor; the other presets are orthographic.
-X-ray uses 0.22 surface opacity with all edges. Hidden line uses depth-only
-surfaces with visible edges. Wireframe turns surfaces off and draws all edges.
-Every group remains independently editable in every preset. Surface styles are
-`shaded`, `flat`, `hidden` (depth only) and `off`; color modes are `original`,
-`single` and `by-part`, with `color` and an optional `colors` palette.
+`resolveViewSettings` returns the established renderer groups. Solid is shaded with
+visible edges, or flat when enabled. X-ray uses 0.22 surface opacity and all edges;
+Hidden line uses depth-only surfaces and visible edges; Wireframe has no fill and all
+edges. Render resolves perspective, no edges and the photographic studio; other modes
+use the shared camera, orthographic by default. Grid and axes default off independently.
+A group's toggle retains its appearance values for re-enabling.
 
-`viewSettingsAreCustom()` compares effective settings with the selected preset.
-`resetViewSettings()` clears all View overrides, including `clip`/`exploded`,
-keeping only the selected mode. Preset selection separately preserves the tools.
-Tools never make a preset Custom. Appearance inherits
-until explicitly supplied. Surface opacity multiplies authored source opacity;
-color modes change presentation without mutating authored materials.
+`resolveViewModeSettings` resolves one mode for its menu; `viewModeChanged` compares it
+with defaults. `resetViewMode` removes only that mode's overrides. Selecting a mode
+keeps every mode's settings and all shared fields. There is no Custom state or migration
+of saved legacy shapes. Surface opacity multiplies authored opacity; colours remain
+presentation settings, never model material edits.
 
 Clip keeps coordinates below its plane by default (`invert: false`); Flip keeps
-coordinates above it. Its offset remains measured from the bounds minimum to
-maximum regardless of Flip. The neutral boundary is therefore offset 1 normally,
-or offset 0 when flipped. Interactive viewers and snapshots share this policy;
-orbiting the camera never changes the clipped half. Clip coordinates use original
-model bounds in both snapshot and interactive paths; posing or exploding the
-model cannot silently change the plane represented by a slider/input value. A
-snapshot cuts and caps with the viewer's own sync (`syncRuntimeStepClipPlane`,
-its plane measured against `restBounds`) on a renderer with local clipping on.
+coordinates above it. `clip.at` is the plane's coordinate on its axis in millimetres;
+omitting it cuts through the middle of the authored bounds. A disabled clip cuts nothing.
 
 `resolveViewSceneSettings({display, camera, appearance, quality})` is the public
 Viewer/snapshot scene-policy boundary. Its `view` is the full grouped state;
@@ -120,15 +104,14 @@ Background opacity follows the ordinary alpha convention: 0 is transparent and
 The floor is independent of background alpha. Render's stands at the model's
 lowest point (`placement: "lowest"`, `RENDER_FLOOR_PLACEMENT`, the Render recipe's
 backdrop default too), following the current model minimum without moving geometry
-or lighting; `placement: "origin"` keeps it at authored Z=0, and a floor turned on
-in another preset starts there. Its double-sided plane uses one transparency pass,
+or lighting; `placement: "origin"` keeps it at authored Z=0. Its double-sided plane uses one transparency pass,
 keeping geometry below the origin visible. Depth fitting includes the actual floor elevation;
 orthographic views can use a signed near plane when the floor crosses the eye.
 
 Lighting quality is `preview` or `final`, mapping to standard/high scene policy.
 The viewer passes `lightingQuality: "preview"`; the CLI baseline is `final`.
-That environment default also feeds Custom comparison and does not pin a saved
-override. An explicit `lighting.quality` wins in either context.
+That environment default also feeds per-mode default comparison and does not pin a saved
+override. An explicit `modes.render.lighting.quality` wins in either context.
 Final uses the bounded L3 mesh rung, a 0.25px viewport target, 4096px spotlight
 shadows, a 512px procedural environment and 2x snapshot capture. Technical
 `quality.tessellation` and `output.renderScale` remain explicit overrides.
@@ -323,7 +306,7 @@ Accepted input fields:
 - `stepParameterUrl` or `resolved.stepParameterUrl`: model sidecar
   (`.step.json`) URL, whose `kinematics` section is compiled here.
 - `quality.tessellation`: explicit STEP tolerances in every preset. When
-  omitted, enabled `display.lighting.quality` selects the bounded preview/final
+  omitted, enabled `display.modes.render.lighting.quality` selects the bounded preview/final
   mesh rung.
 
 STEP-only options are rejected for non-STEP sources. The old shared `params`
@@ -575,7 +558,7 @@ import {
 `renderJobContext(meshData, job)` resolves the shared scene contract plus
 snapshot-owned output policy: display, camera, quality, scene scale, outputs,
 STEP topology edge visibility, and warnings. Studio scene quality comes from enabled
-`display.lighting.quality`; `job.quality` contains technical tessellation only. A
+`display.modes.render.lighting.quality`; `job.quality` contains technical tessellation only. A
 family scene passes `{ bounds }` for `meshData`; its job's kind resolves the view
 features, and anything but a STEP gets the viewer's `EDGELESS_VIEW_FEATURES` (no edges,
 clip or explode).

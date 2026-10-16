@@ -93,12 +93,12 @@ it('a rebuild keeps the named pose chosen while the joints and named poses are t
   expect(chosen()).toEqual(['', { swing: 0 }]);
 });
 
-it('an update that leaves the routine as it was neither stops nor rewinds it, and keeps the pose it set aside; a changed routine is compiled again, at rest', async () => {
+it('an update that leaves the routine as it was neither stops nor rewinds it, a changed routine is compiled again, at rest', async () => {
   const { result, rerender } = mount(saved(1, { routine: 'swing-1' }));
   await loaded(result, 1);
   await waitFor(() => expect(result.current.animationControls.clips).toHaveLength(1));
   act(() => result.current.onParameterChange('swing', 30));
-  // Play takes the pose: Position's values are set aside, and the routine plays from rest.
+  // Using a routine returns Position to its default; nothing is kept to restore.
   act(() => result.current.onPlayToggle());
   expect([result.current.animationState.playing, result.current.parameterValues]).toEqual([true, { swing: 0 }]);
 
@@ -107,9 +107,9 @@ it('an update that leaves the routine as it was neither stops nor rewinds it, an
   expect(compiled.loads).toBe(1);
   expect(result.current.animationState).toMatchObject({ activeClipId: 'swing', enabled: true, playing: true });
   expect(result.current.animationControls.clips).toHaveLength(1);
-  // Leaving preview hands the pose back as Position left it, across the update.
+  // Releasing the routine keeps the default pose across the update.
   act(() => result.current.releaseAnimation());
-  expect(result.current.parameterValues).toEqual({ swing: 30 });
+  expect(result.current.parameterValues).toEqual({ swing: 0 });
 
   // A routine the save changed is compiled again, and is at rest.
   act(() => result.current.onPlayToggle());

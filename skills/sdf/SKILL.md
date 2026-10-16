@@ -138,14 +138,17 @@ viewer's own scene, so it shows what the viewer shows, and a link mesh that cann
 fails it rather than leaving the link out. Robots are authored in metres and are framed on the
 robot scene scale automatically.
 
-A normal snapshot uses the Solid preset and Light appearance; omitted groups inherit preset defaults.
-Pass `--display render` for the shared photographic scene. Inline display JSON and
-JSON files use grouped settings such as `lighting`, `background`, and `floor`;
-`appearance` is `light` (default) or `dark`. Projection and focal length belong
-in `display.camera`. Top-level `--camera` and `--joint-values` remain active in every display
-mode. The display modes are `solid` and `render`: `edges`, `clip`, `exploded`, the
-`xray`, `hidden-line` and `wireframe` modes and the `hidden`/`off` surface styles
-describe a STEP model's CAD edges, parts and solids, and are refused by name here.
+A normal snapshot uses Solid mode and Light appearance; omitted settings inherit
+mode defaults. Pass `--display render` for the shared photographic scene. Inline
+display JSON and JSON files store per-mode settings under `modes`, for example
+`{"mode":"render","modes":{"render":{"floor":{"enabled":false}}}}`.
+Render offers `parts`, `lighting`, `background` and `floor`; Solid offers `parts`,
+`flat`, `grid` and `axes`. `appearance` is `light` (default) or `dark`.
+Projection and focal length belong in `display.camera`; Render uses perspective.
+Top-level `--camera` and `--joint-values` remain active in every display mode.
+The supported modes are `solid` and `render`: `edges`, `clip`, `exploded`, and
+`xray`, `hidden-line` and `wireframe` describe a STEP model's CAD edges, parts
+and solids, and are refused by name here.
 
 Link meshes are resolved relative to the description, so they must be present: an
 unhydrated Git LFS pointer fails as "No link mesh loaded for robot". Run

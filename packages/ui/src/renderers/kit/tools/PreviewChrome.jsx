@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { ToolbarTooltipScope } from "@text-to-cad/ui/primitives/toolbar-button";
 import { cn } from "@text-to-cad/ui/utils";
-import { NAVBAR_CONTROLS_CLASS, NAVBAR_ROW_CLASS } from "../../../lib/navbarRow.js";
+import { FLOATING_CHROME_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
+import { VIEWPORT_INSET_PX } from "../shell/viewportLayout.js";
 
 export const PREVIEW_CHROME_IDLE_MS = 1000;
 // A browser test on a slow software renderer stretches the idle (`window.__cadPreviewChromeIdleMs`)
@@ -12,9 +13,9 @@ const NO_MENUS = Object.freeze([]);
 /**
  * The viewer's chrome around preview mode. `children` — the tool strip and its stack, Quick Edit,
  * everything a person edits with — is hidden and inert while `active`. Preview is fullscreen: the
- * navbar steps aside with the view's controls in it, and the view holds its own at its top-right
- * (`corner`: Orbit, Display and the way out), transparent over the model, on a row of the navbar's
- * own geometry: Display lands where it sat in the navbar, and the way out where Preview did. The
+ * navbar steps aside, and the tool strip with it, and preview's own row takes the strip's place at
+ * the view's top centre (`corner`: Orbit, Display and the way out), on the strip's surface: Display
+ * is a tile of it as it was of the strip, and the way out where Preview was, at its end. The
  * corner and the `playbar` under the model share one idle deadline and a 150ms fade: movement over
  * `surface` wakes them, and hovering them (`data-preview-hover-hold`) or an open menu keeps them up.
  *
@@ -80,8 +81,9 @@ export default function PreviewChrome({ active, surface, corner = null, playbar,
       data-visible={shown} inert={!shown}
       className="pointer-events-none absolute inset-0 z-30 transition-opacity duration-150"
       style={{ opacity: shown ? 1 : 0 }}>
-      {active && corner ? <div className={cn(NAVBAR_ROW_CLASS, "absolute inset-x-0 top-0 justify-end border-transparent")}>
-        <div data-preview-hover-hold="" data-preview-corner="" className={cn(NAVBAR_CONTROLS_CLASS, "pointer-events-auto")}>
+      {active && corner ? <div className="absolute left-1/2 -translate-x-1/2" style={{ top: VIEWPORT_INSET_PX }}>
+        <div data-preview-hover-hold="" data-preview-corner=""
+          className={cn("pointer-events-auto inline-flex min-h-8 items-center gap-1 rounded-md p-1", FLOATING_CHROME_SURFACE_CLASS)}>
           {typeof corner === "function" ? corner(menu) : corner}
         </div>
       </div> : null}

@@ -1,10 +1,12 @@
-import { normalizeViewSettings, resetViewSettings, VIEW_GROUP_KEYS } from "@text-to-cad/core/common/viewSettings.js";
+import { normalizeViewSettings, resetViewMode } from "@text-to-cad/core/common/viewSettings.js";
 import { resolveViewSceneSettings } from "@text-to-cad/core/common/sceneSettings.js";
-import { mergeViewerDisplaySettings, viewerDisplaySettingsForMode } from "./viewerDisplaySettings.js";
+import { mergeViewerDisplaySettings } from "./viewerDisplaySettings.js";
 import { shareSettingsValue } from "./shareSettingsValue.js";
 
 // One per mounted file. UI actions, agent commands and session restoration all
 // write here. Resolved defaults are outputs, never written back as new edits.
+// Every mode keeps its own settings: choosing a mode shows them, editing one mode's
+// (the one on screen or another) leaves the rest alone, and Reset takes one mode's away.
 export function createViewSettingsStore(initial = {}, defaults = {}) {
   let context = defaults;
   let snapshot;
@@ -27,15 +29,10 @@ export function createViewSettingsStore(initial = {}, defaults = {}) {
     // Partial: the appearance and the file's capabilities are configured by different owners.
     configure(defaults) { context = { ...context, ...defaults }; return commit(snapshot.display); },
     restore: commit,
+    /** Merges a patch in the display's own shape: the mode, what modes share, any mode's settings. */
     patch: patch => commit(mergeViewerDisplaySettings(snapshot.display, patch)),
-    selectPreset: mode => commit(viewerDisplaySettingsForMode(snapshot.display, mode)),
-    reset: () => commit(resetViewSettings(snapshot.display)),
-    setEnabled(group, enabled) {
-      if (!["clip", "exploded", ...VIEW_GROUP_KEYS].includes(group)) throw new Error(`Unknown view group: ${group}`);
-      if (snapshot.scene.view[group].enabled === enabled) return snapshot;
-      // A gate replaces its group rather than merging edits. Reopening any
-      // feature (including Clip) starts from defaults, never its old values.
-      return commit({ ...snapshot.display, [group]: { enabled } });
-    }
+    selectMode: mode => commit(mergeViewerDisplaySettings(snapshot.display, { mode })),
+    patchMode: (mode, patch) => commit(mergeViewerDisplaySettings(snapshot.display, { modes: { [mode]: patch } })),
+    resetMode: mode => commit(resetViewMode(snapshot.display, mode))
   };
 }

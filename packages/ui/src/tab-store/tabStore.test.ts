@@ -11,7 +11,7 @@ test('the record normalizes: every setting to its bounds, the files to well-keye
   expect(TAB_RECORD_VERSION).toBe(2);
   expect(readTabRecord(undefined)).toEqual(defaultTabRecord());
   expect(defaultTabRecord()).toEqual({ version: 2, settings: {
-    toolStack: { panels: {}, collapsed: {}, closed: {} }, appearance: 'system', library: { layout: 'grid' },
+    toolStack: { panels: {}, collapsed: {} }, appearance: 'system', library: { layout: 'grid' },
   }, files: {} });
   // A record of the version before (a file tree's width, views under a root) is the defaults.
   for (const raw of [null, 'x', [], { version: 1, settings: { appearance: 'dark', fileTree: { width: 300 } } }, { version: 3, settings: { appearance: 'dark' } }]) {
@@ -23,7 +23,7 @@ test('the record normalizes: every setting to its bounds, the files to well-keye
     orbit: { speed: 99 }, playback: { autoplay: true }, appearance: 'cinematic', library: { layout: 'shelf' },
   }, files: { [tabFileKey('/models/a.step', 'step')]: view(1), '["root","b.step","step"]': view(2), 'junk': view(3), [tabFileKey('/models/c.step', 'step')]: 'not a view' } });
   expect(record.settings).toEqual({
-    toolStack: { panels: { tree: { width: 164 } }, collapsed: { tree: true }, closed: { tree: true } }, appearance: 'system', library: { layout: 'grid' },
+    toolStack: { panels: { tree: { width: 164 } }, collapsed: { tree: true } }, appearance: 'system', library: { layout: 'grid' },
   });
   expect(readTabRecord({ version: 2, settings: { library: { layout: 'list' } }, files: {} }).settings.library).toEqual({ layout: 'list' });
   expect(Object.keys(record.files)).toEqual([tabFileKey('/models/a.step', 'step')]);
@@ -98,9 +98,9 @@ test('the preferences a renderer reads are the settings: patched by key, normali
   preferences.update({ appearance: 'dark' });
   preferences.update({ toolStack: { panels: { tree: { width: 240, height: 12 } }, collapsed: { sdf: false } } as never });
   expect(preferences.getSnapshot().appearance).toBe('dark');
-  expect(preferences.getSnapshot().toolStack).toEqual({ panels: { tree: { width: 240, height: 64 } }, collapsed: { sdf: false }, closed: {} });
-  preferences.update({ toolStack: { panels: {}, collapsed: {}, closed: {} } });
-  expect(preferences.getSnapshot().toolStack).toEqual({ panels: {}, collapsed: {}, closed: {} });
+  expect(preferences.getSnapshot().toolStack).toEqual({ panels: { tree: { width: 240, height: 64 } }, collapsed: { sdf: false } });
+  preferences.update({ toolStack: { panels: {}, collapsed: {} } });
+  expect(preferences.getSnapshot().toolStack).toEqual({ panels: {}, collapsed: {} });
   expect(preferences.getSnapshot()).toBe(store.getSnapshot().settings);
 });
 

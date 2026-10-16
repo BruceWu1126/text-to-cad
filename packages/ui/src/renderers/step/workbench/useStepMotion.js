@@ -56,9 +56,10 @@ export function stepMotionSources(entry) {
  *
  * @param {{ entry: object, fileKey: string, resources: object, meshData: object | null, meshPartial: boolean,
  *   readStored: () => { pose: object | null }, clipboard: object,
- *   reportError: (message: string) => void }} options
+ *   reportError: (message: string) => void,
+ *   host?: { previewing(): boolean, onUse(motion: "position" | "animation"): void } }} options
  */
-export function useStepMotion({ entry, fileKey, resources, meshData, meshPartial, readStored, clipboard, reportError }) {
+export function useStepMotion({ entry, fileKey, resources, meshData, meshPartial, readStored, clipboard, reportError, host = null }) {
   const animationClock = useAnimationClockStore();
   const { resetAnimationClock, setAnimationClock } = animationClock;
   const readStoredRef = useRef(readStored);
@@ -211,6 +212,7 @@ export function useStepMotion({ entry, fileKey, resources, meshData, meshPartial
   // they were neither stops nor rewinds one that is playing, and only a changed routine is
   // compiled again, from rest. The source and the file's name are read when the key changes.
   const animationSourceRef = useRef({ sourceAnimation, entry });
+  const releaseAnimationRef = useRef(null);
   animationSourceRef.current = { sourceAnimation, entry };
   useEffect(() => {
     const { sourceAnimation, entry } = animationSourceRef.current;
@@ -222,6 +224,11 @@ export function useStepMotion({ entry, fileKey, resources, meshData, meshPartial
       setAnimationState(nextState);
       resetAnimationClock();
     };
+    // The same file's routines read again, because a rebuild changed or removed them: the model
+    // goes to rest, a kept frame with it, and the routine chosen keeps its place, with its speed
+    // and loop, for the new ones to restore against.
+    const reloading = animationLoadState.file === fileKey && animationLoadState.status === "ready";
+    if (reloading) releaseAnimationRef.current?.();
 
     if (!animationKey || !sourceAnimation) {
       setAnimationLoadState({ url: "", status: "idle", error: "", clips: null });
@@ -310,7 +317,7 @@ export function useStepMotion({ entry, fileKey, resources, meshData, meshPartial
   const commands = useStepMotionControls({
     selectedStepModuleDefinition: definition, selectedAnimationClips: clips, selectedActiveAnimationClip: activeClip,
     animationState, animationStateRef, setAnimationState, stepModuleParameterValuesRef,
-    setStepModuleParameterValues, setAppliedStepPoseName, motionRevisionRef
+    setStepModuleParameterValues, setAppliedStepPoseName, motionRevisionRef, host
   });
 
   // Embedded animation clips are checked against the compiled tree once it is
@@ -331,6 +338,7 @@ export function useStepMotion({ entry, fileKey, resources, meshData, meshPartial
       .join("\n");
   }, [clips, meshData, meshPartial]);
   const animationError = animationLoadError || validationError;
+  releaseAnimationRef.current = commands.releaseAnimation;
 
   // Copy and Paste of the Position values, as text a person can keep and paste back.
   const { applyStepModuleParameterValues } = commands;
@@ -401,6 +409,11 @@ export function useStepMotion({ entry, fileKey, resources, meshData, meshPartial
     onScrub: commands.handleAnimationScrub,
     onSpeedChange: commands.handleAnimationSpeedChange,
     onLoopToggle: commands.handleAnimationLoopToggle,
+    onRelease: commands.releaseAnimation,
+    onPutDown: commands.putDownAnimation,
+    savePlayback: commands.savePlayback,
+    resetPlayback: commands.resetPlayback,
+    restorePlayback: commands.restorePlayback,
     resetModel: commands.resetMotion,
     // The kit's playbar reads its time from the runtime it is handed, not from a context: the
     // old STEP-only bar did, which is why this object never carried one. It is the same clock
@@ -412,6 +425,7 @@ export function useStepMotion({ entry, fileKey, resources, meshData, meshPartial
     definition, loading, topologyRequired: stepModuleRequiresTopology(definition), parameterValues: stepModuleParameterValues,
     animationState, animationStateRef, animationRuntime, animationError, positionControls, animationControls,
     onParameterChange: commands.handleStepModuleParameterChange, onPlayToggle: commands.handleAnimationPlayToggle,
-    releaseAnimation: commands.releaseAnimation, restore
+    releaseAnimation: commands.releaseAnimation, putDownAnimation: commands.putDownAnimation,
+    resetMotion: commands.resetMotion, resetPosition: commands.resetPosition, restore
   };
 }

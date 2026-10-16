@@ -1,10 +1,12 @@
 # Viewer interaction and settings design system
 
-This is the binding contract for the viewer's tools, its tool stack and its
+This is the binding contract for the viewer's tools, its file sidebar and its
 settings, in both apps. Build from the shared pieces — the
 [toolbar button](../src/primitives/toolbar-button.jsx),
 [FloatingToolBar](../src/renderers/kit/tools/FloatingToolBar.js),
+[SubToolbar](../src/renderers/kit/tools/SubToolbar.jsx),
 [ToolPopover](../src/renderers/kit/tools/ToolPopover.jsx),
+[FileSidebar](../src/renderers/kit/tools/FileSidebar.jsx),
 [ToolStack](../src/renderers/kit/tools/ToolStack.jsx),
 [ToolPanel](../src/renderers/kit/tools/ToolPanel.jsx),
 [the floating surface](../src/lib/floatingSurface.js) and the
@@ -16,19 +18,19 @@ belong to apps through the [host contract](viewer-host.md).
 
 FileViewer owns the navbar — the logo's app menu ([Settings](#settings)) included, built from
 the host's `links` and the `appSettings` `CadViewer` hands it — and the file explorer (a
-popover under the file's name). RendererShell owns the scene's chrome: the toolbar, the tool
-stack under it, Quick Edit, the view cube, the view's controls it draws into the navbar (Display,
-Preview), the playbar and preview mode. Renderers supply their tools, their document state and
-their tool panels; the shell never inspects a format's parts, joints or topology. No pick or
-tool opens or closes the explorer.
+popover under the file's name). RendererShell owns the scene's chrome: the tool strip and
+the view's controls at its end (Display, Preview), the sub-toolbar of the tool in hand under
+it, the file sidebar, Quick Edit, the view cube, preview mode and its playbar. Renderers supply
+their tools, their tools' rows, their sidebar sections and their document state; the shell never
+inspects a format's parts, joints or topology. No pick or tool opens or closes the explorer.
 
 | The host (web, desktop) supplies | The shared UI decides |
 | --- | --- |
-| Where the tab record lives (`TabRecordStorage`: the web's sessionStorage, the CAD app's memory) | The record: its settings (the tool stack's layout, the appearance, the home's layout) and the view of the file on screen (its camera, Display settings, preview's Orbit and playbar settings, and renderer slices), what is written when, and what is never stored (`@text-to-cad/ui/tab-store`, `kit/shell/fileView.js`) |
-| `navigation.home`, `links` (its version, GitHub, Discord, where a new issue opens, how a link opens), `appSettings` (the person's own settings) and `displayActions` (an appearance control) | The navbar's order and look, the app menu (one menu in the viewer and on the home) and what a new issue says |
-| `host.files`, `fileActions`, `navigation`, `clipboard`, `promptContext`, `attachments` | When a copy, capture or open happens and what it carries |
+| Where the tab record lives (`TabRecordStorage`: the web's sessionStorage, the CAD app's memory) | The record: its settings (the file sidebar's and tool stack's layout, the appearance, the home's layout) and the view of the file on screen (its camera, Display settings, preview's Orbit and playbar settings, and renderer slices), what is written when, and what is never stored (`@text-to-cad/ui/tab-store`, `kit/shell/fileView.js`) |
+| `navigation.home`, `links` (its version, GitHub, Discord, where a new issue opens, how a link opens), `appSettings` (the person's own settings) and `colorSchemeControl` (its own light/dark control, where it has one) | The navbar's order and look, the app menu (one menu in the viewer and on the home) and what a new issue says |
+| `host.files`, `fileActions`, `navigation`, `clipboard`, `promptContext`, `promptFiles` | When a copy, capture or open happens and what it carries |
 | `host.environment`: color scheme, keyboard `platform`, `reducedMotion` | How the chrome honours them |
-| `onError`, for errors the viewer hands up | Preview, tooltips, keyboard scope, the tool stack, the camera |
+| `onError`, for errors the viewer hands up | Preview, tooltips, keyboard scope, the tool strip and sidebar, the camera |
 
 Hosts pass no preview, chrome-visibility or notification props; there are
 none.
@@ -56,28 +58,26 @@ none.
   with an exclamation mark, red for an error and amber for a warning, named and hinted by
   the alert's title), which brings the card back and goes with it — the renderer's one
   navbar action. Then, where the host shows the view small (inline in a conversation,
-  where the view is the whole viewer), its **Full size**, corner brackets: the diagonal
-  arrows beside it are Preview's. And last, for a 3D file, the
-  view's own controls, **Display** and **Preview** (below): last, so that preview, which
-  puts the row away, draws its own controls where they sat. A CAD file publishes no navbar
-  action but that icon; its view controls go in the box FileViewer keeps for them at the
-  row's end (`navbarSlot`). The person's own settings are never here: they are the app
-  menu's.
+  where the view is the whole viewer), its **Full size**, corner brackets (Preview's
+  diagonal arrows are the tool strip's). Last, in the page's top-right corner, the host's
+  colour scheme control (`colorSchemeControl`), where it has one: the web viewer's
+  `ViewerAppearance`, an icon button whose dropdown is System, Light and Dark; the CAD app
+  has none, since it takes its host's theme. A CAD file publishes no navbar action but that
+  icon. The person's own settings are never here: they are the app menu's.
 
-  *Design note: the navbar's right end is for the open file's buttons and actions that do
-  not belong in the toolbar.* The toolbar holds the tools: what a press on the model does,
-  and the panels of the tool stack. What acts on the whole file or the whole view instead
-  goes here — Display restyles the whole scene, whatever tool is in hand, and Preview takes
-  over the page — with what a host or the file adds. Here it covers none of the model, no
-  host overlay reaches it (a chat's composer floats over the view's bottom edge), and every
-  view with these controls has a navbar. So a new per-file button goes here, never in a group
-  floating over the view: over the cube, in a corner of the view and along its bottom edge
-  were each tried or weighed, and lost.
+  *Design note: the navbar is the host's and the file's; the view's controls are the
+  strip's.* What a host or the file adds (the update, an alert's icon, Full size) is the
+  navbar's right end. The view's own controls, **Display** and **Preview**, end the tool
+  strip after a thin rule: they act on the whole view, whatever tool is in hand, so they
+  are no tools, but they belong with the chrome over the view, and preview's own row takes
+  the strip's place with Display in it. A new per-file button that is no tool goes after
+  that rule.
 
   A host's home has no navbar: under its TEXTTOCAD wordmark and byline, its update, when there is
   one, is a row of its own (the blue button, labeled **Update**, its card centred under it), then
   GitHub (its mark, a link to the project: it is open source), Discord and X, as icon links, and,
-  where the host shows the view small, **Full size**, above its Recent Files: the models opened before,
+  where the host shows the view small, **Full size**, then the host's colour scheme control,
+  where it has one, last in that row, above its Recent Files: the models opened before,
   pinned first, as cards or rows, with Open where the host has a file chooser.
   The update shows only for a release
   later than the version the page names, whatever the host says. A file that will not open
@@ -87,11 +87,12 @@ none.
   model alone: no tools, view actions, cube or Quick Edit.
 - **File explorer** is a popover under the file's name (`FolderExplorer.jsx`), aligned to
   the name's left edge, 18rem wide and never resized, as tall as its rows up to 28rem or
-  the room below it: past that its list scrolls. It floats over the view and the tool
-  stack, so opening it resizes and moves nothing. It starts in the open file's folder and
+  the room below it: past that its list scrolls. It floats over the view and the file
+  sidebar, so opening it resizes and moves nothing. It starts in the open file's folder and
   lists one folder at a time — its subfolders, then its CAD files — in compact rows: one 24px
-  line of 12px text each, its kind a small light glyph in one column (a folder its disclosure
-  chevron, with no folder icon; a file its type's icon). A press on a subfolder opens it
+  line of 12px text each, its kind a small light glyph in one column 5px in from the row's
+  left end and 4px before the name (a folder its disclosure chevron, with no folder icon; a
+  file its type's icon), as the file sidebar's trees draw theirs. A press on a subfolder opens it
   inline, under itself, its rows 10px further in and hung from a faint line under its
   chevron, read once when it first opens; another press closes it, and Right and Left do the
   same from the keyboard. A double-click opens it in the explorer's place, as a crumb does —
@@ -100,7 +101,8 @@ none.
   farthest giving way first to the "…" (an ellipsis icon), which lists every folder above the crumbs to jump to,
   and only the folder it is in, left alone beside the "…", is cut (its name a hint while it
   is). The folder it is in reads in the foreground color, the others muted; there is no up
-  arrow, and the open file is highlighted. Opened, its filter has the keyboard, so typing
+  arrow, and the open file is highlighted, the list opening scrolled to centre its row, once (a
+  long folder's too). Opened, its filter has the keyboard, so typing
   finds a file at once; on a phone the explorer itself holds focus, keeping the keyboard
   down. "Filter files..." under the breadcrumb searches
   every file nested under the folder (the server's bounded search, debounced 150ms, each
@@ -108,316 +110,351 @@ none.
   early. Keep typing to narrow the search." Up and Down move between the filter and the
   rows on screen, the rows of a folder open inline among them. A pick opens the file and
   closes it, as do Escape and a press anywhere outside it.
-- **Toolbar** at top-left, 8px in — the gap between it and the stack under it.
-- **Tool stack** beneath the toolbar: the panels of the tool in hand and of the
-  effects a person keeps (see [The tool stack](#the-tool-stack)). The column is
-  exactly the height the stack may take: it stops 8px above the cube, so it never runs
-  under it, and while the panels fit only a panel's inner body scrolls.
-- **Quick Edit** at top-right, 8px in, a STEP file's: the box of the note a person
-  writes to their agent, there only while something is picked or drawn (see
-  [Quick Edit](#quick-edit)). The rest of the right side of the view is clear.
-- **View cube** at bottom-left, 2px from the left and 8px off the bottom so the
-  axes drawn in its lower corner never touch the edge, in a 6rem area: enlarged
-  face/edge/corner hit areas and neutral hover and XYZ guides. Preview omits it.
-- **Display and Preview** at the navbar's right end, its last two controls: for a 3D
-  file, the view's own — **Display** (the perspective box: see
-  [Display settings](#display-settings-and-section-primitives)) and **Preview** (a play
-  icon). They are the navbar's 24px icon buttons with 14px icons, 4px apart, with hints
-  below them, in the box FileViewer hands the renderer for them (`navbarSlot`,
-  `data-view-controls`). Display's dropdown opens down from its button, end-aligned, and
-  never taller than the viewer below it. A view that is not 3D has neither, and neither
-  does a view drawn as a picture, one that is loading or failed to load, or preview, which
-  has the page to itself and draws its own in their place (see
+- **Tool strip** at the top centre, 8px down, never wider than the view less 8px at each
+  side (it wraps before it would be): the tools, left to right, then a thin rule and the
+  view's controls, **Display** and **Preview** (below). 24px tiles with 14px icons, an even
+  4px apart, a tool's chevron touching its button, in a 34px row (`FloatingToolBar`,
+  `data-cad-toolbar`). A file with no tools and a 3D view has a strip of Display and Preview
+  alone; one with neither has no strip.
+- **Sub-toolbar** under the strip, 8px below it, centred: the tool in hand's one row of
+  controls (`SubToolbar`, `data-cad-sub-toolbar`), there for as long as the tool is up (see
+  [Tools and lifecycle](#tools-and-lifecycle)). Select and Measure have none.
+- **Tool stack** under the sub-toolbar, in the same centred column: a renderer's own
+  `toolPanels`, where it hands any (see
+  [The file sidebar and the tool stack](#the-file-sidebar-and-the-tool-stack)). The column
+  stops 8px above the cube's line (`VIEWPORT_STACK_BOTTOM`), so it never runs past the
+  view.
+- **File sidebar** down the left edge, 8px in from the top, left and bottom: one floating
+  bar of what there is to read of the file — a STEP assembly's Features, a robot's Links,
+  Position, an SDF's metadata — whatever tool is in hand (see
+  [The file sidebar and the tool stack](#the-file-sidebar-and-the-tool-stack)).
+- **Quick Edit** at top-right, 8px in, a STEP's or a robot's: the box of the note a
+  person writes to their agent, there only while something is picked, drawn or measured
+  (see [Quick Edit](#quick-edit)). The rest of the right side of the view is clear.
+- **View cube** at bottom-right, 2px from the right and 8px off the bottom so the axes
+  drawn in its lower corner never touch the edge (`VIEWPORT_CUBE_BOTTOM`), in a 6rem area:
+  enlarged face/edge/corner hit areas and neutral hover and XYZ guides. A host whose own
+  control floats over that corner lifts it clear with `--cad-viewport-corner-bottom`, the
+  room that control takes from the bottom edge. Preview omits it.
+- **Display and Preview** end the tool strip, after its rule, for a 3D file: **Display**
+  (the active mode's sphere: see [Display settings](#display-settings-and-section-primitives))
+  and **Preview** (two diagonal arrows, outward), the strip's tiles, hinted above them
+  (`data-view-controls`). They are no tools: pressing one leaves the tool in hand as it is.
+  Display's dropdown opens down from its button, centred, never taller than the viewer
+  below it. A view that is not 3D has none of them, and neither does a view drawn as a
+  picture, one that is loading or failed to load, or preview, whose own row stands in the
+  strip's place (see [preview](#camera-animation-and-preview)).
+- **Playbar** (preview's, for a file with routines) sits at bottom-centre, on a line 1.75rem
+  up (a host whose control floats over the view's bottom moves it with
+  `--cad-viewport-bottom-center`), and nothing else does: the tools view has no playbar,
+  and a static file has nothing at the bottom. The routines lead it at its left end, as a
+  playlist, and the routine's settings end it at its right (see
   [preview](#camera-animation-and-preview)).
-- **Playbar** (preview's, a file with routines only) sits at bottom-centre, on a
-  line 1.75rem up (a host whose control floats over the view's bottom moves it
-  with `--cad-viewport-bottom-center`), and nothing else does; a static file has
-  nothing at the bottom. The routines lead it at its left end, as a playlist, and the
-  routine's settings end it at its right (see [preview](#camera-animation-and-preview)).
-- **Model update status** sits at top-centre of the viewport, vertically centred
-  in the same 34px row as the top-left toolbar in every host.
-  It is renderer chrome: the navbar carries no status.
-  On mobile it is a tappable progress icon whose popover names what is loading.
+- **Model update status** sits under the strip and its sub-toolbar, centred, and where
+  there is no strip (preview, a compact view, a load) at the top centre, in the strip's
+  34px row, in every host. It is renderer chrome: the navbar carries no status. On mobile
+  it is a tappable progress icon whose popover names what is loading.
 
 ## Tools and lifecycle
 
-| File | Toolbar, left to right |
+| File | Tool strip, left to right |
 | --- | --- |
-| STEP | Select, Position (movable joints only), Draw, Measure, Explode (two or more parts), Clip |
-| URDF / SRDF / SDF | Select, Position (posable joints only) |
-| GLB / STL / 3MF | none |
-| DXF | none: a 2D canvas |
+| STEP | Select, Annotate, Measure, Explode (two or more parts), Clip, Animation (routines only); then Display and Preview |
+| URDF / SRDF / SDF | Select; then Display and Preview |
+| GLB / STL / 3MF | no tools: Display and Preview alone (a GLB with clips has the Animation tool up from the open, its sub-toolbar under them) |
+| DXF | none: a 2D canvas, with no strip |
 
-There is no separator or activity dot. There is no Animate tool: routines play in
-[preview](#camera-animation-and-preview). Display is not a tool: every 3D view has
-its **Display** button at the navbar's right end, before Preview (see
-[Display settings](#display-settings-and-section-primitives)). A file
-with no tools has no strip at all.
+There is no activity dot. A thin rule parts the tools from the view's controls, which
+are no tools (see [Ownership and layout](#ownership-and-layout)). Position is no tool:
+its knobs are Select's, while Select's filter picks Position, and its controls are a
+section of the [file sidebar](#the-file-sidebar-and-the-tool-stack). Routines play under
+the Animation tool and in [preview](#camera-animation-and-preview). A file with no tools
+and no 3D view has no strip at all.
 
 **A tool the file cannot offer is not on the strip**: never shown disabled.
 Renderers leave it out of the `tools` they hand over; `FloatingToolBar` draws
 what it is given. Until a file has loaded, what it offers is not known: a tool
-that depends on it (Explode, a robot's Position) is shown idle meanwhile, and
-the whole strip is disabled while loading. Unavailable and idle are different
-states.
+that depends on it (Explode) is shown idle meanwhile, a robot's filter offers
+Position meanwhile, and the whole strip is disabled while loading. Unavailable and
+idle are different states.
 
-One tool owns pointer input. A kept effect (an Explode, Clip or Measure panel)
-stays highlighted beside it; a highlighted kept effect is not a second pointer
-owner.
+One tool owns pointer input, and it alone is lit on the strip. An effect a person set —
+an explosion, a cut, a pose, a routine's paused frame — stays on the model once its tool
+is put down, with nothing on screen for it but the model. **A press on the tool in hand
+does nothing**: a tool is put down by taking up another (Select, most often). A press on
+Explode or Clip with its effect set takes it up again, as it is; unset, it starts neutral.
 
-| Tool | Pressing it | Leaving it |
-| --- | --- | --- |
-| Select | The default tool of STEP and robots; shows Features (Links) and, with a selection, the Reference panel; a STEP's Select panel above them sets the mode. A press while it is up opens its tree again where a person closed it | The selection is dropped; its panels leave the stack |
-| Draw | Draws on the view; its tools, color and history are the Drawing panel; a second press puts it down | The sketch is gone |
-| Measure | Arms picking and shows the Measure panel: its snapping modes, then its results; a press while it is up clears the results and puts it down | Unfinished picks are cancelled; completed measurements and their panel stay |
-| Explode / Clip | Opens a neutral panel; an edit applies the effect | A neutral panel goes; an applied effect and its panel stay |
-| Position | Shows joint handles and the Position panel; its icon carries a small dot while the pose is not the default | Handles and panel hide; joint values stay |
+| Tool | Pressing it | Its sub-toolbar | Leaving it |
+| --- | --- | --- | --- |
+| Select | The default tool of STEP and robots; picks what its filter ticks (Shift adds; Delete deletes annotations and measurements); what is picked is Quick Edit's chips | None: its filter is the chevron after its button | The selection stays, lit and in Quick Edit, under any tool |
+| Annotate | Draws on the view | Its tools, what is drawn next, Undo, Redo and Clear annotations | The annotations stay in the model, their chip in Quick Edit; the pen is the annotation tool again |
+| Measure | Arms picking between points on the model; each result a chip in Quick Edit, in its colour | None | Unfinished picks are cancelled; completed measurements stay, Quick Edit's chips |
+| Explode / Clip | The effect as it is set, or neutral; an edit applies it (Explode's, as a motion: see below) | The slider, its amount beside it, Reset (Clip's: its axis first, and Flip clip before Reset) | The effect stays on the model |
+| Animation | Takes the tool up and plays nothing | Routines, Play/Pause, the scrubber, Playback settings, Reset animation | The routine pauses where it is: a frame past its start stays on the model, one at its start is at rest; the Routine, Speed and Loop stay |
 
-A tree is Select's panel, so it is used under Select; a tree row's menu action
-returns to Select before it acts.
+**One motion at a time.** Every tool's state stands beside every other's — the selection,
+measurements, the annotations, Clip — except three that move the parts: **Explode**, the
+**Position** pose and a routine's **frame**. They replace each other: taking up Explode's or
+Animation's tool, or reaching for Position (a knob dragged, a control of its section
+pressed), puts the other two back at rest at once — Explode off, the pose at its default, the
+routine rewound — with nothing set aside to come back, and using one does the same (Explode's
+amount moved off zero; a joint dragged, a value set or a named pose chosen; a routine played
+or scrubbed). Put down, a motion keeps its own: an explosion, a pose or a paused frame stays
+under any other tool but the other two motions. Preview's routine is its own and moves
+nothing of the tools view's.
 
-**Every tool's panel but Select's has an X, and no fold chevron.** The X puts
-the tool down and returns to Select, the default tool, which cannot itself be put
-down. Select's tree has an X too, which closes the tree alone and leaves Select
-the tool; a press on Select while it is up opens it again (see
-[Closing the tree](#the-tool-stack)). SDF folds instead.
+A tree is the file sidebar's, on screen under every tool; a pick in it takes Select up
+before it acts.
 
-**No tool has a menu on the strip.** A press on a tool is its only action:
-it takes the tool up, and — for a tool that toggles (Draw, Measure, Explode,
-Clip) — a press while it is up puts it down. Whatever a tool can be
-set to is its panel in the stack, up while the tool is: Select's modes, Measure's
-snapping, Draw's tools, Position's joints. A tool's exclusive
-modes are never a panel or a row of their own: they are ONE small button in its
-panel's header row, just before the fold chevron or the X — a sliders icon, the
-size of those buttons (the strip's button shows the mode in hand) — whose
-dropdown lists the modes — each its glyph and its name — then any options that
-go with them (`kit/tools/ToolModeMenu.jsx`). Select's sits in the Features
-filter row, Measure's in the Measure heading. A dropdown is ordinary — under
-its own button, free to overlap the stack — and closes with no exit animation,
-so a quick second tap (touch included) always reaches its trigger. Choosing a
-value closes it; ticking an option leaves it open. Menu checks sit on the
-right. The other dropdowns over the viewport are its context menu and
-preview's menus — Orbit, and the playbar's Routines and Playback settings
-(`ToolPopover`, `PlaybackMenu.jsx`).
+**Removing an effect.** Explode's, Clip's and the Animation tool's sub-toolbars end in
+Reset ("Reset explode", "Reset clip", "Reset animation"): always there, disabled while there
+is nothing to take away, it removes the effect and leaves the tool up — Reset animation stops
+the routine and puts the model at rest. Position's way back is its Pose row's Default. A
+measurement's chip X deletes it; the Annotation chip's X clears the annotations.
 
-**Select** (STEP) has four exclusive modes, each with its own glyph: **All**
-(the pointer), **Parts** (a cube), **Faces** (a cube, its top face filled) and
-**Edges** (a faint cube, one edge heavy). They are the mode menu in the
-Features filter row, beside its X; each menu row shows its mode's glyph
-at full size. The strip's Select button shows the mode in hand as ONE composite:
-the pointer, with the mode's glyph shrunk to a badge in its top-right corner
-(cut out of the pointer so the two never touch at the strip's 14px), and the
-bare pointer for All (`data-select-mode`). One drawing of each glyph serves
-both sizes (`SelectionModes.jsx`). Parts is offered only in an assembly. The mode in
-hand is kept while the file is open, across updates of it (an update that leaves no
-assembly puts Parts back to All); another file opens in All. Under the modes,
-checkboxes — **Group edges** and **Group faces** — change how a pick grows,
-independently of the mode and of each other: Group faces applies under All
-and Faces, Group edges under All and Edges. Only the options that apply under the
-mode in hand are shown (both under All, none under Parts); a hidden one keeps
-its choice for when it applies again. Nothing under the strip names the mode. The mode sets the Features tree's shape: under **All** it
-is the person's own (put back as it was when they left All, with the owners of
-what is still selected kept open); **Parts** opens every assembly and shuts
-every part; **Faces** and **Edges** open everything down to the features whose
-faces and edges are picked. Outside All the disclosure is locked (chevrons
-shown, not pressable) and Expand/Collapse leave the row menus. Under Faces or Edges
-a part's topology is asked for as its row comes on screen in the tree, never for
-a whole large assembly at once; a viewport press on a part not yet loaded loads
-that part and picks, and the Features filter row says "Loading…" meanwhile. A large
-assembly (more than 300 rows of assemblies and parts, `LARGE_TREE_ROWS`) opens
-under Faces or Edges with its assemblies open and locked but its parts closed, each
-with a disclosure of its own and, at its right in muted text, its face or edge
-count ("412 faces", "96 edges") once that is known. A part opens by its
-disclosure, by a pick inside it (which scrolls to the picked row) or by the
-row menu's Expand and Expand all; Collapse and Collapse all close parts. A
-closed part's topology is not asked for when its row shows: opening it asks, and
-so does the pointer resting on the part in the viewport (150ms) or pressing it.
+**Select is the one tool with a menu on the strip**: the chevron right after its button
+(`ToolSettingsMenu`'s "chevron" trigger, `kit/tools/ToolModeMenu.jsx`), a small button of
+its own as tall as the tile and touching it, lit by its own hover and while its menu is
+open, never with the tool. A press on any other tool is its only action. Whatever a tool can
+be set to while it is up is its sub-toolbar. A dropdown is ordinary — under its own button,
+free to overlap the view — and closes with no exit animation, so a quick second tap (touch
+included) always reaches its trigger. Choosing a value closes it; ticking an option leaves
+it open. Menu checks sit on the right. The other dropdowns over the viewport are Display,
+the sub-toolbars' (Clip's axis, Annotate's colour, weight, line style and placement, the
+Animation tool's Routines and Playback settings), its context menu and preview's menus —
+Orbit, and the playbar's Routines and Playback settings (`ToolPopover`, `PlaybackMenu.jsx`).
 
-**Draw.** Its **Drawing** panel leads the stack while Draw is up, with no heading
-and no X: choosing another tool, or pressing Draw again, puts it down. It holds
-the tools, then a rule across the panel, then a row of Color, Stroke width (Thin,
-Medium, Bold — a shape's 1, 2 or 4px, the pen drawn to look the same weight),
-Undo, Redo and Clear; both are grids of 24px columns spread across the panel's
-width, their columns lined up, with no menu and no inset beyond the panel's own.
-Leaving Draw forgets the sketch, but not the tool, colour and weight in hand,
-which the next time opens with. An update of the model forgets it too, its history
-with it (Undo has nothing to bring back), and leaves Draw the tool, on the tool,
-colour and weight in hand. Choosing a drawing tool changes the toolbar
-icon. Undo and Redo are disabled when their history is empty. The select tool uses lucide's
-SquareMousePointer. The pencil and the shapes share one default stroke width.
-Once there is ink, the Drawing panel ends in a full-row **Copy Drawing**, which
-writes the view with its ink to the clipboard as a PNG and then says **Copied**, a
-tick where the shortcut was; the copy shortcut does the same. A sketch begun opens
-[Quick Edit](#quick-edit), whose header says **drawing** while the ink is there. Draw disables the cube without hiding it.
+**Select's filter** (`kit/tools/select/SelectFilterMenu.jsx`), as a CAD tool's selection
+filter is: the chevron's dropdown, headed "Selection filter", then **Select all** — ticked
+when every kind is, a dash (indeterminate) when some are; pressing it ticks every kind, or,
+with every kind ticked, none — then, after a rule, a checkbox per kind of thing Select picks,
+each with its glyph and each on its own. A STEP's (`SelectionModes.jsx`): **Parts** (a whole
+cube; an assembly's only — a part file's filter offers none, and a press that reaches no face
+or edge picks the whole part), **Faces** (a faint cube, its top face filled), **Edges** (a
+faint cube, one edge heavy), **Position** (where the file has joints to move: its knobs),
+**Annotations** and **Measurement**. A robot's: **Links** and **Position** (where a
+joint can be driven). Every kind is ticked when a file opens; the filter holds while the file
+is open, across updates of it, and another file starts with every kind. Ticking leaves the
+menu open, so several change in one go, and takes Select up. The chevron's name says what is
+picked ("Selection filter: everything", "Selection filter: Faces, Edges", "…: nothing").
+Select's button is the pointer, whatever the filter. After another rule, a STEP's filter ends
+in how a face or edge pick grows, each with its glyph and independent of the filter and of
+each other: **Group edges** (the connected edges with a picked edge), shown while Edges is
+ticked, and **Group faces** (the smoothly joined faces with a picked face), shown while Faces
+is; a hidden one keeps its choice for when it shows again.
 
-**Measure.** Its **Measure** panel is up as soon as it is the tool, empty: a
-heading whose mode menu, beside its X, holds the four snapping
-modes — **All**, **Points**, **Edges**, **Faces**, plain rows with no title and
-no descriptions, each the mode's glyph at full size (All: the ruler; Points: a
-dot in a ring; Edges and Faces: Select's glyphs) — and, before the first
-measurement, one hint row the height of a measurement row ("Pick two points to
-measure"). The strip's Measure button shows the mode in hand
-as Select's does: the ruler badged with the mode's glyph (`data-measure-mode`).
-Completed measurements are the panel's body, and keep the panel in the
-stack when another tool is taken up; choosing a mode there takes Measure up
-again, results and all. A press on Measure while it is up — results or none —
-or the panel's X clears them all and puts it down. Removing the last result
-leaves Measure picking, its panel empty. There is no Clear All footer.
+The geometry ticked is picked as one mode (`step/workbench/selectionFilter.js`'s
+`selectGeometryMode`): Parts with Faces or Edges, a press takes the face or edge it lands on
+where the part's topology can be picked, and the part elsewhere; Parts alone, the part;
+Faces or Edges without Parts, that topology alone. The mode sets the Features tree's shape:
+with Parts and Faces or Edges, or no geometry at all, it is the person's own (put back as it
+was when they left it, with the owners of what is still selected kept open); Parts alone
+opens every assembly and shuts every part; Faces or Edges without Parts open every assembly. A
+part is a leaf in every shape: nothing opens under it, and a face or edge picked in the
+viewport is revealed at its part's row. Outside the person's own shape the disclosure is
+locked (chevrons shown, not pressable) and Expand/Collapse leave the row menus. Under Faces
+or Edges a part's topology is asked for as its row comes on screen in the tree, never for a
+whole large assembly at once; a viewport press on a part not yet loaded loads that part and
+picks, and the Features heading says "Loading…" meanwhile. In a large assembly (more than 300
+rows of assemblies and parts, `LARGE_TREE_ROWS`) a part's row coming on screen asks for
+nothing: the pointer resting on the part in the viewport (150ms) or pressing it asks.
 
-**Measure, Explode and Clip** do not fold: their X is how a person is done
-with one (it clears the results or removes the effect, and puts the tool down).
+**Sub-toolbars** (`kit/tools/SubToolbar.jsx`): the tool in hand's controls, one row hung
+under the strip, centred, 8px below it, on the strip's surface, its buttons the strip's
+24px tiles, its groups — what the tool does, how it looks, what it can undo — parted by a
+thin rule. It stays up for as long as its tool does, and has no heading: the tool's lit
+button above names it. Explode's, Clip's and the Animation tool's are one shape — what leads
+the slider, the slider (a solid round thumb), its value right beside it and only as wide as
+its text, the tool's actions, then Reset, last, at the same spot in all three, with no rules —
+and one width (`SLIDER_SUB_TOOLBAR_CLASS`, `w-56`). The slider takes the rest of the row, so a
+button that comes and goes (Animation's Routines) shortens the slider rather than the row.
 
-**Explode and Clip** are toggles with no enabled checkbox, drawn alike: the
-amount in the heading beside the title, one row for a body — Explode's a
-slider, Clip's its axis (a compact X / Y / Z dropdown) and then its slider. Explode opens at 0%,
-Clip at no cut; an edit applies the effect and the panel is then kept. A panel
-still at its neutral value goes when another tool is chosen, or when the pointer
-is released after a drag that ended at neutral — never mid-drag. Pressing the
-tool again while its panel shows is the same as its X: the effect is removed and,
-if the tool held the pointer, Select returns. An axis alone is not an effect. The view settings
-own both effects, so a Display Reset removes their panels and a restored effect
-reappears with its panel without another press. Clip's slider, left to right,
-cuts deeper through the original bounding box; pose, animation and Explode never
-redefine the range. There is no Flip. With fewer than two parts Explode is not
-on the strip.
+**Annotate.** Its sub-toolbar, "Annotation controls", while Annotate is up
+(`annotation/toolbar.jsx`'s `AnnotationToolbar`): **Annotation tools**, a button each — Pen,
+Line, Arrow, Rectangle, Ellipse, Text (a mark put down in place) and Eraser — then a rule and
+**Annotation style**, what is drawn next, each a dropdown whose button shows its value, no
+chevron: **Color** (a grid of swatches, unnamed but for assistive technology: the neons and
+one neutral that reads against the viewer, white in dark mode and near-black in light, then
+the colour wheel, which opens the system's colour picker for any other colour, kept once the
+picker closes), **Stroke width** (Thin, Medium, Bold — a shape's 1, 2 or 4px, the pen drawn to
+look the same weight, its glyph a dot 3, 5 or 7px across) and **Line style** (Solid, Dashed,
+Dotted — a shape's line; the pen's freehand ink is always solid; its glyph a diagonal line
+drawn in the style), each a row of glyphs alone, the current one marked, and **Placement**
+(**Draw on surface**, the default, its glyph a sphere: ink carried with the part under it;
+**Draw on plane**, on a plane facing the view through the orbit point, on no part, its glyph a
+plane), its glyphs with their names; then **Annotation history** — **Undo**, **Redo** — and
+**Clear annotations** (the trash), each disabled while there is nothing for it, with no rule
+before them. In a view narrower than 32rem the seven tools and the seven after them are two
+rows, column for column, with no rule. Annotate has no Select or Pan of its own (Select picks
+annotations, a right drag or Space orbits). Never a restyle of ink already down: the
+annotations Select picks have their own bar, a small floating toolbar on the tool strip's
+surface just above them — Color, Stroke width and Line style dropdowns, Fill for a closed
+shape, a rule, Delete. An update of the model forgets the annotations too, their history with
+them (Undo has nothing to bring back), and leaves Annotate the tool, on the tool, colour,
+weight, line style and placement in hand. The pen and the shapes share one default stroke
+width. The annotations have no panel: while there are any they are Quick Edit's
+**Annotation** chip (its X clears them), and while Annotate is up the copy shortcut writes
+the view with its annotations to the clipboard as a PNG. A first stroke opens
+[Quick Edit](#quick-edit), whose header says **annotation** while there is ink. Annotate
+disables the cube without hiding it.
 
-## The tool stack
+**Animation** plays a file's routines without leaving the tools view; only a file with
+routines has it, last of the tools (its icon a plain Play). Pressing it takes the
+tool up and plays nothing: the tools view never plays by itself — Autoplay is preview's,
+applied on entering it — and a kept frame is taken up as it was, paused. Its sub-toolbar
+(`kit/tools/playbar/AnimationPanel.jsx`'s `AnimationToolbar`) is the transport: **Routines**
+(a playlist, with two or more routines), **Play** or **Pause**, the scrubber, and **Playback
+settings** (a cog: the routine's Speed, a submenu, then Loop and Autoplay) — preview's
+playbar's own menus (`RoutineMenu`, `PlaybackMenu`), opening down from the row — and **Reset
+animation**, which stops the routine and puts the model at rest, disabled while it is. The Speed and
+Loop chosen here are the file's, kept in its view; Autoplay is the file's too (preview's Speed
+and Loop are preview's own, and never these: see [preview](#camera-animation-and-preview)).
+There is no playbar under the model in the tools view. While it is up nothing on the model is
+picked or hovered; the other motions stay as they are until the routine is played or
+scrubbed, which puts the pose back to its default and Explode off
+([one motion at a time](#tools-and-lifecycle)). Preview leaves the tool's routine as it is
+and plays its own (see [preview](#camera-animation-and-preview)): leaving preview with
+Animation up finds the routine where it was, playing or paused at its time. Putting it down
+pauses the routine where it is: a frame past its start is **kept** — the model stays there
+under every other tool, which work on it as it stands (picks, hover, Measure and the annotations
+follow the parts where they are drawn) — and one at its start is at rest. The Routine, Speed
+and Loop stay for the next time. A prompt's view records a kept frame
+(`animation: {clip, time}`, the snapshot job's). An update of the model that changes its
+routines keeps Animation up and its Routine chosen (while the model still has it), at rest;
+one that leaves no routine puts it down.
 
-Under the toolbar, in one column: the shell's tool's panel (**Drawing**) while
-Draw is up; Select's **Features** (STEP; a
-robot's **Links**) and, whenever something is selected, its **Reference** (then
-a `.sdf`'s **SDF**); Position's **Position**; then the panels
-of the effects a person keeps (**Measurements**, **Explode**, **Clip**). A panel
-whose tool is not up is `hidden`, not unmounted: a tree keeps its expansion,
-filter and scroll across a trip to another tool. Preview hides the whole
-stack.
+**Measure.** It has no sub-toolbar and no menu: it measures between points on the model,
+snapping to no edge or face, and its button is the ruler. Each completed measurement
+is a chip in [Quick Edit](#quick-edit): the ruler in the measurement's own colour (the
+colour of its line on the model) and its reading; its X deletes it, resting on it lights
+its line and labels it, and its card is the full reading (the distance, the angle where
+there is one, the delta along each axis, what each end bound to). Measurements stay under
+every other tool; a press on Measure while it is up does nothing.
 
-- **Two kinds of panel.** The tree (Features, Links), the **Reference** and
-  **Position** are *resizable*: the person's to size, each on its own. The
-  Reference sits under the tree as a box of its own, sized apart from it:
-  sizing either changes nothing about the other. Every other panel — Drawing,
-  Measurements, Explode, Clip, SDF — is *fixed*: one width, its content's
-  height, and no grip. A renderer opts a panel in with `resizable`; nothing
-  else about it changes.
-- **One width.** Every panel opens at `TOOL_PANEL_WIDTH`: 164px, a strip of
-  six tools (six 24px buttons, 2px gaps, 4px padding and a 1px border),
-  whatever tools the file's own strip has — a file with three tools has the
-  same panels as one with seven. A fixed panel is exactly that wide. A
-  resizable panel is only ever made wider, up to half the viewer; widening one
-  changes nothing about any other panel. The panels hang left-aligned
-  under the strip, each at its own width. Content truncates to fit; it never
-  widens a panel.
-- **Heights.** A panel is exactly its content's height — never padded to a
-  minimum: a tree of two rows is its filter row and two rows. A resizable panel
-  has a *cap* the content grows up to and then scrolls inside: the tree and
-  Position open capped at half the stack's own height (the area under the
-  strip, not the viewer) on desktop, and at the whole column on a phone. The
-  Reference opens shorter, capped at 144px on both (`TOOL_PANEL_REFERENCE_HEIGHT`:
-  its heading, its Copy and four compact rows between them — a reference's key
-  measurements, an arc's four the most; a longer one, a robot link's facts,
-  scrolls, or a drag of its corner shows it).
-  A cap is never a floor. Setting one panel's cap changes no other's.
-- **One grip, on a resizable panel only.** A resizable panel is sized from its
-  bottom-right corner alone, by the grip Quick Edit's box has
-  (`kit/tools/ResizeGrip.jsx`, mirrored into this corner): two short diagonal
-  strokes drawn inside the panel's border, muted until the pointer is over them,
-  in a 14px hit area with a resize cursor and, for the keyboard, a focus ring. No
-  edge of a panel resizes it. A drag moves only that panel, its width (from the
-  one width to half the viewer) and its cap (from 64px to the stack's height)
-  at once. The grip is a separator in the tab order, named after its panel
-  ("Resize features", "Resize reference details"): Left/Right nudge the width
-  and Up/Down the cap by 16px, and Home and End take both to their bounds. One
-  write, when the pointer lets go (or per key), never per pointer move. A
-  folded panel has no grip: there is no height to set.
-- **Never past the viewer.** The column is the viewer's height less the 8px
-  inset above the strip, the strip, and at its foot the cube and an 8px gap above it
-  (`VIEWPORT_STACK_BOTTOM`, `calc(6rem + 16px)`: the cube's 6rem, its 8px off the bottom
-  and the gap): it never runs under the cube. When the panels need more, the tree gives way first and
-  scrolls inside itself, down to 128px or its content, whichever is less; then a
-  details panel (Reference, Position, Measurements)
-  gives way, down to 96px or its content; a small panel (Explode, Clip, Drawing)
-  keeps its height. If what cannot give way still does not fit, the column
-  itself scrolls — a panel is never cut. On mobile the tree starts closed and,
-  opened, may take the whole column, giving way as other panels join it.
-- **Closing the tree.** Select's tree (Features, Links) does not fold: the X at
-  its filter row's end ("Close features") closes it, `hidden` and kept mounted
-  with its expansion, filter, selection and scroll, and Select stays the tool —
-  a selection still shows its Reference, a panel of its own. While the tree is
-  closed, Select's button carries the flyout corner: a small filled triangle in
-  its bottom-right corner (the mode badge has the top-right), out of the
-  accessibility tree, with the button described as "Features closed". A press
-  on Select while it is the tool opens the tree again as it was, and the mark
-  goes; from another tool a press only takes Select up, the tree still closed.
-  Until a person closes or opens it, the tree starts as the file does: closed
-  for a single part, open for an assembly (and for a robot's Links), and closed
-  on a phone whatever the file — the mark showing whenever it starts closed.
-  Once the person has closed or opened it, that choice holds in every file of
-  the tab, over how each starts. A renderer opts in with `closable` on the
-  tree's panel (`ToolPanelClose` is its X) and `panel: { id, label, startsClosed }`
-  on the tool it belongs to (STEP: `startsClosed` for a single part); the frame
-  draws the mark, routes the press and starts the panel (`RendererShell.jsx`).
-- **Folding.** Only Select's SDF panel and a robot's Reference fold: every tool
-  panel and a STEP's Reference has an X alone. A folding panel folds to its first row and unfolds again,
-  by a chevron at that row's trailing end: up while open (fold), down while
-  folded (open), with `aria-expanded` and the panel's name ("Collapse sdf").
-  Folded content stays mounted.
-- **First rows.** Features and Links have no heading: the filter is their top
-  row ("Filter…"), stays put while the tree scrolls, and carries the mode menu
-  (Select's) and the X at its end — both step aside while the box has
-  focus, so the whole row is the box. Every other panel
-  has a heading row, and every heading reads alike: the Display section
-  headings' text (11px, regular, `TOOL_PANEL_HEADING_TEXT_CLASS`), 28px tall,
-  8px in — a title; a summary where there is one (Explode's and Clip's amount);
-  then, at its right
-  end, its own actions (a mode or settings menu — Measure's — or Position's
-  Reset), the chevron where it folds, and an X when there is something to remove.
-  Every small button in a heading or a filter row is 20px, 2px apart and 4px from
-  the edge, so the icons line up down the stack. The Reference's heading is the
-  reference itself, then an X that clears the selection; a kept panel's X removes
-  the effect.
-- **Footers.** A panel can end in one full-row button under its body, which
-  never scrolls (`footer`, `ToolPanelFooterButton`): the Reference's **Copy** —
-  **Copy All** with several references, every one selected — and, once there is
-  ink, Drawing's **Copy Drawing**. The button shows the copy shortcut in the
-  platform's form (a phone shows none); after a copy it says **Copied** for a
-  moment, a tick where the shortcut was.
-- **The layout is the person's.** The sizes, the folded panels and the closed
-  tree are one of the tab's settings, across its files (`CadPreferences.toolStack`:
-  `{ panels: { [panel id]: { width?, height? } }, collapsed: { [panel id]: boolean }, closed: { [panel id]: boolean } }`,
-  kept beside the appearance). `panels` holds only what a person set, by
-  resizable panel — the tree, the Reference and Position each under its own
-  id; `collapsed` only what differs from a panel's start (the SDF panel starts
-  folded); `closed` the person's own choice, once they have closed (`true`) or
-  opened (`false`) the tree, which then holds in every file over how each
-  starts (a part closed, an assembly open, a phone closed). A new tab (a cleared
-  record) puts every panel back at the one width and its default cap, and the
-  tree as each file starts it. Every size is written back once, when the pointer
+**Explode and Clip** have no enabled checkbox, and their sub-toolbars are drawn alike.
+Explode's: its slider, the amount (a percentage), **Reset explode**. Clip's: its axis — a
+borderless button reading the axis in hand, "X ⌄", whose dropdown lists X, Y and Z — its
+slider, the amount, **Flip clip** (which side of the plane is cut away, the cut keeping its
+share; disabled while nothing is cut), **Reset clip**. Explode opens at 0%, Clip at no
+cut; an edit applies the effect, and the slider back at zero removes it. An axis alone is not
+an effect. The view settings own both effects, so a mode reset preserves them and a restored
+effect reappears on the model. Clip's slider, left to right, cuts deeper through the original
+bounding box; pose, animation and Explode never redefine the range. It shows the share cut
+away, while the view stores where the plane stands (`clip.at`, in millimetres), so a model
+edit leaves the plane where it was and the slider reads 0% or 100% if the plane ends up
+outside the new box. With fewer than two parts Explode is not on the strip.
+
+## The file sidebar and the tool stack
+
+**The file sidebar** (`kit/tools/FileSidebar.jsx`) is one floating bar down the view's left
+edge, in a room 8px in from the top, the left and the bottom. It holds what there is to read
+of the file, whatever tool is in hand — the strip is for using tools, the sidebar for reading
+the file: a STEP assembly's **Features** (a part file, whose tree would be its one row, has
+none), then **Position**, where the file has joints to move; a robot's **Links**, an `.sdf`'s
+**SDF** (folded at first), then **Position**, where a joint can be driven. A file with none of
+them has no sidebar. It is read for as long as the file is open, so it has the opaque floating
+surface (`FLOATING_SURFACE_CLASS`). Preview hides it, kept mounted, so a tree keeps its
+expansion, find and scroll.
+
+- **Sections.** Each section is a `ToolPanel` drawn as one: a 24px heading row under a faint
+  rule (none above the first: the bar's edge is there), its name 12px in from the bar's edge,
+  then its body. A section is its content's height, a folded one its heading alone, and none
+  scrolls on its own: the bar is as tall as its sections, up to its cap, and past that the
+  whole bar scrolls, as one. A tree's rows are mounted as that scroll brings them into view
+  (`kit/inspector/VirtualRows.jsx`).
+- **Folding.** Sections fold only where there is more than one: one alone is its heading and
+  its body. The heading row is the fold, a press anywhere on it but on its buttons (its name is
+  the fold's button, with `aria-expanded`), and a small chevron in the padding left of the name
+  shows while the pointer is on the row or the fold has the keyboard: right while folded, down
+  while open. Which sections are folded is the person's, by id, across files.
+- **Pinned and docked heads.** The head of the section the view is in pins to the bar's top
+  until the next one pushes it off; the head of a section below the view docks at the bar's
+  bottom, over the heads after it, so every section is a press away: a press on a docked head
+  unfolds its section if it is folded and brings it to the top at once. The pinned and docked
+  heads pad the scroller, so a row scrolled into view in a section is never left under them.
+- **Find.** A tree's heading ends in a magnifier ("Find in model", "Find in links"): pressing
+  it puts the find field in the heading's place, bordered and focused, its ring while it has
+  focus, then what the heading said meanwhile (Loading…) and an X that clears and closes it
+  (`primitives/tree-filter.jsx`'s `TreeFindButton` and `TreeFilterInput`). Features' heading
+  also carries "Loading…" while a part's faces load and **Show all** while parts are hidden.
+  Every tree's find is one ranked flat search (`kit/inspector/modelTreeSearch.js`).
+- **Size.** The bar opens a tool panel's width (`TOOL_PANEL_WIDTH`, 164px) and as tall as its
+  sections, capped at all of its room. It is sized from its bottom-right corner alone, by Quick
+  Edit's grip (`kit/tools/ResizeGrip.jsx`): width and cap together, by pointer, or by keyboard
+  (a separator named "Resize file sidebar": Left/Right nudge the width and Up/Down the cap by
+  16px, Home and End take both to their bounds). Its width runs from 120px
+  (`FILE_SIDEBAR_MIN_WIDTH`: room for a heading's name and its buttons; a tree's names
+  truncate) to half the viewer, its cap from 64px to its room. One write, when the gesture
   lets go (or per key), never per pointer move.
+- **Put away.** The panel button at the right end of the first section's head ("Hide file
+  sidebar") slides the whole bar out past the viewer's left edge (200ms, none under reduced
+  motion), where nothing in it can be reached; while it is away the same button, bare ("Show
+  file sidebar"), sits in the corner it hung from, centred under the navbar's logo, and brings
+  it back. A find field up in the first section's heading keeps the button after it.
+- **The layout is the person's.** The bar's size, whether it is put away, and the folded
+  sections are one of the tab's settings, across its files (`CadPreferences.toolStack`:
+  `{ panels: { [id]: { width?, height? } }, collapsed: { [id]: boolean } }`, the bar under
+  `sidebar`, kept beside the appearance; any other key a stored record carries is dropped).
+  `panels` holds only what a person set; `collapsed` only what differs from a section's start
+  (the SDF section starts folded). A new tab (a cleared record) puts everything back at its
+  defaults.
+
+**The tool stack** (`ToolStack`) is the column under the strip and the sub-toolbar, centred
+with them, for a renderer's own `toolPanels`. STEP and the robot renderer hand none: their
+tools' controls are sub-toolbars and what there is to read of their files is the sidebar's.
+Its panels follow these rules:
+
+- **Two kinds of panel.** A `resizable` panel is the person's to size, on its own; every
+  other panel is *fixed*: one width, its content's height, and no grip.
+- **One width.** Every panel opens at `TOOL_PANEL_WIDTH`: 164px, a strip of six tools (six
+  24px buttons, 2px gaps, 4px padding and a 1px border). A fixed panel is exactly that wide; a
+  resizable one is only ever made wider, up to half the viewer. The panels hang left-aligned
+  in the column, each at its own width. Content truncates to fit; it never widens a panel.
+- **Heights.** A panel is exactly its content's height — never padded to a minimum. A
+  resizable panel has a *cap* the content grows up to and then scrolls inside: it opens capped
+  at the stack's own height (`toolPanelDefaultHeight`). A cap is never a floor.
+- **One grip, on a resizable panel only**, the sidebar's: its bottom-right corner, Quick
+  Edit's grip, moving its width and cap at once, a separator in the tab order named after its
+  panel, keyed as the sidebar's is. A folded panel has no grip: there is no height to set.
+- **Never past the viewer.** The column stops 8px above the cube's line
+  (`VIEWPORT_STACK_BOTTOM`, `calc(6rem + 16px)`). When the panels need more, a `"tree"` panel
+  gives way first, down to 128px or its content, then the `"details"` panels together, each in
+  proportion to its height, down to 96px or its content; a `"fixed"` panel keeps its height.
+  If what cannot give way still does not fit, the column itself scrolls — a panel is never cut.
+- **Headings.** A panel's heading row reads as Display's section headings do (11px, regular,
+  `TOOL_PANEL_HEADING_TEXT_CLASS`), 28px tall, 8px in: a title, a summary where there is one,
+  then at its right end its own actions, the chevron where it folds (up while open, down while
+  folded) and an X where it has something to remove. Every small button in a heading is 20px,
+  2px apart and 4px from the edge. A panel can end in one full-row button under its body,
+  which never scrolls (`footer`, `ToolPanelFooterButton`).
+
 - **Surfaces.** Two, defined once (`lib/floatingSurface.js`), with one border: the
-  toolbar and the stack's panels, which stay up beside the model, share
+  tool strip, its sub-toolbars and the stack's panels, which stay up beside the model, share
   `FLOATING_CHROME_SURFACE_CLASS` — the background at 45.5% and barely blurred
   (2px), so the model behind them is easy to make out; every menu and popover
-  over the viewport, the app menu and Display included, share
-  `FLOATING_SURFACE_CLASS` (the background at 75%, blurred), so their text never
-  competes with the model.
-- **Scrolling.** Every scroll region in the viewer's chrome — a panel's body,
-  the stack's column, the explorer, a menu, the alert card — is the
+  over the viewport, the app menu and Display included, and the file sidebar, which is read
+  as they are, share `FLOATING_SURFACE_CLASS` (the background at 75%, blurred), so their text
+  never competes with the model.
+- **Scrolling.** Every scroll region in the viewer's chrome — the file sidebar, a panel's
+  body, the stack's column, the explorer, a menu, the alert card — is the
   `ScrollArea` primitive (`primitives/scroll-area.jsx`, shadcn's): thin overlay
   bars in the theme's colours, shown while the pointer is over the region. No
   native `overflow-auto` scroller in chrome; `src/designSystem.test.js` holds it.
   The home (the model library) is a page, not chrome: it scrolls as a page does,
   with the platform's scrollbar, and only when there is more of it than fits.
-- **Nothing opens elsewhere.** A pick shows its Reference in the stack; the
-  Position tool shows its panel by being chosen. No pick or tool opens or closes
-  the explorer, on desktop or mobile.
+- **Nothing opens elsewhere.** A pick shows as Quick Edit's chips; the sidebar is on screen
+  under every tool. No pick or tool opens or closes the explorer, on desktop or mobile.
 
-Tree rows inset their backgrounds 4px from the panel edges, and the filter row
-shares that inset. A tree in the stack (Features, Links) is dense (`TreeRowSurface`'s
-`dense`): 24px rows in the panels' 11px text, 12px kind icons drawn light (Features'; Links
-has none), a 16px disclosure column with the trees' one light chevron, turned down while
-open, and the explorer's compact indent: 10px a level (`TREE_INDENT_PX`), each level's rows
-hung from a faint line under their owner's chevron (`TreeRowGuides`), as the explorer's
-are; its filter row is a heading's 28px, the box 20px tall and close to the row's walls. An assembly row's
+Tree rows inset their backgrounds 4px from the bar's edges, and the find field
+shares that inset. A tree in the file sidebar (Features, Links) is dense (`TreeRowSurface`'s
+`dense`): 24px rows in the panels' 11px text, and ONE light 12px glyph per row in one
+column, as the explorer has: a subassembly's or folded group's disclosure chevron, turned down
+while open, or a part's box (Links draws its chevrons alone), 4px before the name. The glyph
+column starts 5px in from the row's left end (`TREE_ROW_INSET_PX`), centred under the find
+field's search icon and as far in as the icons of a row's actions sit from its right end, in the
+STEP tree and the explorer alike; each level adds
+the explorer's compact indent, 10px (`TREE_INDENT_PX`), its rows hung from a faint line under
+their owner's glyph (`TreeRowGuides`), as the explorer's are; its find field stands in its heading's row. An assembly row's
 actions, shown on hover and kept while they are on, are **Isolate** then the **Hide/Reveal** eye; a part file has no
 Isolate. A Links row that draws something — a link with visuals, or one visual —
 has the eye alone, in its search hit too: a link's hides its own visuals, never its
@@ -425,13 +462,13 @@ child links, and on a partly hidden link hides the rest. They float over the row
 the name runs the row's full width and, while an action shows, fades out half a
 rem before them (a mask, `ROW_NAME_UNDER_ACTIONS`), so nothing is drawn behind the
 buttons and the row keeps its own colour.
-Model, link and explorer filters share `TreeFilterInput`; the explorer's rows are compact
+Model and link finds and the explorer's filter share `TreeFilterInput`; the explorer's rows are compact
 24px lines, as the trees' are, but in 12px text.
 
 **Mobile** is below 720px of FileViewer width — the one viewer breakpoint
-(`useViewerMobile`); chrome never uses window breakpoints. The tool stack is
-the same stack, but Select's tree (Features, Links) starts closed in every
-file, Select marked, so the model has the screen until the person presses Select. The
+(`useViewerMobile`); chrome never uses window breakpoints. The tool strip and
+the file sidebar are the same: a STEP's Features and a robot's Links show as they
+do on a desktop. The
 explorer is the same popover, never wider than the window less 1rem. The navbar is the
 same row; the shortcut hint is hidden.
 Touch works for every tool: one finger orbits, two pan and
@@ -440,60 +477,45 @@ pick.
 
 ## Display settings and section primitives
 
-Display is not a tool. It is a 3D view's dropdown (`kit/shell/DisplayPopover.jsx`) from its
-button at the navbar's right end, before Preview — and in preview from the same place in
-preview's own corner, before its way out: the perspective box
-(`PerspectiveProjectionIcon`), hinted "Display", pressed while the dropdown is open. A view
-that is not 3D (a DXF) has no Display button, not a disabled one. It opens an ordinary
-popover down from the button, end-aligned, 304px wide — the width its settings are laid
-out for, two a row, with Projection's "Orthographic" in full beside the host's appearance
-control — and never taller than the viewer below it: its sections scroll
-inside it. Opening it leaves the tool in hand as
-it is: a selection, a Draw session or Position stay. It goes with Escape, a press outside
-it (on the model, say), its button again, or the X at the end of its first heading
-("Display", its Reset, then its X); setting changes leave it up. It is idle while the file
-is, as the tools are. Another file opens with it closed, and entering or leaving preview
-puts it away. In preview it holds the same settings, the file's: what is set there the
-preview draws at once, and the tools view has it on the way back.
+Display is not a tool. Its tile at the strip's end shows the current mode's sphere icon and
+opens a menu labelled **Display mode**. The strip order is Display, Preview. Below the **Display Mode** section, a **Projection** section
+contains Orthographic and Perspective radio choices, disabled while Render forces perspective.
+Preview uses this same menu over the same file settings. Opening it leaves the active tool
+and its controls in place. A 2D view has no Display or Preview button.
 
-One scroller (the dropdown's body), shared section primitives, no sticky headings
-and no nested cards. Nested dropdowns and color pickers own their dismissal:
-Escape closes the innermost popup first, the dropdown only on a later press.
+The modes are Solid, Render, X-ray, Hidden line and Wireframe, filtered by the view's injected
+capabilities. Each row has a radio item with the mode's sphere and name, a settings trigger
+(`Settings2`) immediately left of the check at the right edge, and that mode's submenu.
+Clicking the name selects its remembered settings. Opening or editing another mode's submenu
+does not select it. There is no Custom state and Grid is a setting, not a mode.
 
-| Section | Contents |
+| Mode | Settings |
 | --- | --- |
-| Display | Full-width render Mode; Appearance (when the host gives one) and Projection beneath; a small gray Reset icon at top-right |
-| Surfaces | Style and part-color mode; color or palette and opacity below |
-| Edges | Visibility and color, where the format has topology |
-| Grid / Axes | Two color/opacity controls, left and right in title order, no visible labels |
-| Lighting | Quality, exposure, rotation, softbox size and fill |
-| Background | Color and opacity |
-| Floor | Color/opacity; position and finish side by side |
+| Solid | Part colours, Flat shading, Edges and edge colour, Grid, Axes |
+| Render | Part colours, Lighting, Background, Floor |
+| X-ray | Part colours, Surface opacity, edge colour, Grid, Axes |
+| Hidden line / Wireframe | Edge colour, Grid, Axes |
 
-Display holds the file's view alone: the person's settings are the [app menu](#settings)'s.
-Display and Surfaces are always open. Every other section is a feature gate
-with plus/minus: expanded means enabled, collapsed means disabled. Grid / Axes
-gates both groups; their settings stay separate in the core/CLI contract. Never
-add an "Enabled" checkbox inside a gated section. Enabling starts at defaults;
-disabling removes overrides. A heading click reveals enabled content without
-disabling it; only minus disables. Hover, focus and rendering never write
-settings.
+On/off controls are menu checkboxes that keep the menu open. Choices use radio submenus.
+Continuous values use compact label/slider/value rows whose keyboard input stays with the
+slider. Colours use swatch grids and a custom colour wheel; By part keeps an editable palette.
+Lighting has its own submenu. Grid and Axes are independent, off by default; each enabled
+guide exposes its appearance. Floor is on by default in Render, at the model's lowest point.
+Settings the view does not offer are absent. Nested submenus own Escape before their parent.
 
-Mode presets are shortcuts over the same controls; manual overrides show
-Custom, which is not selectable. Reset keeps the chosen Mode and clears
-everything else, Explode and Clip included; it never reframes, and it leaves the
-pose, the app's appearance and orbit preferences alone. Appearance is the
-host's (the web app's Light/Dark/System): with System stored, its trigger shows
-the resolved Light or Dark, and the menu still marks System. The Projection
-value carries its icon and truncates with an ellipsis.
+The last item is **Reset <Mode>**, disabled at that mode's defaults. It removes only that
+mode's overrides, preserving every other mode, the shared camera and appearance, Clip and
+Explode. Per-file storage remembers each mode independently. Old-shaped stored display
+settings are dropped, never migrated. Projection is shared, orthographic by default; Render
+resolves to perspective while preserving the shared choice for the other modes.
 
-Every section but the first has a top border. A press on an open gate's title
-scrolls it into view within the natural range, never adding blank space to
-force it to the top; ordinary edits do not scroll.
+Other inspector sections still use shared FileSheet primitives; Display uses menu-native
+controls rather than collapsible settings sections. Hover, focus and rendering never write
+settings. Light and dark remain the host's colour scheme control.
 
 Type comes from the token scale only (`text-micro` 10px, `text-tiny` 11px,
 `text-xs` 12px, `text-ui` 13px); no pixel font sizes. Settings controls and the
-Display's headings use `text-tiny`, regular weight, with shared 28px controls;
+menu labels use `text-tiny`, regular weight;
 panel headings use 12px. Sections use 8px gutters and bottom insets
 and 4px row and column gaps. `FileSheetFieldGrid` owns horizontal spacing; its
 children never pad again. Menu, select and context-menu typography comes from
@@ -520,14 +542,14 @@ what the host supplies:
   (`navigation.home`): it shows the home in this view. The home's own menu has none.
 - The host's own on/off settings (`appSettings`), a checkbox item each, in the order they
   come, checked at the right; a press turns one without closing the menu. **Share
-  usage stats** and **Quick edit** — on until the person turns it off
-  ([Quick Edit](#quick-edit)) — in both apps.
+  usage stats**, in both apps.
 - **Send feedback**, where the host has a tracker (`links.issues`): a link to a new issue
   titled "Feedback: " for the person to finish, naming the version and the platform, with
   no label (what is said may be a bug, a request or a question). Then **GitHub** and
   **Discord**.
 - Last, in gray, a footer: "v<version> · Made by @<handle>" — the version a link to its
-  release notes, the handle one to the host's X account.
+  release notes, the handle one to the host's X account. A build that is not the release's
+  own adds its id to the version: `v0.7.15-dev.b80844940`, the commit it was built from.
 
 Nothing of a file is in it: a file's view is
 [Display](#display-settings-and-section-primitives)'s. Every setting is the person's, not a
@@ -537,12 +559,13 @@ the person comes back to the page.
 
 ## Position and references
 
-The **Position** panel is headed "Position", with a small Reset icon and its
-X in its heading, and is sized like the tree: its content's height, capped at
-half the stack, with its corner grip. Its first row is "Pose" — a label
-beside its dropdown (`KinematicsPoseRow`) — only when there is a named pose to
-choose; the dropdown includes Default, and manual edits show Custom. No divider
-under the pose row and no Reset footer. Each joint's label sits tight above its
+**Position** is a section of the [file sidebar](#the-file-sidebar-and-the-tool-stack), on
+screen under every tool, headed "Position", with no X: a STEP's where the file has joints to
+move, a robot's where a joint can be driven. Its knobs in the viewport are Select's, while
+Select's filter ticks Position. Its first row is "Pose" — a label beside its dropdown
+(`KinematicsPoseRow`): **Default**, which puts the joints back, then the named poses, and
+Custom while the joints are set by hand. No divider under the pose row and no Reset footer.
+Each joint's label sits tight above its
 slider in the flexible left column, with a compact value field (24px tall, about
 five characters wide, tabular figures; degrees read "90.0°") in the right column
 of the same row; joint rows are 4px apart. Long labels truncate with a full-name
@@ -553,68 +576,58 @@ noise). Writes pose the model at once.
 Position persists across tools, and across an update of the model whose joints and
 named poses are unchanged, the named pose chosen included; an update that changed them
 starts the pose at the new defaults, never fitting the old values onto other joints.
-Reset restores the authored
+Default restores the authored
 values (an SRDF's home included), stops motion and hands control back to
-Position. A routine playing in preview sets the Position values aside and gives
-them back on leaving it. A Position edit, Reset included, stops and rewinds a
-routine but keeps its Routine, Speed and Loop for the next play. Kinematics, named poses and
+Position. A routine played or scrubbed in the tools view puts the pose back to its default
+for good ([one motion at a time](#tools-and-lifecycle)); preview's routine leaves it as it is,
+and preview never shows it at all (it draws the model at rest, see
+[preview](#camera-animation-and-preview)). A Position edit, Default included, stops and rewinds a
+routine, a kept frame too, but keeps its Routine, Speed and Loop for the next play. Kinematics, named poses and
 animation are separate capabilities; the absence of one never leaves empty
 controls for another.
 
-The Reference panel is read-only, and a resizable panel of its own under the
-tree: it opens at the one width, capped at 144px, and its corner grip sizes it
-apart from the tree. Its rows are compact (2px above and below) and
-in the panel's one face: labels and values alike are the UI font at `text-tiny`,
-numbers in tabular figures — no monospace. A value too long for its cell wraps
-between words, or (a row of numbers, such as a link's inertia) truncates with
-its whole as a hint; a number never wraps inside itself. Its heading, flush with
-the rows' labels, names the reference: its own label when it has one (a part's or subassembly's
-name, a named face), otherwise its part and kind ("base · face 3") — never the
-raw id, which is no row either. In a STEP its rows are the reference's key
-measurements, nothing else: a face's area, and a round face's diameter and
-radius (a torus's two radii); an edge's length, or a round one's diameter,
-radius and circumference or arc length, with an arc's sweep; a part's size and
-volume; a subassembly's part count, size and volume. What it is (its kind and
-part) is the heading's to say, what a person copies for an agent (the reference,
-with its file) the Copy's, and where it sits and points the view's: there is no
-Type, ID, Center, Normal, Component or Material row. With several references the heading is a
-picker over them with a muted "i/N" beside the name — quiet on hover in either
-theme (no fill; only its chevron comes up), and nothing about it moves; that picker is all a
-multi-selection adds, and the rows are always the browsed reference's alone (no
-totals, no count line). An X at the heading's end clears the selection; the
-heading has no Copy of its own. Copy stays in row menus and the copy shortcut, and
-the panel ends in a full-row **Copy** (**Copy All** with several references) that
-shows the shortcut. What goes to an agent goes through [Quick Edit](#quick-edit), which a
-pick opens and which carries the selected references with the file. Every copied
-reference names its file by absolute path.
+What is picked is [Quick Edit](#quick-edit)'s chips, and a chip's card is what a person
+reads of it (`kit/tools/quick-edit/ReferenceChips.jsx`). A component or subassembly is a chip
+of its own; faces, edges and solids are a chip for each kind on each part — "base · face 3"
+alone, "base · 6 faces" for several, however they were picked — so a large selection stays a
+few chips. A chip names its reference: its own label when it has one (a part's or
+subassembly's name, a named face), otherwise its part and kind ("base · face 3") — never the
+raw id, which its card shows under the name. In a STEP the card's rows are the reference's key
+measurements, nothing else: a face's area, and a round face's diameter and radius (a torus's
+two radii); an edge's length, or a round one's diameter, radius and circumference or arc
+length, with an arc's sweep; a part's size and volume; a subassembly's part count, size and
+volume; a run on one part, one row each. Its rows are the UI font at `text-tiny`, numbers in
+tabular figures — no monospace. A click on a chip copies its references, each naming its file
+by absolute path; resting on it lights its picks; its X drops them.
 
-Viewport picks reach individual faces and edges even where the tree groups them
-into a feature. In an assembly, faces and edges load per part, when first
+Viewport picks reach individual faces and edges. In an assembly, faces and edges load per part, when first
 needed: under a face or edge filter, a press on a part whose faces are not
 loaded loads that part alone and then picks what is under the pointer — one
-press, with "Loading…" in the Features filter row meanwhile. Until
+press, with "Loading…" in the Features heading meanwhile. Until
 then, hovering such a part lights the whole part.
 Shift-click adds to a selection in the viewport; Shift, Ctrl or Cmd does in a
 tree (robots select several links this way). Double-click, or a row's Isolate,
 isolates a component or subassembly; double-click on empty space leaves
 isolation, as do the isolation bar's Exit and the lit Isolate. Only topology that
 cannot be isolated copies on double-click, and it stays selected.
-Clearing the selection or leaving isolation never leaves a stale Copy Reference.
 
 ## Quick Edit
 
-Quick Edit is a person's note to their agent about the STEP file on screen, and the
+Quick Edit is a person's note to their agent about the file on screen, and the
 one way the viewer hands it over: a box at the viewport's top-right, 8px in, on the
 floating surface. It is there only while it has something to carry or a note to keep:
-nothing stands in for it otherwise, not even a button. It is a STEP file's alone,
-since only a STEP has picks and sketches to carry; a compact host gets none, and
+nothing stands in for it otherwise, not even a button. Only a view whose picks and
+annotations a note can carry has it (a STEP's, a robot's); a compact host gets none, and
 preview puts it away with the tools. While the view loads it is out of sight, its note
-and its state kept. A person can turn it off in the [app menu](#settings) (**Quick
-edit**, on until they do; `view.features.quickEdit`): it is then not there at all, in any
-of their views — no box, so nothing a pick or a sketch opens and no keyboard it takes —
-until they turn it on again.
+and its state kept. It is essential, so no setting turns it off.
 
-The box opens 15rem wide, its note growing with what is written up to 10rem. Its
+Below 64rem, the sidebar and Quick Edit start beneath the full tool strip and
+sub-toolbar, including Annotate's two rows. Each side column is capped at half
+the view minus the gutter, so neither covers the other; the sidebar keeps its
+collapse button and corner resizer. Quick Edit stays within its right column,
+which scrolls above the view cube when space is short.
+
+The box opens 15rem wide, capped to its column, its note growing with what is written up to 10rem. Its
 bottom-left corner — the grip every resizable box over the viewport has
 (`kit/tools/ResizeGrip.jsx`) — drags it wider to the left and its note taller, for as long as the
 box is open: once it closes, however it closes, the next box opens at 15rem again, and
@@ -623,21 +636,32 @@ never eased, and renders nothing: the size is written to the box itself, so noth
 else in the viewer redraws under the pointer. Its header is the title, one step up
 the type scale ("Quick Edit"); then what goes with the note, in muted text: **N
 ref(s)**, the selection counted one by one (a reference naming several picks counts
-each; hovering lists their ids, one a line), and **drawing** while Draw has ink;
+each; hovering lists their ids, one a line), and **annotation** while there are annotations;
 then an X. The file always goes and is not named. Under the header, the note
 ("Describe your changes"), its border blue while it has the keyboard, and the
 buttons at its bottom-right.
 
 While the note is empty the box follows what it would carry: it opens when something
-is picked or sketched, and closes when that goes. A written note keeps it open whatever
-is picked, even with nothing picked or sketched, until the X. The X clears everything:
-the note, the selection (as a press on the model's background does) and the sketch, so
-the box goes. A note that has gone (Copy Prompt, Queue, Send) clears the same way.
+is picked, annotated or measured, and closes when that goes. Every chip leads with its
+icon — the Annotation chip's pen, a measurement's ruler in its colour, a reference's pick glyph
+(a part's cube, a face, an edge, a vertex) — then its words, and they stand in the order
+they came, whatever their kind. A chip's copy pasted into the note is a pill there,
+drawn as the chip is, 20px like the note's lines so it sits in its rows without spacing
+them out. A click on a pill selects it whole, highlighted in the selection's colour, so
+Backspace, Delete or typing replaces it as it would selected text. Its chips are
+**Annotation** (a click copies the path of its `.annotation.json` file, what `cadgen snapshot
+--annotation` takes), each measurement (the ruler in its colour and its reading; a click copies the path
+of a file holding it as a snapshot job's `measurements` entry, what `cadgen snapshot
+--measurements` takes; the views the note carries draw every one, and its job file lists
+them), then the selection. A host that keeps no prompt files copies the JSON itself. A written note keeps it open whatever
+is picked, even with nothing picked or annotated, until the X. The X clears everything:
+the note, the selection (as a press on the model's background does), the annotations and the
+measurements, so the box goes. A note that has gone (Copy Prompt, Queue, Send) clears the same way.
 Escape in an empty box is the viewer's Escape (clearing the selection, and so the box);
 in a box with a note it only hands the keyboard back to the model.
 
 The person's picks put the keyboard in the note, each one (a pick right after their
-primary press in this view), and so does a sketch's first stroke once the pen lifts. A
+primary press in this view), and so does a first annotation stroke once the pen lifts. A
 selection an agent or host makes through the live controller (`select`) opens it without
 taking the keyboard.
 
@@ -650,19 +674,27 @@ takes no message, as the web), it is a button in words, "Copy Prompt" with its i
 first. While there is no note they are disabled, dimmed but still drawn:
 
 - **Copy Prompt** (copy icon), always. It copies the note as text: its references
-  spelled as copied references are, and a sketch by the path it was saved at, since
-  text cannot carry a picture.
+  spelled as copied references are, and its files by the paths they were saved at,
+  since text carries no file.
 - **Queue** (list-plus icon), where the destination is a composer: the note goes
   into the context of the person's next message.
 - **Send** (up arrow), where the host can post a message: the note goes now, as the
   person's message.
 
+Every way the note goes carries the same files, made at the press: a picture of each
+view it carries — the view on screen as it goes, and each its annotations were drawn in,
+one such view the same as the one on screen standing for it — rendered as a snapshot
+renders (solid, light, orthographic, the ink in its own colours) whatever the view
+showed; those views as a snapshot job file; and the annotations as an annotation file
+(`.annotation.json`).
+
 Queue and Send clear the note and what it carries, and so close the box, once the
 note has gone. Copy Prompt keeps it all, since nothing has gone yet: its button
 shows a tick for a moment. A failure keeps the note and says why in the box. The message is
 one format, sent, queued or copied: what the person wrote; then `File: <path>`; then
-`References:` and one reference per line; then `Sketch: <path>` when the picture
-travels as a file (a picture sent beside the text is not named).
+`References:` and one reference per line; then each file that travels as a file by its
+label and path — `Current view:`, `View 1:`, `Views (cadgen snapshot --job):`,
+`Annotation:` (a picture sent beside the text is not named).
 
 ## Camera, animation and preview
 
@@ -686,55 +718,70 @@ else: a renderer declares it (`useRendererShell`'s `previewable`: STEP, GLB, STL
 URDF/SRDF/SDF), and a view whose renderer does not (a DXF, 2D) has no Preview button,
 not a disabled one, and never enters it, whatever asks. It is the shell's
 own state (`previewing`); hosts neither start nor observe it, beyond giving the
-page over to it. Its button is the full-screen icon, two diagonal arrows, last in the navbar, after Display
-("Preview"). It is fullscreen: the renderer says so
+page over to it. Its button is two diagonal arrows, outward ("Preview"), last on the
+tool strip, after Display. It is fullscreen: the renderer says so
 (`onFullscreenChange`), and the navbar (its menu and the explorer with it) steps aside
-while it lasts, Display and Preview with it; the toolbar, the tool stack
-and its resize grips, Quick Edit, joint handles, cube and context menu are gone. Its
-controls are its own, at the view's top-right on a row of the navbar's own geometry
-(`lib/navbarRow.js`), so each lands exactly where its counterpart sat: **Orbit** (the orbit
-icon) first, then **Display** in its own place, then the way out, an X ("Exit preview"),
-where Preview was. Orbit's dropdown opens down from it: Orbit on or off, and its Speed.
-Display's is the one the navbar's opens, over the same settings (see
-[Display settings](#display-settings-and-section-primitives)). They are transparent over
-the model and fade with the playbar; Escape leaves preview too, once an open dropdown has
-closed. It starts orbiting, unless the file's Orbit is off. Under the model, an animated
-file shows its playbar: its **Routines** (a playlist icon, with more than one routine: the
-routines, the one in hand checked, a choice playing next) at its left end, then play/pause
-and the scrubber, then **Playback settings** (a cog) at its right end — the routine's Speed,
-Loop and Autoplay. Both open up from their buttons (`PlaybackMenu.jsx`). A static file
-shows nothing there. These controls and the corner share one one-second idle deadline and
-a 150ms fade: movement wakes them, and hovering their area or any open dropdown of theirs,
-Display's included, holds them.
+while it lasts; the tool strip, its sub-toolbar, the file sidebar, the tool stack and
+their resize grips, Quick Edit, joint handles, cube and context menu are gone. Its
+controls are its own row at the view's top centre, 8px down, where the strip was, on the
+strip's surface and of its tiles (`PreviewChrome`): **Orbit** (the orbit icon) first, then
+**Display**, then the way out, two diagonal arrows, inward ("Exit preview"), where Preview
+was; their hints show below them. Orbit's dropdown opens down from it: Orbit on or off, and
+its Speed. Display's is the one the strip's opens, over the same settings (see
+[Display settings](#display-settings-and-section-primitives)). The row fades with the
+playbar; Escape leaves preview too, once an open dropdown has closed. It starts orbiting,
+unless the file's Orbit is off. Under the model, an animated file shows its playbar: its
+**Routines** (a playlist icon, with more than one routine: the routines, the one in hand
+checked, a choice playing next) at its left end, then play/pause and the scrubber, then
+**Playback settings** (a cog) at its right end — the routine's Speed, Loop and Autoplay.
+Both open up from their buttons (`PlaybackMenu.jsx`). A static file shows nothing there.
+The row and the playbar share one one-second idle deadline and a 150ms fade: movement wakes
+them, and hovering them or any open dropdown of theirs, Display's included, holds them.
 
-Routines play in preview alone: there is no Animate tool. Entering preview
-starts the routine when Autoplay is on (off by default); leaving it stops the
-routine and puts the model back at rest, keeping the Routine for the next time
-while the file is open. An update of the model that leaves its routines as they were
+Routines play in preview and under the [Animation tool](#tools-and-lifecycle).
+Preview's routine is its own: it opens at rest on the tools view's Routine, whatever the
+Animation tool was doing, and starts when Autoplay is on (off by default). Leaving
+preview stops its routine — a routine chosen there, its time, whether it played — and
+hands the tools view's back as preview found it: at rest, a kept frame, or under Animation
+where it was, paused at its time or playing on from it (`savePlayback` and `restorePlayback`
+on the playbar runtime, `kit/tools/playbar/ViewportAnimationBar.js`). An update of the model that leaves its routines as they were
 neither stops nor rewinds one that is playing; a changed routine starts at rest.
-Orbit's settings and the playbar's are the file's own and are remembered between leaving
+Orbit's settings and Autoplay are the file's own and are remembered between leaving
 and re-entering preview and across a reload of the tab: Orbit on or off (on by
-default) and its speed (1×), Autoplay, and a Speed or Loop once chosen — until one
-is chosen, the routine's own apply. Another file has its own, and a file the tab
-left starts at the defaults again. Nothing of the routine — which one, its time,
-whether it plays — is saved. Orbit is not an animation setting.
+default) and its speed (1×) — an Orbit turned off stays off in every later preview, and
+one turned on stays on — and Autoplay, which the Animation tool's settings and preview's
+Playback settings both show and set. Speed and Loop are each mode's own. The tools
+view's, the Animation tool's, are the file's, kept in its view once chosen — until then
+the routine's own apply. Preview's start at the routine's own every time it opens,
+whatever the tools view chose; what is chosen in its Playback settings plays there and
+is forgotten on the way out, never written to the tools view's. Another file has its
+own, and a file the tab left starts at the defaults again. Nothing of the routine —
+which one, its time, whether it plays — is saved. Orbit is not an animation setting.
 
-Previewing turns off picks, hover, selection highlights, recognition, Draw,
-Measure, joint handles and Position as tools, and Explode and Clip, without
-discarding any of their values. The two modes keep separate cameras: entering
-saves the tools view's camera and fits a preview camera at the default angle;
-dragging in preview moves only that camera; leaving restores the tools view's
-exact pose (in the projection and lens the Display settings now hold) and every
-suspended tool with its panels. Preview's pose is never kept: the next preview
-fits afresh. The viewport stays mounted throughout.
+**Preview and the tools view are two states.** Entering preview leaves the tools view's
+state exactly as it is — the tool in hand and its sub-toolbar, the Position pose, the
+selection, hidden and isolated parts, Explode and Clip, Measure's results, the annotations,
+the camera, the Animation tool's routine — and preview starts clean, from the model as
+authored: at its opening pose, every part shown, nothing isolated, picked, hovered,
+measured, exploded or clipped, its own camera fitted at the default angle, its routine
+at rest at the routine's own Speed and Loop. Leaving preview throws away what was done
+there — its camera, its routine, the Speed and Loop chosen in it — and the tools view comes back exactly as it was, its camera in the projection and lens
+the Display settings now hold. Nothing of the tools view is reset to make room for
+preview and nothing of preview's is kept: the next preview starts clean again. A
+renderer holds this by drawing preview from its opening view rather than resetting
+its own state (`useRendererShell`'s `preview`); the routine, which both modes play on
+the one model, is saved on the way in and handed back on the way out (above). The
+viewport stays mounted throughout. What is not either mode's state is the file's
+settings, shared by both and kept: its Display settings (an edit in preview's Display
+is the tools view's too), Orbit (on or off, and its speed) and Autoplay.
 
 **Render profiles.** One viewport draws the same Display settings two ways
 (`kit/viewport/renderProfile.js`). The tools view is drawn for working on the
 model: the scene quality its settings resolve to, and a lower pixel ratio while
 the camera moves so a gesture stays responsive. Preview is drawn for looking at
-it: one scene-quality tier up (Interactive to Standard, Standard to High —
-finer STEP tessellation, a higher idle pixel ratio, and at High larger shadow
-and environment maps), its full pixel ratio kept while it orbits, and nothing
+it: one scene-quality tier up (Interactive to Standard, Standard to High — a
+higher idle pixel ratio, and at High larger shadow and environment maps, at the
+same meshes), its full pixel ratio kept while it orbits, and nothing
 of the tools view's (no picking, overlays, cube or tool effects). The profile
 never changes a Display setting.
 
@@ -745,17 +792,16 @@ pressed in while focus is on the page. Editable targets keep their own keys.
 
 - **Escape**, innermost first: an open popup in this viewer (a menu, the app menu
   included, a Select, a color picker, Display, the explorer) closes itself; then preview exits;
-  then Draw's canvas spends its own Escape; then the renderer's (STEP: an
+  then Annotate's canvas spends its own Escape; then the renderer's (STEP: an
   unfinished measurement, then the Measure tool, then the selection, then
-  isolation; robots: the selection). The tool stack's panels are never Escape's to
-  close (a phone's sheet is dismissed like any sheet).
-- **A panel's grip** (its bottom-right corner) is a separator in the tab
-  order: Left/Right nudge its width and Up/Down its cap by 16px, and Home and
+  isolation; robots: the selection). The file sidebar and the tool stack's panels are
+  never Escape's to close.
+- **The file sidebar's grip**, and a resizable panel's (its bottom-right corner), is a
+  separator in the tab order: Left/Right nudge its width and Up/Down its cap by 16px, and Home and
   End take both to their bounds.
-- **Copy** (⌘C or Ctrl+C, and Ctrl+Insert) copies the drawing while Draw has
-  ink, otherwise the selection's references — unless a text field has focus or
-  text is selected. The Reference's and Drawing's Copy buttons show the shortcut
-  in the platform's form (`⌘C` on macOS, `Ctrl+C` elsewhere).
+- **Copy** (⌘C or Ctrl+C, and Ctrl+Insert) copies the view with its annotations
+  while Annotate is up, otherwise the selection's references — unless a text field
+  has focus or text is selected.
 - **Quick Edit's box** keeps its own keys: Enter presses the primary button and
   Shift+Enter is a new line. Escape hands the keyboard back to the view and keeps
   a note; in an empty box it closes the box and is also the viewer's own Escape
@@ -770,12 +816,12 @@ pressed in while focus is on the page. Editable targets keep their own keys.
 Every hint is a `TooltipHint`: compact text, one surface and arrow, a 400ms
 delay. No native `title` anywhere in chrome. Prefer one or two words; show a
 full technical name only when it is truncated (`overflowOnly`). Quick Edit's buttons, the
-strip's buttons, the navbar's right-hand controls (the update, an alert's icon, Full size,
-Display, Preview), preview's corner (Orbit, Display, Exit preview) and the playbar's
-Routines are hinted by name — the strip's and the playbar's hints above their buttons, the
-others' below; there is no hint on the navbar's left (the logo,
+strip's buttons (Display and Preview among them), the navbar's right-hand controls (the
+update, an alert's icon, Full size), preview's row (Orbit, Display, Exit preview) and the
+playbar's Routines are hinted by name — the strip's and the playbar's hints above their
+buttons, the others' below; there is no hint on the navbar's left (the logo,
 the file's name and the ⋯ say what they are), on Playback settings, X,
-the rest of the transport (play, pause, the scrubber), drawing tools or labelled text
+the rest of the transport (play, pause, the scrubber), annotation tools or labelled text
 buttons (Quick Edit's alone say what they do). A disabled, selected or expanded control has none; pressing or leaving cancels a
 pending one. A hint appears on focus only for keyboard navigation (a Tab), never
 when a closing menu hands focus back.
@@ -785,7 +831,10 @@ complete silently, the Copy and Quick Edit buttons showing a tick for a moment.
 Progress stays in the viewport; a failed action is the
 viewport's alert card, whose **Retry** reloads the file and whose **Report Issue**,
 where the host has a tracker, opens a new issue titled "Issue: ", labelled `bug`, filled
-in from the card; errors handed to the host's `onError` are the host's to show. A card the
+in from the card. Its **Details** open into a box that scrolls, with a copy icon at the
+box's top-right corner, hinted **Copy**: it copies all of the details and shows a tick for a
+moment, or, where the clipboard refuses, a line under the box saying so. Errors handed to
+the host's `onError` are the host's to show. A card the
 model survives (a failed update, a warning beside the model) has an X, **Dismiss**: it puts
 the card away for as long as that alert stands, and its icon, first of the navbar's
 right-hand controls after the update button, brings it back. The dismissal goes once the alert changes or clears, or

@@ -48,7 +48,7 @@ import {
   applyDisplayRecordTransform,
   composeDisplayRecordEffectMatrix
 } from "./displayRecordTransform.js";
-import { axisIndex, normalizeStepClipSettings } from "../lib/viewer/clipPlane.js";
+import { axisIndex, clipAxisBounds, clipAxisPosition, normalizeStepClipSettings } from "../lib/viewer/clipPlane.js";
 import {
   PART_HOVER_EDGE_EMPHASIS,
   PART_HOVER_EMISSIVE_INTENSITY,
@@ -1310,22 +1310,18 @@ function applyParameters(THREE, runtime, parameters, meshData, callbacks = {}) {
 
 export function buildStepClipPlane(THREE, clip, bounds, modelOffset = null) {
   const normalized = normalizeStepClipSettings(clip);
-  if (!normalized.enabled || !bounds) {
+  if (!normalized.enabled || (normalized.at === undefined && !bounds)) {
     return null;
   }
-  // The tool can be open at its neutral boundary without cutting any geometry.
-  // Avoid activating clipping shaders and stencil caps until the plane moves
-  // into the model. Flipping the opposite boundary has the same neutral state.
-  if ((!normalized.invert && normalized.offset === 1) ||
-      (normalized.invert && normalized.offset === 0)) return null;
   const index = axisIndex(normalized.axis);
-  const boundsMin = Array.isArray(bounds?.min) ? bounds.min : [0, 0, 0];
-  const boundsMax = Array.isArray(bounds?.max) ? bounds.max : boundsMin;
-  const min = toNumber(boundsMin[index]);
-  const max = toNumber(boundsMax[index]);
-  const low = Math.min(min, max);
-  const high = Math.max(min, max);
-  const position = low + ((high - low) * normalized.offset);
+  // `at` in millimetres in the model's frame; without it, the middle of the model at rest.
+  const position = clipAxisPosition(bounds, normalized);
+  // A plane that cuts nothing (at or past the face on the kept side) activates no clipping
+  // shaders or stencil caps, so an idle tool costs nothing.
+  if (bounds) {
+    const { min, max } = clipAxisBounds(bounds, normalized.axis);
+    if (normalized.invert ? position <= min : position >= max) return null;
+  }
   const normal = new THREE.Vector3(
     index === 0 ? 1 : 0,
     index === 1 ? 1 : 0,

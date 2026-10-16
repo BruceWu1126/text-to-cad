@@ -2,13 +2,14 @@ import { useEffect, useRef } from "react";
 
 import {
   MEASURE_DIMENSION_DRAFT_COLOR,
-  MEASURE_DIMENSION_FADED_ALPHA,
   drawMeasureDimension,
   drawMeasureSnapChip,
   drawMeasureSnapMarker,
+  drawMeasurementMark,
   drawPulsingEndRing,
   measureLabelText,
-  measureSeriesColor,
+  measurementMark,
+  measurementMarkLayout,
   screenSpaceDimensionLayout
 } from "@text-to-cad/core/lib/viewer/measureDimension.js";
 import {
@@ -20,10 +21,15 @@ import { projectWorldPointToClient } from "@text-to-cad/core/lib/viewer/measureR
 
 import { measureRulerDraftMeasurement } from "../workbench/measureRulerState.js";
 
+// What Select has picked, as the annotations and the parts are: the one selection blue.
+const MEASURE_SELECTED_COLOR = "#2979ff";
+
 export function useStepMeasureOverlay({
   measureCanvasRef,
   measureState,
   activeMeasurementId = "",
+  selectedMeasurementIds = [],
+  hoveredMeasurementId = "",
   measureHoverRef = null,
   measureModeActive = false,
   runtimeRef,
@@ -35,6 +41,10 @@ export function useStepMeasureOverlay({
   measureStateRef.current = measureState;
   const activeIdRef = useRef(activeMeasurementId);
   activeIdRef.current = activeMeasurementId;
+  const selectedIdsRef = useRef(selectedMeasurementIds);
+  selectedIdsRef.current = selectedMeasurementIds;
+  const hoveredIdRef = useRef(hoveredMeasurementId);
+  hoveredIdRef.current = hoveredMeasurementId;
 
   // Nothing to draw means no loop at all. An unconditional rAF would clear an
   // empty canvas every frame, for the whole session, on every model, whether or
@@ -63,10 +73,13 @@ export function useStepMeasureOverlay({
 
     let rafId = 0;
 
-    const render = (now) => {
+    // One drawing of the overlay as the camera stands now. It runs right after every render of the
+    // scene (`scene.onAfterRender`), so a dimension moves in the same frame the model does, as the
+    // annotations (in the scene) do; and on its own frames, for the snap marker's pulse while
+    // nothing re-renders the scene.
+    const draw = (now) => {
       const context = canvas.getContext("2d");
       if (!context) {
-        rafId = window.requestAnimationFrame(render);
         return;
       }
       const runtime = runtimeRef.current;
@@ -89,21 +102,23 @@ export function useStepMeasureOverlay({
         const bounds = { width: cssWidth, height: cssHeight };
         const activeId = activeIdRef.current;
 
+        // Each as a mark, drawn by the code a snapshot draws it with (`drawMeasurementMark`): the one in
+        // hand, or the one the pointer rests on, labelled.
         for (const item of state.measurements || []) {
-          const layout = screenSpaceDimensionLayout(item?.pickA, item?.pickB, item?.measurement, camera, localRect);
+          const mark = measurementMark(item);
+          const layout = measurementMarkLayout(mark, camera, localRect);
           if (!layout) {
             continue;
           }
-          const active = item.id === activeId;
-          drawMeasureDimension(context, layout, {
-            color: measureSeriesColor(item?.colorIndex),
-            alpha: active ? 1 : MEASURE_DIMENSION_FADED_ALPHA,
-            lineWidth: active ? 2.6 : 1.4,
-            witnessWidth: active ? 1.6 : 1,
-            ringRadius: active ? 4 : 3,
-            label: active ? measureLabelText(item.measurement) : "",
-            bounds
-          });
+          const active = item.id === activeId || item.id === hoveredIdRef.current;
+          // Picked by Select: a halo in the selection's blue behind the dimension; under the pointer,
+          // a fainter one, as a part is lit before it is picked.
+          const picked = selectedIdsRef.current.includes(item.id);
+          if (picked || hoveredIdRef.current === item.id) {
+            drawMeasureDimension(context, layout, { color: MEASURE_SELECTED_COLOR, alpha: picked ? 0.5 : 0.25, lineWidth: 8, witnessWidth: 5,
+              tickWidth: 6, ringRadius: 6, ringStrokeWidth: 4, bounds });
+          }
+          drawMeasurementMark(context, layout, mark, { active, bounds });
         }
 
         const draft = state.draft;
@@ -164,13 +179,35 @@ export function useStepMeasureOverlay({
         }
       }
 
-      rafId = window.requestAnimationFrame(render);
+    };
+    const tick = (now) => {
+      install();
+      draw(now);
+      rafId = window.requestAnimationFrame(tick);
+    };
+    // The scene's after-render hook, kept wrapped: another owner of it (the photographic studio) puts
+    // back what it found when it leaves, so each frame checks it is still this one's.
+    let hooked = null, previous = null;
+    const afterRender = function measureAfterRender(...args) {
+      previous?.apply(this, args);
+      const [renderer, , camera] = args;
+      const runtime = runtimeRef.current;
+      if (camera === runtime?.camera && !renderer?.getRenderTarget?.()) draw(performance.now());
+    };
+    const install = () => {
+      const scene = runtimeRef.current?.scene;
+      if (!scene || scene.onAfterRender === afterRender) return;
+      if (hooked && hooked !== scene && hooked.onAfterRender === afterRender) hooked.onAfterRender = previous;
+      previous = scene.onAfterRender === afterRender ? previous : scene.onAfterRender;
+      scene.onAfterRender = afterRender;
+      hooked = scene;
     };
 
-    rafId = window.requestAnimationFrame(render);
+    rafId = window.requestAnimationFrame(tick);
 
     return () => {
       window.cancelAnimationFrame(rafId);
+      if (hooked?.onAfterRender === afterRender) hooked.onAfterRender = previous;
     };
   }, [measureCanvasRef, measureHoverRef, measureModeActive, runtimeRef, mountRef, previewMode, viewerReadyTick, hasOverlayContent]);
 }

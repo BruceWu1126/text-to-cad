@@ -15,7 +15,6 @@ add_repo_path("packages/cadgen/src")
 from cadgen.snapshot_core import (  # noqa: E402
     MIN_RENDER_TESSELLATION,
     DISPLAY_APPEARANCES,
-    DISPLAY_GROUP_KEYS,
     DISPLAY_MODES,
     RENDER_QUALITY_IDS,
     SUPPORTED_OUTPUT_SETTINGS_KEYS,
@@ -38,12 +37,12 @@ def normalize(**settings: object) -> dict[str, object]:
 
 class RenderDisplaySchemaTest(unittest.TestCase):
     def test_presets_and_appearance_are_closed(self):
-        self.assertEqual({"solid", "render", "xray", "hidden-line", "wireframe", "grid"}, set(DISPLAY_MODES))
+        self.assertEqual({"solid", "render", "xray", "hidden-line", "wireframe"}, set(DISPLAY_MODES))
         self.assertEqual({"light", "dark"}, set(DISPLAY_APPEARANCES))
         self.assertEqual({"preview", "final"}, set(RENDER_QUALITY_IDS))
         for mode in DISPLAY_MODES:
             self.assertEqual({"mode": mode}, load_display_option(mode, cwd=Path(".")))
-        for invalid in ("shaded", "transparent", "hidden_edges", "unshaded", None, True, [], {}):
+        for invalid in ("grid", "shaded", "transparent", "hidden_edges", "unshaded", None, True, [], {}):
             with self.subTest(mode=invalid), self.assertRaises(SnapshotError):
                 load_display_option({"mode": invalid}, cwd=Path("."))
         for invalid in ("system", "LIGHT", None, False, [], {}):
@@ -56,25 +55,26 @@ class RenderDisplaySchemaTest(unittest.TestCase):
             (root / "render").mkdir()
             self.assertEqual({"mode": "render"}, load_display_option("render", cwd=root))
 
-    def test_groups_are_strict_sparse_overrides_in_every_mode(self):
+    def test_shared_and_per_mode_settings_stay_sparse(self):
         display = {
             "mode": "solid", "appearance": "dark",
             "camera": {"projection": "perspective", "focalLength": 85},
-            "surfaces": {"style": "flat", "colorMode": "by-part", "colors": ["#abc"], "opacity": 0.5},
-            "edges": {"visibility": "all", "color": "#123456"},
-            "lighting": {"quality": "preview", "exposure": -1.25, "rotation": 180, "size": 0.25, "fill": 1},
-            "background": {"color": "#abc", "opacity": 0.4},
-            "floor": {"enabled": False, "placement": "origin", "opacity": 0.6, "finish": "glossy"},
-            "grid": {"density": 2}, "axes": {"enabled": False},
-            "clip": {"enabled": True, "axis": "z", "offsets": {"z": 0.5}},
+            "modes": {
+                "solid": {"flat": True, "parts": {"colorMode": "by-part", "colors": ["#abc"]},
+                          "edges": {"enabled": False}, "grid": {"density": 2}},
+                "render": {"lighting": {"quality": "preview", "exposure": -1.25},
+                           "background": {"opacity": 0.4}, "floor": {"enabled": False, "finish": "glossy"}},
+                "xray": {"opacity": 0.3, "parts": {"colorMode": "single", "color": "#123456"}},
+            },
+            "clip": {"enabled": True, "axis": "z", "at": 0.5},
             "exploded": {"enabled": True, "amount": 0.5},
         }
         self.assertEqual(display, load_display_option(display, cwd=Path(".")))
-        for name in DISPLAY_GROUP_KEYS:
-            self.assertEqual({name: {}}, load_display_option({name: {}}, cwd=Path(".")))
-            for invalid in (None, True, [], "off", {"typo": True}, {"enabled": 1}):
-                with self.subTest(group=name, invalid=invalid), self.assertRaises(SnapshotError):
-                    load_display_option({name: invalid}, cwd=Path("."))
+        with tempfile.TemporaryDirectory() as tmp:
+            import json
+            root = Path(tmp)
+            (root / "display.json").write_text(json.dumps(display), encoding="utf-8")
+            self.assertEqual(display, load_display_option("display.json", cwd=root))
 
     def test_group_numbers_and_values_are_strict(self):
         invalid = (
@@ -93,20 +93,28 @@ class RenderDisplaySchemaTest(unittest.TestCase):
             {"surfaces": {"colors": ["white"]}}, {"edges": {"visibility": "hidden"}},
             {"grid": {"density": 0.24}}, {"grid": {"density": 4.01}}, {"grid": {"density": "2"}},
         )
-        for display in invalid:
+        for value in invalid:
+            name, fields = next(iter(value.items()))
+            if name == "camera":
+                display = value
+            elif name == "surfaces":
+                display = {"modes": {"solid": {"parts": fields}}}
+            else:
+                mode = "render" if name in {"lighting", "background", "floor"} else "solid"
+                display = {"modes": {mode: value}}
             with self.subTest(display=display), self.assertRaises(SnapshotError):
                 load_display_option(display, cwd=Path("."))
 
     def test_old_nested_surfaces_are_rejected(self):
-        for key in ("render", "guides", "partColor"):
+        for key in ("render", "guides", "partColor", "surfaces", "edges", "lighting", "floor", "grid"):
             with self.subTest(key=key), self.assertRaises(SnapshotError):
                 load_display_option({key: {}}, cwd=Path("."))
 
     def test_default_job_is_light_solid_without_overriding_groups(self):
         self.assertEqual({"mode": "solid", "appearance": "light"}, normalize()["display"])
         self.assertEqual({"mode": "render", "appearance": "light"}, normalize(display={"mode": "render"})["display"])
-        self.assertEqual({"mode": "solid", "appearance": "dark", "background": {"opacity": 0.3}},
-                         normalize(display={"appearance": "dark", "background": {"opacity": 0.3}})["display"])
+        self.assertEqual({"mode": "solid", "appearance": "dark", "modes": {"render": {"background": {"opacity": 0.3}}}},
+                         normalize(display={"appearance": "dark", "modes": {"render": {"background": {"opacity": 0.3}}}})["display"])
 
     def test_animation_and_output_capture_controls_remain_composable(self):
         job = normalize(

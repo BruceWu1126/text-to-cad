@@ -4,7 +4,7 @@ import type { FileActions, FileSource } from '../file-viewer/types.js';
 /** Environmental effects are supplied by the app; shared UI never discovers a clipboard. */
 export interface ClipboardPort {
   /**
-   * `text` may still be on its way (a copied Quick Edit whose sketch is being saved): the write
+   * `text` may still be on its way (a copied Quick Edit whose annotation is being saved): the write
    * starts inside the gesture that asked for it and takes the text when it arrives.
    */
   writeText(text: string | Promise<string>): Promise<void>;
@@ -12,12 +12,22 @@ export interface ClipboardPort {
   writeImage(image: Blob | Promise<Blob>): Promise<void>;
 }
 /**
- * Where a picture a prompt names by path is kept: a copied Quick Edit is text, so its sketch is
- * saved as a file on this machine and the text names it. `save` answers the file's absolute path.
- * `createHttpAttachmentStore` (`@text-to-cad/core/client`) is the viewer server's.
+ * A Quick Edit's files, made on this machine for its prompt to carry and name: the views it carries
+ * as a snapshot job file (`cadgen snapshot --job` renders them), its annotation as an annotation file, and
+ * each view's picture, rendered with the snapshot's own code. `create` answers where they are once
+ * they are made; `read` fetches one. `createHttpPromptFiles` (`@text-to-cad/core/client`) is the
+ * viewer server's.
  */
-export interface AttachmentStore {
-  save(image: Blob, name: string): Promise<string>;
+export interface PromptFiles {
+  create(request: {
+    name: string; input: string;
+    views: Array<Record<string, unknown> & { label: string }>;
+    annotation: Record<string, unknown> | null;
+    measurements?: Array<{ start: number[]; end: number[]; label: string; color: string }>;
+  }): Promise<{ job: string; annotation: string | null; images: Array<{ label: string; path: string }> }>;
+  read(path: string): Promise<Blob>;
+  /** A Quick Edit chip's copy as a file, written at once: its path (an annotation's annotation, one measurement). */
+  save?(request: { name: string; kind: 'annotation' | 'measurement'; data: Record<string, unknown> }): Promise<string>;
 }
 /**
  * What the app menu links to — the running version (its release notes), the source and the
@@ -25,9 +35,12 @@ export interface AttachmentStore {
  * `viewerLinks` (`@text-to-cad/ui/links`), which fills in the defaults.
  */
 export interface ViewerLinks {
-  /** The version this host runs, as the app menu shows it (`0.7.4`). */
+  /**
+   * The version this host runs, as the app menu shows it and a new issue names it: `0.7.4` for the
+   * release's own build, `0.7.4-dev.<build>` for a custom build of it (`viewerLinks`' `build`).
+   */
   version: string;
-  /** That version's release notes. */
+  /** The release notes of the release it is, or a custom build was built on. */
   release: string;
   x: string;
   github: string;
@@ -50,8 +63,8 @@ export interface ViewerHost {
   fileActions?: FileActions;
   clipboard: ClipboardPort;
   promptContext: PromptContextPort;
-  /** Saves a copied prompt's picture where the prompt can name it. Absent: a copied prompt names none. */
-  attachments?: AttachmentStore;
+  /** Makes a Quick Edit's views, annotation and pictures as files. Absent: a prompt carries none of them. */
+  promptFiles?: PromptFiles;
   /**
    * Show a file, by its absolute path, in this view: a pick in the explorer, a renderer's link.
    * `home` shows the host's home in this view: its recent models, what it shows with no file. A

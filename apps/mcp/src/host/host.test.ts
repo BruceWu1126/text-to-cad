@@ -6,9 +6,7 @@ import { frameClipboard } from './clipboard';
 import { chatReach, createChatPromptContext } from './prompt';
 import { createServer, type SyncReply, type SyncRequest, type ViewEvent } from './server';
 import { createViewSync, LOST_AFTER, NEWS_MS, SYNC_MS } from './sync';
-import {
-  createHttpTessellationCacheProvider, encodeComponentTessellation, tessellationPayloadFacts,
-} from '@text-to-cad/core/lib/surf/tessellationCache.js';
+import { createHttpTessellationCacheProvider, encodeComponentTessellation, tessellationPayloadFacts } from '@text-to-cad/core/lib/surf/tessellationCache.js';
 import { createTunnelClient, createTunnelFetch, decodeBase64, TUNNEL_ORIGIN, TUNNEL_REPLY_MAX_BYTES } from './tunnel';
 
 /** A host frame: records what the page posts and answers with `respond`. */
@@ -369,8 +367,11 @@ function servingInParts(bytes: Uint8Array, {
 describe('a Quick Edit in the chat', () => {
   const file = referencePart({ resource: { kind: 'workspace-file', path: '/project/parts/a.step' }, target: { kind: 'whole-resource' } }, 'file');
   const face = referencePart({ resource: { kind: 'workspace-file', path: '/project/parts/a.step' }, target: { kind: 'cad-selector', selectors: ['o1.f2'] } }, 'face');
-  const sketch = () => ({ id: 'sketch', kind: 'attachment' as const, name: 'a-sketch.png', label: 'Sketch', mimeType: 'image/png', about: ['file'],
-    content: new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' }) });
+  const annotation = () => ({ id: 'annotation', kind: 'attachment' as const, name: 'a-current.png', label: 'Current view', mimeType: 'image/png', about: ['file'],
+    content: new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' }), path: Promise.resolve('/tmp/p/a-1-current.png') });
+  // The views job: a file, never an image, always named by where it was made.
+  const views = () => ({ id: 'views', kind: 'attachment' as const, name: 'a.job.json', label: 'Views', mimeType: 'application/json', about: ['file'],
+    content: new Blob(['{}'], { type: 'application/json' }), path: Promise.resolve('/tmp/p/a-1.job.json') });
   const edit = (...parts: any[]) => createPromptContext([{ id: 'text', kind: 'text', text: 'Round it.' }, file, ...parts]);
 
   it('reaches what the host declared: a tab host queues whatever it declares, and a picture rides in a message only where it takes images', () => {
@@ -379,7 +380,7 @@ describe('a Quick Edit in the chat', () => {
     expect(chatReach({ updateModelContext: {}, message: { text: {}, image: {} } }, 'inline')).toEqual({ queue: true, send: true, sendImages: true });
   });
 
-  it('queues into the composer as one titled message and its sketch, keeping what it queued until the host clears it', async () => {
+  it('queues into the composer as one titled message and its annotation, keeping what it queued until the host clears it', async () => {
     const updates: any[] = [];
     let context: (value: any) => void = () => {};
     const port = createChatPromptContext({
@@ -388,11 +389,11 @@ describe('a Quick Edit in the chat', () => {
       request: async (method: string, params: any) => { updates.push({ method, params }); return {}; },
     } as any, { reach: { queue: true, send: false, sendImages: false } });
     expect([port.getSnapshot().kind, port.send]).toEqual(['composer', undefined]);
-    expect((await port.deliver(edit(face, sketch()))).status).toBe('added');
+    expect((await port.deliver(edit(face, annotation()))).status).toBe('added');
     const [text, image] = updates[0].params.content;
     expect(updates[0].method).toBe('ui/update-model-context');
     expect(text).toEqual({ type: 'text', text: 'Round it.\n\nFile: /project/parts/a.step\nReferences:\n/project/parts/a.step#o1.f2', _meta: { 'openai/title': 'Quick edit · a.step' } });
-    expect([image.type, image.mimeType, image._meta['openai/title']]).toEqual(['image', 'image/png', 'Sketch · a.step']);
+    expect([image.type, image.mimeType, image._meta['openai/title']]).toEqual(['image', 'image/png', 'Current view · a.step']);
     await port.deliver(edit());
     expect(updates[1].params.content).toHaveLength(3);
     // The host cleared the context (the message went out): the next one starts afresh.
@@ -411,7 +412,7 @@ describe('a Quick Edit in the chat', () => {
     expect((result as { message: string }).message).toMatch(/Copy Prompt/);
   });
 
-  it('sends a message into the chat, its sketch as an image, or saved and named where the host refuses the image', async () => {
+  it('sends a message into the chat, its picture as an image or named by where it was made where the host refuses the image, and its views job by path', async () => {
     const sent: any[] = [];
     let refuse = false;
     const bridge = {
@@ -422,19 +423,17 @@ describe('a Quick Edit in the chat', () => {
         return {};
       },
     } as any;
-    const saved: string[] = [];
-    const attachments = { save: async (_png: Blob, name: string) => { saved.push(name); return `/tmp/cadgen-sketches/${name}`; } };
-    const port = createChatPromptContext(bridge, { reach: { queue: false, send: true, sendImages: true }, attachments });
+    const port = createChatPromptContext(bridge, { reach: { queue: false, send: true, sendImages: true } });
     expect(port.getSnapshot().kind).toBe('unavailable');
-    expect((await port.send!(edit(sketch()))).status).toBe('sent');
+    expect((await port.send!(edit(annotation(), views()))).status).toBe('sent');
     expect(sent[0].method).toBe('ui/message');
     expect(sent[0].params.role).toBe('user');
     expect(sent[0].params.content.map((block: any) => block.type)).toEqual(['text', 'image']);
-    expect(sent[0].params.content[0].text).toBe('Round it.\n\nFile: /project/parts/a.step');
+    expect(sent[0].params.content[0].text).toBe('Round it.\n\nFile: /project/parts/a.step\nViews: /tmp/p/a-1.job.json');
     refuse = true;
-    expect((await port.send!(edit(sketch()))).status).toBe('sent');
-    expect(sent.at(-1).params.content).toEqual([{ type: 'text', text: 'Round it.\n\nFile: /project/parts/a.step\nSketch: /tmp/cadgen-sketches/a-sketch.png' }]);
-    expect(saved).toEqual(['a-sketch.png']);
+    expect((await port.send!(edit(annotation(), views()))).status).toBe('sent');
+    expect(sent.at(-1).params.content).toEqual([{ type: 'text',
+      text: 'Round it.\n\nFile: /project/parts/a.step\nCurrent view: /tmp/p/a-1-current.png\nViews: /tmp/p/a-1.job.json' }]);
   });
 });
 
@@ -451,5 +450,46 @@ describe('the frame\'s clipboard', () => {
       await copied;
       expect(events).toEqual(['item', 'write', 'File: /work/a.step']);
     } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('copies by the page\'s copy command where the host grants the frame no clipboard, and fails only when that fails too', async () => {
+    const details = ['File: /work/gear.step', 'Operation: loading geometry', 'Traceback (most recent call last):',
+      ...Array.from({ length: 40 }, (_, line) => `  File "/work/gear.py", line ${line + 1}, in build`), 'ValueError: no teeth'].join('\n');
+    // What the copy command would put on the clipboard: the selection in the focused field.
+    const copied: string[] = [];
+    const execCommand = vi.fn((command: string) => {
+      const field = document.activeElement as HTMLTextAreaElement;
+      copied.push(`${command}:${field.value.slice(field.selectionStart, field.selectionEnd)}`);
+      return true;
+    });
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommand });
+    const button = document.body.appendChild(document.createElement('button'));
+    const refusing = { clipboard: { writeText: async () => { throw new DOMException('Write permission denied.', 'NotAllowedError'); } } };
+    try {
+      // Granted: the clipboard API, and nothing else.
+      const written: string[] = [];
+      vi.stubGlobal('navigator', { clipboard: { writeText: async (text: string) => { written.push(text); } } });
+      await frameClipboard.writeText(details);
+      expect([written, execCommand.mock.calls.length]).toEqual([[details], 0]);
+      // Refused, or no clipboard API at all: the copy command takes the whole text, and leaves the
+      // page as it was, its field gone and the focus back on the button pressed.
+      vi.stubGlobal('navigator', refusing);
+      button.focus();
+      await frameClipboard.writeText(details);
+      expect([copied, document.querySelector('textarea'), document.activeElement]).toEqual([[`copy:${details}`], null, button]);
+      vi.stubGlobal('navigator', {});
+      await frameClipboard.writeText('File: /work/a.step');
+      await frameClipboard.writeText(Promise.resolve('File: /work/b.step'));
+      expect(copied.slice(1)).toEqual(['copy:File: /work/a.step', 'copy:File: /work/b.step']);
+      // Both refused: the copy fails, with the clipboard's refusal where there was one.
+      execCommand.mockReturnValue(false);
+      await expect(frameClipboard.writeText('File: /work/c.step')).rejects.toThrow('Copying is not available here.');
+      vi.stubGlobal('navigator', refusing);
+      await expect(frameClipboard.writeText('File: /work/c.step')).rejects.toThrow('Write permission denied.');
+    } finally {
+      vi.unstubAllGlobals();
+      delete (document as { execCommand?: unknown }).execCommand;
+      button.remove();
+    }
   });
 });

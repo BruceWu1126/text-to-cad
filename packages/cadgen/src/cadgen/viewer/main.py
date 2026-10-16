@@ -786,6 +786,7 @@ def serve(argv: list[str], *, prog: str = DEFAULT_PROG) -> int:
             reloader.stop()
         if restart["argv"] is None:
             server.server_close()  # the port is free now: a launch waiting for it starts at once
+        app.close()
         keep_last_batch().join(1.0)  # the last batch, kept for the next process to send: a local write
 
     if restart["argv"] is not None:

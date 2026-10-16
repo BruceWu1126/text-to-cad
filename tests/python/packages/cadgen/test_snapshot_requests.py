@@ -14,6 +14,7 @@ point. The rules:
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import io
 import json
@@ -100,7 +101,7 @@ class RefusedRequestsLeaveOutUntouched(_Workspace):
         cases = [
             (stl_door, [self.stl, self.out, "--display", "wireframe"], r"applies to STEP models only"),
             (stl_door, [self.stl, self.out, "--display", '{"clip":{"axis":"x"}}'], r"display\.clip applies to STEP"),
-            (stl_door, [self.stl, self.out, "--display", '{"lighting":{"fill":9}}'], r"display\.lighting\.fill"),
+            (stl_door, [self.stl, self.out, "--display", '{"modes":{"render":{"lighting":{"fill":9}}}}'], r"display\.modes\.render\.lighting\.fill"),
             (step_door, [self.stl, self.out], r"does not render \.stl inputs"),
             (step_door, [script, self.out], r"a model script is a program"),
             (stl_door, [self.stl, self.out, "--mode", "section"], r"section mode requires STEP topology"),
@@ -201,16 +202,16 @@ class CrossKindOptionsAreRefusedByName(_Workspace):
         """S12: `--display Wireframe` on an STL used to list all five presets."""
         code, said = run_door(stl_door, [self.stl, self.out, "--display", "Wireframe"])
         self.assertEqual(1, code)
-        self.assertIn("Supported modes: grid, render, solid", said)
+        self.assertIn("Supported modes: render, solid", said)
         for step_only in ("xray", "hidden-line", "wireframe"):
             self.assertNotIn(step_only, said)
         with self.assertRaises(SnapshotError) as caught:
             self.resolve(self.stl_job(display={"mode": "Wireframe"}))
-        self.assertIn("display.mode must be one of: grid, render, solid;", str(caught.exception))
+        self.assertIn("display.mode must be one of: render, solid;", str(caught.exception))
         # A STEP door still offers every preset.
         step = self.write("part.step", "ISO-10303-21;\nEND-ISO-10303-21;\n")
         code, said = run_door(step_door, [step, self.out, "--display", "Wireframe"])
-        self.assertIn("grid, hidden-line, render, solid, wireframe, xray", said)
+        self.assertIn("hidden-line, render, solid, wireframe, xray", said)
 
 
 class SrdfPairingTests(_Workspace):
@@ -544,7 +545,7 @@ class DisplayIsValidatedOncePerJob(_Workspace):
         return validate.call_count
 
     def test_whichever_way_the_display_arrives(self) -> None:
-        display = {"mode": "render", "lighting": {"fill": 0.4}}
+        display = {"mode": "render", "modes": {"render": {"lighting": {"fill": 0.4}}}}
         self.write("stage.json", json.dumps(display))
         packet = self.write("packet.json", json.dumps({"jobs": [self.stl_job(), self.stl_job(display="solid")]}))
         ways = {
@@ -622,6 +623,106 @@ class StepDebugReportsWhatWasResolved(unittest.TestCase):
         )
         self.assertEqual((resolved["documentHash"], resolved["tree"]), (entry["documentHash"], entry["tree"]))
         self.assertEqual((1, 1, False), (entry["componentCount"], entry["occurrenceCount"], entry["selectorIndex"]))
+
+
+ANNOTATION = {"units": "mm", "parts": {}, "marks": [
+    {"id": "1", "kind": "stroke", "part": None, "points": [0, 0, 0, 1, 1, 1], "color": "#ff2d55", "width": 2}]}
+
+
+class AnnotationAndTargetTests(_Workspace):
+    """A job's annotation is read from its file and handed to the page; TARGET re-aims a job file."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.annotation = self.write("ink.annotation.json", json.dumps(ANNOTATION))
+        self.jobs = self.write("views.job.json", json.dumps({"jobs": [
+            {"input": "part.stl", "camera": "iso", "outputs": [{"path": "a.png"}]},
+            {"input": "part.stl", "camera": "top", "outputs": [{"path": "b.png"}]},
+        ]}))
+
+    def from_options(self, **fields) -> dict:
+        options = SnapshotOptions(**fields)
+        return resolve_render_job_packet(load_job_from_options(options, cwd=self.root), cwd=self.root)
+
+    def test_an_annotation_file_or_object_reaches_the_page_as_the_object(self) -> None:
+        by_file = self.resolve(self.stl_job(annotation="ink.annotation.json"))["jobs"][0]
+        self.assertEqual((by_file["annotation"], by_file["resolved"]["annotationSource"]), (ANNOTATION, str(self.annotation)))
+        inline = self.resolve(self.stl_job(annotation=ANNOTATION))["jobs"][0]
+        self.assertEqual((inline["annotation"], "annotationSource" in inline["resolved"]), (ANNOTATION, False))
+
+    def test_the_flag_draws_over_every_job_and_a_target_replaces_every_jobs_input(self) -> None:
+        other = self.write("other.stl", STL)
+        jobs = self.from_options(job=str(self.jobs), input=str(other), output="ignored.png",
+                                 annotation="ink.annotation.json", annotation_specified=True)["jobs"]
+        self.assertEqual([job["input"] for job in jobs], [str(other)] * 2)
+        self.assertEqual([job["annotation"] for job in jobs], [ANNOTATION] * 2)
+        self.assertEqual([job["outputs"][0]["path"] for job in jobs], [str(self.root / "a.png"), str(self.root / "b.png")])
+        # And the flag is on every door that draws a scene, by that name.
+        for door in (step_door, stl_door, urdf_door, any_door):
+            with self.subTest(door=door.__name__), mock.patch.object(snapshot_cli, "run_snapshot") as run:
+                run.return_value = snapshot_core.snapshot_result({"ok": True, "mode": "view", "outputs": []})
+                code, _ = run_door(door, [self.stl, self.out, "--annotation", "ink.annotation.json"])
+                self.assertEqual(code, 0)
+                self.assertEqual((run.call_args.args[0].annotation, run.call_args.args[0].annotation_specified),
+                                 ("ink.annotation.json", True))
+        code, said = run_door(dxf_door, ["panel.dxf", self.out, "--annotation", "ink.annotation.json"])
+        self.assertEqual(code, 2)
+        self.assertIn("--annotation", said)
+
+    def test_annotation_has_no_legacy_flag_or_job_key(self) -> None:
+        with self.assertRaisesRegex(SnapshotError, r"unknown render job key\(s\): sketch"):
+            self.resolve(self.stl_job(sketch=ANNOTATION))
+        for door in (step_door, stl_door, urdf_door, any_door):
+            with self.subTest(door=door.__name__):
+                code, said = run_door(door, [self.stl, self.out, "--sketch", "ink.annotation.json"])
+                self.assertEqual(code, 2)
+                self.assertIn("--sketch", said)
+
+    def test_an_annotation_that_is_not_one_is_refused_and_a_drawing_or_a_list_takes_none(self) -> None:
+        self.write("list.json", "[]")
+        self.write("panel.dxf", "0\nEOF\n")
+        for job, said in (
+            (self.stl_job(annotation="missing.json"), "annotation file does not exist: missing.json"),
+            (self.stl_job(annotation="list.json"), "an annotation is a JSON object with units, parts and marks"),
+            (self.stl_job(annotation=["not", "one"]), "annotation is the path of an annotation JSON file"),
+            ({"input": "part.stl", "mode": "list", "outputs": [], "annotation": ANNOTATION}, "only view mode draws it"),
+            ({"input": "panel.dxf", "outputs": [{"path": "o.png"}], "annotation": ANNOTATION}, "panel.dxf has no parts or space"),
+        ):
+            with self.subTest(job=job), self.assertRaisesRegex(SnapshotError, re.escape(said)):
+                self.resolve(job)
+
+    def test_measurements_are_a_list_one_measurement_or_a_file_of_either_and_the_flag_draws_over_every_job(self) -> None:
+        mark = {"start": [0, 0, 0], "end": [10, 0, 0], "label": "10.00 mm", "color": "#d59090"}
+        self.write("marks.json", json.dumps([mark]))
+        for value in ([mark], mark, json.dumps(mark), "marks.json"):
+            with self.subTest(value=value):
+                self.assertEqual(self.resolve(self.stl_job(measurements=value))["jobs"][0]["measurements"], [mark])
+        jobs = self.from_options(job=str(self.jobs), measurements=json.dumps(mark), measurements_specified=True)["jobs"]
+        self.assertEqual([job["measurements"] for job in jobs], [[mark]] * 2)
+        for door in (step_door, stl_door, urdf_door, any_door):
+            with self.subTest(door=door.__name__), mock.patch.object(snapshot_cli, "run_snapshot") as run:
+                run.return_value = snapshot_core.snapshot_result({"ok": True, "mode": "view", "outputs": []})
+                code, _ = run_door(door, [self.stl, self.out, "--measurements", "marks.json"])
+                self.assertEqual((code, run.call_args.args[0].measurements), (0, "marks.json"))
+        self.write("panel.dxf", "0\nEOF\n")
+        for job, said in (
+            (self.stl_job(measurements=[{**mark, "color": "red"}]), "measurements[0].color is #rrggbb"),
+            (self.stl_job(measurements="gone.json"), "measurements file does not exist: gone.json"),
+            ({"input": "part.stl", "mode": "list", "outputs": [], "measurements": [mark]}, "only view mode draws them"),
+            ({"input": "panel.dxf", "outputs": [{"path": "o.png"}], "measurements": [mark]}, "no space to draw them in"),
+        ):
+            with self.subTest(job=job), self.assertRaisesRegex(SnapshotError, re.escape(said)):
+                self.resolve(job)
+
+    def test_the_pages_refusal_of_a_mark_names_the_annotation_file(self) -> None:
+        async def refused():
+            raise RuntimeError("Page.evaluate: Error: annotation: marks[0].color must be a #rrggbb colour\n    at nn (x.js:1)")
+
+        job = {"annotation": ANNOTATION, "resolved": {"annotationSource": "/p/ink.annotation.json"}}
+        with self.assertRaisesRegex(SnapshotError, r"^/p/ink\.annotation\.json: annotation: marks\[0\]\.color must be a #rrggbb colour$"):
+            asyncio.run(snapshot_core._refusing_annotation(job, refused()))
+        with self.assertRaisesRegex(RuntimeError, "Page.evaluate"):
+            asyncio.run(snapshot_core._refusing_annotation({}, refused()))
 
 
 if __name__ == "__main__":

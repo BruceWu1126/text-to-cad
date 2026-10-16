@@ -1,34 +1,44 @@
 # Snapshots
 
-## Display presets
+## Display modes
 
 `--display` accepts `solid` (the default), `render`, `xray`, `hidden-line`,
-`wireframe`, `grid`, a JSON object, or a JSON file path. Only `grid` draws the
-grid: Solid on a finer, plainer measuring grid. The CLI defaults to
-`appearance: "light"`; use `"dark"` to request dark appearance. Presets supply
-all group defaults. An omitted group inherits its preset; a supplied group
-merges its parameters and implies `enabled: true` unless explicitly false.
+`wireframe`, a JSON object, or a JSON file path. The CLI defaults to
+`appearance: "light"`; use `"dark"` to request dark appearance. Settings are
+sparse: omitted parameters inherit the active mode's defaults. Each mode keeps
+its own settings under `modes`; editing an inactive mode does not select it.
 
 ```bash
 cadgen step snapshot part.step review.png --display render
-cadgen step snapshot part.step review.png --display '{"mode":"render","appearance":"dark","floor":{"enabled":false},"background":{"opacity":0.5}}'
+cadgen step snapshot part.step review.png --display '{"mode":"render","appearance":"dark","modes":{"render":{"floor":{"enabled":false},"background":{"opacity":0.5}}}}'
 cadgen step snapshot part.step review.png --display display.json --camera front
 ```
 
-The public groups are `camera`, `surfaces`, `edges`, `lighting`, `background`,
-`floor`, `grid`, and `axes`. `clip` and `exploded` remain independent inspection
-tools. `--camera` or a job/output `camera` specifies pose and framing;
-`display.camera` specifies projection and focal length (20–200 mm). Render
-defaults to perspective; other presets use orthographic projection. Opacity is
-0 for transparent and 1 for opaque, including partially transparent PNG
-backgrounds. Unknown keys and retired modes are refused.
+Shared settings are `appearance`, `camera`, `clip` and `exploded`. Solid has
+`parts`, `flat`, `edges`, `grid` and `axes`; Render has `parts`, `lighting`,
+`background` and `floor`; X-ray has `parts`, `opacity`, `edges`, `grid` and
+`axes`; Hidden Line and Wireframe have `edges`, `grid` and `axes`. The grid and
+axes start off. Enable them explicitly in a mode, for example
+`{"modes":{"solid":{"grid":{"enabled":true}}}}`. The retired `grid` mode,
+top-level style groups and unknown keys are refused.
 
-`edges`, `clip`, `exploded`, the `xray`, `hidden-line` and `wireframe` presets and
-the `hidden` and `off` surface styles describe a CAD model: its topology edges,
-its parts and its solids. They apply to STEP/STP inputs only. A mesh or a robot
-description (STL, 3MF, GLB, URDF, SRDF, SDF) takes `solid` or `render`, the
-`shaded` or `flat` surface style and the remaining groups, and refuses the rest
-by name before anything is rendered.
+A clip keeps the part of a STEP model on the lower side of a plane across
+`axis` (`x`, `y` or `z`), or the upper side with `invert`, and fills the cut
+faces. The plane stands at `at`, its coordinate on the axis in millimetres in the
+model's own frame (the numbers `--mode list` prints as bounds), or, without
+`at`, through the middle of the model at rest. A camera facing
+the cut (`right`, `back` or `top`; `left`, `front` or `bottom` inverted) draws a
+section view. `--camera` or a job/output `camera` specifies pose and framing;
+`display.camera` specifies projection and focal length (20–200 mm). Render
+uses perspective; the other modes use the shared projection, orthographic by
+default. Opacity is 0 for transparent and 1 for opaque, including partially
+transparent PNG backgrounds.
+
+`edges`, `clip`, `exploded`, and the `xray`, `hidden-line` and `wireframe` modes
+describe a CAD model: its topology edges, its parts and its solids. They apply
+to STEP/STP inputs only. A mesh or a robot description (STL, 3MF, GLB, URDF,
+SRDF, SDF) takes `solid` or `render` with their other settings, and refuses
+unsupported settings by name before anything is rendered.
 
 ## Meshes and robot descriptions
 
@@ -107,7 +117,76 @@ extension is refused.
 
 A job comes from `--job FILE` or from `TARGET OUT` and the flags; there is no
 stdin form. With `--job`, each flag given overrides that setting in every job of
-the packet, and `--width`/`--height` size every output.
+the packet, and `--width`/`--height` size every output. A TARGET given with
+`--job` replaces every job's `input`: the same views over another model (a
+revision, a sibling). OUT is ignored with `--job`; the jobs' outputs say where
+the files go.
+
+## Annotations
+
+A job's `annotation` (the `--annotation` flag sets it on every job) is ink drawn over
+the model: an annotation JSON file's path, resolved as a job's `input` is, or the
+annotation object itself. The CAD Viewer's Annotate tool writes one with a Quick Edit
+prompt, beside a job file that renders the views the person looked at with it
+(`cadgen.viewer.prompt_files`). Snapshot reads the file and hands the object to
+the page, which draws it with the viewer's own code: what an agent renders is
+what the person drew. A drawing (DXF), `--mode list`, and `--mode section` take no annotation.
+
+```json
+{ "units": "mm",
+  "parts": { "o1.6.2.7": { "placement": [16 numbers, a 4x4 matrix in column order] } },
+  "marks": [ { "id": "1", "kind": "stroke", "part": "o1.6.2.7", "placement": "surface",
+               "view": "view 1", "points": [x, y, z, ...], "color": "#ff2d55", "opacity": 1,
+               "width": 2, "widths": [...], "dash": "solid", "closed": false, "group": "g1",
+               "touches": [{ "part": "o1.6.2.7" }] } ] }
+```
+
+- `marks[]`: `id` unique; `kind` is `stroke` (a line, `width` screen pixels at
+  any zoom, `widths` the pen's share of it per point, `dash` solid, dashed or
+  dotted, `closed`), `area` (a fill: its outline's `outline` points, then the
+  points inside it, which `triangles` index three at a time) or `text` (`text`
+  at `fontPx` on screen, `points` its label's four corners). `color` is
+  `#rrggbb`; `opacity` 0..1.
+- `part` is the occurrence id the mark is fixed to, and its `points` (x, y, z
+  triples) are in that part's own frame: the mark follows the part wherever the
+  job puts it (exploded, posed), hides when it is hidden and is cut by the clip.
+  A part the model no longer has falls back to `parts[id].placement`, where it
+  was when the annotation was made. `part: null` is in model coordinates. A mesh or
+  robot scene has no occurrence ids, so its marks take those fallbacks.
+- `placement` (drawn on the model, or in space), `view` (the label of the view
+  it was drawn in), `group` and `touches` (the parts under it as it was drawn)
+  describe the mark and draw nothing.
+- A stroke is as heavy against the image's height as it was against a viewer
+  900 pixels tall.
+
+Every field is checked before the model loads, and a refusal names the annotation
+file and the mark (`ink.annotation.json: annotation: marks[2].color must be a #rrggbb
+colour`). An unknown field is refused, never read as a default.
+
+## Measurements
+
+A job's `measurements` (the `--measurements` flag sets them on every job: the
+list, one measurement alone, or a file of either) are dimensions drawn over the
+picture, as the CAD Viewer's Measure draws them. A click on a measurement's
+Quick Edit chip copies it in this form; a Quick Edit prompt's job carries every
+measurement the person took, so an agent sees and reads the exact distances
+they meant. Each is drawn by the viewer's own code, every one labelled, its
+lines as heavy against the image's height as against a viewer 900 pixels tall.
+A drawing (DXF), `--mode list`, and `--mode section` take none.
+
+```json
+"measurements": [
+  { "start": [0, 0, 5], "end": [15, 0, 4], "label": "15.03 mm", "color": "#d59090" }
+]
+```
+
+- `start`, `end`: the two ends of the dimension, `[x, y, z]` in model
+  coordinates (a face-to-face reading's ends lie along the faces' normal).
+- `label`: its words as the viewer labels it (`⟂` for a face-to-face distance,
+  `C-C` for hole centres); `color`: `#rrggbb`, the measurement's own.
+
+At most 64. Every field is checked before the model loads, and a refusal names
+the measurement and the field (`measurements[0].start is [x, y, z]`).
 
 ## Section planes
 
@@ -213,11 +292,11 @@ translucent floor stands at the model's lowest point. To place it at the
 document's Z=0 plane instead:
 
 ```bash
-cadgen step snapshot part.step review.png --display '{"mode":"render","floor":{"placement":"origin"}}'
+cadgen step snapshot part.step review.png --display '{"mode":"render","modes":{"render":{"floor":{"placement":"origin"}}}}'
 ```
 
-`display.floor.placement` accepts `lowest` (Render's default) or `origin` (where
-a floor turned on in another preset starts); it moves only the floor, never the
-model or lighting. `display.floor.finish` accepts
-`matte` (the default) or `glossy`, the Viewer's Floor finish: a glossy floor also
-reflects the model. `display.floor.enabled: false` removes the floor.
+`display.modes.render.floor.placement` accepts `lowest` (the default) or
+`origin`; it moves only the floor, never the model or lighting.
+`display.modes.render.floor.finish` accepts `matte` (the default) or `glossy`,
+the Viewer's Floor finish: a glossy floor also reflects the model.
+`display.modes.render.floor.enabled: false` removes the floor.

@@ -9,11 +9,15 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 // on, a runtime whose renderer's canvas is the scene's), and records the props the shell wired, so
 // the camera reports reach the renderer through exactly the callbacks the real viewport calls.
 // The viewport's own half of those reports (a resize, a preview camera) is ShellViewport.test.tsx.
-const viewport = vi.hoisted(() => ({ props: null as any }));
+const viewport = vi.hoisted(() => ({ props: null as any, annotationAt: null as null | ((x: number, y: number) => string | null) }));
 vi.mock('../../../../dist/renderers/kit/shell/ShellViewport.js', () => ({
   default: forwardRef(function StandInViewport(props: any, ref) {
     viewport.props = props;
-    useImperativeHandle(ref, () => ({ captureScreenshotBlob: async () => new Blob(['pixels'], { type: 'image/png' }) }));
+    useImperativeHandle(ref, () => ({
+      captureScreenshotBlob: async () => new Blob(['pixels'], { type: 'image/png' }),
+      annotationAt: (x: number, y: number) => viewport.annotationAt?.(x, y) ?? null,
+      promptCamera: () => ({ camera: { position: [0, -100, 0], target: [0, 0, 0], up: [0, 0, 1], orthographicHalfHeight: 40 }, width: 800, height: 600 }),
+    }));
     const hostRef = useRef<HTMLDivElement | null>(null);
     const runtimeRef = useRef<any>(null);
     const context = { hostRef, runtimeRef, mountRef: hostRef, viewerReadyTick: 1, commitScene: () => true };
@@ -24,34 +28,31 @@ vi.mock('../../../../dist/renderers/kit/shell/ShellViewport.js', () => ({
   })
 }));
 import HarnessRenderer from '../../../../dist/renderers/shell-harness/HarnessRenderer.js';
-import { ViewerHostContext } from '../../../../dist/host/context.js';
+import { ViewerElementContext, ViewerHostContext } from '../../../../dist/host/context.js';
 import { testHost } from '../../../../dist/host/testing/host.js';
+import { createAnimationClock } from '../../../../dist/renderers/kit/tools/playbar/animationClock.js';
 
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); viewport.props = null; document.querySelectorAll('[data-test-navbar]').forEach(slot => slot.remove()); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); viewport.props = null; });
 
-// The navbar FileViewer hands a renderer: the box at its right end Display and Preview go in.
-function navbarSlot() {
-  const slot = document.createElement('div');
-  slot.setAttribute('data-test-navbar', '');
-  document.body.append(slot);
-  return slot;
-}
 
-function mount(host = testHost(), state?: unknown) {
+function mount(host = testHost(), state?: unknown, name = 'one.harness', element: { current: HTMLElement | null } | null = null) {
   const save = vi.fn();
   const navigation = vi.fn();
   let settings: any = { toolStack: { panels: {}, collapsed: {} } };
   const listeners = new Set<() => void>();
   const preferences = { getSnapshot: () => settings, subscribe: (listener: () => void) => { listeners.add(listener); return () => listeners.delete(listener); },
     update: (patch: any) => { settings = { ...settings, ...patch }; listeners.forEach(listener => listener()); } };
-  const props = { source: { id: 'one' }, file: { path: '/models/one.harness', name: 'one.harness', kind: 'file' }, document: null,
-    navbarSlot: navbarSlot(), onReady() {}, onOpenFile() {}, appearance: { colorScheme: 'light' },
+  const props = { source: { id: 'one' }, file: { path: `/models/${name}`, name, kind: 'file' }, document: null,
+    onReady() {}, onOpenFile() {}, appearance: { colorScheme: 'light' },
     state, onStateChange: save, onNavigationActionsChange: navigation, reload() {}, data: { services: { preferences } } };
-  const view = render(<ViewerHostContext.Provider value={host}><HarnessRenderer {...(props as any)} /></ViewerHostContext.Provider>);
+  // `element`: the viewer the keyboard reaches (its Escape and Delete), as a file viewer provides.
+  const view = render(<ViewerHostContext.Provider value={host}><ViewerElementContext.Provider value={element as any}>
+    <HarnessRenderer {...(props as any)} />
+  </ViewerElementContext.Provider></ViewerHostContext.Provider>);
   const canvas = view.container.querySelector('[data-stand-in-viewport] > canvas') as HTMLCanvasElement;
   const overlay = (name: string) => view.container.querySelector(`[data-harness-${name}]`)!.textContent;
   return { ...view, canvas, overlay, save, navigation };
@@ -134,32 +135,44 @@ it('Quick Edit is there once something is picked, with what the host can do, is 
   expect(container.querySelector('[data-preview-chrome]')!.hasAttribute('inert')).toBe(true);
 });
 
-it('a sketch opens Quick Edit, which sends the file, the note and the view with its ink through the port', async () => {
+// A stroke as Annotate puts one into the model.
+const ink = (id: string) => ({ id, kind: 'stroke', part: null, placement: 'surface', points: new Float32Array([0, 0, 0, 1, 0, 0]), color: '#ff2d55', width: 2, dash: 'solid', touches: [] });
+
+it("an annotation opens Quick Edit, which sends the note with the files made of its view and its annotation, and goes with them", async () => {
   const destination = { kind: 'composer', available: true } as const;
   const send = vi.fn(async (_context: unknown) => ({ status: 'sent' as const, partIds: [] }));
-  const host = testHost({ promptContext: { getSnapshot: () => destination, subscribe: () => () => {}, deliver: async () => ({ status: 'added', partIds: [] }), send } as any });
+  const promptFiles = {
+    create: vi.fn(async (request: any) => ({ job: '/tmp/p/one-1.job.json', annotation: '/tmp/p/one-1.annotation.json',
+      images: request.views.map((entry: any) => ({ label: entry.label, path: `/tmp/p/one-1-${entry.label}.png` })) })),
+    read: vi.fn(async () => new Blob(['png'], { type: 'image/png' })),
+  };
+  const host = testHost({ promptContext: { getSnapshot: () => destination, subscribe: () => () => {}, deliver: async () => ({ status: 'added', partIds: [] }), send } as any, promptFiles });
   mount(host);
-  fireEvent.click(screen.getByRole('button', { name: 'Draw' }));
-  // The surface clears its ink as the viewport's does, saying so once it is gone.
-  const clearInk = vi.fn(() => viewport.props.drawing.onContentChange(false, 0));
-  act(() => viewport.props.drawing.onReady({ clear: clearInk }));
-  act(() => viewport.props.drawing.onContentChange(true, 1));
+  fireEvent.click(screen.getByRole('button', { name: 'Annotate' }));
+  act(() => viewport.props.annotation.add([ink('a')]));
   const box = screen.getByRole('region', { name: 'Quick Edit' });
-  expect(box.querySelector('[data-quick-edit-chip="sketch"]')).not.toBeNull();
+  expect(box.querySelector('[data-quick-edit-ref="annotation"]')).not.toBeNull();
   const note = within(box).getByRole('textbox', { name: 'Describe your changes' });
   expect(document.activeElement).toBe(note);
-  fireEvent.change(note, { target: { value: 'Add a boss here.' } });
+  note.textContent = 'Add a boss here.';
+  fireEvent.input(note);
   fireEvent.keyDown(note, { key: 'Enter' });
   await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+  // The view on screen, as a snapshot job says it, and the annotation as an annotation file.
+  const [request] = promptFiles.create.mock.calls[0] as any[];
+  expect(request).toMatchObject({ name: 'one.harness', input: '/models/one.harness', annotation: { units: 'mm', marks: [{ id: 'a', kind: 'stroke' }] } });
+  expect(request.views).toEqual([{ label: 'current', camera: { position: [0, -100, 0], target: [0, 0, 0], up: [0, 0, 1], orthographicHalfHeight: 40 }, width: 1600, height: 1200 }]);
   const context = send.mock.calls[0][0] as any;
-  expect(context.parts.map((part: any) => part.kind)).toEqual(['text', 'reference', 'attachment']);
+  expect(context.parts.map((part: any) => [part.kind, part.label ?? part.id])).toEqual([['text', 'text'], ['reference', 'file'],
+    ['attachment', 'Current view'], ['attachment', 'Views (cadgen snapshot --job)'], ['attachment', 'Annotation']]);
+  expect(await context.parts[2].path).toBe('/tmp/p/one-1-current.png');
   expect((await context.parts[2].content).type).toBe('image/png');
-  // Sent, the note goes with its sketch.
+  // Sent, the note goes with its annotation.
   await waitFor(() => expect(screen.queryByRole('region', { name: 'Quick Edit' })).toBeNull());
-  expect(clearInk).toHaveBeenCalledTimes(1);
+  expect(viewport.props.annotation.hasAnnotation).toBe(false);
 });
 
-it('a clipboard destination has no snapshot in the navbar, and Draw copies its ink from the foot of its controls', async () => {
+it('a clipboard destination has no snapshot in the navbar; the annotation is Quick Edit\'s chip, its pen first', async () => {
   const destination = { kind: 'clipboard', available: true } as const;
   const writeImage = vi.fn(async () => {}), deliver = vi.fn();
   const { navigation } = mount(testHost({
@@ -167,15 +180,107 @@ it('a clipboard destination has no snapshot in the navbar, and Draw copies its i
     clipboard: { writeText: async () => {}, readText: async () => '', writeImage },
   }));
   expect(navigation.mock.calls.flatMap(([actions]) => actions)).toEqual([]);
-  fireEvent.click(screen.getByRole('button', { name: 'Draw' }));
-  const controls = () => screen.getByRole('region', { name: 'Drawing controls' });
-  expect(within(controls()).queryByRole('button', { name: /^Copy/ })).toBeNull();
-  act(() => viewport.props.drawing.onContentChange(true, 1));
-  fireEvent.click(within(controls()).getByRole('button', { name: 'Copy Drawing' }));
-  await waitFor(() => expect(writeImage).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole('button', { name: 'Annotate' }));
+  act(() => viewport.props.annotation.add([ink('a')]));
+  const chip = screen.getByRole('region', { name: 'Quick Edit' }).querySelector('[data-quick-edit-ref="annotation"]')!;
+  expect(chip.querySelector('svg[data-pick-glyph="pencil"]')).not.toBeNull();
   // A clipboard destination's Quick Edit copies its prompt, and nothing else.
   expect(within(screen.getByRole('region', { name: 'Quick Edit' })).queryByRole('button', { name: 'Queue' })).toBeNull();
   expect(deliver).not.toHaveBeenCalled();
+});
+
+it("under Select a press on the annotation picks its mark before anything under it; Shift adds, Escape lets go, Delete deletes", () => {
+  // A file with Select (`panel*`): ink 'a' lies at x < 100 on the canvas, ink 'b' at x >= 100 and y < 50.
+  viewport.annotationAt = (x: number, y: number) => (x < 100 ? 'a' : y < 50 ? 'b' : null);
+  const { canvas } = mount(testHost(), undefined, 'panel-one.harness', { current: document.body });
+  act(() => viewport.props.annotation.add([ink('a'), ink('b'), ink('c')]));
+  const press = (x: number, y: number, shiftKey = false) => fireEvent.pointerDown(canvas, { button: 0, clientX: x, clientY: y, shiftKey, pointerId: 1 });
+  const selected = () => viewport.props.annotation.selected;
+  press(10, 10);
+  expect(selected()).toEqual(['a']);
+  press(150, 10, true);
+  expect(selected()).toEqual(['a', 'b']);
+  press(150, 10, true);
+  expect(selected()).toEqual(['a']);
+  // A press on no ink lets go of it, unless Shift keeps it.
+  press(150, 150, true);
+  expect(selected()).toEqual(['a']);
+  press(150, 150);
+  expect(selected()).toEqual([]);
+  press(10, 10);
+  fireEvent.keyDown(canvas, { key: 'Escape' });
+  expect(selected()).toEqual([]);
+  // With nothing picked Delete deletes nothing; with 'a' picked, 'a' alone.
+  fireEvent.keyDown(canvas, { key: 'Delete' });
+  expect(viewport.props.annotation.items.map((item: any) => item.id)).toEqual(['a', 'b', 'c']);
+  press(10, 10);
+  fireEvent.keyDown(canvas, { key: 'Delete' });
+  expect(viewport.props.annotation.items.map((item: any) => item.id)).toEqual(['b', 'c']);
+  viewport.annotationAt = null;
+});
+
+it("Annotate is one tool on the strip; its controls, a row under the strip, have every tool a button, then Undo, Redo and Clear, disabled with nothing to do", async () => {
+  mount(testHost(), undefined, 'panel-one.harness');
+  const strip = within(screen.getByRole('group', { name: 'Interaction tools' }));
+  fireEvent.click(strip.getByRole('button', { name: 'Annotate' }));
+  // Not a panel of the tool stack: a toolbar of its own, hung under the strip.
+  const row = screen.getByRole('toolbar', { name: 'Annotation controls' });
+  expect([row.closest('[data-cad-tool-stack]'), row.closest('[data-tool-panel]')]).toEqual([null, null]);
+  const panel = () => within(screen.getByRole('toolbar', { name: 'Annotation controls' }));
+  const tools = () => within(panel().getByRole('group', { name: 'Annotation tools' }));
+  const history = () => within(panel().getByRole('group', { name: 'Annotation history' }));
+  expect(tools().getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Pen', 'Line', 'Arrow', 'Rectangle', 'Ellipse', 'Text', 'Eraser']);
+  const disabled = () => ['Undo', 'Redo', 'Clear annotations'].map(name => history().getByRole('button', { name }).hasAttribute('disabled'));
+  expect(disabled()).toEqual([true, true, true]);
+  fireEvent.click(tools().getByRole('button', { name: 'Text' }));
+  expect([viewport.props.annotation.tool, tools().getByRole('button', { name: 'Text' }).getAttribute('aria-pressed')]).toEqual(['text', 'true']);
+  // A step to take back enables Undo and Clear; taking it back enables Redo.
+  act(() => viewport.props.annotation.add([ink('a')]));
+  expect(disabled()).toEqual([false, true, false]);
+  fireEvent.click(history().getByRole('button', { name: 'Undo' }));
+  expect(viewport.props.annotation.items).toEqual([]);
+  expect(disabled()).toEqual([true, false, true]);
+});
+
+it('⌘Z and ⇧⌘Z walk the annotation\'s history from anywhere in the viewer; a text field keeps its own', () => {
+  const { canvas } = mount(testHost(), undefined, 'panel-one.harness', { current: document.body });
+  act(() => viewport.props.annotation.add([ink('a')]));
+  act(() => viewport.props.annotation.add([ink('b')]));
+  const ids = () => viewport.props.annotation.items.map((item: any) => item.id);
+  fireEvent.keyDown(canvas, { key: 'z', metaKey: true });
+  expect(ids()).toEqual(['a']);
+  const field = document.createElement('input');
+  document.body.append(field);
+  fireEvent.keyDown(field, { key: 'z', metaKey: true });
+  expect(ids()).toEqual(['a']);
+  field.remove();
+  fireEvent.keyDown(canvas, { key: 'z', metaKey: true, shiftKey: true });
+  expect(ids()).toEqual(['a', 'b']);
+});
+
+it('under Select the pointer resting on a mark lights it, and the part under it hears nothing', () => {
+  viewport.annotationAt = (x: number) => (x < 100 ? 'a' : null);
+  const { canvas } = mount(testHost(), undefined, 'panel-one.harness');
+  act(() => viewport.props.annotation.add([ink('a'), ink('b')]));
+  const heard = vi.fn();
+  canvas.addEventListener('pointermove', heard);
+  const move = (x: number, buttons = 0) => fireEvent.pointerMove(canvas, { clientX: x, clientY: 10, buttons, pointerId: 1 });
+  move(10);
+  expect(viewport.props.hoveredAnnotation).toEqual(['a']);
+  expect(heard).not.toHaveBeenCalled();
+  const frame = canvas.closest('[data-slot="cad-file-view"]')!;
+  expect(frame.classList.contains('cursor-pointer')).toBe(true);
+  // Off the ink the part hears the pointer again; a drag lights nothing.
+  move(150);
+  expect(viewport.props.hoveredAnnotation).toBeNull();
+  expect(heard).toHaveBeenCalledTimes(1);
+  expect(frame.classList.contains('cursor-pointer')).toBe(false);
+  move(10, 1);
+  expect(viewport.props.hoveredAnnotation).toBeNull();
+  move(10);
+  fireEvent.pointerLeave(canvas.closest('[data-slot="cad-file-view"]')!);
+  expect(viewport.props.hoveredAnnotation).toBeNull();
+  viewport.annotationAt = null;
 });
 
 it('a host with no prompt workflow gets no snapshot, and Quick Edit copies a prompt: left out, not disabled', () => {
@@ -226,3 +331,46 @@ it('a view that has gone writes nothing more: its last write is the one it makes
 
 // The full reset crosses the renderer callback and the shell's tool/preview
 // lifecycle; it must reach the camera only after those changes commit.
+
+// A stand-in routine runtime: what preview puts down on the way in and hands back on the way out.
+function routineRuntime(name: string, calls: string[]) {
+  return { clips: [{ id: name }], clock: createAnimationClock(), savePlayback: () => { calls.push(`save ${name}`); return `${name}@3s`; },
+    resetPlayback: () => calls.push(`reset ${name}`), onRelease: () => calls.push(`release ${name}`),
+    restorePlayback: (saved: string) => calls.push(`restore ${name} ${saved}`), onPlayToggle: () => calls.push(`play ${name}`) };
+}
+
+function mountRoutine(data: Record<string, unknown>) {
+  const settings = { toolStack: { panels: {}, collapsed: {} } };
+  const preferences = { getSnapshot: () => settings, subscribe: () => () => {}, update() {} };
+  const props = (extra: Record<string, unknown>) => ({ source: { id: 'one' }, file: { path: '/models/one.harness', name: 'one.harness', kind: 'file' },
+    document: null, onReady() {}, onOpenFile() {}, appearance: { colorScheme: 'light' }, state: undefined,
+    onStateChange() {}, onNavigationActionsChange() {}, reload() {}, data: { services: { preferences }, ...extra } });
+  const view = render(<ViewerHostContext.Provider value={testHost()}><HarnessRenderer {...(props(data) as any)} /></ViewerHostContext.Provider>);
+  return (extra: Record<string, unknown>) => view.rerender(
+    <ViewerHostContext.Provider value={testHost()}><HarnessRenderer {...(props(extra) as any)} /></ViewerHostContext.Provider>);
+}
+
+it('the tools view\'s routine goes back only to the file it came from', () => {
+  const calls: string[] = [];
+  const first = routineRuntime('a', calls);
+  const rerender = mountRoutine({ animation: first, modelKey: 'a.glb' });
+  act(() => { fireEvent.click(screen.getAllByRole('button', { name: 'Preview' })[0]); });
+  // Another file opened in this view while preview was up: its runtime starts at rest.
+  const second = routineRuntime('b', calls);
+  rerender({ animation: second, modelKey: 'b.glb' });
+  // Opening another file leaves preview; the routine saved from a is never posed on b, which
+  // starts at rest (put down, however many times).
+  expect(screen.queryAllByRole('button', { name: 'Exit preview' })).toEqual([]);
+  expect(calls.filter(call => !call.startsWith('release'))).toEqual(['save a', 'reset a']);
+  expect(calls).toContain('release b');
+});
+
+it('a view that stops offering Preview while it is up leaves it as every exit does', () => {
+  const calls: string[] = [];
+  const runtime = routineRuntime('a', calls);
+  const rerender = mountRoutine({ animation: runtime });
+  act(() => { fireEvent.click(screen.getAllByRole('button', { name: 'Preview' })[0]); });
+  rerender({ animation: runtime, previewable: false });
+  expect(calls.filter(call => !call.startsWith('release'))).toEqual(['save a', 'reset a', 'restore a a@3s']);
+  expect(calls).toContain('release a');
+});

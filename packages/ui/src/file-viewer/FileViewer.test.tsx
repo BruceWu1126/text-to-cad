@@ -1,5 +1,4 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
-import { createPortal } from 'react-dom';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { isMissingFileError } from '@text-to-cad/core/client';
@@ -45,27 +44,26 @@ it('draws the navbar over every file, named by its name, and never over the home
   expect(navbar()).toBeNull();
 });
 
-it('keeps the right of the navbar for the host\'s update button and Full size, then the renderer\'s view controls in the box it hands it, and steps the navbar aside while the renderer shows its file fullscreen', async () => {
-  // A renderer that draws its view controls into the navbar's box for them, and shows its file
-  // fullscreen (the CAD viewer's Display and Preview).
-  const slots: (HTMLElement | null)[] = [];
+it('keeps the right of the navbar for the host\'s update button and Full size, hands a renderer no box of its own there, and steps the navbar aside while the renderer shows its file fullscreen', async () => {
+  // A renderer that draws its view controls itself (the CAD viewer's Display and Preview end its
+  // tool strip), and shows its file fullscreen.
+  const handed: string[][] = [];
   const fullscreen = defineFileRenderer({
     id: 'full', priority: 2, matches: () => true, prepare: async () => ({ data: null }),
-    load: async () => ({ default: ({ onFullscreenChange, navbarSlot }: any) => { slots.push(navbarSlot); return <>
-      {navbarSlot ? createPortal(<button type="button" aria-label="Preview" onClick={() => onFullscreenChange(true)} />, navbarSlot) : null}
-      <button type="button" onClick={() => onFullscreenChange(false)}>Back</button>
+    load: async () => ({ default: (props: any) => { handed.push(Object.keys(props)); return <>
+      <button type="button" aria-label="Preview" onClick={() => props.onFullscreenChange(true)} />
+      <button type="button" onClick={() => props.onFullscreenChange(false)}>Back</button>
     </>; } }),
   });
   render(<FileViewer file={FILE} host={host as any} renderers={[fullscreen]} state={{}} onStateChange={() => {}}
     update={<button type="button" aria-label="Update to 0.7.5" />} fullSize={<button type="button" aria-label="Full size" />} />);
   await screen.findByRole('button', { name: 'Preview' });
-  expect(labels()).toEqual(['Update to 0.7.5', 'Full size', 'Preview']);
-  expect(slots.at(-1)!.matches('[data-viewer-navbar] [data-view-controls]')).toBe(true);
+  expect([labels(), handed.at(-1)!.includes('navbarSlot'), document.querySelector('[data-view-controls]')]).toEqual([['Update to 0.7.5', 'Full size'], false, null]);
   act(() => screen.getByRole('button', { name: 'Preview' }).click());
-  // Fullscreen, there is no navbar, and so no box: the renderer draws its controls itself.
-  expect([navbar(), slots.at(-1)]).toEqual([null, null]);
+  // Fullscreen, there is no navbar.
+  expect(navbar()).toBeNull();
   act(() => screen.getByRole('button', { name: 'Back' }).click());
-  expect(labels()).toEqual(['Update to 0.7.5', 'Full size', 'Preview']);
+  expect(labels()).toEqual(['Update to 0.7.5', 'Full size']);
 });
 
 it('draws Back and Forward between the logo and the file\'s name where the host keeps the view\'s own history, each disabled where it has nowhere to go', async () => {
@@ -92,16 +90,16 @@ it('draws Back and Forward between the logo and the file\'s name where the host 
 it('opens the app menu from the logo: Back to files where the host has a home, the person\'s settings and the host\'s links; its ⋯ offers what the host can do with the file', async () => {
   const user = userEvent.setup();
   const home = vi.fn();
-  const quickEdit = vi.fn();
+  const share = vi.fn();
   const perform = { 'copy-path': vi.fn(), reveal: vi.fn() };
   const links = viewerLinks({ version: '0.7.4', github: 'https://github.com/earthtojake/text-to-cad', discord: 'https://discord.gg/x' });
   open({ host: { ...host, links, environment: { colorScheme: 'light', platform: 'win32' }, navigation: { openFile() {}, home }, fileActions: { platform: 'win32', perform } },
-    appSettings: [{ id: 'quick-edit', label: 'Quick edit', checked: true, onCheckedChange: quickEdit }] } as any);
+    appSettings: [{ id: 'analytics', label: 'Share anonymous usage data', checked: true, onCheckedChange: share }] } as any);
   await screen.findByText('shown');
   expect(labels()).toEqual(['Menu', 'File actions']);
   await user.click(screen.getByRole('button', { name: 'Menu' }));
   const menu = document.querySelector('[data-app-menu]')!;
-  expect([...menu.querySelectorAll('[role^="menuitem"]')].map(item => item.textContent)).toEqual(['Back to files', 'Quick edit', 'Send feedback', 'GitHub', 'Discord']);
+  expect([...menu.querySelectorAll('[role^="menuitem"]')].map(item => item.textContent)).toEqual(['Back to files', 'Share anonymous usage data', 'Send feedback', 'GitHub', 'Discord']);
   expect(menu.querySelector('[data-menu-footer]')?.textContent).toContain('v0.7.4');
   // Send feedback: a new issue on the project's tracker, begun "Feedback: ", for the person to
   // finish, naming the version and the platform; no label: the project has none for feedback.
@@ -110,8 +108,8 @@ it('opens the app menu from the logo: Back to files where the host has a home, t
     .toEqual(['https://github.com/earthtojake/text-to-cad/issues/new', 'Feedback: ', null]);
   expect(feedback.searchParams.get('body')).toMatch(/- CAD: 0\.7\.4\n- Platform: win32$/);
   // A setting turns without closing the menu; Back to files goes home.
-  await user.click(screen.getByRole('menuitemcheckbox', { name: 'Quick edit' }));
-  expect([quickEdit.mock.calls, Boolean(document.querySelector('[data-app-menu]'))]).toEqual([[[false]], true]);
+  await user.click(screen.getByRole('menuitemcheckbox', { name: 'Share anonymous usage data' }));
+  expect([share.mock.calls, Boolean(document.querySelector('[data-app-menu]'))]).toEqual([[[false]], true]);
   await user.click(screen.getByRole('menuitem', { name: 'Back to files' }));
   expect(home).toHaveBeenCalledOnce();
   await user.click(screen.getByRole('button', { name: 'File actions' }));
@@ -127,6 +125,22 @@ it('opens the app menu from the logo: Back to files where the host has a home, t
   await user.keyboard('{Escape}');
   await user.click(screen.getByRole('button', { name: 'File actions' }));
   expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Copy path']);
+});
+
+it('ends the app menu with the version the host runs, a link to its release notes: the release as it is, a custom build with its id', async () => {
+  const user = userEvent.setup();
+  const footer = async (links: object) => {
+    open({ host: { ...host, links } });
+    await screen.findByText('shown');
+    await user.click(screen.getByRole('button', { name: 'Menu' }));
+    const version = document.querySelector('[data-app-menu] [data-menu-version]')!;
+    const shown = [document.querySelector('[data-app-menu] [data-menu-footer]')!.textContent, version.getAttribute('href')];
+    cleanup();
+    return shown;
+  };
+  const notes = 'https://github.com/earthtojake/text-to-cad/releases/tag/v0.7.15';
+  expect(await footer(viewerLinks({ version: '0.7.15' }))).toEqual(['v0.7.15·Made by @earthtojake', notes]);
+  expect(await footer(viewerLinks({ version: '0.7.15', build: 'b80844940-dirty' }))).toEqual(['v0.7.15-dev.b80844940-dirty·Made by @earthtojake', notes]);
 });
 
 it('opens the explorer from the file\'s name where the host\'s files can be browsed, and a pick there is shown through the host', async () => {

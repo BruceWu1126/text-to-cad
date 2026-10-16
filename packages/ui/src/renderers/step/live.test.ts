@@ -72,21 +72,21 @@ describe('live CAD viewer binding', () => {
   it('waits for a grouped edit to commit without resetting the selected mode', async () => {
     let frames = 0;
     const view = harness(async () => {
-      if (++frames === 3) view.update({ ...state(), display: { mode: 'render', lighting: { exposure: 1 } } });
+      if (++frames === 3) view.update({ ...state(), display: { mode: 'render', modes: { render: { lighting: { exposure: 1 } } } } });
     });
     view.update({ ...state(), display: { mode: 'render' } });
-    expect((await view.controller.setDisplaySettings({ lighting: { exposure: 1 } })).display.mode).toBe('render');
-    expect(view.commands.setDisplaySettings).toHaveBeenCalledExactlyOnceWith({ lighting: { exposure: 1 } });
+    expect((await view.controller.setDisplaySettings({ modes: { render: { lighting: { exposure: 1 } } } })).display.mode).toBe('render');
+    expect(view.commands.setDisplaySettings).toHaveBeenCalledExactlyOnceWith({ modes: { render: { lighting: { exposure: 1 } } } });
     expect(frames).toBe(3);
   });
-  it('waits for normalized clip precedence rather than an overridden scalar offset', async () => {
+  it('waits for the normalized clip, where a new axis drops the old coordinate', async () => {
     const view = harness();
-    view.update({ ...state(), display: { mode: 'solid', clip: { axis: 'x', offsets: { x: 0.2 } } } });
+    view.update({ ...state(), display: { mode: 'solid', clip: { axis: 'x', at: 2 } } });
     view.commands.setDisplaySettings.mockImplementation(() => view.update({ ...state(), display: {
-      mode: 'solid', clip: { enabled: true, axis: 'y', offset: 0.7, offsets: { x: 0.2, y: 0.7, z: 0 }, invert: false }
+      mode: 'solid', clip: { enabled: true, axis: 'y', invert: false }
     } }));
-    const result = await view.controller.setDisplaySettings({ clip: { axis: 'y', offset: 0.3, offsets: { y: 0.7 } } });
-    expect(result.display.clip).toMatchObject({ axis: 'y', offset: 0.7 });
+    const result = await view.controller.setDisplaySettings({ clip: { axis: 'y' } });
+    expect(result.display.clip).toEqual({ enabled: true, axis: 'y', invert: false });
   });
   it('bounds a render-mode command that never commits', async () => {
     const now = vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(10_001);

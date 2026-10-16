@@ -15,12 +15,6 @@ Browser entry points never import Node-only code. Node builders remain in `bin/`
 `@text-to-cad/core/client` communicates with `cadgen.viewer` over HTTP; this
 protocol relationship never imports Python or discovers an interpreter.
 
-`@text-to-cad/core/drawing` validates bounded Excalidraw v2 scene snapshots for the
-desktop's temporary sketch tabs. It imports no editor, React, filesystem or
-storage service. Document limits and shared editor/host ownership are described
-in [the drawing contract](../ui/docs/drawing.md); the mechanism is
-[`src/drawing/index.js`](src/drawing/index.js).
-
 ## The laws that live here
 
 - **Viewer three-input law**: a client renders from the file, its optional
@@ -71,15 +65,13 @@ in [the drawing contract](../ui/docs/drawing.md); the mechanism is
   reports a typed miss before tessellation starts rather than turning a cheap
   decoded-mesh request into unbudgeted surface tessellation. Mechanism:
   [docs/resource-ownership.md](docs/resource-ownership.md) §5.
-- **One grouped view state**: `common/viewSettings.js` validates the public
-  Solid, Render, X-ray, Hidden line and Wireframe presets. Every preset exposes
-  the same independent camera, surfaces, edges, lighting, background, floor,
-  grid and axes groups. `resolveViewSceneSettings()` in `common/sceneSettings.js`
-  is the Viewer/snapshot policy boundary: enabled capabilities select scene
-  resources, never the preset name. Disabled lighting retains neutral CAD
-  illumination; disabled background restores the workbench canvas. Camera pose,
-  clipping and explode remain model tools, outside preset selection and Custom
-  comparison. View Reset clears display overrides and disables those tools. The grouped contract and the rig it drives:
+- **One per-mode view state**: `common/viewSettings.js` validates Solid, Render,
+  X-ray, Hidden line and Wireframe and each mode's own settings. Appearance,
+  camera, clipping and explode are shared; selecting or resetting a mode keeps
+  them and the other modes' settings. `resolveViewSceneSettings()` maps the active
+  mode into renderer groups, preserving the Viewer/snapshot policy boundary.
+  Format capabilities are injected. There are no legacy display aliases or
+  saved-shape migrations. The contract and rendering mechanism:
   [docs/render-pipeline.md](docs/render-pipeline.md).
 - **Kinematics is data, choreography is JS, independently**: the FK
   evaluator (`kinematicsRuntime.js`) folds sidecar mate data into
@@ -198,8 +190,8 @@ inert; subscriptions start catalog polling, which the host's `shouldPoll` gates
 (the web's pauses while its page is hidden). The client also carries what every
 CAD view asks of its server, so each host reaches it the same way: the model
 library (`recents`, `changeRecents`, `thumbnail`, `keepThumbnail`), Open
-(`pick`), Reveal (`reveal`), the person's analytics answer and features
-(`consent`, `features`), the update check (`version`) and what the page did for
+(`pick`), Reveal (`reveal`), the person's analytics answer and feature settings (`consent`, `features`), the
+update check (`version`) and what the page did for
 telemetry (`reportActivity`: a touch, a Quick Edit that went, or a crash); every
 change is a POST with the viewer's guard header. A host reports its page's crashes
 with `createCrashReporter(send, { fileOf })`, which makes each with `crashOf` (a
@@ -241,9 +233,12 @@ transport](docs/workspace-resources.md) for worker transfer, nested dependencies
 cache generations and the standalone static-HTTP default. No client reads model
 source or starts a source build.
 
-`createHttpAttachmentStore({ origin, fetch })` is the viewer server's store for a
-picture a prompt names by path: `save(png, name)` posts it to `POST /__cad/sketches`
-and answers the saved file's absolute path.
+`createHttpPromptFiles({ origin, fetch })` is the viewer server's maker of a Quick
+Edit's files: `create(request)` posts its views and annotation to `POST /__cad/prompt-files`,
+asks again until the server has rendered them, and answers where the views job, the
+annotation and each view's picture are; `read(path)` fetches one. The annotation format, and
+the code that draws an annotation in a scene for the viewer and for a snapshot alike, is
+`common/annotation.js`.
 
 Inspect and Render each resolve their fixed scene base. Legacy host theme input
 cannot replace either base.
@@ -273,7 +268,7 @@ person wrote, then `File:`, `References:` and, for a picture that travels as a f
 its label and path. Text, typed resource
 references and attachments travel in one ordered, immutable snapshot with an
 operation ID; attachment relationships name reference parts, and an attachment's
-optional `label` ("Sketch") names it in that message. Text ranges use
+optional `label` ("Annotation") names it in that message. Text ranges use
 zero-based UTF-16 coordinates with an exclusive end. CAD targets retain the
 existing selector grammar and document revision, without interpreting a code
 range as a CAD fragment. Apps own clipboard/draft delivery, MIME/size limits and

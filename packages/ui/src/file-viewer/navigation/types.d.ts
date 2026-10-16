@@ -56,8 +56,7 @@ export function fuzzyMatch(
 /**
  * The one navbar, over a file (a host's home has none). Left: the logo, which opens the app's menu
  * (`AppMenu`), Back and Forward where the host keeps the view's history (`history`), the open file's
- * name (the explorer's door, where the host's files can be browsed) and its ⋯. Right: `update`, `trailing` (the file's actions), `fullSize`, then the box the
- * renderer draws its view controls into (`controlsRef`).
+ * name (the explorer's door, where the host's files can be browsed) and its ⋯. Right: `update`, `trailing` (the file's actions), `fullSize`, then `colorSchemeControl`.
  */
 export const ViewerNavbar: ComponentType<{
   /** The host's home, where it has one: the app menu's Back to files. */
@@ -75,8 +74,8 @@ export const ViewerNavbar: ComponentType<{
   update?: ReactNode;
   /** The host's Full size button, where it shows the view small. */
   fullSize?: ReactNode;
-  /** The box, last in the row, the renderer draws its view controls into (a 3D view's Display and Preview). */
-  controlsRef?: (element: HTMLDivElement | null) => void;
+  /** The host's light/dark control, last: the page's top-right corner. */
+  colorSchemeControl?: ReactNode;
   className?: string;
 }>;
 

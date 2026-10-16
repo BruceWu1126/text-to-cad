@@ -20,9 +20,9 @@ it('keeps controls authoritative while preparation is pending, including StrictM
     requested = desired;
     settled = applied;
     useEffect(() => { if (applied.revision) applied.binding.complete(applied.revision); }, [applied.revision]);
-    return <><button onClick={() => store.selectPreset('render')}>Render</button>
-      <button onClick={() => store.patch({ lighting: { exposure: 2 } })}>Exposure</button>
-      <button onClick={() => store.selectPreset('solid')}>Solid</button>
+    return <><button onClick={() => store.selectMode('render')}>Render</button>
+      <button onClick={() => store.patchMode("render", { lighting: { exposure: 2 } })}>Exposure</button>
+      <button onClick={() => store.selectMode('solid')}>Solid</button>
       <output>{desired.view.mode}:{desired.view.lighting.exposure}</output></>;
   }
   render(<StrictMode><Harness /></StrictMode>);

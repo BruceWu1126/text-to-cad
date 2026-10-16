@@ -1,8 +1,14 @@
 import { normalizeExplodedViewSettings } from "@text-to-cad/core/lib/displaySettings.js";
-import { normalizeViewSettings } from "@text-to-cad/core/common/viewSettings.js";
-import { clipAxisBounds, normalizeStepClipSettings } from "@text-to-cad/core/lib/viewer/clipPlane.js";
+import { clipAmount, clipAtForAmount, clipAxisBounds, normalizeStepClipSettings } from "@text-to-cad/core/lib/viewer/clipPlane.js";
+import { ArrowLeftRight, ChevronDown } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger
+} from "@text-to-cad/ui/primitives/dropdown-menu";
 import { Slider } from "@text-to-cad/ui/primitives/slider";
-import { FILE_SHEET_PRECISION_SLIDER_CLASSES, FileSheetSelectRow } from "../../../kit/inspector/FileSheet.js";
+import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
+import { cn } from "@text-to-cad/ui/utils";
+import { FLOATING_SURFACE_CLASS } from "../../../../lib/floatingSurface.js";
+import { FILE_SHEET_PRECISION_SLIDER_CLASSES } from "../../../kit/inspector/FileSheet.js";
 
 const AXES = Object.freeze(["x", "y", "z"]);
 
@@ -11,58 +17,88 @@ function formatNumber(value, digits = 2) {
   return Number.isFinite(number) ? number.toFixed(digits) : "0";
 }
 
+// These controls read the resolved scene's Clip and Explode groups. Public display
+// validation belongs to the settings store; resolved scene groups are not a saved display.
 // Persistent model effects are separate from Display and its presets. Clip and Explode are drawn
 // alike: the amount in the panel's heading, one row for a body — Explode's a slider, Clip's the
 // axis it cuts along and then its slider.
+//
+// Clip's view holds where its plane stands (`at`, millimetres); the panel shows the share of the
+// model it cuts away, measured on `bounds` — the model at rest, the box the plane is placed in.
 function clipState(viewSettings, bounds) {
-  const clip = normalizeStepClipSettings(normalizeViewSettings(viewSettings).clip);
+  const clip = normalizeStepClipSettings(viewSettings?.clip);
   const { min, max } = clipAxisBounds(bounds, clip.axis);
-  const neutral = clip.invert ? 0 : 1;
-  const offset = clip.enabled ? clip.offset : neutral;
-  return { clip, neutral, range: max - min, amount: (clip.invert ? offset : 1 - offset) * 100 };
+  return { clip, range: max - min, amount: clipAmount(clip, bounds) * 100 };
 }
 
 /** How far Clip cuts, for its panel's heading. */
-export function clipSummary(viewSettings) {
-  return `${formatNumber(clipState(viewSettings, null).amount, 0)}%`;
+export function clipSummary(viewSettings, bounds) {
+  return `${formatNumber(clipState(viewSettings, bounds).amount, 0)}%`;
 }
 
 const AXIS_OPTIONS = Object.freeze(AXES.map(value => ({ value, label: value.toUpperCase() })));
 
-/** Clip's axis, left of its slider: a compact X / Y / Z dropdown, the size of Pose's. */
-function ClipAxisSelect({ viewSettings, onViewSettingsPatch }) {
-  const { clip, neutral } = clipState(viewSettings, null);
-  return <FileSheetSelectRow hideLabel className="w-auto shrink-0 px-0" triggerClassName="!h-6 w-auto gap-1 !px-1.5 text-tiny"
-    value={clip.axis} ariaLabel="Clip axis" options={AXIS_OPTIONS}
-    onValueChange={nextAxis => {
+/** Clip's axis, left of its slider: a borderless button reading the axis in hand, as the row's other
+ *  buttons are, whose dropdown lists X, Y and Z. */
+function ClipAxisSelect({ viewSettings, onViewSettingsPatch, bounds }) {
+  const { clip, amount } = clipState(viewSettings, bounds);
+  const choose = nextAxis => {
       if (!nextAxis || nextAxis === clip.axis) return;
-      const nextOffset = clip.enabled ? clip.offsets[nextAxis] : neutral;
-      onViewSettingsPatch({ clip: { axis: nextAxis, offsets: { [nextAxis]: nextOffset }, enabled: Math.abs(nextOffset - neutral) > 1e-6 } });
-    }} />;
+      // An axis alone is not an effect. A cut keeps its share on the new axis; with no box to
+      // measure it on, it goes through the middle.
+      const { min, max } = clipAxisBounds(bounds, nextAxis);
+      const at = clip.enabled && max > min ? clipAtForAmount({ ...clip, axis: nextAxis }, bounds, amount / 100) : undefined;
+      onViewSettingsPatch({ clip: { axis: nextAxis, ...(at !== undefined ? { at } : {}) } });
+  };
+  return <DropdownMenu modal={false}>
+    <DropdownMenuTrigger asChild>
+      <ToolbarButton tooltip={false} label={`Clip axis: ${clip.axis.toUpperCase()}`} data-clip-axis={clip.axis}
+        className="w-auto shrink-0 gap-0.5 px-1 text-tiny">
+        {clip.axis.toUpperCase()}<ChevronDown className="size-2.5 opacity-60" aria-hidden="true" />
+      </ToolbarButton>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="start" sideOffset={4} collisionPadding={8} aria-label="Clip axis"
+      className={cn(FLOATING_SURFACE_CLASS, "min-w-16 data-[state=closed]:animate-none!")}>
+      <DropdownMenuRadioGroup value={clip.axis} onValueChange={choose}>
+        {AXIS_OPTIONS.map(option => <DropdownMenuRadioItem key={option.value} value={option.value}>{option.label}</DropdownMenuRadioItem>)}
+      </DropdownMenuRadioGroup>
+    </DropdownMenuContent>
+  </DropdownMenu>;
 }
 
-// The Clip panel's body: its axis, then one slider, which applies the cut as it leaves zero and
-// removes it at zero.
-export function CrossSectionControls({ viewSettings, onViewSettingsPatch, bounds }) {
-  const { clip, neutral, range, amount } = clipState(viewSettings, bounds);
-  const changeOffset = nextOffset => onViewSettingsPatch({ clip: {
-    offsets: { [clip.axis]: nextOffset }, enabled: Math.abs(nextOffset - neutral) > 1e-6
-  } });
-  return <div className="flex min-w-0 items-center gap-2 px-2 py-1">
-    <ClipAxisSelect viewSettings={viewSettings} onViewSettingsPatch={onViewSettingsPatch} />
+/** Flip: which side of the plane is cut away, the cut keeping its share; idle while nothing is cut. */
+export function ClipFlipButton({ viewSettings, onViewSettingsPatch, bounds }) {
+  const { clip, amount } = clipState(viewSettings, bounds);
+  const flipped = { ...clip, invert: !clip.invert };
+  return <ToolbarButton label="Flip clip" disabled={!clip.enabled} active={clip.enabled && clip.invert} aria-pressed={clip.invert}
+    onClick={() => onViewSettingsPatch({ clip: { invert: flipped.invert, at: clipAtForAmount(flipped, bounds, amount / 100) } })}>
+    <ArrowLeftRight className="size-3" strokeWidth={2} aria-hidden="true" />
+  </ToolbarButton>;
+}
+
+// Clip's controls: its axis, then one slider, which applies the cut as it leaves zero and removes it
+// at zero. `className` lays them out where they sit, and `sliderClassName` draws the slider.
+export function CrossSectionControls({ viewSettings, onViewSettingsPatch, bounds, className = "flex min-w-0 items-center gap-2 px-2 py-1",
+  sliderClassName = FILE_SHEET_PRECISION_SLIDER_CLASSES }) {
+  const { clip, range, amount } = clipState(viewSettings, bounds);
+  return <div className={className}>
+    <ClipAxisSelect viewSettings={viewSettings} onViewSettingsPatch={onViewSettingsPatch} bounds={bounds} />
     <Slider thumbProps={{ "aria-label": "Clip amount" }} value={[amount]} min={0} max={100}
       step={0.1} disabled={!range}
-      onValueChange={([value]) => changeOffset(clip.invert ? value / 100 : 1 - value / 100)}
-      className={FILE_SHEET_PRECISION_SLIDER_CLASSES} />
+      onValueChange={([value]) => onViewSettingsPatch({ clip: {
+        enabled: value > 0, at: clipAtForAmount(clip, bounds, value / 100)
+      } })}
+      className={sliderClassName} />
   </div>;
 }
 
-// The Explode panel: one slider, which applies the effect as it leaves zero and removes it at zero.
-export function ExplodeControls({ viewSettings, onViewSettingsPatch }) {
-  const exploded = normalizeExplodedViewSettings(normalizeViewSettings(viewSettings).exploded);
-  return <div className="px-2 py-1"><Slider thumbProps={{ "aria-label": "Explode amount" }}
+// Explode's control: one slider, which applies the effect as it leaves zero and removes it at zero.
+// `className` draws it where it sits (its sub-toolbar's slider).
+export function ExplodeControls({ viewSettings, onViewSettingsPatch, className = FILE_SHEET_PRECISION_SLIDER_CLASSES }) {
+  const exploded = normalizeExplodedViewSettings(viewSettings?.exploded);
+  return <Slider thumbProps={{ "aria-label": "Explode amount" }}
     value={[exploded.enabled ? exploded.amount * 100 : 0]} min={0} max={100} step={1}
     onValueChange={([amount]) => onViewSettingsPatch({ exploded: { amount: amount / 100, enabled: amount > 0 } })}
-    className={FILE_SHEET_PRECISION_SLIDER_CLASSES} /></div>;
+    className={className} />;
 }
 

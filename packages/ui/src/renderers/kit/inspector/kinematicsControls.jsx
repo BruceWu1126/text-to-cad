@@ -1,8 +1,10 @@
-import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
-import { RotateCcw, Spline } from "lucide-react";
-import { Button } from "@text-to-cad/ui/primitives/button";
+import { ChevronDown } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger
+} from "@text-to-cad/ui/primitives/dropdown-menu";
 import { cn } from "@text-to-cad/ui/utils";
-import { FILE_SHEET_FIELD_LABEL_CLASSES, FileSheetSelectRow } from "./FileSheet.js";
+import { FLOATING_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
+import { ToolPanelHeadAction } from "../tools/ToolPanel.jsx";
 
 export const NO_PRESET_VALUE = "__none__";
 export const DEFAULT_POSE_VALUE = "__default__";
@@ -16,41 +18,35 @@ export function positionValuesAreDefault(values, defaults) {
 }
 
 /**
- * The Pose row of a Position panel: a "Pose" label beside its dropdown, drawn only when there is a
- * named pose to choose; Default leads the options when the panel can reset. Without a named pose
- * there is no row: Reset is the panel heading's (`MotionResetButton`).
+ * Position's Pose, in its heading at the right end (`ToolPanelHeadAction`), so it is on screen
+ * whatever the section shows, folded too: a borderless button reading the pose in hand ("Custom"
+ * while the joints are set by hand), whose compact list is Default first where the section can
+ * reset (the way back to the default pose: there is no other), then the named poses. Nothing
+ * where there is neither to choose.
  */
 export function KinematicsPoseRow({ poses = [], activeValue, onSelect, onReset }) {
-  if (!poses.length) return null;
+  if (!poses.length && !onReset) return null;
   const options = [...(onReset ? [{ value: DEFAULT_POSE_VALUE, label: "Default" }] : []), ...poses];
   const active = options.find(pose => pose.value === activeValue);
-  return <div data-position-header="" className="flex min-w-0 items-center gap-2 px-2">
-    <span className={cn(FILE_SHEET_FIELD_LABEL_CLASSES, "shrink-0")}>Pose</span>
-    {/* Compact and at the row's right end, the size of the joint value boxes under it. */}
-    <FileSheetSelectRow hideLabel className="ml-auto min-w-0 px-0" triggerClassName="!h-6 w-auto max-w-full gap-1 !px-1.5 text-tiny" value={active?.value || NO_PRESET_VALUE}
-      onValueChange={value => value === DEFAULT_POSE_VALUE ? onReset?.() : onSelect?.(value)}
-      ariaLabel="Pose" triggerContent={<span className="truncate">{active?.label || "Custom"}</span>}
-      options={options} />
-  </div>;
-}
-
-/**
- * The Position tool's icon: the spline, with a small dot at its top-left while the pose is not the
- * default one (a joint moved, or a named pose applied), so a person can see that from the strip.
- */
-export function PositionToolIcon({ custom = false }) {
-  return <span className="relative inline-flex" data-position-custom={custom ? "" : undefined}>
-    <Spline className="size-3" strokeWidth={2} aria-hidden="true" />
-    {/* The size of the spline's own end dots and in its colour: a note, not a badge. */}
-    {custom ? <span aria-hidden="true" className="absolute -left-px -top-px size-1 rounded-full bg-current" /> : null}
-  </span>;
-}
-
-/** A Position panel's Reset: in its heading, before the fold chevron. */
-export function MotionResetButton({ onReset }) {
-  if (!onReset) return null;
-  return <TooltipHint content="Reset motion"><Button variant="ghost" size="icon-xs" className="size-5 shrink-0 text-muted-foreground"
-    onClick={onReset} aria-label="Reset">
-    <RotateCcw className="size-3" aria-hidden="true" />
-  </Button></TooltipHint>;
+  const label = active?.label || "Custom";
+  return <ToolPanelHeadAction>
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <button type="button" aria-label={`Pose: ${label}`} data-pose-menu=""
+          className="flex h-5 min-w-0 max-w-28 shrink items-center gap-0.5 rounded-sm px-1 text-tiny font-normal text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 aria-expanded:bg-accent aria-expanded:text-foreground">
+          <span className="min-w-0 truncate">{label}</span>
+          <ChevronDown className="size-2.5 shrink-0 opacity-60" aria-hidden="true" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" sideOffset={4} collisionPadding={8} aria-label="Pose"
+        className={cn(FLOATING_SURFACE_CLASS, "min-w-28 data-[state=closed]:animate-none!")}>
+        <DropdownMenuRadioGroup value={active?.value || NO_PRESET_VALUE}
+          onValueChange={value => value === DEFAULT_POSE_VALUE ? onReset?.() : onSelect?.(value)}>
+          {options.map(option => <DropdownMenuRadioItem key={option.value} value={option.value}>
+            <span className="min-w-0 truncate">{option.label}</span>
+          </DropdownMenuRadioItem>)}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  </ToolPanelHeadAction>;
 }

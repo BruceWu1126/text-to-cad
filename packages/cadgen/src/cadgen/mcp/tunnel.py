@@ -145,6 +145,8 @@ class ViewerTunnel:
                 # The server's recorder: a person's answer on a card here is the CAD app's.
                 app.analytics, app.consent_by = self._analytics, "app"
                 app.drawings.hold_seconds, app.drawings.retry_ms = DRAWING_HOLD_SECONDS, DRAWING_RETRY_MS
+                # Poll prompt renders at the same cadence as drawing renders.
+                app.prompt_files.retry_ms = DRAWING_RETRY_MS
                 self._app = app
             return self._app
 

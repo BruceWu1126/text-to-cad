@@ -684,7 +684,7 @@ test("surface instances follow transforms and keep the unaffected majority insta
   assert.equal(matrix.elements[12], 20);
   assert.equal(matrix.elements[13], 6);
 
-  scene.update({ clip: { enabled: true, axis: "x", offsets: { x: 0.5 } } });
+  scene.update({ clip: { enabled: true, axis: "x", at: (scene.restBounds.min[0] + scene.restBounds.max[0]) / 2 } });
   assert.equal(set.object.material.clippingPlanes.length, 1, "shared surface pass receives clipping");
   const originalRecords = [...scene.displayRecords];
   const originalMaterials = scene.displayRecords.map((item) => item.material);
@@ -1182,7 +1182,7 @@ test("buildModel applies selection, clipping, and STEP parameter effects", () =>
     clip: {
       enabled: true,
       axis: "x",
-      offsets: { x: 0.5 }
+      at: 1.5
     },
     stepParameters: {
       definition: {
@@ -1255,7 +1255,7 @@ test("buildModel keeps restBounds at the zero pose while bounds follow the param
     theme: cloneThemePresetSettings("workbench-light"),
     renderPartsIndividually: true,
     parameterSetup: false,
-    clip: { enabled: true, axis: "x", offset: 0.5 },
+    clip: { enabled: true, axis: "x", at: 1.5 },
     stepParameters: {
       definition: {
         module: {
@@ -1858,7 +1858,7 @@ test("direct viewer effects and clip passes synchronize shared surfaces without 
   assert.equal(record.surfaceInstance.set, set);
   assert.equal(set.object.material.envMapIntensity, 3.25, "material-only reflection changes reach the shared pass");
 
-  syncRuntimeStepClipPlane(runtime, { enabled: true, axis: "x", offsets: { x: 0.25 } });
+  syncRuntimeStepClipPlane(runtime, { enabled: true, axis: "x", at: scene.restBounds.min[0] + (scene.restBounds.max[0] - scene.restBounds.min[0]) * 0.25 });
   assert.equal(set.object.material.clippingPlanes.length, 1, "clip-only update reaches the shared draw");
   assert.equal(set.object.material.clippingPlanes[0].constant, record.material.clippingPlanes[0].constant);
   syncRuntimeStepClipPlane(runtime, { enabled: false });

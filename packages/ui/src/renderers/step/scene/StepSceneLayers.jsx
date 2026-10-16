@@ -49,7 +49,7 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
   const {
     meshData, modelKey, isLoading, renderMode, previewMode, pickMode, hiddenPartIds, selectedPartIds,
     hoveredPartId, selectorRuntime, stepParameterRuntime, stepAnimationRuntime, animateMode,
-    jointHandles, measureState, activeMeasurementId, measureModeActive,
+    jointHandles, measureState, activeMeasurementId, selectedMeasurementIds = [], hoveredMeasurementId = "", measureModeActive,
     onLodCameraChange, onMeshSourceAdoption, onViewerAlertChange,
     onHoverReferenceChange, onActivateReference, onDoubleActivateReference, deferActivation, onMeasurePick, onMeasureHoverPoint
   } = props;
@@ -239,7 +239,7 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
   }, [measureState]);
 
   useStepMeasureOverlay({
-    measureCanvasRef, measureState, activeMeasurementId, measureHoverRef, measureModeActive,
+    measureCanvasRef, measureState, activeMeasurementId, selectedMeasurementIds, hoveredMeasurementId, measureHoverRef, measureModeActive,
     runtimeRef, mountRef, previewMode, viewerReadyTick
   });
 
@@ -262,8 +262,9 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
     onMeasurePick: handleMeasurePick,
     onMeasureHoverPoint: handleMeasureHoverPoint,
     viewerReadyTick,
-    // Nothing under the pointer is picked or hovered while a routine plays, in preview or under Position.
-    suppressTopologyPicking: animateMode || Array.isArray(jointHandles) || stepAnimationPlaying
+    // Nothing under the pointer is picked or hovered while a routine plays, in preview, or under Animation or Position.
+    // Position's knobs are Select's and leave its picks alone: a press is the knob's only on a knob.
+    suppressTopologyPicking: animateMode || stepAnimationPlaying
   });
 
   // Read-only debug/test seams. `__cadCamera` and `__cadStage` are the viewport's.

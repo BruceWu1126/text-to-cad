@@ -1,7 +1,6 @@
-import { createPromptDeliveryLedger, formatPromptMessage, validatePromptContext } from '@text-to-cad/core/prompt';
+import { createPromptDeliveryLedger, formatPromptMessage, resolveAttachmentPaths, validatePromptContext } from '@text-to-cad/core/prompt';
 import type { PromptContext, PromptContextPort, PromptDeliveryResult, PromptDestinationState, PromptPart } from '@text-to-cad/core/prompt';
 import { encodeBase64 } from '@text-to-cad/core/client';
-import type { AttachmentStore } from '@text-to-cad/ui/host';
 import { HostError, type Bridge } from './bridge';
 import type { Presentation } from './presentation';
 
@@ -49,10 +48,11 @@ async function png(part: Attachment): Promise<Blob> {
  * on every update, so the port keeps what this view has queued and sends all of it; when the host
  * clears the context (the message went, or the chip was removed) it starts again. `send`, where the
  * host takes messages, posts the context as the person's message now. A picture is an image block
- * where the host takes one; where it does not, it is saved (`attachments`) and the text names it.
+ * where the host takes one; where it does not, and for every other file (a views job, an annotation), the
+ * text names the path it is saved at (`part.path`).
  */
-export function createChatPromptContext(bridge: Pick<Bridge, 'request' | 'onHostContext' | 'hostContext'>, { reach, attachments }: {
-  reach: ChatReach; attachments?: AttachmentStore;
+export function createChatPromptContext(bridge: Pick<Bridge, 'request' | 'onHostContext' | 'hostContext'>, { reach }: {
+  reach: ChatReach;
 }): PromptContextPort & { dispose(): void } {
   const state: PromptDestinationState = Object.freeze(reach.queue ? {
     kind: 'composer', available: true,
@@ -81,6 +81,13 @@ export function createChatPromptContext(bridge: Pick<Bridge, 'request' | 'onHost
     ...(title ? { _meta: { 'openai/title': title } } : {}),
   });
   const attachmentsOf = (context: PromptContext) => context.parts.filter((part): part is Attachment => part.kind === 'attachment');
+  // The pictures: what rides beside the text as an image where the host takes one.
+  const picturesOf = (context: PromptContext) => attachmentsOf(context).filter(part => part.mimeType === 'image/png');
+  // The text, naming each file it does not carry as a block: all of them, or all but the pictures.
+  const textOf = async (context: PromptContext, pictured: boolean) => {
+    const paths = await resolveAttachmentPaths(context);
+    return formatPromptMessage(context, { attachmentPath: part => (pictured && part.mimeType === 'image/png' ? null : paths.get(part.id) ?? null) });
+  };
   const deliveryFailure = (context: unknown) => {
     if (context && typeof context === 'object' && Array.isArray((context as PromptContext).parts)) {
       for (const part of (context as PromptContext).parts) if (part?.kind === 'attachment' && part.content) void Promise.resolve(part.content).catch(() => {});
@@ -98,8 +105,8 @@ export function createChatPromptContext(bridge: Pick<Bridge, 'request' | 'onHost
       if (invalid) return invalid;
       return ledger.deliver(context.operationId, async (): Promise<PromptDeliveryResult> => {
         const file = fileOf(context);
-        const blocks: Block[] = [{ type: 'text', text: formatPromptMessage(context), _meta: { 'openai/title': textTitle(context) } }];
-        for (const part of attachmentsOf(context)) blocks.push(await imageBlock(part, titled(part.label || 'CAD view', file)));
+        const blocks: Block[] = [{ type: 'text', text: await textOf(context, true), _meta: { 'openai/title': textTitle(context) } }];
+        for (const part of picturesOf(context)) blocks.push(await imageBlock(part, titled(part.label || 'CAD view', file)));
         // Updates replace each other, so they go out one at a time, in order.
         const update = queueing.then(async () => {
           const next = [...queued, ...blocks].slice(-MAX_ITEMS);
@@ -125,23 +132,19 @@ export function createChatPromptContext(bridge: Pick<Bridge, 'request' | 'onHost
 
   async function post(context: PromptContext, images: boolean) {
     const blocks: Block[] = [];
-    const saved = new Map<string, string>();
-    for (const part of attachmentsOf(context)) {
-      if (images) blocks.push(await imageBlock(part));
-      else if (attachments) saved.set(part.id, await attachments.save(await png(part), part.name));
-    }
-    const text = formatPromptMessage(context, { attachmentPath: part => saved.get(part.id) });
+    if (images) for (const part of picturesOf(context)) blocks.push(await imageBlock(part));
+    const text = await textOf(context, images);
     await bridge.request('ui/message', { role: 'user', content: [{ type: 'text', text }, ...blocks] }, { timeoutMs: 30_000 });
   }
   port.send = context => {
     const invalid = deliveryFailure(context);
     if (invalid) return invalid;
     return ledger.deliver(`send:${context.operationId}`, async (): Promise<PromptDeliveryResult> => {
-      const pictured = attachmentsOf(context).length > 0;
+      const pictured = picturesOf(context).length > 0;
       try { await post(context, reach.sendImages && pictured); }
       catch (error) {
         // A host that declares images in messages and still refuses this one gets the picture as a file.
-        if (!(error instanceof HostError && error.code === INVALID_PARAMS && reach.sendImages && pictured && attachments)) throw error;
+        if (!(error instanceof HostError && error.code === INVALID_PARAMS && reach.sendImages && pictured)) throw error;
         await post(context, false);
       }
       return { status: 'sent', partIds: context.parts.map(part => part.id) };

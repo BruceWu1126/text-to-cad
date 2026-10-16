@@ -59,7 +59,7 @@ let temporary, server, browser;
 const requests = [];
 before(async () => {
   temporary = await mkdtemp(join(tmpdir(), 'text-to-cad-mesh-browser-'));
-  await build({ entryPoints: [fileURLToPath(new URL('../harness/index.tsx', import.meta.url))], outfile: join(temporary, 'harness.js'), bundle: true, format: 'esm', platform: 'browser', conditions: ['production'], jsx: 'automatic', loader: { '.webp': 'dataurl', '.avif': 'dataurl', '.woff2': 'dataurl', '.svg': 'dataurl' } });
+  await build({ entryPoints: [fileURLToPath(new URL('../harness/index.tsx', import.meta.url))], outfile: join(temporary, 'harness.js'), bundle: true, format: 'esm', platform: 'browser', conditions: ['production'], jsx: 'automatic', loader: { '.webp': 'dataurl', '.avif': 'dataurl', '.svg': 'dataurl' } });
   const bundle = await readFile(join(temporary, 'harness.js'));
   const css = await readFile(new URL('../../../dist/styles.css', import.meta.url));
   server = createServer((request, response) => {
@@ -105,17 +105,34 @@ async function open(t, file) {
 }
 
 const ready = pane => pane.locator('[aria-busy="false"] > div > canvas').first().waitFor();
-// A mesh has no interaction tools, so no strip; its Display settings are the navbar's button beside Preview.
+// A mesh has no interaction tools, so its strip is the view's controls alone: Display, then Preview, with no rule.
 const noTools = async (pane) => {
-  assert.equal(await pane.getByRole('group', { name: 'Interaction tools' }).count(), 0, 'a mesh has no tools, so no strip');
-  assert.equal(await displayButton(pane).count(), 1, 'its Display settings are the navbar\'s button beside Preview');
-  for (const name of ['Orbit', 'Draw', 'Select', 'Measure', 'Position', 'Animate']) {
+  const strip = pane.getByRole('group', { name: 'Interaction tools' });
+  assert.deepEqual(await strip.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
+    ['Display mode: Solid', 'Preview'], 'a mesh has no tools: the strip holds the view\'s controls alone');
+  assert.equal(await strip.locator('[data-strip-rule]').count(), 0, 'no rule with no tools before it');
+  for (const name of ['Orbit', 'Annotate', 'Draw', 'Select', 'Measure', 'Position', 'Animation']) {
     assert.equal(await pane.getByRole('button', { name, exact: true }).count(), 0, name);
   }
 };
-const displayButton = pane => pane.locator('[data-view-controls]').getByRole('button', { name: 'Display', exact: true });
+const displayButton = pane => pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button', { name: /^Display mode: / });
+// Display's settings: its per-mode settings submenu.
+async function openDisplay(pane) {
+  await displayButton(pane).click();
+  await pane.page().getByRole('menuitem', { name: 'Solid settings', exact: true }).click();
+  await pane.page().locator('[data-display-settings="solid"]').waitFor();
+}
+// The display modes Display's menu offers, by id.
+async function displayModes(pane) {
+  await displayButton(pane).click();
+  const menu = pane.page().locator('[role=menu][aria-label="Display mode"]');
+  const modes = await menu.locator('[data-display-mode-option]').evaluateAll(items => items.map(item => item.getAttribute('data-display-mode-option')));
+  await pane.page().keyboard.press('Escape');
+  await menu.waitFor({ state: 'detached' });
+  return modes;
+}
 // Display's settings: a dropdown, portaled out of the viewer.
-const displayPanel = pane => pane.page().locator('[data-display-popover]');
+const displayPanel = pane => pane.page().locator('[data-display-settings="solid"]');
 // The viewport's own pixels, without any chrome over them: what a host capture returns.
 async function capture(page) {
   const encoded = await page.evaluate(async () => {
@@ -157,7 +174,7 @@ const settle = page => page.evaluate(() => new Promise(resolve => requestAnimati
 const display = (page, patch) => page.evaluate(next => window.cadHarness.a.controller.setDisplaySettings(next), patch);
 // Grid lines, axes and the stage floor are a share of the picture too; with them off,
 // only the model's own colours are counted.
-const GUIDES_OFF = { grid: { enabled: false }, axes: { enabled: false }, floor: { enabled: false } };
+const GUIDES_OFF = { modes: { solid: { grid: { enabled: false }, axes: { enabled: false } }, render: { floor: { enabled: false } } } };
 const isRed = ([r, g, b]) => r > 150 && g < 90 && b < 90;
 const isBlue = ([r, g, b]) => b > 150 && r < 90 && g < 130;
 
@@ -168,35 +185,25 @@ test('an STL opens as one mesh with no tools: display settings, orbit, host comm
   assert.deepEqual(errors, []);
 
   // Nothing of a mesh picks, measures, poses, plays or is drawn on: the viewport
-  // simply orbits, pans and zooms, with no strip over it.
+  // simply orbits, pans and zooms, with no tools over it.
   await noTools(pane);
   assert.equal(await pane.locator('[data-quick-edit]').count(), 0, 'Quick Edit is a STEP file\'s: a mesh has nothing to pick');
   assert.equal(await pane.locator('[data-view-controls]').getByRole('button', { name: 'Preview', exact: true }).count(), 1,
-    'an STL is 3D: Preview sits in the navbar beside Display');
+    'an STL is 3D: Preview ends the strip after Display');
 
   // A mesh has no panel of its own: its only settings are Display's, and Display is never
   // where a file opens, so the model has the room.
   assert.equal(await pane.locator('[data-tool-panel]').count(), 0, 'nothing in the tool stack');
-  await displayButton(pane).click();
-  await displayPanel(pane).waitFor();
+  assert.deepEqual(await displayModes(pane), ['solid', 'render']);
+  await openDisplay(pane);
   assert.equal(await displayPanel(pane).getByRole('tab').count(), 0, 'Display has no tabs inside it');
   assert.equal(await pane.locator('[data-tool-panel]').count(), 0, 'and nothing joins the tool stack');
   const displayMenu = displayPanel(pane);
-  assert.match(await displayMenu.getByRole('combobox', { name: 'Mode', exact: true }).innerText(), /Solid/);
-  const options = async label => {
-    await displayMenu.getByRole('combobox', { name: label, exact: true }).click();
-    const texts = await page.getByRole('option').allInnerTexts();
-    await page.keyboard.press('Escape');
-    await page.locator('[data-slot=select-content]').waitFor({ state: 'detached' });
-    return texts;
-  };
-  assert.deepEqual(await options('Mode'), ['Solid', 'Render', 'Grid']);
-  assert.deepEqual(await options('Surface style'), ['Shaded', 'Flat']);
-  assert.deepEqual(await options('Parts'), ['Original', 'Single color', 'Color by part']);
-  for (const section of ['Edges', 'Cross-section', 'Explode']) assert.equal(await displayMenu.getByRole('heading', { name: section, exact: true }).count(), 0, section);
-  for (const section of ['Grid / Axes', 'Lighting', 'Background', 'Floor']) assert.equal(await displayMenu.getByRole('heading', { name: section, exact: true }).count(), 1, section);
-  assert.deepEqual(await options('Projection'), ['Orthographic', 'Perspective']);
-  assert.equal(await displayMenu.getByRole('button', { name: 'Reset', exact: true }).count(), 1);
+  assert.equal(await displayMenu.getByRole('combobox', { name: 'Mode', exact: true }).count(), 0, 'its menu chooses the mode');
+  for (const control of ['Flat shading', 'Grid', 'Axes']) assert.equal(await displayMenu.getByRole('menuitemcheckbox', { name: control, exact: true }).count(), 1, control);
+  assert.equal(await displayMenu.getByRole('menuitem', { name: 'Part colours', exact: true }).count(), 1);
+  for (const absent of ['Edges', 'Lighting', 'Floor']) assert.equal(await displayMenu.getByRole('menuitemcheckbox', { name: absent, exact: true }).count(), 0, absent);
+  assert.equal(await displayMenu.getByRole('menuitem', { name: 'Reset Solid', exact: true }).count(), 1);
   await displayButton(pane).click();
   await displayPanel(pane).waitFor({ state: 'detached' });
   // The column closing reaches the scene as a resize; let that frame land before comparing pictures.
@@ -215,23 +222,20 @@ test('an STL opens as one mesh with no tools: display settings, orbit, host comm
   // Surfaces. An STL authors no colour, so Original is the viewer's surface colour; Flat is unlit, one colour.
   const shaded = await capture(page);
   assert.ok(dominantColors(shaded).length >= 3, 'shaded faces differ');
-  await display(page, { surfaces: { style: 'flat' } });
+  await display(page, { modes: { solid: { flat: true } } });
   const original = dominantColors(await capture(page));
   assert.equal(original.length, 1, `one object, one flat colour: ${JSON.stringify(original)}`);
   assert.ok(Math.max(...original[0]) - Math.min(...original[0]) < 60, `the viewer's neutral surface colour: ${JSON.stringify(original)}`);
-  await display(page, { surfaces: { style: 'flat', colorMode: 'single', color: '#00c040' } });
+  await display(page, { modes: { solid: { flat: true, parts: { colorMode: 'single', color: '#00c040' } } } });
   const single = dominantColors(await capture(page));
   assert.equal(single.length, 1, `one colour: ${JSON.stringify(single)}`);
   assert.ok(single[0][1] > single[0][0] + 60 && single[0][1] > single[0][2] + 60, 'and it is the chosen green');
-  await display(page, { surfaces: { style: 'flat', colorMode: 'by-part', colors: ['#c02080', '#00c040'] } });
+  await display(page, { modes: { solid: { flat: true, parts: { colorMode: 'by-part', colors: ['#c02080', '#00c040'] } } } });
   const palette = dominantColors(await capture(page));
   assert.equal(palette.length, 1, `one object takes the first palette colour: ${JSON.stringify(palette)}`);
   assert.ok(palette[0][0] > palette[0][1] + 60 && palette[0][2] > palette[0][1] + 40, `the first palette colour: ${JSON.stringify(palette)}`);
-  await display(page, { surfaces: { style: 'flat', colorMode: 'original', opacity: 0.3 } });
-  const faded = dominantColors(await capture(page));
-  assert.ok(faded.length >= 1 && faded.every(color => JSON.stringify(color) !== JSON.stringify(original[0])), 'opacity lets the backdrop through');
-  // Saved settings are edits, never rewritten: Original, Shaded and 100% bring the first look back exactly.
-  await display(page, { surfaces: { style: 'shaded', colorMode: 'original', opacity: 1 } });
+  // Original colours and shaded surfaces restore the initial look.
+  await display(page, { modes: { solid: { flat: false, parts: { colorMode: 'original' } } } });
   assert.equal(differingPixels(shaded, await capture(page)), 0, 'the look is fully reversible');
 
   // Dragging orbits.
@@ -293,8 +297,8 @@ test('an STL opens as one mesh with no tools: display settings, orbit, host comm
   assert.deepEqual(captured.references[0].target, { kind: 'whole-resource' });
 
   // Camera and Display settings belong to this file under this renderer's id, and survive a remount.
-  await display(page, { surfaces: { colorMode: 'single', color: '#00c040' }, grid: { enabled: true }, floor: { enabled: true } });
-  await page.waitForFunction(() => window.cadHarness.state.renderers?.[JSON.stringify(['/models/part.stl', 'mesh'])]?.display?.surfaces?.colorMode === 'single');
+  await display(page, { modes: { solid: { parts: { colorMode: 'single', color: '#00c040' }, grid: { enabled: true } }, render: { floor: { enabled: true } } } });
+  await page.waitForFunction(() => window.cadHarness.state.renderers?.[JSON.stringify(['/models/part.stl', 'mesh'])]?.display?.modes?.solid?.parts?.colorMode === 'single');
   const stored = await page.evaluate(() => window.cadHarness.state.renderers);
   assert.deepEqual(Object.keys(stored), [JSON.stringify(['/models/part.stl', 'mesh'])], 'keyed by [absolute path, renderer id]');
   const left = await page.evaluate(() => window.cadHarness.a.controller.readState());
@@ -308,7 +312,7 @@ test('an STL opens as one mesh with no tools: display settings, orbit, host comm
   assert.ok(reopened.camera.position.every((value, axis) => Math.abs(value - left.camera.position[axis]) <= 1e-3 * Math.max(1, Math.abs(left.camera.position[axis]))),
     "reopening restores the camera the file was left at");
   assert.ok(Math.abs(reopened.camera.zoom - left.camera.zoom) < 1e-6);
-  assert.deepEqual([reopened.display.surfaces.colorMode, reopened.display.surfaces.color, reopened.display.grid.enabled, reopened.display.floor.enabled], ['single', '#00c040', true, true]);
+  assert.deepEqual([reopened.display.modes.solid.parts.colorMode, reopened.display.modes.solid.parts.color, reopened.display.modes.solid.grid.enabled, reopened.display.modes.render.floor.enabled], ['single', '#00c040', true, true]);
   assert.equal(requests.slice(requested).filter(path => path === '/one/part.stl').length, 1, 'reopening a file reuses its decoded mesh without another asset request');
 
   assert.deepEqual(errors, []);
@@ -319,9 +323,8 @@ test('a 3MF is one mesh per object with its source colour; an uncoloured one tak
   await ready(pane);
   await page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
   await noTools(pane);
-  // A 3MF's controls are a mesh's: no strip, and Display shut as it opens, the same dropdown an STL has.
-  await displayButton(pane).click();
-  await displayPanel(pane).waitFor();
+  // A 3MF's controls are a mesh's: no tools, and Display shut as it opens, the same dropdown an STL has.
+  await openDisplay(pane);
   await displayButton(pane).click();
   await displayPanel(pane).waitFor({ state: 'detached' });
   await page.waitForFunction(() => document.querySelector('[data-testid="one"] [aria-busy] > div > canvas').width >= 790);
@@ -331,18 +334,18 @@ test('a 3MF is one mesh per object with its source colour; an uncoloured one tak
   // Original: both authored colours, each on its own object. Flat shows them unlit, so exactly two.
   const shaded = await capture(page);
   assert.ok(dominantColors(shaded).some(isRed) && dominantColors(shaded).some(isBlue), `both colours, lit: ${JSON.stringify(dominantColors(shaded))}`);
-  await display(page, { surfaces: { style: 'flat' } });
+  await display(page, { modes: { solid: { flat: true } } });
   const original = dominantColors(await capture(page));
   assert.equal(original.length, 2, `two objects, two flat colours: ${JSON.stringify(original)}`);
   assert.ok(original.some(isRed) && original.some(isBlue), JSON.stringify(original));
   // Color by part deals one palette colour per object; Single colour is one for both.
-  await display(page, { surfaces: { style: 'flat', colorMode: 'by-part', colors: ['#c02080', '#00c040'] } });
+  await display(page, { modes: { solid: { flat: true, parts: { colorMode: 'by-part', colors: ['#c02080', '#00c040'] } } } });
   const palette = dominantColors(await capture(page));
   assert.equal(palette.length, 2, JSON.stringify(palette));
   assert.ok(!palette.some(isRed) && !palette.some(isBlue), `the palette replaces the source colours: ${JSON.stringify(palette)}`);
-  await display(page, { surfaces: { style: 'flat', colorMode: 'single', color: '#00c040' } });
+  await display(page, { modes: { solid: { flat: true, parts: { colorMode: 'single', color: '#00c040' } } } });
   assert.equal(dominantColors(await capture(page)).length, 1);
-  await display(page, { surfaces: { style: 'shaded', colorMode: 'original' } });
+  await display(page, { modes: { solid: { flat: false, parts: { colorMode: 'original' } } } });
   assert.equal(differingPixels(shaded, await capture(page)), 0, 'the look is fully reversible');
   // Render keeps the colours and re-lights them.
   await page.evaluate(() => window.cadHarness.a.controller.setRenderMode(true));
@@ -356,7 +359,7 @@ test('a 3MF is one mesh per object with its source colour; an uncoloured one tak
   const plain = await open(t, 'plain.3mf');
   await ready(plain.pane);
   await plain.page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
-  await display(plain.page, { ...GUIDES_OFF, surfaces: { style: 'flat' } });
+  await display(plain.page, { modes: { ...GUIDES_OFF.modes, solid: { ...GUIDES_OFF.modes.solid, flat: true } } });
   const neutral = dominantColors(await capture(plain.page));
   assert.equal(neutral.length, 1, JSON.stringify(neutral));
   assert.ok(Math.max(...neutral[0]) - Math.min(...neutral[0]) < 60, JSON.stringify(neutral));
@@ -370,7 +373,7 @@ test('a corrupt mesh raises the viewer\'s load alert and an empty one says there
   assert.match(await alert.innerText(), /Couldn’t load the model/);
   assert.match(await alert.innerText(), /broken\.stl/);
   // Nothing on screen is the file's to work on: the card alone, with no tools or view actions.
-  for (const name of ['Display', 'Preview']) {
+  for (const name of [/^Display mode: /, 'Preview']) {
     assert.equal(await broken.pane.getByRole('button', { name, exact: true }).count(), 0, `no ${name} over a failed load`);
   }
   assert.equal(await alert.getByRole('button', { name: 'Retry', exact: true }).count(), 1);

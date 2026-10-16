@@ -74,25 +74,25 @@ class DxfSnapshotRefusalTests(unittest.TestCase):
         for display in (
             {"mode": "render"},
             {"mode": "hidden-line"},
-            {"surfaces": {"style": "flat"}},
-            {"lighting": {"enabled": True}},
-            {"floor": {"enabled": True}},
-            {"background": {"color": "#112233"}},
+            {"modes": {"solid": {"flat": True}}},
+            {"modes": {"render": {"lighting": {"exposure": 1.2}}}},
+            {"modes": {"render": {"floor": {"enabled": True}}}},
+            {"modes": {"render": {"background": {"color": "#112233"}}}},
             {"camera": {"projection": "perspective"}},
-            {"edges": {"enabled": True}},
+            {"modes": {"solid": {"edges": {"enabled": True}}}},
             {"clip": {"enabled": True}},
             {"exploded": {"amount": 0.5}},
-            {"grid": {"enabled": True}},
-            {"axes": {"enabled": True}},
+            {"modes": {"solid": {"grid": {"enabled": True}}}},
+            {"modes": {"solid": {"axes": {"enabled": True}}}},
         ):
             with self.subTest(display=display):
                 self.refuses(self.job(display=display), r"describes? a 3D scene")
 
     def test_the_refusal_names_the_setting_and_the_flag_that_replaces_it(self) -> None:
         with self.assertRaises(snapshot.SnapshotError) as raised:
-            self.prepare(self.job(display={"mode": "render", "floor": {"enabled": True}}))
+            self.prepare(self.job(display={"mode": "render", "modes": {"render": {"floor": {"enabled": True}}}}))
         message = str(raised.exception)
-        self.assertIn("display.floor, display.mode", message)
+        self.assertIn("display.mode, display.modes", message)
         self.assertIn("a.dxf", message)
         self.assertIn("--appearance light|dark", message)
 

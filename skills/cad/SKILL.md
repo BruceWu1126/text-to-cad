@@ -138,9 +138,16 @@ print(selection.ref, face.area)
 ```
 
 A note from the viewer's Quick Edit reads: what the person wants, then
-`File:` (the document it is about), `References:` (one per line, as above) and,
-when they sketched on the view, `Sketch: <path>`: a PNG of the view with their
-markup (or the image itself, attached). Look at the sketch before changing the model.
+`File:` (the document it is about), `References:` (one per line, as above), and
+the files of what they looked at: `Current view:` and `View 1:`… (PNGs of the
+view on screen and each view an annotation was drawn in, the annotation drawn on them —
+attached as images where the chat takes them, the person's measurements drawn
+on them), `Views (cadgen snapshot --job):` (a snapshot job file of those views;
+its `measurements` give each one's exact ends and reading) and `Annotation:` (the
+annotation itself).
+`cadgen snapshot --job <job file>` renders the same views again, annotation
+included; after an edit, render it to check the change where the person looked
+([annotations and Quick Edit views](references/snapshot-review.md#annotations-and-quick-edit-views)).
 
 For a bare `#o1.2.f7`, use the identified target file. Do not guess between
 ambiguous files or labels. Numeric refs belong to that saved revision;

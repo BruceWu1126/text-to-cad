@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
-import ToolPanel from "../../../kit/tools/ToolPanel.jsx";
-import { CrossSectionControls, ExplodeControls, clipSummary } from "./ModelViewControls.js";
+import { RotateCcw } from "lucide-react";
+import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
+import SubToolbar, { SLIDER_SUB_TOOLBAR_CLASS, SUB_TOOLBAR_SLIDER_CLASS, SubToolbarValue } from "../../../kit/tools/SubToolbar.jsx";
+import { ClipFlipButton, CrossSectionControls, ExplodeControls, clipSummary } from "./ModelViewControls.js";
 import { explodablePartCount } from "../../workbench/explodableParts.js";
 
 /** Separated assembly layers, distinct from an expand affordance. */
@@ -19,88 +20,59 @@ function ClipIcon(props) {
 }
 
 /**
- * Explode, Clip and Measure: tools whose effects a person keeps, each with a panel in the tool
- * stack that outlives the tool being in hand. Measure's is up while it is the tool — its snapping
- * a menu in its heading (`measure.actions`), its results, if any, the body — and stays while it
- * has results (`measure.shown`).
+ * Explode and Clip: tools whose effects stay on the model once the tool is put down; the
+ * sub-toolbar is the tool's while it is in hand, and nothing of either is on screen after. A press on one in
+ * hand does nothing; on one whose effect is set it takes it up again, as it is, and on one unset
+ * it starts neutral. Its Reset removes the effect, idle while none is set; the tool stays up. (Measure's results are Quick Edit's chips.)
  *
  * A tool the file cannot offer is not on the strip: Explode needs two parts to separate. While
  * the mesh is still loading that is not known yet, so Explode is shown, idle, until it is.
  */
-export function useModelTools({ modelKey, view, features, store, mesh, disabled, selectedTool, onSelect, measure = null }) {
+export function useModelTools({ view, features, store, mesh, disabled, selectedTool, onSelect }) {
   const applied = [
     ...(view.exploded.enabled && view.exploded.amount > 0 ? ["exploded"] : []),
-    ...(view.clip.enabled && Math.abs(view.clip.offsets[view.clip.axis] - (view.clip.invert ? 0 : 1)) > 1e-6 ? ["clip"] : []),
+    ...(view.clip.enabled ? ["clip"] : []),
   ];
-  const [panels, setPanels] = useState(() => ({ modelKey, ids: applied }));
-  const panelIds = panels.modelKey === modelKey ? panels.ids : applied;
-  const appliedKey = applied.join(",");
-  // A pointer held down in a panel (a slider mid-drag): a kept panel whose value passes
-  // through neutral on the way somewhere else must not vanish under the pointer, so panels
-  // are only dropped once it lets go.
-  const [holding, setHolding] = useState(false);
-  useEffect(() => {
-    if (!holding) return undefined;
-    const release = () => setHolding(false);
-    window.addEventListener("pointerup", release, true);
-    window.addEventListener("pointercancel", release, true);
-    return () => {
-      window.removeEventListener("pointerup", release, true);
-      window.removeEventListener("pointercancel", release, true);
-    };
-  }, [holding]);
-  useEffect(() => {
-    setPanels(current => {
-      const existing = current.modelKey === modelKey ? current.ids : [];
-      // Retain an untouched panel only while it owns input. The settings store is
-      // authoritative, so an external Reset also removes previously applied panels.
-      const ids = existing.filter(id => holding || id === selectedTool || applied.includes(id));
-      ids.push(...applied.filter(id => !ids.includes(id)));
-      return current.modelKey === modelKey && ids.join(",") === current.ids.join(",")
-        ? current : { modelKey, ids };
-    });
-  }, [modelKey, selectedTool, appliedKey, holding]);
+  // The box Clip's plane is placed in, so its slider maps with exactly that box: the model at
+  // rest, its declared box when a package has one (the scene's `restBounds`, which the viewport
+  // hands the plane as `zeroPoseBounds`).
+  const clipBounds = mesh?.declaredBounds || mesh?.bounds || null;
   const definitions = [
-    ...(measure ? [{ ...measure, id: "measure", label: "Measure" }] : []),
-    { id: "exploded", label: "Explode", Icon: ExplodeIcon, unavailable: Boolean(mesh) && explodablePartCount(mesh) <= 1,
+    { id: "exploded", label: "Explode", Icon: ExplodeIcon,
+      // Named, as Clip's axis and Animation's Play lead theirs: a bare slider says nothing of what it moves.
+      lead: <span className="shrink-0 pl-1.5 pr-1 text-tiny text-foreground">Explode</span>, unavailable: Boolean(mesh) && explodablePartCount(mesh) <= 1,
       summary: `${Math.round((view.exploded.enabled ? view.exploded.amount : 0) * 100)}%`,
-      controls: <ExplodeControls viewSettings={view} onViewSettingsPatch={store.patch} /> },
-    { id: "clip", label: "Clip", Icon: ClipIcon, summary: clipSummary(view),
-      controls: <CrossSectionControls viewSettings={view} onViewSettingsPatch={store.patch} bounds={mesh?.bounds || null} /> }
-  ].filter(tool => tool.id === "measure" || features.sections.includes(tool.id));
-  const remove = id => {
-    if (id === "measure") { measure.onRemove(); return; }
-    else if (id === "exploded") store.patch({ exploded: { enabled: false, amount: 0 } });
-    else store.patch({ clip: { enabled: false, axis: "x", offsets: { x: 1, y: 1, z: 1 }, invert: false } });
-    setPanels(current => ({ modelKey, ids: current.ids.filter(value => value !== id) }));
-    if (selectedTool === id) onSelect("references");
-  };
+      controls: <ExplodeControls viewSettings={view} onViewSettingsPatch={store.patch} className={SUB_TOOLBAR_SLIDER_CLASS} /> },
+    { id: "clip", label: "Clip", Icon: ClipIcon, summary: clipSummary(view, clipBounds),
+      controls: <CrossSectionControls viewSettings={view} onViewSettingsPatch={store.patch} bounds={clipBounds}
+        className="flex min-w-0 flex-1 items-center gap-1" sliderClassName={SUB_TOOLBAR_SLIDER_CLASS} />,
+      actions: <ClipFlipButton viewSettings={view} onViewSettingsPatch={store.patch} bounds={clipBounds} /> }
+  ].filter(tool => features.settings.includes(tool.id));
+  const neutral = id => id === "exploded" ? { exploded: { enabled: false, amount: 0 } } : { clip: { enabled: false, axis: "x", invert: false } };
+  const tool = definitions.find(value => value.id === selectedTool);
   return {
-    tools: definitions.filter(tool => tool.id !== "measure" && !tool.unavailable).map(({ id, label, Icon }) => ({
-      id, label, active: panelIds.includes(id), disabled,
+    tools: definitions.filter(value => !value.unavailable).map(({ id, label, Icon }) => ({
+      id, label, active: selectedTool === id, disabled,
       icon: <Icon className="size-3" strokeWidth={2} aria-hidden="true" />,
       onSelect: () => {
-        if (panelIds.includes(id)) { remove(id); return; }
+        if (selectedTool === id) return;
         onSelect(id);
-        // A panel starts neutral. Actual edits enable its effect.
-        if (id === "clip") store.patch({ clip: { enabled: false, axis: "x", offsets: { x: 1, y: 1, z: 1 }, invert: false } });
-        else if (id === "exploded") store.patch({ exploded: { enabled: false, amount: 0 } });
-        setPanels(current => ({ modelKey, ids: [...new Set([...(current.modelKey === modelKey ? current.ids.filter(value => applied.includes(value)) : []), id])] }));
+        // Unset, it starts neutral; an edit sets its effect.
+        if (!applied.includes(id)) store.patch(neutral(id));
       }
     })),
-    // The panels sit in the tool stack as its own items (`contents`); a press in any of them holds
-    // their order until the pointer lets go.
-    panels: <div className="contents" data-model-tool-panels="" onPointerDownCapture={() => setHolding(true)}>
-      {[...(measure?.shown ? ["measure"] : []), ...panelIds].map(id => {
-        const tool = definitions.find(value => value.id === id);
-        // Measure's results can run long, so they give way like a details panel; Explode and
-        // Clip are one slider and keep their height. None of them folds: the X is how a person
-        // is done with one.
-        return tool ? <ToolPanel key={id} id={id} title={tool.label} label={`${tool.label} controls`} summary={tool.summary} actions={tool.actions}
-          fit={id === "measure" ? "details" : "fixed"} collapsible={false} onClose={() => remove(id)}>
-          <div className="space-y-1 pb-1">{tool.controls}</div>
-        </ToolPanel> : null;
-      })}
-    </div>
+    // The tool in hand's sub-toolbar (`kit/tools/SubToolbar.jsx`), unnamed — its button is lit on the
+    // strip above it: what leads it (Explode's name; Clip's axis), its slider, the amount beside the slider,
+    // then its actions (Clip's Flip) and Reset, which takes the effect away (the tool stays up) —
+    // always there, idle while there is nothing to take away.
+    subToolbar: tool ? <SubToolbar key={tool.id} label={`${tool.label} controls`} className={SLIDER_SUB_TOOLBAR_CLASS} data-model-tool={tool.id}>
+      {tool.lead || null}
+      {tool.controls}
+      <SubToolbarValue data-model-tool-amount="">{tool.summary}</SubToolbarValue>
+      {tool.actions || null}
+      <ToolbarButton label={`Reset ${tool.label.toLowerCase()}`} disabled={!applied.includes(tool.id)} onClick={() => store.patch(neutral(tool.id))}>
+        <RotateCcw className="size-3" strokeWidth={2} aria-hidden="true" />
+      </ToolbarButton>
+    </SubToolbar> : null
   };
 }

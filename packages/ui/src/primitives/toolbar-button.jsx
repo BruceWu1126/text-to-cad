@@ -4,7 +4,7 @@ import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { cn } from "@text-to-cad/ui/utils";
 
 // The icon button every floating toolbar is made of: the CAD interaction tools,
-// the drawing tools under them, and the standalone drawing editor's toolbar.
+// the annotation tools under them.
 export const TOOLBAR_ICON_BUTTON_CLASS = "size-6 rounded-sm text-sidebar-foreground/70 shadow-none transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/45 data-[variant=secondary]:bg-sidebar-accent data-[variant=secondary]:text-sidebar-accent-foreground data-[variant=secondary]:hover:bg-sidebar-accent";
 
 const ToolbarTooltipVisibility = createContext(true);

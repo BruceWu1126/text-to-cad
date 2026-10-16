@@ -7,8 +7,6 @@ import {
   applyMeasureRulerHover,
   applyMeasureRulerPick,
   cancelMeasureRulerDraft,
-  measureFilterAccepts,
-  measureFilterSnaps,
   measureRulerDraftMeasurement,
   measureRulerStateForChange,
 } from "./measureRulerState.js";
@@ -226,17 +224,4 @@ test("a draft re-renders only when what its end snaps to changes, not on every m
   assert.equal(applyMeasureRulerHover(off, null), off);
   const free = applyMeasureRulerHover(off, { point: [5, 5, 5] });
   assert.deepEqual(free.draft.hover, { point: [5, 5, 5] }, "a free point with no target is still a hover");
-});
-
-test("Measure's snapping filter lets through what it names, and snaps to only that", () => {
-  for (const kind of ["edge", "face", "free", undefined]) {
-    assert.equal(measureFilterAccepts("all", kind), true, `all takes ${kind}`);
-    assert.equal(measureFilterAccepts("points", kind), true, `points takes ${kind} as a point`);
-  }
-  assert.deepEqual(["edge", "face", "free"].map(kind => measureFilterAccepts("edges", kind)), [true, false, false]);
-  assert.deepEqual(["edge", "face", "free"].map(kind => measureFilterAccepts("faces", kind)), [false, true, false]);
-  assert.deepEqual(measureFilterSnaps("all"), { faces: true, edges: true });
-  assert.deepEqual(measureFilterSnaps("faces"), { faces: true, edges: false });
-  assert.deepEqual(measureFilterSnaps("edges"), { faces: false, edges: true });
-  assert.deepEqual(measureFilterSnaps("points"), { faces: false, edges: false }, "points snaps to nothing: free surface points");
 });

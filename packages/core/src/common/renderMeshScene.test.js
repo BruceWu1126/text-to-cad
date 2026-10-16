@@ -273,8 +273,8 @@ test("snapshot scene policy composes display Render quality with technical quali
   assert.equal(normal.displaySettings.guides.grid.enabled, false, "snapshot inherits the Solid preset, which draws no grid");
   assert.equal(normal.displaySettings.guides.axis.enabled, false, "and no axes");
   assert.equal(normal.sceneSettings.appearance, "light", "in light, the CLI's default");
-  const gridded = renderJobContext(twoPartMeshData(), { display: { mode: "grid" } });
-  assert.equal(gridded.displaySettings.guides.grid.enabled, true, "the Grid preset draws one");
+  const gridded = renderJobContext(twoPartMeshData(), { display: { modes: { solid: { grid: { enabled: true }, axes: { enabled: true } } } } });
+  assert.equal(gridded.displaySettings.guides.grid.enabled, true, "Solid draws its enabled grid");
   assert.equal(gridded.displaySettings.guides.grid.density, 2, "twice as fine");
   assert.equal(gridded.displaySettings.guides.axis.enabled, true, "with the axes");
 
@@ -286,7 +286,7 @@ test("snapshot scene policy composes display Render quality with technical quali
   assert.equal(rendered.sharedRenderOptions.renderScale, 2);
 
   const explicitScale = renderJobContext(twoPartMeshData(), {
-    display: { mode: "render", lighting: { quality: "preview" } },
+    display: { mode: "render", modes: { render: { lighting: { quality: "preview" } } } },
     output: { renderScale: 3 }
   });
   assert.equal(explicitScale.quality.id, "standard");
@@ -522,14 +522,14 @@ test("render display accepts common camera, selection, clipping, and quality con
     display: {
       mode: "render",
       camera: { projection: "orthographic" },
-      clip: { enabled: true, axis: "x", offsets: { x: 0.5 } },
+      clip: { enabled: true, axis: "x", at: 0.5 },
       exploded: { enabled: true, amount: 0.5 },
-      surfaces: { colorMode: "single", color: "#123456" }
+      modes: { render: { parts: { colorMode: "single", color: "#123456" } } }
     },
     selection: { hiddenPartIds: ["right"], selectedPartIds: ["left"] },
     quality: { tessellation: { chordTolerance: 0.001 } }
   });
-  assert.equal(context.camera.projection, "orthographic");
+  assert.equal(context.camera.projection, "perspective");
   assert.equal(context.sharedRenderOptions.clip.enabled, true);
   const options = modelOptionsForRenderJob(context, { selection: { hiddenPartIds: ["right"] } });
   assert.deepEqual(options.selection.hiddenPartIds, ["right"]);
@@ -665,7 +665,7 @@ test("a snapshot fits its camera's depth range in every preset, as the viewer fi
 
 test("an exploded Render snapshot keeps its floor and floor shadow on the rest placement, as the viewer does", async () => {
   const job = { mode: "view", kind: "step",
-    display: { mode: "render", lighting: { quality: "preview" }, exploded: { enabled: true, amount: 1 } },
+    display: { mode: "render", modes: { render: { lighting: { quality: "preview" } } }, exploded: { enabled: true, amount: 1 } },
     outputs: [{ path: "exploded.png", width: 64, height: 64, camera: "iso" }] };
   const meshData = wideTwoPartMeshData();
   const context = renderJobContext(meshData, job);
@@ -702,7 +702,7 @@ test("an exploded Render snapshot keeps its floor and floor shadow on the rest p
 test("a snapshot drawn at a render scale above 1 spreads its floor's dither by it", async () => {
   // Final draws twice the pixels it keeps: each kept pixel averages four, and the dither
   // must be drawn twice as wide to survive that, or the dark floor's bands come back.
-  const job = { mode: "view", kind: "step", display: { mode: "render", lighting: { quality: "final" } },
+  const job = { mode: "view", kind: "step", display: { mode: "render", modes: { render: { lighting: { quality: "final" } } } },
     outputs: [{ path: "final.png", width: 64, height: 64, camera: "iso" }] };
   const meshData = wideTwoPartMeshData();
   const context = renderJobContext(meshData, job);
@@ -757,7 +757,7 @@ test("a snapshot's Clip cuts and caps the model where the viewer's does, measure
   // clipping on), so `display.clip` drew the whole model, uncapped. The viewer measures the
   // plane against the model at rest (`syncRuntimeStepClipPlane`), a declared box included.
   const declaredBounds = { min: [0.5, 0, 0], max: [3, 0.5, 0] };
-  const clip = { enabled: true, axis: "x", offset: 0.1 };
+  const clip = { enabled: true, axis: "x", at: 0.75 };
   const job = { mode: "view", kind: "step", display: { mode: "solid", clip },
     outputs: [{ path: "clipped.png", width: 64, height: 64, camera: "iso" }] };
   const meshData = { ...twoPartMeshData(), declaredBounds };
@@ -823,4 +823,43 @@ test("capture diagnostics separate readiness, pose, tight framing, draw submissi
   const listStages = {};
   await captureModel({ model, context: { ...context, mode: "list" } }, { job, stageTimings: listStages });
   assert.deepEqual(listStages, {}, "a list does not report image stages");
+});
+
+test("a snapshot draws the job's annotation on its parts as the scene places them, cut by its clip, as heavy as on the viewer", async () => {
+  // A mark on the right part follows it where the exploded view moved it; a mark on a part the
+  // scene lacks sits where that part was when the annotation was made; a mark on no part stays put.
+  const moved = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 5, 0, 0, 1];
+  const annotation = { units: "mm", parts: { gone: { placement: moved } }, marks: [
+    { id: "1", kind: "stroke", part: "right", points: [2, 0, 0, 3, 1, 0], color: "#ff2d55", width: 3 },
+    { id: "2", kind: "stroke", part: "gone", points: [0, 0, 0, 1, 1, 0], color: "#007aff", width: 3 },
+    { id: "3", kind: "area", part: null, points: [0, 0, 1, 1, 0, 1, 1, 1, 1], triangles: [0, 1, 2], color: "#00aa44" }
+  ] };
+  const job = { mode: "view", kind: "step", annotation, display: { mode: "solid", exploded: { enabled: true, amount: 1 }, clip: { axis: "x" } },
+    outputs: [{ path: "a.png", width: 64, height: 450, camera: "iso" }, { path: "b.png", width: 64, height: 450, camera: "top" }] };
+  const meshData = twoPartMeshData();
+  const context = renderJobContext(meshData, job);
+  const model = buildModel(THREE, { kind: "step", meshData }, modelOptionsForRenderJob(context, job));
+  const scene = new THREE.Scene();
+  scene.add(model.root);
+  const viewport = { ...stubViewport(model, scene), context };
+  viewport.renderer.domElement = { ...viewport.renderer.domElement, height: 450 };
+  try {
+    await captureModel(viewport, { job });
+    const layer = scene.getObjectByName("annotation");
+    assert.ok(layer, "the annotation is in the scene");
+    const [onRight, onGone, onNothing] = layer.children;
+    const right = model.root.getObjectsByProperty("isMesh", true).find(object => object.userData.partId === "right" && !object.isInstancedMesh);
+    assert.ok(right.matrixWorld.elements[12] !== 0 || right.matrixWorld.elements[13] !== 0, "the exploded view moved the part");
+    assert.deepEqual(onRight.matrixWorld.elements, right.matrixWorld.elements);
+    assert.deepEqual(onGone.matrixWorld.elements, moved);
+    assert.deepEqual(onNothing.matrixWorld.elements, new THREE.Matrix4().elements);
+    assert.equal(viewport.clipRuntime.activeClipPlanes.length, 1);
+    for (const mark of layer.children) assert.deepEqual(mark.material.clippingPlanes, viewport.clipRuntime.activeClipPlanes, "cut as the model is");
+    // A 450-pixel output is half the viewer's reference height: its ink is drawn half as wide.
+    assert.equal(onRight.material.linewidth, 1.5);
+    assert.equal(layer.children.length, 3, "one layer serves every output of a height");
+  } finally {
+    viewport.annotationLayer?.layer.dispose();
+    model.dispose();
+  }
 });

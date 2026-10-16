@@ -144,6 +144,10 @@ class SnapshotOptions:
     section_specified: bool = False
     joint_values: object = None
     joint_values_specified: bool = False
+    annotation: object = None
+    annotation_specified: bool = False
+    measurements: object = None
+    measurements_specified: bool = False
     focus: list[str] | None = None
     focus_specified: bool = False
     hide: list[str] | None = None
@@ -281,11 +285,110 @@ def option_display_modes(options: SnapshotOptions) -> frozenset[str] | None:
     return display_modes_for_kind(input_kind(Path(options.input))) if options.input else None
 
 
+# A measurement's closed vocabulary, and how many a job draws at most (the viewer's own bound).
+MEASUREMENT_KEYS = frozenset({"start", "end", "label", "color"})
+MAX_MEASUREMENTS = 64
+
+
+def normalize_measurements(value: object) -> list[dict[str, object]]:
+    """A job's ``measurements``: a list of ``{start, end, label, color}``, checked.
+
+    Each is a dimension between two world points (``start``, ``end``: three finite numbers),
+    its words (``label``) and its colour (``#rrggbb``), as the viewer's Measure drew it; the
+    page draws them over the picture with the same code.
+    """
+    if not isinstance(value, list):
+        raise SnapshotError("measurements is a list of {start, end, label, color}")
+    if len(value) > MAX_MEASUREMENTS:
+        raise SnapshotError(f"measurements: at most {MAX_MEASUREMENTS}")
+    marks: list[dict[str, object]] = []
+    for index, mark in enumerate(value):
+        at = f"measurements[{index}]"
+        if not is_plain_object(mark):
+            raise SnapshotError(f"{at} is {{start, end, label, color}}")
+        unknown = sorted(set(mark) - MEASUREMENT_KEYS)
+        if unknown:
+            raise SnapshotError(f"{at} has unknown field(s): {', '.join(unknown)}")
+        for key in ("start", "end"):
+            point = mark.get(key)
+            if not (isinstance(point, list) and len(point) == 3 and all(
+                    isinstance(axis, (int, float)) and not isinstance(axis, bool) and math.isfinite(axis) for axis in point)):
+                raise SnapshotError(f"{at}.{key} is [x, y, z]")
+        if not isinstance(mark.get("label"), str):
+            raise SnapshotError(f"{at}.label is its words")
+        color = mark.get("color")
+        if not (isinstance(color, str) and len(color) == 7 and color.startswith("#")
+                and all(digit in "0123456789abcdefABCDEF" for digit in color[1:])):
+            raise SnapshotError(f"{at}.color is #rrggbb")
+        marks.append({"start": list(mark["start"]), "end": list(mark["end"]), "label": mark["label"], "color": color})
+    return marks
+
+
+def load_measurements_option(value: object, *, cwd: Path) -> object:
+    """``measurements`` in job form: the list itself.
+
+    A job's ``measurements`` and the ``--measurements`` flag are the same value: the
+    list, one measurement object alone (what a Quick Edit chip copies), that JSON as
+    text, or the path of a file holding it (resolved against the working folder).
+    Its fields are checked by ``normalize_measurements``.
+    """
+    if is_plain_object(value):
+        return [value]
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if text.startswith(("[", "{")):
+        parsed = load_json_text(text, "measurements")
+    else:
+        path = (cwd / Path(text).expanduser()).resolve()
+        if not path.is_file():
+            raise _missing(f"measurements file does not exist: {text}")
+        try:
+            parsed = load_json_text(path.read_text(encoding="utf-8"), str(path))
+        except (OSError, UnicodeDecodeError) as exc:
+            raise SnapshotError(f"Cannot read measurements file {text}: {exc}") from exc
+    return [parsed] if is_plain_object(parsed) else parsed
+
+
+def load_annotation_option(value: object, *, cwd: Path) -> tuple[dict[str, object], str]:
+    """``annotation`` in job form: the annotation object, and the file it was read from ("" inline).
+
+    A job's ``annotation`` and the ``--annotation`` flag are the same value: an annotation
+    JSON file's path (resolved against the working folder, as a job's input is),
+    the annotation JSON as text, or -- from a library call or a job -- the object.
+    Only its outer shape is checked here; every field is checked by the page
+    that draws it (``normalizeAnnotation``), whose refusal names the file.
+    """
+    if is_plain_object(value):
+        return dict(value), ""
+    text = value.strip() if isinstance(value, str) else ""
+    if not text:
+        raise SnapshotError("annotation is the path of an annotation JSON file, or the annotation object itself")
+    source = ""
+    if text.startswith("{"):
+        parsed = load_json_text(text, "annotation")
+    else:
+        path = (cwd / Path(text).expanduser()).resolve()
+        if not path.is_file():
+            raise _missing(f"annotation file does not exist: {text}")
+        try:
+            parsed = load_json_text(path.read_text(encoding="utf-8"), str(path))
+        except (OSError, UnicodeDecodeError) as exc:
+            raise SnapshotError(f"Cannot read annotation file {text}: {exc}") from exc
+        source = str(path)
+    if not is_plain_object(parsed):
+        raise SnapshotError(f"{source or 'annotation'}: an annotation is a JSON object with units, parts and marks")
+    return parsed, source
+
+
 def apply_option_overrides_to_job(job: object, options: SnapshotOptions, *, cwd: Path) -> object:
     if not is_plain_object(job):
         return job
     if not any(
         [
+            bool(options.input),
+            options.annotation_specified,
+            options.measurements_specified,
             options.mode_specified,
             options.view_labels,
             options.debug,
@@ -304,6 +407,12 @@ def apply_option_overrides_to_job(job: object, options: SnapshotOptions, *, cwd:
     ):
         return job
     next_job = copy.deepcopy(job)
+    if options.input:
+        next_job["input"] = options.input
+    if options.annotation_specified:
+        next_job["annotation"] = options.annotation
+    if options.measurements_specified:
+        next_job["measurements"] = options.measurements
     if options.mode_specified:
         next_job["mode"] = normalize_render_mode(options.mode)
     if options.debug:
@@ -424,6 +533,10 @@ def load_job_from_options(options: SnapshotOptions, *, cwd: Path | None = None) 
         job["section"] = parse_section_option(options.section)
     if options.joint_values_specified:
         job["jointValues"] = parse_joint_values_option(options.joint_values)
+    if options.annotation_specified:
+        job["annotation"] = options.annotation
+    if options.measurements_specified:
+        job["measurements"] = options.measurements
     if options.debug:
         job["debug"] = True
     merge_focus_hide_options(job, options)
@@ -931,6 +1044,7 @@ class PreparedRenderJob:
     resolved_cwd: Path
     #: What the kind's check learned that its resolver needs (an SRDF's paired URDF).
     context: dict[str, object]
+    annotation_source: str = ""
 
 
 def prepare_render_job(
@@ -1008,10 +1122,7 @@ def prepare_render_job(
     validate_display_for_kind(display, kind=kind, input_label=input_path.name)
     job["display"] = display
     mode = normalize_render_mode(job.get("mode"))
-    lighting = display.get("lighting")
-    lighting_enabled = (
-        lighting.get("enabled", True) if is_plain_object(lighting) else display.get("mode") == "render"
-    )
+    lighting_enabled = display.get("mode") == "render"
     if lighting_enabled and mode != "view":
         raise SnapshotError("Render display supports only view mode")
 
@@ -1021,6 +1132,15 @@ def prepare_render_job(
         raise SnapshotError("selection.focus and selection.hide cannot be used in the same snapshot job")
 
     context = KIND_CHECKS[kind](job, kind=kind, input_path=input_path, mode=mode) or {}
+    annotation_source = ""
+    if job.get("annotation") is not None:
+        if mode != "view":
+            raise SnapshotError("an annotation is ink drawn over a view; only view mode draws it")
+        job["annotation"], annotation_source = load_annotation_option(job["annotation"], cwd=resolved_cwd)
+    if job.get("measurements") is not None:
+        if mode != "view":
+            raise SnapshotError("measurements are drawn over a view; only view mode draws them")
+        job["measurements"] = normalize_measurements(load_measurements_option(job["measurements"], cwd=resolved_cwd))
     normalized = normalize_common_job(
         job,
         mode=mode,
@@ -1037,12 +1157,13 @@ def prepare_render_job(
         reference_root=reference_root_for_input(input_path, resolved_cwd),
         resolved_cwd=resolved_cwd,
         context=dict(context),
+        annotation_source=annotation_source,
     )
 
 
 def resolve_prepared_render_job(prepared: PreparedRenderJob) -> dict[str, object]:
     """Build what an accepted job's render needs and attach it as ``resolved``."""
-    return KIND_RESOLVERS[prepared.kind](
+    resolved_job = KIND_RESOLVERS[prepared.kind](
         prepared.job,
         kind=prepared.kind,
         input_path=prepared.input_path,
@@ -1051,6 +1172,9 @@ def resolve_prepared_render_job(prepared: PreparedRenderJob) -> dict[str, object
         resolved_cwd=prepared.resolved_cwd,
         **prepared.context,
     )
+    if prepared.annotation_source:
+        resolved_job["resolved"] = {**resolved_job["resolved"], "annotationSource": prepared.annotation_source}
+    return resolved_job
 
 
 def resolve_render_job(
@@ -1359,6 +1483,10 @@ def check_drawing_render_job(
     answer, whichever surface it arrives on.
     """
     label = input_path.name
+    if job.get("annotation") is not None:
+        raise SnapshotError(f"an annotation is ink drawn on a model's parts in 3D; {DRAWING_IS}, so {label} has no parts or space to draw it in.")
+    if job.get("measurements") is not None:
+        raise SnapshotError(f"measurements are dimensions between points in 3D; {DRAWING_IS}, so {label} has no space to draw them in.")
     display = job.get("display") if is_plain_object(job.get("display")) else {}
     scene = sorted(f"display.{key}" for key in set(display) - DRAWING_DISPLAY_KEYS)
     if scene:

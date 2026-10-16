@@ -1,6 +1,8 @@
 import { createInspectEnvironmentResource, hasAuthoredMaterials } from "./inspectEnvironment.js";
 import { resolveCadEdgeSettings } from "./cadInk.js";
 import * as THREE from "three";
+import { createAnnotationLayer, normalizeAnnotation, ANNOTATION_REFERENCE_HEIGHT_PX } from "./annotation.js";
+import { drawMeasurementMark, measurementMarkLayout, normalizeMeasurementMarks } from "../lib/viewer/measureDimension.js";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { Line2 } from "three/examples/jsm/lines/Line2.js";
@@ -203,8 +205,8 @@ function drawBurnedInLabel(context, label, width, height, {
   });
 }
 
-function rendererDataUrlWithOptionalLabel(renderer, label, job, size) {
-  return sharedRendererDataUrlWithOptionalLabel(renderer, label, job, size);
+function rendererDataUrlWithOptionalLabel(renderer, label, job, size, overlay = null) {
+  return sharedRendererDataUrlWithOptionalLabel(renderer, label, job, size, overlay);
 }
 
 export function disposeSnapshotSceneResources(scene, modelRoot = null, extraTextures = []) {
@@ -1038,6 +1040,8 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
     dispose() {
       if (disposed) return;
       disposed = true;
+      viewport.annotationLayer?.layer.dispose();
+      viewport.annotationLayer = null;
       if (viewport.clipRuntime) disposeSectionCaps(viewport.clipRuntime);
       model.dispose?.();
       scene.remove?.(model.root);
@@ -1159,6 +1163,54 @@ function syncViewportTopologyDisplayEdges(viewport) {
       displayRecords: model.displayRecords
     }
   );
+}
+
+function measurementsOverlay(job, camera) {
+  if (!Array.isArray(job.measurements) || !job.measurements.length) return null;
+  const marks = normalizeMeasurementMarks(job.measurements);
+  return (context, width, height) => {
+    const scale = height / ANNOTATION_REFERENCE_HEIGHT_PX;
+    const rect = { left: 0, top: 0, width: width / scale, height: height / scale };
+    camera.updateMatrixWorld?.();
+    context.save();
+    context.scale(scale, scale);
+    for (const mark of marks) {
+      const layout = measurementMarkLayout(mark, camera, rect);
+      if (layout) drawMeasurementMark(context, layout, mark, { active: true, bounds: rect });
+    }
+    context.restore();
+  };
+}
+
+
+function boundsRadius(bounds) {
+  const min = bounds?.min, max = bounds?.max;
+  if (!Array.isArray(min) || !Array.isArray(max)) return 1;
+  const radius = Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2;
+  return Number.isFinite(radius) && radius > 0 ? radius : 1;
+}
+
+// The job's annotation (`job.annotation`, the ink a person drew with the viewer's Annotate tool), drawn over this
+// output with the viewer's own code (`annotation.js`): each mark on its part as the scene now has it,
+// cut by the same clip planes. Its ink is as heavy against this output's height as it was against a
+// viewer `ANNOTATION_REFERENCE_HEIGHT_PX` tall, so one layer serves every output of that height and is
+// rebuilt only for an output of another.
+function syncViewportAnnotation(viewport, job, { height }) {
+  if (job.annotation == null) return;
+  const lineScale = (height / ANNOTATION_REFERENCE_HEIGHT_PX) * (viewport.renderer.getPixelRatio?.() || 1);
+  if (viewport.annotationLayer?.lineScale !== lineScale) {
+    viewport.annotationLayer?.layer.dispose();
+    const { model } = viewport;
+    const layer = createAnnotationLayer(
+      { THREE, Line2, LineGeometry, LineMaterial },
+      normalizeAnnotation(job.annotation),
+      { radius: model.runtime?.modelRadius || boundsRadius(model.restBounds || model.bounds || viewport.context?.bounds), lineScale }
+    );
+    viewport.scene.add(layer.group);
+    viewport.annotationLayer = { layer, lineScale };
+  }
+  if (viewport.renderer) viewport.renderer.localClippingEnabled = true;
+  viewport.annotationLayer.layer.place(viewport.model.root, viewport.clipRuntime?.activeClipPlanes || []);
 }
 
 export async function captureModel(viewport, captureOptions = {}) {
@@ -1341,13 +1393,14 @@ export async function captureModel(viewport, captureOptions = {}) {
       if (outputTimings) outputTimings.prepareStudioMs = Math.round(performance.now() - stageStarted);
     }
     stageStarted = performance.now();
+    syncViewportAnnotation(viewport, job, { height });
     viewport.renderer.render(viewport.scene, renderCamera);
     if (outputTimings) outputTimings.drawSubmitMs = Math.round(performance.now() - stageStarted);
     // WebGL submission can return before GPU completion. PNG readback may
     // wait for that work, so this is image readback/encoding, not pure CPU PNG.
     stageStarted = performance.now();
     const viewLabel = String(output.viewLabel || output.label || resolvedCamera.name || "").toUpperCase();
-    const dataUrl = rendererDataUrlWithOptionalLabel(viewport.renderer, viewLabel, job, { width, height });
+    const dataUrl = rendererDataUrlWithOptionalLabel(viewport.renderer, viewLabel, job, { width, height }, measurementsOverlay(job, renderCamera));
     if (outputTimings) {
       outputTimings.encodeImageMs = Math.round(performance.now() - stageStarted);
       stageTimings.outputs.push(outputTimings);

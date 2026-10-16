@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { Maximize } from 'lucide-react';
 import { useAnalyticsConsent } from '@text-to-cad/ui/consent';
-import { useFeatures } from '@text-to-cad/ui/features';
 import { UpdateButton, useUpdateNotice } from '@text-to-cad/ui/update';
 import { viewerLinks } from '@text-to-cad/ui/links';
 import { Button } from '@text-to-cad/ui/primitives/button';
@@ -23,6 +22,11 @@ import { Banner } from './Notice';
 
 interface Showing { launch: Launch; sequence: number }
 
+declare const __TEXT_TO_CAD_BUILD__: string | undefined;
+// Which build this page is, where it is not the release's own: vite.config.mjs names it
+// (`@text-to-cad/ui/build-id`), and the version then reads `0.7.15-dev.<build>`.
+const BUILD = typeof __TEXT_TO_CAD_BUILD__ === 'string' ? __TEXT_TO_CAD_BUILD__ : '';
+
 // The host's sandbox need not be a secure context, where randomUUID is missing.
 const newViewId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
@@ -33,6 +37,9 @@ export function useHostContext(bridge: Pick<Bridge, 'hostContext' | 'onHostConte
 // A tab host's composer floats over the bottom of the page, its middle this far above the edge: the
 // viewer's playback bars sit on that same line (Codex: a 45px box, 17px up).
 const TAB_BOTTOM_CENTER = '40px';
+// Codex's sidebar page has its own chat's button floating in its bottom-right corner, where the
+// viewer's cube sits: the cube is lifted this far clear of it (`--cad-viewport-corner-bottom`).
+const SIDEBAR_CORNER_BOTTOM = '52px';
 
 // What to do once this view's server has gone: the host started it, and only the host starts it again.
 const LOST: Record<Presentation, string> = {
@@ -51,10 +58,14 @@ export function inlineHeight(width: number, maxHeight?: number): number {
  * Room for what the host draws over the page (`insets`). Inline, a card whose height the host is
  * told. The one element either way, so going full size keeps the view (and its model) as it is.
  */
-function Frame({ bridge, context, insets, inline = false, bottomCenter, overlay = null, children }: { bridge: Bridge; context: HostContext; insets: NonNullable<HostContext['safeAreaInsets']>; inline?: boolean; bottomCenter?: string; overlay?: ReactNode; children: ReactNode }) {
+function Frame({ bridge, context, insets, inline = false, bottomCenter, cornerBottom, overlay = null, children }: { bridge: Bridge; context: HostContext; insets: NonNullable<HostContext['safeAreaInsets']>; inline?: boolean; bottomCenter?: string; cornerBottom?: string; overlay?: ReactNode; children: ReactNode }) {
   // Where the host's composer floats over the page instead of taking room from it: the line the
-  // viewer's playback bars sit on, and the strip lists scroll clear of.
-  const floating = bottomCenter ? { '--cad-viewport-bottom-center': bottomCenter, '--cad-host-bottom-inset': `${context.safeAreaInsets?.bottom || 0}px` } as CSSProperties : {};
+  // viewer's playback bars sit on, and the strip lists scroll clear of; and the room a control of
+  // the host's takes from the bottom-right corner, which the cube keeps clear of.
+  const floating = {
+    ...(bottomCenter ? { '--cad-viewport-bottom-center': bottomCenter, '--cad-host-bottom-inset': `${context.safeAreaInsets?.bottom || 0}px` } : {}),
+    ...(cornerBottom ? { '--cad-viewport-corner-bottom': cornerBottom } : {}),
+  } as CSSProperties;
   const [width, setWidth] = useState(() => window.innerWidth);
   useEffect(() => {
     if (!inline) return;
@@ -117,6 +128,7 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   const insets = presentation === 'inline' ? context.safeAreaInsets || {} : { ...context.safeAreaInsets, bottom: 0 };
   const chat = useMemo(() => chatReach(bridge.hostCapabilities, presentation), [bridge, presentation]);
   const bottomCenter = presentation === 'tabs' ? TAB_BOTTOM_CENTER : undefined;
+  const cornerBottom = presentation === 'tabs' && surface === 'sidebar' ? SIDEBAR_CORNER_BOTTOM : undefined;
   // Once a newer view of this chat is up: this one's last frame (or null), and nothing else.
   const [still, setStill] = useState<string | null | undefined>(undefined);
   const superseded = still !== undefined;
@@ -186,11 +198,7 @@ export default function App({ bridge, server, launch: initial, presentation = 't
 
   // The usage stats cadgen sends (its telemetry), the same as the browser viewer's: nothing asks here (a
   // cadgen command says it once), and the app menu's switch changes it.
-  const { appSettings: analyticsSettings } = useAnalyticsConsent(client.consent);
-  // The app menu's features (Quick edit), on until the person turns one off: kept by the server beside
-  // the analytics answer, one choice for the sidebar, every thread's tab and the browser viewer.
-  const { features, appSettings: featureSettings } = useFeatures(client.features);
-  const appSettings = useMemo(() => [...analyticsSettings ?? [], ...featureSettings ?? []], [analyticsSettings, featureSettings]);
+  const { appSettings } = useAnalyticsConsent(client.consent);
   // A newer text-to-cad (`cadgen/updates.py`): the blue update button, first in the navbar and a row of
   // its own on the home while this install is behind, from the launch's notice at once. Its prompt goes
   // to the chat where the host takes messages, so the agent updates CAD; elsewhere it is copied.
@@ -201,16 +209,16 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   const openLink = (url: string) => void bridge.request('ui/open-link', { url }).catch(() => {});
   // The navbar's links: the same as every app's (X, Discord, GitHub and a new issue), followed through the
   // host (a frame cannot open one itself).
-  const links = useMemo(() => viewerLinks({ version, open: url => bridge.request('ui/open-link', { url }).then(() => {}) }),
+  const links = useMemo(() => viewerLinks({ version, build: BUILD, open: url => bridge.request('ui/open-link', { url }).then(() => {}) }),
     [bridge]);
   const { launch } = showing;
   if (superseded) {
-    return <Frame bridge={bridge} context={context} insets={insets} inline={inline} bottomCenter={bottomCenter}><Superseded still={still} /></Frame>;
+    return <Frame bridge={bridge} context={context} insets={insets} inline={inline} bottomCenter={bottomCenter} cornerBottom={cornerBottom}><Superseded still={still} /></Frame>;
   }
-  return <Frame bridge={bridge} context={context} insets={insets} inline={inline} bottomCenter={bottomCenter}
+  return <Frame bridge={bridge} context={context} insets={insets} inline={inline} bottomCenter={bottomCenter} cornerBottom={cornerBottom}
     overlay={lost ? <Banner message={LOST[presentation]} /> : null}>
     <ModelView launch={launch} sequence={showing.sequence} alone={alone} bridge={bridge} client={client} tunnel={tunnel}
-      tabStore={tabStore} live={live} links={links} appSettings={appSettings} features={features}
+      tabStore={tabStore} live={live} links={links} appSettings={appSettings}
       update={updateNotice ? <UpdateButton notice={updateNotice} send={sendPrompt} copy={prompt => frameClipboard.writeText(prompt)}
         onLink={openLink} /> : null}
       fullSize={inline && context.availableDisplayModes?.includes('fullscreen') !== false ? <FullSizeButton bridge={bridge} /> : null}
