@@ -2,9 +2,10 @@
 and edge by its name, on the entity written for it (``step_names``).
 
 Any reader of the file gets those names from the file alone, on the elements they were
-written on, and a document of one shape is that one product; and a file written without
-names is the file the writer wrote before names existed, which a named file is too, byte
-for byte, but for its names.
+written on; a cold parse walked as a compile walks it names every occurrence by the token
+the result names it by, and a document of one shape is that one product; and a file written
+without names is the file the writer wrote before names existed, which a named file whose
+plain twin already reads back as its result is too, byte for byte, but for its names.
 """
 
 from __future__ import annotations
@@ -152,6 +153,30 @@ class StepNamesRoundTripTest(unittest.TestCase):
         again = self.named.with_name("again.step")
         self.assertEqual(export_build123d_step_file(self.root, again, names=lambda leaf: self.placed.get(id(leaf))),
                          self.named_digest, "the same names write the same bytes")
+
+    def test_a_cold_parse_names_every_occurrence_as_the_result_does(self) -> None:
+        from cadgen._internal.step_scene_loader import load_step_scene
+        from cadgen._internal.tree_tokens import assign_tokens
+        from cadgen.store.build import _document_walk
+
+        def transform(shape):
+            from cadgen._internal.component_package import _transform_from_location
+
+            return _transform_from_location(shape.location)
+
+        leaves = [child for child in self.root.children if child.label != "nest"]
+        nest = next(child for child in self.root.children if child.label == "nest")
+        result = {"id": "rig", "name": "rig", "children": [
+            *({"id": leaf.label, "name": leaf.label} for leaf in leaves[:3]),
+            {"id": "nest", "name": "nest", "children": [{"id": "turned", "name": "turned"}]},
+            {"id": leaves[3].label, "name": leaves[3].label},
+        ]}
+        occurrences = [{"id": leaf.label, "transform": transform(leaf)} for leaf in leaves]
+        occurrences.append({"id": "turned", "transform": transform(nest.children[0])})
+        expected = assign_tokens(result, occurrences, [], label="rig")
+        walk, _paths, _nodes = _document_walk(load_step_scene(self.named))
+        self.assertEqual(sorted(str(row["id"]) for row in walk.occurrences),
+                         sorted(expected[row["id"]] for row in occurrences))
 
     def test_a_document_of_one_shape_is_one_product_named_as_the_result_names_it(self) -> None:
         from OCP.gp import gp_Trsf

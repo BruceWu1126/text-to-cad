@@ -19,6 +19,7 @@ from cadgen._internal.step_names import (
     name_definition,
     write_names,
 )
+from cadgen._internal.step_placements import readable_placement
 from cadgen._internal.step_scene import LoadedStepScene, load_step_scene_from_xcaf_doc, step_file_hash
 
 
@@ -313,6 +314,14 @@ def _create_bin_xcaf_doc(to_export: Any, names: Callable[[Any], ComponentNames |
                     # Carry its frame into the immediate child instances;
                     # adding a placed root reference would add a STEP group.
                     child_location = root_location.Multiplied(child_location)
+                if names is not None and not getattr(child, "children", None):
+                    # Named, a leaf whose rotation a reader would rebuild rounding to
+                    # another token is turned by at most a picoradian so that it does not
+                    # (``step_placements``); every other placement is written as given.
+                    given = child_location.Transformation()
+                    placed = readable_placement(given)
+                    if placed is not given:
+                        child_location = TopLoc_Location(placed)
                 child_component = shape_tool.AddComponent(
                     definition_label,
                     child_definition,
@@ -1459,9 +1468,11 @@ def export_build123d_step_file(
     what the file names that component by (``step_names.ComponentNames``: its part key, on
     its product, and its faces' and edges' names, by the ordinals of its unlocated shape),
     or None. A named file is written so that its reader reads the result: every component
-    keeps its names, and a document of one shape placed at the identity is that one
-    product; otherwise it is the unnamed file, byte for byte, but for the names. Without
-    ``names`` the file is written as it always was."""
+    keeps its names, a document of one shape placed at the identity is that one product,
+    and an occurrence whose rotation a reader would rebuild rounding to another token is
+    turned by at most a picoradian about its own origin (``step_placements``); otherwise it
+    is the unnamed file, byte for byte, but for the names. Without ``names`` the file is
+    written as it always was."""
     with (logger.timed("build XCAF document") if logger is not None else nullcontext()):
         doc = _create_bin_xcaf_doc(to_export, names=names)
     return write_xcaf_doc_step_file(
