@@ -698,9 +698,12 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   occurrence); every part's faces and edges by name and place, within the
   display chord tolerance of the part and each element's own tolerance (a body
   without faces by its edges' places); and the colour each face is drawn in. A
-  file that verifies is its tree: its entry is written again without
-  `verified`. One that does not maps to its own content as above, the
-  differences listed (`differ`). A build with no daemon waits for its verify
+  place is a tight box, the kernel's search for each extreme, which can stop
+  short of one it straddles on one of two equal surfaces: an element its box
+  puts off its place is measured again on both sides, the search cut finer,
+  before it is called moved. A file that verifies is its tree: its entry is
+  written again without `verified`. One that does not maps to its own content
+  as above, the differences listed (`differ`). A build with no daemon waits for its verify
   and warns; a daemon's build returns once its files are written, and the
   verify finishes on the pool, so a mismatch reaches the next touch of the
   file -- a door, `store why`, the next run. A door given an entry still

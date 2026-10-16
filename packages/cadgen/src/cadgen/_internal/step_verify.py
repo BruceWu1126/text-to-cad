@@ -18,6 +18,13 @@ geometry as coincident, so a reader that heals or re-approximates within it has 
 changed the shape. Elements are paired by name; those no name pairs are paired by place,
 in order, else as a set, since a reader need not list them in the order they were written.
 
+A tight box is the kernel's search for each extreme, and a search can stop short of one it
+straddles: the far side of a sphere scaled into a B-spline is found on one of two equal
+surfaces and missed by 0.8 mm on the other, as the last digit a file keeps of its
+parameters decides. So an element its box puts off its place, or leaves without a
+counterpart, is measured again on both sides with the search cut finer
+(:func:`measured_again`) before it is called moved.
+
 What is compared of a colour is the colour each face is drawn in -- its own where its part
 gives it one, else its occurrence's -- to the single precision a STEP reader keeps, never
 how the file states it: OCCT writes an occurrence's colour onto the faces of a compound
@@ -44,7 +51,7 @@ import math
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from cadgen._internal.step_names import ComponentNames, is_part_key
 
@@ -75,6 +82,9 @@ class ExpectedComponent:
     edge_tolerances: tuple[float, ...] = ()
     unnameable_edges: frozenset[int] = frozenset()
     faceless_edges: frozenset[int] = frozenset()
+    # The component's shape, from which an element its box puts off its place is measured
+    # again (:func:`measured_again`); None, not measured again.
+    shape: Any = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -101,7 +111,7 @@ def expected_component(shape: Any, names: ComponentNames, face_colors: Mapping[A
     return ExpectedComponent(names=names, face_boxes=face_boxes(shape), edge_boxes=edge_boxes(shape),
                              face_colors=dict(face_colors or {}), face_tolerances=face_tolerances,
                              edge_tolerances=edge_tolerances, unnameable_edges=edges,
-                             faceless_edges=faceless_edges(shape))
+                             faceless_edges=faceless_edges(shape), shape=shape)
 
 
 def faceless_edges(shape: Any) -> frozenset[int]:
@@ -138,6 +148,57 @@ def edge_boxes(shape: Any) -> tuple[Box | None, ...]:
     from OCP.TopAbs import TopAbs_EDGE
 
     return _boxes(shape, TopAbs_EDGE)
+
+
+def measured_again(element: Any) -> Box | None:
+    """The tight box of a face or an edge measured again with the kernel's search cut
+    finer: a face's surface over each quarter of its parameter domain -- a plane's, which
+    the kernel bounds by its edges, by those -- and an edge's curve over each half of its
+    range. A search over a smaller piece starts nearer each extreme, and pieces cut
+    otherwise than the whole do not straddle an extreme where the whole did."""
+    from OCP.Bnd import Bnd_Box
+    from OCP.BndLib import BndLib_Add3dCurve, BndLib_AddSurface
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
+    from OCP.BRepTools import BRepTools
+    from OCP.GeomAbs import GeomAbs_Plane
+    from OCP.TopAbs import TopAbs_EDGE
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    from cadgen._internal.topology_extract import _bnd_box
+
+    box = Bnd_Box()
+
+    def halves(edge: Any) -> bool:
+        if BRep_Tool.Degenerated_s(edge) or not BRep_Tool.IsGeometric_s(edge):
+            return False
+        curve = BRepAdaptor_Curve(edge)
+        first, last = curve.FirstParameter(), curve.LastParameter()
+        middle = (first + last) / 2
+        for low, high in ((first, middle), (middle, last)):
+            BndLib_Add3dCurve.AddOptimal_s(curve, low, high, 0.0, box)
+        return True
+
+    if element.ShapeType() == TopAbs_EDGE:
+        if not halves(TopoDS.Edge_s(element)):
+            # A degenerate edge is its vertex: there is nothing to search.
+            return _box(_bnd_box(element))
+    else:
+        face = TopoDS.Face_s(element)
+        surface = BRepAdaptor_Surface(face, False)
+        if surface.GetType() == GeomAbs_Plane:
+            explorer = TopExp_Explorer(face, TopAbs_EDGE)
+            while explorer.More():
+                halves(TopoDS.Edge_s(explorer.Current()))
+                explorer.Next()
+        else:
+            u1, u2, v1, v2 = BRepTools.UVBounds_s(face)
+            us, vs = (u1, (u1 + u2) / 2, u2), (v1, (v1 + v2) / 2, v2)
+            for i in range(2):
+                for j in range(2):
+                    BndLib_AddSurface.AddOptimal_s(surface, us[i], us[i + 1], vs[j], vs[j + 1], 0.0, box)
+    return None if box.IsVoid() else _box(box.Get())
 
 
 def element_tolerances(shape: Any) -> tuple[tuple[float, ...], tuple[float, ...]]:
@@ -380,18 +441,43 @@ def _differences(shape: Any, names: ComponentNames, component: ExpectedComponent
         excused = {expected_names[index] for index in unnamed if index < len(expected_names)} - {None}
         differences.extend(_name_differences(kind, read_names, expected_names, excused))
         bounds = [display + (own[index] if index < len(own) else 0.0) for index in range(len(wanted))]
-        pairs[kind] = _paired(kind, read_names, read, expected_names, wanted, bounds, display, differences, skipped)
+        again = (_again(shape, kind), _again(component.shape, kind)) if component.shape is not None else None
+        pairs[kind] = _paired(kind, read_names, read, expected_names, wanted, bounds, display, differences, skipped,
+                              again)
     return differences, pairs["face"]
+
+
+def _again(shape: Any, kind: str) -> Callable[[int], Box | None]:
+    """Each of ``shape``'s faces or edges (by index, in ``TopExp.MapShapes_s`` order)
+    :func:`measured_again`, once."""
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
+    from OCP.TopExp import TopExp
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+
+    elements = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(shape, TopAbs_FACE if kind == "face" else TopAbs_EDGE, elements)
+    measured: dict[int, Box | None] = {}
+
+    def box(index: int) -> Box | None:
+        if index not in measured:
+            measured[index] = measured_again(elements.FindKey(index + 1))
+        return measured[index]
+
+    return box
 
 
 def _paired(kind: str, read_names: list[str | None], read_boxes: tuple[Box | None, ...],
             expected_names: list[str | None], expected_boxes: tuple[Box | None, ...], bounds: list[float],
-            display: float, differences: list[str], skipped: set[int]) -> dict[int, int]:
+            display: float, differences: list[str], skipped: set[int],
+            again: tuple[Callable[[int], Box | None], Callable[[int], Box | None]] | None = None
+            ) -> dict[int, int]:
     """Pair the result's elements of ``kind`` with the file's -- by a name on one element of
     each, the rest by place -- and add to ``differences`` the named ones off their place (by
     more than their ``bounds``, the display tolerance ``display`` and their own) and the
-    number no place pairs. The result's elements at ``skipped`` (edges no file can name that
-    a face bounds) are not paired: their faces answer for them. The pairs, from the result's
+    number no place pairs. ``again`` measures an element of the file's and of the result's
+    again (by index): one its box puts off its place, or leaves without a counterpart, is
+    compared by those. The result's elements at ``skipped`` (edges no file can name that a
+    face bounds) are not paired: their faces answer for them. The pairs, from the result's
     index to the file's."""
     counted = Counter(name for name in read_names if name is not None)
     at = {name: index for index, name in enumerate(read_names) if name is not None and counted[name] == 1}
@@ -403,7 +489,8 @@ def _paired(kind: str, read_names: list[str | None], read_boxes: tuple[Box | Non
             continue
         pairs[index] = at[name]
         taken.add(at[name])
-        if not _near(read_boxes[at[name]], expected_boxes[index], bounds[index]):
+        if not _near(read_boxes[at[name]], expected_boxes[index], bounds[index]) and (
+                again is None or not _near(again[0](at[name]), again[1](index), bounds[index])):
             moved.append(name)
     if moved:
         differences.append(f"{kind}s off their place by more than {display:.3g} and their own tolerance: "
@@ -414,6 +501,13 @@ def _paired(kind: str, read_names: list[str | None], read_boxes: tuple[Box | Non
                         [read_boxes[index] for index in rest_read], [bounds[index] for index in rest_expected])
     pairs.update((rest_expected[a], rest_read[b]) for a, b in matched.items())
     unmatched = len(rest_expected) - len(matched)
+    if unmatched and again is not None:
+        left = [index for index in rest_expected if index not in pairs]
+        free = sorted(set(rest_read) - set(pairs.values()))
+        matched = _by_place([again[1](index) for index in left], [again[0](index) for index in free],
+                            [bounds[index] for index in left])
+        pairs.update((left[a], free[b]) for a, b in matched.items())
+        unmatched -= len(matched)
     if unmatched:
         differences.append(f"{unmatched} {kind}s not paired by name have no counterpart within {display:.3g} "
                            "and their own tolerance")

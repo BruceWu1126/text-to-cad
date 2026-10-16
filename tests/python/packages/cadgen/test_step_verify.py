@@ -147,8 +147,10 @@ class VerifyStepTest(unittest.TestCase):
             for shift, reported in ((0.5 * tolerance, False), (2 * tolerance, True)):
                 with self.subTest(kind=kind, shift=shift):
                     boxes = getattr(bracket, f"{kind}_boxes")
-                    moved = dataclasses.replace(bracket, **{f"{kind}_boxes": ((boxes[0][0] + shift, *boxes[0][1:]),)
-                                                            + boxes[1:]})
+                    # Boxes given without a shape are not measured again.
+                    moved = dataclasses.replace(bracket, shape=None,
+                                                **{f"{kind}_boxes": ((boxes[0][0] + shift, *boxes[0][1:]),)
+                                                   + boxes[1:]})
                     found = self.messages(self.verify(self.named, {**self.components, "bracket": moved}))
                     message = (f"{kind}s off their place by more than {tolerance:.3g} and their own tolerance: "
                                f"{kind[0]}:bracket.make1.1")
@@ -174,6 +176,39 @@ class VerifyStepTest(unittest.TestCase):
                                                                            f"{len(component.face_boxes)}")],
                          "the premise: the file has as many faces")
         self.assertTrue([message for message in found if message.startswith("faces off their place")], found)
+
+    def test_a_face_one_sides_search_measures_short_is_measured_again(self) -> None:
+        """A tight box is the kernel's search for each extreme. On an ellipsoid -- a sphere
+        scaled into a B-spline -- the search stops 0.8 mm short of the far side on the
+        result, and not on the file, whose parameters keep fewer digits: the face is
+        measured again on both sides, its search cut finer, before it is called moved --
+        whether its name pairs it or its place."""
+        import build123d as bd
+        from OCP.TopAbs import TopAbs_FACE
+        from OCP.TopExp import TopExp
+        from OCP.TopTools import TopTools_IndexedMapOfShape
+
+        from cadgen._internal.step_names import ComponentNames
+        from cadgen._internal.step_scene_loader import load_step_scene
+        from cadgen._internal.step_verify import face_boxes, measured_again, verify_step
+        from cadgen.step_export import export_build123d_step_file
+
+        rock = bd.scale(bd.Sphere(90), by=(1.0, 0.82, 0.62))
+        rock.label = "rock"
+        component = _expected(rock, "rock", _KEYS["ball"])
+        named = Path(self._tmp.name) / "rock.step"
+        export_build123d_step_file(rock, named, names=lambda leaf: component.names)
+        ((_key, read),) = load_step_scene(named).prototype_shapes.items()
+        self.assertGreater(abs(face_boxes(read)[0][0] - component.face_boxes[0][0]), 0.5,
+                           "the premise: one side's search stops short of the far side")
+        faces = TopTools_IndexedMapOfShape()
+        TopExp.MapShapes_s(component.shape, TopAbs_FACE, faces)
+        self.assertAlmostEqual(measured_again(faces.FindKey(1))[0], -90.0, places=6)
+        self.assertEqual(verify_step(named, [component]), [])
+        keyed = Path(self._tmp.name) / "rock-keyed.step"
+        export_build123d_step_file(rock, keyed, names=lambda leaf: ComponentNames(part=_KEYS["ball"]))
+        unnamed = dataclasses.replace(component, names=ComponentNames(part=_KEYS["ball"]))
+        self.assertEqual(verify_step(keyed, [unnamed]), [])
 
     def test_a_face_is_drawn_in_the_results_colour(self) -> None:
         bracket = self.components["bracket"]
@@ -223,7 +258,7 @@ class VerifyStepTest(unittest.TestCase):
     def test_a_face_the_result_does_not_have_is_reported(self) -> None:
         bracket = self.components["bracket"]
         more = dataclasses.replace(bracket, names=dataclasses.replace(bracket.names, faces=()),
-                                   face_boxes=bracket.face_boxes + (bracket.face_boxes[0],))
+                                   face_boxes=bracket.face_boxes + (bracket.face_boxes[0],), shape=None)
         found = self.messages(self.verify(self.named, {**self.components, "bracket": more}))
         count = len(bracket.face_boxes)
         self.assertIn((None, _KEYS["bracket"], f"the file has {count} faces where the result has {count + 1}"), found)
@@ -235,7 +270,8 @@ class VerifyStepTest(unittest.TestCase):
         unnamed = dataclasses.replace(bracket, names=dataclasses.replace(bracket.names, faces=(), edges=()))
         self.assertEqual(self.verify(self.keyed, {"bracket": unnamed}, None), [])
         first = bracket.face_boxes[0]
-        moved = dataclasses.replace(unnamed, face_boxes=((first[0] + 1.0, *first[1:]),) + bracket.face_boxes[1:])
+        moved = dataclasses.replace(unnamed, face_boxes=((first[0] + 1.0, *first[1:]),) + bracket.face_boxes[1:],
+                                    shape=None)
         found = self.messages(self.verify(self.keyed, {"bracket": moved}, None))
         self.assertEqual(len(found), 1)
         self.assertTrue(found[0][2].startswith("1 faces not paired by name have no counterpart within"), found)
@@ -356,7 +392,7 @@ class VerifyStepTest(unittest.TestCase):
             with self.subTest(face=index + 1, shift=shift):
                 boxes = list(component.face_boxes)
                 boxes[index] = (boxes[index][0] + shift, *boxes[index][1:])
-                moved = dataclasses.replace(component, face_boxes=tuple(boxes))
+                moved = dataclasses.replace(component, face_boxes=tuple(boxes), shape=None)
                 found = [mismatch.message for mismatch in verify_step(path, [moved])]
                 self.assertEqual(any(message.startswith("faces off their place") for message in found), reported, found)
 
