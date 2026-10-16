@@ -672,11 +672,9 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   objects before reuse and derives failed entries again; a known damaged
   closure and a forced compile derive every canonical component.
 
-  **Exports.** A build writes its STEP from its result once the preview is out
-  (§5, publish order), by the build pool (`store/exports.py`, artifact kind
-  `export`, §9), while the build resolves its declarations and writes its
-  record, its STEP pending: the result's tree is claimed first, and the job
-  names the stored tree and a staged path, never a
+  **Exports.** A build writes its STEP after it publishes its result and its
+  record (§5, publish order), by the build pool (`store/exports.py`, artifact
+  kind `export`, §9): the job names the stored tree and a staged path, never a
   script, materializes the tree (`store.materialize`) and writes it with the
   names writer -- or plain, without part keys and element names, so its bytes
   claim nothing about the store they came from. An all-link parent may instead
@@ -1294,15 +1292,14 @@ Each with the failure it prevents.
   made inside the operating system's own libraries (the macOS shared cache);
   a file a third-party library caches for the life of a warm worker, after
   the first build that reads it.
-- **Publish order.** Objects first (components, then the complete tree,
-  claimed before any export reads it), the record (its STEP output pending),
-  output mappings and the provenance entry; then, per export -- written
-  meanwhile into a private sibling directory outside the store -- the file
-  moved into place atomically, its digest-bound sidecar, the document-byte
-  mapping (pending), the record's output entry; then the verify (§3,
-  *Exports*). Prevents: a record pointing at a tree that does not exist yet, a
-  `.step` whose sha the record has not seen, and a document entry naming a
-  tree its bytes were not written from.
+- **Publish order.** Objects first (components, then the complete tree), the
+  record (its STEP output pending), output mappings and the provenance entry;
+  then, per export, the file (staged in a private sibling directory outside the
+  store, moved into place atomically), its digest-bound sidecar, the
+  document-byte mapping (pending), the record's output entry; then the verify
+  (§3, *Exports*). Prevents: a record pointing at a tree that does not exist
+  yet, a `.step` whose sha the record has not seen, and a document entry
+  naming a tree its bytes were not written from.
 - **Canonical STEP bytes.** Before a written STEP is published, the writer
   canonicalizes what OCCT emitted: NAUO instance ids, presentation-style
   order, and the sign of zero — `-0.` is rewritten `0.`, because which IEEE

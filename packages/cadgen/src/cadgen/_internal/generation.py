@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import copy
 import json
 import sys
@@ -197,38 +196,23 @@ def _export_plan(previous: Mapping[str, object], step_key: str, tree: str, *, fo
                                          and (marked or bool(prior.get("plain")))))
 
 
-def _start_export(tree: str, staged: Path, plan: _ExportPlan, *, children: Mapping[str, object]):
-    """The build pool's export job writing ``tree`` to ``staged`` as ``plan`` says
-    (``store/exports.py``), started: the pool writes the file while the build goes on,
-    and the build waits for it only to publish it (:func:`_save_step`). ``children``,
-    each linked child's tree with its saved STEP, lets an eligible all-link parent be
-    spliced from those files; a plain export writes the whole document."""
-    from cadgen.daemon.artifacts import submit_artifact
+def _export(tree: str, staged: Path, *, names: bool, live: Mapping[str, object],
+            children: Mapping[str, object], logger: CliLogger) -> dict:
+    """The export job's answer for ``tree`` written to ``staged`` (``store/exports.py``):
+    the build pool's, or this process's for a result holding a component only its live
+    shape stands for. Its spans and warnings are told to ``logger``."""
+    if live:
+        from cadgen.store.exports import export_step
 
-    request = {"kind": "export", "tree": tree, "out": str(staged), "names": not plan.plain}
-    if children and not plan.plain:
-        request["children"] = {child: {"path": str(step.path), "sha256": step.step_hash}
-                               for child, step in children.items()}
-    return submit_artifact(request)
+        export = export_step(tree, staged, names=names, shapes=live)
+    else:
+        from cadgen.daemon.artifacts import resolve_artifact
 
-
-def _settled(job):
-    """The exit callback for an export a build started (:func:`_start_export`) and may not
-    get to publish: on the build's failure it waits for the job to finish writing into the
-    stage folder before the folder goes (Windows refuses to remove a file another process
-    holds open); an interrupt does not wait, and the model's next build sweeps the folder."""
-
-    def settle(exc_type, _exc, _traceback) -> bool:
-        if exc_type is None or issubclass(exc_type, Exception):
-            with contextlib.suppress(Exception):
-                job.result()
-        return False
-
-    return settle
-
-
-def _exported(export: dict, staged: Path, logger: CliLogger) -> dict:
-    """An export's answer (``store/exports.py``), its spans and warnings told to ``logger``."""
+        request = {"kind": "export", "tree": tree, "out": str(staged), "names": names}
+        if children:
+            request["children"] = {child: {"path": str(step.path), "sha256": step.step_hash}
+                                   for child, step in children.items()}
+        export = resolve_artifact(request)
     for label, seconds in export["spans"]:
         logger.timing(label, seconds)
     if export.get("unspliced"):
@@ -238,17 +222,15 @@ def _exported(export: dict, staged: Path, logger: CliLogger) -> dict:
     return export
 
 
-def _save_step(spec: EntrySpec, tree: str, plan: _ExportPlan, *, staged: Path, job: object | None,
-               live: Mapping[str, object], record: dict, sidecar_payload: dict | None,
+def _save_step(spec: EntrySpec, tree: str, plan: _ExportPlan, *, record: dict, sidecar_payload: dict | None,
                expected_document_pair: tuple[str | None, str | None] | None, producer: dict | None,
-               still_saves: Callable[[], None], logger: CliLogger) -> bool:
-    """Save the model's STEP from its result ``tree`` (STORE.md §3, *Exports*) to the
-    staged path ``staged``: the export -- the pool's ``job``, already under way, or for a
-    result holding a component only its ``live`` shape stands for, this process's own --
-    or the file kept, then the publication tail -- the file and its sidecar in place, its
-    bytes mapped to the tree pending its verify, the record's output entry, the `saved`
-    event -- then the verify, which a build with no daemon waits for and a daemon's
-    finishes after the build returns. True when the file was kept."""
+               live: Mapping[str, object], children: Callable[[], Mapping[str, object]],
+               stage: Callable[[], Path], still_saves: Callable[[], None], logger: CliLogger) -> bool:
+    """Save the model's STEP from its result ``tree`` (STORE.md §3, *Exports*): the export
+    (or the file kept), then the publication tail -- the file and its sidecar in place,
+    its bytes mapped to the tree pending its verify, the record's output entry, the
+    `saved` event -- then the verify, which a build with no daemon waits for and a
+    daemon's finishes after the build returns. True when the file was kept."""
     from cadgen._internal.atomic_replace import replace_atomic
     from cadgen._internal.source_sidecar import source_sidecar_path, write_source_sidecar
     from cadgen.catalog import seed_artifact_hash
@@ -258,15 +240,11 @@ def _save_step(spec: EntrySpec, tree: str, plan: _ExportPlan, *, staged: Path, j
 
     step_path = spec.step_path.expanduser().resolve()
     model_path = _model_for_spec(spec)
+    staged = stage() / spec.step_path.name
     export = None
     if plan.kept is None:
-        if live:
-            from cadgen.store.exports import export_step
-
-            answer = export_step(tree, staged, names=not plan.plain, shapes=live)
-        else:
-            answer = job.result()
-        export = _exported(answer, staged, logger)
+        export = _export(tree, staged, names=not plan.plain, live=live,
+                         children={} if plan.plain else children(), logger=logger)
         digest = str(export["sha256"])
     else:
         digest = plan.kept_sha256
@@ -661,33 +639,6 @@ def _generate_part_outputs(
 
         # What the preview resolved against the result tree; the sidecar carries the same.
         resolved: dict[str, object] = {}
-        model_path = _model_for_spec(spec)
-        step_key = str(spec.step_path.expanduser().resolve())
-        # The record this build replaces, read before it does: what the kept rule asks of it.
-        previous = (read_record(model_path) or {}) if generated else {}
-        # The STEP on its way (start_saving): the export plan, the staged file, the job.
-        saving: dict[str, object] = {}
-
-        def start_saving(result_hash: str, result_tree: dict) -> None:
-            """Decide the STEP's export (the kept rule) and start it the moment the preview is
-            out: the pool writes the file while this build resolves its declarations and
-            writes its record. Its tree is claimed first, so no sweep takes what it reads
-            (STORE.md §8). A result holding a component only its live shape stands for is
-            exported in this process when the build saves it."""
-            from cadgen.store.trees import claim_tree
-
-            plan = _export_plan(previous, step_key, result_hash, force=force,
-                                on_disk=(expected_document_pair or (None, None))[0])
-            staged = _stage(spec, publication_cleanup) / spec.step_path.name
-            job = None
-            if plan.kept is None and not live:
-                if not claim_tree(result_hash):
-                    raise RuntimeError(f"{spec.cad_ref}: result was not saved: pinned geometry disappeared from the "
-                                       "cache during the build")
-                job = _start_export(result_hash, staged, plan, children=(
-                    _pinned_child_steps(scene) if not force and not result_tree.get("occurrences") else {}))
-                publication_cleanup.push(_settled(job))
-            saving.update(plan=plan, staged=staged, job=job)
 
         def publish_preview(result_hash: str, result_tree: dict):
             """The preview revision (STORE.md §9b), the moment the result exists: its tree and
@@ -736,8 +687,6 @@ def _generate_part_outputs(
             if wait_children is not None:
                 wait_children()
             preview_event(phase="Saving STEP" if writes_step else None)
-            if writes_step:
-                start_saving(result_hash, result_tree)
             # The declarations, resolved against the result tree: for the sidecar below,
             # and for the preview as the one annotations object a viewer binds to. An axis
             # ref reads its component's selector table once the display job is done. The
@@ -795,11 +744,15 @@ def _generate_part_outputs(
         if kernel_run is not None and writes_step:
             provenance = {"features": kernel_run.trace.feature_rows(), **stats["account"]}
 
+        model_path = _model_for_spec(spec)
         outputs: dict[str, object] = {}
+        step_key = str(spec.step_path.expanduser().resolve())
         from cadgen._internal.source_sidecar import source_sidecar_path
 
         sidecar_key = str(source_sidecar_path(spec.entry_path).resolve())
-        export_plan = saving.get("plan")
+        previous = (read_record(model_path) or {}) if generated else {}
+        export_plan = _export_plan(previous, step_key, tree_hash, force=force,
+                                   on_disk=(expected_document_pair or (None, None))[0]) if writes_step else None
         if writes_step:
             # The record is written at the source result, its STEP pending until the
             # export lands (an empty sha256 the gate reads as never written).
@@ -976,9 +929,10 @@ def _generate_part_outputs(
             scene.kernel_run = None
         if writes_step:
             stats["stepKept"] = _save_step(
-                spec, tree_hash, export_plan, staged=saving["staged"], job=saving["job"], live=live, record=record,
-                sidecar_payload=sidecar_payload, expected_document_pair=expected_document_pair, producer=producer,
-                still_saves=still_saves, logger=logger,
+                spec, tree_hash, export_plan, record=record, sidecar_payload=sidecar_payload,
+                expected_document_pair=expected_document_pair, producer=producer, live=live,
+                children=lambda: _pinned_child_steps(scene) if not force and not tree.get("occurrences") else {},
+                stage=lambda: _stage(spec, publication_cleanup), still_saves=still_saves, logger=logger,
             )
         # Every part of the result is stored before the build reports done (the pool's
         # job for them ran while the STEP was written), so a view of what it built only
@@ -1171,13 +1125,10 @@ def _reexport(spec: EntrySpec, tree: str, *, logger: CliLogger) -> bool:
                 + ("did not hold its result; writing it again without names" if plan.plain
                    else "was written by another writer; writing it again"))
     with ExitStack() as cleanup:
-        staged = _stage(spec, cleanup) / spec.step_path.name
-        job = _start_export(tree, staged, plan, children={})
-        cleanup.push(_settled(job))
-        _save_step(spec, tree, plan, staged=staged, job=job, live={}, record=copy.deepcopy(record),
-                   sidecar_payload=_raw_source_sidecar(spec.step_path), expected_document_pair=pair,
-                   producer=(document_entry_for_hash(pair[0] or "") or {}).get("producer"),
-                   still_saves=lambda: None, logger=logger)
+        _save_step(spec, tree, plan, record=copy.deepcopy(record), sidecar_payload=_raw_source_sidecar(spec.step_path),
+                   expected_document_pair=pair, producer=(document_entry_for_hash(pair[0] or "") or {}).get("producer"),
+                   live={}, children=dict, stage=lambda: _stage(spec, cleanup), still_saves=lambda: None,
+                   logger=logger)
     return True
 
 
@@ -1209,6 +1160,8 @@ def _reused_display_producer(document_hash: str, tree: str, hint: object) -> obj
     cadgen wrote the hint -- this runtime's, and the document is re-attested with it, so
     neither this build nor a view asks again for parts no worker can make. Re-attesting is
     best effort: a store this process cannot write keeps the hint it has."""
+    import contextlib
+
     from cadgen.store import parts
 
     try:
