@@ -849,10 +849,12 @@ def prepare_geometry_component(shape: Any, *, face_colors: object = None,
 
 
 def prepare_published_component(shape: Any, *, face_colors: object = None,
-                                identity: tuple[str | None, Mapping[str, Any] | None] | None = None) -> dict[str, Any]:
+                                identity: tuple[str | None, Mapping[str, Any] | None] | None = None,
+                                payload: bytes | None = None) -> dict[str, Any]:
     """:func:`prepare_geometry_component` for a parsed prototype whose exact bytes
     may already be published, named by ``identity`` as the component it was read
-    from is (a scene read from a stored tree carries it).
+    from is (a scene read from a stored tree carries it). ``payload`` is the
+    prototype's bintools-v4 bytes, when the caller has serialized it already.
 
     A STEP read-back parses every prototype again, and each one was encoded,
     privately decoded and fenced for point fidelity on every save even when
@@ -870,7 +872,7 @@ def prepare_published_component(shape: Any, *, face_colors: object = None,
     from cadgen.store.objects import has_object
 
     wrapped = getattr(shape, "wrapped", shape)
-    payload = _shape_brep_bytes(wrapped)
+    payload = _shape_brep_bytes(wrapped) if payload is None else payload
     digest = hashlib.sha256(payload).hexdigest()
     construction, lineage = identity if identity is not None else (None, None)
     lineage_payload = lineage_bytes(lineage) if lineage is not None else None

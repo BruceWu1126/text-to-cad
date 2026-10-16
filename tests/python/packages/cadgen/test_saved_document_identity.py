@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests.python.support.documents import assert_same_document
 from tests.python.support.tmp_root import generated_cad_directory
 from tests.python.support.tree_ids import tokenized
 
@@ -177,7 +178,9 @@ class SavedDocumentIdentityTest(unittest.TestCase):
         )
 
         # The file pair must stand alone. Remove every source and every cached
-        # object/index; the document door can reconstruct only from STEP bytes.
+        # object/index; the document door can reconstruct only from STEP bytes: the
+        # same document, each component read from the file rather than the one the
+        # build wrote it from.
         rough_script.unlink()
         polished_script.unlink()
         shutil.rmtree(self.store)
@@ -186,10 +189,9 @@ class SavedDocumentIdentityTest(unittest.TestCase):
 
         rebuilt_rough_tree = document_tree(rough_step)
         rebuilt_polished_tree = document_tree(polished_step)
-        self.assertEqual(document_tree_hash, rebuilt_rough_tree)
         self.assertEqual(rebuilt_rough_tree, rebuilt_polished_tree)
         canonical_after = flatten(rebuilt_rough_tree)
-        self.assertEqual(canonical_before, canonical_after)
+        assert_same_document(self, canonical_before, canonical_after)
 
         rough_recovered = apply_appearance(canonical_after, read_source_sidecar(rough_step)["appearance"])
         polished_recovered = apply_appearance(canonical_after, read_source_sidecar(polished_step)["appearance"])
@@ -267,7 +269,7 @@ class SavedDocumentIdentityTest(unittest.TestCase):
         self.assertFalse(edited["files"][0]["skipped"])
         self.assertNotEqual(rough_bytes, rough_glb.read_bytes())
         self.assertEqual(polished_bytes, rough_glb.read_bytes())
-        self.assertEqual(document_tree_hash, document_tree(rough_step))
+        self.assertEqual(rebuilt_rough_tree, document_tree(rough_step))
         assert_finish(rough_glb, POLISHED)
 
     def test_parent_result_and_saved_sidecar_preserve_an_exact_pinned_child_finish(self) -> None:

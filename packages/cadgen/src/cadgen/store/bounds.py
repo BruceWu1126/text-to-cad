@@ -22,6 +22,13 @@ of each are curved, and its loose box, the per-prototype facts the adaptive
 edge policy classifies a scene by (``step_scene_mesh.prototype_topology``). A
 build of an all-link parent reads them by the BREP its pins name and decodes
 only a component whose entry is missing (``cadgen.store._references``).
+
+And it remembers, for a body a build wrote to STEP and the body the STEP read
+back as, whether the two AGREE -- the same number of faces, tight boxes within
+half the display chord tolerance (``store.build._same_body``) -- keyed by both
+components' codecs and BREP objects: a saved document's leaf takes its authored
+component only where they do, and a parent writing the same body again finds
+the verdict its child's save reached.
 """
 from __future__ import annotations
 
@@ -49,6 +56,9 @@ PREPARED_OCCURRENCE_BOUNDS_ALGORITHM = "component_bbox.canonical_native_rotation
 #: Names ``step_scene_mesh.prototype_topology``: change what it counts or how
 #: it measures the loose box, and change this name with it.
 TOPOLOGY_ALGORITHM = "component_topology.faces_edges_curved_loose_box.algorithm1"
+#: Names ``store.build._same_body``: change what it compares or its tolerance, and
+#: change this name with it.
+AGREEMENT_ALGORITHM = "component_agreement.faces_tight_box_half_chord.algorithm1"
 
 
 def _is_box(value: Any) -> bool:
@@ -169,6 +179,14 @@ def cached_component_topology(codec: str, brep: str, measure: Callable[[], Any])
     """A component's topology facts (``step_scene_mesh.prototype_topology``),
     remembered by the encoded BREP they count (its codec and object hash)."""
     return _remember(TOPOLOGY_ALGORITHM, (str(codec), str(brep)), measure, _is_topology)
+
+
+def cached_agreement(parts: tuple, measure: Callable[[], bool | None]) -> bool | None:
+    """Whether a written body reads back as itself (``measure()``), remembered under
+    ``parts``: the authored component's codec and BREP object, then the read-back's. A
+    measure that cannot say (None) is not remembered."""
+    return _remember(AGREEMENT_ALGORITHM, tuple(str(part) for part in parts), measure,
+                     lambda value: type(value) is bool)
 
 
 def clear() -> None:

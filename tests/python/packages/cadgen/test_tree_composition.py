@@ -1,6 +1,8 @@
 """An all-link parent's saved-document tree, composed from its children's
-document trees, is the tree a parse of the written STEP publishes — and every
-ineligible case parses (``cadgen.store._compose_readback``, STORE.md §3)."""
+document trees, is the tree the build's parse of the written STEP publishes --
+the file's structure, each leaf the component it was written from where it
+reads back as it -- and every ineligible case parses
+(``cadgen.store._compose_readback``, STORE.md §3)."""
 from __future__ import annotations
 
 import math
@@ -10,6 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests.python.support.documents import assert_same_document
 from tests.python.support.paths import add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
 
@@ -19,8 +22,9 @@ add_repo_path("packages/cadgen/src")
 class Fixture(unittest.TestCase):
     """Two children built through STEP (groups, exact-axis and arbitrary
     rotations, non-dyadic and out-of-range translations, a compound leaf, face
-    and uniform colours, a grandchild link, a name holding '#' and a quote) and
-    the parents that place them."""
+    and uniform colours, a grandchild link, a name holding '#' and a quote), a
+    third whose compound places a member of its own, and the parents that place
+    them."""
 
     @classmethod
     def setUpClass(cls):
@@ -39,7 +43,10 @@ class Fixture(unittest.TestCase):
             cls.child_a(), cls.root / "child_a.step", root_name="child_a")
         cls.b_hash, _, b_stats, b_step = build_tree_through_step(
             cls.child_b(), cls.root / "child_b.step", root_name="child_b", _internal_source_publication=True)
-        cls.documents = {cls.a_hash: a_stats["documentTree"], cls.b_hash: b_stats["documentTree"]}
+        cls.c_hash, _, c_stats, _ = build_tree_through_step(
+            cls.child_c(), cls.root / "child_c.step", root_name="child_c")
+        cls.documents = {cls.a_hash: a_stats["documentTree"], cls.b_hash: b_stats["documentTree"],
+                         cls.c_hash: c_stats["documentTree"]}
         cls.steps = {cls.a_hash: ChildStep(cls.root / "child_a.step", a_step),
                      cls.b_hash: ChildStep(cls.root / "child_b.step", b_step)}
 
@@ -64,7 +71,9 @@ class Fixture(unittest.TestCase):
 
         box = bd.Solid.make_box(1, 2, 3)
         cylinder = bd.Solid.make_cylinder(0.7, 2.5)
-        pair = bd.Compound([bd.Box(2, 2, 2), bd.Pos(4, 0, 0) * bd.Box(2, 2, 2)])
+        # Its boxes made where they sit: a compound that places no member itself.
+        pair = bd.Compound([bd.Solid.make_box(2, 2, 2, bd.Plane((-1, -1, -1))),
+                            bd.Solid.make_box(2, 2, 2, bd.Plane((3, -1, -1)))])
         members = [
             cls.leaf("a", box, bd.Location((0.7, 0.3, 0.9)), color=(0.9, 0.1, 0.1, 1)),
             cls.leaf("b", box, bd.Location(bd.Plane((0.1, 0.2, 0.3), x_dir=(0, 0, -1), z_dir=(1, 0, 0)))),
@@ -91,6 +100,16 @@ class Fixture(unittest.TestCase):
         second.label = "a_second"
         own = cls.leaf("own", bd.Solid.make_cylinder(0.7, 2.5), bd.Location((0.05, 0.25, 0.5)))
         return bd.Compound(children=[first, own, second], label="child_b")
+
+    @classmethod
+    def child_c(cls):
+        import build123d as bd
+
+        # Its compound places its second box itself, a placement the saved document's
+        # leaf keeps with the component it was written from.
+        pair = bd.Compound([bd.Box(2, 2, 2), bd.Pos(4, 0, 0) * bd.Box(2, 2, 2)])
+        return bd.Compound(children=[cls.leaf("pair", pair, bd.Location((0.5, 0.5, 0.5))),
+                                     cls.leaf("block", bd.Box(1, 1, 1), bd.Location((-3, 0, 0)))], label="child_c")
 
     def parent(self, placements=None, *, grouped=False, extra=None):
         import build123d as bd
@@ -138,6 +157,13 @@ class Fixture(unittest.TestCase):
 
         return build_document_tree(load_step_scene_exact(step))[0]
 
+    def assertDocumentOf(self, document, step):
+        """``document`` describes ``step`` as a cold compile of its bytes does: the same
+        structure, names, placements and colours, components alike leaf by leaf."""
+        from cadgen.store.trees import get_tree
+
+        assert_same_document(self, get_tree(document), get_tree(self.parsed_document(step)))
+
     def entry_named(self, tree_hash):
         """The child's document tree as a cadgen from before the XCAF entry rule compiled it:
         its leaf `a` named by its label's address."""
@@ -163,7 +189,7 @@ class ComposedTreeTest(Fixture):
                         side_effect=AssertionError("the composed path parsed the STEP")):
             _, _, stats, step_hash = self.build(self.parent())
         self.assertEqual(stats["documentReadback"], "composed")
-        self.assertEqual(stats["documentTree"], self.parsed_document(self.root / "parent.step"))
+        self.assertDocumentOf(stats["documentTree"], self.root / "parent.step")
         # The same bytes, parsed by the build: the same tree, maps and appearance.
         with mock.patch("cadgen._internal.step_scene_loader.load_step_scene", wraps=load_step_scene) as parse:
             _, _, forced, forced_hash = self.build(self.parent(), name="parent", force=True)
@@ -175,7 +201,7 @@ class ComposedTreeTest(Fixture):
     def test_links_under_a_group_compose_the_group(self):
         _, _, stats, _ = self.build(self.parent(grouped=True), name="grouped")
         self.assertEqual(stats["documentReadback"], "composed")
-        self.assertEqual(stats["documentTree"], self.parsed_document(self.root / "grouped.step"))
+        self.assertDocumentOf(stats["documentTree"], self.root / "grouped.step")
 
     def test_ineligible_parents_parse_and_publish_the_parsed_tree(self):
         import build123d as bd
@@ -191,6 +217,9 @@ class ComposedTreeTest(Fixture):
             "missing document tree": (self.parent(), {self.a_hash: self.documents[self.a_hash]}),
             "incomplete document tree": (self.parent(), None),
             "entry named document tree": (self.parent(), {**self.documents, self.a_hash: self.entry_named(self.a_hash)}),
+            # The child's saved leaf holds the compound it was written from, which places
+            # its second box itself: a placement composition cannot reproduce exactly.
+            "compound placing a member": (self.parent([(self.c_hash, bd.Location((0.25, 0.5, 1.0)))]), None),
         }
         for label, (shape, documents) in cases.items():
             with self.subTest(label):
@@ -205,7 +234,7 @@ class ComposedTreeTest(Fixture):
                 if label == "incomplete document tree":
                     tree.write_bytes(payload)
                 self.assertEqual(stats["documentReadback"], "parsed")
-                self.assertEqual(stats["documentTree"], self.parsed_document(self.root / f"{name}.step"))
+                self.assertDocumentOf(stats["documentTree"], self.root / f"{name}.step")
                 # Refused by the eligibility rule, not rescued by the correspondence fallback.
                 log = logger.stream.getvalue()
                 self.assertIn("document composed from children: no (", log)
@@ -259,7 +288,7 @@ class SplicedStepTest(Fixture):
                 _, _, stats, step_hash = self.build(self.spliced_parent(grouped=grouped), name=name, steps=self.steps)
                 self.assertTrue(stats["stepSpliced"])
                 self.assertEqual(stats["documentReadback"], "composed")
-                self.assertEqual(stats["documentTree"], self.parsed_document(self.root / f"{name}.step"))
+                self.assertDocumentOf(stats["documentTree"], self.root / f"{name}.step")
                 # A forced build exports through OCCT and parses: the same document tree.
                 _, _, exported, exported_hash = self.build(self.spliced_parent(grouped=grouped), name=name, force=True)
                 self.assertFalse(exported["stepSpliced"])
@@ -286,7 +315,7 @@ class SplicedStepTest(Fixture):
                 _, _, stats, _ = self.build(shape, name=name, steps=self.steps)
                 self.assertTrue(stats["stepSpliced"])
                 self.assertTrue((self.root / f"{name}.step").read_bytes().isascii())
-                self.assertEqual(stats["documentTree"], self.parsed_document(self.root / f"{name}.step"))
+                self.assertDocumentOf(stats["documentTree"], self.root / f"{name}.step")
                 shape = self.spliced_parent(grouped=grouped, names=("Bügel_ä", "ナット 🔩 it's"))
                 if grouped:
                     shape.children[0].label = "grüppe"
@@ -313,7 +342,7 @@ class SplicedStepTest(Fixture):
                 _, _, stats, _ = self.build(shape, name=name, logger=logger, steps=steps)
                 self.assertFalse(stats["stepSpliced"])
                 self.assertIn(f"{name}.step spliced from its children: no (", logger.stream.getvalue())
-                self.assertEqual(stats["documentTree"], self.parsed_document(self.root / f"{name}.step"))
+                self.assertDocumentOf(stats["documentTree"], self.root / f"{name}.step")
 
 
 class LargeSpliceTest(Fixture):
@@ -410,7 +439,7 @@ class LargeSpliceTest(Fixture):
             _, _, stats, _ = self.build(shape, name="large_rotated", logger=logger, steps=self.steps)
         self.assertFalse(stats["stepSpliced"])
         self.assertEqual(sizes.count(6), 2, sizes)  # its link's bounds, then the document it exports
-        self.assertEqual(stats["documentTree"], self.parsed_document(self.root / "large_rotated.step"))
+        self.assertDocumentOf(stats["documentTree"], self.root / "large_rotated.step")
 
 
 class PinnedChildStepsTest(unittest.TestCase):

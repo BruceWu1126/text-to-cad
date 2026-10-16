@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests.python.support.documents import assert_same_document as same_document
 from tests.python.support.tmp_root import generated_cad_directory
 
 
@@ -213,7 +214,7 @@ class SavedStepReadbackTest(unittest.TestCase):
         from cadgen._internal.step_scene_package import load_step_scene_exact
         from cadgen.store.build import build_document_tree
         from cadgen.store.objects import read_verified_object
-        from cadgen.store.trees import tree_objects
+        from cadgen.store.trees import get_tree, tree_objects
 
         shapes = []
         for index in range(24):
@@ -234,9 +235,10 @@ class SavedStepReadbackTest(unittest.TestCase):
             self.assert_same_document(expected, self.build(shape))
             self.assertEqual({key: read_verified_object(key) for key in tree_objects(digest)}, original)
         self.assert_same_document(expected, self.build(shape, force=True))
+        built = get_tree(digest)
         with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "cold-store")}):
-            cold_hash, _, _ = build_document_tree(load_step_scene_exact(self.root / "part.step"))
-            self.assertEqual(cold_hash, digest)
+            _, cold, _ = build_document_tree(load_step_scene_exact(self.root / "part.step"))
+        same_document(self, built, cold)
 
     def test_generic_publication_derives_mutated_scene_despite_matching_document_digest(self):
         from cadgen._internal.step_scene_package import scene_from_render_package
@@ -329,7 +331,10 @@ class SavedStepReadbackTest(unittest.TestCase):
                     self.assertIsNone(scene_from_render_package(self.root / "part.step", step_hash=expected[3]))
                     with mock.patch("cadgen._internal.step_scene_loader.load_step_scene", wraps=load_step_scene) as raw:
                         repaired = self.build()
-                    raw.assert_called_once()
+                    # The document's own tree is the read-back's to repair, from a parse; its
+                    # component is the one the build wrote the file from, which the source
+                    # result restores before the read-back looks.
+                    self.assertEqual(raw.call_count, 1 if kind == "tree" else 0)
                     self.assert_same_document(expected, repaired)
                     for object_digest, payload in original.items():
                         self.assertEqual(object_path(object_digest).read_bytes(), payload)
@@ -599,23 +604,32 @@ class SavedStepReadbackTest(unittest.TestCase):
             step = Path(sys.argv[1])
             step_hash, tree_hash = sys.argv[2:4]
             saved_bytes = step.read_bytes()
-            original = {digest: read_verified_object(digest) for digest in tree_objects(tree_hash)}
-            component = next(iter(get_tree(tree_hash)["components"].values()))
             cases = []
-            for kind, digest in (("tree", tree_hash), ("brep", component["brep"])):
+            # A damaged document is compiled again from its bytes: the build's tree, whose
+            # components are the ones it wrote the file from, gives way to the file's own,
+            # and a second damage, to its own objects, compiles that tree again, whole.
+            compiled, original = None, {}
+            for kind in ("tree", "brep"):
+                current = tree_for_document_hash(step_hash)
+                digest = current if kind == "tree" else next(iter(get_tree(current)["components"].values()))["brep"]
                 object_path(digest).write_bytes(b"damaged derived object")
                 with mock.patch.object(executors, "submit_compile", wraps=executors.submit_compile) as submitted:
                     scene = load_step_scene_cached(step)
                 assert submitted.call_count == 1, (kind, submitted.call_count)
                 assert scene.step_hash == step_hash
-                assert tree_for_document_hash(step_hash) == tree_hash
+                if compiled is None:
+                    compiled = tree_for_document_hash(step_hash)
+                    assert compiled != tree_hash
+                    original = {key: read_verified_object(key) for key in tree_objects(compiled)}
+                assert tree_for_document_hash(step_hash) == compiled
                 assert all(read_verified_object(key) == data for key, data in original.items())
                 assert step.read_bytes() == saved_bytes
                 cases.append(kind)
+            component = next(iter(get_tree(compiled)["components"].values()))
             # Byte integrity and a matching codec header cannot certify native
             # validity. Use an honestly hashed malformed BREP/tree to prove the
             # reader carries its failed native verdict into compilation.
-            bad_tree = get_tree(tree_hash)
+            bad_tree = get_tree(compiled)
             old_cid = next(iter(bad_tree["components"]))
             bad_component = bad_tree["components"].pop(old_cid)
             malformed = _BREP_HEADERS[bad_component["codec"]] + b"not a native shape"
@@ -633,7 +647,7 @@ class SavedStepReadbackTest(unittest.TestCase):
                 assert load_step_scene_cached(step).step_hash == step_hash
             assert submitted.call_count == 1
             assert submitted.call_args.kwargs["force"] is True
-            assert tree_for_document_hash(step_hash) == tree_hash
+            assert tree_for_document_hash(step_hash) == compiled
             assert all(read_verified_object(key) == data for key, data in original.items())
             cases.append("unreadable-brep")
             # Force also bypasses a present document index and repairs existing
@@ -641,7 +655,7 @@ class SavedStepReadbackTest(unittest.TestCase):
             object_path(component["brep"]).write_bytes(b"force must repair this")
             result = compile(step, force=True)
             assert result.ok and not result.skipped
-            assert result.tree == tree_hash
+            assert result.tree == compiled
             assert all(read_verified_object(key) == data for key, data in original.items())
             # A healthy saved read retains its no-compile path after repair.
             with mock.patch.object(executors, "submit_compile", side_effect=AssertionError("healthy read compiled")):

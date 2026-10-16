@@ -1,13 +1,13 @@
 """The provenance entry and ``cadgen store where`` (STORE.md §3; README law 20).
 
-A build writes, beside its record, which operation at which line of the model's
-code made each component of its document and each face and edge of it, and
-``store where`` answers a ref from it: through the model's own entry, and
-through a pinned child's for a part placed from a child model. It knows the
-file's bytes only while they are the ones it describes, says so otherwise, goes
-with ``store forget``, is never evicted, and a warm rerun writes the same entry
-a cold run did. Real CLIs, transient builds and one private warm daemon, a temp
-store.
+A build writes, beside its record, the features its run called -- each by its
+name, with the line of the model's code it ran at -- and the components it made,
+whose lineage names their faces, edges and vertices by those features; ``store
+where`` answers a ref from it: through the model's own entry, and through a
+pinned child's for a part placed from a child model. It knows the file's bytes
+only while they are the ones it describes, says so otherwise, goes with ``store
+forget``, is never evicted, and a warm rerun writes the same entry a cold run
+did. Real CLIs, transient builds and one private warm daemon, a temp store.
 """
 
 from __future__ import annotations
@@ -92,7 +92,8 @@ REFS = """
     print(json.dumps(found))
 """
 
-FEATURE_ID = re.compile(r"^fe:[A-Za-z_][\w.]*@[\w./]+\.py:\d+#\d+$")
+# A feature's name: an author's label, or ``<function>.<operation><count>``.
+FEATURE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?$")
 
 
 def _run(*argv: str, cwd: Path, cache: Path, warm: bool = False) -> subprocess.CompletedProcess:
@@ -166,26 +167,37 @@ class TheEntry(ProvenanceCase):
         self.assertEqual({"pin", "arm"}, set(by_model))
         for name, entry in by_model.items():
             record = self._record(f"src/{name}.py")
-            self.assertEqual(("provenance", 1), (entry["kind"], entry["schemaVersion"]))
+            self.assertEqual(("provenance", 2), (entry["kind"], entry["schemaVersion"]))
             self.assertTrue(_posix(entry["model"]).endswith(f"src/{name}.py::{name}"))
             self.assertEqual(record["tree"], entry["tree"])
             self.assertEqual(record["stepHash"], entry["stepHash"])
             self.assertEqual(step_file_hash(self.root / "STEP" / f"{name}.step"), entry["stepHash"])
         pin = by_model["pin"]
         ops = [feature["op"] for feature in pin["features"]]
-        cylinder = ops.index("Solid.make_cylinder")
-        feature = pin["features"][cylinder]
-        self.assertRegex(feature["id"], FEATURE_ID)
-        self.assertEqual(("pin.py", "pin", 1, []), (feature["file"], feature["function"], feature["n"], feature["inputs"]))
+        feature = pin["features"][ops.index("Solid.make_cylinder")]
+        self.assertEqual(("pin.make_cylinder1", "pin.py", "pin", []),
+                         (feature["name"], feature["file"], feature["function"], feature["inputs"]))
+        self.assertIsInstance(feature["line"], int)
         for position, row in enumerate(pin["features"]):
-            self.assertTrue(all(index is None or 0 <= index < position for index in row["inputs"]),
+            earlier = {other["name"] for other in pin["features"][:position]}
+            self.assertTrue(all(name is None or name in earlier for name in row["inputs"]),
                             "a feature is given what earlier features made")
-        [component] = pin["components"].values()
-        self.assertIsNotNone(component["made"])
-        self.assertEqual(3, len(component["faces"]))
-        self.assertTrue(all(re.fullmatch(r"f:[0-9a-f]{12}", token) for token in component["faces"]))
-        self.assertTrue(all(lineage == [cylinder, None] for lineage in component["faces"].values()))
-        self.assertTrue(all(lineage == [cylinder, None] for lineage in component["edges"].values()))
+        # The component the build made names its elements by the feature that made them.
+        from cadgen._internal.component_package import read_lineage
+        from cadgen.store.objects import object_path
+
+        [cid] = pin["components"]
+        record = self._record("src/pin.py")
+        with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.cache)}):
+            from cadgen.store.trees import get_tree
+
+            entry = get_tree(record["tree"])["components"][cid]
+            lineage = read_lineage(object_path(entry["lineage"]).read_bytes())
+        self.assertEqual("pin.make_cylinder1", lineage["made"])
+        self.assertEqual(["f:pin.make_cylinder1.1", "f:pin.make_cylinder1.2", "f:pin.make_cylinder1.3"],
+                         sorted(lineage["faces"]))
+        self.assertTrue(all(name.startswith("e:pin.make_cylinder1.") for name in lineage["edges"]))
+        self.assertEqual({}, lineage["modified"])
 
     def test_features_name_the_calling_frame_in_the_model_and_its_helpers(self) -> None:
         arm = next(entry for entry in self._entries().values() if entry["model"].endswith("::arm"))
@@ -196,8 +208,13 @@ class TheEntry(ProvenanceCase):
         # The child's constructions are the child's build's, not this one's.
         self.assertFalse({feature for feature in frames if feature[0] == "pin.py"})
         for position, feature in enumerate(arm["features"]):
-            self.assertRegex(feature["id"], FEATURE_ID)
-            self.assertTrue(all(index is None or 0 <= index < position for index in feature["inputs"]))
+            self.assertRegex(feature["name"], FEATURE_NAME)
+            earlier = {other["name"] for other in arm["features"][:position]}
+            self.assertTrue(all(name is None or name in earlier for name in feature["inputs"]))
+        # The bore's cut counts in the helper that ran it; the author's label names the fillet.
+        names = {(feature["function"], feature["op"]): feature["name"] for feature in arm["features"]}
+        self.assertEqual("bore.cut1", names[("bore", "cut")])
+        self.assertEqual("bar", names[("arm", "fillet")])
 
 
 class StoreWhere(ProvenanceCase):
@@ -257,11 +274,14 @@ class StoreWhere(ProvenanceCase):
         self.assertEqual(0, code, by_label)
         self.assertEqual("Solid.make_cylinder", by_label["made"]["op"])
 
-    def test_what_it_does_not_know_it_says(self) -> None:
+    def test_a_vertex_and_what_it_does_not_know(self) -> None:
         code, vertex = self._where(self.refs["bar"]["vertex"])
+        self.assertEqual(0, code, vertex)
+        self.assertEqual("vertex", vertex["kind"])
+        self.assertEqual("arm.py", vertex["made"]["file"])
+        code, gone = self._where("#bar/f:bar.99")
         self.assertEqual(1, code)
-        self.assertFalse(vertex["known"])
-        self.assertIn("vertex", vertex["reason"])
+        self.assertIn("no element of that name", gone["reason"])
         bad = self._store("where", "STEP/arm.step", "#no_such_part/f:000000000000")
         self.assertEqual(2, bad.returncode)
         self.assertIn("cadgen store where:", bad.stderr)

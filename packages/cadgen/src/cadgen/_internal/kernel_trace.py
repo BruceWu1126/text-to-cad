@@ -320,7 +320,8 @@ class Trace:
         owners = self._owners(made_by, body)
         if maker is None and not owners:
             return None
-        payload: dict[str, Any] = {"made": None if maker is None else self.features[maker].name}
+        # A body build123d only wrapped or placed was made by what it wraps.
+        payload: dict[str, Any] = {"made": None if maker is None else self.features[self._unwrapped(maker)].name}
         modified: dict[str, str] = {}
         named = False
         for kind, topabs, prefix, plural in KINDS:

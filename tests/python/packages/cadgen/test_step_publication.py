@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests.python.support.documents import assert_same_document
 from tests.python.support.tmp_root import generated_cad_directory
 
 
@@ -403,11 +404,11 @@ class StepPublicationTests(unittest.TestCase):
         from cadgen.catalog import result_tree_for
         from cadgen.step import compile as compile_step
         from cadgen.store import index, records
-        from cadgen.store.trees import tree_complete
+        from cadgen.store.trees import get_tree, tree_complete
 
         self.assertEqual(self.build(10), 0, self.output)
         saved_bytes = self.step.read_bytes()
-        expected_tree = result_tree_for(self.step)
+        expected_tree = get_tree(result_tree_for(self.step))
         self.model.unlink()
         shutil.rmtree(self.root / "store")
         self.assertIsNone(result_tree_for(self.step))
@@ -432,7 +433,9 @@ class StepPublicationTests(unittest.TestCase):
             # patching only a parent document reader misses worker-side reads.
             result = compile_step(self.step)
         self.assertTrue(result.ok, output.getvalue())
-        self.assertEqual(result.tree, expected_tree)
+        # The same document, every component read from the file: the store that knew
+        # which component the build wrote each from is gone.
+        assert_same_document(self, expected_tree, get_tree(result.tree))
         self.assertTrue(tree_complete(result.tree))
         self.assertEqual(self.step.read_bytes(), saved_bytes)
         self.assertEqual(records.read_record(self.step)["outputs"], {})
@@ -654,11 +657,11 @@ class AssemblyJobReads(unittest.TestCase):
         self.assertEqual(max(counts.values()), 1, counts)
         root = next(digest for digest, tree in whole.items() if digest == tree)
         # The no-op's display check of the parent's saved document (``_ensure_reused_display``)
-        # verifies that document's tree again, and the parts it shares with the child's
-        # saved document, which the child's rebuild claimed.
+        # reads nothing more: the document's leaves hold the components the parent was
+        # written from, and what the child's rebuild claimed of them the gate verified.
         document = read_record(f"{self.arm}::{self.arm.stem}")["documentTree"]
-        shared = set(self.closure(self.arm, "documentTree")) & set(self.closure(self.pin, "documentTree"))
-        self.assertEqual(set(reads), {*pinned, root, document, *shared}, counts)
+        self.assertLessEqual(set(self.closure(self.arm, "documentTree")) - {document}, {*whole, *pinned})
+        self.assertEqual(set(reads), {*pinned, root}, counts)
 
 
 if __name__ == "__main__":

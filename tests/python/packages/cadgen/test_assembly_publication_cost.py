@@ -178,34 +178,54 @@ class BoundsTests(Fixture):
 
 
 class ReadbackTests(Fixture):
-    def test_readback_reuses_published_prototypes_without_decoding_them_again(self):
-        decodes: list[int] = []
-        original_walk = build._document_walk
+    def test_readback_proves_each_written_body_once(self):
+        """Each leaf of a parent's read-back takes the component it was written from, as
+        the source result holds it, once the body it reads back as is proven the same
+        (``store.build._reads_back_as``): the first save decodes each child's component
+        for that, a second decodes none -- the verdict is remembered by the two bodies'
+        bytes -- and a forced build proves every one again."""
+        from cadgen.store.trees import flatten
 
-        def counted_walk(*args, **kwargs):
+        decodes: list[int] = []
+        original = build._attach_components
+
+        def counted(*args, **kwargs):
             with mock.patch.object(cp, "_decode_brep", wraps=cp._decode_brep) as decode:
-                result = original_walk(*args, **kwargs)
+                result = original(*args, **kwargs)
             decodes.append(decode.call_count)
             return result
 
-        with mock.patch.object(build, "_document_walk", side_effect=counted_walk):
+        with mock.patch.object(build, "_attach_components", side_effect=counted):
             first = self.result(self.parent(), name="first")
-            published = get_tree(first["documentTree"])["components"]
             with mock.patch.object(cp, "prepare_published_component",
-                                   wraps=cp.prepare_published_component) as fast:
+                                   side_effect=AssertionError("a leaf kept its parse")):
                 second = self.result(self.parent(), name="second")
-            with mock.patch.object(cp, "prepare_published_component", side_effect=AssertionError("forced")):
-                forced = self.result(self.parent(), force=True, name="forced")
+            forced = self.result(self.parent(), force=True, name="forced")
         self.assertEqual(first, second)
         self.assertEqual(first, forced)
-        for entry in published.values():
-            self.assertEqual((entry["kind"], entry["codec"]), ("native", "bintools-v4"))
-        # Every written product is prepared (differently coloured occurrences
-        # are separate products that dedupe to one cid). The cold read-back
-        # decodes each; the second saves nothing new and decodes none; the
-        # forced build proves every one again.
-        self.assertGreaterEqual(fast.call_count, len(published))
-        self.assertEqual(decodes, [fast.call_count, 0, fast.call_count])
+        published = get_tree(first["documentTree"])["components"]
+        self.assertEqual(set(published), set(flatten(first["sourceHash"])["components"]),
+                         "every leaf holds the component it was written from")
+        self.assertEqual(decodes, [len(published), 0, len(published)])
+
+    def test_a_compile_decodes_each_prototype_once(self):
+        """A cold compile -- a store that has never seen the file -- reads every component
+        from the file: it decodes each written product once (differently coloured
+        occurrences are separate products that dedupe to one component), and a compile of
+        the same bytes again decodes none, its exact bytes being published
+        (``prepare_published_component``)."""
+        from cadgen._internal.step_scene_package import load_step_scene_exact
+
+        self.result(self.parent(), name="saved")
+        decodes = []
+        with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "cold")}):
+            for _ in range(2):
+                scene = load_step_scene_exact(self.root / "saved.step")
+                with mock.patch.object(cp, "_decode_brep", wraps=cp._decode_brep) as decode:
+                    document = build.build_document_tree(scene)[0]
+                decodes.append(decode.call_count)
+            self.assertLess(len(get_tree(document)["components"]), len(scene.prototype_shapes))
+        self.assertEqual(decodes, [len(scene.prototype_shapes), 0])
 
     def test_published_component_fast_path_needs_the_exact_native_entry(self):
         from cadgen.store.index import write_entry

@@ -98,15 +98,19 @@ class _DocumentReadback:
     tree_hash: str | None = None
     objects: tuple[tuple[str, bytes], ...] = ()
 
+    def tree(self) -> dict[str, Any]:
+        """The captured canonical tree."""
+        if self.tree_hash is None:
+            raise ValueError("raw STEP readback has no captured canonical tree")
+        return json.loads(dict(self.objects)[self.tree_hash])
+
     def canonical_maps(self) -> tuple[dict[str, list[str]], dict[str, str]]:
         """The document tree's nodes by the parser's positional path (what the correspondence
         joins a written product to, ``store.build._document_correspondence``): each path's
         canonical leaf tokens and its own token, as ``_document_walk`` maps a parse."""
         from cadgen._internal.step_scene_loader import _selector_id
 
-        if self.tree_hash is None:
-            raise ValueError("raw STEP readback has no captured canonical tree")
-        tree = json.loads(dict(self.objects)[self.tree_hash])
+        tree = self.tree()
         leaves: dict[str, list[str]] = {}
         nodes: dict[str, str] = {}
 
