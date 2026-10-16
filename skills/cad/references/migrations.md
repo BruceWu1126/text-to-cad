@@ -92,19 +92,30 @@ no part carries fails the build, naming the clip and the time.
 A ref was positional: `#o1.2.f7` named the second occurrence under the first and
 its seventh face, numbers one saved revision gave them and the next could give to
 other geometry. A ref now names what it points at: an occurrence by a **token**
-minted from its place in the tree (`#o:4b1f9e2a7c03`) and an element by one
-minted from its own geometry (`#o:4b1f9e2a7c03/f:9d2e8c1b5a70`; a label may stand
-for the occurrence, `#housing/f:9d2e8c1b5a70`). The old spellings resolve to
-nothing, as any unknown string does: `resolve()` raises, a mate's `parent`,
-`child` or `axis` fails the build, and a clip's `m.get("#o1.3")` fails the bake.
-Take the new ones where they are shown -- the CAD Viewer's copy button, the
-`ref` of each row `cadgen step snapshot --mode list` prints, each entity's `ref`
-from `read_scene(...).resolve(...).entities(...)` -- and prefer labels, which
-need no renaming. The sidecar is schema 11: its mate ends, material
-assignments and animation tracks name occurrences by token. A schema-10
-sidecar is refused and is rebuilt by rerunning the model, which binds them
-anew; a built document's refs stay what they are until the geometry they name
-changes.
+minted from its place in the tree (`#o:4b1f9e2a7c03`) and an element by its
+**name**, the operation of the model's code that made it and its number among
+the elements that operation made (`#o:4b1f9e2a7c03/f:bracket.make_box1.6`, the
+sixth face of the first box the function `bracket` made; a label may stand for
+the occurrence, `#housing/f:bracket.make_box1.6`). An element of an imported file,
+which no operation of a model made, is named by its geometry instead
+(`f:9d2e8c1b5a70`). The old spellings resolve to nothing, as any unknown string
+does: `resolve()` raises, a mate's `parent`, `child` or `axis` fails the build,
+and a clip's `m.get("#o1.3")` fails the bake. Take the new ones where they are
+shown -- the CAD Viewer's copy button, the `ref` of each row
+`cadgen step snapshot --mode list` prints, each entity's `ref` from
+`read_scene(...).resolve(...).entities(...)` -- and prefer labels, which need no
+renaming. The sidecar is schema 11: its mate ends, material assignments and
+animation tracks name occurrences by token. A schema-10 sidecar is refused and
+is rebuilt by rerunning the model, which binds them anew.
+
+An element ref copied from an earlier 0.8 build names a face by its geometry
+(`f:` and twelve hexadecimal characters). `resolve()` still finds the face with
+that geometry; the viewer and `cadgen store where` give its name now. An
+element's name moves when the code that made it moves to another operation (an
+earlier call of the same operation added in the same function renumbers the
+later ones); a label keeps it, on a shape a later operation is given -- the parts
+an assembly's `Compound` holds, say: with `lid.label = "lid"`, the faces of the
+operation that made `lid` are `f:lid.1`, `f:lid.2`, ….
 
 ## Meshes come from cadgen in 0.8
 

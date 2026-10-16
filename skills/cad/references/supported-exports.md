@@ -119,6 +119,6 @@ before anything builds.
 A face no mesher can cover (typically a sliver a boolean left, narrower than the
 chord tolerance) never fails the export: the part is written without it, and the
 result's `warnings` name it, for example `#o:4b1f9e2a7c03 pin: 1 face
-(f:9d2e8c1b5a70) could not be meshed, so pin.stl has a hole in place of it: it is
+(f:pin.cut1.4) could not be meshed, so pin.stl has a hole in place of it: it is
 not watertight`. Repairing the face in the model, or a finer `--mesh-tolerance`,
 closes the hole.

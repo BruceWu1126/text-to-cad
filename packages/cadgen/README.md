@@ -70,10 +70,10 @@ this one:
 
 | Mechanism | What it must not break | Specified in |
 |---|---|---|
-| Build status and preview: the viewer's feed says whether a build of a file is running or failed and, as soon as the build has its result, names the **preview revision** -- the result tree and the parts it draws with, artifact-side objects -- which the viewer draws labelled as a preview until the saved file replaces it in place; a part's identity is its geometry (law 20), so the saved file's parts are the preview's and nothing is fetched twice | saved-artifact read-back; no reader reaches source, closure or a model record; a preview never stands in for a saved file, and a parent never pins one | [`STORE.md`](STORE.md) §9b |
+| Build status and preview: the viewer's feed says whether a build of a file is running or failed and, as soon as the build has its result, names the **preview revision** -- the result tree and the parts it draws with, artifact-side objects -- which the viewer draws labelled as a preview until the saved file replaces it in place; a part's identity is the construction that made it (law 20), so the saved file's parts are the preview's and nothing is fetched twice | saved-artifact read-back; no reader reaches source, closure or a model record; a preview never stands in for a saved file, and a parent never pins one | [`STORE.md`](STORE.md) §9b |
 | Composition: what a decorated call returns, what a parent may consume before a child's save, and when an exact `Compound(children=[...])` keeps its children's pins | the link/component decision, declared-output completion, `isinstance(root, Compound)` | [`STORE.md`](STORE.md) §6, §9a |
-| Display data: canonical trees pin encoded BREP and effective intrinsic face colors; a build job derives each part's display data — ONE record naming two objects, OCCT's mesh at the one display tolerance and the selector table, both made from the component's topology facts, extracted in memory under an attested producer — in its own process before it reports done (a parent waits for its children, whose jobs derived theirs); views only read, and a part missing from the store is derived by one build-pool job; cadgen is the only mesher — every client draws the store's meshes and holds no tolerance | geometry stays separate from display data — the record is written before the build derives, so a part that fails to derive is a warning and never makes the geometry rebuild; `read_step` never waits for a part | [`STORE.md`](STORE.md) §3 |
-| Tree composition: an all-link parent's saved-document tree composed from its children's document trees instead of parsed from the STEP it just wrote | `index/document` holds the cold compile of the written bytes, the same tree either way; every ineligible case parses | [`STORE.md`](STORE.md) §3 |
+| Display data: canonical trees pin encoded BREP and effective intrinsic face colors; each part's display data — ONE record naming two objects, OCCT's mesh at the one display tolerance and the selector table, both made from the component's topology facts, extracted in memory under an attested producer — is derived by the build pool, never in the build's process: one job a build asks for the moment its result exists and waits for before it publishes (a parent waits for its children, whose builds had theirs derived); views only read, and a part missing from the store is derived by one build-pool job; cadgen is the only mesher — every client draws the store's meshes and holds no tolerance | geometry stays separate from display data — a part that fails to derive is a warning and never makes the geometry rebuild; `read_step` never waits for a part | [`STORE.md`](STORE.md) §3 |
+| Tree composition: an all-link parent's saved-document tree composed from its children's document trees instead of parsed from the STEP it just wrote | `index/document` holds the tree a parse of the written bytes gives, paired with the bodies written, the same tree either way; every ineligible case parses | [`STORE.md`](STORE.md) §3 |
 | STEP splicing: the same parent's STEP written from its children's saved STEP files instead of exported through OCCT | the cold compile of the spliced file is the exported file's; every ineligible case exports | [`STORE.md`](STORE.md) §3 |
 
 ### 2. The store contains only derived results
@@ -154,7 +154,7 @@ Content addresses stay byte hashes; whether a model runs is decided by its
 sources (`STORE.md` §4), never by its outputs being reproducible. Compare two
 builds by geometry within a tolerance, never by file hash. One identity is
 deliberately not a byte hash: a **part** -- a component's display data -- is
-keyed by its component's geometry **fingerprint** (law 20), so the body a
+keyed by the **construction** that made its component (law 20), so the body a
 build holds and the same body read back from the STEP it wrote, whose bytes
 the writer changed, are one part with one mesh.
 *Pressure-test*: build one model twice, each from an empty store. If the bytes
@@ -384,9 +384,12 @@ on a hit and undone when a later run no longer runs the operation, so a cold
 run and a hot run write the same bytes; an input changed in a way no replay
 expresses makes its maker forget it. The memo never reaches the store and
 never outlives the worker: a cold run computes everything, and
-`CADGEN_KERNEL_MEMO=0` runs every call plain. The same layer records each
-call from the model's own code as a **feature** (`_internal/kernel_trace.py`),
-which is what provenance is made of (law 20, `STORE.md` §3). The hooks that
+`CADGEN_KERNEL_MEMO=0` runs every call plain. The memo's key for the
+construction that made a component, restated stably (`construction_key`), is
+that component's identity (law 20). The same layer records each call from the
+model's own code as a **feature** (`_internal/kernel_trace.py`), whose lineage
+names the faces, edges and vertices of what the run made, and whose trace is
+what provenance keeps (law 20, `STORE.md` §3). The hooks that
 remain change no result: `determinism.py` fixes the iteration order of
 build123d's de-duplications (an order-keeping set, and a `Vertex` hash by
 point that leaves equality alone), lazy children defer a child's geometry
@@ -428,7 +431,7 @@ a closed port), and again with every request hanging, start a server, open a
 view, call each tool, and run a build and a snapshot: each works, and nothing
 waits on a request beyond the two waits above.
 
-### 20. Three identities, each for the one question it answers
+### 20. A thing is named by what made it; bytes name objects
 
 cadgen names a thing by what the question is about, and never answers one
 question with another's name.
@@ -436,44 +439,59 @@ question with another's name.
 - **Bytes name objects.** A component, a tree and a document are their bytes
   (`sha256`): the content address, the publish rule, the sweeper and the gate
   all stand on equal bytes meaning the same thing and different bytes costing
-  a recomputation, never a wrong answer (laws 2 and 5). Nothing here changes.
-- **Geometry names parts and refs.** What the eye and the hand touch is named
-  by what it IS, not by which bytes happened to carry it or where it sat in a
-  list: a component's **fingerprint** (`_internal/geometry_fingerprint.py`,
-  a hash of the shape's rounded vertices and per-face signatures under
-  `GEOMETRY_FINGERPRINT_SCHEME`, `STORE.md` §2) keys its part, so one body is
-  one mesh whether the build holds it or a reader parsed it back out of the
-  STEP it wrote, and a preview's parts are the saved file's; a ref is a pair of
-  **tokens**, the occurrence's (`o:`, from its place in the tree: parent token,
-  name, rounded placement) and the element's (`f:`, `e:`, `v:`, from the
-  element's geometry inside its body), so a face keeps its name through a STEP
-  round trip, a reordering of its siblings, and a neighbour's edit, and a token
-  copied from the viewer resolves in `inspect` to the same face. A token holds
-  no ordinal and no position: an ordinal is the one body's accident, a position
-  the one tree's.
-- **Provenance names lineage, on the code side only.** Which operation at which
-  source line made a face is a build's knowledge about its code, and lives
+  a recomputation, never a wrong answer (laws 2 and 5).
+- **Construction names parts and elements.** What the eye and the hand touch
+  is named by what made it, not by which bytes happened to carry it or where
+  it sat in a list. A **part** is the construction that made its component:
+  the kernel memo's key for it (law 18: the operation, its parameters by
+  value and the keys of the shapes it was given, restated stably with
+  cadgen's release) with the producer that derives its display data -- so one
+  body is one mesh whether the build holds it or the saved document took it
+  back from the STEP it wrote, and a preview's parts are the saved file's. A
+  face, edge or vertex is its **lineage** (`_internal/kernel_trace.py`): the
+  feature that made it -- `<function>.<operation><count>`, or the label an
+  author gave the shape, which pins it -- and its number among the elements of
+  its kind that feature made, `f:dial.extrude1.3`, with a piece's number after
+  a later split. A ref is the occurrence's **token** (`o:`, from its place in
+  the tree: parent token, name, rounded placement) and the element's name:
+  `#o:4b1f9e2a7c03/f:dial.extrude1.3`. So a ref survives a STEP round trip, a
+  sibling's insertion, a dimension change and code that moves, and a name
+  copied from the viewer resolves in `inspect` to the same face. Nothing on
+  the way from a run to its record measures geometry to name anything: the
+  key and the lineage are what the run's memo and trace already hold.
+- **Geometry is the fallback.** What no construction of a run made -- a file
+  read, a shape built outside the patched kernel surface -- is keyed by its
+  bytes, and its elements are named by **geometric tokens**
+  (`_internal/geometric_tokens.py`, `f:` and twelve hex characters, a hash of
+  the element's geometry within its body), measured on demand: where a part's
+  display data is derived, in the build pool, and where a reader resolves a
+  ref in that form against a body named by lineage, remembered by content
+  either way. A geometric name tolerates what a byte name cannot and must not
+  pretend to exactness; nothing that decides whether a model is current or
+  whether bytes were written reads one (laws 2, 5).
+- **Provenance is the run's trace, on the code side only.** Which line of
+  which file ran a feature is a build's knowledge about its code, and lives
   where that knowledge belongs: in a per-model entry beside the record,
   `index/provenance` (`STORE.md` §3), on the store's code side with
   `index/model` and `index/output`, reached from a saved document only through
   those by the two commands that may ask about code, `cadgen store why` and
   `cadgen store where`. No object, part, document entry, sidecar or written
-  file carries a feature id, a frame or a line (law 1); the viewer never sees
-  one; and provenance never names an object or a part: deleting the code side
-  loses no geometry and renames nothing.
+  file carries a frame or a line (law 1); a feature's name is a function's
+  name, an operation and a count, and deleting the code side loses no
+  geometry and renames nothing.
 
-A geometric name tolerates what a byte name cannot and must not pretend to
-exactness: two bodies whose fingerprints agree are one part, which is what a
-mesh needs, and nothing that decides whether a model is current or whether
-bytes were written reads a fingerprint (laws 2, 5). The scheme string is the
-only version on a geometric name, bumped when the same shape must be named
-differently; a fix to what is derived from the name bumps that layer's version
-(`STORE.md` §2).
-*Pressure-test*: build a model, read back the STEP it wrote, and compare each
-component's fingerprint and every face token of its body with the saved
-document's: all equal, with the two bodies' bytes different. Then insert a new
-sibling before an occurrence, rename nothing, and rebuild: every token the
-untouched occurrences and their faces had is unchanged. Then `rm -rf
+Versions follow the names (`STORE.md` §2): `GEOMETRY_SCHEME` is the only
+version on a component's identity, the construction key carries cadgen's
+release, and `GEOMETRIC_TOKEN_SCHEME` is the only version on a geometric
+token; a fix to what is derived from a name bumps that layer's version.
+*Pressure-test*: build a model and read back the STEP it wrote: each saved
+leaf's component is the one the build held -- the same construction key, the
+same lineage -- wherever the STEP reads it back as that body, so its part is
+the build's and every face name resolves alike in both. Then change a
+dimension and rebuild: every face the change left in place keeps its name.
+Then insert a new sibling before an occurrence and rebuild: every token and
+name the untouched occurrences had is unchanged. Throughout, nothing outside
+the model's own code measures a surface while it builds. Then `rm -rf
 index/model index/output index/provenance`: every view and every ref still
 resolves; only `store where` says it no longer knows.
 
@@ -534,20 +552,22 @@ src/cadgen/
                          #   builds and how that goes, counted)
   _internal/             # the engine: generation pipeline, tree builder,
                          #   kernel_memo (law 18: the memo at the kernel
-                         #   boundary), kernel_trace (its features, and the
-                         #   lineage provenance is made of),
+                         #   boundary, whose keys are parts' identities),
+                         #   kernel_trace (its features, and the lineage
+                         #   that names elements),
                          #   filetrace (every file a build opens),
                          #   tessellate (every display mesh: OCCT's
                          #   triangulation of the exact BREP, each face checked
                          #   against its surface and meshed again where it
                          #   strays),
-                         #   geometry_fingerprint (a component's fingerprint
-                         #   and its elements' tokens, from its geometry),
+                         #   geometric_tokens (the fallback matcher: an
+                         #   element's name from its geometry, for elements
+                         #   no construction names, measured on demand),
                          #   tree_tokens (an occurrence's token, from its
                          #   place in the tree),
                          #   preview_revision (a build's preview: its parts
-                         #   announced as they are stored, its annotations
-                         #   as one object, STORE.md §9b),
+                         #   announced as the pool stores them, its
+                         #   annotations as one object, STORE.md §9b),
                          #   kinematics_resolve (mate axes to numbers),
                          #   animation_bake
                          #   (clips to keyframes), mesh_export (the mesh

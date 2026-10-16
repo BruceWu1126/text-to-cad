@@ -33,8 +33,8 @@ and the part's record names the display mesh the page reads to draw it
 
 Every mesh the viewer draws is cadgen's (OCCT's triangulation of the exact BREP,
 every face of it verified and where needed repaired by cadgen's native library,
-stored by cadgen, derived by the build that made the model before it reported
-done); the browser never tessellates. A part is named by the construction that
+stored by cadgen, derived by the build pool for the build that made the model
+before it reported done); the browser never tessellates. A part is named by the construction that
 made its component (its key, cadgen's `STORE.md` §2), not its bytes, so a body
 read back from the STEP it was written to shares the mesh of the body that was
 written, and a build's preview revision (§5) shares its parts with the saved file

@@ -66,7 +66,7 @@
     },
     {
       "phase": 0,
-      "why": "bare element token with no occurrence context (a document with one leaf)",
+      "why": "a bare element named by its geometric token, with no occurrence context (a document with one leaf)",
       "selector": "f:9d2e8c1b5a70",
       "selectorType": "face",
       "occurrenceId": "",

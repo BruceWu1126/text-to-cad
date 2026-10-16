@@ -120,19 +120,20 @@ Omitting OUT writes a sibling file with the format's extension. See
 
 ## Prompt references and inspection
 
-A reference such as `/work/robot/STEP/assembly.step#o:4b1f9e2a7c03/f:9d2e8c1b5a70`
+A reference such as `/work/robot/STEP/assembly.step#o:4b1f9e2a7c03/f:bracket.make_box1.6`
 identifies geometry in a particular saved document: an occurrence by its token
 (`o:` and twelve hexadecimal characters) and, after a slash, one of its faces,
-edges or vertices by the element's token (`f:`, `e:`, `v:`). Its file part is the
-document's absolute path as the CAD viewer copied it, with the file's real name
-and extension (in quotes when it holds a space or `#`). Open that path with
-`read_scene`, and pass the whole reference to `resolve()`:
+edges or vertices by the element's name (`f:`, `e:`, `v:`, then the operation of
+the model's code that made it and the element's number among those it made). Its
+file part is the document's absolute path as the CAD viewer copied it, with the
+file's real name and extension (in quotes when it holds a space or `#`). Open that
+path with `read_scene`, and pass the whole reference to `resolve()`:
 
 ```python
 from cadgen import read_scene
 
 scene = read_scene("/work/robot/STEP/assembly.step")
-selection = scene.resolve("/work/robot/STEP/assembly.step#o:4b1f9e2a7c03/f:9d2e8c1b5a70")
+selection = scene.resolve("/work/robot/STEP/assembly.step#o:4b1f9e2a7c03/f:bracket.make_box1.6")
 face = selection.shape()  # owned native geometry, in document world coordinates
 print(selection.ref, face.area)
 ```
@@ -142,13 +143,23 @@ A note from the viewer's Quick Edit reads: what the person wants, then
 when they sketched on the view, `Sketch: <path>`: a PNG of the view with their
 markup (or the image itself, attached).
 
-A bare `#o:4b1f9e2a7c03/f:9d2e8c1b5a70` belongs to the document the conversation
-is about. A token names geometry, never a position: an occurrence's comes from
-its place in the tree (its parent, its name, its placement) and an element's from
-the element's own geometry within its body, so a ref keeps resolving to the same
-face through a rebuild that leaves that face alone, a sibling inserted beside it
-and the STEP round trip, and stops resolving when the geometry it named is gone.
-A part label stands in for an occurrence token (`#housing/f:9d2e8c1b5a70`). There
+A bare `#o:4b1f9e2a7c03/f:bracket.make_box1.6` belongs to the document the
+conversation is about. A ref names geometry, never a position. An occurrence's
+token comes from its place in the tree (its parent, its name, its placement). An
+element's name is the operation that made it -- the function that called it, the
+operation, and how many times that function had called it in the run
+(`bracket.make_box1`, the first box `bracket` made) -- and the element's number
+among those that operation made: `f:bracket.make_box1.6`. A later operation that
+trims or splits it keeps that name (a split piece adds its number:
+`f:bracket.make_box1.6.2`), and a label on a shape another operation is given
+names the shape's operation (`f:lid.3`). So a ref keeps resolving to the same face
+through a rebuild with other dimensions, code moved to other lines, a sibling
+inserted beside it and the STEP round trip; it names another face when an earlier
+call of the same operation in the same function is added or removed. A face of an
+imported file is named by its geometry instead (`f:9d2e8c1b5a70`, twelve
+hexadecimal characters), and a ref in that form also finds the face with that
+geometry in a rebuilt model. A part label stands in for an occurrence token
+(`#housing/f:housing.make_cylinder1.1`). There
 is no inspect CLI: checks are Python scripts, and the
 [inspection reference](references/inspection-and-validation.md) covers label
 aliases, enumeration and measurement.
@@ -192,7 +203,7 @@ print(bracket.volume, len(bracket.faces()))
   `cadgen store why <model>.py` explains an unexpected rebuild or no-op, and
   `--force` rebuilds one model. More in the
   [model contract](references/step-generation.md#progress-and-runtime-diagnostics).
-- `cadgen store where STEP/bracket.step "#bracket/f:9d2e8c1b5a70"` names the
+- `cadgen store where STEP/bracket.step "#bracket/f:bore.make_cylinder1.1"` names the
   line of the model's code whose operation made the face a ref names and the
   one that last modified it, from the build's own account of the run
   ([which code made it](references/inspection-and-validation.md#which-code-made-it)):

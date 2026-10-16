@@ -28,7 +28,7 @@ for face in housing.entities("face"):
   geometry occurrences, repeated copies included. A leaf can hold several solids.
 - `scene.resolve(ref)` returns a selection with `ref`, `kind`, `occurrence_ref`,
   `shape()` and `entities(kind)`, for kinds `"face"`, `"edge"` and `"vertex"`;
-  each entity carries its own ref, the occurrence's token and the element's.
+  each entity carries its own ref, the occurrence's token and the element's name.
 - `shape()` is caller-owned exact geometry in document world coordinates; a group
   gives an unfused compound. Keep it when making several queries.
 - `prototype_id` names geometry shared within this scene, so a body-local check
@@ -41,21 +41,34 @@ for face in housing.entities("face"):
 ### Reference syntax
 
 ```text
-#o:4b1f9e2a7c03                 an occurrence or subassembly, by its token
-#o:4b1f9e2a7c03/f:9d2e8c1b5a70  a face of that leaf occurrence, by the face's token
-#housing/e:12ab34cd56ef         an edge of the occurrence labelled housing
-#f:9d2e8c1b5a70                 a face, only when the scene has exactly one leaf
-part.step#o:4b1f9e2a7c03        a file-prefixed ref matching the opened STEP
+#o:4b1f9e2a7c03                        an occurrence or subassembly, by its token
+#o:4b1f9e2a7c03/f:bracket.make_box1.6  a face of that leaf occurrence, by its name
+#housing/e:bore.cut1.2                 an edge of the occurrence labelled housing
+#f:bracket.make_box1.6                 a face, only when the scene has exactly one leaf
+#o:4b1f9e2a7c03/f:9d2e8c1b5a70         a face named by its geometry (an imported file's)
+part.step#o:4b1f9e2a7c03               a file-prefixed ref matching the opened STEP
 ```
 
-A token is `o:`, `f:`, `e:` or `v:` and twelve lower-case hexadecimal characters.
-An occurrence's is minted from its place in the tree (its parent's token, its
-name, its placement), an element's from its geometry within its body (a face's
-surface class, tight box and normal; an edge's curve class, end points and
-length; a vertex's point), so the same face has the same token in every build
-that leaves it alone, and the viewer, the build's warnings and `resolve()` all
-name it alike. One reference per `resolve()` call. A group has no faces of its
-own: `scene.resolve("#group").entities("face")` enumerates its leaves' faces.
+An occurrence's token is `o:` and twelve lower-case hexadecimal characters,
+minted from its place in the tree (its parent's token, its name, its placement).
+An element's name is `f:`, `e:` or `v:`, the operation of the model's code that
+made it, and its number among the elements of its kind that operation made:
+`f:bracket.make_box1.6` is the sixth face of the first `make_box` the function
+`bracket` called. The operation is the function, then the build123d operation
+and how many times that function had called it in the run, or the label of a
+shape the model labelled and handed to another operation (`f:lid.3`). An element
+a later operation split adds its piece's number (`f:bracket.make_box1.6.2`); an
+operation that only trims or moves it does not rename it. Lines are never in a
+name, so moving code renames nothing, and the viewer, the build's warnings and
+`resolve()` all name a face alike. An element no operation of the model's run
+made -- every element of an imported STEP -- is named by its geometry: `f:`,
+`e:` or `v:` and twelve hexadecimal characters, hashed from the element's shape
+within its body (a face's surface class, tight box and normal; an edge's curve
+class, end points and length; a vertex's point). `resolve()` also finds an
+element by that geometric name in a document whose elements are named by
+operations, measuring the body's geometry the first time it is asked. One
+reference per `resolve()` call. A group has no faces of its own:
+`scene.resolve("#group").entities("face")` enumerates its leaves' faces.
 
 Labels use letters, digits, `_` and `:`, and cannot start with a digit; other
 names stay reachable by occurrence token. Duplicate labels get numbered aliases
@@ -70,30 +83,30 @@ the end of the document's path.
 
 `cadgen store where <file.step> <ref>` answers, for a STEP a model of this
 cadgen wrote, which operation at which line of the model's code made what the
-ref names -- a part's body, a face or an edge -- and, for a face or an edge,
-which operation last modified it (a cut that trimmed a box's face, a fillet
-that shortened an edge), each as `file:line in function (operation)` with the
-operations it was given. The ref is one the viewer copies or `resolve()` takes
-(`#o:…`, `#o:…/f:…`, `#label/e:…`); a vertex has no answer. It reads the
-build's own account of the run, written with the model's record, so it speaks
-for the file's current bytes only: after an edit, run the model, then ask.
-`--json` returns the answer as data; the exit status is 0 when it knows and 1
-when it does not (no build of this cadgen, other bytes, a body read from a file
-or built outside build123d's constructions), with the reason.
+ref names -- a part's body, a face, an edge or a vertex -- and, for an element,
+which operation last modified it (a cut that trimmed a box's face, a fillet that
+shortened an edge), each as `file:line in function (operation)` with the
+operation's name. The ref is one the viewer copies or `resolve()` takes
+(`#o:…`, `#o:…/f:…`, `#label/e:…`). It reads the build's own account of the
+run, written with the model's record, so it speaks for the file's current bytes
+only: after an edit, run the model, then ask. `--json` returns the answer as
+data; the exit status is 0 when it knows and 1 when it does not (no build of
+this cadgen, other bytes, a body read from a file or built outside build123d's
+constructions), with the reason.
 
 ```text
-$ cadgen store where STEP/bracket.step "#bracket/f:e517fb4f3b5b"
+$ cadgen store where STEP/bracket.step "#bracket/f:bore.make_cylinder1.1"
 document  /work/STEP/bracket.step
-ref       #o:624d1aa32b5a/f:e517fb4f3b5b
+ref       #o:624d1aa32b5a/f:bore.make_cylinder1.1
 model     /work/src/bracket.py::bracket
-face      made by bracket.py:6 in bore (Solid.make_cylinder)   fe:Solid.make_cylinder@bracket.py:6#1
-          last modified by bracket.py:6 in bore (cut)   fe:cut@bracket.py:6#1
+face      made by bracket.py:6 in bore (Solid.make_cylinder)   bore.make_cylinder1
+          last modified by bracket.py:6 in bore (cut)   bore.cut1
 ```
 
-The bore wall is the cylinder's face, trimmed by the cut that bored it; the
-feature ids (`fe:<operation>@<file>:<line>#<n>`, `n` counting that line's runs
-in the build) name the same calls across the parts of one assembly, and a face
-of a placed child model is answered from that child's own build.
+The bore wall is the cylinder's face, trimmed by the cut that bored it. A face's
+name holds the operation that made it, so the same name answers across the
+builds of a model that leave that operation alone, and a face of a placed child
+model is answered from that child's own build.
 
 ## Measurements
 

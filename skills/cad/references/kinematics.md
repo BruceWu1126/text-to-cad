@@ -69,7 +69,7 @@ if __name__ == "__main__":
   group `Compound`, which carries every part beneath it. Targets may nest: the
   deepest mate naming a part moves it, and the enclosing group carries only what
   no deeper mate claimed.
-- **`axis`** is a selector ref (`axis="#forearm/f:9d2e8c1b5a70"`: a cylindrical face or
+- **`axis`** is a selector ref (`axis="#forearm/f:forearm.make_cylinder1.1"`: a cylindrical face or
   circular edge gives its axis, a planar face its centre and normal) or literals
   (`origin=(x, y, z), direction=(x, y, z)`), resolved once at build into numbers.
 - **Zero is the artifact as written**: every DOF's rest value is 0, the placement

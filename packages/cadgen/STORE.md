@@ -12,8 +12,8 @@ right.
 | § | What it settles | Read it before |
 |---|---|---|
 | [1](#1-vocabulary) | The one word per concept, and the retired ones | naming anything |
-| [2](#2-layout) | What lives under the root, **the two sides law**, and geometry identity versions | adding an entry or a reader, bumping any version |
-| [3](#3-tree-and-record) | Tree, record and provenance shapes; tokens, parts, meshes, annotation edges | changing what a build writes |
+| [2](#2-layout) | What lives under the root, **the two sides law**, identity by construction and its versions | adding an entry or a reader, bumping any version |
+| [3](#3-tree-and-record) | Tree, record and provenance shapes; tokens and names, parts, meshes, annotation edges | changing what a build writes |
 | [4](#4-the-gate) | The freshness clauses, in order | touching stale/current |
 | [5](#5-invariants) | Each invariant with the failure it prevents | any store write |
 | [6](#6-link-or-component) | Whether a child becomes a link or the parent's geometry | composition, materialize, packaging |
@@ -46,11 +46,13 @@ One word per concept; the code uses these words and no others.
 | **stale / current**, **gate** | the freshness state and the check that decides it |
 | **claim** | what a write does to an object it finds already present: its mtime becomes now, less two ticks of its clock, so the sweeper's grace window covers it and the claiming process keeps what it verified of it (§8) |
 | **evict** | drop a derived entry to keep the store under its cap; only the derived kinds are ever evicted (§8) |
-| **part** | a component's display data under one producer: ONE index entry naming its display mesh and its selector table (§3), keyed by the component's fingerprint, never its bytes |
-| **fingerprint** | a component's geometric identity: `sha256`, under `GEOMETRY_FINGERPRINT_SCHEME`, of the shape's kind, its vertex points rounded relative to its extent and its faces' signatures, all order-free (§2) -- the same for the body a build holds and that body read back from the STEP it wrote |
-| **token** | half of a ref, opaque: an occurrence's `o:` (hashed from its parent's token, its name and its rounded placement; an ordinal only tells identical siblings apart) or an element's `f:`/`e:`/`v:` (hashed from the element's geometry within its body, a selector-table column); never an ordinal or a position (§3) |
+| **part** | a component's display data under one producer: ONE index entry naming its display mesh and its selector table (§3), keyed by the construction that made the component and its lineage, never its bytes |
+| **feature** | one call of a kernel construction from the model's own code, as the run's trace saw it (`_internal/kernel_trace.py`): named `<function>.<operation><count>` -- `dial.extrude1`, the first `extrude` the function `dial` called in the run -- or by the label an author gave its result (§2) |
+| **construction key** | what made a component: the kernel memo's key for the construction whose result it is -- the operation, its parameters by value and the keys of its inputs, restated stably with cadgen's version (`kernel_memo.construction_key`, README law 18). A component no construction of a run made (a child's decoded result, a file read) has none and goes by its content hash (§2) |
+| **lineage** | a component's account of its elements: the feature that made the body and, per face, edge and vertex, its **name** -- `f:dial.extrude1.3`, the third face the feature made -- and the feature that last modified it (§2); an object the component's tree entry names |
+| **token** | half of a ref, opaque: an occurrence's `o:` (hashed from its parent's token, its name and its rounded placement; an ordinal only tells identical siblings apart). An element no construction names -- every element of a file read -- goes by its **geometric token**, `f:`/`e:`/`v:` and twelve hex characters hashed from its geometry within its body: the fallback matcher, measured on demand (§2) |
 | **preview revision** | what a build announces the moment its result exists (§9b): its result tree, the part key of every component in it and its annotations (the articulation, finishes and keyframes the sidecar will carry, resolved against that tree), artifact-side objects a viewer draws labelled as a preview until the saved file replaces them in place |
-| **provenance** | a build's account of which operation at which source frame made each component and element of its result: a code-side entry per model, `index/provenance` (§3), read by `store where` and by nothing on a render path |
+| **provenance** | where a build's features ran: the run's trace, kept as a code-side entry per model, `index/provenance` (§3) -- each feature's name, operation, file, line and inputs, and the components the run made -- read by `store where` and by nothing on a render path |
 | **obsolete** | a part entry an older version of cadgen's derivation wrote, or a record or document entry at a key this cadgen does not own (another schema version's): no reader of this cadgen asks for it again, and the sweeper retires it once it is a week old (§2, §8) |
 | **worker / spare / extra**, **job** | daemon vocabulary (the daemon's own documentation) |
 
@@ -188,9 +190,13 @@ and the animation variant consumes that same immutable text.
 Three properties, each enforced by a
 test:
 
-1. **No object references source.** No tree or component carries a path, a
-   script name, a closure or source hash, or a record key. The same bytes
-   anywhere on disk are the same tree.
+1. **No object references a source file.** No tree or component carries a
+   path, a script name, a line, a closure or source hash, or a record key.
+   What an object carries of its making is its geometry's identity (§2): a
+   component's construction key, and the lineage object that names its
+   elements by features -- a function's name, an operation and an ordinal,
+   never a file or a line. The same construction anywhere on disk is the same
+   tree, and a file read is named by its bytes alone.
 2. **A reader never consults a record.** A reader (`read_scene`, `snapshot`,
    `stl|3mf|glb build`, `step build` on a document), the viewer's catalog and
    render, and the mesh ledger find a tree in ONE lookup — hash the file's
@@ -210,8 +216,8 @@ test:
    each `shape()` returns privately copied topology. An already open scene
    survives document replacement or deletion of its cached objects.
    A build's preview revision (§9b) is artifact-side like everything a viewer
-   reads -- the result tree and the parts the build derived for it, named by
-   the build feed and read as objects -- and a viewer draws it labelled as a
+   reads -- the result tree and the parts the build pool derived for it, named
+   by the build feed and read as objects -- and a viewer draws it labelled as a
    preview, never as the file: nothing maps saved bytes to it, and a parent
    pins its tree as it pins any child's.
 3. **Records are deletable.** `rm -rf index/model index/output
@@ -248,18 +254,19 @@ inputs; this does not change the content address of any object it produces.
 The `.step` document, its sidecar and declared mesh files are
 **outputs** in the project, not store contents; the record lists them with shas.
 
-### Geometry identity and versions
+### Identity and versions
 
-A component's id (cid) is a hash of exactly three inputs: its BREP bytes, its
-intrinsic face colours, and the string `GEOMETRY_SCHEME` (currently
-`cadgen-geometry-input-v3`, in `_internal/component_package.py`). That
-string is the **only** version on geometry identity. Everything derived from
-a component — its part (`PART_VERSION`, in its key), index payloads (their
-`schemaVersion`) — carries its own version and validates its own
-compatibility, so a fix in a producer retires that layer's entries alone and
-never moves a cid.
+A component's id (cid) is a hash of exactly these inputs: its BREP bytes, its
+intrinsic face colours, the construction key and the lineage object its build
+named it by (below; none for geometry no construction of a run made), and the
+string `GEOMETRY_SCHEME` (currently `cadgen-geometry-input-v4`, in
+`_internal/component_package.py`). That string is the **only** version on a
+component's identity. Everything derived from a component — its part
+(`PART_VERSION`, in its key), index payloads (their `schemaVersion`) — carries
+its own version and validates its own compatibility, so a fix in a producer
+retires that layer's entries alone and never moves a cid.
 
-- Bump `GEOMETRY_SCHEME` only when the same bytes must map to a different
+- Bump `GEOMETRY_SCHEME` only when the same inputs must map to a different
   tree: a codec or interpretation change. It re-keys every user's store, so
   it is rare and deliberate, and the reason goes in the commit and here.
 - Bump the derived artifact's own version for an extractor, selector-table,
@@ -268,57 +275,73 @@ never moves a cid.
 - Wiping a store is an operator action (`cadgen store gc`, `store forget`),
   never a hash side effect.
 
-A component has a second identity, for one question only -- which display data
-draws it -- and that identity is its geometry, not its bytes (README law 20).
-Its **fingerprint** (`_internal/geometry_fingerprint.py`) is `sha256` of the
-string `GEOMETRY_FINGERPRINT_SCHEME`, the rounding quantum, the kinds of the
-shape's bodies (solids, or shells, or the bare shape), its counts of faces,
-edges and vertices, its vertex points rounded and sorted, and its faces'
-signatures sorted (each a face's surface class -- the kernel's type with the
-pairs the STEP translation exchanges folded together, a Bezier with a
-B-spline, a torus with a surface of revolution -- its tight box rounded the
-same way, and its normal at its parametric middle rounded to quarters, an
-orientation signal that tells the coincident faces of two solids apart), so
-the order OCCT lists anything in never enters it. The quantum is the power of
-two at or below `RELATIVE_QUANTUM` (2^-12) times the diagonal of the body's
-tight box: a power of two so the quantum itself is exact, half the display
-chord tolerance so bodies that agree to it are drawn alike anyway. Written to
-STEP and read back, a body has different bytes -- a different cid, a different
-`brep` object, the same tree read back as a separate tree -- and the same
-fingerprint. The tree names each component's fingerprint beside its cid (§3),
-the part key hashes the fingerprint and not the content hash (§3), and the
-preview revision (§9b) and the saved document therefore name the same parts:
-one body, one mesh, derived once. Rounding makes a fingerprint tolerant where
-a byte hash is exact, which is why nothing but display data stands on it: the
-gate, the publish rule, the sweeper and every object address stay with bytes.
+**A part is the construction that made it** (README law 20). The run's kernel
+memo (README law 18) keys every construction the model's code calls -- the
+operation, its parameters by value and the keys of the shapes it was given --
+and `kernel_memo.construction_key` restates the key of the construction a
+component's body came from as a stable digest, with cadgen's version, so a key
+never outlives a release that might construct differently. A part's key hashes
+that construction key, the component's lineage object, its intrinsic face
+colours and the producer (the kernel its display data is derived under). The
+body a build holds and the same body read back from the STEP it wrote --
+different bytes -- are therefore one part, the saved document's leaf taking the
+component it was written from (§3), and a build's preview names the saved
+document's parts (§9b). A construction the memo cannot key (an argument it
+cannot hash) has no construction key, and neither has a shape no construction
+of the run made (a child's decoded result, a file read): such a component's
+part is keyed by its content hash, its bytes. Nothing measures geometry to
+name a part, and nothing but display data stands on a part's key: the gate,
+the publish rule, the sweeper and every object address stay with bytes.
 
-How tolerant, measured over the sample corpus (199 model records, 17,923
-leaves, 5,079 pairs of a body a build held and the same body read back from the
-STEP it wrote, 10 pairs undecodable): 98.68 % of the pairs keep their
-fingerprint through the round trip, 99.20 % once the 59 pairs whose geometry
-the STEP translation itself changed are set aside; 99.92 % of faces keep their
-token (99.956 % settled the same way), 98.49 % of edges, 99.996 % of vertices;
-no two distinct elements of one body share a token beyond the quantum (four
-pairs within it, told apart by rank, by design). That is short of the 99.5 %
-of fingerprints and 99.99 % of faces aimed at, and what is lost is the STEP
-translation's own work, which no signature names across: an edge it splits
-differently reads back as edges that are not the one written, and a body whose
-coordinates straddle a rounding boundary rounds to another grid point. A
-coarser quantum straddles about as often -- the straddles are the
-translation's, not the grid's -- and merges near-coincident elements, whose
-tie-break ranks then drift between builds; an edge signature without its end
-points (class, midpoint and length) still changes when the edge is split. So
-the quantum and the signatures stay as they are, and a straddle costs what the
-law allows a geometric name (README law 20): one extra mesh derivation, or one
-renamed ref, never a wrong answer.
+**An element is its lineage.** The run's trace (`_internal/kernel_trace.py`)
+records each kernel call from the model's own code as a **feature**, named
+`<function>.<operation><count>`: the enclosing function, the operation, and how
+many times that function had called that operation in the run, this call
+included (`dial.extrude1`) -- or by the label an author gave a shape it made,
+which pins the name (`lid`). A component's lineage follows each of its faces,
+edges and vertices back through the features to the one that made it, and
+names it `<kind>:<feature>.<n>`: the feature and the element's number among
+the elements of its kind the feature made, in the order of its result
+(`f:dial.extrude1.3`); a piece of an element a later feature split takes its
+number among the pieces after a further dot (`f:dial.extrude1.3.2`). A feature
+that trimmed or otherwise modified an element does not rename it: the last
+one is recorded beside the name, for `store where`. A feature's file and line
+are never in a name -- they are the provenance entry's (§3) -- so moving code
+renames nothing; a call of the same operation inserted earlier in the same
+function renumbers the later ones, which a label never is. The grammar:
+`[fev]:<feature>.<n>[.<piece>]`, a feature one or two segments
+`[A-Za-z_][A-Za-z0-9_]*` joined by a dot, numbers from 1
+(`cad_ref_syntax.ELEMENT_NAME_PATTERN`, which the client's `cadRefs.js`
+mirrors). A construction the memo cannot key is still a feature: its elements
+are named by its place in the run like any other's, and it runs again on every
+run.
 
-- Bump `GEOMETRY_FINGERPRINT_SCHEME` when the same shape must be named
-  differently -- a change to what the fingerprint reads or how it rounds -- and
-  bump `PART_VERSION` with it, so the parts at every old key are obsolete (§2)
-  rather than left to the cap.
-- An element's token (`f:`, `e:`, `v:`, §3) is minted under the same scheme
-  string, from the element's geometry within its body; the scheme bump is the
-  one event that renames a face a ref already named.
+**Geometric tokens are the fallback matcher.** An element no lineage names --
+every element of a file read, and those a model took from a shape no feature
+of its run made -- goes by its **geometric token**
+(`_internal/geometric_tokens.py`): `f:`, `e:` or `v:` and twelve hexadecimal
+characters, a hash under `GEOMETRIC_TOKEN_SCHEME` of the element's geometry
+within its body (a face's surface class, its tight box rounded relative to the
+body's extent and its oriented normal at its parametric middle; an edge's curve
+class, its rounded end points and length; a vertex's rounded point; two
+elements with equal signatures ranked by their exact values), so a token
+survives a STEP round trip and whatever order OCCT lists the elements in.
+Tokens are measured on demand and never on the way from a model's run to its
+record: where a part's display data is derived (in the build pool, for the
+elements its lineage does not name), and where a reader resolves a ref in token
+form -- one copied from a file read, or before its element had a name --
+against a body named by lineage (`read_scene`, `store where`). Either way a
+body's tokens are remembered in `index/bounds` by its codec and BREP object
+under the scheme string (`bounds.cached_tokens`), so they are measured once.
+
+- Bump `GEOMETRIC_TOKEN_SCHEME` when the same shape must be named differently
+  -- a change to what a signature reads or how it rounds -- and bump
+  `PART_VERSION` with it, so the parts whose tables carry tokens at every old
+  key are obsolete (§2) rather than left to the cap.
+- A change to how the trace names features or follows lineage renames the
+  elements a ref already named, and needs no bump: the lineage objects change
+  with it, and the construction key carries cadgen's release, so each
+  release's components and parts are its own.
 
 Until cadgen 0.5.1 a global `CACHE_SCHEMA_VERSION` number salted the cid and
 was bumped for producer fixes as well as geometry changes (17: mesh section
@@ -338,12 +361,12 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
 ```json
 {
   "kind": "geometry-tree",
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "label": "link_arm",
   "entryKind": "assembly",
   "units": "mm",
   "components": {
-    "0c5932ad05ce64a6": {"kind": "native", "codec": "bintools-v4", "brep": "ebe7552f…", "faceColors": {}, "contentHash": "0c5932ad…", "fingerprint": "7d2e91c0…"}
+    "0c5932ad05ce64a6": {"kind": "native", "codec": "bintools-v4", "brep": "ebe7552f…", "faceColors": {}, "contentHash": "0c5932ad…", "construction": "7d2e91c0…", "lineage": "41b07e3a…"}
   },
   "occurrences": [
     {"id": "o:4b1f9e2a7c03", "name": "bar", "component": "0c5932ad05ce64a6", "transform": [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]}
@@ -365,7 +388,13 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
 - `components` are geometry this model created itself, keyed by component id
   (`cid`, the first 16 hexadecimal characters of the complete geometry-input
   hash); each names its encoded `.brep`, declared codec and intrinsic recipe,
-  and its `fingerprint` (§2), the geometric identity its part is keyed by.
+  and, where a construction of the model's run made it, its `construction` key
+  and its `lineage` object (§2): what its part is keyed by and what names its
+  faces, edges and vertices. The lineage object is canonical JSON
+  (`component_package.lineage_bytes`): `{"made": <the feature that made the
+  body>, "faces": [...], "edges": [...], "vertices": [...], "modified":
+  {<name>: <the feature that last modified it>}}`, each list the elements'
+  names by ordinal, `null` for one no feature made.
   Every occurrence, link and node is named by its **token** (`o:` and twelve
   hexadecimal characters): a hash of its parent's token, its name and its
   placement rounded (`_internal/tree_tokens.py`), with an ordinal appended only
@@ -423,45 +452,53 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   runtime producer separately from the tree: the loaded build123d, OCP
   and distribution versions. Each component of a view names its **part**: the
   key its display data is stored and read by, `<digest>-v<version>`
-  (`parts.part_key`). The digest hashes the component's **fingerprint** (§2),
-  its face colours keyed by face token, and the producer -- never its
-  `contentHash`, so the body a build holds and the same body read back from
-  the STEP it wrote (different bytes, one fingerprint) are one part, and the
-  preview revision's parts are the saved document's (§9b); an eager-only
-  component, whose bytes cannot stand for its shape, hashes its pinned
-  topology facts in place of a fingerprint. The version (`parts.PART_VERSION`)
-  is bumped by any change to the extractor, the selector table, the mesher,
-  the verifier, the mesh payload or the fingerprint scheme, and by any change
-  in how the digest is hashed, so the parts at every key before it are
-  obsolete (§2).
+  (`parts.part_key`). The digest hashes what made the component -- its
+  `construction` key (§2), or its `contentHash` for geometry no construction
+  made -- its `lineage` object, its face colours and the producer: the body a
+  build holds and the same body in the saved document it wrote are one part,
+  and the preview revision's parts are the saved document's (§9b). The version
+  (`parts.PART_VERSION`) is bumped by any change to the extractor, the selector
+  table, the mesher, the verifier, the mesh payload or the geometric token
+  scheme, and by any change in how the digest is hashed, so the parts at every
+  key before it are obsolete (§2).
   No tolerance is in the key: a part has one display mesh. Unknown versions
   cannot create a shared persistent namespace. Derivation privately decodes
   only captured inputs; no source, model record, latest child or live authored
   shape is consulted.
 
-  **A build derives its parts' display data; views only read.** Every build
-  job (`_internal/generation.py`: a model build, a no-op build that reuses its
-  tree, a compile of an imported STEP, a re-emit) runs
-  `parts.ensure_display` on the tree a view of its output reads -- the saved
-  document's tree, a mesh-only model's own -- in its own process, after its
-  record is written and before it reports done, and before its declared mesh
-  exports. Which parts lack display data is asked of the store alone (one
+  **A build has its parts' display data derived; views only read.** A build
+  never measures or meshes geometry in its own process: its parts are the
+  build pool's work. The moment a model build's result exists, it asks for ONE
+  job (`kind: display`, `daemon/artifacts.py`; `parts.request_display`) for the
+  parts of its own components the store lacks, which a pool worker derives
+  while the build saves its STEP -- in transient mode a worker process of the
+  build's own pool -- and the build waits for it before it publishes its saved
+  file and record, then asks for any part of the saved document's tree the
+  result did not have (a body the STEP did not read back as it was written).
+  Every other build job (`_internal/generation.py`: a no-op build that reuses
+  its tree, a compile of an imported STEP, a re-emit) asks for the parts of
+  the tree a view of its output reads -- the saved document's, a mesh-only
+  model's own -- the same way, before it reports done and before its declared
+  mesh exports. Which parts lack display data is asked of the store alone (one
   probe per part, no kernel import), so a no-op build of a model whose display
-  data is stored derives nothing; one whose store was cleared derives it again.
-  Each missing part is derived in turn, the build's progress showing `Meshing
-  parts n/total`, and the time counts as cadgen's in the model's time line.
-  Nothing splits the work: sibling models derive in parallel because they build
-  in parallel jobs, and a parent's tree holds its children's components, which
-  their own jobs derived before they reported done, so a parent normally finds
-  nothing missing. A part that fails to derive is a warning on the build, never
-  its failure: the geometry is published, and a view goes on without that part,
-  saying so (below).
+  data is stored starts no job; one whose store was cleared has it derived
+  again. While the build waits, its progress shows `Meshing parts`, and the
+  time counts as cadgen's in the model's time line. Sibling models' jobs run in
+  parallel as their builds do, and a parent's tree holds its children's
+  components, whose builds had them derived before they reported done, so a
+  parent normally finds nothing missing. A part that fails to derive is a
+  warning on the build, never its failure: the geometry is published, and a
+  view goes on without that part, saying so (below). A build that fails after
+  its preview waits for the job before it reports the failure, so the preview
+  stands under it, drawn whole.
   A build's kinematics read components only where a selector is named: a mate's
   parent and child resolve in the result tree's occurrences, group nodes and
-  their labels, with no component read, and an `axis={"ref": ...}` derives
-  (here, in the build) and reads the selector table of the one component its
-  occurrence places (`_internal/kinematics_resolve.py`). `read_step` never waits
-  for a part.
+  their labels, with no component read, and an `axis={"ref": ...}` reads the
+  selector table of the one component its occurrence places, once the build's
+  display job is done (a part it did not cover, by a job of its own;
+  `_internal/kinematics_resolve.py`). A declared mesh export at a tolerance
+  other than the display one still meshes in the build's process
+  (`parts.mesh_at`, below). `read_step` never waits for a part.
 
   A view -- the CAD Viewer and the CAD app (`POST /__cad/parts`), a snapshot
   and `--mode list` (`store/view.py`), a mesh export -- reads what the build
@@ -497,27 +534,20 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   Nothing stores the facts but that pin, and nothing outside a derivation reads
   them.
 
-  The **selector table** (`_internal/selector_table.py`) is the one place a
-  ref's facts are minted. From the exact BREP and the topology facts, per face,
-  edge and vertex, the **element token** a ref ends in (`f:`, `e:`, `v:` and
-  twelve hexadecimal characters: a hash, under `GEOMETRY_FINGERPRINT_SCHEME`,
-  of the element's geometry within its body -- a face's surface class, its
-  tight box rounded and its normal at its parametric middle rounded to
-  quarters; an edge's curve class, its rounded end points as a sorted pair and
-  its rounded length; a vertex's rounded point; two elements of one body with
-  equal signatures ranked by their exact values, each after the first hashing
-  its rank as well -- so the element keeps its token through
-  the STEP round trip and whatever order OCCT lists it in, and the table of
-  the body the build held resolves a token against the body read back from the
-  document), the exact metrics and parameters the facts carry, the plane
+  The **selector table** (`_internal/selector_table.py`, schema 3) is the one
+  place a ref's facts are minted. From the exact BREP and the topology facts,
+  per face, edge and vertex, the **element name** a ref ends in, which leads
+  each row -- its lineage (§2), `f:dial.extrude1.3`, or, for an element no
+  lineage names, its geometric token, `f:9d2e8c1b5a70`, measured here, in the
+  pool's job -- the exact metrics and parameters the facts carry, the plane
   normals, whether an entity can be referenced, its relevance, every adjacency
   (face–edge, edge–vertex), each edge's chain and each face's tangent group —
   the sets the viewer's connected selection grows a pick to. Ordinals stay in
   the table as the join to the mesh's face and edge tables, and never leave it:
-  a ref is `<occurrence token>/<element token>`, two tokens and nothing
-  positional (`cad_ref_syntax.py`, the one grammar the Python and the client
-  share). The CAD Viewer reads the table when it needs it -- a pick, a measure,
-  a node opened -- by the part's key, bound to the object its entry names
+  a ref is `<occurrence token>/<element name>`, and nothing positional
+  (`cad_ref_syntax.py`, the one grammar the Python and the client share). The
+  CAD Viewer reads the table when it needs it -- a pick, a measure, a node
+  opened -- by the part's key, bound to the object its entry names
   (`GET /__tess_cache/<part>.selectors.json`), and joins it to the mesh by
   ordinal; the CLI (`assembly_lookup`) reads the same table from a view's
   `components/<cid>.selectors.json`. So a ref the page shows resolves in
@@ -578,8 +608,24 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   The model result and saved document are separate trees. `record.tree` keeps
   authored grouping and intrinsic appearance for exact child pins. A generated
   save also records `documentTree`, built by the same canonical parsed-scene
-  path as a cold import, using only hierarchy, names, colors and geometry in
-  the STEP bytes. Only this tree is entered in `index/document`.
+  path as a cold import, from the hierarchy, names, colors and geometry in the
+  STEP bytes. Only this tree is entered in `index/document`.
+
+  **The saved document takes the source side's names.** Its identity is not
+  measured: the authored-to-written correspondence (below) pairs each of the
+  document's leaves with the authored leaf that was written there, and a leaf
+  whose bytes read back as the body it was written from takes that body's
+  component -- its BREP, construction key and lineage -- so the document names
+  its parts and elements as the result does. "Read back as" is a check of the
+  read-back, not an identity: the same face colours, the same number of faces,
+  and each face's tight box within half the display chord tolerance of the
+  written one's (`store.build._same_body`), remembered per pair of components
+  in `index/bounds` (§2), so a parent writing the same body again finds the
+  verdict its child's save reached. A leaf that fails it -- the STEP
+  translation changed the body -- keeps its parse, a component of its own
+  with no construction key, whose part the build has derived like any other
+  (above). A document compiled from its bytes alone, with no build to pair it
+  with, names its elements by their geometric tokens.
 
   Raw-document compilation does not discover neighboring model sources. It
   passes the parsed scene directly to this canonical builder, whose fixed edge
@@ -639,7 +685,8 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   correspondence. The composed tree is published and captured exactly as an
   indexed read-back of already-seen bytes is, so the correspondence check,
   the canonical maps and the restore are the same code, and `index/document`
-  receives a tree equal to the cold compile of the bytes. Under `--verbose` a
+  receives the tree a parse of the bytes gives, paired with the bodies written
+  (above). Under `--verbose` a
   composed tree shows as the stage `tree: compose document from children`;
   `CADGEN_VERIFY_READBACK=1` (§10) proves a corpus by parsing as well and
   failing the build on any difference. This adds no staleness class: the gate
@@ -724,25 +771,28 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   geometry while retaining their own finishes. Appearance-sensitive exports
   include the normalized appearance digest in their variant, including absence.
 
-  Model records use payload schema 9: the tree a record names is geometry
-  schema 4, whose ids are tokens, and its correspondence maps and appearance
-  assignments are keyed by them; schema 8 (reach slices, import-time slices,
-  absent, roots and listing entries) keyed them by position. Earlier records
-  are misses: the next source run rebuilds outputs whose input hashes may have
-  been captured after a mid-build edit, as well as outputs predating distinct
-  occurrence colours.
-  This is one source rebuild; existing geometry objects and parts remain reusable.
+  Model records use payload schema 10: the tree a record names is geometry
+  schema 5, whose components carry their construction keys and lineage;
+  schema 9 named schema-4 trees, whose ids are tokens, and keyed the
+  correspondence maps and appearance assignments by them, as 10 does; schema 8
+  (reach slices, import-time slices, absent, roots and listing entries) keyed
+  them by position. Earlier records are misses: the next source run rebuilds
+  outputs whose input hashes may have been captured after a mid-build edit, as
+  well as outputs predating distinct occurrence colours.
+  This is one source rebuild; existing geometry objects remain reusable.
   A record with no `closure.own` leaves nothing out of its listings, which is
   how it hashed them, so it needs no new schema.
-  Document mappings use payload schema 9 (the tree an entry names is geometry
-  schema 4, and the hint is `producer`; schema 8 named schema-3 trees, 7
-  schema-2 trees): saved bytes stay authoritative and are reparsed without
-  guessing colours that the document does not contain. There are no directory
-  or document-byte-key salts. Trees use only geometry schema 4; there is no
-  optional old-tree decoder. Schema 4 names every occurrence, link and node by
-  its `o:` token and every native component by its fingerprint beside its cid;
-  3 admitted resolved named intrinsic appearance on authored trees and pinned an
-  eager-only component's topology facts as `topology`, which 4 keeps. Document indexes may carry an
+  Document mappings use payload schema 10 (the tree an entry names is geometry
+  schema 5, and the hint is `producer`; schema 9 named schema-4 trees, 8
+  schema-3 trees, 7 schema-2 trees): saved bytes stay authoritative and are
+  reparsed without guessing colours that the document does not contain. There
+  are no directory or document-byte-key salts. Trees use only geometry schema
+  5; there is no optional old-tree decoder. Schema 5 names a component made by
+  a construction of its run by its `construction` key and `lineage` object
+  (§2); 4 named every occurrence, link and node by its `o:` token, which 5
+  keeps; 3 admitted resolved named intrinsic appearance on authored trees and
+  pinned an eager-only component's topology facts as `topology`, which 4 and 5
+  keep. Document indexes may carry an
   optional exact loaded `producer` hint outside the tree. A same-tree
   rewrite preserves a valid hint and external mesh ledger; a tree replacement
   drops both unless an attested producer is supplied. A reader selects tree and
@@ -1050,47 +1100,48 @@ A real one (`link_robot`: a base, two placements of `link_arm`, one of
 ### Provenance
 
 The build's account of its own code: `index/provenance/<sha256(model
-ref)>-v<schema>` (`store/provenance.py`), one entry per model beside its
-record, on the code side (§2), written by the build after the record for the
-result tree the record names, and never read by a reader, a view or the
-viewer. It holds the **features** the body ran -- every kernel construction
-cadgen saw at its boundary (`_internal/kernel_trace.py`, the trace the kernel
-memo keeps, README law 18): the operation, the source frame in the model's own
-code that called it (file, line, the enclosing function, and an ordinal for a
-line that ran more than once), and the features that made the shapes it was
-given -- and, for each component of the result, the feature that made its body
-and, per face and edge token (§3), the feature that made that element and the
-one that last modified it. Lineage is found from what each feature was given
-and returned, with no history object from the kernel: an element of a result
-whose TShape an input holds, or that an input holds with the same surface and
-extent, is unchanged there and inherits its lineage; one an input held on the
-same surface with another extent was modified by the feature; any other was
-made by it; and the walk stops at a shape no feature made (a child's geometry,
-an imported file), whose elements are of unknown origin. Components and
-elements are named by their fingerprints and tokens, never by an ordinal, so
-an entry written for the body the build held answers for the body a document
-read back; the pass runs once the tree has prepared its components and reads
-the identities that preparation measured, so nothing is measured twice. The
-entry carries the hashes of the tree and the document it describes (`tree`,
-`stepHash`); a document whose bytes have moved past them is behind its entry,
-and `store where` says so rather than guessing.
+ref)>-v<schema>` (`store/provenance.py`, schema 2), one entry per model beside
+its record, on the code side (§2), written by the build after the record for
+the result tree the record names, and never read by a reader, a view or the
+viewer. It is the run's trace as the kernel boundary saw it
+(`_internal/kernel_trace.py`, the trace the kernel memo keeps, README law 18),
+kept rather than computed: no pass of the build measures anything for it. It
+holds the **features** the body ran, in call order and by name (§2) -- each
+one's operation, the source frame in the model's own code that called it
+(file, line and the enclosing function) and the features that made the shapes
+it was given -- and the **components** the build made. Each of those names its
+elements by those features through its lineage object (§2, §3), which is how
+an element finds the feature that made it and the one that last modified it:
+lineage is found from what each feature was given and returned, with no
+history object from the kernel (an element of a result whose TShape an input
+holds, or that an input holds with the same surface and extent, is unchanged
+there and inherits its lineage; one an input held on the same surface with
+another extent was modified by the feature; any other was made by it), and the
+walk stops at a shape no feature made (a child's geometry, an imported file),
+whose elements are of unknown origin. A file and a line are here and nowhere
+else, so an edit that moves code renames nothing. The entry carries the hashes
+of the tree and the document it describes (`tree`, `stepHash`); a document
+whose bytes have moved past them is behind its entry, and `store where` says
+so rather than guessing.
 
 `cadgen store where <document> <ref>` is the one reader: path →
 `index/output` → the model → its record and its provenance entry, the
 document's hash checked against `stepHash`, the ref resolved in the document
 tree the record names (a label as `read_scene` resolves it) to its occurrence
-and its component's fingerprint, looked up in the model's entry or in a pinned
-child's (through the record's pins, while the child's record and entry still
-describe the pinned tree) -- a code-side walk, like `store why`'s, that no
-door, view or render path takes (§2, property 2). It answers with the feature
-that made what the ref names, as `file:line in function (operation)` with the
-features it was given, and for a face or an edge the one that last modified
-it. Without an entry, or with one for other bytes, or for a vertex, it says it
-does not know, and the ref still resolves to its geometry: provenance is never
-how a ref is found. The entry's key is versioned like the record's, and a
-record a cadgen does not own (§2) has an entry it does not own: both are
-obsolete together; `store forget` drops the entry with the record, and
-nothing evicts it (§8).
+and its component, whose lineage names the feature the element's name holds
+(a ref in geometric-token form is matched to its element by geometry first,
+§2), looked up in the model's entry or in a pinned child's (through the
+record's pins, while the child's record and entry still describe the pinned
+tree) -- a code-side walk, like `store why`'s, that no door, view or render
+path takes (§2, property 2). It answers with the feature that made what the
+ref names, as `file:line in function (operation)` with the features it was
+given, and for a face, an edge or a vertex the one that last modified it.
+Without an entry, or with one for other bytes, or for an element no feature
+made, it says it does not know, and the ref still resolves to its geometry:
+provenance is never how a ref is found. The entry's key is versioned like the
+record's, and a record a cadgen does not own (§2) has an entry it does not
+own: both are obsolete together; `store forget` drops the entry with the
+record, and nothing evicts it (§8).
 
 ## 4. The gate
 
@@ -1884,11 +1935,12 @@ CPU scheduling and reuse remain independent of memory admission:
    — queuing if it must — when that wait ends. A waiting parent holds no CPU slot, which is
    why a 1-slot pool still builds a 3-level tree. It retains its geometry and
    memory reservation. Slots count kernel work only:
-   the build pipeline takes one around a model body, its emit and the display
-   data it derives (§3: a build derives its parts' display data), all in the
-   build's own process. A door and a server hold no slot, and derive nothing in
-   their own process: a part whose display data the store lacks is one pool
-   job. **Doors take
+   the build pipeline takes one around a model body and its emit, in the
+   build's own process, and its display job takes one of its own (§3: a build
+   has its parts' display data derived by the pool), which the build yields its
+   slot to while it waits for the job. A door and a server hold no slot, and
+   derive nothing in their own process: a part whose display data the store
+   lacks is one pool job. **Doors take
    none and never run a body**: `snapshot` and the mesh doors
    (`stl|3mf|glb build`) ask one question of a document — does the store have a
    tree for this file's bytes (`doors.document_tree`: `sha256(bytes)` →
@@ -1950,10 +2002,10 @@ but has no daemon-wide aggregate process budget. CPU slot counts remain upper
 bounds, and extraction concurrency also fits a per-worker extraction ceiling
 (a third of the budget, capped at 2048 MiB), which is not the admission
 reservation and is likewise unconfigurable.
-Geometry publication starts no extraction subprocesses: the build derives its
-parts' display data in its own process (§3). A view's display job for parts
-the store lacks uses the shared artifact-job admission and one private
-derivation per requested component; it has no model binding, declared output
+Geometry publication starts no extraction subprocesses: a build's display
+data is one artifact job (§3), as a view's is. A display job for parts the
+store lacks uses the shared artifact-job admission and one private derivation
+per requested component; it has no model binding, declared output
 or editing-producer order. On the daemon,
 an artifact job is never killed when its caller leaves, as the CAD Viewer's do
 routinely: the worker stays warm rather than being replaced by a fresh kernel
@@ -2104,8 +2156,9 @@ disconnected preview is labelled as such. The ledger is short-lived and
 deletable, never the only durable copy of an authored change. A build's events
 carry what that status reads and no more: a preview names the output, the
 result tree, the producer its parts are keyed under, the part key of each
-component the store holds -- the stored parts first, then one event per part
-the build derives -- and whether that is all of them; the preview's annotations
+component the store holds -- the stored parts first, then all of them once the
+build pool's job for the rest is done -- and whether that is all of them; the
+preview's annotations
 name the one object they are (below); a saved result the document's tree and
 digest; and the ledger keeps nothing else of any of them. Kinematics,
 appearance and animation travel in the sidecar for every durable reader, and
@@ -2127,16 +2180,18 @@ annotations that belong to them, replaced in place when a build writes new
 bytes (the components it already holds are retained: the last paragraph). It
 reads this channel (`GET /__cad/preview`) for status and for the **preview
 revision**: whether a build of the file is queued or running and its phase, a
-failure with its message, and, from the moment the build's body has returned
-and its parts are derived, the result tree's hash and the part key of every
-component in it. Those are artifact-side objects the viewer reads as it reads
-any tree and any part, and it draws them at once, labelled as a preview of the
-build in progress -- the picture is on screen before the STEP is written, read
-back and published -- then replaces them in place with the saved file when the
+failure with its message, and, from the moment the build's body has returned,
+the result tree's hash and the part key of every component in it, with the
+parts the store holds -- at once those it held already, the rest the moment the
+build pool's one job for them (§3) is done, while the build saves its STEP.
+Those are artifact-side objects the viewer reads as it reads any tree and any
+part, and it draws them as they are named, labelled as a preview of the build
+in progress -- the picture is on screen before the STEP is written, read back
+and published -- then replaces them in place with the saved file when the
 catalog names it, keeping every component whose part the two share, which is
-all of them when the fingerprints agree (§2). What the sidecar will carry
-travels with the preview too, as its **annotations**: the build resolves the
-model's declarations against the result tree as soon as the parts are derived
+all of them when every body read back as it was written (§3). What the sidecar
+will carry travels with the preview too, as its **annotations**: the build
+resolves the model's declarations against the result tree as soon as it exists
 -- the mates into the articulation a page plays, `materials=` into finishes on
 leaf tokens, the clips into keyframes -- and publishes them as one
 artifact-side object the preview names, so Position, finishes and routines work
@@ -2252,8 +2307,8 @@ supersession does not cancel their exports.
   separately, by each component's part, through `store.parts` and `index/part`.
 - `CADGEN_VERIFY_READBACK=1` makes every saved build that reuses a document
   tree — composed from its children's (§3) or taken from the document index
-  for already-seen bytes — parse the written STEP as well, and fail with the
-  first difference: the tree hashes, the top-level keys that differ, the
+  for already-seen bytes — parse the written STEP as well, pair it with the
+  bodies written as a parsed save does, and fail with the first difference: the tree hashes, the top-level keys that differ, the
   first differing occurrence, the canonical maps. It is for a maintainer's
   manual check over a corpus; it doubles the read-back's cost and nothing in
   cadgen sets it. Like the store root, it travels with each build to the warm
@@ -2284,7 +2339,7 @@ supersession does not cancel their exports.
 - Put a path, a timestamp, or anything machine-specific into an object.
 - Derive a model's dependencies from its tree's links.
 - Add a version salt to an object's address, or a global schema number to component
-  identity (§2, geometry identity and versions).
+  identity (§2, identity and versions).
 - Add a lock that a reader consults to decide freshness — or any build lock
   at all; the publish rule and pins are the whole concurrency story.
 - Let a door, the viewer, snapshot or any render path open `index/model`,
@@ -2307,12 +2362,13 @@ supersession does not cancel their exports.
 - Write a sidecar for anything but kinematics, or copy into it what only a
   record needs (README law 17): a mesh door tessellates the document's tree
   and never reads a declaration back.
-- Key a part by a component's bytes, or name an occurrence or an element by an
-  ordinal or a position: parts and refs are named by geometry (§2, §3; README
-  law 20).
-- Carry provenance -- a feature, a frame, a line -- in an object, a part, a
-  document entry, a sidecar or a written file, or read `index/provenance` from
-  anything but `store where` and `store why` (§3).
+- Key a part made by a construction by its component's bytes, measure geometry to
+  name a part or an element on the way from a model's run to its record, or name
+  an occurrence or an element by an ordinal of a list or a position: parts and
+  refs are named by what made them (§2, §3; README law 20).
+- Carry a frame or a line in an object, a part, a document entry, a sidecar or a
+  written file, or read `index/provenance` from anything but `store where` and
+  `store why` (§3).
 - Show a preview as the saved file, bind a sidecar to one, or map saved bytes
   to a preview tree (§9b).
 - Store a mesh no face of which was verified, or let a clock decide which faces
