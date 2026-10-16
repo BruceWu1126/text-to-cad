@@ -1498,8 +1498,11 @@ Decided mechanically from the returned geometry and occurrence metadata.
   (`component_package.placed_prototype_bounds`), so the animation bake's leaf
   boxes find for the result what they find for the saved file. A miss measures every native leaf
   with the same optimal extrema operation; it never transforms a component
-  AABB. Incomplete private inputs fall back to the ordinary composed native
-  document, after the same component validation and closure checks.
+  AABB. Incomplete private inputs -- a child's component whose leaf the
+  component places itself, which no remembered box composes exactly -- fall
+  back to the ordinary composed native document, each leaf as the file holds
+  it (the parse's prototype, which a leaf that took its authored component
+  verified as), after the same component validation and closure checks.
 - A bounded descriptor composed entirely of pinned links may instead measure
   exact component bounds from verified canonical BREP objects. `index/bounds`
   stores only six finite numbers, keyed by BREP digest, all 16
