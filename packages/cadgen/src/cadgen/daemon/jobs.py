@@ -1,10 +1,13 @@
 """The daemon's job ledger: every job it runs, whoever asked for it.
 
-One entry per request the supervisor relays — a ``python model.py`` from a
-terminal, a parent's child build, a door's or the viewer's compile — with the
-job's DECLARED OUTPUT PATHS as metadata (the ``out=`` document and the declared
-meshes for a model script, parsed statically; the document itself for a
-compile). Readers match jobs to files by those paths and never by source state:
+One row per request the supervisor relays — a ``python model.py`` from a
+terminal, a door's or the viewer's compile — and one per child model a request
+builds inside it (its parent's body called it, STORE.md §9a), under the request
+(``request``), listed from the child's first event and closed by its own done
+or failed event, or with the request. Every row carries the job's DECLARED
+OUTPUT PATHS as metadata (the ``out=`` document and the declared meshes for a
+model script, parsed statically; the document itself for a compile). Readers
+match jobs to files by those paths and never by source state:
 the CAD Viewer shows ``compiling · <phase> n/total`` for any job whose outputs
 include the document it displays, ``failed`` with the failure's own reason for a
 failed one, and nothing else
@@ -139,10 +142,9 @@ class JobLedger:
 
     # --- lifecycle -------------------------------------------------------------
 
-    def start(self, *, tool: str, subject: str, argv: list[str] | None = None, store_root: str = "",
-              editing_producer: bool = True, adopt_announced: bool = False) -> dict[str, Any]:
+    def start(self, *, tool: str, subject: str, argv: list[str] | None = None, store_root: str = "") -> dict[str, Any]:
         if tool == "artifact":
-            subject, editing_producer = "", False
+            subject = ""
         subject = _real(subject) if subject else ""
         now = self._clock()
         sequence = next(self._ids)
@@ -152,7 +154,6 @@ class JobLedger:
             "sequence": sequence,
             "storeRoot": _real(store_root) if store_root else "",
             "tool": str(tool),
-            "editingProducer": bool(editing_producer),
             "subject": subject,
             "outputs": [] if tool == "artifact" else self._declared_outputs(subject, str(tool)),
             "argv": [str(a) for a in (argv or [])],
@@ -168,32 +169,12 @@ class JobLedger:
             "error": None,
         }
         with self._guard:
-            if adopt_announced and subject:
-                # A concurrent real request for the same model must not hide
-                # the child's earlier announcement.  If it does, that
-                # announcement is never adopted or finished and remains a
-                # permanently submitted Viewer progress row.
-                existing = self._announced_for(subject)
-                if existing is not None:
-                    existing["tool"] = str(tool)
-                    existing["argv"] = [str(a) for a in (argv or [])]
-                    existing["storeRoot"] = job["storeRoot"]
-                    existing["editingProducer"] = bool(editing_producer)
-                    # Announcements are hints that a request is coming, not
-                    # accepted editing revisions.  Order the adopted row by
-                    # this request's actual acceptance.
-                    existing["sequence"] = sequence
-                    existing["startedAt"] = now
-                    existing["updatedAt"] = now
-                    existing.pop("announced", None)
-                    self._notify(existing)
-                    return existing
             self._jobs[job["id"]] = job
             self._notify(job)
         return job
 
     def start_artifact(self, request: dict, *, store_root: str, dependency=False) -> dict[str, Any]:
-        job = self.start(tool="artifact", subject="", store_root=store_root, editing_producer=False)
+        job = self.start(tool="artifact", subject="", store_root=store_root)
         with self._guard:
             job["artifact"] = copy.deepcopy(request)
             job["dependency"] = bool(dependency)
@@ -227,14 +208,10 @@ class JobLedger:
             job["updatedAt"] = self._clock()
             self._notify(job)
 
-    def accept_editing_producer(self, job: dict[str, Any]) -> None:
-        """Only a coalescing request that owns the work advances edit ordering."""
-        with self._guard:
-            job["editingProducer"] = True
-            self._notify(job)
-
     def observe(self, frame: dict[str, Any]) -> None:
-        """Fold one relayed frame into the ledger (only ``event`` frames matter)."""
+        """Fold one relayed frame into the ledger (only ``event`` frames matter): a
+        transition of the request's own model, or of a child the request built inside its
+        body, which has a row of its own under the request (:meth:`_child_row`)."""
         event = frame.get("event") if isinstance(frame, dict) else None
         if not isinstance(event, dict):
             return
@@ -245,61 +222,49 @@ class JobLedger:
         now = self._clock()
         producer = str(event.get("job") or "")
         with self._guard:
-            job = self._jobs.get(producer) if producer else self._running_for(model)
-            if producer:
-                if job is None or _real(model.split("::", 1)[0]) != _real(job["subject"].split("::", 1)[0]):
-                    # Parent-announced child transitions are not the parent's
-                    # own work. The child's accepted request has its own row.
-                    return
-                ordinal = int(event.get("sequence") or 0)
-                if job.get("finishedAt") is not None or (ordinal and ordinal <= job.get("eventSequence", 0)):
-                    return
-                if ordinal:
-                    job["eventSequence"] = ordinal
-            if job is None:
-                if state in ("done", "failed", "current"):
-                    return  # a transition for a job this ledger never saw start
-                # A child a parent has submitted: its own request has not
-                # arrived yet, so it is listed from the parent's announcement.
-                sequence = next(self._ids)
-                job = {
-                    "id": f"{self.epoch}:job-{sequence}", "epoch": self.epoch,
-                    "sequence": sequence, "storeRoot": "", "announced": True,
-                    "tool": "run", "subject": model,
-                    "outputs": self._declared_outputs(model, "run"), "argv": [], "state": "submitted",
-                    "phase": None, "detail": "", "done": None, "total": None, "startedAt": now,
-                    "updatedAt": now, "finishedAt": None, "exit": None, "error": None,
-                }
-                self._jobs[job["id"]] = job
-            if state in ("submitted", "queued"):
-                if job["state"] == "submitted" or state == "queued":
-                    job["state"] = state
-            elif state == "building":
-                job["state"] = "building"
-                job["phase"] = event.get("phase") or job["phase"]
-                if event.get("detail") is not None:
-                    job["detail"] = str(event.get("detail") or "")
-                job["done"] = event.get("done")
-                job["total"] = event.get("total")
-            elif state in ("done", "current"):
-                # A real request may run several decorated models; only its
-                # process completion closes the request, not one model event.
-                if not producer:
-                    job["state"] = "done"
+            request = self._jobs.get(producer) if producer else self._running_for(model)
+            if request is None:
+                return  # a transition for a job this ledger never saw start
+            job = request
+            if producer and _real(model.split("::", 1)[0]) != _real(request["subject"].split("::", 1)[0]):
+                job = self._child_row(request, model, now)
+            ordinal = int(event.get("sequence") or 0)
+            if ordinal and ordinal <= job.get("eventSequence", 0):
+                return
+            if ordinal:
+                job["eventSequence"] = ordinal
+            if job.get("finishedAt") is None:
+                if state in ("submitted", "queued"):
+                    if job["state"] == "submitted" or state == "queued":
+                        job["state"] = state
+                elif state == "building":
+                    job["state"] = "building"
+                    job["phase"] = event.get("phase") or job["phase"]
+                    if event.get("detail") is not None:
+                        job["detail"] = str(event.get("detail") or "")
+                    job["done"] = event.get("done")
+                    job["total"] = event.get("total")
+                elif state in ("done", "current"):
+                    # A request may run several decorated models, so only its process's
+                    # completion closes it (``finish``); a child's own done closes the child.
+                    if not producer or job is not request:
+                        job["state"] = "done"
+                        job["finishedAt"] = now
+                elif state == "failed":
+                    job["state"] = "failed"
+                    job["exit"] = event.get("exit", job["exit"])
+                    if event.get("error"):
+                        job["error"] = str(event["error"])
                     job["finishedAt"] = now
-            elif state == "failed":
-                job["state"] = "failed"
-                job["exit"] = event.get("exit", job["exit"])
-                if event.get("error"):
-                    job["error"] = str(event["error"])
-                job["finishedAt"] = now
+            # A build's results fold in whenever they land, a saved document after its
+            # row closed included (a child's export lands after its done): the names a
+            # reader reads, never a state the row has left.
             for field, (bucket, kept) in _KEPT_RESULT_FIELDS.items():
                 payload = event.get(field)
                 if not isinstance(payload, dict) or not payload.get("output") or not payload.get("tree"):
                     continue
                 output = _real(str(payload["output"]))
                 updates = job.setdefault(bucket, {})
-                ordinal = int(event.get("sequence") or 0)
                 previous = updates.get(output)
                 if previous is None or ordinal > int(previous.get("sequence") or 0):
                     updates[output] = {**{key: copy.deepcopy(payload[key]) for key in kept
@@ -309,6 +274,23 @@ class JobLedger:
                     job["outputs"].append(output)
             job["updatedAt"] = now
             self._notify(job)
+
+    def _child_row(self, request: dict[str, Any], model: str, now: float) -> dict[str, Any]:
+        """The row of ``model``, a child built inside ``request``: made at its first
+        event, with the child's declared outputs and the request's store."""
+        for job in self._jobs.values():
+            if job.get("request") == request["id"] and job["subject"] == model:
+                return job
+        sequence = next(self._ids)
+        job: dict[str, Any] = {
+            "id": f"{self.epoch}:job-{sequence}", "epoch": self.epoch, "sequence": sequence,
+            "storeRoot": request["storeRoot"], "tool": "run", "subject": model, "request": request["id"],
+            "outputs": self._declared_outputs(model, "run"), "argv": [], "state": "submitted",
+            "phase": None, "detail": "", "done": None, "total": None, "startedAt": now,
+            "updatedAt": now, "finishedAt": None, "exit": None, "error": None,
+        }
+        self._jobs[job["id"]] = job
+        return job
 
     def finish(self, job: dict[str, Any], exit_code: int, *, error: str | None = None,
                cancelled: bool = False) -> None:
@@ -322,15 +304,21 @@ class JobLedger:
         """
         now = self._clock()
         with self._guard:
-            if job["state"] in _RUNNING:
-                job["state"] = "cancelled" if cancelled else "done" if exit_code == 0 else "failed"
-            job["exit"] = int(exit_code)
-            if exit_code != 0 and error and not cancelled:
-                job["error"] = str(error)
-            job["finishedAt"] = job["finishedAt"] or now
-            job["updatedAt"] = now
+            # A child row the request leaves running -- its worker died, its caller left --
+            # ends as the request does.
+            rows = [job, *(row for row in self._jobs.values()
+                           if row.get("request") == job["id"] and row["state"] in _RUNNING)]
+            for row in rows:
+                if row["state"] in _RUNNING:
+                    row["state"] = "cancelled" if cancelled else "done" if exit_code == 0 else "failed"
+                row["exit"] = int(exit_code)
+                if exit_code != 0 and error and not cancelled:
+                    row["error"] = str(error)
+                row["finishedAt"] = row["finishedAt"] or now
+                row["updatedAt"] = now
             self._sweep(now)
-            self._notify(job)
+            for row in rows:
+                self._notify(row)
 
     # --- reading -----------------------------------------------------------------
 
@@ -359,7 +347,6 @@ class JobLedger:
             return [
                 job for job in self._jobs.values()
                 if job.get("tool") == "run"
-                and job.get("editingProducer", True)
                 and job.get("storeRoot") and _real(job["storeRoot"]) == normalized_store
                 and normalized_output in {_real(path) for path in job.get("outputs", [])}
             ]
@@ -402,12 +389,6 @@ class JobLedger:
     def _running_for(self, subject: str, *, exclude: dict[str, Any] | None = None) -> dict[str, Any] | None:
         for job in reversed(list(self._jobs.values())):
             if job is not exclude and job["subject"] == subject and job["state"] in _RUNNING:
-                return job
-        return None
-
-    def _announced_for(self, subject: str) -> dict[str, Any] | None:
-        for job in reversed(list(self._jobs.values())):
-            if job["subject"] == subject and job["state"] in _RUNNING and job.get("announced"):
                 return job
         return None
 

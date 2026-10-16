@@ -88,7 +88,7 @@ _EMIT_LOCK = threading.Lock()
 # While a job runs, a daemon thread emits a heartbeat this often. The supervisor
 # calls a worker hung only well past it (server.WORKER_SILENCE_TIMEOUT_SECONDS).
 HEARTBEAT_INTERVAL_SECONDS = 10.0
-# The phase the running job last announced about itself; its heartbeat carries it.
+# The phase the running job last reported of itself; its heartbeat carries it.
 _PHASE: list[str | None] = [None]
 # The frame channel: a descriptor of its own on the pipe the pool reads, opened by
 # ``serve``. Not fd 1 itself, which a job may point elsewhere for a while -- a STEP read
