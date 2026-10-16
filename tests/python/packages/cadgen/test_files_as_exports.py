@@ -151,6 +151,24 @@ class FilesAsExportsTest(unittest.TestCase):
             self.assertEqual(plain, self.step.read_bytes())
             self.assertNotIn("does not hold the result", said)
 
+    def test_a_declared_mesh_export_joins_the_build_without_a_doors_lookup_of_its_file(self) -> None:
+        """A model's declared meshes are cut from its result and keyed on its STEP's bytes
+        as its record names them -- the build's own knowledge -- so the command returns
+        without a door's lookup of the file it just wrote, and without waiting on the
+        file's verify."""
+        self.script.write_text(MODEL.replace("from cadgen import step, label_shape", "from cadgen import step, stl, label_shape")
+                               .replace("@step()", "@step()\n@stl"), encoding="utf-8")
+        door = AssertionError("a door's lookup of the model's own file")
+        with mock.patch("cadgen.store.exports.confirm_document", side_effect=door), \
+                mock.patch("cadgen._internal.doors.document_snapshot", side_effect=door):
+            outcome, said = self.build()
+        self.assertEqual("built", outcome)
+        self.assertIn("wrote STL", said)
+        digest = hashlib.sha256(self.step.read_bytes()).hexdigest()
+        stl = self.record()["outputs"][str(self.step.with_suffix(".stl").resolve())]
+        self.assertEqual(digest, stl["document"])
+        self.assertTrue(self.step.with_suffix(".stl").is_file())
+
     def test_a_runtime_that_cannot_name_its_producer_writes_plain_and_the_record_says_so(self) -> None:
         """A part key names its producer, so a runtime that cannot name its own writes the
         file plain, and the record's output entry and the file's entry say plain -- as

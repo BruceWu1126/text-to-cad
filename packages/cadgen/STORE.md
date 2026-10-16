@@ -689,7 +689,11 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   file written plain), the record's output entry filled (`{sha256, writer,
   plain?}`, empty until then, which the gate reads as never written), and the
   `STEP saved` event. `--verbose` relays the job's steps, and says why a parent
-  was not spliced.
+  was not spliced. A model's declared meshes (`@stl`/`@glb`/`@threemf` beside
+  its `@step`) are then cut from the result and keyed on the STEP's bytes as
+  the record names them -- the build's own knowledge of the file it just
+  wrote, never a door's lookup of it, so they wait on no verify -- and the
+  command returns once its exports are written.
 
   The **verify** job (kind `verify`, keyed by the bytes and the tree, never
   the path) parses the file's exact bytes and compares them with the tree

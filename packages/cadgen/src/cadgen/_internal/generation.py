@@ -1220,6 +1220,12 @@ def _produce_declared_mesh_exports(
 
     A declaration's own tolerances are the only ones: one that names none is
     written at the display tolerance, from the very meshes the viewer draws.
+
+    The meshes are cut from the model's result, ``source_tree`` (else its record's),
+    and keyed on its STEP's bytes as its record names them -- the build's own knowledge
+    of the file it just wrote, or its current record's: no door's lookup of the file, and
+    no wait on its verify (STORE.md §3, *Exports*). A mesh-only model writes no
+    document: its tree IS the geometry the meshes are cut from, so the ledger keys on that.
     """
     if not spec.mesh_exports or spec.entry_path is None or spec.step_path is None:
         return ()
@@ -1230,20 +1236,15 @@ def _produce_declared_mesh_exports(
         record_mesh_export,
         run_mesh_exporter,
     )
+    from cadgen.store.records import read_record
 
     model = _model_for_spec(spec)
+    record = (read_record(model) if model is not None else None) or {}
+    tree_hash = source_tree or str(record.get("tree") or "") or None
     if spec.step_output:
-        from cadgen._internal.doors import document_snapshot
-
-        document_hash, tree_hash = document_snapshot(spec.entry_path)
+        output = (record.get("outputs") or {}).get(str(spec.step_path.expanduser().resolve())) or {}
+        document_hash = str(output.get("sha256") or "") or None
     else:
-        # A mesh-only model writes no document: its tree IS the geometry the
-        # meshes are cut from, so the ledger keys on that.
-        tree_hash = source_tree
-        if tree_hash is None:
-            from cadgen.store.records import current_tree
-
-            tree_hash = current_tree(model) if model is not None else None
         document_hash = tree_hash
     if document_hash is None or tree_hash is None or model is None:
         return ()
