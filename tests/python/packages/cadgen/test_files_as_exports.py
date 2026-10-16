@@ -193,8 +193,11 @@ class KeptRuleTest(unittest.TestCase):
         self.assertIsNone(marked.kept)
         self.assertTrue(marked.plain)
         self.assertEqual({"sha256": "", "writer": STEP_WRITER_SCHEME, "plain": True}, marked.output())
-        # Another result is written with names again.
-        self.assertFalse(self.plan(tree="c" * 64).plain)
+        # Another result, a forced build and another writer write the names again.
+        for why, plan in (("another result", self.plan(tree="c" * 64)), ("forced", self.plan(force=True)),
+                          ("another writer", self.plan(output={"sha256": self.DIGEST, "writer": "cadgen-step-writer-3"}))):
+            with self.subTest(why):
+                self.assertFalse(plan.plain)
 
     def test_a_plain_file_that_did_not_hold_its_result_is_kept(self) -> None:
         """The same result is written plain to the same bytes: nothing is gained by writing
@@ -207,7 +210,8 @@ class KeptRuleTest(unittest.TestCase):
         kept = self.plan(output=output)
         self.assertEqual(output, kept.kept)
         self.assertTrue(kept.plain)
-        self.assertIsNone(self.plan(output=output, force=True).kept)
+        forced = self.plan(output=output, force=True)
+        self.assertEqual((None, False), (forced.kept, forced.plain), "a forced build writes the names again")
 
 
 if __name__ == "__main__":

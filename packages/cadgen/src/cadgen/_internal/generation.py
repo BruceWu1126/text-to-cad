@@ -177,8 +177,8 @@ def _export_plan(previous: Mapping[str, object], step_key: str, tree: str, *, fo
     disk when the build started still has the bytes it recorded, and those bytes held
     the result or were written plain (the same result is written plain to the same bytes
     again) -- unless forced. Otherwise it exports, plain where the same result's last
-    file did not hold it (its document entry lists what differs) or was itself written
-    plain."""
+    file from this writer did not hold it (its document entry lists what differs) or was
+    itself written plain; a forced build, or another writer, writes the names again."""
     from cadgen.step_export import STEP_WRITER_SCHEME
     from cadgen.store.records import document_entry_for_hash
 
@@ -192,7 +192,8 @@ def _export_plan(previous: Mapping[str, object], step_key: str, tree: str, *, fo
             and (not marked or prior.get("plain"))):
         return _ExportPlan(kept={key: prior[key] for key in ("sha256", "writer", "plain") if key in prior},
                            plain=bool(prior.get("plain")))
-    return _ExportPlan(kept=None, plain=same and (marked or bool(prior.get("plain"))))
+    return _ExportPlan(kept=None, plain=(not force and same and prior.get("writer") == STEP_WRITER_SCHEME
+                                         and (marked or bool(prior.get("plain")))))
 
 
 def _export(tree: str, staged: Path, *, names: bool, live: Mapping[str, object],

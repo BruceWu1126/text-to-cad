@@ -164,7 +164,8 @@ CAD app no longer tessellate, and nothing cadgen runs needs Node.
   shows its own content; ...`): at once with no daemon, at the next touch of the
   file through the daemon. `cadgen store why` says `shows its own content:`, and
   the model's next run writes the file without names (a file already written
-  without names is kept).
+  without names is kept until the model changes, or `--force` writes the names
+  again).
 - Every model rebuilds once after the upgrade and writes its STEP again; a
   rebuild whose result is unchanged keeps the file.
 

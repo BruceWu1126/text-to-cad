@@ -730,7 +730,8 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   that exports the bytes the file already has leaves the file, and its stamp,
   in place. A file that did not hold its result is exported plain by the
   model's next run, even one whose model is current, with no body run
-  (`generation._reexport`). Bump `STEP_WRITER_SCHEME` with any change to the
+  (`generation._reexport`); another result, a forced build or another writer
+  writes the names again. Bump `STEP_WRITER_SCHEME` with any change to the
   bytes cadgen writes for the same tree.
 
   **Spliced documents.** An all-link parent's STEP is almost entirely its
@@ -2331,7 +2332,8 @@ supersession does not cancel their exports.
   occurrences that differ (§3, *Exports*) -- and the document entry lists the
   differences (`differ`); a build with no daemon warns in the same words, a
   daemon's build at the next touch of the file. The model's next run writes
-  such a file plain, and keeps a plain one.
+  such a file plain, and keeps a plain one until its result changes or a
+  `--force` build writes the names again.
 - `cadgen store info` sizes the store against its cap, names any retired
   kind still present and any `index/` folder it does not know, and says when
   a newer cadgen's writes keep passes off the store. `cadgen store gc
