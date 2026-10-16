@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tests.python.support.documents import assert_same_document
+from tests.python.support.documents import assert_same_document, save_step
 from tests.python.support.tmp_root import generated_cad_directory
 
 
@@ -66,8 +66,9 @@ class ComponentFaceColorIdentityTest(unittest.TestCase):
 
     def test_differently_colored_occurrences_sharing_one_tshape_do_not_merge(self):
         from build123d import Compound, Location, Solid
-        from cadgen.store.build import build_tree_from_compound, build_tree_through_step
-        from cadgen.store.trees import get_tree
+        from cadgen._internal.step_scene_loader import load_step_scene
+        from cadgen.store.build import build_document_tree, build_tree_from_compound
+        from cadgen.store.records import document_entry_for_hash
 
         prototype = self.box()
         red, blue = Solid(prototype.wrapped), Solid(prototype.wrapped)
@@ -84,21 +85,22 @@ class ComponentFaceColorIdentityTest(unittest.TestCase):
         self.assertEqual(build_tree_from_compound(shape, root_name="two-colors")[0], before)
 
         output = self.root / "two-colors.step"
-        result, _, stats, digest = build_tree_through_step(shape, output, root_name="two-colors")
+        result, _, stats, digest = save_step(shape, output, root_name="two-colors")
         first_bytes = output.read_bytes()
-        document = get_tree(stats["documentTree"])
-        self.assertEqual(len(document["components"]), 2)
-        self.assertEqual(len({entry["brep"] for entry in document["components"].values()}), 1)
-        self.assertEqual([self.faces(document["components"][occ["component"]]) for occ in document["occurrences"]],
+        # The file holds the result, whose two components share one body.
+        self.assertEqual((result, {"ok": True}), (before, stats["verify"]))
+        self.assertEqual(document_entry_for_hash(digest)["tree"], result)
+        _, cold, _ = build_document_tree(load_step_scene(output))
+        self.assertEqual([self.faces(cold["components"][occ["component"]]) for occ in cold["occurrences"]],
                          [{1: RED}, {1: BLUE}])
-        repeated, _, repeated_stats, repeated_digest = build_tree_through_step(shape, output, root_name="two-colors")
-        self.assertEqual((repeated, repeated_stats["documentTree"], repeated_digest),
-                         (result, stats["documentTree"], digest))
+        repeated, _, _, repeated_digest = save_step(shape, output, root_name="two-colors")
+        self.assertEqual((repeated, repeated_digest), (result, digest))
         self.assertEqual(output.read_bytes(), first_bytes)
 
     def test_red_blue_and_colorless_documents_match_empty_store_compilation(self):
         from cadgen._internal.step_scene_loader import load_step_scene
-        from cadgen.store.build import build_document_tree, build_tree_through_step
+        from cadgen.store.build import build_document_tree
+        from cadgen.store.records import document_entry_for_hash
         from cadgen.store.trees import get_tree
 
         documents = []
@@ -106,8 +108,9 @@ class ComponentFaceColorIdentityTest(unittest.TestCase):
         for name, colors in (("red", {1: RED}), ("blue", {1: BLUE}), ("plain", {})):
             with self.subTest(name=name):
                 output = self.root / "box.step"
-                _, _, stats, digest = build_tree_through_step(self.box(colors), output, root_name="box")
-                document = get_tree(stats["documentTree"])
+                _, _, stats, digest = save_step(self.box(colors), output, root_name="box")
+                self.assertEqual({"ok": True}, stats["verify"])
+                document = get_tree(document_entry_for_hash(digest)["tree"])
                 component = next(iter(document["components"].values()))
                 self.assertEqual(self.faces(component), colors)
                 with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / f"cold-{name}")}):
@@ -153,10 +156,10 @@ class ComponentFaceColorIdentityTest(unittest.TestCase):
         from build123d import Compound, Location
         from cadgen._internal.step_scene_loader import load_step_scene
         from cadgen._internal.step_scene_package import scene_from_render_package
-        from cadgen.store.build import build_document_tree, build_tree_from_compound, build_tree_through_step
+        from cadgen.store.build import build_document_tree, build_tree_from_compound
         from cadgen.store.materialize import materialize
-        from cadgen.store.records import note_document_tree
-        from cadgen.store.trees import get_tree
+        from cadgen.store.records import document_entry_for_hash
+        from cadgen.store.trees import flatten, get_tree
 
         red_tree, _, _ = build_tree_from_compound(self.box({1: RED}), root_name="red-child")
         blue_tree, _, _ = build_tree_from_compound(self.box({1: BLUE}), root_name="blue-child")
@@ -167,21 +170,21 @@ class ComponentFaceColorIdentityTest(unittest.TestCase):
             return Compound(children=[red, blue], label="colored-parent")
 
         output = self.root / "parent.step"
-        result, result_tree, stats, step_hash = build_tree_through_step(parent(), output, root_name="colored-parent")
+        result, result_tree, stats, step_hash = save_step(parent(), output, root_name="colored-parent")
         first_bytes = output.read_bytes()
         self.assertEqual([link["tree"] for link in result_tree["links"]], [red_tree, blue_tree])
-        document = get_tree(stats["documentTree"])
+        # The saved document is the linked result: a reader takes it flattened.
+        self.assertEqual(({"ok": True}, result), (stats["verify"], document_entry_for_hash(step_hash)["tree"]))
+        document = flatten(result)
         self.assertEqual([self.faces(document["components"][occ["component"]]) for occ in document["occurrences"]],
                          [{1: RED}, {1: BLUE}])
         self.assertEqual(len({entry["brep"] for entry in document["components"].values()}), 1)
-        repeated, _, repeated_stats, repeated_sha = build_tree_through_step(parent(), output, root_name="colored-parent")
-        self.assertEqual((repeated, repeated_stats["documentTree"], repeated_sha),
-                         (result, stats["documentTree"], step_hash))
+        repeated, _, _, repeated_sha = save_step(parent(), output, root_name="colored-parent")
+        self.assertEqual((repeated, repeated_sha), (result, step_hash))
         self.assertEqual(output.read_bytes(), first_bytes)
-        note_document_tree(step_hash, stats["documentTree"])
         warm_scene = scene_from_render_package(output, step_hash=step_hash)
         self.assertIsNotNone(warm_scene)
-        self.assertEqual(build_document_tree(warm_scene)[0], stats["documentTree"])
+        assert_same_document(self, document, build_document_tree(warm_scene)[1])
 
         # No source or model record is needed to recover the saved appearance: a cold
         # compile reads the same document, every component from the file.
@@ -193,10 +196,10 @@ class ComponentFaceColorIdentityTest(unittest.TestCase):
 
     def test_pre_force_face_override_moves_without_reusing_the_original_child_finish(self):
         from build123d import Compound, Location
-        from cadgen.store.build import build_tree_from_compound, build_tree_through_step
+        from cadgen.store.build import build_tree_from_compound
         from cadgen.store.lazy import LazyCompound
         from cadgen.store.materialize import materialize
-        from cadgen.store.trees import get_tree
+        from cadgen.store.trees import flatten
 
         red_tree, _, _ = build_tree_from_compound(self.box({1: RED}), root_name="child")
         original = LazyCompound("absent.py::child", None, frame=None, label="child", tree=red_tree)
@@ -205,13 +208,13 @@ class ComponentFaceColorIdentityTest(unittest.TestCase):
         moved.cad_face_ordinal_colors[1] = RED
         self.assertEqual(original.cad_face_ordinal_colors, {1: BLUE})
         shape = Compound(children=[original, moved], label="overrides")
-        _, result, stats, _ = build_tree_through_step(shape, self.root / "override.step", root_name="overrides")
+        result_hash, result, stats, _ = save_step(shape, self.root / "override.step", root_name="overrides")
         self.assertEqual([link["tree"] for link in result["links"]], [red_tree])
-        document = get_tree(stats["documentTree"])
+        self.assertEqual({"ok": True}, stats["verify"])
+        document = flatten(result_hash)
         self.assertEqual([self.faces(document["components"][occ["component"]]) for occ in document["occurrences"]],
                          [{1: BLUE}, {1: RED}])
         self.assertEqual(materialize(red_tree).cad_face_ordinal_colors, {1: RED})
-
 
 if __name__ == "__main__":
     unittest.main()

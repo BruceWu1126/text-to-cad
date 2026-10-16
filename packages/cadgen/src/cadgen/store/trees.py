@@ -297,10 +297,10 @@ def flatten_tree(
 ) -> dict[str, Any]:
     """:func:`flatten` of a tree held in memory — one not (yet) in the store.
 
-    The build flattens its own result before it is published, to assemble the
-    STEP it then re-reads (``cadgen.store.build``); the links inside it resolve
-    against the store as usual. ``tree_hash`` is recorded on the descriptor when
-    known and memoizes the result.
+    The build flattens its own result before it is published, to resolve its
+    materials and measure its bounds (``cadgen.store.build``); the links inside it
+    resolve against the store as usual. ``tree_hash`` is recorded on the descriptor when known and
+    memoizes the result.
 
     A child's nodes are re-rooted under the link's token: expanded with
     provisional ids, then every id of the flattened tree is minted again from

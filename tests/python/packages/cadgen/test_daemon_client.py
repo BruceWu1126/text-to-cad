@@ -259,23 +259,23 @@ class ResidentProcessLifecycle(unittest.TestCase):
         self.assertEqual(tokens, ["before", "after"])
 
     def test_a_job_runs_in_its_callers_environment_and_the_daemon_keeps_its_own_names(self):
-        # A model reading os.environ, and one build's request such as CADGEN_VERIFY_READBACK
-        # (STORE.md §10), see the caller's environment warm as cold: what the caller has is
+        # A model reading os.environ, and a client's own choice such as CADGEN_STORE_MAX
+        # (STORE.md §8), see the caller's environment warm as cold: what the caller has is
         # set, what it lacks is unset -- in a daemon started with it -- and the names the
         # daemon's machinery sets for itself are neither sent nor replaced.
         import os
 
         from cadgen.daemon import worker
 
-        with mock.patch.dict("os.environ", {"SIZE": "10", "CADGEN_VERIFY_READBACK": "1",
+        with mock.patch.dict("os.environ", {"SIZE": "10", "CADGEN_STORE_MAX": "1G",
                                             "CADGEN_DAEMON_CHILD": "1", "CADGEN_DAEMON_SOCKET": "/daemon.sock"}):
             caller = client.forwarded_env()
-            self.assertEqual((caller["SIZE"], caller["CADGEN_VERIFY_READBACK"]), ("10", "1"))
+            self.assertEqual((caller["SIZE"], caller["CADGEN_STORE_MAX"]), ("10", "1G"))
             self.assertFalse(set(caller) & client.INTERNAL_ENV_VARS)
-            caller = {name: value for name, value in caller.items() if name != "CADGEN_VERIFY_READBACK"}
+            caller = {name: value for name, value in caller.items() if name != "CADGEN_STORE_MAX"}
             worker._apply_request_env({"env": {**caller, "SIZE": "20", "CADGEN_DAEMON_SOCKET": "/elsewhere.sock"}})
             self.assertEqual(os.environ["SIZE"], "20")
-            self.assertNotIn("CADGEN_VERIFY_READBACK", os.environ)
+            self.assertNotIn("CADGEN_STORE_MAX", os.environ)
             self.assertEqual((os.environ["CADGEN_DAEMON_CHILD"], os.environ["CADGEN_DAEMON_SOCKET"]),
                              ("1", "/daemon.sock"))
 

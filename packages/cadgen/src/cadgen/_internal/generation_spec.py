@@ -109,7 +109,7 @@ class GeneratedStepResult:
     scene: LoadedStepScene | None
     selector_bundle: SelectorBundle | None = None
     tree: str | None = None
-    # The saved STEP was kept, not written: its writer input was unchanged.
+    # The saved STEP was kept, not written: the kept rule held (STORE.md §3, *Exports*).
     step_kept: bool = False
 
 

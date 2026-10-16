@@ -174,7 +174,7 @@ class StepNamesRoundTripTest(unittest.TestCase):
         occurrences = [{"id": leaf.label, "transform": transform(leaf)} for leaf in leaves]
         occurrences.append({"id": "turned", "transform": transform(nest.children[0])})
         expected = assign_tokens(result, occurrences, [], label="rig")
-        walk, _paths, _nodes = _document_walk(load_step_scene(self.named))
+        walk = _document_walk(load_step_scene(self.named))
         self.assertEqual(sorted(str(row["id"]) for row in walk.occurrences),
                          sorted(expected[row["id"]] for row in occurrences))
 

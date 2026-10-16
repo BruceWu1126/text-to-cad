@@ -12,23 +12,16 @@ facts about stored bytes (README law 2), never results of a model run.
 Beside the boxes, and keyed the same way, the index remembers each
 component's LEAF LAYOUT: how many leaves its encoded BREP holds and whether
 every one of them sits at the prototype's own placement (no leaf carries a
-location of its own). Canonical publication records it while it measures
-those leaves, and composing a parent's document tree from its children's
-(``cadgen.store._compose_readback``) reads it back to name the exact per-leaf
-box keys without decoding the BREP.
+location of its own). Publication records it while it measures those leaves,
+and :func:`composed_bounds` reads it back to name the exact per-leaf box keys
+of a placed component without decoding its BREP: a parent's bounds over its
+children's components, the animation bake's leaf boxes.
 
 It also remembers each component's TOPOLOGY: its face and edge counts, how many
 of each are curved, and its loose box, the per-prototype facts the adaptive
 edge policy classifies a scene by (``step_scene_mesh.prototype_topology``). A
 build of an all-link parent reads them by the BREP its pins name and decodes
 only a component whose entry is missing (``cadgen.store._references``).
-
-And it remembers, for a body a build wrote to STEP and the body the STEP read
-back as, whether the two AGREE -- as many faces and edges, each face's tight box
-within the display chord tolerance (``store.build._same_body``) -- keyed by both
-components' codecs and BREP objects: a saved document's leaf takes its authored
-component only where they do, and a parent writing the same body again finds
-the verdict its child's save reached.
 
 Last, keyed by a component's codec and BREP object under the geometric token
 scheme, it remembers the GEOMETRIC TOKENS of its faces, edges and vertices
@@ -40,9 +33,10 @@ from __future__ import annotations
 
 import hashlib
 import math
+import struct
 import threading
 from collections import OrderedDict
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from cadgen.store.parts import kernel_versions
 
@@ -56,15 +50,12 @@ LEAF_LAYOUT_ALGORITHM = "component_leaf_layout.algorithm2"
 #: rotation, so the same body at the same rotation is measured once wherever it is translated
 #: to, by the source result and the canonical document alike
 #: (``component_package.placed_prototype_bounds``), and a composed reader
-#: (``_compose_readback.composed_bounds``) finds what the publication measured from the
-#: occurrence's transform and the leaf layout alone.
+#: (:func:`composed_bounds`) finds what the publication measured from the occurrence's
+#: transform and the leaf layout alone.
 PREPARED_OCCURRENCE_BOUNDS_ALGORITHM = "component_bbox.canonical_native_rotation.algorithm1"
 #: Names ``step_scene_mesh.prototype_topology``: change what it counts or how
 #: it measures the loose box, and change this name with it.
 TOPOLOGY_ALGORITHM = "component_topology.faces_edges_curved_loose_box.algorithm1"
-#: Names ``store.build._same_body``: change what it compares or its tolerance, and
-#: change this name with it.
-AGREEMENT_ALGORITHM = "component_agreement.face_and_edge_counts_each_face_tight_box_chord.algorithm3"
 
 
 def _is_box(value: Any) -> bool:
@@ -187,14 +178,6 @@ def cached_component_topology(codec: str, brep: str, measure: Callable[[], Any])
     return _remember(TOPOLOGY_ALGORITHM, (str(codec), str(brep)), measure, _is_topology)
 
 
-def cached_agreement(parts: tuple, measure: Callable[[], bool | None]) -> bool | None:
-    """Whether a written body reads back as itself (``measure()``), remembered under
-    ``parts``: the authored component's codec and BREP object, then the read-back's. A
-    measure that cannot say (None) is not remembered."""
-    return _remember(AGREEMENT_ALGORITHM, tuple(str(part) for part in parts), measure,
-                     lambda value: type(value) is bool)
-
-
 def _is_tokens(value: Any) -> bool:
     from cadgen._internal.geometric_tokens import TOKEN_RE
 
@@ -210,6 +193,93 @@ def cached_tokens(codec: str, brep: str, measure: Callable[[], dict]) -> dict:
     from cadgen._internal.geometric_tokens import GEOMETRIC_TOKEN_SCHEME
 
     return _remember(f"element_tokens.{GEOMETRIC_TOKEN_SCHEME}", (str(codec), str(brep)), measure, _is_tokens)
+
+
+class NotRemembered(LookupError):
+    """The box :func:`composed_bounds` is asked for is not one the index remembers exactly:
+    the caller measures it."""
+
+
+_IDENTITY_PLACEMENT = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+
+
+def _composed_placement(occurrence: list, inner: list) -> tuple[tuple, tuple]:
+    """The placement of a leaf sitting at ``inner`` inside a prototype placed at
+    ``occurrence`` (16 numbers): its rotation's rows and its translation, as the kernel
+    composes them (rotation times the inner translation, plus the occurrence's)."""
+    rows = [(occurrence[0], occurrence[1], occurrence[2]), (occurrence[4], occurrence[5], occurrence[6]),
+            (occurrence[8], occurrence[9], occurrence[10])]
+    columns = [(inner[0], inner[4], inner[8]), (inner[1], inner[5], inner[9]), (inner[2], inner[6], inner[10])]
+    rotation = tuple(row[0] * column[0] + row[1] * column[1] + row[2] * column[2]
+                     for row in rows for column in columns)
+    offset = (inner[3], inner[7], inner[11])
+    translation = tuple(occurrence[3 + 4 * axis] + (row[0] * offset[0] + row[1] * offset[1] + row[2] * offset[2])
+                        for axis, row in enumerate(rows))
+    return rotation, translation
+
+
+def composed_bounds(occurrences: list[dict[str, Any]], components: Mapping[str, Mapping[str, Any]], *,
+                    exact: bool = True) -> dict[str, list[float]]:
+    """The box publication measures for these occurrences, from the per-leaf boxes it
+    already remembered (:data:`PREPARED_OCCURRENCE_BOUNDS_ALGORITHM`).
+
+    Each leaf's key is its component's codec and BREP object, its ordinal and the leaf's
+    rotation; the leaf layout says where the leaf sits inside its prototype, and a leaf
+    at the prototype's own placement takes the occurrence's placement as the kernel holds
+    it -- the rotation and translation of the transform the tree records, set on a
+    ``gp_Trsf`` -- so its key and its box, the remembered one shifted by that translation,
+    are exactly what ``component_package.placed_prototype_bounds`` measures for that
+    occurrence. A leaf the prototype places inside itself composes its placement with the
+    occurrence's here, in Python arithmetic the kernel's can differ from by ulps, so under
+    ``exact`` -- a tree's bounds, which every path must measure alike -- it is
+    :class:`NotRemembered`; a reader that wants a box, not THE box (the animation bake's
+    pivots) passes ``exact=False``. A layout the index does not hold is measured from the
+    component's bytes and remembered. A box it does not hold is :class:`NotRemembered`.
+    """
+    from cadgen._internal.component_package import component_leaf_layout, decode_geometry_component
+    from cadgen.store.materialize import _native_location_from_matrix
+    from cadgen.store.objects import read_verified_object
+
+    layouts: dict[str, dict[str, Any]] = {}
+    boxes: list[list[float]] = []
+    for occurrence in occurrences:
+        cid = str(occurrence["component"])
+        entry = components[cid]
+        codec, brep = str(entry["codec"]), str(entry["brep"])
+        layout = layouts.get(cid)
+        if layout is None:
+            # A component published before layouts were recorded decodes once here;
+            # the layout is a pure function of the bytes and is remembered.
+            layout = cached_leaf_layout(codec, brep, lambda entry=entry: component_leaf_layout(
+                decode_geometry_component(entry, read_verified_object(entry["brep"])).wrapped))
+            layouts[cid] = layout
+        transform = occurrence["transform"]
+        placed = None
+        for leaf_ordinal, inner in enumerate(layout["inner"], start=1):
+            if inner == _IDENTITY_PLACEMENT:
+                if placed is None:
+                    trsf = _native_location_from_matrix(transform).Transformation()
+                    placed = (tuple(float(trsf.Value(row, column)) for row in range(1, 4) for column in range(1, 4)),
+                              tuple(float(value) for value in trsf.TranslationPart().Coord()))
+                rotation, translation = placed
+            elif exact:
+                raise NotRemembered(f"component {cid} places a leaf of its own")
+            else:
+                rotation, translation = _composed_placement(transform, inner)
+            linear = struct.pack("<12d", rotation[0], rotation[1], rotation[2], 0.0,
+                                 rotation[3], rotation[4], rotation[5], 0.0,
+                                 rotation[6], rotation[7], rotation[8], 0.0)
+            found, box = remembered_box(PREPARED_OCCURRENCE_BOUNDS_ALGORITHM, (codec, brep, leaf_ordinal, linear))
+            if not found:
+                raise NotRemembered(f"leaf {leaf_ordinal} of component {cid} has no remembered box in this placement")
+            if box is not None:
+                boxes.append([float(value) + translation[index % 3] for index, value in enumerate(box)])
+    if not boxes:
+        raise NotRemembered("no leaf has bounds")
+    return {
+        "min": [min(box[axis] for box in boxes) for axis in range(3)],
+        "max": [max(box[axis] for box in boxes) for axis in range(3, 6)],
+    }
 
 
 def clear() -> None:

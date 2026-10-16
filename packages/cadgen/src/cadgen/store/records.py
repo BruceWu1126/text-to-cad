@@ -70,8 +70,7 @@ RECORD_KIND = "record"
 # carries. Their next source run rebuilds; saved-document mappings and objects
 # stay valid.
 # Schema 9: the tree a record names is geometry schema 4 (store.trees.TREE_SCHEMA), whose ids
-# are tokens, and its correspondence maps (documentOccurrenceMap, documentNodeMap) and
-# appearance assignments are keyed by them (README law 20).
+# are tokens, and its appearance assignments are keyed by them (README law 20).
 # Schema 10: the tree a record names is geometry schema 5, whose components carry the
 # construction key and lineage their build named them by.
 # Schema 11: the tree a record names is geometry schema 6, whose leaves' tokens round a

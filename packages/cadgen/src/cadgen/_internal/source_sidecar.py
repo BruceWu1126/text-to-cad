@@ -280,27 +280,6 @@ def resolve_materials(
     return normalize_appearance({"materials": materials, "assignments": assignments})
 
 
-def remap_appearance(
-    block: object, occurrence_map: Mapping[str, list[str]]
-) -> dict[str, Any] | None:
-    """Bind authored flattened leaf assignments to exact saved-document leaves."""
-    appearance = normalize_appearance(block)
-    if appearance is None:
-        return None
-    assignments: dict[str, str] = {}
-    for authored_id, material_id in appearance["assignments"].items():
-        document_ids = occurrence_map.get(authored_id) or []
-        if not document_ids:
-            raise SidecarAppearanceError(
-                f"appearance assignment {authored_id} has no exact saved-document occurrence"
-            )
-        for document_id in document_ids:
-            assignments[str(document_id)] = material_id
-    return normalize_appearance({
-        "materials": appearance["materials"], "assignments": assignments,
-    })
-
-
 def validate_appearance_targets(descriptor: Mapping[str, Any], block: object) -> dict[str, Any] | None:
     """Validate annotation targets without copying an assembly for catalog scans."""
     appearance = normalize_appearance(block)

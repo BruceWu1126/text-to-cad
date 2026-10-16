@@ -1,15 +1,14 @@
 """Reconstruct a loaded STEP scene from its tree.
 
-The canonical tree already stores the native scene inputs: each unique
-prototype's encoded BREP object and effective face-color recipe, plus the
-occurrence hierarchy with names, transforms and colors. So the tree is the
-warm-load cache; there is no second geometry store. ``load_step_scene_cached``
-skips the text-STEP parse by reading the tree;
-a STEP with no current tree pays one full parse, and the canonical document
-tree then makes the next load warm. This tree holds the prototypes read from
-the saved STEP; authored source result trees never participate. Saved readback
-uses the same verified reconstruction when those exact emitted bytes already
-have a canonical document tree.
+The tree a document's bytes map to (``index/document``) already stores the native
+scene inputs: each unique prototype's encoded BREP object and effective face-color
+recipe, plus the occurrence hierarchy with names, transforms and colors. So the tree
+is the warm-load cache; there is no second geometry store. ``load_step_scene_cached``
+skips the text-STEP parse by reading the tree; a STEP with no current tree pays one
+full parse, and the tree its compile publishes then makes the next load warm. The
+tree is the result a build wrote the file from, read flattened -- the hierarchy the
+writer wrote -- or, for a file that does not hold it or that no build of this store
+wrote, the compile of the file's own bytes.
 """
 
 from __future__ import annotations
@@ -20,7 +19,6 @@ import os
 import sys
 import tempfile
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -85,69 +83,12 @@ def _transform_tuple(raw: object) -> tuple[float, ...]:
     return _IDENTITY_TRANSFORM
 
 
-@dataclass(frozen=True)
-class _DocumentReadback:
-    """Call-owned native readback and, when available, its exact object closure.
-
-    This never attaches a certificate to the mutable scene. Only the saved
-    build's internal readback pipeline retains it; ordinary scene consumers
-    receive geometry alone and must derive any subsequent publication anew.
-    """
-
-    scene: LoadedStepScene
-    tree_hash: str | None = None
-    objects: tuple[tuple[str, bytes], ...] = ()
-
-    def tree(self) -> dict[str, Any]:
-        """The captured canonical tree."""
-        if self.tree_hash is None:
-            raise ValueError("raw STEP readback has no captured canonical tree")
-        return json.loads(dict(self.objects)[self.tree_hash])
-
-    def canonical_maps(self) -> tuple[dict[str, list[str]], dict[str, str]]:
-        """The document tree's nodes by the parser's positional path (what the correspondence
-        joins a written product to, ``store.build._document_correspondence``): each path's
-        canonical leaf tokens and its own token, as ``_document_walk`` maps a parse."""
-        from cadgen._internal.step_scene_loader import _selector_id
-
-        tree = self.tree()
-        leaves: dict[str, list[str]] = {}
-        nodes: dict[str, str] = {}
-
-        def visit(node: dict[str, Any], path: tuple[int, ...]) -> list[str]:
-            node_id = node["id"]
-            descendants = ([leaf for index, child in enumerate(node["children"], start=1)
-                            for leaf in visit(child, (*path, index))]
-                           if node["children"] else [node_id])
-            parsed = _selector_id(path)
-            leaves[parsed] = descendants
-            nodes[parsed] = node_id
-            return descendants
-
-        visit(tree["assembly"]["root"], (1,))
-        return leaves, nodes
-
-    def restore(self) -> str:
-        """Repair this selected closure, components first and tree last."""
-        from cadgen.store.objects import put_object
-
-        if self.tree_hash is None:
-            raise ValueError("raw STEP readback has no captured canonical tree")
-        for digest, payload in self.objects:
-            if digest != self.tree_hash:
-                put_object(payload, repair=True)
-        put_object(dict(self.objects)[self.tree_hash], repair=True)
-        return self.tree_hash
-
-
-def _lookup_document_readback(step_path: Path, *, step_hash: str, lazy: bool = False) -> tuple[_DocumentReadback | None, bool]:
-    """Return a private canonical scene and whether an indexed closure failed.
-
-    Only the current document-byte index participates. A missing index is an
-    ordinary miss; a missing, damaged or unreadable indexed object requires
-    derivation during saved-file republishing, never deleting the object that
-    another writer may already have repaired.
-    """
+def lookup_document_scene(step_path: Path, *, step_hash: str, lazy: bool = False) -> tuple[LoadedStepScene | None, bool]:
+    """A private scene of the tree the bytes ``step_hash`` map to, and whether that tree
+    failed to read: ``(None, False)`` for bytes no entry maps, ``(None, True)`` for a
+    missing, damaged or unreadable tree (the caller compiles the bytes again, never
+    deleting an object another writer may already have repaired). A scene carries no
+    reuse authority: its consumers derive any publication anew."""
     from cadgen.store.records import tree_for_document_hash
     from cadgen._internal.component_package import NativeUnavailable
     from OCP.Standard import Standard_Failure
@@ -156,7 +97,7 @@ def _lookup_document_readback(step_path: Path, *, step_hash: str, lazy: bool = F
     if not tree:
         return None, False
     try:
-        readback = _readback_from_document_tree(step_path, step_hash=step_hash, tree_hash=tree, lazy=lazy)
+        scene = _scene_from_document_tree(step_path, step_hash=step_hash, tree_hash=tree, lazy=lazy)
     except NativeUnavailable:
         # A valid eager-only component promises display, not a native codec.
         # Saved-document readers still have its exact bytes and may parse them.
@@ -164,16 +105,10 @@ def _lookup_document_readback(step_path: Path, *, step_hash: str, lazy: bool = F
         payload = read_bytes_with_ladder(step_path)
         if hashlib.sha256(payload).hexdigest() != step_hash:
             return None, False
-        readback = _DocumentReadback(_scene_from_selected_bytes(step_path, payload))
+        return _scene_from_selected_bytes(step_path, payload), False
     except (OSError, ValueError, TypeError, KeyError, AttributeError, OverflowError, Standard_Failure):
-        readback = None
-    return readback, readback is None
-
-
-def lookup_document_scene(step_path: Path, *, step_hash: str, lazy: bool = False) -> tuple[LoadedStepScene | None, bool]:
-    """Return private geometry alone; a public scene carries no reuse authority."""
-    readback, damaged = _lookup_document_readback(step_path, step_hash=step_hash, lazy=lazy)
-    return (readback.scene if readback is not None else None), damaged
+        scene = None
+    return scene, scene is None
 
 
 def scene_from_render_package(step_path: Path, *, step_hash: str) -> LoadedStepScene | None:
@@ -181,12 +116,8 @@ def scene_from_render_package(step_path: Path, *, step_hash: str) -> LoadedStepS
     return lookup_document_scene(step_path, step_hash=step_hash)[0]
 
 
-def _scene_from_document_tree(step_path: Path, *, step_hash: str, tree_hash: str) -> LoadedStepScene | None:
-    readback = _readback_from_document_tree(step_path, step_hash=step_hash, tree_hash=tree_hash)
-    return readback.scene if readback is not None else None
-
-
-def _readback_from_document_tree(step_path: Path, *, step_hash: str, tree_hash: str, lazy: bool = False) -> _DocumentReadback | None:
+def _scene_from_document_tree(step_path: Path, *, step_hash: str, tree_hash: str,
+                              lazy: bool = False) -> LoadedStepScene | None:
     from cadgen._internal.component_package import decode_geometry_component
     from cadgen.store.trees import TREE_KIND, capture_tree, _validate_structure
 
@@ -310,7 +241,7 @@ def _readback_from_document_tree(step_path: Path, *, step_hash: str, tree_hash: 
         if not roots:
             return None
 
-    scene = LoadedStepScene(
+    return LoadedStepScene(
         step_path=step_path,
         roots=roots,
         prototype_shapes=_LazyShapes(lazy_entries) if lazy else prototype_shapes,
@@ -322,7 +253,6 @@ def _readback_from_document_tree(step_path: Path, *, step_hash: str, tree_hash: 
         step_hash=step_hash,
         source_kind="step",
     )
-    return _DocumentReadback(scene, tree_hash, tuple(captured.items()))
 
 
 def scene_tokens(scene: LoadedStepScene) -> None:

@@ -2,9 +2,10 @@
 
 OCCT writes an all-link parent as its own product tree followed by every child's products and
 geometry again, and re-exporting all of that costs seconds on a large assembly. The children's
-saved files already hold those records, exactly as the writer emitted them. So a build writes the
-parent by copying each child's DATA section under its own id prefix, and generates only what the
-parent owns: the header, the root and group products, and one instance block per link.
+saved files already hold those records, exactly as the writer emitted them. So the export job
+(``store/exports.py``) writes such a parent by copying each child's DATA section under its own id
+prefix, and generates only what the parent owns: the header, the root and group products, and one
+instance block per link.
 
 The output keeps OCCT's layout, so its cold compile is OCCT's: the root product named after the
 file, every group at the identity, every leaf at its flattened world placement. A translated link
@@ -30,7 +31,6 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from cadgen._internal.step_reals import written_text
-from cadgen.store._compose_readback import pure_translation
 
 
 class Ineligible(ValueError):
@@ -292,6 +292,16 @@ def _structure(tree: Mapping[str, Any]) -> list[dict[str, Any]]:
         return {"group": str(node.get("name") or ""), "children": [convert(child) for child in node["children"]]}
 
     return convert(tree["assembly"]["root"])["children"]
+
+
+def pure_translation(transform: Any) -> bool:
+    """Whether ``transform`` (16 numbers, row-major) only translates."""
+    if type(transform) is not list or len(transform) != 16:
+        return False
+    if any(type(value) not in (float, int) or not math.isfinite(value) for value in transform):
+        return False
+    linear = [transform[i] for i in (0, 1, 2, 4, 5, 6, 8, 9, 10)]
+    return linear == [1, 0, 0, 0, 1, 0, 0, 0, 1] and transform[12:] == [0, 0, 0, 1]
 
 
 def _translation(transform: Any) -> tuple[float, float, float] | None:

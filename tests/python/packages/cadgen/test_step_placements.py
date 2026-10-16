@@ -111,5 +111,49 @@ class ReadablePlacementTest(unittest.TestCase):
         self.assertEqual(_rounded(named[0]), _rounded(_values(flipping)))
 
 
+class WrittenRealTest(unittest.TestCase):
+    """``step_reals.written_real`` is what the reader returns for what the writer printed
+    (``written_text``, which the splice spells every translation with)."""
+
+    def test_emulation_matches_the_writer_and_reader(self):
+        import build123d as bd
+
+        from cadgen._internal.step_reals import written_real
+        from cadgen._internal.step_scene_loader import load_step_scene
+        from cadgen.step_export import export_build123d_step_file
+
+        scratch = tempfile.TemporaryDirectory(prefix="written-real-")
+        self.addCleanup(scratch.cleanup)
+        values = [0.0, -0.0, 0.1, 0.09999999999999999, 0.1000000000000001, 999.9999999999999, 1000.0,
+                  1000.0000000000001, 999.95, 0.5, 1 / 3, 2 / 3, -1 / 3, 1e-7, 1e-12, 1e-300, 1e300,
+                  5e-324, 123456789.123456789, 12.345678901234567, -12.345678901234567, 99.999999999999,
+                  666.6666666666666, -666.6666666666666, 999.123456789012, -999.123456789012,
+                  0.000123456789012345, 1234.5678901234, 55.5555555555555, -5.5, 7.000000000001]
+        generator = random.Random(20261001)
+        for _ in range(240):
+            magnitude = 10.0 ** generator.uniform(-9, 9)
+            values.append(generator.choice((-1, 1)) * magnitude * generator.random())
+        for _ in range(60):
+            values.append(round(generator.uniform(-2000, 2000), generator.randint(0, 6)))
+        box = bd.Solid.make_box(1, 1, 1)
+        children = []
+        for index in range(0, len(values), 3):
+            x, y, z = (values[index:index + 3] + [0.0, 0.0])[:3]
+            placed = box.moved(bd.Location((x, y, z)))
+            placed.label = f"p{index}"
+            children.append(placed)
+        step = Path(scratch.name) / "points.step"
+        export_build123d_step_file(bd.Compound(children=children, label="points"), step)
+        scene = load_step_scene(step)
+        mismatches = []
+        for node, index in zip(scene.roots[0].children, range(0, len(values), 3)):
+            expected = (values[index:index + 3] + [0.0, 0.0])[:3]
+            for value, read in zip(expected, (node.transform[3], node.transform[7], node.transform[11])):
+                emulated = written_real(value)
+                if emulated != read or math.copysign(1, emulated) != math.copysign(1, read):
+                    mismatches.append((value, emulated, read))
+        self.assertEqual(mismatches, [])
+
+
 if __name__ == "__main__":
     unittest.main()

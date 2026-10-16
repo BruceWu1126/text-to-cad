@@ -13,10 +13,8 @@ from unittest import mock
 
 from tests.python.support.documents import assert_same_document
 from tests.python.support.tmp_root import generated_cad_directory
-from tests.python.support.tree_ids import tokenized
 
 
-IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
 RGBA = [0.2, 0.4, 0.6, 0.75]
 ROUGH = {
     "name": "Rough finish",
@@ -392,84 +390,6 @@ class SavedDocumentIdentityTest(unittest.TestCase):
         scene = read_scene(step_path)
         self.assertEqual("base", scene.resolve(f"#{mate['parentId']}").label)
         self.assertEqual("arm_group", scene.resolve(f"#{mate['childId']}").label)
-
-    def test_kinematics_remap_requires_an_exact_document_subtree(self) -> None:
-        from cadgen._internal.kinematics_resolve import remap_document_kinematics
-        from cadgen.store.trees import put_tree
-
-        body, token = tokenized(
-            {
-                "label": "document",
-                "entryKind": "assembly",
-                "units": "mm",
-                "components": {"c": {"contentHash": "content", "brep": "object"}},
-                "occurrences": [
-                    {"id": "o1.1.1", "name": "left", "component": "c", "transform": IDENTITY},
-                    {"id": "o1.1.2", "name": "right", "component": "c", "transform": IDENTITY},
-                    {"id": "o1.2.1.1", "name": "wrapped", "component": "c", "transform": IDENTITY},
-                ],
-                "links": [],
-                "assembly": {
-                    "root": {
-                        "id": "o1",
-                        "name": "document",
-                        "nodeType": "assembly",
-                        "leafPartIds": ["o1.1.1", "o1.1.2", "o1.2.1.1"],
-                        "children": [
-                            {
-                                "id": "o1.1",
-                                "name": "pair",
-                                "nodeType": "subassembly",
-                                "leafPartIds": ["o1.1.1", "o1.1.2"],
-                                "children": [
-                                    {"id": "o1.1.1", "name": "left", "nodeType": "part", "leafPartIds": ["o1.1.1"], "children": []},
-                                    {"id": "o1.1.2", "name": "right", "nodeType": "part", "leafPartIds": ["o1.1.2"], "children": []},
-                                ],
-                            },
-                            {
-                                "id": "o1.2",
-                                "name": "outer_wrapper",
-                                "nodeType": "subassembly",
-                                "leafPartIds": ["o1.2.1.1"],
-                                "children": [{
-                                    "id": "o1.2.1",
-                                    "name": "inner_wrapper",
-                                    "nodeType": "subassembly",
-                                    "leafPartIds": ["o1.2.1.1"],
-                                    "children": [{"id": "o1.2.1.1", "name": "wrapped", "nodeType": "part", "leafPartIds": ["o1.2.1.1"], "children": []}],
-                                }],
-                            },
-                        ],
-                    }
-                },
-            }
-        )
-        tree_hash = put_tree(body)
-        block = {
-            "mates": [{"name": "join", "parentId": "authored_pair", "childId": "authored_wrapper"}]
-        }
-        occurrence_map = {
-            "authored_pair": [token["o1.1.1"], token["o1.1.2"]],
-            "authored_wrapper": [token["o1.2.1.1"]],
-            "crossing": [token["o1.1.1"], token["o1.2.1.1"]],
-        }
-        node_map = {
-            "authored_pair": token["o1.1"],
-            "authored_wrapper": token["o1.2"],
-            "crossing": token["o1"],
-        }
-
-        remapped = remap_document_kinematics(block, occurrence_map, node_map, tree_hash)
-        self.assertEqual(token["o1.1"], remapped["mates"][0]["parentId"])
-        self.assertEqual(token["o1.2"], remapped["mates"][0]["childId"])
-        self.assertEqual("authored_pair", block["mates"][0]["parentId"])
-
-        missing = {"mates": [{"name": "missing", "parentId": "absent", "childId": "authored_wrapper"}]}
-        with self.assertRaisesRegex(ValueError, "parentId absent has no exact document subtree"):
-            remap_document_kinematics(missing, occurrence_map, node_map, tree_hash)
-        non_subtree = {"mates": [{"name": "cross", "parentId": "crossing", "childId": "authored_wrapper"}]}
-        with self.assertRaisesRegex(ValueError, "parentId crossing document subtree does not match its exact leaves"):
-            remap_document_kinematics(non_subtree, occurrence_map, node_map, tree_hash)
 
 
 if __name__ == "__main__":

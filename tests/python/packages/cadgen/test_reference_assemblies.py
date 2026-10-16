@@ -14,12 +14,13 @@ from pathlib import Path
 import unittest
 from unittest import mock
 
+from tests.python.support.documents import save_step
 from tests.python.support.tmp_root import generated_cad_directory
 
 import build123d as bd
 from cadgen.authoring import building
 from cadgen.store import _references
-from cadgen.store.build import build_tree_from_compound, build_tree_through_step
+from cadgen.store.build import build_tree_from_compound
 from cadgen.store.lazy import ChildBuildError, LazyCompound
 from cadgen.store.materialize import materialize, reset_memo
 from cadgen.store.objects import object_path, put_object
@@ -103,11 +104,9 @@ class ReferenceAssemblies(unittest.TestCase):
             self.assertIs(type(result), _references._ReferenceCompound)
             self.assertTrue(all(child.parent is result for child in children))
             self.assertTrue(all(not child._forced for child in children))
-            tree, descriptor, _, _ = build_tree_through_step(
-                result, self.root / "assembly.step", root_name="assembly",
-                _internal_source_publication=True,
-            )
+            tree, descriptor, stats, _ = save_step(result, self.root / "assembly.step", root_name="assembly")
             self.assertEqual(reconstruct.call_count, 0)
+            self.assertEqual({"ok": True}, stats["verify"])
             self.assertEqual(len(descriptor["links"]), 2)
             self.assertAlmostEqual(materialize(tree).volume, 48)
 
@@ -120,10 +119,7 @@ class ReferenceAssemblies(unittest.TestCase):
                 with building(None) as frame:
                     shape, _ = self.assembly(frame, varied=True)
                     out = self.root / "assembly.step"
-                    tree, descriptor, _, _ = build_tree_through_step(
-                        shape, out, root_name="assembly", force=mode == "forced",
-                        _internal_source_publication=True,
-                    )
+                    tree, descriptor, _, _ = save_step(shape, out, root_name="assembly", force=mode == "forced")
                     results.append((tree, descriptor, out.read_bytes()))
         for result in results[1:]:
             self.assertEqual(result, results[0])
@@ -322,7 +318,7 @@ class ReferenceAssemblies(unittest.TestCase):
                 children[1] = children[1].moved(bd.Location((8, 0, 0)))
                 shape = bd.Compound(children=children, label="variants")
                 out = self.root / "variants.step"
-                result = build_tree_through_step(shape, out, root_name="variants", _internal_source_publication=True)
+                result = save_step(shape, out, root_name="variants")
                 results.append((result[0], result[1], out.read_bytes()))
         self.assertEqual(results[0], results[1])
 

@@ -62,8 +62,7 @@ _TIMED_OUT = object()
 # also how the per-client choices reach a job: the cache root (CADGEN_CACHE_DIR,
 # XDG_CACHE_HOME, LOCALAPPDATA), the import roots (PYTHONPATH, absolutized against the
 # client's cwd because the worker runs elsewhere), the cap the daemon's idle housekeeping
-# holds the client's store to (CADGEN_STORE_MAX, STORE.md §8), one build's read-back check
-# (CADGEN_VERIFY_READBACK, STORE.md §10), and the telemetry switches
+# holds the client's store to (CADGEN_STORE_MAX, STORE.md §8), and the telemetry switches
 # (``cadgen.analytics.ENVIRONMENT``): a client whose environment turns telemetry off has
 # none of its builds counted, whatever the environment of the build that started the
 # daemon said (``cadgen.daemon.telemetry``). CADGEN_FFMPEG is resolved here, below.

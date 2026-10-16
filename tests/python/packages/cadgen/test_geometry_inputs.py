@@ -501,7 +501,6 @@ class GeometryInputs(unittest.TestCase):
     def test_every_same_brep_variant_validates_native_kind_and_effective_recipe(self):
         from build123d import Solid
         from cadgen.store.trees import IDENTITY_16
-        from cadgen.store._descriptor_bounds import Snapshot
         shape = Solid.make_box(2, 3, 4)
         digest, source, cid, entry = self.component_tree(shape)
         from cadgen._internal.topology_facts import topology_facts_bytes
@@ -537,10 +536,6 @@ class GeometryInputs(unittest.TestCase):
                 flat["components"] = {cid: flat["components"][cid], other: flat["components"][other]}
                 with self.assertRaises(error):
                     materialize_descriptor(flat, captured_objects=objects)
-                snapshot = Snapshot(json.dumps(flat).encode(), tuple(objects.items()), (),
-                                    tuple((key, value["brep"]) for key, value in flat["components"].items())).capture_appearance()
-                with self.assertRaises(error):
-                    snapshot.prepare_document()
                 if mode == "eager-only":
                     # The build's own shape for its eager-only component, which only its process
                     # holds: the document its STEP is written from is assembled with it.

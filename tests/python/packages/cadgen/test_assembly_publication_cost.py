@@ -1,16 +1,15 @@
-"""A parent's document preparation, bounds and read-back pay per prototype, not per
+"""A parent's document preparation, bounds and compile pay per prototype, not per
 occurrence — and byte-identical outputs prove it changed nothing else."""
 from __future__ import annotations
 
-import gc
 import hashlib
 import importlib
 import os
 from pathlib import Path
 import unittest
 from unittest import mock
-import weakref
 
+from tests.python.support.documents import save_step
 from tests.python.support.paths import add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
 
@@ -74,13 +73,9 @@ class Fixture(unittest.TestCase):
 
     def result(self, shape, *, force=False, name="same"):
         path = self.root / f"{name}.step"
-        value = build.build_tree_through_step(shape, path, root_name="root", force=force,
-                                              _internal_source_publication=True)
-        return {"sourceHash": value[0], "sourceTree": value[1], "stepHash": value[3],
-                "stepBytesHash": hashlib.sha256(path.read_bytes()).hexdigest(),
-                "documentTree": value[2]["documentTree"],
-                "documentOccurrenceMap": value[2]["documentOccurrenceMap"],
-                "documentNodeMap": value[2]["documentNodeMap"]}
+        tree_hash, tree, stats, digest = save_step(shape, path, root_name="root", force=force)
+        return {"sourceHash": tree_hash, "sourceTree": tree, "stepHash": digest,
+                "stepBytesHash": hashlib.sha256(path.read_bytes()).hexdigest(), "verify": stats["verify"]}
 
 
 def _plain_state(shape):
@@ -142,6 +137,7 @@ class PlacementTests(Fixture):
                 mat.reset_memo()
             actual = self.result(self.parent(), force=state == "force", name=state)
             self.assertEqual(expected, actual, state)
+        self.assertEqual({"ok": True}, expected["verify"])
         tree = get_tree(expected["sourceHash"])
         self.assertEqual(len(tree["links"]), 3)
         self.assertEqual(tree["components"], {})
@@ -177,37 +173,43 @@ class BoundsTests(Fixture):
         self.assertEqual(serialized.call_count, 6 * 2)
 
 
-class ReadbackTests(Fixture):
-    def test_readback_proves_each_written_body_once(self):
-        """Each leaf of a parent's read-back takes the component it was written from, as
-        the source result holds it, once the body it reads back as is proven the same
-        (``store.build._reads_back_as``): the first save decodes each child's component
-        for that, a second decodes none -- the verdict is remembered by the two bodies'
-        bytes -- and a forced build proves every one again."""
-        from cadgen.store.trees import flatten
+    def test_a_parents_bounds_are_one_function_of_its_tree_and_assemble_no_child(self):
+        """A parent's bounds are measured leaf by leaf over its children's stored components
+        (``store.build._bbox_from_authored_occurrences``): decoded from the store where no
+        box is remembered at that placement -- and, for a component that places a leaf of
+        its own, whose placement only the kernel composes, each time -- and from the boxes
+        remembered after, in this process or in the store's index: the same numbers every
+        way, and no child is assembled for them."""
+        import shutil
 
-        decodes: list[int] = []
-        original = build._attach_components
+        import build123d as bd
 
-        def counted(*args, **kwargs):
-            with mock.patch.object(cp, "_decode_brep", wraps=cp._decode_brep) as decode:
-                result = original(*args, **kwargs)
-            decodes.append(decode.call_count)
-            return result
+        plain = []
+        for index, kind in enumerate(("box", "hole")):
+            child = mat.materialize(self.child_tree(kind)).moved(bd.Location((index * 50, 0, 0), (0, 30 + index, 0)))
+            child.label = f"link{index}"
+            plain.append(child)
+        for label, shape in (("leaves at their prototype's placement", bd.Compound(children=plain, label="root")),
+                             ("a nurbs leaf placed by its prototype", self.parent())):
+            published = []
+            for state in ("measured", "remembered", "read from the index"):
+                if state == "measured":
+                    bounds.clear()
+                    shutil.rmtree(self.root / "store" / "index" / "bounds", ignore_errors=True)
+                elif state == "read from the index":
+                    bounds.clear()
+                with self.subTest(label, state=state), \
+                        mock.patch.object(mat, "materialize_descriptor", side_effect=AssertionError("a child was assembled")), \
+                        mock.patch.object(cp, "_bbox_from_shape", side_effect=AssertionError("the parent was measured whole")), \
+                        mock.patch.object(cp, "decode_geometry_component", wraps=cp.decode_geometry_component) as decoded:
+                    tree_hash, tree, _ = build.build_tree_from_compound(shape, root_name="root")
+                    if label.startswith("leaves"):
+                        self.assertEqual(decoded.call_count > 0, state == "measured")
+                published.append((tree_hash, tree["bbox"]))
+            self.assertEqual(len(set(map(repr, published))), 1, published)
 
-        with mock.patch.object(build, "_attach_components", side_effect=counted):
-            first = self.result(self.parent(), name="first")
-            with mock.patch.object(cp, "prepare_published_component",
-                                   side_effect=AssertionError("a leaf kept its parse")):
-                second = self.result(self.parent(), name="second")
-            forced = self.result(self.parent(), force=True, name="forced")
-        self.assertEqual(first, second)
-        self.assertEqual(first, forced)
-        published = get_tree(first["documentTree"])["components"]
-        self.assertEqual(set(published), set(flatten(first["sourceHash"])["components"]),
-                         "every leaf holds the component it was written from")
-        self.assertEqual(decodes, [len(published), 0, len(published)])
 
+class CompileTests(Fixture):
     def test_a_compile_decodes_each_prototype_once(self):
         """A cold compile -- a store that has never seen the file -- reads every component
         from the file: it decodes each written product once (differently coloured
@@ -249,32 +251,6 @@ class ReadbackTests(Fixture):
         self.assertEqual(fast["payload"], ordinary["payload"])
         self.assertEqual(fast["shape"].wrapped.TShape(), prototype.wrapped.TShape())
         self.assertEqual(cp._bbox_from_shape(fast["shape"]), cp._bbox_from_shape(ordinary["shape"]))
-
-    def test_private_document_is_released_before_the_step_is_read_back(self):
-        from cadgen._internal import step_scene_loader
-        holders = []
-        original = mat.materialize_descriptor
-
-        def materialize(*args, **kwargs):
-            document = original(*args, **kwargs)
-            if kwargs.get("tree_hash") is None:  # the build's private document, not a child pin
-                holders.append(weakref.ref(document))
-            return document
-
-        alive_at_readback = []
-        original_load = step_scene_loader.load_step_scene
-
-        def load(*args, **kwargs):
-            gc.collect()
-            alive_at_readback.append([ref() is not None for ref in holders])
-            return original_load(*args, **kwargs)
-
-        with mock.patch.object(mat, "materialize_descriptor", side_effect=materialize), \
-                mock.patch.object(step_scene_loader, "load_step_scene", side_effect=load):
-            for force in (False, True):
-                self.result(self.parent(), force=force, name=f"release{force}")
-        self.assertEqual(len(holders), 2)
-        self.assertEqual(alive_at_readback, [[False], [False, False]])
 
 
 class ReferenceSceneTests(Fixture):

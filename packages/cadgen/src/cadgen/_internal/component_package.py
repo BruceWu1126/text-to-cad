@@ -186,12 +186,11 @@ def placed_prototype_bounds(codec: str, brep: str, prototype: Any, location: Any
     ``_leaf_bounds`` measures a whole document, and remembered per leaf under
     ``cadgen.store.bounds.PREPARED_OCCURRENCE_BOUNDS_ALGORITHM`` (the component's codec and
     BREP object, the leaf's ordinal, the leaf's rotation), with the component's leaf layout
-    beside it. The source result and the canonical document measure through this one
-    function, so the same body at the same rotation is measured once wherever it is
-    translated to, and a composed reader (``_compose_readback.composed_bounds``: a document
-    composed from its children's, the animation bake's leaf boxes) finds the box the
-    publication measured. None when no leaf has bounds; a remembered value that is not a box
-    raises."""
+    beside it. A result and a compiled document measure through this one function, so the
+    same body at the same rotation is measured once wherever it is translated to, and a
+    composed reader (``bounds.composed_bounds``: a parent's bounds over its children's
+    components, the animation bake's leaf boxes) finds the box the publication measured.
+    None when no leaf has bounds; a remembered value that is not a box raises."""
     from OCP.TopLoc import TopLoc_Location
     from OCP.gp import gp_Vec
 
@@ -856,9 +855,9 @@ def prepare_published_component(shape: Any, *, face_colors: object = None,
     from is (a scene read from a stored tree carries it). ``payload`` is the
     prototype's bintools-v4 bytes, when the caller has serialized it already.
 
-    A STEP read-back parses every prototype again, and each one was encoded,
-    privately decoded and fenced for point fidelity on every save even when
-    the exact bytes were published by the previous save. When the prototype's
+    A compile parses every prototype of a file again, and each one was encoded,
+    privately decoded and fenced for point fidelity on every compile even when
+    the exact bytes were published by the previous one. When the prototype's
     bintools-v4 bytes already exist as an object under a component entry that
     declares them native with this recipe, the codec fence was proven for
     exactly those bytes by the build that published them, so the decode that

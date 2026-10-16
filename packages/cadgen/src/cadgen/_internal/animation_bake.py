@@ -1034,8 +1034,8 @@ def bake_animation(
 
 
 class _LeafBoxes:
-    """Each leaf's box in a written document, from the boxes the store remembered
-    when it published it (``composed_bounds``), read when first asked for: a clip
+    """Each leaf's box in a result, from the boxes the store remembered when it was
+    published (``bounds.composed_bounds``), read when first asked for: a clip
     that moves a few parts of a large model measures only those. None where the
     store remembers no box."""
 
@@ -1046,11 +1046,11 @@ class _LeafBoxes:
 
     def get(self, leaf: str) -> tuple | None:
         if leaf not in self._boxes:
-            from cadgen.store._compose_readback import Ineligible, composed_bounds
+            from cadgen.store.bounds import NotRemembered, composed_bounds
 
             occurrence, box = self._occurrences.get(leaf), None
             if occurrence is not None:
-                with contextlib.suppress(Ineligible):
+                with contextlib.suppress(NotRemembered):
                     # A box, not THE box: a pivot wants the leaf's centre and reach.
                     found = composed_bounds([occurrence], self._components, exact=False)
                     box = (found["min"], found["max"])
@@ -1058,14 +1058,14 @@ class _LeafBoxes:
         return self._boxes[leaf]
 
 
-def bake_document_animation(clips: Mapping[str, Any], document_tree: str) -> dict[str, Any]:
-    """Bake against the WRITTEN document's tree: its names, its occurrence ids
-    and its bounds are exactly what every renderer of the file holds."""
+def bake_document_animation(clips: Mapping[str, Any], tree: str) -> dict[str, Any]:
+    """Bake against the result's tree, the one its file is written from: its names, its
+    occurrence tokens and its bounds are exactly what every renderer of the file holds."""
     from cadgen.store.trees import flatten
 
-    descriptor = flatten(document_tree)
+    descriptor = flatten(tree)
     if descriptor is None:
-        raise AnimationError(f"cannot bake animation: document tree {document_tree} is missing")
+        raise AnimationError(f"cannot bake animation: tree {tree} is missing")
     bbox = descriptor.get("bbox") or {}
     if not bbox.get("min") or not bbox.get("max"):
         raise AnimationError("cannot bake animation: the model has no geometry to measure")

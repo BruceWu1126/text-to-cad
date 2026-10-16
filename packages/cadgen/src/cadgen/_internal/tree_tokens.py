@@ -13,8 +13,8 @@ hash their rank among those siblings as well, in tree order.
 So inserting, removing or reordering a sibling changes no other token; the
 flattened tree re-roots a child's nodes under its link's token with their
 composed placements (``cadgen.store.trees.flatten``), which is what the saved
-document's own hierarchy names them by; and the document tree, read back from
-the STEP with its own names and placements, mints the same tokens from them.
+document's own hierarchy names them by; and a compile of the STEP, with its own
+names and placements, mints the same tokens from them.
 A link's token is the token its node has once flattened: a part child's one
 leaf (name, composed placement), an assembly child's group (name).
 """

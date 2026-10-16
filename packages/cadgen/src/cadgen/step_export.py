@@ -223,9 +223,9 @@ def _create_bin_xcaf_doc(to_export: Any, names: Callable[[Any], ComponentNames |
     def set_face_colors(label: object, unlocated: object, shape: object, replaced: Callable[[Any], Any] | None) -> None:
         """Per-face colours (``cad_face_ordinal_colors``, keyed by MapShapes ordinal
         on the unlocated shape) as coloured sub-shape labels — the XCAF form
-        the scene loader reads back (``_face_color_map_from_label``). A vendor
-        part composed through ``read_step`` keeps its face colours this way, and
-        the build's tree, re-read from the written STEP, still renders them.
+        the scene loader reads (``_face_color_map_from_label``). A vendor part
+        composed through ``read_step`` keeps its face colours this way, and a
+        reader of the written STEP still renders them.
         ``replaced`` maps a face to the one the definition holds for it, where
         that is a rebuild (``definition_shape``)."""
         face_colors = getattr(shape, "cad_face_ordinal_colors", None)
@@ -1110,14 +1110,14 @@ def _normalize_negative_zero_reals_in_file(path: Path) -> bool:
 
 # OCCT's STEP reader ends a string literal at an escaped quote ('') followed by spaces and ','
 # or ')'. A name such as "post (6')" or "x('',y)" then loses its product or comes back renamed,
-# in every OCCT-based reader, and the build's own read-back fails. Such a literal is written
+# in every OCCT-based reader, and the file does not verify. Such a literal is written
 # with Part 21's \X\27 for each quote instead, which every reader decodes to the same name.
 #
 # OCCT also writes a name's non-ASCII characters as bytes: its UTF-8 read as Latin-1 and
 # encoded again ("Bügel" as "BÃ¼gel"), with any byte its C library takes for a space trimmed
 # from either end ("à", C3 A0, loses its A0). The reader's repair undoes the first only when
 # the name holds a C1 control, which a lowercase accented letter's encoding does not, so such
-# names failed every build's read-back. A non-ASCII name therefore reaches OCCT in ASCII,
+# names came back otherwise from every file. A non-ASCII name therefore reaches OCCT in ASCII,
 # every non-ASCII character as a Part 21 directive -- \X2\ for a run in the basic plane,
 # \X4\ beyond it (:func:`ascii_name`) -- which every reader decodes to the same name. OCCT
 # doubles a directive's backslashes as it writes the literal, and the name pass restores them.

@@ -243,8 +243,8 @@ def _warm_imports() -> None:
     for tool in _TOOL_IMPORTS:
         with contextlib.suppress(Exception):
             _tool_main(tool)
-    # Every saved STEP's writer input names the cadgen release and the kernel
-    # (store.build.writer_input_digest), and every box key names the kernel. Each
+    # Every construction key names the cadgen release (kernel_memo), and every part
+    # key and box key names the kernel. Each
     # is read from installed metadata once per process, by a lookup that lists
     # every folder on sys.path: tens of milliseconds a job would otherwise pay
     # with its model's folder on that path.

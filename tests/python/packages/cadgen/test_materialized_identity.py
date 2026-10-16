@@ -42,8 +42,9 @@ class MaterializedIdentityTest(unittest.TestCase):
 
     def parent(self, child, *, step=False, expected_export_volume=None):
         from build123d import Compound
-        from cadgen.store.build import build_tree_from_compound, build_tree_through_step
+        from cadgen.store.build import build_tree_from_compound
         from cadgen.store.materialize import materialize
+        from tests.python.support.documents import save_step
 
         shape = Compound(children=[child], label="parent")
         if step:
@@ -54,8 +55,10 @@ class MaterializedIdentityTest(unittest.TestCase):
                     self.assertAlmostEqual(self.signed_volume(document), expected_export_volume, places=9)
                 return export_build123d_step_file(document, *args, **kwargs)
 
-            with mock.patch("cadgen.step_export.export_build123d_step_file", side_effect=export):
-                tree, descriptor, _, _ = build_tree_through_step(shape, self.root / "parent.step", root_name="parent")
+            with mock.patch("cadgen.step_export.export_build123d_step_file", side_effect=export) as exported:
+                tree, descriptor, stats, _ = save_step(shape, self.root / "parent.step", root_name="parent")
+            # The file is written from the result, and holds it.
+            self.assertEqual((exported.call_count, stats["verify"]), (1, {"ok": True}))
         else:
             tree, descriptor, _ = build_tree_from_compound(shape, root_name="parent")
         return descriptor, materialize(tree)
@@ -359,22 +362,18 @@ class MaterializedIdentityTest(unittest.TestCase):
 
     def test_moved_root_can_prepare_and_save_its_pinned_preview_components(self):
         from build123d import Location
-        from cadgen.store.build import build_tree_through_step
+        from cadgen.store.records import document_entry_for_hash
         from cadgen.store.trees import get_tree, tree_complete
+        from tests.python.support.documents import save_step
 
         tree, child = self.child(curved=True)
         original = (get_tree(tree) or {})["components"]
         moved = child.moved(Location((20, -3, 7), (11, 23, 37)))
-        previews = []
-        result, _descriptor, stats, _step_hash = build_tree_through_step(
-            moved, self.root / "parent.step", root_name="moved",
-            on_preview=lambda digest, descriptor: previews.append((digest, descriptor)),
-        )
-        self.assertEqual(set(previews[0][1]["components"]), set(original))
-        self.assertTrue(tree_complete(previews[0][0]))
-        self.assertEqual(result, previews[0][0], "the published source result is never replaced after saving")
+        result, descriptor, stats, digest = save_step(moved, self.root / "parent.step", root_name="moved")
+        self.assertEqual(set(descriptor["components"]), set(original))
         self.assertTrue(tree_complete(result))
-        self.assertTrue(tree_complete(stats["documentTree"]))
+        # The saved document is the result its preview showed, the file holding it.
+        self.assertEqual(({"ok": True}, result), (stats["verify"], document_entry_for_hash(digest)["tree"]))
         self.assertAlmostEqual(self.saved_step_volume(), self.signed_volume(moved), places=7)
 
     def test_missing_pinned_brep_rederives_identity_from_owned_geometry(self):
@@ -419,13 +418,14 @@ class MaterializedIdentityTest(unittest.TestCase):
 
     def test_missing_pin_fails_instead_of_using_materialized_geometry(self):
         from build123d import Compound
-        from cadgen.store.build import build_tree_through_step
         from cadgen.store.objects import object_path
+        from tests.python.support.documents import save_step
 
         tree, child = self.child()
         object_path(tree).unlink()
         with self.assertRaises((FileNotFoundError, RuntimeError)):
-            build_tree_through_step(Compound(children=[child]), self.root / "missing.step", root_name="parent")
+            save_step(Compound(children=[child]), self.root / "missing.step", root_name="parent")
+        self.assertFalse((self.root / "missing.step").exists())
 
     def test_repeated_native_keys_are_stable_and_ambiguous_removal_fails(self):
         from OCP.BRep import BRep_Builder

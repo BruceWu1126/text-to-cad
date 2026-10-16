@@ -1,18 +1,15 @@
-"""An all-link parent's saved-document tree, composed from its children's
-document trees, is the tree the build's parse of the written STEP publishes --
-the file's structure, each leaf the component it was written from where it
-reads back as it -- and every ineligible case parses
-(``cadgen.store._compose_readback``, STORE.md §3)."""
+"""An all-link parent's STEP spliced from its children's saved files is the file the
+writer exports, as far as any reader can tell, and every parent's saved file holds the
+result it was written from (``store/exports.py``, ``cadgen.store._splice_step``,
+STORE.md §3)."""
 from __future__ import annotations
 
-import math
 import os
-import random
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from tests.python.support.documents import assert_same_document
+from tests.python.support.documents import assert_same_document, save_step
 from tests.python.support.paths import add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
 
@@ -35,18 +32,11 @@ class Fixture(unittest.TestCase):
             "CADGEN_COMPONENT_WORKERS": "1", "CADGEN_DAEMON": "0",
         })
         cls.env.start()
-        from cadgen.store.build import build_tree_through_step
-
         from cadgen.store._splice_step import ChildStep
 
-        cls.a_hash, _, a_stats, a_step = build_tree_through_step(
-            cls.child_a(), cls.root / "child_a.step", root_name="child_a")
-        cls.b_hash, _, b_stats, b_step = build_tree_through_step(
-            cls.child_b(), cls.root / "child_b.step", root_name="child_b", _internal_source_publication=True)
-        cls.c_hash, _, c_stats, _ = build_tree_through_step(
-            cls.child_c(), cls.root / "child_c.step", root_name="child_c")
-        cls.documents = {cls.a_hash: a_stats["documentTree"], cls.b_hash: b_stats["documentTree"],
-                         cls.c_hash: c_stats["documentTree"]}
+        cls.a_hash, _, _, a_step = save_step(cls.child_a(), cls.root / "child_a.step", root_name="child_a")
+        cls.b_hash, _, _, b_step = save_step(cls.child_b(), cls.root / "child_b.step", root_name="child_b")
+        cls.c_hash, _, _, _ = save_step(cls.child_c(), cls.root / "child_c.step", root_name="child_c")
         cls.steps = {cls.a_hash: ChildStep(cls.root / "child_a.step", a_step),
                      cls.b_hash: ChildStep(cls.root / "child_b.step", b_step)}
 
@@ -132,24 +122,12 @@ class Fixture(unittest.TestCase):
             links.append(extra)
         return bd.Compound(children=links, label="parent")
 
-    def build(self, shape, *, name="parent", force=False, documents=None, env=None, logger=None, steps=None):
-        from cadgen.store.build import build_tree_through_step
-
-        resolver = (lambda: self.documents) if documents is None else (lambda: documents)
-        with mock.patch.dict(os.environ, env or {}):
-            return build_tree_through_step(
-                shape, self.root / f"{name}.step", root_name=name, force=force,
-                _internal_source_publication=True, child_documents=resolver, logger=logger,
-                child_steps=None if steps is None else (lambda: steps),
-            )
-
-    @staticmethod
-    def verbose_logger():
-        import io
-
-        from cadgen.cli_logging import CliLogger
-
-        return CliLogger(name="t", verbose=True, stream=io.StringIO())
+    def build(self, shape, *, name="parent", force=False, steps=None):
+        """Save ``shape`` as a model's build does, its STEP spliced from ``steps`` (each
+        linked child's saved file) where the parent is eligible, and verified."""
+        result = save_step(shape, self.root / f"{name}.step", root_name=name, force=force, children=steps)
+        self.assertEqual({"ok": True}, result[2]["verify"])
+        return result
 
     def parsed_document(self, step):
         from cadgen._internal.step_scene_package import load_step_scene_exact
@@ -157,117 +135,44 @@ class Fixture(unittest.TestCase):
 
         return build_document_tree(load_step_scene_exact(step))[0]
 
-    def assertDocumentOf(self, document, step):
-        """``document`` describes ``step`` as a cold compile of its bytes does: the same
-        structure, names, placements and colours, components alike leaf by leaf."""
-        from cadgen.store.trees import get_tree
+    def assertDocumentOf(self, result, step):
+        """``step`` holds ``result`` as a cold compile of its bytes reads it: the same
+        structure, names, placements and colours, components alike leaf by leaf, and its
+        bytes map to that result."""
+        from cadgen._internal.step_scene import step_file_hash
+        from cadgen.store.records import document_entry_for_hash
+        from cadgen.store.trees import flatten, get_tree
 
-        assert_same_document(self, get_tree(document), get_tree(self.parsed_document(step)))
-
-    def entry_named(self, tree_hash):
-        """The child's document tree as a cadgen from before the XCAF entry rule compiled it:
-        its leaf `a` named by its label's address."""
-        from cadgen.store.trees import get_tree, put_tree
-
-        tree = get_tree(self.documents[tree_hash])
-        occurrence = next(row for row in tree["occurrences"] if row["name"] == "a")
-        occurrence["name"] = "=>[0:1:1:3]"
-        pending = [tree["assembly"]["root"]]
-        while pending:
-            node = pending.pop()
-            if node["id"] == occurrence["id"]:
-                node["name"] = occurrence["name"]
-            pending.extend(node.get("children") or [])
-        return put_tree(tree)
+        self.assertEqual(result, document_entry_for_hash(step_file_hash(step))["tree"])
+        assert_same_document(self, flatten(result), get_tree(self.parsed_document(step)))
 
 
-class ComposedTreeTest(Fixture):
-    def test_composed_tree_is_the_parse_of_the_written_bytes(self):
-        from cadgen._internal.step_scene_loader import load_step_scene
-
-        with mock.patch("cadgen._internal.step_scene_loader.load_step_scene",
-                        side_effect=AssertionError("the composed path parsed the STEP")):
-            _, _, stats, step_hash = self.build(self.parent())
-        self.assertEqual(stats["documentReadback"], "composed")
-        self.assertDocumentOf(stats["documentTree"], self.root / "parent.step")
-        # The same bytes, parsed by the build: the same tree, maps and appearance.
-        with mock.patch("cadgen._internal.step_scene_loader.load_step_scene", wraps=load_step_scene) as parse:
-            _, _, forced, forced_hash = self.build(self.parent(), name="parent", force=True)
-        parse.assert_called_once()
-        self.assertEqual(step_hash, forced_hash)
-        for key in ("documentTree", "documentOccurrenceMap", "documentNodeMap", "documentAppearance"):
-            self.assertEqual(stats[key], forced[key], key)
-
-    def test_links_under_a_group_compose_the_group(self):
-        _, _, stats, _ = self.build(self.parent(grouped=True), name="grouped")
-        self.assertEqual(stats["documentReadback"], "composed")
-        self.assertDocumentOf(stats["documentTree"], self.root / "grouped.step")
-
-    def test_ineligible_parents_parse_and_publish_the_parsed_tree(self):
+class SavedParentTest(Fixture):
+    def test_every_parent_saved_holds_its_result(self):
         import build123d as bd
-
-        from cadgen.store.objects import object_path
 
         coloured = self.parent()
         coloured.children[1].color = (0.2, 0.4, 0.8, 1.0)
         cases = {
-            "rotated link": (self.parent([(self.a_hash, bd.Location((1, 2, 3), (0, 90, 0)))]), None),
-            "link colour": (coloured, None),
-            "own geometry": (self.parent(extra=self.leaf("plate", bd.Solid.make_box(5, 5, 1), bd.Location((0, 0, -9)))), None),
-            "missing document tree": (self.parent(), {self.a_hash: self.documents[self.a_hash]}),
-            "incomplete document tree": (self.parent(), None),
-            "entry named document tree": (self.parent(), {**self.documents, self.a_hash: self.entry_named(self.a_hash)}),
-            # The child's saved leaf holds the compound it was written from, which places
-            # its second box itself: a placement composition cannot reproduce exactly.
-            "compound placing a member": (self.parent([(self.c_hash, bd.Location((0.25, 0.5, 1.0)))]), None),
+            "links": self.parent(),
+            "links under a group": self.parent(grouped=True),
+            "rotated link": self.parent([(self.a_hash, bd.Location((1, 2, 3), (0, 90, 0)))]),
+            "link colour": coloured,
+            "own geometry": self.parent(extra=self.leaf("plate", bd.Solid.make_box(5, 5, 1), bd.Location((0, 0, -9)))),
+            # The child's leaf holds a compound that places its second box itself.
+            "compound placing a member": self.parent([(self.c_hash, bd.Location((0.25, 0.5, 1.0)))]),
         }
-        for label, (shape, documents) in cases.items():
+        for label, shape in cases.items():
             with self.subTest(label):
-                if label == "incomplete document tree":
-                    tree = object_path(self.documents[self.b_hash])
-                    payload = tree.read_bytes()
-                    tree.unlink()
-                    self.addCleanup(tree.write_bytes, payload)
                 name = label.replace(" ", "_")
-                logger = self.verbose_logger()
-                _, _, stats, _ = self.build(shape, name=name, documents=documents, logger=logger)
-                if label == "incomplete document tree":
-                    tree.write_bytes(payload)
-                self.assertEqual(stats["documentReadback"], "parsed")
-                self.assertDocumentOf(stats["documentTree"], self.root / f"{name}.step")
-                # Refused by the eligibility rule, not rescued by the correspondence fallback.
-                log = logger.stream.getvalue()
-                self.assertIn("document composed from children: no (", log)
-                self.assertNotIn("warning:", log)
-
-    def test_verify_switch_passes_composition_and_catches_an_injected_difference(self):
-        from cadgen.store import _compose_readback as composer
-
-        env = {"CADGEN_VERIFY_READBACK": "1"}
-        _, _, stats, _ = self.build(self.parent(), name="verified", env=env)
-        self.assertEqual(stats["documentReadback"], "composed")
-
-        compose = composer.compose_document_tree
-
-        def nudged(**kwargs):
-            tree = compose(**kwargs)
-            tree["bbox"]["max"][2] = math.nextafter(tree["bbox"]["max"][2], math.inf)
-            return tree
-
-        with mock.patch.object(composer, "compose_document_tree", side_effect=nudged):
-            with self.assertRaisesRegex(RuntimeError, "composed document tree .* differs from the parse.*differs: bbox"):
-                self.build(self.parent(), name="nudged", env=env)
-        # Without the switch the injected difference is not checked here; the
-        # switch exists to find exactly this on a corpus.
-        with mock.patch.object(composer, "compose_document_tree", side_effect=nudged):
-            _, _, stats, _ = self.build(self.parent(), name="unchecked")
-        self.assertEqual(stats["documentReadback"], "composed")
+                result, _, _, _ = self.build(shape, name=name)
+                self.assertDocumentOf(result, self.root / f"{name}.step")
 
 
 class SplicedStepTest(Fixture):
-    """An all-link parent written from its children's saved files is the file OCCT writes, as far
-    as any reader can tell: its cold compile is the exported file's, and the composed tree binds
-    to it (``cadgen.store._splice_step``)."""
+    """An all-link parent written from its children's saved files is the file the writer
+    exports, as far as any reader can tell: its cold compile is the exported file's, and it
+    holds the result it was written from (``cadgen.store._splice_step``)."""
 
     def spliced_parent(self, *, grouped=False, names=("link #1 it's", "b ''#2'' (6')")):
         import build123d as bd
@@ -281,25 +186,33 @@ class SplicedStepTest(Fixture):
             shape.children[0].label = "grp #3 'q'"
         return shape
 
+    def assertSameAsExported(self, shape, name, spliced):
+        """The parent ``shape`` exported through the writer (a forced build splices nothing)
+        reads as the file ``spliced`` from its children did, from bytes of its own."""
+        from cadgen.store.trees import get_tree
+
+        path = self.root / "exported" / f"{name}.step"
+        _, _, exported, exported_hash = save_step(shape, path, root_name=name, force=True)
+        self.assertEqual(({"ok": True}, False), (exported["verify"], exported["export"]["spliced"]))
+        self.assertNotEqual(spliced, exported_hash)
+        assert_same_document(self, get_tree(self.parsed_document(self.root / f"{name}.step")),
+                             get_tree(self.parsed_document(path)))
+
     def test_a_spliced_parent_compiles_to_the_exported_parent(self):
         for grouped in (False, True):
             with self.subTest(grouped=grouped):
                 name = f"spliced_{int(grouped)}"
-                _, _, stats, step_hash = self.build(self.spliced_parent(grouped=grouped), name=name, steps=self.steps)
-                self.assertTrue(stats["stepSpliced"])
-                self.assertEqual(stats["documentReadback"], "composed")
-                self.assertDocumentOf(stats["documentTree"], self.root / f"{name}.step")
-                # A forced build exports through OCCT and parses: the same document tree.
-                _, _, exported, exported_hash = self.build(self.spliced_parent(grouped=grouped), name=name, force=True)
-                self.assertFalse(exported["stepSpliced"])
-                self.assertNotEqual(step_hash, exported_hash)
-                self.assertEqual(stats["documentTree"], exported["documentTree"])
+                result, _, stats, step_hash = self.build(self.spliced_parent(grouped=grouped), name=name,
+                                                         steps=self.steps)
+                self.assertTrue(stats["export"]["spliced"])
+                self.assertDocumentOf(result, self.root / f"{name}.step")
+                self.assertSameAsExported(self.spliced_parent(grouped=grouped), name, step_hash)
 
     def test_a_splice_is_byte_for_byte_repeatable(self):
         written = []
         for _ in range(2):
             _, _, stats, step_hash = self.build(self.spliced_parent(), name="repeat", steps=self.steps)
-            self.assertTrue(stats["stepSpliced"])
+            self.assertTrue(stats["export"]["spliced"])
             written.append((step_hash, (self.root / "repeat.step").read_bytes()))
         self.assertEqual(written[0], written[1])
 
@@ -309,18 +222,18 @@ class SplicedStepTest(Fixture):
         for grouped in (False, True):
             with self.subTest(grouped=grouped):
                 name = f"non_ascii_{int(grouped)}"
-                shape = self.spliced_parent(grouped=grouped, names=("Bügel_ä", "ナット 🔩 it's"))
-                if grouped:
-                    shape.children[0].label = "grüppe"
-                _, _, stats, _ = self.build(shape, name=name, steps=self.steps)
-                self.assertTrue(stats["stepSpliced"])
+
+                def shape():
+                    shape = self.spliced_parent(grouped=grouped, names=("Bügel_ä", "ナット 🔩 it's"))
+                    if grouped:
+                        shape.children[0].label = "grüppe"
+                    return shape
+
+                result, _, stats, step_hash = self.build(shape(), name=name, steps=self.steps)
+                self.assertTrue(stats["export"]["spliced"])
                 self.assertTrue((self.root / f"{name}.step").read_bytes().isascii())
-                self.assertDocumentOf(stats["documentTree"], self.root / f"{name}.step")
-                shape = self.spliced_parent(grouped=grouped, names=("Bügel_ä", "ナット 🔩 it's"))
-                if grouped:
-                    shape.children[0].label = "grüppe"
-                _, _, exported, _ = self.build(shape, name=name, force=True)
-                self.assertEqual(stats["documentTree"], exported["documentTree"])
+                self.assertDocumentOf(result, self.root / f"{name}.step")
+                self.assertSameAsExported(shape(), name, step_hash)
 
     def test_ineligible_parents_are_exported(self):
         import build123d as bd
@@ -338,26 +251,14 @@ class SplicedStepTest(Fixture):
         for label, (shape, steps) in cases.items():
             with self.subTest(label):
                 name = label.replace(" ", "_")
-                logger = self.verbose_logger()
-                _, _, stats, _ = self.build(shape, name=name, logger=logger, steps=steps)
-                self.assertFalse(stats["stepSpliced"])
-                self.assertIn(f"{name}.step spliced from its children: no (", logger.stream.getvalue())
-                self.assertDocumentOf(stats["documentTree"], self.root / f"{name}.step")
+                result, _, stats, _ = self.build(shape, name=name, steps=steps)
+                self.assertFalse(stats["export"]["spliced"])
+                self.assertTrue(stats["export"]["unspliced"])
+                self.assertDocumentOf(result, self.root / f"{name}.step")
 
+    def test_the_build_assembles_no_document_and_the_export_one_only_when_it_cannot_splice(self):
+        import build123d as bd
 
-class LargeSpliceTest(Fixture):
-    """A parent past the bounded capture, as every large assembly is, takes its bounds from its
-    links and assembles no private document when it splices; when it cannot splice, it assembles
-    the document after its callback (STORE.md §3, spliced documents)."""
-
-    @staticmethod
-    def large():
-        from cadgen.store import _descriptor_bounds
-
-        return mock.patch.object(_descriptor_bounds, "capture_links",
-                                 side_effect=_descriptor_bounds.Ineligible("a large assembly"))
-
-    def counting(self):
         from cadgen.store import materialize
 
         sizes = []
@@ -367,79 +268,15 @@ class LargeSpliceTest(Fixture):
             sizes.append(len(descriptor.get("occurrences") or []))
             return original(descriptor, **kwargs)
 
-        return sizes, mock.patch.object(materialize, "materialize_descriptor", side_effect=counted)
-
-    def test_link_bounds_are_the_whole_document_bounds(self):
-        import json
-
-        import build123d as bd
-
-        from cadgen._internal.component_package import _bbox_from_shape
-        from cadgen.coordination import resolve
-        from cadgen.store import bounds as stored
-        from cadgen.store import build
-        from cadgen.store.materialize import materialize_descriptor
-        from cadgen.store.trees import flatten_tree
-
-        rng = random.Random(7)
-        shapes = {
-            "translated": self.parent([(self.a_hash, bd.Location((rng.uniform(-50, 50), 0.1, -0.0))),
-                                       (self.b_hash, bd.Location((-0.0, rng.uniform(-9, 9), 3.3)))]),
-            "grouped": self.parent(grouped=True),
-            "rotated": self.parent([(self.b_hash, bd.Location((1, 2, 3), (0, 90, 0))),
-                                    (self.a_hash, bd.Location((rng.uniform(0, 1), 5, 6), (13, 27, 41)))]),
-        }
-        for label, shape in shapes.items():
-            with self.subTest(label):
-                walk = build._walk_compound(shape, root_name="parent", progress=resolve(None))
-                descriptor = flatten_tree(walk.draft_tree(root_name="parent"))
-                expected = json.dumps(_bbox_from_shape(materialize_descriptor(descriptor, label="parent")))
-                for state in ("measured", "remembered", "read back"):
-                    if state == "read back":
-                        stored.clear()
-                    self.assertEqual(json.dumps(build._bbox_from_links(descriptor, walk.links)), expected, state)
-
-    def test_a_spliced_large_parent_assembles_no_document(self):
-        import build123d as bd
-
-        from cadgen.store import build
-
-        def shape(z):
-            return self.parent([(self.a_hash, bd.Location((0.1, 0.2, z))), (self.b_hash, bd.Location((7.3, -2.2, 0.0)))])
-
-        shapes = [shape(0.375), shape(0.625), shape(0.625), shape(0.625)]
-        sizes, counted = self.counting()
-        with self.large(), counted:
-            first = self.build(shapes[0], name="large", steps=self.steps)
-            self.assertTrue(first[2]["stepSpliced"])
-            # Measured link by link the first time (19 occurrences in all), never as a whole.
-            self.assertEqual(sorted(sizes), [6, 13])
-            sizes.clear()
-            moved = self.build(shapes[1], name="large", steps=self.steps)
-            # A moved link measures its own part only; the other link's bounds are remembered.
-            self.assertEqual(sizes, [6])
-            sizes.clear()
-            again = self.build(shapes[2], name="large", steps=self.steps)
+        eligible = self.spliced_parent()
+        rotated = self.parent([(self.a_hash, bd.Location((1, 2, 3), (0, 90, 0)))])
+        with mock.patch.object(materialize, "materialize_descriptor", side_effect=counted):
+            _, _, spliced, _ = self.build(eligible, name="assembled_spliced", steps=self.steps)
+            self.assertTrue(spliced["export"]["spliced"])
             self.assertEqual(sizes, [])
-            self.assertEqual(again[0], moved[0])
-            # The tree, its bounds included, is the one the whole document gives.
-            with mock.patch.object(build, "_bbox_from_links", return_value=None):
-                whole = self.build(shapes[3], name="large", steps=self.steps)
-            self.assertEqual(sizes, [19])
-        self.assertEqual(whole[0], moved[0])
-        self.assertEqual(whole[1]["bbox"], moved[1]["bbox"])
-
-    def test_a_large_parent_that_cannot_splice_assembles_its_document_once(self):
-        import build123d as bd
-
-        shape = self.parent([(self.a_hash, bd.Location((1, 2, 3), (0, 90, 0)))])
-        sizes, counted = self.counting()
-        logger = self.verbose_logger()
-        with self.large(), counted:
-            _, _, stats, _ = self.build(shape, name="large_rotated", logger=logger, steps=self.steps)
-        self.assertFalse(stats["stepSpliced"])
-        self.assertEqual(sizes.count(6), 2, sizes)  # its link's bounds, then the document it exports
-        self.assertDocumentOf(stats["documentTree"], self.root / "large_rotated.step")
+            _, _, exported, _ = self.build(rotated, name="assembled_rotated", steps=self.steps)
+            self.assertFalse(exported["export"]["spliced"])
+            self.assertEqual(sizes, [6])
 
 
 class PinnedChildStepsTest(unittest.TestCase):
@@ -467,50 +304,6 @@ class PinnedChildStepsTest(unittest.TestCase):
                 {"model": str(root / "edited.py"), "tree": "d" * 64},
             ])
             self.assertEqual(_pinned_child_steps(scene), {"a" * 64: ChildStep(Path(step), "1" * 64)})
-
-
-class WrittenRealTest(unittest.TestCase):
-    """``written_real`` is what the reader returns for what the writer printed."""
-
-    def test_emulation_matches_the_writer_and_reader(self):
-        import build123d as bd
-
-        from cadgen._internal.step_scene_loader import load_step_scene
-        from cadgen.step_export import export_build123d_step_file
-        from cadgen.store._compose_readback import written_real
-
-        scratch = generated_cad_directory(prefix="written-real-")
-        self.addCleanup(scratch.cleanup)
-        values = [0.0, -0.0, 0.1, 0.09999999999999999, 0.1000000000000001, 999.9999999999999, 1000.0,
-                  1000.0000000000001, 999.95, 0.5, 1 / 3, 2 / 3, -1 / 3, 1e-7, 1e-12, 1e-300, 1e300,
-                  5e-324, 123456789.123456789, 12.345678901234567, -12.345678901234567, 99.999999999999,
-                  666.6666666666666, -666.6666666666666, 999.123456789012, -999.123456789012,
-                  0.000123456789012345, 1234.5678901234, 55.5555555555555, -5.5, 7.000000000001]
-        generator = random.Random(20261001)
-        for _ in range(240):
-            magnitude = 10.0 ** generator.uniform(-9, 9)
-            values.append(generator.choice((-1, 1)) * magnitude * generator.random())
-        for _ in range(60):
-            values.append(round(generator.uniform(-2000, 2000), generator.randint(0, 6)))
-        box = bd.Solid.make_box(1, 1, 1)
-        children = []
-        for index in range(0, len(values), 3):
-            x, y, z = (values[index:index + 3] + [0.0, 0.0])[:3]
-            placed = box.moved(bd.Location((x, y, z)))
-            placed.label = f"p{index}"
-            children.append(placed)
-        step = Path(scratch.name) / "points.step"
-        with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(Path(scratch.name) / "store")}):
-            export_build123d_step_file(bd.Compound(children=children, label="points"), step)
-            scene = load_step_scene(step)
-        mismatches = []
-        for node, index in zip(scene.roots[0].children, range(0, len(values), 3)):
-            expected = (values[index:index + 3] + [0.0, 0.0])[:3]
-            for value, read in zip(expected, (node.transform[3], node.transform[7], node.transform[11])):
-                emulated = written_real(value)
-                if emulated != read or math.copysign(1, emulated) != math.copysign(1, read):
-                    mismatches.append((value, emulated, read))
-        self.assertEqual(mismatches, [])
 
 
 if __name__ == "__main__":

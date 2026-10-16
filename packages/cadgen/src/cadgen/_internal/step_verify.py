@@ -295,7 +295,7 @@ def _read_occurrences(scene: Any) -> dict[str, tuple[str, int, str | None, RGBA 
     file does not read as a document."""
     from cadgen.store.build import _document_walk
 
-    walk, _paths, _nodes = _document_walk(scene)
+    walk = _document_walk(scene)
     read: dict[str, tuple[str, int, str | None, RGBA | None]] = {}
     for occurrence in walk.occurrences:
         key = occurrence["_node"].prototype_key

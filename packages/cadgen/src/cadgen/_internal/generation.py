@@ -212,6 +212,8 @@ def _export(tree: str, staged: Path, *, names: bool, live: Mapping[str, object],
         export = resolve_artifact(request)
     for label, seconds in export["spans"]:
         logger.timing(label, seconds)
+    if export.get("unspliced"):
+        logger.debug(f"{staged.name} spliced from its children: no ({export['unspliced']})")
     for warning in export["warnings"]:
         logger.warning(warning)
     return export
@@ -576,7 +578,7 @@ def _generate_part_outputs(
         # The reference scene's decoded prototypes have classified the topology
         # (the edge policy above); everything after this reads geometry from
         # the pinned trees. Drop them now rather than carry a second complete
-        # native copy of a large assembly through its export and read-back.
+        # native copy of a large assembly through its publication.
         scene.prototype_shapes = {}
         scene.prototype_face_colors = {}
 

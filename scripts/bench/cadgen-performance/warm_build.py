@@ -85,7 +85,7 @@ def main() -> int:
         os.environ.update(CADGEN_DAEMON="1", CADGEN_DAEMON_SOCKET=str(Path(args.child_daemon_socket).expanduser().resolve()))
     from cadgen.cli._run_model import run_model_argv
     from cadgen.daemon import executors
-    from cadgen.store.records import read_record
+    from cadgen.store.records import read_record, tree_for_document_hash
     from cadgen.store.trees import flatten
     from cadgen.step_scene import read_step
     import build123d  # noqa: F401 - exclude kernel startup from timed runs
@@ -135,7 +135,9 @@ def main() -> int:
         for pin in record.get("children") or []:
             child = read_record(pin["model"]) or {}
             children.append({"model": pin["model"], "pinnedTree": pin.get("tree"), "currentTree": child.get("tree"),
-                             "documentTree": child.get("documentTree"), "documentHash": child.get("stepHash"),
+                             # The tree its file's bytes map to: its result once verified.
+                             "documentTree": tree_for_document_hash(child.get("stepHash") or ""),
+                             "documentHash": child.get("stepHash"),
                              "outputs": child.get("outputs"), "closure": child.get("closure"),
                              "actualOutputSha256": {path: sha256(Path(path).read_bytes())
                                                     for path in child.get("outputs") or {}}})
@@ -178,7 +180,7 @@ def main() -> int:
                "measured": measured, "milliseconds": elapsed, "exit": code,
                "events": events, "stages": stages, "tree": record.get("tree"), "documentHash": record.get("stepHash"),
                "actualOutputSha256": actual_outputs,
-               "documentTree": record.get("documentTree"), "children": children,
+               "documentTree": tree_for_document_hash(record.get("stepHash") or ""), "children": children,
                "modelMilestones": milestones, "changedChildPins": changed_pins,
                "childPinCheckPassed": pin_check if args.assert_child_pins else None,
                "components": sorted((tree.get("components") or {}).keys()), "occurrences": len(tree.get("occurrences") or []),

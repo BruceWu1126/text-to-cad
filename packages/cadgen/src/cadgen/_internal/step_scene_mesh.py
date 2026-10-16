@@ -161,9 +161,10 @@ def import_step(step_path: Path, *, label: str | None = None) -> Any:
     Returns the file's geometry as ``import_step`` reads it — the root itself,
     not a wrapper around it — but reuses the tree's binary BREP when the store
     has one for these bytes, so warm loads are ~tens of ms instead of a full
-    text-STEP parse. The tree's components are the STEP's own re-read
-    prototypes (``build_tree_through_step``), never the shapes a script
-    returned, so a warm load and a cold parse cannot disagree. Per-occurrence
+    text-STEP parse. The tree is the one the bytes map to: the result a build
+    wrote the file from, once a parse of the file verified it holds that result
+    within the display tolerance (``cadgen.store.exports``), else the compile of
+    the file's own bytes, so a warm load and a cold parse agree. Per-occurrence
     and prototype STEP colors are applied via ``scene_to_build123d_compound``,
     so the returned shape is a colored drop-in. Cache misses compile and return
     through the same canonical representation as hits.
