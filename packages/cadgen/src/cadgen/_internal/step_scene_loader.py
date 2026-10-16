@@ -146,7 +146,8 @@ def _decode_step_unicode_escapes(text: str) -> str:
 
     Some vendor files leave these escape sequences in XCAF labels while a
     cadgen write/read returns the decoded Unicode spelling.  They are the same
-    authored name and must compare as such during strict correspondence.
+    authored name and must read as one, so a file's names mint the tokens its
+    result's do.
     """
     def replace(match: re.Match[str]) -> str:
         digits = match.group(2)

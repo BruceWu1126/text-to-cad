@@ -5,7 +5,7 @@ hash) is a pure function of the STEP file's bytes plus schema versions — the
 cache engine's world, freely evictable. The model's DECLARATIONS live in ONE
 sidecar FILE BESIDE THE MODEL, ``<name>.step.json``: KINEMATICS
 (typed mates with axes resolved to world numbers, couplings, pose presets)
-and APPEARANCE (named materials assigned to canonical document occurrences),
+and APPEARANCE (named materials assigned to the result's occurrences, by token),
 plus optional ANIMATION keyframes (the model's clips, baked at build by
 ``cadgen._internal.animation_bake``). The one hash here is
 ``documentHash``: an artifact binding that prevents declarations from being

@@ -380,8 +380,8 @@ def source_scene(owner: Any, output_path: Any):
     (``prototype_components``), so the policy reads that component's topology
     by its BREP, and a prototype is decoded, once per component, only when it
     is read (a component whose topology is not stored yet). The only consumers
-    before final publication read the scene; saving reconstructs its own private
-    canonical document as before.
+    before final publication read the scene; the STEP is exported from the stored
+    result (``store/exports.py``).
     """
     children = _inputs(owner)
     if children is None:

@@ -48,7 +48,7 @@ LEAF_LAYOUT_ALGORITHM = "component_leaf_layout.algorithm2"
 #: The box of one leaf of a placed component, measured untranslated under the leaf's own
 #: rotation: keyed by the component's codec and BREP object, the leaf's ordinal and that
 #: rotation, so the same body at the same rotation is measured once wherever it is translated
-#: to, by the source result and the canonical document alike
+#: to, by a build's result and a compiled document alike
 #: (``component_package.placed_prototype_bounds``), and a composed reader
 #: (:func:`composed_bounds`) finds what the publication measured from the occurrence's
 #: transform and the leaf layout alone.
