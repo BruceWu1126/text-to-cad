@@ -350,9 +350,10 @@ elements with equal signatures ranked by their exact values), so a token
 survives a STEP round trip and whatever order OCCT lists the elements in.
 Tokens are measured on demand and never on the way from a model's run to its
 record: where a part's display data is derived (in the build pool, for the
-elements its lineage does not name), and where a reader resolves a ref in token
-form -- one copied from a file read, or before its element had a name --
-against a body named by lineage (`read_scene`, `store where`). Either way a
+elements its lineage does not name), and where a ref in token form -- one
+copied from a file read, or before its element had a name -- is resolved
+against a body named by lineage (`refs.py`, the one resolver: `read_scene`,
+`store where`, a mate's axis, every ref). Either way a
 body's tokens are remembered in `index/bounds` by its codec and BREP object
 under the scheme string (`bounds.cached_tokens`), so they are measured once.
 

@@ -176,24 +176,21 @@ class AnalyticParamsAreWorldPlacedTest(PlacedPackageTestCase):
 
 
 class GroupLabelsResolveTest(PlacedPackageTestCase):
-    def test_the_group_carries_a_label_alias(self) -> None:
-        self.assertEqual(
-            self.group_id, self.index.label_aliases["aliases"].get(GROUP_LABEL),
-            "a subassembly's authored label is not in the refs label index",
-        )
+    def test_a_group_label_resolves_to_the_group(self) -> None:
+        from cadgen.refs import resolve
 
-    def test_a_group_label_canonicalizes_to_the_group_id(self) -> None:
-        self.assertEqual(self.group_id, lookup.canonicalize_selector(f"#{GROUP_LABEL}", self.index))
-
-
+        found = resolve(f"#{GROUP_LABEL}", lookup.index_space(self.index))
+        self.assertEqual(self.group_id, found.occurrence,
+                         "a subassembly's authored label does not name it in the refs index")
+        self.assertEqual("occurrence", found.kind)
 
     def test_leaf_labels_still_resolve_to_their_own_occurrence(self) -> None:
         """Additive. Adding interior nodes must not renumber or displace the leaves."""
-        aliases = self.index.label_aliases["aliases"]
-        for label in ("camera_pin", "camera_plate", "base_block"):
-            self.assertEqual(leaf_id(self.descriptor, label), aliases.get(label), label)
-        self.assertNotIn(self.group_id, {aliases[label] for label in ("camera_pin", "camera_plate", "base_block")})
+        from cadgen.refs import resolve
 
+        space = lookup.index_space(self.index)
+        for label in ("camera_pin", "camera_plate", "base_block"):
+            self.assertEqual(leaf_id(self.descriptor, label), resolve(f"#{label}", space).occurrence, label)
 
 
 class GroupLabelAmbiguityTest(unittest.TestCase):
@@ -202,16 +199,16 @@ class GroupLabelAmbiguityTest(unittest.TestCase):
     label refuses rather than picking one."""
 
     def test_a_group_and_a_leaf_sharing_a_name_become_numbered_aliases(self) -> None:
-        from cadgen.label_refs import LabelResolutionError, build_label_aliases, resolve_label_selectors
+        from cadgen.label_refs import LabelResolutionError
+        from cadgen.refs import Space, resolve
 
         group, leaf = "o:" + "3" * 12, "o:" + "4" * 12
-        # Rows come in tree order, the group before the leaf beneath it.
-        built = build_label_aliases(
-            [{"id": group, "name": "gripper"}, {"id": leaf, "name": "gripper"}]
-        )
-        self.assertEqual({"gripper_1": group, "gripper_2": leaf}, built["aliases"])
+        # Names are taken in tree order, the group before the leaf beneath it.
+        space = Space({group: [leaf], leaf: [leaf]}, {"gripper": [group, leaf]})
+        self.assertEqual(group, resolve("#gripper_1", space).occurrence)
+        self.assertEqual(leaf, resolve("#gripper_2", space).occurrence)
         with self.assertRaises(LabelResolutionError):
-            resolve_label_selectors(["gripper"], built)
+            resolve("#gripper", space)
 
 
 if __name__ == "__main__":

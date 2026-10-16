@@ -195,29 +195,6 @@ def split_cad_ref(text: str) -> tuple[str, str]:
     return (prefix.strip(), selectors) if hash_mark else ("", stripped)
 
 
-def ensure_ref_file_matches(file_prefix: str, document_path: str, *, source_label: str = "ref") -> None:
-    """Reject a ref whose file prefix names a file this command is not looking at.
-
-    Copied refs may carry a file prefix (``STEP/plate.step#o:4b1f9e2a7c03``) so they stay
-    meaningful in a prompt spanning several files: the file's path relative to the viewer's root,
-    or its absolute path. It has to name ``document_path``, the file the command was given, as a
-    path does (:func:`ref_prefix_names`). A CLI only ever inspects that file, so a prefix naming a
-    DIFFERENT file has to be an error: silently ignoring it would inspect the wrong file and report
-    a confident answer about geometry the user never asked about.
-
-    CLIs do not resolve prefixes to paths -- the agent does that, then passes the file and the
-    ref separately.
-    """
-    prefix = str(file_prefix or "").strip()
-    document = str(document_path or "").strip()
-    if not prefix or not document or ref_prefix_names(prefix, document):
-        return
-    raise ValueError(
-        f"{source_label} names file {prefix!r} but this command targets {document!r}; "
-        f"pass the file as the entry argument and the '#...' part as the ref"
-    )
-
-
 def parse_selector(raw_selector: str) -> ParsedSelector | None:
     # Only a LEADING "#" is the token marker. str.replace() takes the first "#"
     # anywhere; the JS parser strips /^#/ and leaves the rest opaque, and the two are one language.

@@ -116,18 +116,18 @@ class AssemblyOccurrenceRefsTest(_AssemblyDisplayFixture, unittest.TestCase):
         self.assertTrue(all(is_occurrence_token(occurrence_id) for occurrence_id in ids), ids)
         for occurrence_id in ids:
             with self.subTest(occurrence=occurrence_id):
-                found = lookup.lookup_selector(f"#{occurrence_id}", index)
-                self.assertIsNotNone(found, f"{occurrence_id} did not resolve")
+                found = lookup.find(f"#{occurrence_id}", index)
                 self.assertEqual("occurrence", found[0])
+                self.assertEqual(occurrence_id, found[1]["id"])
 
     def test_an_assembly_has_no_single_occurrence(self) -> None:
         """A bare element name (`#f:…`) names an element of a document's ONE leaf; an
         assembly has none, so the bare form resolves to nothing rather than to a guess."""
         merged = assembly_lookup.merge_assembly_occurrences(_empty_index(), self.descriptor, self.package_dir)
-        self.assertEqual("", merged.single_occurrence_id)
         entities = assembly_lookup.merge_assembly_entities(merged, self.descriptor, self.package_dir)
         _occurrence, element = split_element_ref(str(entities.faces[0]["id"]))
-        self.assertIsNone(lookup.lookup_selector(f"#{element}", entities))
+        with self.assertRaisesRegex(ValueError, "needs an occurrence token in an assembly"):
+            lookup.find(f"#{element}", entities)
 
     def test_a_part_artifact_is_composed_like_any_tree(self) -> None:
         """A tree's selector tables live in its components, a part's single component
@@ -176,8 +176,7 @@ class AssemblyEntityRefsTest(_AssemblyDisplayFixture, unittest.TestCase):
         merged = self._merged()
         occurrence_id = str(self.descriptor["occurrences"][0]["id"])
         ref = element_ref(occurrence_id, str(self._first_face(merged, occurrence_id)["name"]))
-        found = lookup.lookup_selector(f"#{ref}", merged)
-        self.assertIsNotNone(found, f"{ref} did not resolve")
+        found = lookup.find(f"#{ref}", merged)
         self.assertEqual("face", found[0])
         self.assertEqual(ref, found[1]["id"])
 
@@ -260,7 +259,8 @@ class MergedRowsAreInternallyConsistentTest(_AssemblyDisplayFixture, unittest.Te
         self.assertTrue(shapes, "no placed shapes were merged")
         for shape in shapes:
             self.assertNotIn("id", shape)
-            self.assertIsNone(lookup.lookup_selector(f"#{shape['shapeId']}", merged))
+            with self.assertRaises(ValueError):
+                lookup.find(f"#{shape['shapeId']}", merged)
 
 
 class DormantPathsTest(unittest.TestCase):
@@ -307,7 +307,7 @@ class DormantPathsTest(unittest.TestCase):
 
         for occurrence_id in (a, b):
             for element in (self.V1, self.V2):
-                found = lookup.lookup_selector(f"#{element_ref(occurrence_id, element)}", merged)
+                found = lookup.find(f"#{element_ref(occurrence_id, element)}", merged)
                 self.assertEqual("vertex", found[0])
                 self.assertEqual(occurrence_id, found[1]["occurrenceId"])
                 self.assertEqual(element, found[1]["name"])

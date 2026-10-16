@@ -6,12 +6,13 @@ every mate's parent/child occurrence ref must name a real occurrence, and every
 numbers via the same composed selector index inspect uses. The sidecar carries
 only numbers — the viewer does arithmetic, never topology.
 
-A mate's ends name occurrences, so they resolve in the tree's occurrence
-namespace alone: its leaves, its group nodes and their labels, read from the
-flattened tree. No component's topology is read for them. An axis ref names a
-face or edge of one occurrence, and only that occurrence's component is read:
-its selector rows come from its part's selector table, derived through the
-build pool when the store has none.
+Every ref resolves through the one resolver (``cadgen.refs``). A mate's ends
+name occurrences, so they resolve in the tree's occurrence namespace alone: its
+leaves, its group nodes and their names, read from the flattened tree. No
+component's topology is read for them. An axis ref names a face or edge of one
+occurrence, and only that occurrence's component is read: its selector rows
+come from its part's selector table, derived through the build pool when the
+store has none, and a ref by geometry is matched against the component.
 
 Nothing here moves geometry. A kinematics declaration describes how the
 written tree articulates; the tree itself is the model's return value and is
@@ -21,10 +22,7 @@ stored exactly as returned.
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING, Any, Callable, Mapping
-
-if TYPE_CHECKING:
-    from cadgen.label_refs import TreeNames
+from typing import Any, Callable, Mapping
 
 
 def _fail(message: str) -> ValueError:
@@ -32,20 +30,14 @@ def _fail(message: str) -> ValueError:
 
 
 def _occurrence_index(descriptor: Mapping[str, Any]):
-    """The namespace a mate's parent and child resolve in: the tree's leaf
-    occurrences, its group nodes and the label aliases of both. It is the
-    composed selector index inspect uses
-    (``assembly_lookup.index_with_assembly_occurrences``) without any
-    component's topology, which a mate's end never names."""
+    """The selector index an axis ref resolves in, before any component is read: the
+    tree's leaf occurrences and its group nodes, the composed selector index inspect uses
+    (``assembly_lookup.index_with_assembly_occurrences``) without any component's
+    topology, which :func:`_with_named_entities` adds for the leaves axis refs name."""
     from cadgen.assembly_lookup import merge_assembly_occurrences
-    from cadgen.label_refs import attach_label_aliases
     from cadgen.lookup import build_selector_index
 
-    index = build_selector_index(dict(descriptor))
-    return attach_label_aliases(merge_assembly_occurrences(index, descriptor, None))
-
-
-_ENTITY_TYPES = frozenset({"face", "edge", "vertex"})
+    return merge_assembly_occurrences(build_selector_index(dict(descriptor)), descriptor, None)
 
 
 def _with_named_entities(index, descriptor: Mapping[str, Any], refs: list[str], *, tree_hash: str,
@@ -60,18 +52,21 @@ def _with_named_entities(index, descriptor: Mapping[str, Any], refs: list[str], 
     before any table is read (the build's display job, done)."""
     import shutil
 
-    from cadgen import cad_ref_syntax as syntax
     from cadgen.assembly_lookup import merge_assembly_entities
-    from cadgen.lookup import canonicalize_selector
+    from cadgen.lookup import index_space
+    from cadgen.refs import locate
     from cadgen.store.parts import producer_identity
     from cadgen.store.view import export_view
 
     named: set[str] = set()
+    space = index_space(index)
     for ref in refs:
-        canonical = canonicalize_selector(ref.lstrip("#"), index)
-        parsed = syntax.parse_selector(canonical) if canonical else None
-        if parsed is not None and parsed.occurrence_id and parsed.selector_type in _ENTITY_TYPES:
-            named.add(parsed.occurrence_id)
+        try:
+            occurrence, element = locate(ref, space)
+        except ValueError:
+            continue
+        if element is not None:
+            named.add(occurrence)
     rows = [row for row in descriptor.get("occurrences") or []
             if isinstance(row, Mapping) and str(row.get("id") or "").strip() in named
             and str(row.get("component") or "").strip()]
@@ -89,27 +84,19 @@ def _with_named_entities(index, descriptor: Mapping[str, Any], refs: list[str], 
         shutil.rmtree(view, ignore_errors=True)
 
 
-def _lookup(index, selector_text: str):
-    from cadgen import lookup
-
-    return lookup.lookup_selector(selector_text, index)
-
-
 def _axis_from_ref(index, ref: str, *, mate: str, source_ref: str) -> dict[str, list[float]]:
     from cadgen.analysis import positioning_facts_for_row
-    from cadgen.lookup import label_resolution_error
+    from cadgen.lookup import find
 
-    selector = ref.lstrip("#")
-    resolved = _lookup(index, selector)
-    if resolved is None:
-        reason = label_resolution_error(selector, index)
-        if reason is not None:
-            raise _fail(f"{source_ref} mate {mate!r}: axis ref {ref!r}: {reason}")
+    try:
+        selector_type, row = find(ref, index)
+    except ValueError as error:
         raise _fail(
-            f"{source_ref} mate {mate!r}: axis ref {ref!r} does not resolve — "
+            f"{source_ref} mate {mate!r}: axis ref {ref!r} does not resolve ({error}) — "
             "use `read_scene(path).leaves()` and `occurrence.entities(kind)` to list saved selectors and labels"
-        )
-    selector_type, row = resolved
+        ) from None
+    if row is None:
+        raise _fail(f"{source_ref} mate {mate!r}: axis ref {ref!r} names a group; an axis needs a face or edge")
     if selector_type == "occurrence":
         raise _fail(
             f"{source_ref} mate {mate!r}: axis ref {ref!r} names a whole occurrence; "
@@ -129,60 +116,20 @@ def _axis_from_ref(index, ref: str, *, mate: str, source_ref: str) -> dict[str, 
     return {"origin": [float(v) for v in origin], "dir": [float(v) for v in direction]}
 
 
-def _instance_tree_ids(descriptor: Mapping[str, Any]) -> tuple[dict[str, str], TreeNames]:
-    """The INSTANCE TREE's node ids and names — subassemblies included.
-
-    The flat selector index holds LEAF occurrences only, but mates target the
-    instance-tree namespace: a mate on a group occurrence is how "rigid groups
-    are free", and ``_subtree_ids`` already carries a group's whole subtree. So
-    group nodes have to be resolvable, and ``assembly.json["assembly"]["root"]``
-    is where they live. A name resolves as every ``#name`` does
-    (:class:`cadgen.label_refs.TreeNames`); the nodes are taken in tree order
-    (root first, siblings as listed), which is the order a shared name's
-    numbered aliases follow everywhere.
-    """
-    from cadgen.label_refs import TreeNames
-
-    rows = {str(item.get("id") or ""): str(item.get("name") or "").strip()
-            for item in descriptor.get("occurrences") or [] if isinstance(item, Mapping)}
-    by_id: dict[str, str] = {}
-    by_name: dict[str, list[str]] = {}
-    root = (descriptor.get("assembly") or {}).get("root") if isinstance(descriptor.get("assembly"), Mapping) else None
-    stack = [root] if isinstance(root, Mapping) else []
-    while stack:
-        node = stack.pop()
-        if not isinstance(node, Mapping):
-            continue
-        node_id = str(node.get("id") or "").strip()
-        if node_id:
-            by_id[node_id] = node_id
-            name = str(node.get("name") or "").strip()
-            if name:
-                by_name.setdefault(name, []).append(node_id)
-            # A single part's one node is the root, named for the document, and the
-            # part, named by its row: both names mean it (source_sidecar._descriptor_nodes).
-            row_name = rows.get(node_id, "")
-            if row_name and row_name != name:
-                by_name.setdefault(row_name, []).append(node_id)
-        stack.extend(reversed(list(node.get("children") or [])))
-    return by_id, TreeNames(by_name)
-
-
-def _occurrence_id_for_ref(
-    ref: str, *, what: str, mate: str, source_ref: str, tree: tuple[dict[str, str], TreeNames]
-) -> str:
+def _occurrence_id_for_ref(ref: str, *, what: str, mate: str, source_ref: str, space: Any) -> str:
+    """The instance tree node a mate's end names, groups included: a mate on a group is
+    how "rigid groups are free" (``cadgen.refs``, over the tree's nodes)."""
     from cadgen.label_refs import LabelResolutionError
+    from cadgen.refs import resolve
 
-    selector = ref.lstrip("#")
-    by_id, names = tree
-    if selector in by_id:
-        return by_id[selector]
     try:
-        node_id = names.resolve(selector)
+        found = resolve(ref, space)
     except LabelResolutionError as error:
         raise _fail(f"{source_ref} mate {mate!r}: {what} {ref!r}: {error}") from None
-    if node_id is not None:
-        return node_id
+    except ValueError:
+        found = None
+    if found is not None and found.kind == "occurrence":
+        return found.occurrence
     raise _fail(
         f"{source_ref} mate {mate!r}: {what} {ref!r} does not name an occurrence — "
         "label the part or subassembly in the model (cadgen.label_shape, or a "
@@ -249,12 +196,13 @@ def resolve_kinematics_block(
     None resolves it through the build pool, and only when an axis ref needs it.
     ``ready``, when given, is called before an axis ref reads a part's selector
     table: a build waits there for its display job, which derives its parts."""
+    from cadgen.refs import descriptor_space
     from cadgen.store.trees import flatten
 
     descriptor = flatten(tree_hash)
     if not isinstance(descriptor, dict):
         raise _fail(f"{source_ref}: tree {tree_hash} is missing from the store")
-    tree = _instance_tree_ids(descriptor)
+    tree = descriptor_space(descriptor)
     resolved = copy.deepcopy(dict(block))
     occurrence_ids: dict[str, str] = {}
     axis_refs = [str((mate.get("axis") or {})["ref"]) for mate in resolved.get("mates", [])
@@ -268,7 +216,7 @@ def resolve_kinematics_block(
             ref = str(mate.get(key))
             if ref not in occurrence_ids:
                 occurrence_ids[ref] = _occurrence_id_for_ref(
-                    ref, what=what, mate=name, source_ref=source_ref, tree=tree
+                    ref, what=what, mate=name, source_ref=source_ref, space=tree
                 )
             # The resolved instance-tree token rides the sidecar beside the
             # authored label, for the same reason axes ride it as numbers: the

@@ -110,8 +110,8 @@ is rebuilt by rerunning the model, which binds them anew.
 
 A ref by geometry (`f:` and twelve hexadecimal characters, how an imported
 file's elements are named) also finds an element of a part a model made, by its
-geometry: `resolve()` and `cadgen store where` take it, and the
-viewer and `store where` give the element's name. An element's name moves when
+geometry: `resolve()`, a mate's `axis` and `cadgen store where` take it, and
+the viewer and `store where` give the element's name. An element's name moves when
 the code that made it moves to another operation (an earlier call of the same
 operation added in the same function, in making that part, renumbers the later
 ones; an edit to another part renames nothing); a label keeps it in what a later

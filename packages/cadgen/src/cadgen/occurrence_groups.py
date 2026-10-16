@@ -80,7 +80,7 @@ def occurrence_near_miss_hint(selector: str, selector_index: lookup.SelectorInde
 
 
 def expand_occurrence_selector(
-    selector: str, *, selector_index: lookup.SelectorIndex | None, source_label: str
+    selector: str, *, selector_index: lookup.SelectorIndex, source_label: str
 ) -> list[str]:
     """The rendered occurrences a selection ref covers.
 
@@ -91,12 +91,7 @@ def expand_occurrence_selector(
     Expanded at the front door rather than passed through: the resolved job then says
     which parts it means, and a group with nothing rendered under it fails as a command
     error instead of as an empty answer.
-
-    With no selector index (no topology to check against) the ref travels unchanged, as
-    it always has.
     """
-    if selector_index is None:
-        return [selector]
     if selector in selector_index.occurrence_by_id:
         return [selector]
     members = occurrence_group_members(selector, selector_index)

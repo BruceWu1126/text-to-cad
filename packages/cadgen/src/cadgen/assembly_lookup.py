@@ -346,7 +346,8 @@ def merge_assembly_entities(
     """Add each occurrence's faces, edges and vertices, placed into world coordinates.
 
     This is what makes a ref picked in the viewer measurable: ``#o:…/f:…`` is the face of that
-    occurrence's component whose name that is. Every element row is keyed by
+    occurrence's component whose name that is. The components themselves are kept, as a tree
+    lists them, for a ref by geometry (``lookup.index_space``). Every element row is keyed by
     ``<occurrence token>/<element name>`` and carries ``occurrenceId`` (the occurrence that
     places it) and ``shapeId`` (the occurrence's solid, by the component's own ordinal);
     its range columns (``faceStart``, ``edgeCount``, ...) are copied as the component's table
@@ -402,6 +403,13 @@ def merge_assembly_entities(
 
     if not added:
         return index
+    from cadgen.store.parts import geometry_entry
+
+    # A view lists a component with its BREP as ``brepObject``, a flattened tree as ``brep``.
+    components = dict(index.components)
+    for cid, entry in (descriptor.get("components") or {}).items():
+        if isinstance(entry, Mapping) and (entry.get("brepObject") or entry.get("brep")):
+            components.setdefault(str(cid), geometry_entry(dict(entry)) if entry.get("brepObject") else dict(entry))
     return replace(
         index,
         shapes=shapes,
@@ -411,6 +419,7 @@ def merge_assembly_entities(
         face_by_id=face_by_id,
         edge_by_id=edge_by_id,
         vertex_by_id=vertex_by_id,
+        components=components,
     )
 
 
@@ -452,15 +461,19 @@ def merge_assembly_occurrences(
     descriptor: Mapping[str, Any],
     package_dir: Path | None,
 ) -> SelectorIndex:
-    """Add the instance-tree occurrences, its group nodes and every node's members to an index.
+    """Add the instance-tree occurrences, its group nodes, every node's members and every
+    node's names to an index.
 
     ADDITIVE: rows the index already holds under an id stay as they are.
     """
+    from cadgen.refs import descriptor_nodes
+
     rows = assembly_occurrence_rows(descriptor, package_dir)
     group_nodes = assembly_group_nodes(descriptor)
     members = assembly_group_members(descriptor)
+    names = descriptor_nodes(descriptor)[1]
     if not rows:
-        return replace(index, group_nodes=group_nodes, members=members) if group_nodes or members else index
+        return replace(index, group_nodes=group_nodes, members=members, names=names) if members else index
     occurrences = list(index.occurrences)
     occurrence_by_id = dict(index.occurrence_by_id)
     for row in rows:
@@ -469,22 +482,25 @@ def merge_assembly_occurrences(
             continue
         occurrences.append(row)
         occurrence_by_id[occurrence_id] = row
-    # The rows are the tree's leaves (groups travel separately as group_nodes). A
-    # document with exactly one leaf -- a part -- keeps the bare grammar: `#f:…`
-    # canonicalizes to that leaf's element, which is what single_occurrence_id is for.
-    leaf_ids = [str(row.get("id")) for row in rows if row.get("id")]
-    single = index.single_occurrence_id or (leaf_ids[0] if len(leaf_ids) == 1 else "")
     return replace(
         index,
         occurrences=occurrences,
         occurrence_by_id=occurrence_by_id,
         group_nodes=group_nodes,
         members=members,
-        single_occurrence_id=single,
+        names=names,
     )
 
 
-def _index_with_assembly_occurrences(index: SelectorIndex, artifact: object) -> SelectorIndex:
+def index_with_assembly_occurrences(index: SelectorIndex, artifact: object) -> SelectorIndex:
+    """The whole instance tree -- occurrences AND their entities -- keyed off a
+    ``StepArtifact``.
+
+    Lives here rather than at either call site because there are TWO of them and they had already
+    drifted: ``snapshot_cli.artifact_selector_index`` serves ``--focus``/``--hide``, while
+    ``inspect refs`` builds its own index from the same bundle. Fixing one would have left the
+    other reporting the bug, which is how 0b presented as three separate tool failures.
+    """
     if index is None or artifact is None:
         return index
     # Every tree's selector tables live in its components and are composed here per
@@ -501,22 +517,3 @@ def _index_with_assembly_occurrences(index: SelectorIndex, artifact: object) -> 
         return index
     merged = merge_assembly_occurrences(index, descriptor, package_dir)
     return merge_assembly_entities(merged, descriptor, package_dir)
-
-
-def index_with_assembly_occurrences(index: SelectorIndex, artifact: object) -> SelectorIndex:
-    """The whole instance tree -- occurrences AND their entities -- keyed off a
-    ``StepArtifact``, plus the label aliases for whatever rows survive.
-
-    Lives here rather than at either call site because there are TWO of them and they had already
-    drifted: ``snapshot_cli.artifact_selector_index`` serves ``--focus``/``--hide``, while
-    ``inspect refs`` builds its own index from the same bundle. Fixing one would have left the
-    other reporting the bug, which is how 0b presented as three separate tool failures.
-
-    Label aliases are attached on EVERY return path, including the early ones for part entries,
-    for the same reason: this is the one function both call sites already funnel through, so
-    attaching here is what keeps them from drifting again. Aliases must be computed after the
-    assembly merge, because the merge is what decides the final row set.
-    """
-    from cadgen.label_refs import attach_label_aliases
-
-    return attach_label_aliases(_index_with_assembly_occurrences(index, artifact))

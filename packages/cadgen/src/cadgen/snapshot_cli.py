@@ -493,16 +493,10 @@ def _ensure_snapshot_step_artifact(target, *, require_selector=False, debug=None
     )
 
 
-def selector_value_requires_topology(value: str) -> bool:
-    text = str(value or "").strip()
-    if not text:
-        return False
-    parsed = cad_ref_syntax.parse_selector(text)
-    return parsed is not None and parsed.selector_type != "opaque"
-
-
 def selection_requires_selector_topology(job: Mapping[str, object]) -> bool:
-    return any(selector_value_requires_topology(value) for value in selection_filter_values(job))
+    """Whether the job selects anything: every selection ref resolves against the
+    document's tree (``cadgen.refs``)."""
+    return any(str(value or "").strip() for value in selection_filter_values(job))
 
 
 def ensure_render_job_step_artifact(
@@ -547,7 +541,7 @@ def artifact_selector_index(artifact: StepArtifact | None) -> lookup.SelectorInd
 
 
 def expand_occurrence_selector(
-    selector: str, *, selector_index: lookup.SelectorIndex | None, source_label: str
+    selector: str, *, selector_index: lookup.SelectorIndex, source_label: str
 ) -> list[str]:
     """The rendered occurrences a selection ref covers, as a snapshot error on failure."""
     try:
@@ -561,56 +555,36 @@ def expand_occurrence_selector(
 def normalize_selection_selector(
     raw_value: str,
     *,
-    selector_index: lookup.SelectorIndex | None,
+    selector_index: lookup.SelectorIndex,
     source_label: str,
     document_path: str = "",
 ) -> list[str]:
+    """The leaf occurrences one focus or hide ref covers, by token: the ref resolved by the
+    one resolver (``cadgen.refs``) -- a token or a name, with a file prefix that must name
+    the document being rendered -- and a group expanded to its subtree, so everything
+    downstream, the render runtime included, only ever sees leaf tokens."""
     text = str(raw_value or "").strip()
     if not text:
         return []
-    # A copied ref may carry a file prefix (`STEP/plate.step#o:3f2a9c1d7e5b`). Accept it when it names the
-    # document being rendered, refuse it when it names another -- rendering a different file's
-    # ref against this model would focus the wrong geometry and look like it worked.
-    if "#" in text:
-        prefix, remainder = cad_ref_syntax.split_cad_ref(text)
-        try:
-            cad_ref_syntax.ensure_ref_file_matches(
-                prefix, document_path, source_label=f"{source_label} ref {text!r}"
-            )
-        except ValueError as error:
-            raise SnapshotError(str(error)) from error
-        text = remainder.strip()
-        if not text:
-            return []
-    parsed = cad_ref_syntax.parse_selector(text)
-    if parsed is None:
-        return []
-    if parsed.label:
-        # Labels become tokens here, before any validation or job building, so everything
-        # downstream -- including the JS render runtime -- only ever sees occurrence tokens.
-        from cadgen.label_refs import LabelResolutionError, resolve_label_selectors
+    from cadgen.refs import UnknownNode, locate
 
-        alias_map = getattr(selector_index, "label_aliases", None) if selector_index else None
-        try:
-            resolved = resolve_label_selectors([text], alias_map)
-        except LabelResolutionError as error:
-            raise SnapshotError(f"{source_label} {error}") from error
-        parsed = cad_ref_syntax.parse_selector(resolved[0]) if resolved else None
-        if parsed is None:
-            return []
-    if parsed.selector_type == "opaque":
-        return [parsed.canonical]
-    if parsed.selector_type != "occurrence":
+    try:
+        occurrence, element = locate(text, lookup.index_space(selector_index, document=document_path or None))
+    except UnknownNode as error:
+        if error.token is not None:
+            # A token nothing holds: the expansion's error names what the document does hold.
+            return expand_occurrence_selector(error.token, selector_index=selector_index, source_label=source_label)
+        raise SnapshotError(f"{source_label} {error}") from error
+    except ValueError as error:
+        raise SnapshotError(f"{source_label} {error}") from error
+    if element is not None:
         raise SnapshotError(
             f"{source_label} supports only part/subassembly occurrence refs; "
-            f"got {parsed.selector_type} selector {text!r}"
+            f"got {cad_ref_syntax.element_kind(element)} selector {text!r}"
         )
-    # A GROUP ref expands to its subtree here — including a label that resolved to a group
-    # id, which takes this same path, so labels and ids behave identically wherever the
-    # label already exists.
-    return expand_occurrence_selector(
-        parsed.canonical, selector_index=selector_index, source_label=source_label
-    )
+    # A GROUP ref expands to its subtree here — a name that resolved to a group too, so
+    # names and tokens behave identically.
+    return expand_occurrence_selector(occurrence, selector_index=selector_index, source_label=source_label)
 
 
 def normalize_selection_filter_values(

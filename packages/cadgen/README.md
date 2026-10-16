@@ -477,9 +477,10 @@ question with another's name.
   bytes, and its elements are named by **geometric tokens**
   (`_internal/geometric_tokens.py`, `f:` and twelve hex characters, a hash of
   the element's geometry within its body), measured on demand: where a part's
-  display data is derived, in the build pool, and where a reader resolves a
-  ref in that form against a body named by lineage, remembered by content
-  either way. A geometric name tolerates what a byte name cannot and must not
+  display data is derived, in the build pool, and where a ref in that form is
+  resolved against a body named by lineage (`refs.py`, the one resolver every
+  ref goes through), remembered by content either way. A geometric name
+  tolerates what a byte name cannot and must not
   pretend to exactness; nothing that decides whether a model is current or
   whether bytes were written reads one (laws 2, 5). Names live in the store of
   the build that wrote a file, not yet in the file: read with a store that
@@ -543,6 +544,11 @@ src/cadgen/
   animation.py           # animation clips (cadgen.clip) for @step's
                          #   animation=, baked to sidecar keyframes at build
   step_scene.py          # read_step and read_scene
+  refs.py                # the one resolver: every ref (read_scene, store
+                         #   where, a mate's ends and axis, a snapshot's
+                         #   focus and hide, a clip's targets, a material's
+                         #   assignments) to its node and element, the
+                         #   fallback matcher in it
   assembly.py            # label utilities and softly deprecated AssemblyHelper
   results.py             # the typed Results every verb returns (stdlib-only)
   settings.py            # the person's settings: settings.json in the state

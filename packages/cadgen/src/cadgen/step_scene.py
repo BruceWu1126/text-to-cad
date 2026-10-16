@@ -134,8 +134,6 @@ class StepScene:
     """
 
     def __init__(self, scene: LoadedStepScene):
-        from cadgen.label_refs import build_label_aliases
-
         self._loaded = scene
         if any(node.id is None for node in self._walk(scene.roots)):
             from cadgen._internal.step_scene_package import scene_tokens
@@ -150,8 +148,20 @@ class StepScene:
             ref = _node_ref(node)
             self._occurrences[ref] = Occurrence(self, ref, "occurrence", _node=node)
         self._leaves = tuple(o for o in self._occurrences.values() if o._node.prototype_key is not None)
-        self._aliases = build_label_aliases(
-            {"id": o.ref[1:], "name": o.label} for o in self._occurrences.values()
+        from cadgen.refs import Space
+
+        members: dict[str, list[str]] = {}
+        names: dict[str, list[str]] = {}
+        for occurrence in self._occurrences.values():
+            token = occurrence.ref[1:]
+            members[token] = [leaf.ref[1:] for leaf in self._leaves_of(occurrence)]
+            if occurrence.label:
+                names.setdefault(occurrence.label, []).append(token)
+        self._space = Space(
+            members, names, document=str(scene.step_path),
+            elements=lambda token, kind: self._element_names(self._occurrences["#" + token])[_PLURAL[kind]],
+            tokens=lambda token, kind: self._element_tokens(self._occurrences["#" + token])[_PLURAL[kind]],
+            explain=self._named_by_geometry,
         )
 
     @staticmethod
@@ -176,7 +186,7 @@ class StepScene:
 
     def resolve(self, ref: str) -> Selection:
         """Resolve one ref: an occurrence token, an element ref, an exact label alias,
-        or a file-prefixed ref.
+        or a file-prefixed ref (``cadgen.refs``, the one resolver every ref goes through).
 
         A file prefix -- the path under the viewer's root, or an absolute path --
         must name this scene's document as a path does (links resolved, a relative
@@ -185,50 +195,28 @@ class StepScene:
         Ambiguous labels raise with numbered candidates. A bare element name
         (``#f:…``) requires exactly one leaf. No fuzzy matching or first match.
         """
-        from cadgen.cad_ref_syntax import parse_selector, ref_prefix_names, split_cad_ref
-        from cadgen.label_refs import resolve_label_selectors
+        from cadgen.refs import resolve
 
-        prefix, text = split_cad_ref(ref)
-        if prefix and not ref_prefix_names(prefix, str(self._loaded.step_path)):
-            raise ValueError(f"reference names {prefix!r}, but this scene is {str(self._loaded.step_path)!r}")
-        parsed = parse_selector(text)
-        if parsed is None or parsed.selector_type == "opaque":
-            raise ValueError(f"invalid reference: {ref!r}; pass one occurrence or element ref")
-        if parsed.label:
-            text = resolve_label_selectors([text], self._aliases)[0]
-            parsed = parse_selector(text)
-        oid = "#" + parsed.occurrence_id if parsed.occurrence_id else ""
-        if not oid:
-            if len(self._leaves) != 1:
-                raise ValueError(f"{ref!r} needs an occurrence token in an assembly")
-            oid = self._leaves[0].ref
-        occurrence = self._occurrences.get(oid)
-        if occurrence is None:
-            raise ValueError(f"unknown occurrence: {oid}")
-        if parsed.selector_type == "occurrence":
+        found = resolve(ref, self._space)
+        occurrence = self._occurrences["#" + found.occurrence]
+        if found.kind == "occurrence":
             return occurrence
-        kind = parsed.selector_type
-        if occurrence._node.prototype_key is None:
-            raise ValueError(f"{oid} is a group; enumerate its entities or specify a leaf occurrence")
-        names = self._element_names(occurrence)[_PLURAL[kind]]
-        if parsed.element in names:
-            return Selection(self, oid, kind, names.index(parsed.element) + 1)
-        from cadgen._internal.geometric_tokens import TOKEN_RE
+        return Selection(self, occurrence.ref, found.kind, found.ordinal)
 
-        if TOKEN_RE.fullmatch(parsed.element):
-            # A geometric token (copied from a file read, or before its element had a name)
-            # matches an element by its geometry, whatever names it now.
-            tokens = self._element_tokens(occurrence)[_PLURAL[kind]]
-            if parsed.element in tokens:
-                return Selection(self, oid, kind, tokens.index(parsed.element) + 1)
-        elif (self._loaded.prototype_identity.get(occurrence._node.prototype_key) or (None, None))[1] is None:
-            # Names live in the store of the build that wrote the file, not in the file: read
-            # with another store, its elements are named by their geometry.
-            raise ValueError(
-                f"unknown {kind} reference: {ref!r}: the {_PLURAL[kind]} of {oid} are named by their geometry here, "
-                "since no build this store holds wrote these bytes; a name resolves with the store of the build "
-                "that wrote the file, or after building its model again")
-        raise ValueError(f"unknown {kind} reference: {ref!r} ({len(names)} {_PLURAL[kind]} in {oid})")
+    def _leaves_of(self, occurrence) -> list:
+        if occurrence._node.prototype_key is not None:
+            return [occurrence]
+        return [leaf for child in occurrence.children for leaf in self._leaves_of(child)]
+
+    def _named_by_geometry(self, token: str, kind: str) -> str | None:
+        """Why a name finds no element of a leaf whose elements no build this store holds
+        named: a file read with another store is named by its geometry."""
+        occurrence = self._occurrences["#" + token]
+        if (self._loaded.prototype_identity.get(occurrence._node.prototype_key) or (None, None))[1] is not None:
+            return None
+        return (f"the {_PLURAL[kind]} of #{token} are named by their geometry here, since no build this "
+                "store holds wrote these bytes; a name resolves with the store of the build that wrote the "
+                "file, or after building its model again")
 
     def _element_names(self, occurrence) -> dict:
         """The names of the occurrence's prototype's elements by ordinal: its lineage's,

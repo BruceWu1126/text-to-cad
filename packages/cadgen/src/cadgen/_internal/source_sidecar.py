@@ -222,42 +222,6 @@ def bends_a_tube(block: object) -> bool:
                for clip in clips or [] if isinstance(clip, Mapping) for track in clip.get("tracks") or [])
 
 
-def _descriptor_nodes(descriptor: Mapping[str, Any]) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
-    """Every node's leaf members and every name's nodes, in tree order.
-
-    A node is named by its tree node; a leaf also by its occurrence row, which differs
-    only for a single-part document, whose one node is the root (named for the document)
-    and the part (named by its author's label): both names resolve to it."""
-    rows = {str(item.get("id") or ""): str(item.get("name") or "").strip()
-            for item in descriptor.get("occurrences") or [] if isinstance(item, Mapping)}
-    by_id: dict[str, list[str]] = {}
-    by_name: dict[str, list[str]] = {}
-
-    def visit(node: object) -> list[str]:
-        if not isinstance(node, Mapping):
-            return []
-        node_id = str(node.get("id") or "").strip()
-        # Names are taken in tree order (a node before its children), the order a
-        # shared name's numbered aliases follow in every API that reads a #name.
-        name = str(node.get("name") or "").strip()
-        if node_id and name:
-            by_name.setdefault(name, []).append(node_id)
-        row_name = rows.get(node_id, "")
-        if node_id and row_name and row_name != name:
-            by_name.setdefault(row_name, []).append(node_id)
-        members = [node_id] if node_id in rows else []
-        for child in node.get("children") or []:
-            members.extend(visit(child))
-        if node_id:
-            by_id[node_id] = members
-        return members
-
-    assembly = descriptor.get("assembly")
-    root = assembly.get("root") if isinstance(assembly, Mapping) else None
-    visit(root)
-    return by_id, by_name
-
-
 def _available_material_id(existing: Mapping[str, Any], requested: str, *, namespace: str) -> str:
     if requested not in existing:
         return requested
@@ -293,24 +257,22 @@ def resolve_materials(
             materials[resolved_id] = deepcopy(definition)
         local_ids[material_id] = resolved_id
 
-    from cadgen.label_refs import LabelResolutionError, TreeNames
+    from cadgen.label_refs import LabelResolutionError
+    from cadgen.refs import descriptor_space, resolve
 
-    by_id, by_name = _descriptor_nodes(descriptor)
-    names = TreeNames(by_name)
+    space = descriptor_space(descriptor)
     for index, assignment in enumerate(declaration["assignments"]):
         for target in assignment["targets"]:
-            selector = target[1:]
             where = f"materials.assignments[{index}] target {target!r}"
-            if selector in by_id:
-                node_id = selector
-            else:
-                try:
-                    node_id = names.resolve(selector)
-                except LabelResolutionError as error:
-                    raise SidecarAppearanceError(f"{where}: {error}") from None
-                if node_id is None:
-                    raise SidecarAppearanceError(f"{where} does not name a part or group")
-            members = by_id.get(node_id) or []
+            try:
+                found = resolve(target, space)
+            except LabelResolutionError as error:
+                raise SidecarAppearanceError(f"{where}: {error}") from None
+            except ValueError:
+                found = None
+            if found is None or found.kind != "occurrence":
+                raise SidecarAppearanceError(f"{where} does not name a part or group")
+            members = space.members.get(found.occurrence) or []
             if not members:
                 raise SidecarAppearanceError(f"{where} contains no leaf occurrences")
             for occurrence_id in members:

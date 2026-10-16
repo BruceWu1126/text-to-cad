@@ -142,6 +142,21 @@ def _arm_face() -> str:
     return _face_of(pivot, bd.GeomType.CYLINDER)
 
 
+def _arm_face_by_geometry() -> str:
+    """The geometric token of AXIS_MODEL's arm cylinder's side: what a reader with no
+    lineage names it by (the fallback matcher, ``geometric_tokens``)."""
+    from cadgen import build123d as bd
+    from cadgen._internal.entity_ordinals import entity_map
+    from cadgen._internal.geometric_tokens import element_tokens
+    from OCP.TopLoc import TopLoc_Location
+
+    part = bd.Pos(10, 3, 6) * bd.Rot(0, 40, 30) * bd.Cylinder(2, 16)
+    unlocated = part.wrapped.Located(TopLoc_Location())
+    (side,) = [face for face in part.faces() if face.geom_type == bd.GeomType.CYLINDER]
+    ordinal = entity_map(unlocated, "face").FindIndex(side.wrapped.Located(TopLoc_Location()))
+    return element_tokens(unlocated)["faces"][ordinal - 1]
+
+
 def _hinge_arm_face() -> str:
     """The name of HINGE_MODEL's arm box's first face."""
     from cadgen import build123d as bd
@@ -363,6 +378,21 @@ class KinematicsBuildTests(unittest.TestCase):
         (mate,) = self._sidecar(script)["kinematics"]["mates"]
         self.assertEqual(mate["axis"], expected)
         self.assertNotIn(mate["axis"]["dir"], ([0.0, 0.0, 1.0], [0.0, 0.0, -1.0]))
+
+    def test_an_axis_ref_by_geometry_resolves_as_its_face_by_name(self) -> None:
+        # A ref by geometric token -- copied from a reader with no lineage, or before the
+        # face had a name -- names the face with that geometry: the fallback is the one
+        # resolver's, so a mate's axis takes it as read_scene does.
+        script = self.root / "pivot.py"
+        script.write_text(AXIS_MODEL.replace("ARM_FACE", _arm_face()), encoding="utf-8")
+        self.assertEqual(0, self._build(script))
+        (by_name,) = self._sidecar(script)["kinematics"]["mates"]
+        token = _arm_face_by_geometry()
+        self.assertNotEqual(_arm_face(), token)
+        script.write_text(AXIS_MODEL.replace("ARM_FACE", token), encoding="utf-8")
+        self.assertEqual(0, self._build(script))
+        (by_geometry,) = self._sidecar(script)["kinematics"]["mates"]
+        self.assertEqual(by_name["axis"], by_geometry["axis"])
 
     def test_an_unresolvable_mate_ref_fails_the_build(self) -> None:
         script = self.root / "broken.py"

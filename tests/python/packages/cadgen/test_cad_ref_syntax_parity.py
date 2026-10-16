@@ -22,11 +22,19 @@ from unittest import mock
 from tests.python.support.paths import repo_path
 
 from cadgen.cad_ref_syntax import (
-    ensure_ref_file_matches,
     parse_selector,
     path_has_suffix,
     split_cad_ref,
 )
+from cadgen.refs import Space, locate
+
+OCCURRENCE = "o:" + "1" * 12
+
+
+def ensure_ref_file_matches(prefix: str, document: str) -> None:
+    """Resolve a ref carrying ``prefix`` against ``document``: the one resolver's file
+    guard (``cadgen.refs.locate``), which raises ``ValueError`` for a foreign file."""
+    locate(f"{prefix}#{OCCURRENCE}", Space({OCCURRENCE: [OCCURRENCE]}, {}, document=document))
 
 
 FIXTURE_PATH = repo_path("packages", "core", "src", "lib", "cadRefs.parity.json")

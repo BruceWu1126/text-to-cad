@@ -305,24 +305,21 @@ def _braid(value: object) -> dict[str, Any] | None:
 
 class AnimationTargets:
     """The names and tokens a clip's ``m.get`` resolves, each to document leaves.
-    A name means one part or group, as everywhere a ``#name`` is read
-    (:class:`cadgen.label_refs.TreeNames`). ``leaf_order`` is the document's leaf order,
-    what the baked tracks are sorted by (a token carries no order of its own)."""
+    A name means one part or group, as everywhere a ``#name`` is read (``cadgen.refs``).
+    ``leaf_order`` is the document's leaf order, what the baked tracks are sorted by (a
+    token carries no order of its own)."""
 
-    def __init__(self, by_id: Mapping[str, Sequence[str]], by_name: Mapping[str, Sequence[str]]):
-        from cadgen.label_refs import TreeNames
-
-        self._by_id = {key: tuple(value) for key, value in by_id.items()}
-        self._names = TreeNames(by_name)
+    def __init__(self, space: Any):
+        self._space = space
         self._resolved: dict[str, tuple[str, ...]] = {}
         order: dict[str, int] = {}
-        for leaves in self._by_id.values():
+        for leaves in space.members.values():
             for leaf in leaves:
                 order.setdefault(leaf, len(order))
         self.leaf_order = order
 
     def labels(self) -> list[str]:
-        return self._names.names()
+        return self._space.labels()
 
     def resolve(self, target: object) -> tuple[str, ...]:
         key = target if isinstance(target, str) else None
@@ -331,17 +328,16 @@ class AnimationTargets:
             return cached
         if not isinstance(target, str) or not target.startswith("#") or not target[1:].strip():
             raise AnimationError(f"animation target {target!r} must be a #name or an #o:… occurrence token")
-        selector = target[1:].strip()
-        if selector in self._by_id:
-            leaves = self._by_id[selector]
-        else:
-            from cadgen.label_refs import LabelResolutionError
+        from cadgen.label_refs import LabelResolutionError
+        from cadgen.refs import resolve
 
-            try:
-                node = self._names.resolve(selector)
-            except LabelResolutionError as error:
-                raise AnimationError(f"animation target {target!r}: {error}") from None
-            leaves = self._by_id.get(node, ()) if node is not None else ()
+        try:
+            found = resolve(target, self._space)
+        except LabelResolutionError as error:
+            raise AnimationError(f"animation target {target!r}: {error}") from None
+        except ValueError:
+            found = None
+        leaves = self._space.members.get(found.occurrence, ()) if found is not None and found.kind == "occurrence" else ()
         if not leaves:
             names = self.labels()
             known = ", ".join(f"#{name}" for name in names[:20]) or "(none)"
@@ -354,13 +350,9 @@ class AnimationTargets:
 def animation_targets(descriptor: Mapping[str, Any]) -> AnimationTargets:
     """Targets over a descriptor (an ``assembly.json``): its node names and ids,
     each resolving to the leaf occurrences beneath it."""
-    from cadgen._internal.source_sidecar import _descriptor_nodes
+    from cadgen.refs import descriptor_space
 
-    by_id, by_name = _descriptor_nodes(descriptor)
-    return AnimationTargets(by_id, by_name)
-
-
-# --- One sample ----------------------------------------------------------------
+    return AnimationTargets(descriptor_space(descriptor))
 
 
 class _Frame:

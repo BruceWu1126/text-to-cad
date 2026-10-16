@@ -181,17 +181,17 @@ class PartStoreTest(unittest.TestCase):
         for row in table["faces"]:
             face = dict(zip(columns, row))
             ref = f"{occurrence}/{face['name']}"
-            found = lookup.lookup_selector(ref, merged)
-            self.assertIsNotNone(found, f"{ref} resolves")
+            found = lookup.find(ref, merged)
             self.assertEqual(found[0], "face")
             self.assertEqual(found[1]["ordinal"], face["ordinal"])
             self.assertEqual(found[1]["tangentGroup"], face["tangentGroup"])
             # The one leaf qualifies a bare element name.
-            self.assertEqual(lookup.lookup_selector(face["name"], merged), found)
+            self.assertEqual(lookup.find(face["name"], merged), found)
         vertex_name = dict(zip(table["tables"]["vertexColumns"], table["vertices"][0]))["name"]
-        vertex = lookup.lookup_selector(f"{occurrence}/{vertex_name}", merged)
+        vertex = lookup.find(f"{occurrence}/{vertex_name}", merged)
         self.assertEqual(vertex[0], "vertex")
-        self.assertIsNone(lookup.lookup_selector(f"{occurrence}.f1", merged), "the ordinal spelling is no ref")
+        with self.assertRaises(ValueError, msg="the ordinal spelling is no ref"):
+            lookup.find(f"{occurrence}.f1", merged)
 
     def test_a_part_is_what_made_it(self) -> None:
         """A part is keyed by what made its component (STORE.md §2): the construction key its

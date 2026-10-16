@@ -405,6 +405,17 @@ def element_names(entry: dict, topods: Any) -> dict[str, list[str]]:
     return geometric_tokens.element_names(lineage, topods, component=(entry["codec"], entry["brep"]))
 
 
+def element_tokens(entry: dict) -> dict[str, list[str]]:
+    """The geometric token of every face, edge and vertex of the component a tree's
+    ``entry`` describes, by ordinal: what a ref by geometry is matched against
+    (``cadgen.refs``), measured on the decode its selector table names
+    (:func:`element_names`) once per body and remembered by its bytes."""
+    from cadgen._internal.geometric_tokens import component_tokens
+
+    topods, _ = _decoded(entry)
+    return component_tokens(topods, (entry["codec"], entry["brep"]))
+
+
 def _derive(entry: dict, key: str, keep_going: Callable[[], bool] | None = None) -> dict | None:
     """Store the part's display data when the store lacks it and return its record; None when
     ``keep_going`` said stop first. Any failure is the ``MeshProductionError`` naming it."""
