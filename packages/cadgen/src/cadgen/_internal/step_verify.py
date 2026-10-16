@@ -18,12 +18,15 @@ geometry as coincident, so a reader that heals or re-approximates within it has 
 changed the shape. Elements are paired by name; those no name pairs are paired by place,
 in order, else as a set, since a reader need not list them in the order they were written.
 
-A tight box is the kernel's search for each extreme, and a search can stop short of one it
-straddles: the far side of a sphere scaled into a B-spline is found on one of two equal
-surfaces and missed by 0.8 mm on the other, as the last digit a file keeps of its
-parameters decides. So an element its box puts off its place, or leaves without a
-counterpart, is measured again on both sides with the search cut finer
-(:func:`measured_again`) before it is called moved.
+A tight box is the kernel's search for each extreme, over the parameters a face's edges
+span, and it can miss the face either way: it can stop short of an extreme it straddles
+(the far side of a sphere scaled into a B-spline is found on one of two equal surfaces and
+missed by 0.8 mm on the other, as the last digit a file keeps of its parameters decides),
+and it can reach past the face where its surface does (a fillet's surface beyond its trim,
+by as much as the edges' parameter curves span, which a reader makes again otherwise). So an
+element its box puts off its place, or leaves without a counterpart, is measured again on
+both sides by what it is -- a face by a mesh of it (:func:`measured_again`) -- before it is
+called moved.
 
 What is compared of a colour is the colour each face is drawn in -- its own where its part
 gives it one, else its occurrence's -- to the single precision a STEP reader keeps, never
@@ -172,20 +175,24 @@ def edge_boxes(shape: Any) -> tuple[Box | None, ...]:
     return _boxes(shape, TopAbs_EDGE)
 
 
-def measured_again(element: Any) -> Box | None:
-    """The tight box of a face or an edge measured again with the kernel's search cut
-    finer: a face's surface over each quarter of its parameter domain -- a plane's, which
-    the kernel bounds by its edges, by those -- and an edge's curve over each half of its
-    range. A search over a smaller piece starts nearer each extreme, and pieces cut
-    otherwise than the whole do not straddle an extreme where the whole did."""
+def measured_again(element: Any, deflection: float) -> Box | None:
+    """The box of a face or an edge measured again, by what bounds it, where its tight box
+    may not: an edge's curve searched over each half of its range, so that pieces cut
+    otherwise than the whole do not straddle an extreme where the whole did; a plane by its
+    edges; any other face by the nodes of a mesh of a copy of it, made within ``deflection``
+    of its surface. A mesh is the face as trimmed, never its surface over the parameters its
+    edges span: its nodes are on the face, so the box is within the face and short of it by
+    about ``deflection`` at most."""
     from OCP.Bnd import Bnd_Box
-    from OCP.BndLib import BndLib_Add3dCurve, BndLib_AddSurface
+    from OCP.BndLib import BndLib_Add3dCurve
     from OCP.BRep import BRep_Tool
     from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
-    from OCP.BRepTools import BRepTools
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Copy
+    from OCP.BRepMesh import BRepMesh_IncrementalMesh
     from OCP.GeomAbs import GeomAbs_Plane
     from OCP.TopAbs import TopAbs_EDGE
     from OCP.TopExp import TopExp_Explorer
+    from OCP.TopLoc import TopLoc_Location
     from OCP.TopoDS import TopoDS
 
     from cadgen._internal.topology_extract import _bnd_box
@@ -208,18 +215,24 @@ def measured_again(element: Any) -> Box | None:
             return _box(_bnd_box(element))
     else:
         face = TopoDS.Face_s(element)
-        surface = BRepAdaptor_Surface(face, False)
-        if surface.GetType() == GeomAbs_Plane:
+        if BRepAdaptor_Surface(face, False).GetType() == GeomAbs_Plane:
             explorer = TopExp_Explorer(face, TopAbs_EDGE)
             while explorer.More():
                 halves(TopoDS.Edge_s(explorer.Current()))
                 explorer.Next()
         else:
-            u1, u2, v1, v2 = BRepTools.UVBounds_s(face)
-            us, vs = (u1, (u1 + u2) / 2, u2), (v1, (v1 + v2) / 2, v2)
-            for i in range(2):
-                for j in range(2):
-                    BndLib_AddSurface.AddOptimal_s(surface, us[i], us[i + 1], vs[j], vs[j + 1], 0.0, box)
+            # A copy: a mesh is written onto the face it is made of, and the component's own
+            # faces keep none (``topology_extract._bnd_box``).
+            copy = TopoDS.Face_s(BRepBuilderAPI_Copy(face, True, False).Shape())
+            BRepMesh_IncrementalMesh(copy, deflection, False, 0.5, False)
+            location = TopLoc_Location()
+            mesh = BRep_Tool.Triangulation_s(copy, location)
+            if mesh is None or not mesh.NbNodes():
+                # No mesh could be made: the face's surface searched, as its tight box is.
+                return _box(_bnd_box(face))
+            transformation = location.Transformation()
+            for index in range(1, mesh.NbNodes() + 1):
+                box.Add(mesh.Node(index).Transformed(transformation))
     return None if box.IsVoid() else _box(box.Get())
 
 
@@ -469,15 +482,18 @@ def _differences(shape: Any, names: ComponentNames, component: ExpectedComponent
         excused = {expected_names[index] for index in unnamed if index < len(expected_names)} - {None}
         differences.extend(_name_differences(kind, read_names, expected_names, excused))
         bounds = [display + (own[index] if index < len(own) else 0.0) for index in range(len(wanted))]
-        again = (_again(shape, kind), _again(component.shape, kind)) if component.shape is not None else None
+        # A face measured again is meshed within a quarter of the display tolerance, so its
+        # box is within about that much of the face, and two of one face pair within the bound.
+        again = ((_again(shape, kind, display / 4), _again(component.shape, kind, display / 4))
+                 if component.shape is not None else None)
         pairs[kind] = _paired(kind, read_names, read, expected_names, wanted, bounds, display, differences, skipped,
                               again, ignored=ignored)
     return differences, pairs["face"]
 
 
-def _again(shape: Any, kind: str) -> Callable[[int], Box | None]:
+def _again(shape: Any, kind: str, deflection: float) -> Callable[[int], Box | None]:
     """Each of ``shape``'s faces or edges (by index, in ``TopExp.MapShapes_s`` order)
-    :func:`measured_again`, once."""
+    :func:`measured_again` within ``deflection``, once."""
     from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
     from OCP.TopExp import TopExp
     from OCP.TopTools import TopTools_IndexedMapOfShape
@@ -488,7 +504,7 @@ def _again(shape: Any, kind: str) -> Callable[[int], Box | None]:
 
     def box(index: int) -> Box | None:
         if index not in measured:
-            measured[index] = measured_again(elements.FindKey(index + 1))
+            measured[index] = measured_again(elements.FindKey(index + 1), deflection)
         return measured[index]
 
     return box

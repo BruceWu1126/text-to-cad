@@ -699,16 +699,18 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   display chord tolerance of the part and each element's own tolerance (a body
   without faces by its edges' places; a degenerate edge, a point a reader's
   healing may add, by neither side); and the colour each face is drawn in. A
-  place is a tight box, the kernel's search for each extreme, which can stop
-  short of one it straddles on one of two equal surfaces: an element its box
-  puts off its place is measured again on both sides, the search cut finer,
-  before it is called moved. A file that verifies is its tree: its entry is
-  written again without `verified`. One that does not maps to its own content
-  as above, the differences listed (`differ`, and `plain` for a file written
-  plain). A build with no daemon waits for its verify
-  and warns; a daemon's build returns once its files are written, and the
-  verify finishes on the pool, so a mismatch reaches the next touch of the
-  file -- a door, `store why`, the next run. A door given an entry still
+  place is a tight box, the kernel's search for each extreme over the
+  parameters an element's edges span, which can stop short of an extreme it
+  straddles on one of two equal surfaces, or reach past a face where its
+  surface does (as a reader trims it again otherwise): an element its box puts
+  off its place is measured again on both sides by what it is -- a face by a
+  mesh of it -- before it is called moved. A file that verifies is its tree:
+  its entry is written again without `verified`. One that does not maps to its
+  own content as above, the differences listed (`differ`, and `plain` for a
+  file written plain). A build with no daemon waits for its verify and warns;
+  a daemon's build returns once its files are written, and the verify
+  finishes on the pool, so a mismatch reaches the next touch of the file -- a
+  door, `store why`, the next run. A door given an entry still
   pending (`read_step`/`read_scene`, a snapshot, the mesh doors, `step
   compile`'s current check) has that verify answered first and answers with
   what the entry says after it (`exports.confirm_document`); a view draws a

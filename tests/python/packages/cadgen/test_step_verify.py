@@ -181,7 +181,7 @@ class VerifyStepTest(unittest.TestCase):
         """A tight box is the kernel's search for each extreme. On an ellipsoid -- a sphere
         scaled into a B-spline -- the search stops 0.8 mm short of the far side on the
         result, and not on the file, whose parameters keep fewer digits: the face is
-        measured again on both sides, its search cut finer, before it is called moved --
+        measured again on both sides, by a mesh of it, before it is called moved --
         whether its name pairs it or its place."""
         import build123d as bd
         from OCP.TopAbs import TopAbs_FACE
@@ -203,12 +203,36 @@ class VerifyStepTest(unittest.TestCase):
                            "the premise: one side's search stops short of the far side")
         faces = TopTools_IndexedMapOfShape()
         TopExp.MapShapes_s(component.shape, TopAbs_FACE, faces)
-        self.assertAlmostEqual(measured_again(faces.FindKey(1))[0], -90.0, places=6)
+        self.assertLess(abs(measured_again(faces.FindKey(1), 0.05)[0] + 90.0), 0.1)
         self.assertEqual(verify_step(named, [component]), [])
         keyed = Path(self._tmp.name) / "rock-keyed.step"
         export_build123d_step_file(rock, keyed, names=lambda leaf: ComponentNames(part=_KEYS["ball"]))
         unnamed = dataclasses.replace(component, names=ComponentNames(part=_KEYS["ball"]))
         self.assertEqual(verify_step(keyed, [unnamed]), [])
+
+    def test_a_face_measured_again_is_bounded_by_the_face_not_its_surface(self) -> None:
+        """A face measured again is the face as trimmed, never its surface over the
+        parameters its edges span: a sphere with a hole through it is no wider than the
+        hole's rims, though its surface is, and reaches its own extent within the mesh's
+        deflection. A box reaching past a face as its surface does (a fillet's beyond its
+        trim, which a reader trims again otherwise) would call it moved, or call a moved
+        one in place."""
+        import build123d as bd
+        from OCP.GeomAbs import GeomAbs_Sphere
+        from OCP.BRepAdaptor import BRepAdaptor_Surface
+        from OCP.TopoDS import TopoDS
+
+        from cadgen._internal.step_verify import measured_again
+
+        holed = bd.Sphere(20) - bd.Rot(0, 90, 0) * bd.Cylinder(12, 60)
+        (face,) = [face for face in holed.faces()
+                   if BRepAdaptor_Surface(TopoDS.Face_s(face.wrapped), False).GetType() == GeomAbs_Sphere]
+        for deflection in (0.2, 0.02):
+            with self.subTest(deflection=deflection):
+                box = measured_again(face.wrapped, deflection)
+                # The rims are at x = +-16, which the surface passes by 4; the face reaches y = +-20.
+                self.assertEqual((round(box[0], 6), round(box[3], 6)), (-16.0, 16.0))
+                self.assertTrue(-20.0 <= box[1] <= -20.0 + deflection and 20.0 - deflection <= box[4] <= 20.0, box)
 
     def test_a_degenerate_edge_a_reader_adds_is_no_difference(self) -> None:
         """A reader's healing gives a fillet's corner patches degenerate edges the result's
