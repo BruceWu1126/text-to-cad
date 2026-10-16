@@ -733,17 +733,19 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   **The kept rule.** A rebuild keeps its STEP -- writes and verifies nothing
   -- when its record's last build had the same tree, wrote the file with this
   writer (`step_export.STEP_WRITER_SCHEME`, on the output entry), the file on
-  disk when the build started still has the bytes recorded, and those bytes
-  held the result (their entry lists no differences) or were written plain --
-  the same result is written plain to the same bytes, so a plain file that does
-  not hold it stays its own content; `--force` always writes.
-  A kept file's entry is written again where the store lost it, and its
-  sidecar only where its bytes changed: viewers version a sidecar by its
-  stamp, and a new one reloads the model. The run says `kept STEP`. A rebuild
-  that exports the bytes the file already has leaves the file, and its stamp,
-  in place. A file that did not hold its result is exported plain by the
-  model's next run, even one whose model is current, with no body run
-  (`generation._reexport`); another result, a forced build or another writer
+  disk when the build started still has the bytes recorded, the store maps
+  those bytes to a tree (their document entry), and they held the result
+  (their entry lists no differences) or were written plain -- the same result
+  is written plain to the same bytes, so a plain file that does not hold it
+  stays its own content; `--force` always writes.
+  A kept file's sidecar is written only where its bytes changed: viewers
+  version a sidecar by its stamp, and a new one reloads the model. The run
+  says `kept STEP`. A rebuild that exports the bytes the file already has
+  leaves the file, and its stamp, in place. A current model's file is exported
+  again by its next run, with no body run (`generation._reexport`, which says
+  why), where it did not hold its result (plain, this time), another writer
+  wrote it, or the store lost its entry (the same bytes, kept in place, mapped
+  and verified again); another result, a forced build or another writer
   writes the names again. Bump `STEP_WRITER_SCHEME` with any change to the
   bytes cadgen writes for the same tree.
 

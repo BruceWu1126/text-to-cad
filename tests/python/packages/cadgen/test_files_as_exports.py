@@ -151,6 +151,31 @@ class FilesAsExportsTest(unittest.TestCase):
             self.assertEqual(plain, self.step.read_bytes())
             self.assertNotIn("does not hold the result", said)
 
+    def test_a_file_whose_entry_the_store_lost_is_mapped_and_verified_again(self) -> None:
+        """A current model's file the store has no entry for is exported again by its next
+        run: the same bytes, which keep the file and its stamp, mapped to the result and
+        verified -- never left for a door to compile the result's own file as a foreign one."""
+        import os
+
+        from cadgen.store.index import remove_entry
+        from cadgen.store.records import document_key
+
+        self.build()
+        digest = hashlib.sha256(self.step.read_bytes()).hexdigest()
+        stamp = os.stat(self.step)
+        remove_entry("document", document_key(digest))
+        self.assertIsNone(self.entry())
+        outcome, said = self.build()
+        self.assertEqual("current", outcome)
+        self.assertIn("rig.step has no entry in the store; writing it again", said)
+        self.assertEqual(digest, hashlib.sha256(self.step.read_bytes()).hexdigest())
+        after = os.stat(self.step)
+        self.assertEqual((stamp.st_mtime_ns, stamp.st_ino), (after.st_mtime_ns, after.st_ino), "the file kept its stamp")
+        entry = self.entry()
+        self.assertEqual(self.record()["tree"], entry["tree"])
+        self.assertNotIn("verified", entry)
+        self.assertEqual("current", self.build()[0])
+
     def test_a_verify_that_cannot_compare_leaves_the_file_its_own_content(self) -> None:
         """A verify that raises comparing the file with the result (a component the store
         cannot decode) has not verified it: the entry maps the bytes to the file's own content
@@ -253,12 +278,17 @@ class FilesAsExportsTest(unittest.TestCase):
 class KeptRuleTest(unittest.TestCase):
     """A build keeps its STEP -- writes and verifies nothing -- only while its record's last
     build had the same tree, wrote the file with this writer, the file still has the bytes
-    it recorded, and those bytes held the result; a file that did not is written plain."""
+    it recorded, the store maps those bytes to a tree, and they held the result; a file that
+    did not is written plain, and the plan says why a file is written again."""
 
     TREE, DIGEST, STEP = "a" * 64, "b" * 64, "/work/STEP/part.step"
 
     def setUp(self) -> None:
+        from cadgen.store.records import note_document_tree
+
         IsolatedCadRoots(self, prefix="kept-rule-")
+        # The file's bytes map to the tree they were written from, verified.
+        note_document_tree(self.DIGEST, self.TREE)
 
     def plan(self, *, output: dict | None = None, tree: str | None = None, on_disk: str | None = None,
              force: bool = False):
@@ -273,14 +303,24 @@ class KeptRuleTest(unittest.TestCase):
         from cadgen.step_export import STEP_WRITER_SCHEME
 
         kept = self.plan()
-        self.assertEqual({"sha256": self.DIGEST, "writer": STEP_WRITER_SCHEME}, kept.kept)
-        for why, plan in (("another result", self.plan(tree="c" * 64)),
-                          ("other bytes on disk", self.plan(on_disk="f" * 64)),
-                          ("forced", self.plan(force=True)),
-                          ("another writer", self.plan(output={"sha256": self.DIGEST, "writer": "cadgen-step-writer-3"}))):
+        self.assertEqual(({"sha256": self.DIGEST, "writer": STEP_WRITER_SCHEME}, ""), (kept.kept, kept.why))
+        for why, plan, said in (("another result", self.plan(tree="c" * 64), ""),
+                                ("other bytes on disk", self.plan(on_disk="f" * 64), ""),
+                                ("forced", self.plan(force=True), ""),
+                                ("another writer", self.plan(output={"sha256": self.DIGEST, "writer": "cadgen-step-writer-3"}),
+                                 "was written by another writer")):
             with self.subTest(why):
                 self.assertIsNone(plan.kept)
                 self.assertFalse(plan.plain)
+                self.assertEqual(said, plan.why)
+
+    def test_a_file_whose_entry_the_store_lost_is_written_again_to_the_same_bytes(self) -> None:
+        from cadgen.store.index import remove_entry
+        from cadgen.store.records import document_key
+
+        remove_entry("document", document_key(self.DIGEST))
+        plan = self.plan()
+        self.assertEqual((None, False, "has no entry in the store"), (plan.kept, plan.plain, plan.why))
 
     def test_a_file_that_did_not_hold_its_result_is_written_plain(self) -> None:
         from cadgen.step_export import STEP_WRITER_SCHEME
@@ -290,6 +330,7 @@ class KeptRuleTest(unittest.TestCase):
         marked = self.plan()
         self.assertIsNone(marked.kept)
         self.assertTrue(marked.plain)
+        self.assertEqual("did not hold its result", marked.why)
         self.assertEqual({"sha256": "", "writer": STEP_WRITER_SCHEME, "plain": True}, marked.output())
         # Another result, a forced build and another writer write the names again.
         for why, plan in (("another result", self.plan(tree="c" * 64)), ("forced", self.plan(force=True)),

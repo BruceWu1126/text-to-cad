@@ -151,10 +151,13 @@ def _publish_sidecar(staged_step: Path, entry_path: Path) -> None:
 class _ExportPlan:
     """What a build does about its STEP (STORE.md §3, *Exports*): keep the file on disk,
     whose recorded output entry is ``kept``, or export the result -- ``plain``, without
-    names, where the file the same result was last written to did not hold it."""
+    names, where the file the same result was last written to did not hold it. ``why`` says
+    why a file the same result was last written to, still on disk, is written again (a
+    current model's re-export, :func:`_reexport`); empty otherwise."""
 
     kept: dict | None
     plain: bool
+    why: str = ""
 
     @property
     def kept_sha256(self) -> str:
@@ -174,11 +177,13 @@ def _export_plan(previous: Mapping[str, object], step_key: str, tree: str, *, fo
                  on_disk: str | None) -> _ExportPlan:
     """The kept rule: a build keeps its STEP, writing and verifying nothing, when its
     record's last build had this very tree, wrote the file with this writer, the file on
-    disk when the build started still has the bytes it recorded, and those bytes held
-    the result or were written plain (the same result is written plain to the same bytes
-    again) -- unless forced. Otherwise it exports, plain where the same result's last
-    file from this writer did not hold it (its document entry lists what differs) or was
-    itself written plain; a forced build, or another writer, writes the names again."""
+    disk when the build started still has the bytes it recorded, the store maps those
+    bytes to a tree (their document entry), and they held the result or were written
+    plain (the same result is written plain to the same bytes again) -- unless forced.
+    Otherwise it exports, plain where the same result's last file from this writer did
+    not hold it (its document entry lists what differs) or was itself written plain; a
+    forced build, or another writer, writes the names again, and a file whose entry the
+    store lost is written again (to the same bytes) and verified again."""
     from cadgen.step_export import STEP_WRITER_SCHEME
     from cadgen.store.records import document_entry_for_hash
 
@@ -188,12 +193,18 @@ def _export_plan(previous: Mapping[str, object], step_key: str, tree: str, *, fo
     sha = str(prior.get("sha256") or "")
     entry = document_entry_for_hash(sha) if sha else None
     marked = bool(entry and entry.get("differ"))
-    if (not force and same and sha and prior.get("writer") == STEP_WRITER_SCHEME and on_disk == sha
+    this_writer = prior.get("writer") == STEP_WRITER_SCHEME
+    if (not force and same and sha and this_writer and on_disk == sha and entry is not None
             and (not marked or prior.get("plain"))):
         return _ExportPlan(kept={key: prior[key] for key in ("sha256", "writer", "plain") if key in prior},
                            plain=bool(prior.get("plain")))
-    return _ExportPlan(kept=None, plain=(not force and same and prior.get("writer") == STEP_WRITER_SCHEME
-                                         and (marked or bool(prior.get("plain")))))
+    why = ""
+    if not force and same and sha and on_disk == sha:
+        why = ("did not hold its result" if marked and not prior.get("plain")
+               else "was written by another writer" if not this_writer
+               else "has no entry in the store" if entry is None else "")
+    return _ExportPlan(kept=None, plain=not force and same and this_writer and (marked or bool(prior.get("plain"))),
+                       why=why)
 
 
 def _export(tree: str, staged: Path, *, names: bool, live: Mapping[str, object],
@@ -236,7 +247,7 @@ def _save_step(spec: EntrySpec, tree: str, plan: _ExportPlan, *, record: dict, s
     from cadgen.catalog import seed_artifact_hash
     from cadgen.daemon import executors
     from cadgen.store.gate import file_stamp, remember_renamed_digest
-    from cadgen.store.records import document_entry_for_hash, forget_output, note_document_tree, write_record
+    from cadgen.store.records import forget_output, note_document_tree, write_record
 
     step_path = spec.step_path.expanduser().resolve()
     model_path = _model_for_spec(spec)
@@ -269,9 +280,9 @@ def _save_step(spec: EntrySpec, tree: str, plan: _ExportPlan, *, record: dict, s
     if _document_pair_state(spec.step_path) != (digest, sidecar):
         raise RuntimeError(f"{spec.cad_ref}: saved files changed during publication; the build record was not updated")
     seed_artifact_hash(spec.step_path, digest)
-    if plan.kept is None or document_entry_for_hash(digest) is None:
+    if plan.kept is None:
         # The bytes, mapped to the tree they were written from before any parse of them:
-        # pending until the verify answers (a kept file's entry, where the store lost it).
+        # pending until the verify answers.
         note_document_tree(digest, tree, producer=producer, verified=False, plain=plan.plain)
     outputs = record["outputs"]
     outputs[str(step_path)] = {**plan.output(), "sha256": digest}
@@ -1111,9 +1122,9 @@ def _note_warnings(texts: list[str]) -> None:
 
 def _reexport(spec: EntrySpec, tree: str, *, logger: CliLogger) -> bool:
     """Write again the STEP of a current model that owes it -- a file that did not hold its
-    result, written plain this time, or one another writer wrote (STORE.md §3) -- without
-    running its body: an export of the recorded result, its publication and its verify.
-    True when it was written."""
+    result, written plain this time, one another writer wrote, or one whose entry the store
+    lost (STORE.md §3) -- without running its body: an export of the recorded result, its
+    publication and its verify. True when it was written."""
     if spec.source != "generated" or not spec.step_output or spec.step_path is None:
         return False
     from contextlib import ExitStack
@@ -1126,9 +1137,8 @@ def _reexport(spec: EntrySpec, tree: str, *, logger: CliLogger) -> bool:
     plan = _export_plan(record, str(spec.step_path.expanduser().resolve()), tree, force=False, on_disk=pair[0])
     if plan.kept is not None:
         return False
-    logger.info(f"{_display_path(spec.step_path)} "
-                + ("did not hold its result; writing it again without names" if plan.plain
-                   else "was written by another writer; writing it again"))
+    logger.info(f"{_display_path(spec.step_path)} {plan.why}; writing it again"
+                + (" without names" if plan.plain else ""))
     with ExitStack() as cleanup:
         _save_step(spec, tree, plan, record=copy.deepcopy(record), sidecar_payload=_raw_source_sidecar(spec.step_path),
                    expected_document_pair=pair, producer=(document_entry_for_hash(pair[0] or "") or {}).get("producer"),
@@ -1152,23 +1162,24 @@ def _ensure_reused_display(spec: EntrySpec, tree: str | None, *, progress: objec
         if snapshot is None:
             return
         document_hash, tree = snapshot
-        producer = _reused_display_producer(
-            document_hash, tree, (document_entry_for_hash(document_hash) or {}).get("producer"))
+        producer = _reused_display_producer(document_hash, tree, document_entry_for_hash(document_hash) or {})
     _await_display(_request_display(tree or "", producer=producer), progress=progress, logger=logger)
 
 
-def _reused_display_producer(document_hash: str, tree: str, hint: object) -> object:
+def _reused_display_producer(document_hash: str, tree: str, entry: Mapping[str, object]) -> object:
     """The producer a reused build derives its document's display data under.
 
-    The document's hint while this runtime implements it, or while the store holds every
-    part under it (a view reads those). Otherwise -- the kernel was upgraded, or another
-    cadgen wrote the hint -- this runtime's, and the document is re-attested with it, so
-    neither this build nor a view asks again for parts no worker can make. Re-attesting is
-    best effort: a store this process cannot write keeps the hint it has."""
+    The document ``entry``'s hint while this runtime implements it, or while the store
+    holds every part under it (a view reads those). Otherwise -- the kernel was upgraded,
+    or another cadgen wrote the hint -- this runtime's, and the document is re-attested
+    with it, keeping what else the entry says (whether its verify is pending, what
+    differs), so neither this build nor a view asks again for parts no worker can make.
+    Re-attesting is best effort: a store this process cannot write keeps the hint it has."""
     import contextlib
 
     from cadgen.store import parts
 
+    hint = entry.get("producer")
     try:
         current = parts.producer_identity()
         hinted = parts.producer_fields(hint) if hint is not None else None
@@ -1180,7 +1191,9 @@ def _reused_display_producer(document_hash: str, tree: str, hint: object) -> obj
     from cadgen.store.records import note_document_tree
 
     with contextlib.suppress(OSError, StoreUnwritableError):
-        note_document_tree(document_hash, tree, producer=current)
+        note_document_tree(document_hash, tree, kind=str(entry.get("kind") or "step"), producer=current,
+                           verified=entry.get("verified") is not False, plain=bool(entry.get("plain")),
+                           differ=entry.get("differ"))
     return current
 
 
@@ -1815,12 +1828,14 @@ def generate_step_targets(
                 logger.info(
                     f"{_display_path(Path(document)) if document else spec.cad_ref} is current; not rebuilt"
                 )
-                # A current model can still owe its parts' display data (a cleared
-                # store), its STEP (a file that did not hold its result) and declared
-                # mesh exports (deleted file, changed declaration): heal them all without
-                # leaving the no-op path.
-                _ensure_reused_display(spec, tree, logger=logger)
+                # A current model can still owe its STEP (a file that did not hold its
+                # result, one whose entry the store lost), its parts' display data (a
+                # cleared store) and declared mesh exports (deleted file, changed
+                # declaration): heal them all without leaving the no-op path -- the STEP
+                # first, so the display data derived is that of the result its bytes then
+                # map to, never of a marked file's own content.
                 rewritten = _reexport(spec, tree, logger=logger)
+                _ensure_reused_display(spec, tree, logger=logger)
                 if _produce_declared_mesh_exports(spec, logger=logger, source_tree=tree) or rewritten:
                     from cadgen.daemon.telemetry import job_reused
 
