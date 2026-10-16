@@ -297,13 +297,14 @@ the publish rule, the sweeper and every object address stay with bytes.
 records each kernel call from the model's own code as a **feature**, named
 `<function>.<operation><count>`: the enclosing function, the operation, and how
 many times that function had called that operation in the run, this call
-included (`dial.extrude1`) -- or by the label an author gave a shape it made,
-which pins the name (`lid`). A component's lineage follows each of its faces,
-edges and vertices back through the features to the one that made it, and
-names it `<kind>:<feature>.<n>`: the feature and the element's number among
-the elements of its kind the feature made, in the order of its result
-(`f:dial.extrude1.3`); a piece of an element a later feature split takes its
-number among the pieces after a further dot (`f:dial.extrude1.3.2`). A feature
+included (`dial.extrude1`) -- or by the label an author gave the shape it made,
+once that shape is handed to another construction (an assembly's `Compound` of
+labelled parts), which pins the name (`lid`). A component's lineage follows
+each of its faces, edges and vertices back through the features to the one
+that made it, and names it `<kind>:<feature>.<n>`: the feature and the
+element's number among the elements of its kind the feature made, in the order
+of its result (`f:dial.extrude1.3`); a piece of an element a later feature split
+takes its number among the pieces after a further dot (`f:dial.extrude1.3.2`). A feature
 that trimmed or otherwise modified an element does not rename it: the last
 one is recorded beside the name, for `store where`. A feature's file and line
 are never in a name -- they are the provenance entry's (§3) -- so moving code
