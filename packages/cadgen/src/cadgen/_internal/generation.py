@@ -82,7 +82,10 @@ def _stage(spec: EntrySpec, cleanup: object) -> Path:
     """A folder beside the saved STEP for the export to write into, removed with ``cleanup``.
     A build killed while it saved (its caller left) left its staging folder, a full copy
     of its document, beside its output: gone before this one stages. The file takes its
-    final basename there, so its labels and bytes do not depend on the folder."""
+    final basename there, so its labels and bytes do not depend on the folder. The export
+    job writes into it from another process (a daemon worker's), which may still hold the
+    staged file when an interrupt unwinds the build: a removal Windows then refuses never
+    replaces the interrupt, and the next build's sweep removes what is left."""
     from tempfile import TemporaryDirectory
 
     from cadgen._internal.filetrace import paused
@@ -92,7 +95,7 @@ def _stage(spec: EntrySpec, cleanup: object) -> Path:
     with paused():
         sweep_stages(spec.step_path.parent)
     return Path(cleanup.enter_context(TemporaryDirectory(prefix=stage_prefix(spec.step_path.stem),
-                                                         dir=spec.step_path.parent)))
+                                                         dir=spec.step_path.parent, ignore_cleanup_errors=True)))
 
 
 def _sha256_of(path: Path) -> str:
