@@ -38,40 +38,23 @@ import math
 import struct
 from typing import Any, Callable, Mapping
 
-STEP_REAL_RANGE = (0.1, 1000.0)
-STEP_REAL_RANGE_WIDTH = 15
-
 
 class Ineligible(ValueError):
     """The ordinary STEP read-back must build this document tree."""
 
 
-def written_text(value: float) -> str:
-    """The text cadgen's writer prints for the finite real ``value``.
-
-    A real within ``[0.1, 1000)`` in magnitude takes twelve decimals cut to
-    fifteen characters (sign included), and any other real thirteen
-    significant digits in exponent form; trailing zeros are dropped and zero of
-    either sign is written ``0.``. A test pins this against the real writer.
-    """
-    if value == 0.0:
-        return "0."
-    if STEP_REAL_RANGE[0] <= abs(value) < STEP_REAL_RANGE[1]:
-        return ("%.12f" % value)[:STEP_REAL_RANGE_WIDTH].rstrip("0")
-    mantissa, exponent = ("%.12E" % value).split("E")
-    return mantissa.rstrip("0") + "E" + exponent
-
-
 def written_real(value: float) -> float:
     """The number OCCT's STEP reader returns for ``value`` after cadgen's writer
-    printed it (:func:`written_text`): the nearest double to that text.
-    :func:`compose_document_tree` checks this against every child's own
-    document before trusting it for the parent's.
+    printed it (``step_reals.written_real``). :func:`compose_document_tree`
+    checks this against every child's own document before trusting it for the
+    parent's.
     """
+    from cadgen._internal import step_reals
+
     value = float(value)
     if not math.isfinite(value):
         raise Ineligible("non-finite placement")
-    return float(written_text(value)) + 0.0
+    return step_reals.written_real(value)
 
 
 def _same_bits(a: float, b: float) -> bool:

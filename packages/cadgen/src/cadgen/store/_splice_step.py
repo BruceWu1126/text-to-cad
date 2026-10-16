@@ -29,7 +29,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from cadgen.store._compose_readback import pure_translation, written_text
+from cadgen._internal.step_reals import written_text
+from cadgen.store._compose_readback import pure_translation
 
 
 class Ineligible(ValueError):
@@ -101,7 +102,7 @@ def _renumber(body: bytes, prefix: bytes) -> bytes:
 
 
 def _occt_real(value: float) -> bytes:
-    """The text OCCT's writer prints for a real (``_compose_readback.written_text``)."""
+    """The text OCCT's writer prints for a real (``step_reals.written_text``)."""
     value = float(value)
     if not math.isfinite(value):
         raise Ineligible("a placement is not finite")
