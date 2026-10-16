@@ -2,8 +2,9 @@
 and edge by its name, on the entity written for it (``step_names``).
 
 Any reader of the file gets those names from the file alone, on the elements they were
-written on; and a file written without names is the file the writer wrote before names
-existed, which a named file is too, byte for byte, but for its names.
+written on, and a document of one shape is that one product; and a file written without
+names is the file the writer wrote before names existed, which a named file is too, byte
+for byte, but for its names.
 """
 
 from __future__ import annotations
@@ -151,6 +152,32 @@ class StepNamesRoundTripTest(unittest.TestCase):
         again = self.named.with_name("again.step")
         self.assertEqual(export_build123d_step_file(self.root, again, names=lambda leaf: self.placed.get(id(leaf))),
                          self.named_digest, "the same names write the same bytes")
+
+    def test_a_document_of_one_shape_is_one_product_named_as_the_result_names_it(self) -> None:
+        from OCP.gp import gp_Trsf
+        from OCP.TopLoc import TopLoc_Location
+
+        from cadgen._internal.step_scene_loader import load_step_scene
+        from cadgen.step_export import export_build123d_step_file
+
+        # A stored result's one leaf, placed as materialize places it: at a location made
+        # from the identity matrix, which OCCT does not take for no location.
+        shape = self.shapes["mirrored"]
+        root = type(shape)(shape.wrapped.Moved(TopLoc_Location(gp_Trsf())))
+        self.assertFalse(root.wrapped.Location().IsIdentity())
+        root.label = "bracket_only"
+        path = self.named.with_name("one.step")
+        export_build123d_step_file(root, path, names=lambda leaf: self.names["mirrored"] if leaf is root else None)
+        scene = load_step_scene(path)
+        self.assertEqual([(node.name, node.children) for node in scene.roots], [("bracket_only", [])])
+        names = scene.prototype_step_names[scene.roots[0].prototype_key]
+        self.assertEqual((names.part, sorted(filter(None, names.faces))),
+                         (_KEYS["mirrored"], sorted(self.names["mirrored"].faces)))
+        # Named or not is the file's mode, not what it names: a root it names nothing of
+        # is one product too.
+        export_build123d_step_file(root, path, names=lambda leaf: None)
+        self.assertEqual([(node.name, node.children) for node in load_step_scene(path).roots],
+                         [("bracket_only", [])])
 
     def test_face_colours_survive_on_the_faces_they_were_given_where_the_writer_rebuilds_them(self) -> None:
         import build123d as bd

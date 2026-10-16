@@ -113,6 +113,18 @@ def quantity_color_rgba_from_color(color: object) -> object | None:
     return wrapped_rgba
 
 
+def _is_identity(location: Any) -> bool:
+    """Whether ``location`` places nothing: no transformation, or one whose matrix is
+    exactly the identity's (a location made from an identity matrix is not ``IsIdentity``)."""
+    if location.IsIdentity():
+        return True
+    transformation = location.Transformation()
+    return all(
+        transformation.Value(row, column) == (1.0 if row == column else 0.0)
+        for row in range(1, 4) for column in range(1, 5)
+    )
+
+
 def _create_bin_xcaf_doc(to_export: Any, names: Callable[[Any], ComponentNames | None] | None = None) -> Any:
     """The XCAF document of ``to_export``. ``names``, given a leaf shape (or the root of a
     document that is one shape), answers what the file names it by: its part key and its
@@ -327,11 +339,17 @@ def _create_bin_xcaf_doc(to_export: Any, names: Callable[[Any], ComponentNames |
         shape_tool.UpdateAssemblies()
         return doc
 
-    # A document that is one shape: its root is its one leaf.
+    # A document that is one shape: its root is its one leaf. XCAF keeps a shape with a
+    # location as a reference, which the writer wraps in an assembly of one, read back as a
+    # group the result does not have; named, a root placed at the identity (as a stored
+    # result places it: ``materialize`` gives every leaf a location) is the bare shape.
     unlocated = shape_without_location(to_export)
     component_names = names(to_export) if names is not None else None
     held, replaced = definition_shape(unlocated, component_names)
-    root_shape = to_export.wrapped if replaced is None else held.Located(to_export.wrapped.Location())
+    if names is not None and _is_identity(root_location):
+        root_shape = held
+    else:
+        root_shape = to_export.wrapped if replaced is None else held.Located(to_export.wrapped.Location())
     root_label = shape_tool.AddShape(root_shape, is_assembly)
     definition_label = shape_tool.FindShape(held, findInstance=False) if not root_label.IsNull() else root_label
     set_face_colors(definition_label, unlocated, to_export, replaced)
@@ -1440,8 +1458,10 @@ def export_build123d_step_file(
     ``names``, given each leaf shape (or the shape itself, for a document of one), answers
     what the file names that component by (``step_names.ComponentNames``: its part key, on
     its product, and its faces' and edges' names, by the ordinals of its unlocated shape),
-    or None. Names move no geometry: a named file is the unnamed one, byte for byte, but for
-    the names. Without ``names`` the file is written as it always was."""
+    or None. A named file is written so that its reader reads the result: every component
+    keeps its names, and a document of one shape placed at the identity is that one
+    product; otherwise it is the unnamed file, byte for byte, but for the names. Without
+    ``names`` the file is written as it always was."""
     with (logger.timed("build XCAF document") if logger is not None else nullcontext()):
         doc = _create_bin_xcaf_doc(to_export, names=names)
     return write_xcaf_doc_step_file(
