@@ -216,7 +216,7 @@ class TimeLines(unittest.TestCase):
         tree.close()
         self.assertEqual(self._text(out), [
             "[cadgen] built /m/STEP/arm.step in 8m34s: model code 8m20s, cadgen 2.0s, "
-            "waiting on children 12.0s",
+            "children 12.0s",
         ])
         done = [line for line in _lines_json(out) if line["state"] == "done"]
         self.assertEqual(done[0]["timings"]["modelSeconds"], 500.0)

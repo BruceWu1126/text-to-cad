@@ -192,13 +192,6 @@ class Broker:
             event = copy.deepcopy(entry["result"]) if not result_seen else None
             return event, entry["done"].is_set(), int(entry["exit"] if entry["exit"] is not None else 1)
 
-    def claim(self, model: str, closure: str) -> dict[str, Any] | None:
-        """Register ``(model, closure)`` as in flight. Returns None when it is now
-        yours to build, else the entry to wait on (a job with identical source is
-        already running)."""
-        owned, entry = self.claim_entry(model, closure)
-        return None if owned else entry
-
     def _retire_orphan_locked(self, entry: dict[str, Any]) -> None:
         key = entry["key"]
         if self._inflight.get(key) is entry:

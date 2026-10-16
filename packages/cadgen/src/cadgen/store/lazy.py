@@ -319,10 +319,10 @@ class LazyCompound(Compound):
                 if job.result_ready:
                     tree = job.wait_result()
                 else:
-                    from cadgen._internal.build_timing import waiting_for_children
+                    from cadgen._internal.build_timing import child_build
                     from cadgen.daemon.broker import yielded
 
-                    with waiting_for_children(), yielded():
+                    with child_build(), yielded():
                         tree = job.wait_result()
             except RuntimeError as exc:
                 raise ChildBuildError(
@@ -348,10 +348,10 @@ class LazyCompound(Compound):
         if job.done:
             code = job.wait()
         else:
-            from cadgen._internal.build_timing import waiting_for_children
+            from cadgen._internal.build_timing import child_build
             from cadgen.daemon.broker import yielded
 
-            with waiting_for_children(), yielded():
+            with child_build(), yielded():
                 code = job.wait()
         if code != 0:
             raise ChildBuildError(

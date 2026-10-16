@@ -612,6 +612,19 @@ class TraceTest(KernelMemoCase):
         self.assertTrue([name for name in after[1]["faces"] if name.startswith("f:lid.")], after[1]["faces"])
         self.assertNotEqual(after, plain_after, "made after it: the label names the box's feature there")
 
+    def test_a_nested_run_s_features_are_its_own(self) -> None:
+        """A child model built inside its parent's body runs in a run of its own:
+        its features land in its trace, and the parent's trace goes on without them."""
+        from build123d import Solid
+
+        with kernel_memo.run(None) as outer:
+            Solid.make_box(1, 1, 1)
+            with kernel_memo.run(None) as inner:
+                Solid.make_cylinder(1, 2)
+            Solid.make_sphere(1)
+        self.assertEqual([feature.op for feature in outer.trace.features], ["Solid.make_box", "Solid.make_sphere"])
+        self.assertEqual([feature.op for feature in inner.trace.features], ["Solid.make_cylinder"])
+
     def test_a_shape_no_feature_made_has_no_lineage_even_placed(self) -> None:
         from build123d import Location, Solid
 

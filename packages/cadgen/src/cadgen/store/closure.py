@@ -66,6 +66,7 @@ import was found past (``<import roots N>``); a folder the model's code listed
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import hashlib
 import os
@@ -74,7 +75,7 @@ import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Iterable, Iterator, Mapping
 
 from cadgen._internal.atomic_replace import is_transient_name
 from cadgen._internal.source_hash import (
@@ -946,14 +947,18 @@ def static_closure(script: Path) -> StaticImports:
 # --- hash at execution ----------------------------------------------------------
 
 
-_ACTIVE_HASHES: dict[str, str] | None = None
-_ACTIVE_SOURCES: dict[str, bytes] | None = None
+_ACTIVE: "ExecutionHashes | None" = None  # the innermost scope open on this process
 _HOOK_INSTALLED = False
+# Which first-party files ran while a module was being executed by the build's loader
+# (``generation_runner._SourceOnlyLoader``): its own, and every module its import ran,
+# transitively. A model's build inside its parent's takes its module's from here
+# (:class:`ExecutionHashes`); the stack is the modules this thread is executing now.
+_IMPORT_RUNS: dict[str, set[str]] = {}
+_IMPORTING = threading.local()
 
 
 def _exec_hash_hook(event: str, args: tuple) -> None:
-    hashes = _ACTIVE_HASHES
-    if hashes is None or event != "exec" or not args:
+    if _ACTIVE is None or event != "exec" or not args:
         return
     file_name = getattr(args[0], "co_filename", None)
     if not file_name:
@@ -963,7 +968,7 @@ def _exec_hash_hook(event: str, args: tuple) -> None:
     except (OSError, ValueError):
         return
     key = str(path)
-    if key in hashes or not path.is_file() or not is_first_party_source_file(path):
+    if key in _ACTIVE.facts or not path.is_file() or not is_first_party_source_file(path):
         return
     try:
         payload = path.read_bytes()
@@ -972,40 +977,77 @@ def _exec_hash_hook(event: str, args: tuple) -> None:
     # One read: the hash AND the bytes the reach analysis will slice, taken at
     # the moment the module body executes. Analysed once, here: the walk over
     # the same bytes is a memo hit.
-    hashes[key] = execution_digest(payload, key)
-    sources = _ACTIVE_SOURCES
-    if sources is not None:
-        sources[key] = payload
+    _executed(key, payload)
+
+
+def _executed(key: str, payload: bytes) -> None:
+    """A first-party file ran with ``payload``: a fact of the build (the first value
+    stands; a file edited mid-build is caught by the gate), owned by the innermost
+    scope, and by every module this thread is importing."""
+    scope = _ACTIVE
+    if scope is None:
+        return
+    if key not in scope.facts:
+        scope.facts[key] = execution_digest(payload, key)
+        scope.sources[key] = payload
+    scope.hashes.setdefault(key, scope.facts[key])
+    for module in getattr(_IMPORTING, "stack", ()):
+        _IMPORT_RUNS[module].add(key)
+
+
+@contextlib.contextmanager
+def importing(path: Path | str) -> Iterator[None]:
+    """The loader is executing the module at ``path``: every first-party file that
+    runs meanwhile ran because it was imported (``_IMPORT_RUNS``)."""
+    key = str(Path(path).resolve())
+    stack = getattr(_IMPORTING, "stack", None)
+    if stack is None:
+        stack = _IMPORTING.stack = []
+    _IMPORT_RUNS[key] = set()
+    stack.append(key)
+    try:
+        yield
+    finally:
+        stack.pop()
 
 
 class ExecutionHashes:
     """Context: hash every first-party file at the moment it executes, and keep
-    the bytes so the closure's reach analysis describes the revision that ran."""
+    the bytes so the closure's reach analysis describes the revision that ran.
 
-    def __init__(self) -> None:
-        self.hashes: dict[str, str] = {}
-        self.sources: dict[str, bytes] = {}
-        self._previous: tuple[dict[str, str] | None, dict[str, bytes] | None] = (None, None)
+    Nests, for a child model built inside its parent's body: the inner scope owns
+    what executes while it is the innermost and, with ``imported``, what importing
+    that module ran in this build (:func:`importing`) -- so a child's closure is the
+    same built alone or inside its parent -- and the outer scope never owns the
+    inner's executions. The facts are the build's: the hash and the bytes each file
+    ran with, shared by every scope of the build and read by any closure walk."""
+
+    def __init__(self, *, imported: Path | str | None = None) -> None:
+        self.hashes: dict[str, str] = {}  # what this scope's build executed, by path, as it ran
+        self.facts: dict[str, str] = {}  # every file the build executed, by path, as it ran
+        self.sources: dict[str, bytes] = {}  # the bytes each of those ran with
+        self._imported = imported
+        self._previous: ExecutionHashes | None = None
 
     def __enter__(self) -> "ExecutionHashes":
-        global _ACTIVE_HASHES, _ACTIVE_SOURCES, _HOOK_INSTALLED
+        global _ACTIVE, _HOOK_INSTALLED
         if not _HOOK_INSTALLED:
             sys.addaudithook(_exec_hash_hook)
             _HOOK_INSTALLED = True
-        self._previous = (_ACTIVE_HASHES, _ACTIVE_SOURCES)
-        _ACTIVE_HASHES = self.hashes
-        _ACTIVE_SOURCES = self.sources
+        self._previous = _ACTIVE
+        if _ACTIVE is not None:
+            self.facts, self.sources = _ACTIVE.facts, _ACTIVE.sources
+        if self._imported is not None:
+            key = str(Path(self._imported).resolve())
+            for path in (key, *sorted(_IMPORT_RUNS.get(key, ()))):
+                if path in self.facts:
+                    self.hashes[path] = self.facts[path]
+        _ACTIVE = self
         return self
 
     def __exit__(self, *exc: object) -> None:
-        global _ACTIVE_HASHES, _ACTIVE_SOURCES
-        _ACTIVE_HASHES, _ACTIVE_SOURCES = self._previous
-        if _ACTIVE_HASHES is not None:
-            for key, value in self.hashes.items():
-                _ACTIVE_HASHES.setdefault(key, value)
-        if _ACTIVE_SOURCES is not None:
-            for key, payload in self.sources.items():
-                _ACTIVE_SOURCES.setdefault(key, payload)
+        global _ACTIVE
+        _ACTIVE = self._previous
 
 
 def note_compiled_source(path: Path | str, source: bytes) -> None:
@@ -1013,17 +1055,13 @@ def note_compiled_source(path: Path | str, source: bytes) -> None:
     and the bytes, so the reach analysis reads the revision that ran. The first
     value stands; a file edited mid-build is caught by the gate.
     """
-    hashes = _ACTIVE_HASHES
-    if hashes is None:
+    if _ACTIVE is None:
         return
     try:
         key = str(Path(path).expanduser().resolve())
     except (OSError, ValueError):
         return
-    if key not in hashes:
-        hashes[key] = execution_digest(source, key)
-        if _ACTIVE_SOURCES is not None:
-            _ACTIVE_SOURCES[key] = source
+    _executed(key, source)
 
 
 # --- assembling the closure ------------------------------------------------------

@@ -28,7 +28,7 @@ from cadgen._internal.build_timing import (  # noqa: E402
     record_fields,
     slowdown_warning,
     time_line,
-    waiting_for_children,
+    child_build,
 )
 
 
@@ -58,7 +58,7 @@ class Formatting(unittest.TestCase):
         )
         timings.update(childrenSeconds=40.0, queuedSeconds=3.0)
         self.assertTrue(time_line("a.step", timings).endswith(
-            "cadgen 1m22s, waiting on children 40.0s, queued for a build slot 3.0s"))
+            "cadgen 1m22s, children 40.0s, queued for a build slot 3.0s"))
 
 
 class SlowdownRule(unittest.TestCase):
@@ -81,18 +81,18 @@ class Measuring(unittest.TestCase):
                 clock.now = 1.0
                 with model_body(None):
                     clock.now = 2.0
-                    with waiting_for_children():  # a child's build: 3 s
+                    with child_build():  # a child's build: 3 s
                         clock.now = 5.0
                     clock.now = 6.0
                     with cadgen_work():  # loading a child: 1 s, of which 0.5 s waiting
                         clock.now = 6.2
-                        with waiting_for_children():
+                        with child_build():
                             clock.now = 6.7
                         clock.now = 7.0
                     clock.now = 10.0
                     self.assertEqual(record_fields(), {}, "the body is not finished")
                 clock.now = 11.0
-                with waiting_for_children():  # the outputs it owes after the body: 1 s
+                with child_build():  # a child built after the body: 1 s
                     clock.now = 12.0
                 measured.queued = 0.25
                 clock.now = 14.0
@@ -116,7 +116,7 @@ class Measuring(unittest.TestCase):
             self.assertEqual(record_fields(), {})
 
     def test_nothing_is_measured_outside_a_build(self):
-        with model_body(None), waiting_for_children(), cadgen_work():
+        with model_body(None), child_build(), cadgen_work():
             pass
         self.assertIsNone(build_timing.current())
         self.assertEqual(record_fields(), {})

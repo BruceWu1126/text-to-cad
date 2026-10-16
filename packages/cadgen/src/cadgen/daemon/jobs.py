@@ -294,9 +294,6 @@ class JobLedger:
                 if event.get("error"):
                     job["error"] = str(event["error"])
                 job["finishedAt"] = now
-            result = event.get("sourceResult")
-            if isinstance(result, dict) and result.get("model") and result.get("tree"):
-                job.setdefault("sourceResults", {}).setdefault(str(result["model"]), copy.deepcopy(result))
             for field, (bucket, kept) in _KEPT_RESULT_FIELDS.items():
                 payload = event.get(field)
                 if not isinstance(payload, dict) or not payload.get("output") or not payload.get("tree"):
