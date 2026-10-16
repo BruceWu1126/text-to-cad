@@ -18,8 +18,9 @@ an edit elsewhere in the model -- another part's feature, a call no element of
 this part descends from -- renames nothing here. An author's label pins the
 name instead, in what is made of the labelled shape: a shape the model labels
 and hands to another construction names the feature that made it by that label
-(``lid``) in every part that feature is an ancestor of, the part's first
-feature to claim a label keeping it -- but not in the part that shape is itself:
+(``lid``) in every part made from that call on that the feature is an ancestor
+of, the part's first feature to claim a label keeping it -- never in a part made
+before the label reached a construction, and not in the part that shape is itself:
 there (an assembly's leaf) the label names the occurrence, and the elements keep
 their construction's names, so identical constructions labelled apart are one
 part. A function or a label that is not an ASCII identifier
@@ -57,11 +58,11 @@ modified an element do not rename it; the last of them is recorded beside its
 name. An element with no lineage has no name here (``None``): its part names it
 by its geometry (``geometric_tokens``).
 
-``Trace.lineage`` is a component's whole account, the object its tree entry
-names (``component_package``): the feature that made the body and, per element
-ordinal, its name; ``Trace.account`` is that and the feature each name of it
-stands for; ``Trace.feature_rows`` is the run's features, what the provenance
-entry keeps with those names (``cadgen.store.provenance``).
+``Trace.account`` is a component's whole account: its lineage, the object its
+tree entry names (``component_package``) -- the feature that made the body and,
+per element ordinal, its name -- and the feature each name of it stands for;
+``Trace.feature_rows`` is the run's features, what the provenance entry keeps
+with those names (``cadgen.store.provenance``).
 """
 
 from __future__ import annotations
@@ -171,8 +172,11 @@ class Feature:
     # The lineage tables are computed from these on demand.
     handles: list[Any] = field(default_factory=list, repr=False)
     results: list[Any] = field(default_factory=list, repr=False)
-    # The author's label for what this feature made, when one pins its name.
+    # The author's label for what this feature made, when one pins its name, and the
+    # feature whose call pinned it: a part made before that call is named as if the
+    # label had never been set.
     label: str | None = None
+    pinned_at: int | None = None
     _tables: dict[tuple[int, str], dict[int, tuple]] = field(default_factory=dict, repr=False)
     # Per element kind, each element this feature made (its key where the result
     # holding it was returned: :func:`_placed`) -> its number among them, in the
@@ -278,7 +282,7 @@ class Trace:
         self.features.append(feature)
         for shape, index, _handle in inputs:
             if index is not None:
-                self._pin(index, getattr(shape, "__dict__", {}).get("label"))
+                self._pin(index, getattr(shape, "__dict__", {}).get("label"), at=feature.index)
         for shape in results:
             try:
                 self._by_object[id(shape)] = (weakref.ref(shape), feature.index)
@@ -286,18 +290,19 @@ class Trace:
                 pass
         return feature
 
-    def _pin(self, index: int, label: object) -> None:
+    def _pin(self, index: int, label: object, *, at: int) -> None:
         """Name feature ``index`` by the author's ``label``, the first one it is
-        handed on with, in what is made of the shape it made (:meth:`_names`); a
-        label that is an occurrence token (a tree's, not an author's) pins nothing.
-        Of a part's features, the first to claim a label keeps it."""
+        handed on with -- by the call of feature ``at`` -- in what is made of the shape
+        it made from that call on (:meth:`_names`); a label that is an occurrence token
+        (a tree's, not an author's) pins nothing. Of a part's features, the first to
+        claim a label keeps it."""
         from cadgen._internal.tree_tokens import is_occurrence_token
 
         if not isinstance(label, str) or not label or is_occurrence_token(label):
             return
         feature = self.features[self._unwrapped(index)]
         if feature.label is None:
-            feature.label = identifier(label)
+            feature.label, feature.pinned_at = identifier(label), at
 
     def _unwrapped(self, index: int) -> int:
         """The feature that made what feature ``index`` returned, through the features
@@ -334,20 +339,17 @@ class Trace:
         """The run's features in call order, as the provenance entry records them."""
         return [feature.row() for feature in self.features]
 
-    def lineage(self, body: Any, made_by: Callable[[Any], int | None]) -> dict[str, Any] | None:
+    def account(self, body: Any, made_by: Callable[[Any], int | None]) -> tuple[dict[str, Any] | None, dict[str, int]]:
         """The lineage of one unlocated component ``body`` (a ``TopoDS_Shape``):
         ``{"made": <feature name or None>, "faces": [...], "edges": [...],
         "vertices": [...], "modified": {<element name>: <feature name>}}``, each
         list holding an element name or None per ``TopExp.MapShapes_s`` ordinal,
         and ``modified`` the last feature that modified each named element that
-        was. ``made_by`` answers, for a ``TopoDS_TShape``, the feature of this run
-        that made it. None when no feature of the run made any of it."""
-        return self.account(body, made_by)[0]
-
-    def account(self, body: Any, made_by: Callable[[Any], int | None]) -> tuple[dict[str, Any] | None, dict[str, int]]:
-        """:meth:`lineage`, and the feature (its index in the run) each feature name it
-        holds stands for, with the features those were given: what ``store where``
-        answers a name of this part with."""
+        was; None when no feature of the run made any of it. ``made_by`` answers,
+        for a ``TopoDS_TShape``, the feature of this run that made it. With it, the
+        feature (its index in the run) each feature name it holds stands for, with
+        the features those were given: what ``store where`` answers a name of this
+        part with."""
         self._made_by = made_by
         maker = self._maker(made_by, body)
         owners = self._owners(made_by, body)
@@ -364,7 +366,8 @@ class Trace:
         named_features |= {modifier for traced in traced_by_kind for _made, modifier in traced if modifier is not None}
         if made_feature is not None:
             named_features.add(made_feature)
-        names = self._names([index for _shape, index in owners] + sorted(named_features), made_feature)
+        roots = [index for _shape, index in owners] + sorted(named_features)
+        names = self._names(roots, made_feature, made_at=max(roots))
         payload: dict[str, Any] = {"made": None if made_feature is None else names[made_feature]}
         modified: dict[str, str] = {}
         named = False
@@ -393,14 +396,16 @@ class Trace:
             stands.update(given for given in self.features[index].inputs if given is not None)
         return payload, {names[index]: index for index in sorted(stands)}
 
-    def _names(self, roots: list[int], body: int | None) -> dict[int, str]:
+    def _names(self, roots: list[int], body: int | None, *, made_at: int) -> dict[int, str]:
         """The name of each feature a part descends from -- ``roots`` and, transitively,
         every feature that made what one of them was given -- counted among them in
-        call order: a label, the first of the part's features to claim it keeping it,
+        call order: a label pinned by the time the part was made (by feature ``made_at``,
+        the last of its own), the first of the part's features to claim it keeping it,
         else ``<function>.<operation><count>``, every feature counting in its stem.
         ``body`` is the feature that made the part's body, whose own label names the
         occurrence and pins nothing here: identical constructions labelled apart are
-        one part, named alike."""
+        one part, named alike. A label pinned later -- set on a shape after it was given
+        to the construction that made this part -- renames nothing here."""
         seen: set[int] = set()
         pending = [index for index in roots if index is not None]
         while pending:
@@ -416,7 +421,8 @@ class Trace:
             feature = self.features[index]
             stem = feature.stem
             counts[stem] += 1
-            if feature.label is not None and index != body and feature.label not in labels:
+            if (feature.label is not None and feature.pinned_at is not None and feature.pinned_at <= made_at
+                    and index != body and feature.label not in labels):
                 labels.add(feature.label)
                 names[index] = feature.label
             else:

@@ -604,7 +604,7 @@ _LINEAGE_KINDS = (("faces", "face"), ("edges", "edge"), ("vertices", "vertex"))
 
 
 def lineage_bytes(lineage: Mapping[str, Any]) -> bytes:
-    """A component's lineage (``kernel_trace.Trace.lineage``) as the object its tree
+    """A component's lineage (``kernel_trace.Trace.account``) as the object its tree
     entry names: canonical JSON, checked as :func:`read_lineage` reads it."""
     payload = canonical_json_bytes(lineage)
     read_lineage(payload)

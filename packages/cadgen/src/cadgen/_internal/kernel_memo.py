@@ -408,7 +408,7 @@ class _Run:
 
     def identify(self, shape: Any) -> tuple[str | None, dict[str, Any] | None]:
         """What names one component this run made: its construction key
-        (:func:`construction_key`) and its lineage (``kernel_trace.Trace.lineage``),
+        (:func:`construction_key`) and its lineage (``kernel_trace.Trace.account``),
         either None when the run cannot say. The feature each name of the lineage
         stands for is kept for :meth:`names_for`: the first leaf's, for a part the run
         made more than once (identical constructions are one part)."""

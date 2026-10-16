@@ -461,8 +461,9 @@ question with another's name.
   feature that made it -- `<function>.<operation><count>`, counted among the
   features the part descends from so an edit elsewhere renames nothing, or the
   label an author gave the shape, which pins it in what is made of that shape
-  (on a part placed as it is, a label names the occurrence: parts made alike
-  and labelled apart are one part) -- and its number among the elements of its
+  once labelled (a label set after a construction used the shape renames
+  nothing it made; on a part placed as it is, a label names the occurrence:
+  parts made alike and labelled apart are one part) -- and its number among the elements of its
   kind that feature made, `f:dial.extrude1.3`, with a piece's number after a
   later split. A ref is the occurrence's **token** (`o:`, from its place in
   the tree: parent token, name, rounded placement) and the element's name:

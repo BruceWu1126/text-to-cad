@@ -307,8 +307,10 @@ it and, transitively, whatever they were given), in call order:
 many of those features were that function's calls of that operation, this one
 included (`dial.extrude1`) -- or by the label an author gave the shape it made,
 once that shape is handed to another construction, which pins the name (`lid`)
-in every part made of that shape, the part's first feature to claim a label
-keeping it. The part the labelled shape is itself -- an assembly's leaf -- is
+in every part made of that shape from that call on, the part's first feature to
+claim a label keeping it; a part made before the label reached a construction
+keeps the names it had, so labelling a shape after using it renames nothing
+already made. The part the labelled shape is itself -- an assembly's leaf -- is
 not named by it: there the label names the occurrence (`#lid`), so identical
 constructions labelled apart (`screw:0`, `screw:1`) are one part, written once
 and placed twice. A function or label that is not an ASCII identifier is

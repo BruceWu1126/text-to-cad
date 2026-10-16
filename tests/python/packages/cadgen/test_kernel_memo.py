@@ -588,6 +588,30 @@ class TraceTest(KernelMemoCase):
         self.assertTrue(bosses, plate_lineage["faces"])
         self.assertFalse([name for name in plate_lineage["faces"] if "cylinder" in name], plate_lineage["faces"])
 
+    def test_a_label_set_after_a_construction_renames_nothing_it_made(self) -> None:
+        """A label pins names only in what is made after it is applied: labelling a shape
+        that a construction was already given renames nothing that construction made, and
+        the part keeps its key. What is made of the shape after the label is named by it."""
+        from build123d import Box, Compound, Cylinder, Pos
+
+        def model(label):
+            a = Box(10, 10, 10)
+            fused = Pos(30, 0, 0) * (a + Pos(5, 0, 0) * Cylinder(2, 12))
+            if label:
+                a.label = label
+            after = Pos(0, 30, 0) * (a + Pos(5, 0, 0) * Cylinder(1, 12))
+            return Compound(children=[a, fused, after])
+
+        found = []
+        for label in (None, "lid"):
+            compound, _, run = _run(model, label)
+            found.append([run.identify(child) for child in compound.children[1:]])
+        (plain_fused, plain_after), (fused, after) = found
+        self.assertEqual(fused, plain_fused, "made before the label: named and keyed as if there were none")
+        self.assertTrue([name for name in fused[1]["faces"] if name.startswith("f:model.make_box1.")], fused[1]["faces"])
+        self.assertTrue([name for name in after[1]["faces"] if name.startswith("f:lid.")], after[1]["faces"])
+        self.assertNotEqual(after, plain_after, "made after it: the label names the box's feature there")
+
     def test_a_shape_no_feature_made_has_no_lineage_even_placed(self) -> None:
         from build123d import Location, Solid
 

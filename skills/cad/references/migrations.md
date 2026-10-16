@@ -108,17 +108,18 @@ renaming. The sidecar is schema 11: its mate ends, material assignments and
 animation tracks name occurrences by token. A schema-10 sidecar is refused and
 is rebuilt by rerunning the model, which binds them anew.
 
-An element ref copied from an earlier 0.8 build names a face by its geometry
-(`f:` and twelve hexadecimal characters). `resolve()` still finds the face with
-that geometry; the viewer and `cadgen store where` give its name now. An
-element's name moves when the code that made it moves to another operation (an
-earlier call of the same operation added in the same function, in making that
-part, renumbers the later ones; an edit to another part renames nothing); a
-label keeps it in what a later operation makes of the labelled shape: with
-`boss.label = "boss"`, the faces `boss` brings to `plate + boss` are `f:boss.1`,
-`f:boss.2`, …. A labelled part placed in an assembly keeps its own names, its
-label naming the occurrence (`#lid`), so parts made alike and labelled apart are
-one part.
+A ref by geometry (`f:` and twelve hexadecimal characters, how an imported
+file's elements are named) also finds an element of a part a model made, by its
+geometry: `resolve()` and `cadgen store where` take it, and the
+viewer and `store where` give the element's name. An element's name moves when
+the code that made it moves to another operation (an earlier call of the same
+operation added in the same function, in making that part, renumbers the later
+ones; an edit to another part renames nothing); a label keeps it in what a later
+operation makes of the labelled shape: with `boss.label = "boss"`, the faces
+`boss` brings to `plate + boss` are `f:boss.1`, `f:boss.2`, …. A label set after
+the shape was used renames nothing already made of it. A labelled part placed in
+an assembly keeps its own names, its label naming the occurrence (`#lid`), so
+parts made alike and labelled apart are one part.
 
 ## Meshes come from cadgen in 0.8
 
