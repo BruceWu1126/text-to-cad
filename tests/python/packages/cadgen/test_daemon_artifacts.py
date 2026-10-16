@@ -201,7 +201,6 @@ print('kernel-free')
             legacy = ledger.start(tool="artifact", subject="/readable/source.py", argv=[])
         self.assertEqual(job["outputs"], [])
         self.assertEqual(legacy["subject"], "")
-        self.assertFalse(job["editingProducer"])
         self.assertTrue(job["dependency"])
         ledger.record_artifact_result(job, {"result": {"x": 1}})
         ledger.finish(job, 0)
@@ -268,7 +267,6 @@ class ArtifactCoalescing(unittest.TestCase):
         for job in results:
             self.assertEqual(job["subject"], "")
             self.assertEqual(job["outputs"], [])
-            self.assertFalse(job["editingProducer"])
             self.assertIn("artifactResult", job)
         self.assertEqual(registry.snapshot()["inflight"], 0)
 

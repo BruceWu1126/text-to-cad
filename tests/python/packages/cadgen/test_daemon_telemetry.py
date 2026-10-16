@@ -54,7 +54,7 @@ class DaemonTelemetryTest(unittest.TestCase):
         current.observe({"model": "/w/plate.py", "state": "current", "job": "e:job-2"})
         current.observe({"model": "/w/other.py", "state": "building", "job": "e:job-9"})
         current.finish(0, None, 0.5)
-        # A child this model announced makes it an assembly; it failed.
+        # A child built inside this model's body makes it an assembly; it failed.
         assembly = telemetry.build(RUN, {"id": "e:job-3", "outputs": ["/w/arm.step"]})
         assembly.observe({"model": "/w/link.py", "state": "current", "job": "e:job-3", "parent": "/w/arm.py"})
         assembly.observe({"model": "/w/arm.py", "state": "building", "job": "e:job-3"})

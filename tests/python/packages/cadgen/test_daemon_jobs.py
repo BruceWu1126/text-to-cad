@@ -166,9 +166,7 @@ class Lifecycle(unittest.TestCase):
 
     def test_simultaneous_requests_for_same_model_remain_distinct(self):
         first = self.ledger.start(tool="run", subject=self.model, store_root="/one")
-        second = self.ledger.start(
-            tool="run", subject=self.model, store_root="/two", adopt_announced=True,
-        )
+        second = self.ledger.start(tool="run", subject=self.model, store_root="/two")
         self.assertNotEqual(first["id"], second["id"])
         self.assertEqual(len(self.ledger.snapshot()), 2)
         self.ledger.observe(self._event(self.model, "building", job=first["id"], phase="first only"))
@@ -215,12 +213,14 @@ class Lifecycle(unittest.TestCase):
         self.assertEqual(snapshot["savedResults"][output],
                          {"output": output, "tree": "document", "documentHash": "abc", "sequence": 3})
 
-    def test_parent_announcements_cannot_claim_child_preview_and_epochs_are_unique(self):
+    def test_a_childs_preview_is_its_own_rows_and_epochs_are_unique(self):
         parent = self.ledger.start(tool="run", subject=self.model)
         child_path = str(Path(self.model).with_name("child.py"))
         self.ledger.observe(self._event(child_path, "building", job=parent["id"],
                                        preview={"output": "child.step", "tree": "child"}))
         self.assertNotIn("previews", parent)
+        child = next(job for job in self.ledger.snapshot() if job["subject"] == child_path)
+        self.assertEqual(child["previews"][str(Path("child.step").resolve())]["tree"], "child")
         self.assertNotEqual(self.ledger.epoch, JobLedger().epoch)
 
     def test_a_job_follows_its_event_frames_to_done(self):
@@ -269,50 +269,48 @@ class Lifecycle(unittest.TestCase):
         self.assertEqual(("cancelled", None), (listed["state"], listed["error"]))
         self.assertIsNone(build_progress_snapshot(document, jobs=self.ledger.snapshot()))
 
-    def test_a_childs_announcement_lists_it_before_its_own_request_arrives(self):
+    def test_a_child_built_inside_a_request_is_a_row_of_its_own_under_it(self):
         parent = str((Path(self.tmp.name) / "rig.py").resolve())
-        self.ledger.start(tool="run", subject=parent)
-        # The parent's worker announces the child it submitted (executors.submit).
-        self.ledger.observe(self._event(self.model, "submitted", parent=parent))
-        subjects = [job["subject"] for job in self.ledger.snapshot()]
-        self.assertEqual([parent, self.model], subjects)
-        # The child's own request arrives: it is the SAME row, not a second one.
+        request = self.ledger.start(tool="run", subject=parent, store_root=self.tmp.name)
+        # The parent's worker builds the child inside its body: its events carry the
+        # parent's job id (STORE.md §9a), and make the child a row under the request.
         before = self.ledger.watch(timeout=0)
-        announced = self.ledger.snapshot()[1]
-        child = self.ledger.start(
-            tool="run", subject=self.model, argv=[self.model], store_root=self.tmp.name,
-            adopt_announced=True,
-        )
-        self.assertEqual(2, len(self.ledger.snapshot()))
-        self.assertEqual(announced["id"], child["id"])
-        self.assertNotIn("announced", child)
-        self.assertEqual(str(Path(self.tmp.name).resolve()), child["storeRoot"])
+        self.ledger.observe(self._event(self.model, "building", job=request["id"], sequence=1,
+                                       parent=parent, phase="generate"))
+        rows = self.ledger.snapshot()
+        self.assertEqual([parent, self.model], [job["subject"] for job in rows])
+        child = rows[1]
+        self.assertEqual((child["request"], child["storeRoot"], child["tool"]),
+                         (request["id"], str(Path(self.tmp.name).resolve()), "run"))
+        self.assertEqual([str(Path(self.model).with_suffix(".step"))], child["outputs"])
+        self.assertEqual(("building", "generate"), (child["state"], child["phase"]))
+        self.assertEqual(request["state"], "submitted", "a child's transition is not the request's")
         after = self.ledger.watch(before["jobsCursor"], timeout=0)
-        self.assertEqual(int(before["jobsCursor"].rsplit(":", 1)[1]) + 1,
-                         int(after["jobsCursor"].rsplit(":", 1)[1]),
-                         "adoption is one atomic published mutation, without a phantom row")
-        self.ledger.observe(self._event(self.model, "building", phase="generate"))
-        self.ledger.finish(child, 0)
-        self.assertEqual("done", [j for j in self.ledger.snapshot() if j["subject"] == self.model][0]["state"])
+        self.assertNotEqual(before["jobsCursor"], after["jobsCursor"])
+        # The child's own done closes its row; its saved result, landing after, folds
+        # into the closed row without reopening it.
+        self.ledger.observe(self._event(self.model, "done", job=request["id"], sequence=2, parent=parent))
+        child = self.ledger.snapshot()[1]
+        self.assertEqual("done", child["state"])
+        self.assertIsNotNone(child["finishedAt"])
+        output = str(Path(self.model).with_suffix(".step"))
+        self.ledger.observe(self._event(self.model, "building", job=request["id"], sequence=3, parent=parent,
+                                       saved={"output": output, "tree": "t" * 64, "documentHash": "d" * 64}))
+        child = self.ledger.snapshot()[1]
+        self.assertEqual("done", child["state"])
+        self.assertEqual(child["savedResults"][output]["tree"], "t" * 64)
+        self.ledger.finish(request, 0)
+        self.assertEqual(["done", "done"], [job["state"] for job in self.ledger.snapshot()])
 
-    def test_a_concurrent_request_cannot_orphan_a_childs_announced_row(self):
-        self.ledger.observe(self._event(self.model, "submitted", parent="rig.py"))
-        announced = self.ledger.snapshot()[0]
-        self.clock.now += 1
-        concurrent = self.ledger.start(tool="run", subject=self.model, store_root="/other")
-        self.clock.now += 1
-
-        child = self.ledger.start(
-            tool="run", subject=self.model, store_root=self.tmp.name,
-            adopt_announced=True,
-        )
-
-        jobs = self.ledger.snapshot()
-        self.assertEqual(2, len(jobs), "the announcement must not remain submitted forever")
-        self.assertEqual(announced["id"], child["id"])
-        self.assertNotIn("announced", child)
-        self.assertGreater(child["sequence"], concurrent["sequence"])
-        self.assertEqual(self.clock.now, child["startedAt"])
+    def test_a_requests_end_closes_the_child_rows_it_left_running(self):
+        parent = str((Path(self.tmp.name) / "rig.py").resolve())
+        request = self.ledger.start(tool="run", subject=parent)
+        self.ledger.observe(self._event(self.model, "building", job=request["id"], sequence=1, parent=parent))
+        # The worker died mid-child: nothing will ever close the child's row but the request.
+        self.ledger.finish(request, 1, error="worker 42 died")
+        child = self.ledger.snapshot()[1]
+        self.assertEqual(("failed", 1, "worker 42 died"), (child["state"], child["exit"], child["error"]))
+        self.assertIsNotNone(child["finishedAt"])
 
     def test_finished_jobs_are_retained_then_swept(self):
         job = self.ledger.start(tool="step-compile", subject=str(Path(self.tmp.name) / "vendor.step"))

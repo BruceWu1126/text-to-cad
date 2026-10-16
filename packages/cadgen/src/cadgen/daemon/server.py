@@ -380,11 +380,7 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
     if is_artifact:
         job = _JOBS.start_artifact(artifact, store_root=root, dependency=request.get("dependency"))
     else:
-        job = _JOBS.start(
-            tool=tool, subject=subject, argv=argv, store_root=str(request.get("store_root") or ""),
-            editing_producer=not bool(subject and closure and request.get("coalesce")),
-            adopt_announced=True,
-        )
+        job = _JOBS.start(tool=tool, subject=subject, argv=argv, store_root=str(request.get("store_root") or ""))
     inflight = None
     if is_artifact or (subject and closure and request.get("coalesce")):
         if is_artifact:
@@ -407,8 +403,6 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
             with contextlib.suppress(OSError), send_lock:
                 _send(conn, {"exit": code})
             return
-        if not is_artifact:
-            _JOBS.accept_editing_producer(job)
     build = None if is_artifact else telemetry.build(request, job)  # counted as it ends, if it is one
 
     def starting_worker() -> None:

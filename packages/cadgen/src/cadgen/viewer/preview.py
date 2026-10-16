@@ -3,7 +3,7 @@
 The viewer shows the saved file, or the build's preview revision labelled as one until the
 file replaces it (STORE.md 9b). This read-only adapter matches the daemon's jobs to the
 file's output path and store and reports the newest: whether it is queued or running, how
-far it has got, whether it failed and why; the preview revision it announced -- the result
+far it has got, whether it failed and why; the preview revision it published -- the result
 tree's hash, the producer its parts are keyed under, the part key of each component the
 store holds and the hash of its annotations object, artifact-side objects the viewer reads
 as it reads any -- and, once it has finished, whether the file moved past it
@@ -67,7 +67,6 @@ def preview_status(file_ref: str, *, jobs: list[dict] | None = None,
     matching = [
         job for job in listed
         if job.get("tool") == "run"
-        and job.get("editingProducer", True)
         and job.get("storeRoot") and os.path.realpath(job["storeRoot"]) == active_store
         and target in {os.path.realpath(p) for p in job.get("outputs", [])}
     ]
@@ -111,7 +110,7 @@ def preview_status(file_ref: str, *, jobs: list[dict] | None = None,
 
 
 def _preview_revision(job: dict, target: str) -> dict | None:
-    """The preview revision ``job`` announced for ``target``: the names of artifact-side
+    """The preview revision ``job`` published for ``target``: the names of artifact-side
     objects (the ledger keeps nothing else of it, ``daemon/jobs.py``), or None before the
     build's result exists. The annotations are the preview's only when they were resolved
     against its tree."""

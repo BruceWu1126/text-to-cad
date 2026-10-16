@@ -180,7 +180,7 @@ sys.addaudithook(audit)
             self.assertTrue(all(row["model"] == "" for row in workers.snapshot()["workers"]))
             jobs = ledger.snapshot()
             self.assertEqual(len(jobs), 4)
-            self.assertTrue(all(row["subject"] == "" and row["outputs"] == [] and not row["editingProducer"] for row in jobs))
+            self.assertTrue(all(row["subject"] == "" and row["outputs"] == [] for row in jobs))
             self.assertEqual(sum(row["state"] == "failed" for row in jobs), 2)
             self.assertEqual(self.private.broker.snapshot()["granted"], 4, "one slot a job")
 
@@ -243,7 +243,7 @@ parts.derive=derive
             self.assertEqual(self.private.broker.snapshot()["granted"], 1)
             self.assertEqual(len(processes), 1)
             self.assertEqual(workers.snapshot()["imports"], 1)
-            self.assertTrue(all(row["outputs"] == [] and not row["editingProducer"] for row in ledger.snapshot()))
+            self.assertTrue(all(row["outputs"] == [] for row in ledger.snapshot()))
 
 
 if __name__ == "__main__":

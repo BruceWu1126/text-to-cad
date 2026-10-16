@@ -1,4 +1,4 @@
-"""A build's source result: the tree its run published, announced before its files are
+"""A build's source result: the tree its run published, named before its files are
 written and never replaced by a later record. A top-level call hands back exactly that
 tree; a child a parent's body called owes its declared outputs and its failure to the run."""
 

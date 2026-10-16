@@ -2155,11 +2155,11 @@ digest; and the ledger keeps nothing else of any of them. Kinematics,
 appearance and animation travel in the sidecar for every durable reader, and
 in the preview's annotations object for the viewer alone.
 
-Only model-run producers advance editing order. Compiling saved bytes and
-attaching a coalesced subscriber to an existing producer do not create a new
-editing revision or hide the producer's preview. A concurrent child request
-adopts its announced job before executing, so a completed build leaves no
-orphaned pending status behind in the ledger.
+Only model runs advance editing order: a compile of saved bytes is listed
+against the document but never hides a run's preview. A child built inside a
+request (§9a) has a row of its own under it in the ledger, listed from its
+first event with its declared outputs, closed by its own done or failed event
+or with the request, and its preview and saved result are its row's.
 
 These ephemeral preview handles are not GC roots. The normal grace period
 protects newly published objects; explicit GC or cache deletion can expire an

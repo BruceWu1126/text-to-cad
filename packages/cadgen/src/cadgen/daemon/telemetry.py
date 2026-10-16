@@ -202,7 +202,7 @@ class Build:
     def __init__(self, kind: str, via: str, job: str, meshes: bool) -> None:
         self.kind, self.via, self.job, self.meshes = kind, via, job, meshes
         self.states: set[str] = set()  # the model's own transitions (``cadgen.daemon.executors.model_event``)
-        self.children = False  # a child's, announced by this model: an assembly
+        self.children = False  # a child's, built inside this model's body: an assembly
         self.reused = False  # its worker said everything it made was the store's (``exited``)
         self.failure: str | None = None  # why it failed, as its worker decided (``exited``)
 
