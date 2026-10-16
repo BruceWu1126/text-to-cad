@@ -253,5 +253,73 @@ class CompileTests(Fixture):
         self.assertEqual(cp._bbox_from_shape(fast["shape"]), cp._bbox_from_shape(ordinary["shape"]))
 
 
+class StoredTopologyTests(Fixture):
+    """The edge policy of an all-link parent reads each pinned component's topology from the
+    store by its BREP, decodes a prototype only for a component whose entry is missing, and
+    gives the classes the decoded prototypes give (``store.bounds.cached_component_topology``)."""
+
+    def project(self):
+        for name, geometry in (("box", "bd.Solid.make_box(2, 3, 4)"), ("curve", "bd.Solid.make_torus(7, 1)")):
+            (self.root / f"{name}.py").write_text(
+                f"from cadgen import step, build123d as bd\n@step\ndef {name}():\n    return {geometry}\n",
+                encoding="utf-8",
+            )
+        parent = self.root / "parent.py"
+        parent.write_text(
+            "from cadgen import step, build123d as bd\nfrom box import box\nfrom curve import curve\n"
+            "@step\ndef parent():\n"
+            "    return bd.Compound(children=[bd.Pos(5, 0, 0) * box(), bd.Pos(-5, 0, 0) * curve()], label='assembly')\n",
+            encoding="utf-8",
+        )
+        return parent
+
+    def test_the_edge_policy_reads_stored_topology_and_measures_only_what_the_index_lacks(self):
+        import contextlib
+        import io
+
+        from cadgen._internal import step_scene_mesh
+        from cadgen.cli._run_model import run_model_argv
+        from cadgen.store import bounds as stored
+        from cadgen.store.index import read_entry, remove_entry, write_entry
+        from cadgen.store.records import read_record, remove_record
+        from cadgen.store.trees import flatten, get_tree
+
+        parent = self.project()
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            for name in ("box", "curve"):
+                self.assertEqual(run_model_argv([str(self.root / f"{name}.py"), "--json"]), 0, output.getvalue())
+        measured, trees = [], []
+
+        def build():
+            remove_record(parent)
+            stored.clear()  # this process's memory; the store's entries stay
+            with mock.patch.object(step_scene_mesh, "prototype_topology", wraps=step_scene_mesh.prototype_topology) as topology, \
+                    contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                self.assertEqual(run_model_argv([str(parent), "--json"]), 0, output.getvalue())
+            measured.append(topology.call_count)
+            trees.append(read_record(parent)["tree"])
+
+        build()  # the children's builds measured their components: nothing to decode
+        keys = [stored.bounds_key(stored.TOPOLOGY_ALGORITHM, (str(entry["codec"]), str(entry["brep"])))
+                for entry in flatten(trees[0])["components"].values()]
+        self.assertEqual(len(keys), 2)
+        for key in keys:
+            self.assertIsNotNone(read_entry("bounds", key))
+            remove_entry("bounds", key)
+        build()  # the index lacks both: each decoded and measured once
+        write_entry("bounds", keys[0], {"value": {"faces": -1}})
+        build()  # a damaged entry is measured again
+        self.assertEqual([0, 2, 1], measured)
+        self.assertEqual(len(set(trees)), 1)
+        self.assertIn("edgeRendering", get_tree(trees[0]))
+
+
+def json_key(value):
+    import json
+
+    return json.dumps(value, sort_keys=True)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -85,6 +85,33 @@ class FilesAsExportsTest(unittest.TestCase):
         self.assertTrue(names and all(component.part and component.faces for component in names),
                         "the file names its parts and their elements")
 
+    def test_the_preview_precedes_the_one_document_the_export_assembles(self) -> None:
+        """The build assembles no XCAF document of its result before its preview is
+        published: the export, on the pool, assembles the one document a build makes, after
+        the preview -- so the result is on screen before any STEP-writer step runs."""
+        from cadgen import step_export
+        from cadgen.daemon import executors
+
+        documents, previews = [], []
+        assemble, emit = step_export._create_bin_xcaf_doc, executors.emit_event
+
+        def assembled(*args, **kwargs):
+            documents.append(len(previews))  # the preview events published before this document
+            return assemble(*args, **kwargs)
+
+        def emitted(event):
+            if event.get("preview"):
+                previews.append(len(documents))  # the documents assembled before this preview
+            return emit(event)
+
+        with mock.patch.object(step_export, "_create_bin_xcaf_doc", side_effect=assembled), \
+                mock.patch.object(executors, "emit_event", side_effect=emitted):
+            self.assertEqual("built", self.build()[0])
+        self.assertTrue(previews, "the build published its preview")
+        self.assertEqual(0, previews[0], "a document was assembled before the first preview")
+        self.assertEqual(1, len(documents), "the export assembles the one document")
+        self.assertGreaterEqual(documents[0], 1, "the export's document came after the preview")
+
     def test_a_door_confirms_a_pending_entry_before_it_answers(self) -> None:
         from cadgen.step_scene import read_scene
         from cadgen.store.records import note_document_tree

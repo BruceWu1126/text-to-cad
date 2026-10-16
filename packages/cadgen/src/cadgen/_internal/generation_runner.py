@@ -30,7 +30,6 @@ from cadgen.coordination import generator_busy
 from cadgen.coordination import reporting_as
 from cadgen.coordination import resolve as resolve_progress
 from cadgen.render import relative_to_file
-from cadgen.step_export import build_build123d_step_scene
 
 from cadgen._internal.generation_spec import EntrySpec, _display_path
 from cadgen._internal import filetrace
@@ -307,16 +306,13 @@ def _write_shape_step_payload(
             f"{_display_path(script_path)} @step must return a build123d Shape, "
             f"got {type(shape).__name__}"
         )
-    # A @step run builds the render scene in memory and does NOT write a text STEP: the
-    # STEP is an export of the stored result (store/exports.py). The scene is built
-    # straight from the XCAF doc, never via a STEP round-trip.
+    # A @step run writes no document of its own: its result's tree is built from the
+    # shape (``store.build.build_tree_from_compound``) and its STEP is exported from the
+    # stored tree by the build pool (``store/exports.py``), so no XCAF document is
+    # assembled before the preview. The scene carries what the pipeline reads of the run.
     source_identity = python_source_hash(script_path)
-    scene = build_build123d_step_scene(
-        shape,
-        output_path,
-        source_kind="python",
-        source_hash=source_identity.source_hash,
-    )
+    scene = LoadedStepScene(output_path.expanduser().resolve(), [], {}, source_kind="python",
+                            source_hash=source_identity.source_hash)
     _mark_scene_python_backed(scene, source_identity=source_identity, source_path=script_path)
     _mark_scene_step_payload(scene, payload_kind="shape")
     # Stash the compound: the tree build introspects its located

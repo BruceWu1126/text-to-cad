@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, Mapping, Sequence
 
 from OCP.BRepAdaptor import BRepAdaptor_Curve
 from OCP.BRepAdaptor import BRepAdaptor_Surface
@@ -213,55 +213,23 @@ def prototype_topology(shape: Any) -> dict[str, Any]:
     }
 
 
-def _prototype_topologies(scene: LoadedStepScene) -> dict[int, dict[str, Any]]:
-    """:func:`prototype_topology` of every prototype key. A prototype the scene
-    says was decoded from a stored component (``prototype_components``) is read
-    from the store by that component's BREP and measured, from the scene's own
-    shape, only when the entry is missing; so a scene that defers decoding its
-    prototypes decodes none whose facts are stored."""
-    from cadgen.store.bounds import cached_component_topology
-
-    components = getattr(scene, "prototype_components", None) or {}
-    facts: dict[int, dict[str, Any]] = {}
-    for key in scene.prototype_shapes:
-        component = components.get(key)
-        if component is None:
-            facts[key] = prototype_topology(scene.prototype_shapes[key])
-            continue
-        codec, brep = component
-        facts[key] = cached_component_topology(
-            codec, brep, lambda key=key: prototype_topology(scene.prototype_shapes[key]))
-    return facts
-
-
-def _scene_mesh_resolution_hints(scene: LoadedStepScene) -> dict[str, Any]:
-    topologies = _prototype_topologies(scene)
+def topology_hints(topologies: Mapping[Any, Mapping[str, Any]],
+                   leaves: Iterable[tuple[Any, Sequence[float]]]) -> dict[str, Any]:
+    """What the adaptive edge policy classifies a tree by: ``topologies``, each distinct
+    component's facts (:func:`prototype_topology`) by its key, and ``leaves``, each placed
+    occurrence as its component's key and its world transform (16 numbers, row major).
+    Counts per occurrence and per component, the whole's diagonal and the scores the
+    ladder reads (:func:`adaptive_mesh_resolution_from_hints`)."""
+    leaves = list(leaves)
     prototype_face_counts = {key: facts["faces"] for key, facts in topologies.items()}
     prototype_edge_counts = {key: facts["edges"] for key, facts in topologies.items()}
     prototype_curved_face_counts = {key: facts["curvedFaces"] for key, facts in topologies.items()}
     prototype_curved_edge_counts = {key: facts["curvedEdges"] for key, facts in topologies.items()}
 
-    leaves = scene_leaf_occurrences(scene)
-    occurrence_face_count = sum(
-        prototype_face_counts.get(int(node.prototype_key), 0)
-        for node in leaves
-        if node.prototype_key is not None
-    )
-    occurrence_edge_count = sum(
-        prototype_edge_counts.get(int(node.prototype_key), 0)
-        for node in leaves
-        if node.prototype_key is not None
-    )
-    occurrence_curved_face_count = sum(
-        prototype_curved_face_counts.get(int(node.prototype_key), 0)
-        for node in leaves
-        if node.prototype_key is not None
-    )
-    occurrence_curved_edge_count = sum(
-        prototype_curved_edge_counts.get(int(node.prototype_key), 0)
-        for node in leaves
-        if node.prototype_key is not None
-    )
+    occurrence_face_count = sum(prototype_face_counts.get(key, 0) for key, _transform in leaves)
+    occurrence_edge_count = sum(prototype_edge_counts.get(key, 0) for key, _transform in leaves)
+    occurrence_curved_face_count = sum(prototype_curved_face_counts.get(key, 0) for key, _transform in leaves)
+    occurrence_curved_edge_count = sum(prototype_curved_edge_counts.get(key, 0) for key, _transform in leaves)
     prototype_face_count = sum(prototype_face_counts.values())
     prototype_edge_count = sum(prototype_edge_counts.values())
     prototype_curved_face_count = sum(prototype_curved_face_counts.values())
@@ -282,16 +250,16 @@ def _scene_mesh_resolution_hints(scene: LoadedStepScene) -> dict[str, Any]:
     # only thing size contributes to the profile, and the scenes where size
     # matters most (thousands of occurrence faces, e.g. a full launch stack)
     # are exactly the ones a face-count guard would skip. The cost is small:
-    # _bbox_from_shape uses BRepBndLib without tessellation per unique
-    # prototype, plus an 8-corner transform per leaf occurrence.
+    # each component's loose box is among its facts, plus an 8-corner
+    # transform per leaf occurrence.
     prototype_boxes = {
         key: _bbox_from_points([facts["looseBox"][:3], facts["looseBox"][3:]])
         for key, facts in topologies.items()
     }
     occurrence_boxes = [
-        _transform_bbox(prototype_boxes[int(node.prototype_key)], node.transform)
-        for node in leaves
-        if node.prototype_key is not None and int(node.prototype_key) in prototype_boxes
+        _transform_bbox(prototype_boxes[key], tuple(transform))
+        for key, transform in leaves
+        if key in prototype_boxes
     ]
     bbox = _merge_bbox(occurrence_boxes) if occurrence_boxes else _bbox_from_points([])
     diagonal: float | None = float(bbox.get("diag") or 0.0)
@@ -326,9 +294,9 @@ def adaptive_mesh_resolution_from_hints(hints: dict[str, Any]) -> AdaptiveMeshRe
     """Classify a scene's topology into a render ``profile``.
 
     The profile is the ONE thing this resolver still decides, and it decides it
-    for edge rendering: ``_edge_visibility_classes_for_resolution`` turns
-    profile + hints into the visibility classes the tree is built with, so a
-    scene that lands on ``coarse-assembly`` renders feature edges only. It
+    for edge rendering: :func:`edge_visibility_classes` turns profile + hints
+    into the visibility classes the tree is built with, so a tree that lands on
+    ``coarse-assembly`` renders feature edges only. It
     decides nothing about meshing — the one mesher is cadgen's tessellator
     (``cadgen._internal.tessellate``), at the relative tolerances each request
     names.
@@ -373,6 +341,13 @@ def adaptive_mesh_resolution_from_hints(hints: dict[str, Any]) -> AdaptiveMeshRe
     return AdaptiveMeshResolution(profile=profile, hints=hints)
 
 
-def adaptive_mesh_resolution_for_scene(scene: LoadedStepScene) -> AdaptiveMeshResolution:
-    return adaptive_mesh_resolution_from_hints(_scene_mesh_resolution_hints(scene))
+def edge_visibility_classes(hints: Mapping[str, Any]) -> tuple[str, ...]:
+    """The edge classes a tree built over ``hints`` (:func:`topology_hints`) renders:
+    feature edges only where the profile is large or coarse, or past 8000 occurrence
+    edges; every class otherwise."""
+    from cadgen._internal.glb_topology import STEP_EDGE_VISIBILITY_CLASSES, normalize_step_edge_render_visibility_classes
 
+    profile = adaptive_mesh_resolution_from_hints(dict(hints)).profile
+    if profile in {"large-topology", "coarse-assembly"} or int(hints["occurrenceEdgeCount"]) >= 8000:
+        return (STEP_EDGE_VISIBILITY_CLASSES["FEATURE"],)
+    return normalize_step_edge_render_visibility_classes(None)

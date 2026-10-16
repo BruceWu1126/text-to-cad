@@ -18,8 +18,11 @@ of a placed component without decoding its BREP: a parent's bounds over its
 children's components, the animation bake's leaf boxes.
 
 It also remembers each component's TOPOLOGY: its face and edge counts, how many
-of each are curved, and its loose box, the per-prototype facts the adaptive
-edge policy classifies a scene by (``step_scene_mesh.prototype_topology``).
+of each are curved, and its loose box, the per-component facts the adaptive
+edge policy classifies a result by (``step_scene_mesh.prototype_topology``,
+``store.build._edge_rendering``): a build measures its own components as it
+walks them and reads a linked child's here, decoding one only where its entry
+is missing.
 
 Last, keyed by a component's codec and BREP object under the geometric token
 scheme, it remembers the GEOMETRIC TOKENS of its faces, edges and vertices

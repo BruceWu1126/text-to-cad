@@ -178,13 +178,13 @@ def build_tree_from_compound(
     root_name: str,
     force: bool = False,
     progress: Any | None = None,
-    extra: dict[str, Any] | None = None,
     materials: object = None,
     namer: Namer | None = None,
     live: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any], dict[str, Any]]:
-    """Return ``(tree_hash, tree, stats)``. ``extra`` are content-pure fields
-    recorded on the tree (capabilities, edgeRendering) — never paths or times.
+    """Return ``(tree_hash, tree, stats)``. The tree's edge classes, the content-pure
+    fields it carries beside its structure, are classified from the topology it is built
+    from (:func:`_edge_rendering`) — never from a document of it.
     ``namer``, the model's run, names each component the walk prepares from a shape
     the run made -- its construction key and lineage -- and says which call made each
     leaf's shape: ``stats["account"]`` (``{"components", "occurrences"}``) is what the
@@ -217,9 +217,40 @@ def build_tree_from_compound(
                      if entry.get("kind") == "eager-only" and cid in walk.shapes})
     return _publish_tree(
         walk, bbox_shape=compound, root_name=root_name, force=force, progress=progress,
-        extra=extra, appearance=appearance, base_appearance=inherited_appearance,
+        extra=_edge_rendering(descriptor, walk), appearance=appearance, base_appearance=inherited_appearance,
         authored_occurrence_bounds=True, repair_objects=True,
     )
+
+
+def _edge_rendering(descriptor: dict[str, Any], walk: _Walk) -> dict[str, Any]:
+    """The content-pure fields a result tree carries for its edges, ``capabilities`` and
+    ``edgeRendering``: the classes a view draws, classified by the adaptive edge policy
+    (``step_scene_mesh.edge_visibility_classes``) from the flattened result's topology --
+    each distinct component's facts, remembered by its BREP
+    (``bounds.cached_component_topology``) and measured from the walk's own prototype, or
+    from the stored component decoded once, only where the index lacks them -- and each
+    occurrence's placement. No document of the result is assembled for it."""
+    from build123d import Location
+
+    from cadgen._internal.component_package import decode_geometry_component
+    from cadgen._internal.glb_topology import step_edge_capabilities
+    from cadgen._internal.step_scene_mesh import edge_visibility_classes, prototype_topology, topology_hints
+    from cadgen.store.bounds import cached_component_topology
+
+    def measured(cid: str, entry: dict[str, Any]) -> dict[str, Any]:
+        prototype = (walk.prepared.get(cid) or {}).get("shape")
+        if prototype is None and cid in walk.shapes:
+            prototype = walk.shapes[cid].located(Location())
+        if prototype is None:
+            prototype = decode_geometry_component(entry, read_verified_object(entry["brep"]))
+        return prototype_topology(prototype.wrapped)
+
+    topologies = {cid: cached_component_topology(str(entry["codec"]), str(entry["brep"]),
+                                                 lambda cid=cid, entry=entry: measured(cid, entry))
+                  for cid, entry in descriptor["components"].items()}
+    classes = edge_visibility_classes(topology_hints(
+        topologies, ((str(row["component"]), row["transform"]) for row in descriptor["occurrences"])))
+    return {"capabilities": step_edge_capabilities(classes), "edgeRendering": {"visibilityClasses": list(classes)}}
 
 
 def _document_walk(scene: Any) -> _Walk:

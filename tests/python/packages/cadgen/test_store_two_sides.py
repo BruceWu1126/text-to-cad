@@ -45,6 +45,7 @@ from tests.python.support.mesh_geometry import (
 from tests.python.support.paths import add_repo_path
 from tests.python.support.png import largest_block_difference, read_png
 from tests.python.support.tmp_root import temporary_directory
+from tests.python.support.warm_daemon import verified
 
 add_repo_path("packages/cadgen/src")
 
@@ -174,6 +175,7 @@ class TwoSidesLaw(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
+        verified(cls.cache)
         os.chdir(cls._previous_cwd)
         if cls._previous_cache is None:
             os.environ.pop("CADGEN_CACHE_DIR", None)

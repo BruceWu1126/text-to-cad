@@ -143,12 +143,13 @@ leaf at the prototype's own placement, whose box is the remembered one shifted
 exactly; the bake, which wants a centre and a reach, composes the rest). Keyed like
 the leaf layout, it holds each component's **topology** — its face and edge
 counts, how many of each are curved, and its loose box — the facts the
-adaptive edge policy classifies a scene's prototypes by
-(`step_scene_mesh.prototype_topology`). An all-link parent's build reads them
-by the BREP each pin names and decodes a pinned component only when its entry
-is missing or invalid, so its edge classes are the ones the decoded prototypes
-give; a scene of an authored compound (a parent with geometry of its own)
-still measures its prototypes. Nothing in the index holds a value
+adaptive edge policy classifies a result's components by
+(`step_scene_mesh.prototype_topology`, `store.build._edge_rendering`). A
+build measures its own components' as it walks them and reads a linked
+child's by the BREP its tree names, decoding one only where the entry is
+missing or invalid, so a parent's edge classes are the ones its children's
+components give, and no document of the result is assembled for them.
+Nothing in the index holds a value
 computed while a model runs (README law 18): a model's own checks and
 operations always execute.
 
@@ -533,9 +534,10 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   and `--mode list` (`store/view.py`), a mesh export -- reads what the build
   derived. A part the store lacks (a cleared, evicted or older store) is derived
   by ONE build-pool job for the request (`kind: display`,
-  `daemon/artifacts.py`): one request, one job, one worker. No server or
-  snapshot process derives in its own process, and correctness never depends on
-  a store hit. A part that job cannot derive is left out of a view, which names
+  `daemon/artifacts.py`): one request, one job, one worker -- a daemon
+  worker's, or with no daemon (§9) a thread of the process that asks, the
+  server's or the snapshot's own, never a request's thread -- and correctness
+  never depends on a store hit. A part that job cannot derive is left out of a view, which names
   it by the occurrences that place it, as a build's warning does: the CAD
   Viewer draws the rest under a warning, a snapshot and a list draw and list
   the rest and warn (the snapshot view's component carries why, `failure`,
@@ -664,8 +666,10 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   passes the parsed scene directly to the canonical builder
   (`store.build.build_document_tree`), whose fixed edge classes govern every
   compiled document; it does not construct a discarded Python compound or
-  calculate source-only adaptive metadata. Generated models, annotated re-emits
-  and public `read_step` geometry retain their existing preparation paths.
+  classify its edges. A generated model's and an annotated re-emit's tree is
+  built from a compound (`build_tree_from_compound`) and classifies its edges
+  from the topology it walks; public `read_step` geometry keeps its
+  preparation.
   Compilation leaves the STEP and its sidecar untouched; declaration consumers
   retain their normal binding and schema checks. It verifies indexed component
   objects before reuse and derives failed entries again; a known damaged
@@ -1977,8 +1981,10 @@ The CLI doors (`cadgen step build|compile`, `stl|3mf|glb build`)
 are themselves dispatched through the daemon when one is reachable, so they
 run on warm kernels; the subject-less commands (`store`, `doctor`, `daemon
 status`, all snapshot orchestration) run in-process. STEP snapshots delegate
-missing document compilation and part derivation to the artifact build pool;
-their request resolution and browser orchestration never import the CAD kernel.
+missing document compilation and part derivation to the build pool -- a daemon
+worker's job, or with no daemon a compile process of its own and an artifact
+job on a thread of the snapshot's process (above) -- so their request
+resolution and browser orchestration import no kernel themselves.
 
 When the daemon's runtime changes, a request carrying the new version is told
 to restart. With nothing running, the old daemon releases its address and lock

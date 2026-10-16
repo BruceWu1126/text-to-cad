@@ -93,9 +93,8 @@ class AdaptiveMeshResolution:
 
     Not tessellation settings: cadgen's tessellator (``tessellate``) takes its
     own relative tolerances. This is the classification — ``profile`` plus the
-    ``hints`` it was computed from — which
-    ``_edge_visibility_classes_for_resolution`` turns into the edge classes a
-    tree renders.
+    ``hints`` it was computed from — which ``step_scene_mesh.edge_visibility_classes``
+    turns into the edge classes a tree renders.
     """
 
     profile: str

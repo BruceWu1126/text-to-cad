@@ -193,8 +193,9 @@ class ColdCompileCleanupTest(unittest.TestCase):
                 self.assertIsNotNone(discarded.wrapped)  # Match the old wrapper's lifetime.
 
     def test_raw_compile_skips_discarded_native_and_adaptive_preparation(self):
-        from cadgen._internal import generation, step_scene_mesh, generation_spec
+        from cadgen._internal import step_scene_mesh
         from cadgen._internal.step_scene_package import load_step_scene_exact
+        from cadgen.store import build
         from cadgen.store.build import build_document_tree
 
         document = self.document(nested=True)
@@ -202,8 +203,7 @@ class ColdCompileCleanupTest(unittest.TestCase):
             tree, _, _ = build_document_tree(load_step_scene_exact(document))
             expected = self.snapshot(tree)
         with mock.patch.object(step_scene_mesh, "scene_to_build123d_compound", side_effect=AssertionError("unused native compound")), \
-             mock.patch.object(generation_spec, "adaptive_mesh_resolution_for_scene", side_effect=AssertionError("unused classification")), \
-             mock.patch.object(generation, "_assembly_provenance_manifest", side_effect=AssertionError("unused provenance")):
+             mock.patch.object(build, "_edge_rendering", side_effect=AssertionError("unused classification")):
             for force in (False, True):
                 result = self.compile(document, force=force)
                 self.assertEqual(expected, self.snapshot(result["tree"]))
@@ -212,7 +212,6 @@ class ColdCompileCleanupTest(unittest.TestCase):
         from cadgen import step_artifact_cli as artifact
         from cadgen._internal import generation, step_scene_mesh
         from cadgen._internal.step_scene_package import load_step_scene_exact
-        from cadgen._internal.step_scene_types import SelectorOptions
 
         class Reached(Exception):
             pass
@@ -226,13 +225,7 @@ class ColdCompileCleanupTest(unittest.TestCase):
                 scene = load_step_scene_exact(document)
                 scene.source_kind, scene.reemit_source_hash = kind, reemit
                 spec = replace(artifact._build_entry_spec(self.root, document), source=source)
-                with mock.patch.object(generation, "_selector_options_for_part", side_effect=Reached) as classified:
-                    with self.assertRaises(Reached):
-                        generation._generate_part_outputs(spec, preloaded_scene=scene, force=True)
-                self.assertIs(classified.call_args.kwargs["scene"], scene)
-                with mock.patch.object(generation, "_selector_options_for_part", return_value=SelectorOptions()), \
-                     mock.patch.object(generation, "_assembly_provenance_manifest", return_value={}), \
-                     mock.patch.object(step_scene_mesh, "scene_to_build123d_compound", side_effect=Reached) as composed:
+                with mock.patch.object(step_scene_mesh, "scene_to_build123d_compound", side_effect=Reached) as composed:
                     with self.assertRaises(Reached):
                         generation._generate_part_outputs(spec, preloaded_scene=scene, force=True)
                 composed.assert_called_once_with(scene)

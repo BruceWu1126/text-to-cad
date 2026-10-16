@@ -13,7 +13,6 @@ from typing import Sequence
 
 from cadgen.catalog import source_from_path
 from cadgen.cli_logging import CliLogger
-from cadgen._internal.glb_topology import build_step_index_manifest
 from cadgen.coordination import (
     DRAWING_PACKAGE,
     PHASE_GENERATE,
@@ -436,31 +435,6 @@ def _existing_topology_artifact_matches_options(spec: EntrySpec, selector_option
     return bool(_package_descriptor_matches_spec(spec, selector_options))
 
 
-def _assembly_provenance_manifest(selector_options: SelectorOptions) -> dict[str, object]:
-    """The content-pure fields a generated tree carries: its edge capabilities
-    and the edge classes it was built with (``tree_extra`` below takes exactly
-    these two).
-
-    There is no ``mesh`` section. A tree stores geometry, not triangles:
-    each component's mesh is derived per tessellation into the store's mesh
-    entries (``cadgen.store.meshes``), keyed on its own relative tolerances. The
-    deflection numbers this block used to carry reached no mesher, and the adaptive ``resolution`` beside them was the
-    INPUT to a decision whose output — ``edgeRendering.visibilityClasses`` — is
-    recorded right here. No STEP hash either: nothing read it, and computing it
-    read the whole saved document once per build.
-    """
-
-    from cadgen._internal.glb_topology import step_edge_capabilities
-
-    # STEP-pure by contract: nothing here may derive from the Python source.
-    # Source-derived state (provenance, pose, mates) rides the source sidecar
-    # (_source_sidecar_payload below) — the tree keys on geometry alone.
-    return build_step_index_manifest({
-        "capabilities": step_edge_capabilities(selector_options.edge_visibility_classes),
-        "edgeRendering": {"visibilityClasses": list(selector_options.edge_visibility_classes)},
-    })
-
-
 def _source_sidecar_payload(scene: LoadedStepScene) -> dict[str, object] | None:
     """The sidecar payload for a GENERATED build, or None for an import.
 
@@ -557,15 +531,15 @@ def _generate_part_outputs(
                 source_path=spec.script_path,
             )
     # Raw document compilation publishes the byte-derived canonical tree,
-    # whose edge classes are fixed by build_document_tree. Do not calculate
-    # generated-source metadata that this path never consumes. Re-emits and
-    # Python-backed scenes retain their ordinary preparation path.
+    # whose edge classes are fixed by build_document_tree. Re-emits and
+    # Python-backed scenes are walked as compounds, whose trees classify their
+    # own edges from the topology they are built from.
     raw_document = (
         spec.source != "generated"
         and str(getattr(scene, "source_kind", "step") or "step").strip().lower() != "python"
         and not str(getattr(scene, "reemit_source_hash", "") or "").strip()
     )
-    selector_options = _selector_options_for_part(spec, scene=None if raw_document else scene)
+    selector_options = _selector_options_for_part(spec)
     if (
         spec.source != "generated"
         and not force
@@ -591,7 +565,6 @@ def _generate_part_outputs(
     # else is one component. No declaration steers it and nothing is inferred from
     # source — the tree's entryKind is read off the tree once built.
     source_compound = getattr(scene, "source_compound", None)
-    package_provenance = {} if raw_document else _assembly_provenance_manifest(selector_options)
 
     def component_package_job() -> dict[str, object]:
         from pathlib import Path
@@ -612,13 +585,6 @@ def _generate_part_outputs(
             sidecar_payload = _source_sidecar_payload(scene)
         generated = sidecar_payload is not None
 
-        # Content-pure fields the tree carries (capabilities, edge classes); the
-        # provenance fields (generatedAt, sourceKind…) go to the record.
-        tree_extra = {
-            key: package_provenance[key]
-            for key in ("capabilities", "edgeRendering")
-            if key in package_provenance
-        }
         from cadgen.daemon import executors
         from cadgen.store.parts import producer_identity
 
@@ -729,8 +695,7 @@ def _generate_part_outputs(
             else:
                 tree_hash, tree, stats = build_tree_from_compound(
                     shape, root_name=_document_root_name(shape, spec.step_path), force=force,
-                    progress=progress, extra=tree_extra,
-                    materials=getattr(scene, "materials", None), namer=namer, live=live,
+                    progress=progress, materials=getattr(scene, "materials", None), namer=namer, live=live,
                 )
                 # The preview, before any export work: the result is what the file is
                 # written from.
@@ -1211,11 +1176,15 @@ def _produce_declared_mesh_exports(
     A declaration's own tolerances are the only ones: one that names none is
     written at the display tolerance, from the very meshes the viewer draws.
 
-    The meshes are cut from the model's result, ``source_tree`` (else its record's),
-    and keyed on its STEP's bytes as its record names them -- the build's own knowledge
-    of the file it just wrote, or its current record's: no door's lookup of the file, and
-    no wait on its verify (STORE.md §3, *Exports*). A mesh-only model writes no
-    document: its tree IS the geometry the meshes are cut from, so the ledger keys on that.
+    A STEP model's meshes are keyed on its STEP's bytes as its record names them -- the
+    build's own knowledge of the file it just wrote, or its current record's -- and cut
+    from the tree those bytes map to (`index/document`): the result they were written
+    from, pending their verify, or, after a verify found the file its own content or an
+    annotation refresh re-keyed the record, the tree the entry names, which the bare mesh
+    doors cut from too. No door's lookup of the file, so no wait on its verify (STORE.md
+    §3, *Exports*). A mesh-only model writes no document: its result, ``source_tree``
+    (else its record's), IS the geometry the meshes are cut from, so the ledger keys on
+    that.
     """
     if not spec.mesh_exports or spec.entry_path is None or spec.step_path is None:
         return ()
@@ -1226,15 +1195,16 @@ def _produce_declared_mesh_exports(
         record_mesh_export,
         run_mesh_exporter,
     )
-    from cadgen.store.records import read_record
+    from cadgen.store.records import read_record, tree_for_document_hash
 
     model = _model_for_spec(spec)
     record = (read_record(model) if model is not None else None) or {}
-    tree_hash = source_tree or str(record.get("tree") or "") or None
     if spec.step_output:
         output = (record.get("outputs") or {}).get(str(spec.step_path.expanduser().resolve())) or {}
         document_hash = str(output.get("sha256") or "") or None
+        tree_hash = tree_for_document_hash(document_hash) if document_hash else None
     else:
+        tree_hash = source_tree or str(record.get("tree") or "") or None
         document_hash = tree_hash
     if document_hash is None or tree_hash is None or model is None:
         return ()

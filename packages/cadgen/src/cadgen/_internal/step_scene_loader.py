@@ -503,44 +503,6 @@ def _withhold_borrowed_product_names(usages: list[tuple[OccurrenceNode, str, boo
             node.source_name = None
 
 
-def load_step_scene_from_xcaf_doc(
-    step_path: Path,
-    doc: Any,
-    *,
-    step_hash: str | None = None,
-    source_kind: str = "step",
-    source_hash: str | None = None,
-    load_elapsed: float | None = None,
-) -> LoadedStepScene:
-    resolved_step_path = step_path.expanduser().resolve()
-    load_started = time.perf_counter()
-    loaded = _load_occurrence_tree_from_xcaf_doc(resolved_step_path, doc)
-    if loaded is None:
-        raise RuntimeError(f"XCAF document contains no STEP geometry: {resolved_step_path}")
-    (
-        roots,
-        prototype_shapes,
-        prototype_names,
-        prototype_colors,
-        prototype_face_colors,
-        prototype_step_names,
-    ) = loaded
-    return LoadedStepScene(
-        step_path=resolved_step_path,
-        roots=roots,
-        prototype_shapes=prototype_shapes,
-        prototype_names=prototype_names,
-        prototype_colors=prototype_colors,
-        prototype_face_colors=prototype_face_colors,
-        prototype_step_names=prototype_step_names,
-        load_elapsed=time.perf_counter() - load_started if load_elapsed is None else load_elapsed,
-        step_hash=step_hash,
-        source_kind=source_kind,
-        source_hash=source_hash,
-        doc=doc,
-    )
-
-
 @contextlib.contextmanager
 def kernel_messages_on_stderr() -> Iterator[None]:
     """Route the CAD kernel's diagnostics to stderr while a STEP is read.
