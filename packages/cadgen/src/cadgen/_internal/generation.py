@@ -688,12 +688,19 @@ def _generate_part_outputs(
             preview_event(phase="Saving STEP" if writes_step else None)
             # The declarations, resolved against the result tree: for the sidecar below,
             # and for the preview as the one annotations object a viewer binds to. An axis
-            # ref reads its component's selector table once the display job is done.
+            # ref reads its component's selector table once the display job is done. The
+            # clips are baked once: the file is written from this tree, so its sidecar
+            # carries these very keyframes.
             resolved["kinematics"] = tree_kinematics(result_hash, display=display)
+            clips = getattr(scene, "animation", None)
+            if writes_step and clips is not None:
+                from cadgen._internal.animation_bake import bake_document_animation
+
+                resolved["animation"] = bake_document_animation(clips, result_hash)
             if announce:
                 annotations = annotations_object(
                     result_hash, kinematics=resolved["kinematics"],
-                    appearance=result_tree.get("appearance"), clips=getattr(scene, "animation", None))
+                    appearance=result_tree.get("appearance"), animation=resolved.get("animation"))
                 if annotations is not None:
                     executors.emit_event(executors.model_event(
                         _model_for_spec(spec), "building",
@@ -844,11 +851,8 @@ def _generate_part_outputs(
                 appearance = tree.get("appearance")
                 if appearance is not None:
                     sidecar_payload["appearance"] = appearance
-                clips = getattr(scene, "animation", None)
-                if clips is not None:
-                    from cadgen._internal.animation_bake import bake_document_animation
-
-                    sidecar_payload["animation"] = bake_document_animation(clips, tree_hash)
+                if resolved.get("animation") is not None:
+                    sidecar_payload["animation"] = resolved["animation"]
             if sidecar_payload is not None and sidecar_payload.get("kinematics") is not None:
                 record["kinematics"] = sidecar_payload.get("kinematics")
             if getattr(scene, "materials", None) is not None:

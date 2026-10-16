@@ -187,6 +187,18 @@ class PreviewRevision(unittest.TestCase):
         self.assertNotIn(announced["object"], json.dumps(read_record(self.model)))
         self.assertNotIn(announced["object"], Path(source_sidecar_path(self.step)).read_text(encoding="utf-8"))
 
+    def test_a_build_bakes_its_clips_once_for_the_preview_and_the_sidecar(self):
+        """The file is written from the result tree the preview resolves against, so its
+        sidecar carries the very keyframes the annotations do: baked once, not twice."""
+        from cadgen._internal import animation_bake
+
+        with mock.patch.object(animation_bake, "bake_document_animation",
+                               wraps=animation_bake.bake_document_animation) as bake:
+            code, events = self.build()
+        self.assertEqual(code, 0, self.output)
+        self.assertTrue(self._of(events, "annotations") and self._of(events, "saved"))
+        self.assertEqual(1, bake.call_count)
+
     def test_the_viewers_reads_of_a_preview_open_no_record_and_import_no_kernel(self):
         code, events = self.build()
         self.assertEqual(code, 0, self.output)

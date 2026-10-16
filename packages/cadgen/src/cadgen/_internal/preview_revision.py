@@ -13,9 +13,10 @@ The build's events name it, and the daemon's ledger keeps exactly those names
 - ``annotations``: the hash of one content-addressed object, :func:`annotations_object`,
   resolving the model's declarations against the result tree exactly as the catalog
   resolves a saved file's sidecar (``viewer/scanner.py``): the articulation of its mates,
-  its appearance and what that draws per occurrence, its clips baked to keyframes. All of
-  it is keyed by the tree's tokens, which the saved document mints again (README law 20),
-  so the save confirms the annotations and nothing on screen moves.
+  its appearance and what that draws per occurrence, its clips baked to keyframes -- the
+  very keyframes its sidecar carries, baked once per build. All of it is keyed by the
+  tree's tokens, which the saved document mints again (README law 20), so the save
+  confirms the annotations and nothing on screen moves.
 
 The object is artifact-side and no GC root: the grace period keeps it while the build it
 belongs to is the news, and nothing durable names it -- no sidecar binds to a preview, no
@@ -37,15 +38,15 @@ PREVIEW_ANNOTATIONS_SCHEMA = 1
 
 
 def annotations_object(tree_hash: str, *, kinematics: Mapping[str, Any] | None,
-                       appearance: Mapping[str, Any] | None, clips: Mapping[str, Any] | None) -> str | None:
+                       appearance: Mapping[str, Any] | None, animation: Mapping[str, Any] | None) -> str | None:
     """Resolve what the sidecar will carry against the result tree ``tree_hash`` and
     publish it as one object: its hash, or None when the model declares nothing.
     ``kinematics`` is the resolved block (``kinematics_resolve.resolve_kinematics_block``),
-    ``appearance`` the result tree's own, ``clips`` the model's ``animation=``. A
-    declaration that fails to resolve raises, as it fails the build."""
-    if not kinematics and appearance is None and clips is None:
+    ``appearance`` the result tree's own, ``animation`` the keyframes the model's
+    ``animation=`` baked to against that tree (``animation_bake.bake_document_animation``).
+    A declaration that fails to resolve raises, as it fails the build."""
+    if not kinematics and appearance is None and animation is None:
         return None
-    from cadgen._internal.animation_bake import bake_document_animation
     from cadgen._internal.component_package import canonical_json_bytes
     from cadgen._internal.source_sidecar import occurrence_display
     from cadgen.articulation import step_articulation
@@ -62,7 +63,7 @@ def annotations_object(tree_hash: str, *, kinematics: Mapping[str, Any] | None,
         "articulation": step_articulation(descriptor, kinematics) if kinematics else None,
         "appearance": json.loads(json.dumps(appearance)) if appearance is not None else None,
         "display": occurrence_display(descriptor, appearance) if appearance is not None else None,
-        "animation": bake_document_animation(clips, tree_hash) if clips is not None else None,
+        "animation": animation,
     }
     return put_object(canonical_json_bytes(payload))
 
