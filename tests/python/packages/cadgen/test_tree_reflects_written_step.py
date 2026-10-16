@@ -179,6 +179,40 @@ class TreeReflectsWrittenStep(unittest.TestCase):
             warm.solids()[0].is_inside(probe), imported.solids()[0].is_inside(probe)
         )
 
+    def test_a_part_that_did_not_verify_is_selected_by_its_geometric_names(self) -> None:
+        """What the viewer selects on a file that does not hold its result is the file's own
+        content: the part its bytes map to, whose selector table names every face by its
+        geometry, and each name it shows resolves to that face."""
+        import re
+
+        from cadgen import read_scene
+        from cadgen._internal.selector_table import read_selector_table
+        from cadgen._internal.step_scene import step_file_hash
+        from cadgen.store import parts
+        from cadgen.store.records import document_entry_for_hash, read_record
+        from cadgen.store.trees import flatten
+
+        self._write("rot_cap.py", _ROT_CAP)
+        self._run("rot_cap.py")
+        step_path = self.project / "rot_cap.step"
+        with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.store), "CADGEN_DAEMON": "0"}):
+            entry = document_entry_for_hash(step_file_hash(step_path))
+            self.assertTrue(entry["differ"])
+            self.assertNotEqual(entry["tree"], read_record(self.project / "rot_cap.py")["tree"])
+            [leaf] = flatten(entry["tree"])["occurrences"]
+            component = flatten(entry["tree"])["components"][leaf["component"]]
+            self.assertNotIn("lineage", component)
+            # The viewer's part for it, as it reads the selector table on a pick.
+            parts.derive(entry["tree"])
+            table = read_selector_table(parts.read(parts.part_key(component, parts.producer_identity()), "selectors"))
+            columns = table["tables"]["faceColumns"]
+            named = {int(row[columns.index("ordinal")]): str(row[columns.index("name")]) for row in table["faces"]}
+            self.assertTrue(named and all(re.fullmatch(r"f:[0-9a-f]{12}", name) for name in named.values()), named)
+            scene = read_scene(step_path)
+            for ordinal, name in named.items():
+                ref = f"#{leaf['id']}/{name}"
+                self.assertEqual((ref, ordinal), (scene.resolve(ref).ref, scene.resolve(ref)._ordinal))
+
     def test_compound_members_links_and_face_colours_round_trip(self) -> None:
         import build123d as bd
 
