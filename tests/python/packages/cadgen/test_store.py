@@ -492,6 +492,38 @@ class HashAtExecution(StoreCase):
             exec(compile(module.read_bytes(), str(module), "exec"), {})  # noqa: S102
         self.assertEqual(recorded, original.hashes[str(module.resolve())])
 
+    def test_a_nested_scope_owns_its_module_s_import_and_what_runs_inside_it(self) -> None:
+        """A child built inside its parent's body owns what executes in its own scope
+        and what importing its module ran, as it would built alone; the parent never
+        owns the child's executions; the bytes that ran are every scope's facts."""
+        import importlib
+        import sys
+
+        from cadgen._internal.generation_runner import _first_party_from_source
+        from cadgen.store.closure import ExecutionHashes
+
+        child = self.root / "nested_child.py"
+        helper = self.root / "nested_helper.py"
+        lazy = self.root / "nested_lazy.py"
+        helper.write_text("SIZE = 3\n", encoding="utf-8")
+        child.write_text("from nested_helper import SIZE\n", encoding="utf-8")
+        lazy.write_text("LATE = 1\n", encoding="utf-8")
+        for name in ("nested_child", "nested_helper", "nested_lazy"):
+            sys.modules.pop(name, None)
+        with mock.patch.object(sys, "path", [str(self.root), *sys.path]), _first_party_from_source():
+            with ExecutionHashes() as outer:
+                importlib.import_module("nested_child")
+                with ExecutionHashes(imported=child) as inner:
+                    exec(compile(lazy.read_bytes(), str(lazy), "exec"), {})  # noqa: S102
+        for name in ("nested_child", "nested_helper"):
+            sys.modules.pop(name, None)
+        paths = {path: str(path.resolve()) for path in (child, helper, lazy)}
+        self.assertEqual(set(inner.hashes), {paths[child], paths[helper], paths[lazy]})
+        self.assertEqual(set(outer.hashes), {paths[child], paths[helper]})
+        self.assertIs(inner.facts, outer.facts)
+        self.assertEqual(set(outer.facts), set(inner.hashes))
+        self.assertEqual(outer.sources[paths[lazy]], b"LATE = 1\n")
+
 
 class PublishRule(StoreCase):
     def test_a_build_against_older_sources_never_replaces_a_current_record(self) -> None:

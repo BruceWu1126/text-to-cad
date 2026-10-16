@@ -445,6 +445,31 @@ class FileTraceTests(unittest.TestCase):
         files, _folders = trace.inputs()
         self.assertEqual(files, {edited: filetrace.CHANGED, removed: filetrace.CHANGED})
 
+    def test_a_nested_capture_is_its_own(self) -> None:
+        """A child model built inside its parent's body opens a capture of its own:
+        what it reads, lists, starts and takes from the environment is the child's,
+        and the parent's capture sees none of it."""
+        from cadgen._internal import filetrace
+        from cadgen._internal.source_hash import _sha256_file
+
+        before, inner, after = (self._file(name, "1") for name in ("before.json", "inner.json", "after.json"))
+        listed = self.root / "profiles"
+        listed.mkdir()
+        with mock.patch.dict(os.environ, {"CADGEN_NESTED_INPUT": "yes"}), filetrace.capture() as outer:
+            before.read_text(encoding="utf-8")
+            with filetrace.capture() as nested:
+                inner.read_text(encoding="utf-8")
+                os.listdir(listed)
+                os.environ.get("CADGEN_NESTED_INPUT")
+                subprocess.run([sys.executable, "-c", "pass"], check=True)
+            after.read_text(encoding="utf-8")
+        self.assertEqual(outer.inputs(), ({before: _sha256_file(before), after: _sha256_file(after)}, set()))
+        self.assertEqual(outer.environment, {})
+        self.assertEqual(outer.programs, [])
+        self.assertEqual(nested.inputs(), ({inner: _sha256_file(inner)}, {listed}))
+        self.assertEqual(nested.environment, {"CADGEN_NESTED_INPUT": "yes"})
+        self.assertEqual(nested.programs, [Path(sys.executable).name])
+
     def test_the_daemon_key_read_on_a_job_thread_is_not_an_input(self) -> None:
         """A parent submitting a child connects to the daemon on a job thread,
         reading its key; that is cadgen's, on any thread."""
@@ -496,17 +521,6 @@ class FileTraceTests(unittest.TestCase):
         with filetrace.capture() as trace:
             list(os.fwalk(profiles))
         self.assertEqual(trace.inputs()[1], {profiles})
-
-    def test_captures_nest(self) -> None:
-        from cadgen._internal import filetrace
-
-        outer_file, inner_file = self._file("outer.txt"), self._file("inner.txt")
-        with filetrace.capture() as outer:
-            outer_file.read_text(encoding="utf-8")
-            with filetrace.capture() as inner:
-                inner_file.read_text(encoding="utf-8")
-        self.assertEqual(set(inner.inputs()[0]), {inner_file})
-        self.assertEqual(set(outer.inputs()[0]), {outer_file, inner_file})
 
     def test_a_folder_the_model_code_lists_is_an_input_and_an_import_listing_is_not(self) -> None:
         import importlib

@@ -10,13 +10,13 @@ the build prints it once per model built (``cadgen.cli_tree``).
 How the split is measured, on the thread that runs the build:
 
 * ``model code`` is the wall time of the decorated function's call, minus the
-  windows inside it where cadgen worked for it: waiting for a child model's build
-  (``waiting_for_children``) and loading a finished child's geometry from the
-  store (``cadgen_work``). Module import is not in it: loading the script is
-  cadgen's, and on a cold run it is mostly the CAD kernel's own import.
-* ``waiting on children`` is every wait for a child's build, in the body or after
-  it (a parent owes its children's outputs before it is done). Each child prints
-  its own line.
+  windows inside it where cadgen worked for it: a child model's build, run inside
+  the body when the body calls it (``child_build``), and loading a child's
+  geometry from the store (``cadgen_work``). Module import is not in it: loading
+  the script is cadgen's, and on a cold run it is mostly the CAD kernel's own
+  import.
+* ``children`` is the time the body spent in its children's builds, decoded or
+  run. Each child prints its own line, with its own split.
 * ``queued`` is the wait for a build slot before the body could start.
 * ``cadgen`` is the rest of the build's wall time.
 
@@ -97,7 +97,7 @@ def time_line(document: str, timings: dict[str, Any]) -> str:
     ]
     children = float(timings.get("childrenSeconds") or 0.0)
     if children >= 0.05:
-        parts.append(f"waiting on children {format_duration(children)}")
+        parts.append(f"children {format_duration(children)}")
     queued = float(timings.get("queuedSeconds") or 0.0)
     if queued >= 0.05:
         parts.append(f"queued for a build slot {format_duration(queued)}")
@@ -295,8 +295,9 @@ def _paused(kind: str) -> Iterator[None]:
             clock.excluded += elapsed
 
 
-def waiting_for_children() -> contextlib.AbstractContextManager[None]:
-    """A wait for a child model's build: neither model code nor cadgen's own work."""
+def child_build() -> contextlib.AbstractContextManager[None]:
+    """A child model's build inside the body, which the child's own clock measures:
+    neither this model's code nor cadgen's work for it."""
     return _paused("children")
 
 
@@ -337,8 +338,8 @@ def profile_report(profiler: Any, *, project: Path | None, body_seconds: float, 
     """The compact report ``--profile`` prints: where the body's time went.
 
     The profile covers the whole call of the decorated function, so a body that
-    waited for a child shows the wait where it happened (in cadgen's lazy child,
-    named in the overall list); the header says how much of the call that was."""
+    built a child shows the child's build where it happened; the header says how
+    much of the call that was."""
     import pstats
 
     stats = pstats.Stats(profiler).stats  # {(file, line, name): (cc, nc, tt, ct, callers)}
@@ -359,7 +360,7 @@ def profile_report(profiler: Any, *, project: Path | None, body_seconds: float, 
     waited = body_seconds - model_seconds
     header = f"profile of the model code ({format_duration(body_seconds)}"
     if waited >= 0.05:
-        header += f", of which {format_duration(waited)} waiting on or loading child models"
+        header += f", of which {format_duration(waited)} building or loading child models"
     lines = [
         header + "; cProfile slows Python-call-heavy code, so read shares, not absolute times):",
         "  in this project, by cumulative time:",

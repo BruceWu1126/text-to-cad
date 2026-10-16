@@ -32,6 +32,12 @@ and a variable the build set before it read it is its own.
 A program the model's code starts (``subprocess``, ``os.system``, the ``spawn``
 and ``exec`` families, by their audit events and by frame, as folder listings
 are) is noted: the files it reads are invisible here, so the build warns.
+
+Captures nest, and a nested one is its own: a child model built inside its
+parent's body opens a capture of its own, which takes its stretch of the log
+and the listings, programs and environment reads made while it is the
+innermost, and the parent's capture sees none of them. A child is its parent's
+input by its result, never by what it read.
 """
 
 from __future__ import annotations
@@ -60,7 +66,7 @@ _PROTOCOL = 2  # filetrace.c's FILETRACE_VERSION: what its log records mean
 
 _LOCK = threading.Lock()
 _TRACER: ctypes.CDLL | None = None
-_OPEN: list["Trace"] = []  # the captures in progress, outermost first
+_OPEN: list["_Capture"] = []  # the captures in progress, outermost first
 _LOG: str | None = None  # the outermost capture's log
 _HOOKED = False
 # Per thread: how deep in ``paused()`` it is, a whole-environment copy in
@@ -115,7 +121,11 @@ class Trace:
     # The programs the model's code started, in order, each once.
     programs: list[str] = field(default_factory=list)
 
-    def _parse(self, log: bytes, *, own: str) -> None:
+    def _parse(self, log: bytes, *, own: str, skip: Iterable[tuple[int, int]] = ()) -> None:
+        """Take in ``log``, this capture's stretch of the tracer's log, less the
+        stretches of the captures nested in it (``skip``, offsets into ``log``)."""
+        for start, end in sorted(skip, reverse=True):
+            log = log[:start] + log[end:]
         for record in log.split(b"\0"):
             if not record:
                 continue
@@ -212,11 +222,21 @@ def _machine_roots() -> tuple[Path, ...]:
     return tuple(root for root in map(_resolved, filter(None, names)) if root is not None)
 
 
+@dataclass
+class _Capture:
+    """A capture in progress: its trace, where its stretch of the log starts, and
+    the stretches of the captures nested in it, which are theirs alone."""
+
+    trace: Trace
+    start: int
+    nested: list[tuple[int, int]] = field(default_factory=list)
+
+
 @contextlib.contextmanager
 def capture() -> Iterator[Trace]:
     """Record what the code run inside opens, lists, reads from the environment
-    and starts. Nests: an inner capture sees its own stretch of the log, the
-    outer one all of it."""
+    and starts. Nests: an inner capture takes its own stretch of the log, and
+    the outer one sees everything but that stretch (the module docstring)."""
     global _LOG
     tracer = _tracer()
     _install_hooks()
@@ -235,8 +255,8 @@ def capture() -> Iterator[Trace]:
             raise OSError(f"cadgen's file tracer could not open its log {_LOG}")
     log = _LOG
     assert log is not None
-    start = os.stat(log).st_size
-    _OPEN.append(trace)
+    open_capture = _Capture(trace, os.stat(log).st_size)
+    _OPEN.append(open_capture)
     try:
         yield trace
     finally:
@@ -244,9 +264,17 @@ def capture() -> Iterator[Trace]:
         if outermost:
             tracer.cadgen_filetrace_end()
             _LOG = None
+        end = os.stat(log).st_size
         with open(log, "rb") as handle:
-            handle.seek(start)
-            trace._parse(handle.read(), own=log)
+            handle.seek(open_capture.start)
+            stretch = handle.read(end - open_capture.start)
+        trace._parse(stretch, own=log,
+                     skip=[(nested_start - open_capture.start, nested_end - open_capture.start)
+                           for nested_start, nested_end in open_capture.nested])
+        if _OPEN:
+            # The enclosing capture's, not this one's: it skips the whole stretch, the
+            # captures nested in this one included.
+            _OPEN[-1].nested.append((open_capture.start, end))
         if outermost:
             os.unlink(log)
 
@@ -294,21 +322,28 @@ def _audit(event: str, args: tuple) -> None:
     try:
         if getattr(_LOCAL, "paused", 0) or not _listed_by_model(sys._getframe(1)):
             return
+        trace = _innermost()
+        if trace is None:
+            return
         if event in _PROGRAMS:
             program = _program(event, args)
-            for trace in tuple(_OPEN):
-                if program and program not in trace.programs:
-                    trace.programs.append(program)
+            if program and program not in trace.programs:
+                trace.programs.append(program)
             return
         target = args[0] if args else None
         folder = _descriptor_path(target) if isinstance(target, int) else os.path.abspath(
             os.fsdecode(target if target is not None else "."))
         if folder is None:
             return
-        for trace in tuple(_OPEN):
-            trace.listed.add(folder)
+        trace.listed.add(folder)
     except Exception:  # noqa: BLE001 - an audit hook must never fail the call it observes
         pass
+
+
+def _innermost() -> Trace | None:
+    """The capture a listing, a program or an environment read belongs to: the
+    innermost one open, which is the build whose code made it."""
+    return _OPEN[-1].trace if _OPEN else None
 
 
 # Programs that run the command they are handed (``shell=True``, ``os.system``):
@@ -434,9 +469,9 @@ def _environment_read(key: object, value: object, caller, *, subscript: bool = F
         if not isinstance(name, str):
             return
         read = os.fsdecode(value) if isinstance(value, bytes) else value
-        for trace in tuple(_OPEN):
-            if name not in trace.environment_set:
-                trace.environment.setdefault(name, read)
+        trace = _innermost()
+        if trace is not None and name not in trace.environment_set:
+            trace.environment.setdefault(name, read)
     except Exception:  # noqa: BLE001 - noting a read must never fail it
         pass
     finally:
@@ -454,7 +489,8 @@ def _copying(caller) -> bool:
 def _environment_set(key: object) -> None:
     try:
         name = os.fsdecode(key) if isinstance(key, bytes) else key
-        for trace in tuple(_OPEN):
+        trace = _innermost()
+        if trace is not None:
             trace.environment_set.add(str(name))
     except Exception:  # noqa: BLE001 - noting a write must never fail it
         pass

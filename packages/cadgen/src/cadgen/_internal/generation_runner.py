@@ -158,8 +158,9 @@ def _load_generator_module(script_path: Path) -> object:
 
 
 class _SourceOnlyLoader(importlib.machinery.SourceFileLoader):
-    """Compiles the bytes on disk, never a ``__pycache__`` ``.pyc``, and hands
-    those exact bytes to the build's execution hashes."""
+    """Compiles the bytes on disk, never a ``__pycache__`` ``.pyc``, hands those
+    exact bytes to the build's execution hashes, and attributes what a module's
+    execution runs to its import (``closure.importing``)."""
 
     def get_code(self, fullname: str):  # noqa: ANN201 - importlib protocol
         path = self.get_filename(fullname)
@@ -168,6 +169,12 @@ class _SourceOnlyLoader(importlib.machinery.SourceFileLoader):
 
         note_compiled_source(path, data)
         return compile(data, path, "exec", dont_inherit=True)
+
+    def exec_module(self, module) -> None:  # noqa: ANN001 - importlib protocol
+        from cadgen.store.closure import importing
+
+        with importing(self.path):
+            super().exec_module(module)
 
 
 class _FirstPartyFromSource(importlib.abc.MetaPathFinder):
