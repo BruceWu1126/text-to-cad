@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import sys
 import threading
 import time
@@ -103,18 +102,18 @@ class _Model:
 
 
 class BuildTree:
-    """Renders model events for one root request. Thread-safe: events arrive from job
+    """Renders model events for one root request: every event this process's sink
+    hears is its own, the root's and its children's, which build in the root's process
+    or in the one worker that builds the root. Thread-safe: events arrive from job
     threads while the body runs on the main thread."""
 
     def __init__(
         self,
         *,
-        root_id: str | None,
         stream: TextIO | None = None,
         json_lines: bool = False,
     ) -> None:
         self._stream = stream if stream is not None else sys.stderr
-        self._root_id = root_id
         self._json = bool(json_lines)
         self._tty = (not self._json) and bool(getattr(self._stream, "isatty", lambda: False)())
         self._guard = threading.RLock()
@@ -136,9 +135,6 @@ class BuildTree:
     def handle(self, event: dict) -> None:
         if not isinstance(event, dict):
             return
-        root = event.get("root")
-        if self._root_id and root and root != self._root_id:
-            return  # someone else's tree
         model = event.get("model")
         state = event.get("state")
         if not isinstance(model, str) or not isinstance(state, str):
@@ -422,25 +418,17 @@ def build_tree(*, json_lines: bool = False, stream: TextIO | None = None) -> Ite
 
     Installs nothing when a sink is already present (a daemon worker relays events as
     frames — see ``cadgen.daemon.executors``): the tree belongs to the ROOT request
-    only. Mints the root id when this process is the root.
+    only.
     """
     from cadgen.daemon import executors
 
     if executors.sink_installed():
         yield None
         return
-    minted = False
-    if not os.environ.get("CADGEN_ROOT_ID"):
-        import uuid
-
-        os.environ["CADGEN_ROOT_ID"] = uuid.uuid4().hex
-        minted = True
-    tree = BuildTree(root_id=os.environ["CADGEN_ROOT_ID"], stream=stream, json_lines=json_lines)
+    tree = BuildTree(stream=stream, json_lines=json_lines)
     executors.set_event_sink(tree.handle)
     try:
         yield tree
     finally:
         executors.set_event_sink(None)
         tree.close()
-        if minted:
-            os.environ.pop("CADGEN_ROOT_ID", None)

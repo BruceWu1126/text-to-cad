@@ -197,13 +197,12 @@ print('kernel-free')
     def test_ledger_never_parses_source_or_advertises_declared_outputs(self):
         ledger = JobLedger()
         with mock.patch("cadgen.daemon.jobs.declared_outputs", side_effect=AssertionError("source scan")):
-            job = ledger.start_artifact(display_request(), store_root="/store/a", root_id="root", dependency=True)
+            job = ledger.start_artifact(display_request(), store_root="/store/a", dependency=True)
             legacy = ledger.start(tool="artifact", subject="/readable/source.py", argv=[])
         self.assertEqual(job["outputs"], [])
         self.assertEqual(legacy["subject"], "")
         self.assertFalse(job["editingProducer"])
         self.assertTrue(job["dependency"])
-        self.assertEqual(job["rootId"], "root")
         ledger.record_artifact_result(job, {"result": {"x": 1}})
         ledger.finish(job, 0)
         self.assertEqual(ledger.snapshot()[0]["artifactResult"]["result"], {"x": 1})
@@ -239,7 +238,7 @@ class ArtifactCoalescing(unittest.TestCase):
         pool = mock.Mock()
         pool.acquire.return_value = running
         request = {"tool": "artifact", "argv": [], "artifact": display_request(), "store_root": "/store/a",
-                   "root_id": "root", "dependency": True, "cwd": "/unrelated/source"}
+                   "dependency": True, "cwd": "/unrelated/source"}
         first, second = Connection(), Connection()
         with contextlib.ExitStack() as stack:
             for name, value in (("_BROKER", registry), ("_JOBS", ledger), ("_POOL", pool)):

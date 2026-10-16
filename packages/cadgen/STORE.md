@@ -1805,8 +1805,8 @@ and its artifact jobs (above), with two executors that behave identically:
   job this way, and so does every variable a model reads (§3). Only the names
   the daemon's machinery sets for itself are neither sent nor replaced
   (`client.INTERNAL_ENV_VARS`: the worker's own daemon, address and state
-  directory, the request's root and job ids, the install channel). Nothing
-  else a job sees comes from the process that started the daemon.
+  directory, the request's job id, the install channel). Nothing else a job
+  sees comes from the process that started the daemon.
 - **Transient executor (`CADGEN_DAEMON=0`).** A subprocess per job -- a
   document compile -- alive for that job only. It inherits the environment, so
   a test's `CADGEN_CACHE_DIR` isolates its store; tests and CI run this way. An artifact job (`kind:

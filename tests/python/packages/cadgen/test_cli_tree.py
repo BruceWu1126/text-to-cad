@@ -3,7 +3,7 @@
 Driven with synthetic events so the assertions are about the rendering rules: one
 JSON line per transition with --json, nothing but durable lines in any other non-TTY,
 current children counted on the parent's line, a finished subtree folded to one line,
-a finished model that never regresses, and a stranger's root id ignored.
+and a finished model that never regresses.
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ import io
 import json
 import os
 import unittest
-from unittest import mock
 
 from tests.python.support.paths import add_repo_path
 
@@ -26,7 +25,7 @@ ROBOT, ARM, GRIPPER, FINGER = "/m/robot.py", "/m/arm.py", "/m/gripper.py", "/m/f
 
 def _tree(*, json_lines: bool = True) -> tuple[BuildTree, io.StringIO]:
     out = io.StringIO()
-    return BuildTree(root_id="r", stream=out, json_lines=json_lines), out
+    return BuildTree(stream=out, json_lines=json_lines), out
 
 
 def _lines(out: io.StringIO) -> list[dict]:
@@ -89,13 +88,6 @@ class JsonLines(unittest.TestCase):
         tree.close()
         self.assertEqual(_lines(out)[-1]["state"], "failed")
         self.assertEqual(_lines(out)[-1]["exit"], 3)
-
-    def test_events_from_another_root_are_ignored(self):
-        tree, out = _tree()
-        tree.handle({"model": ARM, "state": "building", "root": "someone-else"})
-        tree.handle({"model": ARM, "state": "building", "root": "r"})
-        tree.close()
-        self.assertEqual(len(_lines(out)), 1)
 
     def test_malformed_events_are_dropped(self):
         tree, out = _tree()
@@ -242,7 +234,7 @@ class TimeLines(unittest.TestCase):
 
     def test_a_tty_block_holds_the_lines_until_it_freezes(self):
         out = _Tty()
-        tree = BuildTree(root_id="r", stream=out)
+        tree = BuildTree(stream=out)
         tree.handle({"model": ARM, "state": "building", "phase": "generate"})
         tree.handle({"model": ARM, "state": "done", "timings": _timings(1.0)})
         self.assertNotIn("[cadgen] built", out.getvalue(), "a line written under the block is redrawn over")
@@ -264,7 +256,7 @@ class StartedPrograms(unittest.TestCase):
         for mode in ("tty", "plain", "json"):
             with self.subTest(mode=mode):
                 out = _Tty() if mode == "tty" else io.StringIO()
-                tree = BuildTree(root_id="r", stream=out, json_lines=mode == "json")
+                tree = BuildTree(stream=out, json_lines=mode == "json")
                 tree.handle({"model": ARM, "state": "done", "timings": _timings(1.0), "started": ["openscad"]})
                 tree.handle({"model": ARM, "state": "done"})  # the job thread's second done
                 tree.close()
@@ -283,7 +275,7 @@ class BuildWarnings(unittest.TestCase):
         for mode in ("tty", "plain", "json"):
             with self.subTest(mode=mode):
                 out = _Tty() if mode == "tty" else io.StringIO()
-                tree = BuildTree(root_id="r", stream=out, json_lines=mode == "json")
+                tree = BuildTree(stream=out, json_lines=mode == "json")
                 tree.handle({"model": ARM, "state": "done", "timings": _timings(1.0), "warnings": [warning]})
                 tree.handle({"model": ARM, "state": "done"})  # the job thread's second done
                 tree.close()
@@ -296,34 +288,22 @@ class BuildWarnings(unittest.TestCase):
 class ProcessWiring(unittest.TestCase):
     def setUp(self):
         self.addCleanup(executors.set_event_sink, None)
-        self.addCleanup(os.environ.pop, "CADGEN_ROOT_ID", None)
 
-    def test_the_root_mints_an_id_installs_the_sink_and_clears_both(self):
-        os.environ.pop("CADGEN_ROOT_ID", None)
+    def test_the_root_installs_the_sink_and_clears_it(self):
         out = io.StringIO()
         with build_tree(json_lines=True, stream=out) as tree:
             self.assertIsNotNone(tree)
             self.assertTrue(executors.sink_installed())
-            root = os.environ["CADGEN_ROOT_ID"]
             executors.emit_event(executors.model_event("/m/a.py", "building"))
         self.assertFalse(executors.sink_installed())
-        self.assertNotIn("CADGEN_ROOT_ID", os.environ)
         line = _lines(out)[0]
         self.assertEqual(line["model"], os.path.abspath("/m/a.py"))
-        self.assertEqual(tree._root_id, root)
 
     def test_a_worker_with_a_sink_already_installed_gets_no_tree(self):
         executors.set_event_sink(lambda event: None)
         with build_tree(json_lines=True) as tree:
             self.assertIsNone(tree)
         self.assertTrue(executors.sink_installed(), "the worker's sink was replaced")
-
-    def test_emit_event_tags_the_root_id(self):
-        seen = []
-        executors.set_event_sink(seen.append)
-        with mock.patch.dict(os.environ, {"CADGEN_ROOT_ID": "abc"}):
-            executors.emit_event({"model": "/m/a.py", "state": "building"})
-        self.assertEqual(seen, [{"model": "/m/a.py", "state": "building", "root": "abc"}])
 
 
 if __name__ == "__main__":

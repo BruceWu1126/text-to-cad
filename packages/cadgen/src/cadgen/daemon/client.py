@@ -76,8 +76,7 @@ INTERNAL_ENV_VARS = frozenset({
     "CADGEN_DAEMON_CHILD",
     "CADGEN_DAEMON_SOCKET",
     "CADGEN_DAEMON_STATE_DIR",
-    # A request's own fields (worker._apply_request_env).
-    "CADGEN_ROOT_ID",
+    # A request's own field (worker._apply_request_env).
     "CADGEN_JOB_ID",
     # The daemon's processes report their installation's channel, whoever started
     # them (_spawn_daemon), and a Windows worker names its virtual environment so
@@ -225,7 +224,6 @@ def _request_payload(
     prog: str | None,
     *,
     store_root: str | None = None,
-    root_id: str | None = None,
     closure: str | None = None,
     coalesce: bool = False,
     dependency: bool = False,
@@ -245,9 +243,6 @@ def _request_payload(
         # The store this job reads and writes: an explicit request field, never
         # the worker's ambient environment, so one daemon serves isolated stores.
         "store_root": str(store_root) if store_root else str(default_store_root()),
-        # The top-level request this job belongs to; child-build events carry it
-        # so the root's build tree can place them.
-        "root_id": str(root_id) if root_id else None,
         # In-flight coalescing (cadgen.daemon.broker): a compile carries its document's
         # digest and may join a job already compiling the same bytes. A top-level request
         # never does -- the model the user asked for runs.
@@ -280,7 +275,7 @@ def run_via_daemon(
         return None
     from cadgen.daemon.executors import emit_event
 
-    payload = _request_payload(tool, argv, cwd, prog, root_id=os.environ.get("CADGEN_ROOT_ID"))
+    payload = _request_payload(tool, argv, cwd, prog)
     try:
         return _run_with_retry(payload, on_event=emit_event)
     except KeyboardInterrupt:
@@ -297,7 +292,6 @@ def run_nested(
     *,
     prog: str | None = None,
     store_root: str | None = None,
-    root_id: str | None = None,
     closure: str | None = None,
     on_stream: Callable[[str], None] | None = None,
     on_event: Callable[[dict], None] | None = None,
@@ -313,8 +307,7 @@ def run_nested(
     if os.environ.get("CADGEN_DAEMON") == "0" or not daemon_supported():
         return None
     payload = _request_payload(
-        tool, argv, cwd, prog, store_root=store_root, root_id=root_id, closure=closure,
-        coalesce=True, dependency=True,
+        tool, argv, cwd, prog, store_root=store_root, closure=closure, coalesce=True, dependency=True,
     )
     return _run_with_retry(payload, on_stream=on_stream, on_event=on_event)
 
@@ -323,8 +316,7 @@ def artifact_payload(request: dict, *, store_root: str, dependency: bool = False
     """Capture a structured source-free request on the calling thread."""
     from cadgen.daemon.artifacts import normalize_request, store_path
 
-    payload = _request_payload("artifact", [], None, None, store_root=store_path(store_root),
-                               root_id=os.environ.get("CADGEN_ROOT_ID"), dependency=dependency)
+    payload = _request_payload("artifact", [], None, None, store_root=store_path(store_root), dependency=dependency)
     payload["artifact"] = normalize_request(request)
     return payload
 

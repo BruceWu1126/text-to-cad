@@ -148,8 +148,8 @@ def sink_installed() -> bool:
 
 
 def emit_event(event: dict) -> None:
-    """Hand one model transition to the sink. Tags it with the root request's id
-    (``CADGEN_ROOT_ID``) so the root's renderer can tell its own tree from a stranger's."""
+    """Hand one model transition to the sink, tagged with the job it belongs to
+    (``CADGEN_JOB_ID``, a daemon worker's) and its place in that job's sequence."""
     for capture in getattr(_RESULT_CAPTURE, "jobs", ()):
         capture._observe(event)
     with _EVENT_LOCK:
@@ -160,10 +160,6 @@ def emit_event(event: dict) -> None:
         producer = os.environ.get("CADGEN_JOB_ID")
         if producer:
             event = {**event, "job": producer, "sequence": next(_EVENT_SEQUENCE)}
-    if "root" not in event:
-        root = os.environ.get("CADGEN_ROOT_ID")
-        if root:
-            event = {**event, "root": root}
     try:
         sink(event)
     except Exception:  # noqa: BLE001 - reporting never fails a build
@@ -227,7 +223,6 @@ def submit_compile(
     *,
     store_root: Path | None = None,
     force: bool = False,
-    root_id: str | None = None,
     parent: Path | str | None = None,
 ) -> Job:
     """Compile a document whose bytes have no tree, as a job.
@@ -253,8 +248,7 @@ def submit_compile(
     tool_argv = [str(document)] + (["--force"] if force else [])
     if use_daemon():
         _submit_daemon(
-            job, root, root_id=root_id, closure=closure,
-            tool="step-compile", argv=tool_argv, prog="cadgen step compile",
+            job, root, closure=closure, tool="step-compile", argv=tool_argv, prog="cadgen step compile",
         )
     else:
         _submit_transient(job, root, command=[sys.executable, "-P", "-m", "cadgen.cli.step_compile", *tool_argv])
@@ -320,7 +314,6 @@ def _submit_daemon(
     job: Job,
     store_root: Path,
     *,
-    root_id: str | None,
     closure: str,
     tool: str,
     argv: list[str],
@@ -340,7 +333,6 @@ def _submit_daemon(
             str(job.script.parent),
             prog=prog,
             store_root=str(store_root),
-            root_id=root_id,
             closure=closure,
             on_stream=job._say,
             on_event=emit_event,

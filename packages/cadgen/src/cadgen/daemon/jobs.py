@@ -192,11 +192,10 @@ class JobLedger:
             self._notify(job)
         return job
 
-    def start_artifact(self, request: dict, *, store_root: str, root_id=None, dependency=False) -> dict[str, Any]:
+    def start_artifact(self, request: dict, *, store_root: str, dependency=False) -> dict[str, Any]:
         job = self.start(tool="artifact", subject="", store_root=store_root, editing_producer=False)
         with self._guard:
             job["artifact"] = copy.deepcopy(request)
-            job["rootId"] = root_id
             job["dependency"] = bool(dependency)
             self._notify(job)
         return job

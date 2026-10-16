@@ -59,10 +59,8 @@ def _apply_request_env(request: dict) -> None:
     model code exported. The names the daemon's machinery sets for itself
     (``client.INTERNAL_ENV_VARS``) are left as they are. A request that carries
     no environment changes none of it. The store root is an explicit request
-    field and wins.
-
-    ``root_id`` names the build tree this job belongs to; a child this job
-    submits inherits it through the environment so its events tag the same tree.
+    field and wins. ``job_id`` names the ledger's row for this job: its events
+    carry it.
     """
     env = request.get("env")
     if isinstance(env, dict):
@@ -77,11 +75,6 @@ def _apply_request_env(request: dict) -> None:
     store_root = request.get("store_root")
     if isinstance(store_root, str) and store_root:
         os.environ["CADGEN_CACHE_DIR"] = store_root
-    root_id = request.get("root_id")
-    if isinstance(root_id, str) and root_id:
-        os.environ["CADGEN_ROOT_ID"] = root_id
-    else:
-        os.environ.pop("CADGEN_ROOT_ID", None)
     job_id = request.get("job_id")
     if isinstance(job_id, str) and job_id:
         os.environ["CADGEN_JOB_ID"] = job_id

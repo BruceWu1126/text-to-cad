@@ -125,7 +125,7 @@ class DaemonRouting(unittest.TestCase):
         # daemon. Keep this class's socket, state and default store invariant throughout.
         env = {
             key: value for key, value in os.environ.items()
-            if key not in {"CADGEN_DAEMON_CHILD", "CADGEN_ROOT_ID"}
+            if key != "CADGEN_DAEMON_CHILD"
         }
         env.update({
             "CADGEN_DAEMON": "1",
@@ -154,7 +154,6 @@ class DaemonRouting(unittest.TestCase):
         env["CADGEN_DAEMON_SPARES"] = "1"
         env["CADGEN_DAEMON_STATE_DIR"] = str(cls.work / "state")
         env.pop("CADGEN_DAEMON_CHILD", None)
-        env.pop("CADGEN_ROOT_ID", None)
         with open(cls.log_path, "ab") as log_file:
             cls.server = subprocess.Popen(
                 [sys.executable, str(DAEMON_DIR / "__main__.py")],
@@ -303,8 +302,6 @@ class DaemonRouting(unittest.TestCase):
         self.assertTrue({"left.py", "right.py"} <= models, events)
         parents = {e.get("parent") for e in events if Path(e["model"]).name in {"left.py", "right.py"}}
         self.assertEqual({str(self.src / "pair.py")}, {p for p in parents if p})
-        roots = {e.get("root") for e in events}
-        self.assertEqual(len(roots), 1, f"child events were not tagged with the root's id: {roots}")
         self.assertEqual(len(self._workers_for("pair.py")), 1)
         # The children were built inside pair's worker: this build bound none for them.
         self.assertEqual({name: len(self._workers_for(name)) for name in before}, before)

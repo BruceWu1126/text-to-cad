@@ -13,8 +13,7 @@ Protocol — one JSON request per connection, JSON-lines response:
 
   request : {"tool": <a key of _TOOL_IMPORTS below>,
              "argv": [...], "cwd": "...", "prog": "...",
-             "store_root": "...", "root_id": "..." | null,
-             "env": {...}, "token": <client version token>}
+             "store_root": "...", "env": {...}, "token": <client version token>}
   response: {"stream": "stdout"|"stderr", "data": "..."} chunks and
             {"event": {...}} build-tree events, then {"exit": <int>} — or
             {"restart": true} when the client's version token differs from the
@@ -379,7 +378,7 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
     subject = "" if is_artifact else model or _document_path(argv, cwd)
     closure = str(request.get("closure") or "")
     if is_artifact:
-        job = _JOBS.start_artifact(artifact, store_root=root, root_id=request.get("root_id"), dependency=request.get("dependency"))
+        job = _JOBS.start_artifact(artifact, store_root=root, dependency=request.get("dependency"))
     else:
         job = _JOBS.start(
             tool=tool, subject=subject, argv=argv, store_root=str(request.get("store_root") or ""),
@@ -500,7 +499,6 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
             "cwd": request.get("cwd"),
             "env": request.get("env"),
             "store_root": request.get("store_root"),
-            "root_id": request.get("root_id"),
             "job_id": job["id"],
             **({"artifact": artifact} if is_artifact else {}),
         })

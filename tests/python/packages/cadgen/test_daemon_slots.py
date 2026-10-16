@@ -148,8 +148,7 @@ class OneSlotDaemon(unittest.TestCase):
                 + [os.path.abspath(p) for p in os.environ.get("PYTHONPATH", "").split(os.pathsep) if p]
             ),
         })
-        for key in ("CADGEN_DAEMON_CHILD", "CADGEN_ROOT_ID"):
-            cls.env.pop(key, None)
+        cls.env.pop("CADGEN_DAEMON_CHILD", None)
         os.environ["CADGEN_DAEMON_STATE_DIR"] = cls.env["CADGEN_DAEMON_STATE_DIR"]
         os.environ["CADGEN_DAEMON_SOCKET"] = cls.address
         with open(cls.log_path, "ab") as log_file:
