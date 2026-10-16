@@ -21,6 +21,15 @@ add_repo_path("packages/cadgen/src")
 _KEYS = {"bracket": f"{1:064x}-v7", "ball": f"{3:064x}-v7"}
 
 
+def verify_step(path, expected, occurrences=None, colors=None, *, named=True):
+    """``step_verify.verify_scene`` of a parse of the file at ``path``, read as the verify
+    job reads a file (``load_step_scene``)."""
+    from cadgen._internal.step_scene_loader import load_step_scene
+    from cadgen._internal.step_verify import verify_scene
+
+    return verify_scene(load_step_scene(Path(path)), expected, occurrences, colors, named=named)
+
+
 def _expected(shape, label, part):
     """The component ``shape`` places, keyed ``part``, every face and edge named."""
     from OCP.TopLoc import TopLoc_Location
@@ -85,7 +94,6 @@ class VerifyStepTest(unittest.TestCase):
         cls._tmp.cleanup()
 
     def verify(self, path, components=None, occurrences=...):
-        from cadgen._internal.step_verify import verify_step
 
         return verify_step(path, (self.components if components is None else components).values(),
                            self.occurrences if occurrences is ... else occurrences)
@@ -107,7 +115,6 @@ class VerifyStepTest(unittest.TestCase):
     def test_a_file_written_without_names_is_verified_by_its_occurrences(self) -> None:
         """A plain file claims no part and no element: each occurrence holds the faces and
         edges of the part the result places there, wherever they are named."""
-        from cadgen._internal.step_verify import verify_step
 
         self.assertEqual(verify_step(self.plain, self.components.values(), self.occurrences, named=False), [])
         from cadgen._internal.step_names import ComponentNames
@@ -190,7 +197,7 @@ class VerifyStepTest(unittest.TestCase):
 
         from cadgen._internal.step_names import ComponentNames
         from cadgen._internal.step_scene_loader import load_step_scene
-        from cadgen._internal.step_verify import face_boxes, measured_again, verify_step
+        from cadgen._internal.step_verify import face_boxes, measured_again
         from cadgen.step_export import export_build123d_step_file
 
         rock = bd.scale(bd.Sphere(90), by=(1.0, 0.82, 0.62))
@@ -242,7 +249,7 @@ class VerifyStepTest(unittest.TestCase):
 
         from cadgen._internal.step_names import ComponentNames
         from cadgen._internal.step_scene_loader import load_step_scene
-        from cadgen._internal.step_verify import degenerate_edges, verify_step
+        from cadgen._internal.step_verify import degenerate_edges
         from cadgen.step_export import export_build123d_step_file
 
         # A twisted blade lofted through three sections, trimmed by a hub and filleted along
@@ -287,7 +294,6 @@ class VerifyStepTest(unittest.TestCase):
         every occurrence of it is placed in that colour, and not otherwise."""
         import build123d as bd
 
-        from cadgen._internal.step_verify import verify_step
         from cadgen.step_export import export_build123d_step_file
 
         panel = bd.Compound(obj=[bd.Box(4, 4, 1), bd.Pos(6, 0, 0) * bd.Box(4, 4, 1)])
@@ -394,7 +400,6 @@ class VerifyStepTest(unittest.TestCase):
 
         import build123d as bd
 
-        from cadgen._internal.step_verify import verify_step
         from cadgen.step_export import export_build123d_step_file
 
         green = (0.1, 0.8, 0.2, 1.0)
@@ -432,7 +437,6 @@ class VerifyStepTest(unittest.TestCase):
         from OCP.TopoDS import TopoDS
         from OCP.TopTools import TopTools_IndexedMapOfShape
 
-        from cadgen._internal.step_verify import verify_step
         from cadgen.step_export import export_build123d_step_file
 
         block = bd.Solid.make_box(4, 2, 1)
@@ -461,7 +465,6 @@ class VerifyStepTest(unittest.TestCase):
         occurrence's colour onto each face of a compound part without one of its own."""
         import build123d as bd
 
-        from cadgen._internal.step_verify import verify_step
         from cadgen.step_export import export_build123d_step_file
 
         red, blue = (1.0, 0.0, 0.0, 1.0), (0.2, 0.4, 0.6, 1.0)
@@ -493,7 +496,7 @@ class VerifyStepTest(unittest.TestCase):
         from OCP.TopLoc import TopLoc_Location
 
         from cadgen._internal.step_scene_loader import load_step_scene
-        from cadgen._internal.step_verify import edge_boxes, verify_step
+        from cadgen._internal.step_verify import edge_boxes
         from cadgen.step_export import export_build123d_step_file
 
         sphere = bd.Sphere(1)
@@ -514,7 +517,6 @@ class VerifyStepTest(unittest.TestCase):
         never verify as each other."""
         import build123d as bd
 
-        from cadgen._internal.step_verify import verify_step
         from cadgen.step_export import export_build123d_step_file
 
         written = bd.Wire.make_polygon([(0, 0, 0), (5, 0, 0), (5, 2, 0)])
@@ -529,7 +531,6 @@ class VerifyStepTest(unittest.TestCase):
         self.assertTrue(message.startswith("3 edges not paired by name have no counterpart within"), message)
 
     def test_the_result_names_each_component_by_one_part_key(self) -> None:
-        from cadgen._internal.step_verify import verify_step
 
         bracket = self.components["bracket"]
         with self.assertRaises(ValueError):

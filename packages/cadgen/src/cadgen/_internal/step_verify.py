@@ -1,8 +1,9 @@
 """Whether a written STEP holds the result it was written from: the check an export is
 verified by.
 
-:func:`verify_step` parses the file as any reader does (``load_step_scene``) and walks it
-as a compile walks it (``store.build._document_walk``): the occurrences that walk names, by
+:func:`verify_scene` takes the file parsed as any reader parses it (``load_step_scene``,
+by the verify job) and walks it as a compile walks it (``store.build._document_walk``): the
+occurrences that walk names, by
 the tokens it mints from the file's names and placements, must be the result's, each
 holding the part the result places there and drawing each face in the result's colour. It
 finds each component the file holds by the part key on its product (``step_names``) and
@@ -58,7 +59,6 @@ import bisect
 import math
 from collections import Counter
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
 from cadgen._internal.step_names import ComponentNames, is_part_key
@@ -272,14 +272,6 @@ def element_tolerances(shape: Any) -> tuple[tuple[float, ...], tuple[float, ...]
             explorer.Next()
         face_tolerances.append(largest)
     return tuple(face_tolerances), edge_tolerances
-
-
-def verify_step(path: Path, expected: Iterable[ExpectedComponent], occurrences: Mapping[str, str] | None = None,
-                colors: Mapping[str, Any] | None = None, *, named: bool = True) -> list[Mismatch]:
-    """:func:`verify_scene` of a parse of the STEP at ``path``."""
-    from cadgen._internal.step_scene_loader import load_step_scene
-
-    return verify_scene(load_step_scene(Path(path)), expected, occurrences, colors, named=named)
 
 
 def verify_scene(scene: Any, expected: Iterable[ExpectedComponent], occurrences: Mapping[str, str] | None = None,

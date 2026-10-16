@@ -84,12 +84,6 @@ class LoadedStepScene:
     # is what tells the sidecar writer this is a re-emit rather than an import.
     reemit_source_hash: str | None = None
     reemit_annotation_hash: str | None = None
-    # compound_from_instances carries its assembly hierarchy as an explicit
-    # occurrence-metadata tree (cadgen.instances). The XCAF doc built for an
-    # in-memory scene flattens such a compound to ONE leaf (it has no
-    # build123d children), so scene consumers that need placed leaf
-    # occurrences (interference) walk this tree instead when present.
-    instance_occurrence_tree: dict[str, Any] | None = None
     doc: Any | None = None
 
 
