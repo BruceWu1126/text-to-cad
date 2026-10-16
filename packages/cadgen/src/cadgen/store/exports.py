@@ -22,18 +22,19 @@ a tree, a staged file or a document and its digest, never a script.
   geometry -- and lists what differs (``differ``). The model's next run writes it plain.
 
 A document entry an export wrote is pending until its verify answers (``verified:
-false``, ``records.note_document_tree``).
+false``): a door confirms it first (:func:`confirm_document`), and a view draws it at once.
 """
 
 from __future__ import annotations
 
 import hashlib
+import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
-__all__ = ["export_step", "verify_document"]
+__all__ = ["confirm_document", "export_step", "file_warning", "verify_document"]
 
 # How many of the differences a document entry lists, and a warning shows.
 _LISTED = 50
@@ -63,34 +64,57 @@ class _Spans:
         pass
 
 
-def export_step(tree_hash: str, out: Path, *, names: bool = True,
-                shapes: Mapping[str, Any] | None = None) -> dict[str, Any]:
+def export_step(tree_hash: str, out: Path, *, names: bool = True, shapes: Mapping[str, Any] | None = None,
+                children: Mapping[str, Mapping[str, str]] | None = None) -> dict[str, Any]:
     """Write the stored tree ``tree_hash`` to ``out`` and return the file's ``sha256``, the
-    producer whose part keys it carries (``producer``, None when written plain) and the
-    writer's ``spans`` and ``warnings``. ``names`` False writes it plain: no part key and no
-    element name. ``shapes`` gives the build's own live shapes by cid for components the
-    store cannot decode (an eager-only component's), which only the build's own process
-    holds (STORE.md §3)."""
-    from cadgen.step_export import export_build123d_step_file
-    from cadgen.store.materialize import materialize_descriptor
+    producer whose part keys it carries (``producer``, None when written plain), whether it
+    was spliced (``spliced``) and the writer's ``spans`` and ``warnings``. ``names`` False
+    writes it plain: no part key and no element name. ``shapes`` gives the build's own live
+    shapes by cid for components the store cannot decode (an eager-only component's), which
+    only the build's own process holds (STORE.md §3). ``children``, each linked child's tree
+    mapped to its saved STEP (``{"path", "sha256"}``), lets an all-link parent be spliced
+    from those files (``store/_splice_step.py``) where it is eligible."""
+    from cadgen.store.parts import producer_identity
     from cadgen.store.trees import capture_tree
 
     spans = _Spans()
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    producer = None
+    if names:
+        try:
+            producer = producer_identity()
+        except ValueError:
+            # A part key names its producer: a runtime that cannot name its own writes
+            # the file plain, as a named export never fails where a plain one succeeds.
+            names = False
+    if children:
+        from cadgen.store._splice_step import ChildStep, Ineligible, splice_step
+        from cadgen.store.trees import get_tree
+
+        try:
+            with spans.timed(f"splice STEP {out.name}"):
+                tree = get_tree(tree_hash) or {}
+                digest = splice_step(out=out, root_name=str(tree.get("label") or ""), tree=tree,
+                                     descriptor=capture_tree(tree_hash, retain_payloads=False)[0],
+                                     children={child: ChildStep(Path(step["path"]), str(step["sha256"]))
+                                               for child, step in children.items()})
+            return {"sha256": digest, "producer": producer, "spliced": True, "spans": spans.rows,
+                    "warnings": spans.warnings}
+        except Ineligible:
+            pass
+    from cadgen.step_export import export_build123d_step_file
+    from cadgen.store.materialize import materialize_descriptor
+
     with spans.timed("materialize"):
         descriptor, payloads = capture_tree(tree_hash)
         placed: dict[int, str] = {}
         document = materialize_descriptor(descriptor, captured_objects=payloads, shapes=shapes,
                                           tree_hash=tree_hash, placed=placed)
-    producer = None
-    namer = None
-    if names:
-        from cadgen.store.parts import producer_identity
-
-        producer = producer_identity()
-        namer = _namer(descriptor, payloads, placed, producer)
-    Path(out).parent.mkdir(parents=True, exist_ok=True)
-    digest = export_build123d_step_file(document, Path(out), logger=spans, names=namer)
-    return {"sha256": digest, "producer": producer, "spans": spans.rows, "warnings": spans.warnings}
+    namer = _namer(descriptor, payloads, placed, producer) if names else None
+    digest = export_build123d_step_file(document, out, logger=spans, names=namer)
+    return {"sha256": digest, "producer": producer, "spliced": False, "spans": spans.rows,
+            "warnings": spans.warnings}
 
 
 def _namer(descriptor: Mapping[str, Any], payloads: Mapping[str, bytes], placed: Mapping[int, str],
@@ -132,7 +156,7 @@ def verify_document(tree_hash: str, document: Path, sha256: str, *, producer: di
     from cadgen._internal.step_scene_package import _scene_from_selected_bytes
     from cadgen._internal.step_verify import expected_component, verify_scene
     from cadgen._internal.step_names import ComponentNames
-    from cadgen.store.parts import _decoded, part_key, producer_identity
+    from cadgen.store.parts import _decoded, part_key
     from cadgen.store.records import document_entry_for_hash
     from cadgen.store.trees import capture_tree
 
@@ -146,8 +170,8 @@ def verify_document(tree_hash: str, document: Path, sha256: str, *, producer: di
     from cadgen._internal.component_package import read_lineage
 
     components = descriptor["components"]
-    # A plain file is verified by its occurrences: any producer's part keys tell its parts apart.
-    keys = {cid: part_key(entry, producer if producer is not None else producer_identity())
+    # A plain file is verified by its occurrences: its parts are told apart by their content.
+    keys = {cid: part_key(entry, producer) if producer is not None else f"{entry['contentHash']}-v1"
             for cid, entry in components.items()}
     expected = {}
     for cid, entry in components.items():
@@ -203,3 +227,40 @@ def _differ(mismatches: list[Any], rows: list[Mapping[str, Any]], keys: Mapping[
     if len(found) > _LISTED:
         found[_LISTED:] = [f"and {len(found) - _LISTED} more"]
     return found
+
+
+def confirm_document(document: Path, digest: str) -> bool:
+    """Before a door answers with the tree the bytes ``digest`` of ``document`` map to: an
+    entry an export wrote that no verify has answered is verified first, by the build pool
+    (one job for every door asking about the same bytes), and a file that does not hold
+    the result it was written from is reported once -- it shows its own content. True
+    when a verify answered, and the entry may name another tree since."""
+    from cadgen.store.records import document_entry_for_hash
+
+    entry = document_entry_for_hash(digest)
+    verified = entry is not None and entry.get("verified") is False
+    if verified:
+        from cadgen.daemon.artifacts import resolve_artifact
+
+        resolve_artifact({"kind": "verify", "tree": entry["tree"], "document": str(Path(document).resolve()),
+                          "sha256": digest, "producer": None if entry.get("plain") else entry.get("producer")})
+        entry = document_entry_for_hash(digest)
+    if entry is not None and entry.get("differ") and digest not in _WARNED:
+        _WARNED.add(digest)
+        from cadgen._internal.build_timing import note_warning
+
+        text = file_warning(Path(document), entry["differ"])
+        if not note_warning(text):
+            print(f"[cadgen] warning: {text}", file=sys.stderr)
+    return verified
+
+
+_WARNED: set[str] = set()
+
+
+def file_warning(document: Path, differ: list[str]) -> str:
+    """What a build or a door says of a file that does not hold the result it was written
+    from: that it shows its own content, what differs, and that the next run writes it
+    plain."""
+    return (f"{Path(document).name} does not hold the result it was written from, so it shows its own "
+            f"content; the model's next run writes it without names: {'; '.join(differ)}")

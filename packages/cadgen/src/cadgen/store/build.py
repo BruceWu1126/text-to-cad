@@ -174,11 +174,15 @@ def build_tree_from_compound(
     extra: dict[str, Any] | None = None,
     materials: object = None,
     namer: Namer | None = None,
+    live: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any], dict[str, Any]]:
     """Return ``(tree_hash, tree, stats)``. ``extra`` are content-pure fields
     recorded on the tree (capabilities, edgeRendering) — never paths or times.
     ``namer`` names each component the walk prepares from a shape the model's run
     made: its construction key and lineage (``kernel_memo._Run.identify``).
+    ``live``, when given, is filled with the shape, unlocated, of every component
+    the store cannot decode (an eager-only one's), by cid: what the build's own
+    process writes its STEP with (``store/exports.py``).
 
     Packaging follows the RETURN VALUE: a Compound with children is walked into
     occurrences; a single shape is one component (``compound_has_children``).
@@ -197,6 +201,11 @@ def build_tree_from_compound(
     descriptor = flatten_tree(walk.draft_tree(root_name=root_name))
     inherited_appearance = descriptor.get("appearance")
     appearance = resolve_materials(descriptor, materials, inherited=inherited_appearance)
+    if live is not None:
+        from build123d import Location
+
+        live.update({cid: walk.shapes[cid].located(Location()) for cid, entry in walk.components.items()
+                     if entry.get("kind") == "eager-only" and cid in walk.shapes})
     return _publish_tree(
         walk, bbox_shape=compound, root_name=root_name, force=force, progress=progress,
         extra=extra, appearance=appearance, base_appearance=inherited_appearance,
@@ -1786,11 +1795,7 @@ def _verify_reused_readback(
     raise RuntimeError("; ".join(details))
 
 
-#: The saved-STEP writer's own version (``writerInput``, STORE.md §3). Bump it
-#: with any change to the bytes cadgen writes for the same descriptor: XCAF
-#: construction, the header, or a canonicalization pass. 3: non-ASCII names are
-#: written as Part 21 directives (``step_export.spell_name``).
-STEP_WRITER_SCHEME = "cadgen-step-writer-3"
+from cadgen.step_export import STEP_WRITER_SCHEME  # noqa: E402 - writer_input_digest's
 # Finishes ride the sidecar, never the STEP (README law 16).
 _FINISH_KEYS = ("material", "materialId", "materialName", "baseColor")
 

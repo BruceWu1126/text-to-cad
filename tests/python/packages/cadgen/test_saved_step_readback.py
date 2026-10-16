@@ -157,30 +157,6 @@ class SavedStepReadbackTest(unittest.TestCase):
         self.assertNotIn("documentKept", forced[2])
         self.assertEqual(forced[3], expected[3])
 
-    def test_a_document_is_kept_only_while_its_record_bytes_and_tree_all_agree(self):
-        from types import SimpleNamespace
-
-        from cadgen._internal.generation import _kept_document
-        from cadgen.store.objects import object_path
-        from cadgen.store.records import write_record
-
-        expected = self.seed()
-        script = self.root / "model.py"
-        spec = SimpleNamespace(source="generated", script_path=script,
-                               generator_metadata=SimpleNamespace(entry_function="model"))
-        write_record(f"{script}::model", {
-            "tree": expected[0], "documentTree": expected[2]["documentTree"], "stepHash": expected[3],
-            "writerInput": expected[2]["writerInput"], "documentOccurrenceMap": expected[2]["documentOccurrenceMap"],
-            "documentNodeMap": expected[2]["documentNodeMap"],
-        })
-        on_disk = (expected[3], None)
-        kept = _kept_document(spec, expected[2]["writerInput"], on_disk)
-        self.assertEqual((kept["stepHash"], kept["documentTree"]), (expected[3], expected[2]["documentTree"]))
-        self.assertIsNone(_kept_document(spec, "0" * 64, on_disk), "another writer input")
-        self.assertIsNone(_kept_document(spec, expected[2]["writerInput"], ("f" * 64, None)), "other bytes on disk")
-        object_path(expected[2]["documentTree"]).unlink()
-        self.assertIsNone(_kept_document(spec, expected[2]["writerInput"], on_disk), "an incomplete document tree")
-
     def test_a_sidecar_with_unchanged_bytes_keeps_its_file(self):
         # A viewer versions the sidecar by its file stamp, so rewriting the same bytes (a label
         # edit whose document is kept) would reload the model for nothing.

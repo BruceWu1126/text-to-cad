@@ -152,9 +152,12 @@ class PreviewRevision(unittest.TestCase):
         # Stored parts first, then the job's: the map only grows.
         sizes = [len(event["preview"]["parts"]) for event in previews]
         self.assertEqual(sizes, sorted(sizes))
-        [job] = [call.args[0] for call in submitted.call_args_list]
-        self.assertEqual((job["kind"], job["tree"], sorted(job["cids"])), ("display", tree, sorted(keys)),
-                         "one job derives the build's parts")
+        jobs = [call.args[0] for call in submitted.call_args_list]
+        [job] = [job for job in jobs if job["kind"] == "display"]
+        self.assertEqual((job["tree"], sorted(job["cids"])), (tree, sorted(keys)), "one job derives the build's parts")
+        # The file is an export of the same tree, and verified against it.
+        self.assertEqual([(job["kind"], job["tree"]) for job in jobs if job["kind"] != "display"],
+                         [("export", tree), ("verify", tree)])
         # The saved document names the same parts (law 20): nothing is derived or fetched twice.
         digest = saved[0]["saved"]["documentHash"]
         document = descriptor_for_view(document_entry_for_hash(digest)["tree"], document_hash=digest)

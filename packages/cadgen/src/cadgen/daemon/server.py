@@ -809,10 +809,11 @@ def serve() -> int:
                 gone = _INSTALLATION_GONE.is_set()
                 why = "installation gone" if gone else "version token changed"
                 token_changed = request.get("token") != token or gone
-                dependency_finishing_old_work = bool(
-                    request.get("dependency") and (state["draining"] or _active_requests())
-                )
-                if state["draining"] and not request.get("dependency"):
+                # A dependency, and a worker's slot for the job it runs, are work already
+                # under way: a drain finishes them.
+                dependency = bool(request.get("dependency") or request.get("kind") in {"slot", "inflight"})
+                dependency_finishing_old_work = dependency and bool(state["draining"] or _active_requests())
+                if state["draining"] and not dependency:
                     with contextlib.suppress(OSError):
                         _send(conn, {"restart": True})
                     continue

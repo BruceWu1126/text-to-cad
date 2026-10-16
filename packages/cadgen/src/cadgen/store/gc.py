@@ -289,8 +289,8 @@ def _unowned(found: Scan, retire_before: float) -> list[_Entry]:
 
 def _read_roots(found: Scan, should_stop: Callable[[], bool], newer_since: float | None,
                 retire_before: float | None = None) -> list[object]:
-    """The protected trees: every ``tree`` and ``documentTree`` of this cadgen's
-    own records, and every tree of its own document entries; and those of the
+    """The protected trees: every ``tree`` of this cadgen's own records, and every
+    tree of its own document entries; and those of the
     records and document entries at keys it does not own, written after
     ``retire_before`` (all of them, without it) -- another cadgen may still use
     them, and a pass retires them only once they are older.
@@ -301,7 +301,7 @@ def _read_roots(found: Scan, should_stop: Callable[[], bool], newer_since: float
     """
     newer = {f"index/{name}, a folder this cadgen does not know": mtime for name, mtime in found.unknown.items()}
     roots: list[object] = []
-    for kind, fields in (("model", ("tree", "documentTree")), ("document", ("tree",))):
+    for kind, fields in (("model", ("tree",)), ("document", ("tree",))):
         current = _schema_versions()[kind]
         for count, (key, (_size, mtime)) in enumerate(found.entries[kind].items()):
             if count % _STOP_EVERY == 0 and should_stop():

@@ -335,8 +335,7 @@ class ReferenceSceneTests(Fixture):
             self.assertEqual(sizes, [2])  # the policy saw both prototypes
             self.assertEqual(provenance.call_count, 1)
             self.assertEqual(len(scenes[0].prototype_shapes), 0 if released else 2)
-            results.append((read_record(parent)["tree"], read_record(parent)["documentTree"],
-                            (self.root / "parent.step").read_bytes()))
+            results.append((read_record(parent)["tree"], (self.root / "parent.step").read_bytes()))
         self.assertEqual(results[0], results[1])
 
 

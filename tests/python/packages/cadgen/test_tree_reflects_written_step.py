@@ -1,4 +1,4 @@
-"""Saved document trees describe STEP bytes; model results preserve authored geometry.
+"""What a saved STEP shows is its result where the file holds it, and the file where not.
 
 ``read_step`` on a cadgen-built ``.step`` used to answer from the store tree,
 whose components were BinTools serializations of the shapes the script
@@ -10,12 +10,13 @@ reloads from STEP as the complementary lower cap (0.35 mm³). So the same
 call on the same file gave different solids depending on cache state, and a
 point inside the tree's solid was outside the file's (PR #370 bug records 028-030).
 
-The build writes the STEP, re-reads it, and publishes those DOCUMENT prototypes
-(``cadgen.store.build.build_tree_through_step``). This suite pins the
-consequence from the outside: warm ``read_step`` == cold ``read_step`` ==
-``import_step`` on the written bytes, for the lossy solid above, for an
-assembly whose members are compounds and links, and for a composed vendor part
-whose face colours must survive the round trip.
+The build writes its STEP from its result and verifies a parse of the file against
+it (``cadgen.store.exports``): a file that holds the result is the result, one that
+does not -- the lossy solid above -- shows its own content, and the build says so.
+This suite pins the consequence from the outside: warm ``read_step`` == cold
+``read_step`` == ``import_step`` on the written bytes, for the lossy solid, for an
+assembly whose members are compounds and links, and for a composed vendor part whose
+face colours must survive the round trip.
 """
 
 from __future__ import annotations
@@ -114,7 +115,8 @@ class TreeReflectsWrittenStep(unittest.TestCase):
             }
         )
 
-    def _run(self, model: str) -> None:
+    def _run(self, model: str) -> str:
+        """Build ``model``; what it said."""
         completed = subprocess.run(
             [sys.executable, str(self.project / model), "--force"],
             cwd=str(self.project),
@@ -124,6 +126,7 @@ class TreeReflectsWrittenStep(unittest.TestCase):
             timeout=600,
         )
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        return completed.stdout + completed.stderr
 
     def _write(self, name: str, source: str) -> None:
         (self.project / name).write_text(source, encoding="utf-8")
@@ -146,13 +149,17 @@ class TreeReflectsWrittenStep(unittest.TestCase):
 
     def test_a_lossy_solid_reads_the_same_warm_cold_and_through_build123d(self) -> None:
         self._write("rot_cap.py", _ROT_CAP)
-        self._run("rot_cap.py")
+        said = self._run("rot_cap.py")
+        from cadgen.catalog import result_tree_for
         from cadgen.store.materialize import materialize
         from cadgen.store.records import read_record
 
+        # The file does not hold the result, so it shows its own content, and the build says so.
+        self.assertIn("rot_cap.step does not hold the result it was written from", said)
         with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.store)}):
             source_tree = read_record(self.project / "rot_cap.py")["tree"]
             self.assertGreater(_volumes(materialize(source_tree))[0], 40.0)
+            self.assertNotEqual(result_tree_for(self.project / "rot_cap.step"), source_tree)
         # A forced rebuild in a fresh process must reproduce that same source
         # geometry and identity, regardless of the lossy saved geometry.
         self._run("rot_cap.py")
@@ -206,13 +213,11 @@ class TreeReflectsWrittenStep(unittest.TestCase):
             # Saved colors are the STEP reader's native-precision values.
             for actual, expected in zip(by_name["bar"]["color"][:3], [0.2, 0.4, 0.8], strict=True):
                 self.assertAlmostEqual(actual, expected, places=6)
-            # The document is independent of model links; exact child pins
-            # remain in the distinct authored result tree.
-            tree = json.loads(object_path(descriptor["tree"]).read_text(encoding="utf-8"))
-            self.assertEqual(tree["links"], [])
+            # The file holds its result: the saved document is the result, its child pins links.
             from cadgen.store.records import read_record
 
-            result = json.loads(object_path(read_record(self.project / "rig.py")["tree"]).read_text(encoding="utf-8"))
+            self.assertEqual(descriptor["tree"], read_record(self.project / "rig.py")["tree"])
+            result = json.loads(object_path(descriptor["tree"]).read_text(encoding="utf-8"))
             self.assertEqual({link["name"] for link in result["links"]}, {"pin_left", "pin_right"})
             # The vendor part's face colours came back through the document: the effective
             # recipe its part's derivation meshes with carries them, by face ordinal.

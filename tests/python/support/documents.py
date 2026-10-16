@@ -1,29 +1,34 @@
 """One saved document read two ways, for tests.
 
-A build's document tree takes its structure -- products, names, placements, colours --
-from the STEP it wrote, and each leaf written from one authored occurrence that verifies
-as it takes that occurrence's component, its bytes, construction key and lineage
-(``cadgen.store.build.build_tree_through_step``); a cold compile of the same bytes
-reads every component from the file. ``assert_same_document`` holds the two to
-everything they share, the colours as drawn."""
+A build's saved document is its result, the tree its STEP was exported from
+(``cadgen.store.exports``); a cold compile of the same bytes reads every component from
+the file. ``assert_same_document`` holds the two to everything they share, the colours
+as drawn."""
 
 from __future__ import annotations
 
 import math
+import struct
 from typing import Any, Mapping
 
 
 def document_shape(tree: Mapping[str, Any]) -> dict[str, Any]:
     """``tree`` (a document tree, or one flattened) as a reader of its file sees it: each
     occurrence's component replaced by its kind, and no bounds or face colours (compare
-    those with a tolerance: :func:`assert_same_document`) and no tree hash. Which
+    those with a tolerance: :func:`assert_same_document`) and no tree hash, its colours to
+    the single precision a STEP reader keeps. Which
     occurrences share a component is not read: a parse shares one prototype among
     products of equal geometry, a build keeps the components it authored."""
     components = tree.get("components") or {}
     occurrences = []
     for occurrence in tree.get("occurrences") or []:
         entry = components.get(str(occurrence.get("component") or "")) or {}
-        occurrences.append({**occurrence, "component": entry.get("kind")})
+        shaped = {**occurrence, "component": entry.get("kind")}
+        if occurrence.get("color") is not None:
+            # A STEP reader keeps a colour to single precision.
+            shaped["color"] = [struct.unpack("f", struct.pack("f", float(channel)))[0]
+                               for channel in occurrence["color"]]
+        occurrences.append(shaped)
     shape = {key: value for key, value in tree.items() if key not in ("components", "bbox", "occurrences", "tree")}
     shape["occurrences"] = occurrences
     return shape

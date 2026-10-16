@@ -10,7 +10,7 @@ A record says what a model's build depended on and what it produced::
       "tree": "<tree object hash>",
       "closure": {"hash": "…", "files": ["robot.py", "lib/frame.py"]},
       "children": [{"model": "/abs/src/arm.py", "tree": "…"}],
-      "outputs": {"/abs/STEP/robot.step": {"sha256": "…"}, …}
+      "outputs": {"/abs/STEP/robot.step": {"sha256": "…", "writer": "cadgen-step-writer-4"}, …}
     }
 
 ``children`` is recorded from the CALLS the body made, never derived from the
@@ -76,7 +76,11 @@ RECORD_KIND = "record"
 # construction key and lineage their build named them by.
 # Schema 11: the tree a record names is geometry schema 6, whose leaves' tokens round a
 # translation as the STEP file states it.
-RECORD_SCHEMA_VERSION = 11
+# Schema 12: a model's STEP is an export of the tree it names: the record is written at
+# the source result, its STEP output pending (an empty sha256) until the export lands,
+# then its sha256 and writer (``plain`` for a file written without names). No separate
+# document tree, correspondence maps or writer input.
+RECORD_SCHEMA_VERSION = 12
 # A format change bumps it and lands on new keys (document_key).
 # Schema 6: an XCAF label entry (`=>[0:1:1:2]`) reads as no name, and an
 # occurrence without one of its own never shows a shared product's name that is
@@ -94,7 +98,10 @@ RECORD_SCHEMA_VERSION = 11
 # carry the construction key and lineage of the components they were written from.
 # Schema 11: the tree an entry names is geometry schema 6, whose leaves' tokens round a
 # translation as the STEP file states it.
-DOCUMENT_SCHEMA_VERSION = 11
+# Schema 12: an exported file's bytes map to the result tree it was written from,
+# pending (``verified`` false) until its verify answers, or to its own content and what
+# differs (``differ``) when it does not hold that tree.
+DOCUMENT_SCHEMA_VERSION = 12
 
 
 def record_key(model: Path | str) -> str:

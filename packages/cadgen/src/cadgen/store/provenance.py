@@ -52,8 +52,9 @@ _PLURAL = {"face": "faces", "edge": "edges", "vertex": "vertices"}
 # 2: features by name, and the components the build made, whose lineage names
 # their elements by them. 3: features by place in the run, and each component with
 # the feature each name of its lineage stands for (a part names its features among
-# its own).
-PROVENANCE_SCHEMA_VERSION = 3
+# its own). 4: no document digest: the entry is written with the record, before the
+# file exists, and the record's output entry says which bytes are the model's.
+PROVENANCE_SCHEMA_VERSION = 4
 
 __all__ = [
     "PROVENANCE_KIND",
@@ -73,18 +74,15 @@ def provenance_key(model: Path | str) -> str:
     return versioned_key(model_key(model), PROVENANCE_SCHEMA_VERSION)
 
 
-def write_provenance(model: Path | str, payload: dict[str, Any], *, tree: str, step_hash: str) -> None:
-    """The entry for ``model``'s build that published ``tree`` and wrote the
-    document whose bytes hash to ``step_hash`` (empty for a model that writes
-    no STEP): ``payload`` holds its ``features`` and ``components``. Idempotent;
-    atomic."""
+def write_provenance(model: Path | str, payload: dict[str, Any], *, tree: str) -> None:
+    """The entry for ``model``'s build that published ``tree``: ``payload`` holds its
+    ``features`` and ``components``. Idempotent; atomic."""
     ref = resolve_model_ref(model)
     body = {
         "kind": PROVENANCE_KIND,
         "schemaVersion": PROVENANCE_SCHEMA_VERSION,
         "model": ref,
         "tree": str(tree or ""),
-        "stepHash": str(step_hash or ""),
         "features": list(payload.get("features") or []),
         "components": {str(cid): dict(names) for cid, names in sorted(dict(payload.get("components") or {}).items())},
     }
@@ -137,7 +135,7 @@ def where(document: Path | str, ref: str) -> Where:
     from cadgen.refs import descriptor_space, locate, resolve
     from cadgen.store.objects import read_verified_object
     from cadgen.store.parts import element_tokens
-    from cadgen.store.records import model_for_output, read_record
+    from cadgen.store.records import document_entry_for_hash, model_for_output, read_record
     from cadgen.store.trees import flatten
 
     path = Path(document).expanduser().resolve()
@@ -156,12 +154,16 @@ def where(document: Path | str, ref: str) -> Where:
         return answer.unknown("the model has no provenance entry; run it again")
     if entry.get("tree") != record.get("tree"):
         return answer.unknown("the provenance entry describes another build of the model; run it again")
-    if entry.get("stepHash") != step_file_hash(path):
-        return answer.unknown("the file's bytes are not the ones this entry describes; run the model")
-    document_tree = str(record.get("documentTree") or "")
-    flat = flatten(document_tree) if document_tree else None
+    digest = step_file_hash(path)
+    if ((record.get("outputs") or {}).get(str(path)) or {}).get("sha256") != digest:
+        return answer.unknown("the file's bytes are not the ones the model's build wrote; run the model")
+    if (document_entry_for_hash(digest) or {}).get("differ"):
+        return answer.unknown("the file does not hold the result it was written from, so it shows its own "
+                              "content; run the model again, which writes it anew")
+    # The file is an export of the record's tree: the file's tokens are the tree's.
+    flat = flatten(str(record.get("tree") or ""))
     if flat is None:
-        return answer.unknown("the record names no document tree for this file")
+        return answer.unknown("the model's result is missing from the store; run it again")
 
     rows = {str(occ.get("id")): occ for occ in flat.get("occurrences") or []}
     components = flat.get("components") or {}

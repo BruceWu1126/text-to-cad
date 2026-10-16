@@ -143,11 +143,17 @@ class SavedDocumentIdentityTest(unittest.TestCase):
             rough_record["tree"], polished_record["tree"],
             "the authored model results retain their distinct intrinsic finishes",
         )
-        self.assertEqual(rough_record["documentTree"], polished_record["documentTree"])
-        document_tree_hash = rough_record["documentTree"]
-        canonical_before = flatten(document_tree_hash)
-        self.assertIsNotNone(canonical_before)
-        self.assertFalse(_materials(canonical_before), "PBR annotations do not belong in the byte-derived tree")
+        # Equal bytes map to the tree the last export wrote them from (store/exports.py),
+        # and every reader takes a file's finishes from its own sidecar, never from that tree.
+        import hashlib
+
+        from cadgen.store.records import tree_for_document_hash
+
+        digest = hashlib.sha256(rough_step.read_bytes()).hexdigest()
+        self.assertEqual(polished_record["tree"], tree_for_document_hash(digest))
+        canonical_before = {key: value for key, value in flatten(polished_record["tree"]).items()
+                            if key != "appearance"}
+        self.assertFalse(_materials(canonical_before), "a finish is no occurrence's: it rides the sidecar")
 
         rough_sidecar = read_source_sidecar(rough_step)
         polished_sidecar = read_source_sidecar(polished_step)
@@ -353,6 +359,39 @@ class SavedDocumentIdentityTest(unittest.TestCase):
             ).values()},
             {frozenset(ROUGH.items()), frozenset(POLISHED.items())},
         )
+
+    def test_the_sidecars_mates_resolve_in_a_cold_compile_of_the_file(self) -> None:
+        """The file is an export of the result, so its sidecar binds the result's tokens -- and a
+        compile of its bytes in a store that never held the result names its nodes by them."""
+        from cadgen._internal.source_sidecar import read_source_sidecar
+        from cadgen.step_scene import read_scene
+
+        script = self.root / "hinge.py"
+        script.write_text(textwrap.dedent(
+            """
+            import cadgen
+            from cadgen import label_shape, step
+            from cadgen import build123d as bd
+
+            @step(kinematics={"mates": [cadgen.revolute("swing", parent="#base", child="#arm_group",
+                                                        origin=(0, 0, 6), direction=(0, 0, 1), limits=(0, 90))]})
+            def hinge():
+                base = label_shape(bd.Box(20, 20, 4), "base")
+                arm = label_shape(bd.Pos(10, 0, 6) * bd.Box(16, 4, 4), "arm")
+                tip = label_shape(bd.Pos(18, 0, 6) * bd.Sphere(2), "tip")
+                return bd.Compound(children=[base, bd.Compound(children=[arm, tip], label="arm_group")])
+
+            if __name__ == "__main__":
+                hinge()
+            """
+        ).lstrip(), encoding="utf-8")
+        self._build(script)
+        step_path = script.with_suffix(".step")
+        (mate,) = read_source_sidecar(step_path)["kinematics"]["mates"]
+        shutil.rmtree(self.store)
+        scene = read_scene(step_path)
+        self.assertEqual("base", scene.resolve(f"#{mate['parentId']}").label)
+        self.assertEqual("arm_group", scene.resolve(f"#{mate['childId']}").label)
 
     def test_kinematics_remap_requires_an_exact_document_subtree(self) -> None:
         from cadgen._internal.kinematics_resolve import remap_document_kinematics

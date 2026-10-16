@@ -164,7 +164,7 @@ def _posix(model: str) -> str:
 
 
 class TheEntry(ProvenanceCase):
-    def test_a_build_writes_one_beside_its_record_for_its_tree_and_its_document(self) -> None:
+    def test_a_build_writes_one_beside_its_record_for_its_tree(self) -> None:
         from cadgen._internal.step_hash import step_file_hash
 
         entries = self._entries()
@@ -173,11 +173,13 @@ class TheEntry(ProvenanceCase):
         self.assertEqual({"pin", "arm"}, set(by_model))
         for name, entry in by_model.items():
             record = self._record(f"src/{name}.py")
-            self.assertEqual(("provenance", 3), (entry["kind"], entry["schemaVersion"]))
+            self.assertEqual(("provenance", 4), (entry["kind"], entry["schemaVersion"]))
             self.assertTrue(_posix(entry["model"]).endswith(f"src/{name}.py::{name}"))
             self.assertEqual(record["tree"], entry["tree"])
-            self.assertEqual(record["stepHash"], entry["stepHash"])
-            self.assertEqual(step_file_hash(self.root / "STEP" / f"{name}.step"), entry["stepHash"])
+            # Written with the record, before the file: the record says which bytes are the model's.
+            self.assertNotIn("stepHash", entry)
+            step = self.root / "STEP" / f"{name}.step"
+            self.assertEqual(step_file_hash(step), record["outputs"][str(step.resolve())]["sha256"])
         pin = by_model["pin"]
         ops = [feature["op"] for feature in pin["features"]]
         made = ops.index("Solid.make_cylinder")
@@ -341,6 +343,11 @@ class TheEntryAndTheStore(unittest.TestCase):
     def _store(self, *argv: str) -> subprocess.CompletedProcess:
         return _run("-m", "cadgen.cli", "store", *argv, cwd=self.root, cache=self.cache)
 
+    def _record(self, script: str) -> dict:
+        why = self._store("why", script, "--json")
+        self.assertEqual(0, why.returncode, why.stdout + why.stderr)
+        return json.loads(why.stdout.strip())["record"]
+
     def _entry(self) -> dict | None:
         folder = self.cache / "index" / "provenance"
         found = sorted(folder.iterdir()) if folder.is_dir() else []
@@ -362,7 +369,7 @@ class TheEntryAndTheStore(unittest.TestCase):
             handle.write("\n")
         edited = self._store("where", "STEP/pin.step", face)
         self.assertEqual(1, edited.returncode)
-        self.assertIn("not the ones this entry describes", edited.stdout)
+        self.assertIn("not the ones the model's build wrote", edited.stdout)
         self.assertIsNotNone(self._entry(), "other bytes do not lose the entry")
 
         forgotten = self._store("forget", "src/pin.py")
@@ -376,51 +383,31 @@ class TheEntryAndTheStore(unittest.TestCase):
         self.assertIsNotNone(self._entry())
         self.assertEqual(0, self._store("where", "STEP/pin.step", face).returncode)
 
-    def test_a_leaf_an_earlier_build_of_the_same_bytes_holds_is_answered_by_its_names(self) -> None:
-        """A saved file whose document index holds an earlier build's tree keeps that build's
-        leaf where it is named as this build's (the kernel wrote its bytes a little
-        differently that time): ``where`` answers it from this build's entry, by its names."""
-        from OCP.BRep import BRep_Builder, BRep_Tool
-        from OCP.TopAbs import TopAbs_VERTEX
-        from OCP.TopExp import TopExp_Explorer
-        from OCP.TopoDS import TopoDS
-
-        from cadgen._internal.component_package import (
-            _component_id, decode_geometry_component, prepare_geometry_component, read_lineage)
+    def test_the_same_bytes_written_again_are_answered_by_the_build_that_wrote_them(self) -> None:
+        """Equal bytes map to the tree the last export wrote them from: a document entry an
+        earlier build left for them names this build's result once it writes them again, and
+        ``where`` answers from this build's entry, by its names."""
         from cadgen._internal.step_hash import step_file_hash
-        from cadgen.store.index import write_entry
-        from cadgen.store.objects import put_object, read_verified_object
         from cadgen.store.records import note_document_tree, tree_for_document_hash
-        from cadgen.store.trees import get_tree, put_tree
+        from cadgen.store.trees import put_tree
 
         self._build()
         face = self._face()
         step = self.root / "STEP" / "pin.step"
+        record = self._record("src/pin.py")
         with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.cache)}):
             step_hash = step_file_hash(step)
-            tree = get_tree(tree_for_document_hash(step_hash))
-            [occurrence] = tree["occurrences"]
-            entry = tree["components"].pop(occurrence["component"])
-            shape = decode_geometry_component(entry, read_verified_object(entry["brep"]))
-            vertex = TopoDS.Vertex_s(TopExp_Explorer(shape.wrapped, TopAbs_VERTEX).Current())
-            BRep_Builder().UpdateVertex(vertex, BRep_Tool.Tolerance_s(vertex) * 10)
-            lineage = read_lineage(read_verified_object(entry["lineage"]))
-            prepared = prepare_geometry_component(shape, identity=(entry.get("construction"), lineage))
-            put_object(prepared["payload"])
-            other = prepared["entry"]
-            cid = _component_id(other["contentHash"])
-            write_entry("component", cid, {"schemaVersion": 1, **other})
-            tree["components"][cid] = {**other, **({"color": entry["color"]} if "color" in entry else {})}
-            occurrence["component"] = cid
-            note_document_tree(step_hash, put_tree(tree))
-        step.unlink()  # written again, the same bytes, and read back through the index
+            from cadgen.store.trees import get_tree
+
+            # Another tree for these bytes, as another build of them could have left.
+            earlier = get_tree(record["tree"])
+            earlier["label"] = "earlier"
+            note_document_tree(step_hash, put_tree(earlier))
+        step.unlink()  # written again, the same bytes
         self._build()
         self.assertEqual(step_file_hash(step), step_hash, "the same bytes again")
-        why = self._store("why", "src/pin.py", "--json")
-        self.assertEqual(0, why.returncode, why.stdout + why.stderr)
         with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.cache)}):
-            self.assertIn(cid, get_tree(json.loads(why.stdout)["record"]["documentTree"])["components"],
-                          "the saved file keeps the earlier build's leaf")
+            self.assertEqual(self._record("src/pin.py")["tree"], tree_for_document_hash(step_hash))
         answer = self._store("where", "STEP/pin.step", face, "--json")
         self.assertEqual(0, answer.returncode, answer.stdout + answer.stderr)
         self.assertEqual(("pin.py", "pin", "Solid.make_cylinder"),

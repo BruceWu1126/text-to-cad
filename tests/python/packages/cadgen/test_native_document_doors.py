@@ -53,9 +53,22 @@ class NativeDocumentDoors(unittest.TestCase):
             return read
 
         derived = sorted(path.name for path in (self.store / "index/part").glob("*"))
+        from cadgen.daemon import artifacts
+
+        def files_only(real, name):
+            # A build's file is an export of its result, verified by a parse: pool jobs
+            # that derive no display data.
+            def call(request, **kwargs):
+                if request.get("kind") not in ("export", "verify"):
+                    raise AssertionError(f"native-only operation invoked {name}")
+                return real(request, **kwargs)
+            return call
+
         with contextlib.ExitStack() as stack:
-            for name in ("cadgen.daemon.artifacts.submit_artifact", "cadgen.daemon.artifacts.resolve_artifact",
-                         "cadgen.store.parts._derive", "cadgen._internal.topology_extract.extract_topology_facts",
+            for name in ("submit_artifact", "resolve_artifact"):
+                stack.enter_context(mock.patch.object(artifacts, name, side_effect=files_only(
+                    getattr(artifacts, name), f"cadgen.daemon.artifacts.{name}")))
+            for name in ("cadgen.store.parts._derive", "cadgen._internal.topology_extract.extract_topology_facts",
                          "cadgen.catalog.result_view_dir", "cadgen.store.view.export_view"):
                 stack.enter_context(mock.patch(name, side_effect=AssertionError(f"native-only operation invoked {name}")))
             stack.enter_context(mock.patch("builtins.open", side_effect=guard(original_open)))

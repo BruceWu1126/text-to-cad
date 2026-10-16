@@ -469,27 +469,6 @@ class PinnedChildStepsTest(unittest.TestCase):
             self.assertEqual(_pinned_child_steps(scene), {"a" * 64: ChildStep(Path(step), "1" * 64)})
 
 
-class PinnedChildDocumentsTest(unittest.TestCase):
-    def test_only_a_record_that_still_pins_the_tree_resolves_its_document(self):
-        from cadgen._internal.generation import _pinned_child_documents
-        from cadgen.store.records import write_record
-
-        scratch = generated_cad_directory(prefix="pinned-child-documents-")
-        self.addCleanup(scratch.cleanup)
-        root = Path(scratch.name)
-        with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(root / "store")}):
-            write_record(root / "current.py", {"tree": "a" * 64, "documentTree": "d" * 64})
-            write_record(root / "moved.py", {"tree": "b" * 64, "documentTree": "e" * 64})
-            write_record(root / "mesh_only.py", {"tree": "c" * 64, "documentTree": None})
-            scene = mock.Mock(store_children=[
-                {"model": str(root / "current.py"), "tree": "a" * 64},
-                {"model": str(root / "moved.py"), "tree": "9" * 64},
-                {"model": str(root / "mesh_only.py"), "tree": "c" * 64},
-                {"model": str(root / "absent.py"), "tree": "f" * 64},
-            ])
-            self.assertEqual(_pinned_child_documents(scene), {"a" * 64: "d" * 64})
-
-
 class WrittenRealTest(unittest.TestCase):
     """``written_real`` is what the reader returns for what the writer printed."""
 

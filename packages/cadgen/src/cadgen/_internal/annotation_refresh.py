@@ -184,8 +184,7 @@ def refresh_annotations(spec, *, verdict=None) -> str | None:
     from cadgen.store.trees import get_tree, put_tree, flatten, tree_complete
     from cadgen.catalog import artifact_file_hash
     from cadgen._internal.source_sidecar import (
-        normalize_materials, resolve_materials, remap_appearance,
-        write_source_sidecar, source_sidecar_path,
+        normalize_materials, resolve_materials, write_source_sidecar, source_sidecar_path,
     )
 
     entry_name = getattr(spec.generator_metadata, 'entry_function', None)
@@ -225,12 +224,11 @@ def refresh_annotations(spec, *, verdict=None) -> str | None:
     if closure_hash(geometry_shas.items()) != record['geometryClosure']['hash']:
         return None
     baseline_hash = record['unannotatedTree']
-    if not tree_complete(baseline_hash) or not tree_complete(record.get('documentTree') or ''):
+    if not tree_complete(baseline_hash):
         return None
     baseline = get_tree(baseline_hash)
     descriptor = flatten(baseline_hash)
-    document_descriptor = flatten(record['documentTree'])
-    if baseline is None or descriptor is None or document_descriptor is None:
+    if baseline is None or descriptor is None:
         return None
     raw_materials = parts[1]['materials']
     material_declaration = (copy.deepcopy(record.get('materials')) if raw_materials is _COMPUTED
@@ -243,9 +241,8 @@ def refresh_annotations(spec, *, verdict=None) -> str | None:
     # the ones this source bakes.
     animation = copy.deepcopy(record.get('animation')) if raw_animation is _COMPUTED else None
     raw_kinematics = parts[1]['kinematics']
-    kinematics_is_document = raw_kinematics is _COMPUTED
     try:
-        kinematics = (copy.deepcopy(record.get('kinematics')) if kinematics_is_document
+        kinematics = (copy.deepcopy(record.get('kinematics')) if raw_kinematics is _COMPUTED
                       else _literal_kinematics(raw_kinematics, descriptor))
     except LookupError:
         return None
@@ -254,16 +251,13 @@ def refresh_annotations(spec, *, verdict=None) -> str | None:
     if appearance is not None:
         baseline['appearance'] = appearance
     tree = put_tree(baseline)
+    # The saved file is an export of the result, so the sidecar binds the result's tokens.
     sidecar = {}
     if appearance is not None:
-        sidecar['appearance'] = remap_appearance(appearance, record.get('documentOccurrenceMap') or {})
+        sidecar['appearance'] = appearance
     if animation is not None:
         sidecar['animation'] = animation
     if kinematics is not None:
-        if not kinematics_is_document:
-            from cadgen._internal.kinematics_resolve import remap_document_kinematics
-            kinematics = remap_document_kinematics(kinematics, record.get('documentOccurrenceMap') or {},
-                                                 record.get('documentNodeMap') or {}, record['documentTree'])
         sidecar['kinematics'] = kinematics
     # Preserve the selected source, record, STEP and sidecar revision until
     # publication. A racing change retries via the ordinary build's safeguards.

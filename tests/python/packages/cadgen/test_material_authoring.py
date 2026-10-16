@@ -272,8 +272,11 @@ if __name__ == "__main__":
         record = read_record(model_ref(script, "colored"))
         self.assertTrue(record["unannotatedTree"])
         self.assertTrue(record["geometryClosure"])
-        self.assertTrue(record["documentOccurrenceMap"])
-        self.assertTrue(record["documentNodeMap"])
+        # The file is an export of the result: the sidecar binds the result's own tokens.
+        from cadgen.store.trees import flatten
+
+        tokens = {row["id"] for row in flatten(record["tree"])["occurrences"]}
+        self.assertLessEqual(set(sidecar["appearance"]["assignments"]), tokens)
         self.assertEqual("Blue paint", record["materials"]["definitions"]["paint"]["name"])
         self.assertEqual(animation_before, record["animation"])
         self.assertEqual(kinematics_before, record["kinematics"])

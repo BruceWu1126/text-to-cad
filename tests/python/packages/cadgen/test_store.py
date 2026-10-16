@@ -1146,7 +1146,7 @@ class ChildrenByResult(StoreCase):
             os.utime(path, (then, then))
         arm.write_text(arm.read_text(encoding="utf-8").replace("40.0, 8.0", "40.0 * 1.0, 8.0"), encoding="utf-8")
         self.assertEqual(self.run_model(arm), "built", "the parent alone rebuilds; its child stays current")
-        named = tree_objects(read_record(arm)["tree"]) | tree_objects(read_record(arm)["documentTree"])
+        named = tree_objects(read_record(arm)["tree"])
         self.assertIn(read_record(pin)["tree"], named)
         self.assertEqual([d for d in named if object_path(d).stat().st_mtime < then + 3600], [])
 
