@@ -63,17 +63,16 @@ def _pinned_child_records(scene: object) -> Iterator[tuple[str, dict]]:
 
 
 def _pinned_child_steps(scene: object) -> dict[str, object]:
-    """Each pinned child tree mapped to the saved STEP its record pins, from
-    which the parent may be spliced (``cadgen.store._splice_step``)."""
+    """Each pinned child tree mapped to the saved STEP its record names as its output
+    (one written: its sha256 is empty until its export lands), from which the parent may
+    be spliced (``cadgen.store._splice_step``)."""
     from cadgen.store._splice_step import ChildStep
 
     steps: dict[str, object] = {}
     for tree, record in _pinned_child_records(scene):
-        step_hash = str(record.get("stepHash") or "")
         for path, entry in (record.get("outputs") or {}).items():
-            if (step_hash and Path(path).suffix.lower() in (".step", ".stp")
-                    and isinstance(entry, dict) and entry.get("sha256") == step_hash):
-                steps[tree] = ChildStep(Path(path), step_hash)
+            if Path(path).suffix.lower() in (".step", ".stp") and isinstance(entry, dict) and entry.get("sha256"):
+                steps[tree] = ChildStep(Path(path), str(entry["sha256"]))
                 break
     return steps
 
@@ -298,7 +297,6 @@ def _save_step(spec: EntrySpec, tree: str, plan: _ExportPlan, *, record: dict, s
     else:
         outputs.pop(sidecar_key, None)
         forget_output(sidecar_key)
-    record["stepHash"] = digest
     write_record(model_path, record)
     executors.emit_event(executors.model_event(
         model_path, "building", phase="STEP saved",
@@ -615,7 +613,7 @@ def _generate_part_outputs(
         generated = sidecar_payload is not None
 
         # Content-pure fields the tree carries (capabilities, edge classes); the
-        # provenance fields (stepHash, generatedAt, sourceKind…) go to the record.
+        # provenance fields (generatedAt, sourceKind…) go to the record.
         tree_extra = {
             key: package_provenance[key]
             for key in ("capabilities", "edgeRendering")
@@ -827,17 +825,6 @@ def _generate_part_outputs(
             "constants": dict(getattr(scene, "source_closure_constants", None) or {}) if generated else {},
             "children": list(getattr(scene, "store_children", None) or []),
             "outputs": outputs,
-            # The bytes of the document this tree describes: an imported document's
-            # own; the STEP a generated one exports, once it is written.
-            "stepHash": (
-                str(getattr(scene, "step_hash", "") or "")
-                or (export_plan.kept_sha256 if export_plan is not None else "")
-                or (
-                    step_file_hash(spec.step_path)
-                    if not generated and spec.step_path is not None and Path(spec.step_path).is_file()
-                    else ""
-                )
-            ),
         }
         from cadgen.store.trees import get_tree
 
@@ -912,10 +899,10 @@ def _generate_part_outputs(
             still_saves()
         from cadgen.store.records import note_document_tree, note_output
 
-        if not generated and record.get("stepHash"):
+        if not generated:
             # Artifact side: the bytes of the document this tree describes → the tree
             # (a reader's one lookup; STORE.md §2).
-            note_document_tree(str(record["stepHash"]), tree_hash, producer=producer)
+            note_document_tree(step_hash, tree_hash, producer=producer)
         if generated:
             if not writes_step:
                 # Mesh-only models have no STEP or kinematics sidecar.

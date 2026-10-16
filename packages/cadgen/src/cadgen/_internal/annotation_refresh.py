@@ -263,14 +263,16 @@ def refresh_annotations(spec, *, verdict=None) -> str | None:
     # publication. A racing change retries via the ordinary build's safeguards.
     from cadgen._internal.generation import _document_pair_state
     pair = _document_pair_state(spec.step_path)
-    if pair[0] != record.get('stepHash'):
+    # The STEP as the record names it: written (its sha256 empty until its export lands).
+    recorded = str(((record.get('outputs') or {}).get(str(spec.step_path.expanduser().resolve())) or {}).get('sha256') or '')
+    if not recorded or pair[0] != recorded:
         return None
     if (current_closure_hash(script, closure['files'], sliced, shas=recorded_shas, wholes=wholes, own=own) != full_hash
             or read_record(model) != record):
         return None
     if _document_pair_state(spec.step_path) != pair:
         return None
-    write_source_sidecar(spec.step_path, sidecar, document_hash=record['stepHash'])
+    write_source_sidecar(spec.step_path, sidecar, document_hash=recorded)
     output = source_sidecar_path(spec.step_path).resolve()
     outputs = copy.deepcopy(record.get('outputs') or {})
     digest = artifact_file_hash(output)

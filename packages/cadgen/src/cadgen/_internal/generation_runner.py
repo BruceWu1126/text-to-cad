@@ -373,7 +373,6 @@ def _write_drawing_record(
         "constants": dict(getattr(source_closure, "constants", None) or {}),
         "children": [{"model": str(child), "tree": tree} for child, tree in children],
         "outputs": {str(written): {"sha256": hashlib.sha256(written.read_bytes()).hexdigest()}},
-        "stepHash": "",
     }
     from cadgen._internal.build_timing import record_fields
 

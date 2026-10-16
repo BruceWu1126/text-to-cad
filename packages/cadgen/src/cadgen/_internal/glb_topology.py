@@ -120,7 +120,6 @@ def build_step_index_manifest(
     for key in (
         "capabilities",
         "stepPath",
-        "stepHash",
         "bbox",
         "stats",
         "edgeRendering",

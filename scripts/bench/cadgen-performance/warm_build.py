@@ -26,6 +26,13 @@ def summary(values):
     return {"count": len(values), "minMs": min(values), "medianMs": statistics.median(values), "maxMs": max(values)}
 
 
+def step_sha256(record: dict) -> str:
+    """The sha256 of the STEP a record names as its output, once its export landed
+    (empty until then, and for a record that names none)."""
+    return next((str(entry.get("sha256") or "") for path, entry in (record.get("outputs") or {}).items()
+                 if Path(path).suffix.lower() in {".step", ".stp"}), "")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", required=True)
@@ -136,8 +143,8 @@ def main() -> int:
             child = read_record(pin["model"]) or {}
             children.append({"model": pin["model"], "pinnedTree": pin.get("tree"), "currentTree": child.get("tree"),
                              # The tree its file's bytes map to: its result once verified.
-                             "fileTree": tree_for_document_hash(child.get("stepHash") or ""),
-                             "documentHash": child.get("stepHash"),
+                             "fileTree": tree_for_document_hash(step_sha256(child)),
+                             "documentHash": step_sha256(child) or None,
                              "outputs": child.get("outputs"), "closure": child.get("closure"),
                              "actualOutputSha256": {path: sha256(Path(path).read_bytes())
                                                     for path in child.get("outputs") or {}}})
@@ -171,16 +178,16 @@ def main() -> int:
         actual_outputs = {path: sha256(Path(path).read_bytes()) for path in record.get("outputs") or {}}
         actual_steps = [digest for path, digest in actual_outputs.items() if Path(path).suffix.lower() in {".step", ".stp"}]
         document_hash = actual_steps[0] if len(actual_steps) == 1 else None
-        if not code and (document_hash is None or document_hash != record.get("stepHash")):
+        if not code and (document_hash is None or document_hash != step_sha256(record)):
             raise AssertionError(f"{label} must write one STEP whose actual bytes match its recorded digest")
         first_output_digest = bool(document_hash) and document_hash not in seen_document_hashes
         seen_document_hashes.add(document_hash)
         row = {"run": label, "variant": variant, "variantKind": variant_kind,
                "novelEdit": variant in novel_variants, "firstOutputDigestInStudy": first_output_digest,
                "measured": measured, "milliseconds": elapsed, "exit": code,
-               "events": events, "stages": stages, "tree": record.get("tree"), "documentHash": record.get("stepHash"),
+               "events": events, "stages": stages, "tree": record.get("tree"), "documentHash": step_sha256(record) or None,
                "actualOutputSha256": actual_outputs,
-               "fileTree": tree_for_document_hash(record.get("stepHash") or ""), "children": children,
+               "fileTree": tree_for_document_hash(step_sha256(record)), "children": children,
                "modelMilestones": milestones, "changedChildPins": changed_pins,
                "childPinCheckPassed": pin_check if args.assert_child_pins else None,
                "components": sorted((tree.get("components") or {}).keys()), "occurrences": len(tree.get("occurrences") or []),

@@ -290,18 +290,19 @@ class PinnedChildStepsTest(unittest.TestCase):
         root = Path(scratch.name)
         step = str(root / "current.step")
         with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(root / "store")}):
-            write_record(root / "current.py", {"tree": "a" * 64, "stepHash": "1" * 64, "outputs": {
+            write_record(root / "current.py", {"tree": "a" * 64, "outputs": {
                 str(root / "current.stl"): {"sha256": "1" * 64}, step: {"sha256": "1" * 64}}})
-            write_record(root / "moved.py", {"tree": "b" * 64, "stepHash": "2" * 64,
+            write_record(root / "moved.py", {"tree": "b" * 64,
                                              "outputs": {str(root / "moved.step"): {"sha256": "2" * 64}}})
-            write_record(root / "mesh_only.py", {"tree": "c" * 64, "stepHash": None, "outputs": {}})
-            write_record(root / "edited.py", {"tree": "d" * 64, "stepHash": "4" * 64,
-                                              "outputs": {str(root / "edited.step"): {"sha256": "5" * 64}}})
+            write_record(root / "mesh_only.py", {"tree": "c" * 64, "outputs": {}})
+            # Its export has not landed: the output is pending.
+            write_record(root / "pending.py", {"tree": "d" * 64,
+                                               "outputs": {str(root / "pending.step"): {"sha256": ""}}})
             scene = mock.Mock(store_children=[
                 {"model": str(root / "current.py"), "tree": "a" * 64},
                 {"model": str(root / "moved.py"), "tree": "9" * 64},
                 {"model": str(root / "mesh_only.py"), "tree": "c" * 64},
-                {"model": str(root / "edited.py"), "tree": "d" * 64},
+                {"model": str(root / "pending.py"), "tree": "d" * 64},
             ])
             self.assertEqual(_pinned_child_steps(scene), {"a" * 64: ChildStep(Path(step), "1" * 64)})
 
