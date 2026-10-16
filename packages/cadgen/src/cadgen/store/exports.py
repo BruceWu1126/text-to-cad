@@ -111,8 +111,9 @@ def export_step(tree_hash: str, out: Path, *, names: bool = True, shapes: Mappin
     with spans.timed("materialize"):
         descriptor, payloads = capture_tree(tree_hash)
         placed: dict[int, str] = {}
-        document = materialize_descriptor(descriptor, captured_objects=payloads, shapes=shapes,
-                                          tree_hash=tree_hash, placed=placed)
+        # Written, never handed to model code: untagged, so nothing is captured to tell an
+        # edit of it apart (``materialize``'s partner evidence).
+        document = materialize_descriptor(descriptor, captured_objects=payloads, shapes=shapes, placed=placed)
     namer = _namer(descriptor, payloads, placed, producer) if names else None
     digest = export_build123d_step_file(document, out, logger=spans, names=namer)
     answer = {"sha256": digest, "producer": producer, "spliced": False, "spans": spans.rows,

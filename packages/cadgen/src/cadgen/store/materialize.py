@@ -613,7 +613,7 @@ def materialize_descriptor(
             continue
         brep = str((entry or {}).get("brep") or "")
         if not brep:
-            raise FileNotFoundError(f"tree {tree_hash}: component {cid} has no brep object")
+            raise FileNotFoundError(f"tree {tree_hash or descriptor.get('tree')}: component {cid} has no brep object")
         shape = decoded_by_object.get(brep)
         if shape is None:
             shape = decode_geometry_component(entry, captured_objects[brep] if captured_objects is not None else _bytes_for_object(brep))
@@ -638,7 +638,7 @@ def materialize_descriptor(
         cid = str(occurrence.get("component") or "")
         base = shapes.get(cid)
         if base is None:
-            raise FileNotFoundError(f"tree {tree_hash}: missing component {cid}")
+            raise FileNotFoundError(f"tree {tree_hash or descriptor.get('tree')}: missing component {cid}")
         child = _placed_copy(base, _location_from_matrix(occurrence.get("transform")))
         child.label = str(occurrence.get("name") or occurrence.get("id") or "")
         color = _color_from_entry(occurrence) or _color_from_entry(components.get(cid) or {})

@@ -68,6 +68,18 @@ class ExportTest(unittest.TestCase):
                             for names in load_step_scene(path).prototype_step_names.values()),
                         "a plain file claims no part and no element")
 
+    def test_an_export_captures_no_evidence_for_model_code(self) -> None:
+        """What an export materializes is written, never handed to model code: it is not
+        tagged as a materialized tree, whose evidence (every shape's geometry digest) only
+        tells an edit by model code apart -- 3 s of the moonwatch's export."""
+        from cadgen.store import materialize
+
+        with mock.patch.object(materialize, "_capture_materialized_state",
+                               wraps=materialize._capture_materialized_state) as capture:
+            path, result = self.export("untagged.step")
+        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), result["sha256"])
+        self.assertEqual(0, capture.call_count)
+
     def test_a_named_export_verifies_and_its_entry_is_confirmed(self) -> None:
         from cadgen._internal.step_scene_loader import load_step_scene
         from cadgen.store.exports import verify_document
