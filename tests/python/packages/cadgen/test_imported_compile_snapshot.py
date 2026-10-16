@@ -60,6 +60,8 @@ class ImportedCompileSnapshot(unittest.TestCase):
         first = self.compile(document)
         expected_kind = trees.tree_kind_for(first["tree"])
         expected_stats = trees.capture_tree(first["tree"], retain_payloads=False)[0]["stats"]
+        self.assertTrue(expected_stats)
+        self.assertEqual(first["stats"], expected_stats, "a compile reports its tree's counts")
         # The first compile derived its parts' display data; a hit derives nothing more.
         derived = sorted((self.root / "store/index/part").iterdir())
         self.assertTrue(derived)

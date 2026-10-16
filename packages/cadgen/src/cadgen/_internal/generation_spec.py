@@ -7,7 +7,6 @@ from pathlib import Path
 from cadgen._internal.glb_topology import STEP_EDGE_VISIBILITY_CLASSES
 from cadgen._internal.glb_topology import normalize_step_edge_render_visibility_classes
 from cadgen._internal.step_scene import LoadedStepScene
-from cadgen._internal.step_scene import SelectorBundle
 from cadgen._internal.step_scene import SelectorOptions
 from cadgen._internal.step_scene import adaptive_mesh_resolution_for_scene
 from cadgen.catalog import CadSource
@@ -107,7 +106,6 @@ def _resolve_mesh_exports(
 class GeneratedStepResult:
     spec: EntrySpec
     scene: LoadedStepScene | None
-    selector_bundle: SelectorBundle | None = None
     tree: str | None = None
     # The saved STEP was kept, not written: the kept rule held (STORE.md §3, *Exports*).
     step_kept: bool = False

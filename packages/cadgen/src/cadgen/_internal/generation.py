@@ -958,11 +958,8 @@ def _generate_part_outputs(
         for display in display_jobs:
             display.abandon()
         raise
-    # The render artifact is the tree; each part's selector table is derived with its
-    # display data (_request_display), so generation returns no selector bundle.
     tree_result = artifact_results.get("tree") or {}
-    return GeneratedStepResult(spec=spec, scene=scene, selector_bundle=None,
-                               tree=str(tree_result.get("tree") or "") or None,
+    return GeneratedStepResult(spec=spec, scene=scene, tree=str(tree_result.get("tree") or "") or None,
                                step_kept=bool(tree_result.get("stepKept")))
 
 

@@ -819,7 +819,6 @@ class CadGenerationTests(unittest.TestCase):
         package.assert_not_called()
         self.assertEqual(tree, result.tree)
         self.assertIsNone(result.scene)
-        self.assertIsNone(result.selector_bundle)
 
 
     def test_step_toml_target_is_not_supported(self) -> None:
@@ -883,16 +882,14 @@ class CadGenerationTests(unittest.TestCase):
         package_patch, package_calls = self._patch_package_build()
 
         with mock.patch.object(cad_generation, "load_step_scene_cached", return_value=scene) as load_scene, package_patch:
-            result = cad_generation._generate_part_outputs(spec, entries_by_step_path={spec.step_path.resolve(): spec})
+            cad_generation._generate_part_outputs(spec, entries_by_step_path={spec.step_path.resolve(): spec})
 
         load_scene.assert_called_once_with(step_path)
-        # An imported STEP packages the parsed document itself; the build returns no
-        # whole-model selector bundle (selectors are extracted on demand by inspect).
+        # An imported STEP packages the parsed document itself.
         self.assertEqual(1, len(package_calls))
         self.assertIs(scene, package_calls[0]["scene"])
         self.assertFalse(package_calls[0]["force"])
         self.assertTrue(cad_catalog.result_view_dir(step_path).is_dir())
-        self.assertIsNone(result.selector_bundle)
 
 
 

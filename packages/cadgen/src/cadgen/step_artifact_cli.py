@@ -70,11 +70,12 @@ def _build_entry_spec(repo_root: Path, step_path: Path) -> EntrySpec:
     )
 
 
-def _compiled_result_payload(spec: EntrySpec, stats: dict[str, object] | None) -> dict[str, object]:
+def _compiled_result_payload(spec: EntrySpec) -> dict[str, object]:
     from cadgen.catalog import result_tree_for
-    from cadgen.store.trees import tree_kind_for
+    from cadgen.store.trees import capture_tree, tree_kind_for
 
     tree = result_tree_for(spec.entry_path)
+    stats = capture_tree(tree, retain_payloads=False)[0].get("stats") if tree else None
     return {
         "ok": True,
         "document": relative_to_cwd(spec.step_path),
@@ -83,7 +84,8 @@ def _compiled_result_payload(spec: EntrySpec, stats: dict[str, object] | None) -
         "tree": tree,
         # Off the tree (store.trees.tree_kind) — the one place kind is decided.
         "entryKind": tree_kind_for(tree) or "part",
-        "stats": stats or {},
+        # The tree's own counts, as a current compile reports them.
+        "stats": stats if isinstance(stats, dict) else {},
     }
 
 
@@ -222,7 +224,7 @@ def build_step_artifact(
             progress.phase(PHASE_GENERATE, detail=f"Reading {step_path.name} ({_megabytes(step_path)})")
             with logger.timed(f"load STEP {relative_to_cwd(step_path)}"):
                 scene = load_step_scene_exact(step_path)
-            result = _generate_part_outputs(
+            _generate_part_outputs(
                 spec,
                 # A document compile has no source dependencies to discover.
                 entries_by_step_path={spec.step_path.resolve(): spec},
@@ -232,5 +234,4 @@ def build_step_artifact(
                 logger=logger,
                 progress=progress,
             )
-    stats = result.selector_bundle.manifest.get("stats") if result.selector_bundle is not None else {}
-    return _compiled_result_payload(spec, stats if isinstance(stats, dict) else {})
+    return _compiled_result_payload(spec)
